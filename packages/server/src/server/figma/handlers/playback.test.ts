@@ -14,10 +14,11 @@ import {
 import { playbackHandlers } from "./playback.js";
 
 // Scoped playback (32.5.3, ADR-0037) against the realistic `GET /v1/files/:key/nodes` sample:
-// the handler shares the (fileKey, version) node cache with the canvas, never fetches the
-// whole document or the Tier-3 meta when a version is supplied, normalizes interactions from
-// the requested subtrees only, takes flows from the cached outline, and treats Figma Link
-// overlay metadata as optional. No test touches api.figma.com.
+// the handler shares the (fileKey, version) node cache with the canvas, requested subtrees are
+// the ONLY reads it performs — no Tier-3 meta, no whole-document GET (even depth=2) and no
+// Link call when a version is supplied — it normalizes interactions from the requested subtrees
+// alone, leaves flows to the client's outline, and never claims live Plugin-API overlay
+// metadata for a pinned snapshot. No test touches api.figma.com.
 
 const FILE = "Kx7QmP2vTnYhW3cLdRf5Ba";
 const VERSION = "1775068800"; // the fixture's own `version` field
@@ -75,8 +76,9 @@ function buildRest(): void {
       ),
     };
   });
-  // The outline handler's depth=2 full-file read. No `/meta` responder: a Tier-3 lookup would
-  // throw, so zero meta calls is proven by the tests passing at all.
+  // The whole-document GET, kept registered so an accidental document read answers; the tests
+  // assert it is never called. No `/meta` responder: a Tier-3 lookup would throw, so zero meta
+  // calls is proven by the tests passing at all.
   fixture.api.rest.respond(FULL_PATH, structuredClone(filePayload));
 }
 
@@ -119,7 +121,7 @@ function expectWire(response: Awaited<ReturnType<typeof playback>>): void {
 }
 
 describe("figma.file.playback.request", () => {
-  it("loads requested subtrees, edges and flows from the pinned version with no meta or full-graph fetch", async () => {
+  it("loads requested subtrees and edges from the pinned version with no meta, document, or Link call", async () => {
     const response = await playback(["1:2", "1:20"]);
     expectWire(response);
 
@@ -132,13 +134,13 @@ describe("figma.file.playback.request", () => {
     expect(nodesCall.tier).toBe("1");
     expect(nodesCall.query).toMatchObject({ ids: "1:2,1:20", geometry: "paths", version: VERSION });
 
-    // The pinned version means no Tier-3 metadata resolution, and the only whole-document read
-    // is the shared depth=2 outline — never the full graph for interactions.
+    // The pinned version means no metadata resolution and no document read at all: flows are
+    // the client's outline business, and playback touches neither Tier-3 meta nor Tier-1 GET
+    // /files (even depth=2), nor Figma Link.
     expect(fixture.api.rest.callsTo(META_PATH)).toHaveLength(0);
-    const fullCalls = fixture.api.rest.callsTo(FULL_PATH);
-    expect(fullCalls).toHaveLength(1);
-    expect(fullCalls[0].query).toMatchObject({ depth: 2, version: VERSION });
+    expect(fixture.api.rest.callsTo(FULL_PATH)).toHaveLength(0);
     expect(fixture.api.rest.callsTo(`/v1/images/${FILE}`)).toHaveLength(0);
+    expect(fixture.api.link.toolCalls).toHaveLength(0);
 
     // Edges: the requested subtrees only — 1:25 (unrequested sibling) and 2:1 (unrequested
     // page) contribute nothing here.
@@ -179,16 +181,12 @@ describe("figma.file.playback.request", () => {
     expect(edges.has("1:25 ON_CLICK NODE")).toBe(false);
     expect(edges.has("2:1 ON_CLICK NODE")).toBe(false);
 
-    // Flows come from the cached outline's pages, not the graph.
-    expect(response.prototype?.flows).toEqual([
-      { nodeId: "1:2", name: "Onboarding", pageId: "0:1" },
-      { nodeId: "1:20", name: "Checkout", pageId: "0:1" },
-    ]);
+    // Flows are the client's outline's job; playback leaves the field empty but present.
+    expect(response.prototype?.flows).toEqual([]);
 
-    // REST-only: no Link calls, no overlay metadata claimed.
+    // Live Plugin-API metadata is unverifiable against a pinned version: never claimed.
     expect(response.prototype?.overlays).toEqual([]);
     expect(response.prototype?.overlaySettingsAvailable).toBe(false);
-    expect(fixture.api.link.toolCalls).toHaveLength(0);
   });
 
   it("replays a revisit entirely from the disk cache with no further REST or Link calls", async () => {
@@ -241,73 +239,34 @@ describe("figma.file.playback.request", () => {
   it("passes an explicit older version straight through instead of resolving the live one", async () => {
     await expect(playback(["1:2"], "1775068799")).rejects.toMatchObject({ code: "not_found" });
     expect(fixture.nodeCalls).toEqual([{ ids: ["1:2"], version: "1775068799" }]);
-    // The pinned version was asked for as-is: no Tier-3 meta, and the failed nodes read aborts
-    // the request before the outline is ever fetched.
+    // The pinned version was asked for as-is: no Tier-3 meta and no document read.
     expect(fixture.api.rest.callsTo(META_PATH)).toHaveLength(0);
     expect(fixture.api.rest.callsTo(FULL_PATH)).toHaveLength(0);
   });
 
-  it("fetches overlay metadata only for requested destinations and never the live tree for a pinned version", async () => {
+  it("claims no overlay metadata and makes no Link call for a pinned version, even while linked", async () => {
     fixture.api.link.linked.add(FILE);
-    fixture.api.link.getNodesImpl = () => ({}); // no plugin document; outline falls back to REST
+    fixture.api.link.getNodesImpl = () => {
+      throw new FigmaServiceError("figma_error", "live tree must not serve a pinned version");
+    };
     fixture.api.link.callTool = async (fileKey, tool, args) => {
       fixture.api.link.toolCalls.push({ fileKey, tool, args });
-      if (args.nodeId !== "1:31") return null;
-      return {
-        node: {
-          id: "1:31",
-          overlayPositionType: "CENTER",
-          overlayBackground: [{ type: "SOLID", color: { r: 0, g: 0, b: 0, a: 0.5 } }],
-          overlayBackgroundInteraction: "CLOSE_ON_CLICK_OUTSIDE",
-        },
-      };
+      return { node: { id: args.nodeId, overlayPositionType: "CENTER" } };
     };
     const response = await playback(["1:2", "1:20", "1:31"]);
     expectWire(response);
 
-    // 1:30 (OVERLAY from 1:4) and 1:31 (SWAP from 1:20) are the destinations in these
-    // subtrees; only 1:31 was requested, so only it is asked for.
-    const getNode = fixture.api.link.toolCalls.filter((call) => call.tool === "get_node");
-    expect(getNode.map((call) => call.args.nodeId)).toEqual(["1:31"]);
-    expect(response.prototype?.overlaySettingsAvailable).toBe(true);
-    expect(response.prototype?.overlays).toEqual([
-      {
-        frameId: "1:31",
-        position: "CENTER",
-        background: { type: "SOLID", color: "#00000080" },
-        closeOnClickOutside: true,
-      },
-    ]);
-
-    // A pinned version is a snapshot: the plugin's live getNodes tree never served it — the
-    // frames came from the batched REST call, and the only plugin document read the outline
-    // may attempt is the file root, never a frame id.
-    for (const call of fixture.api.link.toolCalls.filter((c) => c.tool === "getNodes"))
-      expect(call.args.ids).toEqual(["0:0"]);
-    expect(fixture.nodeCalls).toEqual([{ ids: ["1:2", "1:20", "1:31"], version: VERSION }]);
-  });
-
-  it("degrades to no overlay metadata when the plugin call fails, keeping the playback intact", async () => {
-    fixture.api.link.linked.add(FILE);
-    fixture.api.link.getNodesImpl = () => ({});
-    fixture.api.link.callTool = async (fileKey, tool, args) => {
-      fixture.api.link.toolCalls.push({ fileKey, tool, args });
-      throw new FigmaServiceError("figma_error", "plugin disconnected");
-    };
-    const response = await playback(["1:2", "1:20", "1:31"]);
-    expectWire(response);
+    // 1:31 is a SWAP destination in these subtrees and the plugin would answer, but Link
+    // reports settings for whatever version is open now — unverifiable against the snapshot,
+    // so the player is told the metadata is unavailable instead of being handed live data.
     expect(response.prototype?.overlays).toEqual([]);
     expect(response.prototype?.overlaySettingsAvailable).toBe(false);
+    expect(response.prototype?.flows).toEqual([]);
+    expect(fixture.api.link.toolCalls).toHaveLength(0);
+    expect(fixture.api.rest.callsTo(META_PATH)).toHaveLength(0);
+    expect(fixture.api.rest.callsTo(FULL_PATH)).toHaveLength(0);
+    expect(fixture.nodeCalls).toEqual([{ ids: ["1:2", "1:20", "1:31"], version: VERSION }]);
     expect(Object.keys(response.frames).sort()).toEqual(["1:2", "1:20", "1:31"]);
     expect(response.prototype?.interactions).toHaveLength(9);
-    expect(response.prototype?.flows).toHaveLength(2);
-  });
-
-  it("never fetches overlay metadata when no requested frame is an overlay destination", async () => {
-    fixture.api.link.linked.add(FILE);
-    fixture.api.link.getNodesImpl = () => ({});
-    const response = await playback(["1:2", "1:20"]);
-    expect(fixture.api.link.toolCalls.filter((call) => call.tool === "get_node")).toHaveLength(0);
-    expect(response.prototype?.overlaySettingsAvailable).toBe(false);
   });
 });
