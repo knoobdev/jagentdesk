@@ -1538,10 +1538,12 @@ async function main() {
           samples: ram.samples.length,
           daemonRssMb: Math.round(evidence.daemonRssKb / 1024),
         };
-        if (
-          peakGrowthMb < appRamBudgetMb &&
-          (closeGrowthMb === null || closeGrowthMb < appRamBudgetMb)
-        ) {
+        if (closeGrowthMb === null) {
+          unexercisedGate(
+            "perf-app-ram-tree",
+            "missing after-close app-tree sample; peak alone cannot prove cleanup",
+          );
+        } else if (peakGrowthMb < appRamBudgetMb && closeGrowthMb < appRamBudgetMb) {
           passGate("perf-app-ram-tree", {
             peakGrowthMb: peakGrowthMb.toFixed(1),
             afterCloseGrowthMb: closeGrowthMb === null ? null : closeGrowthMb.toFixed(1),
@@ -1923,8 +1925,8 @@ async function runApiGates(client, jagentdeskHome, proxy, ctx) {
  * API gates so the <=3 s canvas bar is a COLD proof (empty daemon outline/nodes cache), and
  * the warm reopen is recorded separately after close. Canvas-view pan/zoom is measured with
  * CTRL+wheel zoom and real drags, asserting the render camera (canvas CTM) actually changed
- * for every input; the fps bar uses real presentation evidence (pixels changed per frame) —
- * rAF cadence is recorded as a diagnostic only and never renamed into a pass.
+ * during trusted continuous input; the fps bar uses main-frame compositor DrawFrame trace
+ * events, with camera/screenshot movement proof and no per-frame pixel readback.
  */
 // eslint-disable-next-line eslint(complexity) — each UI step records its own gate verdict.
 async function runUiPlaybackGates(
@@ -2066,127 +2068,39 @@ async function runUiPlaybackGates(
   }
   await page.screenshot({ path: path.join(artifactDir, "file-canvas.png") });
 
-  // ── pan/zoom fps on the CANVAS VIEW — before the player (the player has no wheel/pan
-  // handler; measuring inputs against it would prove nothing). Every input must move the
-  // render camera: read the canvas 2D context transform before/after each gesture.
-  const canvasExists = await withDeadline(
-    page.evaluate(() => !!document.getElementById("jagentdesk-figma-canvas")),
-    15_000,
-    "canvas presence probe",
-  ).catch(() => false);
-  if (!canvasExists) {
-    const idleRaf = await sampleRafCadence(page, 1_000);
-    unexercisedGate(
-      "perf-playback-fps",
-      `no #jagentdesk-figma-canvas element to drive pan/zoom against — rAF cadence recorded as diagnostic only: ${JSON.stringify(idleRaf)}`,
-    );
+  // Drive the file canvas continuously; read no pixels during the timed trace. A
+  // screencast is delivery-throttled and six gestures with idle gaps do not measure capacity.
+  const fileCanvas = page.locator("#jagentdesk-figma-canvas");
+  if (!(await fileCanvas.isVisible().catch(() => false))) {
+    unexercisedGate("perf-playback-fps", "no file canvas to drive");
   } else {
-    const inputs = [];
-    const readCtm = async () =>
-      await withDeadline(
-        page.evaluate(() => {
-          const c = document.getElementById("jagentdesk-figma-canvas");
-          const ctx = c?.getContext?.("2d");
-          if (!ctx) return null;
-          const t = ctx.getTransform();
-          return [t.a, t.b, t.c, t.d, t.e, t.f];
-        }),
-        15_000,
-        "canvas CTM read",
-      ).catch(() => null);
-    const canvasBox = await page.locator("#jagentdesk-figma-canvas").boundingBox();
-    const cx = canvasBox ? canvasBox.x + canvasBox.width / 2 : 400;
-    const cy = canvasBox ? canvasBox.y + canvasBox.height / 2 : 300;
-    await page.mouse.move(cx, cy);
-    const idleRaf = await sampleRafCadence(page, 1_000);
-    const applyInput = async (label, action) => {
-      const before = await readCtm();
-      await action();
-      await delay(200); // let the camera state round-trip through React into the renderer
-      const after = await readCtm();
-      inputs.push({ label, ctmChanged: JSON.stringify(before) !== JSON.stringify(after) });
-    };
-    // COMPOSITOR-PRESENTED evidence: CDP Page.screencast delivers frames as the compositor
-    // presents them for this tab, so its rate — not an rAF tick count, and not a getImageData
-    // pixel diff (canvas INTERNAL update cadence) — is what may pass the >= 50 fps bar.
-    // Both of those are still recorded, truthfully labelled as diagnostics.
-    let cdp = null;
-    let castFrames = 0;
+    const cdp = await page.context().newCDPSession(page);
     try {
-      cdp = await page.context().newCDPSession(page);
-      cdp.on("Page.screencastFrame", (frame) => {
-        castFrames += 1;
-        cdp.send("Page.screencastFrameAck", { sessionId: frame.sessionId }).catch(() => {});
-      });
-      await cdp.send("Page.startScreencast", {
-        format: "jpeg",
-        quality: 40,
-        everyNthFrame: 1,
-      });
-    } catch {
-      cdp = null;
-    }
-    // Start the pixel-cadence sampler FIRST, then keep the viewport genuinely changing for
-    // the whole window: ctrl+wheel zoom, plain-wheel pan, real pointer-drag pan.
-    const presentation = sampleCanvasPresentation(page, 2_500);
-    const castStart = Date.now();
-    const wheelZoom = async () => {
-      await page.keyboard.down("Control");
-      await page.mouse.move(cx, cy);
-      await page.mouse.wheel(0, -240);
-      await page.keyboard.up("Control");
-    };
-    const wheelPan = async () => {
-      await page.mouse.move(cx, cy);
-      await page.mouse.wheel(0, -240);
-    };
-    const dragPan = async () => {
-      await page.mouse.move(cx, cy);
-      await page.mouse.down();
-      await page.mouse.move(cx - 180, cy - 60, { steps: 10 });
-      await page.mouse.up();
-    };
-    for (let round = 0; round < 2; round += 1) {
-      await applyInput(`ctrl+wheel zoom #${round + 1}`, wheelZoom);
-      await applyInput(`plain-wheel pan #${round + 1}`, wheelPan);
-      await applyInput(`pointer-drag pan #${round + 1}`, dragPan);
-    }
-    const canvasUpdateCadence = await presentation;
-    let compositor = null;
-    if (cdp) {
-      const windowMs = Date.now() - castStart;
-      await cdp.send("Page.stopScreencast").catch(() => {});
+      const ready = await fileCanvas.getAttribute("aria-label");
+      if (ready !== "Figma design canvas") {
+        unexercisedGate("perf-playback-fps", `viewport content is not ready: ${ready}`);
+      } else {
+        const pan = await traceContinuousCanvasPan(page, cdp, fileCanvas, artifactDir);
+        evidence.canvasPan = pan;
+        const stats = pan.compositor;
+        const inputRate = pan.gestureElapsedMs > 0 ? (pan.inputs * 1000) / pan.gestureElapsedMs : 0;
+        if (!stats.correlated || inputRate < minFpsValue) {
+          unexercisedGate("perf-playback-fps", {
+            ...pan,
+            inputRate,
+            reason: stats.reason ?? "input delivery rate below required FPS; capacity unproven",
+          });
+        } else if (stats.drawnFps >= minFpsValue && pan.cameraChanged && pan.screenshotChanged) {
+          passGate("perf-playback-fps", { ...pan, inputRate, budgetFps: minFpsValue });
+        } else {
+          failGate(
+            "perf-playback-fps",
+            JSON.stringify({ ...pan, inputRate, budgetFps: minFpsValue }),
+          );
+        }
+      }
+    } finally {
       await cdp.detach().catch(() => {});
-      if (windowMs > 0 && castFrames > 0)
-        compositor = {
-          presentedFps: Number(((castFrames / windowMs) * 1000).toFixed(1)),
-          frames: castFrames,
-          windowMs,
-        };
-    }
-    const everyInputMovedCamera = inputs.every((i) => i.ctmChanged);
-    if (!compositor) {
-      unexercisedGate(
-        "perf-playback-fps",
-        `no compositor-presented FPS evidence this run (${cdp ? "CDP screencast delivered zero frames" : "CDP screencast unavailable"}) — inputs ran with per-input CTM proof ${everyInputMovedCamera}; canvas internal update cadence ${JSON.stringify(canvasUpdateCadence)} and idle rAF ${JSON.stringify(idleRaf)} recorded as DIAGNOSTICS ONLY, never renamed into a pass`,
-      );
-    } else {
-      const gate = {
-        compositorPresented: compositor,
-        inputs,
-        everyInputMovedCamera,
-        canvasUpdateCadence,
-        canvasUpdateCadenceNote:
-          "pixel-change/rAF = canvas internal update cadence, NOT compositor-presented fps",
-        idleRafCadence: idleRaf,
-      };
-      if (compositor.presentedFps >= minFpsValue && everyInputMovedCamera)
-        passGate("perf-playback-fps", gate);
-      else
-        failGate(
-          "perf-playback-fps",
-          `compositor presented ${compositor.presentedFps} fps during live inputs (gate >= ${minFpsValue}), per-input CTM proof ${everyInputMovedCamera}: ${JSON.stringify(gate)}`,
-        );
     }
   }
 
@@ -2326,103 +2240,6 @@ async function runUiPlaybackGates(
     restDuringReopen: warmRest.map((e) => e.pathname),
     note: "warm reopen recorded separately from the cold ui-file-open gate",
   };
-}
-
-/**
- * Canvas-internal update sampler (DIAGNOSTIC ONLY): counts rAF ticks and the ticks whose
- * centre-region pixel sample of the file canvas actually changed (pixels re-rendered) during
- * live inputs. Neither number is compositor-presented FPS — that bar is the CDP screencast
- * measurement above; these never pass anything on their own.
- */
-async function sampleCanvasPresentation(page, sampleMs) {
-  return await withDeadline(
-    page.evaluate(async (ms) => {
-      const canvas = document.getElementById("jagentdesk-figma-canvas");
-      if (!canvas) return null;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return null;
-      const w = Math.min(120, canvas.width);
-      const h = Math.min(120, canvas.height);
-      const x = Math.floor((canvas.width - w) / 2);
-      const y = Math.floor((canvas.height - h) / 2);
-      const read = () => ctx.getImageData(x, y, w, h).data;
-      let prev = read();
-      let rafFrames = 0;
-      let presented = 0;
-      const start = performance.now();
-      return await new Promise((resolve) => {
-        const tick = (now) => {
-          rafFrames += 1;
-          const next = read();
-          let changed = false;
-          for (let i = 0; i < next.length; i += 4) {
-            if (next[i] !== prev[i] || next[i + 1] !== prev[i + 1] || next[i + 2] !== prev[i + 2]) {
-              changed = true;
-              break;
-            }
-          }
-          if (changed) {
-            presented += 1;
-            prev = next;
-          }
-          if (now - start < ms) requestAnimationFrame(tick);
-          else
-            resolve({
-              presentedFps: Number(((presented / (now - start)) * 1000).toFixed(1)),
-              rafFps: Number(((rafFrames / (now - start)) * 1000).toFixed(1)),
-              presentedFrames: presented,
-              rafFrames,
-              sampleMs: Math.round(now - start),
-            });
-        };
-        requestAnimationFrame(tick);
-      });
-    }, sampleMs),
-    sampleMs + 15_000,
-    `sampleCanvasPresentation (page.evaluate, ${sampleMs}ms window)`,
-  ).catch(() => null);
-}
-
-/**
- * rAF cadence sample: callback count per second plus the real inter-callback intervals.
- * Chromium drives rAF from the display vsync while the page repaints, so the intervals are
- * the honest presentation cadence DURING input — reported with the gate so an idle raf
- * cannot masquerade as a pan/zoom fps.
- */
-async function sampleRafCadence(page, sampleMs) {
-  return await withDeadline(
-    page.evaluate(
-      async (ms) =>
-        await new Promise((resolve) => {
-          const stamps = [];
-          const start = performance.now();
-          const tick = (now) => {
-            stamps.push(now);
-            if (now - start < ms) requestAnimationFrame(tick);
-            else {
-              const intervals = [];
-              for (let i = 1; i < stamps.length; i += 1) intervals.push(stamps[i] - stamps[i - 1]);
-              intervals.sort((a, b) => a - b);
-              resolve({
-                fps: Number(
-                  (((stamps.length - 1) / (stamps.at(-1) - stamps[0])) * 1000).toFixed(1),
-                ),
-                frames: stamps.length,
-                sampleMs: Math.round(stamps.at(-1) - stamps[0]),
-                medianFrameIntervalMs: intervals.length
-                  ? Number(intervals[Math.floor(intervals.length / 2)].toFixed(2))
-                  : null,
-                worstFrameIntervalMs: intervals.length ? Number(intervals.at(-1).toFixed(2)) : null,
-              });
-            }
-          };
-          requestAnimationFrame(tick);
-        }),
-      sampleMs,
-    ),
-    sampleMs + 15_000,
-    `sampleRafCadence (page.evaluate, ${sampleMs}ms window)`,
-  ).catch(() => null);
 }
 
 /**
@@ -2845,7 +2662,8 @@ async function traceContinuousCanvasPan(page, cdp, canvas, artifactDir) {
     Buffer.from(beforeImage.data, "base64"),
   );
   await cdp.send("Tracing.start", {
-    categories: "devtools.timeline,disabled-by-default-devtools.timeline.frame,blink.user_timing",
+    categories:
+      "devtools.timeline,disabled-by-default-devtools.timeline,disabled-by-default-devtools.timeline.frame,blink.user_timing",
     transferMode: "ReturnAsStream",
   });
   let inputs = 0;
@@ -2894,7 +2712,55 @@ async function traceContinuousCanvasPan(page, cdp, canvas, artifactDir) {
     after,
     cameraChanged: JSON.stringify(before) !== JSON.stringify(after),
     screenshotChanged: beforeImage.data !== afterImage.data,
-    note: "Trace needs main-frame/layer correlation and DrawFrame/DroppedFrame analysis; no FPS acceptance inferred here.",
+    compositor: analyzePanTrace(
+      JSON.parse(fs.readFileSync(path.join(artifactDir, "canvas-pan-trace.json"), "utf8")),
+      mainFrameId,
+    ),
+    note: "DrawFrame rate for the main frame layer during continuous trusted wheel input; screenshots and CTM prove camera movement. No per-frame pixel readback or rAF counting.",
+  };
+}
+
+/** Same main-frame → layer-tree attribution used by Chromium DevTools FramesHandler:
+ * https://chromium.googlesource.com/devtools/devtools-frontend/+/HEAD/front_end/models/trace/handlers/FramesHandler.ts
+ * Missing/ambiguous attribution is unexercised; never count other windows or BeginFrame ticks.
+ */
+function analyzePanTrace(trace, mainFrameId) {
+  const events = trace.traceEvents;
+  const start = events.find((e) => e.name === "jagentdesk-pan-start");
+  const end = events.find((e) => e.name === "jagentdesk-pan-end");
+  const layers = events.filter(
+    (e) => e.name === "SetLayerTreeId" && e.args?.data?.frame === mainFrameId,
+  );
+  const identities = new Set(layers.map((e) => `${e.pid}:${e.args.data.layerTreeId}`));
+  if (!start || !end || end.ts <= start.ts || identities.size !== 1) {
+    return {
+      correlated: false,
+      reason: "missing timing marks or unambiguous main-frame SetLayerTreeId",
+    };
+  }
+  const layer = layers[0];
+  const inWindow = events.filter(
+    (e) =>
+      e.ts >= start.ts &&
+      e.ts <= end.ts &&
+      e.pid === layer.pid &&
+      e.args?.layerTreeId === layer.args.data.layerTreeId,
+  );
+  const draws = inWindow.filter((e) => e.name === "DrawFrame");
+  const drops = inWindow.filter((e) => e.name === "DroppedFrame");
+  const drawn = new Set(draws.map((e) => e.args.frameSeqId));
+  const dropped = new Set(drops.map((e) => e.args.frameSeqId));
+  const windowMs = (end.ts - start.ts) / 1000;
+  return {
+    correlated: true,
+    mainFrameId,
+    rendererPid: layer.pid,
+    layerTreeId: layer.args.data.layerTreeId,
+    windowMs,
+    drawnFrames: drawn.size,
+    droppedFrames: dropped.size,
+    drawnFps: (drawn.size * 1000) / windowMs,
+    method: "unique DrawFrame sequence ids on the attributed main layer, bounded by input marks",
   };
 }
 

@@ -52,8 +52,9 @@
 # page.evaluate IPC probe is individually deadline-bounded; teardown RECORDS the isolated
 # home's managed-PID-lock holder in evidence for root review and never speculatively signals
 # an untracked PID (no broad daemon scan, production daemon untouched). The fps bar passes only on
-# compositor-presented CDP screencast frames (pixel/rAF cadence are diagnostics; no evidence
-# leaves it UNEXERCISED, never a false PASS). Link status is read before/after to keep the
+# main-frame DrawFrame trace events during continuous trusted input, attributed through
+# SetLayerTreeId (missing correlation/input rate leaves it UNEXERCISED). No per-frame pixel
+# readback or screencast-delivery rate is used. Link status is read before/after to keep the
 # data proof attributable to standalone REST. Boot/output logs live under the artifact dir.
 set -uo pipefail
 
