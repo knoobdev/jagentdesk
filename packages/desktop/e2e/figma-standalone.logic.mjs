@@ -285,6 +285,113 @@ expectSource(
   "ADR-0038: renderer invokes the bridge without arguments",
 );
 
+console.log("harness boot/readiness contract (source wiring, root-run lessons)");
+
+const harnessSource = fileText("packages/desktop/e2e/figma-standalone.e2e.mjs");
+
+expectSource(
+  "isolated daemon boots with the tailnet bridge OFF (loopback read test, not tailnet acceptance)",
+  harnessSource,
+  'JAGENTDESK_TAILSCALE_ENABLED: "0"',
+  "root run: tailnet Supervisor restarts churned the port and false-passed a bare waitForPort",
+);
+expectSource(
+  "boot-isolated-daemon PASS requires bounded WS server_info readiness",
+  harnessSource,
+  "waitForDaemonReadiness(daemonPort, daemon)",
+  "port-open alone is a stage marker; server_info arrival is the pass condition",
+);
+test("boot gate passes only after the readiness probe returns (ordering)", () => {
+  const ready = harnessSource.indexOf("waitForDaemonReadiness(daemonPort, daemon)");
+  const pass = harnessSource.indexOf('passGate("boot-isolated-daemon"');
+  assert.ok(ready !== -1 && pass !== -1 && ready < pass, "no readiness before the boot PASS");
+});
+expectSource(
+  "every DaemonClient connect carries a hard deadline",
+  harnessSource,
+  "withDeadline(client.connect(), bootTimeoutMs",
+  "root run: client.connect() hung unbounded after a transient open port",
+);
+expectSource(
+  "desktop bridge readiness rejects the empty serverId while starting",
+  harnessSource,
+  'serverId !== ""',
+  "root run: waitForDesktopStatus false-passed on serverId:'' status:'starting'",
+);
+expectSource(
+  "SIGINT runs the owned cleanup",
+  harnessSource,
+  'process.on("SIGINT", ownedSignalCleanup);',
+  "interrupted runs must stop child groups + write evidence, not orphan them",
+);
+expectSource(
+  "SIGTERM runs the owned cleanup",
+  harnessSource,
+  'process.on("SIGTERM", ownedSignalCleanup);',
+  "same as SIGINT: no orphaned isolated daemon/Electron groups",
+);
+expectSource(
+  "runtime registry is written per spawn for root recovery",
+  harnessSource,
+  'trackChild("daemon", daemon);',
+  "runtimeDir/ports/child PGIDs land in runtime.json immediately",
+);
+expectSource(
+  "desktop child is registered too",
+  harnessSource,
+  'trackChild("desktop", desktop);',
+  "both owned groups discoverable without tailing logs",
+);
+expectSource(
+  "link quiescence is read before the run",
+  harnessSource,
+  'recordLinkStatus(client, "Before", evidence)',
+  "data-side proof must be attributable to standalone REST, not the Link plugin path",
+);
+expectSource(
+  "link quiescence is read after the run",
+  harnessSource,
+  'recordLinkStatus(client, "After", evidence)',
+  "before/after both recorded; violations fold into the trace gate as offenders",
+);
+expectSource(
+  "fps PASS comes only from compositor-presented CDP screencast frames",
+  harnessSource,
+  "Page.startScreencast",
+  "pixel-change/rAF are canvas internal update cadence — diagnostics, never the bar",
+);
+expectSource(
+  "screencast frames are acked so the compositor keeps presenting",
+  harnessSource,
+  "Page.screencastFrameAck",
+  "unacked screencast stalls after the window of unacked frames",
+);
+expectSource(
+  "pixel-change result is labelled canvas-internal cadence, not presented fps",
+  harnessSource,
+  "canvasUpdateCadence",
+  "the diagnostic is named for what it measures",
+);
+test("fps gate goes UNEXERCISED, never PASS, without screencast evidence", () => {
+  assert.match(
+    harnessSource,
+    /if \(!compositor\) \{\s*unexercisedGate\(\s*"perf-playback-fps"/,
+    "no CDP data must leave the >=50 bar UNEXERCISED — diagnostics never rename into a pass",
+  );
+});
+expectSource(
+  "ui-file-open labels its bar as mount-only",
+  harnessSource,
+  "frameBarLimit:",
+  "mount of #jagentdesk-figma-canvas != first complete frame — no false PASS claim",
+);
+expectSource(
+  "credential vars are stripped from the booted children",
+  harnessSource,
+  'if (key.startsWith("JAGENTDESK_FIGMA_E2E_")) delete childEnv[key];',
+  "the token belongs to this process + the isolated home's sealed vault only",
+);
+
 const failures = results.filter((result) => !result.ok);
 console.log(
   `\n${failures.length === 0 ? "LOGIC TIER PASSED" : "LOGIC TIER FAILED"}: ${results.length - failures.length}/${results.length} checks`,
