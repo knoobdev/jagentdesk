@@ -2,11 +2,15 @@
 // effects, hotspot hit areas, transition choreography, and overlay stacking. Pixels are drawn by
 // the stage; this file only orchestrates. Hotspots render only with the "Show hotspots" toggle
 // on; ON_HOVER runs through pointer events on web, taps cover it on native.
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { View, Text, Pressable, type LayoutChangeEvent } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 
-import type { FigmaNode, FigmaPrototype } from "@jagentdesk/protocol/figma/rpc-schemas";
+import type {
+  FigmaNode,
+  FigmaOutline,
+  FigmaPrototype,
+} from "@jagentdesk/protocol/figma/rpc-schemas";
 import type { PrototypePlayerProps } from "@/figma/contracts";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
@@ -19,11 +23,10 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { isWeb } from "@/constants/platform";
 import { openExternalUrl } from "@/utils/open-external-url";
-import { useFetchQuery } from "@/data/query";
-import { useHostRuntimeClient } from "@/runtime/host-runtime";
+import { useHostFeature } from "@/runtime/host-features";
 import type { Theme } from "@/styles/theme";
 
-import { callFigma, errorMessage, figmaKeys } from "./figma-api";
+import { PrototypeAssetScopeProvider } from "./asset-scope";
 import { FrameStage, type StageSpace } from "./frame-stage";
 import {
   afterTimeoutForNode,
@@ -34,7 +37,7 @@ import {
 import { findNodeById, nodeBounds, type Rect } from "./node-geometry";
 import { placeOverlay } from "./overlay-placement";
 import { smartAnimateOverrides } from "./smart-animate";
-import { pickStartPosition } from "./start-selection";
+import { pickStartPosition, resolveRequestedStart } from "./start-selection";
 import { advanceTimeline, transitionVisuals } from "./transition-timeline";
 import {
   baseFrameIdFor,
@@ -43,6 +46,8 @@ import {
   emptyPlayerState,
   parseOverlayPosition,
   step,
+  visibleFrameIds,
+  type ActiveTransition,
   type OverlayEntry,
   type OverlaySettings,
   type PlayerContext,
@@ -56,8 +61,128 @@ const TOAST_MS = 2500;
 
 type Frame = NonNullable<PlayerState["transition"]>;
 
-export function PrototypePlayer({ file, outline, startNodeId, onClose }: PrototypePlayerProps) {
-  const client = useHostRuntimeClient(file.serverId);
+export function PrototypePlayer(props: PrototypePlayerProps) {
+  // Gate once on the capability (docs/protocol-compatibility.md): a host without scoped playback
+  // never receives `figma.file.playback.request`; there is no fallback to the full prototype RPC.
+  const supported = useHostFeature(props.file.serverId, "figmaPlayback");
+  if (!supported) {
+    return (
+      <View style={styles.centered}>
+        <Text style={styles.muted}>
+          Update this host to use prototype playback without loading the whole file.
+        </Text>
+        <Button variant="outline" onPress={props.onClose}>
+          Close
+        </Button>
+      </View>
+    );
+  }
+  return <ScopedPrototypePlayer {...props} />;
+}
+
+// Deep link resolution lives in a hook so the Section/flow-start branches stay out of the
+// component's complexity budget (ADR-0039). A known container resolves inward to a playable
+// frame; with nothing playable the player prompts for a frame instead of loading the subtree,
+// and no playback batch is ever issued for the container itself.
+function useRequestedStart(
+  startNodeId: string | null,
+  outline: FigmaOutline,
+  identity: string,
+  dispatchStart: (frameId: string) => void,
+): string | null {
+  const [prompt, setPrompt] = useState<string | null>(null);
+  useEffect(() => {
+    if (!startNodeId) return;
+    const decision = resolveRequestedStart(startNodeId, outline);
+    if (decision.frameId) {
+      setPrompt(null);
+      dispatchStart(decision.frameId);
+    } else {
+      setPrompt(
+        `"${decision.containerName}" is a section with no playable frame in this file. Select a frame to play.`,
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startNodeId, identity]);
+  return prompt;
+}
+
+// One `frame_ready` dispatch per (snapshot identity, visit, data state): the known-delay
+// field flips when interactions arrive after navigation — re-firing the arm so the countdown
+// starts — while clock ticks and callback-identity re-renders never replay a fired timer.
+function useFrameReadyArm(
+  activeFrameId: string | null,
+  activeRoot: FigmaNode | null,
+  player: PlayerState,
+  interactions: InteractionMap,
+  identity: string,
+  dispatch: (event: PlayerEvent) => void,
+): void {
+  const readySignature =
+    activeFrameId && activeRoot && !player.transition
+      ? `${identity}|${activeFrameId}|${player.stack.length}|${player.overlays.length}|${
+          afterTimeoutForNode(interactions, activeFrameId)?.delayMs ?? -1
+        }`
+      : null;
+  const lastArmedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!readySignature || !activeFrameId) return;
+    if (lastArmedRef.current === readySignature) return;
+    lastArmedRef.current = readySignature;
+    dispatch({ type: "frame_ready", frameId: activeFrameId });
+  }, [readySignature, activeFrameId, dispatch]);
+}
+
+// The transition's per-frame clock, gated on BOTH frames of the pair being loaded (ADR-0037):
+// ticking while the target is still in flight finishes unseen and lands the player on a frame
+// it never drew. Completion is reported to the machine, not applied here.
+function useTransitionClock(
+  transition: ActiveTransition | null,
+  frames: FrameLookup,
+  dispatch: (event: PlayerEvent) => void,
+): ReturnType<typeof advanceTimeline> | null {
+  const [clock, setClock] = useState(() => Date.now());
+  const pairLoaded =
+    transition !== null &&
+    frames.nodeFor(transition.fromFrameId) !== null &&
+    frames.nodeFor(transition.toFrameId) !== null;
+  const clockRef = useRef<{ key: string; at_ms: number } | null>(null);
+  if (transition === null) {
+    clockRef.current = null;
+  } else if (pairLoaded) {
+    const key = `${transition.startedAt_ms}->${transition.fromFrameId}->${transition.toFrameId}`;
+    if (clockRef.current?.key !== key) {
+      clockRef.current = { key, at_ms: Date.now() };
+    }
+  }
+
+  // rAF only while a transition actually animates; completion goes through the machine.
+  useEffect(() => {
+    if (!pairLoaded) return;
+    let raf = 0;
+    const loop = () => {
+      setClock(Date.now());
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [pairLoaded]);
+
+  const timeline =
+    transition && clockRef.current
+      ? advanceTimeline(transition.plan, Math.max(0, clock - clockRef.current.at_ms))
+      : null;
+
+  useEffect(() => {
+    if (transition && pairLoaded && timeline?.done) {
+      dispatch({ type: "transition_complete" });
+    }
+  }, [transition, pairLoaded, timeline, dispatch]);
+
+  return timeline;
+}
+
+function ScopedPrototypePlayer({ file, outline, startNodeId, onClose }: PrototypePlayerProps) {
   const [player, setPlayer] = useState(emptyPlayerState);
   const [showHotspots, setShowHotspots] = useState(true);
   const [stage, setStage] = useState({ width: 0, height: 0 });
@@ -65,25 +190,18 @@ export function PrototypePlayer({ file, outline, startNodeId, onClose }: Prototy
     null,
   );
   const [toast, setToast] = useState<string | null>(null);
-  const [clock, setClock] = useState(() => Date.now());
 
-  const prototypeRequest = useFetchQuery<FigmaPrototype | null>({
-    queryKey: figmaKeys.prototype(file.serverId, file.fileKey, file.version ?? null),
-    queryFn: async () => {
-      const data = await callFigma(client, "figma.file.prototype.request", {
-        fileKey: file.fileKey,
-      });
-      return data.prototype;
-    },
-    enabled: client !== null,
-    dataShape: "value",
-    staleTimeMs: 60_000,
-  });
-  const prototype = prototypeRequest.data ?? null;
+  const activeFrameId = currentFrameId(player);
+  const neededIds = useMemo(() => visibleFrameIds(player), [player]);
+  // ADR-0037: playback pins to the outline's immutable version so every batch — and the daemon
+  // cache behind it — reads one snapshot, even if the file changes while the player is open.
+  const playbackVersion = file.version ?? outline.version;
+  const frames = useFigmaFrames(file, neededIds, playbackVersion);
+  const prototype = frames.prototype;
 
+  // Flow starts come from the outline only (spec 32.5.3 / ADR-0037) — the full prototype RPC
+  // would fetch every frame in the file just to enumerate them.
   const flows = useMemo(() => {
-    const wire = prototype?.flows ?? [];
-    if (wire.length > 0) return wire;
     return outline.pages.flatMap((page) =>
       page.flowStartingPoints.map((point) => ({
         nodeId: point.nodeId,
@@ -91,7 +209,7 @@ export function PrototypePlayer({ file, outline, startNodeId, onClose }: Prototy
         pageId: page.id,
       })),
     );
-  }, [prototype, outline]);
+  }, [outline]);
 
   const interactions = useMemo(() => indexInteractions(prototype?.interactions ?? []), [prototype]);
 
@@ -142,32 +260,43 @@ export function PrototypePlayer({ file, outline, startNodeId, onClose }: Prototy
     [dispatch],
   );
 
-  const activeFrameId = currentFrameId(player);
-
-  const neededIds = useMemo(() => {
-    const ids = [...player.stack, ...player.overlays.map((entry) => entry.frameId)];
-    if (player.transition) {
-      ids.push(player.transition.fromFrameId, player.transition.toFrameId);
-    }
-    return Array.from(new Set(ids));
-  }, [player]);
-  const frames = useFigmaFrames(file, neededIds);
-
-  // Deep link / file-screen entry: start on the requested node.
+  // A file/version swap under an open player leaves navigation state pointing into a snapshot
+  // it no longer matches: reset the machine and start the new version from scratch, so no
+  // callback, timer, or frame lookup keeps firing against the previous file.
+  const identity = `${file.serverId}|${file.fileKey}|${playbackVersion}`;
+  const identityRef = useRef(identity);
   useEffect(() => {
-    if (startNodeId) dispatchStart(startNodeId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [startNodeId]);
+    if (identityRef.current === identity) return;
+    identityRef.current = identity;
+    setPlayer(emptyPlayerState());
+    setToast(null);
+    setScrollRequest(null);
+    setStartNote(null);
+  }, [identity]);
+
+  // Deep link / file-screen entry: start on the requested node. A known Section (or other
+  // container) never plays itself — W5's outline flattens its real frames onto the page with
+  // parentId, so the player resolves inward to a playable frame instead of pulling the whole
+  // section subtree through playback, and asks for a frame when nothing playable is known
+  // (ADR-0039). An id absent from the outline passes through: that is a deep element
+  // selection whose caller (the file screen) owns mapping it to an ancestor root frame.
+  const sectionPrompt = useRequestedStart(startNodeId, outline, identity, dispatchStart);
 
   // No start point from the caller: pick one ourselves once the flows are known, so the player
   // never sits on an endless spinner waiting for a hand-picked flow. The first flow wins; with no
   // flows the first top-level frame does, and the toolbar says so.
   useEffect(() => {
-    if (startNodeId || player.startFrameId || prototypeRequest.isPending) return;
+    if (startNodeId || player.startFrameId) return;
     if (!startChoice) return;
     dispatchStart(startChoice.frameId);
     setStartNote(startChoice.note);
-  }, [startNodeId, player.startFrameId, prototypeRequest.isPending, startChoice, dispatchStart]);
+  }, [startNodeId, player.startFrameId, startChoice, dispatchStart]);
+
+  // The interaction data may arrive after navigation; arm a visit's timer once the frame is
+  // ready AND once per data state, so late-arriving interactions still start the countdown
+  // while clock ticks and re-fetches never replay an already-fired timer.
+  const activeRoot = activeFrameId ? frames.nodeFor(activeFrameId) : null;
+  useFrameReadyArm(activeFrameId, activeRoot, player, interactions, identity, dispatch);
 
   // AFTER_TIMEOUT for the frame on stage; the machine re-checks arrival before firing.
   useEffect(() => {
@@ -176,26 +305,11 @@ export function PrototypePlayer({ file, outline, startNodeId, onClose }: Prototy
     return () => clearTimeout(timer);
   }, [player.timeout, dispatch]);
 
-  // Transition clock: rAF only while a transition runs; completion goes through the machine.
-  useEffect(() => {
-    if (!player.transition) return;
-    let raf = 0;
-    const loop = () => {
-      setClock(Date.now());
-      raf = requestAnimationFrame(loop);
-    };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
-  }, [player.transition]);
-
   const transition = player.transition;
-  const timeline = transition
-    ? advanceTimeline(transition.plan, Math.max(0, clock - transition.startedAt_ms))
-    : null;
-
-  useEffect(() => {
-    if (transition && timeline?.done) dispatch({ type: "transition_complete" });
-  }, [transition, timeline, dispatch]);
+  // The pair-gated clock, rAF loop, eased timeline, and machine completion live together in
+  // `useTransitionClock` (ADR-0037): an animation never ticks before its target data is on
+  // hand, so it cannot finish unseen.
+  const timeline = useTransitionClock(transition, frames, dispatch);
 
   useEffect(() => {
     if (!toast) return;
@@ -215,9 +329,6 @@ export function PrototypePlayer({ file, outline, startNodeId, onClose }: Prototy
   const dismissTopOverlay = useCallback(() => dispatch({ type: "overlay_dismiss" }), [dispatch]);
   const goBack = useCallback(() => dispatch({ type: "toolbar_back" }), [dispatch]);
   const restart = useCallback(() => dispatch({ type: "toolbar_restart" }), [dispatch]);
-  const retryPrototype = useCallback(() => {
-    void prototypeRequest.refetch();
-  }, [prototypeRequest]);
 
   // G5 bug 2: the base canvas follows the frame STACK, never the top overlay. Making it follow
   // currentFrameId replaced the frame behind an open sheet, so the backdrop was flat grey.
@@ -243,17 +354,38 @@ export function PrototypePlayer({ file, outline, startNodeId, onClose }: Prototy
   const overlayNote =
     prototype && !prototype.overlaySettingsAvailable ? "Overlay settings need Figma Link" : null;
 
-  if (prototypeRequest.error) {
+  // A failed batch must not strand the user: the error names what happened, Retry re-issues the
+  // playback request, and Close always works (spec 32.5.3, ADR-0037).
+  if (frames.error) {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.muted}>{errorMessage(prototypeRequest.error)}</Text>
-        <Button variant="outline" size="sm" onPress={retryPrototype}>
-          Retry
+      <View style={styles.centered} testID="figma-player-error">
+        <Text style={styles.muted}>{frames.error}</Text>
+        <View style={styles.errorActions}>
+          <Button variant="outline" size="sm" onPress={frames.retry}>
+            Retry
+          </Button>
+          <Button variant="outline" size="sm" onPress={onClose}>
+            Close
+          </Button>
+        </View>
+      </View>
+    );
+  }
+
+  // A Section with no playable frame in the outline must not pull its whole subtree through
+  // playback (ADR-0039): no frame is on stage, no batch is requested, and the user picks one.
+  if (sectionPrompt) {
+    return (
+      <View style={styles.centered} testID="figma-player-select-frame">
+        <Text style={styles.muted}>{sectionPrompt}</Text>
+        <Button variant="outline" size="sm" onPress={onClose}>
+          Close
         </Button>
       </View>
     );
   }
-  if (flows.length === 0 && !startChoice && !prototypeRequest.isPending) {
+
+  if (flows.length === 0 && !startChoice) {
     return (
       <View style={styles.centered}>
         <Text style={styles.muted}>No prototype flows in this file.</Text>
@@ -265,53 +397,57 @@ export function PrototypePlayer({ file, outline, startNodeId, onClose }: Prototy
   }
 
   return (
-    <View style={styles.screen}>
-      <PlayerToolbar
-        flows={flows}
-        startFrameId={player.startFrameId}
-        canGoBack={player.stack.length > 1 || player.overlays.length > 0}
-        canRestart={!!player.startFrameId}
-        showHotspots={showHotspots}
-        onStartFlow={dispatchStart}
-        onBack={goBack}
-        onRestart={restart}
-        onToggleHotspots={setShowHotspots}
-        onClose={onClose}
-        overlayNote={overlayNote}
-        startNote={startNote}
-      />
-      <View style={styles.stageHost} onLayout={onMeasure}>
-        {toast ? <Text style={styles.toast}>{toast}</Text> : null}
-        <PlayerStage
-          file={file}
-          transition={transition}
-          timeline={timeline}
-          frames={frames}
-          stage={stage}
-          root={root}
-          activeFrameId={activeFrameId}
-          scrollRequest={scrollRequest}
-          renderHotspots={renderHotspots}
-          showHotspots={showHotspots}
-          loadingPrototype={prototypeRequest.isPending}
+    <PrototypeAssetScopeProvider file={file} version={playbackVersion}>
+      <View
+        style={styles.screen}
+        testID={`figma-player-state-${transition ? "transition" : "idle"}`}
+      >
+        <PlayerToolbar
           flows={flows}
+          startFrameId={player.startFrameId}
+          canGoBack={player.stack.length > 1 || player.overlays.length > 0}
+          canRestart={!!player.startFrameId}
+          showHotspots={showHotspots}
           onStartFlow={dispatchStart}
+          onBack={goBack}
+          onRestart={restart}
+          onToggleHotspots={setShowHotspots}
+          onClose={onClose}
+          overlayNote={overlayNote}
+          startNote={startNote}
         />
-        {player.overlays.length > 0 ? (
-          <OverlayStack
+        <View style={styles.stageHost} onLayout={onMeasure}>
+          {toast ? <Text style={styles.toast}>{toast}</Text> : null}
+          <PlayerStage
             file={file}
+            transition={transition}
+            timeline={timeline}
             frames={frames}
-            overlays={player.overlays}
             stage={stage}
-            base={baseBounds}
-            interactions={interactions}
+            root={root}
+            activeFrameId={activeFrameId}
+            scrollRequest={scrollRequest}
+            renderHotspots={renderHotspots}
             showHotspots={showHotspots}
-            onTrigger={triggerInteraction}
-            onDismiss={dismissTopOverlay}
+            flows={flows}
+            onStartFlow={dispatchStart}
           />
-        ) : null}
+          {player.overlays.length > 0 ? (
+            <OverlayStack
+              file={file}
+              frames={frames}
+              overlays={player.overlays}
+              stage={stage}
+              base={baseBounds}
+              interactions={interactions}
+              showHotspots={showHotspots}
+              onTrigger={triggerInteraction}
+              onDismiss={dismissTopOverlay}
+            />
+          ) : null}
+        </View>
       </View>
-    </View>
+    </PrototypeAssetScopeProvider>
   );
 }
 
@@ -334,7 +470,6 @@ export function PlayerStage({
   scrollRequest,
   renderHotspots,
   showHotspots,
-  loadingPrototype,
   flows,
   onStartFlow,
 }: {
@@ -348,7 +483,6 @@ export function PlayerStage({
   scrollRequest: { frameId: string; targetId: string } | null;
   renderHotspots: (space: StageSpace) => ReactNode;
   showHotspots: boolean;
-  loadingPrototype: boolean;
   flows: FigmaPrototype["flows"];
   onStartFlow: (frameId: string) => void;
 }) {
@@ -366,7 +500,7 @@ export function PlayerStage({
   if (!root) {
     // The spinner means "frames are actually loading" — nothing else. A file with no start point
     // shows a Choose-flow prompt instead of spinning forever.
-    if (loadingPrototype || frames.loading) {
+    if (frames.loading) {
       return (
         <View style={styles.centered}>
           <LoadingSpinner size="small" color={styles.spinner.color} />
@@ -829,6 +963,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderBottomColor: theme.colors.border,
   },
   navGroup: { flexDirection: "row", gap: theme.spacing[1] },
+  errorActions: { flexDirection: "row", gap: theme.spacing[2] },
   hotspotToggle: {
     flexDirection: "row",
     alignItems: "center",
