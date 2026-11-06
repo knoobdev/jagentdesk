@@ -1332,6 +1332,7 @@ export const ru: TranslationResources = {
     openPath: "Открыть путь",
   },
   branchSwitcher: {
+    failedToLoad: "Не удалось загрузить ветки. Откройте список заново, чтобы повторить попытку.",
     currentBranch: "Текущая ветка:{{branchName}}. Нажмите, чтобы переключить ветку.",
     placeholder: "Сменить ветку...",
     searchPlaceholder: "Фильтровать ветки...",

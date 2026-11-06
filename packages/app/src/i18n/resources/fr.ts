@@ -1343,6 +1343,7 @@ export const fr: TranslationResources = {
     openPath: "Ouvrir le chemin",
   },
   branchSwitcher: {
+    failedToLoad: "Impossible de charger les branches. Rouvrez le sélecteur pour réessayer.",
     currentBranch: "Branche actuelle:{{branchName}}. Appuyez pour changer de branche.",
     placeholder: "Changer de branche...",
     searchPlaceholder: "Filtrer les branches...",

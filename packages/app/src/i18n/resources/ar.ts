@@ -1305,6 +1305,7 @@ export const ar: TranslationResources = {
     openPath: "فتح المسار",
   },
   branchSwitcher: {
+    failedToLoad: "تعذّر تحميل الفروع. أعد فتح قائمة الفروع للمحاولة مرة أخرى.",
     currentBranch: "الفرع الحالي:{{branchName}}. اضغط لتبديل الفرع.",
     placeholder: "تبديل الفرع...",
     searchPlaceholder: "تصفية الفروع...",

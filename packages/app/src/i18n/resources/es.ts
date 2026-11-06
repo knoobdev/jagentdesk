@@ -1344,6 +1344,7 @@ export const es: TranslationResources = {
     openPath: "Abrir ruta",
   },
   branchSwitcher: {
+    failedToLoad: "No se pudieron cargar las ramas. Vuelve a abrir el selector para reintentarlo.",
     currentBranch: "Sucursal actual:{{branchName}}. Presione para cambiar de rama.",
     placeholder: "Cambiar de rama...",
     searchPlaceholder: "Filtrar ramas...",

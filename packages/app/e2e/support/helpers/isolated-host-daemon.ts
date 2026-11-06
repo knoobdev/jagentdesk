@@ -44,7 +44,7 @@ async function getAvailablePort(): Promise<number> {
 }
 
 async function waitForServer(port: number, child: ChildProcess): Promise<void> {
-  const deadline = Date.now() + 20_000;
+  const deadline = Date.now() + Number(process.env.E2E_DAEMON_STARTUP_TIMEOUT_MS ?? 20_000);
   let lastError: unknown = null;
 
   while (Date.now() < deadline) {
