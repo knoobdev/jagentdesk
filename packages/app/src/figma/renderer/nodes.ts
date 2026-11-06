@@ -261,6 +261,8 @@ function drawStrokes(state: DrawState, node: FigmaNode, alpha: number): void {
     ctx.save();
     ctx.globalAlpha = (paint.opacity ?? 1) * alpha;
     applyPaintBlend(ctx, paint.blendMode);
+    if (baked && settings.align !== "CENTER")
+      applyBakedAlignClip(ctx, fillShapes(node), settings.align, width, height, settings.weight);
     for (const shape of shapes) {
       // Figma's strokeGeometry entries are the final outline: width, cap, join and dashes are
       // already baked into the path, so it is filled with its winding rule, not stroked.
@@ -275,6 +277,44 @@ function drawStrokes(state: DrawState, node: FigmaNode, alpha: number): void {
     ctx.restore();
   }
   ctx.restore();
+}
+
+/**
+ * Applies INSIDE/OUTSIDE semantics to a baked strokeGeometry band. Figma bakes the band
+ * spanning ±weight around the outline, so the align is enforced by clipping (source PNG4:
+ * a 1px INSIDE border covers exactly the inner half; unclipped it paints 2px straddling
+ * the edge). Only mathematically proven-safe branches draw vectors here — real-pixel probes
+ * (probe-w7-review-clipsemantics.mjs → w7-review-clipsemantics.json) pin why the rest
+ * cannot: ctx.clip INTERSECTS, and a merged path is NOT a union (merged evenodd islands
+ * XOR their overlap; merged nonzero can cancel opposite-winding overlaps to zero), so
+ * multi-outline INSIDE is a fallback branch while a single fill outline clips exactly
+ * under its own rule. And [rect, path] clipped "nonzero" keeps a same-winding shape
+ * INSIDE the clip (winding 2 ≠ 0): only the evenodd inverse complements, so baked OUTSIDE
+ * over any nonzero fill is a fallback branch too; evenodd-only outlines keep per-outline
+ * inverse clips — intersecting complements equals the complement of the union (De Morgan),
+ * exact for any outlines, with the band filled exactly once (no double alpha). A
+ * fallback-classified node reaching this function means the caller supplied no raster; it
+ * then draws unclipped — a straddling band beats an invisible one.
+ */
+function applyBakedAlignClip(
+  ctx: FigmaCanvasContext,
+  outlines: Shape[],
+  align: string,
+  width: number,
+  height: number,
+  weight: number,
+): void {
+  if (outlines.length === 0) return;
+  if (align === "INSIDE") {
+    if (outlines.length > 1) return;
+    const [outline] = outlines;
+    ctx.clip(outline.path, outline.rule);
+    return;
+  }
+  if (outlines.every((outline) => outline.rule === "evenodd")) {
+    for (const outline of outlines)
+      ctx.clip(inverseShape(outline, width, height, weight), "evenodd");
+  }
 }
 
 function strokeShape(

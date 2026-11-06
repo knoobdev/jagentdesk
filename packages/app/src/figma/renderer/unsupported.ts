@@ -6,6 +6,7 @@ import { boundsIntersect, readBounds, type Bounds } from "./matrix";
 import {
   absoluteBoxOf,
   effectsOf,
+  geometryOf,
   hasHyperlinks,
   isMask,
   listStyleOf,
@@ -89,6 +90,7 @@ export function unsupportedFeatures(node: FigmaNode): string[] {
   pushEffectFeatures(node, features);
   const { strokeAlign } = strokeAlignmentOf(node);
   if (!STROKE_ALIGNMENTS.has(strokeAlign)) pushFeature(features, `STROKE_ALIGN:${strokeAlign}`);
+  else pushBakedAlignFeature(node, strokeAlign, features);
   if (node.type === "TEXT") pushTextFeatures(node, features);
   pushGeometryAndMaskFeatures(node, features);
   pushContainerOpacityFeature(node, features);
@@ -193,6 +195,33 @@ function hasBlendingPaints(node: FigmaNode): boolean {
 
 function strokeAlignmentOf(node: FigmaNode): { strokeAlign: string } {
   return { strokeAlign: typeof node.strokeAlign === "string" ? node.strokeAlign : "CENTER" };
+}
+
+/**
+ * A baked stroke paints `strokeGeometry` clipped to the fill region for INSIDE/OUTSIDE
+ * align, and only three branches are mathematically exact on canvas (proven with
+ * real-pixel probes, not just call shape): a SINGLE fill outline clipped under its own
+ * rule, and per-outline EVENODD inverse clips intersected for OUTSIDE (De Morgan).
+ * A merged path is no union - merged evenodd XORs overlapping islands and merged nonzero
+ * can cancel opposite-winding overlaps - so multi-outline INSIDE is unsupported; and
+ * [rect, path] clipped "nonzero" keeps a same-winding shape inside (winding 2 ≠ 0), so
+ * OUTSIDE over any nonzero/complex fill has no exact complement and is unsupported too.
+ * Unsupported nodes go to the per-node raster fallback (options.fallbackForNode).
+ */
+function pushBakedAlignFeature(node: FigmaNode, strokeAlign: string, features: string[]): void {
+  const weight = typeof node.strokeWeight === "number" ? node.strokeWeight : 0;
+  if (weight <= 0) return;
+  const strokes = geometryOf(node, "strokeGeometry");
+  if (!strokes || strokes.length === 0) return;
+  const fills = geometryOf(node, "fillGeometry");
+  if (!fills || fills.length === 0) return;
+  if (strokeAlign === "INSIDE") {
+    if (fills.length > 1) pushFeature(features, "STROKE_ALIGN_MULTI_OUTLINE");
+    return;
+  }
+  if (strokeAlign === "OUTSIDE" && fills.some((entry) => entry.windingRule !== "EVENODD")) {
+    pushFeature(features, "STROKE_ALIGN_NON_EVENODD_COMPLEMENT");
+  }
 }
 
 /** Mask children that make their parent depend on features this renderer cannot draw. */
