@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { buildThreads, filterThreadsByNode, threadsForNode, toggleReaction } from "./threading";
+import {
+  applyThreadFilters,
+  buildThreads,
+  filterThreadsByNode,
+  threadsForNode,
+  toggleReaction,
+  type ThreadFilter,
+} from "./threading";
 import { comment } from "./test-support/comments";
 
 describe("buildThreads", () => {
@@ -116,5 +123,78 @@ describe("toggleReaction", () => {
       { emoji: "🎉", count: 3, mine: false },
       { emoji: ":+1:", count: 2, mine: true },
     ]);
+  });
+});
+
+describe("applyThreadFilters", () => {
+  const base: ThreadFilter = {
+    query: "",
+    mineOnly: false,
+    showResolved: false,
+    order: "latest",
+    nodeId: null,
+  };
+  const threads = () =>
+    buildThreads([
+      comment("open", { message: "open thread", createdAt_ms: 100 }),
+      comment("done", { message: "done thread", createdAt_ms: 200, resolvedAt_ms: 250 }),
+      comment("mine", { message: "my thread", createdAt_ms: 300, mine: true }),
+      comment("reply-root", { message: "root by other", createdAt_ms: 400 }),
+      comment("reply-mine", {
+        parentId: "reply-root",
+        message: "my reply",
+        mine: true,
+        createdAt_ms: 500,
+      }),
+      comment("on-node", { message: "anchored", createdAt_ms: 600, nodeId: "1:2" }),
+    ]);
+
+  it("hides resolved threads by default and shows them when allowed", () => {
+    expect(applyThreadFilters(threads(), base).map((t) => t.root.id)).not.toContain("done");
+    expect(
+      applyThreadFilters(threads(), { ...base, showResolved: true }).map((t) => t.root.id),
+    ).toContain("done");
+  });
+
+  it("mineOnly keeps threads where the root or any reply carries a real mine flag", () => {
+    const ids = applyThreadFilters(threads(), { ...base, mineOnly: true }).map((t) => t.root.id);
+    expect([...ids].sort()).toEqual(["mine", "reply-root"].sort());
+  });
+
+  it("search matches message text or the real author handle, case-insensitively", () => {
+    const byMessage = applyThreadFilters(threads(), { ...base, query: "  ANCHored  " });
+    expect(byMessage.map((t) => t.root.id)).toEqual(["on-node"]);
+    const byHandle = applyThreadFilters(threads(), {
+      ...base,
+      showResolved: true,
+      query: "someone",
+    });
+    expect(byHandle.map((t) => t.root.id).sort()).toEqual(
+      ["done", "mine", "on-node", "open", "reply-root"].sort(),
+    );
+    expect(applyThreadFilters(threads(), { ...base, query: "   " })).toEqual(
+      applyThreadFilters(threads(), base),
+    );
+  });
+
+  it("sorts by last activity in the requested direction", () => {
+    const latest = applyThreadFilters(threads(), { ...base, showResolved: true, order: "latest" });
+    const oldest = applyThreadFilters(threads(), { ...base, showResolved: true, order: "oldest" });
+    expect(latest[0].lastActivity_ms).toBe(600);
+    expect(oldest[0].lastActivity_ms).toBe(100);
+    expect(oldest.map((t) => t.root.id)).toEqual(latest.map((t) => t.root.id).toReversed());
+  });
+
+  it("scopes to the root's anchor node when a node id is given", () => {
+    expect(applyThreadFilters(threads(), { ...base, nodeId: "1:2" }).map((t) => t.root.id)).toEqual(
+      ["on-node"],
+    );
+  });
+
+  it("does not mutate the input array", () => {
+    const input = threads();
+    const snapshot = input.map((t) => t.root.id);
+    applyThreadFilters(input, { ...base, order: "oldest" });
+    expect(input.map((t) => t.root.id)).toEqual(snapshot);
   });
 });

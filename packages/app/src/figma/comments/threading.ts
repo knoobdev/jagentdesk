@@ -70,6 +70,51 @@ export function threadsForNode(
   return filterThreadsByNode(buildThreads(comments), nodeId);
 }
 
+export type ThreadOrder = "latest" | "oldest";
+
+/**
+ * The list controls spec 32.5.4 commits to (32.12 keeps the rest): node scope, resolved
+ * visibility, real-author/message search, "my threads" from the daemon's `mine` flags (a typed
+ * `@name` is plain text, never a notification), and activity sort. Pure so the panel renders and
+ * the tests pin the semantics without a transport.
+ */
+export interface ThreadFilter {
+  /** Case-insensitive substring over the message or the real author handle. Empty = no match filter. */
+  query: string;
+  /** Keep threads the signed-in user participated in (root or any reply carries `mine`). */
+  mineOnly: boolean;
+  /** Figma's default hides resolved threads; this panel starts the same way. */
+  showResolved: boolean;
+  order: ThreadOrder;
+  /** "On this node" scope over the root's anchor; null keeps everything. */
+  nodeId: string | null;
+}
+
+export function applyThreadFilters(
+  threads: readonly CommentThread[],
+  filter: ThreadFilter,
+): CommentThread[] {
+  let result = filterThreadsByNode(threads, filter.nodeId);
+  if (!filter.showResolved) result = result.filter((thread) => !thread.resolved);
+  if (filter.mineOnly) {
+    result = result.filter(
+      (thread) => thread.root.mine || thread.replies.some((reply) => reply.mine),
+    );
+  }
+  const needle = filter.query.trim().toLowerCase();
+  if (needle) {
+    result = result.filter((thread) =>
+      [thread.root, ...thread.replies].some(
+        (comment) =>
+          comment.message.toLowerCase().includes(needle) ||
+          comment.user.handle.toLowerCase().includes(needle),
+      ),
+    );
+  }
+  const direction = filter.order === "latest" ? -1 : 1;
+  return [...result].sort((a, b) => direction * (a.lastActivity_ms - b.lastActivity_ms));
+}
+
 /** Local preview of pressing a reaction chip: adds, removes, or flips `mine` on the emoji. */
 export function toggleReaction(comment: FigmaComment, emoji: string): FigmaComment["reactions"] {
   const existing = comment.reactions.find((reaction) => reaction.emoji === emoji);
