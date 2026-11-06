@@ -20,7 +20,12 @@ vi.mock("./api", () => ({
     callFigmaMock(client, method, params),
 }));
 
-import { useFigmaAssets, webRegisterFont, type FigmaAssets } from "./use-figma-assets";
+import {
+  useFigmaAssets,
+  webRegisterFont,
+  type FigmaAssets,
+  type ImageDecoder,
+} from "./use-figma-assets";
 
 function imageBytes(): FigmaBytes {
   return { mimeType: "image/png", dataBase64: "AA==" };
@@ -39,6 +44,30 @@ function deferred<T>() {
 /** Let queued microtasks drain (cache flushes run on queueMicrotask). */
 function settle(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/**
+ * A decodeImage fake recording every element it hands out: bytes arriving is NOT decoded-ready,
+ * so tests must emit("load") before asserting an image is served to the renderer.
+ */
+class FakeImage {
+  readonly listeners: Record<"load" | "error", (() => void)[]> = { load: [], error: [] };
+  addEventListener(type: "load" | "error", listener: () => void): void {
+    this.listeners[type].push(listener);
+  }
+  emit(type: "load" | "error"): void {
+    for (const listener of this.listeners[type]) listener();
+  }
+}
+
+function captureDecode(): { images: FakeImage[]; decodeImage: ImageDecoder } {
+  const images: FakeImage[] = [];
+  const decodeImage: ImageDecoder = () => {
+    const image = new FakeImage();
+    images.push(image);
+    return image as unknown as ReturnType<ImageDecoder>;
+  };
+  return { images, decodeImage };
 }
 
 interface RecordedFace {
@@ -138,7 +167,12 @@ describe("webRegisterFont exact-family registration", () => {
 describe("useFigmaAssets owner dispose", () => {
   let root: Root;
 
-  function mount(props: { serverId: string; fileKey: string; version: string | null }) {
+  function mount(props: {
+    serverId: string;
+    fileKey: string;
+    version: string | null;
+    decodeImage?: ImageDecoder;
+  }) {
     const result: { current: FigmaAssets } = {
       current: null as unknown as FigmaAssets,
     };
@@ -255,12 +289,13 @@ describe("useFigmaAssets owner dispose", () => {
 
   it("an empty offscreen paint reconciles the image and font caches; the next paint refetches", async () => {
     stubFontFaceApi(async () => ({}));
+    const { images, decodeImage } = captureDecode();
     callFigmaMock.mockImplementation((_client, method) =>
       method === "figma.fonts.get.request"
         ? Promise.resolve({ font: imageBytes() })
         : Promise.resolve({ images: { r1: imageBytes(), "1:1": imageBytes() } }),
     );
-    const assets = mount({ serverId: "s1", fileKey: "file", version: null });
+    const assets = mount({ serverId: "s1", fileKey: "file", version: null, decodeImage });
     const onPaint = vi.fn();
     assets.subscribe(onPaint);
 
@@ -273,9 +308,13 @@ describe("useFigmaAssets owner dispose", () => {
       assets.endDraw();
       await settle();
     });
+    expect(assets.imageForRef("r1")).toBeNull(); // bytes received is not decoded-ready
+    const notifiesAfterFont = onPaint.mock.calls.length; // font settle notified (live scope)
+    images[0]!.emit("load"); // the two ByteImageCache images decode, in creation order: fill, raster
+    images[1]!.emit("load");
     expect(assets.imageForRef("r1")).not.toBeNull();
+    expect(onPaint.mock.calls.length).toBeGreaterThan(notifiesAfterFont); // readiness repaint comes from load
     expect(assets.fontAvailable("Inter", "Bold")).toBe(true);
-    const fetchesAfterView = callFigmaMock.mock.calls.length;
 
     // Panned offscreen: an empty paint reconciles EVERY cache (root correction: no exempt
     // rules) — pending/failed/decoded keys the draw never touched are all retired.
@@ -285,14 +324,10 @@ describe("useFigmaAssets owner dispose", () => {
       await settle();
     });
     expect(assets.imageForRef("r2")).toBeNull(); // unseen ref…
-    await act(async () => {
-      assets.beginDraw();
-      assets.endDraw();
-      await settle();
-    });
     // Scrolling back re-asks: each cache refetches because the previous view's keys died.
     await act(async () => {
       assets.beginDraw();
+      assets.imageForRef("r1");
       assets.requestThumbnail("2:2", 2);
       assets.fontAvailable("Roboto", "Regular");
       assets.endDraw();
@@ -303,7 +338,9 @@ describe("useFigmaAssets owner dispose", () => {
     expect(
       callFigmaMock.mock.calls.filter((c) => c[1] === "figma.file.render.request").length,
     ).toBe(2);
-    void fetchesAfterView;
+    expect(
+      callFigmaMock.mock.calls.filter((c) => c[1] === "figma.file.imageFills.request").length,
+    ).toBe(2);
   });
 
   it("an unused FontFace is removed from document.fonts when its key reconciles away", async () => {
@@ -349,12 +386,13 @@ describe("useFigmaAssets owner dispose", () => {
   });
 
   it("a per-scale cache created mid-draw joins the open observation and is retired when unused", async () => {
+    const { images, decodeImage } = captureDecode();
     callFigmaMock.mockImplementation((_client, method) =>
       method === "figma.fonts.get.request"
         ? Promise.resolve({ font: null })
         : Promise.resolve({ images: { "1:1": imageBytes() } }),
     );
-    const assets = mount({ serverId: "s1", fileKey: "file", version: null });
+    const assets = mount({ serverId: "s1", fileKey: "file", version: null, decodeImage });
     const onPaint = vi.fn();
     assets.subscribe(onPaint);
 
@@ -365,6 +403,8 @@ describe("useFigmaAssets owner dispose", () => {
       assets.endDraw();
       await settle();
     });
+    expect(assets.requestThumbnail("1:1", 4)).toBeNull(); // bytes received ≠ decoded-ready
+    images[0]!.emit("load");
     expect(assets.requestThumbnail("1:1", 4)).not.toBeNull(); // survived the draw that used it
     expect(onPaint).toHaveBeenCalled(); // live attempt settles into the current generation
     onPaint.mockClear();

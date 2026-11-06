@@ -47,6 +47,17 @@ const bytesFor = (ref: string): [string, FigmaBytes | null] => [ref, imageBytes(
 const deadOrBytes = (ref: string): [string, FigmaBytes | null] =>
   ref === "f" ? nullFor(ref) : bytesFor(ref);
 
+/** MakeImage that records every image it hands out, so tests control decode timing. */
+function captureImages(): { makeImage: MakeImage; images: FakeImage[] } {
+  const images: FakeImage[] = [];
+  const makeImage: MakeImage = () => {
+    const image = new FakeImage();
+    images.push(image);
+    return image as unknown as ReturnType<MakeImage>;
+  };
+  return { makeImage, images };
+}
+
 describe("ByteImageCache failed attempts", () => {
   it("never re-queues a failed ref from request() — the per-paint onMissing loop is bounded", async () => {
     const loadBytes = vi.fn(async (refs: readonly string[]) =>
@@ -92,7 +103,9 @@ describe("ByteImageCache failed attempts", () => {
     const cache = new ByteImageCache(loadBytes, decodesTo(image), onReady);
     cache.request("a");
     await settle();
-    expect(cache.has("a")).toBe(true); // images holds the (still) decoded entry
+    expect(cache.has("a")).toBe(false); // bytes received is not decoded-ready
+    image.emit("load"); // <img> decoded
+    expect(cache.has("a")).toBe(true);
 
     image.emit("error"); // <img> failed to decode
     expect(cache.has("a")).toBe(false);
@@ -322,9 +335,12 @@ describe("ByteImageCache paint reconciliation (spec 32.5.1 bounded lifetime)", (
     const loadBytes = vi.fn(async (refs: readonly string[]) =>
       Object.fromEntries(refs.map(bytesFor)),
     );
-    const cache = new ByteImageCache(loadBytes, okImage);
+    const { makeImage, images } = captureImages();
+    const cache = new ByteImageCache(loadBytes, makeImage);
     await paintOnce(cache, () => expect(cache.get("a")).toBeNull()); // starts + settles the fetch
-    expect(cache.has("a")).toBe(true);
+    expect(cache.has("a")).toBe(false); // bytes received is not decoded-ready
+    images[0]!.emit("load");
+    expect(cache.has("a")).toBe(true); // decoded
 
     await paintOnce(cache, () => undefined); // panned offscreen: nothing observes "a"
     expect(cache.has("a")).toBe(false); // the working set is bounded to the view
@@ -334,25 +350,55 @@ describe("ByteImageCache paint reconciliation (spec 32.5.1 bounded lifetime)", (
     expect(loadBytes).toHaveBeenCalledTimes(2); // scrolling back re-fetches (daemon cache serves bytes)
   });
 
-  it("keys observed across consecutive paints are fetched exactly once", async () => {
+  it("bytes received is not decoded-ready: get stays null and no duplicate fetch while decoding", async () => {
     const loadBytes = vi.fn(async (refs: readonly string[]) =>
       Object.fromEntries(refs.map(bytesFor)),
     );
+    const { makeImage, images } = captureImages();
     const onReady = vi.fn();
-    const cache = new ByteImageCache(loadBytes, okImage, onReady);
+    const cache = new ByteImageCache(loadBytes, makeImage, onReady);
+    await paintOnce(cache, () => cache.get("a"));
+    await settle(); // bytes have arrived; the <img> has not fired load yet
+    expect(onReady).not.toHaveBeenCalled(); // no notify for an undecoded image
+    expect(cache.has("a")).toBe(false);
+
+    for (let paint = 0; paint < 5; paint += 1) {
+      await paintOnce(cache, () => expect(cache.get("a")).toBeNull()); // decode window open
+    }
+    expect(loadBytes).toHaveBeenCalledTimes(1); // no duplicate fetch while it decodes
+
+    images[0]!.emit("load"); // the decode completes
+    expect(onReady).toHaveBeenCalledTimes(1); // only now may the draw be told to repaint
+    expect(cache.has("a")).toBe(true);
+  });
+
+  it("keys observed across consecutive paints are fetched and settled exactly once", async () => {
+    const loadBytes = vi.fn(async (refs: readonly string[]) =>
+      Object.fromEntries(refs.map(bytesFor)),
+    );
+    const { makeImage, images } = captureImages();
+    const onReady = vi.fn();
+    const cache = new ByteImageCache(loadBytes, makeImage, onReady);
     for (let frame = 0; frame < 4; frame += 1) {
       await paintOnce(cache, () => cache.get("a")); // still-visible tile every paint
     }
     expect(loadBytes).toHaveBeenCalledTimes(1);
-    expect(onReady).toHaveBeenCalledTimes(1); // one settle notify, then quiet
+    expect(onReady).not.toHaveBeenCalled(); // decoding: nothing to notify yet
+    images[0]!.emit("load");
+    expect(onReady).toHaveBeenCalledTimes(1); // one decode notify, then quiet
     expect(cache.has("a")).toBe(true);
+
+    await paintOnce(cache, () => cache.get("a")); // still visible: no refetch, no re-notify
+    expect(loadBytes).toHaveBeenCalledTimes(1);
+    expect(onReady).toHaveBeenCalledTimes(1);
   });
 
-  it("a still-visible pending attempt survives its paint and settles", async () => {
+  it("a still-visible pending attempt survives its paint and settles on decode", async () => {
     const first = deferred<Record<string, FigmaBytes | null>>();
     const loadBytes = vi.fn(() => first.promise);
+    const { makeImage, images } = captureImages();
     const onReady = vi.fn();
-    const cache = new ByteImageCache(loadBytes, okImage, onReady);
+    const cache = new ByteImageCache(loadBytes, makeImage, onReady);
 
     await paintOnce(cache, () => cache.get("a")); // observed → survives this draw
     await paintOnce(cache, () => cache.get("a")); // observed again → still singleflighted
@@ -360,8 +406,29 @@ describe("ByteImageCache paint reconciliation (spec 32.5.1 bounded lifetime)", (
 
     first.resolve({ a: imageBytes() }); // the visible load completes
     await settle();
+    expect(onReady).not.toHaveBeenCalled(); // bytes are not readiness
+    expect(cache.get("a")).toBeNull(); // the renderer still sees no image
+
+    images[0]!.emit("load"); // decoded
     expect(onReady).toHaveBeenCalled(); // it belongs to the live scope: repaint
     expect(cache.has("a")).toBe(true);
+  });
+
+  it("a stale load after retire cannot ready or notify the current draw", async () => {
+    const load = deferred<Record<string, FigmaBytes | null>>();
+    const loadBytes = vi.fn(() => load.promise);
+    const { makeImage, images } = captureImages();
+    const onReady = vi.fn();
+    const cache = new ByteImageCache(loadBytes, makeImage, onReady);
+    await paintOnce(cache, () => cache.get("a")); // observed, singleflight started
+    load.resolve({ a: imageBytes() });
+    await settle(); // bytes land: flush makes the <img>, listeners attached, still decoding
+    expect(onReady).not.toHaveBeenCalled(); // bytes received is not readiness
+    await paintOnce(cache, () => undefined); // retired BEFORE the decode completes
+
+    images[0]!.emit("load"); // the dead attempt's <img> finally fires load
+    expect(onReady).not.toHaveBeenCalled(); // a retired record may not notify the current draw
+    expect(cache.has("a")).toBe(false); // …and may not mark itself ready
   });
 
   it("an unobserved pending attempt cannot resurrect after its late settle", async () => {
@@ -403,7 +470,7 @@ describe("ByteImageCache paint reconciliation (spec 32.5.1 bounded lifetime)", (
     expect(onReady).not.toHaveBeenCalled(); // A may not notify…
     expect(cache.has("a")).toBe(false); // …and A's bytes may not pretend to be ready
 
-    fresh.resolve({ a: null }); // B settles failed
+    fresh.resolve({ a: null }); // B settles failed (no image to decode)
     await settle();
     expect(onReady).toHaveBeenCalledTimes(1); // only the live attempt notifies
     expect(cache.has("a")).toBe(false);
@@ -414,8 +481,10 @@ describe("ByteImageCache paint reconciliation (spec 32.5.1 bounded lifetime)", (
     const loadBytes = vi.fn(async (refs: readonly string[]) =>
       refs.includes("p") ? pending.promise : Object.fromEntries(refs.map(deadOrBytes)),
     );
-    const cache = new ByteImageCache(loadBytes, okImage);
-    await paintOnce(cache, () => cache.request("d", "f")); // one ready, one failed
+    const { makeImage, images } = captureImages();
+    const cache = new ByteImageCache(loadBytes, makeImage);
+    await paintOnce(cache, () => cache.request("d", "f")); // one decodable, one failed
+    images[0]!.emit("load"); // "d" really decoded — a failed decode stays cached failed too
     await paintOnce(cache, () => cache.get("p")); // one still loading, observed
 
     await paintOnce(cache, () => undefined); // empty paint: nothing survives
@@ -432,8 +501,10 @@ describe("ByteImageCache paint reconciliation (spec 32.5.1 bounded lifetime)", (
     const loadBytes = vi.fn(async (refs: readonly string[]) =>
       Object.fromEntries(refs.map(bytesFor)),
     );
-    const cache = new ByteImageCache(loadBytes, okImage);
+    const { makeImage, images } = captureImages();
+    const cache = new ByteImageCache(loadBytes, makeImage);
     await paintOnce(cache, () => cache.get("a"));
+    images[0]!.emit("load");
     expect(cache.has("a")).toBe(true);
 
     await paintOnce(cache, () => expect(cache.has("a")).toBe(true)); // probe only
@@ -448,12 +519,14 @@ describe("ByteImageCache paint reconciliation (spec 32.5.1 bounded lifetime)", (
     const loadBytes = vi.fn(async (refs: readonly string[]) =>
       Object.fromEntries(refs.map(bytesFor)),
     );
-    const cache = new ByteImageCache(loadBytes, okImage);
+    const { makeImage, images } = captureImages();
+    const cache = new ByteImageCache(loadBytes, makeImage);
     cache.beginDraw();
     cache.get("a");
     cache.beginDraw(); // React re-entry: must not reset the observed set
     cache.endDraw();
     await settle();
+    images[0]!.emit("load"); // decode completes on the survived record
     expect(cache.has("a")).toBe(true); // observation survived the duplicate begin
 
     cache.endDraw(); // no open draw → reconcile is a no-op

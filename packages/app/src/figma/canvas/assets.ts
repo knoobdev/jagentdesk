@@ -169,19 +169,25 @@ export class ByteImageCache {
         // A reconcile (or clear) retired this attempt, or a later ask recreated it: the record
         // identity is the only check that tells those apart, and it settles only the live attempt.
         if (this.records.get(ref) !== record) continue;
-        committed = true;
         const bytes = result[ref];
         if (!bytes || !this.makeImage) {
           record.phase = "failed";
+          committed = true;
           continue;
         }
         const image = this.makeImage(bytesToDataUrl(bytes));
         if (!image) {
           record.phase = "failed";
+          committed = true;
           continue;
         }
+        // Bytes received is NOT decoded-ready: the <img> must still fire load. Until it does,
+        // get() returns null (the renderer keeps drawing the fallback) while the singleflight
+        // and the observed survival of this record hold — no duplicate fetch while decoding.
         image.addEventListener("load", () => {
-          if (current() && this.records.get(ref) === record) this.onReady();
+          if (!current() || this.records.get(ref) !== record) return; // retired mid-decode
+          record.phase = "ready";
+          this.onReady();
         });
         image.addEventListener("error", () => {
           // A decode error is terminal for this attempt: get() and request() honor failed, so
@@ -191,11 +197,10 @@ export class ByteImageCache {
           record.image = null;
           this.onReady();
         });
-        record.phase = "ready";
         record.image = image;
       }
-      // Only a batch that actually committed something may repaint; a fully retired batch must
-      // not notify the current draw.
+      // Only immediate terminal writes (failed) notify here; a still-decoding image notifies
+      // from its load/error listener, so the draw is never handed an unloaded element.
       if (committed) this.onReady();
     }
   }
