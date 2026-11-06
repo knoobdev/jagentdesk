@@ -16,7 +16,7 @@ import {
 // The player owns its frame/paint assets for exactly as long as it is open on one pinned
 // snapshot (ADR-0037 memory rule): the provider retains the store for `file`@`version`, the
 // tree below it draws through `usePrototypeAssetScope`, and closing the player — or a file,
-// server, or version change under an open player — disposes bytes, stylesheets, and FontFaces.
+// server, or version change under an open player — disposes bytes and FontFaces.
 // While the player stays open, memory is trimmed per stage owner: `releaseFrameOwner` frees
 // everything a frame instance (base or overlay, on navigation or unmount) claimed, keeping
 // only what a simultaneously active owner still shares.
