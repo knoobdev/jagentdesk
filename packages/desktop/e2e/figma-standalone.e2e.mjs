@@ -93,7 +93,7 @@
 // plugin path, not standalone REST, and is recorded as a trace-gate offender (no user
 // open/close of the Figma app is required).
 import { spawn, execFileSync } from "node:child_process";
-import { createCipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createHash, randomBytes } from "node:crypto";
 import http from "node:http";
 import fs from "node:fs";
 import net from "node:net";
@@ -1294,6 +1294,9 @@ async function main() {
       types: new Set(),
       counts: {},
       commentsResponses: [],
+      renderRequests: [],
+      renderPending: new Set(),
+      renderResponses: [],
       playbackFrameCounts: [],
       nodesIdCounts: [],
       apiPlaybackFrameCounts: [],
@@ -1316,6 +1319,10 @@ async function main() {
           if (typeof type !== "string" || !type.startsWith("figma.")) return;
           uiRequests.types.add(type);
           uiRequests.counts[type] = (uiRequests.counts[type] ?? 0) + 1;
+          if (type === "figma.file.render.request") {
+            uiRequests.renderRequests.push({ at_ms: Date.now(), ...msg });
+            uiRequests.renderPending.add(msg.requestId);
+          }
           if (type === "figma.file.playback.request")
             uiRequests.playbackFrameCounts.push((msg?.frameIds ?? []).length);
           if (type === "figma.file.nodes.request")
@@ -1326,9 +1333,23 @@ async function main() {
       });
       ws.on("framereceived", (frame) => {
         try {
-          const msg = JSON.parse(String(frame.payload));
+          const envelope = JSON.parse(String(frame.payload));
+          const msg = envelope?.type === "session" ? envelope.message : envelope;
           if (msg?.type === "figma.file.comments.list.response")
-            uiRequests.commentsResponses.push({ errorCode: msg.error?.code ?? null });
+            uiRequests.commentsResponses.push({ errorCode: msg.payload?.error?.code ?? null });
+          if (msg?.type === "figma.file.render.response") {
+            uiRequests.renderPending.delete(msg.payload?.requestId);
+            uiRequests.renderResponses.push({
+              requestId: msg.payload?.requestId,
+              errorCode: msg.payload?.error?.code ?? null,
+              images: Object.fromEntries(
+                Object.entries(msg.payload?.images ?? {}).map(([id, bytes]) => [
+                  id,
+                  bytes ? { mimeType: bytes.mimeType, byteLength: bytes.byteLength } : null,
+                ]),
+              ),
+            });
+          }
         } catch {
           /* binary or non-JSON frame */
         }
@@ -1514,6 +1535,8 @@ async function main() {
       uiRequests,
       linkProblems,
     );
+    // Optional same-frame evidence AFTER performance gates; never changes their thresholds.
+    await captureRenderQuality(page, uiRequests, artifactDir, evidence);
   } catch (error) {
     console.error(`Figma standalone E2E failed. Artifacts: ${artifactDir}`);
     console.error(error);
@@ -2531,6 +2554,97 @@ async function runCommentsReadOnlyUiProof(page, requests, artifactDir, evidence,
       .screenshot({ path: path.join(artifactDir, "comments-readonly-failure.png") })
       .catch(() => {});
     failGate("ui-comments-readonly", result.error);
+  }
+}
+
+/** Private target ids/version arrive via env; this captures evidence, never declares fidelity PASS. */
+async function captureRenderQuality(page, requests, artifactDir, evidence) {
+  const target = {
+    page: process.env.JAGENTDESK_FIGMA_E2E_QUALITY_PAGE,
+    node: process.env.JAGENTDESK_FIGMA_E2E_QUALITY_NODE,
+    version: process.env.JAGENTDESK_FIGMA_E2E_QUALITY_VERSION,
+  };
+  if (!Object.values(target).some(Boolean)) return;
+  const result = {
+    target,
+    captures: [],
+    note: "Visual review required; stable pixels alone do not prove complete or correct assets.",
+  };
+  evidence.renderQuality = result;
+  try {
+    if (!Object.values(target).every(Boolean))
+      throw new Error("Quality target needs page, node and version");
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    const url = new URL(page.url());
+    for (const [key, value] of Object.entries(target)) url.searchParams.set(key, value);
+    const requestStart = requests.renderRequests.length;
+    const responseStart = requests.renderResponses.length;
+    await page.goto(url.toString(), { waitUntil: "domcontentloaded", timeout: 60_000 });
+    const canvas = page.locator("#jagentdesk-figma-canvas");
+    await canvas.waitFor({ state: "visible", timeout: 60_000 });
+    await page.getByTestId("figma-zoom-reset").filter({ visible: true }).last().click();
+    // Canvas pixels and the real renderer's outstanding export requests must both settle.
+    // This is only a capture readiness hint; missing fonts/subtrees still need visual review.
+    const settle = async () => {
+      const deadline = Date.now() + 120_000;
+      let previous = "",
+        stableSince = Date.now();
+      while (Date.now() < deadline) {
+        const image = await canvas.evaluate((c) => c.toDataURL("image/png"));
+        const hash = createHash("sha256").update(image).digest("hex");
+        if (hash !== previous || requests.renderPending.size) stableSince = Date.now();
+        previous = hash;
+        if (Date.now() - stableSince >= 8_000) return { stable: true, pending: 0, hash };
+        await delay(1_000);
+      }
+      return { stable: false, pending: requests.renderPending.size };
+    };
+    let currentZoom = 1;
+    for (const zoom of [1, 2, 3.32]) {
+      if (zoom !== currentZoom) {
+        const box = await canvas.boundingBox();
+        if (!box) throw new Error("No canvas bounds");
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.keyboard.down("Control");
+        try {
+          await page.mouse.wheel(0, -Math.log(zoom / currentZoom) / 0.0025);
+        } finally {
+          await page.keyboard.up("Control");
+        }
+      }
+      currentZoom = zoom;
+      const readiness = await settle();
+      const geometry = await canvas.evaluate((c) => {
+        const m = c.getContext("2d").getTransform();
+        const r = c.getBoundingClientRect();
+        return {
+          dpr: window.devicePixelRatio,
+          width: c.width,
+          height: c.height,
+          css: { x: r.x, y: r.y, width: r.width, height: r.height },
+          transform: { a: m.a, b: m.b, c: m.c, d: m.d, e: m.e, f: m.f },
+        };
+      });
+      const name = `quality-${Math.round(zoom * 100)}`;
+      await page.screenshot({ path: path.join(artifactDir, `${name}.png`) });
+      await canvas.screenshot({ path: path.join(artifactDir, `${name}-canvas.png`) });
+      fs.writeFileSync(
+        path.join(artifactDir, `${name}-pixels.png`),
+        Buffer.from(
+          (await canvas.evaluate((c) => c.toDataURL("image/png"))).split(",")[1],
+          "base64",
+        ),
+      );
+      result.captures.push({ name, requestedZoom: zoom, readiness, geometry });
+    }
+    result.renderRequests = requests.renderRequests.slice(requestStart);
+    result.renderResponses = requests.renderResponses.slice(responseStart);
+    result.finalUrl = page.url();
+    console.log(`  diagnostic render-quality ${JSON.stringify(result.captures)}`);
+  } catch (error) {
+    result.error = String(error?.message ?? error);
+    await page.screenshot({ path: path.join(artifactDir, "quality-failure.png") }).catch(() => {});
+    console.log(`  diagnostic render-quality failed: ${result.error}`);
   }
 }
 
