@@ -258,6 +258,43 @@ describe("outline", () => {
     expect(fixture.api.rest.callsTo(`/v1/files/${FILE}/meta`)).toHaveLength(metaCallsBefore);
   });
 
+  it("serves a pinned version from REST only, even while the plugin holds a newer document", async () => {
+    // 32.1 snapshot rule: the live plugin document answers for whatever version is open in
+    // Figma now. isLinked must not let it stand in for history — the pinned read goes straight
+    // to the versioned depth-3 REST call and the plugin is never even consulted.
+    fixture.api.link.linked.add(FILE);
+    fixture.api.link.getNodesImpl = (requested) =>
+      requested.includes("0:0") ? { "0:0": linkedDocument() } : {};
+    fixture.api.rest.respond(`/v1/files/${FILE}`, () => fileJson("v9"));
+    const { outline } = await fixture.handlers["figma.file.outline.request"](
+      { requestId: "r1", type: "figma.file.outline.request", fileKey: FILE, version: "v9" },
+      fixture.api.ctx,
+      SESSION,
+    );
+    expect(outline!.source).toBe("rest");
+    expect(outline!.version).toBe("v9");
+    expect(outline!.name).toBe("Marketing Site"); // not the plugin's newer live hierarchy
+    expect(outline!.pages[0].frames[0].bounds).toEqual({ x: 20, y: 40, width: 100, height: 200 });
+    expect(fixture.api.link.toolCalls).toHaveLength(0);
+    const calls = fixture.api.rest.callsTo(`/v1/files/${FILE}`);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].query).toMatchObject({ version: "v9", depth: 3 });
+  });
+
+  it("serves a pinned version from REST when the plugin document read would throw", async () => {
+    // getNodesImpl unset → the fake throws "unsupported"; a pinned read must not care.
+    fixture.api.link.linked.add(FILE);
+    respondFile("v9");
+    const { outline } = await fixture.handlers["figma.file.outline.request"](
+      { requestId: "r1", type: "figma.file.outline.request", fileKey: FILE, version: "v9" },
+      fixture.api.ctx,
+      SESSION,
+    );
+    expect(outline!.source).toBe("rest");
+    expect(outline!.version).toBe("v9");
+    expect(fixture.api.link.toolCalls).toHaveLength(0);
+  });
+
   it("prefers the plugin document while the file is linked", async () => {
     fixture.api.link.linked.add(FILE);
     fixture.api.link.getNodesImpl = (requested): Record<string, FigmaNode | null> =>
@@ -670,6 +707,7 @@ describe("render", () => {
     respondRender();
     fixture.api.link.linked.add(FILE);
     fixture.api.link.exportImpl = () => ({ mimeType: "image/png", data: PNG });
+    // Unversioned: the live read keeps its Live Link semantics (32.1) — version resolved current.
     const first = await fixture.handlers["figma.file.render.request"](
       {
         requestId: "r1",
@@ -678,7 +716,6 @@ describe("render", () => {
         ids: ["1:2"],
         scale: 2,
         format: "png",
-        version: "v1",
       },
       fixture.api.ctx,
       SESSION,
@@ -695,13 +732,88 @@ describe("render", () => {
         ids: ["1:2"],
         scale: 2,
         format: "png",
-        version: "v1",
       },
       fixture.api.ctx,
       SESSION,
     );
     expect(fixture.api.link.toolCalls).toHaveLength(toolCalls); // cached on disk
   });
+
+  it("serves an explicit version from the versioned REST call, never the plugin, while linked", async () => {
+    respondRender();
+    fixture.api.link.linked.add(FILE);
+    fixture.api.link.exportImpl = () => {
+      throw new Error("live plugin raster must not answer a pinned version");
+    };
+    const out = await fixture.handlers["figma.file.render.request"](
+      {
+        requestId: "r1",
+        type: "figma.file.render.request",
+        fileKey: FILE,
+        ids: ["1:2"],
+        scale: 2,
+        format: "png",
+        version: "v1",
+      },
+      fixture.api.ctx,
+      SESSION,
+    );
+    expect(out.source).toBe("rest");
+    expect([...Buffer.from(out.images["1:2"]!.dataBase64, "base64")]).toEqual([...PNG]);
+    expect(out.images["1:2"]!.mimeType).toBe("image/png");
+    expect(fixture.api.link.toolCalls).toHaveLength(0);
+    const calls = fixture.api.rest.callsTo(`/v1/images/${FILE}`);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].query).toMatchObject({ ids: "1:2", scale: 2, format: "png", version: "v1" });
+  });
+
+  it("keeps live plugin bytes and pinned snapshot bytes in separate cache namespaces", async () => {
+    const LIVE = Buffer.from([0x4c, 0x69, 0x76, 0x65]); // distinguishable from PNG
+    respondRender();
+    fixture.api.link.linked.add(FILE);
+    let exports = 0;
+    fixture.api.link.exportImpl = () => {
+      exports += 1;
+      return { mimeType: "image/png", data: LIVE };
+    };
+
+    // Live unversioned read rasterizes through the plugin and caches its bytes under the
+    // current version… the same version string a pinned request could name.
+    const live = await render();
+    expect(live.source).toBe("link");
+    expect([...Buffer.from(live.images["1:2"]!.dataBase64, "base64")]).toEqual([...LIVE]);
+
+    // A pinned request must NOT be answered by those unverified plugin bytes: REST + S3 fetch.
+    const pinned = await render("v1");
+    expect(pinned.source).toBe("rest");
+    expect([...Buffer.from(pinned.images["1:2"]!.dataBase64, "base64")]).toEqual([...PNG]);
+    expect(exports).toBe(1);
+    expect(fixture.api.rest.callsTo(`/v1/images/${FILE}`)).toHaveLength(1);
+
+    // Both namespaces then serve their own kind from disk without any network or plugin call.
+    const liveAgain = await render();
+    const pinnedAgain = await render("v1");
+    expect([...Buffer.from(liveAgain.images["1:2"]!.dataBase64, "base64")]).toEqual([...LIVE]);
+    expect([...Buffer.from(pinnedAgain.images["1:2"]!.dataBase64, "base64")]).toEqual([...PNG]);
+    expect(exports).toBe(1);
+    expect(fixture.api.rest.callsTo(`/v1/images/${FILE}`)).toHaveLength(1);
+  });
+
+  async function render(version?: string) {
+    return fixture.handlers["figma.file.render.request"](
+      {
+        requestId: "r1",
+        type: "figma.file.render.request",
+        fileKey: FILE,
+        ids: ["1:2"],
+        scale: 2,
+        format: "png",
+        version,
+      },
+      fixture.api.ctx,
+      SESSION,
+    );
+  }
 
   it("defaults format to png", async () => {
     respondRender();
