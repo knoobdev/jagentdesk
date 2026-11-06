@@ -253,9 +253,46 @@ describe("outline", () => {
     expect(outline!.version).toBe("v9");
     const calls = fixture.api.rest.callsTo(`/v1/files/${FILE}`);
     expect(calls).toHaveLength(1);
-    expect(calls[0].query).toMatchObject({ version: "v9", depth: 2 });
+    expect(calls[0].query).toMatchObject({ version: "v9", depth: 3 });
     expect(calls[0].tier).toBe("1");
     expect(fixture.api.rest.callsTo(`/v1/files/${FILE}/meta`)).toHaveLength(metaCallsBefore);
+  });
+
+  it("serves a pinned version from REST only, even while the plugin holds a newer document", async () => {
+    // 32.1 snapshot rule: the live plugin document answers for whatever version is open in
+    // Figma now. isLinked must not let it stand in for history — the pinned read goes straight
+    // to the versioned depth-3 REST call and the plugin is never even consulted.
+    fixture.api.link.linked.add(FILE);
+    fixture.api.link.getNodesImpl = (requested) =>
+      requested.includes("0:0") ? { "0:0": linkedDocument() } : {};
+    fixture.api.rest.respond(`/v1/files/${FILE}`, () => fileJson("v9"));
+    const { outline } = await fixture.handlers["figma.file.outline.request"](
+      { requestId: "r1", type: "figma.file.outline.request", fileKey: FILE, version: "v9" },
+      fixture.api.ctx,
+      SESSION,
+    );
+    expect(outline!.source).toBe("rest");
+    expect(outline!.version).toBe("v9");
+    expect(outline!.name).toBe("Marketing Site"); // not the plugin's newer live hierarchy
+    expect(outline!.pages[0].frames[0].bounds).toEqual({ x: 20, y: 40, width: 100, height: 200 });
+    expect(fixture.api.link.toolCalls).toHaveLength(0);
+    const calls = fixture.api.rest.callsTo(`/v1/files/${FILE}`);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].query).toMatchObject({ version: "v9", depth: 3 });
+  });
+
+  it("serves a pinned version from REST when the plugin document read would throw", async () => {
+    // getNodesImpl unset → the fake throws "unsupported"; a pinned read must not care.
+    fixture.api.link.linked.add(FILE);
+    respondFile("v9");
+    const { outline } = await fixture.handlers["figma.file.outline.request"](
+      { requestId: "r1", type: "figma.file.outline.request", fileKey: FILE, version: "v9" },
+      fixture.api.ctx,
+      SESSION,
+    );
+    expect(outline!.source).toBe("rest");
+    expect(outline!.version).toBe("v9");
+    expect(fixture.api.link.toolCalls).toHaveLength(0);
   });
 
   it("prefers the plugin document while the file is linked", async () => {
@@ -670,6 +707,7 @@ describe("render", () => {
     respondRender();
     fixture.api.link.linked.add(FILE);
     fixture.api.link.exportImpl = () => ({ mimeType: "image/png", data: PNG });
+    // Unversioned: the live read keeps its Live Link semantics (32.1) — version resolved current.
     const first = await fixture.handlers["figma.file.render.request"](
       {
         requestId: "r1",
@@ -678,7 +716,6 @@ describe("render", () => {
         ids: ["1:2"],
         scale: 2,
         format: "png",
-        version: "v1",
       },
       fixture.api.ctx,
       SESSION,
@@ -695,13 +732,88 @@ describe("render", () => {
         ids: ["1:2"],
         scale: 2,
         format: "png",
-        version: "v1",
       },
       fixture.api.ctx,
       SESSION,
     );
     expect(fixture.api.link.toolCalls).toHaveLength(toolCalls); // cached on disk
   });
+
+  it("serves an explicit version from the versioned REST call, never the plugin, while linked", async () => {
+    respondRender();
+    fixture.api.link.linked.add(FILE);
+    fixture.api.link.exportImpl = () => {
+      throw new Error("live plugin raster must not answer a pinned version");
+    };
+    const out = await fixture.handlers["figma.file.render.request"](
+      {
+        requestId: "r1",
+        type: "figma.file.render.request",
+        fileKey: FILE,
+        ids: ["1:2"],
+        scale: 2,
+        format: "png",
+        version: "v1",
+      },
+      fixture.api.ctx,
+      SESSION,
+    );
+    expect(out.source).toBe("rest");
+    expect([...Buffer.from(out.images["1:2"]!.dataBase64, "base64")]).toEqual([...PNG]);
+    expect(out.images["1:2"]!.mimeType).toBe("image/png");
+    expect(fixture.api.link.toolCalls).toHaveLength(0);
+    const calls = fixture.api.rest.callsTo(`/v1/images/${FILE}`);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].query).toMatchObject({ ids: "1:2", scale: 2, format: "png", version: "v1" });
+  });
+
+  it("keeps live plugin bytes and pinned snapshot bytes in separate cache namespaces", async () => {
+    const LIVE = Buffer.from([0x4c, 0x69, 0x76, 0x65]); // distinguishable from PNG
+    respondRender();
+    fixture.api.link.linked.add(FILE);
+    let exports = 0;
+    fixture.api.link.exportImpl = () => {
+      exports += 1;
+      return { mimeType: "image/png", data: LIVE };
+    };
+
+    // Live unversioned read rasterizes through the plugin and caches its bytes under the
+    // current version… the same version string a pinned request could name.
+    const live = await render();
+    expect(live.source).toBe("link");
+    expect([...Buffer.from(live.images["1:2"]!.dataBase64, "base64")]).toEqual([...LIVE]);
+
+    // A pinned request must NOT be answered by those unverified plugin bytes: REST + S3 fetch.
+    const pinned = await render("v1");
+    expect(pinned.source).toBe("rest");
+    expect([...Buffer.from(pinned.images["1:2"]!.dataBase64, "base64")]).toEqual([...PNG]);
+    expect(exports).toBe(1);
+    expect(fixture.api.rest.callsTo(`/v1/images/${FILE}`)).toHaveLength(1);
+
+    // Both namespaces then serve their own kind from disk without any network or plugin call.
+    const liveAgain = await render();
+    const pinnedAgain = await render("v1");
+    expect([...Buffer.from(liveAgain.images["1:2"]!.dataBase64, "base64")]).toEqual([...LIVE]);
+    expect([...Buffer.from(pinnedAgain.images["1:2"]!.dataBase64, "base64")]).toEqual([...PNG]);
+    expect(exports).toBe(1);
+    expect(fixture.api.rest.callsTo(`/v1/images/${FILE}`)).toHaveLength(1);
+  });
+
+  async function render(version?: string) {
+    return fixture.handlers["figma.file.render.request"](
+      {
+        requestId: "r1",
+        type: "figma.file.render.request",
+        fileKey: FILE,
+        ids: ["1:2"],
+        scale: 2,
+        format: "png",
+        version,
+      },
+      fixture.api.ctx,
+      SESSION,
+    );
+  }
 
   it("defaults format to png", async () => {
     respondRender();
@@ -1197,5 +1309,299 @@ describe("watches", () => {
     expect(fixture.content.watches.count).toBe(1);
     expect(fixture.api.pushes).toHaveLength(0);
     expect(missing.watchId).toHaveLength(36);
+  });
+});
+
+// ── ADR-0039: section-aware outline + depth-1 metadata read ──────────────────
+
+describe("outline section flattening (ADR-0039)", () => {
+  const FULL_PATH = `/v1/files/${FILE}`;
+
+  function boxed(id: string, name: string, type = "FRAME"): object {
+    return {
+      id,
+      type,
+      name,
+      absoluteBoundingBox: { x: 10, y: 20, width: 100, height: 200 },
+      backgroundColor: { r: 1, g: 1, b: 1, a: 1 },
+    };
+  }
+
+  /**
+   * A depth-3 answer: page children at level 2, section children at level 3. The level-3
+   * SECTION 5:2 comes back truncated (children present-but-empty is how REST marks the cut)
+   * and COMPONENT 6:0 / FRAME 5:3 carry children the outline must NOT flatten — they are
+   * inside a screen, not screens of their own.
+   */
+  function respondSections(): void {
+    fixture.api.rest.respond(FULL_PATH, {
+      name: "Sections",
+      version: "v1",
+      lastModified: "2026-03-01T10:00:00Z",
+      editorType: "figma",
+      document: {
+        id: "0:0",
+        type: "DOCUMENT",
+        children: [
+          {
+            id: "0:1",
+            type: "CANVAS",
+            name: "Cover",
+            backgroundColor: { r: 0, g: 0, b: 0, a: 1 },
+            children: [
+              boxed("1:2", "Hero"),
+              {
+                ...boxed("5:0", "Onboarding", "SECTION"),
+                children: [
+                  boxed("5:1", "Inside Section"),
+                  { ...boxed("5:2", "Boundary Section", "SECTION"), children: [] },
+                  {
+                    ...boxed("6:0", "Section Component", "COMPONENT"),
+                    children: [boxed("6:1", "Hidden")],
+                  },
+                  {
+                    ...boxed("5:3", "Has Nested Frame"),
+                    children: [boxed("5:31", "Frame Within Screen")],
+                  },
+                ],
+              },
+              { id: "5:9", type: "RECTANGLE", name: "No bounds" },
+            ],
+            flowStartingPoints: [{ nodeId: "5:1", name: "Inside Section" }],
+          },
+        ],
+      },
+    });
+  }
+
+  async function outline() {
+    const response = await fixture.handlers["figma.file.outline.request"](
+      { requestId: "r1", type: "figma.file.outline.request", fileKey: FILE },
+      fixture.api.ctx,
+      SESSION,
+    );
+    return response.outline;
+  }
+
+  it("reads depth 3 and flattens only SECTION wrappers into parent-first, sibling-order summaries", async () => {
+    respondSections();
+    const result = await outline();
+    expect(result).not.toBeNull();
+    expect(result!.pages[0].frames.map((frame) => frame.id)).toEqual([
+      "1:2",
+      "5:0", // the section itself is a background/label entry
+      "5:1",
+      "5:2",
+      "6:0",
+      "5:3",
+    ]);
+    expect(fixture.api.rest.callsTo(FULL_PATH)[0].query).toMatchObject({ depth: 3 });
+
+    const byId = Object.fromEntries(result!.pages[0].frames.map((f) => [f.id, f]));
+    // Top-level screen: no parent, no section semantics.
+    expect(byId["1:2"].parentId).toBeUndefined();
+    expect(byId["1:2"].childrenLoaded).toBeUndefined();
+    // Section: children known at level 2, so the walk descended.
+    expect(byId["5:0"].type).toBe("SECTION");
+    expect(byId["5:0"].childrenLoaded).toBe(true);
+    expect(byId["5:0"].parentId).toBeUndefined();
+    // Flattened children carry the nearest section as parent.
+    expect(byId["5:1"].parentId).toBe("5:0");
+    // Boundary section: children: [] is a truncation, not an empty section.
+    expect(byId["5:2"].parentId).toBe("5:0");
+    expect(byId["5:2"].childrenLoaded).toBe(false);
+    // The walk stops at drawable roots: their inner nodes are content, not summaries…
+    expect(byId["6:0"].type).toBe("COMPONENT");
+    expect(byId["6:0"].parentId).toBe("5:0");
+    expect(byId).not.toHaveProperty("6:1");
+    expect(byId).not.toHaveProperty("5:31");
+    // …and a frame nested inside a screen is never its own canvas screen.
+    const ids = result!.pages[0].frames.map((frame) => frame.id);
+    expect(ids).not.toContain("5:31");
+  });
+
+  it("keeps real flow starting points from page metadata and never invents them", async () => {
+    respondSections();
+    const result = await outline();
+    expect(result!.pages[0].flowStartingPoints).toEqual([
+      { nodeId: "5:1", name: "Inside Section" },
+    ]);
+  });
+
+  it("never answers the depth-3 outline from the old depth-2 summary namespace", async () => {
+    // A summary cached before ADR-0039 saw sections as opaque entries with no children; if the
+    // reader kept the `outline@` key, this stale entry would answer with zero REST calls.
+    await fixture.api.ctx.cache.putJson(`file/${FILE}/outline@v1`, {
+      data: {
+        fileKey: FILE,
+        name: "Stale Depth Two",
+        version: "v1",
+        lastModified_ms: 0,
+        editorType: "figma",
+        pages: [],
+        source: "rest",
+      },
+      cached_at: Date.now(),
+      source: "rest",
+    });
+    respondSections();
+    const result = await outline();
+    expect(result!.name).toBe("Sections");
+    expect(fixture.api.rest.callsTo(FULL_PATH)).toHaveLength(1);
+
+    // The second read hits the new namespace instead of re-fetching.
+    const again = await outline();
+    expect(again!.name).toBe("Sections");
+    expect(fixture.api.rest.callsTo(FULL_PATH)).toHaveLength(1);
+  });
+});
+
+describe("nodes depth=1 metadata read (ADR-0039)", () => {
+  const NODES_PATH = `/v1/files/${FILE}/nodes`;
+
+  function nodeEntry(id: string, shallow: boolean): Record<string, unknown> {
+    return {
+      document: {
+        id,
+        name: shallow ? `Shallow ${id}` : `Node ${id}`,
+        type: "TEXT",
+        absoluteBoundingBox: { x: 20, y: 40, width: 100, height: 20 },
+        ...(shallow
+          ? { children: [{ id: `${id}.1`, name: "Direct child", type: "RECTANGLE" }] }
+          : {}),
+      },
+      components: {},
+      componentSets: {},
+      styles: {},
+      schemaVersion: 1,
+    };
+  }
+
+  function respondDepthAware(): void {
+    fixture.api.rest.respond(NODES_PATH, ({ query }) => {
+      const shallow = query.depth !== undefined;
+      return {
+        err: null,
+        name: "Marketing Site",
+        version: "v1",
+        lastModified: "2026-03-01T10:00:00Z",
+        nodes: Object.fromEntries(
+          (query.ids ?? "").split(",").map((id) => [id, nodeEntry(id, shallow)]),
+        ),
+      };
+    });
+  }
+
+  async function readDepth1(version?: string, ids: string[] = ["1:1"]) {
+    return fixture.handlers["figma.file.nodes.request"](
+      { requestId: "r1", type: "figma.file.nodes.request", fileKey: FILE, ids, version, depth: 1 },
+      fixture.api.ctx,
+      SESSION,
+    );
+  }
+
+  it("requires a pinned version and rejects blank ones before any REST call", async () => {
+    respondDepthAware();
+    await expect(readDepth1()).rejects.toMatchObject({ code: "invalid_input" });
+    await expect(readDepth1("   ")).rejects.toMatchObject({ code: "invalid_input" });
+    expect(fixture.api.rest.calls).toHaveLength(0);
+  });
+
+  it("is REST-only for a pinned version, forwards depth without geometry, and never asks the plugin", async () => {
+    fixture.api.link.linked.add(FILE);
+    fixture.api.link.getNodesImpl = () => {
+      throw new Error("depth-1 must never read the live tree");
+    };
+    respondDepthAware();
+    const out = await readDepth1("v1");
+    expect(out.source).toBe("rest");
+
+    const calls = fixture.api.rest.callsTo(NODES_PATH);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].query).toMatchObject({ ids: "1:1", depth: 1, version: "v1" });
+    expect(calls[0].query).not.toHaveProperty("geometry"); // metadata needs no vector paths
+    expect(fixture.api.link.toolCalls).toHaveLength(0);
+
+    // The shallow entry is stored and served as returned: direct children only.
+    const cached = await readDepth1("v1");
+    expect(cached.nodes["1:1"]).toMatchObject({ name: "Shallow 1:1" });
+    expect((cached.nodes["1:1"] as { children?: unknown[] }).children).toHaveLength(1);
+    expect(fixture.api.rest.callsTo(NODES_PATH)).toHaveLength(1);
+  });
+
+  it("keeps shallow and full trees in separate cache namespaces in both directions", async () => {
+    respondDepthAware();
+
+    // Shallow first: the later full read must NOT accept the truncated entry.
+    const shallow = await readDepth1("v1");
+    expect(shallow.nodes["1:1"]).toMatchObject({ name: "Shallow 1:1" });
+    const full = await fixture.handlers["figma.file.nodes.request"](
+      {
+        requestId: "r2",
+        type: "figma.file.nodes.request",
+        fileKey: FILE,
+        ids: ["1:1"],
+        version: "v1",
+      },
+      fixture.api.ctx,
+      SESSION,
+    );
+    expect(full.nodes["1:1"]).toMatchObject({ name: "Node 1:1" });
+    const calls = fixture.api.rest.callsTo(NODES_PATH);
+    expect(calls).toHaveLength(2);
+    expect(calls[1].query).toMatchObject({ ids: "1:1", geometry: "paths", version: "v1" });
+    expect(calls[1].query).not.toHaveProperty("depth");
+
+    // And both repeat reads hit their own namespace, never the other's answer.
+    await readDepth1("v1");
+    await fixture.handlers["figma.file.nodes.request"](
+      {
+        requestId: "r3",
+        type: "figma.file.nodes.request",
+        fileKey: FILE,
+        ids: ["1:1"],
+        version: "v1",
+      },
+      fixture.api.ctx,
+      SESSION,
+    );
+    expect(fixture.api.rest.callsTo(NODES_PATH)).toHaveLength(2);
+  });
+
+  it("treats a shallow known-unknown as known without re-fetching or poisoning the full tree", async () => {
+    fixture.api.rest.respond(NODES_PATH, ({ query }) => {
+      const shallow = query.depth !== undefined;
+      const nodes: Record<string, unknown> = {};
+      for (const id of (query.ids ?? "").split(",")) {
+        if (shallow && id === "missing") continue;
+        nodes[id] = nodeEntry(id, shallow);
+      }
+      return {
+        err: null,
+        name: "Marketing Site",
+        version: "v1",
+        lastModified: "2026-03-01T10:00:00Z",
+        nodes,
+      };
+    });
+
+    const out = await readDepth1("v1", ["1:1", "missing"]);
+    expect(out.nodes["missing"]).toBeNull();
+    // Second shallow call: `missing` is known-unknown at depth 1, so it is not re-asked…
+    await readDepth1("v1", ["1:1", "missing"]);
+    expect(fixture.api.rest.callsTo(NODES_PATH)).toHaveLength(1);
+    // …but the full tree still answers it from its own namespace.
+    const full = await fixture.handlers["figma.file.nodes.request"](
+      {
+        requestId: "r2",
+        type: "figma.file.nodes.request",
+        fileKey: FILE,
+        ids: ["missing"],
+        version: "v1",
+      },
+      fixture.api.ctx,
+      SESSION,
+    );
+    expect(full.nodes["missing"]).toMatchObject({ name: "Node missing" });
   });
 });

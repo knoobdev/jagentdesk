@@ -7,6 +7,7 @@ import type { Dirent } from "node:fs";
 import type {
   FigmaBytes,
   FigmaFile,
+  FigmaFrameSummary,
   FigmaNode,
   FigmaOutline,
   FigmaPage,
@@ -229,7 +230,11 @@ class FileVersionCache {
   }
 }
 
-// ── outline mapping (32.5.1) ──────────────────────────────────────────────────
+// ── outline mapping (32.5.1, ADR-0039) ───────────────────────────────────────
+
+// The outline read: document=0, page=1, page children=2, section children=3. A section at
+// the boundary has no returned children — the REST answer truncates it, it is not empty.
+const OUTLINE_REST_DEPTH = 3;
 
 function colorToHex(color: RestColor | undefined): string | undefined {
   if (!color) return undefined;
@@ -245,28 +250,62 @@ function colorToHex(color: RestColor | undefined): string | undefined {
   return `#${r}${g}${b}${part(color.a ?? 1) ?? "ff"}`;
 }
 
-function pageFromRest(page: RestNode): FigmaPage {
-  const pageId = asString(page.id);
+function frameSummaryFromRest(node: RestNode): FigmaFrameSummary | null {
+  const box = node.absoluteBoundingBox;
+  if (!box) return null; // only nodes with bounds can be placed on canvas
   return {
-    id: pageId,
+    id: asString(node.id),
+    name: asString(node.name),
+    type: asString(node.type),
+    bounds: { x: num(box.x), y: num(box.y), width: num(box.width), height: num(box.height) },
+    backgroundColor: colorToHex(node.backgroundColor),
+  };
+}
+
+/**
+ * A SECTION is a background/label entry, never a unit of subtree loading: its direct children
+ * flatten into ordered summaries — parent first, then children, siblings in data order — so
+ * the canvas can place and hit-test screens without loading a section tree. FRAME, COMPONENT,
+ * INSTANCE and every other drawable node stop the walk: a frame nested inside a screen is
+ * content, not its own canvas screen. Children flattened from within a section (including a
+ * nested section) carry `parentId`; `childrenLoaded` marks whether the section's direct
+ * children are known — a section sitting at the document's returned depth boundary reads false
+ * even when the truncated answer carries `children: []`, and is never faked as an empty one.
+ */
+function collectSectionFlattened(
+  nodes: RestNode[],
+  level: number,
+  parentId: string | undefined,
+  knownDepth: number,
+  out: FigmaFrameSummary[],
+): void {
+  for (const node of nodes) {
+    const children = Array.isArray(node.children) ? node.children : null;
+    const summary = frameSummaryFromRest(node);
+    if (summary) {
+      if (asString(node.type) === "SECTION")
+        summary.childrenLoaded = children !== null && level < knownDepth;
+      out.push(parentId === undefined ? summary : { ...summary, parentId });
+    }
+    if (asString(node.type) !== "SECTION" || !children) continue;
+    collectSectionFlattened(children, level + 1, asString(node.id), knownDepth, out);
+  }
+}
+
+/**
+ * `knownDepth` is the deepest level the payload provably carries children for: the depth-3
+ * outline answer (3) or a whole plugin document, which has no cut (Infinity).
+ */
+function pageFromRest(page: RestNode, knownDepth: number): FigmaPage {
+  const frames: FigmaFrameSummary[] = [];
+  collectSectionFlattened(page.children ?? [], 2, undefined, knownDepth, frames);
+  return {
+    id: asString(page.id),
     name: asString(page.name),
     backgroundColor: colorToHex(page.backgroundColor),
-    // depth=2 returns the page's top-level nodes; only ones with bounds can be placed on canvas.
-    frames: (page.children ?? [])
-      .filter((node) => !!node.absoluteBoundingBox)
-      .map((node) => ({
-        id: asString(node.id),
-        name: asString(node.name),
-        type: asString(node.type),
-        bounds: {
-          x: num(node.absoluteBoundingBox?.x),
-          y: num(node.absoluteBoundingBox?.y),
-          width: num(node.absoluteBoundingBox?.width),
-          height: num(node.absoluteBoundingBox?.height),
-        },
-        backgroundColor: colorToHex(node.backgroundColor),
-      })),
+    frames,
     // The page node itself carries its flow starting points (§5.1) — the file root does not.
+    // ADR-0039 keeps them as REST returned them: no invented flows, none dropped.
     flowStartingPoints: pageFlowStartingPoints(page),
   };
 }
@@ -280,7 +319,7 @@ function outlineFromRest(json: RestFile, fileKey: string, version: string): Figm
     editorType: asString(json.editorType) || "figma",
     pages: (json.document?.children ?? [])
       .filter((node) => asString(node.type) === "CANVAS")
-      .map(pageFromRest),
+      .map((page) => pageFromRest(page, OUTLINE_REST_DEPTH)),
     source: "rest",
   };
 }
@@ -298,7 +337,9 @@ function linkedOutline(
     version,
     lastModified_ms: 0,
     editorType: "figma",
-    pages: pages.map((page) => pageFromRest(page as unknown as RestNode)),
+    // The plugin hands over the whole document: no depth cut, so every section's children
+    // are known.
+    pages: pages.map((page) => pageFromRest(page as unknown as RestNode, Infinity)),
     source: "link",
   };
 }
@@ -858,18 +899,25 @@ export class FigmaContent {
     ctx: FigmaContext,
   ): Promise<{ outline: FigmaOutline | null }> {
     const file = await requireFile(ctx, request.fileKey);
-    if (ctx.link.isLinked(file.fileKey)) {
+    // An explicit version is a snapshot request (32.1): the plugin's live document belongs to
+    // whatever version is open in Figma now, so serving it for a pinned read would silently
+    // present current hierarchy and flows as history. Only the live (unversioned) outline may
+    // prefer the plugin — the same rule the pinned nodes read enforces.
+    if (request.version === undefined && ctx.link.isLinked(file.fileKey)) {
       const viaLink = await this.linkedOutlineAttempt(ctx, file);
       if (viaLink) return { outline: viaLink };
     }
     const version = request.version ?? (await this.versions.current(ctx, file));
-    const key = `file/${file.fileKey}/outline@${version}`;
+    // ADR-0039: the outline is a depth-3 read, so a SECTION's direct children (depth-3 nodes)
+    // come back with it. The cache namespace carries that — a stale depth-2 summary, which
+    // saw sections as opaque entries with no children, must never answer a depth-3 request.
+    const key = `file/${file.fileKey}/outline-d3@${version}`;
     const hit = await ctx.cache.getJson<Wrapped<FigmaOutline>>(key);
     if (hit?.data) return { outline: hit.data };
     const json = await ctx.rest.getJson<RestFile>({
       connectionId: file.connectionId,
       path: `/v1/files/${file.fileKey}`,
-      query: { depth: 2, version },
+      query: { depth: OUTLINE_REST_DEPTH, version },
       tier: "1",
     });
     const outline = outlineFromRest(json, file.fileKey, version);
@@ -896,7 +944,7 @@ export class FigmaContent {
   }
 
   private async nodes(
-    request: { fileKey: string; ids: string[]; version?: string },
+    request: { fileKey: string; ids: string[]; version?: string; depth?: 1 },
     ctx: FigmaContext,
   ): Promise<{
     version: string;
@@ -906,6 +954,20 @@ export class FigmaContent {
     styles: Record<string, StyleMeta>;
   }> {
     const file = await requireFile(ctx, request.fileKey);
+    if (request.depth === 1) {
+      // ADR-0039: a shallow read lists a section's direct children only. It is always the
+      // REST snapshot for a pinned version — the non-empty version is enforced here, the
+      // plugin's live tree is never consulted, and answers cache under their own depth-carrying
+      // namespace so a shallow node can never poison the full tree (or vice versa). Geometry
+      // is not requested: metadata does not need vector paths.
+      const version = request.version?.trim() ?? "";
+      if (version === "")
+        throw new FigmaServiceError(
+          "invalid_input",
+          "A depth-1 node read needs the pinned file version.",
+        );
+      return this.loadNodes(ctx, file, request.ids, version, 1);
+    }
     const version = request.version ?? (await this.versions.current(ctx, file));
     // An explicit version is a snapshot request (ADR-0037): only data for that exact
     // (fileKey, version) can answer it. The plugin's live tree belongs to whatever version is
@@ -932,18 +994,35 @@ export class FigmaContent {
     return this.loadNodes(ctx, file, request.ids, version);
   }
 
+  /** The (fileKey, id, version) node cache — namespaced by depth so shallow and full
+   *  answers never serve each other (ADR-0039). */
+  private static nodeKey(fileKey: string, id: string, version: string, depth?: 1): string {
+    return depth === undefined
+      ? `node/${fileKey}/${id}@${version}`
+      : `node/${fileKey}/${id}@${version}@depth=${depth}`;
+  }
+
+  /** Library maps follow the same namespace rule: a shallow read's entry-level maps must not
+   *  overwrite the full tree's component/style metadata (ADR-0039). */
+  private static libsKey(fileKey: string, version: string, depth?: 1): string {
+    return depth === undefined
+      ? `libs/${fileKey}@${version}`
+      : `libs/${fileKey}@${version}@depth=${depth}`;
+  }
+
   /** Ids already cached (including known-unknown `null`s) and the ids that must be fetched. */
   private async cachedNodes(
     ctx: FigmaContext,
     file: FigmaFile,
     ids: string[],
     version: string,
+    depth?: 1,
   ): Promise<{ nodes: Record<string, FigmaNode | null>; misses: string[] }> {
     const nodes: Record<string, FigmaNode | null> = {};
     const misses: string[] = [];
     for (const id of ids) {
       const hit = await ctx.cache.getJson<Wrapped<FigmaNode | null>>(
-        `node/${file.fileKey}/${id}@${version}`,
+        FigmaContent.nodeKey(file.fileKey, id, version, depth),
       );
       if (hit) nodes[id] = hit.data;
       else misses.push(id);
@@ -951,12 +1030,13 @@ export class FigmaContent {
     return { nodes, misses };
   }
 
-  /** Cached per node per version; uncached ids come back in batched Tier-1 node requests. */
+  /** Cached per node per version per depth; uncached ids come back in batched Tier-1 requests. */
   private async loadNodes(
     ctx: FigmaContext,
     file: FigmaFile,
     ids: string[],
     version: string,
+    depth?: 1,
   ): Promise<{
     version: string;
     source: FigmaSource;
@@ -964,15 +1044,21 @@ export class FigmaContent {
     components: Record<string, ComponentMeta>;
     styles: Record<string, StyleMeta>;
   }> {
-    const { nodes, misses } = await this.cachedNodes(ctx, file, ids, version);
-    const libsKey = `libs/${file.fileKey}@${version}`;
+    const { nodes, misses } = await this.cachedNodes(ctx, file, ids, version, depth);
+    // Library maps join the same namespace rule: shallow entries must not overwrite the full
+    // read's component/style metadata either.
+    const libsKey = FigmaContent.libsKey(file.fileKey, version, depth);
     const libs = (await ctx.cache.getJson<LibraryMeta>(libsKey)) ?? { components: {}, styles: {} };
     let resolvedVersion = version;
     for (const batch of chunks(misses, this.nodesBatchSize)) {
       const response = await ctx.rest.getJson<RestNodesResponse>({
         connectionId: file.connectionId,
         path: `/v1/files/${file.fileKey}/nodes`,
-        query: { ids: batch.join(","), geometry: "paths", version },
+        query: {
+          ids: batch.join(","),
+          ...(depth === undefined ? { geometry: "paths" } : { depth }),
+          version,
+        },
         tier: "1",
       });
       resolvedVersion = asString(response?.version) || resolvedVersion;
@@ -989,7 +1075,7 @@ export class FigmaContent {
         const entry = response?.nodes?.[id] ?? null;
         const node = restEntryNode(entry) as FigmaNode | null;
         nodes[id] = node;
-        await ctx.cache.putJson(`node/${file.fileKey}/${id}@${version}`, wrap(node));
+        await ctx.cache.putJson(FigmaContent.nodeKey(file.fileKey, id, version, depth), wrap(node));
         if (entry?.components) componentMaps.push(entry.components);
         if (entry?.styles) styleMaps.push(entry.styles);
       }
@@ -1076,8 +1162,22 @@ export class FigmaContent {
   ): Promise<{ images: Record<string, FigmaBytes | null>; source: FigmaSource }> {
     const file = await requireFile(ctx, request.fileKey);
     const format: RenderFormat = request.format ?? "png";
-    const version = request.version ?? (await this.versions.current(ctx, file));
-    return this.renderNodes(ctx, file, request.ids, request.scale, format, version);
+    // An explicit version is a snapshot request (32.1): the plugin rasterizes whatever version
+    // is open in Figma now, so live bytes mislabeled as history are the failure mode — only the
+    // versioned Tier-1 images endpoint can answer a pinned version, and its answers keep their
+    // own cache namespace so unverified live plugin bytes never serve a snapshot.
+    if (request.version !== undefined)
+      return this.renderNodes(
+        ctx,
+        file,
+        request.ids,
+        request.scale,
+        format,
+        request.version,
+        false,
+      );
+    const version = await this.versions.current(ctx, file);
+    return this.renderNodes(ctx, file, request.ids, request.scale, format, version, true);
   }
 
   private async export(
@@ -1097,6 +1197,7 @@ export class FigmaContent {
       scale,
       request.format,
       version,
+      true, // export has no version field: it is the live current-version read (32.1)
     );
     const bytes = rendered.images[request.nodeId];
     if (!bytes) return { file: null, fileName: null };
@@ -1107,8 +1208,75 @@ export class FigmaContent {
     return { file: bytes, fileName: `${name}@${scale}x.${request.format}` };
   }
 
-  /** Cache per nodeId@scale@version; a linked file exports through the plugin instead (32.1). */
+  /**
+   * Cache per nodeId@scale@version. `live` marks reads whose version is the CURRENT one:
+   * only those may use the plugin export (32.1). Pinned snapshots never read the live
+   * namespace, so plugin bytes rasterized from an open document can't answer them unverified,
+   * and REST bytes stay under their own (fileKey, version) namespace (32.8).
+   */
   private async renderNodes(
+    ctx: FigmaContext,
+    file: FigmaFile,
+    ids: string[],
+    scale: number,
+    format: RenderFormat,
+    version: string,
+    live: boolean,
+  ): Promise<{ images: Record<string, FigmaBytes | null>; source: FigmaSource }> {
+    if (live && ctx.link.isLinked(file.fileKey))
+      return this.renderViaLink(ctx, file, ids, scale, format, version);
+    return this.renderRest(ctx, file, ids, scale, format, version);
+  }
+
+  /** Live plugin rasters, cached in their own namespace keyed by the current version. */
+  private async renderViaLink(
+    ctx: FigmaContext,
+    file: FigmaFile,
+    ids: string[],
+    scale: number,
+    format: RenderFormat,
+    version: string,
+  ): Promise<{ images: Record<string, FigmaBytes | null>; source: FigmaSource }> {
+    const images: Record<string, FigmaBytes | null> = {};
+    const cacheKey = (id: string): string =>
+      `render-live/${file.fileKey}/${id}@${scale}x@${format}@${version}`;
+    await Promise.all(
+      ids.map(async (id) => {
+        const cached = await ctx.cache.getBytes(cacheKey(id));
+        if (cached) {
+          images[id] = toBase64Bytes(cached);
+          return;
+        }
+        try {
+          const exported = await ctx.link.exportNode(file.fileKey, id, format, scale);
+          const stored = {
+            mimeType: exported.mimeType || RENDER_MIME[format],
+            data: exported.data,
+          };
+          await ctx.cache.putBytes(cacheKey(id), stored);
+          images[id] = toBase64Bytes(stored);
+        } catch (error) {
+          ctx.logger.info(
+            {
+              fileKey: file.fileKey,
+              nodeId: id,
+              err: error instanceof Error ? error.message : String(error),
+            },
+            "figma link export failed",
+          );
+          images[id] = null;
+        }
+      }),
+    );
+    return { images, source: "link" };
+  }
+
+  /**
+   * One multi-id Tier-1 call per batch; the S3 urls never leave the daemon (32.8). Answers
+   * either the versioned snapshot or the unversioned read of an unlinked file — both are
+   * exact-version REST bytes, so they share the version-keyed namespace.
+   */
+  private async renderRest(
     ctx: FigmaContext,
     file: FigmaFile,
     ids: string[],
@@ -1118,48 +1286,13 @@ export class FigmaContent {
   ): Promise<{ images: Record<string, FigmaBytes | null>; source: FigmaSource }> {
     const images: Record<string, FigmaBytes | null> = {};
     const misses: string[] = [];
-    let source: FigmaSource = "rest";
     const cacheKey = (id: string): string =>
       `render/${file.fileKey}/${id}@${scale}x@${format}@${version}`;
-    const linked = ctx.link.isLinked(file.fileKey);
-    if (linked) {
-      source = "link";
-      await Promise.all(
-        ids.map(async (id) => {
-          const cached = await ctx.cache.getBytes(cacheKey(id));
-          if (cached) {
-            images[id] = toBase64Bytes(cached);
-            return;
-          }
-          try {
-            const exported = await ctx.link.exportNode(file.fileKey, id, format, scale);
-            const stored = {
-              mimeType: exported.mimeType || RENDER_MIME[format],
-              data: exported.data,
-            };
-            await ctx.cache.putBytes(cacheKey(id), stored);
-            images[id] = toBase64Bytes(stored);
-          } catch (error) {
-            ctx.logger.info(
-              {
-                fileKey: file.fileKey,
-                nodeId: id,
-                err: error instanceof Error ? error.message : String(error),
-              },
-              "figma link export failed",
-            );
-            images[id] = null;
-          }
-        }),
-      );
-      return { images, source };
-    }
     for (const id of ids) {
       const cached = await ctx.cache.getBytes(cacheKey(id));
       if (cached) images[id] = toBase64Bytes(cached);
       else misses.push(id);
     }
-    // One multi-id Tier-1 call per batch; the S3 urls never leave the daemon (32.8).
     for (const batch of chunks(misses, RENDER_BATCH_SIZE)) {
       const response = await ctx.rest.getJson<RestImagesResponse>({
         connectionId: file.connectionId,
@@ -1193,7 +1326,7 @@ export class FigmaContent {
         }),
       );
     }
-    return { images, source };
+    return { images, source: "rest" };
   }
 
   // ── versions ──
