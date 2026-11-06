@@ -8,6 +8,10 @@ import {
 
 export type FigmaFilePickerResult = { kind: "file"; url: string } | { kind: "cancelled" };
 
+// ERR_ABORTED: our own stop()/preventDefault and the site's in-flight redirects land here, so a
+// cancelled load is not a failure; everything else on the main frame is (ADR-0038 review).
+const ERR_ABORTED = -3;
+
 // The guest is a plain website window: one persistent partition shared with its login popups,
 // sandboxed, context-isolated, and with no Node, no preload, and no IPC from the page. The
 // renderer talks to the website no more than a browser does — only the navigation URL crosses
@@ -29,9 +33,11 @@ function guestWebPreferences(): WebPreferences {
 let pending: Promise<FigmaFilePickerResult> | null = null;
 
 /**
- * Opens the Figma Files guest (or returns the in-flight one) and settles with the file the
- * user selected, or `cancelled` when the window is closed without a selection. Load failures
- * reject so the caller can surface them; the next call starts fresh either way.
+ * Opens the Figma Files guest (or returns the in-flight one) and settles with the file the user
+ * selected, or `cancelled` when the window is closed without a selection. The guest dying under
+ * the user — initial or later main-frame load failure, a lost render process, an unresponsive
+ * page — rejects with a visible failure instead of posing as a cancellation. The next call
+ * starts fresh either way.
  */
 export function pickFigmaFile(): Promise<FigmaFilePickerResult> {
   if (pending) return pending;
@@ -52,6 +58,12 @@ export function pickFigmaFile(): Promise<FigmaFilePickerResult> {
       resolve(selection);
       destroyOwned();
     };
+    const fail = (error: unknown) => {
+      if (finished) return;
+      finished = true;
+      reject(error instanceof Error ? error : new Error(String(error)));
+      destroyOwned();
+    };
     const select = (contents: WebContents, url: string): boolean => {
       const selected = selectedFigmaFileUrl(url);
       if (!selected) return false;
@@ -60,20 +72,29 @@ export function pickFigmaFile(): Promise<FigmaFilePickerResult> {
       return true;
     };
     const guard = (contents: WebContents, owner: BrowserWindow) => {
-      contents.on("will-navigate", (event, url) => {
+      // Redirects bypass will-navigate, so both events share one capture path.
+      const capture = (event: { preventDefault(): void }, url: string): void => {
         if (selectedFigmaFileUrl(url)) {
           event.preventDefault(); // never let the editor load in the guest
           select(contents, url);
         } else if (!isFigmaPickerNavigation(url)) {
           event.preventDefault();
         }
-      });
+      };
+      contents.on("will-navigate", (event, url) => capture(event, url));
+      contents.on("will-redirect", (event, url) => capture(event, url));
       contents.on("did-navigate-in-page", (_event, url, isMainFrame) => {
         if (isMainFrame) select(contents, url); // SPA pushState selection
       });
+      contents.on("did-fail-load", (_event, errorCode, errorDescription, _url, isMainFrame) => {
+        if (!isMainFrame || errorCode === ERR_ABORTED) return;
+        fail(new Error(`Figma failed to load (${errorCode}): ${errorDescription}`));
+      });
       contents.on("render-process-gone", (_event, details) => {
         // clean-exit is our own destroy(); anything else means the guest died under the user.
-        if (details.reason !== "clean-exit") finish({ kind: "cancelled" });
+        if (details.reason !== "clean-exit") {
+          fail(new Error(`Figma picker render process ${details.reason}.`));
+        }
       });
       contents.setWindowOpenHandler(({ url }) => {
         const selected = selectedFigmaFileUrl(url);
@@ -87,11 +108,15 @@ export function pickFigmaFile(): Promise<FigmaFilePickerResult> {
           overrideBrowserWindowOptions: { parent: owner, webPreferences: guestWebPreferences() },
         };
       });
-      contents.on("did-create-window", (window) => {
-        owned.add(window);
-        window.once("closed", () => owned.delete(window));
-        guard(window.webContents, window);
+      contents.on("did-create-window", (window) => attach(window));
+    };
+    const attach = (window: BrowserWindow) => {
+      owned.add(window);
+      window.once("closed", () => owned.delete(window));
+      window.on("unresponsive", () => {
+        fail(new Error("Figma picker became unresponsive."));
       });
+      guard(window.webContents, window);
     };
 
     const picker = new BrowserWindow({
@@ -102,15 +127,9 @@ export function pickFigmaFile(): Promise<FigmaFilePickerResult> {
       webPreferences: guestWebPreferences(),
     });
     picker.setMenuBarVisibility(false);
-    owned.add(picker);
-    guard(picker.webContents, picker);
+    attach(picker);
     picker.once("closed", () => finish({ kind: "cancelled" }));
-    void picker.loadURL(FIGMA_PICKER_URL).catch((error: unknown) => {
-      if (finished) return;
-      finished = true;
-      reject(error);
-      destroyOwned();
-    });
+    void picker.loadURL(FIGMA_PICKER_URL).catch((error: unknown) => fail(error));
   });
   pending = result.finally(() => {
     pending = null;

@@ -98,10 +98,15 @@ const { FakeBrowserWindow: PickerWindow } = vi.hoisted(() => {
       if (failure) throw failure;
     }
 
-    public destroy(): void {
+    public close(): void {
+      // Mirrors Electron: a user-initiated close has the window gone when 'closed' fires.
       if (this.destroyed) return;
       this.destroyed = true;
       this.emit("closed");
+    }
+
+    public destroy(): void {
+      this.close();
     }
 
     public isDestroyed(): boolean {
@@ -147,7 +152,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   // Nothing may leave a pending pick behind: closing every owned window settles it.
-  for (const window of PickerWindow.instances) window.emit("closed");
+  for (const window of PickerWindow.instances) window.close();
   await Promise.allSettled(openPicks);
 });
 
@@ -174,7 +179,7 @@ describe("pickFigmaFile guest window", () => {
     });
     expect(Object.keys(preferences)).not.toContain("preload");
 
-    picker.emit("closed");
+    picker.close();
     await expect(pick).resolves.toEqual({ kind: "cancelled" });
   });
 
@@ -196,6 +201,46 @@ describe("pickFigmaFile selection", () => {
     expect(event.defaultPrevented).toBe(true);
     await expect(pick).resolves.toEqual({ kind: "file", url: selectedDesignResult });
     expect(picker.webContents.stopCount).toBe(1);
+    expect(picker.destroyed).toBe(true);
+  });
+
+  it("catches a server redirect to a file, which bypasses will-navigate", async () => {
+    const pick = startPick();
+    const picker = guest();
+    const event = new FakeNavigationEvent();
+
+    picker.webContents.emit("will-redirect", event, selectedDesignUrl);
+
+    expect(event.defaultPrevented).toBe(true);
+    await expect(pick).resolves.toEqual({ kind: "file", url: selectedDesignResult });
+    expect(picker.webContents.stopCount).toBe(1);
+    expect(picker.destroyed).toBe(true);
+  });
+
+  it("blocks a non-HTTPS redirect without ending the pick", async () => {
+    const pick = startPick();
+    const picker = guest();
+    const event = new FakeNavigationEvent();
+
+    picker.webContents.emit("will-redirect", event, `http://www.figma.com/design/${FILE_KEY}`);
+
+    expect(event.defaultPrevented).toBe(true);
+    picker.close();
+    await expect(pick).resolves.toEqual({ kind: "cancelled" });
+  });
+
+  it("catches a redirected child window the same way as the guest itself", async () => {
+    const pick = startPick();
+    const picker = guest();
+    const child = new PickerWindow({});
+    picker.webContents.emit("did-create-window", child);
+    const event = new FakeNavigationEvent();
+
+    child.webContents.emit("will-redirect", event, selectedDesignUrl);
+
+    expect(event.defaultPrevented).toBe(true);
+    await expect(pick).resolves.toEqual({ kind: "file", url: selectedDesignResult });
+    expect(child.destroyed).toBe(true);
     expect(picker.destroyed).toBe(true);
   });
 
@@ -235,7 +280,7 @@ describe("pickFigmaFile selection", () => {
     picker.webContents.emit("will-navigate", within, "https://www.figma.com/files");
     expect(within.defaultPrevented).toBe(false);
 
-    picker.emit("closed");
+    picker.close();
     await expect(pick).resolves.toEqual({ kind: "cancelled" });
     expect(picker.destroyed).toBe(true);
   });
@@ -273,7 +318,7 @@ describe("pickFigmaFile selection", () => {
 
     expect(handler({ url: "http://localhost:3000/help" })).toEqual({ action: "deny" });
 
-    picker.emit("closed");
+    picker.close();
     await expect(pick).resolves.toEqual({ kind: "cancelled" });
   });
 
@@ -298,12 +343,12 @@ describe("pickFigmaFile cancellation and failures", () => {
     const pick = startPick();
     const picker = guest();
 
-    picker.emit("closed");
+    picker.close();
 
     await expect(pick).resolves.toEqual({ kind: "cancelled" });
   });
 
-  it("resolves cancelled when the guest process crashes under the user", async () => {
+  it("rejects as a visible failure when the guest process crashes, not as a cancellation", async () => {
     const pick = startPick();
     const picker = guest();
 
@@ -311,7 +356,78 @@ describe("pickFigmaFile cancellation and failures", () => {
       reason: "crashed",
     });
 
+    await expect(pick).rejects.toThrow("render process crashed");
+    expect(picker.destroyed).toBe(true);
+  });
+
+  it("ignores the clean-exit render-process-gone caused by our own teardown", async () => {
+    const pick = startPick();
+    const picker = guest();
+
+    picker.webContents.emit("render-process-gone", new FakeNavigationEvent(), {
+      reason: "clean-exit",
+    });
+    picker.close();
+
     await expect(pick).resolves.toEqual({ kind: "cancelled" });
+  });
+
+  it("rejects as a visible failure when the guest page stops responding", async () => {
+    const pick = startPick();
+    const picker = guest();
+
+    picker.emit("unresponsive");
+
+    await expect(pick).rejects.toThrow("unresponsive");
+    expect(picker.destroyed).toBe(true);
+  });
+
+  it("rejects a later main-frame load failure and closes every owned window", async () => {
+    const pick = startPick();
+    const picker = guest();
+    const child = new PickerWindow({});
+    picker.webContents.emit("did-create-window", child);
+
+    picker.webContents.emit(
+      "did-fail-load",
+      new FakeNavigationEvent(),
+      -6,
+      "net::ERR_INTERNET_DISCONNECTED",
+      "https://www.figma.com/files",
+      true,
+    );
+
+    await expect(pick).rejects.toThrow("net::ERR_INTERNET_DISCONNECTED");
+    expect(picker.destroyed).toBe(true);
+    expect(child.destroyed).toBe(true);
+  });
+
+  it("ignores aborted and subframe load failures", async () => {
+    const pick = startPick();
+    const picker = guest();
+
+    // ERR_ABORTED is our own stop/preventDefault; subframes never own the pick.
+    picker.webContents.emit(
+      "did-fail-load",
+      new FakeNavigationEvent(),
+      -3,
+      "net::ERR_ABORTED",
+      selectedDesignUrl,
+      true,
+    );
+    picker.webContents.emit(
+      "did-fail-load",
+      new FakeNavigationEvent(),
+      -6,
+      "net::ERR_INTERNET_DISCONNECTED",
+      "https://www.figma.com/iframe-login",
+      false,
+    );
+
+    const event = new FakeNavigationEvent();
+    picker.webContents.emit("will-navigate", event, selectedDesignUrl);
+    await expect(pick).resolves.toEqual({ kind: "file", url: selectedDesignResult });
+    expect(event.defaultPrevented).toBe(true);
   });
 
   it("shares one guest across duplicate calls and opens a fresh guest afterwards", async () => {
@@ -320,13 +436,13 @@ describe("pickFigmaFile cancellation and failures", () => {
     expect(first).toBe(second);
     expect(PickerWindow.instances).toHaveLength(1);
 
-    guest().emit("closed");
+    guest().close();
     await expect(first).resolves.toEqual({ kind: "cancelled" });
     await expect(second).resolves.toEqual({ kind: "cancelled" });
 
     const third = startPick();
     expect(PickerWindow.instances).toHaveLength(2);
-    guest().emit("closed");
+    guest().close();
     await third;
   });
 
@@ -339,7 +455,7 @@ describe("pickFigmaFile cancellation and failures", () => {
     const retry = startPick();
     expect(PickerWindow.instances).toHaveLength(2);
     expect(guest().destroyed).toBe(false);
-    guest().emit("closed");
+    guest().close();
     await expect(retry).resolves.toEqual({ kind: "cancelled" });
   });
 });
