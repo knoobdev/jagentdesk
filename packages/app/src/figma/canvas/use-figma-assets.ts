@@ -1,6 +1,7 @@
-import { useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { FigmaBytes } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
+import { isItalicStyle, weightForStyle } from "@/figma/prototype/font-loading";
 import { callFigma } from "./api";
 import { ByteImageCache, FontCache, type DecodedImageLike } from "./assets";
 
@@ -18,21 +19,32 @@ const webDecode: ImageDecoder = (dataUrl) => {
   return image;
 };
 
-const webRegisterFont = async (
+/**
+ * Register bytes as a FontFace under the EXACT family the renderer asks for: text.ts sets
+ * `ctx.font = ... "family"` with numeric weight/italic descriptors, so a face named
+ * `"Inter Bold"` is a different family the canvas never matches. `onRegistered` hands the face to
+ * the owner (the hook) so it can be removed from document.fonts on dispose.
+ */
+export async function webRegisterFont(
   family: string,
   style: string,
   dataUrl: string,
-): Promise<boolean> => {
+  onRegistered?: (face: FontFace) => void,
+): Promise<boolean> {
   if (typeof document === "undefined" || typeof FontFace === "undefined") return false;
   try {
-    const face = new FontFace(`${family} ${style}`, `url(${dataUrl})`);
+    const face = new FontFace(family, `url(${dataUrl})`, {
+      weight: String(weightForStyle(style)),
+      style: isItalicStyle(style) ? "italic" : "normal",
+    });
     await face.load();
     document.fonts.add(face);
+    onRegistered?.(face);
     return true;
   } catch {
     return false;
   }
-};
+}
 
 export interface FigmaAssets {
   imageForRef: (imageRef: string) => CanvasImageSource | null;
@@ -63,11 +75,23 @@ export function useFigmaAssets(input: {
   const { serverId, fileKey, version } = input;
   const client = useHostRuntimeClient(serverId);
   const decode = input.decodeImage ?? webDecode;
-  const register = input.registerFont ?? webRegisterFont;
   const listeners = useRef(new Set<() => void>());
   const notify = () => {
     for (const listener of Array.from(listeners.current)) listener();
   };
+  // Faces the web registrar added to document.fonts, so dispose really removes them.
+  const faces = useRef(new Map<string, FontFace>());
+  const registerDefault = useCallback(
+    (family: string, style: string, dataUrl: string) =>
+      webRegisterFont(family, style, dataUrl, (face) => {
+        const key = `${family}\u0000${style}`;
+        const previous = faces.current.get(key);
+        if (previous && typeof document !== "undefined") document.fonts.delete(previous);
+        faces.current.set(key, face);
+      }),
+    [],
+  );
+  const register = input.registerFont ?? registerDefault;
 
   const imageFills = useMemo(
     () =>
@@ -87,29 +111,34 @@ export function useFigmaAssets(input: {
   );
 
   const rasters = useMemo(() => {
-    const cache = new Map<string, ByteImageCache>();
-    const get = (scale: number) => {
-      let cacheForScale = cache.get(String(scale));
-      if (!cacheForScale) {
-        cacheForScale = new ByteImageCache(
-          async (ids) => {
-            if (!client) return {};
-            const data = await callFigma(client, "figma.file.render.request", {
-              fileKey,
-              ids: [...ids],
-              scale,
-              ...(version ? { version } : {}),
-            });
-            return data.images as Record<string, FigmaBytes | null>;
-          },
-          decode,
-          notify,
-        );
-        cache.set(String(scale), cacheForScale);
-      }
-      return cacheForScale;
+    const byScale = new Map<string, ByteImageCache>();
+    return {
+      get: (scale: number) => {
+        let cacheForScale = byScale.get(String(scale));
+        if (!cacheForScale) {
+          cacheForScale = new ByteImageCache(
+            async (ids) => {
+              if (!client) return {};
+              const data = await callFigma(client, "figma.file.render.request", {
+                fileKey,
+                ids: [...ids],
+                scale,
+                ...(version ? { version } : {}),
+              });
+              return data.images as Record<string, FigmaBytes | null>;
+            },
+            decode,
+            notify,
+          );
+          byScale.set(String(scale), cacheForScale);
+        }
+        return cacheForScale;
+      },
+      dispose: () => {
+        for (const cacheForScale of byScale.values()) cacheForScale.clear();
+        byScale.clear();
+      },
     };
-    return { get };
   }, [client, fileKey, version, decode]);
 
   const fonts = useMemo(
@@ -124,6 +153,23 @@ export function useFigmaAssets(input: {
         notify,
       ),
     [client, register],
+  );
+
+  // Owner unmount or scope change (host, file, version, decoder swap) retires the caches built
+  // for the old scope: in-flight settles land in a dead generation and are dropped (no stale
+  // repopulate, no stale notify), failed entries stop being retried only by an actual clear, and
+  // web-registered FontFaces are removed from document.fonts so a reconnect cannot leak faces.
+  useEffect(
+    () => () => {
+      imageFills.clear();
+      rasters.dispose();
+      fonts.clear();
+      for (const face of faces.current.values()) {
+        if (typeof document !== "undefined") document.fonts.delete(face);
+      }
+      faces.current.clear();
+    },
+    [imageFills, rasters, fonts],
   );
 
   return useMemo<FigmaAssets>(
