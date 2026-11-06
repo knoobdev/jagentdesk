@@ -1368,7 +1368,10 @@ async function main() {
       await page
         .getByTestId(`sidebar-workspace-row-${readiness.serverId}:${WORKSPACE_ID}`)
         .click({ timeout: bootTimeoutMs });
-      const figmaNav = page.getByTestId("sidebar-figma-nav");
+      const figmaNav = page
+        .getByTestId("rail-figma")
+        .or(page.getByTestId("sidebar-figma-nav"))
+        .first();
       await figmaNav.waitFor({ state: "visible", timeout: 30_000 });
       await figmaNav.click();
       await page
