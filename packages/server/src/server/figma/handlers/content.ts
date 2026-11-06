@@ -984,7 +984,17 @@ export class FigmaFileWatches {
         tier: "3",
       });
       const version = metaVersion(meta);
-      if (!version || version === poller.baseline) return;
+      if (!version) return;
+      // A watch registered BEFORE the first outline captured a null baseline; the outline has
+      // since primed the current version, so comparing only against the stale registration
+      // baseline made the first unchanged poll push and dump the client's whole FrameStore and
+      // assets. Fall back to the known version when the registration baseline is absent; a
+      // genuinely unknown version (nothing primed) keeps the historical first-poll push.
+      if (poller.baseline === null) {
+        const known = this.versions.peek(fileKey);
+        if (known !== null) poller.baseline = known;
+      }
+      if (version === poller.baseline) return;
       poller.baseline = version;
       this.versions.prime(ctx, fileKey, version);
       this.pushChanged(ctx, fileKey, version, "rest");
@@ -1090,7 +1100,14 @@ export class FigmaContent {
   // missing from a cached map re-fetches the map at most once per minute, not every request.
   private readonly mapRefreshedAt = new Map<string, number>();
   // Concurrent identical outline reads share one flight (see outline()); live calls only.
-  private readonly outlineInFlight = new Map<string, Promise<{ outline: FigmaOutline | null }>>();
+  // Scoped to the requesting FigmaContext: the exported module singleton serves several
+  // service contexts (distinct homes, caches and budgets), so a joiner must never ride a
+  // foreign context's leader — the flight reads and writes THAT context's store, disk cache
+  // and budget, and its callers authorize through its token provider.
+  private readonly outlineFlights = new WeakMap<
+    FigmaContext,
+    Map<string, Promise<{ outline: FigmaOutline | null }>>
+  >();
 
   constructor(deps: ContentDeps = {}) {
     this.versions = new FileVersionCache(deps.versionTtlMs);
@@ -1120,6 +1137,18 @@ export class FigmaContent {
     };
   }
 
+  /**
+   * Narrow prime seam for a successful `figma.files.add` (32.8): the add handler has just
+   * verified the file's version through an authorized Tier-3 meta answer on that connection,
+   * so the version memo is fed from a fresh fact and the first content read resolves
+   * `current` without a second meta call. Only that answer may be primed — never the stored
+   * `files.lastVersion`, which is stale on ordinary reopen — and nothing here prewarms the
+   * content cache: the disk cache stays cold until the first real read.
+   */
+  primeVerifiedVersion(ctx: FigmaContext, fileKey: string, version: string): void {
+    this.versions.prime(ctx, fileKey, version);
+  }
+
   // ── outline / nodes ──
 
   private async outline(
@@ -1129,18 +1158,25 @@ export class FigmaContent {
     const file = await requireFile(ctx, request.fileKey);
     // Run-15 evidence: one real card click fired two identical outline requests a beat apart,
     // and the daemon did the whole depth-3 read twice — REST dispatch, parse, map, cache write.
-    // Concurrent identical requests for the same connection and version compute the answer once
-    // and share it (the same flight-sharing the font index already uses); the entry is dropped
-    // when the read settles, so a later request re-enters and hits the per-version disk cache.
+    // Concurrent identical requests compute the answer once and share it (the same
+    // flight-sharing the font index already uses); the entry is dropped when the read settles,
+    // so a later request re-enters and hits the per-version disk cache. Flights live in a
+    // per-context WeakMap, so two service contexts on one module singleton never join each
+    // other, and the key needs no ctx/home dimension.
     const key = `${file.connectionId}\u0000${request.fileKey}\u0000${request.version ?? "live"}`;
-    const shared = this.outlineInFlight.get(key);
+    let flights = this.outlineFlights.get(ctx);
+    if (!flights) {
+      flights = new Map();
+      this.outlineFlights.set(ctx, flights);
+    }
+    const shared = flights.get(key);
     if (shared) return shared;
     const flight = this.outlineUncached(ctx, file, request.version);
-    this.outlineInFlight.set(key, flight);
+    flights.set(key, flight);
     try {
       return await flight;
     } finally {
-      if (this.outlineInFlight.get(key) === flight) this.outlineInFlight.delete(key);
+      if (flights.get(key) === flight) flights.delete(key);
     }
   }
 

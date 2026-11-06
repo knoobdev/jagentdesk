@@ -6,10 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
 import {
   FigmaContent,
+  figmaContent,
   type ContentDeps,
   readFontNames,
   defaultGoogleFontsDownload,
 } from "./content.js";
+import { filesHandlers } from "./files.js";
 import type { FigmaHandlerMap, FigmaRequestOf } from "./types.js";
 import type { ContentRequestType } from "./content.js";
 import { FigmaServiceError } from "../context.js";
@@ -1611,6 +1613,40 @@ describe("watches", () => {
     expect(fixture.content.watches.count).toBe(0);
   });
 
+  it("pushes nothing on the first poll when the outline primed the version after registration", async () => {
+    // Run-15 reload bug: the viewer registers the watch, then the outline resolves and primes
+    // the current version a beat later. The poller captured baseline=null at registration, so
+    // the first 60 s poll compared the polled version against null, pushed the SAME version,
+    // and the client dropped its whole FrameStore and assets. The comparison must fall back to
+    // the known (primed) version when the registration baseline is absent.
+    const { watchId } = await watch(FILE); // registration baseline: nothing known yet
+    respondFile();
+    await fixture.handlers["figma.file.outline.request"](
+      { requestId: "r1", type: "figma.file.outline.request", fileKey: FILE },
+      fixture.api.ctx,
+      SESSION,
+    ); // primes v1 AFTER registration
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(changed()).toHaveLength(0); // unchanged → zero pushes (was: one spurious)
+
+    // A real change still pushes exactly once and moves the baseline forward.
+    fixture.api.rest.respond(`/v1/files/${FILE}/meta`, metaJson("v2"));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(changed()).toEqual([
+      { type: "figma.file.changed", watchId, fileKey: FILE, version: "v2", source: "rest" },
+    ]);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(changed()).toHaveLength(1);
+  });
+
+  it("still pushes the first poll when the version was never known (unknown baseline preserved)", async () => {
+    const { watchId } = await watch(FILE); // no outline, no prime → nothing is known
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(changed()).toEqual([
+      { type: "figma.file.changed", watchId, fileKey: FILE, version: "v1", source: "rest" },
+    ]);
+  });
+
   it("shares one poller per file across watchers and unsubscribes from the link when idle", async () => {
     // Prime v1 through an outline read so both watchers start from a silent baseline.
     respondFile();
@@ -2280,6 +2316,37 @@ describe("outline coalescing", () => {
     expect(pinnedA.outline!.version).toBe("v9");
   });
 
+  it("does not share a flight across two service contexts", async () => {
+    // The exported figmaContent is a module singleton serving several FigmaService contexts
+    // (distinct homes). Both contexts here carry the SAME connection and file key; flights
+    // must be scoped per context, so the foreign read dispatches its own REST, maps on its
+    // own ctx and answers its own disk cache instead of riding the first context's leader.
+    const homeB = mkdtempSync(path.join(os.tmpdir(), "jad-figma-content-b-"));
+    try {
+      const apiB = makeFigmaApi({ home: homeB, logger: pino({ level: "silent" }) });
+      apiB.store.addFile(makeFile(FILE));
+      apiB.rest.respond(`/v1/files/${FILE}/meta`, metaJson("v1"));
+      apiB.rest.respond(`/v1/files/${FILE}`, () => fileJson("v1"));
+      respondFile();
+      const [a, b] = await Promise.all([
+        ask("r1"),
+        fixture.handlers["figma.file.outline.request"](outlineRequest("r2"), apiB.ctx, SESSION),
+      ]);
+      expect(a.outline).not.toBeNull();
+      expect(b.outline).not.toBeNull();
+      expect(b.outline).not.toBe(a.outline); // each context computed its own answer
+      expect(fixture.api.rest.callsTo(`/v1/files/${FILE}`)).toHaveLength(1);
+      expect(apiB.rest.callsTo(`/v1/files/${FILE}`)).toHaveLength(1);
+      // A second same-context request still works: the settled flight is gone, the warm
+      // per-version disk cache answers it — per-context scoping did not disable either path.
+      const c = await ask("r3");
+      expect(c.outline).toEqual(a.outline);
+      expect(fixture.api.rest.callsTo(`/v1/files/${FILE}`)).toHaveLength(1);
+    } finally {
+      rmSync(homeB, { recursive: true, force: true });
+    }
+  });
+
   it("keeps later requests on the normal path once a shared flight settles", async () => {
     respondFile();
     await Promise.all([ask("r1"), ask("r2")]);
@@ -2289,5 +2356,95 @@ describe("outline coalescing", () => {
     const third = await ask("r3");
     expect(third.outline).toEqual(await ask("r4").then((r) => r.outline));
     expect(fixture.api.rest.callsTo(`/v1/files/${FILE}`)).toHaveLength(1);
+  });
+});
+
+// ── files.add primes the content version memo (avoidable Tier-3 meta double-fetch) ─
+
+describe("add-then-outline version prime", () => {
+  const add = (fileKey: string) =>
+    filesHandlers["figma.files.add.request"](
+      {
+        requestId: "r1",
+        type: "figma.files.add.request",
+        connectionId: "fgc_fake",
+        url: `https://www.figma.com/design/${fileKey}/title`,
+      } as Parameters<(typeof filesHandlers)["figma.files.add.request"]>[0],
+      fixture.api.ctx,
+    );
+  const outline = (fileKey: string) => {
+    const handlers = figmaContent.handlers();
+    return handlers["figma.file.outline.request"](
+      { requestId: "r2", type: "figma.file.outline.request", fileKey } as Parameters<
+        ReturnType<(typeof figmaContent)["handlers"]>["figma.file.outline.request"]
+      >[0],
+      fixture.api.ctx,
+      SESSION,
+    );
+  };
+
+  it("answers the first outline from the add's verified version — one meta total, no prewarm", async () => {
+    const KEY = "PRIMEOK";
+    fixture.api.rest.respond(`/v1/files/${KEY}/meta`, metaJson("v1"));
+    fixture.api.rest.respond(`/v1/files/${KEY}`, () => fileJson("v1"));
+    const added = await add(KEY);
+    expect(added.file.lastVersion).toBe("v1");
+    expect(fixture.api.rest.callsTo(`/v1/files/${KEY}/meta`)).toHaveLength(1); // the add's own
+
+    const { outline: answer } = await outline(KEY);
+    expect(answer!.version).toBe("v1");
+    // The resolver rode the prime: no second meta immediately after the add.
+    expect(fixture.api.rest.callsTo(`/v1/files/${KEY}/meta`)).toHaveLength(1);
+    // And nothing was prewarmed: the cold outline still cost exactly one depth-3 read.
+    expect(fixture.api.rest.callsTo(`/v1/files/${KEY}`)).toHaveLength(1);
+  });
+
+  it("re-resolves meta once the primed version passes the 60 s TTL", async () => {
+    const KEY = "PRIMETTL";
+    fixture.api.rest.respond(`/v1/files/${KEY}/meta`, metaJson("v1"));
+    fixture.api.rest.respond(`/v1/files/${KEY}`, () => fileJson("v1"));
+    await add(KEY);
+    await outline(KEY); // primed → still one meta
+    expect(fixture.api.rest.callsTo(`/v1/files/${KEY}/meta`)).toHaveLength(1);
+
+    fixture.api.setNow(fixture.api.now() + 61_000);
+    const { outline: answer } = await outline(KEY);
+    expect(answer!.version).toBe("v1");
+    // Expiry revalidates: the memo expired, so the resolver fetched its own meta — and the
+    // per-version disk cache still answered the content with zero new depth-3 reads.
+    expect(fixture.api.rest.callsTo(`/v1/files/${KEY}/meta`)).toHaveLength(2);
+    expect(fixture.api.rest.callsTo(`/v1/files/${KEY}`)).toHaveLength(1);
+  });
+
+  it("does not prime when the add succeeded but its metadata carried no version", async () => {
+    const KEY = "PRIMENOV";
+    fixture.api.rest.respond(`/v1/files/${KEY}/meta`, {
+      file: { name: "Marketing Site", last_touched_at: "2026-03-01T10:00:00Z" },
+    });
+    fixture.api.rest.respond(`/v1/files/${KEY}`, () => fileJson("v7"));
+    const added = await add(KEY);
+    expect(added.file.lastVersion ?? null).toBeNull();
+
+    fixture.api.rest.respond(`/v1/files/${KEY}/meta`, metaJson("v7")); // resolver's own answer
+    const { outline: answer } = await outline(KEY);
+    expect(answer!.version).toBe("v7");
+    // Two metas = the add's + the outline resolver's own fetch: a version-less add primed nothing.
+    expect(fixture.api.rest.callsTo(`/v1/files/${KEY}/meta`)).toHaveLength(2);
+  });
+
+  it("does not prime when the add fails, even though its meta carried a version", async () => {
+    const KEY = "PRIMEFAIL";
+    fixture.api.rest.respond(`/v1/files/${KEY}/meta`, {
+      file: { version: "v1", last_touched_at: "2026-03-01T10:00:00Z" },
+    }); // no name → the add throws AFTER fetching a versioned meta
+    await expect(add(KEY)).rejects.toMatchObject({ code: "figma_error" });
+
+    fixture.api.store.addFile(makeFile(KEY)); // the file exists from an earlier successful add
+    fixture.api.rest.respond(`/v1/files/${KEY}/meta`, metaJson("v1"));
+    fixture.api.rest.respond(`/v1/files/${KEY}`, () => fileJson("v1"));
+    const { outline: answer } = await outline(KEY);
+    expect(answer!.version).toBe("v1");
+    // Two metas = the failed add's + the outline resolver's own fetch: nothing was primed.
+    expect(fixture.api.rest.callsTo(`/v1/files/${KEY}/meta`)).toHaveLength(2);
   });
 });

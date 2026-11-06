@@ -235,11 +235,11 @@ export class FakeFigmaStore implements FigmaStore {
   async getFile(fileKey: string): Promise<FigmaFile | null> {
     return this.files.get(fileKey) ?? null;
   }
-  async saveFile(): Promise<void> {
-    // fake: no persistence needed
+  async saveFile(file: FigmaFile): Promise<void> {
+    this.files.set(file.fileKey, file);
   }
-  async removeFile(): Promise<void> {
-    // fake: no persistence needed
+  async removeFile(fileKey: string): Promise<void> {
+    this.files.delete(fileKey);
   }
   async listTeams(): Promise<FigmaTeam[]> {
     return [];
