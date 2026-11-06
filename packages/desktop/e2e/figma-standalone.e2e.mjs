@@ -2586,6 +2586,7 @@ async function captureRenderQuality(page, requests, artifactDir, evidence) {
     for (const [key, value] of Object.entries(target)) url.searchParams.set(key, value);
     const requestStart = requests.renderRequests.length;
     const responseStart = requests.renderResponses.length;
+    requests.renderPending.clear(); // the old page's closed socket cannot settle after navigation
     await page.goto(url.toString(), { waitUntil: "domcontentloaded", timeout: 60_000 });
     const canvas = page.locator("#jagentdesk-figma-canvas");
     await canvas.waitFor({ state: "visible", timeout: 60_000 });
