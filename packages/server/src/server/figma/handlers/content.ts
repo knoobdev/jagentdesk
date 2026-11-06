@@ -1089,6 +1089,8 @@ export class FigmaContent {
   // imageRef→url maps expire "after no more than 14 days" (figma-integration.md §3.1); a ref
   // missing from a cached map re-fetches the map at most once per minute, not every request.
   private readonly mapRefreshedAt = new Map<string, number>();
+  // Concurrent identical outline reads share one flight (see outline()); live calls only.
+  private readonly outlineInFlight = new Map<string, Promise<{ outline: FigmaOutline | null }>>();
 
   constructor(deps: ContentDeps = {}) {
     this.versions = new FileVersionCache(deps.versionTtlMs);
@@ -1125,28 +1127,50 @@ export class FigmaContent {
     ctx: FigmaContext,
   ): Promise<{ outline: FigmaOutline | null }> {
     const file = await requireFile(ctx, request.fileKey);
+    // Run-15 evidence: one real card click fired two identical outline requests a beat apart,
+    // and the daemon did the whole depth-3 read twice — REST dispatch, parse, map, cache write.
+    // Concurrent identical requests for the same connection and version compute the answer once
+    // and share it (the same flight-sharing the font index already uses); the entry is dropped
+    // when the read settles, so a later request re-enters and hits the per-version disk cache.
+    const key = `${file.connectionId}\u0000${request.fileKey}\u0000${request.version ?? "live"}`;
+    const shared = this.outlineInFlight.get(key);
+    if (shared) return shared;
+    const flight = this.outlineUncached(ctx, file, request.version);
+    this.outlineInFlight.set(key, flight);
+    try {
+      return await flight;
+    } finally {
+      if (this.outlineInFlight.get(key) === flight) this.outlineInFlight.delete(key);
+    }
+  }
+
+  private async outlineUncached(
+    ctx: FigmaContext,
+    file: FigmaFile,
+    version: string | undefined,
+  ): Promise<{ outline: FigmaOutline | null }> {
     // An explicit version is a snapshot request (32.1): the plugin's live document belongs to
     // whatever version is open in Figma now, so serving it for a pinned read would silently
     // present current hierarchy and flows as history. Only the live (unversioned) outline may
     // prefer the plugin — the same rule the pinned nodes read enforces.
-    if (request.version === undefined && ctx.link.isLinked(file.fileKey)) {
+    if (version === undefined && ctx.link.isLinked(file.fileKey)) {
       const viaLink = await this.linkedOutlineAttempt(ctx, file);
       if (viaLink) return { outline: viaLink };
     }
-    const version = request.version ?? (await this.versions.current(ctx, file));
+    const pinned = version ?? (await this.versions.current(ctx, file));
     // ADR-0039: the outline is a depth-3 read, so a SECTION's direct children (depth-3 nodes)
     // come back with it. The cache namespace carries that — a stale depth-2 summary, which
     // saw sections as opaque entries with no children, must never answer a depth-3 request.
-    const key = `file/${file.fileKey}/outline-d3@${version}`;
+    const key = `file/${file.fileKey}/outline-d3@${pinned}`;
     const hit = await ctx.cache.getJson<Wrapped<FigmaOutline>>(key);
     if (hit?.data) return { outline: hit.data };
     const json = await ctx.rest.getJson<RestFile>({
       connectionId: file.connectionId,
       path: `/v1/files/${file.fileKey}`,
-      query: { depth: OUTLINE_REST_DEPTH, version },
+      query: { depth: OUTLINE_REST_DEPTH, version: pinned },
       tier: "1",
     });
-    const outline = outlineFromRest(json, file.fileKey, version);
+    const outline = outlineFromRest(json, file.fileKey, pinned);
     this.versions.prime(ctx, file.fileKey, outline.version);
     await ctx.cache.putJson(key, wrap(outline));
     return { outline };

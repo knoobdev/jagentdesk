@@ -290,4 +290,83 @@ describe("HttpFigmaRestClient", () => {
       else process.env.JAGENTDESK_FIGMA_API_URL = previous;
     }
   });
+
+  // Run-15 cold-mount evidence: one card click fired two identical depth-3 outline reads and
+  // the daemon fetched (and parsed, and wrote to cache) twice. Identical concurrent GETs are
+  // one physical request; anything that differs — connection, tier, query — fetches on its own.
+  it("coalesces identical concurrent GETs into one request and one budget send", async () => {
+    api.fileMeta.set("KEY1", { name: "Landing" });
+    const rest = client(new FakeTokens(["fake-figma-access-token-0001"]));
+    const call = () =>
+      rest.getJson<{ file: { name: string } }>({ ...metaRoute, connectionId: "fgc_1" });
+
+    const [a, b] = await Promise.all([call(), call()]);
+    expect(a.file.name).toBe("Landing");
+    expect(b.file.name).toBe("Landing");
+    expect(api.requests.filter((r) => r.path === "/v1/files/KEY1/meta")).toHaveLength(1);
+    // Honest accounting: the tier saw ONE request sent; the joiner adds nothing.
+    expect(rest.budget("fgc_1").tiers.find((tier) => tier.tier === "3")?.usedLastMinute).toBe(1);
+  });
+
+  it("fetches again once a shared call has settled — sharing is in flight, not a result cache", async () => {
+    api.fileMeta.set("KEY1", { name: "Landing" });
+    const rest = client(new FakeTokens(["fake-figma-access-token-0001"]));
+    const call = () => rest.getJson({ ...metaRoute, connectionId: "fgc_1" });
+
+    await call();
+    await call();
+    expect(api.requests.filter((r) => r.path === "/v1/files/KEY1/meta")).toHaveLength(2);
+    expect(rest.budget("fgc_1").tiers.find((tier) => tier.tier === "3")?.usedLastMinute).toBe(2);
+  });
+
+  it("does not coalesce reads that differ in connection, tier, or query", async () => {
+    api.fileMeta.set("KEY1", { name: "Landing" });
+    const rest = client(new FakeTokens(["fake-figma-access-token-0001"]));
+    await Promise.all([
+      rest.getJson({ ...metaRoute, connectionId: "fgc_1" }),
+      rest.getJson({ ...metaRoute, connectionId: "fgc_2" }),
+      rest.getJson({ ...metaRoute, connectionId: "fgc_1", tier: "2" }),
+      rest.getJson({ ...metaRoute, connectionId: "fgc_1", query: { ids: "1:2" } }),
+    ]);
+    expect(api.requests.filter((r) => r.path === "/v1/files/KEY1/meta")).toHaveLength(4);
+  });
+
+  it("shares the 401 refresh-and-retry across coalesced callers", async () => {
+    api.fileMeta.set("KEY1", { name: "Landing" });
+    // First token is refused, the refreshed one is accepted: the released retry-once path.
+    const tokens = new FakeTokens(["wrong-token", "fake-figma-access-token-0001"]);
+    const rest = client(tokens);
+    const call = () => rest.getJson({ ...metaRoute, connectionId: "fgc_1" });
+
+    const [a, b] = await Promise.all([call(), call()]);
+    expect(a).toMatchObject({ file: { name: "Landing" } });
+    expect(b).toMatchObject({ file: { name: "Landing" } });
+    // One leader: the flight ran the released retry-once, and the joiner rode its outcome.
+    expect(api.requests.filter((r) => r.path === "/v1/files/KEY1/meta")).toHaveLength(2);
+    expect(tokens.invalidations).toBe(1);
+    expect(rest.budget("fgc_1").tiers.find((tier) => tier.tier === "3")?.usedLastMinute).toBe(2);
+  });
+
+  it("answers both callers with the leader's rejection", async () => {
+    api.fileMeta.set("KEY1", { name: "Landing" });
+    api.validToken = "nobody"; // no bearer matches: the leader's one retry also 401s
+    const rest = client(new FakeTokens(["other-token"]));
+    const call = () => rest.getJson({ ...metaRoute, connectionId: "fgc_1" });
+
+    const [a, b] = await Promise.allSettled([call(), call()]);
+    expectServiceError((a as PromiseRejectedResult).reason, "auth_failed");
+    expectServiceError((b as PromiseRejectedResult).reason, "auth_failed");
+    expect(api.requests.filter((r) => r.path === "/v1/files/KEY1/meta")).toHaveLength(2);
+  });
+
+  it("coalesces concurrent downloads of the same byte URL", async () => {
+    api.images.set("/images/shared", { data: Buffer.from("png-bytes"), contentType: "image/png" });
+    const rest = client(new FakeTokens(["fake-figma-access-token-0001"]));
+    const url = `${api.baseUrl}/images/shared`;
+
+    const [a, b] = await Promise.all([rest.getBytes(url), rest.getBytes(url)]);
+    expect(a.data.toString()).toBe("png-bytes");
+    expect(b.data).toBe(a.data); // one download, shared buffer
+    expect(api.requests.filter((r) => r.path === "/images/shared")).toHaveLength(1);
+  });
 });

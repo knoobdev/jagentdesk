@@ -2224,3 +2224,65 @@ describe("render fidelity (ADR-0042)", () => {
     expect(fixture.api.rest.callsTo(`/v1/images/${FILE}`)).toEqual([]);
   });
 });
+
+// ── outline request coalescing (run-15 cold-mount evidence) ──────────────────
+
+describe("outline coalescing", () => {
+  const outlineRequest = (requestId: string, params: Record<string, unknown> = {}) =>
+    ({
+      requestId,
+      type: "figma.file.outline.request",
+      fileKey: FILE,
+      ...params,
+    }) as Parameters<(typeof fixture.handlers)["figma.file.outline.request"]>[0];
+  const ask = (requestId: string, params?: Record<string, unknown>) =>
+    fixture.handlers["figma.file.outline.request"](
+      outlineRequest(requestId, params),
+      fixture.api.ctx,
+      SESSION,
+    );
+
+  it("shares one depth-3 read between simultaneous identical live requests", async () => {
+    // Run-15: a real card click fired two outline requests a beat apart and the daemon fetched,
+    // parsed, mapped and cache-wrote the whole file twice. The joiner must ride the leader's
+    // flight, not start a second one.
+    respondFile();
+    const starter = ask("r1");
+    const joiner = ask("r2");
+    const [a, b] = await Promise.all([starter, joiner]);
+    expect(a.outline).not.toBeNull();
+    expect(b.outline).toBe(a.outline); // one flight, one result
+    expect(fixture.api.rest.callsTo(`/v1/files/${FILE}`)).toHaveLength(1);
+    // The version resolve belongs to the flight too: one meta lookup, not two.
+    expect(fixture.api.rest.callsTo(`/v1/files/${FILE}/meta`)).toHaveLength(1);
+  });
+
+  it("does not share between a live read and a pinned-version read", async () => {
+    fixture.api.rest.respond(`/v1/files/${FILE}`, ({ query }) => fileJson(String(query.version)));
+    const [live, pinnedA, pinnedB] = await Promise.all([
+      ask("r1"),
+      ask("r2", { version: "v9" }),
+      ask("r3", { version: "v9" }),
+    ]);
+    const versions = fixture.api.rest
+      .callsTo(`/v1/files/${FILE}`)
+      .map((call) => String(call.query.version))
+      .sort();
+    // The two v9 reads share one flight; the live read is its own key and never joins them.
+    expect(versions).toEqual(["v1", "v9"]);
+    expect(pinnedB.outline).toBe(pinnedA.outline);
+    expect(live.outline!.version).toBe("v1");
+    expect(pinnedA.outline!.version).toBe("v9");
+  });
+
+  it("keeps later requests on the normal path once a shared flight settles", async () => {
+    respondFile();
+    await Promise.all([ask("r1"), ask("r2")]);
+    // The settled flight left no entry behind: a third request re-enters outline() and gets the
+    // per-version disk cache answer (zero new REST calls), exactly like any warm read.
+    respondFile();
+    const third = await ask("r3");
+    expect(third.outline).toEqual(await ask("r4").then((r) => r.outline));
+    expect(fixture.api.rest.callsTo(`/v1/files/${FILE}`)).toHaveLength(1);
+  });
+});
