@@ -4714,6 +4714,11 @@ export const ServerInfoStatusPayloadSchema = z
         // (spec 32.7 / ADR-0040): the figma.remote.* RPCs. The client gates the write surface
         // once; old hosts ask the user to update instead of receiving RPCs they cannot answer.
         figmaRemoteWrites: z.boolean().optional(),
+        // Region-geometry comments (spec 32.5.4 / ADR-0041): `FigmaComment.region` on reads and
+        // the post-request `region`. Clients send `region` only when this flag is present; an old
+        // host strips the unknown field, so sending anyway would pass a point comment off as a
+        // successful region create.
+        figmaCommentRegions: z.boolean().optional(),
       })
       .optional(),
   })

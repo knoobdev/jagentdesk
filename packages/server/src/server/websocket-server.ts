@@ -2473,12 +2473,15 @@ export class VoiceAssistantWebSocketServer {
         // Figma (spec 32 / ADR-0035). `figmaNodeDepth` (ADR-0039) reports the section-aware
         // outline and the depth-1 metadata read together; viewers gate once on it.
         // `figmaRemoteWrites` (ADR-0040) gates the figma.remote.* write surface.
+        // `figmaCommentRegions` (ADR-0041) gates the region-geometry comment DTO fields; clients
+        // send a post `region` only when present.
         ...(this.figmaService
           ? {
               figma: true,
               figmaPlayback: true,
               figmaNodeDepth: true,
               figmaRemoteWrites: true,
+              figmaCommentRegions: true,
             }
           : {}),
         // Advertise the plugin management surface only when a PluginService is

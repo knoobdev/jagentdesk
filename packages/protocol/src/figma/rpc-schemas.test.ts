@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { validateWSOutboundMessage } from "../validation/ws-outbound.js";
 import {
   FIGMA_REQUEST_TYPES,
+  FigmaCommentRegionSchema,
+  FigmaCommentSchema,
+  FigmaCommentsPostRequestSchema,
   FigmaFileNodesRequestSchema,
   FigmaFileNodesResponseSchema,
   FigmaFilePlaybackRequestSchema,
@@ -706,5 +710,153 @@ describe("figma remote RPC registration", () => {
 
   it("adds no remote pushes: readback rides the existing figma.file.changed contract (W3)", () => {
     expect(FIGMA_REQUEST_TYPES.join().includes("figma.remote")).toBe(true);
+  });
+});
+
+// ── ADR-0041: comment region geometry ─────────────────────────────────────────
+
+const REGION_COMMENT = (region: unknown) => ({
+  id: "201",
+  parentId: null,
+  message: "Region.",
+  user: { handle: "ravi", figmaUserId: "450:111" },
+  createdAt_ms: 1_774_000_000_000,
+  resolvedAt_ms: null,
+  nodeId: "23:4",
+  offset: { x: 10, y: 20 },
+  ...(region === undefined ? {} : { region }),
+  reactions: [],
+  mine: false,
+});
+
+describe("figma comment region DTO (ADR-0041)", () => {
+  it("accepts every pin corner with positive finite dimensions", () => {
+    for (const pinCorner of ["top-left", "top-right", "bottom-left", "bottom-right"] as const) {
+      expect(FigmaCommentRegionSchema.parse({ width: 200, height: 80.5, pinCorner })).toEqual({
+        width: 200,
+        height: 80.5,
+        pinCorner,
+      });
+    }
+  });
+
+  it("rejects non-positive or non-finite dimensions and non-numbers", () => {
+    const good = { width: 10, height: 10, pinCorner: "top-left" };
+    expect(FigmaCommentRegionSchema.safeParse({ ...good, width: 0 }).success).toBe(false);
+    expect(FigmaCommentRegionSchema.safeParse({ ...good, height: 0 }).success).toBe(false);
+    expect(FigmaCommentRegionSchema.safeParse({ ...good, width: -5 }).success).toBe(false);
+    expect(FigmaCommentRegionSchema.safeParse({ ...good, height: -0.5 }).success).toBe(false);
+    expect(
+      FigmaCommentRegionSchema.safeParse({ ...good, width: Number.POSITIVE_INFINITY }).success,
+    ).toBe(false);
+    expect(FigmaCommentRegionSchema.safeParse({ ...good, height: Number.NaN }).success).toBe(false);
+    expect(FigmaCommentRegionSchema.safeParse({ ...good, width: "10" }).success).toBe(false);
+  });
+
+  it("rejects an unknown or missing pinCorner — never a guessed corner", () => {
+    expect(
+      FigmaCommentRegionSchema.safeParse({ width: 10, height: 10, pinCorner: "middle" }).success,
+    ).toBe(false);
+    expect(
+      FigmaCommentRegionSchema.safeParse({ width: 10, height: 10, pinCorner: null }).success,
+    ).toBe(false);
+    expect(FigmaCommentRegionSchema.safeParse({ width: 10, height: 10 }).success).toBe(false);
+  });
+
+  it("keeps old payloads parsing: region absent, null, or a full region", () => {
+    // Pre-ADR-0041 hosts simply omit the field; clients must read that as "no region".
+    expect(FigmaCommentSchema.safeParse(REGION_COMMENT(undefined)).success).toBe(true);
+    // New responses answer null for point pins.
+    expect(FigmaCommentSchema.safeParse(REGION_COMMENT(null)).success).toBe(true);
+    expect(
+      FigmaCommentSchema.safeParse(
+        REGION_COMMENT({ width: 200, height: 80, pinCorner: "bottom-right" }),
+      ).success,
+    ).toBe(true);
+    // A malformed region is a hard failure, not a silent drop.
+    expect(FigmaCommentSchema.safeParse(REGION_COMMENT({ width: 0, height: 80 })).success).toBe(
+      false,
+    );
+  });
+});
+
+describe("figma.file.comments.post.request region option (ADR-0041)", () => {
+  const POST = {
+    type: "figma.file.comments.post.request" as const,
+    requestId: "req-c",
+    fileKey: "kH8TzQ2mV1",
+    message: "Pinned region.",
+  };
+
+  it("keeps legacy point requests parsing unchanged", () => {
+    expect(FigmaCommentsPostRequestSchema.safeParse(POST).success).toBe(true);
+    expect(
+      FigmaCommentsPostRequestSchema.safeParse({
+        ...POST,
+        parentId: "101",
+        nodeId: "23:4",
+        offset: { x: 1, y: 2 },
+      }).success,
+    ).toBe(true);
+  });
+
+  it("accepts an optional well-formed region and refuses a malformed one", () => {
+    expect(
+      FigmaCommentsPostRequestSchema.safeParse({
+        ...POST,
+        offset: { x: 1, y: 2 },
+        region: { width: 200, height: 80, pinCorner: "top-left" },
+      }).success,
+    ).toBe(true);
+    expect(
+      FigmaCommentsPostRequestSchema.safeParse({
+        ...POST,
+        region: { width: 200, height: 0, pinCorner: "top-left" },
+      }).success,
+    ).toBe(false);
+    expect(
+      FigmaCommentsPostRequestSchema.safeParse({
+        ...POST,
+        region: { width: 200, height: 80, pinCorner: "north-east" },
+      }).success,
+    ).toBe(false);
+    expect(
+      FigmaCommentsPostRequestSchema.safeParse({ ...POST, region: { width: 1, height: 2 } })
+        .success,
+    ).toBe(false); // pinCorner required: no guessed default on the wire
+  });
+});
+
+describe("outbound deep validation of region comments (zod-aot)", () => {
+  // The client's hot path validates daemon→client traffic with the generated ws-outbound
+  // validator; responses ride inside a `session` envelope under `message`.
+  const LIST_RESPONSE = (comments: unknown[]) => ({
+    type: "session",
+    message: {
+      type: "figma.file.comments.list.response",
+      payload: { requestId: "req-l", error: null, comments },
+    },
+  });
+
+  it("accepts a region-carrying comments list response and an old field-less payload", () => {
+    const withRegion = validateWSOutboundMessage(
+      LIST_RESPONSE([REGION_COMMENT({ width: 200, height: 80, pinCorner: "bottom-left" })]),
+    );
+    expect(withRegion.success).toBe(true);
+    const legacy = validateWSOutboundMessage(LIST_RESPONSE([REGION_COMMENT(undefined)]));
+    expect(legacy.success).toBe(true);
+    const point = validateWSOutboundMessage(LIST_RESPONSE([REGION_COMMENT(null)]));
+    expect(point.success).toBe(true);
+  });
+
+  it("rejects a malformed region through the generated validator, not just runtime zod", () => {
+    expect(
+      validateWSOutboundMessage(LIST_RESPONSE([REGION_COMMENT({ width: 0, height: 8 })])).success,
+    ).toBe(false);
+    expect(
+      validateWSOutboundMessage(
+        LIST_RESPONSE([REGION_COMMENT({ width: 4, height: 8, pinCorner: "side" })]),
+      ).success,
+    ).toBe(false);
   });
 });

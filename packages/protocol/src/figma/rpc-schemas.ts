@@ -166,6 +166,25 @@ export const FigmaVersionSchema = z.object({
 });
 export type FigmaVersion = z.infer<typeof FigmaVersionSchema>;
 
+// ADR-0041: region-geometry for pinned comments. Figma's `Region` / `FrameOffsetRegion`
+// client_meta carries `region_width`, `region_height`, `comment_pin_corner`; JAgentDesk must
+// preserve that geometry instead of drawing a region as a point. Dimensions are positive and
+// finite; the pin corner is one of the four rectangle corners the pin anchors to.
+export const FigmaCommentPinCornerSchema = z.enum([
+  "top-left",
+  "top-right",
+  "bottom-left",
+  "bottom-right",
+]);
+export type FigmaCommentPinCorner = z.infer<typeof FigmaCommentPinCornerSchema>;
+
+export const FigmaCommentRegionSchema = z.object({
+  width: z.number().finite().positive(),
+  height: z.number().finite().positive(),
+  pinCorner: FigmaCommentPinCornerSchema,
+});
+export type FigmaCommentRegion = z.infer<typeof FigmaCommentRegionSchema>;
+
 export const FigmaCommentSchema = z.object({
   id: z.string(),
   parentId: z.string().nullable(),
@@ -176,6 +195,9 @@ export const FigmaCommentSchema = z.object({
   nodeId: z.string().nullable(),
   // Position relative to the node (or canvas when nodeId is null).
   offset: z.object({ x: z.number(), y: z.number() }).nullable(),
+  // ADR-0041: null on point pins in new responses; optional so a payload from a pre-ADR-0041
+  // host (field absent) parses and reads as "no region". Never guessed geometry.
+  region: FigmaCommentRegionSchema.nullable().optional(),
   reactions: z.array(z.object({ emoji: z.string(), count: z.number(), mine: z.boolean() })),
   mine: z.boolean(),
 });
@@ -600,6 +622,10 @@ export const FigmaCommentsPostRequestSchema = req("figma.file.comments.post.requ
   parentId: z.string().optional(),
   nodeId: z.string().optional(),
   offset: z.object({ x: z.number(), y: z.number() }).optional(),
+  // ADR-0041: region pins ride the existing endpoint/token/permissions; the client sends this
+  // only when the host advertises `server_info.features.figmaCommentRegions`. The handler
+  // requires an explicit finite `offset` alongside it — a region never gets a made-up location.
+  region: FigmaCommentRegionSchema.optional(),
 });
 export const FigmaCommentsPostResponseSchema = res("figma.file.comments.post.response", {
   comment: FigmaCommentSchema.nullable(),

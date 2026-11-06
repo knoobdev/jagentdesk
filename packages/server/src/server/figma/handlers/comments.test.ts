@@ -74,6 +74,8 @@ describe("comments.list", () => {
       resolvedAt_ms: null,
       nodeId: "23:4",
       offset: { x: 312.5, y: 88 },
+      // ADR-0041: point pins answer null in new responses — the field is never omitted.
+      region: null,
       reactions: [
         { emoji: ":+1:", count: 2, mine: false },
         { emoji: ":tada:", count: 1, mine: false },
@@ -84,13 +86,14 @@ describe("comments.list", () => {
     expect(reply).toMatchObject({ id: "102", parentId: "101", reactions: [], mine: false });
     expect(reply?.resolvedAt_ms).toBeNull();
 
-    // Canvas-pinned comment: the offset comes from the bare Vector, there is no node; written
-    // and reacted on by the connection account itself, and resolved.
+    // Canvas region pin (ADR-0041): offset from the `Region` x/y, geometry preserved exactly —
+    // written and reacted on by the connection account itself, and resolved.
     expect(canvasPin).toMatchObject({
       id: "103",
       parentId: null,
       nodeId: null,
       offset: { x: 1440, y: 96 },
+      region: { width: 200, height: 80, pinCorner: "bottom-right" },
       mine: true,
       resolvedAt_ms: Date.parse("2026-04-04T12:30:00Z"),
       reactions: [{ emoji: ":+1:", count: 2, mine: true }],
@@ -291,6 +294,240 @@ describe("comments.delete + comments.react", () => {
       path: `/v1/files/${FILE_KEY}/comments/104/reactions?emoji=${encodeURIComponent(":+1:")}`,
       body: undefined,
       tier: "2",
+    });
+  });
+});
+
+// ── ADR-0041: comment region geometry ─────────────────────────────────────────
+
+function restComment(id: string, clientMeta: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id,
+    client_id: 900 + Number(id),
+    parent_id: "",
+    message: `Comment ${id}.`,
+    user: { id: ACCOUNT_USER_ID, handle: "me", img_url: null },
+    created_at: "2026-04-05T07:30:00Z",
+    resolved_at: null,
+    order_id: null,
+    file_key: FILE_KEY,
+    client_meta: clientMeta,
+    reactions: [],
+  };
+}
+
+async function listOne(clientMeta: Record<string, unknown> | null) {
+  const { ctx } = contextFor({
+    getJson: () => ({ comments: [restComment("201", clientMeta ?? {})] }),
+  });
+  const result = await commentsHandlers["figma.file.comments.list.request"](
+    { type: "figma.file.comments.list.request", requestId: "r1", fileKey: FILE_KEY },
+    ctx,
+    session,
+  );
+  return result.comments[0];
+}
+
+describe("comments.list region mapping (ADR-0041)", () => {
+  it("maps Vector and FrameOffset point pins with region null, exactly", async () => {
+    const vector = await listOne({ x: 1440, y: 96 });
+    expect(vector).toMatchObject({ nodeId: null, offset: { x: 1440, y: 96 }, region: null });
+    const frameOffset = await listOne({ node_id: "23:4", node_offset: { x: 312.5, y: 88 } });
+    expect(frameOffset).toMatchObject({
+      nodeId: "23:4",
+      offset: { x: 312.5, y: 88 },
+      region: null,
+    });
+  });
+
+  it("preserves the geometry for all four corners on Region and FrameOffsetRegion", async () => {
+    for (const pinCorner of ["top-left", "top-right", "bottom-left", "bottom-right"] as const) {
+      const canvas = await listOne({
+        x: 100,
+        y: 200,
+        region_width: 240,
+        region_height: 90.5,
+        comment_pin_corner: pinCorner,
+      });
+      expect(canvas).toMatchObject({
+        nodeId: null,
+        offset: { x: 100, y: 200 },
+        region: { width: 240, height: 90.5, pinCorner },
+      });
+      const node = await listOne({
+        node_id: "23:4",
+        node_offset: { x: 100, y: 200 },
+        region_width: 240,
+        region_height: 90.5,
+        comment_pin_corner: pinCorner,
+      });
+      expect(node).toMatchObject({
+        nodeId: "23:4",
+        offset: { x: 100, y: 200 },
+        region: { width: 240, height: 90.5, pinCorner },
+      });
+    }
+  });
+
+  it("defaults an omitted comment_pin_corner to Figma's documented bottom-right", async () => {
+    const canvas = await listOne({ x: 1, y: 2, region_width: 3, region_height: 4 });
+    expect(canvas?.region).toEqual({ width: 3, height: 4, pinCorner: "bottom-right" });
+    const node = await listOne({
+      node_id: "9:9",
+      node_offset: { x: 1, y: 2 },
+      region_width: 3,
+      region_height: 4,
+    });
+    expect(node?.region).toEqual({ width: 3, height: 4, pinCorner: "bottom-right" });
+  });
+
+  it("keeps the region response wire-valid", async () => {
+    const comment = await listOne({
+      x: 1,
+      y: 2,
+      region_width: 3,
+      region_height: 4,
+      comment_pin_corner: "top-left",
+    });
+    expect(() =>
+      FigmaCommentsListResponseSchema.parse({
+        type: "figma.file.comments.list.response",
+        payload: { requestId: "r1", error: null, comments: [comment] },
+      }),
+    ).not.toThrow();
+  });
+
+  it("refuses malformed regions with a clear error instead of guessed geometry", async () => {
+    const malformed: Record<string, unknown>[] = [
+      { x: 1, y: 2, region_width: 0, region_height: 4 }, // zero dimension
+      { x: 1, y: 2, region_width: 3, region_height: -4 }, // negative dimension
+      { x: 1, y: 2, region_width: Infinity, region_height: 4 }, // non-finite
+      { x: 1, y: 2, region_width: "3", region_height: 4 }, // non-number
+      { x: 1, y: 2, region_width: 3 }, // height missing
+      { x: 1, y: 2, region_height: 4 }, // width missing
+      { x: 1, y: 2, comment_pin_corner: "bottom-left" }, // corner without dimensions
+      { x: 1, y: 2, region_width: 3, region_height: 4, comment_pin_corner: "middle" }, // bad corner
+      { x: 1, y: 2, region_width: 3, region_height: 4, comment_pin_corner: 2 }, // non-string corner
+    ];
+    for (const meta of malformed) {
+      const error = await listOne(meta).then(
+        () => null,
+        (caught: unknown) => caught,
+      );
+      expect(error, JSON.stringify(meta)).toBeInstanceOf(FigmaServiceError);
+      expect((error as FigmaServiceError).code).toBe("figma_error");
+      expect((error as FigmaServiceError).message).toContain("201");
+      expect((error as FigmaServiceError).message).toContain("region");
+    }
+  });
+
+  it("null or absent client_meta reads as a plain comment (region null)", async () => {
+    expect((await listOne(null))?.region).toBeNull();
+  });
+});
+
+describe("comments.post region pin (ADR-0041)", () => {
+  const REGION = { width: 200, height: 80, pinCorner: "top-left" } as const;
+
+  function postRequest(params: Record<string, unknown>) {
+    return {
+      type: "figma.file.comments.post.request",
+      requestId: "r1",
+      fileKey: FILE_KEY,
+      message: "Region pinned here.",
+      ...params,
+    } as Parameters<(typeof commentsHandlers)["figma.file.comments.post.request"]>[0];
+  }
+
+  it("maps a frame region to node-anchored client_meta with the region fields", async () => {
+    const { ctx, restCalls } = contextFor({
+      sendJson: () => ({
+        ...restComment("105", {
+          node_id: "23:4",
+          node_offset: { x: 312.5, y: 88 },
+          region_width: 200,
+          region_height: 80,
+          comment_pin_corner: "top-left",
+        }),
+      }),
+    });
+    const result = await commentsHandlers["figma.file.comments.post.request"](
+      postRequest({ nodeId: "23:4", offset: { x: 312.5, y: 88 }, region: REGION }),
+      ctx,
+      session,
+    );
+    expect(restCalls[0]?.body).toEqual({
+      message: "Region pinned here.",
+      client_meta: {
+        node_id: "23:4",
+        node_offset: { x: 312.5, y: 88 },
+        region_width: 200,
+        region_height: 80,
+        comment_pin_corner: "top-left",
+      },
+    });
+    expect(result.comment).toMatchObject({
+      nodeId: "23:4",
+      offset: { x: 312.5, y: 88 },
+      region: { width: 200, height: 80, pinCorner: "top-left" },
+    });
+    expect(() =>
+      FigmaCommentsPostResponseSchema.parse({
+        type: "figma.file.comments.post.response",
+        payload: { requestId: "r1", error: null, comment: result.comment },
+      }),
+    ).not.toThrow();
+  });
+
+  it("maps a canvas region to x/y client_meta with the region fields", async () => {
+    const { ctx, restCalls } = contextFor({ sendJson: () => restComment("106", {}) });
+    await commentsHandlers["figma.file.comments.post.request"](
+      postRequest({ offset: { x: 1440, y: 96 }, region: { ...REGION, pinCorner: "bottom-right" } }),
+      ctx,
+      session,
+    );
+    expect(restCalls[0]?.body).toEqual({
+      message: "Region pinned here.",
+      client_meta: {
+        x: 1440,
+        y: 96,
+        region_width: 200,
+        region_height: 80,
+        comment_pin_corner: "bottom-right",
+      },
+    });
+  });
+
+  it("refuses a region without an explicit finite offset BEFORE any REST call", async () => {
+    const { ctx, restCalls } = contextFor({ sendJson: () => restComment("107", {}) });
+    const cases: Record<string, unknown>[] = [
+      { region: REGION }, // no offset at all
+      { nodeId: "23:4", region: REGION }, // node default {0,0} is a made-up location
+      { offset: { x: Number.POSITIVE_INFINITY, y: 4 }, region: REGION }, // non-finite
+      { offset: { x: 1, y: Number.NaN }, region: REGION }, // NaN
+    ];
+    for (const params of cases) {
+      const error = await commentsHandlers["figma.file.comments.post.request"](
+        postRequest(params),
+        ctx,
+        session,
+      ).catch((caught: unknown) => caught);
+      expect(error, JSON.stringify(params)).toBeInstanceOf(FigmaServiceError);
+      expect((error as FigmaServiceError).message).toContain("offset");
+    }
+    expect(restCalls).toEqual([]); // nothing reached REST
+  });
+
+  it("keeps point posts unchanged: no region, no region fields in client_meta", async () => {
+    const { ctx, restCalls } = contextFor({ sendJson: () => restComment("108", {}) });
+    await commentsHandlers["figma.file.comments.post.request"](
+      postRequest({ nodeId: "23:4", offset: { x: 1, y: 2 } }),
+      ctx,
+      session,
+    );
+    expect(restCalls[0]?.body).toEqual({
+      message: "Region pinned here.",
+      client_meta: { node_id: "23:4", node_offset: { x: 1, y: 2 } },
     });
   });
 });
