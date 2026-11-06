@@ -39,6 +39,7 @@ export const playbackHandlers: FigmaHandlerMap<"figma.file.playback.request"> = 
         fileKey: request.fileKey,
         ids,
         version,
+        ...(request.prepareTextOutlines ? { prepareTextOutlines: true } : {}),
       },
       ctx,
       session,

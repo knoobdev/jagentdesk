@@ -6,6 +6,7 @@ import type {
   FigmaResponseData,
 } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { useFetchQueries } from "@/data/query";
+import { useHostFeature } from "@/runtime/host-features";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import type { FigmaFileRef } from "@/figma/contracts";
 import { callFigma, figmaKeys } from "./figma-api";
@@ -57,6 +58,7 @@ export function useFigmaFrames(
   version: string,
 ): FrameLookup {
   const client = useHostRuntimeClient(file.serverId);
+  const textOutlines = useHostFeature(file.serverId, "figmaTextOutlines");
   const batches = useMemo(() => {
     // Sorted so the same visible set always produces the same query keys — a reshuffle of the
     // player state must not force every batch to refetch.
@@ -79,6 +81,7 @@ export function useFigmaFrames(
           fileKey: file.fileKey,
           frameIds,
           version,
+          ...(textOutlines ? { prepareTextOutlines: true } : {}),
         }),
       enabled: client !== null,
       dataShape: "value" as const,

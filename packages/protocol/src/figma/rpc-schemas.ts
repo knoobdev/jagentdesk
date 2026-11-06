@@ -503,6 +503,7 @@ export const FigmaFileOutlineResponseSchema = res("figma.file.outline.response",
   outline: FigmaOutlineSchema.nullable(),
 });
 export const FigmaFileNodesRequestSchema = req("figma.file.nodes.request", {
+  prepareTextOutlines: z.boolean().optional(),
   fileKey,
   ids: z.array(z.string()).min(1).max(50),
   version: z.string().optional(),
@@ -587,6 +588,7 @@ export const FigmaFilePrototypeResponseSchema = res("figma.file.prototype.respon
 // an empty frame id as absent (latest / no-op), which defeats snapshot pinning. Old RPCs keep
 // their plain strings unchanged.
 export const FigmaFilePlaybackRequestSchema = req("figma.file.playback.request", {
+  prepareTextOutlines: z.boolean().optional(),
   fileKey,
   frameIds: z.array(z.string().min(1)).min(1).max(10),
   version: z.string().min(1),

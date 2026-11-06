@@ -9,6 +9,7 @@ import type {
   FigmaPendingOp,
   FigmaRequestParams,
 } from "@jagentdesk/protocol/figma/rpc-schemas";
+import { useHostFeature } from "@/runtime/host-features";
 import { useFetchQuery } from "@/data/query";
 import { getHostRuntimeStore, useHostRuntimeClient } from "@/runtime/host-runtime";
 import { callFigma } from "./api";
@@ -55,10 +56,11 @@ export function useFigmaFrameStore(
   reloadToken: number,
 ): FrameStore | null {
   const client = useHostRuntimeClient(serverId);
+  const textOutlines = useHostFeature(serverId, "figmaTextOutlines");
   return useMemo(() => {
     if (!client) return null;
     return getFrameStore(
-      `${serverId}|${reloadToken}`,
+      `${serverId}|${reloadToken}|textOutlines=${textOutlines}`,
       fileKey,
       version ?? undefined,
       async (ids, options) => {
@@ -69,6 +71,7 @@ export function useFigmaFrameStore(
           ...(version ? { version } : {}),
         };
         if (options?.depth) params.depth = options.depth;
+        else if (textOutlines && version) params.prepareTextOutlines = true;
         const data = await client.figmaRequest("figma.file.nodes.request", params);
         if (data.error) throw new Error(data.error.message);
         return {
@@ -77,7 +80,7 @@ export function useFigmaFrameStore(
         };
       },
     );
-  }, [client, serverId, fileKey, version, reloadToken]);
+  }, [client, serverId, fileKey, version, reloadToken, textOutlines]);
 }
 
 /** Subscribe the component to the store and kick loading; returns nothing — read via store.get. */

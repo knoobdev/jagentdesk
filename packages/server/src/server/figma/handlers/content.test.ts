@@ -199,6 +199,251 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
+describe("parallel frame text outlines", () => {
+  it("starts a frame SVG before node data arrives and serves extracted glyphs from the pinned cache", async () => {
+    respondFile();
+    const ctx = fixture.api.ctx;
+    await fixture.handlers["figma.file.outline.request"](
+      { type: "figma.file.outline.request", requestId: "outline", fileKey: FILE },
+      ctx,
+      SESSION,
+    );
+    const glyph: FigmaNode = {
+      id: "text_a",
+      type: "TEXT",
+      name: "<text>",
+      absoluteBoundingBox: { x: 30, y: 55, width: 20, height: 10 },
+      fills: [{ type: "SOLID", color: { r: 0, g: 0, b: 0, a: 1 } }],
+    };
+    const frame = { ...restFrame("1:2", "<frame>", 20, 40), children: [glyph] };
+    fixture.api.rest.respond(`/v1/files/${FILE}/nodes`, {
+      version: "v1",
+      nodes: { "1:2": { document: frame } },
+    });
+    fixture.api.rest.respond(`/v1/images/${FILE}`, { images: { "1:2": "<frame-svg-url>" } });
+    fixture.api.rest.provideBytes("<frame-svg-url>", {
+      mimeType: "image/svg+xml",
+      data: Buffer.from(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 200"><g data-node-id="text_a"><path d="M10 15h20v10H10Z" fill="#000"/></g></svg>',
+      ),
+    });
+    let exported!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      exported = resolve;
+    });
+    const disk = ctx.cache;
+    ctx.cache = {
+      getJson: (key) => disk.getJson(key),
+      putJson: (key, data) => disk.putJson(key, data),
+      getBytes: (key) => disk.getBytes(key),
+      putBytes: async (key, bytes) => {
+        await disk.putBytes(key, bytes);
+        if (key.startsWith("text-frame-svg/")) exported();
+      },
+    };
+    const rest = fixture.api.rest;
+    ctx.rest = {
+      getJson: async (input) => {
+        if (input.path.endsWith("/nodes")) await ready;
+        return rest.getJson(input);
+      },
+      sendJson: () => rest.sendJson(),
+      getBytes: (url) => rest.getBytes(url),
+      budget: () => rest.budget(),
+    };
+    const response = await fixture.handlers["figma.file.nodes.request"](
+      {
+        type: "figma.file.nodes.request",
+        requestId: "nodes",
+        fileKey: FILE,
+        ids: ["1:2"],
+        version: "v1",
+        prepareTextOutlines: true,
+      },
+      ctx,
+      SESSION,
+    );
+    expect(response.nodes["1:2"]?.id).toBe("1:2");
+    const cached = await disk.getBytes(`render-rest/${FILE}/text_a@1x@svg@absolute@v1`);
+    expect(cached?.mimeType).toBe("image/svg+xml");
+    expect(cached?.data.toString("utf8")).toContain("translate(-10 -15)");
+    const result = await fixture.handlers["figma.file.render.request"](
+      {
+        type: "figma.file.render.request",
+        requestId: "glyph",
+        fileKey: FILE,
+        ids: ["text_a"],
+        version: "v1",
+        scale: 1,
+        format: "svg",
+        useAbsoluteBounds: true,
+      },
+      ctx,
+      SESSION,
+    );
+    expect(result.images.text_a?.dataBase64).toBe(cached?.data.toString("base64"));
+    expect(rest.callsTo(`/v1/images/${FILE}`)).toHaveLength(1);
+    expect(rest.callsTo(`/v1/images/${FILE}`)[0]?.query).toEqual({
+      ids: "1:2",
+      version: "v1",
+      scale: 1,
+      format: "svg",
+      svg_outline_text: "true",
+      svg_include_node_id: "true",
+      use_absolute_bounds: "true",
+    });
+  });
+
+  it.each([
+    "ordinary-first",
+    "prepared-first",
+    "unsupported-preparation",
+    "ordinary-error",
+  ] as const)("preserves the first complete render result: %s", async (order) => {
+    respondFile();
+    const ctx = fixture.api.ctx;
+    await fixture.handlers["figma.file.outline.request"](
+      { type: "figma.file.outline.request", requestId: "outline", fileKey: FILE },
+      ctx,
+      SESSION,
+    );
+    const glyph: FigmaNode = {
+      id: "text_a",
+      type: "TEXT",
+      name: "<text>",
+      absoluteBoundingBox: { x: 30, y: 55, width: 20, height: 10 },
+      fills: [{ type: "SOLID", color: { r: 0, g: 0, b: 0, a: 1 } }],
+    };
+    fixture.api.rest.respond(`/v1/files/${FILE}/nodes`, {
+      version: "v1",
+      nodes: {
+        "1:2": {
+          document: {
+            ...restFrame("1:2", "<frame>", 20, 40),
+            children: [glyph],
+          },
+        },
+      },
+    });
+    fixture.api.rest.respond(`/v1/images/${FILE}`, ({ query }) => ({
+      images: {
+        [String(query.ids)]: String(query.ids) === "1:2" ? "<frame-svg>" : "<direct-svg>",
+      },
+    }));
+    let finishFrame!: () => void;
+    let finishDirect!: () => void;
+    let directStarted!: () => void;
+    const frameGate = new Promise<void>((resolve) => {
+      finishFrame = resolve;
+    });
+    const directGate = new Promise<void>((resolve) => {
+      finishDirect = resolve;
+    });
+    const requestedDirect = new Promise<void>((resolve) => {
+      directStarted = resolve;
+    });
+    const directSvg =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10"><path d="M0 0h20v10Z"/></svg>';
+    const frameSvg =
+      order === "unsupported-preparation"
+        ? "<svg/>"
+        : '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 200"><g data-node-id="text_a"><path d="M10 15h20v10H10Z" fill="#000"/></g></svg>';
+    const rest = fixture.api.rest;
+    ctx.rest = {
+      getJson: (input) => {
+        if (
+          order === "ordinary-error" &&
+          input.path.endsWith(`/images/${FILE}`) &&
+          input.query?.ids === "text_a"
+        ) {
+          directStarted();
+          return Promise.reject(new Error("Direct export failed"));
+        }
+        return rest.getJson(input);
+      },
+      sendJson: () => rest.sendJson(),
+      budget: () => rest.budget(),
+      getBytes: async (url) => {
+        if (url === "<frame-svg>") {
+          await frameGate;
+          return { mimeType: "image/svg+xml", data: Buffer.from(frameSvg) };
+        }
+        directStarted();
+        await directGate;
+        return { mimeType: "image/svg+xml", data: Buffer.from(directSvg) };
+      },
+    };
+    // The node response must finish even though frame export is still pending.
+    await fixture.handlers["figma.file.nodes.request"](
+      {
+        type: "figma.file.nodes.request",
+        requestId: "nodes",
+        fileKey: FILE,
+        ids: ["1:2"],
+        version: "v1",
+        prepareTextOutlines: true,
+      },
+      ctx,
+      SESSION,
+    );
+    const rendered = fixture.handlers["figma.file.render.request"](
+      {
+        type: "figma.file.render.request",
+        requestId: "glyph",
+        fileKey: FILE,
+        ids: ["text_a"],
+        version: "v1",
+        scale: 1,
+        format: "svg",
+        useAbsoluteBounds: true,
+      },
+      ctx,
+      SESSION,
+    );
+    await requestedDirect;
+    try {
+      if (order === "ordinary-error") {
+        await expect(rendered).rejects.toThrow("Direct export failed");
+        return;
+      }
+      if (order === "prepared-first") finishFrame();
+      else {
+        if (order === "unsupported-preparation") finishFrame();
+        finishDirect();
+      }
+      const result = await rendered;
+      const svg = Buffer.from(result.images.text_a!.dataBase64, "base64").toString("utf8");
+      if (order === "prepared-first") expect(svg).toContain("translate(-10 -15)");
+      else expect(svg).toBe(directSvg);
+    } finally {
+      finishFrame();
+      finishDirect();
+      await rendered.catch(() => undefined);
+    }
+  });
+
+  it("does not speculate about unknown IDs or fetch an outline to enable prefetch", async () => {
+    fixture.api.rest.respond(`/v1/files/${FILE}/nodes`, {
+      version: "v1",
+      nodes: { "1:2": { document: restFrame("1:2", "<frame>", 20, 40) } },
+    });
+    await fixture.handlers["figma.file.nodes.request"](
+      {
+        type: "figma.file.nodes.request",
+        requestId: "nodes",
+        fileKey: FILE,
+        ids: ["1:2"],
+        version: "v1",
+        prepareTextOutlines: true,
+      },
+      fixture.api.ctx,
+      SESSION,
+    );
+    expect(fixture.api.rest.callsTo(`/v1/images/${FILE}`)).toHaveLength(0);
+    expect(fixture.api.rest.callsTo(`/v1/files/${FILE}`)).toHaveLength(0);
+  });
+});
+
 describe("outline", () => {
   it("maps pages, top-level frame bounds, #RRGGBBAA colors and flow starting points", async () => {
     respondFile();
