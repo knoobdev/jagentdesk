@@ -55,11 +55,29 @@
 // NON-SECTION drawing summaries: GROUP/COMPONENT/INSTANCE/… are legitimate loads) with a pinned
 // version and never a known SECTION id (no whole-SECTION downloads for viewport frames). The
 // playback <=10 frameIds contract is enforced on actual UI WebSocket request messages / the
-// correlated RPC trace, never by misreading REST /nodes URLs. The perf fps gate samples rAF
-// ONLY while real wheel-zoom/pan inputs change the viewport (idle raf proves nothing), and the
-// RAM gate measures the real Electron main+helper tree, not the dev-runner's Metro/Node
-// descendants. New behavior rides the server_info capability advertisement, so an old host is
-// gated, not guessed.
+// correlated RPC trace, never by misreading REST /nodes URLs. The fps gate passes ONLY on
+// compositor-presented frames counted with CDP Page.screencast while real CTRL+wheel-zoom,
+// plain-wheel-pan and pointer-drag inputs move the canvas camera (each input must change the
+// canvas 2D context CTM); pixel-change counts and rAF ticks measure the canvas's INTERNAL
+// update cadence and are recorded as diagnostics — never renamed into a pass — and with no
+// screencast data the bar stays UNEXERCISED. ui-file-open is a MOUNT bar: canvas mounted
+// within budget while the daemon was provably still cold; a first COMPLETE frame is not
+// claimed. The RAM gate measures the real Electron main+helper tree, not the dev-runner's
+// Metro/Node descendants. New behavior rides the server_info capability advertisement, so an
+// old host is gated, not guessed.
+//
+// Boot semantics (root-run lessons): the isolated daemon boots with
+// JAGENTDESK_TAILSCALE_ENABLED=0 — this is an EXPLICIT LOOPBACK READ TEST, not tailnet
+// acceptance, and it needs no FigmaDesktop or Link plugin; the tailnet bridge's Supervisor
+// restarts churn the port and false-pass a bare "port is open". boot-isolated-daemon PASS
+// therefore requires a BOUNDED WebSocket handshake whose server_info actually arrives, and
+// boot-electron-renderer requires the desktop bridge to report status running + healthy with
+// a nonempty serverId on OUR listen port. Every client connect/wait carries a deadline,
+// SIGINT/SIGTERM run the owned cleanup, and runtimeDir/ports/child PGIDs are registered to
+// runtime.json immediately for external recovery. figma.link.status.request is read before
+// and after the run — linked files or a pending pairing mean the data flow may ride the
+// plugin path, not standalone REST, and is recorded as a trace-gate offender (no user
+// open/close of the Figma app is required).
 import { spawn, execFileSync } from "node:child_process";
 import { createCipheriv, randomBytes } from "node:crypto";
 import http from "node:http";
@@ -184,6 +202,15 @@ async function portBusy(port) {
     });
     socket.once("error", () => resolve(false));
   });
+}
+
+/** Race any promise against a hard deadline so no harness wait can hang unbounded. */
+function withDeadline(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 async function waitForPort(port, label, processInfo) {
@@ -555,21 +582,56 @@ async function waitForAppPage(browser, expoPort) {
   throw new Error("Timed out waiting for the real Electron app renderer");
 }
 
-async function waitForDesktopStatus(page) {
+/**
+ * Readiness check that cannot lie: the bridge must report `status: "running"` with a NONEMPTY
+ * trimmed serverId, `healthy` true, and the listen address carrying OUR reserved daemon port.
+ * A bare truthy `serverId` was the root-run false pass — the payload reports `serverId: ""`
+ * while the managed daemon is still starting (`typeof "" === "string"` is true).
+ */
+function desktopDaemonReady(status, expectedListenPort) {
+  const serverId = typeof status?.serverId === "string" ? status.serverId.trim() : "";
+  const listenPort =
+    typeof status?.listen === "string"
+      ? Number(/:(\d+)$/.exec(status.listen)?.[1] ?? Number.NaN)
+      : Number.NaN;
+  return (
+    status?.status === "running" &&
+    serverId !== "" &&
+    listenPort === Number(expectedListenPort) &&
+    status.healthy === true
+  );
+}
+
+async function waitForDesktopStatus(page, expectedListenPort) {
   const deadline = Date.now() + bootTimeoutMs;
+  let last = null;
   while (Date.now() < deadline) {
     try {
       const status = await page.evaluate(async () => {
         if (typeof window.jagentdeskDesktop?.invoke !== "function") return null;
         return await window.jagentdeskDesktop.invoke("desktop_daemon_status");
       });
-      if (typeof status?.serverId === "string") return status;
-    } catch {
+      last = status;
+      if (desktopDaemonReady(status, expectedListenPort))
+        return { ...status, serverId: status.serverId.trim() };
+      if (
+        status?.status === "errored" ||
+        (typeof status?.error === "string" && status.error.trim() !== "")
+      ) {
+        throw new Error(
+          `Electron desktop daemon reported error state: ${status.error ?? JSON.stringify(status)}`,
+        );
+      }
+    } catch (error) {
+      if (String(error?.message ?? "").startsWith("Electron desktop daemon reported error"))
+        throw error;
       // Metro may replace the execution context during the initial load.
     }
     await delay(250);
   }
-  throw new Error("Timed out waiting for the Electron desktop bridge");
+  throw new Error(
+    `Timed out waiting for the Electron desktop bridge (running/healthy on port ${expectedListenPort}); last status: ${JSON.stringify(last)}`,
+  );
 }
 
 async function connectDaemonClient(port) {
@@ -580,9 +642,86 @@ async function connectDaemonClient(port) {
     appVersion: "0.9.54",
     webSocketFactory: (u, o) => new WebSocket(u, o?.protocols, { headers: o?.headers }),
   });
-  await client.connect();
+  // client.connect() was observed HANGING unbounded against a daemon that had opened its
+  // port but never completed the handshake (tailnet bridge restart). Bound it, close the
+  // half-open client on failure, and let the caller record a FAIL, not a hung run.
+  try {
+    await withDeadline(client.connect(), bootTimeoutMs, `DaemonClient connect (port ${port})`);
+  } catch (error) {
+    try {
+      client.close();
+    } catch {
+      /* already dead */
+    }
+    throw error;
+  }
   await delay(500);
   return client;
+}
+
+/**
+ * Boot readiness = bounded WS handshake + server_info arrival, NOT a bare open port: the
+ * tailnet bridge's Supervisor restarts left a transient-open port that satisfied waitForPort
+ * while the real daemon was still churning (root run: boot gate false-passed). The client
+ * used for readiness is closed on failure so nothing leaks.
+ */
+async function waitForDaemonReadiness(port, processInfo) {
+  const started = Date.now();
+  const client = await connectDaemonClient(port);
+  try {
+    const deadline = Date.now() + bootTimeoutMs;
+    while (Date.now() < deadline) {
+      if (processInfo?.child.exitCode !== null) {
+        throw new Error(
+          `isolated daemon exited (code ${processInfo.child.exitCode}) before server_info; see ${processInfo.logPath}`,
+        );
+      }
+      const info = client.getLastServerInfoMessage();
+      if (info) return { readyMs: Date.now() - started, version: info.version ?? null };
+      await delay(100);
+    }
+    throw new Error(`no server_info within ${bootTimeoutMs}ms of the WS connect`);
+  } catch (error) {
+    try {
+      client.close();
+    } catch {
+      /* already dead */
+    }
+    throw error;
+  }
+}
+
+/**
+ * Link-plugin quiescence proof (spec 32.4 is a DIFFERENT data path than standalone REST).
+ * Read figma.link.status.request before and after the run: the data-side evidence is only
+ * attributable to the REST source when no file is linked through the plugin and no pairing
+ * is pending. A violation is an offender for the trace gate; the user is away, so the run
+ * never asks anyone to open/close FigmaDesktop or the plugin — the state is simply proven.
+ */
+async function recordLinkStatus(client, phase, evidence) {
+  const res = await figmaRequest(client, "figma.link.status.request", {});
+  const summary = res.error
+    ? { error: `${classifyFigmaError(res.error)} (${res.error.message})` }
+    : {
+        server: res.status?.server ?? null,
+        files: res.status?.files ?? [],
+        pendingPairing: res.status?.pendingPairing ?? null,
+      };
+  evidence[`linkStatus${phase}`] = summary;
+  const problems = [];
+  if (res.error) {
+    problems.push(`link status (${phase.toLowerCase()}) unavailable: ${res.error.message}`);
+  } else {
+    if ((res.status?.files ?? []).length > 0)
+      problems.push(
+        `link status (${phase.toLowerCase()}) has ${res.status.files.length} linked file(s) — data flow may ride the plugin path, not standalone REST`,
+      );
+    if (res.status?.pendingPairing)
+      problems.push(
+        `link status (${phase.toLowerCase()}) has a plugin awaiting pairing — the user is away and no one will type the code`,
+      );
+  }
+  return problems;
 }
 
 async function figmaRequest(client, type, params, options = {}) {
@@ -804,6 +943,55 @@ async function main() {
   let proxy = null;
   let ramSampler = null;
 
+  // Root-recovery registry: written the moment ports are reserved and updated on every spawn,
+  // so an interrupted or hung run leaves a discoverable runtimeDir + child PGIDs (kill
+  // -TERM -<pid>) without tailing logs. Boot/output logs under artifactDir stay root-readable.
+  const processRegistry = [];
+  const writeRegistry = () =>
+    writeJson(path.join(runtimeDir, "runtime.json"), {
+      harnessPid: process.pid,
+      startedAt: new Date().toISOString(),
+      runtimeDir,
+      jagentdeskHome,
+      artifactDir,
+      ports: { daemonPort, expoPort, cdpPort },
+      children: processRegistry,
+    });
+  writeRegistry();
+  const trackChild = (label, info) => {
+    children.push(info.child);
+    processRegistry.push({
+      label,
+      pid: info.child.pid,
+      pgid: info.child.pid,
+      logPath: info.logPath,
+    });
+    writeRegistry();
+  };
+  // SIGINT/SIGTERM must run the OWNED cleanup (stop child groups, close proxy, write
+  // evidence) — otherwise an externally stopped harness leaves the isolated daemon and
+  // Electron groups orphaned, exactly what the root run had to clean by hand.
+  let signalCleanupDone = false;
+  const ownedSignalCleanup = () => {
+    if (signalCleanupDone) return;
+    signalCleanupDone = true;
+    try {
+      if (ramSampler) clearInterval(ramSampler);
+      for (const child of children.toReversed()) stopProcess(child);
+      if (proxy?.server) proxy.server.close();
+      client?.close?.()?.catch?.(() => undefined);
+      browser?.close?.()?.catch?.(() => undefined);
+      evidence.interruptedBySignal = true;
+      finish(evidence, gates, artifactDir);
+      fs.rmSync(runtimeDir, { recursive: true, force: true });
+    } catch {
+      /* best effort while exiting on signal */
+    }
+    process.exit(130);
+  };
+  process.on("SIGINT", ownedSignalCleanup);
+  process.on("SIGTERM", ownedSignalCleanup);
+
   try {
     proxy = await startFigmaProxy();
     const commonEnv = {
@@ -811,6 +999,11 @@ async function main() {
       JAGENTDESK_HOME: jagentdeskHome,
       JAGENTDESK_LISTEN: listen,
       JAGENTDESK_DAEMON_ENDPOINT: `localhost:${daemonPort}`,
+      // Explicit ISOLATED LOOPBACK read test: the tailnet bridge starts Tailscale, binds and
+      // forwards the port, and restarts the Supervisor — its transient port churn false-passed
+      // a bare waitForPort in the root run (daemon.log/desktop.log). This harness never claims
+      // tailnet ACCEPTANCE and needs no FigmaDesktop or Link plugin, so the bridge is off.
+      JAGENTDESK_TAILSCALE_ENABLED: "0",
       JAGENTDESK_CORS_ORIGINS: "*",
       JAGENTDESK_LOCAL_SPEECH_AUTO_DOWNLOAD: "0",
       JAGENTDESK_DICTATION_ENABLED: "0",
@@ -828,13 +1021,21 @@ async function main() {
       { cwd: rootDir, env: { ...commonEnv, JAGENTDESK_NODE_ENV: "development" } },
       artifactDir,
     );
-    children.push(daemon.child);
+    trackChild("daemon", daemon);
     await waitForPort(daemonPort, "isolated daemon", daemon);
     assert(daemonPort !== 6767, "isolated daemon must not use the production port 6767");
+    // An OPEN port is only a stage marker, never readiness: the root run false-passed here
+    // when the tailnet bridge's Supervisor restarts left the port transiently open. PASS
+    // requires a bounded WS handshake whose server_info arrives; failure throws so the
+    // boot gate FAILS with a reason instead of the run hanging or claiming a false green.
+    const readiness = await waitForDaemonReadiness(daemonPort, daemon);
     passGate("boot-isolated-daemon", {
       daemonPort,
       bootMs: Date.now() - daemonBootStart,
+      wsReadyAfterPortOpenMs: readiness.readyMs,
+      serverInfoVersion: readiness.version,
       productionDaemonBusy,
+      note: "isolated LOOPBACK read test with JAGENTDESK_TAILSCALE_ENABLED=0 (no tailnet acceptance claimed); readiness = bounded WS server_info, not a bare port",
     });
 
     const appBootStart = Date.now();
@@ -855,11 +1056,11 @@ async function main() {
       },
       artifactDir,
     );
-    children.push(desktop.child);
+    trackChild("desktop", desktop);
     await waitForPort(cdpPort, "Electron CDP", desktop);
     browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
     const page = await waitForAppPage(browser, expoPort);
-    const status = await waitForDesktopStatus(page);
+    const status = await waitForDesktopStatus(page, daemonPort);
     passGate("boot-electron-renderer", {
       serverId: status.serverId,
       bootMs: Date.now() - appBootStart,
@@ -955,6 +1156,13 @@ async function main() {
       );
     }
 
+    // ── Link attribution (root-run requirement): the standalone data path is REST via the
+    // recording proxy; Figma Link is a separate source. Prove quiescence BEFORE the run —
+    // status.files empty and no pendingPairing — so the REST-side evidence is attributable.
+    // No FigmaDesktop/plugin needs to run and the user never has to open/close anything.
+    const linkProblems = [];
+    linkProblems.push(...(await recordLinkStatus(client, "Before", evidence)));
+
     // ── UI: open the Figma section through the real sidebar ────────────────────
     const openFigmaSection = async () => {
       await page
@@ -1007,7 +1215,7 @@ async function main() {
         // The file entered the daemon store over WS; reload and re-navigate the real product UI
         // so the files home shows it — a user-visible refresh, not DOM injection into Figma.
         await page.reload({ waitUntil: "domcontentloaded", timeout: bootTimeoutMs });
-        await waitForDesktopStatus(page);
+        await waitForDesktopStatus(page, daemonPort);
         await openFigmaSection();
       },
     });
@@ -1058,11 +1266,13 @@ async function main() {
     }
 
     // ── URL trace gate: real proof of which REST shapes the app touched ─────────
+    linkProblems.push(...(await recordLinkStatus(client, "After", evidence)));
     runUrlTraceGate(
       proxy.log,
       fileKey,
       evidence.sectionNodeIds ? new Set(evidence.sectionNodeIds) : null,
       uiRequests,
+      linkProblems,
     );
   } catch (error) {
     console.error(`Figma standalone E2E failed. Artifacts: ${artifactDir}`);
@@ -1471,6 +1681,8 @@ async function runUiPlaybackGates(
       ...coldWitness,
       restDuringMountWindow: mountRest.map((e) => e.pathname),
       note: coldLabel,
+      frameBarLimit:
+        "MOUNT-ONLY bar: #jagentdesk-figma-canvas mounted within budget — a first COMPLETE frame is not claimed by this harness",
     });
   } else {
     failGate(
@@ -1493,6 +1705,7 @@ async function runUiPlaybackGates(
       `no #jagentdesk-figma-canvas element to drive pan/zoom against — rAF cadence recorded as diagnostic only: ${JSON.stringify(idleRaf)}`,
     );
   } else {
+    const inputs = [];
     const readCtm = async () =>
       await page.evaluate(() => {
         const c = document.getElementById("jagentdesk-figma-canvas");
@@ -1506,7 +1719,6 @@ async function runUiPlaybackGates(
     const cy = canvasBox ? canvasBox.y + canvasBox.height / 2 : 300;
     await page.mouse.move(cx, cy);
     const idleRaf = await sampleRafCadence(page, 1_000);
-    const inputs = [];
     const applyInput = async (label, action) => {
       const before = await readCtm();
       await action();
@@ -1514,9 +1726,30 @@ async function runUiPlaybackGates(
       const after = await readCtm();
       inputs.push({ label, ctmChanged: JSON.stringify(before) !== JSON.stringify(after) });
     };
-    // Start the presentation sampler FIRST, then keep the viewport genuinely changing for the
-    // whole sample: ctrl+wheel zoom, plain-wheel pan, real pointer-drag pan.
+    // COMPOSITOR-PRESENTED evidence: CDP Page.screencast delivers frames as the compositor
+    // presents them for this tab, so its rate — not an rAF tick count, and not a getImageData
+    // pixel diff (canvas INTERNAL update cadence) — is what may pass the >= 50 fps bar.
+    // Both of those are still recorded, truthfully labelled as diagnostics.
+    let cdp = null;
+    let castFrames = 0;
+    try {
+      cdp = await page.context().newCDPSession(page);
+      cdp.on("Page.screencastFrame", (frame) => {
+        castFrames += 1;
+        cdp.send("Page.screencastFrameAck", { sessionId: frame.sessionId }).catch(() => {});
+      });
+      await cdp.send("Page.startScreencast", {
+        format: "jpeg",
+        quality: 40,
+        everyNthFrame: 1,
+      });
+    } catch {
+      cdp = null;
+    }
+    // Start the pixel-cadence sampler FIRST, then keep the viewport genuinely changing for
+    // the whole window: ctrl+wheel zoom, plain-wheel pan, real pointer-drag pan.
     const presentation = sampleCanvasPresentation(page, 2_500);
+    const castStart = Date.now();
     const wheelZoom = async () => {
       await page.keyboard.down("Control");
       await page.mouse.move(cx, cy);
@@ -1538,27 +1771,42 @@ async function runUiPlaybackGates(
       await applyInput(`plain-wheel pan #${round + 1}`, wheelPan);
       await applyInput(`pointer-drag pan #${round + 1}`, dragPan);
     }
-    const presented = await presentation;
+    const canvasUpdateCadence = await presentation;
+    let compositor = null;
+    if (cdp) {
+      const windowMs = Date.now() - castStart;
+      await cdp.send("Page.stopScreencast").catch(() => {});
+      await cdp.detach().catch(() => {});
+      if (windowMs > 0 && castFrames > 0)
+        compositor = {
+          presentedFps: Number(((castFrames / windowMs) * 1000).toFixed(1)),
+          frames: castFrames,
+          windowMs,
+        };
+    }
     const everyInputMovedCamera = inputs.every((i) => i.ctmChanged);
-    const gate = {
-      inputs,
-      everyInputMovedCamera,
-      presentation: presented,
-      idleRafCadence: idleRaf,
-      note: "presentation = canvas pixels that actually changed per frame during live inputs; rAF is cadence, recorded diagnostic only",
-    };
-    if (!presented) {
+    if (!compositor) {
       unexercisedGate(
         "perf-playback-fps",
-        `canvas 2D context unreadable — active inputs ran (${JSON.stringify(inputs)}) and rAF cadence ${JSON.stringify(idleRaf)} recorded as diagnostic; the >= ${minFpsValue} rendering bar stays UNEXERCISED, not passed`,
+        `no compositor-presented FPS evidence this run (${cdp ? "CDP screencast delivered zero frames" : "CDP screencast unavailable"}) — inputs ran with per-input CTM proof ${everyInputMovedCamera}; canvas internal update cadence ${JSON.stringify(canvasUpdateCadence)} and idle rAF ${JSON.stringify(idleRaf)} recorded as DIAGNOSTICS ONLY, never renamed into a pass`,
       );
-    } else if (presented.presentedFps >= minFpsValue && everyInputMovedCamera) {
-      passGate("perf-playback-fps", gate);
     } else {
-      failGate(
-        "perf-playback-fps",
-        `presented ${presented?.presentedFps} fps (gate >= ${minFpsValue}) with per-input CTM proof ${everyInputMovedCamera}: ${JSON.stringify(gate)}`,
-      );
+      const gate = {
+        compositorPresented: compositor,
+        inputs,
+        everyInputMovedCamera,
+        canvasUpdateCadence,
+        canvasUpdateCadenceNote:
+          "pixel-change/rAF = canvas internal update cadence, NOT compositor-presented fps",
+        idleRafCadence: idleRaf,
+      };
+      if (compositor.presentedFps >= minFpsValue && everyInputMovedCamera)
+        passGate("perf-playback-fps", gate);
+      else
+        failGate(
+          "perf-playback-fps",
+          `compositor presented ${compositor.presentedFps} fps during live inputs (gate >= ${minFpsValue}), per-input CTM proof ${everyInputMovedCamera}: ${JSON.stringify(gate)}`,
+        );
     }
   }
 
@@ -1650,9 +1898,10 @@ async function runUiPlaybackGates(
 }
 
 /**
- * Presentation sampler: counts rAF ticks AND the ticks whose centre-region pixel sample of
- * the file canvas actually changed (pixels re-rendered), during live inputs. presentedFps is
- * the honest rendering evidence; rafFps is cadence only and never passes the bar alone.
+ * Canvas-internal update sampler (DIAGNOSTIC ONLY): counts rAF ticks and the ticks whose
+ * centre-region pixel sample of the file canvas actually changed (pixels re-rendered) during
+ * live inputs. Neither number is compositor-presented FPS — that bar is the CDP screencast
+ * measurement above; these never pass anything on their own.
  */
 async function sampleCanvasPresentation(page, sampleMs) {
   return await page.evaluate(async (ms) => {
@@ -1752,9 +2001,13 @@ async function sampleRafCadence(page, sampleMs) {
  * The app must NEVER issue an unbounded (no depth) full-document /v1/files/:key GET.
  */
 // eslint-disable-next-line eslint(complexity) -- every request class records its own offender.
-function runUrlTraceGate(proxyLog, fileKey, sectionNodeIds, uiRequests) {
+function runUrlTraceGate(proxyLog, fileKey, sectionNodeIds, uiRequests, linkProblems = []) {
   const restEntries = proxyLog.filter((entry) => entry.pathname.startsWith("/v1/"));
   const offenders = [];
+  // Link quiescence violations fold into the trace verdict: with a plugin-linked file or a
+  // pending pairing, "the app got its data over standalone REST" is no longer proven.
+  for (const problem of linkProblems)
+    offenders.push(`Link plugin path, not standalone REST proof — ${problem}`);
   const outlineDepths = [];
   let sectionMetadataCalls = 0;
   let nodesBatches = 0;

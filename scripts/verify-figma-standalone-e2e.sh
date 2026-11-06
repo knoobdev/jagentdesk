@@ -35,6 +35,14 @@
 # The desktop dist is NOT built here: the harness requires packages/desktop/dist/main.js and
 # fails RED naming the integrator-owned merged build when it is absent.
 # The production daemon on port 6767 and the installed app are never touched.
+# Boot is an ISOLATED LOOPBACK READ TEST: the tailnet bridge is disabled for the children
+# (JAGENTDESK_TAILSCALE_ENABLED=0) — this run never claims tailnet acceptance and needs no
+# FigmaDesktop or Link plugin. boot-isolated-daemon PASSes only on a bounded WS server_info
+# handshake (a transiently open port false-passes), the Electron boot gate only on a running,
+# healthy, nonempty-serverId bridge status on the reserved port, and the fps bar only on
+# compositor-presented CDP screencast frames (pixel/rAF cadence are diagnostics; no evidence
+# leaves it UNEXERCISED, never a false PASS). Link status is read before/after to keep the
+# data proof attributable to standalone REST. Boot/output logs live under the artifact dir.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
