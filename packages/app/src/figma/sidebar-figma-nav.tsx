@@ -40,13 +40,20 @@ import {
 } from "@/figma/queries";
 import { useFigmaGlobalNav, type FigmaNav } from "@/figma/nav";
 import { parseFigmaFileUrl, parseFigmaTeamUrl } from "@/figma/url-parse";
+import {
+  BrowseFilesRow,
+  BrowseGuidanceRow,
+  canBrowseFigmaFiles,
+  describeFigmaApiError,
+} from "@/figma/browse-files";
 
 // The left column while the Figma section is open (spec 32.5), owned the way the Jira column owns
 // its navigation: connections with their auth state; under the selected connection its files —
 // Pinned, Recent, and the files Figma Link reports open right now — plus added teams and their
 // projects; when a file is open, its pages and the layer tree of the selected frame, searchable
-// by name. Rows drive the Figma screen's route params; adding by URL parses client-side first so
-// a bad paste never leaves the column.
+// by name. Rows drive the Figma screen's route params. The primary add is Browse files
+// (ADR-0038, desktop only); the URL-paste rows sit under an explicit Advanced disclosure so a
+// bad paste parses client-side first and never leaves the column.
 
 // Theme-reactive icons. `withUnistyles(Component, mappings)` keeps the color on the theme
 // (light + dark) without the `uniProps` prop, which leaks onto the DOM node on web and draws
@@ -852,6 +859,118 @@ function OpenInFigmaSection({ serverId }: { serverId: string }) {
   );
 }
 
+// Everything under a CONNECTED account: the Browse-first Files section (URL
+// paste lives under the Advanced disclosure), Teams, and the Figma Link rows.
+function ConnectedTree({
+  serverId,
+  connectionId,
+  fileKey,
+  go,
+}: {
+  serverId: string;
+  connectionId: string;
+  fileKey: string | null;
+  go: Go;
+}) {
+  const files = useFigmaFiles(serverId, connectionId);
+  const teams = useFigmaTeams(serverId, connectionId);
+  const { pinned, recent } = useMemo(() => groupFiles(files.data ?? []), [files.data]);
+  const teamList = useMemo(() => teams.data ?? [], [teams.data]);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const toggleAdvanced = useCallback(() => setAdvancedOpen((previous) => !previous), []);
+  return (
+    <>
+      <Text style={styles.sectionLabel}>Files</Text>
+      {/* Browse files is the primary add (ADR-0038). It needs the native
+          pick, so non-desktop sessions get guidance instead of a fake
+          picker, and the URL-paste rows stay reachable under Advanced. */}
+      {canBrowseFigmaFiles() ? (
+        <BrowseFilesRow serverId={serverId} connectionId={connectionId} />
+      ) : (
+        <BrowseGuidanceRow />
+      )}
+      {files.isLoading ? <Text style={styles.empty}>Loading files…</Text> : null}
+      {files.error ? (
+        <Text style={styles.emptyError} testID="figma-nav-files-error">
+          {describeFigmaApiError(files.error)}
+        </Text>
+      ) : null}
+      {pinned.length > 0 ? (
+        <>
+          <Text style={[styles.rowSub, styles.groupLabel]}>Pinned</Text>
+          {pinned.map((file) => (
+            <FileRow
+              key={file.fileKey}
+              serverId={serverId}
+              file={file}
+              active={fileKey === file.fileKey}
+              go={go}
+            />
+          ))}
+        </>
+      ) : null}
+      {recent.length > 0 ? (
+        <>
+          <Text style={[styles.rowSub, styles.groupLabel]}>Recent</Text>
+          {recent.slice(0, 8).map((file) => (
+            <FileRow
+              key={file.fileKey}
+              serverId={serverId}
+              file={file}
+              active={fileKey === file.fileKey}
+              go={go}
+            />
+          ))}
+        </>
+      ) : null}
+      {!files.isLoading && !files.error && !pinned.length && !recent.length ? (
+        <Text style={styles.empty} testID="figma-nav-files-empty">
+          No files yet. Use Browse files, or paste a URL under Advanced.
+        </Text>
+      ) : null}
+
+      <Text style={styles.sectionLabel}>Teams</Text>
+      {teams.isLoading ? <Text style={styles.empty}>Loading teams…</Text> : null}
+      {teams.error ? (
+        <Text style={styles.emptyError} testID="figma-nav-teams-error">
+          {describeFigmaApiError(teams.error)}
+        </Text>
+      ) : null}
+      {teamList.map((team) => (
+        <TeamRow
+          key={team.teamId}
+          serverId={serverId}
+          connectionId={connectionId}
+          teamId={team.teamId}
+          teamName={team.name}
+          go={go}
+        />
+      ))}
+      {!teams.isLoading && !teams.error && !teamList.length ? (
+        <Text style={styles.empty} testID="figma-nav-teams-empty">
+          No teams yet. Add a team by URL under Advanced.
+        </Text>
+      ) : null}
+
+      <Pressable
+        style={styles.advancedRow}
+        onPress={toggleAdvanced}
+        accessibilityRole="button"
+        testID="figma-nav-advanced"
+      >
+        <Text style={styles.advancedLabel}>{advancedOpen ? "▾" : "▸"} Advanced</Text>
+      </Pressable>
+      {advancedOpen ? (
+        <View testID="figma-nav-advanced-panel">
+          <AddFileRow serverId={serverId} connectionId={connectionId} />
+          <AddTeamRow serverId={serverId} connectionId={connectionId} />
+        </View>
+      ) : null}
+      <OpenInFigmaSection serverId={serverId} />
+    </>
+  );
+}
+
 export function SidebarFigmaNav({ serverId }: { serverId: string }) {
   const { location, go } = useFigmaGlobalNav();
   const connections = useFigmaConnections(serverId);
@@ -860,9 +979,6 @@ export function SidebarFigmaNav({ serverId }: { serverId: string }) {
     () => list.find((c) => c.id === location.connectionId) ?? list[0] ?? null,
     [list, location.connectionId],
   );
-  const files = useFigmaFiles(serverId, selected?.id ?? null);
-  const teams = useFigmaTeams(serverId, selected?.id ?? null);
-  const { pinned, recent } = useMemo(() => groupFiles(files.data ?? []), [files.data]);
   const leave = useCallback(() => router.push("/"), []);
   const openLink = useCallback(() => go({ view: "link" }), [go]);
   const openConnect = useCallback(() => go({ view: "connect" }), [go]);
@@ -903,51 +1019,12 @@ export function SidebarFigmaNav({ serverId }: { serverId: string }) {
         ))}
 
         {selected && selected.authState === "connected" ? (
-          <>
-            <Text style={styles.sectionLabel}>Files</Text>
-            <AddFileRow serverId={serverId} connectionId={selected.id} />
-            {files.isLoading ? <Text style={styles.empty}>Loading files…</Text> : null}
-            {pinned.length > 0 ? (
-              <>
-                <Text style={[styles.rowSub, styles.groupLabel]}>Pinned</Text>
-                {pinned.map((file) => (
-                  <FileRow
-                    key={file.fileKey}
-                    serverId={serverId}
-                    file={file}
-                    active={location.fileKey === file.fileKey}
-                    go={go}
-                  />
-                ))}
-              </>
-            ) : null}
-            {recent.length > 0 ? (
-              <>
-                <Text style={[styles.rowSub, styles.groupLabel]}>Recent</Text>
-                {recent.slice(0, 8).map((file) => (
-                  <FileRow
-                    key={file.fileKey}
-                    serverId={serverId}
-                    file={file}
-                    active={location.fileKey === file.fileKey}
-                    go={go}
-                  />
-                ))}
-              </>
-            ) : null}
-            <AddTeamRow serverId={serverId} connectionId={selected.id} />
-            {(teams.data ?? []).map((team) => (
-              <TeamRow
-                key={team.teamId}
-                serverId={serverId}
-                connectionId={selected.id}
-                teamId={team.teamId}
-                teamName={team.name}
-                go={go}
-              />
-            ))}
-            <OpenInFigmaSection serverId={serverId} />
-          </>
+          <ConnectedTree
+            serverId={serverId}
+            connectionId={selected.id}
+            fileKey={location.fileKey}
+            go={go}
+          />
         ) : null}
 
         {location.fileKey ? (
@@ -1080,6 +1157,14 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontSize: theme.fontSize.xs,
     color: theme.colors.foregroundMuted,
   },
+  emptyError: {
+    paddingHorizontal: theme.spacing[3] + theme.spacing[6],
+    paddingVertical: theme.spacing[1],
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.palette.red[500],
+  },
+  advancedRow: row(theme),
+  advancedLabel: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
   dotGreen: { ...dot(theme), backgroundColor: theme.colors.palette.green[500] },
   dotYellow: { ...dot(theme), backgroundColor: theme.colors.palette.amber[500] },
   dotRed: { ...dot(theme), backgroundColor: theme.colors.palette.red[500] },
