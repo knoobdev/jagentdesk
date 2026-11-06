@@ -366,7 +366,7 @@ function ScopedPrototypePlayer({ file, outline, startNodeId, onClose }: Prototyp
           <Button variant="outline" size="sm" onPress={frames.retry}>
             Retry
           </Button>
-          <Button variant="outline" size="sm" onPress={onClose}>
+          <Button variant="outline" size="sm" onPress={onClose} testID="figma-prototype-close">
             Close
           </Button>
         </View>
@@ -380,7 +380,7 @@ function ScopedPrototypePlayer({ file, outline, startNodeId, onClose }: Prototyp
     return (
       <View style={styles.centered} testID="figma-player-select-frame">
         <Text style={styles.muted}>{sectionPrompt}</Text>
-        <Button variant="outline" size="sm" onPress={onClose}>
+        <Button variant="outline" size="sm" onPress={onClose} testID="figma-prototype-close">
           Close
         </Button>
       </View>
@@ -391,7 +391,7 @@ function ScopedPrototypePlayer({ file, outline, startNodeId, onClose }: Prototyp
     return (
       <View style={styles.centered}>
         <Text style={styles.muted}>No prototype flows in this file.</Text>
-        <Button variant="outline" size="sm" onPress={onClose}>
+        <Button variant="outline" size="sm" onPress={onClose} testID="figma-prototype-close">
           Close
         </Button>
       </View>
@@ -602,10 +602,14 @@ export function PlayerToolbar({
   startNote: string | null;
 }) {
   return (
-    <View style={styles.toolbar}>
+    <View style={styles.toolbar} testID="figma-prototype-toolbar">
       <DropdownMenu>
+        {/* The flow name is the only unbounded text here: it shrinks and ellipsizes (minWidth 0
+            lets a flex child go below its content size) instead of pushing Back/Restart/hotspots/
+            Close past the player's own container edge — under the Inspector on a narrow desktop
+            rail, off-screen on a phone. */}
         <DropdownMenuTrigger style={styles.trigger}>
-          <Text style={styles.triggerLabel} numberOfLines={1}>
+          <Text style={styles.triggerLabel} numberOfLines={1} ellipsizeMode="tail">
             {currentFlowLabel(flows, startFrameId)}
           </Text>
         </DropdownMenuTrigger>
@@ -631,11 +635,25 @@ export function PlayerToolbar({
           testID="figma-show-hotspots"
         />
       </View>
-      {overlayNote ? <Text style={styles.note}>{overlayNote}</Text> : null}
-      {startNote ? <Text style={styles.note}>{startNote}</Text> : null}
-      <Button variant="ghost" size="sm" onPress={onClose}>
+      <Button
+        variant="ghost"
+        size="sm"
+        style={styles.close}
+        onPress={onClose}
+        testID="figma-prototype-close"
+      >
         Close
       </Button>
+      {overlayNote ? (
+        <Text style={styles.note} numberOfLines={2}>
+          {overlayNote}
+        </Text>
+      ) : null}
+      {startNote ? (
+        <Text style={styles.note} numberOfLines={2}>
+          {startNote}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -955,31 +973,52 @@ function OverlayLayer({
 const styles = StyleSheet.create((theme: Theme) => ({
   screen: { flex: 1, backgroundColor: theme.colors.surfaceWorkspace },
   toolbar: {
+    // Wrap instead of overflow (spec 32.5.3 responsive contract): the player renders inside its
+    // own canvas column — a ~450px desktop rail next to the Inspector, ~390/280px on a phone —
+    // and a single unwrapping row let a long flow name push Back/Restart/hotspots/Close past the
+    // container edge, with Close landing under the sibling Inspector panel (real-Electron run 12:
+    // Playwright's click hit the panel, not the button). Items that no longer fit drop to the
+    // next row at their full size, so every control stays visible and hit-testable.
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "center",
     gap: theme.spacing[2],
+    rowGap: theme.spacing[1],
     paddingHorizontal: theme.spacing[3],
     paddingVertical: theme.spacing[2],
     backgroundColor: theme.colors.surface0,
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
   },
-  navGroup: { flexDirection: "row", gap: theme.spacing[1] },
+  // Fixed-size controls never squash: they wrap as whole units and Close stays tappable.
+  navGroup: { flexDirection: "row", gap: theme.spacing[1], flexShrink: 0 },
   errorActions: { flexDirection: "row", gap: theme.spacing[2] },
   hotspotToggle: {
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[1.5],
     marginLeft: "auto",
+    flexShrink: 0,
   },
   trigger: {
+    // The long label is bounded HERE: shrinkable with minWidth 0 so `numberOfLines={1}`
+    // ellipsizes at the container edge instead of growing the toolbar past it.
+    flexShrink: 1,
+    minWidth: 0,
+    maxWidth: "100%",
     paddingHorizontal: theme.spacing[2],
     paddingVertical: theme.spacing[1],
     borderRadius: theme.borderRadius.sm,
     backgroundColor: theme.colors.surface1,
   },
   triggerLabel: { fontSize: theme.fontSize.sm, color: theme.colors.foreground },
-  note: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
+  close: { flexShrink: 0 },
+  note: {
+    // Diagnostics own a row: full basis so they never compete with controls for width.
+    flexBasis: "100%",
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+  },
   muted: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
   stageHost: { flex: 1, position: "relative" },
   centered: {
