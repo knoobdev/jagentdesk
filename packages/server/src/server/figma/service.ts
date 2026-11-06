@@ -22,12 +22,7 @@ import { filesHandlers } from "./handlers/files.js";
 import { linkHandlers } from "./handlers/link.js";
 import { pendingHandlers } from "./handlers/pending.js";
 import { playbackHandlers } from "./handlers/playback.js";
-import {
-  REMOTE_HANDLERS,
-  isFigmaRemoteRequestType,
-  type FigmaRemoteRequest,
-  type FigmaRemoteRequestType,
-} from "./handlers/remote.js";
+import { remoteHandlers } from "./handlers/remote.js";
 import type { FigmaHandler, FigmaHandlerMap, FigmaSessionInfo } from "./handlers/types.js";
 import { FigmaRemoteConnector } from "./remote/connector.js";
 
@@ -42,6 +37,7 @@ const HANDLERS: FigmaHandlerMap<FigmaRequestType> = {
   ...linkHandlers,
   ...pendingHandlers,
   ...playbackHandlers,
+  ...remoteHandlers,
 };
 
 export interface FigmaServiceParts {
@@ -88,7 +84,7 @@ export class FigmaService {
   }
 
   handles(type: string): type is FigmaRequestType {
-    return Object.hasOwn(HANDLERS, type) || isFigmaRemoteRequestType(type);
+    return Object.hasOwn(HANDLERS, type);
   }
 
   async handle<T extends FigmaRequestType>(
@@ -96,17 +92,9 @@ export class FigmaService {
     session: FigmaSessionInfo,
   ): Promise<FigmaResponseData<T>> {
     const handler = HANDLERS[request.type as T] as FigmaHandler<T> | undefined;
-    if (handler) return handler(request, this.ctx, session);
-    // COMPAT(figma-remote-writes): the figma.remote.* RPC types are not in the protocol union
-    // yet (W4); they are validated and typed locally in handlers/remote.ts. Remove this branch
-    // once FigmaRequest includes them.
-    if (isFigmaRemoteRequestType(request.type)) {
-      const remoteHandler = REMOTE_HANDLERS[request.type as FigmaRemoteRequestType];
-      return remoteHandler(request as unknown as FigmaRemoteRequest, this.ctx, session) as Promise<
-        FigmaResponseData<T>
-      >;
-    }
-    throw new FigmaServiceError("unsupported", `Unknown Figma request ${request.type}`);
+    if (!handler)
+      throw new FigmaServiceError("unsupported", `Unknown Figma request ${request.type}`);
+    return handler(request, this.ctx, session);
   }
 
   onPush(listener: (event: FigmaPush) => void): () => void {

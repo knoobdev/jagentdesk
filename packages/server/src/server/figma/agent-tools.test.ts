@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import pino from "pino";
 import type { FigmaService } from "./service.js";
 import type { FigmaContext, FigmaNode } from "./context.js";
+import { figmaContent } from "./handlers/content.js";
 import {
   createFigmaAgentTools,
   figmaNodeToCss,
@@ -35,6 +36,7 @@ interface PermissionAsk {
 
 interface Harness {
   ctx: FigmaContext;
+  pushes: ReturnType<typeof fakeFigmaContext>["pushes"];
   link: FakeFigmaLink;
   rest: FakeFigmaRest;
   store: FakeFigmaStore;
@@ -66,7 +68,7 @@ function setup(opts?: {
   if (opts?.linked !== false) link.setLinked(FILE_KEY);
   if (opts?.runScriptEnabled !== undefined) link.runScriptEnabled = opts.runScriptEnabled;
   if (opts?.node) link.setNode(FILE_KEY, opts.node);
-  const { ctx } = fakeFigmaContext({ jagentdeskHome: home, logger, store, rest, link });
+  const { ctx, pushes } = fakeFigmaContext({ jagentdeskHome: home, logger, store, rest, link });
 
   const asks: PermissionAsk[] = [];
   let decision: { behavior: "allow" | "deny" } = { behavior: "allow" };
@@ -83,6 +85,7 @@ function setup(opts?: {
   const byName = new Map(tools.map((t) => [t.name, t]));
   const harness: Harness = {
     ctx,
+    pushes,
     link,
     rest,
     store,
@@ -174,14 +177,14 @@ describe("classification (spec 32.7)", () => {
     }
   });
 
-  it("total tool surface is 113", () => {
+  it("total tool surface is 116", () => {
     const h = setup();
     const tools = createFigmaAgentTools({
       service: { ctx: h.ctx } as unknown as FigmaService,
       callerAgentId: "agent-1",
       requestPermission: async () => ({ behavior: "allow" as const }),
     });
-    expect(tools.length).toBe(113);
+    expect(tools.length).toBe(116);
   });
 });
 
@@ -585,8 +588,14 @@ describe("remote write tools (ADR-0040)", () => {
       description: "d",
     });
     expect(res.isError ?? false).toBe(false);
-    expect(h.pushes ?? []).toContainEqual({});
-    // the push flows through ctx.push collected by fakeFigmaContext — see handlers test for the full assertion
+    expect(h.pushes).toContainEqual({
+      type: "figma.file.changed",
+      watchId,
+      fileKey: FILE_KEY,
+      version: "v-new",
+      source: "rest",
+    });
+    figmaContent.watches.unwatch(watchId);
   });
 
   it("reports UNVERIFIED (never Saved) when the metadata readback failed", async () => {

@@ -1,69 +1,27 @@
+import type {
+  FigmaRemoteCallResult,
+  FigmaRemoteStatus,
+} from "@jagentdesk/protocol/figma/rpc-schemas";
 import { FigmaServiceError } from "../context.js";
 import type {
   FigmaContext,
-  FigmaMcpCallResult,
   FigmaRemoteExecuteInput,
   FigmaRemoteExecuteOutcome,
   FigmaRemoteGateway,
 } from "../context.js";
 import { figmaContent } from "./content.js";
-import type { FigmaSessionInfo } from "./types.js";
+import type { FigmaHandler, FigmaHandlerMap } from "./types.js";
 
-// figma.remote.* RPC group (spec 32.9 / ADR-0040). The RPC types are not in the protocol yet
-// (W4 owns that registration), so this module defines the wire shapes locally and FigmaService
-// widens its handler lookup with a cast. Nothing here stores tokens: every response carries MCP
-// call results and observed status only.
+// figma.remote.* RPC group (spec 32.9 / ADR-0040) on the protocol DTOs registered by W4.
+// Nothing here stores tokens: every response carries MCP call results and observed status
+// only. The connector's guard errors travel verbatim so the app can say "Connect editing".
 
-export const FIGMA_REMOTE_REQUEST_TYPES = [
-  "figma.remote.status.request",
-  "figma.remote.auth.begin.request",
-  "figma.remote.disconnect.request",
-  "figma.remote.read.request",
-  "figma.remote.execute.request",
-] as const;
-export type FigmaRemoteRequestType = (typeof FIGMA_REMOTE_REQUEST_TYPES)[number];
-
-export interface FigmaRemoteStatusRequest {
-  type: "figma.remote.status.request";
-  requestId: string;
-}
-export interface FigmaRemoteAuthBeginRequest {
-  type: "figma.remote.auth.begin.request";
-  requestId: string;
-}
-export interface FigmaRemoteDisconnectRequest {
-  type: "figma.remote.disconnect.request";
-  requestId: string;
-}
-export interface FigmaRemoteReadRequest {
-  type: "figma.remote.read.request";
-  requestId: string;
-  fileKey: string;
-  nodeId?: string;
-}
-export interface FigmaRemoteExecuteRequest {
-  type: "figma.remote.execute.request";
-  requestId: string;
-  fileKey: string;
-  code: string;
-  description: string;
-}
-export type FigmaRemoteRequest =
-  | FigmaRemoteStatusRequest
-  | FigmaRemoteAuthBeginRequest
-  | FigmaRemoteDisconnectRequest
-  | FigmaRemoteReadRequest
-  | FigmaRemoteExecuteRequest;
-
-export type FigmaRemoteHandler = (
-  request: FigmaRemoteRequest,
-  ctx: FigmaContext,
-  session: FigmaSessionInfo,
-) => Promise<Record<string, unknown>>;
-
-export function isFigmaRemoteRequestType(type: string): type is FigmaRemoteRequestType {
-  return (FIGMA_REMOTE_REQUEST_TYPES as readonly string[]).includes(type);
-}
+export type FigmaRemoteRequestType =
+  | "figma.remote.status.request"
+  | "figma.remote.auth.begin.request"
+  | "figma.remote.disconnect.request"
+  | "figma.remote.read.request"
+  | "figma.remote.execute.request";
 
 function gatewayOrThrow(ctx: FigmaContext): FigmaRemoteGateway {
   if (!ctx.remote)
@@ -71,7 +29,7 @@ function gatewayOrThrow(ctx: FigmaContext): FigmaRemoteGateway {
   return ctx.remote;
 }
 
-/** The connector's clear message travels verbatim — the UI tells the user to Connect editing. */
+/** A FigmaServiceError passes through; connector Errors become readable figma_errors. */
 function toServiceError(error: unknown): FigmaServiceError {
   if (error instanceof FigmaServiceError) return error;
   const message = error instanceof Error ? error.message : String(error);
@@ -86,7 +44,7 @@ async function requireTargetFile(ctx: FigmaContext, fileKey: string): Promise<vo
 }
 
 /** Best-effort version extraction from a metadata readback (structuredContent or a JSON text block). */
-function extractReadbackVersion(readback: FigmaMcpCallResult | undefined): string | null {
+function extractReadbackVersion(readback: FigmaRemoteCallResult | undefined): string | null {
   if (!readback) return null;
   const structured = readback.structuredContent;
   if (typeof structured === "object" && structured !== null) {
@@ -94,9 +52,11 @@ function extractReadbackVersion(readback: FigmaMcpCallResult | undefined): strin
     if (typeof version === "string" && version) return version;
   }
   for (const block of readback.content) {
-    if (block.type !== "text" || typeof block.text !== "string") continue;
+    if (typeof block !== "object" || block === null) continue;
+    const record = block as Record<string, unknown>;
+    if (record.type !== "text" || typeof record.text !== "string") continue;
     try {
-      const parsed: unknown = JSON.parse(block.text);
+      const parsed: unknown = JSON.parse(record.text);
       if (typeof parsed === "object" && parsed !== null) {
         const version = (parsed as Record<string, unknown>).version;
         if (typeof version === "string" && version) return version;
@@ -113,7 +73,7 @@ export async function readRemoteMetadata(
   ctx: FigmaContext,
   fileKey: string,
   nodeId?: string,
-): Promise<FigmaMcpCallResult> {
+): Promise<FigmaRemoteCallResult> {
   const gateway = gatewayOrThrow(ctx);
   await requireTargetFile(ctx, fileKey);
   try {
@@ -152,47 +112,53 @@ export async function executeRemoteWrite(
   }
 }
 
-export const REMOTE_HANDLERS: Record<FigmaRemoteRequestType, FigmaRemoteHandler> = {
-  "figma.remote.status.request": async (request, ctx) => {
-    const gateway = gatewayOrThrow(ctx);
-    return { status: await gateway.getStatus() };
-  },
+const statusHandler: FigmaHandler<"figma.remote.status.request"> = async (_request, ctx) => ({
+  status: await gatewayOrThrow(ctx).getStatus(),
+});
 
-  "figma.remote.auth.begin.request": async (request, ctx) => {
-    const gateway = gatewayOrThrow(ctx);
-    try {
-      const begun = await gateway.authBegin();
-      return { ...begun };
-    } catch (error) {
-      throw toServiceError(error);
-    }
-  },
+const authBeginHandler: FigmaHandler<"figma.remote.auth.begin.request"> = async (_request, ctx) => {
+  const gateway = gatewayOrThrow(ctx);
+  try {
+    return await gateway.authBegin();
+  } catch (error) {
+    throw toServiceError(error);
+  }
+};
 
-  "figma.remote.disconnect.request": async (request, ctx) => {
-    const gateway = gatewayOrThrow(ctx);
-    await gateway.disconnect();
-    return { status: { state: "disconnected" as const } };
-  },
+const disconnectHandler: FigmaHandler<"figma.remote.disconnect.request"> = async (
+  _request,
+  ctx,
+) => {
+  const gateway = gatewayOrThrow(ctx);
+  await gateway.disconnect();
+  const status: FigmaRemoteStatus = { state: "disconnected" };
+  return { status };
+};
 
-  "figma.remote.read.request": async (request, ctx) => {
-    const result = await readRemoteMetadata(ctx, request.fileKey, request.nodeId);
-    return { result };
-  },
+const readHandler: FigmaHandler<"figma.remote.read.request"> = async (request, ctx) => ({
+  result: await readRemoteMetadata(ctx, request.fileKey, request.nodeId),
+});
 
-  "figma.remote.execute.request": async (request, ctx) => {
-    if (typeof request.code !== "string" || !request.code)
-      throw new FigmaServiceError("invalid_request", "code is required.");
-    if (typeof request.description !== "string" || !request.description.trim())
-      throw new FigmaServiceError("invalid_request", "description is required.");
-    const outcome = await executeRemoteWrite(ctx, {
-      fileKey: request.fileKey,
-      code: request.code,
-      description: request.description,
-    });
-    return {
-      result: outcome.result,
-      ...(outcome.readback ? { readback: outcome.readback } : {}),
-      readbackAvailable: outcome.readbackAvailable,
-    };
-  },
+const executeHandler: FigmaHandler<"figma.remote.execute.request"> = async (request, ctx) => {
+  if (!request.code) throw new FigmaServiceError("invalid_request", "code is required.");
+  if (!request.description.trim())
+    throw new FigmaServiceError("invalid_request", "description is required.");
+  const outcome = await executeRemoteWrite(ctx, {
+    fileKey: request.fileKey,
+    code: request.code,
+    description: request.description,
+  });
+  return {
+    result: outcome.result,
+    ...(outcome.readback ? { readback: outcome.readback } : {}),
+    readbackAvailable: outcome.readbackAvailable,
+  };
+};
+
+export const remoteHandlers: FigmaHandlerMap<FigmaRemoteRequestType> = {
+  "figma.remote.status.request": statusHandler,
+  "figma.remote.auth.begin.request": authBeginHandler,
+  "figma.remote.disconnect.request": disconnectHandler,
+  "figma.remote.read.request": readHandler,
+  "figma.remote.execute.request": executeHandler,
 };

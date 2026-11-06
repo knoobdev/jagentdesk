@@ -229,7 +229,8 @@ describe("native sequence", () => {
         },
       },
     });
-    expect((threadStart?.params as { model?: string }).model).toBeUndefined();
+    const threadParams = threadStart?.params as { model?: string } | undefined;
+    expect(threadParams?.model).toBeUndefined();
     expect(await connector.getStatus()).toMatchObject({ state: "connected" });
   });
 

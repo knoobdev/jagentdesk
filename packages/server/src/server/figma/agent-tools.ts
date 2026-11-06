@@ -1405,7 +1405,7 @@ function remoteTools(deps: FigmaAgentToolDependencies): FigmaAgentTool[] {
         if (outcome.result.isError) return `${reply}\nThe remote tool reported an error.`;
         return outcome.readbackAvailable
           ? `${reply}\nMetadata readback verified. Re-read the affected node IDs/props with figma_remote_read before claiming the change is what the user asked for.`
-          : `${reply}\nTool replied but the metadata readback failed — outcome UNVERIFIED, do not report Saved.`;
+          : `${reply}\nTool replied but the metadata readback failed — outcome UNVERIFIED; do not claim success until verified by a read.`;
       },
     }),
   ];

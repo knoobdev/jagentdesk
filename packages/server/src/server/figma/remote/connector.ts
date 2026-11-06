@@ -3,6 +3,10 @@ import path from "node:path";
 import pino from "pino";
 import type { Logger } from "pino";
 import { z } from "zod";
+import type {
+  FigmaRemoteCallResult,
+  FigmaRemoteStatus,
+} from "@jagentdesk/protocol/figma/rpc-schemas";
 import { CodexAppServerRpcError } from "../../agent/providers/codex/app-server-transport.js";
 import { CodexAppServerClient } from "../../agent/providers/codex/app-server-transport.js";
 import {
@@ -13,21 +17,19 @@ import { findDefaultCodexBinary } from "../../agent/providers/codex-app-server-a
 import { spawnProcess } from "../../../utils/spawn.js";
 import { ensurePrivateDirectory, writePrivateFileAtomicSync } from "../../private-files.js";
 import type {
-  FigmaMcpCallResult,
   FigmaRemoteExecuteInput,
   FigmaRemoteExecuteOutcome,
   FigmaRemoteGateway,
-  FigmaRemoteState,
-  FigmaRemoteStatus,
 } from "../context.js";
 
 // The provider-independent Figma write connector (spec 32.7 / ADR-0040). One dedicated
 // `codex app-server` child per daemon, started lazily on the first explicit connect. It is
 // driven only through the native MCP methods `mcpServerStatus/list` and `mcpServer/tool/call`
 // — no turn/start, no Codex model, no provider/model switch for the chat. The child runs with
-// a private CODEX_HOME ($JAGENTDESK_HOME/figma/remote-codex) and no inherited OpenAI auth vars,
-// so it never shares or disturbs the user's global Codex credentials. The Figma token lives in
-// that store, owned by Codex; the daemon never reads or copies it.
+// a private CODEX_HOME ($JAGENTDESK_HOME/figma/remote-codex, credentials store file) and no
+// inherited OpenAI auth vars, so it never shares or disturbs the user's global Codex
+// credentials/keyring. The Figma token lives in that store, owned by Codex — the daemon never
+// reads, copies, or parses it.
 
 export const FIGMA_REMOTE_SERVER_NAME = "figma";
 export const FIGMA_REMOTE_ENDPOINT = "https://mcp.figma.com/mcp";
@@ -113,8 +115,6 @@ function toolAdvertisesParameters(
   return parameters.every((name) => Object.hasOwn(props, name));
 }
 
-class RemoteBusyError extends Error {}
-
 /** One dedicated app-server per daemon; every async step is generation-guarded. */
 export class FigmaRemoteConnector implements FigmaRemoteGateway {
   private readonly deps: Required<Pick<FigmaRemoteConnectorDeps, "jagentdeskHome" | "logger">> & {
@@ -130,7 +130,7 @@ export class FigmaRemoteConnector implements FigmaRemoteGateway {
   private threadId: string | null = null;
   private starting: Promise<void> | null = null;
   private generation = 0;
-  private state: FigmaRemoteState = "disconnected";
+  private state: FigmaRemoteStatus["state"] = "disconnected";
   private stateMessage: string | undefined;
   private identityText: string | undefined;
   private tools: Record<string, unknown> = {};
@@ -460,7 +460,7 @@ export class FigmaRemoteConnector implements FigmaRemoteGateway {
 
   // ── reads and writes ────────────────────────────────────────────────────────────
 
-  async readMetadata(fileKey: string, nodeId?: string): Promise<FigmaMcpCallResult> {
+  async readMetadata(fileKey: string, nodeId?: string): Promise<FigmaRemoteCallResult> {
     this.requireConnectedForCall();
     const tool = this.tools.get_metadata;
     if (!toolAdvertisesParameters(tool, ["fileKey"])) {
@@ -501,7 +501,7 @@ export class FigmaRemoteConnector implements FigmaRemoteGateway {
       description: input.description,
       skillNames: "figma-use",
     });
-    let readback: FigmaMcpCallResult | undefined;
+    let readback: FigmaRemoteCallResult | undefined;
     let readbackAvailable = false;
     if (!result.isError) {
       try {
@@ -517,16 +517,22 @@ export class FigmaRemoteConnector implements FigmaRemoteGateway {
 
   private requireConnectedForCall(): void {
     if (this.state === "connected" && this.client && this.threadId) return;
-    const guidance =
-      this.state === "needs_auth" || !this.enabled
-        ? 'Ask the user to tap "Connect editing".'
-        : this.state === "unavailable"
-          ? "Update Codex on this host."
-          : "Retry Connect editing.";
+    const guidance = this.callGuidance();
     throw new Error(`Figma remote editing is ${this.state}. ${guidance}`);
   }
 
-  private async callTool(tool: string, args: Record<string, unknown>): Promise<FigmaMcpCallResult> {
+  /** The one recovery line shown with a guard error — no retry, no LLM fallback. */
+  private callGuidance(): string {
+    if (this.state === "needs_auth" || !this.enabled)
+      return 'Ask the user to tap "Connect editing".';
+    if (this.state === "unavailable") return "Update Codex on this host.";
+    return "Retry Connect editing.";
+  }
+
+  private async callTool(
+    tool: string,
+    args: Record<string, unknown>,
+  ): Promise<FigmaRemoteCallResult> {
     const generation = this.generation;
     const client = this.client;
     const threadId = this.threadId;
@@ -543,7 +549,10 @@ export class FigmaRemoteConnector implements FigmaRemoteGateway {
     } catch (error) {
       if (generation !== this.generation) {
         // Late callback after a dispose/restart: the write outcome is unknown, never auto-retried.
-        throw new Error("The Figma editing helper restarted during the write; outcome unverified.");
+        throw new Error(
+          "The Figma editing helper restarted during the write; outcome unverified.",
+          { cause: error },
+        );
       }
       throw error;
     } finally {
@@ -619,7 +628,18 @@ async function spawnCodexAppServer(
     launch.source === "override" ? launch.command : (availability.resolvedPath ?? launch.command);
   const child = spawnProcess(
     command,
-    [...launch.args, "app-server", "-c", "mcp_servers={}", "-c", "plugins={}"],
+    [
+      ...launch.args,
+      "app-server",
+      "-c",
+      "mcp_servers={}",
+      "-c",
+      "plugins={}",
+      // The private CODEX_HOME dir also keeps native Figma OAuth tokens out of the shared OS
+      // keyring; the file store is created, owned, and read by Codex alone (ADR-0040).
+      "-c",
+      "mcp_oauth_credentials_store=file",
+    ],
     {
       cwd: workDir,
       env: connectorEnv,

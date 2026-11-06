@@ -8,6 +8,8 @@ import type {
   FigmaLinkStatus,
   FigmaNode,
   FigmaPush,
+  FigmaRemoteCallResult,
+  FigmaRemoteStatus,
   FigmaTeam,
 } from "@jagentdesk/protocol/figma/rpc-schemas";
 import type { SecretStore } from "../database/secret-store.js";
@@ -126,29 +128,8 @@ export interface FigmaLinkBridge {
 // ── remote write connector (spec 32.7 / ADR-0040) ──────────────────────────────
 // Provider-independent Figma writes driven through the Codex app-server's native
 // MCP transport. State is observed from actual native events only; the connector
-// never opens OAuth on its own and never retries a write automatically.
-
-export type FigmaRemoteState =
-  | "disconnected"
-  | "connecting"
-  | "needs_auth"
-  | "connected"
-  | "unavailable"
-  | "error";
-
-export interface FigmaRemoteStatus {
-  state: FigmaRemoteState;
-  message?: string;
-  /** Best-effort identity from the official server's `whoami` tool, when readable. */
-  identityText?: string;
-}
-
-/** An MCP tool call result: content blocks only, never tokens or native config (ADR-0040). */
-export interface FigmaMcpCallResult {
-  content: Array<Record<string, unknown>>;
-  structuredContent?: unknown;
-  isError?: boolean;
-}
+// never opens OAuth on its own and never retries a write automatically. The wire
+// DTOs (status, call results) are the protocol's — the daemon owns no shadow types.
 
 export interface FigmaRemoteExecuteInput {
   fileKey: string;
@@ -157,9 +138,9 @@ export interface FigmaRemoteExecuteInput {
 }
 
 export interface FigmaRemoteExecuteOutcome {
-  result: FigmaMcpCallResult;
+  result: FigmaRemoteCallResult;
   /** Metadata readback after a successful write; absent when the readback itself failed. */
-  readback?: FigmaMcpCallResult;
+  readback?: FigmaRemoteCallResult;
   /** True only when the post-write metadata readback succeeded — never claim Saved on false. */
   readbackAvailable: boolean;
 }
@@ -171,7 +152,7 @@ export interface FigmaRemoteGateway {
   authBegin(): Promise<{ status: FigmaRemoteStatus; authorizationUrl?: string }>;
   /** Disable + dispose the owned process/pending OAuth only (no native logout). */
   disconnect(): Promise<void>;
-  readMetadata(fileKey: string, nodeId?: string): Promise<FigmaMcpCallResult>;
+  readMetadata(fileKey: string, nodeId?: string): Promise<FigmaRemoteCallResult>;
   execute(input: FigmaRemoteExecuteInput): Promise<FigmaRemoteExecuteOutcome>;
   dispose(): Promise<void>;
 }

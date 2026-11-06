@@ -1,7 +1,7 @@
 /**
- * figma.remote.* RPC handlers (ADR-0040): local request routing, target-file
- * validation, auth URL passthrough, and the execute flow's version-memo invalidation
- * and viewer push. The connector itself is faked at the gateway boundary.
+ * figma.remote.* RPC handlers (ADR-0040) on the W4 protocol DTOs: target-file validation,
+ * auth URL passthrough, and the execute flow's version-memo invalidation and viewer push.
+ * The connector itself is faked at the FigmaRemoteGateway boundary.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,20 +9,22 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import pino from "pino";
 import type {
-  FigmaMcpCallResult,
+  FigmaRemoteCallResult,
+  FigmaRemoteStatus,
+} from "@jagentdesk/protocol/figma/rpc-schemas";
+import type {
+  FigmaContext,
   FigmaRemoteExecuteInput,
   FigmaRemoteExecuteOutcome,
   FigmaRemoteGateway,
-  FigmaRemoteStatus,
 } from "../context.js";
 import { FigmaServiceError } from "../context.js";
 import { figmaContent } from "./content.js";
 import {
-  REMOTE_HANDLERS,
   executeRemoteWrite,
-  isFigmaRemoteRequestType,
   readRemoteMetadata,
-  type FigmaRemoteRequest,
+  remoteHandlers,
+  type FigmaRemoteRequestType,
 } from "./remote.js";
 import { FakeFigmaStore, fakeFigmaContext, fakeFile } from "../test-support/fake-figma-queue.js";
 import type { FigmaSessionInfo } from "./types.js";
@@ -35,8 +37,8 @@ class FakeRemoteGateway implements FigmaRemoteGateway {
   authResult: { status: FigmaRemoteStatus; authorizationUrl?: string } = {
     status: { state: "needs_auth" },
   };
-  executeCalls: FigmaRemoteExecuteInput[] = [];
-  readCalls: { fileKey: string; nodeId?: string }[] = [];
+  readonly executeCalls: FigmaRemoteExecuteInput[] = [];
+  readonly readCalls: { fileKey: string; nodeId?: string }[] = [];
   disconnects = 0;
   executeOutcome: FigmaRemoteExecuteOutcome = {
     result: { content: [{ type: "text", text: "edited 1:2" }] },
@@ -56,7 +58,7 @@ class FakeRemoteGateway implements FigmaRemoteGateway {
     this.disconnects++;
     this.status = { state: "disconnected" };
   }
-  async readMetadata(fileKey: string, nodeId?: string): Promise<FigmaMcpCallResult> {
+  async readMetadata(fileKey: string, nodeId?: string): Promise<FigmaRemoteCallResult> {
     this.readCalls.push({ fileKey, nodeId });
     if (this.readError) throw this.readError;
     return {
@@ -72,19 +74,23 @@ class FakeRemoteGateway implements FigmaRemoteGateway {
   async dispose(): Promise<void> {}
 }
 
+type RemoteTestRequest = { type: FigmaRemoteRequestType; requestId: string } & Record<
+  string,
+  unknown
+>;
+
 interface Harness {
-  ctx: ReturnType<typeof fakeFigmaContext>["ctx"];
+  ctx: FigmaContext;
   pushes: ReturnType<typeof fakeFigmaContext>["pushes"];
   gateway: FakeRemoteGateway;
   session: FigmaSessionInfo;
-  call: (request: FigmaRemoteRequest) => Promise<Record<string, unknown>>;
-  watch: () => string;
+  call: (request: RemoteTestRequest) => Promise<Record<string, unknown>>;
 }
 
 let home: string;
 let harness: Harness;
 
-function setup(opts?: { linkFile?: boolean; noGateway?: boolean }): Harness {
+function setup(opts?: { noGateway?: boolean }): Harness {
   const store = new FakeFigmaStore();
   store.files.set(
     FILE_KEY,
@@ -100,10 +106,18 @@ function setup(opts?: { linkFile?: boolean; noGateway?: boolean }): Harness {
     gateway,
     session,
     call: (request) => {
-      const handler = REMOTE_HANDLERS[request.type];
+      const handlers = remoteHandlers as Record<
+        string,
+        (
+          request: unknown,
+          ctx: FigmaContext,
+          session: FigmaSessionInfo,
+        ) => Promise<Record<string, unknown>>
+      >;
+      const handler = handlers[request.type];
+      if (!handler) throw new Error(`no handler for ${request.type}`);
       return handler(request, ctx, session);
     },
-    watch: () => figmaContent.watches.watch(ctx, FILE_KEY, session.sessionKey),
   };
 }
 
@@ -117,11 +131,17 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
-describe("routing", () => {
-  it("recognizes only the five remote RPC types", () => {
-    expect(isFigmaRemoteRequestType("figma.remote.execute.request")).toBe(true);
-    expect(isFigmaRemoteRequestType("figma.file.nodes.request")).toBe(false);
-    expect(isFigmaRemoteRequestType("figma.remote.unknown.request")).toBe(false);
+describe("handler registration", () => {
+  it("covers exactly the five protocol RPC types", () => {
+    expect(Object.keys(remoteHandlers).sort()).toEqual(
+      [
+        "figma.remote.auth.begin.request",
+        "figma.remote.disconnect.request",
+        "figma.remote.execute.request",
+        "figma.remote.read.request",
+        "figma.remote.status.request",
+      ].sort(),
+    );
   });
 });
 
@@ -200,9 +220,8 @@ describe("execute", () => {
   });
 
   it("requires code and description", async () => {
-    const h = harness;
     await expect(
-      h.call({
+      harness.call({
         type: "figma.remote.execute.request",
         requestId: "r1",
         fileKey: FILE_KEY,
@@ -211,7 +230,7 @@ describe("execute", () => {
       }),
     ).rejects.toThrow(/code/);
     await expect(
-      h.call({
+      harness.call({
         type: "figma.remote.execute.request",
         requestId: "r1",
         fileKey: FILE_KEY,
@@ -222,7 +241,7 @@ describe("execute", () => {
   });
 
   it("returns result + readback and pushes a refreshed version to watchers", async () => {
-    const watchId = harness.watch();
+    const watchId = figmaContent.watches.watch(harness.ctx, FILE_KEY, "s-1");
     const response = await harness.call({
       type: "figma.remote.execute.request",
       requestId: "r1",
@@ -245,7 +264,6 @@ describe("execute", () => {
       version: "v-new",
       source: "rest",
     });
-    figmaContent.watches.unwatch(watchId);
   });
 
   it("marks a failed readback unverified but still drops the stale version memo", async () => {
@@ -253,7 +271,7 @@ describe("execute", () => {
       result: { content: [{ type: "text", text: "edited" }] },
       readbackAvailable: false,
     };
-    const watchId = harness.watch();
+    const watchId = figmaContent.watches.watch(harness.ctx, FILE_KEY, "s-1");
     const response = await harness.call({
       type: "figma.remote.execute.request",
       requestId: "r1",
@@ -270,14 +288,13 @@ describe("execute", () => {
       version: "",
       source: "rest",
     });
-    figmaContent.watches.unwatch(watchId);
   });
 
   it("a helper restart during the write still invalidates the memo and reports a clear error", async () => {
     harness.gateway.executeError = new Error(
       "The Figma editing helper restarted during the write; outcome unverified.",
     );
-    const watchId = harness.watch();
+    const watchId = figmaContent.watches.watch(harness.ctx, FILE_KEY, "s-1");
     const error = await harness
       .call({
         type: "figma.remote.execute.request",
@@ -295,11 +312,10 @@ describe("execute", () => {
       version: "",
       source: "rest",
     });
-    figmaContent.watches.unwatch(watchId);
   });
 
   it("execute failures do not fall back to the pending queue", async () => {
-    // executeRemoteWrite must reject, never enqueue (spec 32.6.1 is only for the plugin-less Link path).
+    // A remote failure rejects; spec 32.6.1's queue hand-off belongs to the Link path only.
     harness.gateway.executeError = new Error(
       'Figma remote editing is needs_auth. Ask the user to tap "Connect editing".',
     );
