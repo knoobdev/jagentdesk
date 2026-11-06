@@ -645,7 +645,7 @@ async function readManagedDaemonStatusDiagnostic(page) {
  * hand): /tailscale-login → connection-type-local → connection-local-continue ("Continue with
  * Local") → /welcome → welcome-direct-connection → direct-host-input "127.0.0.1" +
  * direct-port-input <reserved port> → direct-host-submit. If the modal shows the password
- * field (the seeded daemon runs password-less) it is cleared once and resubmitted. Completion
+ * field (the seeded daemon runs password-less) it is cleared before submitting. Completion
  * proof is the WIRED server_info identity: sidebar-workspace-row-<serverId>:<workspaceId>
  * becomes visible, i.e. the renderer genuinely connected to the isolated daemon and listed
  * the seeded workspace. No localStorage injection, no fake hosts, no Origin bypass, no Figma
@@ -681,10 +681,11 @@ async function completeDirectConnectionOnboarding(page, daemonPort, wireServerId
   await page.getByTestId("add-host-modal").waitFor({ state: "visible", timeout: 15_000 });
   await page.getByTestId("direct-host-input").fill("127.0.0.1");
   await page.getByTestId("direct-port-input").fill(String(daemonPort));
+  const password = page.getByTestId("direct-password-input");
+  if (await password.isVisible().catch(() => false)) await password.fill("");
   steps.push(`filled direct-host-input 127.0.0.1 + direct-port-input ${daemonPort}`);
   await page.getByTestId("direct-host-submit").click();
   const deadline = Date.now() + bootTimeoutMs;
-  let passwordCleared = false;
   while (Date.now() < deadline) {
     if (
       await page
@@ -694,15 +695,6 @@ async function completeDirectConnectionOnboarding(page, daemonPort, wireServerId
     ) {
       steps.push(`connected — wired workspace row visible: ${rowTest}`);
       return steps;
-    }
-    if (!passwordCleared) {
-      const password = page.getByTestId("direct-password-input");
-      if (await password.isVisible().catch(() => false)) {
-        await password.fill("");
-        await page.getByTestId("direct-host-submit").click();
-        passwordCleared = true;
-        steps.push("password field visible (daemon is password-less) — cleared + resubmitted");
-      }
     }
     await delay(500);
   }
