@@ -180,7 +180,7 @@ try {
   proof.initialRequests = requests.slice();
   const pixelsBeforeZoom = await page
     .locator("#jagentdesk-figma-canvas")
-    .evaluate((canvas) => canvas.toDataURL());
+    .evaluate((surface) => surface.toDataURL());
   proof.zoom = await verifyZoom(page, cdp);
   await page.evaluate(
     () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
@@ -188,7 +188,7 @@ try {
   await waitForContent(page);
   const pixelsAfterZoom = await page
     .locator("#jagentdesk-figma-canvas")
-    .evaluate((canvas) => canvas.toDataURL());
+    .evaluate((surface) => surface.toDataURL());
   assert.notEqual(
     pixelsBeforeZoom,
     pixelsAfterZoom,
