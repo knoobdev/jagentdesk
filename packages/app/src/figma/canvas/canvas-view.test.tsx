@@ -6,10 +6,22 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FigmaFrameSummary, FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { makeFrameSummary, makeNode } from "./__fixtures__/figma";
-import { CanvasView, MAX_RASTER_TILES, NativeCanvasLayer, pruneRasterCache } from "./canvas-view";
+import {
+  CANVAS_ID,
+  CanvasView,
+  MAX_RASTER_TILES,
+  NativeCanvasLayer,
+  pruneRasterCache,
+} from "./canvas-view";
 import { FrameStore } from "./frame-store";
 import type { SectionAwareSummary } from "./section-outline";
-import { type Camera, cameraToFit, framesBoundingRect, framesInViewport } from "./viewport";
+import {
+  type Camera,
+  cameraToFit,
+  figmaToScreen,
+  framesBoundingRect,
+  framesInViewport,
+} from "./viewport";
 
 // The app's tsconfig compiles JSX classic (expo `jsx: "react-native"`), so component modules
 // under test reference a module-global React. Setup does not define it; the heavier import
@@ -17,7 +29,7 @@ import { type Camera, cameraToFit, framesBoundingRect, framesInViewport } from "
 const globalWithReact = globalThis as typeof globalThis & { React?: typeof React };
 globalWithReact.React ??= React;
 
-const { theme, hosts, assets, viewLayout } = vi.hoisted(() => ({
+const { theme, hosts, assets, viewLayout, platform } = vi.hoisted(() => ({
   theme: {
     fontSize: { xs: 11 },
     colors: { foregroundMuted: "#888" },
@@ -29,6 +41,8 @@ const { theme, hosts, assets, viewLayout } = vi.hoisted(() => ({
   assets: { thumbnail: [] as string[] },
   // The host View reports this layout once on mount, giving the viewer a viewport to cull.
   viewLayout: { current: { width: 800, height: 600 } },
+  // The web/native branch of CanvasView, switched per test (native is the default).
+  platform: { isWeb: false },
 }));
 
 vi.mock("react-native", () => ({
@@ -37,6 +51,7 @@ vi.mock("react-native", () => ({
     testID,
     style,
     onLayout,
+    ref,
   }: Record<string, unknown> & { onLayout?: (event: unknown) => void }) => {
     React.useEffect(() => {
       if (typeof onLayout === "function")
@@ -44,7 +59,12 @@ vi.mock("react-native", () => ({
       // Mount-once: the viewer's onLayout handler is a stable useCallback.
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
-    return React.createElement("div", { "data-testid": String(testID ?? ""), style }, children);
+    // The web path finds the host div through this ref to append its <canvas>.
+    return React.createElement(
+      "div",
+      { "data-testid": String(testID ?? ""), style, ref: ref as never },
+      children,
+    );
   },
   Text: ({ children }: { children?: React.ReactNode }) =>
     React.createElement("span", null, children),
@@ -76,7 +96,14 @@ vi.mock("react-native-unistyles", () => ({
   withUnistyles: <T,>(component: T) => component,
 }));
 
-vi.mock("@/constants/platform", () => ({ isWeb: false, isNative: true }));
+vi.mock("@/constants/platform", () => ({
+  get isWeb() {
+    return platform.isWeb;
+  },
+  get isNative() {
+    return !platform.isWeb;
+  },
+}));
 vi.mock("@/runtime/host-runtime", () => ({
   useHostRuntimeClient: (serverId: string) => hosts.current[serverId] ?? null,
   getHostRuntimeStore: () => ({ getSnapshot: () => null }),
@@ -209,6 +236,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  platform.isWeb = false;
   document.body.innerHTML = "";
 });
 
@@ -464,6 +492,7 @@ function mountViewer(opts: {
   frames: readonly FigmaFrameSummary[];
   camera: Camera;
   store: FrameStore | null;
+  onSelectNode?: (nodeId: string | null) => void;
 }) {
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -477,7 +506,7 @@ function mountViewer(opts: {
     camera: opts.camera,
     onCamera: noopCamera,
     selectedNodeId: null,
-    onSelectNode: noopSelect,
+    onSelectNode: opts.onSelectNode ?? noopSelect,
     overrides: {},
   };
   act(() => root.render(<CanvasView {...props} />));
@@ -614,5 +643,138 @@ describe("CanvasView adaptive loading (ADR-0039)", () => {
     expect(store.get("10:1")).toBeUndefined(); // fragments stay out of the full-subtree cache
     expect(store.sectionNode("10:1")?.type).toBe("SECTION");
     viewer.unmount();
+  });
+});
+
+// ── web-path input/paint regressions (ADR-0039 review round) ──────────────────────────
+
+/** Dispatch a click without movement on the canvas the web viewer appends to its host div. */
+function clickCanvas(x: number, y: number): void {
+  const canvas = document.getElementById(CANVAS_ID) as HTMLCanvasElement | null;
+  expect(canvas).toBeTruthy();
+  const target = canvas as HTMLCanvasElement;
+  target.setPointerCapture = () => undefined;
+  target.releasePointerCapture = () => undefined;
+  const init = { clientX: x, clientY: y, button: 0 };
+  act(() => {
+    target.dispatchEvent(new MouseEvent("pointerdown", init));
+    target.dispatchEvent(new MouseEvent("pointerup", init));
+  });
+}
+
+/** jsdom has no 2D context; every drawing call is recorded as a no-op through this Proxy. */
+function fakeCtx(): CanvasRenderingContext2D {
+  const props: Record<string, unknown> = {};
+  return new Proxy(props, {
+    get: (t, p) => {
+      if (p === "getTransform") return () => ({ a: 1 });
+      if (!(p in t)) t[p as string] = () => undefined;
+      return t[p as string];
+    },
+  }) as unknown as CanvasRenderingContext2D;
+}
+
+async function settlePaint(rounds = 4): Promise<void> {
+  for (let i = 0; i < rounds; i += 1) {
+    await act(async () => {
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => setTimeout(() => resolve(), 0)),
+      );
+    });
+  }
+}
+
+describe("CanvasView click select — no Fit flood (ADR-0039)", () => {
+  it("one click at Fit loads at most the root under the cursor, never the whole file", async () => {
+    platform.isWeb = true;
+    const frames = framesGrid(1500);
+    const camera = cameraToFit(framesBoundingRect(frames), 800, 600);
+    const { fetchNodes, subtreeIds } = viewerFetcher();
+    const store = new FrameStore(fetchNodes);
+    const selections = vi.fn();
+    const viewer = mountViewer({ frames, camera, store, onSelectNode: selections });
+    await settleLoads();
+    expect(fetchNodes).not.toHaveBeenCalled(); // Fit itself loads nothing
+
+    const target = frames[777] as FigmaFrameSummary;
+    const at = figmaToScreen(camera, {
+      x: target.bounds.x + target.bounds.width / 2,
+      y: target.bounds.y + target.bounds.height / 2,
+    });
+    clickCanvas(at.x, at.y);
+    await settleLoads();
+    expect(subtreeIds()).toEqual(["7:777"]); // exactly the clicked root — no 1500-root flood
+    expect(fetchNodes).toHaveBeenCalledTimes(1);
+
+    // A point past the grid's right edge (10980 px) contains no root at all: nothing new
+    // loads, nothing selects. (The 20-px gutters are sub-pixel at Fit zoom and would drift.)
+    const gap = figmaToScreen(camera, { x: 11060, y: 75 });
+    clickCanvas(gap.x, gap.y);
+    await settleLoads();
+    expect(fetchNodes).toHaveBeenCalledTimes(1);
+    expect(selections).toHaveBeenLastCalledWith(null);
+    viewer.unmount();
+  });
+
+  it("loading all viewport candidates was the flood: two distant clicks load two roots only", async () => {
+    platform.isWeb = true;
+    const frames = framesGrid(1500);
+    const camera = cameraToFit(framesBoundingRect(frames), 800, 600);
+    const { fetchNodes, subtreeIds } = viewerFetcher();
+    const store = new FrameStore(fetchNodes);
+    const viewer = mountViewer({ frames, camera, store });
+    await settleLoads();
+    for (const id of ["7:0", "7:1234"]) {
+      const frame = frames.find((f) => f.id === id) as FigmaFrameSummary;
+      const at = figmaToScreen(camera, {
+        x: frame.bounds.x + frame.bounds.width / 2,
+        y: frame.bounds.y + frame.bounds.height / 2,
+      });
+      clickCanvas(at.x, at.y);
+      await settleLoads();
+    }
+    expect(new Set(subtreeIds())).toEqual(new Set(["7:0", "7:1234"]));
+    expect(fetchNodes).toHaveBeenCalledTimes(2);
+    viewer.unmount();
+  });
+});
+
+describe("CanvasView SECTION painting (ADR-0039)", () => {
+  it("never requests a whole-Section thumbnail raster at thumbnail LOD", async () => {
+    platform.isWeb = true;
+    const original = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = (() => fakeCtx()) as never;
+    try {
+      // zoom 0.1 = thumbnail LOD; the 600-wide frame projects ≥ detail, the Section is huge.
+      const frames = [
+        sectionFrame("10:1", 5000, 4000),
+        { ...makeFrameSummary("1:5", 100, 100, 600, 400) },
+      ];
+      const camera: Camera = { zoom: 0.1, offsetX: 0, offsetY: 0 };
+      const { fetchNodes, subtreeIds } = viewerFetcher();
+      const store = new FrameStore(fetchNodes);
+      const viewer = mountViewer({ frames, camera, store });
+      await settlePaint();
+      expect(assets.thumbnail).toContain("1:5"); // detail-worthy frame gets its raster
+      expect(assets.thumbnail).not.toContain("10:1"); // the Section is chrome in every LOD
+      expect(fetchNodes).not.toHaveBeenCalled(); // thumbnail LOD loads no subtrees
+      expect(subtreeIds()).toEqual([]);
+      viewer.unmount();
+    } finally {
+      HTMLCanvasElement.prototype.getContext = original;
+    }
+  });
+
+  it("native raster requests skip SECTION ids", async () => {
+    const visible = [sectionFrame("10:1", 1200, 900), ...framesFrom("1", 2)];
+    const layer = mountLayer({ visible });
+    await flush();
+    expect(callFigmaMock).toHaveBeenCalledTimes(1);
+    expect(callFigmaMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "figma.file.render.request",
+      expect.objectContaining({ ids: ["1:0", "1:1"] }), // no "10:1": a Section is never tiled
+    );
+    layer.unmount();
   });
 });
