@@ -545,13 +545,15 @@ export function pruneRasterCache(
 function mergeRasterBatch(
   current: Record<string, string>,
   batch: readonly string[],
-  images: Record<string, FigmaBytes>,
+  images: Record<string, FigmaBytes | null>,
   visibleIds: readonly string[],
   ledger: Set<string>,
 ): Record<string, string> {
   const next = { ...current };
   for (const id of batch) {
     const bytes = images[id];
+    // Null entries are the wire's "this id got no raster" marker: no tile, id stays pruned
+    // from the caller's view of `next` and the ledger lets a re-exposure request it again.
     if (bytes) next[id] = `data:${bytes.mimeType};base64,${bytes.dataBase64}`;
   }
   // Bound the cache at arrival time, not render time: panning across a 500-frame page

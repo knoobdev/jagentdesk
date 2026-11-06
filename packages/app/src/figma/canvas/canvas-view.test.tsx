@@ -4,7 +4,13 @@
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { FigmaFrameSummary, FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
+import type {
+  FigmaFrameSummary,
+  FigmaNode,
+  FigmaRequestParams,
+  FigmaResponseData,
+} from "@jagentdesk/protocol/figma/rpc-schemas";
+import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import { makeFrameSummary, makeNode } from "./__fixtures__/figma";
 import {
   CANVAS_ID,
@@ -56,7 +62,10 @@ vi.mock("react-native", () => ({
     style,
     onLayout,
     ref,
-  }: Record<string, unknown> & { onLayout?: (event: unknown) => void }) => {
+  }: Record<string, unknown> & {
+    children?: React.ReactNode;
+    onLayout?: (event: unknown) => void;
+  }) => {
     React.useEffect(() => {
       if (typeof onLayout === "function")
         onLayout({ nativeEvent: { layout: { ...viewLayout.current } } });
@@ -142,16 +151,37 @@ const noopSelect = (_nodeId: string | null): void => undefined;
 const noopCamera = (_next: typeof CAMERA): void => undefined;
 
 /** The daemon answers every render batch with a tile tagged by the serving host and version. */
+/**
+ * Typed `callFigma` mock adapter: an implementation of the generic signature cannot narrow
+ * `FigmaRequestParams<T>` to the method under test (casting the payload per-call is exactly
+ * what breaks once the protocol types are real), so each mock handler declares the concrete
+ * protocol params/response for one request type and one cast bridges to the generic shape.
+ */
+type RenderRequestParams = FigmaRequestParams<"figma.file.render.request">;
+type RenderResponseImages = Pick<FigmaResponseData<"figma.file.render.request">, "images">;
+
+function mockRenderRequest(
+  handle: (
+    client: DaemonClient | null,
+    params: RenderRequestParams,
+  ) => RenderResponseImages | Promise<RenderResponseImages>,
+): void {
+  callFigmaMock.mockImplementation(((
+    client: DaemonClient | null,
+    _type: "figma.file.render.request",
+    params: RenderRequestParams,
+  ) => handle(client, params)) as unknown as typeof callFigma);
+}
+
 function serveRenderTiles() {
-  callFigmaMock.mockImplementation((async (client, _method, payload) => {
+  mockRenderRequest(async (client, params) => {
     const host = (client as { id?: string } | null)?.id ?? "?";
-    const version = String((payload as { version?: string }).version ?? "live");
-    const ids = (payload as { ids: string[] }).ids;
+    const version = String(params.version ?? "live");
     const images: Record<string, { mimeType: string; dataBase64: string }> = {};
-    for (const id of ids)
+    for (const id of params.ids)
       images[id] = { mimeType: "image/png", dataBase64: `${host}|${version}:${id}` };
     return { images };
-  }) as typeof callFigma);
+  });
 }
 
 function framesFrom(prefix: string, count: number, step = 200): FigmaFrameSummary[] {
@@ -165,24 +195,22 @@ function mountLayer(props: Partial<React.ComponentProps<typeof NativeCanvasLayer
   document.body.appendChild(container);
   const root: Root = createRoot(container);
   const visible = props.visible ?? framesFrom("1", 2);
-  const view = (
-    <NativeCanvasLayer
-      serverId="srv"
-      fileKey="file"
-      version={null}
-      visible={visible}
-      camera={CAMERA}
-      selectedNodeId={null}
-      onSelectNode={noopSelect}
-      onCamera={noopCamera}
-      {...props}
-    />
-  );
-  act(() => root.render(view));
+  const baseProps: React.ComponentProps<typeof NativeCanvasLayer> = {
+    serverId: "srv",
+    fileKey: "file",
+    version: null,
+    visible,
+    camera: CAMERA,
+    selectedNodeId: null,
+    onSelectNode: noopSelect,
+    onCamera: noopCamera,
+    ...props,
+  };
+  act(() => root.render(<NativeCanvasLayer {...baseProps} />));
   return {
     container,
     rerenderWith: (next: Partial<React.ComponentProps<typeof NativeCanvasLayer>>) => {
-      act(() => root.render(<NativeCanvasLayer {...(view.props as never)} {...next} />));
+      act(() => root.render(<NativeCanvasLayer {...baseProps} {...next} />));
     },
     unmount: () => {
       act(() => root.unmount());
@@ -199,9 +227,9 @@ const flush = async () => {
 };
 
 function renderedTiles(container: HTMLElement): string[] {
-  return Array.from(container.querySelectorAll('img[data-testid="tile"]')).map((node) =>
-    node.getAttribute("src"),
-  ) as string[];
+  return Array.from(container.querySelectorAll('img[data-testid="tile"]'))
+    .map((node) => node.getAttribute("src"))
+    .filter((src): src is string => src !== null);
 }
 
 /** Deferred render batches so a test controls exactly when each response lands or fails. */
@@ -212,25 +240,23 @@ function deferredRenderBatches() {
     resolve: (host: string, version: string) => void;
     reject: (error: Error) => void;
   }> = [];
-  callFigmaMock.mockImplementation(((_client, _method, payload) => {
-    const ids = [...((payload as { ids: string[] }).ids ?? [])];
+  mockRenderRequest((_client, params) => {
+    const ids = [...params.ids];
     const clientId = (_client as { id?: string } | null)?.id ?? "?";
-    return new Promise<{ images: Record<string, { mimeType: string; dataBase64: string }> }>(
-      (resolve, reject) => {
-        batches.push({
-          ids,
-          clientId,
-          resolve: (host, version) => {
-            const images: Record<string, { mimeType: string; dataBase64: string }> = {};
-            for (const id of ids)
-              images[id] = { mimeType: "image/png", dataBase64: `${host}|${version}:${id}` };
-            resolve({ images });
-          },
-          reject,
-        });
-      },
-    );
-  }) as typeof callFigma);
+    return new Promise<RenderResponseImages>((resolve, reject) => {
+      batches.push({
+        ids,
+        clientId,
+        resolve: (host, version) => {
+          const images: Record<string, { mimeType: string; dataBase64: string }> = {};
+          for (const id of ids)
+            images[id] = { mimeType: "image/png", dataBase64: `${host}|${version}:${id}` };
+          resolve({ images });
+        },
+        reject,
+      });
+    });
+  });
   return batches;
 }
 
@@ -286,11 +312,10 @@ describe("NativeCanvasLayer lazy render requests", () => {
       "figma.file.render.request",
       expect.objectContaining({ fileKey: "file", ids: ["1:0", "1:1"], scale: 2 }),
     );
-    expect(
-      Array.from(layer.container.querySelectorAll('img[data-testid="tile"]')).map((node) =>
-        node.getAttribute("src"),
-      ),
-    ).toEqual(["data:image/png;base64,srv|live:1:0", "data:image/png;base64,srv|live:1:1"]);
+    expect(renderedTiles(layer.container)).toEqual([
+      "data:image/png;base64,srv|live:1:0",
+      "data:image/png;base64,srv|live:1:1",
+    ]);
 
     layer.rerenderWith({ visible: framesFrom("1", 2) });
     await flush();
@@ -324,9 +349,7 @@ describe("NativeCanvasLayer lazy render requests", () => {
     await flush();
     // Regression: rasters and the request ledger survived a version swap, so the viewer kept
     // painting the old snapshot's tiles forever without refetching.
-    const srcs = Array.from(layer.container.querySelectorAll('img[data-testid="tile"]')).map(
-      (node) => node.getAttribute("src"),
-    );
+    const srcs = renderedTiles(layer.container);
     expect(srcs).toEqual(["data:image/png;base64,srv|7:1:0", "data:image/png;base64,srv|7:1:1"]);
     layer.unmount();
   });
@@ -340,9 +363,7 @@ describe("NativeCanvasLayer lazy render requests", () => {
     const newVisible = framesFrom("3", MAX_RASTER_TILES + 6);
     layer.rerenderWith({ visible: newVisible });
     await flush();
-    const srcs = Array.from(layer.container.querySelectorAll('img[data-testid="tile"]')).map(
-      (node) => node.getAttribute("src"),
-    );
+    const srcs = renderedTiles(layer.container);
     expect(srcs).toHaveLength(MAX_RASTER_TILES + 6); // all visible kept...
     expect(srcs.some((src) => src.includes("2:"))).toBe(false); // ...every hidden tile released
     expect(
