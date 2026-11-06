@@ -352,7 +352,9 @@ function ScopedPrototypePlayer({ file, outline, startNodeId, onClose }: Prototyp
   );
 
   const overlayNote =
-    prototype && !prototype.overlaySettingsAvailable ? "Overlay settings need Figma Link" : null;
+    prototype && !prototype.overlaySettingsAvailable
+      ? "Overlay positioning unavailable in this snapshot"
+      : null;
 
   // A failed batch must not strand the user: the error names what happened, Retry re-issues the
   // playback request, and Close always works (spec 32.5.3, ADR-0037).
