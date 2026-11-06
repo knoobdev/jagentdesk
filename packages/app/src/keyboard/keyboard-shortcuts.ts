@@ -289,6 +289,33 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     },
   },
 
+  // --- Undo archive workspace ---
+  // Only claims the key while an archive can be undone; otherwise text undo runs as usual.
+  {
+    id: "workspace-archive-undo-cmd-z-mac",
+    action: "workspace.archive.undo",
+    combo: "Cmd+Z",
+    when: { mac: true, commandCenter: false, editable: false, terminal: false },
+    help: {
+      id: "undo-archive-workspace",
+      section: "projects",
+      label: "Undo archive workspace",
+      keys: ["mod", "Z"],
+    },
+  },
+  {
+    id: "workspace-archive-undo-ctrl-z-non-mac",
+    action: "workspace.archive.undo",
+    combo: "Ctrl+Z",
+    when: { mac: false, commandCenter: false, editable: false, terminal: false },
+    help: {
+      id: "undo-archive-workspace",
+      section: "projects",
+      label: "Undo archive workspace",
+      keys: ["mod", "Z"],
+    },
+  },
+
   // --- Pin workspace ---
   {
     id: "workspace-pin-cmd-shift-p-mac",

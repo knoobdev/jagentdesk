@@ -35,6 +35,7 @@ import { shouldRenderSyncedStatusLoader } from "@/utils/status-loader";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { resolveSidebarWorkspacePrimaryLabel } from "@/components/sidebar/sidebar-workspace-title";
 import { useWorkspacePrimaryAgentTitle } from "@/hooks/use-workspace-primary-agent-title";
+import { SidebarWorkspaceArchiveButton } from "@/components/sidebar/sidebar-workspace-menu";
 
 // The scrim spans more than the kebab so the fade starts left of the diff stat. Solid from
 // SCRIM_SOLID_OFFSET rightward, which keeps the kebab itself off the gradient entirely.
@@ -178,7 +179,10 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
   const {
     settings: { workspaceTitleSource },
   } = useAppSettings();
-  const primaryAgentTitle = useWorkspacePrimaryAgentTitle(workspace.serverId, workspace.workspaceId);
+  const primaryAgentTitle = useWorkspacePrimaryAgentTitle(
+    workspace.serverId,
+    workspace.workspaceId,
+  );
   const workspaceLabel = resolveSidebarWorkspacePrimaryLabel({
     workspace,
     workspaceTitleSource,
@@ -480,6 +484,8 @@ export const sidebarWorkspaceRowStyles = StyleSheet.create((theme) => ({
     position: "absolute",
     top: 0,
     right: 0,
+    flexDirection: "row",
+    alignItems: "flex-start",
   },
   trailingActionScrim: {
     position: "absolute",
@@ -520,10 +526,15 @@ export function resolveTrailingActionVisibility({
   isHovered: boolean;
   isTouchPlatform: boolean;
   showShortcut: boolean;
-}): { showDiffStat: boolean; showKebab: boolean; showScrim: boolean } {
+}): { showDiffStat: boolean; showKebab: boolean; showArchiveButton: boolean; showScrim: boolean } {
   const showKebab = Boolean(hasArchiveAction && (isHovered || isTouchPlatform)) && !showShortcut;
   const showDiffStat = hasDiffStat && !showShortcut && (isHovered || !showKebab);
-  return { showDiffStat, showKebab, showScrim: showDiffStat && showKebab };
+  return {
+    showDiffStat,
+    showKebab,
+    showArchiveButton: showKebab && isHovered && !isTouchPlatform,
+    showScrim: showDiffStat && showKebab,
+  };
 }
 
 export function SidebarWorkspaceTrailingActionSlot({ children }: { children: ReactNode }) {
@@ -541,21 +552,35 @@ export function SidebarWorkspaceTrailingActionBase({
   return <View style={visible ? undefined : sidebarWorkspaceRowStyles.hidden}>{children}</View>;
 }
 
+// The archive button plus the kebab's marginLeft, which is the gap between them.
+
 export function SidebarWorkspaceTrailingActionOverlay({
   visible,
   scrim = false,
+  workspaceKey,
+  onArchiveButtonPress,
   children,
 }: {
   visible: boolean;
   /** Fade the row into the kebab when something (the diff stat) is still rendered behind it. */
   scrim?: boolean;
+  workspaceKey: string;
+  onArchiveButtonPress?: () => void;
   children: ReactNode;
 }) {
   if (!visible || !children) return null;
   return (
     <>
       {scrim ? <TrailingActionScrim /> : null}
-      <View style={sidebarWorkspaceRowStyles.trailingActionOverlay}>{children}</View>
+      <View style={sidebarWorkspaceRowStyles.trailingActionOverlay}>
+        {onArchiveButtonPress ? (
+          <SidebarWorkspaceArchiveButton
+            workspaceKey={workspaceKey}
+            onArchive={onArchiveButtonPress}
+          />
+        ) : null}
+        {children}
+      </View>
     </>
   );
 }

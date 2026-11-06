@@ -666,6 +666,7 @@ function StatusWorkspaceRowInner({
         const {
           showDiffStat,
           showKebab: showKebabInSlot,
+          showArchiveButton,
           showScrim,
         } = resolveTrailingActionVisibility({
           hasDiffStat: Boolean(workspace.diffStat),
@@ -722,6 +723,7 @@ function StatusWorkspaceRowInner({
                     workspace={workspace}
                     showBase={showDiffStat}
                     showKebab={showKebabInSlot}
+                    showArchiveButton={showArchiveButton}
                     showScrim={showScrim}
                     isPinned={isPinned}
                     onTogglePin={onTogglePin}
@@ -749,6 +751,7 @@ function StatusWorkspaceActionSlot({
   workspace,
   showBase,
   showKebab,
+  showArchiveButton,
   showScrim,
   isPinned,
   onTogglePin,
@@ -765,6 +768,7 @@ function StatusWorkspaceActionSlot({
   workspace: SidebarWorkspaceEntry;
   showBase: boolean;
   showKebab: boolean;
+  showArchiveButton: boolean;
   showScrim: boolean;
   isPinned?: boolean;
   onTogglePin?: () => void;
@@ -789,7 +793,12 @@ function StatusWorkspaceActionSlot({
           />
         ) : null}
       </SidebarWorkspaceTrailingActionBase>
-      <SidebarWorkspaceTrailingActionOverlay visible={kebab.showKebab} scrim={showScrim}>
+      <SidebarWorkspaceTrailingActionOverlay
+        visible={kebab.showKebab}
+        scrim={showScrim}
+        workspaceKey={workspace.workspaceKey}
+        onArchiveButtonPress={showArchiveButton ? onArchive : undefined}
+      >
         {kebab.showKebab && onArchive ? (
           <SidebarWorkspaceMenu
             {...kebab.menuProps}

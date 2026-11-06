@@ -402,6 +402,25 @@ describe("keyboard-shortcuts", () => {
     },
   );
 
+  describe("undo archive workspace", () => {
+    it.each([
+      { isMac: true, event: { key: "z", code: "KeyZ", metaKey: true } },
+      { isMac: false, event: { key: "z", code: "KeyZ", ctrlKey: true } },
+    ])("routes Cmd/Ctrl+Z outside text and terminals (mac: $isMac)", ({ isMac, event }) => {
+      expectShortcutResolution({ event, context: { isMac }, action: "workspace.archive.undo" });
+    });
+
+    it.each(["editable", "message-input", "terminal"] as const)(
+      "leaves Cmd+Z to the focused %s",
+      (focusScope) => {
+        expectNoShortcutResolution({
+          event: { key: "z", code: "KeyZ", metaKey: true },
+          context: { isMac: true, focusScope },
+        });
+      },
+    );
+  });
+
   const nonMatchingCases: NonMatchingShortcutCase[] = [
     {
       name: "does not keep old Mod+Alt+N binding",

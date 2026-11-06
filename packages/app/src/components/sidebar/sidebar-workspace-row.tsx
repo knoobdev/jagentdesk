@@ -405,6 +405,7 @@ function WorkspaceRowTrailingActions({
   const {
     showDiffStat,
     showKebab: showKebabInSlot,
+    showArchiveButton,
     showScrim,
   } = resolveTrailingActionVisibility({
     hasDiffStat: Boolean(workspace.diffStat),
@@ -431,7 +432,12 @@ function WorkspaceRowTrailingActions({
               />
             ) : null}
           </SidebarWorkspaceTrailingActionBase>
-          <SidebarWorkspaceTrailingActionOverlay visible={kebab.showKebab} scrim={showScrim}>
+          <SidebarWorkspaceTrailingActionOverlay
+            visible={kebab.showKebab}
+            scrim={showScrim}
+            workspaceKey={workspace.workspaceKey}
+            onArchiveButtonPress={showArchiveButton ? onArchive : undefined}
+          >
             {onArchive ? (
               <SidebarWorkspaceMenu
                 {...kebab.menuProps}

@@ -13,6 +13,7 @@ import {
 import { useWorkspaceSetupStore } from "@/stores/workspace-setup-store";
 import {
   clearWorkspaceArchivePending,
+  shouldSuppressWorkspaceRemovalForLocalUndo,
   shouldSuppressWorkspaceForLocalArchive,
 } from "@/contexts/session-workspace-upserts";
 import { resolveWorkspaceMapKeyByIdentity } from "@/utils/workspace-identity";
@@ -106,6 +107,13 @@ export class WorkspaceDirectoryReplica {
   ): WorkspaceDirectorySnapshot {
     let workspaces = new Map(snapshot.workspaces);
     const projects = new Map(snapshot.projects);
+    for (const [workspaceId, workspace] of this.read().workspaces) {
+      if (
+        !workspaces.has(workspaceId) &&
+        shouldSuppressWorkspaceRemovalForLocalUndo({ serverId: this.serverId, workspaceId })
+      )
+        workspaces.set(workspaceId, workspace);
+    }
     for (const [workspaceId, workspace] of workspaces) {
       if (shouldSuppressWorkspaceForLocalArchive({ serverId: this.serverId, workspace })) {
         workspaces.delete(workspaceId);
@@ -121,6 +129,13 @@ export class WorkspaceDirectoryReplica {
         continue;
       }
       if (delta.kind === "remove") {
+        if (
+          shouldSuppressWorkspaceRemovalForLocalUndo({
+            serverId: this.serverId,
+            workspaceId: delta.id,
+          })
+        )
+          continue;
         workspaces.delete(delta.id);
         if (delta.emptyProject) {
           const project = normalizeProjectDescriptor(delta.emptyProject);
