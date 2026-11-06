@@ -593,6 +593,103 @@ describe("FrameContent per-owner asset lifetime", () => {
   });
 });
 
+// W8 integration blocker: unavailable TEXT now rasterizes through figma.file.render, and BOTH
+// asset RPCs cap the wire at 20 ids (rpc-schemas.ts:512-525). A normal frame with >20 TEXT
+// nodes produced an invalid request and a blank canvas. Chunking must never drop a claimed id,
+// every raster chunk must pin the scope version, and omitted/rejected responses must settle
+// failed — never left in "loading", never endlessly repainted or retried.
+describe("FrameContent wire batch boundaries (20 per request)", () => {
+  it("chunks 45 fills + 45 rasters into 20/20/5 per path, pins the version on every raster batch, and settles every id", async () => {
+    serveAssets();
+    const fills = Array.from({ length: 45 }, (_, i) => `ref-fill-${i}`);
+    const rasters = Array.from({ length: 45 }, (_, i) => `W:${i}`);
+    serveMissing("W:1", { imageRefs: fills, fallbackNodeIds: rasters });
+    const view = renderPlayer("v1", false, navRoot("W:1"));
+    // 90 decodes started: no chunk dropped an id, and the sizes are exactly 20/20/5 per path.
+    await waitFor(() => expect(createdImages.length).toBe(90));
+    const paramsBy = (type: string) =>
+      callFigma.mock.calls
+        .filter(([, t]) => t === type)
+        .map(([, , p]) => p as { imageRefs?: string[]; ids?: string[]; version?: string });
+    const fillCalls = paramsBy("figma.file.imageFills.request");
+    const rasterCalls = paramsBy("figma.file.render.request");
+    expect(fillCalls.map((c) => c.imageRefs?.length)).toEqual([20, 20, 5]);
+    expect(rasterCalls.map((c) => c.ids?.length)).toEqual([20, 20, 5]);
+    // Each claimed id requested EXACTLY once, in claim order — chunking never loses one.
+    expect(fillCalls.flatMap((c) => c.imageRefs ?? [])).toEqual(fills);
+    expect(rasterCalls.flatMap((c) => c.ids ?? [])).toEqual(rasters);
+    // Every render batch carries the SAME pinned scope version (and imageFills stays versionless).
+    expect(rasterCalls.every((c) => c.version === "v1")).toBe(true);
+    expect(fillCalls.every((c) => !("version" in c))).toBe(true);
+
+    const store = peekAssetScope(assetScopeKey("s1", "fk1", "v1"))!;
+    act(() => {
+      for (const image of createdImages) image.dispatchEvent(new Event("load"));
+    });
+    await waitFor(() => expect(draws.length).toBeGreaterThan(1));
+    for (const ref of fills) expect(store.get(`fill|${ref}`)?.status).toBe("ready");
+    for (const id of rasters) expect(store.get(`raster|${id}`)?.status).toBe("ready");
+    view.unmount();
+  });
+
+  it("settles omitted ids and rejected batches as failed — no stuck loading, no retry, no repaint storm", async () => {
+    let fillCalls = 0;
+    let rasterCalls = 0;
+    callFigma.mockImplementation((_client: unknown, type: string, params: unknown) => {
+      const { imageRefs } = (params ?? {}) as { imageRefs?: string[] };
+      if (type === "figma.file.imageFills.request") {
+        fillCalls += 1;
+        // First chunk: bytes for all but the LAST ref (the daemon omits it). Second chunk: RPC fails.
+        if (fillCalls === 1) {
+          const returned = (imageRefs ?? []).slice(0, -1);
+          return Promise.resolve({
+            images: Object.fromEntries(returned.map(png)),
+          });
+        }
+        return Promise.reject(new Error("fills boom"));
+      }
+      rasterCalls += 1;
+      return Promise.reject(new Error("render boom")); // every raster batch fails
+    });
+    const fills = Array.from({ length: 25 }, (_, i) => `ref-fill-${i}`); // 20 + 5
+    const rasters = Array.from({ length: 25 }, (_, i) => `X:${i}`);
+    serveMissing("X:1", { imageRefs: fills, fallbackNodeIds: rasters });
+    const view = renderPlayer("v9", false, navRoot("X:1"));
+    // Every claim settles one way or the other — rejected/omitted claims fail immediately
+    // (the old code left unreturned claims in "loading" forever); returned bytes legitimately
+    // stay loading until the decode finishes, which the harness drives by hand.
+    const store = peekAssetScope(assetScopeKey("s1", "fk1", "v9"))!;
+    await waitFor(() => {
+      for (const id of rasters) expect(store.get(`raster|${id}`)?.status).toBe("failed");
+      expect(store.get("fill|ref-fill-19")?.status).toBe("failed"); // omitted from chunk 1's response
+      expect(store.get("fill|ref-fill-24")?.status).toBe("failed"); // chunk 2's RPC rejected
+    });
+    for (const ref of fills.slice(0, 19)) expect(store.get(`fill|${ref}`)?.status).toBe("loading");
+    // Continued past the failure: the rejected chunk did not abort the other path's chunks.
+    expect(fillCalls).toBe(2);
+    expect(rasterCalls).toBe(2);
+    expect(createdImages).toHaveLength(19); // only returned bytes start a decode
+    act(() => {
+      for (const image of createdImages) image.dispatchEvent(new Event("load"));
+    });
+    await waitFor(() => expect(store.get("fill|ref-fill-0")?.status).toBe("ready"));
+    for (const ref of fills.slice(0, 19)) expect(store.get(`fill|${ref}`)?.status).toBe("ready");
+    // Settled claims do not re-arm: after the settle-triggered repaints drain, further draws
+    // re-report the same misses, claim() sees the existing records, and nothing re-requests.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    });
+    const drawsSettled = draws.length;
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    });
+    expect(draws.length).toBe(drawsSettled);
+    expect(fillCalls).toBe(2);
+    expect(rasterCalls).toBe(2);
+    view.unmount();
+  });
+});
+
 // Round-2 blocker 2: an unavailable/blocked font must not create a rerender/network/CSS loop.
 // The bounded gate singleflights loads, appends each href once, remembers failures for its
 // lifetime, and availability requires REAL registration — `fonts.check` true proves nothing.
