@@ -18,6 +18,7 @@ export const FIGMA_OAUTH_SCOPES = [
   "file_comments:write",
   "library_content:read",
   "file_dev_resources:read",
+  "projects:read",
 ];
 
 export function canUseLoopback(): boolean {
