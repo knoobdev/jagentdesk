@@ -2472,7 +2472,15 @@ export class VoiceAssistantWebSocketServer {
         ...(this.jiraService ? { jira: true } : {}),
         // Figma (spec 32 / ADR-0035). `figmaNodeDepth` (ADR-0039) reports the section-aware
         // outline and the depth-1 metadata read together; viewers gate once on it.
-        ...(this.figmaService ? { figma: true, figmaPlayback: true, figmaNodeDepth: true } : {}),
+        // `figmaRemoteWrites` (ADR-0040) gates the figma.remote.* write surface.
+        ...(this.figmaService
+          ? {
+              figma: true,
+              figmaPlayback: true,
+              figmaNodeDepth: true,
+              figmaRemoteWrites: true,
+            }
+          : {}),
         // Advertise the plugin management surface only when a PluginService is
         // wired; without it the plugin.* RPCs return empty/disabled results.
         ...(this.pluginRuntime
