@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { unzipSync } from "fflate";
 import type { Dirent } from "node:fs";
 import type {
   FigmaBytes,
@@ -48,7 +47,17 @@ export const FIGMA_VERSION_RESOLVE_TTL_MS = 60_000;
 const NODES_BATCH_SIZE = 10;
 const RENDER_BATCH_SIZE = 20;
 const VERSIONS_PAGE_SIZE = 50;
-const GOOGLE_FONTS_DOWNLOAD_URL = "https://fonts.google.com/download";
+// 32.5.1: the Google Fonts fallback uses the documented CSS API
+// (https://developers.google.com/fonts/docs/css2), not the fonts.google.com/download ZIP
+// route — that endpoint answers non-browser clients with the site's HTML shell, so the
+// old unzipSync path could never produce bytes. A stable explicit non-browser UA makes
+// css2 serve exactly one full-coverage TTF per requested axis tuple (verified for
+// Inter/Roboto incl. Vietnamese in w5-font-download-spike); a browser UA would get the
+// per-subset woff2 sprawl instead. The UA string is load-bearing for the response shape,
+// so it is pinned here rather than left to the fetch default.
+const GOOGLE_FONTS_CSS2_URL = "https://fonts.googleapis.com/css2";
+const GOOGLE_FONTS_ASSET_HOST = "fonts.gstatic.com";
+const GOOGLE_FONTS_USER_AGENT = "JAgentDesk/1.0 (daemon font fetch)";
 
 // ── REST response shapes (only the fields these handlers read) ────────────────
 
@@ -471,46 +480,168 @@ function matchesFont(
   );
 }
 
-async function pickFontFromZip(
-  zip: Buffer,
-  wantedFamily: string,
-  wantedStyle: string,
-): Promise<DownloadedFont | null> {
-  let files: Record<string, Uint8Array>;
-  try {
-    files = unzipSync(zip);
-  } catch {
-    return null;
+// ── Google Fonts CSS API download (32.5.1) ────────────────────────────────────
+// The fonts.google.com/download?family= ZIP route is dead for non-browser clients (it
+// answers the HTML shell), so the fallback acquires bytes through the documented CSS2
+// API instead: request the exact family:ital,wght tuple with a stable non-browser UA and
+// the response carries a single full-coverage TTF (incl. Vietnamese) on fonts.gstatic.com.
+// Every stage fails closed — an ambiguous, off-host, non-sfnt or wrong-named answer
+// becomes null so the caller keeps the real Figma raster fallback. text=/subset slicing
+// and the /download/list internal diagnostic are deliberately not used.
+
+// Mirror of packages/app/src/figma/font-style.ts, the single authority shared by the
+// renderer and the player. The server must not depend on app code, so this table has to
+// stay in sync with that file when weight tokens change.
+const STYLE_WEIGHTS: [string, number][] = [
+  ["thin", 100],
+  ["hairline", 100],
+  ["extralight", 200],
+  ["ultralight", 200],
+  ["light", 300],
+  ["regular", 400],
+  ["normal", 400],
+  ["medium", 500],
+  ["semibold", 600],
+  ["demibold", 600],
+  ["bold", 700],
+  ["extrabold", 800],
+  ["ultrabold", 800],
+  ["black", 900],
+  ["heavy", 900],
+];
+
+function weightForStyle(styleName: string): number {
+  // "Semi Bold" must not hit the "Bold" token: normalise spacing, then take the LONGEST
+  // matching token so "semibold"/"extrabold"/"demibold" win over "bold".
+  const compact = styleName.toLowerCase().replace(/[\s_-]+/g, "");
+  const tokens = [...STYLE_WEIGHTS].sort((a, b) => b[0].length - a[0].length);
+  for (const [token, value] of tokens) {
+    if (compact.includes(token)) return value;
   }
-  for (const [name, bytes] of Object.entries(files)) {
-    if (!/\.(ttf|otf)$/i.test(name)) continue;
-    const data = Buffer.from(bytes);
-    if (!matchesFont(readFontNames(data), wantedFamily, wantedStyle, data)) continue;
-    return { mimeType: fontMimeType(name), data };
-  }
-  return null;
+  return 400;
 }
 
-async function defaultGoogleFontsDownload(
+function isItalicStyle(styleName: string): boolean {
+  return /italic|oblique/.test(styleName.toLowerCase());
+}
+
+function compactFontToken(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function googleFontsCss2Url(family: string, weight: number, italic: boolean): string {
+  const axes = italic ? `ital,wght@1,${weight}` : `wght@${weight}`;
+  return `${GOOGLE_FONTS_CSS2_URL}?family=${encodeURIComponent(family)}:${axes}`;
+}
+
+function isGoogleFontsAssetUrl(href: string): boolean {
+  try {
+    const url = new URL(href);
+    return url.protocol === "https:" && url.hostname === GOOGLE_FONTS_ASSET_HOST;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The one font URL the css2 response serves for the requested face, or null when the
+ * answer is not exactly what was asked for: zero faces (HTML shell — the regression that
+ * killed the ZIP route), more than one face (per-subset woff2 sprawl), descriptors that
+ * disagree with the requested tuple, or multiple/foreign src URLs.
+ */
+function css2FontUrl(css: string, family: string, weight: number, italic: boolean): string | null {
+  const faces = css.match(/@font-face\s*\{[^{}]*\}/g);
+  if (!faces || faces.length !== 1) return null;
+  const face = faces[0];
+  const declaredFamily = /font-family\s*:\s*['"]([^'"]*)['"]/.exec(face)?.[1];
+  if (!declaredFamily || normalizeFontName(declaredFamily) !== normalizeFontName(family))
+    return null;
+  const declaredWeight = Number(/font-weight\s*:\s*(\d+)/.exec(face)?.[1]);
+  if (declaredWeight !== weight) return null;
+  const declaredStyle = /font-style\s*:\s*([A-Za-z]+)/.exec(face)?.[1]?.toLowerCase();
+  if (declaredStyle !== (italic ? "italic" : "normal")) return null;
+  const sources = face.match(/url\(\s*['"]?([^'"()\s]+)/g);
+  if (!sources || sources.length !== 1) return null;
+  const href = sources[0].replace(/^url\(\s*['"]?/, "");
+  return isGoogleFontsAssetUrl(href) ? href : null;
+}
+
+async function fetchGoogleFontsBytes(href: string): Promise<Buffer | null> {
+  const response = await fetch(href, { redirect: "follow" });
+  if (!response.ok) return null;
+  // Validate the FINAL host as well as the requested one: a redirect off gstatic means
+  // the CDN moved or intercepted, and unverified bytes are worse than a raster fallback.
+  if (response.url && !isGoogleFontsAssetUrl(response.url)) return null;
+  return Buffer.from(await response.arrayBuffer());
+}
+
+/** sfnt flavor → mime. Only reached after readFontNames proved the buffer is sfnt. */
+function sfntMimeType(buffer: Buffer): string {
+  const tag = buffer.length >= 4 ? buffer.toString("latin1", 0, 4) : "";
+  if (tag === "OTTO") return "font/otf";
+  if (tag === "ttcf") return "font/collection";
+  return "font/ttf";
+}
+
+export async function defaultGoogleFontsDownload(
   family: string,
   style: string,
 ): Promise<DownloadedFont | null> {
-  const response = await fetch(
-    `${GOOGLE_FONTS_DOWNLOAD_URL}?family=${encodeURIComponent(family)}`,
-    {
-      redirect: "follow",
-    },
+  const requestedStyle = style.trim() || "Regular";
+  const weight = weightForStyle(requestedStyle);
+  const italic = isItalicStyle(requestedStyle);
+  const cssResponse = await fetch(googleFontsCss2Url(family, weight, italic), {
+    redirect: "follow",
+    headers: { "User-Agent": GOOGLE_FONTS_USER_AGENT },
+  });
+  if (!cssResponse.ok) return null;
+  const css = await cssResponse.text();
+  // The HTML shell answers 200 like a stylesheet would; it carries no face.
+  if (!css.includes("@font-face")) return null;
+  const href = css2FontUrl(css, family, weight, italic);
+  if (!href) return null;
+  const data = await fetchGoogleFontsBytes(href);
+  if (!data) return null;
+  // Null for anything that is not a readable sfnt — HTML, woff2, a truncated body.
+  const names = readFontNames(data);
+  if (!names) return null;
+  if (normalizeFontName(names.family) !== normalizeFontName(family)) return null;
+  // The name table must agree with the requested style: a variable font whose name table
+  // says Regular is NOT proof of Italic, so unlike matchesFont (system folders, where a
+  // variable file genuinely carries every style) there is no fvar escape here.
+  if (compactFontToken(names.style) !== compactFontToken(requestedStyle)) return null;
+  return { mimeType: sfntMimeType(data), data };
+}
+
+/**
+ * The index.json read-modify-write runs one save at a time per fonts dir: two flights for
+ * different fonts would otherwise both read the pre-write index, and the later write would
+ * silently drop the earlier entry.
+ */
+const googleFontIndexQueues = new Map<string, Promise<void>>();
+
+function queueGoogleFontIndexWrite(dir: string, write: () => Promise<void>): Promise<void> {
+  const previous = googleFontIndexQueues.get(dir) ?? Promise.resolve();
+  const next = previous.then(write, write);
+  googleFontIndexQueues.set(
+    dir,
+    next.then(
+      () => undefined,
+      () => undefined,
+    ),
   );
-  if (!response.ok) return null;
-  return pickFontFromZip(
-    Buffer.from(await response.arrayBuffer()),
-    normalizeFontName(family),
-    normalizeFontName(style),
-  );
+  return next;
 }
 
 export class FigmaFontProvider {
   private readonly attempted = new Set<string>();
+  /**
+   * Concurrent requests for the same family+style share one download (and one cache
+   * save). Without it the `attempted` memo would turn every sibling but the first into a
+   * null — a false "font unavailable" that silently downgrades a whole text subtree to
+   * the raster fallback.
+   */
+  private readonly inFlight = new Map<string, Promise<DownloadedFont | null>>();
   private readonly searchDirs: string[] | null;
   private readonly downloadFont: (family: string, style: string) => Promise<DownloadedFont | null>;
 
@@ -530,16 +661,38 @@ export class FigmaFontProvider {
     const system = await this.fromSystemFonts(wantedFamily, wantedStyle);
     if (system) return toBase64Bytes(system);
     const attempt = `${wantedFamily} ${wantedStyle}`;
+    const shared = this.inFlight.get(attempt);
+    if (shared) return this.joinFlight(shared);
     if (this.attempted.has(attempt)) return null;
     this.attempted.add(attempt);
+    const flight = this.downloadOnce(ctx, trimmedFamily, trimmedStyle);
+    this.inFlight.set(attempt, flight);
     try {
-      const fetched = await this.downloadFont(trimmedFamily, trimmedStyle);
+      return await this.joinFlight(flight);
+    } finally {
+      this.inFlight.delete(attempt);
+    }
+  }
+
+  private async joinFlight(flight: Promise<DownloadedFont | null>): Promise<FigmaBytes | null> {
+    const font = await flight;
+    return font ? toBase64Bytes(font) : null;
+  }
+
+  /** Download plus cache save are one flight so joiners never race the index write. */
+  private async downloadOnce(
+    ctx: FigmaContext,
+    family: string,
+    style: string,
+  ): Promise<DownloadedFont | null> {
+    try {
+      const fetched = await this.downloadFont(family, style);
       if (!fetched) return null;
-      await this.saveToGoogleCache(ctx, trimmedFamily, trimmedStyle, fetched);
-      return toBase64Bytes(fetched);
+      await this.saveToGoogleCache(ctx, family, style, fetched);
+      return fetched;
     } catch (error) {
       ctx.logger.info(
-        { family: trimmedFamily, err: error instanceof Error ? error.message : String(error) },
+        { family, err: error instanceof Error ? error.message : String(error) },
         "figma google fonts download failed",
       );
       return null;
@@ -640,9 +793,14 @@ export class FigmaFontProvider {
     const file = `${fileNameToken(family)}-${fileNameToken(style)}-${randomUUID().slice(0, 8)}${ext}`;
     await fs.mkdir(dir, { recursive: true, mode: 0o700 });
     writePrivateFileAtomicSync(path.join(dir, file), font.data);
-    const entries = await this.readIndex(ctx);
-    entries.push({ family, style, file, mimeType: font.mimeType });
-    writePrivateFileAtomicSync(path.join(dir, "index.json"), JSON.stringify({ entries }, null, 2));
+    await queueGoogleFontIndexWrite(dir, async () => {
+      const entries = await this.readIndex(ctx);
+      entries.push({ family, style, file, mimeType: font.mimeType });
+      writePrivateFileAtomicSync(
+        path.join(dir, "index.json"),
+        JSON.stringify({ entries }, null, 2),
+      );
+    });
   }
 }
 
