@@ -907,7 +907,11 @@ export class FigmaContent {
   }> {
     const file = await requireFile(ctx, request.fileKey);
     const version = request.version ?? (await this.versions.current(ctx, file));
-    if (ctx.link.isLinked(file.fileKey)) {
+    // An explicit version is a snapshot request (ADR-0037): only data for that exact
+    // (fileKey, version) can answer it. The plugin's live tree belongs to whatever version is
+    // open in Figma right now, so serving it for a pinned version would silently present
+    // current data as history. Only the live (unversioned) read may prefer the plugin.
+    if (request.version === undefined && ctx.link.isLinked(file.fileKey)) {
       try {
         const live = await ctx.link.getNodes(file.fileKey, request.ids);
         if (request.ids.some((id) => live[id]))
