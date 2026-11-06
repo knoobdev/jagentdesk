@@ -42,7 +42,10 @@ const { theme, flags, queryOptions, remoteState, remoteApi } = vi.hoisted(() => 
     fontFamily: { mono: "monospace" },
   },
   flags: { enabled: true },
-  queryOptions: [] as Array<{ refetchIntervalMs?: number } | undefined>,
+  queryOptions: [] as Array<{
+    serverId: string;
+    options?: { refetchIntervalMs?: number; enabled?: boolean };
+  }>,
   remoteState: {
     data: null as {
       state: string;
@@ -162,8 +165,11 @@ vi.mock("@/figma/api", () => ({
 vi.mock("@/utils/open-external-url", () => ({ openExternalUrl: vi.fn(async () => undefined) }));
 
 vi.mock("@/figma/queries", () => ({
-  useFigmaRemoteStatus: (_serverId: string, options?: { refetchIntervalMs?: number }) => {
-    queryOptions.push(options);
+  useFigmaRemoteStatus: (
+    serverId: string,
+    options?: { refetchIntervalMs?: number; enabled?: boolean },
+  ) => {
+    queryOptions.push({ serverId, options });
     return {
       isLoading: false,
       data: remoteState.data,
@@ -215,18 +221,18 @@ describe("RemoteConnectionPanel", () => {
     container = null;
   });
 
-  function render(): HTMLDivElement {
+  function render(serverId = "s1"): HTMLDivElement {
     container = document.createElement("div");
     document.body.appendChild(container);
     const mounted = createRoot(container);
     root = mounted;
-    act(() => mounted.render(<RemoteConnectionPanel serverId="s1" />));
+    act(() => mounted.render(<RemoteConnectionPanel serverId={serverId} />));
     return container;
   }
 
-  /** Re-run the render so the mocked query's new `data` reaches the mounted tree. */
-  function rerender(view: HTMLDivElement) {
-    act(() => root?.render(<RemoteConnectionPanel serverId="s1" />));
+  /** Re-run the render so the mocked query's new `data` (or a host switch) reaches the tree. */
+  function rerender(view: HTMLDivElement, serverId = "s1") {
+    act(() => root?.render(<RemoteConnectionPanel serverId={serverId} />));
     return view;
   }
 
@@ -281,7 +287,7 @@ describe("RemoteConnectionPanel", () => {
     expect(view.querySelector('[data-testid="figma-remote-auth-url"]')).toBeNull();
     expect(vi.mocked(openExternalUrl)).not.toHaveBeenCalled();
     // A disconnected view is static: idle (no poll) and no Retry surface.
-    expect(queryOptions.at(-1)?.refetchIntervalMs).toBeUndefined();
+    expect(queryOptions.at(-1)?.options?.refetchIntervalMs).toBeUndefined();
     expect(view.querySelector('[data-testid="figma-remote-retry"]')).toBeNull();
     // Identity belongs to `connected` only — a stale whoami must not haunt the idle row.
     expect(view.querySelector('[data-testid="figma-remote-identity"]')).toBeNull();
@@ -326,7 +332,7 @@ describe("RemoteConnectionPanel", () => {
   it("polls while needs_auth and tells the user to complete sign-in on the host", () => {
     remoteState.data = status("needs_auth");
     const view = render();
-    expect(queryOptions.at(-1)?.refetchIntervalMs).toBe(2_000);
+    expect(queryOptions.at(-1)?.options?.refetchIntervalMs).toBe(2_000);
     const hint = view.querySelector('[data-testid="figma-remote-host-hint"]');
     expect(hint?.textContent).toContain("host computer");
     expect(hint?.textContent).toContain("complete it");
@@ -341,7 +347,7 @@ describe("RemoteConnectionPanel", () => {
   it("polls while connecting and blocks a second begin press mid-transition", () => {
     remoteState.data = status("connecting");
     const view = render();
-    expect(queryOptions.at(-1)?.refetchIntervalMs).toBe(2_000);
+    expect(queryOptions.at(-1)?.options?.refetchIntervalMs).toBe(2_000);
     const connect = view.querySelector('[data-testid="figma-remote-connect"]') as HTMLButtonElement;
     expect(connect.disabled).toBe(true);
   });
@@ -349,13 +355,13 @@ describe("RemoteConnectionPanel", () => {
   it("stops polling once the connector settles and resumes it when it goes transitional", () => {
     remoteState.data = status("connecting");
     const view = render();
-    expect(queryOptions.at(-1)?.refetchIntervalMs).toBe(2_000);
+    expect(queryOptions.at(-1)?.options?.refetchIntervalMs).toBe(2_000);
     remoteState.data = status("connected");
     rerender(view);
-    expect(queryOptions.at(-1)?.refetchIntervalMs).toBeUndefined();
+    expect(queryOptions.at(-1)?.options?.refetchIntervalMs).toBeUndefined();
     remoteState.data = status("needs_auth");
     rerender(view);
-    expect(queryOptions.at(-1)?.refetchIntervalMs).toBe(2_000);
+    expect(queryOptions.at(-1)?.options?.refetchIntervalMs).toBe(2_000);
   });
 
   // ── connected ──────────────────────────────────────────────────────────────
@@ -366,7 +372,7 @@ describe("RemoteConnectionPanel", () => {
     const identity = view.querySelector('[data-testid="figma-remote-identity"]');
     expect(identity?.textContent).toBe("whoami: @tester (Figma)");
     expect(view.textContent).not.toContain("Saved");
-    expect(queryOptions.at(-1)?.refetchIntervalMs).toBeUndefined();
+    expect(queryOptions.at(-1)?.options?.refetchIntervalMs).toBeUndefined();
   });
 
   it("shows no identity line at all when whoami produced nothing — no placeholder", () => {
@@ -483,17 +489,142 @@ describe("RemoteConnectionPanel", () => {
   });
 
   // ── URL validator (pure) ───────────────────────────────────────────────────
-
-  it("accepts only HTTPS Figma hosts for the sign-in link", () => {
+  it("accepts only plain HTTPS URLs on the official Figma hosts", () => {
     expect(figmaHttpsAuthUrl("https://figma.com/oauth")).toBe("https://figma.com/oauth");
     expect(figmaHttpsAuthUrl("https://www.figma.com/oauth")).toBe("https://www.figma.com/oauth");
-    expect(figmaHttpsAuthUrl("https://cdn.figma.com/x")).toBe("https://cdn.figma.com/x");
+    expect(figmaHttpsAuthUrl("https://api.figma.com/x")).toBe("https://api.figma.com/x");
+    expect(figmaHttpsAuthUrl("https://figma.com:443/x")).toBe("https://figma.com:443/x");
+    expect(figmaHttpsAuthUrl("https://cdn.figma.com/x")).toBeNull();
     expect(figmaHttpsAuthUrl("http://www.figma.com/oauth")).toBeNull();
     expect(figmaHttpsAuthUrl("https://example.com/oauth")).toBeNull();
+    expect(figmaHttpsAuthUrl("https://user@figma.com/x")).toBeNull();
+    expect(figmaHttpsAuthUrl("https://figma.com:8443/x")).toBeNull();
     expect(figmaHttpsAuthUrl("figma.com/oauth")).toBeNull();
     expect(figmaHttpsAuthUrl("https://notfigma.com/x")).toBeNull();
     expect(figmaHttpsAuthUrl("")).toBeNull();
     expect(figmaHttpsAuthUrl(null)).toBeNull();
     expect(figmaHttpsAuthUrl(undefined)).toBeNull();
+  });
+
+  // ── root review: host switch, duplicate press, cancel pending, stale link ──
+
+  it("invalidates an in-flight begin when the host switches underneath it", async () => {
+    let resolveBegin: (value: Record<string, unknown>) => void = () => {};
+    remoteApi.call.mockReturnValue(
+      new Promise<Record<string, unknown>>((resolve) => {
+        resolveBegin = resolve;
+      }),
+    );
+    const view = render("s1");
+    const connect = view.querySelector('[data-testid="figma-remote-connect"]') as HTMLButtonElement;
+    act(() => {
+      connect.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    rerender(view, "s2"); // new host mid-begin
+    await act(async () => {
+      resolveBegin({ authorizationUrl: AUTH_URL });
+    });
+    // The old host's response stamps nothing on the new host: no link, no status refetch.
+    expect(view.querySelector('[data-testid="figma-remote-auth-url"]')).toBeNull();
+    expect(remoteApi.refetch).not.toHaveBeenCalled();
+    expect(queryOptions.at(-1)?.serverId).toBe("s2");
+  });
+
+  it("drops the previous host's sign-in link and action error on a host switch", async () => {
+    remoteApi.call.mockResolvedValue({ authorizationUrl: AUTH_URL });
+    const view = render("s1");
+    await pressAsync(view, "figma-remote-connect");
+    expect(view.querySelector('[data-testid="figma-remote-auth-url"]')).not.toBeNull();
+    rerender(view, "s2");
+    expect(view.querySelector('[data-testid="figma-remote-auth-url"]')).toBeNull();
+    // The new host starts clean and its query is keyed to the new serverId.
+    expect(view.querySelector('[data-testid="figma-error"]')).toBeNull();
+    expect(queryOptions.at(-1)?.serverId).toBe("s2");
+  });
+
+  it("collapses a same-event-loop double begin press into one RPC", async () => {
+    let resolveBegin: (value: Record<string, unknown>) => void = () => {};
+    remoteApi.call.mockReturnValue(
+      new Promise<Record<string, unknown>>((resolve) => {
+        resolveBegin = resolve;
+      }),
+    );
+    const view = render();
+    const connect = view.querySelector('[data-testid="figma-remote-connect"]') as HTMLButtonElement;
+    // Two dispatches with no await between them: `busy` state has not committed yet, so only a
+    // synchronous in-flight ref can stop the second RPC.
+    act(() => {
+      connect.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      connect.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(remoteApi.call).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolveBegin({ authorizationUrl: AUTH_URL });
+    });
+    expect(view.querySelector('[data-testid="figma-remote-auth-url"]')).not.toBeNull();
+  });
+
+  it("cancels an owned pending sign-in in needs_auth through the disconnect RPC, twice at once is once", async () => {
+    remoteState.data = status("needs_auth");
+    const view = render();
+    const cancel = view.querySelector(
+      '[data-testid="figma-remote-disconnect"]',
+    ) as HTMLButtonElement;
+    expect(cancel).not.toBeNull();
+    expect(cancel.textContent).toBe("Cancel sign-in");
+    // Still not an OAuth logout claim.
+    expect(view.textContent).not.toContain("log out");
+    let resolveDisconnect: (value: Record<string, unknown>) => void = () => {};
+    remoteApi.call.mockReturnValue(
+      new Promise<Record<string, unknown>>((resolve) => {
+        resolveDisconnect = resolve;
+      }),
+    );
+    act(() => {
+      cancel.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      cancel.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(remoteApi.call).toHaveBeenCalledTimes(1);
+    expect(remoteApi.call).toHaveBeenCalledWith("figma.remote.disconnect.request", {});
+    await act(async () => {
+      resolveDisconnect({});
+    });
+    expect(remoteApi.refetch).toHaveBeenCalled();
+  });
+
+  it("offers the same cancel affordance while connecting, next to the disabled begin button", () => {
+    remoteState.data = status("connecting");
+    const view = render();
+    const connect = view.querySelector('[data-testid="figma-remote-connect"]') as HTMLButtonElement;
+    const cancel = view.querySelector(
+      '[data-testid="figma-remote-disconnect"]',
+    ) as HTMLButtonElement;
+    expect(connect.disabled).toBe(true);
+    expect(cancel).not.toBeNull();
+    expect(cancel.textContent).toBe("Cancel sign-in");
+  });
+
+  it("idle disconnected offers no cancel affordance to press for nothing", () => {
+    const view = render();
+    expect(view.querySelector('[data-testid="figma-remote-disconnect"]')).toBeNull();
+  });
+
+  it("clears a stored sign-in link once the connector settles, connected or disconnected", async () => {
+    remoteApi.call.mockResolvedValue({ authorizationUrl: AUTH_URL });
+    const view = render();
+    await pressAsync(view, "figma-remote-connect");
+    expect(view.querySelector('[data-testid="figma-remote-auth-url"]')).not.toBeNull();
+    // Sign-in completed on the host: the Open/Copy row is history, not a current affordance.
+    remoteState.data = status("connected");
+    rerender(view);
+    expect(view.querySelector('[data-testid="figma-remote-auth-url"]')).toBeNull();
+    // The abandoned round clears the same way (needs_auth first: it keeps the button pressable).
+    remoteState.data = status("needs_auth");
+    rerender(view);
+    await pressAsync(view, "figma-remote-connect");
+    expect(view.querySelector('[data-testid="figma-remote-open-auth"]')).not.toBeNull();
+    remoteState.data = status("disconnected");
+    rerender(view);
+    expect(view.querySelector('[data-testid="figma-remote-open-auth"]')).toBeNull();
   });
 });

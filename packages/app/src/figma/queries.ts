@@ -84,15 +84,17 @@ export function useFigmaLinkStatus(serverId: string, enabled = true) {
 
 // ADR-0040 / spec 32.7: the Remote MCP editing connector's status. The panel passes a poll
 // interval only while the connector is mid-transition; every other state is read on demand.
+// `enabled` (default true) lets the Section-editing FileScreen mount the hook behind its own
+// capability gate without firing any RPC on a host that predates the connector (W7 consumes it).
 export function useFigmaRemoteStatus(
   serverId: string,
-  options: { refetchIntervalMs?: number } = {},
+  options: { refetchIntervalMs?: number; enabled?: boolean } = {},
 ) {
   const client = useClient(serverId);
   return useFetchQuery({
     queryKey: figmaKeys.remoteStatus(serverId),
     queryFn: async () => (await callFigma(client, "figma.remote.status.request", {})).status,
-    enabled: client !== null,
+    enabled: client !== null && (options.enabled ?? true),
     dataShape: "value",
     staleTimeMs: STALE_MS,
     refetchInterval: options.refetchIntervalMs,

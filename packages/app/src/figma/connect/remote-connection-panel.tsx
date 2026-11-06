@@ -31,19 +31,30 @@ import { openExternalUrl } from "@/utils/open-external-url";
 //   runs, so nothing here claims "Saved".
 // - Status polls only while the connector is mid-transition (connecting / needs_auth); every
 //   other state is static and re-read on demand through Retry.
+// - connecting/needs_auth offer Cancel sign-in: the same `figma.remote.disconnect.request` that
+//   stops a connected connector — always JAgentDesk's own connector, never an OAuth logout.
+// - A host switch (serverId change) or unmount invalidates in-flight begin/disconnect settles via
+//   a generation ref; the new host starts with no URL, error, or busy state of the old one's.
 // - A missing/unsupported Codex executable arrives as `unavailable` with the daemon's own update
 //   message: dependency info, never a push to switch the chat provider or model.
 
 const STATUS_POLL_MS = 2_000;
 
-/** The sign-in page must be an HTTPS Figma URL; anything else is not something to hand a browser. */
+/**
+ * The sign-in page must be a plain HTTPS Figma URL on the official hosts: credentials in the
+ * URL or an explicit non-443 port mean the daemon handed back something that did not come from
+ * Figma's documented OAuth endpoints, and is not worth opening in a browser.
+ */
+const AUTH_HOSTS = new Set(["figma.com", "www.figma.com", "api.figma.com"]);
 export function figmaHttpsAuthUrl(url: string | null | undefined): string | null {
   if (!url) return null;
   try {
     const parsed = new URL(url);
-    const host = parsed.hostname.toLowerCase();
     if (parsed.protocol !== "https:") return null;
-    if (host !== "figma.com" && !host.endsWith(".figma.com")) return null;
+    if (!AUTH_HOSTS.has(parsed.hostname.toLowerCase())) return null;
+    if (parsed.username || parsed.password) return null;
+    // `new URL` normalizes an explicit 443 away; any other port is nonstandard for OAuth here.
+    if (parsed.port && parsed.port !== "443") return null;
     return url;
   } catch {
     return null;
@@ -113,15 +124,31 @@ function RemoteConnectionPanelInner({ serverId }: { serverId: string }) {
   // only time status polls. Disconnected/connected/unavailable/error views are static and re-read
   // on demand through Retry, so an unattended sign-in never becomes an autoload loop.
   const [transitional, setTransitional] = useState(false);
-  // Bumped on unmount: a settle from an in-flight begin/disconnect must not stamp URL/error state
-  // onto a dead component or resurrect a stale authorizationUrl after Disconnect.
+  // Bumped on unmount AND on a host switch: a settle from an in-flight begin/disconnect must not
+  // stamp URL/error state onto a dead component or onto a different server's panel.
   const generation = useRef(0);
+  // Synchronous in-flight latch for begin/disconnect: setBusy alone cannot stop a double click
+  // that lands in the same event loop (React has not committed the state yet).
+  const inFlight = useRef(false);
   useEffect(
     () => () => {
       generation.current += 1;
     },
     [],
   );
+  // A serverId swap is a new host: drop everything the previous host owned (URL, error, busy,
+  // polling) synchronously in render, and invalidate its in-flight RPCs via the generation bump.
+  // The lastServerId render guard beats any effect window between the swap and its cleanup.
+  const lastServerId = useRef(serverId);
+  if (lastServerId.current !== serverId) {
+    lastServerId.current = serverId;
+    generation.current += 1;
+    inFlight.current = false;
+    setAuthUrl(null);
+    setActionError(null);
+    setBusy(false);
+    setTransitional(false);
+  }
 
   const statusQuery = useFigmaRemoteStatus(serverId, {
     refetchIntervalMs: transitional ? STATUS_POLL_MS : undefined,
@@ -131,6 +158,9 @@ function RemoteConnectionPanelInner({ serverId }: { serverId: string }) {
   const identityText = statusQuery.data?.identityText ?? null;
   useEffect(() => {
     setTransitional(isTransitionalState(state));
+    // Once the connector settles on either side, the stored sign-in link is history: an Open
+    // sign-in button for an OAuth round that already finished (or was abandoned) is just stale.
+    if (state === "connected" || state === "disconnected") setAuthUrl(null);
   }, [state]);
 
   const refresh = useCallback(() => {
@@ -139,23 +169,35 @@ function RemoteConnectionPanelInner({ serverId }: { serverId: string }) {
   }, [statusQuery]);
 
   const begin = useCallback(async () => {
+    // Double-clicks land in the same event loop before setBusy commits, so the synchronous ref
+    // — not the busy state — is what actually prevents a second begin/disconnect RPC.
+    if (inFlight.current) return;
+    inFlight.current = true;
     const gen = generation.current;
     setBusy(true);
     setActionError(null);
     try {
       const response = await call("figma.remote.auth.begin.request", {});
-      if (generation.current !== gen) return; // unmounted mid-flight
+      if (generation.current !== gen) return; // unmounted or host switched mid-flight
       setAuthUrl(figmaHttpsAuthUrl(response.authorizationUrl));
       refresh();
     } catch (cause) {
       if (generation.current !== gen) return;
       setActionError(errorMessage(cause));
     } finally {
-      if (generation.current === gen) setBusy(false);
+      // Only the owning generation releases the shared latch: a host switch (or unmount) already
+      // handed it to the reset branch or to a newer action, and must not be unlocked by a stale
+      // settle clearing someone else's in-flight claim.
+      if (generation.current === gen) {
+        inFlight.current = false;
+        setBusy(false);
+      }
     }
   }, [call, refresh]);
 
   const disconnect = useCallback(async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     const gen = generation.current;
     setBusy(true);
     setActionError(null);
@@ -170,7 +212,10 @@ function RemoteConnectionPanelInner({ serverId }: { serverId: string }) {
       if (generation.current !== gen) return;
       setActionError(errorMessage(cause));
     } finally {
-      if (generation.current === gen) setBusy(false);
+      if (generation.current === gen) {
+        inFlight.current = false;
+        setBusy(false);
+      }
     }
   }, [call, refresh]);
 
@@ -269,20 +314,14 @@ function ActionSection({
   onRetry: () => void;
   onOpenSignIn: () => void;
 }) {
+  // The own-connector stop is available in every live state, not just `connected`: a user who
+  // started a sign-in must be able to cancel a stuck `connecting`/`needs_auth` round. It always
+  // means "stop JAgentDesk's connector", never an OAuth logout on the host (ADR-0040).
+  const canDisconnect = state === "connected" || isTransitionalState(state);
   return (
     <>
       <View style={figmaStyles.row}>
-        {state === "connected" ? (
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onPress={onDisconnect}
-            testID="figma-remote-disconnect"
-          >
-            Disconnect editing
-          </Button>
-        ) : (
+        {state !== "connected" ? (
           <Button
             size="sm"
             variant="default"
@@ -293,7 +332,18 @@ function ActionSection({
           >
             {state === "needs_auth" ? "Continue sign-in" : "Connect editing"}
           </Button>
-        )}
+        ) : null}
+        {canDisconnect ? (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onPress={onDisconnect}
+            testID="figma-remote-disconnect"
+          >
+            {state === "connected" ? "Disconnect editing" : "Cancel sign-in"}
+          </Button>
+        ) : null}
         {showRetry ? (
           <Button size="sm" variant="ghost" onPress={onRetry} testID="figma-remote-retry">
             Retry
