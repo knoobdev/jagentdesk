@@ -9,10 +9,12 @@ import {
   identity,
   multiply,
   translate,
+  type Bounds,
   type RenderMatrix,
 } from "./matrix";
 import {
   absoluteBoxOf,
+  absoluteRenderBoundsOf,
   clipsContent,
   effectsOf,
   isMask,
@@ -103,22 +105,55 @@ function culled(state: DrawState, node: FigmaNode, transform: RenderMatrix | nul
   return !boundsIntersect(box, viewport);
 }
 
-function drawFallback(state: DrawState, node: FigmaNode, transform: RenderMatrix | null): void {
-  const raster = state.options.fallbackForNode(node.id);
+function drawFallback(
+  state: DrawState,
+  node: FigmaNode,
+  transform: RenderMatrix | null,
+  inherited: number,
+): void {
+  const raster = state.options.fallbackForNode(node.id, node.type);
   if (!raster) {
     state.missing.addFallback(node.id);
+    if (node.type === "TEXT") state.missing.addTextFallback(node.id);
     return;
   }
-  const box = absoluteBoxOf(node) ?? (transform ? boundsOfRect(transform, ...wh(node)) : null);
+  const box = fallbackPlacementBox(state, node, transform);
   if (!box) return;
   const { ctx } = state;
   ctx.save();
   // The raster covers the node's absolute box in Figma space; the camera turns that into pixels.
   const c = multiply(state.camera, translate(box.x, box.y));
   ctx.setTransform(c.a, c.b, c.c, c.d, c.e, c.f);
-  ctx.globalAlpha = nodeOpacity(node);
+  // ADR-0042 G1 (controlled proof, render-quality/export-alpha-proof.json): bytes Figma exports
+  // already composite the node's own opacity — a 0.12 GROUP carries alphaMax 31/255, so the old
+  // `nodeOpacity(node)` multiplication dropped it to 3/255. Only the ancestor chain, which the
+  // export does not include, composites here.
+  ctx.globalAlpha = Math.min(1, Math.max(0, inherited));
   ctx.drawImage(raster, 0, 0, box.width, box.height);
   ctx.restore();
+}
+
+/**
+ * Where the fallback bytes sit in Figma space. Default-cropped exports (every legacy request,
+ * and all non-TEXT PNG) are cut to the rendered ink box, so they map onto `absoluteRenderBounds`
+ * — the layout box stretches ink-cropped bytes and clips shadow outsets (ADR-0042 G2 proof: a
+ * 44×44 shadow frame exports 2×72×72). W10's new-text path requests `use_absolute_bounds=true`
+ * bytes (flag), which map 1:1 onto `absoluteBoundingBox`. Nodes with no absolute box (REST
+ * `geometry=paths` leaves) are placed through their transform; render bounds missing fall back to
+ * the bounding box, the one disclosed approximation on this path.
+ */
+function fallbackPlacementBox(
+  state: DrawState,
+  node: FigmaNode,
+  transform: RenderMatrix | null,
+): Bounds | null {
+  const rendered = absoluteRenderBoundsOf(node);
+  const layout = absoluteBoxOf(node);
+  const inferred = transform ? boundsOfRect(transform, ...wh(node)) : null;
+  if (node.type === "TEXT" && state.options.fallbackTextUsesAbsoluteBounds === true) {
+    return layout ?? rendered ?? inferred;
+  }
+  return rendered ?? layout ?? inferred;
 }
 
 function wh(node: FigmaNode): [number, number] {
@@ -274,7 +309,7 @@ function toCanvasJoin(join: string): CanvasLineJoin {
   return "miter";
 }
 
-function drawChildren(state: DrawState, node: FigmaNode): void {
+function drawChildren(state: DrawState, node: FigmaNode, inherited: number): void {
   const children = node.children ?? [];
   if (children.length === 0) return;
   const { ctx } = state;
@@ -286,7 +321,9 @@ function drawChildren(state: DrawState, node: FigmaNode): void {
       applyMaskClip(state, resolved);
       continue;
     }
-    drawNode(state, resolved);
+    // Children compose with the parent's effective alpha: an assignment per child (the old
+    // line) dropped the inherited value, so a 0.12 group drew its bars at full strength.
+    drawNode(state, resolved, inherited);
   }
   ctx.restore();
 }
@@ -300,10 +337,10 @@ function applyMaskClip(state: DrawState, mask: FigmaNode): void {
   for (const shape of shapes) state.ctx.clip(shape.path, shape.rule);
 }
 
-function drawNode(state: DrawState, node: FigmaNode): void {
+function drawNode(state: DrawState, node: FigmaNode, inherited: number): void {
   if (node.visible === false) return;
   if (typeof node.type === "string" && CONTAINER_TYPES.has(node.type)) {
-    drawChildren(state, node);
+    drawChildren(state, node, inherited);
     return;
   }
   const transform = nodeTransform(node);
@@ -315,11 +352,14 @@ function drawNode(state: DrawState, node: FigmaNode): void {
   const textRaster =
     node.type === "TEXT" && textNeedsRasterFallback(node, state.options, state.missing);
   if (features.length > 0 || textRaster) {
-    drawFallback(state, node, transform);
+    drawFallback(state, node, transform, inherited);
     return;
   }
   if (!transform) return;
-  const alpha = nodeOpacity(node);
+  // Effective alpha multiplies down the tree (spec 32.5.1). Overlapping siblings under a
+  // reduced-opacity container are already routed to the per-node fallback by CONTAINER_OPACITY,
+  // which is where group compositing differs from multiplication (ADR-0042).
+  const alpha = Math.min(1, Math.max(0, inherited)) * nodeOpacity(node);
   if (alpha <= 0) return;
   const { ctx } = state;
   ctx.save();
@@ -337,7 +377,7 @@ function drawNode(state: DrawState, node: FigmaNode): void {
     drawFills(state, node, alpha);
     drawStrokes(state, node, alpha);
   }
-  drawChildren(state, node);
+  drawChildren(state, node, alpha);
   resetLayerBlur(ctx, blurred);
   ctx.restore();
 }
@@ -349,6 +389,6 @@ export function drawTree(state: DrawState, root: FigmaNode): void {
   // the caller's baseline between subtrees so one frame's node transform cannot leak into the next.
   const c = state.camera;
   ctx.setTransform(c.a, c.b, c.c, c.d, c.e, c.f);
-  drawNode(state, resolveNode(state, root));
+  drawNode(state, resolveNode(state, root), 1);
   ctx.restore();
 }

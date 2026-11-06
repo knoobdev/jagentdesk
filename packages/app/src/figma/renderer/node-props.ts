@@ -203,6 +203,15 @@ export function absoluteBoxOf(node: FigmaNode): Bounds | null {
   return readBounds(node.absoluteBoundingBox);
 }
 
+/**
+ * The node's rendered-ink box (shadow/stroke outsets included, text cropped to ink). Figma's
+ * default node export is cropped to exactly this box, so fallback bytes map here, not onto the
+ * layout box (ADR-0042 G2).
+ */
+export function absoluteRenderBoundsOf(node: FigmaNode): Bounds | null {
+  return readBounds(node.absoluteRenderBounds);
+}
+
 export function nodeSize(node: FigmaNode): { width: number; height: number } {
   const box = absoluteBoxOf(node);
   // REST `geometry=paths` nodes carry the unrotated dimensions in `size`; the bounding box is
