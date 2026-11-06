@@ -1,4 +1,5 @@
 import { type ChildProcess } from "node:child_process";
+import { pickFigmaFile } from "../integrations/figma-file-picker.js";
 import { createFigmaCommandHandlers } from "../integrations/figma-oauth-loopback.js";
 import { createJiraCommandHandlers } from "../integrations/jira-oauth-loopback.js";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -1391,6 +1392,8 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
     ...createSkillsCommandHandlers({ controller: getSkillsController() }),
     ...createJiraCommandHandlers(),
     ...createFigmaCommandHandlers(),
+    // Browse files (spec 32.1, ADR-0038): no URL/partition input, file URL or cancelled back.
+    figma_pick_file: () => pickFigmaFile(),
   };
 }
 
