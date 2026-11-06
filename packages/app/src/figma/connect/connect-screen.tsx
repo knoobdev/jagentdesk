@@ -23,6 +23,7 @@ import {
 import { figmaStyles } from "@/figma/ui/styles";
 import { Button } from "@/components/ui/button";
 import { openExternalUrl } from "@/utils/open-external-url";
+import { RemoteConnectionPanel } from "./remote-connection-panel";
 import {
   canUseLoopback,
   finishWithLoopback,
@@ -272,6 +273,10 @@ export function FigmaConnectScreen({
             ))}
           </View>
         ) : null}
+
+        {/* ADR-0040: the Remote MCP editing connector is a separate connection from the REST
+            OAuth account above; the panel gates itself on the host capability. */}
+        <RemoteConnectionPanel serverId={serverId} />
 
         <Field label="Client ID">
           <Input
