@@ -182,19 +182,38 @@ describe("sectionEditing (read-only surfaces must speak up)", () => {
 // ── the write path: one execute per committed drag, verified independently ────────────────
 
 describe("sectionMoveScript / sectionMoveDescription", () => {
-  it("asserts existence and type so a vanished or retyped node never silently succeeds", () => {
-    const code = sectionMoveScript("40:1", 110, 70);
-    expect(code).toContain('await figma.getNodeByIdAsync("40:1")');
-    expect(code).toContain('throw new Error("SECTION 40:1 does not exist")');
-    expect(code).toContain('target.type !== "SECTION"');
-    expect(code).not.toContain("figma.currentPage.findOne");
+  it("refuses a non-finite world target instead of building nonsense JS", () => {
+    expect(() => sectionMoveScript("40:1", Number.NaN, 0)).toThrow(/finite/);
+    expect(() => sectionMoveScript("40:1", 0, Number.POSITIVE_INFINITY)).toThrow(/finite/);
   });
 
-  it("re-checks locks at write time and sets the target's ACTUAL ancestor page", () => {
+  it("embeds the id ONCE as an encoded literal; messages concatenate it, never interpolate raw", () => {
+    const code = sectionMoveScript('40:"1"', 110, 70);
+    expect(code).toContain('const sectionId = "40:\\"1\\"";');
+    expect(code).toContain("await figma.getNodeByIdAsync(sectionId)");
+    // The raw id appears nowhere outside the encoded literal (no re-escaping hazard).
+    expect(code).toContain('"SECTION " + sectionId + " does not exist"');
+    expect(code.match(/40:/g)).toHaveLength(1); // only inside the JSON.stringify literal
+  });
+
+  it("asserts existence so a vanished node never silently succeeds, with no page assumption", () => {
     const code = sectionMoveScript("40:1", 110, 70);
-    expect(code).toContain("locked at write time");
+    expect(code).toContain('throw new Error("SECTION " + sectionId + " does not exist")');
+    expect(code).not.toContain("figma.currentPage");
+  });
+
+  it("re-checks type and locked ancestors AFTER the awaited page switch, before any write", () => {
+    const code = sectionMoveScript("40:1", 110, 70);
     expect(code).toContain('while (page && page.type !== "PAGE") page = page.parent;');
     expect(code).toContain("await figma.setCurrentPageAsync(page)");
+    const switched = code.indexOf("await figma.setCurrentPageAsync(page)");
+    // Both authority checks sit after the switch: the file may move under us during the await,
+    // and a locked state must be discovered BEFORE writing, not reported afterwards.
+    expect(code.indexOf('target.type !== "SECTION"')).toBeGreaterThan(switched);
+    expect(code.indexOf("locked at write time")).toBeGreaterThan(switched);
+    expect(code.indexOf("target.x =")).toBeGreaterThan(code.indexOf("locked at write time"));
+    // The authoritative re-read: the node is fetched again after the switch settles.
+    expect(code.match(/getNodeByIdAsync/g)).toHaveLength(2);
   });
 
   it("converts the world position through the inverse parent transform, not into n.x/n.y blindly", () => {
@@ -213,11 +232,10 @@ describe("sectionMoveScript / sectionMoveDescription", () => {
     expect(code).toContain("const before = snapshot(target);");
     expect(code).toContain("const after = snapshot(target);");
     expect(code).toContain("return JSON.stringify({ before, after });");
-    expect(code).not.toMatch(/Saved/i);
+    expect(code).not.toMatch(/Saved/);
   });
 
-  it("quotes the id and keeps the description within the RPC's 1000 character cap", () => {
-    expect(sectionMoveScript('40:"1"', 0, 0)).toContain('getNodeByIdAsync("40:\\"1\\"")');
+  it("keeps the description within the RPC's 1000 character cap", () => {
     expect(sectionMoveDescription("Board", 109.6, -20.4)).toBe(
       'Move SECTION "Board" to (110, -20)',
     );

@@ -127,7 +127,24 @@ export function FigmaFileScreen(ref: FigmaFileRef) {
       </View>
     );
   }
-  return <FigmaFileScreenInner {...ref} />;
+  // Keyed so a host/file/version switch MOUNTS A FRESH inner: an in-flight write's promise
+  // window cannot leak into the new identity through lingering state (the generation guard is
+  // the belt; the key is the braces).
+  return (
+    <FigmaFileScreenInner
+      key={`${ref.serverId}|${ref.fileKey}|${ref.version ?? "live"}`}
+      {...ref}
+    />
+  );
+}
+
+// The write's synchronous identity: which host/file/page/version the committed drag belongs to.
+// Compared in late callbacks directly — never relying on the effect-flushed generation alone.
+interface MoveIdentity {
+  serverId: string;
+  fileKey: string;
+  pageId: string | null;
+  version: string | null;
 }
 
 // eslint-disable-next-line complexity
@@ -203,12 +220,37 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
   const remoteStatus = useFigmaRemoteStatus(serverId, { enabled: remoteWrites });
   const [sectionOffsets, setSectionOffsets] = useState<Record<string, SectionOffset>>({});
   const [sectionMoveStatus, setSectionMoveStatus] = useState<SectionMoveStatus>(null);
-  const expectedMove = useRef<{ id: string; x: number; y: number; generation: number } | null>(
-    null,
-  );
+  const expectedMove = useRef<{
+    id: string;
+    x: number;
+    y: number;
+    generation: number;
+    identity: MoveIdentity;
+  } | null>(null);
   const moveGeneration = useRef(0);
   const moveInFlight = useRef(false);
   const moveDeadline = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Synchronous write-identity snapshot, refreshed on EVERY RENDER: a late callback must
+  // compare against what the screen shows NOW, not wait for the generation effect to commit —
+  // that commit window is exactly where an old file/page's promise could land. (The key on the
+  // inner mount handles host/file/version; this also catches an in-instance page switch.)
+  const writeIdentity = useRef<MoveIdentity>({
+    serverId,
+    fileKey,
+    pageId: page?.id ?? null,
+    version: version ?? null,
+  });
+  writeIdentity.current = { serverId, fileKey, pageId: page?.id ?? null, version: version ?? null };
+  const moveIsStale = useCallback((generation: number, identity: MoveIdentity) => {
+    const now = writeIdentity.current;
+    return (
+      generation !== moveGeneration.current ||
+      now.serverId !== identity.serverId ||
+      now.fileKey !== identity.fileKey ||
+      now.pageId !== identity.pageId ||
+      now.version !== identity.version
+    );
+  }, []);
   const sectionEditing = useMemo(
     () =>
       buildSectionEditing({
@@ -254,7 +296,7 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
   useEffect(() => {
     const expected = expectedMove.current;
     if (!expected || !page) return;
-    if (expected.generation !== moveGeneration.current) {
+    if (moveIsStale(expected.generation, expected.identity)) {
       expectedMove.current = null;
       return;
     }
@@ -270,7 +312,7 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
       clearMoveLatch("unverified");
       setSectionOffsets({});
     }
-  }, [clearMoveLatch, page]);
+  }, [clearMoveLatch, moveIsStale, page]);
 
   const handleMoveSection = useCallback(
     (sectionId: string, dx: number, dy: number) => {
@@ -280,9 +322,13 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
       if (!summary || !sectionEditing.canEdit || moveInFlight.current) return;
       const x = summary.bounds.x + dx;
       const y = summary.bounds.y + dy;
+      // NaN/Infinity on the committed delta would produce a meaningless target; the write must
+      // land on finite world coordinates before the script is ever generated.
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
       const generation = moveGeneration.current;
+      const identity = writeIdentity.current;
       moveInFlight.current = true;
-      expectedMove.current = { id: sectionId, x, y, generation };
+      expectedMove.current = { id: sectionId, x, y, generation, identity };
       setSectionOffsets({ [sectionId]: { dx, dy } });
       setSectionMoveStatus("saving");
       void call("figma.remote.execute.request", {
@@ -291,7 +337,7 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
         description: sectionMoveDescription(summary.name, x, y),
       })
         .then((response) => {
-          if (generation !== moveGeneration.current) return; // late: no claim, no refetch
+          if (moveIsStale(generation, identity)) return; // late: no claim, no refetch
           if (response.result?.isError) {
             clearMoveLatch("failed");
             setSectionOffsets({});
@@ -301,24 +347,28 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
           // position from daemon-side metadata (the .then above never claims "Saved").
           onWatched();
           if (response.readbackAvailable === false) {
-            // The daemon's own metadata re-read failed: the write may have landed, nothing proves it.
+            // The daemon's own metadata re-read failed: the write may have landed, but nothing
+            // proves it — and a preview that silently becomes document state is a lie. Drop the
+            // preview while the refresh proceeds and keep the line flagged as uncertain (no
+            // "Saved", no automatic retry).
             clearMoveLatch("unverified");
-            return;
+            setSectionOffsets({});
+            return undefined;
           }
           // Wait for the refreshed outline to settle match/mismatch — never "saving" forever.
           moveDeadline.current = setTimeout(() => {
-            if (generation !== moveGeneration.current) return;
+            if (moveIsStale(generation, identity)) return;
             clearMoveLatch("unverified");
           }, SECTION_MOVE_DEADLINE_MS);
           return undefined;
         })
         .catch(() => {
-          if (generation !== moveGeneration.current) return;
+          if (moveIsStale(generation, identity)) return;
           clearMoveLatch("failed");
           setSectionOffsets({});
         });
     },
-    [call, clearMoveLatch, fileKey, onWatched, page, sectionEditing],
+    [call, clearMoveLatch, fileKey, moveIsStale, onWatched, page, sectionEditing],
   );
 
   const selectNode = useCallback((nodeId: string | null) => {

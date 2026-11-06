@@ -188,25 +188,37 @@ export const SECTION_MOVE_DEADLINE_MS = 20_000;
  * The remote code for one committed Section move. Metadata alone cannot be trusted for the
  * write: the node may be gone, may not be a SECTION any more, may have gained a locked
  * ancestor since the outline snapshot, and n.x/n.y are PARENT-LOCAL while the drag previews a
- * world delta. So the script asserts existence + type, re-checks locks at write time, sets the
- * target's ACTUAL ancestor page (never assume figma.currentPage), and converts the world
- * position through the inverse of the parent's absolute transform before writing. The
- * before/after return (id, parent, page, local + absolute positions) is evidence for the log —
- * the success verdict comes from independently refreshed outline metadata, not from this reply.
+ * world delta. So the script asserts existence, resolves the target's ACTUAL ancestor page
+ * (never assume figma.currentPage), and only THEN — after the awaited page switch, where the
+ * file may have moved under us — re-reads the node and asserts type and locked ancestors
+ * before writing; a locked state is never discovered after the write. The world position is
+ * converted to parent-local through the inverse of the parent's absolute transform. The
+ * sectionId is embedded once as a JS string literal (JSON.stringify) and every message
+ * concatenates that variable, so no raw id ever needs re-escaping. It returns actual
+ * before/after id/parent/page/local+absolute positions as evidence for the log — the success
+ * verdict comes from independently refreshed outline metadata, not from this reply.
  */
 export function sectionMoveScript(sectionId: string, worldX: number, worldY: number): string {
+  if (!Number.isFinite(worldX) || !Number.isFinite(worldY)) {
+    throw new TypeError(
+      `sectionMoveScript: world position must be finite, got (${worldX}, ${worldY})`,
+    );
+  }
   const id = JSON.stringify(sectionId);
   return `return await (async () => {
-  const target = await figma.getNodeByIdAsync(${id});
-  if (!target) throw new Error("SECTION ${sectionId} does not exist");
-  if (target.type !== "SECTION") throw new Error("${sectionId} is a " + target.type + ", not a SECTION");
+  const sectionId = ${id};
+  const first = await figma.getNodeByIdAsync(sectionId);
+  if (!first) throw new Error("SECTION " + sectionId + " does not exist");
+  let page = first.parent;
+  while (page && page.type !== "PAGE") page = page.parent;
+  if (!page) throw new Error("SECTION " + sectionId + " has no ancestor page");
+  await figma.setCurrentPageAsync(page);
+  const target = await figma.getNodeByIdAsync(sectionId);
+  if (!target) throw new Error("SECTION " + sectionId + " does not exist");
+  if (target.type !== "SECTION") throw new Error(sectionId + " is a " + target.type + ", not a SECTION");
   for (let node = target; node && node.type !== "PAGE"; node = node.parent) {
     if (node.locked) throw new Error("locked at write time: " + node.id);
   }
-  let page = target.parent;
-  while (page && page.type !== "PAGE") page = page.parent;
-  if (!page) throw new Error("SECTION ${sectionId} has no ancestor page");
-  await figma.setCurrentPageAsync(page);
   const snapshot = (node) => {
     const t = node.absoluteTransform;
     return { id: node.id, parent: node.parent ? node.parent.id : null, page: page.id,
@@ -215,7 +227,7 @@ export function sectionMoveScript(sectionId: string, worldX: number, worldY: num
   const parent = target.parent;
   const m = parent && parent.absoluteTransform ? parent.absoluteTransform : [[1, 0, 0], [0, 1, 0]];
   const det = m[0][0] * m[1][1] - m[0][1] * m[1][0];
-  if (!det) throw new Error("parent of ${sectionId} has a degenerate transform");
+  if (!det) throw new Error("parent of " + sectionId + " has a degenerate transform");
   const gx = ${worldX} - m[0][2], gy = ${worldY} - m[1][2];
   const before = snapshot(target);
   target.x = (m[1][1] * gx - m[0][1] * gy) / det;

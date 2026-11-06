@@ -57,6 +57,20 @@ const {
         children: [],
         flowStartingPoints: [{ nodeId: "9:9", name: "Onboarding", pageId: "p1" }],
       },
+      {
+        id: "p2",
+        name: "Page 2",
+        frames: [
+          {
+            id: "60:1",
+            name: "Other screen",
+            type: "FRAME",
+            bounds: { x: 0, y: 900, width: 375, height: 812 },
+          },
+        ],
+        children: [],
+        flowStartingPoints: [],
+      },
     ],
   };
   const queue = { "1:1": { name: "Queued" } } as Record<string, unknown>;
@@ -534,20 +548,22 @@ describe("FigmaFileScreen SECTION write path", () => {
     expect(remote.execute).toHaveBeenCalledTimes(1);
     const params = remote.execute.mock.calls[0][0];
     expect(params.fileKey).toBe("file");
-    // Never figma.currentPage.findOne: existence + SECTION type assert (throw, never silent),
-    // locks re-checked at write time, the ACTUAL ancestor page set, and the world position
-    // converted through the inverse parent transform — n.x/n.y are parent-LOCAL.
-    expect(params.code).toContain('figma.getNodeByIdAsync("40:1")');
+    // Never figma.currentPage.findOne: existence asserts (throw, never silent), the ACTUAL
+    // ancestor page is set, and type/locks are re-checked AFTER the await before any write.
+    expect(params.code).toContain('const sectionId = "40:1";');
+    expect(params.code.match(/getNodeByIdAsync/g)).toHaveLength(2); // initial resolve + post-switch re-read
     expect(params.code).toContain("does not exist");
     expect(params.code).toContain("not a SECTION");
     expect(params.code).toContain("locked at write time");
-    expect(params.code).toContain("await figma.setCurrentPageAsync(page)");
+    expect(params.code.indexOf("locked at write time")).toBeGreaterThan(
+      params.code.indexOf("await figma.setCurrentPageAsync(page)"),
+    );
     expect(params.code).toContain("/ det");
     expect(params.code).toContain("const gx = 110 - m[0][2]");
     expect(params.code).toContain("gy = 70 - m[1][2]");
     expect(params.code).toContain("before");
     expect(params.code).toContain("after");
-    expect(params.code).not.toContain("figma.currentPage.findOne");
+    expect(params.code).not.toContain("figma.currentPage");
     expect(params.description).toContain('Move SECTION "Flow Board" to (110, 70)');
     // The preview stands while the write is in flight.
     expect(canvasProps().sectionMoveStatus).toBe("saving");
@@ -641,13 +657,13 @@ describe("FigmaFileScreen SECTION write path", () => {
     expect(canvasProps().sectionOffsets).toEqual({});
   });
 
-  it("a failed daemon re-read settles unverified while keeping the preview", async () => {
+  it("a failed daemon re-read settles unverified and DROPS the preview while refresh proceeds", async () => {
     remote.execute.mockResolvedValue({ result: { content: [] }, readbackAvailable: false });
     mountEditable();
     commitDrag("40:1", 100, 50);
     await settle();
-    expect(canvasProps().sectionMoveStatus).toBe("unverified");
-    expect(canvasProps().sectionOffsets).toEqual({ "40:1": { dx: 100, dy: 50 } });
+    expect(canvasProps().sectionMoveStatus).toBe("unverified"); // uncertainty stays visibly flagged
+    expect(canvasProps().sectionOffsets).toEqual({}); // a preview that outlives proof silently lies
   });
 
   it("never saving forever: the deadline settles a silent readback, with no auto retry", async () => {
@@ -681,5 +697,47 @@ describe("FigmaFileScreen SECTION write path", () => {
     expect(figmaFns.invalidateFile).not.toHaveBeenCalled(); // no stale invalidate/refetch
     commitDrag("40:1", 10, 10); // the latch is free again for the new file
     expect(remote.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it("a page switch mid-write is identity-stale: the late reply settles nothing and refetches nothing", async () => {
+    mountEditable();
+    const pending = deferred<ExecuteResponse>();
+    remote.execute.mockReturnValue(pending.promise);
+    commitDrag("40:1", 100, 50);
+    act(() => (captured.topbar as { onSelectPage: (id: string) => void }).onSelectPage("p2"));
+    expect(canvasProps().sectionMoveStatus).toBeNull();
+    expect(canvasProps().sectionOffsets).toEqual({});
+    pending.resolve({ result: { content: [] }, readbackAvailable: true });
+    await settle();
+    expect(figmaFns.invalidateFile).not.toHaveBeenCalled();
+    // The refreshed outline now reports the section where p1's committed target was — but the
+    // write belonged to a page that is no longer visible: no delayed "verified" flip either.
+    setSectionBounds(110, 70);
+    settleRerender();
+    expect(canvasProps().sectionMoveStatus).toBeNull();
+  });
+
+  it("a version switch mid-write remounts fresh, swallows the late reply, and stays read-only", async () => {
+    const screen = mountEditable();
+    const pending = deferred<ExecuteResponse>();
+    remote.execute.mockReturnValue(pending.promise);
+    commitDrag("40:1", 100, 50);
+    screen.rerender({ version: "v9" }); // keyed identity change: the inner mount is brand new
+    expect(canvasProps().sectionMoveStatus).toBeNull();
+    expect(canvasProps().sectionOffsets).toEqual({});
+    expect(canvasProps().sectionEditing.canEdit).toBe(false); // historical: select/pan only
+    pending.resolve({ result: { content: [] }, readbackAvailable: true });
+    await settle();
+    expect(figmaFns.invalidateFile).not.toHaveBeenCalled(); // no stale invalidate/refetch
+    commitDrag("40:1", 10, 10); // read-only surfaces never write
+    expect(remote.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("a non-finite committed delta never reaches the RPC", () => {
+    mountEditable();
+    commitDrag("40:1", Number.NaN, 5);
+    commitDrag("40:1", 5, Number.POSITIVE_INFINITY);
+    expect(remote.execute).not.toHaveBeenCalled();
+    expect(canvasProps().sectionMoveStatus).toBeNull();
   });
 });
