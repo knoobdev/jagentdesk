@@ -201,6 +201,34 @@ describe("missing resource reporting", () => {
   });
 });
 
+describe("drawn font descriptors", () => {
+  // The renderer asks ctx.font for exactly the face font-loading.ts loaded, because both sides
+  // share figma/font-style.ts. The old local matcher started at 400 and Math.max'd substring
+  // hits, so "Light" drew 400 and "SemiBold"/"Semi Bold" drew 700 (via "bold"). Assert the
+  // actual recorded font string, not just that the vector path drew at all.
+  const drawnFontsFor = (styleName: string): string[] => {
+    const node = loadNode("text-basic");
+    (node as { style: { fontStyle: string } }).style.fontStyle = styleName;
+    const records = draw(node, { fontAvailable: () => true });
+    const fonts = records.filter((r) => r[0] === "set:font").map((r) => String(r[1]));
+    expect(fonts.length).toBeGreaterThan(0);
+    return fonts;
+  };
+
+  it.each([
+    ["Thin", '100 32px "Inter"'],
+    ["Light", '300 32px "Inter"'],
+    ["SemiBold", '600 32px "Inter"'],
+    ["Semi Bold", '600 32px "Inter"'],
+    ["ExtraBold", '800 32px "Inter"'],
+    ["Thin Italic", 'italic 100 32px "Inter"'],
+  ] as const)("style %s draws the real %s face", (styleName, font) => {
+    // Every segment of one run must carry the identical descriptor — a per-word drift would
+    // mean the token list is consulted twice with different results.
+    expect(new Set(drawnFontsFor(styleName))).toEqual(new Set([font]));
+  });
+});
+
 describe("unsupportedFeatures", () => {
   const textNode = (name: string, extra: Record<string, unknown>): FigmaNode =>
     ({

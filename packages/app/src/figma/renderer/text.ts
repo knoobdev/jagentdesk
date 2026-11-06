@@ -7,28 +7,12 @@ import type { FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
 import type { Paint, TextStyle, TextRun } from "./node-props";
 import { nodeOpacity, nodeSize, paintsOf, textAligns, textRuns } from "./node-props";
 import { resolvePaintStyle } from "./paints";
+import { isItalicStyle, weightForStyle } from "../font-style";
 import type { MissingSink } from "./missing";
 import type { FigmaRenderOptions } from "./types";
 
 const DEFAULT_FONT_SIZE = 16;
 const GENERIC_FAMILY = "sans-serif";
-
-const WEIGHT_TOKENS: [string, number][] = [
-  ["thin", 100],
-  ["extralight", 200],
-  ["ultralight", 200],
-  ["light", 300],
-  ["regular", 400],
-  ["normal", 400],
-  ["medium", 500],
-  ["semibold", 600],
-  ["demibold", 600],
-  ["bold", 700],
-  ["extrabold", 800],
-  ["ultrabold", 800],
-  ["black", 900],
-  ["heavy", 900],
-];
 
 interface ResolvedRun {
   text: string;
@@ -39,15 +23,6 @@ interface ResolvedRun {
   letterSpacing: number;
   lineHeight: number;
   decoration: string | null;
-}
-
-function weightAndItalic(styleName: string): { weight: number; italic: boolean } {
-  const lower = styleName.toLowerCase();
-  let weight = 400;
-  for (const [token, value] of WEIGHT_TOKENS) {
-    if (lower.includes(token)) weight = Math.max(weight, value);
-  }
-  return { weight, italic: /italic|oblique/.test(lower) };
 }
 
 function cssFont(run: ResolvedRun): string {
@@ -147,12 +122,12 @@ function toResolvedRun(
 ): ResolvedRun {
   const style = run.style;
   const fontSize = style.fontSize ?? DEFAULT_FONT_SIZE;
-  const { weight, italic } = weightAndItalic(style.fontStyle ?? "Regular");
+  const styleName = style.fontStyle ?? "Regular";
   return {
     text: applyTextCase(run.text, style.textCase),
     family: resolveFamily(style, options, missing),
-    weight,
-    italic,
+    weight: weightForStyle(styleName),
+    italic: isItalicStyle(styleName),
     fontSize,
     letterSpacing: style.letterSpacing ?? 0,
     lineHeight: lineHeightFor(style, fontSize),
