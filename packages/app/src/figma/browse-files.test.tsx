@@ -196,6 +196,63 @@ describe("Browse files (ADR-0038 primary add)", () => {
     expect(router.setParams).not.toHaveBeenCalled();
   });
 
+  it("re-enables Browse after an account switch while a pick is unresolved, and the stale completion cannot unlock the fresh pick", async () => {
+    type Pick = { kind: "file"; url: string } | { kind: "cancelled" };
+    let resolveStale: (value: Pick) => void = () => {};
+    let resolveFresh: (value: Pick) => void = () => {};
+    pickFile
+      .mockReturnValueOnce(new Promise((resolve) => (resolveStale = resolve)))
+      .mockReturnValueOnce(new Promise((resolve) => (resolveFresh = resolve)));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = render(
+      <QueryClientProvider client={client}>
+        <BrowseFilesRow serverId="s1" connectionId="c1" />
+      </QueryClientProvider>,
+    );
+    clickBrowse();
+    expect(screen.getByText("Opening Figma…")).toBeDefined();
+    // Account/connection switch while the FIRST pick is still unresolved.
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <BrowseFilesRow serverId="s2" connectionId="c2" />
+      </QueryClientProvider>,
+    );
+    // The stale pick owns nothing in the fresh context: Browse is usable again…
+    await waitFor(() => expect(screen.getByText("Browse files")).toBeDefined());
+    clickBrowse();
+    // …and the fresh pick now owns the busy state.
+    expect(screen.getByText("Opening Figma…")).toBeDefined();
+    expect(pickFile).toHaveBeenCalledTimes(2);
+    // The STALE completion lands: it must neither unlock the fresh busy state
+    // nor add on the old context.
+    act(() => resolveStale({ kind: "file", url: PICKED_URL }));
+    await waitFor(() => expect(screen.getByText("Opening Figma…")).toBeDefined());
+    expect(figmaRequest).not.toHaveBeenCalledWith(
+      "figma.files.add.request",
+      expect.objectContaining({ connectionId: "c1" }),
+    );
+    // The fresh pick completing is what unlocks.
+    act(() => resolveFresh({ kind: "cancelled" }));
+    await waitFor(() => expect(screen.getByText("Browse files")).toBeDefined());
+    expect(router.setParams).not.toHaveBeenCalled();
+  });
+
+  it("errors without navigating when the add response carries no file", async () => {
+    pickFile.mockResolvedValue({ kind: "file", url: PICKED_URL });
+    figmaRequest.mockImplementation((type: string) => {
+      if (type === "figma.files.add.request") return Promise.resolve({ requestId: "r-add" });
+      if (type === "figma.files.list.request")
+        return Promise.resolve({ requestId: "r-list", files: [] });
+      return Promise.resolve({ requestId: "r" });
+    });
+    renderBrowse(<BrowseFilesRow serverId="s1" connectionId="c1" />);
+    clickBrowse();
+    await waitFor(() => expect(screen.getByTestId("figma-nav-browse-error")).toBeDefined());
+    // No `?? target.fileKey` success fallback: a missing returned file is an error.
+    expect(screen.getByTestId("figma-nav-browse-error").textContent).toMatch(/no file to open/i);
+    expect(router.setParams).not.toHaveBeenCalled();
+  });
+
   it("surfaces the daemon account/app message on a Figma 403 without blaming sharing", async () => {
     pickFile.mockResolvedValue({ kind: "file", url: PICKED_URL });
     figmaRequest.mockImplementationOnce(() =>

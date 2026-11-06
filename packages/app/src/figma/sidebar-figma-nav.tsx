@@ -18,7 +18,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import type {
   FigmaConnection,
   FigmaFile,
-  FigmaFrameSummary,
   FigmaLinkFile,
   FigmaNode,
   FigmaPage,
@@ -34,11 +33,14 @@ import {
   useFigmaLinkStatus,
   useFigmaNodes,
   useFigmaOutline,
+  useFigmaSectionChildren,
   useFigmaTeamFiles,
   useFigmaTeamProjects,
   useFigmaTeams,
 } from "@/figma/queries";
 import { useFigmaGlobalNav, type FigmaNav } from "@/figma/nav";
+import { childSummaries, type OutlineSectionSummary } from "@/figma/canvas/section-outline";
+import { useHostFeature, type HostFeatureName } from "@/runtime/host-features";
 import { parseFigmaFileUrl, parseFigmaTeamUrl } from "@/figma/url-parse";
 import {
   BrowseFilesRow,
@@ -569,27 +571,81 @@ function FrameLayers({
   return <View>{children}</View>;
 }
 
+// ── Outline tree (ADR-0039) ─────────────────────────────────────────────────
+// The depth-3 outline delivers a FLAT, ordered list of frame summaries with an
+// OPTIONAL `parentId` and a SECTION-only `childrenLoaded`. Rows render strictly
+// by parentId (siblings keep the order the API returned); a SECTION expands to
+// its real child summaries when the outline carried them, and to a depth-1
+// snapshot read — its own cache namespace, the outline's pinned version — when
+// they are still unknown. The sidebar never loads a full SECTION subtree and
+// never prefetches sections just because the file opened; only expanding a
+// REAL frame pulls its full tree (useFigmaNodes). Hosts without the
+// figmaNodeDepth capability get a disabled section row plus an update hint —
+// no speculative full-Section fallback.
+
+interface OutlineTree {
+  roots: OutlineSectionSummary[];
+  byParent: Map<string, OutlineSectionSummary[]>;
+}
+
+const NO_CHILDREN = new Map<string, OutlineSectionSummary[]>();
+
+function buildOutlineTree(frames: readonly OutlineSectionSummary[]): OutlineTree {
+  const roots: OutlineSectionSummary[] = [];
+  const byParent = new Map<string, OutlineSectionSummary[]>();
+  for (const summary of frames) {
+    const parent = summary.parentId ?? null;
+    if (parent) {
+      const bucket = byParent.get(parent);
+      if (bucket) bucket.push(summary);
+      else byParent.set(parent, [summary]);
+    } else {
+      roots.push(summary);
+    }
+  }
+  return { roots, byParent };
+}
+
+// Page-child rows start at the old indent1 inset and step 12px per nesting
+// level, so section children line up under their parent section.
+function outlineRowIndent(depth: number): number {
+  return themeSpacing(3) + themeSpacing(2) + depth * 12;
+}
+
+// COMPAT(adr0039-capability): cast pending the protocol's figmaNodeDepth
+// server_info feature (W4); drop the cast after the integrator's build lands.
+const FIGMA_NODE_DEPTH: HostFeatureName = "figmaNodeDepth" as HostFeatureName;
+
+interface OutlineRowProps {
+  serverId: string;
+  fileKey: string;
+  /** Route-pinned version for full-tree reads (old behavior, unchanged). */
+  version: string | null;
+  /** Snapshot version the displayed outline came from; required for depth-1. */
+  pinnedVersion: string | null;
+  canReadNodeDepth: boolean;
+  /** One-open-per-page rule, shared by frames and sections; node ids are
+   * file-global, so a set keyed by id nests correctly at every level. */
+  expandedIds: ReadonlySet<string>;
+  selectedNodeId: string | null;
+  onSelectFrame: (frameId: string) => void;
+  onSelectNode: (nodeId: string) => void;
+  onToggleSection: (sectionId: string, wasExpanded: boolean) => void;
+  search: string;
+}
+
 function FrameRow({
   serverId,
   fileKey,
   version,
   frame,
+  depth,
   expanded,
   selectedNodeId,
   onSelectFrame,
   onSelectNode,
   search,
-}: {
-  serverId: string;
-  fileKey: string;
-  version: string | null;
-  frame: FigmaFrameSummary;
-  expanded: boolean;
-  selectedNodeId: string | null;
-  onSelectFrame: (frameId: string) => void;
-  onSelectNode: (nodeId: string) => void;
-  search: string;
-}) {
+}: OutlineRowProps & { frame: OutlineSectionSummary; depth: number; expanded: boolean }) {
   // The subtree under a frame is fetched from figma.file.nodes only once that frame is open
   // (32.5.2) — the outline alone carries just the frame summaries.
   const nodes = useFigmaNodes(serverId, fileKey, expanded ? [frame.id] : [], version);
@@ -602,7 +658,7 @@ function FrameRow({
   return (
     <View>
       <Pressable
-        style={[styles.row, styles.indent1]}
+        style={[styles.row, { paddingLeft: outlineRowIndent(depth) }]}
         onPress={press}
         accessibilityRole="button"
         testID={`figma-nav-frame-${frame.id}`}
@@ -633,15 +689,156 @@ function FrameRow({
   );
 }
 
+function SectionRow({
+  serverId,
+  fileKey,
+  version,
+  pinnedVersion,
+  canReadNodeDepth,
+  section,
+  byParent,
+  depth,
+  expanded,
+  expandedIds,
+  selectedNodeId,
+  onSelectFrame,
+  onSelectNode,
+  onToggleSection,
+  search,
+}: OutlineRowProps & {
+  section: OutlineSectionSummary;
+  byParent: OutlineTree["byParent"];
+  depth: number;
+  expanded: boolean;
+}) {
+  const knownChildren = useMemo(() => byParent.get(section.id) ?? [], [byParent, section.id]);
+  // Unknown children = the outline did NOT flatten this section (nested
+  // sections at the depth-3 boundary carry childrenLoaded:false; a summary
+  // with no flag at all reads the same way). Only expanding reads depth 1.
+  const childrenUnknown = knownChildren.length === 0 && section.childrenLoaded !== true;
+  const expandable = knownChildren.length > 0 || childrenUnknown;
+  // The shallow read needs the host capability AND the outline's pinned
+  // version; the helper stays disabled (never a full-subtree guess) without
+  // either, and the row is disabled with an update hint when the host lacks it.
+  const shallow = useFigmaSectionChildren(
+    serverId,
+    fileKey,
+    expanded && childrenUnknown && canReadNodeDepth ? section.id : null,
+    pinnedVersion,
+  );
+  const lazyChildren = useMemo(() => {
+    if (!expanded || !childrenUnknown) return [];
+    const node = shallow.data?.nodes?.[section.id] ?? null;
+    return node ? childSummaries(node) : [];
+  }, [childrenUnknown, expanded, section.id, shallow.data]);
+  const press = useCallback(() => {
+    if (expandable) onToggleSection(section.id, expandedIds.has(section.id));
+  }, [expandable, expandedIds, onToggleSection, section.id]);
+  const nested: OutlineRowProps = {
+    serverId,
+    fileKey,
+    version,
+    pinnedVersion,
+    canReadNodeDepth,
+    expandedIds,
+    selectedNodeId,
+    onSelectFrame,
+    onSelectNode,
+    onToggleSection,
+    search,
+  };
+  let openChildren: React.ReactNode = null;
+  if (expanded) {
+    openChildren = childrenUnknown ? (
+      <FrameLayers loading={shallow.isLoading} error={shallow.error}>
+        <OutlineRows
+          {...nested}
+          summaries={lazyChildren}
+          byParent={NO_CHILDREN}
+          depth={depth + 1}
+        />
+      </FrameLayers>
+    ) : (
+      <OutlineRows {...nested} summaries={knownChildren} byParent={byParent} depth={depth + 1} />
+    );
+  }
+  return (
+    <View>
+      <Pressable
+        style={[styles.row, { paddingLeft: outlineRowIndent(depth) }]}
+        onPress={press}
+        accessibilityRole="button"
+        disabled={childrenUnknown && !canReadNodeDepth}
+        testID={`figma-nav-section-${section.id}`}
+      >
+        <LayerChevron hasChildren={expandable} expanded={expanded} />
+        <Text style={styles.rowLabel} numberOfLines={1}>
+          {section.name}
+        </Text>
+      </Pressable>
+      {expandable && childrenUnknown && !canReadNodeDepth ? (
+        <Text
+          style={[styles.rowSub, { paddingLeft: outlineRowIndent(depth + 1) }]}
+          testID={`figma-nav-section-${section.id}-update-hint`}
+        >
+          Update the host to browse sections.
+        </Text>
+      ) : null}
+      {openChildren}
+    </View>
+  );
+}
+
+function OutlineRows({
+  summaries,
+  byParent,
+  depth,
+  ...rows
+}: OutlineRowProps & {
+  summaries: readonly OutlineSectionSummary[];
+  byParent: OutlineTree["byParent"];
+  depth: number;
+}) {
+  return (
+    <>
+      {summaries
+        .filter((summary) => matchesSearch(summary, rows.search))
+        .map((summary) =>
+          summary.type === "SECTION" ? (
+            <SectionRow
+              key={summary.id}
+              {...rows}
+              section={summary}
+              byParent={byParent}
+              depth={depth}
+              expanded={rows.expandedIds.has(summary.id)}
+            />
+          ) : (
+            <FrameRow
+              key={summary.id}
+              {...rows}
+              frame={summary}
+              depth={depth}
+              expanded={rows.expandedIds.has(summary.id)}
+            />
+          ),
+        )}
+    </>
+  );
+}
+
 function PageRow({
   serverId,
   fileKey,
   version,
+  pinnedVersion,
+  canReadNodeDepth,
   page,
   go,
-  expandedFrame,
+  expandedIds,
   selectedNodeId,
   onToggleFrame,
+  onToggleSection,
   onSelectNode,
   search,
   onSearchChange,
@@ -649,11 +846,14 @@ function PageRow({
   serverId: string;
   fileKey: string;
   version: string | null;
+  pinnedVersion: string | null;
+  canReadNodeDepth: boolean;
   page: FigmaPage;
   go: Go;
-  expandedFrame: string | null;
+  expandedIds: ReadonlySet<string>;
   selectedNodeId: string | null;
   onToggleFrame: (pageId: string, frameId: string, wasExpanded: boolean) => void;
+  onToggleSection: (pageId: string, sectionId: string, wasExpanded: boolean) => void;
   onSelectNode: (nodeId: string) => void;
   search: string;
   onSearchChange: (value: string) => void;
@@ -664,12 +864,17 @@ function PageRow({
     go({ pageId: page.id, nodeId: null });
   }, [go, page.id]);
   const selectFrame = useCallback(
-    (frameId: string) => onToggleFrame(page.id, frameId, expandedFrame === frameId),
-    [expandedFrame, onToggleFrame, page.id],
+    (frameId: string) => onToggleFrame(page.id, frameId, expandedIds.has(frameId)),
+    [expandedIds, onToggleFrame, page.id],
   );
-  const frames = useMemo(
-    () => (page.frames ?? []).filter((frame) => matchesSearch(frame, search)),
-    [page.frames, search],
+  const toggleSection = useCallback(
+    (sectionId: string, wasExpanded: boolean) => onToggleSection(page.id, sectionId, wasExpanded),
+    [onToggleSection, page.id],
+  );
+  // The flat summaries become a hierarchy strictly through parentId.
+  const tree = useMemo(
+    () => buildOutlineTree(page.frames as readonly OutlineSectionSummary[]),
+    [page.frames],
   );
   const searchRow = useMemo(
     () => (
@@ -704,20 +909,22 @@ function PageRow({
       {selected ? (
         <>
           {searchRow}
-          {frames.map((frame) => (
-            <FrameRow
-              key={frame.id}
-              serverId={serverId}
-              fileKey={fileKey}
-              version={version}
-              frame={frame}
-              expanded={expandedFrame === frame.id}
-              selectedNodeId={selectedNodeId}
-              onSelectFrame={selectFrame}
-              onSelectNode={onSelectNode}
-              search={search}
-            />
-          ))}
+          <OutlineRows
+            serverId={serverId}
+            fileKey={fileKey}
+            version={version}
+            pinnedVersion={pinnedVersion}
+            canReadNodeDepth={canReadNodeDepth}
+            expandedIds={expandedIds}
+            selectedNodeId={selectedNodeId}
+            onSelectFrame={selectFrame}
+            onSelectNode={onSelectNode}
+            onToggleSection={toggleSection}
+            search={search}
+            summaries={tree.roots}
+            byParent={tree.byParent}
+            depth={0}
+          />
         </>
       ) : null}
     </View>
@@ -737,15 +944,36 @@ function PagesAndLayers({
 }) {
   const { location } = useFigmaGlobalNav();
   const outline = useFigmaOutline(serverId, fileKey, version);
+  const canReadNodeDepth = useHostFeature(serverId, FIGMA_NODE_DEPTH);
   const [search, setSearch] = useState("");
   const pages = useMemo(() => outline.data?.pages ?? [], [outline.data]);
-  const [expandedFrame, setExpandedFrame] = useState<string | null>(null);
+  // The outline response pins the snapshot its tree came from; depth-1 section
+  // reads must run against the SAME version (the handler requires a non-empty
+  // one — null here simply keeps the shallow read disabled, never a fallback).
+  const pinnedVersion = outline.data?.version ?? null;
+  const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const openRow = useCallback((rowId: string, wasExpanded: boolean) => {
+    setExpandedIds((previous) => {
+      const next = new Set(previous);
+      if (wasExpanded) next.delete(rowId);
+      else next.add(rowId);
+      return next;
+    });
+  }, []);
   const toggleFrame = useCallback(
     (pageId: string, frameId: string, wasExpanded: boolean) => {
       go({ pageId, nodeId: frameId });
-      setExpandedFrame(wasExpanded ? null : frameId);
+      openRow(frameId, wasExpanded);
     },
-    [go],
+    [go, openRow],
+  );
+  const toggleSection = useCallback(
+    (_pageId: string, sectionId: string, wasExpanded: boolean) => {
+      // Expanding a section is tree navigation, not a canvas selection: the
+      // selected node stays where it was, only the row opens.
+      openRow(sectionId, wasExpanded);
+    },
+    [openRow],
   );
   const selectNode = useCallback((nodeId: string) => go({ nodeId }), [go]);
   const changeSearch = useCallback((value: string) => setSearch(value), []);
@@ -760,11 +988,14 @@ function PagesAndLayers({
           serverId={serverId}
           fileKey={fileKey}
           version={version}
+          pinnedVersion={pinnedVersion}
+          canReadNodeDepth={canReadNodeDepth}
           page={page}
           go={go}
-          expandedFrame={location.pageId === page.id ? expandedFrame : null}
+          expandedIds={location.pageId === page.id ? expandedIds : EMPTY_IDS}
           selectedNodeId={location.nodeId}
           onToggleFrame={toggleFrame}
+          onToggleSection={toggleSection}
           onSelectNode={selectNode}
           search={search}
           onSearchChange={changeSearch}
@@ -773,6 +1004,8 @@ function PagesAndLayers({
     </>
   );
 }
+
+const EMPTY_IDS: ReadonlySet<string> = new Set();
 
 function ConnectionRow({
   connection,

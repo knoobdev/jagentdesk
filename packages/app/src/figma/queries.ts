@@ -26,6 +26,10 @@ export const figmaKeys = {
     ["figma", serverId, "outline", fileKey, version ?? "latest"] as const,
   nodes: (serverId: string, fileKey: string, ids: readonly string[], version: string | null) =>
     ["figma", serverId, "nodes", fileKey, version ?? "latest", [...ids].sort().join(",")] as const,
+  // ADR-0039: the shallow (depth=1) section-children cache lives in its own
+  // namespace so a shallow snapshot can NEVER answer a full-tree request.
+  nodesShallow: (serverId: string, fileKey: string, id: string, version: string) =>
+    ["figma", serverId, "nodes", "depth-1", fileKey, version, id] as const,
 };
 
 const STALE_MS = 10_000;
@@ -125,6 +129,39 @@ export function useFigmaNodes(
         ...(version ? { version } : {}),
       }),
     enabled: client !== null && fileKey !== null && ids.length > 0 && enabled,
+    dataShape: "value",
+    staleTimeMs: 30 * 60_000,
+  });
+}
+
+/**
+ * ADR-0039 shallow subtree: the DIRECT children of a SECTION, read with
+ * `depth: 1` against a pinned, non-empty version (the handler requires one —
+ * a null version never fires this query, there is no speculative fallback).
+ * Its own depth-qualified cache namespace: a shallow response is never
+ * returned to full-tree `useFigmaNodes` requests, and vice versa.
+ */
+export function useFigmaSectionChildren(
+  serverId: string,
+  fileKey: string | null,
+  sectionId: string | null,
+  version: string | null,
+  enabled = true,
+) {
+  const client = useClient(serverId);
+  const active = client !== null && fileKey !== null && sectionId !== null;
+  // Declared outside the literal: `depth` is added by the ADR-0039 protocol
+  // change (W4); until that lands the extra key must not trip the params type.
+  const request = {
+    fileKey: fileKey ?? "",
+    ids: [sectionId ?? ""],
+    depth: 1 as const,
+    version: version ?? "",
+  };
+  return useFetchQuery({
+    queryKey: figmaKeys.nodesShallow(serverId, fileKey ?? "", sectionId ?? "", version ?? ""),
+    queryFn: async () => await callFigma(client, "figma.file.nodes.request", request),
+    enabled: active && !!version && enabled,
     dataShape: "value",
     staleTimeMs: 30 * 60_000,
   });

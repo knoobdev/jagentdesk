@@ -13,7 +13,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { FigmaConnection, FigmaFile, FigmaTeam } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { bridge, queriesState, navState } = vi.hoisted(() => ({
+const { bridge, queriesState, navState, host, calls } = vi.hoisted(() => ({
   bridge: { current: null as { figma?: { pickFile?: () => Promise<unknown> } } | null },
   queriesState: {
     connections: { data: [] as FigmaConnection[], isLoading: false, error: null as unknown },
@@ -23,6 +23,7 @@ const { bridge, queriesState, navState } = vi.hoisted(() => ({
     teamFiles: { data: [] as unknown[], isLoading: false, error: null as unknown },
     outline: { data: null as unknown, isLoading: false, error: null as unknown },
     nodes: { data: null as unknown, isLoading: false, error: null as unknown },
+    sectionChildren: { data: null as unknown, isLoading: false, error: null as unknown },
     linkStatus: { data: undefined as unknown, isLoading: false, error: null as unknown },
     invalidated: [] as string[],
   },
@@ -36,6 +37,12 @@ const { bridge, queriesState, navState } = vi.hoisted(() => ({
       view: "files" as "files" | "connect" | "link",
     },
     go: vi.fn(),
+  },
+  // server_info.features the sidebar gates on (ADR-0039 figmaNodeDepth).
+  host: { figmaNodeDepth: true },
+  calls: {
+    nodes: [] as unknown[][],
+    sectionChildren: [] as unknown[][],
   },
 }));
 
@@ -96,6 +103,10 @@ vi.mock("@/desktop/host", () => ({ getDesktopHost: () => bridge.current }));
 vi.mock("@/runtime/host-runtime", () => ({
   useHostRuntimeClient: () => ({ figmaRequest: vi.fn() }),
 }));
+vi.mock("@/runtime/host-features", () => ({
+  useHostFeature: (_serverId: string, feature: string) =>
+    feature === "figmaNodeDepth" && host.figmaNodeDepth,
+}));
 vi.mock("@/figma/api", () => ({
   callFigma: vi.fn(async () => ({})),
   errorMessage: (cause: unknown) => (cause instanceof Error ? cause.message : String(cause)),
@@ -113,8 +124,17 @@ vi.mock("@/figma/queries", () => {
     useFigmaTeamProjects: query("teamProjects"),
     useFigmaTeamFiles: query("teamFiles"),
     useFigmaOutline: query("outline"),
-    useFigmaNodes: query("nodes"),
     useFigmaLinkStatus: query("linkStatus"),
+    // Real-argument recorders: the ADR-0039 tests assert WHICH node each read
+    // was asked for (full tree vs shallow depth-1), not just that it ran.
+    useFigmaNodes: (...args: unknown[]) => {
+      calls.nodes.push(args);
+      return queriesState.nodes;
+    },
+    useFigmaSectionChildren: (...args: unknown[]) => {
+      calls.sectionChildren.push(args);
+      return queriesState.sectionChildren;
+    },
     invalidateFigmaFiles: (_queryClient: unknown, serverId: string) =>
       queriesState.invalidated.push(serverId),
   };
@@ -162,8 +182,12 @@ beforeEach(() => {
   queriesState.teamFiles = { data: [], isLoading: false, error: null };
   queriesState.outline = { data: null, isLoading: false, error: null };
   queriesState.nodes = { data: null, isLoading: false, error: null };
+  queriesState.sectionChildren = { data: null, isLoading: false, error: null };
   queriesState.linkStatus = { data: undefined, isLoading: false, error: null };
   queriesState.invalidated = [];
+  host.figmaNodeDepth = true;
+  calls.nodes = [];
+  calls.sectionChildren = [];
   navState.location = {
     connectionId: "fgc_1",
     fileKey: null,
@@ -266,5 +290,171 @@ describe("SidebarFigmaNav — tracked files", () => {
     renderNav();
     fireEvent.click(screen.getByTestId("figma-nav-link"));
     expect(navState.go).toHaveBeenCalledWith({ view: "link" });
+  });
+});
+
+// ── ADR-0039 — Section outline tree ─────────────────────────────────────────
+function summary(
+  id: string,
+  type: string,
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id,
+    name: `${type} ${id}`,
+    type,
+    bounds: { x: 0, y: 0, width: 240, height: 160 },
+    ...overrides,
+  };
+}
+
+function openOutline(pages: Record<string, unknown>[], version = "147:0a9b") {
+  return {
+    data: {
+      fileKey: "Kx7QmP2vTnYhW3cLd",
+      name: "HDC-APP/main",
+      version,
+      lastModified_ms: 1,
+      editorType: "figma",
+      source: "rest",
+      pages,
+    },
+    isLoading: false,
+    error: null,
+  };
+}
+
+function page(id: string, frames: Record<string, unknown>[], name = "Page 1") {
+  return { id, name, frames, flowStartingPoints: [] };
+}
+
+function openFile(pageId = "0:1") {
+  navState.location.fileKey = "Kx7QmP2vTnYhW3cLd";
+  navState.location.pageId = pageId;
+}
+
+const shallowSection = (sectionId: string, children: Record<string, unknown>[]) => ({
+  data: {
+    version: "147:0a9b",
+    source: "rest",
+    nodes: { [sectionId]: { id: sectionId, type: "SECTION", children } },
+  },
+  isLoading: false,
+  error: null,
+});
+
+describe("SidebarFigmaNav — Section outline (ADR-0039)", () => {
+  it("renders the hierarchy strictly by parentId — section children nest under the section, roots stay roots", () => {
+    openFile();
+    queriesState.outline = openOutline([
+      page("0:1", [
+        summary("1:1", "FRAME"),
+        summary("1:2", "SECTION", { childrenLoaded: true }),
+        summary("1:3", "FRAME", { parentId: "1:2" }),
+      ]),
+    ]);
+    renderNav();
+    fireEvent.click(screen.getByTestId("figma-nav-section-1:2"));
+    const nested = screen.getByTestId("figma-nav-frame-1:3");
+    const root = screen.getByTestId("figma-nav-frame-1:1");
+    // parentId places the child one indent level below its section; a root row
+    // keeps the page-child indent.
+    expect(JSON.parse(nested.getAttribute("data-style") ?? "[]")[1].paddingLeft).toBeGreaterThan(
+      JSON.parse(root.getAttribute("data-style") ?? "[]")[1].paddingLeft,
+    );
+  });
+
+  it("expands a childrenLoaded section from the outline summaries with NO node fetch", () => {
+    openFile();
+    queriesState.outline = openOutline([
+      page("0:1", [
+        summary("2:1", "SECTION", { childrenLoaded: true }),
+        summary("2:2", "FRAME", { parentId: "2:1" }),
+      ]),
+    ]);
+    renderNav();
+    fireEvent.click(screen.getByTestId("figma-nav-section-2:1"));
+    expect(screen.getByTestId("figma-nav-frame-2:2")).toBeDefined();
+    // The section never touches the full-subtree query, and nothing shallow either
+    // (the hook stays IDLE with a null target when the children are known).
+    expect(calls.nodes.some(([, , ids]) => (ids as string[]).includes("2:1"))).toBe(false);
+    expect(calls.sectionChildren.filter(([, , id]) => id !== null)).toEqual([]);
+  });
+
+  it("fetches an unknown section's children with the depth-1 helper on the outline's pinned version, and only on expand", () => {
+    openFile();
+    queriesState.outline = openOutline([
+      page("0:1", [summary("3:1", "SECTION", { childrenLoaded: false })]),
+    ]);
+    renderNav();
+    // Opening the file must not prefetch every section — no id-targeted request.
+    expect(calls.sectionChildren.filter(([, , id]) => id !== null)).toEqual([]);
+    queriesState.sectionChildren = shallowSection("3:1", [
+      summary("3:2", "FRAME"),
+      summary("3:3", "SECTION"),
+    ]);
+    fireEvent.click(screen.getByTestId("figma-nav-section-3:1"));
+    expect(calls.sectionChildren).toContainEqual(["srv1", "Kx7QmP2vTnYhW3cLd", "3:1", "147:0a9b"]);
+    // The helper returns REAL child summaries; nested frames render as frame rows.
+    expect(screen.getByTestId("figma-nav-frame-3:2")).toBeDefined();
+    expect(screen.getByTestId("figma-nav-section-3:3")).toBeDefined();
+  });
+
+  it("recurses: expanding a nested section from a depth-1 result fires another depth-1 read", () => {
+    openFile();
+    queriesState.outline = openOutline([page("0:1", [summary("4:1", "SECTION")])]);
+    queriesState.sectionChildren = shallowSection("4:1", [summary("4:2", "SECTION")]);
+    renderNav();
+    fireEvent.click(screen.getByTestId("figma-nav-section-4:1"));
+    fireEvent.click(screen.getByTestId("figma-nav-section-4:2"));
+    expect(calls.sectionChildren).toContainEqual(["srv1", "Kx7QmP2vTnYhW3cLd", "4:2", "147:0a9b"]);
+  });
+
+  it("loads a REAL frame's full tree only when the user expands the frame", () => {
+    openFile();
+    queriesState.outline = openOutline([page("0:1", [summary("5:1", "FRAME")])]);
+    queriesState.nodes = {
+      data: {
+        version: "147:0a9b",
+        nodes: {
+          "5:1": {
+            id: "5:1",
+            type: "FRAME",
+            children: [{ id: "5:2", type: "TEXT", name: "Label" }],
+          },
+        },
+      },
+      isLoading: false,
+      error: null,
+    };
+    renderNav();
+    expect(calls.nodes.some(([, , ids]) => (ids as string[]).includes("5:1"))).toBe(false);
+    fireEvent.click(screen.getByTestId("figma-nav-frame-5:1"));
+    expect(calls.nodes.some(([, , ids]) => (ids as string[]).includes("5:1"))).toBe(true);
+    expect(screen.getByTestId("figma-nav-layer-5:2")).toBeDefined();
+  });
+
+  it("disables unknown sections with an update hint when the host lacks figmaNodeDepth — no full-Section fallback", () => {
+    host.figmaNodeDepth = false;
+    openFile();
+    queriesState.outline = openOutline([
+      page("0:1", [summary("6:1", "SECTION", { childrenLoaded: false })]),
+    ]);
+    renderNav();
+    fireEvent.click(screen.getByTestId("figma-nav-section-6:1"));
+    // No shallow request is even attempted; the hint tells the user why.
+    expect(calls.sectionChildren.filter(([, , id]) => id === "6:1")).toEqual([]);
+    expect(calls.nodes.some(([, , ids]) => (ids as string[]).includes("6:1"))).toBe(false);
+    expect(screen.getByTestId("figma-nav-section-6:1-update-hint").textContent).toMatch(
+      /update the host/i,
+    );
+  });
+
+  it("renders flows only when the outline carried them and never fabricates a full list", () => {
+    openFile();
+    queriesState.outline = openOutline([page("0:1", [summary("7:1", "FRAME")])]);
+    renderNav();
+    // flowStartingPoints absent from the page → no flow chrome invented.
+    expect(screen.queryByText(/flow/i)).toBeNull();
   });
 });
