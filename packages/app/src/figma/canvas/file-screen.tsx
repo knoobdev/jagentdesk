@@ -30,7 +30,13 @@ import {
   sectionMoveDescription,
   sectionMoveScript,
 } from "./section-interaction";
-import { absoluteBoundingBoxOf, type Camera, centerCameraOn, nodeFocusBounds } from "./viewport";
+import {
+  absoluteBoundingBoxOf,
+  type Camera,
+  centerCameraOn,
+  cameraToFit,
+  nodeFocusBounds,
+} from "./viewport";
 import { useFigmaRemoteStatus } from "../queries";
 import {
   figmaKeys,
@@ -170,7 +176,11 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
   // `page`/`node` through useFigmaNav, the top bar writes the same params atomically, and the
   // canvas renders what the route says. A local pageId state let sidebar selection and canvas
   // diverge — "Access" highlighted, canvas still on "00 Start Here".
-  const params = useLocalSearchParams<{ node?: string | string[]; page?: string | string[] }>();
+  const params = useLocalSearchParams<{
+    node?: string | string[];
+    page?: string | string[];
+    focus?: string | string[];
+  }>();
   const queryClient = useQueryClient();
 
   const outlineQuery = useFigmaOutline(serverId, fileKey, version ?? null);
@@ -491,17 +501,21 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
       selectNode(nodeId);
       if (!page || size.width === 0) return;
       let bounds = nodeFocusBounds(store, page, nodeId);
+      let section =
+        page.frames.find((frame) => frame.id === nodeId)?.type === "SECTION" ||
+        (store ? findNodeInStore(store, nodeId)?.type === "SECTION" : false);
       if (!bounds) {
-        // Unknown layer (deep link / comment to a nested node): ask the daemon for the node
-        // itself (one Tier-1 call, cached per version), then queue its subtree so the canvas,
-        // the selection box and the inspector all see it once it arrives.
+        // Resolve unknown bounds with shallow metadata first. A nested Section must not
+        // download every descendant merely to focus it. Drawing roots still get full trees
+        // through the viewport queue; Sections keep their separate depth-1 queue.
         try {
           const data = await call("figma.file.nodes.request", {
             fileKey,
             ids: [nodeId],
-            ...(dataVersion ? { version: dataVersion } : {}),
+            ...(dataVersion ? { version: dataVersion, depth: 1 as const } : {}),
           });
           bounds = absoluteBoundingBoxOf(data.nodes?.[nodeId]);
+          section = data.nodes?.[nodeId]?.type === "SECTION";
         } catch (cause) {
           setFocusError(`Could not focus layer ${nodeId}: ${errorMessage(cause)}`);
           return;
@@ -510,10 +524,15 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
           setFocusError(`Layer ${nodeId} was not found in this page.`);
           return;
         }
-        void store?.load([nodeId]);
+        if (section) void store?.loadSections([nodeId]);
+        else void store?.load([nodeId]);
       }
       const target = bounds;
-      setCamera((current) => centerCameraOn(current, target, size.width, size.height));
+      setCamera((current) =>
+        section
+          ? cameraToFit(target, size.width, size.height)
+          : centerCameraOn(current, target, size.width, size.height),
+      );
     },
     [call, fileKey, page, selectNode, size.height, size.width, store, dataVersion],
   );
@@ -554,7 +573,14 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
   // Canvas clicks write the same param; `nodeParamToFocusId` keeps that echo from moving the
   // camera (skip/auto-focus guards are both held in the decoded node-id form).
   const nodeParam = Array.isArray(params.node) ? params.node[0] : params.node;
+  const focusRequest = firstRouteParam(params.focus);
+  const lastFocusRequest = useRef(focusRequest);
   useEffect(() => {
+    if (lastFocusRequest.current !== focusRequest) {
+      lastFocusRequest.current = focusRequest;
+      skipUrlFocus.current = null;
+      autoFocusedFor.current = null;
+    }
     const nodeId = nodeParamToFocusId(nodeParam, skipUrlFocus.current, autoFocusedFor.current);
     if (!nodeId) {
       if (!figmaNodeIdFromParam(nodeParam ?? null)) autoFocusedFor.current = null;
@@ -563,7 +589,7 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
     if (!page || size.width === 0) return;
     autoFocusedFor.current = nodeId;
     void focusNode(nodeId);
-  }, [nodeParam, page, size.width, focusNode]);
+  }, [nodeParam, focusRequest, page, size.width, focusNode]);
 
   const onLayout = useCallback(
     (event: { nativeEvent: { layout: { width: number; height: number } } }) => {

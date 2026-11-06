@@ -2485,6 +2485,7 @@ export class VoiceAssistantWebSocketServer {
               figmaRemoteWrites: true,
               figmaCommentRegions: true,
               figmaRenderFidelity: true,
+              figmaTextOutlines: true,
             }
           : {}),
         // Advertise the plugin management surface only when a PluginService is

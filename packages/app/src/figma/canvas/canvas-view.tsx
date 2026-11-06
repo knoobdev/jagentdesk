@@ -182,6 +182,7 @@ export function CanvasView(props: CanvasViewProps) {
   // ref) because the paint reads it — one update per pointermove coalesces into one rAF draw,
   // the same cadence panning already keeps, so there is no redraw storm.
   const [sectionDrag, setSectionDrag] = useState<SectionDrag>(IDLE_DRAG);
+  const [blockedMoveFor, setBlockedMoveFor] = useState<string | null>(null);
   const renderer = useMemo(() => createFigmaRenderer(), []);
   // ADR-0042 quality path: the outlined-SVG TEXT fallback and adaptive raster rungs exist only
   // when the host advertises the capability AND this scope pins a snapshot version (the hook
@@ -221,22 +222,34 @@ export function CanvasView(props: CanvasViewProps) {
     if (drawnRoots.length === 0 || size.width === 0 || size.height === 0) return [];
     return framesInViewport(drawnRoots, camera, size.width, size.height, 120);
   }, [drawnRoots, camera, size]);
+  const focusedSectionIds = useMemo(() => {
+    const selected = drawnRoots.find(
+      (root) => root.id === selectedNodeId && isSectionSummary(root),
+    );
+    return new Set(selected ? [selected.id, ...descendantIds(selected.id, drawnRoots)] : []);
+  }, [drawnRoots, selectedNodeId]);
   const loadPlan = useMemo(() => {
     const subtrees: string[] = [];
     const shallowSections: string[] = [];
     for (const frame of visible) {
       const plan = planRootLoad(frame.bounds, camera.zoom);
       if (isSectionSummary(frame)) {
-        // Overview (metadata or thumbnail LOD) draws the Section's own summary box and label
-        // only — its children stay unexpanded until vector detail is on screen (ADR-0039:
-        // defer unknown Section children at overview).
-        if (plan === "full" && frame.childrenLoaded === false) shallowSections.push(frame.id);
+        // Unselected overview Sections stay metadata-only. Explicitly selecting a Section
+        // asks for its shallow children even at preview LOD, so all its visible designs load
+        // without separate frame clicks. Never fetch a full container tree.
+        if (
+          frame.childrenLoaded === false &&
+          (plan === "full" ||
+            frame.id === selectedNodeId ||
+            (plan !== "metadata" && focusedSectionIds.has(frame.id)))
+        )
+          shallowSections.push(frame.id);
       } else if (plan === "full") {
         subtrees.push(frame.id);
       }
     }
     return { subtrees, shallowSections };
-  }, [visible, camera]);
+  }, [visible, camera, focusedSectionIds, selectedNodeId]);
   useEffect(() => {
     if (!store || visible.length === 0) return;
     if (loadPlan.subtrees.length > 0) void store.load(loadPlan.subtrees);
@@ -273,6 +286,7 @@ export function CanvasView(props: CanvasViewProps) {
     middle: false,
     lastX: 0,
     lastY: 0,
+    blockedSectionId: null as string | null,
     pinchDistance: 0,
     pinchCenter: { x: 0, y: 0 } as Point,
   });
@@ -467,13 +481,15 @@ export function CanvasView(props: CanvasViewProps) {
       // Honest readiness over the finished frame (spec 32.5.1): one line from the real
       // ledgers — subtrees/Section expansions still queued or fetching, assets undelivered,
       // confirmed-missing roots, or a pure metadata overview waiting on a zoom. A Section
-      // move owns the line while in flight, uncertain, or failed — and a selected Section on
-      // a read-only surface shows "Connect editing" instead of a silent pendingSaved.
+      // move owns the line while in flight, uncertain, or failed. A blocked drag explains
+      // editing access after loading/errors; viewing alone never asks to connect editing.
       const moveText = sectionMoveStatus ? MOVE_STATUS_LINES[sectionMoveStatus] : null;
       const editingText =
-        selectedSection && sectionEditing && !sectionEditing.canEdit ? sectionEditing.notice : null;
+        selectedSection?.id === blockedMoveFor && sectionEditing && !sectionEditing.canEdit
+          ? sectionEditing.notice
+          : null;
       const ledger = contentLedger(visible, store, zoom, assets);
-      const statusText = moveText ?? editingText ?? canvasStatusText(ledger);
+      const statusText = moveText ?? canvasStatusText(ledger) ?? editingText;
       if (statusText) drawStatusLine(ctx, size.width, size.height, dpr, statusText);
       applyCanvasReadiness(canvas, statusText, ledger.pending);
     } finally {
@@ -481,6 +497,7 @@ export function CanvasView(props: CanvasViewProps) {
     }
   }, [
     assets,
+    blockedMoveFor,
     drawnRoots,
     fidelity,
     page,
@@ -545,6 +562,8 @@ export function CanvasView(props: CanvasViewProps) {
       state.dragging = true;
       state.movedPx = 0;
       state.middle = event.button === 1;
+      state.blockedSectionId = null;
+      setBlockedMoveFor(null);
       state.lastX = event.clientX;
       state.lastY = event.clientY;
       canvas.setPointerCapture?.(event.pointerId);
@@ -558,7 +577,13 @@ export function CanvasView(props: CanvasViewProps) {
         sectionEditing: editing,
         onMoveSection: commit,
       } = handlers.current;
-      const hit = sectionHitAt(roots, cursorOf(event), cameraRef.current.zoom);
+      const hit = sectionHitAt(
+        roots,
+        screenToFigma(cameraRef.current, cursorOf(event)),
+        cameraRef.current.zoom,
+      );
+      if (hit && hit.region !== "empty" && editing && !editing.canEdit)
+        state.blockedSectionId = hit.sectionId;
       if (hit && hit.region !== "empty" && editing?.canEdit && commit) {
         const drag = beginSectionDrag(hit.sectionId, cursorOf(event));
         sectionDragRef.current = drag;
@@ -585,6 +610,7 @@ export function CanvasView(props: CanvasViewProps) {
       state.lastX = event.clientX;
       state.lastY = event.clientY;
       state.movedPx += Math.abs(dx) + Math.abs(dy);
+      if (state.movedPx > 4 && state.blockedSectionId) setBlockedMoveFor(state.blockedSectionId);
       if (dx !== 0 || dy !== 0) handlers.current.onCamera(panBy(cameraRef.current, dx, dy));
     };
     const onPointerUp = (event: PointerEvent) => {

@@ -17,7 +17,11 @@ export interface FigmaLocation {
   view: FigmaHomeView;
 }
 
+let focusRequestSequence = 0;
+
 export interface FigmaLocationPatch {
+  /** Explicit tree navigation can re-focus the same node after the user pans away. */
+  focusCanvas?: boolean;
   connectionId?: string | null;
   fileKey?: string | null;
   pageId?: string | null;
@@ -68,11 +72,14 @@ function useNavFrom(
   const location = useMemo(() => parseFigmaLocation(params), [params]);
   const go = useCallback(
     (patch: FigmaLocationPatch) => {
-      const { view: patchView, ...rest } = patch;
+      const { view: patchView, focusCanvas, ...rest } = patch;
       const next: FigmaLocation = { ...location, ...rest };
       if (patchView) next.view = patchView;
       else if (patchView === null) next.view = "files";
-      router.setParams(toParams(next));
+      router.setParams({
+        ...toParams(next),
+        ...(focusCanvas ? { focus: `${Date.now()}-${++focusRequestSequence}` } : {}),
+      });
     },
     [location],
   );

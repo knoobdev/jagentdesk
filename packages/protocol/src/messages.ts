@@ -4724,6 +4724,7 @@ export const ServerInfoStatusPayloadSchema = z
         // payloads only when present; an old host's plugin export would answer them with
         // wrong-meaning bytes, so PNG-crop stays the fallback there and is not new-quality.
         figmaRenderFidelity: z.boolean().optional(),
+        figmaTextOutlines: z.boolean().optional(),
       })
       .optional(),
   })

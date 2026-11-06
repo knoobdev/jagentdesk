@@ -1,3 +1,4 @@
+import { prepareFrameTextOutlines } from "../prepare-text-outlines.js";
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
@@ -1112,6 +1113,14 @@ function mergeLibraryMaps(
       };
 }
 
+function restNodeQuery(ids: string[], version: string, depth?: 1) {
+  return {
+    ids: ids.join(","),
+    version,
+    ...(depth === undefined ? { geometry: "paths" } : { depth }),
+  };
+}
+
 export class FigmaContent {
   private readonly versions: FileVersionCache;
   readonly watches: FigmaFileWatches;
@@ -1255,7 +1264,13 @@ export class FigmaContent {
   }
 
   private async nodes(
-    request: { fileKey: string; ids: string[]; version?: string; depth?: 1 },
+    request: {
+      fileKey: string;
+      ids: string[];
+      version?: string;
+      depth?: 1;
+      prepareTextOutlines?: boolean;
+    },
     ctx: FigmaContext,
   ): Promise<{
     version: string;
@@ -1265,6 +1280,12 @@ export class FigmaContent {
     styles: Record<string, StyleMeta>;
   }> {
     const file = await requireFile(ctx, request.fileKey);
+    if (request.prepareTextOutlines && (!request.version?.trim() || request.depth !== undefined)) {
+      throw new FigmaServiceError(
+        "invalid_input",
+        "Text outlines need a full frame read at an explicit version.",
+      );
+    }
     if (request.depth === 1) {
       // ADR-0039: a shallow read lists a section's direct children only. It is always the
       // REST snapshot for a pinned version — the non-empty version is enforced here, the
@@ -1302,7 +1323,14 @@ export class FigmaContent {
         );
       }
     }
-    return this.loadNodes(ctx, file, request.ids, version);
+    return this.loadNodes(
+      ctx,
+      file,
+      request.ids,
+      version,
+      undefined,
+      request.prepareTextOutlines === true,
+    );
   }
 
   /** The (fileKey, id, version) node cache — namespaced by depth so shallow and full
@@ -1319,6 +1347,131 @@ export class FigmaContent {
     return depth === undefined
       ? `libs/${fileKey}@${version}`
       : `libs/${fileKey}@${version}@depth=${depth}`;
+  }
+
+  private readonly textGlyphFlights = new WeakMap<FigmaContext, Map<string, Promise<void>>>();
+
+  private readonly textExportFlights = new WeakMap<
+    FigmaContext,
+    Map<string, Promise<string | null>>
+  >();
+
+  private async startTextPreparation(
+    ctx: FigmaContext,
+    file: FigmaFile,
+    ids: string[],
+    version: string,
+    enabled?: boolean,
+  ) {
+    if (!enabled || ids.length === 0) return null;
+    // Only a frame already identified in the pinned outline is eligible. Never export a SECTION,
+    // an arbitrary container ID, or fetch another outline just to speculate about it.
+    const cached = await ctx.cache.getJson<Wrapped<FigmaOutline>>(
+      `file/${file.fileKey}/outline-d3@${version}`,
+    );
+    const frames = new Map(
+      cached?.data?.pages.flatMap((page) => page.frames).map((frame) => [frame.id, frame]) ?? [],
+    );
+    const rootId = ids.find((id) => {
+      const frame = frames.get(id);
+      return frame && ["FRAME", "COMPONENT", "INSTANCE"].includes(frame.type ?? "");
+    });
+    if (!rootId) return null;
+    return {
+      rootId,
+      work: prepareFrameTextOutlines({
+        exportSvg: () => this.exportTextFrame(ctx, file, rootId, version),
+        cacheGlyph: async (id, svg) => {
+          const key = `render-rest/${file.fileKey}/${id}@1x@svg@absolute@${version}`;
+          if (!(await ctx.cache.getBytes(key)))
+            await ctx.cache.putBytes(key, { mimeType: "image/svg+xml", data: Buffer.from(svg) });
+        },
+      }),
+    };
+  }
+
+  private async finishTextPreparation(
+    ctx: FigmaContext,
+    file: FigmaFile,
+    preparation: { rootId: string; work: ReturnType<typeof prepareFrameTextOutlines> } | null,
+    nodes: Record<string, FigmaNode | null>,
+    version: string,
+    resolvedVersion: string,
+  ): Promise<void> {
+    if (!preparation || resolvedVersion !== version) return;
+    const root = nodes[preparation.rootId];
+    if (!root) {
+      await preparation.work.finish(null);
+      return;
+    }
+    let flights = this.textGlyphFlights.get(ctx);
+    if (!flights) {
+      flights = new Map();
+      this.textGlyphFlights.set(ctx, flights);
+    }
+    const keys: string[] = [];
+    const stack: FigmaNode[] = [root];
+    while (stack.length) {
+      const node = stack.pop()!;
+      if (node.type === "TEXT") {
+        const key = JSON.stringify([file.fileKey, version, node.id]);
+        keys.push(key);
+        flights.set(key, preparation.work.completed);
+      }
+      if (node.children) stack.push(...node.children);
+    }
+    const ownedFlights = flights;
+    void preparation.work.completed.then(() => {
+      for (const key of keys)
+        if (ownedFlights.get(key) === preparation.work.completed) ownedFlights.delete(key);
+      return undefined;
+    });
+    await preparation.work.finish(root);
+  }
+
+  private async exportTextFrame(
+    ctx: FigmaContext,
+    file: FigmaFile,
+    rootId: string,
+    version: string,
+  ): Promise<string | null> {
+    const key = `text-frame-svg/${file.fileKey}/${rootId}@${version}`;
+    const hit = await ctx.cache.getBytes(key);
+    if (hit) return hit.data.toString("utf8");
+    let flights = this.textExportFlights.get(ctx);
+    if (!flights) {
+      flights = new Map();
+      this.textExportFlights.set(ctx, flights);
+    }
+    const shared = flights.get(key);
+    if (shared) return shared;
+    const flight = (async () => {
+      const result = await ctx.rest.getJson<RestImagesResponse>({
+        connectionId: file.connectionId,
+        path: `/v1/images/${file.fileKey}`,
+        query: {
+          ids: rootId,
+          version,
+          scale: 1,
+          format: "svg",
+          svg_outline_text: "true",
+          svg_include_node_id: "true",
+          use_absolute_bounds: "true",
+        },
+        tier: "1",
+      });
+      const url = result?.images?.[rootId];
+      if (!url) return null;
+      const bytes = await ctx.rest.getBytes(url);
+      await ctx.cache.putBytes(key, { mimeType: "image/svg+xml", data: bytes.data });
+      return bytes.data.toString("utf8");
+    })();
+    flights.set(key, flight);
+    try {
+      return await flight;
+    } finally {
+      if (flights.get(key) === flight) flights.delete(key);
+    }
   }
 
   /** Ids already cached (including known-unknown `null`s) and the ids that must be fetched. */
@@ -1348,6 +1501,7 @@ export class FigmaContent {
     ids: string[],
     version: string,
     depth?: 1,
+    prepareTextOutlines?: boolean,
   ): Promise<{
     version: string;
     source: FigmaSource;
@@ -1356,6 +1510,13 @@ export class FigmaContent {
     styles: Record<string, StyleMeta>;
   }> {
     const { nodes, misses } = await this.cachedNodes(ctx, file, ids, version, depth);
+    const preparation = await this.startTextPreparation(
+      ctx,
+      file,
+      misses,
+      version,
+      prepareTextOutlines,
+    );
     // Library maps join the same namespace rule: shallow entries must not overwrite the full
     // read's component/style metadata either.
     const libsKey = FigmaContent.libsKey(file.fileKey, version, depth);
@@ -1365,11 +1526,7 @@ export class FigmaContent {
       const response = await ctx.rest.getJson<RestNodesResponse>({
         connectionId: file.connectionId,
         path: `/v1/files/${file.fileKey}/nodes`,
-        query: {
-          ids: batch.join(","),
-          ...(depth === undefined ? { geometry: "paths" } : { depth }),
-          version,
-        },
+        query: restNodeQuery(batch, version, depth),
         tier: "1",
       });
       resolvedVersion = asString(response?.version) || resolvedVersion;
@@ -1394,6 +1551,7 @@ export class FigmaContent {
     }
     if (misses.length > 0) await ctx.cache.putJson(libsKey, libs);
     if (resolvedVersion !== version) this.versions.prime(ctx, file.fileKey, resolvedVersion);
+    await this.finishTextPreparation(ctx, file, preparation, nodes, version, resolvedVersion);
     return {
       version: resolvedVersion,
       source: "rest",
@@ -1623,6 +1781,34 @@ export class FigmaContent {
    * pinned snapshot unverified.
    */
   private async renderRest(
+    ctx: FigmaContext,
+    file: FigmaFile,
+    ids: string[],
+    scale: number,
+    format: RenderFormat,
+    version: string,
+    absolute: boolean,
+  ): Promise<{ images: Record<string, FigmaBytes | null>; source: FigmaSource }> {
+    const flights = this.textGlyphFlights.get(ctx);
+    if (format !== "svg" || scale !== 1 || !absolute || !flights?.size)
+      return this.renderRestDirect(ctx, file, ids, scale, format, version, absolute);
+    // Keep ordinary export latency even when speculative export is slow or unsupported.
+    // Either complete, exact result may answer; the other can still populate the disk cache.
+    const ordinary = this.renderRestDirect(ctx, file, ids, scale, format, version, absolute);
+    const prepared = Promise.all(
+      ids.map(async (id) => {
+        await flights.get(JSON.stringify([file.fileKey, version, id]));
+        const bytes = await ctx.cache.getBytes(
+          `render-rest/${file.fileKey}/${id}@1x@svg@absolute@${version}`,
+        );
+        if (!bytes) throw new Error("Prepared glyph unavailable");
+        return [id, toBase64Bytes(bytes)] as const;
+      }),
+    ).then((entries) => ({ images: Object.fromEntries(entries), source: "rest" as const }));
+    return Promise.race([ordinary, prepared.catch(() => ordinary)]);
+  }
+
+  private async renderRestDirect(
     ctx: FigmaContext,
     file: FigmaFile,
     ids: string[],

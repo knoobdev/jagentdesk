@@ -27,6 +27,20 @@ import { makeFrameSummary, makeNode } from "./__fixtures__/figma";
 
 const BASE: Camera = { zoom: 1, offsetX: 100, offsetY: 50 };
 
+describe("section overview", () => {
+  it("fits every design in a multi-screen section and requests previews before full layer trees", () => {
+    const section = { x: 0, y: 1600, width: 6200, height: 1420 };
+    const camera = cameraToFit(section, 1030, 900);
+    const frames = [0, 1, 2, 3].map((index) => ({
+      bounds: { x: 64 + index * 1536, y: 2000, width: 1440, height: 900 },
+    }));
+    expect(framesInViewport(frames, camera, 1030, 900)).toHaveLength(4);
+    for (const frame of frames) expect(planRootLoad(frame.bounds, camera.zoom)).toBe("thumbnail");
+    const detail = zoomAroundPoint(camera, 4, { x: 500, y: 450 });
+    expect(planRootLoad(frames[0]!.bounds, detail.zoom)).toBe("full");
+  });
+});
+
 describe("zoom around the cursor", () => {
   it("keeps the Figma point under the cursor fixed", () => {
     const cursor = { x: 320, y: 210 };
