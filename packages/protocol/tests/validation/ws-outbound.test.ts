@@ -274,6 +274,83 @@ const SourceSchema = z.object({
     expect(result.success).toBe(true);
   });
 
+  it("accepts a figma.file.playback.response with three levels of frames and a null prototype", () => {
+    // ADR-0037: playback returns only the requested frames. Frames share the opaque FigmaNode
+    // passthrough of nodes.response, so the generated validator must carry unknown node
+    // properties and nested children untouched.
+    const envelope = {
+      type: "session",
+      message: {
+        type: "figma.file.playback.response",
+        payload: {
+          requestId: "figma-playback",
+          error: null,
+          frames: {
+            "1:2": {
+              id: "1:2",
+              name: "Onboarding",
+              type: "FRAME",
+              absoluteBoundingBox: { x: 0, y: 0, width: 375, height: 812 },
+              children: [
+                {
+                  id: "1:3",
+                  name: "Hero copy",
+                  type: "TEXT",
+                  characters: "Welcome",
+                  children: [
+                    { id: "1:4", name: "Glyph", type: "VECTOR", fillPaints: [], strokes: [] },
+                  ],
+                },
+              ],
+            },
+          },
+          prototype: null,
+        },
+      },
+    };
+
+    expect(GeneratedWSOutboundMessageSchema.safeParse(envelope)).toEqual({
+      success: true,
+      data: envelope,
+    });
+  });
+
+  it("accepts a figma.file.playback.response with prototype metadata", () => {
+    const envelope = {
+      type: "session",
+      message: {
+        type: "figma.file.playback.response",
+        payload: {
+          requestId: "figma-playback",
+          error: null,
+          frames: {},
+          prototype: {
+            flows: [{ nodeId: "1:2", name: "Onboarding flow", pageId: "0:1" }],
+            interactions: [
+              {
+                nodeId: "1:2",
+                trigger: { type: "ON_CLICK", delayMs: 300 },
+                action: {
+                  type: "NODE",
+                  navigation: "OVERLAY",
+                  destinationId: "1:9",
+                  transition: { type: "MOVE_IN", durationMs: 220 },
+                },
+              },
+            ],
+            overlays: [{ frameId: "1:9", position: "CENTER" }],
+            overlaySettingsAvailable: false,
+          },
+        },
+      },
+    };
+
+    expect(GeneratedWSOutboundMessageSchema.safeParse(envelope)).toEqual({
+      success: true,
+      data: envelope,
+    });
+  });
+
   it("accepts a legacy github_search_response envelope", () => {
     const result = GeneratedWSOutboundMessageSchema.safeParse({
       type: "session",

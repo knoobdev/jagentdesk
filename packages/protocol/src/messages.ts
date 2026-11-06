@@ -4703,6 +4703,9 @@ export const ServerInfoStatusPayloadSchema = z
         jira: z.boolean().optional(),
         // Figma (spec 32 / ADR-0035): figma.* RPCs and the Figma section.
         figma: z.boolean().optional(),
+        // Scoped prototype playback (spec 32 / ADR-0037): figma.file.playback.request. Clients
+        // send that RPC only when this flag is present; older daemons never advertised it.
+        figmaPlayback: z.boolean().optional(),
       })
       .optional(),
   })

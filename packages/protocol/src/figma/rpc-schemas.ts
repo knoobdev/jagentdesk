@@ -537,6 +537,16 @@ export const FigmaFilePrototypeRequestSchema = req("figma.file.prototype.request
 export const FigmaFilePrototypeResponseSchema = res("figma.file.prototype.response", {
   prototype: FigmaPrototypeSchema.nullable(),
 });
+// ADR-0037: playback reads only the visible frames at the outline's immutable version.
+export const FigmaFilePlaybackRequestSchema = req("figma.file.playback.request", {
+  fileKey,
+  frameIds: z.array(z.string()).min(1).max(10),
+  version: z.string(),
+});
+export const FigmaFilePlaybackResponseSchema = res("figma.file.playback.response", {
+  frames: z.record(z.string(), FigmaNodeSchema),
+  prototype: FigmaPrototypeSchema.nullable(),
+});
 export const FigmaFileWatchRequestSchema = req("figma.file.watch.request", { fileKey });
 export const FigmaFileWatchResponseSchema = res("figma.file.watch.response", {
   watchId: z.string(),
@@ -701,6 +711,7 @@ export const FigmaRequestSchemas = [
   FigmaFileExportRequestSchema,
   FigmaFileVersionsRequestSchema,
   FigmaFilePrototypeRequestSchema,
+  FigmaFilePlaybackRequestSchema,
   FigmaFileWatchRequestSchema,
   FigmaFileUnwatchRequestSchema,
   FigmaFontsGetRequestSchema,
@@ -744,6 +755,7 @@ export const FigmaResponseSchemas = [
   FigmaFileExportResponseSchema,
   FigmaFileVersionsResponseSchema,
   FigmaFilePrototypeResponseSchema,
+  FigmaFilePlaybackResponseSchema,
   FigmaFileWatchResponseSchema,
   FigmaFileUnwatchResponseSchema,
   FigmaFontsGetResponseSchema,
