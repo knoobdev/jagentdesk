@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { createFigmaRenderer } from "@/figma/renderer";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
-import type { FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
+import type { FigmaBytes, FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { callFigma } from "./figma-api";
 import { collectRequiredFonts, type RequiredFont } from "./font-loading";
 import { nodeBounds, toFrameLocalNodes } from "./node-geometry";
@@ -43,23 +43,50 @@ interface RefClaim {
   claim: AssetClaim;
 }
 
+// Both figma.file.imageFills and figma.file.render cap the wire at 20 ids
+// (packages/protocol/src/figma/rpc-schemas.ts:512-525). With W8 rasterizing every unavailable
+// TEXT through the fallback path, a normal frame blows past that instantly, so claims are
+// fetched in chunks — and EVERY claimed id settles, whether or not the response named it: an
+// omitted entry is as missing as a null one and must not sit in "loading" forever (which
+// would stall the repaint and re-report on every pass).
+const WIRE_BATCH_LIMIT = 20;
+
+async function fetchInChunks(
+  store: PrototypeAssetStore,
+  claims: RefClaim[],
+  assetKey: (id: string) => string,
+  request: (ids: string[]) => Promise<Record<string, FigmaBytes | null> | undefined>,
+): Promise<void> {
+  for (let start = 0; start < claims.length; start += WIRE_BATCH_LIMIT) {
+    // Closed player: released claims drop on settle anyway, so never send a later chunk.
+    if (store.disposed) return;
+    const chunk = claims.slice(start, start + WIRE_BATCH_LIMIT);
+    let images: Record<string, FigmaBytes | null> | undefined;
+    try {
+      images = await request(chunk.map((entry) => entry.id));
+    } catch {
+      images = undefined; // A failed RPC settles all of the chunk's claims as failed below.
+    }
+    if (store.disposed) return;
+    // Iterate the CLAIMS, not the returned entries: omitted ids settle failed too, and a
+    // released claim still drops inside putDecoded — nothing here revives cleared entries.
+    for (const { id, claim } of chunk) {
+      store.putDecoded(assetKey(id), images?.[id] ?? null, claim);
+    }
+  }
+}
+
 async function fetchFills(
   client: DaemonClient,
   store: PrototypeAssetStore,
   fileKey: string,
   claims: RefClaim[],
 ): Promise<void> {
-  const byRef = new Map(claims.map((entry) => [entry.id, entry.claim]));
-  const data = await callFigma(client, "figma.file.imageFills.request", {
-    fileKey,
-    imageRefs: claims.map((entry) => entry.id),
+  // Content-addressed: imageRefs ARE the key, so no version rides this request.
+  await fetchInChunks(store, claims, fillKey, async (imageRefs) => {
+    const data = await callFigma(client, "figma.file.imageFills.request", { fileKey, imageRefs });
+    return data.images;
   });
-  if (store.disposed) return;
-  for (const [ref, bytes] of Object.entries(data.images)) {
-    const claim = byRef.get(ref);
-    // A released claim drops inside putDecoded; nothing here revives cleared entries.
-    if (claim) store.putDecoded(fillKey(ref), bytes, claim);
-  }
 }
 
 async function fetchRasters(
@@ -69,20 +96,18 @@ async function fetchRasters(
   version: string,
   claims: RefClaim[],
 ): Promise<void> {
-  const byId = new Map(claims.map((entry) => [entry.id, entry.claim]));
-  // Pin the snapshot: the daemon's versioned cache is what makes these bytes historical rather
-  // than "latest" (a live-link drift could otherwise paint newer bytes into an older frame).
-  const data = await callFigma(client, "figma.file.render.request", {
-    fileKey,
-    ids: claims.map((entry) => entry.id),
-    scale: 2,
-    version,
+  // Pin the snapshot on EVERY chunk: the daemon's versioned cache is what makes these bytes
+  // historical rather than "latest" (a live-link drift could otherwise paint newer bytes into
+  // an older frame).
+  await fetchInChunks(store, claims, rasterKey, async (ids) => {
+    const data = await callFigma(client, "figma.file.render.request", {
+      fileKey,
+      ids,
+      scale: 2,
+      version,
+    });
+    return data.images;
   });
-  if (store.disposed) return;
-  for (const [id, bytes] of Object.entries(data.images)) {
-    const claim = byId.get(id);
-    if (claim) store.putDecoded(rasterKey(id), bytes, claim);
-  }
 }
 
 // Per-instance identity so a reused FrameContent navigating between roots owns distinct claim
