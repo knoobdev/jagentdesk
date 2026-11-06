@@ -13,7 +13,7 @@ import {
   NativeCanvasLayer,
   pruneRasterCache,
 } from "./canvas-view";
-import { FrameStore } from "./frame-store";
+import { FrameStore, type NodeBatch } from "./frame-store";
 import type { SectionAwareSummary } from "./section-outline";
 import {
   type Camera,
@@ -735,6 +735,60 @@ describe("CanvasView click select — no Fit flood (ADR-0039)", () => {
     }
     expect(new Set(subtreeIds())).toEqual(new Set(["7:0", "7:1234"]));
     expect(fetchNodes).toHaveBeenCalledTimes(2);
+    viewer.unmount();
+  });
+
+  it("overlapping stack at Fit queues only the TOPMOST unloaded root, not every overlap", async () => {
+    platform.isWeb = true;
+    // 200 identical-bounds frames at the same spot: the spatially separated grid alone could
+    // not expose the fallthrough that queued EVERY missing overlap under the cursor.
+    const stack: FigmaFrameSummary[] = Array.from({ length: 200 }, (_, index) =>
+      makeFrameSummary(`8:${index}`, 1000, 1000, 200, 150),
+    );
+    const frames = framesGrid(1500).concat(stack);
+    const camera = cameraToFit(framesBoundingRect(frames), 800, 600);
+    const { fetchNodes, subtreeIds } = viewerFetcher();
+    const store = new FrameStore(fetchNodes);
+    const selections = vi.fn();
+    const viewer = mountViewer({ frames, camera, store, onSelectNode: selections });
+    await settleLoads();
+    expect(fetchNodes).not.toHaveBeenCalled();
+
+    const top = stack[stack.length - 1] as FigmaFrameSummary; // last drawn = topmost
+    const at = figmaToScreen(camera, { x: top.bounds.x + 100, y: top.bounds.y + 75 });
+    clickCanvas(at.x, at.y);
+    await settleLoads();
+    expect(subtreeIds()).toEqual([top.id]); // ONE root queued, not 200 overlapping loads
+    expect(fetchNodes).toHaveBeenCalledTimes(1);
+    expect(selections).not.toHaveBeenCalled(); // selection stays as-is; no lower loaded fallback
+    viewer.unmount();
+  });
+
+  it("an unknown topmost root is not answered by a loaded lower frame's hitTest", async () => {
+    platform.isWeb = true;
+    const lower = makeFrameSummary("9:0", 1000, 1000, 200, 150);
+    const upper = makeFrameSummary("9:99", 950, 950, 400, 300); // covers the click point
+    const frames = [lower, upper];
+    // Screen (450, 450) maps to Figma (1100, 1100): inside BOTH summaries; the topmost (last
+    // drawn) is the one whose tree has not landed.
+    const camera: Camera = { zoom: 1, offsetX: -650, offsetY: -650 };
+    const fetchNodes = vi.fn(
+      async (ids: readonly string[]): Promise<NodeBatch> =>
+        ids.includes("9:99")
+          ? new Promise<NodeBatch>(() => {}) // the occluder's batch is in flight, never lands
+          : { nodes: { "9:0": makeNode({ id: "9:0" }) }, components: {} },
+    );
+    const store = new FrameStore(fetchNodes);
+    await store.load(["9:0"]); // only the LOWER root has a tree, loaded before mount
+    const selections = vi.fn();
+    const viewer = mountViewer({ frames, camera, store, onSelectNode: selections });
+    await settleLoads(); // the pre-paint effect's first-exposure request of the occluder hangs
+    expect(store.get("9:0")).toBeTruthy();
+    fetchNodes.mockClear();
+    clickCanvas(450, 450);
+    await settleLoads();
+    expect(fetchNodes).not.toHaveBeenCalled(); // dedup by the in-flight ledger, and no 9:0 refetch
+    expect(selections).not.toHaveBeenCalled(); // the loaded lower frame was NOT reported
     viewer.unmount();
   });
 });

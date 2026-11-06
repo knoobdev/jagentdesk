@@ -221,11 +221,12 @@ export function CanvasView(props: CanvasViewProps) {
         if (!frame) continue;
         const root = store.get(frame.id);
         if (!root) {
-          // The click is a detail demand for exactly this root (load dedups cached/in-flight
-          // ids): queue it and keep checking the stack below for a loaded hit. The next click
-          // on the same spot runs against the real tree once the batch lands.
+          // The click is a detail demand for exactly ONE root: the topmost not-yet-loaded one,
+          // which occludes everything below it — hit-testing a loaded lower frame would report
+          // a selection the unknown root may cover. Queue it (load dedups cached/in-flight ids)
+          // and stop; the next click at this spot runs against the real tree once it lands.
           void store.load([frame.id]);
-          continue;
+          return;
         }
         const hit = renderer.hitTest(root, cursor);
         if (hit) {
