@@ -67,24 +67,31 @@
 // old host is gated, not guessed.
 //
 // Boot semantics (root-run lessons): the isolated daemon boots with
-// JAGENTDESK_TAILSCALE_ENABLED=0 — this is an EXPLICIT LOOPBACK READ TEST, not tailnet
-// acceptance, it starts NO managed/Tailscale desktop daemon, and it needs no FigmaDesktop or
-// Link plugin; the tailnet bridge's Supervisor restarts churn the port and false-pass a bare
-// "port is open". boot-isolated-daemon PASS therefore requires a BOUNDED WebSocket handshake
+// JAGENTDESK_TAILSCALE_ENABLED=0 + JAGENTDESK_DESKTOP_MANAGED=1 — an EXPLICIT LOOPBACK READ
+// TEST, not tailnet acceptance, needing no FigmaDesktop or Link plugin; the tailnet bridge's
+// Supervisor restarts churn the port and false-pass a bare "port is open". The MANAGED flag is
+// the product's own spawnDetachedDaemon env: without it the Desktop manager refused to reuse
+// the harness daemon (root run 4: a second daemon spawned, died on the PID lock, and the UI
+// showed "Something went wrong / local server failed to start"); with it the manager genuinely
+// recognizes and reuses the harness-owned daemon and the Local flow's bootstrap registers the
+// built-in host. boot-isolated-daemon PASS therefore requires a BOUNDED WebSocket handshake
 // whose server_info actually arrives WITH a usable wire serverId. boot-electron-renderer is
-// proven by the SUPPORTED product user flow on fresh renderer state: the real preload bridge
-// exists, onboarding is completed with actual clicks (Local → Continue with Local → welcome →
-// Direct connection → 127.0.0.1 + the reserved daemon port → Connect), and the workspace row
-// named by the server_info wire id becomes visible — no localStorage injection, no fake
-// hosts, no Origin bypass, no Figma website auth. The desktop's MANAGED-daemon IPC status
-// (desktopManaged:false / "stopped" / listen:null for our EXTERNAL UNMANAGED daemon) is
-// recorded as a diagnostic only and never blocks; every page.evaluate IPC probe is individually
+// proven by the SUPPORTED product user flow observed live: the real preload bridge exists, the
+// product's connected state is reached (bootstrap-registered host, or actual clicks — Local →
+// Continue with Local → welcome → Direct connection → 127.0.0.1 + the reserved daemon port →
+// Connect), the rendered error screen fails FAST, and the workspace row named by the
+// server_info wire id becomes visible — no localStorage injection, no fake hosts, no Origin
+// bypass, no Figma website auth. The desktop's MANAGED-daemon IPC status is recorded as a
+// diagnostic only and never blocks; every page.evaluate IPC probe is individually
 // bounded with withDeadline because the outer while loop cannot bound a hung await. Every
-// client connect/wait carries a deadline, SIGINT/SIGTERM run the owned cleanup, and
+// client connect/wait carries a deadline, SIGINT/SIGTERM run the owned cleanup,
 // runtimeDir/ports/child PGIDs are registered to runtime.json immediately for external
-// recovery. figma.link.status.request is read before and after the run — linked files or a
-// pending pairing mean the data flow may ride the plugin path, not standalone REST, and is
-// recorded as a trace-gate offender (no user open/close of the Figma app is required).
+// recovery, and teardown RECORDS the isolated home's managed-PID-lock holder in evidence for
+// root review — it never speculatively signals an untracked PID (stale lock / PID reuse), and
+// no broad daemon scan ever touches the production daemon. figma.link.status.request is read
+// before and after the run — linked files or a pending pairing mean the data flow may ride the
+// plugin path, not standalone REST, and is recorded as a trace-gate offender (no user
+// open/close of the Figma app is required).
 import { spawn, execFileSync } from "node:child_process";
 import { createCipheriv, randomBytes } from "node:crypto";
 import http from "node:http";
@@ -260,6 +267,45 @@ function stopProcess(child) {
   } catch {
     // The process may exit between the liveness check and signal delivery.
   }
+}
+
+/**
+ * Teardown evidence for the managed-boot architecture (ROOT RUN 4 SAFETY RULE): a live PID
+ * with desktopManaged:true in <home>/jagentdesk.pid is NOT sufficient ownership proof — the
+ * lock can be stale and PIDs get reused — so the harness NEVER speculatively signals a
+ * daemon outside its tracked process groups. With the managed boot the Desktop manager REUSES
+ * the harness-owned daemon (matching version + transport mode), so the tracked groups already
+ * own everything that was started; this records the lock holder for root review instead.
+ * `unownedLive: true` flags a replacement the manager spawned but we do not track (e.g. after
+ * a version/transport-mismatch restart) — no broad daemon scan, and the production daemon is
+ * never touched.
+ */
+function managedPidLockState(jagentdeskHome, trackedChildPids) {
+  let lock = null;
+  try {
+    lock = JSON.parse(fs.readFileSync(path.join(jagentdeskHome, "jagentdesk.pid"), "utf8"));
+  } catch {
+    return { present: false };
+  }
+  const pid = typeof lock?.pid === "number" ? lock.pid : null;
+  let live = false;
+  if (pid !== null && pid > 1) {
+    try {
+      process.kill(pid, 0);
+      live = true;
+    } catch {
+      /* dead */
+    }
+  }
+  const tracked = pid !== null && pid > 1 && trackedChildPids.has(pid);
+  return {
+    present: true,
+    desktopManaged: lock?.desktopManaged === true,
+    pid,
+    live,
+    tracked,
+    unownedLive: live && !tracked,
+  };
 }
 
 /**
@@ -618,10 +664,15 @@ async function waitForPreloadBridge(page) {
 
 /**
  * The desktop's MANAGED-daemon IPC status — recorded as a DIAGNOSTIC only, never a
- * precondition. This harness boots an EXTERNAL, UNMANAGED daemon, so the honest managed
- * shape is desktopManaged:false / status:"stopped" / listen:null; requiring running+healthy
- * timed out the whole root run 2 for 240 s on a payload that was correctly idle. Bounded
- * per call; a failed probe degrades to an evidence string, it cannot hang or block.
+ * precondition (root run 2 lesson: the outer while cannot bound a hung await, and no IPC
+ * payload may gate what the real user flow proves). Root run 4 exposed that an EXTERNALLY
+ * started UNMANAGED daemon is not reusable by the manager (second daemon, PID-lock fatal), so
+ * the harness daemon now boots with the product's own JAGENTDESK_DESKTOP_MANAGED=1; the honest
+ * expected shape here is desktopManaged:true / status:"running" / listen on OUR reserved port
+ * with a real
+ * serverId — the same payload the manager uses to REUSE the daemon. A still-"stopped" read
+ * is recorded evidence, not a blocker; bounded per call, a failed probe degrades to an
+ * evidence string, it cannot hang or block.
  */
 async function readManagedDaemonStatusDiagnostic(page) {
   try {
@@ -640,74 +691,86 @@ async function readManagedDaemonStatusDiagnostic(page) {
 }
 
 /**
- * REAL product onboarding through the SUPPORTED Direct connection user flow — actual clicks
- * on the controls the product itself renders for fresh user data (root run 2 walked this by
- * hand): /tailscale-login → connection-type-local → connection-local-continue ("Continue with
- * Local") → /welcome → welcome-direct-connection → direct-host-input "127.0.0.1" +
- * direct-port-input <reserved port> → direct-host-submit. If the modal shows the password
- * field (the seeded daemon runs password-less) it is cleared before submitting. Completion
- * proof is the WIRED server_info identity: sidebar-workspace-row-<serverId>:<workspaceId>
- * becomes visible, i.e. the renderer genuinely connected to the isolated daemon and listed
- * the seeded workspace. No localStorage injection, no fake hosts, no Origin bypass, no Figma
- * website auth involved — and no product change; these are the shipped testIDs.
+ * REAL product onboarding through the SUPPORTED user flow — actual clicks on the controls the
+ * product itself renders (root runs 2 and 4 walked these states by hand). Because the harness
+ * daemon boots DESKTOP-MANAGED-shaped, the Local flow's daemon-start returns a genuinely
+ * running status and the desktop bootstrap registers the built-in host itself
+ * (daemon-start-service upsertDesktopDaemonConnection, local mode), so the connected state can
+ * arrive WITHOUT the welcome step. If the product does show onboarding, the supported path is
+ * /tailscale-login → connection-type-local → connection-local-continue ("Continue with Local")
+ * → /welcome → welcome-direct-connection → direct-host-input "127.0.0.1" + direct-port-input
+ * <reserved port> → ONE direct-host-submit; the optional password field (the seeded daemon is
+ * password-less) is cleared inside the modal BEFORE that single submit (35b440ca3/7e01172aa),
+ * never cleared + resubmitted after. Completion proof is the WIRED
+ * server_info identity: sidebar-workspace-row-<serverId>:<workspaceId> becomes visible, i.e.
+ * the renderer genuinely connected to the isolated daemon and listed the seeded workspace. The
+ * rendered "Something went wrong / local server failed to start" screen (the run-4 symptom)
+ * fails FAST with the page text instead of timing out. No localStorage injection, no fake
+ * hosts, no Origin bypass, no Figma website auth — and no product change; these are the
+ * shipped testIDs. Preload ready does NOT imply React ready: every state is observed live.
  */
 async function completeDirectConnectionOnboarding(page, daemonPort, wireServerId) {
   const steps = [];
   const rowTest = `sidebar-workspace-row-${wireServerId}:${WORKSPACE_ID}`;
-  // Preload can be ready while Metro/React is still rendering the initial route. Wait for
-  // an actual supported UI state before deciding whether onboarding needs the Local step.
-  await page
-    .getByTestId(rowTest)
-    .or(page.getByTestId("tailscale-login-screen"))
-    .or(page.getByTestId("welcome-direct-connection"))
-    .first()
-    .waitFor({ state: "visible", timeout: bootTimeoutMs });
-  if (
-    await page
-      .getByTestId(rowTest)
+  const row = page.getByTestId(rowTest);
+  const errorScreen = page.getByText(/Something went wrong|local server failed to start/i);
+  const visible = async (locator) =>
+    locator
+      .first()
       .isVisible()
-      .catch(() => false)
-  )
-    return ["already connected (persisted host)"];
-  if (
-    await page
-      .getByTestId("tailscale-login-screen")
-      .isVisible()
-      .catch(() => false)
-  ) {
-    steps.push("fresh onboarding detected at /tailscale-login");
-    const localChoice = page.getByTestId("connection-type-local");
-    if (await localChoice.isVisible().catch(() => false)) {
-      await localChoice.click();
-      steps.push("clicked connection-type-local");
-    }
-    await page.getByTestId("connection-local-continue").click({ timeout: 15_000 });
-    steps.push("clicked connection-local-continue");
-  }
-  await page.getByTestId("welcome-direct-connection").click({ timeout: 30_000 });
-  steps.push("clicked welcome-direct-connection");
-  await page.getByTestId("add-host-modal").waitFor({ state: "visible", timeout: 15_000 });
-  await page.getByTestId("direct-host-input").fill("127.0.0.1");
-  await page.getByTestId("direct-port-input").fill(String(daemonPort));
-  const password = page.getByTestId("direct-password-input");
-  if (await password.isVisible().catch(() => false)) await password.fill("");
-  steps.push(`filled direct-host-input 127.0.0.1 + direct-port-input ${daemonPort}`);
-  await page.getByTestId("direct-host-submit").click();
+      .catch(() => false);
+  let localClicked = false;
+  let directSubmitted = false;
   const deadline = Date.now() + bootTimeoutMs;
   while (Date.now() < deadline) {
-    if (
-      await page
-        .getByTestId(rowTest)
-        .isVisible()
-        .catch(() => false)
-    ) {
+    if (await visible(row)) {
       steps.push(`connected — wired workspace row visible: ${rowTest}`);
       return steps;
     }
+    if (await visible(errorScreen)) {
+      const text =
+        (await errorScreen
+          .first()
+          .textContent()
+          .catch(() => "")) ?? "";
+      throw new Error(
+        `onboarding reached the product's error screen instead of a connected host: "${text.trim().slice(0, 200)}"; steps: ${steps.join(" -> ")}`,
+      );
+    }
+    if (!localClicked && (await visible(page.getByTestId("tailscale-login-screen")))) {
+      steps.push("fresh onboarding detected at /tailscale-login");
+      const localChoice = page.getByTestId("connection-type-local");
+      if (await visible(localChoice)) {
+        await localChoice.click();
+        steps.push("clicked connection-type-local");
+      }
+      await page.getByTestId("connection-local-continue").click({ timeout: 15_000 });
+      steps.push("clicked connection-local-continue");
+      localClicked = true;
+      continue;
+    }
+    if (!directSubmitted && (await visible(page.getByTestId("welcome-direct-connection")))) {
+      await page.getByTestId("welcome-direct-connection").click({ timeout: 15_000 });
+      steps.push("clicked welcome-direct-connection");
+      await page.getByTestId("add-host-modal").waitFor({ state: "visible", timeout: 15_000 });
+      await page.getByTestId("direct-host-input").fill("127.0.0.1");
+      await page.getByTestId("direct-port-input").fill(String(daemonPort));
+      // The optional password field is visible from the start; the seeded daemon is
+      // password-less, so it is cleared BEFORE the single submit (root's integration fix
+      // 35b440ca3/7e01172aa) — never cleared + resubmitted after, which double-submits while
+      // the first connection attempt is still pending.
+      const password = page.getByTestId("direct-password-input");
+      if (await visible(password)) await password.fill("");
+      steps.push(`filled direct-host-input 127.0.0.1 + direct-port-input ${daemonPort}`);
+      await page.getByTestId("direct-host-submit").click();
+      directSubmitted = true;
+      continue;
+    }
     await delay(500);
   }
+  const url = page.url();
   throw new Error(
-    `Direct connection onboarding never reached the connected workspace row ${rowTest}; steps: ${steps.join(" -> ")}`,
+    `Direct connection onboarding never reached the connected workspace row ${rowTest}; steps: ${steps.join(" -> ")}; last url: ${url}`,
   );
 }
 
@@ -1080,6 +1143,10 @@ async function main() {
     try {
       if (ramSampler) clearInterval(ramSampler);
       for (const child of children.toReversed()) stopProcess(child);
+      evidence.managedPidLock = managedPidLockState(
+        jagentdeskHome,
+        new Set(children.map((child) => child.pid)),
+      );
       if (proxy?.server) proxy.server.close();
       client?.close?.()?.catch?.(() => undefined);
       browser?.close?.()?.catch?.(() => undefined);
@@ -1106,6 +1173,17 @@ async function main() {
       // a bare waitForPort in the root run (daemon.log/desktop.log). This harness never claims
       // tailnet ACCEPTANCE and needs no FigmaDesktop or Link plugin, so the bridge is off.
       JAGENTDESK_TAILSCALE_ENABLED: "0",
+      // ROOT RUN 4 FIX: the Desktop daemon manager only REUSES a daemon whose <home>/
+      // jagentdesk.pid lock carries desktopManaged:true (daemon-manager.ts readManagedDaemon
+      // PidSync); our externally-spawned UNMANAGED daemon failed that check, so the Local
+      // onboarding's start_desktop_daemon spawned a SECOND daemon that died on the PID lock
+      // ("Another JAgentDesk daemon is already running") and the real UI showed "Something
+      // went wrong / local server failed to start". Booting with the product's OWN managed
+      // flag (exactly what spawnDetachedDaemon sets) makes the manager genuinely recognize
+      // and reuse the harness daemon — a real managed-shape daemon, not a faked status. The
+      // tailnet bridge stays OFF, and with it disabled the daemon writes tailscale-status.json
+      // enabled:false, which is the transport mode the Local flow's reuse guard demands.
+      JAGENTDESK_DESKTOP_MANAGED: "1",
       JAGENTDESK_CORS_ORIGINS: "*",
       JAGENTDESK_LOCAL_SPEECH_AUTO_DOWNLOAD: "0",
       JAGENTDESK_DICTATION_ENABLED: "0",
@@ -1138,7 +1216,7 @@ async function main() {
       serverId: readiness.serverId,
       serverInfoVersion: readiness.version,
       productionDaemonBusy,
-      note: "isolated LOOPBACK read test with JAGENTDESK_TAILSCALE_ENABLED=0 (no tailnet acceptance claimed, no managed/Tailscale desktop daemon started); readiness = bounded WS server_info with a usable wire serverId, not a bare open port",
+      note: "isolated LOOPBACK read test with JAGENTDESK_TAILSCALE_ENABLED=0 and JAGENTDESK_DESKTOP_MANAGED=1 (the product's own managed-boot flag, so the Desktop daemon manager genuinely recognizes and REUSES this harness-owned daemon instead of spawning a second one; no tailnet acceptance claimed, no separate Tailscale daemon started); readiness = bounded WS server_info with a usable wire serverId, not a bare open port",
     });
 
     const appBootStart = Date.now();
@@ -1163,23 +1241,28 @@ async function main() {
     await waitForPort(cdpPort, "Electron CDP", desktop);
     browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
     const page = await waitForAppPage(browser, expoPort);
-    // Renderer boot = the SUPPORTED product user flow, not the desktop's MANAGED-daemon IPC
-    // status. We boot an EXTERNAL UNMANAGED daemon, so desktop_daemon_status legitimately
-    // reports desktopManaged:false / "stopped" / listen:null — demanding running+healthy on it
-    // was the wrong prerequisite that timed root run 2 out at 240 s. It is recorded as a
-    // DIAGNOSTIC only. What may PASS this gate: the real preload bridge exists, fresh
-    // onboarding is completed with actual clicks (Local → Continue with Local → welcome →
-    // Direct connection → Connect on 127.0.0.1 + the reserved port), and the workspace row
-    // named by the WS server_info wire id is visible — the host is genuinely connected.
+    // Renderer boot = the SUPPORTED product user flow with actual clicks, proven by the
+    // connected UI — never by an IPC status alone (root run 2 lesson: demanding running+
+    // healthy on a correctly-idle managed payload timed the run out at 240 s; the gate that
+    // counts is the wire-id workspace row becoming visible). Root run 4 proved an EXTERNALLY
+    // started UNMANAGED daemon is not reusable: the manager spawned a second daemon that died
+    // on the PID lock. The harness daemon therefore now boots with the product's own
+    // JAGENTDESK_DESKTOP_MANAGED=1 so the manager genuinely reuses
+    // it and the Local onboarding no longer spawns a conflicting second daemon; the IPC
+    // status is still recorded as a DIAGNOSTIC only. PASS requires the real preload bridge,
+    // the product's own connected state reached live (bootstrap-registered host or the
+    // Local → Continue with Local → welcome → Direct connection → Connect clicks), and the
+    // workspace row named by the WS server_info wire id visible — the host is genuinely
+    // connected.
     await waitForReadyRenderer(page, daemonPort, readiness.serverId);
     const managedStatusDiagnostic = await readManagedDaemonStatusDiagnostic(page);
     passGate("boot-electron-renderer", {
       serverId: readiness.serverId,
-      via: "supported product user flow: connection-type-local → connection-local-continue → welcome-direct-connection → direct-host-submit",
+      via: "supported product user flow, observed live: connected workspace row (bootstrap-registered built-in host on the reused desktop-managed daemon, or connection-type-local → connection-local-continue → welcome-direct-connection → direct-host-submit with real clicks)",
       hostConnectedUi: `${`sidebar-workspace-row-${readiness.serverId}:${WORKSPACE_ID}`} visible`,
       managedDaemonStatus: managedStatusDiagnostic,
       managedStatusNote:
-        "desktop-managed status is DIAGNOSTIC ONLY — this harness boots an external UNMANAGED daemon, so desktopManaged:false/stopped/listen:null is the expected honest shape, never a precondition",
+        "desktop-managed status is DIAGNOSTIC ONLY — the harness daemon boots with the product's own JAGENTDESK_DESKTOP_MANAGED=1 so the manager recognizes and reuses it (expected honest shape: desktopManaged:true/running/healthy on the reserved port); an idle or errored read is recorded, never a precondition",
       bootMs: Date.now() - appBootStart,
     });
 
@@ -1410,6 +1493,12 @@ async function main() {
       if (child.exitCode === null && child.signalCode === null) stopProcess(child);
     }
     await delay(500);
+    // Managed-boot safety record (never a speculative signal): note who holds the isolated
+    // home's PID lock so an unowned manager replacement is visible to root for review.
+    evidence.managedPidLock = managedPidLockState(
+      jagentdeskHome,
+      new Set(children.map((child) => child.pid)),
+    );
     try {
       fs.rmSync(runtimeDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     } catch {

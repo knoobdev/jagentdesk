@@ -36,15 +36,22 @@
 # fails RED naming the integrator-owned merged build when it is absent.
 # The production daemon on port 6767 and the installed app are never touched.
 # Boot is an ISOLATED LOOPBACK READ TEST: the tailnet bridge is disabled for the children
-# (JAGENTDESK_TAILSCALE_ENABLED=0) and NO managed/Tailscale desktop daemon is started — this
-# run never claims tailnet acceptance and needs no FigmaDesktop or Link plugin.
+# (JAGENTDESK_TAILSCALE_ENABLED=0) and no separate Tailscale daemon is started — this run
+# never claims tailnet acceptance and needs no FigmaDesktop or Link plugin. The harness-owned
+# daemon boots with the product's own JAGENTDESK_DESKTOP_MANAGED=1 so the Desktop daemon
+# manager genuinely recognizes and REUSES it (root run 4: an unmanaged external daemon was
+# not reusable — the Local onboarding's start_desktop_daemon spawned a second daemon that
+# died on the PID lock).
 # boot-isolated-daemon PASSes only on a bounded WS server_info handshake with a usable wire
 # serverId (a transiently open port false-passes). boot-electron-renderer is proven by the
-# SUPPORTED product user flow with actual clicks (tailscale-login → Local → Continue with
-# Local → welcome → Direct connection → 127.0.0.1 + reserved port → Connect) until the
-# wire-id workspace row appears; the desktop-managed IPC status (stopped/listen:null for our
-# external UNMANAGED daemon) is recorded as diagnostic only and never blocks, and every
-# page.evaluate IPC probe is individually deadline-bounded. The fps bar passes only on
+# SUPPORTED product user flow observed live (bootstrap-registered built-in host on the reused
+# managed daemon, or actual clicks: tailscale-login → Local → Continue with
+# Local → welcome → Direct connection → 127.0.0.1 + reserved port → ONE Connect, the optional
+# password field cleared before that submit); the rendered error screen fails fast and the
+# desktop-managed IPC status is recorded as diagnostic only and never blocks; every
+# page.evaluate IPC probe is individually deadline-bounded; teardown RECORDS the isolated
+# home's managed-PID-lock holder in evidence for root review and never speculatively signals
+# an untracked PID (no broad daemon scan, production daemon untouched). The fps bar passes only on
 # compositor-presented CDP screencast frames (pixel/rAF cadence are diagnostics; no evidence
 # leaves it UNEXERCISED, never a false PASS). Link status is read before/after to keep the
 # data proof attributable to standalone REST. Boot/output logs live under the artifact dir.
