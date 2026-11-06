@@ -781,6 +781,10 @@ async function completeDirectConnectionOnboarding(page, daemonPort, wireServerId
  */
 async function waitForReadyRenderer(page, daemonPort, wireServerId) {
   await waitForPreloadBridge(page);
+  // The Figma sidebar replaces the workspace list. Return through its real Back control
+  // after a reload before requiring the connected workspace row as proof.
+  const leaveFigma = page.getByTestId("sidebar-figma-leave").filter({ visible: true }).last();
+  if (await leaveFigma.isVisible().catch(() => false)) await leaveFigma.click();
   await completeDirectConnectionOnboarding(page, daemonPort, wireServerId);
 }
 
@@ -1377,6 +1381,8 @@ async function main() {
       await page
         .getByTestId("figma-files-empty")
         .or(page.getByTestId("figma-files-home"))
+        .filter({ visible: true })
+        .last()
         .waitFor({ state: "visible", timeout: 30_000 });
     };
     await openFigmaSection();
@@ -1857,7 +1863,7 @@ async function runUiPlaybackGates(
       (entry.pathname === `/v1/files/${fileKey}` && entry.search?.depth !== undefined),
   );
   await refreshUi();
-  const card = page.getByTestId(`figma-file-${fileKey}`);
+  const card = page.getByTestId(`figma-file-${fileKey}`).filter({ visible: true }).last();
   if (!(await card.isVisible().catch(() => false))) {
     failGate(
       "ui-file-open",
@@ -1868,7 +1874,7 @@ async function runUiPlaybackGates(
   const openStart = Date.now();
   const proxyMark = proxy.log.length;
   await card.click();
-  const topBar = page.getByTestId("figma-top-bar");
+  const topBar = page.getByTestId("figma-top-bar").filter({ visible: true }).last();
   let canvasAt = null;
   try {
     await topBar.waitFor({ state: "visible", timeout: 15_000 });
@@ -2034,10 +2040,10 @@ async function runUiPlaybackGates(
   }
 
   // ── Player through the product menu: top bar → More → Prototype. ────────────────
-  await page.getByTestId("figma-top-bar-more").click();
-  await page.getByTestId("figma-prototype").click();
-  const playerMarker = page.getByTestId("figma-show-hotspots");
-  const chooseFlow = page.getByTestId("figma-choose-flow");
+  await page.getByTestId("figma-top-bar-more").filter({ visible: true }).last().click();
+  await page.getByTestId("figma-prototype").filter({ visible: true }).last().click();
+  const playerMarker = page.getByTestId("figma-show-hotspots").filter({ visible: true }).last();
+  const chooseFlow = page.getByTestId("figma-choose-flow").filter({ visible: true }).last();
   try {
     await playerMarker.waitFor({ state: "visible", timeout: 20_000 });
   } catch {
@@ -2126,7 +2132,7 @@ async function runUiPlaybackGates(
   const warmMark = proxy.log.length;
   const warmStart = Date.now();
   await refreshUi();
-  await page.getByTestId(`figma-file-${fileKey}`).click();
+  await page.getByTestId(`figma-file-${fileKey}`).filter({ visible: true }).last().click();
   await page
     .waitForSelector("#jagentdesk-figma-canvas", { timeout: 30_000 })
     .catch(() => undefined);
