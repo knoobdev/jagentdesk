@@ -1236,23 +1236,24 @@ describe("fonts", () => {
   function stubGoogleFetch(
     css: string,
     fontBody: Uint8Array | string | null,
-    finalUrl?: string,
+    opts: { assetRedirects?: string[]; cssRedirects?: string[] } = {},
   ): FetchStub {
     const stub: FetchStub = { urls: [], userAgents: [] };
+    let assetCalls = 0;
+    let cssCalls = 0;
     vi.stubGlobal("fetch", async (input: string | URL, init?: RequestInit) => {
       const url = String(input);
       stub.urls.push(url);
       const headers = (init?.headers ?? {}) as Record<string, string>;
       stub.userAgents.push(headers["User-Agent"]);
+      const redirects = url.startsWith(CSS2_BASE) ? opts.cssRedirects : opts.assetRedirects;
+      const queued = redirects?.[url.startsWith(CSS2_BASE) ? cssCalls++ : assetCalls++];
+      if (queued !== undefined)
+        return new Response(null, { status: 302, headers: { location: queued } });
       if (url.startsWith(CSS2_BASE))
         return new Response(css, { status: 200, headers: { "content-type": "text/css" } });
       if (fontBody === null) return new Response("gone", { status: 404 });
-      const response = new Response(fontBody, {
-        status: 200,
-        headers: { "content-type": "font/ttf" },
-      });
-      if (finalUrl) Object.defineProperty(response, "url", { value: finalUrl });
-      return response;
+      return new Response(fontBody, { status: 200, headers: { "content-type": "font/ttf" } });
     });
     return stub;
   }
@@ -1335,19 +1336,6 @@ describe("fonts", () => {
     expect(await defaultGoogleFontsDownload("Inter", "Regular")).toBeNull();
     expect(foreign.urls).toHaveLength(1);
 
-    const redirected = stubGoogleFetch(
-      faceCss({
-        family: "Inter",
-        weight: 400,
-        italic: false,
-        assetUrl: "https://fonts.gstatic.com/a.ttf",
-      }),
-      font,
-      "https://cdn.evil.test/a.ttf", // the request was gstatic; the redirect left it
-    );
-    expect(await defaultGoogleFontsDownload("Inter", "Regular")).toBeNull();
-    expect(redirected.urls).toHaveLength(2); // original check passed, final-host check did not
-
     stubGoogleFetch(
       faceCss({
         family: "Inter",
@@ -1358,6 +1346,103 @@ describe("fonts", () => {
       font,
     );
     expect(await defaultGoogleFontsDownload("Inter", "Regular")).toBeNull();
+  });
+
+  it("never fetches a foreign redirect target on the asset hop", async () => {
+    // The point of manual hops: an untrusted Location is rejected by VALIDATION, before
+    // any request reaches it — not fetched and then discarded after reading the body.
+    const font = buildTtf({ 1: "Inter", 2: "Regular" });
+    const stub = stubGoogleFetch(
+      faceCss({
+        family: "Inter",
+        weight: 400,
+        italic: false,
+        assetUrl: "https://fonts.gstatic.com/a.ttf",
+      }),
+      font,
+      { assetRedirects: ["https://cdn.evil.test/a.ttf"] },
+    );
+    expect(await defaultGoogleFontsDownload("Inter", "Regular")).toBeNull();
+    expect(stub.urls).toEqual([
+      `${CSS2_BASE}?family=Inter:wght@400`,
+      "https://fonts.gstatic.com/a.ttf",
+    ]); // evil.test was never contacted
+  });
+
+  it("follows same-host redirects, absolute and relative", async () => {
+    const font = buildTtf({ 1: "Inter", 2: "Regular" });
+    const stub = stubGoogleFetch(
+      faceCss({
+        family: "Inter",
+        weight: 400,
+        italic: false,
+        assetUrl: "https://fonts.gstatic.com/a.ttf",
+      }),
+      font,
+      {
+        assetRedirects: ["https://fonts.gstatic.com/s/inter/b.ttf", "/s/inter/c.ttf"],
+      },
+    );
+    const out = await defaultGoogleFontsDownload("Inter", "Regular");
+    expect(out).not.toBeNull();
+    expect([...out!.data]).toEqual([...font]);
+    // The relative Location resolves against the current hop and stays on gstatic.
+    expect(stub.urls.slice(1)).toEqual([
+      "https://fonts.gstatic.com/a.ttf",
+      "https://fonts.gstatic.com/s/inter/b.ttf",
+      "https://fonts.gstatic.com/s/inter/c.ttf",
+    ]);
+  });
+
+  it("rejects redirect hops with credentials or a custom port", async () => {
+    const font = buildTtf({ 1: "Inter", 2: "Regular" });
+    const cases = [
+      "https://cdn.example.com/a.ttf", // foreign host
+      "https://user@fonts.gstatic.com/a.ttf", // embedded credentials
+      "https://fonts.gstatic.com:8443/a.ttf", // custom port
+      "http://fonts.gstatic.com/a.ttf", // not https
+    ];
+    for (const location of cases) {
+      const stub = stubGoogleFetch(
+        faceCss({
+          family: "Inter",
+          weight: 400,
+          italic: false,
+          assetUrl: "https://fonts.gstatic.com/a.ttf",
+        }),
+        font,
+        { assetRedirects: [location] },
+      );
+      expect(await defaultGoogleFontsDownload("Inter", "Regular")).toBeNull();
+      // Rejected at validation: the original hop was fetched, the untrusted target never was.
+      expect(stub.urls).toHaveLength(2);
+    }
+  });
+
+  it("keeps the css2 request on fonts.googleapis.com and bounds loops", async () => {
+    const font = buildTtf({ 1: "Inter", 2: "Regular" });
+    const offHost = stubGoogleFetch(
+      faceCss({ family: "Inter", weight: 400, italic: false }),
+      font,
+      { cssRedirects: ["https://fonts.google.com/css2?family=Inter:wght@400"] },
+    );
+    expect(await defaultGoogleFontsDownload("Inter", "Regular")).toBeNull();
+    expect(offHost.urls).toHaveLength(1); // the stylesheet host itself must not bounce off-policy
+
+    const looping = stubGoogleFetch(
+      faceCss({
+        family: "Inter",
+        weight: 400,
+        italic: false,
+        assetUrl: "https://fonts.gstatic.com/loop.ttf",
+      }),
+      font,
+      { assetRedirects: Array(10).fill("https://fonts.gstatic.com/loop.ttf") },
+    );
+    expect(await defaultGoogleFontsDownload("Inter", "Regular")).toBeNull();
+    // One hop per allowed GET, then the bound answers null: 5 redirects followed plus the
+    // sixth 302 hits the cap — no infinite spin, and the font body is never served.
+    expect(looping.urls.filter((u) => u.includes("loop.ttf"))).toHaveLength(6);
   });
 
   it("rejects ambiguous responses: multiple faces or multiple src urls", async () => {

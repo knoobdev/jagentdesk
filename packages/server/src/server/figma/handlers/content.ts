@@ -55,9 +55,15 @@ const VERSIONS_PAGE_SIZE = 50;
 // Inter/Roboto incl. Vietnamese in w5-font-download-spike); a browser UA would get the
 // per-subset woff2 sprawl instead. The UA string is load-bearing for the response shape,
 // so it is pinned here rather than left to the fetch default.
+// ADR-37: only Google's own API/CDN hosts are trusted, and there is no token to hide, so
+// redirects are followed MANUALLY — every hop URL and every Location is validated
+// (https, expected host, no credentials, port 443 only) BEFORE its GET is issued, so a
+// foreign redirect target is never fetched at all and a loop terminates at the bound.
 const GOOGLE_FONTS_CSS2_URL = "https://fonts.googleapis.com/css2";
+const GOOGLE_FONTS_CSS2_HOST = "fonts.googleapis.com";
 const GOOGLE_FONTS_ASSET_HOST = "fonts.gstatic.com";
 const GOOGLE_FONTS_USER_AGENT = "JAgentDesk/1.0 (daemon font fetch)";
+const GOOGLE_FONTS_MAX_REDIRECT_HOPS = 5;
 
 // ── REST response shapes (only the fields these handlers read) ────────────────
 
@@ -534,10 +540,21 @@ function googleFontsCss2Url(family: string, weight: number, italic: boolean): st
   return `${GOOGLE_FONTS_CSS2_URL}?family=${encodeURIComponent(family)}:${axes}`;
 }
 
-function isGoogleFontsAssetUrl(href: string): boolean {
+/**
+ * ADR-37 gate for every Google Fonts hop, including relative Locations once resolved:
+ * https on the exact expected host, and a URL shape that cannot carry state we would
+ * leak to a third party — no embedded credentials, no custom port other than 443.
+ */
+function isAllowedGoogleUrl(raw: string, expectedHost: string): boolean {
   try {
-    const url = new URL(href);
-    return url.protocol === "https:" && url.hostname === GOOGLE_FONTS_ASSET_HOST;
+    const url = new URL(raw);
+    return (
+      url.protocol === "https:" &&
+      url.hostname === expectedHost &&
+      url.username === "" &&
+      url.password === "" &&
+      (url.port === "" || url.port === "443")
+    );
   } catch {
     return false;
   }
@@ -563,15 +580,42 @@ function css2FontUrl(css: string, family: string, weight: number, italic: boolea
   const sources = face.match(/url\(\s*['"]?([^'"()\s]+)/g);
   if (!sources || sources.length !== 1) return null;
   const href = sources[0].replace(/^url\(\s*['"]?/, "");
-  return isGoogleFontsAssetUrl(href) ? href : null;
+  return isAllowedGoogleUrl(href, GOOGLE_FONTS_ASSET_HOST) ? href : null;
+}
+
+/**
+ * Fetches inside one expected Google host with redirect:manual, validating every hop
+ * BEFORE its GET: the start URL and each resolved Location must pass isAllowedGoogleUrl,
+ * so an off-policy target (foreign host, http, credentials, custom port) returns null
+ * without ever contacting it. Relative Locations resolve against the current hop. The
+ * hop count is bounded; a loop answers null instead of spinning. 2xx/4xx/5xx responses
+ * are returned for the caller's own ok check — only 3xx is followed here.
+ */
+async function fetchWithinGoogleHost(
+  startUrl: string,
+  expectedHost: string,
+  headers?: Record<string, string>,
+): Promise<Response | null> {
+  let url = startUrl;
+  for (let hop = 0; hop <= GOOGLE_FONTS_MAX_REDIRECT_HOPS; hop += 1) {
+    if (!isAllowedGoogleUrl(url, expectedHost)) return null;
+    const response = await fetch(url, { redirect: "manual", headers });
+    if (response.status < 300 || response.status > 399) return response;
+    if (hop === GOOGLE_FONTS_MAX_REDIRECT_HOPS) return null;
+    const location = response.headers.get("location");
+    if (!location) return null;
+    try {
+      url = new URL(location, url).href;
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 async function fetchGoogleFontsBytes(href: string): Promise<Buffer | null> {
-  const response = await fetch(href, { redirect: "follow" });
-  if (!response.ok) return null;
-  // Validate the FINAL host as well as the requested one: a redirect off gstatic means
-  // the CDN moved or intercepted, and unverified bytes are worse than a raster fallback.
-  if (response.url && !isGoogleFontsAssetUrl(response.url)) return null;
+  const response = await fetchWithinGoogleHost(href, GOOGLE_FONTS_ASSET_HOST);
+  if (!response || !response.ok) return null;
   return Buffer.from(await response.arrayBuffer());
 }
 
@@ -590,11 +634,14 @@ export async function defaultGoogleFontsDownload(
   const requestedStyle = style.trim() || "Regular";
   const weight = weightForStyle(requestedStyle);
   const italic = isItalicStyle(requestedStyle);
-  const cssResponse = await fetch(googleFontsCss2Url(family, weight, italic), {
-    redirect: "follow",
-    headers: { "User-Agent": GOOGLE_FONTS_USER_AGENT },
-  });
-  if (!cssResponse.ok) return null;
+  // Same manual-hop policy for the stylesheet: fonts.googleapis.com only, every redirect
+  // validated before it is fetched, so a bounce to an untrusted host cannot fake a face.
+  const cssResponse = await fetchWithinGoogleHost(
+    googleFontsCss2Url(family, weight, italic),
+    GOOGLE_FONTS_CSS2_HOST,
+    { "User-Agent": GOOGLE_FONTS_USER_AGENT },
+  );
+  if (!cssResponse || !cssResponse.ok) return null;
   const css = await cssResponse.text();
   // The HTML shell answers 200 like a stylesheet would; it carries no face.
   if (!css.includes("@font-face")) return null;
