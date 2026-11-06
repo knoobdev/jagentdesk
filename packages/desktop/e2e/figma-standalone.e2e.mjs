@@ -1256,7 +1256,9 @@ async function main() {
     );
     trackChild("desktop", desktop);
     await waitForPort(cdpPort, "Electron CDP", desktop);
-    browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
+    browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`, {
+      timeout: bootTimeoutMs,
+    });
     const page = await waitForAppPage(browser, expoPort);
     // Renderer boot = the SUPPORTED product user flow with actual clicks, proven by the
     // connected UI — never by an IPC status alone (root run 2 lesson: demanding running+
@@ -1299,6 +1301,7 @@ async function main() {
       renderResponses: [],
       contentPending: new Set(),
       contentResponses: [],
+      outlines: new Map(),
       playbackFrameCounts: [],
       nodesIdCounts: [],
       apiPlaybackFrameCounts: [],
@@ -1349,21 +1352,25 @@ async function main() {
         try {
           const envelope = JSON.parse(String(frame.payload));
           const msg = envelope?.type === "session" ? envelope.message : envelope;
-          if (uiRequests.contentPending.delete(msg?.payload?.requestId))
+          if (!msg) return;
+          const payload = msg.payload ?? {};
+          if (msg.type === "figma.file.outline.response" && payload.outline)
+            uiRequests.outlines.set(payload.outline.fileKey, payload.outline);
+          if (uiRequests.contentPending.delete(payload.requestId))
             uiRequests.contentResponses.push({
               type: msg.type,
-              requestId: msg.payload.requestId,
-              errorCode: msg.payload.error?.code ?? null,
+              requestId: payload.requestId,
+              errorCode: payload.error?.code ?? null,
             });
-          if (msg?.type === "figma.file.comments.list.response")
-            uiRequests.commentsResponses.push({ errorCode: msg.payload?.error?.code ?? null });
-          if (msg?.type === "figma.file.render.response") {
-            uiRequests.renderPending.delete(msg.payload?.requestId);
+          if (msg.type === "figma.file.comments.list.response")
+            uiRequests.commentsResponses.push({ errorCode: payload.error?.code ?? null });
+          if (msg.type === "figma.file.render.response") {
+            uiRequests.renderPending.delete(payload.requestId);
             uiRequests.renderResponses.push({
-              requestId: msg.payload?.requestId,
-              errorCode: msg.payload?.error?.code ?? null,
+              requestId: payload.requestId,
+              errorCode: payload.error?.code ?? null,
               images: Object.fromEntries(
-                Object.entries(msg.payload?.images ?? {}).map(([id, bytes]) => [
+                Object.entries(payload.images ?? {}).map(([id, bytes]) => [
                   id,
                   bytes ? { mimeType: bytes.mimeType, byteLength: bytes.byteLength } : null,
                 ]),
@@ -1956,7 +1963,7 @@ async function runUiPlaybackGates(
   const topBar = page.getByTestId("figma-top-bar").filter({ visible: true }).last();
   let canvasAt = null;
   try {
-    await topBar.waitFor({ state: "visible", timeout: 15_000 });
+    await topBar.waitFor({ state: "visible", timeout: figmaTimeoutMs });
     // The file canvas view mounts its own <canvas id="jagentdesk-figma-canvas"> — mount of
     // THAT element is the product proof, not any <canvas> in the tree.
     await page.waitForSelector("#jagentdesk-figma-canvas", { timeout: canvasDeadline });
@@ -1975,21 +1982,86 @@ async function runUiPlaybackGates(
   const coldLabel = isCold
     ? "cold (daemon had not fetched outline/nodes before the click)"
     : `WARM witness: cache ${cacheFilesBefore} files, ${preClickContentRest.length} outline/nodes REST before click — <=3s is not a cold proof`;
-  if (canvasAt !== null && canvasAt <= canvasDeadline && isCold) {
+  // A mounted canvas can still paint placeholders. Observe the SAME visible/a11y content
+  // status and actual wire outline + camera; no app-store inspection or state injection.
+  let completeAt = null;
+  let contentWitness = null;
+  const observeUntil = openStart + figmaTimeoutMs;
+  while (Date.now() < observeUntil) {
+    if (canvasAt === null) break;
+    contentWitness = await page.evaluate(() => {
+      const c = document.getElementById("jagentdesk-figma-canvas");
+      if (!c) return null;
+      const m = c.getContext("2d").getTransform();
+      return {
+        label: c.getAttribute("aria-label"),
+        busy: c.getAttribute("aria-busy"),
+        pageId: new URL(location.href).searchParams.get("page"),
+        dpr: window.devicePixelRatio,
+        width: c.width,
+        height: c.height,
+        matrix: { a: m.a, d: m.d, e: m.e, f: m.f },
+      };
+    });
+    const outline = uiRequests.outlines.get(fileKey);
+    const selected = outline?.pages.find((p) => p.id === contentWitness?.pageId);
+    const m = contentWitness?.matrix;
+    const rect =
+      m && m.a > 0 && m.d > 0
+        ? {
+            x: -m.e / m.a,
+            y: -m.f / m.d,
+            width: contentWitness.width / m.a,
+            height: contentWitness.height / m.d,
+          }
+        : null;
+    const roots = rect
+      ? (selected?.frames ?? []).filter(
+          (f) =>
+            f.type !== "SECTION" &&
+            f.bounds.x < rect.x + rect.width &&
+            f.bounds.x + f.bounds.width > rect.x &&
+            f.bounds.y < rect.y + rect.height &&
+            f.bounds.y + f.bounds.height > rect.y,
+        )
+      : [];
+    if (
+      contentWitness?.label === "Figma design canvas" &&
+      contentWitness.busy !== "true" &&
+      roots.length > 0
+    ) {
+      completeAt = Date.now() - openStart;
+      contentWitness = {
+        ...contentWitness,
+        visibleRootCount: roots.length,
+        outlineVersion: outline.version,
+      };
+      break;
+    }
+    await delay(100);
+  }
+  evidence.coldCanvasContent = {
+    mountedMs: canvasAt,
+    completeMs: completeAt,
+    witness: contentWitness,
+    observedUntilMs: Date.now() - openStart,
+    ...coldWitness,
+  };
+  if (completeAt !== null && completeAt <= canvasDeadline && isCold) {
     passGate("ui-file-open", {
       canvasVisibleMs: canvasAt,
+      viewportContentMs: completeAt,
       budgetMs: canvasDeadline,
       cold: true,
       ...coldWitness,
+      contentWitness,
       restDuringMountWindow: mountRest.map((e) => e.pathname),
-      note: coldLabel,
-      frameBarLimit:
-        "MOUNT-ONLY bar: #jagentdesk-figma-canvas mounted within budget — a first COMPLETE frame is not claimed by this harness",
     });
   } else {
     failGate(
       "ui-file-open",
-      `#jagentdesk-figma-canvas not COLD-mounted within ${canvasDeadline}ms of the real card click (took ${canvasAt ?? ">15s top-bar"}ms; ${coldLabel}; ${JSON.stringify(coldWitness)})`,
+      `COLD viewport content not complete within ${canvasDeadline}ms of real card click: ` +
+        `mounted=${canvasAt ?? "not mounted"}ms, complete=${completeAt ?? "not ready in observation"}ms; ${coldLabel}`,
     );
   }
   await page.screenshot({ path: path.join(artifactDir, "file-canvas.png") });
@@ -2473,6 +2545,7 @@ function runUrlTraceGate(proxyLog, fileKey, sectionNodeIds, uiRequests, linkProb
 
 // These are real controls and real comment reads, never post/reply/react/delete. This gate
 // proves the read/filter layout only; write/resolve/mention/presence acceptance stays separate.
+// eslint-disable-next-line eslint(complexity) — sequential UI steps retain one correlated gate verdict.
 async function runCommentsReadOnlyUiProof(page, requests, artifactDir, evidence, searchTerm) {
   const result = { writesAttempted: false, layouts: [], refreshConfirmed: false };
   evidence.commentsReadOnlyUi = result;
@@ -2763,6 +2836,8 @@ async function traceContinuousCanvasPan(page, cdp, canvas, artifactDir) {
       const m = element.getContext("2d").getTransform();
       return { a: m.a, d: m.d, e: m.e, f: m.f, dpr: window.devicePixelRatio };
     });
+  const { frameTree } = await cdp.send("Page.getFrameTree");
+  const mainFrameId = frameTree.frame.id;
   const before = await camera();
   const beforeImage = await cdp.send("Page.captureScreenshot", { format: "png" });
   fs.writeFileSync(
@@ -2776,6 +2851,7 @@ async function traceContinuousCanvasPan(page, cdp, canvas, artifactDir) {
   let inputs = 0;
   const started = Date.now();
   let inputError = null;
+  let gestureElapsedMs = null;
   try {
     await page.evaluate(() => performance.mark("jagentdesk-pan-start"));
     for (let i = 0; i < 180 && Date.now() - started < 6_000; i += 1) {
@@ -2784,6 +2860,7 @@ async function traceContinuousCanvasPan(page, cdp, canvas, artifactDir) {
       await delay(Math.max(0, started + ((i + 1) * 1000) / 60 - Date.now()));
     }
     await page.evaluate(() => performance.mark("jagentdesk-pan-end"));
+    gestureElapsedMs = Date.now() - started;
   } catch (error) {
     inputError = error;
   }
@@ -2810,6 +2887,8 @@ async function traceContinuousCanvasPan(page, cdp, canvas, artifactDir) {
   fs.writeFileSync(path.join(artifactDir, "pan-after.png"), Buffer.from(afterImage.data, "base64"));
   return {
     inputs,
+    mainFrameId,
+    gestureElapsedMs,
     elapsedMs: Date.now() - started,
     before,
     after,
