@@ -93,9 +93,35 @@ function initialNodeId(param: string | string[] | undefined): string | null {
   return figmaNodeIdFromParam(Array.isArray(param) ? param[0] : param);
 }
 
+// ADR-0039 / spec 32.5.1: the viewer gates ONCE on `figmaNodeDepth`, next to the existing base
+// `figma` gate. An old host strips the `depth=1` option from `figma.file.nodes` and answers with
+// the full Section, so sending it anyway silently breaks the bounded-Section contract — this
+// client never sends depth to a host that does not advertise it, and there is no fallback to the
+// full Section here. Missing capability shows the update-host view with NO data path mounted:
+// the inner screen (outline, frame store, watch, edits) never runs its hooks, mirroring the
+// W6 PrototypePlayer feature-contract shape so no hook is called conditionally.
+export function FigmaFileScreen(ref: FigmaFileRef) {
+  const enabled = useHostFeature(ref.serverId, "figma");
+  const nodeDepth = useHostFeature(ref.serverId, "figmaNodeDepth");
+  if (!enabled) {
+    return (
+      <View style={jiraStyles.screen} testID="figma-host-unsupported">
+        <ErrorBanner message="This host does not speak Figma yet — update the app running the daemon." />
+      </View>
+    );
+  }
+  if (!nodeDepth) {
+    return (
+      <View style={jiraStyles.screen} testID="figma-update-host">
+        <ErrorBanner message="This host predates Section outlines — update the app running the daemon to open Figma files." />
+      </View>
+    );
+  }
+  return <FigmaFileScreenInner {...ref} />;
+}
+
 // eslint-disable-next-line complexity
-export function FigmaFileScreen({ serverId, fileKey, version }: FigmaFileRef) {
-  const enabled = useHostFeature(serverId, "figma");
+function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
   const isCompact = useIsCompactFormFactor();
   const params = useLocalSearchParams<{ node?: string | string[] }>();
   const queryClient = useQueryClient();
@@ -145,7 +171,9 @@ export function FigmaFileScreen({ serverId, fileKey, version }: FigmaFileRef) {
     setWatchToken((token) => token + 1);
   }, [serverId, fileKey, queryClient]);
 
-  useFigmaWatch({ serverId, fileKey, active: enabled && !version, onChanged: onWatched });
+  // The wrapper only mounts this screen when the host speaks Figma, so the watch is active for
+  // any live file; a historical version snapshot never watches.
+  useFigmaWatch({ serverId, fileKey, active: !version, onChanged: onWatched });
 
   const selectNode = useCallback((nodeId: string | null) => {
     setSelectedNodeId(nodeId);
@@ -284,14 +312,6 @@ export function FigmaFileScreen({ serverId, fileKey, version }: FigmaFileRef) {
     [page, selectedNodeId],
   );
   const panelHeader = useMemo(() => ({ title: panelTitle(panel) }), [panel]);
-
-  if (!enabled) {
-    return (
-      <View style={jiraStyles.screen}>
-        <ErrorBanner message="This host does not speak Figma yet — update the app running the daemon." />
-      </View>
-    );
-  }
 
   if (outlineQuery.isPending) {
     return (
