@@ -1,4 +1,10 @@
-import { BrowserWindow, type WebContents, type WebPreferences } from "electron";
+import {
+  BrowserWindow,
+  session,
+  type Session,
+  type WebContents,
+  type WebPreferences,
+} from "electron";
 import {
   FIGMA_PICKER_PARTITION,
   FIGMA_PICKER_URL,
@@ -11,6 +17,23 @@ export type FigmaFilePickerResult = { kind: "file"; url: string } | { kind: "can
 // ERR_ABORTED: our own stop()/preventDefault and the site's in-flight redirects land here, so a
 // cancelled load is not a failure; everything else on the main frame is (ADR-0038 review).
 const ERR_ABORTED = -3;
+
+// The browse-only guest is granted nothing (ADR-0038). With no handler Electron auto-approves
+// every remote permission request, and a download would open a save flow nobody owns here — so
+// deny requests, checks, and device access, and cancel downloads. This configures the picker
+// partition ONLY: default/app sessions and the browser-profile session keep Electron's
+// behavior, and no CSP, user-agent, or SSO handling is touched.
+const configuredGuestSessions = new WeakSet<Session>();
+
+function configureFigmaPickerSession(): void {
+  const guestSession = session.fromPartition(FIGMA_PICKER_PARTITION);
+  if (configuredGuestSessions.has(guestSession)) return;
+  configuredGuestSessions.add(guestSession);
+  guestSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  guestSession.setPermissionCheckHandler(() => false);
+  guestSession.setDevicePermissionHandler(() => false);
+  guestSession.on("will-download", (event) => event.preventDefault());
+}
 
 // The guest is a plain website window: one persistent partition shared with its login popups,
 // sandboxed, context-isolated, and with no Node, no preload, and no IPC from the page. The
@@ -41,6 +64,9 @@ let pending: Promise<FigmaFilePickerResult> | null = null;
  */
 export function pickFigmaFile(): Promise<FigmaFilePickerResult> {
   if (pending) return pending;
+  // Invoked through the desktop IPC bridge, which only exists after app ready — the point
+  // Electron requires for session permission handlers.
+  configureFigmaPickerSession();
   const parent = BrowserWindow.getFocusedWindow();
   const result = new Promise<FigmaFilePickerResult>((resolve, reject) => {
     const owned = new Set<BrowserWindow>();

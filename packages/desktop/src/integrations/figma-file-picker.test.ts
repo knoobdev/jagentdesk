@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FIGMA_PICKER_PARTITION, FIGMA_PICKER_URL } from "./figma-file-picker-policy";
 import { pickFigmaFile, type FigmaFilePickerResult } from "./figma-file-picker";
 
-const { FakeBrowserWindow: PickerWindow } = vi.hoisted(() => {
+const {
+  FakeBrowserWindow: PickerWindow,
+  fakeSessionState,
+  fakeFromPartition,
+  fakeResetGuestSession,
+} = vi.hoisted(() => {
   type Listener = (...args: unknown[]) => void;
   interface OpenResult {
     action: "allow" | "deny";
@@ -44,6 +49,10 @@ const { FakeBrowserWindow: PickerWindow } = vi.hoisted(() => {
 
     public emit(event: string, ...args: unknown[]): void {
       for (const listener of Array.from(this.listeners.get(event) ?? [])) listener(...args);
+    }
+
+    public listenerCount(event: string): number {
+      return (this.listeners.get(event) ?? []).length;
     }
   }
 
@@ -114,10 +123,63 @@ const { FakeBrowserWindow: PickerWindow } = vi.hoisted(() => {
     }
   }
 
-  return { FakeBrowserWindow };
+  type GrantCallback = (granted: boolean) => void;
+  type PermissionRequestListener = (
+    contents: unknown,
+    permission: string,
+    callback: GrantCallback,
+  ) => void;
+  type PermissionCheckListener = (
+    contents: unknown,
+    permission: string,
+    requestingOrigin: string,
+    details: unknown,
+  ) => boolean;
+  type DevicePermissionListener = (details: unknown) => boolean;
+
+  class FakeSession extends FakeEmitter {
+    public readonly permissionRequestHandlers: PermissionRequestListener[] = [];
+    public readonly permissionCheckHandlers: PermissionCheckListener[] = [];
+    public readonly devicePermissionHandlers: DevicePermissionListener[] = [];
+
+    public setPermissionRequestHandler(handler: PermissionRequestListener): void {
+      this.permissionRequestHandlers.push(handler);
+    }
+
+    public setPermissionCheckHandler(handler: PermissionCheckListener): void {
+      this.permissionCheckHandlers.push(handler);
+    }
+
+    public setDevicePermissionHandler(handler: DevicePermissionListener): void {
+      this.devicePermissionHandlers.push(handler);
+    }
+  }
+
+  const guestSessionState = {
+    partitions: [] as string[],
+    current: new FakeSession(),
+  };
+  const guestFromPartition = (partition: string): FakeSession => {
+    guestSessionState.partitions.push(partition);
+    return guestSessionState.current;
+  };
+  const guestResetGuestSession = (): void => {
+    guestSessionState.partitions = [];
+    guestSessionState.current = new FakeSession();
+  };
+
+  return {
+    FakeBrowserWindow,
+    fakeSessionState: guestSessionState,
+    fakeFromPartition: guestFromPartition,
+    fakeResetGuestSession: guestResetGuestSession,
+  };
 });
 
-vi.mock("electron", () => ({ BrowserWindow: PickerWindow }));
+vi.mock("electron", () => ({
+  BrowserWindow: PickerWindow,
+  session: { fromPartition: fakeFromPartition },
+}));
 
 class FakeNavigationEvent {
   public defaultPrevented = false;
@@ -147,6 +209,7 @@ function guest(): PickerWindow {
 
 beforeEach(() => {
   PickerWindow.reset();
+  fakeResetGuestSession();
   openPicks = [];
 });
 
@@ -457,5 +520,75 @@ describe("pickFigmaFile cancellation and failures", () => {
     expect(guest().destroyed).toBe(false);
     guest().close();
     await expect(retry).resolves.toEqual({ kind: "cancelled" });
+  });
+});
+
+describe("picker guest session policy (ADR-0038)", () => {
+  it("configures only the persistent picker partition, leaving default/app/browser sessions alone", async () => {
+    const pick = startPick();
+
+    // The sole session touched is the guest partition: never the default session, the app
+    // session, or the browser-profile partition.
+    expect(fakeSessionState.partitions).toEqual([FIGMA_PICKER_PARTITION]);
+    guest().close();
+    await expect(pick).resolves.toEqual({ kind: "cancelled" });
+  });
+
+  it("denies permission requests, permission checks, and device permissions", async () => {
+    const pick = startPick();
+    const guestSession = fakeSessionState.current;
+
+    expect(guestSession.permissionRequestHandlers).toHaveLength(1);
+    let granted: boolean | undefined;
+    guestSession.permissionRequestHandlers[0]!({ webContents: true }, "media", (value) => {
+      granted = value;
+    });
+    expect(granted).toBe(false);
+
+    expect(guestSession.permissionCheckHandlers).toHaveLength(1);
+    expect(
+      guestSession.permissionCheckHandlers[0]!(null, "geolocation", "https://www.figma.com", {}),
+    ).toBe(false);
+
+    expect(guestSession.devicePermissionHandlers).toHaveLength(1);
+    expect(guestSession.devicePermissionHandlers[0]!({ mediaType: "videoCapturer" })).toBe(false);
+
+    guest().close();
+    await expect(pick).resolves.toEqual({ kind: "cancelled" });
+  });
+
+  it("blocks downloads in the browse-only guest", async () => {
+    const pick = startPick();
+    const guestSession = fakeSessionState.current;
+
+    const event = new FakeNavigationEvent();
+    guestSession.emit("will-download", event);
+
+    expect(event.defaultPrevented).toBe(true);
+    guest().close();
+    await expect(pick).resolves.toEqual({ kind: "cancelled" });
+  });
+
+  it("shares one deny policy with popups through the same partition and never stacks handlers", async () => {
+    const first = startPick();
+    const picker = guest();
+    expect(picker.options.webPreferences?.partition).toBe(FIGMA_PICKER_PARTITION);
+    const popup = picker.webContents.openHandler!({ url: "https://www.figma.com/files" });
+    expect(popup.overrideBrowserWindowOptions?.webPreferences?.partition).toBe(
+      FIGMA_PICKER_PARTITION,
+    );
+    picker.close();
+    await expect(first).resolves.toEqual({ kind: "cancelled" });
+
+    // A second pick reuses the same partition session without stacking a second policy.
+    const second = startPick();
+    guest().close();
+    await expect(second).resolves.toEqual({ kind: "cancelled" });
+
+    const guestSession = fakeSessionState.current;
+    expect(guestSession.permissionRequestHandlers).toHaveLength(1);
+    expect(guestSession.permissionCheckHandlers).toHaveLength(1);
+    expect(guestSession.devicePermissionHandlers).toHaveLength(1);
+    expect(guestSession.listenerCount("will-download")).toBe(1);
   });
 });
