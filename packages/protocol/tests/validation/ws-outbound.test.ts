@@ -525,3 +525,150 @@ describe("WS inbound figma nodes depth option", () => {
     expect(WSInboundMessageSchema.safeParse(nodesEnvelope({ depth: "1" })).success).toBe(false);
   });
 });
+
+// ADR-0040: the figma.remote.* responses travel daemon→client through the generated zod-aot
+// validator. Remote MCP results are raw content arrays with arbitrary nesting — deep structures
+// (get_metadata trees, use_figma node graphs) must survive compilation unchanged.
+describe("WS outbound figma remote responses (generated validator)", () => {
+  it("accepts a figma.remote.status.response with connected status and identityText", () => {
+    const envelope = {
+      type: "session",
+      message: {
+        type: "figma.remote.status.response",
+        payload: {
+          requestId: "figma-remote-status",
+          error: null,
+          status: { state: "connected", message: null, identityText: "ngocchanh" },
+        },
+      },
+    };
+
+    const res = GeneratedWSOutboundMessageSchema.safeParse(envelope);
+    if (!res.success)
+      console.log("AOT STATUS ERR:", JSON.stringify(res.error.issues).slice(0, 400));
+    expect(res.success).toBe(true);
+  });
+
+  it("accepts a figma.remote.execute.response with deep MCP content, structuredContent, readback", () => {
+    const envelope = {
+      type: "session",
+      message: {
+        type: "figma.remote.execute.response",
+        payload: {
+          requestId: "figma-remote-execute",
+          error: null,
+          result: {
+            content: [
+              { type: "text", text: "1:2" },
+              { type: "image", data: "cG5n", mimeType: "image/png" },
+              {
+                type: "resource",
+                resource: { uri: "figma://node/1:2", text: '{"name":"Landing"}' },
+              },
+            ],
+            structuredContent: {
+              nodeId: "1:2",
+              changes: [
+                { op: "rename", from: "Frame 1", to: "Landing", nested: { deep: [1, [2, [3]]] } },
+              ],
+            },
+            isError: false,
+          },
+          readback: {
+            content: [{ type: "text", text: '{"name":"Landing","bounds":{"x":0,"y":0}}' }],
+            structuredContent: { name: "Landing", bounds: { x: 0, y: 0, width: 375, height: 812 } },
+          },
+          readbackAvailable: true,
+        },
+      },
+    };
+
+    const res = GeneratedWSOutboundMessageSchema.safeParse(envelope);
+    if (!res.success) console.log("AOT EXEC ERR:", JSON.stringify(res.error.issues).slice(0, 400));
+    expect(res.success).toBe(true);
+  });
+});
+
+// ADR-0040: figma.remote.* requests travel client→daemon through the runtime inbound union — the
+// daemon's real parse boundary. Bare requests are empty-param; read/execute carry the ADR's
+// parameter rules (nonempty fileKey, description 1–1000, code ≤65536 chars).
+describe("WS inbound figma remote requests", () => {
+  const remoteEnvelope = (type: string, params: Record<string, unknown>) => ({
+    type: "session",
+    message: { type, requestId: "figma-remote", ...params },
+  });
+
+  it("accepts the three bare requests and read/execute with params", () => {
+    for (const type of [
+      "figma.remote.status.request",
+      "figma.remote.auth.begin.request",
+      "figma.remote.disconnect.request",
+    ]) {
+      const res = WSInboundMessageSchema.safeParse(remoteEnvelope(type, {}));
+      if (!res.success) console.log(type, "ERR:", JSON.stringify(res.error.issues).slice(0, 300));
+      expect(res.success).toBe(true);
+    }
+
+    expect(
+      WSInboundMessageSchema.safeParse(
+        remoteEnvelope("figma.remote.read.request", { fileKey: "kH8TzQ2mV1", nodeId: "1:2" }),
+      ).success,
+    ).toBe(true);
+    expect(
+      WSInboundMessageSchema.safeParse(
+        remoteEnvelope("figma.remote.execute.request", {
+          fileKey: "kH8TzQ2mV1",
+          code: 'figma.currentPage.children[0].name = "Landing";',
+          description: "Rename the landing frame",
+        }),
+      ).success,
+    ).toBe(true);
+  });
+
+  it("rejects a read request with an empty fileKey", () => {
+    const res = WSInboundMessageSchema.safeParse(
+      remoteEnvelope("figma.remote.read.request", { fileKey: "" }),
+    );
+    if (res.success) console.log("EMPTY KEYS accepted:", JSON.stringify(res.data).slice(0, 200));
+    expect(res.success).toBe(false);
+  });
+
+  it("keeps the execute code cap at 65536 characters and description at 1–1000", () => {
+    expect(
+      WSInboundMessageSchema.safeParse(
+        remoteEnvelope("figma.remote.execute.request", {
+          fileKey: "kH8TzQ2mV1",
+          code: "a".repeat(65536),
+          description: "d",
+        }),
+      ).success,
+    ).toBe(true);
+    expect(
+      WSInboundMessageSchema.safeParse(
+        remoteEnvelope("figma.remote.execute.request", {
+          fileKey: "kH8TzQ2mV1",
+          code: "a".repeat(65537),
+          description: "d",
+        }),
+      ).success,
+    ).toBe(false);
+    expect(
+      WSInboundMessageSchema.safeParse(
+        remoteEnvelope("figma.remote.execute.request", {
+          fileKey: "kH8TzQ2mV1",
+          code: "return 1;",
+          description: "",
+        }),
+      ).success,
+    ).toBe(false);
+    expect(
+      WSInboundMessageSchema.safeParse(
+        remoteEnvelope("figma.remote.execute.request", {
+          fileKey: "kH8TzQ2mV1",
+          code: "return 1;",
+          description: "d".repeat(1001),
+        }),
+      ).success,
+    ).toBe(false);
+  });
+});
