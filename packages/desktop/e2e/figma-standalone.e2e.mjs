@@ -727,6 +727,14 @@ async function completeDirectConnectionOnboarding(page, daemonPort, wireServerId
       steps.push(`connected — wired workspace row visible: ${rowTest}`);
       return steps;
     }
+    // Route restoration can finish after preload initialization. The Figma sidebar hides
+    // the workspace list; use its real Back control once it renders, then prove connection.
+    const leaveFigma = page.getByTestId("sidebar-figma-leave").filter({ visible: true }).last();
+    if (await visible(leaveFigma)) {
+      await leaveFigma.click();
+      steps.push("left restored Figma sidebar to expose the workspace list");
+      continue;
+    }
     if (await visible(errorScreen)) {
       const text =
         (await errorScreen
@@ -781,10 +789,6 @@ async function completeDirectConnectionOnboarding(page, daemonPort, wireServerId
  */
 async function waitForReadyRenderer(page, daemonPort, wireServerId) {
   await waitForPreloadBridge(page);
-  // The Figma sidebar replaces the workspace list. Return through its real Back control
-  // after a reload before requiring the connected workspace row as proof.
-  const leaveFigma = page.getByTestId("sidebar-figma-leave").filter({ visible: true }).last();
-  if (await leaveFigma.isVisible().catch(() => false)) await leaveFigma.click();
   await completeDirectConnectionOnboarding(page, daemonPort, wireServerId);
 }
 
