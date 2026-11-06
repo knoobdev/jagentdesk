@@ -1,3 +1,4 @@
+import { createRenderUrlBatcher } from "../render-url-batcher.js";
 import { prepareFrameTextOutlines } from "../prepare-text-outlines.js";
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
@@ -1626,6 +1627,7 @@ export class FigmaContent {
       scale: number;
       format?: "png" | "jpg" | "svg";
       useAbsoluteBounds?: boolean;
+      cachedOnly?: boolean;
       version?: string;
     },
     ctx: FigmaContext,
@@ -1633,6 +1635,22 @@ export class FigmaContent {
     const file = await requireFile(ctx, request.fileKey);
     const format: RenderFormat = request.format ?? "png";
     const absolute = request.useAbsoluteBounds === true;
+    if (request.cachedOnly) {
+      if (!request.version?.trim())
+        throw new FigmaServiceError(
+          "invalid_input",
+          "Cached render reads require an explicit version.",
+        );
+      const images: Record<string, FigmaBytes | null> = {};
+      for (const id of request.ids) {
+        const bounds = absolute ? "@absolute" : "";
+        const bytes = await ctx.cache.getBytes(
+          `render-rest/${file.fileKey}/${id}@${request.scale}x@${format}${bounds}@${request.version}`,
+        );
+        images[id] = bytes ? toBase64Bytes(bytes) : null;
+      }
+      return { images, source: "rest" };
+    }
     // ADR-0042 (clarified at review): the fidelity path — svg text outlines or absolute bounds —
     // is answered ONLY by the version-pinned Tier-1 REST read. The plugin export predates the
     // options and would return wrong-meaning bytes, so an unversioned fidelity request is a
@@ -1808,6 +1826,58 @@ export class FigmaContent {
     return Promise.race([ordinary, prepared.catch(() => ordinary)]);
   }
 
+  private readonly previewExportBatches = new WeakMap<
+    FigmaContext,
+    Map<string, ReturnType<typeof createRenderUrlBatcher>>
+  >();
+
+  private renderUrls(
+    ctx: FigmaContext,
+    file: FigmaFile,
+    query: Record<string, string | number | boolean | undefined>,
+  ): Promise<RestImagesResponse> {
+    const request = (ids: string) =>
+      ctx.rest.getJson<RestImagesResponse>({
+        connectionId: file.connectionId,
+        path: `/v1/images/${file.fileKey}`,
+        query: { ...query, ids },
+        tier: "1",
+      });
+    if (query.format !== "png" || typeof query.scale !== "number" || query.scale >= 1)
+      return request(String(query.ids));
+    const { ids, ...options } = query;
+    const key = JSON.stringify([file.connectionId, file.fileKey, options]);
+    let batches = this.previewExportBatches.get(ctx);
+    if (!batches) {
+      batches = new Map();
+      this.previewExportBatches.set(ctx, batches);
+    }
+    let batcher = batches.get(key);
+    if (!batcher) {
+      const owned = batches;
+      batcher = createRenderUrlBatcher({
+        exportIds: async (wanted) => {
+          const started = performance.now();
+          const result = await request(wanted.join(","));
+          ctx.logger.info(
+            {
+              nodeCount: wanted.length,
+              scale: query.scale,
+              duration_ms: performance.now() - started,
+            },
+            "figma preview export timing",
+          );
+          return result.images ?? {};
+        },
+        onIdle: () => {
+          if (owned.get(key) === batcher) owned.delete(key);
+        },
+      });
+      batches.set(key, batcher);
+    }
+    return batcher(String(ids).split(",")).then((images) => ({ images }));
+  }
+
   private async renderRestDirect(
     ctx: FigmaContext,
     file: FigmaFile,
@@ -1842,12 +1912,10 @@ export class FigmaContent {
       // Neither flag is added for the plain crop path — old requests keep identical queries.
       if (format === "svg") query.svg_outline_text = "true";
       if (absolute) query.use_absolute_bounds = "true";
-      const response = await ctx.rest.getJson<RestImagesResponse>({
-        connectionId: file.connectionId,
-        path: `/v1/images/${file.fileKey}`,
-        query,
-        tier: "1",
-      });
+      const prepareStarted = performance.now();
+      const response = await this.renderUrls(ctx, file, query);
+      const prepare_ms = performance.now() - prepareStarted;
+      const downloadStarted = performance.now();
       await Promise.all(
         batch.map(async (id) => {
           const url = response?.images?.[id];
@@ -1873,6 +1941,12 @@ export class FigmaContent {
           }
         }),
       );
+      const download_ms = performance.now() - downloadStarted;
+      if (prepare_ms + download_ms >= 1000)
+        ctx.logger.info(
+          { nodeCount: batch.length, scale, format, prepare_ms, download_ms },
+          "figma render batch timing",
+        );
     }
     return { images, source: "rest" };
   }

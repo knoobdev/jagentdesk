@@ -177,6 +177,12 @@ describe("LOD switch", () => {
 describe("projected-detail load plan (ADR-0039)", () => {
   const box = (width: number, height: number) => ({ x: 0, y: 0, width, height });
 
+  it("does not export unreadable text labels just because their layout box is wide", () => {
+    expect(planRootLoad(box(4000, 24), 0.07, "TEXT")).toBe("metadata");
+    expect(planRootLoad(box(1440, 900), 0.07, "FRAME")).toBe("thumbnail");
+    expect(planRootLoad(box(4000, 24), 1, "TEXT")).toBe("full");
+  });
+
   it("plans metadata when the longest projected edge is under the detail threshold", () => {
     // Fit on a thousand-screen file: every frame is a few pixels wide → zero subtree requests.
     expect(planRootLoad(box(100, 80), THUMBNAIL_ZOOM / 2)).toBe("metadata");

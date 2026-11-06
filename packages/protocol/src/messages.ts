@@ -4725,6 +4725,7 @@ export const ServerInfoStatusPayloadSchema = z
         // wrong-meaning bytes, so PNG-crop stays the fallback there and is not new-quality.
         figmaRenderFidelity: z.boolean().optional(),
         figmaTextOutlines: z.boolean().optional(),
+        figmaCachedRender: z.boolean().optional(),
       })
       .optional(),
   })
