@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "@testing-library/react";
 import type { FigmaBytes, FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
 
-const { theme, clientRef, callFigma, draws, missingByRoot } = vi.hoisted(() => ({
+const { theme, clientRef, callFigma, draws, missingByRoot, fidelityRef } = vi.hoisted(() => ({
   theme: {
     spacing: { 1: 4, 1.5: 6, 2: 8, 3: 12, 4: 16, 6: 24 },
     fontSize: { xs: 11, sm: 13, base: 15 },
@@ -31,19 +31,23 @@ const { theme, clientRef, callFigma, draws, missingByRoot } = vi.hoisted(() => (
     string,
     {
       fallbackNodeIds: string[];
+      textFallbackNodeIds?: string[];
       imageRefs: string[];
       fonts: { family: string; style: string }[];
       cachedImageRefs: string[];
     }
   >(),
+  fidelityRef: { current: false },
 }));
 
 interface DrawOptions {
   imageForRef: (ref: string) => HTMLImageElement | null;
-  fallbackForNode: (id: string) => HTMLImageElement | null;
+  fallbackForNode: (id: string, nodeType?: string) => HTMLImageElement | null;
+  fallbackTextUsesAbsoluteBounds?: boolean;
   fontAvailable: (family: string, style: string) => boolean;
   onMissing: (missing: {
     fallbackNodeIds: string[];
+    textFallbackNodeIds?: string[];
     imageRefs: string[];
     fonts: { family: string; style: string }[];
   }) => void;
@@ -58,6 +62,12 @@ vi.mock("react-native-unistyles", () => ({
 }));
 vi.mock("@/runtime/host-runtime", () => ({
   useHostRuntimeClient: () => clientRef.current,
+}));
+// ADR-0042 quality toggle: the real module answers false in jsdom, so every existing case
+// stays on the legacy wire; the fidelity describe flips this flag to exercise the quality path.
+vi.mock("@/runtime/host-features", () => ({
+  useHostFeature: (_serverId: string, feature: string) =>
+    fidelityRef.current && feature === "figmaRenderFidelity",
 }));
 vi.mock("./figma-api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./figma-api")>()),
@@ -135,6 +145,8 @@ let createdImages: HTMLImageElement[] = [];
 
 interface MissingReport {
   fallbackNodeIds: string[];
+  /** Font-missing TEXT ids from the renderer (ADR-0042): these route to the outlined-SVG cache. */
+  textFallbackNodeIds?: string[];
   imageRefs: string[];
   fonts: { family: string; style: string }[];
   /** Assets this frame PAINTS from cache — the real renderer reads them mid-draw via the
@@ -148,26 +160,28 @@ interface MissingReport {
 function serveMissing(rootId: string, report: Partial<MissingReport>): void {
   missingByRoot.set(rootId, {
     fallbackNodeIds: report.fallbackNodeIds ?? [],
+    textFallbackNodeIds: report.textFallbackNodeIds,
     imageRefs: report.imageRefs ?? [],
     fonts: report.fonts ?? [],
     cachedImageRefs: report.cachedImageRefs ?? [],
   });
 }
 
-function renderPlayer(version = "v1", withText = false, root?: FigmaNode) {
+function renderPlayer(version = "v1", withText = false, root?: FigmaNode, drawScale = 1) {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const rootNode = createRoot(container);
-  const draw = (node: FigmaNode, atVersion = version) =>
+  const draw = (node: FigmaNode, atVersion = version, scale = drawScale) =>
     rootNode.render(
       <PrototypeAssetScopeProvider file={file} version={atVersion}>
-        <FrameContent file={file} root={node} scale={1} />
+        <FrameContent file={file} root={node} scale={scale} />
       </PrototypeAssetScopeProvider>,
     );
   act(() => draw(root ?? frameRoot(withText)));
   const view = {
     container,
-    rerender: (node: FigmaNode, atVersion?: string) => act(() => draw(node, atVersion)),
+    rerender: (node: FigmaNode, atVersion?: string, scale?: number) =>
+      act(() => draw(node, atVersion, scale ?? drawScale)),
     unmount: () => {
       act(() => rootNode.unmount());
       container.remove();
@@ -336,7 +350,7 @@ describe("FrameContent asset scope lifecycle", () => {
     // the late decode/RPC callbacks drop instead of reviving the cleared store.
     expect(store?.disposed).toBe(true);
     expect(store?.get("fill|ref-a")).toBeUndefined();
-    expect(store?.get("raster|1:2")).toBeUndefined();
+    expect(store?.get("raster|v1|2|png|crop|1:2")).toBeUndefined();
     expect(peekAssetScope(assetScopeKey("s1", "fk1", "v1"))).toBeUndefined();
     expect(document.head.querySelector("link[href*='fonts.googleapis.com']")).toBeNull();
     act(() => {
@@ -619,7 +633,7 @@ describe("FrameContent wire batch boundaries (20 per request)", () => {
     });
     await waitFor(() => expect(draws.length).toBeGreaterThan(1));
     for (const ref of fills) expect(store.get(`fill|${ref}`)?.status).toBe("ready");
-    for (const id of rasters) expect(store.get(`raster|${id}`)?.status).toBe("ready");
+    for (const id of rasters) expect(store.get(`raster|v1|2|png|crop|${id}`)?.status).toBe("ready");
     view.unmount();
   });
 
@@ -651,7 +665,8 @@ describe("FrameContent wire batch boundaries (20 per request)", () => {
     // stay loading until the decode finishes, which the harness drives by hand.
     const store = peekAssetScope(assetScopeKey("s1", "fk1", "v9"))!;
     await waitFor(() => {
-      for (const id of rasters) expect(store.get(`raster|${id}`)?.status).toBe("failed");
+      for (const id of rasters)
+        expect(store.get(`raster|v9|2|png|crop|${id}`)?.status).toBe("failed");
       expect(store.get("fill|ref-fill-19")?.status).toBe("failed"); // omitted from chunk 1's response
       expect(store.get("fill|ref-fill-24")?.status).toBe("failed"); // chunk 2's RPC rejected
     });
@@ -895,6 +910,269 @@ describe("FrameContent bounded font behavior", () => {
     });
     expect(fontsGetCalls()).toHaveLength(1);
     expect(document.head.querySelectorAll("link")).toHaveLength(0);
+    view.unmount();
+  });
+});
+
+// ── ADR-0042 quality path (root review: same three bug classes as the canvas hook) ─────────
+// The store-side twin of the fidelity regressions: ONE route helper drives reads and fetches,
+// the SVG→PNG downgrade persists independently of the SVG entry (no ping-pong), each rung is
+// claimed exactly once (finite lattice), and a ready exact fallback makes the failed font
+// irrelevant to what paints. Faking the capability through the host-features mock is the only
+// switch; the legacy describes above already pin the pre-capability wire.
+describe("FrameContent ADR-0042 quality path", () => {
+  const SVG_KEY = "raster|v1|1|svg|absolute|1:3";
+  const PNG_ABS_3 = "raster|v1|3|png|absolute|1:3";
+  const PNG_ABS_4 = "raster|v1|4|png|absolute|1:3";
+
+  function pngCalls(): Array<Record<string, unknown>> {
+    return callFigma.mock.calls
+      .filter((c) => c[1] === "figma.file.render.request")
+      .map((c) => c[2] as Record<string, unknown>);
+  }
+
+  /** Raster calls for one format (and optional rung) — loop-based, so waitFor callbacks
+   *  never stack a second filter arrow onto the lint depth budget. */
+  function pngCallsWhere(format: string, scale?: number): Array<Record<string, unknown>> {
+    const out: Array<Record<string, unknown>> = [];
+    for (const c of pngCalls())
+      if (c.format === format && (scale === undefined || c.scale === scale)) out.push(c);
+    return out;
+  }
+
+  /** SVG asks fail terminal; PNG asks answer with decodable bytes. */
+  function serveSvgFailingPngOk(): void {
+    callFigma.mockImplementation(async (_client: unknown, type: string, params: unknown) => {
+      const p = (params ?? {}) as { ids?: string[]; imageRefs?: string[]; format?: string };
+      if (type !== "figma.file.render.request") return { images: {} };
+      const ids = p.ids ?? [];
+      if (p.format === "svg") return { images: Object.fromEntries(ids.map((id) => [id, null])) };
+      return {
+        images: Object.fromEntries(
+          ids.map((id) => [id, { mimeType: "image/png", dataBase64: "QUJD" }]),
+        ),
+      };
+    });
+  }
+
+  /** Every raster class answers with bytes whose MIME matches the ask — stable "loading"
+   *  (decodes) for wire-shape assertions, since jsdom never fires image load. */
+  function serveRasterBytes(): void {
+    callFigma.mockImplementation(async (_client: unknown, type: string, params: unknown) => {
+      const p = (params ?? {}) as { ids?: string[]; imageRefs?: string[]; format?: string };
+      if (type !== "figma.file.render.request") return { images: {} };
+      const mimeType = p.format === "svg" ? "image/svg+xml" : "image/png";
+      return {
+        images: Object.fromEntries(
+          (p.ids ?? []).map((id) => [id, { mimeType, dataBase64: "QUJD" }]),
+        ),
+      };
+    });
+  }
+
+  function setDpr(value: number): void {
+    Object.defineProperty(window, "devicePixelRatio", { configurable: true, value });
+  }
+
+  /** Let queued microtasks and timer callbacks drain (store flushes + claim settles). */
+  function settle(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  beforeEach(() => {
+    fidelityRef.current = true;
+    setDpr(2);
+  });
+  afterEach(() => {
+    fidelityRef.current = false;
+    setDpr(1);
+  });
+
+  it("an empty or whitespace-only pin never opens the quality route: exact legacy scale-2 crop wire (ADR-0042 contract)", async () => {
+    serveRasterBytes();
+    serveMissing("1:1", {
+      fallbackNodeIds: ["1:3"],
+      textFallbackNodeIds: ["1:3"],
+      imageRefs: [],
+      fonts: [],
+      cachedImageRefs: [],
+    });
+    const view = renderPlayer("  ", true, undefined, 1.35);
+    await firstDraw();
+    await waitFor(() => expect(pngCalls()).toHaveLength(1));
+    // The blank pin the daemon would refuse (handlers/content.ts checks trim()) behaves like
+    // the pre-capability wire exactly: rung 2 crop PNG, no format/bounds fields on it.
+    expect(pngCalls()).toEqual([{ fileKey: "fk1", ids: ["1:3"], scale: 2, version: "  " }]);
+    view.unmount();
+  });
+
+  it("routes renderer-classified TEXT to svg@1@absolute and non-TEXT to the ceil(zoom·dpr) crop rung", async () => {
+    serveRasterBytes();
+    serveMissing("1:1", {
+      fallbackNodeIds: ["1:2", "1:3"],
+      textFallbackNodeIds: ["1:3"],
+      imageRefs: [],
+      fonts: [],
+      cachedImageRefs: [],
+    });
+    // zoom 1.35 × dpr 2 = 2.7 → rung 3 for the non-TEXT crop class.
+    const view = renderPlayer("v1", true, undefined, 1.35);
+    const draw = await firstDraw();
+    expect(draw.fallbackTextUsesAbsoluteBounds).toBe(true); // the renderer pairs TEXT with the layout box
+    await waitFor(() => expect(pngCalls()).toHaveLength(2));
+    expect(pngCalls()).toContainEqual({
+      fileKey: "fk1",
+      ids: ["1:3"],
+      scale: 1,
+      version: "v1",
+      format: "svg",
+      useAbsoluteBounds: true,
+    });
+    expect(pngCalls()).toContainEqual({
+      fileKey: "fk1",
+      ids: ["1:2"],
+      scale: 3,
+      version: "v1",
+      format: "png",
+    });
+    const store = peekAssetScope(assetScopeKey("s1", "fk1", "v1"))!;
+    expect(store.get(SVG_KEY)?.status).toBe("loading");
+    expect(store.get("raster|v1|3|png|crop|1:2")?.status).toBe("loading");
+    view.unmount();
+  });
+
+  it("a terminal SVG failure downgrades once per rung: stable PNG across repeated reads, no SVG restart", async () => {
+    serveSvgFailingPngOk();
+    serveMissing("1:1", {
+      fallbackNodeIds: ["1:3"],
+      textFallbackNodeIds: ["1:3"],
+      imageRefs: [],
+      fonts: [],
+      cachedImageRefs: [],
+    });
+    const view = renderPlayer("v1", true, undefined, 1.35);
+    const draw = await firstDraw();
+    await waitFor(() => {
+      const store = peekAssetScope(assetScopeKey("s1", "fk1", "v1"));
+      expect(store?.get(SVG_KEY)?.status).toBe("failed");
+    });
+    // The failed SVG entry is never pinned by a successful path — the CHANNEL is persistent,
+    // so this read (and every later re-ask) routes to the absolute PNG of the current rung.
+    for (let pass = 0; pass < 20; pass += 1) expect(draw.fallbackForNode("1:3", "TEXT")).toBeNull();
+    await waitFor(() => expect(pngCallsWhere("png", 3)).toHaveLength(1));
+    // The later onMissing reports (renderer keeps re-asking while nothing paints) must NOT
+    // restart the SVG or double-fetch the PNG rung: same route helper, same claims, deduped.
+    act(() => {
+      draw.onMissing({
+        fallbackNodeIds: ["1:3"],
+        textFallbackNodeIds: ["1:3"],
+        imageRefs: [],
+        fonts: [],
+      });
+    });
+    await settle();
+    expect(pngCalls().filter((c) => c.format === "svg")).toHaveLength(1);
+    expect(pngCalls().filter((c) => c.format === "png" && c.scale === 3)).toHaveLength(1);
+
+    // The downgrade decodes and paints from here; attachOwner keeps it alive while used.
+    const pngImage = createdImages.find((i) => (i.src ?? "").includes("image/png"));
+    expect(pngImage).toBeDefined();
+    act(() => {
+      pngImage!.dispatchEvent(new Event("load"));
+    });
+    await waitFor(() => {
+      const store = peekAssetScope(assetScopeKey("s1", "fk1", "v1"));
+      expect(store?.get(PNG_ABS_3)?.status).toBe("ready");
+    });
+    const after = draws[draws.length - 1];
+    expect(after.fallbackForNode("1:3", "TEXT")).toBeTruthy(); // paints the replacement
+    view.unmount();
+  });
+
+  it("zooming after a downgrade asks the new rung exactly once and keeps the old rung's bytes", async () => {
+    serveSvgFailingPngOk();
+    serveMissing("1:1", {
+      fallbackNodeIds: ["1:3"],
+      textFallbackNodeIds: ["1:3"],
+      imageRefs: [],
+      fonts: [],
+      cachedImageRefs: [],
+    });
+    const view = renderPlayer("v1", true, undefined, 1.35); // rung 3
+    const draw = await firstDraw();
+    await waitFor(() => {
+      const store = peekAssetScope(assetScopeKey("s1", "fk1", "v1"));
+      expect(store?.get(SVG_KEY)?.status).toBe("failed"); // the SVG attempt settled terminal
+    });
+    // Engage the persistent channel; rung 3 is claimed exactly once and stays loading.
+    for (let pass = 0; pass < 20; pass += 1) expect(draw.fallbackForNode("1:3", "TEXT")).toBeNull();
+    await waitFor(() => {
+      const store = peekAssetScope(assetScopeKey("s1", "fk1", "v1"));
+      expect(store?.get(PNG_ABS_3)?.status).toBe("loading");
+    });
+    const pngImg = createdImages.find((i) => (i.src ?? "").includes("image/png"));
+    act(() => {
+      pngImg?.dispatchEvent(new Event("load"));
+    });
+    await waitFor(() => {
+      const store = peekAssetScope(assetScopeKey("s1", "fk1", "v1"));
+      expect(store?.get(PNG_ABS_3)?.status).toBe("ready");
+    });
+
+    // Zoom to 2 × dpr 2 = 4 → rung 4. A FRESH rung on the persistent channel: asked once,
+    // while rung 3 keeps its bytes (the ≤4-rung lattice is the finite cache, never a leak).
+    view.rerender(frameRoot(true), "v1", 2);
+    const draw4 = await nextDraw(draws.length - 1);
+    for (let pass = 0; pass < 10; pass += 1) draw4.fallbackForNode("1:3", "TEXT");
+    await waitFor(() => expect(pngCallsWhere("png", 4)).toHaveLength(1));
+    expect(pngCalls().filter((c) => c.format === "svg")).toHaveLength(1); // still no SVG ping-pong
+    const store = peekAssetScope(assetScopeKey("s1", "fk1", "v1"))!;
+    expect(store.get(PNG_ABS_3)?.status).toBe("ready"); // old rung retained, not overwritten
+    expect(store.get(PNG_ABS_4)?.status).toBe("loading"); // new rung single-flighted
+    view.unmount();
+  });
+
+  it("a ready exact fallback makes the failed font irrelevant; without it the font still settles bounded", async () => {
+    // Bug-1 twin on the prototype side: the draw reports the font EVERY paint once the SVG is
+    // ready (fallback ids no longer missing). That must not re-enter the fetch loop or hold a
+    // loading/error state — the gate singleflights per family and remembers the failure.
+    serveRasterBytes();
+    serveMissing("1:1", {
+      fallbackNodeIds: ["1:3"],
+      textFallbackNodeIds: ["1:3"],
+      imageRefs: [],
+      fonts: [],
+      cachedImageRefs: [],
+    });
+    const view = renderPlayer("v1", true); // dpr 2 × scale 1 → svg class regardless of rung here
+    const draw = await firstDraw();
+    await waitFor(() => {
+      const store = peekAssetScope(assetScopeKey("s1", "fk1", "v1"));
+      expect(store?.get(SVG_KEY)).toBeDefined();
+    });
+    const svgImage = createdImages.find((i) => (i.src ?? "").includes("image/svg+xml"));
+    expect(svgImage).toBeDefined();
+    act(() => {
+      svgImage!.dispatchEvent(new Event("load"));
+    });
+    await waitFor(() => {
+      const store = peekAssetScope(assetScopeKey("s1", "fk1", "v1"));
+      expect(store?.get(SVG_KEY)?.status).toBe("ready");
+    });
+    // Exact replacement painting; the renderer reports the (nonexistent) font on every pass.
+    expect(draw.fallbackForNode("1:3", "TEXT")).toBeTruthy();
+    for (let pass = 0; pass < 3; pass += 1) {
+      act(() => {
+        draw.onMissing({
+          fallbackNodeIds: [],
+          imageRefs: [],
+          fonts: [{ family: "Roboto", style: "Regular" }],
+        });
+      });
+      await settle();
+    }
+    const fontsGet = callFigma.mock.calls.filter((c) => c[1] === "figma.fonts.get.request");
+    expect(fontsGet.length).toBeLessThanOrEqual(1); // bounded by the gate — no repaint feedback loop
     view.unmount();
   });
 });

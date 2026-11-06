@@ -16,6 +16,14 @@ export type LoadBytes = (ids: readonly string[]) => Promise<Record<string, Figma
 export type RasterFormat = "png" | "svg";
 /** Export bounds semantics: Figma's default ink/render crop, or the full layout box. */
 export type RasterBounds = "crop" | "absolute";
+/** One raster request class (ADR-0042): rung + wire format + bounds semantics, never mixed.
+ *  The canvas hook and the prototype's keyed store both route through this single shape so a
+ *  read can never miss the cache its fetch went into. */
+export interface RasterSpec {
+  scale: number;
+  format: RasterFormat;
+  bounds: RasterBounds;
+}
 
 /**
  * Quantized raster rung for a device scale (ADR-0042 resolution rule): the smallest integer
@@ -28,6 +36,17 @@ export type RasterBounds = "crop" | "absolute";
 export function rasterRung(deviceScale: number): number {
   if (!Number.isFinite(deviceScale) || deviceScale <= 0) return 2;
   return Math.min(4, Math.max(1, Math.ceil(deviceScale)));
+}
+
+/**
+ * Is this a NON-EMPTY pinned snapshot version (ADR-0042 contract with the daemon,
+ * packages/server/src/server/figma/handlers/content.ts): svg/useAbsoluteBounds are REFUSED
+ * without one. An empty or whitespace-only pin is therefore exactly the no-pin case — the
+ * whole quality path (SVG TEXT, adaptive rungs, new wire fields) stays off and the legacy
+ * scale-2 crop wire goes out untouched.
+ */
+export function isPinnedVersion(version: string | null): boolean {
+  return version !== null && version.trim() !== "";
 }
 
 /**

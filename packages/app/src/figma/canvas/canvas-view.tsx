@@ -8,7 +8,7 @@ import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import type { Theme } from "@/styles/theme";
 import { createFigmaRenderer } from "@/figma/renderer";
 import { callFigma } from "./api";
-import { rasterRung } from "./assets";
+import { isPinnedVersion, rasterRung } from "./assets";
 import type { FrameStore } from "./frame-store";
 import {
   childSummaries,
@@ -442,7 +442,7 @@ export function CanvasView(props: CanvasViewProps) {
           // bounds SVG (and its absolute PNG), so the renderer must place those at the layout
           // box; everything else stays on Figma's default crop → absoluteRenderBounds. False
           // unless the whole quality path (capability + pinned version) is on.
-          fallbackTextUsesAbsoluteBounds: fidelity && version !== null,
+          fallbackTextUsesAbsoluteBounds: fidelity === true && isPinnedVersion(version),
           fontAvailable: assets.fontAvailable,
           onMissing: assets.onMissing,
           overrides: overridesRef.current,
@@ -480,6 +480,7 @@ export function CanvasView(props: CanvasViewProps) {
   }, [
     assets,
     drawnRoots,
+    fidelity,
     page,
     renderer,
     sectionEditing,
@@ -489,6 +490,7 @@ export function CanvasView(props: CanvasViewProps) {
     size.height,
     size.width,
     store,
+    version,
     visible,
   ]);
 
@@ -935,7 +937,9 @@ export function NativeCanvasLayer(props: {
   // fixed scale-2 wire. Tiles stay PNG everywhere — SVG data URIs in RN <Image> have no real-
   // device proof yet, so no SVG claim on native.
   const tileScale =
-    props.fidelity === true && version !== null ? rasterRung(camera.zoom * PixelRatio.get()) : 2;
+    props.fidelity === true && isPinnedVersion(version)
+      ? rasterRung(camera.zoom * PixelRatio.get())
+      : 2;
   const [rasters, setRasters] = useState<Record<string, string>>({});
   const requested = useRef(new Set<string>());
   // The viewport as of the latest pass: an arriving batch must prune against what is visible

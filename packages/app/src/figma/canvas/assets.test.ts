@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import type { FigmaBytes } from "@jagentdesk/protocol/figma/rpc-schemas";
-import { ByteImageCache, FontCache, MAX_REFS_PER_REQUEST, type MakeImage } from "./assets";
+import {
+  ByteImageCache,
+  FontCache,
+  MAX_REFS_PER_REQUEST,
+  rasterNamespace,
+  rasterRung,
+  type MakeImage,
+} from "./assets";
 
 // The draw calls get()/request()/fontAvailable() every paint, and every settle notifies (which
 // repaints). These regressions pin the feedback loop: a failure is attempted once per scope, and
@@ -8,6 +15,16 @@ import { ByteImageCache, FontCache, MAX_REFS_PER_REQUEST, type MakeImage } from 
 
 function imageBytes(): FigmaBytes {
   return { mimeType: "image/png", dataBase64: "AA==" };
+}
+
+/** Per-id record built with a plain loop: serve stubs stay inside the callback-depth budget. */
+function recordsFor(
+  ids: readonly string[],
+  bytes: FigmaBytes | null,
+): Record<string, FigmaBytes | null> {
+  const images: Record<string, FigmaBytes | null> = {};
+  for (const id of ids) images[id] = bytes;
+  return images;
 }
 
 /** Let queued microtasks and promise chains drain (flushes run on queueMicrotask). */
@@ -593,5 +610,136 @@ describe("FontCache paint reconciliation (spec 32.5.1 bounded lifetime)", () => 
     await settle();
     expect(onReady).not.toHaveBeenCalled(); // FontCache still drops the stale settle
     expect(cache.fontAvailable("Inter", "Bold")).toBe(false); // and nothing was cached
+  });
+});
+
+describe("rasterRung / rasterNamespace (ADR-0042 resolution lattice)", () => {
+  it("ceil-quantizes the device scale to 1..4 and degrades safely", () => {
+    expect(rasterRung(0.5)).toBe(1); // overview zoom: never below 1
+    expect(rasterRung(1)).toBe(1);
+    expect(rasterRung(1.01)).toBe(2); // any oversample need jumps to the next rung
+    expect(rasterRung(2)).toBe(2);
+    expect(rasterRung(2.7)).toBe(3); // the 332%×DPR2 context would ceil to 7 → clamped 4
+    expect(rasterRung(3.9)).toBe(4);
+    expect(rasterRung(6.64)).toBe(4); // clamped at the API max — 32 MP cap keeps honesty
+    expect(rasterRung(32)).toBe(4);
+    expect(rasterRung(Number.NaN)).toBe(2); // unreadable camera falls back to the legacy rung
+    expect(rasterRung(0)).toBe(2);
+    expect(rasterRung(-1)).toBe(2);
+    expect(rasterRung(Number.POSITIVE_INFINITY)).toBe(2); // unreadable camera → safe legacy rung
+    // The lattice is finite by construction: one cache per integer rung at most.
+    const rungs = new Set([0.1, 0.5, 1, 1.2, 2, 2.1, 3, 3.1, 4, 4.5, 9].map(rasterRung));
+    expect([...rungs].sort((a, b) => a - b)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("namespaces separate scale, format, bounds and version — never cross-served", () => {
+    const png2 = rasterNamespace(2, "png", "crop", "v1");
+    expect(png2).toBe("2@png@crop@v1");
+    expect(rasterNamespace(2, "svg", "crop", "v1")).not.toBe(png2); // format isolates SVG
+    expect(rasterNamespace(2, "png", "absolute", "v1")).not.toBe(png2); // bounds isolate crop
+    expect(rasterNamespace(1, "png", "crop", "v1")).not.toBe(png2); // rung isolates zoom
+    expect(rasterNamespace(2, "png", "crop", "v2")).not.toBe(png2); // snapshot isolates version
+    expect(rasterNamespace(2, "png", "crop", null)).toBe("2@png@crop@live");
+  });
+});
+
+describe("ByteImageCache.stateOf (non-observing phase probe)", () => {
+  it("tracks the real lifecycle without starting fetches or pinning keys", async () => {
+    const loadBytes = vi.fn(async (ids: readonly string[]) => recordsFor(ids, imageBytes()));
+    const { makeImage, images } = captureImages();
+    const cache = new ByteImageCache(loadBytes, makeImage, () => undefined);
+
+    expect(cache.stateOf("x")).toBeNull(); // never asked: no record, no fetch
+    expect(loadBytes).not.toHaveBeenCalled();
+
+    expect(cache.get("x")).toBeNull(); // get() is the observing start
+    expect(cache.stateOf("x")).toBe("queued");
+    await settle();
+    expect(cache.stateOf("x")).toBe("loading");
+    images[0]!.emit("load");
+    expect(cache.stateOf("x")).toBe("ready");
+    expect(cache.get("x")).not.toBeNull();
+
+    const load2 = vi.fn(async (ids: readonly string[]) => recordsFor(ids, null));
+    const cache2 = new ByteImageCache(load2, makeImage, () => undefined);
+    cache2.get("y");
+    await settle();
+    expect(cache2.stateOf("y")).toBe("failed"); // bytes-null is a terminal negative cache entry
+    // Repeated probes never resurrect or refetch: the failed "y" stays terminal without a
+    // second wire ask (the negative cache the draw-owner budgets depend on).
+    cache2.stateOf("y");
+    cache2.stateOf("y");
+    expect(load2).toHaveBeenCalledTimes(1);
+    expect(cache2.stateOf("y")).toBe("failed");
+  });
+
+  it("stateOf alone during a paint does not save an unobserved key from reconciliation", async () => {
+    const cache = new ByteImageCache(
+      async (ids) => Object.fromEntries(ids.map((id) => [id, imageBytes()])),
+      okImage,
+      () => undefined,
+    );
+    cache.beginDraw();
+    cache.get("kept");
+    expect(cache.stateOf("probed-only")).toBeNull(); // a miss: stateOf must not enqueue either
+    cache.endDraw();
+    await settle();
+    expect(cache.stateOf("probed-only")).toBeNull();
+    expect(cache.stateOf("kept")).not.toBeNull(); // the observed key survived
+  });
+});
+
+describe("FontCache.unresolved (non-observing per-key ledger)", () => {
+  it("lists loading and failed attempts by key, omits successes, and never observes", async () => {
+    const okLoad = vi.fn(async () => imageBytes());
+    const failLoad = vi.fn(async () => null);
+    const cache = new FontCache(
+      okLoad,
+      async () => true,
+      () => undefined,
+    );
+    await paintOnce(cache, () => cache.fontAvailable("Inter", "Bold"));
+    await settle();
+    expect(cache.fontAvailable("Inter", "Bold")).toBe(true); // observed again so it survives
+    expect(cache.unresolved()).toEqual([]); // a success is not an unresolved attempt
+
+    const failing = new FontCache(
+      failLoad,
+      async () => false,
+      () => undefined,
+    );
+    failing.beginDraw();
+    expect(failing.fontAvailable("SF Pro Text", "Semibold")).toBe(false);
+    failing.endDraw();
+    await settle();
+    expect(failing.unresolved()).toEqual([{ key: "SF Pro Text\u0000Semibold", pending: false }]);
+    // The probe does not pin: an empty paint reconciles even while unresolved() keeps reporting.
+    failing.beginDraw();
+    failing.unresolved();
+    failing.endDraw();
+    await settle();
+    expect(failing.unresolved()).toEqual([]);
+  });
+
+  it("an in-flight attempt reports pending until it settles", async () => {
+    const load = deferred<FigmaBytes | null>();
+    const cache = new FontCache(
+      () => load.promise,
+      async () => true,
+      () => undefined,
+    );
+    cache.beginDraw();
+    cache.fontAvailable("Hiragino Kaku Gothic ProN", "W6");
+    cache.endDraw();
+    expect(cache.unresolved()).toEqual([
+      { key: "Hiragino Kaku Gothic ProN\u0000W6", pending: true },
+    ]);
+    load.resolve(imageBytes());
+    await settle();
+    cache.beginDraw();
+    cache.fontAvailable("Hiragino Kaku Gothic ProN", "W6");
+    cache.endDraw();
+    await settle();
+    expect(cache.unresolved()).toEqual([]); // settled-ok drops out of the ledger entirely
   });
 });
