@@ -2270,13 +2270,25 @@ async function runUiPlaybackGates(
   await page
     .waitForSelector("#jagentdesk-figma-canvas", { timeout: 30_000 })
     .catch(() => undefined);
+  const warmMountMs = Date.now() - warmStart;
+  let warmCompleteMs = null;
+  while (Date.now() - warmStart < 30_000) {
+    const ready = await page.locator("#jagentdesk-figma-canvas").getAttribute("aria-label");
+    const busy = await page.locator("#jagentdesk-figma-canvas").getAttribute("aria-busy");
+    if (ready === "Figma design canvas" && busy !== "true") {
+      warmCompleteMs = Date.now() - warmStart;
+      break;
+    }
+    await delay(100);
+  }
   const warmRest = proxy.log
     .slice(warmMark)
     .filter((entry) => entry.pathname.startsWith(`/v1/files/${fileKey}`));
   evidence.warmUiReopen = {
-    mountMs: Date.now() - warmStart,
+    mountMs: warmMountMs,
+    contentCompleteMs: warmCompleteMs,
     restDuringReopen: warmRest.map((e) => e.pathname),
-    note: "warm reopen recorded separately from the cold ui-file-open gate",
+    note: "warm click after Files-home reload; content readiness measured separately from mount, no cold acceptance inferred",
   };
 }
 
