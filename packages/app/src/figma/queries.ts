@@ -30,6 +30,7 @@ export const figmaKeys = {
   // namespace so a shallow snapshot can NEVER answer a full-tree request.
   nodesShallow: (serverId: string, fileKey: string, id: string, version: string) =>
     ["figma", serverId, "nodes", "depth-1", fileKey, version, id] as const,
+  remoteStatus: (serverId: string) => ["figma", serverId, "remote", "status"] as const,
 };
 
 const STALE_MS = 10_000;
@@ -78,6 +79,23 @@ export function useFigmaLinkStatus(serverId: string, enabled = true) {
     enabled: client !== null && enabled,
     dataShape: "value",
     staleTimeMs: STALE_MS,
+  });
+}
+
+// ADR-0040 / spec 32.7: the Remote MCP editing connector's status. The panel passes a poll
+// interval only while the connector is mid-transition; every other state is read on demand.
+export function useFigmaRemoteStatus(
+  serverId: string,
+  options: { refetchIntervalMs?: number } = {},
+) {
+  const client = useClient(serverId);
+  return useFetchQuery({
+    queryKey: figmaKeys.remoteStatus(serverId),
+    queryFn: async () => (await callFigma(client, "figma.remote.status.request", {})).status,
+    enabled: client !== null,
+    dataShape: "value",
+    staleTimeMs: STALE_MS,
+    refetchInterval: options.refetchIntervalMs,
   });
 }
 
