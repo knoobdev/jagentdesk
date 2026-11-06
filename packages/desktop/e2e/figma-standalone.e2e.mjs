@@ -1497,6 +1497,7 @@ async function main() {
         proxy,
         jagentdeskHome,
         evidence,
+        closeFileUi: openFigmaSection,
         refreshUi: async () => {
           // The file entered the daemon store over WS; reload and re-navigate the real product
           // UI so the files home shows it — a user-visible refresh, not DOM injection into Figma.
@@ -1936,7 +1937,7 @@ async function runUiPlaybackGates(
   minFpsValue,
   electronPid,
   fileKey,
-  { artifactDir, uiRequests, proxy, jagentdeskHome, evidence, refreshUi },
+  { artifactDir, uiRequests, proxy, jagentdeskHome, evidence, refreshUi, closeFileUi },
 ) {
   // Cold precondition: the daemon's outline/nodes handlers must not have fetched anything yet.
   // (file-add's /meta call is not a content-cache write — rest.ts only caches in content.ts —
@@ -2106,6 +2107,7 @@ async function runUiPlaybackGates(
 
   // ── Player through the product menu: top bar → More → Prototype. ────────────────
   await page.getByTestId("figma-top-bar-more").filter({ visible: true }).last().click();
+  const playerOpenStart = Date.now();
   await page.getByTestId("figma-prototype").filter({ visible: true }).last().click();
   const playerMarker = page.getByTestId("figma-show-hotspots").filter({ visible: true }).last();
   const chooseFlow = page.getByTestId("figma-choose-flow").filter({ visible: true }).last();
@@ -2127,8 +2129,9 @@ async function runUiPlaybackGates(
   }
   // Player green requires its OWN stage canvas with loaded frame pixels: any <canvas> can
   // match the file canvas still mounted behind the player, and the toolbar alone is not a
-  // frame. The file canvas is identified by id, so the player stage is the LARGEST canvas
-  // without it — and it must have painted content, proving a frame actually loaded. The
+  // frame. The file canvas is identified by id, so the player stage is the LARGEST visible
+  // canvas without it. All visible stage canvases must announce completed content and painted
+  // pixels: alpha alone can be a blank frame background with every glyph still loading. The
   // toolbar appears WHILE the frame RPC is still loading, so a single immediate pixel sample
   // false-fails; poll the same honest bar (largest id-less canvas, width >= 100, nonempty
   // painted pixels) until it passes or the canvas budget expires. No complete-frame proof is
@@ -2137,7 +2140,11 @@ async function runUiPlaybackGates(
     withDeadline(
       page.evaluate(() => {
         const candidates = [...document.querySelectorAll("canvas:not(#jagentdesk-figma-canvas)")];
-        const canvas = candidates.sort((a, b) => b.width * b.height - a.width * a.height)[0];
+        const visible = candidates.filter((c) => {
+          const r = c.getBoundingClientRect();
+          return r.width > 0 && r.height > 0 && getComputedStyle(c).visibility !== "hidden";
+        });
+        const canvas = visible.sort((a, b) => b.width * b.height - a.width * a.height)[0];
         if (!canvas) return null;
         const ctx = canvas.getContext("2d");
         if (!ctx) return null;
@@ -2153,31 +2160,54 @@ async function runUiPlaybackGates(
           width: canvas.width,
           height: canvas.height,
           paintedSamplePixels,
+          allContentReady:
+            visible.length > 0 &&
+            visible.every(
+              (c) =>
+                c.getAttribute("aria-label") === "Figma prototype frame" &&
+                c.getAttribute("aria-busy") !== "true",
+            ),
+          statuses: visible.map((c) => ({
+            label: c.getAttribute("aria-label"),
+            busy: c.getAttribute("aria-busy"),
+          })),
         };
       }),
       15_000,
       "player stage canvas sample",
     ).catch(() => null);
-  const stageStart = Date.now();
+  const stageStart = playerOpenStart;
   let playerStage = await readPlayerStage();
   while (
-    (!playerStage || playerStage.width < 100 || playerStage.paintedSamplePixels === 0) &&
+    (!playerStage ||
+      playerStage.width < 100 ||
+      playerStage.paintedSamplePixels === 0 ||
+      !playerStage.allContentReady) &&
     Date.now() - stageStart < canvasDeadline
   ) {
     await delay(500);
     playerStage = await readPlayerStage();
   }
   const stagePaintWaitMs = Date.now() - stageStart;
-  if (!playerStage || playerStage.width < 100 || playerStage.paintedSamplePixels === 0) {
+  if (
+    !playerStage ||
+    playerStage.width < 100 ||
+    playerStage.paintedSamplePixels === 0 ||
+    !playerStage.allContentReady ||
+    stagePaintWaitMs > canvasDeadline
+  ) {
     failGate(
       "ui-player-open",
-      `player toolbar visible but no player-specific stage canvas with loaded pixels after ${stagePaintWaitMs}ms of polling (got ${JSON.stringify(playerStage)}); "canvas" alone would match the file canvas behind the player`,
+      `player content not complete within budget after ${stagePaintWaitMs}ms of polling (got ${JSON.stringify(playerStage)}); "canvas" alone would match the file canvas behind the player`,
     );
     // Keep the failed timing gate. A separate bounded observation lets us inspect eventual
     // rendering on a real slow API response instead of losing the window before pixels arrive.
     const observationDeadline = Date.now() + 30_000;
     while (
-      (!playerStage || playerStage.width < 100 || playerStage.paintedSamplePixels === 0) &&
+      (!playerStage ||
+        playerStage.width < 100 ||
+        playerStage.paintedSamplePixels === 0 ||
+        !playerStage.allContentReady) &&
       Date.now() < observationDeadline
     ) {
       await delay(500);
@@ -2204,30 +2234,38 @@ async function runUiPlaybackGates(
       };
       await page.screenshot({ path: path.join(artifactDir, "player-assets-observation.png") });
     }
-    return;
+  } else {
+    passGate("ui-player-open", {
+      via: "figma-top-bar-more → figma-prototype → real clicks",
+      playerToolbarVisible: true,
+      playerStage,
+      stagePaintWaitMs,
+      note: "all visible player canvases report complete current content, have painted pixels, and are not busy",
+    });
   }
-  uiRequests.playerOpened = true;
-  passGate("ui-player-open", {
-    via: "figma-top-bar-more → figma-prototype → real clicks",
-    playerToolbarVisible: true,
-    playerStage,
-    stagePaintWaitMs,
-    note: "stage canvas is canvas:not(#jagentdesk-figma-canvas) with nonempty painted pixels, polled until painted (toolbar visibility alone does not gate)",
-  });
+  uiRequests.playerOpened = Boolean(playerStage?.allContentReady);
   await page.screenshot({ path: path.join(artifactDir, "player.png") });
 
-  // Close the player, capture after-close app-tree RAM.
-  await page.keyboard.press("Escape");
-  await playerMarker.waitFor({ state: "hidden", timeout: 15_000 }).catch(() => undefined);
-  await delay(1_000);
+  // Observe cleanup even when the timing budget failed. Close through real controls, then
+  // navigate to Files home without a reload (reload would hide a resource-lifetime defect).
+  await page.getByTestId("figma-prototype-close").filter({ visible: true }).last().click();
+  await playerMarker.waitFor({ state: "hidden", timeout: 15_000 });
+  await closeFileUi();
+  await page.locator("#jagentdesk-figma-canvas").waitFor({ state: "hidden", timeout: 15_000 });
+  await delay(2_000);
   ram.afterCloseKb = treeRssKb(electronPid ?? 0).totalKb || ram.afterCloseKb;
+  evidence.fileClose = {
+    via: "prototype Close → Figma rail → Files home",
+    reload: false,
+    canvasHidden: true,
+  };
 
   // ── WARM UI, recorded separately (NOT a gate): reopen through the product UI after close.
   // The reload resets renderer query state, so the reopen exercises the DAEMON-side versioned
   // cache — expected zero new REST in the reopen window.
+  await refreshUi();
   const warmMark = proxy.log.length;
   const warmStart = Date.now();
-  await refreshUi();
   await page.getByTestId(`figma-file-${fileKey}`).filter({ visible: true }).last().click();
   await page
     .waitForSelector("#jagentdesk-figma-canvas", { timeout: 30_000 })
