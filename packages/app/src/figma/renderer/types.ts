@@ -9,6 +9,19 @@ import type { MissingReport } from "./missing";
 /** The subset of CanvasRenderingContext2D the renderer uses (implemented by Skia on mobile). */
 export type FigmaCanvasContext = CanvasRenderingContext2D;
 
+/**
+ * Why a node needs a fallback raster, decided from node data BEFORE the getter is invoked
+ * (queueing the wrong-rung asset request is a side effect outside this package, and the
+ * missing-only report arrives too late to prevent it). `backgroundBlur: true` marks a
+ * backdrop-specific request — the node carries a VISIBLE BACKGROUND_BLUR — so the asset
+ * consumer (W10) serves the blurred-behind export capped at rung 2, never a full-detail
+ * rung-4 export (ADR-0042). Ordinary fallbacks keep the two-argument call; legacy callbacks
+ * ignore the extra optional parameter.
+ */
+export interface FigmaFallbackHint {
+  readonly backgroundBlur?: boolean;
+}
+
 export interface FigmaRenderOptions {
   /**
    * Device pixels per Figma unit (zoom × devicePixelRatio), used only for what the context
@@ -26,7 +39,11 @@ export interface FigmaRenderOptions {
    * the node's Figma type so the caller can route TEXT ids to the Figma-exported SVG outline
    * bytes and everything else to PNG (ADR-0042); pre-ADR callers ignore the parameter.
    */
-  fallbackForNode: (nodeId: string, nodeType?: string) => CanvasImageSource | null;
+  fallbackForNode: (
+    nodeId: string,
+    nodeType?: string,
+    hint?: FigmaFallbackHint,
+  ) => CanvasImageSource | null;
   /**
    * True only on W10's new-quality path: TEXT fallback bytes were exported with
    * `use_absolute_bounds=true` and map 1:1 onto `absoluteBoundingBox`. Default false keeps the
