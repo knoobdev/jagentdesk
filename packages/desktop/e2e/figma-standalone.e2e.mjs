@@ -654,6 +654,14 @@ async function readManagedDaemonStatusDiagnostic(page) {
 async function completeDirectConnectionOnboarding(page, daemonPort, wireServerId) {
   const steps = [];
   const rowTest = `sidebar-workspace-row-${wireServerId}:${WORKSPACE_ID}`;
+  // Preload can be ready while Metro/React is still rendering the initial route. Wait for
+  // an actual supported UI state before deciding whether onboarding needs the Local step.
+  await page
+    .getByTestId(rowTest)
+    .or(page.getByTestId("tailscale-login-screen"))
+    .or(page.getByTestId("welcome-direct-connection"))
+    .first()
+    .waitFor({ state: "visible", timeout: bootTimeoutMs });
   if (
     await page
       .getByTestId(rowTest)

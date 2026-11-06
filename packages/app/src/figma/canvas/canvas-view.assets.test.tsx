@@ -223,7 +223,7 @@ interface FigmaHandlers {
  * generic exactly as the sibling harness does).
  */
 function routeFigma(handlers: FigmaHandlers, deferred?: Deferred[]): void {
-  const defer = <T,>(value: T): T => {
+  const defer = <T,>(value: T): T | Promise<T> => {
     if (!deferred) return value;
     return new Promise<T>((resolve, reject) => {
       deferred.push({
@@ -232,7 +232,11 @@ function routeFigma(handlers: FigmaHandlers, deferred?: Deferred[]): void {
       });
     });
   };
-  callFigmaMock.mockImplementation(((client, type, params: unknown) => {
+  callFigmaMock.mockImplementation(((
+    client: Parameters<typeof callFigma>[0],
+    type: Parameters<typeof callFigma>[1],
+    params: unknown,
+  ) => {
     if (!client) throw new Error("test client missing");
     if (type === "figma.file.imageFills.request") {
       const p = params as unknown as ImageFillsParams;
