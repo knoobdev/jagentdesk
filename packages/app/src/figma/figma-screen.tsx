@@ -1,4 +1,4 @@
-import { default as React, useCallback, useMemo } from "react";
+import { default as React, useCallback, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { withUnistyles } from "react-native-unistyles";
@@ -12,9 +12,9 @@ import { FigmaConnectScreen } from "@/figma/connect/connect-screen";
 import { FigmaLinkPanel } from "@/figma/link/link-panel";
 import { useFigmaNav } from "@/figma/nav";
 import { fileSubtitle } from "@/figma/file-subtitle";
-import { canBrowseFigmaFiles } from "@/figma/browse-files";
+import { filterSavedFigmaFiles } from "@/figma/file-browser-model";
 import { useFigmaConnections, useFigmaFiles } from "@/figma/queries";
-import { EmptyState, ErrorBanner } from "@/figma/ui/primitives";
+import { EmptyState, ErrorBanner, Input } from "@/figma/ui/primitives";
 import { figmaStyles } from "@/figma/ui/styles";
 import type { Theme } from "@/styles/theme";
 import { errorMessage } from "@/figma/api";
@@ -61,38 +61,58 @@ function FileCard({ file, onOpen }: { file: FigmaFile; onOpen: (fileKey: string)
 function FilesHome({ serverId, connectionId }: { serverId: string; connectionId: string | null }) {
   const { go } = useFigmaNav();
   const files = useFigmaFiles(serverId, connectionId);
-  const list = useMemo(() => files.data ?? [], [files.data]);
+  const { refetch } = files;
+  const [search, setSearch] = useState("");
+  const list = useMemo(() => filterSavedFigmaFiles(files.data ?? [], search), [files.data, search]);
+  const refresh = useCallback(() => {
+    void refetch();
+  }, [refetch]);
   const openFile = useCallback(
     (fileKey: string) => go({ fileKey, pageId: null, nodeId: null, version: null }),
     [go],
   );
-  if (files.isLoading) return <Text style={figmaStyles.rowSubtle}>Loading files…</Text>;
-  if (files.error) return <ErrorBanner message={errorMessage(files.error)} />;
   const pinned = list.filter((file) => file.pinned);
   const recent = [...list]
     .filter((file) => !file.pinned)
-    .sort((a, b) => (b.lastOpenedAt_ms ?? 0) - (a.lastOpenedAt_ms ?? 0))
-    .slice(0, 12);
-  if (list.length === 0) {
-    const browse = canBrowseFigmaFiles();
-    return (
-      <EmptyState
-        title="No files yet"
-        body={
-          browse
-            ? "Add a file with Browse files in the left column — pick it in the JAgentDesk file picker and it is added and opened here."
-            : "Files are added with Browse files in the JAgentDesk desktop app; this device lists the files already added."
-        }
-        testID="figma-files-empty"
-      />
-    );
-  }
+    .sort((a, b) => (b.lastOpenedAt_ms ?? 0) - (a.lastOpenedAt_ms ?? 0));
   return (
     <ScrollView
       style={figmaStyles.screen}
       contentContainerStyle={figmaStyles.scrollContent}
       testID="figma-files-home"
     >
+      <View style={figmaStyles.rowBetween}>
+        <Text style={figmaStyles.sectionHeading}>Files added to JAgentDesk</Text>
+        <Button
+          size="sm"
+          variant="ghost"
+          onPress={refresh}
+          disabled={files.isFetching}
+          testID="figma-files-refresh"
+        >
+          Refresh
+        </Button>
+      </View>
+      <Input
+        value={search}
+        onChangeText={setSearch}
+        accessibilityLabel="Search files"
+        placeholder="Search files by name"
+        testID="figma-files-search"
+      />
+      {files.isLoading ? <Text style={figmaStyles.rowSubtle}>Loading files…</Text> : null}
+      {files.error ? <ErrorBanner message={errorMessage(files.error)} /> : null}
+      {!files.isLoading && !files.error && list.length === 0 ? (
+        <EmptyState
+          title={search.trim() ? "No matching files" : "No files added yet"}
+          body={
+            search.trim()
+              ? "No added file matches this search."
+              : "This account has no files added to JAgentDesk. This list does not include every file in your Figma account."
+          }
+          testID="figma-files-empty"
+        />
+      ) : null}
       {pinned.length > 0 ? (
         <View style={figmaStyles.section}>
           <Text style={figmaStyles.sectionHeading}>Pinned</Text>
@@ -147,7 +167,13 @@ export function FigmaScreen() {
     return `${selectedConnection.account.handle}${email ? ` · ${email}` : ""}`;
   }, [selectedConnection]);
 
-  let body = <FilesHome serverId={serverId} connectionId={selectedConnection?.id ?? null} />;
+  let body = (
+    <FilesHome
+      key={selectedConnection?.id ?? "none"}
+      serverId={serverId}
+      connectionId={selectedConnection?.id ?? null}
+    />
+  );
   if (!supportsFigma) {
     body = (
       <EmptyState

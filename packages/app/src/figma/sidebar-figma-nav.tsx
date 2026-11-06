@@ -42,19 +42,14 @@ import { useFigmaGlobalNav, type FigmaNav } from "@/figma/nav";
 import { childSummaries, type SectionAwareSummary } from "@/figma/canvas/section-outline";
 import { useHostFeature } from "@/runtime/host-features";
 import { parseFigmaFileUrl, parseFigmaTeamUrl } from "@/figma/url-parse";
-import {
-  BrowseFilesRow,
-  BrowseGuidanceRow,
-  canBrowseFigmaFiles,
-  describeFigmaApiError,
-} from "@/figma/browse-files";
+import { BrowseFilesRow, describeFigmaApiError } from "@/figma/browse-files";
 
 // The left column while the Figma section is open (spec 32.5), owned the way the Jira column owns
 // its navigation: connections with their auth state; under the selected connection its files —
 // Pinned, Recent, and the files Figma Link reports open right now — plus added teams and their
 // projects; when a file is open, its pages and the layer tree of the selected frame, searchable
-// by name. Rows drive the Figma screen's route params. The primary add is Browse files
-// (ADR-0038, desktop only); the URL-paste rows and the optional Figma Link entry sit under an
+// by name. Rows drive the Figma screen's route params. Browse files opens the native saved-file index
+// (ADR-0038, desktop and mobile); the URL-paste rows and the optional Figma Link entry sit under an
 // explicit Advanced disclosure so the pick → view → play flow owns the surface and a bad paste
 // parses client-side first and never leaves the column.
 
@@ -1110,14 +1105,7 @@ function ConnectedTree({
   return (
     <>
       <Text style={styles.sectionLabel}>Files</Text>
-      {/* Browse files is the primary add (ADR-0038). It needs the native
-          pick, so non-desktop sessions get guidance instead of a fake
-          picker, and the URL-paste rows stay reachable under Advanced. */}
-      {canBrowseFigmaFiles() ? (
-        <BrowseFilesRow serverId={serverId} connectionId={connectionId} />
-      ) : (
-        <BrowseGuidanceRow />
-      )}
+      <BrowseFilesRow serverId={serverId} connectionId={connectionId} />
       {files.isLoading ? <Text style={styles.empty}>Loading files…</Text> : null}
       {files.error ? (
         <Text style={styles.emptyError} testID="figma-nav-files-error">
@@ -1154,7 +1142,7 @@ function ConnectedTree({
       ) : null}
       {!files.isLoading && !files.error && !pinned.length && !recent.length ? (
         <Text style={styles.empty} testID="figma-nav-files-empty">
-          No files yet. Use Browse files, or paste a URL under Advanced.
+          No files added to JAgentDesk for this account.
         </Text>
       ) : null}
 
