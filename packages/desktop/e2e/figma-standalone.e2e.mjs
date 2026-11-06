@@ -2141,6 +2141,21 @@ async function runUiPlaybackGates(
       note: "diagnostic only; ui-player-open FAIL above is unchanged",
     };
     await page.screenshot({ path: path.join(artifactDir, "player-after-deadline.png") });
+    const extendedObservationMs = Math.min(
+      60_000,
+      Math.max(0, Number(process.env.JAGENTDESK_FIGMA_E2E_AFTER_FAILURE_OBSERVE_MS) || 0),
+    );
+    if (extendedObservationMs > 0) {
+      console.log(
+        `  DIAGNOSTIC player assets observation: ${extendedObservationMs}ms; failed gate unchanged`,
+      );
+      await delay(extendedObservationMs);
+      evidence.playerExtendedObservation = {
+        ms: extendedObservationMs,
+        stage: await readPlayerStage(),
+      };
+      await page.screenshot({ path: path.join(artifactDir, "player-assets-observation.png") });
+    }
     return;
   }
   uiRequests.playerOpened = true;

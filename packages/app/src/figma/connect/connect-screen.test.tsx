@@ -183,6 +183,15 @@ vi.mock("@/figma/api", () => ({
   useFigmaCall: () => vi.fn(async () => ({})),
   errorMessage: (cause: unknown) => String(cause),
 }));
+// The Remote MCP editing panel runs its own capability gate and status query (contract pinned in
+// remote-connection-panel.test.tsx); stubbed here so the guide's harness stays query-free.
+vi.mock("./remote-connection-panel", () => ({
+  RemoteConnectionPanel: ({ serverId }: { serverId: string }) =>
+    React.createElement("div", {
+      "data-testid": "figma-remote-panel-stub",
+      "data-server-id": serverId,
+    }),
+}));
 vi.mock("@/utils/open-external-url", () => ({ openExternalUrl: vi.fn(async () => undefined) }));
 vi.mock("@/constants/platform", () => ({
   isWeb: true,
@@ -272,6 +281,17 @@ describe("FigmaConnectScreen", () => {
     expect(screen).not.toBeNull();
     // The credential block is one stacked column on the standard block gap (theme.spacing[4]).
     expect(screen?.getAttribute("data-gap")).toBe(String(theme.spacing[4]));
+  });
+
+  // ADR-0040: the Remote MCP editing connection lives in the Connections view next to the REST
+  // account rows; the guide itself (sign-in paths) must keep working alongside it untouched.
+  it("mounts the Remote editing panel for this host in the Connections view", () => {
+    const view = render();
+    const panel = view.querySelector('[data-testid="figma-remote-panel-stub"]');
+    expect(panel?.getAttribute("data-server-id")).toBe("s1");
+    // The REST OAuth guide keeps its controls (the connection features are preserved).
+    expect(view.querySelector('[data-testid="figma-connect-guide"]')).not.toBeNull();
+    expect(view.querySelector('[data-testid="figma-signin-paste"]')).not.toBeNull();
   });
 
   it("routes Sign in with browser to the store action", () => {
