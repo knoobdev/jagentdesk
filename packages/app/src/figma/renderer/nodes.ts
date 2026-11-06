@@ -117,7 +117,16 @@ function drawFallback(
   transform: RenderMatrix | null,
   inherited: number,
 ): void {
-  const raster = state.options.fallbackForNode(node.id, node.type);
+  // ADR-0042 backdrop rungs: the hint is decided from node data BEFORE the getter runs — an
+  // asset request is queued at call time, so a missing/late hint would ask for the wrong rung.
+  // Only a VISIBLE BACKGROUND_BLUR marks the request; ordinary fallbacks keep the two-argument
+  // call so pre-hint mocks (exact-arity assertions) stay untouched.
+  const backdrop = visibleEffects(effectsOf(node)).some(
+    (effect) => effect.type === "BACKGROUND_BLUR",
+  );
+  const raster = backdrop
+    ? state.options.fallbackForNode(node.id, node.type, { backgroundBlur: true })
+    : state.options.fallbackForNode(node.id, node.type);
   if (!raster) {
     state.missing.addFallback(node.id);
     if (node.type === "TEXT") state.missing.addTextFallback(node.id);
