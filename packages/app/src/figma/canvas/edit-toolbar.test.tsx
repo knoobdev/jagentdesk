@@ -5,6 +5,7 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FigmaNode, FigmaPage } from "@jagentdesk/protocol/figma/rpc-schemas";
+import type { ApplyFigmaEdits } from "../contracts";
 import { makeNode } from "./__fixtures__/figma";
 
 const { theme } = vi.hoisted(() => ({
@@ -147,10 +148,10 @@ const PAGE: FigmaPage = {
   flowStartingPoints: [],
 } as unknown as FigmaPage;
 
-function deferred() {
-  let resolve!: (value: unknown) => void;
+function deferred<T = unknown>() {
+  let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
-  const promise = new Promise<unknown>((res, rej) => {
+  const promise = new Promise<T>((res, rej) => {
     resolve = res;
     reject = rej;
   });
@@ -184,10 +185,11 @@ describe("EditToolbar honest status", () => {
     containers.push(container);
     const root = createRoot(container);
     roots.push(root);
-    const node: FigmaNode = overrides.node === undefined ? makeNode({ id: "1:1" }) : overrides.node;
+    const node: FigmaNode | null =
+      overrides.node === undefined ? makeNode({ id: "1:1" }) : overrides.node;
     const props: EditToolbarProps = {
       page: PAGE,
-      selection: { pageId: "p1", nodeId: node.id },
+      selection: node ? { pageId: "p1", nodeId: node.id } : null,
       camera: { zoom: 1, offsetX: 0, offsetY: 0 },
       size: { width: 800, height: 600 },
       applyEdits: vi.fn(async () => undefined),
@@ -230,8 +232,8 @@ describe("EditToolbar honest status", () => {
   });
 
   it("shows Submitting… and disables controls while a submission is in flight", async () => {
-    const flight = deferred();
-    const applyEdits = vi.fn(() => flight.promise);
+    const flight = deferred<void>();
+    const applyEdits = vi.fn<ApplyFigmaEdits>(() => flight.promise);
     const { container } = render({ applyEdits });
     await act(async () => button(container, "Duplicate")?.click());
     expect(container.querySelector('[data-testid="figma-edit-busy"]')?.textContent).toContain(
@@ -289,7 +291,7 @@ describe("EditToolbar honest status", () => {
   });
 
   it("never blocks edits or the pending caption while the file is unlinked", async () => {
-    const applyEdits = vi.fn(async () => undefined);
+    const applyEdits = vi.fn<ApplyFigmaEdits>(async () => undefined);
     const { container } = render({ linked: false, pendingCount: 1, applyEdits });
     // Missing Link must not gate creating content: the create buttons stay enabled.
     expect(button(container, "Frame")?.disabled).toBe(false);
@@ -315,8 +317,8 @@ describe("EditToolbar honest status", () => {
   });
 
   it("ignores a late completion after the component unmounted", async () => {
-    const flight = deferred();
-    const applyEdits = vi.fn(() => flight.promise);
+    const flight = deferred<void>();
+    const applyEdits = vi.fn<ApplyFigmaEdits>(() => flight.promise);
     const { container } = render({ applyEdits });
     await act(async () => button(container, "Duplicate")?.click());
     expect(container.querySelector('[data-testid="figma-edit-busy"]')).not.toBeNull();

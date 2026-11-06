@@ -115,7 +115,8 @@ describe("nodeEditState", () => {
       queue({ op: "set_fill", nodeId: "1:1", color: { r: 1, g: 0.5, b: 0, a: 1 } }),
     );
     expect(state.pendingFields).toEqual(new Set(["fillColor"]));
-    expect(state.node.fills?.[0]).toMatchObject({
+    const fills = state.node.fills as { type: string; color: Record<string, number> }[] | undefined;
+    expect(fills?.[0]).toMatchObject({
       type: "SOLID",
       color: { r: 1, g: 0.5, b: 0, a: 1 },
     });

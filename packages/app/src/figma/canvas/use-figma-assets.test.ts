@@ -20,7 +20,12 @@ vi.mock("./api", () => ({
     callFigmaMock(client, method, params),
 }));
 
-import { useFigmaAssets, webRegisterFont, type FigmaAssets } from "./use-figma-assets";
+import {
+  useFigmaAssets,
+  webRegisterFont,
+  type FigmaAssets,
+  type ImageDecoder,
+} from "./use-figma-assets";
 
 function imageBytes(): FigmaBytes {
   return { mimeType: "image/png", dataBase64: "AA==" };
@@ -39,6 +44,30 @@ function deferred<T>() {
 /** Let queued microtasks drain (cache flushes run on queueMicrotask). */
 function settle(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/**
+ * A decodeImage fake recording every element it hands out: bytes arriving is NOT decoded-ready,
+ * so tests must emit("load") before asserting an image is served to the renderer.
+ */
+class FakeImage {
+  readonly listeners: Record<"load" | "error", (() => void)[]> = { load: [], error: [] };
+  addEventListener(type: "load" | "error", listener: () => void): void {
+    this.listeners[type].push(listener);
+  }
+  emit(type: "load" | "error"): void {
+    for (const listener of this.listeners[type]) listener();
+  }
+}
+
+function captureDecode(): { images: FakeImage[]; decodeImage: ImageDecoder } {
+  const images: FakeImage[] = [];
+  const decodeImage: ImageDecoder = () => {
+    const image = new FakeImage();
+    images.push(image);
+    return image as unknown as ReturnType<ImageDecoder>;
+  };
+  return { images, decodeImage };
 }
 
 interface RecordedFace {
@@ -138,7 +167,12 @@ describe("webRegisterFont exact-family registration", () => {
 describe("useFigmaAssets owner dispose", () => {
   let root: Root;
 
-  function mount(props: { serverId: string; fileKey: string; version: string | null }) {
+  function mount(props: {
+    serverId: string;
+    fileKey: string;
+    version: string | null;
+    decodeImage?: ImageDecoder;
+  }) {
     const result: { current: FigmaAssets } = {
       current: null as unknown as FigmaAssets,
     };
@@ -251,6 +285,146 @@ describe("useFigmaAssets owner dispose", () => {
     // …but exactly one was added, and it is the second (current-scope) instance — never the stale one.
     expect(fontsAdd).toHaveBeenCalledWith(expect.objectContaining({ seq: 1 }));
     expect(fontsAdd).not.toHaveBeenCalledWith(expect.objectContaining({ seq: 0 }));
+  });
+
+  it("an empty offscreen paint reconciles the image and font caches; the next paint refetches", async () => {
+    stubFontFaceApi(async () => ({}));
+    const { images, decodeImage } = captureDecode();
+    callFigmaMock.mockImplementation((_client, method) =>
+      method === "figma.fonts.get.request"
+        ? Promise.resolve({ font: imageBytes() })
+        : Promise.resolve({ images: { r1: imageBytes(), "1:1": imageBytes() } }),
+    );
+    const assets = mount({ serverId: "s1", fileKey: "file", version: null, decodeImage });
+    const onPaint = vi.fn();
+    assets.subscribe(onPaint);
+
+    // A visible tile: image fill, fallback raster and a text font, all observed by one draw.
+    await act(async () => {
+      assets.beginDraw();
+      assets.imageForRef("r1");
+      assets.requestThumbnail("1:1", 2);
+      assets.fontAvailable("Inter", "Bold");
+      assets.endDraw();
+      await settle();
+    });
+    expect(assets.imageForRef("r1")).toBeNull(); // bytes received is not decoded-ready
+    const notifiesAfterFont = onPaint.mock.calls.length; // font settle notified (live scope)
+    images[0]!.emit("load"); // the two ByteImageCache images decode, in creation order: fill, raster
+    images[1]!.emit("load");
+    expect(assets.imageForRef("r1")).not.toBeNull();
+    expect(onPaint.mock.calls.length).toBeGreaterThan(notifiesAfterFont); // readiness repaint comes from load
+    expect(assets.fontAvailable("Inter", "Bold")).toBe(true);
+
+    // Panned offscreen: an empty paint reconciles EVERY cache (root correction: no exempt
+    // rules) — pending/failed/decoded keys the draw never touched are all retired.
+    await act(async () => {
+      assets.beginDraw();
+      assets.endDraw();
+      await settle();
+    });
+    expect(assets.imageForRef("r2")).toBeNull(); // unseen ref…
+    // Scrolling back re-asks: each cache refetches because the previous view's keys died.
+    await act(async () => {
+      assets.beginDraw();
+      assets.imageForRef("r1");
+      assets.requestThumbnail("2:2", 2);
+      assets.fontAvailable("Roboto", "Regular");
+      assets.endDraw();
+      await settle();
+    });
+    const names = callFigmaMock.mock.calls.map((call) => call[1]);
+    expect(names.filter((n) => n === "figma.fonts.get.request")).toHaveLength(2); // retired + refetched
+    expect(
+      callFigmaMock.mock.calls.filter((c) => c[1] === "figma.file.render.request").length,
+    ).toBe(2);
+    expect(
+      callFigmaMock.mock.calls.filter((c) => c[1] === "figma.file.imageFills.request").length,
+    ).toBe(2);
+  });
+
+  it("an unused FontFace is removed from document.fonts when its key reconciles away", async () => {
+    stubFontFaceApi(async () => ({}));
+    callFigmaMock.mockImplementation((_client, method) =>
+      method === "figma.fonts.get.request"
+        ? Promise.resolve({ font: imageBytes() })
+        : Promise.resolve({ images: {} }),
+    );
+    const assets = mount({ serverId: "s1", fileKey: "file", version: null });
+    await act(async () => {
+      assets.beginDraw();
+      assets.onMissing({
+        fallbackNodeIds: [],
+        imageRefs: [],
+        fonts: [{ family: "Inter", style: "Bold" }],
+      });
+      assets.endDraw();
+      await settle();
+    });
+    expect(fontsAdd).toHaveBeenCalledTimes(1);
+    expect(assets.fontAvailable("Inter", "Bold")).toBe(true);
+
+    // A paint without that text retires the face — real document.fonts cleanup, per W7 design.
+    await act(async () => {
+      assets.beginDraw();
+      assets.endDraw();
+      await settle();
+    });
+    expect(fontsDelete).toHaveBeenCalledWith(expect.objectContaining({ seq: 0 }));
+    // And scrolling back to text loads a fresh face rather than trusting the stale state.
+    await act(async () => {
+      assets.beginDraw();
+      expect(assets.fontAvailable("Inter", "Bold")).toBe(false);
+      assets.endDraw();
+      await settle();
+    });
+    const fontFetches = callFigmaMock.mock.calls.filter(
+      (c) => c[1] === "figma.fonts.get.request",
+    ).length;
+    expect(fontFetches).toBe(2);
+    expect(fontsAdd).toHaveBeenCalledTimes(2);
+  });
+
+  it("a per-scale cache created mid-draw joins the open observation and is retired when unused", async () => {
+    const { images, decodeImage } = captureDecode();
+    callFigmaMock.mockImplementation((_client, method) =>
+      method === "figma.fonts.get.request"
+        ? Promise.resolve({ font: null })
+        : Promise.resolve({ images: { "1:1": imageBytes() } }),
+    );
+    const assets = mount({ serverId: "s1", fileKey: "file", version: null, decodeImage });
+    const onPaint = vi.fn();
+    assets.subscribe(onPaint);
+
+    // scale 4 does not exist yet when the draw opens; get() creates it mid-draw.
+    await act(async () => {
+      assets.beginDraw();
+      assets.requestThumbnail("1:1", 4);
+      assets.endDraw();
+      await settle();
+    });
+    expect(assets.requestThumbnail("1:1", 4)).toBeNull(); // bytes received ≠ decoded-ready
+    images[0]!.emit("load");
+    expect(assets.requestThumbnail("1:1", 4)).not.toBeNull(); // survived the draw that used it
+    expect(onPaint).toHaveBeenCalled(); // live attempt settles into the current generation
+    onPaint.mockClear();
+
+    // Unused next paint: the mid-draw cache reconciles like every other cache — all clears.
+    await act(async () => {
+      assets.beginDraw();
+      assets.endDraw();
+      await settle();
+    });
+    expect(assets.requestThumbnail("1:1", 4)).toBeNull(); // retired, must refetch
+    await act(async () => {
+      assets.beginDraw();
+      assets.requestThumbnail("1:1", 4);
+      assets.endDraw();
+      await settle();
+    });
+    expect(
+      callFigmaMock.mock.calls.filter((c) => c[1] === "figma.file.render.request").length,
+    ).toBe(2);
   });
 
   it("a scope change clears the previous file's caches — no stale repopulate or notify", async () => {
