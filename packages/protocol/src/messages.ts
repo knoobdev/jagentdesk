@@ -4710,6 +4710,10 @@ export const ServerInfoStatusPayloadSchema = z
         // childrenLoaded and figma.file.nodes.request depth=1. The new viewer gates once; an old
         // daemon strips depth and returns the full subtree, so it must not receive the option.
         figmaNodeDepth: z.boolean().optional(),
+        // Provider-independent writes over the Codex-backed Remote MCP connector
+        // (spec 32.7 / ADR-0040): the figma.remote.* RPCs. The client gates the write surface
+        // once; old hosts ask the user to update instead of receiving RPCs they cannot answer.
+        figmaRemoteWrites: z.boolean().optional(),
       })
       .optional(),
   })

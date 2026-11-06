@@ -8,9 +8,22 @@ import {
   FigmaFilePrototypeRequestSchema,
   FigmaFilePrototypeResponseSchema,
   FigmaFrameSummarySchema,
+  FigmaRemoteAuthBeginRequestSchema,
+  FigmaRemoteAuthBeginResponseSchema,
+  FigmaRemoteCallResultSchema,
+  FigmaRemoteDisconnectRequestSchema,
+  FigmaRemoteDisconnectResponseSchema,
+  FigmaRemoteExecuteRequestSchema,
+  FigmaRemoteExecuteResponseSchema,
+  FigmaRemoteReadRequestSchema,
+  FigmaRemoteReadResponseSchema,
+  FigmaRemoteStatusRequestSchema,
+  FigmaRemoteStatusResponseSchema,
+  FigmaRemoteStatusSchema,
   FigmaRequestSchemas,
   FigmaResponseSchemas,
   type FigmaNode,
+  type FigmaRemoteStatus,
 } from "./rpc-schemas.js";
 
 // ADR-0037: `figma.file.playback.request` carries fileKey, an immutable version and 1–10 frame
@@ -386,5 +399,312 @@ describe("figma.file.nodes.request depth option (ADR-0039)", () => {
       "components",
       "styles",
     ]);
+  });
+});
+
+// ADR-0040: five provider-independent write RPCs over the Codex-backed Figma Remote MCP
+// connector. Requests/params per the ADR table; the call result is raw MCP content with no
+// secrets, since Codex owns the native token. Error responses reuse the existing FigmaError
+// envelope, and optional fields must also accept null so FigmaSession's error branch
+// (emptyData fills optionals with null) still yields one schema-valid response per request.
+describe("figma remote status DTO", () => {
+  const STATES: FigmaRemoteStatus["state"][] = [
+    "disconnected",
+    "connecting",
+    "needs_auth",
+    "connected",
+    "unavailable",
+    "error",
+  ];
+
+  it("accepts exactly the six documented states", () => {
+    for (const state of STATES) {
+      expect(FigmaRemoteStatusSchema.parse({ state })).toEqual({ state });
+    }
+    expect(FigmaRemoteStatusSchema.safeParse({ state: "ready" }).success).toBe(false);
+    expect(FigmaRemoteStatusSchema.safeParse({}).success).toBe(false);
+  });
+
+  it("keeps message/identityText optional and accepts null for the session error branch", () => {
+    const withText = {
+      state: "needs_auth",
+      message: "Figma editing needs sign-in on the host",
+      identityText: "ngocchanh",
+    } as const;
+
+    expect(FigmaRemoteStatusSchema.parse(withText)).toEqual(withText);
+    expect(FigmaRemoteStatusSchema.safeParse({ state: "connected" }).success).toBe(true);
+    expect(
+      FigmaRemoteStatusSchema.safeParse({ state: "error", message: null, identityText: null })
+        .success,
+    ).toBe(true);
+  });
+});
+
+describe("figma remote call result DTO", () => {
+  it("passes raw MCP content through untouched, including nested structures", () => {
+    const result = {
+      content: [
+        { type: "text", text: '{"name":"Landing","id":"1:2"}' },
+        "plain string entry",
+        42,
+        null,
+        { type: "image", data: "cG5n", mimeType: "image/png" },
+      ],
+      structuredContent: { nodes: { "1:2": { id: "1:2", children: [1, 2, 3] } } },
+      isError: false,
+    };
+
+    expect(FigmaRemoteCallResultSchema.parse(result)).toEqual(result);
+  });
+
+  it("accepts minimal and nullable error-branch shapes", () => {
+    expect(FigmaRemoteCallResultSchema.parse({ content: [] })).toEqual({ content: [] });
+    expect(
+      FigmaRemoteCallResultSchema.safeParse({
+        content: [],
+        structuredContent: null,
+        isError: null,
+      }).success,
+    ).toBe(true);
+    expect(FigmaRemoteCallResultSchema.safeParse({ content: {} }).success).toBe(false);
+    expect(FigmaRemoteCallResultSchema.safeParse({}).success).toBe(false);
+  });
+
+  it("carries no secrets: unknown keys are stripped, never required (ADR-0040 vault ownership)", () => {
+    expect(
+      FigmaRemoteCallResultSchema.parse({
+        content: [],
+        token: "figd_secret",
+        authHeader: "Bearer …",
+      }),
+    ).toEqual({ content: [] });
+  });
+});
+
+describe("figma.remote.status|auth.begin|disconnect RPCs", () => {
+  it("parses the three bare requests with only type+requestId", () => {
+    const cases = [
+      [FigmaRemoteStatusRequestSchema, "figma.remote.status.request"],
+      [FigmaRemoteAuthBeginRequestSchema, "figma.remote.auth.begin.request"],
+      [FigmaRemoteDisconnectRequestSchema, "figma.remote.disconnect.request"],
+    ] as const;
+
+    for (const [schema, type] of cases) {
+      expect(schema.parse({ type, requestId: "req-remote" })).toEqual({
+        type,
+        requestId: "req-remote",
+      });
+    }
+  });
+
+  it("status response returns the status object; error envelope reuses FigmaError", () => {
+    const message = {
+      type: "figma.remote.status.response",
+      payload: { requestId: "req-remote", error: null, status: { state: "connected" } },
+    };
+    expect(FigmaRemoteStatusResponseSchema.parse(message)).toEqual(message);
+    expect(
+      FigmaRemoteStatusResponseSchema.safeParse({
+        type: "figma.remote.status.response",
+        payload: {
+          requestId: "req-remote",
+          error: { code: "unsupported", message: "Codex app-server mcpServer/tool/call missing." },
+          status: { state: "unavailable", message: null, identityText: null },
+        },
+      }).success,
+    ).toBe(true);
+  });
+
+  it("auth.begin response carries status plus optional authorizationUrl", () => {
+    const withUrl = {
+      type: "figma.remote.auth.begin.response",
+      payload: {
+        requestId: "req-remote",
+        error: null,
+        status: { state: "connecting" },
+        authorizationUrl: "https://www.figma.com/oauth/mcp",
+      },
+    };
+    const withoutUrl = {
+      type: "figma.remote.auth.begin.response",
+      payload: {
+        requestId: "req-remote",
+        error: null,
+        status: { state: "connected", identityText: "ngocchanh" },
+      },
+    };
+
+    expect(FigmaRemoteAuthBeginResponseSchema.parse(withUrl)).toEqual(withUrl);
+    expect(FigmaRemoteAuthBeginResponseSchema.parse(withoutUrl)).toEqual(withoutUrl);
+  });
+
+  it("disconnect response returns the status object", () => {
+    const message = {
+      type: "figma.remote.disconnect.response",
+      payload: {
+        requestId: "req-remote",
+        error: null,
+        status: {
+          state: "disconnected",
+          message: "Connector stopped; other Codex sessions keep auth.",
+        },
+      },
+    };
+    expect(FigmaRemoteDisconnectResponseSchema.parse(message)).toEqual(message);
+  });
+});
+
+describe("figma.remote.read request and response", () => {
+  const base = () => ({
+    type: "figma.remote.read.request",
+    requestId: "req-read",
+    fileKey: "kH8TzQ2mV1",
+  });
+
+  it("requires a nonempty fileKey — an empty key cannot target a file", () => {
+    const { fileKey: _omitted, ...withoutKey } = base();
+    expect(FigmaRemoteReadRequestSchema.safeParse(base()).success).toBe(true);
+    expect(FigmaRemoteReadRequestSchema.safeParse(withoutKey).success).toBe(false);
+    expect(FigmaRemoteReadRequestSchema.safeParse({ ...base(), fileKey: "" }).success).toBe(false);
+    expect(FigmaRemoteReadRequestSchema.safeParse({ ...base(), fileKey: 42 }).success).toBe(false);
+  });
+
+  it("accepts an optional nodeId targeting one node", () => {
+    expect(FigmaRemoteReadRequestSchema.safeParse({ ...base(), nodeId: "1:2" }).success).toBe(true);
+  });
+
+  it("read response returns the raw MCP result", () => {
+    const message = {
+      type: "figma.remote.read.response",
+      payload: {
+        requestId: "req-read",
+        error: null,
+        result: {
+          content: [{ type: "text", text: '{"document":{"children":[]}}' }],
+          structuredContent: { document: { children: [] } },
+          isError: false,
+        },
+      },
+    };
+    expect(FigmaRemoteReadResponseSchema.parse(message)).toEqual(message);
+  });
+});
+
+describe("figma.remote.execute request and response", () => {
+  const base = () => ({
+    type: "figma.remote.execute.request",
+    requestId: "req-execute",
+    fileKey: "kH8TzQ2mV1",
+    code: 'const f = figma.currentPage.children[0]; f.name = "Landing"; return f.id;',
+    description: "Rename the landing frame",
+  });
+
+  it("requires fileKey, code and description together", () => {
+    expect(FigmaRemoteExecuteRequestSchema.safeParse(base()).success).toBe(true);
+    for (const field of ["fileKey", "code", "description"] as const) {
+      const { [field]: _omitted, ...without } = base();
+      expect(FigmaRemoteExecuteRequestSchema.safeParse(without).success).toBe(false);
+    }
+    expect(FigmaRemoteExecuteRequestSchema.safeParse({ ...base(), fileKey: "" }).success).toBe(
+      false,
+    );
+  });
+
+  it("caps code at 65536 schema characters (backend adds the UTF-8 byte check)", () => {
+    expect(
+      FigmaRemoteExecuteRequestSchema.safeParse({ ...base(), code: "a".repeat(65536) }).success,
+    ).toBe(true);
+    expect(
+      FigmaRemoteExecuteRequestSchema.safeParse({ ...base(), code: "a".repeat(65537) }).success,
+    ).toBe(false);
+  });
+
+  it("requires description 1–1000 characters", () => {
+    expect(FigmaRemoteExecuteRequestSchema.safeParse({ ...base(), description: "" }).success).toBe(
+      false,
+    );
+    expect(
+      FigmaRemoteExecuteRequestSchema.safeParse({ ...base(), description: "д".repeat(1000) })
+        .success,
+    ).toBe(true);
+    expect(
+      FigmaRemoteExecuteRequestSchema.safeParse({ ...base(), description: "d".repeat(1001) })
+        .success,
+    ).toBe(false);
+  });
+
+  it("execute response separates tool reply from readback; readback is optional", () => {
+    const withReadback = {
+      type: "figma.remote.execute.response",
+      payload: {
+        requestId: "req-execute",
+        error: null,
+        result: { content: [{ type: "text", text: "1:2" }], isError: false },
+        readback: {
+          content: [{ type: "text", text: '{"name":"Landing"}' }],
+          structuredContent: { name: "Landing" },
+        },
+        readbackAvailable: true,
+      },
+    };
+    const unverified = {
+      type: "figma.remote.execute.response",
+      payload: {
+        requestId: "req-execute",
+        error: null,
+        result: { content: [{ type: "text", text: "1:2" }] },
+        readbackAvailable: false,
+      },
+    };
+
+    expect(FigmaRemoteExecuteResponseSchema.parse(withReadback)).toEqual(withReadback);
+    expect(FigmaRemoteExecuteResponseSchema.parse(unverified)).toEqual(unverified);
+    // Error-branch shape built by FigmaSession.emptyData.
+    expect(
+      FigmaRemoteExecuteResponseSchema.safeParse({
+        type: "figma.remote.execute.response",
+        payload: {
+          requestId: "req-execute",
+          error: { code: "rate_limited", message: "Figma limited requests." },
+          result: { content: [], structuredContent: null, isError: null },
+          readback: null,
+          readbackAvailable: false,
+        },
+      }).success,
+    ).toBe(true);
+  });
+});
+
+describe("figma remote RPC registration", () => {
+  const REMOTE_REQUEST_TYPES = [
+    "figma.remote.status.request",
+    "figma.remote.auth.begin.request",
+    "figma.remote.disconnect.request",
+    "figma.remote.read.request",
+    "figma.remote.execute.request",
+  ] as const;
+
+  it("registers exactly the five ADR-0040 request types in the allowlist", () => {
+    for (const type of REMOTE_REQUEST_TYPES) {
+      expect(FIGMA_REQUEST_TYPES).toContain(type);
+    }
+    expect(FIGMA_REQUEST_TYPES.filter((type) => type.startsWith("figma.remote."))).toEqual([
+      ...REMOTE_REQUEST_TYPES,
+    ]);
+  });
+
+  it("keeps every remote request paired with its response schema (FigmaSession dispatch)", () => {
+    const responseTypes = new Set(
+      FigmaResponseSchemas.map((schema) => (schema.shape.type as { value: string }).value),
+    );
+
+    for (const type of REMOTE_REQUEST_TYPES) {
+      expect(responseTypes.has(type.replace(/\.request$/, ".response"))).toBe(true);
+    }
+  });
+
+  it("adds no remote pushes: readback rides the existing figma.file.changed contract (W3)", () => {
+    expect(FIGMA_REQUEST_TYPES.join().includes("figma.remote")).toBe(true);
   });
 });
