@@ -2433,8 +2433,18 @@ async function runCommentsReadOnlyUiProof(page, requests, artifactDir, evidence,
       await visible("figma-show-hotspots")
         .isVisible()
         .catch(() => false)
-    )
-      await page.getByText("Close", { exact: true }).filter({ visible: true }).last().click();
+    ) {
+      const close = visible("figma-prototype-close");
+      // A label can sit under the Inspector. Inspect actual hit testing before clicking.
+      const reachable = await close.evaluate((element) => {
+        const r = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        return Boolean(hit && (hit === element || element.contains(hit)));
+      });
+      if (!reachable) throw new Error("Prototype Close is covered by another panel");
+      await close.click({ timeout: 10_000 });
+      await visible("figma-show-hotspots").waitFor({ state: "hidden", timeout: 10_000 });
+    }
     await visible("figma-panel-comments").click({ timeout: 10_000 });
     await visible("figma-comment-input").waitFor({ state: "visible", timeout: 20_000 });
     await visible("figma-comment-search").fill(searchTerm);
@@ -2488,6 +2498,22 @@ async function runCommentsReadOnlyUiProof(page, requests, artifactDir, evidence,
       if (overflowing.length)
         throw new Error(`${name}: controls overflow: ${overflowing.join(", ")}`);
     }
+    // Leave the compact inspector through its real close control, then exercise the player
+    // toolbar in that same narrow viewport. Merely seeing Close was insufficient in run 12.
+    await page
+      .getByRole("button", { name: "Close", exact: true })
+      .filter({ visible: true })
+      .last()
+      .click();
+    await visible("figma-comment-search").waitFor({ state: "hidden", timeout: 10_000 });
+    await visible("figma-top-bar-more").click();
+    await visible("figma-prototype").click();
+    const phoneClose = visible("figma-prototype-close");
+    await phoneClose.waitFor({ state: "visible", timeout: 10_000 });
+    await page.screenshot({ path: path.join(artifactDir, "prototype-phone-toolbar.png") });
+    await phoneClose.click({ timeout: 10_000 });
+    await visible("figma-show-hotspots").waitFor({ state: "hidden", timeout: 10_000 });
+    result.prototypeCloseOnPhone = true;
     const writes = Object.entries(requests.counts).filter(
       ([type, count]) =>
         count > 0 &&
