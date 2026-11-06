@@ -131,6 +131,14 @@ export function useFigmaNodes(
     enabled: client !== null && fileKey !== null && ids.length > 0 && enabled,
     dataShape: "value",
     staleTimeMs: 30 * 60_000,
+    // Spec 32.5.1 memory scope: the ONLY consumer of a full subtree is the
+    // sidebar's FrameRow, and collapsing or moving the selection detaches its
+    // observer immediately. TanStack's 5-minute default gcTime would pin every
+    // expanded frame's tree in the app cache OUTSIDE the FrameStore LRU; 0
+    // releases it the moment it is unobserved — revisits ask the daemon (whose
+    // per-version cache answers them), they do not replay app history. The
+    // shallow section reads and the outline keep the default retention.
+    gcTime: 0,
   });
 }
 
