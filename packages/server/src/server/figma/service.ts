@@ -21,6 +21,7 @@ import { contentHandlers } from "./handlers/content.js";
 import { filesHandlers } from "./handlers/files.js";
 import { linkHandlers } from "./handlers/link.js";
 import { pendingHandlers } from "./handlers/pending.js";
+import { playbackHandlers } from "./handlers/playback.js";
 import type { FigmaHandler, FigmaHandlerMap, FigmaSessionInfo } from "./handlers/types.js";
 
 // The daemon-wide Figma service (spec 32): one instance shared by every session and the agent
@@ -33,6 +34,7 @@ const HANDLERS: FigmaHandlerMap<FigmaRequestType> = {
   ...commentsHandlers,
   ...linkHandlers,
   ...pendingHandlers,
+  ...playbackHandlers,
 };
 
 export interface FigmaServiceParts {

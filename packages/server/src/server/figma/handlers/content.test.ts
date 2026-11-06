@@ -367,6 +367,22 @@ describe("nodes", () => {
     });
   }
 
+  /** The plugin's live tree, named so it cannot be confused with REST data. */
+  function liveNodesResponder(requested: string[]): Record<string, FigmaNode | null> {
+    const found: Record<string, FigmaNode | null> = {};
+    for (const id of requested)
+      found[id] = { id, name: `Live ${id}`, type: "TEXT" } as unknown as FigmaNode;
+    return found;
+  }
+
+  /** Echoes the requested version into every document, proving the pin went to REST as-is. */
+  function pinnedNodesResponder({ query }: { query: Record<string, string> }): unknown {
+    const entries = (query.ids ?? "")
+      .split(",")
+      .map((id) => [id, { document: { id, name: `Pinned ${query.version}`, type: "TEXT" } }]);
+    return { nodes: Object.fromEntries(entries) };
+  }
+
   it("batches ids into multi-id Tier-1 requests and returns components/styles", async () => {
     respondNodes();
     const out = await fixture.handlers["figma.file.nodes.request"](
@@ -484,7 +500,6 @@ describe("nodes", () => {
         type: "figma.file.nodes.request",
         fileKey: FILE,
         ids: ["1:1", "1:2"],
-        version: "v1",
       },
       fixture.api.ctx,
       SESSION,
@@ -502,13 +517,41 @@ describe("nodes", () => {
         type: "figma.file.nodes.request",
         fileKey: FILE,
         ids: ["1:1", "1:2"],
-        version: "v1",
       },
       fixture.api.ctx,
       SESSION,
     );
     expect(viaRest.nodes["1:1"]).toMatchObject({ name: "Node 1:1" });
     expect(fixture.api.rest.callsTo(`/v1/files/${FILE}/nodes`)).toHaveLength(1);
+  });
+
+  it("serves an explicit version from REST even while the plugin is linked", async () => {
+    // A pinned version is a snapshot request (ADR-0037): the live plugin tree belongs to
+    // whatever version is open in Figma now, so answering with it would silently present
+    // current data as history. REST + cache answer for that exact version instead — with no
+    // Tier-3 meta, no whole-document fetch, and only the requested ids.
+    fixture.api.link.linked.add(FILE);
+    fixture.api.link.getNodesImpl = liveNodesResponder;
+    fixture.api.rest.respond(`/v1/files/${FILE}/nodes`, pinnedNodesResponder);
+    const out = await fixture.handlers["figma.file.nodes.request"](
+      {
+        requestId: "r1",
+        type: "figma.file.nodes.request",
+        fileKey: FILE,
+        ids: ["1:1"],
+        version: "v9",
+      },
+      fixture.api.ctx,
+      SESSION,
+    );
+    expect(out.source).toBe("rest");
+    expect(out.nodes["1:1"]).toMatchObject({ name: "Pinned v9" });
+    const calls = fixture.api.rest.callsTo(`/v1/files/${FILE}/nodes`);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].query).toMatchObject({ ids: "1:1", version: "v9" });
+    expect(fixture.api.rest.callsTo(`/v1/files/${FILE}/meta`)).toHaveLength(0);
+    expect(fixture.api.rest.callsTo(`/v1/files/${FILE}`)).toHaveLength(0);
+    expect(fixture.api.link.toolCalls.filter((call) => call.tool === "getNodes")).toHaveLength(0);
   });
 
   it("falls back to REST when the plugin throws", async () => {
@@ -520,7 +563,6 @@ describe("nodes", () => {
         type: "figma.file.nodes.request",
         fileKey: FILE,
         ids: ["1:1"],
-        version: "v1",
       },
       fixture.api.ctx,
       SESSION,
