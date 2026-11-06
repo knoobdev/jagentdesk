@@ -29,6 +29,10 @@ export class ByteImageCache {
   private readonly failed = new Set<string>();
   private readonly queued = new Set<string>();
   private flushScheduled = false;
+  // Bumped by clear(). A settle from a batch issued before the clear belongs to a dead
+  // scope (reconnect, unmount, version switch): it must not repopulate the maps or notify
+  // the now-current generation, or every paint after a failure re-enters the fetch loop.
+  private generation = 0;
 
   constructor(
     private readonly loadBytes: LoadBytes,
@@ -49,7 +53,16 @@ export class ByteImageCache {
   request(...refs: string[]): void {
     let scheduled = false;
     for (const ref of refs) {
-      if (!ref || this.images.has(ref) || this.loading.has(ref) || this.queued.has(ref)) continue;
+      // failed is checked here too: onMissing calls this every paint, and a re-queued
+      // failure refetches and re-notifies forever (paint/network feedback).
+      if (
+        !ref ||
+        this.images.has(ref) ||
+        this.loading.has(ref) ||
+        this.queued.has(ref) ||
+        this.failed.has(ref)
+      )
+        continue;
       this.queued.add(ref);
       scheduled = true;
     }
@@ -64,6 +77,7 @@ export class ByteImageCache {
   }
 
   clear(): void {
+    this.generation += 1;
     this.images.clear();
     this.loading.clear();
     this.failed.clear();
@@ -72,6 +86,9 @@ export class ByteImageCache {
 
   private async flush(): Promise<void> {
     this.flushScheduled = false;
+    const generation = this.generation;
+    // All post-await writes check this: a clear() mid-flight retires the whole batch.
+    const current = () => generation === this.generation;
     const refs = [...this.queued];
     this.queued.clear();
     for (let i = 0; i < refs.length; i += MAX_REFS_PER_REQUEST) {
@@ -81,9 +98,15 @@ export class ByteImageCache {
       try {
         result = await this.loadBytes(batch);
       } catch {
-        for (const ref of batch) this.loading.delete(ref);
+        if (!current()) return;
+        // Transport failure is a cached failure like any other: retried on clear, not per paint.
+        for (const ref of batch) {
+          this.loading.delete(ref);
+          this.failed.add(ref);
+        }
         continue;
       }
+      if (!current()) return;
       for (const ref of batch) {
         const bytes = result[ref];
         this.loading.delete(ref);
@@ -96,8 +119,13 @@ export class ByteImageCache {
           this.failed.add(ref);
           continue;
         }
-        image.addEventListener("load", () => this.onReady());
+        image.addEventListener("load", () => {
+          if (current()) this.onReady();
+        });
         image.addEventListener("error", () => {
+          // A decode error is terminal until clear(): get() and request() both honor failed,
+          // so the renderer's per-paint onMissing cannot resurrect it.
+          if (!current()) return;
           this.failed.add(ref);
           this.images.delete(ref);
           this.onReady();
@@ -116,43 +144,71 @@ export class ByteImageCache {
 /**
  * `figma.fonts.get` bytes → a loaded font the canvas context can use (spec 32.5.1). Registration
  * is injected (`register`) so web adds a FontFace, mobile hands bytes to Skia, and tests fake it.
+ * A family/style is attempted at most once until `clear()`: the draw calls `fontAvailable` every
+ * paint, and a failed/null attempt that refetched each frame would re-enter the load→notify→paint
+ * loop forever. `clear()` runs on reconnect and scope change, so a retried font is intentional.
  */
 export class FontCache {
   private readonly available = new Map<string, boolean>();
   private readonly loading = new Set<string>();
+  // Bumped by clear(). A settle captured before the clear is stale: it must not repopulate the
+  // maps or notify the now-current generation, or a cleared/reconnected cache resurrects ghosts.
+  private generation = 0;
 
   constructor(
     private readonly loadFont: (family: string, style: string) => Promise<FigmaBytes | null>,
-    private readonly register: (family: string, style: string, dataUrl: string) => Promise<boolean>,
+    private readonly register: (
+      family: string,
+      style: string,
+      dataUrl: string,
+      /** Live only while this scope is current; the registrar must not commit DOM side effects
+       * once the owner cleared (unmount/scope swap) mid-registration. */
+      isCurrent: () => boolean,
+    ) => Promise<boolean>,
     private readonly onReady: () => void = () => undefined,
   ) {}
 
   fontAvailable(family: string, style: string): boolean {
     const key = `${family}\u0000${style}`;
-    if (this.available.get(key) === true) return true;
+    // Terminal state — true OR false — is cached. Only an unattempted key starts a load, and the
+    // loading set singleflights concurrent attempts, so one font is fetched at most once per scope.
+    const cached = this.available.get(key);
+    if (cached !== undefined) return cached;
     if (!this.loading.has(key)) {
       this.loading.add(key);
-      void this.load(key, family, style);
+      void this.load(key, family, style, this.generation);
     }
-    return this.available.get(key) === true;
+    return false;
   }
 
-  private async load(key: string, family: string, style: string): Promise<void> {
+  private async load(
+    key: string,
+    family: string,
+    style: string,
+    generation: number,
+  ): Promise<void> {
+    let ok = false;
+    const current = () => generation === this.generation;
     try {
       const bytes = await this.loadFont(family, style);
-      this.available.set(
-        key,
-        bytes ? await this.register(family, style, bytesToDataUrl(bytes)) : false,
-      );
+      // A clear mid-fetch retires this attempt before it can touch the DOM registrar (adding a
+      // FontFace nobody owns any more).
+      if (!current()) return;
+      // The registrar owns the rest of the async window (face.load() etc): it must re-check
+      // `current` itself, or a scope swap during that await leaks a face into FontFaceSet.
+      ok = bytes ? await this.register(family, style, bytesToDataUrl(bytes), current) : false;
     } catch {
-      this.available.set(key, false);
-    } finally {
-      this.loading.delete(key);
-      this.onReady();
+      ok = false;
     }
+    // A settle from a dead scope (clear/reconnect/unmount) is dropped: no repopulate, no notify.
+    if (!current()) return;
+    this.loading.delete(key);
+    this.available.set(key, ok);
+    this.onReady();
   }
 
   clear(): void {
+    this.generation += 1;
     this.available.clear();
     this.loading.clear();
   }
