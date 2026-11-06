@@ -91,12 +91,18 @@ function setNodeTransform(state: DrawState, m: RenderMatrix): void {
   state.ctx.setTransform(c.a, c.b, c.c, c.d, c.e, c.f);
 }
 
-/** True when the node's absolute box lies entirely outside the render viewport. */
+/**
+ * True when nothing the node paints lies inside the render viewport. The drawn box is
+ * `absoluteRenderBounds` when present — it carries shadow/effect outsets beyond the layout box
+ * and matches where `fallbackPlacementBox` maps raster bytes — so a node reachable only by its
+ * outset stays visible instead of being culled on its layout box (ADR-0042 review).
+ */
 function culled(state: DrawState, node: FigmaNode, transform: RenderMatrix | null): boolean {
   const viewport = state.options.viewport;
   if (!viewport) return false;
   const size = nodeSize(node);
   const box =
+    absoluteRenderBoundsOf(node) ??
     absoluteBoxOf(node) ??
     (transform && size.width > 0 && size.height > 0
       ? boundsOfRect(transform, size.width, size.height)
