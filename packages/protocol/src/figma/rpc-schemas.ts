@@ -121,6 +121,13 @@ export const FigmaFrameSummarySchema = z.object({
   type: z.string(),
   bounds: FigmaRectSchema,
   backgroundColor: z.string().optional(), // #RRGGBBAA
+  // ADR-0039 (32.5.1): SECTION membership and whether the outline already carries the node's
+  // direct children. Frames separated out of a SECTION carry its `parentId`; `childrenLoaded`
+  // only appears on SECTIONs — false marks one cut off at the depth=3 boundary, whose viewer
+  // reads its children with a depth=1 node request instead of the whole subtree. Everything
+  // else omits both fields; parent-first draw order and sibling order are producer-side.
+  parentId: z.string().optional(),
+  childrenLoaded: z.boolean().optional(),
 });
 export type FigmaFrameSummary = z.infer<typeof FigmaFrameSummarySchema>;
 
@@ -477,6 +484,11 @@ export const FigmaFileNodesRequestSchema = req("figma.file.nodes.request", {
   fileKey,
   ids: z.array(z.string()).min(1).max(50),
   version: z.string().optional(),
+  // ADR-0039 (32.9): direct children only, for reading SECTION contents without their subtrees.
+  // The handler requires an explicit nonempty version with this option — a schema-level refine
+  // here would widen the old contract, so the check lives server-side. Old requests omit it and
+  // still receive the full tree; the response shape is unchanged.
+  depth: z.literal(1).optional(),
 });
 export const FigmaComponentMetaSchema = z.object({
   key: z.string(),
