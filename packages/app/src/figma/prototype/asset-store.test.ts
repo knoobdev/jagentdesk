@@ -468,3 +468,54 @@ describe("createScopedFontGate", () => {
     store.dispose();
   });
 });
+
+// ── resetFailed (spec 32.5.3 Retry) ────────────────────────────────────────────────
+
+describe("PrototypeAssetStore.resetFailed", () => {
+  it("resets exactly one terminal-failed entry and nothing else", () => {
+    const store = new PrototypeAssetStore("s1|fk1|v1");
+    const failed = store.claim("1:1:1:1", "raster|v1|1|svg|absolute|1:2")!;
+    store.putDecoded(failed.assetKey, null, failed); // terminal: bytes answered null
+    const loading = store.claim("1:1:1:1", "raster|v1|2|png|crop|1:2")!;
+
+    expect(store.resetFailed(failed.assetKey)).toBe(true);
+    expect(store.get(failed.assetKey)).toBeUndefined(); // re-claimable, fresh generation
+    expect(store.resetFailed(loading.assetKey)).toBe(false); // loading is NOT retryable
+    expect(store.get(loading.assetKey)?.status).toBe("loading"); // and not disturbed
+    expect(store.resetFailed("raster|v1|1|svg|absolute|9:9")).toBe(false); // unknown key
+
+    // After the reset the entry claims again like a first demand (fetch slot is free).
+    expect(store.claim("2:1:1:1", failed.assetKey)).not.toBeNull();
+    store.dispose();
+  });
+
+  it("a disposed store resets nothing", () => {
+    const store = new PrototypeAssetStore("s1|fk1|v1");
+    const c = store.claim("1:1:1:1", "fill|ref-a")!;
+    store.putDecoded(c.assetKey, null, c);
+    store.dispose();
+    expect(store.resetFailed(c.assetKey)).toBe(false);
+  });
+});
+
+describe("PrototypeAssetStore.retryable_failed", () => {
+  it("a terminal-failed asset attempt can be re-demanded once and land ready", () => {
+    const store = new PrototypeAssetStore("s1|fk1|v1");
+    const c = store.claim("1:1:1:1", "raster|v1|1|svg|absolute|1:2");
+    expect(c).not.toBeNull();
+    const claim = c!;
+    store.putDecoded(claim.assetKey, null, claim);
+    expect(store.get(claim.assetKey)?.status).toBe("failed");
+    // Retry re-demands the resource exactly once: the entry drops, so the next claim opens a
+    // fresh attempt and the bytes can land as ready.
+    expect(store.resetFailed(claim.assetKey)).toBe(true);
+    expect(store.get(claim.assetKey)).toBeUndefined();
+    const again = store.claim("1:1:1:1", claim.assetKey);
+    expect(again).not.toBeNull();
+    store.putDecoded(claim.assetKey, bytes(), again!);
+    createdImages[createdImages.length - 1].dispatchEvent(new Event("load"));
+    expect(store.get(claim.assetKey)?.status).toBe("ready");
+    expect(store.resetFailed(claim.assetKey)).toBe(false); // a ready entry is not "retryable"
+    store.dispose();
+  });
+});

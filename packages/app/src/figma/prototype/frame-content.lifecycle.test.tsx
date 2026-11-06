@@ -4,41 +4,52 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { waitFor } from "@testing-library/react";
+import { fireEvent, waitFor } from "@testing-library/react";
 import type { FigmaBytes, FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
+import { PROTOTYPE_READY_LABEL, STATUS_FAILED, STATUS_LOADING } from "./status-texts";
 
-const { theme, clientRef, callFigma, draws, missingByRoot, fidelityRef } = vi.hoisted(() => ({
-  theme: {
-    spacing: { 1: 4, 1.5: 6, 2: 8, 3: 12, 4: 16, 6: 24 },
-    fontSize: { xs: 11, sm: 13, base: 15 },
-    fontWeight: { normal: "400", semibold: "600" },
-    borderRadius: { sm: 4, md: 6, lg: 8, full: 9999 },
-    borderWidth: { 1: 1 },
-    colors: {
-      surface0: "#111",
-      surface1: "#161616",
-      surfaceWorkspace: "#0a0a0a",
-      foreground: "#fff",
-      foregroundMuted: "#aaa",
-      border: "#333",
-      accent: "#2563eb",
+const { theme, clientRef, callFigma, draws, attrSnaps, missingByRoot, fidelityRef } = vi.hoisted(
+  () => ({
+    theme: {
+      spacing: { 1: 4, 1.5: 6, 2: 8, 3: 12, 4: 16, 6: 24 },
+      fontSize: { xs: 11, sm: 13, base: 15 },
+      fontWeight: { normal: "400", semibold: "600" },
+      borderRadius: { sm: 4, md: 6, lg: 8, full: 9999 },
+      borderWidth: { 1: 1 },
+      opacity: { 0: 0, 50: 0.5, 100: 1 },
+      chrome: { controlRadius: 8 },
+      colors: {
+        surface0: "#111",
+        surface1: "#161616",
+        surfaceWorkspace: "#0a0a0a",
+        foreground: "#fff",
+        foregroundMuted: "#aaa",
+        border: "#333",
+        accent: "#2563eb",
+      },
     },
-  },
-  clientRef: { current: { id: "client" } as unknown },
-  callFigma: vi.fn(),
-  draws: [] as DrawOptions[],
-  missingByRoot: new Map<
-    string,
-    {
-      fallbackNodeIds: string[];
-      textFallbackNodeIds?: string[];
-      imageRefs: string[];
-      fonts: { family: string; style: string }[];
-      cachedImageRefs: string[];
-    }
-  >(),
-  fidelityRef: { current: false },
-}));
+    clientRef: { current: { id: "client" } as unknown },
+    callFigma: vi.fn(),
+    draws: [] as DrawOptions[],
+    // The canvas a11y attributes as they stand AT THE START of every recorded draw — the proof
+    // that readiness flips only AFTER a completed paint, never from a store notification.
+    attrSnaps: [] as Array<{ role: string | null; label: string | null; busy: string | null }>,
+    missingByRoot: new Map<
+      string,
+      {
+        fallbackNodeIds: string[];
+        textFallbackNodeIds?: string[];
+        imageRefs: string[];
+        fonts: { family: string; style: string }[];
+        cachedImageRefs: string[];
+        /** Ids the frame PAINTS through `fallbackForNode` this pass (the real renderer reads
+         *  every drawn fallback; only what comes back empty is reported to `onMissing`). */
+        paintedFallbackNodeIds?: string[];
+      }
+    >(),
+    fidelityRef: { current: false },
+  }),
+);
 
 interface DrawOptions {
   imageForRef: (ref: string) => HTMLImageElement | null;
@@ -83,12 +94,29 @@ vi.mock("@/figma/renderer", () => ({
   createFigmaRenderer: () => ({
     draw: (_ctx: unknown, root: unknown, options: DrawOptions) => {
       draws.push(options);
+      // Snapshot the a11y attributes as they stand AT THIS DRAW: readiness must be announced
+      // only by a completed paint, so what the element says when a draw BEGINS is evidence of
+      // what the previous state was — never a flip staged ahead of the pixels.
+      const view = activeViews[activeViews.length - 1];
+      const canvas = view?.container.querySelector("canvas") as HTMLCanvasElement | null;
+      attrSnaps.push({
+        role: canvas?.getAttribute("role") ?? null,
+        label: canvas?.getAttribute("aria-label") ?? null,
+        busy: canvas?.getAttribute("aria-busy") ?? null,
+      });
       // Mirror the real renderer: paint cached assets through the getters and report only the
       // misses, both from inside the draw pass, so claims for a new root land before the
       // component's previous-owner release effect runs.
       const report = missingByRoot.get((root as { id?: string } | null)?.id ?? "");
       if (report) {
         for (const ref of report.cachedImageRefs) options.imageForRef(ref);
+        // The real renderer reads EVERY painted fallback through the getter (that read is the
+        // ledger's cache-hit side); tests replay those reads for their painted node ids.
+        for (const id of report.paintedFallbackNodeIds ?? [])
+          options.fallbackForNode(
+            id,
+            report.textFallbackNodeIds?.includes(id) ? "TEXT" : undefined,
+          );
         options.onMissing(report);
       }
     },
@@ -157,6 +185,8 @@ interface MissingReport {
    * getters and only reports what comes back empty. That read is the sole owner-attach that
    * keeps a cached asset alive after the owner that originally fetched it releases. */
   cachedImageRefs: string[];
+  /** Ids this frame paints through `fallbackForNode` (raster fallback reads, getter side). */
+  paintedFallbackNodeIds?: string[];
 }
 
 // The REAL renderer reports missing assets from inside `draw`; tests that exercise the
@@ -168,6 +198,7 @@ function serveMissing(rootId: string, report: Partial<MissingReport>): void {
     imageRefs: report.imageRefs ?? [],
     fonts: report.fonts ?? [],
     cachedImageRefs: report.cachedImageRefs ?? [],
+    paintedFallbackNodeIds: report.paintedFallbackNodeIds ?? [],
   });
 }
 
@@ -199,7 +230,7 @@ function renderPlayer(version = "v1", withText = false, root?: FigmaNode, drawSc
 
 // A test that fails mid-case leaves its provider mounted; without this sweep the retained
 // s1|fk1|v1 store leaks into the next case and its claims come back "already held".
-const activeViews: { unmount: () => void }[] = [];
+const activeViews: { unmount: () => void; container: HTMLElement }[] = [];
 
 /** Paint: wait for the live scope + settled fonts, then the next recorded draw. */
 async function nextDraw(baseline: number) {
@@ -217,6 +248,7 @@ beforeEach(() => {
   clientRef.current = { id: "client" };
   callFigma.mockReset();
   draws.length = 0;
+  attrSnaps.length = 0;
   missingByRoot.clear();
   createdImages = [];
   const RealImage = globalThis.Image;
@@ -1400,5 +1432,382 @@ describe("FrameContent ADR-0042 backdrop BACKGROUND_BLUR cap", () => {
     const store = peekAssetScope(assetScopeKey("s1", "fk1", "v1"))!;
     expect(store.get("raster|v1|2|png|crop|1:2")?.status).toBe("failed");
     view.unmount();
+  });
+});
+
+// ── stage readiness (spec 32.5.3) ─────────────────────────────────────────────────────
+// The player's stage must not present a partial frame as complete: while THIS draw's demanded
+// fill/glyph/fallback assets are pending the stage says `Loading content…` and the canvas is
+// busy; a terminal failure says the failure line with a Retry for exactly those keys; ready is
+// role img + `Figma prototype frame`, announced ONLY by a completed paint that settled the
+// required assets. The rules the canvas viewer follows (32.5.1) apply verbatim here: loading
+// dominates failure, an optional font never blocks a ready glyph fallback, the ledger is per
+// draw of THIS owner — never the whole store.
+
+function canvasA11y(view: { container: HTMLElement }) {
+  const canvas = view.container.querySelector("canvas") as HTMLCanvasElement | null;
+  expect(canvas).toBeTruthy();
+  const target = canvas as HTMLCanvasElement;
+  return {
+    role: target.getAttribute("role"),
+    label: target.getAttribute("aria-label"),
+    busy: target.getAttribute("aria-busy"),
+  };
+}
+
+function stageTextOf(view: { container: HTMLElement }): string {
+  return view.container.textContent ?? "";
+}
+
+function retryButton(view: { container: HTMLElement }): HTMLElement | null {
+  for (const el of Array.from(
+    view.container.querySelectorAll("button, [role='button'], [data-variant]"),
+  )) {
+    if (el.textContent?.includes("Retry")) return el as HTMLElement;
+  }
+  return null;
+}
+
+/** The overlay bar element (zIndex lifts it above the later-rendered HotspotsLayer). */
+function statusBarOf(view: { container: HTMLElement }): HTMLElement | null {
+  for (const el of Array.from(view.container.querySelectorAll("div"))) {
+    if ((el.getAttribute("style") ?? "").includes("z-index")) return el as HTMLElement;
+  }
+  return null;
+}
+
+function imageFillCalls(refs: string[]): number {
+  let count = 0;
+  for (const c of callFigma.mock.calls) {
+    if (c[1] !== "figma.file.imageFills.request") continue;
+    const asked = ((c[2] as { imageRefs?: string[] })?.imageRefs ?? []).filter((r) =>
+      refs.includes(r),
+    );
+    if (asked.length > 0) count += 1;
+  }
+  return count;
+}
+
+async function flushTasks(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function pngBytes(): FigmaBytes {
+  return { mimeType: "image/png", dataBase64: "QUJD" };
+}
+
+// A React-level press spy: an ancestor handler is exactly what a covering overlay/hotspot
+// Pressable would see when a tap bubbles — module-created so the JSX prop reference stays a
+// stable identifier (react-perf rule), the counter is the test's only use.
+function makeAncestorPressSpy(): { onClick: () => void; presses: { n: number } } {
+  const presses = { n: 0 };
+  return {
+    presses,
+    onClick() {
+      presses.n += 1;
+    },
+  };
+}
+
+describe("FrameContent stage readiness (spec 32.5.3)", () => {
+  it("a demanded asset still on its way keeps the stage and the element honestly loading", async () => {
+    serveAssets(); // bytes answer, but jsdom never fires image load: decoding stays pending
+    serveMissing("1:1", { imageRefs: ["ref-a"], fallbackNodeIds: [], fonts: [] });
+    const view = renderPlayer("v1");
+    await firstDraw();
+    await waitFor(() => expect(canvasA11y(view).busy).toBe("true"));
+    // The visible line and the announced name are the SAME loading text; pixels alone do not
+    // make a ready stage.
+    expect(canvasA11y(view)).toEqual({ role: null, label: STATUS_LOADING, busy: "true" });
+    expect(stageTextOf(view)).toContain(STATUS_LOADING);
+    expect(retryButton(view)).toBeNull();
+    // Loading never blocks the real hotspots (standard CSS `pointer-events: none`, not the
+    // RN-only box-none Unistyles cannot polyfill), and the bar sits above the later layer.
+    const bar = statusBarOf(view);
+    expect(bar).not.toBeNull();
+    const style = bar?.getAttribute("style") ?? "";
+    expect(style).toContain("z-index: 10");
+    expect(style).toContain("pointer-events: none");
+    view.unmount();
+  });
+
+  it("ready is announced only by the completed repaint that settled the asset", async () => {
+    serveAssets();
+    serveMissing("1:1", { imageRefs: ["ref-a"], fallbackNodeIds: [], fonts: [] });
+    const view = renderPlayer("v1");
+    await firstDraw();
+    await waitFor(() => expect(createdImages.length).toBe(1));
+    act(() => {
+      createdImages[0].dispatchEvent(new Event("load"));
+    });
+    await waitFor(() => expect(draws.length).toBeGreaterThan(1));
+    // The draw-entry snapshot proves the flip came AFTER the repaint: when the settled-redraw
+    // began, the element still carried the loading announcement (no pre-paint "ready" credit
+    // from the store notification alone).
+    expect(attrSnaps[attrSnaps.length - 1]).toEqual({
+      role: null,
+      label: STATUS_LOADING,
+      busy: "true",
+    });
+    // And only now — actual pixels + settled required assets — is it a labelled image.
+    expect(canvasA11y(view)).toEqual({
+      role: "img",
+      label: PROTOTYPE_READY_LABEL,
+      busy: null,
+    });
+    expect(stageTextOf(view)).not.toContain(STATUS_LOADING);
+    view.unmount();
+  });
+
+  it("a terminal failure shows the failure line with a Retry that re-demands exactly that key, once, without bubbling", async () => {
+    callFigma.mockImplementation(async (_c: unknown, type: string) =>
+      type === "figma.file.imageFills.request" ? { images: { "ref-a": null } } : { images: {} },
+    );
+    serveMissing("1:1", { imageRefs: ["ref-a"], fallbackNodeIds: [], fonts: [] });
+    // The ancestor is a React press handler (exactly what an overlay/hotspot Pressable is):
+    // a bubbling tap would fire it, which is the prototype-navigation bug this must prevent.
+    const ancestorSpy = makeAncestorPressSpy();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const rootNode = createRoot(container);
+    act(() =>
+      rootNode.render(
+        <PrototypeAssetScopeProvider file={file} version="v1">
+          <div onClick={ancestorSpy.onClick}>
+            <FrameContent file={file} root={frameRoot(false)} scale={1} />
+          </div>
+        </PrototypeAssetScopeProvider>,
+      ),
+    );
+    const view = {
+      container,
+      unmount: () => {
+        act(() => rootNode.unmount());
+        container.remove();
+        const index = activeViews.indexOf(view);
+        if (index >= 0) activeViews.splice(index, 1);
+      },
+    };
+    // Registered so a mid-failure case still tears the provider down in afterEach.
+    activeViews.push(view);
+    await firstDraw();
+    await waitFor(() => expect(canvasA11y(view).label).toBe(STATUS_FAILED));
+    // The exact displayed line doubles as the announced name; a failure is NOT "busy".
+    expect(canvasA11y(view)).toEqual({ role: null, label: STATUS_FAILED, busy: null });
+    expect(stageTextOf(view)).toContain(STATUS_FAILED);
+    const button = retryButton(view);
+    expect(button).not.toBeNull();
+    // No automatic retry storm while the user has not asked: settling stays at one wire call.
+    await flushTasks();
+    await flushTasks();
+    expect(imageFillCalls(["ref-a"])).toBe(1);
+    act(() => {
+      fireEvent.click(button as HTMLElement);
+    });
+    expect(ancestorSpy.presses.n).toBe(0); // the tap died at the chip row, never reached navigation
+    await waitFor(() => expect(imageFillCalls(["ref-a"])).toBe(2)); // reset → re-claim: exactly once
+    // Still loading honestly between press and settle (never a fake ready), then failed again.
+    await waitFor(() => expect(canvasA11y(view).label).toBe(STATUS_FAILED));
+    await flushTasks();
+    expect(imageFillCalls(["ref-a"])).toBe(2); // bounded: a second storm needs a second press
+    // And the chip row's stopPropagation did not swallow the button's own Retry handler:
+    // the re-demand above IS the handler's effect, with the tap dead one layer out.
+    view.unmount();
+  });
+
+  it("loading dominates failure on the same draw", async () => {
+    callFigma.mockImplementation(async (_c: unknown, type: string, params: unknown) => {
+      const p = (params ?? {}) as { imageRefs?: string[] };
+      const refs = p.imageRefs ?? [];
+      const images: Record<string, FigmaBytes | null> = {};
+      for (const r of refs)
+        images[r] = r === "ref-a" ? { mimeType: "image/png", dataBase64: "QUJD" } : null;
+      return { images };
+    });
+    serveMissing("1:1", { imageRefs: ["ref-a", "ref-b"], fallbackNodeIds: [], fonts: [] });
+    const view = renderPlayer("v1");
+    await firstDraw();
+    // ref-b failed terminal, ref-a still decoding: the user is waiting, so loading owns the line.
+    await waitFor(() => {
+      expect(canvasA11y(view)).toEqual({ role: null, label: STATUS_LOADING, busy: "true" });
+    });
+    expect(retryButton(view)).toBeNull();
+    view.unmount();
+  });
+
+  it("another owner's pending asset is NOT this stage's debt — readiness is per draw, not store-wide", async () => {
+    serveAssets();
+    serveMissing("1:1", { imageRefs: ["ref-a"], fallbackNodeIds: [], fonts: [] });
+    const view = renderPlayer("v1");
+    await firstDraw();
+    await waitFor(() => expect(createdImages.length).toBe(1));
+    act(() => {
+      createdImages[0].dispatchEvent(new Event("load"));
+    });
+    await waitFor(() => expect(canvasA11y(view).role).toBe("img"));
+    const store = peekAssetScope(assetScopeKey("s1", "fk1", "v1"))!;
+    // A sibling stage (different owner, same store) demands its own asset and fails it.
+    act(() => {
+      const foreign = store.claim("99:foreign", "fill|elsewhere");
+      expect(foreign).not.toBeNull();
+      store.putDecoded("fill|elsewhere", null, foreign!);
+    });
+    await flushTasks();
+    await flushTasks();
+    // This frame painted and its ledger settled: the foreign claim never reaches it.
+    expect(canvasA11y(view)).toEqual({ role: "img", label: PROTOTYPE_READY_LABEL, busy: null });
+    expect(stageTextOf(view)).not.toContain(STATUS_LOADING);
+    view.unmount();
+  });
+
+  it("a same-id/same-version frame under a different scope is pending before paint, and a late settle on the OLD store cannot flip it", async () => {
+    // Controlled wire: nothing answers until the test says so.
+    const inflight: Array<(v: { images: Record<string, FigmaBytes | null> }) => void> = [];
+    callFigma.mockImplementation(
+      () =>
+        new Promise<{ images: Record<string, FigmaBytes | null> }>((resolve) => {
+          inflight.push(resolve);
+        }),
+    );
+    serveMissing("1:1", { imageRefs: ["ref-a"], fallbackNodeIds: [], fonts: [] });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const rootNode = createRoot(container);
+    const node = frameRoot(false);
+    const view = {
+      container,
+      renderAt: (playerFile: { serverId: string; fileKey: string }, version: string) =>
+        act(() =>
+          rootNode.render(
+            <PrototypeAssetScopeProvider file={playerFile} version={version}>
+              <FrameContent file={playerFile} root={node} scale={1} />
+            </PrototypeAssetScopeProvider>,
+          ),
+        ),
+      unmount: () => {
+        act(() => rootNode.unmount());
+        container.remove();
+        const index = activeViews.indexOf(view);
+        if (index >= 0) activeViews.splice(index, 1);
+      },
+    };
+    // Registered so the renderer mock's draw-entry attribute snapshots read THIS container —
+    // that snapshot is the pre-paint proof below.
+    activeViews.push(view);
+    const f1 = { serverId: "s1", fileKey: "fk1" };
+    const f2 = { serverId: "s1", fileKey: "fk2" };
+    view.renderAt(f1, "v1");
+    await firstDraw();
+    // Settle frame one fully so the OLD subject is genuinely "ready" — the stale-claim case.
+    await waitFor(() => expect(inflight.length).toBe(1));
+    inflight[0]({ images: { "ref-a": { mimeType: "image/png", dataBase64: "QUJD" } } });
+    await waitFor(() => expect(createdImages.length).toBe(1));
+    act(() => {
+      createdImages[0].dispatchEvent(new Event("load"));
+    });
+    await waitFor(() => expect(canvasA11y(view).role).toBe("img"));
+    expect(canvasA11y(view).label).toBe(PROTOTYPE_READY_LABEL);
+
+    // A REAL pending claim on the OLD store, opened while it is still retained — the late
+    // settle of this fetch is what must die at the scope boundary. Retain the store reference
+    // now: the provider's release disposes it and drops it from the registry.
+    const store1 = peekAssetScope(assetScopeKey("s1", "fk1", "v1"))!;
+    const lateClaim = store1.claim("99:late", "fill|late");
+    expect(lateClaim).not.toBeNull();
+
+    // Re-bind the SAME root id at the SAME version to another file: the old ready must die
+    // BEFORE the browser paints, and the new scope starts pending.
+    serveMissing("1:1", { imageRefs: ["ref-b"], fallbackNodeIds: [], fonts: [] });
+    const drawsBefore = draws.length;
+    view.renderAt(f2, "v1");
+    await waitFor(() => expect(draws.length).toBeGreaterThan(drawsBefore));
+    // The new subject's first draw BEGAN while the element still announced the wait (layout
+    // reset ran pre-paint): never a carried-over ready for a different scope.
+    expect(attrSnaps[attrSnaps.length - 1]).toEqual({
+      role: null,
+      label: STATUS_LOADING,
+      busy: "true",
+    });
+    expect(canvasA11y(view)).toEqual({ role: null, label: STATUS_LOADING, busy: "true" });
+    // The old scope is gone from the registry — its store lives on only in this retained ref.
+    expect(peekAssetScope(assetScopeKey("s1", "fk1", "v1"))).toBeUndefined();
+    // A late settle landing on that disposed OLD store must not flip this stage: the frame's
+    // subscription died with the scope change, so the settle notifies nobody, repaints nothing,
+    // and the new subject's demanded key (ref-b, never served) still honestly holds "loading".
+    const drawsNow = draws.length;
+    act(() => {
+      store1.putDecoded("fill|late", { mimeType: "image/png", dataBase64: "QUJD" }, lateClaim!);
+    });
+    await flushTasks();
+    await flushTasks();
+    expect(draws.length).toBe(drawsNow);
+    expect(canvasA11y(view)).toEqual({ role: null, label: STATUS_LOADING, busy: "true" });
+    expect(stageTextOf(view)).toContain(STATUS_LOADING);
+    view.unmount();
+  });
+
+  it("a successful PNG downgrade does not false-fail on the stale SVG key, and the stage goes ready", async () => {
+    fidelityRef.current = true;
+    Object.defineProperty(window, "devicePixelRatio", { configurable: true, value: 2 });
+    try {
+      serveMissing("1:1", {
+        fallbackNodeIds: ["1:3"],
+        textFallbackNodeIds: ["1:3"],
+        paintedFallbackNodeIds: ["1:3"],
+        imageRefs: [],
+        fonts: [],
+      });
+      callFigma.mockImplementation(async (_c: unknown, type: string, params: unknown) => {
+        const p = (params ?? {}) as { ids?: string[]; format?: string };
+        if (type !== "figma.file.render.request") return { images: {} };
+        // Loop-built images map (repo precedent): keeps the mock under the lint callback budget.
+        const images: Record<string, FigmaBytes | null> = {};
+        for (const id of p.ids ?? []) images[id] = p.format === "svg" ? null : pngBytes();
+        return { images };
+      });
+      const view = renderPlayer("v1", true, undefined, 1.35); // rung 3 for the PNG channel
+      await firstDraw();
+      await waitFor(() => {
+        const store = peekAssetScope(assetScopeKey("s1", "fk1", "v1"));
+        expect(store?.get("raster|v1|1|svg|absolute|1:3")?.status).toBe("failed");
+      });
+      // The settled-redraw pass: the getter reads the failed SVG, the downgrade deletes it from
+      // the ledger and demands the PNG — so this draw says LOADING (its own pending truth),
+      // never FAILED (the stale SVG is not this pass's debt).
+      await waitFor(() => expect(canvasA11y(view).label).toBe(STATUS_LOADING));
+      expect(retryButton(view)).toBeNull();
+      const pngImage = createdImages.find((i) => (i.src ?? "").includes("image/png"));
+      expect(pngImage).toBeDefined();
+      act(() => {
+        pngImage?.dispatchEvent(new Event("load"));
+      });
+      await waitFor(() =>
+        expect(canvasA11y(view)).toEqual({
+          role: "img",
+          label: PROTOTYPE_READY_LABEL,
+          busy: null,
+        }),
+      );
+      // The stale SVG entry is STILL failed — readiness came from ignoring it, not healing it —
+      // and the wire stayed finite: one SVG ask, one PNG ask.
+      const store = peekAssetScope(assetScopeKey("s1", "fk1", "v1"))!;
+      expect(store.get("raster|v1|1|svg|absolute|1:3")?.status).toBe("failed");
+      expect(store.get("raster|v1|3|png|absolute|1:3")?.status).toBe("ready");
+      const rasterCalls = callFigma.mock.calls.filter((c) => c[1] === "figma.file.render.request");
+      expect(
+        rasterCalls.filter((c) => (c[2] as { format?: string }).format === "svg"),
+      ).toHaveLength(1);
+      expect(
+        rasterCalls.filter(
+          (c) =>
+            (c[2] as { format?: string; scale?: number }).format === "png" &&
+            (c[2] as { scale?: number }).scale === 3,
+        ),
+      ).toHaveLength(1);
+      view.unmount();
+    } finally {
+      fidelityRef.current = false;
+      Object.defineProperty(window, "devicePixelRatio", { configurable: true, value: 1 });
+    }
   });
 });
