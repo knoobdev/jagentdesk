@@ -25,7 +25,6 @@ import {
 import { figmaStyles } from "@/figma/ui/styles";
 import { Button } from "@/components/ui/button";
 import { openExternalUrl } from "@/utils/open-external-url";
-import { RemoteConnectionPanel } from "./remote-connection-panel";
 import {
   canUseLoopback,
   finishWithLoopback,
@@ -155,10 +154,8 @@ export function FigmaConnectScreen({
   const client = useHostRuntimeClient(serverId);
   const queryClient = useQueryClient();
   const [addingAccount, setAddingAccount] = useState(false);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const showSetup = connections.length === 0 || addingAccount;
   const toggleAddAccount = useCallback(() => setAddingAccount((value) => !value), []);
-  const toggleAdvanced = useCallback(() => setAdvancedOpen((value) => !value), []);
   const state = useConnectState(serverId);
   const [pastedUrl, setPastedUrl] = useState("");
   const [note, setNote] = useState<string | null>(null);
@@ -400,10 +397,6 @@ export function FigmaConnectScreen({
             ) : null}
           </>
         ) : null}
-        <Button variant="ghost" size="sm" onPress={toggleAdvanced} testID="figma-connect-advanced">
-          {advancedOpen ? "Hide advanced" : "Advanced"}
-        </Button>
-        {advancedOpen ? <RemoteConnectionPanel serverId={serverId} /> : null}
       </View>
     </ScrollView>
   );

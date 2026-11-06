@@ -292,18 +292,10 @@ describe("FigmaConnectScreen", () => {
     expect(screen?.getAttribute("data-gap")).toBe(String(theme.spacing[4]));
   });
 
-  // Editing is explicitly optional and only mounted after opening Advanced.
-  it("opens the optional editing panel under Advanced in Connections", () => {
+  it("keeps editing setup and Advanced out of the OAuth connection screen", () => {
     const view = render();
+    expect(view.querySelector('[data-testid="figma-connect-advanced"]')).toBeNull();
     expect(view.querySelector('[data-testid="figma-remote-panel-stub"]')).toBeNull();
-    act(() => {
-      view
-        .querySelector('[data-testid="figma-connect-advanced"]')
-        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    const panel = view.querySelector('[data-testid="figma-remote-panel-stub"]');
-    expect(panel?.getAttribute("data-server-id")).toBe("s1");
-    // The REST OAuth guide keeps its controls (the connection features are preserved).
     expect(view.querySelector('[data-testid="figma-connect-guide"]')).not.toBeNull();
     expect(view.querySelector('[data-testid="figma-signin-paste"]')).not.toBeNull();
   });
