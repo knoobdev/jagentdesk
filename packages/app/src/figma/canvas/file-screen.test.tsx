@@ -5,62 +5,97 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { theme, captured, queueOverrides, editsState, features, hooks } = vi.hoisted(() => {
-  const uiTheme = {
-    spacing: { 1: 4, 2: 8, 3: 12, 4: 16, 6: 24 },
-    colors: {
-      surface0: "#0a0a0a",
-      surface1: "#111",
-      foreground: "#fff",
-      foregroundMuted: "#aaa",
-      foregroundExtraMuted: "#777",
-      border: "#555",
-      accent: "#0a84ff",
-      statusDanger: "#ff0000",
-      palette: { red: { 300: "#ff6b6b" }, white: "#fff" },
-    },
-  };
-  const outline = {
-    name: "Design file",
-    pages: [{ id: "p1", name: "Page 1", frames: [], children: [] }],
-  };
-  const queue = { "1:1": { name: "Queued" } } as Record<string, unknown>;
-  const edits = {
-    current: {
-      linked: false,
-      pendingCount: 1,
-      overrides: {} as Record<string, unknown>,
-      applyEdits: vi.fn(async () => undefined),
-      applyPending: vi.fn(() => Promise.resolve()),
-      discardPending: vi.fn(() => Promise.resolve()),
-    },
-  };
-  return {
-    theme: uiTheme,
-    // Props the screen hands the toolbar / inspect panel / canvas — the wiring contract.
-    captured: {
-      toolbar: null as Record<string, unknown> | null,
-      inspect: null as Record<string, unknown> | null,
-      canvas: null as Record<string, unknown> | null,
-    },
-    outlineFixture: outline,
-    queueOverrides: queue,
-    editsState: edits,
-    // The daemon capabilities the gate reads (ADR-0039 / spec 32.5.1). Tests flip these; the
-    // base `figma` gate must stay compatible with the pre-ADR behaviour.
-    features: {
-      current: { figma: true, figmaNodeDepth: true } as Record<string, boolean>,
-    },
-    // The inner screen's data path. The capability gate must keep ALL of these unmounted —
-    // a new client never sends depth1 to an old host, and there is no full-Section fallback.
-    hooks: {
-      outline: vi.fn(() => ({ data: outline, isPending: false, isError: false, error: null })),
-      edits: vi.fn(() => edits.current),
-      frameStore: vi.fn(() => null),
-      watch: vi.fn(),
-    },
-  };
-});
+const { theme, captured, queueOverrides, editsState, features, hooks, routeParams } = vi.hoisted(
+  () => {
+    const uiTheme = {
+      spacing: { 1: 4, 2: 8, 3: 12, 4: 16, 6: 24 },
+      colors: {
+        surface0: "#0a0a0a",
+        surface1: "#111",
+        foreground: "#fff",
+        foregroundMuted: "#aaa",
+        foregroundExtraMuted: "#777",
+        border: "#555",
+        accent: "#0a84ff",
+        statusDanger: "#ff0000",
+        palette: { red: { 300: "#ff6b6b" }, white: "#fff" },
+      },
+    };
+    const outline = {
+      name: "Design file",
+      // ADR-0039: even live asset paths must pin to the outline snapshot version.
+      version: "snap-1",
+      pages: [
+        {
+          id: "p1",
+          name: "Page 1",
+          frames: [
+            {
+              id: "1:1",
+              name: "Screen",
+              type: "FRAME",
+              bounds: { x: 0, y: 0, width: 375, height: 812 },
+            },
+          ],
+          children: [],
+          flowStartingPoints: [{ nodeId: "9:9", name: "Onboarding", pageId: "p1" }],
+        },
+      ],
+    };
+    const queue = { "1:1": { name: "Queued" } } as Record<string, unknown>;
+    const edits = {
+      current: {
+        linked: false,
+        pendingCount: 1,
+        overrides: {} as Record<string, unknown>,
+        applyEdits: vi.fn(async () => undefined),
+        applyPending: vi.fn(() => Promise.resolve()),
+        discardPending: vi.fn(() => Promise.resolve()),
+      },
+    };
+    // The lazy store as the screen sees it: a cached parent chain 1:5 → 1:4 → 1:1 lets the W6
+    // handoff test assert the player gets the ROOT FRAME, not the selected text/button node.
+    const parentLinks: Record<string, { id: string; name: string; type: string }> = {
+      "1:5": { id: "1:4", name: "Group", type: "GROUP" },
+      "1:4": { id: "1:1", name: "Screen", type: "FRAME" },
+    };
+    const store = {
+      subscribe: vi.fn(() => vi.fn()),
+      parentOf: vi.fn((id: string) => parentLinks[id] ?? null),
+      componentMeta: vi.fn(() => undefined),
+    };
+    return {
+      theme: uiTheme,
+      // Props the screen hands the toolbar / inspect panel / canvas / player — the wiring.
+      captured: {
+        toolbar: null as Record<string, unknown> | null,
+        inspect: null as Record<string, unknown> | null,
+        canvas: null as Record<string, unknown> | null,
+        player: null as Record<string, unknown> | null,
+        topbar: null as Record<string, unknown> | null,
+      },
+      outlineFixture: outline,
+      queueOverrides: queue,
+      editsState: edits,
+      // The daemon capabilities the gate reads (ADR-0039 / spec 32.5.1). Tests flip these; the
+      // base `figma` gate must stay compatible with the pre-ADR behaviour.
+      features: {
+        current: { figma: true, figmaNodeDepth: true } as Record<string, boolean>,
+      },
+      // The inner screen's data path. The capability gate must keep ALL of these unmounted —
+      // a new client never sends depth1 to an old host, and there is no full-Section fallback.
+      hooks: {
+        outline: vi.fn(() => ({ data: outline, isPending: false, isError: false, error: null })),
+        edits: vi.fn(() => edits.current),
+        frameStore: vi.fn(() => store),
+        watch: vi.fn(),
+      },
+      // Route params feed the initial selection (decoded by ./node-url, the real pure module).
+      routeParams: { current: {} as Record<string, string | string[]> },
+      storeMock: store,
+    };
+  },
+);
 
 // The pending queue RPC promises are the whole point of this wiring test: the callbacks the
 // screen passes to the toolbar must be the live promises (the toolbar surfaces their
@@ -96,7 +131,7 @@ vi.mock("@tanstack/react-query", () => ({
 }));
 vi.mock("expo-router", () => ({
   router: { setParams: vi.fn(async () => undefined), replace: vi.fn(async () => undefined) },
-  useLocalSearchParams: () => ({}),
+  useLocalSearchParams: () => routeParams.current,
 }));
 vi.mock("@/jira/ui/styles", () => {
   const style = new Proxy({}, { get: () => ({}) });
@@ -147,10 +182,25 @@ vi.mock("./inspect-panel", () => ({
     return React.createElement("div", { "data-testid": "inspect-panel" });
   },
 }));
-vi.mock("./top-bar", () => ({ FigmaTopBar: () => null }));
+vi.mock("./top-bar", () => ({
+  FigmaTopBar: (props: Record<string, unknown>) => {
+    captured.topbar = props;
+    // Expose the prototype trigger so tests can open the player like a user would.
+    return React.createElement("button", {
+      type: "button",
+      "data-testid": "open-prototype",
+      onClick: () => (props.onOpenPrototype as () => void)(),
+    });
+  },
+}));
 vi.mock("./assistant-panel", () => ({ FigmaAssistantPanel: () => null }));
 vi.mock("@/figma/comments/comments-panel", () => ({ CommentsPanel: () => null }));
-vi.mock("@/figma/prototype/prototype-player", () => ({ PrototypePlayer: () => null }));
+vi.mock("@/figma/prototype/prototype-player", () => ({
+  PrototypePlayer: (props: Record<string, unknown>) => {
+    captured.player = props;
+    return React.createElement("div", { "data-testid": "prototype-player" });
+  },
+}));
 vi.mock("@/figma/versions/versions-panel", () => ({ VersionsPanel: () => null }));
 
 import { FigmaFileScreen } from "./file-screen";
@@ -166,6 +216,9 @@ beforeEach(() => {
   captured.toolbar = null;
   captured.inspect = null;
   captured.canvas = null;
+  captured.player = null;
+  captured.topbar = null;
+  routeParams.current = {};
   features.current = { figma: true, figmaNodeDepth: true };
   hooks.outline.mockClear();
   hooks.edits.mockClear();
@@ -283,5 +336,57 @@ describe("FigmaFileScreen capability gate (ADR-0039)", () => {
     expect(captured.inspect).not.toBeNull();
     expect(hooks.outline).toHaveBeenCalled();
     expect(hooks.watch).toHaveBeenCalledWith(expect.objectContaining({ active: true }));
+  });
+});
+
+describe("FigmaFileScreen snapshot pinning and W6 prototype handoff", () => {
+  function openPrototype(container: HTMLElement) {
+    const trigger = container.querySelector('[data-testid="open-prototype"]') as HTMLButtonElement;
+    act(() => trigger.click());
+  }
+
+  it("pins live asset paths to the outline snapshot version while keeping the viewer editable", () => {
+    render();
+    // ADR-0039: depth1 metadata, full subtrees and rasters must all carry the SAME explicit
+    // snapshot — the outline's version — even for the live view.
+    expect(hooks.frameStore).toHaveBeenCalledWith("s1", "file", "snap-1", expect.anything());
+    expect((captured.canvas as Record<string, unknown>).version).toBe("snap-1");
+    // Read-only-ness stays keyed to the explicit historical prop, not the derived snapshot.
+    expect((captured.toolbar as Record<string, unknown>).disabled).toBe(false);
+    expect((captured.inspect as Record<string, unknown>).disabled).toBe(false);
+  });
+
+  it("the explicit historical version wins over the outline snapshot for store and canvas", () => {
+    render({ version: "v3" });
+    expect(hooks.frameStore).toHaveBeenCalledWith("s1", "file", "v3", expect.anything());
+    expect((captured.canvas as Record<string, unknown>).version).toBe("v3");
+    expect((captured.toolbar as Record<string, unknown>).disabled).toBe(true);
+    expect((captured.inspect as Record<string, unknown>).disabled).toBe(true);
+  });
+
+  it("hands the player the cached root FRAME, not the selected descendant", () => {
+    routeParams.current = { node: "1-5" }; // dash form; ./node-url decodes to "1:5"
+    const container = render();
+    openPrototype(container);
+    expect((captured.player as Record<string, unknown>).startNodeId).toBe("1:1");
+  });
+
+  it("honors the current page's flow when nothing is selected", () => {
+    const container = render();
+    openPrototype(container);
+    expect((captured.player as Record<string, unknown>).startNodeId).toBe("9:9");
+  });
+
+  it("keeps a selected root frame; an uncached layer falls back to the flow, never its subtree", () => {
+    routeParams.current = { node: "1-1" };
+    const first = render();
+    openPrototype(first);
+    expect((captured.player as Record<string, unknown>).startNodeId).toBe("1:1");
+
+    captured.player = null;
+    routeParams.current = { node: "7-7" }; // outside the cached chain
+    const second = render();
+    openPrototype(second);
+    expect((captured.player as Record<string, unknown>).startNodeId).toBe("9:9");
   });
 });

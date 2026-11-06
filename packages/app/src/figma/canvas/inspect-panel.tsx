@@ -1,6 +1,6 @@
 // Right-hand inspect panel: selected node fields, edit controls that build ops,
 // generated CSS, and an export section.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, ScrollView, type StyleProp, type ViewStyle } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import type { Theme } from "@/styles/theme";
@@ -11,6 +11,7 @@ import type {
   FigmaNode,
   FigmaBytes,
   FigmaComponentMeta,
+  FigmaPendingOp,
 } from "@jagentdesk/protocol/figma/rpc-schemas";
 import type { FigmaColor } from "./protocol-types";
 import type { ApplyFigmaEdits } from "../contracts";
@@ -28,6 +29,10 @@ import * as Clipboard from "expo-clipboard";
 import { Copy, Download, Eye, EyeOff, Lock, Unlock } from "lucide-react-native";
 
 const EXPORT_FORMATS = ["png", "jpg", "svg", "pdf"] as const;
+
+// Stable empty queue: a disabled (historical) Inspect must merge zero live pending ops, and a
+// fresh [] per render would thrash the editState memo.
+const NO_PENDING_OPS: readonly FigmaPendingOp[] = [];
 const EXPORT_SCALES = [1, 2, 4] as const;
 
 interface ExportResult {
@@ -320,6 +325,7 @@ function LayerSection({
           variant={hidden ? "ghost" : "outline"}
           leftIcon={hidden ? EyeOff : Eye}
           onPress={toggleVisibility}
+          disabled={disabled}
         >
           {hidden ? "Hidden" : "Visible"}
         </Button>
@@ -329,6 +335,7 @@ function LayerSection({
           variant={locked ? "outline" : "ghost"}
           leftIcon={locked ? Lock : Unlock}
           onPress={toggleLock}
+          disabled={disabled}
         >
           {locked ? "Locked" : "Unlocked"}
         </Button>
@@ -943,24 +950,41 @@ export function InspectPanel({
   const pendingOps = useFigmaPendingOps(serverId, fileKey);
   const [editError, setEditError] = useState<string | null>(null);
   // Queued values preview in the fields and carry a Pending badge; the raw node stays for
-  // facts the queue cannot change (export runs against the file as Figma has it).
+  // facts the queue cannot change (export runs against the file as Figma has it). A disabled
+  // panel is a historical snapshot (32.5.4): the queue previews over the LATEST file, so its
+  // values must not bleed into the old version — the merge sees an empty queue instead.
   const editState = useMemo(
-    () => (node ? nodeEditState(node, pendingOps) : null),
-    [node, pendingOps],
+    () => (node ? nodeEditState(node, disabled ? NO_PENDING_OPS : pendingOps) : null),
+    [node, pendingOps, disabled],
   );
-  useEffect(() => setEditError(null), [node?.id]);
+  useEffect(() => setEditError(null), [serverId, fileKey, node?.id]);
+
+  // A rejection in flight for node A can settle after the user switched to B (or to another
+  // file/host while this panel instance lives) and paint A's error onto B. Sequence- and
+  // identity-key the settles, like the toolbar's guarded submit.
+  const settleSeq = useRef(0);
+  const settleIdentity = useRef("");
+  settleIdentity.current = `${serverId}\u0000${fileKey}\u0000${node?.id ?? ""}`;
 
   const apply = useCallback(
     (patch: InspectEditPatch) => {
-      if (!node) return;
+      if (!node || disabled) return;
+      const seq = ++settleSeq.current;
+      const identity = settleIdentity.current;
       // buildEditOps throws synchronously on bad input (e.g. a malformed hex); CommitText
       // catches that inline. Only the async RPC result becomes a banner.
       void applyEdits(buildEditOps(node.id, patch)).then(
-        () => setEditError(null),
-        (cause: unknown) => setEditError(errorMessage(cause)),
+        () => {
+          if (settleSeq.current !== seq || settleIdentity.current !== identity) return undefined;
+          return setEditError(null);
+        },
+        (cause: unknown) => {
+          if (settleSeq.current !== seq || settleIdentity.current !== identity) return undefined;
+          return setEditError(errorMessage(cause));
+        },
       );
     },
-    [node, applyEdits],
+    [node, disabled, applyEdits],
   );
   const dismissError = useCallback(() => setEditError(null), []);
   const renderEmpty = useCallback(

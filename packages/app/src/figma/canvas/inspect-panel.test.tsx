@@ -48,8 +48,8 @@ vi.mock("react-native", () => ({
   StyleSheet: { create: (styles: unknown) => styles, hairlineWidth: 1 },
   View: ({ children, testID }: { children?: React.ReactNode; testID?: string }) =>
     React.createElement("div", { "data-testid": testID }, children),
-  Text: ({ children }: { children?: React.ReactNode }) =>
-    React.createElement("span", null, children),
+  Text: ({ children, testID }: { children?: React.ReactNode; testID?: string }) =>
+    React.createElement("span", { "data-testid": testID }, children),
   TextInput: (props: Record<string, unknown>) =>
     React.createElement("input", {
       readOnly: true,
@@ -126,9 +126,23 @@ vi.mock("@/jira/ui/primitives", () => ({
     React.createElement("span", { "data-testid": "error-banner" }, message, action ?? null),
 }));
 
+// Honour `disabled` like the real Button: the historical-snapshot tests assert write controls
+// are disabled AND that the guarded callback swallows a dispatched press.
 vi.mock("@/components/ui/button", () => ({
-  Button: ({ children, onPress }: { children?: React.ReactNode; onPress?: () => void }) =>
-    React.createElement("button", { type: "button", onClick: onPress }, children),
+  Button: ({
+    children,
+    onPress,
+    disabled,
+  }: {
+    children?: React.ReactNode;
+    onPress?: () => void;
+    disabled?: boolean;
+  }) =>
+    React.createElement(
+      "button",
+      { type: "button", disabled: Boolean(disabled), onClick: onPress },
+      children,
+    ),
 }));
 
 vi.mock("lucide-react-native", () => {
@@ -172,6 +186,7 @@ function renderPanel(
     applyEdits?: (ops: unknown[], fields?: string[]) => Promise<void>;
     linked?: boolean;
     queue?: FigmaPendingOp[];
+    disabled?: boolean;
   },
 ) {
   pendingQueueOps = opts?.queue ?? [];
@@ -186,6 +201,7 @@ function renderPanel(
         node={node}
         linked={opts?.linked ?? false}
         applyEdits={opts?.applyEdits ?? vi.fn(async () => undefined)}
+        disabled={opts?.disabled}
         componentMeta={componentMeta}
         parentOf={opts?.parentOf}
       />,
@@ -597,5 +613,148 @@ describe("InspectPanel honest edit states", () => {
     expect(container.querySelector('[data-testid="figma-inspect-panel"]')).not.toBeNull();
     expect(container.textContent ?? "").toContain("Card");
     expect(container.textContent ?? "").not.toContain("Link this file through the Figma plugin");
+  });
+});
+
+describe("InspectPanel historical snapshot (32.5.4)", () => {
+  let roots: Root[] = [];
+  let containers: HTMLDivElement[] = [];
+
+  beforeEach(() => {
+    Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
+      value: true,
+      configurable: true,
+    });
+    vi.stubGlobal("React", React);
+    roots = [];
+    containers = [];
+  });
+
+  afterEach(() => {
+    for (const root of roots) act(() => root.unmount());
+    for (const container of containers) container.remove();
+    roots = [];
+    containers = [];
+    pendingQueueOps = [];
+    fetchFigmaExportMock.mockReset();
+    fetchFigmaExportMock.mockImplementation(async () => ({ file: null, fileName: null }));
+  });
+
+  interface HistOpts {
+    disabled?: boolean;
+    queue?: FigmaPendingOp[];
+    applyEdits?: (ops: unknown[]) => Promise<void>;
+  }
+
+  function render(node: FigmaNode | null, opts: HistOpts = {}) {
+    const view = renderPanel(node, undefined, opts);
+    roots.push(view.root);
+    containers.push(view.container);
+    return {
+      container: view.container,
+      // Switch the selection on the SAME panel instance: a settle still in flight for the old
+      // node must be retired by the identity guard, not painted onto the new selection.
+      moveSelection: (next: FigmaNode, nextOpts: HistOpts = {}) => {
+        pendingQueueOps = nextOpts.queue ?? opts.queue ?? [];
+        act(() =>
+          view.root.render(
+            <InspectPanel
+              serverId="s1"
+              fileKey="file"
+              node={next}
+              linked={false}
+              applyEdits={nextOpts.applyEdits ?? opts.applyEdits ?? vi.fn(async () => undefined)}
+              disabled={nextOpts.disabled ?? opts.disabled}
+            />,
+          ),
+        );
+      },
+    };
+  }
+
+  const toggle = (container: HTMLElement, label: string) =>
+    [...container.querySelectorAll("button")].find((b) => b.textContent === label) as
+      | HTMLButtonElement
+      | undefined;
+
+  const queueFor = () => [makePendingOp({ op: "rename", nodeId: "1:1", name: "Queued rename" })];
+
+  it("keeps the live pending queue out of a disabled historical snapshot", () => {
+    const historical = render(makeNode({ id: "1:1", name: "Card" }), {
+      queue: queueFor(),
+      disabled: true,
+    });
+    expect(
+      historical.container.querySelector('[data-testid="figma-inspect-pending-note"]'),
+    ).toBeNull();
+    expect(
+      historical.container.querySelectorAll('[data-testid="figma-edit-pending"]'),
+    ).toHaveLength(0);
+    const text = historical.container.textContent ?? "";
+    expect(text).toContain("Card"); // the raw snapshot, not the queue preview
+    expect(text).not.toContain("Queued rename");
+
+    // Contrast on the same queue: the live panel previews and flags it.
+    const live = render(makeNode({ id: "1:1", name: "Card" }), { queue: queueFor() });
+    expect(
+      live.container.querySelector('[data-testid="figma-inspect-pending-note"]'),
+    ).not.toBeNull();
+    expect(live.container.textContent ?? "").toContain("Queued rename");
+  });
+
+  it("disables every write control, visibility and lock toggles included", () => {
+    const { container } = render(makeNode({ id: "1:1", name: "Card" }), { disabled: true });
+    expect(toggle(container, "Visible")?.disabled).toBe(true);
+    expect(toggle(container, "Unlocked")?.disabled).toBe(true);
+    expect(toggle(container, "Row")?.disabled).toBe(true);
+    expect(toggle(container, "None")?.disabled).toBe(true);
+  });
+
+  it("guards the apply callback too — a dispatched press cannot write to history", async () => {
+    const applyEdits = vi.fn(async () => undefined);
+    const { container } = render(makeNode({ id: "1:1", name: "Card" }), {
+      disabled: true,
+      applyEdits,
+    });
+    const button = toggle(container, "Visible") as HTMLButtonElement;
+    // Dispatch instead of .click(): jsdom suppresses clicks on disabled buttons, and the point
+    // here is that the handler itself refuses, not the DOM.
+    await act(async () => {
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(applyEdits).not.toHaveBeenCalled();
+  });
+
+  it("retires an async rejection that lands after the selection moved on", async () => {
+    let rejectEdit!: (reason?: unknown) => void;
+    const applyEdits = vi.fn(
+      () =>
+        new Promise<void>((_, reject) => {
+          rejectEdit = reject;
+        }),
+    );
+    const view = render(makeNode({ id: "1:1", name: "Card A" }), { applyEdits });
+    await act(async () => {
+      toggle(view.container, "Visible")?.click();
+    });
+    expect(applyEdits).toHaveBeenCalledTimes(1);
+    // The user moves to another layer while the rejection is still in flight.
+    view.moveSelection(makeNode({ id: "2:2", name: "Card B" }));
+    await act(async () => {
+      rejectEdit(new Error("Layer is locked"));
+    });
+    expect(view.container.querySelector('[data-testid="figma-edit-error"]')).toBeNull();
+
+    // A rejection for the CURRENT selection still paints.
+    const failing = vi.fn(async () => {
+      throw new Error("boom on B");
+    });
+    view.moveSelection(makeNode({ id: "2:2", name: "Card B" }), { applyEdits: failing });
+    await act(async () => {
+      toggle(view.container, "Visible")?.click();
+    });
+    expect(
+      view.container.querySelector('[data-testid="error-banner"]')?.textContent ?? "",
+    ).toContain("boom on B");
   });
 });
