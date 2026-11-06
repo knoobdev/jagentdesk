@@ -109,6 +109,16 @@ function firstRouteParam(value: string | string[] | undefined): string | null {
   return raw && raw.length > 0 ? raw : null;
 }
 
+// The route-page banner's OWN signature: the clear path compares against it so fixing the
+// URL never blindly wipes an unrelated focus-layer error sitting in the same banner slot.
+function routePageErrorMessage(pageId: string): string {
+  return `Page ${pageId} is not in this file.`;
+}
+
+function isRoutePageError(message: string): boolean {
+  return message.startsWith("Page ") && message.endsWith(" is not in this file.");
+}
+
 // ADR-0039 / spec 32.5.1: the viewer gates ONCE on `figmaNodeDepth`, next to the existing base
 // `figma` gate. An old host strips the `depth=1` option from `figma.file.nodes` and answers with
 // the full Section, so sending it anyway silently breaks the bounded-Section contract — this
@@ -213,28 +223,52 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
   }, [outline, pageParam]);
   const currentPageId = page?.id ?? null;
 
-  // An unknown route page errors clearly instead of silently showing another page: a wrong
-  // page (or an accidental focus of a node on it) reads as missing/wrong designs. The canvas
-  // stays page-less until the user fixes the route; nothing selects a wrong node meanwhile.
-  useEffect(() => {
-    if (!outline || !pageParam) return;
-    if (!outline.pages.some((candidate) => candidate.id === pageParam)) {
-      setFocusError(`Page ${pageParam} is not in this file.`);
-    }
-  }, [outline, pageParam]);
-
-  // URL missing a page: write the default selection back exactly ONCE per outline snapshot so
-  // sidebar/topbar/canvas converge on one canonical location without a param-echo loop. Direct
-  // setParams, not useFigmaNav.go — go() would rewrite node/view from a stale location.
+  // ONE route-state effect owns the page-param edge cases; a split would let the two halves
+  // drift (the stamp outliving the banner it was supposed to pair with).
+  // - Unknown route page: error CLEARLY — no silent fallback to another page (a wrong page
+  //   reads as missing/wrong designs) and the focus effect bails, so no accidental node.
+  // - Real page param arriving: FORGET the canonicalization stamp, so a later back/forward
+  //   (or removal) returning to the old page-less URL of the SAME outline canonicalizes again
+  //   instead of being skipped by a stale stamp forever.
+  // - Route becoming valid: clear the banner ONLY when the shown error is the one this effect
+  //   raised — an unrelated focus-layer error must survive the fix. The functional updater
+  //   returns the same value otherwise, so React bails: no re-render loop.
   const canonicalizedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!outline || pageParam) return;
+    if (!outline) return;
+    if (pageParam) {
+      if (!outline.pages.some((candidate) => candidate.id === pageParam)) {
+        // Unknown route page: error CLEARLY — no silent fallback to another page (a wrong page
+        // reads as missing/wrong designs) and the focus effect bails, so no accidental node.
+        setFocusError(routePageErrorMessage(pageParam));
+        return;
+      }
+      // A REAL page param arriving means the route is now authoritative on its own: FORGET
+      // the canonicalization stamp, so a later back/forward (or removal) returning to the
+      // old page-less URL of the SAME outline re-canonicalizes instead of being skipped by a
+      // stale stamp forever.
+      canonicalizedFor.current = null;
+      // Route became valid: clear the banner ONLY when the shown error is the one this effect
+      // raised — an unrelated focus-layer error must survive (never setFocusError(null)
+      // blindly). Returning the same value makes React bail: no re-render loop.
+      setFocusError((current) => (current && isRoutePageError(current) ? null : current));
+      return;
+    }
     const firstPage = outline.pages[0];
-    if (!firstPage) return;
-    const stamp = `${fileKey}|${outline.version ?? ""}`;
-    if (canonicalizedFor.current === stamp) return;
-    canonicalizedFor.current = stamp;
-    void router.setParams({ page: firstPage.id });
+    if (firstPage) {
+      // URL missing a page: write the default selection back exactly ONCE per outline snapshot
+      // so sidebar/topbar/canvas converge on one canonical location. Direct setParams, not
+      // useFigmaNav.go — go() would rewrite node/view from a stale location.
+      const stamp = `${fileKey}|${outline.version ?? ""}`;
+      if (canonicalizedFor.current !== stamp) {
+        canonicalizedFor.current = stamp;
+        void router.setParams({ page: firstPage.id });
+      }
+    }
+    // A page-less route is ALSO a valid route (it resolves to the first real page): deleting
+    // the param must not leave a false "Page … not in this file" banner — same signature
+    // compare, unrelated focus errors survive.
+    setFocusError((current) => (current && isRoutePageError(current) ? null : current));
   }, [outline, pageParam, fileKey]);
 
   const onWatched = useCallback(() => {

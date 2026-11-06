@@ -95,6 +95,10 @@ const {
     subscribe: vi.fn(() => vi.fn()),
     parentOf: vi.fn((id: string) => parentLinks[id] ?? null),
     componentMeta: vi.fn(() => undefined),
+    // nodeFocusBounds walks loaded roots; the shared mock keeps none (frame summaries cover
+    // known layers, and unknown ones fall through to the Tier-1 nodes RPC, as intended).
+    loadedIds: vi.fn(() => [] as string[]),
+    get: vi.fn(() => null),
   };
   return {
     theme: uiTheme,
@@ -865,6 +869,49 @@ describe("FigmaFileScreen page route sync", () => {
     expect(container.textContent).toContain("Page p9 is not in this file.");
     // No camera policy invented for a page that isn't there: nothing was focused or zoomed.
     expect(canvasProps().camera).toEqual({ zoom: 1, offsetX: 0, offsetY: 0 });
+  });
+
+  it("a return to a page-less URL re-canonicalizes: a REAL page param forgets the stale stamp", () => {
+    mountEditable();
+    expect(pageRouteWrites()).toEqual([{ page: "p1" }]); // the mount canonicalization
+    navigateRoute({ page: "p2" }); // a real page param arrives: the stamp is forgotten
+    routeParams.current = {}; // browser back/forward lands on the OLD page-less URL
+    settleRerender();
+    expect(pageRouteWrites()).toEqual([{ page: "p1" }, { page: "p1" }]); // canonicalized AGAIN
+    settleRerender();
+    settleRerender(); // the echo lands; extra renders must not re-write — no param loop
+    expect(pageRouteWrites()).toHaveLength(2);
+  });
+
+  it("correcting an unknown page clears ONLY the route banner; unrelated focus errors survive", async () => {
+    routeParams.current = { page: "p9" };
+    const { container } = mountEditable();
+    fireLayouts(800, 600);
+    expect(container.textContent).toContain("Page p9 is not in this file.");
+    navigateRoute({ page: "p2" }); // route becomes valid: the banner this effect raised clears
+    expect(container.textContent ?? "").not.toContain("is not in this file.");
+    expect(canvasProps().page.id).toBe("p2");
+
+    // An unrelated layer-focus error (deep link to a nonexistent layer) through the REAL
+    // URL-focus path — no local shortcut.
+    routeParams.current = { page: "p2", node: "88-8" };
+    settleRerender();
+    await settle();
+    expect(container.textContent).toContain("Layer 88:8 was not found in this page.");
+
+    // Re-run the route effect while the UNRELATED error is current (outline identity swap,
+    // the same mechanism the readback refresh uses): the valid-route clear must compare
+    // signatures and leave the focus error alone, never setFocusError(null) blindly.
+    hooks.outline.mockImplementation(() => ({
+      data: { ...outlineFixture },
+      isPending: false,
+      isError: false,
+      error: null,
+    }));
+    settleRerender();
+    expect(container.textContent).toContain("Layer 88:8 was not found in this page.");
+    // And the correction looped nothing: no extra page-param writes anywhere in this flow.
+    expect(pageRouteWrites()).toEqual([]);
   });
 
   it("selecting a node through the URL never re-keys the frame store (no asset remount)", () => {
