@@ -1,4 +1,5 @@
 import { parseFigmaCallbackUrl } from "@/figma/url-parse";
+import type { FigmaBrowserWait } from "./browser-sign-in";
 
 // Client-side state for the Figma connect surface (spec 32.2): the OAuth attempt in flight and
 // the client ID/secret draft, per serverId. The connect screen reads it through
@@ -9,6 +10,7 @@ export type FigmaConnectPhase =
   | { kind: "idle" }
   | { kind: "starting" }
   | { kind: "browser-opened"; attemptId: string; authorizeUrl: string; redirectUri: string }
+  | { kind: "waiting-browser" }
   | { kind: "finishing" }
   | { kind: "error"; message: string };
 
@@ -27,6 +29,7 @@ const IDLE: FigmaConnectState = {
 };
 
 const states = new Map<string, FigmaConnectState>();
+const browserRuns = new Map<string, AbortController>();
 const listeners = new Set<() => void>();
 
 function emit(): void {
@@ -61,12 +64,20 @@ export function setFigmaConnectDraft(
 }
 
 export function resetFigmaConnect(serverId: string): void {
+  browserRuns.get(serverId)?.abort();
+  browserRuns.delete(serverId);
   const current = getFigmaConnectState(serverId);
   setState(serverId, {
     ...IDLE,
     clientId: current.clientId,
     clientSecret: current.clientSecret,
   });
+}
+
+export function cancelFigmaBrowserSignIn(serverId: string): void {
+  if (getFigmaConnectState(serverId).phase.kind === "waiting-browser") {
+    browserRuns.get(serverId)?.abort();
+  }
 }
 
 export interface FigmaBeginResult {
@@ -89,6 +100,7 @@ interface FigmaConnectOps {
   }) => Promise<{ connected: boolean }>;
   runLoopback: (
     begin: FigmaBeginResult,
+    wait: FigmaBrowserWait,
   ) => Promise<{ kind: "connected" } | { kind: "error"; message: string }>;
   delegate: (input: {
     clientId: string;
@@ -121,6 +133,7 @@ function failCurrent(serverId: string, message: unknown): void {
 // Desktop: begin with the loopback redirect, hand the authorize URL to Electron, which serves
 // 127.0.0.1:8766 and opens the system browser itself (mirrors the Jira desktop flow).
 export async function startFigmaBrowserSignIn(serverId: string): Promise<void> {
+  if (browserRuns.has(serverId)) return;
   const current = getFigmaConnectState(serverId);
   if (missingCredentials(current)) {
     setState(serverId, {
@@ -133,26 +146,41 @@ export async function startFigmaBrowserSignIn(serverId: string): Promise<void> {
     return;
   }
   setState(serverId, { ...current, phase: { kind: "starting" } });
+  const controller = new AbortController();
+  browserRuns.set(serverId, controller);
   try {
-    const begun = await requireOps().begin({
+    const activeOps = requireOps();
+    const begun = await activeOps.begin({
       clientId: current.clientId.trim(),
       clientSecret: current.clientSecret.trim(),
       redirect: "loopback",
     });
-    setState(serverId, { ...getFigmaConnectState(serverId), phase: { kind: "finishing" } });
-    const outcome = await requireOps().runLoopback(begun);
+    if (browserRuns.get(serverId) !== controller) return;
+    setState(serverId, { ...getFigmaConnectState(serverId), phase: { kind: "waiting-browser" } });
+    const outcome = await activeOps.runLoopback(begun, {
+      signal: controller.signal,
+      onCode: () => {
+        if (browserRuns.get(serverId) !== controller || controller.signal.aborted) return;
+        setState(serverId, { ...getFigmaConnectState(serverId), phase: { kind: "finishing" } });
+      },
+    });
+    if (browserRuns.get(serverId) !== controller) return;
     const previous = getFigmaConnectState(serverId);
     setState(serverId, {
       ...previous,
       signedInLabel:
-        outcome.kind === "connected" ? previous.clientId.trim() : previous.signedInLabel,
+        !controller.signal.aborted && outcome.kind === "connected"
+          ? previous.clientId.trim()
+          : previous.signedInLabel,
       phase:
-        outcome.kind === "connected"
+        controller.signal.aborted || outcome.kind === "connected"
           ? { kind: "idle" }
           : { kind: "error", message: outcome.message },
     });
   } catch (error) {
-    failCurrent(serverId, error);
+    if (browserRuns.get(serverId) === controller) failCurrent(serverId, error);
+  } finally {
+    if (browserRuns.get(serverId) === controller) browserRuns.delete(serverId);
   }
 }
 

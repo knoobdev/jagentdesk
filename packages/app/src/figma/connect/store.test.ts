@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import {
   configureFigmaConnect,
+  cancelFigmaBrowserSignIn,
   getFigmaConnectState,
   requestFigmaDelegatedSignIn,
   resetFigmaConnect,
@@ -74,8 +75,57 @@ describe("connect store", () => {
       clientSecret: "sec",
       redirect: "loopback",
     });
-    expect(runLoopback).toHaveBeenCalledWith(BEGUN);
+    expect(runLoopback).toHaveBeenCalledWith(BEGUN, {
+      signal: expect.any(AbortSignal),
+      onCode: expect.any(Function),
+    });
     expect(getFigmaConnectState("srv").phase).toEqual({ kind: "idle" });
+  });
+
+  it("can cancel waiting, keeps the draft, ignores a late success and permits retry", async () => {
+    let settle!: (value: { kind: "connected" }) => void;
+    runLoopback.mockImplementationOnce((_begun, wait) => {
+      expect(wait.signal.aborted).toBe(false);
+      return new Promise((resolve) => {
+        settle = resolve;
+      });
+    });
+    setFigmaConnectDraft("srv", { clientId: "cid", clientSecret: "sec" });
+    const first = startFigmaBrowserSignIn("srv");
+    await Promise.resolve();
+    expect(getFigmaConnectState("srv").phase.kind).toBe("waiting-browser");
+    cancelFigmaBrowserSignIn("srv");
+    expect(runLoopback.mock.calls[0]![1].signal.aborted).toBe(true);
+    settle({ kind: "connected" });
+    await first;
+    expect(getFigmaConnectState("srv")).toEqual({
+      phase: { kind: "idle" },
+      clientId: "cid",
+      clientSecret: "sec",
+      signedInLabel: null,
+    });
+    await startFigmaBrowserSignIn("srv");
+    expect(begin).toHaveBeenCalledTimes(2);
+    expect(getFigmaConnectState("srv").signedInLabel).toBe("cid");
+  });
+
+  it("stops offering cancellation once the authorization code is being exchanged", async () => {
+    let settle!: (value: { kind: "connected" }) => void;
+    runLoopback.mockImplementationOnce((_begun, wait) => {
+      wait.onCode();
+      return new Promise((resolve) => {
+        settle = resolve;
+      });
+    });
+    setFigmaConnectDraft("srv", { clientId: "cid", clientSecret: "sec" });
+    const pending = startFigmaBrowserSignIn("srv");
+    await Promise.resolve();
+    expect(getFigmaConnectState("srv").phase.kind).toBe("finishing");
+    cancelFigmaBrowserSignIn("srv");
+    expect(runLoopback.mock.calls[0]![1].signal.aborted).toBe(false);
+    settle({ kind: "connected" });
+    await pending;
+    expect(getFigmaConnectState("srv").signedInLabel).toBe("cid");
   });
 
   it("surfaces a loopback error", async () => {
