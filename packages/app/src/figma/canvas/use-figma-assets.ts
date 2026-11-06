@@ -66,6 +66,15 @@ export interface FigmaAssets {
     fonts: { family: string; style: string }[];
   }) => void;
   /**
+   * The REAL ledger across every cache (fills, per-scale rasters, fonts): attempts not yet
+   * delivered and terminal failures. Backs the canvas's honest loading status (spec 32.5.1) —
+   * it reports what the caches actually hold, never fabricated counts, and probing does not
+   * observe (unlike get/request/fontAvailable, it cannot pin a key across reconciliation).
+   */
+  status: () => { pending: number; failed: number };
+  /** Targeted retry: drop failed asset attempts so the next paint re-requests them. */
+  retryFailed: () => void;
+  /**
    * Open/close one synchronous web paint (spec 32.5.1 bounded asset lifetime). Everything the
    * draw observed through get/request/fontAvailable survives; everything else is retired at
    * endDraw — decoded images, pending attempts, failed refs, and unused FontFaces (removed from
@@ -237,6 +246,21 @@ export function useFigmaAssets(input: {
         imageFills.request(...missing.imageRefs);
         rasters.get(2).request(...missing.fallbackNodeIds);
         for (const font of missing.fonts) fonts.fontAvailable(font.family, font.style);
+      },
+      // Probes the caches' real records — no observation, no pinning, no fabricated numbers:
+      // pending counts attempts not yet delivered, failed counts terminal attempts still held.
+      status: () => {
+        let pending = 0;
+        let failed = 0;
+        for (const cache of [imageFills, fonts, ...rasters.all()]) {
+          const state = cache.status();
+          pending += state.pending;
+          failed += state.failed;
+        }
+        return { pending, failed };
+      },
+      retryFailed: () => {
+        for (const cache of [imageFills, fonts, ...rasters.all()]) cache.retryFailed();
       },
       beginDraw: () => {
         // Rebuilt each begin so scales first used mid-draw are covered; per-cache begin is

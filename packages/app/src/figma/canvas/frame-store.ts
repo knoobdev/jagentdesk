@@ -196,6 +196,29 @@ export class FrameStore {
     return this.sectionQueue.pending.has(id) || this.sectionQueue.inflight.has(id);
   }
 
+  /**
+   * The REAL in-flight ledger across both queues (subtrees + shallow SECTION reads), for the
+   * canvas's honest loading status (spec 32.5.1): queued or fetching ids, never guessed from
+   * absent cache entries.
+   */
+  pendingCount(): number {
+    return (
+      this.subtreeQueue.pending.size +
+      this.subtreeQueue.inflight.size +
+      this.sectionQueue.pending.size +
+      this.sectionQueue.inflight.size
+    );
+  }
+
+  /**
+   * Targeted retry (spec 32.5.1): drop a cached verdict for one root and re-queue the read.
+   * A plain `load()` would skip it — the cache entry (e.g. a confirmed null) already exists.
+   */
+  retry(id: string): Promise<void> {
+    this.subtreeQueue.cache.delete(id);
+    return this.load([id]);
+  }
+
   loadedCount(): number {
     return this.cache.size;
   }
