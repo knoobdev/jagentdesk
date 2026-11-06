@@ -44,7 +44,7 @@ import {
 const globalWithReact = globalThis as typeof globalThis & { React?: typeof React };
 globalWithReact.React ??= React;
 
-const { theme, hosts, assets, viewLayout, platform, renderer } = vi.hoisted(() => ({
+const { theme, hosts, assets, viewLayout, platform, renderer, pixelRatio } = vi.hoisted(() => ({
   theme: {
     fontSize: { xs: 11 },
     colors: { foregroundMuted: "#888" },
@@ -68,6 +68,8 @@ const { theme, hosts, assets, viewLayout, platform, renderer } = vi.hoisted(() =
   platform: { isWeb: false },
   // Shared renderer mock: tests arm hitTest to model child-vs-Section click ownership.
   renderer: { draw: vi.fn(), hitTest: vi.fn() },
+  // RN PixelRatio stand-in for the ADR-0042 rung proof (device px per DIP).
+  pixelRatio: { current: 2 },
 }));
 
 vi.mock("react-native", () => ({
@@ -113,6 +115,7 @@ vi.mock("react-native", () => ({
   },
   StyleSheet: { create: (styles: unknown) => styles },
   Platform: { OS: "web" },
+  PixelRatio: { get: () => pixelRatio.current },
 }));
 
 vi.mock("react-native-unistyles", () => ({
@@ -351,6 +354,64 @@ describe("NativeCanvasLayer lazy render requests", () => {
       callFigmaMock.mock.calls.map(([, , payload]) => (payload as { ids: string[] }).ids.length),
     ).toEqual([20, 5]);
     layer.unmount();
+  });
+
+  it("with the fidelity capability pins rungs ceil(zoom·dpr) clamped 1..4, re-asking on crossings only (ADR-0042)", async () => {
+    pixelRatio.current = 2;
+    // zoom 1.6 × dpr 2 = 3.2 → rung 4; tiles stay PNG (no SVG claim on native).
+    const layer = mountLayer({
+      fidelity: true,
+      version: "7",
+      camera: { zoom: 1.6, offsetX: 0, offsetY: 0 },
+    });
+    await flush();
+    expect(callFigmaMock).toHaveBeenCalledTimes(1);
+    expect(callFigmaMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "figma.file.render.request",
+      expect.objectContaining({ fileKey: "file", ids: ["1:0", "1:1"], scale: 4, version: "7" }),
+    );
+
+    // Same rung, unrelated re-render: the rung-qualified ledger dedupes — no double ask.
+    layer.rerenderWith({ selectedNodeId: "1:0" });
+    await flush();
+    expect(callFigmaMock).toHaveBeenCalledTimes(1);
+
+    // Crossing DOWN a rung boundary (0.6 × 2 = 1.2 → rung 2) re-asks: the rung-4 tile must
+    // never stretch to answer the lower zoom, and the new rung is asked exactly once. (0.6
+    // keeps the frames above the 48px detail floor, so the plan still wants rasters.)
+    layer.rerenderWith({ camera: { zoom: 0.6, offsetX: 0, offsetY: 0 } });
+    await flush();
+    expect(callFigmaMock).toHaveBeenCalledTimes(2);
+    expect(callFigmaMock).toHaveBeenLastCalledWith(
+      expect.anything(),
+      "figma.file.render.request",
+      expect.objectContaining({ ids: ["1:0", "1:1"], scale: 2, version: "7" }),
+    );
+    layer.rerenderWith({ selectedNodeId: null });
+    await flush();
+    expect(callFigmaMock).toHaveBeenCalledTimes(2); // stable at rung 2 — no flood
+
+    // The legacy invariant holds under the capability too: without a PINNED version the
+    // daemon refuses svg/absolute semantics, so native keeps the exact scale-2 wire.
+    layer.unmount();
+    const live = mountLayer({ fidelity: true, version: null });
+    await flush();
+    expect(callFigmaMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "figma.file.render.request",
+      expect.objectContaining({ scale: 2 }),
+    );
+    expect(callFigmaMock.mock.calls.at(-1)?.[2]).not.toHaveProperty("format");
+    live.unmount();
+    // Contract edge (matches the daemon's non-empty-version refusal in handlers/content.ts):
+    // an empty/whitespace pin is the no-pin case — scale 2, no new fields, ever.
+    const blank = mountLayer({ fidelity: true, version: "  " });
+    await flush();
+    expect(callFigmaMock.mock.calls.at(-1)?.[2]).toEqual(expect.objectContaining({ scale: 2 }));
+    expect(callFigmaMock.mock.calls.at(-1)?.[2]).not.toHaveProperty("format");
+    blank.unmount();
+    pixelRatio.current = 2;
   });
 
   it("swapping the version drops stale tiles and re-requests the same ids for the new version", async () => {

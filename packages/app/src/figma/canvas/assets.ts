@@ -12,6 +12,57 @@ export const MAX_REFS_PER_REQUEST = 20;
 
 export type LoadBytes = (ids: readonly string[]) => Promise<Record<string, FigmaBytes | null>>;
 
+/** Raster wire formats (ADR-0042). `svg` is the outlined-text fallback class. */
+export type RasterFormat = "png" | "svg";
+/** Export bounds semantics: Figma's default ink/render crop, or the full layout box. */
+export type RasterBounds = "crop" | "absolute";
+/** One raster request class (ADR-0042): rung + wire format + bounds semantics, never mixed.
+ *  The canvas hook and the prototype's keyed store both route through this single shape so a
+ *  read can never miss the cache its fetch went into. */
+export interface RasterSpec {
+  scale: number;
+  format: RasterFormat;
+  bounds: RasterBounds;
+}
+
+/**
+ * Quantized raster rung for a device scale (ADR-0042 resolution rule): the smallest integer
+ * scale that still delivers ≥ the device pixels per Figma unit the camera is drawing at,
+ * clamped to the API's 1..4. Quantizing to integers keeps the cache lattice finite (≤4 rungs
+ * per scope instead of one cache per zoom step). The 32 MP Figma cap is a server-side fact the
+ * ladder cannot outrun: at rung 4 a >2828px-long-edge node exceeds it and the daemon answers
+ * a clamped raster or a failure, never infinite sharpness.
+ */
+export function rasterRung(deviceScale: number): number {
+  if (!Number.isFinite(deviceScale) || deviceScale <= 0) return 2;
+  return Math.min(4, Math.max(1, Math.ceil(deviceScale)));
+}
+
+/**
+ * Is this a NON-EMPTY pinned snapshot version (ADR-0042 contract with the daemon,
+ * packages/server/src/server/figma/handlers/content.ts): svg/useAbsoluteBounds are REFUSED
+ * without one. An empty or whitespace-only pin is therefore exactly the no-pin case — the
+ * whole quality path (SVG TEXT, adaptive rungs, new wire fields) stays off and the legacy
+ * scale-2 crop wire goes out untouched.
+ */
+export function isPinnedVersion(version: string | null): boolean {
+  return version !== null && version.trim() !== "";
+}
+
+/**
+ * Full cache namespace for one raster class (ADR-0042): format, bounds, scale and version all
+ * separate, so crop bytes never answer an absolute-bounds ask and an SVG never shares a
+ * ByteImageCache with the PNG of the same node at the same scale.
+ */
+export function rasterNamespace(
+  scale: number,
+  format: RasterFormat,
+  bounds: RasterBounds,
+  version: string | null,
+): string {
+  return `${scale}@${format}@${bounds}@${version ?? "live"}`;
+}
+
 /** The decoded-image surface the caches need (an HTMLImageElement on web, faked in tests). */
 export interface DecodedImageLike {
   addEventListener: (type: "load" | "error", listener: () => void) => void;
@@ -108,6 +159,15 @@ export class ByteImageCache {
   /** Diagnostic: is a decoded image cached? Probing must not count as observing. */
   has(ref: string): boolean {
     return this.records.get(ref)?.phase === "ready";
+  }
+
+  /**
+   * Non-observing phase probe: what this cache currently knows about a ref, or null when it has
+   * never been asked. The fidelity pipeline uses "failed" to trigger its one-shot PNG downgrade
+   * — `get()` cannot answer that because it starts a fetch on a miss.
+   */
+  stateOf(ref: string): "queued" | "loading" | "ready" | "failed" | null {
+    return this.records.get(ref)?.phase ?? null;
   }
 
   /**
@@ -310,6 +370,20 @@ export class FontCache {
       else if (!record.ok) failed += 1;
     }
     return { pending, failed };
+  }
+
+  /**
+   * Non-observing per-key view of the same ledger: the undelivered/failed font attempts with
+   * their `family\0style` keys, so the owner can decide whether an exact raster replacement
+   * already covers them (ADR-0042 readiness rule) instead of blanket-counting every font.
+   */
+  unresolved(): Array<{ key: string; pending: boolean }> {
+    const out: Array<{ key: string; pending: boolean }> = [];
+    for (const [key, record] of this.records) {
+      if (record.phase === "loading") out.push({ key, pending: true });
+      else if (!record.ok) out.push({ key, pending: false });
+    }
+    return out;
   }
 
   /** Targeted retry: drop failed font attempts so the next demand fetches them again. */
