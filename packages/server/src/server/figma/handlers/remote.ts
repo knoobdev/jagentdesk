@@ -9,6 +9,7 @@ import type {
   FigmaRemoteExecuteOutcome,
   FigmaRemoteGateway,
 } from "../context.js";
+import { FigmaRemoteOutcomeUnknownError } from "../remote/connector.js";
 import { figmaContent } from "./content.js";
 import type { FigmaHandler, FigmaHandlerMap } from "./types.js";
 
@@ -84,9 +85,25 @@ export async function readRemoteMetadata(
 }
 
 /**
+ * An outcome the connector could not vouch for after the call was DISPATCHED: timeout, helper
+ * restart/disconnect mid-call, or a declined native approval. The class covers the real
+ * connector; the message shapes keep faked gateways honest at this boundary.
+ */
+function isOutcomeUnknown(error: unknown): boolean {
+  if (error instanceof FigmaRemoteOutcomeUnknownError) return true;
+  const message = error instanceof Error ? error.message : "";
+  return (
+    message.includes("restarted during the write") ||
+    message.includes("timed out") ||
+    (message.includes("approval") && message.includes("unverified"))
+  );
+}
+
+/**
  * Target validation + `use_figma` execute. On success the current version memo is dropped and
- * watchers are pushed (primed with the readback-confirmed version when available); a write whose
- * outcome was lost to a helper restart still drops the stale memo (ADR-0040, no auto-retry).
+ * watchers are pushed (primed with the readback-confirmed version when available); ANY unknown
+ * dispatched outcome — timeout, restart, declined elicitation — also drops the stale memo and
+ * notifies refresh, because the side effect may have landed (ADR-0040, no auto-retry).
  */
 export async function executeRemoteWrite(
   ctx: FigmaContext,
@@ -104,8 +121,7 @@ export async function executeRemoteWrite(
     return outcome;
   } catch (error) {
     if (error instanceof FigmaServiceError) throw error;
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.includes("restarted during the write")) {
+    if (isOutcomeUnknown(error)) {
       figmaContent.watches.remoteWriteApplied(ctx, input.fileKey, null);
     }
     throw toServiceError(error);

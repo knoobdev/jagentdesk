@@ -12,6 +12,7 @@ import pino from "pino";
 import { CodexAppServerRpcError } from "../../agent/providers/codex/app-server-transport.js";
 import {
   FigmaRemoteConnector,
+  FigmaRemoteOutcomeUnknownError,
   FIGMA_REMOTE_ENDPOINT,
   FIGMA_REMOTE_MAX_CODE_BYTES,
   validateFigmaAuthorizationUrl,
@@ -38,6 +39,8 @@ class FakeNativeClient implements NativeMcpRpcClient {
     reject: (error: unknown) => void;
   }[] = [];
   private deferCalls = false;
+  private deferOauth = false;
+  private readonly pendingOauth: { resolve: (value: unknown) => void }[] = [];
   disposed = false;
 
   on(method: string, responder: Responder): void {
@@ -49,11 +52,21 @@ class FakeNativeClient implements NativeMcpRpcClient {
     this.deferCalls = true;
   }
 
+  /** Hold `mcpServer/oauth/login` promises so duplicate Connect taps race for one flow. */
+  deferOauthLogin(): void {
+    this.deferOauth = true;
+  }
+
   async request(method: string, params?: unknown): Promise<unknown> {
     this.requests.push({ method, params });
     if (method === "mcpServer/tool/call" && this.deferCalls) {
       return new Promise((resolve, reject) => {
         this.pendingToolCalls.push({ resolve, reject });
+      });
+    }
+    if (method === "mcpServer/oauth/login" && this.deferOauth) {
+      return new Promise((resolve) => {
+        this.pendingOauth.push({ resolve });
       });
     }
     const responder = this.responders.get(method);
@@ -69,6 +82,16 @@ class FakeNativeClient implements NativeMcpRpcClient {
 
   get inFlightToolCalls(): number {
     return this.pendingToolCalls.length;
+  }
+
+  resolveOauthLogin(value: unknown): void {
+    const call = this.pendingOauth.shift();
+    if (!call) throw new Error("no oauth login in flight");
+    call.resolve(value);
+  }
+
+  get inFlightOauth(): number {
+    return this.pendingOauth.length;
   }
 
   notify(method: string, params?: unknown): void {
@@ -280,6 +303,24 @@ describe("authorization URL validation", () => {
     expect(validateFigmaAuthorizationUrl("https://figma.com.evil.local/x")).toBeUndefined();
     expect(validateFigmaAuthorizationUrl(undefined)).toBeUndefined();
   });
+
+  it("accepts only the exact auth hosts, no userinfo, and 443 only", () => {
+    expect(validateFigmaAuthorizationUrl("https://figma.com/oauth")).toBe(
+      "https://figma.com/oauth",
+    );
+    expect(validateFigmaAuthorizationUrl("https://api.figma.com/oauth/xyz")).toBe(
+      "https://api.figma.com/oauth/xyz",
+    );
+    // Arbitrary subdomains are not authority: only the listed hosts pass.
+    expect(validateFigmaAuthorizationUrl("https://cdn.figma.com/oauth")).toBeUndefined();
+    expect(validateFigmaAuthorizationUrl("https://user@figma.com/oauth")).toBeUndefined();
+    expect(validateFigmaAuthorizationUrl("https://user:pw@figma.com/oauth")).toBeUndefined();
+    expect(validateFigmaAuthorizationUrl("https://figma.com:8443/oauth")).toBeUndefined();
+    // The WHATWG URL parser normalizes an explicit default port away.
+    expect(validateFigmaAuthorizationUrl("https://figma.com:443/oauth")).toBe(
+      "https://figma.com:443/oauth",
+    );
+  });
 });
 
 describe("execute", () => {
@@ -442,5 +483,327 @@ describe("identity", () => {
       state: "connected",
       identityText: "user: Jane Doe",
     });
+  });
+});
+
+// ── root-review regressions: lifecycle ownership races ─────────────────────────
+
+/** A connector whose client factory is held by the test, so disconnects race the start. */
+function makeGatedConnector(): {
+  connector: FigmaRemoteConnector;
+  releases: ((client: FakeNativeClient) => void)[];
+  spawns: { count: number };
+} {
+  const releases: ((client: FakeNativeClient) => void)[] = [];
+  const spawns = { count: 0 };
+  const connector = new FigmaRemoteConnector({
+    jagentdeskHome: home,
+    logger,
+    createClient: () =>
+      new Promise<NativeMcpRpcClient>((resolve) => {
+        spawns.count++;
+        releases.push((fake) => {
+          fake.on("initialize", () => ({}));
+          fake.on("thread/start", () => ({ thread: { id: `thr-${spawns.count}` } }));
+          fake.on("mcpServerStatus/list", () => connectedInventory());
+          fake.on("mcpServer/oauth/login", () => ({
+            authorizationUrl: "https://www.figma.com/oauth/abc",
+          }));
+          resolve(fake);
+        });
+      }),
+  });
+  return { connector, releases, spawns };
+}
+
+describe("disconnect racing a start (root review 1)", () => {
+  it("a late-created client is disposed and never adopted as the live child", async () => {
+    const { connector, releases, spawns } = makeGatedConnector();
+    const begun = connector.authBegin();
+    await settle();
+    expect(spawns.count).toBe(1);
+    await connector.disconnect(); // lands while createClient is still pending
+    const late = new FakeNativeClient();
+    releases[0]?.(late); // the factory finally delivers a child
+    await begun;
+    await settle();
+    expect(late.disposed).toBe(true); // abandoned late child disposed, not leaked
+    expect(await connector.getStatus()).toEqual({ state: "disconnected" });
+
+    // An abandoned connect cannot block the next one: reconnect starts a genuinely new process.
+    const again = connector.authBegin();
+    await settle();
+    expect(spawns.count).toBe(2);
+    const second = new FakeNativeClient();
+    releases[1]?.(second);
+    await again;
+    expect(await connector.getStatus()).toMatchObject({ state: "connected" });
+    expect(second.disposed).toBe(false);
+  });
+
+  it("a createClient failure after disconnect does not overwrite newer state", async () => {
+    const { connector, releases } = makeGatedConnector();
+    const begun = connector.authBegin();
+    await settle();
+    await connector.disconnect();
+    releases[0]?.(new FakeNativeClient()); // resolves the factory only after the disconnect
+    await begun;
+    // The late start must not stamp `unavailable`/`connecting` over the disconnected reset.
+    expect(await connector.getStatus()).toEqual({ state: "disconnected" });
+  });
+
+  it("a disconnect while initialize/thread-start await leaves no live client pointer", async () => {
+    const { connector, releases } = makeGatedConnector();
+    const begun = connector.authBegin();
+    await settle();
+    const started = new FakeNativeClient();
+    // Freeze the child after thread/start is delivered, before status is read.
+    started.deferToolCalls();
+    started.on("mcpServerStatus/list", async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return connectedInventory();
+    });
+    releases[0]?.(started);
+    await connector.disconnect(); // lands mid-status while the start still owns nothing
+    await begun;
+    expect(await connector.getStatus()).toEqual({ state: "disconnected" });
+  });
+});
+
+describe("authBegin ownership (root review 2)", () => {
+  it("duplicate Connect/Continue share one native OAuth flow", async () => {
+    const connector = makeConnector();
+    client.on("mcpServerStatus/list", () => notLoggedInInventory());
+    client.deferOauthLogin();
+    const first = connector.authBegin();
+    const second = connector.authBegin();
+    await settle();
+    expect(client.inFlightOauth).toBe(1); // not two stacked OAuth flows
+    client.resolveOauthLogin({ authorizationUrl: "https://www.figma.com/oauth/abc" });
+    const [a, b] = await Promise.all([first, second]);
+    expect(a.authorizationUrl).toBe("https://www.figma.com/oauth/abc");
+    expect(b.authorizationUrl).toBe("https://www.figma.com/oauth/abc");
+    expect(
+      client.requests.filter((request) => request.method === "mcpServer/oauth/login"),
+    ).toHaveLength(1);
+  });
+
+  it("never returns an old URL when disconnect lands mid-OAuth", async () => {
+    const connector = makeConnector();
+    client.on("mcpServerStatus/list", () => notLoggedInInventory());
+    client.deferOauthLogin();
+    const begun = connector.authBegin();
+    await settle();
+    await connector.disconnect();
+    client.resolveOauthLogin({ authorizationUrl: "https://www.figma.com/oauth/abc" });
+    const result = await begun;
+    expect(result.status).toEqual({ state: "disconnected" });
+    expect(result.authorizationUrl).toBeUndefined();
+  });
+
+  it("a new Connect after a settled one starts a fresh flow (single-flight is not sticky)", async () => {
+    const connector = await connectedConnector();
+    await connector.authBegin();
+    await connector.authBegin();
+    expect(
+      client.requests.filter((request) => request.method === "mcpServer/oauth/login"),
+    ).toHaveLength(0); // connected state never re-OAuthes
+  });
+});
+
+describe("tool-call serialization (root review 3)", () => {
+  it("one in-flight native tool call at a time, even for concurrent executes", async () => {
+    const connector = await connectedConnector();
+    client.deferToolCalls();
+    const a = connector.execute({ fileKey: "A", code: "x", description: "d" });
+    const b = connector.execute({ fileKey: "B", code: "y", description: "d" });
+    await settle();
+    expect(client.inFlightToolCalls).toBe(1); // B queues behind A; two agents never interleave
+    // The serialized lane is strict FIFO: A.use_figma, B.use_figma, A.get_metadata, B.get_metadata.
+    client.resolveToolCall({ content: [{ type: "text", text: "a applied" }] });
+    await settle();
+    expect(client.inFlightToolCalls).toBe(1); // B took the lane next — never two at once
+    client.resolveToolCall({ content: [{ type: "text", text: "b applied" }] });
+    await settle();
+    client.resolveToolCall({ content: [], structuredContent: { version: "va" } }); // A readback
+    await settle();
+    client.resolveToolCall({ content: [], structuredContent: { version: "vb" } }); // B readback
+    await expect(a).resolves.toMatchObject({ readbackAvailable: true });
+    await expect(b).resolves.toMatchObject({ readbackAvailable: true });
+  });
+
+  it("an approval declined during an earlier write is not lost to a later call", async () => {
+    const connector = await connectedConnector();
+    client.deferToolCalls();
+    const a = connector.execute({ fileKey: "A", code: "x", description: "d" });
+    const b = connector.execute({ fileKey: "B", code: "y", description: "d" });
+    await settle();
+    client.elicit({ message: "approve A?" }); // while A owns the lane; B is still queued
+    client.resolveToolCall({ content: [{ type: "text", text: "a applied" }] });
+    await expect(a).rejects.toThrow(/approval/); // A specifically fails clear
+    client.resolveToolCall({ content: [{ type: "text", text: "b applied" }] }); // B.use_figma
+    await settle(); // let B's readback enter the lane before answering it
+    client.resolveToolCall({ content: [], structuredContent: { version: "v" } }); // B.get_metadata
+    const outcomeB = await b;
+    expect(outcomeB.readbackAvailable).toBe(true); // B's outcome untouched by A's decline
+    expect(connector.elicitationCount).toBe(1);
+  });
+
+  it("a disconnect while a call is queued reports the write outcome as unverified", async () => {
+    const connector = await connectedConnector();
+    client.deferToolCalls();
+    const a = connector.execute({ fileKey: "A", code: "x", description: "d" });
+    const b = connector.execute({ fileKey: "B", code: "y", description: "d" });
+    await settle();
+    await connector.disconnect();
+    await expect(a).rejects.toThrow(/restarted during the write/); // dispose rejected it mid-call
+    await expect(b).rejects.toThrow(/restarted during the write/); // dispatched into a dead lane
+  });
+
+  it("execute -> readback does not deadlock the serialized lane", async () => {
+    const connector = await connectedConnector();
+    scriptToolReplies([
+      { content: [{ type: "text", text: "edited" }] },
+      { content: [], structuredContent: { version: "7" } },
+    ]);
+    await expect(
+      connector.execute({ fileKey: "FK", code: "x", description: "d" }),
+    ).resolves.toMatchObject({ readbackAvailable: true });
+  });
+});
+
+describe("status observation (root review 4)", () => {
+  it("getStatus re-reads native state while the process is owned, without OAuth or spawn", async () => {
+    const connector = await connectedConnector();
+    const baseline = client.requests.length;
+    client.on("mcpServerStatus/list", () => ({
+      data: [{ name: "figma", runtimeStatus: "connected", authStatus: "oAuth", tools: {} }],
+    }));
+    const status = await connector.getStatus();
+    expect(status).toEqual({ state: "connected" });
+    const after = client.requests.slice(baseline);
+    expect(after.map((request) => request.method)).toContain("mcpServerStatus/list");
+    expect(after.map((request) => request.method)).not.toContain("mcpServer/oauth/login");
+  });
+
+  it("concurrent status polls share one in-flight native refresh", async () => {
+    const connector = await connectedConnector();
+    const baseline = client.requests.filter(
+      (request) => request.method === "mcpServerStatus/list",
+    ).length;
+    client.on("mcpServerStatus/list", async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return connectedInventory();
+    });
+    await Promise.all([connector.getStatus(), connector.getStatus(), connector.getStatus()]);
+    const extra = client.requests.filter(
+      (request) => request.method === "mcpServerStatus/list",
+    ).length;
+    expect(extra - baseline).toBe(1);
+  });
+
+  it("a pending startup notification settles into an observable terminal state via polling", async () => {
+    const connector = await connectedConnector();
+    client.on("mcpServerStatus/list", () => ({
+      data: [{ name: "figma", runtimeStatus: "starting", authStatus: "oAuth", tools: {} }],
+    }));
+    client.emitNotification("mcpServer/startupStatus/updated", {
+      name: "figma",
+      status: "starting",
+    });
+    await settle();
+    expect(await connector.getStatus()).toMatchObject({ state: "connecting" });
+    client.on("mcpServerStatus/list", () => ({
+      data: [{ name: "figma", runtimeStatus: "failed", authStatus: "oAuth", tools: {} }],
+    }));
+    expect(await connector.getStatus()).toMatchObject({
+      state: "error",
+      message: /failed/,
+    });
+  });
+
+  it("a stale-generation refresh cannot stamp state over a newer lifecycle", async () => {
+    const connector = await connectedConnector();
+    client.on("mcpServerStatus/list", async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      return connectedInventory();
+    });
+    const first = connector.getStatus(); // refresh in flight, observing `connected`
+    await settle();
+    client.terminate(); // enabled stays true; the termination owns the new state
+    await first;
+    await settle(60); // the stale refresh resolves late — it must be guard-dropped
+    expect(await connector.getStatus()).toMatchObject({ state: "error" });
+  });
+});
+
+describe("elicitation logging (root review 5)", () => {
+  it("logs only the method and outcome — raw params may carry the auth URL", async () => {
+    const lines: string[] = [];
+    const capturing = pino(
+      { level: "debug" },
+      {
+        write: (chunk: string) => lines.push(chunk),
+      },
+    );
+    const connector = new FigmaRemoteConnector({
+      jagentdeskHome: home,
+      logger: capturing,
+      createClient: async () => {
+        client.on("initialize", () => ({}));
+        client.on("thread/start", () => ({ thread: { id: "thr-1" } }));
+        client.on("mcpServerStatus/list", () => connectedInventory());
+        client.on("mcpServer/oauth/login", () => ({
+          authorizationUrl: "https://www.figma.com/oauth/abc",
+        }));
+        return client;
+      },
+    });
+    await connector.authBegin();
+    client.elicit({ message: "secret consent text", url: "https://hidden.example/x" });
+    const elicitationLines = lines.filter((line) => line.includes("elicitation declined"));
+    expect(elicitationLines.length).toBe(1);
+    expect(elicitationLines[0]).not.toMatch(/secret consent text|hidden\.example/);
+    expect(elicitationLines[0]).toMatch(/"action":"decline"/);
+  });
+});
+
+describe("malformed native results (root review 7)", () => {
+  it("a result without a content array fails closed instead of empty success", async () => {
+    const connector = await connectedConnector();
+    client.on("mcpServer/tool/call", () => ({ structuredContent: { note: "no content" } }));
+    await expect(connector.execute({ fileKey: "FK", code: "x", description: "d" })).rejects.toThrow(
+      /malformed use_figma/,
+    );
+    expect(toolCallRequests()).toHaveLength(1); // parse fails before the readback dispatches
+  });
+
+  it("a non-object content block fails closed", async () => {
+    const connector = await connectedConnector();
+    client.on("mcpServer/tool/call", () => ({ content: ["surprise"] }));
+    await expect(connector.execute({ fileKey: "FK", code: "x", description: "d" })).rejects.toThrow(
+      /malformed use_figma/,
+    );
+  });
+
+  it("isError must be a strict boolean to be honored", async () => {
+    const connector = await connectedConnector();
+    client.on("mcpServer/tool/call", () => ({ content: [], isError: "false" }));
+    await expect(connector.execute({ fileKey: "FK", code: "x", description: "d" })).rejects.toThrow(
+      /malformed use_figma/,
+    );
+  });
+
+  it("a tool-call timeout is tagged outcome-unknown so the memo is dropped, never retried", async () => {
+    const connector = await connectedConnector();
+    client.on("mcpServer/tool/call", () => {
+      throw new Error("Codex app-server request timed out for mcpServer/tool/call");
+    });
+    const error = await connector
+      .execute({ fileKey: "FK", code: "x", description: "d" })
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(FigmaRemoteOutcomeUnknownError);
+    expect((error as Error).message).toMatch(/timed out/);
+    expect(toolCallRequests()).toHaveLength(1); // no auto-retry, ever
   });
 });

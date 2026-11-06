@@ -20,6 +20,7 @@ import type {
 } from "../context.js";
 import { FigmaServiceError } from "../context.js";
 import { figmaContent } from "./content.js";
+import { FigmaRemoteOutcomeUnknownError } from "../remote/connector.js";
 import {
   executeRemoteWrite,
   readRemoteMetadata,
@@ -312,6 +313,60 @@ describe("execute", () => {
       version: "",
       source: "rest",
     });
+  });
+
+  it("any unknown-outcome failure invalidates the memo — not just the restart string", async () => {
+    const unknowns: Error[] = [
+      new FigmaRemoteOutcomeUnknownError(
+        "The Figma editing helper timed out responding to use_figma; outcome unverified.",
+      ),
+      new FigmaRemoteOutcomeUnknownError(
+        "The official Figma MCP server asked for an approval while calling use_figma; " +
+          "the connector declined it and treats the outcome as unverified.",
+      ),
+      // Even an untyped Error from a foreign gateway implementation must drop the memo.
+      new Error("Codex app-server request timed out for mcpServer/tool/call"),
+    ];
+    for (const executeError of unknowns) {
+      const h = setup();
+      h.gateway.executeError = executeError;
+      const watchId = figmaContent.watches.watch(h.ctx, FILE_KEY, "s-1");
+      await expect(
+        h.call({
+          type: "figma.remote.execute.request",
+          requestId: "r1",
+          fileKey: FILE_KEY,
+          code: "x",
+          description: "d",
+        }),
+      ).rejects.toBeInstanceOf(FigmaServiceError);
+      expect(h.pushes).toContainEqual({
+        type: "figma.file.changed",
+        watchId,
+        fileKey: FILE_KEY,
+        version: "",
+        source: "rest",
+      });
+    }
+  });
+
+  it("a pre-dispatch guard failure does not push a refresh (no side effect happened)", async () => {
+    const h = setup();
+    h.gateway.executeError = new Error(
+      'Figma remote editing is disconnected. Ask the user to tap "Connect editing".',
+    );
+    figmaContent.watches.watch(h.ctx, FILE_KEY, "s-1");
+    await expect(
+      h.call({
+        type: "figma.remote.execute.request",
+        requestId: "r1",
+        fileKey: FILE_KEY,
+        code: "x",
+        description: "d",
+      }),
+    ).rejects.toBeInstanceOf(FigmaServiceError);
+    // Guard errors are pre-dispatch: the current memo stands and the viewer gets no refresh.
+    expect(h.pushes).toEqual([]);
   });
 
   it("execute failures do not fall back to the pending queue", async () => {
