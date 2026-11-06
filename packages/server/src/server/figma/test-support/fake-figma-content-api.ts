@@ -28,6 +28,7 @@ export interface RecordedCall {
   path: string;
   query: Record<string, string | number | boolean | undefined> | undefined;
   tier: string;
+  connectionId: string;
 }
 
 export type RestResponder = (input: { query: Record<string, string> }) => unknown;
@@ -58,7 +59,12 @@ export class FakeFigmaRest implements FigmaRestClient {
     query?: Record<string, string | number | boolean | undefined>;
     tier: "1" | "2" | "3";
   }): Promise<T> {
-    this.calls.push({ path: input.path, query: input.query, tier: input.tier });
+    this.calls.push({
+      path: input.path,
+      query: input.query,
+      tier: input.tier,
+      connectionId: input.connectionId,
+    });
     const responder = this.responders.get(input.path);
     if (responder === undefined)
       throw new FigmaServiceError("not_found", `fake Figma API has no handler for ${input.path}`);

@@ -303,7 +303,10 @@ describe("HttpFigmaRestClient", () => {
     const [a, b] = await Promise.all([call(), call()]);
     expect(a.file.name).toBe("Landing");
     expect(b.file.name).toBe("Landing");
-    expect(api.requests.filter((r) => r.path === "/v1/files/KEY1/meta")).toHaveLength(1);
+    const metas = api.requests.filter((r) => r.path === "/v1/files/KEY1/meta");
+    expect(metas).toHaveLength(1);
+    // Joiners are answered under the leader's authorized request: one bearer, that connection's.
+    expect(metas[0].authorization).toBe("Bearer fake-figma-access-token-0001");
     // Honest accounting: the tier saw ONE request sent; the joiner adds nothing.
     expect(rest.budget("fgc_1").tiers.find((tier) => tier.tier === "3")?.usedLastMinute).toBe(1);
   });
@@ -319,16 +322,57 @@ describe("HttpFigmaRestClient", () => {
     expect(rest.budget("fgc_1").tiers.find((tier) => tier.tier === "3")?.usedLastMinute).toBe(2);
   });
 
-  it("does not coalesce reads that differ in connection, tier, or query", async () => {
+  it("hands coalesced callers the one shared response object", async () => {
+    // The contract this pins: joiners ride the leader's parse, so the response is a shared
+    // reference, not an independent copy like before coalescing. Safe because every consumer
+    // of a getJson result maps it into freshly built DTOs — none mutates the raw response.
     api.fileMeta.set("KEY1", { name: "Landing" });
     const rest = client(new FakeTokens(["fake-figma-access-token-0001"]));
+    const call = () => rest.getJson({ ...metaRoute, connectionId: "fgc_1" });
+
+    const [a, b] = await Promise.all([call(), call()]);
+    expect(b).toBe(a);
+    const fresh = await call(); // settled → a new physical call parses a new object
+    expect(fresh).not.toBe(a);
+    expect(fresh).toEqual(a);
+  });
+
+  it("does not coalesce reads that differ in connection, tier, or query", async () => {
+    api.fileMeta.set("KEY1", { name: "Landing" });
+    api.validToken = null; // per-connection tokens below are what the assertions check
+    const issued: string[] = [];
+    const perConnection = {
+      accessToken: async (connectionId: string) => {
+        issued.push(connectionId);
+        return `token-${connectionId}`;
+      },
+      invalidate: () => {},
+    };
+    const rest = client(perConnection);
     await Promise.all([
       rest.getJson({ ...metaRoute, connectionId: "fgc_1" }),
       rest.getJson({ ...metaRoute, connectionId: "fgc_2" }),
       rest.getJson({ ...metaRoute, connectionId: "fgc_1", tier: "2" }),
       rest.getJson({ ...metaRoute, connectionId: "fgc_1", query: { ids: "1:2" } }),
     ]);
-    expect(api.requests.filter((r) => r.path === "/v1/files/KEY1/meta")).toHaveLength(4);
+    const metas = api.requests.filter((r) => r.path === "/v1/files/KEY1/meta");
+    expect(metas).toHaveLength(4);
+    // Each connection's request carries its own bearer: a joiner never rode a foreign
+    // connection's in-flight call, and each physical send minted its own token.
+    expect(metas.map((r) => r.authorization).sort()).toEqual([
+      "Bearer token-fgc_1",
+      "Bearer token-fgc_1",
+      "Bearer token-fgc_1",
+      "Bearer token-fgc_2",
+    ]);
+    expect(issued.sort()).toEqual(["fgc_1", "fgc_1", "fgc_1", "fgc_2"]);
+    // Budgets stay per connection: the fgc_2 send never touched fgc_1's counters.
+    expect(rest.budget("fgc_1").tiers.map((tier) => [tier.tier, tier.usedLastMinute])).toEqual([
+      ["1", 0],
+      ["2", 1],
+      ["3", 2],
+    ]);
+    expect(rest.budget("fgc_2").tiers.find((tier) => tier.tier === "3")?.usedLastMinute).toBe(1);
   });
 
   it("shares the 401 refresh-and-retry across coalesced callers", async () => {

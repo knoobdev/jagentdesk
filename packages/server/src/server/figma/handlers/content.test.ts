@@ -2252,7 +2252,10 @@ describe("outline coalescing", () => {
     const [a, b] = await Promise.all([starter, joiner]);
     expect(a.outline).not.toBeNull();
     expect(b.outline).toBe(a.outline); // one flight, one result
-    expect(fixture.api.rest.callsTo(`/v1/files/${FILE}`)).toHaveLength(1);
+    const reads = fixture.api.rest.callsTo(`/v1/files/${FILE}`);
+    expect(reads).toHaveLength(1);
+    // The shared read stays on the owning file's connection and tier — never a cross-connection ride.
+    expect(reads[0]).toMatchObject({ connectionId: "fgc_fake", tier: "1" });
     // The version resolve belongs to the flight too: one meta lookup, not two.
     expect(fixture.api.rest.callsTo(`/v1/files/${FILE}/meta`)).toHaveLength(1);
   });
@@ -2270,6 +2273,8 @@ describe("outline coalescing", () => {
       .sort();
     // The two v9 reads share one flight; the live read is its own key and never joins them.
     expect(versions).toEqual(["v1", "v9"]);
+    for (const call of fixture.api.rest.callsTo(`/v1/files/${FILE}`))
+      expect(call).toMatchObject({ connectionId: "fgc_fake", tier: "1" });
     expect(pinnedB.outline).toBe(pinnedA.outline);
     expect(live.outline!.version).toBe("v1");
     expect(pinnedA.outline!.version).toBe("v9");
