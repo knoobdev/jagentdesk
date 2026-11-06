@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// W9 real E2E for Figma standalone browsing + playback (ADR-0037, ADR-0038, spec 32.11).
+// W9 real E2E for Figma standalone browsing + playback (ADR-0037, ADR-0038, ADR-0039, spec 32.11).
 //
 // FULL E2E, not a scaffold test: boots an isolated daemon and a real Electron app on reserved
 // ports (the production daemon on 6767 is never restarted), drives the actual renderer through
@@ -15,8 +15,12 @@
 //                                        the vault itself. Absence is a RED at the credentials gate
 //                                        BEFORE any heavy boot.
 //   JAGENTDESK_FIGMA_E2E_FILE_KEY        real file key or full figma.com URL; defaults to the
-//                                        parent-verified file (2026-11-06: /me 200, meta 200,
-//                                        depth-1/2 200, no 403 on this connection).
+//                                        parent's real USER file (private, not a public fixture):
+//                                        /me 200, meta 200, no 403 on this connection (2026-11-06).
+//                                        The parent supplies the token only during the actual
+//                                        final run — until then the harness stays RED on missing
+//                                        prerequisites and the real-website browse gate stays
+//                                        exercised separately from everything else.
 //   JAGENTDESK_FIGMA_E2E_FRAME_IDS       optional comma list of playback ids (default: from the outline)
 //   JAGENTDESK_FIGMA_STANDALONE_E2E_ARTIFACT_DIR  evidence output directory
 //
@@ -26,10 +30,18 @@
 // are labelled as such. The real-website browse gate stays BLOCKED until an actual authenticated
 // selection happens inside the guest — no injected location.assign, no DOM injection into Figma.
 //
-// The >=500-frame criterion counts FRAME nodes through the WHOLE document tree: this file nests
-// screens inside SECTIONs (depth-2 yields 24 top FRAME + 209 SECTION), so a top-level count
-// cannot prove it. That deep count is a pre-boot read-only data diagnostic against
-// api.figma.com directly; the app's own REST trace must still show no full-document fetch.
+// The >=500-frame criterion (ADR-0039 / spec 32.11 #17) counts frame screens through the whole
+// tree INCLUDING the ones nested inside SECTIONs: the parent's real read is depth=3, which
+// returns 3546 FRAME nodes and 422 flowStartingPoints across 15 pages (17.4 MB in 9.4 s). The
+// pre-boot data diagnostic reproduces that exact depth=3 request shape. An API-only run NEVER
+// claims the <=3 s cold goal — that is the click-to-canvas UI gate's evidence alone.
+//
+// The recording-proxy trace must keep three request classes distinct and correctly bounded:
+// the bounded depth<=3 outline call, Section metadata at depth 1 (W4 optional capability /
+// W5/W7 adaptive Sections), and full FRAME reads over /nodes (<=10 ids, pinned version, ids
+// drawn from the outline's frame set — a non-outline id means a whole SECTION tree was
+// downloaded, which spec 32.11 #17 forbids for viewport frames). New behavior rides the
+// server_info capability advertisement, so an old host is gated, not guessed.
 import { spawn, execFileSync } from "node:child_process";
 import { createCipheriv, randomBytes } from "node:crypto";
 import http from "node:http";
@@ -61,10 +73,19 @@ const CONNECTION_ID = "fgc_w9_harness";
 const WORKSPACE_ID = "figma-standalone-w9";
 const FIGMA_API_ORIGIN = "https://api.figma.com";
 const FIGMA_FILE_KINDS = new Set(["design", "file", "proto"]);
-// Parent-verified 2026-11-06. A version that moved on is reported, not failed: playback pins the
-// live version, and this file is a snapshot, not a frozen fixture.
+// The parent's real user file — PRIVATE, not a public fixture. Parent-verified 2026-11-06:
+// /me 200, meta 200, no 403; depth=3 yields 3546 FRAME nodes + 422 flowStartingPoints across
+// 15 pages (17.4 MB, 9.4 s). A version move or a changed count is reported, not failed:
+// playback pins the live version and these numbers are a live user file, not a frozen fixture.
 const VERIFIED_FILE_KEY = "aGsoYCbRX1CH7o1yuaN7Hf";
 const VERIFIED_FILE_VERSION = "2418589277144612492";
+const PARENT_DEPTH3_FACTS = {
+  frames: 3546,
+  flowStartingPoints: 422,
+  pages: 15,
+  mb: 17.4,
+  seconds: 9.4,
+};
 
 const GATE_NAMES = [
   "desktop-build",
@@ -264,15 +285,28 @@ async function figmaApiGet(token, apiPath, query) {
 }
 
 /**
- * Count FRAME nodes through the whole document tree. The verified file nests screens inside
- * SECTIONs (depth-2 gives 24 top FRAME + 209 SECTION), so only the recursive total answers
- * spec 32.11 #2's >=500-frame criterion.
+ * Count nodes of a type through the WHOLE document tree. Frame screens nest inside SECTIONs
+ * (depth-2 yields 24 top FRAME + 209 SECTION), so only a recursive count answers the
+ * >=500-frame criterion (ADR-0039 / spec 32.11 #17) — and SECTION itself must be counted
+ * through the tree, not just at top level.
  */
-function countFrameNodes(node) {
+function countNodesByType(node, type) {
   if (!node || typeof node !== "object") return 0;
-  let total = String(node.type).toUpperCase() === "FRAME" ? 1 : 0;
-  for (const child of node.children ?? []) total += countFrameNodes(child);
+  let total = String(node.type).toUpperCase() === type ? 1 : 0;
+  for (const child of node.children ?? []) total += countNodesByType(child, type);
   return total;
+}
+
+/** Page (CANVAS) count and flow-start count from the real depth=3 answer, both cross-checked. */
+function countFlowStartingPoints(document, body) {
+  const fromRoot = Object.keys(body?.flows ?? {}).length;
+  const walk = (node) => {
+    if (!node || typeof node !== "object") return 0;
+    let total = Array.isArray(node.flowStartingPoints) ? node.flowStartingPoints.length : 0;
+    for (const child of node.children ?? []) total += walk(child);
+    return total;
+  };
+  return Math.max(fromRoot, walk(document));
 }
 
 // ── recording pass-through proxy ─────────────────────────────────────────────
@@ -566,24 +600,52 @@ async function main() {
     evidence.fileMeta = { name: fileMeta.name, version: fileMeta.version ?? null };
     passGate("file-access", { name: fileMeta.name });
 
-    const fullDocument = await figmaApiGet(accessToken, `/v1/files/${encodeURIComponent(fileKey)}`);
-    if (fullDocument.status !== 200) {
-      failGate(
-        "file-size-500-frames",
-        `full-document data diagnostic answered ${fullDocument.status}`,
-      );
+    // ADR-0039 / spec 32.11 #17 real read: depth=3 returns every frame screen INCLUDING those
+    // nested inside SECTIONs (parent-verified: 3546 FRAME + 422 flowStartingPoints / 15 pages,
+    // 17.4 MB in 9.4 s). This is a pre-boot read-only DATA diagnostic against api.figma.com —
+    // an API-only run here never claims the <=3 s cold goal; that is the click-to-canvas UI gate.
+    const depth3Start = Date.now();
+    const depth3 = await figmaApiGet(accessToken, `/v1/files/${encodeURIComponent(fileKey)}`, {
+      depth: 3,
+    });
+    evidence.dataDiagnostic = {
+      shape: `GET /v1/files/${fileKey}?depth=3`,
+      ms: Date.now() - depth3Start,
+      parentVerified: PARENT_DEPTH3_FACTS,
+      note: "parent's private user file — cross-checked as facts reported, never as a public fixture",
+    };
+    if (depth3.status !== 200) {
+      failGate("file-size-500-frames", `depth=3 data diagnostic answered ${depth3.status}`);
     } else {
-      const frames = countFrameNodes(fullDocument.body?.document);
-      evidence.totalFrameNodes = frames;
+      const frames = countNodesByType(depth3.body?.document, "FRAME");
+      const sections = countNodesByType(depth3.body?.document, "SECTION");
+      const pages = (depth3.body?.document?.children ?? []).filter(
+        (node) => String(node?.type).toUpperCase() === "CANVAS",
+      ).length;
+      const flows = countFlowStartingPoints(depth3.body?.document, depth3.body);
+      Object.assign(evidence.dataDiagnostic, {
+        frames,
+        sections,
+        pages,
+        flowStartingPoints: flows,
+      });
       if (frames >= minFrames)
         passGate("file-size-500-frames", {
           frames,
-          method: "recursive FRAME count of the full document (pre-boot read-only data diagnostic)",
+          sections,
+          pages,
+          flowStartingPoints: flows,
+          method:
+            "recursive frame-screen count of the depth=3 document — SECTION-nested screens included (pre-boot read-only data diagnostic)",
         });
       else
         failGate(
           "file-size-500-frames",
-          `real file has ${frames} FRAME nodes across the whole tree — spec 32.11 #2 demands >= ${minFrames}; pick a bigger file for green`,
+          `real file has ${frames} FRAME nodes through the tree (SECTIONs included) — spec 32.11 #17 demands >= ${minFrames}; pick a bigger file for green`,
+        );
+      if (frames !== PARENT_DEPTH3_FACTS.frames || flows !== PARENT_DEPTH3_FACTS.flowStartingPoints)
+        console.log(
+          `  note       live depth-3 read is ${frames} FRAME / ${flows} flowStartingPoints / ${pages} pages — parent verified ${PARENT_DEPTH3_FACTS.frames}/${PARENT_DEPTH3_FACTS.flowStartingPoints}/${PARENT_DEPTH3_FACTS.pages} (live user file, reported not failed)`,
         );
     }
     if (evidence.fileMeta.version && evidence.fileMeta.version !== VERIFIED_FILE_VERSION) {
@@ -698,8 +760,16 @@ async function main() {
     client = await connectDaemonClient(daemonPort);
     const serverInfo = client.getLastServerInfoMessage();
     assert(serverInfo, "no server_info after connect");
+    // ADR-0039 behavior (depth<=3 outline, SECTION-nested frames, no whole-SECTION viewport
+    // downloads) rides the capability advertisement: an old host is gated by what it actually
+    // advertises — recorded here so the evidence shows the host's real feature set and version.
     if (serverInfo.features?.figma === true && serverInfo.features?.figmaPlayback === true) {
-      passGate("capability-advertisement", { figma: true, figmaPlayback: true });
+      passGate("capability-advertisement", {
+        figma: true,
+        figmaPlayback: true,
+        hostVersion: serverInfo.version ?? null,
+        advertisedFeatures: serverInfo.features,
+      });
     } else {
       failGate(
         "capability-advertisement",
@@ -791,7 +861,11 @@ async function main() {
     }
 
     // ── URL trace gate: real proof of which REST shapes the app touched ─────────
-    runUrlTraceGate(proxy.log, fileKey);
+    runUrlTraceGate(
+      proxy.log,
+      fileKey,
+      evidence.outlineFrameIds ? new Set(evidence.outlineFrameIds) : null,
+    );
   } catch (error) {
     console.error(`Figma standalone E2E failed. Artifacts: ${artifactDir}`);
     console.error(error);
@@ -973,6 +1047,13 @@ async function runApiGates(client, jagentdeskHome, proxy, ctx) {
     failGate("api-outline", "outline response has no version — playback cannot pin a snapshot");
     return;
   }
+  const outlineFrameIds = [
+    ...new Set((outline.pages ?? []).flatMap((p) => (p.frames ?? []).map((frame) => frame.id))),
+  ];
+  evidence.outlineFrameIds =
+    configuredFrames.length > 0
+      ? [...new Set([...outlineFrameIds, ...configuredFrames])]
+      : outlineFrameIds;
   const outlineFrameCount = (outline.pages ?? []).reduce(
     (sum, p) => sum + (p.frames?.length ?? 0),
     0,
@@ -1173,33 +1254,68 @@ async function runUiPlaybackGates(
   ram.afterCloseKb = treeRssKb(electronPid).totalKb || ram.afterCloseKb;
 }
 
-function runUrlTraceGate(proxyLog, fileKey) {
+/**
+ * REST trace gate (spec 32.11 #15, ADR-0039 #17): the recording proxy proves WHICH request
+ * shapes the app made, keeping the three classes distinct:
+ *   - outline: a BOUNDED /v1/files/:key call with depth <= 3 and a pinned version (W5/W7 move
+ *     the outline to depth 3 so SECTION-nested screens appear; W4's optional Section metadata
+ *     rides depth 1)
+ *   - Section metadata: depth=1 calls, never a whole-SECTION tree download
+ *   - full FRAME reads: /v1/files/:key/nodes — <=10 ids, pinned version, and every id must be
+ *     an outline frame id; a non-outline id means the app downloaded a whole SECTION tree
+ * The app must NEVER issue an unbounded (no depth) full-document /v1/files/:key GET.
+ */
+// eslint-disable-next-line eslint(complexity) -- every request class records its own offender.
+function runUrlTraceGate(proxyLog, fileKey, allowedNodeIds) {
   const restEntries = proxyLog.filter((entry) => entry.pathname.startsWith("/v1/"));
   const offenders = [];
+  const outlineDepths = [];
+  let sectionMetadataCalls = 0;
+  let nodesBatches = 0;
   for (const entry of restEntries) {
     if (entry.pathname === `/v1/files/${fileKey}`) {
-      const depth = Number(entry.search?.depth ?? Number.POSITIVE_INFINITY);
-      if (depth > 2)
-        offenders.push(
-          `full-document GET /v1/files/${fileKey} (depth=${entry.search?.depth ?? "unset"})`,
-        );
-    }
-    if (entry.pathname === `/v1/files/${fileKey}/nodes` && entry.method === "GET") {
+      const rawDepth = entry.search?.depth;
+      const depth = rawDepth === undefined ? Number.POSITIVE_INFINITY : Number(rawDepth);
+      if (!Number.isFinite(depth) || depth > 3) {
+        offenders.push(`full-document GET /v1/files/${fileKey} (depth=${rawDepth ?? "unset"})`);
+      } else if (depth === 1) {
+        sectionMetadataCalls += 1;
+      } else {
+        outlineDepths.push(depth);
+        if (!entry.search?.version)
+          offenders.push(`outline files call at depth=${depth} without a pinned version`);
+      }
+    } else if (entry.pathname === `/v1/files/${fileKey}/nodes` && entry.method === "GET") {
+      nodesBatches += 1;
       const ids = String(entry.search?.ids ?? "")
         .split(",")
         .filter(Boolean);
+      if (ids.length === 0) offenders.push("nodes call with no ids");
       if (ids.length > 10) offenders.push(`nodes call carried ${ids.length} ids (max 10)`);
       if (!entry.search?.version) offenders.push("nodes call without a pinned version");
+      if (allowedNodeIds) {
+        const strays = ids.filter((id) => !allowedNodeIds.has(id));
+        if (strays.length > 0)
+          offenders.push(
+            `nodes call fetched non-outline ids (whole-SECTION download?): ${strays.join(",")}`,
+          );
+      }
     }
   }
   const distinct = [...new Set(restEntries.map((entry) => `${entry.method} ${entry.pathname}`))];
-  if (offenders.length === 0 && restEntries.length > 0) {
-    passGate("net-url-trace", { restCalls: restEntries.length, distinctPaths: distinct });
-  } else if (restEntries.length === 0) {
+  if (restEntries.length === 0) {
     failGate(
       "net-url-trace",
       "the app made no REST calls through the recording proxy — nothing to prove",
     );
+  } else if (offenders.length === 0) {
+    passGate("net-url-trace", {
+      restCalls: restEntries.length,
+      outlineBoundedDepths: [...new Set(outlineDepths)],
+      sectionMetadataCalls,
+      nodesBatches,
+      distinctPaths: distinct,
+    });
   } else {
     failGate("net-url-trace", `${offenders.join("; ")} — paths: ${distinct.join(", ")}`);
   }
