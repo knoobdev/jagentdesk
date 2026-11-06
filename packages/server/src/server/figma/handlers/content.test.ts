@@ -799,6 +799,26 @@ describe("render", () => {
     expect(fixture.api.rest.callsTo(`/v1/images/${FILE}`)).toHaveLength(1);
   });
 
+  it("does not consume a legacy pre-upgrade render/ entry for a pinned snapshot", async () => {
+    respondRender();
+    // Released code cached the plugin's LIVE raster bytes under plain `render/...@version`.
+    // The verified-REST path must ignore that mixed-source namespace entirely rather than
+    // trust a pre-upgrade entry as history: the pinned request still fetches from Tier-1.
+    await fixture.api.ctx.cache.putBytes(`render/${FILE}/1:2@2x@png@v1`, {
+      mimeType: "image/png",
+      data: Buffer.from([0x4c, 0x69, 0x76, 0x65]),
+    });
+    fixture.api.link.linked.add(FILE);
+    fixture.api.link.exportImpl = () => {
+      throw new Error("legacy live bytes must not answer a pinned request");
+    };
+    const out = await render("v1");
+    expect(out.source).toBe("rest");
+    expect([...Buffer.from(out.images["1:2"]!.dataBase64, "base64")]).toEqual([...PNG]);
+    expect(fixture.api.rest.callsTo(`/v1/images/${FILE}`)).toHaveLength(1);
+    expect(fixture.api.link.toolCalls).toHaveLength(0);
+  });
+
   async function render(version?: string) {
     return fixture.handlers["figma.file.render.request"](
       {

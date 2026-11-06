@@ -1210,9 +1210,10 @@ export class FigmaContent {
 
   /**
    * Cache per nodeId@scale@version. `live` marks reads whose version is the CURRENT one:
-   * only those may use the plugin export (32.1). Pinned snapshots never read the live
-   * namespace, so plugin bytes rasterized from an open document can't answer them unverified,
-   * and REST bytes stay under their own (fileKey, version) namespace (32.8).
+   * only those may use the plugin export (32.1). Live and verified-REST bytes keep separate
+   * namespaces, and both are NEW: released code cached mixed-source plugin bytes under plain
+   * `render/...@version`, whose legacy entries neither branch reads — a pre-upgrade live byte
+   * can never answer a pinned snapshot unverified.
    */
   private async renderNodes(
     ctx: FigmaContext,
@@ -1274,7 +1275,10 @@ export class FigmaContent {
   /**
    * One multi-id Tier-1 call per batch; the S3 urls never leave the daemon (32.8). Answers
    * either the versioned snapshot or the unversioned read of an unlinked file — both are
-   * exact-version REST bytes, so they share the version-keyed namespace.
+   * exact-version REST bytes, so they share the version-keyed namespace. That namespace is
+   * NEW: released code stored plugin-live rasters under plain `render/...@version`, and those
+   * mixed-source entries are never consumed here, so a pre-upgrade live byte can't answer a
+   * pinned snapshot unverified.
    */
   private async renderRest(
     ctx: FigmaContext,
@@ -1287,7 +1291,7 @@ export class FigmaContent {
     const images: Record<string, FigmaBytes | null> = {};
     const misses: string[] = [];
     const cacheKey = (id: string): string =>
-      `render/${file.fileKey}/${id}@${scale}x@${format}@${version}`;
+      `render-rest/${file.fileKey}/${id}@${scale}x@${format}@${version}`;
     for (const id of ids) {
       const cached = await ctx.cache.getBytes(cacheKey(id));
       if (cached) images[id] = toBase64Bytes(cached);
