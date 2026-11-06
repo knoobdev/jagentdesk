@@ -11,7 +11,7 @@ on:
         required: true
         type: string
       only:
-        description: "Build every asset, or only re-cut the Android APK or the iOS IPA of an existing release"
+        description: "Build every asset, or only re-cut Android, iOS, or Apple Silicon macOS for an existing release"
         required: false
         default: all
         type: choice
@@ -19,6 +19,7 @@ on:
           - all
           - android
           - ios
+          - macos-arm64
 
 concurrency:
   group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
@@ -109,26 +110,13 @@ jobs:
   desktop:
     name: Desktop (${{ matrix.name }})
     needs: [validate, create-release]
-    if: github.event_name != 'workflow_dispatch' || inputs.only == 'all'
+    if: github.event_name != 'workflow_dispatch' || inputs.only == 'all' || inputs.only == 'macos-arm64'
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: linux-x64
-            runner: ubuntu-22.04
-            build_args: "--linux --x64"
-          - name: windows-x64
-            # Pin to windows-2022 (VS2022): windows-latest ships VS18, which
-            # node-gyp 11 can't detect ("could not find a version of Visual
-            # Studio 2017 or newer"), breaking the better-sqlite3 native build.
-            runner: windows-2022
-            build_args: "--win --x64"
-          - name: macos-arm64
-            runner: macos-14
-            build_args: "--mac --arm64"
-          - name: macos-x64
-            runner: macos-15-intel
-            build_args: "--mac --x64"
+        # Windows 2022 retains VS2022 for node-gyp. macOS 14 runners are retired.
+        # Select the matrix before expansion so a repair starts only Apple Silicon.
+        include: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.only == 'macos-arm64' && '[{"name":"macos-arm64","runner":"macos-15","build_args":"--mac --arm64"}]' || '[{"name":"linux-x64","runner":"ubuntu-22.04","build_args":"--linux --x64"},{"name":"windows-x64","runner":"windows-2022","build_args":"--win --x64"},{"name":"macos-arm64","runner":"macos-15","build_args":"--mac --arm64"},{"name":"macos-x64","runner":"macos-15-intel","build_args":"--mac --x64"}]') }}
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Check out source
@@ -229,7 +217,7 @@ jobs:
   mobile-android:
     name: Mobile Android APK
     needs: [validate, create-release]
-    if: github.event_name != 'workflow_dispatch' || inputs.only != 'ios'
+    if: github.event_name != 'workflow_dispatch' || inputs.only == 'all' || inputs.only == 'android'
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
