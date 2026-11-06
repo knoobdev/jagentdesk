@@ -615,9 +615,9 @@ function outlineRowIndent(depth: number): number {
 interface OutlineRowProps {
   serverId: string;
   fileKey: string;
-  /** Route-pinned version for full-tree reads (old behavior, unchanged). */
-  version: string | null;
-  /** Snapshot version the displayed outline came from; required for depth-1. */
+  /** Snapshot version the displayed outline came from: depth-1 section reads
+   * AND expanded-frame subtree reads use it, so the tree and its children
+   * always describe the SAME snapshot (the handler requires a non-empty one). */
   pinnedVersion: string | null;
   canReadNodeDepth: boolean;
   /** One-open-per-page rule, shared by frames and sections; node ids are
@@ -633,7 +633,7 @@ interface OutlineRowProps {
 function FrameRow({
   serverId,
   fileKey,
-  version,
+  pinnedVersion,
   frame,
   depth,
   expanded,
@@ -643,8 +643,10 @@ function FrameRow({
   search,
 }: OutlineRowProps & { frame: SectionAwareSummary; depth: number; expanded: boolean }) {
   // The subtree under a frame is fetched from figma.file.nodes only once that frame is open
-  // (32.5.2) — the outline alone carries just the frame summaries.
-  const nodes = useFigmaNodes(serverId, fileKey, expanded ? [frame.id] : [], version);
+  // (32.5.2) — the outline alone carries just the frame summaries — and it reads against the
+  // outline's pinned version so the row and its layers come from one snapshot, never a mix of
+  // the live tree and an older outline.
+  const nodes = useFigmaNodes(serverId, fileKey, expanded ? [frame.id] : [], pinnedVersion);
   const frameNode = expanded ? (nodes.data?.nodes?.[frame.id] ?? null) : null;
   const children = useMemo(
     () => (frameNode?.children ?? []).filter((child) => matchesSearch(child, search)),
@@ -688,7 +690,6 @@ function FrameRow({
 function SectionRow({
   serverId,
   fileKey,
-  version,
   pinnedVersion,
   canReadNodeDepth,
   section,
@@ -733,7 +734,6 @@ function SectionRow({
   const nested: OutlineRowProps = {
     serverId,
     fileKey,
-    version,
     pinnedVersion,
     canReadNodeDepth,
     expandedIds,
@@ -826,7 +826,6 @@ function OutlineRows({
 function PageRow({
   serverId,
   fileKey,
-  version,
   pinnedVersion,
   canReadNodeDepth,
   page,
@@ -841,7 +840,6 @@ function PageRow({
 }: {
   serverId: string;
   fileKey: string;
-  version: string | null;
   pinnedVersion: string | null;
   canReadNodeDepth: boolean;
   page: FigmaPage;
@@ -908,7 +906,6 @@ function PageRow({
           <OutlineRows
             serverId={serverId}
             fileKey={fileKey}
-            version={version}
             pinnedVersion={pinnedVersion}
             canReadNodeDepth={canReadNodeDepth}
             expandedIds={expandedIds}
@@ -944,8 +941,9 @@ function PagesAndLayers({
   const [search, setSearch] = useState("");
   const pages = useMemo(() => outline.data?.pages ?? [], [outline.data]);
   // The outline response pins the snapshot its tree came from; depth-1 section
-  // reads must run against the SAME version (the handler requires a non-empty
-  // one — null here simply keeps the shallow read disabled, never a fallback).
+  // reads AND expanded-frame subtree reads run against the SAME version (the
+  // handler requires a non-empty one — null here simply keeps the shallow read
+  // disabled, never a fallback).
   const pinnedVersion = outline.data?.version ?? null;
   const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(() => new Set());
   const openRow = useCallback((rowId: string, wasExpanded: boolean) => {
@@ -983,7 +981,6 @@ function PagesAndLayers({
           key={page.id}
           serverId={serverId}
           fileKey={fileKey}
-          version={version}
           pinnedVersion={pinnedVersion}
           canReadNodeDepth={canReadNodeDepth}
           page={page}

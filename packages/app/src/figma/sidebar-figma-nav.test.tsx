@@ -343,6 +343,18 @@ const shallowSection = (sectionId: string, children: Record<string, unknown>[]) 
   error: null,
 });
 
+// A depth-1 payload child is a raw FigmaNode: childSummaries keeps only what
+// the payload actually carries (id, name, type, absoluteBoundingBox) and
+// SKIPS anything missing a real bbox — the fixture must carry the legitimate
+// neutral facts, or the helper is right to drop the row.
+const childNode = (id: string, type: string, extra: Record<string, unknown> = {}) => ({
+  id,
+  name: `${type} ${id}`,
+  type,
+  absoluteBoundingBox: { x: 0, y: 0, width: 240, height: 160 },
+  ...extra,
+});
+
 describe("SidebarFigmaNav — Section outline (ADR-0039)", () => {
   it("renders the hierarchy strictly by parentId — section children nest under the section, roots stay roots", () => {
     openFile();
@@ -390,20 +402,24 @@ describe("SidebarFigmaNav — Section outline (ADR-0039)", () => {
     // Opening the file must not prefetch every section — no id-targeted request.
     expect(calls.sectionChildren.filter(([, , id]) => id !== null)).toEqual([]);
     queriesState.sectionChildren = shallowSection("3:1", [
-      summary("3:2", "FRAME"),
-      summary("3:3", "SECTION"),
+      childNode("3:2", "FRAME"),
+      childNode("3:3", "SECTION"),
+      // Payload child with no absoluteBoundingBox: the authoritative helper
+      // skips it rather than fabricating a zero box.
+      { id: "3:9", name: "FRAME 3:9", type: "FRAME" },
     ]);
     fireEvent.click(screen.getByTestId("figma-nav-section-3:1"));
     expect(calls.sectionChildren).toContainEqual(["srv1", "Kx7QmP2vTnYhW3cLd", "3:1", "147:0a9b"]);
     // The helper returns REAL child summaries; nested frames render as frame rows.
     expect(screen.getByTestId("figma-nav-frame-3:2")).toBeDefined();
     expect(screen.getByTestId("figma-nav-section-3:3")).toBeDefined();
+    expect(screen.queryByTestId("figma-nav-frame-3:9")).toBeNull();
   });
 
   it("recurses: expanding a nested section from a depth-1 result fires another depth-1 read", () => {
     openFile();
     queriesState.outline = openOutline([page("0:1", [summary("4:1", "SECTION")])]);
-    queriesState.sectionChildren = shallowSection("4:1", [summary("4:2", "SECTION")]);
+    queriesState.sectionChildren = shallowSection("4:1", [childNode("4:2", "SECTION")]);
     renderNav();
     fireEvent.click(screen.getByTestId("figma-nav-section-4:1"));
     fireEvent.click(screen.getByTestId("figma-nav-section-4:2"));
@@ -431,6 +447,9 @@ describe("SidebarFigmaNav — Section outline (ADR-0039)", () => {
     expect(calls.nodes.some(([, , ids]) => (ids as string[]).includes("5:1"))).toBe(false);
     fireEvent.click(screen.getByTestId("figma-nav-frame-5:1"));
     expect(calls.nodes.some(([, , ids]) => (ids as string[]).includes("5:1"))).toBe(true);
+    // The subtree read is pinned to the DISPLAYED outline's version, so a frame
+    // row and its layers can never come from two different snapshots.
+    expect(calls.nodes).toContainEqual(["srv1", "Kx7QmP2vTnYhW3cLd", ["5:1"], "147:0a9b"]);
     expect(screen.getByTestId("figma-nav-layer-5:2")).toBeDefined();
   });
 
