@@ -12,11 +12,23 @@
 # BOTH required inputs are supplied by the parent at run time (the user is AWAY: no auth
 # prompts, no manual-login attempt; missing website session stays BLOCKED, no green full-E2E):
 #   JAGENTDESK_FIGMA_E2E_ACCESS_TOKEN    a valid access token (no refresh, no client
-#                                        credentials, no vault reads by the harness)
+#                                        credentials, no vault reads by the harness). These
+#                                        E2E_* vars stay in THIS process only — stripped from
+#                                        the daemon/desktop/Metro child env so the booted app
+#                                        never re-reads them (the isolated daemon home's sealed
+#                                        vault is its only credential source).
 #   JAGENTDESK_FIGMA_E2E_FILE_KEY        real file key/URL — REQUIRED; no user-file default
 #                                        lives in the harness (the parent's file is private,
 #                                        its link stays in /tmp evidence only)
 #   JAGENTDESK_FIGMA_E2E_FRAME_IDS       comma-separated frame ids (default: discovered from the outline)
+#   JAGENTDESK_FIGMA_STANDALONE_E2E_NO_PICKER_PROBE=1
+#                                        user-AWAY mode: the native probe already reached
+#                                        figma.com/login and was closed — do NOT open a second
+#                                        login window. The website-selection gates are recorded
+#                                        BLOCKED/UNEXERCISED (never skipped to green) while the
+#                                        independent API proof and real UI read/perf gates run.
+#                                        Default acceptance still requires ALL-PASS, so this
+#                                        mode reports overall RED.
 # A missing credential, 403, or website session is a RED with the unexercised gates listed —
 # it never skips to green.
 #

@@ -18,8 +18,23 @@
 //                                        AWAY — a missing website session is simply BLOCKED, no
 //                                        manual-login attempt, no full-E2E green).
 //   JAGENTDESK_FIGMA_E2E_FILE_KEY        real file key or full figma.com URL the account can read.
-//   JAGENTDESK_FIGMA_E2E_FRAME_IDS       optional comma list of playback ids (default: from the outline)
+//   JAGENTDESK_FIGMA_E2E_FRAME_IDS       optional comma list of playback ids (default: NON-SECTION
+//                                        independent FRAME/COMPONENT/INSTANCE/GROUP summaries or
+//                                        flow starts from the depth=3 read — never a SECTION id)
+//   JAGENTDESK_FIGMA_STANDALONE_E2E_NO_PICKER_PROBE
+//                                        "1" = user AWAY mode: the native picker probe already
+//                                        reached figma.com/login and was closed, so NO second
+//                                        guest window is opened (no auth request). The website
+//                                        gates are recorded BLOCKED (selection) / UNEXERCISED
+//                                        (cancel) — never skipped to green — while the independent
+//                                        API proof and the real UI read/perf gates still run.
+//                                        Overall acceptance stays ALL-PASS, so this mode is RED.
 //   JAGENTDESK_FIGMA_STANDALONE_E2E_ARTIFACT_DIR  evidence output directory
+//
+// Credential vars are NOT propagated to the booted children: JAGENTDESK_FIGMA_E2E_* is stripped
+// from the daemon/desktop/Metro commonEnv so the token belongs only to THIS harness process and
+// the isolated daemon home's sealed vault — the app never re-reads the E2E environment, and the
+// caller's own provider config stays unforced.
 //
 // Identity is populated ONLY from the real `GET /v1/me` answer — never a fabricated account row,
 // no dummy client credentials. The `Browse files` control (W2 ships it as figma-nav-browse /
@@ -123,6 +138,15 @@ function blockedGate(name, detail) {
 function unimplementedGate(name, detail) {
   gates.set(name, { status: "UNIMPLEMENTED", detail });
   console.log(`  UNIMPL     ${name}: ${detail}`);
+}
+/**
+ * Explicit UNEXERCISED: a gate whose real evidence could not be produced this run (e.g. no
+ * rendering instrumentation available, or the no-probe mode declines to open a login window).
+ * Recorded with its reason — never silently skipped to green, never a renamed diagnostic pass.
+ */
+function unexercisedGate(name, detail) {
+  gates.set(name, { status: "UNEXERCISED", detail });
+  console.log(`  UNEXERCISED ${name}: ${detail}`);
 }
 
 function assert(condition, message) {
@@ -347,6 +371,46 @@ function countFlowStartingPoints(document, body) {
   return Math.max(fromRoot, walk(document));
 }
 
+/**
+ * Default playback ids for the harness's own calls: REAL independent drawing summaries —
+ * FRAME/COMPONENT/INSTANCE/GROUP/COMPONENT_SET plus flow-start nodes — collected recursively
+ * from the depth=3 tree. Never SECTION ids: requesting a whole SECTION from /nodes downloads
+ * its full subtree (what spec 32.11 #17 forbids for viewport frames).
+ */
+function collectPlaybackCandidates(document, body) {
+  const allowed = new Set(["FRAME", "COMPONENT", "INSTANCE", "GROUP", "COMPONENT_SET"]);
+  const ids = [];
+  const kinds = {};
+  const walk = (node) => {
+    if (!node || typeof node !== "object") return;
+    const type = String(node.type).toUpperCase();
+    if (allowed.has(type) && node.id) {
+      if (!ids.includes(String(node.id))) {
+        ids.push(String(node.id));
+        kinds[type] = (kinds[type] ?? 0) + 1;
+      }
+    }
+    for (const child of node.children ?? []) walk(child);
+  };
+  walk(document);
+  const flowStartIds = [];
+  const collectFlowStarts = (entries) => {
+    for (const entry of entries ?? []) {
+      const id = entry?.node_id ?? entry?.nodeId ?? entry?.id;
+      if (id && !flowStartIds.includes(String(id))) flowStartIds.push(String(id));
+    }
+  };
+  for (const flow of Object.values(body?.flows ?? {}))
+    collectFlowStarts(flow?.flowStartingPoints ?? flow);
+  const walkFlows = (node) => {
+    if (!node || typeof node !== "object") return;
+    collectFlowStarts(node.flowStartingPoints);
+    for (const child of node.children ?? []) walkFlows(child);
+  };
+  walkFlows(document);
+  return { ids: [...new Set([...flowStartIds, ...ids])], kinds, flowStartIds };
+}
+
 // ── recording pass-through proxy ─────────────────────────────────────────────
 // The daemon is pointed at this proxy via JAGENTDESK_FIGMA_API_URL, so every REST call the app
 // made is captured as a URL trace — Tier-1 budget counts alone cannot prove the absence of a
@@ -568,6 +632,12 @@ async function main() {
     .map((id) => id.trim())
     .filter(Boolean);
   const fileKey = fileKeyInput ? parseFileKeyInput(fileKeyInput) : null;
+  // NO-PICKER-PROBE MODE (user AWAY): the native probe already reached figma.com/login and was
+  // closed (see evidence/native-picker-manual-state.json). Opening another guest window would
+  // just request auth again. With this mode the website-selection gates are recorded
+  // BLOCKED/UNEXERCISED — never skipped to green — while the independent API proof and the
+  // real UI read/perf gates still run. Default acceptance still requires ALL gates PASS.
+  const noPickerProbe = process.env.JAGENTDESK_FIGMA_STANDALONE_E2E_NO_PICKER_PROBE === "1";
 
   // ── pre-boot gates: everything cheap is proven before ANY heavy process starts ──
   let exitCode = 0;
@@ -668,6 +738,12 @@ async function main() {
       // independent NON-SECTION drawing summaries (GROUP/COMPONENT/INSTANCE/…) may legitimately
       // be fetched by id, so "not an outline frame id" alone is not an offender.
       evidence.sectionNodeIds = collectNodeIdsByType(depth3.body?.document, "SECTION");
+      // Default playback ids are NON-SECTION independent summaries (or flow starts), never a
+      // whole SECTION — the harness's own outline/playback requests use these below.
+      const candidates = collectPlaybackCandidates(depth3.body?.document, depth3.body);
+      evidence.playbackCandidates = candidates.ids.slice(0, 40);
+      evidence.playbackCandidateKinds = candidates.kinds;
+      evidence.flowStartCandidateCount = candidates.flowStartIds.length;
       Object.assign(evidence.dataDiagnostic, {
         frames,
         sections,
@@ -713,6 +789,15 @@ async function main() {
   seedJAgentDeskHome(jagentdeskHome, listen, workspaceRoot);
   seedFigmaState(jagentdeskHome, { accessToken, account });
 
+  // Children must not inherit the harness's credential contract: the token/file key belong to
+  // THIS process (pre-boot diagnostics + seeding). Outside the isolated daemon home the app
+  // gets the token through the sealed vault only; leaking E2E_* vars into Metro/desktop
+  // (and their env-hash caches) buys nothing and risks re-reading them as configuration.
+  const childEnv = { ...process.env };
+  for (const key of Object.keys(childEnv))
+    if (key.startsWith("JAGENTDESK_FIGMA_E2E_")) delete childEnv[key];
+  if (noPickerProbe) childEnv.JAGENTDESK_FIGMA_STANDALONE_E2E_NO_PICKER_PROBE = "1";
+
   const children = [];
   let browser = null;
   let client = null;
@@ -722,7 +807,7 @@ async function main() {
   try {
     proxy = await startFigmaProxy();
     const commonEnv = {
-      ...process.env,
+      ...childEnv,
       JAGENTDESK_HOME: jagentdeskHome,
       JAGENTDESK_LISTEN: listen,
       JAGENTDESK_DAEMON_ENDPOINT: `localhost:${daemonPort}`,
@@ -784,10 +869,25 @@ async function main() {
     // A REST /nodes URL alone cannot tell the logical caller apart (canvas subtree loads
     // are allowed <=50 ids per spec 32.5.1; the playback RPC contract is <=10). So the
     // playback limit is proven against the actual WS request messages the UI sent, not
-    // against raw proxy lines.
-    const uiRequests = { types: new Set(), playbackFrameCounts: [], nodesIdCounts: [] };
+    // against raw proxy lines. The listener is registered here — BEFORE the product-UI
+    // reload in runUiPlaybackGates re-creates the socket — and matches the daemon PORT
+    // regardless of host (the app may dial localhost: not just 127.0.0.1).
+    const uiRequests = {
+      types: new Set(),
+      playbackFrameCounts: [],
+      nodesIdCounts: [],
+      apiPlaybackFrameCounts: [],
+      apiNodesIdCounts: [],
+      playerOpened: false,
+    };
     page.on("websocket", (ws) => {
-      if (!ws.url().includes(`127.0.0.1:${daemonPort}`)) return;
+      let url;
+      try {
+        url = new URL(ws.url());
+      } catch {
+        return;
+      }
+      if (url.port !== String(daemonPort)) return;
       ws.on("framesent", (frame) => {
         try {
           // Wire shape (daemon-client figmaRequest): { type, ...params } — params are flat.
@@ -835,17 +935,23 @@ async function main() {
     // ADR-0039 behavior (depth<=3 outline, SECTION-nested frames, no whole-SECTION viewport
     // downloads) rides the capability advertisement: an old host is gated by what it actually
     // advertises — recorded here so the evidence shows the host's real feature set and version.
-    if (serverInfo.features?.figma === true && serverInfo.features?.figmaPlayback === true) {
+    // figmaNodeDepth is the depth-capable outline advertisement; without it the SECTION-nested
+    // frames and bounded-depth trace classes are not trustworthy, so it is REQUIRED, not assumed.
+    const features = serverInfo.features ?? {};
+    const requiredCapabilities = ["figma", "figmaPlayback", "figmaNodeDepth"];
+    const missingCapabilities = requiredCapabilities.filter((k) => features[k] !== true);
+    if (missingCapabilities.length === 0) {
       passGate("capability-advertisement", {
         figma: true,
         figmaPlayback: true,
+        figmaNodeDepth: true,
         hostVersion: serverInfo.version ?? null,
         advertisedFeatures: serverInfo.features,
       });
     } else {
       failGate(
         "capability-advertisement",
-        `server_info.features=${JSON.stringify(serverInfo.features)}`,
+        `server_info.features=${JSON.stringify(features)} — missing advertisement: ${missingCapabilities.join(", ")}`,
       );
     }
 
@@ -885,21 +991,18 @@ async function main() {
     }
 
     // ── UI: real selection through the picker guest (W1 seed bridge) ────────────
-    await runPickerGate(page, browser, artifactDir, { fileKey });
+    await runPickerGate(page, browser, artifactDir, { fileKey, noPickerProbe });
 
-    // ── API-integration proof (WS RPCs; NOT the player E2E) ────────────────────
-    await runApiGates(client, jagentdeskHome, proxy, {
-      fileKey,
-      fileMetaName: evidence.fileMeta.name,
-      configuredFrames,
-      evidence,
-      uiRequests,
-    });
-
-    // ── UI: open the file and the player through real clicks ───────────────────
+    // ── cold UI FIRST: file added through the product RPC, then the real click while
+    // the daemon's outline/nodes caches are still empty. Running the harness's own API
+    // gates first would warm those caches and make ui-file-open a WARM-only proof —
+    // unable to carry the <=3 s cold bar (spec 32.11 #2). ───────────────────────────
+    await runFileAddGate(client, { fileKey, fileMetaName: evidence.fileMeta.name });
     await runUiPlaybackGates(page, ram, canvasDeadlineMs, minFps, electronMainPid, fileKey, {
       artifactDir,
       uiRequests,
+      proxy,
+      jagentdeskHome,
       refreshUi: async () => {
         // The file entered the daemon store over WS; reload and re-navigate the real product UI
         // so the files home shows it — a user-visible refresh, not DOM injection into Figma.
@@ -907,6 +1010,14 @@ async function main() {
         await waitForDesktopStatus(page);
         await openFigmaSection();
       },
+    });
+
+    // ── API-integration proof AFTER the UI (harness's own WS RPCs; labelled) ──────
+    await runApiGates(client, jagentdeskHome, proxy, {
+      fileKey,
+      configuredFrames,
+      evidence,
+      uiRequests,
     });
 
     // ── app-tree RAM gate ──────────────────────────────────────────────────────
@@ -981,7 +1092,23 @@ async function main() {
 }
 
 /** Opens the guest through the W1 preload bridge and clicks a REAL Files entry — no injected URL. */
-async function runPickerGate(page, browser, artifactDir, { fileKey }) {
+async function runPickerGate(page, browser, artifactDir, { fileKey, noPickerProbe }) {
+  if (noPickerProbe) {
+    // User AWAY mode: the native probe already reached figma.com/login and was closed
+    // (evidence/native-picker-manual-state.json). Do NOT open another guest window — that
+    // would request auth again. The website gates stay honestly BLOCKED / UNEXERCISED, never
+    // skipped to green; every other gate (API + real UI read/perf) still runs in full.
+    blockedGate(
+      "ui-picker-selection",
+      "no-probe mode (user away): website session unverified, no second login window opened; the earlier probe reached figma.com/login and was closed",
+    );
+    unexercisedGate(
+      "ui-picker-cancel",
+      "no-probe mode (user away): cancel path unexercised because no guest window was opened",
+    );
+    evidence.pickerProbe = "skipped-no-auth";
+    return;
+  }
   const openGuest = async () => {
     const before = new Set(browser.contexts().flatMap((context) => context.pages()));
     await page.evaluate(() => {
@@ -1101,27 +1228,41 @@ async function runPickerGate(page, browser, artifactDir, { fileKey }) {
   else failGate("ui-picker-cancel", `closing the guest resolved ${JSON.stringify(cancelled)}`);
 }
 
-/** WS outline/playback + warm cache — API-integration proof (labelled; not the player E2E). */
-// eslint-disable-next-line eslint(complexity) — each API step records its own gate verdict.
-async function runApiGates(client, jagentdeskHome, proxy, ctx) {
-  const { fileKey, fileMetaName, configuredFrames, evidence, uiRequests } = ctx;
+/**
+ * Product-RPC file add — the UI gates need the file in the daemon store, and this doubles as
+ * api-integration proof of figma.files.add.request, cross-checked against the real /meta name.
+ * Runs BEFORE the cold UI click; it is seeding config, not the warm-up the API gates cause.
+ */
+async function runFileAddGate(client, { fileKey, fileMetaName }) {
   const added = await figmaRequest(client, "figma.files.add.request", {
     connectionId: CONNECTION_ID,
     url: `https://www.figma.com/design/${fileKey}/w9-e2e`,
   });
   if (added.error) {
     failGate("api-file-add", `${classifyFigmaError(added.error)} (${added.error.message})`);
-    return;
+    return false;
   }
   if (added.file?.name !== fileMetaName) {
     failGate(
       "api-file-add",
       `daemon stored "${added.file?.name}" but /v1/files/${fileKey}/meta said "${fileMetaName}"`,
     );
-    return;
+    return false;
   }
   passGate("api-file-add", { name: added.file.name });
+  return true;
+}
 
+/**
+ * WS outline/playback + warm cache — API-integration proof (labelled; not the player E2E).
+ * Runs AFTER the cold UI gates: the harness's own outline/playback pushes would otherwise
+ * warm the daemon caches and leave ui-file-open a warm-only proof. Because the UI has run,
+ * the daemon may already be warm here — that is recorded honestly (restCalls in the gate
+ * measurements), and the cold <=3 s claim belongs to ui-file-open alone.
+ */
+// eslint-disable-next-line eslint(complexity) — each API step records its own gate verdict.
+async function runApiGates(client, jagentdeskHome, proxy, ctx) {
+  const { fileKey, configuredFrames, evidence, uiRequests } = ctx;
   const outlineStart = Date.now();
   const outlineResponse = await figmaRequest(client, "figma.file.outline.request", { fileKey });
   const outlineMs = Date.now() - outlineStart;
@@ -1156,17 +1297,28 @@ async function runApiGates(client, jagentdeskHome, proxy, ctx) {
   });
   evidence.outlineVersion = outline.version;
 
+  // Default playback ids: NON-SECTION independent drawing summaries from the depth=3 read
+  // (FRAME/COMPONENT/INSTANCE/GROUP/COMPONENT_SET or flow starts) — never a whole SECTION id,
+  // which would download the SECTION's full subtree. Env override still wins.
   const frameIds = [
     ...new Set(
       configuredFrames.length > 0
-        ? configuredFrames.slice(0, 10)
-        : (outline.pages?.[0]?.frames ?? []).map((frame) => frame.id).slice(0, 10),
+        ? configuredFrames.slice(0, maxPlaybackBatch)
+        : (evidence.playbackCandidates ?? []).slice(0, maxPlaybackBatch),
     ),
   ];
-  assert(frameIds.length >= 1, "no real frames to play back — the outline returned zero frames");
-  // Correlated RPC trace: the harness's own playback requests join the UI WS list so the
-  // <=10 contract is enforced on every playback caller, REST shapes included.
-  uiRequests?.playbackFrameCounts.push(frameIds.length);
+  assert(
+    frameIds.length >= 1,
+    "no real frames to play back — the depth=3 diagnostic returned no independent (non-SECTION) summaries; pass JAGENTDESK_FIGMA_E2E_FRAME_IDS",
+  );
+  const sectionIdSet = new Set(evidence.sectionNodeIds ?? []);
+  assert(
+    frameIds.every((id) => !sectionIdSet.has(id)),
+    `default playback ids include a SECTION id (${frameIds.filter((id) => sectionIdSet.has(id)).join(",")}) — whole-SECTION downloads are forbidden`,
+  );
+  // Correlated RPC trace: the harness's OWN playback requests are recorded separately from
+  // the UI's WS-captured messages — API-pushed counts never substitute for UI-side evidence.
+  uiRequests?.apiPlaybackFrameCounts.push(frameIds.length);
 
   const proxyMark = proxy.log.length;
   const coldStart = Date.now();
@@ -1190,6 +1342,7 @@ async function runApiGates(client, jagentdeskHome, proxy, ctx) {
     ms: evidence.coldPlaybackMs,
     restCalls: proxy.log.length - proxyMark,
     prototypeInteractions: cold.prototype?.interactions?.length ?? 0,
+    note: "runs after the UI gates by design (own API tests later); if restCalls === 0 these ids were already cached by the real UI open — the cold <=3 s proof belongs to ui-file-open alone, this gate is API-integration proof",
   });
 
   // Warm: same pinned version must add ZERO proxy traffic (trace-level proof, not budget counts).
@@ -1246,7 +1399,15 @@ async function runApiGates(client, jagentdeskHome, proxy, ctx) {
   };
 }
 
-/** File open + player driven through the actual product UI clicks. */
+/**
+ * File open + player driven through the actual product UI clicks. Runs BEFORE the harness's
+ * API gates so the <=3 s canvas bar is a COLD proof (empty daemon outline/nodes cache), and
+ * the warm reopen is recorded separately after close. Canvas-view pan/zoom is measured with
+ * CTRL+wheel zoom and real drags, asserting the render camera (canvas CTM) actually changed
+ * for every input; the fps bar uses real presentation evidence (pixels changed per frame) —
+ * rAF cadence is recorded as a diagnostic only and never renamed into a pass.
+ */
+// eslint-disable-next-line eslint(complexity) — each UI step records its own gate verdict.
 async function runUiPlaybackGates(
   page,
   ram,
@@ -1254,8 +1415,20 @@ async function runUiPlaybackGates(
   minFpsValue,
   electronPid,
   fileKey,
-  { artifactDir, refreshUi },
+  { artifactDir, uiRequests, proxy, jagentdeskHome, refreshUi },
 ) {
+  // Cold precondition: the daemon's outline/nodes handlers must not have fetched anything yet.
+  // (file-add's /meta call is not a content-cache write — rest.ts only caches in content.ts —
+  // and the pre-boot /me, /meta and depth=3 diagnostics hit api.figma.com directly, never
+  // through this proxy.) A warm witness here means the run order drifted and the <=3 s number
+  // is no longer a cold proof.
+  const cacheDir = path.join(jagentdeskHome, "figma", "cache");
+  const cacheFilesBefore = fs.existsSync(cacheDir) ? countFiles(cacheDir) : 0;
+  const preClickContentRest = proxy.log.filter(
+    (entry) =>
+      entry.pathname === `/v1/files/${fileKey}/nodes` ||
+      (entry.pathname === `/v1/files/${fileKey}` && entry.search?.depth !== undefined),
+  );
   await refreshUi();
   const card = page.getByTestId(`figma-file-${fileKey}`);
   if (!(await card.isVisible().catch(() => false))) {
@@ -1266,27 +1439,130 @@ async function runUiPlaybackGates(
     return;
   }
   const openStart = Date.now();
+  const proxyMark = proxy.log.length;
   await card.click();
   const topBar = page.getByTestId("figma-top-bar");
   let canvasAt = null;
   try {
     await topBar.waitFor({ state: "visible", timeout: 15_000 });
-    await page.waitForSelector("canvas", { timeout: canvasDeadline });
+    // The file canvas view mounts its own <canvas id="jagentdesk-figma-canvas"> — mount of
+    // THAT element is the product proof, not any <canvas> in the tree.
+    await page.waitForSelector("#jagentdesk-figma-canvas", { timeout: canvasDeadline });
     canvasAt = Date.now() - openStart;
   } catch {
     /* the 3 s gate below records the miss */
   }
-  if (canvasAt !== null && canvasAt <= canvasDeadline) {
-    passGate("ui-file-open", { canvasVisibleMs: canvasAt, budgetMs: canvasDeadline });
+  const mountRest = proxy.log
+    .slice(proxyMark)
+    .filter((entry) => entry.pathname.startsWith(`/v1/files/${fileKey}`));
+  const coldWitness = {
+    cacheFilesBefore,
+    preClickContentRest: preClickContentRest.map((e) => e.pathname),
+  };
+  const isCold = cacheFilesBefore === 0 && preClickContentRest.length === 0;
+  const coldLabel = isCold
+    ? "cold (daemon had not fetched outline/nodes before the click)"
+    : `WARM witness: cache ${cacheFilesBefore} files, ${preClickContentRest.length} outline/nodes REST before click — <=3s is not a cold proof`;
+  if (canvasAt !== null && canvasAt <= canvasDeadline && isCold) {
+    passGate("ui-file-open", {
+      canvasVisibleMs: canvasAt,
+      budgetMs: canvasDeadline,
+      cold: true,
+      ...coldWitness,
+      restDuringMountWindow: mountRest.map((e) => e.pathname),
+      note: coldLabel,
+    });
   } else {
     failGate(
       "ui-file-open",
-      `canvas not mounted within ${canvasDeadline}ms of the real card click (took ${canvasAt ?? ">15s top-bar"}ms)`,
+      `#jagentdesk-figma-canvas not COLD-mounted within ${canvasDeadline}ms of the real card click (took ${canvasAt ?? ">15s top-bar"}ms; ${coldLabel}; ${JSON.stringify(coldWitness)})`,
     );
   }
   await page.screenshot({ path: path.join(artifactDir, "file-canvas.png") });
 
-  // Player through the product menu: top bar → More → Prototype.
+  // ── pan/zoom fps on the CANVAS VIEW — before the player (the player has no wheel/pan
+  // handler; measuring inputs against it would prove nothing). Every input must move the
+  // render camera: read the canvas 2D context transform before/after each gesture.
+  const canvasExists = await page.evaluate(
+    () => !!document.getElementById("jagentdesk-figma-canvas"),
+  );
+  if (!canvasExists) {
+    const idleRaf = await sampleRafCadence(page, 1_000);
+    unexercisedGate(
+      "perf-playback-fps",
+      `no #jagentdesk-figma-canvas element to drive pan/zoom against — rAF cadence recorded as diagnostic only: ${JSON.stringify(idleRaf)}`,
+    );
+  } else {
+    const readCtm = async () =>
+      await page.evaluate(() => {
+        const c = document.getElementById("jagentdesk-figma-canvas");
+        const ctx = c?.getContext?.("2d");
+        if (!ctx) return null;
+        const t = ctx.getTransform();
+        return [t.a, t.b, t.c, t.d, t.e, t.f];
+      });
+    const canvasBox = await page.locator("#jagentdesk-figma-canvas").boundingBox();
+    const cx = canvasBox ? canvasBox.x + canvasBox.width / 2 : 400;
+    const cy = canvasBox ? canvasBox.y + canvasBox.height / 2 : 300;
+    await page.mouse.move(cx, cy);
+    const idleRaf = await sampleRafCadence(page, 1_000);
+    const inputs = [];
+    const applyInput = async (label, action) => {
+      const before = await readCtm();
+      await action();
+      await delay(200); // let the camera state round-trip through React into the renderer
+      const after = await readCtm();
+      inputs.push({ label, ctmChanged: JSON.stringify(before) !== JSON.stringify(after) });
+    };
+    // Start the presentation sampler FIRST, then keep the viewport genuinely changing for the
+    // whole sample: ctrl+wheel zoom, plain-wheel pan, real pointer-drag pan.
+    const presentation = sampleCanvasPresentation(page, 2_500);
+    const wheelZoom = async () => {
+      await page.keyboard.down("Control");
+      await page.mouse.move(cx, cy);
+      await page.mouse.wheel(0, -240);
+      await page.keyboard.up("Control");
+    };
+    const wheelPan = async () => {
+      await page.mouse.move(cx, cy);
+      await page.mouse.wheel(0, -240);
+    };
+    const dragPan = async () => {
+      await page.mouse.move(cx, cy);
+      await page.mouse.down();
+      await page.mouse.move(cx - 180, cy - 60, { steps: 10 });
+      await page.mouse.up();
+    };
+    for (let round = 0; round < 2; round += 1) {
+      await applyInput(`ctrl+wheel zoom #${round + 1}`, wheelZoom);
+      await applyInput(`plain-wheel pan #${round + 1}`, wheelPan);
+      await applyInput(`pointer-drag pan #${round + 1}`, dragPan);
+    }
+    const presented = await presentation;
+    const everyInputMovedCamera = inputs.every((i) => i.ctmChanged);
+    const gate = {
+      inputs,
+      everyInputMovedCamera,
+      presentation: presented,
+      idleRafCadence: idleRaf,
+      note: "presentation = canvas pixels that actually changed per frame during live inputs; rAF is cadence, recorded diagnostic only",
+    };
+    if (!presented) {
+      unexercisedGate(
+        "perf-playback-fps",
+        `canvas 2D context unreadable — active inputs ran (${JSON.stringify(inputs)}) and rAF cadence ${JSON.stringify(idleRaf)} recorded as diagnostic; the >= ${minFpsValue} rendering bar stays UNEXERCISED, not passed`,
+      );
+    } else if (presented.presentedFps >= minFpsValue && everyInputMovedCamera) {
+      passGate("perf-playback-fps", gate);
+    } else {
+      failGate(
+        "perf-playback-fps",
+        `presented ${presented?.presentedFps} fps (gate >= ${minFpsValue}) with per-input CTM proof ${everyInputMovedCamera}: ${JSON.stringify(gate)}`,
+      );
+    }
+  }
+
+  // ── Player through the product menu: top bar → More → Prototype. ────────────────
   await page.getByTestId("figma-top-bar-more").click();
   await page.getByTestId("figma-prototype").click();
   const playerMarker = page.getByTestId("figma-show-hotspots");
@@ -1307,74 +1583,120 @@ async function runUiPlaybackGates(
       await playerMarker.waitFor({ state: "visible", timeout: 15_000 });
     }
   }
-  try {
-    await page.waitForSelector("canvas", { timeout: 15_000 });
-  } catch {
-    failGate("ui-player-open", "the player opened but no frame canvas was mounted");
+  // Player green requires its OWN stage canvas with loaded frame pixels: any <canvas> can
+  // match the file canvas still mounted behind the player, and the toolbar alone is not a
+  // frame. The file canvas is identified by id, so the player stage is the LARGEST canvas
+  // without it — and it must have painted content, proving a frame actually loaded.
+  const playerStage = await page.evaluate(() => {
+    const candidates = [...document.querySelectorAll("canvas:not(#jagentdesk-figma-canvas)")];
+    const canvas = candidates.sort((a, b) => b.width * b.height - a.width * a.height)[0];
+    if (!canvas) return null;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    const w = Math.min(160, canvas.width);
+    const h = Math.min(160, canvas.height);
+    const x = Math.floor((canvas.width - w) / 2);
+    const y = Math.floor((canvas.height - h) / 2);
+    const data = ctx.getImageData(x, y, w, h).data;
+    let paintedSamplePixels = 0;
+    for (let i = 3; i < data.length; i += 4) if (data[i] > 0) paintedSamplePixels += 1;
+    return {
+      canvasCount: candidates.length,
+      width: canvas.width,
+      height: canvas.height,
+      paintedSamplePixels,
+    };
+  });
+  if (!playerStage || playerStage.width < 100 || playerStage.paintedSamplePixels === 0) {
+    failGate(
+      "ui-player-open",
+      `player toolbar visible but no player-specific stage canvas with loaded pixels (got ${JSON.stringify(playerStage)}); "canvas" alone would match the file canvas behind the player`,
+    );
     return;
   }
+  uiRequests.playerOpened = true;
   passGate("ui-player-open", {
     via: "figma-top-bar-more → figma-prototype → real clicks",
     playerToolbarVisible: true,
+    playerStage,
+    note: "stage canvas is canvas:not(#jagentdesk-figma-canvas) with nonempty painted pixels",
   });
   await page.screenshot({ path: path.join(artifactDir, "player.png") });
-
-  // ── Frame rate during REAL viewport change (spec 32.11 #2: pan/zoom >= 50 fps) ──
-  // An idle requestAnimationFrame count proves nothing about rendering cost, so the sample
-  // runs WHILE wheel-zoom and drag-pan inputs keep the canvas redrawing, and both cadences —
-  // idle and active — are reported so the number cannot masquerade as an idle raf high.
-  const canvasBox = await page
-    .locator("canvas")
-    .first()
-    .boundingBox()
-    .catch(() => null);
-  const idleFps = await sampleRafCadence(page, 1_000);
-  if (canvasBox) {
-    const cx = canvasBox.x + canvasBox.width / 2;
-    const cy = canvasBox.y + canvasBox.height / 2;
-    await page.mouse.move(cx, cy);
-    const inputs = { wheelZoom: 0, panDrag: 0, hotspotNav: 0 };
-    const activeSample = sampleRafCadence(page, 2_000);
-    const wheel = async () => {
-      await page.mouse.wheel(0, -120);
-      inputs.wheelZoom += 1;
-    };
-    const pan = async () => {
-      await page.mouse.down();
-      await page.mouse.move(cx - 160, cy, { steps: 8 });
-      await page.mouse.up();
-      inputs.panDrag += 1;
-    };
-    for (let round = 0; round < 2; round += 1) {
-      await wheel();
-      await wheel();
-      await pan();
-    }
-    const fps = await activeSample;
-    const gate = {
-      ...fps,
-      inputs,
-      idleFps,
-      note: "measured WHILE wheel-zoom/pan inputs were live",
-    };
-    if (fps.fps >= minFpsValue) passGate("perf-playback-fps", gate);
-    else
-      failGate(
-        "perf-playback-fps",
-        `active pan/zoom sustained ${fps.fps} fps — gate >= ${minFpsValue}: ${JSON.stringify(gate)}`,
-      );
-  } else {
-    failGate(
-      "perf-playback-fps",
-      `no player canvas bounding box to drive pan/zoom inputs against (idle raf cadence was ${JSON.stringify(idleFps)} — idle alone never passes)`,
-    );
-  }
 
   // Close the player, capture after-close app-tree RAM.
   await page.keyboard.press("Escape");
   await playerMarker.waitFor({ state: "hidden", timeout: 15_000 }).catch(() => undefined);
   await delay(1_000);
   ram.afterCloseKb = treeRssKb(electronPid ?? 0).totalKb || ram.afterCloseKb;
+
+  // ── WARM UI, recorded separately (NOT a gate): reopen through the product UI after close.
+  // The reload resets renderer query state, so the reopen exercises the DAEMON-side versioned
+  // cache — expected zero new REST in the reopen window.
+  const warmMark = proxy.log.length;
+  const warmStart = Date.now();
+  await refreshUi();
+  await page.getByTestId(`figma-file-${fileKey}`).click();
+  await page
+    .waitForSelector("#jagentdesk-figma-canvas", { timeout: 30_000 })
+    .catch(() => undefined);
+  const warmRest = proxy.log
+    .slice(warmMark)
+    .filter((entry) => entry.pathname.startsWith(`/v1/files/${fileKey}`));
+  evidence.warmUiReopen = {
+    mountMs: Date.now() - warmStart,
+    restDuringReopen: warmRest.map((e) => e.pathname),
+    note: "warm reopen recorded separately from the cold ui-file-open gate",
+  };
+}
+
+/**
+ * Presentation sampler: counts rAF ticks AND the ticks whose centre-region pixel sample of
+ * the file canvas actually changed (pixels re-rendered), during live inputs. presentedFps is
+ * the honest rendering evidence; rafFps is cadence only and never passes the bar alone.
+ */
+async function sampleCanvasPresentation(page, sampleMs) {
+  return await page.evaluate(async (ms) => {
+    const canvas = document.getElementById("jagentdesk-figma-canvas");
+    if (!canvas) return null;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    const w = Math.min(120, canvas.width);
+    const h = Math.min(120, canvas.height);
+    const x = Math.floor((canvas.width - w) / 2);
+    const y = Math.floor((canvas.height - h) / 2);
+    const read = () => ctx.getImageData(x, y, w, h).data;
+    let prev = read();
+    let rafFrames = 0;
+    let presented = 0;
+    const start = performance.now();
+    return await new Promise((resolve) => {
+      const tick = (now) => {
+        rafFrames += 1;
+        const next = read();
+        let changed = false;
+        for (let i = 0; i < next.length; i += 4) {
+          if (next[i] !== prev[i] || next[i + 1] !== prev[i + 1] || next[i + 2] !== prev[i + 2]) {
+            changed = true;
+            break;
+          }
+        }
+        if (changed) {
+          presented += 1;
+          prev = next;
+        }
+        if (now - start < ms) requestAnimationFrame(tick);
+        else
+          resolve({
+            presentedFps: Number(((presented / (now - start)) * 1000).toFixed(1)),
+            rafFps: Number(((rafFrames / (now - start)) * 1000).toFixed(1)),
+            presentedFrames: presented,
+            rafFrames,
+            sampleMs: Math.round(now - start),
+          });
+      };
+      requestAnimationFrame(tick);
+    });
+  }, sampleMs);
 }
 
 /**
@@ -1469,20 +1791,33 @@ function runUrlTraceGate(proxyLog, fileKey, sectionNodeIds, uiRequests) {
       }
     }
   }
-  // Playback <=10 frameIds is an RPC-contract limit, proven on the UI's own WS requests.
-  if (uiRequests?.playbackFrameCounts?.length > 0) {
-    const tooBig = uiRequests.playbackFrameCounts.filter((n) => n > maxPlaybackBatch);
+  // Playback <=10 frameIds is an RPC-contract limit, proven on the UI's own WS requests and
+  // the harness's correlated API calls — recorded as SEPARATE lists so API-pushed counts can
+  // never substitute for missing UI-side evidence.
+  if (uiRequests?.playerOpened && (uiRequests.playbackFrameCounts?.length ?? 0) === 0)
+    offenders.push(
+      "the player gate passed but the renderer WebSocket never sent a figma.file.playback.request — no UI-side playback evidence (harness API calls are not a substitute)",
+    );
+  for (const [source, counts] of [
+    ["UI WS", uiRequests?.playbackFrameCounts ?? []],
+    ["harness API", uiRequests?.apiPlaybackFrameCounts ?? []],
+  ]) {
+    const tooBig = counts.filter((n) => n > maxPlaybackBatch);
     if (tooBig.length > 0)
       offenders.push(
-        `UI playback requests carried ${tooBig.join(",")} frameIds (contract <= ${maxPlaybackBatch})`,
+        `${source} playback requests carried ${tooBig.join(",")} frameIds (contract <= ${maxPlaybackBatch})`,
       );
   }
   // Full-canvas subtree loads are a DIFFERENT logical caller: budget <=50, never held to 10.
-  if (uiRequests?.nodesIdCounts?.length > 0) {
-    const tooBig = uiRequests.nodesIdCounts.filter((n) => n > maxNodesBatch);
+  const allNodesCounts = [
+    ...(uiRequests?.nodesIdCounts ?? []),
+    ...(uiRequests?.apiNodesIdCounts ?? []),
+  ];
+  {
+    const tooBig = allNodesCounts.filter((n) => n > maxNodesBatch);
     if (tooBig.length > 0)
       offenders.push(
-        `UI nodes requests carried ${tooBig.join(",")} ids (spec 32.5.1 budget is <= ${maxNodesBatch})`,
+        `nodes requests carried ${tooBig.join(",")} ids (spec 32.5.1 budget is <= ${maxNodesBatch})`,
       );
   }
   const distinct = [...new Set(restEntries.map((entry) => `${entry.method} ${entry.pathname}`))];
@@ -1501,6 +1836,9 @@ function runUrlTraceGate(proxyLog, fileKey, sectionNodeIds, uiRequests) {
       uiFigmaRpcTypes: uiRequests ? [...uiRequests.types].sort() : [],
       uiPlaybackBatchSizes: uiRequests?.playbackFrameCounts ?? [],
       uiNodesBatchSizes: uiRequests?.nodesIdCounts ?? [],
+      apiPlaybackBatchSizes: uiRequests?.apiPlaybackFrameCounts ?? [],
+      apiNodesBatchSizes: uiRequests?.apiNodesIdCounts ?? [],
+      uiPlayerOpened: uiRequests?.playerOpened === true,
       playbackLimitNote:
         "playback <=10 enforced on captured UI WS requests; REST /nodes budget is <=50 per spec 32.5.1",
     });
