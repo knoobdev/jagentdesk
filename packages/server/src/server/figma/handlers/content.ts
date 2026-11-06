@@ -1381,13 +1381,15 @@ export class FigmaContent {
       fileKey: string;
       ids: string[];
       scale: number;
-      format?: "png" | "jpg";
+      format?: "png" | "jpg" | "svg";
+      useAbsoluteBounds?: boolean;
       version?: string;
     },
     ctx: FigmaContext,
   ): Promise<{ images: Record<string, FigmaBytes | null>; source: FigmaSource }> {
     const file = await requireFile(ctx, request.fileKey);
     const format: RenderFormat = request.format ?? "png";
+    const absolute = request.useAbsoluteBounds === true;
     // An explicit version is a snapshot request (32.1): the plugin rasterizes whatever version
     // is open in Figma now, so live bytes mislabeled as history are the failure mode — only the
     // versioned Tier-1 images endpoint can answer a pinned version, and its answers keep their
@@ -1401,9 +1403,23 @@ export class FigmaContent {
         format,
         request.version,
         false,
+        absolute,
       );
     const version = await this.versions.current(ctx, file);
-    return this.renderNodes(ctx, file, request.ids, request.scale, format, version, true);
+    // ADR-0042: the fidelity path (svg text outlines, absolute bounds) is version-pinned REST,
+    // never the plugin — the plugin export predates the options and would answer them with
+    // wrong-meaning bytes. The client scopes absolute to the new TEXT fallback path; this server
+    // never forces it on. Without either option the old crop path keeps its live-Link semantics.
+    return this.renderNodes(
+      ctx,
+      file,
+      request.ids,
+      request.scale,
+      format,
+      version,
+      !absolute && format !== "svg",
+      absolute,
+    );
   }
 
   private async export(
@@ -1424,6 +1440,9 @@ export class FigmaContent {
       request.format,
       version,
       true, // export has no version field: it is the live current-version read (32.1)
+      // ADR-0042 adds no option to export: existing single-file export semantics (including the
+      // plugin's own svg exportAsync path) stay untouched.
+      false,
     );
     const bytes = rendered.images[request.nodeId];
     if (!bytes) return { file: null, fileName: null };
@@ -1435,7 +1454,8 @@ export class FigmaContent {
   }
 
   /**
-   * Cache per nodeId@scale@version. `live` marks reads whose version is the CURRENT one:
+   * Cache per nodeId@scale@version and bounds semantics (ADR-0042: absolute bytes never answer
+   * a crop request and vice versa). `live` marks reads whose version is the CURRENT one:
    * only those may use the plugin export (32.1). Live and verified-REST bytes keep separate
    * namespaces, and both are NEW: released code cached mixed-source plugin bytes under plain
    * `render/...@version`, whose legacy entries neither branch reads — a pre-upgrade live byte
@@ -1449,10 +1469,11 @@ export class FigmaContent {
     format: RenderFormat,
     version: string,
     live: boolean,
+    absolute: boolean,
   ): Promise<{ images: Record<string, FigmaBytes | null>; source: FigmaSource }> {
-    if (live && ctx.link.isLinked(file.fileKey))
-      return this.renderViaLink(ctx, file, ids, scale, format, version);
-    return this.renderRest(ctx, file, ids, scale, format, version);
+    if (live && !absolute && format !== "svg" && ctx.link.isLinked(file.fileKey))
+      return this.renderViaLink(ctx, file, ids, scale, format, version, absolute);
+    return this.renderRest(ctx, file, ids, scale, format, version, absolute);
   }
 
   /** Live plugin rasters, cached in their own namespace keyed by the current version. */
@@ -1463,7 +1484,16 @@ export class FigmaContent {
     scale: number,
     format: RenderFormat,
     version: string,
+    absolute: boolean,
   ): Promise<{ images: Record<string, FigmaBytes | null>; source: FigmaSource }> {
+    if (absolute) {
+      // Tripwire, not a fallback: the plugin export predates ADR-0042 and would return
+      // crop-meaning bytes for an absolute-bounds request. Such requests belong on REST.
+      throw new FigmaServiceError(
+        "unsupported",
+        "Figma Live Link cannot answer absolute-bounds render requests.",
+      );
+    }
     const images: Record<string, FigmaBytes | null> = {};
     const cacheKey = (id: string): string =>
       `render-live/${file.fileKey}/${id}@${scale}x@${format}@${version}`;
@@ -1513,21 +1543,37 @@ export class FigmaContent {
     scale: number,
     format: RenderFormat,
     version: string,
+    absolute: boolean,
   ): Promise<{ images: Record<string, FigmaBytes | null>; source: FigmaSource }> {
     const images: Record<string, FigmaBytes | null> = {};
     const misses: string[] = [];
+    // The crop key is unchanged from released code so its bytes keep answering; the absolute
+    // key can never collide with it — and never reuses its bytes (ADR-0042).
     const cacheKey = (id: string): string =>
-      `render-rest/${file.fileKey}/${id}@${scale}x@${format}@${version}`;
+      absolute
+        ? `render-rest/${file.fileKey}/${id}@${scale}x@${format}@absolute@${version}`
+        : `render-rest/${file.fileKey}/${id}@${scale}x@${format}@${version}`;
     for (const id of ids) {
       const cached = await ctx.cache.getBytes(cacheKey(id));
       if (cached) images[id] = toBase64Bytes(cached);
       else misses.push(id);
     }
     for (const batch of chunks(misses, RENDER_BATCH_SIZE)) {
+      const query: Record<string, string | number | boolean | undefined> = {
+        ids: batch.join(","),
+        scale,
+        format,
+        version,
+      };
+      // ADR-0042 → Figma file endpoints: SVG fallbacks carry the text as paths (no substitute
+      // fonts) and absolute bounds export the same geometry the renderer will place it into.
+      // Neither flag is added for the plain crop path — old requests keep identical queries.
+      if (format === "svg") query.svg_outline_text = "true";
+      if (absolute) query.use_absolute_bounds = "true";
       const response = await ctx.rest.getJson<RestImagesResponse>({
         connectionId: file.connectionId,
         path: `/v1/images/${file.fileKey}`,
-        query: { ids: batch.join(","), scale, format, version },
+        query,
         tier: "1",
       });
       await Promise.all(

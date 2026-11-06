@@ -2475,6 +2475,8 @@ export class VoiceAssistantWebSocketServer {
         // `figmaRemoteWrites` (ADR-0040) gates the figma.remote.* write surface.
         // `figmaCommentRegions` (ADR-0041) gates the region-geometry comment DTO fields; clients
         // send a post `region` only when present.
+        // `figmaRenderFidelity` (ADR-0042) gates the render `svg` text-outline format and
+        // `useAbsoluteBounds`, answered version-pinned over REST only.
         ...(this.figmaService
           ? {
               figma: true,
@@ -2482,6 +2484,7 @@ export class VoiceAssistantWebSocketServer {
               figmaNodeDepth: true,
               figmaRemoteWrites: true,
               figmaCommentRegions: true,
+              figmaRenderFidelity: true,
             }
           : {}),
         // Advertise the plugin management surface only when a PluginService is

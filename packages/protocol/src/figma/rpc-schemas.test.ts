@@ -8,6 +8,7 @@ import {
   FigmaFileNodesRequestSchema,
   FigmaFileNodesResponseSchema,
   FigmaFilePlaybackRequestSchema,
+  FigmaFileRenderRequestSchema,
   FigmaFilePlaybackResponseSchema,
   FigmaFilePrototypeRequestSchema,
   FigmaFilePrototypeResponseSchema,
@@ -856,6 +857,70 @@ describe("outbound deep validation of region comments (zod-aot)", () => {
     expect(
       validateWSOutboundMessage(
         LIST_RESPONSE([REGION_COMMENT({ width: 4, height: 8, pinCorner: "side" })]),
+      ).success,
+    ).toBe(false);
+  });
+});
+
+// ── ADR-0042: render fidelity options ─────────────────────────────────────────
+
+const RENDER = (overrides: Record<string, unknown> = {}) => ({
+  type: "figma.file.render.request" as const,
+  requestId: "req-render",
+  fileKey: "kH8TzQ2mV1",
+  ids: ["1:2"],
+  scale: 2,
+  ...overrides,
+});
+
+describe("figma.file.render.request fidelity options (ADR-0042)", () => {
+  it("accepts svg and useAbsoluteBounds, and round-trips every field", () => {
+    expect(
+      FigmaFileRenderRequestSchema.parse(RENDER({ format: "svg", useAbsoluteBounds: true })),
+    ).toEqual(RENDER({ format: "svg", useAbsoluteBounds: true }));
+  });
+
+  it("keeps old payloads parsing: png/jpg requests are unchanged and default to png", () => {
+    // Pre-ADR-0042 clients never send the new fields; the released contract must parse as-is.
+    expect(FigmaFileRenderRequestSchema.safeParse(RENDER()).success).toBe(true);
+    expect(FigmaFileRenderRequestSchema.parse(RENDER()).format).toBe("png");
+    expect(FigmaFileRenderRequestSchema.safeParse(RENDER({ format: "png" })).success).toBe(true);
+    expect(FigmaFileRenderRequestSchema.safeParse(RENDER({ format: "jpg" })).success).toBe(true);
+    expect(
+      FigmaFileRenderRequestSchema.safeParse(RENDER({ version: "1566622199797801477" })).success,
+    ).toBe(true);
+  });
+
+  it("rejects unknown formats and non-boolean bounds options — no implicit format change", () => {
+    expect(FigmaFileRenderRequestSchema.safeParse(RENDER({ format: "webp" })).success).toBe(false);
+    expect(FigmaFileRenderRequestSchema.safeParse(RENDER({ format: "svg " })).success).toBe(false);
+    expect(
+      FigmaFileRenderRequestSchema.safeParse(RENDER({ useAbsoluteBounds: "true" })).success,
+    ).toBe(false);
+    expect(FigmaFileRenderRequestSchema.safeParse(RENDER({ useAbsoluteBounds: 1 })).success).toBe(
+      false,
+    );
+    // false is a legal value: it means the old crop semantics, explicitly.
+    expect(
+      FigmaFileRenderRequestSchema.safeParse(RENDER({ useAbsoluteBounds: false })).success,
+    ).toBe(true);
+  });
+
+  it("keeps the released limits unchanged: scale 0.1..4 and 1..20 ids", () => {
+    expect(FigmaFileRenderRequestSchema.safeParse(RENDER({ scale: 0.1 })).success).toBe(true);
+    expect(FigmaFileRenderRequestSchema.safeParse(RENDER({ scale: 4 })).success).toBe(true);
+    expect(FigmaFileRenderRequestSchema.safeParse(RENDER({ scale: 0.09 })).success).toBe(false);
+    expect(FigmaFileRenderRequestSchema.safeParse(RENDER({ scale: 4.01 })).success).toBe(false);
+    const twenty = Array.from({ length: 20 }, (_, i) => `1:${i}`);
+    expect(FigmaFileRenderRequestSchema.safeParse(RENDER({ ids: twenty })).success).toBe(true);
+    expect(
+      FigmaFileRenderRequestSchema.safeParse(RENDER({ ids: [...twenty, "1:20"] })).success,
+    ).toBe(false);
+    expect(FigmaFileRenderRequestSchema.safeParse(RENDER({ ids: [] })).success).toBe(false);
+    // And with the new options in play, the limits still bind.
+    expect(
+      FigmaFileRenderRequestSchema.safeParse(
+        RENDER({ format: "svg", useAbsoluteBounds: true, scale: 5 }),
       ).success,
     ).toBe(false);
   });

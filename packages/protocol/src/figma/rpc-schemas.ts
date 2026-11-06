@@ -543,7 +543,16 @@ export const FigmaFileRenderRequestSchema = req("figma.file.render.request", {
   fileKey,
   ids: z.array(z.string()).min(1).max(20),
   scale: z.number().min(0.1).max(4),
-  format: z.enum(["png", "jpg"]).default("png"),
+  // ADR-0042: `svg` is the text-outline fallback format (Figma draws the text as paths, no
+  // substitute font). It rides the existing byte contract; clients send it, and
+  // `useAbsoluteBounds`, only when `server_info.features.figmaRenderFidelity` is advertised.
+  format: z.enum(["png", "jpg", "svg"]).default("png"),
+  // ADR-0042: true maps Figma `use_absolute_bounds=true` — the raster covers the node's
+  // absoluteBoundingBox. The client sets it ONLY on the new TEXT fallback path (SVG, or its
+  // PNG fallback): measured on real nodes, absolute crops a shadow's outset (44×44+shadow
+  // exports 88×88, not the 144×144 the default crop gives). The server never forces it —
+  // absent keeps the old crop semantics for every existing client and for export.
+  useAbsoluteBounds: z.boolean().optional(),
   version: z.string().optional(),
 });
 export const FigmaFileRenderResponseSchema = res("figma.file.render.response", {
