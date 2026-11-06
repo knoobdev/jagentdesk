@@ -18,6 +18,9 @@ import {
   MAX_RASTER_TILES,
   NativeCanvasLayer,
   pruneRasterCache,
+  STATUS_FAILED,
+  STATUS_LOADING,
+  STATUS_ZOOM_HINT,
 } from "./canvas-view";
 import { FrameStore, type NodeBatch } from "./frame-store";
 import type { SectionAwareSummary } from "./section-outline";
@@ -35,7 +38,7 @@ import {
 const globalWithReact = globalThis as typeof globalThis & { React?: typeof React };
 globalWithReact.React ??= React;
 
-const { theme, hosts, assets, viewLayout, platform } = vi.hoisted(() => ({
+const { theme, hosts, assets, viewLayout, platform, renderer } = vi.hoisted(() => ({
   theme: {
     fontSize: { xs: 11 },
     colors: { foregroundMuted: "#888" },
@@ -48,11 +51,17 @@ const { theme, hosts, assets, viewLayout, platform } = vi.hoisted(() => ({
     thumbnail: [] as string[],
     beginDraw: vi.fn(),
     endDraw: vi.fn(),
+    // Backs the hook mock's status()/retryFailed(): tests push pending/failed numbers to
+    // drive the honest loading status without a real cache.
+    state: { pending: 0, failed: 0 },
+    retryFailed: vi.fn(),
   },
   // The host View reports this layout once on mount, giving the viewer a viewport to cull.
   viewLayout: { current: { width: 800, height: 600 } },
   // The web/native branch of CanvasView, switched per test (native is the default).
   platform: { isWeb: false },
+  // Shared renderer mock: tests arm hitTest to model child-vs-Section click ownership.
+  renderer: { draw: vi.fn(), hitTest: vi.fn() },
 }));
 
 vi.mock("react-native", () => ({
@@ -79,8 +88,8 @@ vi.mock("react-native", () => ({
       children,
     );
   },
-  Text: ({ children }: { children?: React.ReactNode }) =>
-    React.createElement("span", null, children),
+  Text: ({ children, testID }: { children?: React.ReactNode; testID?: string }) =>
+    React.createElement("span", { "data-testid": testID }, children),
   Image: ({
     source,
     accessibilityLabel,
@@ -122,7 +131,7 @@ vi.mock("@/runtime/host-runtime", () => ({
   getHostRuntimeStore: () => ({ getSnapshot: () => null }),
 }));
 vi.mock("@/figma/renderer", () => ({
-  createFigmaRenderer: () => ({ draw: vi.fn(), hitTest: vi.fn() }),
+  createFigmaRenderer: () => renderer,
 }));
 vi.mock("./use-figma-assets", () => ({
   useFigmaAssets: () => ({
@@ -135,6 +144,8 @@ vi.mock("./use-figma-assets", () => ({
     fallbackForNode: () => null,
     fontAvailable: () => false,
     onMissing: () => undefined,
+    status: () => ({ ...assets.state }),
+    retryFailed: () => assets.retryFailed(),
     beginDraw: () => assets.beginDraw(),
     endDraw: () => assets.endDraw(),
   }),
@@ -266,6 +277,10 @@ beforeEach(() => {
   assets.thumbnail.length = 0;
   assets.beginDraw.mockClear();
   assets.endDraw.mockClear();
+  assets.retryFailed.mockClear();
+  assets.state.pending = 0;
+  assets.state.failed = 0;
+  renderer.hitTest.mockReset(); // re-armed per test; default: no child under the cursor
   serveRenderTiles();
 });
 
@@ -801,11 +816,10 @@ describe("CanvasView click select — no Fit flood (ADR-0039)", () => {
     // Screen (450, 450) maps to Figma (1100, 1100): inside BOTH summaries; the topmost (last
     // drawn) is the one whose tree has not landed.
     const camera: Camera = { zoom: 1, offsetX: -650, offsetY: -650 };
-    const fetchNodes = vi.fn(
-      async (ids: readonly string[]): Promise<NodeBatch> =>
-        ids.includes("9:99")
-          ? new Promise<NodeBatch>(() => {}) // the occluder's batch is in flight, never lands
-          : { nodes: { "9:0": makeNode({ id: "9:0" }) }, components: {} },
+    const fetchNodes = vi.fn(async (ids: readonly string[]): Promise<NodeBatch> =>
+      ids.includes("9:99")
+        ? new Promise<NodeBatch>(() => {}) // the occluder's batch is in flight, never lands
+        : { nodes: { "9:0": makeNode({ id: "9:0" }) }, components: {} },
     );
     const store = new FrameStore(fetchNodes);
     await store.load(["9:0"]); // only the LOWER root has a tree, loaded before mount
@@ -1013,5 +1027,278 @@ describe("CanvasView paint retention wrapper (spec 32.5.1)", () => {
     } finally {
       HTMLCanvasElement.prototype.getContext = original;
     }
+  });
+});
+
+// ── honest content status (spec 32.5.1) ────────────────────────────────────────────────
+
+/**
+ * A 2D context that records every `fillText` argument, one batch per paint: each draw calls
+ * getContext, so after a settled paint `state.texts` holds exactly what the LAST paint drew —
+ * status assertions cannot be polluted by an earlier frame's line.
+ */
+function ctxTextRecorder() {
+  const state = { texts: [] as string[] };
+  const make = (): CanvasRenderingContext2D => {
+    state.texts = [];
+    const props: Record<string, unknown> = {
+      fillText: (value: string) => state.texts.push(String(value)),
+    };
+    return new Proxy(props, {
+      get: (t, p) => {
+        if (p === "getTransform") return () => ({ a: 1 });
+        if (!(p in t)) t[p as string] = () => undefined;
+        return t[p as string];
+      },
+    }) as unknown as CanvasRenderingContext2D;
+  };
+  return { state, make };
+}
+
+async function withPaintedViewer(
+  setup: () =>
+    | Promise<{ viewer: { unmount: () => void } }>
+    | {
+        viewer: { unmount: () => void };
+      },
+  paint: (texts: () => string[]) => Promise<void> | void,
+): Promise<void> {
+  const rec = ctxTextRecorder();
+  const original = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = (() => rec.make()) as never;
+  let viewer: { unmount: () => void } | null = null;
+  try {
+    viewer = (await setup()).viewer;
+    await paint(() => rec.state.texts);
+  } finally {
+    viewer?.unmount();
+    HTMLCanvasElement.prototype.getContext = original;
+  }
+}
+
+describe("CanvasView honest content status (spec 32.5.1)", () => {
+  it("shows loading while a visible detail subtree is still in flight", async () => {
+    platform.isWeb = true;
+    await withPaintedViewer(
+      () => {
+        const fetchNodes = vi.fn(async (): Promise<NodeBatch> => new Promise(() => undefined));
+        const store = new FrameStore(fetchNodes);
+        return {
+          viewer: mountViewer({
+            frames: framesGrid(3),
+            camera: { zoom: 1, offsetX: 0, offsetY: 0 },
+            store,
+          }),
+        };
+      },
+      async (texts) => {
+        await settleLoads(); // drain the queue into the inflight ledger
+        await settlePaint(2);
+        expect(texts()).toContain(STATUS_LOADING);
+      },
+    );
+  });
+
+  it("reports a fully loaded, fully delivered viewport with no status line at all", async () => {
+    platform.isWeb = true;
+    await withPaintedViewer(
+      () => {
+        const { fetchNodes } = viewerFetcher(); // resolves every root
+        return {
+          viewer: mountViewer({
+            frames: framesGrid(3),
+            camera: { zoom: 1, offsetX: 0, offsetY: 0 },
+            store: new FrameStore(fetchNodes),
+          }),
+        };
+      },
+      async (texts) => {
+        await settleLoads();
+        await settlePaint(2);
+        expect(texts()).not.toContain(STATUS_LOADING);
+        expect(texts()).not.toContain(STATUS_FAILED);
+        expect(texts()).not.toContain(STATUS_ZOOM_HINT);
+      },
+    );
+  });
+
+  it("an undelivered asset attempt reports loading, and outranks failures", async () => {
+    platform.isWeb = true;
+    assets.state.pending = 2;
+    assets.state.failed = 3; // loading must beat "failed" while work is still on its way
+    await withPaintedViewer(
+      () => {
+        const { fetchNodes } = viewerFetcher();
+        return {
+          viewer: mountViewer({
+            frames: framesGrid(3),
+            camera: { zoom: 1, offsetX: 0, offsetY: 0 },
+            store: new FrameStore(fetchNodes),
+          }),
+        };
+      },
+      async (texts) => {
+        await settleLoads();
+        await settlePaint(2);
+        expect(texts()).toContain(STATUS_LOADING);
+        expect(texts()).not.toContain(STATUS_FAILED);
+      },
+    );
+  });
+
+  it("terminal failed asset attempts show the retry line once nothing is pending", async () => {
+    platform.isWeb = true;
+    assets.state.failed = 1;
+    await withPaintedViewer(
+      () => {
+        const { fetchNodes } = viewerFetcher();
+        return {
+          viewer: mountViewer({
+            frames: framesGrid(3),
+            camera: { zoom: 1, offsetX: 0, offsetY: 0 },
+            store: new FrameStore(fetchNodes),
+          }),
+        };
+      },
+      async (texts) => {
+        await settleLoads();
+        await settlePaint(2);
+        expect(texts()).toContain(STATUS_FAILED);
+      },
+    );
+  });
+
+  it("a confirmed-missing root reads as failed, and a tap retries exactly that root", async () => {
+    platform.isWeb = true;
+    const { fetchNodes, subtreeIds } = viewerFetcher(() => null); // every root: confirmed null
+    const store = new FrameStore(fetchNodes);
+    const selections = vi.fn();
+    await withPaintedViewer(
+      () => ({
+        viewer: mountViewer({
+          frames: framesGrid(3),
+          camera: { zoom: 1, offsetX: 0, offsetY: 0 },
+          store,
+          onSelectNode: selections,
+        }),
+      }),
+      async (texts) => {
+        await settleLoads();
+        await settlePaint(2);
+        expect(texts()).toContain(STATUS_FAILED);
+        expect(subtreeIds().filter((id) => id === "7:0")).toHaveLength(1);
+
+        // Tap the frame whose read confirmed missing: targeted retry of THAT root only.
+        clickCanvas(100, 75); // center of 7:0 at (0,0,200,150), camera offset 0 zoom 1
+        expect(assets.retryFailed).toHaveBeenCalled(); // failed asset attempts cleared too
+        await settleLoads();
+        const retried = subtreeIds().filter((id) => id === "7:0");
+        expect(retried).toHaveLength(2); // re-queued, despite the cached null verdict
+        expect(selections).not.toHaveBeenCalled(); // a retry is not a selection
+      },
+    );
+  });
+
+  it("a pure metadata overview says zoom for detail instead of going silent", async () => {
+    platform.isWeb = true;
+    // 300x225 projected 30px at zoom 0.1 — below the detail threshold: metadata-only is right,
+    // but the paper must explain itself (spec 32.5.1: the overview is not a content failure).
+    const frames = [makeFrameSummary("9:1", 0, 0, 300, 225)];
+    await withPaintedViewer(
+      () => {
+        const { fetchNodes } = viewerFetcher();
+        return {
+          viewer: mountViewer({
+            frames,
+            camera: { zoom: 0.1, offsetX: 0, offsetY: 0 },
+            store: new FrameStore(fetchNodes),
+          }),
+        };
+      },
+      async (texts) => {
+        await settlePaint(2);
+        expect(texts()).toContain(STATUS_ZOOM_HINT);
+      },
+    );
+    // ...and the overview demanded zero subtree loads on the way there.
+    const { fetchNodes } = viewerFetcher();
+    const store = new FrameStore(fetchNodes);
+    const viewer = mountViewer({ frames, camera: { zoom: 0.1, offsetX: 0, offsetY: 0 }, store });
+    await settleLoads();
+    expect(fetchNodes).not.toHaveBeenCalled();
+    viewer.unmount();
+  });
+
+  it("a SECTION whose depth-1 children are still queued counts as pending content", async () => {
+    platform.isWeb = true;
+    const section = sectionFrame("40:1", 900, 600); // full-plan at zoom 1 → shallow expansion
+    await withPaintedViewer(
+      () => {
+        const fetchNodes = vi.fn(async (): Promise<NodeBatch> => new Promise(() => undefined));
+        return {
+          viewer: mountViewer({
+            frames: [section],
+            camera: { zoom: 1, offsetX: 0, offsetY: 0 },
+            store: new FrameStore(fetchNodes),
+          }),
+        };
+      },
+      async (texts) => {
+        await settleLoads();
+        await settlePaint(2);
+        expect(texts()).toContain(STATUS_LOADING);
+      },
+    );
+  });
+
+  it("a mounted canvas without its store is not content-ready: it says loading", async () => {
+    platform.isWeb = true;
+    await withPaintedViewer(
+      () => ({
+        viewer: mountViewer({
+          frames: framesGrid(1),
+          camera: { zoom: 1, offsetX: 0, offsetY: 0 },
+          store: null,
+        }),
+      }),
+      async (texts) => {
+        await settlePaint(2);
+        expect(texts()).toContain(STATUS_LOADING);
+      },
+    );
+  });
+});
+
+describe("NativeCanvasLayer honest content status (spec 32.5.1)", () => {
+  const statusNode = (container: HTMLElement) =>
+    container.querySelector('[data-testid="figma-canvas-status"]');
+
+  it("overlays loading while a demanded tile batch is still in flight, then goes quiet", async () => {
+    const batches = deferredRenderBatches(); // tiles never land until the test says so
+    const layer = mountLayer({
+      visible: framesFrom("1", 2),
+      camera: { zoom: 1, offsetX: 0, offsetY: 0 },
+    });
+    await flush();
+    expect(batches.length).toBeGreaterThan(0);
+    expect(statusNode(layer.container)?.textContent).toContain(STATUS_LOADING);
+
+    for (const batch of batches) batch.resolve("srv", "live");
+    await flush();
+    expect(renderedTiles(layer.container)).toHaveLength(2); // the load was real
+    expect(statusNode(layer.container)).toBeNull(); // delivered: no line, no lie
+    layer.unmount();
+  });
+
+  it("surfaces the ledger's failure line once every tile is present", async () => {
+    const layer = mountLayer({
+      visible: framesFrom("1", 2),
+      camera: { zoom: 1, offsetX: 0, offsetY: 0 },
+      statusText: STATUS_FAILED,
+    });
+    await flush(); // serveRenderTiles (beforeEach) lands the batch
+    expect(renderedTiles(layer.container)).toHaveLength(2);
+    expect(statusNode(layer.container)?.textContent).toContain(STATUS_FAILED);
+    layer.unmount();
   });
 });
