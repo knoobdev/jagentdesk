@@ -2350,6 +2350,8 @@ async function sampleRafCadence(page, sampleMs) {
 function runUrlTraceGate(proxyLog, fileKey, sectionNodeIds, uiRequests, linkProblems = []) {
   const restEntries = proxyLog.filter((entry) => entry.pathname.startsWith("/v1/"));
   const offenders = [];
+  if (!uiRequests || uiRequests.types.size === 0)
+    offenders.push("no observed UI Figma RPCs — request attribution is unproven");
   // Link quiescence violations fold into the trace verdict: with a plugin-linked file or a
   // pending pairing, "the app got its data over standalone REST" is no longer proven.
   for (const problem of linkProblems)
