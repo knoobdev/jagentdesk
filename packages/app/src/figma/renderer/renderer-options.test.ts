@@ -118,16 +118,70 @@ describe("missing resource reporting", () => {
     expect(reports[0].imageRefs).toEqual(["a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0"]);
   });
 
-  it("reports fonts that are not available and renders with the generic family", () => {
+  it("reports the node id for the raster fallback when an unavailable font has no raster yet", () => {
+    // Spec 32.5.1: a TEXT node whose required family/style cannot be drawn faithfully is
+    // replaced by Figma's render of that node — the generic-sans-serif approximation was a
+    // fake. While no raster exists the node id goes to onMissing.fallbackNodeIds, and the
+    // font stays on the report so the caller can load it and re-render as vector.
     const { records, reports } = drawWithMissing(loadNode("text-basic"), {
       fontAvailable: () => false,
+      fallbackForNode: () => null,
     });
     expect(reports).toHaveLength(1);
     expect(reports[0].fonts).toEqual([{ family: "Inter", style: "Bold" }]);
-    const fonts = records.filter((r) => r[0] === "set:font");
-    expect(fonts.length).toBeGreaterThan(0);
-    expect(fonts[0][1]).toContain("sans-serif");
-    expect(fonts[0][1]).not.toContain("Inter");
+    expect(reports[0].fallbackNodeIds).toEqual(["13:1"]);
+    expect(records.some((r) => r[0] === "set:font")).toBe(false);
+    expect(records.some((r) => r[0] === "fillText")).toBe(false);
+  });
+
+  it("draws the supplied fallback raster for a text node with an unavailable font", () => {
+    // With the raster supplied it draws at the node box instead of the fake approximate text,
+    // and the font report is kept so W6 still loads it.
+    const { records, reports } = drawWithMissing(loadNode("text-basic"), {
+      fontAvailable: () => false,
+    });
+    expect(records).toContainEqual(
+      expect.arrayContaining(["drawImage", "raster:13:1", 0, 0, 320, 40]),
+    );
+    expect(records.some((r) => r[0] === "fillText")).toBe(false);
+    expect(records.some((r) => r[0] === "set:font")).toBe(false);
+    expect(reports).toHaveLength(1);
+    expect(reports[0].fonts).toEqual([{ family: "Inter", style: "Bold" }]);
+    expect(reports[0].fallbackNodeIds).toEqual([]); // resolved: nothing left to request
+  });
+
+  it("keeps drawing vector text while the font is available", () => {
+    const { records, reports } = drawWithMissing(loadNode("text-basic"), {
+      fontAvailable: () => true,
+    });
+    expect(records).toContainEqual(expect.arrayContaining(["set:font"]));
+    expect(records.find((r) => r[0] === "set:font")?.[1]).toContain("Inter");
+    expect(records.some((r) => r[0] === "drawImage")).toBe(false);
+    expect(reports).toHaveLength(0); // nothing missing: no report at all
+  });
+
+  it("rasterizes the whole node when only a mixed-run override font is unavailable", () => {
+    // text-style-overrides: base run is Inter Regular, one override run is Inter Bold. With
+    // only Bold unavailable the node still cannot be drawn faithfully, so the single raster
+    // replaces it; the unavailable face stays reported for the caller to load.
+    const { records, reports } = drawWithMissing(loadNode("text-style-overrides"), {
+      fontAvailable: (_family, style) => style !== "Bold",
+    });
+    expect(records).toContainEqual(expect.arrayContaining(["drawImage", "raster:13:4", 0, 0]));
+    expect(records.some((r) => r[0] === "fillText")).toBe(false);
+    expect(records.some((r) => r[0] === "set:font")).toBe(false);
+    expect(reports).toHaveLength(1);
+    expect(reports[0].fallbackNodeIds).toEqual([]); // raster supplied: drawn, not requested
+    expect(reports[0].fonts).toEqual([{ family: "Inter", style: "Bold" }]);
+  });
+
+  it("draws empty text as text even when its font is unavailable", () => {
+    // Nothing to approximate for a text-less node: it must not steal raster fallback bandwidth.
+    const { records, reports } = drawWithMissing(loadNode("text-empty"), {
+      fontAvailable: () => false,
+    });
+    expect(reports).toHaveLength(0);
+    expect(records.some((r) => r[0] === "drawImage")).toBe(false);
   });
 
   it("reports raster fallbacks it cannot get for unsupported nodes", () => {

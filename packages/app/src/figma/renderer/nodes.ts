@@ -33,7 +33,7 @@ import {
   visibleEffects,
 } from "./effects";
 import { unsupportedChildFeatures, unsupportedFeatures } from "./unsupported";
-import { drawTextNode } from "./text";
+import { drawTextNode, textNeedsRasterFallback } from "./text";
 import type { MissingSink } from "./missing";
 import type { FigmaCanvasContext, FigmaRenderOptions } from "./types";
 
@@ -309,7 +309,12 @@ function drawNode(state: DrawState, node: FigmaNode): void {
   const transform = nodeTransform(node);
   if (culled(state, node, transform)) return;
   const features = [...unsupportedFeatures(node), ...unsupportedChildFeatures(node)];
-  if (features.length > 0) {
+  // A TEXT node whose required family/style is unavailable cannot be drawn faithfully: it goes
+  // through the same per-node raster fallback as unsupported features (spec 32.5.1), while the
+  // font itself stays on the missing report so the caller can load it and re-render as vector.
+  const textRaster =
+    node.type === "TEXT" && textNeedsRasterFallback(node, state.options, state.missing);
+  if (features.length > 0 || textRaster) {
     drawFallback(state, node, transform);
     return;
   }
