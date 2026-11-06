@@ -1402,7 +1402,7 @@ async function main() {
     }
 
     // ── UI: real selection through the picker guest (W1 seed bridge) ────────────
-    await runPickerGate(page, browser, artifactDir, { fileKey, noPickerProbe });
+    await runPickerGate(page, browser, artifactDir, { fileKey, noPickerProbe, evidence });
 
     // ── cold UI FIRST: file added through the product RPC, then the real click while
     // the daemon's outline/nodes caches are still empty. Running the harness's own API
@@ -1414,6 +1414,7 @@ async function main() {
       uiRequests,
       proxy,
       jagentdeskHome,
+      evidence,
       refreshUi: async () => {
         // The file entered the daemon store over WS; reload and re-navigate the real product
         // UI so the files home shows it — a user-visible refresh, not DOM injection into Figma.
@@ -1514,7 +1515,7 @@ async function main() {
 }
 
 /** Opens the guest through the W1 preload bridge and clicks a REAL Files entry — no injected URL. */
-async function runPickerGate(page, browser, artifactDir, { fileKey, noPickerProbe }) {
+async function runPickerGate(page, browser, artifactDir, { fileKey, noPickerProbe, evidence }) {
   if (noPickerProbe) {
     // User AWAY mode: the native probe already reached figma.com/login and was closed
     // (evidence/native-picker-manual-state.json). Do NOT open another guest window — that
@@ -1533,11 +1534,15 @@ async function runPickerGate(page, browser, artifactDir, { fileKey, noPickerProb
   }
   const openGuest = async () => {
     const before = new Set(browser.contexts().flatMap((context) => context.pages()));
-    await page.evaluate(() => {
-      globalThis.__jagentdeskFigmaPicker =
-        globalThis.window?.jagentdeskDesktop?.figma?.pickFile?.() ??
-        Promise.resolve({ kind: "no-bridge" });
-    });
+    await withDeadline(
+      page.evaluate(() => {
+        globalThis.__jagentdeskFigmaPicker =
+          globalThis.window?.jagentdeskDesktop?.figma?.pickFile?.() ??
+          Promise.resolve({ kind: "no-bridge" });
+      }),
+      15_000,
+      "picker bridge invoke",
+    );
     const deadline = Date.now() + 45_000;
     while (Date.now() < deadline) {
       for (const context of browser.contexts()) {
@@ -1837,7 +1842,7 @@ async function runUiPlaybackGates(
   minFpsValue,
   electronPid,
   fileKey,
-  { artifactDir, uiRequests, proxy, jagentdeskHome, refreshUi },
+  { artifactDir, uiRequests, proxy, jagentdeskHome, evidence, refreshUi },
 ) {
   // Cold precondition: the daemon's outline/nodes handlers must not have fetched anything yet.
   // (file-add's /meta call is not a content-cache write — rest.ts only caches in content.ts —
@@ -1907,9 +1912,11 @@ async function runUiPlaybackGates(
   // ── pan/zoom fps on the CANVAS VIEW — before the player (the player has no wheel/pan
   // handler; measuring inputs against it would prove nothing). Every input must move the
   // render camera: read the canvas 2D context transform before/after each gesture.
-  const canvasExists = await page.evaluate(
-    () => !!document.getElementById("jagentdesk-figma-canvas"),
-  );
+  const canvasExists = await withDeadline(
+    page.evaluate(() => !!document.getElementById("jagentdesk-figma-canvas")),
+    15_000,
+    "canvas presence probe",
+  ).catch(() => false);
   if (!canvasExists) {
     const idleRaf = await sampleRafCadence(page, 1_000);
     unexercisedGate(
@@ -1919,13 +1926,17 @@ async function runUiPlaybackGates(
   } else {
     const inputs = [];
     const readCtm = async () =>
-      await page.evaluate(() => {
-        const c = document.getElementById("jagentdesk-figma-canvas");
-        const ctx = c?.getContext?.("2d");
-        if (!ctx) return null;
-        const t = ctx.getTransform();
-        return [t.a, t.b, t.c, t.d, t.e, t.f];
-      });
+      await withDeadline(
+        page.evaluate(() => {
+          const c = document.getElementById("jagentdesk-figma-canvas");
+          const ctx = c?.getContext?.("2d");
+          if (!ctx) return null;
+          const t = ctx.getTransform();
+          return [t.a, t.b, t.c, t.d, t.e, t.f];
+        }),
+        15_000,
+        "canvas CTM read",
+      ).catch(() => null);
     const canvasBox = await page.locator("#jagentdesk-figma-canvas").boundingBox();
     const cx = canvasBox ? canvasBox.x + canvasBox.width / 2 : 400;
     const cy = canvasBox ? canvasBox.y + canvasBox.height / 2 : 300;
@@ -2046,31 +2057,50 @@ async function runUiPlaybackGates(
   // Player green requires its OWN stage canvas with loaded frame pixels: any <canvas> can
   // match the file canvas still mounted behind the player, and the toolbar alone is not a
   // frame. The file canvas is identified by id, so the player stage is the LARGEST canvas
-  // without it — and it must have painted content, proving a frame actually loaded.
-  const playerStage = await page.evaluate(() => {
-    const candidates = [...document.querySelectorAll("canvas:not(#jagentdesk-figma-canvas)")];
-    const canvas = candidates.sort((a, b) => b.width * b.height - a.width * a.height)[0];
-    if (!canvas) return null;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    const w = Math.min(160, canvas.width);
-    const h = Math.min(160, canvas.height);
-    const x = Math.floor((canvas.width - w) / 2);
-    const y = Math.floor((canvas.height - h) / 2);
-    const data = ctx.getImageData(x, y, w, h).data;
-    let paintedSamplePixels = 0;
-    for (let i = 3; i < data.length; i += 4) if (data[i] > 0) paintedSamplePixels += 1;
-    return {
-      canvasCount: candidates.length,
-      width: canvas.width,
-      height: canvas.height,
-      paintedSamplePixels,
-    };
-  });
+  // without it — and it must have painted content, proving a frame actually loaded. The
+  // toolbar appears WHILE the frame RPC is still loading, so a single immediate pixel sample
+  // false-fails; poll the same honest bar (largest id-less canvas, width >= 100, nonempty
+  // painted pixels) until it passes or the canvas budget expires. No complete-frame proof is
+  // manufactured here — only that a frame actually painted, and how long that took.
+  const readPlayerStage = () =>
+    withDeadline(
+      page.evaluate(() => {
+        const candidates = [...document.querySelectorAll("canvas:not(#jagentdesk-figma-canvas)")];
+        const canvas = candidates.sort((a, b) => b.width * b.height - a.width * a.height)[0];
+        if (!canvas) return null;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return null;
+        const w = Math.min(160, canvas.width);
+        const h = Math.min(160, canvas.height);
+        const x = Math.floor((canvas.width - w) / 2);
+        const y = Math.floor((canvas.height - h) / 2);
+        const data = ctx.getImageData(x, y, w, h).data;
+        let paintedSamplePixels = 0;
+        for (let i = 3; i < data.length; i += 4) if (data[i] > 0) paintedSamplePixels += 1;
+        return {
+          canvasCount: candidates.length,
+          width: canvas.width,
+          height: canvas.height,
+          paintedSamplePixels,
+        };
+      }),
+      15_000,
+      "player stage canvas sample",
+    ).catch(() => null);
+  const stageStart = Date.now();
+  let playerStage = await readPlayerStage();
+  while (
+    (!playerStage || playerStage.width < 100 || playerStage.paintedSamplePixels === 0) &&
+    Date.now() - stageStart < canvasDeadline
+  ) {
+    await delay(500);
+    playerStage = await readPlayerStage();
+  }
+  const stagePaintWaitMs = Date.now() - stageStart;
   if (!playerStage || playerStage.width < 100 || playerStage.paintedSamplePixels === 0) {
     failGate(
       "ui-player-open",
-      `player toolbar visible but no player-specific stage canvas with loaded pixels (got ${JSON.stringify(playerStage)}); "canvas" alone would match the file canvas behind the player`,
+      `player toolbar visible but no player-specific stage canvas with loaded pixels after ${stagePaintWaitMs}ms of polling (got ${JSON.stringify(playerStage)}); "canvas" alone would match the file canvas behind the player`,
     );
     return;
   }
@@ -2079,7 +2109,8 @@ async function runUiPlaybackGates(
     via: "figma-top-bar-more → figma-prototype → real clicks",
     playerToolbarVisible: true,
     playerStage,
-    note: "stage canvas is canvas:not(#jagentdesk-figma-canvas) with nonempty painted pixels",
+    stagePaintWaitMs,
+    note: "stage canvas is canvas:not(#jagentdesk-figma-canvas) with nonempty painted pixels, polled until painted (toolbar visibility alone does not gate)",
   });
   await page.screenshot({ path: path.join(artifactDir, "player.png") });
 
@@ -2116,48 +2147,52 @@ async function runUiPlaybackGates(
  * measurement above; these never pass anything on their own.
  */
 async function sampleCanvasPresentation(page, sampleMs) {
-  return await page.evaluate(async (ms) => {
-    const canvas = document.getElementById("jagentdesk-figma-canvas");
-    if (!canvas) return null;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    const w = Math.min(120, canvas.width);
-    const h = Math.min(120, canvas.height);
-    const x = Math.floor((canvas.width - w) / 2);
-    const y = Math.floor((canvas.height - h) / 2);
-    const read = () => ctx.getImageData(x, y, w, h).data;
-    let prev = read();
-    let rafFrames = 0;
-    let presented = 0;
-    const start = performance.now();
-    return await new Promise((resolve) => {
-      const tick = (now) => {
-        rafFrames += 1;
-        const next = read();
-        let changed = false;
-        for (let i = 0; i < next.length; i += 4) {
-          if (next[i] !== prev[i] || next[i + 1] !== prev[i + 1] || next[i + 2] !== prev[i + 2]) {
-            changed = true;
-            break;
+  return await withDeadline(
+    page.evaluate(async (ms) => {
+      const canvas = document.getElementById("jagentdesk-figma-canvas");
+      if (!canvas) return null;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return null;
+      const w = Math.min(120, canvas.width);
+      const h = Math.min(120, canvas.height);
+      const x = Math.floor((canvas.width - w) / 2);
+      const y = Math.floor((canvas.height - h) / 2);
+      const read = () => ctx.getImageData(x, y, w, h).data;
+      let prev = read();
+      let rafFrames = 0;
+      let presented = 0;
+      const start = performance.now();
+      return await new Promise((resolve) => {
+        const tick = (now) => {
+          rafFrames += 1;
+          const next = read();
+          let changed = false;
+          for (let i = 0; i < next.length; i += 4) {
+            if (next[i] !== prev[i] || next[i + 1] !== prev[i + 1] || next[i + 2] !== prev[i + 2]) {
+              changed = true;
+              break;
+            }
           }
-        }
-        if (changed) {
-          presented += 1;
-          prev = next;
-        }
-        if (now - start < ms) requestAnimationFrame(tick);
-        else
-          resolve({
-            presentedFps: Number(((presented / (now - start)) * 1000).toFixed(1)),
-            rafFps: Number(((rafFrames / (now - start)) * 1000).toFixed(1)),
-            presentedFrames: presented,
-            rafFrames,
-            sampleMs: Math.round(now - start),
-          });
-      };
-      requestAnimationFrame(tick);
-    });
-  }, sampleMs);
+          if (changed) {
+            presented += 1;
+            prev = next;
+          }
+          if (now - start < ms) requestAnimationFrame(tick);
+          else
+            resolve({
+              presentedFps: Number(((presented / (now - start)) * 1000).toFixed(1)),
+              rafFps: Number(((rafFrames / (now - start)) * 1000).toFixed(1)),
+              presentedFrames: presented,
+              rafFrames,
+              sampleMs: Math.round(now - start),
+            });
+        };
+        requestAnimationFrame(tick);
+      });
+    }, sampleMs),
+    sampleMs + 15_000,
+    `sampleCanvasPresentation (page.evaluate, ${sampleMs}ms window)`,
+  ).catch(() => null);
 }
 
 /**
@@ -2167,33 +2202,39 @@ async function sampleCanvasPresentation(page, sampleMs) {
  * cannot masquerade as a pan/zoom fps.
  */
 async function sampleRafCadence(page, sampleMs) {
-  return await page.evaluate(
-    async (ms) =>
-      await new Promise((resolve) => {
-        const stamps = [];
-        const start = performance.now();
-        const tick = (now) => {
-          stamps.push(now);
-          if (now - start < ms) requestAnimationFrame(tick);
-          else {
-            const intervals = [];
-            for (let i = 1; i < stamps.length; i += 1) intervals.push(stamps[i] - stamps[i - 1]);
-            intervals.sort((a, b) => a - b);
-            resolve({
-              fps: Number((((stamps.length - 1) / (stamps.at(-1) - stamps[0])) * 1000).toFixed(1)),
-              frames: stamps.length,
-              sampleMs: Math.round(stamps.at(-1) - stamps[0]),
-              medianFrameIntervalMs: intervals.length
-                ? Number(intervals[Math.floor(intervals.length / 2)].toFixed(2))
-                : null,
-              worstFrameIntervalMs: intervals.length ? Number(intervals.at(-1).toFixed(2)) : null,
-            });
-          }
-        };
-        requestAnimationFrame(tick);
-      }),
-    sampleMs,
-  );
+  return await withDeadline(
+    page.evaluate(
+      async (ms) =>
+        await new Promise((resolve) => {
+          const stamps = [];
+          const start = performance.now();
+          const tick = (now) => {
+            stamps.push(now);
+            if (now - start < ms) requestAnimationFrame(tick);
+            else {
+              const intervals = [];
+              for (let i = 1; i < stamps.length; i += 1) intervals.push(stamps[i] - stamps[i - 1]);
+              intervals.sort((a, b) => a - b);
+              resolve({
+                fps: Number(
+                  (((stamps.length - 1) / (stamps.at(-1) - stamps[0])) * 1000).toFixed(1),
+                ),
+                frames: stamps.length,
+                sampleMs: Math.round(stamps.at(-1) - stamps[0]),
+                medianFrameIntervalMs: intervals.length
+                  ? Number(intervals[Math.floor(intervals.length / 2)].toFixed(2))
+                  : null,
+                worstFrameIntervalMs: intervals.length ? Number(intervals.at(-1).toFixed(2)) : null,
+              });
+            }
+          };
+          requestAnimationFrame(tick);
+        }),
+      sampleMs,
+    ),
+    sampleMs + 15_000,
+    `sampleRafCadence (page.evaluate, ${sampleMs}ms window)`,
+  ).catch(() => null);
 }
 
 /**
