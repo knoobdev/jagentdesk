@@ -910,6 +910,14 @@ async function figmaRequest(client, type, params, options = {}) {
       };
     return payload;
   } catch (error) {
+    // Negative bound probes can be rejected by the REAL client schema before any WS send.
+    // Keep that distinct from a daemon rejection, and continue recording the other gates.
+    if (error?.name === "ZodError" && Array.isArray(error.issues)) {
+      return {
+        error: { code: "client_validation", message: String(error.message) },
+        __harnessOrigin: "client_validation_before_send",
+      };
+    }
     // Inbound-validation rejections answer `rpc_error`; surface them as an error payload.
     if (error?.code && error?.requestType)
       return { error: { code: error.code, message: String(error.error ?? error.message) } };
@@ -1833,6 +1841,11 @@ async function runApiGates(client, jagentdeskHome, proxy, ctx) {
     tooMany: tooMany.error?.code ?? null,
     none: none.error?.code ?? null,
     noVersion: noVersion.error?.code ?? null,
+    rejectionSource: {
+      tooMany: tooMany.__harnessOrigin ?? "daemon_response",
+      none: none.__harnessOrigin ?? "daemon_response",
+      noVersion: noVersion.__harnessOrigin ?? "daemon_response",
+    },
   };
 }
 
@@ -2112,6 +2125,22 @@ async function runUiPlaybackGates(
       "ui-player-open",
       `player toolbar visible but no player-specific stage canvas with loaded pixels after ${stagePaintWaitMs}ms of polling (got ${JSON.stringify(playerStage)}); "canvas" alone would match the file canvas behind the player`,
     );
+    // Keep the failed timing gate. A separate bounded observation lets us inspect eventual
+    // rendering on a real slow API response instead of losing the window before pixels arrive.
+    const observationDeadline = Date.now() + 30_000;
+    while (
+      (!playerStage || playerStage.width < 100 || playerStage.paintedSamplePixels === 0) &&
+      Date.now() < observationDeadline
+    ) {
+      await delay(500);
+      playerStage = await readPlayerStage();
+    }
+    evidence.playerAfterDeadline = {
+      stage: playerStage,
+      elapsedMs: Date.now() - stageStart,
+      note: "diagnostic only; ui-player-open FAIL above is unchanged",
+    };
+    await page.screenshot({ path: path.join(artifactDir, "player-after-deadline.png") });
     return;
   }
   uiRequests.playerOpened = true;
