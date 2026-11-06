@@ -252,6 +252,18 @@ function drawStrokes(state: DrawState, node: FigmaNode, alpha: number): void {
     ctx.save();
     ctx.globalAlpha = (paint.opacity ?? 1) * alpha;
     applyPaintBlend(ctx, paint.blendMode);
+    if (baked && settings.align !== "CENTER") {
+      // Figma's strokeGeometry band spans ±weight around the outline; the align semantics
+      // are applied by clipping (source PNG4: a 1px INSIDE border covers exactly the inner
+      // half). Unclipped, a weight-1 inside border paints 2px straddling the edge — the
+      // "visibly heavier" stroke residual. Same technique as the primitive branch below.
+      const outlines = fillShapes(node);
+      for (const outline of outlines) {
+        if (settings.align === "INSIDE") ctx.clip(outline.path, outline.rule);
+        else if (settings.align === "OUTSIDE")
+          ctx.clip(inverseShape(outline, width, height, settings.weight), "evenodd");
+      }
+    }
     for (const shape of shapes) {
       // Figma's strokeGeometry entries are the final outline: width, cap, join and dashes are
       // already baked into the path, so it is filled with its winding rule, not stroked.
