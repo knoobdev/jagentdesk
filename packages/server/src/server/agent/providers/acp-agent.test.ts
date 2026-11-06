@@ -138,6 +138,7 @@ interface ACPModelSelectionInternals {
 }
 
 interface ACPConfiguredOverrideInternals {
+  applySessionState(response: SessionStateResponse): void;
   sessionId: string | null;
   connection: {
     setSessionMode: (input: { sessionId: string; modeId: string }) => Promise<void>;
@@ -442,6 +443,24 @@ function prepareConfiguredOverrideSession(
     configOptions: options.configOptions ?? [],
   }));
   const internals = asInternals<ACPConfiguredOverrideInternals>(session);
+  const availableModes = options.availableModes ?? [];
+  const modes =
+    availableModes.length > 0
+      ? {
+          currentModeId: options.currentMode ?? availableModes[0]!.id,
+          availableModes: availableModes.map((mode) => ({
+            id: mode.id,
+            label: mode.label,
+            description: mode.description,
+            name: mode.label,
+          })),
+        }
+      : undefined;
+  internals.applySessionState({
+    sessionId: "session-1",
+    modes,
+    configOptions: options.configOptions ?? [],
+  });
   internals.sessionId = "session-1";
   internals.connection = {
     setSessionMode,
