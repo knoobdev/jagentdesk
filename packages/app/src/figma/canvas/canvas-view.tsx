@@ -8,6 +8,12 @@ import type { Theme } from "@/styles/theme";
 import { createFigmaRenderer } from "@/figma/renderer";
 import { callFigma } from "./api";
 import type { FrameStore } from "./frame-store";
+import {
+  childSummaries,
+  flattenVisibleRoots,
+  isSectionSummary,
+  type SectionAwareSummary,
+} from "./section-outline";
 import { useFigmaAssets } from "./use-figma-assets";
 import {
   type Camera,
@@ -16,19 +22,23 @@ import {
   framesInViewport,
   lodMode,
   panBy,
+  planRootLoad,
   screenToFigma,
   visibleRect,
   zoomAroundPoint,
 } from "./viewport";
 
-// The canvas viewer (spec 32.5.1). Web/Electron draw into one HTML canvas with a
+// The canvas viewer (spec 32.5.1, ADR-0039). Web/Electron draw into one HTML canvas with a
 // devicePixelRatio-backed store: drag or two-finger wheel pans, ctrl/cmd-wheel or pinch zooms
-// around the cursor, and a click without movement runs the renderer's hitTest. Frames entering
-// the viewport are requested through `figma.file.nodes` lazily (FrameStore batches ≤ 50 ids,
-// LRU-caps the subtrees). Below THUMBNAIL_ZOOM the viewer swaps to cached raster thumbnails from
-// figma.file.render so thousand-frame files stay smooth; above it the renderer draws vectors,
-// pulling image fills, fallback rasters and fonts through the asset caches. Mobile shares the
-// camera math and shows frame rasters with pinch/pan and frame-level tap selection.
+// around the cursor, and a click without movement runs the renderer's hitTest. What reaches the
+// network is decided by ONE plan function (planRootLoad): at Fit every root is too small for
+// detail, so overview draws factual metadata boxes and requests nothing; thumbnail LOD fetches
+// cached rasters only for frames projected large enough to read; vectors (and their subtree
+// loads, FrameStore batches ≤ 50 ids, LRU-capped) come only above THUMBNAIL_ZOOM with real
+// projected size. SECTIONs never load a full tree: chrome from the summary, children via
+// shallow depth-1 reads into a separate bounded cache, flattened into the same root list that
+// painting, culling, hit-testing and Inspect share. Mobile shares the camera math, the plan,
+// and shows frame rasters with pinch/pan and frame-level tap selection.
 
 export interface CanvasViewProps {
   serverId: string;
@@ -91,6 +101,14 @@ export function findNodeInStore(store: FrameStore, nodeId: string): FigmaNode | 
     const found = root.id === nodeId ? root : findNode(root, nodeId);
     if (found) return found;
   }
+  // Shallow SECTION payloads carry their direct children (depth-1, ADR-0039): a selected
+  // Section or one of its direct children must resolve for Inspect without a full-tree load.
+  for (const id of store.sectionLoadedIds()) {
+    const root = store.sectionNode(id);
+    if (!root) continue;
+    const found = root.id === nodeId ? root : findNode(root, nodeId);
+    if (found) return found;
+  }
   return null;
 }
 
@@ -116,16 +134,46 @@ export function CanvasView(props: CanvasViewProps) {
   useEffect(() => (store ? store.subscribe(bump) : undefined), [store, bump]);
   useEffect(() => assets.subscribe(bump), [assets, bump]);
 
-  // ── lazy loading: frames that scroll in get their subtree requested once ──────────
+  // ── adaptive roots + lazy loading (spec 32.5.1, ADR-0039) ──────────────────────────
+  // A SECTION is chrome only — background and label drawn from the real summary. Its unknown
+  // children come from a shallow depth-1 read when the Section is in the viewport and large
+  // enough for detail, recursively for nested Sections; the full-subtree queue only ever
+  // carries leaf drawing/frame roots. The flat child summaries are the single source for
+  // culling, painting, hit-testing and Inspect, so no Section tree is drawn twice.
+  const revision = store ? store.revisionSnapshot() : 0;
+  const drawnRoots = useMemo<SectionAwareSummary[]>(() => {
+    void revision; // Cache changes keep `store`/`page` stable; only the revision re-runs this.
+    if (!page) return [];
+    return flattenVisibleRoots(page.frames, (id) => {
+      const section = store?.sectionNode(id);
+      return section ? childSummaries(section) : undefined;
+    });
+  }, [page, store, revision]);
   const visible = useMemo(() => {
-    if (!page || size.width === 0 || size.height === 0) return [];
-    return framesInViewport(page.frames, camera, size.width, size.height, 120);
-  }, [page, camera, size]);
-  const visibleKey = visible.map((frame) => frame.id).join(",");
+    if (drawnRoots.length === 0 || size.width === 0 || size.height === 0) return [];
+    return framesInViewport(drawnRoots, camera, size.width, size.height, 120);
+  }, [drawnRoots, camera, size]);
+  const loadPlan = useMemo(() => {
+    const subtrees: string[] = [];
+    const shallowSections: string[] = [];
+    for (const frame of visible) {
+      const plan = planRootLoad(frame.bounds, camera.zoom);
+      if (isSectionSummary(frame)) {
+        // Overview (metadata or thumbnail LOD) draws the Section's own summary box and label
+        // only — its children stay unexpanded until vector detail is on screen (ADR-0039:
+        // defer unknown Section children at overview).
+        if (plan === "full" && frame.childrenLoaded === false) shallowSections.push(frame.id);
+      } else if (plan === "full") {
+        subtrees.push(frame.id);
+      }
+    }
+    return { subtrees, shallowSections };
+  }, [visible, camera]);
   useEffect(() => {
-    if (!store || visibleKey.length === 0) return;
-    void store.load(visibleKey.split(","));
-  }, [store, visibleKey]);
+    if (!store || visible.length === 0) return;
+    if (loadPlan.subtrees.length > 0) void store.load(loadPlan.subtrees);
+    if (loadPlan.shallowSections.length > 0) void store.loadSections(loadPlan.shallowSections);
+  }, [store, visible, loadPlan]);
 
   // ── camera gestures ───────────────────────────────────────────────────────────────
   const cameraRef = useRef(camera);
@@ -148,12 +196,18 @@ export function CanvasView(props: CanvasViewProps) {
         return;
       }
       const cursor = screenToFigma(cameraRef.current, point);
-      const candidates = framesInViewport(page.frames, cameraRef.current, size.width, size.height);
+      const candidates = framesInViewport(drawnRoots, cameraRef.current, size.width, size.height);
       for (let i = candidates.length - 1; i >= 0; i -= 1) {
         const frame = candidates[i];
-        if (!frame) continue;
+        // Flat child frame roots only: a SECTION is chrome, and its subtree is not loaded.
+        if (!frame || isSectionSummary(frame)) continue;
         const root = store.get(frame.id);
-        if (!root) continue;
+        if (!root) {
+          // The click is a detail demand: queue exactly this root (load dedups cached ids),
+          // so the next click on the same spot hit-tests against the real tree.
+          void store.load([frame.id]);
+          continue;
+        }
         const hit = renderer.hitTest(root, cursor);
         if (hit) {
           onSelectNode(hit.id);
@@ -162,7 +216,7 @@ export function CanvasView(props: CanvasViewProps) {
       }
       onSelectNode(null);
     },
-    [onSelectNode, page, renderer, size.height, size.width, store],
+    [drawnRoots, onSelectNode, page, renderer, size.height, size.width, store],
   );
 
   // ── painting (web/Electron) ───────────────────────────────────────────────────────
@@ -195,6 +249,13 @@ export function CanvasView(props: CanvasViewProps) {
     const viewport = visibleRect(cameraRef.current, size.width, size.height);
     const mode = lodMode(zoom);
     for (const frame of visible) {
+      const plan = planRootLoad(frame.bounds, zoom);
+      if (plan === "metadata") {
+        // Overview: factual summary data only — zero subtree requests, zero thumbnail rasters.
+        if (isSectionSummary(frame)) drawSectionChrome(ctx, frame);
+        else drawMetadataBox(ctx, frame);
+        continue;
+      }
       if (mode === "thumbnail") {
         const raster = assets.requestThumbnail(frame.id, 1);
         if (raster)
@@ -206,6 +267,10 @@ export function CanvasView(props: CanvasViewProps) {
             frame.bounds.height,
           );
         else drawPlaceholder(ctx, frame.bounds, frame.name);
+        continue;
+      }
+      if (isSectionSummary(frame)) {
+        drawSectionChrome(ctx, frame);
         continue;
       }
       const node = store.get(frame.id);
@@ -354,6 +419,38 @@ function drawPlaceholder(ctx: CanvasRenderingContext2D, bounds: FrameBounds, lab
   ctx.restore();
 }
 
+const SECTION_BORDER = "#7a7a7a";
+
+/** The Section's real summary is the whole picture: background from the outline, plus label. */
+function drawSectionChrome(ctx: CanvasRenderingContext2D, frame: SectionAwareSummary): void {
+  ctx.save();
+  if (frame.backgroundColor) {
+    ctx.fillStyle = frame.backgroundColor;
+    ctx.fillRect(frame.bounds.x, frame.bounds.y, frame.bounds.width, frame.bounds.height);
+  }
+  ctx.strokeStyle = SECTION_BORDER;
+  ctx.lineWidth = 1 / (ctx.getTransform().a || 1);
+  ctx.strokeRect(frame.bounds.x, frame.bounds.y, frame.bounds.width, frame.bounds.height);
+  ctx.fillStyle = SECTION_BORDER;
+  ctx.font = "12px sans-serif";
+  ctx.fillText(frame.name, frame.bounds.x + 8, frame.bounds.y + 18);
+  ctx.restore();
+}
+
+/** Overview frame box from factual summary data only — bounds, real background, name. */
+function drawMetadataBox(ctx: CanvasRenderingContext2D, frame: SectionAwareSummary): void {
+  ctx.save();
+  ctx.fillStyle = frame.backgroundColor ?? "#ffffff";
+  ctx.fillRect(frame.bounds.x, frame.bounds.y, frame.bounds.width, frame.bounds.height);
+  ctx.strokeStyle = PLACEHOLDER_BORDER;
+  ctx.lineWidth = 1 / (ctx.getTransform().a || 1);
+  ctx.strokeRect(frame.bounds.x, frame.bounds.y, frame.bounds.width, frame.bounds.height);
+  ctx.fillStyle = PLACEHOLDER_BORDER;
+  ctx.font = "12px sans-serif";
+  ctx.fillText(frame.name, frame.bounds.x + 8, frame.bounds.y + 18);
+  ctx.restore();
+}
+
 function drawSelectionBox(
   ctx: CanvasRenderingContext2D,
   store: FrameStore,
@@ -438,7 +535,7 @@ export function NativeCanvasLayer(props: {
   serverId: string;
   fileKey: string;
   version: string | null;
-  visible: ReturnType<typeof framesInViewport>;
+  visible: readonly SectionAwareSummary[];
   camera: Camera;
   selectedNodeId: string | null;
   onSelectNode: (nodeId: string | null) => void;
@@ -469,10 +566,12 @@ export function NativeCanvasLayer(props: {
       requested.current.clear();
       setRasters((current) => (Object.keys(current).length === 0 ? current : {}));
     }
-    const visibleIds = visible.map((frame) => frame.id);
-    visibleIdsRef.current = visibleIds;
+    const detailIds = visible
+      .filter((frame) => planRootLoad(frame.bounds, camera.zoom) !== "metadata")
+      .map((frame) => frame.id);
+    visibleIdsRef.current = detailIds;
     if (!client) return;
-    const missing = visibleIds.filter((id) => !requested.current.has(id));
+    const missing = detailIds.filter((id) => !requested.current.has(id));
     if (missing.length === 0) return;
     for (const id of missing) requested.current.add(id);
     for (let i = 0; i < missing.length; i += 20) {
@@ -505,7 +604,7 @@ export function NativeCanvasLayer(props: {
           for (const id of batch) requested.current.delete(id);
         });
     }
-  }, [client, props.serverId, fileKey, version, visible]);
+  }, [client, props.serverId, fileKey, version, visible, camera]);
 
   const cameraRef = useRef(camera);
   cameraRef.current = camera;

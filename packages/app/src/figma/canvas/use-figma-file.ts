@@ -7,6 +7,7 @@ import type {
   FigmaFile,
   FigmaNode,
   FigmaPendingOp,
+  FigmaRequestParams,
 } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { useFetchQuery } from "@/data/query";
 import { getHostRuntimeStore, useHostRuntimeClient } from "@/runtime/host-runtime";
@@ -60,12 +61,15 @@ export function useFigmaFrameStore(
       `${serverId}|${reloadToken}`,
       fileKey,
       version ?? undefined,
-      async (ids) => {
-        const data = await client.figmaRequest("figma.file.nodes.request", {
+      async (ids, options) => {
+        // depth: 1 (ADR-0039) is a protocol field on the nodes request (commit 205355388).
+        const params: FigmaRequestParams<"figma.file.nodes.request"> = {
           fileKey,
           ids: [...ids],
           ...(version ? { version } : {}),
-        });
+        };
+        if (options?.depth) params.depth = options.depth;
+        const data = await client.figmaRequest("figma.file.nodes.request", params);
         if (data.error) throw new Error(data.error.message);
         return {
           nodes: data.nodes as Record<string, FigmaNode | null>,
