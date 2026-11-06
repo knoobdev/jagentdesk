@@ -1,6 +1,7 @@
 import type { FigmaBytes, FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { textRuns } from "../renderer/node-props";
 import { walkNodes } from "./node-geometry";
+import { isItalicStyle, weightForStyle } from "../font-style";
 
 // Font loading for the player (spec 32.5.3): the renderer never loads fonts — it asks
 // `fontAvailable` per family and falls back to its generic stack, so the player must load what
@@ -8,6 +9,7 @@ import { walkNodes } from "./node-geometry";
 // Families Google Fonts serves come from its CSS; everything else rides the daemon's
 // `figma.fonts.get` bytes (32.8) registered through the FontFace API. DOM access stays behind
 // the injected deps so this module runs, and is tested, without one.
+export { isItalicStyle, weightForStyle };
 
 export interface RequiredFont {
   family: string;
@@ -55,39 +57,6 @@ const GOOGLE_FONTS: Record<string, string> = {
   "plus jakarta sans": "Plus Jakarta Sans",
   outfit: "Outfit",
 };
-
-const STYLE_WEIGHTS: [string, number][] = [
-  ["thin", 100],
-  ["hairline", 100],
-  ["extralight", 200],
-  ["ultralight", 200],
-  ["light", 300],
-  ["regular", 400],
-  ["normal", 400],
-  ["medium", 500],
-  ["semibold", 600],
-  ["demibold", 600],
-  ["bold", 700],
-  ["extrabold", 800],
-  ["ultrabold", 800],
-  ["black", 900],
-  ["heavy", 900],
-];
-
-export function weightForStyle(styleName: string): number {
-  // "Semi Bold" must not hit the "Bold" token: normalise spacing, then take the LONGEST matching
-  // token so "semibold"/"extrabold"/"demibold" win over "bold".
-  const compact = styleName.toLowerCase().replace(/[\s_-]+/g, "");
-  const tokens = [...STYLE_WEIGHTS].sort((a, b) => b[0].length - a[0].length);
-  for (const [token, value] of tokens) {
-    if (compact.includes(token)) return value;
-  }
-  return 400;
-}
-
-export function isItalicStyle(styleName: string): boolean {
-  return /italic|oblique/.test(styleName.toLowerCase());
-}
 
 /** Every family/style the subtree's TEXT nodes ask for, in document order, deduplicated. */
 export function collectRequiredFonts(root: FigmaNode): RequiredFont[] {
