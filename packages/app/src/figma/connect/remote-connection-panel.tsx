@@ -155,7 +155,12 @@ function RemoteConnectionPanelInner({ serverId }: { serverId: string }) {
   });
   const state = statusQuery.data?.state ?? null;
   const message = statusQuery.data?.message ?? null;
-  const identityText = statusQuery.data?.identityText ?? null;
+  const rawIdentity = statusQuery.data?.identityText?.trim();
+  // Older hosts may return a truncated whoami document instead of a human identity.
+  const identityText =
+    rawIdentity && !rawIdentity.startsWith("{") && !rawIdentity.startsWith("[")
+      ? rawIdentity
+      : null;
   useEffect(() => {
     setTransitional(isTransitionalState(state));
     // Once the connector settles on either side, the stored sign-in link is history: an Open

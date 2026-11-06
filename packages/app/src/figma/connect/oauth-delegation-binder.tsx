@@ -1,4 +1,6 @@
 import { useEffect } from "react";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { commitFigmaConnection } from "./connection-cache";
 import type { FigmaOAuthDelegation } from "@jagentdesk/protocol/figma/rpc-schemas";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
@@ -15,6 +17,8 @@ import { beginFigmaOAuthLoopback, canUseLoopback } from "./oauth-flow";
 async function runDelegatedSignIn(
   client: DaemonClient,
   message: FigmaOAuthDelegation,
+  queryClient: QueryClient,
+  serverId: string,
 ): Promise<void> {
   const accepted = await confirmDialog({
     title: "Sign in to Figma for another device",
@@ -28,21 +32,24 @@ async function runDelegatedSignIn(
     redirectUri: message.redirectUri,
   });
   if (result.kind === "error") return;
-  await callFigma(client, "figma.oauth.complete.request", {
-    attemptId: message.attemptId,
-    code: result.code,
-    state: result.state,
-  }).catch(() => undefined);
+  await commitFigmaConnection(queryClient, serverId, () =>
+    callFigma(client, "figma.oauth.complete.request", {
+      attemptId: message.attemptId,
+      code: result.code,
+      state: result.state,
+    }),
+  ).catch(() => undefined);
 }
 
 export function FigmaOAuthDelegationBinder({ serverId }: { serverId: string }): null {
   const client = useHostRuntimeClient(serverId);
+  const queryClient = useQueryClient();
   const supportsFigma = useHostFeature(serverId, "figma");
   useEffect(() => {
     if (!client || !supportsFigma || !canUseLoopback()) return;
     return client.onFigmaPush("figma.oauth.delegation", (message) => {
-      void runDelegatedSignIn(client, message);
+      void runDelegatedSignIn(client, message, queryClient, serverId);
     });
-  }, [client, supportsFigma]);
+  }, [client, supportsFigma, queryClient, serverId]);
   return null;
 }
