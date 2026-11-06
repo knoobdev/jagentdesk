@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# W9 acceptance entry point for Figma standalone browsing + playback (ADR-0037, ADR-0038).
+# W9 acceptance entry point for Figma standalone browsing + playback
+# (ADR-0037, ADR-0038, ADR-0039, spec 32.11 incl. criterion #17).
 #
 # Tiers (kept visibly separate — scaffold/logic tests are NOT full E2E proof):
 #   logic   protocol playback bounds + picker policy. No app, no network.
@@ -7,12 +8,14 @@
 #           guest lifecycle + REST data flow + prototype request bounds + metrics.
 #   all     logic then e2e (default).
 #
-# Runtime acceptance uses REAL data only — no mocks, no fabricated entities, no ALLOW_BLOCKED:
-#   JAGENTDESK_FIGMA_E2E_ACCESS_TOKEN    a valid access token (the ONLY input the parent
-#                                        supplies; no refresh, no client credentials, no
-#                                        vault reads by the harness)
-#   JAGENTDESK_FIGMA_E2E_FILE_KEY        real file key/URL (defaults to the parent-verified
-#                                        file inside the harness)
+# Runtime acceptance uses REAL data only — no mocks, no fabricated entities, no ALLOW_BLOCKED.
+# BOTH required inputs are supplied by the parent at run time (the user is AWAY: no auth
+# prompts, no manual-login attempt; missing website session stays BLOCKED, no green full-E2E):
+#   JAGENTDESK_FIGMA_E2E_ACCESS_TOKEN    a valid access token (no refresh, no client
+#                                        credentials, no vault reads by the harness)
+#   JAGENTDESK_FIGMA_E2E_FILE_KEY        real file key/URL — REQUIRED; no user-file default
+#                                        lives in the harness (the parent's file is private,
+#                                        its link stays in /tmp evidence only)
 #   JAGENTDESK_FIGMA_E2E_FRAME_IDS       comma-separated frame ids (default: discovered from the outline)
 # A missing credential, 403, or website session is a RED with the unexercised gates listed —
 # it never skips to green.

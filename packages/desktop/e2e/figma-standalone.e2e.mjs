@@ -8,40 +8,43 @@
 // there is no skip-to-green and no ALLOW_BLOCKED. A missing credential, a 403, or a missing
 // website session is a RED with the unexercised gates listed.
 //
-// Inputs (environment):
-//   JAGENTDESK_FIGMA_E2E_ACCESS_TOKEN    a valid, read-only Figma access token — THE only input
-//                                        the parent supplies at run time. No refresh, no rotation
-//                                        side effects: the harness never refreshes and never reads
-//                                        the vault itself. Absence is a RED at the credentials gate
-//                                        BEFORE any heavy boot.
-//   JAGENTDESK_FIGMA_E2E_FILE_KEY        real file key or full figma.com URL; defaults to the
-//                                        parent's real USER file (private, not a public fixture):
-//                                        /me 200, meta 200, no 403 on this connection (2026-11-06).
-//                                        The parent supplies the token only during the actual
-//                                        final run — until then the harness stays RED on missing
-//                                        prerequisites and the real-website browse gate stays
-//                                        exercised separately from everything else.
+// Inputs (environment): BOTH are required at run time — RED at the credentials gate before any
+// heavy boot if either is absent. No user-file-specific default lives in this source; the
+// parent's private link and its depth-3 numbers stay in the /tmp evidence and the report.
+//   JAGENTDESK_FIGMA_E2E_ACCESS_TOKEN    a valid, read-only Figma access token, supplied by the
+//                                        parent only during the actual final run. No refresh, no
+//                                        rotation side effects: the harness never refreshes, never
+//                                        reads the vault, and never prompts for auth (user is
+//                                        AWAY — a missing website session is simply BLOCKED, no
+//                                        manual-login attempt, no full-E2E green).
+//   JAGENTDESK_FIGMA_E2E_FILE_KEY        real file key or full figma.com URL the account can read.
 //   JAGENTDESK_FIGMA_E2E_FRAME_IDS       optional comma list of playback ids (default: from the outline)
 //   JAGENTDESK_FIGMA_STANDALONE_E2E_ARTIFACT_DIR  evidence output directory
 //
 // Identity is populated ONLY from the real `GET /v1/me` answer — never a fabricated account row,
-// no dummy client credentials. The `Browse files` control and the prototype player are driven
-// through actual product UI clicks; the WS outline/playback checks are API-integration proof and
-// are labelled as such. The real-website browse gate stays BLOCKED until an actual authenticated
+// no dummy client credentials. The `Browse files` control (W2 ships it as figma-nav-browse /
+// figma-nav-browse-button) and the prototype player are driven through actual product UI clicks;
+// the WS outline/playback checks are API-integration proof and are labelled as such. The
+// real-website browse gate stays its own separate gate and BLOCKED until an actual authenticated
 // selection happens inside the guest — no injected location.assign, no DOM injection into Figma.
 //
 // The >=500-frame criterion (ADR-0039 / spec 32.11 #17) counts frame screens through the whole
-// tree INCLUDING the ones nested inside SECTIONs: the parent's real read is depth=3, which
-// returns 3546 FRAME nodes and 422 flowStartingPoints across 15 pages (17.4 MB in 9.4 s). The
-// pre-boot data diagnostic reproduces that exact depth=3 request shape. An API-only run NEVER
-// claims the <=3 s cold goal — that is the click-to-canvas UI gate's evidence alone.
+// tree INCLUDING the ones nested inside SECTIONs, via a depth=3 pre-boot read-only data
+// diagnostic — the request shape the parent measured (3546 FRAME / 422 flowStartingPoints /
+// 15 pages in 17.4 MB / 9.4 s on THEIR file). An API-only run NEVER claims the <=3 s cold goal:
+// that is the click-to-canvas UI gate's evidence alone.
 //
-// The recording-proxy trace must keep three request classes distinct and correctly bounded:
-// the bounded depth<=3 outline call, Section metadata at depth 1 (W4 optional capability /
-// W5/W7 adaptive Sections), and full FRAME reads over /nodes (<=10 ids, pinned version, ids
-// drawn from the outline's frame set — a non-outline id means a whole SECTION tree was
-// downloaded, which spec 32.11 #17 forbids for viewport frames). New behavior rides the
-// server_info capability advertisement, so an old host is gated, not guessed.
+// The recording-proxy trace keeps request classes distinct and correctly bounded: bounded
+// depth<=3 outline calls, Section metadata at depth 1 (W4 optional capability / W5/W7 adaptive
+// Sections), and full FRAME reads over /nodes — <=50 ids per spec 32.5.1 (independent
+// NON-SECTION drawing summaries: GROUP/COMPONENT/INSTANCE/… are legitimate loads) with a pinned
+// version and never a known SECTION id (no whole-SECTION downloads for viewport frames). The
+// playback <=10 frameIds contract is enforced on actual UI WebSocket request messages / the
+// correlated RPC trace, never by misreading REST /nodes URLs. The perf fps gate samples rAF
+// ONLY while real wheel-zoom/pan inputs change the viewport (idle raf proves nothing), and the
+// RAM gate measures the real Electron main+helper tree, not the dev-runner's Metro/Node
+// descendants. New behavior rides the server_info capability advertisement, so an old host is
+// gated, not guessed.
 import { spawn, execFileSync } from "node:child_process";
 import { createCipheriv, randomBytes } from "node:crypto";
 import http from "node:http";
@@ -68,24 +71,17 @@ const figmaTimeoutMs = 60_000;
 const canvasDeadlineMs = 3_000; // spec 32.11 #2: canvas with viewport frames in <= 3 s
 const appRamBudgetMb = 300; // spec 32.11 #2: app RAM growth < 300 MB
 const minFps = 50; // spec 32.11 #2: pan/zoom >= 50 fps
-const minFrames = 500; // spec 32.11 #2: a real file with >= 500 frames
+const minFrames = 500; // spec 32.11 #17: >= 500 frame screens, SECTION-nested included
+const maxNodesBatch = 50; // spec 32.5.1: full-canvas nodes requests carry <= 50 ids
+const maxPlaybackBatch = 10; // playback RPC contract: frameIds <= 10 per request
 const CONNECTION_ID = "fgc_w9_harness";
 const WORKSPACE_ID = "figma-standalone-w9";
 const FIGMA_API_ORIGIN = "https://api.figma.com";
 const FIGMA_FILE_KINDS = new Set(["design", "file", "proto"]);
-// The parent's real user file — PRIVATE, not a public fixture. Parent-verified 2026-11-06:
-// /me 200, meta 200, no 403; depth=3 yields 3546 FRAME nodes + 422 flowStartingPoints across
-// 15 pages (17.4 MB, 9.4 s). A version move or a changed count is reported, not failed:
-// playback pins the live version and these numbers are a live user file, not a frozen fixture.
-const VERIFIED_FILE_KEY = "aGsoYCbRX1CH7o1yuaN7Hf";
-const VERIFIED_FILE_VERSION = "2418589277144612492";
-const PARENT_DEPTH3_FACTS = {
-  frames: 3546,
-  flowStartingPoints: 422,
-  pages: 15,
-  mb: 17.4,
-  seconds: 9.4,
-};
+// No file-specific default lives in this tracked source: JAGENTDESK_FIGMA_E2E_FILE_KEY is
+// REQUIRED at run time alongside the access token. The parent's real file is PRIVATE — its key,
+// version and depth-3 numbers (3546 FRAME / 422 flowStartingPoints / 15 pages, 17.4 MB / 9.4 s)
+// live in /tmp evidence and the report only.
 
 const GATE_NAMES = [
   "desktop-build",
@@ -208,7 +204,37 @@ function stopProcess(child) {
   }
 }
 
-/** RSS of every descendant of rootPid: Electron main, renderer, GPU and helper processes. */
+/**
+ * Locate the REAL Electron main process among the dev-runner's descendants. The dev-runner's
+ * own command line also references desktopDir (it lives in scripts/), and helper processes
+ * inherit it, so the main is uniquely: contains the desktopDir argument, no `--type=` flag
+ * (helpers carry one), not `dev-runner` itself, and runs the Electron binary proper.
+ */
+function findElectronMainPid(desktopDirPath) {
+  let out;
+  try {
+    out = execFileSync("ps", ["-axo", "pid=,command="], {
+      encoding: "utf8",
+      maxBuffer: 32 * 1024 * 1024,
+    });
+  } catch {
+    return null;
+  }
+  for (const line of out.split("\n")) {
+    const match = /^\s*(\d+)\s+(.*)$/.exec(line);
+    if (!match) continue;
+    const [, pidText, command] = match;
+    if (!command.includes(desktopDirPath)) continue;
+    if (command.includes("--type=") || command.includes("dev-runner")) continue;
+    if (
+      /Electron\.app\/Contents\/MacOS\/Electron(\s|$)|electron\/dist\/electron(\s|$)/.test(command)
+    )
+      return Number(pidText);
+  }
+  return null;
+}
+
+/** RSS of every descendant of rootPid (used for the daemon tree). */
 function treeRssKb(rootPid) {
   let out;
   try {
@@ -295,6 +321,18 @@ function countNodesByType(node, type) {
   let total = String(node.type).toUpperCase() === type ? 1 : 0;
   for (const child of node.children ?? []) total += countNodesByType(child, type);
   return total;
+}
+
+/** Ids of every node of a type, used to classify REST /nodes fetches (SECTION downloads). */
+function collectNodeIdsByType(node, type) {
+  const ids = [];
+  const walk = (n) => {
+    if (!n || typeof n !== "object") return;
+    if (String(n.type).toUpperCase() === type && n.id) ids.push(String(n.id));
+    for (const child of n.children ?? []) walk(child);
+  };
+  walk(node);
+  return ids;
 }
 
 /** Page (CANVAS) count and flow-start count from the real depth=3 answer, both cross-checked. */
@@ -524,7 +562,7 @@ async function main() {
   const evidence = { startedAt: new Date().toISOString(), gates: {}, artifactDir };
 
   const accessToken = process.env.JAGENTDESK_FIGMA_E2E_ACCESS_TOKEN ?? "";
-  const fileKeyInput = process.env.JAGENTDESK_FIGMA_E2E_FILE_KEY || VERIFIED_FILE_KEY;
+  const fileKeyInput = process.env.JAGENTDESK_FIGMA_E2E_FILE_KEY ?? "";
   const configuredFrames = (process.env.JAGENTDESK_FIGMA_E2E_FRAME_IDS ?? "")
     .split(",")
     .map((id) => id.trim())
@@ -549,10 +587,13 @@ async function main() {
       process.exit(1);
     }
 
-    if (!accessToken) {
+    const missingInputs = [];
+    if (!accessToken) missingInputs.push("JAGENTDESK_FIGMA_E2E_ACCESS_TOKEN");
+    if (!fileKeyInput) missingInputs.push("JAGENTDESK_FIGMA_E2E_FILE_KEY");
+    if (missingInputs.length > 0) {
       failGate(
         "credentials",
-        "JAGENTDESK_FIGMA_E2E_ACCESS_TOKEN is missing — the parent supplies a valid access token at run time; RED without booting the app (the vault is not read by this harness)",
+        `${missingInputs.join(" and ")} missing — the parent supplies the token AND the private file key at run time (no defaults live in this tracked source); RED without booting the app`,
       );
       finish(evidence, gates, artifactDir);
       process.exit(1);
@@ -601,9 +642,11 @@ async function main() {
     passGate("file-access", { name: fileMeta.name });
 
     // ADR-0039 / spec 32.11 #17 real read: depth=3 returns every frame screen INCLUDING those
-    // nested inside SECTIONs (parent-verified: 3546 FRAME + 422 flowStartingPoints / 15 pages,
-    // 17.4 MB in 9.4 s). This is a pre-boot read-only DATA diagnostic against api.figma.com —
-    // an API-only run here never claims the <=3 s cold goal; that is the click-to-canvas UI gate.
+    // nested inside SECTIONs. The parent's verified numbers for THEIR file (3546 FRAME + 422
+    // flowStartingPoints / 15 pages, 17.4 MB / 9.4 s at depth=3) are PRIVATE and live in /tmp
+    // evidence only — no file-specific default is baked into this tracked source. This is a
+    // pre-boot read-only DATA diagnostic against api.figma.com; an API-only run here never
+    // claims the <=3 s cold goal — that is the click-to-canvas UI gate's proof alone.
     const depth3Start = Date.now();
     const depth3 = await figmaApiGet(accessToken, `/v1/files/${encodeURIComponent(fileKey)}`, {
       depth: 3,
@@ -611,8 +654,6 @@ async function main() {
     evidence.dataDiagnostic = {
       shape: `GET /v1/files/${fileKey}?depth=3`,
       ms: Date.now() - depth3Start,
-      parentVerified: PARENT_DEPTH3_FACTS,
-      note: "parent's private user file — cross-checked as facts reported, never as a public fixture",
     };
     if (depth3.status !== 200) {
       failGate("file-size-500-frames", `depth=3 data diagnostic answered ${depth3.status}`);
@@ -623,6 +664,10 @@ async function main() {
         (node) => String(node?.type).toUpperCase() === "CANVAS",
       ).length;
       const flows = countFlowStartingPoints(depth3.body?.document, depth3.body);
+      // Known SECTION ids let the REST trace gate flag a whole-SECTION download specifically:
+      // independent NON-SECTION drawing summaries (GROUP/COMPONENT/INSTANCE/…) may legitimately
+      // be fetched by id, so "not an outline frame id" alone is not an offender.
+      evidence.sectionNodeIds = collectNodeIdsByType(depth3.body?.document, "SECTION");
       Object.assign(evidence.dataDiagnostic, {
         frames,
         sections,
@@ -643,15 +688,6 @@ async function main() {
           "file-size-500-frames",
           `real file has ${frames} FRAME nodes through the tree (SECTIONs included) — spec 32.11 #17 demands >= ${minFrames}; pick a bigger file for green`,
         );
-      if (frames !== PARENT_DEPTH3_FACTS.frames || flows !== PARENT_DEPTH3_FACTS.flowStartingPoints)
-        console.log(
-          `  note       live depth-3 read is ${frames} FRAME / ${flows} flowStartingPoints / ${pages} pages — parent verified ${PARENT_DEPTH3_FACTS.frames}/${PARENT_DEPTH3_FACTS.flowStartingPoints}/${PARENT_DEPTH3_FACTS.pages} (live user file, reported not failed)`,
-        );
-    }
-    if (evidence.fileMeta.version && evidence.fileMeta.version !== VERIFIED_FILE_VERSION) {
-      console.log(
-        `  note       file version moved from ${VERIFIED_FILE_VERSION} to ${evidence.fileMeta.version} (playback pins the live version)`,
-      );
     }
   } catch (error) {
     console.error(error);
@@ -744,17 +780,53 @@ async function main() {
       bootMs: Date.now() - appBootStart,
     });
 
-    // Continuous app-tree RAM sampling for the whole session
-    // (spec 32.11 #2: RAM before/peak/after close; daemon measured separately).
+    // ── correlated UI RPC trace: capture the renderer's OWN WebSocket requests ──────
+    // A REST /nodes URL alone cannot tell the logical caller apart (canvas subtree loads
+    // are allowed <=50 ids per spec 32.5.1; the playback RPC contract is <=10). So the
+    // playback limit is proven against the actual WS request messages the UI sent, not
+    // against raw proxy lines.
+    const uiRequests = { types: new Set(), playbackFrameCounts: [], nodesIdCounts: [] };
+    page.on("websocket", (ws) => {
+      if (!ws.url().includes(`127.0.0.1:${daemonPort}`)) return;
+      ws.on("framesent", (frame) => {
+        try {
+          // Wire shape (daemon-client figmaRequest): { type, ...params } — params are flat.
+          const msg = JSON.parse(String(frame.payload));
+          const type = msg?.type;
+          if (typeof type !== "string" || !type.startsWith("figma.")) return;
+          uiRequests.types.add(type);
+          if (type === "figma.file.playback.request")
+            uiRequests.playbackFrameCounts.push((msg?.frameIds ?? []).length);
+          if (type === "figma.file.nodes.request")
+            uiRequests.nodesIdCounts.push((msg?.ids ?? []).length);
+        } catch {
+          /* binary or non-JSON frame */
+        }
+      });
+    });
+
+    // App-tree RAM must be the REAL Electron main + helper processes (spec 32.11 #2), NOT
+    // the dev-runner's Metro/Node/compiler descendants. Locate the main by its launch
+    // signature (the desktop dir argument, no --type= helper flag) and measure that tree;
+    // the daemon tree is recorded separately and never mixed in.
+    const electronMainPid = findElectronMainPid(desktopDir);
+    const electronFound = electronMainPid !== null;
+    if (!electronFound)
+      console.log(
+        "  note       Electron main process not located among dev-runner descendants — perf-app-ram-tree will fail rather than measure the wrong tree",
+      );
     const ram = { baselineKb: 0, peakKb: 0, afterCloseKb: null, samples: [] };
     ramSampler = setInterval(() => {
-      const { totalKb } = treeRssKb(desktop.child.pid);
+      const { totalKb } = treeRssKb(electronMainPid ?? 0);
       if (totalKb > 0) {
         ram.samples.push({ at: Date.now(), totalKb });
         ram.peakKb = Math.max(ram.peakKb, totalKb);
       }
     }, 250);
-    ram.baselineKb = treeRssKb(desktop.child.pid).totalKb;
+    ram.baselineKb = treeRssKb(electronMainPid ?? 0).totalKb;
+    evidence.electronMainPid = electronMainPid;
+    evidence.devRunnerTreeNote =
+      "dev-runner (Metro/node/compiler) descendants excluded from the measured tree";
     evidence.daemonRssKb = treeRssKb(daemon.child.pid).totalKb;
 
     client = await connectDaemonClient(daemonPort);
@@ -794,14 +866,21 @@ async function main() {
     passGate("ui-figma-section", { reached: "figma files home" });
     await page.screenshot({ path: path.join(artifactDir, "figma-section.png") });
 
-    // ── UI: Browse files (W2 product control) ──────────────────────────────────
-    const browseButton = page.getByTestId("figma-browse-files");
+    // ── UI: Browse files (W2 product control — actual testIDs from latest source) ──
+    const browseButton = page.getByTestId("figma-nav-browse-button");
+    const browseRow = page.getByTestId("figma-nav-browse");
     if (await browseButton.isVisible().catch(() => false)) {
-      passGate("ui-browse-files", { via: "real product control figma-browse-files" });
+      passGate("ui-browse-files", {
+        via: "real product control figma-nav-browse-button (W2, ADR-0038)",
+      });
+    } else if (await browseRow.isVisible().catch(() => false)) {
+      passGate("ui-browse-files", {
+        via: "real product control figma-nav-browse row (W2, ADR-0038)",
+      });
     } else {
       unimplementedGate(
         "ui-browse-files",
-        "no Browse files control in the product UI yet — W2 owns the button that opens the picker",
+        "no Browse files control on this tree yet — W2's button ships as figma-nav-browse / figma-nav-browse-button (commit 7c4d1bbc6); the gate resolves automatically once merged",
       );
     }
 
@@ -814,11 +893,13 @@ async function main() {
       fileMetaName: evidence.fileMeta.name,
       configuredFrames,
       evidence,
+      uiRequests,
     });
 
     // ── UI: open the file and the player through real clicks ───────────────────
-    await runUiPlaybackGates(page, ram, canvasDeadlineMs, minFps, desktop.child.pid, fileKey, {
+    await runUiPlaybackGates(page, ram, canvasDeadlineMs, minFps, electronMainPid, fileKey, {
       artifactDir,
+      uiRequests,
       refreshUi: async () => {
         // The file entered the daemon store over WS; reload and re-navigate the real product UI
         // so the files home shows it — a user-visible refresh, not DOM injection into Figma.
@@ -829,7 +910,12 @@ async function main() {
     });
 
     // ── app-tree RAM gate ──────────────────────────────────────────────────────
-    if (ram.samples.length === 0) {
+    if (!electronFound) {
+      failGate(
+        "perf-app-ram-tree",
+        "the real Electron main process was never located — measuring dev-runner (Metro/node) descendants would have manufactured green",
+      );
+    } else if (ram.samples.length === 0) {
       failGate("perf-app-ram-tree", "the RAM sampler collected no process-tree samples");
     } else {
       const peakGrowthMb = (ram.peakKb - ram.baselineKb) / 1024;
@@ -864,7 +950,8 @@ async function main() {
     runUrlTraceGate(
       proxy.log,
       fileKey,
-      evidence.outlineFrameIds ? new Set(evidence.outlineFrameIds) : null,
+      evidence.sectionNodeIds ? new Set(evidence.sectionNodeIds) : null,
+      uiRequests,
     );
   } catch (error) {
     console.error(`Figma standalone E2E failed. Artifacts: ${artifactDir}`);
@@ -936,6 +1023,9 @@ async function runPickerGate(page, browser, artifactDir, { fileKey }) {
     .screenshot({ path: path.join(artifactDir, "picker-guest.png") })
     .catch(() => undefined);
   const landedUrl = guest.url();
+  // USER IS AWAY: the harness never waits for or attempts a manual login. One probe, verdict
+  // recorded (a native probe reaching figma.com/login just gets BLOCKED and the guest closed),
+  // missing website session keeps the run RED — never a green full-E2E by login patience.
   if (
     /figma\.com\/(login|email|handle-auth|oauth)/.test(landedUrl) ||
     !/figma\.com/.test(landedUrl)
@@ -1014,7 +1104,7 @@ async function runPickerGate(page, browser, artifactDir, { fileKey }) {
 /** WS outline/playback + warm cache — API-integration proof (labelled; not the player E2E). */
 // eslint-disable-next-line eslint(complexity) — each API step records its own gate verdict.
 async function runApiGates(client, jagentdeskHome, proxy, ctx) {
-  const { fileKey, fileMetaName, configuredFrames, evidence } = ctx;
+  const { fileKey, fileMetaName, configuredFrames, evidence, uiRequests } = ctx;
   const added = await figmaRequest(client, "figma.files.add.request", {
     connectionId: CONNECTION_ID,
     url: `https://www.figma.com/design/${fileKey}/w9-e2e`,
@@ -1074,6 +1164,9 @@ async function runApiGates(client, jagentdeskHome, proxy, ctx) {
     ),
   ];
   assert(frameIds.length >= 1, "no real frames to play back — the outline returned zero frames");
+  // Correlated RPC trace: the harness's own playback requests join the UI WS list so the
+  // <=10 contract is enforced on every playback caller, REST shapes included.
+  uiRequests?.playbackFrameCounts.push(frameIds.length);
 
   const proxyMark = proxy.log.length;
   const coldStart = Date.now();
@@ -1226,32 +1319,98 @@ async function runUiPlaybackGates(
   });
   await page.screenshot({ path: path.join(artifactDir, "player.png") });
 
-  // Sustained frame rate while the player is live (spec 32.11 #2: >= 50 fps).
-  const fps = await page.evaluate(
-    async () =>
-      await new Promise((resolve) => {
-        let count = 0;
-        const start = performance.now();
-        const tick = () => {
-          count += 1;
-          if (performance.now() - start < 2_000) requestAnimationFrame(tick);
-          else resolve(Number(((count / (performance.now() - start)) * 1000).toFixed(1)));
-        };
-        requestAnimationFrame(tick);
-      }),
-  );
-  if (fps >= minFpsValue) passGate("perf-playback-fps", { fps, measuredMs: 2_000 });
-  else
+  // ── Frame rate during REAL viewport change (spec 32.11 #2: pan/zoom >= 50 fps) ──
+  // An idle requestAnimationFrame count proves nothing about rendering cost, so the sample
+  // runs WHILE wheel-zoom and drag-pan inputs keep the canvas redrawing, and both cadences —
+  // idle and active — are reported so the number cannot masquerade as an idle raf high.
+  const canvasBox = await page
+    .locator("canvas")
+    .first()
+    .boundingBox()
+    .catch(() => null);
+  const idleFps = await sampleRafCadence(page, 1_000);
+  if (canvasBox) {
+    const cx = canvasBox.x + canvasBox.width / 2;
+    const cy = canvasBox.y + canvasBox.height / 2;
+    await page.mouse.move(cx, cy);
+    const inputs = { wheelZoom: 0, panDrag: 0, hotspotNav: 0 };
+    const activeSample = sampleRafCadence(page, 2_000);
+    const wheel = async () => {
+      await page.mouse.wheel(0, -120);
+      inputs.wheelZoom += 1;
+    };
+    const pan = async () => {
+      await page.mouse.down();
+      await page.mouse.move(cx - 160, cy, { steps: 8 });
+      await page.mouse.up();
+      inputs.panDrag += 1;
+    };
+    for (let round = 0; round < 2; round += 1) {
+      await wheel();
+      await wheel();
+      await pan();
+    }
+    const fps = await activeSample;
+    const gate = {
+      ...fps,
+      inputs,
+      idleFps,
+      note: "measured WHILE wheel-zoom/pan inputs were live",
+    };
+    if (fps.fps >= minFpsValue) passGate("perf-playback-fps", gate);
+    else
+      failGate(
+        "perf-playback-fps",
+        `active pan/zoom sustained ${fps.fps} fps — gate >= ${minFpsValue}: ${JSON.stringify(gate)}`,
+      );
+  } else {
     failGate(
       "perf-playback-fps",
-      `sustained ${fps} fps during playback — gate is >= ${minFpsValue}`,
+      `no player canvas bounding box to drive pan/zoom inputs against (idle raf cadence was ${JSON.stringify(idleFps)} — idle alone never passes)`,
     );
+  }
 
   // Close the player, capture after-close app-tree RAM.
   await page.keyboard.press("Escape");
   await playerMarker.waitFor({ state: "hidden", timeout: 15_000 }).catch(() => undefined);
   await delay(1_000);
-  ram.afterCloseKb = treeRssKb(electronPid).totalKb || ram.afterCloseKb;
+  ram.afterCloseKb = treeRssKb(electronPid ?? 0).totalKb || ram.afterCloseKb;
+}
+
+/**
+ * rAF cadence sample: callback count per second plus the real inter-callback intervals.
+ * Chromium drives rAF from the display vsync while the page repaints, so the intervals are
+ * the honest presentation cadence DURING input — reported with the gate so an idle raf
+ * cannot masquerade as a pan/zoom fps.
+ */
+async function sampleRafCadence(page, sampleMs) {
+  return await page.evaluate(
+    async (ms) =>
+      await new Promise((resolve) => {
+        const stamps = [];
+        const start = performance.now();
+        const tick = (now) => {
+          stamps.push(now);
+          if (now - start < ms) requestAnimationFrame(tick);
+          else {
+            const intervals = [];
+            for (let i = 1; i < stamps.length; i += 1) intervals.push(stamps[i] - stamps[i - 1]);
+            intervals.sort((a, b) => a - b);
+            resolve({
+              fps: Number((((stamps.length - 1) / (stamps.at(-1) - stamps[0])) * 1000).toFixed(1)),
+              frames: stamps.length,
+              sampleMs: Math.round(stamps.at(-1) - stamps[0]),
+              medianFrameIntervalMs: intervals.length
+                ? Number(intervals[Math.floor(intervals.length / 2)].toFixed(2))
+                : null,
+              worstFrameIntervalMs: intervals.length ? Number(intervals.at(-1).toFixed(2)) : null,
+            });
+          }
+        };
+        requestAnimationFrame(tick);
+      }),
+    sampleMs,
+  );
 }
 
 /**
@@ -1261,12 +1420,17 @@ async function runUiPlaybackGates(
  *     the outline to depth 3 so SECTION-nested screens appear; W4's optional Section metadata
  *     rides depth 1)
  *   - Section metadata: depth=1 calls, never a whole-SECTION tree download
- *   - full FRAME reads: /v1/files/:key/nodes — <=10 ids, pinned version, and every id must be
- *     an outline frame id; a non-outline id means the app downloaded a whole SECTION tree
+ *   - full FRAME reads: /v1/files/:key/nodes — <=50 ids per spec 32.5.1 (canvas subtree loads
+ *     are legitimately independent NON-SECTION drawing summaries: GROUP/COMPONENT/INSTANCE/…),
+ *     pinned version, and NEVER a known SECTION id: a SECTION id in /nodes means its whole
+ *     subtree was downloaded, which spec 32.11 #17 forbids for viewport frames.
+ * A REST URL alone cannot tell the logical caller apart, so the playback <=10 frameIds contract
+ * is enforced against the actual UI WebSocket request messages (correlated RPC trace), never by
+ * shrinking the 50-id canvas budget under the playback limit.
  * The app must NEVER issue an unbounded (no depth) full-document /v1/files/:key GET.
  */
 // eslint-disable-next-line eslint(complexity) -- every request class records its own offender.
-function runUrlTraceGate(proxyLog, fileKey, allowedNodeIds) {
+function runUrlTraceGate(proxyLog, fileKey, sectionNodeIds, uiRequests) {
   const restEntries = proxyLog.filter((entry) => entry.pathname.startsWith("/v1/"));
   const offenders = [];
   const outlineDepths = [];
@@ -1291,16 +1455,35 @@ function runUrlTraceGate(proxyLog, fileKey, allowedNodeIds) {
         .split(",")
         .filter(Boolean);
       if (ids.length === 0) offenders.push("nodes call with no ids");
-      if (ids.length > 10) offenders.push(`nodes call carried ${ids.length} ids (max 10)`);
+      if (ids.length > maxNodesBatch)
+        offenders.push(
+          `nodes call carried ${ids.length} ids (full-canvas budget is <= ${maxNodesBatch})`,
+        );
       if (!entry.search?.version) offenders.push("nodes call without a pinned version");
-      if (allowedNodeIds) {
-        const strays = ids.filter((id) => !allowedNodeIds.has(id));
-        if (strays.length > 0)
+      if (sectionNodeIds) {
+        const sectionIds = ids.filter((id) => sectionNodeIds.has(id));
+        if (sectionIds.length > 0)
           offenders.push(
-            `nodes call fetched non-outline ids (whole-SECTION download?): ${strays.join(",")}`,
+            `nodes call fetched known SECTION ids (whole-SECTION download): ${sectionIds.join(",")}`,
           );
       }
     }
+  }
+  // Playback <=10 frameIds is an RPC-contract limit, proven on the UI's own WS requests.
+  if (uiRequests?.playbackFrameCounts?.length > 0) {
+    const tooBig = uiRequests.playbackFrameCounts.filter((n) => n > maxPlaybackBatch);
+    if (tooBig.length > 0)
+      offenders.push(
+        `UI playback requests carried ${tooBig.join(",")} frameIds (contract <= ${maxPlaybackBatch})`,
+      );
+  }
+  // Full-canvas subtree loads are a DIFFERENT logical caller: budget <=50, never held to 10.
+  if (uiRequests?.nodesIdCounts?.length > 0) {
+    const tooBig = uiRequests.nodesIdCounts.filter((n) => n > maxNodesBatch);
+    if (tooBig.length > 0)
+      offenders.push(
+        `UI nodes requests carried ${tooBig.join(",")} ids (spec 32.5.1 budget is <= ${maxNodesBatch})`,
+      );
   }
   const distinct = [...new Set(restEntries.map((entry) => `${entry.method} ${entry.pathname}`))];
   if (restEntries.length === 0) {
@@ -1315,6 +1498,11 @@ function runUrlTraceGate(proxyLog, fileKey, allowedNodeIds) {
       sectionMetadataCalls,
       nodesBatches,
       distinctPaths: distinct,
+      uiFigmaRpcTypes: uiRequests ? [...uiRequests.types].sort() : [],
+      uiPlaybackBatchSizes: uiRequests?.playbackFrameCounts ?? [],
+      uiNodesBatchSizes: uiRequests?.nodesIdCounts ?? [],
+      playbackLimitNote:
+        "playback <=10 enforced on captured UI WS requests; REST /nodes budget is <=50 per spec 32.5.1",
     });
   } else {
     failGate("net-url-trace", `${offenders.join("; ")} — paths: ${distinct.join(", ")}`);
