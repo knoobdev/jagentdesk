@@ -4,6 +4,7 @@
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { router } from "expo-router"; // the hoisted mock — used to assert param writes
 
 const {
   theme,
@@ -94,6 +95,10 @@ const {
     subscribe: vi.fn(() => vi.fn()),
     parentOf: vi.fn((id: string) => parentLinks[id] ?? null),
     componentMeta: vi.fn(() => undefined),
+    // nodeFocusBounds walks loaded roots; the shared mock keeps none (frame summaries cover
+    // known layers, and unknown ones fall through to the Tier-1 nodes RPC, as intended).
+    loadedIds: vi.fn(() => [] as string[]),
+    get: vi.fn(() => null),
   };
   return {
     theme: uiTheme,
@@ -104,6 +109,11 @@ const {
       canvas: null as Record<string, unknown> | null,
       player: null as Record<string, unknown> | null,
       topbar: null as Record<string, unknown> | null,
+      // Plain-View onLayout handlers (the canvas area's size callback) so tests can deliver a
+      // real layout pass — the URL-node focus effect is gated on a measured canvas.
+      layouts: [] as Array<
+        (event: { nativeEvent: { layout: { width: number; height: number } } }) => void
+      >,
     },
     outlineFixture: outline,
     queueOverrides: queue,
@@ -144,8 +154,18 @@ const {
 vi.mock("react-native", () => ({
   Platform: { OS: "web" },
   StyleSheet: { create: (styles: unknown) => styles, hairlineWidth: 1 },
-  View: ({ children, testID }: { children?: React.ReactNode; testID?: string }) =>
-    React.createElement("div", { "data-testid": testID }, children),
+  View: ({
+    children,
+    testID,
+    onLayout,
+  }: {
+    children?: React.ReactNode;
+    testID?: string;
+    onLayout?: (event: { nativeEvent: { layout: { width: number; height: number } } }) => void;
+  }) => {
+    if (onLayout) captured.layouts.push(onLayout);
+    return React.createElement("div", { "data-testid": testID }, children);
+  },
   Text: ({ children }: { children?: React.ReactNode }) =>
     React.createElement("span", null, children),
   Pressable: ({ children }: { children?: React.ReactNode }) =>
@@ -171,7 +191,14 @@ vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ invalidateQueries: figmaFns.invalidateQueries }),
 }));
 vi.mock("expo-router", () => ({
-  router: { setParams: vi.fn(async () => undefined), replace: vi.fn(async () => undefined) },
+  router: {
+    // REALISTIC merge semantics: a param write updates the location that
+    // useLocalSearchParams reads back — the echo the component must survive (#185).
+    setParams: vi.fn(async (patch: Record<string, string | string[]>) => {
+      Object.assign(routeParams.current, patch);
+    }),
+    replace: vi.fn(async () => undefined),
+  },
   useLocalSearchParams: () => routeParams.current,
 }));
 vi.mock("@/jira/ui/styles", () => {
@@ -270,6 +297,7 @@ beforeEach(() => {
   captured.canvas = null;
   captured.player = null;
   captured.topbar = null;
+  captured.layouts = [];
   routeParams.current = {};
   features.current = { figma: true, figmaNodeDepth: true };
   lastRerender = null;
@@ -277,6 +305,9 @@ beforeEach(() => {
   remote.statusCalls = [];
   remote.execute.mockReset();
   remote.execute.mockResolvedValue({ result: { content: [] }, readbackAvailable: true });
+  // Keep the merge-into-location behaviour; clear only the call history.
+  const setParams = router.setParams as unknown as { mockClear: () => void };
+  setParams.mockClear();
   figmaFns.invalidateFile.mockReset();
   figmaFns.invalidateQueries.mockReset();
   hooks.outline.mockImplementation(() => ({
@@ -479,9 +510,13 @@ function deferred<T>() {
 
 interface CapturedCanvas {
   onMoveSection: (sectionId: string, dx: number, dy: number) => void;
+  onSelectNode: (nodeId: string | null) => void;
   sectionEditing: { canEdit: boolean; notice: string | null };
   sectionOffsets: Record<string, { dx: number; dy: number }>;
   sectionMoveStatus: string | null;
+  page: { id: string } | null;
+  selectedNodeId: string | null;
+  camera: { zoom: number; offsetX: number; offsetY: number };
 }
 
 function canvasProps(): CapturedCanvas {
@@ -494,6 +529,28 @@ let lastRerender: (() => void) | null = null;
 function settleRerender(): void {
   expect(lastRerender).not.toBeNull();
   act(() => lastRerender!());
+}
+
+/** Deliver the real layout pass the canvas size gate waits on (RN View mock captures it). */
+function fireLayouts(width: number, height: number): void {
+  act(() => {
+    for (const onLayout of captured.layouts)
+      onLayout({ nativeEvent: { layout: { width, height } } });
+  });
+}
+
+/** The way a URL change reaches the screen: the location mutates, then it re-renders. */
+function navigateRoute(params: Record<string, string | string[]>): void {
+  routeParams.current = { ...routeParams.current, ...params };
+  settleRerender();
+}
+
+/** Route writes that touched the `page` param — the page source-of-truth evidence. */
+function pageRouteWrites(): Array<Record<string, string>> {
+  const calls = (
+    router.setParams as unknown as { mock: { calls: Array<[Record<string, string>]> } }
+  ).mock.calls;
+  return calls.map(([patch]) => patch).filter((patch) => "page" in patch);
 }
 
 function commitDrag(sectionId: string, dx: number, dy: number): void {
@@ -538,7 +595,7 @@ function mountEditable(overrides: { fileKey?: string; version?: string } = {}) {
     act(() => root.render(<FigmaFileScreen {...ref} {...next} />));
   };
   lastRerender = rerender;
-  return { rerender };
+  return { rerender, container };
 }
 
 describe("FigmaFileScreen SECTION write path", () => {
@@ -704,7 +761,10 @@ describe("FigmaFileScreen SECTION write path", () => {
     const pending = deferred<ExecuteResponse>();
     remote.execute.mockReturnValue(pending.promise);
     commitDrag("40:1", 100, 50);
+    // The top bar page change now flows through the URL — the same route the sidebar writes —
+    // and the screen reacts when the location echo lands (realistic, not a local shortcut).
     act(() => (captured.topbar as { onSelectPage: (id: string) => void }).onSelectPage("p2"));
+    settleRerender();
     expect(canvasProps().sectionMoveStatus).toBeNull();
     expect(canvasProps().sectionOffsets).toEqual({});
     pending.resolve({ result: { content: [] }, readbackAvailable: true });
@@ -739,5 +799,144 @@ describe("FigmaFileScreen SECTION write path", () => {
     commitDrag("40:1", 5, Number.POSITIVE_INFINITY);
     expect(remote.execute).not.toHaveBeenCalled();
     expect(canvasProps().sectionMoveStatus).toBeNull();
+  });
+});
+
+// ── page route sync (spec 32.5.1): the URL is the single source of truth ──────────────────
+// Sidebar (useFigmaNav go), top bar (router.setParams) and the canvas all converge on the
+// route's `page`/`node` params. These tests drive the screen the way expo-router does: the
+// location mutates, then the screen re-renders — no fake local page state shortcuts.
+
+describe("FigmaFileScreen page route sync", () => {
+  it("a sidebar URL page change flips the page the CanvasView actually renders", () => {
+    mountEditable();
+    expect(canvasProps().page.id).toBe("p1");
+    // sidebarPageRow: go({ pageId: "p2", nodeId: null }) writes page and clears node.
+    navigateRoute({ page: "p2", node: "" });
+    expect(canvasProps().page.id).toBe("p2");
+    expect(canvasProps().selectedNodeId).toBeNull();
+  });
+
+  it("top-bar page selection writes route page AND node clear in ONE param write", () => {
+    mountEditable();
+    fireLayouts(800, 600);
+    act(() => canvasProps().onSelectNode("1:1")); // canvas click: selection into the URL
+    settleRerender();
+    expect(routeParams.current.node).toBe("1-1");
+    expect(canvasProps().selectedNodeId).toBe("1:1");
+    act(() => (captured.topbar as { onSelectPage: (id: string) => void }).onSelectPage("p2"));
+    const writes = pageRouteWrites();
+    // The only writes touching `page`: the mount canonicalization of the default, then the
+    // top-bar selection — which lands page AND node clear in ONE call, never two half-writes.
+    expect(writes).toEqual([{ page: "p1" }, { page: "p2", node: "" }]);
+    settleRerender();
+    expect(canvasProps().page.id).toBe("p2");
+    expect(canvasProps().selectedNodeId).toBeNull(); // stale p1 selection follows the route
+  });
+
+  it("back/forward history restore of page+node shows that page and focuses that node", () => {
+    mountEditable();
+    fireLayouts(800, 600);
+    act(() => canvasProps().onSelectNode("1:1"));
+    settleRerender();
+    expect(canvasProps().selectedNodeId).toBe("1:1");
+    // Canvas-originated selection never moved the camera; only a URL-driven focus may.
+    const cameraBefore = canvasProps().camera;
+    expect(cameraBefore).toEqual({ zoom: 1, offsetX: 0, offsetY: 0 });
+    // History lands on the earlier p2 deep link: the URL names page p2, node 60:1.
+    navigateRoute({ page: "p2", node: "60-1" });
+    expect(canvasProps().page.id).toBe("p2");
+    expect(canvasProps().selectedNodeId).toBe("60:1"); // restored THROUGH the route, not local state
+    expect(canvasProps().camera).not.toEqual(cameraBefore); // the URL focus effect drove the camera
+  });
+
+  it("a route without a page shows the first real outline page and canonicalizes it ONCE", () => {
+    mountEditable();
+    expect(canvasProps().page.id).toBe("p1"); // the first REAL page, never an invented one
+    expect(pageRouteWrites()).toEqual([{ page: "p1" }]);
+    // The mock setParams already echoed into the location; further renders must not re-write
+    // (a guard keyed on the outline snapshot, not a per-render router.go loop).
+    settleRerender();
+    settleRerender();
+    expect(pageRouteWrites()).toHaveLength(1);
+  });
+
+  it("an unknown route page errors clearly: no silent fallback page, no wrong-node focus", () => {
+    routeParams.current = { page: "p9", node: "40-1" };
+    const { container } = mountEditable();
+    fireLayouts(800, 600);
+    expect(canvasProps().page).toBeNull(); // never silently show a DIFFERENT page
+    expect(container.textContent).toContain("Page p9 is not in this file.");
+    // No camera policy invented for a page that isn't there: nothing was focused or zoomed.
+    expect(canvasProps().camera).toEqual({ zoom: 1, offsetX: 0, offsetY: 0 });
+  });
+
+  it("a return to a page-less URL re-canonicalizes: a REAL page param forgets the stale stamp", () => {
+    mountEditable();
+    expect(pageRouteWrites()).toEqual([{ page: "p1" }]); // the mount canonicalization
+    navigateRoute({ page: "p2" }); // a real page param arrives: the stamp is forgotten
+    routeParams.current = {}; // browser back/forward lands on the OLD page-less URL
+    settleRerender();
+    expect(pageRouteWrites()).toEqual([{ page: "p1" }, { page: "p1" }]); // canonicalized AGAIN
+    settleRerender();
+    settleRerender(); // the echo lands; extra renders must not re-write — no param loop
+    expect(pageRouteWrites()).toHaveLength(2);
+  });
+
+  it("correcting an unknown page clears ONLY the route banner; unrelated focus errors survive", async () => {
+    routeParams.current = { page: "p9" };
+    const { container } = mountEditable();
+    fireLayouts(800, 600);
+    expect(container.textContent).toContain("Page p9 is not in this file.");
+    navigateRoute({ page: "p2" }); // route becomes valid: the banner this effect raised clears
+    expect(container.textContent ?? "").not.toContain("is not in this file.");
+    expect(canvasProps().page.id).toBe("p2");
+
+    // An unrelated layer-focus error (deep link to a nonexistent layer) through the REAL
+    // URL-focus path — no local shortcut.
+    routeParams.current = { page: "p2", node: "88-8" };
+    settleRerender();
+    await settle();
+    expect(container.textContent).toContain("Layer 88:8 was not found in this page.");
+
+    // Re-run the route effect while the UNRELATED error is current (outline identity swap,
+    // the same mechanism the readback refresh uses): the valid-route clear must compare
+    // signatures and leave the focus error alone, never setFocusError(null) blindly.
+    hooks.outline.mockImplementation(() => ({
+      data: { ...outlineFixture },
+      isPending: false,
+      isError: false,
+      error: null,
+    }));
+    settleRerender();
+    expect(container.textContent).toContain("Layer 88:8 was not found in this page.");
+    // And the correction looped nothing: no extra page-param writes anywhere in this flow.
+    expect(pageRouteWrites()).toEqual([]);
+  });
+
+  it("selecting a node through the URL never re-keys the frame store (no asset remount)", () => {
+    mountEditable();
+    fireLayouts(800, 600);
+    const keyBefore = hooks.frameStore.mock.calls.at(-1);
+    navigateRoute({ node: "1-5" });
+    navigateRoute({ node: "1-1" });
+    expect(hooks.frameStore.mock.calls.at(-1)).toEqual(keyBefore); // same identity args: same mount
+  });
+
+  it("the canvas echo of its own selection never re-centres the camera (#185)", () => {
+    mountEditable();
+    fireLayouts(800, 600);
+    act(() => canvasProps().onSelectNode("1:1"));
+    settleRerender(); // the echoed node param arrives here
+    const camera = canvasProps().camera;
+    const writes = (router.setParams as unknown as { mock: { calls: unknown[] } }).mock.calls
+      .length;
+    settleRerender();
+    settleRerender();
+    expect(canvasProps().camera).toEqual(camera); // stable: echo skipped, not re-focused
+    // No second write: the echo never re-triggered selectNode/focusNode in a loop.
+    expect((router.setParams as unknown as { mock: { calls: unknown[] } }).mock.calls.length).toBe(
+      writes,
+    );
   });
 });

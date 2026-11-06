@@ -103,6 +103,22 @@ function initialNodeId(param: string | string[] | undefined): string | null {
   return figmaNodeIdFromParam(Array.isArray(param) ? param[0] : param);
 }
 
+/** Expo-router params arrive as string | string[]; empty means absent. */
+function firstRouteParam(value: string | string[] | undefined): string | null {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return raw && raw.length > 0 ? raw : null;
+}
+
+// The route-page banner's OWN signature: the clear path compares against it so fixing the
+// URL never blindly wipes an unrelated focus-layer error sitting in the same banner slot.
+function routePageErrorMessage(pageId: string): string {
+  return `Page ${pageId} is not in this file.`;
+}
+
+function isRoutePageError(message: string): boolean {
+  return message.startsWith("Page ") && message.endsWith(" is not in this file.");
+}
+
 // ADR-0039 / spec 32.5.1: the viewer gates ONCE on `figmaNodeDepth`, next to the existing base
 // `figma` gate. An old host strips the `depth=1` option from `figma.file.nodes` and answers with
 // the full Section, so sending it anyway silently breaks the bounded-Section contract — this
@@ -150,7 +166,11 @@ interface MoveIdentity {
 // eslint-disable-next-line complexity
 function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
   const isCompact = useIsCompactFormFactor();
-  const params = useLocalSearchParams<{ node?: string | string[] }>();
+  // The URL is the SINGLE source of truth for page + node (spec 32.5.1): the sidebar writes
+  // `page`/`node` through useFigmaNav, the top bar writes the same params atomically, and the
+  // canvas renders what the route says. A local pageId state let sidebar selection and canvas
+  // diverge — "Access" highlighted, canvas still on "00 Start Here".
+  const params = useLocalSearchParams<{ node?: string | string[]; page?: string | string[] }>();
   const queryClient = useQueryClient();
 
   const outlineQuery = useFigmaOutline(serverId, fileKey, version ?? null);
@@ -167,7 +187,6 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
   const dataVersion = version ?? outline?.version ?? null;
   const store = useFigmaFrameStore(serverId, fileKey, dataVersion, watchToken);
 
-  const [pageId, setPageId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(() =>
     initialNodeId(params.node),
   );
@@ -194,10 +213,63 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
     [dismissFocusError],
   );
 
+  const pageParam = firstRouteParam(params.page);
   const page = useMemo(() => {
     if (!outline) return null;
-    return outline.pages.find((candidate) => candidate.id === pageId) ?? outline.pages[0] ?? null;
-  }, [outline, pageId]);
+    // Missing page param: the first REAL outline page, canonicalized into the route below —
+    // never an invented page of its own.
+    if (!pageParam) return outline.pages[0] ?? null;
+    return outline.pages.find((candidate) => candidate.id === pageParam) ?? null;
+  }, [outline, pageParam]);
+  const currentPageId = page?.id ?? null;
+
+  // ONE route-state effect owns the page-param edge cases; a split would let the two halves
+  // drift (the stamp outliving the banner it was supposed to pair with).
+  // - Unknown route page: error CLEARLY — no silent fallback to another page (a wrong page
+  //   reads as missing/wrong designs) and the focus effect bails, so no accidental node.
+  // - Real page param arriving: FORGET the canonicalization stamp, so a later back/forward
+  //   (or removal) returning to the old page-less URL of the SAME outline canonicalizes again
+  //   instead of being skipped by a stale stamp forever.
+  // - Route becoming valid: clear the banner ONLY when the shown error is the one this effect
+  //   raised — an unrelated focus-layer error must survive the fix. The functional updater
+  //   returns the same value otherwise, so React bails: no re-render loop.
+  const canonicalizedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!outline) return;
+    if (pageParam) {
+      if (!outline.pages.some((candidate) => candidate.id === pageParam)) {
+        // Unknown route page: error CLEARLY — no silent fallback to another page (a wrong page
+        // reads as missing/wrong designs) and the focus effect bails, so no accidental node.
+        setFocusError(routePageErrorMessage(pageParam));
+        return;
+      }
+      // A REAL page param arriving means the route is now authoritative on its own: FORGET
+      // the canonicalization stamp, so a later back/forward (or removal) returning to the
+      // old page-less URL of the SAME outline re-canonicalizes instead of being skipped by a
+      // stale stamp forever.
+      canonicalizedFor.current = null;
+      // Route became valid: clear the banner ONLY when the shown error is the one this effect
+      // raised — an unrelated focus-layer error must survive (never setFocusError(null)
+      // blindly). Returning the same value makes React bail: no re-render loop.
+      setFocusError((current) => (current && isRoutePageError(current) ? null : current));
+      return;
+    }
+    const firstPage = outline.pages[0];
+    if (firstPage) {
+      // URL missing a page: write the default selection back exactly ONCE per outline snapshot
+      // so sidebar/topbar/canvas converge on one canonical location. Direct setParams, not
+      // useFigmaNav.go — go() would rewrite node/view from a stale location.
+      const stamp = `${fileKey}|${outline.version ?? ""}`;
+      if (canonicalizedFor.current !== stamp) {
+        canonicalizedFor.current = stamp;
+        void router.setParams({ page: firstPage.id });
+      }
+    }
+    // A page-less route is ALSO a valid route (it resolves to the first real page): deleting
+    // the param must not leave a false "Page … not in this file" banner — same signature
+    // compare, unrelated focus errors survive.
+    setFocusError((current) => (current && isRoutePageError(current) ? null : current));
+  }, [outline, pageParam, fileKey]);
 
   const onWatched = useCallback(() => {
     invalidateFigmaFile(serverId, fileKey);
@@ -287,7 +359,7 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
     return () => {
       moveGeneration.current += 1;
     };
-  }, [serverId, fileKey, pageId, version]);
+  }, [serverId, fileKey, currentPageId, version]);
 
   // Independent verification: only the daemon's own re-read metadata may settle a move — it
   // compares WORLD bounds against the committed target. A matching refresh ends the preview; a
@@ -462,6 +534,21 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
     [size.height, size.width],
   );
 
+  // A route page change (sidebar click, top bar write, back/forward) must not leave the
+  // previous page's node highlighted or the focus latch pointed at a stale node: the URL no
+  // longer names it, so neither may the screen. Mount/first-settling never clears (a deep
+  // link's node param survives its own page); only an ACTUAL page flip does. Declared BEFORE
+  // the focus effect so a history restore clears first and the restored node then re-selects.
+  const lastRoutePage = useRef<string | null>(null);
+  useEffect(() => {
+    if (lastRoutePage.current !== null && lastRoutePage.current !== currentPageId) {
+      setSelectedNodeId(null);
+      skipUrlFocus.current = null;
+      autoFocusedFor.current = null;
+    }
+    lastRoutePage.current = currentPageId;
+  }, [currentPageId]);
+
   // The URL's `node` param drives focus: a deep link or a comment-panel URL write selects and
   // zooms to the layer, nested layers included (F5 owns the comment side of this contract).
   // Canvas clicks write the same param; `nodeParamToFocusId` keeps that echo from moving the
@@ -485,14 +572,14 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
     [],
   );
 
-  const selectPage = useCallback(
-    (next: string) => {
-      setPageId(next);
-      autoFocusedFor.current = null;
-      selectNode(null);
-    },
-    [selectNode],
-  );
+  const selectPage = useCallback((next: string) => {
+    // ONE atomic route write: page changes AND the node clear land together, so the sidebar,
+    // the top bar and the canvas all converge on the same location (the page-change effect
+    // above the URL-focus effect drops the stale local selection when the route flips).
+    // Never a local-only setPageId — that left the sidebar stale while the canvas moved.
+    void router.setParams({ page: next, node: "" });
+  }, []);
+
   const openPrototype = useCallback(() => setPrototypeOpen(true), []);
   const closePrototype = useCallback(() => setPrototypeOpen(false), []);
   const toggleAssistant = useCallback(() => setAssistantOpen((open) => !open), []);
