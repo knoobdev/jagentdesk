@@ -546,6 +546,8 @@ export const FigmaFileRenderRequestSchema = req("figma.file.render.request", {
   // ADR-0042: `svg` is the text-outline fallback format (Figma draws the text as paths, no
   // substitute font). It rides the existing byte contract; clients send it, and
   // `useAbsoluteBounds`, only when `server_info.features.figmaRenderFidelity` is advertised.
+  // Both MUST carry a non-empty explicit `version` — the fidelity path is version-pinned REST,
+  // never Live Link — and the daemon refuses the request before any REST call when it is absent.
   format: z.enum(["png", "jpg", "svg"]).default("png"),
   // ADR-0042: true maps Figma `use_absolute_bounds=true` — the raster covers the node's
   // absoluteBoundingBox. The client sets it ONLY on the new TEXT fallback path (SVG, or its
