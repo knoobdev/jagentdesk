@@ -172,7 +172,7 @@ export function WorkspaceBaseBranchPicker({
 }
 
 const styles = StyleSheet.create((theme) => ({
-  anchor: { flexShrink: 1, minWidth: 0 },
+  anchor: { flexShrink: 0, minWidth: 0, maxWidth: "40%" },
   footer: { padding: theme.spacing[3], gap: theme.spacing[2] },
   text: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
   error: { color: theme.colors.destructive, fontSize: theme.fontSize.sm },

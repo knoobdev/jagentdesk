@@ -18,6 +18,7 @@ test("All changes includes committed and uncommitted edits and retains a manual 
   await page.setViewportSize({ width: 1400, height: 900 });
   await workspace.navigateTo();
   await openChangesPanel(page);
+  await expect(page.getByTestId("workspace-base-branch-trigger")).toHaveCount(0);
   const trigger = page.getByTestId("changes-diff-status-trigger").filter({ visible: true }).first();
   await expect(trigger).toContainText("All changes");
   await expect(page.getByText("committed.txt", { exact: true }).first()).toBeVisible();
