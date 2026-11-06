@@ -378,15 +378,19 @@ describe("FigmaFileScreen snapshot pinning and W6 prototype handoff", () => {
   });
 
   it("keeps a selected root frame; an uncached layer falls back to the flow, never its subtree", () => {
+    // The mid-test `captured.player = null` keeps narrowing the property to null (a re-render
+    // reassigns it inside a helper, which TS's control flow can't see), so read it through a
+    // function: the call site resets narrowing to the declared type and the cast stays honest.
+    const playerSeen = () => captured.player as Record<string, unknown>;
     routeParams.current = { node: "1-1" };
     const first = render();
     openPrototype(first);
-    expect((captured.player as Record<string, unknown>).startNodeId).toBe("1:1");
+    expect(playerSeen().startNodeId).toBe("1:1");
 
     captured.player = null;
     routeParams.current = { node: "7-7" }; // outside the cached chain
     const second = render();
     openPrototype(second);
-    expect((captured.player as Record<string, unknown>).startNodeId).toBe("9:9");
+    expect(playerSeen().startNodeId).toBe("9:9");
   });
 });

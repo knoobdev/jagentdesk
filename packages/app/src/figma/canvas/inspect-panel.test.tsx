@@ -476,7 +476,7 @@ describe("InspectPanel honest edit states", () => {
     const { container } = render(makeNode({ id: "1:1", type: "TEXT", characters: "Original" }), {
       queue: [makePendingOp({ op: "set_text", nodeId: "1:1", characters: "Queued label" })],
     });
-    const inputs = [...container.querySelectorAll('input[data-testid="input:"]')];
+    const inputs = [...container.querySelectorAll<HTMLInputElement>('input[data-testid="input:"]')];
     expect(inputs.some((input) => input.value === "Queued label")).toBe(true);
     expect(container.querySelector('[data-testid="figma-edit-pending"]')).not.toBeNull();
     const text = container.textContent ?? "";
