@@ -694,6 +694,69 @@ export const FigmaBudgetGetResponseSchema = res("figma.budget.get.response", {
   budget: FigmaBudgetSchema.nullable(),
 });
 
+// ── Remote MCP writes (32.7 / ADR-0040) ──────────────────────────────────────
+// The daemon's connector drives a real Codex app-server as Figma's supported MCP client. No
+// model is added and the chat provider is untouched; Codex owns the native OAuth flow and the
+// credential vault, so no secret travels in these DTOs. The optional fields stay `.optional()`
+// per ADR and are additionally `.nullable()` because FigmaSession's error path fills an absent
+// optional with null (the nodes/prototype DTOs above follow the same convention).
+
+export const FigmaRemoteStatusSchema = z.object({
+  // `connected` means the connector is live with Figma — not that a seat or edit right exists
+  // for every file (ADR-0040). `unavailable` covers a missing/unsupported Codex executable.
+  state: z.enum(["disconnected", "connecting", "needs_auth", "connected", "unavailable", "error"]),
+  message: z.string().nullable().optional(),
+  identityText: z.string().nullable().optional(), // from the connector's `whoami`, when readable
+});
+export type FigmaRemoteStatus = z.infer<typeof FigmaRemoteStatusSchema>;
+
+// A raw MCP tool result (get_metadata / use_figma) passed through verbatim. No token, no auth
+// header, no native config: JAgentDesk never copies Codex's native credentials (ADR-0040).
+export const FigmaRemoteCallResultSchema = z.object({
+  content: z.array(z.unknown()),
+  structuredContent: z.unknown().optional(),
+  isError: z.boolean().nullable().optional(),
+});
+export type FigmaRemoteCallResult = z.infer<typeof FigmaRemoteCallResultSchema>;
+
+export const FigmaRemoteStatusRequestSchema = req("figma.remote.status.request", {});
+export const FigmaRemoteStatusResponseSchema = res("figma.remote.status.response", {
+  status: FigmaRemoteStatusSchema,
+});
+export const FigmaRemoteAuthBeginRequestSchema = req("figma.remote.auth.begin.request", {});
+export const FigmaRemoteAuthBeginResponseSchema = res("figma.remote.auth.begin.response", {
+  status: FigmaRemoteStatusSchema,
+  // HTTPS Figma URL the app opens in the system browser after a user action; never opened
+  // automatically on mount/query or by an agent tool call (ADR-0040).
+  authorizationUrl: z.string().nullable().optional(),
+});
+export const FigmaRemoteDisconnectRequestSchema = req("figma.remote.disconnect.request", {});
+export const FigmaRemoteDisconnectResponseSchema = res("figma.remote.disconnect.response", {
+  status: FigmaRemoteStatusSchema,
+});
+export const FigmaRemoteReadRequestSchema = req("figma.remote.read.request", {
+  fileKey: z.string().min(1),
+  nodeId: z.string().optional(),
+});
+export const FigmaRemoteReadResponseSchema = res("figma.remote.read.response", {
+  result: FigmaRemoteCallResultSchema,
+});
+export const FigmaRemoteExecuteRequestSchema = req("figma.remote.execute.request", {
+  fileKey: z.string().min(1),
+  // 64 KiB is measured in UTF-8 bytes by the backend handler; the schema caps characters only,
+  // keeping this a pure declaration (32.9).
+  code: z.string().max(65536),
+  description: z.string().min(1).max(1000),
+});
+export const FigmaRemoteExecuteResponseSchema = res("figma.remote.execute.response", {
+  result: FigmaRemoteCallResultSchema,
+  // Metadata re-read after a successful execute, separate from the tool reply. A failed re-read
+  // means `unverified`, never "Saved"; `readbackAvailable` only attests the re-read worked, not
+  // that the design request is correct (ADR-0040).
+  readback: FigmaRemoteCallResultSchema.nullable().optional(),
+  readbackAvailable: z.boolean(),
+});
+
 // Mobile: a desktop runs the browser step for a delegated sign-in.
 export const FigmaOAuthDelegationSchema = z.object({
   type: z.literal("figma.oauth.delegation"),
@@ -745,6 +808,11 @@ export const FigmaRequestSchemas = [
   FigmaPendingDiscardRequestSchema,
   FigmaPendingApplyRequestSchema,
   FigmaBudgetGetRequestSchema,
+  FigmaRemoteStatusRequestSchema,
+  FigmaRemoteAuthBeginRequestSchema,
+  FigmaRemoteDisconnectRequestSchema,
+  FigmaRemoteReadRequestSchema,
+  FigmaRemoteExecuteRequestSchema,
 ] as const;
 
 export const FigmaResponseSchemas = [
@@ -789,6 +857,11 @@ export const FigmaResponseSchemas = [
   FigmaPendingDiscardResponseSchema,
   FigmaPendingApplyResponseSchema,
   FigmaBudgetGetResponseSchema,
+  FigmaRemoteStatusResponseSchema,
+  FigmaRemoteAuthBeginResponseSchema,
+  FigmaRemoteDisconnectResponseSchema,
+  FigmaRemoteReadResponseSchema,
+  FigmaRemoteExecuteResponseSchema,
 ] as const;
 
 export const FigmaPushSchemas = [
