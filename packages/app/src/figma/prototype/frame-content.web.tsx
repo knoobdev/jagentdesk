@@ -1,4 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type MouseEvent as ReactMouseEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { Text, View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useHostFeature } from "@/runtime/host-features";
 import { createFigmaRenderer, type FigmaFallbackHint } from "@/figma/renderer";
@@ -8,8 +18,11 @@ import {
   rasterRung,
   type RasterSpec,
 } from "@/figma/canvas/assets";
+import { PROTOTYPE_READY_LABEL, STATUS_FAILED, STATUS_LOADING } from "./status-texts";
+import { Button } from "@/components/ui/button";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { FigmaBytes, FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
+import type { Theme } from "@/styles/theme";
 import { callFigma } from "./figma-api";
 import { collectRequiredFonts, type RequiredFont } from "./font-loading";
 import { nodeBounds, toFrameLocalNodes } from "./node-geometry";
@@ -151,6 +164,10 @@ async function fetchRasters(
 // sets — the old root's assets must be releasable while the new root keeps whatever it shares.
 let frameContentSequence = 0;
 
+// What the stage currently is: still waiting on demanded assets, terminal failure awaiting an
+// explicit retry, or done — real pixels plus settled required assets for THIS frame@version.
+type StageStatus = "loading" | "failed" | "ready";
+
 // The one TEXT raster class (ADR-0042): Figma-exported outlined glyphs at scale 1, mapped onto
 // the node's absoluteBoundingBox. Vector bytes — crisp at any player zoom, no font dependency.
 const TEXT_SVG_SPEC: RasterSpec = { scale: 1, format: "svg", bounds: "absolute" };
@@ -238,6 +255,112 @@ export function FrameContent({ file, root, scale, overrides }: FrameContentProps
 
   const requiredFonts = useMemo(() => collectRequiredFonts(root), [root]);
 
+  // Stage readiness (spec 32.5.3): the status this stage shows and the canvas announces, keyed
+  // to the CURRENT draw subject — this instance's owner identity plus the exact provider scope
+  // handle (its identity carries server/file/version AND the live store: a reconnect or a
+  // same-version file swap produces a fresh handle, never a reused one). A reused FrameContent
+  // navigating to a new root, file, or snapshot is pending again BEFORE its first completed
+  // draw — an old "ready" must never survive the switch — and no React state loop is involved:
+  // the value is derived during render from the subject it was set for, never set in render.
+  const readinessSubject = useMemo(() => ({ ownerId, scope }), [ownerId, scope]);
+  const [statusState, setStatusState] = useState<{
+    subject: { ownerId: string; scope: PrototypeAssetScopeHandle | null };
+    kind: StageStatus;
+  } | null>(null);
+  const stageStatus: StageStatus =
+    statusState?.subject === readinessSubject ? statusState.kind : "loading";
+  // Derived ONLY from the exact keys the CURRENT draw asked for or attached — a store-wide
+  // loading count is forbidden (another owner's pending asset, an offscreen frame's released
+  // claim, or an older rung must not hold this stage), and state must follow this subject only.
+  const usedKeysRef = useRef(new Set<string>());
+  const failedKeysRef = useRef<string[]>([]);
+  // Pixels ≠ ready, and no-pixels ≠ ready either: only a COMPLETED draw gets to derive
+  // readiness from its settled ledger. An aborted pass (no context) keeps the stage loading.
+  const paintedRef = useRef(false);
+
+  // Readiness for THIS draw, computed from exactly the keys the draw asked for or attached —
+  // fonts live in the gate, never in the ledger, so an optional font still loading or terminally
+  // failed cannot block a frame whose glyph fallback is already painted (spec 32.5.1/32.5.3).
+  // Loading dominates failure while anything of this pass is still on its way; a terminal failure
+  // with nothing pending shows the failure line and the Retry for exactly those failed keys.
+  const syncReadiness = useCallback(() => {
+    let pending = false;
+    const failed: string[] = [];
+    if (store && !store.disposed) {
+      for (const key of usedKeysRef.current) {
+        const record = store.get(key);
+        // A demanded key the store no longer holds (released mid-flight, or dropped by an
+        // explicit retry) is still OWED content — treat as pending, not settled.
+        if (!record || record.status === "loading") pending = true;
+        else if (record.status === "failed") failed.push(key);
+      }
+    } else {
+      pending = true; // no live scope: nothing is settled
+    }
+    let next: StageStatus;
+    if (!paintedRef.current || pending) next = "loading";
+    else if (failed.length > 0) next = "failed";
+    else next = "ready";
+    failedKeysRef.current = next === "failed" ? failed : [];
+    setStatusState((prev) =>
+      prev?.subject === readinessSubject && prev.kind === next
+        ? prev
+        : {
+            subject: readinessSubject,
+            kind: next,
+          },
+    );
+    // The element announces the SAME truth the visible label shows (spec 32.5.3): ready is a
+    // labelled image; loading/failure state the exact displayed line; aria-busy iff content is
+    // genuinely still arriving. Imperative writes with the paint — no React state loop.
+    const canvas = canvasRef.current;
+    if (canvas) {
+      if (next === "ready") {
+        canvas.setAttribute("role", "img");
+        canvas.setAttribute("aria-label", PROTOTYPE_READY_LABEL);
+        canvas.removeAttribute("aria-busy");
+      } else if (next === "loading") {
+        canvas.removeAttribute("role");
+        canvas.setAttribute("aria-label", STATUS_LOADING);
+        canvas.setAttribute("aria-busy", "true");
+      } else {
+        canvas.removeAttribute("role");
+        canvas.setAttribute("aria-label", STATUS_FAILED);
+        canvas.removeAttribute("aria-busy");
+      }
+    }
+  }, [store, readinessSubject]);
+
+  // Pre-paint announcement for a NEW subject (reused instance navigating roots, or a snapshot
+  // change): passive effects run AFTER the browser paints, so without this the previous frame's
+  // "ready" attributes and label would be announced until the new draw completes. The element
+  // starts (and restarts) honestly busy; only a completed draw flips it.
+  useLayoutEffect(() => {
+    paintedRef.current = false;
+    usedKeysRef.current.clear();
+    failedKeysRef.current = [];
+    const canvas = canvasRef.current;
+    if (canvas) {
+      canvas.removeAttribute("role");
+      canvas.setAttribute("aria-busy", "true");
+      canvas.setAttribute("aria-label", STATUS_LOADING);
+    }
+  }, [readinessSubject]);
+
+  // Stage Retry (spec 32.5.3): resets ONLY the current draw's terminal-failed keys — bounded per
+  // explicit press, one re-demand each. Loading/ready entries are untouched (an explicit retry
+  // can never storm), fonts are not in the ledger so they are not re-tried here, and nothing
+  // touches the server. The repaint lets the draw's missing report re-claim each reset key once.
+  const retryCurrentAssets = useCallback(() => {
+    if (store && !store.disposed) {
+      for (const key of failedKeysRef.current) store.resetFailed(key);
+    }
+    failedKeysRef.current = [];
+    setStatusState({ subject: readinessSubject, kind: "loading" });
+    setAssetsReady((tick) => tick + 1);
+    syncReadiness();
+  }, [store, readinessSubject, syncReadiness]);
+
   // Font loading runs IN PARALLEL with drawing (W8 5d0b57396: the renderer paints TEXT as a real
   // Figma raster while a face is in flight), so a hung font request can never hold the
   // player blank. When a face actually becomes available the repaint below replaces the raster
@@ -261,6 +384,9 @@ export function FrameContent({ file, root, scale, overrides }: FrameContentProps
 
   useEffect(() => {
     if (!store) return;
+    // A settle (fetch resolution, decode, terminal failure) only SCHEDULES the repaint here:
+    // readiness flips after the completed draw that actually shows the pixels, never from the
+    // store notification itself — an old glyph-less canvas must not announce "ready" pre-paint.
     const unsubscribe = store.subscribe(() => setAssetsReady((tick) => tick + 1));
     return unsubscribe;
   }, [store]);
@@ -271,7 +397,9 @@ export function FrameContent({ file, root, scale, overrides }: FrameContentProps
     // on stage; only the call that started the fetch holds a token to settle it.
     const imageClaims: RefClaim[] = [];
     for (const ref of missing.imageRefs) {
-      const claim = store.claim(ownerId, fillKey(ref));
+      const key = fillKey(ref);
+      usedKeysRef.current.add(key); // this draw DEMANDED the asset, whether or not it must fetch
+      const claim = store.claim(ownerId, key);
       if (claim) imageClaims.push({ id: ref, claim });
     }
     // Record the renderer's TEXT classification FIRST, then route EVERY ask through the ONE
@@ -285,7 +413,9 @@ export function FrameContent({ file, root, scale, overrides }: FrameContentProps
     for (const id of missing.fallbackNodeIds) {
       const spec = routeSpecFor(id, scope.version);
       const ns = `${spec.scale}@${spec.format}@${spec.bounds}`;
-      const claim = store.claim(ownerId, rasterKey(id, scope.version, spec));
+      const key = rasterKey(id, scope.version, spec);
+      usedKeysRef.current.add(key); // demanded on THIS draw only: an old rung's key is not our debt
+      const claim = store.claim(ownerId, key);
       if (!claim) continue;
       const group = bySpec.get(ns) ?? { spec, claims: [] };
       group.claims.push({ id, claim });
@@ -323,6 +453,7 @@ export function FrameContent({ file, root, scale, overrides }: FrameContentProps
       // (navigation, unmount) cannot free them while this frame still paints with them. The
       // real renderer only reports assets the getters miss, so this is the only attach point.
       store.attachOwner(ownerId, key);
+      usedKeysRef.current.add(key); // painted from cache: a used asset of THIS draw
       return entry.image;
     },
     [store, ownerId],
@@ -345,6 +476,7 @@ export function FrameContent({ file, root, scale, overrides }: FrameContentProps
       // painted — including FAILED entries, whose retention as a negative cache is what makes
       // the route finite (no refetch per paint).
       store.attachOwner(ownerId, key);
+      usedKeysRef.current.add(key); // painted from cache: a used asset of THIS draw
       if (!isQualityText || spec.format !== "svg" || entry.status !== "failed") return entry.image;
       // Terminal SVG failure → engage the persistent downgrade channel: every later read and
       // fetch for this node+snapshot routes to the absolute-bounds PNG at the CURRENT rung.
@@ -353,6 +485,11 @@ export function FrameContent({ file, root, scale, overrides }: FrameContentProps
       downgradedText.current.add(`${nodeId}@${scope.version}`);
       const pngSpec = routeSpecFor(nodeId, scope.version);
       const pngKey = rasterKey(nodeId, scope.version, pngSpec);
+      // From here on THIS pass depends on the PNG, not the failed SVG: the abandoned SVG key
+      // leaves the ledger (a successful downgrade must not false-fail the stage), and the PNG
+      // keeps it honestly loading until its bytes settle.
+      usedKeysRef.current.delete(key);
+      usedKeysRef.current.add(pngKey);
       const onceKey = `${nodeId}@${scope.version}@${pngSpec.scale}`;
       if (!textPngOnce.current.has(onceKey) && client) {
         textPngOnce.current.add(onceKey);
@@ -393,13 +530,22 @@ export function FrameContent({ file, root, scale, overrides }: FrameContentProps
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !frame || !localRoot) return;
+    // The ledger is REBUILT by this draw alone: the getters and the missing-report claims below
+    // record exactly the keys this pass asks for or attaches. Nothing from a previous frame,
+    // version, rung, or another owner survives into readiness — and this pass's state follows
+    // only the current frame (spec 32.5.3).
+    usedKeysRef.current.clear();
+    paintedRef.current = false;
     const dpr = window.devicePixelRatio || 1;
     const pixelWidth = Math.max(1, Math.round(frame.width * scale * dpr));
     const pixelHeight = Math.max(1, Math.round(frame.height * scale * dpr));
     if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
     if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
     const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    if (!ctx) {
+      syncReadiness(); // no pixels, no readiness — say so instead of keeping a stale label
+      return;
+    }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     // The subtree is already frame-local, so the canvas origin is the frame origin: a second
@@ -418,6 +564,10 @@ export function FrameContent({ file, root, scale, overrides }: FrameContentProps
       onMissing,
       overrides,
     });
+    // The pass is on the canvas and every key it needed (or used from cache) is recorded:
+    // announce the SAME state to the stage label and the element, from the real ledger only.
+    paintedRef.current = true;
+    syncReadiness();
   }, [
     localRoot,
     frame,
@@ -430,6 +580,7 @@ export function FrameContent({ file, root, scale, overrides }: FrameContentProps
     quality,
     fontAvailable,
     onMissing,
+    syncReadiness,
   ]);
 
   // Release the PREVIOUS root's claims after this commit has already drawn (and claimed) the
@@ -471,9 +622,83 @@ export function FrameContent({ file, root, scale, overrides }: FrameContentProps
   // Without a live scope there is nothing to draw with — no assets, no fonts — and drawing
   // before the player's snapshot exists would paint the previous file's bytes.
   if (!frame || !canvasStyle || !hasLiveScope(scope)) return null;
-  return <canvas ref={canvasRef} style={canvasStyle} />;
+  return (
+    <>
+      <canvas ref={canvasRef} style={canvasStyle} aria-label={STATUS_LOADING} aria-busy="true" />
+      {stageStatus !== "ready" && (
+        // The stage reports the SAME visible status the canvas announces (spec 32.5.3). zIndex
+        // keeps it above the HotspotsLayer sibling even though FrameContent renders first, so a
+        // visible Retry stays actually clickable. The bar itself is pointer-events:none in BOTH
+        // states (standard CSS, not the RN-only box-none Unistyles cannot polyfill): taps pass
+        // through to real hotspots everywhere except the Retry barrier, which sets auto on its
+        // own — a none parent still hit-tests an explicit auto descendant.
+        <View style={styles.statusBar}>
+          <View style={styles.statusChip}>
+            <Text style={styles.statusText}>
+              {stageStatus === "loading" ? STATUS_LOADING : STATUS_FAILED}
+            </Text>
+          </View>
+          {stageStatus === "failed" && (
+            // A plain DOM barrier (this file is web-only): the click stops here so an ancestor
+            // overlay/hotspot Pressable never treats the Retry tap as its own press — prototype
+            // navigation does not fire — while the Button's own handler runs untouched.
+            <div style={RETRY_BARRIER_STYLE} onClick={stopBarrierClick}>
+              <Button variant="outline" size="sm" onPress={retryCurrentAssets}>
+                Retry
+              </Button>
+            </div>
+          )}
+        </View>
+      )}
+    </>
+  );
 }
 
 function hasLiveScope(scope: PrototypeAssetScopeHandle | null): boolean {
   return scope !== null && !scope.store.disposed;
 }
+
+// Module-level so the barrier's props are not recreated per render (react-perf rule). The
+// click stops AT this div: React's synthetic propagation honors stopPropagation, so no ancestor
+// handler — a covering overlay or hotspot Pressable — ever sees the Retry tap.
+const RETRY_BARRIER_STYLE = {
+  display: "flex",
+  justifyContent: "center",
+  pointerEvents: "auto",
+} as const;
+
+function stopBarrierClick(event: ReactMouseEvent<HTMLDivElement>): void {
+  event.stopPropagation();
+}
+
+// Inherited presentation, not invented: the same bottom-centered status bar the canvas overlay
+// uses, on the established tokens — surface0 chip with the standard border, muted extra-small
+// type from the theme scale (spec 32.5.1: the stage label reports the same visible status).
+const styles = StyleSheet.create((theme: Theme) => ({
+  statusBar: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: theme.spacing[4],
+    alignItems: "center",
+    gap: theme.spacing[1.5],
+    // HotspotsLayer renders after FrameContent's subtree; Retry must beat it (and any
+    // transition overlay stacks its own layer) to stay actually clickable.
+    zIndex: 10,
+    // Standard CSS in both states (see the render comment for why the Retry child still hits).
+    pointerEvents: "none",
+  },
+  statusChip: {
+    backgroundColor: theme.colors.surface0,
+    borderWidth: theme.borderWidth[1],
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.md,
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+    pointerEvents: "none",
+  },
+  statusText: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+  },
+}));

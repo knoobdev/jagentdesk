@@ -108,6 +108,20 @@ export class PrototypeAssetStore {
   }
 
   /**
+   * Reset exactly one TERMINAL-failed entry (spec 32.5.3 Retry): the record drops, so the next
+   * `claim` opens a fresh generation and the draw's missing report re-demands the bytes once.
+   * Loading/ready entries are untouched and return false — an explicit retry can never storm,
+   * and a still-unserved key stays in whatever honest state the store holds.
+   */
+  resetFailed(assetKey: string): boolean {
+    if (this.isDisposed) return false;
+    const record = this.entries.get(assetKey);
+    if (!record || record.status !== "failed") return false;
+    this.entries.delete(assetKey);
+    return true;
+  }
+
+  /**
    * Drops every claim held by `ownerId` — a reused FrameContent on its previous root, or a frame
    * that left the stage. Entries no other active owner holds are freed (decoded image, bytes,
    * fetch slot); entries shared with a still-active owner survive.
