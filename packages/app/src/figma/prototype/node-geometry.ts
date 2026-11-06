@@ -37,17 +37,31 @@ export function nodeBounds(node: FigmaNode): Rect | null {
   return { x, y, width, height };
 }
 
+/** The rendered-ink box (`absoluteRenderBounds`) when it is complete and finite. */
+export function nodeRenderBounds(node: FigmaNode): Rect | null {
+  const box = readRecord(node.absoluteRenderBounds);
+  if (!box) return null;
+  const x = readNumber(box.x);
+  const y = readNumber(box.y);
+  const width = readNumber(box.width);
+  const height = readNumber(box.height);
+  if (x === null || y === null || width === null || height === null) return null;
+  return { x, y, width, height };
+}
+
 export function nodeIsVisible(node: FigmaNode): boolean {
   return node.visible !== false;
 }
 
 /**
  * Rewrite a subtree in frame-local coordinates: subtract the frame's absoluteBoundingBox origin
- * from every node's box and pin each node's transform to that local position. The web player's
- * canvas spans one frame, and the renderer draws with the absolute coordinates it is handed, so
- * drawing a frame at x=1200 without localizing puts the whole frame off-canvas. Real Figma REST
- * nodes carry no `absoluteTransform` (that field is plugin-only) — position comes from
- * `absoluteBoundingBox`, and any transforms riding on the payload are replaced outright.
+ * from every node's box — and from its `absoluteRenderBounds` when that box is valid, since the
+ * renderer places default-crop fallbacks on it — and pin each node's transform to that local
+ * position. The web player's canvas spans one frame, and the renderer draws with the absolute
+ * coordinates it is handed, so drawing a frame at x=1200 without localizing puts the whole
+ * frame off-canvas. Real Figma REST nodes carry no `absoluteTransform` (that field is
+ * plugin-only) — position comes from `absoluteBoundingBox`, and any transforms riding on the
+ * payload are replaced outright.
  */
 export function toFrameLocalNodes(root: FigmaNode, origin: Rect): FigmaNode {
   const localize = (node: FigmaNode): FigmaNode => {
@@ -66,6 +80,21 @@ export function toFrameLocalNodes(root: FigmaNode, origin: Rect): FigmaNode {
           [0, 1, y],
         ];
     }
+    // W8's renderer consults `absoluteRenderBounds` FIRST for default-crop fallbacks and
+    // shadow outsets (renderer/nodes.ts fallbackPlacementBox), and on the wire that box is in
+    // document coordinates exactly like the layout box — leaving it unshifted places a
+    // shadowed fallback far off the one-frame canvas (or culls it). Width/height are the
+    // export's ink extent, position-independent, so they survive verbatim. Missing, null or
+    // non-finite bounds stay untouched: never fabricate a local box — the renderer's own
+    // validated read falls back to the bounding box for those.
+    const rendered = nodeRenderBounds(node);
+    if (rendered)
+      copy.absoluteRenderBounds = {
+        x: rendered.x - origin.x,
+        y: rendered.y - origin.y,
+        width: rendered.width,
+        height: rendered.height,
+      };
     if (Array.isArray(node.children)) copy.children = node.children.map(localize);
     return copy;
   };
