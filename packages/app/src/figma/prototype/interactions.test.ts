@@ -53,6 +53,25 @@ describe("parseAction", () => {
     expect(parseAction({ type: "NODE" })).toEqual({ kind: "ignore" });
     expect(parseAction({ type: "NAVIGATE_TO_THE_MOON" })).toEqual({ kind: "ignore" });
   });
+
+  it("ignores NODE actions whose navigation the player cannot perform", () => {
+    // CHANGE_TO swaps a component instance's variant: no destination frame, so a navigate
+    // here would jump to the wrong screen. Unknown/future navigations must not jump either.
+    expect(parseAction({ type: "NODE", navigation: "CHANGE_TO", destinationId: "v" })).toEqual({
+      kind: "ignore",
+    });
+    expect(parseAction({ type: "NODE", navigation: "FLY_TO", destinationId: "v" })).toEqual({
+      kind: "ignore",
+    });
+  });
+
+  it("treats a NODE action without a navigation field as plain NAVIGATE (legacy default)", () => {
+    expect(parseAction({ type: "NODE", destinationId: "2:1" })).toEqual({
+      kind: "navigate",
+      destinationId: "2:1",
+      transition: null,
+    });
+  });
 });
 
 describe("indexInteractions", () => {

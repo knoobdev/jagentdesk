@@ -73,6 +73,17 @@ export function unsupportedFeatures(node: FigmaNode): string[] {
   if (typeof node.type !== "string" || !DRAWABLE_TYPES.has(node.type)) {
     pushFeature(features, `NODE_TYPE:${node.type ?? "UNKNOWN"}`);
   }
+  pushPaintFeatures(node, features);
+  pushNodeBlendFeature(node, features);
+  pushEffectFeatures(node, features);
+  const { strokeAlign } = strokeAlignmentOf(node);
+  if (!STROKE_ALIGNMENTS.has(strokeAlign)) pushFeature(features, `STROKE_ALIGN:${strokeAlign}`);
+  if (node.type === "TEXT") pushTextFeatures(node, features);
+  pushGeometryAndMaskFeatures(node, features);
+  return features;
+}
+
+function pushPaintFeatures(node: FigmaNode, features: string[]): void {
   for (const paint of [...paintsOf(node, "fills"), ...paintsOf(node, "strokes")]) {
     if (!PAINT_TYPES.has(paint.type)) pushFeature(features, `FILL_TYPE:${paint.type}`);
     if (paint.blendMode && !BLEND_MODES.has(paint.blendMode)) {
@@ -82,21 +93,29 @@ export function unsupportedFeatures(node: FigmaNode): string[] {
       pushFeature(features, `IMAGE_SCALE_MODE:${paint.scaleMode}`);
     }
   }
+}
+
+function pushNodeBlendFeature(node: FigmaNode, features: string[]): void {
   if (typeof node.blendMode === "string" && !BLEND_MODES.has(node.blendMode)) {
     pushFeature(features, `BLEND_MODE:${node.blendMode}`);
   }
+}
+
+function pushEffectFeatures(node: FigmaNode, features: string[]): void {
   for (const effect of effectsOf(node)) {
     if (!EFFECT_TYPES.has(effect.type)) pushFeature(features, `EFFECT:${effect.type}`);
     else if (effect.type === "BACKGROUND_BLUR" && effect.visible !== false) {
       pushFeature(features, "BACKGROUND_BLUR");
     }
   }
-  const { strokeAlign } = strokeAlignmentOf(node);
-  if (!STROKE_ALIGNMENTS.has(strokeAlign)) pushFeature(features, `STROKE_ALIGN:${strokeAlign}`);
-  if (node.type === "TEXT") {
-    if (listStyleOf(node) !== undefined) pushFeature(features, "TEXT_LIST");
-    if (hasHyperlinks(node)) pushFeature(features, "TEXT_HYPERLINKS");
-  }
+}
+
+function pushTextFeatures(node: FigmaNode, features: string[]): void {
+  if (listStyleOf(node) !== undefined) pushFeature(features, "TEXT_LIST");
+  if (hasHyperlinks(node)) pushFeature(features, "TEXT_HYPERLINKS");
+}
+
+function pushGeometryAndMaskFeatures(node: FigmaNode, features: string[]): void {
   const geometryMissing =
     (node.type === "VECTOR" || node.type === "BOOLEAN_OPERATION") &&
     node.fills === undefined &&
@@ -107,7 +126,6 @@ export function unsupportedFeatures(node: FigmaNode): string[] {
     // it on the parent because the parent is what changes visually.
     pushFeature(features, `MASK_TYPE:${maskType(node)}`);
   }
-  return features;
 }
 
 function strokeAlignmentOf(node: FigmaNode): { strokeAlign: string } {

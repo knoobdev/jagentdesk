@@ -28,7 +28,8 @@
   },
   "characterStyleOverrides": [],
   "styleOverrideTable": {},
-  "styles": { "listStyles": { "type": "BULLETED", "level": 0 } },
+  "lineTypes": ["UNORDERED", "UNORDERED"],
+  "lineIndentations": [0, 0],
   "fills": [{ "type": "SOLID", "color": { "r": 0, "g": 0, "b": 0, "a": 1 } }],
   "strokes": []
 }

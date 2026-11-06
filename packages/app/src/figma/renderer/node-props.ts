@@ -264,7 +264,13 @@ export function textRuns(node: FigmaNode): TextRun[] {
   let runStyle: TextStyle = base;
   for (let i = 0; i < characters.length; i++) {
     const rawKey = overrides[i];
-    const key = rawKey === undefined || rawKey === null || rawKey === -1 ? "" : String(rawKey);
+    // REST documents 0 as the default-style marker (trailing zeros are stripped, and shorter
+    // arrays mean the rest is default too); the plugin API's -1 and absent entries also map to
+    // the base style. Anything else names a styleOverrideTable entry.
+    const key =
+      rawKey === undefined || rawKey === null || rawKey === -1 || rawKey === 0
+        ? ""
+        : String(rawKey);
     if (key !== runStyleKey) {
       runStyleKey = key;
       runStyle = key === "" ? base : mergeStyle(base, readTextStyle(table[key]) ?? {});
@@ -364,14 +370,38 @@ export function clipsContent(node: FigmaNode): boolean {
   return node.clipsContent === true;
 }
 
+/**
+ * The node's list style when it is a bullet/numbered list. REST TEXTNode carries lists as
+ * top-level `lineTypes`/`lineIndentations` (one entry per line); `styles.listStyles` is the
+ * Figma-plugin spelling kept for Link data. Undefined for plain text.
+ */
 export function listStyleOf(node: FigmaNode): unknown {
+  const lineTypes = node.lineTypes;
+  if (
+    Array.isArray(lineTypes) &&
+    lineTypes.some((type) => type === "ORDERED" || type === "UNORDERED")
+  ) {
+    return lineTypes;
+  }
   const styles = node.styles;
   if (isRecord(styles) && styles.listStyles !== undefined) return styles.listStyles;
   return undefined;
 }
 
+/** True when the base style or any override style carries a hyperlink (TypeStyle.hyperlink). */
 export function hasHyperlinks(node: FigmaNode): boolean {
-  return Array.isArray(node.textWithHyperlinks) && node.textWithHyperlinks.length > 0;
+  if (hasHyperlinkIn(node.style)) return true;
+  const table = node.styleOverrideTable;
+  if (isRecord(table)) {
+    for (const entry of Object.values(table)) {
+      if (hasHyperlinkIn(entry)) return true;
+    }
+  }
+  return false;
+}
+
+function hasHyperlinkIn(style: unknown): boolean {
+  return isRecord(style) && style.hyperlink != null;
 }
 
 export function pointCountOf(node: FigmaNode): number {

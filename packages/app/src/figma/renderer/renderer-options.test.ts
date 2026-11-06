@@ -148,6 +148,15 @@ describe("missing resource reporting", () => {
 });
 
 describe("unsupportedFeatures", () => {
+  const textNode = (name: string, extra: Record<string, unknown>): FigmaNode =>
+    ({
+      id: "1:1",
+      name,
+      type: "TEXT",
+      absoluteBoundingBox: { x: 0, y: 0, width: 100, height: 20 },
+      characters: "hi",
+      ...extra,
+    }) as unknown as FigmaNode;
   it("lists what the renderer cannot draw", () => {
     const renderer = createFigmaRenderer();
     expect(renderer.unsupportedFeatures(loadNode("background-blur"))).toEqual(["BACKGROUND_BLUR"]);
@@ -161,8 +170,27 @@ describe("unsupportedFeatures", () => {
       "BLEND_MODE:LINEAR_BURN",
     ]);
     expect(renderer.unsupportedFeatures(loadNode("unsupported-mask-luminosity"))).toEqual([
-      "MASK_TYPE:LUMINOSITY",
+      "MASK_TYPE:LUMINANCE",
     ]);
+    expect(renderer.unsupportedFeatures(loadNode("text-list-styles"))).toEqual(["TEXT_LIST"]);
+    // Real Figma REST list data uses top-level lineTypes/lineIndentations, and hyperlinks live
+    // on TypeStyle.hyperlink (base style or any override) — both must reach the fallback list.
+    expect(
+      renderer.unsupportedFeatures(textNode("List", { lineTypes: ["NONE", "UNORDERED"] })),
+    ).toEqual(["TEXT_LIST"]);
+    expect(
+      renderer.unsupportedFeatures(
+        textNode("Linked", { style: { hyperlink: { type: "URL", url: "https://figma.com" } } }),
+      ),
+    ).toEqual(["TEXT_HYPERLINKS"]);
+    expect(
+      renderer.unsupportedFeatures(
+        textNode("PartlyLinked", {
+          styleOverrideTable: { "1": { hyperlink: { type: "NODE", nodeId: "2:3" } } },
+        }),
+      ),
+    ).toEqual(["TEXT_HYPERLINKS"]);
+    expect(renderer.unsupportedFeatures(textNode("Plain", {}))).toEqual([]);
     expect(renderer.unsupportedFeatures(loadNode("rectangle-solid"))).toEqual([]);
   });
 });

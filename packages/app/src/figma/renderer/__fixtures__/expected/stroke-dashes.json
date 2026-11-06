@@ -9,8 +9,9 @@
   ["set:lineCap", "square"],
   ["set:lineJoin", "round"],
   ["setLineDash", [4, 4]],
-  ["set:strokeStyle", "rgba(0, 0, 255, 1)"],
+  ["save"],
   ["set:globalAlpha", 1],
+  ["set:strokeStyle", "rgba(0, 0, 255, 1)"],
   [
     "stroke",
     {
@@ -24,6 +25,7 @@
       ]
     }
   ],
+  ["restore"],
   ["restore"],
   ["restore"],
   ["restore"]

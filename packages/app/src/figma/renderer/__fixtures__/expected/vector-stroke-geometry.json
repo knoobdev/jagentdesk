@@ -5,17 +5,17 @@
   ["setTransform", 1, 0, 0, 1, 10, 10],
   ["set:globalAlpha", 1],
   ["save"],
-  ["set:lineWidth", 3],
-  ["set:lineCap", "round"],
-  ["set:lineJoin", "bevel"],
-  ["set:strokeStyle", "rgba(0, 0, 0, 1)"],
+  ["save"],
   ["set:globalAlpha", 1],
+  ["set:fillStyle", "rgba(0, 0, 0, 1)"],
   [
-    "stroke",
+    "fill",
     {
       "svg": "M 0 20 C 10 0 30 0 40 20"
-    }
+    },
+    "nonzero"
   ],
+  ["restore"],
   ["restore"],
   ["restore"],
   ["restore"]
