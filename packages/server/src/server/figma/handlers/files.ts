@@ -117,11 +117,11 @@ async function accountLabel(ctx: FigmaContext, connectionId: string): Promise<st
 
 /**
  * `GET /v1/files/:key/meta` answered 403. Sign-in itself is already proven — `figma.oauth.complete`
- * ran `GET /v1/me` — so Figma's bare "Permission denied" is misleading: a token only carries scopes
- * the private app has ENABLED in the Figma console (the authorize URL asks for a subset of them), so
- * a 403 means the APP lacks the grant or the ACCOUNT lacks file access, and /me success cannot tell
- * the two apart. Quote Figma's error verbatim, name the connected account, and hand the user both
- * checks without claiming which one is the root cause.
+ * ran `GET /v1/me` — so Figma's bare "Permission denied" is misleading: it reads as the user lacking
+ * file permission, yet the denial's cause is unproven. The private app's scope configuration in the
+ * Figma console and the account's file permission are both candidates, and /me success cannot
+ * separate them. Quote Figma's error verbatim, name the connected account, and hand the user both
+ * checks without declaring either one the cause.
  */
 async function getFileMeta(
   ctx: FigmaContext,
@@ -140,10 +140,10 @@ async function getFileMeta(
     const account = await accountLabel(ctx, connectionId);
     throw new FigmaServiceError(
       "forbidden",
-      `Figma refused file ${fileKey} for ${account} (403: ${error.message}). Sign-in only proves ` +
-        `the account, so check both sides of file access: the private app must have the scopes ` +
-        `listed in the Connect guide enabled in the Figma console (changing them needs a new ` +
-        `sign-in), and ${account} must be able to open this file's URL in Figma.`,
+      `Figma refused file ${fileKey} for ${account} (403: ${error.message}). A valid sign-in does ` +
+        `not prove file access, and the reason for this refusal is not known. Check both ` +
+        `candidates: the private app must have the scopes listed in the Connect guide enabled in ` +
+        `the Figma console, and ${account} must be able to open this file's URL in Figma.`,
       error.extra,
     );
   }
