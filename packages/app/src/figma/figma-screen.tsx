@@ -66,15 +66,6 @@ function FilesHome({ serverId, connectionId }: { serverId: string; connectionId:
     (fileKey: string) => go({ fileKey, pageId: null, nodeId: null, version: null }),
     [go],
   );
-  const openConnect = useCallback(() => go({ view: "connect" }), [go]);
-  const connectAction = useMemo(
-    () => (
-      <Button variant="outline" onPress={openConnect} testID="figma-open-connect">
-        Connect Figma
-      </Button>
-    ),
-    [openConnect],
-  );
   if (files.isLoading) return <Text style={figmaStyles.rowSubtle}>Loading files…</Text>;
   if (files.error) return <ErrorBanner message={errorMessage(files.error)} />;
   const pinned = list.filter((file) => file.pinned);
@@ -89,10 +80,9 @@ function FilesHome({ serverId, connectionId }: { serverId: string; connectionId:
         title="No files yet"
         body={
           browse
-            ? "Add a file with Browse files in the left column — pick it in the Figma window and it is added and opened here."
+            ? "Add a file with Browse files in the left column — pick it in the JAgentDesk file picker and it is added and opened here."
             : "Files are added with Browse files in the JAgentDesk desktop app; this device lists the files already added."
         }
-        action={connectAction}
         testID="figma-files-empty"
       />
     );

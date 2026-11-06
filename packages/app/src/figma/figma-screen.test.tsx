@@ -7,7 +7,7 @@
  * surface: Browse files on the desktop, desktop-added guidance elsewhere (32.1, ADR-0038).
  */
 import React from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FigmaConnection, FigmaFile } from "@jagentdesk/protocol/figma/rpc-schemas";
 
@@ -192,10 +192,15 @@ describe("FigmaScreen files home", () => {
     expect(empty.textContent).toContain("files already added");
   });
 
-  it("the empty state keeps the Connect Figma action", async () => {
+  it("the connected empty state guides to Browse files without a reconnect button", () => {
     render(<FigmaScreen />);
-    fireEvent.click(screen.getByTestId("figma-open-connect"));
-    await waitFor(() => expect(navState.go).toHaveBeenCalledWith({ view: "connect" }));
+    const empty = screen.getByTestId("figma-files-empty");
+    expect(empty.textContent).toContain("Browse files");
+    expect(empty.textContent).toContain("JAgentDesk file picker");
+    // Not the Figma Desktop app, and no second Connect competing with Browse.
+    expect(empty.textContent).not.toContain("Figma window");
+    expect(empty.textContent).not.toContain("Connect Figma");
+    expect(screen.queryByTestId("figma-open-connect")).toBeNull();
   });
 
   it("shows the real file-list error", () => {

@@ -176,7 +176,7 @@ export function BrowseFilesRow({
         style={styles.row}
       >
         {busy ? <ThemedSpinner size={13} /> : <ThemedFolder size={13} />}
-        <Text style={styles.label}>{busy ? "Opening Figma…" : "Browse files"}</Text>
+        <Text style={styles.label}>{busy ? "Opening file browser…" : "Browse files"}</Text>
       </Pressable>
       {error ? (
         <Text style={styles.error} testID={`${testID}-error`}>
