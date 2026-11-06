@@ -50,21 +50,11 @@ export function rasterRung(deviceScale: number): number {
 export const BACKGROUND_BLUR_MAX_RASTER_SCALE = 2;
 
 /** The rung a visible-BACKGROUND_BLUR fallback may ask: min(adaptive rung, proven-correct
- *  scale). Never raises — low zooms keep the honest rung and share the ordinary crop cache. */
+ *  scale). Never raises — low zooms keep the honest rung and share the ordinary crop cache.
+ *  The classification rides the renderer's `FigmaFallbackHint` (renderer/types.ts) passed at
+ *  the fallback getter — the single source of truth for which nodes the cap applies to. */
 export function backgroundBlurRasterRung(deviceScale: number): number {
   return Math.min(rasterRung(deviceScale), BACKGROUND_BLUR_MAX_RASTER_SCALE);
-}
-
-/**
- * Optional hint the renderer hands to the fallback getter (ADR-0042 backdrop exception): true
- * when the node's fallback route was triggered by a VISIBLE BACKGROUND_BLUR effect. It must
- * arrive at the FIRST getter call — the canvas getter enqueues the fetch on a miss, so a
- * classification that only came with the missing report would already have asked a flat rung-4
- * raster. Consumers treat absent/false identically as "not blurred" so a renderer without the
- * hint keeps today's behavior.
- */
-export interface FigmaFallbackHint {
-  backgroundBlur?: boolean;
 }
 
 /**

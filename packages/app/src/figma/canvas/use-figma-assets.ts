@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { FigmaBytes } from "@jagentdesk/protocol/figma/rpc-schemas";
+import type { FigmaFallbackHint } from "@/figma/renderer";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { isItalicStyle, weightForStyle } from "../font-style";
 import { callFigma } from "./api";
@@ -11,7 +12,6 @@ import {
   rasterNamespace,
   rasterRung,
   type DecodedImageLike,
-  type FigmaFallbackHint,
   type RasterBounds,
   type RasterFormat,
   type RasterSpec,

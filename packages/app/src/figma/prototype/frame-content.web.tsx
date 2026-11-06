@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useHostFeature } from "@/runtime/host-features";
-import { createFigmaRenderer } from "@/figma/renderer";
+import { createFigmaRenderer, type FigmaFallbackHint } from "@/figma/renderer";
 import {
   backgroundBlurRasterRung,
   isPinnedVersion,
   rasterRung,
-  type FigmaFallbackHint,
   type RasterSpec,
 } from "@/figma/canvas/assets";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
