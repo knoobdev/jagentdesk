@@ -276,4 +276,30 @@ describe("FontCache failed fonts are terminal until clear()", () => {
     await settle();
     expect(loadFont).toHaveBeenCalledTimes(2);
   });
+
+  it("hands the registrar a live isCurrent predicate that clear() retires", async () => {
+    const reg = deferred<boolean>();
+    let capturedIsCurrent!: () => boolean;
+    const loadFont = vi.fn(async () => bytes);
+    const register = vi.fn(async (_f: string, _s: string, _d: string, isCurrent: () => boolean) => {
+      capturedIsCurrent = isCurrent;
+      return reg.promise;
+    });
+    const onReady = vi.fn();
+    const cache = new FontCache(loadFont, register, onReady);
+    cache.fontAvailable("Inter", "Bold");
+    await settle(); // register is now in flight (it re-checks the predicate after its own await)
+    expect(capturedIsCurrent()).toBe(true);
+
+    cache.clear(); // unmount/scope swap during face.load()
+    expect(capturedIsCurrent()).toBe(false); // the registrar's guard sees the dead scope
+    reg.resolve(false); // a well-behaved registrar commits nothing
+    await settle();
+    expect(onReady).not.toHaveBeenCalled(); // and FontCache drops the stale settle regardless
+
+    // Nothing was cached from the stale attempt: a fresh ask re-fetches on the new scope.
+    expect(cache.fontAvailable("Inter", "Bold")).toBe(false);
+    await settle();
+    expect(loadFont).toHaveBeenCalledTimes(2);
+  });
 });

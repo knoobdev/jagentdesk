@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { FigmaBytes } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import { isItalicStyle, weightForStyle } from "@/figma/prototype/font-loading";
+import { isItalicStyle, weightForStyle } from "../font-style";
 import { callFigma } from "./api";
 import { ByteImageCache, FontCache, type DecodedImageLike } from "./assets";
 
@@ -22,14 +22,16 @@ const webDecode: ImageDecoder = (dataUrl) => {
 /**
  * Register bytes as a FontFace under the EXACT family the renderer asks for: text.ts sets
  * `ctx.font = ... "family"` with numeric weight/italic descriptors, so a face named
- * `"Inter Bold"` is a different family the canvas never matches. `onRegistered` hands the face to
- * the owner (the hook) so it can be removed from document.fonts on dispose.
+ * `"Inter Bold"` is a different family the canvas never matches. `isCurrent` retires the attempt
+ * if the owner cleared while `face.load()` was in flight — a stale face must never enter
+ * FontFaceSet or `onRegistered` after cleanup already ran, or it leaks there unowned.
  */
 export async function webRegisterFont(
   family: string,
   style: string,
   dataUrl: string,
   onRegistered?: (face: FontFace) => void,
+  isCurrent?: () => boolean,
 ): Promise<boolean> {
   if (typeof document === "undefined" || typeof FontFace === "undefined") return false;
   try {
@@ -38,6 +40,10 @@ export async function webRegisterFont(
       style: isItalicStyle(style) ? "italic" : "normal",
     });
     await face.load();
+    // The await above is the whole race window: an unmount/version switch mid-load means the
+    // owner's dispose already ran, so adding (and tracking) this face now would resurrect it
+    // into a scope that no longer wants it.
+    if (isCurrent && !isCurrent()) return false;
     document.fonts.add(face);
     onRegistered?.(face);
     return true;
@@ -70,7 +76,12 @@ export function useFigmaAssets(input: {
   fileKey: string;
   version: string | null;
   decodeImage?: ImageDecoder;
-  registerFont?: (family: string, style: string, dataUrl: string) => Promise<boolean>;
+  registerFont?: (
+    family: string,
+    style: string,
+    dataUrl: string,
+    isCurrent?: () => boolean,
+  ) => Promise<boolean>;
 }): FigmaAssets {
   const { serverId, fileKey, version } = input;
   const client = useHostRuntimeClient(serverId);
@@ -82,13 +93,19 @@ export function useFigmaAssets(input: {
   // Faces the web registrar added to document.fonts, so dispose really removes them.
   const faces = useRef(new Map<string, FontFace>());
   const registerDefault = useCallback(
-    (family: string, style: string, dataUrl: string) =>
-      webRegisterFont(family, style, dataUrl, (face) => {
-        const key = `${family}\u0000${style}`;
-        const previous = faces.current.get(key);
-        if (previous && typeof document !== "undefined") document.fonts.delete(previous);
-        faces.current.set(key, face);
-      }),
+    (family: string, style: string, dataUrl: string, isCurrent: () => boolean) =>
+      webRegisterFont(
+        family,
+        style,
+        dataUrl,
+        (face) => {
+          const key = `${family}\u0000${style}`;
+          const previous = faces.current.get(key);
+          if (previous && typeof document !== "undefined") document.fonts.delete(previous);
+          faces.current.set(key, face);
+        },
+        isCurrent,
+      ),
     [],
   );
   const register = input.registerFont ?? registerDefault;

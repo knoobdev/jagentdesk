@@ -157,7 +157,14 @@ export class FontCache {
 
   constructor(
     private readonly loadFont: (family: string, style: string) => Promise<FigmaBytes | null>,
-    private readonly register: (family: string, style: string, dataUrl: string) => Promise<boolean>,
+    private readonly register: (
+      family: string,
+      style: string,
+      dataUrl: string,
+      /** Live only while this scope is current; the registrar must not commit DOM side effects
+       * once the owner cleared (unmount/scope swap) mid-registration. */
+      isCurrent: () => boolean,
+    ) => Promise<boolean>,
     private readonly onReady: () => void = () => undefined,
   ) {}
 
@@ -181,17 +188,20 @@ export class FontCache {
     generation: number,
   ): Promise<void> {
     let ok = false;
+    const current = () => generation === this.generation;
     try {
       const bytes = await this.loadFont(family, style);
       // A clear mid-fetch retires this attempt before it can touch the DOM registrar (adding a
       // FontFace nobody owns any more).
-      if (generation !== this.generation) return;
-      ok = bytes ? await this.register(family, style, bytesToDataUrl(bytes)) : false;
+      if (!current()) return;
+      // The registrar owns the rest of the async window (face.load() etc): it must re-check
+      // `current` itself, or a scope swap during that await leaks a face into FontFaceSet.
+      ok = bytes ? await this.register(family, style, bytesToDataUrl(bytes), current) : false;
     } catch {
       ok = false;
     }
     // A settle from a dead scope (clear/reconnect/unmount) is dropped: no repopulate, no notify.
-    if (generation !== this.generation) return;
+    if (!current()) return;
     this.loading.delete(key);
     this.available.set(key, ok);
     this.onReady();

@@ -48,16 +48,23 @@ interface RecordedFace {
 }
 
 let madeFaces: RecordedFace[] = [];
+let madeInstances: unknown[] = [];
 let fontsAdd: ReturnType<typeof vi.fn>;
 let fontsDelete: ReturnType<typeof vi.fn>;
 
 function stubFontFaceApi(load: () => Promise<unknown>) {
   madeFaces = [];
+  madeInstances = [];
   fontsAdd = vi.fn();
   fontsDelete = vi.fn();
   class FakeFontFace {
+    seq: number;
     constructor(family: string, src: string, descriptors?: Record<string, string>) {
       madeFaces.push({ family, src, descriptors });
+      madeInstances.push(this);
+      // Identity for assertions: jest's toHaveBeenCalledWith is a deep-equal, so two
+      // structurally identical faces would otherwise be interchangeable.
+      this.seq = madeFaces.length - 1;
       this.load = load;
     }
     load: () => Promise<unknown>;
@@ -101,6 +108,22 @@ describe("webRegisterFont exact-family registration", () => {
     });
     await expect(webRegisterFont("Inter", "Bold", "data:x")).resolves.toBe(false);
     expect(fontsAdd).not.toHaveBeenCalled();
+  });
+
+  it("an owner retired during face.load() never reaches document.fonts or onRegistered", async () => {
+    const load = deferred<unknown>();
+    stubFontFaceApi(() => load.promise);
+    const track = vi.fn();
+    let current = true;
+    const registering = webRegisterFont("Inter", "Bold", "data:x", track, () => current);
+    await settle(); // face.load() is in flight, nothing committed yet
+    expect(fontsAdd).not.toHaveBeenCalled();
+    current = false; // unmount / version switch while load was pending
+    load.resolve({});
+    await expect(registering).resolves.toBe(false);
+    // The dispose already ran, so a stale add would leak an unowned face into FontFaceSet.
+    expect(fontsAdd).not.toHaveBeenCalled();
+    expect(track).not.toHaveBeenCalled();
   });
 
   it("hands the face to onRegistered so the owner can dispose it", async () => {
@@ -180,6 +203,54 @@ describe("useFigmaAssets owner dispose", () => {
 
     expect(fontsDelete).toHaveBeenCalledWith(expect.anything()); // real document.fonts removal
     expect(onPaint).not.toHaveBeenCalled(); // the late settle belongs to a dead generation
+  });
+
+  it("retires an owner-registered face that lands after a scope switch mid-load", async () => {
+    const staleLoad = deferred<unknown>();
+    const currentLoad = deferred<unknown>();
+    const faceLoads = [staleLoad, currentLoad];
+    let loadIndex = 0;
+    stubFontFaceApi(() => faceLoads[loadIndex++]!.promise);
+    callFigmaMock.mockImplementation((_client, method) =>
+      method === "figma.fonts.get.request"
+        ? Promise.resolve({ font: imageBytes() })
+        : Promise.resolve({ images: {} }),
+    );
+    const first = mount({ serverId: "s1", fileKey: "a", version: null });
+    await act(async () => {
+      first.onMissing({
+        fallbackNodeIds: [],
+        imageRefs: [],
+        fonts: [{ family: "Inter", style: "Bold" }],
+      });
+      await settle();
+    });
+    // The stale face.load() is in flight when the scope switches (version bump retires every
+    // hook cache through the dispose effect, even the ones whose memo identity is stable).
+    expect(loadIndex).toBe(1);
+    expect(fontsAdd).not.toHaveBeenCalled();
+
+    const second = mount({ serverId: "s1", fileKey: "a", version: "v2" });
+    await act(async () => {
+      second.onMissing({
+        fallbackNodeIds: [],
+        imageRefs: [],
+        fonts: [{ family: "Inter", style: "Bold" }],
+      });
+      await settle();
+    });
+    expect(loadIndex).toBe(2); // the current scope asked for its own face
+    staleLoad.resolve({});
+    currentLoad.resolve({});
+    await settle();
+
+    // Only the current generation's face may enter FontFaceSet; the stale attempt — whose
+    // dispose already ran, faces map emptied — must be dropped whole.
+    expect(fontsAdd).toHaveBeenCalledTimes(1);
+    expect(madeFaces).toHaveLength(2); // both were constructed…
+    // …but exactly one was added, and it is the second (current-scope) instance — never the stale one.
+    expect(fontsAdd).toHaveBeenCalledWith(expect.objectContaining({ seq: 1 }));
+    expect(fontsAdd).not.toHaveBeenCalledWith(expect.objectContaining({ seq: 0 }));
   });
 
   it("a scope change clears the previous file's caches — no stale repopulate or notify", async () => {
