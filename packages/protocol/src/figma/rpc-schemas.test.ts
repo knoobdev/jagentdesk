@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   FIGMA_REQUEST_TYPES,
+  FigmaFileNodesRequestSchema,
   FigmaFilePlaybackRequestSchema,
   FigmaFilePlaybackResponseSchema,
   FigmaFilePrototypeRequestSchema,
@@ -91,6 +92,11 @@ describe("figma.file.playback.request schema", () => {
   it("requires the immutable version (ADR-0037 snapshot pinning)", () => {
     const { version: _version, ...withoutVersion } = requestOverride({});
     expect(FigmaFilePlaybackRequestSchema.safeParse(withoutVersion).success).toBe(false);
+    // An empty version reaches the node cache as a truthy-less pin: the read silently falls
+    // back to the latest document instead of the outline snapshot.
+    expect(FigmaFilePlaybackRequestSchema.safeParse(requestOverride({ version: "" })).success).toBe(
+      false,
+    );
   });
 
   it("requires fileKey and requestId", () => {
@@ -115,6 +121,15 @@ describe("figma.file.playback.request schema", () => {
     ).toBe(false);
     expect(
       FigmaFilePlaybackRequestSchema.safeParse(requestOverride({ frameIds: ids(11) })).success,
+    ).toBe(false);
+  });
+
+  it("rejects empty frame-id strings on the playback RPC", () => {
+    expect(
+      FigmaFilePlaybackRequestSchema.safeParse(requestOverride({ frameIds: [""] })).success,
+    ).toBe(false);
+    expect(
+      FigmaFilePlaybackRequestSchema.safeParse(requestOverride({ frameIds: ["1:2", ""] })).success,
     ).toBe(false);
   });
 
@@ -245,5 +260,19 @@ describe("legacy prototype RPC unchanged (ADR-0037 keeps it for existing clients
       "error",
       "prototype",
     ]);
+  });
+
+  it("keeps the nodes RPC permissive: playback tightening did not leak to old RPCs", () => {
+    // figma.file.nodes.request is the loader playback delegates to; its contract predates
+    // ADR-0037 and callers may still send an empty version or empty id strings.
+    expect(
+      FigmaFileNodesRequestSchema.safeParse({
+        type: "figma.file.nodes.request",
+        requestId: "req-nodes",
+        fileKey: "kH8TzQ2mV1",
+        ids: [""],
+        version: "",
+      }).success,
+    ).toBe(true);
   });
 });

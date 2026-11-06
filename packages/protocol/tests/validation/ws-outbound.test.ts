@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createJiti } from "jiti";
 import { describe, expect, it } from "vitest";
+import { WSInboundMessageSchema } from "../../src/messages.js";
 import { WSOutboundMessageSchema as GeneratedWSOutboundMessageSchema } from "../../src/generated/validation/ws-outbound.aot.js";
 
 interface GeneratedSchema {
@@ -377,5 +378,58 @@ const SourceSchema = z.object({
       },
     });
     expect(result.success).toBe(true);
+  });
+});
+
+// Requests travel client→daemon and are parsed by the daemon's runtime `WSInboundMessageSchema`
+// (websocket-server.ts); only the outbound side has a generated zod-aot artifact. These cases
+// pin the ADR-0037 playback request tightening at the real inbound parse boundary, so both WS
+// directions of the RPC pair are covered.
+describe("WS inbound figma playback request validation", () => {
+  const playbackEnvelope = (params: Record<string, unknown>) => ({
+    type: "session",
+    message: {
+      type: "figma.file.playback.request",
+      requestId: "figma-playback",
+      fileKey: "kH8TzQ2mV1",
+      frameIds: ["1:2"],
+      version: "1566622199797801477",
+      ...params,
+    },
+  });
+
+  it("accepts a playback request envelope with 10 frame ids", () => {
+    const ids = Array.from({ length: 10 }, (_, i) => `1:${i + 2}`);
+    expect(WSInboundMessageSchema.safeParse(playbackEnvelope({ frameIds: ids })).success).toBe(
+      true,
+    );
+  });
+
+  it("rejects an empty version — a falsy pin would load the latest document, not the snapshot", () => {
+    expect(WSInboundMessageSchema.safeParse(playbackEnvelope({ version: "" })).success).toBe(false);
+  });
+
+  it("rejects an empty frame id", () => {
+    expect(WSInboundMessageSchema.safeParse(playbackEnvelope({ frameIds: [""] })).success).toBe(
+      false,
+    );
+    expect(
+      WSInboundMessageSchema.safeParse(playbackEnvelope({ frameIds: ["1:2", ""] })).success,
+    ).toBe(false);
+  });
+
+  it("still accepts the unchanged legacy nodes request with an empty version and id", () => {
+    expect(
+      WSInboundMessageSchema.safeParse({
+        type: "session",
+        message: {
+          type: "figma.file.nodes.request",
+          requestId: "figma-nodes",
+          fileKey: "kH8TzQ2mV1",
+          ids: [""],
+          version: "",
+        },
+      }).success,
+    ).toBe(true);
   });
 });

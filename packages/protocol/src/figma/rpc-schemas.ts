@@ -538,10 +538,13 @@ export const FigmaFilePrototypeResponseSchema = res("figma.file.prototype.respon
   prototype: FigmaPrototypeSchema.nullable(),
 });
 // ADR-0037: playback reads only the visible frames at the outline's immutable version.
+// `.min(1)` on both fields is load-bearing: the versioned node cache treats an empty version or
+// an empty frame id as absent (latest / no-op), which defeats snapshot pinning. Old RPCs keep
+// their plain strings unchanged.
 export const FigmaFilePlaybackRequestSchema = req("figma.file.playback.request", {
   fileKey,
-  frameIds: z.array(z.string()).min(1).max(10),
-  version: z.string(),
+  frameIds: z.array(z.string().min(1)).min(1).max(10),
+  version: z.string().min(1),
 });
 export const FigmaFilePlaybackResponseSchema = res("figma.file.playback.response", {
   frames: z.record(z.string(), FigmaNodeSchema),
