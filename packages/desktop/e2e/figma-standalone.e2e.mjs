@@ -1462,80 +1462,84 @@ async function main() {
     // gates first would warm those caches and make ui-file-open a WARM-only proof —
     // unable to carry the <=3 s cold bar (spec 32.11 #2). ───────────────────────────
     await runFileAddGate(client, { fileKey, fileMetaName: evidence.fileMeta.name });
-    await runUiPlaybackGates(page, ram, canvasDeadlineMs, minFps, electronMainPid, fileKey, {
-      artifactDir,
-      uiRequests,
-      proxy,
-      jagentdeskHome,
-      evidence,
-      refreshUi: async () => {
-        // The file entered the daemon store over WS; reload and re-navigate the real product
-        // UI so the files home shows it — a user-visible refresh, not DOM injection into Figma.
-        // After reload the host connection is persisted, so waitForReadyRenderer only proves
-        // the bridge + connected row are back (it re-runs the supported onboarding if the
-        // product dropped to it, still with real clicks).
-        await page.reload({ waitUntil: "domcontentloaded", timeout: bootTimeoutMs });
-        await waitForReadyRenderer(page, daemonPort, readiness.serverId);
-        await openFigmaSection();
-      },
-    });
+    // A targeted fidelity run exercises only this group; finish() records every omitted
+    // performance/player/comment gate as UNEXERCISED, so it cannot be a full acceptance PASS.
+    if (process.env.JAGENTDESK_FIGMA_E2E_QUALITY_ONLY !== "1") {
+      await runUiPlaybackGates(page, ram, canvasDeadlineMs, minFps, electronMainPid, fileKey, {
+        artifactDir,
+        uiRequests,
+        proxy,
+        jagentdeskHome,
+        evidence,
+        refreshUi: async () => {
+          // The file entered the daemon store over WS; reload and re-navigate the real product
+          // UI so the files home shows it — a user-visible refresh, not DOM injection into Figma.
+          // After reload the host connection is persisted, so waitForReadyRenderer only proves
+          // the bridge + connected row are back (it re-runs the supported onboarding if the
+          // product dropped to it, still with real clicks).
+          await page.reload({ waitUntil: "domcontentloaded", timeout: bootTimeoutMs });
+          await waitForReadyRenderer(page, daemonPort, readiness.serverId);
+          await openFigmaSection();
+        },
+      });
 
-    await runCommentsReadOnlyUiProof(page, uiRequests, artifactDir, evidence, account.handle);
+      await runCommentsReadOnlyUiProof(page, uiRequests, artifactDir, evidence, account.handle);
 
-    // ── API-integration proof AFTER the UI (harness's own WS RPCs; labelled) ──────
-    await runApiGates(client, jagentdeskHome, proxy, {
-      fileKey,
-      configuredFrames,
-      evidence,
-      uiRequests,
-    });
+      // ── API-integration proof AFTER the UI (harness's own WS RPCs; labelled) ──────
+      await runApiGates(client, jagentdeskHome, proxy, {
+        fileKey,
+        configuredFrames,
+        evidence,
+        uiRequests,
+      });
 
-    // ── app-tree RAM gate ──────────────────────────────────────────────────────
-    if (!electronFound) {
-      failGate(
-        "perf-app-ram-tree",
-        "the real Electron main process was never located — measuring dev-runner (Metro/node) descendants would have manufactured green",
-      );
-    } else if (ram.samples.length === 0) {
-      failGate("perf-app-ram-tree", "the RAM sampler collected no process-tree samples");
-    } else {
-      const peakGrowthMb = (ram.peakKb - ram.baselineKb) / 1024;
-      const closeGrowthMb =
-        ram.afterCloseKb === null ? null : (ram.afterCloseKb - ram.baselineKb) / 1024;
-      evidence.ram = {
-        baselineMb: Math.round(ram.baselineKb / 1024),
-        peakMb: Math.round(ram.peakKb / 1024),
-        afterCloseMb: ram.afterCloseKb === null ? null : Math.round(ram.afterCloseKb / 1024),
-        samples: ram.samples.length,
-        daemonRssMb: Math.round(evidence.daemonRssKb / 1024),
-      };
-      if (
-        peakGrowthMb < appRamBudgetMb &&
-        (closeGrowthMb === null || closeGrowthMb < appRamBudgetMb)
-      ) {
-        passGate("perf-app-ram-tree", {
-          peakGrowthMb: peakGrowthMb.toFixed(1),
-          afterCloseGrowthMb: closeGrowthMb === null ? null : closeGrowthMb.toFixed(1),
-        });
-      } else {
+      // ── app-tree RAM gate ──────────────────────────────────────────────────────
+      if (!electronFound) {
         failGate(
           "perf-app-ram-tree",
-          `app process tree grew ${peakGrowthMb.toFixed(0)}MB peak / ${
-            closeGrowthMb === null ? "?" : closeGrowthMb.toFixed(0)
-          }MB after close — budget ${appRamBudgetMb}MB`,
+          "the real Electron main process was never located — measuring dev-runner (Metro/node) descendants would have manufactured green",
         );
+      } else if (ram.samples.length === 0) {
+        failGate("perf-app-ram-tree", "the RAM sampler collected no process-tree samples");
+      } else {
+        const peakGrowthMb = (ram.peakKb - ram.baselineKb) / 1024;
+        const closeGrowthMb =
+          ram.afterCloseKb === null ? null : (ram.afterCloseKb - ram.baselineKb) / 1024;
+        evidence.ram = {
+          baselineMb: Math.round(ram.baselineKb / 1024),
+          peakMb: Math.round(ram.peakKb / 1024),
+          afterCloseMb: ram.afterCloseKb === null ? null : Math.round(ram.afterCloseKb / 1024),
+          samples: ram.samples.length,
+          daemonRssMb: Math.round(evidence.daemonRssKb / 1024),
+        };
+        if (
+          peakGrowthMb < appRamBudgetMb &&
+          (closeGrowthMb === null || closeGrowthMb < appRamBudgetMb)
+        ) {
+          passGate("perf-app-ram-tree", {
+            peakGrowthMb: peakGrowthMb.toFixed(1),
+            afterCloseGrowthMb: closeGrowthMb === null ? null : closeGrowthMb.toFixed(1),
+          });
+        } else {
+          failGate(
+            "perf-app-ram-tree",
+            `app process tree grew ${peakGrowthMb.toFixed(0)}MB peak / ${
+              closeGrowthMb === null ? "?" : closeGrowthMb.toFixed(0)
+            }MB after close — budget ${appRamBudgetMb}MB`,
+          );
+        }
       }
-    }
 
-    // ── URL trace gate: real proof of which REST shapes the app touched ─────────
-    linkProblems.push(...(await recordLinkStatus(client, "After", evidence)));
-    runUrlTraceGate(
-      proxy.log,
-      fileKey,
-      evidence.sectionNodeIds ? new Set(evidence.sectionNodeIds) : null,
-      uiRequests,
-      linkProblems,
-    );
+      // ── URL trace gate: real proof of which REST shapes the app touched ─────────
+      linkProblems.push(...(await recordLinkStatus(client, "After", evidence)));
+      runUrlTraceGate(
+        proxy.log,
+        fileKey,
+        evidence.sectionNodeIds ? new Set(evidence.sectionNodeIds) : null,
+        uiRequests,
+        linkProblems,
+      );
+    }
     // Optional same-frame evidence AFTER performance gates; never changes their thresholds.
     await captureRenderQuality(page, uiRequests, artifactDir, evidence);
   } catch (error) {
@@ -2584,8 +2588,28 @@ async function captureRenderQuality(page, requests, artifactDir, evidence) {
   try {
     if (!Object.values(target).every(Boolean))
       throw new Error("Quality target needs page, node and version");
-    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.setViewportSize({ width: 2300, height: 1500 });
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Emulation.setDeviceMetricsOverride", {
+      width: 2300,
+      height: 1500,
+      deviceScaleFactor: 2,
+      mobile: false,
+    });
+    // CDP capture does not run Playwright's viewport-reset path (which resets DPR to 1 in
+    // a context attached over CDP). Capture pixels without changing the emulated metrics.
+    const screenshot = async (filename, clip) => {
+      const { data } = await cdp.send("Page.captureScreenshot", {
+        format: "png",
+        fromSurface: true,
+        captureBeyondViewport: false,
+        ...(clip ? { clip: { ...clip, scale: 1 } } : {}),
+      });
+      fs.writeFileSync(path.join(artifactDir, filename), Buffer.from(data, "base64"));
+    };
     const url = new URL(page.url());
+    const fileInput = process.env.JAGENTDESK_FIGMA_E2E_FILE_KEY ?? "";
+    url.searchParams.set("fileKey", parseFileKeyInput(fileInput));
     for (const [key, value] of Object.entries(target)) url.searchParams.set(key, value);
     const requestStart = requests.renderRequests.length;
     const responseStart = requests.renderResponses.length;
@@ -2660,8 +2684,10 @@ async function captureRenderQuality(page, requests, artifactDir, evidence) {
         };
       });
       const name = `quality-${Math.round(zoom * 100)}`;
-      await page.screenshot({ path: path.join(artifactDir, `${name}.png`) });
-      await canvas.screenshot({ path: path.join(artifactDir, `${name}-canvas.png`) });
+      await screenshot(`${name}.png`);
+      const box = await canvas.boundingBox();
+      if (!box) throw new Error("No canvas bounds at capture");
+      await screenshot(`${name}-canvas.png`, box);
       fs.writeFileSync(
         path.join(artifactDir, `${name}-pixels.png`),
         Buffer.from(
