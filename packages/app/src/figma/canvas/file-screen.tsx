@@ -20,6 +20,7 @@ import { FigmaAssistantPanel } from "./assistant-panel";
 import { InspectPanel } from "./inspect-panel";
 import { FigmaTopBar } from "./top-bar";
 import { figmaNodeIdFromParam, figmaNodeParam, nodeParamToFocusId } from "./node-url";
+import { resolvePrototypeStartNode } from "./prototype-start";
 import { errorMessage, useFigmaCall } from "./api";
 import { absoluteBoundingBoxOf, type Camera, centerCameraOn, nodeFocusBounds } from "./viewport";
 import {
@@ -131,7 +132,14 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
   const edits = useFigmaEdits(serverId, fileKey);
 
   const [watchToken, setWatchToken] = useState(0);
-  const store = useFigmaFrameStore(serverId, fileKey, version ?? null, watchToken);
+  // ADR-0039 / spec 32.5.1: every asset path — depth1 Section metadata, full subtrees and
+  // rasters — must pin to the SAME outline snapshot, so even the live view forwards the
+  // outline's version explicitly (the figmaNodeDepth gate guarantees the host honors it).
+  // Read-only stays keyed to the explicit historical `version` prop: deriving it from the
+  // outline would lock the live viewer. The outline loads before the canvas mounts, so
+  // assets simply re-key once when the snapshot lands — same pattern as watchToken reloads.
+  const dataVersion = version ?? outline?.version ?? null;
+  const store = useFigmaFrameStore(serverId, fileKey, dataVersion, watchToken);
 
   const [pageId, setPageId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(() =>
@@ -203,6 +211,20 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
 
   const parentOf = useCallback((nodeId: string) => store?.parentOf(nodeId), [store]);
 
+  // W6 handoff: the player is started from the frame, never from the selected descendant. The
+  // chain only exists once subtrees load, so this tracks the same store tick as selectedNode.
+  const prototypeStartNodeId = useMemo(
+    () =>
+      resolvePrototypeStartNode({
+        selectedNodeId,
+        frames: page?.frames ?? [],
+        flowStartingPoints: page?.flowStartingPoints ?? [],
+        parentOf,
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedNodeId, page, parentOf, storeTick],
+  );
+
   const focusNode = useCallback(
     async (nodeId: string) => {
       setFocusError(null);
@@ -217,7 +239,7 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
           const data = await call("figma.file.nodes.request", {
             fileKey,
             ids: [nodeId],
-            ...(version ? { version } : {}),
+            ...(dataVersion ? { version: dataVersion } : {}),
           });
           bounds = absoluteBoundingBoxOf(data.nodes?.[nodeId]);
         } catch (cause) {
@@ -233,7 +255,7 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
       const target = bounds;
       setCamera((current) => centerCameraOn(current, target, size.width, size.height));
     },
-    [call, fileKey, page, selectNode, size.height, size.width, store, version],
+    [call, fileKey, page, selectNode, size.height, size.width, store, dataVersion],
   );
 
   // Comment pins with only an x/y offset (no node): pan the camera to the point itself.
@@ -384,7 +406,7 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
           <CanvasView
             serverId={serverId}
             fileKey={fileKey}
-            version={version ?? null}
+            version={dataVersion}
             page={page}
             store={store}
             camera={camera}
@@ -427,7 +449,7 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
               <PrototypePlayer
                 file={fileRef}
                 outline={outline}
-                startNodeId={selectedNodeId ?? page?.flowStartingPoints[0]?.nodeId ?? null}
+                startNodeId={prototypeStartNodeId}
                 onClose={closePrototype}
               />
             </View>
