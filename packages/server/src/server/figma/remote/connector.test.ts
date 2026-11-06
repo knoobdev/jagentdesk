@@ -807,3 +807,156 @@ describe("malformed native results (root review 7)", () => {
     expect(toolCallRequests()).toHaveLength(1); // no auto-retry, ever
   });
 });
+
+// ── root review round 2: async correctness races ────────────────────────────────
+
+describe("stale status observations (root review 2.1)", () => {
+  it("an unknown-method failure from a dead generation cannot mark a reconnect unavailable", async () => {
+    const connector = await connectedConnector();
+    let phase = "stale";
+    client.on("mcpServerStatus/list", async () => {
+      if (phase === "stale") {
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        throw new CodexAppServerRpcError("Method not found", -32601);
+      }
+      return connectedInventory();
+    });
+    const poll = connector.getStatus(); // refresh in flight under the old generation
+    await settle();
+    phase = "healthy";
+    await connector.disconnect();
+    await connector.authBegin(); // fresh lifecycle observes connected
+    await poll; // the stale -32601 observation lands LAST
+    scriptToolReplies([
+      { content: [{ type: "text", text: "applied" }] },
+      { content: [], structuredContent: { version: "v" } },
+    ]);
+    // Unguarded, the stale catch would have stamped `unavailable` over the reconnect and
+    // execute would throw "Figma remote editing is unavailable".
+    await expect(
+      connector.execute({ fileKey: "FK", code: "x", description: "d" }),
+    ).resolves.toMatchObject({ readbackAvailable: true });
+  });
+
+  it("status polls cannot backlog the write lane behind repeated whoami calls", async () => {
+    const connector = makeConnector();
+    client.on("mcpServerStatus/list", () =>
+      connectedInventory({
+        use_figma: USE_FIGMA_TOOL,
+        get_metadata: GET_METADATA_TOOL,
+        whoami: { inputSchema: { type: "object", properties: {} } },
+      }),
+    );
+    client.on("mcpServer/tool/call", () => ({
+      content: [{ type: "text", text: "user: Jane Doe" }],
+    }));
+    await connector.authBegin();
+    await settle();
+    const whoamiCalls = () =>
+      toolCallRequests().filter((request) => (request.params as { tool: string }).tool === "whoami")
+        .length;
+    expect(whoamiCalls()).toBe(1); // the one identity attempt for this lifecycle
+    await connector.getStatus();
+    await connector.getStatus();
+    await connector.getStatus(); // polls re-read status but never re-queue whoami
+    expect(whoamiCalls()).toBe(1);
+    expect(await connector.getStatus()).toMatchObject({ identityText: "user: Jane Doe" });
+  });
+});
+
+describe("attempt ownership (root review 2.2)", () => {
+  it("an abandoned start never notifies initialized nor opens a thread", async () => {
+    const fake = new FakeNativeClient();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    fake.on("initialize", async () => {
+      await gate;
+      return {};
+    });
+    fake.on("thread/start", () => ({ thread: { id: "thr-x" } }));
+    fake.on("mcpServerStatus/list", () => connectedInventory());
+    fake.on("mcpServer/oauth/login", () => ({
+      authorizationUrl: "https://www.figma.com/oauth/abc",
+    }));
+    const connector = new FigmaRemoteConnector({
+      jagentdeskHome: home,
+      logger,
+      createClient: async () => fake,
+    });
+    const begun = connector.authBegin();
+    await settle();
+    await connector.disconnect(); // lands while initialize is still pending
+    release();
+    const result = await begun;
+    expect(fake.disposed).toBe(true); // late child disposed, not adopted
+    const methods = fake.requests.map((request) => request.method);
+    expect(methods).toContain("initialize");
+    expect(methods).not.toContain("initialized"); // first post-await side effect gated
+    expect(methods).not.toContain("thread/start");
+    expect(result.status).toEqual({ state: "disconnected" });
+  });
+
+  it("a new Connect does not wait on an abandoned attempt's pending OAuth (disconnect abandons authInFlight)", async () => {
+    const connector = makeConnector();
+    client.on("mcpServerStatus/list", () => notLoggedInInventory());
+    client.deferOauthLogin();
+    const first = connector.authBegin();
+    await settle();
+    expect(client.inFlightOauth).toBe(1);
+    await connector.disconnect();
+    const second = connector.authBegin(); // must NOT join the stale authInFlight
+    await settle();
+    expect(client.inFlightOauth).toBe(2); // the new lifecycle drives its own flow immediately
+    client.resolveOauthLogin({ authorizationUrl: "https://www.figma.com/oauth/one" });
+    client.resolveOauthLogin({ authorizationUrl: "https://www.figma.com/oauth/two" });
+    const [r1, r2] = await Promise.all([first, second]);
+    expect(r1.authorizationUrl).toBeUndefined(); // a released attempt never returns the old URL
+    expect(r2.authorizationUrl).toBe("https://www.figma.com/oauth/two");
+  });
+
+  it("an attempt whose start was abandoned issues no OAuth on the replacement client", async () => {
+    const { connector, releases } = makeGatedConnector();
+    const begun = connector.authBegin();
+    await settle();
+    await connector.disconnect(); // lands while createClient is pending
+    const fake = new FakeNativeClient();
+    fake.on("initialize", () => ({}));
+    fake.on("thread/start", () => ({ thread: { id: "thr-g" } }));
+    fake.on("mcpServerStatus/list", () => notLoggedInInventory());
+    // No oauth/login responder: any OAuth on this abandoned attempt throws "unhandled".
+    releases[0]?.(fake);
+    const result = await begun;
+    expect(result.status).toEqual({ state: "disconnected" });
+    expect(result.authorizationUrl).toBeUndefined();
+    expect(fake.requests.map((request) => request.method)).not.toContain("mcpServer/oauth/login");
+  });
+});
+
+describe("post-dispatch malformed writes (root review 2.3)", () => {
+  it("a malformed use_figma reply is outcome-unknown, never a plain pre-dispatch failure", async () => {
+    const connector = await connectedConnector();
+    client.on("mcpServer/tool/call", () => ({ structuredContent: { note: "no content" } }));
+    const write = await connector
+      .execute({ fileKey: "FK", code: "x", description: "d" })
+      .catch((caught: unknown) => caught);
+    expect(write).toBeInstanceOf(FigmaRemoteOutcomeUnknownError);
+    expect((write as Error).message).toMatch(/malformed use_figma/);
+    expect((write as Error).message).toMatch(/unverified/);
+  });
+
+  it("a malformed read reply stays a plain failure with no write classification", async () => {
+    const connector = await connectedConnector();
+    client.on("mcpServer/tool/call", (params) =>
+      (params as { tool: string }).tool === "get_metadata"
+        ? { nonsense: true }
+        : { content: [{ type: "text", text: "applied" }] },
+    );
+    const read = await connector.readMetadata("FK").catch((caught: unknown) => caught);
+    expect(read).toBeInstanceOf(Error);
+    expect(read).not.toBeInstanceOf(FigmaRemoteOutcomeUnknownError); // reads are not writes
+    // Inside execute, the same read failure just marks the outcome unverified — no throw.
+    const outcome = await connector.execute({ fileKey: "FK", code: "x", description: "d" });
+    expect(outcome.result.content).toHaveLength(1);
+    expect(outcome.readbackAvailable).toBe(false);
+  });
+});

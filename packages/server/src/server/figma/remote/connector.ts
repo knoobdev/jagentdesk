@@ -152,6 +152,15 @@ export class FigmaRemoteConnector implements FigmaRemoteGateway {
   private threadId: string | null = null;
   private starting: Promise<void> | null = null;
   private generation = 0;
+  /**
+   * Bumped whenever the owned process is released (disconnect, dispose, unexpected exit) —
+   * never by a start. A pending `authBegin` pins the epoch it launched on: after any release
+   * it reports state only, never driving OAuth on another operation's brand-new client and
+   * never returning a stale authorization URL.
+   */
+  private lifecycleEpoch = 0;
+  /** One best-effort identity attempt per lifecycle generation (polls must not backlog writes). */
+  private identityAttemptedGeneration = -1;
   private state: FigmaRemoteStatus["state"] = "disconnected";
   private stateMessage: string | undefined;
   private identityText: string | undefined;
@@ -302,10 +311,12 @@ export class FigmaRemoteConnector implements FigmaRemoteGateway {
       // No automatic retry: a dropped child leaves the last execute's outcome unknown.
       // Bumping the generation abandons any in-flight refresh of this owned process too.
       this.generation++;
+      this.lifecycleEpoch++;
       this.client = null;
       this.threadId = null;
       this.tools = {};
       this.starting = null;
+      this.authInFlight = null;
       this.state = this.enabled ? "error" : "disconnected";
       this.stateMessage =
         "The Figma editing helper stopped unexpectedly. Try Connect editing again.";
@@ -323,11 +334,13 @@ export class FigmaRemoteConnector implements FigmaRemoteGateway {
         },
         this.deps.timeouts.initialize,
       );
-      client.notify("initialized");
+      // Gate BEFORE the first post-initialize side effect: an abandoned start must not even
+      // notify the child it is proceeding, and never dispatches thread/start.
       if (!this.owns(generation)) {
         await client.dispose().catch(() => {});
         return;
       }
+      client.notify("initialized");
       const started = await client.request(
         "thread/start",
         {
@@ -380,6 +393,12 @@ export class FigmaRemoteConnector implements FigmaRemoteGateway {
     this.threadId = null;
     this.tools = {};
     this.generation++;
+    // Abandon the lifecycle: a pending authBegin must not drive OAuth on a future client,
+    // and a deliberate new Connect must not wait behind the old OAuth request. The stale
+    // attempt's finally compares identity, so clearing here never clobbers newer work.
+    this.lifecycleEpoch++;
+    this.authInFlight = null;
+    this.identityAttemptedGeneration = -1;
     this.state = "disconnected";
     this.stateMessage = undefined;
     this.identityText = undefined;
@@ -407,16 +426,19 @@ export class FigmaRemoteConnector implements FigmaRemoteGateway {
     authorizationUrl?: string;
   }> {
     await this.saveEnabled(true);
-    let generation = this.generation;
+    // Pin the lifecycle this attempt launched on. A start's own generation bump is not a
+    // release; only disconnect/dispose/termination increments the epoch. Once released, this
+    // attempt reports state only — it never drives OAuth on a reconnect's new client and
+    // never hands back a stale authorization URL.
+    const attempt = this.lifecycleEpoch;
+    const ownsAttempt = () => attempt === this.lifecycleEpoch;
     try {
       await this.ensureStarted();
-      // Capture AFTER the start resolves: startOnce owns the generation bump. This baseline
-      // detects a disconnect (or a newer start) landing while OAuth is in flight.
-      generation = this.generation;
+      if (!ownsAttempt()) return { status: this.snapshot() };
       if (this.state !== "connected") {
         await this.refreshServerStatus(this.generation);
       }
-      if (!this.owns(generation)) return { status: this.snapshot() };
+      if (!ownsAttempt()) return { status: this.snapshot() };
       if (this.state === "needs_auth" && this.client && this.threadId) {
         const client = this.client;
         const threadId = this.threadId;
@@ -425,8 +447,9 @@ export class FigmaRemoteConnector implements FigmaRemoteGateway {
           { threadId, name: FIGMA_REMOTE_SERVER_NAME },
           this.deps.timeouts.oauthLogin,
         );
-        // A disconnect mid-OAuth makes any returned URL stale: report state, never the old URL.
-        if (!this.owns(generation) || this.client !== client) return { status: this.snapshot() };
+        // A disconnect (or restart) mid-OAuth makes any returned URL stale.
+        if (!ownsAttempt() || this.client !== client || this.threadId !== threadId)
+          return { status: this.snapshot() };
         const url = validateFigmaAuthorizationUrl(
           isRecord(response) ? response.authorizationUrl : undefined,
         );
@@ -434,7 +457,7 @@ export class FigmaRemoteConnector implements FigmaRemoteGateway {
       }
       return { status: this.snapshot() };
     } catch (error) {
-      if (!this.owns(generation)) return { status: this.snapshot() };
+      if (!ownsAttempt()) return { status: this.snapshot() };
       if (isUnknownMethodError(error)) {
         this.state = "unavailable";
         this.stateMessage =
@@ -510,19 +533,20 @@ export class FigmaRemoteConnector implements FigmaRemoteGateway {
         this.deps.timeouts.serverStatus,
       );
     } catch (error) {
+      // A stale observation from a dead generation must not touch state at all — including
+      // the unknown-method branch, so old -32601 noise cannot mark a reconnect unavailable.
+      if (!this.owns(generation) || this.client !== client) return;
       if (isUnknownMethodError(error)) {
         this.state = "unavailable";
         this.stateMessage =
           "This Codex version does not support native MCP status. Update Codex (requires 0.165+).";
         return;
       }
-      if (generation === this.generation && this.client === client) {
-        this.state = "error";
-        this.stateMessage = error instanceof Error ? error.message : String(error);
-      }
+      this.state = "error";
+      this.stateMessage = error instanceof Error ? error.message : String(error);
       return;
     }
-    if (generation !== this.generation || this.client !== client) return;
+    if (!this.owns(generation) || this.client !== client) return;
     const data = isRecord(response) && Array.isArray(response.data) ? response.data : [];
     const entry = data.find((item) => isRecord(item) && item.name === FIGMA_REMOTE_SERVER_NAME);
     if (!isRecord(entry)) {
@@ -554,18 +578,32 @@ export class FigmaRemoteConnector implements FigmaRemoteGateway {
     this.stateMessage = `The official Figma MCP server reported "${runtimeStatus || "unknown"}".`;
   }
 
-  /** Identity is cosmetic: a failed whoami must never change the observed state. */
-  private async refreshIdentity(generation: number): Promise<void> {
+  /**
+   * Identity is cosmetic: a failed whoami must never change the observed state. Attempted
+   * once per lifecycle generation — otherwise every status poll would enqueue another whoami
+   * behind the serialized write lane and backlog live writes.
+   */
+  private refreshIdentity(generation: number): Promise<void> {
     const client = this.client;
-    if (!client || !Object.hasOwn(this.tools, "whoami")) return;
+    if (!client || !Object.hasOwn(this.tools, "whoami")) return Promise.resolve();
+    if (generation !== this.generation || this.identityAttemptedGeneration === generation)
+      return Promise.resolve();
+    this.identityAttemptedGeneration = generation;
+    return this.attemptIdentity(generation, client);
+  }
+
+  private async attemptIdentity(generation: number, client: NativeMcpRpcClient): Promise<void> {
     try {
       // Queued like every other tool call so a whoami elicitation can never be attributed
       // to (or steal the flag from) a concurrent write. Elicitations here are ignorable.
       const response = await this.enqueue(() =>
         this.dispatchToolCall(generation, client, "whoami", {}, { tolerateElicitation: true }),
       );
-      const text = extractFirstText(response);
-      if (text) this.identityText = text.slice(0, 500);
+      // Final ownership gate after the await: a dead lifecycle never sets identity.
+      if (this.owns(generation) && this.client === client) {
+        const text = extractFirstText(response);
+        if (text) this.identityText = text.slice(0, 500);
+      }
     } catch {
       // best-effort
     }
@@ -608,12 +646,17 @@ export class FigmaRemoteConnector implements FigmaRemoteGateway {
       );
     }
     // The daemon injects the target fileKey at the tool layer; the caller cannot swap endpoint or tool.
-    const result = await this.callTool("use_figma", {
-      fileKey: input.fileKey,
-      code: input.code,
-      description: input.description,
-      skillNames: "figma-use",
-    });
+    const result = await this.callTool(
+      "use_figma",
+      {
+        fileKey: input.fileKey,
+        code: input.code,
+        description: input.description,
+        skillNames: "figma-use",
+      },
+      // A malformed reply to a dispatched write is unknown-outcome (memo drop), not success.
+      { postDispatchMalformedIsUnknown: true },
+    );
     let readback: FigmaRemoteCallResult | undefined;
     let readbackAvailable = false;
     if (!result.isError) {
@@ -645,6 +688,7 @@ export class FigmaRemoteConnector implements FigmaRemoteGateway {
   private async callTool(
     tool: string,
     args: Record<string, unknown>,
+    options: { postDispatchMalformedIsUnknown?: boolean } = {},
   ): Promise<FigmaRemoteCallResult> {
     const generation = this.generation;
     const client = this.client;
@@ -652,7 +696,19 @@ export class FigmaRemoteConnector implements FigmaRemoteGateway {
     const response = await this.enqueue(() =>
       this.dispatchToolCall(generation, client, tool, args, {}),
     );
-    return this.parseCallResult(tool, response);
+    try {
+      return this.parseCallResult(tool, response);
+    } catch (error) {
+      // The call was already DISPATCHED: a malformed reply to a write cannot claim success
+      // — the side effect may have landed, so surface it like any other unknown outcome.
+      // Reads keep the plain failure (no write classification).
+      if (options.postDispatchMalformedIsUnknown && error instanceof Error)
+        throw new FigmaRemoteOutcomeUnknownError(
+          `${error.message} Treat the write outcome as unverified.`,
+          { cause: error },
+        );
+      throw error;
+    }
   }
 
   /**

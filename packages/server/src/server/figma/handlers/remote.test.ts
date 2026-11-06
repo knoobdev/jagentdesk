@@ -324,6 +324,11 @@ describe("execute", () => {
         "The official Figma MCP server asked for an approval while calling use_figma; " +
           "the connector declined it and treats the outcome as unverified.",
       ),
+      // A malformed reply to a DISPATCHED write: the tool ran, so the memo must drop too.
+      new FigmaRemoteOutcomeUnknownError(
+        "The official Figma MCP server returned a malformed use_figma result. " +
+          "Treat the write outcome as unverified.",
+      ),
       // Even an untyped Error from a foreign gateway implementation must drop the memo.
       new Error("Codex app-server request timed out for mcpServer/tool/call"),
     ];
