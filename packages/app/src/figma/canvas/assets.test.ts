@@ -44,6 +44,8 @@ const decodesTo =
 
 const nullFor = (ref: string): [string, FigmaBytes | null] => [ref, null];
 const bytesFor = (ref: string): [string, FigmaBytes | null] => [ref, imageBytes()];
+const deadOrBytes = (ref: string): [string, FigmaBytes | null] =>
+  ref === "f" ? nullFor(ref) : bytesFor(ref);
 
 describe("ByteImageCache failed attempts", () => {
   it("never re-queues a failed ref from request() — the per-paint onMissing loop is bounded", async () => {
@@ -301,5 +303,222 @@ describe("FontCache failed fonts are terminal until clear()", () => {
     expect(cache.fontAvailable("Inter", "Bold")).toBe(false);
     await settle();
     expect(loadFont).toHaveBeenCalledTimes(2);
+  });
+});
+
+/** One full synchronous paint: begin, touch what the draw uses, end, drain. */
+async function paintOnce(
+  cache: { beginDraw(): void; endDraw(): void },
+  touch: () => void,
+): Promise<void> {
+  cache.beginDraw();
+  touch();
+  cache.endDraw();
+  await settle();
+}
+
+describe("ByteImageCache paint reconciliation (spec 32.5.1 bounded lifetime)", () => {
+  it("retires a decoded image the next draw does not observe; a later ask refetches", async () => {
+    const loadBytes = vi.fn(async (refs: readonly string[]) =>
+      Object.fromEntries(refs.map(bytesFor)),
+    );
+    const cache = new ByteImageCache(loadBytes, okImage);
+    await paintOnce(cache, () => expect(cache.get("a")).toBeNull()); // starts + settles the fetch
+    expect(cache.has("a")).toBe(true);
+
+    await paintOnce(cache, () => undefined); // panned offscreen: nothing observes "a"
+    expect(cache.has("a")).toBe(false); // the working set is bounded to the view
+
+    cache.get("a");
+    await settle();
+    expect(loadBytes).toHaveBeenCalledTimes(2); // scrolling back re-fetches (daemon cache serves bytes)
+  });
+
+  it("keys observed across consecutive paints are fetched exactly once", async () => {
+    const loadBytes = vi.fn(async (refs: readonly string[]) =>
+      Object.fromEntries(refs.map(bytesFor)),
+    );
+    const onReady = vi.fn();
+    const cache = new ByteImageCache(loadBytes, okImage, onReady);
+    for (let frame = 0; frame < 4; frame += 1) {
+      await paintOnce(cache, () => cache.get("a")); // still-visible tile every paint
+    }
+    expect(loadBytes).toHaveBeenCalledTimes(1);
+    expect(onReady).toHaveBeenCalledTimes(1); // one settle notify, then quiet
+    expect(cache.has("a")).toBe(true);
+  });
+
+  it("a still-visible pending attempt survives its paint and settles", async () => {
+    const first = deferred<Record<string, FigmaBytes | null>>();
+    const loadBytes = vi.fn(() => first.promise);
+    const onReady = vi.fn();
+    const cache = new ByteImageCache(loadBytes, okImage, onReady);
+
+    await paintOnce(cache, () => cache.get("a")); // observed → survives this draw
+    await paintOnce(cache, () => cache.get("a")); // observed again → still singleflighted
+    expect(loadBytes).toHaveBeenCalledTimes(1);
+
+    first.resolve({ a: imageBytes() }); // the visible load completes
+    await settle();
+    expect(onReady).toHaveBeenCalled(); // it belongs to the live scope: repaint
+    expect(cache.has("a")).toBe(true);
+  });
+
+  it("an unobserved pending attempt cannot resurrect after its late settle", async () => {
+    const load = deferred<Record<string, FigmaBytes | null>>();
+    const loadBytes = vi.fn(() => load.promise);
+    const onReady = vi.fn();
+    const cache = new ByteImageCache(loadBytes, okImage, onReady);
+    await paintOnce(cache, () => cache.get("a")); // starts loading, observed once
+    await paintOnce(cache, () => undefined); // retired while still in flight
+    onReady.mockClear();
+
+    load.resolve({ a: imageBytes() }); // bytes land after the draw stopped caring
+    await settle();
+    expect(onReady).not.toHaveBeenCalled(); // dead attempt: no notify for the current draw
+    expect(cache.has("a")).toBe(false); // dead attempt: no repopulate
+
+    cache.get("a"); // a fresh ask on the live scope goes through a NEW record
+    await settle();
+    expect(loadBytes).toHaveBeenCalledTimes(2);
+  });
+
+  it("an old attempt's settle cannot clobber a recreated key", async () => {
+    const stale = deferred<Record<string, FigmaBytes | null>>();
+    const fresh = deferred<Record<string, FigmaBytes | null>>();
+    const loads = [stale, fresh];
+    let loadIndex = 0;
+    const loadBytes = vi.fn(() => loads[loadIndex++]!.promise);
+    const onReady = vi.fn();
+    const cache = new ByteImageCache(loadBytes, okImage, onReady);
+    await paintOnce(cache, () => cache.get("a")); // attempt A loading, observed
+    await paintOnce(cache, () => undefined); // A retired mid-flight
+
+    cache.get("a"); // attempt B (new record) on the current scope
+    await settle();
+    expect(loadBytes).toHaveBeenCalledTimes(2);
+
+    stale.resolve({ a: imageBytes() }); // A settles onto a map holding B
+    await settle();
+    expect(onReady).not.toHaveBeenCalled(); // A may not notify…
+    expect(cache.has("a")).toBe(false); // …and A's bytes may not pretend to be ready
+
+    fresh.resolve({ a: null }); // B settles failed
+    await settle();
+    expect(onReady).toHaveBeenCalledTimes(1); // only the live attempt notifies
+    expect(cache.has("a")).toBe(false);
+  });
+
+  it("an empty draw clears decoded, failed and pending alike", async () => {
+    const pending = deferred<Record<string, FigmaBytes | null>>();
+    const loadBytes = vi.fn(async (refs: readonly string[]) =>
+      refs.includes("p") ? pending.promise : Object.fromEntries(refs.map(deadOrBytes)),
+    );
+    const cache = new ByteImageCache(loadBytes, okImage);
+    await paintOnce(cache, () => cache.request("d", "f")); // one ready, one failed
+    await paintOnce(cache, () => cache.get("p")); // one still loading, observed
+
+    await paintOnce(cache, () => undefined); // empty paint: nothing survives
+
+    expect(cache.has("d")).toBe(false); // decoded
+    cache.get("f"); // failed and pending re-fetch: they were retired, not cached
+    await settle();
+    expect(loadBytes).toHaveBeenCalledTimes(3); // (d,f), (p), (f) — nothing from retirement is sticky
+    pending.resolve({ p: null });
+    await settle();
+  });
+
+  it("has() is a diagnostic and must not count as observing", async () => {
+    const loadBytes = vi.fn(async (refs: readonly string[]) =>
+      Object.fromEntries(refs.map(bytesFor)),
+    );
+    const cache = new ByteImageCache(loadBytes, okImage);
+    await paintOnce(cache, () => cache.get("a"));
+    expect(cache.has("a")).toBe(true);
+
+    await paintOnce(cache, () => expect(cache.has("a")).toBe(true)); // probe only
+    expect(cache.has("a")).toBe(false); // the probe did not keep it alive
+
+    cache.get("a");
+    await settle();
+    expect(loadBytes).toHaveBeenCalledTimes(2);
+  });
+
+  it("duplicate beginDraw keeps the open observation; endDraw without beginDraw is a no-op", async () => {
+    const loadBytes = vi.fn(async (refs: readonly string[]) =>
+      Object.fromEntries(refs.map(bytesFor)),
+    );
+    const cache = new ByteImageCache(loadBytes, okImage);
+    cache.beginDraw();
+    cache.get("a");
+    cache.beginDraw(); // React re-entry: must not reset the observed set
+    cache.endDraw();
+    await settle();
+    expect(cache.has("a")).toBe(true); // observation survived the duplicate begin
+
+    cache.endDraw(); // no open draw → reconcile is a no-op
+    expect(cache.has("a")).toBe(true);
+  });
+});
+
+describe("FontCache paint reconciliation (spec 32.5.1 bounded lifetime)", () => {
+  const bytes = imageBytes();
+
+  it("a font observed on consecutive paints is fetched and registered exactly once", async () => {
+    const loadFont = vi.fn(async () => bytes);
+    const register = vi.fn(async () => true);
+    const onReady = vi.fn();
+    const cache = new FontCache(loadFont, register, onReady);
+    expect(cache.fontAvailable("Inter", "Bold")).toBe(false); // first paint: not yet loaded
+    for (let frame = 0; frame < 4; frame += 1) {
+      await paintOnce(cache, () => cache.fontAvailable("Inter", "Bold"));
+    }
+    expect(cache.fontAvailable("Inter", "Bold")).toBe(true);
+    expect(loadFont).toHaveBeenCalledTimes(1);
+    expect(register).toHaveBeenCalledTimes(1);
+    expect(onReady).toHaveBeenCalledTimes(1); // one settle, no repaint feedback
+  });
+
+  it("an unobserved font attempt is retired; its late settle registers nothing and notifies nothing", async () => {
+    const load = deferred<FigmaBytes | null>();
+    const loadFont = vi.fn(() => load.promise);
+    const register = vi.fn(async () => true);
+    const onReady = vi.fn();
+    const cache = new FontCache(loadFont, register, onReady);
+    await paintOnce(cache, () => cache.fontAvailable("Inter", "Bold")); // observed once, fetching
+    await paintOnce(cache, () => undefined); // next paint has no text: retired in flight
+
+    load.resolve(bytes);
+    await settle();
+    expect(register).not.toHaveBeenCalled(); // a retired record never touches the DOM registrar
+    expect(onReady).not.toHaveBeenCalled(); // nor notifies the current draw
+    expect(cache.fontAvailable("Inter", "Bold")).toBe(false); // fresh ask: not cached → refetch
+    await settle();
+    expect(loadFont).toHaveBeenCalledTimes(2);
+  });
+
+  it("registrar isCurrent includes record liveness, not just the scope generation", async () => {
+    const load = deferred<FigmaBytes | null>();
+    const loadFont = vi.fn(() => load.promise);
+    let capturedIsCurrent!: () => boolean;
+    const reg = deferred<boolean>();
+    const register = vi.fn(async (_f: string, _s: string, _d: string, isCurrent: () => boolean) => {
+      capturedIsCurrent = isCurrent;
+      return reg.promise;
+    });
+    const onReady = vi.fn();
+    const cache = new FontCache(loadFont, register, onReady);
+    await paintOnce(cache, () => cache.fontAvailable("Inter", "Bold")); // observed → survives
+    load.resolve(bytes);
+    await settle(); // register now in flight
+    expect(capturedIsCurrent()).toBe(true); // the live record's predicate is true
+
+    await paintOnce(cache, () => undefined); // unobserved reconcile retires the record — no clear()
+    expect(capturedIsCurrent()).toBe(false); // the registrar sees the death through the record
+
+    reg.resolve(true); // the registrar commits as if still owned
+    await settle();
+    expect(onReady).not.toHaveBeenCalled(); // FontCache still drops the stale settle
+    expect(cache.fontAvailable("Inter", "Bold")).toBe(false); // and nothing was cached
   });
 });

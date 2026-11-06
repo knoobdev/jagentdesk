@@ -253,6 +253,140 @@ describe("useFigmaAssets owner dispose", () => {
     expect(fontsAdd).not.toHaveBeenCalledWith(expect.objectContaining({ seq: 0 }));
   });
 
+  it("an empty offscreen paint reconciles the image and font caches; the next paint refetches", async () => {
+    stubFontFaceApi(async () => ({}));
+    callFigmaMock.mockImplementation((_client, method) =>
+      method === "figma.fonts.get.request"
+        ? Promise.resolve({ font: imageBytes() })
+        : Promise.resolve({ images: { r1: imageBytes(), "1:1": imageBytes() } }),
+    );
+    const assets = mount({ serverId: "s1", fileKey: "file", version: null });
+    const onPaint = vi.fn();
+    assets.subscribe(onPaint);
+
+    // A visible tile: image fill, fallback raster and a text font, all observed by one draw.
+    await act(async () => {
+      assets.beginDraw();
+      assets.imageForRef("r1");
+      assets.requestThumbnail("1:1", 2);
+      assets.fontAvailable("Inter", "Bold");
+      assets.endDraw();
+      await settle();
+    });
+    expect(assets.imageForRef("r1")).not.toBeNull();
+    expect(assets.fontAvailable("Inter", "Bold")).toBe(true);
+    const fetchesAfterView = callFigmaMock.mock.calls.length;
+
+    // Panned offscreen: an empty paint reconciles EVERY cache (root correction: no exempt
+    // rules) — pending/failed/decoded keys the draw never touched are all retired.
+    await act(async () => {
+      assets.beginDraw();
+      assets.endDraw();
+      await settle();
+    });
+    expect(assets.imageForRef("r2")).toBeNull(); // unseen ref…
+    await act(async () => {
+      assets.beginDraw();
+      assets.endDraw();
+      await settle();
+    });
+    // Scrolling back re-asks: each cache refetches because the previous view's keys died.
+    await act(async () => {
+      assets.beginDraw();
+      assets.requestThumbnail("2:2", 2);
+      assets.fontAvailable("Roboto", "Regular");
+      assets.endDraw();
+      await settle();
+    });
+    const names = callFigmaMock.mock.calls.map((call) => call[1]);
+    expect(names.filter((n) => n === "figma.fonts.get.request")).toHaveLength(2); // retired + refetched
+    expect(
+      callFigmaMock.mock.calls.filter((c) => c[1] === "figma.file.render.request").length,
+    ).toBe(2);
+    void fetchesAfterView;
+  });
+
+  it("an unused FontFace is removed from document.fonts when its key reconciles away", async () => {
+    stubFontFaceApi(async () => ({}));
+    callFigmaMock.mockImplementation((_client, method) =>
+      method === "figma.fonts.get.request"
+        ? Promise.resolve({ font: imageBytes() })
+        : Promise.resolve({ images: {} }),
+    );
+    const assets = mount({ serverId: "s1", fileKey: "file", version: null });
+    await act(async () => {
+      assets.beginDraw();
+      assets.onMissing({
+        fallbackNodeIds: [],
+        imageRefs: [],
+        fonts: [{ family: "Inter", style: "Bold" }],
+      });
+      assets.endDraw();
+      await settle();
+    });
+    expect(fontsAdd).toHaveBeenCalledTimes(1);
+    expect(assets.fontAvailable("Inter", "Bold")).toBe(true);
+
+    // A paint without that text retires the face — real document.fonts cleanup, per W7 design.
+    await act(async () => {
+      assets.beginDraw();
+      assets.endDraw();
+      await settle();
+    });
+    expect(fontsDelete).toHaveBeenCalledWith(expect.objectContaining({ seq: 0 }));
+    // And scrolling back to text loads a fresh face rather than trusting the stale state.
+    await act(async () => {
+      assets.beginDraw();
+      expect(assets.fontAvailable("Inter", "Bold")).toBe(false);
+      assets.endDraw();
+      await settle();
+    });
+    const fontFetches = callFigmaMock.mock.calls.filter(
+      (c) => c[1] === "figma.fonts.get.request",
+    ).length;
+    expect(fontFetches).toBe(2);
+    expect(fontsAdd).toHaveBeenCalledTimes(2);
+  });
+
+  it("a per-scale cache created mid-draw joins the open observation and is retired when unused", async () => {
+    callFigmaMock.mockImplementation((_client, method) =>
+      method === "figma.fonts.get.request"
+        ? Promise.resolve({ font: null })
+        : Promise.resolve({ images: { "1:1": imageBytes() } }),
+    );
+    const assets = mount({ serverId: "s1", fileKey: "file", version: null });
+    const onPaint = vi.fn();
+    assets.subscribe(onPaint);
+
+    // scale 4 does not exist yet when the draw opens; get() creates it mid-draw.
+    await act(async () => {
+      assets.beginDraw();
+      assets.requestThumbnail("1:1", 4);
+      assets.endDraw();
+      await settle();
+    });
+    expect(assets.requestThumbnail("1:1", 4)).not.toBeNull(); // survived the draw that used it
+    expect(onPaint).toHaveBeenCalled(); // live attempt settles into the current generation
+    onPaint.mockClear();
+
+    // Unused next paint: the mid-draw cache reconciles like every other cache — all clears.
+    await act(async () => {
+      assets.beginDraw();
+      assets.endDraw();
+      await settle();
+    });
+    expect(assets.requestThumbnail("1:1", 4)).toBeNull(); // retired, must refetch
+    await act(async () => {
+      assets.beginDraw();
+      assets.requestThumbnail("1:1", 4);
+      assets.endDraw();
+      await settle();
+    });
+    expect(
+      callFigmaMock.mock.calls.filter((c) => c[1] === "figma.file.render.request").length,
+    ).toBe(2);
+  });
+
   it("a scope change clears the previous file's caches — no stale repopulate or notify", async () => {
     const images = deferred<{ images: Record<string, FigmaBytes | null> }>();
     callFigmaMock.mockReturnValue(images.promise);
