@@ -10,6 +10,8 @@ import type { FigmaContext } from "./context.js";
 import { FigmaServiceError } from "./context.js";
 import type { FigmaService } from "./service.js";
 import { addPendingOps, loadPendingOps } from "./pending.js";
+import { executeRemoteWrite, readRemoteMetadata } from "./handlers/remote.js";
+import { FIGMA_REMOTE_MAX_CODE_BYTES } from "./remote/connector.js";
 
 type FigmaColor = z.infer<typeof FigmaColorSchema>;
 
@@ -22,7 +24,9 @@ export const FIGMA_TOOL_RESULT_MAX_CHARS = 24_000;
 export const FIGMA_TOOL_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
 
 export const FIGMA_SAFE_WORKFLOW =
-  "Follow the Forge safe workflow: design_preflight, get_build_checkpoint, then edit in small batches, audit_design, get_screenshot, commit_build_checkpoint.";
+  "Follow the Forge safe workflow: design_preflight, get_build_checkpoint, then edit in small batches, audit_design, get_screenshot, commit_build_checkpoint. " +
+  'For edits without the Figma Link plugin, prefer the official remote editor: when figma_remote_status reports connected, use figma_remote_execute (load fonts before editing text, return the created/edited node IDs); when auth is missing, tell the user to tap "Connect editing". ' +
+  "A remote timeout or connection loss is never auto-retried (the side effect may have happened), and re-read the affected IDs/props with figma_remote_read before claiming the task is done.";
 
 export interface FigmaToolPermissionRequest {
   name: string;
@@ -1328,8 +1332,92 @@ function queueAndCommentTools(deps: FigmaAgentToolDependencies): FigmaAgentTool[
   ];
 }
 
+// ── remote write tools (spec 32.7 / ADR-0040) ─────────────────────────────────
+// Provider-independent writes through the official Figma MCP server on the Codex
+// app-server transport: no chat provider/model switch, no Desktop, no plugin.
+// Status and read are neutral; every execute raises the JAD permission card first.
+
+function remoteTools(deps: FigmaAgentToolDependencies): FigmaAgentTool[] {
+  return [
+    define(deps, {
+      name: "figma_remote_status",
+      title: "Figma remote editing status",
+      description:
+        "State of the official Figma remote write connector: disconnected / connecting / needs_auth / connected / unavailable / error, with the account identity when readable. Neutral: never starts the helper, never opens OAuth.",
+      inputSchema: {},
+      async run(_input, ctx) {
+        if (!ctx.remote) throw new ToolFailure("This daemon has no Figma remote write connector.");
+        const status = await ctx.remote.getStatus();
+        const identity = status.identityText ? ` — ${status.identityText}` : "";
+        const message = status.message ? ` — ${status.message}` : "";
+        return `Figma remote editing: ${status.state}${message}${identity}`;
+      },
+    }),
+    define(deps, {
+      name: "figma_remote_read",
+      title: "Read Figma metadata (remote)",
+      description:
+        "Read file/frame/node metadata through the official Figma remote MCP server (get_metadata). Use after a remote write to verify the affected node IDs and properties before claiming the task done.",
+      inputSchema: {
+        fileKey: z.string().min(1),
+        nodeId: z.string().min(1).optional().describe("Optional node id to scope the read"),
+      },
+      async run(input, ctx) {
+        const result = await readRemoteMetadata(ctx, input.fileKey, input.nodeId);
+        return compact(result);
+      },
+    }),
+    define(deps, {
+      name: "figma_remote_execute",
+      title: "Edit Figma remotely (use_figma)",
+      description: `Apply Figma Plugin-API code through the official Figma remote MCP server (use_figma skill figma-use). Edits the original file from chat without Figma Desktop or the Link plugin, and never switches the chat provider or model. ${FIGMA_SAFE_WORKFLOW}`,
+      inputSchema: {
+        fileKey: z.string().min(1).describe("File key of a file added to JAgentDesk"),
+        code: z
+          .string()
+          .min(1)
+          .describe(`Plugin API code, at most ${FIGMA_REMOTE_MAX_CODE_BYTES} UTF-8 bytes`),
+        description: z
+          .string()
+          .min(1)
+          .max(1000)
+          .describe("Short human-readable summary of the edit (shown on the permission card)"),
+      },
+      precheck: (input) => {
+        const bytes = Buffer.byteLength(input.code, "utf8");
+        if (bytes > FIGMA_REMOTE_MAX_CODE_BYTES)
+          throw new ToolFailure(
+            `use_figma code is ${bytes} UTF-8 bytes — the limit is ${FIGMA_REMOTE_MAX_CODE_BYTES}.`,
+          );
+      },
+      permission: (input: { fileKey: string; code: string; description: string }) => ({
+        title: `Edit ${input.fileKey} with Figma use_figma`,
+        description: `${input.description}\n\n${input.code.slice(0, 2000)}`,
+        input: { fileKey: input.fileKey, description: input.description, code: input.code },
+      }),
+      async run(input, ctx) {
+        const outcome = await executeRemoteWrite(ctx, {
+          fileKey: input.fileKey,
+          code: input.code,
+          description: input.description,
+        });
+        const reply = compact(outcome.result);
+        if (outcome.result.isError) return `${reply}\nThe remote tool reported an error.`;
+        return outcome.readbackAvailable
+          ? `${reply}\nMetadata readback verified. Re-read the affected node IDs/props with figma_remote_read before claiming the change is what the user asked for.`
+          : `${reply}\nTool replied but the metadata readback failed — outcome UNVERIFIED; do not claim success until verified by a read.`;
+      },
+    }),
+  ];
+}
+
 export function createFigmaAgentTools(deps: FigmaAgentToolDependencies): FigmaAgentTool[] {
-  return [...restReadTools(deps), ...linkTools(deps), ...queueAndCommentTools(deps)];
+  return [
+    ...restReadTools(deps),
+    ...linkTools(deps),
+    ...queueAndCommentTools(deps),
+    ...remoteTools(deps),
+  ];
 }
 
 /** Names that must run without a permission card (spec 32.7's auto-run groups). */
@@ -1341,4 +1429,6 @@ export const FIGMA_READ_TOOL_NAMES: readonly string[] = [
   }).map((t) => t.name),
   ...FIGMA_FORGE_TOOLS.filter((t) => !t.write).map((t) => `figma_link_${t.name}`),
   "figma_queue_list",
+  "figma_remote_status",
+  "figma_remote_read",
 ];

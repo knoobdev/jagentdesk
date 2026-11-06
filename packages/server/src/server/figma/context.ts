@@ -8,6 +8,8 @@ import type {
   FigmaLinkStatus,
   FigmaNode,
   FigmaPush,
+  FigmaRemoteCallResult,
+  FigmaRemoteStatus,
   FigmaTeam,
 } from "@jagentdesk/protocol/figma/rpc-schemas";
 import type { SecretStore } from "../database/secret-store.js";
@@ -123,6 +125,38 @@ export interface FigmaLinkBridge {
   close(): Promise<void>;
 }
 
+// ── remote write connector (spec 32.7 / ADR-0040) ──────────────────────────────
+// Provider-independent Figma writes driven through the Codex app-server's native
+// MCP transport. State is observed from actual native events only; the connector
+// never opens OAuth on its own and never retries a write automatically. The wire
+// DTOs (status, call results) are the protocol's — the daemon owns no shadow types.
+
+export interface FigmaRemoteExecuteInput {
+  fileKey: string;
+  code: string;
+  description: string;
+}
+
+export interface FigmaRemoteExecuteOutcome {
+  result: FigmaRemoteCallResult;
+  /** Metadata readback after a successful write; absent when the readback itself failed. */
+  readback?: FigmaRemoteCallResult;
+  /** True only when the post-write metadata readback succeeded — never claim Saved on false. */
+  readbackAvailable: boolean;
+}
+
+export interface FigmaRemoteGateway {
+  /** Snapshot of observed state. Never starts the process, never opens OAuth. */
+  getStatus(): Promise<FigmaRemoteStatus>;
+  /** Explicit enable + native OAuth start; returns the validated Figma HTTPS URL when present. */
+  authBegin(): Promise<{ status: FigmaRemoteStatus; authorizationUrl?: string }>;
+  /** Disable + dispose the owned process/pending OAuth only (no native logout). */
+  disconnect(): Promise<void>;
+  readMetadata(fileKey: string, nodeId?: string): Promise<FigmaRemoteCallResult>;
+  execute(input: FigmaRemoteExecuteInput): Promise<FigmaRemoteExecuteOutcome>;
+  dispose(): Promise<void>;
+}
+
 export interface FigmaContext {
   jagentdeskHome: string;
   logger: pino.Logger;
@@ -132,6 +166,8 @@ export interface FigmaContext {
   rest: FigmaRestClient;
   cache: FigmaCache;
   link: FigmaLinkBridge;
+  /** Lazy remote write connector (ADR-0040); owned by FigmaService, absent when not wired. */
+  remote?: FigmaRemoteGateway;
   /** Broadcast a push to every session that subscribed (watches) or to all (link/pending). */
   push(event: FigmaPush): void;
   now(): number;

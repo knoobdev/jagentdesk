@@ -225,6 +225,11 @@ class FileVersionCache {
     this.entries.set(fileKey, { version, at_ms: ctx.now() });
   }
 
+  /** Drop a pinned version so the next read re-resolves (remote write, ADR-0040). */
+  invalidate(fileKey: string): void {
+    this.entries.delete(fileKey);
+  }
+
   /** The live version of the file, so every cache key below is (fileKey, version) exact. */
   async current(ctx: FigmaContext, file: FigmaFile): Promise<string> {
     const hit = this.entries.get(file.fileKey);
@@ -947,6 +952,22 @@ export class FigmaFileWatches {
     this.pollers.delete(fileKey);
   }
 
+  /**
+   * Remote-write seam (ADR-0040): after a `use_figma` reply the version pin must not stay
+   * stale. Drops the memo, re-pins with the readback-confirmed version when there is one,
+   * and notifies watchers so the viewer re-reads. Versioned snapshot caches survive; a
+   * failed readback pushes an empty version so the next read resolves fresh.
+   */
+  remoteWriteApplied(ctx: FigmaContext, fileKey: string, version: string | null): void {
+    this.versions.invalidate(fileKey);
+    if (version) {
+      this.versions.prime(ctx, fileKey, version);
+      const poller = this.pollers.get(fileKey);
+      if (poller) poller.baseline = version;
+    }
+    this.pushChanged(ctx, fileKey, version ?? "", "rest");
+  }
+
   private async poll(fileKey: string): Promise<void> {
     const ctx = this.ctx;
     const poller = this.pollers.get(fileKey);
@@ -1570,4 +1591,7 @@ export class FigmaContent {
   }
 }
 
-export const contentHandlers: FigmaHandlerMap<ContentRequestType> = new FigmaContent().handlers();
+// The daemon-wide content instance, exported for the remote-write seam (ADR-0040): the
+// connector's version memo lives here, so `handlers/remote.ts` pushes through this singleton.
+export const figmaContent = new FigmaContent();
+export const contentHandlers: FigmaHandlerMap<ContentRequestType> = figmaContent.handlers();
