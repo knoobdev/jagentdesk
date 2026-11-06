@@ -25,7 +25,6 @@ const SPEC_32_2_SCOPES = [
   "file_comments:write",
   "library_content:read",
   "file_dev_resources:read",
-  "projects:read",
 ];
 
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));

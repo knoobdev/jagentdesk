@@ -1,6 +1,7 @@
 import { getIsElectron } from "@/constants/platform";
 import { invokeDesktopCommand } from "@/desktop/electron/invoke";
 import { parseFigmaCallbackUrl } from "@/figma/url-parse";
+import { finishFigmaBrowserSignIn, type FigmaBrowserWait } from "./browser-sign-in";
 
 // Desktop runs the browser step itself: the daemon composes the authorize URL, Electron serves
 // the loopback callback on 127.0.0.1 and opens the system browser (spec 32.2). Everywhere else
@@ -18,7 +19,6 @@ export const FIGMA_OAUTH_SCOPES = [
   "file_comments:write",
   "library_content:read",
   "file_dev_resources:read",
-  "projects:read",
 ];
 
 export function canUseLoopback(): boolean {
@@ -57,14 +57,16 @@ function fromComplete(response: { connection: unknown | null }): FigmaOAuthOutco
 export async function finishWithLoopback(
   complete: FigmaCompleteCall,
   begin: { attemptId: string; authorizeUrl: string; redirectUri: string },
+  wait?: FigmaBrowserWait,
 ): Promise<FigmaOAuthOutcome> {
-  const loopback = await beginFigmaOAuthLoopback({
-    authorizeUrl: begin.authorizeUrl,
-    redirectUri: begin.redirectUri,
-  });
-  if (loopback.kind === "error") return { kind: "error", message: loopback.message };
-  return fromComplete(
-    await complete({ attemptId: begin.attemptId, code: loopback.code, state: loopback.state }),
+  return finishFigmaBrowserSignIn(
+    {
+      open: beginFigmaOAuthLoopback,
+      cancel: (state) => invokeDesktopCommand("figma_oauth_cancel", { state }),
+      complete,
+    },
+    begin,
+    wait,
   );
 }
 

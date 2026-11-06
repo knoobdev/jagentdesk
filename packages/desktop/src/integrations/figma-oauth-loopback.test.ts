@@ -116,7 +116,11 @@ describe("runFigmaOAuthLoopback", () => {
       openExternal: async () => {},
     });
 
-    expect(result).toEqual({ kind: "error", message: "Timed out waiting for the browser." });
+    expect(result).toEqual({
+      kind: "error",
+      message:
+        "Figma did not return to JAgentDesk. If the browser shows 'Invalid scopes for app', check that every scope listed in Connect Figma is enabled in your Figma OAuth app, then try again.",
+    });
   });
 
   it("fails when the callback URL is not a local address", async () => {
@@ -171,9 +175,56 @@ describe("runFigmaOAuthLoopback", () => {
 });
 
 describe("createFigmaCommandHandlers", () => {
+  it("cancels only the matching state, releases the port, and accepts a fresh sign-in", async () => {
+    const port = await freePort();
+    let opened!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      opened = resolve;
+    });
+    let openCount = 0;
+    const handlers = createFigmaCommandHandlers({
+      openExternal: async () => {
+        openCount++;
+        if (openCount === 1) opened();
+        else await fetch(`${redirectUri(port)}?code=c_new&state=st_new`);
+      },
+    });
+    const first = handlers.figma_oauth_loopback!({
+      authorizeUrl: AUTH_URL,
+      redirectUri: redirectUri(port),
+      timeoutMs: 5000,
+    });
+    await ready;
+    await expect(handlers.figma_oauth_cancel!({ state: "st_other" })).resolves.toEqual({
+      cancelled: false,
+    });
+    await expect(
+      handlers.figma_oauth_loopback!({
+        authorizeUrl: AUTH_URL,
+        redirectUri: redirectUri(port),
+        timeoutMs: 5000,
+      }),
+    ).resolves.toEqual({ kind: "error", message: "This sign-in is already open." });
+    await expect(handlers.figma_oauth_cancel!({ state: "st_1" })).resolves.toEqual({
+      cancelled: true,
+    });
+    await expect(first).resolves.toEqual({ kind: "error", message: "Sign-in cancelled." });
+    await expect(handlers.figma_oauth_cancel!({ state: "st_1" })).resolves.toEqual({
+      cancelled: false,
+    });
+    await expect(
+      handlers.figma_oauth_loopback!({
+        authorizeUrl: "https://www.figma.com/oauth?state=st_new",
+        redirectUri: redirectUri(port),
+        timeoutMs: 5000,
+      }),
+    ).resolves.toEqual({ kind: "code", code: "c_new", state: "st_new" });
+    expect(openCount).toBe(2);
+  });
+
   it("registers the figma_oauth_loopback command the preload invokes", async () => {
     const handlers = createFigmaCommandHandlers({ openExternal: async () => {} });
-    expect(Object.keys(handlers)).toEqual(["figma_oauth_loopback"]);
+    expect(Object.keys(handlers)).toEqual(["figma_oauth_loopback", "figma_oauth_cancel"]);
     const port = await freePort();
     const result = await handlers.figma_oauth_loopback!({
       authorizeUrl: AUTH_URL,
@@ -182,6 +233,10 @@ describe("createFigmaCommandHandlers", () => {
     });
     // The command carries no injectable browser, so with nothing hitting the listener the
     // run ends by timeout.
-    expect(result).toEqual({ kind: "error", message: "Timed out waiting for the browser." });
+    expect(result).toEqual({
+      kind: "error",
+      message:
+        "Figma did not return to JAgentDesk. If the browser shows 'Invalid scopes for app', check that every scope listed in Connect Figma is enabled in your Figma OAuth app, then try again.",
+    });
   });
 });

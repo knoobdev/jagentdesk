@@ -34,6 +34,7 @@ import {
 } from "./oauth-flow";
 import {
   configureFigmaConnect,
+  cancelFigmaBrowserSignIn,
   getFigmaConnectState,
   requestFigmaDelegatedSignIn,
   resetFigmaConnect,
@@ -178,7 +179,7 @@ export function FigmaConnectScreen({
         const response = await complete(input);
         return { connected: response.connection !== null };
       },
-      runLoopback: (begin) => finishWithLoopback(complete, begin),
+      runLoopback: (begin, wait) => finishWithLoopback(complete, begin, wait),
       delegate: (input) => callFigma(client, "figma.oauth.delegate.request", input),
     });
     return () => configureFigmaConnect(null);
@@ -194,7 +195,10 @@ export function FigmaConnectScreen({
     }
   }, [serverId, state.signedInLabel, onConnected]);
 
-  const busy = state.phase.kind === "starting" || state.phase.kind === "finishing";
+  const busy =
+    state.phase.kind === "starting" ||
+    state.phase.kind === "waiting-browser" ||
+    state.phase.kind === "finishing";
   const errorMessageText = state.phase.kind === "error" ? state.phase.message : null;
   const scopesText = useMemo(() => FIGMA_OAUTH_SCOPES.join(", "), []);
 
@@ -213,6 +217,7 @@ export function FigmaConnectScreen({
     [serverId],
   );
   const dismiss = useCallback(() => resetFigmaConnect(serverId), [serverId]);
+  const cancelSignIn = useCallback(() => cancelFigmaBrowserSignIn(serverId), [serverId]);
   const signInWithBrowser = useCallback(() => {
     void startFigmaBrowserSignIn(serverId);
   }, [serverId]);
@@ -358,6 +363,11 @@ export function FigmaConnectScreen({
                 </Button>
               ) : null}
             </View>
+            {state.phase.kind === "waiting-browser" ? (
+              <Button variant="ghost" onPress={cancelSignIn} testID="figma-signin-cancel">
+                Cancel sign-in
+              </Button>
+            ) : null}
             {note ? <Text style={figmaStyles.rowSubtle}>{note}</Text> : null}
 
             {state.phase.kind === "browser-opened" ? (

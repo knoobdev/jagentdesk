@@ -19,6 +19,7 @@ interface LoopbackArgs {
   authorizeUrl: string;
   redirectUri: string;
   timeoutMs?: number;
+  signal?: AbortSignal;
   /** Injectable for tests; defaults to the system browser (WebView is forbidden by Figma). */
   openExternal?: (url: string) => Promise<void>;
 }
@@ -34,6 +35,8 @@ const PAGE = (title: string) =>
   `<!doctype html><meta charset="utf-8"><title>JAgentDesk</title><body style="font-family:system-ui;padding:32px"><h3>${title}</h3><p>You can close this window and return to JAgentDesk.</p></body>`;
 
 export function runFigmaOAuthLoopback(input: LoopbackArgs): Promise<FigmaLoopbackResult> {
+  const cancelled: FigmaLoopbackResult = { kind: "error", message: "Sign-in cancelled." };
+  if (input.signal?.aborted) return Promise.resolve(cancelled);
   const openExternal = input.openExternal ?? ((url: string) => shell.openExternal(url));
   let redirect: URL;
   let authorize: URL;
@@ -76,14 +79,22 @@ export function runFigmaOAuthLoopback(input: LoopbackArgs): Promise<FigmaLoopbac
       finish({ kind: "code", code, state });
     });
     const timer = setTimeout(
-      () => finish({ kind: "error", message: "Timed out waiting for the browser." }),
+      () =>
+        finish({
+          kind: "error",
+          message:
+            "Figma did not return to JAgentDesk. If the browser shows 'Invalid scopes for app', check that every scope listed in Connect Figma is enabled in your Figma OAuth app, then try again.",
+        }),
       input.timeoutMs ?? FIGMA_LOOPBACK_TIMEOUT_MS,
     );
+    const cancel = () => finish(cancelled);
+    input.signal?.addEventListener("abort", cancel, { once: true });
     function finish(result: FigmaLoopbackResult): void {
       const deliver = pending;
       if (!deliver) return;
       pending = null;
       clearTimeout(timer);
+      input.signal?.removeEventListener("abort", cancel);
       server.close();
       server.closeAllConnections();
       deliver(result);
@@ -96,6 +107,7 @@ export function runFigmaOAuthLoopback(input: LoopbackArgs): Promise<FigmaLoopbac
       finish({ kind: "error", message });
     });
     server.listen(Number(redirect.port || FIGMA_LOOPBACK_PORT), redirect.hostname, () => {
+      if (!pending) return;
       void openExternal(authorize.toString()).catch((error: unknown) => {
         finish({ kind: "error", message: `Could not open the browser: ${String(error)}` });
       });
@@ -107,8 +119,35 @@ export function createFigmaCommandHandlers(options?: {
   /** Injectable for tests; IPC never sends functions. */
   openExternal?: (url: string) => Promise<void>;
 }): Record<string, (args?: Record<string, unknown>) => Promise<unknown>> {
+  const pending = new Map<string, AbortController>();
   return {
-    figma_oauth_loopback: (args) =>
-      runFigmaOAuthLoopback({ ...parseArgs(args), openExternal: options?.openExternal }),
+    figma_oauth_loopback: async (args) => {
+      const input = parseArgs(args);
+      let state: string | null;
+      try {
+        state = new URL(input.authorizeUrl).searchParams.get("state");
+      } catch {
+        state = null;
+      }
+      if (!state) return { kind: "error", message: "Missing sign-in state." };
+      if (pending.has(state)) return { kind: "error", message: "This sign-in is already open." };
+      const controller = new AbortController();
+      pending.set(state, controller);
+      try {
+        return await runFigmaOAuthLoopback({
+          ...input,
+          signal: controller.signal,
+          openExternal: options?.openExternal,
+        });
+      } finally {
+        pending.delete(state);
+      }
+    },
+    figma_oauth_cancel: async (args) => {
+      const state = typeof args?.state === "string" ? args.state : "";
+      const controller = pending.get(state);
+      controller?.abort();
+      return { cancelled: controller !== undefined };
+    },
   };
 }
