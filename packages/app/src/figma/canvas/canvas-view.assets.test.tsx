@@ -232,7 +232,7 @@ function routeFigma(handlers: FigmaHandlers, deferred?: Deferred[]): void {
       });
     });
   };
-  callFigmaMock.mockImplementation(((client, type, params) => {
+  callFigmaMock.mockImplementation(((client, type, params: unknown) => {
     if (!client) throw new Error("test client missing");
     if (type === "figma.file.imageFills.request") {
       const p = params as unknown as ImageFillsParams;
