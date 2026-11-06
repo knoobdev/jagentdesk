@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import {
   Component as ComponentIcon,
@@ -16,6 +16,8 @@ import type { FigmaNode, FigmaPage } from "@jagentdesk/protocol/figma/rpc-schema
 import { Button } from "@/components/ui/button";
 import { jiraStyles } from "@/jira/ui/styles";
 import type { ApplyFigmaEdits, FigmaSelection } from "../contracts";
+import { errorMessage } from "./api";
+import { EditFailureBanner } from "./edit-state-view";
 import {
   createComponentOp,
   createInstanceOp,
@@ -32,6 +34,9 @@ import { type Camera, visibleRect } from "./viewport";
 // Edit toolbar (spec 32.6): the one-click side of editing. Everything here builds FigmaEditOps
 // and hands them to applyEdits — Figma Link when the file is open there, the pending queue
 // otherwise (32.6.1). The queue controls live here because the screen owns the edit flow.
+// Missing Link never blocks these buttons: queued edits stay marked pending and are never
+// presented as saved to the original file in Figma. A failed edit stays visible until retried
+// or dismissed (docs/testing.md: fallible user actions).
 
 export interface EditToolbarProps {
   page: FigmaPage | null;
@@ -42,15 +47,22 @@ export interface EditToolbarProps {
   applyEdits: ApplyFigmaEdits;
   linked: boolean;
   pendingCount: number;
-  onApplyPending: () => void;
-  onDiscardPending: () => void;
+  // Both may reject (the queue RPC is async); the toolbar routes them through the same
+  // failure surface as edits. file-screen currently wraps them in `void`, so today's
+  // wiring resolves immediately — returning the promise there surfaces real failures.
+  onApplyPending: () => void | Promise<unknown>;
+  onDiscardPending: () => void | Promise<unknown>;
   disabled?: boolean;
 }
 
 const styles = StyleSheet.create({
   bar: { paddingHorizontal: 8, paddingVertical: 6 },
   pendingCount: { color: "inherit" },
+  statusRow: { paddingHorizontal: 8, paddingBottom: 6 },
 });
+
+type EditStatus = { kind: "idle" } | { kind: "busy" } | { kind: "failed"; message: string };
+const EDIT_IDLE: EditStatus = { kind: "idle" };
 
 let tempCounter = 0;
 function nextTempId(): string {
@@ -255,11 +267,59 @@ export function EditToolbar({
   onDiscardPending,
   disabled,
 }: EditToolbarProps) {
+  const [status, setStatus] = useState<EditStatus>(EDIT_IDLE);
+  const busy = status.kind === "busy";
+  const controlsDisabled = Boolean(disabled) || busy;
+
+  // One flight at a time (synchronous guard), completions keyed by sequence so a late
+  // response can never clobber a newer one, and by inspect identity so an edit that fails
+  // after the user moved to another layer doesn't strand its banner. The failed status
+  // itself persists until retried or dismissed (docs/testing.md: fallible user actions).
+  const submittingRef = useRef(false);
+  const mountedRef = useRef(true);
+  const seqRef = useRef(0);
+  const parentForCreate = selection?.pageId ?? page?.id ?? "";
+  const identity = `${parentForCreate}|${node?.id ?? ""}`;
+  const identityRef = useRef(identity);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    identityRef.current = identity;
+    setStatus((current) => (current.kind === "failed" ? EDIT_IDLE : current));
+  }, [identity]);
+
+  const submit = useCallback((run: () => unknown) => {
+    if (submittingRef.current) return;
+    const seq = (seqRef.current += 1);
+    const identityAtSubmit = identityRef.current;
+    submittingRef.current = true;
+    setStatus({ kind: "busy" });
+    const settle = (next: EditStatus) => {
+      if (!mountedRef.current || seq !== seqRef.current) return;
+      submittingRef.current = false;
+      setStatus(identityAtSubmit === identityRef.current ? next : EDIT_IDLE);
+    };
+    void Promise.resolve()
+      .then(run)
+      .then(
+        () => settle(EDIT_IDLE),
+        (cause: unknown) => settle({ kind: "failed", message: errorMessage(cause) }),
+      );
+  }, []);
+
   const apply = useCallback(
-    (ops: Parameters<ApplyFigmaEdits>[0]) => {
-      void applyEdits(ops).catch(() => undefined);
-    },
-    [applyEdits],
+    (ops: Parameters<ApplyFigmaEdits>[0]) => submit(() => applyEdits(ops)),
+    [applyEdits, submit],
+  );
+  const dismissFailure = useCallback(() => setStatus(EDIT_IDLE), []);
+  const applyPending = useCallback(() => submit(() => onApplyPending()), [submit, onApplyPending]);
+  const discardPending = useCallback(
+    () => submit(() => onDiscardPending()),
+    [submit, onDiscardPending],
   );
 
   const place = useCallback(
@@ -267,7 +327,6 @@ export function EditToolbar({
       placementForCreate(visibleRect(camera, size.width, size.height), { width, height }),
     [camera, size],
   );
-  const parentForCreate = selection?.pageId ?? page?.id ?? "";
 
   const create = useCallback(
     (kind: "FRAME" | "TEXT" | "RECTANGLE") => {
@@ -316,56 +375,92 @@ export function EditToolbar({
   const frames = useMemo(() => page?.frames ?? [], [page]);
 
   return (
-    <View style={[jiraStyles.row, styles.bar]} testID="figma-edit-toolbar">
-      {node ? (
-        <SelectionActions
-          node={node}
-          frames={frames}
-          parentForCreate={parentForCreate}
-          disabled={disabled}
-          apply={apply}
-          place={place}
-        />
-      ) : null}
-
-      <View style={jiraStyles.spacer} />
-
-      <Button size="sm" variant="ghost" leftIcon={Frame} onPress={createFrame} disabled={disabled}>
-        Frame
-      </Button>
-      <Button size="sm" variant="ghost" leftIcon={Type} onPress={createText} disabled={disabled}>
-        Text
-      </Button>
-      <Button size="sm" variant="ghost" leftIcon={Square} onPress={createRect} disabled={disabled}>
-        Rect
-      </Button>
-      <Button
-        size="sm"
-        variant="ghost"
-        leftIcon={Shapes}
-        onPress={createGroup}
-        disabled={disabled || !node}
-      >
-        Group
-      </Button>
-
-      <View style={jiraStyles.row}>
-        {pendingCount > 0 ? (
-          <Text style={[jiraStyles.textSmall, styles.pendingCount]} testID="figma-pending-count">
-            {`${pendingCount} pending`}
-          </Text>
+    <View testID="figma-edit-toolbar-root">
+      <View style={[jiraStyles.row, styles.bar]} testID="figma-edit-toolbar">
+        {node ? (
+          <SelectionActions
+            node={node}
+            frames={frames}
+            parentForCreate={parentForCreate}
+            disabled={controlsDisabled}
+            apply={apply}
+            place={place}
+          />
         ) : null}
-        {pendingCount > 0 && linked ? (
-          <Button size="sm" variant="outline" leftIcon={PenTool} onPress={onApplyPending}>
-            Apply
-          </Button>
-        ) : null}
-        {pendingCount > 0 ? (
-          <Button size="sm" variant="ghost" onPress={onDiscardPending}>
-            Discard
-          </Button>
-        ) : null}
+
+        <View style={jiraStyles.spacer} />
+
+        <Button
+          size="sm"
+          variant="ghost"
+          leftIcon={Frame}
+          onPress={createFrame}
+          disabled={controlsDisabled}
+        >
+          Frame
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          leftIcon={Type}
+          onPress={createText}
+          disabled={controlsDisabled}
+        >
+          Text
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          leftIcon={Square}
+          onPress={createRect}
+          disabled={controlsDisabled}
+        >
+          Rect
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          leftIcon={Shapes}
+          onPress={createGroup}
+          disabled={controlsDisabled || !node}
+        >
+          Group
+        </Button>
+
+        <View style={jiraStyles.row}>
+          {busy ? (
+            <Text style={jiraStyles.textSmall} testID="figma-edit-busy">
+              Submitting…
+            </Text>
+          ) : null}
+          {pendingCount > 0 ? (
+            <Text style={[jiraStyles.textSmall, styles.pendingCount]} testID="figma-pending-count">
+              {`${pendingCount} pending`}
+            </Text>
+          ) : null}
+          {pendingCount > 0 && linked ? (
+            <Button
+              size="sm"
+              variant="outline"
+              leftIcon={PenTool}
+              onPress={applyPending}
+              disabled={controlsDisabled}
+            >
+              Apply
+            </Button>
+          ) : null}
+          {pendingCount > 0 ? (
+            <Button size="sm" variant="ghost" onPress={discardPending} disabled={controlsDisabled}>
+              Discard
+            </Button>
+          ) : null}
+        </View>
       </View>
+      {status.kind === "failed" ? (
+        <View style={styles.statusRow}>
+          <EditFailureBanner message={status.message} onDismiss={dismissFailure} />
+        </View>
+      ) : null}
     </View>
   );
 }

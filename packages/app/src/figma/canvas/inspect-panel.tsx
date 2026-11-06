@@ -19,13 +19,21 @@ import { generateNodeCss, gradientFills, colorToCss, type GradientFillInfo } fro
 import { baseTextStyle } from "../renderer/node-props";
 import { isWeb } from "@/constants/platform";
 import { PanelSection, PanelRow, MonoText } from "./panel-ui";
-import { fetchFigmaExport } from "./use-figma-file";
+import { errorMessage } from "./api";
+import { fetchFigmaExport, useFigmaPendingOps } from "./use-figma-file";
+import { nodeEditState, type PendingField } from "./edit-state";
+import { EditFailureBanner, PendingBadge, PendingNote } from "./edit-state-view";
 import { saveExportedBytes } from "./save-bytes";
 import * as Clipboard from "expo-clipboard";
 import { Copy, Download, Eye, EyeOff, Lock, Unlock } from "lucide-react-native";
 
 const EXPORT_FORMATS = ["png", "jpg", "svg", "pdf"] as const;
 const EXPORT_SCALES = [1, 2, 4] as const;
+
+interface ExportResult {
+  bytes: FigmaBytes;
+  fileName: string;
+}
 
 function dict(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -110,6 +118,7 @@ function NumberFieldRow({
   label,
   value,
   disabled,
+  pending,
   apply,
   patchKey,
   toPatchValue,
@@ -117,6 +126,7 @@ function NumberFieldRow({
   label: string;
   value: number | undefined;
   disabled?: boolean;
+  pending?: boolean;
   apply: (patch: InspectEditPatch) => void;
   patchKey: keyof InspectEditPatch;
   /** Converts the displayed (relative) number back to what the op carries (page-absolute). */
@@ -127,7 +137,15 @@ function NumberFieldRow({
       apply({ [patchKey]: toPatchValue ? toPatchValue(next) : next } as InspectEditPatch),
     [apply, patchKey, toPatchValue],
   );
-  return <NumField label={label} value={value} disabled={disabled} onCommit={onCommit} />;
+  return (
+    <NumField
+      label={label}
+      value={value}
+      disabled={disabled}
+      pending={pending}
+      onCommit={onCommit}
+    />
+  );
 }
 
 function TextFieldRow({
@@ -137,6 +155,7 @@ function TextFieldRow({
   multiline,
   placeholder,
   disabled,
+  pending,
 }: {
   value: string;
   patchKey: keyof InspectEditPatch;
@@ -144,6 +163,7 @@ function TextFieldRow({
   multiline?: boolean;
   placeholder?: string;
   disabled?: boolean;
+  pending?: boolean;
 }) {
   const onCommit = useCallback(
     (next: string) => apply({ [patchKey]: next } as InspectEditPatch),
@@ -156,6 +176,7 @@ function TextFieldRow({
       multiline={multiline}
       placeholder={placeholder}
       disabled={disabled}
+      pending={pending}
     />
   );
 }
@@ -166,11 +187,14 @@ function NumField({
   label,
   value,
   disabled,
+  pending,
   onCommit,
 }: {
   label: string;
   value: number | undefined;
   disabled?: boolean;
+  /** The displayed value comes from the local queue, not from Figma (32.6.1). */
+  pending?: boolean;
   onCommit: (value: number) => void;
 }) {
   const [text, setText] = useState(value === undefined ? "" : String(value));
@@ -189,7 +213,10 @@ function NumField({
   }, [commit]);
   return (
     <View style={styles.fieldWrap}>
-      <Text style={jiraStyles.formLabel}>{label}</Text>
+      <View style={jiraStyles.row}>
+        <Text style={jiraStyles.formLabel}>{label}</Text>
+        {pending ? <PendingBadge /> : null}
+      </View>
       <Input
         value={text}
         onChangeText={setText}
@@ -212,12 +239,14 @@ function CommitText({
   multiline,
   placeholder,
   disabled,
+  pending,
 }: {
   value: string;
   onCommit: (value: string) => void;
   multiline?: boolean;
   placeholder?: string;
   disabled?: boolean;
+  pending?: boolean;
 }) {
   const [text, setText] = useState(value);
   const [error, setError] = useState<string | null>(null);
@@ -236,6 +265,11 @@ function CommitText({
   }, [text, value, onCommit]);
   return (
     <View style={styles.textWrap}>
+      {pending ? (
+        <View style={jiraStyles.row}>
+          <PendingBadge />
+        </View>
+      ) : null}
       <Input
         value={text}
         onChangeText={setText}
@@ -255,10 +289,12 @@ function CommitText({
 function LayerSection({
   node,
   disabled,
+  pending,
   apply,
 }: {
   node: FigmaNode;
   disabled?: boolean;
+  pending: ReadonlySet<PendingField>;
   apply: (patch: InspectEditPatch) => void;
 }) {
   const hidden = node.visible === false;
@@ -276,6 +312,7 @@ function LayerSection({
         patchKey="name"
         apply={apply}
         disabled={disabled}
+        pending={pending.has("name")}
       />
       <View style={jiraStyles.row}>
         <Button
@@ -286,6 +323,7 @@ function LayerSection({
         >
           {hidden ? "Hidden" : "Visible"}
         </Button>
+        {pending.has("visible") ? <PendingBadge /> : null}
         <Button
           size="sm"
           variant={locked ? "outline" : "ghost"}
@@ -294,6 +332,7 @@ function LayerSection({
         >
           {locked ? "Locked" : "Unlocked"}
         </Button>
+        {pending.has("locked") ? <PendingBadge /> : null}
       </View>
     </PanelSection>
   );
@@ -302,11 +341,13 @@ function LayerSection({
 function GeometrySection({
   node,
   disabled,
+  pending,
   apply,
   parentOf,
 }: {
   node: FigmaNode;
   disabled?: boolean;
+  pending: ReadonlySet<PendingField>;
   apply: (patch: InspectEditPatch) => void;
   /** Parent within a loaded subtree: null = top-level frame, undefined = not loaded. */
   parentOf?: (nodeId: string) => FigmaNode | null | undefined;
@@ -331,6 +372,7 @@ function GeometrySection({
           label="W"
           value={num(bounds.width)}
           disabled={disabled}
+          pending={pending.has("width")}
           apply={apply}
           patchKey="width"
         />
@@ -338,6 +380,7 @@ function GeometrySection({
           label="H"
           value={num(bounds.height)}
           disabled={disabled}
+          pending={pending.has("height")}
           apply={apply}
           patchKey="height"
         />
@@ -347,6 +390,7 @@ function GeometrySection({
           label="X"
           value={absX === undefined ? undefined : absX - offsetX}
           disabled={disabled}
+          pending={pending.has("x")}
           apply={apply}
           patchKey="x"
           toPatchValue={toAbsoluteX}
@@ -355,6 +399,7 @@ function GeometrySection({
           label="Y"
           value={absY === undefined ? undefined : absY - offsetY}
           disabled={disabled}
+          pending={pending.has("y")}
           apply={apply}
           patchKey="y"
           toPatchValue={toAbsoluteY}
@@ -377,6 +422,7 @@ function PaddingField({
   value,
   node,
   disabled,
+  pending,
   apply,
 }: {
   side: keyof typeof PADDING_KEYS;
@@ -384,6 +430,7 @@ function PaddingField({
   value: number | undefined;
   node: FigmaNode;
   disabled?: boolean;
+  pending?: boolean;
   apply: (patch: InspectEditPatch) => void;
 }) {
   const onCommit = useCallback(
@@ -398,16 +445,26 @@ function PaddingField({
       }),
     [apply, side, node],
   );
-  return <NumField label={label} value={value} disabled={disabled} onCommit={onCommit} />;
+  return (
+    <NumField
+      label={label}
+      value={value}
+      disabled={disabled}
+      pending={pending}
+      onCommit={onCommit}
+    />
+  );
 }
 
 function AutoLayoutSection({
   node,
   disabled,
+  pending,
   apply,
 }: {
   node: FigmaNode;
   disabled?: boolean;
+  pending: ReadonlySet<PendingField>;
   apply: (patch: InspectEditPatch) => void;
 }) {
   const layoutMode = typeof node.layoutMode === "string" ? node.layoutMode : null;
@@ -443,6 +500,7 @@ function AutoLayoutSection({
         >
           None
         </Button>
+        {pending.has("layoutMode") ? <PendingBadge /> : null}
       </View>
       {showSpacing ? (
         <>
@@ -450,6 +508,7 @@ function AutoLayoutSection({
             label="Gap"
             value={num(node.itemSpacing)}
             disabled={disabled}
+            pending={pending.has("itemSpacing")}
             onCommit={onGap}
           />
           <Text style={jiraStyles.formLabel}>Padding</Text>
@@ -460,6 +519,7 @@ function AutoLayoutSection({
               node={node}
               value={num(node.paddingTop)}
               disabled={disabled}
+              pending={pending.has("padding")}
               apply={apply}
             />
             <PaddingField
@@ -468,6 +528,7 @@ function AutoLayoutSection({
               node={node}
               value={num(node.paddingRight)}
               disabled={disabled}
+              pending={pending.has("padding")}
               apply={apply}
             />
             <PaddingField
@@ -476,6 +537,7 @@ function AutoLayoutSection({
               node={node}
               value={num(node.paddingBottom)}
               disabled={disabled}
+              pending={pending.has("padding")}
               apply={apply}
             />
             <PaddingField
@@ -484,6 +546,7 @@ function AutoLayoutSection({
               node={node}
               value={num(node.paddingLeft)}
               disabled={disabled}
+              pending={pending.has("padding")}
               apply={apply}
             />
           </View>
@@ -532,10 +595,12 @@ function GradientFillRow({ fill }: { fill: GradientFillInfo }) {
 function FillSection({
   node,
   disabled,
+  pending,
   apply,
 }: {
   node: FigmaNode;
   disabled?: boolean;
+  pending: ReadonlySet<PendingField>;
   apply: (patch: InspectEditPatch) => void;
 }) {
   const solidFill = firstSolidColor(node);
@@ -553,6 +618,7 @@ function FillSection({
           onCommit={onCommit}
           placeholder="#RRGGBB"
           disabled={disabled}
+          pending={pending.has("fillColor")}
         />
       ) : null}
       <MonoText>{fills.length > 0 ? `${fills.length} paint(s)` : "No fills"}</MonoText>
@@ -586,10 +652,12 @@ function StrokeSection({ node }: { node: FigmaNode }) {
 function AppearanceSection({
   node,
   disabled,
+  pending,
   apply,
 }: {
   node: FigmaNode;
   disabled?: boolean;
+  pending: ReadonlySet<PendingField>;
   apply: (patch: InspectEditPatch) => void;
 }) {
   const effects = Array.isArray(node.effects) ? node.effects : [];
@@ -599,6 +667,7 @@ function AppearanceSection({
         label="Radius"
         value={num(node.cornerRadius)}
         disabled={disabled}
+        pending={pending.has("cornerRadius")}
         apply={apply}
         patchKey="cornerRadius"
       />
@@ -617,10 +686,12 @@ function AppearanceSection({
 function TextSection({
   node,
   disabled,
+  pending,
   apply,
 }: {
   node: FigmaNode;
   disabled?: boolean;
+  pending: ReadonlySet<PendingField>;
   apply: (patch: InspectEditPatch) => void;
 }) {
   const style = dict(node.style);
@@ -635,6 +706,7 @@ function TextSection({
         apply={apply}
         multiline
         disabled={disabled}
+        pending={pending.has("characters")}
       />
       <PanelRow label="Font">
         <MonoText>{`${textStyle.fontFamily ?? "—"} ${textStyle.fontStyle ?? ""}`}</MonoText>
@@ -665,17 +737,23 @@ function ComponentSection({
   const componentId = String(node.componentId ?? "");
   const meta = componentMeta?.(componentId);
   const name = meta?.name || componentId;
-  const main = meta?.remote === true ? "Team library" : "Local component";
   return (
     <PanelSection title="Component">
       <PanelRow label="Component">
         <MonoText>{name}</MonoText>
       </PanelRow>
       <PanelRow label="Main">
-        <MonoText>{main}</MonoText>
+        <MonoText>{componentOriginLabel(meta)}</MonoText>
       </PanelRow>
     </PanelSection>
   );
+}
+
+// The local-vs-team origin only exists once the components map has loaded; labelling an
+// unloaded component "Local" would be a guess, not a fact.
+function componentOriginLabel(meta: FigmaComponentMeta | undefined): string {
+  if (!meta) return "—";
+  return meta.remote === true ? "Team library" : "Local component";
 }
 
 function CssSection({ node }: { node: FigmaNode }) {
@@ -743,38 +821,42 @@ function ExportSection({
   serverId,
   fileKey,
   node,
-  linked,
 }: {
   serverId: string;
   fileKey: string;
   node: FigmaNode;
-  linked: boolean;
 }) {
   const [format, setFormat] = useState<(typeof EXPORT_FORMATS)[number]>("png");
   const [scale, setScale] = useState<(typeof EXPORT_SCALES)[number]>(2);
-  const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle");
-  const [result, setResult] = useState<{ bytes: FigmaBytes; fileName: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<ExportResult | null>(null);
 
   useEffect(() => {
-    setState("idle");
+    setBusy(false);
+    setError(null);
     setResult(null);
   }, [node.id]);
 
   const run = useCallback(async () => {
-    setState("busy");
+    setBusy(true);
+    setError(null);
     try {
       const data = await fetchFigmaExport(serverId, fileKey, node.id, format, scale);
       if (!data.file) {
-        setState("error");
+        setError("Export returned no file.");
         return;
       }
       setResult({
         bytes: data.file,
         fileName: data.fileName ?? `${String(node.name ?? "export")}.${format}`,
       });
-      setState("done");
-    } catch {
-      setState("error");
+    } catch (cause) {
+      // The daemon's own failure (rate limit, unsupported format, …) is the message the user
+      // needs — dropping it hid real export failures behind a generic banner.
+      setError(errorMessage(cause));
+    } finally {
+      setBusy(false);
     }
   }, [serverId, fileKey, node.id, node.name, format, scale]);
 
@@ -814,8 +896,8 @@ function ExportSection({
         ))}
       </View>
       <View style={jiraStyles.row}>
-        <Button size="sm" variant="secondary" onPress={startExport} disabled={state === "busy"}>
-          {state === "busy" ? "Exporting…" : "Export"}
+        <Button size="sm" variant="secondary" onPress={startExport} disabled={busy}>
+          {busy ? "Exporting…" : "Export"}
         </Button>
         {result ? (
           <Button size="sm" variant="default" leftIcon={Download} onPress={save}>
@@ -823,9 +905,7 @@ function ExportSection({
           </Button>
         ) : null}
       </View>
-      {state === "error" ? (
-        <ErrorBanner message={linked ? "Export failed." : "Export failed — check the queue."} />
-      ) : null}
+      {error ? <ErrorBanner message={error} /> : null}
     </PanelSection>
   );
 }
@@ -855,19 +935,34 @@ export function InspectPanel({
   serverId,
   fileKey,
   node,
-  linked,
   applyEdits,
   disabled,
   componentMeta,
   parentOf,
 }: InspectPanelProps) {
+  const pendingOps = useFigmaPendingOps(serverId, fileKey);
+  const [editError, setEditError] = useState<string | null>(null);
+  // Queued values preview in the fields and carry a Pending badge; the raw node stays for
+  // facts the queue cannot change (export runs against the file as Figma has it).
+  const editState = useMemo(
+    () => (node ? nodeEditState(node, pendingOps) : null),
+    [node, pendingOps],
+  );
+  useEffect(() => setEditError(null), [node?.id]);
+
   const apply = useCallback(
     (patch: InspectEditPatch) => {
       if (!node) return;
-      void applyEdits(buildEditOps(node.id, patch)).catch(() => undefined);
+      // buildEditOps throws synchronously on bad input (e.g. a malformed hex); CommitText
+      // catches that inline. Only the async RPC result becomes a banner.
+      void applyEdits(buildEditOps(node.id, patch)).then(
+        () => setEditError(null),
+        (cause: unknown) => setEditError(errorMessage(cause)),
+      );
     },
     [node, applyEdits],
   );
+  const dismissError = useCallback(() => setEditError(null), []);
   const renderEmpty = useCallback(
     () => (
       <View style={styles.emptyWrap}>
@@ -877,8 +972,10 @@ export function InspectPanel({
     [],
   );
 
-  if (!node) return renderEmpty();
+  if (!node || !editState) return renderEmpty();
 
+  const view = editState.node;
+  const pending = editState.pendingFields;
   const isText = node.type === "TEXT";
   const transitions = Array.isArray(node.transitions) ? node.transitions : [];
   const interaction = node as FigmaNode & {
@@ -894,20 +991,33 @@ export function InspectPanel({
     >
       <View style={styles.header}>
         <Text style={jiraStyles.textStrong} numberOfLines={1}>
-          {String(node.name ?? "Untitled")}
+          {String(view.name ?? "Untitled")}
         </Text>
         <Text style={jiraStyles.textSmall}>
           {String(node.type ?? "NODE")} · {node.id}
         </Text>
+        {editState.pendingCount > 0 ? <PendingNote count={editState.pendingCount} /> : null}
       </View>
 
-      <LayerSection node={node} disabled={disabled} apply={apply} />
-      <GeometrySection node={node} disabled={disabled} apply={apply} parentOf={parentOf} />
-      <AutoLayoutSection node={node} disabled={disabled} apply={apply} />
-      {!isText ? <FillSection node={node} disabled={disabled} apply={apply} /> : null}
+      {editError ? <EditFailureBanner message={editError} onDismiss={dismissError} /> : null}
+
+      <LayerSection node={view} disabled={disabled} pending={pending} apply={apply} />
+      <GeometrySection
+        node={view}
+        disabled={disabled}
+        pending={pending}
+        apply={apply}
+        parentOf={parentOf}
+      />
+      <AutoLayoutSection node={view} disabled={disabled} pending={pending} apply={apply} />
+      {!isText ? (
+        <FillSection node={view} disabled={disabled} pending={pending} apply={apply} />
+      ) : null}
       <StrokeSection node={node} />
-      <AppearanceSection node={node} disabled={disabled} apply={apply} />
-      {isText ? <TextSection node={node} disabled={disabled} apply={apply} /> : null}
+      <AppearanceSection node={view} disabled={disabled} pending={pending} apply={apply} />
+      {isText ? (
+        <TextSection node={view} disabled={disabled} pending={pending} apply={apply} />
+      ) : null}
       {node.componentId ? <ComponentSection node={node} componentMeta={componentMeta} /> : null}
 
       {transitions.length > 0 ? (
@@ -935,8 +1045,8 @@ export function InspectPanel({
         </PanelSection>
       ) : null}
 
-      <CssSection node={node} />
-      <ExportSection serverId={serverId} fileKey={fileKey} node={node} linked={linked} />
+      <CssSection node={view} />
+      <ExportSection serverId={serverId} fileKey={fileKey} node={node} />
     </ScrollView>
   );
 }

@@ -262,12 +262,9 @@ export function FigmaFileScreen({ serverId, fileKey, version }: FigmaFileRef) {
   const closeAssistant = useCallback(() => setAssistantOpen(false), []);
   const openPanel = useCallback(() => setPanelOpen(true), []);
   const closePanel = useCallback(() => setPanelOpen(false), []);
-  const applyPending = useCallback(() => {
-    void edits.applyPending();
-  }, [edits]);
-  const discardPending = useCallback(() => {
-    void edits.discardPending();
-  }, [edits]);
+  // Return the queue RPC promises so the toolbar can surface real failures; do NOT void here.
+  const applyPending = useCallback(() => edits.applyPending(), [edits]);
+  const discardPending = useCallback(() => edits.discardPending(), [edits]);
 
   const assistantContext = useMemo<FigmaAssistantContext>(
     () => ({
@@ -360,6 +357,7 @@ export function FigmaFileScreen({ serverId, fileKey, version }: FigmaFileRef) {
         pendingCount={edits.pendingCount}
         onApplyPending={applyPending}
         onDiscardPending={discardPending}
+        disabled={Boolean(version)}
       />
       <View style={jiraStyles.body}>
         <View style={jiraStyles.main} onLayout={onLayout}>
@@ -373,7 +371,7 @@ export function FigmaFileScreen({ serverId, fileKey, version }: FigmaFileRef) {
             onCamera={setCamera}
             selectedNodeId={selectedNodeId}
             onSelectNode={selectNode}
-            overrides={edits.overrides}
+            overrides={version ? HISTORY_NO_OVERRIDES : edits.overrides}
           />
           {focusError ? (
             <View style={styles.canvasError} testID="figma-focus-error">
@@ -457,6 +455,9 @@ export function FigmaFileScreen({ serverId, fileKey, version }: FigmaFileRef) {
 const ASSISTANT_HEADER = { title: "Figma assistant" };
 const PANEL_HEADER_TABS = PANEL_TABS.map((tab) => ({ id: tab.id, label: tab.label }));
 const VERSIONS_OPEN_HANDLER = () => undefined;
+// A historical snapshot (32.5.4) is read-only: current queued edits preview over the *latest*
+// file, so they must not bleed into the snapshot the canvas renders for an old version.
+const HISTORY_NO_OVERRIDES: Record<string, Partial<FigmaNode>> = {};
 
 function AssistantColumn({
   context,
@@ -523,6 +524,7 @@ function PanelColumn({
           node={selectedNode}
           linked={linked}
           applyEdits={applyEdits}
+          disabled={Boolean(file.version)}
           componentMeta={componentMeta}
           parentOf={parentOf}
         />
