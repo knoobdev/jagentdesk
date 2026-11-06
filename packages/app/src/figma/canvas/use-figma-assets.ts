@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { FigmaBytes } from "@jagentdesk/protocol/figma/rpc-schemas";
+import type { FigmaFallbackHint } from "@/figma/renderer";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { isItalicStyle, weightForStyle } from "../font-style";
 import { callFigma } from "./api";
 import {
   ByteImageCache,
+  backgroundBlurRasterRung,
   FontCache,
   isPinnedVersion,
   rasterNamespace,
@@ -22,7 +24,9 @@ import {
 // ADR-0042 quality path (host capability + pinned version): TEXT fallbacks become Figma-exported
 // outlined SVGs drawn at the absolute bounding box — crisp at any zoom, correct glyphs without
 // the font — with one finite absolute-bounds PNG downgrade per node if the SVG fails; non-TEXT
-// rasters ride an adaptive rung ceil(zoom × dpr) clamped 1..4 instead of the legacy fixed 2.
+// rasters ride an adaptive rung ceil(zoom × dpr) clamped 1..4 instead of the legacy fixed 2;
+// fallbacks the renderer HINTS as visible BACKGROUND_BLUR ride min(rung, proven-correct scale)
+// crop PNG — Figma's per-node export bakes no backdrop above that scale (backdrop exception).
 // Without the capability or the pin, every request is the exact pre-ADR-0042 scale-2 crop PNG.
 
 export type ImageDecoder = (dataUrl: string) => DecodedImageLike | null;
@@ -74,8 +78,17 @@ export interface FigmaAssets {
    * Decoded fallback raster for a node, or null while it loads. `nodeType` is the renderer's
    * node type (ADR-0042): the quality path routes "TEXT" to the outlined-SVG cache and keeps
    * every other type on PNG. Callers that do not know the type get the legacy PNG routing.
+   * `hint.backgroundBlur` (ADR-0042 backdrop exception) must arrive on the FIRST ask: the
+   * getter itself queues the fetch on a miss, so a classification only reported later with the
+   * missing report would already have asked (and cached) a flat high-rung raster. Absent or
+   * false on any ask lifts the cap for this scope (a hidden/dropped effect never inherits the
+   * previous paint's cap — the getter runs for every fallback node on every paint).
    */
-  fallbackForNode: (nodeId: string, nodeType?: string) => CanvasImageSource | null;
+  fallbackForNode: (
+    nodeId: string,
+    nodeType?: string,
+    hint?: FigmaFallbackHint,
+  ) => CanvasImageSource | null;
   fontAvailable: (family: string, style: string) => boolean;
   /** Ask for a frame's raster thumbnail at a scale; returns null until decoded. */
   requestThumbnail: (nodeId: string, scale: number) => CanvasImageSource | null;
@@ -169,6 +182,12 @@ export function useFigmaAssets(input: {
   // Node types the renderer revealed through `fallbackForNode(id, nodeType)`; the quality
   // path only routes ids KNOWN to be TEXT to the outlined-SVG cache, everything else to PNG.
   const nodeTypes = useRef(new Map<string, "TEXT" | "OTHER">());
+  // Ids the renderer hinted as visible BACKGROUND_BLUR at their latest fallback ask (ADR-0042
+  // backdrop exception). Last-write-per-getter, not per-paint: every fallback node passes the
+  // getter on every paint it is drawn, so a hidden or removed effect (hint false/absent on the
+  // next ask) lifts the cap immediately and the node never inherits a stale paint's cap. The
+  // set holds ids only — never node trees — and dies with the scope.
+  const bgBlurNodes = useRef(new Set<string>());
   // Persistent per-node downgrade channel (`${nodeId}@${version}`): once a TEXT node's SVG
   // attempt failed terminal, every LATER ask — reads and fetches alike — routes to the
   // absolute-bounds PNG. Independent of the SVG cache's own retention (an unobserved failed
@@ -292,6 +311,7 @@ export function useFigmaAssets(input: {
       rasters.dispose();
       fonts.clear();
       nodeTypes.current.clear();
+      bgBlurNodes.current.clear();
       downgradedText.current.clear();
       selected.current = new Map();
       servedText.current = new Set();
@@ -315,9 +335,18 @@ export function useFigmaAssets(input: {
     };
     /** The ONE routing decision, shared by reads (`fallbackForNode`) and fetches
      *  (`onMissing`), so a get can never miss the cache its request went into — and a
-     *  downgraded TEXT never re-enters the SVG class. */
+     *  downgraded TEXT never re-enters the SVG class. The BACKGROUND_BLUR class rides HERE too:
+     *  capped crop PNG (absolute for TEXT, whose replacement class is always the layout box)
+     *  at `min(rung, proven-correct scale)`, decided once and honored by every later read AND
+     *  fetch, so zooming never asks the node's flat rung-3/4 export (no phantom rung). */
     const routeSpecFor = (nodeId: string): RasterSpec => {
       if (!quality) return { scale: 2, format: "png", bounds: "crop" };
+      if (bgBlurNodes.current.has(nodeId)) {
+        const capped = backgroundBlurRasterRung(deviceScale());
+        return nodeTypes.current.get(nodeId) === "TEXT"
+          ? { scale: capped, format: "png", bounds: "absolute" }
+          : { scale: capped, format: "png", bounds: "crop" };
+      }
       if (nodeTypes.current.get(nodeId) === "TEXT") {
         if (downgradedText.current.has(`${nodeId}@${version}`))
           return { scale: rasterRung(deviceScale()), format: "png", bounds: "absolute" };
@@ -346,9 +375,13 @@ export function useFigmaAssets(input: {
         select(imageFills, imageRef);
         return toSource(imageFills.get(imageRef));
       },
-      fallbackForNode: (nodeId, nodeType) => {
+      fallbackForNode: (nodeId, nodeType, hint) => {
         if (!nodeId) return null;
         if (nodeType) nodeTypes.current.set(nodeId, nodeType === "TEXT" ? "TEXT" : "OTHER");
+        // The classifier sees the hint BEFORE any cache choice or queue: record true, drop
+        // anything else (false or absent — W7 passes it fresh at every fallback ask).
+        if (hint?.backgroundBlur === true) bgBlurNodes.current.add(nodeId);
+        else bgBlurNodes.current.delete(nodeId);
         const spec = routeSpecFor(nodeId);
         const cache = cacheForSpec(spec);
         select(cache, nodeId);
@@ -385,31 +418,28 @@ export function useFigmaAssets(input: {
           for (const ref of missing.imageRefs) select(imageFills, ref);
         }
         // Record the renderer's TEXT classification FIRST (W8 emits these ids; `[]` until it
-        // lands), then split the fallback asks: known TEXT rides the outlined-SVG cache,
-        // everything else stays default-crop PNG on the adaptive rung (legacy: fixed scale 2).
+        // lands), then group EVERY ask through the ONE route helper — TEXT→outlined SVG (or
+        // its persistent PNG channel once downgraded), hinted BACKGROUND_BLUR→capped crop PNG,
+        // everything else→default-crop PNG on the adaptive rung (legacy: fixed scale 2). One
+        // wire batch per class, never mixed: the capped class must not ride the batch's rung.
         for (const id of missing.textFallbackNodeIds ?? []) nodeTypes.current.set(id, "TEXT");
         const textIds: string[] = [];
-        const otherIds: string[] = [];
+        const bySpec = new Map<string, { spec: RasterSpec; ids: string[] }>();
         for (const id of missing.fallbackNodeIds) {
           if (quality && nodeTypes.current.get(id) === "TEXT") textIds.push(id);
-          else otherIds.push(id);
+          const spec = routeSpecFor(id);
+          const ns = `${spec.scale}@${spec.format}@${spec.bounds}`;
+          const group = bySpec.get(ns) ?? { spec, ids: [] };
+          group.ids.push(id);
+          bySpec.set(ns, group);
         }
         // ONE route helper, not "always SVG for TEXT": a downgraded node's re-ask lands on the
         // PNG cache of the CURRENT rung — where ByteImageCache's own records dedupe (an
         // existing queued/loading/failed entry never refetches; a fresh rung asks once).
-        for (const id of textIds) {
-          const cache = cacheForSpec(routeSpecFor(id));
-          cache.request(id);
-          select(cache, id);
-        }
-        if (otherIds.length > 0) {
-          const cache = cacheForSpec({
-            scale: quality ? rasterRung(deviceScale()) : 2,
-            format: "png",
-            bounds: "crop",
-          });
-          cache.request(...otherIds);
-          for (const id of otherIds) select(cache, id);
+        for (const { spec, ids } of bySpec.values()) {
+          const cache = cacheForSpec(spec);
+          cache.request(...ids);
+          for (const id of ids) select(cache, id);
         }
         for (const font of missing.fonts) {
           fonts.fontAvailable(font.family, font.style);

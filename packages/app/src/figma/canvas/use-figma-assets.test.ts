@@ -554,6 +554,336 @@ function serveSvgBytes(): void {
   });
 }
 
+/**
+ * Every raster class answers with bytes whose base64 embeds the node id, so a decoded
+ * FakeImage is ATTRIBUTABLE to its ask (which scale served which node) — the backdrop
+ * regressions read and re-read the same node across zooms and must tell the classes apart.
+ */
+function serveRastersById(): void {
+  callFigmaMock.mockImplementation((_client, method, params) => {
+    const p = params as { ids?: string[]; format?: string };
+    if (method !== "figma.file.render.request") return Promise.resolve({});
+    const mimeType = p.format === "svg" ? "image/svg+xml" : "image/png";
+    const images: Record<string, FigmaBytes | null> = {};
+    for (const id of p.ids ?? []) images[id] = { mimeType, dataBase64: btoa(id) };
+    return Promise.resolve({ images });
+  });
+}
+
+function imageForId(images: FakeImage[], id: string, mime: "image/png" | "image/svg+xml") {
+  const needle = `;base64,${btoa(id)}`;
+  return images.find((i) => i.src.includes(mime) && i.src.includes(needle));
+}
+
+// ── ADR-0042 backdrop BACKGROUND_BLUR exception ────────────────────────────────
+// Figma's PER-NODE export bakes no backdrop structure for a visible BACKGROUND_BLUR above
+// scale 2 (pinned probes: scale 2 matches the composited frame, 3/4 are flat). The asset layer
+// caps that class to min(rung, 2), classified from the renderer's getter hint BEFORE any cache
+// choice or miss-queue — one decision shared by reads and fetches, so zooming never asks the
+// node's flat rung and an ordinary raster/TEXT class is untouched.
+describe("useFigmaAssets ADR-0042 backdrop BACKGROUND_BLUR cap", () => {
+  let root: Root;
+
+  function mount(props: {
+    serverId: string;
+    fileKey: string;
+    version: string | null;
+    decodeImage?: ImageDecoder;
+    fidelity?: boolean;
+    getDeviceScale?: () => number;
+  }) {
+    const result: { current: FigmaAssets } = {
+      current: null as unknown as FigmaAssets,
+    };
+    function Harness() {
+      result.current = useFigmaAssets(props);
+      return null;
+    }
+    act(() => root.render(React.createElement(Harness)));
+    return result.current;
+  }
+
+  beforeEach(() => {
+    Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
+      value: true,
+      configurable: true,
+    });
+    vi.stubGlobal("React", React);
+    root = createRoot(document.createElement("div"));
+    clientRef.current = { id: "host" };
+    callFigmaMock.mockReset();
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    vi.unstubAllGlobals();
+  });
+
+  it("never queues 3/4 for a hinted backdrop node while siblings ride rung 4 and TEXT stays SVG", async () => {
+    serveRastersById();
+    const { decodeImage } = captureDecode();
+    const assets = mount({
+      serverId: "s1",
+      fileKey: "f",
+      version: "v1",
+      fidelity: true,
+      getDeviceScale: () => 4.2, // rasterRung → 4
+      decodeImage,
+    });
+    // The real renderer's order: the getter runs FIRST (a miss queues from the getter itself),
+    // the report arrives after — the cap must already be decided at the getter.
+    assets.beginDraw();
+    expect(assets.fallbackForNode("bg1", "RECTANGLE", { backgroundBlur: true })).toBeNull();
+    expect(assets.fallbackForNode("n1", "RECTANGLE")).toBeNull();
+    expect(assets.fallbackForNode("t1", "TEXT")).toBeNull();
+    assets.onMissing({
+      fallbackNodeIds: ["bg1", "n1", "t1"],
+      textFallbackNodeIds: ["t1"],
+      imageRefs: [],
+      fonts: [],
+    });
+    assets.endDraw();
+    await settle();
+    // Three separate class batches — and the backdrop never touches the rung-4 batch with n1:
+    // capped to the proven scale 2, no format-less legacy field leakage, deduped against the
+    // getter's own queue (exactly one ask per class).
+    expect(renderCalls()).toContainEqual({
+      fileKey: "f",
+      ids: ["bg1"],
+      scale: 2,
+      version: "v1",
+      format: "png",
+    });
+    expect(renderCalls()).toContainEqual({
+      fileKey: "f",
+      ids: ["n1"],
+      scale: 4,
+      version: "v1",
+      format: "png",
+    });
+    expect(renderCalls()).toContainEqual({
+      fileKey: "f",
+      ids: ["t1"],
+      scale: 1,
+      version: "v1",
+      format: "svg",
+      useAbsoluteBounds: true,
+    });
+    expect(renderCalls()).toHaveLength(3);
+  });
+
+  it("read and fetch share the capped cache across zoom — rising rung re-reads it, never asks flat 3/4 bytes", async () => {
+    serveRastersById();
+    const { images, decodeImage } = captureDecode();
+    let zoom = 4.2; // → rung 4
+    const assets = mount({
+      serverId: "s1",
+      fileKey: "f",
+      version: "v1",
+      fidelity: true,
+      getDeviceScale: () => zoom,
+      decodeImage,
+    });
+    assets.beginDraw();
+    expect(assets.fallbackForNode("bg1", "RECTANGLE", { backgroundBlur: true })).toBeNull();
+    assets.onMissing({
+      fallbackNodeIds: ["bg1"],
+      textFallbackNodeIds: [],
+      imageRefs: [],
+      fonts: [],
+    });
+    assets.endDraw();
+    await settle();
+    const bgImage = imageForId(images, "bg1", "image/png");
+    expect(bgImage).toBeDefined();
+    bgImage!.emit("load");
+
+    // Zoom to 6 × dpr 2 territory: the ADAPTIVE class would ride rung 4, but the hinted
+    // backdrop reads the SAME capped scale-2 cache its fetch filled — no second ask at all.
+    for (let paint = 0; paint < 5; paint += 1) {
+      assets.beginDraw();
+      expect(assets.fallbackForNode("bg1", "RECTANGLE", { backgroundBlur: true })).toBe(bgImage);
+      assets.onMissing({
+        fallbackNodeIds: ["bg1"],
+        textFallbackNodeIds: [],
+        imageRefs: [],
+        fonts: [],
+      });
+      assets.endDraw();
+      await settle();
+    }
+    zoom = 6;
+    assets.beginDraw();
+    expect(assets.fallbackForNode("bg1", "RECTANGLE", { backgroundBlur: true })).toBe(bgImage);
+    assets.endDraw();
+    expect(renderCalls()).toHaveLength(1); // ever: the one capped ask
+    expect(renderCalls()[0].scale).toBe(2);
+  });
+
+  it("an ask without the hint lifts the cap — a hidden effect never inherits the previous paint's rung-2", async () => {
+    serveRastersById();
+    const { decodeImage } = captureDecode();
+    const assets = mount({
+      serverId: "s1",
+      fileKey: "f",
+      version: "v1",
+      fidelity: true,
+      getDeviceScale: () => 4.2, // rung 4
+      decodeImage,
+    });
+    assets.beginDraw();
+    expect(assets.fallbackForNode("bg1", "RECTANGLE", { backgroundBlur: true })).toBeNull();
+    assets.endDraw();
+    await settle();
+    expect(renderCalls()).toHaveLength(1);
+    expect(renderCalls()[0].scale).toBe(2);
+
+    // Effect hidden (W7 stops hinting): the node still fallbacks via another feature, and the
+    // fresh ask WITHOUT the hint routes back to the honest adaptive rung — the cap is per-ask
+    // truth, not sticky state.
+    assets.beginDraw();
+    expect(assets.fallbackForNode("bg1", "RECTANGLE", { backgroundBlur: false })).toBeNull();
+    assets.onMissing({
+      fallbackNodeIds: ["bg1"],
+      textFallbackNodeIds: [],
+      imageRefs: [],
+      fonts: [],
+    });
+    assets.endDraw();
+    await settle();
+    expect(renderCalls()).toHaveLength(2);
+    expect(renderCalls()[1]).toEqual({
+      fileKey: "f",
+      ids: ["bg1"],
+      scale: 4,
+      version: "v1",
+      format: "png",
+    });
+  });
+
+  it("TEXT with a visible backdrop comes as capped absolute PNG, never an SVG outline — and back to SVG once hidden", async () => {
+    serveRastersById();
+    const { decodeImage } = captureDecode();
+    const assets = mount({
+      serverId: "s1",
+      fileKey: "f",
+      version: "v1",
+      fidelity: true,
+      getDeviceScale: () => 4.2,
+      decodeImage,
+    });
+    assets.beginDraw();
+    expect(assets.fallbackForNode("tb1", "TEXT", { backgroundBlur: true })).toBeNull();
+    assets.onMissing({
+      fallbackNodeIds: ["tb1"],
+      textFallbackNodeIds: ["tb1"],
+      imageRefs: [],
+      fonts: [],
+    });
+    assets.endDraw();
+    await settle();
+    // The backdrop class keeps the absolute-bounds meaning (the renderer places known TEXT on
+    // the layout box) at the proven scale — and never burns the SVG outline the backdrop voids.
+    expect(renderCalls()).toEqual([
+      {
+        fileKey: "f",
+        ids: ["tb1"],
+        scale: 2,
+        version: "v1",
+        format: "png",
+        useAbsoluteBounds: true,
+      },
+    ]);
+
+    // Hidden again: ordinary TEXT returns to the SVG route (no stale cap, no downgrade mark).
+    assets.beginDraw();
+    expect(assets.fallbackForNode("tb1", "TEXT")).toBeNull();
+    assets.onMissing({
+      fallbackNodeIds: ["tb1"],
+      textFallbackNodeIds: ["tb1"],
+      imageRefs: [],
+      fonts: [],
+    });
+    assets.endDraw();
+    await settle();
+    expect(renderCalls()).toHaveLength(2);
+    expect(renderCalls()[1]).toEqual({
+      fileKey: "f",
+      ids: ["tb1"],
+      scale: 1,
+      version: "v1",
+      format: "svg",
+      useAbsoluteBounds: true,
+    });
+  });
+
+  it("the capped class keeps the finite negative cache and retry semantics — one ask per rung, ever", async () => {
+    serveRastersAllNull();
+    const { decodeImage } = captureDecode();
+    const assets = mount({
+      serverId: "s1",
+      fileKey: "f",
+      version: "v1",
+      fidelity: true,
+      getDeviceScale: () => 4.2, // rung 4 — without the cap this node would ask 4 every fresh scope
+      decodeImage,
+    });
+    for (let paint = 0; paint < 10; paint += 1) {
+      assets.beginDraw();
+      expect(assets.fallbackForNode("bg1", "RECTANGLE", { backgroundBlur: true })).toBeNull();
+      assets.onMissing({
+        fallbackNodeIds: ["bg1"],
+        textFallbackNodeIds: [],
+        imageRefs: [],
+        fonts: [],
+      });
+      assets.endDraw();
+      await settle();
+    }
+    // Ten re-asks, ONE wire call — and it is the capped scale, never the flat rung-4 bytes.
+    const blurAsks = renderCalls().filter((c) => c.ids.includes("bg1"));
+    expect(blurAsks).toHaveLength(1);
+    expect(blurAsks[0].scale).toBe(2);
+    // The ledger is honest: the failed backdrop counts as failed, nothing phantom pending.
+    const st = assets.status();
+    expect(st.failed).toBe(1);
+    expect(st.pending).toBe(0);
+    // retryFailed reopens exactly one ask on the capped scale again — bounded, not per-frame.
+    assets.retryFailed();
+    assets.beginDraw();
+    expect(assets.fallbackForNode("bg1", "RECTANGLE", { backgroundBlur: true })).toBeNull();
+    assets.endDraw();
+    await settle();
+    expect(renderCalls().filter((c) => c.ids.includes("bg1"))).toHaveLength(2);
+  });
+
+  it("without the capability the hint changes nothing — the legacy wire stays byte-identical", async () => {
+    serveRastersById();
+    const { decodeImage } = captureDecode();
+    const legacy = mount({
+      serverId: "s1",
+      fileKey: "f",
+      version: "v1",
+      fidelity: false,
+      getDeviceScale: () => 4.2,
+      decodeImage,
+    });
+    legacy.beginDraw();
+    expect(legacy.fallbackForNode("bg1", "RECTANGLE", { backgroundBlur: true })).toBeNull();
+    legacy.onMissing({
+      fallbackNodeIds: ["bg1"],
+      textFallbackNodeIds: [],
+      imageRefs: [],
+      fonts: [],
+    });
+    legacy.endDraw();
+    await settle();
+    // Pre-capability hosts never see format/useAbsoluteBounds — and the cap is a no-op at 2
+    // because the legacy path already asks exactly the scale-2 crop PNG.
+    expect(renderCalls()).toEqual([{ fileKey: "f", ids: ["bg1"], scale: 2, version: "v1" }]);
+  });
+});
+
 describe("useFigmaAssets ADR-0042 fidelity quality path", () => {
   // The routing rules the asset layer owns: TEXT+capability → outlined SVG at the absolute
   // box, non-TEXT → default-crop PNG on the quantized rung, everything else → the exact legacy
