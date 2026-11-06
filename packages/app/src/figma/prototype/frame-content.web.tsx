@@ -17,7 +17,7 @@ import type { FrameContentProps } from "./frame-content";
 // canvas spans one frame, and the renderer places nodes by absoluteBoundingBox, so an
 // unlocalized frame at x=1200 would paint off-canvas.
 //
-// Every byte, stylesheet, and FontFace this draws through belongs to the player's asset scope
+// Every byte and FontFace this draws through belongs to the player's asset scope
 // (`asset-store.ts`) and is claimed under THIS instance's stage-owner identity: when the root
 // changes (a reused instance navigating) or the instance unmounts, the previous owner's claims
 // are released while the player stays open, and only assets a simultaneously active owner still
@@ -133,7 +133,7 @@ export function FrameContent({ file, root, scale, overrides }: FrameContentProps
   const requiredFonts = useMemo(() => collectRequiredFonts(root), [root]);
 
   // Font loading runs IN PARALLEL with drawing (W8 5d0b57396: the renderer paints TEXT as a real
-  // Figma raster while a face is in flight), so a blocked Google stylesheet can never hold the
+  // Figma raster while a face is in flight), so a hung font request can never hold the
   // player blank. When a face actually becomes available the repaint below replaces the raster
   // with live text. Unavailable fonts SETTLE (the bounded gate remembers failures): this fires
   // its repaint only for claims made while a load was still in flight, once per root.
@@ -182,8 +182,8 @@ export function FrameContent({ file, root, scale, overrides }: FrameContentProps
       );
     }
     if (missing.fonts.length > 0 && fontGate) {
-      // Bounded by construction: the gate singleflights per family, remembers failed attempts,
-      // and appends each stylesheet at most once. Repaint only when a face actually became
+      // Bounded by construction: the gate singleflights per family and remembers failed
+      // attempts for its lifetime. Repaint only when a face actually became
       // available — a failed font must not re-arm this draw loop on every pass.
       void fontGate
         .loadForOwner(ownerId, missing.fonts as RequiredFont[])

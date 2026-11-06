@@ -185,21 +185,12 @@ const activeViews: { unmount: () => void }[] = [];
 
 /** Paint: wait for the live scope + settled fonts, then the next recorded draw. */
 async function nextDraw(baseline: number) {
-  settleGoogleStylesheet();
   await waitFor(() => expect(draws.length).toBeGreaterThan(baseline));
   return draws[draws.length - 1];
 }
 
 async function firstDraw() {
   return nextDraw(0);
-}
-
-function settleGoogleStylesheet(): void {
-  for (const link of document.head.querySelectorAll("link")) {
-    act(() => {
-      link.dispatchEvent(new Event("load"));
-    });
-  }
 }
 
 beforeEach(() => {
@@ -842,5 +833,68 @@ describe("FrameContent bounded font behavior", () => {
     view.unmount();
     expect(fontsSet.delete).toHaveBeenCalledTimes(1);
     expect(fontsSet.faces).toHaveLength(0);
+  });
+
+  // spec 32.5.1 contract: production player fonts come from the daemon's CACHED bytes, not the
+  // browser's Google Fonts stylesheet network. A well-known Google family must behave exactly
+  // like a custom one — `figma.fonts.get` answers, and no <link> is ever appended.
+  it("serves the known Google family Inter from daemon bytes with no browser <link>, repaints once, and unregisters on release", async () => {
+    let resolveFont: ((value: { font: FigmaBytes | null }) => void) | null = null;
+    callFigma.mockImplementation((_client: unknown, type: string) => {
+      if (type === "figma.fonts.get.request")
+        return new Promise((resolve) => {
+          resolveFont = resolve as (value: { font: FigmaBytes | null }) => void;
+        });
+      return Promise.resolve({ images: {} });
+    });
+    serveMissing("I:1", { fonts: [{ family: "Inter", style: "Regular" }] });
+    const view = renderPlayer("v1", false, textRoot("I:1", "Inter"));
+    const draw = await firstDraw(); // text paints through the raster fallback while loading
+    expect(draw.fontAvailable("Inter", "Regular")).toBe(false);
+    // Inter is the canonical Google family: it goes to the daemon, NOT a fonts.googleapis.com
+    // <link>, so the player needs zero third-party CSS network access to get its bytes.
+    expect(fontsGetCalls()).toHaveLength(1);
+    expect(fontsGetCalls()[0][2]).toEqual({ family: "Inter", style: "Regular" });
+    expect(document.head.querySelectorAll("link")).toHaveLength(0);
+    // The daemon bytes land: real registration flips availability and repaints exactly once.
+    await act(async () => {
+      resolveFont?.({ font: { mimeType: "font/woff2", dataBase64: "Rk9P" } });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    const drawsAfterFont = draws.length;
+    expect(drawsAfterFont).toBe(2);
+    expect(draws[drawsAfterFont - 1].fontAvailable("Inter", "Regular")).toBe(true);
+    const fontsSet = document.fonts as unknown as {
+      delete: ReturnType<typeof vi.fn>;
+      faces: unknown[];
+    };
+    view.unmount();
+    expect(fontsSet.delete).toHaveBeenCalledTimes(1);
+    expect(fontsSet.faces).toHaveLength(0);
+  });
+
+  it("an offline daemon (rejected fonts.get) settles bounded and still paints through the raster fallback", async () => {
+    callFigma.mockImplementation(async (_client: unknown, type: string) => {
+      if (type === "figma.fonts.get.request") throw new Error("offline");
+      return { images: {} };
+    });
+    serveMissing("O:1", { fonts: [{ family: "Inter", style: "Regular" }] });
+    const view = renderPlayer("v1", false, textRoot("O:1", "Inter"));
+    const draw = await firstDraw();
+    // A rejected fetch settles like missing bytes — bounded to ONE attempt (negative cache) and
+    // never faked available — and the frame still painted: W8's raster fallback carries the text.
+    expect(draw.fontAvailable("Inter", "Regular")).toBe(false);
+    for (let i = 0; i < 5; i += 1)
+      draw.onMissing({
+        imageRefs: [],
+        fallbackNodeIds: [],
+        fonts: [{ family: "Inter", style: "Regular" }],
+      });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    expect(fontsGetCalls()).toHaveLength(1);
+    expect(document.head.querySelectorAll("link")).toHaveLength(0);
+    view.unmount();
   });
 });

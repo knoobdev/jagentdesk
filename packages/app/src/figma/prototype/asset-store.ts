@@ -1,6 +1,5 @@
 import type { FigmaBytes } from "@jagentdesk/protocol/figma/rpc-schemas";
 import {
-  googleFontsCssHref,
   isItalicStyle,
   weightForStyle,
   type PrototypeFontGate,
@@ -8,7 +7,7 @@ import {
 } from "./font-loading";
 
 // Player-scoped asset lifetime (spec 32.5.3, ADR-0037 memory rule): decoded image fills, raster
-// fallbacks, injected stylesheets, and FontFace registrations hang off ONE store per
+// fallbacks, and FontFace registrations hang off ONE store per
 // server/file/version snapshot — but the store must not become a second global cache. Memory is
 // released per stage owner: every asset is claimed for the frame instance that draws it, and a
 // claim frees the entry the moment no simultaneously active owner holds it, while the player
@@ -154,7 +153,7 @@ export class PrototypeAssetStore {
     };
   }
 
-  /** Cleanup for global DOM resources this scope created (stylesheet <link>s, FontFace entries). */
+  /** Cleanup hook for global DOM resources a scope creates (e.g. attached nodes). */
   onDispose(cleanup: () => void): void {
     if (this.isDisposed) {
       cleanup();
@@ -244,14 +243,18 @@ export function assetScopeKey(serverId: string, fileKey: string, version: string
 }
 
 // ── Scope-bound font gate ──────────────────────────────────────────────────
-// One gate per snapshot with the load bounding the player needs to stay stable while a font is
-// unavailable: loads are singleflight (concurrent claims share the SAME in-flight promise),
-// Google stylesheet hrefs are appended at most once, and a failed family is remembered for the
-// gate's lifetime so a blocked font settles into the renderer's raster fallback instead of
-// re-arming a fetch/CSS/rerender loop every draw. Fonts are claimed per stage owner and the
-// FontFace (or its Google <link>) is unregistered when the last active owner releases, while
-// the player stays open. W8's `createFontGate` owns the generic loader semantics; this wrapper
-// composes the same exported primitives and never edits that file.
+// Production player fonts come from the daemon's CACHED bytes (spec 32.5.1), NOT the browser's
+// Google Fonts stylesheet network. This gate deliberately appends no `<link>` and issues no
+// client CSS request: a face is honoured only when an actual matching FontFace is ALREADY
+// registered and loaded (real evidence, not `fonts.check`), otherwise the bytes are fetched once
+// from `loadFontBytes` (the `figma.fonts.get` RPC) and registered locally. Load bounding the
+// player needs to stay stable while a font is unavailable: loads are singleflight (concurrent
+// claims share the SAME in-flight promise), and a failed family is remembered for the gate's
+// lifetime so a blocked font settles into the renderer's raster fallback instead of re-arming a
+// fetch/rerender loop every draw. Fonts are claimed per stage owner and the FontFace is
+// unregistered when the last active owner releases, while the player stays open. W8's
+// `createFontGate` owns the generic loader semantics and the shared font/style pure helpers;
+// this wrapper composes the same exported primitives and never edits that file.
 
 export interface ScopedFontGate extends PrototypeFontGate {
   /**
@@ -270,8 +273,6 @@ interface FontRecord {
   promise: Promise<boolean>;
   owners: Set<string>;
   unregister: (() => void) | null;
-  /** Google stylesheet href this record caused to be injected, for refcounted release. */
-  href: string | null;
 }
 
 export function createScopedFontGate(
@@ -281,16 +282,19 @@ export function createScopedFontGate(
   const fontKey = (family: string, style: string) => `${family}\u0000${style}`;
   const records = new Map<string, FontRecord>();
   const ownerFonts = new Map<string, Set<string>>();
-  // Lifetime memory: a family that failed to load is never retried by this gate — the failed
-  // attempt is remembered so the font settles into the raster fallback instead of re-arming a
-  // fetch/CSS/rerender loop on every draw — and an injected Google href is appended at most
-  // once while any claim still depends on it.
+  // Lifetime memory: a family whose daemon bytes failed or went missing is never retried by
+  // this gate — the attempt is remembered so the font settles into the renderer's raster
+  // fallback instead of re-arming a fetch/rerender loop on every draw.
   const permanentlyFailed = new Set<string>();
-  // One <link> per distinct Google stylesheet href for as long as any claim depends on it:
-  // concurrent AND repeated loads share the same in-flight/settled attempt, so an unavailable
-  // font cannot append CSS (or re-arm a rerender) on every draw.
-  const stylesheetAttempts = new Map<string, Promise<void>>();
-  const stylesheetLinks = new Map<string, HTMLLinkElement>();
+  // Closing the scope (player close / version switch) frees EVERY registration this gate holds,
+  // including the unguarded "unowned" claims: a dead snapshot keeps no global FontFace.
+  store.onDispose(() => {
+    for (const record of records.values()) {
+      if (record.status === "loaded" && record.unregister) record.unregister();
+    }
+    records.clear();
+    ownerFonts.clear();
+  });
 
   // Real availability proof: `document.fonts.check` returns true even for nonexistent families
   // (MDN documents `i-dont-exist` => true), so it cannot certify that the requested face exists.
@@ -324,35 +328,6 @@ export function createScopedFontGate(
       return false;
     }
     return false;
-  }
-
-  function appendStylesheetOnce(href: string): Promise<void> {
-    if (typeof document === "undefined" || store.disposed) return Promise.resolve();
-    let attempt = stylesheetAttempts.get(href);
-    if (!attempt) {
-      attempt = new Promise<void>((resolve) => {
-        const link = document.createElement("link");
-        link.rel = "stylesheet";
-        link.href = href;
-        const done = () => resolve();
-        link.addEventListener("load", done, { once: true });
-        link.addEventListener("error", done, { once: true });
-        document.head.appendChild(link);
-        stylesheetLinks.set(href, link);
-        store.onDispose(() => link.remove());
-      });
-      stylesheetAttempts.set(href, attempt);
-    }
-    return attempt;
-  }
-
-  function releaseHref(href: string): void {
-    stylesheetAttempts.delete(href);
-    const link = stylesheetLinks.get(href);
-    if (link) {
-      stylesheetLinks.delete(href);
-      link.remove();
-    }
   }
 
   async function registerFace(font: RequiredFont, bytes: FigmaBytes, record: FontRecord) {
@@ -397,20 +372,9 @@ export function createScopedFontGate(
     };
     if (loadedFaceMatches(font.family, font.style)) return settle(true);
     if (permanentlyFailed.has(record.key)) return settle(false);
-    const href = googleFontsCssHref([font]);
-    if (href) {
-      record.href = href;
-      await appendStylesheetOnce(href);
-      // Give the browser a moment to finish queuing the stylesheet's faces before deciding
-      // whether it delivered what this frame asked for.
-      try {
-        await (document.fonts?.ready ?? Promise.resolve());
-      } catch {
-        // A platform without a usable FontFaceSet simply falls through to the daemon path.
-      }
-      // Give the stylesheet its chance to serve the family before falling back to bytes.
-      if (loadedFaceMatches(font.family, font.style)) return settle(true);
-    }
+    // Daemon-cached bytes are the ONLY network path (spec 32.5.1): the browser never fetches a
+    // Google stylesheet here, so offline/failed bytes settle like missing bytes and the draw
+    // proceeds through the renderer's real-Figma raster fallback (W8-owned), never re-arming.
     let bytes: FigmaBytes | null = null;
     if (!store.disposed) {
       try {
@@ -443,7 +407,6 @@ export function createScopedFontGate(
         promise: Promise.resolve(false),
         owners: new Set([ownerId]),
         unregister: null,
-        href: null,
       };
       // Register before starting the load: the settle guard compares identity against the
       // live map, so the record must exist there even for a synchronously-settled attempt.
@@ -508,14 +471,6 @@ export function createScopedFontGate(
         records.delete(key);
         if (record.status === "loaded" && record.unregister) record.unregister();
         if (record.status === "failed") permanentlyFailed.add(key);
-        if (record.href) {
-          // Only drop the shared <link> when no remaining claim depends on it.
-          let stillUsed = false;
-          for (const other of records.values()) {
-            if (other.href === record.href) stillUsed = true;
-          }
-          if (!stillUsed) releaseHref(record.href);
-        }
       }
     },
   };

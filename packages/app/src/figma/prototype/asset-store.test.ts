@@ -12,7 +12,7 @@ import {
   retainAssetScope,
 } from "./asset-store";
 
-// Player asset lifetime (ADR-0037 memory rule): bytes, stylesheets, and FontFaces hang off one
+// Player asset lifetime (ADR-0037 memory rule): bytes and FontFaces hang off one
 // store per server/file/version snapshot, are claimed per STAGE OWNER, and are released while
 // the player stays open the moment no active owner holds them. Late callbacks after a release
 // (or after close) must not revive cleared entries or stomp a newer generation.
@@ -297,27 +297,26 @@ describe("createScopedFontGate", () => {
     Reflect.deleteProperty(document, "fonts");
   });
 
-  it("injects the Google stylesheet once, serves the family from it, and removes it on dispose", async () => {
+  it("loads a known Google family (Inter) from the daemon, never appending a browser <link>", async () => {
     const store = new PrototypeAssetStore("s1|fk1|v1");
-    const fonts = stubFonts();
-    const loadFontBytes = vi.fn(async (): Promise<FigmaBytes | null> => null);
+    stubFonts();
+    const loadFontBytes = vi.fn(
+      async (): Promise<FigmaBytes | null> => ({
+        mimeType: "font/woff2",
+        dataBase64: "Rk9P",
+      }),
+    );
     const gate = createScopedFontGate(store, loadFontBytes);
-    const settled = gate.load([{ family: "Roboto", style: "Regular" }]);
-    const link = document.head.querySelector<HTMLLinkElement>("link[href*='fonts.googleapis.com']");
-    expect(link).toBeTruthy();
-    // Repeated loads while open must NOT append a second stylesheet for the same href — and
-    // they ride the SAME in-flight promise (singleflight), so await them together.
-    const secondLoad = gate.load([{ family: "Roboto", style: "Regular" }]);
-    expect(document.head.querySelectorAll("link")).toHaveLength(1);
-    // jsdom never loads external CSS: the harness plays the browser — the face arrives with it.
-    fonts.add({ family: "Roboto", weight: "400", style: "normal", status: "loaded" });
-    link!.dispatchEvent(new Event("load"));
-    await Promise.all([settled, secondLoad]);
-    // A family Google Fonts serves (with registered evidence) never goes to the daemon.
-    expect(loadFontBytes).not.toHaveBeenCalled();
-    expect(gate.fontAvailable("Roboto", "Regular")).toBe(true);
+    await gate.load([{ family: "Inter", style: "Regular" }]);
+    // spec 32.5.1: production fonts come from cached daemon bytes, not the browser's Google
+    // stylesheet network. Inter is a classic Google family and still hits the daemon exactly
+    // once, and NO <link> is ever appended (the whole client-CSS path is gone).
+    expect(loadFontBytes).toHaveBeenCalledTimes(1);
+    expect(loadFontBytes).toHaveBeenCalledWith("Inter", "Regular");
+    expect(document.head.querySelectorAll("link")).toHaveLength(0);
+    expect(gate.fontAvailable("Inter", "Regular")).toBe(true);
     store.dispose();
-    expect(document.head.querySelector("link[href*='fonts.googleapis.com']")).toBeNull();
+    expect(gate.fontAvailable("Inter", "Regular")).toBe(false);
   });
 
   it("a nonexistent family that fonts.check answers TRUE for is not available and never re-tries", async () => {
@@ -444,25 +443,28 @@ describe("createScopedFontGate", () => {
     expect(gate.fontAvailable("Zorbal DevLiga", "Bold")).toBe(false);
   });
 
-  it("asks the daemon for bytes only for non-Google families", async () => {
-    const loadFontBytes = vi.fn(async (): Promise<FigmaBytes | null> => null);
+  it("serves every family from the daemon — no Google/non-Google distinction, no <link>", async () => {
+    const loadFontBytes = vi.fn(
+      async (family: string): Promise<FigmaBytes | null> =>
+        family === "Zorbal Custom" ? { mimeType: "font/woff2", dataBase64: "Rk9P" } : null,
+    );
     const store = new PrototypeAssetStore("s1|fk1|v3");
-    const fonts = stubFonts();
+    stubFonts();
     const gate = createScopedFontGate(store, loadFontBytes);
-    const settled = gate.load([
+    await gate.load([
       { family: "Inter", style: "Regular" },
       { family: "Zorbal Custom", style: "Bold" },
     ]);
-    for (const link of document.head.querySelectorAll("link")) {
-      // Play the browser: the Google stylesheet delivers Inter, nothing delivers Zorbal.
-      fonts.add({ family: "Inter", weight: "400", style: "normal", status: "loaded" });
-      link.dispatchEvent(new Event("load"));
-    }
-    await settled;
-    expect(loadFontBytes).toHaveBeenCalledTimes(1);
+    // A well-known Google family is no longer special-cased to browser CSS: BOTH families go to
+    // the daemon's cached bytes (spec 32.5.1), and not a single <link> is appended.
+    expect(loadFontBytes).toHaveBeenCalledTimes(2);
+    expect(loadFontBytes).toHaveBeenCalledWith("Inter", "Regular");
     expect(loadFontBytes).toHaveBeenCalledWith("Zorbal Custom", "Bold");
-    expect(gate.fontAvailable("Inter", "Regular")).toBe(true);
-    expect(gate.fontAvailable("Zorbal Custom", "Bold")).toBe(false);
+    expect(document.head.querySelectorAll("link")).toHaveLength(0);
+    // Missing daemon bytes settle failed (negative-cached) rather than faking availability; a
+    // real registration is what proves out.
+    expect(gate.fontAvailable("Inter", "Regular")).toBe(false);
+    expect(gate.fontAvailable("Zorbal Custom", "Bold")).toBe(true);
     store.dispose();
   });
 });
