@@ -150,6 +150,7 @@ const GATE_NAMES = [
   "net-url-trace",
   "ui-file-open",
   "ui-player-open",
+  "ui-comments-readonly",
   "perf-app-ram-tree",
   "perf-playback-fps",
 ];
@@ -1291,6 +1292,8 @@ async function main() {
     // regardless of host (the app may dial localhost: not just 127.0.0.1).
     const uiRequests = {
       types: new Set(),
+      counts: {},
+      commentsResponses: [],
       playbackFrameCounts: [],
       nodesIdCounts: [],
       apiPlaybackFrameCounts: [],
@@ -1312,10 +1315,20 @@ async function main() {
           const type = msg?.type;
           if (typeof type !== "string" || !type.startsWith("figma.")) return;
           uiRequests.types.add(type);
+          uiRequests.counts[type] = (uiRequests.counts[type] ?? 0) + 1;
           if (type === "figma.file.playback.request")
             uiRequests.playbackFrameCounts.push((msg?.frameIds ?? []).length);
           if (type === "figma.file.nodes.request")
             uiRequests.nodesIdCounts.push((msg?.ids ?? []).length);
+        } catch {
+          /* binary or non-JSON frame */
+        }
+      });
+      ws.on("framereceived", (frame) => {
+        try {
+          const msg = JSON.parse(String(frame.payload));
+          if (msg?.type === "figma.file.comments.list.response")
+            uiRequests.commentsResponses.push({ errorCode: msg.error?.code ?? null });
         } catch {
           /* binary or non-JSON frame */
         }
@@ -1444,6 +1457,8 @@ async function main() {
         await openFigmaSection();
       },
     });
+
+    await runCommentsReadOnlyUiProof(page, uiRequests, artifactDir, evidence, account.handle);
 
     // ── API-integration proof AFTER the UI (harness's own WS RPCs; labelled) ──────
     await runApiGates(client, jagentdeskHome, proxy, {
@@ -2404,6 +2419,92 @@ function runUrlTraceGate(proxyLog, fileKey, sectionNodeIds, uiRequests, linkProb
     });
   } else {
     failGate("net-url-trace", `${offenders.join("; ")} — paths: ${distinct.join(", ")}`);
+  }
+}
+
+// These are real controls and real comment reads, never post/reply/react/delete. This gate
+// proves the read/filter layout only; write/resolve/mention/presence acceptance stays separate.
+async function runCommentsReadOnlyUiProof(page, requests, artifactDir, evidence, searchTerm) {
+  const result = { writesAttempted: false, layouts: [], refreshConfirmed: false };
+  evidence.commentsReadOnlyUi = result;
+  const visible = (id) => page.getByTestId(id).filter({ visible: true }).last();
+  try {
+    if (
+      await visible("figma-show-hotspots")
+        .isVisible()
+        .catch(() => false)
+    )
+      await page.getByText("Close", { exact: true }).filter({ visible: true }).last().click();
+    await visible("figma-panel-comments").click({ timeout: 10_000 });
+    await visible("figma-comment-input").waitFor({ state: "visible", timeout: 20_000 });
+    await visible("figma-comment-search").fill(searchTerm);
+    for (const id of ["figma-comment-filter-mine", "figma-comment-filter-resolved"]) {
+      await visible(id).click();
+      await visible(id).click();
+    }
+    await visible("figma-comment-sort-oldest").click();
+    await visible("figma-comment-sort-latest").click();
+    await visible("figma-comment-search").fill("");
+    const readCount = requests.commentsResponses.length;
+    await visible("figma-comment-refresh").click();
+    const deadline = Date.now() + 20_000;
+    while (requests.commentsResponses.length <= readCount && Date.now() < deadline)
+      await delay(100);
+    if (requests.commentsResponses.length <= readCount)
+      throw new Error("Refresh sent no completed comment-list response within 20s");
+    const refreshed = requests.commentsResponses.at(-1);
+    if (refreshed.errorCode) throw new Error(`Comments Refresh failed: ${refreshed.errorCode}`);
+    result.refreshConfirmed = true;
+
+    for (const viewport of [null, { width: 390, height: 844 }]) {
+      if (viewport) {
+        await page.setViewportSize(viewport);
+        await visible("figma-compact-panel").click({ timeout: 10_000 });
+      }
+      const search = visible("figma-comment-search");
+      await search.waitFor({ state: "visible", timeout: 10_000 });
+      const panel = search.locator("..").locator("..");
+      const bounds = await panel.boundingBox();
+      if (!bounds) throw new Error("Comments panel has no measurable bounds");
+      const overflowing = [];
+      for (const id of [
+        "figma-comment-refresh",
+        "figma-comment-filter-all",
+        "figma-comment-filter-node",
+        "figma-comment-filter-mine",
+        "figma-comment-filter-resolved",
+        "figma-comment-sort-latest",
+        "figma-comment-sort-oldest",
+        "figma-comment-input",
+        "figma-comment-post",
+      ]) {
+        const b = await visible(id).boundingBox();
+        if (!b || b.x < bounds.x - 2 || b.x + b.width > bounds.x + bounds.width + 2)
+          overflowing.push(id);
+      }
+      const name = viewport ? "comments-phone-web" : "comments-desktop";
+      await page.screenshot({ path: path.join(artifactDir, `${name}.png`) });
+      result.layouts.push({ name, width: bounds.width, overflowing });
+      if (overflowing.length)
+        throw new Error(`${name}: controls overflow: ${overflowing.join(", ")}`);
+    }
+    const writes = Object.entries(requests.counts).filter(
+      ([type, count]) =>
+        count > 0 &&
+        /^figma\.(?:file\.comments\.(?:post|delete|react)|remote\.execute|link\.op|pending\.add)\.request$/.test(
+          type,
+        ),
+    );
+    if (writes.length) throw new Error("Unexpected Figma write RPC observed in read-only UI run");
+    result.pass = true;
+    passGate("ui-comments-readonly", result);
+  } catch (error) {
+    result.pass = false;
+    result.error = error instanceof Error ? error.message : String(error);
+    await page
+      .screenshot({ path: path.join(artifactDir, "comments-readonly-failure.png") })
+      .catch(() => {});
+    failGate("ui-comments-readonly", result.error);
   }
 }
 
