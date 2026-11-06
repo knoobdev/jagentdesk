@@ -172,3 +172,60 @@ export function sectionEditing(input: SectionEditingInput): SectionEditing {
     input.capability && input.remoteConnected && !input.versionPinned && input.locked !== true;
   return { ...input, canEdit, notice: canEdit ? null : CONNECT_EDITING_NOTICE };
 }
+
+// ── the write path (spec 32.6.2: one execute per committed drag, verified independently) ──
+
+export type SectionMoveStatus = "saving" | "failed" | "unverified" | null;
+
+/**
+ * How long a committed move may wait for refreshed outline metadata before it stops claiming
+ * "Saving move…" and admits the position is unconfirmed. No automatic retry — an uncertain
+ * write stays uncertain until the user acts.
+ */
+export const SECTION_MOVE_DEADLINE_MS = 20_000;
+
+/**
+ * The remote code for one committed Section move. Metadata alone cannot be trusted for the
+ * write: the node may be gone, may not be a SECTION any more, may have gained a locked
+ * ancestor since the outline snapshot, and n.x/n.y are PARENT-LOCAL while the drag previews a
+ * world delta. So the script asserts existence + type, re-checks locks at write time, sets the
+ * target's ACTUAL ancestor page (never assume figma.currentPage), and converts the world
+ * position through the inverse of the parent's absolute transform before writing. The
+ * before/after return (id, parent, page, local + absolute positions) is evidence for the log —
+ * the success verdict comes from independently refreshed outline metadata, not from this reply.
+ */
+export function sectionMoveScript(sectionId: string, worldX: number, worldY: number): string {
+  const id = JSON.stringify(sectionId);
+  return `return await (async () => {
+  const target = await figma.getNodeByIdAsync(${id});
+  if (!target) throw new Error("SECTION ${sectionId} does not exist");
+  if (target.type !== "SECTION") throw new Error("${sectionId} is a " + target.type + ", not a SECTION");
+  for (let node = target; node && node.type !== "PAGE"; node = node.parent) {
+    if (node.locked) throw new Error("locked at write time: " + node.id);
+  }
+  let page = target.parent;
+  while (page && page.type !== "PAGE") page = page.parent;
+  if (!page) throw new Error("SECTION ${sectionId} has no ancestor page");
+  await figma.setCurrentPageAsync(page);
+  const snapshot = (node) => {
+    const t = node.absoluteTransform;
+    return { id: node.id, parent: node.parent ? node.parent.id : null, page: page.id,
+      x: node.x, y: node.y, ax: t ? t[0][2] : null, ay: t ? t[1][2] : null };
+  };
+  const parent = target.parent;
+  const m = parent && parent.absoluteTransform ? parent.absoluteTransform : [[1, 0, 0], [0, 1, 0]];
+  const det = m[0][0] * m[1][1] - m[0][1] * m[1][0];
+  if (!det) throw new Error("parent of ${sectionId} has a degenerate transform");
+  const gx = ${worldX} - m[0][2], gy = ${worldY} - m[1][2];
+  const before = snapshot(target);
+  target.x = (m[1][1] * gx - m[0][1] * gy) / det;
+  target.y = (-m[1][0] * gx + m[0][0] * gy) / det;
+  const after = snapshot(target);
+  return JSON.stringify({ before, after });
+})();`;
+}
+
+/** The execute RPC's audit description — names the node and the committed world position. */
+export function sectionMoveDescription(name: string, worldX: number, worldY: number): string {
+  return `Move SECTION "${name}" to (${Math.round(worldX)}, ${Math.round(worldY)})`.slice(0, 1000);
+}

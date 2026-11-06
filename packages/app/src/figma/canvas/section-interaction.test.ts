@@ -17,6 +17,8 @@ import {
   SECTION_LABEL_BAND_PX,
   sectionEditing,
   sectionHitAt,
+  sectionMoveDescription,
+  sectionMoveScript,
 } from "./section-interaction";
 
 function section(
@@ -174,5 +176,51 @@ describe("sectionEditing (read-only surfaces must speak up)", () => {
 
   it("the input is carried through so the caller can build the execute request", () => {
     expect(sectionEditing(live)).toMatchObject({ ...live });
+  });
+});
+
+// ── the write path: one execute per committed drag, verified independently ────────────────
+
+describe("sectionMoveScript / sectionMoveDescription", () => {
+  it("asserts existence and type so a vanished or retyped node never silently succeeds", () => {
+    const code = sectionMoveScript("40:1", 110, 70);
+    expect(code).toContain('await figma.getNodeByIdAsync("40:1")');
+    expect(code).toContain('throw new Error("SECTION 40:1 does not exist")');
+    expect(code).toContain('target.type !== "SECTION"');
+    expect(code).not.toContain("figma.currentPage.findOne");
+  });
+
+  it("re-checks locks at write time and sets the target's ACTUAL ancestor page", () => {
+    const code = sectionMoveScript("40:1", 110, 70);
+    expect(code).toContain("locked at write time");
+    expect(code).toContain('while (page && page.type !== "PAGE") page = page.parent;');
+    expect(code).toContain("await figma.setCurrentPageAsync(page)");
+  });
+
+  it("converts the world position through the inverse parent transform, not into n.x/n.y blindly", () => {
+    const code = sectionMoveScript("40:1", 110, 70);
+    expect(code).toContain("const gx = 110 - m[0][2]");
+    expect(code).toContain("gy = 70 - m[1][2]");
+    expect(code).toContain("target.x = (m[1][1] * gx - m[0][1] * gy) / det;");
+    expect(code).toContain("target.y = (-m[1][0] * gx + m[0][0] * gy) / det;");
+    // A page child has no parent transform: the identity fallback makes local == world.
+    expect(code).toContain("[[1, 0, 0], [0, 1, 0]]");
+    expect(code).toContain("degenerate transform");
+  });
+
+  it("returns actual before/after positions as evidence, never a Saved claim", () => {
+    const code = sectionMoveScript("40:1", 110, 70);
+    expect(code).toContain("const before = snapshot(target);");
+    expect(code).toContain("const after = snapshot(target);");
+    expect(code).toContain("return JSON.stringify({ before, after });");
+    expect(code).not.toMatch(/Saved/i);
+  });
+
+  it("quotes the id and keeps the description within the RPC's 1000 character cap", () => {
+    expect(sectionMoveScript('40:"1"', 0, 0)).toContain('getNodeByIdAsync("40:\\"1\\"")');
+    expect(sectionMoveDescription("Board", 109.6, -20.4)).toBe(
+      'Move SECTION "Board" to (110, -20)',
+    );
+    expect(sectionMoveDescription("x".repeat(2000), 1, 2).length).toBe(1000);
   });
 });
