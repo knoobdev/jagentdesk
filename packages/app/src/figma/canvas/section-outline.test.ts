@@ -66,6 +66,24 @@ describe("childSummaries", () => {
     expect(childSummaries(section).map((s) => s.id)).toEqual(["10:3"]);
   });
 
+  it("skips a child with no real type instead of inventing FRAME", () => {
+    const section = makeNode({
+      id: "10:1",
+      type: "SECTION",
+      children: [
+        {
+          id: "10:7",
+          name: "Typeless",
+          absoluteBoundingBox: { x: 1, y: 2, width: 10, height: 20 },
+        },
+        child("10:3", "FRAME"),
+      ] as unknown as FigmaNode[],
+    });
+    const summaries = childSummaries(section);
+    expect(summaries.map((s) => s.id)).toEqual(["10:3"]); // the typeless node produced no summary
+    expect(summaries.every((s) => s.type === "FRAME")).toBe(true);
+  });
+
   it("drops malformed children instead of inventing fields for them", () => {
     const section = makeNode({
       id: "10:1",

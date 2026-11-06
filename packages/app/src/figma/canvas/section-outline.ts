@@ -2,17 +2,11 @@ import type { FigmaFrameSummary, FigmaNode } from "@jagentdesk/protocol/figma/rp
 import { absoluteBoundingBoxOf } from "./viewport";
 
 // Section granularity for the canvas (spec 32.5.1, ADR-0039): a SECTION is never a full-tree
-// load unit. The outline (W5, depth 3) and shallow depth-1 reads (W4, `figmaNodeDepth`) hand
-// `parentId`/`childrenLoaded` summary fields; the protocol schema lands in its own build, so
-// these types INTERSECT the protocol summary rather than shadow it.
+// load unit. `parentId`/`childrenLoaded` are protocol fields (commit 205355388) — the outline
+// (W5, depth 3) and shallow depth-1 reads (W4, `figmaNodeDepth`) produce them; nothing here
+// re-declares the summary shape. The alias only names what this module deals in.
 
-export interface SectionSummaryFields {
-  parentId?: string;
-  /** False at a truncation boundary: this Section's children are not in the summary yet. */
-  childrenLoaded?: boolean;
-}
-
-export type SectionAwareSummary = FigmaFrameSummary & SectionSummaryFields;
+export type SectionAwareSummary = FigmaFrameSummary;
 
 export function isSectionSummary(frame: { type: string }): boolean {
   return frame.type === "SECTION";
@@ -21,10 +15,10 @@ export function isSectionSummary(frame: { type: string }): boolean {
 /**
  * SHARED EXPORT (canvas + W2 sidebar): the SECTION's direct children as frame summaries from a
  * depth-1 payload. Only facts that exist in the payload become summaries — real id, name, type
- * and absoluteBoundingBox, `parentId` = section.id, document order preserved. A child with no
- * real bbox is skipped (nothing is fabricated), and a child SECTION is a boundary node: its own
- * children are unknown, so `childrenLoaded: false` and recursion happens via its own depth-1
- * read when it enters the viewport.
+ * and absoluteBoundingBox, `parentId` = section.id, document order preserved. A child missing
+ * any of those (no real type included) is skipped: nothing is fabricated. A child SECTION is a
+ * boundary node: its own children are unknown, so `childrenLoaded: false` and recursion
+ * happens via its own depth-1 read when it enters the viewport.
  */
 export function childSummaries(section: FigmaNode): SectionAwareSummary[] {
   const summaries: SectionAwareSummary[] = [];
@@ -33,17 +27,17 @@ export function childSummaries(section: FigmaNode): SectionAwareSummary[] {
     if (!raw || typeof raw !== "object") continue;
     const child = raw as Partial<FigmaNode>;
     if (typeof child.id !== "string" || typeof child.name !== "string") continue;
+    if (typeof child.type !== "string") continue;
     const bounds = absoluteBoundingBoxOf(child as FigmaNode);
     if (!bounds) continue;
     const summary: SectionAwareSummary = {
       id: child.id,
       name: child.name,
-      // Unknown child types still paint from their own subtree load; keep the wire value.
-      type: typeof child.type === "string" ? child.type : "FRAME",
+      type: child.type,
       bounds,
       parentId: section.id,
     };
-    if (isSectionSummary(child as { type: string })) summary.childrenLoaded = false;
+    if (isSectionSummary(child)) summary.childrenLoaded = false;
     summaries.push(summary);
   }
   return summaries;

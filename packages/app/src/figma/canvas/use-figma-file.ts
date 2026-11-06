@@ -62,9 +62,8 @@ export function useFigmaFrameStore(
       fileKey,
       version ?? undefined,
       async (ids, options) => {
-        // depth: 1 (ADR-0039) rides the same request; W4's protocol field lands in its own
-        // build, so the optional property is added structurally instead of shadowing the type.
-        const params: FigmaRequestParams<"figma.file.nodes.request"> & { depth?: 1 } = {
+        // depth: 1 (ADR-0039) is a protocol field on the nodes request (commit 205355388).
+        const params: FigmaRequestParams<"figma.file.nodes.request"> = {
           fileKey,
           ids: [...ids],
           ...(version ? { version } : {}),
