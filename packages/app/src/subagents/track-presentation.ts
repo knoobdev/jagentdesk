@@ -1,11 +1,23 @@
 import type { SidebarStateBucket } from "@/utils/sidebar-agent-state";
-import { deriveSidebarStateBucket } from "@/utils/sidebar-agent-state";
 import type { SubagentRow } from "./select";
 import { providerSubagentLifecycleStatus } from "./provider-store";
 
 function presentationStatus(row: SubagentRow) {
   if (row.kind === "jagentdesk") return row.status;
   return providerSubagentLifecycleStatus(row.status);
+}
+
+/**
+ * A child's mark reports what it is doing, not whether anyone read it: the track is where a
+ * failed child stays visible after the parent's own attention is cleared.
+ */
+export function deriveSubagentStatusBucket(
+  status: SubagentRow["status"],
+  backgroundWork?: { count: number } | null,
+): SidebarStateBucket {
+  if (status === "error") return "failed";
+  if (status === "running" || (backgroundWork?.count ?? 0) > 0) return "running";
+  return "done";
 }
 
 export interface SubagentRowPresentationData {
@@ -32,10 +44,10 @@ export function buildSubagentRowPresentationData(row: SubagentRow): SubagentRowP
     label: label ?? "",
     subtitle: subtitle ?? "",
     titleState: label ? "ready" : "loading",
-    statusBucket: deriveSidebarStateBucket({
+    statusBucket: deriveSubagentStatusBucket(
       status,
-      requiresAttention: false,
-    }),
+      row.kind === "jagentdesk" ? row.backgroundWork : undefined,
+    ),
   };
 }
 

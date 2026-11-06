@@ -15,6 +15,7 @@ export interface JAgentDeskSubagentRow {
   description: null;
   subtitle: null;
   status: Agent["status"];
+  backgroundWork?: Agent["backgroundWork"];
   requiresAttention: Agent["requiresAttention"];
   createdAt: Agent["createdAt"];
 }
@@ -58,6 +59,7 @@ function toSubagentRow(agent: Agent): SubagentRow {
     description: null,
     subtitle: null,
     status: agent.status,
+    backgroundWork: agent.backgroundWork,
     requiresAttention: agent.requiresAttention,
     createdAt: agent.createdAt,
   };

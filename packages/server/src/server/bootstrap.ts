@@ -648,6 +648,8 @@ function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): Mutab
     autoArchiveAfterMerge: config.autoArchiveAfterMerge ?? false,
     enableTerminalAgentHooks: config.enableTerminalAgentHooks ?? false,
     appendSystemPrompt: config.appendSystemPrompt ?? "",
+    resumeOnStartup: config.resumeOnStartup === true,
+    resumePrompt: config.resumePrompt ?? "Resume working.",
     operatorContext: config.operatorContext ?? "",
     orchestration: config.orchestration ?? createDefaultOrchestrationConfig(),
   };
@@ -1079,8 +1081,6 @@ export async function createJAgentDeskDaemon(
     providerDefinitions: initialAgentManagerState.providerDefinitions,
     registry: agentStorage,
     appendSystemPrompt: config.appendSystemPrompt,
-    resumeOnStartup: config.resumeOnStartup === true,
-    resumePrompt: config.resumePrompt ?? "Resume working.",
     operatorContext: config.operatorContext,
     onWorkspaceStateMayHaveChanged: ({ cwd }) => {
       workspaceGitService.onWorkspaceStateMayHaveChanged(cwd);

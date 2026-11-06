@@ -16,6 +16,7 @@ import {
   type WorkspaceBaseBranchService,
 } from "./session/workspace-base-branch/service.js";
 import type { WorkspaceBaseBranchSetRequest } from "@jagentdesk/protocol/messages";
+import type { AgentBackgroundWorkItem } from "./agent/background-work/index.js";
 import equal from "fast-deep-equal";
 import { v4 as uuidv4 } from "uuid";
 import { lstat, mkdir, mkdtemp, rename, rm, stat } from "node:fs/promises";
@@ -2204,6 +2205,11 @@ export class Session {
           return;
         }
 
+        if (event.type === "background_work") {
+          this.forwardBackgroundWork(event);
+          return;
+        }
+
         if (
           this.voiceSession.isActiveForAgent(event.agentId) &&
           event.event.type === "permission_requested" &&
@@ -2269,6 +2275,18 @@ export class Session {
     );
   }
 
+  private forwardBackgroundWork(
+    event: Extract<AgentManagerEvent, { type: "background_work" }>,
+  ): void {
+    const agent = this.agentManager.getAgent(event.agentId);
+    if (agent?.internal) return;
+    this.emit({
+      type: "agent.background_work.update",
+      payload: { agentId: event.agentId, items: event.items },
+    });
+    if (agent) void this.agentUpdates.forwardLiveAgent(agent);
+  }
+
   private emitProviderSubagentWorkspaceUpdate(event: ProviderSubagentManagerEvent): void {
     if (event.type === "timeline") {
       return;
@@ -2301,6 +2319,7 @@ export class Session {
   }
 
   private async enrichAgentPayload(payload: AgentSnapshotPayload): Promise<AgentSnapshotPayload> {
+    payload.backgroundWork = this.agentManager.getAgentBackgroundWorkSummary(payload.id);
     const storedRecord = await this.agentStorage.get(payload.id);
     payload.title = storedRecord?.title ?? null;
     payload.archivedAt = storedRecord?.archivedAt ?? null;
@@ -3066,6 +3085,10 @@ export class Session {
         return this.handleAgentTimelineSearchRequest(msg, source);
       case "agent.provider_subagents.list.request":
         return this.handleProviderSubagentListRequest(msg);
+      case "agent.background_work.list.request":
+        return this.handleAgentBackgroundWorkListRequest(msg);
+      case "agent.background_work.stop.request":
+        return this.handleAgentBackgroundWorkStopRequest(msg);
       case "agent.provider_subagents.timeline.get.request":
         return this.handleProviderSubagentTimelineRequest(msg, source);
       case "agent.timeline.set_subscription.request": {
@@ -7417,6 +7440,7 @@ export class Session {
             pendingPermissionCount: agent.pendingPermissions?.length ?? 0,
             requiresAttention: agent.requiresAttention,
             attentionReason: agent.attentionReason ?? null,
+            backgroundWork: agent.backgroundWork,
           });
         case "created_at":
           return Date.parse(agent.createdAt);
@@ -9666,6 +9690,75 @@ export class Session {
     }
   }
 
+  private async handleAgentBackgroundWorkStopRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.background_work.stop.request" }>,
+  ): Promise<void> {
+    let error: string | null = null;
+    try {
+      await this.agentManager.stopAgentBackgroundWork({
+        agentId: msg.agentId,
+        itemId: msg.itemId,
+        stopToken: msg.stopToken,
+      });
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : String(cause);
+    }
+    this.emit({
+      type: "agent.background_work.stop.response",
+      payload: {
+        requestId: msg.requestId,
+        agentId: msg.agentId,
+        itemId: msg.itemId,
+        error,
+      },
+    });
+  }
+
+  private async handleAgentBackgroundWorkListRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.background_work.list.request" }>,
+  ): Promise<void> {
+    try {
+      this.emit({
+        type: "agent.background_work.list.response",
+        payload: {
+          requestId: msg.requestId,
+          agentId: msg.agentId,
+          items: await this.readAgentBackgroundWork(msg.agentId),
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emit({
+        type: "agent.background_work.list.response",
+        payload: {
+          requestId: msg.requestId,
+          agentId: msg.agentId,
+          items: [],
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+
+  // Background work lives only in memory, so an agent that is not loaded has none.
+  // Answering from storage keeps a read from resuming a dormant agent.
+  private async readAgentBackgroundWork(agentId: string): Promise<AgentBackgroundWorkItem[]> {
+    if (this.agentManager.getAgent(agentId)) {
+      if (!this.agentManager.getAgentBackgroundWorkSummary(agentId)) {
+        throw new Error("Background work inventory is unavailable");
+      }
+      return this.agentManager.listAgentBackgroundWork(agentId);
+    }
+    const record = await this.agentStorage.get(agentId);
+    if (!record || record.internal) {
+      throw new Error(`Unknown agent '${agentId}'`);
+    }
+    if (record.archivedAt) {
+      throw new Error(`Agent is archived: ${agentId}`);
+    }
+    throw new Error("Background work inventory is unavailable");
+  }
+
   private async handleProviderSubagentTimelineRequest(
     msg: Extract<SessionInboundMessage, { type: "agent.provider_subagents.timeline.get.request" }>,
     source?: object,
@@ -10072,7 +10165,8 @@ export class Session {
     const capabilities = source
       ? this.clientCapabilitiesBySource.get(source)
       : this.clientCapabilities;
-    if (!capabilities?.has(CLIENT_CAPS.explicitEventSubscriptions)) return true;
+    if (!capabilities?.has(CLIENT_CAPS.explicitEventSubscriptions))
+      return event !== "agent.background_work.update";
     return [...this.eventSubscriptions.values()].some(
       ({ owner, events }) =>
         (!source || owner.source === source) && events.has(event as SessionEventSubscription),
