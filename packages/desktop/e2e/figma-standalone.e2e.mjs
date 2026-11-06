@@ -1249,7 +1249,7 @@ async function main() {
           EXPO_DEV_URL: `http://localhost:${expoPort}`,
           JAGENTDESK_ELECTRON_REMOTE_DEBUGGING_PORT: String(cdpPort),
           JAGENTDESK_ELECTRON_USER_DATA_DIR: userData,
-          JAGENTDESK_ELECTRON_FLAGS: `--remote-debugging-address=127.0.0.1 --remote-debugging-port=${cdpPort}`,
+          JAGENTDESK_ELECTRON_FLAGS: `--remote-debugging-address=127.0.0.1 --remote-debugging-port=${cdpPort}${process.env.JAGENTDESK_FIGMA_E2E_DEVICE_SCALE === "2" ? " --force-device-scale-factor=2" : ""}`,
         },
       },
       artifactDir,
@@ -1313,8 +1313,9 @@ async function main() {
       if (url.port !== String(daemonPort)) return;
       ws.on("framesent", (frame) => {
         try {
-          // Wire shape (daemon-client figmaRequest): { type, ...params } — params are flat.
-          const msg = JSON.parse(String(frame.payload));
+          // DaemonClient sends the flat RPC INSIDE the session transport envelope.
+          const envelope = JSON.parse(String(frame.payload));
+          const msg = envelope?.type === "session" ? envelope.message : envelope;
           const type = msg?.type;
           if (typeof type !== "string" || !type.startsWith("figma.")) return;
           uiRequests.types.add(type);
@@ -2493,6 +2494,13 @@ async function runCommentsReadOnlyUiProof(page, requests, artifactDir, evidence,
       if (viewport) {
         await page.setViewportSize(viewport);
         await visible("figma-compact-panel").click({ timeout: 10_000 });
+        // Compact layout can remount the panel on Inspect; choose the real tab again.
+        if (
+          !(await visible("figma-comment-search")
+            .isVisible()
+            .catch(() => false))
+        )
+          await visible("figma-panel-comments").click({ timeout: 10_000 });
       }
       const search = visible("figma-comment-search");
       await search.waitFor({ state: "visible", timeout: 10_000 });
@@ -2575,13 +2583,6 @@ async function captureRenderQuality(page, requests, artifactDir, evidence) {
     if (!Object.values(target).every(Boolean))
       throw new Error("Quality target needs page, node and version");
     await page.setViewportSize({ width: 1920, height: 1080 });
-    const cdp = await page.context().newCDPSession(page);
-    await cdp.send("Emulation.setDeviceMetricsOverride", {
-      width: 1920,
-      height: 1080,
-      deviceScaleFactor: 2,
-      mobile: false,
-    });
     const url = new URL(page.url());
     for (const [key, value] of Object.entries(target)) url.searchParams.set(key, value);
     const requestStart = requests.renderRequests.length;
@@ -2590,7 +2591,19 @@ async function captureRenderQuality(page, requests, artifactDir, evidence) {
     await page.goto(url.toString(), { waitUntil: "domcontentloaded", timeout: 60_000 });
     const canvas = page.locator("#jagentdesk-figma-canvas");
     await canvas.waitFor({ state: "visible", timeout: 60_000 });
-    await page.getByTestId("figma-zoom-reset").filter({ visible: true }).last().click();
+    // Deep-link focus starts at 100%. Reset-100 centers the ENTIRE page and would lose this frame.
+    const readZoom = async () => {
+      const label = await page
+        .getByTestId("figma-zoom-reset")
+        .filter({ visible: true })
+        .last()
+        .innerText();
+      const value = Number.parseFloat(label) / 100;
+      if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid zoom readout: ${label}`);
+      return value;
+    };
+    if (Math.abs((await readZoom()) - 1) > 0.005)
+      throw new Error("Pinned frame did not open at 100%");
     // Canvas pixels and the real renderer's outstanding export requests must both settle.
     // This is only a capture readiness hint; missing fonts/subtrees still need visual review.
     const settle = async () => {
@@ -2607,20 +2620,31 @@ async function captureRenderQuality(page, requests, artifactDir, evidence) {
       }
       return { stable: false, pending: requests.renderPending.size };
     };
-    let currentZoom = 1;
+    let wheelGain = 0.0025;
     for (const zoom of [1, 2, 3.32]) {
-      if (zoom !== currentZoom) {
+      const inputs = [];
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const before = await readZoom();
+        if (Math.abs(before - zoom) <= 0.005) break;
         const box = await canvas.boundingBox();
         if (!box) throw new Error("No canvas bounds");
+        const deltaY = -Math.log(zoom / before) / wheelGain;
         await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
         await page.keyboard.down("Control");
         try {
-          await page.mouse.wheel(0, -Math.log(zoom / currentZoom) / 0.0025);
+          await page.mouse.wheel(0, deltaY);
         } finally {
           await page.keyboard.up("Control");
         }
+        await delay(500);
+        const after = await readZoom();
+        inputs.push({ before, after, deltaY });
+        const measuredGain = -Math.log(after / before) / deltaY;
+        if (Number.isFinite(measuredGain) && measuredGain > 0) wheelGain = measuredGain;
       }
-      currentZoom = zoom;
+      const observedZoom = await readZoom();
+      if (Math.abs(observedZoom - zoom) > 0.005)
+        throw new Error(`Zoom ${zoom}: actual readout ${observedZoom}`);
       const readiness = await settle();
       const geometry = await canvas.evaluate((c) => {
         const m = c.getContext("2d").getTransform();
@@ -2643,7 +2667,15 @@ async function captureRenderQuality(page, requests, artifactDir, evidence) {
           "base64",
         ),
       );
-      result.captures.push({ name, requestedZoom: zoom, readiness, geometry });
+      result.captures.push({
+        name,
+        requestedZoom: zoom,
+        observedZoom,
+        inputs,
+        readiness,
+        geometry,
+      });
+      if (geometry.dpr !== 2) throw new Error(`Quality requires DPR 2, measured ${geometry.dpr}`);
     }
     result.renderRequests = requests.renderRequests.slice(requestStart);
     result.renderResponses = requests.renderResponses.slice(responseStart);
