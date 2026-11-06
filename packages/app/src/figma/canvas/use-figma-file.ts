@@ -79,9 +79,17 @@ export function useFigmaFrameStore(
 /** Subscribe the component to the store and kick loading; returns nothing — read via store.get. */
 export function useFrameLoader(store: FrameStore | null, ids: readonly string[]): void {
   const key = ids.join(",");
+  // The subscribe callback must be stable across renders: an inline arrow changes identity every
+  // render, and useSyncExternalStore then tears down and re-adds the listener on every paint tick.
+  const subscribe = useCallback(
+    (onChange: () => void) => (store ? store.subscribe(onChange) : () => undefined),
+    [store],
+  );
+  // Key the snapshot on the store's monotonic revision, not loadedCount(): at LRU capacity a
+  // replacement keeps the count equal, React sees no change, and the canvas never repaints.
   const snapshot = useSyncExternalStore(
-    (onChange) => (store ? store.subscribe(onChange) : () => undefined),
-    () => (store ? store.loadedCount() : 0),
+    subscribe,
+    () => (store ? store.revisionSnapshot() : 0),
     () => 0,
   );
   useEffect(() => {

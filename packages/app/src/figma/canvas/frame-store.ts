@@ -2,9 +2,15 @@ import type { FigmaComponentMeta, FigmaNode } from "@jagentdesk/protocol/figma/r
 import { chunkIds, LruCache, MAX_IDS_PER_REQUEST } from "./batching";
 
 // Lazy viewport loading (spec 32.5.1): frames entering the viewport are requested through
-// `figma.file.nodes` in batches of ≤ 50 ids, and loaded subtrees live in an LRU so panning back
-// costs nothing and memory stays flat on thousand-frame files. The fetcher is injected so the
-// tests run without a client, and the canvas can swap in the Figma Link path.
+// `figma.file.nodes` in batches of ≤ 50 ids, and loaded subtrees live in a per-store LRU, so
+// panning back costs nothing. Memory is BOUNDED, not flat: capacity × cached-subtree size per
+// store, times the MAX_STORE_REGISTRY_SIZE stores the registry keeps alive — a superseded
+// reload/version scope never piles up unbounded, but a thousand-frame file still pays for
+// whatever the cache holds. The bound is on ENTRY COUNT, and entries are heterogeneous: the
+// outline hands canvas-visible SECTIONs over as frame roots (server content.ts `pageFromRest`),
+// so one cache slot can hold a many-frame Section subtree (real file: 18 frames + 21 texts,
+// 51 KB for one Section's children) — capacity 300 is 300 roots, not 300 screens. The fetcher
+// is injected so the tests run without a client, and the canvas can swap in the Figma Link path.
 
 export interface NodeBatch {
   nodes: Record<string, FigmaNode | null>;
@@ -27,20 +33,30 @@ function findParentInSubtree(node: FigmaNode, childId: string): FigmaNode | null
 
 export class FrameStore {
   private readonly cache: LruCache<FigmaNode | null>;
-  private readonly components = new Map<string, FigmaComponentMeta>();
+  // Component metadata is as unbounded as the subtrees that reference it, so it rides the same
+  // LRU budget: a thousand-component file must not keep every meta seen since first paint.
+  private readonly components: LruCache<FigmaComponentMeta>;
   private readonly pending = new Set<string>();
   private readonly inflight = new Set<string>();
   private readonly listeners = new Set<() => void>();
   private flushScheduled = false;
+  // Bumped by invalidate(): batches that were already awaiting the fetcher when the cache was
+  // dropped belong to the old generation and must not repopulate the fresh cache, or the next
+  // load() sees them as cached and the re-fetch the doc promises never happens.
+  private epoch = 0;
+  // Monotonic content counter: subscribers must see a replacement at LRU capacity (loadedCount
+  // stays equal while a subtree is swapped out and another in), so React snapshots key on this.
+  private revision = 0;
   private settlePromise: Promise<void> | null = null;
   private settleResolve: (() => void) | null = null;
 
   constructor(
-    private readonly fetchNodes: FetchNodeSubtrees,
+    private fetchNodes: FetchNodeSubtrees,
     readonly capacity: number = 300,
     readonly batchMax: number = MAX_IDS_PER_REQUEST,
   ) {
     this.cache = new LruCache<FigmaNode | null>(capacity);
+    this.components = new LruCache<FigmaComponentMeta>(capacity);
   }
 
   /** Schedule the ids that are not loaded or fetching yet; resolves when every batch lands. */
@@ -63,6 +79,12 @@ export class FrameStore {
       });
     }
     return this.settlePromise;
+  }
+
+  /** Point the store at a new fetch path (host reconnect): the registry keeps the cache,
+   * the caller keeps a live client. Last bind wins — the newest closure is the correct one. */
+  setFetcher(fetchNodes: FetchNodeSubtrees): void {
+    this.fetchNodes = fetchNodes;
   }
 
   /** The loaded subtree: null = confirmed missing, undefined = not loaded (yet). */
@@ -119,15 +141,29 @@ export class FrameStore {
 
   /** Drop everything (version change, figma.file.changed): the next load re-fetches. */
   invalidate(): void {
+    this.epoch += 1;
     this.cache.clear();
     this.components.clear();
     this.pending.clear();
     this.inflight.clear();
+    // The queues are now empty and every in-flight response is dead data: settle waiters that
+    // no further fetch can finish, or an awaited load() would hang until a next request runs.
+    const resolve = this.settleResolve;
+    this.settlePromise = null;
+    this.settleResolve = null;
+    resolve?.();
+    this.revision += 1;
     this.notify();
+  }
+
+  /** Monotonic content version: changes whenever the cache gains, swaps, or drops entries. */
+  revisionSnapshot(): number {
+    return this.revision;
   }
 
   private async flush(): Promise<void> {
     this.flushScheduled = false;
+    const epoch = this.epoch;
     const ids = [...this.pending];
     this.pending.clear();
     for (const id of ids) this.inflight.add(id);
@@ -139,8 +175,21 @@ export class FrameStore {
         } catch {
           // Failed ids fall out of `inflight` and stay out of `cache`, so a later viewport
           // pass retries them; the canvas shows a frame outline meanwhile.
+          if (this.epoch !== epoch) {
+            // A rejection that surfaces after invalidate() belongs to the dead generation:
+            // `inflight` may already carry the same ids re-queued by a newer flush, and deleting
+            // them here would misreport `isPending` and settle the wrong flush's waiter.
+            break;
+          }
           for (const id of batch) this.inflight.delete(id);
           continue;
+        }
+        if (this.epoch !== epoch) {
+          // invalidate() fired while this batch was in flight: the response is pre-invalidation
+          // data. Discard it and stop — invalidate() already dropped these ids from
+          // `inflight`/`pending`, and the remaining chunks of this dead generation are stale
+          // too, so the next load() re-queues whatever the viewport still needs.
+          break;
         }
         for (const [id, meta] of Object.entries(result.components ?? {}))
           this.components.set(id, meta);
@@ -148,6 +197,7 @@ export class FrameStore {
           this.cache.set(id, result.nodes[id] ?? null);
           this.inflight.delete(id);
         }
+        this.revision += 1;
         this.notify();
       }
     } finally {
@@ -174,6 +224,25 @@ export class FrameStore {
 
 const stores = new Map<string, FrameStore>();
 
+/** Registry ceiling: superseded reload/version scopes must not pile up full LRU caches forever. */
+export const MAX_STORE_REGISTRY_SIZE = 12;
+
+function touchStore(key: string, store: FrameStore): FrameStore {
+  stores.delete(key);
+  stores.set(key, store);
+  while (stores.size > MAX_STORE_REGISTRY_SIZE) {
+    const oldest = stores.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    const evicted = stores.get(oldest);
+    stores.delete(oldest);
+    // Free the subtree memory now: a store still mounted somewhere may repopulate, but an
+    // evicted store must never serve its old cache after it left the registry (and a late
+    // in-flight response must not repopulate it — same generation rule as a drop).
+    evicted?.invalidate();
+  }
+  return store;
+}
+
 /** One shared store per (scope, file, version): remounts keep loaded subtrees, versions don't mix. */
 export function getFrameStore(
   scope: string,
@@ -182,12 +251,21 @@ export function getFrameStore(
   fetchNodes: FetchNodeSubtrees,
 ): FrameStore {
   const key = `${scope}\u0000${fileKey}\u0000${version ?? "live"}`;
-  let store = stores.get(key);
-  if (!store) {
-    store = new FrameStore(fetchNodes);
-    stores.set(key, store);
+  const store = stores.get(key);
+  if (store) {
+    // Reuse the cache, rebind the fetch path: after a host reconnect the newest closure holds
+    // the live client, while reusing the store keeps panning back free of charge.
+    store.setFetcher(fetchNodes);
+    return touchStore(key, store);
   }
-  return store;
+  const created = new FrameStore(fetchNodes);
+  stores.set(key, created);
+  return touchStore(key, created);
+}
+
+/** Number of stores the registry currently retains (tests / diagnostics). */
+export function frameStoreRegistrySize(): number {
+  return stores.size;
 }
 
 /** Forget every cached subtree for a file; `scope` narrows to one session, "*" drops all of them. */
@@ -196,6 +274,10 @@ export function dropFrameStores(scope: string, fileKey: string): void {
     const [keyScope, keyFile] = key.split("\u0000");
     if (keyFile !== fileKey) continue;
     if (scope !== "*" && keyScope !== scope) continue;
+    const store = stores.get(key);
     stores.delete(key);
+    // Invalidate before unlinking: a batch still awaiting the fetcher belongs to a dropped
+    // generation and must not repopulate the obsolete store when it finally lands.
+    store?.invalidate();
   }
 }

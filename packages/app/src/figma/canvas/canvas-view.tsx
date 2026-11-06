@@ -1,7 +1,7 @@
 import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Image, PanResponder, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import type { FigmaNode, FigmaPage } from "@jagentdesk/protocol/figma/rpc-schemas";
+import type { FigmaBytes, FigmaNode, FigmaPage } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { isWeb } from "@/constants/platform";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import type { Theme } from "@/styles/theme";
@@ -379,8 +379,60 @@ function drawSelectionBox(
   }
 }
 
+/** Keep this many rendered tiles in memory on the native viewer; visible tiles never evict. */
+export const MAX_RASTER_TILES = 64;
+
+/**
+ * Cap the native raster cache: the spec keeps no drawing objects outside the viewport, so tiles
+ * that scrolled away expire oldest-first once the cache outgrows `max`. Currently visible tiles
+ * stay regardless (they are being painted), and every dropped id is reported so the caller can
+ * forget it from its request ledger and re-fetch when the frame scrolls back.
+ */
+export function pruneRasterCache(
+  cached: Record<string, string>,
+  visibleIds: readonly string[],
+  max: number = MAX_RASTER_TILES,
+): { rasters: Record<string, string>; dropped: string[] } {
+  const keys = Object.keys(cached);
+  if (keys.length <= max) return { rasters: cached, dropped: [] };
+  const visible = new Set(visibleIds);
+  const hidden = keys.filter((id) => !visible.has(id));
+  const keepHidden = Math.max(0, max - keys.filter((id) => visible.has(id)).length);
+  const keep = new Set<string>([...visible, ...hidden.slice(hidden.length - keepHidden)]);
+  const rasters: Record<string, string> = {};
+  const dropped: string[] = [];
+  for (const id of keys) {
+    if (keep.has(id)) rasters[id] = cached[id] as string;
+    else dropped.push(id);
+  }
+  return { rasters, dropped };
+}
+
+/**
+ * Merge one arrived render batch and enforce the tile cap. The ledger loses dropped ids so a
+ * frame scrolled back into view is requested again.
+ */
+function mergeRasterBatch(
+  current: Record<string, string>,
+  batch: readonly string[],
+  images: Record<string, FigmaBytes>,
+  visibleIds: readonly string[],
+  ledger: Set<string>,
+): Record<string, string> {
+  const next = { ...current };
+  for (const id of batch) {
+    const bytes = images[id];
+    if (bytes) next[id] = `data:${bytes.mimeType};base64,${bytes.dataBase64}`;
+  }
+  // Bound the cache at arrival time, not render time: panning across a 500-frame page
+  // otherwise keeps every tile's base64 payload for the whole session.
+  const pruned = pruneRasterCache(next, visibleIds);
+  for (const id of pruned.dropped) ledger.delete(id);
+  return pruned.rasters;
+}
+
 /** Native (spec 32.5 mobile): same camera math, rasters + pinch/pan through PanResponder. */
-function NativeCanvasLayer(props: {
+export function NativeCanvasLayer(props: {
   serverId: string;
   fileKey: string;
   version: string | null;
@@ -395,9 +447,20 @@ function NativeCanvasLayer(props: {
   const client = useHostRuntimeClient(props.serverId);
   const [rasters, setRasters] = useState<Record<string, string>>({});
   const requested = useRef(new Set<string>());
+  // Rasters belong to one (file, version) snapshot: the versions panel swaps `version` on the
+  // same mounted viewer, and without this ledger the old tiles would render forever — stale
+  // data retained as if it were the new version, and never released.
+  const rasterScope = useRef<string | null>(null);
   useEffect(() => {
     if (!client) return;
-    const missing = visible.map((frame) => frame.id).filter((id) => !requested.current.has(id));
+    const scope = `${fileKey}|${version ?? "live"}`;
+    if (rasterScope.current !== scope) {
+      rasterScope.current = scope;
+      requested.current.clear();
+      setRasters((current) => (Object.keys(current).length === 0 ? current : {}));
+    }
+    const visibleIds = visible.map((frame) => frame.id);
+    const missing = visibleIds.filter((id) => !requested.current.has(id));
     if (missing.length === 0) return;
     for (const id of missing) requested.current.add(id);
     for (let i = 0; i < missing.length; i += 20) {
@@ -410,12 +473,10 @@ function NativeCanvasLayer(props: {
       })
         .then((data) =>
           setRasters((current) => {
-            const next = { ...current };
-            for (const id of batch) {
-              const bytes = data.images[id];
-              if (bytes) next[id] = `data:${bytes.mimeType};base64,${bytes.dataBase64}`;
-            }
-            return next;
+            // A response that crossed a version/file switch belongs to the old scope; the new
+            // scope's effect already re-requested these ids, so drop the stale payload.
+            if (rasterScope.current !== scope) return current;
+            return mergeRasterBatch(current, batch, data.images, visibleIds, requested.current);
           }),
         )
         .catch(() => {

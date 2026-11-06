@@ -4,6 +4,8 @@ import {
   FrameStore,
   getFrameStore,
   dropFrameStores,
+  frameStoreRegistrySize,
+  MAX_STORE_REGISTRY_SIZE,
   type FetchNodeSubtrees,
   type NodeBatch,
 } from "./frame-store";
@@ -28,6 +30,11 @@ function recordingFetcher() {
     return { nodes, components };
   });
   return { calls, fetchNodes };
+}
+
+/** Flush the microtask queue long enough for awaiting fetch continuations to settle. */
+async function drainMicrotasks(): Promise<void> {
+  for (let i = 0; i < 10; i += 1) await Promise.resolve();
 }
 
 describe("FrameStore lazy batching", () => {
@@ -184,6 +191,130 @@ describe("FrameStore lazy batching", () => {
     store.invalidate();
     expect(store.componentMeta("1:1")).toBeUndefined();
   });
+
+  it("caps component metadata at the store capacity, oldest first", async () => {
+    const { fetchNodes } = recordingFetcher();
+    const store = new FrameStore(fetchNodes, 2, 50);
+    await store.load(["1:1", "1:2", "1:3"]);
+    // Regression: metadata was an unbounded Map, so a component-heavy file kept every meta
+    // ever seen while the subtree cache itself was LRU-capped.
+    expect(store.componentMeta("1:1")).toBeUndefined();
+    expect(store.componentMeta("1:2")).toEqual({ key: "k-1:2", name: "Component 1:2" });
+    expect(store.componentMeta("1:3")).toEqual({
+      key: "k-1:3",
+      name: "Component 1:3",
+      remote: false,
+    });
+  });
+
+  it("discards an in-flight batch that crosses invalidate() and re-fetches after", async () => {
+    // Regression: invalidate() cleared `inflight`, but a response already awaiting the fetcher
+    // still landed in the fresh cache, so the "next load re-fetches" promise silently kept
+    // serving pre-invalidation data.
+    const releases: Array<(batch: NodeBatch) => void> = [];
+    const fetchNodes = vi.fn(
+      () =>
+        new Promise<NodeBatch>((resolve) => {
+          releases.push(resolve);
+        }),
+    );
+    const store = new FrameStore(fetchNodes);
+    const settled = store.load(["1:1"]);
+    await vi.waitFor(() => expect(fetchNodes).toHaveBeenCalledTimes(1));
+    store.invalidate();
+    releases[0]!({
+      nodes: { "1:1": makeNode({ id: "1:1", name: "stale" }) },
+      components: { "1:1": { key: "k-stale", name: "Stale" } },
+    });
+    await settled;
+    expect(store.get("1:1")).toBeUndefined();
+    expect(store.componentMeta("1:1")).toBeUndefined();
+
+    void store.load(["1:1"]);
+    await vi.waitFor(() => expect(fetchNodes).toHaveBeenCalledTimes(2));
+    releases[1]!({
+      nodes: { "1:1": makeNode({ id: "1:1", name: "fresh" }) },
+      components: {},
+    });
+    await vi.waitFor(() => expect(store.get("1:1")?.name).toBe("fresh"));
+  });
+
+  it("keeps the new generation's in-flight ids when a dead batch rejects late", async () => {
+    // Regression: the catch branch deleted the batch's ids from `inflight` unconditionally, so a
+    // rejection surfacing after invalidate() + a fresh load of the same ids cleared the NEW
+    // flush's in-flight marks — isPending lied and the wrong waiter could settle.
+    const settles: Array<{
+      resolve: (batch: NodeBatch) => void;
+      reject: (error: Error) => void;
+    }> = [];
+    const fetchNodes = vi.fn(
+      () =>
+        new Promise<NodeBatch>((resolve, reject) => {
+          settles.push({ resolve, reject });
+        }),
+    );
+    const store = new FrameStore(fetchNodes);
+    void store.load(["1:1"]);
+    await vi.waitFor(() => expect(fetchNodes).toHaveBeenCalledTimes(1));
+    store.invalidate();
+    void store.load(["1:1"]);
+    await vi.waitFor(() => expect(fetchNodes).toHaveBeenCalledTimes(2));
+    expect(store.isPending("1:1")).toBe(true);
+
+    settles[0]!.reject(new Error("dead generation"));
+    await drainMicrotasks();
+    expect(store.isPending("1:1")).toBe(true); // the live batch still owns the id
+
+    settles[1]!.resolve({
+      nodes: { "1:1": makeNode({ id: "1:1", name: "fresh" }) },
+      components: {},
+    });
+    await vi.waitFor(() => expect(store.get("1:1")?.name).toBe("fresh"));
+    expect(store.isPending("1:1")).toBe(false);
+  });
+
+  it("settles load() waiters when invalidate() drops the only in-flight batch", async () => {
+    // The fetcher never resolves: after invalidate() no running request can ever finish, so the
+    // waiter must settle from invalidate() itself instead of hanging.
+    const fetchNodes = vi.fn(() => new Promise<NodeBatch>(() => {}));
+    const store = new FrameStore(fetchNodes);
+    const settled = store.load(["1:1"]);
+    await vi.waitFor(() => expect(fetchNodes).toHaveBeenCalledTimes(1));
+    store.invalidate();
+    let resolved = false;
+    void settled.then(
+      () => (resolved = true),
+      () => (resolved = false),
+    );
+    await drainMicrotasks();
+    expect(resolved).toBe(true);
+  });
+
+  it("notifies on a capacity replacement that keeps loadedCount equal", async () => {
+    const { fetchNodes } = recordingFetcher();
+    const store = new FrameStore(fetchNodes, 2, 50);
+    await store.load(["1:1", "1:2"]);
+    const listener = vi.fn();
+    store.subscribe(listener);
+    const revisionBefore = store.revisionSnapshot();
+    expect(store.loadedCount()).toBe(2);
+
+    await store.load(["1:3"]); // evicts 1:1, count stays 2
+    expect(store.loadedCount()).toBe(2);
+    expect(store.revisionSnapshot()).toBeGreaterThan(revisionBefore);
+    expect(listener).toHaveBeenCalled();
+    expect(store.get("1:1")).toBeUndefined();
+    expect(store.get("1:3")?.id).toBe("1:3");
+  });
+
+  it("leaves a batch fetched entirely after invalidate() alone in charge of its results", async () => {
+    const { calls, fetchNodes } = recordingFetcher();
+    const store = new FrameStore(fetchNodes);
+    store.invalidate();
+    await store.load(["1:1"]);
+    expect(calls).toEqual([["1:1"]]);
+    expect(store.get("1:1")?.id).toBe("1:1");
+  });
 });
 
 describe("FrameStore.parentOf", () => {
@@ -237,5 +368,95 @@ describe("store registry", () => {
     expect(getFrameStore("x1", "fileA", undefined, fetchNodes)).not.toBe(first);
     expect(getFrameStore("x2", "fileA", "3", fetchNodes)).not.toBe(second);
     expect(getFrameStore("x1", "fileB", undefined, fetchNodes)).toBe(untouched);
+  });
+
+  it("rebinds the fetch path when a shared store is requested with a newer fetcher", async () => {
+    // Regression: the registry reused the store with the fetcher captured at creation, so after
+    // a host reconnect every subtree request went to the dead client until the next file change.
+    const callsA: string[][] = [];
+    const fetcherA = vi.fn(async (ids: readonly string[]) => {
+      callsA.push([...ids]);
+      return { nodes: { [ids[0] as string]: makeNode({ id: ids[0] as string }) }, components: {} };
+    });
+    const callsB: string[][] = [];
+    const fetcherB = vi.fn(async (ids: readonly string[]) => {
+      callsB.push([...ids]);
+      return { nodes: { [ids[0] as string]: makeNode({ id: ids[0] as string }) }, components: {} };
+    });
+    const store = getFrameStore("rebind", "file", undefined, fetcherA);
+    const same = getFrameStore("rebind", "file", undefined, fetcherB);
+    expect(same).toBe(store);
+    void same.load(["1:1"]);
+    await vi.waitFor(() => expect(fetcherB).toHaveBeenCalledTimes(1));
+    expect(fetcherA).not.toHaveBeenCalled();
+    expect(callsB).toEqual([["1:1"]]);
+  });
+
+  it("evicts the least recently used stores past the registry cap", () => {
+    const { fetchNodes } = recordingFetcher();
+    const created: FrameStore[] = [];
+    for (let i = 0; i < MAX_STORE_REGISTRY_SIZE + 3; i += 1) {
+      created.push(getFrameStore(`cap${i}`, "capfile", undefined, fetchNodes));
+    }
+    expect(frameStoreRegistrySize()).toBe(MAX_STORE_REGISTRY_SIZE);
+    // The newest survive; the evicted oldest ones come back as fresh stores on demand.
+    const newest = created[created.length - 1] as FrameStore;
+    expect(
+      getFrameStore(`cap${MAX_STORE_REGISTRY_SIZE + 2}`, "capfile", undefined, fetchNodes),
+    ).toBe(newest);
+    const oldest = created[0] as FrameStore;
+    expect(getFrameStore("cap0", "capfile", undefined, fetchNodes)).not.toBe(oldest);
+  });
+
+  it("releases cached subtrees when a store is evicted from the registry", async () => {
+    // Regression: unlinking the entry left a full LRU cache on the orphan store — bounded
+    // count, but every evicted store kept its complete multi-frame subtree retention alive.
+    const { fetchNodes } = recordingFetcher();
+    const evicted = getFrameStore("evict-me", "evictfile", undefined, fetchNodes);
+    await evicted.load(["1:1"]);
+    expect(evicted.get("1:1")?.id).toBe("1:1");
+    for (let i = 0; i < MAX_STORE_REGISTRY_SIZE; i += 1) {
+      getFrameStore(`post${i}`, `postfile${i}`, undefined, fetchNodes);
+    }
+    expect(frameStoreRegistrySize()).toBe(MAX_STORE_REGISTRY_SIZE);
+    expect(evicted.loadedCount()).toBe(0);
+    expect(evicted.loadedIds()).toEqual([]);
+    expect(getFrameStore("evict-me", "evictfile", undefined, fetchNodes)).not.toBe(evicted);
+  });
+
+  it("keeps a reused store inside the registry by refreshing its recency", () => {
+    const { fetchNodes } = recordingFetcher();
+    const survivor = getFrameStore("hot", "capfile", undefined, fetchNodes);
+    for (let i = 0; i < MAX_STORE_REGISTRY_SIZE; i += 1) {
+      getFrameStore(`fill${i}`, `fillfile${i}`, undefined, fetchNodes);
+      // Each round re-touches the survivor, so it never becomes the oldest entry.
+      expect(getFrameStore("hot", "capfile", undefined, fetchNodes)).toBe(survivor);
+    }
+    expect(frameStoreRegistrySize()).toBe(MAX_STORE_REGISTRY_SIZE);
+  });
+
+  it("cannot let a late response repopulate a store dropped mid-flight", async () => {
+    // Regression: dropFrameStores only unlinked the entry, so a batch still awaiting the fetcher
+    // landed in the obsolete store's cache afterwards and the instance looked freshly loaded.
+    const releases: Array<(batch: NodeBatch) => void> = [];
+    const fetchNodes = vi.fn(
+      () =>
+        new Promise<NodeBatch>((resolve) => {
+          releases.push(resolve);
+        }),
+    );
+    const store = getFrameStore("dropped", "latefile", undefined, fetchNodes);
+    const waiter = store.load(["1:1"]);
+    await vi.waitFor(() => expect(fetchNodes).toHaveBeenCalledTimes(1));
+    dropFrameStores("dropped", "latefile");
+    await waiter; // invalidate-on-drop settles the waiter instead of hanging on the dead batch
+    releases[0]!({ nodes: { "1:1": makeNode({ id: "1:1" }) }, components: {} });
+    await drainMicrotasks();
+    expect(store.get("1:1")).toBeUndefined(); // the dead-generation response was discarded
+
+    void store.load(["1:1"]); // a post-drop load on the still-mounted instance re-fetches
+    await vi.waitFor(() => expect(fetchNodes).toHaveBeenCalledTimes(2));
+    releases[1]!({ nodes: { "1:1": makeNode({ id: "1:1", name: "again" }) }, components: {} });
+    await vi.waitFor(() => expect(store.get("1:1")?.name).toBe("again"));
   });
 });
