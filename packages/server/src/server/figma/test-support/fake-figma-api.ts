@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 // A fake api.figma.com for tests only (no real network calls to Figma). Routing and response
 // shapes follow the official endpoints cited in the research doc (figma-integration.md §3, §4):
 //   GET /v1/files/:key/meta         Tier 3  → { file: { name, version, last_touched_at, thumbnail_url, editorType } }
-//   GET /v1/teams/:team_id/projects Tier 2 → { name, projects: [{ key, name }] }
+//   GET /v1/teams/:team_id/projects Tier 2 → { name, projects: [{ id, name }] }
 //   GET /v1/projects/:id/files      Tier 2 → { name, files: [{ key, name, last_modified }] }
 //   GET /images/<name>              S3-style bytes, never authenticated
 // Every request is logged (method, path, query, Authorization) so tests can assert what the
@@ -52,7 +52,7 @@ export function documentedFileMeta(fileKey: string, meta: FakeFileMeta): FakeFil
 
 export interface FakeTeam {
   name: string;
-  projects: Array<{ key: string; name: string }>;
+  projects: Array<{ id: string; name: string }>;
 }
 
 export interface FakeProject {

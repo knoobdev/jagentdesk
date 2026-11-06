@@ -14,7 +14,7 @@ import type { FigmaHandlerMap } from "./types.js";
 // Figma has no "my files" API (research §3.3): the file list is user-pasted URLs or keys and the
 // daemon fetches each file's name from `GET /v1/files/:key/meta` (Tier 3). Teams are pasted too;
 // browsing a team's projects needs the folders/projects endpoints, which public OAuth apps cannot
-// use — a 403/404 there becomes `forbidden` telling the user to paste file URLs instead.
+// use. Browsing requires projects:read on a private OAuth app; provider errors retain their cause.
 
 export type FilesRequestType =
   | "figma.files.list.request"
@@ -61,8 +61,11 @@ export function parseFigmaTeamUrl(input: string): string | null {
   if (BARE_KEY.test(trimmed)) return trimmed;
   const segments = figmaUrlSegments(input);
   if (!segments || segments.length < 3) return null;
-  if (!(segments[0].toLowerCase() === "files" && segments[1].toLowerCase() === "team")) return null;
-  return BARE_KEY.test(segments[2]) ? segments[2] : null;
+  if (segments[0].toLowerCase() !== "files") return null;
+  let id: string | undefined;
+  if (segments[1].toLowerCase() === "team") id = segments[2];
+  else if (segments[2]?.toLowerCase() === "team") id = segments[3];
+  return id && BARE_KEY.test(id) ? id : null;
 }
 
 interface FileMetaBody {
@@ -151,7 +154,7 @@ async function getFileMeta(
   return meta;
 }
 
-/** Team/project browsing endpoints: public apps answer 403/404 (research §3.3). */
+/** Preserve the provider denial and distinguish it from a missing team/project. */
 async function getBrowseJson<T>(
   ctx: FigmaContext,
   input: Parameters<FigmaContext["rest"]["getJson"]>[0],
@@ -159,13 +162,13 @@ async function getBrowseJson<T>(
   try {
     return await ctx.rest.getJson<T>(input);
   } catch (error) {
-    if (
-      error instanceof FigmaServiceError &&
-      (error.code === "forbidden" || error.code === "not_found")
-    ) {
+    if (error instanceof FigmaServiceError && error.code === "forbidden") {
       throw new FigmaServiceError(
         "forbidden",
-        "Figma could not browse this team with your app — paste file URLs instead.",
+        `Figma refused this team/project request (403: ${error.message}). Check that your ` +
+          `private OAuth app allows projects:read and that the connected account can access ` +
+          `this team/project. The specific cause of this refusal is not known.`,
+        error.extra,
       );
     }
     throw error;
@@ -276,7 +279,7 @@ export const filesHandlers: FigmaHandlerMap<FilesRequestType> = {
     const mapped: FigmaProject[] = [];
     for (const project of projects) {
       const record = project as Record<string, unknown>;
-      const id = optionalString(record.key);
+      const id = optionalString(record.id);
       const name = optionalString(record.name);
       if (id && name) mapped.push({ id, name });
     }

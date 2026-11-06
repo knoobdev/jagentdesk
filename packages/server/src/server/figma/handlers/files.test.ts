@@ -113,6 +113,7 @@ describe("parseFigmaTeamUrl", () => {
     );
     expect(parseFigmaTeamUrl("figma.com/files/team/222")).toBe("222");
     expect(parseFigmaTeamUrl("333")).toBe("333");
+    expect(parseFigmaTeamUrl("https://www.figma.com/files/222/team/111/all-projects")).toBe("111");
   });
 
   it("rejects non-team URLs and junk", () => {
@@ -359,7 +360,7 @@ describe("figma.files list / remove / pin", () => {
 
 describe("figma.teams", () => {
   it("validates and names the team from the projects endpoint when adding", async () => {
-    api.teams.set("111", { name: "Design Org", projects: [{ key: "P1", name: "Web" }] });
+    api.teams.set("111", { name: "Design Org", projects: [{ id: "P1", name: "Web" }] });
     const response = await filesHandlers["figma.teams.add.request"](
       {
         type: "figma.teams.add.request",
@@ -378,10 +379,10 @@ describe("figma.teams", () => {
     api.teams.set("111", {
       name: "Design Org",
       projects: [
-        { key: "P1", name: "Web" },
-        { key: "P2", name: "Mobile" },
-        { key: "P3", name: "No name" },
-        { key: "P4", name: 7 } as unknown as { key: string; name: string },
+        { id: "P1", name: "Web" },
+        { id: "P2", name: "Mobile" },
+        { id: "P3", name: "No name" },
+        { id: "P4", name: 7 } as unknown as { id: string; name: string },
       ],
     });
     api.projects.set("P1", {
@@ -453,7 +454,7 @@ describe("figma.teams", () => {
     expect(await ctx.store.listTeams(CONNECTION)).toEqual([]);
   });
 
-  it("turns browse-endpoint 403/404 into forbidden with the paste-file-URLs advice", async () => {
+  it("preserves browse denials and not-found errors without paste-file advice", async () => {
     api.browseEnabled = false; // public app: Figma answers 403 on projects/files
     const error = await expectError(
       filesHandlers["figma.teams.projects.request"](
@@ -468,7 +469,11 @@ describe("figma.teams", () => {
       ),
       "forbidden",
     );
-    expect(error.message).toContain("paste file URLs");
+    expect(error.message).toContain("projects:read");
+    expect(error.message).toContain(
+      "OAuth application is not verified or some of the required scopes were not granted.",
+    );
+    expect(error.message).not.toContain("paste file URLs");
 
     await expectError(
       filesHandlers["figma.teams.files.request"](
@@ -484,7 +489,7 @@ describe("figma.teams", () => {
       "forbidden",
     );
 
-    // A 404 (unknown team) is forbidden advice too, while rate limits keep their own code.
+    // An unknown team stays not_found; it must not be reported as an authorization failure.
     api.browseEnabled = true;
     await expectError(
       filesHandlers["figma.teams.projects.request"](
@@ -497,7 +502,7 @@ describe("figma.teams", () => {
         ctx,
         session,
       ),
-      "forbidden",
+      "not_found",
     );
     api.enqueue({ status: 429, headers: { "Retry-After": "30" } });
     await expectError(
