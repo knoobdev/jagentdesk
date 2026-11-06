@@ -12,6 +12,7 @@ import {
 } from "./content.js";
 import type { FigmaHandlerMap, FigmaRequestOf } from "./types.js";
 import type { ContentRequestType } from "./content.js";
+import { FigmaServiceError } from "../context.js";
 import {
   makeFile,
   makeFigmaApi,
@@ -1981,5 +1982,245 @@ describe("nodes depth=1 metadata read (ADR-0039)", () => {
       SESSION,
     );
     expect(full.nodes["missing"]).toMatchObject({ name: "Node missing" });
+  });
+});
+
+// ── ADR-0042: render fidelity (packet C3) ─────────────────────────────────────
+
+describe("render fidelity (ADR-0042)", () => {
+  const SVG = Buffer.from("<svg><path/></svg>");
+
+  function renderRequest(params: Record<string, unknown> = {}) {
+    return {
+      requestId: "r1",
+      type: "figma.file.render.request",
+      fileKey: FILE,
+      ids: ["1:2"],
+      scale: 2,
+      ...params,
+    } as Parameters<(typeof fixture.handlers)["figma.file.render.request"]>[0];
+  }
+
+  function respondImage(url: string, mimeType: string, data: Buffer): void {
+    fixture.api.rest.respond(`/v1/images/${FILE}`, ({ query }) => ({
+      images: { [String(query.ids)]: url },
+    }));
+    fixture.api.rest.provideBytes(url, { mimeType, data });
+  }
+
+  function onlyImageQuery(): Record<string, unknown> {
+    const calls = fixture.api.rest.callsTo(`/v1/images/${FILE}`);
+    expect(calls).toHaveLength(1);
+    return calls[0]!.query;
+  }
+
+  async function render(params: Record<string, unknown> = {}) {
+    return fixture.handlers["figma.file.render.request"](
+      renderRequest(params),
+      fixture.api.ctx,
+      SESSION,
+    );
+  }
+
+  // The clarified contract: fidelity (svg or absolute) must carry a non-empty explicit version,
+  // refused BEFORE any REST dispatch and without touching the plugin — even while linked.
+  it("fidelity without an explicit version is refused before REST and without the plugin", async () => {
+    fixture.api.link.linked.add(FILE); // a linked file must not rescue it either
+    const missing: Record<string, unknown>[] = [
+      { format: "svg" }, // no version at all
+      { useAbsoluteBounds: true },
+      { format: "svg", version: "" }, // blank
+      { format: "svg", useAbsoluteBounds: true, version: "   " }, // whitespace
+    ];
+    for (const params of missing) {
+      const error = await render(params).catch((caught: unknown) => caught);
+      expect(error, JSON.stringify(params)).toBeInstanceOf(FigmaServiceError);
+      expect((error as FigmaServiceError).code).toBe("invalid_input");
+      expect((error as FigmaServiceError).message).toContain("version");
+    }
+    expect(fixture.api.rest.callsTo(`/v1/images/${FILE}`)).toEqual([]);
+    expect(fixture.api.link.toolCalls).toEqual([]);
+  });
+
+  it("legacy png/jpg unversioned keep their released live semantics (not refused)", async () => {
+    respondImage("https://s3.test/png", "image/png", PNG);
+    await expect(render({ format: "png" })).resolves.toMatchObject({ source: "rest" });
+    respondImage("https://s3.test/jpg", "image/jpeg", PNG);
+    await expect(render({ format: "jpg" })).resolves.toMatchObject({ source: "rest" });
+  });
+
+  it("plain png crop keeps the released query byte-for-byte — no new flags", async () => {
+    respondImage("https://s3.test/png", "image/png", PNG);
+    const out = await render();
+    // Exact object equality: an absent option must not even send `undefined` flags.
+    expect(onlyImageQuery()).toEqual({ ids: "1:2", scale: 2, format: "png", version: "v1" });
+    expect(out.images["1:2"]).toMatchObject({ mimeType: "image/png" });
+  });
+
+  it("jpg crop keeps the released query too", async () => {
+    respondImage("https://s3.test/jpg", "image/jpeg", PNG);
+    await render({ format: "jpg" });
+    expect(onlyImageQuery()).toEqual({ ids: "1:2", scale: 2, format: "jpg", version: "v1" });
+  });
+
+  it("svg requests text outlines over REST and return svg bytes", async () => {
+    respondImage("https://s3.test/svg", "image/svg+xml", SVG);
+    const out = await render({ format: "svg", version: "v1" });
+    const query = onlyImageQuery();
+    expect(query.format).toBe("svg");
+    expect(query.svg_outline_text).toBe("true");
+    expect(query).not.toHaveProperty("use_absolute_bounds");
+    expect(out.images["1:2"]!.mimeType).toBe("image/svg+xml");
+    expect(Buffer.from(out.images["1:2"]!.dataBase64, "base64")).toEqual(SVG);
+  });
+
+  it("absolute bounds maps exactly to use_absolute_bounds=true", async () => {
+    respondImage("https://s3.test/abs", "image/png", PNG);
+    await render({ useAbsoluteBounds: true, version: "v1" });
+    const query = onlyImageQuery();
+    expect(query.use_absolute_bounds).toBe("true");
+    expect(query).not.toHaveProperty("svg_outline_text");
+  });
+
+  it("svg + absolute carries both flags", async () => {
+    respondImage("https://s3.test/both", "image/svg+xml", SVG);
+    await render({ format: "svg", useAbsoluteBounds: true, version: "v1" });
+    expect(onlyImageQuery()).toMatchObject({
+      ids: "1:2",
+      scale: 2,
+      format: "svg",
+      version: "v1",
+      svg_outline_text: "true",
+      use_absolute_bounds: "true",
+    });
+  });
+
+  it("fidelity requests never reach the live plugin even while linked", async () => {
+    fixture.api.link.linked.add(FILE);
+    let pluginAsked = 0;
+    fixture.api.link.exportImpl = () => {
+      pluginAsked += 1;
+      return { mimeType: "image/png", data: PNG };
+    };
+    respondImage("https://s3.test/never-via-link", "image/svg+xml", SVG);
+    const svg = await render({ format: "svg", version: "v1" });
+    respondImage("https://s3.test/abs-via-rest", "image/png", PNG);
+    const absolute = await render({ useAbsoluteBounds: true, version: "v1" });
+    expect(svg.source).toBe("rest");
+    expect(absolute.source).toBe("rest");
+    expect(pluginAsked).toBe(0);
+    expect(fixture.api.link.toolCalls).toEqual([]); // not even a probe of the plugin
+  });
+
+  it("the old crop path still uses the plugin when linked (semantics preserved)", async () => {
+    fixture.api.link.linked.add(FILE);
+    fixture.api.link.exportImpl = () => ({ mimeType: "image/png", data: PNG });
+    const out = await render();
+    expect(out.source).toBe("link");
+    expect(fixture.api.link.toolCalls.map((c) => c.tool)).toEqual(["exportNode"]);
+    expect(fixture.api.rest.callsTo(`/v1/images/${FILE}`)).toEqual([]);
+  });
+
+  it("absolute bytes are never served from, nor collided with, the crop cache", async () => {
+    // Bytes the released code cached for the CROP semantics of this exact file/id/scale/format/version.
+    const cropKey = `render-rest/${FILE}/1:2@2x@png@v1`;
+    fixture.api.cache.putBytes(cropKey, { mimeType: "image/png", data: PNG });
+
+    respondImage("https://s3.test/absolute", "image/png", PNG);
+    const absolute = await render({ useAbsoluteBounds: true, version: "v1" });
+    // The crop entry must NOT answer an absolute request: exactly one REST call, with the new flag.
+    expect(onlyImageQuery().use_absolute_bounds).toBe("true");
+
+    const absoluteKey = `render-rest/${FILE}/1:2@2x@png@absolute@v1`;
+    expect(await fixture.api.cache.getBytes(absoluteKey)).not.toBeNull();
+    // The crop entry is a separate namespace, not overwritten by the absolute store.
+    expect(await fixture.api.cache.getBytes(cropKey)).not.toBeNull();
+
+    // Second absolute request: served from its own key, no second REST round-trip...
+    const before = fixture.api.rest.callsTo(`/v1/images/${FILE}`).length;
+    const again = await render({ useAbsoluteBounds: true, version: "v1" });
+    expect(fixture.api.rest.callsTo(`/v1/images/${FILE}`)).toHaveLength(before);
+    expect(again.images["1:2"]).toEqual(absolute.images["1:2"]);
+
+    // ...and the crop request is STILL served from the original crop key (untouched bytes).
+    const crop = await render();
+    // no new images REST call for the crop either (served from the crop namespace)
+    expect(fixture.api.rest.callsTo(`/v1/images/${FILE}`)).toHaveLength(before);
+    expect(crop.images["1:2"]).toEqual(absolute.images["1:2"]); // same png bytes, different namespace
+  });
+
+  it("a pinned-version fidelity request answers from REST for that version", async () => {
+    // Same pinned rule as the crop snapshot path (32.1): the fidelity query carries the
+    // requested version, and its cache key is versioned too — never the current one.
+    respondImage("https://s3.test/pinned-absolute", "image/png", PNG);
+    const out = await render({ version: "v9", useAbsoluteBounds: true });
+    expect(out.source).toBe("rest");
+    expect(onlyImageQuery()).toMatchObject({ version: "v9", use_absolute_bounds: "true" });
+    expect(
+      await fixture.api.cache.getBytes(`render-rest/${FILE}/1:2@2x@png@absolute@v9`),
+    ).not.toBeNull();
+    expect(await fixture.api.cache.getBytes(`render-rest/${FILE}/1:2@2x@png@v9`)).toBeNull();
+  });
+
+  it("single-file export keeps its existing semantics — no ADR-0042 flags on its query", async () => {
+    // ADR-0042 is a render-only contract: export must not gain the new options implicitly.
+    fixture.api.rest.respond(`/v1/files/${FILE}/nodes`, () => ({
+      version: "v1",
+      nodes: { "1:2": { id: "1:2", name: "Hero", type: "FRAME" } },
+    }));
+    fixture.api.rest.respond(`/v1/images/${FILE}`, ({ query }) => ({
+      images: { [String(query.ids)]: "https://s3.test/export" },
+    }));
+    fixture.api.rest.provideBytes("https://s3.test/export", { mimeType: "image/png", data: PNG });
+    const out = await fixture.handlers["figma.file.export.request"](
+      {
+        requestId: "r1",
+        type: "figma.file.export.request",
+        fileKey: FILE,
+        nodeId: "1:2",
+        format: "png",
+        scale: 2,
+      },
+      fixture.api.ctx,
+      SESSION,
+    );
+    expect(out.file).not.toBeNull();
+    const calls = fixture.api.rest.callsTo(`/v1/images/${FILE}`);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.query).not.toHaveProperty("svg_outline_text");
+    expect(calls[0]!.query).not.toHaveProperty("use_absolute_bounds");
+  });
+
+  it("legacy single-file export SVG with a linked file still goes through the plugin", async () => {
+    // The pre-ADR-0042 behavior root review restored: the renderNodes route must not gain a
+    // format guard — export answers from the plugin's own svg export while linked.
+    fixture.api.link.linked.add(FILE);
+    fixture.api.rest.respond(`/v1/files/${FILE}/nodes`, () => ({
+      version: "v1",
+      nodes: { "1:2": { id: "1:2", name: "Hero", type: "FRAME" } },
+    }));
+    let pluginArgs: Record<string, unknown> | null = null;
+    fixture.api.link.exportImpl = (nodeId, format, scale) => {
+      pluginArgs = { nodeId, format, scale };
+      return { mimeType: "image/svg+xml", data: SVG };
+    };
+    const out = await fixture.handlers["figma.file.export.request"](
+      {
+        requestId: "r1",
+        type: "figma.file.export.request",
+        fileKey: FILE,
+        nodeId: "1:2",
+        format: "svg",
+        scale: 2,
+      },
+      fixture.api.ctx,
+      SESSION,
+    );
+    expect(pluginArgs).toEqual({ nodeId: "1:2", format: "svg", scale: 2 });
+    expect(out.fileName).toBe("Hero@2x.svg");
+    expect(out.file!.mimeType).toBe("image/svg+xml");
+    expect(Buffer.from(out.file!.dataBase64, "base64")).toEqual(SVG);
+    // No REST images call: the old plugin export path is intact.
+    expect(fixture.api.rest.callsTo(`/v1/images/${FILE}`)).toEqual([]);
   });
 });

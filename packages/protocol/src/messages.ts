@@ -4719,6 +4719,11 @@ export const ServerInfoStatusPayloadSchema = z
         // host strips the unknown field, so sending anyway would pass a point comment off as a
         // successful region create.
         figmaCommentRegions: z.boolean().optional(),
+        // Render fidelity (spec 32.5.1 / ADR-0042): the render `svg` format and
+        // `useAbsoluteBounds`, answered version-pinned over REST only. Clients send the new
+        // payloads only when present; an old host's plugin export would answer them with
+        // wrong-meaning bytes, so PNG-crop stays the fallback there and is not new-quality.
+        figmaRenderFidelity: z.boolean().optional(),
       })
       .optional(),
   })

@@ -2,7 +2,18 @@
 // Everything listed here sends the node to `options.fallbackForNode` (a Figma-rendered raster), and
 // the debug frame (W10) shows the list. Keep this the single source of truth for support status.
 import type { FigmaNode } from "@jagentdesk/protocol/figma/rpc-schemas";
-import { effectsOf, hasHyperlinks, isMask, listStyleOf, maskType, paintsOf } from "./node-props";
+import { boundsIntersect, readBounds, type Bounds } from "./matrix";
+import {
+  absoluteBoxOf,
+  effectsOf,
+  hasHyperlinks,
+  isMask,
+  listStyleOf,
+  maskType,
+  nodeBlendMode,
+  nodeOpacity,
+  paintsOf,
+} from "./node-props";
 
 const DRAWABLE_TYPES = new Set([
   "FRAME",
@@ -80,6 +91,7 @@ export function unsupportedFeatures(node: FigmaNode): string[] {
   if (!STROKE_ALIGNMENTS.has(strokeAlign)) pushFeature(features, `STROKE_ALIGN:${strokeAlign}`);
   if (node.type === "TEXT") pushTextFeatures(node, features);
   pushGeometryAndMaskFeatures(node, features);
+  pushContainerOpacityFeature(node, features);
   return features;
 }
 
@@ -126,6 +138,57 @@ function pushGeometryAndMaskFeatures(node: FigmaNode, features: string[]): void 
     // it on the parent because the parent is what changes visually.
     pushFeature(features, `MASK_TYPE:${maskType(node)}`);
   }
+}
+
+/**
+ * A container whose reduced opacity canvas cannot reproduce faithfully (ADR-0042). Figma
+ * composites a group as one layer; painting each child at parent×child alpha differs wherever
+ * children overlap each other or the container's own paint — so the truthful boundary is the
+ * container node itself: its per-node Figma fallback bakes the group compositing and its own
+ * opacity (controlled proof, render-quality/export-alpha-proof.json: a 0.12 GROUP exports
+ * alphaMax 31/255, a 0.55 FRAME 140/255; re-applying nodeOpacity there drops them to 3 and 77).
+ * Disjoint children in normal blend multiply exactly, so the container stays on the vector
+ * path. Overlap is decided on drawn boxes, so shape-disjoint nodes with intersecting boxes
+ * over-fallback rather than mis-composite.
+ */
+function pushContainerOpacityFeature(node: FigmaNode, features: string[]): void {
+  if (nodeOpacity(node) >= 1) return;
+  const children = node.children ?? [];
+  if (children.length === 0) return;
+  const boxes: Bounds[] = [];
+  if (paintsOf(node, "fills").length > 0 || paintsOf(node, "strokes").length > 0) {
+    const own = drawnBoxOf(node);
+    if (own) boxes.push(own);
+  }
+  if (drawablesOverlap(children, boxes)) pushFeature(features, "CONTAINER_OPACITY");
+}
+
+function drawnBoxOf(node: FigmaNode): Bounds | null {
+  return readBounds(node.absoluteRenderBounds) ?? absoluteBoxOf(node);
+}
+
+/** Pairwise test over every child that paints (masks clip, they do not composite). */
+function drawablesOverlap(children: FigmaNode[], boxes: Bounds[]): boolean {
+  for (const child of children) {
+    if (child.visible === false || isMask(child) || nodeOpacity(child) === 0) continue;
+    // A blend mode reads the backdrop, so group compositing and per-child alpha differ even
+    // for geometrically disjoint nodes.
+    if (nodeBlendMode(child) !== null || hasBlendingPaints(child)) return true;
+    const box = drawnBoxOf(child);
+    if (box) {
+      for (const other of boxes) if (boundsIntersect(other, box)) return true;
+      boxes.push(box);
+    }
+    if (drawablesOverlap(child.children ?? [], boxes)) return true;
+  }
+  return false;
+}
+
+function hasBlendingPaints(node: FigmaNode): boolean {
+  return [...paintsOf(node, "fills"), ...paintsOf(node, "strokes")].some(
+    (paint) =>
+      !!paint.blendMode && paint.blendMode !== "NORMAL" && paint.blendMode !== "PASS_THROUGH",
+  );
 }
 
 function strokeAlignmentOf(node: FigmaNode): { strokeAlign: string } {

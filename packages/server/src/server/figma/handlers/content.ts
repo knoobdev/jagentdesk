@@ -1381,13 +1381,38 @@ export class FigmaContent {
       fileKey: string;
       ids: string[];
       scale: number;
-      format?: "png" | "jpg";
+      format?: "png" | "jpg" | "svg";
+      useAbsoluteBounds?: boolean;
       version?: string;
     },
     ctx: FigmaContext,
   ): Promise<{ images: Record<string, FigmaBytes | null>; source: FigmaSource }> {
     const file = await requireFile(ctx, request.fileKey);
     const format: RenderFormat = request.format ?? "png";
+    const absolute = request.useAbsoluteBounds === true;
+    // ADR-0042 (clarified at review): the fidelity path — svg text outlines or absolute bounds —
+    // is answered ONLY by the version-pinned Tier-1 REST read. The plugin export predates the
+    // options and would return wrong-meaning bytes, so an unversioned fidelity request is a
+    // caller error, refused BEFORE any REST dispatch rather than silently resolved to current.
+    if (absolute || format === "svg") {
+      const version = request.version;
+      if (version === undefined || version.trim() === "") {
+        throw new FigmaServiceError(
+          "invalid_input",
+          "figma.file.render.request with format=svg or useAbsoluteBounds must pin an explicit non-empty version: the fidelity path is version-pinned REST, never Live Link (ADR-0042).",
+        );
+      }
+      return this.renderNodes(
+        ctx,
+        file,
+        request.ids,
+        request.scale,
+        format,
+        version,
+        false,
+        absolute,
+      );
+    }
     // An explicit version is a snapshot request (32.1): the plugin rasterizes whatever version
     // is open in Figma now, so live bytes mislabeled as history are the failure mode — only the
     // versioned Tier-1 images endpoint can answer a pinned version, and its answers keep their
@@ -1403,6 +1428,9 @@ export class FigmaContent {
         false,
       );
     const version = await this.versions.current(ctx, file);
+    // Legacy crop path, semantics unchanged from before ADR-0042: plugin when linked, exact REST
+    // bytes otherwise. The fidelity route above is enforced HERE, at the caller, not as a format
+    // guard in renderNodes — single-file export (below) keeps its old plugin svg behavior.
     return this.renderNodes(ctx, file, request.ids, request.scale, format, version, true);
   }
 
@@ -1424,7 +1452,8 @@ export class FigmaContent {
       request.format,
       version,
       true, // export has no version field: it is the live current-version read (32.1)
-    );
+    ); // ADR-0042 adds no option here: single-file export keeps its pre-ADR semantics, plugin
+    // svg included — the fidelity route is enforced in render(), not in this shared helper.
     const bytes = rendered.images[request.nodeId];
     if (!bytes) return { file: null, fileName: null };
     const name =
@@ -1435,7 +1464,8 @@ export class FigmaContent {
   }
 
   /**
-   * Cache per nodeId@scale@version. `live` marks reads whose version is the CURRENT one:
+   * Cache per nodeId@scale@version and bounds semantics (ADR-0042: absolute bytes never answer
+   * a crop request and vice versa). `live` marks reads whose version is the CURRENT one:
    * only those may use the plugin export (32.1). Live and verified-REST bytes keep separate
    * namespaces, and both are NEW: released code cached mixed-source plugin bytes under plain
    * `render/...@version`, whose legacy entries neither branch reads — a pre-upgrade live byte
@@ -1449,10 +1479,11 @@ export class FigmaContent {
     format: RenderFormat,
     version: string,
     live: boolean,
+    absolute = false,
   ): Promise<{ images: Record<string, FigmaBytes | null>; source: FigmaSource }> {
     if (live && ctx.link.isLinked(file.fileKey))
       return this.renderViaLink(ctx, file, ids, scale, format, version);
-    return this.renderRest(ctx, file, ids, scale, format, version);
+    return this.renderRest(ctx, file, ids, scale, format, version, absolute);
   }
 
   /** Live plugin rasters, cached in their own namespace keyed by the current version. */
@@ -1513,21 +1544,37 @@ export class FigmaContent {
     scale: number,
     format: RenderFormat,
     version: string,
+    absolute: boolean,
   ): Promise<{ images: Record<string, FigmaBytes | null>; source: FigmaSource }> {
     const images: Record<string, FigmaBytes | null> = {};
     const misses: string[] = [];
+    // The crop key is unchanged from released code so its bytes keep answering; the absolute
+    // key can never collide with it — and never reuses its bytes (ADR-0042).
     const cacheKey = (id: string): string =>
-      `render-rest/${file.fileKey}/${id}@${scale}x@${format}@${version}`;
+      absolute
+        ? `render-rest/${file.fileKey}/${id}@${scale}x@${format}@absolute@${version}`
+        : `render-rest/${file.fileKey}/${id}@${scale}x@${format}@${version}`;
     for (const id of ids) {
       const cached = await ctx.cache.getBytes(cacheKey(id));
       if (cached) images[id] = toBase64Bytes(cached);
       else misses.push(id);
     }
     for (const batch of chunks(misses, RENDER_BATCH_SIZE)) {
+      const query: Record<string, string | number | boolean | undefined> = {
+        ids: batch.join(","),
+        scale,
+        format,
+        version,
+      };
+      // ADR-0042 → Figma file endpoints: SVG fallbacks carry the text as paths (no substitute
+      // fonts) and absolute bounds export the same geometry the renderer will place it into.
+      // Neither flag is added for the plain crop path — old requests keep identical queries.
+      if (format === "svg") query.svg_outline_text = "true";
+      if (absolute) query.use_absolute_bounds = "true";
       const response = await ctx.rest.getJson<RestImagesResponse>({
         connectionId: file.connectionId,
         path: `/v1/images/${file.fileKey}`,
-        query: { ids: batch.join(","), scale, format, version },
+        query,
         tier: "1",
       });
       await Promise.all(
