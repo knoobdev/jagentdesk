@@ -636,6 +636,36 @@ function createAbortError(signal: AbortSignal | undefined, fallbackMessage: stri
   return Object.assign(new Error(message), { name: "AbortError" });
 }
 
+// JAGENTDESK_WORKSPACE_ID lets an agent rename or archive its own workspace; several workspaces can
+// share one cwd, so the agent can't work it out from JAGENTDESK_AGENT_CWD.
+function agentIdentityEnv({
+  agentId,
+  cwd,
+  opening,
+}: {
+  agentId: string;
+  cwd: string;
+  opening: { workspaceId?: string | null } | undefined;
+}): Record<string, string> {
+  const workspaceId = opening?.workspaceId;
+  return {
+    JAGENTDESK_AGENT_ID: agentId,
+    JAGENTDESK_AGENT_CWD: cwd,
+    ...(workspaceId ? { JAGENTDESK_WORKSPACE_ID: workspaceId } : {}),
+  };
+}
+
+// Launch env and the registered agent must agree, or the next snapshot erases the stored workspace.
+function resolveResumeWorkspaceId({
+  options,
+  record,
+}: {
+  options: { workspaceId?: string } | undefined;
+  record: Pick<StoredAgentRecord, "workspaceId"> | null;
+}): string | undefined {
+  return options?.workspaceId ?? record?.workspaceId;
+}
+
 function validateAgentId(agentId: string, source: string): string {
   const result = AgentIdSchema.safeParse(agentId);
   if (!result.success) {
@@ -1282,6 +1312,7 @@ export class AgentManager {
       client,
       storedConfig.cwd,
       options?.env,
+      { workspaceId: options.workspaceId },
     );
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
     const createOptions = this.buildCreateSessionOptions(options);
@@ -1355,6 +1386,7 @@ export class AgentManager {
     const record = this.registry ? await this.registry.get(resolvedAgentId) : null;
     const purpose = await resolveResumePurpose(record, resumeOptions?.purpose, mergedConfig.cwd);
     const currentResumeOptions = { purpose } satisfies AgentResumeSessionOptions;
+    const workspaceId = resolveResumeWorkspaceId({ options, record });
     const { storedConfig, launchConfig } = await this.prepareSessionConfig(
       mergedConfig,
       resolvedAgentId,
@@ -1368,7 +1400,13 @@ export class AgentManager {
         `Provider '${handle.provider}' is not available. Please ensure the CLI is installed.`,
       );
     }
-    const launchContext = await this.buildLaunchContext(resolvedAgentId, client, storedConfig.cwd);
+    const launchContext = await this.buildLaunchContext(
+      resolvedAgentId,
+      client,
+      storedConfig.cwd,
+      undefined,
+      { workspaceId },
+    );
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
     const session = await client.resumeSession(
       handle,
@@ -1380,6 +1418,7 @@ export class AgentManager {
     await this.requireExternalMcpSupport(session, storedConfig);
     return this.registerSession(session, storedConfig, resolvedAgentId, {
       ...options,
+      workspaceId,
       persistence: handle,
     });
   }
@@ -1418,7 +1457,13 @@ export class AgentManager {
       resolvedAgentId,
       { resolveDefaultModel: false },
     );
-    const launchContext = await this.buildLaunchContext(resolvedAgentId, client, storedConfig.cwd);
+    const launchContext = await this.buildLaunchContext(
+      resolvedAgentId,
+      client,
+      storedConfig.cwd,
+      undefined,
+      { workspaceId: input.workspaceId },
+    );
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
     const imported = await client.importSession(
       {
@@ -1505,7 +1550,13 @@ export class AgentManager {
       provider,
     } as AgentSessionConfig;
     const { storedConfig, launchConfig } = await this.prepareSessionConfig(refreshConfig, agentId);
-    const launchContext = await this.buildLaunchContext(agentId, client, storedConfig.cwd);
+    const launchContext = await this.buildLaunchContext(
+      agentId,
+      client,
+      storedConfig.cwd,
+      undefined,
+      { workspaceId: existing.workspaceId },
+    );
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
 
     const session = handle
@@ -1913,7 +1964,13 @@ export class AgentManager {
 
     const client = this.requireClient(provider);
     const { storedConfig, launchConfig } = await this.prepareSessionConfig(newConfig, agentId);
-    const launchContext = await this.buildLaunchContext(agentId, client, storedConfig.cwd);
+    const launchContext = await this.buildLaunchContext(
+      agentId,
+      client,
+      storedConfig.cwd,
+      undefined,
+      { workspaceId: existing.workspaceId },
+    );
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
 
     // The new provider has no native session handle → create a fresh session.
@@ -5421,14 +5478,14 @@ export class AgentManager {
     client: AgentClient,
     cwd: string,
     env?: Record<string, string>,
+    opening?: { workspaceId?: string | null },
   ): Promise<AgentLaunchContext> {
     const context: AgentLaunchContext = {
       agentId,
       env: {
         ...env,
         ...this.launchEnvProvider?.(agentId),
-        JAGENTDESK_AGENT_ID: agentId,
-        JAGENTDESK_AGENT_CWD: cwd,
+        ...agentIdentityEnv({ agentId, cwd, opening }),
       },
     };
     if (
