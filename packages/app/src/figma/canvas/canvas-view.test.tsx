@@ -38,7 +38,11 @@ const { theme, hosts, assets, viewLayout, platform } = vi.hoisted(() => ({
   // hosts exactly like the runtime store does.
   hosts: { current: {} as Record<string, { id: string } | null> },
   // Records what the paint path asks the asset caches for, so "no flood" is assertable.
-  assets: { thumbnail: [] as string[] },
+  assets: {
+    thumbnail: [] as string[],
+    beginDraw: vi.fn(),
+    endDraw: vi.fn(),
+  },
   // The host View reports this layout once on mount, giving the viewer a viewport to cull.
   viewLayout: { current: { width: 800, height: 600 } },
   // The web/native branch of CanvasView, switched per test (native is the default).
@@ -122,6 +126,8 @@ vi.mock("./use-figma-assets", () => ({
     fallbackForNode: () => null,
     fontAvailable: () => false,
     onMissing: () => undefined,
+    beginDraw: () => assets.beginDraw(),
+    endDraw: () => assets.endDraw(),
   }),
 }));
 vi.mock("./api", () => ({
@@ -232,6 +238,8 @@ beforeEach(() => {
   callFigmaMock.mockReset();
   hosts.current = { srv: { id: "srv" } };
   assets.thumbnail.length = 0;
+  assets.beginDraw.mockClear();
+  assets.endDraw.mockClear();
   serveRenderTiles();
 });
 
@@ -830,5 +838,159 @@ describe("CanvasView SECTION painting (ADR-0039)", () => {
       expect.objectContaining({ ids: ["1:0", "1:1"] }), // no "10:1": a Section is never tiled
     );
     layer.unmount();
+  });
+});
+
+// ── per-paint asset retention wrapper (spec 32.5.1, design accepted; real hook by W10) ──
+
+/**
+ * The merged sequence of beginDraw/endDraw invocations, in true call order. The wrapper's
+ * contract is that paint always appears as strictly paired `begin end` frames — a missing
+ * `end` is a frame left open (caches never reconcile), a missing `begin` is a paint that
+ * skipped retention, and any `begin begin` overlap means re-entrancy the sync paint forbids.
+ */
+function retentionSequence(): Array<"begin" | "end"> {
+  const events = [
+    ...assets.beginDraw.mock.invocationCallOrder.map((order) => ({
+      order,
+      kind: "begin" as const,
+    })),
+    ...assets.endDraw.mock.invocationCallOrder.map((order) => ({ order, kind: "end" as const })),
+  ];
+  events.sort((a, b) => a.order - b.order);
+  return events.map((event) => event.kind);
+}
+
+function expectBalancedFrames(minPaints = 1): void {
+  const sequence = retentionSequence();
+  expect(sequence.length).toBeGreaterThanOrEqual(minPaints * 2);
+  expect(sequence).toEqual(
+    Array.from({ length: sequence.length / 2 }, () => ["begin", "end"]).flat(),
+  );
+  expect(assets.beginDraw).toHaveBeenCalledTimes(assets.endDraw.mock.calls.length);
+}
+
+/** One-shot 2D context: the FIRST call to `method` throws, imitating a mid-paint failure. */
+function fakeCtxThrowingOnce(method: string): CanvasRenderingContext2D {
+  const props: Record<string, unknown> = {};
+  let armed = true;
+  return new Proxy(props, {
+    get: (t, p) => {
+      if (p === "getTransform") return () => ({ a: 1 });
+      if (p === method && armed) {
+        armed = false;
+        return () => {
+          throw new Error("mid-paint canvas failure");
+        };
+      }
+      if (!(p in t)) t[p as string] = () => undefined;
+      return t[p as string];
+    },
+  }) as unknown as CanvasRenderingContext2D;
+}
+
+describe("CanvasView paint retention wrapper (spec 32.5.1)", () => {
+  it("opens and closes exactly one retention frame per normal paint", async () => {
+    platform.isWeb = true;
+    const original = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = (() => fakeCtx()) as never;
+    try {
+      const frames = framesGrid(3);
+      const camera = cameraToFit(framesBoundingRect(frames), 800, 600);
+      const { fetchNodes } = viewerFetcher();
+      const viewer = mountViewer({ frames, camera, store: new FrameStore(fetchNodes) });
+      await settlePaint(3);
+      expectBalancedFrames();
+      viewer.unmount();
+    } finally {
+      HTMLCanvasElement.prototype.getContext = original;
+    }
+  });
+
+  it("closes the frame through finally when the canvas throws mid-paint", async () => {
+    platform.isWeb = true;
+    const original = HTMLCanvasElement.prototype.getContext;
+    // drawMetadataBox's first strokeRect aborts paint after the frame opened; the begin/end
+    // pair must still close (that is what `finally` guarantees).
+    HTMLCanvasElement.prototype.getContext = (() => fakeCtxThrowingOnce("strokeRect")) as never;
+    try {
+      const frames = framesGrid(3);
+      const camera = cameraToFit(framesBoundingRect(frames), 800, 600);
+      const { fetchNodes } = viewerFetcher();
+      const store = new FrameStore(fetchNodes);
+      const viewer = mountViewer({ frames, camera, store });
+      await settlePaint(3);
+      expect(assets.beginDraw).toHaveBeenCalled();
+      expectBalancedFrames(); // equal counts: the throw did not leak an open frame
+      viewer.unmount();
+    } finally {
+      HTMLCanvasElement.prototype.getContext = original;
+    }
+    // Recovery: a fresh mount paints normally again — the failure did not strand the wrapper.
+    HTMLCanvasElement.prototype.getContext = (() => fakeCtx()) as never;
+    try {
+      const frames = framesGrid(3);
+      const camera = cameraToFit(framesBoundingRect(frames), 800, 600);
+      const { fetchNodes } = viewerFetcher();
+      const viewer = mountViewer({ frames, camera, store: new FrameStore(fetchNodes) });
+      await settlePaint(2);
+      expectBalancedFrames();
+      viewer.unmount();
+    } finally {
+      HTMLCanvasElement.prototype.getContext = original;
+    }
+  });
+
+  it("still reconciles when paint early-returns after a valid ctx (null store, empty viewport)", async () => {
+    platform.isWeb = true;
+    const original = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = (() => fakeCtx()) as never;
+    try {
+      const { fetchNodes } = viewerFetcher();
+      // (a) store=null returns at the page/store guard — the frame still opens and closes.
+      const frames = framesGrid(3);
+      const camera = cameraToFit(framesBoundingRect(frames), 800, 600);
+      const noStore = mountViewer({ frames, camera, store: null });
+      await settlePaint(2);
+      expect(assets.beginDraw).toHaveBeenCalled();
+      expectBalancedFrames();
+      expect(assets.thumbnail).toEqual([]); // nothing past the guard drew
+      noStore.unmount();
+
+      // (b) empty viewport: every frame is culled, so ALL caches reconcile against an
+      // unobserved set — no exempt rule, the frame still closes.
+      assets.beginDraw.mockClear();
+      assets.endDraw.mockClear();
+      const far = [makeFrameSummary("7:900", 50000, 50000, 200, 150)];
+      const empty = mountViewer({
+        frames: far,
+        camera: { zoom: 1, offsetX: 0, offsetY: 0 },
+        store: new FrameStore(fetchNodes),
+      });
+      await settlePaint(2);
+      expectBalancedFrames();
+      expect(assets.thumbnail).toEqual([]);
+      empty.unmount();
+    } finally {
+      HTMLCanvasElement.prototype.getContext = original;
+    }
+  });
+
+  it("never opens a frame when no usable 2D context exists", async () => {
+    platform.isWeb = true;
+    const original = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = (() => null) as never; // jsdom-real: no 2D context
+    try {
+      const frames = framesGrid(3);
+      const camera = cameraToFit(framesBoundingRect(frames), 800, 600);
+      const { fetchNodes } = viewerFetcher();
+      const viewer = mountViewer({ frames, camera, store: new FrameStore(fetchNodes) });
+      await settlePaint(2);
+      expect(assets.beginDraw).not.toHaveBeenCalled();
+      expect(assets.endDraw).not.toHaveBeenCalled(); // placement: the ctx guard precedes begin
+      viewer.unmount();
+    } finally {
+      HTMLCanvasElement.prototype.getContext = original;
+    }
   });
 });

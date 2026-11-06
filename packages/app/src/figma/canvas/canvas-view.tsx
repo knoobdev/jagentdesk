@@ -246,75 +246,85 @@ export function CanvasView(props: CanvasViewProps) {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    const dpr = window.devicePixelRatio || 1;
-    const pixelsW = Math.max(1, Math.round(size.width * dpr));
-    const pixelsH = Math.max(1, Math.round(size.height * dpr));
-    if (canvas.width !== pixelsW || canvas.height !== pixelsH) {
-      canvas.width = pixelsW;
-      canvas.height = pixelsH;
+    // Per-paint asset retention (spec 32.5.1): every draw opens a retention frame and closes
+    // it, so caches drop everything this frame did not observe — culling already decided the
+    // working set, "visited" alone keeps nothing alive. The frame MUST close on every path
+    // past a valid ctx (empty viewport, missing page/store, mid-paint throw): an unclosed
+    // frame leaves the caches permanently open, and caches reconcile even when untouched.
+    assets.beginDraw();
+    try {
+      const dpr = window.devicePixelRatio || 1;
+      const pixelsW = Math.max(1, Math.round(size.width * dpr));
+      const pixelsH = Math.max(1, Math.round(size.height * dpr));
+      if (canvas.width !== pixelsW || canvas.height !== pixelsH) {
+        canvas.width = pixelsW;
+        canvas.height = pixelsH;
+      }
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.fillStyle = PAPER_COLOR;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      if (!page || !store || size.width === 0) return;
+      const zoom = cameraRef.current.zoom;
+      ctx.setTransform(
+        zoom * dpr,
+        0,
+        0,
+        zoom * dpr,
+        cameraRef.current.offsetX * dpr,
+        cameraRef.current.offsetY * dpr,
+      );
+      const viewport = visibleRect(cameraRef.current, size.width, size.height);
+      const mode = lodMode(zoom);
+      for (const frame of visible) {
+        const plan = planRootLoad(frame.bounds, zoom);
+        // A SECTION is chrome in EVERY LOD: background and label from the summary only. Asking
+        // for its thumbnail would raster a whole huge container, and its subtree is never loaded.
+        if (isSectionSummary(frame)) {
+          drawSectionChrome(ctx, frame);
+          continue;
+        }
+        if (plan === "metadata") {
+          // Overview: factual summary data only — zero subtree requests, zero thumbnail rasters.
+          drawMetadataBox(ctx, frame);
+          continue;
+        }
+        if (mode === "thumbnail") {
+          const raster = assets.requestThumbnail(frame.id, 1);
+          if (raster)
+            ctx.drawImage(
+              raster,
+              frame.bounds.x,
+              frame.bounds.y,
+              frame.bounds.width,
+              frame.bounds.height,
+            );
+          else drawPlaceholder(ctx, frame.bounds, frame.name);
+          continue;
+        }
+        const node = store.get(frame.id);
+        if (node === null) {
+          drawPlaceholder(ctx, frame.bounds, `${frame.name} (unavailable)`);
+          continue;
+        }
+        if (node === undefined) {
+          void store.load([frame.id]);
+          drawPlaceholder(ctx, frame.bounds, frame.name);
+          continue;
+        }
+        renderer.draw(ctx, node, {
+          scale: zoom * dpr,
+          viewport,
+          imageForRef: assets.imageForRef,
+          fallbackForNode: assets.fallbackForNode,
+          fontAvailable: assets.fontAvailable,
+          onMissing: assets.onMissing,
+          overrides: overridesRef.current,
+        });
+      }
+      if (selectedNodeId) drawSelectionBox(ctx, store, selectedNodeId);
+    } finally {
+      assets.endDraw();
     }
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = PAPER_COLOR;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    if (!page || !store || size.width === 0) return;
-    const zoom = cameraRef.current.zoom;
-    ctx.setTransform(
-      zoom * dpr,
-      0,
-      0,
-      zoom * dpr,
-      cameraRef.current.offsetX * dpr,
-      cameraRef.current.offsetY * dpr,
-    );
-    const viewport = visibleRect(cameraRef.current, size.width, size.height);
-    const mode = lodMode(zoom);
-    for (const frame of visible) {
-      const plan = planRootLoad(frame.bounds, zoom);
-      // A SECTION is chrome in EVERY LOD: background and label from the summary only. Asking
-      // for its thumbnail would raster a whole huge container, and its subtree is never loaded.
-      if (isSectionSummary(frame)) {
-        drawSectionChrome(ctx, frame);
-        continue;
-      }
-      if (plan === "metadata") {
-        // Overview: factual summary data only — zero subtree requests, zero thumbnail rasters.
-        drawMetadataBox(ctx, frame);
-        continue;
-      }
-      if (mode === "thumbnail") {
-        const raster = assets.requestThumbnail(frame.id, 1);
-        if (raster)
-          ctx.drawImage(
-            raster,
-            frame.bounds.x,
-            frame.bounds.y,
-            frame.bounds.width,
-            frame.bounds.height,
-          );
-        else drawPlaceholder(ctx, frame.bounds, frame.name);
-        continue;
-      }
-      const node = store.get(frame.id);
-      if (node === null) {
-        drawPlaceholder(ctx, frame.bounds, `${frame.name} (unavailable)`);
-        continue;
-      }
-      if (node === undefined) {
-        void store.load([frame.id]);
-        drawPlaceholder(ctx, frame.bounds, frame.name);
-        continue;
-      }
-      renderer.draw(ctx, node, {
-        scale: zoom * dpr,
-        viewport,
-        imageForRef: assets.imageForRef,
-        fallbackForNode: assets.fallbackForNode,
-        fontAvailable: assets.fontAvailable,
-        onMissing: assets.onMissing,
-        overrides: overridesRef.current,
-      });
-    }
-    if (selectedNodeId) drawSelectionBox(ctx, store, selectedNodeId);
   }, [assets, page, renderer, selectedNodeId, size.height, size.width, store, visible]);
 
   useEffect(() => {
