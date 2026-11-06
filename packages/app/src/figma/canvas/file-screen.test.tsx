@@ -523,6 +523,13 @@ function canvasProps(): CapturedCanvas {
   return captured.canvas as unknown as CapturedCanvas;
 }
 
+/** The page id actually handed to CanvasView — a null page yields null, so an expected id
+ * fails the ASSERTION meaningfully (proving the canvas is page-less) instead of crashing or
+ * type-erroring on a nullable access. */
+function canvasPageId(): string | null {
+  return canvasProps().page?.id ?? null;
+}
+
 let lastRerender: (() => void) | null = null;
 
 /** Re-render the most recently mounted screen so swapped outline data takes effect. */
@@ -810,10 +817,10 @@ describe("FigmaFileScreen SECTION write path", () => {
 describe("FigmaFileScreen page route sync", () => {
   it("a sidebar URL page change flips the page the CanvasView actually renders", () => {
     mountEditable();
-    expect(canvasProps().page.id).toBe("p1");
+    expect(canvasPageId()).toBe("p1");
     // sidebarPageRow: go({ pageId: "p2", nodeId: null }) writes page and clears node.
     navigateRoute({ page: "p2", node: "" });
-    expect(canvasProps().page.id).toBe("p2");
+    expect(canvasPageId()).toBe("p2");
     expect(canvasProps().selectedNodeId).toBeNull();
   });
 
@@ -830,7 +837,7 @@ describe("FigmaFileScreen page route sync", () => {
     // top-bar selection — which lands page AND node clear in ONE call, never two half-writes.
     expect(writes).toEqual([{ page: "p1" }, { page: "p2", node: "" }]);
     settleRerender();
-    expect(canvasProps().page.id).toBe("p2");
+    expect(canvasPageId()).toBe("p2");
     expect(canvasProps().selectedNodeId).toBeNull(); // stale p1 selection follows the route
   });
 
@@ -845,14 +852,14 @@ describe("FigmaFileScreen page route sync", () => {
     expect(cameraBefore).toEqual({ zoom: 1, offsetX: 0, offsetY: 0 });
     // History lands on the earlier p2 deep link: the URL names page p2, node 60:1.
     navigateRoute({ page: "p2", node: "60-1" });
-    expect(canvasProps().page.id).toBe("p2");
+    expect(canvasPageId()).toBe("p2");
     expect(canvasProps().selectedNodeId).toBe("60:1"); // restored THROUGH the route, not local state
     expect(canvasProps().camera).not.toEqual(cameraBefore); // the URL focus effect drove the camera
   });
 
   it("a route without a page shows the first real outline page and canonicalizes it ONCE", () => {
     mountEditable();
-    expect(canvasProps().page.id).toBe("p1"); // the first REAL page, never an invented one
+    expect(canvasPageId()).toBe("p1"); // the first REAL page, never an invented one
     expect(pageRouteWrites()).toEqual([{ page: "p1" }]);
     // The mock setParams already echoed into the location; further renders must not re-write
     // (a guard keyed on the outline snapshot, not a per-render router.go loop).
@@ -890,7 +897,7 @@ describe("FigmaFileScreen page route sync", () => {
     expect(container.textContent).toContain("Page p9 is not in this file.");
     navigateRoute({ page: "p2" }); // route becomes valid: the banner this effect raised clears
     expect(container.textContent ?? "").not.toContain("is not in this file.");
-    expect(canvasProps().page.id).toBe("p2");
+    expect(canvasPageId()).toBe("p2");
 
     // An unrelated layer-focus error (deep link to a nonexistent layer) through the REAL
     // URL-focus path — no local shortcut.
