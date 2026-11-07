@@ -2749,7 +2749,7 @@ class ClaudeAgentSession implements AgentSession {
     this.currentMode = normalized;
   }
 
-  async setModel(modelId: string | null): Promise<void> {
+  async setModel(modelId: string | null): Promise<{ model: string | null }> {
     const normalizedModelId =
       typeof modelId === "string" && modelId.trim().length > 0 ? modelId.trim() : null;
     const activeQuery = await this.ensureQuery();
@@ -2767,6 +2767,7 @@ class ClaudeAgentSession implements AgentSession {
     this.cachedRuntimeInfo = null;
     // Model change affects persistence metadata, so invalidate cached handle.
     this.persistence = null;
+    return { model: this.lastOptionsModel ?? this.config.model ?? null };
   }
 
   private reconcileThinkingOptionForModel(modelId: string | null): void {
