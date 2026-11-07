@@ -33,7 +33,7 @@ vi.mock("react-native-unistyles", () => ({
 }));
 vi.mock("@/runtime/host-runtime", () => ({
   useHostRuntimeClient: () => null,
-  // Module-level imports in prototype-player.tsx (via page-outline) need these to exist.
+  // The real page-outline module loads with prototype-player.tsx and needs these exports.
   useHostRuntimeConnectionStatus: () => "connected",
   getHostRuntimeStore: () => ({ getSnapshot: () => ({ client: null }) }),
 }));
@@ -45,8 +45,6 @@ vi.mock("@/components/ui/button", () => ({
       "button",
       {
         type: "button",
-        // Mirror the real control: a disabled button neither fires nor reports enabled.
-        ...(disabled ? { disabled: true } : {}),
         "data-testid": (testID as string | undefined) ?? undefined,
         onClick: () => (disabled ? undefined : (onPress as () => void)?.()),
       },
@@ -66,16 +64,8 @@ vi.mock("@/components/ui/dropdown-menu", () => ({
     ),
   DropdownMenuContent: ({ children }: { children?: React.ReactNode }) =>
     React.createElement("div", null, children),
-  DropdownMenuItem: ({ children, onSelect, testID }: Record<string, unknown>) =>
-    React.createElement(
-      "button",
-      {
-        type: "button",
-        "data-testid": (testID as string | undefined) ?? undefined,
-        onClick: () => (onSelect as (() => void) | undefined)?.(),
-      },
-      children as React.ReactNode,
-    ),
+  DropdownMenuItem: ({ children }: { children?: React.ReactNode }) =>
+    React.createElement("div", null, children),
 }));
 vi.mock("@/components/ui/switch", () => ({
   Switch: () => React.createElement("input", { type: "checkbox" }),
@@ -105,17 +95,7 @@ const flows = [
 
 function renderToolbar(
   player: { startFrameId: string | null },
-  options?: {
-    overlayNote?: string | null;
-    startNote?: string | null;
-    onClose?: () => void;
-    pages?: { id: string; name: string; loaded: boolean }[] | null;
-    flowPageId?: string | null;
-    onSelectFlowPage?: (pageId: string) => void;
-    flowPageNote?: string | null;
-    flowPageRetrying?: boolean;
-    onRetryFlowPage?: () => void;
-  },
+  options?: { overlayNote?: string | null; startNote?: string | null; onClose?: () => void },
 ) {
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -125,12 +105,6 @@ function renderToolbar(
     root.render(
       <PlayerToolbar
         flows={flows}
-        pages={options?.pages ?? null}
-        flowPageId={options?.flowPageId ?? null}
-        onSelectFlowPage={options?.onSelectFlowPage ?? null}
-        flowPageNote={options?.flowPageNote ?? null}
-        flowPageRetrying={options?.flowPageRetrying ?? false}
-        onRetryFlowPage={options?.onRetryFlowPage ?? null}
         startFrameId={player.startFrameId}
         canGoBack={false}
         canRestart={player.startFrameId !== null}
@@ -148,8 +122,6 @@ function renderToolbar(
   return {
     container,
     label: () => container.querySelector('[data-testid="figma-flow-trigger"]')?.textContent ?? "",
-    pageLabel: () =>
-      container.querySelector('[data-testid="figma-flow-page-trigger"]')?.textContent ?? "",
     unmount: () => {
       act(() => {
         root.unmount();
@@ -242,99 +214,5 @@ describe("PlayerToolbar flow label", () => {
     });
     expect(onClose).toHaveBeenCalledTimes(1);
     view.unmount();
-  });
-});
-
-// ADR-0043: paged hosts list one page's flows at a time. The pages menu names every page, marks
-// the ones the canvas has not read, and hands the choice to the player.
-describe("PlayerToolbar flow pages menu", () => {
-  beforeEach(() => {
-    vi.stubGlobal("React", React);
-    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-    document.body.innerHTML = "";
-  });
-
-  const pages = [
-    { id: "0:1", name: "Light", loaded: true },
-    { id: "0:2", name: "Dark", loaded: false },
-  ];
-
-  it("shows no pages menu for legacy fully-read outlines", () => {
-    const view = renderToolbar({ startFrameId: "2:1" });
-    expect(view.container.querySelector('[data-testid="figma-flow-page-trigger"]')).toBeNull();
-    view.unmount();
-  });
-
-  it("names the browsed page and marks unread pages as not loaded", () => {
-    const view = renderToolbar(
-      { startFrameId: "2:1" },
-      { pages, flowPageId: "0:1", onSelectFlowPage: vi.fn() },
-    );
-    expect(view.pageLabel()).toContain("Light");
-    const dark = view.container.querySelector(
-      '[data-testid="figma-flow-page-item-0:2"]',
-    ) as HTMLElement | null;
-    expect(dark?.textContent).toContain("Dark (not loaded)");
-    const light = view.container.querySelector(
-      '[data-testid="figma-flow-page-item-0:1"]',
-    ) as HTMLElement | null;
-    expect(light?.textContent).not.toContain("(not loaded)");
-    view.unmount();
-  });
-
-  it("reports the selection to the player when a page is chosen", () => {
-    const onSelectFlowPage = vi.fn();
-    const view = renderToolbar(
-      { startFrameId: "2:1" },
-      { pages, flowPageId: "0:1", onSelectFlowPage },
-    );
-    const dark = view.container.querySelector(
-      '[data-testid="figma-flow-page-item-0:2"]',
-    ) as HTMLElement;
-    act(() => {
-      dark.click();
-    });
-    expect(onSelectFlowPage).toHaveBeenCalledWith("0:2");
-    view.unmount();
-  });
-
-  it("shows a failed page read with a Retry that is disabled while retrying", () => {
-    const onRetryFlowPage = vi.fn();
-    const view = renderToolbar(
-      { startFrameId: "2:1" },
-      {
-        pages,
-        flowPageId: "0:2",
-        onSelectFlowPage: vi.fn(),
-        flowPageNote: 'Flows on "Dark" failed to load: host offline',
-        onRetryFlowPage,
-      },
-    );
-    expect(view.container.textContent).toContain('Flows on "Dark" failed to load');
-    const retry = view.container.querySelector(
-      '[data-testid="figma-flow-page-retry"]',
-    ) as HTMLElement;
-    act(() => {
-      retry.click();
-    });
-    expect(onRetryFlowPage).toHaveBeenCalledTimes(1);
-    view.unmount();
-
-    const retrying = renderToolbar(
-      { startFrameId: "2:1" },
-      {
-        pages,
-        flowPageId: "0:2",
-        onSelectFlowPage: vi.fn(),
-        flowPageNote: 'Flows on "Dark" failed to load: host offline',
-        flowPageRetrying: true,
-        onRetryFlowPage,
-      },
-    );
-    const retryButton = retrying.container.querySelector(
-      '[data-testid="figma-flow-page-retry"]',
-    ) as HTMLButtonElement;
-    expect(retryButton.disabled).toBe(true);
-    retrying.unmount();
   });
 });

@@ -13,7 +13,7 @@ import type {
 } from "@jagentdesk/protocol/figma/rpc-schemas";
 import type { FigmaFileRef } from "@/figma/contracts";
 
-const { theme, clientRef, featureRef, callFigma, staged, flowPageRef } = vi.hoisted(() => ({
+const { theme, clientRef, featureRef, callFigma, staged } = vi.hoisted(() => ({
   theme: {
     spacing: { 1: 4, 1.5: 6, 2: 8, 3: 12, 4: 16, 6: 24 },
     fontSize: { xs: 11, sm: 13, base: 15 },
@@ -34,16 +34,6 @@ const { theme, clientRef, featureRef, callFigma, staged, flowPageRef } = vi.hois
   featureRef: { current: true },
   callFigma: vi.fn(),
   staged: [] as string[],
-  // ADR-0043: the on-demand flow-page read, faked per test; calls records (version, pageId).
-  flowPageRef: {
-    current: {
-      data: undefined as unknown,
-      error: null as Error | null,
-      isPending: false,
-      refetch: async (): Promise<unknown> => undefined,
-    },
-    calls: [] as Array<[string | null, string | null]>,
-  },
 }));
 
 vi.mock("react-native-unistyles", () => ({
@@ -55,24 +45,9 @@ vi.mock("react-native-unistyles", () => ({
 }));
 vi.mock("@/runtime/host-runtime", () => ({
   useHostRuntimeClient: () => clientRef.current,
-  // Module-level import in prototype-player.tsx (via page-outline) needs this to exist.
+  // The REAL page-outline module (no longer mocked here) loads with the player and needs these.
+  useHostRuntimeConnectionStatus: () => "connected",
   getHostRuntimeStore: () => ({ getSnapshot: () => ({ client: clientRef.current }) }),
-}));
-// The on-demand page read (ADR-0043) is faked through flowPageRef; the retry helper just
-// re-runs the refetch, matching the real helper once the host is reachable again.
-vi.mock("@/figma/page-outline", () => ({
-  useFigmaFlowPageOutline: (
-    _serverId: string,
-    _fileKey: string,
-    version: string | null,
-    pageId: string | null,
-  ) => {
-    flowPageRef.calls.push([version, pageId]);
-    return flowPageRef.current;
-  },
-  retryFigmaFlowPage: async (_serverId: string, refetch: () => Promise<unknown>) => {
-    await refetch();
-  },
 }));
 vi.mock("@/runtime/host-features", () => ({
   useHostFeature: () => featureRef.current,
@@ -212,30 +187,6 @@ const outlineFixture: FigmaOutline = outline([
   }),
 ]);
 
-// ADR-0043: a paged host's depth-1 index lists every page by name, but only pages the canvas
-// has read carry flow data — the unread page reports childrenLoaded === false with no frames.
-const pagedOutlineFixture = (): FigmaOutline =>
-  outline([
-    page({
-      id: "p1",
-      name: "Light",
-      flowStartingPoints: [{ nodeId: "1:1", name: "Onboarding" }],
-      frames: [summary({ id: "1:1", name: "Onboarding start" })],
-    }),
-    page({ id: "p2", name: "Dark", childrenLoaded: false }),
-  ]);
-
-// What the on-demand read of the Dark page returns: one fully-read page at the pinned version.
-const darkPageOutline = (): FigmaOutline =>
-  outline([
-    page({
-      id: "p2",
-      name: "Dark",
-      flowStartingPoints: [{ nodeId: "2:1", name: "Dark flow" }],
-      frames: [summary({ id: "2:1", name: "Dark start" })],
-    }),
-  ]);
-
 /** playback responses keyed by the exact sorted id set; unkeyed sets answer immediately. */
 interface PlaybackControl {
   hold(key: string): void;
@@ -369,13 +320,6 @@ beforeEach(() => {
   featureRef.current = true;
   callFigma.mockReset();
   staged.length = 0;
-  flowPageRef.current = {
-    data: undefined,
-    error: null,
-    isPending: false,
-    refetch: async (): Promise<unknown> => undefined,
-  };
-  flowPageRef.calls.length = 0;
   installPlayback();
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 });
@@ -569,114 +513,5 @@ describe("PrototypePlayer scoped playback", () => {
     act(() => root.unmount());
     expect(peekAssetScope(scopeKey)).toBeUndefined();
     expect(store?.disposed).toBe(true);
-  });
-});
-
-// ADR-0043: on paged hosts the player lists ONE page's flows at a time. Browsing another page
-// loads that page's outline on demand at the pinned version but never hijacks playback, and a
-// failed read keeps Retry available (spec 32.5.3 error contract).
-describe("PrototypePlayer flow pages", () => {
-  it("legacy fully-read outlines keep the original behavior with no pages menu", async () => {
-    renderPlayer();
-    await waitFor(() => expect(staged).toContain("1:1"));
-    expect(container.querySelector('[data-testid="figma-flow-page-trigger"]')).toBeNull();
-    // The on-demand hook stayed disabled: no page read was ever requested.
-    expect(flowPageRef.calls.every(([, pageId]) => pageId === null)).toBe(true);
-  });
-
-  it("browsing another page lists its flows without switching playback until a flow is chosen", async () => {
-    FRAMES["2:1"] = buildFrame("2:1");
-    flowPageRef.current = {
-      data: darkPageOutline(),
-      error: null,
-      isPending: false,
-      refetch: async () => undefined,
-    };
-    renderPlayer({ outline: pagedOutlineFixture() });
-    await waitFor(() => expect(staged).toContain("1:1"));
-    const before = playback.requests.length;
-    clickButton("Dark (not loaded)");
-    // The browse requested the Dark page's outline at the pinned version…
-    expect(flowPageRef.calls.some(([version, pageId]) => version === "v1" && pageId === "p2")).toBe(
-      true,
-    );
-    // …playback did NOT follow the browse…
-    await sleep(50);
-    expect(staged).toContain("1:1");
-    expect(playback.requests.slice(before).every((r) => !r.frameIds.includes("2:1"))).toBe(true);
-    // …and the played flow keeps its name in the toolbar.
-    expect(container.querySelector('[data-testid="figma-flow-trigger"]')?.textContent).toContain(
-      "Onboarding",
-    );
-    // Choosing the browsed page's flow switches playback to it.
-    clickButton("Dark flow");
-    await waitFor(() => expect(staged).toContain("2:1"));
-  });
-
-  it("browsing to an unread page never auto-starts its flows", async () => {
-    FRAMES["2:1"] = buildFrame("2:1");
-    const emptyLight = outline([
-      page({ id: "p1", name: "Light", flowStartingPoints: [], frames: [] }),
-      page({ id: "p2", name: "Dark", childrenLoaded: false }),
-    ]);
-    flowPageRef.current = {
-      data: darkPageOutline(),
-      error: null,
-      isPending: false,
-      refetch: async () => undefined,
-    };
-    renderPlayer({ outline: emptyLight });
-    await sleep(30);
-    // The read page offers neither flows nor frames: nothing has been started.
-    expect(playback.requests).toHaveLength(0);
-    clickButton("Dark (not loaded)");
-    await sleep(50);
-    // The browsed page's flows are listed for an explicit choice — auto-start must not have
-    // hijacked playback just because the flow list changed.
-    expect(playback.requests).toHaveLength(0);
-    expect(container.querySelector("[data-testid='figma-choose-flow']")).not.toBeNull();
-    expect(text()).toContain("Dark flow");
-    clickButton("Dark flow");
-    await waitFor(() => expect(staged).toContain("2:1"));
-  });
-
-  it("an on-demand page read shows loading and never claims the page is empty", async () => {
-    renderPlayer({ outline: pagedOutlineFixture() });
-    await waitFor(() => expect(staged).toContain("1:1"));
-    flowPageRef.current = {
-      data: undefined,
-      error: null,
-      isPending: true,
-      refetch: async () => undefined,
-    };
-    clickButton("Dark (not loaded)");
-    expect(text()).toContain('Loading flows on "Dark"');
-    expect(text()).not.toContain('No flows on "Dark"');
-  });
-
-  it("a failed on-demand page read offers Retry that recovers into the page's flows", async () => {
-    renderPlayer({ outline: pagedOutlineFixture() });
-    await waitFor(() => expect(staged).toContain("1:1"));
-    const refetch = vi.fn(async () => {
-      flowPageRef.current = {
-        data: darkPageOutline(),
-        error: null,
-        isPending: false,
-        refetch,
-      };
-    });
-    flowPageRef.current = {
-      data: undefined,
-      error: new Error("Page read failed"),
-      isPending: false,
-      refetch,
-    };
-    clickButton("Dark (not loaded)");
-    expect(text()).toContain('Flows on "Dark" failed to load: Page read failed');
-    clickButton("Retry");
-    await waitFor(() => expect(refetch).toHaveBeenCalled());
-    // The recovered read lists the page's flows for an explicit choice; playback never moved.
-    await waitFor(() => expect(text()).toContain("Dark flow"));
-    expect(playback.requests.every((r) => !r.frameIds.includes("2:1"))).toBe(true);
   });
 });

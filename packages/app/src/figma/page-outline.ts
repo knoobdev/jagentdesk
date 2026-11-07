@@ -191,22 +191,53 @@ export function useFigmaFlowPageOutline(
     staleTimeMs: 30 * 60_000,
     retry: false,
   });
+  // Retry owns the whole restore, exactly like the canvas page hook: cancel THIS scope's
+  // in-flight read first, then wait for the host through the existing runtime pairing, then
+  // re-read on the current client. The retry is scope-stamped (server|file|version|page), so a
+  // page/version change or unmount aborts the wait instead of applying a late result — and a
+  // reconnect failure lands in `error` (never swallowed), keeping Retry distinguishable from
+  // loading for the caller.
+  const scope = JSON.stringify([serverId, fileKey, version, pageId]);
+  const retryScope = useRef<string | null>(scope);
+  const retryAbort = useRef<AbortController | null>(null);
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<Error | null>(null);
+  useEffect(() => {
+    retryScope.current = scope;
+    setRetrying(false);
+    setRetryError(null);
+    return () => {
+      if (retryScope.current === scope) retryScope.current = null;
+      retryAbort.current?.abort();
+    };
+  }, [scope]);
+  const queryRefetch = query.refetch;
+  const refetch = useCallback(async () => {
+    if (retryAbort.current && !retryAbort.current.signal.aborted) return;
+    const abort = new AbortController();
+    retryAbort.current = abort;
+    setRetrying(true);
+    setRetryError(null);
+    try {
+      await waitForFigmaHost(getHostRuntimeStore(), serverId, abort.signal);
+      if (retryScope.current !== scope) return;
+      await queries.cancelQueries({ queryKey: key, exact: true });
+      if (retryScope.current !== scope) return;
+      await queryRefetch();
+    } catch (error) {
+      if (retryScope.current === scope)
+        setRetryError(error instanceof Error ? error : new Error(String(error)));
+    } finally {
+      abort.abort();
+      if (retryAbort.current === abort) retryAbort.current = null;
+      if (retryScope.current === scope) setRetrying(false);
+    }
+  }, [serverId, scope, key, queries, queryRefetch]);
   return {
     data: query.data,
-    error: query.error,
+    error: retryError ?? query.error ?? null,
     isPending: query.isPending,
-    refetch: query.refetch,
+    retrying,
+    refetch,
   };
-}
-
-// Retry for an on-demand page read (ADR-0043): restore the exact host through the existing
-// runtime pairing first, then re-read on the current client. No OAuth, no other host, and the
-// caller's scope change aborts the wait instead of applying a late result.
-export async function retryFigmaFlowPage(
-  serverId: string,
-  refetch: () => Promise<unknown>,
-  signal: AbortSignal,
-): Promise<void> {
-  await waitForFigmaHost(getHostRuntimeStore(), serverId, signal);
-  await refetch();
 }
