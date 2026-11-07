@@ -346,6 +346,40 @@ function outlineFromRest(json: RestFile, fileKey: string, version: string): Figm
   };
 }
 
+/** A cached outline answers only when it is the exact (fileKey, version) snapshot requested —
+ *  a mismatched preexisting entry is stale input, not a Figma conflict, so callers drop it and
+ *  recompute instead of serving history under the key it was found under (32.1, ADR-0043). */
+function cachedSnapshotMatches(
+  outline: FigmaOutline | undefined,
+  fileKey: string,
+  version: string,
+): boolean {
+  return !!outline && outline.fileKey === fileKey && outline.version === version;
+}
+
+/** A pinned REST read must not silently adopt a version other than the one asked for: Figma
+ *  echoes the served version, and a mismatch means the answer is not the requested snapshot.
+ *  An absent version field keeps the tolerant legacy shape. */
+function assertRestSnapshotVersion(
+  json: { version?: unknown },
+  expected: string,
+  what: string,
+): void {
+  const version = asString(json.version);
+  if (version && version !== expected)
+    throw new FigmaServiceError("conflict", `The ${what} belongs to another file version.`);
+}
+
+/** A REST file answer without a document/children shape is malformed — it is never mapped or
+ *  cached, while a genuine empty `children: []` stays a valid empty file. */
+function assertRestFileShape(json: RestFile, fileKey: string): void {
+  if (!json.document || typeof json.document !== "object" || !Array.isArray(json.document.children))
+    throw new FigmaServiceError(
+      "figma_error",
+      `Figma returned a malformed file answer for ${fileKey}.`,
+    );
+}
+
 function linkedOutline(
   file: FigmaFile,
   document: FigmaNode | null | undefined,
@@ -1183,7 +1217,7 @@ export class FigmaContent {
   // ── outline / nodes ──
 
   private async outline(
-    request: { fileKey: string; version?: string },
+    request: { fileKey: string; version?: string; pagesOnly?: boolean; pageId?: string },
     ctx: FigmaContext,
   ): Promise<{ outline: FigmaOutline | null }> {
     const file = await requireFile(ctx, request.fileKey);
@@ -1194,7 +1228,13 @@ export class FigmaContent {
     // so a later request re-enters and hits the per-version disk cache. Flights live in a
     // per-context WeakMap, so two service contexts on one module singleton never join each
     // other, and the key needs no ctx/home dimension.
-    const key = `${file.connectionId}\u0000${request.fileKey}\u0000${request.version ?? "live"}`;
+    const key = JSON.stringify([
+      file.connectionId,
+      request.fileKey,
+      request.version ?? "live",
+      request.pagesOnly ?? false,
+      request.pageId ?? null,
+    ]);
     let flights = this.outlineFlights.get(ctx);
     if (!flights) {
       flights = new Map();
@@ -1202,13 +1242,117 @@ export class FigmaContent {
     }
     const shared = flights.get(key);
     if (shared) return shared;
-    const flight = this.outlineUncached(ctx, file, request.version);
+    const flight =
+      request.pagesOnly || request.pageId !== undefined
+        ? this.scopedOutline(ctx, file, request)
+        : this.outlineUncached(ctx, file, request.version);
     flights.set(key, flight);
     try {
       return await flight;
     } finally {
       if (flights.get(key) === flight) flights.delete(key);
     }
+  }
+
+  private async pageIndex(
+    ctx: FigmaContext,
+    file: FigmaFile,
+    version: string,
+  ): Promise<FigmaOutline> {
+    const key = `file/${file.fileKey}/page-index@${version}`;
+    const hit = await ctx.cache.getJson<Wrapped<FigmaOutline>>(key);
+    if (hit?.data && cachedSnapshotMatches(hit.data, file.fileKey, version)) return hit.data;
+    const full = await ctx.cache.getJson<Wrapped<FigmaOutline>>(
+      `file/${file.fileKey}/outline-d3@${version}`,
+    );
+    let outline: FigmaOutline | undefined;
+    if (full?.data && cachedSnapshotMatches(full.data, file.fileKey, version)) outline = full.data;
+    else {
+      const json = await ctx.rest.getJson<RestFile>({
+        connectionId: file.connectionId,
+        path: `/v1/files/${file.fileKey}`,
+        query: { depth: 1, version },
+        tier: "1",
+      });
+      assertRestFileShape(json, file.fileKey);
+      assertRestSnapshotVersion(json, version, "page index");
+      outline = outlineFromRest(json, file.fileKey, version);
+    }
+    const index = {
+      ...outline,
+      pages: outline.pages.map((page) => ({
+        id: page.id,
+        name: page.name,
+        backgroundColor: page.backgroundColor,
+        flowStartingPoints: page.flowStartingPoints,
+        frames: [],
+        childrenLoaded: false,
+      })),
+    };
+    await ctx.cache.putJson(key, wrap(index));
+    return index;
+  }
+
+  private async scopedOutline(
+    ctx: FigmaContext,
+    file: FigmaFile,
+    request: { version?: string; pagesOnly?: boolean; pageId?: string },
+  ): Promise<{ outline: FigmaOutline }> {
+    if (request.version !== undefined && !request.version.trim())
+      throw new FigmaServiceError("invalid_input", "A file version cannot be blank.");
+    if (request.pagesOnly && request.pageId !== undefined)
+      throw new FigmaServiceError("invalid_input", "Choose a page index or one page.");
+    if (request.pageId !== undefined && (!request.pageId.trim() || !request.version?.trim()))
+      throw new FigmaServiceError(
+        "invalid_input",
+        "A page outline requires a page ID and explicit version.",
+      );
+    const version = request.version ?? (await this.versions.current(ctx, file));
+    const index = await this.pageIndex(ctx, file, version);
+    if (request.pagesOnly) return { outline: index };
+    const pageId = request.pageId!;
+    if (!index.pages.some((page) => page.id === pageId))
+      throw new FigmaServiceError("not_found", "This page is not in the selected file version.");
+    return { outline: await this.pageOutline(ctx, file, index, pageId, version) };
+  }
+
+  private async pageOutline(
+    ctx: FigmaContext,
+    file: FigmaFile,
+    index: FigmaOutline,
+    pageId: string,
+    version: string,
+  ): Promise<FigmaOutline> {
+    const key = `file/${file.fileKey}/page-outline/${pageId}@${version}`;
+    const hit = await ctx.cache.getJson<Wrapped<FigmaOutline>>(key);
+    if (hit?.data && cachedSnapshotMatches(hit.data, file.fileKey, version)) return hit.data;
+    const full = await ctx.cache.getJson<Wrapped<FigmaOutline>>(
+      `file/${file.fileKey}/outline-d3@${version}`,
+    );
+    let page =
+      full?.data && cachedSnapshotMatches(full.data, file.fileKey, version)
+        ? full.data.pages.find((entry) => entry.id === pageId)
+        : undefined;
+    if (!page) {
+      const json = await ctx.rest.getJson<RestNodesResponse>({
+        connectionId: file.connectionId,
+        path: `/v1/files/${file.fileKey}/nodes`,
+        query: { ids: pageId, depth: 2, version },
+        tier: "1",
+      });
+      assertRestSnapshotVersion(json, version, "page content");
+      const node = restEntryNode(json.nodes?.[pageId] ?? null);
+      if (!node || asString(node.type) !== "CANVAS" || asString(node.id) !== pageId)
+        throw new FigmaServiceError("not_found", "The requested page is unavailable.");
+      // A depth-2 answer for a CANVAS always carries its children array (possibly empty);
+      // requiring it here keeps the `childrenLoaded: true` below derived, never asserted.
+      if (!Array.isArray(node.children))
+        throw new FigmaServiceError("figma_error", "The page answer did not include its children.");
+      page = pageFromRest(node, OUTLINE_REST_DEPTH);
+    }
+    const outline = { ...index, pages: [{ ...page, childrenLoaded: true }] };
+    await ctx.cache.putJson(key, wrap(outline));
+    return outline;
   }
 
   private async outlineUncached(
@@ -1230,13 +1374,16 @@ export class FigmaContent {
     // saw sections as opaque entries with no children, must never answer a depth-3 request.
     const key = `file/${file.fileKey}/outline-d3@${pinned}`;
     const hit = await ctx.cache.getJson<Wrapped<FigmaOutline>>(key);
-    if (hit?.data) return { outline: hit.data };
+    if (hit?.data && cachedSnapshotMatches(hit.data, file.fileKey, pinned))
+      return { outline: hit.data };
     const json = await ctx.rest.getJson<RestFile>({
       connectionId: file.connectionId,
       path: `/v1/files/${file.fileKey}`,
       query: { depth: OUTLINE_REST_DEPTH, version: pinned },
       tier: "1",
     });
+    assertRestFileShape(json, file.fileKey);
+    assertRestSnapshotVersion(json, pinned, "file outline");
     const outline = outlineFromRest(json, file.fileKey, pinned);
     // A pinned read is an immutable historical snapshot (32.1) — promoting its version into
     // the live memo would poison current v2 with history v1. Only a live (unversioned) read
@@ -1370,9 +1517,27 @@ export class FigmaContent {
     const cached = await ctx.cache.getJson<Wrapped<FigmaOutline>>(
       `file/${file.fileKey}/outline-d3@${version}`,
     );
-    const frames = new Map(
-      cached?.data?.pages.flatMap((page) => page.frames).map((frame) => [frame.id, frame]) ?? [],
-    );
+    const summaries = cached?.data?.pages.flatMap((page) => page.frames) ?? [];
+    if (!cached?.data) {
+      const index = await ctx.cache.getJson<Wrapped<FigmaOutline>>(
+        `file/${file.fileKey}/page-index@${version}`,
+      );
+      for (const page of index?.data?.pages ?? []) {
+        const hit = await ctx.cache.getJson<Wrapped<FigmaOutline>>(
+          `file/${file.fileKey}/page-outline/${page.id}@${version}`,
+        );
+        summaries.push(...(hit?.data?.pages.flatMap((entry) => entry.frames) ?? []));
+        if (
+          ids.some((id) =>
+            summaries.some(
+              (frame) => frame.id === id && ["FRAME", "COMPONENT", "INSTANCE"].includes(frame.type),
+            ),
+          )
+        )
+          break;
+      }
+    }
+    const frames = new Map(summaries.map((frame) => [frame.id, frame]));
     const rootId = ids.find((id) => {
       const frame = frames.get(id);
       return frame && ["FRAME", "COMPONENT", "INSTANCE"].includes(frame.type ?? "");

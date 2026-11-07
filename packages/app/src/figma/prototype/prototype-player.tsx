@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { View, Text, Pressable, type LayoutChangeEvent } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
+import { useQueryClient } from "@tanstack/react-query";
 
 import type {
   FigmaNode,
@@ -24,6 +25,8 @@ import { Switch } from "@/components/ui/switch";
 import { isWeb } from "@/constants/platform";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { useHostFeature } from "@/runtime/host-features";
+import { useFigmaFlowPageOutline } from "@/figma/page-outline";
+import { pageOutlineKeys } from "@/figma/page-outline-cache";
 import type { Theme } from "@/styles/theme";
 
 import { PrototypeAssetScopeProvider } from "./asset-scope";
@@ -37,6 +40,13 @@ import {
 import { findNodeById, nodeBounds, type Rect } from "./node-geometry";
 import { placeOverlay } from "./overlay-placement";
 import { smartAnimateOverrides } from "./smart-animate";
+import {
+  firstReadPageId,
+  flowsForListing,
+  outlineIsPaged,
+  seenFlowsForIdentity,
+  type FlowPageOption,
+} from "./flow-pages";
 import { pickStartPosition, resolveRequestedStart } from "./start-selection";
 import { advanceTimeline, transitionVisuals } from "./transition-timeline";
 import {
@@ -182,6 +192,165 @@ function useTransitionClock(
   return timeline;
 }
 
+// ADR-0043 flow-page selection: which page's flows the player lists, the on-demand outline read
+// of a page the canvas has not read, and that read's loading/error/Retry status. One hook so the
+// player component itself stays a plain orchestrator; the pure rules live in ./flow-pages.
+function useFlowPages(
+  file: PrototypePlayerProps["file"],
+  outline: FigmaOutline,
+  playbackVersion: string,
+) {
+  const queries = useQueryClient();
+  const paged = useMemo(() => outlineIsPaged(outline), [outline]);
+  const [browsedPageId, setBrowsedPageId] = useState<string | null>(null);
+  const browsedExplicitly = useRef(false);
+  // The page whose flows the player lists: the user's explicit browse, else the first page the
+  // canvas has already read — opening the player from the canvas never waits on a new read.
+  const defaultPageId = useMemo(() => firstReadPageId(outline), [outline]);
+  const flowPageId = browsedPageId ?? defaultPageId;
+  const flowPageKnown =
+    flowPageId !== null &&
+    outline.pages.some((page) => page.id === flowPageId && page.childrenLoaded !== false);
+  const flowPage = useFigmaFlowPageOutline(
+    file.serverId,
+    file.fileKey,
+    paged ? playbackVersion : null,
+    paged && !flowPageKnown ? flowPageId : null,
+  );
+
+  // LEGACY (fully-read) outlines keep the original aggregate flow list across ALL pages; paged
+  // hosts list ONE page's flows — the browsed page's on-demand snapshot when the outline does
+  // not already carry it (flow-pages.ts holds the rule and its regression tests).
+  const flows = useMemo(
+    () => flowsForListing(outline, paged, flowPageId, flowPage.data),
+    [outline, paged, flowPageId, flowPage.data],
+  );
+
+  // Flow names must survive page browsing: the label of a PLAYING flow resolves from every
+  // flow the session has listed so far, not only the page currently browsed. The memory is
+  // scoped to the player identity (server|file|pinned version), so a new snapshot never
+  // resolves labels from a superseded one.
+  const identity = `${file.serverId}|${file.fileKey}|${playbackVersion}`;
+  const flowsSeenRef = useRef<{ identity: string; flows: FigmaPrototype["flows"] }>({
+    identity: "",
+    flows: [],
+  });
+  const knownFlows = useMemo(() => {
+    const merged = seenFlowsForIdentity(flowsSeenRef.current, identity, flows);
+    flowsSeenRef.current = { identity, flows: merged };
+    return merged;
+  }, [flows, identity]);
+
+  const flowPageName = useMemo(
+    () =>
+      flowPageId ? (outline.pages.find((page) => page.id === flowPageId)?.name ?? null) : null,
+    [outline.pages, flowPageId],
+  );
+
+  // On-demand page read status: pending is NOT "no flows" — the toolbar names the page being
+  // read, and a failed read (query error OR reconnect failure surfaced by the retry owner)
+  // keeps Retry available (spec 32.5.3 error contract). Error outranks loading.
+  const flowPageNote = useMemo(() => {
+    if (!paged || !flowPageId || flowPageKnown) return null;
+    const name = flowPageName ?? "this page";
+    if (flowPage.error) {
+      const detail =
+        flowPage.error instanceof Error ? flowPage.error.message : String(flowPage.error);
+      return detail
+        ? `Flows on "${name}" failed to load: ${detail}`
+        : `Flows on "${name}" failed to load.`;
+    }
+    if (flowPage.isPending) return `Loading flows on "${name}"…`;
+    return null;
+  }, [paged, flowPageId, flowPageKnown, flowPageName, flowPage.error, flowPage.isPending]);
+
+  const { refetch: refetchFlowPage } = flowPage;
+  const onRetryFlowPage = useCallback(() => {
+    void refetchFlowPage();
+  }, [refetchFlowPage]);
+
+  const onSelectFlowPage = useCallback((pageId: string) => {
+    browsedExplicitly.current = true;
+    setBrowsedPageId(pageId);
+  }, []);
+
+  // A file/version swap under an open player retires the browse; the seen-flow memory and any
+  // in-flight retry are scoped to the old identity and drop out with it.
+  const resetFlowPages = useCallback(() => {
+    setBrowsedPageId(null);
+    browsedExplicitly.current = false;
+  }, []);
+
+  // Pages the canvas read are loaded per the outline; a page read ON DEMAND earlier in this
+  // session still says childrenLoaded === false, so its real state comes from the shared query
+  // cache (same key as the canvas page query) — loaded / failed / pending / not loaded.
+  // Observed read state of the browsed page comes straight from the on-demand hook
+  // (data/error/pending), so its marker recomputes the moment the read resolves — without a
+  // global query cache subscription; other pages' markers read the shared cache per render.
+  const flowPageOptions = useMemo<FlowPageOption[]>(
+    () =>
+      outline.pages.map((page) => {
+        if (page.childrenLoaded !== false)
+          return { id: page.id, name: page.name, loaded: true, status: "loaded" };
+        if (page.id === flowPageId) {
+          if (flowPage.data)
+            return { id: page.id, name: page.name, loaded: true, status: "loaded" };
+          if (flowPage.error)
+            return { id: page.id, name: page.name, loaded: false, status: "failed" };
+          if (flowPage.isPending)
+            return { id: page.id, name: page.name, loaded: false, status: "pending" };
+          return { id: page.id, name: page.name, loaded: false, status: "unread" };
+        }
+        const state = queries.getQueryState(
+          pageOutlineKeys.page(file.serverId, file.fileKey, playbackVersion, page.id),
+        );
+        if (state?.status === "success")
+          return { id: page.id, name: page.name, loaded: true, status: "loaded" };
+        if (state?.status === "error")
+          return { id: page.id, name: page.name, loaded: false, status: "failed" };
+        if (state?.fetchStatus === "fetching")
+          return { id: page.id, name: page.name, loaded: false, status: "pending" };
+        return { id: page.id, name: page.name, loaded: false, status: "unread" };
+      }),
+    [
+      outline.pages,
+      queries,
+      file.serverId,
+      file.fileKey,
+      playbackVersion,
+      flowPageId,
+      flowPage.data,
+      flowPage.error,
+      flowPage.isPending,
+    ],
+  );
+
+  // The browsed page's flows are being read on demand; pending is not "no flows", and a failed
+  // read shows the error instead of spinning.
+  const flowsLoading =
+    paged && flowPageId !== null && !flowPageKnown && !flowPage.error ? flowPage.isPending : false;
+  const emptyFlowsMessage = useMemo(() => {
+    if (!paged) return null;
+    return `No flows on "${flowPageName ?? "this page"}". Choose another page from the pages menu.`;
+  }, [paged, flowPageName]);
+
+  return {
+    paged,
+    flows,
+    knownFlows,
+    flowPageId,
+    flowPageOptions,
+    flowPageNote,
+    flowPageRetrying: flowPage.retrying,
+    flowsLoading,
+    emptyFlowsMessage,
+    browsedExplicitly,
+    onSelectFlowPage,
+    onRetryFlowPage,
+    resetFlowPages,
+  };
+}
+
 function ScopedPrototypePlayer({ file, outline, startNodeId, onClose }: PrototypePlayerProps) {
   const [player, setPlayer] = useState(emptyPlayerState);
   const [showHotspots, setShowHotspots] = useState(true);
@@ -200,16 +369,23 @@ function ScopedPrototypePlayer({ file, outline, startNodeId, onClose }: Prototyp
   const prototype = frames.prototype;
 
   // Flow starts come from the outline only (spec 32.5.3 / ADR-0037) — the full prototype RPC
-  // would fetch every frame in the file just to enumerate them.
-  const flows = useMemo(() => {
-    return outline.pages.flatMap((page) =>
-      page.flowStartingPoints.map((point) => ({
-        nodeId: point.nodeId,
-        name: point.name,
-        pageId: page.id,
-      })),
-    );
-  }, [outline]);
+  // would fetch every frame in the file just to enumerate them. On paged hosts (ADR-0043) the
+  // flow-page selection, the on-demand page read and its Retry status live in useFlowPages.
+  const {
+    paged,
+    flows,
+    knownFlows,
+    flowPageId,
+    flowPageOptions,
+    flowPageNote,
+    flowPageRetrying,
+    flowsLoading,
+    emptyFlowsMessage,
+    browsedExplicitly,
+    onSelectFlowPage,
+    onRetryFlowPage,
+    resetFlowPages,
+  } = useFlowPages(file, outline, playbackVersion);
 
   const interactions = useMemo(() => indexInteractions(prototype?.interactions ?? []), [prototype]);
 
@@ -272,7 +448,8 @@ function ScopedPrototypePlayer({ file, outline, startNodeId, onClose }: Prototyp
     setToast(null);
     setScrollRequest(null);
     setStartNote(null);
-  }, [identity]);
+    resetFlowPages();
+  }, [identity, resetFlowPages]);
 
   // Deep link / file-screen entry: start on the requested node. A known Section (or other
   // container) never plays itself — W5's outline flattens its real frames onto the page with
@@ -286,11 +463,14 @@ function ScopedPrototypePlayer({ file, outline, startNodeId, onClose }: Prototyp
   // never sits on an endless spinner waiting for a hand-picked flow. The first flow wins; with no
   // flows the first top-level frame does, and the toolbar says so.
   useEffect(() => {
+    // Browsing another page's flow list (ADR-0043) must not hijack playback: auto-start runs
+    // only before the user first picked a page — afterwards they choose flows by hand.
+    if (browsedExplicitly.current) return;
     if (startNodeId || player.startFrameId) return;
     if (!startChoice) return;
     dispatchStart(startChoice.frameId);
     setStartNote(startChoice.note);
-  }, [startNodeId, player.startFrameId, startChoice, dispatchStart]);
+  }, [startNodeId, player.startFrameId, startChoice, dispatchStart, browsedExplicitly]);
 
   // The interaction data may arrive after navigation; arm a visit's timer once the frame is
   // ready AND once per data state, so late-arriving interactions still start the countdown
@@ -387,7 +567,9 @@ function ScopedPrototypePlayer({ file, outline, startNodeId, onClose }: Prototyp
     );
   }
 
-  if (flows.length === 0 && !startChoice) {
+  // Legacy (fully-read) outlines only: a paged file renders the toolbar with its pages menu so
+  // the user can browse flows elsewhere instead of being told the file has nothing.
+  if (!paged && flows.length === 0 && !startChoice) {
     return (
       <View style={styles.centered}>
         <Text style={styles.muted}>No prototype flows in this file.</Text>
@@ -406,6 +588,13 @@ function ScopedPrototypePlayer({ file, outline, startNodeId, onClose }: Prototyp
       >
         <PlayerToolbar
           flows={flows}
+          labelFlows={knownFlows}
+          pages={paged ? flowPageOptions : null}
+          flowPageId={flowPageId}
+          onSelectFlowPage={onSelectFlowPage}
+          flowPageNote={flowPageNote}
+          flowPageRetrying={flowPageRetrying}
+          onRetryFlowPage={onRetryFlowPage}
           startFrameId={player.startFrameId}
           canGoBack={player.stack.length > 1 || player.overlays.length > 0}
           canRestart={!!player.startFrameId}
@@ -432,6 +621,8 @@ function ScopedPrototypePlayer({ file, outline, startNodeId, onClose }: Prototyp
             renderHotspots={renderHotspots}
             showHotspots={showHotspots}
             flows={flows}
+            emptyFlowsMessage={emptyFlowsMessage}
+            flowsLoading={flowsLoading}
             onStartFlow={dispatchStart}
           />
           {player.overlays.length > 0 ? (
@@ -474,6 +665,8 @@ export function PlayerStage({
   showHotspots,
   flows,
   onStartFlow,
+  emptyFlowsMessage,
+  flowsLoading,
 }: {
   file: PrototypePlayerProps["file"];
   transition: Frame | null;
@@ -487,6 +680,10 @@ export function PlayerStage({
   showHotspots: boolean;
   flows: FigmaPrototype["flows"];
   onStartFlow: (frameId: string) => void;
+  /** Paged mode (ADR-0043): the browsed page has no flows — the pages menu is the way out. */
+  emptyFlowsMessage?: string | null;
+  /** The browsed page's flows are being read on demand; pending is not "no flows". */
+  flowsLoading?: boolean;
 }) {
   if (transition && timeline) {
     return (
@@ -509,6 +706,13 @@ export function PlayerStage({
         </View>
       );
     }
+    if (flowsLoading) {
+      return (
+        <View style={styles.centered}>
+          <LoadingSpinner size="small" color={styles.spinner.color} />
+        </View>
+      );
+    }
     if (frames.error) {
       return (
         <View style={styles.centered}>
@@ -521,7 +725,7 @@ export function PlayerStage({
     }
     return (
       <View style={styles.centered}>
-        <Text style={styles.muted}>No prototype flows in this file.</Text>
+        <Text style={styles.muted}>{emptyFlowsMessage ?? "No prototype flows in this file."}</Text>
       </View>
     );
   }
@@ -576,6 +780,13 @@ function FlowRow({
 // on stage: navigating inside a played flow must not drop it back to "Select a flow".
 export function PlayerToolbar({
   flows,
+  labelFlows,
+  pages = null,
+  flowPageId = null,
+  onSelectFlowPage = null,
+  flowPageNote = null,
+  flowPageRetrying = false,
+  onRetryFlowPage = null,
   startFrameId,
   canGoBack,
   canRestart,
@@ -589,6 +800,15 @@ export function PlayerToolbar({
   startNote,
 }: {
   flows: FigmaPrototype["flows"];
+  /** Every flow the session has listed — a page switch must not unname a playing flow. */
+  labelFlows?: FigmaPrototype["flows"];
+  /** Paged mode (ADR-0043): the browsable pages with their read state, else null. */
+  pages?: FlowPageOption[] | null;
+  flowPageId?: string | null;
+  onSelectFlowPage?: ((pageId: string) => void) | null;
+  flowPageNote?: string | null;
+  flowPageRetrying?: boolean;
+  onRetryFlowPage?: (() => void) | null;
   startFrameId: string | null;
   canGoBack: boolean;
   canRestart: boolean;
@@ -601,19 +821,37 @@ export function PlayerToolbar({
   overlayNote: string | null;
   startNote: string | null;
 }) {
+  const labelSource = labelFlows ?? flows;
   return (
     <View style={styles.toolbar} testID="figma-prototype-toolbar">
+      {pages && onSelectFlowPage ? (
+        <DropdownMenu>
+          {/* The pages menu scopes the flow list: one page's flows at a time (ADR-0043). The
+              marker reflects the page's REAL read state, including on-demand reads this session
+              (loaded / pending / failed / not loaded). */}
+          <DropdownMenuTrigger style={styles.trigger} testID="figma-flow-page-trigger">
+            <Text style={styles.triggerLabel} numberOfLines={1} ellipsizeMode="tail">
+              {pages.find((page) => page.id === flowPageId)?.name ?? "Select a page"}
+            </Text>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent scrollable testID="figma-flow-page-menu">
+            {pages.map((page) => (
+              <FlowPageMenuItem key={page.id} page={page} onSelectFlowPage={onSelectFlowPage} />
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
       <DropdownMenu>
         {/* The flow name is the only unbounded text here: it shrinks and ellipsizes (minWidth 0
             lets a flex child go below its content size) instead of pushing Back/Restart/hotspots/
             Close past the player's own container edge — under the Inspector on a narrow desktop
             rail, off-screen on a phone. */}
-        <DropdownMenuTrigger style={styles.trigger}>
+        <DropdownMenuTrigger style={styles.trigger} testID="figma-flow-trigger">
           <Text style={styles.triggerLabel} numberOfLines={1} ellipsizeMode="tail">
-            {currentFlowLabel(flows, startFrameId)}
+            {currentFlowLabel(labelSource, startFrameId)}
           </Text>
         </DropdownMenuTrigger>
-        <DropdownMenuContent>
+        <DropdownMenuContent scrollable testID="figma-flow-menu">
           {flows.map((flow) => (
             <FlowMenuItem key={flow.nodeId} flow={flow} onStartFlow={onStartFlow} />
           ))}
@@ -654,6 +892,24 @@ export function PlayerToolbar({
           {startNote}
         </Text>
       ) : null}
+      {flowPageNote ? (
+        <View style={styles.noteRow}>
+          <Text style={styles.noteRowText} numberOfLines={2}>
+            {flowPageNote}
+          </Text>
+          {onRetryFlowPage ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onPress={onRetryFlowPage}
+              disabled={flowPageRetrying}
+              testID="figma-flow-page-retry"
+            >
+              {flowPageRetrying ? "Retrying…" : "Retry"}
+            </Button>
+          ) : null}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -666,7 +922,31 @@ function FlowMenuItem({
   onStartFlow: (frameId: string) => void;
 }) {
   const start = useCallback(() => onStartFlow(flow.nodeId), [onStartFlow, flow]);
-  return <DropdownMenuItem onSelect={start}>{flow.name}</DropdownMenuItem>;
+  return (
+    <DropdownMenuItem testID={`figma-flow-item-${flow.nodeId}`} onSelect={start}>
+      {flow.name}
+    </DropdownMenuItem>
+  );
+}
+
+function FlowPageMenuItem({
+  page,
+  onSelectFlowPage,
+}: {
+  page: FlowPageOption;
+  onSelectFlowPage: (pageId: string) => void;
+}) {
+  const select = useCallback(() => onSelectFlowPage(page.id), [onSelectFlowPage, page.id]);
+  // The marker reflects the page's REAL read state, including on-demand reads this session.
+  let marker: string | null = null;
+  if (page.status === "pending") marker = " (loading…)";
+  else if (page.status === "failed") marker = " (failed)";
+  else if (page.status === "unread") marker = " (not loaded)";
+  return (
+    <DropdownMenuItem testID={`figma-flow-page-item-${page.id}`} onSelect={select}>
+      {marker ? `${page.name}${marker}` : page.name}
+    </DropdownMenuItem>
+  );
 }
 
 /** Name of the flow being played — resolved from the session's start frame, not the stage. */
@@ -1019,6 +1299,14 @@ const styles = StyleSheet.create((theme: Theme) => ({
     fontSize: theme.fontSize.xs,
     color: theme.colors.foregroundMuted,
   },
+  // A page-read status shares its row with Retry: the text shrinks, the button stays tappable.
+  noteRow: {
+    flexBasis: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+  },
+  noteRowText: { flexShrink: 1, fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
   muted: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
   stageHost: { flex: 1, position: "relative" },
   centered: {

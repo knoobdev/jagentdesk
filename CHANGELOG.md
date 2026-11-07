@@ -1,9 +1,53 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.9.55`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.9.56`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.9.56 — 2026-11-08
+
+Figma connection-state fixes, an in-app browser for tracked files, and page-scoped loading.
+This release ships the current fixes; first-load performance and full Figma Design parity remain unfinished.
+
+### Fixed and changed
+
+- **Connections update immediately:** completed OAuth sign-in and Remove publish their results to
+  the shared account/file cache. Removed accounts cannot return through an older in-flight read.
+- **Simpler connection screen:** remove the separate editing setup and raw editing identity output
+  from the OAuth screen. Restore the basic sign-in scope set so optional catalog scopes do not
+  break login with "Invalid scopes for app". Pending browser sign-in can be cancelled.
+- **Browse files stays in JAgentDesk:** show files already tracked by the daemon using the existing
+  REST connection, without opening the Figma website login. This is not automatic discovery of
+  every file, team or folder in the account; folder browsing remains incomplete.
+- **Sections and zoom:** selecting a Section fits its child screens and loads all required visible
+  previews without clicking each frame. Preview quality follows zoom and display density;
+  cached images can paint while missing exports load, and failures notify the canvas.
+- **Load one page at a time:** a lightweight page index and selected-page outline share one pinned
+  snapshot between sidebar and canvas. Unloaded, empty, failed and ready pages stay distinct.
+  Mismatched cache versions and malformed file/page responses are rejected before reuse.
+- **Retry after a disconnected host:** reconnect the paired host and read through its current client;
+  missing pages show an error instead of leaving the previous canvas visible.
+- **Prototype flows across pages:** choose another page's flows without changing the background
+  canvas or current playback; selecting a flow starts its frame at the same version. Long page
+  and flow menus scroll within the window, and flow labels reset with their snapshot.
+- New page-scoped viewing requires an updated host advertising `figmaPagedOutline`. Older clients'
+  existing full-outline requests retain their wire format and behavior.
+
+### Verification and current limits
+
+- Focused regression checks, repository typecheck, affected-file lint/format and daemon build passed.
+  Real macOS Electron checks covered page navigation, disconnect/reconnect/Retry, invalid pages,
+  all 49 flows of another page, pinned playback, menu scrolling and preserving the background page.
+- **First-load speed is still below target.** With all local design/font caches empty and a fresh
+  daemon/Electron runtime, a wide viewport of 65 previews took **24.68 seconds** from file click to
+  complete content; its Figma PNG-export request alone waited **17.64 seconds**. A four-screen
+  Section took **6.75–6.91 seconds** from file click, including **1.84–2.00 seconds** after selecting
+  the Section. Figma-side cache state was uncontrolled; these are observations, not an SLA.
+- Experimental SVG previews, a replacement renderer and extra PNG export groups were not adopted.
+- Complete folder discovery, authenticated editing of the original file, multi-user presence/follow
+  and full Figma Design parity remain unfinished. Native iOS/Android viewing, standalone browser and
+  Windows/Linux Electron have not passed the same real-file checks as macOS Electron.
 
 ## v0.9.55 — 2026-11-06
 

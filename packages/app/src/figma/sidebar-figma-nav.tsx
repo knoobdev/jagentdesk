@@ -32,12 +32,12 @@ import {
   useFigmaFiles,
   useFigmaLinkStatus,
   useFigmaNodes,
-  useFigmaOutline,
   useFigmaSectionChildren,
   useFigmaTeamFiles,
   useFigmaTeamProjects,
   useFigmaTeams,
 } from "@/figma/queries";
+import { useFigmaPageOutline } from "@/figma/page-outline";
 import { useFigmaGlobalNav, type FigmaNav } from "@/figma/nav";
 import { childSummaries, type SectionAwareSummary } from "@/figma/canvas/section-outline";
 import { useHostFeature } from "@/runtime/host-features";
@@ -901,6 +901,9 @@ function PageRow({
       </Pressable>
       {selected ? (
         <>
+          {page.childrenLoaded === false ? (
+            <Text style={styles.empty}>Page content is not loaded yet.</Text>
+          ) : null}
           {searchRow}
           <OutlineRows
             serverId={serverId}
@@ -923,7 +926,18 @@ function PageRow({
   );
 }
 
-function PagesAndLayers({
+function PagesAndLayers(props: {
+  serverId: string;
+  fileKey: string;
+  version: string | null;
+  go: Go;
+}) {
+  const enabled = useHostFeature(props.serverId, "figmaPagedOutline");
+  if (!enabled) return <Text style={styles.empty}>Update this host to load Figma pages.</Text>;
+  return <PageScopedLayers {...props} />;
+}
+
+function PageScopedLayers({
   serverId,
   fileKey,
   version,
@@ -935,7 +949,7 @@ function PagesAndLayers({
   go: Go;
 }) {
   const { location } = useFigmaGlobalNav();
-  const outline = useFigmaOutline(serverId, fileKey, version);
+  const outline = useFigmaPageOutline(serverId, fileKey, version, location.pageId);
   const canReadNodeDepth = useHostFeature(serverId, "figmaNodeDepth");
   const [search, setSearch] = useState("");
   const pages = useMemo(() => outline.data?.pages ?? [], [outline.data]);
@@ -969,11 +983,11 @@ function PagesAndLayers({
   );
   const selectNode = useCallback((nodeId: string) => go({ nodeId }), [go]);
   const changeSearch = useCallback((value: string) => setSearch(value), []);
-  if (outline.isLoading) return <Text style={styles.empty}>Loading pages…</Text>;
-  if (outline.error) return <Text style={styles.empty}>{outline.error.message}</Text>;
+  if (outline.isLoading && !outline.data) return <Text style={styles.empty}>Loading pages…</Text>;
   return (
     <>
       <Text style={styles.sectionLabel}>Pages</Text>
+      {outline.error ? <Text style={styles.empty}>{outline.error.message}</Text> : null}
       {pages.map((page) => (
         <PageRow
           key={page.id}

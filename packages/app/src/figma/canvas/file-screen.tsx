@@ -135,6 +135,7 @@ function isRoutePageError(message: string): boolean {
 export function FigmaFileScreen(ref: FigmaFileRef) {
   const enabled = useHostFeature(ref.serverId, "figma");
   const nodeDepth = useHostFeature(ref.serverId, "figmaNodeDepth");
+  const pagedOutline = useHostFeature(ref.serverId, "figmaPagedOutline");
   if (!enabled) {
     return (
       <View style={jiraStyles.screen} testID="figma-host-unsupported">
@@ -142,10 +143,10 @@ export function FigmaFileScreen(ref: FigmaFileRef) {
       </View>
     );
   }
-  if (!nodeDepth) {
+  if (!nodeDepth || !pagedOutline) {
     return (
       <View style={jiraStyles.screen} testID="figma-update-host">
-        <ErrorBanner message="This host predates Section outlines — update the app running the daemon to open Figma files." />
+        <ErrorBanner message="Update the app running the daemon to open Figma files with page loading." />
       </View>
     );
   }
@@ -183,8 +184,14 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
   }>();
   const queryClient = useQueryClient();
 
-  const outlineQuery = useFigmaOutline(serverId, fileKey, version ?? null);
-  const outline = outlineQuery.data ?? null;
+  const outlineQuery = useFigmaOutline(
+    serverId,
+    fileKey,
+    version ?? null,
+    initialNodeId(params.page),
+  );
+  const outline =
+    outlineQuery.isPending || outlineQuery.isError ? null : (outlineQuery.data ?? null);
   const edits = useFigmaEdits(serverId, fileKey);
 
   const [watchToken, setWatchToken] = useState(0);
@@ -636,6 +643,25 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
   );
   const panelHeader = useMemo(() => ({ title: panelTitle(panel) }), [panel]);
 
+  const refetchOutline = outlineQuery.refetch;
+  const retryOutline = useCallback(() => {
+    void refetchOutline();
+  }, [refetchOutline]);
+  const retrying = outlineQuery.retrying;
+  const retryAction = useMemo(
+    () => (
+      <Pressable
+        onPress={retryOutline}
+        accessibilityRole="button"
+        testID="figma-page-retry"
+        disabled={retrying}
+      >
+        <Text style={jiraStyles.mainText}>{retrying ? "Retrying…" : "Retry"}</Text>
+      </Pressable>
+    ),
+    [retryOutline, retrying],
+  );
+
   if (outlineQuery.isPending) {
     return (
       <View style={[jiraStyles.screen, styles.center]}>
@@ -647,7 +673,18 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
   if (outlineQuery.isError || !outline) {
     return (
       <View style={jiraStyles.screen}>
-        <ErrorBanner message={outlineQuery.error?.message ?? "The file could not be loaded."} />
+        <ErrorBanner
+          message={outlineQuery.error?.message ?? "The file could not be loaded."}
+          action={retryAction}
+        />
+      </View>
+    );
+  }
+
+  if (pageParam && !page) {
+    return (
+      <View style={jiraStyles.screen}>
+        <ErrorBanner message={routePageErrorMessage(pageParam)} />
       </View>
     );
   }
@@ -790,7 +827,14 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
           <AssistantColumn context={assistantContext} isCompact onClose={closeAssistant} />
         </AdaptiveModalSheet>
       ) : null}
-      {page && page.frames.length === 0 ? (
+      {page && page.childrenLoaded === false ? (
+        // ADR-0043: an index page reports childrenLoaded === false until its content is read —
+        // that is "loading", not "empty". Spin instead of claiming the page has no frames.
+        <View style={[styles.emptyOverlay, styles.center]} testID="figma-page-loading">
+          <LoadingSpinner size="large" color="#71717a" />
+        </View>
+      ) : null}
+      {page && page.childrenLoaded !== false && page.frames.length === 0 ? (
         <View style={styles.emptyOverlay}>
           <EmptyState title="This page has no frames" body="Create one from the toolbar." />
         </View>

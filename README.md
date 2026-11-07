@@ -120,6 +120,19 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
+### Figma: account updates, in-app file browsing and page loading (v0.9.56)
+
+- Sign-in and Remove update the account list immediately; OAuth setup no longer shows a separate
+  editing connection. Basic sign-in scopes avoid optional-catalog permission failures.
+- Browse files already tracked by the daemon inside JAgentDesk, using the existing REST connection.
+  The Figma website login is no longer the file browser; complete folder discovery remains unfinished.
+- Fit a Section and load its visible screens together; load outlines per page, share versioned snapshots
+  and recover failed reads through Retry. Browse prototype flows on another page without switching
+  the current playback until a flow is chosen; long menus scroll within the window.
+- **First loading is still slow:** a real local-cold 65-preview viewport needed 24.68 seconds. This
+  release does not claim a completed performance fix or full Figma Design parity. See the
+  [changelog](CHANGELOG.md#v0956--2026-11-08) for measurements and limits.
+
 ### Figma: clearer designs and scoped prototype playback (v0.9.55)
 
 - **Browse files** from the desktop Figma sidebar; the isolated picker uses your Figma website

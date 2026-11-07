@@ -2482,6 +2482,7 @@ export class VoiceAssistantWebSocketServer {
               figma: true,
               figmaPlayback: true,
               figmaNodeDepth: true,
+              figmaPagedOutline: true,
               figmaRemoteWrites: true,
               figmaCommentRegions: true,
               figmaRenderFidelity: true,

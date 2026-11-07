@@ -45,6 +45,9 @@ vi.mock("react-native-unistyles", () => ({
 }));
 vi.mock("@/runtime/host-runtime", () => ({
   useHostRuntimeClient: () => clientRef.current,
+  // The REAL page-outline module (no longer mocked here) loads with the player and needs these.
+  useHostRuntimeConnectionStatus: () => "connected",
+  getHostRuntimeStore: () => ({ getSnapshot: () => ({ client: clientRef.current }) }),
 }));
 vi.mock("@/runtime/host-features", () => ({
   useHostFeature: () => featureRef.current,
@@ -75,8 +78,12 @@ vi.mock("@/components/ui/loading-spinner", () => ({
 }));
 vi.mock("@/components/ui/dropdown-menu", () => ({
   DropdownMenu: ({ children }: { children?: React.ReactNode }) => children,
-  DropdownMenuTrigger: ({ children }: { children?: React.ReactNode }) =>
-    React.createElement("div", null, children),
+  DropdownMenuTrigger: ({ children, testID }: Record<string, unknown>) =>
+    React.createElement(
+      "div",
+      { "data-testid": (testID as string | undefined) ?? "figma-flow-trigger" },
+      children as React.ReactNode,
+    ),
   DropdownMenuContent: ({ children }: { children?: React.ReactNode }) =>
     React.createElement("div", null, children),
   DropdownMenuItem: ({

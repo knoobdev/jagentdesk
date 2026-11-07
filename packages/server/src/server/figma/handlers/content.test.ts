@@ -199,6 +199,209 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
+describe("page-scoped outlines", () => {
+  const request = (options: { pagesOnly?: boolean; pageId?: string; version?: string }) =>
+    fixture.handlers["figma.file.outline.request"](
+      { type: "figma.file.outline.request", requestId: "page", fileKey: FILE, ...options },
+      fixture.api.ctx,
+      SESSION,
+    );
+  const respondPage = (version = "v1", type = "CANVAS") => {
+    fixture.api.rest.respond(`/v1/files/${FILE}/nodes`, {
+      version,
+      nodes: {
+        "0:1": {
+          document: {
+            id: "0:1",
+            name: "<page>",
+            type,
+            children: [restFrame("1:2", "<frame>", 20, 40)],
+            flowStartingPoints: [],
+          },
+        },
+      },
+    });
+  };
+  it("reads only the page index and distinguishes unloaded pages from empty ones", async () => {
+    respondFile();
+    const result = await request({ pagesOnly: true });
+    expect(result.outline?.pages[0]).toMatchObject({ childrenLoaded: false, frames: [] });
+    expect(fixture.api.rest.callsTo(`/v1/files/${FILE}`)[0]?.query).toEqual({
+      depth: 1,
+      version: "v1",
+    });
+  });
+  it("loads only the requested page, caches it separately, and keeps legacy outlines complete", async () => {
+    respondFile();
+    respondPage();
+    const result = await request({ pageId: "0:1", version: "v1" });
+    expect(result.outline?.pages.map((page) => page.id)).toEqual(["0:1"]);
+    expect(result.outline?.pages[0]).toMatchObject({
+      childrenLoaded: true,
+      frames: [{ id: "1:2" }],
+    });
+    expect(fixture.api.rest.callsTo(`/v1/files/${FILE}/nodes`)[0]?.query).toEqual({
+      ids: "0:1",
+      depth: 2,
+      version: "v1",
+    });
+    expect(await request({ pageId: "0:1", version: "v1" })).toEqual(result);
+    expect(fixture.api.rest.callsTo(`/v1/files/${FILE}/nodes`)).toHaveLength(1);
+    const full = await request({ version: "v1" });
+    expect(full.outline?.pages.map((page) => page.id)).toEqual(["0:1", "0:2"]);
+    expect(fixture.api.rest.callsTo(`/v1/files/${FILE}`).map((call) => call.query?.depth)).toEqual([
+      1, 3,
+    ]);
+  });
+  it("reuses a cached legacy snapshot without mutating it or calling REST again", async () => {
+    respondFile();
+    const full = await request({ version: "v1" });
+    const before = fixture.api.rest.calls.length;
+    const index = await request({ version: "v1", pagesOnly: true });
+    const page = await request({ version: "v1", pageId: "0:1" });
+    expect(
+      index.outline?.pages.every((entry) => !entry.frames.length && entry.childrenLoaded === false),
+    ).toBe(true);
+    expect(page.outline?.pages[0]?.frames).toEqual(full.outline?.pages[0]?.frames);
+    expect(full.outline?.pages[0]?.childrenLoaded).toBeUndefined();
+    expect(fixture.api.rest.calls).toHaveLength(before);
+  });
+  it.each([
+    { pageId: "0:1" },
+    { pageId: "0:1", version: " " },
+    { pagesOnly: true, pageId: "0:1", version: "v1" },
+    { pagesOnly: true, version: " " },
+  ])("rejects invalid scope before a network read: %j", async (options) => {
+    await expect(request(options)).rejects.toMatchObject({ code: "invalid_input" });
+    expect(fixture.api.rest.calls).toEqual([]);
+  });
+  it("rejects an unknown page before requesting any node tree", async () => {
+    respondFile();
+    await expect(request({ pageId: "0:9", version: "v1" })).rejects.toMatchObject({
+      code: "not_found",
+    });
+    expect(fixture.api.rest.callsTo(`/v1/files/${FILE}/nodes`)).toEqual([]);
+  });
+  it("rejects page content from another version", async () => {
+    respondFile();
+    respondPage("v2");
+    await expect(request({ pageId: "0:1", version: "v1" })).rejects.toMatchObject({
+      code: "conflict",
+    });
+  });
+  it("rejects non-page node content", async () => {
+    respondFile();
+    respondPage("v1", "SECTION");
+    await expect(request({ pageId: "0:1", version: "v1" })).rejects.toMatchObject({
+      code: "not_found",
+    });
+  });
+
+  // ── snapshot validation (ADR-0043): a cached entry or a fresh answer that does not carry
+  // the exact requested (fileKey, version) must never be served as that snapshot. ──
+  const staleOutline = (version: string) => ({
+    fileKey: FILE,
+    name: "Marketing Site",
+    version,
+    lastModified_ms: 0,
+    editorType: "figma",
+    source: "rest",
+    pages: [{ id: "0:1", name: "Stale", frames: [], flowStartingPoints: [] }],
+  });
+
+  it("does not serve a cached full outline that belongs to another snapshot", async () => {
+    respondFile();
+    await fixture.api.ctx.cache.putJson(`file/${FILE}/outline-d3@v1`, { data: staleOutline("v2") });
+    const result = await request({ version: "v1" });
+    expect(result.outline?.version).toBe("v1");
+    expect(result.outline?.pages.map((page) => page.id)).toEqual(["0:1", "0:2"]);
+    expect(fixture.api.rest.callsTo(`/v1/files/${FILE}`)).toHaveLength(1);
+  });
+
+  it("rejects a fresh full outline answered from another version", async () => {
+    fixture.api.rest.respond(`/v1/files/${FILE}`, () => fileJson("v2"));
+    await expect(request({ version: "v1" })).rejects.toMatchObject({ code: "conflict" });
+    respondFile();
+    const result = await request({ version: "v1" });
+    expect(result.outline?.version).toBe("v1");
+  });
+
+  it("recomputes a page index cached under a mismatched snapshot", async () => {
+    respondFile();
+    await fixture.api.ctx.cache.putJson(`file/${FILE}/page-index@v1`, {
+      data: staleOutline("v2"),
+    });
+    const result = await request({ version: "v1", pagesOnly: true });
+    expect(result.outline?.version).toBe("v1");
+    expect(result.outline?.pages[0]).toMatchObject({ id: "0:1", childrenLoaded: false });
+    expect(fixture.api.rest.callsTo(`/v1/files/${FILE}`)).toHaveLength(1);
+  });
+
+  it("recomputes a page outline cached under a mismatched snapshot", async () => {
+    respondFile();
+    respondPage();
+    await fixture.api.ctx.cache.putJson(`file/${FILE}/page-outline/0:1@v1`, {
+      data: staleOutline("v2"),
+    });
+    const result = await request({ pageId: "0:1", version: "v1" });
+    expect(result.outline?.version).toBe("v1");
+    expect(result.outline?.pages[0]).toMatchObject({
+      childrenLoaded: true,
+      frames: [{ id: "1:2" }],
+    });
+    expect(fixture.api.rest.callsTo(`/v1/files/${FILE}/nodes`)).toHaveLength(1);
+  });
+
+  it("rejects page index content from another version", async () => {
+    fixture.api.rest.respond(`/v1/files/${FILE}`, () => fileJson("v2"));
+    await expect(request({ version: "v1", pagesOnly: true })).rejects.toMatchObject({
+      code: "conflict",
+    });
+  });
+
+  it.each([
+    {}, // no document at all
+    { name: "x", version: "v1", document: {} }, // document without children
+    { name: "x", version: "v1", document: { id: "0:0", type: "DOCUMENT" } },
+  ])("rejects a malformed file answer without caching it: %j", async (body) => {
+    fixture.api.rest.respond(`/v1/files/${FILE}`, () => body);
+    await expect(request({ version: "v1" })).rejects.toMatchObject({ code: "figma_error" });
+    // The malformed answer must not poison the cache: a good answer after it is served fresh.
+    respondFile();
+    const result = await request({ version: "v1" });
+    expect(result.outline?.pages.map((page) => page.id)).toEqual(["0:1", "0:2"]);
+  });
+
+  it("keeps a genuine empty children array a valid empty file", async () => {
+    fixture.api.rest.respond(`/v1/files/${FILE}`, () => ({
+      name: "Empty",
+      version: "v1",
+      lastModified: "2026-03-01T10:00:00Z",
+      editorType: "figma",
+      document: { id: "0:0", type: "DOCUMENT", name: "Document", children: [] },
+    }));
+    const result = await request({ version: "v1" });
+    expect(result.outline?.version).toBe("v1");
+    expect(result.outline?.pages).toEqual([]);
+  });
+
+  it("rejects a page answer without a children array instead of faking a loaded page", async () => {
+    respondFile();
+    fixture.api.rest.respond(`/v1/files/${FILE}/nodes`, {
+      version: "v1",
+      nodes: {
+        "0:1": {
+          document: { id: "0:1", name: "<page>", type: "CANVAS", flowStartingPoints: [] },
+        },
+      },
+    });
+    await expect(request({ pageId: "0:1", version: "v1" })).rejects.toMatchObject({
+      code: "figma_error",
+    });
+    expect(await fixture.api.ctx.cache.getJson(`file/${FILE}/page-outline/0:1@v1`)).toBeNull();
+  });
+});
+
 describe("preview export grouping boundaries", () => {
   it("never groups different pinned versions into the same upstream export", async () => {
     vi.useRealTimers();
@@ -303,99 +506,126 @@ describe("cached-only render reads", () => {
 });
 
 describe("parallel frame text outlines", () => {
-  it("starts a frame SVG before node data arrives and serves extracted glyphs from the pinned cache", async () => {
-    respondFile();
-    const ctx = fixture.api.ctx;
-    await fixture.handlers["figma.file.outline.request"](
-      { type: "figma.file.outline.request", requestId: "outline", fileKey: FILE },
-      ctx,
-      SESSION,
-    );
-    const glyph: FigmaNode = {
-      id: "text_a",
-      type: "TEXT",
-      name: "<text>",
-      absoluteBoundingBox: { x: 30, y: 55, width: 20, height: 10 },
-      fills: [{ type: "SOLID", color: { r: 0, g: 0, b: 0, a: 1 } }],
-    };
-    const frame = { ...restFrame("1:2", "<frame>", 20, 40), children: [glyph] };
-    fixture.api.rest.respond(`/v1/files/${FILE}/nodes`, {
-      version: "v1",
-      nodes: { "1:2": { document: frame } },
-    });
-    fixture.api.rest.respond(`/v1/images/${FILE}`, { images: { "1:2": "<frame-svg-url>" } });
-    fixture.api.rest.provideBytes("<frame-svg-url>", {
-      mimeType: "image/svg+xml",
-      data: Buffer.from(
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 200"><g data-node-id="text_a"><path d="M10 15h20v10H10Z" fill="#000"/></g></svg>',
-      ),
-    });
-    let exported!: () => void;
-    const ready = new Promise<void>((resolve) => {
-      exported = resolve;
-    });
-    const disk = ctx.cache;
-    ctx.cache = {
-      getJson: (key) => disk.getJson(key),
-      putJson: (key, data) => disk.putJson(key, data),
-      getBytes: (key) => disk.getBytes(key),
-      putBytes: async (key, bytes) => {
-        await disk.putBytes(key, bytes);
-        if (key.startsWith("text-frame-svg/")) exported();
-      },
-    };
-    const rest = fixture.api.rest;
-    ctx.rest = {
-      getJson: async (input) => {
-        if (input.path.endsWith("/nodes")) await ready;
-        return rest.getJson(input);
-      },
-      sendJson: () => rest.sendJson(),
-      getBytes: (url) => rest.getBytes(url),
-      budget: () => rest.budget(),
-    };
-    const response = await fixture.handlers["figma.file.nodes.request"](
-      {
-        type: "figma.file.nodes.request",
-        requestId: "nodes",
-        fileKey: FILE,
-        ids: ["1:2"],
+  it.each([false, true])(
+    "starts a frame SVG before nodes arrive with a page-only outline cache: %s",
+    async (pageOnly) => {
+      respondFile();
+      const ctx = fixture.api.ctx;
+      await fixture.handlers["figma.file.outline.request"](
+        {
+          type: "figma.file.outline.request",
+          requestId: "outline",
+          fileKey: FILE,
+          ...(pageOnly ? { pagesOnly: true } : {}),
+        },
+        ctx,
+        SESSION,
+      );
+      if (pageOnly) {
+        fixture.api.rest.respond(`/v1/files/${FILE}/nodes`, {
+          version: "v1",
+          nodes: {
+            "0:1": { document: (fileJson("v1").document as { children: unknown[] }).children[0] },
+          },
+        });
+        await fixture.handlers["figma.file.outline.request"](
+          {
+            type: "figma.file.outline.request",
+            requestId: "page",
+            fileKey: FILE,
+            pageId: "0:1",
+            version: "v1",
+          },
+          ctx,
+          SESSION,
+        );
+      }
+      const glyph: FigmaNode = {
+        id: "text_a",
+        type: "TEXT",
+        name: "<text>",
+        absoluteBoundingBox: { x: 30, y: 55, width: 20, height: 10 },
+        fills: [{ type: "SOLID", color: { r: 0, g: 0, b: 0, a: 1 } }],
+      };
+      const frame = { ...restFrame("1:2", "<frame>", 20, 40), children: [glyph] };
+      fixture.api.rest.respond(`/v1/files/${FILE}/nodes`, {
         version: "v1",
-        prepareTextOutlines: true,
-      },
-      ctx,
-      SESSION,
-    );
-    expect(response.nodes["1:2"]?.id).toBe("1:2");
-    const cached = await disk.getBytes(`render-rest/${FILE}/text_a@1x@svg@absolute@v1`);
-    expect(cached?.mimeType).toBe("image/svg+xml");
-    expect(cached?.data.toString("utf8")).toContain("translate(-10 -15)");
-    const result = await fixture.handlers["figma.file.render.request"](
-      {
-        type: "figma.file.render.request",
-        requestId: "glyph",
-        fileKey: FILE,
-        ids: ["text_a"],
+        nodes: { "1:2": { document: frame } },
+      });
+      fixture.api.rest.respond(`/v1/images/${FILE}`, { images: { "1:2": "<frame-svg-url>" } });
+      fixture.api.rest.provideBytes("<frame-svg-url>", {
+        mimeType: "image/svg+xml",
+        data: Buffer.from(
+          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 200"><g data-node-id="text_a"><path d="M10 15h20v10H10Z" fill="#000"/></g></svg>',
+        ),
+      });
+      let exported!: () => void;
+      const ready = new Promise<void>((resolve) => {
+        exported = resolve;
+      });
+      const disk = ctx.cache;
+      ctx.cache = {
+        getJson: (key) => disk.getJson(key),
+        putJson: (key, data) => disk.putJson(key, data),
+        getBytes: (key) => disk.getBytes(key),
+        putBytes: async (key, bytes) => {
+          await disk.putBytes(key, bytes);
+          if (key.startsWith("text-frame-svg/")) exported();
+        },
+      };
+      const rest = fixture.api.rest;
+      ctx.rest = {
+        getJson: async (input) => {
+          if (input.path.endsWith("/nodes")) await ready;
+          return rest.getJson(input);
+        },
+        sendJson: () => rest.sendJson(),
+        getBytes: (url) => rest.getBytes(url),
+        budget: () => rest.budget(),
+      };
+      const response = await fixture.handlers["figma.file.nodes.request"](
+        {
+          type: "figma.file.nodes.request",
+          requestId: "nodes",
+          fileKey: FILE,
+          ids: ["1:2"],
+          version: "v1",
+          prepareTextOutlines: true,
+        },
+        ctx,
+        SESSION,
+      );
+      expect(response.nodes["1:2"]?.id).toBe("1:2");
+      const cached = await disk.getBytes(`render-rest/${FILE}/text_a@1x@svg@absolute@v1`);
+      expect(cached?.mimeType).toBe("image/svg+xml");
+      expect(cached?.data.toString("utf8")).toContain("translate(-10 -15)");
+      const result = await fixture.handlers["figma.file.render.request"](
+        {
+          type: "figma.file.render.request",
+          requestId: "glyph",
+          fileKey: FILE,
+          ids: ["text_a"],
+          version: "v1",
+          scale: 1,
+          format: "svg",
+          useAbsoluteBounds: true,
+        },
+        ctx,
+        SESSION,
+      );
+      expect(result.images.text_a?.dataBase64).toBe(cached?.data.toString("base64"));
+      expect(rest.callsTo(`/v1/images/${FILE}`)).toHaveLength(1);
+      expect(rest.callsTo(`/v1/images/${FILE}`)[0]?.query).toEqual({
+        ids: "1:2",
         version: "v1",
         scale: 1,
         format: "svg",
-        useAbsoluteBounds: true,
-      },
-      ctx,
-      SESSION,
-    );
-    expect(result.images.text_a?.dataBase64).toBe(cached?.data.toString("base64"));
-    expect(rest.callsTo(`/v1/images/${FILE}`)).toHaveLength(1);
-    expect(rest.callsTo(`/v1/images/${FILE}`)[0]?.query).toEqual({
-      ids: "1:2",
-      version: "v1",
-      scale: 1,
-      format: "svg",
-      svg_outline_text: "true",
-      svg_include_node_id: "true",
-      use_absolute_bounds: "true",
-    });
-  });
+        svg_outline_text: "true",
+        svg_include_node_id: "true",
+        use_absolute_bounds: "true",
+      });
+    },
+  );
 
   it.each([
     "ordinary-first",

@@ -105,7 +105,7 @@ vi.mock("@/runtime/host-runtime", () => ({
 }));
 vi.mock("@/runtime/host-features", () => ({
   useHostFeature: (_serverId: string, feature: string) =>
-    feature === "figmaNodeDepth" && host.figmaNodeDepth,
+    feature === "figmaPagedOutline" || (feature === "figmaNodeDepth" && host.figmaNodeDepth),
 }));
 vi.mock("@/figma/api", () => ({
   callFigma: vi.fn(async () => ({})),
@@ -115,6 +115,9 @@ vi.mock("@/figma/nav", () => ({
   useFigmaGlobalNav: () => ({ location: navState.location, go: navState.go }),
   useFigmaNav: () => ({ location: navState.location, go: navState.go }),
 }));
+// Legacy sidebar rendering tests keep their existing query port; real paging is exercised
+// by the standalone cache tests and the real Electron observer.
+vi.mock("@/figma/page-outline", () => ({ useFigmaPageOutline: () => queriesState.outline }));
 vi.mock("@/figma/queries", () => {
   const query = (key: keyof typeof queriesState) => () => queriesState[key];
   return {
