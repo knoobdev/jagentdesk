@@ -5392,6 +5392,7 @@ export class CodexAppServerAgentSession implements AgentSession {
     const { model, thinkingOptionId } = await this.resolveModelAndThinking();
     this.config.model = model;
     this.config.thinkingOptionId = thinkingOptionId;
+    this.refreshResolvedCollaborationMode();
     return model;
   }
 
