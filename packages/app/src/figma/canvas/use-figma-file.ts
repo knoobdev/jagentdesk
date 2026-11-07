@@ -30,23 +30,7 @@ export const figmaKeys = {
     [...figmaKeys.all(serverId, fileKey), "pending"] as const,
 };
 
-export function useFigmaOutline(serverId: string, fileKey: string, version: string | null) {
-  const client = useHostRuntimeClient(serverId);
-  return useFetchQuery({
-    queryKey: figmaKeys.outline(serverId, fileKey, version),
-    queryFn: async () => {
-      const { outline } = await callFigma(client, "figma.file.outline.request", {
-        fileKey,
-        ...(version ? { version } : {}),
-      });
-      if (!outline) throw new Error("This file is unavailable.");
-      return outline;
-    },
-    enabled: client !== null,
-    dataShape: "value",
-    staleTimeMs: 60_000,
-  });
-}
+export { useFigmaPageOutline as useFigmaOutline } from "../page-outline";
 
 /** The shared lazy subtree store; a new store per version so snapshots never mix with live data. */
 export function useFigmaFrameStore(

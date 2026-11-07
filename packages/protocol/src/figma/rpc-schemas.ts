@@ -132,6 +132,7 @@ export const FigmaFrameSummarySchema = z.object({
 export type FigmaFrameSummary = z.infer<typeof FigmaFrameSummarySchema>;
 
 export const FigmaPageSchema = z.object({
+  childrenLoaded: z.boolean().optional(), // ADR-0043: index entries are not empty pages
   id: z.string(),
   name: z.string(),
   backgroundColor: z.string().optional(),
@@ -496,6 +497,8 @@ export const FigmaTeamsFilesResponseSchema = res("figma.teams.files.response", {
 
 // ── file content (32.5) ──────────────────────────────────────────────────────
 export const FigmaFileOutlineRequestSchema = req("figma.file.outline.request", {
+  pagesOnly: z.boolean().optional(),
+  pageId: z.string().min(1).optional(),
   fileKey,
   version: z.string().optional(), // read-only view of an older version
 });

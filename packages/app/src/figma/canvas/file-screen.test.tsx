@@ -121,7 +121,10 @@ const {
     // The daemon capabilities the gate reads (ADR-0039 / spec 32.5.1). Tests flip these; the
     // base `figma` gate must stay compatible with the pre-ADR behaviour.
     features: {
-      current: { figma: true, figmaNodeDepth: true } as Record<string, boolean>,
+      current: { figma: true, figmaNodeDepth: true, figmaPagedOutline: true } as Record<
+        string,
+        boolean
+      >,
     },
     // The inner screen's data path. The capability gate must keep ALL of these unmounted —
     // a new client never sends depth1 to an old host, and there is no full-Section fallback.
@@ -299,7 +302,7 @@ beforeEach(() => {
   captured.topbar = null;
   captured.layouts = [];
   routeParams.current = {};
-  features.current = { figma: true, figmaNodeDepth: true };
+  features.current = { figma: true, figmaNodeDepth: true, figmaPagedOutline: true };
   lastRerender = null;
   remote.statusData = null;
   remote.statusCalls = [];
@@ -398,7 +401,7 @@ describe("FigmaFileScreen capability gate (ADR-0039)", () => {
     const container = render();
     expect(container.querySelector('[data-testid="figma-update-host"]')).not.toBeNull();
     expect(container.textContent ?? "").toContain(
-      "This host predates Section outlines — update the app running the daemon to open Figma files.",
+      "Update the app running the daemon to open Figma files with page loading.",
     );
     // No fallback to the full Section: the inner screen (and every hook it holds) never mounts,
     // so this client never sends depth1 to a host that would silently strip the option.
@@ -409,6 +412,14 @@ describe("FigmaFileScreen capability gate (ADR-0039)", () => {
     expect(captured.canvas).toBeNull();
     expect(captured.toolbar).toBeNull();
     expect(captured.inspect).toBeNull();
+  });
+
+  it("requires page loading support before mounting a data path", () => {
+    features.current.figmaPagedOutline = false;
+    const container = render();
+    expect(container.querySelector('[data-testid="figma-update-host"]')).not.toBeNull();
+    expect(hooks.outline).not.toHaveBeenCalled();
+    expect(captured.canvas).toBeNull();
   });
 
   it("keeps the base figma gate first and unchanged for hosts that do not speak Figma at all", () => {
@@ -871,11 +882,9 @@ describe("FigmaFileScreen page route sync", () => {
   it("an unknown route page errors clearly: no silent fallback page, no wrong-node focus", () => {
     routeParams.current = { page: "p9", node: "40-1" };
     const { container } = mountEditable();
-    fireLayouts(800, 600);
-    expect(canvasProps().page).toBeNull(); // never silently show a DIFFERENT page
+    expect(captured.canvas).toBeNull(); // no empty canvas advertising a ready state
     expect(container.textContent).toContain("Page p9 is not in this file.");
-    // No camera policy invented for a page that isn't there: nothing was focused or zoomed.
-    expect(canvasProps().camera).toEqual({ zoom: 1, offsetX: 0, offsetY: 0 });
+    expect(captured.toolbar).toBeNull();
   });
 
   it("a return to a page-less URL re-canonicalizes: a REAL page param forgets the stale stamp", () => {
@@ -893,9 +902,9 @@ describe("FigmaFileScreen page route sync", () => {
   it("correcting an unknown page clears ONLY the route banner; unrelated focus errors survive", async () => {
     routeParams.current = { page: "p9" };
     const { container } = mountEditable();
-    fireLayouts(800, 600);
     expect(container.textContent).toContain("Page p9 is not in this file.");
     navigateRoute({ page: "p2" }); // route becomes valid: the banner this effect raised clears
+    fireLayouts(800, 600);
     expect(container.textContent ?? "").not.toContain("is not in this file.");
     expect(canvasPageId()).toBe("p2");
 

@@ -45,9 +45,20 @@ async function readSection() {
   });
   const file = listing.files.find((candidate) => candidate.name === fileName);
   assert(file, "Expected a real indexed file.");
-  const result = await client.figmaRequest("figma.file.outline.request", { fileKey: file.fileKey });
-  assert(!result.error && result.outline, "Real outline unavailable.");
-  const page = result.outline.pages.find((candidate) => candidate.name === pageName);
+  const index = await client.figmaRequest("figma.file.outline.request", {
+    fileKey: file.fileKey,
+    pagesOnly: true,
+  });
+  assert(!index.error && index.outline, "Real page index unavailable.");
+  const selected = index.outline.pages.find((candidate) => candidate.name === pageName);
+  assert(selected, "Real page unavailable.");
+  const result = await client.figmaRequest("figma.file.outline.request", {
+    fileKey: file.fileKey,
+    pageId: selected.id,
+    version: index.outline.version,
+  });
+  assert(!result.error && result.outline, "Real page outline unavailable.");
+  const page = result.outline.pages.find((candidate) => candidate.id === selected.id);
   const section = page?.frames.find(
     (frame) => frame.type === "SECTION" && frame.name === sectionName,
   );
