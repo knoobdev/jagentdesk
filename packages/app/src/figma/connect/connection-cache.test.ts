@@ -119,4 +119,47 @@ describe("Figma account mutations on a mounted query", () => {
     expect(queryClient.getQueryData(["figma", "host_a1", "files", connection.id])).toEqual([]);
     expect(queryClient.getQueryData(["figma", "host_a1", "teams", connection.id])).toBeUndefined();
   });
+
+  // ADR-0043: per-file reads outlive their screen — page snapshots in particular are shared
+  // cache entries. A removed account's snapshots (cached or in flight) must retire with it,
+  // while another account's file reads stay untouched.
+  it("Remove retires the removed account's per-file reads and keeps other accounts' reads", async () => {
+    const other = { ...connection, id: "fgc_d4e5f6" };
+    queryClient.setQueryData(key, [connection, other]);
+    const allFiles = ["figma", "host_a1", "files", "*"];
+    const ownFile = { fileKey: "file_a1", connectionId: connection.id, name: "Own" };
+    const otherFile = { fileKey: "file_b2", connectionId: other.id, name: "Other" };
+    queryClient.setQueryData(allFiles, [ownFile, otherFile]);
+    const ownPageKey = ["figma", "host_a1", "file_a1", "page-outline", "v1", "0:1"];
+    const ownIndexKey = ["figma", "host_a1", "file_a1", "page-index", "live"];
+    const ownOutlineKey = ["figma", "host_a1", "outline", "file_a1", "latest"];
+    const ownNodesKey = ["figma", "host_a1", "nodes", "file_a1", "latest", "0:1"];
+    const otherPageKey = ["figma", "host_a1", "file_b2", "page-outline", "v1", "0:1"];
+    queryClient.setQueryData(ownPageKey, { fileKey: "file_a1" });
+    queryClient.setQueryData(ownIndexKey, { pages: [] });
+    queryClient.setQueryData(ownOutlineKey, { fileKey: "file_a1" });
+    queryClient.setQueryData(ownNodesKey, { frames: {} });
+    queryClient.setQueryData(otherPageKey, { fileKey: "file_b2" });
+    // An in-flight page read for the removed account's file must not land after removal.
+    let finishPageRead: (value: unknown) => void = () => {};
+    const inflightKey = ["figma", "host_a1", "file_a1", "page-outline", "v2", "0:1"];
+    const inflight = queryClient
+      .fetchQuery({
+        queryKey: inflightKey,
+        queryFn: () =>
+          new Promise((resolve) => {
+            finishPageRead = resolve;
+          }),
+      })
+      .catch(() => undefined);
+    await removeFigmaConnection(queryClient, "host_a1", connection.id, async () => ({}));
+    finishPageRead({ fileKey: "file_a1" });
+    await inflight;
+    expect(queryClient.getQueryData(ownPageKey)).toBeUndefined();
+    expect(queryClient.getQueryData(ownIndexKey)).toBeUndefined();
+    expect(queryClient.getQueryData(ownOutlineKey)).toBeUndefined();
+    expect(queryClient.getQueryData(ownNodesKey)).toBeUndefined();
+    expect(queryClient.getQueryData(inflightKey)).toBeUndefined();
+    expect(queryClient.getQueryData(otherPageKey)).toEqual({ fileKey: "file_b2" });
+  });
 });

@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import type { FigmaOutline } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { useFetchQuery } from "@/data/query";
 import {
   getHostRuntimeStore,
@@ -25,6 +26,18 @@ function outlineLoadError(
   );
 }
 
+// Reads resolve the client at call time from the runtime store, so a retry after the socket was
+// replaced issues the request on the CURRENT client instead of a dead one.
+async function loadOutline(serverId: string, params: ReadParams): Promise<FigmaOutline> {
+  const { outline } = await callFigma(
+    getHostRuntimeStore().getSnapshot(serverId)?.client ?? null,
+    "figma.file.outline.request",
+    params,
+  );
+  if (!outline) throw new Error("This file is unavailable.");
+  return outline;
+}
+
 // Mounted only behind the figmaPagedOutline gate. Both sidebar and canvas use this hook and
 // identical keys, so neither starts a legacy full-file read or owns another copy of the index.
 export function useFigmaPageOutline(
@@ -36,15 +49,7 @@ export function useFigmaPageOutline(
   const client = useHostRuntimeClient(serverId);
   const connectionStatus = useHostRuntimeConnectionStatus(serverId);
   const queries = useQueryClient();
-  const load = async (params: ReadParams) => {
-    const { outline } = await callFigma(
-      getHostRuntimeStore().getSnapshot(serverId)?.client ?? null,
-      "figma.file.outline.request",
-      params,
-    );
-    if (!outline) throw new Error("This file is unavailable.");
-    return outline;
-  };
+  const load = (params: ReadParams) => loadOutline(serverId, params);
   const indexKey = useMemo(
     () => pageOutlineKeys.index(serverId, fileKey, version),
     [serverId, fileKey, version],
@@ -154,6 +159,85 @@ export function useFigmaPageOutline(
     isLoading: isPending,
     retrying,
     isFetching: retrying || index.isFetching || page.isFetching,
+    refetch,
+  };
+}
+
+// The prototype flow selector (ADR-0043): loads ONE page's outline at the pinned version when
+// the user browses flows on a page the canvas has not read. Same key and snapshot rules as the
+// canvas page query, so an already-read page is answered from this app's cache with no extra
+// RPC, and the pinned version can never mix with another snapshot. A pending result is NOT "no
+// flows" — the caller distinguishes loading, error and an empty read.
+export function useFigmaFlowPageOutline(
+  serverId: string,
+  fileKey: string,
+  version: string | null,
+  pageId: string | null,
+) {
+  const client = useHostRuntimeClient(serverId);
+  const queries = useQueryClient();
+  const key = useMemo(
+    () => pageOutlineKeys.page(serverId, fileKey, version, pageId),
+    [serverId, fileKey, version, pageId],
+  );
+  const query = useFetchQuery({
+    queryKey: key,
+    queryFn: () =>
+      readOutlineSnapshot(queries, key, { fileKey, pageId: pageId!, version: version! }, (params) =>
+        loadOutline(serverId, params),
+      ),
+    enabled: client !== null && version !== null && pageId !== null,
+    dataShape: "value",
+    staleTimeMs: 30 * 60_000,
+    retry: false,
+  });
+  // Retry owns the whole restore, exactly like the canvas page hook: cancel THIS scope's
+  // in-flight read first, then wait for the host through the existing runtime pairing, then
+  // re-read on the current client. The retry is scope-stamped (server|file|version|page), so a
+  // page/version change or unmount aborts the wait instead of applying a late result — and a
+  // reconnect failure lands in `error` (never swallowed), keeping Retry distinguishable from
+  // loading for the caller.
+  const scope = JSON.stringify([serverId, fileKey, version, pageId]);
+  const retryScope = useRef<string | null>(scope);
+  const retryAbort = useRef<AbortController | null>(null);
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<Error | null>(null);
+  useEffect(() => {
+    retryScope.current = scope;
+    setRetrying(false);
+    setRetryError(null);
+    return () => {
+      if (retryScope.current === scope) retryScope.current = null;
+      retryAbort.current?.abort();
+    };
+  }, [scope]);
+  const queryRefetch = query.refetch;
+  const refetch = useCallback(async () => {
+    if (retryAbort.current && !retryAbort.current.signal.aborted) return;
+    const abort = new AbortController();
+    retryAbort.current = abort;
+    setRetrying(true);
+    setRetryError(null);
+    try {
+      await waitForFigmaHost(getHostRuntimeStore(), serverId, abort.signal);
+      if (retryScope.current !== scope) return;
+      await queries.cancelQueries({ queryKey: key, exact: true });
+      if (retryScope.current !== scope) return;
+      await queryRefetch();
+    } catch (error) {
+      if (retryScope.current === scope)
+        setRetryError(error instanceof Error ? error : new Error(String(error)));
+    } finally {
+      abort.abort();
+      if (retryAbort.current === abort) retryAbort.current = null;
+      if (retryScope.current === scope) setRetrying(false);
+    }
+  }, [serverId, scope, key, queries, queryRefetch]);
+  return {
+    data: query.data,
+    error: retryError ?? query.error ?? null,
+    isPending: query.isPending,
+    retrying,
     refetch,
   };
 }

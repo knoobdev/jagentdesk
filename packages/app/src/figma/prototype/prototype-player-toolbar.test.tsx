@@ -31,7 +31,12 @@ vi.mock("react-native-unistyles", () => ({
   withUnistyles: (component: unknown) => component,
   useUnistyles: () => ({ theme }),
 }));
-vi.mock("@/runtime/host-runtime", () => ({ useHostRuntimeClient: () => null }));
+vi.mock("@/runtime/host-runtime", () => ({
+  useHostRuntimeClient: () => null,
+  // The real page-outline module loads with prototype-player.tsx and needs these exports.
+  useHostRuntimeConnectionStatus: () => "connected",
+  getHostRuntimeStore: () => ({ getSnapshot: () => ({ client: null }) }),
+}));
 vi.mock("@/data/query", () => ({ useFetchQuery: () => ({ data: undefined }) }));
 vi.mock("@/utils/open-external-url", () => ({ openExternalUrl: vi.fn() }));
 vi.mock("@/components/ui/button", () => ({
@@ -51,8 +56,12 @@ vi.mock("@/components/ui/loading-spinner", () => ({
 }));
 vi.mock("@/components/ui/dropdown-menu", () => ({
   DropdownMenu: ({ children }: { children?: React.ReactNode }) => children,
-  DropdownMenuTrigger: ({ children }: { children?: React.ReactNode }) =>
-    React.createElement("div", { "data-testid": "figma-flow-trigger" }, children),
+  DropdownMenuTrigger: ({ children, testID }: Record<string, unknown>) =>
+    React.createElement(
+      "div",
+      { "data-testid": (testID as string | undefined) ?? "figma-flow-trigger" },
+      children as React.ReactNode,
+    ),
   DropdownMenuContent: ({ children }: { children?: React.ReactNode }) =>
     React.createElement("div", null, children),
   DropdownMenuItem: ({ children }: { children?: React.ReactNode }) =>
