@@ -284,11 +284,23 @@ function useFlowPages(
   // Pages the canvas read are loaded per the outline; a page read ON DEMAND earlier in this
   // session still says childrenLoaded === false, so its real state comes from the shared query
   // cache (same key as the canvas page query) — loaded / failed / pending / not loaded.
+  // Observed read state of the browsed page comes straight from the on-demand hook
+  // (data/error/pending), so its marker recomputes the moment the read resolves — without a
+  // global query cache subscription; other pages' markers read the shared cache per render.
   const flowPageOptions = useMemo<FlowPageOption[]>(
     () =>
       outline.pages.map((page) => {
         if (page.childrenLoaded !== false)
           return { id: page.id, name: page.name, loaded: true, status: "loaded" };
+        if (page.id === flowPageId) {
+          if (flowPage.data)
+            return { id: page.id, name: page.name, loaded: true, status: "loaded" };
+          if (flowPage.error)
+            return { id: page.id, name: page.name, loaded: false, status: "failed" };
+          if (flowPage.isPending)
+            return { id: page.id, name: page.name, loaded: false, status: "pending" };
+          return { id: page.id, name: page.name, loaded: false, status: "unread" };
+        }
         const state = queries.getQueryState(
           pageOutlineKeys.page(file.serverId, file.fileKey, playbackVersion, page.id),
         );
@@ -300,7 +312,17 @@ function useFlowPages(
           return { id: page.id, name: page.name, loaded: false, status: "pending" };
         return { id: page.id, name: page.name, loaded: false, status: "unread" };
       }),
-    [outline.pages, queries, file.serverId, file.fileKey, playbackVersion],
+    [
+      outline.pages,
+      queries,
+      file.serverId,
+      file.fileKey,
+      playbackVersion,
+      flowPageId,
+      flowPage.data,
+      flowPage.error,
+      flowPage.isPending,
+    ],
   );
 
   // The browsed page's flows are being read on demand; pending is not "no flows", and a failed
@@ -812,7 +834,7 @@ export function PlayerToolbar({
               {pages.find((page) => page.id === flowPageId)?.name ?? "Select a page"}
             </Text>
           </DropdownMenuTrigger>
-          <DropdownMenuContent>
+          <DropdownMenuContent scrollable testID="figma-flow-page-menu">
             {pages.map((page) => (
               <FlowPageMenuItem key={page.id} page={page} onSelectFlowPage={onSelectFlowPage} />
             ))}
@@ -829,7 +851,7 @@ export function PlayerToolbar({
             {currentFlowLabel(labelSource, startFrameId)}
           </Text>
         </DropdownMenuTrigger>
-        <DropdownMenuContent>
+        <DropdownMenuContent scrollable testID="figma-flow-menu">
           {flows.map((flow) => (
             <FlowMenuItem key={flow.nodeId} flow={flow} onStartFlow={onStartFlow} />
           ))}
