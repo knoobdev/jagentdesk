@@ -34,10 +34,29 @@ export async function removeFigmaConnection(
   remove: () => Promise<unknown>,
 ): Promise<void> {
   await remove(); // Failed removal leaves all current account/file state intact.
+  // The removed account's per-file reads must not survive: outline and page-snapshot queries —
+  // cached or still in flight — would keep serving a disconnected account's data. Collect the
+  // account's file keys BEFORE dropping the file rows, then retire every read scoped to them.
+  const fileKeys = new Set<string>();
+  for (const [, files] of queryClient.getQueriesData<FigmaFile[]>({
+    queryKey: ["figma", serverId, "files"],
+  })) {
+    for (const file of files ?? []) {
+      if (file.connectionId === connectionId) fileKeys.add(file.fileKey);
+    }
+  }
   await Promise.all([
     queryClient.cancelQueries({ queryKey: connectionKey(serverId), exact: true }),
     queryClient.cancelQueries({ queryKey: ["figma", serverId, "files"] }),
     queryClient.cancelQueries({ queryKey: ["figma", serverId, "teams", connectionId] }),
+    ...[...fileKeys].map((fileKey) =>
+      Promise.all([
+        queryClient.cancelQueries({ queryKey: ["figma", serverId, fileKey] }),
+        queryClient.cancelQueries({ queryKey: ["figma", serverId, "outline", fileKey] }),
+        queryClient.cancelQueries({ queryKey: ["figma", serverId, "nodes", fileKey] }),
+        queryClient.cancelQueries({ queryKey: ["figma", serverId, "nodes", "depth-1", fileKey] }),
+      ]),
+    ),
   ]);
   queryClient.setQueryData<FigmaConnection[]>(connectionKey(serverId), (previous = []) =>
     previous.filter((item) => item.id !== connectionId),
@@ -48,4 +67,13 @@ export async function removeFigmaConnection(
     previous?.filter((file) => file.connectionId !== connectionId),
   );
   queryClient.removeQueries({ queryKey: ["figma", serverId, "teams", connectionId] });
+  // Per-file reads (legacy outline/nodes and ADR-0043 page snapshots) are dead once their
+  // account is gone: remove them so no stale cache can resurrect the removed account, while
+  // other accounts' file reads stay untouched.
+  for (const fileKey of fileKeys) {
+    queryClient.removeQueries({ queryKey: ["figma", serverId, fileKey] });
+    queryClient.removeQueries({ queryKey: ["figma", serverId, "outline", fileKey] });
+    queryClient.removeQueries({ queryKey: ["figma", serverId, "nodes", fileKey] });
+    queryClient.removeQueries({ queryKey: ["figma", serverId, "nodes", "depth-1", fileKey] });
+  }
 }

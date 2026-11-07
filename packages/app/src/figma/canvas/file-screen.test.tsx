@@ -956,3 +956,44 @@ describe("FigmaFileScreen page route sync", () => {
     );
   });
 });
+
+// ADR-0043: index pages report childrenLoaded === false until their content is read. "No frames
+// yet" is a LOADING state, not an empty page — the false banner used to fire on unloaded pages.
+describe("FigmaFileScreen paged index pages", () => {
+  const pagedIndexPage = {
+    id: "p3",
+    name: "Dark",
+    frames: [],
+    children: [],
+    flowStartingPoints: [],
+  };
+
+  it("an unloaded index page shows the page-loading state, not a false empty-page banner", () => {
+    hooks.outline.mockImplementation(() => ({
+      data: {
+        ...outlineFixture,
+        pages: [...outlineFixture.pages, { ...pagedIndexPage, childrenLoaded: false }],
+      },
+      isPending: false,
+      isError: false,
+      error: null,
+    }));
+    routeParams.current = { page: "p3" };
+    const container = render();
+    expect(container.querySelector("[data-testid='figma-page-loading']")).not.toBeNull();
+    expect(container.querySelector("[data-testid='empty-state']")).toBeNull();
+  });
+
+  it("a genuinely empty read page keeps the empty-page banner", () => {
+    hooks.outline.mockImplementation(() => ({
+      data: { ...outlineFixture, pages: [...outlineFixture.pages, pagedIndexPage] },
+      isPending: false,
+      isError: false,
+      error: null,
+    }));
+    routeParams.current = { page: "p3" };
+    const container = render();
+    expect(container.querySelector("[data-testid='figma-page-loading']")).toBeNull();
+    expect(container.querySelector("[data-testid='empty-state']")).not.toBeNull();
+  });
+});

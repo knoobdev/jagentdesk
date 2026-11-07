@@ -827,7 +827,14 @@ function FigmaFileScreenInner({ serverId, fileKey, version }: FigmaFileRef) {
           <AssistantColumn context={assistantContext} isCompact onClose={closeAssistant} />
         </AdaptiveModalSheet>
       ) : null}
-      {page && page.frames.length === 0 ? (
+      {page && page.childrenLoaded === false ? (
+        // ADR-0043: an index page reports childrenLoaded === false until its content is read —
+        // that is "loading", not "empty". Spin instead of claiming the page has no frames.
+        <View style={[styles.emptyOverlay, styles.center]} testID="figma-page-loading">
+          <LoadingSpinner size="large" color="#71717a" />
+        </View>
+      ) : null}
+      {page && page.childrenLoaded !== false && page.frames.length === 0 ? (
         <View style={styles.emptyOverlay}>
           <EmptyState title="This page has no frames" body="Create one from the toolbar." />
         </View>
