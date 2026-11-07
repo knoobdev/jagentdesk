@@ -1,3 +1,4 @@
+import { createHostLogger } from "@/runtime/host-logger";
 import { connectToDaemon } from "./test-daemon-connection";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DaemonClientConfig } from "@jagentdesk/client/internal/daemon-client";
@@ -35,6 +36,7 @@ class FakeDaemonClient implements DaemonProbeClient {
 }
 
 class FakeDaemonProbe {
+  diagnosticLines: string[] = [];
   createdClients: FakeDaemonClient[] = [];
   closedClients: FakeDaemonClient[] = [];
   clientIdsRequested = 0;
@@ -43,6 +45,11 @@ class FakeDaemonProbe {
   hangNextConnection = false;
 
   readonly deps: DaemonConnectionDependencies<FakeDaemonClient> = {
+    createLogger: (readServerId) => {
+      const capture = (...values: unknown[]) =>
+        this.diagnosticLines.push(values.map(String).join(" "));
+      return createHostLogger(readServerId, { log: capture, warn: capture, error: capture });
+    },
     getClientId: async () => {
       this.clientIdsRequested += 1;
       return "cid_shared_probe_test";
@@ -74,6 +81,19 @@ describe("test-daemon-connection connectToDaemon", () => {
   beforeEach(() => {
     vi.stubGlobal("__DEV__", false);
     probe = new FakeDaemonProbe();
+  });
+
+  it("retains the learned host identity in adopted probe logs after close", async () => {
+    const result = await connectToDaemon(
+      { id: "direct:test", type: "directTcp", endpoint: "127.0.0.1:6934" },
+      undefined,
+      probe.deps,
+    );
+    await result.client.close();
+    result.client.config.logger!.error({ err: new Error("socket closed") }, "connection_error");
+    const record = JSON.parse(probe.diagnosticLines[0]!.slice("connection_error ".length));
+    expect(record.serverId).toBe("srv_probe_test");
+    expect(record.err.message).toBe("socket closed");
   });
 
   it("reuses the app clientId for direct connections", async () => {

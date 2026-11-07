@@ -1,3 +1,4 @@
+import { createHostLogger } from "./host-logger";
 import {
   nativeWebSocketFactory,
   defaultWebSocketFactory,
@@ -585,6 +586,7 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
         appVersion: resolveAppVersion() ?? undefined,
         runtimeGeneration,
         capabilities: appCapabilities,
+        logger: createHostLogger(() => host.serverId),
       };
       if (connection.type === "directSocket" || connection.type === "directPipe") {
         return new DaemonClient({

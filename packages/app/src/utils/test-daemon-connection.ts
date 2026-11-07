@@ -1,3 +1,4 @@
+import { createHostLogger } from "@/runtime/host-logger";
 import {
   nativeWebSocketFactory,
   defaultWebSocketFactory,
@@ -36,6 +37,7 @@ interface LocalTransportUrlInput {
 }
 
 export interface DaemonConnectionDependencies<TClient extends DaemonProbeClient> {
+  createLogger: typeof createHostLogger;
   getClientId(): Promise<string>;
   resolveAppVersion(): string | null;
   createLocalTransportFactory(): DaemonClientConfig["transportFactory"] | null;
@@ -44,6 +46,7 @@ export interface DaemonConnectionDependencies<TClient extends DaemonProbeClient>
 }
 
 const defaultDaemonConnectionDependencies: DaemonConnectionDependencies<DaemonClient> = {
+  createLogger: createHostLogger,
   getClientId: async () => {
     await prepareRelayDeviceSigning().catch(() => undefined);
     return getOrCreateClientId();
@@ -390,5 +393,14 @@ export async function connectToDaemon(
   deps: DaemonConnectionDependencies<DaemonProbeClient> = defaultDaemonConnectionDependencies,
 ): Promise<{ client: DaemonProbeClient; serverId: string; hostname: string | null }> {
   const config = await buildClientConfig(connection, options?.serverId, options, deps);
-  return connectAndProbe(config, resolveTimeout(connection, options), deps, options?.signal);
+  let serverId = options?.serverId;
+  config.logger = deps.createLogger(() => serverId);
+  const result = await connectAndProbe(
+    config,
+    resolveTimeout(connection, options),
+    deps,
+    options?.signal,
+  );
+  serverId = result.serverId;
+  return result;
 }
