@@ -296,6 +296,110 @@ describe("page-scoped outlines", () => {
       code: "not_found",
     });
   });
+
+  // ── snapshot validation (ADR-0043): a cached entry or a fresh answer that does not carry
+  // the exact requested (fileKey, version) must never be served as that snapshot. ──
+  const staleOutline = (version: string) => ({
+    fileKey: FILE,
+    name: "Marketing Site",
+    version,
+    lastModified_ms: 0,
+    editorType: "figma",
+    source: "rest",
+    pages: [{ id: "0:1", name: "Stale", frames: [], flowStartingPoints: [] }],
+  });
+
+  it("does not serve a cached full outline that belongs to another snapshot", async () => {
+    respondFile();
+    await fixture.api.ctx.cache.putJson(`file/${FILE}/outline-d3@v1`, { data: staleOutline("v2") });
+    const result = await request({ version: "v1" });
+    expect(result.outline?.version).toBe("v1");
+    expect(result.outline?.pages.map((page) => page.id)).toEqual(["0:1", "0:2"]);
+    expect(fixture.api.rest.callsTo(`/v1/files/${FILE}`)).toHaveLength(1);
+  });
+
+  it("rejects a fresh full outline answered from another version", async () => {
+    fixture.api.rest.respond(`/v1/files/${FILE}`, () => fileJson("v2"));
+    await expect(request({ version: "v1" })).rejects.toMatchObject({ code: "conflict" });
+    respondFile();
+    const result = await request({ version: "v1" });
+    expect(result.outline?.version).toBe("v1");
+  });
+
+  it("recomputes a page index cached under a mismatched snapshot", async () => {
+    respondFile();
+    await fixture.api.ctx.cache.putJson(`file/${FILE}/page-index@v1`, {
+      data: staleOutline("v2"),
+    });
+    const result = await request({ version: "v1", pagesOnly: true });
+    expect(result.outline?.version).toBe("v1");
+    expect(result.outline?.pages[0]).toMatchObject({ id: "0:1", childrenLoaded: false });
+    expect(fixture.api.rest.callsTo(`/v1/files/${FILE}`)).toHaveLength(1);
+  });
+
+  it("recomputes a page outline cached under a mismatched snapshot", async () => {
+    respondFile();
+    respondPage();
+    await fixture.api.ctx.cache.putJson(`file/${FILE}/page-outline/0:1@v1`, {
+      data: staleOutline("v2"),
+    });
+    const result = await request({ pageId: "0:1", version: "v1" });
+    expect(result.outline?.version).toBe("v1");
+    expect(result.outline?.pages[0]).toMatchObject({
+      childrenLoaded: true,
+      frames: [{ id: "1:2" }],
+    });
+    expect(fixture.api.rest.callsTo(`/v1/files/${FILE}/nodes`)).toHaveLength(1);
+  });
+
+  it("rejects page index content from another version", async () => {
+    fixture.api.rest.respond(`/v1/files/${FILE}`, () => fileJson("v2"));
+    await expect(request({ version: "v1", pagesOnly: true })).rejects.toMatchObject({
+      code: "conflict",
+    });
+  });
+
+  it.each([
+    {}, // no document at all
+    { name: "x", version: "v1", document: {} }, // document without children
+    { name: "x", version: "v1", document: { id: "0:0", type: "DOCUMENT" } },
+  ])("rejects a malformed file answer without caching it: %j", async (body) => {
+    fixture.api.rest.respond(`/v1/files/${FILE}`, () => body);
+    await expect(request({ version: "v1" })).rejects.toMatchObject({ code: "figma_error" });
+    // The malformed answer must not poison the cache: a good answer after it is served fresh.
+    respondFile();
+    const result = await request({ version: "v1" });
+    expect(result.outline?.pages.map((page) => page.id)).toEqual(["0:1", "0:2"]);
+  });
+
+  it("keeps a genuine empty children array a valid empty file", async () => {
+    fixture.api.rest.respond(`/v1/files/${FILE}`, () => ({
+      name: "Empty",
+      version: "v1",
+      lastModified: "2026-03-01T10:00:00Z",
+      editorType: "figma",
+      document: { id: "0:0", type: "DOCUMENT", name: "Document", children: [] },
+    }));
+    const result = await request({ version: "v1" });
+    expect(result.outline?.version).toBe("v1");
+    expect(result.outline?.pages).toEqual([]);
+  });
+
+  it("rejects a page answer without a children array instead of faking a loaded page", async () => {
+    respondFile();
+    fixture.api.rest.respond(`/v1/files/${FILE}/nodes`, {
+      version: "v1",
+      nodes: {
+        "0:1": {
+          document: { id: "0:1", name: "<page>", type: "CANVAS", flowStartingPoints: [] },
+        },
+      },
+    });
+    await expect(request({ pageId: "0:1", version: "v1" })).rejects.toMatchObject({
+      code: "figma_error",
+    });
+    expect(await fixture.api.ctx.cache.getJson(`file/${FILE}/page-outline/0:1@v1`)).toBeNull();
+  });
 });
 
 describe("preview export grouping boundaries", () => {
