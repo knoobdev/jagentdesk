@@ -100,6 +100,10 @@ export function describeConnectionKind(type: HostConnection["type"] | string): s
       return "local pipe";
     case "tailnet":
       return "tailnet";
+    case "relay":
+      return "relay";
+    case "routed":
+      return "routed";
     default:
       return "unknown";
   }

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  describeConnectionKind,
   formatHostRuntimeSection,
   formatServerInfoSection,
   redactAppDiagnosticReport,
@@ -120,6 +121,27 @@ describe("app diagnostics report", () => {
     expect(formatHostRuntimeSection({ host: makeHost(), snapshot: null })).toContain(
       "Last online: unknown",
     );
+  });
+
+  test.each(["relay", "routed"])("identifies %s connections by name", (type) => {
+    expect(describeConnectionKind(type)).toBe(type);
+  });
+
+  test("identifies the active relay without exposing its endpoint", () => {
+    const host = makeHost();
+    host.connections.push({
+      id: "relay-private",
+      type: "relay",
+      endpoint: "127.0.0.1:6934",
+      daemonPublicKeyB64: "private-key",
+    });
+    const snapshot = makeSnapshot(host);
+    snapshot.activeConnectionId = "relay-private";
+    snapshot.activeConnection = { type: "relay", endpoint: "127.0.0.1:6934", display: "relay" };
+    const report = formatHostRuntimeSection({ host, snapshot });
+    expect(report).toContain("Active connection: relay");
+    expect(report).toContain("Connection 5: relay, active, probe=unknown");
+    expect(report).not.toContain("127.0.0.1:6934");
   });
 
   test("redacts saved connection secrets from collected daemon and desktop text", () => {
