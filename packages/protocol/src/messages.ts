@@ -211,6 +211,11 @@ import {
   ProxyPushSchemas,
 } from "./proxy/rpc-schemas.js";
 import { SshRequestSchemas, SshResponseSchemas, SshPushSchemas } from "./ssh/rpc-schemas.js";
+import {
+  RemoteExecRequestSchemas,
+  RemoteExecResponseSchemas,
+  RemoteExecPushSchemas,
+} from "./remote-exec/rpc-schemas.js";
 import { SpecModeRequestSchemas, SpecModeResponseSchemas } from "./spec-mode.js";
 import {
   ArgoCdRequestSchemas,
@@ -4069,6 +4074,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ...JiraRequestSchemas,
   ...FigmaRequestSchemas,
   ...SshRequestSchemas,
+  ...RemoteExecRequestSchemas,
   ...SideloadRequestSchemas,
   ...SftpInboundSchemas,
   ...ForwardingInboundSchemas,
@@ -7911,6 +7917,8 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ...FigmaPushSchemas,
   ...SshResponseSchemas,
   ...SshPushSchemas,
+  ...RemoteExecResponseSchemas,
+  ...RemoteExecPushSchemas,
   ...SideloadResponseSchemas,
   ...SideloadPushSchemas,
   ...SftpOutboundSchemas,

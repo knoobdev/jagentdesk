@@ -19,6 +19,18 @@ export interface DirectTailnetAddress {
 }
 
 /**
+ * Loopback SOCKS5 proxy of the bridge's tsnet node (spec 33.2 / ADR-0044): the
+ * daemon dials tailnet targets for `via: "tailnet"` SSH servers through it.
+ * Username is fixed to "tsnet"; the password rotates on every bridge run.
+ */
+export interface TailnetSocksProxy {
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+}
+
+/**
  * Abstraction over the daemon's tailnet (tsnet) listener.
  *
  * The real listener spawns the Go/tsnet bridge binary
@@ -41,6 +53,13 @@ export interface TsnetListener {
    * ready, or the daemon has no TCP listen port).
    */
   getDirectAddress(): DirectTailnetAddress | null;
+  /**
+   * The bridge's loopback SOCKS5 proxy. Null unless the bridge is READY and
+   * printed a `TSNET_SOCKS5` line; reset when the bridge errors, exits or the
+   * listener stops. Never logged verbatim, never persisted, never sent to
+   * clients.
+   */
+  getTailnetSocks(): TailnetSocksProxy | null;
   /** Bind the tailnet listener and begin accepting application sockets. */
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -134,6 +153,7 @@ export function createTsnetListener(options: TsnetListenerOptions): TsnetListene
   let readyHost: string | null = null;
   let loginUrl: string | null = null;
   let localProxyPort: number | null = null;
+  let tailnetSocks: TailnetSocksProxy | null = null;
 
   function resolveConfiguredLocalProxyPort(): number {
     const raw = process.env.JAGENTDESK_TAILSCALE_PROXY_PORT?.trim() ?? "";
@@ -189,6 +209,32 @@ export function createTsnetListener(options: TsnetListenerOptions): TsnetListene
     );
   }
 
+  /**
+   * `TSNET_SOCKS5 <addr> <proxyCred>` → the loopback SOCKS5 proxy. Returns null
+   * when the line is malformed; the credential never leaves memory in clear.
+   */
+  function parseSocksLine(line: string): TailnetSocksProxy | null {
+    const rest = line.slice("TSNET_SOCKS5 ".length);
+    const lastSpace = rest.lastIndexOf(" ");
+    if (lastSpace <= 0) return null;
+    const addr = rest.slice(0, lastSpace);
+    const password = rest.slice(lastSpace + 1);
+    const colon = addr.lastIndexOf(":");
+    if (colon <= 0) return null;
+    const host = addr.slice(0, colon);
+    const port = Number.parseInt(addr.slice(colon + 1), 10);
+    if (!host || !Number.isInteger(port) || port <= 0 || port > 65_535 || !password) return null;
+    return { host, port, username: "tsnet", password };
+  }
+
+  /** Loggable form of a `TSNET_SOCKS5` line: the credential becomes `***`. */
+  function redactSocksCredential(line: string): string {
+    if (!line.startsWith("TSNET_SOCKS5 ")) return line;
+    const lastSpace = line.lastIndexOf(" ");
+    if (lastSpace < "TSNET_SOCKS5 ".length) return "TSNET_SOCKS5 ***";
+    return `${line.slice(0, lastSpace)} ***`;
+  }
+
   function attachBridgeOutputHandlers(bridgeProcess: ChildProcess): void {
     bridgeProcess.stdout?.on("data", (chunk: Buffer) => {
       for (const line of chunk.toString().split("\n")) {
@@ -203,12 +249,35 @@ export function createTsnetListener(options: TsnetListenerOptions): TsnetListene
           writeStatus(Boolean(readyHost), readyHost);
           continue;
         }
+        if (trimmed.startsWith("TSNET_SOCKS5 ")) {
+          const parsed = parseSocksLine(trimmed);
+          if (parsed) {
+            tailnetSocks = parsed;
+            logger.info(
+              { line: redactSocksCredential(trimmed) },
+              "tsnet bridge loopback SOCKS5 ready",
+            );
+          } else {
+            logger.warn(
+              { line: redactSocksCredential(trimmed) },
+              "tsnet bridge SOCKS5 line unparsable",
+            );
+          }
+          continue;
+        }
+        if (trimmed.startsWith("TSNET_SOCKS5_ERROR ")) {
+          const message = trimmed.slice("TSNET_SOCKS5_ERROR ".length).trim();
+          logger.warn({ message }, "tsnet bridge loopback SOCKS5 unavailable");
+          tailnetSocks = null;
+          continue;
+        }
         if (trimmed.startsWith("TSNET_ERROR ")) {
           const message = trimmed.slice("TSNET_ERROR ".length).trim();
           logger.error({ message }, "tsnet bridge startup failed");
           readyHost = null;
           loginUrl = null;
           localProxyPort = null;
+          tailnetSocks = null;
           writeStatus(false);
           continue;
         }
@@ -237,6 +306,7 @@ export function createTsnetListener(options: TsnetListenerOptions): TsnetListene
       readyHost = null;
       loginUrl = null;
       localProxyPort = null;
+      tailnetSocks = null;
       writeStatus(false);
       child = null;
     });
@@ -245,6 +315,7 @@ export function createTsnetListener(options: TsnetListenerOptions): TsnetListene
       readyHost = null;
       loginUrl = null;
       localProxyPort = null;
+      tailnetSocks = null;
       child = null;
       writeStatus(false);
     });
@@ -314,6 +385,9 @@ export function createTsnetListener(options: TsnetListenerOptions): TsnetListene
   return {
     kind: "tsnet",
     getDirectAddress: () => currentAddress(),
+    // READY-with-a-SOCKS-line is the contract: an unparsed or error line leaves
+    // the accessor null even when the bridge is otherwise up.
+    getTailnetSocks: () => (readyHost !== null && tailnetSocks ? tailnetSocks : null),
     start: async () => {
       if (started || stopped) {
         return;
@@ -379,6 +453,7 @@ export function createTsnetListener(options: TsnetListenerOptions): TsnetListene
       readyHost = null;
       loginUrl = null;
       localProxyPort = null;
+      tailnetSocks = null;
       writeStatus(false);
 
       if (child) {

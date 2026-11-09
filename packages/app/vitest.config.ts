@@ -13,6 +13,10 @@ const resolvePackageEntry = (packageName: string) => {
 };
 
 export default defineConfig({
+  // Expo compiles JSX with the automatic runtime (no `import React` needed); esbuild's
+  // default is the classic runtime, which breaks files that render JSX without React
+  // in scope (e.g. remote-job-card.tsx) under test.
+  esbuild: { jsx: "automatic" },
   test: {
     environment: "node",
     exclude: [...configDefaults.exclude, "e2e/**"],

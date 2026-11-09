@@ -6278,3 +6278,94 @@ test("raw ssh.* module pushes reach onSshModulePush and typed SSH listeners", as
   offForward();
   offActivity();
 });
+
+test("sends remote_exec.list_targets.request and resolves the response", async () => {
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "remote_exec_request_test",
+    transportFactory: () => mock.transport,
+    reconnect: { enabled: false },
+  });
+  clients.push(client);
+  const connectPromise = client.connect();
+  mock.triggerOpen();
+  await connectPromise;
+
+  const targetsPromise = client.remoteExecListTargets("rex-1");
+
+  expect(JSON.parse(assertStr(mock.sent[0]))).toEqual({
+    type: "session",
+    message: { type: "remote_exec.list_targets.request", requestId: "rex-1" },
+  });
+
+  const target = {
+    serverId: "srv_1a2b3c4d5e6f",
+    label: "build-box",
+    address: "build-box.tailnet.ts.net",
+    via: "tailnet",
+    workRoot: "~/.jagentdesk/remote-exec",
+    connectionState: "connected",
+    environment: null,
+  };
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "remote_exec.list_targets.response",
+      payload: { requestId: "rex-1", error: null, targets: [target] },
+    }),
+  );
+
+  await expect(targetsPromise).resolves.toEqual({
+    requestId: "rex-1",
+    error: null,
+    targets: [target],
+  });
+});
+
+test("remote_exec.job_updated pushes reach onRemoteExecJobUpdated", async () => {
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "remote_exec_push_test",
+    transportFactory: () => mock.transport,
+    reconnect: { enabled: false },
+  });
+  clients.push(client);
+  const connectPromise = client.connect();
+  mock.triggerOpen();
+  await connectPromise;
+
+  const updates: unknown[] = [];
+  const off = client.onRemoteExecJobUpdated((event) => updates.push(event));
+  const event = {
+    type: "remote_exec.job_updated",
+    payload: {
+      job: {
+        id: "rjb_1a2b3c4d5e6f",
+        serverId: "srv_1a2b3c4d5e6f",
+        serverLabel: "build-box",
+        workspacePath: "/Users/dev/work/app",
+        workspaceKey: "wsk_1a2b3c4d5e6f",
+        snapshotId: null,
+        command: "npm test",
+        status: "running",
+        exitCode: null,
+        error: null,
+        agentId: null,
+        sync: null,
+        outputBytes: 512,
+        outputTruncated: false,
+        createdAtMs: 1_000,
+        startedAtMs: 1_050,
+        finishedAtMs: null,
+        timeoutMs: 7_200_000,
+      },
+    },
+  };
+  mock.triggerMessage(wrapSessionMessage(event));
+  // A push of another type is not delivered to this subscription.
+  mock.triggerMessage(wrapSessionMessage({ type: "ssh.prompt.resolved", promptId: "hk_a1b2c3" }));
+
+  expect(updates).toEqual([event]);
+  off();
+});

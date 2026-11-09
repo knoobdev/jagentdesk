@@ -52,6 +52,8 @@ with a few deliberate boundaries:
 - **Kubernetes cluster management** — a full Kubernetes cockpit built into the app.
 - **Per‑cluster AI chat** — ask an agent about any resource or its logs; the agent uses
   real `kubectl` tools scoped to the exact cluster you connected.
+- **Remote tasks** _(new)_ — ask the agent to run a command on another machine (for example a
+  Windows PC through WSL2) on a copy of your workspace; output and status come back in the chat.
 - **SSH servers** _(new)_ — a Termius-class SSH client in the daemon: servers, groups and a keychain,
   terminals that survive closing the app, SFTP, port forwarding, jump hosts and proxies, snippets on
   many servers, session logs and import — plus a chat agent per server that works with its Docker,
@@ -119,6 +121,24 @@ with a few deliberate boundaries:
 ---
 
 ## ✨ New in this release
+
+### Run tasks on your PC from chat (v0.9.57)
+
+- **Ask in chat, run on another machine.** "Run the tests on my PC" — the agent sends a copy of the
+  current workspace to an SSH server you enabled for remote tasks, runs the command there and shows the
+  output in the chat. The project and the agent stay on your Mac.
+- **No Tailscale app needed on the Mac.** Choose **Route → JAgentDesk Tailscale** and SSH goes through
+  the daemon's own Tailscale node. Host keys are checked like any SSH server.
+- **Only what the task needs.** Uncommitted changes and new files are included; `.env` and key files
+  are never sent. Re-runs only send what changed, and dependencies installed on the PC are kept.
+- **Long jobs are safe.** Jobs keep running through network drops, closing the app and daemon
+  restarts. Every run and every Stop asks for your permission first.
+- Setup for a Windows PC with WSL2: [docs/remote-tasks.md](docs/remote-tasks.md). Details and
+  limits: [changelog](CHANGELOG.md#v0957--2026-11-09).
+
+![An agent ran a command on a Windows PC through WSL2: the job card with status, files sent, exit code and the end of the output, then the agent's summary](docs/media/remote-tasks-chat.png)
+
+![Edit server → Remote tasks: route through JAgentDesk Tailscale, use for remote tasks, work folder and a passing Check](docs/media/remote-tasks-server.png)
 
 ### Figma: account updates, in-app file browsing and page loading (v0.9.56)
 

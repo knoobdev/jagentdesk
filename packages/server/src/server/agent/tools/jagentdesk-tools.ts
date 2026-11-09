@@ -121,6 +121,7 @@ import type { AgentForumService } from "../../agent-forum/service.js";
 import { registerForumTools } from "./forum-tools.js";
 import type { ClusterRegistry } from "../../cluster/cluster-registry.js";
 import { registerSshAgentTools, type SshAgentTool } from "../../ssh/environment/agent-tools.js";
+import type { RemoteExecAgentTool } from "../../remote-exec/agent-tools.js";
 import type { ArgoCdAgentTool } from "../../argocd/agent-tools.js";
 import type { SideloadAgentTool } from "../../sideload/agent-tools.js";
 import type { JiraAgentTool } from "../../jira/agent-tools.js";
@@ -197,6 +198,8 @@ export interface JAgentDeskToolHostDependencies {
   // SSH servers (spec 25.11): ssh_* tools and the server-aware docker_* tools that replace the
   // host-only ones (same names, same behaviour without serverId). Bound per caller agent.
   sshAgentTools?: (callerAgentId: string | null) => SshAgentTool[];
+  // Remote execution (spec 33.7): remote_* tools; [] when no SSH server has remote tasks enabled.
+  remoteExecAgentTools?: (callerAgentId: string | null) => RemoteExecAgentTool[];
   // Argo CD (spec 30.4): argocd_* tools bound per caller agent (default instance from its label).
   argocdAgentTools?: (callerAgentId: string | null) => ArgoCdAgentTool[];
   /** Sideload tools (spec 26.10); installs raise a permission card. */
@@ -4151,6 +4154,15 @@ export function createJAgentDeskToolCatalog(
   registerDockerTools({ registerTool });
   if (options.sshAgentTools) {
     registerSshAgentTools(registerTool, options.sshAgentTools(callerAgentId ?? null));
+  }
+  if (options.remoteExecAgentTools) {
+    for (const tool of options.remoteExecAgentTools(callerAgentId ?? null)) {
+      registerTool(
+        tool.name,
+        { title: tool.title, description: tool.description, inputSchema: tool.inputSchema },
+        tool.handler,
+      );
+    }
   }
   if (options.sideloadAgentTools) {
     registerSshAgentTools(registerTool, options.sideloadAgentTools(callerAgentId ?? null));

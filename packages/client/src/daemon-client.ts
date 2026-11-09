@@ -76,6 +76,7 @@ import type {
   SshSessionActivity,
   SshTerminalSize,
 } from "@jagentdesk/protocol/ssh/rpc-schemas";
+import type { RemoteExecJobUpdated } from "@jagentdesk/protocol/remote-exec/rpc-schemas";
 import type {
   SideloadAuthPrompt,
   SideloadInstallProgress,
@@ -870,6 +871,41 @@ export type {
   SshSessionInfo,
   SshTerminalSize,
 } from "@jagentdesk/protocol/ssh/rpc-schemas";
+// Remote execution (spec 33 / ADR-0044). Payload types mirror the protocol's correlated
+// responses (packages/protocol/src/remote-exec/rpc-schemas.ts); DTOs are re-exported so app
+// screens never import the protocol remote-exec module directly for types.
+export type RemoteExecListTargetsPayload = Extract<
+  SessionOutboundMessage,
+  { type: "remote_exec.list_targets.response" }
+>["payload"];
+export type RemoteExecCheckTargetPayload = Extract<
+  SessionOutboundMessage,
+  { type: "remote_exec.check_target.response" }
+>["payload"];
+export type RemoteExecListJobsPayload = Extract<
+  SessionOutboundMessage,
+  { type: "remote_exec.list_jobs.response" }
+>["payload"];
+export type RemoteExecGetJobPayload = Extract<
+  SessionOutboundMessage,
+  { type: "remote_exec.get_job.response" }
+>["payload"];
+export type RemoteExecReadJobOutputPayload = Extract<
+  SessionOutboundMessage,
+  { type: "remote_exec.read_job_output.response" }
+>["payload"];
+export type RemoteExecStopJobPayload = Extract<
+  SessionOutboundMessage,
+  { type: "remote_exec.stop_job.response" }
+>["payload"];
+export type {
+  RemoteCheckResult,
+  RemoteJob,
+  RemoteJobStatus,
+  RemoteOutputChunk,
+  RemoteSyncSummary,
+  RemoteTarget,
+} from "@jagentdesk/protocol/remote-exec/rpc-schemas";
 type LegacyFileExplorerFilePayload = NonNullable<FileExplorerPayload["file"]>;
 export interface FileReadResult {
   bytes: Uint8Array;
@@ -8392,6 +8428,84 @@ export class DaemonClient {
   /** Live connect state for a saved server. Filter by serverId/terminalId at the call site. */
   onSshConnectionState(handler: (event: SshConnectionStateEvent) => void): () => void {
     return this.on("ssh.connection.state", (message) => {
+      handler(message);
+    });
+  }
+
+  // ── Remote execution (spec 33 / ADR-0044) ──
+  // Jobs run on an SSH target (direct or via tailnet) synced from a local git workspace.
+  // Progress arrives unsolicited via remote_exec.job_updated (onRemoteExecJobUpdated).
+
+  async remoteExecListTargets(requestId?: string): Promise<RemoteExecListTargetsPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"remote_exec.list_targets.response">({
+      requestId,
+      message: { type: "remote_exec.list_targets.request" },
+    });
+  }
+
+  async remoteExecCheckTarget(options: {
+    serverId: string;
+    requestId?: string;
+  }): Promise<RemoteExecCheckTargetPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"remote_exec.check_target.response">({
+      requestId: options.requestId,
+      message: { type: "remote_exec.check_target.request", serverId: options.serverId },
+    });
+  }
+
+  async remoteExecListJobs(
+    options: { workspacePath?: string; limit?: number; requestId?: string } = {},
+  ): Promise<RemoteExecListJobsPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"remote_exec.list_jobs.response">({
+      requestId: options.requestId,
+      message: {
+        type: "remote_exec.list_jobs.request",
+        ...(options.workspacePath !== undefined ? { workspacePath: options.workspacePath } : {}),
+        ...(options.limit !== undefined ? { limit: options.limit } : {}),
+      },
+    });
+  }
+
+  async remoteExecGetJob(options: {
+    jobId: string;
+    requestId?: string;
+  }): Promise<RemoteExecGetJobPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"remote_exec.get_job.response">({
+      requestId: options.requestId,
+      message: { type: "remote_exec.get_job.request", jobId: options.jobId },
+    });
+  }
+
+  async remoteExecReadJobOutput(options: {
+    jobId: string;
+    offset: number;
+    limit?: number;
+    requestId?: string;
+  }): Promise<RemoteExecReadJobOutputPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"remote_exec.read_job_output.response">({
+      requestId: options.requestId,
+      message: {
+        type: "remote_exec.read_job_output.request",
+        jobId: options.jobId,
+        offset: options.offset,
+        ...(options.limit !== undefined ? { limit: options.limit } : {}),
+      },
+    });
+  }
+
+  async remoteExecStopJob(options: {
+    jobId: string;
+    requestId?: string;
+  }): Promise<RemoteExecStopJobPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest<"remote_exec.stop_job.response">({
+      requestId: options.requestId,
+      message: { type: "remote_exec.stop_job.request", jobId: options.jobId },
+    });
+  }
+
+  /** A job changed status, or its output grew (≤1/s per job): refresh the job view. */
+  onRemoteExecJobUpdated(handler: (event: RemoteExecJobUpdated) => void): () => void {
+    return this.on("remote_exec.job_updated", (message) => {
       handler(message);
     });
   }

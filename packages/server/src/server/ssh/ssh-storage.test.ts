@@ -146,4 +146,59 @@ describe("SshStorage (spec 25.2)", () => {
     expect(service.exportPublicKey(imported.id)).toBe(`${generated.publicKey} i`);
     expect(service.exportPublicKey(imported.id, "pem")).toContain("BEGIN PUBLIC KEY");
   });
+
+  it("rejects a tailnet route combined with a proxy, inherited or not (spec 33.2)", async () => {
+    const service = new SshService({ jagentdeskHome: await home() });
+    await service.initialize();
+    await expect(
+      service.saveServer({
+        id: "",
+        label: "wsl",
+        address: "100.64.0.2",
+        via: "tailnet",
+        proxy: { type: "socks5", host: "127.0.0.1", port: 1080 },
+      }),
+    ).rejects.toThrow("A tailnet route cannot be combined with a proxy");
+    const group = await service.saveGroup({
+      id: "",
+      label: "proxied",
+      proxy: { type: "socks5", host: "127.0.0.1", port: 1080 },
+    });
+    await expect(
+      service.saveServer({
+        id: "",
+        label: "wsl",
+        address: "100.64.0.2",
+        groupId: group.id,
+        via: "tailnet",
+      }),
+    ).rejects.toThrow("A tailnet route cannot be combined with a proxy");
+  });
+
+  it("round-trips via and remoteExec through servers.json (spec 33.2/33.3)", async () => {
+    const jagentdeskHome = await home();
+    const service = new SshService({ jagentdeskHome });
+    await service.initialize();
+    const saved = await service.saveServer({
+      id: "",
+      label: "wsl",
+      address: "100.64.0.2",
+      via: "tailnet",
+      remoteExec: { enabled: true, workRoot: "~/remote-work" },
+    });
+    await service.storage.flush();
+
+    const reloaded = new SshService({ jagentdeskHome });
+    await reloaded.initialize();
+    expect(reloaded.storage.getServer(saved.id)).toMatchObject({
+      via: "tailnet",
+      remoteExec: { enabled: true, workRoot: "~/remote-work" },
+    });
+    // The connect path reads `via` off the resolved config.
+    expect(reloaded.resolveConfig(saved.id)?.via).toBe("tailnet");
+    await expect(reloaded.getServerInfo(saved.id)).resolves.toMatchObject({
+      via: "tailnet",
+      remoteExec: { enabled: true, workRoot: "~/remote-work" },
+    });
+  });
 });

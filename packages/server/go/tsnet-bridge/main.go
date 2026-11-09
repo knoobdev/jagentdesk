@@ -10,6 +10,15 @@
 //
 //	TSNET_READY <dnsName>
 //
+// Before TSNET_READY, the bridge prints exactly one line describing the
+// loopback SOCKS5 proxy of the tsnet node (spec 33.2 / ADR-0044):
+//
+//	TSNET_SOCKS5 <addr> <proxyCred>
+//
+// The SOCKS5 user is "tsnet" and proxyCred is the per-run password; localAPICred
+// is never printed. A Loopback failure must not kill inbound serving, so it
+// prints `TSNET_SOCKS5_ERROR <message>` and continues.
+//
 // Startup failures print TSNET_ERROR <message> and exit non-zero.
 package main
 
@@ -70,10 +79,10 @@ func main() {
 	}
 
 	srv := &tsnet.Server{
-		Hostname:  name,
-		AuthKey:   os.Getenv("TS_AUTHKEY"),
-		Dir:       dir,
-		Logf:      logf,
+		Hostname: name,
+		AuthKey:  os.Getenv("TS_AUTHKEY"),
+		Dir:      dir,
+		Logf:     logf,
 		UserLogf: func(format string, args ...any) {
 			message := fmt.Sprintf(format, args...)
 			emitLoginURL(message)
@@ -88,6 +97,15 @@ func main() {
 	defer cancel()
 	if _, err := srv.Up(ctx); err != nil {
 		fail(fmt.Sprintf("tsnet up: %v", err))
+	}
+
+	// Loopback SOCKS5 (spec 33.2): the daemon reaches tailnet targets through this
+	// proxy. A failure only removes the outbound path; inbound serving continues.
+	socksAddr, proxyCred, _, loopbackErr := srv.Loopback()
+	if loopbackErr != nil {
+		fmt.Printf("TSNET_SOCKS5_ERROR %s\n", singleLine(loopbackErr.Error()))
+	} else {
+		fmt.Printf("TSNET_SOCKS5 %s %s\n", socksAddr, proxyCred)
 	}
 
 	addr := fmt.Sprintf(":%d", *tailnetPort)
@@ -134,6 +152,11 @@ func main() {
 		}
 		go forward(conn, *localPort)
 	}
+}
+
+// singleLine flattens an error message onto one stdout line.
+func singleLine(message string) string {
+	return strings.Join(strings.Fields(message), " ")
 }
 
 func listen(srv *tsnet.Server, useTLS bool, addr string) (net.Listener, error) {

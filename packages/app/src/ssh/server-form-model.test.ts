@@ -210,3 +210,77 @@ describe("terminal appearance in the server form", () => {
     expect(server.fontSize).toBe(16);
   });
 });
+
+describe("remote execution fields in the server form", () => {
+  it("round-trips via and remoteExec: editing other fields keeps them", () => {
+    const model = openSshServerFormModel({
+      server: { ...stored, via: "tailnet", remoteExec: { enabled: true, workRoot: "~/jobs" } },
+      defaultGroupId: null,
+    });
+    expect(model.getState().via).toBe("tailnet");
+    expect(model.getState().remoteExecEnabled).toBe(true);
+    expect(model.getState().remoteWorkRoot).toBe("~/jobs");
+
+    model.setLabel("Renamed box");
+
+    const { server } = model.buildSavePayload();
+    expect(server.label).toBe("Renamed box");
+    expect(server.via).toBe("tailnet");
+    expect(server.remoteExec).toEqual({ enabled: true, workRoot: "~/jobs" });
+  });
+
+  it("omits via and remoteExec for a plain direct server", () => {
+    const model = openSshServerFormModel(emptySnapshot);
+    model.setLabel("Box");
+    model.setAddress("box.local");
+
+    const { server } = model.buildSavePayload();
+    expect(server.via).toBeUndefined();
+    expect(server.remoteExec).toBeUndefined();
+  });
+
+  it("saves tailnet and omits an empty work folder", () => {
+    const model = openSshServerFormModel(emptySnapshot);
+    model.setLabel("Box");
+    model.setAddress("box.local");
+    model.setVia("tailnet");
+    model.setRemoteExecEnabled(true);
+    expect(model.getState().canSubmit).toBe(true);
+
+    expect(model.buildSavePayload().server.remoteExec).toEqual({ enabled: true });
+
+    model.setRemoteWorkRoot("  ");
+    expect(model.buildSavePayload().server.remoteExec).toEqual({ enabled: true });
+
+    model.setRemoteWorkRoot("~/.jagentdesk/remote-exec");
+    expect(model.buildSavePayload().server.remoteExec).toEqual({
+      enabled: true,
+      workRoot: "~/.jagentdesk/remote-exec",
+    });
+  });
+
+  it("rejects a tailnet route combined with a proxy and recovers on direct", () => {
+    const model = openSshServerFormModel(emptySnapshot);
+    model.setLabel("Box");
+    model.setAddress("box.local");
+    model.setVia("tailnet");
+    model.setAdvanced({ proxyType: "socks5", proxyHost: "proxy.local", proxyPort: "1080" });
+
+    expect(model.getState().errors.proxy).toBe("A tailnet route cannot be combined with a proxy");
+    expect(model.getState().canSubmit).toBe(false);
+
+    model.setVia("direct");
+    expect(model.getState().errors.proxy).toBeNull();
+    expect(model.getState().canSubmit).toBe(true);
+  });
+
+  it("drops remoteExec when the switch is turned off", () => {
+    const model = openSshServerFormModel({
+      server: { ...stored, remoteExec: { enabled: true, workRoot: "~/jobs" } },
+      defaultGroupId: null,
+    });
+    model.setRemoteExecEnabled(false);
+
+    expect(model.buildSavePayload().server.remoteExec).toBeUndefined();
+  });
+});

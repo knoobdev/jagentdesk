@@ -1,10 +1,12 @@
 import { memo, useCallback, useMemo, useState } from "react";
 import { Text, View } from "react-native";
+import { Check, X } from "lucide-react-native";
 import { AdaptiveModalSheet } from "@/components/adaptive-modal-sheet";
 import { Alert } from "@/components/ui/alert";
 import { useAppSettings } from "@/hooks/use-settings";
 import { resolveTerminalAppearance } from "@/ssh/snippets/appearance";
 import { TerminalAppearancePicker } from "@/ssh/snippets/terminal-appearance-picker";
+import { formatBytes } from "@/ssh/sftp/model";
 import { Button } from "@/components/ui/button";
 import { Field, FormTextInput } from "@/components/ui/form-field";
 import { SelectField, type SelectFieldOption } from "@/components/ui/select-field";
@@ -13,6 +15,7 @@ import { Switch } from "@/components/ui/switch";
 import { useTranslation } from "react-i18next";
 import type {
   DaemonClient,
+  RemoteCheckResult,
   SshAuthMethod,
   SshGroup,
   SshIdentity,
@@ -23,6 +26,7 @@ import {
   buildGroupOptions,
   SSH_AUTH_METHOD_LABELS,
   SSH_AUTH_METHODS,
+  type SshServerFormState,
 } from "@/ssh/server-form-model";
 import { useSshServerFormModel } from "@/ssh/use-ssh-connect-events";
 import { Chip, Disclosure, IconBtn, mutedTint, ThemedArrowDown, ThemedArrowUp } from "./primitives";
@@ -438,6 +442,183 @@ function AdvancedSection({
   );
 }
 
+type RemoteCheckState =
+  | { phase: "idle" }
+  | { phase: "checking" }
+  | { phase: "done"; result: RemoteCheckResult }
+  | { phase: "failed"; error: string };
+
+const ROUTE_OPTIONS: SelectFieldOption<SshServerFormState["via"]>[] = [
+  { id: "direct", value: "direct", label: "Direct" },
+  { id: "tailnet", value: "tailnet", label: "JAgentDesk Tailscale" },
+];
+
+/** One line of a `remote_exec.check_target` result with its pass/fail marker (spec 33.3). */
+function RemoteCheckRow({ ok, label, value }: { ok: boolean; label: string; value: string }) {
+  const Marker = ok ? Check : X;
+  return (
+    <View style={styles.remoteCheckRow}>
+      <Marker size={14} color={ok ? styles.remoteCheckOk.color : styles.remoteCheckFail.color} />
+      <Text style={styles.remoteCheckLabel}>{label}</Text>
+      {value ? (
+        <Text style={styles.remoteCheckValue} numberOfLines={1}>
+          {value}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * Remote tasks (spec 33.9): the route (direct or via the JAgentDesk tailnet, unusable with a
+ * proxy), the switch that includes the server as a remote execution target, and the Check
+ * button that probes a saved server with `remote_exec.check_target`.
+ */
+function RemoteTasksSection({
+  form,
+  client,
+  serverId,
+}: {
+  form: FormHandle;
+  client: DaemonClient | null;
+  serverId: string | null;
+}) {
+  const { t } = useTranslation();
+  const { model, state } = form;
+  const [check, setCheck] = useState<RemoteCheckState>({ phase: "idle" });
+  const proxySet = Boolean(state.proxyType);
+  const routeDisplay = useMemo(() => optionLabel(ROUTE_OPTIONS, state.via, "Direct"), [state.via]);
+  const setRoute = useCallback((value: SshServerFormState["via"]) => model.setVia(value), [model]);
+  const setRemoteExecEnabled = useCallback(
+    (value: boolean) => model.setRemoteExecEnabled(value),
+    [model],
+  );
+  const setWorkRoot = useCallback((value: string) => model.setRemoteWorkRoot(value), [model]);
+  const runCheck = useCallback(async () => {
+    if (!client || !serverId) return;
+    setCheck({ phase: "checking" });
+    try {
+      const res = await client.remoteExecCheckTarget({ serverId });
+      if (res.error || !res.result) {
+        setCheck({
+          phase: "failed",
+          error: res.error ?? t("ssh.server.remoteExec.checkFailed"),
+        });
+        return;
+      }
+      setCheck({ phase: "done", result: res.result });
+    } catch (error) {
+      setCheck({
+        phase: "failed",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }, [client, serverId, t]);
+  const handleCheck = useCallback(() => void runCheck(), [runCheck]);
+  const result = check.phase === "done" ? check.result : null;
+  return (
+    <>
+      <SelectField<SshServerFormState["via"]>
+        label={t("ssh.server.remoteExec.route")}
+        value={state.via}
+        selectedDisplay={routeDisplay}
+        options={ROUTE_OPTIONS}
+        onChange={setRoute}
+        placeholder={t("ssh.server.remoteExec.routeDirect")}
+        emptyText={t("ssh.server.remoteExec.routeDirect")}
+        disabled={proxySet}
+        hint={proxySet ? t("ssh.server.remoteExec.routeProxyHint") : undefined}
+        testID="ssh-server-route"
+      />
+      <Field
+        label={t("ssh.server.remoteExec.enabled")}
+        hint={
+          state.remoteExecEnabled
+            ? undefined
+            : "Remote agents sync this server's work folder and run tasks on it."
+        }
+      >
+        <Switch
+          value={state.remoteExecEnabled}
+          onValueChange={setRemoteExecEnabled}
+          accessibilityLabel={t("ssh.server.remoteExec.enabled")}
+          testID="ssh-server-remote-exec-enabled"
+        />
+      </Field>
+      {state.remoteExecEnabled ? (
+        <Field
+          label={t("ssh.server.remoteExec.workFolder")}
+          hint="Folder on the server that receives the synced workspace. Blank uses the default."
+        >
+          <FormTextInput
+            testID="ssh-server-remote-work-root"
+            initialValue={state.remoteWorkRoot}
+            value={state.remoteWorkRoot}
+            onChangeText={setWorkRoot}
+            placeholder={t("ssh.server.remoteExec.workFolderPlaceholder")}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+        </Field>
+      ) : null}
+      {serverId ? (
+        <View style={styles.formRow}>
+          <Button
+            size="sm"
+            variant="secondary"
+            onPress={handleCheck}
+            disabled={check.phase === "checking" || !client}
+            testID="ssh-server-remote-check"
+          >
+            {check.phase === "checking"
+              ? t("ssh.server.remoteExec.checking")
+              : t("ssh.server.remoteExec.check")}
+          </Button>
+        </View>
+      ) : null}
+      {check.phase === "failed" ? <Alert variant="error" title={check.error} /> : null}
+      {result ? (
+        <View style={styles.remoteCheckList}>
+          <RemoteCheckRow
+            ok={result.os !== null}
+            label={t("ssh.server.remoteExec.os")}
+            value={result.os ?? "—"}
+          />
+          <RemoteCheckRow
+            ok={result.shell !== null}
+            label={t("ssh.server.remoteExec.shell")}
+            value={result.shell ?? "—"}
+          />
+          <RemoteCheckRow
+            ok={result.freeKb !== null}
+            label={t("ssh.server.remoteExec.freeSpace")}
+            value={result.freeKb !== null ? formatBytes(result.freeKb * 1024) : "—"}
+          />
+          <RemoteCheckRow
+            ok={result.writable}
+            label={t("ssh.server.remoteExec.writable")}
+            value={t(
+              result.writable
+                ? "ssh.server.remoteExec.writableOk"
+                : "ssh.server.remoteExec.writableFail",
+            )}
+          />
+          {result.missing.length === 0 ? (
+            <RemoteCheckRow ok label={t("ssh.server.remoteExec.toolsOk")} value="" />
+          ) : (
+            <RemoteCheckRow
+              ok={false}
+              label={t("ssh.server.remoteExec.toolsMissing")}
+              value={result.missing.join(", ")}
+            />
+          )}
+          {result.error ? <Alert variant="error" title={result.error.message} /> : null}
+        </View>
+      ) : null}
+    </>
+  );
+}
+
 export function ServerFormSheet({
   client,
   target,
@@ -506,6 +687,10 @@ export function ServerFormSheet({
   );
   const toggleAdvanced = useCallback(
     () => model.setDisclosure(state.disclosure === "advanced" ? "basic" : "advanced"),
+    [model, state.disclosure],
+  );
+  const toggleRemoteExec = useCallback(
+    () => model.setDisclosure(state.disclosure === "remoteExec" ? "basic" : "remoteExec"),
     [model, state.disclosure],
   );
   const toggleAppearance = useCallback(
@@ -618,6 +803,19 @@ export function ServerFormSheet({
         />
         {state.disclosure === "advanced" ? (
           <AdvancedSection form={form} jumpCandidates={jumpCandidates} />
+        ) : null}
+        <Disclosure
+          title="Remote tasks"
+          open={state.disclosure === "remoteExec"}
+          onToggle={toggleRemoteExec}
+          testID="ssh-server-remote-exec-section"
+        />
+        {state.disclosure === "remoteExec" ? (
+          <RemoteTasksSection
+            form={form}
+            client={client}
+            serverId={target.mode === "edit" ? (target.server?.id ?? null) : null}
+          />
         ) : null}
         <Disclosure
           title="Terminal theme & font size"

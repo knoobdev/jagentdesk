@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { getJAgentDeskToolLeafName, isJAgentDeskToolName } from "@jagentdesk/protocol/tool-name-normalization";
+import {
+  getJAgentDeskToolLeafName,
+  isJAgentDeskToolName,
+} from "@jagentdesk/protocol/tool-name-normalization";
 
 describe("isJAgentDeskToolName", () => {
   it("detects Claude Code format", () => {
@@ -23,6 +26,12 @@ describe("isJAgentDeskToolName", () => {
     expect(isJAgentDeskToolName("jagentdesk.create_agent")).toBe(true);
   });
 
+  it("detects the OpenCode flattened underscore format", () => {
+    expect(isJAgentDeskToolName("jagentdesk_remote_run")).toBe(true);
+    expect(isJAgentDeskToolName("jagentdesk_remote_job_wait")).toBe(true);
+    expect(isJAgentDeskToolName("jagentdesk_speak")).toBe(false);
+  });
+
   it("rejects non-jagentdesk tools", () => {
     expect(isJAgentDeskToolName("Bash")).toBe(false);
     expect(isJAgentDeskToolName("Read")).toBe(false);
@@ -40,7 +49,14 @@ describe("getJAgentDeskToolLeafName", () => {
     expect(getJAgentDeskToolLeafName("jagentdesk.list_agents")).toBe("list_agents");
   });
 
+  it("extracts leaf from the OpenCode flattened format", () => {
+    expect(getJAgentDeskToolLeafName("jagentdesk_remote_run")).toBe("remote_run");
+    expect(getJAgentDeskToolLeafName("jagentdesk_remote_job_wait")).toBe("remote_job_wait");
+  });
+
   it("returns null for non-jagentdesk tools", () => {
     expect(getJAgentDeskToolLeafName("Bash")).toBeNull();
+    expect(getJAgentDeskToolLeafName("mcp__other_server__some_tool")).toBeNull();
+    expect(getJAgentDeskToolLeafName("jagentdesk_")).toBeNull();
   });
 });

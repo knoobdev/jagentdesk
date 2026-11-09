@@ -27,6 +27,7 @@ import type { DatabaseRegistry } from "./database/database-registry.js";
 import { SshService } from "./ssh/ssh-service.js";
 import type { SideloadService } from "./sideload/sideload-service.js";
 import type { JiraService } from "./jira/service.js";
+import type { RemoteExecService } from "./remote-exec/types.js";
 import type { FigmaService } from "./figma/service.js";
 import type { ScheduleService } from "./schedule/service.js";
 import type { AutorunService } from "./autorun/service.js";
@@ -667,6 +668,8 @@ export class VoiceAssistantWebSocketServer {
   // Jira (spec 29), injected post-construction like the Agent Forum.
   private jiraService: JiraService | null = null;
   private figmaService: FigmaService | null = null;
+  // Remote execution (spec 33 / ADR-0044), injected post-construction like Jira.
+  private remoteExecService: RemoteExecService | null = null;
   private agentForumBootstrap:
     | ((input: { topicId: string; prompt: string; originAgentId?: string }) => void | Promise<void>)
     | null = null;
@@ -1914,6 +1917,11 @@ export class VoiceAssistantWebSocketServer {
     this.figmaService = service;
   }
 
+  /** Remote execution (spec 33): injected post-construction, like Jira/Figma. */
+  public setRemoteExecService(service: RemoteExecService | null): void {
+    this.remoteExecService = service;
+  }
+
   // Inject the Agent Forum service + its orchestration-bootstrap hook after construction (Team mode).
   public setAgentForum(
     service: AgentForumService | null,
@@ -1994,6 +2002,7 @@ export class VoiceAssistantWebSocketServer {
       sideloadService: this.sideloadService,
       jiraService: this.jiraService,
       figmaService: this.figmaService,
+      remoteExecService: this.remoteExecService,
       scheduleService: this.scheduleService,
       autorunService: this.autorunService,
       specModeService: this.specModeService,
