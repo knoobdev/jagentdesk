@@ -1323,6 +1323,11 @@ export class SshService {
     return Boolean(entry?.connection && !entry.connection.isClosed());
   }
 
+  /** Live aggregate connect state for a saved server (the ssh.connection.state source of truth). */
+  serverState(serverId: string): SshServerState {
+    return this.serverStates.get(serverId)?.state ?? "disconnected";
+  }
+
   // ── composite-manager registry surface ─────────────────────────────────
 
   getSshTerminal(terminalId: string): TerminalSession | undefined {
