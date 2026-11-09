@@ -7,6 +7,7 @@ import {
   buildStopScript,
   remotePathExpr,
   REMOTE_LAUNCHER_SCRIPT,
+  runUnderSh,
   shellQuote,
 } from "./remote-scripts.js";
 
@@ -33,6 +34,26 @@ describe("shellQuote", () => {
 
   it("quotes the empty string", () => {
     expect(shellQuote("")).toBe("''");
+  });
+});
+
+describe("runUnderSh", () => {
+  it("wraps the script in a single-quoted /bin/sh -c", () => {
+    expect(runUnderSh("uname -srm")).toBe("/bin/sh -c 'uname -srm'");
+  });
+
+  it("escapes embedded single quotes", () => {
+    expect(runUnderSh("echo 'it's'")).toBe("/bin/sh -c 'echo '\\''it'\\''s'\\'''");
+  });
+
+  it("keeps multi-line scripts with quotes intact through a real /bin/sh", async () => {
+    const { execFileSync } = await import("node:child_process");
+    const script = [
+      `printf %s ${shellQuote("it's a $HOME `x`")}`,
+      `printf %s ${shellQuote("second 'line'")}`,
+    ].join("\n");
+    const printed = execFileSync("/bin/sh", ["-c", runUnderSh(script)]).toString();
+    expect(printed).toBe("it's a $HOME `x`second 'line'");
   });
 });
 
@@ -67,7 +88,7 @@ describe("script builders", () => {
       jobDirExpr: "'/srv/wsk_1/jobs/rjb_1'",
     });
     expect(script).toContain("cd '/srv/wsk_1/src' || exit 3");
-    expect(script).toContain('setsid "${SHELL:-/bin/sh}" -c \'');
+    expect(script).toContain("setsid /bin/sh -c '");
     expect(script).toContain("echo $! > '/srv/wsk_1/jobs/rjb_1'/pid");
   });
 
@@ -96,8 +117,8 @@ describe("script builders", () => {
     expect(script).toContain("printf 'STOPPED\\n'");
   });
 
-  it("deletes only inside src via NUL-separated stdin", () => {
-    expect(buildDeleteScript("'/srv/src'")).toBe("cd '/srv/src' && xargs -0 rm -rf --");
+  it("deletes only inside src via NUL-separated stdin without recursing", () => {
+    expect(buildDeleteScript("'/srv/src'")).toBe("cd '/srv/src' && xargs -0 rm -f --");
   });
 
   it("probes the workRoot for the check-target report", () => {

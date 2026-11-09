@@ -7,6 +7,15 @@ export function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
+/**
+ * sshd runs every exec command through the user's login shell (zsh, fish, …), which must never
+ * parse our snippets. Every exec command is therefore sent as `/bin/sh -c <script>`; the
+ * single-quoted form also parses in zsh and fish.
+ */
+export function runUnderSh(script: string): string {
+  return `/bin/sh -c ${shellQuote(script)}`;
+}
+
 function escapeDoubleQuoted(value: string): string {
   return value.replace(/([$`"\\])/g, "\\$1");
 }
@@ -41,15 +50,17 @@ export function buildWriteCommandScript(jobDirExpr: string): string {
 }
 
 /**
- * Launches the detached job (spec 33.6). The setsid'd shell is the process group leader; it runs
- * the login shell on the command, appends output to output.log and records the exit code atomically.
- * Its own pid lands in `pid` and doubles as the process group id.
+ * Launches the detached job (spec 33.6). The wrapper shell is always /bin/sh — the login shell only
+ * runs the user's command inside the launcher — so the launch snippet cannot trip over zsh/fish.
+ * The setsid'd shell is the process group leader; it runs the login shell on the command, appends
+ * output to output.log and records the exit code atomically. Its own pid lands in `pid` and doubles
+ * as the process group id.
  */
 export function buildLaunchJobScript(input: { srcDirExpr: string; jobDirExpr: string }): string {
   const { srcDirExpr, jobDirExpr } = input;
   return [
     `cd ${srcDirExpr} || exit 3`,
-    `setsid "${LOGIN_SHELL}" -c '${REMOTE_LAUNCHER_SCRIPT}' launcher ` +
+    `setsid /bin/sh -c '${REMOTE_LAUNCHER_SCRIPT}' launcher ` +
       `${jobDirExpr}/command ${jobDirExpr}/output.log ${jobDirExpr}/exit_code ` +
       `</dev/null >/dev/null 2>&1 &`,
     `echo $! > ${jobDirExpr}/pid`,
@@ -113,9 +124,9 @@ export function buildExtractScript(srcDirExpr: string): string {
   return `mkdir -p ${srcDirExpr} && tar -xzf - -C ${srcDirExpr}`;
 }
 
-/** Deletes NUL-separated workspace-relative paths from src/ (stdin); never anything else. */
+/** Deletes NUL-separated paths from src/ (stdin); never recurses into directories. */
 export function buildDeleteScript(srcDirExpr: string): string {
-  return `cd ${srcDirExpr} && xargs -0 rm -rf --`;
+  return `cd ${srcDirExpr} && xargs -0 rm -f --`;
 }
 
 /** Writes the new manifest from stdin atomically (temp + mv, spec 33.5). */

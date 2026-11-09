@@ -157,9 +157,14 @@ export async function syncWorkspace(input: {
   let filesDeleted = 0;
   const deletions = diff.deletePaths.filter(isSafeRelativeDeletePath);
   if (deletions.length > 0) {
-    await execCollect(client, buildDeleteScript(dirs.src), {
+    const deleted = await execCollect(client, buildDeleteScript(dirs.src), {
       stdin: Buffer.from(`${deletions.join("\0")}\0`, "utf8"),
     });
+    if (deleted.exitCode !== 0) {
+      // rm -f never recurses, so this is a manifest path that is now a directory on the target;
+      // failing loudly beats destroying user data with a recursive delete.
+      throw new Error(`deleting removed paths failed on the target (exit ${deleted.exitCode})`);
+    }
     filesDeleted = deletions.length;
   }
 

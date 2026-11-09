@@ -47,6 +47,24 @@ function connect(config: {
   });
 }
 
+/** One raw exec, deliberately bypassing the service's /bin/sh wrapper (to probe the login shell). */
+function rawExec(client: Client, command: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    client.exec(command, (error, stream) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      let out = "";
+      stream.on("data", (chunk: Buffer) => {
+        out += chunk.toString("utf8");
+      });
+      stream.on("error", reject);
+      stream.on("close", () => resolve(out));
+    });
+  });
+}
+
 describe.runIf(E2E_ENABLED)("remote-exec service against a real sshd", () => {
   let containerName: string | null = null;
   let port = 0;
@@ -348,4 +366,51 @@ describe.runIf(E2E_ENABLED)("remote-exec service against a real sshd", () => {
     const result = await service.waitForJob(verify.id, 120_000);
     expect(result.job.status).toBe("succeeded");
   }, 180_000);
+
+  it("runs the whole pipeline when the target user's login shell is not sh-compatible", async () => {
+    // Install zsh and make it the target user's login shell; sshd then runs every exec command
+    // through zsh, so only the /bin/sh wrapper keeps the engine's snippets parseable.
+    const prepare = spawnSync(
+      "docker",
+      [
+        "exec",
+        containerName!,
+        "sh",
+        "-c",
+        "apk add --no-cache zsh >/dev/null && sed -i '/^jad:/s#/bin/bash$#/bin/zsh#' /etc/passwd",
+      ],
+      { encoding: "utf8", timeout: 300_000 },
+    );
+    expect(prepare.status).toBe(0);
+    const passwd = spawnSync("docker", ["exec", containerName!, "grep", "^jad:", "/etc/passwd"], {
+      encoding: "utf8",
+      timeout: 60_000,
+    });
+    expect(passwd.stdout).toContain("/bin/zsh");
+
+    // OpenSSH resolves the login shell per connection, so drop the pooled client: the service's
+    // next lease reconnects, and every exec channel from then on runs through zsh.
+    disconnect();
+
+    // A fresh raw connection proves the login shell really changed for exec channels.
+    const probe = await connect({ host: "127.0.0.1", port, username: "jad", password: "jadtest" });
+    try {
+      expect(await rawExec(probe, "echo $0")).toContain("zsh");
+    } finally {
+      probe.end();
+    }
+
+    const check = await service.checkTarget("srv1");
+    expect(check.ok).toBe(true);
+    const job = await service.startJob({
+      serverId: "srv1",
+      workspacePath: workspace,
+      command: "printf 'ran-under-zsh'",
+      timeoutMs: 120_000,
+      agentId: null,
+    });
+    const result = await service.waitForJob(job.id, 120_000);
+    expect(result.job.status).toBe("succeeded");
+    expect(result.output).toContain("ran-under-zsh");
+  }, 300_000);
 });

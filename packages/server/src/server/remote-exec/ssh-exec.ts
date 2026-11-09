@@ -1,4 +1,5 @@
 import type { Client, ClientChannel } from "ssh2";
+import { runUnderSh } from "./remote-scripts.js";
 
 export interface RemoteExecResult {
   stdout: Buffer;
@@ -9,11 +10,12 @@ export interface RemoteExecResult {
 
 /**
  * Opens an exec channel with the exit listener registered inside the ssh2 callback: ssh2 emits
- * `exit` while parsing its socket buffer, so a listener added after `await` misses it.
+ * `exit` while parsing its socket buffer, so a listener added after `await` misses it. The command
+ * is wrapped to run under /bin/sh regardless of the user's login shell (see runUnderSh).
  */
 export function openExecChannel(client: Client, command: string): Promise<ClientChannel> {
   return new Promise((resolve, reject) => {
-    client.exec(command, (error, stream) => {
+    client.exec(runUnderSh(command), (error, stream) => {
       if (error) {
         reject(error);
         return;
@@ -25,7 +27,8 @@ export function openExecChannel(client: Client, command: string): Promise<Client
 
 /**
  * Runs one command on an exec channel and collects stdout bytes. stdin bytes go over the channel
- * (never interpolated into the command line). Rejects on channel errors and on timeout.
+ * (never interpolated into the command line). Rejects on channel errors and on timeout. The
+ * command is wrapped to run under /bin/sh regardless of the user's login shell (see runUnderSh).
  */
 export function execCollect(
   client: Client,
@@ -43,7 +46,7 @@ export function execCollect(
       if (timer) clearTimeout(timer);
       fn();
     };
-    client.exec(command, (error, stream) => {
+    client.exec(runUnderSh(command), (error, stream) => {
       if (error) {
         settle(() => reject(error));
         return;
