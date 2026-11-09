@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Text, View, ScrollView as RNScrollView } from "react-native";
 import { ScrollView as GHScrollView } from "react-native-gesture-handler";
 import { StyleSheet } from "react-native-unistyles";
@@ -10,9 +10,23 @@ import { isWeb } from "@/constants/platform";
 import { darkTheme } from "@/styles/theme";
 import { CODE_SURFACE_DATASET } from "@/styles/code-surface";
 import { isTerminalRemoteJobStatus } from "./job-card-state";
+import { nextPinnedState, scrollActionForAppend } from "./output-scroll";
 import { useRemoteJobCard } from "./use-remote-job-card";
 
 const ScrollView = isWeb ? RNScrollView : GHScrollView;
+
+/** Both ScrollView implementations expose the same imperative scrollToEnd. */
+interface ScrollToEndableView {
+  scrollToEnd: (options?: { animated?: boolean }) => void;
+}
+
+interface OutputScrollEvent {
+  nativeEvent: {
+    layoutMeasurement: { height: number };
+    contentOffset: { y: number };
+    contentSize: { height: number };
+  };
+}
 
 /** spec 33.9: the output frame is at most 240px tall and scrolls. */
 const OUTPUT_MAX_HEIGHT = 240;
@@ -58,6 +72,26 @@ export function RemoteJobCard({
     initialOutput,
     initialOutputOffset,
   });
+
+  // Stick to the bottom (spec 33.9: the box shows the end of the output): jump to the end on
+  // mount and whenever new output lands, unless the user scrolled up — their position holds
+  // until they scroll back near the bottom, which re-pins the box.
+  const scrollRef = useRef<ScrollToEndableView | null>(null);
+  const pinnedRef = useRef(true);
+  const attachScrollRef = useCallback((instance: ScrollToEndableView | null) => {
+    scrollRef.current = instance;
+  }, []);
+  const handleOutputScroll = useCallback((event: OutputScrollEvent) => {
+    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+    pinnedRef.current = nextPinnedState(
+      contentSize.height - layoutMeasurement.height - contentOffset.y,
+    );
+  }, []);
+  useEffect(() => {
+    if (scrollActionForAppend(pinnedRef.current) === "toEnd") {
+      scrollRef.current?.scrollToEnd({ animated: false });
+    }
+  }, [output]);
 
   const active = job !== null && !isTerminalRemoteJobStatus(job.status);
   const metaParts = useMemo(() => {
@@ -117,10 +151,13 @@ export function RemoteJobCard({
       {stopError ? <Text style={styles.errorText}>{stopError}</Text> : null}
       <View style={styles.outputBox}>
         <ScrollView
+          ref={attachScrollRef}
           style={styles.outputScroll}
           contentContainerStyle={styles.outputContent}
           nestedScrollEnabled
           showsVerticalScrollIndicator
+          onScroll={handleOutputScroll}
+          scrollEventThrottle={16}
         >
           <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator>
             {output.length > 0 ? (
