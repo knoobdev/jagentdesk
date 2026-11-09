@@ -39,6 +39,8 @@ export function isLikelyNamespacedToolName(name: string): boolean {
   return false;
 }
 
+// Every naming a provider gives jagentdesk MCP tools: Claude Code `mcp__jagentdesk__remote_run`,
+// dotted `jagentdesk.remote_run`, OpenCode flattened `jagentdesk_remote_run`, plain `remote_run`.
 export function isJAgentDeskToolName(name: string): boolean {
   const normalized = normalizeToolName(name);
   if (isSpeakToolName(normalized)) {
@@ -56,7 +58,8 @@ export function isJAgentDeskToolName(name: string): boolean {
     const firstSegment = normalized.split(".")[0];
     return firstSegment === "jagentdesk" || firstSegment.startsWith("jagentdesk_");
   }
-  return false;
+  // OpenCode MCP naming flattens the namespace to underscores: jagentdesk_remote_run.
+  return normalized.startsWith("jagentdesk_");
 }
 
 export function getJAgentDeskToolLeafName(name: string): string | null {
@@ -78,6 +81,10 @@ export function getJAgentDeskToolLeafName(name: string): string | null {
       return normalized.split(".").slice(1).join(".");
     }
     return null;
+  }
+  // OpenCode MCP naming flattens the namespace to underscores: jagentdesk_remote_run → remote_run.
+  if (normalized.startsWith("jagentdesk_")) {
+    return normalized.slice("jagentdesk_".length) || null;
   }
   return null;
 }
