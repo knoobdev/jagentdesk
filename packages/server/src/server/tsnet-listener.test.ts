@@ -3,6 +3,7 @@ import type { ChildProcess } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { Writable } from "node:stream";
 import { WebSocket } from "ws";
 import { describe, expect, test } from "vitest";
 import pino from "pino";
@@ -288,5 +289,77 @@ describe("createTsnetListener", () => {
     expect(attached).toHaveLength(1);
     expect(attached[0]).toMatchObject({ transport: "tailnet", readyState: 1 });
     await listener.stop();
+  });
+
+  test("exposes the loopback SOCKS5 only once the bridge is READY", async () => {
+    const child = createFakeChild();
+    const options = listenableOptions("/usr/bin/fake-tailnet-bridge", async () => {});
+    options.spawnBridge = () => child as unknown as ChildProcess;
+
+    const listener = createTsnetListener(options);
+    await listener.start();
+    expect(listener.getTailnetSocks()).toBeNull();
+
+    // The SOCKS line arrives before READY (bridge contract): still not exposed.
+    child.stdout.emit("data", Buffer.from("TSNET_SOCKS5 127.0.0.1:41823 sockcred-9f2a\n"));
+    expect(listener.getTailnetSocks()).toBeNull();
+
+    child.stdout.emit("data", Buffer.from("TSNET_READY myhost.tailnet.ts.net\n"));
+    expect(listener.getTailnetSocks()).toEqual({
+      host: "127.0.0.1",
+      port: 41823,
+      username: "tsnet",
+      password: "sockcred-9f2a",
+    });
+
+    child.exit(1);
+    expect(listener.getTailnetSocks()).toBeNull();
+    await listener.stop();
+  });
+
+  test("keeps the accessor null when the bridge reports a SOCKS error", async () => {
+    const child = createFakeChild();
+    const options = listenableOptions("/usr/bin/fake-tailnet-bridge", async () => {});
+    options.spawnBridge = () => child as unknown as ChildProcess;
+
+    const listener = createTsnetListener(options);
+    await listener.start();
+    child.stdout.emit("data", Buffer.from("TSNET_READY myhost.tailnet.ts.net\n"));
+    child.stdout.emit("data", Buffer.from("TSNET_SOCKS5_ERROR loopback listener failed\n"));
+
+    expect(listener.getDirectAddress()).toEqual({ host: "myhost.tailnet.ts.net", port: 6767 });
+    expect(listener.getTailnetSocks()).toBeNull();
+    await listener.stop();
+  });
+
+  test("never logs the SOCKS credential and redacts it to ***", async () => {
+    const child = createFakeChild();
+    const chunks: string[] = [];
+    const logger = pino(
+      { level: "info" },
+      new Writable({
+        write(chunk, _encoding, callback) {
+          chunks.push(String(chunk));
+          callback();
+        },
+      }),
+    );
+    const options = createListenerOptions({
+      bridgeBinary: "/usr/bin/fake-tailnet-bridge",
+      logger,
+      attachSocket: async () => {},
+    });
+    options.spawnBridge = () => child as unknown as ChildProcess;
+
+    const listener = createTsnetListener(options);
+    await listener.start();
+    child.stdout.emit("data", Buffer.from("TSNET_SOCKS5 127.0.0.1:41823 sockcred-9f2a\n"));
+    child.stdout.emit("data", Buffer.from("TSNET_READY myhost.tailnet.ts.net\n"));
+    child.stdout.emit("data", Buffer.from("TSNET_SOCKS5_ERROR loopback listener failed\n"));
+    await listener.stop();
+
+    const output = chunks.join("");
+    expect(output).not.toContain("sockcred-9f2a");
+    expect(output).toContain("***");
   });
 });

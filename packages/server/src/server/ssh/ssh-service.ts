@@ -18,6 +18,7 @@ import type {
 import type { TerminalActivityTransitionEvent } from "../../terminal/terminal-manager.js";
 import type { TerminalSession } from "../../terminal/terminal.js";
 import type { SessionOutboundMessage } from "../messages.js";
+import type { TailnetSocksProxy } from "../tsnet-listener.js";
 import type { SecretStore } from "../database/secret-store.js";
 import {
   isValidEnvName,
@@ -172,6 +173,13 @@ export interface SshServiceOptions {
   reconnectDelayMs?: (attempt: number) => number;
   /** Replace connect pipeline steps (proxy / jump / agent modules). */
   connectSteps?: Partial<SshConnectSteps>;
+  /**
+   * Spec 33.2 / ADR-0044: loopback SOCKS5 of the daemon's tsnet node, used as the
+   * first-hop route for `via: "tailnet"` servers. Read again on every connect
+   * attempt so a bridge restart (new credential) is picked up; null = tailnet
+   * unavailable, which fails the attempt instead of falling back to direct TCP.
+   */
+  tailnetSocks?: () => TailnetSocksProxy | null;
   /** Startup snippet lookup (S5 owns snippets.json); default reads it directly. */
   resolveStartupScript?: (snippetId: string) => Promise<string | null>;
 }
@@ -184,6 +192,7 @@ export class SshService {
   private readonly idleCloseMs: number;
   private reconnectDelay: (attempt: number) => number;
   private connectSteps: Partial<SshConnectSteps>;
+  private readonly tailnetSocks: (() => TailnetSocksProxy | null) | null;
   private resolveStartupScript: (snippetId: string) => Promise<string | null>;
   private readonly pool = new Map<string, PoolEntry>();
   private readonly terminals = new Map<string, TerminalRecord>();
@@ -214,6 +223,7 @@ export class SshService {
     this.idleCloseMs = options.idleCloseMs ?? SSH_IDLE_CLOSE_MS;
     this.reconnectDelay = options.reconnectDelayMs ?? reconnectDelayMs;
     this.connectSteps = options.connectSteps ?? {};
+    this.tailnetSocks = options.tailnetSocks ?? null;
     this.storage = new SshStorage({
       jagentdeskHome: options.jagentdeskHome,
       logger: options.logger,
@@ -261,6 +271,18 @@ export class SshService {
     if (!server.label.trim()) throw new Error("Label is required.");
     if (!server.address.trim()) throw new Error("Address is required.");
     validateCommonFields(server);
+    if (server.via === "tailnet") {
+      // Spec 33.2: the effective config — including a proxy inherited from a
+      // parent group — must not mix a tailnet route with a proxy.
+      const resolved = resolveSshConfig({
+        server,
+        groups: this.storage.groupMap(),
+        identities: this.storage.identityMap(),
+      });
+      if (resolved.proxy) {
+        throw new Error("A tailnet route cannot be combined with a proxy");
+      }
+    }
     if (server.groupId && !this.storage.getGroup(server.groupId)) {
       throw new Error("Group does not exist.");
     }
@@ -674,7 +696,7 @@ export class SshService {
     const promise = (async () => {
       const hops = await this.buildHops(entry.serverId);
       const target = hops[hops.length - 1].config;
-      const proxy = await this.resolveProxy(target, hops[0].config);
+      const proxy = await this.resolveFirstHopRoute(target, hops[0].config);
       this.setServerState(entry.serverId, "connecting");
       const connection = await connectSshChain({
         serverId: entry.serverId,
@@ -805,6 +827,41 @@ export class SshService {
       port: source.proxy.port,
       ...(source.proxy.username ? { username: source.proxy.username } : {}),
       ...(password ? { password } : {}),
+    };
+  }
+
+  /**
+   * Route for the first hop's TCP socket (spec 25.3 step 2, spec 33.2): a saved
+   * proxy, or — when the target is `via: "tailnet"` — the tsnet node's loopback
+   * SOCKS5. A tailnet route never combines with a proxy and never falls back to
+   * a direct dial: without the accessor the attempt fails with
+   * `tailnet_unavailable` right away.
+   */
+  private async resolveFirstHopRoute(
+    target: ResolvedSshConfig,
+    firstHop: ResolvedSshConfig,
+  ): Promise<ProxyTarget | undefined> {
+    const proxy = await this.resolveProxy(target, firstHop);
+    if (target.via !== "tailnet") return proxy;
+    if (proxy) {
+      throw new SshConnectionError({
+        code: "config_invalid",
+        message: "A tailnet route cannot be combined with a proxy",
+      });
+    }
+    const socks = this.tailnetSocks?.() ?? null;
+    if (!socks) {
+      throw new SshConnectionError({
+        code: "tailnet_unavailable",
+        message: "JAgentDesk Tailscale is not connected on this host.",
+      });
+    }
+    return {
+      type: "socks5",
+      host: socks.host,
+      port: socks.port,
+      username: socks.username,
+      password: socks.password,
     };
   }
 

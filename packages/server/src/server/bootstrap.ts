@@ -726,6 +726,10 @@ export async function createJAgentDeskDaemon(
     jagentdeskHome: config.jagentdeskHome,
     logger,
     broadcast: (message) => wsServer?.broadcast(wrapSessionMessage(message)),
+    // Spec 33.2: via:"tailnet" servers dial the first hop through the bridge's
+    // loopback SOCKS5 (tsnetListener is created later, the accessor is late-bound
+    // and re-read on every connect attempt).
+    tailnetSocks: () => tsnetListener?.getTailnetSocks() ?? null,
   });
   const terminalManager = createSshTerminalManager(
     createConfiguredTerminalManager({

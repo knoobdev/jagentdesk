@@ -45,6 +45,11 @@ export interface ResolvedSshConfig {
   host: string;
   port: number;
   protocol: SshProtocol;
+  /**
+   * How the daemon reaches this host (spec 33.2): "direct" TCP (default) or
+   * through the tsnet node's loopback SOCKS5. Server-only: groups never set it.
+   */
+  via?: "direct" | "tailnet";
   username?: string;
   identityId?: string;
   /** Present when the resolved identity references a key. */
@@ -150,6 +155,7 @@ export function resolveSshConfig(input: ResolveSshConfigInput): ResolvedSshConfi
     port: nearest("port") ?? defaultPort,
     protocol,
     ...definedFields({
+      via: server.via === "tailnet" ? server.via : undefined,
       username: nearest("username") ?? (identity?.username || undefined),
       identityId,
       keyId: identity?.keyId,
