@@ -76,6 +76,16 @@ export const SshServerSchema = z.object({
   protocol: SshProtocolSchema.optional(), // default "ssh"
   createdAtMs: z.number().optional(),
   updatedAtMs: z.number().optional(),
+  // Remote execution (spec 33 / ADR-0044). `via` selects how the daemon reaches the host:
+  // direct TCP or through the tailnet path. `remoteExec` opts the server into remote jobs;
+  // `workRoot` overrides the job root on the host. Server-only: groups do not inherit these.
+  via: z.enum(["direct", "tailnet"]).optional(),
+  remoteExec: z
+    .object({
+      enabled: z.boolean(),
+      workRoot: z.string().min(1).optional(),
+    })
+    .optional(),
   ...SshInheritableShape,
 });
 export type SshServer = z.infer<typeof SshServerSchema>;
