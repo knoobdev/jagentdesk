@@ -1,8 +1,10 @@
+import { execFileSync } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import pino from "pino";
+import { SshConnectionError } from "../ssh/ssh-connection.js";
 import { computeWorkspaceKey } from "./ids.js";
 import { createRemoteExecService } from "./service.js";
 import {
@@ -122,6 +124,82 @@ describe("createRemoteExecService", () => {
     const result = await service.checkTarget("srv1");
     expect(result.ok).toBe(false);
     expect(result.error?.code).toBe("ECONNREFUSED");
+  });
+
+  it("preserves tailnet_unavailable with its message from checkTarget", async () => {
+    const deps = makeDeps({
+      acquireError: new SshConnectionError({
+        code: "tailnet_unavailable",
+        message: "JAgentDesk Tailscale is not connected on this host.",
+      }),
+    });
+    const service = createRemoteExecService(deps);
+    const result = await service.checkTarget("srv1");
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("tailnet_unavailable");
+    expect(result.error?.message).toBe("JAgentDesk Tailscale is not connected on this host.");
+  });
+
+  it("keeps the generic connection code for other SshConnectionError codes", async () => {
+    const deps = makeDeps({
+      acquireError: new SshConnectionError({ code: "auth_failed", message: "bad credentials" }),
+    });
+    const service = createRemoteExecService(deps);
+    const result = await service.checkTarget("srv1");
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("connection_failed");
+    expect(result.error?.message).toBe("bad credentials");
+  });
+
+  it("maps tailnet_unavailable into the failed job's error", async () => {
+    execFileSync("git", ["init", "-q"], { cwd: workspace, stdio: "ignore" });
+    const deps = makeDeps({
+      acquireError: new SshConnectionError({
+        code: "tailnet_unavailable",
+        message: "JAgentDesk Tailscale is not connected on this host.",
+      }),
+    });
+    const service = createRemoteExecService(deps);
+    const job = await service.startJob({
+      serverId: "srv1",
+      workspacePath: workspace,
+      command: "true",
+      timeoutMs: 60_000,
+      agentId: null,
+    });
+    const result = await service.waitForJob(job.id, 5_000);
+    expect(result.job.status).toBe("failed");
+    expect(result.job.error?.code).toBe("tailnet_unavailable");
+    expect(result.job.error?.message).toBe("JAgentDesk Tailscale is not connected on this host.");
+    await service.stop();
+  });
+
+  it("surfaces tailnet_unavailable in follower reconnect logs", async () => {
+    await seedStore(homeDir, [makeStoredJob("rjb_running", { startedAtMs: Date.now() })]);
+    const records: Array<Record<string, unknown>> = [];
+    const deps = makeDeps({
+      acquireError: new SshConnectionError({
+        code: "tailnet_unavailable",
+        message: "JAgentDesk Tailscale is not connected on this host.",
+      }),
+    });
+    deps.logger = pino(
+      { level: "debug" },
+      {
+        write(chunk: string) {
+          records.push(JSON.parse(chunk) as Record<string, unknown>);
+        },
+      },
+    );
+    const service = createRemoteExecService(deps);
+    await service.start();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await service.stop();
+    const pollFailure = records.find(
+      (record) => record.msg === "remote-exec: poll failed, backing off",
+    );
+    expect(pollFailure).toBeDefined();
+    expect(pollFailure?.code).toBe("tailnet_unavailable");
   });
 
   it("fails startJob with not_git_workspace for a plain directory", async () => {

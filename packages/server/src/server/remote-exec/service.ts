@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { Client } from "ssh2";
+import { SshConnectionError } from "../ssh/ssh-connection.js";
 import { computeWorkspaceKey, newJobId } from "./ids.js";
 import { isTerminalStatus, RemoteJobStore } from "./job-store.js";
 import { OutputMirror } from "./output-mirror.js";
@@ -48,11 +49,25 @@ type NotifyKind = "status" | "output";
 
 function toErrorInfo(error: unknown, fallbackCode: string): RemoteExecErrorInfo {
   if (error instanceof RemoteExecError) return { code: error.code, message: error.message };
+  const tailnet = tailnetErrorCode(error);
+  if (tailnet)
+    return { code: tailnet, message: error instanceof Error ? error.message : String(error) };
   const code = (error as { code?: unknown } | null)?.code;
   if (typeof code === "string" && code.length > 0) {
     return { code, message: error instanceof Error ? error.message : String(error) };
   }
   return { code: fallbackCode, message: error instanceof Error ? error.message : String(error) };
+}
+
+/**
+ * ssh-service fails a `via: "tailnet"` target fast when the tsnet bridge has no SOCKS accessor;
+ * that code is a condition of its own (spec 33.2/33.10#2), not a generic connection failure, so it
+ * is preserved verbatim instead of being folded into connection_failed / sync_failed.
+ */
+function tailnetErrorCode(error: unknown): string | null {
+  return error instanceof SshConnectionError && error.info.code === "tailnet_unavailable"
+    ? "tailnet_unavailable"
+    : null;
 }
 
 function workRootOf(server: { remoteExec?: { enabled: boolean; workRoot?: string } }): string {
@@ -230,7 +245,11 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
         }
       } catch (error) {
         // Connection errors leave the job running on the target; resume from the same offset.
-        logger.debug({ err: error, jobId }, "remote-exec: poll failed, backing off");
+        // The tailnet code rides along so a down bridge is visible in the daemon log (33.2).
+        logger.debug(
+          { err: error, jobId, code: tailnetErrorCode(error) ?? undefined },
+          "remote-exec: poll failed, backing off",
+        );
         await sleep(BACKOFF_MS[Math.min(backoffIndex, BACKOFF_MS.length - 1)]);
         backoffIndex += 1;
       }
