@@ -28,6 +28,9 @@ import type {
   TerminalManager,
   TerminalWorkspaceContributionChangedEvent,
 } from "../terminal/terminal-manager.js";
+import type { RemoteJob } from "@jagentdesk/protocol/remote-exec/rpc-schemas";
+import { handleRemoteExecMessage, remoteExecJobUpdated } from "./remote-exec/rpc.js";
+import type { RemoteExecService } from "./remote-exec/types.js";
 import { TerminalSessionController } from "../terminal/terminal-session-controller.js";
 import type { TerminalActivity } from "@jagentdesk/protocol/terminal-activity";
 import type { BinaryFrame } from "@jagentdesk/protocol/binary-frames/index";
@@ -557,6 +560,9 @@ export interface SessionOptions {
   clusterRegistry?: ClusterRegistry;
   databaseRegistry?: DatabaseRegistry;
   sshService?: SshService;
+  // Remote execution (spec 33 / ADR-0044): daemon-wide service; null while the engine is
+  // unavailable — its requests then get an error response instead of timing out silently.
+  remoteExecService?: RemoteExecService | null;
   // Argo CD (spec 30): daemon-wide service; null when the host runs without it.
   argocdService?: ArgoCdService | null;
   /** Sideload (spec 26); null in tests and hosts that do not run it. */
@@ -907,6 +913,7 @@ export class Session {
   private jiraSession: JiraSession | null = null;
   private figmaSession: FigmaSession | null = null;
   private sshService!: SshService;
+  private remoteExecService: RemoteExecService | null = null;
   private sideloadSession: SideloadSession | null = null;
   private clusterRegistry!: ClusterRegistry;
   private databaseRegistry!: DatabaseRegistry;
@@ -953,11 +960,7 @@ export class Session {
       filesystem,
       chatService,
       scheduleService,
-      autorunService,
       specModeService,
-      sessionShareService,
-      agentForumService,
-      activityGraphService,
       loopService,
       checkoutDiffManager,
       github,
@@ -1123,49 +1126,13 @@ export class Session {
       emit: (msg) => this.emit(msg),
       logger: this.sessionLogger,
     });
-    this.autorunSession = autorunService
-      ? new AutorunSession({
-          host: { emit: (msg) => this.emit(msg) },
-          autorunService,
-          logger: this.sessionLogger,
-        })
-      : null;
-    this.sessionShareSession = sessionShareService
-      ? new SessionShareSession({
-          host: { emit: (msg) => this.emit(msg) },
-          sessionShareService,
-          logger: this.sessionLogger,
-        })
-      : null;
-    this.agentForumSession = agentForumService
-      ? new AgentForumSession({
-          host: {
-            emit: (msg) => this.emit(msg),
-            supportsArchifyDiagrams: () => this.supportsArchifyDiagramsOnEverySource(),
-          },
-          agentForumService,
-          logger: this.sessionLogger,
-          bootstrapTopic: options.agentForumBootstrap,
-          notifyForumActivity: options.agentForumNotify,
-        })
-      : null;
-    this.activityGraphSession = activityGraphService
-      ? new ActivityGraphSession({
-          host: {
-            emit: (msg) => this.emit(msg),
-            supportsActivityGraph: () => this.supports(CLIENT_CAPS.activityGraph),
-            ensureAgentLoaded: async (agentId) => {
-              await ensureUnarchivedAgentLoaded(agentId, {
-                agentManager: this.agentManager,
-                agentStorage: this.agentStorage,
-                logger: this.sessionLogger,
-              });
-            },
-          },
-          service: activityGraphService,
-          logger: this.sessionLogger,
-        })
-      : null;
+    ({
+      autorunSession: this.autorunSession,
+      sessionShareSession: this.sessionShareSession,
+      agentForumSession: this.agentForumSession,
+      activityGraphSession: this.activityGraphSession,
+      jiraSession: this.jiraSession,
+    } = this.createOptionalSessions(options));
     this.initClusterSession(options);
     this.initDatabaseSession(options);
     this.initSshSession(options);
@@ -1183,13 +1150,6 @@ export class Session {
           logger: this.sessionLogger,
         })
       : null;
-    if (options.jiraService) {
-      this.jiraSession = new JiraSession({
-        service: options.jiraService,
-        emit: (msg) => this.emit(msg),
-        logger: this.sessionLogger,
-      });
-    }
     this.figmaSession = this.createFigmaSession(options.figmaService);
     this.providerCatalogSession = new ProviderCatalogSession({
       host: {
@@ -1419,6 +1379,69 @@ export class Session {
     };
   }
 
+  // The sessions that exist only when their daemon-wide service is enabled. Extracted from the
+  // constructor to keep its cyclomatic complexity under the lint limit.
+  private createOptionalSessions(options: SessionOptions): {
+    autorunSession: AutorunSession | null;
+    sessionShareSession: SessionShareSession | null;
+    agentForumSession: AgentForumSession | null;
+    activityGraphSession: ActivityGraphSession | null;
+    jiraSession: JiraSession | null;
+  } {
+    return {
+      autorunSession: options.autorunService
+        ? new AutorunSession({
+            host: { emit: (msg) => this.emit(msg) },
+            autorunService: options.autorunService,
+            logger: this.sessionLogger,
+          })
+        : null,
+      sessionShareSession: options.sessionShareService
+        ? new SessionShareSession({
+            host: { emit: (msg) => this.emit(msg) },
+            sessionShareService: options.sessionShareService,
+            logger: this.sessionLogger,
+          })
+        : null,
+      agentForumSession: options.agentForumService
+        ? new AgentForumSession({
+            host: {
+              emit: (msg) => this.emit(msg),
+              supportsArchifyDiagrams: () => this.supportsArchifyDiagramsOnEverySource(),
+            },
+            agentForumService: options.agentForumService,
+            logger: this.sessionLogger,
+            bootstrapTopic: options.agentForumBootstrap,
+            notifyForumActivity: options.agentForumNotify,
+          })
+        : null,
+      activityGraphSession: options.activityGraphService
+        ? new ActivityGraphSession({
+            host: {
+              emit: (msg) => this.emit(msg),
+              supportsActivityGraph: () => this.supports(CLIENT_CAPS.activityGraph),
+              ensureAgentLoaded: async (agentId) => {
+                await ensureUnarchivedAgentLoaded(agentId, {
+                  agentManager: this.agentManager,
+                  agentStorage: this.agentStorage,
+                  logger: this.sessionLogger,
+                });
+              },
+            },
+            service: options.activityGraphService,
+            logger: this.sessionLogger,
+          })
+        : null,
+      jiraSession: options.jiraService
+        ? new JiraSession({
+            service: options.jiraService,
+            emit: (msg) => this.emit(msg),
+            logger: this.sessionLogger,
+          })
+        : null,
+    };
+  }
+
   private initClusterSession(options: SessionOptions): void {
     this.clusterRegistry = options.clusterRegistry ?? new ClusterRegistry();
     this.clusterSession = new ClusterSession({
@@ -1450,6 +1473,17 @@ export class Session {
       sshService: this.sshService,
       logger: this.sessionLogger,
     });
+    this.remoteExecService = options.remoteExecService ?? null;
+  }
+
+  // Remote execution (spec 33.8): the allowlist is the `remote_exec.` prefix, the handler map in
+  // remote-exec/rpc.ts is type-checked against the six request schemas. A request missing here
+  // would time out without a response.
+  private dispatchRemoteExecMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    if (!msg.type.startsWith("remote_exec.")) return undefined;
+    return handleRemoteExecMessage(this.remoteExecService, msg, (out) => this.emit(out)).then(
+      () => undefined,
+    );
   }
 
   updateAppVersion(appVersion: string | null): void {
@@ -1763,6 +1797,14 @@ export class Session {
 
   public emitServerMessage(message: SessionOutboundMessage): void {
     this.emit(message);
+  }
+
+  /**
+   * remote_exec.job_updated (spec 33.8): bootstrap pushes every job change here; the emit gate
+   * drops sessions whose scopes cannot read it (workspace.read on the permission table).
+   */
+  public emitRemoteExecJobUpdated(job: RemoteJob): void {
+    this.emit(remoteExecJobUpdated(job));
   }
 
   /**
@@ -2439,6 +2481,7 @@ export class Session {
       () => this.dispatchClusterMessage(msg),
       () => this.dispatchDatabaseMessage(msg),
       () => this.dispatchSshMessage(msg),
+      () => this.dispatchRemoteExecMessage(msg),
       () => this.dispatchArgoCdMessage(msg),
       () => this.dispatchSideloadMessage(msg),
       () => this.dispatchJiraMessage(msg),
