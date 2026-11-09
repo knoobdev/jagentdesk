@@ -3259,6 +3259,8 @@ interface ToolCallProps {
   detail?: ToolCallDetail;
   cwd?: string;
   metadata?: Record<string, unknown>;
+  /** Session daemon client; the remote job card (spec 33.9) reads live job state through it. */
+  client?: DaemonClient | null;
   isLastInSequence?: boolean;
   disableOuterSpacing?: boolean;
   onInlineDetailsHoverChange?: (hovered: boolean) => void;
@@ -3278,6 +3280,7 @@ export const ToolCall = memo(function ToolCall({
   detail,
   cwd,
   metadata,
+  client,
   isLastInSequence = false,
   disableOuterSpacing,
   onInlineDetailsHoverChange,
@@ -3337,6 +3340,8 @@ export const ToolCall = memo(function ToolCall({
         errorText: presentation.errorText,
         icon: presentation.icon,
         showLoadingSkeleton: presentation.isLoadingDetails,
+        toolName,
+        client,
       });
     } else {
       setIsExpanded((prev) => !prev);
@@ -3350,6 +3355,8 @@ export const ToolCall = memo(function ToolCall({
     presentation.icon,
     presentation.isLoadingDetails,
     effectiveDetail,
+    toolName,
+    client,
   ]);
 
   useEffect(() => {
@@ -3385,6 +3392,8 @@ export const ToolCall = memo(function ToolCall({
     return (
       <ToolCallDetailsContent
         detail={effectiveDetail}
+        toolName={toolName}
+        client={client}
         errorText={presentation.errorText}
         maxHeight={maxDetailHeight}
         showLoadingSkeleton={presentation.isLoadingDetails}
@@ -3393,6 +3402,8 @@ export const ToolCall = memo(function ToolCall({
   }, [
     shouldRenderInline,
     effectiveDetail,
+    toolName,
+    client,
     presentation.errorText,
     presentation.isLoadingDetails,
     maxDetailHeight,
@@ -3436,6 +3447,7 @@ function areToolCallPropsEqual(previous: ToolCallProps, next: ToolCallProps) {
   if (previous.detail !== next.detail) return false;
   if (previous.cwd !== next.cwd) return false;
   if (previous.metadata !== next.metadata) return false;
+  if (previous.client !== next.client) return false;
   if (previous.isLastInSequence !== next.isLastInSequence) return false;
   if (previous.disableOuterSpacing !== next.disableOuterSpacing) return false;
   if (previous.onOpenFilePath !== next.onOpenFilePath) return false;

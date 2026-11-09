@@ -15,6 +15,7 @@ import {
   useIsolatedBottomSheetVisibility,
 } from "@/components/ui/isolated-bottom-sheet-modal";
 import type { ToolCallIconComponent } from "@/utils/tool-call-icon";
+import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import { ToolCallDetailsContent } from "./tool-call-details";
 
 // ----- Types -----
@@ -23,6 +24,9 @@ export interface ToolCallSheetData {
   displayName: string;
   summary?: string;
   detail?: ToolCallDetail;
+  /** Tool call name and daemon client for the remote job card (spec 33.9). */
+  toolName?: string;
+  client?: DaemonClient | null;
   errorText?: string;
   icon: ToolCallIconComponent;
   showLoadingSkeleton?: boolean;
@@ -139,7 +143,15 @@ interface ToolCallSheetContentProps {
 
 function ToolCallSheetContent({ data, onClose }: ToolCallSheetContentProps) {
   const { theme } = useUnistyles();
-  const { displayName, detail, errorText, icon: IconComponent, showLoadingSkeleton } = data;
+  const {
+    displayName,
+    detail,
+    toolName,
+    client,
+    errorText,
+    icon: IconComponent,
+    showLoadingSkeleton,
+  } = data;
 
   return (
     <View style={styles.container}>
@@ -160,6 +172,8 @@ function ToolCallSheetContent({ data, onClose }: ToolCallSheetContentProps) {
       <BottomSheetScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
         <ToolCallDetailsContent
           detail={detail}
+          toolName={toolName}
+          client={client}
           errorText={errorText}
           fillAvailableHeight
           showLoadingSkeleton={showLoadingSkeleton}

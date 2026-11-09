@@ -1,6 +1,7 @@
-// Strings for the SSH feature modules (spec 25: SFTP, port forwarding, snippets, Telnet),
-// under `ssh.sftp.*`, `ssh.forwarding.*`, `ssh.snippets.*` and `ssh.telnet.*`. Every locale
-// spreads this English tree into its `ssh` key until it ships native translations.
+// Strings for the SSH feature modules (spec 25: SFTP, port forwarding, snippets, Telnet;
+// spec 33: remote execution), under `ssh.sftp.*`, `ssh.forwarding.*`, `ssh.snippets.*`,
+// `ssh.telnet.*`, `ssh.server.remoteExec.*` and `ssh.remoteExec.*`. Every locale spreads this
+// English tree into its `ssh` key until it ships native translations.
 export const sshModuleStrings = {
   sftp: {
     location: "Location",
@@ -268,6 +269,25 @@ export const sshModuleStrings = {
     unencrypted: "Connection is not encrypted",
     endpoint: "telnet://{{address}}:{{port}}",
   },
+  remoteExec: {
+    job: {
+      status: {
+        syncing: "Syncing",
+        running: "Running",
+        succeeded: "Succeeded",
+        failed: "Failed",
+        stopped: "Stopped",
+        timed_out: "Timed out",
+        lost: "Lost",
+      },
+      syncSummary: "{{sent}} files sent, {{removed}} removed",
+      exitCode: "Exit code {{code}}",
+      stop: "Stop",
+      stopping: "Stopping…",
+      outputTruncated: "Showing the last {{limit}} of {{total}} bytes of output.",
+      outputEmpty: "No output yet",
+    },
+  },
   server: {
     detectOnConnect: {
       label: "Detect environment on connect",
@@ -326,6 +346,26 @@ export const sshModuleStrings = {
       submit: "Import cluster",
       imported: "Imported {{name}} into Clusters.",
       contextRequired: "Enter the context name from the kubeconfig",
+    },
+    remoteExec: {
+      route: "Route",
+      routeDirect: "Direct",
+      routeTailnet: "JAgentDesk Tailscale",
+      routeProxyHint: "Disabled while a proxy is set — remote tasks use the proxy route.",
+      enabled: "Use for remote tasks",
+      workFolder: "Work folder",
+      workFolderPlaceholder: "~/.jagentdesk/remote-exec",
+      check: "Check",
+      checking: "Checking…",
+      checkFailed: "Check failed",
+      os: "OS",
+      shell: "Shell",
+      freeSpace: "Free space",
+      writable: "Work folder writable",
+      writableOk: "Yes",
+      writableFail: "No",
+      toolsOk: "All required tools present",
+      toolsMissing: "Missing tools",
     },
   },
   import: {

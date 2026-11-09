@@ -34,7 +34,7 @@ export interface SshServerFormState {
     proxy: string | null;
     keepalive: string | null;
   };
-  disclosure: "basic" | "auth" | "advanced" | "appearance";
+  disclosure: "basic" | "auth" | "advanced" | "remoteExec" | "appearance";
   groupId: string;
   identityId: string;
   username: string;
@@ -59,6 +59,11 @@ export interface SshServerFormState {
   keepaliveS: string;
   /** spec 25.10: detect the server environment after each connect (server-only, default on). */
   detectEnvironment: boolean;
+  // Remote execution (spec 33.2 / 33.3, server-only): how the daemon reaches the host and
+  // whether the server accepts remote job targets.
+  via: "direct" | "tailnet";
+  remoteExecEnabled: boolean;
+  remoteWorkRoot: string;
   // Terminal theme + font size set on this server; unset fields inherit from its groups (25.4).
   appearance: SshTerminalAppearance;
   formError: string | null;
@@ -84,6 +89,9 @@ export interface SshServerFormModel {
   setDisclosure: (disclosure: SshServerFormState["disclosure"]) => void;
   setAdvanced: (patch: Partial<SshServerAdvancedFields>) => void;
   setAppearance: (appearance: SshTerminalAppearance) => void;
+  setVia: (via: SshServerFormState["via"]) => void;
+  setRemoteExecEnabled: (enabled: boolean) => void;
+  setRemoteWorkRoot: (value: string) => void;
   toggleJumpHost: (serverId: string) => void;
   setGroup: (groupId: string) => void;
   setIdentity: (identityId: string) => void;
@@ -167,6 +175,10 @@ function deriveErrors(state: SshServerFormState): SshServerFormState["errors"] {
   let proxy: string | null = null;
   if (state.proxyType && !state.proxyHost.trim()) proxy = "Proxy host is required";
   else if (state.proxyType) proxy = portError(state.proxyPort || "x");
+  // The daemon rejects the combination on save (spec 33.2), so surface it before submit.
+  if (state.proxyType && state.via === "tailnet") {
+    proxy = "A tailnet route cannot be combined with a proxy";
+  }
   return {
     label: state.label.trim() ? null : "Label is required",
     address: state.address.trim() ? null : "Address is required",
@@ -231,7 +243,16 @@ function initialBasicFields(server: SshServer | null, defaultGroupId: string | n
 }
 
 type AdvancedInitialFields = Omit<SshServerAdvancedFields, "proxyPasswordDraft"> &
-  Pick<SshServerFormState, "jumpChain" | "hasStoredProxyPassword" | "appearance">;
+  Pick<SshServerFormState, "jumpChain" | "hasStoredProxyPassword" | "appearance"> &
+  Pick<SshServerFormState, "via" | "remoteExecEnabled" | "remoteWorkRoot">;
+
+function initialRemoteExecFields(server: SshServer | null) {
+  return {
+    via: server?.via ?? "direct",
+    remoteExecEnabled: server?.remoteExec?.enabled === true,
+    remoteWorkRoot: server?.remoteExec?.workRoot ?? "",
+  };
+}
 
 function initialAdvancedFields(server: SshServer | null): AdvancedInitialFields {
   const proxy = server?.proxy;
@@ -248,6 +269,7 @@ function initialAdvancedFields(server: SshServer | null): AdvancedInitialFields 
     autoReconnect: triState(server?.autoReconnect),
     keepaliveS: server?.keepaliveIntervalS === undefined ? "" : String(server.keepaliveIntervalS),
     detectEnvironment: server?.detectEnvironment !== false,
+    ...initialRemoteExecFields(server),
     appearance: initialAppearance(server),
   };
 }
@@ -290,9 +312,19 @@ function buildServerDto(server: SshServer | null, state: SshServerFormState): Ss
     autoReconnect: fromTriState(state.autoReconnect),
     keepaliveIntervalS: optionalInt(state.keepaliveS),
     detectEnvironment: state.detectEnvironment ? undefined : false,
+    // "direct" is the wire default, so it is omitted on save (spec 33.2).
+    via: state.via === "tailnet" ? "tailnet" : undefined,
+    remoteExec: buildRemoteExec(state),
     theme: state.appearance.theme,
     fontSize: state.appearance.fontSize,
   };
+}
+
+/** spec 33.3: `remoteExec` is absent while the switch is off; an empty work folder is omitted. */
+function buildRemoteExec(state: SshServerFormState): SshServer["remoteExec"] {
+  if (!state.remoteExecEnabled) return undefined;
+  const workRoot = optionalString(state.remoteWorkRoot);
+  return workRoot ? { enabled: true, workRoot } : { enabled: true };
 }
 
 /**
@@ -358,6 +390,9 @@ export function openSshServerFormModel(snapshot: SshServerFormSnapshot): SshServ
     setDisclosure: (disclosure) => set({ disclosure }),
     setAdvanced: (patch) => set(patch),
     setAppearance: (appearance) => set({ appearance }),
+    setVia: (via) => set({ via }),
+    setRemoteExecEnabled: (remoteExecEnabled) => set({ remoteExecEnabled }),
+    setRemoteWorkRoot: (remoteWorkRoot) => set({ remoteWorkRoot }),
     toggleJumpHost(serverId) {
       const chain = state.jumpChain.includes(serverId)
         ? state.jumpChain.filter((id) => id !== serverId)
