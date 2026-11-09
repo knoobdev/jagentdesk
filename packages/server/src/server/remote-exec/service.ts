@@ -491,16 +491,19 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
       const workspacePath = path.resolve(input.workspacePath);
       const workspaceKey = computeWorkspaceKey(deps.daemonId, workspacePath);
       const lockKey = `${input.serverId}\0${workspaceKey}`;
+      const jobRunningError = (active: RemoteJob): RemoteExecError =>
+        new RemoteExecError(
+          "job_running",
+          `A job is already active for this workspace on ${server.label} (${active.id}). ` +
+            `Wait for it with remote_job_wait or stop it with remote_job_stop.`,
+          { jobId: active.id },
+        );
       // Serialize concurrent starts for one (serverId, workspaceKey) so the one-running-job rule
       // cannot be raced.
       while (true) {
         const active = store.findActive(input.serverId, workspaceKey);
         if (active) {
-          throw new RemoteExecError(
-            "job_running",
-            `A job is already active for this workspace on ${server.label}`,
-            { jobId: active.id },
-          );
+          throw jobRunningError(active);
         }
         const prior = startLocks.get(lockKey);
         if (!prior) break;
@@ -514,11 +517,7 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
       try {
         const active = store.findActive(input.serverId, workspaceKey);
         if (active) {
-          throw new RemoteExecError(
-            "job_running",
-            `A job is already active for this workspace on ${server.label}`,
-            { jobId: active.id },
-          );
+          throw jobRunningError(active);
         }
         const snapshot = await createSnapshot({
           workspacePath,

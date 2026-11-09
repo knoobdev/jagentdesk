@@ -230,6 +230,10 @@ describe("createRemoteExecService", () => {
     expect(error).toBeInstanceOf(RemoteExecError);
     expect((error as RemoteExecError).code).toBe("job_running");
     expect((error as RemoteExecError).details).toEqual({ jobId: "rjb_active" });
+    // The agent only sees the text: the active job's id must be in it, with the next actions.
+    expect((error as RemoteExecError).message).toContain("(rjb_active)");
+    expect((error as RemoteExecError).message).toContain("remote_job_wait");
+    expect((error as RemoteExecError).message).toContain("remote_job_stop");
   });
 
   it("marks syncing jobs failed(daemon_restarted) on start and resumes following running ones", async () => {
