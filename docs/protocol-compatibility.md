@@ -56,7 +56,7 @@ When a tag's condition is met, delete the shim and the tag in the same change.
 
 ## Recent additive changes
 
-- v0.9.56: `remote_exec.*` RPCs and the `remote_exec.job_updated` push (spec 33 / ADR-0044). `SshServer` gained optional `via` and `remoteExec` fields. Old clients ignore the new fields and never send the new types; old daemons never send them.
+- v0.9.57: `remote_exec.*` RPCs and the `remote_exec.job_updated` push (spec 33 / ADR-0044). `SshServer` gained optional `via` and `remoteExec` fields. Old clients ignore the new fields and never send the new types; old daemons never send them.
 
 ## QA
 

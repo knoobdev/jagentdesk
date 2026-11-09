@@ -1,9 +1,60 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.9.56`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.9.57`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.9.57 — 2026-11-09
+
+Remote tasks: ask the agent in chat to run something on another machine — for example a Windows PC
+through WSL2 — and get the output back in the same chat. The project and the agent stay on the
+daemon machine; the other machine only receives a copy of the code.
+
+### Added
+
+- **Run on another machine from chat.** Agents get `remote_targets`, `remote_run`,
+  `remote_job_wait`, `remote_job_output`, `remote_job_stop` and `remote_jobs`. `remote_run` and
+  `remote_job_stop` ask for permission first; the card shows the target, command, folder, file count
+  and size, and how many secret files were left out.
+- **JAgentDesk Tailscale route for SSH servers.** A server can use **Route → JAgentDesk Tailscale**:
+  SSH goes through the daemon's embedded Tailscale node (a loopback-only SOCKS5 proxy with a per-run
+  credential), so the daemon machine does not need the Tailscale app running. If the embedded node is
+  not connected, the connection fails with `tailnet_unavailable` instead of trying a direct route.
+- **Workspace copy, not a remote checkout.** Tracked files plus new files that are not ignored,
+  including uncommitted changes. `.env`, private keys and similar secret files are never sent.
+  Re-runs only send changed files and delete removed ones; dependencies and caches installed on the
+  target (for example `node_modules`) are kept.
+- **Jobs that keep running.** Jobs run detached on the target: they survive network drops, closing
+  the app and daemon restarts, and output resumes from the last byte. Stop ends the whole process
+  group. One active job per workspace and target; a second run is refused with the running job's id.
+- **Remote tasks in the server form**: enable a server for remote tasks, choose its work folder and
+  run **Check** (OS, shell, free space, writable folder, required tools).
+- **Job card in chat**: the tool call shows as a card with live status, sync summary, exit code, the
+  end of the output and a **Stop** button.
+- Protocol: additive `remote_exec.*` RPCs, the `remote_exec.job_updated` event and optional `via` /
+  `remoteExec` fields on SSH servers. Older apps ignore them.
+
+### Verification and current limits
+
+- All 12 acceptance checks passed against a real Windows 11 PC (Ubuntu 20.04 on WSL2) over the
+  tailnet with the Tailscale app on the Mac stopped: SSH terminal and host-key check, `tailnet_unavailable`
+  in 3 ms with Tailscale off, target check, run, incremental sync with `.env` excluded, zero-byte
+  re-run, a 90-second job surviving a 20-second Tailscale freeze and a daemon restart with all 90
+  output lines exactly once, Stop in 1.9–2.9 seconds with no process left, the running-job refusal,
+  no secret in daemon files or client messages, and the live job card with Stop in the app.
+- Stop was also checked at eight moments between 0.3 and 4.5 seconds after starting, including while
+  the copy was still being sent.
+- Repository typecheck, focused server/protocol/app tests and a real OpenSSH end-to-end suite passed.
+  The full app suite has the same 39 pre-existing failures as v0.9.56 and no new ones.
+- Targets need a POSIX shell, `tar` and `setsid`: Linux and WSL2 work; macOS targets do not ship
+  `setsid`, so **Check** reports it missing. Plain Windows without WSL is not supported. Results from a
+  Linux target do not prove macOS or iOS behaviour.
+- A snapshot is limited to 1 GiB (100 MiB per file). Files are not copied back from the target.
+- In a repository whose own OpenCode configuration enables Code Mode, OpenCode agents may not see
+  the remote tools directly.
+- The app was checked through the desktop renderer (web build); the iOS/Android form and card share
+  the same components but were not exercised on devices.
 
 ## v0.9.56 — 2026-11-08
 
