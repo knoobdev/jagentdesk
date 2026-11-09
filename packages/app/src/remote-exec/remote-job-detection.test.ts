@@ -13,6 +13,11 @@ describe("isRemoteJobToolName", () => {
     expect(isRemoteJobToolName("jagentdesk.remote_job_wait")).toBe(true);
   });
 
+  it("matches OpenCode flattened names", () => {
+    expect(isRemoteJobToolName("jagentdesk_remote_run")).toBe(true);
+    expect(isRemoteJobToolName("jagentdesk_remote_job_wait")).toBe(true);
+  });
+
   it("matches MCP-prefixed names", () => {
     expect(isRemoteJobToolName("mcp__jagentdesk__remote_run")).toBe(true);
     expect(isRemoteJobToolName("mcp__jagentdesk__remote_job_wait")).toBe(true);

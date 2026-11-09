@@ -72,6 +72,8 @@ import type { AgentAttachment } from "@jagentdesk/protocol/messages";
 import type { ToolCallDetail } from "@jagentdesk/protocol/agent-types";
 import { buildToolCallPresentation } from "@/tool-calls/presentation";
 import { resolveToolCallIcon } from "@/utils/tool-call-icon";
+import { readRemoteJobToolResult } from "@/remote-exec/remote-job-detection";
+import { RemoteJobCard } from "@/remote-exec/remote-job-card";
 import { getMarkdownListMarker, getMarkdownListSpacing } from "@/utils/markdown-list";
 import { markdownNodeContainsType } from "@/utils/markdown-ast";
 import { useStableEvent } from "@/hooks/use-stable-event";
@@ -3408,6 +3410,25 @@ export const ToolCall = memo(function ToolCall({
     presentation.isLoadingDetails,
     maxDetailHeight,
   ]);
+
+  // A remote job call with a result shows as the live job card directly in the chat
+  // (spec 33.9); pending calls and every other tool keep the collapsed badge row.
+  const remoteJob = useMemo(
+    () => readRemoteJobToolResult(toolName, effectiveDetail),
+    [toolName, effectiveDetail],
+  );
+  if (remoteJob) {
+    return (
+      <RemoteJobCard
+        client={client ?? null}
+        initialJob={remoteJob.job}
+        initialOutput={remoteJob.output}
+        initialOutputOffset={remoteJob.outputOffset}
+        initialTruncated={remoteJob.outputTruncatedHead}
+        testID="remote-job-card"
+      />
+    );
+  }
 
   if (presentation.isPlan && effectiveDetail?.type === "plan") {
     return (
