@@ -72,7 +72,7 @@ import type { AgentAttachment } from "@jagentdesk/protocol/messages";
 import type { ToolCallDetail } from "@jagentdesk/protocol/agent-types";
 import { buildToolCallPresentation } from "@/tool-calls/presentation";
 import { resolveToolCallIcon } from "@/utils/tool-call-icon";
-import { readRemoteJobToolResult } from "@/remote-exec/remote-job-detection";
+import { readRemoteJobToolResult, remoteJobCardVariant } from "@/remote-exec/remote-job-detection";
 import { RemoteJobCard } from "@/remote-exec/remote-job-card";
 import { getMarkdownListMarker, getMarkdownListSpacing } from "@/utils/markdown-list";
 import { markdownNodeContainsType } from "@/utils/markdown-ast";
@@ -3425,6 +3425,7 @@ export const ToolCall = memo(function ToolCall({
         initialOutput={remoteJob.output}
         initialOutputOffset={remoteJob.outputOffset}
         initialTruncated={remoteJob.outputTruncatedHead}
+        variant={remoteJobCardVariant(toolName)}
         testID="remote-job-card"
       />
     );

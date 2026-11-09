@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { ToolCallDetail } from "@jagentdesk/protocol/agent-types";
-import { isRemoteJobToolName, readRemoteJobToolResult } from "./remote-job-detection";
+import {
+  isRemoteJobToolName,
+  readRemoteJobToolResult,
+  remoteJobCardVariant,
+} from "./remote-job-detection";
 
 describe("isRemoteJobToolName", () => {
   it("matches the plain tool names", () => {
@@ -27,6 +31,27 @@ describe("isRemoteJobToolName", () => {
     expect(isRemoteJobToolName("remote_stop")).toBe(false);
     expect(isRemoteJobToolName("remote_exec")).toBe(false);
     expect(isRemoteJobToolName("shell")).toBe(false);
+  });
+});
+
+describe("remoteJobCardVariant", () => {
+  it("renders remote_run as the full card in every naming", () => {
+    expect(remoteJobCardVariant("remote_run")).toBe("full");
+    expect(remoteJobCardVariant("jagentdesk.remote_run")).toBe("full");
+    expect(remoteJobCardVariant("jagentdesk_remote_run")).toBe("full");
+    expect(remoteJobCardVariant("mcp__jagentdesk__remote_run")).toBe("full");
+  });
+
+  it("renders remote_job_wait as the compact card in every naming", () => {
+    expect(remoteJobCardVariant("remote_job_wait")).toBe("compact");
+    expect(remoteJobCardVariant("jagentdesk.remote_job_wait")).toBe("compact");
+    expect(remoteJobCardVariant("jagentdesk_remote_job_wait")).toBe("compact");
+    expect(remoteJobCardVariant("mcp__jagentdesk__remote_job_wait")).toBe("compact");
+  });
+
+  it("defaults other tools to full", () => {
+    expect(remoteJobCardVariant("remote_stop")).toBe("full");
+    expect(remoteJobCardVariant("shell")).toBe("full");
   });
 });
 

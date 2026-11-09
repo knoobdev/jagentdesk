@@ -2,6 +2,7 @@
  * @vitest-environment jsdom
  */
 import React, { act } from "react";
+import { act as rtlAct, fireEvent } from "@testing-library/react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -110,6 +111,14 @@ const remoteJobWaitDetail: ToolCallDetail = {
   },
 };
 
+// A remote_job_wait can also surface while its job is still running; the compact card must
+// still omit the stop button (the wait call itself cannot be stopped from here).
+const remoteJobWaitRunningDetail: ToolCallDetail = {
+  type: "unknown",
+  input: {},
+  output: jobResult,
+};
+
 const remoteStopDetail: ToolCallDetail = {
   type: "unknown",
   input: {},
@@ -151,5 +160,71 @@ describe("ToolCall inline remote job card (spec 33.9)", () => {
     mount(<ToolCall toolName="remote_stop" status="completed" detail={remoteStopDetail} />);
     expect(document.querySelector('[data-testid="tool-call-badge"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="remote-job-card"]')).toBeNull();
+  });
+});
+
+describe("ToolCall remote_job_wait compact card (spec 33.9 follow-up)", () => {
+  it("collapses the output box and omits the stop button", () => {
+    mount(
+      <ToolCall
+        toolName="jagentdesk_remote_job_wait"
+        status="completed"
+        detail={remoteJobWaitRunningDetail}
+      />,
+    );
+    // Collapsed by default: no output box until the toggle is pressed.
+    expect(document.querySelector('[data-testid="remote-job-output-box"]')).toBeNull();
+    expect(document.querySelector('[data-testid="remote-job-stop"]')).toBeNull();
+    const toggle = document.querySelector('[data-testid="remote-job-output-toggle"]');
+    expect(toggle).not.toBeNull();
+    expect(toggle?.textContent).toContain("ssh.remoteExec.job.showOutput");
+  });
+
+  it("caps the command at 3 lines and keeps the full text in the accessibility label", () => {
+    mount(
+      <ToolCall
+        toolName="jagentdesk_remote_job_wait"
+        status="completed"
+        detail={remoteJobWaitRunningDetail}
+      />,
+    );
+    const command = document.querySelector<HTMLElement>("[aria-label]");
+    expect(command).not.toBeNull();
+    // The full command stays accessible (and tooltip-able) while the visible text is capped.
+    expect(command?.getAttribute("aria-label")).toBe(jobResult.job.command);
+    // react-native-web's numberOfLines > 1 machinery: -webkit-box + ellipsis for the cap,
+    // and our styles let the command wrap inside the card instead of overflowing.
+    // (The -webkit-line-clamp: 3 value itself is set via style.setProperty, which jsdom drops.)
+    expect(command?.className).toContain("r-WebkitBoxOrient");
+    expect(command?.className).toContain("r-textOverflow");
+    expect(command?.style.whiteSpace).toBe("pre-wrap");
+    expect(command?.style.overflowWrap).toBe("anywhere");
+  });
+
+  it("expands the same output box when the toggle is pressed", () => {
+    mount(
+      <ToolCall
+        toolName="jagentdesk_remote_job_wait"
+        status="completed"
+        detail={remoteJobWaitRunningDetail}
+      />,
+    );
+    const toggle = document.querySelector('[data-testid="remote-job-output-toggle"]');
+    expect(toggle).not.toBeNull();
+    rtlAct(() => {
+      fireEvent.click(toggle as HTMLElement);
+    });
+    expect(document.querySelector('[data-testid="remote-job-output-box"]')).not.toBeNull();
+    expect(document.body.textContent).toContain("step 1");
+    const toggleAfter = document.querySelector('[data-testid="remote-job-output-toggle"]');
+    expect(toggleAfter?.textContent).toContain("ssh.remoteExec.job.hideOutput");
+  });
+
+  it("keeps the full card for remote_run: output box shown outright, no toggle", () => {
+    mount(
+      <ToolCall toolName="jagentdesk_remote_run" status="completed" detail={remoteRunDetail} />,
+    );
+    expect(document.querySelector('[data-testid="remote-job-output-box"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="remote-job-output-toggle"]')).toBeNull();
   });
 });

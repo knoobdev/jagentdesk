@@ -7,13 +7,22 @@ import {
 
 const REMOTE_JOB_TOOL_LEAF_NAMES: ReadonlySet<string> = new Set(["remote_run", "remote_job_wait"]);
 
-/**
- * True for the remote job tools however the agent names them: plain (`remote_run`),
- * daemon-prefixed (`jagentdesk.remote_run`) or MCP-prefixed (`mcp__jagentdesk__remote_run`).
- */
+/** True for the remote job tools however the agent names them: plain (`remote_run`),
+ * daemon-prefixed (`jagentdesk.remote_run`) or MCP-prefixed (`mcp__jagentdesk__remote_run`). */
 export function isRemoteJobToolName(toolName: string): boolean {
-  const leaf = getJAgentDeskToolLeafName(toolName) ?? normalizeToolName(toolName);
-  return REMOTE_JOB_TOOL_LEAF_NAMES.has(leaf);
+  return REMOTE_JOB_TOOL_LEAF_NAMES.has(remoteJobLeafName(toolName));
+}
+
+/**
+ * `remote_run` keeps the full card with the output box; `remote_job_wait` results are terminal,
+ * so they render as a compact card with a collapsed "Show output" toggle (spec 33.9 follow-up).
+ */
+export function remoteJobCardVariant(toolName: string): "full" | "compact" {
+  return remoteJobLeafName(toolName) === "remote_job_wait" ? "compact" : "full";
+}
+
+function remoteJobLeafName(toolName: string): string {
+  return getJAgentDeskToolLeafName(toolName) ?? normalizeToolName(toolName);
 }
 
 /** The part of a `remote_run` / `remote_job_wait` result the job card needs (spec 33.7). */

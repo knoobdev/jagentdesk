@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Text, View, ScrollView as RNScrollView } from "react-native";
 import { ScrollView as GHScrollView } from "react-native-gesture-handler";
 import { StyleSheet } from "react-native-unistyles";
@@ -48,12 +48,93 @@ function remoteJobDotStyle(status: RemoteJobStatus) {
   }
 }
 
+/** Header row: status dot, target label, status text and (full card only) the stop button. */
+function RemoteJobCardHeader({
+  job,
+  active,
+  showStop,
+  statusText,
+  stopLabel,
+  stoppingLabel,
+  stopping,
+  stop,
+}: {
+  job: RemoteJob;
+  active: boolean;
+  showStop: boolean;
+  statusText: string;
+  stopLabel: string;
+  stoppingLabel: string;
+  stopping: boolean;
+  stop: () => void;
+}) {
+  return (
+    <View style={styles.headerRow}>
+      <View style={[styles.dot, remoteJobDotStyle(job.status)]} />
+      <Text style={styles.targetLabel} numberOfLines={1}>
+        {job.serverLabel}
+      </Text>
+      <Text style={styles.statusText}>{statusText}</Text>
+      <View style={styles.spacer} />
+      {active && showStop ? (
+        <Button
+          size="xs"
+          variant="outline"
+          onPress={stop}
+          disabled={stopping}
+          testID="remote-job-stop"
+        >
+          {stopping ? stoppingLabel : stopLabel}
+        </Button>
+      ) : null}
+    </View>
+  );
+}
+
+/** The dark output frame, shared by the full card and the compact card's expanded state. */
+function RemoteJobOutputBox({
+  output,
+  outputEmptyLabel,
+  attachScrollRef,
+  handleOutputScroll,
+}: {
+  output: string;
+  outputEmptyLabel: string;
+  attachScrollRef: (instance: ScrollToEndableView | null) => void;
+  handleOutputScroll: (event: OutputScrollEvent) => void;
+}) {
+  return (
+    <View style={styles.outputBox} testID="remote-job-output-box">
+      <ScrollView
+        ref={attachScrollRef}
+        style={styles.outputScroll}
+        contentContainerStyle={styles.outputContent}
+        nestedScrollEnabled
+        showsVerticalScrollIndicator
+        onScroll={handleOutputScroll}
+        scrollEventThrottle={16}
+      >
+        <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator>
+          {output.length > 0 ? (
+            <Text selectable style={styles.outputText} dataSet={CODE_SURFACE_DATASET}>
+              {output}
+            </Text>
+          ) : (
+            <Text style={styles.outputEmptyText}>{outputEmptyLabel}</Text>
+          )}
+        </ScrollView>
+      </ScrollView>
+    </View>
+  );
+}
+
 export function RemoteJobCard({
   client,
   initialJob,
   initialOutput,
   initialOutputOffset,
   initialTruncated = false,
+  variant = "full",
   testID,
 }: {
   client: DaemonClient | null;
@@ -62,9 +143,15 @@ export function RemoteJobCard({
   initialOutputOffset: number;
   /** True when the tool result already reported a dropped output head. */
   initialTruncated?: boolean;
+  /**
+   * "full" (remote_run) shows the output box outright; "compact" (remote_job_wait, a terminal
+   * result) collapses it behind a "Show output" toggle. Spec 33.9 follow-up.
+   */
+  variant?: "full" | "compact";
   testID?: string;
 }) {
   const { t } = useTranslation();
+  const compact = variant === "compact";
   const { job, output, stopping, stopError, stop } = useRemoteJobCard({
     client,
     jobId: initialJob?.id ?? "",
@@ -72,6 +159,10 @@ export function RemoteJobCard({
     initialOutput,
     initialOutputOffset,
   });
+  const [outputExpanded, setOutputExpanded] = useState(false);
+  const toggleOutput = useCallback(() => {
+    setOutputExpanded((expanded) => !expanded);
+  }, []);
 
   // Stick to the bottom (spec 33.9: the box shows the end of the output): jump to the end on
   // mount and whenever new output lands, unless the user scrolled up — their position holds
@@ -116,26 +207,23 @@ export function RemoteJobCard({
 
   return (
     <View style={styles.card} testID={testID}>
-      <View style={styles.headerRow}>
-        <View style={[styles.dot, remoteJobDotStyle(job.status)]} />
-        <Text style={styles.targetLabel} numberOfLines={1}>
-          {job.serverLabel}
-        </Text>
-        <Text style={styles.statusText}>{t(`ssh.remoteExec.job.status.${job.status}`)}</Text>
-        <View style={styles.spacer} />
-        {active ? (
-          <Button
-            size="xs"
-            variant="outline"
-            onPress={stop}
-            disabled={stopping}
-            testID="remote-job-stop"
-          >
-            {stopping ? t("ssh.remoteExec.job.stopping") : t("ssh.remoteExec.job.stop")}
-          </Button>
-        ) : null}
-      </View>
-      <Text selectable style={styles.command} dataSet={CODE_SURFACE_DATASET}>
+      <RemoteJobCardHeader
+        job={job}
+        active={active}
+        showStop={!compact}
+        statusText={t(`ssh.remoteExec.job.status.${job.status}`)}
+        stopLabel={t("ssh.remoteExec.job.stop")}
+        stoppingLabel={t("ssh.remoteExec.job.stopping")}
+        stopping={stopping}
+        stop={stop}
+      />
+      <Text
+        selectable
+        style={styles.command}
+        dataSet={CODE_SURFACE_DATASET}
+        numberOfLines={3}
+        accessibilityLabel={job.command}
+      >
         {job.command}
       </Text>
       {metaParts.length > 0 ? (
@@ -149,27 +237,24 @@ export function RemoteJobCard({
         </Text>
       ) : null}
       {stopError ? <Text style={styles.errorText}>{stopError}</Text> : null}
-      <View style={styles.outputBox}>
-        <ScrollView
-          ref={attachScrollRef}
-          style={styles.outputScroll}
-          contentContainerStyle={styles.outputContent}
-          nestedScrollEnabled
-          showsVerticalScrollIndicator
-          onScroll={handleOutputScroll}
-          scrollEventThrottle={16}
+      {compact ? (
+        <Button
+          size="xs"
+          variant="outline"
+          onPress={toggleOutput}
+          testID="remote-job-output-toggle"
         >
-          <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator>
-            {output.length > 0 ? (
-              <Text selectable style={styles.outputText} dataSet={CODE_SURFACE_DATASET}>
-                {output}
-              </Text>
-            ) : (
-              <Text style={styles.outputEmptyText}>{t("ssh.remoteExec.job.outputEmpty")}</Text>
-            )}
-          </ScrollView>
-        </ScrollView>
-      </View>
+          {outputExpanded ? t("ssh.remoteExec.job.hideOutput") : t("ssh.remoteExec.job.showOutput")}
+        </Button>
+      ) : null}
+      {!compact || outputExpanded ? (
+        <RemoteJobOutputBox
+          output={output}
+          outputEmptyLabel={t("ssh.remoteExec.job.outputEmpty")}
+          attachScrollRef={attachScrollRef}
+          handleOutputScroll={handleOutputScroll}
+        />
+      ) : null}
       {truncated ? (
         <Text style={styles.truncatedNote}>{t("ssh.remoteExec.job.outputTruncated")}</Text>
       ) : null}
@@ -220,7 +305,10 @@ const styles = StyleSheet.create((theme) => ({
     fontFamily: theme.fontFamily.mono,
     fontSize: theme.fontSize.code,
     color: theme.colors.foreground,
-    ...(isWeb ? { whiteSpace: "pre", overflowWrap: "normal" } : null),
+    // Wrap long commands inside the card; numberOfLines={3} caps the lines with an ellipsis
+    // (native) and via -webkit-line-clamp (web), and the full text stays in the
+    // accessibility label.
+    ...(isWeb ? { whiteSpace: "pre-wrap", overflowWrap: "anywhere" } : null),
   },
   metaText: {
     color: theme.colors.foregroundMuted,

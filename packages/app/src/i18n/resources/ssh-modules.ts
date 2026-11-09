@@ -284,6 +284,8 @@ export const sshModuleStrings = {
       exitCode: "Exit code {{code}}",
       stop: "Stop",
       stopping: "Stopping…",
+      showOutput: "Show output",
+      hideOutput: "Hide output",
       outputTruncated: "Showing the last {{limit}} of {{total}} bytes of output.",
       outputEmpty: "No output yet",
     },
