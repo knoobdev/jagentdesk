@@ -238,4 +238,10 @@ export const sshStyles = StyleSheet.create((theme: Theme) => ({
   savedSecretRow: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
   footerRow: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
   privateKeyInput: { minHeight: 96, fontFamily: "monospace", fontSize: theme.fontSize.xs },
+  remoteCheckList: { gap: theme.spacing[1], marginTop: theme.spacing[2] },
+  remoteCheckRow: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
+  remoteCheckLabel: { fontSize: theme.fontSize.xs, color: theme.colors.foregroundMuted },
+  remoteCheckValue: { fontSize: theme.fontSize.xs, color: theme.colors.foreground },
+  remoteCheckOk: { color: theme.colors.palette.green[500] },
+  remoteCheckFail: { color: theme.colors.palette.red[500] },
 }));

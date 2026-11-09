@@ -840,6 +840,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
               detail={data.detail}
               cwd={context.cwd}
               metadata={data.metadata}
+              client={client}
               isLastInSequence={isLastInSequence}
               onOpenFilePath={handleToolCallOpenFile}
               maxDetailHeight={maxDetailHeight}
@@ -862,7 +863,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
           />
         );
       },
-      [context.cwd, setInlineDetailsExpanded, handleToolCallOpenFile],
+      [context.cwd, client, setInlineDetailsExpanded, handleToolCallOpenFile],
     );
 
     // Read through a stable event so live group updates do not change the renderer identity on

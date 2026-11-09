@@ -22,6 +22,9 @@ import { HighlightedLines } from "./highlighted-content";
 import { DiffViewer } from "./diff-viewer";
 import { getCodeInsets } from "./code-insets";
 import { isWeb } from "@/constants/platform";
+import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
+import { readRemoteJobToolResult } from "@/remote-exec/remote-job-detection";
+import { RemoteJobCard } from "@/remote-exec/remote-job-card";
 
 const ScrollView = isWeb ? RNScrollView : GHScrollView;
 
@@ -29,6 +32,9 @@ const ScrollView = isWeb ? RNScrollView : GHScrollView;
 
 interface ToolCallDetailsContentProps {
   detail?: ToolCallDetail;
+  /** Un-normalized tool call name; drives the remote job card (spec 33.9). */
+  toolName?: string;
+  client?: DaemonClient | null;
   errorText?: string;
   maxHeight?: number;
   fillAvailableHeight?: boolean;
@@ -751,6 +757,8 @@ export function ToolCallDetailsContent({ ...props }: ToolCallDetailsContentProps
 
 function ToolCallDetailsContentInner({
   detail,
+  toolName,
+  client,
   errorText,
   maxHeight,
   fillAvailableHeight = false,
@@ -760,6 +768,24 @@ function ToolCallDetailsContentInner({
   const resolvedMaxHeight = fillAvailableHeight ? undefined : (maxHeight ?? 300);
   const ds = useDetailStyles(detail, resolvedMaxHeight, fillAvailableHeight);
   const diffLines = useDiffLines(detail);
+
+  // Remote job calls (spec 33.9) render a live card instead of the generic result sections.
+  const remoteJob = useMemo(
+    () => readRemoteJobToolResult(toolName ?? "", detail),
+    [toolName, detail],
+  );
+  if (remoteJob) {
+    return (
+      <RemoteJobCard
+        client={client ?? null}
+        initialJob={remoteJob.job}
+        initialOutput={remoteJob.output}
+        initialOutputOffset={remoteJob.outputOffset}
+        initialTruncated={remoteJob.outputTruncatedHead}
+        testID="remote-job-card"
+      />
+    );
+  }
 
   const sections: ReactNode[] = buildDetailSections(detail, diffLines, ds, t);
 
