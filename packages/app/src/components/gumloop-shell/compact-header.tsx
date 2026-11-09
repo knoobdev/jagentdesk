@@ -1,3 +1,4 @@
+import { WindowChromeSafeArea } from "@/utils/desktop-window";
 import { useCallback, useMemo } from "react";
 import { Text, View } from "react-native";
 import { usePathname } from "expo-router";
@@ -76,7 +77,7 @@ export function GumloopCompactHeader({ enabled }: { enabled: boolean }) {
   if (!enabled || !compact || !gumloop) return null;
   return (
     <View style={rootStyle} testID="gumloop-compact-header">
-      <View style={styles.row}>
+      <WindowChromeSafeArea placement="inline" horizontalPadding={6} style={styles.row}>
         <HeaderToggleButton
           onPress={toggleDrawer}
           tooltipLabel={t("shell.menu.open")}
@@ -110,7 +111,7 @@ export function GumloopCompactHeader({ enabled }: { enabled: boolean }) {
             <ThemedPlus size={22} uniProps={foreground} />
           )}
         </HeaderToggleButton>
-      </View>
+      </WindowChromeSafeArea>
     </View>
   );
 }
@@ -120,7 +121,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.border,
   },
-  row: { height: 56, paddingHorizontal: 6, flexDirection: "row", alignItems: "center", gap: 6 },
+  row: { height: 56, flexDirection: "row", alignItems: "center", gap: 6 },
   button: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   title: {
     flex: 1,
