@@ -14,7 +14,7 @@ import {
 } from "./remote-scripts.js";
 import { createSnapshot, type WorkspaceSnapshot } from "./snapshot.js";
 import { execCollect } from "./ssh-exec.js";
-import { syncWorkspace } from "./sync.js";
+import { SyncCancelled, syncWorkspace } from "./sync.js";
 import {
   REMOTE_DEFAULT_WORK_ROOT,
   REMOTE_OUTPUT_READ_MAX_BYTES,
@@ -43,6 +43,22 @@ const OUTPUT_NOTIFY_INTERVAL_MS = 1_000;
 
 interface FollowHandle {
   cancelled: boolean;
+  /** Resolves when the runner has finished reacting to this job and the record is final. */
+  settled: Promise<void>;
+  settle(): void;
+}
+
+/**
+ * Runner-owned handle: `cancelled` is the stop request (set by stopJob or service.stop()), and
+ * `settle()` fires exactly once when the runner has written the final status — stopJob awaits it so
+ * the record it returns can never be overwritten afterwards.
+ */
+function newFollowHandle(): FollowHandle {
+  let settle!: () => void;
+  const settled = new Promise<void>((resolve) => {
+    settle = resolve;
+  });
+  return { cancelled: false, settled, settle };
 }
 
 type NotifyKind = "status" | "output";
@@ -126,6 +142,17 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
     notifyJob(job, kind);
   }
 
+  /**
+   * Status writes must never overwrite a terminal record: store.upsert stores copies, so a runner's
+   * local job object goes stale the moment stopJob or another writer settles the record — a later
+   * write from the old runner would otherwise resurrect a stopped job as running (the live race).
+   */
+  async function persistIfActive(job: RemoteJob, kind: NotifyKind): Promise<void> {
+    const stored = store.get(job.id);
+    if (stored && isTerminalStatus(stored.status)) return;
+    await persistJob(job, kind);
+  }
+
   function waitForUpdate(jobId: string, timeoutMs: number): Promise<void> {
     return new Promise((resolve) => {
       let settled = false;
@@ -187,18 +214,31 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
     }
   }
 
-  function settleByExit(job: RemoteJob, exitCode: number): Promise<void> {
+  async function settleByExit(job: RemoteJob, exitCode: number): Promise<void> {
+    const stored = store.get(job.id);
+    if (stored && isTerminalStatus(stored.status)) return;
     job.exitCode = exitCode;
     job.status = exitCode === 0 ? "succeeded" : "failed";
     job.finishedAtMs = now();
     handles.delete(job.id);
-    return persistJob(job, "status");
+    await persistJob(job, "status");
   }
 
   async function followLoop(jobId: string, handle: FollowHandle): Promise<void> {
     let backoffIndex = 0;
     // oxlint-disable-next-line no-unmodified-loop-condition -- shuttingDown flips in stop()
-    while (!handle.cancelled && !shuttingDown) {
+    while (!shuttingDown) {
+      // A stop request is honoured here: the runner owns the record, so the stop procedure runs on
+      // this loop and settles the job before the loop (and the awaited runner) ends.
+      if (handle.cancelled) {
+        const cancelled = store.get(jobId);
+        if (cancelled && !isTerminalStatus(cancelled.status)) {
+          const server = await deps.getServer(cancelled.serverId);
+          const workRoot = server ? workRootOf(server) : REMOTE_DEFAULT_WORK_ROOT;
+          await stopRemoteJob(cancelled, workRoot, "stopped");
+        }
+        return;
+      }
       const job = store.get(jobId);
       if (!job || isTerminalStatus(job.status)) {
         handles.delete(jobId);
@@ -220,24 +260,20 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
         await applyPoll(job, poll);
         if (poll.exitCode !== null) {
           // Drain what the capped poll could not fit; the exit code file stays put.
-          while (
-            !handle.cancelled &&
-            // oxlint-disable-next-line no-unmodified-loop-condition -- shuttingDown flips in stop()
-            !shuttingDown &&
-            poll.bytes.length >= REMOTE_OUTPUT_READ_MAX_BYTES
-          ) {
+          // oxlint-disable-next-line no-unmodified-loop-condition -- shuttingDown flips in stop()
+          while (!shuttingDown && poll.bytes.length >= REMOTE_OUTPUT_READ_MAX_BYTES) {
             const extra = await readStep(job, workRoot);
             await applyPoll(job, extra);
             poll.bytes = extra.bytes;
           }
-          if (!handle.cancelled && !shuttingDown) await settleByExit(job, poll.exitCode);
+          if (!shuttingDown) await settleByExit(job, poll.exitCode);
           return;
         }
         if (poll.gone) {
           job.status = "lost";
           job.finishedAtMs = now();
           handles.delete(job.id);
-          await persistJob(job, "status");
+          await persistIfActive(job, "status");
           return;
         }
         if (poll.bytes.length < REMOTE_OUTPUT_READ_MAX_BYTES) {
@@ -293,32 +329,16 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
     }
     job.status = finalStatus;
     job.finishedAtMs = now();
-    await persistJob(job, "status");
+    await persistIfActive(job, "status");
     return true;
   }
 
-  async function startRemoteJob(client: Client, job: RemoteJob, workRoot: string): Promise<void> {
-    const dirExpr = jobDirExprOf(workRoot, job);
-    const written = await execCollect(client, buildWriteCommandScript(dirExpr), {
-      stdin: Buffer.from(job.command, "utf8"),
-      timeoutMs: EXEC_TIMEOUT_MS,
-    });
-    if (written.exitCode !== 0) {
-      throw new Error(`writing the job command failed on the target (exit ${written.exitCode})`);
-    }
-    const launched = await execCollect(
-      client,
-      buildLaunchJobScript({
-        srcDirExpr: remotePathExpr(workRoot, job.workspaceKey, "src"),
-        jobDirExpr: dirExpr,
-      }),
-      { timeoutMs: EXEC_TIMEOUT_MS },
-    );
-    if (launched.exitCode !== 0) {
-      throw new Error(`job launcher exited with ${launched.exitCode} on the target`);
-    }
-  }
-
+  /**
+   * Runs one job end to end and owns every status write for it: a stop request (stopJob) flips
+   * `handle.cancelled` and awaits `handle.settled`, so this function alone decides the final
+   * record. Cancellation is checked after every await; if the launch exec already ran, the stop
+   * procedure kills the launched process group before the record settles as stopped.
+   */
   async function runJob(
     job: RemoteJob,
     snapshot: WorkspaceSnapshot,
@@ -326,8 +346,13 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
   ): Promise<void> {
     const server = await deps.getServer(job.serverId);
     const workRoot = server ? workRootOf(server) : REMOTE_DEFAULT_WORK_ROOT;
+    // service.stop() (daemon shutdown) also cancels handles, but that is not a user stop: the
+    // sync/launch should finish and the record stays as-is for the next start() to resume.
+    const cancelled = (): boolean => handle.cancelled && !shuttingDown;
     let phase: "sync" | "start" = "sync";
+    let launched = false;
     try {
+      if (cancelled()) throw new SyncCancelled();
       const lease = await deps.acquireClient(job.serverId);
       let sync: RemoteSyncSummary;
       try {
@@ -336,6 +361,7 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
           snapshot,
           workRoot,
           workspacePath: snapshot.workspacePath,
+          isCancelled: cancelled,
         });
         sync = {
           snapshotId: snapshot.snapshotId,
@@ -344,26 +370,70 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
           ...result.summary,
         };
         phase = "start";
-        if (handle.cancelled || isTerminalStatus(job.status)) return;
-        await startRemoteJob(lease.client, job, workRoot);
+        const dirExpr = jobDirExprOf(workRoot, job);
+        const written = await execCollect(lease.client, buildWriteCommandScript(dirExpr), {
+          stdin: Buffer.from(job.command, "utf8"),
+          timeoutMs: EXEC_TIMEOUT_MS,
+        });
+        if (written.exitCode !== 0) {
+          throw new Error(
+            `writing the job command failed on the target (exit ${written.exitCode})`,
+          );
+        }
+        if (cancelled()) throw new SyncCancelled();
+        // If the stop lands while this exec is in flight it still completes; the post-launch
+        // check below then runs the stop procedure against the pid the launch recorded.
+        const launchedResult = await execCollect(
+          lease.client,
+          buildLaunchJobScript({
+            srcDirExpr: remotePathExpr(workRoot, job.workspaceKey, "src"),
+            jobDirExpr: dirExpr,
+          }),
+          { timeoutMs: EXEC_TIMEOUT_MS },
+        );
+        launched = true;
+        if (launchedResult.exitCode !== 0) {
+          throw new Error(`job launcher exited with ${launchedResult.exitCode} on the target`);
+        }
       } finally {
         lease.release();
       }
+      if (cancelled()) throw new SyncCancelled();
       job.sync = sync;
       job.snapshotId = snapshot.snapshotId;
       job.status = "running";
       job.startedAtMs = now();
-      await persistJob(job, "status");
-      void followLoop(job.id, handle).catch((error: unknown) => {
-        logger.error({ err: error, jobId: job.id }, "remote-exec: follow loop crashed");
-      });
+      await persistIfActive(job, "status");
+      await followLoop(job.id, handle);
     } catch (error) {
-      if (handle.cancelled || isTerminalStatus(job.status)) return;
+      if (!shuttingDown && (error instanceof SyncCancelled || handle.cancelled)) {
+        // A stop was requested: never launch, never go back to running. A launch that already ran
+        // left a live process group — the stop procedure kills it before the record settles.
+        if (launched) {
+          const stopped = await stopRemoteJob(job, workRoot, "stopped");
+          if (!stopped) {
+            logger.warn(
+              { jobId: job.id },
+              "remote-exec: stop after launch failed; the job stays active on the target",
+            );
+          }
+        } else {
+          job.status = "stopped";
+          job.finishedAtMs = now();
+          await persistIfActive(job, "status");
+        }
+        return;
+      }
+      const stored = store.get(job.id);
+      if (stored && isTerminalStatus(stored.status)) return;
       job.status = "failed";
       job.error = toErrorInfo(error, phase === "sync" ? "sync_failed" : "start_failed");
       job.finishedAtMs = now();
       handles.delete(job.id);
-      await persistJob(job, "status");
+      await persistIfActive(job, "status");
+    } finally {
+      handles.delete(job.id);
+      handle.settle();
     }
   }
 
@@ -549,7 +619,7 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
         };
         await store.upsert(job);
         notifyJob(job, "status");
-        const handle: FollowHandle = { cancelled: false };
+        const handle = newFollowHandle();
         handles.set(job.id, handle);
         void runJob(job, snapshot, handle);
         return { ...job };
@@ -591,10 +661,20 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
       const job = store.get(jobId);
       if (!job) throw new RemoteExecError("job_not_found", `Unknown job ${jobId}`);
       if (isTerminalStatus(job.status)) return { ...job };
+      const handle = handles.get(job.id);
+      if (handle) {
+        // The runner owns the record while the handle is live: request the cancellation and wait
+        // until the runner has settled the status, so the returned record is final.
+        handle.cancelled = true;
+        await handle.settled;
+        const settled = store.get(jobId);
+        if (!settled || !isTerminalStatus(settled.status)) {
+          throw new RemoteExecError("connection_failed", `Could not stop job ${jobId}`);
+        }
+        return { ...settled };
+      }
       if (job.status === "syncing") {
-        const handle = handles.get(job.id);
-        if (handle) handle.cancelled = true;
-        handles.delete(job.id);
+        // No live runner (crashed before the runner took over): settle directly.
         job.status = "stopped";
         job.finishedAtMs = now();
         await persistJob(job, "status");
@@ -638,11 +718,14 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
           job.finishedAtMs = now();
           await persistJob(job, "status");
         } else if (job.status === "running") {
-          const handle: FollowHandle = { cancelled: false };
+          const handle = newFollowHandle();
           handles.set(job.id, handle);
-          void followLoop(job.id, handle).catch((error: unknown) => {
-            logger.error({ err: error, jobId: job.id }, "remote-exec: resumed follow crashed");
-          });
+          void followLoop(job.id, handle)
+            .then(() => handle.settle())
+            .catch((error: unknown) => {
+              logger.error({ err: error, jobId: job.id }, "remote-exec: resumed follow crashed");
+              handle.settle();
+            });
         }
       }
     },

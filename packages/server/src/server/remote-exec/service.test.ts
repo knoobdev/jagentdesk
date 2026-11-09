@@ -1,9 +1,12 @@
 import { execFileSync } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import pino from "pino";
+import type { Client, ClientChannel } from "ssh2";
 import { SshConnectionError } from "../ssh/ssh-connection.js";
 import { computeWorkspaceKey } from "./ids.js";
 import { createRemoteExecService } from "./service.js";
@@ -30,6 +33,8 @@ afterEach(async () => {
 interface FakeDepsOptions {
   servers?: RemoteExecServerConfig[];
   acquireError?: Error;
+  /** Fake ssh client handed out by acquireClient; without one, acquire throws. */
+  client?: Client;
 }
 
 function makeDeps(options: FakeDepsOptions = {}): RemoteExecDeps & { acquired: string[] } {
@@ -55,13 +60,138 @@ function makeDeps(options: FakeDepsOptions = {}): RemoteExecDeps & { acquired: s
     async acquireClient(serverId: string) {
       acquired.push(serverId);
       if (options.acquireError) throw options.acquireError;
-      throw new Error("acquire not expected in this test");
+      if (!options.client) throw new Error("acquire not expected in this test");
+      return { client: options.client, release: () => undefined };
     },
     connectionState: () => "connected",
     environment: () => null,
     logger: pino({ level: "silent" }),
     acquired,
   };
+}
+
+interface FakeExec {
+  command: string;
+  completed: boolean;
+  start(): void;
+  complete(result?: { exitCode?: number; stdout?: string; stderr?: string }): void;
+}
+
+/**
+ * Exec channels stay parked until started and completed by the test, so a stop can be requested
+ * at any phase of the pipeline (sync steps, write-command, launch, follow poll).
+ */
+function makeFakeClient(): { client: Client; execs: FakeExec[] } {
+  const execs: FakeExec[] = [];
+  const client = {
+    exec(command: string, callback: (error: Error | null, stream: ClientChannel) => void) {
+      let stream: ClientChannel | null = null;
+      const entry: FakeExec = {
+        command,
+        completed: false,
+        start() {
+          stream = new EventEmitter() as ClientChannel;
+          Object.assign(stream, {
+            stderr: new EventEmitter(),
+            // A real Writable: the extract channel's stdin is piped into and must emit 'finish'.
+            stdin: new Writable({ write: (_chunk, _enc, cb) => cb() }),
+            write: () => true,
+            end: () => undefined,
+            close: () => undefined,
+          });
+          callback(null, stream);
+        },
+        complete(result = {}) {
+          if (!stream) throw new Error(`exec not started: ${command}`);
+          entry.completed = true;
+          // Defer the emissions: a same-tick listener attach (openExecChannel resolves, then
+          // uploadEntries attaches 'close' in its continuation) must win over the completion,
+          // exactly like the real channel where events arrive after the callback returns.
+          queueMicrotask(() => {
+            if (!stream) return;
+            if (result.stdout !== undefined) stream.emit("data", Buffer.from(result.stdout));
+            if (result.stderr !== undefined) stream.stderr.emit("data", Buffer.from(result.stderr));
+            stream.emit("exit", result.exitCode ?? 0);
+            stream.emit("close");
+          });
+        },
+      };
+      execs.push(entry);
+    },
+  } as unknown as Client;
+  return { client, execs };
+}
+
+function nextExec(execs: FakeExec[], fragment: string): FakeExec {
+  const entry = execs.find(
+    (candidate) => !candidate.completed && candidate.command.includes(fragment),
+  );
+  if (!entry) {
+    throw new Error(
+      `no pending exec matching ${fragment}; have: ${execs.map((e) => e.command).join(" | ")}`,
+    );
+  }
+  return entry;
+}
+
+function completeExec(
+  execs: FakeExec[],
+  fragment: string,
+  result?: { exitCode?: number; stdout?: string; stderr?: string },
+): void {
+  const entry = nextExec(execs, fragment);
+  entry.start();
+  entry.complete(result);
+}
+
+async function waitUntil(condition: () => boolean, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error("condition not met before the timeout");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+function execed(execs: FakeExec[], fragment: string): boolean {
+  return execs.some((entry) => entry.command.includes(fragment));
+}
+
+function execCount(execs: FakeExec[], fragment: string): number {
+  return execs.filter((entry) => entry.command.includes(fragment)).length;
+}
+
+async function initGitWorkspace(): Promise<void> {
+  execFileSync("git", ["init", "-q"], { cwd: workspace, stdio: "ignore" });
+  await fs.writeFile(path.join(workspace, "tracked.txt"), "hello\n");
+  execFileSync("git", ["add", "."], { cwd: workspace, stdio: "ignore" });
+  execFileSync(
+    "git",
+    ["-c", "user.email=t@example.com", "-c", "user.name=T", "commit", "-qm", "init"],
+    { cwd: workspace, stdio: "ignore" },
+  );
+}
+
+function startInput() {
+  return {
+    serverId: "srv1",
+    workspacePath: workspace,
+    command: "echo hi",
+    timeoutMs: 60_000,
+    agentId: null,
+  } as const;
+}
+
+/** Drives the sync steps until an exec matching `untilFragment` exists (usually still parked). */
+async function syncThrough(execs: FakeExec[], untilFragment: string): Promise<void> {
+  await waitUntil(() => execs.length >= 1); // the runner is parked on the first sync step
+  completeExec(execs, "mkdir -p", { exitCode: 0 });
+  await waitUntil(() => execs.length >= 2);
+  completeExec(execs, "2>/dev/null", { exitCode: 1 }); // no manifest on the target yet
+  await waitUntil(() => execed(execs, "tar -xzf"));
+  completeExec(execs, "tar -xzf", { exitCode: 0 });
+  await waitUntil(() => execed(execs, ".tmp && mv"));
+  completeExec(execs, ".tmp && mv", { exitCode: 0 });
+  await waitUntil(() => execed(execs, untilFragment));
 }
 
 async function seedStore(home: string, jobs: RemoteJob[]): Promise<void> {
@@ -274,6 +404,100 @@ describe("createRemoteExecService", () => {
       code: "job_not_found",
     });
     await expect(service.stopJob("rjb_x")).rejects.toMatchObject({ code: "job_not_found" });
+  });
+
+  it("stop while parked on the first sync step settles stopped without further remote steps", async () => {
+    await initGitWorkspace();
+    const { client, execs } = makeFakeClient();
+    const service = createRemoteExecService(makeDeps({ client }));
+    const job = await service.startJob(startInput());
+    await waitUntil(() => execs.length === 1);
+    const stopping = service.stopJob(job.id);
+    completeExec(execs, "mkdir -p", { exitCode: 0 });
+    const stopped = await stopping;
+    expect(stopped.status).toBe("stopped");
+    expect(stopped.startedAtMs).toBeNull();
+    expect(execs).toHaveLength(1);
+    await service.stop();
+  });
+
+  it("stop during the upload aborts the sync before any later step", async () => {
+    await initGitWorkspace();
+    const { client, execs } = makeFakeClient();
+    const service = createRemoteExecService(makeDeps({ client }));
+    const job = await service.startJob(startInput());
+    await waitUntil(() => execs.length >= 1);
+    completeExec(execs, "mkdir -p", { exitCode: 0 });
+    await waitUntil(() => execs.length >= 2);
+    completeExec(execs, "2>/dev/null", { exitCode: 1 }); // no manifest on the target yet
+    await waitUntil(() => execed(execs, "tar -xzf"));
+    const stopping = service.stopJob(job.id);
+    completeExec(execs, "tar -xzf", { exitCode: 0 }); // the extract channel finishes
+    const stopped = await stopping;
+    expect(stopped.status).toBe("stopped");
+    expect(stopped.startedAtMs).toBeNull();
+    expect(execed(execs, ".tmp && mv")).toBe(false);
+    expect(execed(execs, "setsid")).toBe(false);
+    await service.stop();
+  });
+
+  it("stop between write-command and launch never launches the job", async () => {
+    await initGitWorkspace();
+    const { client, execs } = makeFakeClient();
+    const service = createRemoteExecService(makeDeps({ client }));
+    const job = await service.startJob(startInput());
+    await syncThrough(execs, "&& cat >");
+    const stopping = service.stopJob(job.id);
+    completeExec(execs, "&& cat >", { exitCode: 0 });
+    const stopped = await stopping;
+    expect(stopped.status).toBe("stopped");
+    expect(stopped.startedAtMs).toBeNull();
+    expect(execed(execs, "setsid")).toBe(false);
+    await service.stop();
+  });
+
+  it("stop during the launch runs the stop procedure on the pid the launch recorded", async () => {
+    await initGitWorkspace();
+    const { client, execs } = makeFakeClient();
+    const service = createRemoteExecService(makeDeps({ client }));
+    const job = await service.startJob(startInput());
+    await syncThrough(execs, "&& cat >");
+    completeExec(execs, "&& cat >", { exitCode: 0 });
+    await waitUntil(() => execed(execs, "setsid"));
+    const stopping = service.stopJob(job.id);
+    completeExec(execs, "setsid", { exitCode: 0 }); // the launch completes and records a pid
+    await waitUntil(() => execed(execs, "kill -TERM"));
+    completeExec(execs, "kill -TERM", { exitCode: 0 });
+    await waitUntil(() => execed(execs, "tail -c"));
+    completeExec(execs, "tail -c", { exitCode: 0 }); // the stop procedure's final read
+    const stopped = await stopping;
+    expect(stopped.status).toBe("stopped");
+    expect(stopped.startedAtMs).toBeNull();
+    await service.stop();
+  });
+
+  it("stop while following settles stopped through the follow loop", async () => {
+    await initGitWorkspace();
+    const { client, execs } = makeFakeClient();
+    const service = createRemoteExecService(makeDeps({ client }));
+    const job = await service.startJob(startInput());
+    await syncThrough(execs, "&& cat >");
+    completeExec(execs, "&& cat >", { exitCode: 0 });
+    await waitUntil(() => execed(execs, "setsid"));
+    completeExec(execs, "setsid", { exitCode: 0 });
+    // The runner marks the job running and the follow loop starts polling.
+    await waitUntil(() => execed(execs, "tail -c"));
+    expect(service.getJob(job.id)?.status).toBe("running");
+    const stopping = service.stopJob(job.id);
+    completeExec(execs, "tail -c", { exitCode: 0 }); // finish the in-flight poll
+    await waitUntil(() => execed(execs, "kill -TERM"));
+    completeExec(execs, "kill -TERM", { exitCode: 0 });
+    await waitUntil(() => execCount(execs, "tail -c") >= 2);
+    completeExec(execs, "tail -c", { exitCode: 0 }); // the stop procedure's final read
+    const stopped = await stopping;
+    expect(stopped.status).toBe("stopped");
+    expect(stopped.startedAtMs).not.toBeNull();
+    await service.stop();
   });
 
   it("lists jobs filtered by workspace path with a limit, newest first", async () => {

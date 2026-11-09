@@ -124,17 +124,31 @@ export interface SyncOutput {
   summary: Omit<RemoteSyncSummary, "snapshotId" | "excludedSecrets" | "skipped">;
 }
 
+/** Thrown by syncWorkspace between remote steps when the caller's isCancelled callback fires. */
+export class SyncCancelled extends Error {
+  constructor() {
+    super("workspace sync cancelled");
+    this.name = "SyncCancelled";
+  }
+}
+
 export async function syncWorkspace(input: {
   client: Client;
   snapshot: WorkspaceSnapshot;
   workRoot: string;
   workspacePath: string;
+  /** Checked between remote steps; a true return aborts the sync with SyncCancelled. */
+  isCancelled?: () => boolean;
 }): Promise<SyncOutput> {
   const { client, snapshot, workRoot, workspacePath } = input;
+  const cancelled = (): boolean => input.isCancelled?.() === true;
   const dirs = remoteDirs(workRoot, snapshot.workspaceKey);
 
+  if (cancelled()) throw new SyncCancelled();
   await execCollect(client, `mkdir -p ${dirs.base}`);
+  if (cancelled()) throw new SyncCancelled();
   const manifestResult = await execCollect(client, `cat ${dirs.manifest} 2>/dev/null`);
+  if (cancelled()) throw new SyncCancelled();
   const oldManifest =
     manifestResult.exitCode === 0
       ? parseRemoteManifest(manifestResult.stdout.toString("utf8"))
@@ -153,6 +167,7 @@ export async function syncWorkspace(input: {
     filesUploaded = diff.upload.length;
     bytesUploaded = diff.upload.reduce((sum, file) => sum + file.size, 0);
   }
+  if (cancelled()) throw new SyncCancelled();
 
   let filesDeleted = 0;
   const deletions = diff.deletePaths.filter(isSafeRelativeDeletePath);
@@ -167,6 +182,7 @@ export async function syncWorkspace(input: {
     }
     filesDeleted = deletions.length;
   }
+  if (cancelled()) throw new SyncCancelled();
 
   const manifest = {
     snapshotId: snapshot.snapshotId,
