@@ -367,6 +367,35 @@ describe.runIf(E2E_ENABLED)("remote-exec service against a real sshd", () => {
     expect(result.job.status).toBe("succeeded");
   }, 180_000);
 
+  it("stopping during sync, launch and follow never leaves the job running", async () => {
+    // Stop at different pipeline phases: still syncing, mid-launch, just launched, following.
+    for (const delayMs of [0, 200, 700, 1200, 2500]) {
+      const job = await service.startJob({
+        serverId: "srv1",
+        workspacePath: workspace,
+        command: "echo started-marker; sleep 25",
+        timeoutMs: 600_000,
+        agentId: null,
+      });
+      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+      const stopped = await service.stopJob(job.id);
+      expect(stopped.status).toBe("stopped");
+      // Whatever phase the stop landed in, nothing from the job may still be alive: its pid file
+      // either does not exist (never launched) or names a dead process group.
+      const verify = await service.startJob({
+        serverId: "srv1",
+        workspacePath: workspace,
+        command:
+          `p=$(cat "$HOME/jad-remote-exec-e2e/${job.workspaceKey}/jobs/${job.id}/pid" 2>/dev/null); ` +
+          `if [ -n "$p" ] && { kill -0 -"$p" 2>/dev/null || kill -0 "$p" 2>/dev/null; }; then exit 1; fi`,
+        timeoutMs: 120_000,
+        agentId: null,
+      });
+      const result = await service.waitForJob(verify.id, 120_000);
+      expect(result.job.status).toBe("succeeded");
+    }
+  }, 300_000);
+
   it("runs the whole pipeline when the target user's login shell is not sh-compatible", async () => {
     // Install zsh and make it the target user's login shell; sshd then runs every exec command
     // through zsh, so only the /bin/sh wrapper keeps the engine's snippets parseable.
