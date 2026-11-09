@@ -46,7 +46,13 @@ const markAsReadLeadingIcon = (
 const archiveLeadingIcon = <ThemedArchive size={14} uniProps={foregroundMutedColorMapping} />;
 const pinLeadingIcon = <ThemedPin size={14} uniProps={foregroundMutedColorMapping} />;
 const unpinLeadingIcon = <ThemedPinOff size={14} uniProps={foregroundMutedColorMapping} />;
-export const ARCHIVE_BUTTON_SIZE = 18;
+
+/** Pointer-only, so it is always the kebab's pointer size. */
+const ARCHIVE_BUTTON_SIZE = 18;
+/** Keeps a press aimed at the kebab from landing on the one-click archive. */
+const ARCHIVE_BUTTON_KEBAB_GAP = 8;
+/** The width the archive button and its gap take up left of the kebab. */
+export const ARCHIVE_BUTTON_FOOTPRINT = ARCHIVE_BUTTON_SIZE + ARCHIVE_BUTTON_KEBAB_GAP;
 
 function renderTriggerIcon({ hovered }: { hovered?: boolean }) {
   return (
@@ -394,10 +400,11 @@ const styles = StyleSheet.create((theme) => ({
     backgroundColor: theme.colors.surface2,
   },
   // The kebab's box without its offsets: the archive glyph fills its view box, so it needs
-  // none of the nudging the three dots do. The kebab's marginLeft is the gap between them.
+  // none of the nudging the three dots do.
   archiveButton: {
     width: ARCHIVE_BUTTON_SIZE,
     height: ARCHIVE_BUTTON_SIZE,
+    marginRight: ARCHIVE_BUTTON_KEBAB_GAP,
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 4,

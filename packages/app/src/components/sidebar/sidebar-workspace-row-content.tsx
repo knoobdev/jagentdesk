@@ -233,7 +233,11 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
                   showLabel={hostBadge.showLabel}
                 />
               ) : null}
-              <Text style={workspaceBranchTextStyle} numberOfLines={1}>
+              <Text
+                style={workspaceBranchTextStyle}
+                numberOfLines={1}
+                testID={`sidebar-workspace-title-${workspace.workspaceKey}`}
+              >
                 {workspaceLabel}
               </Text>
               {scriptIconKind ? <WorkspaceScriptIcon kind={scriptIconKind} /> : null}
@@ -600,7 +604,11 @@ function TrailingActionScrim() {
   // Keep the per-instance uniqueness, drop everything a fragment reference can't carry.
   const gradientId = `sidebar-scrim-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   return (
-    <View style={sidebarWorkspaceRowStyles.trailingActionScrim} pointerEvents="none">
+    <View
+      testID="sidebar-workspace-trailing-scrim"
+      style={sidebarWorkspaceRowStyles.trailingActionScrim}
+      pointerEvents="none"
+    >
       <ThemedTrailingActionScrimSvg gradientId={gradientId} uniProps={scrimColorMapping} />
     </View>
   );

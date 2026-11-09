@@ -55,6 +55,7 @@ import { ClickUpSidebarHeader } from "@/components/clickup-shell/clickup-sidebar
 import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 import { PluginSidebarItems } from "@/plugins";
 import { SidebarDisplayPreferencesMenu } from "@/components/sidebar/sidebar-display-preferences-menu";
+import { SidebarToastRegion } from "@/components/sidebar/sidebar-toast-region";
 import { SidebarHelpMenu } from "@/components/sidebar/sidebar-help-menu";
 import { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
 import { Shortcut } from "@/components/ui/shortcut";
@@ -858,7 +859,7 @@ function SidebarFooter({
   }, [localServerId, openPairDeviceModal]);
 
   return (
-    <View style={styles.sidebarFooter}>
+    <View style={styles.sidebarFooter} testID="sidebar-footer">
       {showAddProject ? (
         <FooterAddProjectButton
           onPress={handleOpenProject}
@@ -1032,7 +1033,13 @@ function MobileSidebar({
           </Pressable>
         </WindowChromeSafeArea>
 
-        {resolveSidebarNavBody(clusterRoute, databaseRoute, mobileWorkspaceBody)}
+        {resolveSidebarNavBody(
+          clusterRoute,
+          databaseRoute,
+          <SidebarToastRegion active={dragGestureHostPresented}>
+            {mobileWorkspaceBody}
+          </SidebarToastRegion>,
+        )}
 
         <SidebarFooter
           theme={theme}
@@ -1361,7 +1368,12 @@ function DesktopSidebar({
           )}
         </View>
 
-        {resolveSidebarNavBody(clusterRoute, databaseRoute, workspaceListElement, sectionRoute)}
+        {resolveSidebarNavBody(
+          clusterRoute,
+          databaseRoute,
+          <SidebarToastRegion active={active}>{workspaceListElement}</SidebarToastRegion>,
+          sectionRoute,
+        )}
 
         <SidebarCalloutSlot />
 

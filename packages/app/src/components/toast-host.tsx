@@ -46,7 +46,7 @@ export interface ToastApi {
   error: (message: string) => void;
 }
 
-type ToastViewportPlacement = "app-shell" | "panel";
+type ToastViewportPlacement = "app-shell" | "panel" | "sidebar";
 
 const DEFAULT_DURATION_MS = 2200;
 
@@ -243,12 +243,13 @@ export function ToastViewport({
     };
   }, [clearTimer, opacity, scheduleDismiss, toast, translateY]);
 
-  const headerHeight = isMobile ? HEADER_INNER_HEIGHT_MOBILE : HEADER_INNER_HEIGHT;
-  const headerTopPadding = isMobile ? HEADER_TOP_PADDING_MOBILE : 0;
-  const topOffset =
-    placement === "app-shell"
-      ? insets.top + headerTopPadding + headerHeight + theme.spacing[2]
-      : theme.spacing[3];
+  const topOffset = resolveToastTopOffset(
+    placement,
+    isMobile,
+    insets.top,
+    theme.spacing[2],
+    theme.spacing[3],
+  );
 
   const toastVariant = toast?.variant;
   const toastAnimatedStyle = useMemo(
@@ -259,12 +260,12 @@ export function ToastViewport({
       toastVariant === "warning" ? styles.toastWarning : null,
       toastVariant === "error" ? styles.toastError : null,
       {
-        marginTop: topOffset,
+        marginTop: placement === "sidebar" ? 0 : topOffset,
         opacity,
         transform: [{ translateY }],
       },
     ],
-    [toastVariant, topOffset, opacity, translateY],
+    [toastVariant, topOffset, opacity, translateY, placement],
   );
   const toastMessageStyle = useMemo(
     () => [styles.message, toastVariant === "error" ? styles.messageError : null],
@@ -288,7 +289,10 @@ export function ToastViewport({
   const icon = toast.icon ?? defaultIcon;
 
   const content = (
-    <View style={styles.container} pointerEvents="box-none">
+    <View
+      style={placement === "sidebar" ? styles.sidebarContainer : styles.container}
+      pointerEvents="box-none"
+    >
       <Animated.View
         testID={toast.testID ?? "app-toast"}
         onPointerEnter={isWeb ? pauseDismiss : undefined}
@@ -323,6 +327,14 @@ const styles = StyleSheet.create((theme) => ({
     left: theme.spacing[4],
     right: theme.spacing[4],
     top: 0,
+    zIndex: OVERLAY_Z.toast,
+    alignItems: "center",
+  },
+  sidebarContainer: {
+    position: "absolute",
+    left: theme.spacing[2],
+    right: theme.spacing[2],
+    bottom: theme.spacing[2],
     zIndex: OVERLAY_Z.toast,
     alignItems: "center",
   },
@@ -370,3 +382,15 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foreground,
   },
 }));
+
+function resolveToastTopOffset(
+  placement: ToastViewportPlacement,
+  isMobile: boolean,
+  insetTop: number,
+  gap: number,
+  panelOffset: number,
+): number {
+  const headerHeight = isMobile ? HEADER_INNER_HEIGHT_MOBILE : HEADER_INNER_HEIGHT;
+  const headerTopPadding = isMobile ? HEADER_TOP_PADDING_MOBILE : 0;
+  return placement === "app-shell" ? insetTop + headerTopPadding + headerHeight + gap : panelOffset;
+}
