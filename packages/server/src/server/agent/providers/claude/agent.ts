@@ -411,6 +411,8 @@ interface ClaudeAgentClientOptions {
   resolveBinary?: () => Promise<string>;
   resolveVersion?: (signal?: AbortSignal) => Promise<string>;
   rewindSdk?: ClaudeRewindSdk;
+  /** Extra env resolved once at session build (spec 34.3: ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN). */
+  spawnEnvOverlay?: () => Promise<Record<string, string> | null>;
 }
 
 interface ClaudeAgentSessionOptions {
@@ -424,6 +426,7 @@ interface ClaudeAgentSessionOptions {
   queryFactory?: ClaudeQueryFactory;
   resolveBinary: () => Promise<string>;
   rewindSdk?: ClaudeRewindSdk;
+  spawnEnvOverlay?: () => Promise<Record<string, string> | null>;
 }
 
 type ClaudeThinkingEffort = "low" | "medium" | "high" | "xhigh" | "max";
@@ -1507,6 +1510,7 @@ export class ClaudeAgentClient implements AgentClient {
   private readonly resolveBinary: () => Promise<string>;
   private readonly resolveVersion: (signal?: AbortSignal) => Promise<string>;
   private readonly rewindSdk: ClaudeRewindSdk;
+  private readonly spawnEnvOverlay?: () => Promise<Record<string, string> | null>;
 
   constructor(options: ClaudeAgentClientOptions) {
     this.defaults = options.defaults;
@@ -1518,6 +1522,7 @@ export class ClaudeAgentClient implements AgentClient {
       options.resolveVersion ??
       ((signal) => resolveClaudeCodeVersion(this.runtimeSettings, signal));
     this.rewindSdk = options.rewindSdk ?? realClaudeRewindSdk;
+    this.spawnEnvOverlay = options.spawnEnvOverlay;
   }
 
   resolveConfiguredModel(model: AgentModelDefinition): AgentModelDefinition {
@@ -1540,6 +1545,7 @@ export class ClaudeAgentClient implements AgentClient {
       queryFactory: this.queryFactory,
       resolveBinary: this.resolveBinary,
       rewindSdk: this.rewindSdk,
+      spawnEnvOverlay: this.spawnEnvOverlay,
     });
   }
 
@@ -2110,6 +2116,9 @@ class ClaudeAgentSession implements AgentSession {
   private readonly emittedUserMessageIds = new Set<string>();
   private readonly rewindTurnAnchors: ClaudeRewindTurnAnchor[] = [];
   private readonly rewindSdk: ClaudeRewindSdk;
+  private readonly spawnEnvOverlay?: () => Promise<Record<string, string> | null>;
+  private spawnEnvOverlayCache: Record<string, string> | null = null;
+  private spawnEnvOverlayLoaded = false;
   private pendingFreshSessionId: string | null = null;
   private recentStderr = "";
   private closed = false;
@@ -2126,6 +2135,7 @@ class ClaudeAgentSession implements AgentSession {
     this.queryFactory = options.queryFactory;
     this.resolveBinary = options.resolveBinary;
     this.rewindSdk = options.rewindSdk ?? realClaudeRewindSdk;
+    this.spawnEnvOverlay = options.spawnEnvOverlay;
     this.contextUsage = new ClaudeContextUsageState(
       findClaudeModel(this.config.model)?.contextWindowMaxTokens,
     );
@@ -3260,6 +3270,15 @@ class ClaudeAgentSession implements AgentSession {
     });
   }
 
+  /** Spec 34.3: the api provider's ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN, resolved once per session. */
+  private async resolveSpawnEnvOverlay(): Promise<Record<string, string>> {
+    if (this.spawnEnvOverlayLoaded) return this.spawnEnvOverlayCache ?? {};
+    this.spawnEnvOverlayLoaded = true;
+    // A failure (e.g. tailnet_unavailable) must fail the spawn, not silently fall back.
+    this.spawnEnvOverlayCache = (await this.spawnEnvOverlay?.()) ?? {};
+    return this.spawnEnvOverlayCache;
+  }
+
   private async buildOptions(): Promise<ClaudeOptions> {
     const { thinking, effort, ultracode } = this.resolveThinkingConfig();
     const appendedSystemPrompt = this.buildAppendedSystemPrompt();
@@ -3268,7 +3287,7 @@ class ClaudeAgentSession implements AgentSession {
       this.config.toolPolicy,
     );
     const settingsOptions = this.buildSettingsOptions(providerOptions, { ultracode });
-    const sdkEnv = this.buildSdkEnv();
+    const sdkEnv = { ...this.buildSdkEnv(), ...(await this.resolveSpawnEnvOverlay()) };
     assertClaudeModeCanRun(this.currentMode, sdkEnv);
 
     const claudeBinary = await this.resolveBinary();

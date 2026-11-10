@@ -176,6 +176,8 @@ import { WorkspaceGitServiceImpl } from "./workspace-git-service.js";
 import { resolveWorkspaceIdForPath } from "./resolve-workspace-id-for-path.js";
 import { ForgeHubService } from "./session/forge/forge-hub-session.js";
 import { FileSecretStore } from "./database/secret-store.js";
+import { extractProviderOverrides } from "./config.js";
+import { createCustomProviderService } from "./custom-providers/service.js";
 import { ArgoCdService } from "./argocd/service.js";
 import { createArgoCdClusterAccess } from "./argocd/cluster-access.js";
 import { createArgoCdAgentTools } from "./argocd/agent-tools.js";
@@ -204,7 +206,6 @@ import { createRemoteExecAgentTools } from "./remote-exec/agent-tools.js";
 import { createRemoteExecService } from "./remote-exec/service.js";
 import { createRemoteExecDeps } from "./remote-exec/wiring.js";
 import type { RemoteExecService } from "./remote-exec/types.js";
-import { createCustomProviderService } from "./custom-providers/service.js";
 import { createCustomProviderAgentTools } from "./custom-providers/agent-tools.js";
 import { SshModules } from "./ssh/ssh-modules.js";
 import { SshModules as SshServerModules } from "./ssh/modules.js";
@@ -967,6 +968,25 @@ export async function createJAgentDeskDaemon(
     workspaceGitService,
     logger,
   });
+  // Custom API providers (spec 34 / ADR-0047): config.json entries with an `api`
+  // block, keys in the encrypted secret store, loopback forwards for tailnet/ssh
+  // routes. reloadRegistry is late-bound to the snapshot manager + agent manager
+  // consts below; it only fires after boot (save/delete from RPCs).
+  const customProviderSecretStore = new FileSecretStore(
+    path.join(config.jagentdeskHome, "custom-providers"),
+  );
+  let reloadProviderRegistry: (
+    removeProviders: readonly string[],
+  ) => Promise<void> = async () => {};
+  const customProviderService = createCustomProviderService({
+    jagentdeskHome: config.jagentdeskHome,
+    logger,
+    secretStore: customProviderSecretStore,
+    getTailnetSocks: () => tsnetListener?.getTailnetSocks() ?? null,
+    acquireSshClient: (acquireServerId) => sshService.acquireClient(acquireServerId),
+    sshServerExists: (existsServerId) => sshService.storage.getServer(existsServerId) !== undefined,
+    reloadRegistry: (removeProviders) => reloadProviderRegistry(removeProviders),
+  });
   const providerSnapshotLogger = logger.child({ module: "provider-snapshot-manager" });
   const providerSnapshotManager = new ProviderSnapshotManager({
     logger: providerSnapshotLogger,
@@ -976,6 +996,9 @@ export async function createJAgentDeskDaemon(
     managedProcesses,
     isDev: config.isDev === true,
     extraClients: config.agentClients,
+    openCodeProviderInjection: (providerId) =>
+      customProviderService.materializeOpenCodeProvider(providerId),
+    claudeSpawnEnv: (providerId) => customProviderService.materializeClaudeEnv(providerId),
   });
   const usageHistory = new UsageHistoryStorage(config.jagentdeskHome, logger);
   await usageHistory.initialize();
@@ -1000,6 +1023,22 @@ export async function createJAgentDeskDaemon(
     agentStorage,
   );
   await agentStorage.initialize();
+
+  // Spec 34.6 hot reload: after a custom provider save/delete, re-read the
+  // persisted config, rebuild the provider registry (base overrides replaced,
+  // removed providers dropped) and swap it into the live agent manager. The
+  // providers_snapshot_update broadcast happens via the snapshot "change" event.
+  reloadProviderRegistry = async (removeProviders) => {
+    const persisted = loadPersistedConfig(config.jagentdeskHome, logger);
+    const baseOverrides = extractProviderOverrides(
+      persisted.agents?.providers as Record<string, unknown> | undefined,
+    );
+    const nextAgentManagerState = providerSnapshotManager.applyMutableProviderConfig(undefined, {
+      baseOverrides: baseOverrides ?? {},
+      removeProviders,
+    });
+    agentManager.updateProviderRegistry(nextAgentManagerState);
+  };
   logger.info({ elapsed: elapsed() }, "Agent storage initialized");
   // Seed the lifetime usage baseline once from existing agents so headline Usage
   // & Cost figures include usage that predates the time-series and never drop
@@ -1417,11 +1456,6 @@ export async function createJAgentDeskDaemon(
     logger.warn({ err: error }, "Remote-exec service unavailable");
     remoteExecService = null;
   }
-  // Custom API providers (spec 34 / ADR-0047): one daemon-wide service over config.json
-  // `agents.providers` + the secret store. TEMPORARY (C10): createCustomProviderService is a
-  // stub until C9's service lands — every operation fails with an "internal" error, and the
-  // providers.custom.* requests still get a response.
-  const customProvidersService = createCustomProviderService();
   // Sideload (spec 26 / ADR-0032): accounts, signing, installs and the hourly refresh job.
   // Secrets stay in <home>/sideload's own secret store; prompts, progress and notices fan out
   // to every client (wsServer is late-bound). The two env knobs shorten the refresh cycle for
@@ -1690,7 +1724,7 @@ export async function createJAgentDeskDaemon(
         : [],
     customProviderAgentTools: (callerAgentId) =>
       createCustomProviderAgentTools({
-        service: customProvidersService,
+        service: customProviderService,
         callerAgentId,
         requestPermission: (agentId, request) =>
           agentManager.requestHostToolPermission(agentId, request),
@@ -1957,7 +1991,7 @@ export async function createJAgentDeskDaemon(
             server.setJiraService(jiraService);
             server.setFigmaService(figmaService);
             server.setRemoteExecService(remoteExecService);
-            server.setCustomProvidersService(customProvidersService);
+            server.setCustomProvidersService(customProviderService);
             server.setAgentForum(
               agentForumService,
               createForumBootstrap({ agentManager, agentStorage, logger }),
@@ -2156,6 +2190,8 @@ export async function createJAgentDeskDaemon(
     await agentManager.flushForShutdown().catch(() => undefined);
     detachAgentStoragePersistence();
     await agentStorage.flush().catch(() => undefined);
+    // Spec 34: loopback forwards of api providers die with the daemon.
+    customProviderService.closeAll();
     await providerSnapshotManager.shutdown();
     terminalManager.killAll();
     stopDeviceGrantWatch();
