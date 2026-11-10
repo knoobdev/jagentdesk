@@ -124,9 +124,10 @@ export function buildExtractScript(srcDirExpr: string): string {
   return `mkdir -p ${srcDirExpr} && tar -xzf - -C ${srcDirExpr}`;
 }
 
-/** noCode runs (spec 33.5): only ensure the empty src/ exists — nothing is sent or deleted. */
-export function buildEnsureSrcScript(srcDirExpr: string): string {
-  return `mkdir -p ${srcDirExpr}`;
+/** noCode runs (spec 33.5): only ensure the nocode/ run directory exists — nothing is sent or
+ * deleted, and the directory is never synced, so it stays separate from src/ and sources/. */
+export function buildEnsureNocodeDirScript(dirExpr: string): string {
+  return `mkdir -p ${dirExpr}`;
 }
 
 /** Deletes NUL-separated paths from src/ (stdin); never recurses into directories. */

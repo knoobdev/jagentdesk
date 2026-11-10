@@ -497,7 +497,7 @@ describe("createRemoteExecService", () => {
     await service.stop();
   });
 
-  it("runs noCode in an empty src/ without sending or deleting anything", async () => {
+  it("runs noCode in its own empty nocode/ directory without sending or deleting anything", async () => {
     await initMultiWorkspace();
     const { client, execs } = makeFakeClient();
     const service = createRemoteExecService(makeDeps({ client }));
@@ -508,13 +508,15 @@ describe("createRemoteExecService", () => {
     await waitUntil(() => execed(execs, "mkdir -p"));
     completeExec(execs, "mkdir -p", { exitCode: 0 });
     await waitUntil(() => execed(execs, "/command"));
-    // No tar, no manifest write: only the empty src/ was ensured.
+    // No tar, no manifest write: only the nocode/ run directory was ensured.
     expect(execed(execs, "tar -xzf")).toBe(false);
     expect(execed(execs, ".tmp && mv")).toBe(false);
     completeExec(execs, "/command", { exitCode: 0 });
     await waitUntil(() => execed(execs, "setsid"));
     const launch = execs.find((candidate) => candidate.command.includes("setsid"));
-    expect(launch?.command).toContain('src" || exit 3');
+    // The run directory is nocode/, not src/ — the default copy must stay untouched (33.10#14).
+    expect(launch?.command).toContain('nocode" || exit 3');
+    expect(launch?.command).not.toContain('src" || exit 3');
     completeExec(execs, "setsid", { exitCode: 0 });
     await waitUntil(() => execed(execs, "tail -c"));
     completeExec(execs, "tail -c", { exitCode: 0, stderr: "EXIT 0\n" });

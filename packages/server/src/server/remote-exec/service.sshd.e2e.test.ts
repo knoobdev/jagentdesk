@@ -421,27 +421,6 @@ describe.runIf(E2E_ENABLED)("remote-exec service against a real sshd", () => {
     }
   }, 300_000);
 
-  it("runs sendCode:false without sending any code", async () => {
-    // First run against sourcesWorkspace: only an empty src/ is ensured; no manifest may exist
-    // afterwards (one would force the next default run to re-upload everything, spec 33.5).
-    const job = await service.startJob({
-      serverId: "srv1",
-      workspacePath: sourcesWorkspace,
-      command: `test ! -e ../manifest.json && [ -z "$(ls -A .)" ] && pwd`,
-      timeoutMs: 120_000,
-      agentId: null,
-      noCode: true,
-    });
-    const result = await service.waitForJob(job.id, 180_000);
-    expect(result.job.status).toBe("succeeded");
-    expect(result.job.exitCode).toBe(0);
-    expect(result.job.noCode).toBe(true);
-    expect(result.job.snapshotId).toBeNull();
-    expect(result.job.sync).toBeNull();
-    expect(result.job.sources).toBeUndefined();
-    expect(result.output.trimEnd().endsWith(`/${result.job.workspaceKey}/src`)).toBe(true);
-  }, 180_000);
-
   it("syncs the non-git sources workspace into the default layout", async () => {
     const job = await service.startJob({
       serverId: "srv1",
@@ -478,6 +457,27 @@ describe.runIf(E2E_ENABLED)("remote-exec service against a real sshd", () => {
     expect(result.job.sync?.filesUploaded).toBe(0);
     expect(result.job.sync?.bytesUploaded).toBe(0);
   }, 240_000);
+
+  it("runs sendCode:false in its own empty nocode/ directory", async () => {
+    // Runs after the default layout tests, so src/ is populated on the target: the noCode run
+    // must neither see nor touch that copy — its run directory is nocode/ (spec 33.10#14).
+    const job = await service.startJob({
+      serverId: "srv1",
+      workspacePath: sourcesWorkspace,
+      command: `[ -z "$(ls -A .)" ] && test -f ../src/A/code.ts && test -f ../manifest.json && pwd`,
+      timeoutMs: 120_000,
+      agentId: null,
+      noCode: true,
+    });
+    const result = await service.waitForJob(job.id, 180_000);
+    expect(result.job.status).toBe("succeeded");
+    expect(result.job.exitCode).toBe(0);
+    expect(result.job.noCode).toBe(true);
+    expect(result.job.snapshotId).toBeNull();
+    expect(result.job.sync).toBeNull();
+    expect(result.job.sources).toBeUndefined();
+    expect(result.output.trimEnd().endsWith(`/${result.job.workspaceKey}/nocode`)).toBe(true);
+  }, 180_000);
 
   it("syncs source A into sources/A and runs there", async () => {
     const sourcePath = await fs.realpath(path.join(sourcesWorkspace, "A"));

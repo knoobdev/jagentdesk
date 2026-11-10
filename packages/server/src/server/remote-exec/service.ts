@@ -6,7 +6,7 @@ import { isTerminalStatus, RemoteJobStore } from "./job-store.js";
 import { OutputMirror } from "./output-mirror.js";
 import {
   buildCheckTargetScript,
-  buildEnsureSrcScript,
+  buildEnsureNocodeDirScript,
   buildLaunchJobScript,
   buildPollScript,
   buildStopScript,
@@ -349,9 +349,13 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
     };
   }
 
-  /** Command run directory (spec 33.6): src/ for default/noCode, sources/<name> for one explicit
-   * source, sources/ for several (the command cds into each source itself). */
+  /** Command run directory (spec 33.6): src/ for the default source, nocode/ for noCode (its own
+   * directory, never synced or deleted, separate from src/ and sources/), sources/<name> for one
+   * explicit source, sources/ for several (the command cds into each source itself). */
   function runDirExpr(plan: RunPlan, workRoot: string, workspaceKey: string): string {
+    if (plan.kind === "noCode") {
+      return remotePathExpr(workRoot, workspaceKey, "nocode");
+    }
     if (plan.kind === "sources") {
       return plan.snapshots.length === 1
         ? remotePathExpr(workRoot, workspaceKey, "sources", plan.snapshots[0].name)
@@ -448,12 +452,13 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
       let sync: RemoteSyncSummary | null = null;
       try {
         if (plan.kind === "noCode") {
-          // No code sent (spec 33.5): only ensure the empty src/ exists — nothing uploaded,
-          // nothing deleted, no manifest written (one would make the next default run re-upload).
+          // No code sent (spec 33.5): only ensure the nocode/ run directory exists — nothing
+          // uploaded, nothing deleted, no manifest written (one would make the next default run
+          // re-upload). The directory is separate from src/ and sources/ and never synced.
           if (cancelled()) throw new SyncCancelled();
           await execCollect(
             lease.client,
-            buildEnsureSrcScript(remotePathExpr(workRoot, job.workspaceKey, "src")),
+            buildEnsureNocodeDirScript(remotePathExpr(workRoot, job.workspaceKey, "nocode")),
             { timeoutMs: EXEC_TIMEOUT_MS },
           );
         } else if (plan.kind === "default") {
