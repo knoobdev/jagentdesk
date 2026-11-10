@@ -41,6 +41,13 @@ already-proxied connections stay open), checks the daemon is reachable
 through the tailnet with a bounded deadline, and restarts the tsnet node
 from the saved state directory when the dial fails. It returns the current
 loopback address so the caller can rebuild clients whose URL changed.
+
+The reachability dial and the node restart run WITHOUT b.mu (serialized by
+reviveMu instead), so synchronous Proxy()/LocalAddress() calls from the JS
+thread never wait on a dial or Up. When the daemon stays unreachable (e.g.
+the daemon machine is asleep) Revive still returns the address with nil
+error — the normal reconnect loop handles the offline daemon. An error is
+returned only when there is no usable listener.
  */
 - (NSString* _Nonnull)revive:(NSString* _Nullable)target error:(NSError* _Nullable* _Nullable)error;
 - (NSString* _Nonnull)signNonce:(NSString* _Nullable)nonce;

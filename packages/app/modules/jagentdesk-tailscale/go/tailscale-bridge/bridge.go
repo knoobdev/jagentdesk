@@ -36,9 +36,13 @@ type Bridge struct {
 	hostname string
 	target   string
 
+	// Serializes Revive calls. Revive's dial and node restart run WITHOUT
+	// b.mu, so Proxy()/LocalAddress()/status reads never wait on them.
+	reviveMu sync.Mutex
+
 	// Test seams (same package only): injectable dial and node restart so the
 	// listener-recovery and revive paths run without a real tailnet.
-	dial        func(ctx context.Context, network, address string) (net.Conn, error)
+	dial        dialFunc
 	restartNode func() error
 }
 
@@ -371,14 +375,11 @@ func (b *Bridge) handleConn(conn net.Conn, target string) {
 	proxy(conn, remote)
 }
 
+type dialFunc func(ctx context.Context, network, address string) (net.Conn, error)
+
 // dialThrough dials the daemon through the tailnet. dial replaces server.Dial
 // in tests so listener recovery runs without a real tailnet.
-func dialThrough(
-	server *tsnet.Server,
-	dial func(ctx context.Context, network, address string) (net.Conn, error),
-	ctx context.Context,
-	target string,
-) (net.Conn, error) {
+func dialThrough(server *tsnet.Server, dial dialFunc, ctx context.Context, target string) (net.Conn, error) {
 	if dial != nil {
 		return dial(ctx, "tcp", target)
 	}
@@ -413,11 +414,22 @@ func portOf(addr net.Addr) int {
 // through the tailnet with a bounded deadline, and restarts the tsnet node
 // from the saved state directory when the dial fails. It returns the current
 // loopback address so the caller can rebuild clients whose URL changed.
+//
+// The reachability dial and the node restart run WITHOUT b.mu (serialized by
+// reviveMu instead), so synchronous Proxy()/LocalAddress() calls from the JS
+// thread never wait on a dial or Up. When the daemon stays unreachable (e.g.
+// the daemon machine is asleep) Revive still returns the address with nil
+// error — the normal reconnect loop handles the offline daemon. An error is
+// returned only when there is no usable listener.
 func (b *Bridge) Revive(target string) (string, error) {
+	b.reviveMu.Lock()
+	defer b.reviveMu.Unlock()
+
+	// Short critical section: decide the target and re-open the listener.
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	select {
 	case <-b.closed:
+		b.mu.Unlock()
 		return "", fmt.Errorf("tailscale is not started")
 	default:
 	}
@@ -425,21 +437,28 @@ func (b *Bridge) Revive(target string) (string, error) {
 		target = b.target
 	}
 	if strings.TrimSpace(target) == "" {
+		b.mu.Unlock()
 		return "", fmt.Errorf("tailscale target is required")
 	}
 	b.target = target
 
 	if b.listener == nil {
 		if err := b.startProxyLocked(target); err != nil {
+			b.mu.Unlock()
 			return "", err
 		}
 	} else if err := b.reopenListenerLocked(); err != nil {
+		b.mu.Unlock()
 		return "", err
 	}
 	addr := b.listener.Addr().String()
+	server, dial := b.server, b.dial
+	b.mu.Unlock()
 
-	if err := b.ensureTailnetReachableLocked(target); err != nil {
-		return "", err
+	// Dial and node restart never hold b.mu; the result only decides whether
+	// the reachability failure is logged.
+	if !b.ensureTailnetReachable(server, dial, target) {
+		fmt.Printf("[JAgentDeskTailscale] revive: daemon %s still unreachable, leaving recovery to the reconnect loop\n", target)
 	}
 	return addr, nil
 }
@@ -463,40 +482,54 @@ func (b *Bridge) reopenListenerLocked() error {
 	return nil
 }
 
-func (b *Bridge) ensureTailnetReachableLocked(target string) error {
-	if err := b.tryDialLocked(target); err == nil {
-		return nil
+// ensureTailnetReachable dials the daemon through the tailnet; on failure it
+// restarts the tsnet node from the saved state directory and dials again. It
+// never holds b.mu: the caller snapshots the server pointer first, and the
+// restart swaps b.server under b.mu. Returns whether the daemon was reachable
+// in the end.
+func (b *Bridge) ensureTailnetReachable(server *tsnet.Server, dial dialFunc, target string) bool {
+	if b.tryDial(server, dial, target) {
+		return true
 	}
-	// tsnet's own sockets can be reclaimed with the app. Restart the node
-	// from the saved state directory; no auth key is needed.
-	if err := b.restartNodeFromStateLocked(); err != nil {
-		return err
+	b.mu.Lock()
+	restart := b.restartNode
+	b.mu.Unlock()
+	if restart == nil {
+		restart = b.restartNodeFromState
 	}
-	return b.tryDialLocked(target)
+	if err := restart(); err != nil {
+		fmt.Printf("[JAgentDeskTailscale] revive node restart failed: %v\n", err)
+		return false
+	}
+	// Re-dial through whatever node is current now (in tests the fake dial
+	// seam decides).
+	b.mu.Lock()
+	current := b.server
+	b.mu.Unlock()
+	return b.tryDial(current, dial, target)
 }
 
-func (b *Bridge) tryDialLocked(target string) error {
+func (b *Bridge) tryDial(server *tsnet.Server, dial dialFunc, target string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), reviveDialTimeout)
 	defer cancel()
-	conn, err := dialThrough(b.server, b.dial, ctx, target)
+	conn, err := dialThrough(server, dial, ctx, target)
 	if err != nil {
-		return err
+		return false
 	}
 	_ = conn.Close()
-	return nil
+	return true
 }
 
-func (b *Bridge) restartNodeFromStateLocked() error {
-	if b.restartNode != nil {
-		return b.restartNode()
-	}
+// restartNodeFromState restarts the tsnet node from the saved state dir
+// WITHOUT holding b.mu: the new node is built and brought up first, then
+// swapped in under b.mu and the old node is closed afterwards. No auth key is
+// needed — the state directory holds the node key.
+func (b *Bridge) restartNodeFromState() error {
+	b.mu.Lock()
 	stateDir, hostname := b.stateDir, b.hostname
+	b.mu.Unlock()
 	if strings.TrimSpace(stateDir) == "" {
 		return fmt.Errorf("tailscale node state is unavailable")
-	}
-	if b.server != nil {
-		_ = b.server.Close()
-		b.server = nil
 	}
 	srv := b.newServer("", stateDir, hostname)
 	upCtx, cancel := context.WithTimeout(context.Background(), reviveNodeRestartTimeout)
@@ -505,7 +538,20 @@ func (b *Bridge) restartNodeFromStateLocked() error {
 		_ = srv.Close()
 		return fmt.Errorf("tailscale node restart: %w", err)
 	}
+	b.mu.Lock()
+	select {
+	case <-b.closed:
+		b.mu.Unlock()
+		_ = srv.Close()
+		return fmt.Errorf("tailscale is not started")
+	default:
+	}
+	old := b.server
 	b.server = srv
+	b.mu.Unlock()
+	if old != nil {
+		_ = old.Close()
+	}
 	return nil
 }
 

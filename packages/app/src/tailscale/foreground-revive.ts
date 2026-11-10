@@ -47,8 +47,8 @@ export async function reviveTailnetHosts(store: TailnetReviveStore): Promise<voi
     try {
       address = await adapter.revive(connection.tailnetAddress);
     } catch {
-      // A failed revive leaves recovery to the normal retry loop (05.7.4):
-      // keep ensureConnectedAll/revalidateConnectedAll running as before.
+      // The native revive only errors when there is no usable listener at
+      // all; leave recovery to the normal retry loop then (05.7.4).
       continue;
     }
     if (!address) {

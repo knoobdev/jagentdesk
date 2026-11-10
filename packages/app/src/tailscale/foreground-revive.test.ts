@@ -75,6 +75,20 @@ describe("reviveTailnetHosts", () => {
     expect(store.rebuildCalls).toEqual([["s1", CONNECTION.id]]);
   });
 
+  it("still rebuilds when the daemon is offline, because revive resolves anyway", async () => {
+    // The native Revive returns the loopback address with nil error even
+    // when the daemon stays unreachable after the node restart; the normal
+    // reconnect loop handles the offline daemon (spec 05.7.4).
+    reviveMock.mockResolvedValue("127.0.0.1:5319");
+    const store = makeStore({
+      serverId: "s1",
+      activeConnectionId: CONNECTION.id,
+      connection: CONNECTION,
+    });
+    await expect(reviveTailnetHosts(store)).resolves.toBeUndefined();
+    expect(store.rebuildCalls).toEqual([["s1", CONNECTION.id]]);
+  });
+
   it("leaves recovery to the retry loop when revive throws", async () => {
     reviveMock.mockRejectedValue(new Error("tsnet node restart failed"));
     const store = makeStore({
