@@ -74,6 +74,8 @@ import { buildToolCallPresentation } from "@/tool-calls/presentation";
 import { resolveToolCallIcon } from "@/utils/tool-call-icon";
 import { readRemoteJobToolResult, remoteJobCardVariant } from "@/remote-exec/remote-job-detection";
 import { RemoteJobCard } from "@/remote-exec/remote-job-card";
+import { readSshRunToolResult } from "@/remote-exec/ssh-run-detection";
+import { SshRunCard } from "@/remote-exec/ssh-run-card";
 import { getMarkdownListMarker, getMarkdownListSpacing } from "@/utils/markdown-list";
 import { markdownNodeContainsType } from "@/utils/markdown-ast";
 import { useStableEvent } from "@/hooks/use-stable-event";
@@ -3412,9 +3414,15 @@ export const ToolCall = memo(function ToolCall({
   ]);
 
   // A remote job call with a result shows as the live job card directly in the chat
-  // (spec 33.9); pending calls and every other tool keep the collapsed badge row.
+  // (spec 33.9); an ssh_run call with a parsed result shows the ssh_run card (ADR-0045 §7).
+  // Pending calls and every other tool keep the collapsed badge row. Both hooks run on every
+  // render — the early returns below must not change the hook order.
   const remoteJob = useMemo(
     () => readRemoteJobToolResult(toolName, effectiveDetail),
+    [toolName, effectiveDetail],
+  );
+  const sshRun = useMemo(
+    () => readSshRunToolResult(toolName, effectiveDetail),
     [toolName, effectiveDetail],
   );
   if (remoteJob) {
@@ -3429,6 +3437,9 @@ export const ToolCall = memo(function ToolCall({
         testID="remote-job-card"
       />
     );
+  }
+  if (sshRun) {
+    return <SshRunCard client={client ?? null} result={sshRun} />;
   }
 
   if (presentation.isPlan && effectiveDetail?.type === "plan") {

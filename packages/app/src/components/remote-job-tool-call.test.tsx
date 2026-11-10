@@ -163,6 +163,75 @@ describe("ToolCall inline remote job card (spec 33.9)", () => {
   });
 });
 
+// ADR-0045 job fields are optional and additive; the card must render both old and new records.
+const noCodeDetail: ToolCallDetail = {
+  type: "unknown",
+  input: { command: "pwd" },
+  output: JSON.stringify({
+    ...jobResult,
+    job: {
+      ...jobResult.job,
+      status: "succeeded",
+      exitCode: 0,
+      sync: null,
+      noCode: true,
+    },
+  }),
+};
+
+const sourcesDetail: ToolCallDetail = {
+  type: "unknown",
+  input: { command: "ls" },
+  output: JSON.stringify({
+    ...jobResult,
+    job: {
+      ...jobResult.job,
+      status: "succeeded",
+      exitCode: 0,
+      sync: { filesUploaded: 12, filesDeleted: 2 },
+      sources: [
+        { name: "A", path: "/ws/A", sync: { filesUploaded: 10, filesDeleted: 1 } },
+        { name: "C", path: "/ws/C", sync: { filesUploaded: 2, filesDeleted: 1 } },
+      ],
+    },
+  }),
+};
+
+const legacySyncDetail: ToolCallDetail = {
+  type: "unknown",
+  input: { command: "ls" },
+  output: {
+    ...jobResult,
+    job: { ...jobResult.job, sync: { filesUploaded: 3, filesDeleted: 0 } },
+  },
+};
+
+describe("ToolCall remote job card noCode / sources (spec 33.9, ADR-0045)", () => {
+  it("shows 'No code sent' instead of the sync line for a noCode job", () => {
+    mount(<ToolCall toolName="jagentdesk_remote_run" status="completed" detail={noCodeDetail} />);
+    expect(document.body.textContent).toContain("ssh.remoteExec.job.noCode");
+    expect(document.body.textContent).not.toContain("ssh.remoteExec.job.syncSummary");
+  });
+
+  it("shows the source names before the aggregate sync summary", () => {
+    mount(<ToolCall toolName="jagentdesk_remote_run" status="completed" detail={sourcesDetail} />);
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("A, C");
+    expect(text).toContain("ssh.remoteExec.job.syncSummary");
+    expect(text.indexOf("A, C")).toBeLessThan(text.indexOf("ssh.remoteExec.job.syncSummary"));
+  });
+
+  it("keeps the old rendering for a job record without the optional fields", () => {
+    mount(
+      <ToolCall toolName="jagentdesk_remote_run" status="completed" detail={legacySyncDetail} />,
+    );
+    const text = document.body.textContent ?? "";
+    expect(text).not.toContain("ssh.remoteExec.job.noCode");
+    expect(text).not.toContain("A, C");
+    expect(text).toContain("ssh.remoteExec.job.syncSummary");
+  });
+});
+
 describe("ToolCall remote_job_wait compact card (spec 33.9 follow-up)", () => {
   it("collapses the output box and omits the stop button", () => {
     mount(
