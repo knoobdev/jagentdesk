@@ -48,6 +48,7 @@ vi.mock("@/utils/rich-clipboard-default-environment", () => ({
 import { ToolCall } from "./message";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { ToolCallDetail } from "@jagentdesk/protocol/agent-types";
+import claudeSshRunCalls from "@/remote-exec/fixtures/claude-ssh-run-calls.json";
 
 let root: Root | null = null;
 let container: HTMLElement | null = null;
@@ -250,5 +251,53 @@ describe("ToolCall inline ssh_run card (spec 33.9)", () => {
     expect(command?.getAttribute("aria-label")).toBe("echo one && echo two && echo three");
     expect(command?.style.whiteSpace).toBe("pre-wrap");
     expect(command?.style.overflowWrap).toBe("anywhere");
+  });
+});
+
+// The real Claude wrapping found in the live test: the tool JSON sits inside a
+// {type:'command', command, output} wrapper under detail.output, as a string.
+const claudeSshRunDetail: ToolCallDetail = {
+  type: "unknown",
+  input: { serverId: SERVER_ID, command: "uptime; df -h / | tail -1" },
+  output: {
+    type: "command",
+    command: "uptime; df -h / | tail -1",
+    output: JSON.stringify(sshRunResult({ stdout: "load average: 0.03\n" })),
+  },
+};
+
+// Pulled straight from the saved live timeline (fixtures/claude-ssh-run-calls.json).
+const claudeFixtureCalls = claudeSshRunCalls as unknown as Array<{
+  name: string;
+  detail: ToolCallDetail;
+}>;
+
+describe("ToolCall ssh_run card with real Claude detail shapes (spec 33.9 follow-up)", () => {
+  it("renders the card for the Claude {type:'command'} wrapper", () => {
+    mount(
+      <ToolCall
+        toolName="mcp__jagentdesk__ssh_run"
+        status="completed"
+        detail={claudeSshRunDetail}
+      />,
+    );
+    expect(document.querySelector('[data-testid="ssh-run-card"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="tool-call-badge"]')).toBeNull();
+    expect(document.body.textContent).toContain("uptime; df -h / | tail -1");
+    expect(document.body.textContent).toContain("load average: 0.03");
+  });
+
+  it("renders the card for the fixture's completed call", () => {
+    const [, fixtureCall] = claudeFixtureCalls;
+    mount(<ToolCall toolName={fixtureCall.name} status="completed" detail={fixtureCall.detail} />);
+    expect(document.querySelector('[data-testid="ssh-run-card"]')).not.toBeNull();
+    expect(document.body.textContent).toContain("df -h /");
+  });
+
+  it("keeps the collapsed badge for the fixture's failed call (output null)", () => {
+    const [failedCall] = claudeFixtureCalls;
+    mount(<ToolCall toolName={failedCall.name} status="failed" detail={failedCall.detail} />);
+    expect(document.querySelector('[data-testid="tool-call-badge"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="ssh-run-card"]')).toBeNull();
   });
 });

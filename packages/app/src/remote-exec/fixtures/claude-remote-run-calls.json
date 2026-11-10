@@ -1,0 +1,45 @@
+[
+  {
+    "type": "tool_call",
+    "callId": "toolu_019kV8aqbPZjzdiRpHrNMqNn",
+    "name": "ToolSearch",
+    "detail": {
+      "type": "unknown",
+      "input": {
+        "query": "select:mcp__jagentdesk__remote_run",
+        "max_results": 1
+      },
+      "output": {
+        "output": [
+          {
+            "tool_name": "mcp__jagentdesk__remote_run",
+            "type": "tool_reference"
+          }
+        ]
+      }
+    },
+    "status": "completed",
+    "error": null
+  },
+  {
+    "type": "tool_call",
+    "callId": "toolu_01V2MhFfLkqAWDJCHkf2eML5",
+    "name": "mcp__jagentdesk__remote_run",
+    "detail": {
+      "type": "unknown",
+      "input": {
+        "serverId": "srv_236c7de7a989",
+        "source": ["A", "C"],
+        "waitMs": 60000,
+        "command": "ls; ls C ."
+      },
+      "output": {
+        "type": "command",
+        "command": "ls; ls C .",
+        "output": "{\n  \"job\": {\n    \"id\": \"rjb_7c2421a87cf6\",\n    \"serverId\": \"srv_236c7de7a989\",\n    \"serverLabel\": \"PC WSL2\",\n    \"workspacePath\": \"/tmp/rex2-proj\",\n    \"workspaceKey\": \"wsk_c6ad0b5f5017\",\n    \"snapshotId\": \"snp_0c088dedb599\",\n    \"command\": \"ls; ls C .\",\n    \"status\": \"succeeded\",\n    \"exitCode\": 0,\n    \"error\": null,\n    \"agentId\": \"4ec5cca7-dfe6-47f2-8edf-1613dde87122\",\n    \"sync\": {\n      \"snapshotId\": \"snp_0c088dedb599\",\n      \"filesTotal\": 3,\n      \"filesUploaded\": 0,\n      \"filesDeleted\": 0,\n      \"bytesUploaded\": 0,\n      \"excludedSecrets\": [\n        \"A/.env\"\n      ],\n      \"skipped\": []\n    },\n    \"outputBytes\": 29,\n    \"outputTruncated\": false,\n    \"createdAtMs\": 1794291648296,\n    \"startedAtMs\": 1794291652259,\n    \"finishedAtMs\": 1794291652698,\n    \"timeoutMs\": 7200000,\n    \"sources\": [\n      {\n        \"name\": \"A\",\n        \"path\": \"/private/tmp/rex2-proj/A\",\n        \"sync\": {\n          \"snapshotId\": \"snp_9b4d6519c85f\",\n          \"excludedSecrets\": [\n            \".env\"\n          ],\n          \"skipped\": [],\n          \"filesTotal\": 2,\n          \"filesUploaded\": 0,\n          \"filesDeleted\": 0,\n          \"bytesUploaded\": 0\n        }\n      },\n      {\n        \"name\": \"C\",\n        \"path\": \"/private/tmp/rex2-proj/C\",\n        \"sync\": {\n          \"snapshotId\": \"snp_c5559c149433\",\n          \"excludedSecrets\": [],\n          \"skipped\": [],\n          \"filesTotal\": 1,\n          \"filesUploaded\": 0,\n          \"filesDeleted\": 0,\n          \"bytesUploaded\": 0\n        }\n      }\n    ]\n  },\n  \"output\": \"A\\nB\\nC\\n.:\\nA\\nB\\nC\\n\\nC:\\nnotes.txt\\n\",\n  \"outputOffset\": 0,\n  \"outputTruncatedHead\": false\n}"
+      }
+    },
+    "status": "completed",
+    "error": null
+  }
+]

@@ -48,6 +48,7 @@ vi.mock("@/utils/rich-clipboard-default-environment", () => ({
 
 import { ToolCall } from "./message";
 import type { ToolCallDetail } from "@jagentdesk/protocol/agent-types";
+import claudeRemoteRunCalls from "@/remote-exec/fixtures/claude-remote-run-calls.json";
 
 let root: Root | null = null;
 let container: HTMLElement | null = null;
@@ -295,5 +296,58 @@ describe("ToolCall remote_job_wait compact card (spec 33.9 follow-up)", () => {
     );
     expect(document.querySelector('[data-testid="remote-job-output-box"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="remote-job-output-toggle"]')).toBeNull();
+  });
+});
+
+// The real Claude wrapping found in the live test: the tool JSON sits inside a
+// {type:'command', command, output} wrapper under detail.output, as a string.
+const claudeRemoteRunDetail: ToolCallDetail = {
+  type: "unknown",
+  input: { serverId: "srv_e4e910a0a4ab", source: ["A", "C"], command: "ls; ls C ." },
+  output: {
+    type: "command",
+    command: "ls; ls C .",
+    output: JSON.stringify({
+      ...jobResult,
+      job: {
+        ...jobResult.job,
+        status: "succeeded",
+        exitCode: 0,
+        sources: [
+          { name: "A", path: "/ws/A", sync: { filesUploaded: 0, filesDeleted: 0 } },
+          { name: "C", path: "/ws/C", sync: { filesUploaded: 1, filesDeleted: 0 } },
+        ],
+      },
+    }),
+  },
+};
+
+// Pulled straight from the saved live timeline (fixtures/claude-remote-run-calls.json).
+const claudeFixtureCalls = claudeRemoteRunCalls as unknown as Array<{
+  name: string;
+  detail: ToolCallDetail;
+}>;
+
+describe("ToolCall remote job card with real Claude detail shapes (spec 33.9 follow-up)", () => {
+  it("renders the card for the Claude {type:'command'} wrapper, sources included", () => {
+    mount(
+      <ToolCall
+        toolName="mcp__jagentdesk__remote_run"
+        status="completed"
+        detail={claudeRemoteRunDetail}
+      />,
+    );
+    expect(document.querySelector('[data-testid="remote-job-card"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="tool-call-badge"]')).toBeNull();
+    expect(document.body.textContent).toContain("A, C");
+    expect(document.body.textContent).toContain(jobResult.job.command);
+  });
+
+  it("renders the card for the fixture's real remote_run call", () => {
+    const [, fixtureCall] = claudeFixtureCalls;
+    mount(<ToolCall toolName={fixtureCall.name} status="completed" detail={fixtureCall.detail} />);
+    expect(document.querySelector('[data-testid="remote-job-card"]')).not.toBeNull();
+    expect(document.body.textContent).toContain("PC WSL2");
+    expect(document.body.textContent).toContain("notes.txt");
   });
 });

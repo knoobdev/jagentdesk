@@ -3,6 +3,7 @@ import {
   getJAgentDeskToolLeafName,
   normalizeToolName,
 } from "@jagentdesk/protocol/tool-name-normalization";
+import { unwrapToolResultPayload } from "./tool-result-payload";
 
 const SSH_RUN_TOOL_LEAF_NAME = "ssh_run";
 
@@ -31,9 +32,9 @@ export interface SshRunToolResult {
 }
 
 /**
- * Extracts the ssh_run result from a tool call's detail. The output is the JSON result
- * (object or string) or an MCP content array whose text item holds the JSON; the command
- * comes from the call input. Returns null for pending calls and malformed results.
+ * Extracts the ssh_run result from a tool call's detail. The output is the JSON result however
+ * the provider wraps it (see tool-result-payload.ts); the command comes from the call input
+ * (or the shell detail for ACP agents). Returns null for pending calls and malformed results.
  */
 export function readSshRunToolResult(
   toolName: string,
@@ -42,80 +43,54 @@ export function readSshRunToolResult(
   if (!detail || !isSshRunToolName(toolName)) return null;
   let raw: unknown;
   let input: unknown = null;
+  let shellCommand: string | null = null;
   if (detail.type === "unknown") {
     raw = detail.output;
     input = detail.input;
   } else if (detail.type === "plain_text") {
     raw = detail.text;
+  } else if (detail.type === "shell") {
+    // Generic ACP "execute" tools arrive as shell details with the tool JSON as output text.
+    raw = detail.output;
+    shellCommand = typeof detail.command === "string" ? detail.command : null;
   } else {
     return null;
   }
   const parsed = parseSshRunResult(raw);
   if (!parsed) return null;
-  return { ...parsed, command: readCommand(input) };
+  const command = readCommand(input) ?? shellCommand ?? "";
+  return { ...parsed, command };
 }
 
-function readCommand(input: unknown): string {
-  if (!input || typeof input !== "object") return "";
+function readCommand(input: unknown): string | null {
+  if (!input || typeof input !== "object") return null;
   const command = (input as Record<string, unknown>).command;
-  return typeof command === "string" ? command : "";
+  return typeof command === "string" ? command : null;
 }
 
 /**
- * Parses the ssh_run result payload: the JSON object itself, a JSON string, or an MCP
- * content array whose first text item holds the JSON. Malformed payloads → null.
+ * Parses the ssh_run result payload: the JSON object itself, a JSON string, an MCP content
+ * array whose text item holds the JSON, or a provider wrapper ({type:'command', command,
+ * output} / {output}) with the payload under `output`. Malformed payloads → null.
  */
 export function parseSshRunResult(raw: unknown): Omit<SshRunToolResult, "command"> | null {
-  let value = raw;
-  if (typeof value === "string") {
-    value = parseJsonObject(value);
-  } else if (isMcpContentArray(value)) {
-    const text = firstMcpContentText(value.content);
-    if (text === null) return null;
-    value = parseJsonObject(text);
-  }
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const record = value as Record<string, unknown>;
-  if (typeof record.serverId !== "string" || record.serverId.length === 0) return null;
-  if (typeof record.exitCode !== "number" && record.exitCode !== null) return null;
+  const payload = unwrapToolResultPayload(raw, isValidSshRunPayload);
+  if (!payload) return null;
   return {
-    serverId: record.serverId,
-    stdout: typeof record.stdout === "string" ? record.stdout : "",
-    stderr: typeof record.stderr === "string" ? record.stderr : "",
-    exitCode: record.exitCode,
-    signal: typeof record.signal === "string" ? record.signal : null,
-    stdoutTruncated: record.stdoutTruncated === true,
-    stderrTruncated: record.stderrTruncated === true,
-    timedOut: record.timedOut === true,
+    serverId: payload.serverId as string,
+    stdout: typeof payload.stdout === "string" ? payload.stdout : "",
+    stderr: typeof payload.stderr === "string" ? payload.stderr : "",
+    exitCode: payload.exitCode as number | null,
+    signal: typeof payload.signal === "string" ? payload.signal : null,
+    stdoutTruncated: payload.stdoutTruncated === true,
+    stderrTruncated: payload.stderrTruncated === true,
+    timedOut: payload.timedOut === true,
   };
 }
 
-function parseJsonObject(text: string): unknown {
-  const trimmed = text.trim();
-  if (!trimmed.startsWith("{")) return null;
-  try {
-    return JSON.parse(trimmed) as unknown;
-  } catch {
-    return null;
-  }
-}
-
-function isMcpContentArray(
-  value: unknown,
-): value is { content: unknown[] } & Record<string, unknown> {
-  return (
-    !!value &&
-    typeof value === "object" &&
-    !Array.isArray(value) &&
-    Array.isArray((value as Record<string, unknown>).content)
-  );
-}
-
-function firstMcpContentText(content: unknown[]): string | null {
-  for (const item of content) {
-    if (!item || typeof item !== "object") continue;
-    const record = item as Record<string, unknown>;
-    if (record.type === "text" && typeof record.text === "string") return record.text;
-  }
-  return null;
+function isValidSshRunPayload(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  if (typeof record.serverId !== "string" || record.serverId.length === 0) return false;
+  return typeof record.exitCode === "number" || record.exitCode === null;
 }

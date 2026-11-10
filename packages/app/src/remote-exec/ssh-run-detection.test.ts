@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { ToolCallDetail } from "@jagentdesk/protocol/agent-types";
+import claudeSshRunCalls from "./fixtures/claude-ssh-run-calls.json";
 import { isSshRunToolName, parseSshRunResult, readSshRunToolResult } from "./ssh-run-detection";
+
+interface FixtureCall {
+  name: string;
+  detail: ToolCallDetail;
+  status: string;
+}
 
 describe("isSshRunToolName", () => {
   // Every provider naming of the same tool (spec 33.7 / tool-name-normalization).
@@ -51,11 +58,37 @@ describe("parseSshRunResult", () => {
     expect(parseSshRunResult(JSON.stringify(fullResult))).toEqual(fullResult);
   });
 
-  it("reads an MCP content array whose text item holds the JSON", () => {
+  it("reads an MCP content array whose text item holds the JSON (Codex CallToolResult)", () => {
     const payload = {
       content: [{ type: "text", text: JSON.stringify(fullResult) }],
     };
     expect(parseSshRunResult(payload)).toEqual(fullResult);
+  });
+
+  it("reads the Claude {type:'command'} wrapper with the payload under output", () => {
+    const wrapper = { type: "command", command: "uptime", output: JSON.stringify(fullResult) };
+    expect(parseSshRunResult(wrapper)).toEqual(fullResult);
+  });
+
+  it("peels the Claude wrapper nested once more", () => {
+    const wrapper = { type: "command", command: "uptime", output: JSON.stringify(fullResult) };
+    expect(parseSshRunResult({ output: wrapper })).toEqual(fullResult);
+  });
+
+  it("reads the Claude {output} fallback wrapper (remote_job_wait-style)", () => {
+    expect(parseSshRunResult({ output: fullResult })).toEqual(fullResult);
+  });
+
+  it("does not over-unwrap a payload that itself carries an output field", () => {
+    const payload = { ...fullResult, output: "trailing tail" };
+    expect(parseSshRunResult(payload)).toEqual(fullResult);
+    expect(parseSshRunResult({ output: payload })).toEqual(fullResult);
+  });
+
+  it("reads a single {type:'text', text} block (generic ACP unknown output)", () => {
+    expect(parseSshRunResult({ type: "text", text: JSON.stringify(fullResult) })).toEqual(
+      fullResult,
+    );
   });
 
   it("skips non-text MCP content items", () => {
@@ -141,6 +174,18 @@ describe("readSshRunToolResult", () => {
     expect(result?.command).toBe("");
   });
 
+  it("reads a shell detail (generic ACP) and takes the command from the detail", () => {
+    const detail: ToolCallDetail = {
+      type: "shell",
+      command: "uptime",
+      output: JSON.stringify(fullResult),
+      exitCode: 2,
+    };
+    const result = readSshRunToolResult("ssh_run", detail);
+    expect(result?.command).toBe("uptime");
+    expect(result?.exitCode).toBe(2);
+  });
+
   it("returns null for pending calls and non ssh_run tools", () => {
     expect(readSshRunToolResult("ssh_run", undefined)).toBeNull();
     expect(readSshRunToolResult("ssh_run", unknownDetail({}, null))).toBeNull();
@@ -152,5 +197,26 @@ describe("readSshRunToolResult", () => {
   it("returns null when the result is malformed", () => {
     expect(readSshRunToolResult("ssh_run", unknownDetail({ command: "x" }, "{}"))).toBeNull();
     expect(readSshRunToolResult("ssh_run", unknownDetail({ command: "x" }, "denied"))).toBeNull();
+  });
+});
+
+describe("readSshRunToolResult with the real Claude fixture (live-test regression)", () => {
+  const calls = claudeSshRunCalls as unknown as FixtureCall[];
+
+  it("keeps the failed call (output null) unrendered so the badge stays", () => {
+    const [failed] = calls;
+    expect(failed.status).toBe("failed");
+    expect(readSshRunToolResult(failed.name, failed.detail)).toBeNull();
+  });
+
+  it("parses the completed calls out of the {type:'command'} wrapper", () => {
+    const [, uptime, missingDir] = calls;
+    const ok = readSshRunToolResult(uptime.name, uptime.detail);
+    expect(ok?.command).toBe("uptime; df -h / | tail -1");
+    expect(ok?.exitCode).toBe(0);
+    expect(ok?.stdout).toContain("load average");
+    const err = readSshRunToolResult(missingDir.name, missingDir.detail);
+    expect(err?.exitCode).toBe(2);
+    expect(err?.stderr).toContain("No such file or directory");
   });
 });
