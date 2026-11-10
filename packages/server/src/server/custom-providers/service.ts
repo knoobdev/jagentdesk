@@ -195,16 +195,13 @@ export function createCustomProviderService(
   async function resolveEndpoint(
     input: { baseUrl: string; via?: string; sshServerId?: string },
     forwardKey: string,
-    closeAfter: boolean,
   ): Promise<string> {
     const via = input.via === "tailnet" || input.via === "ssh" ? input.via : "direct";
-    const effective = await forwarder.effectiveBaseUrl(forwardKey, {
+    return await forwarder.effectiveBaseUrl(forwardKey, {
       baseUrl: input.baseUrl,
       via,
       ...(input.sshServerId ? { sshServerId: input.sshServerId } : {}),
     });
-    if (closeAfter) forwarder.close(forwardKey);
-    return effective;
   }
 
   async function fetchModels(
@@ -295,8 +292,12 @@ export function createCustomProviderService(
       apiKey = await deps.secretStore.get(providerApiKeySecretId(input.id));
     }
     const forwardKey = input.id ?? "__test__";
+    // A test without `id` opens a temporary forward that must live until the
+    // models fetch completes — closing it before the fetch made every via
+    // tailnet/ssh test fail with "fetch failed" (spec 34 live-test fix).
+    const closeForward = input.id === undefined;
     try {
-      const baseUrl = await resolveEndpoint(validated, forwardKey, input.id === undefined);
+      const baseUrl = await resolveEndpoint(validated, forwardKey);
       const models = await fetchModels(validated.protocol, baseUrl, apiKey);
       return { ok: true, models, error: null };
     } catch (error) {
@@ -313,6 +314,8 @@ export function createCustomProviderService(
         models: [],
         error: { code: providerError.code, message: providerError.message },
       };
+    } finally {
+      if (closeForward) forwarder.close(forwardKey);
     }
   }
 
@@ -400,7 +403,7 @@ export function createCustomProviderService(
       const entry = readEntries()[providerId];
       const api = apiBlockOf(entry);
       if (!api || api.protocol !== "openai") return null;
-      const baseUrl = await resolveEndpoint(api, providerId, false);
+      const baseUrl = await resolveEndpoint(api, providerId);
       const apiKey = await deps.secretStore.get(providerApiKeySecretId(providerId));
       return {
         id: providerId,
@@ -422,7 +425,7 @@ export function createCustomProviderService(
       const entry = readEntries()[providerId];
       const api = apiBlockOf(entry);
       if (!api || api.protocol !== "anthropic") return null;
-      const baseUrl = await resolveEndpoint(api, providerId, false);
+      const baseUrl = await resolveEndpoint(api, providerId);
       const apiKey = await deps.secretStore.get(providerApiKeySecretId(providerId));
       return buildClaudeSpawnEnv({ baseUrl, apiKey });
     },

@@ -24,7 +24,8 @@ export type AgentProviderModeDefinition = Omit<AgentMode, "icon" | "colorTier"> 
 export interface AgentProviderDefinition {
   id: string;
   label: string;
-  description: string;
+  /** Api providers (spec 34.2) may omit it — the base provider's must not leak in. */
+  description?: string;
   enabledByDefault?: boolean;
   defaultModeId: string | null;
   modes: AgentProviderModeDefinition[];

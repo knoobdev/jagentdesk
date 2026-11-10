@@ -1,14 +1,35 @@
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import http from "node:http";
+import net from "node:net";
+import { EventEmitter } from "node:events";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
+import type { Client } from "ssh2";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import { MemorySecretStore } from "../database/secret-store.js";
 import { createCustomProviderService } from "./service.js";
 import { writeAgentProviderEntry } from "./config-storage.js";
+
+/** ssh2 Client stub exposing only what the forwarder uses: forwardOut + close event. */
+function createFakeSshClient(onForward: (host: string, port: number) => net.Socket) {
+  const client = new EventEmitter() as EventEmitter & {
+    forwardOut: Client["forwardOut"];
+  };
+  client.forwardOut = (_srcAddr, _srcPort, host, port, callback) => {
+    const socket = onForward(host, port);
+    socket.once("connect", () => callback(null, socket as never));
+    socket.once("error", (error: Error) => callback(error, null));
+  };
+  return client as unknown as Client;
+}
+
+/** The forwarder's direct-tcpip channel becomes a plain loopback connection in tests. */
+function forwardThroughLoopback(host: string, port: number): net.Socket {
+  return net.connect(port, host);
+}
 
 function createHome(): string {
   return mkdtempSync(path.join(tmpdir(), "jagentdesk-cp-service-"));
@@ -331,6 +352,39 @@ describe("createCustomProviderService — test", () => {
         await secretStore.set("provider.apikey.stored", "sk-stored");
         const result = await service.test({ protocol: "openai", baseUrl, id: "stored" });
         expect(result.ok).toBe(true);
+      },
+    );
+  });
+
+  // Live-test fix (spec 34): a test without `id` opens a temporary ssh forward and
+  // used to close it BEFORE the models fetch, so every via:"ssh" test failed with
+  // endpoint_unreachable: fetch failed. The forward must live until the fetch ends.
+  test("without id via ssh fetches through the temporary forward and closes it after", async () => {
+    const home = createHome();
+    await withHttpServer(
+      (_req, res) => {
+        res.end(JSON.stringify({ data: [{ id: "qwen2.5:3b" }] }));
+      },
+      async (baseUrl) => {
+        let releaseCount = 0;
+        const client = createFakeSshClient(forwardThroughLoopback);
+        const { service } = await makeService(home, {
+          acquireSshClient: async (serverId: string) => {
+            expect(serverId).toBe("srv-1");
+            return { client, release: () => (releaseCount += 1) };
+          },
+          sshServerExists: (serverId: string) => serverId === "srv-1",
+        });
+        const result = await service.test({
+          protocol: "openai",
+          baseUrl,
+          via: "ssh",
+          sshServerId: "srv-1",
+        });
+        expect(result.ok).toBe(true);
+        expect(result.models).toEqual([{ id: "qwen2.5:3b" }]);
+        // The temporary forwarder (no id) released the SSH lease after the fetch.
+        expect(releaseCount).toBe(1);
       },
     );
   });

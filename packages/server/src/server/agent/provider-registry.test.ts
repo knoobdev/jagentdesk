@@ -602,6 +602,85 @@ test("new provider extending claude appears in registry", () => {
   expect(registry.zai.createClient(logger).provider).toBe("zai");
 });
 
+describe("api providers (spec 34)", () => {
+  const openCodeBaseModeIds = AGENT_PROVIDER_DEFINITIONS.find(
+    (definition) => definition.id === "opencode",
+  )?.modes.map((mode) => mode.id);
+
+  test("openai models are exposed in the OpenCode provider/model form with variants intact", async () => {
+    const registry = buildProviderRegistry(logger, {
+      providerOverrides: {
+        "local-qwen": {
+          api: { protocol: "openai", baseUrl: "http://127.0.0.1:11434" },
+          label: "Local Qwen",
+          models: [
+            {
+              id: "qwen2.5:3b",
+              label: "Qwen 2.5 3B",
+              thinkingOptions: [{ id: "think", label: "think" }],
+            },
+          ],
+        },
+      },
+    });
+
+    const catalog = await registry["local-qwen"].fetchCatalog({
+      scope: "workspace",
+      cwd: "/tmp/registry-api",
+      force: false,
+    });
+
+    // The injected OpenCode config keys the provider by the JAgentDesk provider
+    // id, so the composer/createAgent model id must be "<providerId>/<modelId>".
+    expect(catalog.models).toHaveLength(1);
+    expect(catalog.models[0]?.id).toBe("local-qwen/qwen2.5:3b");
+    expect(catalog.models[0]?.label).toBe("Qwen 2.5 3B");
+    // A thinking option id is the OpenCode variant id of the declared model.
+    expect(catalog.models[0]?.thinkingOptions?.map((option) => option.id)).toEqual(["think"]);
+    // Static base modes: declared models replace runtime discovery entirely.
+    expect(catalog.modes.map((mode) => mode.id)).toEqual(openCodeBaseModeIds);
+  });
+
+  test("anthropic models keep their verbatim model id (spec 34.3)", async () => {
+    const registry = buildProviderRegistry(logger, {
+      providerOverrides: {
+        "remote-anthropic": {
+          api: { protocol: "anthropic", baseUrl: "http://127.0.0.1:1" },
+          label: "Remote Anthropic",
+          models: [{ id: "m1", label: "M1" }],
+        },
+      },
+    });
+
+    const catalog = await registry["remote-anthropic"].fetchCatalog({
+      scope: "workspace",
+      cwd: "/tmp/registry-api",
+      force: false,
+    });
+
+    expect(catalog.models.map((model) => model.id)).toEqual(["m1"]);
+  });
+
+  test("the snapshot description is the api provider's own, never the base provider's", () => {
+    const registry = buildProviderRegistry(logger, {
+      providerOverrides: {
+        "local-qwen": {
+          api: { protocol: "openai", baseUrl: "http://127.0.0.1:11434" },
+          label: "Local Qwen",
+        },
+        "local-qwen-doc": {
+          api: { protocol: "openai", baseUrl: "http://127.0.0.1:11434" },
+          label: "Local Qwen Doc",
+          description: "Runs on my box",
+        },
+      },
+    });
+
+    expect(registry["local-qwen"].description).toBeUndefined();
+    expect(registry["local-qwen-doc"].description).toBe("Runs on my box");
+  });
+});
+
 test("new provider extending codex archives and unarchives its native sessions", async () => {
   const registry = buildProviderRegistry(logger, {
     providerOverrides: { "my-codex": { extends: "codex", label: "My Codex" } },

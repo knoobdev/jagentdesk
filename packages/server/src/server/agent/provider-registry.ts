@@ -354,7 +354,11 @@ function createDerivedDefinition(
     ...baseDefinition,
     id: providerId,
     label: override.label,
-    description: override.description ?? baseDefinition.description,
+    // An api provider (spec 34.2) is not the base provider: use its own
+    // description when set, otherwise none — never the base provider's.
+    description: override.api
+      ? override.description
+      : (override.description ?? baseDefinition.description),
   };
 }
 
@@ -799,6 +803,24 @@ function resolveDerivedBaseProviderId(override: ProviderOverride): string {
   return override.extends ?? (override.api?.protocol === "anthropic" ? "claude" : "opencode");
 }
 
+/**
+ * Spec 34.3: the injected OpenCode config keys the provider by the JAgentDesk
+ * provider id, so the model id OpenCode resolves is "<providerId>/<modelId>".
+ * The registry therefore exposes openai api-provider models in that form (labels
+ * and thinking options unchanged — a thinking option id is the OpenCode variant
+ * id). providers.custom.list / config.json keep the raw id; anthropic api
+ * providers pass their model ids to Claude Code verbatim and are not rewritten.
+ */
+function openCodeApiModels(
+  providerId: string,
+  override: ProviderOverride,
+  key: "models" | "additionalModels",
+): ProviderProfileModel[] {
+  const models = override[key] ?? [];
+  if (override.api?.protocol !== "openai") return models;
+  return models.map((model) => Object.assign({}, model, { id: `${providerId}/${model.id}` }));
+}
+
 function addDerivedProviders(
   resolvedProviders: Map<string, ResolvedProvider>,
   providerOverrides: Record<string, ProviderOverride>,
@@ -894,8 +916,8 @@ function addDerivedProviders(
     resolvedProviders.set(providerId, {
       definition: createDerivedDefinition(providerId, baseDefinition, override),
       runtimeSettings: mergedRuntimeSettings,
-      profileModels: override.models ?? [],
-      additionalModels: override.additionalModels ?? [],
+      profileModels: openCodeApiModels(providerId, override, "models"),
+      additionalModels: openCodeApiModels(providerId, override, "additionalModels"),
       profileModelsAreAdditive: false,
       enabled: override.enabled !== false,
       derivedFromProviderId: baseProviderId,

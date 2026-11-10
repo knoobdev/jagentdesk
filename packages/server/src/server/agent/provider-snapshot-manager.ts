@@ -505,6 +505,15 @@ export class ProviderSnapshotManager {
     options: ApplyMutableProviderConfigOptions = {},
   ): StagedMutableProviderConfig {
     const previous = this.captureMutableProviderState();
+    // Spec 34.6: a save/delete must reach every session listening for snapshot
+    // changes even when no client has pulled a snapshot in this daemon process
+    // yet — prime the global snapshot so publish() has a cwd to emit for.
+    if (this.snapshots.size === 0) {
+      this.snapshots.set(
+        GLOBAL_PROVIDER_SNAPSHOT_KEY,
+        this.reconcileSnapshotForRegistry(GLOBAL_PROVIDER_SNAPSHOT_KEY),
+      );
+    }
     const snapshotCwds = Array.from(this.snapshots.keys());
     try {
       if (options.baseOverrides !== undefined) {
