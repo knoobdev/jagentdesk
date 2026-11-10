@@ -56,9 +56,14 @@ const EXPECTED_CLAUDE_MODELS = [
     descriptionFragment: "Previous release",
   },
   {
+    id: "claude-fable-5-2",
+    model: "Fable 5.2",
+    descriptionFragment: "Most powerful",
+  },
+  {
     id: "claude-fable-5-1",
     model: "Fable 5.1",
-    descriptionFragment: "Most powerful",
+    descriptionFragment: "Previous release",
   },
   {
     id: "claude-fable-5",
@@ -192,11 +197,10 @@ function assertClaudeModels(data: ProviderModel[]): void {
     );
   }
 
-  const fable51Index = data.findIndex((model) => model.id === "claude-fable-5-1");
-  const fable5Index = data.findIndex((model) => model.id === "claude-fable-5");
-  assert.strictEqual(
-    fable5Index,
-    fable51Index + 1,
+  const fable52Index = data.findIndex((model) => model.id === "claude-fable-5-2");
+  assert.deepStrictEqual(
+    data.slice(fable52Index, fable52Index + 3).map((model) => model.id),
+    ["claude-fable-5-2", "claude-fable-5-1", "claude-fable-5"],
     "Fable models should stay adjacent and newest-first",
   );
   assert(
