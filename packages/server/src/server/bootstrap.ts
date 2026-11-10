@@ -204,6 +204,8 @@ import { createRemoteExecAgentTools } from "./remote-exec/agent-tools.js";
 import { createRemoteExecService } from "./remote-exec/service.js";
 import { createRemoteExecDeps } from "./remote-exec/wiring.js";
 import type { RemoteExecService } from "./remote-exec/types.js";
+import { createCustomProviderService } from "./custom-providers/service.js";
+import { createCustomProviderAgentTools } from "./custom-providers/agent-tools.js";
 import { SshModules } from "./ssh/ssh-modules.js";
 import { SshModules as SshServerModules } from "./ssh/modules.js";
 import { applyTerminalAgentHookSetting } from "../terminal/agent-hooks/terminal-agent-hook-setting.js";
@@ -1415,6 +1417,11 @@ export async function createJAgentDeskDaemon(
     logger.warn({ err: error }, "Remote-exec service unavailable");
     remoteExecService = null;
   }
+  // Custom API providers (spec 34 / ADR-0047): one daemon-wide service over config.json
+  // `agents.providers` + the secret store. TEMPORARY (C10): createCustomProviderService is a
+  // stub until C9's service lands — every operation fails with an "internal" error, and the
+  // providers.custom.* requests still get a response.
+  const customProvidersService = createCustomProviderService();
   // Sideload (spec 26 / ADR-0032): accounts, signing, installs and the hourly refresh job.
   // Secrets stay in <home>/sideload's own secret store; prompts, progress and notices fan out
   // to every client (wsServer is late-bound). The two env knobs shorten the refresh cycle for
@@ -1681,6 +1688,14 @@ export async function createJAgentDeskDaemon(
               agentManager.requestHostToolPermission(agentId, request),
           })
         : [],
+    customProviderAgentTools: (callerAgentId) =>
+      createCustomProviderAgentTools({
+        service: customProvidersService,
+        callerAgentId,
+        requestPermission: (agentId, request) =>
+          agentManager.requestHostToolPermission(agentId, request),
+        sshServerLabel: (id) => sshService.storage.getServer(id)?.label ?? null,
+      }),
     argocdAgentTools: (callerAgentId) =>
       createArgoCdAgentTools({
         service: argocdService,
@@ -1942,6 +1957,7 @@ export async function createJAgentDeskDaemon(
             server.setJiraService(jiraService);
             server.setFigmaService(figmaService);
             server.setRemoteExecService(remoteExecService);
+            server.setCustomProvidersService(customProvidersService);
             server.setAgentForum(
               agentForumService,
               createForumBootstrap({ agentManager, agentStorage, logger }),

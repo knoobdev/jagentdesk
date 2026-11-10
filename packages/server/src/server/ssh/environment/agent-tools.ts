@@ -377,7 +377,7 @@ function forwardTools(deps: SshAgentToolDependencies, forwards: SshForwardAccess
     name: "ssh_forward_start",
     title: "Start a port forward",
     description:
-      "Start a port forward through the SSH server: local (-L, listen on this machine, connect to destHost:destPort from the server), remote (-R, listen on the server, connect back to destHost:destPort here) or dynamic (-D, SOCKS5 on this machine). Requires the user's approval.",
+      "Start a port forward through the SSH server: local (-L, listen on this machine, connect to destHost:destPort from the server), remote (-R, listen on the server, connect back to destHost:destPort here) or dynamic (-D, SOCKS5 on this machine). Use this when a shell or command on THIS machine must reach a port on the remote machine — the shell has no tailnet route, only the daemon's SSH connection goes through Tailscale (for example to curl a model server you installed there with remote_run). Requires the user's approval.",
     inputSchema: {
       serverId: serverIdInput,
       kind: SshForwardKindSchema,
@@ -414,7 +414,8 @@ function forwardTools(deps: SshAgentToolDependencies, forwards: SshForwardAccess
   const stop = defineTool({
     name: "ssh_forward_stop",
     title: "Stop a port forward",
-    description: "Stop a running port forward by forwardId. Requires the user's approval.",
+    description:
+      "Stop a running port forward by forwardId (from ssh_forward_start). Requires the user's approval.",
     inputSchema: { forwardId: z.string().min(1) },
     requiresPermission: true,
     async run(input) {
