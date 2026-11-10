@@ -28,3 +28,18 @@ export function computeSnapshotId(
   const digest = createHash("sha256").update(lines.join("\n")).digest("hex");
   return `snp_${digest.slice(0, 12)}`;
 }
+
+/** snp_<12 hex of SHA-256 over the sorted (source name, source snapshotId) pairs> (spec 33.4). */
+export function computeSourcesSnapshotId(
+  pairs: readonly { name: string; snapshotId: string }[],
+): string {
+  const lines = pairs
+    .toSorted((a, b) => {
+      if (a.name < b.name) return -1;
+      if (a.name > b.name) return 1;
+      return 0;
+    })
+    .map((pair) => `${pair.name}\0${pair.snapshotId}`);
+  const digest = createHash("sha256").update(lines.join("\n")).digest("hex");
+  return `snp_${digest.slice(0, 12)}`;
+}
