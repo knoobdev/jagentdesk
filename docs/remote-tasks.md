@@ -15,7 +15,7 @@ command there and shows the result in the chat. Spec: remote execution (spec 33,
   and similar); any git repository found inside follows its own `.gitignore`. `.env`, private keys and
   similar files are never sent. Limits: 1 GiB per run, 100 MiB per file.
 - **Choosing what to send.** The agent can pass `source` to send only some folders inside the current
-  folder (for example `source: "mosa-be"` or `["mosa-be", "mosa-ui"]`), or `sendCode: false` to run a
+  folder (one or several), or `sendCode: false` to run a
   command without sending any code. Folders outside the current folder cannot be sent.
 - **Where it runs on the target.** The default copy lives in `<work folder>/<workspace key>/src`;
   folders chosen with `source` live in `.../sources/<name>`. Later runs only send changes; anything else
@@ -78,7 +78,7 @@ Register-ScheduledTask -TaskName "WSL keepalive" -Action $a -Trigger $t -Setting
 5. Edit the server again and press **Check**: every line should be green.
 
 Then ask an agent in any project, for example: "Run the test suite on my PC." From a folder that holds
-many repositories, name the one you mean: "Run the tests of mosa-be on my PC."
+many repositories, name the repository you mean in the request.
 
 ## Limits
 

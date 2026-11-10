@@ -18,8 +18,8 @@ agent provider.
   `.git` and similar); every git repository found inside keeps following its own `.gitignore`. `.env`,
   private keys and similar files are still never sent; limits stay 1 GiB per run and 100 MiB per file,
   and size limits are now checked before any file is read, then files are hashed as a stream.
-- **Choose what to send.** `source: "mosa-be"` or `["mosa-be", "mosa-ui"]` sends only those folders
-  (they must be inside the current folder); each lives in its own `sources/<name>` on the target and
+- **Choose what to send.** `source` sends only the folders you name (one or several, inside the
+  current folder); each lives in its own `sources/<name>` on the target and
   keeps its dependencies between runs. `sendCode: false` runs a command in a separate empty `nocode/`
   folder without sending anything. The permission card lists every source, or says no code is sent.
 - **`ssh_run` result card:** server name, command, exit code, output and a separate stderr box.
