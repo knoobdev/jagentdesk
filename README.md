@@ -122,6 +122,15 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
+### Remote tasks from any folder (v0.9.58)
+
+- **No git needed.** Ask from any folder — even one that holds many repositories. Name the part you
+  mean ("run the tests of mosa-be on my PC") and only that folder is sent; or run a command on the PC
+  without sending any code.
+- **Every result as a card.** Quick checks with `ssh_run` (uptime, disk, a failing command with its
+  stderr) and project jobs both show as cards in the chat, for Claude, Codex, OpenCode and ACP agents.
+- Details: [docs/remote-tasks.md](docs/remote-tasks.md) and the [changelog](CHANGELOG.md#v0958--2026-11-10).
+
 ### Run tasks on your PC from chat (v0.9.57)
 
 - **Ask in chat, run on another machine.** "Run the tests on my PC" — the agent sends a copy of the
