@@ -34,6 +34,7 @@ import {
 import { SettingsSection } from "@/screens/settings/settings-section";
 import { useProviderSettingsStore } from "@/stores/provider-settings-store";
 import { confirmDialog } from "@/utils/confirm-dialog";
+import { CustomProvidersSection } from "@/custom-providers/custom-providers-section";
 import { ChevronRight, MoreHorizontal, Trash2 } from "lucide-react-native";
 
 type ProviderDefinition = ReturnType<typeof buildProviderDefinitions>[number];
@@ -451,6 +452,8 @@ export function ProvidersSection({ serverId }: ProvidersSectionProps) {
           </View>
         ) : null}
       </SettingsSection>
+
+      {hasServer && isConnected ? <CustomProvidersSection serverId={serverId} /> : null}
 
       {hasServer && isConnected ? (
         <SettingsSection
