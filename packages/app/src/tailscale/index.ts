@@ -27,4 +27,6 @@ export {
   isTailscaleReady,
   shouldRoutePairVerifyToTailscaleLogin,
 } from "./login-gate";
+export { reviveTailnetHosts } from "./foreground-revive";
+export type { TailnetReviveStore } from "./foreground-revive";
 export type { TailscaleLoginResult, TailscaleLoginStatus } from "./types";

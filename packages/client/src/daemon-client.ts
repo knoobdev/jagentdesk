@@ -10688,6 +10688,15 @@ export class DaemonClient {
     }
   }
 
+  /**
+   * The WebSocket URL this client was built with. The host runtime compares
+   * it against the address the native Tailscale revive returns so it can
+   * rebuild the client when the loopback port changed (spec 05.7.4).
+   */
+  get url(): string {
+    return this.config.url;
+  }
+
   private resolveTransportUrlForAttempt(): string {
     return this.config.url;
   }
