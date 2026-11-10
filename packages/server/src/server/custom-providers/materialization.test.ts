@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  applyClaudeSpawnEnvOverlay,
   buildClaudeSpawnEnv,
   buildOpenCodeProviderConfig,
   mergeOpenCodeConfigContent,
@@ -58,10 +59,35 @@ describe("buildClaudeSpawnEnv", () => {
     });
   });
 
-  test("omits the token when there is no key", () => {
+  test("always sets the token: the literal no-key when there is no key", () => {
     expect(buildClaudeSpawnEnv({ baseUrl: "http://127.0.0.1:9/v1", apiKey: null })).toEqual({
       ANTHROPIC_BASE_URL: "http://127.0.0.1:9/v1",
+      ANTHROPIC_AUTH_TOKEN: "no-key",
     });
+  });
+});
+
+describe("applyClaudeSpawnEnvOverlay", () => {
+  test("a parent env with ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN does not reach the spawn env", () => {
+    const env = applyClaudeSpawnEnvOverlay(
+      {
+        PATH: "/usr/bin",
+        ANTHROPIC_API_KEY: "sk-user-own",
+        CLAUDE_CODE_OAUTH_TOKEN: "oauth-user",
+        ANTHROPIC_BASE_URL: "https://api.anthropic.com",
+      },
+      { ANTHROPIC_BASE_URL: "http://127.0.0.1:9/v1", ANTHROPIC_AUTH_TOKEN: "sk-provider" },
+    );
+    expect(env).toEqual({
+      PATH: "/usr/bin",
+      ANTHROPIC_BASE_URL: "http://127.0.0.1:9/v1",
+      ANTHROPIC_AUTH_TOKEN: "sk-provider",
+    });
+  });
+
+  test("without an overlay the parent env is kept untouched", () => {
+    const base = { PATH: "/usr/bin", ANTHROPIC_API_KEY: "sk-user-own" };
+    expect(applyClaudeSpawnEnvOverlay(base, {})).toEqual(base);
   });
 });
 

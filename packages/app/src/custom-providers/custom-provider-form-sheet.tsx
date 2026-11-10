@@ -11,7 +11,7 @@ import { SelectField, type SelectFieldOption } from "@/components/ui/select-fiel
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { confirmDialog } from "@/utils/confirm-dialog";
-import type { CustomProvidersClient } from "./client";
+import type { CustomProvidersClient } from "./use-custom-providers-list";
 import { useCustomProviderFormModel } from "./use-custom-provider-form-model";
 import type {
   CustomProviderFormState,
@@ -312,12 +312,13 @@ function DiscoverControls({
     if (!client) return;
     model.beginDiscover();
     try {
-      const result = await client.customProvidersTest(model.buildTestInput());
-      onTested?.(recordId, result.ok);
+      const payload = await client.customProvidersTest(model.buildTestInput());
+      const result = payload.result;
+      onTested?.(recordId, result?.ok === true);
       model.applyDiscoverResult({
-        ok: result.ok,
-        modelIds: result.models.map((entry) => entry.id),
-        errorMessage: result.error?.message ?? null,
+        ok: result?.ok === true,
+        modelIds: result?.models.map((entry) => entry.id) ?? [],
+        errorMessage: result?.error?.message ?? null,
       });
     } catch (error) {
       model.applyDiscoverResult({

@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { CustomProvidersClient } from "./client";
+import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { ApiProviderRecord, EnvProviderSummary } from "./types";
+
+/** The four daemon-client methods the custom-providers UI calls; tests inject a fake. */
+export type CustomProvidersClient = Pick<
+  DaemonClient,
+  "customProvidersList" | "customProvidersSave" | "customProvidersDelete" | "customProvidersTest"
+>;
 
 export type CustomProvidersLoadState =
   | { status: "connecting" } // an answer may still be pending (no client or host not connected)

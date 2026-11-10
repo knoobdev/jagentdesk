@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { ChevronRight, Plus } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -6,7 +6,6 @@ import { useTranslation } from "react-i18next";
 import { settingsStyles } from "@/styles/settings";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { SettingsSection } from "@/screens/settings/settings-section";
-import { createCustomProvidersClient } from "./client";
 import { useCustomProvidersList, type CustomProvidersLoadState } from "./use-custom-providers-list";
 import {
   CustomProviderFormSheet,
@@ -149,11 +148,7 @@ export function CustomProvidersSection({ serverId }: { serverId: string }) {
   const { t } = useTranslation();
   const isConnected = useHostRuntimeIsConnected(serverId);
   const daemonClient = useHostRuntimeClient(serverId);
-  const client = useMemo(
-    () => (daemonClient ? createCustomProvidersClient(daemonClient) : null),
-    [daemonClient],
-  );
-  const { state, refresh } = useCustomProvidersList(client, isConnected);
+  const { state, refresh } = useCustomProvidersList(daemonClient, isConnected);
   const [editor, setEditor] = useState<CustomProviderEditorTarget | null>(null);
   const [editorKey, setEditorKey] = useState(0);
   const [sshServers, setSshServers] = useState<readonly SshServerOption[]>([]);
@@ -263,7 +258,7 @@ export function CustomProvidersSection({ serverId }: { serverId: string }) {
       {editor ? (
         <CustomProviderFormSheet
           key={`${editor.mode}-${editor.record?.id ?? "create"}-${editorKey}`}
-          client={client}
+          client={daemonClient}
           target={editor}
           sshServers={sshServers}
           onClose={handleClose}

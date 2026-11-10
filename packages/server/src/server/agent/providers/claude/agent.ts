@@ -28,6 +28,7 @@ import {
   mapClaudeFailedToolCall,
   mapClaudeRunningToolCall,
 } from "./tool-call-mapper.js";
+import { applyClaudeSpawnEnvOverlay } from "../../../custom-providers/materialization.js";
 import {
   mapTaskNotificationSystemRecordToToolCall,
   mapTaskNotificationUserContentToToolCall,
@@ -3287,7 +3288,12 @@ class ClaudeAgentSession implements AgentSession {
       this.config.toolPolicy,
     );
     const settingsOptions = this.buildSettingsOptions(providerOptions, { ultracode });
-    const sdkEnv = { ...this.buildSdkEnv(), ...(await this.resolveSpawnEnvOverlay()) };
+    // Spec 34.3: when a custom api provider overlay applies, the user's own Anthropic
+    // credentials are deleted from the final env (never sent to the provider's endpoint).
+    const sdkEnv = applyClaudeSpawnEnvOverlay(
+      this.buildSdkEnv(),
+      await this.resolveSpawnEnvOverlay(),
+    );
     assertClaudeModeCanRun(this.currentMode, sdkEnv);
 
     const claudeBinary = await this.resolveBinary();

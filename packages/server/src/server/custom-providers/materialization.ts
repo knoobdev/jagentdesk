@@ -49,8 +49,27 @@ export function buildOpenCodeProviderConfig(
 export function buildClaudeSpawnEnv(endpoint: MaterializedEndpoint): Record<string, string> | null {
   return {
     ANTHROPIC_BASE_URL: endpoint.baseUrl,
-    ...(endpoint.apiKey ? { ANTHROPIC_AUTH_TOKEN: endpoint.apiKey } : {}),
+    // Always set (key or a placeholder) so Claude Code never falls back to the user's
+    // keychain login and never sends the user's own credentials to this endpoint.
+    ANTHROPIC_AUTH_TOKEN: endpoint.apiKey ?? "no-key",
   };
+}
+
+/**
+ * Final Claude spawn env when a custom api provider overlay applies: the user's own
+ * Anthropic credentials (parent env or keychain) must never reach the provider's
+ * endpoint, so they are deleted — not just overwritten.
+ */
+export function applyClaudeSpawnEnvOverlay(
+  baseEnv: NodeJS.ProcessEnv,
+  overlay: Record<string, string>,
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...baseEnv, ...overlay };
+  if (Object.keys(overlay).length > 0) {
+    delete env["ANTHROPIC_API_KEY"];
+    delete env["CLAUDE_CODE_OAUTH_TOKEN"];
+  }
+  return env;
 }
 
 /**

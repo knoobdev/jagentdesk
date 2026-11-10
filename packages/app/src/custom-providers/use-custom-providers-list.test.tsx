@@ -4,17 +4,20 @@
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ApiProviderRecord, EnvProviderSummary } from "./types";
-import type { CustomProvidersClient } from "./client";
+import type {
+  CustomProvidersDeletePayload,
+  CustomProvidersListPayload,
+  CustomProvidersSavePayload,
+  CustomProvidersTestPayload,
+} from "@jagentdesk/client/internal/daemon-client";
+import type { ApiProviderRecord } from "./types";
 import {
   useCustomProvidersList,
+  type CustomProvidersClient,
   type UseCustomProvidersListResult,
 } from "./use-custom-providers-list";
 
-interface FakeListResult {
-  providers: ApiProviderRecord[];
-  envProviders: EnvProviderSummary[];
-}
+type FakeListResult = Pick<CustomProvidersListPayload, "providers" | "envProviders">;
 
 function makeProvider(id: string): ApiProviderRecord {
   return {
@@ -36,15 +39,27 @@ function makeFakeClient(list: () => Promise<FakeListResult>): CustomProvidersCli
   const client = {
     listCalls: 0,
     deletedIds: [] as string[],
-    customProvidersList: () => {
+    customProvidersList: async () => {
       client.listCalls += 1;
-      return list();
+      const result = await list();
+      return { requestId: "test", error: null, ...result } satisfies CustomProvidersListPayload;
     },
-    customProvidersSave: async () => ({ provider: makeProvider("x") }),
+    customProvidersSave: async () =>
+      ({
+        requestId: "test",
+        error: null,
+        provider: makeProvider("x"),
+      }) satisfies CustomProvidersSavePayload,
     customProvidersDelete: async (input: { id: string }) => {
       client.deletedIds.push(input.id);
+      return { requestId: "test", error: null } satisfies CustomProvidersDeletePayload;
     },
-    customProvidersTest: async () => ({ ok: true, models: [], error: null }),
+    customProvidersTest: async () =>
+      ({
+        requestId: "test",
+        error: null,
+        result: { ok: true, models: [], error: null },
+      }) satisfies CustomProvidersTestPayload,
   };
   return client;
 }
