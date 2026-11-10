@@ -298,6 +298,8 @@ function buildDefaultTestServiceDeps() {
   };
 }
 
+// Registering a workspace reads the checkout twice: once at start and once
+// when observation setup establishes watcher coverage.
 function createService(options?: CreateServiceTestOptions) {
   const deps = { ...buildDefaultTestServiceDeps(), ...options };
   deps.getCheckoutWorktreeState =
@@ -863,7 +865,7 @@ describe("WorkspaceGitServiceImpl", () => {
       vi.fn(),
     );
     await vi.waitFor(() => {
-      expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(2);
+      expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(4);
       expect(runGitFetch).toHaveBeenCalledTimes(1);
       expect(service.getMetrics().workspaceRefreshInFlightCount).toBe(0);
     });
@@ -876,7 +878,7 @@ describe("WorkspaceGitServiceImpl", () => {
     await flushPromises();
     await vi.advanceTimersByTimeAsync(1_000);
     await vi.waitFor(() => {
-      expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(4);
+      expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(6);
     });
 
     await vi.advanceTimersByTimeAsync(180_000);
