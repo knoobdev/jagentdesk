@@ -632,6 +632,60 @@ test("a new visible agent subscribes immediately while the previous agent linger
 
 test("backgrounding preserves an existing unsubscribe grace period", async () => {
   const world = new TimelineWorld();
+test("a slow answer to the foreground check stays silent while the socket stayed connected", async () => {
+  vi.useFakeTimers();
+  try {
+    const world = freshnessWorld();
+    world.cursors.set("agent-a", { epoch: "epoch-a", endSeq: 42 });
+    world.show("pane", ["agent-a"]);
+    world.sync.setConnected(true);
+    (await world.nextMembership()).succeed({ "agent-a": "current" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("ready");
+
+    world.sync.setActive(false);
+    world.sync.setActive(true);
+    const check = await world.nextMembership();
+
+    await vi.advanceTimersByTimeAsync(FRESHNESS_CHECK_QUIET_MS * 4);
+    expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("checking");
+
+    check.succeed({ "agent-a": "current" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("ready");
+    world.expectNoPendingFetch();
+    world.sync.dispose();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a foreground check answered behind reports pending until the fetch lands", async () => {
+  const world = freshnessWorld();
+  world.cursors.set("agent-a", { epoch: "epoch-a", endSeq: 42 });
+  world.show("pane", ["agent-a"]);
+  world.sync.setConnected(true);
+  (await world.nextMembership()).succeed({ "agent-a": "current" });
+  await vi.waitFor(() => expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("ready"));
+
+  world.sync.setActive(false);
+  world.sync.setActive(true);
+  (await world.nextMembership()).succeed({ "agent-a": "behind" });
+
+  const fetch = await world.nextFetch("agent-a");
+  expect(fetch.request).toMatchObject({ direction: "after", cursor: { seq: 42 } });
+  expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("pending");
+  fetch.respond({ hasNewer: false });
+  await vi.waitFor(() => expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("ready"));
+  world.sync.dispose();
+});
+
+test("the old subscription keeps delivering until the daemon accepts its replacement", async () => {
+  const world = freshnessWorld();
+  world.cursors.set("agent-a", { epoch: "epoch-a", endSeq: 1 });
+  world.cursors.set("agent-b", { epoch: "epoch-b", endSeq: 2 });
+  world.openedEarlier(["agent-b"]);
+  world.show("pane", ["agent-a"]);
   world.sync.setConnected(true);
   world.sync.replaceVisibleAgentIds("workspace", ["agent-a"]);
   const membership = await world.nextMembership();
@@ -713,6 +767,34 @@ test("legacy delivery skips subscription RPCs while retaining visibility catch-u
     limit: 40,
     projection: "projected",
   });
+test("reconnecting reports reattaching instead of pending until the check answers", async () => {
+  vi.useFakeTimers();
+  try {
+    const world = freshnessWorld();
+    world.cursors.set("agent-a", { epoch: "epoch-a", endSeq: 42 });
+    world.show("pane", ["agent-a"]);
+    world.sync.setConnected(true);
+    (await world.nextMembership()).succeed({ "agent-a": "current" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("ready");
+
+    world.sync.setConnected(false);
+    expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("reattaching");
+    world.sync.setConnected(true);
+    expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("reattaching");
+
+    const check = await world.nextMembership();
+    await vi.advanceTimersByTimeAsync(FRESHNESS_CHECK_QUIET_MS * 4);
+    expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("reattaching");
+
+    check.succeed({ "agent-a": "current" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(world.sync.getAgentTimelineStatus("agent-a")).toBe("ready");
+    world.expectNoPendingFetch();
+    world.sync.dispose();
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("switching from legacy to selective delivery publishes membership and catches up once", async () => {
