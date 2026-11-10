@@ -48,6 +48,7 @@ vi.mock("@/utils/rich-clipboard-default-environment", () => ({
 
 import { ToolCall } from "./message";
 import type { ToolCallDetail } from "@jagentdesk/protocol/agent-types";
+import claudeRemoteRunCalls from "@/remote-exec/fixtures/claude-remote-run-calls.json";
 
 let root: Root | null = null;
 let container: HTMLElement | null = null;
@@ -163,6 +164,75 @@ describe("ToolCall inline remote job card (spec 33.9)", () => {
   });
 });
 
+// ADR-0045 job fields are optional and additive; the card must render both old and new records.
+const noCodeDetail: ToolCallDetail = {
+  type: "unknown",
+  input: { command: "pwd" },
+  output: JSON.stringify({
+    ...jobResult,
+    job: {
+      ...jobResult.job,
+      status: "succeeded",
+      exitCode: 0,
+      sync: null,
+      noCode: true,
+    },
+  }),
+};
+
+const sourcesDetail: ToolCallDetail = {
+  type: "unknown",
+  input: { command: "ls" },
+  output: JSON.stringify({
+    ...jobResult,
+    job: {
+      ...jobResult.job,
+      status: "succeeded",
+      exitCode: 0,
+      sync: { filesUploaded: 12, filesDeleted: 2 },
+      sources: [
+        { name: "A", path: "/ws/A", sync: { filesUploaded: 10, filesDeleted: 1 } },
+        { name: "C", path: "/ws/C", sync: { filesUploaded: 2, filesDeleted: 1 } },
+      ],
+    },
+  }),
+};
+
+const legacySyncDetail: ToolCallDetail = {
+  type: "unknown",
+  input: { command: "ls" },
+  output: {
+    ...jobResult,
+    job: { ...jobResult.job, sync: { filesUploaded: 3, filesDeleted: 0 } },
+  },
+};
+
+describe("ToolCall remote job card noCode / sources (spec 33.9, ADR-0045)", () => {
+  it("shows 'No code sent' instead of the sync line for a noCode job", () => {
+    mount(<ToolCall toolName="jagentdesk_remote_run" status="completed" detail={noCodeDetail} />);
+    expect(document.body.textContent).toContain("ssh.remoteExec.job.noCode");
+    expect(document.body.textContent).not.toContain("ssh.remoteExec.job.syncSummary");
+  });
+
+  it("shows the source names before the aggregate sync summary", () => {
+    mount(<ToolCall toolName="jagentdesk_remote_run" status="completed" detail={sourcesDetail} />);
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("A, C");
+    expect(text).toContain("ssh.remoteExec.job.syncSummary");
+    expect(text.indexOf("A, C")).toBeLessThan(text.indexOf("ssh.remoteExec.job.syncSummary"));
+  });
+
+  it("keeps the old rendering for a job record without the optional fields", () => {
+    mount(
+      <ToolCall toolName="jagentdesk_remote_run" status="completed" detail={legacySyncDetail} />,
+    );
+    const text = document.body.textContent ?? "";
+    expect(text).not.toContain("ssh.remoteExec.job.noCode");
+    expect(text).not.toContain("A, C");
+    expect(text).toContain("ssh.remoteExec.job.syncSummary");
+  });
+});
+
 describe("ToolCall remote_job_wait compact card (spec 33.9 follow-up)", () => {
   it("collapses the output box and omits the stop button", () => {
     mount(
@@ -226,5 +296,58 @@ describe("ToolCall remote_job_wait compact card (spec 33.9 follow-up)", () => {
     );
     expect(document.querySelector('[data-testid="remote-job-output-box"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="remote-job-output-toggle"]')).toBeNull();
+  });
+});
+
+// The real Claude wrapping found in the live test: the tool JSON sits inside a
+// {type:'command', command, output} wrapper under detail.output, as a string.
+const claudeRemoteRunDetail: ToolCallDetail = {
+  type: "unknown",
+  input: { serverId: "srv_e4e910a0a4ab", source: ["A", "C"], command: "ls; ls C ." },
+  output: {
+    type: "command",
+    command: "ls; ls C .",
+    output: JSON.stringify({
+      ...jobResult,
+      job: {
+        ...jobResult.job,
+        status: "succeeded",
+        exitCode: 0,
+        sources: [
+          { name: "A", path: "/ws/A", sync: { filesUploaded: 0, filesDeleted: 0 } },
+          { name: "C", path: "/ws/C", sync: { filesUploaded: 1, filesDeleted: 0 } },
+        ],
+      },
+    }),
+  },
+};
+
+// Pulled straight from the saved live timeline (fixtures/claude-remote-run-calls.json).
+const claudeFixtureCalls = claudeRemoteRunCalls as unknown as Array<{
+  name: string;
+  detail: ToolCallDetail;
+}>;
+
+describe("ToolCall remote job card with real Claude detail shapes (spec 33.9 follow-up)", () => {
+  it("renders the card for the Claude {type:'command'} wrapper, sources included", () => {
+    mount(
+      <ToolCall
+        toolName="mcp__jagentdesk__remote_run"
+        status="completed"
+        detail={claudeRemoteRunDetail}
+      />,
+    );
+    expect(document.querySelector('[data-testid="remote-job-card"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="tool-call-badge"]')).toBeNull();
+    expect(document.body.textContent).toContain("A, C");
+    expect(document.body.textContent).toContain(jobResult.job.command);
+  });
+
+  it("renders the card for the fixture's real remote_run call", () => {
+    const [, fixtureCall] = claudeFixtureCalls;
+    mount(<ToolCall toolName={fixtureCall.name} status="completed" detail={fixtureCall.detail} />);
+    expect(document.querySelector('[data-testid="remote-job-card"]')).not.toBeNull();
+    expect(document.body.textContent).toContain("PC WSL2");
+    expect(document.body.textContent).toContain("notes.txt");
   });
 });

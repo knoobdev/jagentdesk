@@ -9,9 +9,20 @@ command there and shows the result in the chat. Spec: remote execution (spec 33,
 - The other machine is an ordinary **SSH server** in **Servers**, with **Remote tasks** turned on.
 - With **Route → JAgentDesk Tailscale**, SSH goes through the daemon's embedded Tailscale node. The
   daemon machine does not need the Tailscale app. The target must be in the same tailnet.
-- Each run copies tracked files and new, non-ignored files (including uncommitted changes) to
-  `<work folder>/<workspace key>/src` on the target. `.env`, private keys and similar files are never
-  sent. Later runs only send changes; anything else in that folder (for example `node_modules`) stays.
+- **What gets sent.** By default the agent's current folder. In a git repository: tracked files and
+  new, non-ignored files, including uncommitted changes. In a folder that is not a git repository: every
+  file except dependency, cache and VCS folders (`node_modules`, `.venv`, `__pycache__`, `.next`, `.git`
+  and similar); any git repository found inside follows its own `.gitignore`. `.env`, private keys and
+  similar files are never sent. Limits: 1 GiB per run, 100 MiB per file.
+- **Choosing what to send.** The agent can pass `source` to send only some folders inside the current
+  folder (for example `source: "mosa-be"` or `["mosa-be", "mosa-ui"]`), or `sendCode: false` to run a
+  command without sending any code. Folders outside the current folder cannot be sent.
+- **Where it runs on the target.** The default copy lives in `<work folder>/<workspace key>/src`;
+  folders chosen with `source` live in `.../sources/<name>`. Later runs only send changes; anything else
+  in those folders (for example `node_modules` installed on the target) stays.
+- **`remote_run` vs `ssh_run`.** `remote_run` is for project work (build, test, scripts, long jobs) on a
+  copy of the code. `ssh_run` runs a quick command on the server itself (uptime, disk, services) in the
+  home folder without sending code. Both show their result as a card in the chat.
 - Jobs run detached from the SSH session and keep running if the connection drops. Each run and each
   Stop asks for your permission in the chat.
 
@@ -66,7 +77,8 @@ Register-ScheduledTask -TaskName "WSL keepalive" -Action $a -Trigger $t -Setting
 4. Connect once and accept the host key only if it matches `ssh-keygen -lf` from step 3 above.
 5. Edit the server again and press **Check**: every line should be green.
 
-Then ask an agent in any project, for example: "Run the test suite on my PC."
+Then ask an agent in any project, for example: "Run the test suite on my PC." From a folder that holds
+many repositories, name the one you mean: "Run the tests of mosa-be on my PC."
 
 ## Limits
 

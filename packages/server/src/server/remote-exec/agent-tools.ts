@@ -156,13 +156,16 @@ async function resolveTarget(
 }
 
 const remoteRunDescription =
-  "Run a shell command on another machine: snapshots a copy of the current workspace (including " +
-  "uncommitted changes and new files), syncs it to the SSH target and runs the command there. " +
-  "Secrets like .env files are not sent. Results from a Linux/WSL target do not prove macOS/iOS " +
-  "behaviour. serverId may be omitted when exactly one target is enabled. timeoutMs defaults to " +
-  "7200000 (max 86400000); waitMs defaults to 120000 (max 1800000). Requires the user's " +
-  "approval. Returns the job plus the last 64 KiB of output; when status is 'running', keep " +
-  "waiting with remote_job_wait.";
+  "Run a shell command on another machine for project work — build, test, scripts, long jobs — on a " +
+  "copy of the current workspace (git or not, including uncommitted changes and new files): it " +
+  "syncs the code to the SSH target and runs the command there. In a folder containing many " +
+  "repositories, pass source (a path, or an array of 1-8 paths, relative to the workspace) to send " +
+  "only those directories; commands that need no code (system checks, installs) take sendCode: " +
+  "false to run in an empty directory. Secrets like .env files are not sent. Results from a " +
+  "Linux/WSL target do not prove macOS/iOS behaviour. serverId may be omitted when exactly one " +
+  "target is enabled. timeoutMs defaults to 7200000 (max 86400000); waitMs defaults to 120000 (max " +
+  "1800000). Requires the user's approval. Returns the job plus the last 64 KiB of output; when " +
+  "status is 'running', keep waiting with remote_job_wait.";
 
 const jobTools = (deps: RemoteExecAgentToolDependencies): RemoteExecAgentTool[] => [
   defineTool({
@@ -187,6 +190,20 @@ const jobTools = (deps: RemoteExecAgentToolDependencies): RemoteExecAgentTool[] 
         .optional()
         .describe("Target server id (srv_…). Optional when exactly one target is enabled."),
       command: z.string().min(1),
+      source: z
+        .union([z.string(), z.array(z.string())])
+        .optional()
+        .describe(
+          "Directory (or array of 1-8 directories) inside the workspace to send instead of the " +
+            "whole workspace; each must be a directory inside the workspace.",
+        ),
+      sendCode: z
+        .boolean()
+        .optional()
+        .describe(
+          "Set false to run without sending any code (empty directory on the target). " +
+            "Cannot be combined with source.",
+        ),
       timeoutMs: z.number().int().positive().optional(),
       waitMs: z.number().int().nonnegative().optional(),
     },
@@ -195,20 +212,33 @@ const jobTools = (deps: RemoteExecAgentToolDependencies): RemoteExecAgentTool[] 
       requireEnabledTarget(deps);
       const workspacePath = requireCwd(deps);
       const { serverId, label } = await resolveTarget(deps, input.serverId);
+      // Source errors (33.4) throw here, before the permission card, and no job is created.
       // Snapshot stats for the card first (spec 33.7); the run's snapshot is created after approval.
-      const preview = await deps.service.previewSnapshot({ workspacePath });
+      const preview = await deps.service.previewSnapshot({
+        workspacePath,
+        ...(input.source !== undefined ? { source: input.source } : {}),
+        // sendCode defaults to true (spec 33.7); only an explicit false runs without code.
+        ...(input.sendCode === false ? { noCode: true } : {}),
+      });
+      // Card input (spec 33.7): snapshot stats plus the source list, or code:"none" for noCode runs.
+      const cardInput: Record<string, unknown> = {
+        server: label,
+        command: input.command,
+        cwd: workspacePath,
+      };
+      if (preview.noCode === true) {
+        cardInput.code = "none";
+      } else {
+        cardInput.files = preview.filesTotal;
+        cardInput.bytes = preview.bytesTotal;
+        cardInput.excludedSecrets = preview.excludedSecrets.length;
+        if (preview.sources) cardInput.sources = preview.sources;
+      }
       await requireApproval(deps, {
         name: "remote_run",
         title: `Run on ${label}`,
         description: input.command,
-        input: {
-          server: label,
-          command: input.command,
-          cwd: workspacePath,
-          files: preview.filesTotal,
-          bytes: preview.bytesTotal,
-          excludedSecrets: preview.excludedSecrets.length,
-        },
+        input: cardInput,
       });
       const job = await deps.service.startJob({
         serverId,
@@ -220,6 +250,8 @@ const jobTools = (deps: RemoteExecAgentToolDependencies): RemoteExecAgentTool[] 
           REMOTE_RUN_MAX_TIMEOUT_MS,
         ),
         agentId: deps.callerAgentId,
+        ...(input.source !== undefined ? { source: input.source } : {}),
+        ...(input.sendCode === false ? { noCode: true } : {}),
       });
       return jsonResult(
         await deps.service.waitForJob(

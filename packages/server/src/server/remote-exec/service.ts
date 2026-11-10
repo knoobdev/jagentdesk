@@ -1,20 +1,22 @@
 import path from "node:path";
 import type { Client } from "ssh2";
 import { SshConnectionError } from "../ssh/ssh-connection.js";
-import { computeWorkspaceKey, newJobId } from "./ids.js";
+import { computeSourcesSnapshotId, computeWorkspaceKey, newJobId } from "./ids.js";
 import { isTerminalStatus, RemoteJobStore } from "./job-store.js";
 import { OutputMirror } from "./output-mirror.js";
 import {
   buildCheckTargetScript,
+  buildEnsureNocodeDirScript,
   buildLaunchJobScript,
   buildPollScript,
   buildStopScript,
   buildWriteCommandScript,
   remotePathExpr,
 } from "./remote-scripts.js";
-import { createSnapshot, type WorkspaceSnapshot } from "./snapshot.js";
+import { jobSnapshotId, createRunPlan, type RunPlan } from "./run-plan.js";
 import { execCollect } from "./ssh-exec.js";
 import { SyncCancelled, syncWorkspace } from "./sync.js";
+import type { WorkspaceSnapshot } from "./snapshot.js";
 import {
   REMOTE_DEFAULT_WORK_ROOT,
   REMOTE_OUTPUT_READ_MAX_BYTES,
@@ -28,6 +30,7 @@ import {
   type RemoteExecErrorInfo,
   type RemoteExecService,
   type RemoteJob,
+  type RemoteJobSource,
   type RemoteOutputChunk,
   type RemoteRunResult,
   type RemoteSnapshotPreview,
@@ -333,17 +336,109 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
     return true;
   }
 
+  /** Per-source record at job creation: totals known, upload counts filled in after the sync. */
+  function initialSourceSync(snapshot: WorkspaceSnapshot): RemoteSyncSummary {
+    return {
+      snapshotId: snapshot.snapshotId,
+      filesTotal: snapshot.files.length,
+      filesUploaded: 0,
+      filesDeleted: 0,
+      bytesUploaded: 0,
+      excludedSecrets: snapshot.excludedSecrets,
+      skipped: snapshot.skipped,
+    };
+  }
+
+  /** Command run directory (spec 33.6): src/ for the default source, nocode/ for noCode (its own
+   * directory, never synced or deleted, separate from src/ and sources/), sources/<name> for one
+   * explicit source, sources/ for several (the command cds into each source itself). */
+  function runDirExpr(plan: RunPlan, workRoot: string, workspaceKey: string): string {
+    if (plan.kind === "noCode") {
+      return remotePathExpr(workRoot, workspaceKey, "nocode");
+    }
+    if (plan.kind === "sources") {
+      return plan.snapshots.length === 1
+        ? remotePathExpr(workRoot, workspaceKey, "sources", plan.snapshots[0].name)
+        : remotePathExpr(workRoot, workspaceKey, "sources");
+    }
+    return remotePathExpr(workRoot, workspaceKey, "src");
+  }
+
+  /**
+   * Explicit sources (spec 33.5): each source syncs only inside its own directory; sources not in
+   * this run are left untouched. Returns the aggregate summary (paths prefixed `<name>/`) and the
+   * per-source records with source-relative paths.
+   */
+  async function syncExplicitSources(
+    plan: Extract<RunPlan, { kind: "sources" }>,
+    client: Client,
+    workRoot: string,
+    cancelled: () => boolean,
+  ): Promise<{ sync: RemoteSyncSummary; sourceRecords: RemoteJobSource[] }> {
+    const sourceRecords: RemoteJobSource[] = [];
+    let filesTotal = 0;
+    let filesUploaded = 0;
+    let filesDeleted = 0;
+    let bytesUploaded = 0;
+    const excludedSecrets: string[] = [];
+    const skipped: string[] = [];
+    for (const entry of plan.snapshots) {
+      if (cancelled()) throw new SyncCancelled();
+      const result = await syncWorkspace({
+        client,
+        snapshot: entry.snapshot,
+        workRoot,
+        workspacePath: entry.snapshot.workspacePath,
+        sourceName: entry.name,
+        isCancelled: cancelled,
+      });
+      sourceRecords.push({
+        name: entry.name,
+        path: entry.path,
+        sync: {
+          snapshotId: entry.snapshot.snapshotId,
+          excludedSecrets: entry.snapshot.excludedSecrets,
+          skipped: entry.snapshot.skipped,
+          ...result.summary,
+        },
+      });
+      filesTotal += result.summary.filesTotal;
+      filesUploaded += result.summary.filesUploaded;
+      filesDeleted += result.summary.filesDeleted;
+      bytesUploaded += result.summary.bytesUploaded;
+      excludedSecrets.push(...entry.snapshot.excludedSecrets.map((p) => `${entry.name}/${p}`));
+      skipped.push(...entry.snapshot.skipped.map((p) => `${entry.name}/${p}`));
+    }
+    return {
+      // Exactly one source keeps its own snapshotId; several get the aggregate (spec 33.4).
+      sync: {
+        snapshotId:
+          plan.snapshots.length === 1
+            ? plan.snapshots[0].snapshot.snapshotId
+            : computeSourcesSnapshotId(
+                plan.snapshots.map((entry) => ({
+                  name: entry.name,
+                  snapshotId: entry.snapshot.snapshotId,
+                })),
+              ),
+        filesTotal,
+        filesUploaded,
+        filesDeleted,
+        bytesUploaded,
+        excludedSecrets,
+        skipped,
+      },
+      sourceRecords,
+    };
+  }
+
   /**
    * Runs one job end to end and owns every status write for it: a stop request (stopJob) flips
    * `handle.cancelled` and awaits `handle.settled`, so this function alone decides the final
    * record. Cancellation is checked after every await; if the launch exec already ran, the stop
    * procedure kills the launched process group before the record settles as stopped.
    */
-  async function runJob(
-    job: RemoteJob,
-    snapshot: WorkspaceSnapshot,
-    handle: FollowHandle,
-  ): Promise<void> {
+  async function runJob(job: RemoteJob, plan: RunPlan, handle: FollowHandle): Promise<void> {
     const server = await deps.getServer(job.serverId);
     const workRoot = server ? workRootOf(server) : REMOTE_DEFAULT_WORK_ROOT;
     // service.stop() (daemon shutdown) also cancels handles, but that is not a user stop: the
@@ -354,21 +449,37 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
     try {
       if (cancelled()) throw new SyncCancelled();
       const lease = await deps.acquireClient(job.serverId);
-      let sync: RemoteSyncSummary;
+      let sync: RemoteSyncSummary | null = null;
       try {
-        const result = await syncWorkspace({
-          client: lease.client,
-          snapshot,
-          workRoot,
-          workspacePath: snapshot.workspacePath,
-          isCancelled: cancelled,
-        });
-        sync = {
-          snapshotId: snapshot.snapshotId,
-          excludedSecrets: snapshot.excludedSecrets,
-          skipped: snapshot.skipped,
-          ...result.summary,
-        };
+        if (plan.kind === "noCode") {
+          // No code sent (spec 33.5): only ensure the nocode/ run directory exists — nothing
+          // uploaded, nothing deleted, no manifest written (one would make the next default run
+          // re-upload). The directory is separate from src/ and sources/ and never synced.
+          if (cancelled()) throw new SyncCancelled();
+          await execCollect(
+            lease.client,
+            buildEnsureNocodeDirScript(remotePathExpr(workRoot, job.workspaceKey, "nocode")),
+            { timeoutMs: EXEC_TIMEOUT_MS },
+          );
+        } else if (plan.kind === "default") {
+          const result = await syncWorkspace({
+            client: lease.client,
+            snapshot: plan.snapshot,
+            workRoot,
+            workspacePath: plan.snapshot.workspacePath,
+            isCancelled: cancelled,
+          });
+          sync = {
+            snapshotId: plan.snapshot.snapshotId,
+            excludedSecrets: plan.snapshot.excludedSecrets,
+            skipped: plan.snapshot.skipped,
+            ...result.summary,
+          };
+        } else {
+          const result = await syncExplicitSources(plan, lease.client, workRoot, cancelled);
+          sync = result.sync;
+          job.sources = result.sourceRecords;
+        }
         phase = "start";
         const dirExpr = jobDirExprOf(workRoot, job);
         const written = await execCollect(lease.client, buildWriteCommandScript(dirExpr), {
@@ -386,7 +497,7 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
         const launchedResult = await execCollect(
           lease.client,
           buildLaunchJobScript({
-            srcDirExpr: remotePathExpr(workRoot, job.workspaceKey, "src"),
+            srcDirExpr: runDirExpr(plan, workRoot, job.workspaceKey),
             jobDirExpr: dirExpr,
           }),
           { timeoutMs: EXEC_TIMEOUT_MS },
@@ -400,7 +511,6 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
       }
       if (cancelled()) throw new SyncCancelled();
       job.sync = sync;
-      job.snapshotId = snapshot.snapshotId;
       job.status = "running";
       job.startedAtMs = now();
       await persistIfActive(job, "status");
@@ -530,19 +640,52 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
       }
     },
 
-    async previewSnapshot(input: { workspacePath: string }): Promise<RemoteSnapshotPreview> {
-      const snapshot = await createSnapshot({
-        workspacePath: input.workspacePath,
+    async previewSnapshot(input): Promise<RemoteSnapshotPreview> {
+      const plan = await createRunPlan({
+        cwd: input.workspacePath,
         daemonId: deps.daemonId,
         homeDir: deps.homeDir,
+        source: input.source,
+        noCode: input.noCode,
       });
+      if (plan.kind === "noCode") {
+        return {
+          workspacePath: plan.cwd,
+          workspaceKey: plan.workspaceKey,
+          filesTotal: 0,
+          bytesTotal: 0,
+          excludedSecrets: [],
+          skipped: [],
+          noCode: true,
+        };
+      }
+      if (plan.kind === "default") {
+        return {
+          workspacePath: plan.cwd,
+          workspaceKey: plan.workspaceKey,
+          filesTotal: plan.snapshot.files.length,
+          bytesTotal: plan.snapshot.bytesTotal,
+          excludedSecrets: plan.snapshot.excludedSecrets,
+          skipped: plan.snapshot.skipped,
+        };
+      }
       return {
-        workspacePath: snapshot.workspacePath,
-        workspaceKey: snapshot.workspaceKey,
-        filesTotal: snapshot.files.length,
-        bytesTotal: snapshot.bytesTotal,
-        excludedSecrets: snapshot.excludedSecrets,
-        skipped: snapshot.skipped,
+        workspacePath: plan.cwd,
+        workspaceKey: plan.workspaceKey,
+        filesTotal: plan.snapshots.reduce((sum, entry) => sum + entry.snapshot.files.length, 0),
+        bytesTotal: plan.snapshots.reduce((sum, entry) => sum + entry.snapshot.bytesTotal, 0),
+        excludedSecrets: plan.snapshots.flatMap((entry) =>
+          entry.snapshot.excludedSecrets.map((p) => `${entry.name}/${p}`),
+        ),
+        skipped: plan.snapshots.flatMap((entry) =>
+          entry.snapshot.skipped.map((p) => `${entry.name}/${p}`),
+        ),
+        sources: plan.snapshots.map((entry) => ({
+          name: entry.name,
+          files: entry.snapshot.files.length,
+          bytes: entry.snapshot.bytesTotal,
+          excludedSecrets: entry.snapshot.excludedSecrets.length,
+        })),
       };
     },
 
@@ -589,10 +732,12 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
         if (active) {
           throw jobRunningError(active);
         }
-        const snapshot = await createSnapshot({
-          workspacePath,
+        const plan = await createRunPlan({
+          cwd: workspacePath,
           daemonId: deps.daemonId,
           homeDir: deps.homeDir,
+          source: input.source,
+          noCode: input.noCode,
         });
         const job: RemoteJob = {
           id: newJobId(),
@@ -600,7 +745,9 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
           serverLabel: server.label,
           workspacePath,
           workspaceKey,
-          snapshotId: null,
+          // Known from the plan, so the record is correct from the syncing state on
+          // (null for noCode, per 33.4).
+          snapshotId: jobSnapshotId(plan),
           command: input.command,
           status: "syncing",
           exitCode: null,
@@ -616,12 +763,22 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
             input.timeoutMs > 0
               ? Math.min(input.timeoutMs, REMOTE_RUN_MAX_TIMEOUT_MS)
               : REMOTE_RUN_DEFAULT_TIMEOUT_MS,
+          ...(plan.kind === "noCode" ? { noCode: true } : {}),
+          ...(plan.kind === "sources"
+            ? {
+                sources: plan.snapshots.map((entry) => ({
+                  name: entry.name,
+                  path: entry.path,
+                  sync: initialSourceSync(entry.snapshot),
+                })),
+              }
+            : {}),
         };
         await store.upsert(job);
         notifyJob(job, "status");
         const handle = newFollowHandle();
         handles.set(job.id, handle);
-        void runJob(job, snapshot, handle);
+        void runJob(job, plan, handle);
         return { ...job };
       } finally {
         startLocks.delete(lockKey);

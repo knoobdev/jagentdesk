@@ -1,9 +1,51 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.9.57`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.9.58`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.9.58 — 2026-11-10
+
+Remote tasks from any folder: `remote_run` no longer needs git, can send only the folders you name,
+or run without sending code. `ssh_run` results now show as a card, and job cards render for every
+agent provider.
+
+### Added and changed
+
+- **No git required.** By default `remote_run` sends the agent's current folder. Outside a git
+  repository it skips dependency, cache and VCS folders (`node_modules`, `.venv`, `__pycache__`, `.next`,
+  `.git` and similar); every git repository found inside keeps following its own `.gitignore`. `.env`,
+  private keys and similar files are still never sent; limits stay 1 GiB per run and 100 MiB per file,
+  and size limits are now checked before any file is read, then files are hashed as a stream.
+- **Choose what to send.** `source: "mosa-be"` or `["mosa-be", "mosa-ui"]` sends only those folders
+  (they must be inside the current folder); each lives in its own `sources/<name>` on the target and
+  keeps its dependencies between runs. `sendCode: false` runs a command in a separate empty `nocode/`
+  folder without sending anything. The permission card lists every source, or says no code is sent.
+- **`ssh_run` result card:** server name, command, exit code, output and a separate stderr box.
+- **Job cards for every provider.** Claude delivers tool results inside a wrapper, so v0.9.57 showed
+  only a collapsed "Remote run" row for Claude agents; the job card and the `ssh_run` card now read
+  the result shapes of Claude, Codex, OpenCode and ACP agents.
+- **Clearer tool choice.** `remote_run` is described for project work on a copy of the code;
+  `ssh_run` for quick commands on the server itself.
+- Protocol: optional `noCode` and `sources` fields on remote jobs; older apps ignore them.
+
+### Verification and current limits
+
+- Checked on the real Windows 11 PC (WSL2) over the tailnet with the Tailscale app on the Mac stopped:
+  a non-git folder holding two git repositories and a plain folder (ignored build output, `node_modules`
+  and both `.env` files left out, zero files on re-run); `sendCode: false` in an empty `nocode/` folder;
+  `source` with one and two folders, every refused source (outside the folder, symlink escape, missing,
+  duplicate name, more than eight) refused before any permission card; earlier sources and the default
+  copy left untouched. Regression: re-run, running-job refusal, Stop, a 90-second job across a
+  20-second Tailscale freeze, no secrets in daemon files.
+- In the app, a Claude agent's `ssh_run` calls (exit 0 and exit 2 with stderr), a two-source job and a
+  no-code job rendered as cards.
+- A whole folder of many repositories can exceed 1 GiB: the run is refused (measured: 22 seconds for a
+  multi-GB folder, no file content read) with a hint to use `source`.
+- Repository typecheck, focused server/protocol/app tests and the real OpenSSH end-to-end suite (19)
+  passed; the full app suite has the same 39 pre-existing failures as v0.9.57.
+- OpenCode agents with Code Mode enabled may not see the remote tools directly.
 
 ## v0.9.57 — 2026-11-09
 

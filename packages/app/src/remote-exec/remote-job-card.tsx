@@ -11,16 +11,17 @@ import { darkTheme } from "@/styles/theme";
 import { CODE_SURFACE_DATASET } from "@/styles/code-surface";
 import { isTerminalRemoteJobStatus } from "./job-card-state";
 import { nextPinnedState, scrollActionForAppend } from "./output-scroll";
+import { readRemoteJobExtras } from "./remote-job-extras";
 import { useRemoteJobCard } from "./use-remote-job-card";
 
 const ScrollView = isWeb ? RNScrollView : GHScrollView;
 
 /** Both ScrollView implementations expose the same imperative scrollToEnd. */
-interface ScrollToEndableView {
+export interface ScrollToEndableView {
   scrollToEnd: (options?: { animated?: boolean }) => void;
 }
 
-interface OutputScrollEvent {
+export interface OutputScrollEvent {
   nativeEvent: {
     layoutMeasurement: { height: number };
     contentOffset: { y: number };
@@ -32,16 +33,36 @@ interface OutputScrollEvent {
 const OUTPUT_MAX_HEIGHT = 240;
 
 /** spec 33.9 dot colours: green succeeded, amber syncing/running, red failed/lost, muted stopped. */
-function remoteJobDotStyle(status: RemoteJobStatus) {
+export type RemoteJobDotVariant = "succeeded" | "active" | "failed" | "stopped";
+
+export function remoteJobDotVariant(status: RemoteJobStatus): RemoteJobDotVariant {
   switch (status) {
     case "succeeded":
-      return styles.dotSucceeded;
+      return "succeeded";
     case "syncing":
     case "running":
-      return styles.dotActive;
+      return "active";
     case "failed":
     case "timed_out":
     case "lost":
+      return "failed";
+    case "stopped":
+      return "stopped";
+  }
+}
+
+/** The status dot (spec 33.9 §1.4 palette); shared by the job card and the ssh_run card. */
+export function RemoteJobDot({ variant }: { variant: RemoteJobDotVariant }) {
+  return <View style={[styles.dot, dotVariantStyle(variant)]} />;
+}
+
+function dotVariantStyle(variant: RemoteJobDotVariant) {
+  switch (variant) {
+    case "succeeded":
+      return styles.dotSucceeded;
+    case "active":
+      return styles.dotActive;
+    case "failed":
       return styles.dotFailed;
     case "stopped":
       return styles.dotStopped;
@@ -70,7 +91,7 @@ function RemoteJobCardHeader({
 }) {
   return (
     <View style={styles.headerRow}>
-      <View style={[styles.dot, remoteJobDotStyle(job.status)]} />
+      <RemoteJobDot variant={remoteJobDotVariant(job.status)} />
       <Text style={styles.targetLabel} numberOfLines={1}>
         {job.serverLabel}
       </Text>
@@ -91,20 +112,50 @@ function RemoteJobCardHeader({
   );
 }
 
+/**
+ * The command line, mono and capped at 3 lines (spec 33.9 wrap rule, shared by the job card
+ * and the ssh_run card). The full text stays in the accessibility label.
+ */
+export function RemoteJobCommand({
+  command,
+  accessibilityLabel,
+}: {
+  command: string;
+  accessibilityLabel?: string;
+}) {
+  if (!command) return null;
+  return (
+    <Text
+      selectable
+      style={styles.command}
+      dataSet={CODE_SURFACE_DATASET}
+      numberOfLines={3}
+      accessibilityLabel={accessibilityLabel ?? command}
+    >
+      {command}
+    </Text>
+  );
+}
+
 /** The dark output frame, shared by the full card and the compact card's expanded state. */
-function RemoteJobOutputBox({
+export function RemoteJobOutputBox({
   output,
   outputEmptyLabel,
   attachScrollRef,
   handleOutputScroll,
+  handleContentSizeChange,
+  testID = "remote-job-output-box",
 }: {
   output: string;
   outputEmptyLabel: string;
   attachScrollRef: (instance: ScrollToEndableView | null) => void;
   handleOutputScroll: (event: OutputScrollEvent) => void;
+  /** Fired when the content lays out or grows; the card sticks to the bottom while pinned. */
+  handleContentSizeChange?: () => void;
+  testID?: string;
 }) {
   return (
-    <View style={styles.outputBox} testID="remote-job-output-box">
+    <View style={styles.outputBox} testID={testID}>
       <ScrollView
         ref={attachScrollRef}
         style={styles.outputScroll}
@@ -112,6 +163,7 @@ function RemoteJobOutputBox({
         nestedScrollEnabled
         showsVerticalScrollIndicator
         onScroll={handleOutputScroll}
+        onContentSizeChange={handleContentSizeChange}
         scrollEventThrottle={16}
       >
         <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator>
@@ -185,22 +237,34 @@ export function RemoteJobCard({
   }, [output]);
 
   const active = job !== null && !isTerminalRemoteJobStatus(job.status);
+  // Optional ADR-0045 fields (`noCode`, `sources`), read at runtime so old-daemon records
+  // without them render exactly as before.
+  const extras = useMemo(() => readRemoteJobExtras(job), [job]);
   const metaParts = useMemo(() => {
     if (!job) return [];
     const parts: string[] = [];
-    if (job.sync) {
-      parts.push(
-        t("ssh.remoteExec.job.syncSummary", {
-          sent: job.sync.filesUploaded,
-          removed: job.sync.filesDeleted,
-        }),
-      );
+    if (extras.noCode) {
+      parts.push(t("ssh.remoteExec.job.noCode"));
+    } else {
+      // Source names first, then the aggregate sync summary (spec 33.9); the single-line
+      // meta row truncates to fit.
+      if (extras.sources.length > 0) {
+        parts.push(extras.sources.map((source) => source.name).join(", "));
+      }
+      if (job.sync) {
+        parts.push(
+          t("ssh.remoteExec.job.syncSummary", {
+            sent: job.sync.filesUploaded,
+            removed: job.sync.filesDeleted,
+          }),
+        );
+      }
     }
     if (job.exitCode !== null) {
       parts.push(t("ssh.remoteExec.job.exitCode", { code: job.exitCode }));
     }
     return parts;
-  }, [job, t]);
+  }, [job, extras, t]);
   const truncated = initialTruncated || (job?.outputTruncated ?? false);
 
   if (!job) return null;
@@ -217,15 +281,7 @@ export function RemoteJobCard({
         stopping={stopping}
         stop={stop}
       />
-      <Text
-        selectable
-        style={styles.command}
-        dataSet={CODE_SURFACE_DATASET}
-        numberOfLines={3}
-        accessibilityLabel={job.command}
-      >
-        {job.command}
-      </Text>
+      <RemoteJobCommand command={job.command} />
       {metaParts.length > 0 ? (
         <Text style={styles.metaText} numberOfLines={1}>
           {metaParts.join(" · ")}
@@ -262,7 +318,7 @@ export function RemoteJobCard({
   );
 }
 
-const styles = StyleSheet.create((theme) => ({
+export const styles = StyleSheet.create((theme) => ({
   card: {
     gap: theme.spacing[2],
   },

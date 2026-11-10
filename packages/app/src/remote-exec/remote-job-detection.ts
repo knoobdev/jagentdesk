@@ -4,6 +4,7 @@ import {
   getJAgentDeskToolLeafName,
   normalizeToolName,
 } from "@jagentdesk/protocol/tool-name-normalization";
+import { unwrapToolResultPayload } from "./tool-result-payload";
 
 const REMOTE_JOB_TOOL_LEAF_NAMES: ReadonlySet<string> = new Set(["remote_run", "remote_job_wait"]);
 
@@ -37,9 +38,9 @@ export interface RemoteJobToolResult {
 }
 
 /**
- * Extracts the job from a remote job tool call's result. Tools arrive with `unknown` details
- * whose output is the JSON result (object or string); `plain_text` carries the JSON as text.
- * Returns null for pending calls (no result yet) and for results without a `rjb_` job.
+ * Extracts the job from a remote job tool call's result. The output is the JSON result however
+ * the provider wraps it (see tool-result-payload.ts). Returns null for pending calls (no result
+ * yet) and for results without a `rjb_` job.
  */
 export function readRemoteJobToolResult(
   toolName: string,
@@ -51,6 +52,9 @@ export function readRemoteJobToolResult(
     raw = detail.output;
   } else if (detail.type === "plain_text") {
     raw = detail.text;
+  } else if (detail.type === "shell") {
+    // Generic ACP "execute" tools arrive as shell details with the tool JSON as output text.
+    raw = detail.output;
   } else {
     return null;
   }
@@ -59,27 +63,21 @@ export function readRemoteJobToolResult(
 }
 
 function parseRemoteJobResult(raw: unknown): RemoteJobToolResult | null {
-  let value = raw;
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (!trimmed.startsWith("{")) return null;
-    try {
-      value = JSON.parse(trimmed) as unknown;
-    } catch {
-      return null;
-    }
-  }
-  if (!value || typeof value !== "object") return null;
-  const record = value as Record<string, unknown>;
-  const job = record.job;
-  if (!job || typeof job !== "object") return null;
-  const jobRecord = job as Record<string, unknown>;
-  if (typeof jobRecord.id !== "string" || !jobRecord.id.startsWith("rjb_")) return null;
-  if (typeof jobRecord.status !== "string") return null;
+  const record = unwrapToolResultPayload(raw, isValidRemoteJobPayload);
+  if (!record) return null;
   return {
-    job: job as RemoteJob,
+    job: record.job as RemoteJob,
     output: typeof record.output === "string" ? record.output : "",
     outputOffset: typeof record.outputOffset === "number" ? record.outputOffset : 0,
     outputTruncatedHead: record.outputTruncatedHead === true,
   };
+}
+
+function isValidRemoteJobPayload(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const job = (value as Record<string, unknown>).job;
+  if (!job || typeof job !== "object") return false;
+  const jobRecord = job as Record<string, unknown>;
+  if (typeof jobRecord.id !== "string" || !jobRecord.id.startsWith("rjb_")) return false;
+  return typeof jobRecord.status === "string";
 }

@@ -52,6 +52,16 @@ export const RemoteSyncSummarySchema = z.object({
 });
 export type RemoteSyncSummary = z.infer<typeof RemoteSyncSummarySchema>;
 
+export const RemoteJobSourceSchema = z.object({
+  // Source name = basename of the resolved source directory (spec 33.4 / ADR-0045).
+  name: z.string(),
+  // Absolute path of the source on the daemon (spec 33.6).
+  path: z.string(),
+  // Per-source sync summary; paths inside are relative to that source.
+  sync: RemoteSyncSummarySchema,
+});
+export type RemoteJobSource = z.infer<typeof RemoteJobSourceSchema>;
+
 export const RemoteJobSchema = z.object({
   id: z.string(), // `rjb_…`
   serverId: z.string(),
@@ -71,6 +81,12 @@ export const RemoteJobSchema = z.object({
   startedAtMs: z.number().nullable(),
   finishedAtMs: z.number().nullable(),
   timeoutMs: z.number().int(),
+  // Optional since ADR-0045; old records and old daemons never send them.
+  // True when the job ran with sendCode:false — no code was sent (spec 33.4).
+  noCode: z.boolean().optional(),
+  // Present when the run selected sources via `source` (spec 33.4); absent for the
+  // default (whole-cwd) source, which keeps `sync` as its summary.
+  sources: z.array(RemoteJobSourceSchema).optional(),
 });
 export type RemoteJob = z.infer<typeof RemoteJobSchema>;
 

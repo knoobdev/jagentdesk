@@ -111,12 +111,23 @@ export function isSafeRelativeDeletePath(manifestPath: string): boolean {
   return !manifestPath.split("/").includes("..");
 }
 
-function remoteDirs(workRoot: string, workspaceKey: string) {
+function remoteDirs(workRoot: string, workspaceKey: string, sourceName?: string) {
   const base = remotePathExpr(workRoot, workspaceKey);
+  // Explicit sources live beside the default layout (spec 33.5): `sources/<name>/` with their own
+  // manifest, so the two layouts never overwrite each other's files.
+  if (sourceName === undefined) {
+    return {
+      base,
+      src: remotePathExpr(workRoot, workspaceKey, "src"),
+      manifest: remotePathExpr(workRoot, workspaceKey, "manifest.json"),
+      manifestDir: base,
+    };
+  }
   return {
     base,
-    src: remotePathExpr(workRoot, workspaceKey, "src"),
-    manifest: remotePathExpr(workRoot, workspaceKey, "manifest.json"),
+    src: remotePathExpr(workRoot, workspaceKey, "sources", sourceName),
+    manifest: remotePathExpr(workRoot, workspaceKey, "manifests", `${sourceName}.json`),
+    manifestDir: remotePathExpr(workRoot, workspaceKey, "manifests"),
   };
 }
 
@@ -137,12 +148,14 @@ export async function syncWorkspace(input: {
   snapshot: WorkspaceSnapshot;
   workRoot: string;
   workspacePath: string;
+  /** Explicit source name (spec 33.5): syncs into `sources/<name>/` with `manifests/<name>.json`. */
+  sourceName?: string;
   /** Checked between remote steps; a true return aborts the sync with SyncCancelled. */
   isCancelled?: () => boolean;
 }): Promise<SyncOutput> {
   const { client, snapshot, workRoot, workspacePath } = input;
   const cancelled = (): boolean => input.isCancelled?.() === true;
-  const dirs = remoteDirs(workRoot, snapshot.workspaceKey);
+  const dirs = remoteDirs(workRoot, snapshot.workspaceKey, input.sourceName);
 
   if (cancelled()) throw new SyncCancelled();
   await execCollect(client, `mkdir -p ${dirs.base}`);
@@ -193,9 +206,16 @@ export async function syncWorkspace(input: {
       ]),
     ),
   };
-  await execCollect(client, buildWriteManifestScript(dirs.manifest), {
-    stdin: Buffer.from(JSON.stringify(manifest), "utf8"),
-  });
+  const written = await execCollect(
+    client,
+    buildWriteManifestScript(dirs.manifest, dirs.manifestDir),
+    {
+      stdin: Buffer.from(JSON.stringify(manifest), "utf8"),
+    },
+  );
+  if (written.exitCode !== 0) {
+    throw new Error(`writing the manifest failed on the target (exit ${written.exitCode})`);
+  }
 
   return {
     summary: {
