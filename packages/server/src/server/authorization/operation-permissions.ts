@@ -269,6 +269,12 @@ const INBOUND_PERMISSION = {
   "remote_exec.list_targets.request": "daemon.manage",
   "remote_exec.read_job_output.request": "workspace.read",
   "remote_exec.stop_job.request": "daemon.manage",
+  // Custom API providers (spec 34.7): all four mutate or reveal daemon config, like the
+  // daemon-config RPCs.
+  "providers.custom.delete.request": "daemon.manage",
+  "providers.custom.list.request": "daemon.manage",
+  "providers.custom.save.request": "daemon.manage",
+  "providers.custom.test.request": "daemon.manage",
   restart_server_request: "daemon.manage",
   resume_agent_request: "workspace.write",
   "schedule/create": "automation.manage",
@@ -953,6 +959,11 @@ const OUTBOUND_PERMISSION = {
   "push.unregister.response": "workspace.read",
   read_project_config_response: "workspace.read",
   refresh_providers_snapshot_response: "daemon.read",
+  // Custom API providers (spec 34.7): responses mirror their request permission.
+  "providers.custom.delete.response": "daemon.manage",
+  "providers.custom.list.response": "daemon.manage",
+  "providers.custom.save.response": "daemon.manage",
+  "providers.custom.test.response": "daemon.manage",
   // Remote execution (spec 33 / ADR-0044): responses mirror their request permission;
   // job updates are readable with workspace.read.
   "remote_exec.check_target.response": "daemon.manage",

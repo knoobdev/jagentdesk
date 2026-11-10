@@ -216,6 +216,10 @@ import {
   RemoteExecResponseSchemas,
   RemoteExecPushSchemas,
 } from "./remote-exec/rpc-schemas.js";
+import {
+  CustomProvidersRequestSchemas,
+  CustomProvidersResponseSchemas,
+} from "./custom-providers/rpc-schemas.js";
 import { SpecModeRequestSchemas, SpecModeResponseSchemas } from "./spec-mode.js";
 import {
   ArgoCdRequestSchemas,
@@ -4075,6 +4079,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ...FigmaRequestSchemas,
   ...SshRequestSchemas,
   ...RemoteExecRequestSchemas,
+  ...CustomProvidersRequestSchemas,
   ...SideloadRequestSchemas,
   ...SftpInboundSchemas,
   ...ForwardingInboundSchemas,
@@ -7919,6 +7924,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ...SshPushSchemas,
   ...RemoteExecResponseSchemas,
   ...RemoteExecPushSchemas,
+  ...CustomProvidersResponseSchemas,
   ...SideloadResponseSchemas,
   ...SideloadPushSchemas,
   ...SftpOutboundSchemas,

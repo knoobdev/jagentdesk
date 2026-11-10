@@ -31,6 +31,8 @@ import type {
 import type { RemoteJob } from "@jagentdesk/protocol/remote-exec/rpc-schemas";
 import { handleRemoteExecMessage, remoteExecJobUpdated } from "./remote-exec/rpc.js";
 import type { RemoteExecService } from "./remote-exec/types.js";
+import { handleCustomProvidersMessage } from "./custom-providers/rpc.js";
+import type { CustomProviderService } from "./custom-providers/types.js";
 import { TerminalSessionController } from "../terminal/terminal-session-controller.js";
 import type { TerminalActivity } from "@jagentdesk/protocol/terminal-activity";
 import type { BinaryFrame } from "@jagentdesk/protocol/binary-frames/index";
@@ -563,6 +565,9 @@ export interface SessionOptions {
   // Remote execution (spec 33 / ADR-0044): daemon-wide service; null while the engine is
   // unavailable — its requests then get an error response instead of timing out silently.
   remoteExecService?: RemoteExecService | null;
+  // Custom API providers (spec 34 / ADR-0047): daemon-wide service; null while it is
+  // unavailable — its requests then get an error response instead of timing out silently.
+  customProvidersService?: CustomProviderService | null;
   // Argo CD (spec 30): daemon-wide service; null when the host runs without it.
   argocdService?: ArgoCdService | null;
   /** Sideload (spec 26); null in tests and hosts that do not run it. */
@@ -914,6 +919,7 @@ export class Session {
   private figmaSession: FigmaSession | null = null;
   private sshService!: SshService;
   private remoteExecService: RemoteExecService | null = null;
+  private customProvidersService: CustomProviderService | null = null;
   private sideloadSession: SideloadSession | null = null;
   private clusterRegistry!: ClusterRegistry;
   private databaseRegistry!: DatabaseRegistry;
@@ -1474,6 +1480,7 @@ export class Session {
       logger: this.sessionLogger,
     });
     this.remoteExecService = options.remoteExecService ?? null;
+    this.customProvidersService = options.customProvidersService ?? null;
   }
 
   // Remote execution (spec 33.8): the allowlist is the `remote_exec.` prefix, the handler map in
@@ -1484,6 +1491,16 @@ export class Session {
     return handleRemoteExecMessage(this.remoteExecService, msg, (out) => this.emit(out)).then(
       () => undefined,
     );
+  }
+
+  // Custom API providers (spec 34.7): the allowlist is the `providers.custom.` prefix, the handler
+  // map in custom-providers/rpc.ts is type-checked against the four request schemas. A request
+  // missing here would time out without a response.
+  private dispatchCustomProvidersMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    if (!msg.type.startsWith("providers.custom.")) return undefined;
+    return handleCustomProvidersMessage(this.customProvidersService, msg, (out) =>
+      this.emit(out),
+    ).then(() => undefined);
   }
 
   updateAppVersion(appVersion: string | null): void {
@@ -2482,6 +2499,7 @@ export class Session {
       () => this.dispatchDatabaseMessage(msg),
       () => this.dispatchSshMessage(msg),
       () => this.dispatchRemoteExecMessage(msg),
+      () => this.dispatchCustomProvidersMessage(msg),
       () => this.dispatchArgoCdMessage(msg),
       () => this.dispatchSideloadMessage(msg),
       () => this.dispatchJiraMessage(msg),

@@ -168,7 +168,9 @@ const remoteRunDescription =
   "rejects those servers from chats that are not the server's own. serverId may be omitted " +
   "when exactly one target is enabled. timeoutMs defaults to 7200000 (max 86400000); waitMs " +
   "defaults to 120000 (max 1800000). Requires the user's approval. Returns the job plus the " +
-  "last 64 KiB of output; when status is 'running', keep waiting with remote_job_wait.";
+  "last 64 KiB of output; when status is 'running', keep waiting with remote_job_wait. When " +
+  "you install a model server this way, add it to JAgentDesk with provider_add using via " +
+  '"ssh" with this machine\'s serverId and baseUrl "http://127.0.0.1:<port>/v1".';
 
 const jobTools = (deps: RemoteExecAgentToolDependencies): RemoteExecAgentTool[] => [
   defineTool({

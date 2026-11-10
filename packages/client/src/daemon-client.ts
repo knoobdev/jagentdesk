@@ -906,6 +906,40 @@ export type {
   RemoteSyncSummary,
   RemoteTarget,
 } from "@jagentdesk/protocol/remote-exec/rpc-schemas";
+// Custom API providers (spec 34 / ADR-0047). Payload types mirror the protocol's correlated
+// responses (packages/protocol/src/custom-providers/rpc-schemas.ts); DTOs are re-exported so app
+// screens never import the protocol custom-providers module directly for types.
+export type CustomProvidersListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "providers.custom.list.response" }
+>["payload"];
+export type CustomProvidersSavePayload = Extract<
+  SessionOutboundMessage,
+  { type: "providers.custom.save.response" }
+>["payload"];
+export type CustomProvidersDeletePayload = Extract<
+  SessionOutboundMessage,
+  { type: "providers.custom.delete.response" }
+>["payload"];
+export type CustomProvidersTestPayload = Extract<
+  SessionOutboundMessage,
+  { type: "providers.custom.test.response" }
+>["payload"];
+export type {
+  ApiProtocol,
+  ApiProviderModel,
+  ApiProviderRecord,
+  ApiProviderThinkingOption,
+  ApiRoute,
+  EnvProviderSummary,
+  ProviderTestResult,
+  SaveApiProvider,
+  TestApiProvider,
+} from "@jagentdesk/protocol/custom-providers/rpc-schemas";
+import type {
+  SaveApiProvider,
+  TestApiProvider,
+} from "@jagentdesk/protocol/custom-providers/rpc-schemas";
 type LegacyFileExplorerFilePayload = NonNullable<FileExplorerPayload["file"]>;
 export interface FileReadResult {
   bytes: Uint8Array;
@@ -8508,6 +8542,74 @@ export class DaemonClient {
     return this.on("remote_exec.job_updated", (message) => {
       handler(message);
     });
+  }
+
+  // ── Custom API providers (spec 34 / ADR-0047) ──
+  // Daemon-managed OpenAI/Anthropic-compatible endpoints. API keys never come back: records
+  // carry hasApiKey only, and the error string follows the "<code>: <message>" convention.
+
+  async customProvidersList(requestId?: string): Promise<CustomProvidersListPayload> {
+    const payload =
+      await this.sendNamespacedCorrelatedSessionRequest<"providers.custom.list.response">({
+        requestId,
+        message: { type: "providers.custom.list.request" },
+      });
+    if (payload.error) throw new Error(payload.error);
+    return payload;
+  }
+
+  async customProvidersSave(options: {
+    mode: "create" | "update";
+    provider: SaveApiProvider;
+    /** undefined = keep the stored key; "" = delete the key; otherwise replace it. */
+    apiKey?: string;
+    requestId?: string;
+  }): Promise<CustomProvidersSavePayload> {
+    const payload =
+      await this.sendNamespacedCorrelatedSessionRequest<"providers.custom.save.response">({
+        requestId: options.requestId,
+        message: {
+          type: "providers.custom.save.request",
+          mode: options.mode,
+          provider: options.provider,
+          ...(options.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
+        },
+      });
+    if (payload.error) throw new Error(payload.error);
+    return payload;
+  }
+
+  async customProvidersDelete(options: {
+    id: string;
+    requestId?: string;
+  }): Promise<CustomProvidersDeletePayload> {
+    const payload =
+      await this.sendNamespacedCorrelatedSessionRequest<"providers.custom.delete.response">({
+        requestId: options.requestId,
+        message: { type: "providers.custom.delete.request", id: options.id },
+      });
+    if (payload.error) throw new Error(payload.error);
+    return payload;
+  }
+
+  async customProvidersTest(
+    options: TestApiProvider & { requestId?: string },
+  ): Promise<CustomProvidersTestPayload> {
+    const payload =
+      await this.sendNamespacedCorrelatedSessionRequest<"providers.custom.test.response">({
+        requestId: options.requestId,
+        message: {
+          type: "providers.custom.test.request",
+          protocol: options.protocol,
+          baseUrl: options.baseUrl,
+          ...(options.via !== undefined ? { via: options.via } : {}),
+          ...(options.sshServerId !== undefined ? { sshServerId: options.sshServerId } : {}),
+          ...(options.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
+          ...(options.id !== undefined ? { id: options.id } : {}),
+        },
+      });
+    if (payload.error) throw new Error(payload.error);
+    return payload;
   }
 
   // ── Sideload (spec 26) ──
