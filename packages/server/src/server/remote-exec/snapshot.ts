@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { promises as fs } from "node:fs";
+import { createHash } from "node:crypto";
+import { createReadStream, promises as fs } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { computeSnapshotId, computeWorkspaceKey } from "./ids.js";
@@ -203,23 +204,44 @@ async function listWalkFiles(sourcePath: string, maxVisitedEntries: number): Pro
   return { files, gitlinks };
 }
 
+/** One candidate file of a source listing: lstat facts only — no file content is read (spec 33.4). */
+export interface SourceFileEntry {
+  /** Path relative to the source directory, with "/" separators. */
+  path: string;
+  size: number;
+  mtimeMs: number;
+  ino: number;
+  executable: boolean;
+  symlink: boolean;
+  /** Link target string for symlinks, else null. */
+  linkTarget: string | null;
+}
+
+/** Phase one of a source snapshot: the tree listed and lstat'ed, nothing hashed yet. */
+export interface SourceListing {
+  workspacePath: string;
+  workspaceKey: string;
+  cacheFile: string;
+  files: SourceFileEntry[];
+  bytesTotal: number;
+  excludedSecrets: string[];
+  skipped: string[];
+}
+
 /**
- * Snapshots one source directory (spec 33.4): a git work tree is listed via `git ls-files` scoped
- * to the directory; anything else is walked. Size limits are enforced run-wide by the caller —
- * this function only collects. The hash cache lives at
- * `remote-exec/hash-cache/<cacheFile>`; the default source keeps `<workspaceKey>.json`, explicit
- * sources pass their own file so they never evict the default source's cache.
+ * Phase one of a source snapshot (spec 33.4): lists the source tree and lstats every candidate —
+ * no file content is read, so the run-wide size limits can fire before anything is hashed. Same
+ * collection rules as before: git work trees via `git ls-files`, non-git via the pruned walk,
+ * secrets excluded, gitlinks (submodules) skipped.
  */
-export async function createSourceSnapshot(input: {
-  /** Absolute path of the source directory to snapshot. */
+export async function listSourceEntries(input: {
   workspacePath: string;
   daemonId: string;
-  homeDir: string;
   /** Overrides the key derived from the source path (explicit sources pass the run's key). */
   workspaceKey?: string;
   cacheFile?: string;
   maxVisitedEntries?: number;
-}): Promise<WorkspaceSnapshot> {
+}): Promise<SourceListing> {
   const sourcePath = path.resolve(input.workspacePath);
   const workspaceKey = input.workspaceKey ?? computeWorkspaceKey(input.daemonId, sourcePath);
   const cacheFile = input.cacheFile ?? `${workspaceKey}.json`;
@@ -228,15 +250,13 @@ export async function createSourceSnapshot(input: {
   const listed: WalkResult = inGit
     ? { files: await listGitFiles(sourcePath), gitlinks: await listGitlinks(sourcePath) }
     : await listWalkFiles(sourcePath, maxVisitedEntries);
-  const { files: paths, gitlinks } = listed;
 
-  const cache = new HashCache(path.join(input.homeDir, "remote-exec", "hash-cache", cacheFile));
-  const files: SnapshotEntry[] = [];
+  const files: SourceFileEntry[] = [];
   const excludedSecrets: string[] = [];
   const skipped: string[] = [];
 
-  for (const relativePath of paths) {
-    if (gitlinks.has(relativePath)) {
+  for (const relativePath of listed.files) {
+    if (listed.gitlinks.has(relativePath)) {
       skipped.push(relativePath);
       continue;
     }
@@ -252,43 +272,128 @@ export async function createSourceSnapshot(input: {
       continue; // tracked file deleted from disk has no place in the snapshot (spec 33.4)
     }
     if (stats.isSymbolicLink()) {
-      const target = await fs.readlink(absolutePath);
+      // Symlinks (including directory symlinks) travel as symlinks and are never followed.
       files.push({
         path: relativePath,
-        mode: SNAPSHOT_MODE_SYMLINK,
-        symlink: true,
-        executable: false,
-        hash: sha256Hex(target),
         size: 0,
+        mtimeMs: stats.mtimeMs,
+        ino: stats.ino,
+        executable: false,
+        symlink: true,
+        linkTarget: await fs.readlink(absolutePath),
       });
       continue;
     }
     if (!stats.isFile()) continue;
-    const cached = cache.get(relativePath, stats);
-    const hash = cached ?? sha256Hex(await fs.readFile(absolutePath));
-    if (cached === null) cache.set(relativePath, stats, hash);
-    const executable = (stats.mode & 0o111) !== 0;
     files.push({
       path: relativePath,
-      mode: executable ? SNAPSHOT_MODE_EXEC : SNAPSHOT_MODE_FILE,
-      symlink: false,
-      executable,
-      hash,
       size: stats.size,
+      mtimeMs: stats.mtimeMs,
+      ino: stats.ino,
+      executable: (stats.mode & 0o111) !== 0,
+      symlink: false,
+      linkTarget: null,
+    });
+  }
+
+  return {
+    workspacePath: sourcePath,
+    workspaceKey,
+    cacheFile,
+    files,
+    bytesTotal: files.reduce((sum, file) => sum + file.size, 0),
+    excludedSecrets,
+    skipped,
+  };
+}
+
+/** Streams the file through the sha256 in chunks — no whole file in memory (spec 33.4). */
+function hashFileContent(absolutePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = createHash("sha256");
+    const stream = createReadStream(absolutePath);
+    stream.on("data", (chunk: string | Buffer) => {
+      hash.update(chunk);
+    });
+    stream.on("error", reject);
+    stream.on("end", () => resolve(hash.digest("hex")));
+  });
+}
+
+/**
+ * Phase two: hashes the listing's entries — file contents via streaming reads, symlinks via their
+ * link-target string — through the (path, size, mtimeMs, ino) cache, and assembles the
+ * WorkspaceSnapshot.
+ */
+export async function hashSourceEntries(input: {
+  listing: SourceListing;
+  homeDir: string;
+  /** Injected by tests; defaults to a streaming content hash. */
+  hasher?: (absolutePath: string) => Promise<string>;
+}): Promise<WorkspaceSnapshot> {
+  const { listing } = input;
+  const cache = new HashCache(
+    path.join(input.homeDir, "remote-exec", "hash-cache", listing.cacheFile),
+  );
+  const hasher = input.hasher ?? hashFileContent;
+  const files: SnapshotEntry[] = [];
+
+  for (const entry of listing.files) {
+    if (entry.symlink) {
+      files.push({
+        path: entry.path,
+        mode: SNAPSHOT_MODE_SYMLINK,
+        symlink: true,
+        executable: false,
+        hash: sha256Hex(entry.linkTarget ?? ""),
+        size: 0,
+      });
+      continue;
+    }
+    const cached = cache.get(entry.path, entry);
+    const hash = cached ?? (await hasher(path.join(listing.workspacePath, entry.path)));
+    if (cached === null) cache.set(entry.path, entry, hash);
+    files.push({
+      path: entry.path,
+      mode: entry.executable ? SNAPSHOT_MODE_EXEC : SNAPSHOT_MODE_FILE,
+      symlink: false,
+      executable: entry.executable,
+      hash,
+      size: entry.size,
     });
   }
 
   await cache.save(new Set(files.map((file) => file.path)));
 
   return {
-    workspacePath: sourcePath,
-    workspaceKey,
+    workspacePath: listing.workspacePath,
+    workspaceKey: listing.workspaceKey,
     snapshotId: computeSnapshotId(
       files.map((file) => ({ path: file.path, mode: file.mode, hash: file.hash })),
     ),
     files,
-    bytesTotal: files.reduce((sum, file) => sum + file.size, 0),
-    excludedSecrets,
-    skipped,
+    bytesTotal: listing.bytesTotal,
+    excludedSecrets: listing.excludedSecrets,
+    skipped: listing.skipped,
   };
+}
+
+/**
+ * Convenience over both phases (spec 33.4): list + lstat, then hash. Callers that enforce the
+ * run-wide size limits across several sources use the two phases separately instead — hashing
+ * must not start before every source is within limits.
+ */
+export async function createSourceSnapshot(input: {
+  /** Absolute path of the source directory to snapshot. */
+  workspacePath: string;
+  daemonId: string;
+  homeDir: string;
+  workspaceKey?: string;
+  cacheFile?: string;
+  maxVisitedEntries?: number;
+  /** Injected by tests; defaults to a streaming content hash. */
+  hasher?: (absolutePath: string) => Promise<string>;
+}): Promise<WorkspaceSnapshot> {
+  const listing = await listSourceEntries(input);
+  return hashSourceEntries({ listing, homeDir: input.homeDir, hasher: input.hasher });
 }

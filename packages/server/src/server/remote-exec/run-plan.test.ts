@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { computeWorkspaceKey } from "./ids.js";
 import { createRunPlan, jobSnapshotId } from "./run-plan.js";
 import { RemoteExecError } from "./types.js";
@@ -140,6 +140,26 @@ describe("createRunPlan", () => {
       path: "big.bin",
       bytes: SNAPSHOT_MAX_FILE_BYTES + 1,
     });
+  });
+
+  it("reads no file content when the size limit fires", async () => {
+    const cwd = path.join(root, "ws");
+    await fs.mkdir(cwd);
+    await fs.writeFile(path.join(cwd, "small.txt"), "ok\n");
+    // Sparse file: stats.size exceeds the per-file limit, disk usage stays tiny.
+    const handle = await fs.open(path.join(cwd, "big.bin"), "w");
+    await handle.truncate(SNAPSHOT_MAX_FILE_BYTES + 1);
+    await handle.close();
+    const hasher = vi.fn(async () => {
+      throw new Error("content must not be read before the limits pass");
+    });
+    const error = await createRunPlan({ cwd, daemonId: "d1", homeDir, hasher }).catch(
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(RemoteExecError);
+    expect((error as RemoteExecError).code).toBe("snapshot_too_large");
+    expect((error as RemoteExecError).message).toContain("sendCode: false");
+    expect(hasher).not.toHaveBeenCalled();
   });
 
   it("enforces the 1 GiB total across all sources of one run", async () => {

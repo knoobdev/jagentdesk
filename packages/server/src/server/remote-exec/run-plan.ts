@@ -2,17 +2,21 @@ import path from "node:path";
 import { computeSourcesSnapshotId, computeWorkspaceKey } from "./ids.js";
 import { sha256Hex } from "./hash-cache.js";
 import {
-  createSourceSnapshot,
+  hashSourceEntries,
+  listSourceEntries,
   SNAPSHOT_MAX_FILE_BYTES,
   SNAPSHOT_MAX_TOTAL_BYTES,
+  type SourceListing,
   type WorkspaceSnapshot,
 } from "./snapshot.js";
 import { resolveSourceSelection } from "./sources.js";
 import { RemoteExecError } from "./types.js";
 
-// The run plan (spec 33.4–33.6): resolves the source selection, snapshots every source, enforces
-// the run-wide size limits and derives the job's snapshotId. Both previewSnapshot and startJob go
-// through createRunPlan, so source errors always fire before a permission card or a job record.
+// The run plan (spec 33.4–33.6): resolves the source selection, lists + lstats every candidate of
+// EVERY source of the run (phase one — no file content read), enforces the run-wide size limits,
+// and only then hashes (phase two). Both previewSnapshot and startJob go through createRunPlan, so
+// source errors always fire before a permission card or a job record, and snapshot_too_large never
+// costs a multi-gigabyte hashing pass.
 
 export type RunPlan =
   | {
@@ -32,7 +36,7 @@ export type RunPlan =
 /** One-based default: a default-source run is the single source `<name: null>`. */
 interface SourceLike {
   name: string | null;
-  snapshot: WorkspaceSnapshot;
+  listing: SourceListing;
 }
 
 /**
@@ -44,9 +48,9 @@ function enforceRunLimits(sources: readonly SourceLike[]): void {
   const oversized: { path: string; size: number }[] = [];
   let bytesTotal = 0;
   const all: { path: string; size: number }[] = [];
-  for (const { name, snapshot } of sources) {
+  for (const { name, listing } of sources) {
     const prefix = name === null ? "" : `${name}/`;
-    for (const file of snapshot.files) {
+    for (const file of listing.files) {
       bytesTotal += file.size;
       const displayPath = `${prefix}${file.path}`;
       all.push({ path: displayPath, size: file.size });
@@ -85,6 +89,8 @@ export async function createRunPlan(input: {
   source?: string | string[];
   noCode?: boolean;
   maxVisitedEntries?: number;
+  /** Injected by tests; threaded into the hashing phase only. */
+  hasher?: (absolutePath: string) => Promise<string>;
 }): Promise<RunPlan> {
   const cwd = path.resolve(input.cwd);
   const workspaceKey = computeWorkspaceKey(input.daemonId, cwd);
@@ -95,24 +101,29 @@ export async function createRunPlan(input: {
   });
   if (selection.kind === "noCode") return { kind: "noCode", cwd, workspaceKey };
   if (selection.kind === "default") {
-    const snapshot = await createSourceSnapshot({
+    const listing = await listSourceEntries({
       workspacePath: cwd,
       daemonId: input.daemonId,
-      homeDir: input.homeDir,
       maxVisitedEntries: input.maxVisitedEntries,
     });
-    enforceRunLimits([{ name: null, snapshot }]);
+    enforceRunLimits([{ name: null, listing }]);
+    const snapshot = await hashSourceEntries({
+      listing,
+      homeDir: input.homeDir,
+      hasher: input.hasher,
+    });
     return { kind: "default", cwd, workspaceKey, snapshot };
   }
-  const snapshots: Array<{ name: string; path: string; snapshot: WorkspaceSnapshot }> = [];
+  // Phase one for every source before anything is hashed: the limits are run-wide, so an
+  // oversized second source must not have let the first one's gigabytes through the hasher.
+  const listings: Array<{ name: string; path: string; listing: SourceListing }> = [];
   for (const source of selection.sources) {
-    snapshots.push({
+    listings.push({
       name: source.name,
       path: source.absolutePath,
-      snapshot: await createSourceSnapshot({
+      listing: await listSourceEntries({
         workspacePath: source.absolutePath,
         daemonId: input.daemonId,
-        homeDir: input.homeDir,
         // Explicit sources share the run's cwd-based key but get their own cache file so they
         // never evict the default source's cache.
         workspaceKey,
@@ -121,6 +132,18 @@ export async function createRunPlan(input: {
       }),
     });
   }
-  enforceRunLimits(snapshots);
+  enforceRunLimits(listings);
+  const snapshots: Array<{ name: string; path: string; snapshot: WorkspaceSnapshot }> = [];
+  for (const entry of listings) {
+    snapshots.push({
+      name: entry.name,
+      path: entry.path,
+      snapshot: await hashSourceEntries({
+        listing: entry.listing,
+        homeDir: input.homeDir,
+        hasher: input.hasher,
+      }),
+    });
+  }
   return { kind: "sources", cwd, workspaceKey, snapshots };
 }

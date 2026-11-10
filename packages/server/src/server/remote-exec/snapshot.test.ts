@@ -219,6 +219,19 @@ describe("createSourceSnapshot", () => {
     expect(snapshot.excludedSecrets).toEqual([".env"]);
   });
 
+  it("hashes file content with a streaming read, identical to whole-file hashing", async () => {
+    const repo = path.join(root, "repo");
+    await fs.mkdir(repo);
+    await fs.writeFile(path.join(repo, "small.txt"), "tiny\n");
+    // Larger than one read-stream chunk (64 KiB) so streaming must actually chunk.
+    const big = Array.from({ length: 400 }, (_, i) => `${i}:${"x".repeat(1024)}`).join("\n");
+    await fs.writeFile(path.join(repo, "big.txt"), big);
+    const snapshot = await createSourceSnapshot({ workspacePath: repo, daemonId: "d1", homeDir });
+    const hashByPath = new Map(snapshot.files.map((file) => [file.path, file.hash]));
+    expect(hashByPath.get("big.txt")).toBe(createHash("sha256").update(big).digest("hex"));
+    expect(hashByPath.get("small.txt")).toBe(createHash("sha256").update("tiny\n").digest("hex"));
+  });
+
   it("produces a deterministic snapshotId and reuses the hash cache", async () => {
     const repo = await makeRepo();
     const first = await createSourceSnapshot({ workspacePath: repo, daemonId: "d1", homeDir });
