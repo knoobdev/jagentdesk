@@ -463,6 +463,30 @@ describe("ClaudeAgentClient.fetchCatalog", () => {
     }
   });
 
+  test("marks bypassPermissions as an unattended mode and default as attended (spec 33.7)", async () => {
+    const emptyConfigDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), "jagentdesk-claude-modes-empty-"),
+    );
+    try {
+      const client = new ClaudeAgentClient({
+        logger,
+        resolveBinary: async () => "/test/claude/bin",
+        resolveVersion: async () => "2.1.219",
+        runtimeSettings: { env: { CLAUDE_CONFIG_DIR: emptyConfigDir } },
+      });
+      const { modes } = await client.fetchCatalog({
+        scope: "workspace",
+        cwd: "/tmp/claude-modes",
+        force: false,
+      });
+
+      expect(modes.find((mode) => mode.id === "bypassPermissions")?.isUnattended).toBe(true);
+      expect(modes.find((mode) => mode.id === "default")?.isUnattended).toBeFalsy();
+    } finally {
+      await fs.rm(emptyConfigDir, { recursive: true, force: true });
+    }
+  });
+
   test("preserves the catalog when Claude Code version detection fails", async () => {
     const emptyConfigDir = await fs.mkdtemp(
       path.join(os.tmpdir(), "jagentdesk-claude-models-empty-"),

@@ -343,6 +343,9 @@ const DEFAULT_MODES: AgentMode[] = [
     id: "bypassPermissions",
     label: "Bypass",
     description: "Skip all permission prompts (use with caution)",
+    // Spec 33.7: JAgentDesk treats this mode as the operator's standing approval and
+    // auto-approves its own permission cards (agent-manager.isAgentSessionUnattended).
+    isUnattended: true,
   },
 ];
 

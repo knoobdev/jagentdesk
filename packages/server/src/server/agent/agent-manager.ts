@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { projectTimelineRows } from "./timeline-projection.js";
+import { isDefaultAgentCreateConfigUnattended } from "./create-agent-mode.js";
 import { resolve } from "node:path";
 import { stat } from "node:fs/promises";
 import {
@@ -2967,6 +2968,16 @@ export class AgentManager {
     },
   ): Promise<AgentPermissionResponse> {
     const agent = this.requireAgent(agentId);
+    // Spec 33.7 ("Chế độ bypass được tôn trọng"): an unattended provider mode is the
+    // operator's standing approval, so every JAgentDesk permission card is auto-approved —
+    // no pending card, no permission_requested event. Attended modes keep the card.
+    if (this.isAgentSessionUnattended(agent)) {
+      this.logger.debug(
+        { agentId, tool: request.name, modeId: agent.currentModeId },
+        "Auto-approved host tool permission: agent is in an unattended provider mode",
+      );
+      return { behavior: "allow" };
+    }
     const id = randomUUID();
     const permissionRequest: AgentPermissionRequest = {
       id,
@@ -2994,6 +3005,32 @@ export class AgentManager {
     this.emitState(agent);
 
     return promise;
+  }
+
+  /**
+   * Whether the agent's current provider mode is unattended (spec 33.7). Resolved per
+   * request through the provider hook (`isCreateConfigUnattended`), so a mode switched
+   * at runtime is respected on the next card. Providers without the hook fall back to
+   * the shared default, which reads `isUnattended` off the available mode definitions.
+   */
+  private isAgentSessionUnattended(agent: LiveManagedAgent): boolean {
+    const client = this.clients.get(agent.provider);
+    const isCreateConfigUnattended =
+      client?.isCreateConfigUnattended ?? isDefaultAgentCreateConfigUnattended;
+    try {
+      return isCreateConfigUnattended({
+        modeId: agent.currentModeId,
+        config: agent.config,
+        features: agent.features,
+        availableModes: agent.availableModes,
+      });
+    } catch (error) {
+      this.logger.warn(
+        { err: error, agentId: agent.id },
+        "Failed to resolve unattended mode; showing the permission card",
+      );
+      return false;
+    }
   }
 
   async cancelAgentRun(agentId: string): Promise<AgentRunCancellationResult> {

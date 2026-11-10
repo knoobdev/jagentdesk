@@ -829,6 +829,14 @@ describe("Codex app-server provider", () => {
     );
   });
 
+  test("marks full-access as an unattended mode and auto as attended (spec 33.7)", async () => {
+    const session = createSession({}, { autoReviewEnabled: true });
+
+    const modes = await session.getAvailableModes();
+    expect(modes.find((mode) => mode.id === "full-access")?.isUnattended).toBe(true);
+    expect(modes.find((mode) => mode.id === "auto")?.isUnattended).toBeFalsy();
+  });
+
   test("setMode auto-review sends approvalsReviewer to thread/start", async () => {
     const requests: Array<{ method: string; params: unknown }> = [];
     const session = createSession(

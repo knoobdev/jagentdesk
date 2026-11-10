@@ -239,6 +239,9 @@ const CODEX_MODES: AgentMode[] = [
     id: "full-access",
     label: "Full Access",
     description: "Edit files, run commands, and access the network without additional prompts.",
+    // Spec 33.7: JAgentDesk treats this mode as the operator's standing approval and
+    // auto-approves its own permission cards (agent-manager.isAgentSessionUnattended).
+    isUnattended: true,
   },
 ];
 
@@ -3091,11 +3094,13 @@ const CodexNotificationSchema = z.union([
       params,
     }),
   ),
-  z
-    .object({ method: z.string(), params: z.unknown() })
-    .transform(
-      ({ method, params }): ParsedCodexNotification => ({ kind: "unknown_method", method, params }),
-    ),
+  z.object({ method: z.string(), params: z.unknown() }).transform(
+    ({ method, params }): ParsedCodexNotification => ({
+      kind: "unknown_method",
+      method,
+      params,
+    }),
+  ),
 ]);
 
 async function readCodexConfiguredDefaults(

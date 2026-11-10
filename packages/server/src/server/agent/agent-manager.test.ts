@@ -32,6 +32,7 @@ import type {
   AgentCreateSessionOptions,
   AgentFeature,
   AgentLaunchContext,
+  AgentMode,
   AgentPromptInput,
   AgentProvider,
   AgentPersistenceHandle,
@@ -8398,6 +8399,158 @@ test("permission request notifies once without forcing unread attention state", 
   }
 
   expect(attentionReasons).toContain("permission");
+});
+
+test("requestHostToolPermission auto-approves when the provider hook reports an unattended mode", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-unattended-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+
+  class UnattendedClient implements AgentClient {
+    readonly provider = "codex" as const;
+    readonly capabilities = TEST_CAPABILITIES;
+    readonly isCreateConfigUnattended = (): boolean => true;
+
+    async isAvailable(): Promise<boolean> {
+      return true;
+    }
+
+    async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      return new TestAgentSession(config);
+    }
+
+    async resumeSession(config?: Partial<AgentSessionConfig>): Promise<AgentSession> {
+      return new TestAgentSession({ provider: "codex", cwd: config?.cwd ?? process.cwd() });
+    }
+  }
+
+  const manager = new AgentManager({
+    clients: { codex: new UnattendedClient() },
+    registry: storage,
+    logger,
+  });
+
+  const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+    workspaceId: undefined,
+  });
+
+  await expect(
+    manager.requestHostToolPermission(agent.id, { name: "ssh_run", kind: "tool" }),
+  ).resolves.toEqual({ behavior: "allow" });
+  expect(manager.getAgent(agent.id)?.pendingPermissions.size).toBe(0);
+});
+
+test("requestHostToolPermission keeps the card for an attended mode", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-attended-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+
+  class AttendedClient implements AgentClient {
+    readonly provider = "codex" as const;
+    readonly capabilities = TEST_CAPABILITIES;
+    readonly isCreateConfigUnattended = (): boolean => false;
+
+    async isAvailable(): Promise<boolean> {
+      return true;
+    }
+
+    async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      return new TestAgentSession(config);
+    }
+
+    async resumeSession(config?: Partial<AgentSessionConfig>): Promise<AgentSession> {
+      return new TestAgentSession({ provider: "codex", cwd: config?.cwd ?? process.cwd() });
+    }
+  }
+
+  const manager = new AgentManager({
+    clients: { codex: new AttendedClient() },
+    registry: storage,
+    logger,
+  });
+
+  const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+    workspaceId: undefined,
+  });
+
+  const permission = manager.requestHostToolPermission(agent.id, {
+    name: "ssh_run",
+    kind: "tool",
+  });
+  expect(manager.getAgent(agent.id)?.pendingPermissions.size).toBe(1);
+
+  const [pendingId] = manager.getAgent(agent.id)!.pendingPermissions.keys();
+  await manager.respondToPermission(agent.id, pendingId, { behavior: "allow" });
+  await expect(permission).resolves.toEqual({ behavior: "allow" });
+  expect(manager.getAgent(agent.id)?.pendingPermissions.size).toBe(0);
+});
+
+test("requestHostToolPermission respects a mode switched at runtime through the default hook", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-mode-switch-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+
+  const MODES: AgentMode[] = [
+    { id: "auto", label: "Default" },
+    { id: "full-access", label: "Full Access", isUnattended: true },
+  ];
+
+  class ModeSwitchSession extends TestAgentSession {
+    private current: string | null = "auto";
+
+    override async getAvailableModes(): Promise<AgentMode[]> {
+      return MODES;
+    }
+
+    override async getCurrentMode(): Promise<string | null> {
+      return this.current;
+    }
+
+    override async setMode(modeId: string): Promise<void> {
+      this.current = modeId;
+    }
+  }
+
+  class ModeSwitchClient implements AgentClient {
+    readonly provider = "codex" as const;
+    readonly capabilities = TEST_CAPABILITIES;
+
+    async isAvailable(): Promise<boolean> {
+      return true;
+    }
+
+    async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      return new ModeSwitchSession(config);
+    }
+
+    async resumeSession(config?: Partial<AgentSessionConfig>): Promise<AgentSession> {
+      return new ModeSwitchSession({ provider: "codex", cwd: config?.cwd ?? process.cwd() });
+    }
+  }
+
+  const manager = new AgentManager({
+    clients: { codex: new ModeSwitchClient() },
+    registry: storage,
+    logger,
+  });
+
+  const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+    workspaceId: undefined,
+  });
+
+  // Attended mode ("auto"): the default hook finds no isUnattended flag → card.
+  const permission = manager.requestHostToolPermission(agent.id, {
+    name: "ssh_run",
+    kind: "tool",
+  });
+  expect(manager.getAgent(agent.id)?.pendingPermissions.size).toBe(1);
+  const [pendingId] = manager.getAgent(agent.id)!.pendingPermissions.keys();
+  await manager.respondToPermission(agent.id, pendingId, { behavior: "allow" });
+  await expect(permission).resolves.toEqual({ behavior: "allow" });
+
+  // Runtime switch to an unattended mode: next card is auto-approved, no pending entry.
+  await manager.setAgentMode(agent.id, "full-access");
+  await expect(
+    manager.requestHostToolPermission(agent.id, { name: "ssh_run", kind: "tool" }),
+  ).resolves.toEqual({ behavior: "allow" });
+  expect(manager.getAgent(agent.id)?.pendingPermissions.size).toBe(0);
 });
 
 test("respondToPermission updates currentModeId after plan approval", async () => {
