@@ -19,6 +19,10 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import type { Logger } from "pino";
 import {
+  JAGENTDESK_MCP_SERVER_NAME,
+  isInternalJAgentDeskMcpServer,
+} from "../../runtime-mcp-config.js";
+import {
   mapClaudeCanceledToolCall,
   mapClaudeCompletedToolCall,
   mapClaudeFailedToolCall,
@@ -4614,11 +4618,32 @@ class ClaudeAgentSession implements AgentSession {
     return this.contextUsage.buildResultUsage(message, modelUsage);
   }
 
+  /**
+   * True for `mcp__jagentdesk__<tool>` when the daemon actually injected its internal MCP
+   * server under that name in this session's config (runtime-mcp-config.ts). The name check
+   * alone is not enough: a user-configured server named "jagentdesk" is not the daemon's.
+   */
+  private isInternalJAgentDeskMcpTool(toolName: string): boolean {
+    const serverConfig = this.config.mcpServers?.[JAGENTDESK_MCP_SERVER_NAME];
+    if (!serverConfig || !isInternalJAgentDeskMcpServer(serverConfig)) {
+      return false;
+    }
+    return toolName.startsWith(`mcp__${JAGENTDESK_MCP_SERVER_NAME}__`);
+  }
+
   private handlePermissionRequest: CanUseTool = async (
     toolName,
     input,
     options,
   ): Promise<PermissionResult> => {
+    // ADR-0046: every tool of the internal JAgentDesk MCP server gates itself through the
+    // daemon's own permission card where needed (requestHostToolPermission), so Claude must
+    // not add a second approval — the same contract Codex gets via
+    // default_tools_approval_mode = "auto". Only the injected internal server qualifies;
+    // a user-configured server with the same name or tool names keeps prompting.
+    if (this.isInternalJAgentDeskMcpTool(toolName)) {
+      return { behavior: "allow", updatedInput: input };
+    }
     const requestId = `permission-${randomUUID()}`;
     const kind = resolvePermissionKind(toolName, input);
     const requestInput = normalizeClaudeAskUserQuestionRequestInput(toolName, input);

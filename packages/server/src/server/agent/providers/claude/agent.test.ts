@@ -20,6 +20,7 @@ import { streamSession } from "../test-utils/session-stream-adapter.js";
 import type {
   AgentPromptInput,
   AgentSession,
+  AgentSessionConfig,
   AgentTimelineItem,
   AgentStreamEvent,
 } from "../../agent-sdk-types.js";
@@ -642,6 +643,46 @@ describe("ClaudeAgentClient binary resolution", () => {
   });
 });
 
+/**
+ * Calls the session's canUseTool directly (the SDK callback) and returns its decision plus
+ * the emitted stream events. A prompted tool never resolves, so the decision is undefined
+ * there and the permission_requested event is the assertion target.
+ */
+async function canUseToolDecision(
+  config: AgentSessionConfig,
+  toolName: string,
+  input: Record<string, unknown>,
+): Promise<{ decision: unknown; events: AgentStreamEvent[] }> {
+  const client = new ClaudeAgentClient({
+    logger: createTestLogger(),
+    resolveBinary: async () => "/test/claude/bin",
+  });
+  const session = await client.createSession(config);
+  const events: AgentStreamEvent[] = [];
+  session.subscribe((event) => events.push(event));
+  try {
+    const internal = session as unknown as {
+      handlePermissionRequest: (
+        toolName: string,
+        input: Record<string, unknown>,
+        options: Record<string, unknown>,
+      ) => Promise<unknown>;
+    };
+    // A prompted tool never resolves until a human answers (and rejects on close); the
+    // permission_requested event is pushed synchronously before that, so a short race
+    // separates the two outcomes. The catch keeps the late rejection from surfacing.
+    const decisionPromise = internal.handlePermissionRequest(toolName, input, {});
+    decisionPromise.catch(() => undefined);
+    const decision = await Promise.race([
+      decisionPromise,
+      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 50)),
+    ]);
+    return { decision, events };
+  } finally {
+    await session.close();
+  }
+}
+
 describe("ClaudeAgentSession features", () => {
   const logger = createTestLogger();
 
@@ -748,6 +789,73 @@ describe("ClaudeAgentSession features", () => {
       unsubscribe();
       await session.close();
     }
+  });
+
+  test("auto-allows every tool of the injected internal JAgentDesk MCP server (ADR-0046)", async () => {
+    const { decision, events } = await canUseToolDecision(
+      {
+        provider: "claude",
+        cwd: process.cwd(),
+        mcpServers: {
+          jagentdesk: {
+            type: "http",
+            url: "http://127.0.0.1:6767/mcp/agents?callerAgentId=agent-1",
+          },
+        },
+      },
+      "mcp__jagentdesk__ssh_run",
+      { serverId: "srv_1", command: "uptime" },
+    );
+
+    expect(decision).toEqual({
+      behavior: "allow",
+      updatedInput: { serverId: "srv_1", command: "uptime" },
+    });
+    expect(events.find((event) => event.type === "permission_requested")).toBeUndefined();
+  });
+
+  test("still prompts for a non-internal MCP server with the same tool name", async () => {
+    const { decision, events } = await canUseToolDecision(
+      {
+        provider: "claude",
+        cwd: process.cwd(),
+        mcpServers: {
+          jagentdesk: {
+            type: "http",
+            url: "http://127.0.0.1:6767/mcp/agents?callerAgentId=agent-1",
+          },
+          other: { type: "http", url: "https://mcp.example.com/sse" },
+        },
+      },
+      "mcp__other__ssh_run",
+      { command: "uptime" },
+    );
+
+    expect(decision).toBeUndefined();
+    expect(events.find((event) => event.type === "permission_requested")).toMatchObject({
+      type: "permission_requested",
+      request: { name: "mcp__other__ssh_run", kind: "tool" },
+    });
+  });
+
+  test("still prompts when a user server is named jagentdesk but is not the internal one", async () => {
+    const { decision, events } = await canUseToolDecision(
+      {
+        provider: "claude",
+        cwd: process.cwd(),
+        mcpServers: {
+          jagentdesk: { type: "http", url: "https://mcp.example.com/jagentdesk" },
+        },
+      },
+      "mcp__jagentdesk__ssh_run",
+      { command: "uptime" },
+    );
+
+    expect(decision).toBeUndefined();
+    expect(events.find((event) => event.type === "permission_requested")).toMatchObject({
+      type: "permission_requested",
+      request: { name: "mcp__jagentdesk__ssh_run", kind: "tool" },
+    });
   });
 
   test("passes exact configured Fable 5 IDs through to Claude Code", async () => {
