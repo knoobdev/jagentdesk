@@ -102,6 +102,19 @@ export interface ProviderDefinition extends AgentProviderDefinition {
   ) => Promise<ProviderCatalog>;
 }
 
+/** One daemon-managed API provider definition to merge into OPENCODE_CONFIG_CONTENT (spec 34.3). */
+export interface OpenCodeProviderInjection {
+  id: string;
+  config: Record<string, unknown>;
+}
+
+export type OpenCodeProviderInjectionResolver = (
+  providerId: string,
+) => Promise<OpenCodeProviderInjection | null>;
+
+/** Spawn-time env for one Anthropic-compatible API provider (ANTHROPIC_BASE_URL / AUTH_TOKEN). */
+export type ClaudeSpawnEnvResolver = (providerId: string) => Promise<Record<string, string> | null>;
+
 export interface BuildProviderRegistryOptions {
   runtimeSettings?: AgentProviderRuntimeSettingsMap;
   providerOverrides?: Record<string, ProviderOverride>;
@@ -110,6 +123,8 @@ export interface BuildProviderRegistryOptions {
   isDev?: boolean;
   ompRuntime?: OmpRuntime;
   openCodeBridge?: OpenCodeBridge;
+  openCodeProviderInjection?: OpenCodeProviderInjectionResolver;
+  claudeSpawnEnv?: ClaudeSpawnEnvResolver;
 }
 
 interface ProviderClientFactoryOptions extends Pick<
@@ -123,6 +138,8 @@ interface ProviderClientFactoryOptions extends Pick<
     label: string;
     extends: string;
   };
+  openCodeProviderInjection?: OpenCodeProviderInjectionResolver;
+  claudeSpawnEnv?: ClaudeSpawnEnvResolver;
 }
 
 type ProviderClientFactory = (
@@ -191,10 +208,16 @@ const HUB_E2E_PROVIDER_CONTRACT: ProviderContract = {
 };
 
 const PROVIDER_CLIENT_FACTORIES: Record<string, ProviderClientFactory> = {
-  claude: (logger, runtimeSettings) =>
+  claude: (logger, runtimeSettings, options) =>
     new ClaudeAgentClient({
       logger,
       runtimeSettings,
+      ...(options?.claudeSpawnEnv && options.customProvider
+        ? {
+            spawnEnvOverlay: () =>
+              options.claudeSpawnEnv?.(options.customProvider?.id ?? "") ?? Promise.resolve(null),
+          }
+        : {}),
     }),
   codex: (logger, runtimeSettings, options) =>
     new CodexAppServerAgentClient(logger, runtimeSettings, {
@@ -216,6 +239,13 @@ const PROVIDER_CLIENT_FACTORIES: Record<string, ProviderClientFactory> = {
     new OpenCodeRuntimeClient(logger, runtimeSettings, {
       managedProcesses: options?.managedProcesses,
       bridge: options?.openCodeBridge,
+      ...(options?.openCodeProviderInjection && options.customProvider
+        ? {
+            providerConfigInjection: () =>
+              options.openCodeProviderInjection?.(options.customProvider?.id ?? "") ??
+              Promise.resolve(null),
+          }
+        : {}),
     }),
   pi: (logger, runtimeSettings, options) =>
     new PiRpcAgentClient({
@@ -754,19 +784,39 @@ function buildResolvedBuiltinProviders(
   return resolvedProviders;
 }
 
+/** api entries (spec 34.2): Anthropic-compatible endpoints cannot run Anthropic-only server tools. */
+function withAnthropicToolRestriction(override: ProviderOverride): ProviderOverride {
+  if (override.api?.protocol !== "anthropic") return override;
+  if ((override.disallowedTools ?? []).includes("WebSearch")) return override;
+  return {
+    ...override,
+    disallowedTools: [...(override.disallowedTools ?? []), "WebSearch"],
+  };
+}
+
+/** api entries without an explicit extends derive their driver from the protocol (spec 34.2). */
+function resolveDerivedBaseProviderId(override: ProviderOverride): string {
+  return override.extends ?? (override.api?.protocol === "anthropic" ? "claude" : "opencode");
+}
+
 function addDerivedProviders(
   resolvedProviders: Map<string, ResolvedProvider>,
   providerOverrides: Record<string, ProviderOverride>,
-  options: Pick<BuildProviderRegistryOptions, "managedProcesses" | "openCodeBridge">,
+  options: Pick<
+    BuildProviderRegistryOptions,
+    "managedProcesses" | "openCodeBridge" | "openCodeProviderInjection" | "claudeSpawnEnv"
+  >,
 ): void {
-  for (const [providerId, override] of Object.entries(providerOverrides)) {
+  for (const [providerId, rawOverride] of Object.entries(providerOverrides)) {
     if (resolvedProviders.has(providerId) || BUILTIN_PROVIDER_IDS.includes(providerId)) {
       continue;
     }
 
-    if (!override.extends) {
+    if (!rawOverride.extends && !rawOverride.api) {
       throw new Error(`Custom provider '${providerId}' requires an extends value`);
     }
+
+    const override = withAnthropicToolRestriction(rawOverride);
 
     if (override.extends === "acp") {
       if (!override.command || !isNonEmptyStringArray(override.command)) {
@@ -825,7 +875,7 @@ function addDerivedProviders(
       continue;
     }
 
-    const baseProviderId = override.extends;
+    const baseProviderId = resolveDerivedBaseProviderId(override);
     const baseProvider = resolvedProviders.get(baseProviderId);
     if (!baseProvider) {
       throw new Error(
@@ -855,6 +905,8 @@ function addDerivedProviders(
           managedProcesses: options.managedProcesses,
           openCodeBridge: options.openCodeBridge,
           providerParams,
+          openCodeProviderInjection: options.openCodeProviderInjection,
+          claudeSpawnEnv: options.claudeSpawnEnv,
           customProvider: {
             id: providerId,
             label: override.label ?? providerId,
@@ -886,6 +938,8 @@ export function buildProviderRegistry(
   addDerivedProviders(resolvedProviders, providerOverrides, {
     managedProcesses: options?.managedProcesses,
     openCodeBridge: options?.openCodeBridge,
+    openCodeProviderInjection: options?.openCodeProviderInjection,
+    claudeSpawnEnv: options?.claudeSpawnEnv,
   });
 
   return Object.fromEntries(

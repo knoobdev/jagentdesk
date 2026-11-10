@@ -176,6 +176,8 @@ import { WorkspaceGitServiceImpl } from "./workspace-git-service.js";
 import { resolveWorkspaceIdForPath } from "./resolve-workspace-id-for-path.js";
 import { ForgeHubService } from "./session/forge/forge-hub-session.js";
 import { FileSecretStore } from "./database/secret-store.js";
+import { extractProviderOverrides } from "./config.js";
+import { createCustomProviderService } from "./custom-providers/service.js";
 import { ArgoCdService } from "./argocd/service.js";
 import { createArgoCdClusterAccess } from "./argocd/cluster-access.js";
 import { createArgoCdAgentTools } from "./argocd/agent-tools.js";
@@ -965,6 +967,25 @@ export async function createJAgentDeskDaemon(
     workspaceGitService,
     logger,
   });
+  // Custom API providers (spec 34 / ADR-0047): config.json entries with an `api`
+  // block, keys in the encrypted secret store, loopback forwards for tailnet/ssh
+  // routes. reloadRegistry is late-bound to the snapshot manager + agent manager
+  // consts below; it only fires after boot (save/delete from RPCs).
+  const customProviderSecretStore = new FileSecretStore(
+    path.join(config.jagentdeskHome, "custom-providers"),
+  );
+  let reloadProviderRegistry: (
+    removeProviders: readonly string[],
+  ) => Promise<void> = async () => {};
+  const customProviderService = createCustomProviderService({
+    jagentdeskHome: config.jagentdeskHome,
+    logger,
+    secretStore: customProviderSecretStore,
+    getTailnetSocks: () => tsnetListener?.getTailnetSocks() ?? null,
+    acquireSshClient: (acquireServerId) => sshService.acquireClient(acquireServerId),
+    sshServerExists: (existsServerId) => sshService.storage.getServer(existsServerId) !== undefined,
+    reloadRegistry: (removeProviders) => reloadProviderRegistry(removeProviders),
+  });
   const providerSnapshotLogger = logger.child({ module: "provider-snapshot-manager" });
   const providerSnapshotManager = new ProviderSnapshotManager({
     logger: providerSnapshotLogger,
@@ -974,6 +995,9 @@ export async function createJAgentDeskDaemon(
     managedProcesses,
     isDev: config.isDev === true,
     extraClients: config.agentClients,
+    openCodeProviderInjection: (providerId) =>
+      customProviderService.materializeOpenCodeProvider(providerId),
+    claudeSpawnEnv: (providerId) => customProviderService.materializeClaudeEnv(providerId),
   });
   const usageHistory = new UsageHistoryStorage(config.jagentdeskHome, logger);
   await usageHistory.initialize();
@@ -998,6 +1022,22 @@ export async function createJAgentDeskDaemon(
     agentStorage,
   );
   await agentStorage.initialize();
+
+  // Spec 34.6 hot reload: after a custom provider save/delete, re-read the
+  // persisted config, rebuild the provider registry (base overrides replaced,
+  // removed providers dropped) and swap it into the live agent manager. The
+  // providers_snapshot_update broadcast happens via the snapshot "change" event.
+  reloadProviderRegistry = async (removeProviders) => {
+    const persisted = loadPersistedConfig(config.jagentdeskHome, logger);
+    const baseOverrides = extractProviderOverrides(
+      persisted.agents?.providers as Record<string, unknown> | undefined,
+    );
+    const nextAgentManagerState = providerSnapshotManager.applyMutableProviderConfig(undefined, {
+      baseOverrides: baseOverrides ?? {},
+      removeProviders,
+    });
+    agentManager.updateProviderRegistry(nextAgentManagerState);
+  };
   logger.info({ elapsed: elapsed() }, "Agent storage initialized");
   // Seed the lifetime usage baseline once from existing agents so headline Usage
   // & Cost figures include usage that predates the time-series and never drop
@@ -2140,6 +2180,8 @@ export async function createJAgentDeskDaemon(
     await agentManager.flushForShutdown().catch(() => undefined);
     detachAgentStoragePersistence();
     await agentStorage.flush().catch(() => undefined);
+    // Spec 34: loopback forwards of api providers die with the daemon.
+    customProviderService.closeAll();
     await providerSnapshotManager.shutdown();
     terminalManager.killAll();
     stopDeviceGrantWatch();

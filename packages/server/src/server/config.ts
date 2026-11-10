@@ -137,7 +137,8 @@ function parseOptionalVoiceLlmProvider(value: unknown): AgentProvider | null {
   return parsed.success ? parsed.data : null;
 }
 
-function extractProviderOverrides(
+/** Parsed `agents.providers` entries (spec 34 hot reload re-extracts them after a write). */
+export function extractProviderOverrides(
   providers: Record<string, unknown> | undefined,
 ): Record<string, ProviderOverride> | undefined {
   if (!providers) {

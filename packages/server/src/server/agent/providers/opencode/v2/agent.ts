@@ -40,6 +40,7 @@ import { importSessionFromPersistence } from "../../../provider-session-import.j
 import type { OpenCodeBridge } from "../bridge.js";
 import { resolveOpenCodeHomeDir } from "../paths.js";
 import { V2Runtime, type V2Connection } from "./runtime.js";
+import type { OpenCodeProviderInjection } from "../../../../custom-providers/materialization.js";
 import { modelRef, modesFromV2, modelsFromV2 } from "./mapping.js";
 
 interface V2AgentOptions {
@@ -48,6 +49,7 @@ interface V2AgentOptions {
   managedProcesses?: ManagedProcessRegistry;
   bridge?: OpenCodeBridge;
   runtime?: Pick<V2Runtime, "acquire" | "shutdown">;
+  providerConfigInjection?: () => Promise<OpenCodeProviderInjection | null>;
 }
 
 export class OpenCodeV2AgentClient implements AgentClient {
