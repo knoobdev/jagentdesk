@@ -114,6 +114,7 @@ export const Sun = StubIcon;
 export const Terminal = StubIcon;
 export const Trash2 = StubIcon;
 export const TriangleAlert = StubIcon;
+export const TriangleAlertIcon = StubIcon;
 export const Undo2 = StubIcon;
 export const Unlink = StubIcon;
 export const Upload = StubIcon;

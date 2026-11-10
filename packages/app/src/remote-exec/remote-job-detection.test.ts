@@ -1,10 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { ToolCallDetail } from "@jagentdesk/protocol/agent-types";
+import claudeRemoteRunCalls from "./fixtures/claude-remote-run-calls.json";
 import {
   isRemoteJobToolName,
   readRemoteJobToolResult,
   remoteJobCardVariant,
 } from "./remote-job-detection";
+
+interface FixtureCall {
+  name: string;
+  detail: ToolCallDetail;
+  status: string;
+}
 
 describe("isRemoteJobToolName", () => {
   it("matches the plain tool names", () => {
@@ -130,6 +137,88 @@ describe("readRemoteJobToolResult", () => {
     value.outputTruncatedHead = true;
     const result = readRemoteJobToolResult("remote_run", unknownResult(value));
     expect(result?.outputTruncatedHead).toBe(true);
+  });
+});
+
+describe("readRemoteJobToolResult provider wrappers (live-test regression)", () => {
+  it("reads the Claude {type:'command'} wrapper with the payload under output", () => {
+    const detail = unknownResult({
+      type: "command",
+      command: "ls",
+      output: JSON.stringify(jobResult({ status: "succeeded", exitCode: 0 })),
+    });
+    const result = readRemoteJobToolResult("mcp__jagentdesk__remote_run", detail);
+    expect(result?.job.status).toBe("succeeded");
+    expect(result?.output).toBe("hello\n");
+  });
+
+  it("peels the Claude wrapper nested once more", () => {
+    const detail = unknownResult({
+      output: { type: "command", command: "ls", output: JSON.stringify(jobResult()) },
+    });
+    expect(readRemoteJobToolResult("remote_run", detail)?.job.id).toBe("rjb_0123456789ab");
+  });
+
+  it("reads the Claude {output} fallback wrapper (remote_job_wait)", () => {
+    const result = readRemoteJobToolResult(
+      "jagentdesk.remote_job_wait",
+      unknownResult({ output: jobResult({ status: "failed", exitCode: 1 }) }),
+    );
+    expect(result?.job.status).toBe("failed");
+  });
+
+  it("does not over-unwrap the job result's own output field", () => {
+    const value = jobResult();
+    value.output = "job tail\n";
+    const result = readRemoteJobToolResult("remote_run", unknownResult({ output: value }));
+    expect(result?.output).toBe("job tail\n");
+  });
+
+  it("reads an MCP content array (Codex CallToolResult)", () => {
+    const detail = unknownResult({
+      content: [{ type: "text", text: JSON.stringify(jobResult()) }],
+    });
+    expect(readRemoteJobToolResult("remote_run", detail)?.job.id).toBe("rjb_0123456789ab");
+  });
+
+  it("reads a shell detail (generic ACP)", () => {
+    const detail: ToolCallDetail = {
+      type: "shell",
+      command: "ls",
+      output: JSON.stringify(jobResult({ status: "succeeded", exitCode: 0 })),
+      exitCode: 0,
+    };
+    const result = readRemoteJobToolResult("remote_run", detail);
+    expect(result?.job.status).toBe("succeeded");
+    expect(result?.output).toBe("hello\n");
+  });
+
+  it("reads a plain_text detail whose output is the Claude-style wrapper", () => {
+    const detail: ToolCallDetail = {
+      type: "unknown",
+      input: {},
+      output: { output: JSON.stringify(jobResult()) },
+    };
+    expect(readRemoteJobToolResult("remote_run", detail)?.job.id).toBe("rjb_0123456789ab");
+  });
+});
+
+describe("readRemoteJobToolResult with the real Claude fixture (live-test regression)", () => {
+  const calls = claudeRemoteRunCalls as unknown as FixtureCall[];
+
+  it("skips non-remote tools in the fixture", () => {
+    const [toolSearch] = calls;
+    expect(toolSearch.name).toBe("ToolSearch");
+    expect(readRemoteJobToolResult(toolSearch.name, toolSearch.detail)).toBeNull();
+  });
+
+  it("parses the remote_run result out of the {type:'command'} wrapper", () => {
+    const [, remoteRun] = calls;
+    const result = readRemoteJobToolResult(remoteRun.name, remoteRun.detail);
+    expect(result?.job.id).toBe("rjb_7c2421a87cf6");
+    expect(result?.job.status).toBe("succeeded");
+    expect(result?.output).toContain("notes.txt");
+    expect(result?.outputOffset).toBe(0);
   });
 });
 

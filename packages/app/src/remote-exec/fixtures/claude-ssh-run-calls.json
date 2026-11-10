@@ -1,0 +1,57 @@
+[
+  {
+    "type": "tool_call",
+    "callId": "toolu_01MjYQowpsUXq11WvfFh7U1w",
+    "name": "mcp__jagentdesk__ssh_run",
+    "detail": {
+      "type": "unknown",
+      "input": {},
+      "output": null
+    },
+    "status": "failed",
+    "error": {
+      "type": "tool_result",
+      "content": "MCP error -32602: Input validation error: Invalid arguments for tool ssh_run: [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"command\"\n    ],\n    \"message\": \"Invalid input: expected string, received undefined\"\n  }\n]",
+      "is_error": true,
+      "tool_use_id": "toolu_01MjYQowpsUXq11WvfFh7U1w"
+    }
+  },
+  {
+    "type": "tool_call",
+    "callId": "toolu_019mXUxXt7jxWVAnsfwAks8y",
+    "name": "mcp__jagentdesk__ssh_run",
+    "detail": {
+      "type": "unknown",
+      "input": {
+        "serverId": "srv_236c7de7a989",
+        "command": "uptime; df -h / | tail -1"
+      },
+      "output": {
+        "type": "command",
+        "command": "uptime; df -h / | tail -1",
+        "output": "{\n  \"serverId\": \"srv_236c7de7a989\",\n  \"stdout\": \" 13:13:46 up 23:56,  1 user,  load average: 0.03, 0.01, 0.00\\n/dev/sdb        251G   34G  205G  15% /\\n\",\n  \"stderr\": \"\",\n  \"exitCode\": 0,\n  \"signal\": null,\n  \"timedOut\": false,\n  \"stdoutTruncated\": false,\n  \"stderrTruncated\": false\n}"
+      }
+    },
+    "status": "completed",
+    "error": null
+  },
+  {
+    "type": "tool_call",
+    "callId": "toolu_01VfX1BdvmyMuvdewEcYwsuN",
+    "name": "mcp__jagentdesk__ssh_run",
+    "detail": {
+      "type": "unknown",
+      "input": {
+        "serverId": "srv_236c7de7a989",
+        "command": "ls /no-such-dir"
+      },
+      "output": {
+        "type": "command",
+        "command": "ls /no-such-dir",
+        "output": "{\n  \"serverId\": \"srv_236c7de7a989\",\n  \"stdout\": \"\",\n  \"stderr\": \"ls: cannot access '/no-such-dir': No such file or directory\\n\",\n  \"exitCode\": 2,\n  \"signal\": null,\n  \"timedOut\": false,\n  \"stdoutTruncated\": false,\n  \"stderrTruncated\": false\n}"
+      }
+    },
+    "status": "completed",
+    "error": null
+  }
+]
