@@ -291,6 +291,10 @@ vi.mock("@/utils/confirm-dialog", () => ({
   confirmDialog: vi.fn(async () => true),
 }));
 
+vi.mock("@/custom-providers/custom-providers-section", () => ({
+  CustomProvidersSection: () => null,
+}));
+
 import { ProvidersSection } from "./providers-section";
 
 const claudeEntry: ProviderSnapshotEntry = {
