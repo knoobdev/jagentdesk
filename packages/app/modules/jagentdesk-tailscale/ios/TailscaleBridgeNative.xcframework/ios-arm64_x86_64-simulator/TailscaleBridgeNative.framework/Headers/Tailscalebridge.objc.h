@@ -33,6 +33,16 @@ tsnet.Start when this embedded node has not been authenticated yet.
 - (NSString* _Nonnull)devicePublicKeyB64;
 - (NSString* _Nonnull)localAddress;
 - (BOOL)proxy:(NSString* _Nullable)target error:(NSError* _Nullable* _Nullable)error;
+/**
+ * Revive restores the transport after the OS reclaimed the app's sockets
+while it was suspended (spec 05.7.4, "Hồi phục tầng tsnet khi lên
+foreground"): it re-opens the loopback listener (same port preferred;
+already-proxied connections stay open), checks the daemon is reachable
+through the tailnet with a bounded deadline, and restarts the tsnet node
+from the saved state directory when the dial fails. It returns the current
+loopback address so the caller can rebuild clients whose URL changed.
+ */
+- (NSString* _Nonnull)revive:(NSString* _Nullable)target error:(NSError* _Nullable* _Nullable)error;
 - (NSString* _Nonnull)signNonce:(NSString* _Nullable)nonce;
 - (BOOL)start:(NSString* _Nullable)authKey stateDir:(NSString* _Nullable)stateDir hostname:(NSString* _Nullable)hostname target:(NSString* _Nullable)target error:(NSError* _Nullable* _Nullable)error;
 - (BOOL)stop:(NSError* _Nullable* _Nullable)error;

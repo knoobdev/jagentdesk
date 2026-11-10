@@ -92,6 +92,7 @@ import { shouldRedirectToDesktopTailscaleLogin } from "@/navigation/desktop-conn
 import {
   getConnectionMode,
   refreshTailscaleStatus,
+  reviveTailnetHosts,
   useConnectionMode,
   useTailscaleLoginStatus,
 } from "@/tailscale";
@@ -1171,8 +1172,7 @@ function TailscaleHealthMonitor() {
       return;
     }
 
-    const reconnectNow = () => {
-      void refreshTailscaleStatus();
+    const reconnectPass = () => {
       const store = getHostRuntimeStore();
       void store.runProbeCycleNow();
       store.ensureConnectedAll();
@@ -1181,12 +1181,21 @@ function TailscaleHealthMonitor() {
       store.revalidateConnectedAll();
     };
 
-    reconnectNow();
+    // Mount: the process just launched, so its sockets cannot have been
+    // reclaimed while suspended — connect without the revive step.
+    reconnectPass();
     const timer = setInterval(() => void refreshTailscaleStatus(), 5000);
     const appStateSubscription = AppState.addEventListener("change", (nextState) => {
-      if (nextState === "active") {
-        reconnectNow();
+      if (nextState !== "active") {
+        return;
       }
+      void refreshTailscaleStatus();
+      // Spec 05.7.4: revive the native tsnet layer first — iOS may have
+      // reclaimed the loopback listener and the tsnet sockets while the app
+      // was suspended — then run the normal reconnect pass. A revived host
+      // whose loopback port changed has its client rebuilt inside the revive
+      // step; the backoff resets through the reconnect pass below.
+      void reviveTailnetHosts(getHostRuntimeStore()).then(reconnectPass);
     });
     return () => {
       clearInterval(timer);

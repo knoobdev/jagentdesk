@@ -2823,6 +2823,17 @@ export class HostRuntimeStore {
   }
 
   /**
+   * Recreate a host's client for the given connection (spec 05.7.4): used
+   * after the native Tailscale revive reports a loopback address different
+   * from the one the client was built with, because a DaemonClient keeps the
+   * URL it was constructed with. Reuses activateConnection — the same path
+   * the probe cycle uses to build clients.
+   */
+  async rebuildTailnetClient(serverId: string, connectionId: string): Promise<void> {
+    await this.controllers.get(serverId)?.activateConnection({ connectionId });
+  }
+
+  /**
    * Clear a local host's exhausted-retry state and resume auto-retrying (REQ 4).
    * Used when the user explicitly retries a local host that gave up.
    */
