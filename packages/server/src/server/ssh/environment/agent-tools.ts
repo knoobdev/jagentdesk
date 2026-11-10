@@ -94,6 +94,12 @@ export interface SshAgentToolDependencies {
   /** The server a server-chat agent is bound to (its `SSH_SERVER_AGENT_LABEL`), else null. */
   defaultServerId: string | null;
   requestPermission: RequestToolPermission;
+  /**
+   * Servers with remote tasks enabled (spec 33.7), resolved per call since the saved
+   * server list changes. When a caller other than the server's own chat targets one,
+   * ssh_run fails fast with `use_remote_run` instead of connecting.
+   */
+  remoteExecEnabledServers?: () => ReadonlySet<string>;
   /** Tools whose access is null are not offered: an advertised tool must work. */
   terminals: SshTerminalAccess | null;
   forwards: SshForwardAccess | null;
@@ -113,6 +119,24 @@ function jsonResult(value: unknown): JAgentDeskToolResult {
 
 function errorResult(message: string): JAgentDeskToolResult {
   return { content: [{ type: "text", text: message }], isError: true };
+}
+
+/** Spec 33.7: point the caller at remote_run instead of running over plain SSH. */
+function remoteRunRequiredResult(serverId: string): JAgentDeskToolResult {
+  return {
+    content: [
+      {
+        type: "text",
+        text:
+          `use_remote_run: ${serverId} is set up for remote tasks. Use remote_run with serverId ` +
+          `"${serverId}" and the same command; pass sendCode: false when the command does not ` +
+          "need this project's code (installing software, cloning a repository, checking the " +
+          "machine).",
+      },
+    ],
+    structuredContent: { code: "use_remote_run", serverId },
+    isError: true,
+  };
 }
 
 function resolveServerId(deps: SshAgentToolDependencies, requested: string | undefined): string {
@@ -187,7 +211,7 @@ function execTools(deps: SshAgentToolDependencies): SshAgentTool[] {
   const run = defineTool({
     name: "ssh_run",
     title: "Run a command on an SSH server",
-    description: `Run a shell command on the SSH server over an exec channel and return stdout, stderr and the exit code (each stream cut at ${SSH_RUN_MAX_BYTES_PER_STREAM / 1024} KB). For quick inspection and administration of the server itself (uptime, disk, services, packages): it runs in the home directory, sends no code, is capped at ${SSH_RUN_MAX_TIMEOUT_MS / 1000} s and ${SSH_RUN_MAX_BYTES_PER_STREAM / 1024} KB per stream. To build or test project code on another machine, use remote_run. Not a TTY: interactive programs will not work, use ssh_terminal_send for those. Requires the user's approval.`,
+    description: `Run a shell command on the SSH server over an exec channel and return stdout, stderr and the exit code (each stream cut at ${SSH_RUN_MAX_BYTES_PER_STREAM / 1024} KB). For quick inspection and administration of the server itself (uptime, disk, services, packages): it runs in the home directory, sends no code, is capped at ${SSH_RUN_MAX_TIMEOUT_MS / 1000} s and ${SSH_RUN_MAX_BYTES_PER_STREAM / 1024} KB per stream. To build or test project code on another machine, use remote_run. A server set up for remote tasks must be driven entirely through remote_run (including installs and clones) — ssh_run rejects it from chats that are not the server's own. Not a TTY: interactive programs will not work, use ssh_terminal_send for those. Requires the user's approval.`,
     inputSchema: {
       serverId: serverIdInput,
       command: z.string().min(1),
@@ -196,6 +220,13 @@ function execTools(deps: SshAgentToolDependencies): SshAgentTool[] {
     requiresPermission: true,
     async run(input) {
       const serverId = resolveServerId(deps, input.serverId);
+      // Spec 33.7: fail before connecting or raising the permission card.
+      if (
+        serverId !== deps.defaultServerId &&
+        (deps.remoteExecEnabledServers?.().has(serverId) ?? false)
+      ) {
+        return remoteRunRequiredResult(serverId);
+      }
       await requireApproval(deps, {
         name: "ssh_run",
         title: `Run on ${serverId}`,

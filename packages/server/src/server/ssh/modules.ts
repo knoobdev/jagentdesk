@@ -342,6 +342,13 @@ export class SshModules {
         callerAgentId,
         defaultServerId,
         requestPermission,
+        remoteExecEnabledServers: () => {
+          const enabled = new Set<string>();
+          for (const server of service.storage.listServers()) {
+            if (server.remoteExec?.enabled === true) enabled.add(server.id);
+          }
+          return enabled;
+        },
         terminals: terminalAccess(service),
         forwards: forwardAccess(this.forwarding),
         servers: serverDirectory(service),
