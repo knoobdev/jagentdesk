@@ -75,7 +75,10 @@ describe("exec channel /bin/sh wrapping", () => {
       buildStopScript({ jobDirExpr: jobDir }),
       buildExtractScript(remotePathExpr("/srv", "wsk_1", "src")),
       buildDeleteScript(remotePathExpr("/srv", "wsk_1", "src")),
-      buildWriteManifestScript(remotePathExpr("/srv", "wsk_1", "manifest.json")),
+      buildWriteManifestScript(
+        remotePathExpr("/srv", "wsk_1", "manifest.json"),
+        remotePathExpr("/srv", "wsk_1"),
+      ),
     ];
     const { client, commands } = recordingClient();
     for (const script of scripts) {

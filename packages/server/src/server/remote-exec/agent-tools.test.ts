@@ -336,6 +336,78 @@ describe("remote_run", () => {
     expect(result.isError).toBe(true);
     expect(text(result)).toBe("No SSH server has remote tasks enabled.");
   });
+
+  it("passes source through and lists the sources on the permission card", async () => {
+    const { deps, service, asked } = createHarness({
+      service: {
+        previewSnapshot: vi.fn(async () => ({
+          ...preview,
+          filesTotal: 3,
+          excludedSecrets: ["A/.env"],
+          sources: [
+            { name: "A", files: 2, bytes: 3_000, excludedSecrets: 1 },
+            { name: "C", files: 1, bytes: 1_096, excludedSecrets: 0 },
+          ],
+        })),
+      },
+    });
+
+    await run(deps, "remote_run", { command: "npm test", source: ["A", "C"] });
+
+    expect(service.previewSnapshot).toHaveBeenCalledWith({
+      workspacePath: "/repo",
+      source: ["A", "C"],
+    });
+    expect(asked[0].input).toMatchObject({
+      files: 3,
+      excludedSecrets: 1,
+      sources: [
+        { name: "A", files: 2, bytes: 3_000, excludedSecrets: 1 },
+        { name: "C", files: 1, bytes: 1_096, excludedSecrets: 0 },
+      ],
+    });
+    expect(service.startJob).toHaveBeenCalledWith(expect.objectContaining({ source: ["A", "C"] }));
+  });
+
+  it('shows code:"none" on the card and sends noCode for sendCode: false', async () => {
+    const { deps, service, asked } = createHarness({
+      service: {
+        previewSnapshot: vi.fn(async () => ({ ...preview, filesTotal: 0, noCode: true })),
+      },
+    });
+
+    await run(deps, "remote_run", { command: "uname -a", sendCode: false });
+
+    expect(service.previewSnapshot).toHaveBeenCalledWith({
+      workspacePath: "/repo",
+      noCode: true,
+    });
+    expect(asked[0].input).toEqual({
+      server: "build box",
+      command: "uname -a",
+      cwd: "/repo",
+      code: "none",
+    });
+    expect(asked[0].input.files).toBeUndefined();
+    expect(service.startJob).toHaveBeenCalledWith(expect.objectContaining({ noCode: true }));
+  });
+
+  it("returns source errors before asking permission and starts no job", async () => {
+    const { deps, service, asked } = createHarness({
+      service: {
+        previewSnapshot: vi.fn(async () => {
+          throw new RemoteExecError("source_outside_workspace", "outside");
+        }),
+      },
+    });
+
+    const result = await run(deps, "remote_run", { command: "npm test", source: "../outside" });
+
+    expect(result.isError).toBe(true);
+    expect(text(result)).toBe("source_outside_workspace: outside");
+    expect(asked).toEqual([]);
+    expect(service.startJob).not.toHaveBeenCalled();
+  });
 });
 
 describe("remote_job_stop", () => {

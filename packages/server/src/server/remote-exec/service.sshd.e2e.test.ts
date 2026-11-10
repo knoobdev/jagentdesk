@@ -70,6 +70,8 @@ describe.runIf(E2E_ENABLED)("remote-exec service against a real sshd", () => {
   let port = 0;
   let homeDir: string;
   let workspace: string;
+  /** Non-git cwd with git repos A and B, plain dir C and a root .env (spec 33.10#13). */
+  let sourcesWorkspace: string;
   let clients: Client[] = [];
   let current: Promise<Client> | null = null;
   let service: ReturnType<typeof createRemoteExecService>;
@@ -98,15 +100,38 @@ describe.runIf(E2E_ENABLED)("remote-exec service against a real sshd", () => {
     }
     homeDir = await fs.mkdtemp(path.join(os.tmpdir(), "jad-remote-exec-e2e-home-"));
     workspace = await fs.mkdtemp(path.join(os.tmpdir(), "jad-remote-exec-e2e-ws-"));
-    const git = (args: string[]) =>
+    sourcesWorkspace = await fs.mkdtemp(path.join(os.tmpdir(), "jad-remote-exec-e2e-srcws-"));
+    const git = (args: string[], cwd: string = workspace) =>
       execFileSync("git", ["-c", "user.email=e2e@example.com", "-c", "user.name=E2E", ...args], {
-        cwd: workspace,
+        cwd,
         stdio: "ignore",
       });
     git(["init", "-q"]);
     await fs.writeFile(path.join(workspace, "tracked.txt"), "original tracked\n");
     git(["add", "."]);
     git(["commit", "-qm", "init"]);
+
+    // sourcesWorkspace: repo A (.gitignore'd build/, .env), repo B, plain C (node_modules,
+    // notes.txt), root .env (spec 33.10#13).
+    for (const name of ["A", "B", "C"]) {
+      await fs.mkdir(path.join(sourcesWorkspace, name));
+    }
+    await fs.writeFile(path.join(sourcesWorkspace, ".env"), "ROOT_SECRET=yes\n");
+    await fs.writeFile(path.join(sourcesWorkspace, "A", ".gitignore"), "build/\n");
+    await fs.writeFile(path.join(sourcesWorkspace, "A", "code.ts"), "export a;\n");
+    await fs.mkdir(path.join(sourcesWorkspace, "A", "build"));
+    await fs.writeFile(path.join(sourcesWorkspace, "A", "build", "x.js"), "ignored\n");
+    await fs.writeFile(path.join(sourcesWorkspace, "A", ".env"), "A_SECRET=yes\n");
+    git(["init", "-q"], path.join(sourcesWorkspace, "A"));
+    git(["add", "."], path.join(sourcesWorkspace, "A"));
+    git(["commit", "-qm", "init"], path.join(sourcesWorkspace, "A"));
+    await fs.writeFile(path.join(sourcesWorkspace, "B", "b.ts"), "export b;\n");
+    git(["init", "-q"], path.join(sourcesWorkspace, "B"));
+    git(["add", "."], path.join(sourcesWorkspace, "B"));
+    git(["commit", "-qm", "init"], path.join(sourcesWorkspace, "B"));
+    await fs.mkdir(path.join(sourcesWorkspace, "C", "node_modules"), { recursive: true });
+    await fs.writeFile(path.join(sourcesWorkspace, "C", "node_modules", "m.js"), "dep\n");
+    await fs.writeFile(path.join(sourcesWorkspace, "C", "notes.txt"), "plain\n");
 
     port = 20000 + Math.floor(Math.random() * 20000);
     containerName = `jad-remote-exec-e2e-${Date.now()}`;
@@ -395,6 +420,171 @@ describe.runIf(E2E_ENABLED)("remote-exec service against a real sshd", () => {
       expect(result.job.status).toBe("succeeded");
     }
   }, 300_000);
+
+  it("runs sendCode:false without sending any code", async () => {
+    // First run against sourcesWorkspace: only an empty src/ is ensured; no manifest may exist
+    // afterwards (one would force the next default run to re-upload everything, spec 33.5).
+    const job = await service.startJob({
+      serverId: "srv1",
+      workspacePath: sourcesWorkspace,
+      command: `test ! -e ../manifest.json && [ -z "$(ls -A .)" ] && pwd`,
+      timeoutMs: 120_000,
+      agentId: null,
+      noCode: true,
+    });
+    const result = await service.waitForJob(job.id, 180_000);
+    expect(result.job.status).toBe("succeeded");
+    expect(result.job.exitCode).toBe(0);
+    expect(result.job.noCode).toBe(true);
+    expect(result.job.snapshotId).toBeNull();
+    expect(result.job.sync).toBeNull();
+    expect(result.job.sources).toBeUndefined();
+    expect(result.output.trimEnd().endsWith(`/${result.job.workspaceKey}/src`)).toBe(true);
+  }, 180_000);
+
+  it("syncs the non-git sources workspace into the default layout", async () => {
+    const job = await service.startJob({
+      serverId: "srv1",
+      workspacePath: sourcesWorkspace,
+      command:
+        "test -f A/code.ts && test -f B/b.ts && test -f C/notes.txt && " +
+        "test ! -e A/build && test ! -e A/.env && test ! -e C/node_modules && test ! -e .env && " +
+        "test -f ../manifest.json && pwd",
+      timeoutMs: 120_000,
+      agentId: null,
+    });
+    const result = await service.waitForJob(job.id, 180_000);
+    expect(result.job.status).toBe("succeeded");
+    expect(result.job.exitCode).toBe(0);
+    expect(result.output.trimEnd().endsWith(`/${result.job.workspaceKey}/src`)).toBe(true);
+    expect(result.job.sources).toBeUndefined();
+    expect(result.job.sync?.excludedSecrets).toContain(".env");
+    expect(result.job.sync?.excludedSecrets).toContain("A/.env");
+    // A/.gitignore, A/code.ts, B/b.ts, C/notes.txt (build/, node_modules and secrets excluded).
+    expect(result.job.sync?.filesUploaded).toBeGreaterThanOrEqual(4);
+    expect(result.job.snapshotId).toMatch(/^snp_[0-9a-f]{12}$/);
+  }, 240_000);
+
+  it("uploads nothing on the next default run", async () => {
+    const job = await service.startJob({
+      serverId: "srv1",
+      workspacePath: sourcesWorkspace,
+      command: "true",
+      timeoutMs: 120_000,
+      agentId: null,
+    });
+    const result = await service.waitForJob(job.id, 180_000);
+    expect(result.job.status).toBe("succeeded");
+    expect(result.job.sync?.filesUploaded).toBe(0);
+    expect(result.job.sync?.bytesUploaded).toBe(0);
+  }, 240_000);
+
+  it("syncs source A into sources/A and runs there", async () => {
+    const sourcePath = await fs.realpath(path.join(sourcesWorkspace, "A"));
+    const job = await service.startJob({
+      serverId: "srv1",
+      workspacePath: sourcesWorkspace,
+      command:
+        "test -f code.ts && test ! -e build && test ! -e .env && " +
+        "test -f ../../manifests/A.json && pwd",
+      timeoutMs: 120_000,
+      agentId: null,
+      source: "A",
+    });
+    const result = await service.waitForJob(job.id, 180_000);
+    expect(result.job.status).toBe("succeeded");
+    expect(result.job.exitCode).toBe(0);
+    expect(result.output.trimEnd().endsWith("/sources/A")).toBe(true);
+    expect(result.job.sources).toHaveLength(1);
+    expect(result.job.sources?.[0]?.name).toBe("A");
+    expect(result.job.sources?.[0]?.path).toBe(sourcePath);
+    // Per-source sync paths are relative to the source (spec 33.6); the aggregate prefixes them.
+    expect(result.job.sources?.[0]?.sync.excludedSecrets).toEqual([".env"]);
+    // .gitignore + code.ts; the gitignored build/ and the secret .env stay behind.
+    expect(result.job.sources?.[0]?.sync.filesUploaded).toBeGreaterThanOrEqual(2);
+    // One explicit source keeps its own snapshotId (spec 33.4).
+    expect(result.job.snapshotId).toBe(result.job.sources?.[0]?.sync.snapshotId);
+    expect(result.job.sync?.excludedSecrets).toEqual(["A/.env"]);
+  }, 240_000);
+
+  it("uploads nothing when source A runs again", async () => {
+    const job = await service.startJob({
+      serverId: "srv1",
+      workspacePath: sourcesWorkspace,
+      command: "true",
+      timeoutMs: 120_000,
+      agentId: null,
+      source: "A",
+    });
+    const result = await service.waitForJob(job.id, 180_000);
+    expect(result.job.status).toBe("succeeded");
+    expect(result.job.sync?.filesUploaded).toBe(0);
+    expect(result.job.sync?.bytesUploaded).toBe(0);
+    expect(result.job.sources?.[0]?.sync.filesUploaded).toBe(0);
+  }, 240_000);
+
+  it("syncs sources A and C side by side and runs in sources/", async () => {
+    const job = await service.startJob({
+      serverId: "srv1",
+      workspacePath: sourcesWorkspace,
+      command:
+        "test -f A/code.ts && test -f C/notes.txt && test ! -e B && " +
+        "test -f ../manifests/A.json && test -f ../manifests/C.json && pwd",
+      timeoutMs: 120_000,
+      agentId: null,
+      source: ["A", "C"],
+    });
+    const result = await service.waitForJob(job.id, 180_000);
+    expect(result.job.status).toBe("succeeded");
+    expect(result.job.exitCode).toBe(0);
+    expect(result.output.trimEnd().endsWith("/sources")).toBe(true);
+    expect(result.job.sources?.map((source) => source.name)).toEqual(["A", "C"]);
+    expect(result.job.sources?.[0]?.sync.excludedSecrets).toEqual([".env"]);
+    expect(result.job.sources?.[1]?.sync.filesTotal).toBe(1);
+    expect(result.job.sync?.excludedSecrets).toEqual(["A/.env"]);
+    // A was already synced by the earlier source-A runs, so only C's notes.txt uploads now.
+    expect(result.job.sources?.[0]?.sync.filesUploaded).toBe(0);
+    expect(result.job.sources?.[1]?.sync.filesUploaded).toBeGreaterThanOrEqual(1);
+    expect(result.job.sync?.filesUploaded).toBe(result.job.sources?.[1]?.sync.filesUploaded);
+    // Several sources get the aggregate id, distinct from every per-source id (spec 33.4).
+    expect(result.job.snapshotId).toMatch(/^snp_[0-9a-f]{12}$/);
+    expect(result.job.snapshotId).not.toBe(result.job.sources?.[0]?.sync.snapshotId);
+    expect(result.job.snapshotId).not.toBe(result.job.sources?.[1]?.sync.snapshotId);
+  }, 240_000);
+
+  it("uploads nothing when sources A and C run again", async () => {
+    const job = await service.startJob({
+      serverId: "srv1",
+      workspacePath: sourcesWorkspace,
+      command: "true",
+      timeoutMs: 120_000,
+      agentId: null,
+      source: ["A", "C"],
+    });
+    const result = await service.waitForJob(job.id, 180_000);
+    expect(result.job.status).toBe("succeeded");
+    expect(result.job.sync?.filesUploaded).toBe(0);
+    expect(result.job.sync?.bytesUploaded).toBe(0);
+    for (const source of result.job.sources ?? []) {
+      expect(source.sync.filesUploaded).toBe(0);
+    }
+  }, 240_000);
+
+  it("leaves other sources and the default src untouched", async () => {
+    const job = await service.startJob({
+      serverId: "srv1",
+      workspacePath: sourcesWorkspace,
+      command: "test -f b.ts && test -f ../A/code.ts && test -f ../../src/A/code.ts && pwd",
+      timeoutMs: 120_000,
+      agentId: null,
+      source: "B",
+    });
+    const result = await service.waitForJob(job.id, 180_000);
+    expect(result.job.status).toBe("succeeded");
+    expect(result.job.exitCode).toBe(0);
+    expect(result.output.trimEnd().endsWith("/sources/B")).toBe(true);
+    expect(result.job.sources?.map((source) => source.name)).toEqual(["B"]);
+  }, 240_000);
 
   it("runs the whole pipeline when the target user's login shell is not sh-compatible", async () => {
     // Install zsh and make it the target user's login shell; sshd then runs every exec command

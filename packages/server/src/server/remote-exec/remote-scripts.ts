@@ -124,14 +124,20 @@ export function buildExtractScript(srcDirExpr: string): string {
   return `mkdir -p ${srcDirExpr} && tar -xzf - -C ${srcDirExpr}`;
 }
 
+/** noCode runs (spec 33.5): only ensure the empty src/ exists — nothing is sent or deleted. */
+export function buildEnsureSrcScript(srcDirExpr: string): string {
+  return `mkdir -p ${srcDirExpr}`;
+}
+
 /** Deletes NUL-separated paths from src/ (stdin); never recurses into directories. */
 export function buildDeleteScript(srcDirExpr: string): string {
   return `cd ${srcDirExpr} && xargs -0 rm -f --`;
 }
 
-/** Writes the new manifest from stdin atomically (temp + mv, spec 33.5). */
-export function buildWriteManifestScript(manifestExpr: string): string {
-  return `cat > ${manifestExpr}.tmp && mv ${manifestExpr}.tmp ${manifestExpr}`;
+/** Writes the new manifest from stdin atomically (temp + mv, spec 33.5); creates its directory
+ * first because explicit-source manifests live in `manifests/`, which nothing else creates. */
+export function buildWriteManifestScript(manifestExpr: string, dirExpr: string): string {
+  return `mkdir -p ${dirExpr} && cat > ${manifestExpr}.tmp && mv ${manifestExpr}.tmp ${manifestExpr}`;
 }
 
 /** Prints the check-target report (spec 33.3) as parseable lines. */

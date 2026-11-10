@@ -171,6 +171,69 @@ async function initGitWorkspace(): Promise<void> {
   );
 }
 
+/** Non-git cwd holding git repo A (with .env), git repo B and plain dir C with node_modules. */
+async function initMultiWorkspace(): Promise<void> {
+  for (const name of ["A", "B", "C"]) {
+    await fs.mkdir(path.join(workspace, name), { recursive: true });
+  }
+  await fs.writeFile(path.join(workspace, ".env"), "ROOT_SECRET=1\n");
+  await fs.writeFile(path.join(workspace, "A", "code.ts"), "a\n");
+  await fs.writeFile(path.join(workspace, "A", ".env"), "A_SECRET=1\n");
+  execFileSync("git", ["init", "-q"], { cwd: path.join(workspace, "A"), stdio: "ignore" });
+  execFileSync("git", ["add", "."], { cwd: path.join(workspace, "A"), stdio: "ignore" });
+  execFileSync(
+    "git",
+    ["-c", "user.email=t@example.com", "-c", "user.name=T", "commit", "-qm", "init"],
+    { cwd: path.join(workspace, "A"), stdio: "ignore" },
+  );
+  await fs.writeFile(path.join(workspace, "B", "code.ts"), "b\n");
+  execFileSync("git", ["init", "-q"], { cwd: path.join(workspace, "B"), stdio: "ignore" });
+  execFileSync("git", ["add", "."], { cwd: path.join(workspace, "B"), stdio: "ignore" });
+  execFileSync(
+    "git",
+    ["-c", "user.email=t@example.com", "-c", "user.name=T", "commit", "-qm", "init"],
+    { cwd: path.join(workspace, "B"), stdio: "ignore" },
+  );
+  await fs.mkdir(path.join(workspace, "C", "node_modules"), { recursive: true });
+  await fs.writeFile(path.join(workspace, "C", "node_modules", "m.js"), "dep\n");
+  await fs.writeFile(path.join(workspace, "C", "notes.txt"), "plain\n");
+}
+
+function completeExecMatching(
+  execs: FakeExec[],
+  predicate: (command: string) => boolean,
+  result?: { exitCode?: number; stdout?: string; stderr?: string },
+): void {
+  const entry = execs.find((candidate) => !candidate.completed && predicate(candidate.command));
+  if (!entry) {
+    throw new Error(
+      `no pending exec matches the predicate; have: ${execs.map((e) => e.command).join(" | ")}`,
+    );
+  }
+  entry.start();
+  entry.complete(result);
+}
+
+/**
+ * Drives one syncWorkspace run (default source when name is null, else `sources/<name>`): base
+ * mkdir, manifest read (none yet), tar upload, manifest write.
+ */
+async function driveOneSourceSync(execs: FakeExec[], name: string | null): Promise<void> {
+  const manifestFragment = name === null ? "manifest.json" : `manifests/${name}.json`;
+  await waitUntil(() =>
+    execs.some((e) => !e.completed && e.command.includes("mkdir -p") && !e.command.includes("tar")),
+  );
+  completeExecMatching(execs, (c) => c.includes("mkdir -p") && !c.includes("tar"), {
+    exitCode: 0,
+  });
+  await waitUntil(() => execs.some((e) => !e.completed && e.command.includes(manifestFragment)));
+  completeExecMatching(execs, (c) => c.includes(manifestFragment), { exitCode: 1 });
+  await waitUntil(() => execs.some((e) => !e.completed && e.command.includes("tar -xzf")));
+  completeExecMatching(execs, (c) => c.includes("tar -xzf"), { exitCode: 0 });
+  await waitUntil(() => execs.some((e) => !e.completed && e.command.includes(".tmp && mv")));
+  completeExecMatching(execs, (c) => c.includes(".tmp && mv"), { exitCode: 0 });
+}
+
 function startInput() {
   return {
     serverId: "srv1",
@@ -332,17 +395,163 @@ describe("createRemoteExecService", () => {
     expect(pollFailure?.code).toBe("tailnet_unavailable");
   });
 
-  it("fails startJob with not_git_workspace for a plain directory", async () => {
+  it("runs a plain (non-git) directory as the default source", async () => {
+    await fs.writeFile(path.join(workspace, "plain.txt"), "no git here\n");
+    const { client, execs } = makeFakeClient();
+    const service = createRemoteExecService(makeDeps({ client }));
+    const job = await service.startJob(startInput());
+    await syncThrough(execs, "/command");
+    completeExec(execs, "/command", { exitCode: 0 });
+    await waitUntil(() => execed(execs, "setsid"));
+    completeExec(execs, "setsid", { exitCode: 0 });
+    // The follow loop's first poll reports the exit code and settles the job.
+    await waitUntil(() => execed(execs, "tail -c"));
+    completeExec(execs, "tail -c", { exitCode: 0, stderr: "EXIT 0\n" });
+    const result = await service.waitForJob(job.id, 5_000);
+    expect(result.job.status).toBe("succeeded");
+    expect(result.job.sync?.filesTotal).toBe(1);
+    expect(result.job.snapshotId).toMatch(/^snp_[0-9a-f]{12}$/);
+    await service.stop();
+  });
+
+  it("fails startJob for a missing source before any job record exists", async () => {
+    await initGitWorkspace();
     const service = createRemoteExecService(makeDeps());
     await expect(
-      service.startJob({
-        serverId: "srv1",
-        workspacePath: workspace,
-        command: "true",
-        timeoutMs: 60_000,
-        agentId: null,
-      }),
-    ).rejects.toMatchObject({ code: "not_git_workspace" });
+      service.startJob({ ...startInput(), source: "missing-dir" }),
+    ).rejects.toMatchObject({ code: "source_not_found" });
+    await expect(
+      service.startJob({ ...startInput(), noCode: true, source: "any" }),
+    ).rejects.toMatchObject({ code: "invalid_source" });
+    expect(service.listJobs({}).map((job) => job.id)).toEqual([]);
+  });
+
+  it("syncs explicit sources into sources/<name> and launches several in sources/", async () => {
+    await initMultiWorkspace();
+    const { client, execs } = makeFakeClient();
+    const service = createRemoteExecService(makeDeps({ client }));
+    const job = await service.startJob({ ...startInput(), source: ["A", "C"] });
+    // The record carries the resolved sources from the syncing state on.
+    expect(job.sources?.map((source) => source.name)).toEqual(["A", "C"]);
+    expect(job.sources?.map((source) => source.path)).toEqual([
+      await fs.realpath(path.join(workspace, "A")),
+      await fs.realpath(path.join(workspace, "C")),
+    ]);
+    expect(job.snapshotId).toMatch(/^snp_[0-9a-f]{12}$/);
+
+    await driveOneSourceSync(execs, "A");
+    await driveOneSourceSync(execs, "C");
+    await waitUntil(() => execed(execs, "/command"));
+    completeExec(execs, "/command", { exitCode: 0 });
+    await waitUntil(() => execed(execs, "setsid"));
+    // Several sources: the command runs in sources/ (the command cds into each source itself).
+    const launch = execs.find((candidate) => candidate.command.includes("setsid"));
+    expect(launch?.command).toContain('sources" || exit 3');
+    // Each source synced only inside its own directory.
+    expect(execed(execs, "sources/A")).toBe(true);
+    expect(execed(execs, "manifests/A.json")).toBe(true);
+    expect(execed(execs, "sources/C")).toBe(true);
+    expect(execed(execs, "manifests/C.json")).toBe(true);
+    completeExec(execs, "setsid", { exitCode: 0 });
+    await waitUntil(() => execed(execs, "tail -c"));
+    completeExec(execs, "tail -c", { exitCode: 0, stderr: "EXIT 0\n" });
+
+    const result = await service.waitForJob(job.id, 5_000);
+    expect(result.job.status).toBe("succeeded");
+    // Aggregate summary with <name>/ prefixes (spec 33.5).
+    expect(result.job.sync?.filesTotal).toBe(2);
+    expect(result.job.sync?.excludedSecrets).toEqual(["A/.env"]);
+    expect(result.job.sync?.skipped).toEqual([]);
+    // Per-source records keep source-relative paths and their own sync summary.
+    expect(result.job.sources?.[0]).toMatchObject({
+      name: "A",
+      path: await fs.realpath(path.join(workspace, "A")),
+      sync: { filesTotal: 1, excludedSecrets: [".env"] },
+    });
+    expect(result.job.sources?.[1]).toMatchObject({
+      name: "C",
+      sync: { filesTotal: 1, excludedSecrets: [] },
+    });
+    await service.stop();
+  });
+
+  it("launches a single explicit source in sources/<name> with its own snapshotId", async () => {
+    await initMultiWorkspace();
+    const { client, execs } = makeFakeClient();
+    const service = createRemoteExecService(makeDeps({ client }));
+    const job = await service.startJob({ ...startInput(), source: "A" });
+    await driveOneSourceSync(execs, "A");
+    await waitUntil(() => execed(execs, "/command"));
+    completeExec(execs, "/command", { exitCode: 0 });
+    await waitUntil(() => execed(execs, "setsid"));
+    const launch = execs.find((candidate) => candidate.command.includes("setsid"));
+    expect(launch?.command).toContain('sources/A" || exit 3');
+    completeExec(execs, "setsid", { exitCode: 0 });
+    await waitUntil(() => execed(execs, "tail -c"));
+    completeExec(execs, "tail -c", { exitCode: 0, stderr: "EXIT 0\n" });
+    const result = await service.waitForJob(job.id, 5_000);
+    expect(result.job.status).toBe("succeeded");
+    // Exactly one source keeps that source's snapshotId (spec 33.4).
+    expect(result.job.snapshotId).toBe(result.job.sources?.[0].sync.snapshotId);
+    expect(result.job.sync?.snapshotId).toBe(result.job.sources?.[0].sync.snapshotId);
+    await service.stop();
+  });
+
+  it("runs noCode in an empty src/ without sending or deleting anything", async () => {
+    await initMultiWorkspace();
+    const { client, execs } = makeFakeClient();
+    const service = createRemoteExecService(makeDeps({ client }));
+    const job = await service.startJob({ ...startInput(), noCode: true });
+    expect(job.noCode).toBe(true);
+    expect(job.snapshotId).toBeNull();
+    expect(job.sources).toBeUndefined();
+    await waitUntil(() => execed(execs, "mkdir -p"));
+    completeExec(execs, "mkdir -p", { exitCode: 0 });
+    await waitUntil(() => execed(execs, "/command"));
+    // No tar, no manifest write: only the empty src/ was ensured.
+    expect(execed(execs, "tar -xzf")).toBe(false);
+    expect(execed(execs, ".tmp && mv")).toBe(false);
+    completeExec(execs, "/command", { exitCode: 0 });
+    await waitUntil(() => execed(execs, "setsid"));
+    const launch = execs.find((candidate) => candidate.command.includes("setsid"));
+    expect(launch?.command).toContain('src" || exit 3');
+    completeExec(execs, "setsid", { exitCode: 0 });
+    await waitUntil(() => execed(execs, "tail -c"));
+    completeExec(execs, "tail -c", { exitCode: 0, stderr: "EXIT 0\n" });
+    const result = await service.waitForJob(job.id, 5_000);
+    expect(result.job.status).toBe("succeeded");
+    expect(result.job.sync).toBeNull();
+    expect(result.job.noCode).toBe(true);
+    await service.stop();
+  });
+
+  it("previews explicit sources and noCode for the permission card", async () => {
+    await initMultiWorkspace();
+    const service = createRemoteExecService(makeDeps());
+    const preview = await service.previewSnapshot({
+      workspacePath: workspace,
+      source: ["A", "C"],
+    });
+    expect(preview.filesTotal).toBe(2);
+    expect(preview.excludedSecrets).toEqual(["A/.env"]);
+    expect(preview.sources).toEqual([
+      { name: "A", files: 1, bytes: preview.sources?.[0].bytes, excludedSecrets: 1 },
+      { name: "C", files: 1, bytes: preview.sources?.[1].bytes, excludedSecrets: 0 },
+    ]);
+    const noCode = await service.previewSnapshot({ workspacePath: workspace, noCode: true });
+    expect(noCode.noCode).toBe(true);
+    expect(noCode.filesTotal).toBe(0);
+  });
+
+  it("loads job records written before noCode/sources existed", async () => {
+    await seedStore(homeDir, [makeStoredJob("rjb_old", { status: "succeeded" })]);
+    const service = createRemoteExecService(makeDeps());
+    await service.start();
+    const loaded = service.getJob("rjb_old");
+    expect(loaded?.status).toBe("succeeded");
+    expect(loaded?.noCode).toBeUndefined();
+    expect(loaded?.sources).toBeUndefined();
+    await service.stop();
   });
 
   it("enforces the one-running-job rule with the active jobId in the details", async () => {
@@ -446,9 +655,9 @@ describe("createRemoteExecService", () => {
     const { client, execs } = makeFakeClient();
     const service = createRemoteExecService(makeDeps({ client }));
     const job = await service.startJob(startInput());
-    await syncThrough(execs, "&& cat >");
+    await syncThrough(execs, "/command");
     const stopping = service.stopJob(job.id);
-    completeExec(execs, "&& cat >", { exitCode: 0 });
+    completeExec(execs, "/command", { exitCode: 0 });
     const stopped = await stopping;
     expect(stopped.status).toBe("stopped");
     expect(stopped.startedAtMs).toBeNull();
@@ -461,8 +670,8 @@ describe("createRemoteExecService", () => {
     const { client, execs } = makeFakeClient();
     const service = createRemoteExecService(makeDeps({ client }));
     const job = await service.startJob(startInput());
-    await syncThrough(execs, "&& cat >");
-    completeExec(execs, "&& cat >", { exitCode: 0 });
+    await syncThrough(execs, "/command");
+    completeExec(execs, "/command", { exitCode: 0 });
     await waitUntil(() => execed(execs, "setsid"));
     const stopping = service.stopJob(job.id);
     completeExec(execs, "setsid", { exitCode: 0 }); // the launch completes and records a pid
@@ -481,8 +690,8 @@ describe("createRemoteExecService", () => {
     const { client, execs } = makeFakeClient();
     const service = createRemoteExecService(makeDeps({ client }));
     const job = await service.startJob(startInput());
-    await syncThrough(execs, "&& cat >");
-    completeExec(execs, "&& cat >", { exitCode: 0 });
+    await syncThrough(execs, "/command");
+    completeExec(execs, "/command", { exitCode: 0 });
     await waitUntil(() => execed(execs, "setsid"));
     completeExec(execs, "setsid", { exitCode: 0 });
     // The runner marks the job running and the follow loop starts polling.

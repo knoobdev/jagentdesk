@@ -261,6 +261,35 @@ describe("remote_exec.* responses", () => {
     };
     expect(SessionOutboundMessageSchema.safeParse(message).success).toBe(false);
   });
+
+  it("parses a job with noCode and per-source records (ADR-0045)", () => {
+    const message = {
+      type: "remote_exec.get_job.response",
+      payload: {
+        requestId: "req_7",
+        error: null,
+        job: jobFixture({
+          noCode: true,
+          sources: [
+            {
+              name: "A",
+              path: "/Users/dev/work/A",
+              sync: {
+                snapshotId: "snp_1a2b3c4d5e6f",
+                filesTotal: 10,
+                filesUploaded: 2,
+                filesDeleted: 0,
+                bytesUploaded: 512,
+                excludedSecrets: [".env"],
+                skipped: [],
+              },
+            },
+          ],
+        }),
+      },
+    };
+    expect(SessionOutboundMessageSchema.parse(message)).toEqual(message);
+  });
 });
 
 describe("remote_exec.job_updated push", () => {

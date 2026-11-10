@@ -13,7 +13,11 @@ export type RemoteJobStatus =
   | "lost";
 
 export type RemoteExecErrorCode =
-  | "not_git_workspace"
+  | "invalid_source"
+  | "source_outside_workspace"
+  | "source_not_found"
+  | "source_name_conflict"
+  | "too_many_sources"
   | "snapshot_too_large"
   | "job_running"
   | "target_not_found"
@@ -53,6 +57,16 @@ export interface RemoteSyncSummary {
   skipped: string[];
 }
 
+/** One explicitly selected source of a job record (spec 33.6); absent for the default source. */
+export interface RemoteJobSource {
+  /** Source name = basename of the resolved source directory (spec 33.4). */
+  name: string;
+  /** Absolute path of the source on the daemon (spec 33.6). */
+  path: string;
+  /** Per-source sync summary; its paths are relative to that source. */
+  sync: RemoteSyncSummary;
+}
+
 export interface RemoteJob {
   id: string; // rjb_<12 hex>
   serverId: string;
@@ -72,6 +86,18 @@ export interface RemoteJob {
   startedAtMs: number | null;
   finishedAtMs: number | null;
   timeoutMs: number;
+  /** True for sendCode:false runs — no code was sent (spec 33.4). Old records lack the field. */
+  noCode?: boolean;
+  /** Present when the run selected sources via `source` (spec 33.4). Old records lack the field. */
+  sources?: RemoteJobSource[];
+}
+
+/** Per-source counts for the remote_run permission card (spec 33.7). */
+export interface RemoteSourcePreview {
+  name: string;
+  files: number;
+  bytes: number;
+  excludedSecrets: number;
 }
 
 export interface RemoteSnapshotPreview {
@@ -81,6 +107,10 @@ export interface RemoteSnapshotPreview {
   bytesTotal: number;
   excludedSecrets: string[];
   skipped: string[];
+  /** True for sendCode:false runs — the card shows code:"none" (spec 33.7). */
+  noCode?: boolean;
+  /** One entry per explicitly selected source, in selection order (spec 33.7). */
+  sources?: RemoteSourcePreview[];
 }
 
 export interface RemoteTarget {
@@ -155,12 +185,16 @@ export const REMOTE_DEFAULT_WORK_ROOT = "~/.jagentdesk/remote-exec";
 export interface RemoteExecService {
   listTargets(): Promise<RemoteTarget[]>;
   checkTarget(serverId: string): Promise<RemoteCheckResult>;
-  /** Snapshot stats for the approval card; uploads nothing. */
-  previewSnapshot(input: { workspacePath: string }): Promise<RemoteSnapshotPreview>;
+  /** Snapshot stats for the approval card; uploads nothing. Source errors throw before any card. */
+  previewSnapshot(input: {
+    workspacePath: string;
+    source?: string | string[];
+    noCode?: boolean;
+  }): Promise<RemoteSnapshotPreview>;
   /**
-   * Validates target + workspace + the one-running-job rule (throws RemoteExecError job_running with
-   * details.jobId), records the job as `syncing`, then syncs and starts it in the background. Returns
-   * the job record as soon as it exists.
+   * Validates target + source selection + the one-running-job rule (throws RemoteExecError
+   * job_running with details.jobId), records the job as `syncing`, then syncs and starts it in the
+   * background. Returns the job record as soon as it exists.
    */
   startJob(input: {
     serverId: string;
@@ -168,6 +202,8 @@ export interface RemoteExecService {
     command: string;
     timeoutMs: number;
     agentId: string | null;
+    source?: string | string[];
+    noCode?: boolean;
   }): Promise<RemoteJob>;
   /** Resolves when the job is terminal or waitMs elapses (job still running). */
   waitForJob(jobId: string, waitMs: number): Promise<RemoteRunResult>;
