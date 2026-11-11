@@ -4,6 +4,8 @@ import { HostCapabilityService } from "./host-capabilities/service.js";
 import { ensureToolDirsOnPath, HostToolInstaller } from "./host-tools/installer.js";
 import type { HttpFetch } from "./host-tools/release.js";
 import { setForgeToolInstaller } from "./session/forge/forge-cli-installer.js";
+import { unarchiveAgentState } from "./agent/agent-prompt.js";
+import { unarchiveWorkspaceAgents } from "./workspace-archive-service.js";
 import { createWorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
 import express from "express";
 import { createServer as createHTTPServer, type IncomingMessage, type ServerResponse } from "http";
@@ -998,6 +1000,13 @@ export async function createJAgentDeskDaemon(
     }
   });
   const workspaceProvisioning = createWorkspaceProvisioningService({
+    unarchiveWorkspaceAgents: (request) =>
+      unarchiveWorkspaceAgents({
+        ...request,
+        agentStorage,
+        unarchiveAgent: (id) => unarchiveAgentState(agentStorage, agentManager, id),
+        sessionLogger: logger,
+      }),
     serverId,
     projectRegistry,
     workspaceRegistry,
@@ -1137,11 +1146,13 @@ export async function createJAgentDeskDaemon(
   const archiveWorkspaceRecordExternal = async (
     workspaceId: string,
     context?: WorkspaceArchiveContext,
+    archivedAt?: string,
   ) => {
     const existingWorkspace = await archivePersistedWorkspaceRecord({
       workspaceId,
       workspaceRegistry,
       context,
+      archivedAt,
     });
     if (!existingWorkspace || existingWorkspace.archivedAt) return;
     teardownArchivedWorkspaceRuntime(workspaceId);
@@ -1325,7 +1336,8 @@ export async function createJAgentDeskDaemon(
         agentStorage,
         findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
         listActiveWorkspaces: listActiveWorkspacesExternal,
-        archiveWorkspaceRecord: archiveWorkspaceRecordExternal,
+        archiveWorkspaceRecord: (workspaceIdToArchive, archivedAt) =>
+          archiveWorkspaceRecordExternal(workspaceIdToArchive, undefined, archivedAt),
         emitWorkspaceUpdatesForWorkspaceIds: emitWorkspaceUpdatesExternal,
         markWorkspaceArchiving: markWorkspaceArchivingExternal,
         clearWorkspaceArchiving: clearWorkspaceArchivingExternal,
@@ -1347,7 +1359,7 @@ export async function createJAgentDeskDaemon(
       archiveAgentCommand({ agentManager, agentStorage, logger }, agentId),
     findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
     listActiveWorkspaces: listActiveWorkspacesExternal,
-    archiveWorkspaceRecord: archiveWorkspaceRecordExternal,
+    archiveWorkspaceRecord: (workspaceId) => archiveWorkspaceRecordExternal(workspaceId),
     emit: emitExternalSessionMessage,
     emitAgentRemove: async () => undefined,
     emitWorkspaceUpdatesForWorkspaceIds: emitWorkspaceUpdatesExternal,
@@ -1572,7 +1584,8 @@ export async function createJAgentDeskDaemon(
         agentStorage,
         findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
         listActiveWorkspaces: listActiveWorkspacesExternal,
-        archiveWorkspaceRecord: archiveWorkspaceRecordExternal,
+        archiveWorkspaceRecord: (workspaceIdToArchive, archivedAt) =>
+          archiveWorkspaceRecordExternal(workspaceIdToArchive, undefined, archivedAt),
         emitWorkspaceUpdatesForWorkspaceIds: emitWorkspaceUpdatesExternal,
         markWorkspaceArchiving: markWorkspaceArchivingExternal,
         clearWorkspaceArchiving: clearWorkspaceArchivingExternal,
@@ -1694,7 +1707,8 @@ export async function createJAgentDeskDaemon(
     workspaceGitService,
     findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
     listActiveWorkspaces: listActiveWorkspacesExternal,
-    archiveWorkspaceRecord: archiveWorkspaceRecordExternal,
+    archiveWorkspaceRecord: (workspaceId, archivedAt) =>
+      archiveWorkspaceRecordExternal(workspaceId, undefined, archivedAt),
     emitWorkspaceUpdatesForWorkspaceIds: emitWorkspaceUpdatesExternal,
     workspaceRegistry,
     projectRegistry,

@@ -42,7 +42,7 @@ export interface ArchiveDependencies {
   // break a same-cwd tie in favor of the worktree-kind record when archiving by
   // path (no explicit workspaceId).
   listActiveWorkspaces: () => Promise<ActiveWorkspaceRef[]>;
-  archiveWorkspaceRecord: (workspaceId: string) => Promise<void>;
+  archiveWorkspaceRecord: (workspaceId: string, archivedAt: string) => Promise<void>;
   emitWorkspaceUpdatesForWorkspaceIds: (workspaceIds: Iterable<string>) => Promise<void>;
   markWorkspaceArchiving: (workspaceIds: Iterable<string>, archivingAt: string) => void;
   clearWorkspaceArchiving: (workspaceIds: Iterable<string>) => void;
@@ -62,9 +62,6 @@ export type ArchiveScope =
 
 export interface ArchiveResult {
   archivedAgentIds: string[];
-  // Agents this request moved from active to archived. `archivedAgentIds` also lists agents that
-  // were already archived; undo must restore only the ones this archive took down.
-  newlyArchivedAgentIds: string[];
   archivedWorkspaceIds: string[];
   removedDirectory: boolean;
 }
@@ -77,16 +74,9 @@ export interface ArchiveByScopeRequest {
   signal?: AbortSignal;
 }
 
-/**
- * The archive stopped at a checkpoint because its signal aborted. Whatever ran before the
- * checkpoint stays done; `newlyArchivedAgentIds` and `recordArchived` say how far it got so the
- * canceller can put it back.
- */
+// Cancellation carries the operation stamp even before the workspace record is archived.
 export class WorkspaceArchiveCanceledError extends Error {
-  constructor(
-    public readonly newlyArchivedAgentIds: string[],
-    public readonly recordArchived: boolean,
-  ) {
+  constructor(public readonly archivedAt: string) {
     super("Workspace archive was canceled");
     this.name = "WorkspaceArchiveCanceledError";
   }
@@ -139,13 +129,10 @@ export async function archiveByScope(
   dependencies: ArchiveDependencies,
   request: ArchiveByScopeRequest,
 ): Promise<ArchiveResult> {
-  const progress: ArchiveProgress = { newlyArchivedAgentIds: new Set(), recordArchived: false };
+  const archivedAt = new Date().toISOString();
   const checkpoint = () => {
     if (request.signal?.aborted) {
-      throw new WorkspaceArchiveCanceledError(
-        Array.from(progress.newlyArchivedAgentIds),
-        progress.recordArchived,
-      );
+      throw new WorkspaceArchiveCanceledError(archivedAt);
     }
   };
 
@@ -170,7 +157,7 @@ export async function archiveByScope(
     const { archivedAgents, archivedWorkspaceIds } = await archiveTargetRecords(
       dependencies,
       targetWorkspaceIds,
-      { requestId: request.requestId, checkpoint, progress },
+      { requestId: request.requestId, checkpoint, archivedAt },
     );
     checkpoint();
 
@@ -199,7 +186,6 @@ export async function archiveByScope(
 
     return {
       archivedAgentIds: Array.from(archivedAgents),
-      newlyArchivedAgentIds: Array.from(progress.newlyArchivedAgentIds),
       archivedWorkspaceIds,
       removedDirectory,
     };
@@ -209,11 +195,6 @@ export async function archiveByScope(
       await dependencies.emitWorkspaceUpdatesForWorkspaceIds(targetWorkspaceIds);
     }
   }
-}
-
-interface ArchiveProgress {
-  newlyArchivedAgentIds: Set<string>;
-  recordArchived: boolean;
 }
 
 async function resolveArchiveTarget(
@@ -318,23 +299,27 @@ async function resolveBackingDirectory(
 async function archiveTargetRecords(
   dependencies: ArchiveDependencies,
   targetWorkspaceIds: string[],
-  options: { requestId: string; checkpoint: () => void; progress: ArchiveProgress },
+  options: {
+    requestId: string;
+    checkpoint: () => void;
+    archivedAt: string;
+  },
 ): Promise<{ archivedAgents: Set<string>; archivedWorkspaceIds: string[] }> {
   const archivedAgents = new Set<string>();
   const archivedWorkspaceIds: string[] = [];
 
   const results = await Promise.allSettled(
     targetWorkspaceIds.map(async (workspaceId) => {
-      const contents = await archiveWorkspaceContentsWithProgress(dependencies, workspaceId);
-      for (const agentId of contents.newlyArchivedAgentIds) {
-        options.progress.newlyArchivedAgentIds.add(agentId);
-      }
+      const contents = await archiveWorkspaceContents(
+        dependencies,
+        workspaceId,
+        options.archivedAt,
+      );
       // Agents and terminals are down, the record is not: an abort here leaves the workspace
-      // listed, and the canceller restores the agents it reports.
+      // listed, and cancellation restores agents carrying this operation stamp.
       options.checkpoint();
-      await dependencies.archiveWorkspaceRecord(workspaceId);
-      options.progress.recordArchived = true;
-      return { workspaceId, agents: contents.agentIds };
+      await dependencies.archiveWorkspaceRecord(workspaceId, options.archivedAt);
+      return { workspaceId, agents: contents };
     }),
   );
 
@@ -345,10 +330,7 @@ async function archiveTargetRecords(
         archivedAgents.add(agentId);
       }
     } else if (result.reason instanceof WorkspaceArchiveCanceledError) {
-      throw new WorkspaceArchiveCanceledError(
-        Array.from(options.progress.newlyArchivedAgentIds),
-        options.progress.recordArchived,
-      );
+      throw result.reason;
     } else {
       dependencies.sessionLogger?.warn(
         { err: result.reason, requestId: options.requestId },
@@ -463,14 +445,8 @@ export type ArchiveWorkspaceContentsDependencies = Pick<
 export async function archiveWorkspaceContents(
   dependencies: ArchiveWorkspaceContentsDependencies,
   workspaceId: string,
+  archivedAt = new Date().toISOString(),
 ): Promise<Set<string>> {
-  return (await archiveWorkspaceContentsWithProgress(dependencies, workspaceId)).agentIds;
-}
-
-async function archiveWorkspaceContentsWithProgress(
-  dependencies: ArchiveWorkspaceContentsDependencies,
-  workspaceId: string,
-): Promise<{ agentIds: Set<string>; newlyArchivedAgentIds: string[] }> {
   const archivedAgents = new Set<string>();
 
   const liveAgents = dependencies.agentManager
@@ -497,34 +473,23 @@ async function archiveWorkspaceContentsWithProgress(
     archivedAgents.add(record.id);
   }
 
-  const archivedAt = new Date().toISOString();
   const agentIdsToArchive = [
     ...new Set([
       ...liveAgents.map((agent) => agent.id),
       ...matchingStoredRecords.filter((record) => !record.archivedAt).map((record) => record.id),
     ]),
   ];
-  // Undo brings back only what this archive took down. Internal agents are retired rather than
-  // archived, and an agent loaded only to read its history was archived before this request.
-  const restorableAgentIds = new Set(agentIdsToArchive);
-  for (const agent of liveAgents) {
-    if (agent.internal) restorableAgentIds.delete(agent.id);
-  }
-  for (const record of matchingStoredRecords) {
-    if (record.archivedAt) restorableAgentIds.delete(record.id);
-  }
   const [agentResults, [terminalResult]] = await Promise.all([
     Promise.allSettled(
       agentIdsToArchive.map((agentId) =>
         liveAgentIds.has(agentId)
-          ? dependencies.agentManager.archiveAgent(agentId)
+          ? dependencies.agentManager.archiveAgent(agentId, archivedAt)
           : dependencies.agentManager.archiveSnapshot(agentId, archivedAt),
       ),
     ),
     Promise.allSettled([dependencies.killTerminalsForWorkspace(workspaceId)]),
   ]);
 
-  const newlyArchivedAgentIds: string[] = [];
   for (const [index, result] of agentResults.entries()) {
     const agentId = agentIdsToArchive[index]!;
     if (result.status === "rejected") {
@@ -532,8 +497,6 @@ async function archiveWorkspaceContentsWithProgress(
         { err: result.reason, workspaceId, agentId },
         "Workspace archive teardown step failed; continuing",
       );
-    } else if (restorableAgentIds.has(agentId)) {
-      newlyArchivedAgentIds.push(agentId);
     }
   }
   if (terminalResult?.status === "rejected") {
@@ -543,7 +506,7 @@ async function archiveWorkspaceContentsWithProgress(
     );
   }
 
-  return { agentIds: archivedAgents, newlyArchivedAgentIds };
+  return archivedAgents;
 }
 
 // True when, after archiving
@@ -639,4 +602,46 @@ export async function archivePersistedWorkspaceRecord(input: {
   await input.workspaceRegistry.archive(input.workspaceId, archivedAt, input.context);
 
   return existingWorkspace;
+}
+
+export interface WorkspaceArchiveRestoreRequest {
+  workspaceId: string;
+  archivedAt: string;
+  allowLegacyFallback?: boolean;
+}
+
+interface UnarchiveWorkspaceAgentsInput extends WorkspaceArchiveRestoreRequest {
+  agentStorage: Pick<AgentStorage, "list">;
+  unarchiveAgent: (agentId: string) => Promise<unknown>;
+  sessionLogger?: Logger;
+}
+
+export async function unarchiveWorkspaceAgents(
+  input: UnarchiveWorkspaceAgentsInput,
+): Promise<void> {
+  const { workspaceId, archivedAt, allowLegacyFallback = true } = input;
+  const records = (await input.agentStorage.list()).filter(
+    (record) => record.workspaceId === workspaceId,
+  );
+  const exact = records.filter((record) => record.archivedAt === archivedAt);
+  // COMPAT(workspaceArchiveStamp): added in v0.15.3; remove after 2027-05-09 once old workspace archives no longer need restoration.
+  const matching =
+    exact.length > 0 || !allowLegacyFallback
+      ? exact
+      : records.filter((record) => {
+          if (!record.archivedAt) return false;
+          const age = Date.parse(archivedAt) - Date.parse(record.archivedAt);
+          return age >= 0 && age <= 60_000;
+        });
+  const results = await Promise.allSettled(
+    matching.map((record) => input.unarchiveAgent(record.id)),
+  );
+  for (const [index, result] of results.entries()) {
+    if (result.status === "rejected") {
+      input.sessionLogger?.warn(
+        { err: result.reason, workspaceId, agentId: matching[index]!.id },
+        "Failed to unarchive workspace agent",
+      );
+    }
+  }
 }

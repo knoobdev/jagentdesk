@@ -1736,11 +1736,14 @@ export class AgentManager {
     }
   }
 
-  async archiveAgent(agentId: string): Promise<{ archivedAt: string }> {
-    return this.runLifecycleMutation(agentId, () => this.archiveAgentUnlocked(agentId));
+  async archiveAgent(agentId: string, archivedAt?: string): Promise<{ archivedAt: string }> {
+    return this.runLifecycleMutation(agentId, () => this.archiveAgentUnlocked(agentId, archivedAt));
   }
 
-  private async archiveAgentUnlocked(agentId: string): Promise<{ archivedAt: string }> {
+  private async archiveAgentUnlocked(
+    agentId: string,
+    requestedArchivedAt?: string,
+  ): Promise<{ archivedAt: string }> {
     const agent = this.requireAgent(agentId);
     if (!this.registry) {
       throw new Error("Agent storage is not configured");
@@ -1754,8 +1757,9 @@ export class AgentManager {
       throw new Error(`Agent ${agentId} not found in storage after snapshot`);
     }
 
-    const { archivedAt } = await this.markRecordArchived(stored);
-    agent.updatedAt = new Date(archivedAt);
+    const archivedRecord = await this.markRecordArchived(stored, requestedArchivedAt);
+    const { archivedAt } = archivedRecord;
+    agent.updatedAt = new Date(archivedRecord.updatedAt);
     await this.closeAgent(agentId);
     this.discardRetainedAgentState(agentId);
 
@@ -1801,18 +1805,26 @@ export class AgentManager {
         if (shouldDetachFromArchivedParent(parent, currentChild)) {
           await this.detachAgentUnlocked(currentChild.id);
         } else if (this.agents.has(currentChild.id)) {
-          await this.archiveAgentUnlocked(currentChild.id);
+          await this.archiveAgentUnlocked(currentChild.id, parent.archivedAt ?? undefined);
         } else {
-          await this.archiveSnapshot(currentChild.id, new Date().toISOString());
+          await this.archiveSnapshot(
+            currentChild.id,
+            parent.archivedAt ?? new Date().toISOString(),
+          );
         }
       });
     }
   }
 
-  private async markRecordArchived(record: StoredAgentRecord): Promise<ArchivedStoredAgentRecord> {
+  private async markRecordArchived(
+    record: StoredAgentRecord,
+    archivedAt = new Date().toISOString(),
+  ): Promise<ArchivedStoredAgentRecord> {
     const registry = this.requireRegistry();
-    const archivedAt = new Date().toISOString();
-    const archivedRecord = buildArchivedAgentRecord(record, { archivedAt, updatedAt: archivedAt });
+    const archivedRecord = buildArchivedAgentRecord(record, {
+      archivedAt: record.archivedAt ?? archivedAt,
+      updatedAt: archivedAt,
+    });
 
     await registry.upsert(archivedRecord);
 

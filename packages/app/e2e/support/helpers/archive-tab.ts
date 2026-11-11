@@ -224,7 +224,7 @@ export async function reloadWorkspace(page: Page, workspaceId: string): Promise<
 }
 
 export async function openSessions(page: Page): Promise<void> {
-  const sessionsButton = page.getByTestId("sidebar-sessions");
+  const sessionsButton = page.getByRole("button", { name: "History", exact: true });
   await expect(sessionsButton).toBeVisible({ timeout: 30_000 });
   await sessionsButton.click();
   await expectAppRoute(page, buildSessionsRoute(), { timeout: 30_000 });

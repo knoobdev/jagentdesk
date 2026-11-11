@@ -1,4 +1,5 @@
 import { stat } from "node:fs/promises";
+import type { WorkspaceArchiveRestoreRequest } from "../../workspace-archive-service.js";
 import { basename, resolve } from "node:path";
 import type { ProjectCheckoutLitePayload } from "@jagentdesk/protocol/messages";
 import type { Logger } from "pino";
@@ -70,6 +71,7 @@ export interface WorkspaceProvisioningService {
   findOrCreateProjectForDirectory(cwd: string): Promise<PersistedProjectRecord>;
   ensureWorkspaceRecordUnarchived(
     workspace: PersistedWorkspaceRecord,
+    archivedAt?: string | null,
   ): Promise<PersistedWorkspaceRecord>;
 }
 
@@ -90,6 +92,7 @@ export class WorkspaceProvisioningError extends Error {
 }
 
 export function createWorkspaceProvisioningService(deps: {
+  unarchiveWorkspaceAgents: (request: WorkspaceArchiveRestoreRequest) => Promise<void>;
   serverId?: string;
   workspaceRegistry: WorkspaceRegistry;
   projectRegistry: ProjectRegistry;
@@ -400,6 +403,7 @@ export function createWorkspaceProvisioningService(deps: {
 
   async function ensureWorkspaceRecordUnarchived(
     workspace: PersistedWorkspaceRecord,
+    archivedAt = workspace.archivedAt,
   ): Promise<PersistedWorkspaceRecord> {
     const project = await projectRegistry.get(workspace.projectId);
     if (!project) throw new Error(`Unknown project: ${workspace.projectId}`);
@@ -447,9 +451,16 @@ export function createWorkspaceProvisioningService(deps: {
         });
       }
     }
-    if (!next) return workspace;
-    await workspaceRegistry.upsert(next);
-    return next;
+    if (next) await workspaceRegistry.upsert(next);
+    // A canceled archive supplies a modern stamp before the record itself is archived.
+    if (archivedAt) {
+      await deps.unarchiveWorkspaceAgents({
+        workspaceId: workspace.workspaceId,
+        archivedAt,
+        allowLegacyFallback: Boolean(workspace.archivedAt),
+      });
+    }
+    return next ?? workspace;
   }
 
   async function refreshWorkspaceRecord(
