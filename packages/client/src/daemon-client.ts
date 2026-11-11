@@ -11014,6 +11014,7 @@ export class DaemonClient {
           protocolVersion: 1,
           capabilities: {
             [CLIENT_CAPS.binaryChunkingV1]: true,
+            [CLIENT_CAPS.backgroundAgents]: true,
             [CLIENT_CAPS.customModeIcons]: true,
             [CLIENT_CAPS.reasoningMergeEnum]: true,
             [CLIENT_CAPS.pluginTimelineItems]: true,

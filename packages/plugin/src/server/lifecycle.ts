@@ -67,6 +67,7 @@ export interface PluginHookAgent {
   provider: string;
   cwd: string;
   title: string | null;
+  readonly background: boolean;
 }
 
 export interface PluginSessionOpenRequest {
@@ -77,6 +78,8 @@ export interface PluginSessionOpenRequest {
   reason: "create" | "resume" | "refresh" | "import";
   purpose: "interactive" | "history";
   readonly title: string | null;
+  /** A helper hidden from tabs, lists and attention. Fixed at creation. */
+  readonly background: boolean;
   readonly labels: Readonly<Record<string, string>>;
   /** Instructions appended for this open; not saved on the agent. */
   appendSystemPrompt?: string[];
@@ -121,10 +124,18 @@ export interface PluginHookRequests {
   "workspace.create.before": Omit<WorkspaceCreateRequest, "type" | "requestId">;
 }
 
+/** What a hook may return. An omitted background stays as it was. */
+type PluginHookRequestResults = Omit<PluginHookRequests, "agent.open.before"> & {
+  // Read-only fields added after the first SDK stay optional in a result; omitted means unchanged.
+  "agent.open.before": Omit<PluginSessionOpenRequest, "background"> & {
+    readonly background?: boolean;
+  };
+};
+
 export type PluginHooks = {
   [Name in keyof PluginHookRequests]: {
     request: PluginHookRequests[Name];
-    result: PluginHookRequests[Name];
+    result: PluginHookRequestResults[Name];
   };
 } & { [Name in keyof PluginHookEvents]: { payload: PluginHookEvents[Name] } } & {
   "worktree.create.after": { payload: { worktree: PluginHookWorktree } };
@@ -166,7 +177,7 @@ export interface PluginLifecycleRegistration {
     handler: (
       input: { request: PluginBeforeRequests[Name] },
       context: PluginHookContext,
-    ) => PluginBeforeRequests[Name] | void | Promise<PluginBeforeRequests[Name] | void>,
+    ) => PluginBeforeResults[Name] | void | Promise<PluginBeforeResults[Name] | void>,
   ): () => void;
 }
 
@@ -210,6 +221,9 @@ export type PluginLifecycleEvents = {
 };
 export type PluginBeforeRequests = {
   [Name in keyof typeof legacyRequests]: PluginHookRequests[(typeof legacyRequests)[Name]];
+};
+type PluginBeforeResults = {
+  [Name in keyof typeof legacyRequests]: PluginHookRequestResults[(typeof legacyRequests)[Name]];
 };
 
 /** @internal SDK adapter for the daemon's hook registry. */

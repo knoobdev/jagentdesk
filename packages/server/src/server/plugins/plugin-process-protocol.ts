@@ -148,6 +148,7 @@ export const PluginProcessRequestSchema: z.ZodType<PluginProcessRequest> = z.dis
             provider: z.string(),
             cwd: z.string(),
             title: z.string().nullable(),
+            background: z.boolean(),
           })
           .strict(),
         name: z.string(),

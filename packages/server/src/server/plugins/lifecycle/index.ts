@@ -101,6 +101,8 @@ const beforeSchemas = {
       reason: z.enum(["create", "resume", "refresh", "import"]),
       purpose: z.enum(["interactive", "history"]),
       title: z.string().nullable(),
+      // Optional so a plugin that returns its own object keeps working; omitted means unchanged.
+      background: z.boolean().optional(),
       labels: z.record(z.string(), z.string()),
       appendSystemPrompt: z.array(z.string()).optional(),
       tools: z.array(agentToolMetadataSchema),
@@ -162,6 +164,7 @@ export function describeHookAgent(agent: {
   provider: string;
   cwd: string;
   title?: string | null;
+  background?: boolean;
   labels: Record<string, string>;
 }): PluginHookAgent {
   return {
@@ -171,6 +174,7 @@ export function describeHookAgent(agent: {
     provider: agent.provider,
     cwd: agent.cwd,
     title: agent.title ?? null,
+    background: agent.background === true,
   };
 }
 
@@ -220,6 +224,7 @@ export async function validateBeforeResult<Name extends keyof PluginWireBeforeRe
     const previous = beforeSchemas["agent.open.before"].parse(input);
     const next = beforeSchemas["agent.open.before"].parse(result);
     if (
+      (next.background !== undefined && previous.background !== next.background) ||
       previous.agentId !== next.agentId ||
       previous.workspaceId !== next.workspaceId ||
       previous.provider !== next.provider ||
@@ -235,6 +240,7 @@ export async function validateBeforeResult<Name extends keyof PluginWireBeforeRe
     }
     if (next.appendSystemPrompt === undefined && previous.appendSystemPrompt !== undefined)
       return { ...result, appendSystemPrompt: previous.appendSystemPrompt };
+    return { ...result, background: previous.background };
   }
   if (name === "agent.create.before") {
     const previous = beforeSchemas["agent.create.before"].parse(input);

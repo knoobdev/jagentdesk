@@ -1472,6 +1472,7 @@ export class AgentManager {
         workspaceId: options.workspaceId,
         reason: "create",
         title: options.initialTitle ?? storedConfig.title ?? null,
+        background: options.background,
         labels: options.labels ?? {},
       },
     );
@@ -1582,6 +1583,7 @@ export class AgentManager {
         workspaceId,
         title: record?.title ?? mergedConfig.title ?? null,
         labels: record?.labels ?? options?.labels ?? {},
+        background: options?.background,
       },
     );
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
@@ -1750,6 +1752,7 @@ export class AgentManager {
         purpose: "interactive",
         workspaceId: existing.workspaceId,
         title: await this.resolveInitialPersistedTitle(agentId, existing.config, null),
+        background: existing.background,
         labels: existing.labels,
       },
     );
@@ -5786,6 +5789,7 @@ export class AgentManager {
       reason?: PluginSessionOpenRequest["reason"];
       purpose?: PluginSessionOpenRequest["purpose"];
       title?: string | null;
+      background?: boolean;
       labels?: Record<string, string>;
     },
   ): Promise<AgentLaunchContext> {
@@ -5808,6 +5812,7 @@ export class AgentManager {
         env: { ...env },
         title: opening?.title ?? null,
         labels: opening?.labels ?? {},
+        background: opening?.background === true,
         tools: [],
         mcpServers: {},
       };

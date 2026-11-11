@@ -105,8 +105,6 @@ export interface CreateAgentFromMcpInput {
   background: boolean;
   notifyOnFinish: boolean;
   internal?: boolean;
-  /** Omitted with a caller, the caller agent's own background applies. */
-  background?: boolean;
   detached?: boolean;
   owner?: AgentOwner;
   env?: Record<string, string>;
