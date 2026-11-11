@@ -64,7 +64,6 @@ import { normalizeCodexFilePath } from "./codex/tool-call-detail-parser.js";
 import {
   checkProviderLaunchAvailable,
   createProviderEnv,
-  createProviderEnvSpec,
   resolveProviderLaunch,
   type ProviderRuntimeSettings,
   type ResolvedProviderLaunch,
@@ -1177,6 +1176,40 @@ export function mapCodexPlanToToolCall(params: {
       text,
     },
   };
+}
+
+interface CodexStreamRetry {
+  callId: string;
+  message: string;
+  details: string | null;
+}
+
+type CodexStreamRetryOutcome =
+  | { status: "running" | "completed" | "canceled" }
+  | { status: "failed"; error: string };
+
+// Codex reports each model-stream reconnect as an `error` notification with `willRetry: true`.
+// One status line per reconnect run shows the latest attempt and settles when the turn moves on.
+function mapCodexStreamRetryToStatusLine(
+  retry: CodexStreamRetry,
+  outcome: CodexStreamRetryOutcome,
+): ToolCallTimelineItem {
+  const base = {
+    type: "tool_call" as const,
+    callId: retry.callId,
+    name: "codex_retry",
+    detail: {
+      type: "plain_text" as const,
+      label: outcome.status === "completed" ? "Reconnected" : retry.message,
+      ...(retry.details ? { text: retry.details } : {}),
+      icon: "sparkles" as const,
+    },
+    metadata: { synthetic: true, source: "codex_stream_retry" },
+  };
+  if (outcome.status === "failed") {
+    return { ...base, status: "failed", error: outcome.error };
+  }
+  return { ...base, status: outcome.status, error: null };
 }
 
 function buildPlanPermissionActions(options?: {
@@ -2322,6 +2355,26 @@ const TurnCompletedNotificationSchema = z
   })
   .passthrough();
 
+const TurnErrorNotificationSchema = z
+  .object({
+    threadId: z.string().optional(),
+    willRetry: z.boolean(),
+    error: z
+      .object({
+        message: z.string(),
+        additionalDetails: z.string().nullable().optional(),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+
+const WarningNotificationSchema = z
+  .object({
+    threadId: z.string().nullable().optional(),
+    message: z.string(),
+  })
+  .passthrough();
+
 const TurnPlanUpdatedNotificationSchema = z
   .object({
     threadId: z.string().optional(),
@@ -2605,6 +2658,14 @@ type ParsedCodexNotification =
       threadId: string | null;
     }
   | {
+      kind: "turn_error";
+      message: string;
+      details: string | null;
+      willRetry: boolean;
+      threadId: string | null;
+    }
+  | { kind: "warning"; message: string; threadId: string | null }
+  | {
       kind: "plan_updated";
       plan: Array<{ step: string | null; status: string | null }>;
       threadId: string | null;
@@ -2758,6 +2819,36 @@ const CodexNotificationSchema = z.union([
       }),
     ),
   z.object({ method: z.literal("turn/completed"), params: z.unknown() }).transform(
+    ({ method, params }): ParsedCodexNotification => ({
+      kind: "invalid_payload",
+      method,
+      params,
+    }),
+  ),
+  z.object({ method: z.literal("error"), params: TurnErrorNotificationSchema }).transform(
+    ({ params }): ParsedCodexNotification => ({
+      kind: "turn_error",
+      message: params.error.message,
+      details: params.error.additionalDetails ?? null,
+      willRetry: params.willRetry,
+      threadId: params.threadId ?? null,
+    }),
+  ),
+  z.object({ method: z.literal("error"), params: z.unknown() }).transform(
+    ({ method, params }): ParsedCodexNotification => ({
+      kind: "invalid_payload",
+      method,
+      params,
+    }),
+  ),
+  z.object({ method: z.literal("warning"), params: WarningNotificationSchema }).transform(
+    ({ params }): ParsedCodexNotification => ({
+      kind: "warning",
+      message: params.message,
+      threadId: params.threadId ?? null,
+    }),
+  ),
+  z.object({ method: z.literal("warning"), params: z.unknown() }).transform(
     ({ method, params }): ParsedCodexNotification => ({
       kind: "invalid_payload",
       method,
@@ -3538,6 +3629,9 @@ export class CodexAppServerAgentSession implements AgentSession {
   private pendingFileChangeOutputDeltas = new Map<string, string[]>();
   private pendingToolCallDetails = new Map<string, ToolCallTimelineItem["detail"]>();
   private pendingAssistantMessageBoundary = false;
+  // The root turn's model-stream reconnect run that has not yet resumed or ended.
+  private activeStreamRetry: CodexStreamRetry | null = null;
+  private readonly shownWarningMessages = new Set<string>();
   private terminalCommandByProcessId = new Map<string, string>();
   // The root thread's still-running command process ids, keyed by the native turn that
   // started them. Codex's `thread/backgroundTerminals/list` carries no turn, so
@@ -3773,6 +3867,7 @@ export class CodexAppServerAgentSession implements AgentSession {
     const hasActiveRootTurn = this.activeForegroundTurnId !== null || this.currentTurnId !== null;
     this.clearPendingPermissions({ preservePlanApprovals: !hasActiveRootTurn });
     if (hasActiveRootTurn) {
+      this.settleStreamRetry({ status: "failed", error: error.message });
       this.emitEvent({
         type: "turn_failed",
         provider: CODEX_PROVIDER,
@@ -5183,6 +5278,7 @@ export class CodexAppServerAgentSession implements AgentSession {
     this.clearPendingPermissions();
     this.pendingToolCallDetails.clear();
     this.pendingSubAgentNotificationsByThreadId.clear();
+    this.settleStreamRetry({ status: "canceled" });
     this.subscribers.clear();
     this.startupEvents = null;
     this.activeForegroundTurnId = null;
@@ -5601,6 +5697,19 @@ export class CodexAppServerAgentSession implements AgentSession {
       this.dispatchSubAgentNotification(parsed, route.callId);
       return;
     }
+    // Root model output means the stream is back. Steering messages and asynchronous
+    // child activity arrive independently of the root stream, so neither proves recovery.
+    const startedItemType =
+      parsed.kind === "item_started" ? normalizeCodexThreadItemType(parsed.item.type) : null;
+    if (
+      parsed.kind === "agent_message_delta" ||
+      parsed.kind === "reasoning_delta" ||
+      (parsed.kind === "item_started" &&
+        startedItemType !== "userMessage" &&
+        startedItemType !== "subAgentActivity")
+    ) {
+      this.settleStreamRetry({ status: "completed" });
+    }
     this.dispatchParsedNotification(parsed);
   }
 
@@ -5658,6 +5767,12 @@ export class CodexAppServerAgentSession implements AgentSession {
         return;
       case "turn_completed":
         this.handleTurnCompletedNotification(parsed);
+        return;
+      case "turn_error":
+        this.handleTurnErrorNotification(parsed);
+        return;
+      case "warning":
+        this.handleWarningNotification(parsed);
         return;
       case "plan_updated":
         this.handlePlanUpdatedNotification(parsed);
@@ -6322,14 +6437,14 @@ export class CodexAppServerAgentSession implements AgentSession {
       this.terminalProcessIdsByTurnId.delete(this.currentTurnId);
     }
     if (parsed.status === "failed") {
-      this.emitEvent({
-        type: "turn_failed",
-        provider: CODEX_PROVIDER,
-        error: parsed.errorMessage ?? "Codex turn failed",
-      });
+      const error = parsed.errorMessage ?? "Codex turn failed";
+      this.settleStreamRetry({ status: "failed", error });
+      this.emitEvent({ type: "turn_failed", provider: CODEX_PROVIDER, error });
     } else if (parsed.status === "interrupted") {
+      this.settleStreamRetry({ status: "canceled" });
       this.emitEvent({ type: "turn_canceled", provider: CODEX_PROVIDER, reason: "interrupted" });
     } else {
+      this.settleStreamRetry({ status: "completed" });
       if (this.planModeEnabled && this.latestPlanResult?.text) {
         this.emitSyntheticPlanApprovalRequest(this.latestPlanResult.text);
       }
@@ -6346,6 +6461,53 @@ export class CodexAppServerAgentSession implements AgentSession {
     this.pendingForegroundTurnIdentification = null;
     this.pendingSubAgentNotificationsByThreadId.clear();
     this.resetTurnTrackingState();
+  }
+
+  private handleTurnErrorNotification(
+    parsed: Extract<ParsedCodexNotification, { kind: "turn_error" }>,
+  ): void {
+    // A final error is followed by `turn/completed`, which reports it as the turn's failure.
+    if (!parsed.willRetry) {
+      return;
+    }
+    this.activeStreamRetry = {
+      callId: this.activeStreamRetry?.callId ?? `codex-retry:${randomUUID()}`,
+      message: parsed.message,
+      details: parsed.details,
+    };
+    this.emitEvent({
+      type: "timeline",
+      provider: CODEX_PROVIDER,
+      item: mapCodexStreamRetryToStatusLine(this.activeStreamRetry, { status: "running" }),
+    });
+  }
+
+  private handleWarningNotification(
+    parsed: Extract<ParsedCodexNotification, { kind: "warning" }>,
+  ): void {
+    // Codex repeats some warnings on every turn, such as missing metadata for a custom model.
+    if (this.shownWarningMessages.has(parsed.message)) {
+      return;
+    }
+    this.shownWarningMessages.add(parsed.message);
+    this.emitEvent({
+      type: "timeline",
+      provider: CODEX_PROVIDER,
+      item: { type: "notification", level: "warning", message: parsed.message },
+    });
+  }
+
+  private settleStreamRetry(outcome: CodexStreamRetryOutcome): void {
+    const retry = this.activeStreamRetry;
+    if (!retry) {
+      return;
+    }
+    this.activeStreamRetry = null;
+    this.emitEvent({
+      type: "timeline",
+      provider: CODEX_PROVIDER,
+      item: mapCodexStreamRetryToStatusLine(retry, outcome),
+    });
   }
 
   private resetTurnTrackingState(): void {
@@ -7156,7 +7318,6 @@ export class CodexAppServerAgentSession implements AgentSession {
   }
 
   private async handleFileChangeApprovalRequest(params: unknown): Promise<unknown> {
-    await this.pendingNotifications;
     const parsed = z
       .object({
         itemId: z.string(),
