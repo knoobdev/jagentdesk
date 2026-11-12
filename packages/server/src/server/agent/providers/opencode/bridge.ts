@@ -171,7 +171,9 @@ export class OpenCodeBridge {
       }
       const url = new URL(request.url ?? "/", this.requireBaseUrl());
       if (request.method === "GET" && url.pathname === `${INTERNAL_PREFIX}/tools`) {
-        sendJson(response, 200, { tools: this.serializeManifest() });
+        sendJson(response, 200, {
+          tools: this.serializeManifest(url.searchParams.get("sessionID")),
+        });
         return;
       }
 
@@ -233,8 +235,18 @@ export class OpenCodeBridge {
     }
   }
 
-  private serializeManifest(): Array<Record<string, unknown>> {
-    const catalog = this.manifestCatalog;
+  private serializeManifest(sessionId: string | null): Array<Record<string, unknown>> {
+    let catalog: Pick<JAgentDeskToolCatalog, "tools"> | null | undefined = this.manifestCatalog;
+    if (sessionId !== null) {
+      const binding = this.sessions.get(sessionId);
+      if (!binding) {
+        throw new OpenCodeBridgeClientError(
+          404,
+          "OpenCode session is not bound to a JAgentDesk agent",
+        );
+      }
+      catalog = binding.tools;
+    }
     if (!catalog) return [];
     return [...catalog.tools.values()].map((tool) => {
       const definition: Record<string, unknown> = {
