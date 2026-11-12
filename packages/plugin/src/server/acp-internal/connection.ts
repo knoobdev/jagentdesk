@@ -1392,7 +1392,9 @@ function toolTimelineItem(snapshot: AcpToolCallSnapshot): ProviderTimelineItem {
     name: snapshot.name ?? snapshot.title,
     detail,
   };
-  if (status === "failed") return { ...base, status, error: snapshot.output };
+  if (status === "failed") {
+    return { ...base, status, error: snapshot.output ?? { message: "Tool failed" } };
+  }
   return { ...base, status, error: null };
 }
 
