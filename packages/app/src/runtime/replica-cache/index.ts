@@ -208,6 +208,7 @@ function serializeWorkspace(workspace: WorkspaceDescriptor): WorkspaceDescriptor
     gitRuntime: workspace.gitRuntime,
     githubRuntime: workspace.githubRuntime,
     forge: workspace.forge,
+    forgeWeb: workspace.forgeWeb,
     project: workspace.project,
   };
 }

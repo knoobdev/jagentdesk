@@ -5029,6 +5029,22 @@ export const WorkspaceScriptPayloadSchema = z.object({
   terminalId: z.string().nullable().optional().default(null),
 });
 
+/**
+ * Where a workspace's forge is on the web, resolved by the daemon so every
+ * client builds the same links.
+ */
+export const ForgeWebSchema = z.object({
+  /** Web host of the forge: the SSH config alias resolved, cloud SSH hosts mapped to their web host. */
+  host: z.string(),
+  /**
+   * Repository path that owns issue and change-request numbers when it is not
+   * the origin repository, such as a fork's parent. Absent: the origin repository.
+   */
+  referenceRepository: z.string().optional(),
+});
+
+export type ForgeWeb = z.infer<typeof ForgeWebSchema>;
+
 const WorkspaceGitRuntimePayloadSchema = z
   .object({
     currentBranch: z.string().nullable().optional(),
@@ -5150,6 +5166,8 @@ export const WorkspaceDescriptorPayloadSchema = z
     // for this workspace, so the sidebar/hover-card render the right brand mark.
     // Old daemons omit it; absent means the client falls back to GitHub.
     forge: z.string().optional(),
+    // COMPAT(forgeWeb): added in v0.9.59; remove remote-derived links after 2027-05-23.
+    forgeWeb: ForgeWebSchema.optional(),
     project: ProjectPlacementPayloadSchema.optional(),
   })
   .transform((workspace) => ({
@@ -6207,6 +6225,7 @@ const CheckoutStatusCommonSchema = z.object({
   error: CheckoutErrorSchema.nullable(),
   requestId: z.string(),
   baseRefExact: z.string().nullable().optional(),
+  forgeWeb: ForgeWebSchema.optional(),
 });
 
 const CheckoutStatusNotGitSchema = CheckoutStatusCommonSchema.extend({

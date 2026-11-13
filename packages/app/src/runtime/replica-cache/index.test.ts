@@ -382,3 +382,21 @@ describe("ReplicaCache", () => {
     });
   });
 });
+
+it("preserves where the workspace's forge is on the web across cache reopen", async () => {
+  const storage = new MemoryStorage();
+  const writer = new ReplicaCache(storage);
+  writer.setHosts([SERVER_ID]);
+  seedSession();
+  const forgeWeb = { host: "github.com", referenceRepository: "main-owner/repo" };
+  const row = normalizeWorkspaceDescriptor({ ...workspace(), background: false, forgeWeb });
+  useSessionStore.getState().setWorkspaces(SERVER_ID, new Map([[row.id, row]]));
+  await writer.flush();
+  useSessionStore.getState().clearSession(SERVER_ID);
+  const reader = new ReplicaCache(storage);
+  reader.setHosts([SERVER_ID]);
+  await reader.restore();
+  expect(useSessionStore.getState().sessions[SERVER_ID]?.workspaces.get(row.id)?.forgeWeb).toEqual(
+    forgeWeb,
+  );
+});

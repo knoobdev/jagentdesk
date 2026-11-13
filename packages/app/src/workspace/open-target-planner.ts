@@ -1,3 +1,4 @@
+import type { ForgeWeb } from "@jagentdesk/protocol/messages";
 import { type Forge, forgeFromRemoteUrl, getForgePresentation } from "@/git/forge";
 import type { DesktopOpenTarget, OpenDesktopTargetInput } from "@/workspace/desktop-open-targets";
 import {
@@ -9,6 +10,7 @@ import {
 interface CheckoutStatusForOpenTarget {
   isGit: boolean;
   remoteUrl?: string | null;
+  forgeWeb?: ForgeWeb | null;
   currentBranch?: string | null;
 }
 
@@ -102,6 +104,7 @@ function buildForgeWebUrl(
   forge: Forge,
   input: {
     remoteUrl: string | null | undefined;
+    forgeWeb: ForgeWeb | null | undefined;
     branch: string | null | undefined;
     path: string | null;
     lineStart?: number;
@@ -113,6 +116,7 @@ function buildForgeWebUrl(
     return (
       presentation.buildBlobUrl?.({
         remoteUrl: input.remoteUrl,
+        forgeWeb: input.forgeWeb,
         branch: input.branch,
         path: input.path,
         lineStart: input.lineStart,
@@ -123,6 +127,7 @@ function buildForgeWebUrl(
   return (
     presentation.buildBranchTreeUrl?.({
       remoteUrl: input.remoteUrl,
+      forgeWeb: input.forgeWeb,
       branch: input.branch,
     }) ?? null
   );
@@ -143,6 +148,7 @@ function planForgeOpenTarget(input: {
   }
   const url = buildForgeWebUrl(forge, {
     remoteUrl: input.checkoutStatus.remoteUrl,
+    forgeWeb: input.checkoutStatus.forgeWeb,
     branch: input.checkoutStatus.currentBranch,
     path: input.resolvedFile?.relativePath ?? null,
     lineStart: input.activeFile?.lineStart,
