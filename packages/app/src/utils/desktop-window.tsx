@@ -83,6 +83,8 @@ export function resolveWindowChromeObstruction(input: {
   isMac: boolean;
   isFullscreen: boolean;
 }): WindowChromeObstruction {
+  if (input.topBand?.trailingObstruction)
+    return { topLeft: null, topRight: input.topBand.trailingObstruction };
   if (!input.isElectron || input.isFullscreen) return EMPTY_OBSTRUCTION;
   if (input.isMac) {
     return {
@@ -190,8 +192,9 @@ export function WindowChromeProvider({ children }: { children: ReactNode }) {
         isElectron: isElectronReady,
         isMac: getIsElectronRuntimeMac(),
         isFullscreen,
+        topBand,
       }),
-    [isElectronReady, isFullscreen],
+    [isElectronReady, isFullscreen, topBand],
   );
   return (
     <WindowChromeContext.Provider value={obstruction}>

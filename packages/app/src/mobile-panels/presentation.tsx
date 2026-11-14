@@ -14,6 +14,7 @@ interface MobilePanelOverlayProps {
   children: ReactNode;
   closeGesture: GestureType;
   panel: OverlayPanel;
+  presentationEnabled?: boolean;
   panelWidth?: number;
   scrimColor?: string;
   panelStyle?: ComponentProps<typeof Animated.View>["style"];
@@ -24,14 +25,16 @@ export function MobilePanelOverlay({
   closeGesture,
   panel,
   panelStyle,
+  presentationEnabled = true,
   panelWidth,
   scrimColor,
 }: MobilePanelOverlayProps) {
   const { position, windowWidth } = useMobilePanelsRuntime();
   const target = usePanelStore((state) => state.mobilePanel.target);
   const showMobileAgent = usePanelStore((state) => state.showMobileAgent);
-  const isOpen = target === panel;
-  const isPresented = useIsMobilePanelPresented(panel);
+  const isOpen = target === panel && presentationEnabled;
+  const motionPresented = useIsMobilePanelPresented(panel);
+  const isPresented = motionPresented && presentationEnabled;
   const isLeft = panel === "agent-list";
   const width = panelWidth ?? windowWidth;
 

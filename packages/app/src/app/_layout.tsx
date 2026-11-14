@@ -1,3 +1,5 @@
+import { useSettingsSidebarPresentation } from "@/navigation/settings-presentation";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   WindowLayoutProvider,
   WindowLayoutActionsHost,
@@ -31,6 +33,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
   useSyncExternalStore,
@@ -446,6 +449,14 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
   useGumloopSidebarShortcut(gumloopShell);
   const onForge = !gumloopShell && pathname.endsWith("/forge");
   const sidebarEnabled = chromeEnabled || gumloopShell;
+  const settingsSidebar = useSettingsSidebarPresentation({
+    presentation: isCompactLayout ? "overlay" : "dock",
+    visible: sidebarEnabled,
+  });
+  const applyPanelLayout = usePanelStore((state) => state.applyPanelLayout);
+  useLayoutEffect(() => {
+    applyPanelLayout({ isCompact: isCompactLayout, leftSidebar: settingsSidebar.presentation });
+  }, [applyPanelLayout, isCompactLayout, settingsSidebar.presentation]);
   const hasMountedDesktopSidebar = useLatchedBoolean(sidebarEnabled);
   const toggleAgentList = isCompactLayout ? toggleMobileAgentList : toggleDesktopAgentList;
   const toggleDesktopSidebars = useCallback(() => {
@@ -697,14 +708,20 @@ function SidebarChrome({
   const isOpen = usePanelStore((state) =>
     selectIsAgentListOpen(state, { isCompact: isCompactLayout }),
   );
-  const active = visible && isOpen;
+  const presentation = useSettingsSidebarPresentation({
+    presentation: isCompactLayout ? "overlay" : "dock",
+    visible,
+  });
+  const active = presentation.visible && isOpen;
   const hardwareKeyboardPresent = useHardwareKeyboardPresent();
   return (
     <SidebarModelProvider
       active={active}
       keyboardNavigationActive={keyboardShortcutsEnabled && hardwareKeyboardPresent}
     >
-      {mounted && gumloopTheme && isCompactLayout ? <GumloopDrawer active={active} /> : null}
+      {mounted && gumloopTheme && isCompactLayout ? (
+        <GumloopDrawer active={active} presentationEnabled={presentation.visible} />
+      ) : null}
       {mounted && gumloopShell ? <GumloopSidebar active={active} /> : null}
       {mounted && !gumloopTheme ? <LeftSidebar active={active} /> : null}
       <WorkspaceShortcutTargetsSubscriber enabled={keyboardShortcutsEnabled} />

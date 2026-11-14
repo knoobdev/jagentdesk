@@ -1,3 +1,6 @@
+import { openSettingsFromSidebar } from "@/navigation/settings-navigation";
+import { getSettingsSidebarReturn } from "@/navigation/settings-presentation/session";
+import { getLastWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { useWindowDimensions } from "react-native";
 import { useWindowLayout, resolveDesktopDivisionLayout } from "@/window-layout";
 import { useIsCompactFormFactor } from "@/constants/layout";
@@ -57,7 +60,6 @@ import type { Theme } from "@/styles/theme";
 import {
   buildSettingsAddHostRoute,
   buildSettingsHostSectionRoute,
-  buildSettingsRoute,
   buildSettingsSectionRoute,
 } from "@/utils/host-routes";
 import { resolveSidebarNavBody, resolveSectionRoute } from "@/components/left-sidebar";
@@ -256,10 +258,11 @@ function ConnectionFooter({ serverId, onNavigate }: { serverId: string; onNaviga
     onNavigate();
     pair(serverId);
   }, [onNavigate, pair, serverId]);
-  const settings = useCallback(() => {
-    onNavigate();
-    router.push(buildSettingsRoute());
-  }, [onNavigate]);
+  const compact = useIsCompactFormFactor();
+  const settings = useCallback(
+    () => openSettingsFromSidebar({ workspace: getLastWorkspaceSelection(), isCompact: compact }),
+    [compact],
+  );
   const connections = useCallback(() => {
     onNavigate();
     router.push(buildSettingsHostSectionRoute(serverId, "connections"));
@@ -474,8 +477,16 @@ function sidebarDrillTitle(
   return drill?.title ?? "";
 }
 
+function useSidebarPathname(): string {
+  const routePathname = usePathname();
+  const origin = getSettingsSidebarReturn();
+  return routePathname.startsWith("/settings") && origin
+    ? `/h/${encodeURIComponent(origin.serverId)}/workspace/${encodeURIComponent(origin.workspaceId)}`
+    : routePathname;
+}
+
 export function GumloopSidebar({ active }: { active: boolean }) {
-  const pathname = usePathname();
+  const pathname = useSidebarPathname();
   const hosts = useHosts();
   const hostFilters = useSidebarViewStore((state) => state.hostFilters);
   const match = /^\/h\/([^/]+)/.exec(pathname);

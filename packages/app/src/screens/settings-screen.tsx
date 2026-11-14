@@ -1,3 +1,4 @@
+import { useSettingsContentPresented } from "@/navigation/settings-presentation";
 import { GumloopRow } from "@/components/gumloop-shell/sidebar";
 import { PageHeader } from "@/components/headers/page-header";
 import { SidebarViewPicker } from "@/plugins/sidebar-view/picker";
@@ -954,6 +955,10 @@ export interface SettingsScreenProps {
 }
 
 export default function SettingsScreen({ view, openAddHostIntent = null }: SettingsScreenProps) {
+  const contentPresented = useSettingsContentPresented();
+  useEffect(() => {
+    contentPresented();
+  }, [contentPresented]);
   const router = useRouter();
   const isRouteFocused = useIsFocused();
   const { theme } = useUnistyles();

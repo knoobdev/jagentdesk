@@ -17,12 +17,13 @@ export interface MobilePanelCommit {
 
 export interface MobilePanelTransition {
   animationTarget?: MobilePanelView;
+  immediateTarget?: MobilePanelView;
   commit?: MobilePanelCommit;
   state: MobilePanelMotionState;
 }
 
 export type MobilePanelEvent =
-  | { type: "command"; selection: MobilePanelSelection }
+  | { type: "command"; selection: MobilePanelSelection; immediate?: boolean }
   | { type: "gesture.begin"; origin: MobilePanelView }
   | {
       type: "gesture.finish";
@@ -43,25 +44,45 @@ export function createMobilePanelMotionState(
   };
 }
 
+function transitionCommand(
+  state: MobilePanelMotionState,
+  event: Extract<MobilePanelEvent, { type: "command" }>,
+): MobilePanelTransition {
+  "worklet";
+
+  if (event.selection.revision <= state.revision) {
+    return { state };
+  }
+  if (event.immediate) {
+    return {
+      immediateTarget: event.selection.target,
+      state: {
+        ...event.selection,
+        gesture: null,
+        motionTarget: event.selection.target,
+        settledTarget: event.selection.target,
+      },
+    };
+  }
+  // An interrupted drag left the position between anchors, so it moves back even when the
+  // target is unchanged. Without a drag, the command adopts motion already heading there.
+  return {
+    animationTarget: event.selection.target,
+    state: {
+      ...state,
+      ...event.selection,
+      gesture: null,
+      motionTarget: event.selection.target,
+    },
+  };
+}
+
 export function transitionMobilePanel(
   state: MobilePanelMotionState,
   event: MobilePanelEvent,
 ): MobilePanelTransition {
   "worklet";
-  if (event.type === "command") {
-    if (event.selection.revision <= state.revision) {
-      return { state };
-    }
-    return {
-      animationTarget: event.selection.target,
-      state: {
-        ...state,
-        ...event.selection,
-        gesture: null,
-        motionTarget: event.selection.target,
-      },
-    };
-  }
+  if (event.type === "command") return transitionCommand(state, event);
 
   if (event.type === "gesture.begin") {
     if (

@@ -43,6 +43,14 @@ export interface PanelLayoutInput {
   isCompact: boolean;
 }
 
+/** Sidebar presentation; suspended retains an overlay while Settings covers it. */
+export type LeftSidebarPresentation = "overlay" | "dock" | "hidden" | "suspended";
+
+/** The panels app chrome presents, which decide the mobile panel targets that can stay selected. */
+export interface PanelLayout extends PanelLayoutInput {
+  leftSidebar: LeftSidebarPresentation;
+}
+
 export interface ExplorerPanelIntent extends PanelLayoutInput {
   checkout: ExplorerCheckoutContext;
 }
@@ -282,3 +290,29 @@ export function migratePanelState(
 
 export { buildExplorerCheckoutKey, resolveExplorerTabForCheckout };
 export type { ExplorerTab, ExplorerCheckoutContext };
+
+export function dropOverlayAgentList(selection: MobilePanelSelection): MobilePanelSelection {
+  return {
+    target: selection.target === "agent-list" ? "agent" : selection.target,
+    revision: selection.revision + 1,
+  };
+}
+
+/**
+ * Keeps only the targets the layout presents. The `file-explorer` target exists on compact layouts
+ * only; a wide layout docks the Explorer instead, and a stale target there would block the
+ * navigation swipe, which begins only from `agent`.
+ */
+export function reconcileMobilePanel(
+  selection: MobilePanelSelection,
+  layout: PanelLayout,
+): MobilePanelSelection {
+  const sidebarReconciled =
+    layout.leftSidebar === "overlay" || layout.leftSidebar === "suspended"
+      ? selection
+      : dropOverlayAgentList(selection);
+  if (!layout.isCompact && sidebarReconciled.target === "file-explorer") {
+    return setMobilePanelTarget(sidebarReconciled, "agent");
+  }
+  return sidebarReconciled;
+}

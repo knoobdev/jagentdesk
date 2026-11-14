@@ -20,6 +20,7 @@ export interface RouteSelectionInput {
 }
 
 export interface NavigateToWorkspaceInput {
+  surface?: "workspace" | "sidebar";
   serverId: string;
   workspaceId: string;
   target?: WorkspaceTabTarget;
