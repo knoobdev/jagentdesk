@@ -123,3 +123,9 @@ export const Wrench = StubIcon;
 export const X = StubIcon;
 export const XCircle = StubIcon;
 export const KeyRound = StubIcon;
+
+export const Code = StubIcon;
+export const Maximize2 = StubIcon;
+export const Workflow = StubIcon;
+export const ZoomIn = StubIcon;
+export const ZoomOut = StubIcon;
