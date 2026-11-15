@@ -140,7 +140,12 @@ public final class JAgentDeskTailscaleModule: Module {
       // Expo runs async functions off the main thread. The revive can block
       // on a bounded dial plus a tsnet node restart, so it must never run on
       // the JS thread.
-      return try self.bridge.revive(target)
+      var nsError: NSError?
+      let address = self.bridge.revive(target, error: &nsError)
+      if let nsError {
+        throw nsError
+      }
+      return address
     }
 
     Function("getDevicePublicKeyB64") { () -> String? in
