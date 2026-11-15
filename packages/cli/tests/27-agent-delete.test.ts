@@ -10,10 +10,10 @@
  * - All flags are accepted
  */
 
-import { runJAgentDeskCli, startTestDaemon } from "./helpers/test-daemon.ts";
+import { createTempDirs, runJAgentDeskCli, startTestDaemon } from "./helpers/test-daemon.ts";
 import assert from "node:assert";
 import { $ } from "zx";
-import { mkdtemp, rm } from "fs/promises";
+import { mkdtemp, rm, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
@@ -139,6 +139,64 @@ try {
       await daemon.stop();
     }
     console.log("✓ delete reports AGENT_NOT_FOUND for an unknown ID\n");
+  }
+
+  {
+    console.log("Test 10: a missing full ID does not delete an agent titled with it");
+    const missingId = "11111111-2222-4333-8444-555555555555";
+    const titledId = "c9a97e5d-4a92-4646-a016-53032146d0a1";
+    const dirs = await createTempDirs();
+    await writeFile(
+      join(dirs.jagentdeskHome, "agents", `${titledId}.json`),
+      JSON.stringify(
+        {
+          id: titledId,
+          provider: "codex",
+          cwd: dirs.workDir,
+          createdAt: "2026-09-03T18:29:21.949Z",
+          updatedAt: "2026-09-03T18:29:21.949Z",
+          title: missingId,
+          labels: {},
+          lastStatus: "closed",
+        },
+        null,
+        2,
+      ),
+    );
+    const daemon = await startTestDaemon(dirs);
+    const host = `127.0.0.1:${daemon.port}`;
+    try {
+      for (const command of ["inspect", "delete"]) {
+        const result = await runJAgentDeskCli(daemon, [
+          "agent",
+          command,
+          missingId,
+          "--json",
+          "--host",
+          host,
+        ]);
+        assert.strictEqual(result.exitCode, 1, `${command}: ${result.stdout}`);
+        assert.strictEqual(
+          JSON.parse(result.stderr).error.code,
+          "AGENT_NOT_FOUND",
+          `${command}: ${result.stderr}`,
+        );
+      }
+
+      const titled = await runJAgentDeskCli(daemon, [
+        "agent",
+        "inspect",
+        titledId,
+        "--json",
+        "--host",
+        host,
+      ]);
+      assert.strictEqual(titled.exitCode, 0, titled.stderr);
+      assert.strictEqual(JSON.parse(titled.stdout).Id, titledId);
+    } finally {
+      await daemon.stop();
+    }
+    console.log("✓ a missing full ID does not delete an agent titled with it\n");
   }
 } finally {
   await rm(jagentdeskHome, { recursive: true, force: true });
