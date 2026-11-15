@@ -207,6 +207,8 @@ interface UseGitActionsResult {
   gitActions: GitActions;
   branchLabel: string;
   isGit: boolean;
+  /** Archives this workspace, Git or not. Null while it cannot be archived. */
+  archiveWorkspace: (() => void) | null;
 }
 
 interface UseWorkspaceScreenArchiveControllerInput {
@@ -262,6 +264,13 @@ function canArchiveWorkspace(
     (workspace.workspaceKind !== "worktree" ||
       (risk.isDirty !== undefined && risk.aheadOfOrigin !== undefined))
   );
+}
+
+function availableArchive(
+  controller: { canArchive: boolean; isArchiving: boolean },
+  archive: () => void,
+): (() => void) | null {
+  return controller.canArchive && !controller.isArchiving ? archive : null;
 }
 
 function useWorkspaceScreenArchiveController({
@@ -862,7 +871,12 @@ export function useGitActions({ serverId, cwd, icons }: UseGitActionsInput): Use
     [gitActionsInput, baseRefLabel, hasPullRequest, forge, t],
   );
 
-  return { gitActions, branchLabel, isGit };
+  return {
+    gitActions,
+    branchLabel,
+    isGit,
+    archiveWorkspace: availableArchive(archiveController, handleArchiveWorkspace),
+  };
 }
 
 function translateGitActions(
