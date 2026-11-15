@@ -1,7 +1,6 @@
-import { fetchAllAgents } from "../../utils/agent-directory.js";
 import { Command } from "commander";
-import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
-import { connectToDaemon, getDaemonHost, resolveAgentId } from "../../utils/client.js";
+import { connectToDaemon, getDaemonHost } from "../../utils/client.js";
+import { resolveAgentEntry, type AgentLookupClient } from "../../utils/agent-directory.js";
 import type {
   CommandOptions,
   SingleResult,
@@ -40,13 +39,26 @@ export interface AgentArchiveOptions extends CommandOptions {
 
 export type AgentArchiveCommandResult = SingleResult<AgentArchiveResult>;
 
+export interface AgentArchiveClient extends AgentLookupClient {
+  archiveAgent(agentId: string): Promise<{ archivedAt: string }>;
+  close(): Promise<void>;
+}
+
 export async function runArchiveCommand(
   agentIdArg: string,
   options: AgentArchiveOptions,
   _command: Command,
 ): Promise<AgentArchiveCommandResult> {
-  const host = getDaemonHost({ host: options.host });
+  return archiveAgent(agentIdArg, options);
+}
 
+export async function archiveAgent(
+  agentIdArg: string,
+  options: AgentArchiveOptions,
+  connect: (
+    options: Parameters<typeof connectToDaemon>[0],
+  ) => Promise<AgentArchiveClient> = connectToDaemon,
+): Promise<AgentArchiveCommandResult> {
   // Validate arguments
   if (!agentIdArg || agentIdArg.trim().length === 0) {
     const error: CommandError = {
@@ -57,9 +69,10 @@ export async function runArchiveCommand(
     throw error;
   }
 
-  let client: DaemonClient;
+  const host = getDaemonHost({ host: options.host });
+  let client: AgentArchiveClient;
   try {
-    client = await connectToDaemon({ host: options.host });
+    client = await connect({ host: options.host });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const error: CommandError = {
@@ -71,9 +84,8 @@ export async function runArchiveCommand(
   }
 
   try {
-    const agents = await fetchAllAgents(client, { filter: { includeArchived: true } });
-    const agentId = resolveAgentId(agentIdArg, agents);
-    if (!agentId) {
+    const agent = await resolveAgentEntry(client, agentIdArg);
+    if (!agent) {
       const error: CommandError = {
         code: "AGENT_NOT_FOUND",
         message: `Agent not found: ${agentIdArg}`,
@@ -81,10 +93,7 @@ export async function runArchiveCommand(
       };
       throw error;
     }
-    const agent = agents.find((entry) => entry.id === agentId);
-    if (!agent) {
-      throw new Error(`Resolved agent missing from fetched agents: ${agentId}`);
-    }
+    const agentId = agent.id;
 
     // Check if agent is already archived
     if (agent.archivedAt) {
