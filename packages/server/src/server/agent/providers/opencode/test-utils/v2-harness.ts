@@ -143,6 +143,22 @@ export class V2Harness {
       },
       get: async () => this.info,
       list: async () => ({ data: [], cursor: {} }),
+      // Mirrors the real surface: once an MCP server's tools are listed they
+      // appear in the session context as "<server>_<tool>" tool calls.
+      context: async () =>
+        this.mcpAdds.length === 0
+          ? []
+          : [
+              {
+                id: "msg_ctx",
+                type: "assistant" as const,
+                content: this.mcpAdds.map((name) => ({
+                  type: "tool" as const,
+                  name: `${name}_probe`,
+                  state: { status: "completed" },
+                })),
+              },
+            ],
       active: async () => {
         this.activeReads += 1;
         return this.active ? { [this.info.id]: { type: "running" as const } } : {};

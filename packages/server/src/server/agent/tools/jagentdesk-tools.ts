@@ -122,6 +122,7 @@ import { registerForumTools } from "./forum-tools.js";
 import type { ClusterRegistry } from "../../cluster/cluster-registry.js";
 import { registerSshAgentTools, type SshAgentTool } from "../../ssh/environment/agent-tools.js";
 import type { RemoteExecAgentTool } from "../../remote-exec/agent-tools.js";
+import type { CustomProviderAgentTool } from "../../custom-providers/agent-tools.js";
 import type { ArgoCdAgentTool } from "../../argocd/agent-tools.js";
 import type { SideloadAgentTool } from "../../sideload/agent-tools.js";
 import type { JiraAgentTool } from "../../jira/agent-tools.js";
@@ -200,6 +201,8 @@ export interface JAgentDeskToolHostDependencies {
   sshAgentTools?: (callerAgentId: string | null) => SshAgentTool[];
   // Remote execution (spec 33.7): remote_* tools; [] when no SSH server has remote tasks enabled.
   remoteExecAgentTools?: (callerAgentId: string | null) => RemoteExecAgentTool[];
+  // Custom API providers (spec 34.7): provider_* tools; list/test auto-run, mutations raise a card.
+  customProviderAgentTools?: (callerAgentId: string | null) => CustomProviderAgentTool[];
   // Argo CD (spec 30.4): argocd_* tools bound per caller agent (default instance from its label).
   argocdAgentTools?: (callerAgentId: string | null) => ArgoCdAgentTool[];
   /** Sideload tools (spec 26.10); installs raise a permission card. */
@@ -4157,6 +4160,15 @@ export function createJAgentDeskToolCatalog(
   }
   if (options.remoteExecAgentTools) {
     for (const tool of options.remoteExecAgentTools(callerAgentId ?? null)) {
+      registerTool(
+        tool.name,
+        { title: tool.title, description: tool.description, inputSchema: tool.inputSchema },
+        tool.handler,
+      );
+    }
+  }
+  if (options.customProviderAgentTools) {
+    for (const tool of options.customProviderAgentTools(callerAgentId ?? null)) {
       registerTool(
         tool.name,
         { title: tool.title, description: tool.description, inputSchema: tool.inputSchema },

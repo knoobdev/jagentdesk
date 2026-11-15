@@ -122,6 +122,25 @@ with a few deliberate boundaries:
 
 ## ✨ New in this release
 
+### Custom API providers: use your own model servers (v0.9.59)
+
+- **Any OpenAI- or Anthropic-compatible endpoint.** Add it under Settings → Providers → Custom API
+  providers, press **Discover models**, and its models appear in the composer straight away, with the
+  thinking levels you define.
+- **Models on your PC, even on `127.0.0.1`.** Choose **Through SSH server** and JAgentDesk forwards a
+  local port over the SSH connection you already use for remote tasks — no Tailscale app needed on the Mac.
+- **Agents can set it up.** Ask "install a model server on my PC and add it to JAgentDesk": the agent
+  installs it with `remote_run`, tests it and adds the provider after you approve. Keys stay in the
+  daemon's encrypted store and are never shown to the app or the agent.
+- Also in this release: bypass mode no longer stops for permission cards, OpenCode agents see JAgentDesk
+  tools from the first message, and the phone reconnects after coming back from the background.
+  Details: [docs/custom-providers.md](docs/custom-providers.md#api-providers-managed-by-jagentdesk) and the
+  [changelog](CHANGELOG.md#v0959--2026-11-16).
+
+![Settings → Providers: a custom API provider reached through an SSH server, with its protocol, address and model count](docs/media/custom-api-providers-list.png)
+
+![Edit API provider: OpenAI-compatible base URL on 127.0.0.1, route through the SSH server "Model box" and the model found by Discover models](docs/media/custom-api-provider-sheet.png)
+
 ### Remote tasks from any folder (v0.9.58)
 
 - **No git needed.** Ask from any folder — even one that holds many repositories. Name the part you

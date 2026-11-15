@@ -19,11 +19,16 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import type { Logger } from "pino";
 import {
+  JAGENTDESK_MCP_SERVER_NAME,
+  isInternalJAgentDeskMcpServer,
+} from "../../runtime-mcp-config.js";
+import {
   mapClaudeCanceledToolCall,
   mapClaudeCompletedToolCall,
   mapClaudeFailedToolCall,
   mapClaudeRunningToolCall,
 } from "./tool-call-mapper.js";
+import { applyClaudeSpawnEnvOverlay } from "../../../custom-providers/materialization.js";
 import {
   mapTaskNotificationSystemRecordToToolCall,
   mapTaskNotificationUserContentToToolCall,
@@ -343,6 +348,9 @@ const DEFAULT_MODES: AgentMode[] = [
     id: "bypassPermissions",
     label: "Bypass",
     description: "Skip all permission prompts (use with caution)",
+    // Spec 33.7: JAgentDesk treats this mode as the operator's standing approval and
+    // auto-approves its own permission cards (agent-manager.isAgentSessionUnattended).
+    isUnattended: true,
   },
 ];
 
@@ -404,6 +412,8 @@ interface ClaudeAgentClientOptions {
   resolveBinary?: () => Promise<string>;
   resolveVersion?: (signal?: AbortSignal) => Promise<string>;
   rewindSdk?: ClaudeRewindSdk;
+  /** Extra env resolved once at session build (spec 34.3: ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN). */
+  spawnEnvOverlay?: () => Promise<Record<string, string> | null>;
 }
 
 interface ClaudeAgentSessionOptions {
@@ -417,6 +427,7 @@ interface ClaudeAgentSessionOptions {
   queryFactory?: ClaudeQueryFactory;
   resolveBinary: () => Promise<string>;
   rewindSdk?: ClaudeRewindSdk;
+  spawnEnvOverlay?: () => Promise<Record<string, string> | null>;
 }
 
 type ClaudeThinkingEffort = "low" | "medium" | "high" | "xhigh" | "max";
@@ -1500,6 +1511,7 @@ export class ClaudeAgentClient implements AgentClient {
   private readonly resolveBinary: () => Promise<string>;
   private readonly resolveVersion: (signal?: AbortSignal) => Promise<string>;
   private readonly rewindSdk: ClaudeRewindSdk;
+  private readonly spawnEnvOverlay?: () => Promise<Record<string, string> | null>;
 
   constructor(options: ClaudeAgentClientOptions) {
     this.defaults = options.defaults;
@@ -1511,6 +1523,7 @@ export class ClaudeAgentClient implements AgentClient {
       options.resolveVersion ??
       ((signal) => resolveClaudeCodeVersion(this.runtimeSettings, signal));
     this.rewindSdk = options.rewindSdk ?? realClaudeRewindSdk;
+    this.spawnEnvOverlay = options.spawnEnvOverlay;
   }
 
   resolveConfiguredModel(model: AgentModelDefinition): AgentModelDefinition {
@@ -1533,6 +1546,7 @@ export class ClaudeAgentClient implements AgentClient {
       queryFactory: this.queryFactory,
       resolveBinary: this.resolveBinary,
       rewindSdk: this.rewindSdk,
+      spawnEnvOverlay: this.spawnEnvOverlay,
     });
   }
 
@@ -2103,6 +2117,9 @@ class ClaudeAgentSession implements AgentSession {
   private readonly emittedUserMessageIds = new Set<string>();
   private readonly rewindTurnAnchors: ClaudeRewindTurnAnchor[] = [];
   private readonly rewindSdk: ClaudeRewindSdk;
+  private readonly spawnEnvOverlay?: () => Promise<Record<string, string> | null>;
+  private spawnEnvOverlayCache: Record<string, string> | null = null;
+  private spawnEnvOverlayLoaded = false;
   private pendingFreshSessionId: string | null = null;
   private recentStderr = "";
   private closed = false;
@@ -2119,6 +2136,7 @@ class ClaudeAgentSession implements AgentSession {
     this.queryFactory = options.queryFactory;
     this.resolveBinary = options.resolveBinary;
     this.rewindSdk = options.rewindSdk ?? realClaudeRewindSdk;
+    this.spawnEnvOverlay = options.spawnEnvOverlay;
     this.contextUsage = new ClaudeContextUsageState(
       findClaudeModel(this.config.model)?.contextWindowMaxTokens,
     );
@@ -3253,6 +3271,15 @@ class ClaudeAgentSession implements AgentSession {
     });
   }
 
+  /** Spec 34.3: the api provider's ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN, resolved once per session. */
+  private async resolveSpawnEnvOverlay(): Promise<Record<string, string>> {
+    if (this.spawnEnvOverlayLoaded) return this.spawnEnvOverlayCache ?? {};
+    this.spawnEnvOverlayLoaded = true;
+    // A failure (e.g. tailnet_unavailable) must fail the spawn, not silently fall back.
+    this.spawnEnvOverlayCache = (await this.spawnEnvOverlay?.()) ?? {};
+    return this.spawnEnvOverlayCache;
+  }
+
   private async buildOptions(): Promise<ClaudeOptions> {
     const { thinking, effort, ultracode } = this.resolveThinkingConfig();
     const appendedSystemPrompt = this.buildAppendedSystemPrompt();
@@ -3261,7 +3288,12 @@ class ClaudeAgentSession implements AgentSession {
       this.config.toolPolicy,
     );
     const settingsOptions = this.buildSettingsOptions(providerOptions, { ultracode });
-    const sdkEnv = this.buildSdkEnv();
+    // Spec 34.3: when a custom api provider overlay applies, the user's own Anthropic
+    // credentials are deleted from the final env (never sent to the provider's endpoint).
+    const sdkEnv = applyClaudeSpawnEnvOverlay(
+      this.buildSdkEnv(),
+      await this.resolveSpawnEnvOverlay(),
+    );
     assertClaudeModeCanRun(this.currentMode, sdkEnv);
 
     const claudeBinary = await this.resolveBinary();
@@ -4611,11 +4643,32 @@ class ClaudeAgentSession implements AgentSession {
     return this.contextUsage.buildResultUsage(message, modelUsage);
   }
 
+  /**
+   * True for `mcp__jagentdesk__<tool>` when the daemon actually injected its internal MCP
+   * server under that name in this session's config (runtime-mcp-config.ts). The name check
+   * alone is not enough: a user-configured server named "jagentdesk" is not the daemon's.
+   */
+  private isInternalJAgentDeskMcpTool(toolName: string): boolean {
+    const serverConfig = this.config.mcpServers?.[JAGENTDESK_MCP_SERVER_NAME];
+    if (!serverConfig || !isInternalJAgentDeskMcpServer(serverConfig)) {
+      return false;
+    }
+    return toolName.startsWith(`mcp__${JAGENTDESK_MCP_SERVER_NAME}__`);
+  }
+
   private handlePermissionRequest: CanUseTool = async (
     toolName,
     input,
     options,
   ): Promise<PermissionResult> => {
+    // ADR-0046: every tool of the internal JAgentDesk MCP server gates itself through the
+    // daemon's own permission card where needed (requestHostToolPermission), so Claude must
+    // not add a second approval — the same contract Codex gets via
+    // default_tools_approval_mode = "auto". Only the injected internal server qualifies;
+    // a user-configured server with the same name or tool names keeps prompting.
+    if (this.isInternalJAgentDeskMcpTool(toolName)) {
+      return { behavior: "allow", updatedInput: input };
+    }
     const requestId = `permission-${randomUUID()}`;
     const kind = resolvePermissionKind(toolName, input);
     const requestInput = normalizeClaudeAskUserQuestionRequestInput(toolName, input);

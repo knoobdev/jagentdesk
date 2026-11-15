@@ -40,7 +40,18 @@ export const ProviderProfileModelSchema = z.object({
   label: z.string().min(1),
   description: z.string().optional(),
   isDefault: z.boolean().optional(),
+  contextWindow: z.number().int().positive().optional(),
   thinkingOptions: z.array(ProviderProfileThinkingOptionSchema).optional(),
+});
+
+// Daemon-managed custom API provider block (spec 34.2 / ADR-0047). The `extends`
+// value is derived from `protocol` (openai → opencode, anthropic → claude).
+export const ProviderApiConfigSchema = z.object({
+  protocol: z.enum(["openai", "anthropic"]),
+  baseUrl: z.string().min(1),
+  via: z.enum(["direct", "tailnet", "ssh"]).optional(),
+  /** Required when via is "ssh": the SSH server (spec 25) to tunnel through. */
+  sshServerId: z.string().min(1).optional(),
 });
 
 export const ProviderOverrideSchema = z.object({
@@ -55,6 +66,7 @@ export const ProviderOverrideSchema = z.object({
   disallowedTools: z.array(z.string()).optional(),
   enabled: z.boolean().optional(),
   order: z.number().optional(),
+  api: ProviderApiConfigSchema.optional(),
 });
 
 const BUILTIN_PROVIDER_IDS = ["claude", "codex", "copilot", "opencode", "pi", "omp"] as const;
@@ -76,7 +88,8 @@ export const ProviderOverridesSchema = z
       }
 
       const isBuiltinProvider = builtinProviderIdSet.has(providerId);
-      if (!isBuiltinProvider && !provider.extends) {
+      const isApiProvider = provider.api !== undefined;
+      if (!isBuiltinProvider && !provider.extends && !isApiProvider) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: [providerId, "extends"],
@@ -84,11 +97,19 @@ export const ProviderOverridesSchema = z
         });
       }
 
-      if (!isBuiltinProvider && !provider.label) {
+      if (!isBuiltinProvider && !provider.label && !isApiProvider) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: [providerId, "label"],
           message: `Custom provider "${providerId}" must declare label.`,
+        });
+      }
+
+      if (isApiProvider && provider.api?.via === "ssh" && !provider.api.sshServerId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [providerId, "api", "sshServerId"],
+          message: `API provider "${providerId}" with via "ssh" must declare sshServerId.`,
         });
       }
 

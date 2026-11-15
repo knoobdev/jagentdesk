@@ -16,6 +16,10 @@ import type { ManagedProcessRegistry } from "../../../../managed-processes/manag
 import { resolveOpenCodeHomeDir } from "../paths.js";
 import { OpenCodeHttpError } from "../http-error.js";
 import { raceProviderRefreshAbort } from "../../../provider-refresh-deadline.js";
+import {
+  mergeOpenCodeConfigContent,
+  type OpenCodeProviderInjection,
+} from "../../../../custom-providers/materialization.js";
 
 export interface V2Connection {
   client: V2Api;
@@ -34,6 +38,8 @@ export interface V2RuntimeOptions {
   settings?: ProviderRuntimeSettings;
   managedProcesses?: ManagedProcessRegistry;
   decorateEnv?: (env: Record<string, string>) => Promise<Record<string, string>>;
+  /** Resolves the daemon-managed API provider definition merged into OPENCODE_CONFIG_CONTENT at spawn (spec 34.3). */
+  providerConfigInjection?: () => Promise<OpenCodeProviderInjection | null>;
 }
 
 export interface V2RuntimeAcquireOptions {
@@ -155,11 +161,23 @@ export class V2Runtime {
     await mkdir(cwd, { recursive: true });
     const password = randomBytes(32).toString("base64url");
     const inheritedConfig = globalThis.process.env.OPENCODE_CONFIG_CONTENT;
-    const configured = {
+    let configured: Record<string, string> = {
       ...(inheritedConfig ? { OPENCODE_CONFIG_CONTENT: inheritedConfig } : {}),
       ...settings?.env,
       ...env,
     };
+    const injection = this.options.providerConfigInjection
+      ? await this.options.providerConfigInjection()
+      : null;
+    if (injection) {
+      // Spec 34.3: merge the daemon-managed provider into the inherited config;
+      // the user's other providers and global files stay untouched.
+      const merged = mergeOpenCodeConfigContent(
+        configured.OPENCODE_CONFIG_CONTENT ?? inheritedConfig,
+        injection,
+      );
+      configured = { ...configured, OPENCODE_CONFIG_CONTENT: merged };
+    }
     const decorated = this.options.decorateEnv
       ? await this.options.decorateEnv(configured)
       : decorateOpenCodeV2Env(

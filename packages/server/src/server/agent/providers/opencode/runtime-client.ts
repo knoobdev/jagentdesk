@@ -97,6 +97,7 @@ export class OpenCodeRuntimeClient implements AgentClient {
         settings: this.settings,
         managedProcesses: this.options.managedProcesses,
         bridge: this.options.bridge,
+        providerConfigInjection: this.options.providerConfigInjection,
       });
     })().catch((error: unknown) => {
       // A failed probe must not poison refresh after the user updates the binary.

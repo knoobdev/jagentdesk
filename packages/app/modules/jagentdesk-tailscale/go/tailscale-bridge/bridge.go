@@ -29,7 +29,36 @@ type Bridge struct {
 	tailnetName string
 	authURL     string
 	deviceKey   ed25519.PrivateKey
+
+	// Start parameters saved so Revive can restart the node without an auth
+	// key: the state directory holds the node key tsnet needs to rejoin.
+	stateDir string
+	hostname string
+	target   string
+
+	// Serializes Revive calls. Revive's dial and node restart run WITHOUT
+	// b.mu, so Proxy()/LocalAddress()/status reads never wait on them.
+	reviveMu sync.Mutex
+
+	// Test seams (same package only): injectable dial and node restart so the
+	// listener-recovery and revive paths run without a real tailnet.
+	dial        dialFunc
+	restartNode func() error
 }
+
+const (
+	// Backoff between accept failures while the loop recovers a reclaimed
+	// listener. Never busy-spin: after iOS reclaims a suspended app's socket,
+	// Accept can error immediately and forever.
+	acceptRetryBaseDelay = 250 * time.Millisecond
+	acceptRetryMaxDelay  = 2 * time.Second
+	// Revive dials the daemon through the tailnet with a bounded deadline
+	// before deciding the embedded node itself must be restarted.
+	reviveDialTimeout = 5 * time.Second
+	// Bounded Up deadline when Revive restarts the tsnet node from saved
+	// state. No auth key is needed: the state dir holds the node key.
+	reviveNodeRestartTimeout = 60 * time.Second
+)
 
 func (b *Bridge) LocalAddress() string {
 	b.mu.Lock()
@@ -109,6 +138,8 @@ func (b *Bridge) getTailnetName() string {
 func (b *Bridge) Start(authKey, stateDir, hostname, target string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.stateDir = stateDir
+	b.hostname = hostname
 	if b.server != nil {
 		// getStatus() may have started an unauthenticated tsnet node in order to
 		// obtain an interactive login URL. An auth-key submission must replace
@@ -127,26 +158,7 @@ func (b *Bridge) Start(authKey, stateDir, hostname, target string) error {
 		b.setAuthURL("")
 	}
 
-	srv := &tsnet.Server{
-		AuthKey:  authKey,
-		Dir:      stateDir,
-		Hostname: hostname,
-		Logf: func(format string, args ...any) {
-			// Keep enough native diagnostics to explain a failed mobile login,
-			// while redacting the one-time browser URL from device logs.
-			message := redactTailscaleLog(fmt.Sprintf(format, args...))
-			if strings.Contains(message, "control:") || strings.Contains(message, "RegisterReq") || strings.Contains(message, "TryLogin") || strings.Contains(message, "error") || strings.Contains(message, "failed") {
-				fmt.Printf("[JAgentDeskTailscale] %s\\n", message)
-			}
-		},
-		UserLogf: func(format string, args ...any) {
-			message := fmt.Sprintf(format, args...)
-			if index := strings.Index(message, "https://login.tailscale.com/"); index >= 0 {
-				b.setAuthURL(strings.Fields(message[index:])[0])
-			}
-			fmt.Printf("[JAgentDeskTailscale] %s\\n", redactTailscaleLog(message))
-		},
-	}
+	srv := b.newServer(authKey, stateDir, hostname)
 	fmt.Printf("[JAgentDeskTailscale] start begin interactive=%t\\n", strings.TrimSpace(authKey) == "")
 	if strings.TrimSpace(authKey) == "" {
 		if err := srv.Start(); err != nil {
@@ -249,10 +261,36 @@ func (b *Bridge) Proxy(target string) error {
 	return b.startProxyLocked(target)
 }
 
+// newServer builds the embedded tsnet node. Shared by Start and the Revive
+// node restart so both log and cache the interactive auth URL the same way.
+func (b *Bridge) newServer(authKey, stateDir, hostname string) *tsnet.Server {
+	return &tsnet.Server{
+		AuthKey:  authKey,
+		Dir:      stateDir,
+		Hostname: hostname,
+		Logf: func(format string, args ...any) {
+			// Keep enough native diagnostics to explain a failed mobile login,
+			// while redacting the one-time browser URL from device logs.
+			message := redactTailscaleLog(fmt.Sprintf(format, args...))
+			if strings.Contains(message, "control:") || strings.Contains(message, "RegisterReq") || strings.Contains(message, "TryLogin") || strings.Contains(message, "error") || strings.Contains(message, "failed") {
+				fmt.Printf("[JAgentDeskTailscale] %s\\n", message)
+			}
+		},
+		UserLogf: func(format string, args ...any) {
+			message := fmt.Sprintf(format, args...)
+			if index := strings.Index(message, "https://login.tailscale.com/"); index >= 0 {
+				b.setAuthURL(strings.Fields(message[index:])[0])
+			}
+			fmt.Printf("[JAgentDeskTailscale] %s\\n", redactTailscaleLog(message))
+		},
+	}
+}
+
 func (b *Bridge) startProxyLocked(target string) error {
 	if strings.TrimSpace(target) == "" {
 		return fmt.Errorf("tailscale target is required")
 	}
+	b.target = target
 	if b.listener != nil {
 		return nil
 	}
@@ -261,30 +299,260 @@ func (b *Bridge) startProxyLocked(target string) error {
 		return fmt.Errorf("loopback listen: %w", err)
 	}
 	b.listener = ln
-	go b.acceptLoop(target)
+	go b.acceptLoop(ln, target)
 	return nil
 }
 
-func (b *Bridge) acceptLoop(target string) {
+// acceptLoop serves ln until the bridge stops or a newer listener replaces
+// it. Each loop owns exactly one listener — the listener is passed in and the
+// loop exits once b.listener no longer points at it — so a replacement never
+// leaves two loops serving the same port.
+func (b *Bridge) acceptLoop(ln net.Listener, target string) {
+	backoff := acceptRetryBaseDelay
 	for {
-		conn, err := b.listener.Accept()
-		if err != nil {
-			select {
-			case <-b.closed:
-				return
-			default:
-			}
+		conn, err := ln.Accept()
+		if err == nil {
+			backoff = acceptRetryBaseDelay
+			go b.handleConn(conn, target)
 			continue
 		}
-		go func() {
-			remote, dialErr := b.server.Dial(context.Background(), "tcp", target)
-			if dialErr != nil {
-				_ = conn.Close()
-				return
-			}
-			proxy(conn, remote)
-		}()
+		select {
+		case <-b.closed:
+			return
+		default:
+		}
+		b.mu.Lock()
+		if b.listener != ln {
+			// A newer listener owns serving now (Stop or a re-open); this
+			// loop's job is done.
+			b.mu.Unlock()
+			return
+		}
+		// The OS took the socket away (iOS reclaims a suspended app's
+		// sockets) or Accept failed transiently. Sleep, then close the dead
+		// listener and re-open: same 127.0.0.1 port first, else a new port.
+		b.mu.Unlock()
+		time.Sleep(backoff)
+		if backoff < acceptRetryMaxDelay {
+			backoff *= 2
+		}
+		select {
+		case <-b.closed:
+			return
+		default:
+		}
+		b.mu.Lock()
+		if b.listener != ln {
+			b.mu.Unlock()
+			return
+		}
+		port := portOf(ln.Addr())
+		_ = ln.Close()
+		reopened, listenErr := listenLoopbackPreferred(port)
+		if listenErr != nil {
+			// Both listens failed; retry after the next backoff sleep. Accept
+			// on the closed ln errors immediately, so this stays a
+			// sleep-backed retry, not a busy spin.
+			b.mu.Unlock()
+			continue
+		}
+		b.listener = reopened
+		go b.acceptLoop(reopened, target)
+		b.mu.Unlock()
+		return
 	}
+}
+
+func (b *Bridge) handleConn(conn net.Conn, target string) {
+	b.mu.Lock()
+	server, dial := b.server, b.dial
+	b.mu.Unlock()
+	remote, dialErr := dialThrough(server, dial, context.Background(), target)
+	if dialErr != nil {
+		_ = conn.Close()
+		return
+	}
+	proxy(conn, remote)
+}
+
+type dialFunc func(ctx context.Context, network, address string) (net.Conn, error)
+
+// dialThrough dials the daemon through the tailnet. dial replaces server.Dial
+// in tests so listener recovery runs without a real tailnet.
+func dialThrough(server *tsnet.Server, dial dialFunc, ctx context.Context, target string) (net.Conn, error) {
+	if dial != nil {
+		return dial(ctx, "tcp", target)
+	}
+	if server == nil {
+		return nil, fmt.Errorf("tailscale is not started")
+	}
+	return server.Dial(ctx, "tcp", target)
+}
+
+// listenLoopbackPreferred re-opens the loopback forwarder, keeping the old
+// port when it is still available so existing clients can keep dialing it.
+func listenLoopbackPreferred(port int) (net.Listener, error) {
+	if port > 0 {
+		if ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port)); err == nil {
+			return ln, nil
+		}
+	}
+	return net.Listen("tcp", "127.0.0.1:0")
+}
+
+func portOf(addr net.Addr) int {
+	if tcp, ok := addr.(*net.TCPAddr); ok {
+		return tcp.Port
+	}
+	return 0
+}
+
+// Revive restores the transport after the OS reclaimed the app's sockets
+// while it was suspended (spec 05.7.4, "Hồi phục tầng tsnet khi lên
+// foreground"): it re-opens the loopback listener (same port preferred;
+// already-proxied connections stay open), checks the daemon is reachable
+// through the tailnet with a bounded deadline, and restarts the tsnet node
+// from the saved state directory when the dial fails. It returns the current
+// loopback address so the caller can rebuild clients whose URL changed.
+//
+// The reachability dial and the node restart run WITHOUT b.mu (serialized by
+// reviveMu instead), so synchronous Proxy()/LocalAddress() calls from the JS
+// thread never wait on a dial or Up. When the daemon stays unreachable (e.g.
+// the daemon machine is asleep) Revive still returns the address with nil
+// error — the normal reconnect loop handles the offline daemon. An error is
+// returned only when there is no usable listener.
+func (b *Bridge) Revive(target string) (string, error) {
+	b.reviveMu.Lock()
+	defer b.reviveMu.Unlock()
+
+	// Short critical section: decide the target and re-open the listener.
+	b.mu.Lock()
+	select {
+	case <-b.closed:
+		b.mu.Unlock()
+		return "", fmt.Errorf("tailscale is not started")
+	default:
+	}
+	if strings.TrimSpace(target) == "" {
+		target = b.target
+	}
+	if strings.TrimSpace(target) == "" {
+		b.mu.Unlock()
+		return "", fmt.Errorf("tailscale target is required")
+	}
+	b.target = target
+
+	if b.listener == nil {
+		if err := b.startProxyLocked(target); err != nil {
+			b.mu.Unlock()
+			return "", err
+		}
+	} else if err := b.reopenListenerLocked(); err != nil {
+		b.mu.Unlock()
+		return "", err
+	}
+	addr := b.listener.Addr().String()
+	server, dial := b.server, b.dial
+	b.mu.Unlock()
+
+	// Dial and node restart never hold b.mu; the result only decides whether
+	// the reachability failure is logged.
+	if !b.ensureTailnetReachable(server, dial, target) {
+		fmt.Printf("[JAgentDeskTailscale] revive: daemon %s still unreachable, leaving recovery to the reconnect loop\n", target)
+	}
+	return addr, nil
+}
+
+// reopenListenerLocked swaps in a fresh listener on the same 127.0.0.1 port
+// (falling back to a new port). Closing the old listener ends its accept loop
+// without touching connections it already handed off.
+func (b *Bridge) reopenListenerLocked() error {
+	old := b.listener
+	port := 0
+	if old != nil {
+		port = portOf(old.Addr())
+		_ = old.Close()
+	}
+	ln, err := listenLoopbackPreferred(port)
+	if err != nil {
+		return fmt.Errorf("loopback listen: %w", err)
+	}
+	b.listener = ln
+	go b.acceptLoop(ln, b.target)
+	return nil
+}
+
+// ensureTailnetReachable dials the daemon through the tailnet; on failure it
+// restarts the tsnet node from the saved state directory and dials again. It
+// never holds b.mu: the caller snapshots the server pointer first, and the
+// restart swaps b.server under b.mu. Returns whether the daemon was reachable
+// in the end.
+func (b *Bridge) ensureTailnetReachable(server *tsnet.Server, dial dialFunc, target string) bool {
+	if b.tryDial(server, dial, target) {
+		return true
+	}
+	b.mu.Lock()
+	restart := b.restartNode
+	b.mu.Unlock()
+	if restart == nil {
+		restart = b.restartNodeFromState
+	}
+	if err := restart(); err != nil {
+		fmt.Printf("[JAgentDeskTailscale] revive node restart failed: %v\n", err)
+		return false
+	}
+	// Re-dial through whatever node is current now (in tests the fake dial
+	// seam decides).
+	b.mu.Lock()
+	current := b.server
+	b.mu.Unlock()
+	return b.tryDial(current, dial, target)
+}
+
+func (b *Bridge) tryDial(server *tsnet.Server, dial dialFunc, target string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), reviveDialTimeout)
+	defer cancel()
+	conn, err := dialThrough(server, dial, ctx, target)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+// restartNodeFromState restarts the tsnet node from the saved state dir
+// WITHOUT holding b.mu: the new node is built and brought up first, then
+// swapped in under b.mu and the old node is closed afterwards. No auth key is
+// needed — the state directory holds the node key.
+func (b *Bridge) restartNodeFromState() error {
+	b.mu.Lock()
+	stateDir, hostname := b.stateDir, b.hostname
+	b.mu.Unlock()
+	if strings.TrimSpace(stateDir) == "" {
+		return fmt.Errorf("tailscale node state is unavailable")
+	}
+	srv := b.newServer("", stateDir, hostname)
+	upCtx, cancel := context.WithTimeout(context.Background(), reviveNodeRestartTimeout)
+	defer cancel()
+	if _, err := srv.Up(upCtx); err != nil {
+		_ = srv.Close()
+		return fmt.Errorf("tailscale node restart: %w", err)
+	}
+	b.mu.Lock()
+	select {
+	case <-b.closed:
+		b.mu.Unlock()
+		_ = srv.Close()
+		return fmt.Errorf("tailscale is not started")
+	default:
+	}
+	old := b.server
+	b.server = srv
+	b.mu.Unlock()
+	if old != nil {
+		_ = old.Close()
+	}
+	return nil
 }
 
 func (b *Bridge) Stop() error {

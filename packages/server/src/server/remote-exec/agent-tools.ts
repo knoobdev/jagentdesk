@@ -156,16 +156,21 @@ async function resolveTarget(
 }
 
 const remoteRunDescription =
-  "Run a shell command on another machine for project work — build, test, scripts, long jobs — on a " +
-  "copy of the current workspace (git or not, including uncommitted changes and new files): it " +
-  "syncs the code to the SSH target and runs the command there. In a folder containing many " +
-  "repositories, pass source (a path, or an array of 1-8 paths, relative to the workspace) to send " +
-  "only those directories; commands that need no code (system checks, installs) take sendCode: " +
-  "false to run in an empty directory. Secrets like .env files are not sent. Results from a " +
-  "Linux/WSL target do not prove macOS/iOS behaviour. serverId may be omitted when exactly one " +
-  "target is enabled. timeoutMs defaults to 7200000 (max 86400000); waitMs defaults to 120000 (max " +
-  "1800000). Requires the user's approval. Returns the job plus the last 64 KiB of output; when " +
-  "status is 'running', keep waiting with remote_job_wait.";
+  "Run a shell command on another machine for ANY work on it — project work (build, test, " +
+  "scripts, long jobs) and machine setup alike (installing software, cloning repositories, " +
+  "checking the machine) — on a copy of the current workspace (git or not, including " +
+  "uncommitted changes and new files): it syncs the code to the SSH target and runs the " +
+  "command there. Commands that need no code take sendCode: false to run in an empty " +
+  "directory. In a folder containing many repositories, pass source (a path, or an array of " +
+  "1-8 paths, relative to the workspace) to send only those directories. Secrets like .env " +
+  "files are not sent. Results from a Linux/WSL target do not prove macOS/iOS behaviour. " +
+  "This is the only way to run commands on a server set up for remote tasks — ssh_run " +
+  "rejects those servers from chats that are not the server's own. serverId may be omitted " +
+  "when exactly one target is enabled. timeoutMs defaults to 7200000 (max 86400000); waitMs " +
+  "defaults to 120000 (max 1800000). Requires the user's approval. Returns the job plus the " +
+  "last 64 KiB of output; when status is 'running', keep waiting with remote_job_wait. When " +
+  "you install a model server this way, add it to JAgentDesk with provider_add using via " +
+  '"ssh" with this machine\'s serverId and baseUrl "http://127.0.0.1:<port>/v1".';
 
 const jobTools = (deps: RemoteExecAgentToolDependencies): RemoteExecAgentTool[] => [
   defineTool({

@@ -31,6 +31,8 @@ import type {
 import {
   buildProviderRegistry,
   shutdownAgentClients,
+  type ClaudeSpawnEnvResolver,
+  type OpenCodeProviderInjectionResolver,
   type ProviderDefinition,
 } from "./provider-registry.js";
 import { BUILTIN_PROVIDER_IDS } from "@jagentdesk/protocol/provider-manifest";
@@ -100,6 +102,8 @@ export interface ProviderSnapshotManagerOptions {
   refreshTimeoutMs?: number;
   diagnosticTimeoutMs?: number;
   openCodeBridge?: OpenCodeBridge;
+  openCodeProviderInjection?: OpenCodeProviderInjectionResolver;
+  claudeSpawnEnv?: ClaudeSpawnEnvResolver;
 }
 
 interface ProviderSnapshotRefreshOptions {
@@ -121,6 +125,8 @@ interface ProviderSnapshotReadOptions {
 interface ApplyMutableProviderConfigOptions {
   removeProviders?: readonly string[];
   replace?: boolean;
+  /** Replaces the startup-derived base overrides (spec 34.6 hot reload from persisted config). */
+  baseOverrides?: Record<string, ProviderOverride>;
 }
 
 export interface StagedMutableProviderConfig {
@@ -222,6 +228,8 @@ export class ProviderSnapshotManager {
   private readonly workspaceGitService?: Pick<WorkspaceGitService, "resolveRepoRoot">;
   private readonly managedProcesses?: ManagedProcessRegistry;
   private readonly openCodeBridge?: OpenCodeBridge;
+  private readonly openCodeProviderInjection?: OpenCodeProviderInjectionResolver;
+  private readonly claudeSpawnEnv?: ClaudeSpawnEnvResolver;
   private readonly isDev: boolean;
   private readonly extraClients: Partial<Record<AgentProvider, AgentClient>>;
   private runtimeSettings: AgentProviderRuntimeSettingsMap | undefined;
@@ -236,6 +244,8 @@ export class ProviderSnapshotManager {
     this.workspaceGitService = options.workspaceGitService;
     this.managedProcesses = options.managedProcesses;
     this.openCodeBridge = options.openCodeBridge;
+    this.openCodeProviderInjection = options.openCodeProviderInjection;
+    this.claudeSpawnEnv = options.claudeSpawnEnv;
     this.isDev = options.isDev === true;
     this.extraClients = options.extraClients ?? {};
     this.runtimeSettings = options.runtimeSettings;
@@ -495,8 +505,20 @@ export class ProviderSnapshotManager {
     options: ApplyMutableProviderConfigOptions = {},
   ): StagedMutableProviderConfig {
     const previous = this.captureMutableProviderState();
+    // Spec 34.6: a save/delete must reach every session listening for snapshot
+    // changes even when no client has pulled a snapshot in this daemon process
+    // yet — prime the global snapshot so publish() has a cwd to emit for.
+    if (this.snapshots.size === 0) {
+      this.snapshots.set(
+        GLOBAL_PROVIDER_SNAPSHOT_KEY,
+        this.reconcileSnapshotForRegistry(GLOBAL_PROVIDER_SNAPSHOT_KEY),
+      );
+    }
     const snapshotCwds = Array.from(this.snapshots.keys());
     try {
+      if (options.baseOverrides !== undefined) {
+        this.baseProviderOverrides = options.baseOverrides;
+      }
       if (options.replace) {
         this.baseProviderOverrides = undefined;
         this.runtimeSettings = undefined;
@@ -506,9 +528,14 @@ export class ProviderSnapshotManager {
           options.removeProviders ?? [],
         );
       }
+      // Removed providers must not come back through the runtime toggles either.
+      const filteredMutableProviders = omitProviderOverrides(
+        mutableProviders,
+        options.removeProviders ?? [],
+      );
       this.providerOverrides = applyMutableProviderConfigToOverrides(
         this.baseProviderOverrides,
-        mutableProviders,
+        filteredMutableProviders,
       );
       // The mutable config is the complete provider source after startup. Keeping
       // startup-derived runtime settings here would retain removed command/env fields.
@@ -606,6 +633,8 @@ export class ProviderSnapshotManager {
       managedProcesses: this.managedProcesses,
       openCodeBridge: this.openCodeBridge,
       isDev: this.isDev,
+      openCodeProviderInjection: this.openCodeProviderInjection,
+      claudeSpawnEnv: this.claudeSpawnEnv,
     });
 
     for (const [provider, client] of Object.entries(this.extraClients) as Array<

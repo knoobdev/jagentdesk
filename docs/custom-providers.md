@@ -21,6 +21,7 @@ Provider IDs must be lowercase alphanumeric with hyphens (`/^[a-z][a-z0-9-]*$/`)
 
 ## Table of Contents
 
+- [API providers managed by JAgentDesk](#api-providers-managed-by-jagentdesk)
 - [Extending a built-in provider](#extending-a-built-in-provider)
 - [Z.AI (Zhipu) coding plan](#zai-zhipu-coding-plan)
 - [Alibaba Cloud (Qwen) coding plan](#alibaba-cloud-qwen-coding-plan)
@@ -30,6 +31,33 @@ Provider IDs must be lowercase alphanumeric with hyphens (`/^[a-z][a-z0-9-]*$/`)
 - [Disabling a provider](#disabling-a-provider)
 - [ACP providers](#acp-providers)
 - [Provider override reference](#provider-override-reference)
+
+---
+
+## API providers managed by JAgentDesk
+
+For an OpenAI- or Anthropic-compatible model server you do not need to edit `config.json`: add it in
+**Settings → Providers → Custom API providers**, or let an agent do it with the `provider_*` tools.
+
+| Field     | Meaning                                                                                                                                                                                                                                                             |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Name / ID | Shown in the composer; the ID follows the rule above                                                                                                                                                                                                                |
+| Protocol  | OpenAI-compatible (runs through OpenCode) or Anthropic-compatible (runs through Claude Code)                                                                                                                                                                        |
+| Base URL  | e.g. `http://127.0.0.1:11434/v1`; `http` or `https`                                                                                                                                                                                                                 |
+| Route     | **Direct**; **JAgentDesk Tailscale** (the daemon reaches a tailnet address through its own Tailscale node); **Through SSH server** (the daemon forwards a local port over an SSH server you added, so the URL is as seen _from that server_, typically `127.0.0.1`) |
+| API key   | Stored in the daemon's encrypted secret store as `provider.apikey.<id>`; never written to `config.json`, never returned                                                                                                                                             |
+| Models    | Press **Discover models** (`GET {baseUrl}/models`, or `/v1/models` for Anthropic) or list them by hand; each thinking option becomes a reasoning setting                                                                                                            |
+
+The daemon stores the entry under `agents.providers.<id>` with an `api` block and keeps every other key
+of the file. Saving, editing or deleting refreshes the composer without a restart; running agents keep the
+settings they started with.
+
+Agent tools: `provider_list`, `provider_test`, `provider_add`, `provider_update`, `provider_remove`. The
+last three ask for permission unless the agent runs in bypass mode. Typical flow for a model on your PC:
+install the server with `remote_run`, then `provider_test` and `provider_add` with `via: "ssh"`, the PC's
+server ID and `baseUrl: "http://127.0.0.1:<port>/v1"`.
+
+Entries written by hand (with `extends` and `env`, below) keep working and are shown read-only.
 
 ---
 

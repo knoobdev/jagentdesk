@@ -1,9 +1,68 @@
 # Changelog
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.9.58`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.9.59`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.9.59 — 2026-11-16
+
+Custom API providers: point JAgentDesk at any OpenAI- or Anthropic-compatible model server — including
+one you installed on your PC — and use its models in chat. Bypass mode now really skips permission
+cards, OpenCode agents see JAgentDesk tools from the first message, and the phone reconnects after
+coming back from the background.
+
+### Added
+
+- **Custom API providers** (Settings → Providers → Custom API providers). Add an OpenAI-compatible or
+  Anthropic-compatible endpoint, pick its models (or press **Discover models**), and they show up in the
+  composer right away — no daemon restart. OpenAI-compatible endpoints run through OpenCode, Anthropic-
+  compatible ones through Claude Code; each thinking option you define is sent as the matching reasoning
+  setting.
+- **Three routes:** _Direct_; _JAgentDesk Tailscale_ for a server listening on its tailnet address; and
+  _Through SSH server_ for a model that only listens on `127.0.0.1` of a machine you already added under
+  SSH (for example the PC used for remote tasks). For the last two the daemon opens a local port on this
+  machine and forwards it, so agents reach the model even when the Mac has no Tailscale app running.
+- **Agents can manage providers:** `provider_list`, `provider_test`, `provider_add`, `provider_update`,
+  `provider_remove`. Ask an agent to install a model server on your PC with `remote_run` and add it —
+  adding, changing and removing ask for permission (not in bypass mode); the card never shows the key.
+- **API keys stay in the daemon's encrypted secret store.** They are never written to `config.json`, never
+  returned to the app or to agents, and never logged. An Anthropic-compatible provider never inherits your
+  own Anthropic key or Claude login.
+- `ssh_forward_start` / `ssh_forward_stop` are available to every agent with a working folder, so a shell
+  command on this machine can reach a port on a remote machine.
+
+### Fixed
+
+- **Bypass mode is respected.** When an agent runs unattended (Claude _bypass permissions_, Codex _full
+  access_, OpenCode auto-accept), JAgentDesk tools no longer stop for a permission card.
+- **One permission card, with details.** Claude no longer asks a second time (with "No additional
+  details") for JAgentDesk tools that already ask through their own card.
+- **The right tool for remote machines.** From a project chat, `ssh_run` on a machine enabled for remote
+  tasks now tells the agent to use `remote_run` (with `sendCode: false` when no project code is needed, e.g.
+  installing software), so installs and jobs show as job cards.
+- **OpenCode agents see JAgentDesk tools from the first message.** OpenCode reported its MCP connection
+  before the tools were listed; the daemon now waits until the session has the `jagentdesk_` tools.
+- **Phone reconnects after the background.** iOS can reclaim the app's sockets while it is suspended; the
+  embedded Tailscale bridge then never accepted connections again until the app was killed. On returning
+  to the foreground the app now reopens the local port (same port when possible), checks the tailnet within
+  5 seconds, restarts the embedded Tailscale node from its saved state if needed (no new sign-in) and
+  reconnects. The bridge no longer spins on a dead port.
+
+### Verification and current limits
+
+- Custom providers were checked against a real model server (Ollama) reachable only through an SSH host:
+  Discover models through the SSH route, live composer update after save, chat with tool calls through
+  OpenCode, `low`/`high` thinking sent as `reasoning_effort` (seen in the server's request log), no key in
+  config, logs or app messages, three permission cards in normal mode and none in bypass mode.
+- Not yet checked live: the _JAgentDesk Tailscale_ route and an Anthropic-compatible endpoint (covered by
+  tests only). Small models on a CPU may not finish an OpenCode turn: OpenCode's prompt is long, so give the
+  model server a large context window.
+- The phone fix is covered by bridge and app tests and rebuilt iOS/Android libraries; it has not yet been
+  confirmed on a physical iPhone after a long time in the background.
+- Permission cards of other providers' MCP tools still show "No additional details" when the tool gives none.
+- Protocol: new `providers.custom.*` requests; provider entries may omit `description`. Older apps ignore
+  them.
 
 ## v0.9.58 — 2026-11-10
 

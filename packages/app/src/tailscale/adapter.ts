@@ -40,6 +40,13 @@ export interface TailscaleLoginAdapter {
   getProxyAddress?(target: string): string | null;
   getDevicePublicKeyB64?(): string | null;
   signNonce?(nonce: string): string;
+  /**
+   * Re-open the loopback listener and re-verify the tailnet path after the OS
+   * reclaimed the suspended app's sockets (spec 05.7.4). Returns the current
+   * loopback "127.0.0.1:port" address, or null when the platform cannot
+   * revive. Throws when the revive itself failed; callers keep retrying.
+   */
+  revive?(target: string): Promise<string | null>;
 }
 
 const AUTH_KEY_REQUIRED_ERROR = "An auth key is required.";
@@ -166,6 +173,8 @@ export interface JAgentDeskTailscaleNativeModule {
   getDevicePublicKeyB64?: () => string | null;
   signNonce?: (nonce: string) => string;
   getProxyAddress?: (target: string) => string | null;
+  /** Native tsnet revive (spec 05.7.4); rejects when the revive failed. */
+  revive?: (target: string) => Promise<string>;
 }
 
 export interface DeviceSigningMaterial {
@@ -295,6 +304,17 @@ export class NativeTailscaleLoginAdapter implements TailscaleLoginAdapter {
     } catch {
       return null;
     }
+  }
+
+  async revive(target: string): Promise<string | null> {
+    if (!this.module?.revive) {
+      return null;
+    }
+    // Errors propagate: the caller keeps its normal retry loop running
+    // (spec 05.7.4) instead of treating a failed revive as recovered.
+    const address = await this.module.revive(target);
+    const normalized = address.trim();
+    return normalized.length > 0 ? normalized : null;
   }
 }
 

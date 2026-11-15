@@ -198,6 +198,52 @@ describe("createSshAgentTools", () => {
     expect(recorder.asked).toEqual([]);
   });
 
+  it("routes a remote-tasks server to remote_run without connecting or asking (spec 33.7)", async () => {
+    const recorder = newRecorder();
+    const deps = dependencies(recorder, {
+      remoteExecEnabledServers: () => new Set(["srv_b"]),
+    });
+
+    const result = await tool(deps, "ssh_run").handler(
+      { serverId: "srv_b", command: "apt-get install -y ripgrep" },
+      {},
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({ code: "use_remote_run", serverId: "srv_b" });
+    expect(text(result)).toContain('Use remote_run with serverId "srv_b"');
+    expect(text(result)).toContain("sendCode: false");
+    expect(recorder.asked).toEqual([]);
+  });
+
+  it("still runs ssh_run against a remote-tasks server in the server's own chat", async () => {
+    const recorder = newRecorder();
+    const deps = dependencies(recorder, {
+      defaultServerId: "srv_b",
+      remoteExecEnabledServers: () => new Set(["srv_b"]),
+    });
+
+    const result = await tool(deps, "ssh_run").handler({ command: "uptime" }, {});
+
+    expect(recorder.asked).toHaveLength(1);
+    expect(text(result)).toBe("no network in this test (srv_b)");
+  });
+
+  it("still asks for ssh_run on a server without remote tasks", async () => {
+    const recorder = newRecorder();
+    const deps = dependencies(recorder, {
+      remoteExecEnabledServers: () => new Set(["srv_other"]),
+    });
+
+    const result = await tool(deps, "ssh_run").handler(
+      { serverId: "srv_b", command: "uptime" },
+      {},
+    );
+
+    expect(recorder.asked).toHaveLength(1);
+    expect(text(result)).toBe("no network in this test (srv_b)");
+  });
+
   it("refuses state-changing tools outside an agent-scoped session", async () => {
     const recorder = newRecorder();
     const deps = dependencies(recorder, { callerAgentId: null });

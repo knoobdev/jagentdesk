@@ -36,6 +36,7 @@ import { commands } from "./commands.js";
 import { messages } from "./history.js";
 import { SessionPermissions } from "./permissions.js";
 import { SessionUsage } from "./usage.js";
+import { attachMcpServers } from "./mcp-attach.js";
 
 export class OpenCodeV2Session implements AgentSession {
   readonly provider = "opencode";
@@ -149,28 +150,14 @@ export class OpenCodeV2Session implements AgentSession {
     await waitForLocationReady({ client: this.client, location, signal: this.abort.signal });
     if (this.requiresJAgentDeskPlugin)
       await awaitJAgentDeskPlugin({ client: this.client, location, signal: this.abort.signal });
-    for (const [server, config] of Object.entries(this.config.mcpServers ?? {})) {
-      await this.client.mcp.add({
-        server,
-        location,
-        config:
-          config.type === "stdio"
-            ? {
-                type: "local",
-                command: [config.command, ...(config.args ?? [])],
-                environment: config.env,
-                codemode: false,
-              }
-            : {
-                type: "remote",
-                url: config.url,
-                headers: config.headers,
-                oauth: false,
-                codemode: false,
-              },
-      });
-      await this.awaitMcp(server);
-    }
+    await attachMcpServers({
+      client: this.client,
+      sessionID: this.id,
+      location,
+      mcpServers: this.config.mcpServers,
+      signal: this.abort.signal,
+      logger: this.logger,
+    });
     const system = composeSystemPromptParts(
       this.config.systemPrompt,
       this.config.daemonAppendSystemPrompt,
@@ -235,22 +222,6 @@ export class OpenCodeV2Session implements AgentSession {
     return () => {
       this.listeners.delete(callback);
     };
-  }
-  private async awaitMcp(server: string) {
-    const signal = AbortSignal.any([this.abort.signal, AbortSignal.timeout(30_000)]);
-    while (true) {
-      const catalog = await this.client.mcp.list(
-        { location: { directory: this.config.cwd } },
-        { signal },
-      );
-      const entry = catalog.data.find((item) => item.name === server);
-      if (entry?.status.status === "connected") return;
-      if (entry && entry.status.status !== "pending") {
-        const reason = entry.status.status === "failed" ? entry.status.error : entry.status.status;
-        throw new Error(`OpenCode MCP server ${server} failed to connect: ${reason}`);
-      }
-      await delay(50, undefined, { signal });
-    }
   }
   private emit(event: AgentStreamEvent) {
     for (const listener of this.listeners) listener(event);

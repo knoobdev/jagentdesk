@@ -83,6 +83,7 @@ import {
   type OpenCodeServerManagerLike,
 } from "./opencode/server-manager.js";
 import type { OpenCodeBridge } from "./opencode/bridge.js";
+import type { OpenCodeProviderInjection } from "../../custom-providers/materialization.js";
 import {
   OpenCodeEventConsumer,
   type OpenCodeEventStreamDiagnostics,
@@ -1384,6 +1385,8 @@ interface OpenCodeAgentClientDeps {
   resolveHomeDir?: () => string;
   managedProcesses?: ManagedProcessRegistry;
   bridge?: OpenCodeBridge;
+  /** v2 only: the daemon-managed API provider definition merged into OPENCODE_CONFIG_CONTENT (spec 34.3). */
+  providerConfigInjection?: () => Promise<OpenCodeProviderInjection | null>;
 }
 
 type OpenCodeClientFactory = (options: { baseUrl: string; directory: string }) => OpencodeClient;

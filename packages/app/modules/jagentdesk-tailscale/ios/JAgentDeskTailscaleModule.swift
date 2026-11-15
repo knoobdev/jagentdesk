@@ -136,6 +136,13 @@ public final class JAgentDeskTailscaleModule: Module {
       return self.bridge.localAddress()
     }
 
+    AsyncFunction("revive") { (target: String) -> String in
+      // Expo runs async functions off the main thread. The revive can block
+      // on a bounded dial plus a tsnet node restart, so it must never run on
+      // the JS thread.
+      return try self.bridge.revive(target)
+    }
+
     Function("getDevicePublicKeyB64") { () -> String? in
       let publicKey = self.bridge.devicePublicKeyB64()
       return publicKey.isEmpty ? nil : publicKey
