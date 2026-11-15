@@ -2312,7 +2312,7 @@ export const en = {
           idInvalid: "Use lowercase letters, numbers and hyphens; start with a letter.",
           protocol: "Protocol",
           baseUrl: "Base URL",
-          baseUrlPlaceholder: "https://api.example.com/v1",
+          baseUrlPlaceholder: "http://127.0.0.1:11434/v1",
           baseUrlSshPlaceholder: "http://127.0.0.1:11434/v1",
           baseUrlInvalid: "Enter an http(s) base URL",
           route: "Route",

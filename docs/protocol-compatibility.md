@@ -58,6 +58,7 @@ When a tag's condition is met, delete the shim and the tag in the same change.
 
 - v0.9.57: `remote_exec.*` RPCs and the `remote_exec.job_updated` push (spec 33 / ADR-0044). `SshServer` gained optional `via` and `remoteExec` fields. Old clients ignore the new fields and never send the new types; old daemons never send them.
 - v0.9.58: `RemoteJob` gained optional `noCode` and `sources` fields (spec 33.4 / ADR-0045). Old clients parse jobs without them; old daemons never send them.
+- v0.9.59: `providers.custom.list|save|delete|test` requests and responses (spec 34 / ADR-0047); provider config entries gained an optional `api` block. Old clients never send the new requests and the settings section shows the daemon's error on old daemons.
 
 ## QA
 
