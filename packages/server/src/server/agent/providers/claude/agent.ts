@@ -5183,6 +5183,13 @@ class ClaudeAgentSession implements AgentSession {
     if (this.isInternalJAgentDeskMcpTool(toolName)) {
       return { behavior: "allow", updatedInput: input };
     }
+    // Decide before publishing anything: bypassed tools never enter the permission UI.
+    // Claude also routes questions and plan review through this callback.
+    const needsUserAnswer = toolName === "AskUserQuestion" || toolName === "ExitPlanMode";
+    if (this.currentMode === "bypassPermissions" && !needsUserAnswer) {
+      return { behavior: "allow", updatedInput: input, toolUseID: options.toolUseID };
+    }
+
     const requestId = `permission-${randomUUID()}`;
     const kind = resolvePermissionKind(toolName, input);
     const requestInput = normalizeClaudeAskUserQuestionRequestInput(toolName, input);
