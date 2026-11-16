@@ -2184,6 +2184,42 @@ describe("OpenCode adapter startTurn error handling", () => {
     }
   });
 
+  test("reports a question rejected by a human steer as resolved", async () => {
+    const { parent: session, openCode } = await createParentSession("ses_steer_question");
+    openCode.sessionPromptAsyncEvents = [];
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+    const { turnId } = await session.startTurn("first");
+    openCode.emitEvent({
+      type: "question.asked",
+      properties: {
+        id: "question-steer",
+        sessionID: "ses_steer_question",
+        questions: [{ question: "Which color?", header: "Color", options: [] }],
+      },
+    });
+    await vi.waitFor(() => expect(session.getPendingPermissions()).toHaveLength(1));
+
+    await expect(
+      session.steerActiveTurn?.("never mind", {
+        expectedTurnId: turnId,
+        clearPendingPermissions: true,
+      }),
+    ).resolves.toEqual({ status: "accepted" });
+
+    expect(openCode.calls.questionReject).toContainEqual(
+      expect.objectContaining({ requestID: "question-steer" }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "permission_resolved",
+        requestId: "question-steer",
+        resolution: expect.objectContaining({ behavior: "deny" }),
+      }),
+    );
+    await session.close();
+  });
+
   test("waits for the stop abort and provider idle before starting the next prompt", async () => {
     const { parent: session, openCode } = await createParentSession("ses_unit_test");
     const retryStarted = createTestDeferred<void>();
