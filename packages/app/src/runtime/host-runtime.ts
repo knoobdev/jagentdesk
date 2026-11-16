@@ -20,7 +20,10 @@ import {
   disambiguateHostLabels,
   hostHasLocalConnection,
   hostHasTailnetConnection,
-  normalizeStoredHostProfile,
+  readHostRegistry,
+  writeHostRegistry,
+  forgetUnreadableHost,
+  type UnreadableHostEntries,
   upsertHostConnectionInProfiles,
   registryHasConnection,
   type HostConnection,
@@ -1560,6 +1563,7 @@ export class HostRuntimeStore {
   private hostListVersion = 0;
   private hostRegistryLoaded = false;
   private hosts: HostProfile[] = [];
+  private unreadableHosts: UnreadableHostEntries = { hosts: [], connectionsByServerId: new Map() };
   // Memoized display view of `hosts` with duplicate labels disambiguated. Keyed
   // on the raw `hosts` reference so `getHosts()` returns a stable array (required
   // by useSyncExternalStore) and only recomputes when the host list changes.
@@ -1869,9 +1873,9 @@ export class HostRuntimeStore {
       if (stored) {
         const parsed = JSON.parse(stored) as unknown;
         if (Array.isArray(parsed)) {
-          const normalizedProfiles = parsed
-            .map((entry) => normalizeStoredHostProfile(entry))
-            .filter((entry): entry is HostProfile => entry !== null);
+          const registry = readHostRegistry(parsed);
+          this.unreadableHosts = registry.unreadable;
+          const normalizedProfiles = registry.hosts;
           profiles = normalizedProfiles.filter((entry) => !isPlaceholderServerId(entry.serverId));
           if (profiles.length !== normalizedProfiles.length) {
             shouldPersistHosts = true;
@@ -2283,6 +2287,7 @@ export class HostRuntimeStore {
   }
 
   async removeHost(serverId: string): Promise<void> {
+    this.unreadableHosts = forgetUnreadableHost(this.unreadableHosts, serverId);
     const removed = this.hosts.find((daemon) => daemon.serverId === serverId);
     if (removed) {
       this.backupRemovedHost(removed);
@@ -2389,7 +2394,10 @@ export class HostRuntimeStore {
   }
 
   private async persistHosts(hosts = this.hosts): Promise<void> {
-    await this.storage.setItem(REGISTRY_STORAGE_KEY, JSON.stringify(hosts));
+    await this.storage.setItem(
+      REGISTRY_STORAGE_KEY,
+      JSON.stringify(writeHostRegistry(hosts, this.unreadableHosts)),
+    );
   }
 
   private emitHostList(): void {

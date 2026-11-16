@@ -551,6 +551,75 @@ export function hostHasTailnetConnection(host: HostProfile): boolean {
   return host.connections.some((connection) => connection.type === "tailnet");
 }
 
+/**
+ * Stored registry entries this build can't read, such as a connection kind added by a newer
+ * build. `writeHostRegistry` writes them back so that build still finds them.
+ */
+export interface UnreadableHostEntries {
+  hosts: unknown[];
+  connectionsByServerId: Map<string, unknown[]>;
+}
+
+export function readHostRegistry(stored: unknown[]): {
+  hosts: HostProfile[];
+  unreadable: UnreadableHostEntries;
+} {
+  const hosts: HostProfile[] = [];
+  const unreadable: UnreadableHostEntries = { hosts: [], connectionsByServerId: new Map() };
+  for (const entry of stored) {
+    try {
+      const profile = normalizeStoredHostProfile(entry);
+      if (!profile) {
+        unreadable.hosts.push(entry);
+        continue;
+      }
+      const record = toObjectRecord(entry);
+      const rawConnections = Array.isArray(record?.connections) ? record.connections : [];
+      const skipped = rawConnections.filter((connection) => !normalizeStoredConnection(connection));
+      hosts.push(profile);
+      if (skipped.length) unreadable.connectionsByServerId.set(profile.serverId, skipped);
+    } catch {
+      unreadable.hosts.push(entry);
+    }
+  }
+  return { hosts, unreadable };
+}
+
+export function writeHostRegistry(
+  hosts: HostProfile[],
+  unreadable: UnreadableHostEntries,
+): unknown[] {
+  const savedServerIds = new Set(hosts.map((host) => host.serverId));
+  const written: unknown[] = hosts.map((host) => {
+    const kept = unreadable.connectionsByServerId.get(host.serverId);
+    return kept ? { ...host, connections: [...host.connections, ...kept] } : host;
+  });
+  for (const entry of unreadable.hosts) {
+    // A host this build saved again replaces the entry it couldn't read.
+    const serverId = readStoredServerId(entry);
+    if (serverId === null || !savedServerIds.has(serverId)) written.push(entry);
+  }
+  return written;
+}
+
+/** Drops the entries this build couldn't read for a host you removed. */
+export function forgetUnreadableHost(
+  unreadable: UnreadableHostEntries,
+  serverId: string,
+): UnreadableHostEntries {
+  const connectionsByServerId = new Map(unreadable.connectionsByServerId);
+  connectionsByServerId.delete(serverId);
+  return {
+    hosts: unreadable.hosts.filter((entry) => readStoredServerId(entry) !== serverId),
+    connectionsByServerId,
+  };
+}
+
+function readStoredServerId(entry: unknown): string | null {
+  if (typeof entry !== "object" || entry === null || !("serverId" in entry)) return null;
+  return typeof entry.serverId === "string" ? entry.serverId.trim() : null;
+}
+
 export function hostHasConnection(host: HostProfile, connection: HostConnection): boolean {
   return host.connections.some((existing) => hostConnectionEquals(existing, connection));
 }
