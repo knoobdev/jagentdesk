@@ -5,6 +5,7 @@ import {
   getAgentControlHintKey,
   normalizeModelId,
   resolveAgentModelSelection,
+  shortModelLabel,
 } from "./utils";
 
 describe("getAgentControlHintKey", () => {
@@ -163,5 +164,21 @@ describe("resolveAgentModelSelection", () => {
     expect(selection.displayModel).toBe("Default (Sonnet 4.6)");
     expect(selection.selectedThinkingId).toBe("low");
     expect(selection.displayThinking).toBe("Low");
+  });
+});
+
+describe("shortModelLabel", () => {
+  it("drops a provider namespace", () => {
+    expect(shortModelLabel("openrouter/gpt-5.5")).toBe("gpt-5.5");
+    expect(shortModelLabel("openrouter/google/gemini-2.5-flash")).toBe("gemini-2.5-flash");
+  });
+
+  it("keeps slashes inside a display name", () => {
+    expect(shortModelLabel("DeepSeek V4.1 Flash (~6-7 tok/s, 56/56)")).toBe(
+      "DeepSeek V4.1 Flash (~6-7 tok/s, 56/56)",
+    );
+    expect(shortModelLabel("llama-swap/DeepSeek V4.1 Flash (56/56)")).toBe(
+      "DeepSeek V4.1 Flash (56/56)",
+    );
   });
 });

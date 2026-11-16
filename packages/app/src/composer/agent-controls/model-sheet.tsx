@@ -10,6 +10,7 @@ import { ModelBrowser, useModelBrowser } from "@/components/model-browser";
 import { ComposerToolbarGlyph } from "@/composer/agent-controls/glyph";
 import type { ProviderSelectorProvider } from "@/provider-selection/provider-selection";
 import { useIsCompactFormFactor } from "@/constants/layout";
+import { shortModelLabel } from "./utils";
 
 const SNAP_POINTS = ["80%", "90%"];
 const MODEL_LIST_TOP_INSET = 4;
@@ -34,11 +35,6 @@ interface CompactModelSheetProps {
   serverId?: string | null;
   glyphSize: number;
   children: ReactNode;
-}
-
-function shortModelLabel(label: string): string {
-  const separatorIndex = label.lastIndexOf("/");
-  return separatorIndex === -1 ? label : label.slice(separatorIndex + 1);
 }
 
 export function CompactModelSheet({
