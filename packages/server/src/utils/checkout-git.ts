@@ -8,6 +8,7 @@ import {
   access,
   mkdtemp,
   copyFile,
+  utimes,
   rm,
 } from "fs/promises";
 import { tmpdir } from "node:os";
@@ -3624,12 +3625,16 @@ async function prepareAllChangesIndex(cwd: string, baseRef: string) {
     });
     const indexPath = resolveGitRevParsePath(cwd, index.stdout);
     if (!indexPath) throw new Error("Git did not return an index path");
+    const { atime, mtimeMs } = await statFile(indexPath);
     await copyFile(indexPath, indexFile);
     await runGitCommand(["update-index", "-z", "--index-info"], {
       cwd,
       input: entries,
       envOverlay: { ...READ_ONLY_GIT_ENV, GIT_INDEX_FILE: indexFile },
     });
+    // A fresh index copy would hide same-size edits saved in its source index's timestamp tick.
+    // update-index also rewrites the private index, so restore the source time after both writes.
+    await utimes(indexFile, atime, Math.floor(mtimeMs / 1000));
     return { indexFile, cleanup: () => rm(directory, { recursive: true, force: true }) };
   } catch (error) {
     await rm(directory, { recursive: true, force: true });

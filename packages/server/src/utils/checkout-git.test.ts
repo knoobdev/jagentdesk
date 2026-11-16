@@ -9,6 +9,7 @@ import {
   realpathSync,
   mkdirSync,
   statSync,
+  utimesSync,
 } from "fs";
 import { join } from "path";
 import { win32 } from "node:path";
@@ -4386,4 +4387,40 @@ describe("discardChanges", () => {
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
+});
+
+it("All changes sees a same-size edit saved in the timestamp tick it was staged", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "all-racy-index-"));
+  const git = (...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+  const file = join(cwd, "x.ts");
+  const indexPath = join(cwd, ".git", "index");
+  const tick = new Date("2026-01-01T00:00:00Z");
+  try {
+    git("init", "-b", "main");
+    git("config", "user.email", "test@example.com");
+    git("config", "user.name", "Test");
+    git("config", "core.trustctime", "false");
+    writeFileSync(file, "const value = 1;\n");
+    writeFileSync(join(cwd, "y.ts"), "const kept = 1;\n");
+    git("add", ".");
+    git("-c", "commit.gpgsign=false", "commit", "-m", "base");
+    writeFileSync(file, "const value = 2;\n");
+    utimesSync(file, tick, tick);
+    git("add", "x.ts");
+    git("-c", "commit.gpgsign=false", "commit", "-m", "staged");
+    git("rm", "--cached", "y.ts");
+    utimesSync(indexPath, tick, tick);
+    writeFileSync(file, "const value = 3;\n");
+    utimesSync(file, tick, tick);
+    expect(git("diff", "--name-only")).toBe("x.ts");
+    const originalIndex = readFileSync(indexPath);
+    const originalMtime = statSync(indexPath, { bigint: true }).mtimeNs;
+    const result = await getCheckoutDiff(cwd, { mode: "all", baseRef: "main" });
+    expect(result.diff).toContain("-const value = 2;");
+    expect(result.diff).toContain("+const value = 3;");
+    expect(readFileSync(indexPath)).toEqual(originalIndex);
+    expect(statSync(indexPath, { bigint: true }).mtimeNs).toBe(originalMtime);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });
