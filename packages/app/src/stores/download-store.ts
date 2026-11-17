@@ -4,7 +4,6 @@ import * as LegacyFileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import type { HostProfile } from "@/types/host-connection";
 import { buildDaemonWebSocketUrl } from "@/utils/daemon-endpoints";
-import { openExternalUrl } from "@/utils/open-external-url";
 import { isWeb } from "@/constants/platform";
 import { i18n } from "@/i18n/i18next";
 
@@ -37,6 +36,7 @@ interface DownloadState {
     fileName: string;
     path: string;
     daemonProfile: HostProfile | undefined;
+    fetchFile?: typeof fetch;
     requestFileDownloadToken: (path: string) => Promise<{
       token: string | null;
       fileName: string | null;
@@ -67,6 +67,7 @@ export const useDownloadStore = create<DownloadState>()((set, get) => ({
     path,
     daemonProfile,
     requestFileDownloadToken,
+    fetchFile = fetch,
   }) => {
     const id = generateDownloadId();
     const download: Download = {
@@ -95,14 +96,11 @@ export const useDownloadStore = create<DownloadState>()((set, get) => ({
       }
 
       const resolvedFileName = tokenResponse.fileName ?? fileName;
-      const downloadUrl = buildDownloadUrl(
-        downloadTarget.baseUrl,
-        tokenResponse.token,
-        isWeb ? downloadTarget.authCredentials : null,
-      );
+      const downloadUrl = buildDownloadUrl(downloadTarget.baseUrl, tokenResponse.token);
 
       if (isWeb) {
-        triggerBrowserDownload(downloadUrl, resolvedFileName);
+        const file = await fetchDownload(fetchFile, downloadUrl);
+        saveBrowserFile(file, resolvedFileName);
         get().completeDownload(id);
         return;
       }
@@ -241,13 +239,12 @@ function findMostRecentDownloadId(downloads: Map<string, Download>): string | nu
 interface DownloadTarget {
   baseUrl: string | null;
   authHeader: string | null;
-  authCredentials: { username: string; password: string } | null;
 }
 
 function resolveDaemonDownloadTarget(daemon?: HostProfile): DownloadTarget {
   const connection = daemon?.connections.find((conn) => conn.type === "directTcp") ?? null;
   if (!connection) {
-    return { baseUrl: null, authHeader: null, authCredentials: null };
+    return { baseUrl: null, authHeader: null };
   }
 
   let parsed: URL;
@@ -256,7 +253,7 @@ function resolveDaemonDownloadTarget(daemon?: HostProfile): DownloadTarget {
       buildDaemonWebSocketUrl(connection.endpoint, { useTls: connection.useTls ?? false }),
     );
   } catch {
-    return { baseUrl: null, authHeader: null, authCredentials: null };
+    return { baseUrl: null, authHeader: null };
   }
 
   if (parsed.protocol === "ws:") {
@@ -282,30 +279,44 @@ function resolveDaemonDownloadTarget(daemon?: HostProfile): DownloadTarget {
     ? `Basic ${btoa(`${authCredentials.username}:${authCredentials.password}`)}`
     : null;
 
-  return { baseUrl, authHeader, authCredentials };
+  return { baseUrl, authHeader };
 }
 
-function buildDownloadUrl(
-  baseUrl: string,
-  token: string,
-  authCredentials: { username: string; password: string } | null,
-): string {
+function buildDownloadUrl(baseUrl: string, token: string): string {
   const url = new URL("/api/files/download", baseUrl);
   url.searchParams.set("token", token);
-  if (authCredentials) {
-    url.username = authCredentials.username;
-    url.password = authCredentials.password;
-  }
   return url.toString();
 }
 
-function triggerBrowserDownload(url: string, fileName: string) {
-  if (typeof document === "undefined") {
-    if (typeof window !== "undefined") {
-      void openExternalUrl(url);
-    }
-    return;
+/**
+ * Fetches the file instead of navigating to it. The app runs on another origin than the host
+ * (jagentdesk://app on desktop), so a link to the download URL navigates the whole window, and any
+ * response that is not the file (a proxy's 401 page, a 404) replaces the app.
+ */
+async function fetchDownload(fetchFile: typeof fetch, url: string): Promise<Blob> {
+  let response: Response;
+  try {
+    // Send the same cookies the host's WebSocket handshake sends, so a proxy in front of the
+    // host lets the download through. Refuse redirects: a proxy that redirects to a login page
+    // would otherwise be saved as the file.
+    response = await fetchFile(url, { credentials: "include", redirect: "error" });
+  } catch {
+    throw new Error(i18n.t("downloads.failed"));
   }
+  if (!response.ok) {
+    throw new Error(i18n.t("downloads.httpFailed", { status: response.status }));
+  }
+  try {
+    // The body streams after the headers, so the connection can still drop here.
+    return await response.blob();
+  } catch {
+    throw new Error(i18n.t("downloads.failed"));
+  }
+}
+
+function saveBrowserFile(file: Blob, fileName: string) {
+  if (typeof document === "undefined") return;
+  const url = URL.createObjectURL(file);
 
   const link = document.createElement("a");
   link.href = url;
@@ -314,6 +325,8 @@ function triggerBrowserDownload(url: string, fileName: string) {
   document.body.appendChild(link);
   link.click();
   link.remove();
+  // The browser may still be reading the blob while its save prompt is open.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 function resolveDownloadTargetFile(fileName: string): FSFile {

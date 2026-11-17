@@ -1,3 +1,5 @@
+import { once } from "node:events";
+import { get, type IncomingMessage } from "node:http";
 import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
@@ -24,6 +26,29 @@ describe("daemon E2E", () => {
   }, 60000);
 
   describe("file download tokens", () => {
+    test("lets a page on a loopback alias of the request's host and port fetch a download", async () => {
+      const cwd = tmpCwd();
+      writeFileSync(path.join(cwd, "download.bin"), "download bytes");
+      try {
+        // The web UI behind a remapped port (for example Docker -p 8080:6767): the page is at
+        // http://127.0.0.1:8080 and the app sends the request to localhost:8080. The WebSocket
+        // accepts this origin, so the download must as well.
+        const token = await ctx.client.requestDownloadToken(cwd, "download.bin");
+        const request = get({
+          host: "127.0.0.1",
+          port: ctx.daemon.port,
+          path: `/api/files/download?token=${token.token}`,
+          headers: { Host: "localhost:8080", Origin: "http://127.0.0.1:8080" },
+        });
+        const [response] = (await once(request, "response")) as [IncomingMessage];
+        response.resume();
+        expect(response.statusCode).toBe(200);
+        expect(response.headers["access-control-allow-origin"]).toBe("http://127.0.0.1:8080");
+      } finally {
+        rmSync(cwd, { recursive: true, force: true });
+      }
+    });
+
     test("issues token over WS and downloads via HTTP", async () => {
       const cwd = tmpCwd();
       const filePath = path.join(cwd, "download.txt");

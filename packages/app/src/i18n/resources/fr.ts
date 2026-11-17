@@ -1581,6 +1581,7 @@ export const fr: TranslationResources = {
     hostUnavailable: "L'hôte de téléchargement n'est pas disponible.",
     cancelled: "Le téléchargement a été annulé.",
     failed: "Échec du téléchargement du fichier.",
+    httpFailed: "Impossible de télécharger le fichier (HTTP {{status}}).",
     shareFile: "Partager un fichier",
     shareFileNamed: "Partager{{fileName}}",
   },
