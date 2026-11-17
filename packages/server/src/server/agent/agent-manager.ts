@@ -21,6 +21,7 @@ import { z } from "zod";
 import type { TerminalManager } from "../../terminal/terminal-manager.js";
 
 import {
+  AgentTurnStartCanceledError,
   getAgentStreamEventTurnId,
   type AgentCapabilityFlags,
   type AgentClient,
@@ -2387,7 +2388,7 @@ export class AgentManager {
     pendingRun: PendingForegroundRun;
     prompt: AgentPromptInput;
     options?: AgentRunOptions;
-  }): Promise<string> {
+  }): Promise<string | null> {
     const { agent, agentId, pendingRun, prompt, options } = params;
     try {
       const result = await agent.session.startTurn(prompt, options);
@@ -2396,11 +2397,31 @@ export class AgentManager {
       }
       return result.turnId;
     } catch (error) {
+      if (error instanceof AgentTurnStartCanceledError) {
+        if (!pendingRun.settled) {
+          if (options?.clientMessageId) {
+            this.recordSubmittedPrompt(agent, prompt, options.clientMessageId, {
+              messageId: options.clientMessageId,
+            });
+          }
+          await this.handleStreamEvent(agent, {
+            type: "turn_canceled",
+            provider: agent.provider,
+            reason: "interrupted",
+          });
+          this.finalizeForegroundTurn(agent);
+          this.runs.settleForegroundRun(agentId, pendingRun.token);
+        }
+        return null;
+      }
       if (pendingRun.settled) {
         throw error;
       }
       if (isStaleProviderSessionError(error)) {
-        this.runs.settleForegroundStart(pendingRun, { status: "failed", error: error.message });
+        this.runs.settleForegroundStart(pendingRun, {
+          status: "failed",
+          error: error.message,
+        });
         agent.pendingReplacement = false;
         if (!agent.activeForegroundTurnId) agent.lifecycle = "idle";
         this.runs.settleForegroundRun(agentId, pendingRun.token);
@@ -2472,7 +2493,7 @@ export class AgentManager {
     const pendingRun = this.runs.createPendingRun(agentId);
 
     const streamForwarder = async function* streamForwarder(this: AgentManager) {
-      let turnId: string;
+      let turnId: string | null;
       let turnStream: ReturnType<AgentRunState["createTurnStream"]> | null = null;
       turnId = await this.startPendingForegroundTurn({
         agent,
@@ -2481,6 +2502,10 @@ export class AgentManager {
         prompt,
         options,
       });
+      if (turnId === null) {
+        yield { type: "turn_canceled", provider: agent.provider, reason: "interrupted" };
+        return;
+      }
 
       if (isReplacement) {
         agent.pendingReplacement = false;

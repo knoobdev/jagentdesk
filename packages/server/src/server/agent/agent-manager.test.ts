@@ -1,3 +1,5 @@
+import { CodexAppServerAgentSession } from "./providers/codex-app-server-agent.js";
+import { createFakeCodexAppServer } from "./providers/codex/test-utils/fake-app-server.js";
 import { expect, test, vi } from "vitest";
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -11201,5 +11203,67 @@ test("failed startup history closes the session without registering an agent", a
     expect({ agents: manager.listAgents(), closed }).toEqual({ agents: [], closed: true });
   } finally {
     for (const agent of manager.listAgents()) await manager.closeAgent(agent.id);
+  }
+});
+
+test("canceling a pending Codex start settles as canceled without accepting its prompt", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-codex-cold-cancel-"));
+  const threadLoaded = deferred<{ data: string[] }>();
+  const appServer = createFakeCodexAppServer({ "thread/loaded/list": () => threadLoaded.promise });
+  class ColdStartClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      return new CodexAppServerAgentSession(config, null, logger, async () => appServer.child);
+    }
+  }
+  const manager = new AgentManager({
+    clients: { codex: new ColdStartClient() },
+    registry: new AgentStorage(join(workdir, "agents"), logger),
+    logger,
+  });
+  const events: AgentStreamEvent[] = [];
+  manager.subscribe((event) => {
+    if (event.type === "agent_stream") events.push(event.event);
+  });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    // Drain the stream: a fresh Codex agent has no session handle for runAgent before its first turn.
+    const firstRun = drainAsyncGenerator(
+      manager.streamAgent(agent.id, "Canceled prompt", { clientMessageId: "canceled-prompt" }),
+    );
+    void firstRun.catch(() => undefined);
+    await appServer.waitForRequest("thread/loaded/list");
+    const cancel = manager.cancelAgentRun(agent.id);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    threadLoaded.resolve({ data: ["thread-1"] });
+    await expect(cancel).resolves.toEqual({ status: "settled" });
+    await expect(firstRun).resolves.toBeUndefined();
+    expect(manager.getAgent(agent.id)).toMatchObject({ lifecycle: "idle", lastError: undefined });
+    expect(manager.hasInFlightRun(agent.id)).toBe(false);
+    expect(events.map((event) => event.type)).toEqual(["timeline", "turn_canceled"]);
+    // The canceled attempt stays in history like a rejected one, without being delivered.
+    expect(manager.getTimeline(agent.id)).toEqual([
+      {
+        type: "user_message",
+        text: "Canceled prompt",
+        clientMessageId: "canceled-prompt",
+        messageId: "canceled-prompt",
+      },
+    ]);
+    expect(appServer.requests().some((request) => request.method === "turn/start")).toBe(false);
+
+    const nextRun = manager.runAgent(agent.id, "Next prompt", { clientMessageId: "next-prompt" });
+    await appServer.waitForRequest("turn/start");
+    appServer.startsTurn({ threadId: "thread-1", turnId: "next-turn" });
+    appServer.completeTurn();
+    await expect(nextRun).resolves.toMatchObject({ canceled: false });
+    appServer.assertNoErrors();
+  } finally {
+    threadLoaded.resolve({ data: ["thread-1"] });
+    manager.prepareForShutdown();
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    await manager.flushForShutdown();
+    rmSync(workdir, { recursive: true, force: true });
   }
 });
