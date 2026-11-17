@@ -7,6 +7,7 @@ import path from "node:path";
 import { LRUCache } from "lru-cache";
 import stripAnsi from "strip-ansi";
 import { createImportDescriptorScheduler } from "./import-descriptor-scheduler.js";
+import { bypassApprovesAsk } from "./bypass-approval.js";
 import {
   type AgentDefinition,
   type CanUseTool,
@@ -5187,10 +5188,8 @@ class ClaudeAgentSession implements AgentSession {
     if (this.isInternalJAgentDeskMcpTool(toolName)) {
       return { behavior: "allow", updatedInput: input };
     }
-    // Decide before publishing anything: bypassed tools never enter the permission UI.
-    // Claude also routes questions and plan review through this callback.
-    const needsUserAnswer = toolName === "AskUserQuestion" || toolName === "ExitPlanMode";
-    if (this.currentMode === "bypassPermissions" && !needsUserAnswer) {
+    // Decide before publishing anything: bypassed asks never enter the permission UI.
+    if (this.currentMode === "bypassPermissions" && bypassApprovesAsk(toolName, options)) {
       return { behavior: "allow", updatedInput: input, toolUseID: options.toolUseID };
     }
 
