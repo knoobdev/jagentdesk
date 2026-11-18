@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -513,6 +513,134 @@ test("archiving the last reference to a worktree removes it from disk regardless
     .toBe(false);
   await expect.poll(() => existsSync(deleteDir), { timeout: 10000, interval: 100 }).toBe(false);
 }, 60000);
+
+async function createWorktreeWithTeardown(
+  slug: string,
+  worktreeConfig: { teardown: string; teardownTimeoutMs?: number },
+): Promise<{ workspaceId: string; worktreePath: string }> {
+  const repoDir = createGitRepo();
+  writeFileSync(
+    path.join(repoDir, "jagentdesk.json"),
+    JSON.stringify({ worktree: worktreeConfig }),
+  );
+  execFileSync("git", ["add", "jagentdesk.json"], { cwd: repoDir, stdio: "pipe" });
+  execFileSync("git", ["-c", "commit.gpgsign=false", "commit", "-m", "add teardown"], {
+    cwd: repoDir,
+    stdio: "pipe",
+  });
+  const result = await ctx.client.createWorkspace({
+    source: { kind: "worktree", cwd: repoDir, worktreeSlug: slug, baseBranch: "main" },
+  });
+  const workspace = result.workspace;
+  if (!workspace?.workspaceDirectory) {
+    throw new Error(result.error ?? "Failed to create worktree workspace");
+  }
+  return { workspaceId: workspace.id, worktreePath: workspace.workspaceDirectory };
+}
+
+function isProcessRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test.skipIf(process.platform === "win32")(
+  "a jagentdesk.json teardown that never exits is stopped and the archive answers",
+  async () => {
+    const pidFile = path.join(makeTempDir("hanging-teardown-"), "sleep.pid");
+    const { workspaceId, worktreePath } = await createWorktreeWithTeardown("hanging-teardown", {
+      teardown: `sleep 600 & echo $! > ${JSON.stringify(pidFile)}; wait`,
+      teardownTimeoutMs: 2000,
+    });
+
+    try {
+      const archive = await ctx.client.archiveWorkspace(workspaceId);
+
+      expect({
+        error: archive.error,
+        workspaceActive: (await activeWorkspaceIds()).has(workspaceId),
+        worktreeOnDisk: existsSync(worktreePath),
+      }).toEqual({ error: null, workspaceActive: false, worktreeOnDisk: true });
+      const sleepPid = Number(readFileSync(pidFile, "utf8").trim());
+      await expect.poll(() => isProcessRunning(sleepPid), { timeout: 5000 }).toBe(false);
+    } finally {
+      if (existsSync(pidFile)) {
+        const sleepPid = Number(readFileSync(pidFile, "utf8").trim());
+        if (isProcessRunning(sleepPid)) process.kill(sleepPid, "SIGKILL");
+      }
+    }
+  },
+  30000,
+);
+
+test.skipIf(process.platform === "win32")(
+  "a jagentdesk.json teardown that prints more than 1 MiB still removes the worktree",
+  async () => {
+    const { workspaceId, worktreePath } = await createWorktreeWithTeardown("chatty-teardown", {
+      teardown: `node -e "process.stdout.write('x'.repeat(2 * 1024 * 1024))"`,
+    });
+
+    const archive = await ctx.client.archiveWorkspace(workspaceId);
+
+    expect({
+      error: archive.error,
+      workspaceActive: (await activeWorkspaceIds()).has(workspaceId),
+      worktreeOnDisk: existsSync(worktreePath),
+    }).toEqual({ error: null, workspaceActive: false, worktreeOnDisk: false });
+  },
+  60000,
+);
+
+test.skipIf(process.platform === "win32")(
+  "a teardown that handles SIGTERM and exits zero still leaves the worktree",
+  async () => {
+    const { workspaceId, worktreePath } = await createWorktreeWithTeardown("teardown-trap", {
+      teardown: `trap 'exit 0' TERM; sleep 5 & wait`,
+      teardownTimeoutMs: 2000,
+    });
+
+    const archive = await ctx.client.archiveWorkspace(workspaceId);
+
+    expect({
+      error: archive.error,
+      workspaceActive: (await activeWorkspaceIds()).has(workspaceId),
+      worktreeOnDisk: existsSync(worktreePath),
+    }).toEqual({ error: null, workspaceActive: false, worktreeOnDisk: true });
+  },
+  15000,
+);
+
+test.skipIf(process.platform === "win32")(
+  "the archive answers when an exited teardown shell's child holds its output open",
+  async () => {
+    const pidFile = path.join(makeTempDir("teardown-open-output-"), "sleep.pid");
+    const { workspaceId, worktreePath } = await createWorktreeWithTeardown("teardown-open-output", {
+      teardown: `sleep 12 & echo $! > ${JSON.stringify(pidFile)}`,
+      teardownTimeoutMs: 2000,
+    });
+
+    try {
+      const archiveStarted = Date.now();
+      const archive = await ctx.client.archiveWorkspace(workspaceId);
+      expect(Date.now() - archiveStarted).toBeLessThan(8_000);
+
+      expect({
+        error: archive.error,
+        workspaceActive: (await activeWorkspaceIds()).has(workspaceId),
+        worktreeOnDisk: existsSync(worktreePath),
+      }).toEqual({ error: null, workspaceActive: false, worktreeOnDisk: true });
+    } finally {
+      if (existsSync(pidFile)) {
+        const sleepPid = Number(readFileSync(pidFile, "utf8").trim());
+        if (isProcessRunning(sleepPid)) process.kill(sleepPid, "SIGKILL");
+      }
+    }
+  },
+  30000,
+);
 
 test("worktree archive targets the explicit workspaceId when a directory backs multiple workspaces", async () => {
   const repoDir = createGitRepo();
