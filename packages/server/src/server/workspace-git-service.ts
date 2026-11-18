@@ -601,6 +601,7 @@ interface WorkspaceGitAuxiliaryReadCacheEntry<T> {
 
 interface WorkspaceForgePrStatusPollTarget {
   headRef: string;
+  currentBranch?: string;
   headSha?: string;
   headRepositoryOwner?: string;
 }
@@ -3095,11 +3096,7 @@ export class WorkspaceGitServiceImpl implements WorkspaceGitService {
     if (resolution.service.retainCurrentPullRequestStatusPoll) {
       target.forgePrStatusPollSubscription = resolution.service.retainCurrentPullRequestStatusPoll({
         cwd: target.cwd,
-        headRef: pollTarget.headRef,
-        ...(pollTarget.headSha ? { headSha: pollTarget.headSha } : {}),
-        ...(pollTarget.headRepositoryOwner
-          ? { headRepositoryOwner: pollTarget.headRepositoryOwner }
-          : {}),
+        ...pollTarget,
         onStatus: (status) => {
           if (!this.isActiveObservedWorkspaceTarget(target)) {
             return;
@@ -3171,11 +3168,7 @@ export class WorkspaceGitServiceImpl implements WorkspaceGitService {
       try {
         const status = await service.getCurrentPullRequestStatus({
           cwd: target.cwd,
-          headRef: pollTarget.headRef,
-          ...(pollTarget.headSha ? { headSha: pollTarget.headSha } : {}),
-          ...(pollTarget.headRepositoryOwner
-            ? { headRepositoryOwner: pollTarget.headRepositoryOwner }
-            : {}),
+          ...pollTarget,
           reason: "self-heal-forge-pr-status",
         });
         if (!closed && this.isActiveObservedWorkspaceTarget(target)) {
@@ -3230,16 +3223,17 @@ export class WorkspaceGitServiceImpl implements WorkspaceGitService {
       target.latestFacts?.isGit && target.latestFacts.currentBranch === git.currentBranch
         ? target.latestFacts.pullRequestLookupTarget
         : null;
+    if (lookupTarget) {
+      return git.currentBranch === lookupTarget.headRef
+        ? lookupTarget
+        : { ...lookupTarget, currentBranch: git.currentBranch };
+    }
     if (
       target.latestFacts?.isGit &&
       target.latestFacts.jagentdeskWorktree.isJAgentDeskOwnedWorktree
     ) {
-      return lookupTarget;
+      return null;
     }
-    if (lookupTarget) {
-      return lookupTarget;
-    }
-
     return { headRef: git.currentBranch };
   }
 
@@ -4370,6 +4364,7 @@ function buildWorkspaceForgePrStatusPollKey({
     forge,
     remoteUrl,
     target.headRef,
+    target.currentBranch ?? null,
     target.headSha ?? null,
     target.headRepositoryOwner ?? null,
   ]);

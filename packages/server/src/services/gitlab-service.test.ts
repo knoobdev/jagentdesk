@@ -389,6 +389,30 @@ describe("createGitLabService", () => {
     expect(calls[1]).toEqual(["mr", "view", "270", "-F", "json"]);
   });
 
+  it("hides a historical MR on the project's default branch", async () => {
+    const historical = { ...OPEN_MR, state: "merged", source_branch: "trunk" };
+    const { service } = makeService((args) => {
+      if (args[1] === "list") return ok(JSON.stringify([historical]));
+      if (args[1] === "view") return ok(JSON.stringify(historical));
+      if (args[0] === "api" && args[1] === "projects/example-group%2Fexample-project") {
+        return ok(
+          JSON.stringify({
+            path_with_namespace: "example-group/example-project",
+            default_branch: "trunk",
+          }),
+        );
+      }
+      return ok("{}");
+    });
+    await expect(
+      service.getCurrentPullRequestStatus({
+        cwd: "/repo",
+        headRef: "trunk",
+        headSha: historical.sha,
+      }),
+    ).resolves.toBeNull();
+  });
+
   it("does not attach the latest historical merge request after a reused branch advances", async () => {
     const stale = {
       ...OPEN_MR,
