@@ -51,6 +51,7 @@ import {
   buildStandardContextMenuItems,
 } from "./window/window-manager.js";
 import { setupDarwinCompositorWatchdog } from "./window/compositor-watchdog/index.js";
+import { reloadWhenRendererExits } from "./window/renderer-recovery.js";
 import { showWindowWhenReady } from "./window/show-when-ready.js";
 import { registerDialogHandlers } from "./features/dialogs.js";
 import { registerArgoCdSsoHandlers } from "./features/argocd-sso.js";
@@ -1084,6 +1085,7 @@ async function createWindow(
   }
 
   setupDarwinCompositorWatchdog(mainWindow);
+  reloadWhenRendererExits(mainWindow);
   setupWindowResizeEvents(mainWindow);
   if (windowStateStore) {
     setupWindowStatePersistence(mainWindow, windowStateStore);
