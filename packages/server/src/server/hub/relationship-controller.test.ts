@@ -151,6 +151,49 @@ describe("Hub relationship", () => {
     });
   });
 
+  test.each([false, true])(
+    "reconnect applies the current execution grant (initially %s)",
+    async (initiallyGranted) => {
+      relationship = await HubRelationshipHarness.start();
+      await relationship.beginConnectViaRpc("token", "https://hub.test", initiallyGranted).result;
+      relationship.connectLatestLegacySocket();
+      if (initiallyGranted) await relationship.updatePermissionViaRpc(false);
+      else await relationship.updatePermissionViaRpc(true);
+      relationship.closeLatestSocket(1006);
+      await relationship.retry();
+      relationship.connectLatestLegacySocket();
+
+      const response = await relationship.requestOrdinary({
+        type: "project.list.request",
+        requestId: "reconnected-projects",
+      });
+      expect(response.type).toBe(initiallyGranted ? "rpc_error" : "project.list.response");
+      if (response.type === "rpc_error") expect(response.payload.code).toBe("access_denied");
+    },
+  );
+
+  test("a permission mismatch retries the handshake with the same enrollment", async () => {
+    relationship = await HubRelationshipHarness.start();
+    await relationship.beginConnectViaRpc().result;
+    relationship.connectLatestLegacySocket();
+    const reason = "daemon session permissions do not match enrollment";
+    relationship.closeLatestSocket(4403, reason);
+    expect(await relationship.statusViaRpc()).toMatchObject({
+      state: "reconnecting",
+      lastError: expect.stringContaining("Hub and daemon permissions differ"),
+    });
+    await relationship.retry();
+    await relationship.updatePermissionViaRpc(false);
+    relationship.connectLatestLegacySocket();
+    expect(relationship.enrollmentAttempts()).toHaveLength(1);
+    expect(
+      await relationship.requestOrdinary({
+        type: "project.list.request",
+        requestId: "reconnected-projects",
+      }),
+    ).toMatchObject({ type: "rpc_error", payload: { code: "access_denied" } });
+  });
+
   test("Hub enrollment cannot widen the daemon's locally granted permissions", async () => {
     relationship = await HubRelationshipHarness.start();
     relationship.returnEnrollmentPermissions(["hub.execute", "daemon.manage"]);
