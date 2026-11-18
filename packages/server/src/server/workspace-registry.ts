@@ -62,6 +62,7 @@ const PersistedWorkspaceRecordSchema = z.object({
     .nullable()
     .optional()
     .transform((value) => value ?? null),
+  head: z.string().optional(),
   // Exact checkout/worktree root backing cwd. This differs from cwd when the
   // selected project is a subdirectory inside a repository. Persist it so
   // archive and recovery do not need the directory to still exist in order to
@@ -111,6 +112,7 @@ export interface WorkspaceMutationContext {
 
 export interface WorkspaceArchiveContext {
   autoArchivedChangeRequestUrl?: string;
+  head?: string;
 }
 
 export interface ProjectMutation {
@@ -489,6 +491,7 @@ export class FileBackedWorkspaceRegistry
         ...existing,
         updatedAt: archivedAt,
         archivedAt,
+        head: context?.head,
         ...(context?.autoArchivedChangeRequestUrl
           ? { autoArchivedChangeRequestUrl: context.autoArchivedChangeRequestUrl }
           : {}),

@@ -3,6 +3,7 @@ import {
   createWorktree as createWorktreePrimitive,
   deriveWorktreeProjectHash,
   deleteJAgentDeskWorktree,
+  readWorktreeHead,
   isJAgentDeskOwnedWorktreeCwd,
   mapWorkspaceCwdToWorktree,
   runWorktreeTeardownCommands,
@@ -330,6 +331,33 @@ describe("jagentdesk worktree manager", () => {
     });
 
     expect(existsSync(created.worktreePath)).toBe(false);
+  });
+
+  it("does not read a parent repository's HEAD when the worktree has no .git", async () => {
+    const directory = join(repoDir, "missing-worktree");
+    mkdirSync(directory);
+    await expect(readWorktreeHead(directory)).resolves.toBeNull();
+  });
+
+  it("keeps a worktree when writing its retention ref fails", async () => {
+    const created = await createLegacyWorktreeForTest({
+      branchName: "ref-write-failure",
+      cwd: repoDir,
+      baseBranch: "main",
+      worktreeSlug: "ref-write-failure",
+      jagentdeskHome,
+    });
+    mkdirSync(join(repoDir, ".git", "refs", "jagentdesk"), { recursive: true });
+    writeFileSync(join(repoDir, ".git", "refs", "jagentdesk", "kept-commits"), "blocked\n");
+
+    await expect(
+      deleteJAgentDeskWorktree({
+        cwd: repoDir,
+        worktreePath: created.worktreePath,
+        jagentdeskHome,
+      }),
+    ).rejects.toThrow();
+    expect(existsSync(created.worktreePath)).toBe(true);
   });
 
   it("is idempotent: deleting an already-absent worktree succeeds", async () => {

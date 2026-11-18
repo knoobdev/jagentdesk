@@ -1226,6 +1226,36 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
       rmSync(tempDir, { recursive: true, force: true });
     });
 
+    it("keeps an otherwise unreachable detached commit after deleting the worktree", async () => {
+      const result = await createWorktreePrimitive({
+        cwd: repoDir,
+        worktreeSlug: "keep-commit",
+        source: { kind: "branch-off", baseBranch: "main", branchName: "feature/keep-commit" },
+        jagentdeskHome,
+      });
+      execFileSync("git", ["checkout", "--detach"], { cwd: result.worktreePath });
+      writeFileSync(join(result.worktreePath, "file.txt"), "detached change\n");
+      execFileSync("git", ["add", "file.txt"], { cwd: result.worktreePath });
+      execFileSync("git", ["-c", "commit.gpgsign=false", "commit", "-m", "detached"], {
+        cwd: result.worktreePath,
+      });
+      const commit = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: result.worktreePath,
+        encoding: "utf8",
+      }).trim();
+
+      await deleteJAgentDeskWorktree({
+        cwd: repoDir,
+        worktreePath: result.worktreePath,
+        jagentdeskHome,
+      });
+      execFileSync("git", ["reflog", "expire", "--expire=now", "--all"], { cwd: repoDir });
+      execFileSync("git", ["gc", "--prune=now"], { cwd: repoDir });
+      expect(
+        execFileSync("git", ["cat-file", "-t", commit], { cwd: repoDir, encoding: "utf8" }).trim(),
+      ).toBe("commit");
+    });
+
     it("isolates worktree roots for repositories that share the same directory name", async () => {
       const repoA = join(tempDir, "team-a", "test-repo");
       const repoB = join(tempDir, "team-b", "test-repo");

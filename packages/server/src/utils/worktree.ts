@@ -194,6 +194,7 @@ export type WorktreeSource =
   | { kind: "branch-off"; baseBranch: string; branchName: string }
   | { kind: "checkout-branch"; branchName: string }
   | { kind: "restore"; branchName: string; baseRef: string | null }
+  | { kind: "restore-commit"; commit: string; baseRef: string }
   | { kind: "restore-from-base"; baseRef: string; branchName: string }
   | {
       kind: "checkout-change-request";
@@ -1169,6 +1170,32 @@ export interface DeleteJAgentDeskWorktreeOptions {
   worktreesBaseRoot?: string;
 }
 
+export async function readWorktreeHead(worktreePath: string): Promise<string | null> {
+  if (!(await pathExists(join(worktreePath, ".git")))) return null;
+  try {
+    const { stdout } = await runGitCommand(["rev-parse", "--verify", "HEAD^{commit}"], {
+      cwd: worktreePath,
+    });
+    return stdout.trim();
+  } catch {
+    return null;
+  }
+}
+
+export async function readWorktreeHeadReference(worktreePath: string): Promise<string | null> {
+  if (!(await pathExists(join(worktreePath, ".git")))) return null;
+  try {
+    const result = await runGitCommand(["symbolic-ref", "--quiet", "HEAD"], {
+      cwd: worktreePath,
+      acceptExitCodes: [0, 1],
+    });
+    if (result.exitCode === 0) return result.stdout.trim();
+    return readWorktreeHead(worktreePath);
+  } catch {
+    return null;
+  }
+}
+
 export async function deleteJAgentDeskWorktree({
   cwd,
   worktreePath,
@@ -1220,6 +1247,12 @@ export async function deleteJAgentDeskWorktree({
       await runWorktreeTeardownCommands({
         worktreePath: resolvedWorktree,
         teardownCwd,
+      });
+    }
+    const commit = await readWorktreeHead(resolvedWorktree);
+    if (commit) {
+      await runGitCommand(["update-ref", `refs/jagentdesk/kept-commits/${commit}`, commit], {
+        cwd: resolvedWorktree,
       });
     }
   }
@@ -1314,14 +1347,22 @@ async function removeDirectoryWithRetries(path: string): Promise<void> {
 /**
  * Create a git worktree with proper naming conventions
  */
-export const createWorktree = async ({
+export function createWorktree(
+  options: CreateWorktreeOptions & { source: Exclude<WorktreeSource, { kind: "restore-commit" }> },
+): Promise<CreatedWorktree>;
+export function createWorktree(
+  options: CreateWorktreeOptions,
+): Promise<Omit<CreatedWorktree, "branchName"> & { branchName: string | null }>;
+export async function createWorktree({
   cwd,
   source,
   worktreeSlug,
   runSetup,
   jagentdeskHome,
   worktreesRoot,
-}: CreateWorktreeOptions): Promise<CreatedWorktree> => {
+}: CreateWorktreeOptions): Promise<
+  Omit<CreatedWorktree, "branchName"> & { branchName: string | null }
+> {
   const sourcePlan = await resolveWorktreeSourcePlan({ cwd, source, desiredSlug: worktreeSlug });
   let worktreePath = join(
     await getJAgentDeskWorktreesRoot(cwd, jagentdeskHome, worktreesRoot),
@@ -1344,14 +1385,14 @@ export const createWorktree = async ({
   });
   worktreePath = await normalizePathForOwnership(finalWorktreePath);
 
-  if (sourcePlan.pushRemote) {
+  if (sourcePlan.pushRemote && sourcePlan.branchName) {
     await configureWorktreePushRemote({
       cwd,
       branchName: sourcePlan.branchName,
       remote: sourcePlan.pushRemote,
     });
   }
-  if (sourcePlan.trackingRemote) {
+  if (sourcePlan.trackingRemote && sourcePlan.branchName) {
     await configureWorktreeTrackingRemote({
       cwd,
       branchName: sourcePlan.branchName,
@@ -1369,7 +1410,7 @@ export const createWorktree = async ({
 
   await seedJAgentDeskConfigFile({ sourceCwd: cwd, targetCwd: worktreePath });
 
-  if (runSetup) {
+  if (runSetup && sourcePlan.branchName) {
     await runWorktreeSetupCommands({
       worktreePath,
       branchName: sourcePlan.branchName,
@@ -1382,7 +1423,7 @@ export const createWorktree = async ({
     worktreePath,
     comparisonBaseRef: sourcePlan.metadataBaseRef ?? sourcePlan.metadataBaseRefName,
   };
-};
+}
 
 interface ResolveWorktreeSourcePlanOptions {
   cwd: string;
@@ -1391,7 +1432,7 @@ interface ResolveWorktreeSourcePlanOptions {
 }
 
 interface WorktreeSourcePlan {
-  branchName: string;
+  branchName: string | null;
   // Display name and exact ref are two different facts. The name cannot round-trip to a
   // commit — "main" resolves local-first even when the worktree was cut from a fork's
   // upstream — so comparisons and actions read the ref and the UI reads the name.
@@ -1442,6 +1483,26 @@ async function resolveRestoredWorktreeSourcePlan(
   };
 }
 
+async function resolveRestoredCommitSourcePlan(
+  cwd: string,
+  source: Extract<WorktreeSource, { kind: "restore-commit" }>,
+): Promise<WorktreeSourcePlan> {
+  let exactBase: string | undefined;
+  if (isQualifiedRef(source.baseRef)) {
+    try {
+      exactBase = await resolveBaseBranchForWorktree(cwd, source.baseRef);
+    } catch {
+      // Restore the saved commit even when its comparison ref no longer exists.
+    }
+  }
+  return {
+    branchName: null,
+    metadataBaseRefName: normalizeRequiredBaseBranch(source.baseRef),
+    ...(exactBase ? { metadataBaseRef: exactBase } : {}),
+    addArguments: ["--detach", source.commit],
+  };
+}
+
 async function resolveRestoredWorktreeFromBasePlan(
   cwd: string,
   source: Extract<WorktreeSource, { kind: "restore-from-base" }>,
@@ -1457,32 +1518,41 @@ async function resolveRestoredWorktreeFromBasePlan(
   };
 }
 
+async function resolveBranchOffWorktreeSourcePlan(
+  cwd: string,
+  source: Extract<WorktreeSource, { kind: "branch-off" }>,
+  desiredSlug: string,
+): Promise<WorktreeSourcePlan> {
+  const branchName = source.branchName;
+  validateWorktreeBranchName(branchName);
+  const normalizedBaseBranch = normalizeRequiredBaseBranch(source.baseBranch);
+  const resolvedBaseBranch = await resolveBaseBranchForWorktree(cwd, source.baseBranch);
+  const branchExists = await localBranchExists(cwd, branchName);
+  const base = branchExists ? branchName : resolvedBaseBranch;
+  await refreshRemoteTrackingBaseRef(cwd, base);
+  const candidateBranch = branchExists ? desiredSlug : branchName;
+  const newBranchName = await resolveUniqueLocalBranchName(cwd, candidateBranch);
+
+  return {
+    branchName: newBranchName,
+    metadataBaseRefName: normalizedBaseBranch,
+    metadataBaseRef: resolvedBaseBranch,
+    addArguments: ["-b", newBranchName, "--no-track", base],
+  };
+}
+
 async function resolveWorktreeSourcePlan({
   cwd,
   source,
   desiredSlug,
 }: ResolveWorktreeSourcePlanOptions): Promise<WorktreeSourcePlan> {
   switch (source.kind) {
-    case "branch-off": {
-      const branchName = source.branchName;
-      validateWorktreeBranchName(branchName);
-      const normalizedBaseBranch = normalizeRequiredBaseBranch(source.baseBranch);
-      const resolvedBaseBranch = await resolveBaseBranchForWorktree(cwd, source.baseBranch);
-      const branchExists = await localBranchExists(cwd, branchName);
-      const base = branchExists ? branchName : resolvedBaseBranch;
-      await refreshRemoteTrackingBaseRef(cwd, base);
-      const candidateBranch = branchExists ? desiredSlug : branchName;
-      const newBranchName = await resolveUniqueLocalBranchName(cwd, candidateBranch);
-
-      return {
-        branchName: newBranchName,
-        metadataBaseRefName: normalizedBaseBranch,
-        metadataBaseRef: resolvedBaseBranch,
-        addArguments: ["-b", newBranchName, "--no-track", base],
-      };
-    }
+    case "branch-off":
+      return resolveBranchOffWorktreeSourcePlan(cwd, source, desiredSlug);
     case "restore":
       return resolveRestoredWorktreeSourcePlan(cwd, source);
+    case "restore-commit":
+      return resolveRestoredCommitSourcePlan(cwd, source);
     case "restore-from-base":
       return resolveRestoredWorktreeFromBasePlan(cwd, source);
     case "checkout-branch": {
