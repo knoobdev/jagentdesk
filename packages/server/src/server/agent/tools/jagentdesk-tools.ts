@@ -35,7 +35,7 @@ import {
 } from "../agent-projections.js";
 import { curateAgentActivity } from "../activity-curator.js";
 import { selectItemsByProjectedLimit } from "../timeline-projection.js";
-import type { AgentStorage } from "../agent-storage.js";
+import type { AgentStorage, StoredAgentRecord } from "../agent-storage.js";
 import { AgentNotFoundError, ensureAgentLoaded } from "../agent-loading.js";
 import { isStoredAgentProviderAvailable } from "../../persistence-hooks.js";
 import {
@@ -5240,6 +5240,21 @@ function createToolCatalog(
     },
   );
 
+  // Match the WebSocket snapshot: idle agents can still own background work.
+  async function projectLiveAgent(agent: ManagedAgent) {
+    const snapshot = await serializeSnapshotWithMetadata(agentStorage, agent, childLogger);
+    const backgroundWork = agentManager.getAgentBackgroundWorkSummary(agent.id);
+    return backgroundWork ? { ...snapshot, backgroundWork } : snapshot;
+  }
+
+  function projectStoredAgent(record: StoredAgentRecord) {
+    return buildStoredAgentPayload(
+      record,
+      new Set(providerSnapshotManager.listRegisteredProviderIds()),
+      agentManager.getAgentBackgroundWorkSummary(record.id),
+    );
+  }
+
   registerTool(
     "get_agent_status",
     {
@@ -5276,10 +5291,7 @@ function createToolCatalog(
         throw new JAgentDeskToolInputError(`Agent ${agentId} not found`);
       }
 
-      const structuredSnapshot = buildStoredAgentPayload(
-        record,
-        new Set(providerSnapshotManager.listRegisteredProviderIds()),
-      );
+      const structuredSnapshot = projectStoredAgent(record);
       return {
         content: [],
         structuredContent: ensureValidJson({

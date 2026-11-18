@@ -102,7 +102,12 @@ import {
   type ProviderSubagentDescriptor,
   type ProviderSubagentStoreEvent,
 } from "./provider-subagents/store.js";
-import { AgentBackgroundWorkStore, type AgentBackgroundWorkItem } from "./background-work/index.js";
+import {
+  AgentBackgroundWorkStore,
+  isHeartbeatBackgroundWorkItem,
+  type AgentBackgroundWorkItem,
+  type HeartbeatBackgroundWorkInput,
+} from "./background-work/index.js";
 
 const RELOAD_SESSION_CLOSE_TIMEOUT_MS = 3_000;
 const INTERRUPT_SESSION_TIMEOUT_MS = 2_000;
@@ -155,6 +160,7 @@ interface StopAgentBackgroundWorkOptions {
   agentId: string;
   itemId: string;
   stopToken: string;
+  canManageAutomation?: boolean;
 }
 
 async function resolveResumePurpose(
@@ -1371,35 +1377,54 @@ export class AgentManager {
   }
 
   listAgentBackgroundWork(agentId: string): AgentBackgroundWorkItem[] {
-    this.requirePublicAgent(agentId);
+    const agent = this.agents.get(agentId);
+    if (agent?.internal || (!agent && !this.backgroundWork.summary(agentId))) {
+      throw new Error(`Unknown agent '${agentId}'`);
+    }
     return this.backgroundWork.list(agentId);
+  }
+
+  setHeartbeatBackgroundWork(input: HeartbeatBackgroundWorkInput): void {
+    this.publishBackgroundWork(input.agentId, this.backgroundWork.setHeartbeat(input));
+  }
+
+  removeHeartbeatBackgroundWork(agentId: string, scheduleId: string): void {
+    this.publishBackgroundWork(agentId, this.backgroundWork.removeHeartbeat(agentId, scheduleId));
   }
 
   async stopAgentBackgroundWork({
     agentId,
     itemId,
     stopToken,
+    canManageAutomation,
   }: StopAgentBackgroundWorkOptions): Promise<void> {
+    if (isHeartbeatBackgroundWorkItem({ id: itemId })) {
+      if (this.agents.get(agentId)?.internal) throw new Error(`Unknown agent '${agentId}'`);
+      if (!canManageAutomation)
+        throw new Error("Managing automation is required to stop a heartbeat");
+      await this.backgroundWork.stopHeartbeat(agentId, itemId, stopToken);
+      return;
+    }
     this.requirePublicAgent(agentId);
     // Inventory events share the session queue; drain events already received before
     // authorizing the token, including a reconnect's ownership revocation.
     await this.sessionEventTails.get(agentId)?.catch(() => undefined);
-    const agent = this.requirePublicAgent(agentId);
-    if (!agent.session || !agent.session.stopBackgroundWork)
-      throw new Error("Background work cannot be stopped");
-    const item = this.backgroundWork.list(agentId).find((entry) => entry.id === itemId);
-    if (!item?.canStop || item.stopToken !== stopToken)
-      throw new Error("Background work is no longer available to stop");
-    await agent.session.stopBackgroundWork(itemId);
+    const { session } = this.requirePublicAgent(agentId);
+    if (!session?.stopBackgroundWork) throw new Error("Background work cannot be stopped");
+    const providerItemId = this.backgroundWork.authorizeProviderStop(agentId, itemId, stopToken);
+    await session.stopBackgroundWork(providerItemId);
   }
 
   getAgentBackgroundWorkSummary(agentId: string): { count: number } | undefined {
     return this.backgroundWork.summary(agentId);
   }
 
-  private clearBackgroundWork(agentId: string): void {
-    const items = this.backgroundWork.clear(agentId);
+  private publishBackgroundWork(agentId: string, items: AgentBackgroundWorkItem[] | null): void {
     if (items) this.dispatch({ type: "background_work", agentId, items });
+  }
+
+  private clearProviderBackgroundWork(agentId: string): void {
+    this.publishBackgroundWork(agentId, this.backgroundWork.clear(agentId));
   }
 
   listProviderSubagentActivity(): ProviderSubagentDescriptor[] {
@@ -1906,7 +1931,7 @@ export class AgentManager {
     await this.drainSessionEvents(agentId);
     this.cancelRunningProviderSubagents(agentId);
     // close() drops the session's subscribers before the provider could report an empty list.
-    this.clearBackgroundWork(agentId);
+    this.clearProviderBackgroundWork(agentId);
     const closedAgent = this.prepareAgentForClosure(agent, "agent closed");
     let persistError: unknown;
     try {
@@ -4221,7 +4246,7 @@ export class AgentManager {
     for (const event of this.providerSubagents.deleteParent(agentId)) {
       this.dispatch({ type: "provider_subagent", event });
     }
-    this.clearBackgroundWork(agentId);
+    this.clearProviderBackgroundWork(agentId);
   }
 
   private emitClosedAgent(agent: ManagedAgentClosed, options?: { persist?: boolean }): void {
@@ -4336,7 +4361,7 @@ export class AgentManager {
         event.items === null
           ? this.backgroundWork.clear(agent.id)
           : this.backgroundWork.apply(agent.id, event.items);
-      if (items) this.dispatch({ type: "background_work", agentId: agent.id, items });
+      this.publishBackgroundWork(agent.id, items);
       return;
     }
     const turnId = getAgentStreamEventTurnId(event);
