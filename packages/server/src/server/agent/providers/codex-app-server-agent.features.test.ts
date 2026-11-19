@@ -49,7 +49,18 @@ function speedFeature(value: string) {
     value,
     options: [
       { id: "default", label: "Normal", isDefault: true },
+      { id: "flex", label: "Flex" },
       { id: "priority", label: "Fast" },
+    ],
+  };
+}
+
+function flexSpeedFeature(value = "default") {
+  return {
+    ...speedFeature(value),
+    options: [
+      { id: "default", label: "Normal", isDefault: true },
+      { id: "flex", label: "Flex" },
     ],
   };
 }
@@ -100,13 +111,14 @@ function createConfig(overrides: Partial<AgentSessionConfig> = {}): AgentSession
 
 function createSessionHarness(
   configOverrides: Partial<AgentSessionConfig> = {},
-  options: { logger?: pino.Logger; models?: unknown[] } = {},
+  options: { logger?: pino.Logger; models?: unknown[]; userAgent?: string } = {},
 ): {
   session: CodexFeaturesTestSession;
   appServer: FakeCodexAppServer;
 } {
   const config = createConfig(configOverrides);
   const appServer = createFakeCodexAppServer({
+    initialize: () => ({ userAgent: options.userAgent ?? "codex/0.156.0" }),
     "collaborationMode/list": () => ({ data: TEST_COLLABORATION_MODES }),
     "model/list": () => ({ data: options.models ?? TEST_SPEED_MODELS }),
   });
@@ -121,7 +133,7 @@ function createSessionHarness(
 
 async function createConnectedSession(
   configOverrides: Partial<AgentSessionConfig> = {},
-  options: { logger?: pino.Logger; models?: unknown[] } = {},
+  options: { logger?: pino.Logger; models?: unknown[]; userAgent?: string } = {},
 ): Promise<{
   session: CodexFeaturesTestSession;
   appServer: FakeCodexAppServer;
@@ -156,6 +168,7 @@ describe("Codex app-server provider features", () => {
           value: "default",
           options: [
             { id: "default", label: "Normal", isDefault: true },
+            { id: "flex", label: "Flex" },
             { id: "priority", label: "Fast" },
             { id: "ultrafast", label: "Ultrafast" },
           ],
@@ -191,6 +204,7 @@ describe("Codex app-server provider features", () => {
           id: "service_tier",
           options: [
             { id: "default", label: "Normal", isDefault: true },
+            { id: "flex", label: "Flex" },
             { id: "future-tier", label: "Future speed" },
           ],
         }),
@@ -341,7 +355,7 @@ describe("Codex app-server provider features", () => {
       featureValues: { fast_mode: true },
     });
     try {
-      expect(session.features.map((feature) => feature.id)).toEqual(["plan_mode"]);
+      expect(session.features.map((feature) => feature.id)).toEqual(["service_tier", "plan_mode"]);
       await expect(session.setFeature?.("fast_mode", true)).rejects.toThrow(
         `Codex fast mode is not available for model '${model}'`,
       );
@@ -415,6 +429,7 @@ describe("Codex app-server provider features", () => {
     const { session } = await createConnectedSession({ model: "gpt-3.5-turbo" });
 
     expect(session.features).toEqual([
+      flexSpeedFeature(),
       {
         type: "toggle",
         id: "plan_mode",
@@ -434,6 +449,7 @@ describe("Codex app-server provider features", () => {
     });
 
     expect(session.features).toEqual([
+      flexSpeedFeature(),
       {
         type: "toggle",
         id: "plan_mode",
@@ -574,6 +590,7 @@ describe("Codex app-server provider features", () => {
     await session.setModel("gpt-3.5-turbo");
 
     expect(session.features).toEqual([
+      flexSpeedFeature(),
       {
         type: "toggle",
         id: "plan_mode",

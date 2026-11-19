@@ -77,6 +77,7 @@ import { spawnProcess } from "../../../utils/spawn.js";
 import { extractCodexTerminalSessionId, nonEmptyString } from "./tool-call-mapper-utils.js";
 import {
   buildCodexFeatures,
+  codexSpeedTiers,
   CodexServiceTierSchema,
   readCodexServiceTier,
   type CodexServiceTier,
@@ -152,6 +153,8 @@ function isCodexAlreadyUnarchivedError(error: unknown, threadId: string): boolea
 const TURN_START_TIMEOUT_MS = 90 * 1000;
 const INTERRUPT_TIMEOUT_MS = 2_000;
 const CODEX_PROVIDER = "codex" as const;
+// Codex 0.156.0 first forwards Flex without a matching entry in the model catalog.
+const CODEX_UNADVERTISED_FLEX_MIN_VERSION: readonly [number, number, number] = [0, 156, 0];
 // These native provider identities belong to Codex, not to an older custom
 // JAgentDesk provider. Never include them in a custom provider's legacy import scan.
 const CODEX_BUILTIN_MODEL_PROVIDER_IDS = new Set([
@@ -3449,6 +3452,7 @@ export class CodexAppServerAgentSession implements AgentSession {
   private cachedRuntimeInfo: AgentRuntimeInfo | null = null;
   private serviceTier: string | null = null;
   private speedModels: CodexModel[] = [];
+  private supportsUnadvertisedFlex = false;
   private planModeEnabled = false;
   // History read by rewind or an archived resume, held until streamHistory consumes it.
   private stagedHistory: CodexThreadHistory | null = null;
@@ -3559,7 +3563,7 @@ export class CodexAppServerAgentSession implements AgentSession {
 
   get features(): AgentFeature[] {
     return buildCodexFeatures({
-      serviceTiers: this.currentServiceTiers(),
+      serviceTiers: this.offeredServiceTiers(),
       serviceTier: this.serviceTier ?? "default",
       planModeEnabled: this.planModeEnabled,
       planModeAvailable: this.hasPlanCollaborationMode(),
@@ -3612,6 +3616,10 @@ export class CodexAppServerAgentSession implements AgentSession {
         await client.request("initialize", buildCodexAppServerInitializeParams()),
       );
       this.threadRollbackAvailable = codexServerHasThreadRollback(initialized?.userAgent);
+      const userAgent = initialized?.userAgent;
+      this.supportsUnadvertisedFlex =
+        typeof userAgent === "string" &&
+        codexVersionAtLeast(userAgent, CODEX_UNADVERTISED_FLEX_MIN_VERSION);
       client.notify("initialized", {});
 
       this.speedModels =
@@ -3825,17 +3833,17 @@ export class CodexAppServerAgentSession implements AgentSession {
     this.resolvedCollaborationMode = this.resolveCollaborationMode();
   }
 
-  private currentServiceTiers(): CodexServiceTier[] {
+  private offeredServiceTiers(): CodexServiceTier[] {
     const selectedModel = this.config.model
       ? this.speedModels.find(
           (model) => model.id === this.config.model || model.model === this.config.model,
         )
       : (this.speedModels.find((model) => model.isDefault) ?? this.speedModels[0]);
-    return selectedModel?.serviceTiers ?? [];
+    return codexSpeedTiers(selectedModel?.serviceTiers ?? [], this.supportsUnadvertisedFlex);
   }
 
   private reconcileServiceTier(): void {
-    const tiers = this.currentServiceTiers();
+    const tiers = this.offeredServiceTiers();
     // COMPAT(codexFastPreference): added in v0.10.0, remove after 2027-03-29 once saved Fast preferences have migrated.
     if (this.serviceTier === "fast" && !tiers.some((tier) => tier.id === "fast")) {
       this.serviceTier = tiers.find((tier) => tier.name.toLowerCase() === "fast")?.id ?? null;
@@ -4601,7 +4609,7 @@ export class CodexAppServerAgentSession implements AgentSession {
   async setFeature(featureId: string, value: unknown): Promise<void> {
     // COMPAT(codexFastPreference): added in v0.10.0, remove after 2027-03-29 once clients use service_tier.
     if (featureId === "fast_mode") {
-      const fast = this.currentServiceTiers().find((tier) => tier.name.toLowerCase() === "fast");
+      const fast = this.offeredServiceTiers().find((tier) => tier.name.toLowerCase() === "fast");
       if (value && !fast)
         throw new Error(
           `Codex fast mode is not available for model '${this.config.model ?? "default"}'`,
@@ -4611,7 +4619,7 @@ export class CodexAppServerAgentSession implements AgentSession {
     if (featureId === "service_tier") {
       if (
         typeof value !== "string" ||
-        (value !== "default" && !this.currentServiceTiers().some((tier) => tier.id === value))
+        (value !== "default" && !this.offeredServiceTiers().some((tier) => tier.id === value))
       ) {
         throw new Error(
           `Codex speed '${String(value)}' is not available for model '${this.config.model ?? "default"}'`,
