@@ -1,3 +1,5 @@
+import { execFileSync } from "node:child_process";
+import { realpath } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { buildHostWorkspaceRoute } from "@/utils/host-routes";
@@ -738,6 +740,65 @@ test.describe("New workspace flow", () => {
       expect(branchInfo.currentBranch).toBe(path.basename(createdWorkspace.workspaceDirectory));
       expect(branchInfo.hasAncestor(tempRepo.branchHeads.main)).toBe(true);
       expect(branchInfo.hasAncestor(tempRepo.branchHeads.dev)).toBe(true);
+    } finally {
+      await tempRepo.cleanup();
+    }
+  });
+
+  test("existing worktree starts the first agent in the chosen worktree", async ({ page }) => {
+    const tempRepo = await createTempGitRepo("existing-worktree-");
+    // Made with git, not JAgentDesk: the list holds every git worktree of the repository.
+    const worktreePath = path.join(tempRepo.path, "manual-worktree");
+    execFileSync("git", ["worktree", "add", "-b", "e2e/manual", worktreePath], {
+      cwd: tempRepo.path,
+      stdio: "ignore",
+    });
+
+    try {
+      const openedProject = await openProjectViaDaemon(client, tempRepo.path);
+      localWorkspaceIds.add(openedProject.workspaceId);
+      localProjectIds.add(openedProject.projectId);
+
+      await gotoAppShell(page);
+      await waitForSidebarHydration(page);
+      await openNewWorkspaceComposer(page, {
+        projectKey: openedProject.projectKey,
+        projectDisplayName: openedProject.projectDisplayName,
+      });
+      const isolation = page.getByTestId("workspace-create-isolation-trigger");
+      await isolation.click();
+      await page.getByTestId(`workspace-create-isolation-existing:${worktreePath}`).click();
+      await expect(isolation).toContainText("e2e/manual");
+      await submitNewWorkspacePrompt(page);
+
+      const createdWorkspace = await assertNewWorkspaceSidebarAndHeader(page, {
+        serverId: getServerId(),
+        client,
+        previousWorkspaceId: openedProject.workspaceId,
+        projectDisplayName: openedProject.projectDisplayName,
+      });
+      localWorkspaceIds.add(createdWorkspace.workspaceId);
+      expect(await realpath(createdWorkspace.workspaceDirectory)).toBe(
+        await realpath(worktreePath),
+      );
+
+      const agentTabs = page
+        .getByTestId(`workspace-deck-entry-${getServerId()}:${createdWorkspace.workspaceId}`)
+        .filter({ visible: true })
+        .locator('[data-testid^="workspace-tab-agent_"]');
+      await expect(agentTabs).toHaveCount(1, { timeout: 30_000 });
+      await expect
+        .poll(
+          async () => {
+            const { entries } = await client.fetchAgents({ scope: "active" });
+            for (const { agent } of entries) {
+              if (agent.workspaceId === createdWorkspace.workspaceId) return realpath(agent.cwd);
+            }
+            return null;
+          },
+          { timeout: 30_000 },
+        )
+        .toBe(await realpath(worktreePath));
     } finally {
       await tempRepo.cleanup();
     }

@@ -2435,6 +2435,12 @@ export const CheckoutCommitsListRequestSchema = z.object({
   requestId: z.string(),
 });
 
+export const CheckoutWorktreesListRequestSchema = z.object({
+  type: z.literal("checkout.worktrees.list.request"),
+  cwd: z.string(),
+  requestId: z.string(),
+});
+
 export const CheckoutCommitFileDiffRequestSchema = z.object({
   type: z.literal("checkout.commits.file_diff.request"),
   cwd: z.string(),
@@ -4270,6 +4276,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   CheckoutForgeSetAutoMergeRequestSchema,
   CheckoutGithubSetAutoMergeRequestSchema,
   CheckoutCommitsListRequestSchema,
+  CheckoutWorktreesListRequestSchema,
   CheckoutCommitFileDiffRequestSchema,
   CheckoutForgeGetCheckDetailsRequestSchema,
   CheckoutGithubGetCheckDetailsRequestSchema,
@@ -4649,6 +4656,11 @@ export const ServerInfoStatusPayloadSchema = z
         providersSnapshotCwd: z.boolean().optional(),
         // COMPAT(workspaceBaseBranch): added in v0.9.59; remove after 2027-05-23.
         workspaceBaseBranch: z.boolean().optional(),
+        // COMPAT(checkoutWorktreeList): added after v0.16.2, remove gate after 2027-11-19.
+        checkoutWorktreeList: z.boolean().optional(),
+        // COMPAT(worktreeRefActions): added after v0.16.2, remove gate after 2027-11-19.
+        // Hosts without it check out a change request even when asked to branch off it.
+        worktreeRefActions: z.boolean().optional(),
         // COMPAT(checkoutForgeSetAutoMerge): added in v0.1.106, remove old
         // checkoutGithubSetAutoMerge fallback after 2026-12-28.
         checkoutForgeSetAutoMerge: z.boolean().optional(),
@@ -6554,6 +6566,26 @@ export const CheckoutCommitsListResponseSchema = z.object({
   }),
 });
 
+export const CheckoutWorktreeSchema = z.object({
+  path: z.string(),
+  // null when HEAD is detached
+  branchName: z.string().nullable(),
+  head: z.string().nullable(),
+  createdAt: z.string(), // ISO 8601
+  // true for the worktree the request's cwd is in
+  containsCwd: z.boolean(),
+});
+
+export const CheckoutWorktreesListResponseSchema = z.object({
+  type: z.literal("checkout.worktrees.list.response"),
+  payload: z.object({
+    cwd: z.string(),
+    worktrees: z.array(CheckoutWorktreeSchema),
+    error: CheckoutErrorSchema.nullable(),
+    requestId: z.string(),
+  }),
+});
+
 export const CheckoutCommitFileDiffResponseSchema = z.object({
   type: z.literal("checkout.commits.file_diff.response"),
   payload: z.object({
@@ -8186,6 +8218,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   CheckoutForgeSetAutoMergeResponseSchema,
   CheckoutGithubSetAutoMergeResponseSchema,
   CheckoutCommitsListResponseSchema,
+  CheckoutWorktreesListResponseSchema,
   CheckoutCommitFileDiffResponseSchema,
   CheckoutForgeGetCheckDetailsResponseSchema,
   CheckoutGithubGetCheckDetailsResponseSchema,
@@ -8680,6 +8713,9 @@ export type CheckoutCommitFile = z.infer<typeof CheckoutCommitFileSchema>;
 export type CheckoutCommit = z.infer<typeof CheckoutCommitSchema>;
 export type CheckoutCommitsListRequest = z.infer<typeof CheckoutCommitsListRequestSchema>;
 export type CheckoutCommitsListResponse = z.infer<typeof CheckoutCommitsListResponseSchema>;
+export type CheckoutWorktree = z.infer<typeof CheckoutWorktreeSchema>;
+export type CheckoutWorktreesListRequest = z.infer<typeof CheckoutWorktreesListRequestSchema>;
+export type CheckoutWorktreesListResponse = z.infer<typeof CheckoutWorktreesListResponseSchema>;
 export type CheckoutCommitFileDiffRequest = z.infer<typeof CheckoutCommitFileDiffRequestSchema>;
 export type CheckoutCommitFileDiffResponse = z.infer<typeof CheckoutCommitFileDiffResponseSchema>;
 export type ParsedDiffFile = z.infer<typeof ParsedDiffFileSchema>;

@@ -1,5 +1,8 @@
-import type { ForgeSearchItem } from "@jagentdesk/protocol/messages";
 import type { CheckoutStatusPayload } from "@/git/checkout-status-cache";
+import type { CreateJAgentDeskWorktreeInput } from "@jagentdesk/client/internal/daemon-client";
+import type { ForgeSearchItem } from "@jagentdesk/protocol/messages";
+import type { ComboboxOptionModel } from "@/components/ui/combobox-options";
+import { getForgePresentation } from "@/git/forge";
 
 export interface BranchPickerDetail {
   name: string;
@@ -24,19 +27,23 @@ export type PickerItem =
       item: ForgeSearchItem;
     };
 
-export type PickerCheckoutRequest = {
-  action: "branch-off" | "checkout";
-  refName?: string;
-  checkoutSource?: {
-    kind: "change_request";
-    forge?: string;
-    number: number;
-    projectPath?: string;
-  };
-  githubPrNumber?: number;
+export type PickerCheckoutRequest = Pick<
+  CreateJAgentDeskWorktreeInput,
+  "action" | "refName" | "checkoutSource" | "githubPrNumber"
+>;
+
+/** What a new worktree does with the picked ref: start a new branch from it, or work on it. */
+export type RefAction = "branch-off" | "checkout";
+
+/** A branch is a base to branch off by default; a pull request is checked out. */
+export const DEFAULT_REF_ACTION: Record<PickerItem["kind"], RefAction> = {
+  branch: "branch-off",
+  "github-pr": "checkout",
 };
 
 const BRANCH_OPTION_PREFIX = "branch:";
+const PR_OPTION_PREFIX = "github-pr:";
+const REMOTE_TRACKING_PREFIX = "refs/remotes/";
 
 export function branchPickerOptionId(refName: string): string {
   return `${BRANCH_OPTION_PREFIX}${refName}`;
@@ -134,18 +141,73 @@ export function buildBranchPickerItems(details: readonly BranchPickerDetail[]): 
   return items;
 }
 
+export interface BaseRefCheckoutStatus {
+  currentBranch: string | null;
+  upstreamRef?: string | null;
+}
+
+export function branchNameFromRef(refName: string): string {
+  if (refName.startsWith("refs/heads/")) return refName.slice("refs/heads/".length);
+  if (refName.startsWith(REMOTE_TRACKING_PREFIX)) {
+    const remainder = refName.slice(REMOTE_TRACKING_PREFIX.length);
+    const separator = remainder.indexOf("/");
+    return separator === -1 ? remainder : remainder.slice(separator + 1);
+  }
+  return refName;
+}
+
+// Where a ref lives, for disambiguating two rows that would otherwise read the same.
+function refQualifier(refName: string): string | null {
+  if (refName.startsWith("refs/heads/")) return "local";
+  if (refName.startsWith(REMOTE_TRACKING_PREFIX)) {
+    const remainder = refName.slice(REMOTE_TRACKING_PREFIX.length);
+    const separator = remainder.indexOf("/");
+    return separator === -1 ? null : remainder.slice(0, separator);
+  }
+  return null;
+}
+
+// The one owner of "what do we branch off when the user picked nothing". The checkmarked
+// row, the trigger label, and the created ref all read this; computing it twice is how the
+// picker once showed local main while branching off something else.
+//
+// The upstream wins when the branch has one, because branching off the local ref silently
+// carries unpushed commits into the new workspace. The daemon sends the resolved ref rather
+// than a remote name, so a fork tracking upstream/main branches from upstream/main.
+export function defaultBasePickerItem(status: BaseRefCheckoutStatus): PickerItem | null {
+  const currentBranch = status.currentBranch;
+  if (!currentBranch) return null;
+  // COMPAT(checkoutUpstreamRef): added in v0.2.6, remove after 2027-02-01 once the daemon
+  // floor sends upstreamRef. Daemons that predate it omit the field, which lands on the
+  // local ref — the base those daemons always used.
+  const refName = status.upstreamRef ?? `refs/heads/${currentBranch}`;
+  // The upstream branch can be named differently from the local one, so the row reads the
+  // ref rather than the branch the user happens to be on.
+  const name = branchNameFromRef(refName);
+  return {
+    kind: "branch",
+    name,
+    refName,
+    accessibilityLabel: status.upstreamRef ? `${name}, upstream branch` : `${name}, local branch`,
+  };
+}
+
 export function pickerItemToCheckoutRequest(
   item: PickerItem | null,
+  action: RefAction = item ? DEFAULT_REF_ACTION[item.kind] : "branch-off",
 ): PickerCheckoutRequest | undefined {
   if (!item) return undefined;
   switch (item.kind) {
     case "branch":
-      return { action: "branch-off", refName: item.refName };
+      // A checkout works on the local branch; both the origin row and the local row stand for it.
+      return action === "checkout"
+        ? { action, refName: branchNameFromRef(item.refName) }
+        : { action, refName: item.refName };
     case "github-pr": {
       const headRefName = item.item.headRefName?.trim();
       const forge = item.item.forge ?? "github";
       return {
-        action: "checkout",
+        action,
         ...(headRefName ? { refName: headRefName } : {}),
         checkoutSource: {
           kind: "change_request",
@@ -155,14 +217,157 @@ export function pickerItemToCheckoutRequest(
         },
         ...(forge === "github"
           ? {
-              // COMPAT(githubPrNumber): added in v0.1.106, remove after 2026-12-28 once
-              // daemon floor parses checkoutSource.
+              // COMPAT(githubPrNumber): send the legacy GitHub checkout input
+              // to daemons predating checkoutSource. Remove after 2027-01-17
+              // once the supported daemon floor is >= v0.2.0.
               githubPrNumber: item.item.number,
             }
           : {}),
       };
     }
   }
+}
+
+/**
+ * Whether creating a worktree from this request cuts a new branch. No request at all (a detached
+ * HEAD gives the screen no default base) cuts one from the repository's default branch. A request
+ * with no action is read as the daemon reads it: a change request is checked out.
+ */
+export function startsNewBranch(request: PickerCheckoutRequest | undefined): boolean {
+  if (!request) return true;
+  if (request.action) return request.action === "branch-off";
+  return !request.checkoutSource && request.githubPrNumber === undefined;
+}
+
+/**
+ * The rows of one ref list. Checking out works on the local branch, so the origin and local rows
+ * of a branch are one choice there: one row per branch, named by the branch, keeping the selected
+ * row's id so its checkmark stays.
+ */
+export function refListOptions(input: {
+  options: readonly ComboboxOptionModel[];
+  itemById: ReadonlyMap<string, PickerItem>;
+  selectedOptionId: string;
+  kind: PickerItem["kind"];
+  action: RefAction;
+}): ComboboxOptionModel[] {
+  const { options, itemById, selectedOptionId, kind, action } = input;
+  const ofKind = options.filter((option) => itemById.get(option.id)?.kind === kind);
+  if (kind !== "branch" || action !== "checkout") return ofKind;
+  const rowByBranch = new Map<string, ComboboxOptionModel>();
+  for (const option of ofKind) {
+    const item = itemById.get(option.id);
+    if (item?.kind !== "branch") continue;
+    const branchName = branchNameFromRef(item.refName);
+    if (rowByBranch.has(branchName) && option.id !== selectedOptionId) continue;
+    rowByBranch.set(branchName, { ...option, label: branchName });
+  }
+  return [...rowByBranch.values()];
+}
+
+export function prPickerOptionId(number: number): string {
+  return `${PR_OPTION_PREFIX}${number}`;
+}
+
+export function pickerOptionId(item: PickerItem): string {
+  return item.kind === "branch"
+    ? branchPickerOptionId(item.refName)
+    : prPickerOptionId(item.item.number);
+}
+
+function formatPrLabel(item: Pick<ForgeSearchItem, "forge" | "number" | "title">): string {
+  const presentation = getForgePresentation(item.forge ?? "github");
+  return `${presentation.numberPrefix}${item.number} ${item.title}`;
+}
+
+export function pickerItemLabel(item: PickerItem): string {
+  return item.kind === "branch" ? item.name : formatPrLabel(item.item);
+}
+
+export interface PickerOptionData {
+  options: ComboboxOptionModel[];
+  itemById: Map<string, PickerItem>;
+  selectedOptionId: string;
+}
+
+interface TimedOption {
+  option: ComboboxOptionModel;
+  timestamp: number;
+}
+
+export function buildPickerOptionData(input: {
+  branchDetails: readonly BranchPickerDetail[];
+  prItems: readonly ForgeSearchItem[];
+  baseItem: PickerItem | null;
+}): PickerOptionData {
+  const itemById = new Map<string, PickerItem>();
+  const timedOptions: TimedOption[] = [];
+
+  for (const branch of buildBranchPickerItems(input.branchDetails)) {
+    if (branch.kind !== "branch") continue;
+    const id = branchPickerOptionId(branch.refName);
+    itemById.set(id, branch);
+    timedOptions.push({
+      option: { id, label: pickerItemLabel(branch) },
+      timestamp: branch.committerDate ?? 0,
+    });
+  }
+
+  for (const pr of input.prItems) {
+    if (!pr.headRefName) continue;
+    const id = prPickerOptionId(pr.number);
+    itemById.set(id, { kind: "github-pr", item: pr });
+    const updatedAtMs = pr.updatedAt ? Date.parse(pr.updatedAt) : 0;
+    const timestamp = Number.isNaN(updatedAtMs) ? 0 : Math.floor(updatedAtMs / 1000);
+    timedOptions.push({
+      option: { id, label: formatPrLabel(pr), searchText: pr.body ?? undefined },
+      timestamp,
+    });
+  }
+
+  const baseItem = input.baseItem;
+  if (!baseItem) {
+    timedOptions.sort((a, b) => b.timestamp - a.timestamp);
+    return { options: timedOptions.map((t) => t.option), itemById, selectedOptionId: "" };
+  }
+
+  const selectedOptionId = pickerOptionId(baseItem);
+  if (!itemById.has(selectedOptionId)) {
+    // The label lives on the item, so the row and the trigger read it from the same place.
+    const labeledItem = disambiguate(baseItem, timedOptions);
+    itemById.set(selectedOptionId, labeledItem);
+    timedOptions.push({
+      option: {
+        id: selectedOptionId,
+        label: pickerItemLabel(labeledItem),
+        ...(labeledItem.kind === "github-pr"
+          ? { searchText: labeledItem.item.body ?? undefined }
+          : {}),
+      },
+      // The base sorts first: it is what a workspace is created from unless you pick something.
+      timestamp: Number.POSITIVE_INFINITY,
+    });
+  }
+
+  timedOptions.sort((a, b) => b.timestamp - a.timestamp);
+  return { options: timedOptions.map((t) => t.option), itemById, selectedOptionId };
+}
+
+// Two rows reading "main" would be a coin flip for the user, so the added row says where its
+// ref lives. Only when it collides — a lone row needs no qualifier.
+function disambiguate(item: PickerItem, existing: readonly TimedOption[]): PickerItem {
+  if (item.kind !== "branch") return item;
+  if (!existing.some((entry) => entry.option.label === item.name)) return item;
+  const qualifier = refQualifier(item.refName);
+  if (!qualifier) return item;
+  const name = `${item.name} (${qualifier})`;
+  return {
+    ...item,
+    name,
+    // Accessibility labels are built as `${name}${suffix}`, so re-prefixing keeps the spoken
+    // label and the visible one the same string.
+    accessibilityLabel: `${name}${item.accessibilityLabel.slice(item.name.length)}`,
+  };
 }
 
 export function resolveCheckoutRequest(

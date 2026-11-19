@@ -16,6 +16,7 @@ type NewWorkspaceDaemonClient = Pick<
   | "connect"
   | "createJAgentDeskWorktree"
   | "createWorkspace"
+  | "fetchAgents"
   | "fetchWorkspaces"
   | "getJAgentDeskWorktreeList"
   | "getDaemonConfig"

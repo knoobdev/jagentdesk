@@ -2455,6 +2455,10 @@ export class VoiceAssistantWebSocketServer {
       })(),
       features: {
         workspaceBaseBranch: true,
+        // COMPAT(checkoutWorktreeList): added after v0.16.2, remove gate after 2027-11-19.
+        checkoutWorktreeList: true,
+        // COMPAT(worktreeRefActions): added after v0.16.2, remove gate after 2027-11-19.
+        worktreeRefActions: true,
         // COMPAT(providersSnapshot): keep optional until all clients rely on snapshot flow.
         providersSnapshot: true,
         // COMPAT(checkoutForgeSetAutoMerge): added in v0.1.106, remove old

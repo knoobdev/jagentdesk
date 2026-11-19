@@ -4,6 +4,7 @@ import type { ForgeService } from "../services/forge-service.js";
 import {
   createWorktree,
   resolveExistingWorktreeForSlug,
+  fetchFirstAvailableRef,
   slugify,
   validateBranchSlug,
   type CreatedWorktree,
@@ -72,7 +73,11 @@ export async function createWorktreeCore(
       githubPrNumber: input.githubPrNumber,
       worktreeSlug: requestedWorktreeSlug,
     };
-  } else if (input.checkoutSource !== undefined || input.githubPrNumber !== undefined) {
+  } else if (
+    input.action !== "branch-off" &&
+    (input.checkoutSource !== undefined || input.githubPrNumber !== undefined)
+  ) {
+    // A change request with no action is checked out, as clients did before `action` existed.
     intentInput = {
       checkoutSource: input.checkoutSource,
       githubPrNumber: input.githubPrNumber,
@@ -84,6 +89,8 @@ export async function createWorktreeCore(
     intentInput = {
       action: "branch-off",
       refName: input.refName,
+      checkoutSource: input.checkoutSource,
+      githubPrNumber: input.githubPrNumber,
       branchName: requestedBranchName,
       worktreeSlug,
     };
@@ -94,6 +101,8 @@ export async function createWorktreeCore(
     forge: forge.forge,
     forgeService: forge.service,
     resolveDefaultBranch: (root) => resolveDefaultBranch(root, deps),
+    fetchRef: ({ repoRoot: cwd, sources, destination }) =>
+      fetchFirstAvailableRef({ cwd, sources, destination }),
   });
   let normalizedSlug: string;
 

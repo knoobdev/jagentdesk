@@ -13,6 +13,7 @@ import {
   getWorktreeTeardownCommands,
   isServiceScript,
   isJAgentDeskOwnedWorktreeCwd,
+  listGitWorktrees,
   listJAgentDeskWorktrees,
   readJAgentDeskConfig,
   resolveWorktreeRuntimeEnv,
@@ -1327,6 +1328,61 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
 
       const remaining = await listJAgentDeskWorktrees({ cwd: repoDir, jagentdeskHome });
       expect(remaining.map((worktree) => worktree.path)).toEqual([second.worktreePath]);
+    });
+
+    it("lists every git worktree of the repository, not only JAgentDesk's", async () => {
+      const jagentdeskWorktree = await createLegacyWorktreeForTest({
+        branchName: "feature/jagentdesk",
+        cwd: repoDir,
+        baseBranch: "main",
+        worktreeSlug: "alpha",
+        jagentdeskHome,
+      });
+      const manualPath = join(tempDir, "manual");
+      execFileSync("git", ["worktree", "add", "-b", "feature/manual", manualPath], {
+        cwd: repoDir,
+      });
+      const detachedPath = join(tempDir, "detached");
+      execFileSync("git", ["worktree", "add", "--detach", detachedPath], { cwd: repoDir });
+      const removedPath = join(tempDir, "removed");
+      execFileSync("git", ["worktree", "add", "-b", "feature/removed", removedPath], {
+        cwd: repoDir,
+      });
+      rmSync(removedPath, { recursive: true, force: true });
+      // Git reports a locked worktree as neither prunable nor gone after its directory is deleted.
+      const lockedRemovedPath = join(tempDir, "locked-removed");
+      execFileSync(
+        "git",
+        ["worktree", "add", "--lock", "-b", "feature/locked", lockedRemovedPath],
+        {
+          cwd: repoDir,
+        },
+      );
+      rmSync(lockedRemovedPath, { recursive: true, force: true });
+
+      const fromProject = await listGitWorktrees({ cwd: repoDir });
+      const fromJAgentDeskWorktree = await listGitWorktrees({
+        cwd: jagentdeskWorktree.worktreePath,
+      });
+
+      const [mainWorktree, ...linkedWorktrees] = fromProject.map(
+        ({ path, branchName, containsCwd }) => ({ path, branchName, containsCwd }),
+      );
+      expect(mainWorktree).toEqual({ path: repoDir, branchName: "main", containsCwd: true });
+      expect(linkedWorktrees.sort((a, b) => a.path.localeCompare(b.path))).toEqual(
+        [
+          {
+            path: jagentdeskWorktree.worktreePath,
+            branchName: "feature/jagentdesk",
+            containsCwd: false,
+          },
+          { path: manualPath, branchName: "feature/manual", containsCwd: false },
+          { path: detachedPath, branchName: null, containsCwd: false },
+        ].sort((a, b) => a.path.localeCompare(b.path)),
+      );
+      expect(
+        fromJAgentDeskWorktree.filter((worktree) => worktree.containsCwd).map(({ path }) => path),
+      ).toEqual([jagentdeskWorktree.worktreePath]);
     });
 
     it("deletes a jagentdesk worktree even when given a subdirectory path", async () => {

@@ -3149,6 +3149,8 @@ export class Session {
     switch (msg.type) {
       case "checkout_status_request":
         return this.checkoutSession.handleStatusRequest(msg);
+      case "checkout.worktrees.list.request":
+        return this.checkoutSession.handleWorktreesListRequest(msg);
       case "checkout.commits.list.request":
         return this.checkoutSession.handleCommitsListRequest(msg);
       case "checkout.commits.file_diff.request":
