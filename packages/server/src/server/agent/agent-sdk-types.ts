@@ -9,6 +9,12 @@ import type {
   ToolPolicy,
 } from "@jagentdesk/protocol/agent-types";
 import type { AgentAttachment } from "@jagentdesk/protocol/messages";
+import type {
+  ProviderInspection,
+  ProviderUpdateCheck,
+  ProviderUpdateReport,
+  ProviderUpdateResult,
+} from "@jagentdesk/plugin/server/provider";
 import type { JAgentDeskToolCatalog } from "./tools/types.js";
 
 export type {
@@ -785,6 +791,30 @@ export interface ResolveAgentDefaultModeInput {
   signal?: AbortSignal;
 }
 
+export interface AgentClientInstallationContext {
+  /** Aborted when JAgentDesk stops waiting for the result. */
+  signal: AbortSignal;
+}
+
+export interface AgentClientInstallation {
+  installUrl?: string;
+  updateUrl?: string;
+  inspect?(context: AgentClientInstallationContext): Promise<ProviderInspection>;
+  /** See `ProviderInstallation.checkForUpdates` in the plugin contract. */
+  checkForUpdates?(context: AgentClientUpdateCheckContext): Promise<ProviderUpdateCheck>;
+  /** Runs the provider's updater. See `ProviderInstallation.update` in the plugin contract. */
+  update?(context: AgentClientUpdateContext): Promise<ProviderUpdateResult>;
+}
+
+export interface AgentClientUpdateCheckContext extends AgentClientInstallationContext {
+  /** The version `inspect` reported, as written. Absent when it reported none or there is no `inspect`. */
+  installedVersion?: string;
+}
+
+export interface AgentClientUpdateContext extends AgentClientInstallationContext {
+  report(event: ProviderUpdateReport): void;
+}
+
 export interface AgentClient {
   readonly provider: AgentProvider;
   readonly capabilities: AgentCapabilityFlags;
@@ -829,6 +859,12 @@ export interface AgentClient {
    */
   isAvailable(signal?: AbortSignal): Promise<boolean>;
   getDiagnostic?(): Promise<{ diagnostic: string }>;
+  /**
+   * Installation links and the installed version. The same contract as plugin providers'
+   * `ProviderRegistration.installation`; built-ins resolve their own launch inside `inspect`.
+   * Never consulted by availability, discovery, or session creation.
+   */
+  readonly installation?: AgentClientInstallation;
   /**
    * Archive a durable native session (best-effort). Runtime release belongs to AgentSession.close().
    * Called when JAgentDesk archives an agent so the provider's own UI reflects the same state.

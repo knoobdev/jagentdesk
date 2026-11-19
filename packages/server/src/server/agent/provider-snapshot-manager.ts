@@ -49,6 +49,7 @@ import {
   type AgentConfigurationValidationInput,
   validateAgentConfigurationAgainstProvider,
 } from "./agent-configuration-validator.js";
+import { ProviderInstallations } from "./provider-installation/provider-installations.js";
 
 const DEFAULT_REFRESH_TIMEOUT_MS = 120_000;
 const MAX_REFRESH_TIMEOUT_MS = 2_147_483_647;
@@ -238,6 +239,7 @@ export class ProviderSnapshotManager {
   private providerRegistry: Record<AgentProvider, ProviderDefinition>;
   private providerClients: Record<AgentProvider, AgentClient>;
   private readonly ownedClients = new Set<AgentClient>();
+  readonly installations: ProviderInstallations;
   private pluginProvidersSettled = false;
 
   constructor(options: ProviderSnapshotManagerOptions) {
@@ -263,6 +265,14 @@ export class ProviderSnapshotManager {
     this.providerRegistry = this.buildRegistry();
     this.providerClients = { ...this.extraClients } as Record<AgentProvider, AgentClient>;
     for (const client of Object.values(this.providerClients)) this.ownedClients.add(client);
+    this.installations = new ProviderInstallations({
+      logger: options.logger.child({ module: "provider-installations" }),
+      resolveClient: (provider) => {
+        const definition = this.providerRegistry[provider];
+        return definition ? this.ensureClient(provider, definition) : null;
+      },
+      refreshProvider: (provider) => this.refreshSettingsSnapshot({ providers: [provider] }),
+    });
   }
 
   getSnapshot(cwd?: string): ProviderSnapshotEntry[] {
@@ -660,6 +670,7 @@ export class ProviderSnapshotManager {
   }
 
   async shutdown(): Promise<void> {
+    this.installations.close();
     // Materialize a client per enabled provider so provider-owned resources
     // (background processes, sockets, etc.) get a chance to release even when
     // a given provider hasn't been touched yet during this daemon's lifetime.
@@ -669,6 +680,7 @@ export class ProviderSnapshotManager {
 
   destroy(): void {
     this.destroyed = true;
+    this.installations.close();
     this.events.removeAllListeners();
     this.snapshots.clear();
     this.providerLoads.clear();

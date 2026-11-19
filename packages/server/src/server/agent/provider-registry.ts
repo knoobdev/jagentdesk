@@ -644,6 +644,7 @@ function wrapClientProvider(
       : undefined,
     isAvailable: (signal) => inner.isAvailable(signal),
     getDiagnostic: inner.getDiagnostic?.bind(inner),
+    installation: inner.installation,
   };
 }
 

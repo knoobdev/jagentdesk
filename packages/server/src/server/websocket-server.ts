@@ -2503,6 +2503,7 @@ export class VoiceAssistantWebSocketServer {
           : {};
       })(),
       features: {
+        providerInstallation: true,
         binaryChunkingV1: true,
         workspaceBaseBranch: true,
         // COMPAT(checkoutWorktreeList): added after v0.16.2, remove gate after 2027-11-19.
