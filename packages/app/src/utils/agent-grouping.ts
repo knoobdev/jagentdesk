@@ -265,7 +265,7 @@ const MAX_INACTIVE_PER_PROJECT = 5;
 function isAgentTrulyActive(agent: AggregatedAgent): boolean {
   return (
     agent.status === "running" ||
-    (agent.backgroundWork?.count ?? 0) > 0 ||
+    (agent.backgroundWork?.runningCount ?? agent.backgroundWork?.count ?? 0) > 0 ||
     agent.requiresAttention ||
     (agent.pendingPermissionCount ?? 0) > 0
   );

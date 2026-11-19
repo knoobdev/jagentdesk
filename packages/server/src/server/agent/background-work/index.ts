@@ -134,12 +134,13 @@ export class AgentBackgroundWorkStore {
     return items;
   }
 
-  summary(agentId: string): { count: number } | undefined {
+  summary(agentId: string): { count: number; runningCount?: number } | undefined {
     const items = this.providerItems.get(agentId);
     const heartbeats = this.heartbeats.get(agentId);
-    return items || heartbeats
-      ? { count: (items?.length ?? 0) + (heartbeats?.size ?? 0) }
-      : undefined;
+    if (!items && !heartbeats) return undefined;
+    const count = (items?.length ?? 0) + (heartbeats?.size ?? 0);
+    const runningCount = items?.length ?? 0;
+    return runningCount === count ? { count } : { count, runningCount };
   }
 
   clear(agentId: string): AgentBackgroundWorkItem[] | null {

@@ -5339,9 +5339,7 @@ function createToolCatalog(
       const sinceMs = Date.now() - sinceHours * 60 * 60 * 1000;
       const liveSnapshots = agentManager.listAgents();
       const liveAgents = await Promise.all(
-        liveSnapshots.map((snapshot) =>
-          serializeSnapshotWithMetadata(agentStorage, snapshot, childLogger),
-        ),
+        liveSnapshots.map((snapshot) => projectLiveAgent(snapshot)),
       );
       const liveIds = new Set(liveSnapshots.map((snapshot) => snapshot.id));
       const storedRecords = await agentStorage.list();

@@ -35,6 +35,7 @@ import type {
   AgentPersistenceHandle,
 } from "@jagentdesk/protocol/agent-types";
 import type {
+  AgentBackgroundWorkSummary,
   ServerInfoStatusPayload,
   ProjectPlacementPayload,
   ServerCapabilities,
@@ -118,7 +119,7 @@ export interface Agent {
   id: string;
   provider: AgentProvider;
   status: AgentLifecycleStatus;
-  backgroundWork?: { count: number };
+  backgroundWork?: AgentBackgroundWorkSummary;
   activeTurn: { turnId: string | null; startedAt: Date | null } | null;
   createdAt: Date;
   updatedAt: Date;

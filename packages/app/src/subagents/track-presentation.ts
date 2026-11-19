@@ -1,3 +1,5 @@
+import { isAgentRunning } from "@jagentdesk/protocol/agent-state-bucket";
+import type { AgentBackgroundWorkSummary } from "@jagentdesk/protocol/messages";
 import type { SidebarStateBucket } from "@/utils/sidebar-agent-state";
 import type { SubagentRow } from "./select";
 import { providerSubagentLifecycleStatus } from "./provider-store";
@@ -13,10 +15,10 @@ function presentationStatus(row: SubagentRow) {
  */
 export function deriveSubagentStatusBucket(
   status: SubagentRow["status"],
-  backgroundWork?: { count: number } | null,
+  backgroundWork?: AgentBackgroundWorkSummary | null,
 ): SidebarStateBucket {
   if (status === "error") return "failed";
-  if (status === "running" || (backgroundWork?.count ?? 0) > 0) return "running";
+  if (isAgentRunning({ status, backgroundWork })) return "running";
   return "done";
 }
 
