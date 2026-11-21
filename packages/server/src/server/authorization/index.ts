@@ -1,6 +1,7 @@
 import type { SessionInboundMessage, SessionOutboundMessage } from "../messages.js";
 import { DAEMON_PERMISSIONS, type DaemonPermission } from "@jagentdesk/protocol/messages";
 import {
+  type PermissionRequirement,
   requiredPermissionForInbound,
   requiredPermissionForOutbound,
 } from "./operation-permissions.js";
@@ -48,8 +49,10 @@ export class SessionAuthorization {
     return this.permissions.has(permission);
   }
 
-  private allows(permission: DaemonPermission | null): boolean {
-    return permission === null || this.permissions.has(permission);
+  private allows(requirement: PermissionRequirement): boolean {
+    if (requirement === null) return true;
+    if (typeof requirement === "string") return this.permissions.has(requirement);
+    return requirement.some((permission) => this.permissions.has(permission));
   }
 }
 
@@ -68,5 +71,7 @@ export function permissionsForLegacyHubScopes(
 // fork's scope authorization; the Hub relationship path is vestigial under the
 // Tailscale-only transport (see docs/decisions/ADR-0001).
 export function hubScopesForPermissions(permissions: readonly DaemonPermission[]): string[] {
-  return permissions.includes("hub.execute") ? [LEGACY_HUB_EXECUTION_SCOPE] : [];
+  return permissions.includes("hub.execute")
+    ? [LEGACY_HUB_EXECUTION_SCOPE, "project.list.request", "project.list.response"]
+    : [];
 }

@@ -606,6 +606,14 @@ export class HubRelationshipHarness {
     }
   }
 
+  async requestOrdinary(
+    message: SessionInboundMessage & { requestId: string },
+  ): Promise<SessionOutboundMessage> {
+    const socket = this.latestSocket().socket;
+    socket.receive(message);
+    return socket.messageFor(message.requestId);
+  }
+
   async statusViaRpc(): Promise<Record<string, unknown>> {
     const response = await this.requestLocal({
       type: "hub.management.daemon.get_status.request",
