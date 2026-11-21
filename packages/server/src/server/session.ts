@@ -1788,7 +1788,16 @@ export class Session {
     workspace: PersistedWorkspaceRecord,
   ): Promise<void> {
     try {
-      await this.workspaceGitObserver.warmGitData(workspace);
+      await this.workspaceGitObserver.syncObserverForWorkspace(workspace);
+      if (workspace.kind !== "directory") {
+        // Recovery can refresh Git before this session starts observing again.
+        // Publish the current status to replace any read made while archived.
+        const snapshot = await this.workspaceGitService.getSnapshot(workspace.cwd, {
+          includeForge: false,
+        });
+        this.checkoutSession.emitStatusUpdate(workspace.cwd, snapshot);
+      }
+      await this.emitWorkspaceUpdateForWorkspaceId(workspace.workspaceId);
     } catch (error) {
       this.sessionLogger.warn(
         { err: error, workspaceId: workspace.workspaceId },
