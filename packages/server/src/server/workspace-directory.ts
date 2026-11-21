@@ -76,6 +76,7 @@ export interface WorkspaceDirectoryDeps {
   workspaceRegistry: {
     list(): Promise<PersistedWorkspaceRecord[]>;
   };
+  getArchivingAt(workspaceId: string): string | null;
   listAgentPayloads(): Promise<AgentSnapshotPayload[]>;
   listProviderSubagentActivity(): Promise<ProviderSubagentWorkspaceActivity[]>;
   listTerminalActivityContributions(): Promise<
@@ -154,7 +155,6 @@ export function workspaceIdsForProjects(
 }
 
 export class WorkspaceDirectory {
-  private readonly archivingByWorkspaceId = new Map<string, string>();
   /**
    * Per-workspace last-seen winning bucket + entered-at. Persists across
    * `buildDescriptorMap` calls inside the daemon process; reset on cold start.
@@ -187,18 +187,6 @@ export class WorkspaceDirectory {
   });
 
   constructor(private readonly deps: WorkspaceDirectoryDeps) {}
-
-  markArchiving(workspaceIds: Iterable<string>, archivingAt: string): void {
-    for (const workspaceId of workspaceIds) {
-      this.archivingByWorkspaceId.set(workspaceId, archivingAt);
-    }
-  }
-
-  clearArchiving(workspaceIds: Iterable<string>): void {
-    for (const workspaceId of workspaceIds) {
-      this.archivingByWorkspaceId.delete(workspaceId);
-    }
-  }
 
   async buildDescriptorMap(options: {
     includeGitData: boolean;
@@ -251,7 +239,7 @@ export class WorkspaceDirectory {
       const workspaceId = includedWorkspaces[i].workspaceId;
       descriptorsByWorkspaceId.set(workspaceId, {
         ...workspaceDescriptors[i],
-        archivingAt: this.archivingByWorkspaceId.get(workspaceId) ?? null,
+        archivingAt: this.deps.getArchivingAt(workspaceId),
       });
     }
 

@@ -728,7 +728,6 @@ export class VoiceAssistantWebSocketServer {
   private readonly voiceSpeakHandlers = new Map<string, VoiceSpeakHandler>();
   private readonly voiceCallerContexts = new Map<string, VoiceCallerContext>();
   private readonly workspaceSetupSnapshots = new Map<string, WorkspaceSetupSnapshot>();
-  private readonly workspaceArchiveOperations = new WorkspaceArchiveOperations();
   private readonly providerSnapshotManager: ProviderSnapshotManager;
   private onLifecycleIntent!: ((intent: SessionLifecycleIntent) => void) | null;
   private onBranchChanged!:
@@ -833,6 +832,7 @@ export class VoiceAssistantWebSocketServer {
     sshService?: SshService | null,
     argocdService?: ArgoCdService | null,
     sideloadService?: SideloadService | null,
+    private readonly workspaceArchiveOperations: WorkspaceArchiveOperations = new WorkspaceArchiveOperations(),
   ) {
     this.logger = logger.child({ module: "websocket-server" });
     this.argocdService = argocdServiceOrNull(argocdService);
@@ -1360,6 +1360,19 @@ export class VoiceAssistantWebSocketServer {
           )
           .map((connection) => connection.session),
       ),
+    );
+  }
+
+  public async publishWorkspaceUpdates(workspaceIds: Iterable<string>): Promise<void> {
+    const ids = Array.from(workspaceIds);
+    await Promise.all(
+      this.listTrustedSessions().map(async (session) => {
+        try {
+          await session.emitWorkspaceUpdatesForExternalWorkspaceIds(ids);
+        } catch (error) {
+          this.logger.warn({ err: error }, "Failed to publish workspace updates");
+        }
+      }),
     );
   }
 
@@ -2049,6 +2062,7 @@ export class VoiceAssistantWebSocketServer {
       getTransportBufferedAmount: options.getTransportBufferedAmount,
       onLifecycleIntent: options.onLifecycleIntent,
       logger: options.connectionLogger.child({ module: "session" }),
+      publishWorkspaceArchiveUpdates: (workspaceIds) => this.publishWorkspaceUpdates(workspaceIds),
       onWorkspaceRecovered: async (workspace) => {
         await Promise.all(
           this.listTrustedSessions().map((activeSession) =>
