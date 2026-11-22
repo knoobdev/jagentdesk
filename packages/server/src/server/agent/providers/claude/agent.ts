@@ -1771,6 +1771,7 @@ export class ClaudeAgentClient implements AgentClient {
     }
     const env = this.buildProviderEnv();
     let discoveredModelIds = new Set<string>();
+    let incomplete = false;
     try {
       const advertisedModels = await runProviderRefreshActivity(context, "models", () =>
         this.discoverModels({
@@ -1787,6 +1788,7 @@ export class ClaudeAgentClient implements AgentClient {
       );
     } catch (error) {
       context?.signal.throwIfAborted();
+      incomplete = true;
       this.logger.warn(
         { err: error },
         "Claude model discovery failed; omitting discovery-required models",
@@ -1804,6 +1806,7 @@ export class ClaudeAgentClient implements AgentClient {
     return {
       models,
       ...modeCatalog,
+      ...(incomplete ? { incomplete } : {}),
     };
   }
 

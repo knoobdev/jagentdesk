@@ -2,6 +2,13 @@
 
 This guide walks through adding a new agent provider end-to-end. There are two integration patterns, and this doc covers both.
 
+## Catalog refresh
+
+The daemon refreshes enabled providers about every 30 minutes, staggered one provider per slot.
+A manual refresh delays that provider's next slot. Background refresh keeps a ready catalog when
+a probe fails, reports unavailable, or returns an incomplete catalog. It uses a soft provider
+refresh so OpenCode keeps its shared server. Shutdown cancels the schedule and aborts running probes.
+
 ## Two Integration Patterns
 
 ### ACP (Agent Client Protocol) -- recommended
