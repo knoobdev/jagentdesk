@@ -1658,7 +1658,7 @@ export function inspect() { void Surface; return {}; }`,
     await runtime.stopAll();
   });
 
-  it("rejects a handler result that does not match its RPC output schema", async () => {
+  it("forwards a handler result for the client to validate against its RPC output schema", async () => {
     const directory = await createPlugin(
       "invalid-output",
       `import { z } from "zod";
@@ -1677,7 +1677,9 @@ export default function contribute(plugin: any) {
 
     await runtime.startPlugin("invalid-output", directory);
 
-    await expect(runtime.invoke("invalid-output", "broken", {})).rejects.toThrow();
+    await expect(runtime.invoke("invalid-output", "broken", {})).resolves.toEqual({
+      value: "wrong",
+    });
     await runtime.stopAll();
   });
 

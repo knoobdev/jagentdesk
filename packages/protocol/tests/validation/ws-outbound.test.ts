@@ -6,7 +6,7 @@ import { createJiti } from "jiti";
 import { describe, expect, it } from "vitest";
 import { WSInboundMessageSchema } from "../../src/messages.js";
 import type { z } from "zod";
-import { WSOutboundMessageSchema } from "../../src/messages.js";
+import { PluginRpcInvokeResponseSchema, WSOutboundMessageSchema } from "../../src/messages.js";
 import { validateWSOutboundMessage } from "../../src/validation/ws-outbound.js";
 
 interface GeneratedSchema {
@@ -527,6 +527,11 @@ const SourceSchema = z.object({
       message: { payload: { agent: { capabilities: { supportsRewindConversation: false } } } },
     });
   });
+});
+
+it("accepts omitted RPC output so the receiving client can apply schema defaults", () => {
+  const message = { type: "plugin.rpc.invoke.response", payload: { requestId: "default-output" } };
+  expect(PluginRpcInvokeResponseSchema.safeParse(message).success).toBe(true);
 });
 
 // Requests travel client→daemon and are parsed by the daemon's runtime `WSInboundMessageSchema`
