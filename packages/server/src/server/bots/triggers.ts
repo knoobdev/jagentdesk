@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { z } from "zod";
+import type { Logger } from "pino";
 import type { Bot } from "@jagentdesk/protocol/bots/types";
 import type { JiraService } from "../jira/service.js";
 import { search } from "../jira/issue-ops.js";
@@ -28,13 +29,24 @@ export class LocalBotTriggers implements BotTriggerSource {
       gh?: GhCommand;
       now?: () => number;
       jiraEnabled: () => boolean;
+      logger?: Pick<Logger, "warn">;
     },
   ) {}
   async poll(bot: Bot): Promise<BotTrigger[]> {
     if (this.polling.has(bot.id)) return [];
     this.polling.add(bot.id);
     try {
-      return [...(await this.github(bot)), ...(await this.jira(bot))];
+      const results = await Promise.allSettled([this.github(bot), this.jira(bot)]);
+      const events: BotTrigger[] = [];
+      for (const [index, result] of results.entries()) {
+        if (result.status === "fulfilled") events.push(...result.value);
+        else
+          this.deps.logger?.warn(
+            { err: result.reason, botId: bot.id, source: index === 0 ? "github" : "jira" },
+            "Bot trigger source failed",
+          );
+      }
+      return events;
     } finally {
       this.polling.delete(bot.id);
     }

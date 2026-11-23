@@ -1803,6 +1803,7 @@ export async function createJAgentDeskDaemon(
         storage: botStorage,
         jira: jiraService,
         jiraEnabled: () => pluginRuntime.builtin.isEnabled("jira"),
+        logger,
       }),
     push: { send: (payload) => wsServer?.sendBotPush(payload) ?? Promise.resolve() },
   });

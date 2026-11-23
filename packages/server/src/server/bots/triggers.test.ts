@@ -64,3 +64,44 @@ it("does not query GitHub before auth; polls at five minutes and deduplicates ac
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+it("delivers GitHub triggers even when the configured Jira source fails", async () => {
+  const home = mkdtempSync(join(tmpdir(), "bots-trigger-"));
+  const storage = new BotStorage(home);
+  try {
+    const bot = storage.createBot({
+      slug: "builder",
+      name: "Builder",
+      identity: "Help",
+      provider: "claude",
+      model: "default",
+      modeId: "default",
+    });
+    const source = new LocalBotTriggers({
+      storage,
+      jiraEnabled: () => true,
+      jira: {
+        listConnections: () => {
+          throw new Error("Jira is unavailable");
+        },
+        site: () => {
+          throw new Error("No site");
+        },
+      },
+      gh: async (args) =>
+        args[0] === "auth"
+          ? ""
+          : JSON.stringify([
+              {
+                url: "https://github.com/jagentdesk/jagentdesk/pull/1",
+                title: "Fix",
+                updatedAt: "2026-01-01",
+              },
+            ]),
+    });
+    expect((await source.poll(bot)).map((event) => event.source)).toEqual(["github", "github"]);
+  } finally {
+    storage.close();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
