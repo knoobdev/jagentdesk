@@ -1,6 +1,6 @@
 {
   "id": "lifecycle-logger",
   "requirements": {
-    "jagentdesk": ">=0.8.0"
+    "jagentdesk": ">=0.14.0-beta.1"
   }
 }

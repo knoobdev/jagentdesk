@@ -46,7 +46,7 @@ export type PluginProcessRequest =
       providerId: string;
       options: ProviderCatalogOptions;
     }
-  | { type: "hook"; requestId: string; kind: "event" | "before"; name: string; input: unknown }
+  | { type: "hook"; requestId: string; name: string; input: unknown }
   | { type: "hook.cancel"; requestId: string }
   | { type: "invoke"; requestId: string; method: string; input: unknown }
   | {
@@ -68,12 +68,12 @@ export type PluginProcessRequest =
 
 export type PluginProcessMessage =
   | { type: "settings.changed"; settingsId: string }
-  | { type: "hooks.changed"; hooks: { events: string[]; before: string[] } }
+  | { type: "hooks.changed"; hooks: string[] }
   | {
       type: "ready";
       methods: string[];
       providers: PluginProviderMetadata[];
-      hooks?: { events: string[]; before: string[] };
+      hooks?: string[];
     }
   | { type: "result"; requestId: string; output: unknown }
   | { type: "error"; requestId: string; error: string }
@@ -97,7 +97,7 @@ export type PluginProcessMessage =
   | { type: "jagentdesk_frame"; data: string | Uint8Array; isBinary: boolean }
   | { type: "jagentdesk_close" };
 
-const hooksSchema = z.object({ events: z.array(z.string()), before: z.array(z.string()) }).strict();
+const hooksSchema = z.array(z.string());
 
 const providerMetadataSchema = z
   .object({
@@ -190,7 +190,6 @@ export const PluginProcessRequestSchema: z.ZodType<PluginProcessRequest> = z.dis
       .object({
         type: z.literal("hook"),
         requestId: z.string(),
-        kind: z.enum(["event", "before"]),
         name: z.string(),
         input: z.unknown(),
       })

@@ -991,7 +991,7 @@ export async function createJAgentDeskDaemon(
   });
   workspaceRegistry.subscribeToMutations((mutation) => {
     if (mutation.kind === "archive" && mutation.workspace)
-      pluginRuntime.emit("workspace.archived", {
+      pluginRuntime.emit("workspace.archive.after", {
         workspace: describeHookWorkspace(mutation.workspace),
       });
   });
@@ -1273,6 +1273,7 @@ export async function createJAgentDeskDaemon(
         worktreesRoot: config.worktreesRoot,
         createJAgentDeskWorktree: async (workflowInput, workflowOptions) => {
           return createRegisteredJAgentDeskWorktree(workflowInput, {
+            lifecycle: pluginRuntime,
             github,
             ...(workflowOptions?.resolveDefaultBranch
               ? {

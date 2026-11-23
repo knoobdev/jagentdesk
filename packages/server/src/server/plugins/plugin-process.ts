@@ -268,6 +268,7 @@ export function createPluginWorker(options: {
         register(contract, (input, context) => handler(contract.input.parse(input), context)),
       registerProvider,
       registerSettings,
+      addHook: hooks.addHook,
       on: hooks.on,
       before: hooks.before,
     });
@@ -506,20 +507,18 @@ export function createPluginWorker(options: {
         });
         return;
       }
-      void hooks
-        .invoke(message.requestId, message.kind, message.name, message.input, jagentdesk)
-        .then(
-          (output) => {
-            return send({ type: "result", requestId: message.requestId, output });
-          },
-          (error) => {
-            return send({
-              type: "error",
-              requestId: message.requestId,
-              error: describeError(error),
-            });
-          },
-        );
+      void hooks.invoke(message.requestId, message.name, message.input, jagentdesk).then(
+        (output) => {
+          return send({ type: "result", requestId: message.requestId, output });
+        },
+        (error) => {
+          return send({
+            type: "error",
+            requestId: message.requestId,
+            error: describeError(error),
+          });
+        },
+      );
       return;
     }
   }

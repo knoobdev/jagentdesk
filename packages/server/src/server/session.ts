@@ -632,6 +632,7 @@ export interface SessionOptions {
   daemonRuntimeConfig?: DaemonRuntimeConfig;
   getWebSocketRuntimeMetrics?: () => DaemonWebSocketRuntimeDiagnosticSnapshot | null;
   pluginRuntime?: {
+    wait: import("./plugins/lifecycle/index.js").PluginLifecycle["wait"];
     before?: import("./plugins/lifecycle/index.js").PluginLifecycle["before"];
     emit?: import("./plugins/lifecycle/index.js").PluginLifecycle["emit"];
     listPlugins(): Promise<import("@jagentdesk/protocol/messages").PluginListItem[]>;
@@ -7472,6 +7473,7 @@ export class Session {
     },
   ): Promise<CreateJAgentDeskWorktreeResult> {
     const result = await createJAgentDeskWorktree(input, {
+      lifecycle: this.pluginRuntime,
       github: this.github,
       ...(options?.resolveDefaultBranch
         ? { resolveDefaultBranch: options.resolveDefaultBranch }
@@ -8046,7 +8048,7 @@ export class Session {
       if (this.pluginRuntime?.before) {
         const { type, requestId, ...input } = request;
         request = {
-          ...(await this.pluginRuntime.before("workspace.create", input)),
+          ...(await this.pluginRuntime.before("workspace.create.before", input)),
           type,
           requestId,
         };
