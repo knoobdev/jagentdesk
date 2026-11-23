@@ -1,3 +1,4 @@
+import { createWorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
 import { DaemonClient } from "@jagentdesk/client";
 import { createWebSocketTransportFactory } from "@jagentdesk/client/internal/daemon-client-transport";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -109,6 +110,7 @@ function createRelayServerHarness(
     null,
     { allowedOrigins: new Set(["*"]) },
     createWorkspaceAutoNameStub(),
+    createWorkspaceRuntimeStore(),
     undefined,
     undefined,
     undefined,

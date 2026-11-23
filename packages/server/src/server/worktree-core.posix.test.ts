@@ -1547,7 +1547,17 @@ describe.skipIf(isPlatform("win32"))("worktree-core POSIX-only", () => {
           branchName: "follow-up",
           jagentdeskHome,
         },
-        createCoreDeps({ github }),
+        {
+          ...createCoreDeps({ github }),
+          lifecycle: {
+            before: async (name, request) =>
+              validateBeforeResult(
+                name,
+                validateBeforeRequest(name, { ...request, branch: "hook-follow-up" }),
+                request,
+              ),
+          },
+        },
       );
 
       const prHead = execFileSync("git", [
@@ -1561,15 +1571,53 @@ describe.skipIf(isPlatform("win32"))("worktree-core POSIX-only", () => {
         kind: "branch-off",
         baseBranch: "refs/remotes/origin/daemon-shutdown-diagnostics",
         startPoint: "refs/jagentdesk/change-requests/1790",
-        branchName: "follow-up",
+        branchName: "hook-follow-up",
       });
-      expect(result.worktree.branchName).toBe("follow-up");
+      expect(result.worktree.branchName).toBe("hook-follow-up");
       expect(git(result.worktree.worktreePath, "rev-parse", "HEAD")).toBe(prHead);
       expect(getBranchUpstream(result.worktree.worktreePath)).toBeNull();
       expect(result.worktree.comparisonBaseRef).toBe(
         "refs/remotes/origin/daemon-shutdown-diagnostics",
       );
       expect(git(repoDir, "branch", "--list", "daemon-shutdown-diagnostics")).toBe("");
+    });
+
+    test("a before hook can replace a PR branch-off base without retaining the fetched PR head", async () => {
+      const { tempDir, repoDir, jagentdeskHome } = createSameRepoGitHubPrRemoteRepo();
+      cleanupPaths.push(tempDir);
+      const deps = createCoreDeps();
+      const result = await createCoreWorktree(
+        {
+          cwd: repoDir,
+          action: "branch-off",
+          githubPrNumber: 1790,
+          branchName: "hook-base",
+          jagentdeskHome,
+          runSetup: false,
+        },
+        {
+          ...deps,
+          lifecycle: {
+            before: async (name, request) =>
+              validateBeforeResult(
+                name,
+                validateBeforeRequest(name, { ...request, baseRef: "main" }),
+                request,
+              ),
+          },
+        },
+      );
+      expect(result.intent).toEqual({
+        kind: "branch-off",
+        branchName: "hook-base",
+        baseBranch: "main",
+      });
+      expect(git(result.worktree.worktreePath, "rev-parse", "HEAD")).toBe(
+        git(repoDir, "rev-parse", "main"),
+      );
+      expect(git(result.worktree.worktreePath, "rev-parse", "HEAD")).not.toBe(
+        git(repoDir, "rev-parse", "refs/jagentdesk/change-requests/1790"),
+      );
     });
 
     test("branches off a same-repo pull request in a clone whose origin is a fork", async () => {

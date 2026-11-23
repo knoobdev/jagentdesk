@@ -1201,7 +1201,10 @@ test.each([
       archivedAt: stamp,
       agentStorage: {
         list: async () =>
-          agents.map(([id, archivedAt]) => ({ id, archivedAt })) as StoredAgentRecord[],
+          [
+            ...agents.map(([id, archivedAt]) => ({ id, archivedAt, workspaceId: "workspace" })),
+            { id: "foreign", archivedAt: stamp, workspaceId: "other-workspace" },
+          ] as StoredAgentRecord[],
       },
       unarchiveAgent: async (id) => {
         restored.push(id);
@@ -1219,7 +1222,9 @@ test("a canceled archive with no matching agents leaves earlier closed agents ar
     allowLegacyFallback: false,
     agentStorage: {
       list: async () =>
-        [{ id: "closed", archivedAt: "2026-11-09T09:59:59.000Z" }] as StoredAgentRecord[],
+        [
+          { id: "closed", workspaceId: "workspace", archivedAt: "2026-11-09T09:59:59.000Z" },
+        ] as StoredAgentRecord[],
     },
     unarchiveAgent: async (id) => {
       restored.push(id);

@@ -214,7 +214,18 @@ function creationIntentFromRequest(
   original: WorktreeCreationIntent,
 ): WorktreeCreationIntent {
   if (request.kind === "branch-off") {
-    return { kind: request.kind, branchName: request.branch, baseBranch: request.baseRef };
+    return {
+      kind: request.kind,
+      branchName: request.branch,
+      baseBranch: request.baseRef,
+      // PR heads can differ from their comparison base. A hook that changes only
+      // placement or branch keeps the fetched head; a new base replaces it.
+      ...(original.kind === "branch-off" &&
+      original.baseBranch === request.baseRef &&
+      original.startPoint
+        ? { startPoint: original.startPoint }
+        : {}),
+    };
   }
   if (request.kind === "checkout-branch") {
     return {

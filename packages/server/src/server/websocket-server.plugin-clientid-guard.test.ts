@@ -1,3 +1,4 @@
+import { createWorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -91,7 +92,7 @@ function createHarness(): Harness {
   const home = mkdtempSync(path.join(tmpdir(), "jagentdesk-plugin-guard-"));
   const httpServer = createServer();
   // Positional arg order mirrors the constructor exactly. The `undefined` at the
-  // clusterRegistry slot (position 22) is load-bearing: omitting it shifts every
+  // clusterRegistry slot is load-bearing: omitting it shifts every
   // later argument and drops checkoutDiffManager (the bug in the older harnesses).
   const wsServer = new VoiceAssistantWebSocketServer(
     httpServer,
@@ -117,6 +118,7 @@ function createHarness(): Harness {
       scheduleForWorktree: () => {},
       scheduleForDirectory: () => {},
     }),
+    createWorkspaceRuntimeStore(),
     undefined, // auth — no pairing, so no signed hello is required
     undefined, // speech
     undefined, // terminalManager
