@@ -191,6 +191,9 @@ describe("static built-in plugin registry", () => {
     for (const rpc of [
       "checkout.forge.set_auto_merge.request",
       "forge.search.request",
+      "checkout.worktrees.list.request",
+      "workspace.base_branch.set.request",
+      "workspace.archive.undo.request",
       "pairing.device.list.request",
       "schedule.create.request",
       "orchestration.status.request",

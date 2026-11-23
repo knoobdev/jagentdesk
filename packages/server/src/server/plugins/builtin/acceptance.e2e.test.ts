@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { once } from "node:events";
+import { execFileSync } from "node:child_process";
 import pino from "pino";
 import { WebSocket } from "ws";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -88,6 +89,41 @@ test("36.6 #2: Docker RPCs and new agent catalogs change live; old agents retain
   expect((await tools(after.id)).filter((name) => name.startsWith("docker_"))).toEqual([]);
   const reenabled = await agent();
   expect((await tools(reenabled.id)).some((name) => name.startsWith("docker_"))).toBe(true);
+});
+
+test("Forge Hub toggles preserve B9 core worktree discovery and per-agent tool catalogs", async () => {
+  const repo = path.join(daemon.jagentdeskHome, "core-worktree-discovery");
+  execFileSync("git", ["init", "-b", "main", repo], { stdio: "pipe" });
+  execFileSync(
+    "git",
+    [
+      "-c",
+      "user.name=JAgentDesk Test",
+      "-c",
+      "user.email=test@jagentdesk.local",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "--allow-empty",
+      "-m",
+      "initial",
+    ],
+    { cwd: repo, stdio: "pipe" },
+  );
+  const before = await agent();
+  expect((await tools(before.id)).some((name) => name.startsWith("forge_"))).toBe(true);
+  await client.setBuiltinPlugin("forge-hub", false);
+  try {
+    await expect(client.forgeListConnections()).rejects.toMatchObject({ code: "plugin_disabled" });
+    expect(await client.listCheckoutWorktrees(repo)).toEqual(
+      expect.arrayContaining([expect.objectContaining({ branchName: "main", containsCwd: true })]),
+    );
+    const after = await agent();
+    expect((await tools(after.id)).filter((name) => name.startsWith("forge_"))).toEqual([]);
+    expect((await tools(before.id)).some((name) => name.startsWith("forge_"))).toBe(true);
+  } finally {
+    await client.setBuiltinPlugin("forge-hub", true);
+  }
 });
 
 test("36.6 #3: declining a cascade leaves SSH and Remote tasks unchanged; accepting changes both", async () => {

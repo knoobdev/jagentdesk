@@ -1209,6 +1209,21 @@
       },
       "additionalProperties": false
     },
+    "builtinPlugins": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": ["enabled"]
+      }
+    },
     "pluginsEnabled": {
       "type": "boolean"
     },
