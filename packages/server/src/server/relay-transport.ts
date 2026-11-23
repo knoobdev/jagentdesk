@@ -60,6 +60,7 @@ const RELAY_WEBSOCKET_OPTIONS = {
 } as const;
 
 function createDefaultRelayWebSocket(url: string): RelayWebSocketLike {
+  // Relay is a separate transport; HTTP(S)_PROXY applies to fetch and Hub sockets only.
   return new WebSocket(url, RELAY_WEBSOCKET_OPTIONS);
 }
 

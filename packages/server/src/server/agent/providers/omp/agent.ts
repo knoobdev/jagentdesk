@@ -831,7 +831,6 @@ export class OmpAgentSession implements AgentSession {
     const turnId = randomUUID();
     this.live = true;
     this.activeTurnId = turnId;
-    this.rememberClientMessage(options?.clientMessageId ?? null, payload.text);
     this.activeAssistantMessageId = null;
     this.activeTurnTerminalAssistantMessage = null;
     this.activeTurnStarted = false;
@@ -842,6 +841,7 @@ export class OmpAgentSession implements AgentSession {
     const payload = await convertPromptInput(prompt, { model: this.state.model });
     if (this.closed) throw new Error("OMP session is closed");
     if (this.activeTurnId !== turnId) return { turnId };
+    this.rememberClientMessage(options?.clientMessageId ?? null, payload.text);
     this.activeNoTurnPromptText = payload.text;
     this.usagePoller.startTurn();
     if (announceTurn) {
@@ -908,7 +908,9 @@ export class OmpAgentSession implements AgentSession {
   ): Promise<SteerResult> {
     if (this.closed || this.activeTurnId !== options.expectedTurnId)
       return { status: "unavailable" };
-    const payload = convertPromptInput(prompt, { model: this.state.model });
+    const payload = await convertPromptInput(prompt, { model: this.state.model });
+    if (this.closed || this.activeTurnId !== options.expectedTurnId)
+      return { status: "unavailable" };
     if (this.parseSlashCommandInput(payload.text)) return { status: "unavailable" };
     const submission = this.rememberClientMessage(options.clientMessageId ?? null, payload.text);
     try {

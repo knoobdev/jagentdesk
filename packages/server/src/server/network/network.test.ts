@@ -5,7 +5,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
-import { connect } from "node:net";
+import { connect, createServer as createTcpServer } from "node:net";
+import { connectThroughProxy } from "../ssh/proxy-socket.js";
+import { generateKeyPairSync, sign, verify } from "node:crypto";
+import pino from "pino";
+import { startRelayTransport } from "../relay-transport.js";
+import { relayChallengeMessage } from "@jagentdesk/relay/ownership";
 import { afterEach, expect, test } from "vitest";
 import { WebSocket, WebSocketServer } from "ws";
 import { getGlobalDispatcher, setGlobalDispatcher } from "undici";
@@ -311,3 +316,111 @@ test.each(["user:@", ":secret@", "user:secret@"])(
     expect(authorizations).toEqual([expected, expected]);
   },
 );
+
+test("relay control and data sockets bypass proxies with a conflicting NO_PROXY", async () => {
+  const recorder = await proxy();
+  initializeEnvironmentProxy({
+    HTTP_PROXY: recorder.url,
+    HTTPS_PROXY: recorder.url,
+    NO_PROXY: "unrelated.invalid",
+  });
+  const keys = generateKeyPairSync("ed25519");
+  const publicKey = keys.publicKey.export({ format: "jwk" });
+  const server = createServer((_, response) => response.end("direct"));
+  const sockets = new WebSocketServer({ server });
+  const authenticated: string[] = [];
+  const attached = Promise.withResolvers<void>();
+  sockets.on("connection", (socket, request) => {
+    const url = new URL(request.url!, "http://localhost");
+    const connectionId = url.searchParams.get("connectionId");
+    const nonce = connectionId ?? "control-challenge";
+    socket.send(JSON.stringify({ type: "relay_challenge", v: 1, nonce }));
+    socket.on("message", (data) => {
+      const message = JSON.parse(String(data));
+      if (message.type !== "relay_auth") return;
+      expect(message.publicKey).toBe(publicKey.x);
+      expect(
+        verify(
+          null,
+          Buffer.from(relayChallengeMessage("srv_proxy_test", nonce)),
+          keys.publicKey,
+          Buffer.from(message.signature, "base64url"),
+        ),
+      ).toBe(true);
+      authenticated.push(connectionId ?? "control");
+      socket.send(JSON.stringify({ type: "relay_auth_ok" }));
+      if (connectionId) attached.resolve();
+      else socket.send(JSON.stringify({ type: "connected", connectionId: "data-proxy-test" }));
+    });
+  });
+  const endpoint = await listen(server);
+  const controller = startRelayTransport({
+    logger: pino({ level: "silent" }),
+    relayEndpoint: endpoint,
+    relayUseTls: false,
+    serverId: "srv_proxy_test",
+    relayOwnership: {
+      publicKeyB64url: publicKey.x!,
+      signOwnership(serverId, nonce) {
+        return sign(
+          null,
+          Buffer.from(relayChallengeMessage(serverId, nonce)),
+          keys.privateKey,
+        ).toString("base64url");
+      },
+    },
+    attachSocket: async () => {},
+  });
+  try {
+    await attached.promise;
+    expect(authenticated).toEqual(["control", "data-proxy-test"]);
+    expect(webSocketProxyAgent("wss://127.0.0.1:41823")).toBeUndefined();
+    expect(await (await fetch(`http://${endpoint}/health`)).text()).toBe("direct");
+    expect(recorder.tunnels).toEqual([]);
+  } finally {
+    await controller.stop();
+    for (const socket of sockets.clients) socket.terminate();
+    await new Promise<void>((resolve) => sockets.close(() => resolve()));
+  }
+}, 15_000);
+
+test("tsnet loopback SOCKS dial bypasses HTTP proxy and NO_PROXY settings", async () => {
+  const recorder = await proxy();
+  initializeEnvironmentProxy({
+    HTTP_PROXY: recorder.url,
+    HTTPS_PROXY: recorder.url,
+    NO_PROXY: "unrelated.invalid",
+  });
+  const requests: Buffer[] = [];
+  const server = createTcpServer((socket) => {
+    let greeted = false;
+    socket.on("data", (chunk: Buffer) => {
+      requests.push(chunk);
+      if (!greeted) {
+        greeted = true;
+        socket.write(Buffer.from([5, 0]));
+      } else {
+        socket.write(Buffer.from([5, 0, 0, 1, 127, 0, 0, 1, 0, 22]));
+      }
+    });
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Missing SOCKS address");
+  try {
+    const socket = await connectThroughProxy(
+      { type: "socks5", host: "127.0.0.1", port: address.port },
+      "100.64.0.2",
+      22,
+    );
+    socket.destroy();
+    expect(requests).toEqual([
+      Buffer.from([5, 1, 0]),
+      Buffer.from([5, 1, 0, 1, 100, 64, 0, 2, 0, 22]),
+    ]);
+    expect(recorder.tunnels).toEqual([]);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});

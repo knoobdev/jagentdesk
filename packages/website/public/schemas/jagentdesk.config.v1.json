@@ -360,6 +360,22 @@
           },
           "additionalProperties": {}
         },
+        "relay": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "endpoint": {
+              "type": "string",
+              "minLength": 1
+            },
+            "useTls": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
         "git": {
           "type": "object",
           "properties": {
@@ -1286,6 +1302,13 @@
                   "type": "string"
                 }
               },
+              "options": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
               "params": {
                 "type": "object",
                 "propertyNames": {
@@ -1548,7 +1571,7 @@
                 },
                 "voice": {
                   "type": "string",
-                  "enum": ["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
+                  "minLength": 1
                 },
                 "speakerId": {
                   "type": "integer",

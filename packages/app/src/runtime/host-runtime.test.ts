@@ -111,10 +111,6 @@ class FakeDaemonClient {
     }
   }
 
-  getLastServerInfoMessage() {
-    return null;
-  }
-
   getConnectionState(): ConnectionState {
     return this.state;
   }

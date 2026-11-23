@@ -2130,7 +2130,7 @@ describe("create_agent MCP tool", () => {
       })
         .toString()
         .trim();
-      const metadata = readJAgentDeskWorktreeMetadata(agentCwd);
+      const metadata = await readJAgentDeskWorktreeMetadata(agentCwd);
 
       expect(metadata).toMatchObject({
         version: 2,
@@ -2540,7 +2540,7 @@ describe("create_agent MCP tool", () => {
         title: "Generated Checkout Workspace Title",
         branch: "existing-feature",
       });
-      expect(readJAgentDeskWorktreeMetadata(agentCwd)).toMatchObject({
+      expect(await readJAgentDeskWorktreeMetadata(agentCwd)).toMatchObject({
         version: 1,
         baseRefName: "existing-feature",
       });

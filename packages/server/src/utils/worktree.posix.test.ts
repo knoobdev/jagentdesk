@@ -1395,7 +1395,7 @@ describe.skipIf(isPlatform("win32"))("async worktree metadata", () => {
         placeholderBranchName: "topic",
       }).then(() => order.push("first-naming"));
       // A read issued while writes are pending observes their completed snapshot.
-      const snapshot = readJAgentDeskWorktreeMetadata(first);
+      const snapshot = await readJAgentDeskWorktreeMetadata(first);
       await Promise.all([runtime, unrelated, naming]);
       expect(order.indexOf("first-runtime")).toBeLessThan(order.indexOf("first-naming"));
       expect(await snapshot).toMatchObject({
