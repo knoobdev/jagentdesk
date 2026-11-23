@@ -173,22 +173,8 @@ func (b *Bridge) Start(authKey, stateDir, hostname, target string) error {
 	}
 
 	b.server, b.closed = srv, make(chan struct{})
-	keyPath := filepath.Join(stateDir, "jagentdesk-device-ed25519.key")
-	if key, err := os.ReadFile(keyPath); err == nil && len(key) == ed25519.PrivateKeySize {
-		b.deviceKey = ed25519.PrivateKey(key)
-	} else {
-		publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
-		if err != nil {
-			return fmt.Errorf("device key generation: %w", err)
-		}
-		if err := os.MkdirAll(stateDir, 0700); err != nil {
-			return fmt.Errorf("device key directory: %w", err)
-		}
-		if err := os.WriteFile(keyPath, privateKey, 0600); err != nil {
-			return fmt.Errorf("device key storage: %w", err)
-		}
-		_ = publicKey
-		b.deviceKey = privateKey
+	if err := b.prepareDeviceIdentityLocked(stateDir); err != nil {
+		return err
 	}
 	if strings.TrimSpace(target) != "" {
 		if err := b.startProxyLocked(target); err != nil {
@@ -232,6 +218,38 @@ func redactTailscaleLog(message string) string {
 		return prefix + "<tailscale-login-url>"
 	}
 	return message
+}
+
+// PrepareDeviceIdentity loads the same device key used by the tailnet without
+// starting tsnet. Relay-only pairing needs this before any Tailscale login.
+func (b *Bridge) PrepareDeviceIdentity(stateDir string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.prepareDeviceIdentityLocked(stateDir)
+}
+
+func (b *Bridge) prepareDeviceIdentityLocked(stateDir string) error {
+	if len(b.deviceKey) == ed25519.PrivateKeySize {
+		return nil
+	}
+	keyPath := filepath.Join(stateDir, "jagentdesk-device-ed25519.key")
+	if key, err := os.ReadFile(keyPath); err == nil && len(key) == ed25519.PrivateKeySize {
+		b.deviceKey = ed25519.PrivateKey(key)
+	} else {
+		publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			return fmt.Errorf("device key generation: %w", err)
+		}
+		if err := os.MkdirAll(stateDir, 0700); err != nil {
+			return fmt.Errorf("device key directory: %w", err)
+		}
+		if err := os.WriteFile(keyPath, privateKey, 0600); err != nil {
+			return fmt.Errorf("device key storage: %w", err)
+		}
+		_ = publicKey
+		b.deviceKey = privateKey
+	}
+	return nil
 }
 
 func (b *Bridge) DevicePublicKeyB64() string {

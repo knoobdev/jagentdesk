@@ -1,10 +1,14 @@
-import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, chmodSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { createPublicKey, verify } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
 
-import { loadOrCreateDaemonKeyPair, RELAY_OWNERSHIP_SIGNATURE_PREFIX } from "./daemon-keypair.js";
+import {
+  loadExistingRelayIdentity,
+  loadOrCreateDaemonKeyPair,
+  RELAY_OWNERSHIP_SIGNATURE_PREFIX,
+} from "./daemon-keypair.js";
 import { PRIVATE_FILE_MODE } from "./private-files.js";
 
 const MODE_MASK = 0o777;
@@ -112,6 +116,49 @@ describe("relay identity key (spec 35.2)", () => {
       before.ensureRelayIdentity();
       const after = await loadOrCreateDaemonKeyPair(home);
       expect(after.publicKeyB64).toBe(before.publicKeyB64);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("relay reset identity recovery", () => {
+  test("loads the old signer without modifying the daemon key file", async () => {
+    const home = createTempHome();
+    try {
+      const bundle = await loadOrCreateDaemonKeyPair(home);
+      const signer = bundle.ensureRelayIdentity();
+      const file = path.join(home, "daemon-keypair.json");
+      const before = readFileSync(file, "utf8");
+      const recovered = loadExistingRelayIdentity(home);
+      expect(recovered.publicKeyB64url).toBe(signer.publicKeyB64url);
+      expect(recovered.signOwnership("srv_reset", "challenge")).toBe(
+        signer.signOwnership("srv_reset", "challenge"),
+      );
+      expect(readFileSync(file, "utf8")).toBe(before);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test("refuses a home that has never generated an ownership key", async () => {
+    const home = createTempHome();
+    try {
+      await loadOrCreateDaemonKeyPair(home);
+      const file = path.join(home, "daemon-keypair.json");
+      const before = readFileSync(file, "utf8");
+      expect(() => loadExistingRelayIdentity(home)).toThrow("current pinned relay key");
+      expect(readFileSync(file, "utf8")).toBe(before);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test("does not create an identity in an empty home", () => {
+    const home = createTempHome();
+    try {
+      expect(() => loadExistingRelayIdentity(home)).toThrow();
+      expect(existsSync(path.join(home, "daemon-keypair.json"))).toBe(false);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

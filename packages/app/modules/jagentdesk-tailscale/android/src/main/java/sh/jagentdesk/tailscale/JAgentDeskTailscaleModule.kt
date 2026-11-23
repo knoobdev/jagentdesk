@@ -106,6 +106,7 @@ class JAgentDeskTailscaleModule : Module() {
     }
 
     Function("getDevicePublicKeyB64") {
+      bridge.prepareDeviceIdentity(stateDirectory().absolutePath)
       bridge.devicePublicKeyB64().takeIf { it.isNotEmpty() }
     }
 
@@ -152,7 +153,7 @@ class JAgentDeskTailscaleModule : Module() {
   }
 
   private fun removePersistedTailscaleState() {
-    stateDirectory().listFiles()?.forEach { runCatching { it.deleteRecursively() } }
+    stateDirectory().listFiles()?.filter { it.name != "jagentdesk-device-ed25519.key" }?.forEach { runCatching { it.deleteRecursively() } }
   }
 
   private fun resetUnauthenticatedInteractiveNodeIfNeeded() {

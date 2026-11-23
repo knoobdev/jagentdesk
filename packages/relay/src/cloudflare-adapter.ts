@@ -55,6 +55,7 @@ interface WebSocketPair {
 interface DurableObjectStorage {
   get<T = unknown>(key: string, opts?: { cacheTtl?: number }): Promise<T | undefined | null>;
   put(key: string, value: unknown): Promise<void>;
+  delete(key: string): Promise<boolean>;
   setAlarm(scheduledTime: number | Date): Promise<void>;
   deleteAlarm(): Promise<void>;
 }
@@ -509,6 +510,18 @@ export class RelayDurableObject {
       this.closeSocket(ws, RELAY_CLOSE_OWNERSHIP_MISMATCH, "serverId owned by a different key");
       return;
     }
+    if (attachment.reset === true) {
+      // Reset may only remove an existing pin. It never registers the caller's
+      // key, and an unauthenticated reset must leave the active daemon alone.
+      if (typeof stored !== "string") {
+        this.closeSocket(ws, RELAY_CLOSE_OWNERSHIP_MISMATCH, "No pinned key to reset");
+        return;
+      }
+      await this.state.storage.delete(OWNERSHIP_STORAGE_KEY);
+      saveAttachment(ws, { authState: "ok", resetComplete: true });
+      this.closeSocket(ws, 1000, "Relay ownership reset");
+      return;
+    }
     if (typeof stored !== "string") {
       await this.state.storage.put(OWNERSHIP_STORAGE_KEY, auth.publicKey);
     }
@@ -599,6 +612,7 @@ export class RelayDurableObject {
     role: ConnectionRole,
     serverId: string,
     connectionId: string,
+    reset: boolean,
   ): Response {
     const upgradeError = this.requireWebSocketUpgrade(request);
     if (upgradeError) return upgradeError;
@@ -616,7 +630,8 @@ export class RelayDurableObject {
     // - server-control: single per serverId
     // - server-data: single per connectionId
     // - client: many sockets per connectionId are allowed
-    this.closeExistingServerSockets({ isServerControl, isServerData, resolvedConnectionId });
+    if (!reset)
+      this.closeExistingServerSockets({ isServerControl, isServerData, resolvedConnectionId });
 
     if (role === "client" && this.countClientSockets() >= MAX_RELAY_CLIENTS_PER_SERVER) {
       const [client, server] = this.createWebSocketPair();
@@ -642,6 +657,8 @@ export class RelayDurableObject {
     const tags: string[] = [];
     if (role === "client") {
       tags.push("client", `client:${resolvedConnectionId}`);
+    } else if (reset) {
+      tags.push("server-reset");
     } else if (isServerControl) {
       tags.push("server-control");
     } else {
@@ -655,6 +672,7 @@ export class RelayDurableObject {
       role,
       version: CURRENT_RELAY_VERSION,
       connectionId: resolvedConnectionId || null,
+      ...(reset ? { reset: true } : {}),
       createdAt: Date.now(),
       lastActivityAt: Date.now(),
       ...(role === "server" ? { authState: "pending" as const } : { authState: "ok" as const }),
@@ -707,7 +725,10 @@ export class RelayDurableObject {
       return new Response("Invalid v parameter (expected 2)", { status: 400 });
     }
 
-    return this.fetchV2(request, role, serverId, connectionId);
+    const reset = url.searchParams.get("reset") === "1";
+    if (reset && (role !== "server" || connectionId))
+      return new Response("Reset requires a server control socket", { status: 400 });
+    return this.fetchV2(request, role, serverId, connectionId, reset);
   }
 
   /**
@@ -720,6 +741,7 @@ export class RelayDurableObject {
       return;
     }
     const attachment = attachmentRaw;
+    if (attachment.resetComplete === true) return;
 
     saveAttachment(ws, { lastActivityAt: Date.now() });
 

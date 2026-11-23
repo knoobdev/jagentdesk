@@ -45,6 +45,7 @@ function createMockState() {
       put: vi.fn(async (key: string, value: unknown) => {
         storage.set(key, value);
       }),
+      delete: vi.fn(async (key: string) => storage.delete(key)),
       setAlarm: vi.fn(async () => undefined),
       deleteAlarm: vi.fn(async () => undefined),
     },
@@ -720,4 +721,56 @@ describe("relay worker endpoint routing", () => {
     expect(idFromName).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
   });
+});
+
+describe("RelayDurableObject ownership reset", () => {
+  it.each(["owner", "other", "missing"])(
+    "reset with %s key only clears the current owner's pin",
+    async (mode) => {
+      const { state, storage, setTagSockets } = createMockState();
+      const owner = nacl.sign.keyPair();
+      if (mode !== "missing") storage.set("relay:serverPublicKey", base64Url(owner.publicKey));
+      const existing = createMockSocket({ role: "server", serverId: "srv_reset", authState: "ok" });
+      setTagSockets("server-control", [existing]);
+      await withMockWebSocketPair(async ({ serverWs }) => {
+        const relay = new RelayDurableObject(state as unknown as DurableObjectStateArg);
+        await relay
+          .fetch(
+            new Request("https://relay.test/ws?role=server&serverId=srv_reset&v=2&reset=1", {
+              headers: { Upgrade: "websocket" },
+            }),
+          )
+          .catch(swallow);
+        expect(existing.close).not.toHaveBeenCalled();
+        await authenticateServerSocket(
+          relay,
+          serverWs,
+          "srv_reset",
+          mode === "other" ? nacl.sign.keyPair() : owner,
+        );
+        expect(serverWs.close).toHaveBeenCalledWith(
+          mode === "owner" ? 1000 : 4403,
+          expect.any(String),
+        );
+        expect(storage.get("relay:serverPublicKey")).toBe(
+          mode === "other" ? base64Url(owner.publicKey) : undefined,
+        );
+        expect(existing.close).not.toHaveBeenCalled();
+        expect(sentFrames(serverWs).join("\n")).not.toContain('"sync"');
+      });
+    },
+  );
+
+  it.each(["role=client", "role=server&connectionId=data"])(
+    "rejects reset on %s",
+    async (route) => {
+      const { state } = createMockState();
+      const relay = new RelayDurableObject(state as unknown as DurableObjectStateArg);
+      const response = await relay.fetch(
+        new Request(`https://relay.test/ws?${route}&serverId=srv_reset&v=2&reset=1`),
+      );
+      expect(response.status).toBe(400);
+      expect(state.acceptWebSocket).not.toHaveBeenCalled();
+    },
+  );
 });

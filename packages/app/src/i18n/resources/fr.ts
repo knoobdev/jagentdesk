@@ -1443,6 +1443,21 @@ export const fr: TranslationResources = {
     },
   },
   pairing: {
+    verify: {
+      failed: "Pairing failed",
+      saveFailed:
+        "JAgentDesk could not save the pairing offer on this device. Paste the link again to retry.",
+      invalidOffer: "This is not a valid JAgentDesk pairing offer.",
+      enterCode: "Enter the 6-digit verification code shown on desktop.",
+      starting: "Connection is still starting. Try entering the code again.",
+      waiting: "Waiting for Tailscale to connect...",
+      helper: "Enter the 6-digit code shown in the JAgentDesk desktop connection popup.",
+      login:
+        "Pairing offer saved. Sign in to Tailscale first; then this screen will connect to the desktop and ask for the 6-digit code.",
+      title: "Verify pairing",
+      codeTitle: "Enter verification code",
+      verifying: "Verifying…",
+    },
     connectionMethods: {
       title: "Ajouter une connexion",
       direct: {
@@ -1536,6 +1551,8 @@ export const fr: TranslationResources = {
       errorTitle: "Erreur",
     },
     device: {
+      transportHint:
+        "Copy this link or scan the QR code. This desktop will show the device request and six-digit code. Relay works without a Tailscale login.",
       loadingOffer: "Chargement de l'offre d'association...",
       failedToLoadOffer: "Échec du chargement de l'offre d'association.",
       unavailable: "Offre de jumelage indisponible.",
@@ -2093,9 +2110,15 @@ export const fr: TranslationResources = {
       },
       notFound: "Hostintrouvable",
       badges: {
+        relay: "Relay",
+        tailnet: "Tailscale",
         local: "Locale",
       },
       connections: {
+        active: "Active",
+        enableRelay: "Enable relay",
+        use: "Use this connection",
+        useFailed: "Could not switch connection",
         title: "Relations",
         removeTitle: "Supprimer la connexion",
         removeMessage: "Supprimer{{name}}? Cela ne peut pas être annulé.",

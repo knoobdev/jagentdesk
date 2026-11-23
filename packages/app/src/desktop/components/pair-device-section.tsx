@@ -197,7 +197,7 @@ function PairDeviceBody(props: PairDeviceBodyProps) {
     offerContent = <Text style={styles.stateLine}>{t("pairing.device.loadingOffer")}</Text>;
   } else if (props.error) {
     offerContent = <OfferLoadError message={props.error.message} onRetry={props.onRetry} />;
-  } else if (props.offer?.tailnetEnabled === false || !props.offer?.url) {
+  } else if (!props.offer?.url) {
     offerContent = <Text style={styles.stateLine}>{t("pairing.device.unavailable")}</Text>;
   } else {
     offerContent = <PairingOffer {...props} offer={props.offer} />;
@@ -234,10 +234,7 @@ function PairingOffer(props: PairDeviceBodyProps & { offer: PairingOfferPayload 
   const { t } = useTranslation();
   return (
     <View style={styles.offer}>
-      <Text style={styles.offerHint}>
-        Copy this link or scan the QR code. After the mobile device joins Tailscale, this desktop
-        will show the device request and six-digit code in this panel.
-      </Text>
+      <Text style={styles.offerHint}>{t("pairing.device.transportHint")}</Text>
       <View style={styles.qrTile}>
         <PairingQr svg={props.qrSvg} isError={props.qrError} />
       </View>

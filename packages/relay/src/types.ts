@@ -36,6 +36,8 @@ export interface RelaySessionAttachment {
   /** Unix ms of the last inbound frame; drives the 10-minute idle close. */
   lastActivityAt: number;
   authState: RelayAuthState;
+  /** A separate ownership-authenticated control socket used only to clear the pin. */
+  reset?: boolean;
   /** Challenge nonce (base64url). Present only while a server socket is pending. */
   authNonce?: string;
   /** Unix ms after which an unanswered challenge closes the socket with 4401. */

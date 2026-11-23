@@ -23,7 +23,13 @@ Keep `daemon-keypair.json` private (0600) and preserve it with `server-id` when
 moving daemon state. It contains the X25519 Noise key and a separate Ed25519 relay
 ownership key. The ownership key is generated on first relay enable. The Worker
 binds `serverId` to that key on first registration; losing it requires a new
-server identity unless you still have the old key to authorize a reset.
+server identity unless you still have the old key to authorize a reset. Before replacing that
+key, run `jagentdesk relay reset --home <old-home>`. The command reads the
+existing `server-id` and ownership key without generating new ones. The Worker
+clears its pin only after the current pinned key signs a fresh challenge; a
+missing or different key cannot reset ownership. Keep the old home until the
+command succeeds. The Worker reset endpoint must be deployed before using the
+command.
 
 Ownership authentication runs before routing on both daemon control and data
 sockets. Noise authenticates the daemon to the client. Inside Noise, the client
@@ -36,6 +42,19 @@ Tailscale offline. Authenticated `server_info` also advertises the relay route
 and Noise public key for hosts paired earlier. The client SDK requires explicit
 E2EE configuration for relay URLs and keeps credentials inside the encrypted
 session rather than the WebSocket upgrade.
+
+## App connections
+
+Pairing saves every route in the offer, including relay-only offers. Relay uses
+the same trusted device identity as Tailscale; browser clients persist a
+non-exportable signing key in IndexedDB. Clearing browser site data removes that
+identity and requires pairing again.
+
+Connections are tried in order: your preferred route, the last successful route,
+local socket or pipe, direct TCP, Tailscale, then relay. A dropped route gets one
+15-second reconnect attempt before the next route is tried. A live route is kept
+until it fails or you choose **Use this connection** in host Connections settings.
+Authenticated daemon metadata adds relay to hosts paired before relay existed.
 
 ## Local verification
 

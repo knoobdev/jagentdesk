@@ -90,6 +90,19 @@ function createRelaySigner(
   };
 }
 
+/** Recovery must use the old key without generating or replacing any identity. */
+export function loadExistingRelayIdentity(jagentdeskHome: string): RelayOwnershipSigner {
+  const stored = KeyPairSchema.parse(
+    JSON.parse(readFileSync(path.join(jagentdeskHome, KEYPAIR_FILENAME), "utf8")),
+  );
+  if (!stored.relayPublicKeyB64 || !stored.relaySecretKeyB64) {
+    throw new Error(
+      "The current pinned relay key is required. Restore the old daemon-keypair.json or use a new serverId.",
+    );
+  }
+  return createRelaySigner(stored.relayPublicKeyB64, stored.relaySecretKeyB64);
+}
+
 export async function loadOrCreateDaemonKeyPair(
   jagentdeskHome: string,
   logger?: pino.Logger,

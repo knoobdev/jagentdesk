@@ -213,3 +213,25 @@ func TestReviveRestartsNodeWhenDialFails(t *testing.T) {
 		t.Fatalf("node restarts = %d, want 1", restarts)
 	}
 }
+
+func TestPrepareDeviceIdentityWithoutTailnet(t *testing.T) {
+	directory := t.TempDir()
+	first := &Bridge{}
+	if err := first.PrepareDeviceIdentity(directory); err != nil {
+		t.Fatal(err)
+	}
+	publicKey := first.DevicePublicKeyB64()
+	if publicKey == "" || first.SignNonce("relay-only") == "" {
+		t.Fatal("device signer unavailable")
+	}
+	if first.server != nil || first.listener != nil {
+		t.Fatal("identity preparation started tsnet")
+	}
+	second := &Bridge{}
+	if err := second.PrepareDeviceIdentity(directory); err != nil {
+		t.Fatal(err)
+	}
+	if second.DevicePublicKeyB64() != publicKey {
+		t.Fatal("device identity changed on reload")
+	}
+}

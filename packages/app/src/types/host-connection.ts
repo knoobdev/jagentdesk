@@ -1,6 +1,8 @@
+import type { RelayOfferEndpoint, ConnectionOffer } from "@jagentdesk/protocol/connection-offer";
 import {
   normalizeHostPort,
   normalizeLoopbackToLocalhost,
+  parseRelayEndpoint,
 } from "@jagentdesk/protocol/daemon-endpoints";
 import {
   DirectTcpHostConnectionSchema,
@@ -35,11 +37,66 @@ export interface TailnetHostConnection {
   pairingCode?: string;
 }
 
+export interface RelayHostConnection {
+  id: string;
+  type: "relay";
+  endpoint: string;
+  useTls?: boolean;
+  daemonPublicKeyB64: string;
+  pairingCode?: string;
+}
+
+export function relayConnectionFromOffer(offer: ConnectionOffer): RelayHostConnection {
+  if (!offer.relay) throw new Error("Offer has no relay route");
+  return createRelayHostConnection(offer.relay, offer.daemonPublicKeyB64);
+}
+
+function createRelayHostConnection(
+  relay: RelayOfferEndpoint,
+  publicKey: string,
+): RelayHostConnection {
+  const { host, port, isIpv6 } = parseRelayEndpoint(relay.endpoint);
+  const endpoint = `${isIpv6 ? `[${host}]` : host}:${port}`;
+  const useTls = relay.useTls ?? true;
+  return {
+    id: useTls ? `relay:wss:${endpoint}` : `relay:${endpoint}`,
+    type: "relay",
+    endpoint,
+    useTls,
+    daemonPublicKeyB64: publicKey.trim(),
+  };
+}
+
+export function connectionsFromOffer(offer: ConnectionOffer): HostConnection[] {
+  const connections: HostConnection[] = [];
+  if (offer.tailnetAddress) {
+    const tailnetAddress = normalizeHostPort(offer.tailnetAddress);
+    connections.push({
+      id: offer.useTls ? `tailnet:wss:${tailnetAddress}` : `tailnet:${tailnetAddress}`,
+      type: "tailnet",
+      tailnetAddress,
+      useTls: offer.useTls,
+      daemonPublicKeyB64: offer.daemonPublicKeyB64,
+    });
+  }
+  if (offer.relay) connections.push(relayConnectionFromOffer(offer));
+  return connections;
+}
+
 export type HostConnection =
   | DirectTcpHostConnection
   | DirectSocketHostConnection
   | DirectPipeHostConnection
-  | TailnetHostConnection;
+  | TailnetHostConnection
+  | RelayHostConnection;
+
+export function hostTransportLabelKey(
+  type: HostConnection["type"],
+): "settings.host.badges.relay" | "settings.host.badges.tailnet" | "settings.host.badges.local" {
+  if (type === "relay") return "settings.host.badges.relay";
+  if (type === "tailnet") return "settings.host.badges.tailnet";
+  return "settings.host.badges.local";
+}
 
 export type HostLifecycle = Record<string, never>;
 
@@ -50,6 +107,7 @@ export interface HostProfile {
   lifecycle: HostLifecycle;
   connections: HostConnection[];
   preferredConnectionId: string | null;
+  lastConnectionId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -75,6 +133,7 @@ export function hostConnectionHint(host: HostProfile): string {
   if (!conn) return host.serverId.slice(0, 8);
   switch (conn.type) {
     case "directTcp":
+    case "relay":
       return conn.endpoint;
     case "tailnet":
       return conn.tailnetAddress;
@@ -148,8 +207,16 @@ export function resolveActiveHostServerId(params: {
   );
 }
 
+function relayConnectionsEqual(left: RelayHostConnection, right: RelayHostConnection): boolean {
+  return (
+    left.endpoint === right.endpoint &&
+    (left.useTls ?? true) === (right.useTls ?? true) &&
+    left.daemonPublicKeyB64 === right.daemonPublicKeyB64
+  );
+}
+
 function hostConnectionEquals(left: HostConnection, right: HostConnection): boolean {
-  if (left.type !== right.type || left.id !== right.id) {
+  if (left.id !== right.id) {
     return false;
   }
 
@@ -165,6 +232,9 @@ function hostConnectionEquals(left: HostConnection, right: HostConnection): bool
   }
   if (left.type === "directPipe" && right.type === "directPipe") {
     return left.path === right.path;
+  }
+  if (left.type === "relay" && right.type === "relay") {
+    return relayConnectionsEqual(left, right);
   }
   if (left.type === "tailnet" && right.type === "tailnet") {
     return (
@@ -225,7 +295,7 @@ export function upsertHostConnectionInProfiles(input: {
       appearance: defaultHostAppearance(),
       lifecycle: defaultLifecycle(),
       connections: [input.connection],
-      preferredConnectionId: input.connection.id,
+      preferredConnectionId: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -235,7 +305,9 @@ export function upsertHostConnectionInProfiles(input: {
   const matchedProfiles = matchingIndexes.map((index) => existing[index]);
   const prev = matchedProfiles.find((daemon) => daemon.serverId === serverId) ?? matchedProfiles[0];
   const nextConnections = dedupeHostConnections([
-    ...matchedProfiles.flatMap((daemon) => daemon.connections),
+    ...matchedProfiles
+      .flatMap((daemon) => daemon.connections)
+      .filter((connection) => connection.id !== input.connection.id),
     input.connection,
   ]);
   const nextLifecycle = prev.lifecycle;
@@ -244,7 +316,7 @@ export function upsertHostConnectionInProfiles(input: {
     prev.preferredConnectionId &&
     nextConnections.some((connection) => connection.id === prev.preferredConnectionId)
       ? prev.preferredConnectionId
-      : input.connection.id;
+      : null;
   const nextCreatedAt = matchedProfiles.reduce(
     (earliest, daemon) => (daemon.createdAt < earliest ? daemon.createdAt : earliest),
     prev.createdAt,
@@ -395,6 +467,22 @@ function normalizeStoredConnection(connection: unknown): HostConnection | null {
     const path = (typeof record.path === "string" ? record.path : "").trim();
     return path ? { id: `pipe:${path}`, type: "directPipe", path } : null;
   }
+  if (type === "relay") {
+    try {
+      if (typeof record.daemonPublicKeyB64 !== "string" || !record.daemonPublicKeyB64.trim())
+        return null;
+      if (record.useTls !== undefined && typeof record.useTls !== "boolean") return null;
+      return createRelayHostConnection(
+        {
+          endpoint: typeof record.endpoint === "string" ? record.endpoint : "",
+          useTls: record.useTls,
+        },
+        record.daemonPublicKeyB64,
+      );
+    } catch {
+      return null;
+    }
+  }
   if (type === "tailnet") {
     return normalizeStoredTailnet(record);
   }
@@ -429,7 +517,7 @@ export function normalizeStoredHostProfile(entry: unknown): HostProfile | null {
     typeof record.preferredConnectionId === "string" &&
     connections.some((connection) => connection.id === record.preferredConnectionId)
       ? record.preferredConnectionId
-      : (connections[0]?.id ?? null);
+      : null;
 
   return {
     serverId,
@@ -438,6 +526,11 @@ export function normalizeStoredHostProfile(entry: unknown): HostProfile | null {
     lifecycle: defaultLifecycle(),
     connections,
     preferredConnectionId,
+    lastConnectionId:
+      typeof record.lastConnectionId === "string" &&
+      connections.some((connection) => connection.id === record.lastConnectionId)
+        ? record.lastConnectionId
+        : null,
     createdAt: typeof record.createdAt === "string" ? record.createdAt : now,
     updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : now,
   };
@@ -445,7 +538,7 @@ export function normalizeStoredHostProfile(entry: unknown): HostProfile | null {
 
 /**
  * True when the host has at least one connection that is reachable without
- * Tailscale (a direct TCP/socket/pipe endpoint). A host whose connections are
+ * Tailscale (a direct TCP/socket/pipe endpoint or relay). A host whose connections are
  * ALL `tailnet` cannot be reached in local connection mode, so the host list
  * hides it there (see `HostRuntimeStore.getHosts`).
  */

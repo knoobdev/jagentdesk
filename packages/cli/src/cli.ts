@@ -1,3 +1,4 @@
+import { createRelayCommand } from "./commands/relay.js";
 import { Command, Option } from "commander";
 import { createAgentCommand } from "./commands/agent/index.js";
 import { createDaemonCommand } from "./commands/daemon/index.js";
@@ -118,6 +119,7 @@ export function createCli(): Command {
   program.addCommand(onboardCommand());
   program.addCommand(daemonStartCommand());
   program.addCommand(createHooksCommand());
+  program.addCommand(createRelayCommand());
 
   addJsonOption(
     program
