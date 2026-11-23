@@ -179,6 +179,11 @@ export default function PairVerifyScreen() {
         connectionAttemptAbortControllerRef.current = null;
         connectionAttemptRef.current = null;
       }
+      if (!offer.tailnetAddress) {
+        // Spec 35: relay-only pairing UI lands in the app transport work; this
+        // build dials tailnet routes only, so refuse an offer with no address.
+        throw new Error("Pairing over relay requires a newer JAgentDesk app.");
+      }
       const connection = {
         id: `tailnet:${normalizeHostPort(offer.tailnetAddress)}`,
         type: "tailnet" as const,

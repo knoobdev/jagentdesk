@@ -176,7 +176,7 @@ import { WorkspaceGitServiceImpl } from "./workspace-git-service.js";
 import { resolveWorkspaceIdForPath } from "./resolve-workspace-id-for-path.js";
 import { ForgeHubService } from "./session/forge/forge-hub-session.js";
 import { FileSecretStore } from "./database/secret-store.js";
-import { extractProviderOverrides } from "./config.js";
+import { DEFAULT_RELAY_ENDPOINT, extractProviderOverrides } from "./config.js";
 import { createCustomProviderService } from "./custom-providers/service.js";
 import { ArgoCdService } from "./argocd/service.js";
 import { createArgoCdClusterAccess } from "./argocd/cluster-access.js";
@@ -212,6 +212,8 @@ import { SshModules as SshServerModules } from "./ssh/modules.js";
 import { applyTerminalAgentHookSetting } from "../terminal/agent-hooks/terminal-agent-hook-setting.js";
 import { loadOrCreateDaemonKeyPair } from "./daemon-keypair.js";
 import { createTsnetListener, type TsnetListener } from "./tsnet-listener.js";
+import { createRelayRuntime, type RelayRuntime } from "./relay-runtime.js";
+import { admitSecuredRelaySocket } from "./websocket/secure-relay-ingress.js";
 import { createPairedDeviceStore, type PairedDeviceStore } from "./pairing/paired-devices.js";
 import {
   createNonceChallengeManager,
@@ -459,6 +461,11 @@ export interface JAgentDeskDaemonConfig {
   autorunEnabled?: boolean;
   // Session sharing (spec §21). Default OFF; exposes one agent chat via a Cloudflare tunnel.
   sessionSharingEnabled?: boolean;
+  // Relay second path (spec 35). Default ON; daemon dials the Worker alongside the tailnet.
+  relayEnabled?: boolean;
+  relayEnabledMutable?: boolean;
+  relayEndpoint?: string;
+  relayUseTls?: boolean;
   // Directory of the app web build served to session-share guests as the real UI (ADR-0019).
   sessionShareAppDistDir?: string;
   git?: {
@@ -582,6 +589,14 @@ function resolveExpressTrustProxySetting(config: JAgentDeskDaemonConfig): true |
   return config.trustedProxies ?? ["loopback"];
 }
 
+function createInitialRelayConfig(config: JAgentDeskDaemonConfig): MutableDaemonConfig["relay"] {
+  return {
+    enabled: config.relayEnabled ?? true,
+    endpoint: config.relayEndpoint ?? DEFAULT_RELAY_ENDPOINT,
+    useTls: config.relayUseTls ?? true,
+  };
+}
+
 function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): MutableDaemonConfig {
   const providers: MutableDaemonConfig["providers"] = Object.fromEntries(
     Object.entries(config.providerOverrides ?? {}).map(([providerId, override]) => {
@@ -607,6 +622,7 @@ function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): Mutab
     },
     autorun: { enabled: config.autorunEnabled ?? false },
     sessionSharing: { enabled: config.sessionSharingEnabled ?? false },
+    relay: createInitialRelayConfig(config),
     providers,
     metadataGeneration: {
       providers: config.metadataGeneration?.providers ?? [],
@@ -700,6 +716,7 @@ export async function createJAgentDeskDaemon(
     logger.warn({ err: error }, "Failed to reconcile managed helper process ledger");
   });
   let tsnetListener: TsnetListener | null = null;
+  let relayRuntime: RelayRuntime | null = null;
 
   const staticDir = config.staticDir;
   const downloadTokenTtlMs = config.downloadTokenTtlMs ?? 60000;
@@ -2091,6 +2108,12 @@ export async function createJAgentDeskDaemon(
                 appBaseUrl: config.appBaseUrl,
                 desktopManaged: config.desktopManaged === true,
                 getTailnetAddress: () => tsnetListener?.getDirectAddress() ?? null,
+                getRelayConfig: () =>
+                  relayRuntime?.getConfig() ?? {
+                    enabled: config.relayEnabled ?? true,
+                    endpoint: config.relayEndpoint ?? DEFAULT_RELAY_ENDPOINT,
+                    useTls: config.relayUseTls ?? true,
+                  },
               },
               serviceProxyPublicBaseUrl,
               browserToolsBroker,
@@ -2145,6 +2168,43 @@ export async function createJAgentDeskDaemon(
               },
             });
             await tsnetListener.start();
+            // Relay second path (spec 35 / ADR-0048): dials the Worker alongside
+            // the tailnet and feeds the same auth path. Data sockets run the
+            // Noise E2EE handshake before session admission.
+            const relaySecurityLogger = logger.child({ module: "relay-security" });
+            relayRuntime = createRelayRuntime({
+              config: {
+                enabled: config.relayEnabled ?? true,
+                endpoint: config.relayEndpoint ?? DEFAULT_RELAY_ENDPOINT,
+                useTls: config.relayUseTls ?? true,
+              },
+              logger,
+              serverId,
+              getRelayOwnership: () => daemonKeyPair.ensureRelayIdentity(),
+              attachSocket: (ws, metadata) =>
+                admitSecuredRelaySocket(
+                  ws,
+                  {
+                    daemonKeyPair: daemonKeyPair.keyPair,
+                    logger: relaySecurityLogger,
+                    requireProtectedMode: () => false,
+                  },
+                  async (secured) => {
+                    if (!wsServer) throw new Error("WebSocket server is not ready");
+                    await wsServer.attachExternalSocket(secured.socket, {
+                      ...metadata,
+                      transport: "relay",
+                      securityMode: secured.securityMode,
+                    });
+                  },
+                ),
+            });
+            daemonConfigStore.onFieldChange("relay.enabled", (value) => {
+              if (config.relayEnabledMutable === false && value !== config.relayEnabled) {
+                throw new Error("Relay enabled state is pinned by the daemon launch configuration");
+              }
+              relayRuntime?.setEnabled(value === true);
+            });
             await hubRelationships.start();
           };
 
@@ -2213,6 +2273,7 @@ export async function createJAgentDeskDaemon(
     await autorunService?.stop().catch(() => undefined);
     specModeService?.stop();
     await sessionShareService?.stop().catch(() => undefined);
+    await relayRuntime?.stop().catch(() => undefined);
     await tsnetListener?.stop().catch(() => undefined);
     if (wsServer) {
       await wsServer.close();

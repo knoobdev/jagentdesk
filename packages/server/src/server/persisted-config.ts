@@ -268,6 +268,16 @@ export const PersistedConfigSchema = z
           })
           .passthrough()
           .optional(),
+        // Relay second connection path (spec 35.3). Default ON; endpoint is the
+        // deployed Worker and is overridable here or via JAGENTDESK_RELAY_*.
+        relay: z
+          .object({
+            enabled: z.boolean().optional(),
+            endpoint: z.string().min(1).optional(),
+            useTls: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
         git: z
           .object({
             maxProcessesPerSecond: z.number().int().positive().optional(),

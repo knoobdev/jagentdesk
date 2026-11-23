@@ -144,6 +144,94 @@ export function buildDaemonWebSocketUrl(endpoint: string, opts: WebSocketUrlOpti
   return new URL(`${protocol}://${hostPart}:${port}/ws`).toString();
 }
 
+export type RelayRole = "server" | "client";
+export type RelayProtocolVersion = "1" | "2";
+
+export const CURRENT_RELAY_PROTOCOL_VERSION: RelayProtocolVersion = "2";
+
+/** Cloudflare Workers default port for relay endpoints given without one. */
+const RELAY_DEFAULT_PORT = 443;
+
+export function normalizeRelayProtocolVersion(
+  value: unknown,
+  fallback: RelayProtocolVersion = CURRENT_RELAY_PROTOCOL_VERSION,
+): RelayProtocolVersion {
+  if (value == null) {
+    return fallback;
+  }
+
+  let normalized = "";
+  if (typeof value === "string") {
+    normalized = value.trim();
+  } else if (typeof value === "number") {
+    normalized = String(value);
+  }
+  if (!normalized) {
+    return fallback;
+  }
+  if (normalized === "1" || normalized === "2") {
+    return normalized;
+  }
+  throw new Error('Relay version must be "1" or "2"');
+}
+
+/**
+ * Split a relay endpoint into host and port. Unlike `parseHostPort`, a bare
+ * hostname is valid and implies the TLS port (Cloudflare Worker endpoints ship
+ * as `host` without a port).
+ */
+export function parseRelayEndpoint(input: string): HostPortParts {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    throw new Error("Relay endpoint is required");
+  }
+  try {
+    return parseHostPort(trimmed);
+  } catch {
+    // Fall through to the bare-host form.
+  }
+  const isIpv6 = trimmed.startsWith("[") && trimmed.endsWith("]");
+  const host = isIpv6 ? trimmed.slice(1, -1) : trimmed;
+  if (!host || (host.includes(":") && !isIpv6)) {
+    throw new Error("Invalid relay endpoint");
+  }
+  return { host, port: RELAY_DEFAULT_PORT, isIpv6 };
+}
+
+export function buildRelayWebSocketUrl(params: {
+  endpoint: string;
+  useTls: boolean;
+  serverId: string;
+  role: RelayRole;
+  /**
+   * Per-connection routing identifier used by the daemon to open server data sockets.
+   * Clients should NOT provide this — the relay assigns a routing ID on connect.
+   */
+  connectionId?: string;
+  version?: RelayProtocolVersion | 1 | 2;
+}): string {
+  const { host, port, isIpv6 } = parseRelayEndpoint(params.endpoint);
+  const protocol = params.useTls ? "wss" : "ws";
+  const hostPart = isIpv6 ? `[${host}]` : host;
+  const url = new URL(`${protocol}://${hostPart}:${port}/ws`);
+  url.searchParams.set("serverId", params.serverId);
+  url.searchParams.set("role", params.role);
+  url.searchParams.set("v", normalizeRelayProtocolVersion(params.version));
+  if (params.connectionId) {
+    url.searchParams.set("connectionId", params.connectionId);
+  }
+  return url.toString();
+}
+
+export function isRelayClientWebSocketUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.searchParams.get("role") === "client" && parsed.searchParams.has("serverId");
+  } catch {
+    return false;
+  }
+}
+
 export function extractHostPortFromWebSocketUrl(wsUrl: string): string {
   const parsed = new URL(wsUrl);
   if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") {

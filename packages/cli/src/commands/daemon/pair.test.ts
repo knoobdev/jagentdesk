@@ -2,9 +2,15 @@ import { describe, expect, test, vi } from "vitest";
 
 import { runPairCommand, type PairCommandOutput, type PairingOffer } from "./pair.js";
 
-const disabledOffer: PairingOffer = { tailnetEnabled: false, url: null, qr: null };
+const disabledOffer: PairingOffer = {
+  tailnetEnabled: false,
+  relayEnabled: false,
+  url: null,
+  qr: null,
+};
 const enabledOffer: PairingOffer = {
   tailnetEnabled: true,
+  relayEnabled: false,
   url: "jagentdesk://app/#offer=test",
   qr: null,
 };
@@ -43,14 +49,11 @@ describe("daemon pair workflow", () => {
     const resolveOffer = vi.fn(async () => disabledOffer);
     const output = createRecordedOutput();
 
-    await runPairCommand(
-      {},
-      { resolveOffer, isInteractive: () => true, output },
-    );
+    await runPairCommand({}, { resolveOffer, isInteractive: () => true, output });
 
     expect(resolveOffer).toHaveBeenCalledWith({ jagentdeskHome: expect.any(String) });
     expect(output.exitCode).toBe(1);
-    expect(output.stderr.join("")).toContain("Tailnet pairing is not configured for this daemon");
+    expect(output.stderr.join("")).toContain("No pairing transport is configured for this daemon");
     expect(output.stdout.join("")).toBe("");
   });
 
@@ -58,13 +61,10 @@ describe("daemon pair workflow", () => {
     const resolveOffer = vi.fn(async () => disabledOffer);
     const output = createRecordedOutput();
 
-    await runPairCommand(
-      { json: true },
-      { resolveOffer, isInteractive: () => true, output },
-    );
+    await runPairCommand({ json: true }, { resolveOffer, isInteractive: () => true, output });
 
     expect(resolveOffer).toHaveBeenCalledWith({ jagentdeskHome: expect.any(String) });
-    expect(output.stderr.join("")).toContain('"code":"TAILNET_NOT_CONFIGURED"');
+    expect(output.stderr.join("")).toContain('"code":"NO_PAIRING_TRANSPORT"');
     expect(output.exitCode).toBe(1);
   });
 
@@ -72,10 +72,7 @@ describe("daemon pair workflow", () => {
     const resolveOffer = vi.fn(async () => enabledOffer);
     const output = createRecordedOutput();
 
-    await runPairCommand(
-      {},
-      { resolveOffer, isInteractive: () => true, output },
-    );
+    await runPairCommand({}, { resolveOffer, isInteractive: () => true, output });
 
     expect(output.stdout.join("")).toContain(enabledOffer.url ?? "");
     expect(output.exitCode).toBeUndefined();
@@ -85,13 +82,20 @@ describe("daemon pair workflow", () => {
     const resolveOffer = vi.fn(async () => enabledOffer);
     const output = createRecordedOutput();
 
-    await runPairCommand(
-      { json: true },
-      { resolveOffer, isInteractive: () => true, output },
-    );
+    await runPairCommand({ json: true }, { resolveOffer, isInteractive: () => true, output });
 
     expect(output.stdout.join("")).toContain('"tailnetEnabled": true');
     expect(output.stdout.join("")).toContain(enabledOffer.url ?? "");
     expect(output.exitCode).toBeUndefined();
+  });
+  test("prints a relay-only pairing offer when Tailscale is down", async () => {
+    const offer = { ...enabledOffer, tailnetEnabled: false, relayEnabled: true };
+    const output = createRecordedOutput();
+    await runPairCommand(
+      { json: true },
+      { resolveOffer: async () => offer, isInteractive: () => false, output },
+    );
+    expect(output.exitCode).toBeUndefined();
+    expect(JSON.parse(output.stdout.join(""))).toEqual(offer);
   });
 });

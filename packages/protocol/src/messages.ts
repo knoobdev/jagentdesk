@@ -384,6 +384,16 @@ export const MutableDaemonConfigSchema = z
     autorun: z.object({ enabled: z.boolean() }).default({ enabled: false }),
     // Session sharing (spec §21.11). Default OFF: opt-in per daemon.
     sessionSharing: z.object({ enabled: z.boolean() }).default({ enabled: false }),
+    // Relay second path (spec 35.3). Optional (not `.default`) so existing
+    // MutableDaemonConfig literals stay valid; the daemon seeds it from startup
+    // config and `relay.enabled` toggles the transport without a restart.
+    relay: z
+      .object({
+        enabled: z.boolean(),
+        endpoint: z.string().min(1),
+        useTls: z.boolean(),
+      })
+      .optional(),
     providers: z.record(z.string(), MutableDaemonProviderConfigSchema).default({}),
     metadataGeneration: MutableMetadataGenerationConfigSchema.default({ providers: [] }),
     autoArchiveAfterMerge: z.boolean().default(false),
@@ -428,6 +438,16 @@ export const MutableDaemonConfigPatchSchema = z
     metadataGeneration: MutableMetadataGenerationConfigSchema.partial().optional(),
     autorun: z.object({ enabled: z.boolean().optional() }).passthrough().optional(),
     sessionSharing: z.object({ enabled: z.boolean().optional() }).passthrough().optional(),
+    // Explicit optional fields (NOT relaySchema.partial()): an omitted field must stay
+    // untouched so a `{ relay: { enabled } }` patch never rewrites endpoint/useTls.
+    relay: z
+      .object({
+        enabled: z.boolean().optional(),
+        endpoint: z.string().min(1).optional(),
+        useTls: z.boolean().optional(),
+      })
+      .passthrough()
+      .optional(),
     autoArchiveAfterMerge: z.boolean().optional(),
     enableTerminalAgentHooks: z.boolean().optional(),
     appendSystemPrompt: z.string().optional(),
@@ -1570,6 +1590,7 @@ export const PairingDeviceRequestedMessageSchema = z.object({
     connectionId: z.string().min(1).optional(),
     remoteAddress: z.string().min(1).optional(),
     transport: z.literal("tailnet").optional(),
+    relayConnectionId: z.string().min(1).optional(),
   }),
 });
 
@@ -4568,6 +4589,15 @@ export const ServerInfoStatusPayloadSchema = z
     desktopManaged: z.boolean().optional(),
     capabilities: ServerCapabilitiesFromUnknownSchema.optional(),
     // COMPAT(providersSnapshot): added in v0.1.48, remove gating when all clients use snapshot
+    // Relay second path (spec 35 / ADR-0048): sent after auth so hosts paired
+    // before relay existed can add a `relay` connection. Presence = enabled.
+    relay: z
+      .object({
+        endpoint: z.string().min(1),
+        useTls: z.boolean().optional(),
+        daemonPublicKeyB64: z.string().min(1),
+      })
+      .optional(),
     features: z
       .object({
         providersSnapshot: z.boolean().optional(),
@@ -4738,6 +4768,9 @@ export const ServerInfoStatusPayloadSchema = z
         figmaRenderFidelity: z.boolean().optional(),
         figmaTextOutlines: z.boolean().optional(),
         figmaCachedRender: z.boolean().optional(),
+        // Relay second path (spec 35 / ADR-0048): pairing offers carry `relay`,
+        // server_info carries the relay descriptor, and the app shows the Relay badge.
+        relay: z.boolean().optional(),
       })
       .optional(),
   })
@@ -5786,6 +5819,7 @@ export const DaemonGetPairingOfferResponseSchema = z.object({
         .optional(),
       pairingCodeExpiresAtMs: z.number().int().positive().optional(),
       tailnetEnabled: z.boolean().optional(),
+      relayEnabled: z.boolean().optional(),
     })
     .passthrough(),
 });

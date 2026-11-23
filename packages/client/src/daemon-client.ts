@@ -11,6 +11,7 @@ import type {
   SpecModeState,
 } from "@jagentdesk/protocol/spec-mode";
 import type { z } from "zod";
+import { isRelayClientWebSocketUrl } from "@jagentdesk/protocol/daemon-endpoints";
 import { CLIENT_CAPS, type ClientCapability } from "@jagentdesk/protocol/client-capabilities";
 import type { DatabaseEngine, DbConnectionConfig } from "@jagentdesk/protocol/database/rpc-schemas";
 import type {
@@ -331,6 +332,8 @@ import {
   type FileTransferFrame,
 } from "@jagentdesk/protocol/binary-frames/index";
 import {
+  createRelayE2eeTransportFactory,
+  createRelayUpgradeTransportFactory,
   createWebSocketTransportFactory,
   decodeMessageData,
   defaultWebSocketFactory,
@@ -506,6 +509,9 @@ export type DaemonEventHandler = (event: DaemonEvent) => void;
 export type BrowserAutomationExecuteRequestMessage = BrowserAutomationExecuteRequest;
 export type BrowserAutomationExecuteResponseMessage = BrowserAutomationExecuteResponse;
 
+/** Endpoint security negotiated on a relay connection. */
+export type RelaySecurityMode = "legacy" | "protected";
+
 export interface DaemonClientConfig {
   url: string;
   clientId: string;
@@ -519,6 +525,19 @@ export interface DaemonClientConfig {
   webSocketFactory?: WebSocketFactory;
   logger?: Logger;
   connectTimeoutMs?: number;
+  /**
+   * Relay E2EE (spec 35 / ADR-0048): wrap the relay WebSocket in the Noise
+   * secure channel pinned to the daemon's key. Only valid for relay URLs —
+   * direct/tailnet transports never route through the Worker.
+   */
+  e2ee?: {
+    enabled?: boolean;
+    daemonPublicKeyB64?: string;
+    /** Refuse connections whose negotiated endpoint security is below this mode. */
+    minimumMode?: RelaySecurityMode;
+    /** Called with the negotiated mode after each authenticated relay handshake. */
+    onSecurityMode?: (mode: RelaySecurityMode) => void;
+  };
   reconnect?: {
     enabled?: boolean;
     baseDelayMs?: number;
@@ -547,9 +566,9 @@ export interface DaemonClientConfig {
    * (no challenge). Never set this for tailnet — it would be an auth bypass.
    */
   unsignedHelloFallbackOnChallengeTimeout?: boolean;
-  /** Tailnet transport only: keys used to answer the daemon's nonce challenge. */
+  /** Tailnet and relay transports: keys used to answer the daemon's nonce challenge. */
   deviceSigning?: DeviceSigningConfig;
-  /** Tailnet transport only: register the device pre-hello on first challenge. */
+  /** Tailnet and relay transports: register the device pre-hello on first challenge. */
   pairingRegistration?: PairingRegistrationConfig;
 }
 
@@ -1893,7 +1912,13 @@ export class DaemonClient {
   private completedBinaryFileReads = new Map<string, FileReadResult>();
   private logger: Logger;
   private pendingSendQueue: PendingSend[] = [];
-  private readonly logConnectionPath: "direct";
+  private readonly logConnectionPath: "direct" | "relay";
+  /**
+   * Lowest relay endpoint security this client accepts on its next attempt.
+   * Starts at the configured floor; once a connection negotiates `protected`
+   * the floor ratchets up, so an attacker cannot downgrade later attempts.
+   */
+  private relaySecurityFloorValue: RelaySecurityMode | undefined;
   private readonly logServerId: string | null;
   private readonly logClientIdHash: string;
   private readonly logGeneration: number | null;
@@ -1907,7 +1932,8 @@ export class DaemonClient {
 
   constructor(private config: DaemonClientConfig) {
     this.logger = config.logger ?? consoleLogger;
-    this.logConnectionPath = "direct";
+    this.logConnectionPath = isRelayClientWebSocketUrl(this.config.url) ? "relay" : "direct";
+    this.relaySecurityFloorValue = config.e2ee?.minimumMode;
     let parsedUrlForLog: URL | null = null;
     try {
       parsedUrlForLog = new URL(this.config.url);
@@ -1976,6 +2002,40 @@ export class DaemonClient {
     return this.connectPromise;
   }
 
+  private createTransportFactoryForAttempt(): DaemonTransportFactory {
+    const baseTransportFactory =
+      this.config.transportFactory ??
+      createWebSocketTransportFactory(this.config.webSocketFactory ?? defaultWebSocketFactory);
+    const isRelayTransport = isRelayClientWebSocketUrl(this.config.url);
+    // Spec 35: relay carries routing only. Credentials must never reach the
+    // Worker socket; on a relay URL they travel inside the encrypted hello.
+    if (isRelayTransport && this.config.e2ee?.enabled !== true) {
+      this.setReconnectEnabled(false);
+      throw new Error("Relay connections require E2EE");
+    }
+    // Endpoint security is selected by configuration, never inferred from the URL.
+    let transportFactory = isRelayTransport
+      ? createRelayUpgradeTransportFactory(baseTransportFactory)
+      : baseTransportFactory;
+    if (this.config.e2ee?.enabled === true) {
+      const daemonPublicKeyB64 = this.config.e2ee.daemonPublicKeyB64;
+      if (!daemonPublicKeyB64) {
+        throw new Error("daemonPublicKeyB64 is required for relay E2EE");
+      }
+      transportFactory = createRelayE2eeTransportFactory({
+        baseFactory: transportFactory,
+        daemonPublicKeyB64,
+        logger: this.logger,
+        ...(this.relaySecurityFloorValue ? { minimumMode: this.relaySecurityFloorValue } : {}),
+        onSecurityMode: (mode) => {
+          if (mode === "protected") this.relaySecurityFloorValue = "protected";
+          this.config.e2ee?.onSecurityMode?.(mode);
+        },
+      });
+    }
+    return transportFactory;
+  }
+
   private attemptConnect(): void {
     if (this.connectionState.status === "disposed") {
       this.rejectConnect(new Error("Daemon client is disposed"));
@@ -2003,9 +2063,7 @@ export class DaemonClient {
       // Reconnect can overlap with browser close/error delivery ordering.
       // Always dispose previous transport before constructing the next one.
       this.disposeTransport();
-      const transportFactory =
-        this.config.transportFactory ??
-        createWebSocketTransportFactory(this.config.webSocketFactory ?? defaultWebSocketFactory);
+      const transportFactory = this.createTransportFactoryForAttempt();
       const transportUrl = this.resolveTransportUrlForAttempt();
       const transport = transportFactory({
         url: transportUrl,

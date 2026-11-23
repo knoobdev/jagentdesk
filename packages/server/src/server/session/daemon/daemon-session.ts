@@ -22,6 +22,8 @@ export interface DaemonRuntimeConfig {
   appBaseUrl?: string;
   desktopManaged?: boolean;
   getTailnetAddress(): { host: string; port: number; useTls?: boolean } | null;
+  /** Live relay runtime state (spec 35.3); read per request so a toggle applies at once. */
+  getRelayConfig?(): { enabled: boolean; endpoint: string; useTls: boolean } | null;
 }
 
 export interface DaemonSessionHost {
@@ -58,6 +60,8 @@ export interface DaemonSessionOptions {
     requestId: string;
     reason: string;
   }) => Promise<{ ok: boolean; error?: string }> | { ok: boolean; error?: string };
+  /** Spec 05.5: closes every live socket of a revoked device on all transports. */
+  closeConnectionsForDevice?: (deviceId: string) => number;
 }
 
 /**
@@ -96,6 +100,7 @@ export class DaemonSession {
         reason: string;
       }) => Promise<{ ok: boolean; error?: string }> | { ok: boolean; error?: string })
     | null;
+  private readonly closeConnectionsForDevice: ((deviceId: string) => number) | null;
 
   constructor(options: DaemonSessionOptions) {
     this.host = options.host;
@@ -115,6 +120,7 @@ export class DaemonSession {
     this.daemonPublicKeyB64 = options.daemonPublicKeyB64 ?? null;
     this.pairingCodeManager = options.pairingCodeManager ?? null;
     this.cancelPendingPairingRequest = options.cancelPendingPairingRequest ?? null;
+    this.closeConnectionsForDevice = options.closeConnectionsForDevice ?? null;
     this.selfUpdate = new DaemonSelfUpdateSessionController({
       clientId: this.clientId,
       daemonVersion: this.daemonVersion ?? null,
@@ -260,10 +266,14 @@ export class DaemonSession {
   ): Promise<void> {
     try {
       const tailnetAddress = this.daemonRuntimeConfig?.getTailnetAddress() ?? null;
+      const relayConfig = this.daemonRuntimeConfig?.getRelayConfig?.() ?? null;
       const pairing = await generateLocalPairingOffer({
         jagentdeskHome: this.jagentdeskHome,
         tailnetAddress: tailnetAddress ? `${tailnetAddress.host}:${tailnetAddress.port}` : null,
         useTls: tailnetAddress?.useTls,
+        relayEnabled: relayConfig?.enabled === true,
+        relayEndpoint: relayConfig?.endpoint ?? null,
+        relayUseTls: relayConfig?.useTls,
         appBaseUrl: this.daemonRuntimeConfig?.appBaseUrl,
         includeQr: true,
         logger: this.logger,
@@ -277,6 +287,7 @@ export class DaemonSession {
           url: pairing.url ?? "",
           qr: pairing.qr ?? null,
           tailnetEnabled: pairing.tailnetEnabled,
+          relayEnabled: pairing.relayEnabled,
           ...(pairing.pairingCode ? { pairingCode: pairing.pairingCode } : {}),
           ...(pairing.pairingCodeExpiresAtMs
             ? { pairingCodeExpiresAtMs: pairing.pairingCodeExpiresAtMs }
@@ -422,8 +433,17 @@ export class DaemonSession {
       return;
     }
     const revoked = this.pairedDevices.revokeById(msg.deviceId);
+    // Spec 05.5: revocation closes the device's live sockets on every transport,
+    // tailnet and relay alike (spec 35.5), within the revoke acceptance window.
+    const closedSockets = revoked ? (this.closeConnectionsForDevice?.(msg.deviceId) ?? 0) : 0;
     this.logger.info(
-      { clientId: this.clientId, deviceId: msg.deviceId, revoked, requestId: msg.requestId },
+      {
+        clientId: this.clientId,
+        deviceId: msg.deviceId,
+        revoked,
+        closedSockets,
+        requestId: msg.requestId,
+      },
       "Revoked paired device",
     );
     this.host.emit({

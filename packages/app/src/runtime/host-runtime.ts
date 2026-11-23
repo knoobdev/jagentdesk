@@ -2243,6 +2243,11 @@ export class HostRuntimeStore {
     label?: string,
     pairingCode?: string,
   ): Promise<HostProfile> {
+    if (!offer.tailnetAddress) {
+      // Spec 35: relay-only offers pair over the Worker once the app relay
+      // transport lands; this build dials tailnet routes only.
+      throw new Error("Pairing over relay requires a newer JAgentDesk app.");
+    }
     return this.upsertTailnetConnection({
       serverId: offer.serverId,
       tailnetAddress: offer.tailnetAddress,

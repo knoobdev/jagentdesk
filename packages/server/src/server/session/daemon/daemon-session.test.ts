@@ -218,6 +218,7 @@ describe("DaemonSession", () => {
           url: "",
           qr: null,
           tailnetEnabled: false,
+          relayEnabled: false,
         },
       },
     ]);

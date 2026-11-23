@@ -76,6 +76,7 @@
     "@jagentdesk/highlight": "0.9.59",
     "@jagentdesk/plugin": "0.9.59",
     "@jagentdesk/protocol": "0.9.59",
+    "@jagentdesk/relay": "0.9.59",
     "@kubernetes/client-node": "^1.4.0",
     "@modelcontextprotocol/sdk": "^1.20.1",
     "@opencode-ai/sdk": "1.14.46",

@@ -175,6 +175,7 @@ async function prepareTestDaemonConfig(
     corsAllowedOrigins: options.corsAllowedOrigins ?? [],
     hostnames: true,
     mcpEnabled: options.mcpEnabled ?? true,
+    relayEnabled: false,
     staticDir,
     mcpDebug: options.mcpDebug ?? false,
     sessionSharingEnabled: options.sessionSharingEnabled,

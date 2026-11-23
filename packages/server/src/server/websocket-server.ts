@@ -146,8 +146,12 @@ import {
 const WS_CLOSE_DAEMON_AUTH_FAILED = 4401;
 
 export interface ExternalSocketMetadata {
-  transport: "tailnet";
+  transport: "tailnet" | "relay";
   externalSessionKey?: string;
+  /** Routing id of the relay data socket (spec 35.2); relay transports only. */
+  relayConnectionId?: string;
+  /** Negotiated endpoint security for relay-carried sockets. */
+  securityMode?: "legacy" | "protected";
 }
 
 /**
@@ -200,7 +204,7 @@ type PendingPairingRequestPayload = Extract<
 
 interface WebSocketConnectionIdentity {
   connectionId: string;
-  transport: "direct" | "tailnet";
+  transport: "direct" | "tailnet" | "relay";
   peer: "loopback" | "local_ipc" | "external";
   browserOrigin: boolean;
   host?: string;
@@ -211,6 +215,8 @@ interface WebSocketConnectionIdentity {
   sessionId?: string;
   appVersion?: string;
   deviceId?: string;
+  relayConnectionId?: string;
+  securityMode?: "legacy" | "protected";
 }
 
 interface WebSocketServerConfig {
@@ -1274,8 +1280,8 @@ export class VoiceAssistantWebSocketServer {
     transport: WebSocketConnectionIdentity["transport"],
   ): void {
     // The desktop approval UI is a local trusted client. Do not replay the
-    // desktop-only notification to the tailnet client that triggered it.
-    if (transport === "tailnet") {
+    // desktop-only notification to the tailnet/relay client that triggered it.
+    if (transport === "tailnet" || transport === "relay") {
       return;
     }
 
@@ -1290,6 +1296,40 @@ export class VoiceAssistantWebSocketServer {
         wrapSessionMessage({ type: "pairing.device.requested", payload: request }),
       );
     }
+  }
+
+  /**
+   * Spec 05.5 / 35: device revocation must take effect on every path. Closes all
+   * sockets currently carrying this device's identity — tailnet, relay, and
+   * direct alike — so a revoked device loses its live sessions, not just future
+   * handshakes. Returns how many sockets were closed.
+   */
+  public closeConnectionsForDevice(deviceId: string): number {
+    const targets = new Set<WebSocketLike>();
+    for (const [ws, identity] of this.socketIdentities) {
+      if (identity.deviceId === deviceId) {
+        targets.add(ws);
+      }
+    }
+    let closed = 0;
+    for (const ws of targets) {
+      closed += 1;
+      // Drop admission immediately, including buffered requests arriving while
+      // the peer or network stalls the WebSocket close handshake.
+      void this.detachSocket(ws, { code: WS_CLOSE_DAEMON_AUTH_FAILED, reason: "Device revoked" });
+      const forceClose = setTimeout(() => ws.terminate?.(), 5_000);
+      forceClose.unref();
+      ws.once("close", () => clearTimeout(forceClose));
+      try {
+        ws.close(WS_CLOSE_DAEMON_AUTH_FAILED, "Device revoked");
+      } catch {
+        ws.terminate?.();
+      }
+    }
+    if (closed > 0) {
+      this.incrementRuntimeCounter("pairingDeviceRevoked");
+    }
+    return closed;
   }
 
   public listTrustedSessions(): Session[] {
@@ -1356,6 +1396,8 @@ export class VoiceAssistantWebSocketServer {
   ): Promise<void> {
     if (metadata?.transport === "tailnet") {
       this.incrementRuntimeCounter("tailnetExternalSocketAttached");
+    } else if (metadata?.transport === "relay") {
+      this.incrementRuntimeCounter("relayExternalSocketAttached");
     }
     await this.attachSocket(ws, undefined, metadata);
   }
@@ -1718,16 +1760,18 @@ export class VoiceAssistantWebSocketServer {
     this.incrementRuntimeCounter("connectedAwaitingHello");
     this.bindSocketHandlers(ws);
 
-    // A tailnet connection can never be served unauthenticated: reject it up
-    // front when pairing is not configured, regardless of the direct-gate flag.
-    if (identity.transport === "tailnet" && !this.pairing) {
+    // An external-path connection can never be served unauthenticated: reject
+    // it up front when pairing is not configured, regardless of the direct-gate
+    // flag. Relay is treated exactly like the tailnet here (spec 35.3): the E2EE
+    // channel proves the daemon's key, the device signature proves the client.
+    if ((identity.transport === "tailnet" || identity.transport === "relay") && !this.pairing) {
       this.clearPendingConnection(ws);
       pending.connectionLogger.warn(
         { ...toConnectionLogFields(identity) },
-        "Rejected tailnet connection: pairing is not configured on the daemon",
+        `Rejected ${identity.transport} connection: pairing is not configured on the daemon`,
       );
       try {
-        ws.close(WS_CLOSE_DAEMON_AUTH_FAILED, "Tailnet connections require pairing");
+        ws.close(WS_CLOSE_DAEMON_AUTH_FAILED, `${identity.transport} connections require pairing`);
       } catch {
         // ignore close errors
       }
@@ -2038,6 +2082,7 @@ export class VoiceAssistantWebSocketServer {
       pairingCodeManager: this.pairing?.pairingCodeManager,
       cancelPendingPairingRequest: ({ requestId, reason }) =>
         this.cancelPendingPairingRequest({ requestId, reason }),
+      closeConnectionsForDevice: (deviceId) => this.closeConnectionsForDevice(deviceId),
       serviceProxy: this.serviceProxy ?? undefined,
       scriptRuntimeStore: this.scriptRuntimeStore ?? undefined,
       workspaceSetupSnapshots: this.workspaceSetupSnapshots,
@@ -2108,7 +2153,7 @@ export class VoiceAssistantWebSocketServer {
     if (!this.pairing) {
       return false;
     }
-    if (identity.transport === "tailnet") {
+    if (identity.transport === "tailnet" || identity.transport === "relay") {
       return true;
     }
     return this.pairing.requireSignedHelloForDirect === true;
@@ -2364,6 +2409,21 @@ export class VoiceAssistantWebSocketServer {
       // COMPAT(desktopManaged): added in v0.1.X, remove optional parsing after 2027-01-16.
       desktopManaged: this.daemonRuntimeConfig?.desktopManaged === true,
       ...(this.serverCapabilities ? { capabilities: this.serverCapabilities } : {}),
+      // Spec 35.4: hosts paired before relay existed learn the second path from
+      // here. `daemonPublicKeyB64` is the Noise static key the app pins.
+      ...(() => {
+        const relay = this.daemonRuntimeConfig?.getRelayConfig?.() ?? null;
+        const daemonPublicKeyB64 = this.pairing?.daemonPublicKeyB64;
+        return relay?.enabled && relay.endpoint && daemonPublicKeyB64
+          ? {
+              relay: {
+                endpoint: relay.endpoint,
+                useTls: relay.useTls,
+                daemonPublicKeyB64,
+              },
+            }
+          : {};
+      })(),
       features: {
         // COMPAT(providersSnapshot): keep optional until all clients rely on snapshot flow.
         providersSnapshot: true,
@@ -2520,6 +2580,9 @@ export class VoiceAssistantWebSocketServer {
               pluginSettings: true,
             }
           : {}),
+        // Relay second path (spec 35 / ADR-0048): with it the pairing offer
+        // carries `relay` and server_info carries the descriptor above.
+        relay: this.daemonRuntimeConfig?.getRelayConfig?.()?.enabled === true,
       },
     };
   }
@@ -3062,7 +3125,11 @@ export class VoiceAssistantWebSocketServer {
       ...(pendingConnection.identity.remoteAddress
         ? { remoteAddress: pendingConnection.identity.remoteAddress }
         : {}),
-      transport: "tailnet",
+      // COMPAT(pairingRequestTransport): added in v0.9.59, remove after 2027-05-23
+      // once the client floor accepts "relay" in the legacy transport field.
+      ...(pendingConnection.identity.transport === "relay"
+        ? { relayConnectionId: pendingConnection.identity.relayConnectionId }
+        : { transport: "tailnet" as const }),
     };
     this.rememberPendingPairingRequest(pairingRequestPayload);
     this.broadcast(
@@ -3840,13 +3907,15 @@ function createWebSocketConnectionIdentity(
 ): WebSocketConnectionIdentity {
   return {
     connectionId: `conn_${randomUUID().replaceAll("-", "")}`,
-    transport: metadata?.transport === "tailnet" ? "tailnet" : "direct",
+    transport: metadata?.transport ?? "direct",
     peer: resolveConnectionPeer(requestMetadata, metadata),
     browserOrigin: requestMetadata.origin !== undefined,
     ...(requestMetadata.host ? { host: requestMetadata.host } : {}),
     ...(requestMetadata.origin ? { origin: requestMetadata.origin } : {}),
     ...(requestMetadata.userAgent ? { userAgent: requestMetadata.userAgent } : {}),
     ...(requestMetadata.remoteAddress ? { remoteAddress: requestMetadata.remoteAddress } : {}),
+    ...(metadata?.relayConnectionId ? { relayConnectionId: metadata.relayConnectionId } : {}),
+    ...(metadata?.securityMode ? { securityMode: metadata.securityMode } : {}),
   };
 }
 
@@ -3863,6 +3932,8 @@ function toConnectionLogFields(identity: WebSocketConnectionIdentity): Record<st
     ...(identity.sessionId ? { sessionId: identity.sessionId } : {}),
     ...(identity.appVersion ? { appVersion: identity.appVersion } : {}),
     ...(identity.deviceId ? { deviceId: identity.deviceId } : {}),
+    ...(identity.relayConnectionId ? { relayConnectionId: identity.relayConnectionId } : {}),
+    ...(identity.securityMode ? { securityMode: identity.securityMode } : {}),
   };
 }
 
@@ -3870,7 +3941,7 @@ function resolveConnectionPeer(
   requestMetadata: SocketRequestMetadata,
   metadata: ExternalSocketMetadata | undefined,
 ): WebSocketConnectionIdentity["peer"] {
-  if (metadata?.transport === "tailnet") return "external";
+  if (metadata?.transport === "tailnet" || metadata?.transport === "relay") return "external";
   if (!requestMetadata.remoteAddress) return "local_ipc";
   return isLoopbackAddress(requestMetadata.remoteAddress) ? "loopback" : "external";
 }
