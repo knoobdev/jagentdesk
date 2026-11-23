@@ -380,9 +380,9 @@ function resolveOperatorContext(persisted: ReturnType<typeof loadPersistedConfig
 }
 
 function resolveBrowserToolsEnabled(persisted: ReturnType<typeof loadPersistedConfig>): boolean {
-  // Browser tools default ON: agents can drive the built-in agentic browser out of
-  // the box. Only an explicit `false` in persisted config turns them off.
-  return persisted.daemon?.browserTools?.enabled ?? true;
+  // Spec 36 keeps the browser-tools built-in opt-in. An explicit legacy value
+  // seeds the one-time migration; an absent flag must not turn it on.
+  return persisted.daemon?.browserTools?.enabled ?? false;
 }
 
 function resolveAutorunEnabled(persisted: ReturnType<typeof loadPersistedConfig>): boolean {
@@ -543,6 +543,7 @@ export function loadConfig(
     enableTerminalAgentHooks: persisted.daemon?.enableTerminalAgentHooks ?? false,
     appendSystemPrompt,
     operatorContext,
+    builtinPlugins: persisted.builtinPlugins,
     pluginsEnabled: persisted.pluginsEnabled,
     plugins: persisted.plugins,
     terminalProfiles,

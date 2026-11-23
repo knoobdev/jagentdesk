@@ -1,3 +1,4 @@
+import { useBuiltinPluginEnabled } from "@/plugins/builtin/hooks";
 import React, { useMemo, type ReactNode } from "react";
 import {
   View,
@@ -774,7 +775,11 @@ function ToolCallDetailsContentInner({
     () => readRemoteJobToolResult(toolName ?? "", detail),
     [toolName, detail],
   );
-  if (remoteJob) {
+  const remoteTasksEnabled = useBuiltinPluginEnabled(
+    client?.getLastServerInfoMessage()?.serverId,
+    "remote-tasks",
+  );
+  if (remoteJob && remoteTasksEnabled) {
     return (
       <RemoteJobCard
         client={client ?? null}

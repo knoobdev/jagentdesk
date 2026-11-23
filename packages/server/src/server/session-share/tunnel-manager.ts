@@ -34,7 +34,8 @@ export class TunnelManager {
 
   // Start a quick tunnel to a local port and resolve once the public URL appears.
   // Rejects with CloudflaredMissingError if the binary is absent, or on timeout.
-  async start(localPort: number, timeoutMs = 30_000): Promise<TunnelHandle> {
+  async start(localPort: number, timeoutMs = 30_000, signal?: AbortSignal): Promise<TunnelHandle> {
+    signal?.throwIfAborted();
     let child: ChildProcess;
     try {
       child = spawnProcess("cloudflared", [
@@ -63,6 +64,7 @@ export class TunnelManager {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
         this.logger.info({ url, localPort }, "Cloudflare quick tunnel ready");
         resolve({ url, stop });
       };
@@ -70,6 +72,7 @@ export class TunnelManager {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
         void stop();
         reject(err);
       };
@@ -89,10 +92,13 @@ export class TunnelManager {
         finishErr(new Error(`cloudflared exited before the tunnel was ready (code ${code})`));
       });
 
+      const onAbort = () => finishErr(new Error("Session sharing stopped"));
+      signal?.addEventListener("abort", onAbort, { once: true });
       const timer = setTimeout(() => {
         finishErr(new Error(`Timed out waiting for the Cloudflare tunnel (${timeoutMs}ms)`));
       }, timeoutMs);
       (timer as unknown as { unref?: () => void }).unref?.();
+      if (signal?.aborted) onAbort();
     });
   }
 }

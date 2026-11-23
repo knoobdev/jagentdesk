@@ -1,3 +1,4 @@
+import { BuiltinPluginGate } from "@/plugins/builtin/gate";
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
@@ -453,7 +454,11 @@ export function ProvidersSection({ serverId }: ProvidersSectionProps) {
         ) : null}
       </SettingsSection>
 
-      {hasServer && isConnected ? <CustomProvidersSection serverId={serverId} /> : null}
+      {hasServer && isConnected ? (
+        <BuiltinPluginGate serverId={serverId} id="custom-providers">
+          <CustomProvidersSection serverId={serverId} />
+        </BuiltinPluginGate>
+      ) : null}
 
       {hasServer && isConnected ? (
         <SettingsSection

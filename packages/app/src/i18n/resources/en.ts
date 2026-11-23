@@ -1,8 +1,10 @@
+import { builtinPluginStrings } from "./builtin-plugins";
 import { pluginSettings } from "./plugin-settings";
 import { activityGraphStrings } from "./activity-graph";
 import { sshModuleStrings } from "./ssh-modules";
 
 export const en = {
+  builtinPlugins: builtinPluginStrings,
   ssh: sshModuleStrings,
   paneFind: {
     connectionFailure: "Could not search this chat. Check the host connection and retry.",

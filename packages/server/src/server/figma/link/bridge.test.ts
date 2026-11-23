@@ -229,3 +229,37 @@ describe("FigmaLinkServer", () => {
     await bridge.close();
   });
 });
+
+it("preserves host push listeners across a built-in toggle", async () => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const dataDir = await mkdtemp(path.join(tmpdir(), "jad-figma-toggle-"));
+  const bridge = new FigmaLinkServer({
+    secrets: new MemorySecretStore(),
+    dataDir,
+    logger,
+    port: 0,
+    autoInstall: false,
+  });
+  let plugin: FakePlugin | null = null;
+  const statuses: FigmaLinkStatus[] = [];
+  bridge.attachPush((status) => {
+    statuses.push(status);
+  });
+  try {
+    const first = await bridge.start();
+    expect(first.ok).toBe(true);
+    await bridge.close();
+    statuses.length = 0;
+    const second = await bridge.start();
+    if (!second.ok) throw new Error("Could not restart the bridge");
+    plugin = new FakePlugin({ url: `ws://127.0.0.1:${second.port}/ws` });
+    await plugin.connect();
+    plugin.hello();
+    await plugin.nextFrame("pairing_required");
+    expect(statuses.at(-1)?.files).toHaveLength(1);
+  } finally {
+    await plugin?.close();
+    await bridge.close();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});

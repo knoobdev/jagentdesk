@@ -32,6 +32,7 @@ interface CustomProviderFormSheetProps {
   client: CustomProvidersClient | null;
   target: CustomProviderEditorTarget;
   sshServers: readonly SshServerOption[];
+  sshEnabled?: boolean;
   onClose: () => void;
   /** Called after a successful save or delete; the parent closes and refreshes. */
   onSaved: () => void;
@@ -407,6 +408,7 @@ export function CustomProviderFormSheet({
   client,
   target,
   sshServers,
+  sshEnabled = true,
   onClose,
   onSaved,
   onTested,
@@ -449,24 +451,27 @@ export function CustomProviderFormSheet({
   );
 
   const routeOptions = useMemo<Array<SelectFieldOption<ApiRoute>>>(
-    () => [
-      {
-        id: "direct",
-        value: "direct",
-        label: t("settings.providers.customProviders.route.direct"),
-      },
-      {
-        id: "tailnet",
-        value: "tailnet",
-        label: t("settings.providers.customProviders.route.tailnet"),
-      },
-      {
-        id: "ssh",
-        value: "ssh",
-        label: t("settings.providers.customProviders.route.ssh"),
-      },
-    ],
-    [t],
+    () =>
+      (
+        [
+          {
+            id: "direct",
+            value: "direct",
+            label: t("settings.providers.customProviders.route.direct"),
+          },
+          {
+            id: "tailnet",
+            value: "tailnet",
+            label: t("settings.providers.customProviders.route.tailnet"),
+          },
+          {
+            id: "ssh",
+            value: "ssh",
+            label: t("settings.providers.customProviders.route.ssh"),
+          },
+        ] as Array<SelectFieldOption<ApiRoute>>
+      ).filter((option) => sshEnabled || option.value !== "ssh"),
+    [t, sshEnabled],
   );
 
   const routeDisplay = useMemo(() => {

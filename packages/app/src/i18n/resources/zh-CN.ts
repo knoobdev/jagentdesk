@@ -1,9 +1,11 @@
+import { builtinPluginStrings } from "./builtin-plugins";
 import type { TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 import { activityGraphStrings } from "./activity-graph";
 import { sshModuleStrings } from "./ssh-modules";
 
 export const zhCN: TranslationResources = {
+  builtinPlugins: builtinPluginStrings,
   ssh: sshModuleStrings,
   activityGraph: activityGraphStrings,
   paneFind: {

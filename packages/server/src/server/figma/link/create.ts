@@ -12,6 +12,7 @@ export async function createFigmaLinkBridge(options: {
   secrets: SecretStore;
   jagentdeskHome: string;
   logger: pino.Logger;
+  enabled?: boolean;
 }): Promise<FigmaLinkServer> {
   const link = new FigmaLinkServer({
     secrets: options.secrets,
@@ -20,6 +21,7 @@ export async function createFigmaLinkBridge(options: {
     // Test runs only (e.g. beside a running figma-mcp-forge on 1995); the plugin manifest keeps 1995.
     ...linkPortOption(process.env),
   });
+  if (options.enabled === false) return link;
   const started = await link.start();
   if (!started.ok) {
     options.logger.warn({ port: started.error }, "figma link could not bind the loopback port");

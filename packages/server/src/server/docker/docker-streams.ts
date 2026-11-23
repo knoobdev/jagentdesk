@@ -16,6 +16,7 @@ interface EventsSub {
 // per session; every subscription is a spawned process that pushes to the client until it is
 // unsubscribed or the session closes. No polling — `docker events` drives the snapshot refresh.
 export class DockerStreams {
+  private generation = 0;
   private readonly events = new Map<string, EventsSub>();
   private readonly logs = new Map<string, ChildProcess>();
   private readonly stats = new Map<string, ChildProcess>();
@@ -27,7 +28,10 @@ export class DockerStreams {
     emit: (snapshot: DockerSnapshot) => void,
   ): Promise<void> {
     // Push the current state immediately so the UI is never empty while `docker events` warms up.
-    emit(await this.service.list());
+    const generation = this.generation;
+    const snapshot = await this.service.list();
+    if (generation !== this.generation) return;
+    emit(snapshot);
     const child = spawnProcess("docker", ["events", "--format", "{{json .}}"]);
     const sub: EventsSub = { child, debounce: null };
     this.events.set(subscriptionId, sub);
@@ -108,6 +112,7 @@ export class DockerStreams {
   }
 
   disposeAll(): void {
+    this.generation++;
     for (const id of Array.from(this.events.keys())) this.unsubscribeSnapshot(id);
     for (const id of Array.from(this.logs.keys())) this.unsubscribeLogs(id);
     for (const id of Array.from(this.stats.keys())) this.unsubscribeStats(id);

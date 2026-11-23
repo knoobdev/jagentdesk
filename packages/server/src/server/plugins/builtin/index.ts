@@ -1,3 +1,4 @@
+import { BUILTIN_PLUGIN_MANIFESTS } from "@jagentdesk/protocol/builtin-plugins";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,12 +23,13 @@ export interface BuiltinPlugin {
 
 export class BuiltinPluginLoader {
   readonly ids: ReadonlySet<string>;
+  readonly featureManifests = BUILTIN_PLUGIN_MANIFESTS;
 
   constructor(
     private readonly root = resolveBuiltinPluginsRoot(),
     private readonly list: readonly string[] = builtinPlugins,
   ) {
-    this.ids = new Set(list);
+    this.ids = new Set([...list, ...this.featureManifests.map(({ id }) => id)]);
   }
 
   async load(start: (plugin: BuiltinPlugin) => Promise<void>): Promise<void> {

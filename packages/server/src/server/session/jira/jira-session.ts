@@ -59,6 +59,10 @@ export class JiraSession {
 
   dispose(): void {
     this.unsubscribe();
+    this.suspend();
+  }
+
+  suspend(): void {
     this.options.service.watches.unwatchOwner(this.owner);
   }
 

@@ -1,3 +1,5 @@
+import { useHostFeature } from "@/runtime/host-features";
+import { BuiltinPluginGate } from "@/plugins/builtin/gate";
 import { hostTransportLabelKey } from "@/types/host-connection";
 import {
   ArrowDown,
@@ -269,10 +271,18 @@ export function HostAgentsPage({ serverId }: { serverId: string }) {
       {isConnected ? (
         <SettingsSection title={t("settings.hostSections.agents")}>
           <InjectJAgentDeskToolsCard serverId={serverId} />
-          <BrowserToolsOptInCard serverId={serverId} />
-          <AutorunOptInCard serverId={serverId} />
-          <SessionShareOptInCard serverId={serverId} />
-          <BrowserFingerprintProfilesCard serverId={serverId} />
+          <LegacyPluginSettings serverId={serverId}>
+            <BrowserToolsOptInCard serverId={serverId} />
+          </LegacyPluginSettings>
+          <LegacyPluginSettings serverId={serverId}>
+            <AutorunOptInCard serverId={serverId} />
+          </LegacyPluginSettings>
+          <LegacyPluginSettings serverId={serverId}>
+            <SessionShareOptInCard serverId={serverId} />
+          </LegacyPluginSettings>
+          <BuiltinPluginGate serverId={serverId} id="browser-tools">
+            <BrowserFingerprintProfilesCard serverId={serverId} />
+          </BuiltinPluginGate>
           <AppendSystemPromptCard serverId={serverId} />
           <OperatorContextCard serverId={serverId} />
         </SettingsSection>
@@ -2233,3 +2243,13 @@ const styles = StyleSheet.create((theme) => ({
 }));
 
 const FLEX_1_STYLE = { flex: 1 };
+
+function LegacyPluginSettings({
+  serverId,
+  children,
+}: {
+  serverId: string;
+  children: import("react").ReactNode;
+}) {
+  return useHostFeature(serverId, "builtinPlugins") ? null : children;
+}

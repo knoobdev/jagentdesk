@@ -1,3 +1,4 @@
+import { BUILTIN_PLUGIN_MANIFESTS } from "@jagentdesk/protocol/builtin-plugins";
 import {
   loadPersistedConfig,
   savePersistedConfig,
@@ -209,7 +210,35 @@ export class DaemonConfigStore {
   constructor(jagentdeskHome: string, initial: MutableDaemonConfig, logger?: LoggerLike) {
     this.jagentdeskHome = jagentdeskHome;
     this.logger = getLogger(logger);
-    this.current = MutableDaemonConfigSchema.parse(initial);
+    const persisted = loadPersistedConfig(jagentdeskHome, this.logger);
+    const builtinPlugins = initial.builtinPlugins ?? persisted.builtinPlugins;
+    this.current = MutableDaemonConfigSchema.parse({
+      ...initial,
+      ...(builtinPlugins ? { builtinPlugins } : {}),
+    });
+    if (!builtinPlugins) {
+      const legacy = {
+        "browser-tools":
+          persisted.daemon?.browserTools?.enabled ?? initial.browserTools?.enabled === true,
+        autorun: persisted.daemon?.autorun?.enabled ?? initial.autorun?.enabled === true,
+        "session-share":
+          persisted.daemon?.sessionSharing?.enabled ?? initial.sessionSharing?.enabled === true,
+      };
+      this.patch({
+        builtinPlugins: Object.fromEntries(
+          BUILTIN_PLUGIN_MANIFESTS.map((manifest) => [
+            manifest.id,
+            {
+              enabled:
+                manifest.id in legacy
+                  ? legacy[manifest.id as keyof typeof legacy]
+                  : manifest.defaultEnabled,
+            },
+          ]),
+        ),
+      });
+      this.logger?.info("Migrated built-in plugin flags to builtinPlugins in config.json");
+    }
   }
 
   public get(): MutableDaemonConfig {
@@ -368,6 +397,7 @@ function mergeMutableConfigIntoPersistedConfig(params: {
   return {
     ...persisted,
     // The live plugin map already has removePlugins applied, so it replaces the stored one.
+    ...(mutable.builtinPlugins !== undefined ? { builtinPlugins: mutable.builtinPlugins } : {}),
     ...(mutable.pluginsEnabled !== undefined ? { pluginsEnabled: mutable.pluginsEnabled } : {}),
     ...(mutable.plugins !== undefined ? { plugins: mutable.plugins } : {}),
     daemon: {

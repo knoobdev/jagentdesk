@@ -1,3 +1,4 @@
+import { BuiltinPluginsSection } from "@/plugins/builtin/settings-section";
 import { formatPluginInstallation } from "@jagentdesk/protocol/plugin-source-reference";
 import { buildPluginSettingsRoute } from "@/plugins/settings/routes";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -495,7 +496,8 @@ export function HostPluginsPage({ serverId }: { serverId: string }) {
 
   return (
     <View>
-      <SettingsSection title={t("settings.plugins.title")}>
+      <BuiltinPluginsSection serverId={serverId} />
+      <SettingsSection title={t("builtinPlugins.installed")}>
         <View style={settingsStyles.card}>
           <View style={settingsStyles.row}>
             <View style={settingsStyles.rowContent}>

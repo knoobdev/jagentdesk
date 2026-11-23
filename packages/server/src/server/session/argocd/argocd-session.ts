@@ -102,8 +102,12 @@ export class ArgoCdSession {
   }
 
   dispose(): void {
-    const service = this.options.service;
     this.unsubscribeInstances?.();
+    this.suspend();
+  }
+
+  suspend(): void {
+    const service = this.options.service;
     this.unregisterDelegate?.();
     this.unregisterDelegate = null;
     if (service) {

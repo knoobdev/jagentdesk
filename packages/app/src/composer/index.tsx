@@ -1,3 +1,4 @@
+import { BuiltinPluginGate } from "@/plugins/builtin/gate";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
   View,
@@ -312,9 +313,15 @@ function renderLeftContent(args: RenderLeftContentArgs): ReactElement {
         onDropdownClose={focusInput}
         isCompactLayout={isCompactLayout}
       />
-      <SkillsControl agentId={agentId} serverId={serverId} />
-      <SpecModeControl agentId={agentId} serverId={serverId} />
-      <AutonomousControl agentId={agentId} serverId={serverId} />
+      <BuiltinPluginGate serverId={serverId} id="skills">
+        <SkillsControl agentId={agentId} serverId={serverId} />
+      </BuiltinPluginGate>
+      <BuiltinPluginGate serverId={serverId} id="spec-mode">
+        <SpecModeControl agentId={agentId} serverId={serverId} />
+      </BuiltinPluginGate>
+      <BuiltinPluginGate serverId={serverId} id="autorun">
+        <AutonomousControl agentId={agentId} serverId={serverId} />
+      </BuiltinPluginGate>
     </View>
   );
 }
@@ -325,6 +332,7 @@ interface PendingFileAttachment {
 }
 
 interface RenderAttachmentTrayArgs {
+  serverId: string;
   selectedAttachments: ComposerAttachment[];
   pendingFiles: PendingFileAttachment[];
   isComposerLocked: boolean;
@@ -353,6 +361,7 @@ function renderAttachmentTray(args: RenderAttachmentTrayArgs): ReactElement | nu
     <View style={styles.attachmentTray} testID="composer-attachment-tray">
       {selectedAttachments.map((attachment, index) =>
         renderComposerAttachmentPill({
+          serverId: args.serverId,
           attachment,
           index,
           disabled: isComposerLocked,
@@ -403,6 +412,7 @@ function renderQueueTrack(args: RenderQueueTrackArgs): ReactElement | null {
 }
 
 interface RenderComposerAttachmentPillArgs {
+  serverId: string;
   attachment: ComposerAttachment;
   index: number;
   disabled: boolean;
@@ -467,14 +477,20 @@ function renderComposerAttachmentPill(args: RenderComposerAttachmentPillArgs): R
   }
   if (attachment.kind === "jira_issue") {
     return (
-      <JiraIssuePill
+      <BuiltinPluginGate
         key={`jira:${attachment.attachment.connectionId}/${attachment.attachment.key}`}
-        attachment={attachment}
-        index={index}
-        disabled={disabled}
-        onOpen={onOpen}
-        onRemove={onRemove}
-      />
+        serverId={args.serverId}
+        id="jira"
+      >
+        <JiraIssuePill
+          key={`jira:${attachment.attachment.connectionId}/${attachment.attachment.key}`}
+          attachment={attachment}
+          index={index}
+          disabled={disabled}
+          onOpen={onOpen}
+          onRemove={onRemove}
+        />
+      </BuiltinPluginGate>
     );
   }
   if (attachment.kind === "plugin_resource") {
@@ -2117,6 +2133,7 @@ export function Composer({
   const attachmentTray = useMemo(
     () =>
       renderAttachmentTray({
+        serverId,
         selectedAttachments,
         pendingFiles,
         isComposerLocked,
@@ -2133,6 +2150,7 @@ export function Composer({
         },
       }),
     [
+      serverId,
       handleOpenAttachment,
       handleRemoveAttachment,
       isComposerLocked,
@@ -2145,12 +2163,14 @@ export function Composer({
   const attachmentSlot = useMemo(
     () => (
       <>
-        <JiraIssueSuggestion
-          serverId={serverId}
-          text={value}
-          attachments={selectedAttachments}
-          onAttach={handleAttachJiraIssue}
-        />
+        <BuiltinPluginGate serverId={serverId} id="jira">
+          <JiraIssueSuggestion
+            serverId={serverId}
+            text={value}
+            attachments={selectedAttachments}
+            onAttach={handleAttachJiraIssue}
+          />
+        </BuiltinPluginGate>
         {attachmentTray}
       </>
     ),

@@ -1233,7 +1233,8 @@ export class PhysicalDeviceHub {
   }
 
   dispose(): void {
-    for (const udid of Array.from(this.screens.keys())) this.forgetDevice(udid, "daemon stopping");
+    for (const udid of new Set([...this.screens.keys(), ...this.logChildren.keys()]))
+      this.forgetDevice(udid, "daemon stopping");
     for (const device of this.ioses.values()) device.stop();
     this.tools?.tunnel?.stop();
   }

@@ -1,3 +1,5 @@
+import { BuiltinPluginGate } from "@/plugins/builtin/gate";
+import { builtinPluginScreenLayout } from "@/plugins/builtin/route-boundary";
 import { Redirect, Stack, useLocalSearchParams } from "expo-router";
 import { ArgoCdSsoDelegatePrompt } from "@/argocd/sso-delegate-prompt";
 import { useHostRuntimeBootstrapState } from "@/app/_layout";
@@ -38,7 +40,7 @@ function KnownHostRoute() {
   }
 
   const stack = (
-    <ThemedStack screenOptions={HOST_STACK_SCREEN_OPTIONS}>
+    <ThemedStack screenOptions={HOST_STACK_SCREEN_OPTIONS} screenLayout={builtinPluginScreenLayout}>
       <Stack.Screen name="index" />
       <Stack.Screen name="workspace/[workspaceId]/index" />
       <Stack.Screen name="agent/[agentId]" options={AGENT_SCREEN_OPTIONS} />
@@ -56,10 +58,18 @@ function KnownHostRoute() {
 
   return (
     <HostRouteProvider serverId={routeServerId}>
-      <SkillsSyncBinder serverId={routeServerId} />
-      <ArgoCdSsoDelegatePrompt serverId={routeServerId} />
-      <JiraOAuthDelegationBinder serverId={routeServerId} />
-      <FigmaOAuthDelegationBinder serverId={routeServerId} />
+      <BuiltinPluginGate serverId={routeServerId} id="skills">
+        <SkillsSyncBinder serverId={routeServerId} />
+      </BuiltinPluginGate>
+      <BuiltinPluginGate serverId={routeServerId} id="argocd">
+        <ArgoCdSsoDelegatePrompt serverId={routeServerId} />
+      </BuiltinPluginGate>
+      <BuiltinPluginGate serverId={routeServerId} id="jira">
+        <JiraOAuthDelegationBinder serverId={routeServerId} />
+      </BuiltinPluginGate>
+      <BuiltinPluginGate serverId={routeServerId} id="figma">
+        <FigmaOAuthDelegationBinder serverId={routeServerId} />
+      </BuiltinPluginGate>
       {stack}
     </HostRouteProvider>
   );

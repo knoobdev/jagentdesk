@@ -1,3 +1,4 @@
+import { useBuiltinPluginEnabled } from "@/plugins/builtin/hooks";
 import { ClickUpUserHeader } from "@/components/clickup-shell/chat-headers";
 import { CLICKUP_MESSAGE_INDENT } from "@/components/clickup-shell/chat-layout";
 import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
@@ -468,11 +469,14 @@ function userMessageTexts(message: string): {
 function UserMessageText({
   message,
   specModeMessage,
+  serverId,
 }: {
+  serverId?: string;
   message: string;
   specModeMessage: SpecModeMessage | null;
 }) {
-  if (specModeMessage) {
+  const specEnabled = useBuiltinPluginEnabled(serverId, "spec-mode");
+  if (specModeMessage && specEnabled) {
     return (
       <SpecModeMessageBody
         message={message}
@@ -621,7 +625,11 @@ export const UserMessage = memo(function UserMessage({
           })}
         </View>
       ) : null}
-      <UserMessageText message={message} specModeMessage={specModeMessage} />
+      <UserMessageText
+        serverId={serverId}
+        message={visibleText}
+        specModeMessage={specModeMessage}
+      />
     </>
   );
   const actions =
@@ -3417,13 +3425,16 @@ export const ToolCall = memo(function ToolCall({
   // (spec 33.9); an ssh_run call with a parsed result shows the ssh_run card (ADR-0045 §7).
   // Pending calls and every other tool keep the collapsed badge row. Both hooks run on every
   // render — the early returns below must not change the hook order.
+  const builtinServerId = client?.getLastServerInfoMessage()?.serverId;
+  const remoteTasksEnabled = useBuiltinPluginEnabled(builtinServerId, "remote-tasks");
+  const sshEnabled = useBuiltinPluginEnabled(builtinServerId, "ssh-servers");
   const remoteJob = useMemo(
-    () => readRemoteJobToolResult(toolName, effectiveDetail),
-    [toolName, effectiveDetail],
+    () => (remoteTasksEnabled ? readRemoteJobToolResult(toolName, effectiveDetail) : null),
+    [toolName, effectiveDetail, remoteTasksEnabled],
   );
   const sshRun = useMemo(
-    () => readSshRunToolResult(toolName, effectiveDetail),
-    [toolName, effectiveDetail],
+    () => (sshEnabled ? readSshRunToolResult(toolName, effectiveDetail) : null),
+    [toolName, effectiveDetail, sshEnabled],
   );
   if (remoteJob) {
     return (

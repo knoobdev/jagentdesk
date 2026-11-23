@@ -1,3 +1,4 @@
+import { useBuiltinPluginEnabled } from "@/plugins/builtin/hooks";
 import { useCallback, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { ChevronRight, Plus } from "lucide-react-native";
@@ -146,6 +147,7 @@ function ListStateMessage({ state }: { state: CustomProvidersLoadState }) {
 
 export function CustomProvidersSection({ serverId }: { serverId: string }) {
   const { t } = useTranslation();
+  const sshEnabled = useBuiltinPluginEnabled(serverId, "ssh-servers");
   const isConnected = useHostRuntimeIsConnected(serverId);
   const daemonClient = useHostRuntimeClient(serverId);
   const { state, refresh } = useCustomProvidersList(daemonClient, isConnected);
@@ -158,7 +160,7 @@ export function CustomProvidersSection({ serverId }: { serverId: string }) {
     async (target: CustomProviderEditorTarget) => {
       setEditorKey((current) => current + 1);
       setEditor(target);
-      if (!daemonClient) {
+      if (!daemonClient || !sshEnabled) {
         setSshServers([]);
         return;
       }
@@ -171,7 +173,7 @@ export function CustomProvidersSection({ serverId }: { serverId: string }) {
         // The server picker renders its empty text; the route still works.
       }
     },
-    [daemonClient],
+    [daemonClient, sshEnabled],
   );
 
   const openCreateEditor = useCallback(() => {
@@ -261,6 +263,7 @@ export function CustomProvidersSection({ serverId }: { serverId: string }) {
           client={daemonClient}
           target={editor}
           sshServers={sshServers}
+          sshEnabled={sshEnabled}
           onClose={handleClose}
           onSaved={handleSaved}
           onTested={handleTested}

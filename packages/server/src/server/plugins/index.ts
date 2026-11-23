@@ -1,3 +1,4 @@
+import { BuiltinPluginState } from "./builtin/state.js";
 import type { PluginRuntimeSubscription } from "./runtime-subscription.js";
 import { BuiltinPluginLoader, type BuiltinPlugin } from "./builtin/index.js";
 import type { PluginAgentToolsRuntime } from "./agent-tools.js";
@@ -88,6 +89,7 @@ function resolvePluginStatus(input: {
 }
 
 export class PluginService {
+  readonly builtin: BuiltinPluginState;
   private readonly runtime: PluginRuntimePort;
   private readonly managedSources: ManagedPluginSources | null;
   private readonly builtinPlugins: BuiltinPluginLoader;
@@ -120,6 +122,7 @@ export class PluginService {
       });
     this.builtinPlugins = dependencies.builtinPlugins ?? new BuiltinPluginLoader(undefined, []);
     this.builtinPluginIds = this.builtinPlugins.ids;
+    this.builtin = new BuiltinPluginState(configStore, this.builtinPlugins.featureManifests);
     this.managedSources = dependencies.managedSources ?? null;
     this.runtime.subscribe((pluginId, error) => {
       this.removeProviderRegistrations(pluginId);

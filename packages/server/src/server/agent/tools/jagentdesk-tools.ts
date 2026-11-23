@@ -11,6 +11,8 @@ import { randomUUID } from "node:crypto";
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import nodePath from "node:path";
 import { z } from "zod";
+import type { BuiltinPluginId } from "@jagentdesk/protocol/builtin-plugins";
+import { builtinPluginForTool } from "../../plugins/builtin/gates.js";
 import { ensureValidJson } from "../../json-utils.js";
 import type { Logger } from "pino";
 
@@ -153,6 +155,7 @@ import { slugifySkillName } from "../../skills-native/frontmatter.js";
 import type { AgentPermissionResponse } from "../agent-sdk-types.js";
 
 export interface JAgentDeskToolHostDependencies {
+  builtinPlugins?: ReadonlySet<BuiltinPluginId>;
   jagentdeskToolPolicy?: ProviderJAgentDeskToolsPolicy;
   agentManager: AgentManager;
   agentStorage: AgentStorage;
@@ -3647,6 +3650,8 @@ function createToolCatalog(
     handler: (input: any, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>,
   ) => {
     builtinNames.add(name);
+    const plugin = builtinPluginForTool(name);
+    if (plugin && options.builtinPlugins && !options.builtinPlugins.has(plugin)) return;
     if (!isJAgentDeskToolEnabled(options.jagentdeskToolPolicy, name)) return;
     tools.set(name, {
       name,

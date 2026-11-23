@@ -87,6 +87,7 @@ export class AppsHub {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private reconnectDelayMs = RECONNECT_MIN_MS;
   private started = false;
+  private generation = 0;
 
   constructor(
     private readonly connection: ArgoCdConnection,
@@ -121,6 +122,7 @@ export class AppsHub {
   stop(): void {
     if (!this.started) return;
     this.started = false;
+    this.generation++;
     this.connection.stopViewing();
     this.stream?.close();
     this.stream = null;
@@ -133,14 +135,26 @@ export class AppsHub {
   }
 
   private async connect(isReconnect: boolean): Promise<void> {
-    this.stream = await this.connection.stream(
+    const generation = this.generation;
+    const stream = await this.connection.stream(
       { path: "/api/v1/stream/applications", query: { fields: APP_STREAM_FIELDS } },
       {
-        onMessage: (result) => this.handleEvent(result as StreamEvent),
-        onClose: (error) => this.handleClose(error),
+        onMessage: (result) => {
+          if (this.started && generation === this.generation)
+            this.handleEvent(result as StreamEvent);
+        },
+        onClose: (error) => {
+          if (generation === this.generation) this.handleClose(error);
+        },
       },
     );
+    if (!this.started || generation !== this.generation) {
+      stream.close();
+      return;
+    }
+    this.stream = stream;
     const apps = await listAppSummaries(this.connection);
+    if (!this.started || generation !== this.generation) return;
     const seen = new Set<string>();
     for (const app of apps) {
       const key = appKey(app.name, app.appNamespace);

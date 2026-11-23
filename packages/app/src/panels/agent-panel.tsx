@@ -1,3 +1,4 @@
+import { BuiltinPluginGate } from "@/plugins/builtin/gate";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { SessionShareControl } from "@/composer/agent-controls/session-share-control";
 import {
@@ -378,7 +379,9 @@ function AgentPanel() {
           isPaneFocused={isInteractive}
           onOpenWorkspaceFile={openFileInWorkspace}
         />
-        <AgentSkillTrainBar serverId={serverId} agentId={target.agentId} />
+        <BuiltinPluginGate serverId={serverId} id="skills">
+          <AgentSkillTrainBar serverId={serverId} agentId={target.agentId} />
+        </BuiltinPluginGate>
       </View>
     </RetainedChatContent>
   );
@@ -1267,8 +1270,12 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
         <FileDropZone style={styles.container} disabled={isArchivingCurrentAgent}>
           {isGuestShareMode() ? null : (
             <View style={styles.shareHeader}>
-              <ActivityGraphToggle agentId={agentId} serverId={serverId} />
-              <SessionShareControl agentId={agentId} serverId={serverId} />
+              <BuiltinPluginGate serverId={serverId} id="activity-graph">
+                <ActivityGraphToggle agentId={agentId} serverId={serverId} />
+              </BuiltinPluginGate>
+              <BuiltinPluginGate serverId={serverId} id="session-share">
+                <SessionShareControl agentId={agentId} serverId={serverId} />
+              </BuiltinPluginGate>
             </View>
           )}
           {contentContainer}
@@ -1345,16 +1352,24 @@ function ActivityGraphLayout({
       <View style={styles.chatRow}>
         <View style={styles.chatColumn}>{children}</View>
         {open && !isCompact && width > 0 ? (
-          <ActivityGraphSidePanel
-            serverId={serverId}
-            agentId={agentId}
-            containerWidth={width}
-            onSelectNode={handleSelectNode}
-          />
+          <BuiltinPluginGate serverId={serverId} id="activity-graph">
+            <ActivityGraphSidePanel
+              serverId={serverId}
+              agentId={agentId}
+              containerWidth={width}
+              onSelectNode={handleSelectNode}
+            />
+          </BuiltinPluginGate>
         ) : null}
       </View>
       {isCompact ? (
-        <ActivityGraphSheet serverId={serverId} agentId={agentId} onSelectNode={handleSelectNode} />
+        <BuiltinPluginGate serverId={serverId} id="activity-graph">
+          <ActivityGraphSheet
+            serverId={serverId}
+            agentId={agentId}
+            onSelectNode={handleSelectNode}
+          />
+        </BuiltinPluginGate>
       ) : null}
     </View>
   );
@@ -1675,12 +1690,14 @@ function ActiveAgentComposer({
 
   const specModeDock = useMemo(
     () => (
-      <SpecModeComposerDock
-        serverId={serverId}
-        agentId={agentId}
-        cwd={cwd}
-        onOpenFile={handleOpenSpecFile}
-      />
+      <BuiltinPluginGate serverId={serverId} id="spec-mode">
+        <SpecModeComposerDock
+          serverId={serverId}
+          agentId={agentId}
+          cwd={cwd}
+          onOpenFile={handleOpenSpecFile}
+        />
+      </BuiltinPluginGate>
     ),
     [agentId, cwd, handleOpenSpecFile, serverId],
   );

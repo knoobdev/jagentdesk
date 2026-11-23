@@ -1,3 +1,5 @@
+import { builtinPluginForRpc } from "./plugins/builtin/gates.js";
+import { BuiltinPluginError, type BuiltinPluginState } from "./plugins/builtin/state.js";
 import { SessionDelivery, type OwnedSubscription } from "./session/owned-subscriptions/index.js";
 import {
   SessionEventSubscriptionSchema,
@@ -622,6 +624,7 @@ export interface SessionOptions {
   daemonRuntimeConfig?: DaemonRuntimeConfig;
   getWebSocketRuntimeMetrics?: () => DaemonWebSocketRuntimeDiagnosticSnapshot | null;
   pluginRuntime?: {
+    builtin?: BuiltinPluginState;
     wait: import("./plugins/lifecycle/index.js").PluginLifecycle["wait"];
     before: import("./plugins/lifecycle/index.js").PluginLifecycle["before"];
     emit?: import("./plugins/lifecycle/index.js").PluginLifecycle["emit"];
@@ -2359,6 +2362,14 @@ export class Session {
         this.trackGuestActivity(msg);
       }
       try {
+        const plugin = builtinPluginForRpc(msg.type);
+        if (
+          plugin &&
+          this.pluginRuntime?.builtin &&
+          !this.pluginRuntime.builtin.isEnabled(plugin)
+        ) {
+          throw new BuiltinPluginError("plugin_disabled", `Plugin turned off: ${plugin}`);
+        }
         await this.dispatchInboundMessage(msg, source);
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
@@ -2374,7 +2385,7 @@ export class Session {
                 requestId,
                 requestType: msg.type,
                 error: `Request failed: ${err.message}`,
-                code: "handler_error",
+                code: error instanceof BuiltinPluginError ? error.code : "handler_error",
               },
             });
           } catch (emitError) {
@@ -2546,6 +2557,7 @@ export class Session {
       () => this.dispatchSimulatorMessage(msg),
       () => this.dispatchProxyMessage(msg),
       () => this.dispatchMigrationMessage(msg),
+      () => this.dispatchBuiltinPluginMessage(msg),
       () => this.dispatchPluginMessage(msg),
       () => this.dispatchPluginRpcMessage(msg),
       () => this.dispatchPluginDirectoryMessage(msg),
@@ -2557,6 +2569,33 @@ export class Session {
       if (promise) break;
     }
     if (promise) await promise;
+  }
+
+  private dispatchBuiltinPluginMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    if (msg.type === "plugins.builtin.list.request") {
+      return Promise.resolve().then(() => {
+        if (!this.pluginRuntime?.builtin)
+          throw new Error("Built-in plugin registry is unavailable");
+        return this.emit({
+          type: "plugins.builtin.list.response",
+          payload: {
+            requestId: msg.requestId,
+            plugins: this.pluginRuntime.builtin.list(),
+            canManage: isSessionRpcAllowed(this.scopes, "plugins.builtin.set.request"),
+          },
+        });
+      });
+    }
+    if (msg.type === "plugins.builtin.set.request") {
+      if (!this.pluginRuntime?.builtin) throw new Error("Built-in plugin registry is unavailable");
+      return this.pluginRuntime.builtin.set(msg.id, msg.enabled, msg.cascade).then((plugins) => {
+        return this.emit({
+          type: "plugins.builtin.set.response",
+          payload: { requestId: msg.requestId, plugins },
+        });
+      });
+    }
+    return undefined;
   }
 
   private dispatchPluginMessage(msg: SessionInboundMessage): Promise<void> | undefined {
@@ -2836,10 +2875,35 @@ export class Session {
     return undefined;
   }
 
+  private stopDisabledBuiltinStreams(): void {
+    const builtin = this.pluginRuntime?.builtin;
+    if (!builtin) return;
+    if (!builtin.isEnabled("docker")) {
+      this.dockerStreams.disposeAll();
+      disposeRemoteDocker({ service: this.dockerService, streams: this.dockerStreams });
+      for (const routed of this.remoteDockerSubscriptions.values()) routed.release();
+      this.remoteDockerSubscriptions.clear();
+    }
+    if (!builtin.isEnabled("devices")) {
+      this.simulatorStreams.disposeAll();
+      this.physicalDeviceSession?.dispose();
+    }
+    if (!builtin.isEnabled("clusters")) this.clusterSession.dispose();
+    if (!builtin.isEnabled("argocd")) this.argocdSession.suspend();
+    else this.argocdSession.syncDelegateRegistration();
+    if (!builtin.isEnabled("jira")) this.jiraSession?.suspend();
+    if (!builtin.isEnabled("activity-graph")) this.activityGraphSession?.dispose();
+    if (!builtin.isEnabled("workbench")) {
+      for (const id of this.proxySubscriptionIds) this.proxyService.unsubscribe(id);
+      this.proxySubscriptionIds.clear();
+    }
+  }
+
   private subscribeToPluginChanges(
     pluginRuntime: SessionOptions["pluginRuntime"],
   ): (() => void) | null {
     if (!pluginRuntime) return null;
+    const builtin = pluginRuntime.builtin?.subscribe(() => this.stopDisabledBuiltinStreams());
     const catalog = pluginRuntime.subscribe((pluginId) => {
       this.emit({ type: "status", payload: { status: "plugin_catalog_changed", pluginId } });
     });
@@ -2851,6 +2915,7 @@ export class Session {
     });
     return () => {
       catalog();
+      builtin?.();
       settings?.();
     };
   }
@@ -3079,7 +3144,13 @@ export class Session {
           type: "set_daemon_config_response",
           payload: {
             requestId: msg.requestId,
-            config: this.daemonConfigStore.patch(msg.config),
+            config: this.daemonConfigStore.patch(
+              (() => {
+                if (msg.config.builtinPlugins)
+                  throw new Error("Use plugins.builtin.set.request to change built-in plugins");
+                return msg.config;
+              })(),
+            ),
           },
         });
         return undefined;
@@ -9541,7 +9612,10 @@ export class Session {
 
       // Spec mode (spec 28.4 step 2): the message becomes the pending phase's spec-kit command.
       // The command must lead the turn, so attached skills are not prefixed to it.
-      const specPhase = await this.specMode?.service.prepareUserMessage(agentId, msg.text);
+      const specPhase =
+        this.pluginRuntime?.builtin && !this.pluginRuntime.builtin.isEnabled("spec-mode")
+          ? undefined
+          : await this.specMode?.service.prepareUserMessage(agentId, msg.text);
       const prompt = buildAgentPrompt(specPhase?.text ?? msg.text, msg.images, msg.attachments);
       this.sessionLogger.trace(
         {
@@ -9560,7 +9634,11 @@ export class Session {
           prompt,
           messageId: msg.messageId,
           activeTurnBehavior: msg.activeTurnBehavior,
-          skillIds: specPhase ? undefined : msg.skillIds,
+          skillIds:
+            specPhase ||
+            (this.pluginRuntime?.builtin && !this.pluginRuntime.builtin.isEnabled("skills"))
+              ? undefined
+              : msg.skillIds,
           skillInvocation: this.skillsStorage,
           logger: this.sessionLogger,
         });

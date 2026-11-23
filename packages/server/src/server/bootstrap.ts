@@ -1,3 +1,4 @@
+import { getSharedProxyService } from "./proxy/proxy-service.js";
 import { resolveJAgentDeskToolPolicy } from "./agent/jagentdesk-tool-policy.js";
 import { BuiltinPluginLoader } from "./plugins/builtin/index.js";
 import { withTimeout } from "../utils/promise-timeout.js";
@@ -175,7 +176,6 @@ import { DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-sto
 import { PluginService } from "./plugins/index.js";
 import { ManagedPluginSources } from "./plugins/managed-source.js";
 import { BrowserToolsBroker } from "./browser-tools/broker.js";
-import { DaemonConfigBrowserToolsPolicy } from "./browser-tools/policy.js";
 import { WorkspaceGitServiceImpl } from "./workspace-git-service.js";
 import { resolveWorkspaceIdForPath } from "./resolve-workspace-id-for-path.js";
 import { ForgeHubService } from "./session/forge/forge-hub-session.js";
@@ -458,6 +458,7 @@ export interface JAgentDeskDaemonConfig {
   // Anti-detect fingerprint profiles and the active one (ADR-0011), persisted in config.json.
   browserFingerprintProfiles?: NonNullable<MutableDaemonConfig["browserTools"]["profiles"]>;
   browserActiveProfileId?: string | null;
+  builtinPlugins?: MutableDaemonConfig["builtinPlugins"];
   pluginsEnabled?: boolean;
   plugins?: MutableDaemonConfig["plugins"];
   // Autonomous run (spec §20). Default OFF; only exposes the autorun.* RPC surface +
@@ -539,6 +540,7 @@ export interface JAgentDeskDaemon {
 }
 
 export interface JAgentDeskDaemonDependencies {
+  sessionShareTunnelManager?: TunnelManager;
   builtinPlugins?: BuiltinPluginLoader;
   hubRelationshipRemote?: HubRelationshipRemote;
   hubRelationshipClock?: HubRelationshipClock;
@@ -620,7 +622,7 @@ function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): Mutab
   const initialConfig: MutableDaemonConfig = {
     mcp: { injectIntoAgents: config.mcpInjectIntoAgents ?? true },
     browserTools: {
-      enabled: config.browserToolsEnabled ?? true,
+      enabled: config.browserToolsEnabled ?? false,
       ...(config.browserFingerprintProfiles ? { profiles: config.browserFingerprintProfiles } : {}),
       ...(config.browserActiveProfileId !== undefined
         ? { activeProfileId: config.browserActiveProfileId }
@@ -643,6 +645,7 @@ function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): Mutab
   if (config.terminalProfiles !== undefined) {
     initialConfig.terminalProfiles = config.terminalProfiles;
   }
+  if (config.builtinPlugins !== undefined) initialConfig.builtinPlugins = config.builtinPlugins;
   if (config.pluginsEnabled !== undefined) initialConfig.pluginsEnabled = config.pluginsEnabled;
   if (config.plugins !== undefined) initialConfig.plugins = config.plugins;
 
@@ -669,7 +672,6 @@ export async function createJAgentDeskDaemon(
     createInitialMutableDaemonConfig(config),
     logger,
   );
-  const browserToolsPolicy = new DaemonConfigBrowserToolsPolicy(daemonConfigStore);
   const browserToolsBroker = new BrowserToolsBroker({});
   // Built-ins load independently of the user-plugin switch. Managed git sources
   // back marketplace installs and are rebranded before compilation.
@@ -1054,6 +1056,13 @@ export async function createJAgentDeskDaemon(
     mcpAuthToken: agentMcpAuthToken,
     logger,
   });
+
+  const unsubscribeBuiltinAgentSnapshots = agentManager.subscribe(
+    (event) => {
+      if (event.type === "agent_state") pluginRuntime.builtin.forAgent(event.agent.id);
+    },
+    { replayState: false },
+  );
 
   const unsubscribePluginProviders = pluginRuntime.subscribeProviderRegistrations(() => {
     agentManager.updateProviderRegistry(
@@ -1493,7 +1502,6 @@ export async function createJAgentDeskDaemon(
         logger: logger.child({ module: "remote-exec" }),
       }),
     );
-    await remoteExecCandidate.start();
     remoteExecService = remoteExecCandidate;
     unsubscribeRemoteExecJobs = remoteExecCandidate.onJobUpdated((job) => {
       for (const session of wsServer?.listTrustedSessions() ?? []) {
@@ -1517,7 +1525,6 @@ export async function createJAgentDeskDaemon(
     refreshIntervalMs: positiveEnvNumber("JAGENTDESK_SIDELOAD_REFRESH_INTERVAL_MS"),
     clockOffsetMs: envNumber("JAGENTDESK_SIDELOAD_CLOCK_OFFSET_MS"),
   });
-  sideloadService.initialize();
   logger.info("Sideload service initialized");
   deviceSignerSource = sideloadService;
   // Daemon-wide Forge Hub service (spec 19 / ADR-0015). One instance shared across
@@ -1533,7 +1540,6 @@ export async function createJAgentDeskDaemon(
     logger: logger.child({ module: "argocd" }),
     clusters: createArgoCdClusterAccess(clusterRegistry),
   });
-  await argocdService.initialize();
   logger.info("Argo CD service initialized");
   // Daemon-wide Jira service (spec 29 / ADR-0034 §4): the one credential manager for every
   // session, view watch and agent tool. Secrets live under <home>/jira.
@@ -1545,7 +1551,11 @@ export async function createJAgentDeskDaemon(
   await jiraService.initialize();
   logger.info("Jira service initialized");
   // Daemon-wide Figma service (spec 32 / ADR-0035): OAuth, REST budget, Figma Link bridge.
-  const figmaService = await createFigmaService({ jagentdeskHome: config.jagentdeskHome, logger });
+  const figmaService = await createFigmaService({
+    jagentdeskHome: config.jagentdeskHome,
+    logger,
+    enabled: false,
+  });
   logger.info("Figma service initialized");
   const createScheduleLocalWorkspaceExternal = async (input: {
     cwd: string;
@@ -1624,21 +1634,15 @@ export async function createJAgentDeskDaemon(
     }
   });
   logger.info({ elapsed: elapsed() }, "Schedule service initialized");
-  // Autonomous run driver (spec §20 / ADR-0017). Default OFF (spec §20.12): the service —
-  // and with it the whole autorun.* RPC surface + `features.autorun` capability — only
-  // exists when the daemon config opts in. onUpdate broadcasts the run snapshot to every
-  // connected client as `autorun.stream`. Reuses the schedule workspace-creator.
-  const autorunService = config.autorunEnabled
-    ? new AutorunService({
-        jagentdeskHome: config.jagentdeskHome,
-        logger,
-        agentManager,
-        onUpdate: (state) =>
-          emitExternalSessionMessage({ type: "autorun.stream", payload: { state } }),
-        onStopped: (state) => wsServer?.notifyAutorunStopped(state),
-      })
-    : null;
-  await autorunService?.initialize();
+  // Construct services once so live sessions keep their references. The built-in loader
+  // starts/stops background work and gates RPCs/features; Autorun stays off by default.
+  const autorunService = new AutorunService({
+    jagentdeskHome: config.jagentdeskHome,
+    logger,
+    agentManager,
+    onUpdate: (state) => emitExternalSessionMessage({ type: "autorun.stream", payload: { state } }),
+    onStopped: (state) => wsServer?.notifyAutorunStopped(state),
+  });
   // Spec mode (spec 28 / ADR-0030) needs the host capability probe, created with the WebSocket
   // server below; it is assigned there.
   let specModeService: SpecModeService | null = null;
@@ -1646,27 +1650,107 @@ export async function createJAgentDeskDaemon(
     { elapsed: elapsed(), enabled: config.autorunEnabled === true },
     "Autorun service initialized",
   );
-  // Session sharing (spec §21 / ADR-0018). Default OFF: the service + `features.sessionSharing`
-  // only exist when the daemon opted in. Cloudflare quick tunnel + a scoped per-share server.
+  // Session sharing stays off by default. Construction is inert; its lifecycle owns
+  // Cloudflare quick tunnels and scoped per-share servers.
   const shareAppDistDir =
     config.sessionShareAppDistDir ??
     process.env.JAGENTDESK_SHARE_APP_DIST ??
     resolveBundledShareAppDist();
-  const sessionShareService = config.sessionSharingEnabled
-    ? new SessionShareService({
-        logger,
-        agentManager,
-        agentStorage,
-        tunnelManager: new TunnelManager(logger),
-        appDistDir: shareAppDistDir,
-        onUpdate: (share) =>
-          emitExternalSessionMessage({ type: "session.share.stream", payload: { share } }),
-      })
-    : null;
+  const sessionShareService = new SessionShareService({
+    logger,
+    agentManager,
+    agentStorage,
+    tunnelManager: dependencies.sessionShareTunnelManager ?? new TunnelManager(logger),
+    isEnabled: () => pluginRuntime.builtin.isEnabled("session-share"),
+    appDistDir: shareAppDistDir,
+    onUpdate: (share) =>
+      emitExternalSessionMessage({ type: "session.share.stream", payload: { share } }),
+  });
   logger.info(
     { elapsed: elapsed(), enabled: config.sessionSharingEnabled === true },
     "Session share service initialized",
   );
+  await pluginRuntime.builtin.registerLifecycle("clusters", {
+    start: () => {},
+    stop: async () => {
+      await Promise.all(
+        clusterRegistry.list().map((entry) => clusterRegistry.disconnect(entry.id)),
+      );
+    },
+  });
+  await pluginRuntime.builtin.registerLifecycle("databases", {
+    start: () => {},
+    stop: async () => {
+      await Promise.all(
+        databaseRegistry.list().map((entry) => databaseRegistry.disconnect(entry.id)),
+      );
+    },
+  });
+  const suspendedForwardingRules = new Set<string>();
+  await pluginRuntime.builtin.registerLifecycle("ssh-servers", {
+    start: async () => {
+      await sshService.initialize();
+      await Promise.all(
+        [...suspendedForwardingRules].map((id) => sshServerModules.forwarding.start(id)),
+      );
+      suspendedForwardingRules.clear();
+    },
+    stop: async () => {
+      // Stop dependents before closing the shared SSH pool. Keep module event wiring intact.
+      customProviderService.closeAll();
+      for (const state of sshServerModules.forwarding.list().states) {
+        if (state.status === "active") suspendedForwardingRules.add(state.ruleId);
+      }
+      await sshServerModules.forwarding.dispose();
+      await sshServerModules.docker.stopAll();
+      await sshServerModules.remoteDb.closeAll();
+      sshService.dispose();
+    },
+  });
+  if (!pluginRuntime.builtin.isEnabled("ssh-servers")) sshService.dispose();
+  await pluginRuntime.builtin.registerLifecycle("remote-tasks", {
+    start: async () => {
+      await remoteExecService?.start();
+    },
+    stop: async () => {
+      await remoteExecService?.stop();
+    },
+  });
+  await pluginRuntime.builtin.registerLifecycle("custom-providers", {
+    start: () => {},
+    stop: () => customProviderService.closeAll(),
+  });
+  await pluginRuntime.builtin.registerLifecycle("argocd", {
+    start: () => argocdService.initialize(),
+    stop: () => argocdService.dispose(),
+  });
+  await pluginRuntime.builtin.registerLifecycle("devices", {
+    start: () => sideloadService.initialize(),
+    stop: () => {
+      sideloadService.dispose();
+      physicalDevices.dispose();
+    },
+  });
+  await pluginRuntime.builtin.registerLifecycle("workbench", {
+    start: () => {},
+    stop: () => getSharedProxyService().disposeAll(),
+  });
+  await pluginRuntime.builtin.registerLifecycle("figma", {
+    start: () => figmaService.start(),
+    stop: () => figmaService.stopBackground(),
+  });
+  await pluginRuntime.builtin.registerLifecycle("jira", {
+    start: () => {},
+    stop: () => jiraService.dispose(),
+  });
+  await pluginRuntime.builtin.registerLifecycle("autorun", {
+    start: () => autorunService.initialize(),
+    stop: () => autorunService.stop(),
+  });
+  await pluginRuntime.builtin.registerLifecycle("session-share", {
+    start: () => {},
+    stop: () => sessionShareService.stop(),
+  });
   logger.info({ elapsed: elapsed() }, "Loading persisted agent registry");
   const persistedRecords = await agentStorage.list();
   logger.info(
@@ -1690,6 +1774,7 @@ export async function createJAgentDeskDaemon(
   const createAgentToolHostDependencies = (
     runtime: JAgentDeskToolRuntimeContext,
   ): JAgentDeskToolHostDependencies => ({
+    builtinPlugins: pluginRuntime.builtin.forAgent(runtime.callerAgentId),
     jagentdeskToolPolicy:
       runtime.jagentdeskToolPolicy ??
       (runtime.callerAgentId
@@ -1740,7 +1825,7 @@ export async function createJAgentDeskDaemon(
     clearWorkspaceArchiving: clearWorkspaceArchivingExternal,
     ensureWorkspaceForCreate: createAgentCommandDependencies.ensureWorkspaceForCreate,
     createJAgentDeskWorktree: createAgentCommandDependencies.createJAgentDeskWorktree,
-    browserToolsEnabled: browserToolsPolicy.isEnabled(),
+    browserToolsEnabled: pluginRuntime.builtin.forAgent(runtime.callerAgentId).has("browser-tools"),
     browserToolsBroker,
     jagentdeskHome: config.jagentdeskHome,
     worktreesRoot: config.worktreesRoot,
@@ -2034,6 +2119,16 @@ export async function createJAgentDeskDaemon(
               onState: (state) => server.notifySpecModeState(state),
             });
             server.setSpecModeService(specModeService);
+            agentManager.setLaunchEnvProvider((agentId) =>
+              pluginRuntime.builtin.isEnabled("spec-mode")
+                ? specModeService!.launchEnv(agentId)
+                : null,
+            );
+            specModeService.stop();
+            await pluginRuntime.builtin.registerLifecycle("spec-mode", {
+              start: () => specModeService!.initialize(),
+              stop: () => specModeService!.stop(),
+            });
             server.setJiraService(jiraService);
             server.setFigmaService(figmaService);
             server.setRemoteExecService(remoteExecService);
@@ -2288,6 +2383,7 @@ export async function createJAgentDeskDaemon(
     await pluginRuntime.stopAllPlugins().catch(() => undefined);
     await providerSnapshotManager.shutdown();
     terminalManager.killAll();
+    unsubscribeBuiltinAgentSnapshots();
     stopDeviceGrantWatch();
     physicalDevices.dispose();
     await sshModules.dispose().catch(() => undefined);

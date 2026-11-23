@@ -1,9 +1,11 @@
+import { builtinPluginStrings } from "./builtin-plugins";
 // Vietnamese (Tiếng Việt). Partial translation of the app shell; any missing key
 // falls back to English (i18next fallbackLng: "en"). Extend incrementally.
 import { pluginSettings } from "./plugin-settings";
 import { sshModuleStrings } from "./ssh-modules";
 
 export const vi = {
+  builtinPlugins: builtinPluginStrings,
   ssh: sshModuleStrings,
   paneFind: {
     connectionFailure: "Không tìm được trong đoạn chat này. Kiểm tra kết nối tới host rồi thử lại.",

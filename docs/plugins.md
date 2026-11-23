@@ -106,8 +106,22 @@ including when the user plugin switch is off. `worktree-include` is bundled in s
 packaged builds. It copies matching ignored files from `.worktreeinclude` before setup or the
 first agent starts. It does not overwrite existing destinations or copy tracked files.
 
-Usage-source built-ins await the Usage host API. Per-host Settings toggles for built-ins are
-planned separately; this loader does not implement them.
+The same loader reserves the 19 statically linked feature ids. Settings → Plugins shows their
+per-host switches above Installed; `pluginsEnabled` applies only to Installed. Feature switches
+persist in top-level `builtinPlugins`. The config store migrates the three legacy opt-in flags
+once; after that, editing those flags does not change built-ins.
+
+Use the built-in set RPC for changes so dependency checks, cascades and service lifecycle run
+together. Wire requests use `.request` / `.response` suffixes; a disabled feature answers with
+`plugin_disabled`. Keep workspace Forge checkout/search, shared Docker/secret-store libraries,
+and guest permission checks independent of feature gates.
+
+Capture feature tools once per agent, including stateless HTTP MCP access. A toggle changes new
+agents' catalogs; existing agents retain their launch tools. Session subscriptions and daemon
+background services still stop on disable. Do not clear push listeners while stopping a service:
+the same WebSocket sessions must work when it is enabled again.
+
+Usage-source built-ins await the Usage host API.
 
 ## Remaining host gaps
 

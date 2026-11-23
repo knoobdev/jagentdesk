@@ -56,6 +56,33 @@ describe("prepareTurnSkills", () => {
     expect(useAgentSkillsStore.getState().injected.agent_1).toBeUndefined();
   });
 
+  it("preserves attached skills while the built-in is off, including queued sends", () => {
+    useAgentSkillsStore.setState({ attached: { agent_1: [release.skillId] } });
+    const session = useSessionStore.getState().sessions.srv_1!;
+    const info = {
+      serverId: "srv_1",
+      hostname: "host",
+      version: "0.9.59",
+      features: { builtinPlugins: true, skills: false },
+    };
+    useSessionStore.setState({ sessions: { srv_1: { ...session, serverInfo: info } } });
+    const disabled = prepareTurnSkills({ serverId: "srv_1", agentId: "agent_1", text: "hi" });
+    expect(disabled.skillIds).toBe(undefined);
+    disabled.commit();
+    expect(useAgentSkillsStore.getState().injected).toEqual({});
+    useSessionStore.setState({
+      sessions: {
+        srv_1: {
+          ...session,
+          serverInfo: { ...info, features: { builtinPlugins: true, skills: true } },
+        },
+      },
+    });
+    expect(
+      prepareTurnSkills({ serverId: "srv_1", agentId: "agent_1", text: "hi" }).skillIds,
+    ).toEqual([release.skillId]);
+  });
+
   it("never auto-loads skills from the message text (spec 22.7)", () => {
     const turn = prepareTurnSkills({
       serverId: "srv_1",

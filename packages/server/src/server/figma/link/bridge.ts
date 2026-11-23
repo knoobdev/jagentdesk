@@ -648,8 +648,7 @@ export class FigmaLinkServer implements FigmaLinkBridge {
       if (this.server?.listening) this.server.close(() => resolve());
       else resolve();
     });
-    this.pushListeners.clear();
-    this.changeListeners.clear();
+    // A built-in toggle stops the transport while the same host sessions keep their listeners.
   }
 
   private requireUsable(fileKey: string): LinkConnection {

@@ -46,6 +46,7 @@ const OUTPUT_NOTIFY_INTERVAL_MS = 1_000;
 
 interface FollowHandle {
   cancelled: boolean;
+  suspended: boolean;
   /** Resolves when the runner has finished reacting to this job and the record is final. */
   settled: Promise<void>;
   settle(): void;
@@ -61,7 +62,7 @@ function newFollowHandle(): FollowHandle {
   const settled = new Promise<void>((resolve) => {
     settle = resolve;
   });
-  return { cancelled: false, settled, settle };
+  return { cancelled: false, suspended: false, settled, settle };
 }
 
 type NotifyKind = "status" | "output";
@@ -227,10 +228,12 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
     await persistJob(job, "status");
   }
 
+  const following = (handle: FollowHandle): boolean => !shuttingDown && !handle.suspended;
+
   async function followLoop(jobId: string, handle: FollowHandle): Promise<void> {
     let backoffIndex = 0;
     // oxlint-disable-next-line no-unmodified-loop-condition -- shuttingDown flips in stop()
-    while (!shuttingDown) {
+    while (following(handle)) {
       // A stop request is honoured here: the runner owns the record, so the stop procedure runs on
       // this loop and settles the job before the loop (and the awaited runner) ends.
       if (handle.cancelled) {
@@ -264,12 +267,12 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
         if (poll.exitCode !== null) {
           // Drain what the capped poll could not fit; the exit code file stays put.
           // oxlint-disable-next-line no-unmodified-loop-condition -- shuttingDown flips in stop()
-          while (!shuttingDown && poll.bytes.length >= REMOTE_OUTPUT_READ_MAX_BYTES) {
+          while (following(handle) && poll.bytes.length >= REMOTE_OUTPUT_READ_MAX_BYTES) {
             const extra = await readStep(job, workRoot);
             await applyPoll(job, extra);
             poll.bytes = extra.bytes;
           }
-          if (!shuttingDown) await settleByExit(job, poll.exitCode);
+          if (following(handle)) await settleByExit(job, poll.exitCode);
           return;
         }
         if (poll.gone) {
@@ -443,7 +446,7 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
     const workRoot = server ? workRootOf(server) : REMOTE_DEFAULT_WORK_ROOT;
     // service.stop() (daemon shutdown) also cancels handles, but that is not a user stop: the
     // sync/launch should finish and the record stays as-is for the next start() to resume.
-    const cancelled = (): boolean => handle.cancelled && !shuttingDown;
+    const cancelled = (): boolean => handle.cancelled && !handle.suspended && !shuttingDown;
     let phase: "sync" | "start" = "sync";
     let launched = false;
     try {
@@ -516,7 +519,11 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
       await persistIfActive(job, "status");
       await followLoop(job.id, handle);
     } catch (error) {
-      if (!shuttingDown && (error instanceof SyncCancelled || handle.cancelled)) {
+      if (
+        !shuttingDown &&
+        !handle.suspended &&
+        (error instanceof SyncCancelled || handle.cancelled)
+      ) {
         // A stop was requested: never launch, never go back to running. A launch that already ran
         // left a live process group — the stop procedure kills it before the record settles.
         if (launched) {
@@ -863,6 +870,7 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
     },
 
     async start(): Promise<void> {
+      shuttingDown = false;
       await store.ensureLoaded();
       for (const job of store.list()) {
         if (job.status === "syncing") {
@@ -889,7 +897,7 @@ export function createRemoteExecService(deps: RemoteExecDeps): RemoteExecService
 
     async stop(): Promise<void> {
       shuttingDown = true;
-      for (const handle of handles.values()) handle.cancelled = true;
+      for (const handle of handles.values()) handle.suspended = true;
       handles.clear();
     },
   };

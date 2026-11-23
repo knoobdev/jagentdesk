@@ -1,3 +1,5 @@
+import { useBuiltinPluginEnabled } from "@/plugins/builtin/hooks";
+import { builtinPluginEnabled } from "@/plugins/builtin/registry";
 import { router, usePathname, type Href } from "expo-router";
 import { useCallback, useMemo } from "react";
 import {
@@ -65,6 +67,7 @@ import {
 
 /** Routes behind the app's primary navigation, shared by the sidebar list and the ClickUp rail. */
 export interface AppNavTargets {
+  sharedSessionsRoute: Href | null;
   clustersRoute: Href | null;
   databasesRoute: Href | null;
   serversRoute: Href | null;
@@ -88,9 +91,21 @@ export interface AppNavTargets {
 
 export function useAppNavTargets(): AppNavTargets {
   const hosts = useHosts();
-  const firstServerId = hosts[0]?.serverId ?? "";
+  const pathname = usePathname();
+  const selection = useActiveWorkspaceSelection();
+  const routeServerId = /^\/h\/([^/]+)/.exec(pathname)?.[1];
+  const firstServerId = routeServerId
+    ? decodeURIComponent(routeServerId)
+    : (selection?.serverId ?? hosts[0]?.serverId ?? "");
   const lastCluster = useClusterNavStore((s) => s.lastCluster);
   const lastDatabase = useDatabaseNavStore((s) => s.lastDatabase);
+  const dockerEnabled = useBuiltinPluginEnabled(firstServerId, "docker");
+  const clustersEnabled = useBuiltinPluginEnabled(firstServerId, "clusters");
+  const databasesEnabled = useBuiltinPluginEnabled(firstServerId, "databases");
+  const skillsEnabled = useBuiltinPluginEnabled(firstServerId, "skills");
+  const insightsEnabled = useBuiltinPluginEnabled(firstServerId, "insights");
+  const workbenchEnabled = useBuiltinPluginEnabled(firstServerId, "workbench");
+  const sharingEnabled = useBuiltinPluginEnabled(firstServerId, "session-share");
   // Forge Hub is a post-ADR-0003 surface gated per release milestone (spec 19.12):
   // only advertise the entry when the first/active daemon reports forgeHub.
   const supportsForgeHub = useSessionStore(
@@ -111,8 +126,11 @@ export function useAppNavTargets(): AppNavTargets {
   // Spec 24.4: devices open on the first host that can run simulators; none → no entry.
   const deviceServerId = useSessionStore(
     (state) =>
-      hosts.find((host) =>
-        hostSupportsCapability(state.sessions[host.serverId]?.serverInfo, DEVICE_CAPABILITIES),
+      hosts.find(
+        (host) =>
+          host.serverId === firstServerId &&
+          builtinPluginEnabled(state.sessions[host.serverId]?.serverInfo, "devices") &&
+          hostSupportsCapability(state.sessions[host.serverId]?.serverInfo, DEVICE_CAPABILITIES),
       )?.serverId ?? null,
   );
   return useMemo(() => {
@@ -121,31 +139,32 @@ export function useAppNavTargets(): AppNavTargets {
     // Clusters and databases jump straight back to the resource the user last had open,
     // falling back to the list when there is none.
     let clustersRoute: Href | null = perHost(buildClustersRoute);
-    if (lastCluster) {
+    if (lastCluster && lastCluster.serverId === firstServerId) {
       clustersRoute = buildClusterWorkloadsRoute(
         lastCluster.serverId,
         lastCluster.clusterId,
       ) as Href;
     }
     let databasesRoute: Href | null = perHost(buildDatabasesRoute);
-    if (lastDatabase) {
+    if (lastDatabase && lastDatabase.serverId === firstServerId) {
       databasesRoute = buildDatabaseBrowseRoute(
         lastDatabase.serverId,
         lastDatabase.databaseId,
       ) as Href;
     }
     return {
-      clustersRoute,
-      databasesRoute,
+      clustersRoute: clustersEnabled ? clustersRoute : null,
+      databasesRoute: databasesEnabled ? databasesRoute : null,
+      sharedSessionsRoute: sharingEnabled ? (buildSharedSessionsRoute() as Href) : null,
       // Gated at the route: the entry disappears with the daemon feature flag.
       serversRoute: supportsSshServers ? perHost(buildServersRoute) : null,
-      skillsRoute: perHost(buildSkillsRoute),
-      insightsRoute: perHost(buildInsightsRoute),
+      skillsRoute: skillsEnabled ? perHost(buildSkillsRoute) : null,
+      insightsRoute: insightsEnabled ? perHost(buildInsightsRoute) : null,
       forgeRoute: perHost(buildForgeRoute),
       marketplaceRoute: perHost(buildMarketplaceRoute),
-      dockerRoute: perHost(buildDockerRoute),
+      dockerRoute: dockerEnabled ? perHost(buildDockerRoute) : null,
       simulatorRoute: deviceServerId ? (buildSimulatorRoute(deviceServerId) as Href) : null,
-      proxyRoute: perHost(buildProxyRoute),
+      proxyRoute: workbenchEnabled ? perHost(buildProxyRoute) : null,
       argoCdRoute: supportsArgoCd ? perHost(buildArgoCdRoute) : null,
       supportsForgeHub,
       supportsSshServers,
@@ -153,6 +172,13 @@ export function useAppNavTargets(): AppNavTargets {
       figmaRoute: supportsFigma ? perHost(buildFigmaRoute) : null,
     };
   }, [
+    dockerEnabled,
+    clustersEnabled,
+    databasesEnabled,
+    skillsEnabled,
+    insightsEnabled,
+    workbenchEnabled,
+    sharingEnabled,
     supportsJira,
     supportsFigma,
     deviceServerId,
@@ -210,15 +236,17 @@ export function useAppNavItems(): AppNavItem[] {
         isActive: pathname.includes("/schedules"),
         testID: "rail-schedules",
       },
-      {
-        key: "shared-sessions",
-        icon: Share2,
-        label: "Shared sessions",
-        shortLabel: "Shared",
-        route: buildSharedSessionsRoute() as Href,
-        isActive: pathname.includes("/shared-sessions"),
-        testID: "rail-shared-sessions",
-      },
+      targets.sharedSessionsRoute
+        ? {
+            key: "shared-sessions",
+            icon: Share2,
+            label: "Shared sessions",
+            shortLabel: "Shared",
+            route: targets.sharedSessionsRoute,
+            isActive: pathname.includes("/shared-sessions"),
+            testID: "rail-shared-sessions",
+          }
+        : null,
 
       navItem("skills", Sparkles, "Skills", "Skills", targets.skillsRoute, pathname, "/skills"),
       navItem(

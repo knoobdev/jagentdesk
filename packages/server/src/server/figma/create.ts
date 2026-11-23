@@ -13,6 +13,7 @@ import { HttpFigmaRestClient } from "./rest.js";
 export async function createFigmaService(options: {
   jagentdeskHome: string;
   logger: pino.Logger;
+  enabled?: boolean;
 }): Promise<FigmaService> {
   const dir = path.join(options.jagentdeskHome, "figma");
   const secrets = new FileSecretStore(dir);
@@ -25,11 +26,15 @@ export async function createFigmaService(options: {
     secrets,
     jagentdeskHome: options.jagentdeskHome,
     logger: options.logger,
+    enabled: options.enabled,
   });
   const service = new FigmaService({
     jagentdeskHome: options.jagentdeskHome,
     logger: options.logger,
     secrets,
+    startLink: async () => {
+      await link.start();
+    },
     parts: {
       store,
       tokens: new FigmaOAuth({ secrets, logger: options.logger }),

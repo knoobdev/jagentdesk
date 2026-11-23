@@ -1,3 +1,4 @@
+import { BuiltinPluginGate } from "@/plugins/builtin/gate";
 import { router, usePathname, type Href } from "expo-router";
 import {
   Boxes,
@@ -145,23 +146,45 @@ function resolveSidebarNavBody(
 ): ReactNode {
   // A section that owns the left column (spec 25.13.1 Servers, 29.3 Jira, 30.3 Argo CD).
   if (sectionRoute?.section === "servers")
-    return <SidebarServersNav serverId={sectionRoute.serverId} />;
-  if (sectionRoute?.section === "jira") return <SidebarJiraNav serverId={sectionRoute.serverId} />;
+    return (
+      <BuiltinPluginGate serverId={sectionRoute.serverId} id="ssh-servers">
+        <SidebarServersNav serverId={sectionRoute.serverId} />
+      </BuiltinPluginGate>
+    );
+  if (sectionRoute?.section === "jira")
+    return (
+      <BuiltinPluginGate serverId={sectionRoute.serverId} id="jira">
+        <SidebarJiraNav serverId={sectionRoute.serverId} />
+      </BuiltinPluginGate>
+    );
   if (sectionRoute?.section === "figma")
-    return <SidebarFigmaNav serverId={sectionRoute.serverId} />;
+    return (
+      <BuiltinPluginGate serverId={sectionRoute.serverId} id="figma">
+        <SidebarFigmaNav serverId={sectionRoute.serverId} />
+      </BuiltinPluginGate>
+    );
   if (sectionRoute?.section === "argocd") {
     return (
-      <SidebarArgoCdNav serverId={sectionRoute.serverId} instanceId={sectionRoute.instanceId} />
+      <BuiltinPluginGate serverId={sectionRoute.serverId} id="argocd">
+        <SidebarArgoCdNav serverId={sectionRoute.serverId} instanceId={sectionRoute.instanceId} />
+      </BuiltinPluginGate>
     );
   }
   if (clusterRoute) {
     return (
-      <SidebarClusterNav serverId={clusterRoute.serverId} clusterId={clusterRoute.clusterId} />
+      <BuiltinPluginGate serverId={clusterRoute.serverId} id="clusters">
+        <SidebarClusterNav serverId={clusterRoute.serverId} clusterId={clusterRoute.clusterId} />
+      </BuiltinPluginGate>
     );
   }
   if (databaseRoute) {
     return (
-      <SidebarDatabaseNav serverId={databaseRoute.serverId} databaseId={databaseRoute.databaseId} />
+      <BuiltinPluginGate serverId={databaseRoute.serverId} id="databases">
+        <SidebarDatabaseNav
+          serverId={databaseRoute.serverId}
+          databaseId={databaseRoute.databaseId}
+        />
+      </BuiltinPluginGate>
     );
   }
   return fallback;
@@ -1079,6 +1102,7 @@ function DesktopSidebar({
   handleViewSchedules,
   handleViewSharedSessions,
 }: DesktopSidebarProps) {
+  const builtinTargets = useAppNavTargets();
   const ownsTopLeft = useOwnsWindowChromeCorner("top-left");
   const isClickUp = useIsClickUpTheme();
   const pathname = usePathname();
@@ -1229,31 +1253,37 @@ function DesktopSidebar({
                 testID="sidebar-schedules"
                 variant="compact"
               />
-              <SidebarHeaderRow
-                icon={Share2}
-                label={labels.sharedSessions}
-                onPress={handleViewSharedSessions}
-                isActive={isSharedSessionsActive}
-                testID="sidebar-shared-sessions"
-                variant="compact"
-              />
+              <NavTargetGate route={builtinTargets.sharedSessionsRoute}>
+                <SidebarHeaderRow
+                  icon={Share2}
+                  label={labels.sharedSessions}
+                  onPress={handleViewSharedSessions}
+                  isActive={isSharedSessionsActive}
+                  testID="sidebar-shared-sessions"
+                  variant="compact"
+                />
+              </NavTargetGate>
 
-              <SidebarHeaderRow
-                icon={Boxes}
-                label={labels.clusters}
-                onPress={handleClusters}
-                isActive={isClustersActive}
-                testID="sidebar-clusters-nav"
-                variant="compact"
-              />
-              <SidebarHeaderRow
-                icon={Database}
-                label={labels.databases}
-                onPress={handleDatabases}
-                isActive={isDatabasesActive}
-                testID="sidebar-databases-nav"
-                variant="compact"
-              />
+              <NavTargetGate route={builtinTargets.clustersRoute}>
+                <SidebarHeaderRow
+                  icon={Boxes}
+                  label={labels.clusters}
+                  onPress={handleClusters}
+                  isActive={isClustersActive}
+                  testID="sidebar-clusters-nav"
+                  variant="compact"
+                />
+              </NavTargetGate>
+              <NavTargetGate route={builtinTargets.databasesRoute}>
+                <SidebarHeaderRow
+                  icon={Database}
+                  label={labels.databases}
+                  onPress={handleDatabases}
+                  isActive={isDatabasesActive}
+                  testID="sidebar-databases-nav"
+                  variant="compact"
+                />
+              </NavTargetGate>
               {supportsSshServers ? (
                 <SidebarHeaderRow
                   icon={Server}
@@ -1276,14 +1306,16 @@ function DesktopSidebar({
               ) : null}
               <JiraSidebarEntry closesDrawer={false} />
               <FigmaSidebarEntry closesDrawer={false} />
-              <SidebarHeaderRow
-                icon={Sparkles}
-                label={labels.skills}
-                onPress={handleSkills}
-                isActive={isSkillsActive}
-                testID="sidebar-skills-nav"
-                variant="compact"
-              />
+              <NavTargetGate route={builtinTargets.skillsRoute}>
+                <SidebarHeaderRow
+                  icon={Sparkles}
+                  label={labels.skills}
+                  onPress={handleSkills}
+                  isActive={isSkillsActive}
+                  testID="sidebar-skills-nav"
+                  variant="compact"
+                />
+              </NavTargetGate>
               <SidebarHeaderRow
                 icon={Store}
                 label={labels.marketplace}
@@ -1292,14 +1324,16 @@ function DesktopSidebar({
                 testID="sidebar-marketplace-nav"
                 variant="compact"
               />
-              <SidebarHeaderRow
-                icon={Container}
-                label={labels.docker}
-                onPress={handleDocker}
-                isActive={isDockerActive}
-                testID="sidebar-docker-nav"
-                variant="compact"
-              />
+              <NavTargetGate route={builtinTargets.dockerRoute}>
+                <SidebarHeaderRow
+                  icon={Container}
+                  label={labels.docker}
+                  onPress={handleDocker}
+                  isActive={isDockerActive}
+                  testID="sidebar-docker-nav"
+                  variant="compact"
+                />
+              </NavTargetGate>
               {supportsDevices ? (
                 <SidebarHeaderRow
                   icon={Smartphone}
@@ -1310,22 +1344,26 @@ function DesktopSidebar({
                   variant="compact"
                 />
               ) : null}
-              <SidebarHeaderRow
-                icon={Radar}
-                label={labels.workbench}
-                onPress={handleWorkbench}
-                isActive={isWorkbenchActive}
-                testID="sidebar-workbench-nav"
-                variant="compact"
-              />
-              <SidebarHeaderRow
-                icon={BarChart3}
-                label={labels.insights}
-                onPress={handleInsights}
-                isActive={isInsightsActive}
-                testID="sidebar-insights-nav"
-                variant="compact"
-              />
+              <NavTargetGate route={builtinTargets.proxyRoute}>
+                <SidebarHeaderRow
+                  icon={Radar}
+                  label={labels.workbench}
+                  onPress={handleWorkbench}
+                  isActive={isWorkbenchActive}
+                  testID="sidebar-workbench-nav"
+                  variant="compact"
+                />
+              </NavTargetGate>
+              <NavTargetGate route={builtinTargets.insightsRoute}>
+                <SidebarHeaderRow
+                  icon={BarChart3}
+                  label={labels.insights}
+                  onPress={handleInsights}
+                  isActive={isInsightsActive}
+                  testID="sidebar-insights-nav"
+                  variant="compact"
+                />
+              </NavTargetGate>
               {supportsForgeHub ? (
                 <SidebarHeaderRow
                   icon={GitPullRequest}
@@ -1582,3 +1620,7 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.popoverForeground,
   },
 }));
+
+function NavTargetGate({ route, children }: { route: Href | null; children: ReactNode }) {
+  return route ? children : null;
+}

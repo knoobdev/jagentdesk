@@ -24,8 +24,8 @@ import type {
 // Session sharing orchestrator (spec §21 / ADR-0018). Owns the live shares: each is a scoped
 // ShareServer (guest web + guest WS on a loopback port) fronted by a Cloudflare quick tunnel.
 // In-memory only — tunnels are child processes, so nothing survives a daemon restart (nor
-// should it: the public URL would be dead). Default OFF (§21.11): constructed only when
-// daemon.sessionSharing.enabled.
+// should it: the public URL would be dead). Default OFF (§21.11): starts shares only when
+// the session-share built-in is enabled.
 //
 // Join flow (§21.5): guest opens link → requests to join → the host gets an auto Accept/Reject
 // dialog on every connected device → on Accept the DAEMON mints the 6-digit code (single
@@ -75,6 +75,7 @@ export interface SessionShareServiceOptions {
   agentManager: ShareAgentManager;
   agentStorage: AgentStorage;
   tunnelManager: TunnelManager;
+  isEnabled?: () => boolean;
   onUpdate?: (share: SessionShare) => void;
   now?: () => number;
   // App web build directory served to guests as the real UI (ADR-0019); bespoke page if unset.
@@ -195,7 +196,11 @@ export class SessionShareService {
     return { grant, capabilities: live.share.capabilities };
   }
 
+  private readonly pendingStarts = new Set<AbortController>();
+  private readonly isEnabled: () => boolean;
+
   constructor(options: SessionShareServiceOptions) {
+    this.isEnabled = options.isEnabled ?? (() => true);
     this.logger = options.logger.child({ module: "session-share-service" });
     this.agentManager = options.agentManager;
     this.agentStorage = options.agentStorage;
@@ -206,6 +211,7 @@ export class SessionShareService {
   }
 
   async stop(): Promise<void> {
+    for (const controller of this.pendingStarts) controller.abort();
     await Promise.all([...this.shares.keys()].map((id) => this.teardown(id, "revoked")));
   }
 
@@ -221,145 +227,160 @@ export class SessionShareService {
     allowGuestModelMode?: boolean;
     capabilities?: Partial<SessionShareCapabilities>;
   }): Promise<SessionShare> {
-    const { agentId } = input;
-    if (!this.agentManager.getAgent(agentId)) {
-      throw new Error(`Agent ${agentId} is not active`);
-    }
-    // An agent may have several concurrent shares (separate links/codes for different people or
-    // groups, each revocable on its own). We no longer tear down the agent's existing shares here.
-
-    const shareId = `share_${randomBytes(6).toString("hex")}`;
-    const now = this.now();
-    const record = await this.agentStorage.get(agentId);
-    const agentLabel = record?.title?.trim() || "Agent";
-    // The workspace root the guest's file/diff RPCs are confined to (defense-in-depth on top of the
-    // capability scope). null when the agent has no cwd → the file guard denies all file RPCs.
-    const workspaceCwd = resolveWorkspaceCwd(record);
-    // Default ON so a guest lands in the existing conversation (spec §21.4): joining a share and
-    // seeing an empty pane is confusing. The host can still create a from-now share explicitly.
-    const shareFullHistory = input.shareFullHistory ?? true;
-    const shareDraftPreview = input.shareDraftPreview ?? false;
-    const capabilities = resolveInitialCapabilities(input.capabilities, input.allowGuestModelMode);
-    const allowGuestModelMode = capabilities.modelMode;
-
-    const startSeq = shareFullHistory ? -1 : this.currentMaxSeq(agentId);
-    const fetchTranscript = (): TranscriptRow[] =>
-      toTranscript(this.fetchRows(agentId).filter((r) => r.seq > startSeq));
-
-    const share: SessionShare = {
-      shareId,
-      agentId,
-      status: "active",
-      tunnelUrl: null,
-      createdAt_ms: now,
-      expiresAt_ms: now + SHARE_TTL_MS,
-      shareFullHistory,
-      shareDraftPreview,
-      requireHostApproval: input.requireHostApproval ?? true,
-      allowGuestModelMode,
-      capabilities,
-      pendingRequests: [],
-      members: [],
-      recentActivity: [],
-    };
-
-    const server = new ShareServer({
-      agentLabel,
-      agentId,
-      workspaceCwd,
-      appDistDir: this.appDistDir,
-      sendPrompt: async (text) => {
-        await sendPromptToAgent({
-          agentId,
-          prompt: text,
-          agentManager: this.agentManager as unknown as AgentManager,
-          agentStorage: this.agentStorage,
-          logger: this.logger,
-          unarchive: false,
-        });
-      },
-      fetchTranscript,
-      shareDraftPreview,
-      allowGuestModelMode,
-      // Live capabilities so the guest app's share hint shows only the granted tabs (ADR-0019).
-      getCapabilities: () => this.shares.get(shareId)?.share.capabilities ?? capabilities,
-      // Guest model/mode change (spec §21.6) — honored by ShareServer only while the share's
-      // allowGuestModelMode is ON. Modes come straight off the live agent snapshot.
-      getModes: () => {
-        const agent = this.agentManager.getAgent(agentId);
-        return {
-          modes: (agent?.availableModes ?? []).map((m) => ({ id: m.id, label: m.label })),
-          currentModeId: agent?.currentModeId ?? null,
-        };
-      },
-      setMode: async (modeId) => {
-        await this.agentManager.setAgentMode(agentId, modeId);
-      },
-      // On successful pairing, mint a guest token the real app uses to open the scoped /ws and
-      // render the actual chat UI (ADR-0019). Token → {shareId, agentId, member}.
-      mintGuestToken: (member) => {
-        const token = `gt_${randomBytes(24).toString("hex")}`;
-        this.guestTokens.set(token, {
-          token,
-          shareId,
-          agentId,
-          memberId: member.memberId,
-          label: member.label,
-          device: member.device,
-          workspaceCwd,
-        });
-        return token;
-      },
-      // Validate a guest token on the scoped /ws and hand the socket to the daemon as a real,
-      // agent-confined session (ADR-0019). Capabilities are resolved live.
-      attachGuestWs: (ws, token) => {
-        const resolved = this.validateGuestToken(token);
-        if (!resolved || !this.guestAttacher) return false;
-        const grant = resolved.grant;
-        this.guestAttacher(ws, {
-          agentId: grant.agentId,
-          scopes: guestScopesForCapabilities(resolved.capabilities),
-          workspaceCwd: grant.workspaceCwd,
-          // Attribute the guest's real-protocol messages back onto the share so the host sees
-          // who·device·what (recentActivity), like the bespoke channel did (ADR-0019).
-          onGuestActivity: (text) =>
-            this.shares
-              .get(grant.shareId)
-              ?.server.recordGuestActivity(
-                { memberId: grant.memberId, label: grant.label, device: grant.device },
-                text,
-              ),
-        });
-        return true;
-      },
-      onStateChanged: (snapshot) => this.applyState(shareId, snapshot),
-      logger: this.logger,
-    });
-
-    const port = await server.start();
-
-    let tunnelUrl: string;
-    let stopTunnel: () => Promise<void>;
+    if (!this.isEnabled()) throw new Error("Plugin turned off: session-share");
+    const controller = new AbortController();
+    this.pendingStarts.add(controller);
     try {
-      const tunnel = await this.tunnelManager.start(port);
-      tunnelUrl = tunnel.url;
-      stopTunnel = tunnel.stop;
-    } catch (error) {
-      await server.stop();
-      if (error instanceof CloudflaredMissingError) throw new CloudflaredMissingRpcError();
-      throw error;
+      const { agentId } = input;
+      if (!this.agentManager.getAgent(agentId)) {
+        throw new Error(`Agent ${agentId} is not active`);
+      }
+      // An agent may have several concurrent shares (separate links/codes for different people or
+      // groups, each revocable on its own). We no longer tear down the agent's existing shares here.
+
+      const shareId = `share_${randomBytes(6).toString("hex")}`;
+      const now = this.now();
+      const record = await this.agentStorage.get(agentId);
+      const agentLabel = record?.title?.trim() || "Agent";
+      // The workspace root the guest's file/diff RPCs are confined to (defense-in-depth on top of the
+      // capability scope). null when the agent has no cwd → the file guard denies all file RPCs.
+      const workspaceCwd = resolveWorkspaceCwd(record);
+      // Default ON so a guest lands in the existing conversation (spec §21.4): joining a share and
+      // seeing an empty pane is confusing. The host can still create a from-now share explicitly.
+      const shareFullHistory = input.shareFullHistory ?? true;
+      const shareDraftPreview = input.shareDraftPreview ?? false;
+      const capabilities = resolveInitialCapabilities(
+        input.capabilities,
+        input.allowGuestModelMode,
+      );
+      const allowGuestModelMode = capabilities.modelMode;
+
+      const startSeq = shareFullHistory ? -1 : this.currentMaxSeq(agentId);
+      const fetchTranscript = (): TranscriptRow[] =>
+        toTranscript(this.fetchRows(agentId).filter((r) => r.seq > startSeq));
+
+      const share: SessionShare = {
+        shareId,
+        agentId,
+        status: "active",
+        tunnelUrl: null,
+        createdAt_ms: now,
+        expiresAt_ms: now + SHARE_TTL_MS,
+        shareFullHistory,
+        shareDraftPreview,
+        requireHostApproval: input.requireHostApproval ?? true,
+        allowGuestModelMode,
+        capabilities,
+        pendingRequests: [],
+        members: [],
+        recentActivity: [],
+      };
+
+      const server = new ShareServer({
+        agentLabel,
+        agentId,
+        workspaceCwd,
+        appDistDir: this.appDistDir,
+        sendPrompt: async (text) => {
+          await sendPromptToAgent({
+            agentId,
+            prompt: text,
+            agentManager: this.agentManager as unknown as AgentManager,
+            agentStorage: this.agentStorage,
+            logger: this.logger,
+            unarchive: false,
+          });
+        },
+        fetchTranscript,
+        shareDraftPreview,
+        allowGuestModelMode,
+        // Live capabilities so the guest app's share hint shows only the granted tabs (ADR-0019).
+        getCapabilities: () => this.shares.get(shareId)?.share.capabilities ?? capabilities,
+        // Guest model/mode change (spec §21.6) — honored by ShareServer only while the share's
+        // allowGuestModelMode is ON. Modes come straight off the live agent snapshot.
+        getModes: () => {
+          const agent = this.agentManager.getAgent(agentId);
+          return {
+            modes: (agent?.availableModes ?? []).map((m) => ({ id: m.id, label: m.label })),
+            currentModeId: agent?.currentModeId ?? null,
+          };
+        },
+        setMode: async (modeId) => {
+          await this.agentManager.setAgentMode(agentId, modeId);
+        },
+        // On successful pairing, mint a guest token the real app uses to open the scoped /ws and
+        // render the actual chat UI (ADR-0019). Token → {shareId, agentId, member}.
+        mintGuestToken: (member) => {
+          const token = `gt_${randomBytes(24).toString("hex")}`;
+          this.guestTokens.set(token, {
+            token,
+            shareId,
+            agentId,
+            memberId: member.memberId,
+            label: member.label,
+            device: member.device,
+            workspaceCwd,
+          });
+          return token;
+        },
+        // Validate a guest token on the scoped /ws and hand the socket to the daemon as a real,
+        // agent-confined session (ADR-0019). Capabilities are resolved live.
+        attachGuestWs: (ws, token) => {
+          const resolved = this.validateGuestToken(token);
+          if (!resolved || !this.guestAttacher) return false;
+          const grant = resolved.grant;
+          this.guestAttacher(ws, {
+            agentId: grant.agentId,
+            scopes: guestScopesForCapabilities(resolved.capabilities),
+            workspaceCwd: grant.workspaceCwd,
+            // Attribute the guest's real-protocol messages back onto the share so the host sees
+            // who·device·what (recentActivity), like the bespoke channel did (ADR-0019).
+            onGuestActivity: (text) =>
+              this.shares
+                .get(grant.shareId)
+                ?.server.recordGuestActivity(
+                  { memberId: grant.memberId, label: grant.label, device: grant.device },
+                  text,
+                ),
+          });
+          return true;
+        },
+        onStateChanged: (snapshot) => this.applyState(shareId, snapshot),
+        logger: this.logger,
+      });
+
+      const port = await server.start();
+
+      let tunnelUrl: string;
+      let stopTunnel: () => Promise<void>;
+      try {
+        const tunnel = await this.tunnelManager.start(port, 30_000, controller.signal);
+        tunnelUrl = tunnel.url;
+        stopTunnel = tunnel.stop;
+      } catch (error) {
+        await server.stop();
+        if (error instanceof CloudflaredMissingError) throw new CloudflaredMissingRpcError();
+        throw error;
+      }
+
+      if (controller.signal.aborted || !this.isEnabled()) {
+        await server.stop();
+        await stopTunnel();
+        throw new Error("Plugin turned off: session-share");
+      }
+      share.tunnelUrl = tunnelUrl;
+      const expiryTimer = setTimeout(() => {
+        void this.teardown(shareId, "expired");
+      }, SHARE_TTL_MS);
+      (expiryTimer as unknown as { unref?: () => void }).unref?.();
+
+      this.shares.set(shareId, { share, server, stopTunnel, expiryTimer });
+      this.emit(share);
+      this.logger.info({ shareId, agentId, tunnelUrl }, "Session share created");
+      return share;
+    } finally {
+      this.pendingStarts.delete(controller);
     }
-
-    share.tunnelUrl = tunnelUrl;
-    const expiryTimer = setTimeout(() => {
-      void this.teardown(shareId, "expired");
-    }, SHARE_TTL_MS);
-    (expiryTimer as unknown as { unref?: () => void }).unref?.();
-
-    this.shares.set(shareId, { share, server, stopTunnel, expiryTimer });
-    this.emit(share);
-    this.logger.info({ shareId, agentId, tunnelUrl }, "Session share created");
-    return share;
   }
 
   // Host Accept/Reject of a guest's join request. On accept, the daemon mints the 6-digit code

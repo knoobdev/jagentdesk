@@ -50,6 +50,7 @@ export interface FigmaServiceParts {
 
 export class FigmaService {
   readonly ctx: FigmaContext;
+  private readonly startLink?: () => Promise<void>;
   private readonly listeners = new Set<(event: FigmaPush) => void>();
 
   constructor(options: {
@@ -57,8 +58,10 @@ export class FigmaService {
     logger: pino.Logger;
     secrets: SecretStore;
     parts: FigmaServiceParts;
+    startLink?: () => Promise<void>;
     now?: () => number;
   }) {
+    this.startLink = options.startLink;
     this.ctx = {
       jagentdeskHome: options.jagentdeskHome,
       logger: options.logger.child({ module: "figma" }),
@@ -100,6 +103,15 @@ export class FigmaService {
   onPush(listener: (event: FigmaPush) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  async start(): Promise<void> {
+    await this.startLink?.();
+  }
+
+  async stopBackground(): Promise<void> {
+    await this.ctx.link.close();
+    await this.ctx.remote?.dispose();
   }
 
   async dispose(): Promise<void> {

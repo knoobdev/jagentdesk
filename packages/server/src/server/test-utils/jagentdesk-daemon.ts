@@ -15,6 +15,7 @@ import { createTestAgentClients } from "./fake-agent-client.js";
 import type { PushNotificationSender } from "../push/notifications.js";
 
 interface TestJAgentDeskDaemonOptions {
+  sessionShareTunnelManager?: import("../session-share/tunnel-manager.js").TunnelManager;
   builtinPlugins?: BuiltinPluginLoader;
   daemonVersion?: string;
   desktopManaged?: boolean;
@@ -97,6 +98,7 @@ export async function createTestJAgentDeskDaemon(
       await prepareTestDaemonConfig(options);
     const logger = options.logger ?? pino({ level: "silent" });
     const daemon = await createJAgentDeskDaemon(config, logger, {
+      sessionShareTunnelManager: options.sessionShareTunnelManager,
       builtinPlugins: options.builtinPlugins ?? new BuiltinPluginLoader(undefined, []),
       serverFeatureOverrides: {
         daemonStatusRpc: options.daemonStatusRpcCapability,

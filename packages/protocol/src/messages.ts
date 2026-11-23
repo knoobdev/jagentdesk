@@ -10,6 +10,14 @@ export {
   type PluginSource,
 } from "./plugin-config.js";
 import { z } from "zod";
+import {
+  BuiltinPluginConfigSchema,
+  BuiltinPluginListRequestSchema,
+  BuiltinPluginSetRequestSchema,
+  BuiltinPluginListResponseSchema,
+  BuiltinPluginSetResponseSchema,
+  BuiltinPluginChangedSchema,
+} from "./builtin-plugins.js";
 import { TerminalActivitySchema } from "./terminal-activity.js";
 import { CLIENT_CAPS } from "./client-capabilities.js";
 import { AGENT_LIFECYCLE_STATUSES } from "./agent-lifecycle.js";
@@ -388,6 +396,7 @@ export const MutableDaemonConfigSchema = z
     orchestration: OrchestrationConfigSchema.default(createDefaultOrchestrationConfig()),
     // Plugins are OFF by default (ADR-0014 §3): enabling a plugin trusts its
     // author like a paired device.
+    builtinPlugins: BuiltinPluginConfigSchema.optional(),
     pluginsEnabled: z.boolean().optional(),
     plugins: z.record(PluginIdSchema, PluginSourceSchema).optional(),
   })
@@ -432,6 +441,7 @@ export const MutableDaemonConfigPatchSchema = z
     operatorContext: z.string().optional(),
     terminalProfiles: z.array(TerminalProfileSchema).optional(),
     orchestration: OrchestrationConfigPatchSchema.optional(),
+    builtinPlugins: BuiltinPluginConfigSchema.optional(),
     pluginsEnabled: z.boolean().optional(),
     plugins: z.record(PluginIdSchema, PluginSourceSchema).optional(),
     // Delete plugin entries by id (the `plugins` record is deep-merged, so a
@@ -4214,6 +4224,8 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   HubManagementDaemonDisconnectRequestSchema,
   DiagnosticsRequestSchema,
   PluginCatalogGetRequestSchema,
+  BuiltinPluginListRequestSchema,
+  BuiltinPluginSetRequestSchema,
   PluginListRequestSchema,
   PluginLogsGetRequestSchema,
   PluginDirectoryInstallRequestSchema,
@@ -4767,6 +4779,17 @@ export const ServerInfoStatusPayloadSchema = z
         // still uses this legacy-style `features` boolean object (see forgeProviders /
         // forgeSearch above); Forge Hub follows the working code pattern. Aligning the
         // wire to spec 07's capability array is a separate refactor (out of scope here).
+        builtinPlugins: z.boolean().optional(),
+        docker: z.boolean().optional(),
+        clusters: z.boolean().optional(),
+        databases: z.boolean().optional(),
+        devices: z.boolean().optional(),
+        workbench: z.boolean().optional(),
+        skills: z.boolean().optional(),
+        insights: z.boolean().optional(),
+        browserTools: z.boolean().optional(),
+        remoteTasks: z.boolean().optional(),
+        customProviders: z.boolean().optional(),
         forgeHub: z.boolean().optional(), // Milestone A: framework + connections + repos + PR read
         forgeHubCode: z.boolean().optional(), // Milestone B: branches/commits/compare
         forgeHubReview: z.boolean().optional(), // Milestone B: approve/request-changes/comment + merge
@@ -8143,6 +8166,9 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   HubManagementDaemonDisconnectResponseSchema,
   DiagnosticsResponseSchema,
   PluginCatalogGetResponseSchema,
+  BuiltinPluginListResponseSchema,
+  BuiltinPluginSetResponseSchema,
+  BuiltinPluginChangedSchema,
   PluginListResponseSchema,
   PluginLogsGetResponseSchema,
   PluginDirectoryInstallResponseSchema,

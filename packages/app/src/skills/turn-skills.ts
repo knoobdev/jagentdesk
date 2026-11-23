@@ -1,3 +1,5 @@
+import { builtinPluginEnabled } from "@/plugins/builtin/registry";
+import { useSessionStore } from "@/stores/session-store";
 import { allKnownSkills } from "@/stores/skills-store";
 import { useAgentSkillsStore } from "@/stores/agent-skills-store";
 import {
@@ -23,15 +25,16 @@ export interface TurnSkills {
 }
 
 /**
- * Reads store snapshots at send time — no React deps, so every send path can use
- * it. `serverId` and `text` are accepted for call-site stability; the selection
- * no longer depends on them.
+ * Reads host feature state and skill snapshots at send time, including queued sends.
+ * Disabling Skills must not consume the attached ids before they can be invoked.
  */
 export function prepareTurnSkills(input: {
   serverId?: string | null;
   agentId: string;
   text: string;
 }): TurnSkills {
+  const info = useSessionStore.getState().sessions[input.serverId ?? ""]?.serverInfo;
+  if (!builtinPluginEnabled(info, "skills")) return { skillIds: undefined, commit: () => {} };
   const known = allKnownSkills();
   const agentSkills = useAgentSkillsStore.getState();
   const legacyMap = buildLegacyIdMap(known);

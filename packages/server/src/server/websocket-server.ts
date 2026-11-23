@@ -899,7 +899,23 @@ export class VoiceAssistantWebSocketServer {
       );
       this.agentManager.updateProviderRegistry(nextAgentManagerState);
       this.broadcastDaemonConfigChanged(config);
+      this.broadcastCapabilitiesUpdate();
     });
+    // Raw broadcasts bypass guest scopes; feature/config pushes go through Session.emit.
+    const unsubscribeBuiltin = this.pluginRuntime?.builtin?.subscribe(() => {
+      for (const session of this.listTrustedSessions()) {
+        session.emitServerMessage({
+          type: "plugins.builtin.changed",
+          payload: { plugins: this.pluginRuntime!.builtin!.list() },
+        });
+      }
+      this.broadcastCapabilitiesUpdate();
+    });
+    const unsubscribeConfig = this.unsubscribeDaemonConfigChange;
+    this.unsubscribeDaemonConfigChange = () => {
+      unsubscribeBuiltin?.();
+      unsubscribeConfig?.();
+    };
     this.setupSkillsBroadcast(skillsStorage);
     this.setupUsageBroadcast(usageHistory);
 
@@ -1357,9 +1373,20 @@ export class VoiceAssistantWebSocketServer {
   ): void {
     this.unsubscribeHostCapabilities?.();
     this.hostCapabilities = service;
+    if (service)
+      void this.pluginRuntime?.builtin
+        ?.setCapabilities(service.snapshot())
+        .catch((err) =>
+          this.logger.error({ err }, "Failed to reconcile built-in host capabilities"),
+        );
     this.hostToolInstaller = installer;
     this.unsubscribeHostCapabilities =
       service?.onChange((host) => {
+        void this.pluginRuntime?.builtin
+          ?.setCapabilities(host)
+          .catch((err) =>
+            this.logger.error({ err }, "Failed to reconcile built-in host capabilities"),
+          );
         this.updateServerCapabilities(
           buildServerCapabilities({ readiness: this.speech?.getReadiness() ?? null, host }),
         );
@@ -2596,6 +2623,9 @@ export class VoiceAssistantWebSocketServer {
         // Relay second path (spec 35 / ADR-0048): with it the pairing offer
         // carries `relay` and server_info carries the descriptor above.
         relay: this.daemonRuntimeConfig?.getRelayConfig?.()?.enabled === true,
+        ...(this.pluginRuntime?.builtin
+          ? { builtinPlugins: true, ...this.pluginRuntime.builtin.featureFlags() }
+          : {}),
       },
     };
   }
@@ -2608,16 +2638,6 @@ export class VoiceAssistantWebSocketServer {
         payload: this.buildServerInfoStatusPayload(),
       },
     };
-  }
-
-  private createDaemonConfigChangedMessage(config: MutableDaemonConfig): WSOutboundMessage {
-    return wrapSessionMessage({
-      type: "status",
-      payload: {
-        status: "daemon_config_changed",
-        config,
-      },
-    });
   }
 
   // Push notification when an autonomous run reaches a terminal state (spec §14). The
@@ -2653,7 +2673,12 @@ export class VoiceAssistantWebSocketServer {
   }
 
   private broadcastDaemonConfigChanged(config: MutableDaemonConfig): void {
-    this.broadcast(this.createDaemonConfigChangedMessage(config));
+    for (const session of this.listTrustedSessions()) {
+      session.emitServerMessage({
+        type: "status",
+        payload: { status: "daemon_config_changed", config },
+      });
+    }
   }
 
   private setupSkillsBroadcast(skillsStorage: NativeSkillsService | null | undefined): void {

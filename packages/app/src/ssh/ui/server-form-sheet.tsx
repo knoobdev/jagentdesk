@@ -1,3 +1,4 @@
+import { BuiltinPluginGate } from "@/plugins/builtin/gate";
 import { memo, useCallback, useMemo, useState } from "react";
 import { Text, View } from "react-native";
 import { Check, X } from "lucide-react-native";
@@ -804,19 +805,25 @@ export function ServerFormSheet({
         {state.disclosure === "advanced" ? (
           <AdvancedSection form={form} jumpCandidates={jumpCandidates} />
         ) : null}
-        <Disclosure
-          title="Remote tasks"
-          open={state.disclosure === "remoteExec"}
-          onToggle={toggleRemoteExec}
-          testID="ssh-server-remote-exec-section"
-        />
-        {state.disclosure === "remoteExec" ? (
-          <RemoteTasksSection
-            form={form}
-            client={client}
-            serverId={target.mode === "edit" ? (target.server?.id ?? null) : null}
+        <BuiltinPluginGate
+          serverId={client?.getLastServerInfoMessage()?.serverId}
+          id="remote-tasks"
+        >
+          {" "}
+          <Disclosure
+            title="Remote tasks"
+            open={state.disclosure === "remoteExec"}
+            onToggle={toggleRemoteExec}
+            testID="ssh-server-remote-exec-section"
           />
-        ) : null}
+          {state.disclosure === "remoteExec" ? (
+            <RemoteTasksSection
+              form={form}
+              client={client}
+              serverId={target.mode === "edit" ? (target.server?.id ?? null) : null}
+            />
+          ) : null}
+        </BuiltinPluginGate>
         <Disclosure
           title="Terminal theme & font size"
           open={state.disclosure === "appearance"}

@@ -238,6 +238,7 @@ export class SshService {
   }
 
   async initialize(): Promise<void> {
+    this.disposed = false;
     await this.storage.initialize();
   }
 

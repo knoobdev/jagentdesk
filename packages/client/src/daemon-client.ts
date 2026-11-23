@@ -1,3 +1,4 @@
+import type { BuiltinPluginId, BuiltinPluginListItem } from "@jagentdesk/protocol/builtin-plugins";
 import {
   ChunkedTransport,
   ChunkedTransportProtocolError,
@@ -6329,6 +6330,42 @@ export class DaemonClient {
       requestId,
       message: { type: "plugin.catalog.get.request", requestId },
       responseType: "plugin.catalog.get.response",
+    });
+    return payload.plugins;
+  }
+
+  async getBuiltinPluginState(): Promise<{
+    plugins: BuiltinPluginListItem[];
+    canManage?: boolean;
+  }> {
+    const requestId = this.createRequestId();
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "plugins.builtin.list.request", requestId },
+      responseType: "plugins.builtin.list.response",
+    });
+  }
+
+  async listBuiltinPlugins(): Promise<BuiltinPluginListItem[]> {
+    const requestId = this.createRequestId();
+    const payload = await this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "plugins.builtin.list.request", requestId },
+      responseType: "plugins.builtin.list.response",
+    });
+    return payload.plugins;
+  }
+
+  async setBuiltinPlugin(
+    id: BuiltinPluginId,
+    enabled: boolean,
+    cascade = false,
+  ): Promise<BuiltinPluginListItem[]> {
+    const requestId = this.createRequestId();
+    const payload = await this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "plugins.builtin.set.request", requestId, id, enabled, cascade },
+      responseType: "plugins.builtin.set.response",
     });
     return payload.plugins;
   }

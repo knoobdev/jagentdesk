@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import { BuiltinPluginConfigSchema } from "@jagentdesk/protocol/builtin-plugins";
 import { DEFAULT_JAGENTDESK_DAEMON_PORT } from "@jagentdesk/protocol/defaults";
 
 import {
@@ -354,6 +355,7 @@ export const PersistedConfigSchema = z
 
     providers: ProvidersSchema.optional(),
     // Plugins persist at the top level, matching upstream's config layout.
+    builtinPlugins: BuiltinPluginConfigSchema.optional(),
     pluginsEnabled: z.boolean().optional(),
     plugins: z.record(PluginIdSchema, PluginSourceSchema).optional(),
     worktrees: WorktreesConfigSchema.optional(),
