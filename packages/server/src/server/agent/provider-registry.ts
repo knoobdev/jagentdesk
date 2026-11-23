@@ -520,11 +520,12 @@ function wrapClientProvider(
   const listFeatures = inner.listFeatures?.bind(inner);
   const archiveNativeSession = inner.archiveNativeSession?.bind(inner);
   const unarchiveNativeSession = inner.unarchiveNativeSession?.bind(inner);
+  const configuredModelIds = [...profileModels, ...additionalModels].map((model) => model.id);
 
   return {
     provider,
     capabilities: inner.capabilities,
-    createSession: async (config, launchContext) =>
+    createSession: async (config, launchContext, options) =>
       wrapSessionProvider(
         provider,
         await inner.createSession(
@@ -533,6 +534,7 @@ function wrapClientProvider(
             provider: inner.provider,
           },
           launchContext,
+          { ...options, configuredModelIds },
         ),
       ),
     resumeSession: async (handle, overrides, launchContext, options) =>
@@ -550,7 +552,7 @@ function wrapClientProvider(
               }
             : undefined,
           launchContext,
-          options,
+          { ...options, configuredModelIds },
         ),
       ),
     fetchCatalog: async (options, context) => {

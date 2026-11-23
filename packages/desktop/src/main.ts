@@ -1,3 +1,6 @@
+import { protectConsoleStreams } from "./diagnostics/console-streams.js";
+protectConsoleStreams();
+
 process.emitWarning = (() => {}) as typeof process.emitWarning;
 
 import log from "electron-log/main";
@@ -48,6 +51,7 @@ import {
   buildStandardContextMenuItems,
 } from "./window/window-manager.js";
 import { setupDarwinCompositorWatchdog } from "./window/compositor-watchdog/index.js";
+import { showWindowWhenReady } from "./window/show-when-ready.js";
 import { registerDialogHandlers } from "./features/dialogs.js";
 import { registerArgoCdSsoHandlers } from "./features/argocd-sso.js";
 import { registerNotificationHandlers } from "./features/notifications.js";
@@ -465,8 +469,11 @@ ipcMain.handle("jagentdesk:agent-navigation:ready", (event) => {
   return agentNavigationInbox.windowReady(event.sender.id);
 });
 
+// The renderer measures the element in page CSS pixels, while capturePage
+// takes device-independent pixels, so the guest's zoom factor scales the region.
 function normalizeBrowserCaptureRect(
   rect: unknown,
+  zoomFactor: number,
 ): { x: number; y: number; width: number; height: number } | null {
   if (!rect || typeof rect !== "object") {
     return null;
@@ -491,10 +498,10 @@ function normalizeBrowserCaptureRect(
     return null;
   }
   return {
-    x: Math.max(0, Math.round(x)),
-    y: Math.max(0, Math.round(y)),
-    width: Math.round(width),
-    height: Math.round(height),
+    x: Math.max(0, Math.round(x * zoomFactor)),
+    y: Math.max(0, Math.round(y * zoomFactor)),
+    width: Math.round(width * zoomFactor),
+    height: Math.round(height * zoomFactor),
   };
 }
 
@@ -745,13 +752,12 @@ ipcMain.handle(
     if (!contents || contents.isDestroyed()) {
       return null;
     }
-    const captureRect = normalizeBrowserCaptureRect(rect);
+    const captureRect = normalizeBrowserCaptureRect(rect, contents.getZoomFactor());
     if (!captureRect) {
       return null;
     }
     try {
-      // capturePage expects an integer rect in CSS pixels relative to the
-      // guest viewport, which matches getBoundingClientRect() on the page.
+      // The rect is already scaled to the guest's device-independent pixels.
       const image = await contents.capturePage(captureRect);
       if (image.isEmpty()) {
         return null;
@@ -1139,8 +1145,9 @@ async function createWindow(
     registerBrowserWebviewNavigationGuards(contents);
   });
 
-  mainWindow.once("ready-to-show", showWindow);
-  mainWindow.webContents.once("did-finish-load", showWindow);
+  // showOnLoad stays true on every platform: the reveal is shared with the
+  // timeout fallback through the caller's onShow guard.
+  showWindowWhenReady(mainWindow, { showOnLoad: true, onShow: showWindow });
 
   if (!app.isPackaged) {
     const { loadReactDevTools } = await import("./features/react-devtools.js");

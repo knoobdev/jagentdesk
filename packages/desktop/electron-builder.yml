@@ -100,6 +100,8 @@ linux:
   extraResources:
     - from: bin/jagentdesk
       to: bin/jagentdesk
+    - from: assets/icon.png
+      to: icon.png
   target:
     - AppImage
     - deb

@@ -1902,6 +1902,8 @@ export const ja: TranslationResources = {
       searchPlaceholder: "ショートカットを検索",
       unavailableOnMobile: "キーボードショートカットはデスクトップでのみ利用できます",
       capturePrompt: "ショートカットを押してください...",
+      captureIndexPrompt: "最後に1〜9の数字を入力してください。",
+      unassigned: "未設定",
       actions: {
         done: "完了",
         cancel: "キャンセル",

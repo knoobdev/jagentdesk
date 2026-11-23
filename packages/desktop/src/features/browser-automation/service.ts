@@ -18,7 +18,6 @@ import {
   dispatchTrustedHover,
   dispatchTrustedKey,
   dispatchTrustedScroll,
-  dispatchTrustedText,
   type ClickInputOptions,
   type IsolatedKeyboardInputEvent,
 } from "./trusted-input.js";
@@ -39,6 +38,9 @@ export interface TabContents {
   capturePage(options?: TabCapturePageOptions): Promise<TabImage>;
   invalidate(): void;
   sendInputEvent(event: IsolatedKeyboardInputEvent): void;
+  // Commits text into this tab's focused element. CDP Input.insertText would
+  // commit into whichever element has focus in the JAgentDesk window instead.
+  insertText(text: string): Promise<void>;
   getConsoleMessages?(): BrowserAutomationConsoleLogEntry[];
   /**
    * Run a command and collect dialog events (ADR-0025). When the command opens a dialog,
@@ -1203,7 +1205,7 @@ async function executeType(
       }
       await dispatchTrustedClick(cdpSender(target.contents), actionable.target.point);
     }
-    await dispatchTrustedText(cdpSender(target.contents), text);
+    await target.contents.insertText(text);
     return {
       requestId,
       ok: true,

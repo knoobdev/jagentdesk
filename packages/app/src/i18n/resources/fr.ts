@@ -1935,6 +1935,8 @@ export const fr: TranslationResources = {
       searchPlaceholder: "Rechercher des raccourcis",
       unavailableOnMobile: "Les raccourcis clavier ne sont disponibles que sur le bureau",
       capturePrompt: "Appuyez sur le raccourci...",
+      captureIndexPrompt: "Terminez par un chiffre de 1 à 9.",
+      unassigned: "Non attribué",
       actions: {
         done: "Fait",
         cancel: "Annuler",

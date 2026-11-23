@@ -101,6 +101,7 @@ interface BrowserAutomationWebContents extends ConsoleMessageEmitter {
   capturePage(rect?: Rectangle, options?: { stayHidden?: boolean }): Promise<TabImage>;
   invalidate(): void;
   sendInputEvent(event: IsolatedKeyboardInputEvent): void;
+  insertText(text: string): Promise<void>;
 }
 
 export function adaptWebContents(contents: BrowserAutomationWebContents): TabContents {
@@ -123,6 +124,7 @@ export function adaptWebContents(contents: BrowserAutomationWebContents): TabCon
     capturePage: (captureOptions) => contents.capturePage(undefined, captureOptions),
     invalidate: () => contents.invalidate(),
     sendInputEvent: (event) => contents.sendInputEvent(event),
+    insertText: (text) => contents.insertText(text),
     getConsoleMessages: () => consoleMessagesByContentsId.get(contentsId) ?? [],
     captureDialogs: (task) => captureDialogs(contentsId, task),
     getPendingDialog: () => getPendingDialog(contentsId),

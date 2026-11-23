@@ -131,6 +131,25 @@ function respondWithHealthyStatus(
   queueMicrotask(() => callback({ statusCode: 200, resume: () => undefined }));
 }
 
+function mockNoLocalDaemon(): void {
+  mocks.httpRequest.mockImplementation(
+    (
+      _url: unknown,
+      _options: unknown,
+      callback: (response: { statusCode: number; resume: () => void }) => void,
+    ) => {
+      const request = new EventEmitter() as EventEmitter & {
+        destroy: () => void;
+        end: () => void;
+      };
+      request.destroy = vi.fn();
+      request.end = vi.fn();
+      queueMicrotask(() => callback({ statusCode: 503, resume: () => undefined }));
+      return request;
+    },
+  );
+}
+
 describe("daemon-manager commands", () => {
   beforeEach(() => {
     mocks.settings = DEFAULT_DESKTOP_SETTINGS;
@@ -184,6 +203,39 @@ describe("daemon-manager commands", () => {
 
     expect(mocks.runExternalCliJsonCommand).not.toHaveBeenCalled();
     expect(mocks.spawnProcess).not.toHaveBeenCalled();
+  });
+
+  it("reports a stopped daemon without launching the CLI when no local daemon runs", async () => {
+    mkdirSync(mocks.jagentdeskHome);
+    mockNoLocalDaemon();
+    mocks.runExternalCliJsonCommand.mockResolvedValue({
+      home: mocks.jagentdeskHome,
+      pid: null,
+      startedAt: null,
+      listen: null,
+      hostname: null,
+      localDaemon: "stopped",
+      desktopManaged: false,
+      connectedDaemon: "not_probed",
+    });
+
+    const status = await createDaemonCommandHandlers().desktop_daemon_status();
+
+    expect(status).toMatchObject({ serverId: "", status: "stopped", pid: null });
+    expect(mocks.runExternalCliJsonCommand).not.toHaveBeenCalled();
+  });
+
+  it("does not reject status when the managed daemon state file cannot be read", async () => {
+    mkdirSync(mocks.jagentdeskHome);
+    writeFileSync(`${mocks.jagentdeskHome}/jagentdesk.pid`, "garbage");
+    mockNoLocalDaemon();
+
+    const status = await createDaemonCommandHandlers().desktop_daemon_status();
+
+    // JAgentDesk answers an idle daemon in-process, so an unreadable state file
+    // resolves as stopped instead of taking the CLI failure path upstream uses.
+    expect(status).toMatchObject({ serverId: "", status: "stopped", pid: null });
+    expect(mocks.runExternalCliJsonCommand).not.toHaveBeenCalled();
   });
 
   it("keeps stop callable while built-in daemon management is disabled", async () => {

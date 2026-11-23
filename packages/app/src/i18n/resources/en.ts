@@ -1961,6 +1961,8 @@ export const en = {
       searchPlaceholder: "Search shortcuts",
       unavailableOnMobile: "Keyboard shortcuts are only available on desktop",
       capturePrompt: "Press shortcut...",
+      captureIndexPrompt: "End with a number from 1 to 9.",
+      unassigned: "Not set",
       actions: {
         done: "Done",
         cancel: "Cancel",

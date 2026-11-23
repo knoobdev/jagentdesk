@@ -1,10 +1,11 @@
+import { once } from "node:events";
 import type { Query } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, test, vi } from "vitest";
 
 import { createTestLogger } from "../../../../test-utils/test-logger.js";
 import type { AgentLaunchContext } from "../../agent-sdk-types.js";
 import { ClaudeAgentClient } from "./agent.js";
-import type { ClaudeQueryInput } from "./query.js";
+import { claudeQuery, type ClaudeQueryInput } from "./query.js";
 
 function createQueryMock(events: unknown[]): Query {
   let index = 0;
@@ -29,8 +30,58 @@ function createQueryMock(events: unknown[]): Query {
 }
 
 describe("Claude SDK env", () => {
+  test.each(
+    ["node", "bun", process.execPath].flatMap((command) =>
+      [undefined, "jagentdesk", "custom-client"].map((entrypoint) => ({ command, entrypoint })),
+    ),
+  )(
+    "preserves explicit launch identity $entrypoint in $command while clearing inherited session env",
+    async ({ command, entrypoint }) => {
+      let output = "";
+      let exited = Promise.resolve<unknown[]>([]);
+      const query = claudeQuery(
+        { prompt: "", options: {} },
+        {
+          runtimeSettings: { env: { CLAUDE_CODE_ENTRYPOINT: "sdk-ts" } },
+          launchEnv: entrypoint === undefined ? {} : { CLAUDE_CODE_ENTRYPOINT: entrypoint },
+          queryFactory: ({ options }) => {
+            if (!options.spawnClaudeCodeProcess) {
+              throw new Error("Missing Claude process launcher");
+            }
+            const child = options.spawnClaudeCodeProcess({
+              command,
+              args: [
+                "-e",
+                "process.stdout.write(JSON.stringify({ entrypoint: process.env.CLAUDE_CODE_ENTRYPOINT, parentSession: process.env.CLAUDECODE ?? null }))",
+              ],
+              cwd: process.cwd(),
+              env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: "sdk-ts", CLAUDECODE: "1" },
+              signal: new AbortController().signal,
+            });
+            child.stdout.on("data", (chunk: Buffer) => {
+              output += chunk.toString();
+            });
+            exited = once(child, "close");
+            return createQueryMock([]);
+          },
+        },
+      );
+
+      try {
+        expect(await exited).toEqual([0, null]);
+        expect(JSON.parse(output)).toEqual({
+          ...(entrypoint === undefined ? {} : { entrypoint }),
+          parentSession: null,
+        });
+      } finally {
+        query.close();
+      }
+    },
+  );
+
   test("forwards launch-context env through Claude process env", async () => {
     let capturedEnv: Record<string, string | undefined> | undefined;
+    let capturedPerTaskStopAffordance: boolean | undefined;
     const launchContext: AgentLaunchContext = {
       env: {
         JAGENTDESK_AGENT_ID: "00000000-0000-4000-8000-000000000201",
@@ -39,6 +90,7 @@ describe("Claude SDK env", () => {
     };
     const queryFactory = vi.fn(({ options }: ClaudeQueryInput) => {
       capturedEnv = options.env;
+      capturedPerTaskStopAffordance = options.perTaskStopAffordance;
       return createQueryMock([
         {
           type: "system",
@@ -82,6 +134,10 @@ describe("Claude SDK env", () => {
       expect(result.sessionId).toBe("managed-agent-env-session");
       expect(capturedEnv?.JAGENTDESK_AGENT_ID).toBe(launchContext.env?.JAGENTDESK_AGENT_ID);
       expect(capturedEnv?.JAGENTDESK_TEST_FLAG).toBe(launchContext.env?.JAGENTDESK_TEST_FLAG);
+      // JAgentDesk reads session_state_changed to know when an autonomous turn is over.
+      expect(capturedEnv?.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS).toBe("1");
+      // Without it, Stop and replace kill every background subagent along with the turn.
+      expect(capturedPerTaskStopAffordance).toBe(true);
     } finally {
       await session.close();
     }

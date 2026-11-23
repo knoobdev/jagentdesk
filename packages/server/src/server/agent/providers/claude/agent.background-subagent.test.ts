@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createTestLogger } from "../../../../test-utils/test-logger.js";
-import type { AgentStreamEvent } from "../../agent-sdk-types.js";
+import type { AgentSession, AgentStreamEvent } from "../../agent-sdk-types.js";
+import type { AgentTimelineRow } from "../../agent-timeline-store-types.js";
+import { projectTimelineRows } from "../../timeline-projection.js";
 import { ClaudeAgentClient } from "./agent.js";
 import { streamSession } from "../test-utils/session-stream-adapter.js";
 
@@ -81,6 +83,39 @@ async function collectUntilTerminal(
     }
   }
   return events;
+}
+
+async function collectTimelineAcrossTurns(
+  session: AgentSession,
+  prompt: string,
+  turnCount: number,
+): Promise<AgentTimelineRow[]> {
+  const rows: AgentTimelineRow[] = [];
+  let currentTurnId: string | undefined;
+  let completedTurns = 0;
+  let unsubscribe = () => {};
+  const turnsCompleted = new Promise<void>((resolve) => {
+    unsubscribe = session.subscribe((event) => {
+      if (event.type === "turn_started") currentTurnId = event.turnId;
+      if (event.type === "timeline") {
+        rows.push({
+          seq: rows.length + 1,
+          timestamp: new Date(Date.UTC(2026, 9, 4, 0, 0, rows.length)).toISOString(),
+          item: event.item,
+          ...((event.turnId ?? currentTurnId) ? { turnId: event.turnId ?? currentTurnId } : {}),
+        });
+      }
+      if (event.type === "turn_completed" && ++completedTurns === turnCount) resolve();
+    });
+  });
+  try {
+    await session.startTurn(prompt);
+    await turnsCompleted;
+    return rows;
+  } finally {
+    unsubscribe();
+    await session.close();
+  }
 }
 
 describe("background Claude subagents", () => {
@@ -180,4 +215,266 @@ describe("background Claude subagents", () => {
       },
     });
   });
+
+  test("keeps the Task card labeled when the child's frames arrive after its launch result", async () => {
+    // Claude Code answers a background Agent call at once ("Agent launched") and only then streams
+    // the child's frames, so they arrive after the parent's tool call has its result.
+    queryFactory.mockImplementation(() =>
+      buildQueryMock([
+        { type: "system", subtype: "init", session_id: "bg-session", permissionMode: "default" },
+        {
+          type: "assistant",
+          message: {
+            model: "claude-haiku-4-5",
+            content: [
+              {
+                type: "tool_use",
+                id: "toolu_background",
+                name: "Agent",
+                input: {
+                  subagent_type: "general-purpose",
+                  description: "Count files here",
+                  prompt: "Run ls and reply with the number of entries.",
+                },
+              },
+            ],
+          },
+        },
+        {
+          type: "system",
+          subtype: "task_started",
+          task_id: "bg-task",
+          tool_use_id: "toolu_background",
+          task_type: "local_agent",
+          subagent_type: "general-purpose",
+          description: "Count files here",
+          prompt: "Run ls and reply with the number of entries.",
+        },
+        {
+          type: "user",
+          message: {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "toolu_background",
+                content: "Async agent launched successfully.",
+              },
+            ],
+          },
+        },
+        {
+          type: "assistant",
+          parent_tool_use_id: "toolu_background",
+          message: {
+            model: "claude-haiku-4-5",
+            content: [
+              {
+                type: "tool_use",
+                id: "toolu_ls",
+                name: "Bash",
+                input: { command: "ls -1", description: "List files" },
+              },
+            ],
+          },
+        },
+        {
+          type: "user",
+          parent_tool_use_id: "toolu_background",
+          message: {
+            role: "user",
+            content: [{ type: "tool_result", tool_use_id: "toolu_ls", content: "a\nb\nc" }],
+          },
+        },
+        {
+          type: "assistant",
+          parent_tool_use_id: "toolu_background",
+          message: { model: "claude-haiku-4-5", content: [{ type: "text", text: "3" }] },
+        },
+        {
+          type: "system",
+          subtype: "task_updated",
+          task_id: "bg-task",
+          patch: { status: "completed" },
+        },
+        {
+          type: "system",
+          subtype: "task_notification",
+          task_id: "bg-task",
+          tool_use_id: "toolu_background",
+          status: "completed",
+        },
+        { type: "result", subtype: "success", usage: {}, total_cost_usd: 0 },
+      ]),
+    );
+    const session = await new ClaudeAgentClient({
+      logger: createTestLogger(),
+      queryFactory,
+      resolveBinary: async () => "/test/claude/bin",
+    }).createSession({ provider: "claude", cwd: process.cwd() });
+    const events = await collectUntilTerminal(streamSession(session, "delegate work"));
+    await session.close();
+
+    const rows: AgentTimelineRow[] = events
+      .filter((event) => event.type === "timeline")
+      .map((event, index) => ({
+        seq: index + 1,
+        timestamp: new Date(Date.UTC(2026, 9, 4, 0, 0, index)).toISOString(),
+        item: event.item,
+      }));
+    const cards = projectTimelineRows({ rows, mode: "projected" })
+      .map((entry) => entry.item)
+      .filter((item) => item.type === "tool_call" && item.callId === "toolu_background");
+
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({
+      status: "completed",
+      detail: {
+        type: "sub_agent",
+        subAgentType: "general-purpose",
+        description: "Count files here",
+        log: "[Bash] ls -1",
+      },
+    });
+  });
+
+  test.each(["before", "after"])(
+    "keeps one logged Task card when child tools start %s the parent finishes",
+    async (timing) => {
+      // A child can stream across the main session's turn boundary. Claude opens the next
+      // main-session turn with system/init; bare child frames do not open a turn.
+      queryFactory.mockImplementation(() =>
+        buildQueryMock([
+          { type: "system", subtype: "init", session_id: "bg-session", permissionMode: "default" },
+          {
+            type: "assistant",
+            message: {
+              model: "claude-haiku-4-5",
+              content: [
+                {
+                  type: "tool_use",
+                  id: "toolu_background",
+                  name: "Agent",
+                  input: {
+                    subagent_type: "general-purpose",
+                    description: "Count files here",
+                    prompt: "Run ls and reply with the number of entries.",
+                    run_in_background: true,
+                  },
+                },
+              ],
+            },
+          },
+          {
+            type: "system",
+            subtype: "task_started",
+            task_id: "bg-task",
+            tool_use_id: "toolu_background",
+            task_type: "local_agent",
+            subagent_type: "general-purpose",
+            description: "Count files here",
+            prompt: "Run ls and reply with the number of entries.",
+          },
+          {
+            type: "user",
+            message: {
+              role: "user",
+              content: [
+                {
+                  type: "tool_result",
+                  tool_use_id: "toolu_background",
+                  content: "Async agent launched successfully.",
+                },
+              ],
+            },
+          },
+          ...(timing === "after"
+            ? [
+                { type: "result", subtype: "success", usage: {}, total_cost_usd: 0 },
+                {
+                  type: "system",
+                  subtype: "init",
+                  session_id: "bg-session",
+                  permissionMode: "default",
+                },
+              ]
+            : []),
+          {
+            type: "assistant",
+            parent_tool_use_id: "toolu_background",
+            message: {
+              model: "claude-haiku-4-5",
+              content: [
+                {
+                  type: "tool_use",
+                  id: "toolu_ls",
+                  name: "Bash",
+                  input: { command: "ls -1", description: "List files" },
+                },
+              ],
+            },
+          },
+          ...(timing === "before"
+            ? [
+                { type: "result", subtype: "success", usage: {}, total_cost_usd: 0 },
+                {
+                  type: "system",
+                  subtype: "init",
+                  session_id: "bg-session",
+                  permissionMode: "default",
+                },
+              ]
+            : []),
+          {
+            type: "user",
+            parent_tool_use_id: "toolu_background",
+            message: {
+              role: "user",
+              content: [{ type: "tool_result", tool_use_id: "toolu_ls", content: "a\nb\nc" }],
+            },
+          },
+          {
+            type: "assistant",
+            parent_tool_use_id: "toolu_background",
+            message: { model: "claude-haiku-4-5", content: [{ type: "text", text: "3" }] },
+          },
+          {
+            type: "system",
+            subtype: "task_updated",
+            task_id: "bg-task",
+            patch: { status: "completed" },
+          },
+          {
+            type: "system",
+            subtype: "task_notification",
+            task_id: "bg-task",
+            tool_use_id: "toolu_background",
+            status: "completed",
+          },
+          { type: "result", subtype: "success", usage: {}, total_cost_usd: 0 },
+        ]),
+      );
+      const session = await new ClaudeAgentClient({
+        logger: createTestLogger(),
+        queryFactory,
+        resolveBinary: async () => "/test/claude/bin",
+      }).createSession({ provider: "claude", cwd: process.cwd() });
+      const rows = await collectTimelineAcrossTurns(session, "delegate work", 2);
+
+      const cards = projectTimelineRows({ rows, mode: "projected" })
+        .map((entry) => entry.item)
+        .filter((item) => item.type === "tool_call" && item.callId === "toolu_background");
+
+      expect(cards).toHaveLength(1);
+      expect(cards[0]).toMatchObject({
+        status: "completed",
+        detail: {
+          type: "sub_agent",
+          subAgentType: "general-purpose",
+          description: "Count files here",
+          log: "[Bash] ls -1",
+        },
+      });
+    },
+  );
 });
