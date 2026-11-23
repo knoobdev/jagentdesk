@@ -62,12 +62,11 @@ interface FakeAgentSessionOptions {
   closeSession?: () => Promise<void>;
   onStartTurn?: (prompt: AgentPromptInput, config: AgentSessionConfig) => void;
   beforeTurnComplete?: (prompt: AgentPromptInput) => Promise<void>;
-  steerActiveTurn?: AgentSession["steerActiveTurn"];
-  onInterrupt?: () => void;
   historyEvents?: readonly AgentStreamEvent[];
 }
 
 export interface TestAgentClientOptions {
+  beforeCreateSession?: (config: AgentSessionConfig) => Promise<void>;
   closeSession?: () => Promise<void>;
   onStartTurn?: (prompt: AgentPromptInput, config: AgentSessionConfig) => void;
   beforeTurnComplete?: (prompt: AgentPromptInput) => Promise<void>;
@@ -1237,6 +1236,7 @@ class FakeAgentClient implements AgentClient {
     config: AgentSessionConfig,
     _launchContext?: AgentLaunchContext,
   ): Promise<AgentSession> {
+    await this.options.beforeCreateSession?.(config);
     return new FakeAgentSession({
       providerName: this.provider,
       config: { ...config },
