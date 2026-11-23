@@ -1,3 +1,4 @@
+import { HostConfirmations, type HostConfirmationRequest } from "./host-confirmation";
 import { useSyncExternalStore, useMemo } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import equal from "fast-deep-equal/es6";
@@ -1539,6 +1540,8 @@ export class HostRuntimeStore {
   private directorySyncByServer = new Map<string, DirectorySync>();
   private configuredOverrideBootstrapInFlight: Promise<void> | null = null;
   private bootPromise: Promise<void> | null = null;
+  private registryLoad: Promise<void> | null = null;
+  private readonly hostConfirmations = new HostConfirmations();
   private connectionMode: ConnectionMode | null = null;
   private connectionModeUnsubscribe: (() => void) | null = null;
   private storage: HostRuntimeStorage;
@@ -1756,8 +1759,7 @@ export class HostRuntimeStore {
     const override = readConfiguredLocalDaemonOverride();
     await this.loadTimingOutHosts();
     await this.loadHostBackups();
-    await this.loadFromStorage();
-    this.markHostRegistryLoaded();
+    await this.loadRegistry();
 
     let isE2E: string | null = null;
     try {
@@ -1792,6 +1794,26 @@ export class HostRuntimeStore {
     } else {
       await this.bootstrapDefaultLocalhost();
     }
+  }
+
+  private loadRegistry(): Promise<void> {
+    this.registryLoad ??= this.loadFromStorage().then(() => this.markHostRegistryLoaded());
+    return this.registryLoad;
+  }
+
+  async confirmConnectionOffer(offer: ConnectionOffer, signal?: AbortSignal): Promise<boolean> {
+    await this.loadRegistry();
+    return this.hostConfirmations.confirmLink(offer, this.hosts, signal);
+  }
+
+  getPendingHostConfirmation(): HostConfirmationRequest | null {
+    return this.hostConfirmations.getPending();
+  }
+  subscribeHostConfirmation(listener: () => void): () => void {
+    return this.hostConfirmations.subscribe(listener);
+  }
+  answerHostConfirmation(id: number, approved: boolean): void {
+    this.hostConfirmations.answer(id, approved);
   }
 
   private async loadFromStorage(): Promise<void> {
@@ -2132,7 +2154,7 @@ export class HostRuntimeStore {
     offerUrlOrFragment: string,
     label?: string,
     pairingCode?: string,
-  ): Promise<HostProfile> {
+  ): Promise<HostProfile | null> {
     const marker = "#offer=";
     const idx = offerUrlOrFragment.indexOf(marker);
     if (idx === -1) {
@@ -2144,6 +2166,7 @@ export class HostRuntimeStore {
     }
     const payload = decodeOfferFragmentPayload(encoded);
     const offer = ConnectionOfferSchema.parse(payload);
+    if (!(await this.confirmConnectionOffer(offer))) return null;
     return this.upsertConnectionFromOffer(offer, label, pairingCode);
   }
 
@@ -2997,6 +3020,24 @@ export function useHostRegistryLoaded(): boolean {
   );
 }
 
+export function useHostConfirmation() {
+  const store = getHostRuntimeStore();
+  const pending = useSyncExternalStore(
+    (listener) => store.subscribeHostConfirmation(listener),
+    () => store.getPendingHostConfirmation(),
+    () => store.getPendingHostConfirmation(),
+  );
+  return useMemo(
+    () => ({
+      pending,
+      answer: (approved: boolean) => {
+        if (pending) store.answerHostConfirmation(pending.id, approved);
+      },
+    }),
+    [pending, store],
+  );
+}
+
 export interface HostMutations {
   upsertDirectConnection: (input: {
     serverId: string;
@@ -3029,7 +3070,7 @@ export interface HostMutations {
     offerUrlOrFragment: string,
     label?: string,
     pairingCode?: string,
-  ) => Promise<HostProfile>;
+  ) => Promise<HostProfile | null>;
   renameHost: (serverId: string, label: string) => Promise<void>;
   setHostColor: (serverId: string, color: HostColor) => Promise<void>;
   setHostBadgeDisplay: (serverId: string, badgeDisplay: HostBadgeDisplay) => Promise<void>;
