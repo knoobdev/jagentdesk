@@ -1,6 +1,6 @@
 import { CodexAppServerAgentSession } from "./providers/codex-app-server-agent.js";
 import { createFakeCodexAppServer } from "./providers/codex/test-utils/fake-app-server.js";
-import { expect, test, vi } from "vitest";
+import { expect, test, vi, onTestFinished } from "vitest";
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -635,6 +635,48 @@ async function startAndSteerThroughManager(
   return { manager, agentId: agent.id, workdir };
 }
 
+test("OpenCode persistence excludes launch-only instructions from storage and clients", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-plugin-persistence-"));
+  const harness = new V2Harness();
+  harness.info.location.directory = workdir;
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const client = new OpenCodeV2AgentClient({ logger, runtime: harness.runtime });
+  const manager = new AgentManager({
+    clients: { opencode: client },
+    registry: storage,
+    logger,
+    appendSystemPrompt: "Daemon instruction",
+    pluginLifecycle: {
+      emit: () => {},
+      before: async (name, request) =>
+        name === "agent.open.before"
+          ? { ...request, appendSystemPrompt: ["Plugin instruction"] }
+          : request,
+    },
+  });
+  const agent = await manager.createAgent({ provider: "opencode", cwd: workdir }, undefined, {
+    workspaceId: undefined,
+  });
+  try {
+    expect(harness.instructions.get("jagentdesk")).toBe("Daemon instruction\n\nPlugin instruction");
+    await manager.flush();
+    const record = await storage.get(agent.id);
+    expect(record?.persistence?.metadata).not.toHaveProperty("pluginAppendSystemPrompt");
+    expect(record?.persistence?.metadata).not.toHaveProperty("daemonAppendSystemPrompt");
+    const live = manager.getAgent(agent.id)!;
+    expect(toAgentPayload(live).persistence?.metadata).not.toHaveProperty(
+      "pluginAppendSystemPrompt",
+    );
+    expect(toAgentPayload(live).persistence?.metadata).not.toHaveProperty(
+      "daemonAppendSystemPrompt",
+    );
+  } finally {
+    await manager.closeAgent(agent.id);
+    await client.shutdown();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
 test("stops an OpenCode execution already active when its conversation is reopened", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-opencode-resume-"));
   onTestFinished(() => rmSync(workdir, { recursive: true, force: true }));
@@ -938,7 +980,10 @@ test("starts its own turn when the previous turn fails to start under a steer se
     );
 
     startHeld.resolve();
-    await expect(second).resolves.toEqual({ disposition: "turn_started" });
+    await expect(second).resolves.toEqual({
+      disposition: "turn_started",
+      started: expect.any(Promise),
+    });
     await vi.waitFor(() => expect(session.startPrompts).toEqual(["FIRST", "SECOND"]));
     expect(session.interruptCount).toBe(0);
   } finally {
@@ -4796,6 +4841,104 @@ test.each([
       await manager.flush();
       rmSync(workdir, { recursive: true, force: true });
     }
+  },
+);
+
+test.each([
+  {
+    event: {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "hook-turn",
+    } satisfies AgentStreamEvent,
+    outcome: { kind: "completed" },
+  },
+  {
+    event: {
+      type: "turn_failed",
+      provider: "codex",
+      turnId: "hook-turn",
+      error: "Failed",
+      code: "test",
+    } satisfies AgentStreamEvent,
+    outcome: { kind: "failed", error: { message: "Failed", code: "test" } },
+  },
+  {
+    event: {
+      type: "turn_canceled",
+      provider: "codex",
+      turnId: "hook-turn",
+      reason: "Stopped",
+    } satisfies AgentStreamEvent,
+    outcome: { kind: "canceled", reason: "Stopped" },
+  },
+])(
+  "lifecycle hooks receive no conversation for $event.type and stream dispatch never reads timeline items",
+  async ({ event: terminalEvent, outcome }) => {
+    class CountingTimelineStore extends InMemoryAgentTimelineStore {
+      itemReads = 0;
+      override getItems(agentId: string): AgentTimelineItem[] {
+        this.itemReads += 1;
+        return super.getItems(agentId);
+      }
+    }
+    const workdir = mkdtempSync(join(tmpdir(), "agent-hook-payload-"));
+    const client = new SessionRecordingAgentClient();
+    const timelineStore = new CountingTimelineStore();
+    const events: Array<{ name: string; event: unknown }> = [];
+    const manager = new AgentManager({
+      clients: { codex: client },
+      registry: new AgentStorage(join(workdir, "agents"), logger),
+      logger,
+      timelineStore,
+      pluginLifecycle: {
+        before: async (_name, request) => request,
+        emit: (name, event) => {
+          events.push({ name, event });
+        },
+      },
+    });
+    onTestFinished(async () => {
+      await manager.closeAgent(manager.listAgents()[0]!.id);
+      await manager.flush();
+      rmSync(workdir, { recursive: true, force: true });
+    });
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    await manager.appendTimelineItem(agent.id, {
+      type: "assistant_message",
+      text: "A long conversation".repeat(10_000),
+    });
+    expect(manager.getTimeline(agent.id)).toHaveLength(1);
+    const readsBeforeDispatch = timelineStore.itemReads;
+    const session = client.sessions[0]!;
+    session.pushEvent({ type: "turn_started", provider: "codex", turnId: "hook-turn" });
+    await expect
+      .poll(() => events.filter(({ name }) => name === "agent.turn.before").length)
+      .toBe(1);
+    expect(timelineStore.itemReads).toBe(readsBeforeDispatch);
+    session.pushEvent(terminalEvent);
+    await expect
+      .poll(() => events.filter(({ name }) => name === "agent.turn.after"))
+      .toEqual([
+        {
+          name: "agent.turn.after",
+          event: {
+            agent: {
+              id: agent.id,
+              workspaceId: null,
+              parentAgentId: null,
+              provider: "codex",
+              cwd: workdir,
+              title: null,
+            },
+            turnId: "hook-turn",
+            outcome,
+          },
+        },
+      ]);
+    expect(timelineStore.itemReads).toBe(readsBeforeDispatch);
   },
 );
 
@@ -11412,4 +11555,70 @@ test("canceling a pending Codex start settles as canceled without accepting its 
     await manager.flushForShutdown();
     rmSync(workdir, { recursive: true, force: true });
   }
+});
+
+test("plugin instructions are recomputed for each launch without changing saved config", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-plugin-prompt-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const client = new TestAgentClient();
+  let additions = ["Plugin one", "Plugin two"];
+  const manager = new AgentManager({
+    clients: { codex: client },
+    registry: storage,
+    logger,
+    appendSystemPrompt: "Daemon",
+    pluginLifecycle: {
+      emit: () => {},
+      before: async (name, request) =>
+        name === "agent.open.before" ? { ...request, appendSystemPrompt: additions } : request,
+    },
+  });
+  const snapshot = await manager.createAgent(
+    { provider: "codex", cwd: workdir, systemPrompt: "Saved" },
+    undefined,
+    { workspaceId: undefined },
+  );
+  expect(client.createdConfigs[0]).toMatchObject({
+    systemPrompt: "Saved",
+    daemonAppendSystemPrompt: "Daemon",
+    pluginAppendSystemPrompt: ["Plugin one", "Plugin two"],
+  });
+  expect(snapshot.config.systemPrompt).toBe("Saved");
+  expect((await storage.get(snapshot.id))?.config?.systemPrompt).toBe("Saved");
+  const handle: AgentPersistenceHandle = {
+    provider: "codex",
+    sessionId: "prompt-session",
+    metadata: { provider: "codex", cwd: workdir, systemPrompt: "Saved" },
+  };
+  await manager.closeAgent(snapshot.id);
+  await manager.resumeAgentFromPersistence(
+    handle,
+    { cwd: workdir, systemPrompt: "Saved" },
+    snapshot.id,
+  );
+  expect(client.resumeOverrides.at(-1)?.pluginAppendSystemPrompt).toEqual([
+    "Plugin one",
+    "Plugin two",
+  ]);
+  additions = ["Changed"];
+  await manager.closeAgent(snapshot.id);
+  await manager.resumeAgentFromPersistence(
+    handle,
+    { cwd: workdir, systemPrompt: "Saved" },
+    snapshot.id,
+  );
+  expect(client.resumeOverrides.at(-1)?.pluginAppendSystemPrompt).toEqual(["Changed"]);
+  additions = ["Refreshed"];
+  await manager.reloadAgentSession(snapshot.id);
+  expect(client.resumeOverrides.at(-1)?.pluginAppendSystemPrompt).toEqual(["Refreshed"]);
+  additions = [];
+  await manager.closeAgent(snapshot.id);
+  await manager.resumeAgentFromPersistence(
+    handle,
+    { cwd: workdir, systemPrompt: "Saved" },
+    snapshot.id,
+  );
+  expect(client.resumeOverrides.at(-1)?.systemPrompt).toBe("Saved");
+  expect(client.resumeOverrides.at(-1)?.daemonAppendSystemPrompt).toBe("Daemon");
+  expect((await storage.get(snapshot.id))?.config?.systemPrompt).toBe("Saved");
 });

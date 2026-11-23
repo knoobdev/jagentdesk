@@ -6,7 +6,7 @@ import { createJiti } from "jiti";
 import { describe, expect, it } from "vitest";
 import { WSInboundMessageSchema } from "../../src/messages.js";
 import type { z } from "zod";
-import { WSOutboundMessageSchema } from "../../src/messages.js";
+import { PluginRpcInvokeResponseSchema, WSOutboundMessageSchema } from "../../src/messages.js";
 import { validateWSOutboundMessage } from "../../src/validation/ws-outbound.js";
 
 interface GeneratedSchema {
@@ -529,6 +529,11 @@ const SourceSchema = z.object({
   });
 });
 
+it("accepts omitted RPC output so the receiving client can apply schema defaults", () => {
+  const message = { type: "plugin.rpc.invoke.response", payload: { requestId: "default-output" } };
+  expect(PluginRpcInvokeResponseSchema.safeParse(message).success).toBe(true);
+});
+
 // Requests travel client→daemon and are parsed by the daemon's runtime `WSInboundMessageSchema`
 // (websocket-server.ts); only the outbound side has a generated zod-aot artifact. These cases
 // pin the ADR-0037 playback request tightening at the real inbound parse boundary, so both WS
@@ -761,4 +766,49 @@ it("preserves the signed-device challenge envelope", () => {
     data: { type: "challenge", nonce: "pairing-nonce" },
   });
   expect(validateWSOutboundMessage({ type: "challenge", nonce: "" }).success).toBe(false);
+});
+
+it("keeps nested JSON in plugin timeline entries through generated validation", () => {
+  const message = {
+    type: "session",
+    message: {
+      type: "fetch_agent_timeline_response",
+      payload: {
+        requestId: "plugin-history",
+        agentId: "agent",
+        agent: null,
+        direction: "tail",
+        projection: "projected",
+        epoch: "epoch",
+        reset: false,
+        staleCursor: false,
+        gap: false,
+        window: { minSeq: 1, maxSeq: 1, nextSeq: 2 },
+        startCursor: null,
+        endCursor: null,
+        hasOlder: false,
+        hasNewer: false,
+        entries: [
+          {
+            provider: "codex",
+            timestamp: "2026-11-23T00:00:00.000Z",
+            seqStart: 1,
+            seqEnd: 1,
+            sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }],
+            collapsed: [],
+            item: {
+              type: "plugin",
+              id: "review",
+              pluginId: "review",
+              kind: "review",
+              version: 1,
+              data: { status: "complete", nested: [1, null, { text: "kept" }] },
+            },
+          },
+        ],
+        error: null,
+      },
+    },
+  };
+  expect(validateWSOutboundMessage(message)).toEqual({ success: true, data: message });
 });

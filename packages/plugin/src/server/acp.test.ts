@@ -226,6 +226,53 @@ lines.on("line", (line) => {
 });`;
 
 describe("runAcpProvider", () => {
+  it("spawns the daemon-resolved launch for probes, catalogues, listing, and sessions", async () => {
+    const executable = await fakeAcp(`
+if (process.env.LAUNCH_TOKEN !== "resolved" || process.env.CLAUDECODE || process.env.JAGENTDESK_NODE_ENV) process.exit(1);
+const readline = require("node:readline");
+const lines = readline.createInterface({ input: process.stdin });
+const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+lines.on("line", (line) => {
+  const message = JSON.parse(line);
+  let result;
+  if (message.method === "initialize") result = { protocolVersion: message.params.protocolVersion, agentCapabilities: { sessionCapabilities: { list: {} } } };
+  else if (message.method === "session/new") result = { sessionId: "native", configOptions: [{ id: "model", name: "Model", category: "model", type: "select", currentValue: "resolved", options: [{ value: "resolved", name: process.env.SESSION_TOKEN || "probe" }] }] };
+  else if (message.method === "session/list") result = { sessions: [] };
+  else return;
+  send({ jsonrpc: "2.0", id: message.id, result });
+});`);
+    const registration = runAcpProvider({
+      id: "launch-acp",
+      label: "Launch ACP",
+      command: ["missing-default-command"],
+    });
+    const connection = await registration.connect({
+      versions: [1],
+      capabilities: ["prompt.message", "session.list"],
+      launch: { command: process.execPath, args: [executable], env: { LAUNCH_TOKEN: "resolved" } },
+    });
+    const events: ProviderEvent[] = [];
+    connection.onEvent((event) => events.push(event));
+    try {
+      await connection.send({ type: "catalog", requestId: "catalog" });
+      expect(await waitForEvent(events, (event) => event.type === "catalog")).toMatchObject({
+        catalog: { models: [{ id: "resolved", label: "probe" }] },
+      });
+      await connection.send({ type: "sessions", requestId: "list" });
+      expect(await waitForEvent(events, (event) => event.type === "sessions")).toMatchObject({
+        sessions: [],
+      });
+      const input = openInput();
+      input.config.env = { SESSION_TOKEN: "session" };
+      await connection.send(input);
+      expect(await waitForEvent(events, (event) => event.type === "session.config")).toMatchObject({
+        config: { models: [{ id: "resolved", label: "session" }] },
+      });
+    } finally {
+      await connection.close();
+    }
+  });
+
   it("rejects connection cleanly when the ACP executable does not exist", async () => {
     const registration = runAcpProvider({
       id: "missing-acp",
@@ -633,6 +680,104 @@ describe("runAcpProvider", () => {
           expect(AgentTimelineItemPayloadSchema.safeParse(row).success).toBe(true);
         }
         expect(rows.at(-1)).toMatchObject({ type: "tool_call", status, error });
+      } finally {
+        await connection.close();
+      }
+    },
+  );
+
+  it.each([
+    { counts: null, context: false, expected: [] },
+    {
+      counts: { totalTokens: 0, inputTokens: 0, outputTokens: 0 },
+      context: false,
+      expected: [
+        {
+          turnId: "acp:first",
+          usage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: undefined },
+        },
+      ],
+    },
+    {
+      counts: { totalTokens: 18971, inputTokens: 12152, outputTokens: 78, cachedReadTokens: 6741 },
+      context: true,
+      expected: [
+        {
+          turnId: undefined,
+          usage: { contextWindowUsedTokens: 42, contextWindowMaxTokens: 100, totalCostUsd: 0.25 },
+        },
+        {
+          turnId: "acp:first",
+          usage: {
+            inputTokens: 12152,
+            outputTokens: 78,
+            cachedInputTokens: 6741,
+            contextWindowUsedTokens: 42,
+            contextWindowMaxTokens: 100,
+            totalCostUsd: 0.25,
+          },
+        },
+      ],
+    },
+  ])(
+    "forwards prompt-result usage $counts while preserving context updates: $context",
+    async ({ counts, context, expected }) => {
+      const harness = connectorHarness({
+        handleRequest(instance, message) {
+          if (message.method !== "session/prompt") return false;
+          if (context)
+            instance.notify("session/update", {
+              sessionId: "connector-session",
+              update: {
+                sessionUpdate: "usage_update",
+                used: 42,
+                size: 100,
+                cost: { amount: 0.25, currency: "USD" },
+              },
+            });
+          instance.respond(message, {
+            stopReason: "end_turn",
+            ...(counts ? { usage: counts } : {}),
+          });
+          return true;
+        },
+      });
+      const registration = runAcpProvider({
+        id: "usage-acp",
+        label: "Usage ACP",
+        connector: harness.connector,
+      });
+      const connection = await registration.connect({
+        versions: [1],
+        capabilities: ["prompt.message"],
+      });
+      const events: ProviderEvent[] = [];
+      connection.onEvent((event) => events.push(event));
+      try {
+        await connection.send(openInput());
+        await waitForEvent(events, (event) => event.type === "session.ready");
+        await connection.send({
+          type: "session.prompt",
+          sessionId: "session-1",
+          prompt: {
+            clientMessageId: "first",
+            delivery: "auto",
+            input: { type: "message", content: [{ type: "text", text: "hello" }] },
+          },
+        });
+        await waitForEvent(
+          events,
+          (event) => event.type === "session.turn" && event.state === "completed",
+        );
+        const usage = events.flatMap((event) =>
+          event.type === "session.usage" ? [{ turnId: event.turnId, usage: event.usage }] : [],
+        );
+        expect(usage).toEqual(expected);
+        const lastUsage = events.findLastIndex((event) => event.type === "session.usage");
+        const completed = events.findIndex(
+          (event) => event.type === "session.turn" && event.state === "completed",
+        );
+        expect(lastUsage).toBeLessThan(completed);
       } finally {
         await connection.close();
       }
@@ -1154,7 +1299,15 @@ describe("runAcpProvider streamed chunks without messageId (#4699)", () => {
     const items = events.flatMap((event) =>
       event.type === "timeline.item" &&
       (event.item.type === "assistant_message" || event.item.type === "reasoning")
-        ? [{ id: event.item.id, text: event.item.text }]
+        ? [
+            {
+              id: event.item.id,
+              text: event.item.text,
+              ...(event.item.type === "assistant_message" && event.item.messageId
+                ? { messageId: event.item.messageId }
+                : {}),
+            },
+          ]
         : [],
     );
     expect(items).toEqual([
@@ -1162,7 +1315,11 @@ describe("runAcpProvider streamed chunks without messageId (#4699)", () => {
       { id: "agent_message_chunk:1", text: "- **Current temperature**: 25°C" },
       { id: "agent_message_chunk:2", text: "next turn" },
       { id: "agent_thought_chunk:3", text: "think A" },
-      { id: "m-explicit", text: "say" },
+      {
+        id: JSON.stringify(["agent_message_chunk", "m-explicit"]),
+        messageId: "m-explicit",
+        text: "say",
+      },
       { id: "agent_thought_chunk:4", text: "think B" },
     ]);
     await connection.close();
@@ -1249,6 +1406,21 @@ async function streamChunkTurns(
 }
 
 describe("ACP streamed message boundaries", () => {
+  it("keeps reasoning separate from a reply sharing its native message ID", async () => {
+    expect(
+      await streamChunkTurns([
+        textChunk("private ", "agent_thought_chunk", "shared-id"),
+        textChunk("reasoning", "agent_thought_chunk", "shared-id"),
+        textChunk("public ", "agent_message_chunk", "shared-id"),
+        textChunk("reply", "agent_message_chunk", "shared-id"),
+      ]),
+    ).toEqual([
+      { type: "reasoning", text: "private reasoning" },
+      { type: "assistant_message", text: "public reply" },
+      { type: "assistant_message", text: "Next turn" },
+    ]);
+  });
+
   it.each([
     {
       name: "tool call",

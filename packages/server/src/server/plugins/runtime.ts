@@ -1,4 +1,15 @@
-import type { PluginBeforeRequests, PluginLifecycleEvents } from "@jagentdesk/plugin/server";
+import { InternalPluginChild } from "./internal-child.js";
+import { evaluateBundle } from "./bundle-evaluator.js";
+import {
+  ProviderStatusSchema,
+  type ProviderStatus,
+  type ProviderStatusRequest,
+} from "@jagentdesk/plugin/server/provider";
+import { validateWorktreePath } from "../../utils/worktree-path.js";
+import type { PluginHookPayload } from "@jagentdesk/plugin/server";
+import type { PluginWireBeforeRequests, PluginBeforeResults } from "./lifecycle/index.js";
+import type { SessionOpenWireRequest, AttachedAgentTool } from "./agent-tools.js";
+import type { PluginHookEvents, PluginHookAgent, AgentToolResult } from "@jagentdesk/plugin/server";
 import { validateBeforeRequest, validateBeforeResult } from "./lifecycle/index.js";
 import { fork } from "node:child_process";
 import path from "node:path";
@@ -23,9 +34,14 @@ import type {
   PluginProviderMetadata,
 } from "./plugin-process-protocol.js";
 import { PluginProcessMessageSchema } from "./plugin-process-protocol.js";
+import {
+  BufferedPluginSubscription,
+  type PluginRuntimeSubscription,
+} from "./runtime-subscription.js";
 import { PluginSessionSocket } from "./session-socket.js";
 
 const REQUEST_TIMEOUT_MS = 30_000;
+const TOOL_CALL_TIMEOUT_MS = 10 * 60_000;
 const MAX_LOG_ENTRIES = 500;
 const MAX_LOG_BYTES = 256 * 1024;
 const MAX_LOG_LINE_BYTES = 16 * 1024;
@@ -55,10 +71,13 @@ interface PendingInvocation {
 
 interface LoadedPlugin {
   id: string;
+  instanceId: string;
   requirements: PluginRequirements | undefined;
   clientBundle: string;
   methods: ReadonlySet<string>;
-  hooks: { events: string[]; before: string[] };
+  subscriptionMethods: ReadonlySet<string>;
+  subscriptions: Map<string, BufferedPluginSubscription>;
+  hooks: string[];
   providers: readonly PluginProviderMetadata[];
   child: PluginChild | null;
   outputCapture: PluginOutputCapture | null;
@@ -223,8 +242,9 @@ function spawnPluginChild(): PluginChild {
   }) as PluginChild;
 }
 
+// Kill only. Node never emits "close" for a child whose IPC channel the parent disconnected, and
+// "close" is how the runtime learns that a plugin exited; the channel closes with the process.
 function terminatePluginChild(child: PluginChild): void {
-  if (child.connected) child.disconnect();
   if (!child.killed) child.kill();
 }
 
@@ -252,11 +272,13 @@ function send(child: PluginChild, message: PluginProcessRequest): Promise<void> 
 
 export class PluginRuntime {
   private readonly plugins = new Map<string, LoadedPlugin>();
+  private readonly pendingEvents = new Set<Promise<void>>();
   private readonly logTails = new Map<string, PluginLogTail>();
   private readonly logger: pino.Logger;
   private readonly spawnChild: () => PluginChild;
   private sessionHost: PluginJAgentDeskSessionHost | null;
   private readonly listeners = new Set<(pluginId: string, error?: string) => void>();
+  private readonly sessionOpenListeners = new Set<() => void>();
 
   constructor(
     logger: pino.Logger,
@@ -277,6 +299,16 @@ export class PluginRuntime {
   subscribe(listener: (pluginId: string, error?: string) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  subscribeSessionOpenChanges(listener: () => void): () => void {
+    this.sessionOpenListeners.add(listener);
+    return () => this.sessionOpenListeners.delete(listener);
+  }
+
+  private notifySessionOpenChange(loaded: LoadedPlugin): void {
+    if (!loaded.hooks.includes("agent.open.before")) return;
+    for (const listener of this.sessionOpenListeners) listener();
   }
 
   async startPlugin(
@@ -301,6 +333,7 @@ export class PluginRuntime {
       throw new Error(`Plugin start cancelled: ${pluginId}`);
     }
     this.plugins.set(pluginId, loaded);
+    this.notifySessionOpenChange(loaded);
     this.appendLog(pluginId, "stdout", "[jagentdesk] Plugin ready");
   }
 
@@ -312,6 +345,7 @@ export class PluginRuntime {
     const loaded = this.plugins.get(pluginId);
     if (!loaded) return false;
     this.plugins.delete(pluginId);
+    this.notifySessionOpenChange(loaded);
     this.rejectPending(loaded, `Plugin stopped: ${pluginId}`);
     await this.stopPlugin(loaded);
     return true;
@@ -325,6 +359,23 @@ export class PluginRuntime {
 
   getProviderRegistrations(pluginId: string): readonly PluginProviderMetadata[] {
     return this.plugins.get(pluginId)?.providers ?? [];
+  }
+
+  async getProviderStatus(
+    pluginId: string,
+    providerId: string,
+    request: ProviderStatusRequest,
+  ): Promise<ProviderStatus> {
+    const loaded = this.plugins.get(pluginId);
+    if (!loaded) throw new Error(`Plugin is not available: ${pluginId}`);
+    return ProviderStatusSchema.parse(
+      await this.request(loaded, {
+        type: "provider.status",
+        requestId: randomUUID(),
+        providerId,
+        request,
+      }),
+    );
   }
 
   async connectProvider(
@@ -410,56 +461,137 @@ export class PluginRuntime {
     return this.request(loaded, { type: "invoke", requestId: randomUUID(), method, input });
   }
 
-  emit<Name extends keyof PluginLifecycleEvents>(
-    name: Name,
-    event: PluginLifecycleEvents[Name],
-  ): void {
+  /** Starts one subscriber's handler in the plugin process. */
+  startSubscription(pluginId: string, method: string, input: unknown): PluginRuntimeSubscription {
+    const loaded = this.plugins.get(pluginId);
+    if (!loaded) throw new Error(`Plugin is not available: ${pluginId}`);
+    if (!loaded.subscriptionMethods.has(method))
+      throw new Error(`Plugin ${pluginId} does not contribute subscription ${method}`);
+    const subscriptionId = randomUUID();
+    const subscription = new BufferedPluginSubscription();
+    loaded.subscriptions.set(subscriptionId, subscription);
+    const ready = this.request(loaded, {
+      type: "subscribe",
+      requestId: randomUUID(),
+      subscriptionId,
+      method,
+      input,
+    }).then(
+      () => undefined,
+      (error: unknown) => {
+        loaded.subscriptions.delete(subscriptionId);
+        throw error;
+      },
+    );
+    return {
+      ready,
+      attach: (sink) => subscription.attach(sink),
+      release: () => {
+        subscription.released();
+        if (!loaded.subscriptions.delete(subscriptionId)) return;
+        if (loaded.child?.connected)
+          void send(loaded.child, { type: "unsubscribe", subscriptionId }).catch(() => undefined);
+      },
+    };
+  }
+
+  emit<Name extends keyof PluginHookEvents>(name: Name, event: PluginHookEvents[Name]): void {
     for (const loaded of this.plugins.values()) {
-      if (!loaded.hooks.events.includes(name)) {
+      if (!loaded.hooks.includes(name)) {
         continue;
       }
-      void this.request(loaded, {
+      const request = this.request(loaded, {
         type: "hook",
         requestId: randomUUID(),
-        kind: "event",
         name,
-        input: event,
-      }).catch((error) => {
-        this.appendLog(
-          loaded.id,
-          "stderr",
-          `Lifecycle hook ${name} failed: ${describeError(error)}`,
-        );
-      });
+        input: wireEvent(name, event),
+      })
+        .then(() => undefined)
+        .catch((error) => {
+          this.appendLog(
+            loaded.id,
+            "stderr",
+            `Lifecycle hook ${name} failed: ${describeError(error)}`,
+          );
+        });
+      this.pendingEvents.add(request);
+      void request.finally(() => this.pendingEvents.delete(request));
     }
   }
 
-  async before<Name extends keyof PluginBeforeRequests>(
+  async drainEvents(): Promise<void> {
+    await Promise.all(this.pendingEvents);
+  }
+
+  async wait(
+    name: "worktree.create.after",
+    payload: PluginHookPayload<"worktree.create.after">,
+  ): Promise<void> {
+    const plugins = [...this.plugins.values()].sort((left, right) =>
+      left.id.localeCompare(right.id),
+    );
+    for (const loaded of plugins) {
+      if (!loaded.hooks.includes(name)) continue;
+      try {
+        await this.request(loaded, { type: "hook", requestId: randomUUID(), name, input: payload });
+      } catch (error) {
+        throw new Error(`Plugin ${loaded.id} ${name} failed: ${describeError(error)}`, {
+          cause: error,
+        });
+      }
+    }
+  }
+
+  async before<Name extends keyof PluginWireBeforeRequests>(
     name: Name,
-    input: PluginBeforeRequests[Name],
-  ): Promise<PluginBeforeRequests[Name]> {
+    input: PluginWireBeforeRequests[Name],
+  ): Promise<PluginBeforeResults[Name]> {
     let request = validateBeforeRequest(name, input);
     const plugins = [...this.plugins.values()].sort((left, right) => {
       return left.id.localeCompare(right.id);
     });
+    const attached: AttachedAgentTool[] = [];
+    const mcpServers: SessionOpenWireRequest["mcpServers"] = {};
+    const mcpServerOwners: Record<string, string> = {};
     for (const loaded of plugins) {
-      if (!loaded.hooks.before.includes(name)) {
+      if (!loaded.hooks.includes(name)) {
         continue;
       }
       try {
         const output = await this.request(loaded, {
           type: "hook",
           requestId: randomUUID(),
-          kind: "before",
           name,
-          input: request,
+          input: name === "agent.open.before" ? { ...request, tools: [], mcpServers: {} } : request,
         });
-        request = validateBeforeResult(name, request, output);
+        request = await validateBeforeResult(name, request, output);
+        if (name === "worktree.create.before") {
+          const worktree = request as PluginWireBeforeRequests["worktree.create.before"];
+          worktree.path = await validateWorktreePath({
+            candidate: worktree.path,
+            repoPath: worktree.repoRoot,
+          });
+        }
+        if (name === "agent.open.before") {
+          const opened = request as SessionOpenWireRequest;
+          this.collectMcpServers(mcpServers, mcpServerOwners, loaded, opened.mcpServers);
+          this.collectAgentTools(attached, loaded, opened.tools);
+        }
       } catch (error) {
-        throw new Error(`Plugin ${loaded.id} before ${name} failed: ${describeError(error)}`, {
+        if (name === "agent.open.before")
+          this.detachTools((request as SessionOpenWireRequest).agentId);
+        throw new Error(`Plugin ${loaded.id} ${name} failed: ${describeError(error)}`, {
           cause: error,
         });
       }
+    }
+    if (name === "agent.open.before") {
+      return {
+        ...request,
+        tools: attached,
+        mcpServers,
+        mcpServerOwners,
+      } as PluginBeforeResults[Name];
     }
     return request;
   }
@@ -482,25 +614,124 @@ export class PluginRuntime {
     return output;
   }
 
+  private collectMcpServers(
+    servers: SessionOpenWireRequest["mcpServers"],
+    owners: Record<string, string>,
+    loaded: LoadedPlugin,
+    contributions: SessionOpenWireRequest["mcpServers"],
+  ): void {
+    for (const [name, server] of Object.entries(contributions)) {
+      if (Object.hasOwn(servers, name)) {
+        throw new Error(
+          `MCP server ${name} from plugin ${loaded.id} collides with plugin ${owners[name]}`,
+        );
+      }
+      servers[name] = server;
+      owners[name] = loaded.id;
+    }
+  }
+
+  private collectAgentTools(
+    attached: AttachedAgentTool[],
+    loaded: LoadedPlugin,
+    tools: SessionOpenWireRequest["tools"],
+  ): void {
+    for (const tool of tools) {
+      const collision = attached.find((entry) => entry.name === tool.name);
+      if (collision)
+        throw new Error(
+          `Agent tool ${tool.name} from plugin ${loaded.id} collides with plugin ${collision.pluginId}`,
+        );
+      attached.push({ ...tool, pluginId: loaded.id, pluginInstanceId: loaded.instanceId });
+    }
+  }
+
+  isToolPluginAvailable(pluginId: string, pluginInstanceId: string): boolean {
+    return this.plugins.get(pluginId)?.instanceId === pluginInstanceId;
+  }
+
+  detachTools(agentId: string): void {
+    for (const loaded of this.plugins.values()) {
+      if (loaded.child) void send(loaded.child, { type: "tools.detach", agentId }).catch(() => {});
+    }
+  }
+
+  async callTool(
+    pluginId: string,
+    pluginInstanceId: string,
+    agent: PluginHookAgent,
+    name: string,
+    input: unknown,
+    signal?: AbortSignal,
+  ): Promise<AgentToolResult> {
+    const loaded = this.plugins.get(pluginId);
+    if (!loaded || loaded.instanceId !== pluginInstanceId)
+      return { isError: true, text: `Plugin is not available: ${pluginId}` };
+    const requestId = randomUUID();
+    try {
+      return (await this.request(
+        loaded,
+        { type: "tool.call", requestId, agent, name, input },
+        signal,
+      )) as AgentToolResult;
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      return { isError: true, text: describeError(error) };
+    }
+  }
+
   private request(
     loaded: LoadedPlugin,
     message: Extract<PluginProcessRequest, { requestId: string }>,
+    signal?: AbortSignal,
   ): Promise<unknown> {
     const child = loaded.child;
     const pluginId = loaded.id;
     if (!child) throw new Error(`Plugin ${pluginId} has no server entry`);
     const requestId = message.requestId;
+    signal?.throwIfAborted();
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
+      const cancel = () => {
+        clearTimeout(timeout);
         loaded.pending.delete(requestId);
-        if (message.type === "hook") {
-          void send(child, { type: "hook.cancel", requestId }).catch(() => {});
-        }
-        reject(new Error(`Plugin RPC timed out: ${pluginId}.${message.type}`));
-      }, REQUEST_TIMEOUT_MS);
-      loaded.pending.set(requestId, { resolve, reject, timeout });
+        if (message.type === "tool.call")
+          void send(child, { type: "tool.cancel", requestId }).catch(() => {});
+        signal?.removeEventListener("abort", cancel);
+        reject(signal?.reason ?? new Error("Tool call canceled"));
+      };
+      const timeout = setTimeout(
+        () => {
+          loaded.pending.delete(requestId);
+          signal?.removeEventListener("abort", cancel);
+          if (message.type === "tool.call")
+            void send(child, { type: "tool.cancel", requestId }).catch(() => {});
+          if (message.type === "hook") {
+            void send(child, { type: "hook.cancel", requestId }).catch(() => {});
+          }
+          // The handler may still start after the daemon gave up on it.
+          if (message.type === "subscribe") {
+            const { subscriptionId } = message;
+            void send(child, { type: "unsubscribe", subscriptionId }).catch(() => {});
+          }
+          reject(new Error(`Plugin RPC timed out: ${pluginId}.${message.type}`));
+        },
+        message.type === "tool.call" ? TOOL_CALL_TIMEOUT_MS : REQUEST_TIMEOUT_MS,
+      );
+      signal?.addEventListener("abort", cancel, { once: true });
+      loaded.pending.set(requestId, {
+        resolve: (value) => {
+          signal?.removeEventListener("abort", cancel);
+          resolve(value);
+        },
+        reject: (error) => {
+          signal?.removeEventListener("abort", cancel);
+          reject(error);
+        },
+        timeout,
+      });
       void send(child, message).catch((error) => {
         clearTimeout(timeout);
+        signal?.removeEventListener("abort", cancel);
         loaded.pending.delete(requestId);
         reject(error);
       });
@@ -511,6 +742,7 @@ export class PluginRuntime {
     const loaded = [...this.plugins.values()];
     this.plugins.clear();
     for (const plugin of loaded) {
+      this.notifySessionOpenChange(plugin);
       this.rejectPending(plugin, `Plugin stopped: ${plugin.id}`);
     }
     await Promise.all(loaded.map((plugin) => this.stopPlugin(plugin)));
@@ -529,10 +761,13 @@ export class PluginRuntime {
     if (!serverBundle) {
       return {
         id: pluginId,
+        instanceId: randomUUID(),
         clientBundle: bundles.clientBundle ?? "",
         requirements: manifest.requirements,
         methods: new Set(),
-        hooks: { events: [], before: [] },
+        subscriptionMethods: new Set(),
+        subscriptions: new Map(),
+        hooks: [],
         providers: [],
         child: null,
         outputCapture: null,
@@ -543,9 +778,52 @@ export class PluginRuntime {
         sessionClosed: null,
       };
     }
+    return this.launchPlugin({
+      pluginId,
+      directory,
+      bundles,
+      child: this.spawnChild(),
+      serverBundle,
+    });
+  }
+
+  async startBuiltinPlugin(input: { id: string; directory: string }): Promise<void> {
+    if (this.plugins.has(input.id)) throw new Error(`Plugin is already running: ${input.id}`);
+    this.appendLog(input.id, "stdout", "[jagentdesk] Loading plugin");
+    const directory = path.resolve(input.directory);
+    const bundles = await compileDirectoryPlugin(directory, this.daemonVersion);
+    if (bundles.manifest.id !== input.id)
+      throw new Error(`Built-in plugin ${input.id} has manifest ID ${bundles.manifest.id}`);
+    if (!bundles.serverBundle) throw new Error(`Built-in plugin ${input.id} needs a server entry`);
+    const loaded = await this.launchPlugin({
+      pluginId: input.id,
+      directory,
+      bundles,
+      child: new InternalPluginChild(evaluateBundle(bundles.serverBundle)),
+      serverBundle: "",
+    });
+    this.plugins.set(input.id, loaded);
+    this.notifySessionOpenChange(loaded);
+    this.appendLog(input.id, "stdout", "[jagentdesk] Plugin ready");
+  }
+
+  private async launchPlugin({
+    pluginId,
+    directory,
+    bundles,
+    child,
+    serverBundle,
+  }: {
+    pluginId: string;
+    directory: string;
+    bundles: Awaited<ReturnType<typeof compileDirectoryPlugin>>;
+    child: PluginChild;
+    serverBundle: string;
+  }): Promise<LoadedPlugin> {
+    void directory;
+    const { manifest } = bundles;
     const sessionHost = this.sessionHost;
     if (!sessionHost) throw new Error("Plugin JAgentDesk session host is not attached");
-    const child = this.spawnChild();
     const outputCapture = new PluginOutputCapture(child, (stream, message) => {
       this.appendLog(pluginId, stream, message);
     });
@@ -637,10 +915,13 @@ export class PluginRuntime {
     }
     loaded = {
       id: pluginId,
+      instanceId: randomUUID(),
       clientBundle: bundles.clientBundle ?? "",
       requirements: manifest.requirements,
       methods: new Set(ready.methods),
-      hooks: ready.hooks ?? { events: [], before: [] },
+      subscriptionMethods: new Set(ready.subscriptions ?? []),
+      subscriptions: new Map(),
+      hooks: ready.hooks ?? [],
       providers: ready.providers ?? [],
       child,
       outputCapture,
@@ -651,7 +932,6 @@ export class PluginRuntime {
       sessionClosed: sessionAttachment.closed,
     };
     session.plugin = loaded;
-    this.warnUnwiredContributions(loaded);
     this.logger.info(
       { pluginId, methods: ready.methods, providers: ready.providers },
       "Loaded plugin",
@@ -722,26 +1002,16 @@ export class PluginRuntime {
     );
   }
 
-  // The runtime accepts lifecycle hooks and agent providers, but the daemon's workspace and agent
-  // managers do not dispatch to them yet. Say so in the plugin log instead of failing silently.
-  private warnUnwiredContributions(loaded: LoadedPlugin): void {
-    const unwired = [
-      ...loaded.hooks.events.map((name) => `event hook ${name}`),
-      ...loaded.hooks.before.map((name) => `before hook ${name}`),
-      ...loaded.providers.map((provider) => `agent provider ${provider.id}`),
-    ];
-    if (unwired.length === 0) return;
-    this.appendLog(
-      loaded.id,
-      "stderr",
-      `[jagentdesk] Not supported by this daemon yet, so it will not run: ${unwired.join(", ")}`,
-    );
-  }
-
   private handleChildMessage(loaded: LoadedPlugin, message: PluginProcessMessage): void {
     if (message.type === "hooks.changed") {
+      const hadSessionOpen = loaded.hooks.includes("agent.open.before");
       loaded.hooks = message.hooks;
-      this.warnUnwiredContributions(loaded);
+      if (
+        this.plugins.get(loaded.id) === loaded &&
+        hadSessionOpen !== loaded.hooks.includes("agent.open.before")
+      ) {
+        for (const listener of this.sessionOpenListeners) listener();
+      }
       return;
     }
     if (message.type === "settings.changed") {
@@ -750,6 +1020,16 @@ export class PluginRuntime {
     }
     if (message.type.startsWith("provider.")) {
       this.handleProviderMessage(loaded, message);
+      return;
+    }
+    if (message.type === "subscription.event") {
+      loaded.subscriptions.get(message.subscriptionId)?.event(message.event);
+      return;
+    }
+    if (message.type === "subscription.closed") {
+      const subscription = loaded.subscriptions.get(message.subscriptionId);
+      loaded.subscriptions.delete(message.subscriptionId);
+      subscription?.closed(message.error);
       return;
     }
     if (message.type !== "result" && message.type !== "error") return;
@@ -1055,6 +1335,7 @@ export class PluginRuntime {
     const wasPublished = this.plugins.get(loaded.id) === loaded;
     if (wasPublished) {
       this.plugins.delete(loaded.id);
+      this.notifySessionOpenChange(loaded);
     }
     this.rejectPending(loaded, `Plugin process exited: ${loaded.id}`);
     for (const state of loaded.providerConnections.values()) {
@@ -1109,12 +1390,16 @@ export class PluginRuntime {
     this.appendLog(loaded.id, "stdout", "[jagentdesk] Plugin stopped");
   }
 
+  /** Rejects in-flight requests and closes open subscriptions with the reason. */
   private rejectPending(loaded: LoadedPlugin, message: string): void {
     for (const invocation of loaded.pending.values()) {
       clearTimeout(invocation.timeout);
       invocation.reject(new Error(message));
     }
     loaded.pending.clear();
+    const subscriptions = [...loaded.subscriptions.values()];
+    loaded.subscriptions.clear();
+    for (const subscription of subscriptions) subscription.closed(message);
   }
 
   private appendLog(pluginId: string, stream: PluginLogEntry["stream"], message: string): void {
@@ -1159,4 +1444,12 @@ function readConnectionId(value: unknown): string | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const connectionId = Reflect.get(value, "connectionId");
   return typeof connectionId === "string" ? connectionId : null;
+}
+
+// COMPAT(pluginTurnTimeline): added in v0.16.0-beta.3; plugins built before the field left the SDK type read `timeline`; remove after 2027-05-31
+function wireEvent<Name extends keyof PluginHookEvents>(
+  name: Name,
+  event: PluginHookEvents[Name],
+): PluginHookEvents[Name] {
+  return name === "agent.turn.after" ? { ...event, timeline: [] } : event;
 }

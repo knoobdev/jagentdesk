@@ -54,6 +54,8 @@ interface Deferred<T> {
 interface FakeAgentSessionOptions {
   providerName: string;
   config: AgentSessionConfig;
+  steerActiveTurn?: AgentSession["steerActiveTurn"];
+  onInterrupt?: () => void;
   supportsMcpServers?: boolean;
   sessionId?: string;
   memoryMarker?: string | null;
@@ -64,10 +66,13 @@ interface FakeAgentSessionOptions {
 }
 
 export interface TestAgentClientOptions {
+  beforeCreateSession?: (config: AgentSessionConfig) => Promise<void>;
   closeSession?: () => Promise<void>;
   onStartTurn?: (prompt: AgentPromptInput, config: AgentSessionConfig) => void;
   beforeTurnComplete?: (prompt: AgentPromptInput) => Promise<void>;
   historyEvents?: readonly AgentStreamEvent[];
+  steerActiveTurn?: AgentSession["steerActiveTurn"];
+  onInterrupt?: () => void;
   supportsMcpServers?: boolean;
 }
 
@@ -336,6 +341,8 @@ class FakeAgentSession implements AgentSession {
   private nextTurnOrdinal = 0;
   private activeForegroundTurnId: string | null = null;
 
+  readonly steerActiveTurn: AgentSession["steerActiveTurn"];
+  private readonly onInterrupt: (() => void) | undefined;
   private readonly closeSession: (() => Promise<void>) | undefined;
   private readonly onStartTurn: TestAgentClientOptions["onStartTurn"];
   private readonly beforeTurnComplete: TestAgentClientOptions["beforeTurnComplete"];
@@ -350,6 +357,8 @@ class FakeAgentSession implements AgentSession {
     this.config = options.config;
     this.id = options.sessionId ?? randomUUID();
     this.memoryMarker = options.memoryMarker ?? null;
+    this.steerActiveTurn = options.steerActiveTurn;
+    this.onInterrupt = options.onInterrupt;
     this.closeSession = options.closeSession;
     this.onStartTurn = options.onStartTurn;
     this.beforeTurnComplete = options.beforeTurnComplete;
@@ -882,6 +891,7 @@ class FakeAgentSession implements AgentSession {
   }
 
   async interrupt(): Promise<void> {
+    this.onInterrupt?.();
     this.interruptSignal.resolve();
   }
 
@@ -1226,6 +1236,7 @@ class FakeAgentClient implements AgentClient {
     config: AgentSessionConfig,
     _launchContext?: AgentLaunchContext,
   ): Promise<AgentSession> {
+    await this.options.beforeCreateSession?.(config);
     return new FakeAgentSession({
       providerName: this.provider,
       config: { ...config },
@@ -1233,6 +1244,8 @@ class FakeAgentClient implements AgentClient {
       closeSession: this.options.closeSession,
       onStartTurn: this.options.onStartTurn,
       beforeTurnComplete: this.options.beforeTurnComplete,
+      steerActiveTurn: this.options.steerActiveTurn,
+      onInterrupt: this.options.onInterrupt,
       historyEvents: this.options.historyEvents,
     });
   }
@@ -1260,6 +1273,8 @@ class FakeAgentClient implements AgentClient {
       closeSession: this.options.closeSession,
       onStartTurn: this.options.onStartTurn,
       beforeTurnComplete: this.options.beforeTurnComplete,
+      steerActiveTurn: this.options.steerActiveTurn,
+      onInterrupt: this.options.onInterrupt,
       historyEvents: this.options.historyEvents,
     });
   }

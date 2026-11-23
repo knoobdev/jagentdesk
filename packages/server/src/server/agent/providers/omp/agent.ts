@@ -436,6 +436,7 @@ function buildResumeStartInput(input: {
     systemPrompt: composeSystemPromptParts(
       input.resumeConfig.config.systemPrompt,
       input.resumeConfig.config.daemonAppendSystemPrompt,
+      ...(input.resumeConfig.config.pluginAppendSystemPrompt ?? []),
     ),
   };
 }
@@ -2293,7 +2294,11 @@ export class OmpAgentClient implements AgentClient {
       noSession: config.internal === true,
       modeId: launchMode.modeId,
       extraArgs: launchMode.extraArgs,
-      systemPrompt: composeSystemPromptParts(config.systemPrompt, config.daemonAppendSystemPrompt),
+      systemPrompt: composeSystemPromptParts(
+        config.systemPrompt,
+        config.daemonAppendSystemPrompt,
+        ...(config.pluginAppendSystemPrompt ?? []),
+      ),
       env: launchContext?.env,
     };
     const runtimeSession = await this.resolveRuntime(config.providerOptions).startSession(

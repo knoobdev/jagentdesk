@@ -2,7 +2,7 @@ import { mkdir, open, realpath, rename, stat, writeFile } from "node:fs/promises
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import pLimit from "p-limit";
-import { isAbsolute, join, resolve } from "path";
+import { dirname, isAbsolute, join, resolve } from "path";
 import { z } from "zod";
 
 const MAX_WORKTREE_METADATA_BYTES = 64 * 1024;
@@ -327,6 +327,39 @@ export async function markJAgentDeskWorktreeFirstAgentBranchAutoNameAttempted(
     await writeJAgentDeskWorktreeMetadataFile(root, next);
     return next;
   });
+}
+
+export async function hasJAgentDeskWorktreeMetadata(worktreeRoot: string): Promise<boolean> {
+  try {
+    return (await readJAgentDeskWorktreeMetadata(worktreeRoot)) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Filesystem-only search for a JAgentDesk worktree root at or above cwd: the
+ * first directory containing a .git entry wins, and it only counts when
+ * its git admin dir holds the jagentdesk/worktree.json marker. Lets callers
+ * cheaply rule out plain directories before running git ownership checks.
+ */
+export async function findJAgentDeskWorktreeRootForCwd(cwd: string): Promise<string | null> {
+  let current = resolve(cwd);
+  for (;;) {
+    if (
+      await stat(join(current, ".git")).then(
+        () => true,
+        () => false,
+      )
+    ) {
+      return (await hasJAgentDeskWorktreeMetadata(current)) ? current : null;
+    }
+    const parent = dirname(current);
+    if (parent === current) {
+      return null;
+    }
+    current = parent;
+  }
 }
 
 export async function readJAgentDeskWorktreeMetadata(

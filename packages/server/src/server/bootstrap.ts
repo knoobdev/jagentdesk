@@ -1,3 +1,7 @@
+import { resolveJAgentDeskToolPolicy } from "./agent/jagentdesk-tool-policy.js";
+import { BuiltinPluginLoader } from "./plugins/builtin/index.js";
+import { withTimeout } from "../utils/promise-timeout.js";
+import { describeHookWorkspace } from "./plugins/lifecycle/index.js";
 import { PhysicalDeviceHub } from "./devices/hub.js";
 import { clearGrantsWhenSessionsEnd } from "./devices/agent-grants.js";
 import { HostCapabilityService } from "./host-capabilities/service.js";
@@ -537,6 +541,7 @@ export interface JAgentDeskDaemon {
 }
 
 export interface JAgentDeskDaemonDependencies {
+  builtinPlugins?: BuiltinPluginLoader;
   hubRelationshipRemote?: HubRelationshipRemote;
   hubRelationshipClock?: HubRelationshipClock;
   hubRelationshipRetryPolicy?: HubRelationshipRetryPolicy;
@@ -606,6 +611,7 @@ function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): Mutab
       if (override.enabled !== undefined) {
         providerConfig.enabled = override.enabled;
       }
+      if (override.jagentdeskTools) providerConfig.jagentdeskTools = override.jagentdeskTools;
       if (override.additionalModels) {
         providerConfig.additionalModels = override.additionalModels;
       }
@@ -667,10 +673,10 @@ export async function createJAgentDeskDaemon(
   );
   const browserToolsPolicy = new DaemonConfigBrowserToolsPolicy(daemonConfigStore);
   const browserToolsBroker = new BrowserToolsBroker({});
-  // `pluginsEnabled` defaults FALSE, so start() spawns nothing unless the operator
-  // has explicitly enabled plugins. Managed git sources back the marketplace install
-  // flow (a checked-out Paseo plugin is auto-rebranded before it is compiled).
+  // Built-ins load independently of the user-plugin switch. Managed git sources
+  // back marketplace installs and are rebranded before compilation.
   const pluginRuntime = new PluginService(logger, daemonConfigStore, daemonVersion, {
+    builtinPlugins: dependencies.builtinPlugins ?? new BuiltinPluginLoader(),
     managedSources: new ManagedPluginSources(config.jagentdeskHome),
     settingsDirectory: path.join(config.jagentdeskHome, "plugin-settings"),
   });
@@ -984,7 +990,14 @@ export async function createJAgentDeskDaemon(
       forgeOverrides: { github },
     },
   });
+  workspaceRegistry.subscribeToMutations((mutation) => {
+    if (mutation.kind === "archive" && mutation.workspace)
+      pluginRuntime.emit("workspace.archive.after", {
+        workspace: describeHookWorkspace(mutation.workspace),
+      });
+  });
   const workspaceProvisioning = createWorkspaceProvisioningService({
+    lifecycle: pluginRuntime,
     serverId,
     projectRegistry,
     workspaceRegistry,
@@ -1027,6 +1040,10 @@ export async function createJAgentDeskDaemon(
   await usageHistory.initialize();
   const initialAgentManagerState = providerSnapshotManager.getAgentManagerProviderState();
   const agentManager = new AgentManager({
+    pluginLifecycle: pluginRuntime,
+    resolveJAgentDeskToolPolicy: (provider) =>
+      resolveJAgentDeskToolPolicy(provider, daemonConfigStore.get().providers),
+    pluginAgentTools: pluginRuntime,
     clients: initialAgentManagerState.clients,
     providerDefinitions: initialAgentManagerState.providerDefinitions,
     registry: agentStorage,
@@ -1038,6 +1055,16 @@ export async function createJAgentDeskDaemon(
     onUsageBilled: (billed) => usageHistory.record(billed),
     mcpAuthToken: agentMcpAuthToken,
     logger,
+  });
+
+  const unsubscribePluginProviders = pluginRuntime.subscribeProviderRegistrations(() => {
+    agentManager.updateProviderRegistry(
+      providerSnapshotManager.replacePluginProviders(pluginRuntime.getProviderRegistrations()),
+    );
+  });
+
+  const unsubscribePluginSessionChanges = pluginRuntime.subscribeSessionOpenChanges(() => {
+    agentManager.invalidatePluginSessions();
   });
 
   const detachAgentStoragePersistence = attachAgentStoragePersistence(
@@ -1249,6 +1276,7 @@ export async function createJAgentDeskDaemon(
         worktreesRoot: config.worktreesRoot,
         createJAgentDeskWorktree: async (workflowInput, workflowOptions) => {
           return createRegisteredJAgentDeskWorktree(workflowInput, {
+            lifecycle: pluginRuntime,
             github,
             ...(workflowOptions?.resolveDefaultBranch
               ? {
@@ -1671,6 +1699,11 @@ export async function createJAgentDeskDaemon(
   const createAgentToolHostDependencies = (
     runtime: JAgentDeskToolRuntimeContext,
   ): JAgentDeskToolHostDependencies => ({
+    jagentdeskToolPolicy:
+      runtime.jagentdeskToolPolicy ??
+      (runtime.callerAgentId
+        ? agentManager.getJAgentDeskToolPolicy(runtime.callerAgentId)
+        : undefined),
     agentManager,
     agentStorage,
     terminalManager,
@@ -2157,6 +2190,7 @@ export async function createJAgentDeskDaemon(
             // external ingress attaches, mirroring upstream's pre-accept ordering.
             pluginRuntime.bindJAgentDeskSessionHost(wsServer);
             await pluginRuntime.start();
+            providerSnapshotManager.settlePluginProviders();
             tsnetListener = createTsnetListener({
               logger,
               port: boundListenTarget.type === "tcp" ? boundListenTarget.port : 0,
@@ -2236,6 +2270,8 @@ export async function createJAgentDeskDaemon(
       speechService.start();
       scriptHealthMonitor.start();
     } catch (error) {
+      unsubscribePluginProviders();
+      unsubscribePluginSessionChanges();
       await pluginRuntime.stopAllPlugins().catch(() => undefined);
       await serviceProxy.stopStandalone().catch(() => undefined);
       if (mainStarted) {
@@ -2247,7 +2283,8 @@ export async function createJAgentDeskDaemon(
   };
 
   const stop = async () => {
-    await pluginRuntime.stopAllPlugins().catch(() => undefined);
+    unsubscribePluginProviders();
+    unsubscribePluginSessionChanges();
     await hubRelationships.stop();
     workspaceReconciliation.dispose();
     scriptHealthMonitor.stop();
@@ -2255,11 +2292,17 @@ export async function createJAgentDeskDaemon(
     wsServer?.prepareForShutdown();
     agentManager.prepareForShutdown();
     await closeAllAgents(logger, agentManager);
+    await withTimeout({
+      promise: pluginRuntime.drainEvents(),
+      timeoutMs: 5_000,
+      label: "drain plugin lifecycle events",
+    }).catch((error) => logger.warn({ err: error }, "Plugin lifecycle events did not finish"));
     await agentManager.flushForShutdown().catch(() => undefined);
     detachAgentStoragePersistence();
     await agentStorage.flush().catch(() => undefined);
     // Spec 34: loopback forwards of api providers die with the daemon.
     customProviderService.closeAll();
+    await pluginRuntime.stopAllPlugins().catch(() => undefined);
     await providerSnapshotManager.shutdown();
     terminalManager.killAll();
     stopDeviceGrantWatch();
@@ -2354,7 +2397,11 @@ async function closeAllAgents(logger: Logger, agentManager: AgentManager): Promi
   await Promise.all(
     agents.map(async (agent) => {
       try {
-        await agentManager.closeAgent(agent.id);
+        await withTimeout({
+          promise: agentManager.closeAgent(agent.id),
+          timeoutMs: 5_000,
+          label: `close agent ${agent.id}`,
+        });
       } catch (err) {
         logger.error({ err, agentId: agent.id }, "Failed to close agent");
       }

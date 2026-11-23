@@ -1,3 +1,5 @@
+import type { PluginLifecycle } from "../../plugins/lifecycle/index.js";
+import { describeHookWorkspace } from "../../plugins/lifecycle/index.js";
 import { stat } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import type { ProjectCheckoutLitePayload } from "@jagentdesk/protocol/messages";
@@ -87,6 +89,7 @@ export class WorkspaceProvisioningError extends Error {
 }
 
 export function createWorkspaceProvisioningService(deps: {
+  lifecycle?: Pick<PluginLifecycle, "emit">;
   serverId?: string;
   workspaceRegistry: WorkspaceRegistry;
   projectRegistry: ProjectRegistry;
@@ -224,6 +227,9 @@ export function createWorkspaceProvisioningService(deps: {
       updatedAt: timestamp,
     });
     await workspaceRegistry.upsert(workspace, context);
+    deps.lifecycle?.emit("workspace.create.after", {
+      workspace: describeHookWorkspace(workspace),
+    });
     return workspace;
   }
 
@@ -258,6 +264,7 @@ export function createWorkspaceProvisioningService(deps: {
     await workspaceRegistry.upsert(workspace, {
       expectsInitialAgent: input.expectsInitialAgent,
     });
+    deps.lifecycle?.emit("workspace.create.after", { workspace: describeHookWorkspace(workspace) });
     return workspace;
   }
 

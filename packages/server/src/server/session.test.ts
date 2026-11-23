@@ -322,6 +322,7 @@ interface SessionForTestOptions {
   messages?: unknown[];
   targetedMessages?: Array<{ source: object; message: SessionOutboundMessage }>;
   binaryMessages?: Uint8Array[];
+  clientCapabilities?: SessionOptions["clientCapabilities"];
   pluginRuntime?: SessionOptions["pluginRuntime"];
   orchestrationSkills?: SessionOptions["orchestrationSkills"];
   workspaceLabelService?: WorkspaceLabelService;
@@ -369,6 +370,7 @@ function createSessionForTest(options: SessionForTestOptions = {}): Session {
         }
       : {}),
     onBinaryMessage: createBinaryMessageHandler(options.binaryMessages),
+    clientCapabilities: options.clientCapabilities,
     logger,
     downloadTokenStore: options.downloadTokenStore ?? asDownloadTokenStore(),
     pushNotifications: options.pushNotifications ?? asPushNotifications(),
@@ -5613,3 +5615,34 @@ describe("agent config setters", () => {
     });
   });
 });
+
+test.each(["repro.card", "Review", "review_card", "1review", ""])(
+  "rejects the kind %j that no client renderer can register",
+  async (kind) => {
+    const messages: SessionOutboundMessage[] = [];
+    const appendTimelineItem = vi.fn();
+    const session = createSessionForTest({
+      clientId: "plugin:review",
+      messages,
+      agentManager: { appendTimelineItem },
+    });
+
+    await session.handleMessage({
+      type: "agent.timeline.append.request",
+      requestId: "append-kind",
+      agentId: "agent-1",
+      item: { type: "plugin", id: "review-1", kind, version: 1, data: {} },
+    });
+
+    expect(appendTimelineItem).not.toHaveBeenCalled();
+    expect(messages).toContainEqual({
+      type: "rpc_error",
+      payload: {
+        requestId: "append-kind",
+        requestType: "agent.timeline.append.request",
+        error: `Request failed: Plugin timeline item kind must start with a lowercase letter and contain only lowercase letters, digits, and dashes: ${JSON.stringify(kind)}`,
+        code: "handler_error",
+      },
+    });
+  },
+);

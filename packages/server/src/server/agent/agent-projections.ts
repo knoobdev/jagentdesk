@@ -390,6 +390,9 @@ function projectPersistenceHandleForWire(
     return projected;
   }
   delete projected.metadata.mcpServers;
+  delete projected.metadata.pluginAppendSystemPrompt;
+  delete projected.metadata.daemonAppendSystemPrompt;
+  delete projected.metadata.jagentdeskInstructionReceipt;
   if (Object.keys(projected.metadata).length === 0) {
     delete projected.metadata;
   }

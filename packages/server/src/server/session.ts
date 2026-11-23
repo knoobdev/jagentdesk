@@ -1,3 +1,13 @@
+import { SessionDelivery, type OwnedSubscription } from "./session/owned-subscriptions/index.js";
+import {
+  SessionEventSubscriptionSchema,
+  type SessionEventSubscription,
+} from "@jagentdesk/protocol/messages";
+import {
+  assertPluginTimelineDataSize,
+  assertPluginTimelineKind,
+} from "./agent/agent-timeline-content.js";
+import { parsePluginClientId } from "./plugins/plugin-session-identity.js";
 import equal from "fast-deep-equal";
 import { v4 as uuidv4 } from "uuid";
 import { lstat, mkdir, mkdtemp, rename, rm, stat } from "node:fs/promises";
@@ -36,6 +46,11 @@ import type { CustomProviderService } from "./custom-providers/types.js";
 import { TerminalSessionController } from "../terminal/terminal-session-controller.js";
 import type { TerminalActivity } from "@jagentdesk/protocol/terminal-activity";
 import type { BinaryFrame } from "@jagentdesk/protocol/binary-frames/index";
+import {
+  encodePluginEventFrame,
+  encodePluginOutputFrame,
+  PluginFrameOpcode,
+} from "@jagentdesk/protocol/binary-frames/index";
 import { CursorError } from "./pagination/cursor.js";
 import { SortablePager, type SortSpec } from "./pagination/sortable-pager.js";
 import type { SpeechToTextProvider, TextToSpeechProvider } from "./speech/speech-provider.js";
@@ -49,7 +64,7 @@ import { ensureAgentLoaded, ensureUnarchivedAgentLoaded } from "./agent/agent-lo
 import { searchTimeline } from "./agent/chat-search/index.js";
 import {
   formatSystemNotificationPrompt,
-  type PromptDispatchDisposition,
+  type PromptDispatchResult,
   sendPromptToAgent,
   waitForAgentRunStartWithTimeout,
   unarchiveAgentState,
@@ -627,7 +642,8 @@ export interface SessionOptions {
   daemonRuntimeConfig?: DaemonRuntimeConfig;
   getWebSocketRuntimeMetrics?: () => DaemonWebSocketRuntimeDiagnosticSnapshot | null;
   pluginRuntime?: {
-    before?: import("./plugins/lifecycle/index.js").PluginLifecycle["before"];
+    wait: import("./plugins/lifecycle/index.js").PluginLifecycle["wait"];
+    before: import("./plugins/lifecycle/index.js").PluginLifecycle["before"];
     emit?: import("./plugins/lifecycle/index.js").PluginLifecycle["emit"];
     listPlugins(): Promise<import("@jagentdesk/protocol/messages").PluginListItem[]>;
     getLogs(pluginId: string): import("@jagentdesk/protocol/messages").PluginLogEntry[];
@@ -664,6 +680,11 @@ export interface SessionOptions {
     subscribeSettings?(listener: (pluginId: string, settingsId: string) => void): () => void;
     catalog(): Array<{ id: string; clientBundle: string }>;
     invokePluginRpc(pluginId: string, method: string, input: unknown): Promise<unknown>;
+    subscribePluginRpc(
+      pluginId: string,
+      method: string,
+      input: unknown,
+    ): import("./plugins/runtime-subscription.js").PluginRuntimeSubscription;
   };
   /** Paired-device store for the `pairing.device.*` RPC surface. */
   pairedDevices?: PairedDeviceStore;
@@ -820,7 +841,22 @@ function resolveGuestGrant(options: SessionOptions): {
  * It owns all state management, orchestration logic, and message processing.
  * Session has no knowledge of WebSockets - it only emits and receives messages.
  */
+function workspacePluginLifecycle(runtime: SessionOptions["pluginRuntime"]) {
+  return runtime?.emit ? { emit: runtime.emit } : undefined;
+}
+
 export class Session {
+  private readonly eventSubscriptions = new Map<
+    string,
+    { owner: OwnedSubscription; events: Set<SessionEventSubscription> }
+  >();
+  readonly delivery = new SessionDelivery(
+    (source, message) => {
+      if (isSessionRpcAllowed(this.scopes, message.type)) this.emitForSource(message, source);
+    },
+    (source, frame) => this.emitBinaryReply(frame, source),
+  );
+
   private readonly clientId: string;
   private scopes: readonly string[];
   private readonly guestAgentId: string | null;
@@ -1026,7 +1062,7 @@ export class Session {
     this.workspaceFilesSession = new WorkspaceFilesSession({
       host: {
         emit: (msg, source) => this.emitForSource(msg, source),
-        emitBinary: (frame, source) => this.emitBinaryForFileTransfer(frame, source),
+        emitBinary: (frame, source) => this.emitBinaryReply(frame, source),
         hasBinaryChannel: () => this.onBinaryMessage !== null,
       },
       downloadTokenStore,
@@ -1047,6 +1083,7 @@ export class Session {
     });
     this.workspaceAutoName = workspaceAutoName;
     this.workspaceProvisioning = createWorkspaceProvisioningService({
+      lifecycle: workspacePluginLifecycle(pluginRuntime),
       serverId,
       workspaceRegistry: this.workspaceRegistry,
       projectRegistry: this.projectRegistry,
@@ -1518,6 +1555,7 @@ export class Session {
     this.clientCapabilities = parseClientCapabilities(capabilities);
     this.argocdSession?.syncDelegateRegistration();
     if (source) {
+      this.delivery.attach(source, true);
       this.clientCapabilitiesBySource.set(source, this.clientCapabilities);
     }
     if (!source && !this.supports(CLIENT_CAPS.selectiveAgentTimeline)) {
@@ -1527,6 +1565,11 @@ export class Session {
   }
 
   clearAgentTimelineSubscription(source: object): void {
+    void this.delivery
+      .detach(source)
+      .catch((error) =>
+        this.sessionLogger.warn({ err: error }, "Failed to release source subscriptions"),
+      );
     this.clientCapabilitiesBySource.delete(source);
     if (this.viewedTimelineAgentIdsBySource.delete(source)) {
       this.rebuildViewedTimelineAgentIds();
@@ -1558,11 +1601,48 @@ export class Session {
     return true;
   }
 
+  // COMPAT(timelineItemCapabilities): added in v0.9.59; remove after 2027-05-23 once the client floor accepts these kinds.
+  private supportsTimelineItem(item: { type: string }, source?: object): boolean {
+    let capability: ClientCapability;
+    if (item.type === "plugin") capability = CLIENT_CAPS.pluginTimelineItems;
+    else if (item.type === "notification") capability = CLIENT_CAPS.timelineNotifications;
+    else return true;
+    return source ? this.supportsForSource(capability, source) : this.supports(capability);
+  }
+
+  private isQuietAgentStreamSource(source: object, agentId: string): boolean {
+    return (
+      this.supportsForSource(CLIENT_CAPS.explicitEventSubscriptions, source) &&
+      !this.wantsEvent("agent_stream", source) &&
+      !this.viewedTimelineAgentIdsBySource.get(source)?.has(agentId)
+    );
+  }
+
+  private shouldFilterAgentStream(
+    source: object,
+    agentId: string,
+    event: Extract<SessionOutboundMessage, { type: "agent_stream" }>["payload"]["event"],
+  ): boolean {
+    return (
+      this.isQuietAgentStreamSource(source, agentId) ||
+      (event.type === "timeline" && !this.supportsTimelineItem(event.item, source))
+    );
+  }
+
+  private hasAgentStreamDemand(source: object): boolean {
+    return (
+      this.supportsForSource(CLIENT_CAPS.explicitEventSubscriptions, source) &&
+      this.wantsEvent("agent_stream", source)
+    );
+  }
+
   private forwardAgentStream(
     event: Extract<AgentManagerEvent, { type: "agent_stream" }>,
     serializedEvent: Extract<SessionOutboundMessage, { type: "agent_stream" }>["payload"]["event"],
   ): void {
     if (this.clientCapabilitiesBySource.size === 0 || !this.onMessageToSource) {
+      if (serializedEvent.type === "timeline" && !this.supportsTimelineItem(serializedEvent.item))
+        return;
       if (this.usesSelectiveTimelineDelivery() && serializedEvent.type === "attention_required") {
         this.emit({
           type: "agent_attention_required",
@@ -1587,6 +1667,7 @@ export class Session {
     }
 
     for (const [source, capabilities] of this.clientCapabilitiesBySource) {
+      if (this.shouldFilterAgentStream(source, event.agentId, serializedEvent)) continue;
       const supportsSelectiveDelivery = capabilities.has(CLIENT_CAPS.selectiveAgentTimeline);
       if (supportsSelectiveDelivery && serializedEvent.type === "attention_required") {
         this.onMessageToSource(source, {
@@ -1603,7 +1684,8 @@ export class Session {
       }
       if (
         supportsSelectiveDelivery &&
-        !this.viewedTimelineAgentIdsBySource.get(source)?.has(event.agentId)
+        !this.viewedTimelineAgentIdsBySource.get(source)?.has(event.agentId) &&
+        !this.hasAgentStreamDemand(source)
       ) {
         continue;
       }
@@ -1633,11 +1715,15 @@ export class Session {
           : update,
     };
     if (this.clientCapabilitiesBySource.size === 0 || !this.onMessageToSource) {
-      if (this.supports(CLIENT_CAPS.projectUpdates)) this.emit(message);
+      if (this.supports(CLIENT_CAPS.projectUpdates) && this.wantsEvent("project.update"))
+        this.emit(message);
       return;
     }
     for (const [source, capabilities] of this.clientCapabilitiesBySource) {
-      if (capabilities.has(CLIENT_CAPS.projectUpdates)) {
+      if (
+        capabilities.has(CLIENT_CAPS.projectUpdates) &&
+        this.wantsEvent("project.update", source)
+      ) {
         this.onMessageToSource(source, message);
       }
     }
@@ -2091,7 +2177,10 @@ export class Session {
             // COMPAT(projectedSubagentTimeline): added after v0.8.0, remove gate after 2027-03-14.
             // Older clients keep child names/status; the child transcript needs the projected
             // fetch contract, so they get an upgrade notice when opening it instead of live rows.
-            if (!this.supports(CLIENT_CAPS.projectedSubagentTimeline)) {
+            if (
+              !this.supports(CLIENT_CAPS.projectedSubagentTimeline) ||
+              !this.supportsTimelineItem(update.row.item)
+            ) {
               return;
             }
             this.emit({
@@ -2281,18 +2370,24 @@ export class Session {
    * Main entry point for processing session messages
    */
   public async handleMessage(msg: SessionInboundMessage, source?: object): Promise<void> {
+    return this.delivery.request(source, msg, () => this.handleRequest(msg, source));
+  }
+
+  private async handleRequest(msg: SessionInboundMessage, source?: object): Promise<void> {
     this.inflightRequests++;
     if (this.inflightRequests > this.peakInflightRequests) {
       this.peakInflightRequests = this.inflightRequests;
     }
     try {
-      this.sessionLogger.trace(
-        {
-          messageType: msg.type,
-          payloadBytes: JSON.stringify(msg).length,
-        },
-        "agent.session.inbound",
-      );
+      // Stringifying a binary plugin input costs its size; test logger stubs lack isLevelEnabled.
+      if (this.sessionLogger.isLevelEnabled?.("trace"))
+        this.sessionLogger.trace(
+          {
+            messageType: msg.type,
+            payloadBytes: JSON.stringify(msg).length,
+          },
+          "agent.session.inbound",
+        );
       if (!isSessionRpcAllowed(this.scopes, msg.type)) {
         const requestId = sessionRequestId(msg);
         if (requestId) {
@@ -2370,6 +2465,12 @@ export class Session {
   }
 
   public setScopes(scopes: readonly string[]): void {
+    if (!isSessionRpcAllowed(scopes, "plugin.rpc.invoke.request"))
+      void this.delivery
+        .releaseFamily("plugin-rpc")
+        .catch((error) =>
+          this.sessionLogger.warn({ err: error }, "Failed to release plugin subscriptions"),
+        );
     this.scopes = [...scopes];
   }
 
@@ -2514,6 +2615,7 @@ export class Session {
       () => this.dispatchProxyMessage(msg),
       () => this.dispatchMigrationMessage(msg),
       () => this.dispatchPluginMessage(msg),
+      () => this.dispatchPluginRpcMessage(msg),
       () => this.dispatchPluginDirectoryMessage(msg),
       () => this.dispatchMiscMessage(msg),
     ];
@@ -2594,19 +2696,129 @@ export class Session {
       });
       return undefined;
     }
+    return undefined;
+  }
+
+  private dispatchPluginRpcMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    if (msg.type === "subscription.release.request")
+      return this.delivery.release(msg.subscriptionId).then(() => {
+        this.emitForSource(
+          {
+            type: "subscription.release.response",
+            payload: { requestId: msg.requestId, subscriptionId: msg.subscriptionId },
+          },
+          this.delivery.currentSource,
+        );
+        return undefined;
+      });
+    if (msg.type === "session.events.set_subscription.request") {
+      const owner = this.delivery.begin(
+        "events",
+        undefined,
+        (id) => {
+          this.eventSubscriptions.delete(id);
+        },
+        msg.requestId,
+      );
+      this.eventSubscriptions.set(owner.id, { owner, events: new Set(msg.events) });
+      this.emitForSource(
+        {
+          type: "session.events.set_subscription.response",
+          payload: { requestId: msg.requestId, subscriptionId: owner.responseId },
+        },
+        owner.source,
+      );
+      return Promise.resolve();
+    }
     if (msg.type === "plugin.rpc.invoke.request") {
       if (!this.pluginRuntime) throw new Error("Plugin service is unavailable");
       return this.pluginRuntime
         .invokePluginRpc(msg.pluginId, msg.method, msg.input)
-        .then((output) => {
-          this.emit({
-            type: "plugin.rpc.invoke.response",
-            payload: { requestId: msg.requestId, output },
-          });
-          return undefined;
-        });
+        .then((output) => this.replyPluginRpc(msg, output));
     }
+    if (msg.type === "plugin.rpc.subscribe.request") return this.subscribePluginRpc(msg);
     return undefined;
+  }
+
+  /** A `Uint8Array` output is the binary form of `plugin.rpc.invoke.response`. */
+  private async replyPluginRpc(
+    request: Extract<SessionInboundMessage, { type: "plugin.rpc.invoke.request" }>,
+    output: unknown,
+  ): Promise<void> {
+    const response: SessionOutboundMessage = {
+      type: "plugin.rpc.invoke.response",
+      payload: { requestId: request.requestId, output },
+    };
+    if (!(output instanceof Uint8Array)) {
+      this.emitForSource(response, this.delivery.currentSource);
+      return;
+    }
+    // The frame is the binary form of the response, so it needs the response's permission.
+    if (!isSessionRpcAllowed(this.scopes, response.type)) return;
+    if (!this.supports(CLIENT_CAPS.pluginBinaryPayloads) || this.onBinaryMessage === null)
+      throw new Error(
+        `Update JAgentDesk to receive the binary output of plugin RPC ${request.pluginId}.${request.method}`,
+      );
+    await this.emitBinaryReply(
+      encodePluginOutputFrame(request.requestId, output),
+      this.delivery.currentSource,
+    );
+  }
+
+  private async subscribePluginRpc(
+    request: Extract<SessionInboundMessage, { type: "plugin.rpc.subscribe.request" }>,
+  ): Promise<void> {
+    if (!this.pluginRuntime) throw new Error("Plugin service is unavailable");
+    const subscription = this.pluginRuntime.subscribePluginRpc(
+      request.pluginId,
+      request.method,
+      request.input,
+    );
+    const owner = this.delivery.begin("plugin-rpc", undefined, () => subscription.release());
+    try {
+      await subscription.ready;
+    } catch (error) {
+      await owner.release();
+      throw error;
+    }
+    if (owner.signal.aborted) return;
+    this.emitForSource(
+      {
+        type: "plugin.rpc.subscribe.response",
+        payload: { requestId: request.requestId, subscriptionId: owner.responseId },
+      },
+      owner.source,
+    );
+    const close = (reason?: string) => {
+      owner.emit({
+        type: "plugin.rpc.closed",
+        payload: {
+          subscriptionId: owner.responseId,
+          ...(reason === undefined ? {} : { error: reason }),
+        },
+      });
+      void owner.release().catch(() => undefined);
+    };
+    subscription.attach({
+      event: (event) => {
+        const message: SessionOutboundMessage = {
+          type: "plugin.rpc.event",
+          payload: { subscriptionId: owner.responseId, event },
+        };
+        if (!(event instanceof Uint8Array)) {
+          owner.emit(message);
+          return;
+        }
+        if (!isSessionRpcAllowed(this.scopes, message.type)) return;
+        if (this.onBinaryMessage === null) {
+          subscription.release();
+          close("This connection cannot carry binary plugin events");
+          return;
+        }
+        owner.emitBinary(encodePluginEventFrame(owner.responseId, event));
+      },
+      closed: close,
+    });
   }
 
   private dispatchPluginDirectoryMessage(msg: SessionInboundMessage): Promise<void> | undefined {
@@ -2786,6 +2998,8 @@ export class Session {
     switch (msg.type) {
       case "fetch_agent_timeline_request":
         return this.handleFetchAgentTimelineRequest(msg, source);
+      case "agent.timeline.append.request":
+        return this.handleAgentTimelineAppendRequest(msg);
       case "agent.timeline.list_prompts.request":
         return this.handleAgentTimelineListPromptsRequest(msg, source);
       case "agent.timeline.search.request":
@@ -4900,7 +5114,22 @@ export class Session {
     return this.sessionId;
   }
 
-  public async handleBinaryFrame(binaryFrame: BinaryFrame): Promise<void> {
+  public async handleBinaryFrame(binaryFrame: BinaryFrame, source?: object): Promise<void> {
+    if (binaryFrame.kind === "plugin") {
+      const frame = binaryFrame.frame;
+      if (frame.opcode !== PluginFrameOpcode.Input) return;
+      await this.handleMessage(
+        {
+          type: "plugin.rpc.invoke.request",
+          requestId: frame.requestId,
+          pluginId: frame.pluginId,
+          method: frame.method,
+          input: frame.payload,
+        },
+        source,
+      );
+      return;
+    }
     if (binaryFrame.kind === "file_transfer") {
       await this.workspaceFilesSession.handleFileTransferFrame(binaryFrame.frame);
       return;
@@ -6355,6 +6584,7 @@ export class Session {
     source?: object,
   ): void {
     for (const row of rows) {
+      if (!this.supportsTimelineItem(row.item, source)) continue;
       const event = serializeAgentStreamEvent({
         type: "timeline",
         provider,
@@ -7445,6 +7675,7 @@ export class Session {
     },
   ): Promise<CreateJAgentDeskWorktreeResult> {
     const result = await createJAgentDeskWorktree(input, {
+      lifecycle: this.pluginRuntime,
       github: this.github,
       ...(options?.resolveDefaultBranch
         ? { resolveDefaultBranch: options.resolveDefaultBranch }
@@ -8016,6 +8247,14 @@ export class Session {
     request: Extract<SessionInboundMessage, { type: "workspace.create.request" }>,
   ): Promise<void> {
     try {
+      if (this.pluginRuntime?.before) {
+        const { type, requestId, ...input } = request;
+        request = {
+          ...(await this.pluginRuntime.before("workspace.create.before", input)),
+          type,
+          requestId,
+        };
+      }
       if (request.source.kind === "directory") {
         await this.handleWorkspaceCreateLocal(request);
         return;
@@ -9015,21 +9254,23 @@ export class Session {
             hasOlder: selectedTimeline.hasOlder,
             hasNewer: selectedTimeline.hasNewer,
             ...(msg.mergeWindow === true ? { mergeWindow: true } : {}),
-            entries: selectedTimeline.entries.map((entry) => ({
-              provider: snapshot.provider,
-              item: entry.item,
-              timestamp: entry.timestamp,
-              seqStart: entry.seqStart,
-              seqEnd: entry.seqEnd,
-              sourceSeqRanges: entry.sourceSeqRanges,
-              collapsed: (
-                source
-                  ? this.supportsForSource(CLIENT_CAPS.reasoningMergeEnum, source)
-                  : this.supports(CLIENT_CAPS.reasoningMergeEnum)
-              )
-                ? entry.collapsed
-                : entry.collapsed.filter((value) => value !== "reasoning_merge"),
-            })),
+            entries: selectedTimeline.entries
+              .filter((entry) => this.supportsTimelineItem(entry.item, source))
+              .map((entry) => ({
+                provider: snapshot.provider,
+                item: entry.item,
+                timestamp: entry.timestamp,
+                seqStart: entry.seqStart,
+                seqEnd: entry.seqEnd,
+                sourceSeqRanges: entry.sourceSeqRanges,
+                collapsed: (
+                  source
+                    ? this.supportsForSource(CLIENT_CAPS.reasoningMergeEnum, source)
+                    : this.supports(CLIENT_CAPS.reasoningMergeEnum)
+                )
+                  ? entry.collapsed
+                  : entry.collapsed.filter((value) => value !== "reasoning_merge"),
+              })),
             error: null,
           },
         },
@@ -9066,6 +9307,23 @@ export class Session {
         source,
       );
     }
+  }
+
+  private async handleAgentTimelineAppendRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.timeline.append.request" }>,
+  ): Promise<void> {
+    const pluginId = parsePluginClientId(this.clientId);
+    if (!pluginId) throw new Error("Only plugin sessions can append plugin timeline items");
+    assertPluginTimelineKind(msg.item.kind);
+    assertPluginTimelineDataSize(msg.item.data);
+    const { seq, epoch } = await this.agentManager.appendTimelineItem(msg.agentId, {
+      ...msg.item,
+      pluginId,
+    });
+    this.emit({
+      type: "agent.timeline.append.response",
+      payload: { requestId: msg.requestId, seq, epoch },
+    });
   }
 
   private async handleAgentTimelineListPromptsRequest(
@@ -9253,14 +9511,16 @@ export class Session {
             hasOlder: supportsProjection && timeline.hasOlder,
             hasNewer: supportsProjection && timeline.hasNewer,
             rows: supportsProjection
-              ? timeline.rows.map((row) => ({
-                  item: row.item,
-                  timestamp: row.timestamp,
-                  seq: row.seqEnd,
-                  seqStart: row.seqStart,
-                  seqEnd: row.seqEnd,
-                  sourceSeqRanges: row.sourceSeqRanges,
-                }))
+              ? timeline.rows
+                  .filter((row) => this.supportsTimelineItem(row.item, source))
+                  .map((row) => ({
+                    item: row.item,
+                    timestamp: row.timestamp,
+                    seq: row.seqEnd,
+                    seqStart: row.seqStart,
+                    seqEnd: row.seqEnd,
+                    sourceSeqRanges: row.sourceSeqRanges,
+                  }))
               : [
                   {
                     seq: timeline.window.maxSeq,
@@ -9390,7 +9650,7 @@ export class Session {
         },
         "agent.session.send_agent_message",
       );
-      let dispatchResult: { disposition: PromptDispatchDisposition };
+      let dispatchResult: PromptDispatchResult;
       try {
         dispatchResult = await sendPromptToAgent({
           agentManager: this.agentManager,
@@ -9435,7 +9695,7 @@ export class Session {
       }
 
       try {
-        await waitForAgentRunStartWithTimeout(this.agentManager, agentId);
+        await waitForAgentRunStartWithTimeout(this.agentManager, agentId, dispatchResult.started);
       } catch (error) {
         this.emit({
           type: "send_agent_message_response",
@@ -9596,7 +9856,36 @@ export class Session {
   /**
    * Emit a message to the client
    */
+  wantsEvent(event: string, source?: object): boolean {
+    const capabilities = source
+      ? this.clientCapabilitiesBySource.get(source)
+      : this.clientCapabilities;
+    if (!capabilities?.has(CLIENT_CAPS.explicitEventSubscriptions)) return true;
+    return [...this.eventSubscriptions.values()].some(
+      ({ owner, events }) =>
+        (!source || owner.source === source) && events.has(event as SessionEventSubscription),
+    );
+  }
+
   private emit(msg: SessionOutboundMessage): void {
+    const event = msg.type === "status" ? `status.${msg.payload.status}` : msg.type;
+    if (
+      SessionEventSubscriptionSchema.safeParse(event).success &&
+      !("payload" in msg && "requestId" in msg.payload && typeof msg.payload.requestId === "string")
+    ) {
+      if (this.clientCapabilitiesBySource.size > 0 && this.onMessageToSource) {
+        for (const [source] of this.clientCapabilitiesBySource) {
+          if (
+            this.wantsEvent(event, source) &&
+            isSessionRpcAllowed(this.scopes, msg.type) &&
+            !(this.guestAgentId !== null && this.guestMessageTouchesOtherAgent(msg))
+          )
+            this.onMessageToSource(source, msg);
+        }
+        return;
+      }
+      if (!this.wantsEvent(event)) return;
+    }
     if (msg.type !== "rpc_error" && !isSessionRpcAllowed(this.scopes, msg.type)) {
       return;
     }
@@ -9630,7 +9919,7 @@ export class Session {
     }
   }
 
-  private async emitBinaryForFileTransfer(frame: Uint8Array, source?: object): Promise<void> {
+  private async emitBinaryReply(frame: Uint8Array, source?: object): Promise<void> {
     if (source && this.onBinaryMessageToSource) {
       await this.onBinaryMessageToSource(source, frame);
       return;
@@ -9652,6 +9941,7 @@ export class Session {
   public async cleanup(): Promise<void> {
     this.sessionLogger.trace({}, "agent.session.lifecycle.cleanup");
     this.isCleanedUp = true;
+    await this.delivery.close();
 
     if (this.unsubscribeAgentEvents) {
       this.unsubscribeAgentEvents();

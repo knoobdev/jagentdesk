@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { AgentRunState } from "./agent-run-state.js";
+import { AgentRunState, ForegroundPromptStart } from "./agent-run-state.js";
 
 function track(promise: Promise<void>): { readonly resolved: boolean } {
   const state = { resolved: false };
@@ -47,5 +47,40 @@ describe("waitForForegroundStart", () => {
   test("resolves at once when no turn is starting", async () => {
     const runs = new AgentRunState();
     await expect(runs.waitForForegroundStart("agent")).resolves.toBeUndefined();
+  });
+});
+
+describe("ForegroundPromptStart", () => {
+  test("remembers acceptance after a turn has already completed", async () => {
+    const runs = new AgentRunState();
+    const prompt = new ForegroundPromptStart("agent");
+    const run = runs.createPendingRun("agent");
+    prompt.bind(run);
+    runs.settleForegroundStart(run, { status: "started", turnId: "fast" });
+    runs.settleForegroundRun("agent", run.token);
+    prompt.end();
+    await expect(prompt.started).resolves.toBeUndefined();
+  });
+  test("waits for the replacement run after a stale-session failure", async () => {
+    const runs = new AgentRunState();
+    const prompt = new ForegroundPromptStart("agent");
+    const first = runs.createPendingRun("agent");
+    prompt.bind(first);
+    runs.settleForegroundStart(first, { status: "failed", error: "stale", stale: true });
+    runs.settleForegroundRun("agent", first.token);
+    await flushMicrotasks();
+    const retry = runs.createPendingRun("agent");
+    prompt.bind(retry);
+    runs.settleForegroundStart(retry, { status: "started", turnId: "retry" });
+    await expect(prompt.started).resolves.toBeUndefined();
+  });
+  test("rejects an unstarted failed prompt with its own failure", async () => {
+    const runs = new AgentRunState();
+    const prompt = new ForegroundPromptStart("agent");
+    const run = runs.createPendingRun("agent");
+    prompt.bind(run);
+    runs.settleForegroundStart(run, { status: "failed", error: "provider rejected" });
+    runs.settleForegroundRun("agent", run.token);
+    await expect(prompt.started).rejects.toThrow("provider rejected");
   });
 });

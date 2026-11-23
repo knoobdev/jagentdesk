@@ -1,4 +1,24 @@
+import type { JsonValue } from "@jagentdesk/protocol/agent-types";
 import type { AgentTimelineItem } from "./agent-sdk-types.js";
+import { PluginIdSchema } from "@jagentdesk/protocol/plugin-config";
+
+export const PLUGIN_TIMELINE_DATA_MAX_BYTES = 64 * 1024;
+
+// The app registers renderer kinds under the plugin ID rule, so stored kinds must use that format.
+export function assertPluginTimelineKind(kind: string): void {
+  if (!PluginIdSchema.safeParse(kind).success) {
+    throw new Error(
+      `Plugin timeline item kind must start with a lowercase letter and contain only lowercase letters, digits, and dashes: ${JSON.stringify(kind)}`,
+    );
+  }
+}
+
+export function assertPluginTimelineDataSize(data: JsonValue): void {
+  const serializedBytes = Buffer.byteLength(JSON.stringify(data), "utf8");
+  if (serializedBytes > PLUGIN_TIMELINE_DATA_MAX_BYTES) {
+    throw new Error(`Plugin timeline item data exceeds ${PLUGIN_TIMELINE_DATA_MAX_BYTES} bytes`);
+  }
+}
 
 const TOOL_CALL_CONTENT_MAX_LENGTH = 64 * 1024;
 

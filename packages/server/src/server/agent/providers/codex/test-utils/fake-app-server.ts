@@ -171,7 +171,7 @@ export function createFakeCodexAppServer(
   const child = createCodexAppServerChildProcess();
   const recordedRollbacks: JsonObject[] = [];
   const responseHandlers: Record<string, FakeCodexAppServerHandler> = {
-    initialize: () => ({}),
+    initialize: () => ({ userAgent: "codex/0.150.0" }),
     "collaborationMode/list": () => ({ data: [] }),
     "config/read": () => ({ config: {} }),
     getUserSavedConfig: () => ({ config: {} }),
@@ -188,6 +188,7 @@ export function createFakeCodexAppServer(
     "thread/start": () => ({ thread: { id: "thread-1" } }),
     "thread/loaded/list": () => ({ data: [] }),
     "thread/resume": () => ({}),
+    "thread/inject_items": () => ({}),
     "turn/start": () => ({}),
     "thread/fork": (params) => ({
       thread: {

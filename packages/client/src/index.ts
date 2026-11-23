@@ -90,6 +90,7 @@ export type SubscriptionSnapshot<T> = T & { subscriptionId: string };
 export interface SubscriptionObserver<T> {
   snapshot(snapshot: T): void;
   update(message: SessionOutboundMessage): void;
+  binary?(payload: Uint8Array): void;
   error?(error: unknown): void;
 }
 export interface OwnedSubscription<T> {
@@ -261,6 +262,11 @@ export interface JAgentDeskAgentTimelineRefetchOptions {
   cursor?: FetchAgentTimelineCursor;
   limit?: number;
   projection?: FetchAgentTimelineProjection;
+  /**
+   * Extends a `tail` or `before` page back to the start of the oldest turn it touches, so
+   * `{ direction: "tail", limit: 1, wholeTurns: true }` returns the latest turn.
+   */
+  wholeTurns?: boolean;
   requestId?: string;
 }
 
@@ -291,6 +297,9 @@ export type JAgentDeskAgentStream = Extract<
 export type JAgentDeskAgentUpdateHandler = (update: JAgentDeskAgentUpdate) => void;
 
 export interface JAgentDeskAgentTimelineHandle {
+  append(
+    item: Omit<import("@jagentdesk/protocol/agent-types").PluginTimelineItem, "pluginId">,
+  ): Promise<{ seq: number; epoch: string }>;
   /**
    * Fetches a fresh timeline page through the existing daemon RPC. If the daemon
    * includes an agent snapshot in the response, the parent handle is updated to
@@ -328,6 +337,11 @@ export interface JAgentDeskAgentHandle {
   readonly timeline: JAgentDeskAgentTimelineHandle;
   current(): JAgentDeskAgent | null;
   refresh(requestId?: string): Promise<JAgentDeskAgentRefetchResult | null>;
+  /**
+   * Reopens the provider session with current configuration, rerunning session-open hooks.
+   * Interrupts a running turn and returns the refreshed snapshot.
+   */
+  reload(options?: { requestId?: string }): Promise<JAgentDeskAgentRefetchResult | null>;
   send(text: string, options?: JAgentDeskAgentSendOptions): Promise<void>;
   /** Sends a prompt and resolves when that turn finishes or needs attention. */
   run(text: string, options?: JAgentDeskAgentRunOptions): Promise<JAgentDeskAgentRunResult>;
@@ -751,6 +765,7 @@ function createAgentHandleFactory(daemonClient: DaemonClient): AgentHandleFactor
     const handle: JAgentDeskAgentHandle = {
       id,
       timeline: {
+        append: (item) => daemonClient.appendAgentTimelineItem(id, item),
         refetch: async (options) => {
           const result = await daemonClient.fetchAgentTimeline(id, options);
           if (result.agent) {
@@ -804,6 +819,12 @@ function createAgentHandleFactory(daemonClient: DaemonClient): AgentHandleFactor
       current: () => current,
       refresh: async (requestId) => {
         const result = await daemonClient.fetchAgent({ agentId: id, requestId });
+        current = result?.agent ?? null;
+        return result;
+      },
+      reload: async (options) => {
+        await daemonClient.refreshAgent(id, options?.requestId);
+        const result = await daemonClient.fetchAgent({ agentId: id });
         current = result?.agent ?? null;
         return result;
       },

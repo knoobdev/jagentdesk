@@ -66,6 +66,7 @@ export type { AgentProviderDefinition };
 export { AGENT_PROVIDER_DEFINITIONS, getAgentProviderDefinition };
 
 export interface ProviderDefinition extends AgentProviderDefinition {
+  iconSvg?: string;
   enabled: boolean;
   /**
    * The id of another *registered* provider this one extends (e.g. a Z.AI
@@ -105,7 +106,15 @@ export type OpenCodeProviderInjectionResolver = (
 /** Spawn-time env for one Anthropic-compatible API provider (ANTHROPIC_BASE_URL / AUTH_TOKEN). */
 export type ClaudeSpawnEnvResolver = (providerId: string) => Promise<Record<string, string> | null>;
 
+/** Provider metadata and an unconfigured factory; the registry owns override application. */
+export interface RegisteredProviderDefinition extends AgentProviderDefinition {
+  iconSvg?: string;
+  supportsExactMcpPreapproval: boolean;
+  createClient: (logger: Logger, runtimeSettings?: ProviderRuntimeSettings) => AgentClient;
+}
+
 export interface BuildProviderRegistryOptions {
+  pluginProviders?: Record<string, RegisteredProviderDefinition>;
   runtimeSettings?: AgentProviderRuntimeSettingsMap;
   providerOverrides?: Record<string, ProviderOverride>;
   workspaceGitService?: Pick<WorkspaceGitService, "resolveRepoRoot">;
@@ -466,6 +475,9 @@ export function wrapSessionProvider(provider: AgentProvider, inner: AgentSession
     get capabilities() {
       return inner.capabilities;
     },
+    get persistenceUpdatedOnResume() {
+      return inner.persistenceUpdatedOnResume;
+    },
     get initialTimeline() {
       return inner.initialTimeline;
     },
@@ -521,7 +533,10 @@ function wrapClientProvider(
 
   return {
     provider,
-    capabilities: inner.capabilities,
+    get capabilities() {
+      return inner.capabilities;
+    },
+    shutdown: inner.shutdown?.bind(inner),
     createSession: async (config, launchContext, options) =>
       wrapSessionProvider(
         provider,
@@ -747,6 +762,31 @@ function createResolvedProviderClient(
   );
 }
 
+interface RegisteredProvider {
+  definition: AgentProviderDefinition;
+  createClient: ProviderClientFactory;
+  contract: ProviderContract;
+  runtimeSettings?: ProviderRuntimeSettings;
+  override?: ProviderOverride;
+}
+
+function resolveRegisteredProvider(input: RegisteredProvider): ResolvedProvider {
+  const { definition, override, contract } = input;
+  const runtimeSettings = mergeRuntimeSettings(input.runtimeSettings, toRuntimeSettings(override));
+  return {
+    definition: applyOverrideToDefinition(definition, override),
+    runtimeSettings,
+    profileModels: override?.models ?? [],
+    additionalModels: override?.additionalModels ?? [],
+    profileModelsAreAdditive: false,
+    enabled: override?.enabled ?? definition.enabledByDefault ?? true,
+    derivedFromProviderId: null,
+    providerOptions: configuredProviderOptions(override),
+    createBaseClient: (logger) => input.createClient(logger, runtimeSettings),
+    contract,
+  };
+}
+
 function buildResolvedBuiltinProviders(
   providerOverrides: Record<string, ProviderOverride>,
   runtimeSettings: AgentProviderRuntimeSettingsMap | undefined,
@@ -840,7 +880,8 @@ function addDerivedProviders(
     }
 
     if (!rawOverride.extends && !rawOverride.api) {
-      throw new Error(`Custom provider '${providerId}' requires an extends value`);
+      // Plugin overrides can precede registration (including disabled or removed plugins).
+      continue;
     }
 
     const override = withAnthropicToolRestriction(rawOverride);
@@ -960,6 +1001,28 @@ export function buildProviderRegistry(
     },
     options?.isDev === true,
   );
+  for (const [provider, definition] of Object.entries(options?.pluginProviders ?? {})) {
+    if (resolvedProviders.has(provider)) {
+      throw new Error(`Plugin provider '${provider}' conflicts with a built-in provider`);
+    }
+    const override = providerOverrides[provider];
+    if (override?.extends) {
+      logger.warn({ provider }, "Plugin provider shadowed by configured provider");
+      continue;
+    }
+    resolvedProviders.set(
+      provider,
+      resolveRegisteredProvider({
+        definition,
+        override,
+        runtimeSettings: runtimeSettings?.[provider],
+        createClient: definition.createClient,
+        contract: {
+          supportsExactMcpPreapproval: definition.supportsExactMcpPreapproval,
+        },
+      }),
+    );
+  }
   addDerivedProviders(resolvedProviders, providerOverrides, {
     managedProcesses: options?.managedProcesses,
     openCodeBridge: options?.openCodeBridge,

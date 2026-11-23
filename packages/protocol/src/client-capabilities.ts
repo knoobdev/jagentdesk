@@ -1,5 +1,11 @@
 export const CLIENT_CAPS = {
   binaryChunkingV1: "binary_chunking_v1",
+  pluginBinaryPayloads: "plugin_binary_payloads",
+  explicitEventSubscriptions: "explicit_event_subscriptions",
+  // COMPAT(pluginTimelineItems): added in v0.9.59; remove after 2027-05-23 once the client floor supports plugin items.
+  pluginTimelineItems: "plugin_timeline_items",
+  // COMPAT(timelineNotifications): added in v0.9.59; remove after 2027-05-23 once the client floor supports notifications.
+  timelineNotifications: "timeline_notifications",
   // COMPAT(selectiveAgentTimeline): added in v0.1.106. Capable clients receive
   // agent streams only for their explicit viewed set. Remove after 2027-01-12
   // once the supported client floor is >= v0.1.106.

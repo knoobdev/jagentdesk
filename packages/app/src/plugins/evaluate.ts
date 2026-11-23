@@ -78,6 +78,7 @@ export type PluginClientRuntime = Pick<
   | "openSettings"
   | "openSurface"
   | "openPanel"
+  | "subscribe"
   | "addComposerPill"
   | "addHeaderButton"
 > & { hosts: ReturnType<typeof createPluginHosts> };

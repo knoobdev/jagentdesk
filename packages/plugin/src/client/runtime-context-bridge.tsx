@@ -24,7 +24,9 @@ export function usePluginRuntimeContextBridge(): PluginRuntimeContextBridge {
       );
       return (
         <JAgentDeskApiProvider jagentdesk={jagentdesk}>
-          <PluginRpcProvider invoke={rpc.invoke}>{content}</PluginRpcProvider>
+          <PluginRpcProvider invoke={rpc.invoke} subscribe={rpc.subscribe}>
+            {content}
+          </PluginRpcProvider>
         </JAgentDeskApiProvider>
       );
     },

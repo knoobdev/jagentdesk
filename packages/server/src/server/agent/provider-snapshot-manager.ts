@@ -1,3 +1,5 @@
+import type { ProviderRegistration } from "@jagentdesk/plugin/server/provider";
+import { PluginAgentClientRegistry } from "./plugin-provider.js";
 import { EventEmitter } from "node:events";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
@@ -228,6 +230,7 @@ export class ProviderSnapshotManager {
   private readonly openCodeProviderInjection?: OpenCodeProviderInjectionResolver;
   private readonly claudeSpawnEnv?: ClaudeSpawnEnvResolver;
   private readonly isDev: boolean;
+  private readonly pluginProviders: PluginAgentClientRegistry;
   private readonly extraClients: Partial<Record<AgentProvider, AgentClient>>;
   private runtimeSettings: AgentProviderRuntimeSettingsMap | undefined;
   private providerOverrides: Record<string, ProviderOverride> | undefined;
@@ -235,9 +238,13 @@ export class ProviderSnapshotManager {
   private providerRegistry: Record<AgentProvider, ProviderDefinition>;
   private providerClients: Record<AgentProvider, AgentClient>;
   private readonly ownedClients = new Set<AgentClient>();
+  private pluginProvidersSettled = false;
 
   constructor(options: ProviderSnapshotManagerOptions) {
     this.logger = options.logger;
+    this.pluginProviders = new PluginAgentClientRegistry(
+      options.logger.child({ module: "plugin-providers" }),
+    );
     this.workspaceGitService = options.workspaceGitService;
     this.managedProcesses = options.managedProcesses;
     this.openCodeBridge = options.openCodeBridge;
@@ -336,6 +343,54 @@ export class ProviderSnapshotManager {
       }
     }
     return { providerDefinitions, clients };
+  }
+
+  settlePluginProviders(): void {
+    if (this.pluginProvidersSettled) return;
+    this.pluginProvidersSettled = true;
+    this.warnUnknownProviderOverrides();
+  }
+
+  private warnUnknownProviderOverrides(): void {
+    if (!this.pluginProvidersSettled) return;
+    for (const [provider, override] of Object.entries(this.providerOverrides ?? {})) {
+      if (!override.extends && !this.providerRegistry[provider])
+        this.logger.warn({ provider }, "Provider override matches no registered provider");
+    }
+  }
+
+  replacePluginProviders(
+    registrations: readonly ProviderRegistration[],
+  ): AgentManagerProviderState {
+    for (const registration of registrations) {
+      if (BUILTIN_PROVIDER_IDS.includes(registration.id) || this.extraClients[registration.id])
+        throw new Error(`Plugin provider '${registration.id}' conflicts with a built-in provider`);
+    }
+    const previousPlugins = this.pluginProviders.definitions();
+    this.pluginProviders.replace(registrations);
+    const plugins = this.pluginProviders.definitions();
+    const definitions = this.buildRegistry();
+    for (const provider of new Set([
+      ...Object.keys(this.providerRegistry),
+      ...Object.keys(definitions),
+    ])) {
+      const before = this.providerRegistry[provider];
+      const after = definitions[provider];
+      const registrationChanged =
+        previousPlugins[provider] !== plugins[provider] &&
+        !this.providerOverrides?.[provider]?.extends;
+      if (registrationChanged || !before || !after) {
+        delete this.providerClients[provider];
+      } else definitions[provider] = before;
+    }
+    this.providerRegistry = definitions;
+    this.warnUnknownProviderOverrides();
+    for (const cwd of this.snapshots.keys()) {
+      this.providerLoads.delete(cwd);
+      this.snapshots.set(cwd, this.reconcileSnapshotForRegistry(cwd));
+      this.emitChange(cwd);
+    }
+    return this.getAgentManagerProviderState();
   }
 
   private ensureClient(provider: AgentProvider, definition: ProviderDefinition): AgentClient {
@@ -534,6 +589,7 @@ export class ProviderSnapshotManager {
       // startup-derived runtime settings here would retain removed command/env fields.
       if (options.replace) this.runtimeSettings = undefined;
       this.providerRegistry = this.buildRegistry();
+      this.warnUnknownProviderOverrides();
       this.providerClients = { ...this.extraClients } as Record<AgentProvider, AgentClient>;
 
       for (const cwd of this.snapshots.keys()) {
@@ -622,6 +678,7 @@ export class ProviderSnapshotManager {
     const registry = buildProviderRegistry(this.logger, {
       runtimeSettings: this.runtimeSettings,
       providerOverrides: this.providerOverrides,
+      pluginProviders: this.pluginProviders.definitions(),
       workspaceGitService: this.workspaceGitService,
       managedProcesses: this.managedProcesses,
       openCodeBridge: this.openCodeBridge,
@@ -745,6 +802,7 @@ export class ProviderSnapshotManager {
   }
 
   private getProviderSource(provider: AgentProvider): ProviderSnapshotEntry["source"] {
+    if (this.pluginProviders.has(provider)) return "custom";
     const isBuiltin = BUILTIN_PROVIDER_IDS.includes(provider);
     return !isBuiltin && this.providerOverrides?.[provider]?.extends ? "custom" : "builtin";
   }

@@ -1,5 +1,6 @@
 // POSIX-only: git worktree and teardown shell fixtures
 /* eslint-disable max-nested-callbacks */
+import { validateWorktreePath } from "./worktree-path.js";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   BranchAlreadyCheckedOutError,
@@ -149,7 +150,7 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
       ).resolves.toMatchObject({ allowed: true, worktreeRoot: join(worktreesRoot, projectHash) });
       await expect(
         isJAgentDeskOwnedWorktreeCwd(result.worktreePath, { jagentdeskHome }),
-      ).resolves.toMatchObject({ allowed: false });
+      ).resolves.toMatchObject({ allowed: true, worktreePath: result.worktreePath });
 
       const worktrees = await listJAgentDeskWorktrees({
         cwd: repoDir,
@@ -1103,6 +1104,213 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
       });
 
       expect(existsSync(join(result.worktreePath, "jagentdesk.json"))).toBe(false);
+    });
+  });
+
+  describe("worktrees at explicit paths", () => {
+    let tempDir: string;
+    let repoDir: string;
+    let jagentdeskHome: string;
+
+    beforeEach(() => {
+      tempDir = realpathSync(mkdtempSync(join(tmpdir(), "worktree-explicit-test-")));
+      repoDir = join(tempDir, "test-repo");
+      jagentdeskHome = join(tempDir, "jagentdesk-home");
+
+      mkdirSync(repoDir, { recursive: true });
+      execFileSync("git", ["init", "-b", "main"], { cwd: repoDir });
+      execFileSync("git", ["config", "user.email", "test@test.com"], { cwd: repoDir });
+      execFileSync("git", ["config", "user.name", "Test"], { cwd: repoDir });
+      writeFileSync(join(repoDir, "file.txt"), "hello\n");
+      execFileSync("git", ["add", "."], { cwd: repoDir });
+      execFileSync("git", ["-c", "commit.gpgsign=false", "commit", "-m", "initial"], {
+        cwd: repoDir,
+      });
+    });
+
+    afterEach(() => {
+      rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it("places, owns, lists, and deletes a worktree outside the legacy root", async () => {
+      // Sibling layout: <repo-parent>/wt-<slug>
+
+      const result = await createWorktreePrimitive({
+        cwd: repoDir,
+        worktreeSlug: "sibling-one",
+        source: { kind: "branch-off", baseBranch: "main", branchName: "feature/sibling" },
+        jagentdeskHome,
+        worktreePath: join(tempDir, "wt-sibling-one"),
+      });
+
+      expect(result.worktreePath).toBe(join(tempDir, "wt-sibling-one"));
+      expect(existsSync(join(result.worktreePath, "file.txt"))).toBe(true);
+      expect(existsSync(await getJAgentDeskWorktreeMetadataPath(result.worktreePath))).toBe(true);
+
+      const ownership = await isJAgentDeskOwnedWorktreeCwd(result.worktreePath, { jagentdeskHome });
+      expect(ownership.allowed).toBe(true);
+      expect(ownership.worktreePath).toBe(result.worktreePath);
+      // A subdirectory of the worktree resolves to the worktree root.
+      mkdirSync(join(result.worktreePath, "sub"), { recursive: true });
+      const nested = await isJAgentDeskOwnedWorktreeCwd(join(result.worktreePath, "sub"), {
+        jagentdeskHome,
+      });
+      expect(nested.worktreePath).toBe(result.worktreePath);
+
+      const listed = await listJAgentDeskWorktrees({ cwd: repoDir, jagentdeskHome });
+      expect(listed.map((entry) => entry.path)).toContain(result.worktreePath);
+
+      await deleteJAgentDeskWorktree({
+        cwd: repoDir,
+        worktreePath: result.worktreePath,
+        jagentdeskHome,
+      });
+      expect(existsSync(result.worktreePath)).toBe(false);
+    });
+
+    it("removes branches fetched by the source plan when git worktree add fails", async () => {
+      // A branch that exists only on the remote: resolving a
+      // checkout-branch plan fetches it into a local branch. A script
+      // failure must not leave that branch behind, or the next attempt
+      // would uniquify to a different branch name.
+      const remoteDir = join(tempDir, "remote.git");
+      execFileSync("git", ["clone", "--bare", repoDir, remoteDir], { cwd: tempDir });
+      execFileSync("git", ["remote", "add", "origin", remoteDir], { cwd: repoDir });
+      execFileSync("git", ["push", "origin", "main"], { cwd: repoDir });
+      execFileSync("git", ["branch", "feature/remote-check"], { cwd: repoDir });
+      execFileSync("git", ["push", "origin", "feature/remote-check"], { cwd: repoDir });
+      execFileSync("git", ["branch", "-D", "feature/remote-check"], { cwd: repoDir });
+      execFileSync("git", ["fetch", "origin"], { cwd: repoDir });
+
+      mkdirSync(join(tempDir, "occupied"));
+      writeFileSync(join(tempDir, "occupied", "keep"), "keep");
+      await expect(
+        createWorktreePrimitive({
+          cwd: repoDir,
+          worktreeSlug: "remote-check",
+          source: { kind: "checkout-branch", branchName: "feature/remote-check" },
+          jagentdeskHome,
+          worktreePath: join(tempDir, "occupied"),
+        }),
+      ).rejects.toThrow();
+
+      const localBranches = execFileSync("git", ["branch", "--list", "feature/remote-check"], {
+        cwd: repoDir,
+        encoding: "utf8",
+      });
+      expect(localBranches.trim()).toBe("");
+    });
+
+    it("deletes only the registered destination nested beneath the legacy root", async () => {
+      const parent = join(jagentdeskHome, "worktrees", "acme", "widgets");
+      const worktreePath = join(parent, "topic");
+      const siblingPath = join(parent, "sibling");
+      await createWorktreePrimitive({
+        cwd: repoDir,
+        jagentdeskHome,
+        worktreeSlug: "topic",
+        worktreePath,
+        source: { kind: "branch-off", branchName: "topic", baseBranch: "main" },
+      });
+      await createWorktreePrimitive({
+        cwd: repoDir,
+        jagentdeskHome,
+        worktreeSlug: "sibling",
+        worktreePath: siblingPath,
+        source: { kind: "branch-off", branchName: "sibling", baseBranch: "main" },
+      });
+      mkdirSync(join(worktreePath, "nested"));
+      expect(
+        await isJAgentDeskOwnedWorktreeCwd(join(worktreePath, "nested"), { jagentdeskHome }),
+      ).toMatchObject({ allowed: true, worktreePath });
+      await deleteJAgentDeskWorktree({
+        cwd: repoDir,
+        jagentdeskHome,
+        worktreePath,
+        registryProven: true,
+      });
+      expect(existsSync(worktreePath)).toBe(false);
+      expect(readFileSync(join(siblingPath, "file.txt"), "utf8")).toBe("hello\n");
+    });
+
+    it("rejects a destination under a symlink into .git", async () => {
+      const alias = join(tempDir, "git-alias");
+      symlinkSync(join(repoDir, ".git"), alias, "dir");
+      await expect(
+        validateWorktreePath({ candidate: join(alias, "new", "worktree"), repoPath: repoDir }),
+      ).rejects.toThrow("inside a .git directory");
+      expect(existsSync(join(repoDir, ".git", "new"))).toBe(false);
+    });
+
+    it("uses an explicit worktreePath verbatim", async () => {
+      const explicitPath = join(tempDir, "explicit-wt");
+
+      const result = await createWorktreePrimitive({
+        cwd: repoDir,
+        worktreeSlug: "explicit-one",
+        source: { kind: "branch-off", baseBranch: "main", branchName: "feature/explicit" },
+        jagentdeskHome,
+        worktreePath: explicitPath,
+      });
+
+      expect(result.worktreePath).toBe(explicitPath);
+      expect(existsSync(join(explicitPath, "file.txt"))).toBe(true);
+    });
+
+    it("restore recreates at the recorded path", async () => {
+      const created = await createWorktreePrimitive({
+        cwd: repoDir,
+        worktreeSlug: "restorable",
+        source: { kind: "branch-off", baseBranch: "main", branchName: "feature/restorable" },
+        jagentdeskHome,
+        worktreePath: join(tempDir, "wt-sibling-one"),
+      });
+      await deleteJAgentDeskWorktree({
+        cwd: repoDir,
+        worktreePath: created.worktreePath,
+        jagentdeskHome,
+      });
+      expect(existsSync(created.worktreePath)).toBe(false);
+
+      const restored = await createWorktreePrimitive({
+        cwd: repoDir,
+        worktreeSlug: "restorable",
+        source: { kind: "restore", branchName: "feature/restorable", baseRef: "main" },
+        jagentdeskHome,
+        worktreePath: created.worktreePath,
+      });
+
+      expect(restored.worktreePath).toBe(created.worktreePath);
+      expect(existsSync(join(restored.worktreePath, "file.txt"))).toBe(true);
+    });
+
+    it("does not treat a copied marker in a non-worktree directory as ownership", async () => {
+      const created = await createWorktreePrimitive({
+        cwd: repoDir,
+        worktreeSlug: "marker-source",
+        source: { kind: "branch-off", baseBranch: "main", branchName: "feature/marker" },
+        jagentdeskHome,
+        worktreePath: join(tempDir, "wt-sibling-one"),
+      });
+      const metadata = await readJAgentDeskWorktreeMetadata(created.worktreePath);
+      expect(metadata).not.toBeNull();
+
+      // A plain directory with a .git file pointing at a copied admin dir
+      // that holds a jagentdesk/worktree.json. Git does not list it as a
+      // worktree, so the copied marker must not prove ownership.
+      const fakeDir = join(tempDir, "fake-worktree");
+      const fakeAdmin = join(tempDir, "fake-admin");
+      mkdirSync(join(fakeAdmin, "jagentdesk"), { recursive: true });
+      mkdirSync(fakeDir, { recursive: true });
+      writeFileSync(join(fakeAdmin, "jagentdesk", "worktree.json"), JSON.stringify(metadata));
+      writeFileSync(join(fakeDir, ".git"), `gitdir: ${fakeAdmin}\n`);
+
+      const ownership = await isJAgentDeskOwnedWorktreeCwd(fakeDir, { jagentdeskHome });
+      expect(ownership.allowed).toBe(false);
+      await expect(
+        deleteJAgentDeskWorktree({ cwd: repoDir, worktreePath: fakeDir, jagentdeskHome }),
+      ).rejects.toThrow("Refusing to delete non-JAgentDesk worktree");
+      expect(existsSync(fakeDir)).toBe(true);
     });
   });
 

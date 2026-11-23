@@ -1,7 +1,10 @@
+import path from "node:path";
+import { expandUserPath } from "../../classify.js";
 import { createInterface } from "node:readline/promises";
 import { Command } from "commander";
 import type { PluginListItem, PluginLogEntry } from "@jagentdesk/protocol/messages";
 import {
+  parsePluginSourceReference,
   formatPluginIdentity,
   formatPluginSourceReference,
 } from "@jagentdesk/protocol/plugin-source-reference";
@@ -121,7 +124,21 @@ export async function runPluginInstallCommand(
   process.stderr.write(
     "Trusting plugin code: server code and preparation commands run unsandboxed on the daemon host; client code runs inside JAgentDesk. Dependencies and future updates are part of the codebase you trust.\n",
   );
-  const sourceReference = formatPluginSourceReference(source, options.path);
+  const reference = parsePluginSourceReference(source);
+  let resolvedSource = source;
+  if (
+    !/^(npm:|github:|git:(?!\/\/))/.test(source) &&
+    /^(\.\.?(?:[/\\]|$)|\/|~|[A-Za-z]:[/\\]|\\\\)/.test(reference.source)
+  ) {
+    const directory = expandUserPath(reference.source);
+    // An absolute path can target a daemon on a different operating system.
+    const absoluteDirectory =
+      path.posix.isAbsolute(directory) || path.win32.isAbsolute(directory)
+        ? directory
+        : path.resolve(directory);
+    resolvedSource = formatPluginSourceReference(absoluteDirectory, reference.pluginPath);
+  }
+  const sourceReference = formatPluginSourceReference(resolvedSource, options.path);
   const data = await withPluginSourceClient(options.host, (client) =>
     client.installSourcePlugin(sourceReference, {
       ...(options.id ? { id: options.id } : {}),

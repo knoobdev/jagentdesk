@@ -1,3 +1,4 @@
+import { timelineItemIdentity } from "@jagentdesk/protocol/timeline-identity";
 import type { AgentTimelineItem, ToolCallDetail } from "./agent-sdk-types.js";
 
 import type { AgentTimelineRow } from "./agent-timeline-store-types.js";
@@ -9,7 +10,11 @@ export interface TimelineSeqRange {
   endSeq: number;
 }
 
-export type TimelineProjectionKind = "assistant_merge" | "reasoning_merge" | "tool_lifecycle";
+export type TimelineProjectionKind =
+  | "assistant_merge"
+  | "reasoning_merge"
+  | "tool_lifecycle"
+  | "identity";
 export type TimelineLimitDirection = "tail" | "before" | "after";
 
 export interface TimelineProjectionEntry {
@@ -127,14 +132,6 @@ function makeCanonicalEntries(rows: readonly AgentTimelineRow[]): WorkingEntry[]
   });
 }
 
-/**
- * Stable identity of an item whose later updates replace its earlier state.
- * JAgentDesk has no plugin timeline items, so only tool calls carry an identity.
- */
-function timelineItemIdentity(item: AgentTimelineItem): string | null {
-  return item.type === "tool_call" ? item.callId : null;
-}
-
 function mergeIdentityMetadata(
   existing: WorkingEntry,
   entry: WorkingEntry,
@@ -158,6 +155,13 @@ function mergeIdentityEntries(existing: WorkingEntry, entry: WorkingEntry): Work
         timestamp: entry.timestamp,
         seqEnd: Math.max(existing.seqEnd, entry.seqEnd),
         ...mergeIdentityMetadata(existing, entry, "tool_lifecycle"),
+      };
+    case "plugin":
+      if (existing.item.type !== "plugin") return null;
+      return {
+        ...entry,
+        seqStart: existing.seqStart,
+        ...mergeIdentityMetadata(existing, entry, "identity"),
       };
     default:
       return null;
@@ -317,7 +321,7 @@ export class TimelineProjection {
     this.sourceRanges.sort((a, b) => a.startSeq - b.startSeq);
   }
 
-  append(row: AgentTimelineRow): void {
+  append(row: AgentTimelineRow): ProjectedTimelineRow {
     const rowIndex = this.appendProjected(row);
     const last = this.sourceRanges.at(-1);
     if (last && last.rowIndex === rowIndex && last.endSeq + 1 === row.seq) {
@@ -325,6 +329,7 @@ export class TimelineProjection {
     } else {
       this.sourceRanges.push({ startSeq: row.seq, endSeq: row.seq, rowIndex });
     }
+    return { ...this.rows[rowIndex] };
   }
 
   private appendProjected(row: AgentTimelineRow): number {

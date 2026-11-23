@@ -24,6 +24,8 @@ export {
 import type { JAgentDeskConfig } from "@jagentdesk/protocol/jagentdesk-config-schema";
 import {
   createJAgentDeskWorktreeChangeRequestHint,
+  hasJAgentDeskWorktreeMetadata,
+  findJAgentDeskWorktreeRootForCwd,
   normalizeBaseRefName,
   isQualifiedRef,
   type JAgentDeskWorktreeChangeRequestHint,
@@ -214,6 +216,7 @@ export interface CreateWorktreeOptions {
   worktreeSlug: string;
   source: WorktreeSource;
   runSetup: boolean;
+  worktreePath?: string;
   jagentdeskHome?: string;
   worktreesRoot?: string;
 }
@@ -223,6 +226,7 @@ interface ResolveExistingWorktreeForSlugOptions {
   repoRoot: string;
   jagentdeskHome?: string;
   worktreesRoot?: string;
+  worktreePath?: string;
 }
 
 export class BranchAlreadyCheckedOutError extends Error {
@@ -967,6 +971,24 @@ export async function isJAgentDeskOwnedWorktreeCwd(
     }
   }
 
+  // Worktrees placed at plugin-chosen paths are
+  // proven by the marker createWorktree writes unconditionally: a
+  // jagentdesk/worktree.json in the worktree's git admin dir, with the path
+  // still registered in the repo's `git worktree list`. The marker alone
+  // is not proof — it lives in a git admin dir a user can copy into a
+  // hand-made directory that git does not know about.
+  if (options?.knownGitCommonDir !== null) {
+    const metadataProof = await resolveMetadataOwnedWorktree(cwd, repoRoot);
+    if (metadataProof) {
+      return {
+        allowed: true,
+        ...(repoRoot !== undefined ? { repoRoot } : {}),
+        worktreeRoot: metadataProof.worktreeRoot,
+        worktreePath: metadataProof.worktreePath,
+      };
+    }
+  }
+
   const worktreesBaseRoot = resolveJAgentDeskWorktreesBaseRoot(options);
   const relativePath = await getOwnershipRelativePath(worktreesBaseRoot, resolvedCwd);
 
@@ -974,30 +996,49 @@ export async function isJAgentDeskOwnedWorktreeCwd(
   // The <hash>/<slug> prefix is JAgentDesk-private — nothing else writes there — so the
   // path shape alone is sufficient proof of ownership, even when git has already
   // forgotten about the worktree.
-  if (relativePath === null) {
-    return {
-      allowed: false,
-      ...(repoRoot !== undefined ? { repoRoot } : {}),
-      worktreePath: resolvedCwd,
-    };
+  if (relativePath !== null) {
+    const parts = relativePath.split(sep).filter((part) => part.length > 0);
+    if (parts.length >= 2) {
+      const worktreesRoot = join(worktreesBaseRoot, parts[0]);
+      return {
+        allowed: true,
+        ...(repoRoot !== undefined ? { repoRoot } : {}),
+        worktreeRoot: worktreesRoot,
+        worktreePath: join(worktreesRoot, parts[1]),
+      };
+    }
   }
 
-  const parts = relativePath.split(sep).filter((part) => part.length > 0);
-  if (parts.length < 2) {
-    return {
-      allowed: false,
-      ...(repoRoot !== undefined ? { repoRoot } : {}),
-      worktreePath: resolvedCwd,
-    };
-  }
-
-  const worktreesRoot = join(worktreesBaseRoot, parts[0]);
   return {
-    allowed: true,
+    allowed: false,
     ...(repoRoot !== undefined ? { repoRoot } : {}),
-    worktreeRoot: worktreesRoot,
-    worktreePath: join(worktreesRoot, parts[1]),
+    worktreePath: resolvedCwd,
   };
+}
+
+async function resolveMetadataOwnedWorktree(
+  cwd: string,
+  repoRoot: string | undefined,
+): Promise<{ worktreePath: string; worktreeRoot: string } | null> {
+  try {
+    const root = await findJAgentDeskWorktreeRootForCwd(cwd);
+    if (!root) return null;
+    const candidate = await normalizePathForOwnership(root);
+    if (repoRoot !== undefined && candidate === (await normalizePathForOwnership(repoRoot)))
+      return null;
+    const { stdout: listOutput } = await runGitCommand(["worktree", "list", "--porcelain"], {
+      cwd: candidate,
+      envOverlay: READ_ONLY_GIT_ENV,
+    });
+    for (const entry of parseWorktreeList(listOutput)) {
+      if ((await normalizePathForOwnership(entry.path)) === candidate) {
+        return { worktreePath: candidate, worktreeRoot: dirname(candidate) };
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 type ParsedJAgentDeskWorktreeInfo = Omit<JAgentDeskWorktreeInfo, "createdAt">;
@@ -1066,12 +1107,17 @@ export async function listJAgentDeskWorktrees({
     envOverlay: READ_ONLY_GIT_ENV,
   });
 
+  const mainCheckoutPath = await resolveRepoRootFromGitCommonDir(await getGitCommonDir(cwd));
   const roots = await ownershipPathVariants(projectWorktreesRoot);
   const worktrees: JAgentDeskWorktreeInfo[] = [];
   // Inspect foreign paths sequentially; a large worktree list must not consume the FS pool.
   for (const entry of parseWorktreeList(stdout)) {
     const path = await normalizePathForOwnership(entry.path);
-    if (!roots.some((root) => getRelativePathInsideRoot(root, path) !== null)) continue;
+    if (
+      !roots.some((root) => getRelativePathInsideRoot(root, path) !== null) &&
+      !(path !== mainCheckoutPath && (await hasJAgentDeskWorktreeMetadata(path)))
+    )
+      continue;
     worktrees.push({ ...entry, path, createdAt: await resolveWorktreeCreatedAtIso(path) });
   }
   return worktrees;
@@ -1117,6 +1163,30 @@ export interface DeleteJAgentDeskWorktreeOptions {
   worktreesRoot?: string;
   jagentdeskHome?: string;
   worktreesBaseRoot?: string;
+  // The caller has a workspace registry record backing worktreePath (the
+  // record's cwd is this path). Registry membership is an ownership proof
+  // in its own right: it covers worktrees whose git admin dir is already
+  // gone, where the marker proof can no longer be verified. Only pass
+  // this when the record was matched against the path by the caller.
+  registryProven?: boolean;
+}
+
+// Project scoping for delete: a proof for some other repo's worktree must
+// not make this repo's delete remove it. Only refuses on a positive
+// mismatch — when git has forgotten either side, the ownership proof the
+// caller already established stands.
+async function assertWorktreeBelongsToRepo(cwd: string, worktreePath: string): Promise<void> {
+  let callerRepoRoot: string;
+  let targetRepoRoot: string;
+  try {
+    callerRepoRoot = await resolveRepoRootFromGitCommonDir(await getGitCommonDir(cwd));
+    targetRepoRoot = await resolveRepoRootFromGitCommonDir(await getGitCommonDir(worktreePath));
+  } catch {
+    return;
+  }
+  if ((await getOwnershipRelativePath(callerRepoRoot, targetRepoRoot)) !== "") {
+    throw new Error("Refusing to delete non-JAgentDesk worktree");
+  }
 }
 
 export async function deleteJAgentDeskWorktree({
@@ -1127,6 +1197,7 @@ export async function deleteJAgentDeskWorktree({
   worktreesRoot,
   jagentdeskHome,
   worktreesBaseRoot,
+  registryProven,
 }: DeleteJAgentDeskWorktreeOptions): Promise<void> {
   if (!worktreePath && !worktreeSlug) {
     throw new Error("worktreePath or worktreeSlug is required");
@@ -1149,20 +1220,25 @@ export async function deleteJAgentDeskWorktree({
   }
 
   const requestedPath = worktreePath ?? join(resolvedWorktreesRoot, worktreeSlug!);
-  const resolvedRequested = await normalizePathForOwnership(requestedPath);
   const ownership = await isJAgentDeskOwnedWorktreeCwd(requestedPath, {
     jagentdeskHome,
     worktreesRoot: worktreesBaseRoot,
   });
-  const resolvedWorktree =
-    ownership.allowed && ownership.worktreePath ? ownership.worktreePath : resolvedRequested;
-
-  const relativeWorktreePath = await getOwnershipRelativePath(
-    resolvedWorktreesRoot,
-    resolvedWorktree,
-  );
-  if (relativeWorktreePath === null || relativeWorktreePath === "") {
+  // Deletion is gated on the ownership proof set (legacy shape, the
+  // jagentdesk/worktree.json marker verified against `git worktree list`, or a
+  // caller-asserted registry record), not on living under the per-project
+  // hashed root: plugin-placed worktrees live anywhere.
+  let resolvedWorktree: string;
+  if (registryProven) {
+    resolvedWorktree = await normalizePathForOwnership(requestedPath);
+  } else if (ownership.allowed && ownership.worktreePath) {
+    resolvedWorktree = ownership.worktreePath;
+  } else {
     throw new Error("Refusing to delete non-JAgentDesk worktree");
+  }
+
+  if (cwd) {
+    await assertWorktreeBelongsToRepo(cwd, resolvedWorktree);
   }
 
   if (await pathExists(resolvedWorktree)) {
@@ -1261,6 +1337,67 @@ async function removeDirectoryWithRetries(path: string): Promise<void> {
   }
 }
 
+async function listLocalBranchNames(cwd: string): Promise<Set<string>> {
+  const { stdout } = await runGitCommand(
+    ["for-each-ref", "--format=%(refname:short)", "refs/heads"],
+    { cwd },
+  );
+  return new Set(
+    stdout
+      .split("\n")
+      .map((name) => name.trim())
+      .filter((name) => name.length > 0),
+  );
+}
+
+// The one local branch a source plan can create while resolving: a
+// checkout-branch plan fetches refs/heads/<source.branchName>, and a
+// change-request/PR plan fetches refs/heads/<localBranchName> (which is
+// the plan's branchName). branch-off creates no local branch. Only this
+// ref may be rolled back when creation fails — never any other
+// branch that appeared in the meantime; other creators own those.
+function planCreatedLocalBranch(
+  source: WorktreeSource,
+  sourcePlan: WorktreeSourcePlan,
+): string | null {
+  switch (source.kind) {
+    case "checkout-branch":
+      return source.branchName;
+    case "checkout-change-request":
+    case "checkout-github-pr":
+      return sourcePlan.branchName;
+    default:
+      return null;
+  }
+}
+
+async function readLocalBranchTip(cwd: string, branchName: string): Promise<string | null> {
+  try {
+    const { stdout } = await runGitCommand(
+      ["rev-parse", "--verify", `refs/heads/${branchName}^{commit}`],
+      { cwd },
+    );
+    const tip = stdout.trim();
+    return tip.length > 0 ? tip : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Resolve the default placement once, before presenting it to creation hooks. */
+export async function resolveDefaultWorktreePath(
+  options: Pick<CreateWorktreeOptions, "cwd" | "jagentdeskHome" | "worktreesRoot" | "worktreeSlug">,
+): Promise<string> {
+  const original = join(
+    await getJAgentDeskWorktreesRoot(options.cwd, options.jagentdeskHome, options.worktreesRoot),
+    options.worktreeSlug,
+  );
+  let candidate = original;
+  let suffix = 1;
+  while (await pathExists(candidate)) candidate = `${original}-${suffix++}`;
+  return candidate;
+}
+
 /**
  * Create a git worktree with proper naming conventions
  */
@@ -1268,73 +1405,85 @@ export const createWorktree = async ({
   cwd,
   source,
   worktreeSlug,
-  runSetup,
   jagentdeskHome,
   worktreesRoot,
+  runSetup,
+  worktreePath: explicitWorktreePath,
 }: CreateWorktreeOptions): Promise<CreatedWorktree> => {
+  const branchesBefore =
+    source.kind === "checkout-branch" ||
+    source.kind === "checkout-change-request" ||
+    source.kind === "checkout-github-pr"
+      ? await listLocalBranchNames(cwd)
+      : new Set<string>();
   const sourcePlan = await resolveWorktreeSourcePlan({ cwd, source, desiredSlug: worktreeSlug });
-  let worktreePath = join(
-    await getJAgentDeskWorktreesRoot(cwd, jagentdeskHome, worktreesRoot),
-    worktreeSlug,
-  );
-  await mkdir(dirname(worktreePath), { recursive: true });
+  const fetchedBranch = planCreatedLocalBranch(source, sourcePlan);
+  const fetchedTip =
+    fetchedBranch && !branchesBefore.has(fetchedBranch)
+      ? await readLocalBranchTip(cwd, fetchedBranch)
+      : null;
+  try {
+    let worktreePath =
+      explicitWorktreePath ??
+      (await resolveDefaultWorktreePath({ cwd, jagentdeskHome, worktreesRoot, worktreeSlug }));
+    await mkdir(dirname(worktreePath), { recursive: true });
 
-  // Also handle worktree path collision
-  let finalWorktreePath = worktreePath;
-  let pathSuffix = 1;
-  while (await pathExists(finalWorktreePath)) {
-    finalWorktreePath = `${worktreePath}-${pathSuffix}`;
-    pathSuffix++;
-  }
-
-  // Primitive owner for `git worktree add`; callers route through createWorktreeCore.
-  await runGitCommand(["worktree", "add", finalWorktreePath, ...sourcePlan.addArguments], {
-    cwd,
-    timeout: 120_000,
-  });
-  worktreePath = await normalizePathForOwnership(finalWorktreePath);
-
-  if (sourcePlan.pushRemote) {
-    await configureWorktreePushRemote({
+    // Primitive owner for `git worktree add`; callers route through createWorktreeCore.
+    await runGitCommand(["worktree", "add", worktreePath, ...sourcePlan.addArguments], {
       cwd,
-      branchName: sourcePlan.branchName,
-      remote: sourcePlan.pushRemote,
+      timeout: 120_000,
     });
-  }
-  if (sourcePlan.trackingRemote) {
-    await configureWorktreeTrackingRemote({
-      cwd,
-      branchName: sourcePlan.branchName,
-      remote: sourcePlan.trackingRemote,
+    worktreePath = await normalizePathForOwnership(worktreePath);
+
+    if (sourcePlan.pushRemote) {
+      await configureWorktreePushRemote({
+        cwd,
+        branchName: sourcePlan.branchName,
+        remote: sourcePlan.pushRemote,
+      });
+    }
+    if (sourcePlan.trackingRemote) {
+      await configureWorktreeTrackingRemote({
+        cwd,
+        branchName: sourcePlan.branchName,
+        remote: sourcePlan.trackingRemote,
+      });
+    }
+
+    await writeJAgentDeskWorktreeMetadata(worktreePath, {
+      baseRefName: sourcePlan.metadataBaseRefName,
+      ...(sourcePlan.metadataBaseRef ? { baseRef: sourcePlan.metadataBaseRef } : {}),
+      ...(sourcePlan.changeRequestLookupTarget
+        ? { changeRequestLookupTarget: sourcePlan.changeRequestLookupTarget }
+        : {}),
     });
-  }
 
-  await writeJAgentDeskWorktreeMetadata(worktreePath, {
-    baseRefName: sourcePlan.metadataBaseRefName,
-    ...(sourcePlan.metadataBaseRef ? { baseRef: sourcePlan.metadataBaseRef } : {}),
-    ...(sourcePlan.changeRequestLookupTarget
-      ? { changeRequestLookupTarget: sourcePlan.changeRequestLookupTarget }
-      : {}),
-  });
+    await seedJAgentDeskConfigFile({ sourceCwd: cwd, targetCwd: worktreePath });
 
-  await seedJAgentDeskConfigFile({ sourceCwd: cwd, targetCwd: worktreePath });
-
-  if (runSetup) {
-    await runWorktreeSetupCommands({
+    if (runSetup)
+      await runWorktreeSetupCommands({
+        worktreePath,
+        branchName: sourcePlan.branchName,
+        cleanupOnFailure: true,
+      });
+    return {
+      branchName: sourcePlan.branchName,
       worktreePath,
-      branchName: sourcePlan.branchName,
-      cleanupOnFailure: true,
-    });
+      comparisonBaseRef:
+        source.kind === "checkout-branch"
+          ? null
+          : (sourcePlan.metadataBaseRef ?? sourcePlan.metadataBaseRefName),
+    };
+  } catch (error) {
+    if (
+      fetchedBranch &&
+      fetchedTip &&
+      (await readLocalBranchTip(cwd, fetchedBranch)) === fetchedTip
+    ) {
+      await runGitCommand(["branch", "-D", fetchedBranch], { cwd }).catch(() => {});
+    }
+    throw error;
   }
-
-  return {
-    branchName: sourcePlan.branchName,
-    worktreePath,
-    comparisonBaseRef:
-      source.kind === "checkout-branch"
-        ? null
-        : (sourcePlan.metadataBaseRef ?? sourcePlan.metadataBaseRefName),
-  };
 };
 
 interface ResolveWorktreeSourcePlanOptions {

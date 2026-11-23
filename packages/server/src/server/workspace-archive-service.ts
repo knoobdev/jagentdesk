@@ -37,6 +37,7 @@ export interface ArchiveDependencies {
   // path uniquely identifies a worktree workspace; this is a directory lookup for
   // the archive target, not status/ownership.
   findWorkspaceIdForCwd: (cwd: string) => Promise<string | null>;
+  getWorkspace?: (workspaceId: string) => Promise<PersistedWorkspaceRecord | null>;
   // Active (non-archived) workspaces, used to decide whether the workspace being
   // archived is the last reference to its backing worktree directory, and to
   // break a same-cwd tie in favor of the worktree-kind record when archiving by
@@ -64,6 +65,10 @@ export interface ArchiveResult {
   archivedAgentIds: string[];
   archivedWorkspaceIds: string[];
   removedDirectory: boolean;
+  // Set when the record archived but its worktree directory was left on
+  // disk because no ownership proof held for it. The directory is never
+  // deleted in that case; the path and reason surface here and in the log.
+  directoryLeftBehind?: { path: string; reason: string };
 }
 
 export interface ArchiveByScopeRequest {
@@ -87,6 +92,15 @@ export async function requireActiveWorkspaceForArchive(
 interface BackingDirectory {
   path: string;
   isJAgentDeskOwnedWorktree: boolean;
+  // True when the directory backs a worktree workspace (or a worktree-scope
+  // archive), so a failed ownership proof means a JAgentDesk worktree directory
+  // is being left behind rather than a user's local checkout being ignored.
+  expectsJAgentDeskOwnership: boolean;
+  // True only when this backing came from a workspace registry record
+  // matched to this path (the record is itself an ownership proof, passed
+  // through to deleteJAgentDeskWorktree). Disk-derived backings stay false:
+  // they must prove ownership on disk.
+  registryProven: boolean;
   mainRepoRoot: string | null;
   jagentdeskWorktreesRoot: string | null;
 }
@@ -126,6 +140,7 @@ export async function archiveByScope(
   }
 
   let removedDirectory = false;
+  let directoryLeftBehind: ArchiveResult["directoryLeftBehind"];
 
   try {
     if (targetWorkspaceIds.length > 0) {
@@ -153,18 +168,21 @@ export async function archiveByScope(
     }
 
     if (target.backing !== null) {
-      removedDirectory = await maybeRemoveDirectory(
+      const removal = await maybeRemoveDirectory(
         dependencies,
         request,
         target,
         archivedWorkspaceIds,
       );
+      removedDirectory = removal.removedDirectory;
+      directoryLeftBehind = removal.directoryLeftBehind;
     }
 
     return {
       archivedAgentIds: Array.from(archivedAgents),
       archivedWorkspaceIds,
       removedDirectory,
+      ...(directoryLeftBehind ? { directoryLeftBehind } : {}),
     };
   } finally {
     if (targetWorkspaceIds.length > 0) {
@@ -207,14 +225,16 @@ async function resolveArchiveTarget(
       }),
     )
   ).filter((workspace): workspace is ActiveWorkspaceRef => workspace !== null);
-  const persistedMainRepoRoot = targetWorkspaces.find(
-    (workspace) => workspace.mainRepoRoot,
-  )?.mainRepoRoot;
+  const recordedId = await dependencies.findWorkspaceIdForCwd(backing.path);
+  const recorded = recordedId ? await dependencies.getWorkspace?.(recordedId) : null;
+  const record =
+    targetWorkspaces.find((workspace) => workspace.kind === "worktree") ??
+    (recorded && matchesBackingDirectory(recorded.worktreeRoot ?? recorded.cwd)
+      ? recorded
+      : null) ??
+    targetWorkspaces[0];
   return {
-    backing: {
-      ...backing,
-      mainRepoRoot: persistedMainRepoRoot ?? backing.mainRepoRoot,
-    },
+    backing: record ? await resolveWorkspaceBackingDirectory(record, dependencies) : backing,
     teardownTargets:
       targetWorkspaces.length > 0
         ? targetWorkspaces.map((workspace) => ({
@@ -230,10 +250,22 @@ async function resolveWorkspaceBackingDirectory(
   workspace: ActiveWorkspaceRef,
   dependencies: Pick<ArchiveDependencies, "jagentdeskHome" | "jagentdeskWorktreesBaseRoot">,
 ): Promise<BackingDirectory> {
+  if (workspace.isJAgentDeskOwnedWorktree === false) {
+    return {
+      path: resolve(workspace.worktreeRoot ?? workspace.cwd),
+      isJAgentDeskOwnedWorktree: false,
+      expectsJAgentDeskOwnership: false,
+      registryProven: false,
+      mainRepoRoot: workspace.mainRepoRoot ?? null,
+      jagentdeskWorktreesRoot: null,
+    };
+  }
   if (workspace.isJAgentDeskOwnedWorktree && workspace.worktreeRoot && workspace.mainRepoRoot) {
     return {
       path: resolve(workspace.worktreeRoot),
       isJAgentDeskOwnedWorktree: true,
+      expectsJAgentDeskOwnership: true,
+      registryProven: true,
       mainRepoRoot: workspace.mainRepoRoot,
       jagentdeskWorktreesRoot: null,
     };
@@ -242,6 +274,8 @@ async function resolveWorkspaceBackingDirectory(
     return {
       path: resolve(workspace.cwd),
       isJAgentDeskOwnedWorktree: false,
+      expectsJAgentDeskOwnership: false,
+      registryProven: false,
       mainRepoRoot: workspace.mainRepoRoot ?? null,
       jagentdeskWorktreesRoot: null,
     };
@@ -268,6 +302,8 @@ async function resolveBackingDirectory(
   return {
     path: resolve(ownership.allowed && ownership.worktreePath ? ownership.worktreePath : cwd),
     isJAgentDeskOwnedWorktree: ownership.allowed,
+    expectsJAgentDeskOwnership: true,
+    registryProven: false,
     mainRepoRoot: ownership.repoRoot ?? null,
     jagentdeskWorktreesRoot: ownership.worktreeRoot ?? null,
   };
@@ -311,10 +347,28 @@ async function maybeRemoveDirectory(
   request: Pick<ArchiveByScopeRequest, "requestId">,
   target: ArchiveTarget,
   archivedWorkspaceIds: string[],
-): Promise<boolean> {
+): Promise<{
+  removedDirectory: boolean;
+  directoryLeftBehind?: { path: string; reason: string };
+}> {
   const backing = target.backing;
   if (!backing?.isJAgentDeskOwnedWorktree) {
-    return false;
+    // Missing ownership proof for a worktree-backed directory: the record
+    // still archives, but the directory is left in place and surfaced.
+    // Never delete an unproven directory.
+    if (backing?.expectsJAgentDeskOwnership) {
+      const reason =
+        "no ownership proof (not under the JAgentDesk worktrees root, no jagentdesk/worktree.json marker, no registry record)";
+      dependencies.sessionLogger?.warn(
+        { targetPath: backing.path, requestId: request.requestId },
+        `Worktree directory left in place during archive: ${reason}`,
+      );
+      return {
+        removedDirectory: false,
+        directoryLeftBehind: { path: backing.path, reason },
+      };
+    }
+    return { removedDirectory: false };
   }
 
   const archivedWorkspaceIdSet = new Set(archivedWorkspaceIds);
@@ -342,7 +396,7 @@ async function maybeRemoveDirectory(
         { err: error, targetPath: backing.path, requestId: request.requestId },
         "Worktree teardown failed during archive; workspace already archived",
       );
-      return false;
+      return { removedDirectory: false };
     }
     throw error;
   }
@@ -356,7 +410,7 @@ async function maybeRemoveDirectory(
       dependencies,
     ))
   ) {
-    return false;
+    return { removedDirectory: false };
   }
 
   try {
@@ -367,17 +421,18 @@ async function maybeRemoveDirectory(
       worktreesRoot: backing.jagentdeskWorktreesRoot ?? undefined,
       jagentdeskHome: dependencies.jagentdeskHome,
       worktreesBaseRoot: dependencies.jagentdeskWorktreesBaseRoot,
+      registryProven: backing.registryProven,
     });
     dependencies.workspaceGitService.invalidateWorktrees();
     dependencies.github.invalidate({ cwd: backing.path });
-    return true;
+    return { removedDirectory: true };
   } catch (error) {
     if (error instanceof WorktreeTeardownError) {
       dependencies.sessionLogger?.warn(
         { err: error, targetPath: backing.path, requestId: request.requestId },
         "Worktree disk removal failed during archive; workspace already archived",
       );
-      return false;
+      return { removedDirectory: false };
     }
     throw error;
   }

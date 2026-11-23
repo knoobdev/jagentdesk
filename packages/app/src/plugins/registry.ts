@@ -1,3 +1,4 @@
+import { createPluginSubscribe } from "./subscriptions";
 import { useMemo, useSyncExternalStore } from "react";
 import { QueryClient } from "@tanstack/react-query";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
@@ -83,6 +84,11 @@ export class PluginRegistry {
           serverId,
           clientBundle: entry.clientBundle,
           requirements: entry.requirements,
+          subscribe: createPluginSubscribe({
+            client: options.client,
+            pluginId: entry.id,
+            lifetime: lifetime.signal,
+          }),
           queryClient: new QueryClient(),
           cleanup: () => undefined,
           surfaces: [],

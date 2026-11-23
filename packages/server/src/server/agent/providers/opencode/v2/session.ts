@@ -70,6 +70,7 @@ export class OpenCodeV2Session implements AgentSession {
     bindChild?: (id: string) => void,
     private readonly acquire?: () => Promise<V2Connection>,
     private readonly moved?: (connection: V2Connection) => void,
+    private readonly historyOnly = false,
   ) {
     this.permissions = new SessionPermissions(
       () => this.client,
@@ -163,16 +164,27 @@ export class OpenCodeV2Session implements AgentSession {
       signal: this.abort.signal,
       logger: this.logger,
     });
+    if (this.historyOnly) return;
     const system = composeSystemPromptParts(
       this.config.systemPrompt,
       this.config.daemonAppendSystemPrompt,
+      ...(this.config.pluginAppendSystemPrompt ?? []),
     );
-    if (system)
+    if (system) {
       await this.client.session.instructions.entry.put({
         sessionID: this.id,
         key: "jagentdesk",
         value: system,
       });
+    } else {
+      const entries = await this.client.session.instructions.entry.list({ sessionID: this.id });
+      if (entries.some((entry) => entry.key === "jagentdesk")) {
+        await this.client.session.instructions.entry.remove({
+          sessionID: this.id,
+          key: "jagentdesk",
+        });
+      }
+    }
   }
   private async startStream() {
     let ready!: () => void;

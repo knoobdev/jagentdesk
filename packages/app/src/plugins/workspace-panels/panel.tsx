@@ -4,7 +4,6 @@ import type {
   PluginWorkspacePanelProps,
 } from "@jagentdesk/plugin/client";
 import type { PluginTheme } from "@jagentdesk/plugin";
-import { PluginClientStateProvider } from "@jagentdesk/plugin/client/host";
 import { CircleAlert } from "lucide-react-native";
 import { useMemo } from "react";
 import { Platform, Text, View } from "react-native";
@@ -105,8 +104,8 @@ function PluginPanelBody({ theme }: { theme: PluginTheme }) {
       Surface={Surface}
       key={`${serverId}/${target.pluginId}/${target.panelId}/${target.context}`}
     >
-      <PluginRuntimeBoundary plugin={plugin} client={client}>
-        <PluginClientStateProvider source={stateSource}>{panel}</PluginClientStateProvider>
+      <PluginRuntimeBoundary plugin={plugin} client={client} stateSource={stateSource}>
+        {panel}
       </PluginRuntimeBoundary>
     </SurfaceErrorBoundary>
   );
