@@ -160,23 +160,19 @@ export const piSubagents: PiExtension = {
         ],
       };
     };
-    const mapSpawn = (call: PiExtensionToolCall) => {
-      const args = Args.safeParse(call.args);
-      if (!args.success) return undefined;
-      if (args.data.action === "resume")
-        return mapResume(call, args.data.message ?? args.data.task);
-      if (args.data.action !== undefined || !args.data.agent || !args.data.task) return undefined;
+    const mapSpawn = (call: PiExtensionToolCall, args: z.infer<typeof Args>) => {
+      if (args.action !== undefined || !args.agent || !args.task) return undefined;
       const detail = {
         type: "sub_agent" as const,
-        subAgentType: args.data.agent,
-        description: args.data.task,
+        subAgentType: args.agent,
+        description: args.task,
         log: extractTextFromToolResult(call.result)?.trim() ?? "",
       };
       const base = {
         type: "upsert" as const,
         id: call.callId,
-        title: args.data.agent,
-        description: args.data.task,
+        title: args.agent,
+        description: args.task,
         toolCallId: call.callId,
       };
       if (call.status === "running")
@@ -189,7 +185,7 @@ export const piSubagents: PiExtension = {
           ? { detail, subagents: [{ ...base, status: "failed" as const }] }
           : { detail };
       if (details.data.runId) callsByRun.set(details.data.runId, call.callId);
-      if (details.data.results.length === 0 && (details.data.asyncId || args.data.async)) {
+      if (details.data.results.length === 0 && (details.data.asyncId || args.async)) {
         rememberAsyncRun(details.data, call);
         return {
           detail,
@@ -205,13 +201,19 @@ export const piSubagents: PiExtension = {
         return { detail, subagents: [{ ...base, status: "failed" as const }] };
       return {
         detail,
-        ...collectRows(call.callId, details.data.results, args.data.task, call.status === "failed"),
+        ...collectRows(call.callId, details.data.results, args.task, call.status === "failed"),
       };
     };
     return {
       mapToolCall(call) {
         if (call.toolName === "bg_wait") return mapWait(call);
-        if (call.toolName === "subagent") return mapSpawn(call);
+        if (call.toolName === "subagent") {
+          const args = Args.safeParse(call.args);
+          if (!args.success) return undefined;
+          if (args.data.action === "resume")
+            return mapResume(call, args.data.message ?? args.data.task);
+          return mapSpawn(call, args.data);
+        }
         return undefined;
       },
       // The notice is the only completion Pi persists, so replay settles async runs from it.

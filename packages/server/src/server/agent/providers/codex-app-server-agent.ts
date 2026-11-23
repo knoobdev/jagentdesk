@@ -6493,7 +6493,14 @@ export class CodexAppServerAgentSession implements AgentSession {
     this.emitEvent({
       type: "timeline",
       provider: CODEX_PROVIDER,
-      item: { type: "notification", level: "warning", message: parsed.message },
+      item: {
+        type: "tool_call",
+        callId: `codex-warning:${randomUUID()}`,
+        name: "codex_warning",
+        status: "completed",
+        error: null,
+        detail: { type: "plain_text", label: `warning: ${parsed.message}` },
+      },
     });
   }
 

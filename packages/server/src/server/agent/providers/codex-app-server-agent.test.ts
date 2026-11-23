@@ -619,8 +619,8 @@ async function startStatusNoticeTurnTest(): Promise<{
     session.subscribe((event) => {
       const isStatusNotice =
         event.type === "timeline" &&
-        (event.item.type === "notification" ||
-          (event.item.type === "tool_call" && event.item.name === "codex_retry"));
+        event.item.type === "tool_call" &&
+        (event.item.name === "codex_warning" || event.item.name === "codex_retry");
       const isTerminal =
         event.type === "turn_completed" ||
         event.type === "turn_failed" ||
@@ -644,10 +644,8 @@ function describeStatusNotice(event: AgentStreamEvent): string {
   if (event.type !== "timeline") {
     return event.type;
   }
-  if (event.item.type === "notification") {
-    return `${event.item.level}: ${event.item.message}`;
-  }
   if (event.item.type === "tool_call" && event.item.detail.type === "plain_text") {
+    if (event.item.name === "codex_warning") return event.item.detail.label ?? "";
     return `${event.item.status}: ${event.item.detail.label}`;
   }
   return event.item.type;
