@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import * as server from "./server/index.js";
 
 const sourceDirectory = path.dirname(fileURLToPath(import.meta.url));
+const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const entries = {
   ".": "shared",
   "./server": "server",
@@ -64,6 +65,26 @@ function boundaryViolations(entry: string, runtime: "shared" | "server" | "clien
   return violations;
 }
 
+function typeErrors(code: string): string[] {
+  const configPath = path.resolve(sourceDirectory, "../tsconfig.examples.json");
+  const { config } = ts.readConfigFile(configPath, ts.sys.readFile);
+  const { options } = ts.parseJsonConfigFileContent(config, ts.sys, path.dirname(configPath));
+  const file = path.resolve(
+    sourceDirectory,
+    "../../../plugin-examples/skill-example/client/example.tsx",
+  );
+  const host = ts.createCompilerHost(options);
+  const getSourceFile = host.getSourceFile;
+  host.getSourceFile = (name, language, ...rest) =>
+    path.resolve(name) === file
+      ? ts.createSourceFile(name, code, language)
+      : getSourceFile.call(host, name, language, ...rest);
+  host.fileExists = (name) => path.resolve(name) === file || ts.sys.fileExists(name);
+  const program = ts.createProgram([file], options, host);
+  return ts
+    .getPreEmitDiagnostics(program)
+    .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"));
+}
 describe("plugin SDK import boundaries", () => {
   it("publishes process capabilities without their Windows implementation helpers", () => {
     expect(Object.keys(server).sort()).toEqual([
@@ -75,7 +96,6 @@ describe("plugin SDK import boundaries", () => {
   });
 
   it("classifies every published entry", () => {
-    const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
     expect(Object.keys(manifest.exports).sort()).toEqual(Object.keys(entries).sort());
   });
 
@@ -171,6 +191,7 @@ describe("lifecycle hook SDK types", () => {
     expect(
       typeErrors(`
       import type { PluginServerContext, PluginHooks, PluginHookPayload, PluginHookResult } from "@jagentdesk/plugin/server";
+      import type { AgentTimelineItem } from "@jagentdesk/protocol/agent-types";
       export default function contribute(server: PluginServerContext) {
         server.addHook("worktree.create.before", async ({ request }) => {
           if (request.kind === "checkout-branch") {
@@ -200,8 +221,17 @@ describe("lifecycle hook SDK types", () => {
         server.addHook("workspace.create.before", async ({ request }) => ({ ...request, title: "Changed" }));
         server.addHook("workspace.create.before", async () => {});
         server.addHook("agent.open.before", async () => {});
-        server.addHook("agent.turn.after", async ({ agent, outcome, timeline }, { jagentdesk, signal }) => {
+        server.addHook("agent.turn.after", async (event, { jagentdesk, signal }) => {
+          const { agent, outcome } = event;
           const kind: "completed" | "failed" | "canceled" = outcome.kind;
+          // @ts-expect-error Turn payloads carry no history; read it from the agent's timeline.
+          event.timeline;
+          const turn = await jagentdesk.agents
+            .ref(agent.id)
+            .timeline.refetch({ direction: "tail", limit: 1, wholeTurns: true });
+          const items: readonly AgentTimelineItem[] = turn.entries
+            .filter((entry) => entry.item.type === "assistant_message")
+            .map(({ item }) => item);
           // @ts-expect-error Notification payloads have no creation request.
           outcome.request;
         });

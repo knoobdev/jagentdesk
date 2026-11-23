@@ -2,7 +2,6 @@ import type { AgentToolDefinition } from "./agent-tools.js";
 import type {
   AgentPermissionRequest,
   AgentPermissionResponse,
-  AgentTimelineItem,
   AgentSessionConfig,
 } from "@jagentdesk/protocol/agent-types";
 import type { JAgentDeskApi } from "@jagentdesk/client";
@@ -94,12 +93,11 @@ export interface PluginHookEvents {
   "agent.turn.after": {
     agent: PluginHookAgent;
     turnId: string | null;
-    outcome: PluginTurnOutcome;
     /**
-     * @deprecated Always empty. Fetch history on demand with
-     * context.jagentdesk.agents.ref(agent.id).timeline.refetch({ direction: "tail", limit: 20 }).
+     * The payload carries no history. Read the turn with
+     * `jagentdesk.agents.ref(agent.id).timeline.refetch({ direction: "tail", limit: 20 })`.
      */
-    timeline: readonly AgentTimelineItem[];
+    outcome: PluginTurnOutcome;
   };
   "agent.permission.before": { agent: PluginHookAgent; request: AgentPermissionRequest };
   "agent.permission.after": {

@@ -23,7 +23,8 @@ export default function contribute(server: PluginServerContext) {
     }
     const agent = context.jagentdesk.agents.ref(event.agent.id);
     const page = await agent.timeline.refetch({ direction: "tail", limit: 20 });
-    const text = latestOutputText(page.entries.map(({ item }) => item));
+    const turn = page.entries;
+    const text = latestOutputText(turn.map(({ item }) => item));
     if (/out of credits/i.test(text)) {
       console.log("Sending a follow-up after out of credits", event.agent.id);
       await agent.send("Try again.");

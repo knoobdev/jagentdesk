@@ -4890,7 +4890,6 @@ test.each([
             },
             turnId: "hook-turn",
             outcome,
-            timeline: [],
           },
         },
       ]);
