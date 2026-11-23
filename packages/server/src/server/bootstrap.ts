@@ -1,3 +1,4 @@
+import type { BuiltinPluginLoader } from "./plugins/builtin/index.js";
 import { describeHookWorkspace } from "./plugins/lifecycle/index.js";
 import { PhysicalDeviceHub } from "./devices/hub.js";
 import { clearGrantsWhenSessionsEnd } from "./devices/agent-grants.js";
@@ -538,6 +539,7 @@ export interface JAgentDeskDaemon {
 }
 
 export interface JAgentDeskDaemonDependencies {
+  builtinPlugins?: BuiltinPluginLoader;
   hubRelationshipRemote?: HubRelationshipRemote;
   hubRelationshipClock?: HubRelationshipClock;
   hubRelationshipRetryPolicy?: HubRelationshipRetryPolicy;
@@ -672,6 +674,7 @@ export async function createJAgentDeskDaemon(
   // has explicitly enabled plugins. Managed git sources back the marketplace install
   // flow (a checked-out Paseo plugin is auto-rebranded before it is compiled).
   const pluginRuntime = new PluginService(logger, daemonConfigStore, daemonVersion, {
+    builtinPlugins: dependencies.builtinPlugins,
     managedSources: new ManagedPluginSources(config.jagentdeskHome),
     settingsDirectory: path.join(config.jagentdeskHome, "plugin-settings"),
   });
@@ -2172,6 +2175,7 @@ export async function createJAgentDeskDaemon(
             // external ingress attaches, mirroring upstream's pre-accept ordering.
             pluginRuntime.bindJAgentDeskSessionHost(wsServer);
             await pluginRuntime.start();
+            providerSnapshotManager.settlePluginProviders();
             tsnetListener = createTsnetListener({
               logger,
               port: boundListenTarget.type === "tcp" ? boundListenTarget.port : 0,
@@ -2264,7 +2268,6 @@ export async function createJAgentDeskDaemon(
 
   const stop = async () => {
     unsubscribePluginProviders();
-    await pluginRuntime.stopAllPlugins().catch(() => undefined);
     await hubRelationships.stop();
     workspaceReconciliation.dispose();
     scriptHealthMonitor.stop();
@@ -2277,6 +2280,7 @@ export async function createJAgentDeskDaemon(
     await agentStorage.flush().catch(() => undefined);
     // Spec 34: loopback forwards of api providers die with the daemon.
     customProviderService.closeAll();
+    await pluginRuntime.stopAllPlugins().catch(() => undefined);
     await providerSnapshotManager.shutdown();
     terminalManager.killAll();
     stopDeviceGrantWatch();

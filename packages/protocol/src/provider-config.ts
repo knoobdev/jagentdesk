@@ -91,15 +91,8 @@ export const ProviderOverridesSchema = z
 
       const isBuiltinProvider = builtinProviderIdSet.has(providerId);
       const isApiProvider = provider.api !== undefined;
-      if (!isBuiltinProvider && !provider.extends && !isApiProvider) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: [providerId, "extends"],
-          message: `Custom provider "${providerId}" must declare extends.`,
-        });
-      }
 
-      if (!isBuiltinProvider && !provider.label && !isApiProvider) {
+      if (!isBuiltinProvider && provider.extends && !provider.label && !isApiProvider) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: [providerId, "label"],

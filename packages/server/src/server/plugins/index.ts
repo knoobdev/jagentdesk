@@ -1,3 +1,4 @@
+import { BuiltinPluginLoader, type BuiltinPlugin } from "./builtin/index.js";
 import type { PluginLifecycle } from "./lifecycle/index.js";
 import path from "node:path";
 import { stat, rm } from "node:fs/promises";
@@ -49,6 +50,8 @@ interface PluginRuntimePort {
   getProviderRegistrations?(pluginId: string): readonly PluginProviderMetadata[];
   connectProvider: PluginRuntime["connectProvider"];
   getProviderCatalogCacheKey?: PluginRuntime["getProviderCatalogCacheKey"];
+  getProviderStatus?: PluginRuntime["getProviderStatus"];
+  startBuiltinPlugin?(plugin: BuiltinPlugin): Promise<void>;
   validatePlugin?(path: string): Promise<void>;
   startPlugin(pluginId: string, path: string, canPublish: () => boolean): Promise<void>;
   stopPluginById(pluginId: string): Promise<boolean>;
@@ -61,6 +64,7 @@ interface PluginRuntimePort {
 
 interface PluginServiceDependencies {
   settingsDirectory?: string;
+  builtinPlugins?: BuiltinPluginLoader;
   runtime?: PluginRuntimePort;
   managedSources?: ManagedPluginSources;
 }
@@ -77,6 +81,8 @@ function resolvePluginStatus(input: {
 export class PluginService {
   private readonly runtime: PluginRuntimePort;
   private readonly managedSources: ManagedPluginSources | null;
+  private readonly builtinPlugins: BuiltinPluginLoader;
+  private readonly builtinPluginIds: ReadonlySet<string>;
   private readonly logger: pino.Logger;
   private readonly errors = new Map<string, string>();
   private readonly listeners = new Set<(pluginId: string) => void>();
@@ -103,6 +109,8 @@ export class PluginService {
           for (const listener of this.settingsListeners) listener(pluginId, settingsId);
         },
       });
+    this.builtinPlugins = dependencies.builtinPlugins ?? new BuiltinPluginLoader(undefined, []);
+    this.builtinPluginIds = this.builtinPlugins.ids;
     this.managedSources = dependencies.managedSources ?? null;
     this.runtime.subscribe((pluginId, error) => {
       this.removeProviderRegistrations(pluginId);
@@ -152,6 +160,15 @@ export class PluginService {
     this.started = true;
     const config = this.configStore.get();
     this.globalStartsBlocked = config.pluginsEnabled !== true;
+    await this.builtinPlugins.load(async (plugin) => {
+      try {
+        await this.runtime.startBuiltinPlugin?.(plugin);
+        await this.publishProviderRegistrations(plugin.id, plugin.directory);
+      } catch (error) {
+        this.errors.set(plugin.id, error instanceof Error ? error.message : String(error));
+        this.logger.error({ err: error, pluginId: plugin.id }, "Built-in plugin failed to load");
+      }
+    });
     if (config.pluginsEnabled === true) {
       for (const [pluginId, source] of Object.entries(config.plugins ?? {})) {
         if (source.enabled === false) continue;
@@ -201,7 +218,7 @@ export class PluginService {
   }
 
   getLogs(pluginId: string): PluginLogEntry[] {
-    this.requireSource(pluginId);
+    if (!this.builtinPluginIds.has(pluginId)) this.requireSource(pluginId);
     return this.runtime.getLogs(pluginId);
   }
 
@@ -215,6 +232,8 @@ export class PluginService {
       const manifest = await readPluginManifest(directory);
       assertPluginCompatibility({ ...manifest, version: this.daemonVersion, runtime: "daemon" });
       const pluginId = PluginIdSchema.parse(input.id ?? manifest.id);
+      if (this.builtinPluginIds.has(pluginId))
+        throw new Error(`Plugin ID "${pluginId}" is reserved for a built-in plugin`);
       if (this.configStore.get().plugins?.[pluginId]) {
         throw new Error(
           `Plugin ID "${pluginId}" is already configured; choose another ID with --id`,
@@ -269,6 +288,8 @@ export class PluginService {
       try {
         await this.checkRequirements(candidate.directory);
         pluginId = PluginIdSchema.parse(input.id ?? candidate.defaultId);
+        if (this.builtinPluginIds.has(pluginId))
+          throw new Error(`Plugin ID "${pluginId}" is reserved for a built-in plugin`);
         if (this.configStore.get().plugins?.[pluginId]) {
           throw new Error(
             `Plugin ID "${pluginId}" is already configured; choose another ID with --id`,
@@ -522,15 +543,9 @@ export class PluginService {
     pluginDirectory: string,
   ): Promise<void> {
     const metadata = this.runtime.getProviderRegistrations?.(pluginId) ?? [];
-    const configuredIds = new Set(Object.keys(this.configStore.get().providers));
     for (const provider of metadata) {
       if (BUILTIN_PROVIDER_ID_SET.has(provider.id)) {
         throw new Error(`Plugin ${pluginId} cannot register builtin provider ID "${provider.id}"`);
-      }
-      if (configuredIds.has(provider.id)) {
-        throw new Error(
-          `Plugin ${pluginId} cannot register configured provider ID "${provider.id}"`,
-        );
       }
       if (this.providers.has(provider.id)) {
         throw new Error(`Plugin ${pluginId} cannot register provider ID "${provider.id}" twice`);
@@ -542,6 +557,14 @@ export class PluginService {
           id: provider.id,
           label: provider.label,
           description: provider.description,
+          command: provider.command,
+          status: provider.hasStatus
+            ? (request) => {
+                if (!this.runtime.getProviderStatus)
+                  throw new Error("Plugin runtime cannot resolve provider status");
+                return this.runtime.getProviderStatus(pluginId, provider.id, request);
+              }
+            : undefined,
           getCatalogCacheKey: provider.hasCatalogCacheKey
             ? (options) => {
                 if (!this.runtime.getProviderCatalogCacheKey)

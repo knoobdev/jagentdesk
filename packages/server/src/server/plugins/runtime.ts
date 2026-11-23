@@ -1,3 +1,10 @@
+import { InternalPluginChild } from "./internal-child.js";
+import { evaluateBundle } from "./bundle-evaluator.js";
+import {
+  ProviderStatusSchema,
+  type ProviderStatus,
+  type ProviderStatusRequest,
+} from "@jagentdesk/plugin/server/provider";
 import type { PluginBeforeRequests, PluginLifecycleEvents } from "@jagentdesk/plugin/server";
 import { validateBeforeRequest, validateBeforeResult } from "./lifecycle/index.js";
 import { fork } from "node:child_process";
@@ -327,6 +334,23 @@ export class PluginRuntime {
     return this.plugins.get(pluginId)?.providers ?? [];
   }
 
+  async getProviderStatus(
+    pluginId: string,
+    providerId: string,
+    request: ProviderStatusRequest,
+  ): Promise<ProviderStatus> {
+    const loaded = this.plugins.get(pluginId);
+    if (!loaded) throw new Error(`Plugin is not available: ${pluginId}`);
+    return ProviderStatusSchema.parse(
+      await this.request(loaded, {
+        type: "provider.status",
+        requestId: randomUUID(),
+        providerId,
+        request,
+      }),
+    );
+  }
+
   async connectProvider(
     pluginId: string,
     providerId: string,
@@ -543,9 +567,51 @@ export class PluginRuntime {
         sessionClosed: null,
       };
     }
+    return this.launchPlugin({
+      pluginId,
+      directory,
+      bundles,
+      child: this.spawnChild(),
+      serverBundle,
+    });
+  }
+
+  async startBuiltinPlugin(input: { id: string; directory: string }): Promise<void> {
+    if (this.plugins.has(input.id)) throw new Error(`Plugin is already running: ${input.id}`);
+    this.appendLog(input.id, "stdout", "[jagentdesk] Loading plugin");
+    const directory = path.resolve(input.directory);
+    const bundles = await compileDirectoryPlugin(directory, this.daemonVersion);
+    if (bundles.manifest.id !== input.id)
+      throw new Error(`Built-in plugin ${input.id} has manifest ID ${bundles.manifest.id}`);
+    if (!bundles.serverBundle) throw new Error(`Built-in plugin ${input.id} needs a server entry`);
+    const loaded = await this.launchPlugin({
+      pluginId: input.id,
+      directory,
+      bundles,
+      child: new InternalPluginChild(evaluateBundle(bundles.serverBundle)),
+      serverBundle: "",
+    });
+    this.plugins.set(input.id, loaded);
+    this.appendLog(input.id, "stdout", "[jagentdesk] Plugin ready");
+  }
+
+  private async launchPlugin({
+    pluginId,
+    directory,
+    bundles,
+    child,
+    serverBundle,
+  }: {
+    pluginId: string;
+    directory: string;
+    bundles: Awaited<ReturnType<typeof compileDirectoryPlugin>>;
+    child: PluginChild;
+    serverBundle: string;
+  }): Promise<LoadedPlugin> {
+    void directory;
+    const { manifest } = bundles;
     const sessionHost = this.sessionHost;
     if (!sessionHost) throw new Error("Plugin JAgentDesk session host is not attached");
-    const child = this.spawnChild();
     const outputCapture = new PluginOutputCapture(child, (stream, message) => {
       this.appendLog(pluginId, stream, message);
     });

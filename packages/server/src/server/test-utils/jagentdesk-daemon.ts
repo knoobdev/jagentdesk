@@ -1,3 +1,4 @@
+import type { BuiltinPluginLoader } from "../plugins/builtin/index.js";
 import os from "node:os";
 import path from "node:path";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
@@ -14,6 +15,7 @@ import { createTestAgentClients } from "./fake-agent-client.js";
 import type { PushNotificationSender } from "../push/notifications.js";
 
 interface TestJAgentDeskDaemonOptions {
+  builtinPlugins?: BuiltinPluginLoader;
   daemonVersion?: string;
   desktopManaged?: boolean;
   downloadTokenTtlMs?: number;
@@ -95,6 +97,7 @@ export async function createTestJAgentDeskDaemon(
       await prepareTestDaemonConfig(options);
     const logger = options.logger ?? pino({ level: "silent" });
     const daemon = await createJAgentDeskDaemon(config, logger, {
+      builtinPlugins: options.builtinPlugins,
       serverFeatureOverrides: {
         daemonStatusRpc: options.daemonStatusRpcCapability,
       },
