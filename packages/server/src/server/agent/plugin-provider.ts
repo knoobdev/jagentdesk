@@ -1797,9 +1797,7 @@ function mapSessionConfig(
     mode: config.modeId,
     thinkingOption: config.thinkingOptionId,
     settings: toJsonObject(config.featureValues ?? {}, "provider settings"),
-    providerOptions: config.providerOptions
-      ? toJsonObject(config.providerOptions, "provider options")
-      : undefined,
+    providerOptions: config.providerOptions,
     title: config.title ?? undefined,
     persist,
   };
