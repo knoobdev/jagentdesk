@@ -10,6 +10,9 @@ function installed(): InstalledPlugin {
     clientBundle: "bundle",
     lifetime: new AbortController(),
     queryClient: new QueryClient(),
+    subscribe: () => {
+      throw new Error("Subscriptions are not used here");
+    },
     cleanup: () => {},
     settingsScreens: [],
     surfaces: [],

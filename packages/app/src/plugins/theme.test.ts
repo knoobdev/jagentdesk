@@ -51,6 +51,9 @@ function installed(serverId: string, themes: PluginThemeContribution[]): Install
     clientBundle: serverId,
     lifetime: new AbortController(),
     queryClient: new QueryClient(),
+    subscribe: () => {
+      throw new Error("Subscriptions are not used here");
+    },
     settingsScreens: [],
     surfaces: [],
     sidebarItems: [],

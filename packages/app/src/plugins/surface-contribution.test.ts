@@ -18,6 +18,9 @@ function installation(
     clientBundle: serverId,
     lifetime: new AbortController(),
     queryClient: new QueryClient(),
+    subscribe: () => {
+      throw new Error("Subscriptions are not used here");
+    },
     cleanup: () => undefined,
     settingsScreens: [],
     surfaces: surfaces.map((id) => ({ id, Component: () => null })),

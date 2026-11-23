@@ -2,6 +2,7 @@ import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { createPluginHosts } from "./hosts";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { PluginClientOpenPanelOptions } from "@jagentdesk/plugin/client";
+import { subscribePluginRpc } from "@jagentdesk/plugin/client/host";
 import {
   createPluginAgentActionContext,
   createPluginCapabilities,
@@ -38,6 +39,8 @@ export function createPluginClientRuntime(
     openPanel(panelId, options) {
       openClientPanel({ installation, runtime, state, panelId, options });
     },
+    subscribe: (contract, input, onEvent, options) =>
+      subscribePluginRpc(contract, installation.subscribe, input, onEvent, options),
   };
 }
 

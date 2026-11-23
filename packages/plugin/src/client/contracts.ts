@@ -2,7 +2,13 @@ import type { ComponentType } from "react";
 import type { JAgentDeskApi } from "@jagentdesk/client";
 import type { AgentTimelineItem } from "@jagentdesk/protocol/agent-types";
 import type { ZodType, input as ZodInput, output as ZodOutput } from "zod";
-import type { PluginRpcContract } from "../rpc.js";
+import type {
+  PluginRpcContract,
+  PluginSubscribeOptions,
+  PluginSubscriptionContract,
+  PluginSubscriptionHandle,
+  PluginWireInput,
+} from "../rpc.js";
 import type {
   PluginButtonRegistration,
   PluginHeaderButtonContribution,
@@ -102,6 +108,16 @@ export interface PluginClientContext extends PluginCommandCapabilities {
     contribution: PluginTimelineRendererContribution<Schema>,
   ): PluginCleanup;
   openPanel(id: string, options: PluginClientOpenPanelOptions): void;
+  /**
+   * Subscribes to a plugin subscription on this client's host. JAgentDesk re-subscribes after a
+   * reconnect and releases what is left when the plugin stops.
+   */
+  subscribe<InputSchema extends ZodType, EventSchema extends ZodType>(
+    contract: PluginSubscriptionContract<InputSchema, EventSchema>,
+    input: PluginWireInput<ZodInput<InputSchema>>,
+    onEvent: (event: ZodOutput<EventSchema>) => void,
+    options?: PluginSubscribeOptions,
+  ): PluginSubscriptionHandle;
 }
 
 export type PluginClientContribution = (client: PluginClientContext) => PluginCleanup;
@@ -172,7 +188,7 @@ export interface PluginCommandCapabilities {
   jagentdesk: JAgentDeskApi;
   rpc<InputSchema extends ZodType, OutputSchema extends ZodType>(
     contract: PluginRpcContract<InputSchema, OutputSchema>,
-    input: ZodInput<InputSchema>,
+    input: PluginWireInput<ZodInput<InputSchema>>,
   ): Promise<ZodOutput<OutputSchema>>;
   openSurface(id: string): void;
   openSettings(id: string): void;

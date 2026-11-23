@@ -322,6 +322,7 @@ interface SessionForTestOptions {
   messages?: unknown[];
   targetedMessages?: Array<{ source: object; message: SessionOutboundMessage }>;
   binaryMessages?: Uint8Array[];
+  clientCapabilities?: SessionOptions["clientCapabilities"];
   pluginRuntime?: SessionOptions["pluginRuntime"];
   orchestrationSkills?: SessionOptions["orchestrationSkills"];
   workspaceLabelService?: WorkspaceLabelService;
@@ -369,6 +370,7 @@ function createSessionForTest(options: SessionForTestOptions = {}): Session {
         }
       : {}),
     onBinaryMessage: createBinaryMessageHandler(options.binaryMessages),
+    clientCapabilities: options.clientCapabilities,
     logger,
     downloadTokenStore: options.downloadTokenStore ?? asDownloadTokenStore(),
     pushNotifications: options.pushNotifications ?? asPushNotifications(),

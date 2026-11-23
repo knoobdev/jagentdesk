@@ -7,7 +7,7 @@ export {
 import type { PluginAttachmentSourceContribution } from "../contracts.js";
 import { PluginRpcProvider } from "./rpc-context.js";
 import { JAgentDeskApiProvider } from "./jagentdesk-context.js";
-import { callPluginRpc } from "../rpc.js";
+import { callPluginRpc, subscribePluginRpc, type PluginSubscriptionObserver } from "../rpc.js";
 
 export async function searchPluginAttachments(
   source: PluginAttachmentSourceContribution,
@@ -18,4 +18,6 @@ export async function searchPluginAttachments(
   return PluginAttachmentSearchPayloadSchema.parseAsync(output);
 }
 
-export { callPluginRpc, JAgentDeskApiProvider, PluginRpcProvider };
+export { callPluginRpc, subscribePluginRpc, JAgentDeskApiProvider, PluginRpcProvider };
+export type { PluginSubscriptionObserver };
+export type { PluginSubscribe } from "./rpc-context.js";

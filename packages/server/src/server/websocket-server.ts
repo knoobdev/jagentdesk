@@ -2582,6 +2582,8 @@ export class VoiceAssistantWebSocketServer {
               pluginSourceUpdates: true,
               pluginThemes: true,
               pluginSettings: true,
+              pluginSubscriptions: true,
+              explicitEventSubscriptions: true,
             }
           : {}),
         // Relay second path (spec 35 / ADR-0048): with it the pairing offer
@@ -3003,7 +3005,7 @@ export class VoiceAssistantWebSocketServer {
       ws.close(WS_CLOSE_INVALID_HELLO, "Binary frames are not supported on Hub sessions");
       return true;
     }
-    void Promise.resolve(activeConnection.session.handleBinaryFrame(decodedFrame)).catch(
+    void Promise.resolve(activeConnection.session.handleBinaryFrame(decodedFrame, ws)).catch(
       (error: unknown) => {
         this.handleRawMessageError({
           ws,

@@ -1,4 +1,3 @@
-// Upstream e2e coverage kept for the next selective port. Skipped: demand-based event delivery to plugin sessions is not ported; the fork broadcasts status to every session.
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -7,7 +6,7 @@ import { createJAgentDeskApi } from "@jagentdesk/client";
 import { DaemonClient } from "../test-utils/daemon-client.js";
 import { createTestJAgentDeskDaemon } from "../test-utils/jagentdesk-daemon.js";
 
-test.skip("an RPC-only plugin receives no agent, project or provider data", async () => {
+test("an RPC-only plugin receives no agent, project or provider data", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "jagentdesk-quiet-plugin-"));
   await writeFile(path.join(directory, "jagentdesk-plugin.json"), JSON.stringify({ id: "quiet" }));
   await writeFile(

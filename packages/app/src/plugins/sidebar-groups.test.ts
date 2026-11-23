@@ -11,6 +11,9 @@ function installed(serverId: string, contributionId = "main"): InstalledPlugin {
     clientBundle: serverId,
     lifetime: new AbortController(),
     queryClient: new QueryClient(),
+    subscribe: () => {
+      throw new Error("Subscriptions are not used here");
+    },
     settingsScreens: [],
     surfaces: [{ id: "surface", Component: () => null }],
     sidebarItems: [

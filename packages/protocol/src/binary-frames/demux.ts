@@ -4,6 +4,7 @@ import {
   type FileTransferFrame,
 } from "./file-transfer.js";
 import { decodeScreenFrame, ScreenFrameOpcode, type ScreenFrame } from "./screen.js";
+import { decodePluginFrame, PluginFrameOpcode, type PluginFrame } from "./plugin.js";
 import {
   decodeTerminalStreamFrame,
   TerminalStreamOpcode,
@@ -13,7 +14,8 @@ import {
 export type BinaryFrame =
   | { kind: "terminal"; frame: TerminalStreamFrame }
   | { kind: "file_transfer"; frame: FileTransferFrame }
-  | { kind: "screen"; frame: ScreenFrame };
+  | { kind: "screen"; frame: ScreenFrame }
+  | { kind: "plugin"; frame: PluginFrame };
 
 export function decodeBinaryFrame(bytes: Uint8Array): BinaryFrame | null {
   switch (bytes[0]) {
@@ -34,6 +36,12 @@ export function decodeBinaryFrame(bytes: Uint8Array): BinaryFrame | null {
     case ScreenFrameOpcode: {
       const frame = decodeScreenFrame(bytes);
       return frame ? { kind: "screen", frame } : null;
+    }
+    case PluginFrameOpcode.Event:
+    case PluginFrameOpcode.Output:
+    case PluginFrameOpcode.Input: {
+      const frame = decodePluginFrame(bytes);
+      return frame ? { kind: "plugin", frame } : null;
     }
     default:
       return null;

@@ -1,0 +1,6 @@
+{
+  "id": "media-stream",
+  "requirements": {
+    "jagentdesk": ">=0.15.0-beta.2"
+  }
+}

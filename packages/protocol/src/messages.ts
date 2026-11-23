@@ -1769,6 +1769,14 @@ export const PluginEnableRequestSchema = pluginIdRequest("plugin.enable.request"
 export const PluginDisableRequestSchema = pluginIdRequest("plugin.disable.request");
 export const PluginRemoveRequestSchema = pluginIdRequest("plugin.remove.request");
 
+export const PluginRpcSubscribeRequestSchema = z.object({
+  type: z.literal("plugin.rpc.subscribe.request"),
+  requestId: z.string(),
+  pluginId: PluginIdSchema,
+  method: z.string().min(1),
+  input: z.unknown(),
+});
+
 export const AgentTimelineAppendRequestSchema = z.object({
   type: z.literal("agent.timeline.append.request"),
   requestId: z.string(),
@@ -4119,7 +4127,53 @@ export const AgentConfigApplyRequestMessageSchema = z.object({
   requestId: z.string(),
 });
 
+export const SessionEventSubscriptionSchema = z.enum([
+  "agent_stream",
+  "agent_update",
+  "workspace_update",
+  "project.update",
+  "providers_snapshot_update",
+  "agent_attention_required",
+  "agent_permission_request",
+  "agent_permission_resolved",
+  "checkout_status_update",
+  "script_status_update",
+  "workspace_setup_progress",
+  "agent.provider_subagents.update",
+  "terminal_attention_required",
+  "status.server_info",
+  "status.daemon_config_changed",
+  "status.plugin_catalog_changed",
+  "status.plugin_settings_changed",
+  "activity_log",
+  "hub.execution.agent.update",
+  "hub.execution.agent.stream",
+]);
+export type SessionEventSubscription = z.infer<typeof SessionEventSubscriptionSchema>;
+export const SessionEventsSetSubscriptionRequestSchema = z.object({
+  type: z.literal("session.events.set_subscription.request"),
+  requestId: z.string(),
+  events: z.array(SessionEventSubscriptionSchema),
+  notifications: z.boolean().optional(),
+});
+export const SessionEventsSetSubscriptionResponseSchema = z.object({
+  type: z.literal("session.events.set_subscription.response"),
+  payload: z.object({ requestId: z.string(), subscriptionId: z.string().optional() }),
+});
+
+export const SubscriptionReleaseRequestSchema = z.object({
+  type: z.literal("subscription.release.request"),
+  requestId: z.string(),
+  subscriptionId: z.string(),
+});
+export const SubscriptionReleaseResponseSchema = z.object({
+  type: z.literal("subscription.release.response"),
+  payload: z.object({ requestId: z.string(), subscriptionId: z.string() }),
+});
+
 export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
+  SessionEventsSetSubscriptionRequestSchema,
+  SubscriptionReleaseRequestSchema,
   ...SpecModeRequestSchemas,
   ...DatabaseRequestSchemas,
   ...ArgoCdRequestSchemas,
@@ -4188,6 +4242,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   PluginEnableRequestSchema,
   PluginDisableRequestSchema,
   PluginRemoveRequestSchema,
+  PluginRpcSubscribeRequestSchema,
   AgentTimelineAppendRequestSchema,
   PluginRpcInvokeRequestSchema,
   GetDaemonConfigRequestMessageSchema,
@@ -4734,6 +4789,8 @@ export const ServerInfoStatusPayloadSchema = z
         pluginThemes: z.boolean().optional(),
         // Plugin settings screens + host-scoped plugin settings storage (split client/server API).
         pluginSettings: z.boolean().optional(),
+        pluginSubscriptions: z.boolean().optional(),
+        explicitEventSubscriptions: z.boolean().optional(),
         // Forge Hub (spec 19 / ADR-0015): standalone remote forge management surface.
         // Advertised per release milestone so old clients don't call the new RPCs blind.
         // NOTE: spec 07 describes capabilities as an array of strings, but the daemon
@@ -6057,6 +6114,22 @@ export const PluginDisableResponseSchema = pluginActionResponse("plugin.disable.
 export const PluginRemoveResponseSchema = z.object({
   type: z.literal("plugin.remove.response"),
   payload: z.object({ requestId: z.string() }).strict(),
+});
+
+export const PluginRpcSubscribeResponseSchema = z.object({
+  type: z.literal("plugin.rpc.subscribe.response"),
+  payload: z.object({ requestId: z.string(), subscriptionId: z.string() }),
+});
+
+/** A JSON subscription event. A `Uint8Array` event rides as binary opcode 0x20 instead. */
+export const PluginRpcEventSchema = z.object({
+  type: z.literal("plugin.rpc.event"),
+  payload: z.object({ subscriptionId: z.string(), event: z.unknown() }),
+});
+
+export const PluginRpcClosedSchema = z.object({
+  type: z.literal("plugin.rpc.closed"),
+  payload: z.object({ subscriptionId: z.string(), error: z.string().optional() }),
 });
 
 export const AgentTimelineAppendResponseSchema = z.object({
@@ -7983,6 +8056,8 @@ export function parseHubExecutionOutboundMessage(value: unknown): HubExecutionOu
 export type DaemonUpdateProgressMessage = z.infer<typeof DaemonUpdateProgressMessageSchema>;
 
 export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
+  SessionEventsSetSubscriptionResponseSchema,
+  SubscriptionReleaseResponseSchema,
   ...SpecModeResponseSchemas,
   ...DatabaseResponseSchemas,
   ...ArgoCdResponseSchemas,
@@ -8107,6 +8182,9 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   PluginEnableResponseSchema,
   PluginDisableResponseSchema,
   PluginRemoveResponseSchema,
+  PluginRpcSubscribeResponseSchema,
+  PluginRpcEventSchema,
+  PluginRpcClosedSchema,
   AgentTimelineAppendResponseSchema,
   PluginRpcInvokeResponseSchema,
   GetDaemonConfigResponseMessageSchema,

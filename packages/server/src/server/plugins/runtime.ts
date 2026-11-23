@@ -34,6 +34,10 @@ import type {
   PluginProviderMetadata,
 } from "./plugin-process-protocol.js";
 import { PluginProcessMessageSchema } from "./plugin-process-protocol.js";
+import {
+  BufferedPluginSubscription,
+  type PluginRuntimeSubscription,
+} from "./runtime-subscription.js";
 import { PluginSessionSocket } from "./session-socket.js";
 
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -71,6 +75,8 @@ interface LoadedPlugin {
   requirements: PluginRequirements | undefined;
   clientBundle: string;
   methods: ReadonlySet<string>;
+  subscriptionMethods: ReadonlySet<string>;
+  subscriptions: Map<string, BufferedPluginSubscription>;
   hooks: string[];
   providers: readonly PluginProviderMetadata[];
   child: PluginChild | null;
@@ -454,6 +460,40 @@ export class PluginRuntime {
     return this.request(loaded, { type: "invoke", requestId: randomUUID(), method, input });
   }
 
+  /** Starts one subscriber's handler in the plugin process. */
+  startSubscription(pluginId: string, method: string, input: unknown): PluginRuntimeSubscription {
+    const loaded = this.plugins.get(pluginId);
+    if (!loaded) throw new Error(`Plugin is not available: ${pluginId}`);
+    if (!loaded.subscriptionMethods.has(method))
+      throw new Error(`Plugin ${pluginId} does not contribute subscription ${method}`);
+    const subscriptionId = randomUUID();
+    const subscription = new BufferedPluginSubscription();
+    loaded.subscriptions.set(subscriptionId, subscription);
+    const ready = this.request(loaded, {
+      type: "subscribe",
+      requestId: randomUUID(),
+      subscriptionId,
+      method,
+      input,
+    }).then(
+      () => undefined,
+      (error: unknown) => {
+        loaded.subscriptions.delete(subscriptionId);
+        throw error;
+      },
+    );
+    return {
+      ready,
+      attach: (sink) => subscription.attach(sink),
+      release: () => {
+        subscription.released();
+        if (!loaded.subscriptions.delete(subscriptionId)) return;
+        if (loaded.child?.connected)
+          void send(loaded.child, { type: "unsubscribe", subscriptionId }).catch(() => undefined);
+      },
+    };
+  }
+
   emit<Name extends keyof PluginHookEvents>(name: Name, event: PluginHookEvents[Name]): void {
     for (const loaded of this.plugins.values()) {
       if (!loaded.hooks.includes(name)) {
@@ -667,6 +707,11 @@ export class PluginRuntime {
           if (message.type === "hook") {
             void send(child, { type: "hook.cancel", requestId }).catch(() => {});
           }
+          // The handler may still start after the daemon gave up on it.
+          if (message.type === "subscribe") {
+            const { subscriptionId } = message;
+            void send(child, { type: "unsubscribe", subscriptionId }).catch(() => {});
+          }
           reject(new Error(`Plugin RPC timed out: ${pluginId}.${message.type}`));
         },
         message.type === "tool.call" ? TOOL_CALL_TIMEOUT_MS : REQUEST_TIMEOUT_MS,
@@ -719,6 +764,8 @@ export class PluginRuntime {
         clientBundle: bundles.clientBundle ?? "",
         requirements: manifest.requirements,
         methods: new Set(),
+        subscriptionMethods: new Set(),
+        subscriptions: new Map(),
         hooks: [],
         providers: [],
         child: null,
@@ -871,6 +918,8 @@ export class PluginRuntime {
       clientBundle: bundles.clientBundle ?? "",
       requirements: manifest.requirements,
       methods: new Set(ready.methods),
+      subscriptionMethods: new Set(ready.subscriptions ?? []),
+      subscriptions: new Map(),
       hooks: ready.hooks ?? [],
       providers: ready.providers ?? [],
       child,
@@ -970,6 +1019,16 @@ export class PluginRuntime {
     }
     if (message.type.startsWith("provider.")) {
       this.handleProviderMessage(loaded, message);
+      return;
+    }
+    if (message.type === "subscription.event") {
+      loaded.subscriptions.get(message.subscriptionId)?.event(message.event);
+      return;
+    }
+    if (message.type === "subscription.closed") {
+      const subscription = loaded.subscriptions.get(message.subscriptionId);
+      loaded.subscriptions.delete(message.subscriptionId);
+      subscription?.closed(message.error);
       return;
     }
     if (message.type !== "result" && message.type !== "error") return;
@@ -1330,12 +1389,16 @@ export class PluginRuntime {
     this.appendLog(loaded.id, "stdout", "[jagentdesk] Plugin stopped");
   }
 
+  /** Rejects in-flight requests and closes open subscriptions with the reason. */
   private rejectPending(loaded: LoadedPlugin, message: string): void {
     for (const invocation of loaded.pending.values()) {
       clearTimeout(invocation.timeout);
       invocation.reject(new Error(message));
     }
     loaded.pending.clear();
+    const subscriptions = [...loaded.subscriptions.values()];
+    loaded.subscriptions.clear();
+    for (const subscription of subscriptions) subscription.closed(message);
   }
 
   private appendLog(pluginId: string, stream: PluginLogEntry["stream"], message: string): void {

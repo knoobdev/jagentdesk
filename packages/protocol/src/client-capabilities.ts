@@ -1,4 +1,6 @@
 export const CLIENT_CAPS = {
+  pluginBinaryPayloads: "plugin_binary_payloads",
+  explicitEventSubscriptions: "explicit_event_subscriptions",
   // COMPAT(pluginTimelineItems): added in v0.9.59; remove after 2027-05-23 once the client floor supports plugin items.
   pluginTimelineItems: "plugin_timeline_items",
   // COMPAT(timelineNotifications): added in v0.9.59; remove after 2027-05-23 once the client floor supports notifications.

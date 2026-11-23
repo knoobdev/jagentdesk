@@ -39,6 +39,8 @@ export interface EvaluatedPlugin {
 
 export interface InstalledPlugin extends EvaluatedPlugin {
   lifetime: AbortController;
+  /** Subscribes to one of the plugin's server subscriptions; released with the lifetime. */
+  subscribe: import("@jagentdesk/plugin/client/host").PluginSubscribe;
   serverId: string;
   requirements?: PluginRequirements;
   clientBundle: string;

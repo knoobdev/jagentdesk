@@ -19,7 +19,9 @@ export function PluginRuntimeBoundary({
   return (
     <QueryClientProvider client={plugin.queryClient}>
       <JAgentDeskApiProvider jagentdesk={runtime.jagentdesk}>
-        <PluginRpcProvider invoke={runtime.invoke}>{children}</PluginRpcProvider>
+        <PluginRpcProvider invoke={runtime.invoke} subscribe={runtime.subscribe}>
+          {children}
+        </PluginRpcProvider>
       </JAgentDeskApiProvider>
     </QueryClientProvider>
   );

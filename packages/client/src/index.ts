@@ -90,6 +90,7 @@ export type SubscriptionSnapshot<T> = T & { subscriptionId: string };
 export interface SubscriptionObserver<T> {
   snapshot(snapshot: T): void;
   update(message: SessionOutboundMessage): void;
+  binary?(payload: Uint8Array): void;
   error?(error: unknown): void;
 }
 export interface OwnedSubscription<T> {

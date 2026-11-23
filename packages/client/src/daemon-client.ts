@@ -1,3 +1,8 @@
+import { OwnedSubscriptions, type OwnedSubscription } from "./connection/owned.js";
+import {
+  SessionEventSubscriptionSchema,
+  type SessionEventSubscription,
+} from "@jagentdesk/protocol/messages";
 import { messageTooLargeError } from "./daemon-client-transport-utils.js";
 import { MAX_WEBSOCKET_MESSAGE_BYTES } from "@jagentdesk/protocol/websocket-message-limit";
 import type {
@@ -332,6 +337,11 @@ import {
   FileTransferOpcode,
   TerminalStreamOpcode,
   type FileTransferFrame,
+  assertPluginWireValue,
+  decodePluginFrame,
+  encodePluginInputFrame,
+  isPluginFrameOpcode,
+  PluginFrameOpcode,
 } from "@jagentdesk/protocol/binary-frames/index";
 import {
   createRelayE2eeTransportFactory,
@@ -1872,6 +1882,51 @@ function assertTransportFrameFits(frame: string | Uint8Array | ArrayBuffer): voi
 }
 
 export class DaemonClient {
+  private readonly eventObservations = new Set<{
+    events: Set<SessionEventSubscription>;
+    subscription: OwnedSubscription<unknown>;
+  }>();
+
+  private deliverObservedEvents(message: SessionOutboundMessage): void {
+    const event = message.type === "status" ? `status.${message.payload.status}` : message.type;
+    for (const observation of this.eventObservations) {
+      const subscriptionId = observation.subscription.subscriptionId;
+      if (!subscriptionId || !observation.events.has(event as SessionEventSubscription)) continue;
+      this.owned.receiveForSubscription(subscriptionId, message);
+    }
+  }
+
+  private readonly automaticEvents = new Map<string, OwnedSubscription<unknown>>();
+  private syncEventDemand(type: string): void {
+    if (
+      this.config.capabilities?.[CLIENT_CAPS.explicitEventSubscriptions] === false ||
+      this.lastServerInfoMessage?.features?.explicitEventSubscriptions !== true
+    )
+      return;
+    if (this.automaticEvents.has(type)) return;
+    const events =
+      type === "status"
+        ? SessionEventSubscriptionSchema.options.filter((event) => event.startsWith("status."))
+        : SessionEventSubscriptionSchema.options.filter((event) => event === type);
+    if (events.length) {
+      const subscription = this.observeEvents(events);
+      subscription.subscribe({ snapshot: () => undefined, update: () => undefined });
+      this.automaticEvents.set(type, subscription);
+    }
+  }
+
+  private readonly owned = new OwnedSubscriptions({
+    release: async (subscriptionId) => {
+      const requestId = this.createRequestId();
+      await this.sendCorrelatedSessionRequest({
+        requestId,
+        message: { type: "subscription.release.request", requestId, subscriptionId },
+        responseType: "subscription.release.response",
+      });
+    },
+    failed: (error) => this.logger.error({ err: error }, "Plugin subscription failed"),
+  });
+
   private transport: DaemonTransport | null = null;
   private transportCleanup: Array<() => void> = [];
   private rawMessageListeners: Set<(message: SessionOutboundMessage) => void> = new Set();
@@ -2087,6 +2142,7 @@ export class DaemonClient {
       });
       this.transport = transport;
       this.lastServerInfoMessage = null;
+      this.owned.disconnected();
       this.registeredThisConnection = false;
 
       this.updateConnectionState(
@@ -2213,6 +2269,12 @@ export class DaemonClient {
   }
 
   async close(): Promise<void> {
+    await Promise.all(
+      [...this.eventObservations].map(({ subscription }) => subscription.release()),
+    );
+    await this.owned.close();
+    this.eventObservations.clear();
+    this.automaticEvents.clear();
     if (this.connectionState.status === "disposed") {
       return;
     }
@@ -2235,6 +2297,7 @@ export class DaemonClient {
     this.fileSubscriptions.clear();
     this.logSubscriptions.clear();
     this.lastServerInfoMessage = null;
+    this.owned.disconnected();
     if (this.runtimeMetricsInterval) {
       clearInterval(this.runtimeMetricsInterval);
       this.runtimeMetricsInterval = null;
@@ -2398,8 +2461,9 @@ export class DaemonClient {
       this.messageHandlers.set(type, new Set());
     }
     this.messageHandlers.get(type)!.add(handler);
+    this.syncEventDemand(type);
 
-    return () => {
+    const release = () => {
       const handlers = this.messageHandlers.get(type);
       if (!handlers) {
         return;
@@ -2407,8 +2471,16 @@ export class DaemonClient {
       handlers.delete(handler);
       if (handlers.size === 0) {
         this.messageHandlers.delete(type);
+        const observation = this.automaticEvents.get(type);
+        this.automaticEvents.delete(type);
+        void observation
+          ?.release()
+          .catch((error) => this.logger.warn({ err: error }, "Event subscription release failed"));
       }
     };
+    return Object.assign(release, {
+      ready: this.automaticEvents.get(type)?.ready ?? Promise.resolve(),
+    });
   }
 
   onAgentAttentionRequired(
@@ -2578,6 +2650,8 @@ export class DaemonClient {
     timeout?: number;
     select: (msg: SessionOutboundMessage) => T | null;
     options?: { skipQueue?: boolean };
+    /** Sends the request in another form, such as a binary frame; defaults to `message`. */
+    transmit?: () => Promise<void>;
   }): Promise<T> {
     const timeout = params.timeout ?? DEFAULT_SESSION_RPC_TIMEOUT_MS;
     const { promise, cancel } = this.waitForWithCancel<RpcWaitResult<T>>(
@@ -2604,7 +2678,8 @@ export class DaemonClient {
     );
 
     try {
-      await this.sendSessionMessageOrThrow(params.message);
+      if (params.transmit) await params.transmit();
+      else await this.sendSessionMessageOrThrow(params.message);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       cancel(err);
@@ -2629,12 +2704,14 @@ export class DaemonClient {
     responseType: TResponseType;
     options?: { skipQueue?: boolean };
     selectPayload?: (payload: CorrelatedResponsePayload<TResponseType>) => TResult | null;
+    transmit?: () => Promise<void>;
   }): Promise<TResult> {
     return this.sendRequest({
       requestId: params.requestId,
       message: params.message,
       timeout: params.timeout,
       options: params.options,
+      ...(params.transmit ? { transmit: params.transmit } : {}),
       select: (msg) => {
         const correlated = msg as CorrelatedResponseMessage;
         if (correlated.type !== params.responseType) {
@@ -6199,20 +6276,105 @@ export class DaemonClient {
     return payload.plugins;
   }
 
+  /**
+   * A `Uint8Array` input or output crosses the wire as a binary frame. Any other value is JSON and
+   * must not contain a `Uint8Array`.
+   */
   async invokePluginRpc(pluginId: string, method: string, input: unknown): Promise<unknown> {
+    assertPluginWireValue(input, "input");
     const requestId = this.createRequestId();
-    const payload = await this.sendCorrelatedSessionRequest({
-      requestId,
-      message: {
-        type: "plugin.rpc.invoke.request",
+    if (!(input instanceof Uint8Array)) {
+      const payload = await this.sendCorrelatedSessionRequest({
         requestId,
-        pluginId,
-        method,
-        input,
-      },
+        message: {
+          type: "plugin.rpc.invoke.request",
+          requestId,
+          pluginId,
+          method,
+          input,
+        },
+        responseType: "plugin.rpc.invoke.response",
+      });
+      return payload.output;
+    }
+    this.requirePluginSubscriptions();
+    const frame = encodePluginInputFrame({ requestId, pluginId, method, payload: input });
+    const payload = await this.sendCorrelatedRequest({
+      requestId,
+      message: { type: "plugin.rpc.invoke.request", requestId, pluginId, method, input: null },
       responseType: "plugin.rpc.invoke.response",
+      options: { skipQueue: true },
+      transmit: async () => this.sendBinaryFrame(frame),
     });
     return payload.output;
+  }
+
+  /** One subscription to a plugin subscription handler; events arrive as updates and binary. */
+  observePluginRpc(
+    pluginId: string,
+    method: string,
+    input: unknown,
+    options?: { signal?: AbortSignal },
+  ): OwnedSubscription<CorrelatedResponsePayload<"plugin.rpc.subscribe.response">> {
+    assertPluginWireValue(input, "input");
+    return this.owned.observe(async (accept) => {
+      this.requirePluginSubscriptions();
+      const requestId = this.createRequestId();
+      const result = await this.sendCorrelatedSessionRequest({
+        requestId,
+        message: { type: "plugin.rpc.subscribe.request", requestId, pluginId, method, input },
+        responseType: "plugin.rpc.subscribe.response",
+        selectPayload: (payload) => {
+          accept(payload);
+          return payload;
+        },
+      });
+      return result;
+    }, options?.signal);
+  }
+
+  observeEvents(
+    events: SessionEventSubscription[],
+    options?: { signal?: AbortSignal; notifications?: boolean },
+  ): OwnedSubscription<CorrelatedResponsePayload<"session.events.set_subscription.response">> {
+    const subscription = this.owned.observe<
+      CorrelatedResponsePayload<"session.events.set_subscription.response">
+    >(async (accept) => {
+      if (this.lastServerInfoMessage?.features?.explicitEventSubscriptions !== true)
+        throw new Error("Update the host to observe session events");
+      const requestId = this.createRequestId();
+      return this.sendCorrelatedSessionRequest({
+        requestId,
+        message: {
+          type: "session.events.set_subscription.request",
+          requestId,
+          events,
+          notifications: options?.notifications,
+        },
+        responseType: "session.events.set_subscription.response",
+        selectPayload: (payload) => {
+          accept(payload);
+          return payload;
+        },
+      });
+    }, options?.signal);
+    const observation = { events: new Set(events), subscription };
+    if (options?.signal?.aborted) return subscription;
+    this.eventObservations.add(observation);
+    const forget = () => this.eventObservations.delete(observation);
+    options?.signal?.addEventListener("abort", forget, { once: true });
+    const release = subscription.release;
+    subscription.release = () => {
+      this.eventObservations.delete(observation);
+      options?.signal?.removeEventListener("abort", forget);
+      return release();
+    };
+    return subscription;
+  }
+
+  private requirePluginSubscriptions(): void {
+    if (this.lastServerInfoMessage?.features?.pluginSubscriptions !== true)
+      throw new Error("Update the host to use plugin subscriptions and binary plugin RPC");
   }
 
   async getPluginLogs(pluginId: string): Promise<PluginLogEntry[]> {
@@ -10829,6 +10991,8 @@ export class DaemonClient {
             [CLIENT_CAPS.customModeIcons]: true,
             [CLIENT_CAPS.reasoningMergeEnum]: true,
             [CLIENT_CAPS.pluginTimelineItems]: true,
+            [CLIENT_CAPS.pluginBinaryPayloads]: true,
+            [CLIENT_CAPS.explicitEventSubscriptions]: true,
             [CLIENT_CAPS.timelineNotifications]: true,
             [CLIENT_CAPS.terminalReflowableSnapshot]: true,
             [CLIENT_CAPS.providerSubagents]: true,
@@ -11193,6 +11357,23 @@ export class DaemonClient {
     }
   }
 
+  private handlePluginFrame(rawBytes: Uint8Array): void {
+    const frame = decodePluginFrame(rawBytes);
+    this.consecutiveLivenessFailures = 0;
+    this.runtimeMetrics?.recordBinaryFrame("other", rawBytes.byteLength, 0);
+    if (frame?.opcode === PluginFrameOpcode.Event) {
+      this.owned.receiveBinary(frame.subscriptionId, frame.payload);
+      return;
+    }
+    if (frame?.opcode === PluginFrameOpcode.Output) {
+      // The binary form of plugin.rpc.invoke.response.
+      this.resolveWaiters({
+        type: "plugin.rpc.invoke.response",
+        payload: { requestId: frame.requestId, output: frame.payload },
+      });
+    }
+  }
+
   private tryHandleBinaryFrame(rawBytes: Uint8Array): boolean {
     if (rawBytes[0] === ScreenFrameOpcode) {
       const screenFrame = decodeScreenFrame(rawBytes);
@@ -11200,6 +11381,10 @@ export class DaemonClient {
       this.consecutiveLivenessFailures = 0;
       this.screenFrameHandlers.get(screenFrame.subscriptionId)?.(screenFrame);
       this.runtimeMetrics?.recordBinaryFrame("other", rawBytes.byteLength, 0);
+      return true;
+    }
+    if (isPluginFrameOpcode(rawBytes[0])) {
+      this.handlePluginFrame(rawBytes);
       return true;
     }
     const fileFrame = decodeFileTransferFrame(rawBytes);
@@ -11346,6 +11531,7 @@ export class DaemonClient {
     this.rejectPingProbe(new DaemonConnectionError(reason ?? "Connection lost"));
     this.terminalStreams.clearSlots();
     this.lastServerInfoMessage = null;
+    this.owned.disconnected();
 
     if (wasDisposed) {
       this.rejectConnect(new Error(reason ?? "Daemon client is disposed"));
@@ -11438,6 +11624,8 @@ export class DaemonClient {
 
   private handleClusterPushMessage(msg: SessionOutboundMessage): boolean {
     const consumerMessage = normalizeProviderSnapshotUpdateMessage(msg);
+    this.owned.receive(consumerMessage);
+    this.deliverObservedEvents(consumerMessage);
 
     if (consumerMessage.type === "cluster/logs/chunk") {
       this.logSubscriptions.get(consumerMessage.subscriptionId)?.onChunk(consumerMessage.chunk);
@@ -11476,6 +11664,8 @@ export class DaemonClient {
           this.resetConnectTimeout();
           this.reconnectAttempt = 0;
           this.updateConnectionState({ status: "connected" }, { event: "HELLO_SERVER_INFO" });
+          this.owned.restore();
+          for (const type of this.messageHandlers.keys()) this.syncEventDemand(type);
           this.startLivenessHeartbeat();
           this.resubscribeCheckoutDiffSubscriptions();
           this.resubscribeTerminalDirectorySubscriptions();
@@ -11735,3 +11925,5 @@ function resolveAgentConfig(options: CreateAgentRequestOptions): AgentSessionCon
     cwd: merged.cwd,
   };
 }
+
+export type { OwnedSubscription } from "./connection/owned.js";

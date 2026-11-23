@@ -60,6 +60,9 @@ function plugin(onAgentSelect: AgentCommandItem["onSelect"]): InstalledPlugin {
     id: "review",
     serverId: "host-1",
     clientBundle: "bundle",
+    subscribe: () => {
+      throw new Error("No subscriptions in this test");
+    },
     lifetime: new AbortController(),
     queryClient: new QueryClient(),
     cleanup: () => {},
@@ -129,6 +132,9 @@ function createRuntime(installed: InstalledPlugin) {
   });
   return {
     jagentdesk: createJAgentDeskApi(client),
+    subscribe: () => {
+      throw new Error("Subscriptions are not used here");
+    },
     invoke: async (method: string, input: unknown) => {
       expect(installed.id).toBe("review");
       expect(method).toBe("review.inspect");

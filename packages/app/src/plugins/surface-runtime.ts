@@ -1,3 +1,5 @@
+import { createPluginSubscribe } from "./subscriptions";
+import type { PluginSubscribe } from "@jagentdesk/plugin/client/host";
 import { useEffect, useState } from "react";
 import type { InstalledPlugin } from "./types";
 import { createJAgentDeskApi, type JAgentDeskApi } from "@jagentdesk/client";
@@ -5,6 +7,7 @@ import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 
 export interface PluginSurfaceRuntime {
   jagentdesk: JAgentDeskApi;
+  subscribe: PluginSubscribe;
   invoke(method: string, input: unknown): Promise<unknown>;
 }
 
@@ -16,6 +19,11 @@ export function createPluginSurfaceRuntime(
   return {
     jagentdesk: createJAgentDeskApi(client, { signal: plugin.lifetime.signal }),
     invoke: (method, input) => client.invokePluginRpc(plugin.id, method, input),
+    subscribe: createPluginSubscribe({
+      client,
+      pluginId: plugin.id,
+      lifetime: plugin.lifetime.signal,
+    }),
   };
 }
 
