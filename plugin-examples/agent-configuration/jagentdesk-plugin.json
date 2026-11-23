@@ -1,6 +1,6 @@
 {
   "id": "agent-configuration",
   "requirements": {
-    "jagentdesk": ">=0.14.0-beta.1"
+    "jagentdesk": ">=0.9.59"
   }
 }

@@ -1,4 +1,6 @@
 {
   "id": "agent-tools",
-  "requirements": { "jagentdesk": ">=0.14.0-beta.1" }
+  "requirements": {
+    "jagentdesk": ">=0.9.59"
+  }
 }

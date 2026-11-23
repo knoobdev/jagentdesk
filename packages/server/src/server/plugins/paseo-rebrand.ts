@@ -24,7 +24,7 @@ const SKIP_DIRECTORIES = new Set(["node_modules", ".git", ".turbo", ".next"]);
  * Paseo release, plus the pre-split plugins it still loads. Bump the upper bound when a Paseo
  * release is ported.
  */
-export const SUPPORTED_PASEO_PLUGIN_API = ">=0.8.0-0 <=0.10.2";
+export const SUPPORTED_PASEO_PLUGIN_API = ">=0.8.0-0 <=0.17.3";
 
 // The SDK specifier inside an import/require/export string: the quote, the scope, and an
 // optional subpath. The fork publishes the same SDK subpaths as Paseo (., ./client,
