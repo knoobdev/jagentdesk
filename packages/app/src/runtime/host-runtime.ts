@@ -1,3 +1,9 @@
+import { createHostLogger } from "./host-logger";
+import {
+  nativeWebSocketFactory,
+  defaultWebSocketFactory,
+} from "@jagentdesk/client/internal/daemon-client-transport";
+import { HostConfirmations, type HostConfirmationRequest } from "./host-confirmation";
 import { useSyncExternalStore, useMemo } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import equal from "fast-deep-equal/es6";
@@ -48,7 +54,7 @@ import { getRelayDeviceSigning, prepareRelayDeviceSigning } from "@/utils/relay-
 import { resolveAppVersion } from "@/utils/app-version";
 import { ConnectionOfferSchema, type ConnectionOffer } from "@jagentdesk/protocol/connection-offer";
 import { shouldUseDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
-import { isWeb } from "@/constants/platform";
+import { isWeb, isNative } from "@/constants/platform";
 import { connectToDaemon } from "@/utils/test-daemon-connection";
 import { getOrCreateClientId } from "@/utils/client-id";
 import {
@@ -225,7 +231,8 @@ export interface HostRuntimeStartOptions {
 
 const PROBE_TICK_MS = 2_000;
 const PROBE_STEADY_MS = 10_000;
-const PROBE_INACTIVE_WHILE_ONLINE_MS = 120_000;
+const PROBE_INACTIVE_WHILE_ONLINE_INITIAL_MS = 120_000;
+const PROBE_INACTIVE_WHILE_ONLINE_MAX_MS = 30 * 60_000;
 const DEFAULT_AGENT_DIRECTORY_PAGE_LIMIT = 200;
 const CONFIGURED_OVERRIDE_BOOTSTRAP_RETRY_MS = 1_000;
 // A local host that fails to connect this many times in a row stops auto-retrying
@@ -574,11 +581,13 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
       const localTransportFactory = createDesktopLocalDaemonTransportFactory();
       const base = {
         suppressSendErrors: true,
+        webSocketFactory: isNative ? nativeWebSocketFactory : defaultWebSocketFactory,
         clientId,
         clientType: "mobile" as const,
         appVersion: resolveAppVersion() ?? undefined,
         runtimeGeneration,
         capabilities: appCapabilities,
+        logger: createHostLogger(() => host.serverId),
       };
       if (connection.type === "directSocket" || connection.type === "directPipe") {
         return new DaemonClient({
@@ -691,6 +700,7 @@ export class HostRuntimeController {
   private started = false;
   private connectionFirstSeenAt = new Map<string, number>();
   private connectionLastProbedAt = new Map<string, number>();
+  private inactiveOnlineProbeBackoffStep = 0;
   private clientIdPromise: Promise<string> | null = null;
   private clientIdHash: string | null = null;
   private switchRequestVersion = 0;
@@ -859,6 +869,7 @@ export class HostRuntimeController {
   }
 
   async updateHost(host: HostProfile): Promise<void> {
+    if (!equal(this.host.connections, host.connections)) this.resetInactiveOnlineProbeBackoff();
     const activeConnectionId = this.snapshot.activeConnectionId;
     const previousActiveConnection = findConnectionById(this.host, activeConnectionId);
     const preferredChanged = host.preferredConnectionId !== this.host.preferredConnectionId;
@@ -952,6 +963,7 @@ export class HostRuntimeController {
   }
 
   ensureConnected(): void {
+    this.resetInactiveOnlineProbeBackoff();
     this.activeClient?.ensureConnected();
   }
 
@@ -1045,6 +1057,7 @@ export class HostRuntimeController {
     }
     const online = activeAllowed && this.snapshot.connectionStatus === "online";
     const probes = new Map(this.snapshot.probeByConnectionId);
+    let sampledInactive = false;
     // A disconnected active socket gets one reconnect round. If that fails,
     // proceed through the other routes immediately; never wait for max backoff.
     const ordered =
@@ -1062,15 +1075,40 @@ export class HostRuntimeController {
         online &&
         lastProbed !== undefined &&
         now - lastProbed <
-          (connectionId === activeId ? PROBE_STEADY_MS : PROBE_INACTIVE_WHILE_ONLINE_MS)
+          (connectionId === activeId ? PROBE_STEADY_MS : this.inactiveOnlineProbeIntervalMs())
       )
         continue;
+      if (online && connectionId !== activeId) sampledInactive = true;
       this.connectionLastProbedAt.set(connectionId, now);
       probes.set(connectionId, { status: "pending", latencyMs: null });
       this.updateSnapshot({ probeByConnectionId: new Map(probes) });
       if (await this.probeConnection({ connection, online, activeId, requestVersion, probes }))
         return;
     }
+    // Ordered routing keeps a healthy socket selected. Back off diagnostic probes
+    // only while that same socket stayed online throughout this cycle.
+    if (
+      sampledInactive &&
+      this.isCurrentProbeRequest(requestVersion) &&
+      this.snapshot.connectionStatus === "online" &&
+      this.snapshot.activeConnectionId === activeId
+    ) {
+      this.advanceInactiveOnlineProbeBackoff();
+    }
+  }
+
+  private inactiveOnlineProbeIntervalMs(): number {
+    return Math.min(
+      PROBE_INACTIVE_WHILE_ONLINE_INITIAL_MS * 2 ** this.inactiveOnlineProbeBackoffStep,
+      PROBE_INACTIVE_WHILE_ONLINE_MAX_MS,
+    );
+  }
+  private advanceInactiveOnlineProbeBackoff(): void {
+    if (this.inactiveOnlineProbeIntervalMs() < PROBE_INACTIVE_WHILE_ONLINE_MAX_MS)
+      this.inactiveOnlineProbeBackoffStep += 1;
+  }
+  private resetInactiveOnlineProbeBackoff(): void {
+    this.inactiveOnlineProbeBackoffStep = 0;
   }
 
   private async probeConnection(input: {
@@ -1197,6 +1235,7 @@ export class HostRuntimeController {
     if (previousState.tag !== "online" && nextState.tag === "online") {
       this.connectionEpoch += 1;
     }
+    if (previousState.tag !== nextState.tag) this.resetInactiveOnlineProbeBackoff();
     this.connectionMachineState = nextState;
     this.logConnectionTransition({
       from: previousState.tag,
@@ -1539,6 +1578,8 @@ export class HostRuntimeStore {
   private directorySyncByServer = new Map<string, DirectorySync>();
   private configuredOverrideBootstrapInFlight: Promise<void> | null = null;
   private bootPromise: Promise<void> | null = null;
+  private registryLoad: Promise<void> | null = null;
+  private readonly hostConfirmations = new HostConfirmations();
   private connectionMode: ConnectionMode | null = null;
   private connectionModeUnsubscribe: (() => void) | null = null;
   private storage: HostRuntimeStorage;
@@ -1756,8 +1797,7 @@ export class HostRuntimeStore {
     const override = readConfiguredLocalDaemonOverride();
     await this.loadTimingOutHosts();
     await this.loadHostBackups();
-    await this.loadFromStorage();
-    this.markHostRegistryLoaded();
+    await this.loadRegistry();
 
     let isE2E: string | null = null;
     try {
@@ -1792,6 +1832,26 @@ export class HostRuntimeStore {
     } else {
       await this.bootstrapDefaultLocalhost();
     }
+  }
+
+  private loadRegistry(): Promise<void> {
+    this.registryLoad ??= this.loadFromStorage().then(() => this.markHostRegistryLoaded());
+    return this.registryLoad;
+  }
+
+  async confirmConnectionOffer(offer: ConnectionOffer, signal?: AbortSignal): Promise<boolean> {
+    await this.loadRegistry();
+    return this.hostConfirmations.confirmLink(offer, this.hosts, signal);
+  }
+
+  getPendingHostConfirmation(): HostConfirmationRequest | null {
+    return this.hostConfirmations.getPending();
+  }
+  subscribeHostConfirmation(listener: () => void): () => void {
+    return this.hostConfirmations.subscribe(listener);
+  }
+  answerHostConfirmation(id: number, approved: boolean): void {
+    this.hostConfirmations.answer(id, approved);
   }
 
   private async loadFromStorage(): Promise<void> {
@@ -2132,7 +2192,7 @@ export class HostRuntimeStore {
     offerUrlOrFragment: string,
     label?: string,
     pairingCode?: string,
-  ): Promise<HostProfile> {
+  ): Promise<HostProfile | null> {
     const marker = "#offer=";
     const idx = offerUrlOrFragment.indexOf(marker);
     if (idx === -1) {
@@ -2144,6 +2204,7 @@ export class HostRuntimeStore {
     }
     const payload = decodeOfferFragmentPayload(encoded);
     const offer = ConnectionOfferSchema.parse(payload);
+    if (!(await this.confirmConnectionOffer(offer))) return null;
     return this.upsertConnectionFromOffer(offer, label, pairingCode);
   }
 
@@ -2997,6 +3058,24 @@ export function useHostRegistryLoaded(): boolean {
   );
 }
 
+export function useHostConfirmation() {
+  const store = getHostRuntimeStore();
+  const pending = useSyncExternalStore(
+    (listener) => store.subscribeHostConfirmation(listener),
+    () => store.getPendingHostConfirmation(),
+    () => store.getPendingHostConfirmation(),
+  );
+  return useMemo(
+    () => ({
+      pending,
+      answer: (approved: boolean) => {
+        if (pending) store.answerHostConfirmation(pending.id, approved);
+      },
+    }),
+    [pending, store],
+  );
+}
+
 export interface HostMutations {
   upsertDirectConnection: (input: {
     serverId: string;
@@ -3029,7 +3108,7 @@ export interface HostMutations {
     offerUrlOrFragment: string,
     label?: string,
     pairingCode?: string,
-  ) => Promise<HostProfile>;
+  ) => Promise<HostProfile | null>;
   renameHost: (serverId: string, label: string) => Promise<void>;
   setHostColor: (serverId: string, color: HostColor) => Promise<void>;
   setHostBadgeDisplay: (serverId: string, badgeDisplay: HostBadgeDisplay) => Promise<void>;

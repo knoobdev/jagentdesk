@@ -1414,6 +1414,19 @@ export const ja: TranslationResources = {
     },
   },
   pairing: {
+    hostConfirmation: {
+      title: "Connect to this host?",
+      description: "This link adds a new host. Check its address and key before connecting.",
+      descriptionChanged:
+        "This link changes a saved host. Check the previous and new values before connecting.",
+      hostLabel: "Host",
+      fingerprintLabel: "New daemon key fingerprint (SHA-256)",
+      routesLabel: "New connections",
+      previousRoutesLabel: "Previous connections",
+      previousFingerprintLabel: "Previous daemon key fingerprint (SHA-256)",
+      keyChanged: "Warning: the daemon key has changed. Verify this change with the host owner.",
+      connect: "Connect",
+    },
     verify: {
       failed: "Pairing failed",
       saveFailed:

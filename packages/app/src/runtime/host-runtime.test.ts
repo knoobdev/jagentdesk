@@ -954,6 +954,39 @@ describe("HostRuntimeController", () => {
     );
   });
 
+  it("exponentially backs off alternate probes and resets on foreground verification", async () => {
+    useHostRuntimeClock();
+    const clients: FakeDaemonClient[] = [];
+    const host = makeHost({ preferredConnectionId: "direct:lan:6767" });
+    const controller = new HostRuntimeController({
+      host,
+      deps: makeDeps({ "direct:lan:6767": 200, "tailnet:tailnet.localhost:8082:443": 5 }, clients),
+    });
+    await controller.start({ autoProbe: false });
+    const active = controller.getSnapshot().client;
+    await controller.runProbeCycleNow();
+    expect(clients).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(120_000);
+    await controller.runProbeCycleNow();
+    expect(clients).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(120_000);
+    await controller.runProbeCycleNow();
+    expect(clients).toHaveLength(3);
+    await vi.advanceTimersByTimeAsync(240_000);
+    await controller.runProbeCycleNow();
+    expect(clients).toHaveLength(3);
+    await vi.advanceTimersByTimeAsync(240_000);
+    await controller.runProbeCycleNow();
+    expect(clients).toHaveLength(4);
+    expect(controller.getSnapshot().client).toBe(active);
+    controller.ensureConnected();
+    await vi.advanceTimersByTimeAsync(120_000);
+    await controller.runProbeCycleNow();
+    expect(clients).toHaveLength(5);
+    expect(controller.getSnapshot().client).toBe(active);
+    await controller.stop();
+  });
+
   it("keeps the preferred live connection despite faster alternatives", async () => {
     useHostRuntimeClock();
     const host = makeHost({ preferredConnectionId: "direct:lan:6767" });

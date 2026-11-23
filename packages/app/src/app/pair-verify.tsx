@@ -5,7 +5,7 @@ import { Alert, Text, TextInput, View } from "react-native";
 import { useLocalSearchParams, useRouter, type Href } from "expo-router";
 import { StyleSheet } from "react-native-unistyles";
 import { BackHeader } from "@/components/headers/back-header";
-import { useHostMutations } from "@/runtime/host-runtime";
+import { getHostRuntimeStore, useHostMutations } from "@/runtime/host-runtime";
 import { connectToDaemon } from "@/utils/test-daemon-connection";
 import { decodeOfferFragmentPayload } from "@/utils/daemon-endpoints";
 import { ConnectionOfferSchema } from "@jagentdesk/protocol/connection-offer";
@@ -140,6 +140,33 @@ export default function PairVerifyScreen() {
     }
   }, [offerUrl]);
 
+  const [confirmedOffer, setConfirmedOffer] = useState<typeof offer>(null);
+  useEffect(() => {
+    if (!offer) return;
+    let active = true;
+    const store = getHostRuntimeStore();
+    const confirmationAbort = new AbortController();
+    void store
+      .confirmConnectionOffer(offer, confirmationAbort.signal)
+      .then(async (approved) => {
+        if (!active) return;
+        if (approved) setConfirmedOffer(offer);
+        else {
+          await clearPendingPairingOffer();
+          if (active) router.back();
+        }
+        return undefined;
+      })
+      .catch((error) => {
+        if (active) setAttemptError(error instanceof Error ? error.message : String(error));
+      });
+    return () => {
+      active = false;
+      confirmationAbort.abort();
+    };
+  }, [offer, router]);
+  const offerConfirmed = offer !== null && confirmedOffer === offer;
+
   const tailscaleReady = Boolean(offer?.relay) || isTailscaleReady(tailscaleLoginStatus);
   const shouldRouteToLogin =
     !offer?.relay && shouldRoutePairVerifyToTailscaleLogin(tailscaleLoginStatus);
@@ -162,15 +189,15 @@ export default function PairVerifyScreen() {
   }, []);
 
   useEffect(() => {
-    if (!offer || !offerPersisted || !shouldRouteToLogin) {
+    if (!offerConfirmed || !offer || !offerPersisted || !shouldRouteToLogin) {
       return;
     }
     router.replace("/tailscale-login?returnTo=pair-verify" as Href);
-  }, [offer, offerPersisted, router, shouldRouteToLogin]);
+  }, [offerConfirmed, offer, offerPersisted, router, shouldRouteToLogin]);
 
   const createConnectionAttempt = useCallback(
     (pairingCode?: string) => {
-      if (!offer) return null;
+      if (!offerConfirmed || !offer) return null;
       if (connectionAttemptRef.current && !pairingCode) return connectionAttemptRef.current;
       if (pairingCode) {
         pairingCodeRejecterRef.current?.(new Error("Pairing confirmation socket replaced"));
@@ -211,7 +238,7 @@ export default function PairVerifyScreen() {
         });
       return attempt;
     },
-    [offer, pairingCodeProvider],
+    [offerConfirmed, offer, pairingCodeProvider],
   );
 
   useEffect(() => {
@@ -302,6 +329,7 @@ export default function PairVerifyScreen() {
           value={code}
           onChangeText={handleCodeChange}
           keyboardType="number-pad"
+          editable={offerConfirmed && !busy}
           maxLength={6}
           autoFocus
           placeholder="000000"

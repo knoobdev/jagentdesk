@@ -1,3 +1,4 @@
+import { HostConfirmationSheet } from "@/hosts/host-confirmation-sheet";
 import "@/styles/unistyles";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 import { PortalProvider } from "@gorhom/portal";
@@ -786,6 +787,7 @@ function ProvidersWrapper({ children }: { children: ReactNode }) {
     <VoiceProvider>
       <DesktopWindowControlsSync enabled={!settingsLoading} />
       <OfferLinkListener />
+      <HostConfirmationSheet />
       <HostSessionManager />
       <ConnectionNotifications />
       <ForumNotifications />

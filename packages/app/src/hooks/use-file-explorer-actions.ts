@@ -252,6 +252,21 @@ export function useFileExplorerActions(params: { serverId: string } & FileExplor
     [client, normalizedWorkspaceRoot, t],
   );
 
+  const requestFileBytes = useCallback(
+    async (path: string, maxBytes: number) => {
+      if (!normalizedWorkspaceRoot) {
+        throw new Error(t("workspace.fileExplorer.states.unavailable"));
+      }
+      if (!client) {
+        throw new Error(t("workspace.terminal.hostDisconnected"));
+      }
+      // No request timeout: a large file over a slow relay legitimately takes longer than the
+      // 60 s default, and a dead connection still rejects on disconnect.
+      return client.readFile(normalizedWorkspaceRoot, path, undefined, maxBytes, 0);
+    },
+    [client, normalizedWorkspaceRoot, t],
+  );
+
   const selectExplorerEntry = useCallback(
     (path: string | null) => {
       updateExplorerState((state) => ({
@@ -267,6 +282,7 @@ export function useFileExplorerActions(params: { serverId: string } & FileExplor
     requestDirectoryListing,
     requestFilePreview,
     requestFileDownloadToken,
+    requestFileBytes,
     selectExplorerEntry,
   };
 }

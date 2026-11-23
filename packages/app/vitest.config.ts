@@ -77,10 +77,13 @@ export default defineConfig({
     // Bundle the CJS dependencies of the excluded gesture-handler package for the browser.
     include: [
       "react/jsx-runtime",
+      "react/jsx-dev-runtime",
       "react-native-gesture-handler > hoist-non-react-statics",
       "react-native-gesture-handler > invariant",
     ],
     exclude: [
+      // Expo core has web modules that must pass through the platform resolver.
+      "expo-modules-core",
       "react-native-reanimated",
       "react-native-gesture-handler",
       "react-native-keyboard-controller",

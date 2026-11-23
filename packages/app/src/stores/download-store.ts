@@ -15,6 +15,16 @@ interface DownloadProgress {
   eta: number;
 }
 
+// The session path holds the file in memory two to three times over (client chunks, the
+// concatenated result, then the Blob or native write). Lift once the client streams chunks to disk.
+export const MAX_SESSION_DOWNLOAD_BYTES = 64 * 1024 * 1024;
+
+export interface DownloadedBytes {
+  bytes: Uint8Array;
+  fileName: string;
+  mimeType: string | null;
+}
+
 export interface Download {
   id: string;
   serverId: string;
@@ -36,11 +46,15 @@ interface DownloadState {
     fileName: string;
     path: string;
     daemonProfile: HostProfile | undefined;
+    activeConnectionId: string | null;
+    readFile: (path: string, maxBytes: number) => Promise<{ bytes: Uint8Array; size: number }>;
+    saveFile?: typeof saveDownloadedBytes;
     fetchFile?: typeof fetch;
     requestFileDownloadToken: (path: string) => Promise<{
       token: string | null;
       fileName: string | null;
       mimeType: string | null;
+      size: number | null;
       error: string | null;
     }>;
   }) => Promise<void>;
@@ -66,6 +80,9 @@ export const useDownloadStore = create<DownloadState>()((set, get) => ({
     fileName,
     path,
     daemonProfile,
+    activeConnectionId,
+    readFile,
+    saveFile = saveDownloadedBytes,
     requestFileDownloadToken,
     fetchFile = fetch,
   }) => {
@@ -90,12 +107,42 @@ export const useDownloadStore = create<DownloadState>()((set, get) => ({
         throw new Error(tokenResponse.error ?? i18n.t("downloads.requestTokenFailed"));
       }
 
-      const downloadTarget = resolveDaemonDownloadTarget(daemonProfile);
+      const resolvedFileName = tokenResponse.fileName ?? fileName;
+      const downloadTarget = resolveDaemonDownloadTarget(daemonProfile, activeConnectionId);
+      if (!downloadTarget) {
+        // Relay, SSH, socket and pipe hosts have no HTTP endpoint: read the file over the
+        // session socket that is already connected (#543).
+        if (
+          typeof tokenResponse.size === "number" &&
+          tokenResponse.size > MAX_SESSION_DOWNLOAD_BYTES
+        ) {
+          throw new Error(
+            i18n.t("composer.errors.fileTooLarge", { fileName: resolvedFileName, size: "64 MB" }),
+          );
+        }
+        const { bytes, size } = await readFile(path, MAX_SESSION_DOWNLOAD_BYTES);
+        // A daemon without a binary channel answers `encoding: "none"` for a binary file: no
+        // content, real size. Never save that as a complete download.
+        if (bytes.byteLength !== size) {
+          throw new Error(
+            `File transfer incomplete: expected ${size} bytes, received ${bytes.byteLength}.`,
+          );
+        }
+        const savedUri = await saveFile({
+          bytes,
+          fileName: resolvedFileName,
+          mimeType: tokenResponse.mimeType,
+        });
+        get().completeDownload(id);
+        if (savedUri !== null) {
+          await shareSavedFile(savedUri, tokenResponse.mimeType, resolvedFileName);
+        }
+        return;
+      }
       if (!downloadTarget.baseUrl) {
         throw new Error(i18n.t("downloads.hostUnavailable"));
       }
 
-      const resolvedFileName = tokenResponse.fileName ?? fileName;
       const downloadUrl = buildDownloadUrl(downloadTarget.baseUrl, tokenResponse.token);
 
       if (isWeb) {
@@ -144,14 +191,7 @@ export const useDownloadStore = create<DownloadState>()((set, get) => ({
 
       get().completeDownload(id);
 
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(result.uri, {
-          mimeType: tokenResponse.mimeType ?? undefined,
-          dialogTitle: resolvedFileName
-            ? i18n.t("downloads.shareFileNamed", { fileName: resolvedFileName })
-            : i18n.t("downloads.shareFile"),
-        });
-      }
+      await shareSavedFile(result.uri, tokenResponse.mimeType, resolvedFileName);
     } catch (error) {
       const message = error instanceof Error ? error.message : i18n.t("downloads.failed");
       if (isWeb) {
@@ -241,11 +281,12 @@ interface DownloadTarget {
   authHeader: string | null;
 }
 
-function resolveDaemonDownloadTarget(daemon?: HostProfile): DownloadTarget {
-  const connection = daemon?.connections.find((conn) => conn.type === "directTcp") ?? null;
-  if (!connection) {
-    return { baseUrl: null, authHeader: null };
-  }
+function resolveDaemonDownloadTarget(
+  daemon: HostProfile | undefined,
+  activeConnectionId: string | null,
+): DownloadTarget | null {
+  const connection = daemon?.connections.find((conn) => conn.id === activeConnectionId);
+  if (connection?.type !== "directTcp") return null;
 
   let parsed: URL;
   try {
@@ -311,6 +352,38 @@ async function fetchDownload(fetchFile: typeof fetch, url: string): Promise<Blob
     return await response.blob();
   } catch {
     throw new Error(i18n.t("downloads.failed"));
+  }
+}
+
+async function saveDownloadedBytes({
+  bytes,
+  fileName,
+  mimeType,
+}: DownloadedBytes): Promise<string | null> {
+  if (isWeb) {
+    const buffer = new ArrayBuffer(bytes.byteLength);
+    new Uint8Array(buffer).set(bytes);
+    saveBrowserFile(new Blob([buffer], { type: mimeType ?? "application/octet-stream" }), fileName);
+    return null;
+  }
+  // Resolve and write in one tick so two downloads of the same name cannot pick the same path.
+  const targetFile = resolveDownloadTargetFile(fileName);
+  targetFile.write(bytes);
+  return targetFile.uri;
+}
+
+async function shareSavedFile(
+  uri: string,
+  mimeType: string | null,
+  fileName: string,
+): Promise<void> {
+  if (await Sharing.isAvailableAsync()) {
+    await Sharing.shareAsync(uri, {
+      mimeType: mimeType ?? undefined,
+      dialogTitle: fileName
+        ? i18n.t("downloads.shareFileNamed", { fileName })
+        : i18n.t("downloads.shareFile"),
+    });
   }
 }
 
