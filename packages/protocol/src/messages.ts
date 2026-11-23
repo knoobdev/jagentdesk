@@ -5629,6 +5629,7 @@ const AgentTimelineSeqRangeSchema = z.object({
 export const AgentTimelineEntryPayloadSchema = z.object({
   provider: AgentProviderSchema,
   item: AgentTimelineItemPayloadSchema,
+  turnId: z.string().optional(),
   timestamp: z.string(),
   seqStart: z.number().int().nonnegative(),
   seqEnd: z.number().int().nonnegative(),

@@ -1,3 +1,5 @@
+import type { DatabaseRegistry } from "./database/database-registry.js";
+import type { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { createWorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Server as HTTPServer } from "http";
@@ -160,6 +162,7 @@ function createServer(terminalManager: TerminalManager, workspaceRegistry?: Work
     workspaceRegistry,
     createStub<FileBackedChatService>({}),
     createStub<LoopService>({}),
+    createStub<ClusterRegistry>({}),
     createStub<ScheduleService>({}),
     createStub<CheckoutDiffManager>({
       subscribe: vi.fn(),
@@ -182,6 +185,15 @@ function createServer(terminalManager: TerminalManager, workspaceRegistry?: Work
     undefined,
     pushNotifications,
     createProviderSnapshotManagerStub().manager,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    createStub<DatabaseRegistry>({}),
   );
 
   return { server, pushNotifications };
@@ -204,6 +216,7 @@ function connectClient(server: VoiceAssistantWebSocketServer, subscribed = true)
     session: {
       getClientActivity: vi.fn(() => null),
       subscribesToTerminalDirectory: vi.fn(async () => subscribed),
+      wantsEvent: () => subscribed,
     },
     clientId: "client-test",
     appVersion: null,

@@ -115,6 +115,14 @@ test("Forge Hub toggles preserve B9 core worktree discovery and per-agent tool c
   await client.setBuiltinPlugin("forge-hub", false);
   try {
     await expect(client.forgeListConnections()).rejects.toMatchObject({ code: "plugin_disabled" });
+    await writeFile(path.join(repo, "scratch.txt"), "discard me\n");
+    expect(await client.checkoutDiscardChanges(repo, { paths: ["scratch.txt"] })).toMatchObject({
+      success: true,
+      error: null,
+    });
+    await expect(readFile(path.join(repo, "scratch.txt"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
     expect(await client.listCheckoutWorktrees(repo)).toEqual(
       expect.arrayContaining([expect.objectContaining({ branchName: "main", containsCwd: true })]),
     );

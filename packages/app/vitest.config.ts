@@ -85,6 +85,7 @@ export default defineConfig({
       // Expo core has web modules that must pass through the platform resolver.
       "expo-modules-core",
       "expo-clipboard",
+      "expo-crypto",
       "expo-web-browser",
       "expo-file-system",
       "react-native-reanimated",

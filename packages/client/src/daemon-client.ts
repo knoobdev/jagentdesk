@@ -4807,6 +4807,15 @@ export class DaemonClient {
     });
   }
 
+  async checkoutDiscardChanges(
+    cwd: string,
+    input: { paths: string[] },
+  ): Promise<CorrelatedResponsePayload<"checkout.discard_changes.response">> {
+    return this.sendNamespacedCorrelatedSessionRequest<"checkout.discard_changes.response">({
+      message: { type: "checkout.discard_changes.request", cwd, paths: input.paths },
+    });
+  }
+
   async checkoutCommit(
     cwd: string,
     input: { message?: string; addAll?: boolean },

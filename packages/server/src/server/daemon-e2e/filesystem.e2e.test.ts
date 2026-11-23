@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { describe, test, expect, beforeEach, afterEach, onTestFinished } from "vitest";
 import {
   mkdtempSync,
@@ -76,9 +77,13 @@ describe("checkout discard", () => {
         git(["--literal-pathspecs", "add", "--", "apps/web/target[ab].txt", "apps/web/staged.txt"]);
         git(["rm", "apps/web/deleted.txt"]);
 
-        const subscription = ctx.client.observeCheckoutDiff(workspaceCwd, { mode: "uncommitted" });
+        const subscriptionId = randomUUID();
         try {
-          const changes = await subscription.ready;
+          const changes = await ctx.client.subscribeCheckoutDiff(
+            workspaceCwd,
+            { mode: "uncommitted" },
+            { subscriptionId },
+          );
           expect(changes.error).toBeNull();
           expect(changes.files.map((file) => file.path).sort()).toEqual([
             "apps/web/deleted.txt",
@@ -105,7 +110,7 @@ describe("checkout discard", () => {
           await expect(ctx.client.readFile(cwd, "apps/web/scratch.txt")).rejects.toThrow(/ENOENT/);
           expect(git(["status", "--porcelain=v1", "-z"])).toBe(" M apps/web/targeta.txt\0");
         } finally {
-          await subscription.release();
+          ctx.client.unsubscribeCheckoutDiff(subscriptionId);
         }
       } finally {
         // afterEach shuts down the daemon and its repository observers first.

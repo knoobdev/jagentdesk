@@ -10,7 +10,6 @@ import path from "node:path";
 import { expect, test, vi } from "vitest";
 
 import { Session, type SessionOptions } from "./session.js";
-import { OWNER_PERMISSIONS } from "./authorization/index.js";
 import type { SessionOutboundMessage } from "@jagentdesk/protocol/messages";
 import { createNoopWorkspaceGitService } from "./test-utils/workspace-git-service-stub.js";
 import { asInternals, createStub } from "./test-utils/class-mocks.js";
@@ -90,7 +89,7 @@ function createHarness(input: {
   const session = new Session({
     workspaceRuntimeStore: createWorkspaceRuntimeStore(),
     clientId: "test",
-    permissions: OWNER_PERMISSIONS,
+    scopes: ["*"],
     appVersion: null,
     onMessage: (m) => emitted.push(m),
     logger: createStub<SessionOptions["logger"]>(logger),

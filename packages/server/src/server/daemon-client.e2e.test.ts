@@ -422,14 +422,20 @@ test("createAgent preserves the error snapshot when the initial turn cannot star
     await client.connect();
     await client.fetchAgents({ subscribe: { subscriptionId: "create-start-failure" } });
 
-    const created = await client.createAgent({
-      provider: "codex",
-      cwd: tmpCwd(),
-      title: "Start failure agent",
-      modeId: "full-access",
-      model: "gpt-5.4-mini",
-      initialPrompt: "Run exactly: sleep 30",
-    });
+    await expect(
+      client.createAgent({
+        provider: "codex",
+        cwd: tmpCwd(),
+        title: "Start failure agent",
+        modeId: "full-access",
+        model: "gpt-5.4-mini",
+        initialPrompt: "Run exactly: sleep 30",
+      }),
+    ).rejects.toThrow("Initial turn failed to start");
+    const listed = await client.fetchAgents();
+    const created = listed.entries.find(
+      ({ agent }) => agent.title === "Start failure agent",
+    )!.agent;
     expect(created.status).toBe("error");
     expect(created.lastError).toBe("Initial turn failed to start");
     const fetched = await client.fetchAgent({ agentId: created.id });
@@ -716,34 +722,45 @@ afterAll(async () => {
 }, 60000);
 
 test("handles session actions", async () => {
-  expect(ctx.client.isConnected).toBe(true);
-
-  const agents = await ctx.client.fetchAgents();
-  expect(Array.isArray(agents.entries)).toBe(true);
-
-  const cwd = tmpCwd();
-  const created = await ctx.client.createAgent({
-    config: {
-      ...getFullAccessConfig("codex"),
-      cwd,
+  const local = await createDaemonTestContext({
+    speech: {
+      providers: {
+        voiceTurnDetection: { provider: "local", explicit: true, enabled: false },
+        voiceStt: { provider: "local", explicit: true, enabled: false },
+        voiceTts: { provider: "local", explicit: true, enabled: false },
+      },
     },
   });
+  try {
+    expect(local.client.isConnected).toBe(true);
 
-  await expect(ctx.client.setVoiceMode(true, created.id)).resolves.toMatchObject({
-    enabled: true,
-    agentId: created.id,
-    accepted: true,
-    error: null,
-  });
-  await expect(ctx.client.setVoiceMode(false)).resolves.toMatchObject({
-    enabled: false,
-    agentId: null,
-    accepted: true,
-    error: null,
-  });
+    const agents = await local.client.fetchAgents();
+    expect(Array.isArray(agents.entries)).toBe(true);
 
-  await ctx.client.deleteAgent(randomUUID());
-  rmSync(cwd, { recursive: true, force: true });
+    const cwd = tmpCwd();
+    const created = await local.client.createAgent({
+      config: {
+        ...getFullAccessConfig("codex"),
+        cwd,
+      },
+    });
+
+    expect(local.client.getLastServerInfoMessage()?.capabilities?.voice?.voice.enabled).toBe(false);
+    await expect(local.client.setVoiceMode(true, created.id)).rejects.toThrow(
+      "Realtime voice is disabled in daemon config.",
+    );
+    await expect(local.client.setVoiceMode(false)).resolves.toMatchObject({
+      enabled: false,
+      agentId: null,
+      accepted: true,
+      error: null,
+    });
+
+    await local.client.deleteAgent(randomUUID());
+    rmSync(cwd, { recursive: true, force: true });
+  } finally {
+    await local.cleanup();
+  }
 }, 30000);
 
 test("archives agents and excludes them from default listings", async () => {

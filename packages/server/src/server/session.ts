@@ -3394,6 +3394,8 @@ export class Session {
         return this.checkoutSession.handleCheckoutSwitchBranchRequest(msg);
       case "checkout.rename_branch.request":
         return this.checkoutSession.handleCheckoutRenameBranchRequest(msg);
+      case "checkout.discard_changes.request":
+        return this.checkoutSession.handleCheckoutDiscardChangesRequest(msg);
       case "checkout_commit_request":
         return this.checkoutSession.handleCheckoutCommitRequest(msg);
       case "checkout_merge_request":
@@ -9440,6 +9442,7 @@ export class Session {
                 provider: snapshot.provider,
                 item: entry.item,
                 timestamp: entry.timestamp,
+                turnId: entry.turnId,
                 seqStart: entry.seqStart,
                 seqEnd: entry.seqEnd,
                 sourceSeqRanges: entry.sourceSeqRanges,

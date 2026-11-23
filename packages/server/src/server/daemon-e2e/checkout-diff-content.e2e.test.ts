@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
@@ -130,9 +131,11 @@ test.each(
       const compare = { mode, baseRef: "main" };
       const rootDiff = await ctx.client.getCheckoutDiff(cwd, compare);
       const subdirectoryDiff = await ctx.client.getCheckoutDiff(subdirectory, compare);
-      const subscription = ctx.client.observeCheckoutDiff(subdirectory, compare);
-      const liveDiff = await subscription.ready;
-      await subscription.release();
+      const subscriptionId = randomUUID();
+      const liveDiff = await ctx.client.subscribeCheckoutDiff(subdirectory, compare, {
+        subscriptionId,
+      });
+      ctx.client.unsubscribeCheckoutDiff(subscriptionId);
 
       expect(rootDiff.error).toBeNull();
       expect(subdirectoryDiff.error).toBeNull();
@@ -174,18 +177,17 @@ test("All changes subscriptions refresh on file edits and commits", async () => 
     writeFileSync(join(cwd, "file.txt"), "committed\n");
     git(cwd, "add", ".");
     git(cwd, "-c", "commit.gpgsign=false", "commit", "-m", "feature");
-    const subscription = ctx.client.observeCheckoutDiff(cwd, { mode: "all", baseRef: "main" });
+    const subscriptionId = randomUUID();
+    let latest = await ctx.client.subscribeCheckoutDiff(
+      cwd,
+      { mode: "all", baseRef: "main" },
+      { subscriptionId },
+    );
+    const unsubscribe = ctx.client.on("checkout_diff_update", ({ payload }) => {
+      if (payload.subscriptionId === subscriptionId) latest = payload;
+    });
     try {
-      let latest = await subscription.ready;
       expect(latest.error).toBeNull();
-      subscription.subscribe({
-        snapshot: (snapshot) => {
-          latest = snapshot;
-        },
-        update: (message) => {
-          if (message.type === "checkout_diff_update") latest = message.payload;
-        },
-      });
       writeFileSync(join(cwd, "file.txt"), "working\n");
       await expect
         .poll(
@@ -216,7 +218,8 @@ test("All changes subscriptions refresh on file edits and commits", async () => 
         .poll(() => latest.files.map((file) => file.path), { timeout: 15_000 })
         .toEqual(["file.txt", "new.txt"]);
     } finally {
-      await subscription.release();
+      unsubscribe();
+      ctx.client.unsubscribeCheckoutDiff(subscriptionId);
     }
   } finally {
     await ctx.cleanup();

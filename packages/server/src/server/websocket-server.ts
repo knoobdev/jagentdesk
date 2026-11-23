@@ -3954,6 +3954,7 @@ export class VoiceAssistantWebSocketServer {
       if (connection.kind !== "trusted") {
         continue;
       }
+      if (!connection.session.wantsEvent("terminal_attention_required", ws)) continue;
       clientEntries.push({
         ws,
         state: this.getClientActivityState(connection.session),

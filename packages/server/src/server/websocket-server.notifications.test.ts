@@ -1,3 +1,7 @@
+import type { DatabaseRegistry } from "./database/database-registry.js";
+import type { FileBackedChatService } from "./chat/chat-service.js";
+import type { LoopService } from "./loop-service.js";
+import type { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { createWorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Server as HTTPServer } from "http";
@@ -126,6 +130,9 @@ function createServer(agentManagerOverrides?: Record<string, unknown>) {
     undefined,
     undefined,
     undefined,
+    createStub<FileBackedChatService>({}),
+    createStub<LoopService>({}),
+    createStub<ClusterRegistry>({}),
     createStub<ScheduleService>({}),
     createStub<CheckoutDiffManager>({
       subscribe: vi.fn(),
@@ -148,6 +155,15 @@ function createServer(agentManagerOverrides?: Record<string, unknown>) {
     undefined,
     pushNotifications,
     createProviderSnapshotManagerStub().manager,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    createStub<DatabaseRegistry>({}),
   );
 
   return { server, agentManager, pushNotifications };
@@ -178,6 +194,7 @@ function createSessionWithActivity(
     supports: () => false,
     supportsForSource: () => false,
     subscribesToAgent: vi.fn(async () => subscribed),
+    wantsEvent: () => subscribed,
   };
 }
 
@@ -246,7 +263,7 @@ describe("VoiceAssistantWebSocketServer notification payloads", () => {
     expect(pushNotifications.sent).toHaveLength(1);
   });
 
-  it("uses assistant preview text for push notifications with markdown removed", async () => {
+  it("keeps assistant preview text out of push notifications", async () => {
     const getLastAssistantMessage = vi.fn(
       async () => "**Done**. Updated `README.md` and [link](https://example.com).",
     );
@@ -270,7 +287,7 @@ describe("VoiceAssistantWebSocketServer notification payloads", () => {
     expect(pushNotifications.sent).toEqual([
       {
         title: "Agent finished",
-        body: "Done. Updated README.md and link.",
+        body: "Finished working.",
         data: {
           serverId: "srv-test",
           workspaceId: WORKSPACE_ID,
@@ -279,7 +296,7 @@ describe("VoiceAssistantWebSocketServer notification payloads", () => {
         },
       },
     ]);
-    expect(getLastAssistantMessage).toHaveBeenCalledWith("agent-1");
+    expect(getLastAssistantMessage).not.toHaveBeenCalled();
   });
 
   it("sends push notifications regardless of UI label presence", async () => {
@@ -303,7 +320,7 @@ describe("VoiceAssistantWebSocketServer notification payloads", () => {
     });
 
     expect(pushNotifications.sent).toHaveLength(1);
-    expect(getLastAssistantMessage).toHaveBeenCalledWith("agent-2");
+    expect(getLastAssistantMessage).not.toHaveBeenCalled();
   });
 
   it("routes a hidden stale focused browser tab's notification to the present Electron web client", async () => {

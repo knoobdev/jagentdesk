@@ -42,6 +42,7 @@ import type {
 } from "../../../services/forge-service.js";
 import {
   commitChanges,
+  discardChanges,
   createPullRequest,
   forgeAuthStateFromError,
   isForgeAuthError,
@@ -702,6 +703,26 @@ export class CheckoutSession {
       this.host.emit({
         type: "stash_list_response",
         payload: { cwd, entries: [], error: toCheckoutError(error), requestId },
+      });
+    }
+  }
+
+  async handleCheckoutDiscardChangesRequest(
+    msg: Extract<SessionInboundMessage, { type: "checkout.discard_changes.request" }>,
+  ): Promise<void> {
+    const { cwd, paths, requestId } = msg;
+    try {
+      await discardChanges(cwd, paths);
+      await this.gitMutation.notifyGitMutation(cwd, "discard-changes");
+      this.scheduleDiffRefresh(cwd);
+      this.host.emit({
+        type: "checkout.discard_changes.response",
+        payload: { cwd, success: true, error: null, requestId },
+      });
+    } catch (error) {
+      this.host.emit({
+        type: "checkout.discard_changes.response",
+        payload: { cwd, success: false, error: toCheckoutError(error), requestId },
       });
     }
   }
