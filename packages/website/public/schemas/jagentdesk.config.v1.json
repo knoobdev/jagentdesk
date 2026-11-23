@@ -1420,6 +1420,20 @@
                   "type": "string"
                 }
               },
+              "jagentdeskTools": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "disabledTools": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
               "enabled": {
                 "type": "boolean"
               },

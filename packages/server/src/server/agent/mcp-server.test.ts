@@ -13,6 +13,7 @@ import { createTestLogger } from "../../test-utils/test-logger.js";
 import { createAgentMcpServer } from "./mcp-server.js";
 import { AgentManager, type ManagedAgent } from "./agent-manager.js";
 import { AgentStorage, type StoredAgentRecord } from "./agent-storage.js";
+import { AgentRunState } from "./agent-run-state.js";
 import { createTestAgentClients } from "../test-utils/fake-agent-client.js";
 import type {
   AgentClient,
@@ -214,6 +215,7 @@ interface TestDeps {
 }
 
 function buildAgentManagerSpies() {
+  const getAgent = vi.fn();
   return {
     createAgent: vi.fn(),
     waitForAgentEvent: vi.fn().mockResolvedValue({
@@ -230,7 +232,7 @@ function buildAgentManagerSpies() {
     updateAgentMetadata: vi.fn().mockResolvedValue(undefined),
     archiveAgent: vi.fn().mockResolvedValue({ archivedAt: new Date().toISOString() }),
     notifyAgentState: vi.fn(),
-    getAgent: vi.fn(),
+    getAgent,
     listAgents: vi.fn().mockReturnValue([]),
     getTimeline: vi.fn().mockReturnValue([]),
     resumeAgentFromPersistence: vi.fn(),
@@ -242,7 +244,19 @@ function buildAgentManagerSpies() {
     hasInFlightRun: vi.fn().mockReturnValue(false),
     tryRunOutOfBand: vi.fn().mockReturnValue(false),
     subscribe: vi.fn().mockReturnValue(() => {}),
-    streamAgent: vi.fn(() => (async function* noop() {})()),
+    streamAgent: vi.fn((...args: Parameters<AgentManager["streamAgent"]>) =>
+      (async function* admitted() {
+        const [agentId, , , promptStart] = args;
+        const turnId = randomUUID();
+        if (promptStart) {
+          const runs = new AgentRunState();
+          const run = runs.createPendingRun(agentId);
+          promptStart.bind(run);
+          runs.settleForegroundStart(run, { status: "started", turnId });
+        }
+        yield { type: "turn_started", provider: getAgent(agentId)?.provider ?? "claude", turnId };
+      })(),
+    ),
     waitForAgentRunStart: vi.fn().mockResolvedValue(undefined),
     respondToPermission: vi.fn(),
     cancelAgentRun: vi.fn(),
