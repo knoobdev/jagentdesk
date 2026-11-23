@@ -231,7 +231,8 @@ export interface HostRuntimeStartOptions {
 
 const PROBE_TICK_MS = 2_000;
 const PROBE_STEADY_MS = 10_000;
-const PROBE_INACTIVE_WHILE_ONLINE_MS = 120_000;
+const PROBE_INACTIVE_WHILE_ONLINE_INITIAL_MS = 120_000;
+const PROBE_INACTIVE_WHILE_ONLINE_MAX_MS = 30 * 60_000;
 const DEFAULT_AGENT_DIRECTORY_PAGE_LIMIT = 200;
 const CONFIGURED_OVERRIDE_BOOTSTRAP_RETRY_MS = 1_000;
 // A local host that fails to connect this many times in a row stops auto-retrying
@@ -699,6 +700,7 @@ export class HostRuntimeController {
   private started = false;
   private connectionFirstSeenAt = new Map<string, number>();
   private connectionLastProbedAt = new Map<string, number>();
+  private inactiveOnlineProbeBackoffStep = 0;
   private clientIdPromise: Promise<string> | null = null;
   private clientIdHash: string | null = null;
   private switchRequestVersion = 0;
@@ -867,6 +869,7 @@ export class HostRuntimeController {
   }
 
   async updateHost(host: HostProfile): Promise<void> {
+    if (!equal(this.host.connections, host.connections)) this.resetInactiveOnlineProbeBackoff();
     const activeConnectionId = this.snapshot.activeConnectionId;
     const previousActiveConnection = findConnectionById(this.host, activeConnectionId);
     const preferredChanged = host.preferredConnectionId !== this.host.preferredConnectionId;
@@ -960,6 +963,7 @@ export class HostRuntimeController {
   }
 
   ensureConnected(): void {
+    this.resetInactiveOnlineProbeBackoff();
     this.activeClient?.ensureConnected();
   }
 
@@ -1053,6 +1057,7 @@ export class HostRuntimeController {
     }
     const online = activeAllowed && this.snapshot.connectionStatus === "online";
     const probes = new Map(this.snapshot.probeByConnectionId);
+    let sampledInactive = false;
     // A disconnected active socket gets one reconnect round. If that fails,
     // proceed through the other routes immediately; never wait for max backoff.
     const ordered =
@@ -1070,15 +1075,40 @@ export class HostRuntimeController {
         online &&
         lastProbed !== undefined &&
         now - lastProbed <
-          (connectionId === activeId ? PROBE_STEADY_MS : PROBE_INACTIVE_WHILE_ONLINE_MS)
+          (connectionId === activeId ? PROBE_STEADY_MS : this.inactiveOnlineProbeIntervalMs())
       )
         continue;
+      if (online && connectionId !== activeId) sampledInactive = true;
       this.connectionLastProbedAt.set(connectionId, now);
       probes.set(connectionId, { status: "pending", latencyMs: null });
       this.updateSnapshot({ probeByConnectionId: new Map(probes) });
       if (await this.probeConnection({ connection, online, activeId, requestVersion, probes }))
         return;
     }
+    // Ordered routing keeps a healthy socket selected. Back off diagnostic probes
+    // only while that same socket stayed online throughout this cycle.
+    if (
+      sampledInactive &&
+      this.isCurrentProbeRequest(requestVersion) &&
+      this.snapshot.connectionStatus === "online" &&
+      this.snapshot.activeConnectionId === activeId
+    ) {
+      this.advanceInactiveOnlineProbeBackoff();
+    }
+  }
+
+  private inactiveOnlineProbeIntervalMs(): number {
+    return Math.min(
+      PROBE_INACTIVE_WHILE_ONLINE_INITIAL_MS * 2 ** this.inactiveOnlineProbeBackoffStep,
+      PROBE_INACTIVE_WHILE_ONLINE_MAX_MS,
+    );
+  }
+  private advanceInactiveOnlineProbeBackoff(): void {
+    if (this.inactiveOnlineProbeIntervalMs() < PROBE_INACTIVE_WHILE_ONLINE_MAX_MS)
+      this.inactiveOnlineProbeBackoffStep += 1;
+  }
+  private resetInactiveOnlineProbeBackoff(): void {
+    this.inactiveOnlineProbeBackoffStep = 0;
   }
 
   private async probeConnection(input: {
@@ -1205,6 +1235,7 @@ export class HostRuntimeController {
     if (previousState.tag !== "online" && nextState.tag === "online") {
       this.connectionEpoch += 1;
     }
+    if (previousState.tag !== nextState.tag) this.resetInactiveOnlineProbeBackoff();
     this.connectionMachineState = nextState;
     this.logConnectionTransition({
       from: previousState.tag,
