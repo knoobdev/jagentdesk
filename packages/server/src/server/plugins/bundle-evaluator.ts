@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import * as pluginServerRuntime from "@jagentdesk/plugin/server";
 import * as pluginSharedRuntime from "@jagentdesk/plugin";
 import * as pluginProviderRuntime from "@jagentdesk/plugin/server/provider";
 import * as pluginAcpRuntime from "@jagentdesk/plugin/server/acp";
@@ -13,7 +14,7 @@ function runtimeRequire(name: string): unknown {
     throw new Error(`${name} is available only in plugin client code`);
   }
   if (name === "@jagentdesk/plugin") return pluginSharedRuntime;
-  if (name === "@jagentdesk/plugin/server") return {};
+  if (name === "@jagentdesk/plugin/server") return pluginServerRuntime;
   if (name === "@jagentdesk/plugin/server/provider") return pluginProviderRuntime;
   if (name === "@jagentdesk/plugin/server/acp") return pluginAcpRuntime;
   if (name === "zod") return zod;

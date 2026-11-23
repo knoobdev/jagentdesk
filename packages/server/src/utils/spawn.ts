@@ -1,18 +1,9 @@
-import { execFile, spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
-import { extname } from "node:path";
-import { promisify } from "node:util";
-
+import type { ChildProcess, SpawnOptions } from "node:child_process";
+import { spawnProcess as spawnCli, execCommand as execCli } from "@jagentdesk/plugin/server";
 import {
   createExternalCommandProcessEnv,
   type ProcessEnvRecord,
 } from "../server/jagentdesk-env.js";
-import {
-  isWindowsCommandScript,
-  quoteWindowsArgument,
-  quoteWindowsCommand,
-} from "./windows-command.js";
-
-const execFileAsync = promisify(execFile);
 
 interface ExternalEnvOptions {
   baseEnv?: ProcessEnvRecord;
@@ -38,23 +29,6 @@ interface ExecCommandResult {
   stderr: string;
 }
 
-function hasPathSeparator(value: string): boolean {
-  return value.includes("/") || value.includes("\\");
-}
-
-function shouldUseWindowsShell(
-  command: string,
-  requestedShell?: boolean | string,
-): boolean | string {
-  if (isWindowsCommandScript(command)) {
-    return true;
-  }
-  if (requestedShell !== undefined) {
-    return requestedShell;
-  }
-  return process.platform === "win32" && !hasPathSeparator(command) && !extname(command);
-}
-
 export function spawnProcess(
   command: string,
   args: string[],
@@ -62,12 +36,6 @@ export function spawnProcess(
 ): ChildProcess {
   const { baseEnv, env, envOverlay, ...spawnOptions } = options ?? {};
   const resolvedBaseEnv = env ?? baseEnv ?? process.env;
-  const isWindows = process.platform === "win32";
-  const shell = shouldUseWindowsShell(command, spawnOptions.shell);
-
-  const shouldQuoteForShell = isWindows && shell !== false;
-  const resolvedCommand = shouldQuoteForShell ? quoteWindowsCommand(command) : command;
-  const resolvedArgs = shouldQuoteForShell ? args.map(quoteWindowsArgument) : args;
   const childEnv =
     options?.envMode === "internal"
       ? ({ ...resolvedBaseEnv, ...envOverlay } as NodeJS.ProcessEnv)
@@ -77,12 +45,10 @@ export function spawnProcess(
           ...(envOverlay ? [envOverlay] : []),
         );
 
-  return spawn(resolvedCommand, resolvedArgs, {
+  return spawnCli(command, args, {
     ...spawnOptions,
     env: childEnv,
-    shell,
     signal: options?.signal,
-    windowsHide: true,
   });
 }
 
@@ -93,11 +59,6 @@ export async function execCommand(
 ): Promise<ExecCommandResult> {
   const { baseEnv, env, envOverlay } = options ?? {};
   const resolvedBaseEnv = env ?? baseEnv ?? process.env;
-  const isWindows = process.platform === "win32";
-  const shell = shouldUseWindowsShell(command, options?.shell);
-  const shouldQuoteForShell = isWindows && shell !== false;
-  const resolvedCommand = shouldQuoteForShell ? quoteWindowsCommand(command) : command;
-  const resolvedArgs = shouldQuoteForShell ? args.map(quoteWindowsArgument) : args;
   const childEnv =
     options?.envMode === "internal"
       ? ({ ...resolvedBaseEnv, ...envOverlay } as NodeJS.ProcessEnv)
@@ -107,14 +68,14 @@ export async function execCommand(
           ...(envOverlay ? [envOverlay] : []),
         );
 
-  return execFileAsync(resolvedCommand, resolvedArgs, {
+  return execCli(command, args, {
     cwd: options?.cwd,
     env: childEnv,
+    shell: options?.shell,
     encoding: options?.encoding ?? "utf8",
+    signal: options?.signal,
     killSignal: options?.killSignal,
     timeout: options?.timeout,
     maxBuffer: options?.maxBuffer,
-    shell,
-    windowsHide: true,
   }) as Promise<ExecCommandResult>;
 }
