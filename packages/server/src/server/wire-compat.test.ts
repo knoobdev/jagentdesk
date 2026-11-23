@@ -1,3 +1,4 @@
+import { createWorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
 import pino from "pino";
 import { z } from "zod";
 import { describe, expect, test } from "vitest";
@@ -206,6 +207,7 @@ function createSessionForWireCompatTest(options?: {
   ];
 
   const session = new Session({
+    workspaceRuntimeStore: createWorkspaceRuntimeStore(),
     clientId: "wire-compat-client",
     permissions: OWNER_PERMISSIONS,
     clientCapabilities: options?.clientCapabilities ?? null,
@@ -249,9 +251,7 @@ function createSessionForWireCompatTest(options?: {
       async listStashes() {
         return [];
       },
-      peekSnapshot() {
-        return null;
-      },
+
       async validateBranchRef() {
         return { ok: false, error: "not found" };
       },

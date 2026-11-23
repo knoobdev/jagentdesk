@@ -10,6 +10,12 @@ import {
   assertPluginTimelineKind,
 } from "./agent/agent-timeline-content.js";
 import { parsePluginClientId } from "./plugins/plugin-session-identity.js";
+import { type WorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
+import {
+  createWorkspaceBaseBranchService,
+  type WorkspaceBaseBranchService,
+} from "./session/workspace-base-branch/service.js";
+import type { WorkspaceBaseBranchSetRequest } from "@jagentdesk/protocol/messages";
 import equal from "fast-deep-equal";
 import { v4 as uuidv4 } from "uuid";
 import { lstat, mkdir, mkdtemp, rename, rm, stat } from "node:fs/promises";
@@ -25,6 +31,7 @@ import {
   type FirstAgentContext,
   type SessionInboundMessage,
   type SessionOutboundMessage,
+  type ScriptStatusUpdateMessage,
   type GitSetupOptions,
   type StartWorkspaceScriptRequest,
   type WorkspaceScriptListRequest,
@@ -239,7 +246,7 @@ import { PushTokenStore } from "./push/token-store.js";
 import {
   archivePersistedWorkspaceRecord,
   archiveWorkspaceContents,
-  requireActiveWorkspaceForArchive,
+  unarchiveWorkspaceAgents,
 } from "./workspace-archive-service.js";
 import type { ServiceProxySubsystem } from "./service-proxy.js";
 import { prepareTaskBrief } from "./orchestration/task-brief.js";
@@ -336,6 +343,15 @@ import {
   handleWorkspaceSetupStatusRequest as handleWorkspaceSetupStatusRequestMessage,
 } from "./worktree-session.js";
 import { archiveByScope, type ActiveWorkspaceRef } from "./workspace-archive-service.js";
+import {
+  WorkspaceArchiveOperations,
+  type WorkspaceArchiveUndoInput,
+} from "./workspace-archive-operations.js";
+function resolveWorkspaceArchiveOperations(
+  operations: WorkspaceArchiveOperations | undefined,
+): WorkspaceArchiveOperations {
+  return operations ?? new WorkspaceArchiveOperations();
+}
 import { WorktreeRequestError, toWorktreeWireError } from "./worktree-errors.js";
 import { parseGitRemoteLocation } from "@jagentdesk/protocol/git-remote";
 import {
@@ -532,7 +548,9 @@ export interface SessionOptions {
   onBinaryMessageToSource?: (source: object, frame: Uint8Array) => Promise<void>;
   getTransportBufferedAmount?: () => number | null;
   onLifecycleIntent?: (intent: SessionLifecycleIntent) => void;
+  publishWorkspaceArchiveUpdates?: (workspaceIds: Iterable<string>) => Promise<void>;
   onWorkspaceRecovered?: (workspace: PersistedWorkspaceRecord) => Promise<void>;
+  publishScriptStatusUpdate?: (message: ScriptStatusUpdateMessage) => void;
   logger: pino.Logger;
   downloadTokenStore: DownloadTokenStore;
   pushTokenStore: PushTokenStore;
@@ -542,6 +560,7 @@ export interface SessionOptions {
   agentStorage: AgentStorage;
   projectRegistry: ProjectRegistry;
   workspaceRegistry: WorkspaceRegistry;
+  workspaceBaseBranch?: WorkspaceBaseBranchService;
   filesystem?: SessionFileSystem;
   chatService: FileBackedChatService;
   scheduleService: ScheduleService;
@@ -581,6 +600,7 @@ export interface SessionOptions {
   // defaults to the real checkout-git implementation.
   renameCurrentBranch?: typeof renameCurrentBranchDefault;
   workspaceGitService: WorkspaceGitService;
+  workspaceRuntimeStore: WorkspaceRuntimeStore;
   workspaceAutoName: WorkspaceAutoName;
   daemonConfigStore: DaemonConfigStore;
   mcpBaseUrl?: string | null;
@@ -595,6 +615,7 @@ export interface SessionOptions {
   serviceProxy?: ServiceProxySubsystem;
   scriptRuntimeStore?: WorkspaceScriptRuntimeStore;
   workspaceSetupSnapshots?: Map<string, WorkspaceSetupSnapshot>;
+  workspaceArchiveOperations?: WorkspaceArchiveOperations;
   onBranchChanged?: (
     workspaceId: string,
     oldBranch: string | null,
@@ -858,6 +879,7 @@ export class Session {
     | null;
   private readonly getTransportBufferedAmount: () => number | null;
   private readonly onLifecycleIntent: ((intent: SessionLifecycleIntent) => void) | null;
+  private readonly onWorkspaceArchiveUpdate: SessionOptions["publishWorkspaceArchiveUpdates"];
   private readonly onWorkspaceRecovered:
     | ((workspace: PersistedWorkspaceRecord) => Promise<void>)
     | null;
@@ -874,10 +896,12 @@ export class Session {
   private readonly github: ForgeService;
   private readonly renameCurrentBranch: typeof renameCurrentBranchDefault;
   private readonly workspaceGitService: WorkspaceGitService;
+  private readonly workspaceRuntimeStore: WorkspaceRuntimeStore;
   private readonly workspaceAutoName: WorkspaceAutoName;
   private readonly gitMutation: GitMutationService;
   private readonly workspaceProvisioning: WorkspaceProvisioningService;
   private readonly workspaceRecovery: WorkspaceRecoveryService;
+  private workspaceBaseBranch: WorkspaceBaseBranchService | undefined;
   private readonly daemonConfigStore: DaemonConfigStore;
   private readonly skillsStorage: NativeSkillsService | null;
   private readonly usageHistory: UsageHistoryStorage | null;
@@ -922,6 +946,7 @@ export class Session {
   private inflightRequests = 0;
   private peakInflightRequests = 0;
   private readonly workspaceSetupSnapshots: Map<string, WorkspaceSetupSnapshot>;
+  private readonly workspaceArchiveOperations: WorkspaceArchiveOperations;
   private readonly workspaceGitObserver: WorkspaceGitObserverService;
   private readonly workspaceDirectory: WorkspaceDirectory;
   private readonly voiceSession: VoiceSession;
@@ -975,6 +1000,7 @@ export class Session {
       getTransportBufferedAmount,
       onLifecycleIntent,
       onWorkspaceRecovered,
+      publishScriptStatusUpdate,
       logger,
       downloadTokenStore,
       pushTokenStore,
@@ -993,6 +1019,7 @@ export class Session {
       github,
       renameCurrentBranch,
       workspaceGitService,
+      workspaceRuntimeStore,
       workspaceAutoName,
       daemonConfigStore,
       stt,
@@ -1001,6 +1028,7 @@ export class Session {
       terminalManager,
       providerSnapshotManager,
       providerUsageService,
+      workspaceArchiveOperations,
       onBranchChanged,
       voice,
       voiceBridge,
@@ -1031,6 +1059,7 @@ export class Session {
     this.onBinaryMessageToSource = onBinaryMessageToSource ?? null;
     this.getTransportBufferedAmount = getTransportBufferedAmount ?? (() => 0);
     this.onLifecycleIntent = onLifecycleIntent ?? null;
+    this.onWorkspaceArchiveUpdate = options.publishWorkspaceArchiveUpdates;
     this.onWorkspaceRecovered = onWorkspaceRecovered ?? null;
     this.pushTokenStore = pushTokenStore;
     this.jagentdeskHome = jagentdeskHome;
@@ -1059,6 +1088,16 @@ export class Session {
     this.github = github ?? createGitHubService();
     this.renameCurrentBranch = renameCurrentBranch ?? renameCurrentBranchDefault;
     this.workspaceGitService = workspaceGitService;
+    this.workspaceRuntimeStore = workspaceRuntimeStore;
+    this.workspaceBaseBranch =
+      options.workspaceBaseBranch ??
+      createWorkspaceBaseBranchService({
+        jagentdeskHome: this.jagentdeskHome,
+        worktreesRoot: this.worktreesRoot,
+        workspaceRegistry: this.workspaceRegistry,
+        workspaceGitService: this.workspaceGitService,
+      });
+
     this.gitMutation = createGitMutationService({
       workspaceGitService: this.workspaceGitService,
       logger: this.sessionLogger,
@@ -1066,6 +1105,14 @@ export class Session {
     this.workspaceAutoName = workspaceAutoName;
     this.workspaceProvisioning = createWorkspaceProvisioningService({
       lifecycle: workspacePluginLifecycle(pluginRuntime),
+      unarchiveWorkspaceAgents: (request) =>
+        unarchiveWorkspaceAgents({
+          ...request,
+          agentStorage: this.agentStorage,
+          unarchiveAgent: (id) => unarchiveAgentState(this.agentStorage, this.agentManager, id),
+          sessionLogger: this.sessionLogger,
+        }),
+      withCheckoutLock: this.workspaceBaseBranch.withCheckoutLock,
       serverId,
       workspaceRegistry: this.workspaceRegistry,
       projectRegistry: this.projectRegistry,
@@ -1298,8 +1345,7 @@ export class Session {
       archiveWorkspaceRecord: (workspaceId) => this.archiveWorkspaceRecord(workspaceId),
       emit: (message) => this.emit(message),
       emitAgentRemove: (agentId) => this.agentUpdates.removeAgent(agentId),
-      emitWorkspaceUpdatesForWorkspaceIds: (workspaceIds) =>
-        this.emitWorkspaceUpdatesForWorkspaceIds(workspaceIds),
+      emitWorkspaceUpdatesForWorkspaceIds: this.publishWorkspaceArchiveUpdates,
       markWorkspaceArchiving: (workspaceIds, archivingAt) =>
         this.markWorkspaceArchiving(workspaceIds, archivingAt),
       clearWorkspaceArchiving: (workspaceIds) => this.clearWorkspaceArchiving(workspaceIds),
@@ -1316,24 +1362,30 @@ export class Session {
     this.getDaemonTcpHost = optionalServiceRefs.getDaemonTcpHost;
     this.serviceProxyPublicBaseUrl = optionalServiceRefs.serviceProxyPublicBaseUrl;
     this.resolveScriptHealth = optionalServiceRefs.resolveScriptHealth;
+    this.workspaceArchiveOperations = resolveWorkspaceArchiveOperations(workspaceArchiveOperations);
     this.workspaceScripts = createWorkspaceScriptsService({
       serviceProxy: this.serviceProxy,
       scriptRuntimeStore: this.scriptRuntimeStore,
       terminalManager: this.terminalManager,
       workspaceRegistry: this.workspaceRegistry,
       projectRegistry: this.projectRegistry,
-      workspaceGitService: this.workspaceGitService,
+      workspaceRuntimeStore: this.workspaceRuntimeStore,
       getDaemonTcpPort: this.getDaemonTcpPort,
       getDaemonTcpHost: this.getDaemonTcpHost,
       serviceProxyPublicBaseUrl: this.serviceProxyPublicBaseUrl,
       resolveScriptHealth: this.resolveScriptHealth,
       logger: this.sessionLogger,
       emit: (message) => this.emit(message),
+      publishStatusUpdate: (message) => {
+        if (publishScriptStatusUpdate) publishScriptStatusUpdate(message);
+        else this.emit(message);
+      },
       spawnWorkspaceScript,
       globalServicePorts: loadPersistedConfig(this.jagentdeskHome).worktrees?.servicePorts,
     });
     this.subscribeToOptionalManagers();
     this.workspaceDirectory = new WorkspaceDirectory({
+      getArchivingAt: (workspaceId) => this.workspaceArchiveOperations.getArchivingAt(workspaceId),
       logger: this.sessionLogger,
       projectRegistry: this.projectRegistry,
       workspaceRegistry: this.workspaceRegistry,
@@ -1727,16 +1779,11 @@ export class Session {
     });
   }
 
-  markWorkspaceArchivingForExternalMutation(
+  private readonly publishWorkspaceArchiveUpdates = (
     workspaceIds: Iterable<string>,
-    archivingAt: string,
-  ): void {
-    this.markWorkspaceArchiving(workspaceIds, archivingAt);
-  }
-
-  clearWorkspaceArchivingForExternalMutation(workspaceIds: Iterable<string>): void {
-    this.clearWorkspaceArchiving(workspaceIds);
-  }
+  ): Promise<void> =>
+    this.onWorkspaceArchiveUpdate?.(workspaceIds) ??
+    this.emitWorkspaceUpdatesForWorkspaceIds(workspaceIds);
 
   async emitWorkspaceUpdatesForExternalWorkspaceIds(workspaceIds: Iterable<string>): Promise<void> {
     await this.emitWorkspaceUpdatesForWorkspaceIds(workspaceIds);
@@ -1763,7 +1810,16 @@ export class Session {
     workspace: PersistedWorkspaceRecord,
   ): Promise<void> {
     try {
-      await this.workspaceGitObserver.warmGitData(workspace);
+      await this.workspaceGitObserver.syncObserverForWorkspace(workspace);
+      if (workspace.kind !== "directory") {
+        // Recovery can refresh Git before this session starts observing again.
+        // Publish the current status to replace any read made while archived.
+        const snapshot = await this.workspaceGitService.getSnapshot(workspace.cwd, {
+          includeForge: false,
+        });
+        this.checkoutSession.emitStatusUpdate(workspace.cwd, snapshot);
+      }
+      await this.emitWorkspaceUpdateForWorkspaceId(workspace.workspaceId);
     } catch (error) {
       this.sessionLogger.warn(
         { err: error, workspaceId: workspace.workspaceId },
@@ -2274,7 +2330,7 @@ export class Session {
     if (!project) {
       throw new Error(`Project not found for workspace ${workspace.workspaceId}`);
     }
-    const snapshot = this.workspaceGitService.peekSnapshot(workspace.cwd);
+    const snapshot = this.workspaceRuntimeStore.get(workspace.cwd);
     const checkout = checkoutFromPersistedWorkspacePlacement({
       workspace,
       // COMPAT(workspacePlacementBackfill): added in v0.1.107, remove after 2027-01-15.
@@ -3317,6 +3373,8 @@ export class Session {
     switch (msg.type) {
       case "checkout_status_request":
         return this.checkoutSession.handleStatusRequest(msg);
+      case "checkout.worktrees.list.request":
+        return this.checkoutSession.handleWorktreesListRequest(msg);
       case "checkout.commits.list.request":
         return this.checkoutSession.handleCommitsListRequest(msg);
       case "checkout.commits.file_diff.request":
@@ -3456,10 +3514,21 @@ export class Session {
         return this.handleWorkspaceCreateRequest(msg);
       case "workspace.clear_attention.request":
         return this.handleWorkspaceClearAttentionRequest(msg);
+      default:
+        return this.dispatchWorkspaceMetadataMessage(msg);
+    }
+  }
+
+  private dispatchWorkspaceMetadataMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    switch (msg.type) {
       case "workspace.title.set.request":
         return this.handleWorkspaceTitleSetRequest(msg.workspaceId, msg.title, msg.requestId);
       case "workspace.pin.set.request":
         return this.handleWorkspacePinSetRequest(msg.workspaceId, msg.pinned, msg.requestId);
+      case "workspace.archive.undo.request":
+        return this.handleWorkspaceArchiveUndoRequest(msg);
+      case "workspace.base_branch.set.request":
+        return this.handleWorkspaceBaseBranchSetRequest(msg);
       default:
         return undefined;
     }
@@ -5606,14 +5675,14 @@ export class Session {
         .filter((workspace) => !workspace.archivedAt)
         .map((workspace) => workspace.workspaceId);
 
-      if (activeWorkspaceIds.length > 0) {
-        this.markWorkspaceArchiving(activeWorkspaceIds, new Date().toISOString());
-        await this.emitWorkspaceUpdatesForWorkspaceIds(activeWorkspaceIds);
-      }
-
       const removedWorkspaceIds: string[] = [];
+      this.markWorkspaceArchiving(activeWorkspaceIds, new Date().toISOString());
       try {
+        if (activeWorkspaceIds.length > 0) {
+          await this.publishWorkspaceArchiveUpdates(activeWorkspaceIds);
+        }
         for (const workspaceId of activeWorkspaceIds) {
+          const archivedAt = new Date().toISOString();
           await archiveWorkspaceContents(
             {
               agentManager: this.agentManager,
@@ -5623,8 +5692,9 @@ export class Session {
               sessionLogger: this.sessionLogger,
             },
             workspaceId,
+            archivedAt,
           );
-          await this.archiveWorkspaceRecord(workspaceId);
+          await this.archiveWorkspaceRecord(workspaceId, archivedAt);
           removedWorkspaceIds.push(workspaceId);
         }
 
@@ -5638,19 +5708,18 @@ export class Session {
             "Failed to clean up removed project icon",
           );
         });
+
+        const updateIds =
+          removedWorkspaceIds.length > 0
+            ? removedWorkspaceIds
+            : [projectWorkspaces[0]?.workspaceId ?? projectId];
+        await this.emitWorkspaceUpdatesForWorkspaceIds(updateIds, { removedProjectId: projectId });
       } finally {
+        this.clearWorkspaceArchiving(activeWorkspaceIds);
         if (activeWorkspaceIds.length > 0) {
-          this.clearWorkspaceArchiving(activeWorkspaceIds);
+          await this.publishWorkspaceArchiveUpdates(activeWorkspaceIds);
         }
       }
-
-      const updateIds =
-        removedWorkspaceIds.length > 0
-          ? removedWorkspaceIds
-          : [projectWorkspaces[0]?.workspaceId ?? projectId];
-      await this.emitWorkspaceUpdatesForWorkspaceIds(updateIds, {
-        removedProjectId: projectId,
-      });
 
       this.emit({
         type: "project.remove.response",
@@ -5756,6 +5825,41 @@ export class Session {
           accepted: false,
           title: null,
           error: getErrorMessageOr(error, "Failed to set workspace title"),
+        },
+      });
+    }
+  }
+
+  private async handleWorkspaceBaseBranchSetRequest(
+    msg: WorkspaceBaseBranchSetRequest,
+  ): Promise<void> {
+    try {
+      this.workspaceBaseBranch ??= createWorkspaceBaseBranchService({
+        jagentdeskHome: this.jagentdeskHome,
+        worktreesRoot: this.worktreesRoot,
+        workspaceRegistry: this.workspaceRegistry,
+        workspaceGitService: this.workspaceGitService,
+      });
+      const baseRef = await this.workspaceBaseBranch.setBaseBranch(msg);
+      this.emit({
+        type: "workspace.base_branch.set.response",
+        payload: {
+          requestId: msg.requestId,
+          workspaceId: msg.workspaceId,
+          accepted: true,
+          baseRef,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emit({
+        type: "workspace.base_branch.set.response",
+        payload: {
+          requestId: msg.requestId,
+          workspaceId: msg.workspaceId,
+          accepted: false,
+          baseRef: null,
+          error: getErrorMessage(error),
         },
       });
     }
@@ -6922,10 +7026,10 @@ export class Session {
         agentStorage: this.agentStorage,
         findWorkspaceIdForCwd: (cwd) => this.findWorkspaceIdForCwd(cwd),
         listActiveWorkspaces: () => this.listActiveWorkspaceRefs(),
-        archiveWorkspaceRecord: (workspaceId) => this.archiveWorkspaceRecord(workspaceId),
+        archiveWorkspaceRecord: (workspaceId, archivedAt) =>
+          this.archiveWorkspaceRecord(workspaceId, archivedAt),
         emit: (message) => this.emit(message),
-        emitWorkspaceUpdatesForWorkspaceIds: (workspaceIds) =>
-          this.emitWorkspaceUpdatesForWorkspaceIds(workspaceIds),
+        emitWorkspaceUpdatesForWorkspaceIds: this.publishWorkspaceArchiveUpdates,
         markWorkspaceArchiving: (workspaceIds, archivingAt) =>
           this.markWorkspaceArchiving(workspaceIds, archivingAt),
         clearWorkspaceArchiving: (workspaceIds) => this.clearWorkspaceArchiving(workspaceIds),
@@ -7319,7 +7423,7 @@ export class Session {
       projectRecord ?? (await this.projectRegistry.get(workspace.projectId));
 
     let diffStat: { additions: number; deletions: number } | null = null;
-    const snapshot = this.workspaceGitService.peekSnapshot(workspace.cwd);
+    const snapshot = this.workspaceRuntimeStore.get(workspace.cwd);
     if (snapshot?.git.diffStat) {
       diffStat = snapshot.git.diffStat;
     }
@@ -7345,6 +7449,7 @@ export class Session {
       name: resolveWorkspaceDisplayName(workspace),
       title: workspace.title,
       pinnedAt: workspace.pinnedAt,
+      background: workspace.background,
       archivingAt: null,
       status: "done",
       statusEnteredAt: null,
@@ -7392,7 +7497,7 @@ export class Session {
     projectRecord?: PersistedProjectRecord | null,
   ): Promise<WorkspaceDescriptorPayload> {
     const base = await this.describeWorkspaceRecord(workspace, projectRecord);
-    const snapshot = this.workspaceGitService.peekSnapshot(workspace.cwd);
+    const snapshot = this.workspaceRuntimeStore.get(workspace.cwd);
     if (!snapshot) {
       return base;
     }
@@ -7410,6 +7515,7 @@ export class Session {
       // resolves to "github") so the sidebar/hover-card brand mark matches the
       // status projection without a second resolve.
       forge: snapshot.forge.forge,
+      forgeWeb: snapshot.forgeWeb,
     };
   }
 
@@ -7430,6 +7536,7 @@ export class Session {
       worktreeSlug: basename(result.worktree.worktreePath),
       projectKind: projectRecord?.kind ?? "git",
       workspaceKind: result.workspace.kind,
+      background: result.workspace.background,
       name: resolveWorkspaceName({
         title: result.workspace.title,
         derivedDisplayName: result.worktree.branchName || result.workspace.displayName,
@@ -7467,11 +7574,11 @@ export class Session {
   }
 
   markWorkspaceArchiving(workspaceIds: Iterable<string>, archivingAt: string): void {
-    this.workspaceDirectory.markArchiving(workspaceIds, archivingAt);
+    this.workspaceArchiveOperations.markArchiving(workspaceIds, archivingAt);
   }
 
   clearWorkspaceArchiving(workspaceIds: Iterable<string>): void {
-    this.workspaceDirectory.clearArchiving(workspaceIds);
+    this.workspaceArchiveOperations.clearArchiving(workspaceIds);
   }
 
   private async buildWorkspaceDescriptorMap(options: {
@@ -7505,7 +7612,13 @@ export class Session {
     pageInfo: FetchWorkspacesResponsePageInfo;
   }> {
     try {
-      return await this.workspaceDirectory.listFetchEntries(request);
+      return await this.workspaceDirectory.listFetchEntries({
+        ...request,
+        filter: {
+          ...request.filter,
+          ...(request.includeBackground ? { includeBackground: true } : {}),
+        },
+      });
     } catch (error) {
       if (error instanceof CursorError) {
         throw new SessionRequestError("invalid_cursor", error.message);
@@ -7605,6 +7718,10 @@ export class Session {
 
   private async restoreWorkspaceAndEmit(workspaceId: string): Promise<void> {
     await this.workspaceRecovery.restore(workspaceId);
+    await this.publishRecoveredWorkspace(workspaceId);
+  }
+
+  private async publishRecoveredWorkspace(workspaceId: string): Promise<void> {
     const workspace = await this.workspaceRegistry.get(workspaceId);
     if (!workspace) {
       throw new Error(`Recovered workspace record not found: ${workspaceId}`);
@@ -8056,7 +8173,10 @@ export class Session {
         {
           requestId: request.requestId,
           subscribeRequested: Boolean(request.subscribe),
-          filter: request.filter ?? null,
+          filter: {
+            ...request.filter,
+            ...(request.includeBackground ? { includeBackground: true } : {}),
+          },
           sort: request.sort ?? null,
           page: request.page ?? null,
         },
@@ -8065,7 +8185,10 @@ export class Session {
       if (subscriptionId) {
         this.workspaceUpdatesSubscription = {
           subscriptionId,
-          filter: request.filter,
+          filter: {
+            ...request.filter,
+            ...(request.includeBackground ? { includeBackground: true } : {}),
+          },
           isBootstrapping: true,
           pendingUpdatesByWorkspaceId: new Map(),
           lastEmittedByWorkspaceId: new Map(),
@@ -8252,6 +8375,13 @@ export class Session {
     }
   }
 
+  private callerWorkspaceForBackground(callerAgentId?: string): string | undefined {
+    if (!callerAgentId) return undefined;
+    const caller = this.agentManager.getAgent(callerAgentId);
+    if (!caller) throw new Error(`Caller agent ${callerAgentId} not found`);
+    return caller.workspaceId;
+  }
+
   private async handleWorkspaceCreateLocal(
     request: Extract<SessionInboundMessage, { type: "workspace.create.request" }>,
   ): Promise<void> {
@@ -8281,7 +8411,11 @@ export class Session {
       cwd,
       explicitTitle ?? promptTitle,
       request.source.projectId,
-      { expectsInitialAgent: Boolean(request.firstAgentContext) },
+      {
+        expectsInitialAgent: Boolean(request.firstAgentContext),
+        background: request.background,
+        callerWorkspaceId: this.callerWorkspaceForBackground(request.callerAgentId),
+      },
     );
     await this.syncWorkspaceGitObserverForWorkspace(workspace);
     const descriptor = await this.describeWorkspaceRecord(workspace);
@@ -8356,6 +8490,8 @@ export class Session {
         githubPrNumber: source.githubPrNumber,
         firstAgentContext: request.firstAgentContext,
         title: request.title,
+        background: request.background,
+        callerWorkspaceId: this.callerWorkspaceForBackground(request.callerAgentId),
       },
       source.baseBranch
         ? { resolveDefaultBranch: async () => source.baseBranch as string }
@@ -8900,7 +9036,6 @@ export class Session {
         emit: (message) => this.emit(message),
         sessionLogger: this.sessionLogger,
         terminalManager: this.terminalManager,
-        archiveWorkspaceRecord: (workspaceId) => this.archiveWorkspaceRecord(workspaceId),
         serviceProxy: this.serviceProxy,
         scriptRuntimeStore: this.scriptRuntimeStore,
         getDaemonTcpPort: this.getDaemonTcpPort,
@@ -8931,36 +9066,57 @@ export class Session {
     request: Extract<SessionInboundMessage, { type: "archive_workspace_request" }>,
   ): Promise<void> {
     try {
-      const existing = await requireActiveWorkspaceForArchive(
-        { listActiveWorkspaces: () => this.listActiveWorkspaceRefs() },
+      // Claim the archive queue before any await, so an undo sent right behind this request
+      // queues after it and cancels it instead of running first.
+      const outcome = await this.workspaceArchiveOperations.archive(
         request.workspaceId,
+        async (signal) => {
+          const existing = await this.workspaceRegistry.get(request.workspaceId);
+          if (!existing) {
+            throw new Error(`Workspace not found: ${request.workspaceId}`);
+          }
+          return archiveByScope(
+            {
+              jagentdeskHome: this.jagentdeskHome,
+              jagentdeskWorktreesBaseRoot: this.worktreesRoot,
+              github: this.github,
+              workspaceGitService: this.workspaceGitService,
+              agentManager: this.agentManager,
+              agentStorage: this.agentStorage,
+              findWorkspaceIdForCwd: (cwd) => this.findWorkspaceIdForCwd(cwd),
+              listActiveWorkspaces: () => this.listActiveWorkspaceRefs(),
+              archiveWorkspaceRecord: (workspaceId, archivedAt) =>
+                this.archiveWorkspaceRecord(workspaceId, archivedAt),
+              emitWorkspaceUpdatesForWorkspaceIds: this.publishWorkspaceArchiveUpdates,
+              markWorkspaceArchiving: (workspaceIds, archivingAt) =>
+                this.markWorkspaceArchiving(workspaceIds, archivingAt),
+              clearWorkspaceArchiving: (workspaceIds) => this.clearWorkspaceArchiving(workspaceIds),
+              killTerminalsForWorkspace: (workspaceId) =>
+                this.terminalController.killTerminalsForWorkspace(workspaceId),
+              sessionLogger: this.sessionLogger,
+            },
+            {
+              scope: { kind: "workspace", workspaceId: existing.workspaceId },
+              requestId: request.requestId,
+              signal,
+            },
+          );
+        },
       );
 
-      await archiveByScope(
-        {
-          jagentdeskHome: this.jagentdeskHome,
-          jagentdeskWorktreesBaseRoot: this.worktreesRoot,
-          github: this.github,
-          workspaceGitService: this.workspaceGitService,
-          agentManager: this.agentManager,
-          agentStorage: this.agentStorage,
-          findWorkspaceIdForCwd: (cwd) => this.findWorkspaceIdForCwd(cwd),
-          listActiveWorkspaces: () => this.listActiveWorkspaceRefs(),
-          archiveWorkspaceRecord: (workspaceId) => this.archiveWorkspaceRecord(workspaceId),
-          emitWorkspaceUpdatesForWorkspaceIds: (workspaceIds) =>
-            this.emitWorkspaceUpdatesForWorkspaceIds(workspaceIds),
-          markWorkspaceArchiving: (workspaceIds, archivingAt) =>
-            this.markWorkspaceArchiving(workspaceIds, archivingAt),
-          clearWorkspaceArchiving: (workspaceIds) => this.clearWorkspaceArchiving(workspaceIds),
-          killTerminalsForWorkspace: (workspaceId) =>
-            this.terminalController.killTerminalsForWorkspace(workspaceId),
-          sessionLogger: this.sessionLogger,
-        },
-        {
-          scope: { kind: "workspace", workspaceId: existing.workspaceId },
-          requestId: request.requestId,
-        },
-      );
+      if (outcome.kind === "canceled") {
+        this.emit({
+          type: "archive_workspace_response",
+          payload: {
+            requestId: request.requestId,
+            workspaceId: request.workspaceId,
+            archivedAt: null,
+            error: "Workspace archive was undone",
+            canceled: true,
+          },
+        });
+        return;
+      }
 
       const archivedWorkspace = await this.workspaceRegistry.get(request.workspaceId);
       const archivedAt = archivedWorkspace?.archivedAt ?? new Date().toISOString();
@@ -8989,6 +9145,58 @@ export class Session {
         },
       });
     }
+  }
+
+  private async handleWorkspaceArchiveUndoRequest(
+    request: Extract<SessionInboundMessage, { type: "workspace.archive.undo.request" }>,
+  ): Promise<void> {
+    try {
+      await this.workspaceArchiveOperations.undo(request.workspaceId, (input) =>
+        this.restoreArchivedWorkspaceAndAgents(request.workspaceId, input),
+      );
+      this.emit({
+        type: "workspace.archive.undo.response",
+        payload: {
+          requestId: request.requestId,
+          workspaceId: request.workspaceId,
+          accepted: true,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.sessionLogger.warn(
+        { err: error, workspaceId: request.workspaceId, requestId: request.requestId },
+        "session: workspace.archive.undo.request rejected",
+      );
+      this.emit({
+        type: "workspace.archive.undo.response",
+        payload: {
+          requestId: request.requestId,
+          workspaceId: request.workspaceId,
+          accepted: false,
+          error: getErrorMessageOr(error, "Failed to undo the workspace archive"),
+        },
+      });
+    }
+  }
+
+  // Runs on the archive lane after any in-flight archive has stopped, so the record reflects how
+  // far it got: still active when it was canceled early, archived (directory kept or removed)
+  // otherwise.
+  private async restoreArchivedWorkspaceAndAgents(
+    workspaceId: string,
+    input: WorkspaceArchiveUndoInput,
+  ): Promise<void> {
+    const workspace = await this.workspaceRegistry.get(workspaceId);
+    if (!workspace) {
+      throw new Error(`Workspace not found: ${workspaceId}`);
+    }
+    if (workspace.archivedAt) {
+      await this.workspaceRecovery.restore(workspaceId);
+    } else if (input.archivedAt) {
+      await this.workspaceProvisioning.ensureWorkspaceRecordUnarchived(workspace, input.archivedAt);
+    }
+    await this.publishRecoveredWorkspace(workspaceId);
   }
 
   private async handleWorkspaceClearAttentionRequest(

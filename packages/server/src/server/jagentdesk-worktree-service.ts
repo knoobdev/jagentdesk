@@ -32,6 +32,8 @@ import type { FirstAgentContext } from "@jagentdesk/protocol/messages";
 export interface CreateJAgentDeskWorktreeInput extends CreateWorktreeCoreInput {
   projectId?: string;
   title?: string;
+  background?: boolean;
+  callerWorkspaceId?: string;
 }
 
 export interface CreateJAgentDeskWorktreeResult {
@@ -102,6 +104,8 @@ export async function createJAgentDeskWorktree(
       baseBranch: createdWorktree.worktree.comparisonBaseRef,
       title: input.title?.trim() || resolveFirstAgentPromptTitle(input.firstAgentContext),
       expectsInitialAgent: Boolean(input.firstAgentContext),
+      background: input.background,
+      callerWorkspaceId: input.callerWorkspaceId,
     });
 
     deps.github.invalidate({ cwd: createdWorktree.worktree.worktreePath });

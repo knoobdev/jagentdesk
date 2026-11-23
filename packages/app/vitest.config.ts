@@ -84,6 +84,9 @@ export default defineConfig({
     exclude: [
       // Expo core has web modules that must pass through the platform resolver.
       "expo-modules-core",
+      "expo-clipboard",
+      "expo-web-browser",
+      "expo-file-system",
       "react-native-reanimated",
       "react-native-gesture-handler",
       "react-native-keyboard-controller",

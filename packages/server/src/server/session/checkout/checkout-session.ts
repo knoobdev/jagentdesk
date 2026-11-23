@@ -10,6 +10,7 @@ import type {
   CheckoutRefreshRequest,
   CheckoutRenameBranchRequest,
   CheckoutStatusRequest,
+  CheckoutWorktreesListRequest,
   SessionInboundMessage,
   SessionOutboundMessage,
   SubscribeCheckoutDiffRequest,
@@ -53,6 +54,7 @@ import {
 } from "../../../utils/checkout-git.js";
 import { runGitCommand } from "../../../utils/run-git-command.js";
 import { expandTilde } from "../../../utils/path.js";
+import { listGitWorktrees } from "../../../utils/worktree.js";
 import type { GitMetadataGenerator } from "./git-metadata-generator.js";
 
 /**
@@ -233,7 +235,12 @@ export class CheckoutSession {
     const resolvedCwd = expandTilde(cwd);
 
     try {
-      const snapshot = await this.workspaceGitService.getSnapshot(resolvedCwd);
+      const snapshot = await this.workspaceGitService.getSnapshot(resolvedCwd, {
+        force: true,
+        afterInFlight: true,
+        includeForge: false,
+        reason: "checkout-status-request",
+      });
       this.host.emit({
         type: "checkout_status_response",
         payload: buildCheckoutStatusPayloadFromSnapshot({
@@ -281,6 +288,23 @@ export class CheckoutSession {
       this.host.emit({
         type: "checkout.commits.list.response",
         payload: { cwd, baseRef: null, commits: [], error: toCheckoutError(error), requestId },
+      });
+    }
+  }
+
+  async handleWorktreesListRequest(msg: CheckoutWorktreesListRequest): Promise<void> {
+    const { cwd, requestId } = msg;
+
+    try {
+      const worktrees = await listGitWorktrees({ cwd: expandTilde(cwd) });
+      this.host.emit({
+        type: "checkout.worktrees.list.response",
+        payload: { cwd, worktrees, error: null, requestId },
+      });
+    } catch (error) {
+      this.host.emit({
+        type: "checkout.worktrees.list.response",
+        payload: { cwd, worktrees: [], error: toCheckoutError(error), requestId },
       });
     }
   }
@@ -374,13 +398,14 @@ export class CheckoutSession {
   }
 
   async handleBranchSuggestionsRequest(msg: BranchSuggestionsRequest): Promise<void> {
-    const { cwd, query, limit, requestId } = msg;
+    const { cwd, query, limit, refMode, requestId } = msg;
 
     try {
       const resolvedCwd = expandTilde(cwd);
       const branchDetails = await this.workspaceGitService.suggestBranchesForCwd(resolvedCwd, {
         query,
         limit,
+        refMode,
       });
       this.host.emit({
         type: "branch_suggestions_response",

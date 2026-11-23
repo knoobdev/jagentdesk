@@ -1198,6 +1198,13 @@ export const WorkspacePinSetRequestSchema = z.object({
   requestId: z.string(),
 });
 
+export const WorkspaceBaseBranchSetRequestSchema = z.object({
+  type: z.literal("workspace.base_branch.set.request"),
+  workspaceId: z.string(),
+  baseRef: z.string(),
+  requestId: z.string(),
+});
+
 export const WorkspaceRecoveryInspectRequestSchema = z.object({
   type: z.literal("workspace.recovery.inspect.request"),
   workspaceId: z.string(),
@@ -1206,6 +1213,14 @@ export const WorkspaceRecoveryInspectRequestSchema = z.object({
 
 export const WorkspaceRecoveryRestoreRequestSchema = z.object({
   type: z.literal("workspace.recovery.restore.request"),
+  workspaceId: z.string(),
+  requestId: z.string(),
+});
+
+// Undoes the latest archive of a workspace: cancels it if it is still running, otherwise
+// restores the workspace, then unarchives the agents that archive took down.
+export const WorkspaceArchiveUndoRequestSchema = z.object({
+  type: z.literal("workspace.archive.undo.request"),
   workspaceId: z.string(),
   requestId: z.string(),
 });
@@ -1322,7 +1337,7 @@ export const ReviewAttachmentSchema = z.object({
   type: z.literal("review"),
   mimeType: z.literal("application/jagentdesk-review"),
   cwd: z.string(),
-  mode: z.enum(["uncommitted", "base"]),
+  mode: z.enum(["uncommitted", "base", "all"]),
   baseRef: z.string().nullable().optional(),
   comments: z.array(ReviewAttachmentCommentSchema),
 });
@@ -1436,11 +1451,13 @@ const WorkspaceStateBucketSchema = z.enum([
 ]);
 
 export const FetchWorkspacesRequestMessageSchema = z.object({
+  includeBackground: z.boolean().optional(),
   type: z.literal("fetch_workspaces_request"),
   requestId: z.string(),
   filter: z
     .object({
       query: z.string().optional(),
+      includeBackground: z.boolean().optional(),
       projectId: z.string().optional(),
       // Unused: accepted so older clients still parse, but the server does not filter on it.
       idPrefix: z.string().optional(),
@@ -2226,6 +2243,17 @@ export const WorkspacePinSetResponseSchema = z.object({
   payload: WorkspacePinSetResponsePayloadSchema,
 });
 
+export const WorkspaceBaseBranchSetResponseSchema = z.object({
+  type: z.literal("workspace.base_branch.set.response"),
+  payload: z.object({
+    requestId: z.string(),
+    workspaceId: z.string(),
+    accepted: z.boolean(),
+    baseRef: z.string().nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
 export const WorkspaceRecoveryStateSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("recoverable"),
@@ -2252,6 +2280,16 @@ export const WorkspaceRecoveryInspectResponseSchema = z.object({
 
 export const WorkspaceRecoveryRestoreResponseSchema = z.object({
   type: z.literal("workspace.recovery.restore.response"),
+  payload: z.object({
+    requestId: z.string(),
+    workspaceId: z.string(),
+    accepted: z.boolean(),
+    error: z.string().nullable(),
+  }),
+});
+
+export const WorkspaceArchiveUndoResponseSchema = z.object({
+  type: z.literal("workspace.archive.undo.response"),
   payload: z.object({
     requestId: z.string(),
     workspaceId: z.string(),
@@ -2294,7 +2332,7 @@ const CheckoutErrorSchema = z.object({
 });
 
 const CheckoutDiffCompareSchema = z.object({
-  mode: z.enum(["uncommitted", "base"]),
+  mode: z.enum(["uncommitted", "base", "all"]),
   baseRef: z.string().optional(),
   ignoreWhitespace: z.boolean().optional(),
 });
@@ -2420,6 +2458,12 @@ export const CheckoutCommitsListRequestSchema = z.object({
   requestId: z.string(),
 });
 
+export const CheckoutWorktreesListRequestSchema = z.object({
+  type: z.literal("checkout.worktrees.list.request"),
+  cwd: z.string(),
+  requestId: z.string(),
+});
+
 export const CheckoutCommitFileDiffRequestSchema = z.object({
   type: z.literal("checkout.commits.file_diff.request"),
   cwd: z.string(),
@@ -2527,6 +2571,7 @@ export const BranchSuggestionsRequestSchema = z.object({
   cwd: z.string(),
   query: z.string().optional(),
   limit: z.number().int().min(1).max(200).optional(),
+  refMode: z.literal("exact").optional(),
   requestId: z.string(),
 });
 
@@ -3427,6 +3472,8 @@ export const ArchiveWorkspaceRequestSchema = z.object({
 export const WorkspaceCreateRequestSchema = z.object({
   type: z.literal("workspace.create.request"),
   requestId: z.string(),
+  background: z.boolean().optional(),
+  callerAgentId: z.string().optional(),
   // Optional user-set title applied to the created workspace.
   title: z.string().optional(),
   // Optional prompt context for workspace-level name/branch generation.
@@ -4207,8 +4254,10 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ProjectRemoveRequestSchema,
   WorkspaceTitleSetRequestSchema,
   WorkspacePinSetRequestSchema,
+  WorkspaceBaseBranchSetRequestSchema,
   WorkspaceRecoveryInspectRequestSchema,
   WorkspaceRecoveryRestoreRequestSchema,
+  WorkspaceArchiveUndoRequestSchema,
   SetVoiceModeMessageSchema,
   SendAgentMessageRequestSchema,
   WaitForFinishRequestSchema,
@@ -4301,6 +4350,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   CheckoutForgeSetAutoMergeRequestSchema,
   CheckoutGithubSetAutoMergeRequestSchema,
   CheckoutCommitsListRequestSchema,
+  CheckoutWorktreesListRequestSchema,
   CheckoutCommitFileDiffRequestSchema,
   CheckoutForgeGetCheckDetailsRequestSchema,
   CheckoutGithubGetCheckDetailsRequestSchema,
@@ -4668,6 +4718,13 @@ export const ServerInfoStatusPayloadSchema = z
         providersSnapshot: z.boolean().optional(),
         // COMPAT(providersSnapshotCwd): added in v0.3.2, remove gate after 2027-02-10.
         providersSnapshotCwd: z.boolean().optional(),
+        // COMPAT(workspaceBaseBranch): added in v0.9.59; remove after 2027-05-23.
+        workspaceBaseBranch: z.boolean().optional(),
+        // COMPAT(checkoutWorktreeList): added after v0.16.2, remove gate after 2027-11-19.
+        checkoutWorktreeList: z.boolean().optional(),
+        // COMPAT(worktreeRefActions): added after v0.16.2, remove gate after 2027-11-19.
+        // Hosts without it check out a change request even when asked to branch off it.
+        worktreeRefActions: z.boolean().optional(),
         // COMPAT(checkoutForgeSetAutoMerge): added in v0.1.106, remove old
         // checkoutGithubSetAutoMerge fallback after 2026-12-28.
         checkoutForgeSetAutoMerge: z.boolean().optional(),
@@ -4702,6 +4759,8 @@ export const ServerInfoStatusPayloadSchema = z
         worktreeRestore: z.boolean().optional(),
         // COMPAT(workspaceRecovery): added in v0.1.105, remove after 2027-01-11 once daemon floor >= v0.1.105.
         workspaceRecovery: z.boolean().optional(),
+        // COMPAT(workspaceArchiveUndo): added in v0.15.3, remove gate after 2027-05-06.
+        workspaceArchiveUndo: z.boolean().optional(),
         // COMPAT(workspaceFileEditing): added in v0.2.0, remove after 2027-01-18 once daemon floor >= v0.2.0.
         workspaceFileEditing: z.boolean().optional(),
         // COMPAT(providerUsageList): added in v0.1.98, drop the gate when daemon floor >= v0.1.98.
@@ -4848,6 +4907,8 @@ export const ServerInfoStatusPayloadSchema = z
         // Relay second path (spec 35 / ADR-0048): pairing offers carry `relay`,
         // server_info carries the relay descriptor, and the app shows the Relay badge.
         relay: z.boolean().optional(),
+        checkoutDiffAll: z.boolean().optional(),
+        backgroundWorkspaces: z.boolean().optional(),
       })
       .optional(),
   })
@@ -5056,6 +5117,22 @@ export const WorkspaceScriptPayloadSchema = z.object({
   terminalId: z.string().nullable().optional().default(null),
 });
 
+/**
+ * Where a workspace's forge is on the web, resolved by the daemon so every
+ * client builds the same links.
+ */
+export const ForgeWebSchema = z.object({
+  /** Web host of the forge: the SSH config alias resolved, cloud SSH hosts mapped to their web host. */
+  host: z.string(),
+  /**
+   * Repository path that owns issue and change-request numbers when it is not
+   * the origin repository, such as a fork's parent. Absent: the origin repository.
+   */
+  referenceRepository: z.string().optional(),
+});
+
+export type ForgeWeb = z.infer<typeof ForgeWebSchema>;
+
 const WorkspaceGitRuntimePayloadSchema = z
   .object({
     currentBranch: z.string().nullable().optional(),
@@ -5124,6 +5201,7 @@ export const WorkspaceGitHubRuntimePayloadSchema = z
 export const WorkspaceDescriptorPayloadSchema = z
   .object({
     id: z.string(),
+    background: z.boolean().optional(),
     projectId: z.string(),
     projectDisplayName: z.string(),
     // COMPAT(projectCustomName): added in v0.1.76, drop the optional gate when floor >= v0.1.76.
@@ -5176,6 +5254,8 @@ export const WorkspaceDescriptorPayloadSchema = z
     // for this workspace, so the sidebar/hover-card render the right brand mark.
     // Old daemons omit it; absent means the client falls back to GitHub.
     forge: z.string().optional(),
+    // COMPAT(forgeWeb): added in v0.9.59; remove remote-derived links after 2027-05-23.
+    forgeWeb: ForgeWebSchema.optional(),
     project: ProjectPlacementPayloadSchema.optional(),
   })
   .transform((workspace) => ({
@@ -5526,6 +5606,8 @@ export const ArchiveWorkspaceResponseMessageSchema = z.object({
     workspaceId: z.string(),
     archivedAt: z.string().nullable(),
     error: z.string().nullable(),
+    // An undo stopped this archive before it finished; `error` carries the reason.
+    canceled: z.boolean().optional(),
   }),
 });
 
@@ -6255,6 +6337,8 @@ const CheckoutStatusCommonSchema = z.object({
   cwd: z.string(),
   error: CheckoutErrorSchema.nullable(),
   requestId: z.string(),
+  baseRefExact: z.string().nullable().optional(),
+  forgeWeb: ForgeWebSchema.optional(),
 });
 
 const CheckoutStatusNotGitSchema = CheckoutStatusCommonSchema.extend({
@@ -6578,6 +6662,26 @@ export const CheckoutCommitsListResponseSchema = z.object({
     cwd: z.string(),
     baseRef: z.string().nullable(),
     commits: z.array(CheckoutCommitSchema),
+    error: CheckoutErrorSchema.nullable(),
+    requestId: z.string(),
+  }),
+});
+
+export const CheckoutWorktreeSchema = z.object({
+  path: z.string(),
+  // null when HEAD is detached
+  branchName: z.string().nullable(),
+  head: z.string().nullable(),
+  createdAt: z.string(), // ISO 8601
+  // true for the worktree the request's cwd is in
+  containsCwd: z.boolean(),
+});
+
+export const CheckoutWorktreesListResponseSchema = z.object({
+  type: z.literal("checkout.worktrees.list.response"),
+  payload: z.object({
+    cwd: z.string(),
+    worktrees: z.array(CheckoutWorktreeSchema),
     error: CheckoutErrorSchema.nullable(),
     requestId: z.string(),
   }),
@@ -8199,8 +8303,10 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ProjectRemoveResponseSchema,
   WorkspaceTitleSetResponseSchema,
   WorkspacePinSetResponseSchema,
+  WorkspaceBaseBranchSetResponseSchema,
   WorkspaceRecoveryInspectResponseSchema,
   WorkspaceRecoveryRestoreResponseSchema,
+  WorkspaceArchiveUndoResponseSchema,
   WaitForFinishResponseMessageSchema,
   AgentPermissionRequestMessageSchema,
   AgentPermissionResolvedMessageSchema,
@@ -8222,6 +8328,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   CheckoutForgeSetAutoMergeResponseSchema,
   CheckoutGithubSetAutoMergeResponseSchema,
   CheckoutCommitsListResponseSchema,
+  CheckoutWorktreesListResponseSchema,
   CheckoutCommitFileDiffResponseSchema,
   CheckoutForgeGetCheckDetailsResponseSchema,
   CheckoutGithubGetCheckDetailsResponseSchema,
@@ -8520,6 +8627,7 @@ export type WorkspaceRecoveryInspectResponse = z.infer<
 export type WorkspaceRecoveryRestoreResponse = z.infer<
   typeof WorkspaceRecoveryRestoreResponseSchema
 >;
+export type WorkspaceArchiveUndoResponse = z.infer<typeof WorkspaceArchiveUndoResponseSchema>;
 export type WorkspaceCreateRequest = z.infer<typeof WorkspaceCreateRequestSchema>;
 export type WorkspaceCreateResponse = z.infer<typeof WorkspaceCreateResponseSchema>;
 export type ProjectRenameResponsePayload = z.infer<typeof ProjectRenameResponsePayloadSchema>;
@@ -8667,8 +8775,10 @@ export type ProjectIconSetRequest = z.infer<typeof ProjectIconSetRequestSchema>;
 export type ProjectRemoveRequest = z.infer<typeof ProjectRemoveRequestSchema>;
 export type WorkspaceTitleSetRequest = z.infer<typeof WorkspaceTitleSetRequestSchema>;
 export type WorkspacePinSetRequest = z.infer<typeof WorkspacePinSetRequestSchema>;
+export type WorkspaceBaseBranchSetRequest = z.infer<typeof WorkspaceBaseBranchSetRequestSchema>;
 export type WorkspaceRecoveryInspectRequest = z.infer<typeof WorkspaceRecoveryInspectRequestSchema>;
 export type WorkspaceRecoveryRestoreRequest = z.infer<typeof WorkspaceRecoveryRestoreRequestSchema>;
+export type WorkspaceArchiveUndoRequest = z.infer<typeof WorkspaceArchiveUndoRequestSchema>;
 export type SetAgentModeRequestMessage = z.infer<typeof SetAgentModeRequestMessageSchema>;
 export type SetAgentModelRequestMessage = z.infer<typeof SetAgentModelRequestMessageSchema>;
 export type SwitchAgentProviderRequestMessage = z.infer<
@@ -8701,6 +8811,9 @@ export type CheckoutCommitFile = z.infer<typeof CheckoutCommitFileSchema>;
 export type CheckoutCommit = z.infer<typeof CheckoutCommitSchema>;
 export type CheckoutCommitsListRequest = z.infer<typeof CheckoutCommitsListRequestSchema>;
 export type CheckoutCommitsListResponse = z.infer<typeof CheckoutCommitsListResponseSchema>;
+export type CheckoutWorktree = z.infer<typeof CheckoutWorktreeSchema>;
+export type CheckoutWorktreesListRequest = z.infer<typeof CheckoutWorktreesListRequestSchema>;
+export type CheckoutWorktreesListResponse = z.infer<typeof CheckoutWorktreesListResponseSchema>;
 export type CheckoutCommitFileDiffRequest = z.infer<typeof CheckoutCommitFileDiffRequestSchema>;
 export type CheckoutCommitFileDiffResponse = z.infer<typeof CheckoutCommitFileDiffResponseSchema>;
 export type ParsedDiffFile = z.infer<typeof ParsedDiffFileSchema>;

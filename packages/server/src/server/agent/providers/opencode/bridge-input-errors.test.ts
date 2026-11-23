@@ -50,8 +50,8 @@ test("bridge preserves tool failure messages and classifies invalid requests as 
       path.join(jagentdeskHome, "projects.json"),
       logger,
     ),
-    workspaceGitService: {
-      peekSnapshot: () => {
+    workspaceRuntimeStore: {
+      get: () => {
         throw new Error("Unexpected git lookup");
       },
     },

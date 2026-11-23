@@ -760,13 +760,14 @@ test("does not mark checkout branch worktrees as eligible for first-agent rename
     createDeps(),
   );
 
+  // baseRefName must be the repo's default branch, not the checked-out branch
+  // itself — otherwise the diff panel compares the branch against itself and
+  // always shows no changes.
   expect(await readJAgentDeskWorktreeMetadata(created.worktree.worktreePath)).toMatchObject({
     version: 1,
-    baseRefName: "dev",
+    baseRefName: "main",
   });
-  // A checkout-branch worktree has no distinct base, so the workspace records a
-  // null baseBranch even though worktree.json's baseRefName is the branch itself.
-  expect(created.workspace.baseBranch).toBe(null);
+  expect(created.workspace.baseBranch).toBe("main");
   await expect(
     attemptFirstAgentBranchAutoName({
       cwd: created.worktree.worktreePath,
@@ -1082,6 +1083,7 @@ function createDeps(options?: {
   };
   const workspaceGitService = createWorkspaceGitServiceStub();
   const workspaceProvisioning = createWorkspaceProvisioningService({
+    unarchiveWorkspaceAgents: async () => {},
     projectRegistry,
     workspaceRegistry,
     workspaceGitService,
@@ -1187,7 +1189,7 @@ function createWorkspaceGitServiceStub(): WorkspaceGitService {
     registerWorkspace: () => ({
       unsubscribe: () => {},
     }),
-    peekSnapshot: (cwd) => createWorkspaceGitSnapshot(cwd),
+
     getCheckout: async (cwd) => {
       try {
         const snapshot = createWorkspaceGitSnapshot(cwd);

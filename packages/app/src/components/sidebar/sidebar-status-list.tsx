@@ -27,11 +27,9 @@ import { AdaptiveRenameModal } from "@/components/rename-modal";
 import { requireWorkspaceDirectory } from "@/utils/workspace-directory";
 import { redirectIfArchivingActiveWorkspace } from "@/utils/sidebar-workspace-archive-redirect";
 import { useWorkspaceArchive } from "@/workspace/use-workspace-archive";
-import { toWorktreeArchiveRisk } from "@/git/worktree-archive-warning";
 import * as Clipboard from "expo-clipboard";
 import type { ShortcutKey } from "@/utils/format-shortcut";
 import { useShortcutKeys } from "@/hooks/use-shortcut-keys";
-import { useKeyboardActionHandler } from "@/hooks/use-keyboard-action-handler";
 import { useClearWorkspaceAttention } from "@/hooks/use-clear-workspace-attention";
 import {
   SidebarWorkspaceRowFrame,
@@ -486,8 +484,9 @@ function StatusWorkspaceRowWithMenu({
     serverId: workspace.serverId,
     workspaceId: workspace.workspaceId,
     workspaceKind: workspace.workspaceKind,
+    workspaceDirectory: workspace.workspaceDirectory,
     name: workspace.name,
-    ...toWorktreeArchiveRisk(workspace),
+    diffStat: workspace.diffStat,
     onArchiveStarted: redirectAfterArchive,
     onSetHiding: setIsHidingWorkspace,
   });
@@ -549,17 +548,6 @@ function StatusWorkspaceRowWithMenu({
       toast.error(error instanceof Error ? error.message : "Failed to mark workspace as read");
     });
   }, [clearAttention, toast]);
-
-  useKeyboardActionHandler({
-    handlerId: `workspace-archive-${workspace.workspaceKey}`,
-    actions: ["workspace.archive"],
-    enabled: selected && !isArchiving,
-    priority: 0,
-    handle: () => {
-      handleArchive();
-      return true;
-    },
-  });
 
   return (
     <>
@@ -666,6 +654,7 @@ function StatusWorkspaceRowInner({
         const {
           showDiffStat,
           showKebab: showKebabInSlot,
+          showArchiveButton,
           showScrim,
         } = resolveTrailingActionVisibility({
           hasDiffStat: Boolean(workspace.diffStat),
@@ -722,6 +711,7 @@ function StatusWorkspaceRowInner({
                     workspace={workspace}
                     showBase={showDiffStat}
                     showKebab={showKebabInSlot}
+                    showArchiveButton={showArchiveButton}
                     showScrim={showScrim}
                     isPinned={isPinned}
                     onTogglePin={onTogglePin}
@@ -749,6 +739,7 @@ function StatusWorkspaceActionSlot({
   workspace,
   showBase,
   showKebab,
+  showArchiveButton,
   showScrim,
   isPinned,
   onTogglePin,
@@ -765,6 +756,7 @@ function StatusWorkspaceActionSlot({
   workspace: SidebarWorkspaceEntry;
   showBase: boolean;
   showKebab: boolean;
+  showArchiveButton: boolean;
   showScrim: boolean;
   isPinned?: boolean;
   onTogglePin?: () => void;
@@ -789,7 +781,12 @@ function StatusWorkspaceActionSlot({
           />
         ) : null}
       </SidebarWorkspaceTrailingActionBase>
-      <SidebarWorkspaceTrailingActionOverlay visible={kebab.showKebab} scrim={showScrim}>
+      <SidebarWorkspaceTrailingActionOverlay
+        visible={kebab.showKebab}
+        scrim={showScrim}
+        workspaceKey={workspace.workspaceKey}
+        onArchiveButtonPress={showArchiveButton ? onArchive : undefined}
+      >
         {kebab.showKebab && onArchive ? (
           <SidebarWorkspaceMenu
             {...kebab.menuProps}

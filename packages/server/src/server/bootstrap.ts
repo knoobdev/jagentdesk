@@ -3,12 +3,16 @@ import { resolveJAgentDeskToolPolicy } from "./agent/jagentdesk-tool-policy.js";
 import { BuiltinPluginLoader } from "./plugins/builtin/index.js";
 import { withTimeout } from "../utils/promise-timeout.js";
 import { describeHookWorkspace } from "./plugins/lifecycle/index.js";
+import { WorkspaceArchiveOperations } from "./workspace-archive-operations.js";
 import { PhysicalDeviceHub } from "./devices/hub.js";
 import { clearGrantsWhenSessionsEnd } from "./devices/agent-grants.js";
 import { HostCapabilityService } from "./host-capabilities/service.js";
 import { ensureToolDirsOnPath, HostToolInstaller } from "./host-tools/installer.js";
 import type { HttpFetch } from "./host-tools/release.js";
 import { setForgeToolInstaller } from "./session/forge/forge-cli-installer.js";
+import { unarchiveAgentState } from "./agent/agent-prompt.js";
+import { unarchiveWorkspaceAgents } from "./workspace-archive-service.js";
+import { createWorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
 import express from "express";
 import { createServer as createHTTPServer, type IncomingMessage, type ServerResponse } from "http";
 import { constants, existsSync, unlinkSync } from "fs";
@@ -996,8 +1000,28 @@ export async function createJAgentDeskDaemon(
         workspace: describeHookWorkspace(mutation.workspace),
       });
   });
+  const workspaceRuntimeStore = createWorkspaceRuntimeStore();
+  const workspaceArchiveOperations = new WorkspaceArchiveOperations();
+  workspaceGitService.onSnapshotUpdated((snapshot) => workspaceRuntimeStore.set(snapshot));
+  workspaceRegistry.subscribeToMutations(async (mutation) => {
+    if (mutation.kind === "remove" && mutation.workspace) {
+      const cwd = path.resolve(mutation.workspace.cwd);
+      const workspaces = await workspaceRegistry.list();
+      const hasActiveWorkspace = workspaces.some(
+        (workspace) => !workspace.archivedAt && path.resolve(workspace.cwd) === cwd,
+      );
+      if (!hasActiveWorkspace) workspaceRuntimeStore.remove(cwd);
+    }
+  });
   const workspaceProvisioning = createWorkspaceProvisioningService({
     lifecycle: pluginRuntime,
+    unarchiveWorkspaceAgents: (request) =>
+      unarchiveWorkspaceAgents({
+        ...request,
+        agentStorage,
+        unarchiveAgent: (id) => unarchiveAgentState(agentStorage, agentManager, id),
+        sessionLogger: logger,
+      }),
     serverId,
     projectRegistry,
     workspaceRegistry,
@@ -1153,15 +1177,18 @@ export async function createJAgentDeskDaemon(
     logger,
     jagentdeskHome: config.jagentdeskHome,
     workspaceGitService,
+    workspaceRuntimeStore,
   });
   const archiveWorkspaceRecordExternal = async (
     workspaceId: string,
     context?: WorkspaceArchiveContext,
+    archivedAt?: string,
   ) => {
     const existingWorkspace = await archivePersistedWorkspaceRecord({
       workspaceId,
       workspaceRegistry,
       context,
+      archivedAt,
     });
     if (!existingWorkspace || existingWorkspace.archivedAt) return;
     teardownArchivedWorkspaceRuntime(workspaceId);
@@ -1201,25 +1228,12 @@ export async function createJAgentDeskDaemon(
         mainRepoRoot: workspace.mainRepoRoot,
       }));
   };
-  const markWorkspaceArchivingExternal = (workspaceIds: Iterable<string>, archivingAt: string) => {
-    const workspaceIdList = Array.from(workspaceIds);
-    for (const session of wsServer?.listTrustedSessions() ?? []) {
-      session.markWorkspaceArchivingForExternalMutation(workspaceIdList, archivingAt);
-    }
-  };
-  const clearWorkspaceArchivingExternal = (workspaceIds: Iterable<string>) => {
-    const workspaceIdList = Array.from(workspaceIds);
-    for (const session of wsServer?.listTrustedSessions() ?? []) {
-      session.clearWorkspaceArchivingForExternalMutation(workspaceIdList);
-    }
-  };
+  const markWorkspaceArchiving = (workspaceIds: Iterable<string>, archivingAt: string) =>
+    workspaceArchiveOperations.markArchiving(workspaceIds, archivingAt);
+  const clearWorkspaceArchiving = (workspaceIds: Iterable<string>) =>
+    workspaceArchiveOperations.clearArchiving(workspaceIds);
   const emitWorkspaceUpdatesExternal = async (workspaceIds: Iterable<string>) => {
-    const workspaceIdList = Array.from(workspaceIds);
-    await Promise.all(
-      (wsServer?.listTrustedSessions() ?? []).map((session) =>
-        session.emitWorkspaceUpdatesForExternalWorkspaceIds(workspaceIdList),
-      ),
-    );
+    await wsServer?.publishWorkspaceUpdates(workspaceIds);
   };
   const ensureWorkspaceForCreateAndBroadcastExternal = async (
     cwd: string,
@@ -1268,8 +1282,8 @@ export async function createJAgentDeskDaemon(
     getAutoArchivedChangeRequestUrl: async (workspaceId) =>
       (await workspaceRegistry.get(workspaceId))?.autoArchivedChangeRequestUrl ?? null,
     archiveWorkspaceRecord: archiveWorkspaceRecordExternal,
-    markWorkspaceArchiving: markWorkspaceArchivingExternal,
-    clearWorkspaceArchiving: clearWorkspaceArchivingExternal,
+    markWorkspaceArchiving,
+    clearWorkspaceArchiving,
     emitWorkspaceUpdatesForWorkspaceIds: emitWorkspaceUpdatesExternal,
   });
 
@@ -1310,7 +1324,6 @@ export async function createJAgentDeskDaemon(
         emit: emitExternalSessionMessage,
         sessionLogger: logger,
         terminalManager,
-        archiveWorkspaceRecord: archiveWorkspaceRecordExternal,
         serviceProxy,
         scriptRuntimeStore,
         getDaemonTcpPort: () => (boundListenTarget?.type === "tcp" ? boundListenTarget.port : null),
@@ -1347,10 +1360,11 @@ export async function createJAgentDeskDaemon(
         agentStorage,
         findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
         listActiveWorkspaces: listActiveWorkspacesExternal,
-        archiveWorkspaceRecord: archiveWorkspaceRecordExternal,
+        archiveWorkspaceRecord: (workspaceIdToArchive, archivedAt) =>
+          archiveWorkspaceRecordExternal(workspaceIdToArchive, undefined, archivedAt),
         emitWorkspaceUpdatesForWorkspaceIds: emitWorkspaceUpdatesExternal,
-        markWorkspaceArchiving: markWorkspaceArchivingExternal,
-        clearWorkspaceArchiving: clearWorkspaceArchivingExternal,
+        markWorkspaceArchiving,
+        clearWorkspaceArchiving,
         killTerminalsForWorkspace: (workspaceIdToKill) =>
           killTerminalsForWorkspace({ terminalManager, sessionLogger: logger }, workspaceIdToKill),
         sessionLogger: logger,
@@ -1369,12 +1383,12 @@ export async function createJAgentDeskDaemon(
       archiveAgentCommand({ agentManager, agentStorage, logger }, agentId),
     findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
     listActiveWorkspaces: listActiveWorkspacesExternal,
-    archiveWorkspaceRecord: archiveWorkspaceRecordExternal,
+    archiveWorkspaceRecord: (workspaceId) => archiveWorkspaceRecordExternal(workspaceId),
     emit: emitExternalSessionMessage,
     emitAgentRemove: async () => undefined,
     emitWorkspaceUpdatesForWorkspaceIds: emitWorkspaceUpdatesExternal,
-    markWorkspaceArchiving: markWorkspaceArchivingExternal,
-    clearWorkspaceArchiving: clearWorkspaceArchivingExternal,
+    markWorkspaceArchiving,
+    clearWorkspaceArchiving,
     killTerminalsForWorkspace: (workspaceId) =>
       killTerminalsForWorkspace({ terminalManager, sessionLogger: logger }, workspaceId),
     logger,
@@ -1595,10 +1609,11 @@ export async function createJAgentDeskDaemon(
         agentStorage,
         findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
         listActiveWorkspaces: listActiveWorkspacesExternal,
-        archiveWorkspaceRecord: archiveWorkspaceRecordExternal,
+        archiveWorkspaceRecord: (workspaceIdToArchive, archivedAt) =>
+          archiveWorkspaceRecordExternal(workspaceIdToArchive, undefined, archivedAt),
         emitWorkspaceUpdatesForWorkspaceIds: emitWorkspaceUpdatesExternal,
-        markWorkspaceArchiving: markWorkspaceArchivingExternal,
-        clearWorkspaceArchiving: clearWorkspaceArchivingExternal,
+        markWorkspaceArchiving,
+        clearWorkspaceArchiving,
         killTerminalsForWorkspace: (workspaceIdToKill) =>
           killTerminalsForWorkspace(
             {
@@ -1790,15 +1805,17 @@ export async function createJAgentDeskDaemon(
     workspaceGitService,
     findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
     listActiveWorkspaces: listActiveWorkspacesExternal,
-    archiveWorkspaceRecord: archiveWorkspaceRecordExternal,
+    archiveWorkspaceRecord: (workspaceId, archivedAt) =>
+      archiveWorkspaceRecordExternal(workspaceId, undefined, archivedAt),
     emitWorkspaceUpdatesForWorkspaceIds: emitWorkspaceUpdatesExternal,
     workspaceRegistry,
     projectRegistry,
-    createDirectoryWorkspace: async (cwd, title, projectId) => {
+    createDirectoryWorkspace: async (cwd, title, projectId, context) => {
       const workspace = await workspaceProvisioning.createWorkspaceForDirectory(
         cwd,
         title,
         projectId,
+        context,
       );
       await emitWorkspaceUpdatesExternal([workspace.workspaceId]);
       return workspace;
@@ -1809,20 +1826,19 @@ export async function createJAgentDeskDaemon(
       terminalManager,
       workspaceRegistry,
       projectRegistry,
-      workspaceGitService,
+      workspaceRuntimeStore,
       getDaemonTcpPort: () => (boundListenTarget?.type === "tcp" ? boundListenTarget.port : null),
       getDaemonTcpHost: () => (boundListenTarget?.type === "tcp" ? boundListenTarget.host : null),
       serviceProxyPublicBaseUrl,
       resolveScriptHealth: (hostname) => scriptHealthMonitor.getHealthForHostname(hostname),
       logger,
-      // MCP operations do not belong to one WebSocket session, so lifecycle
-      // status updates fan out to every connected client.
       emit: (message) => wsServer?.broadcast(wrapSessionMessage(message)),
+      publishStatusUpdate: (message) => wsServer?.publishScriptStatusUpdate(message),
       spawnWorkspaceScript,
       globalServicePorts: loadPersistedConfig(config.jagentdeskHome).worktrees?.servicePorts,
     }),
-    markWorkspaceArchiving: markWorkspaceArchivingExternal,
-    clearWorkspaceArchiving: clearWorkspaceArchivingExternal,
+    markWorkspaceArchiving,
+    clearWorkspaceArchiving,
     ensureWorkspaceForCreate: createAgentCommandDependencies.ensureWorkspaceForCreate,
     createJAgentDeskWorktree: createAgentCommandDependencies.createJAgentDeskWorktree,
     browserToolsEnabled: pluginRuntime.builtin.forAgent(runtime.callerAgentId).has("browser-tools"),
@@ -2190,6 +2206,7 @@ export async function createJAgentDeskDaemon(
                 daemonStatusRpc: dependencies.serverFeatureOverrides?.daemonStatusRpc,
               },
               workspaceAutoName,
+              workspaceRuntimeStore,
               config.auth,
               speechService,
               terminalManager,
@@ -2253,6 +2270,7 @@ export async function createJAgentDeskDaemon(
               sshService,
               argocdService,
               sideloadService,
+              workspaceArchiveOperations,
             );
             // Session-share guests (ADR-0019): let the scoped ShareServer /ws hand validated guest
             // sockets to the daemon as agent-confined real sessions.

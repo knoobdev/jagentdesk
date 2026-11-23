@@ -9,8 +9,16 @@ function fileExplorerEntry(page: Page, name: string) {
 }
 
 export async function openFileExplorer(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "Open explorer" }).first().click();
-  await page.getByTestId("explorer-tab-files").click();
+  const toggle = page.getByTestId("workspace-explorer-toggle").first();
+  await expect(toggle).toBeVisible({ timeout: 30_000 });
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  const filesTab = page.getByTestId("explorer-tab-files").filter({ visible: true }).first();
+  await expect
+    .poll(async () => (await fileExplorerTree(page).isVisible()) || (await filesTab.isVisible()), {
+      timeout: 30_000,
+    })
+    .toBe(true);
+  if (await filesTab.isVisible()) await filesTab.click();
   await expect(fileExplorerTree(page)).toBeVisible({ timeout: 30_000 });
 }
 

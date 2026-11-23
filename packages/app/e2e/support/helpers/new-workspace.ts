@@ -16,6 +16,7 @@ type NewWorkspaceDaemonClient = Pick<
   | "connect"
   | "createJAgentDeskWorktree"
   | "createWorkspace"
+  | "fetchAgents"
   | "fetchWorkspaces"
   | "getJAgentDeskWorktreeList"
   | "getDaemonConfig"
@@ -219,7 +220,7 @@ export async function expectNewWorkspaceControlsEnabled(page: Page): Promise<voi
 }
 
 export async function openNewWorkspaceProjectPickerWithShortcut(page: Page): Promise<void> {
-  await page.keyboard.press("Control+P");
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+P" : "Control+P");
 
   const searchInput = page.getByPlaceholder("Search projects");
   await expect(searchInput).toBeVisible({ timeout: 30_000 });

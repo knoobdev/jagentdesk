@@ -661,6 +661,82 @@ describe("WorkspaceReconciliationService", () => {
     expect([...workspaces.values()].every((workspace) => workspace.archivedAt !== null)).toBe(true);
   }, 120000);
 
+  test("keeps a worktree restorable when it is archived while its checkout read is in flight", async () => {
+    const projectRoot = "/reconcile/archive-worktree/root";
+    const worktreeCwd = "/reconcile/archive-worktree/worktrees/feature";
+    const { projects, workspaces, projectRegistry, workspaceRegistry } = createTestRegistries();
+    projects.set(
+      "p1",
+      createPersistedProjectRecord({
+        projectId: "p1",
+        rootPath: projectRoot,
+        projectKey: deriveProjectKey({
+          rootPath: projectRoot,
+          remoteUrl: null,
+          worktreeRoot: projectRoot,
+          mainRepoRoot: null,
+        }),
+        kind: "git",
+        displayName: "archive-worktree",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }),
+    );
+    workspaces.set(
+      "w1",
+      createPersistedWorkspaceRecord({
+        workspaceId: "w1",
+        projectId: "p1",
+        cwd: worktreeCwd,
+        kind: "worktree",
+        displayName: "feature",
+        branch: "feature",
+        worktreeRoot: worktreeCwd,
+        isJAgentDeskOwnedWorktree: true,
+        mainRepoRoot: projectRoot,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }),
+    );
+    const worktreeReadStarted = deferred();
+    const allowWorktreeRead = deferred();
+    const service = new WorkspaceReconciliationService({
+      projectRegistry,
+      workspaceRegistry,
+      logger: createTestLogger(),
+      inspectDirectory: async () => "directory",
+      workspaceGitService: {
+        getCheckout: async (cwd) => {
+          if (cwd === projectRoot) {
+            return createCheckout(cwd, { isGit: true, currentBranch: "main", worktreeRoot: cwd });
+          }
+          worktreeReadStarted.resolve();
+          await allowWorktreeRead.promise;
+          // Archive deletes the worktree after archiving its record, so a read that
+          // lands mid-deletion no longer sees a Git checkout there.
+          return createCheckout(cwd);
+        },
+      },
+    });
+
+    const reconciliation = service.runOnce();
+    await worktreeReadStarted.promise;
+    const archivedAt = "2025-01-02T00:00:00.000Z";
+    await workspaceRegistry.archive("w1", archivedAt);
+    allowWorktreeRead.resolve();
+    const result = await reconciliation;
+
+    expect(result.changesApplied).toEqual([]);
+    expect(workspaces.get("w1")).toMatchObject({
+      archivedAt,
+      kind: "worktree",
+      branch: "feature",
+      worktreeRoot: worktreeCwd,
+      isJAgentDeskOwnedWorktree: true,
+      mainRepoRoot: projectRoot,
+    });
+  });
+
   const tempDirs: string[] = [];
 
   afterEach(() => {
@@ -795,6 +871,62 @@ describe("WorkspaceReconciliationService", () => {
     ]);
     expect(git.reads).toEqual([projectRoot, projectRoot]);
     expect(projects.get("p1")?.kind).toBe("git");
+  });
+
+  test("reads sibling checkouts a few at a time in the background Git lane", async () => {
+    const projectRoot = "/reconcile/fan-out/root";
+    const { projects, workspaces, projectRegistry, workspaceRegistry } = createTestRegistries();
+    projects.set(
+      "p1",
+      createPersistedProjectRecord({
+        projectId: "p1",
+        rootPath: projectRoot,
+        kind: "git",
+        displayName: "fan-out",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }),
+    );
+    const siblingCwds = Array.from({ length: 40 }, (_, index) => `${projectRoot}-${index}`);
+    for (const [index, cwd] of siblingCwds.entries()) {
+      workspaces.set(
+        `w${index}`,
+        createPersistedWorkspaceRecord({
+          workspaceId: `w${index}`,
+          projectId: "p1",
+          cwd,
+          kind: "worktree",
+          displayName: `sibling-${index}`,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        }),
+      );
+    }
+    const reads: Array<{ cwd: string; priority: string | undefined }> = [];
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const service = new WorkspaceReconciliationService({
+      projectRegistry,
+      workspaceRegistry,
+      logger: createTestLogger(),
+      inspectDirectory: async () => "directory",
+      workspaceGitService: {
+        async getCheckout(cwd, options) {
+          reads.push({ cwd, priority: options?.priority });
+          inFlight += 1;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          await new Promise((resolve) => setTimeout(resolve, 1));
+          inFlight -= 1;
+          return createCheckout(cwd, { isGit: true, currentBranch: "main", worktreeRoot: cwd });
+        },
+      },
+    });
+
+    await service.runOnce();
+
+    expect(reads.map((read) => read.cwd).sort()).toEqual([projectRoot, ...siblingCwds].sort());
+    expect(new Set(reads.map((read) => read.priority))).toEqual(new Set(["background"]));
+    expect(maxInFlight).toBe(4);
   });
 
   test("deduplicates equivalent project and workspace paths across legacy duplicate projects", async () => {
@@ -969,12 +1101,16 @@ describe("WorkspaceReconciliationService", () => {
   test("archives workspaces whose directories no longer exist", async () => {
     const { projects, workspaces, projectRegistry, workspaceRegistry } = createTestRegistries();
     const archivedWorkspaceIds: string[] = [];
+    const projectRoot = realpathSync(mkdtempSync(path.join(tmpdir(), "reconcile-missing-child-")));
+    tempDirs.push(projectRoot);
+    const missingDirectory = path.join(projectRoot, "missing");
 
     projects.set(
       "p1",
       createPersistedProjectRecord({
         projectId: "p1",
-        rootPath: "/tmp/does-not-exist-reconcile-test",
+        rootPath: projectRoot,
+        projectKey: canonicalLocalProjectKey(projectRoot),
         kind: "non_git",
         displayName: "ghost",
         createdAt: timestamp,
@@ -986,7 +1122,7 @@ describe("WorkspaceReconciliationService", () => {
       createPersistedWorkspaceRecord({
         workspaceId: "w1",
         projectId: "p1",
-        cwd: "/tmp/does-not-exist-reconcile-test",
+        cwd: missingDirectory,
         kind: "directory",
         displayName: "ghost",
         createdAt: timestamp,
@@ -1009,7 +1145,7 @@ describe("WorkspaceReconciliationService", () => {
       {
         kind: "workspace_archived",
         workspaceId: "w1",
-        directory: "/tmp/does-not-exist-reconcile-test",
+        directory: missingDirectory,
         reason: "directory_missing",
       },
     ]);
@@ -1020,9 +1156,13 @@ describe("WorkspaceReconciliationService", () => {
   test("keeps a project active after all its workspaces are archived", async () => {
     const { projects, workspaces, projectRegistry, workspaceRegistry } = createTestRegistries();
 
+    const projectRoot = realpathSync(mkdtempSync(path.join(tmpdir(), "reconcile-empty-project-")));
+    tempDirs.push(projectRoot);
+    const missingDirectory = path.join(projectRoot, "missing");
     const project = createPersistedProjectRecord({
       projectId: "p1",
-      rootPath: "/tmp/does-not-exist-reconcile-orphan",
+      rootPath: projectRoot,
+      projectKey: canonicalLocalProjectKey(projectRoot),
       kind: "non_git",
       displayName: "orphan",
       createdAt: timestamp,
@@ -1034,7 +1174,7 @@ describe("WorkspaceReconciliationService", () => {
       createPersistedWorkspaceRecord({
         workspaceId: "w1",
         projectId: "p1",
-        cwd: "/tmp/does-not-exist-reconcile-orphan",
+        cwd: missingDirectory,
         kind: "directory",
         displayName: "orphan",
         createdAt: timestamp,
@@ -1054,16 +1194,17 @@ describe("WorkspaceReconciliationService", () => {
       {
         kind: "workspace_archived",
         workspaceId: "w1",
-        directory: "/tmp/does-not-exist-reconcile-orphan",
+        directory: missingDirectory,
         reason: "directory_missing",
       },
     ]);
     expect(workspaces.get("w1")).toEqual({
       workspaceId: "w1",
       projectId: "p1",
-      cwd: "/tmp/does-not-exist-reconcile-orphan",
+      cwd: missingDirectory,
       kind: "directory",
       displayName: "orphan",
+      background: false,
       title: null,
       pinnedAt: null,
       branch: null,
@@ -1758,11 +1899,15 @@ describe("WorkspaceReconciliationService", () => {
   test("calls onChanges callback when changes are applied", async () => {
     const { projects, workspaces, projectRegistry, workspaceRegistry } = createTestRegistries();
 
+    const projectRoot = realpathSync(mkdtempSync(path.join(tmpdir(), "reconcile-callback-")));
+    tempDirs.push(projectRoot);
+    const missingDirectory = path.join(projectRoot, "missing");
     projects.set(
       "p1",
       createPersistedProjectRecord({
         projectId: "p1",
-        rootPath: "/tmp/does-not-exist-callback-test",
+        rootPath: projectRoot,
+        projectKey: canonicalLocalProjectKey(projectRoot),
         kind: "non_git",
         displayName: "ghost",
         createdAt: timestamp,
@@ -1774,7 +1919,7 @@ describe("WorkspaceReconciliationService", () => {
       createPersistedWorkspaceRecord({
         workspaceId: "w1",
         projectId: "p1",
-        cwd: "/tmp/does-not-exist-callback-test",
+        cwd: missingDirectory,
         kind: "directory",
         displayName: "ghost",
         createdAt: timestamp,
@@ -1796,7 +1941,7 @@ describe("WorkspaceReconciliationService", () => {
       {
         kind: "workspace_archived",
         workspaceId: "w1",
-        directory: "/tmp/does-not-exist-callback-test",
+        directory: missingDirectory,
         reason: "directory_missing",
       },
     ]);
@@ -1806,11 +1951,15 @@ describe("WorkspaceReconciliationService", () => {
     const { projects, workspaces, projectRegistry, workspaceRegistry } = createTestRegistries();
     const { logger, infoRecords } = createCapturingLogger();
 
+    const projectRoot = realpathSync(mkdtempSync(path.join(tmpdir(), "reconcile-log-")));
+    tempDirs.push(projectRoot);
+    const missingDirectory = path.join(projectRoot, "missing");
     projects.set(
       "p1",
       createPersistedProjectRecord({
         projectId: "p1",
-        rootPath: "/tmp/does-not-exist-log-test",
+        rootPath: projectRoot,
+        projectKey: canonicalLocalProjectKey(projectRoot),
         kind: "non_git",
         displayName: "ghost",
         createdAt: timestamp,
@@ -1822,7 +1971,7 @@ describe("WorkspaceReconciliationService", () => {
       createPersistedWorkspaceRecord({
         workspaceId: "w1",
         projectId: "p1",
-        cwd: "/tmp/does-not-exist-log-test",
+        cwd: missingDirectory,
         kind: "directory",
         displayName: "ghost",
         createdAt: timestamp,
@@ -1847,7 +1996,7 @@ describe("WorkspaceReconciliationService", () => {
             {
               kind: "workspace_archived",
               workspaceId: "w1",
-              directory: "/tmp/does-not-exist-log-test",
+              directory: missingDirectory,
               reason: "directory_missing",
             },
           ]),

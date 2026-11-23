@@ -72,14 +72,15 @@ archived workspace. History navigation must not infer workspace lifecycle from `
 or mutate either lifecycle. The workspace route asks the daemon for authoritative recovery state;
 only the route's explicit Unarchive or Restore action changes the archived workspace.
 
-History navigation preserves the selected agent as an explicit recovery target. If both that agent
-and its workspace are archived, the workspace recovery action restores the workspace and unarchives
-the selected agent as one user action. Other archived agents in the restored workspace remain
-recoverable from History. Opening one pins its tab and renders the archived-agent callout. Authoritative
-timeline catch-up may load provider history with a runtime-only `history` resume purpose, which must
-leave both JAgentDesk's `archivedAt` and the provider's native archive state unchanged. **Unarchive** remains
-the only transition back to an interactive runtime: it runs the provider's native unarchive hook
-(including Codex `thread/unarchive`) before the normal agent resume and timeline hydration flow.
+Workspace **Unarchive**, **Restore**, Undo, and reopening the directory recover the agents closed by
+that workspace archive, including after a daemon restart. Agents archived individually beforehand
+stay archived. A failed worktree recreation or workspace record write leaves agents archived for retry.
+Each recovered agent runs the provider's native unarchive hook before interactive resume and history
+hydration. History navigation alone preserves both archive states.
+
+The archive toast offers Undo for six seconds, with Cmd/Ctrl+Z outside text fields and terminals.
+The daemon serializes archive and undo per workspace across connections. Tabs and layout survive
+until the undo window closes; a canceled archive keeps them.
 
 Provider session connection owns every process it spawns until the session is registered with
 `AgentManager`. If initialization, persisted-session resume, or initial history hydration fails,
@@ -177,11 +178,11 @@ $JAGENTDESK_HOME/agents/{cwd-with-dashes}/{agent-id}.json
 
 Each agent is a single JSON file. Fields relevant to this doc:
 
-| Field                             | Type          | Meaning                                                                            |
-| --------------------------------- | ------------- | ---------------------------------------------------------------------------------- |
-| `id`                              | `string`      | Stable identifier                                                                  |
-| `archivedAt`                      | `string?`     | Soft-delete timestamp (ISO 8601)                                                   |
+| Field                                  | Type          | Meaning                                                                            |
+| -------------------------------------- | ------------- | ---------------------------------------------------------------------------------- |
+| `id`                                   | `string`      | Stable identifier                                                                  |
+| `archivedAt`                           | `string?`     | Soft-delete timestamp (ISO 8601)                                                   |
 | `labels["jagentdesk.parent-agent-id"]` | `string?`     | Parent agent ID, set automatically for agent-scoped creation and removed by detach |
-| `lastStatus`                      | `AgentStatus` | `initializing` / `idle` / `running` / `error` / `closed`                           |
+| `lastStatus`                           | `AgentStatus` | `initializing` / `idle` / `running` / `error` / `closed`                           |
 
 See [`docs/data-model.md`](./data-model.md) for the full agent record.

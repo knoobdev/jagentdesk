@@ -164,6 +164,7 @@ import type {
   GitSetupOptions,
   CheckoutStatusResponse,
   CheckoutCommit,
+  CheckoutWorktree,
   ParsedDiffFile,
   CheckoutCommitResponse,
   CheckoutMergeResponse,
@@ -1959,7 +1960,11 @@ export class DaemonClient {
     string,
     {
       cwd: string;
-      compare: { mode: "uncommitted" | "base"; baseRef?: string; ignoreWhitespace?: boolean };
+      compare: {
+        mode: "uncommitted" | "base" | "all";
+        baseRef?: string;
+        ignoreWhitespace?: boolean;
+      };
     }
   >();
   private terminalDirectorySubscriptions = new Map<string, { cwd: string; workspaceId?: string }>();
@@ -3111,10 +3116,15 @@ export class DaemonClient {
   }
 
   async fetchWorkspaces(options?: FetchWorkspacesOptions): Promise<FetchWorkspacesPayload> {
+    if (options?.includeBackground || options?.filter?.includeBackground)
+      this.assertBackgroundWorkspacesSupported();
     const resolvedRequestId = this.createRequestId(options?.requestId);
     const message = SessionInboundMessageSchema.parse({
       type: "fetch_workspaces_request",
       requestId: resolvedRequestId,
+      ...(options?.includeBackground !== undefined
+        ? { includeBackground: options.includeBackground }
+        : {}),
       ...(options?.filter ? { filter: options.filter } : {}),
       ...(options?.sort ? { sort: options.sort } : {}),
       ...(options?.page ? { page: options.page } : {}),
@@ -3654,6 +3664,22 @@ export class DaemonClient {
     return { pinnedAt: payload.pinnedAt };
   }
 
+  async setWorkspaceBaseBranch(options: {
+    workspaceId: string;
+    baseRef: string;
+    requestId?: string;
+  }): Promise<{ baseRef: string | null }> {
+    const { requestId, workspaceId, baseRef } = options;
+    const payload =
+      await this.sendNamespacedCorrelatedSessionRequest<"workspace.base_branch.set.response">({
+        requestId,
+        message: { type: "workspace.base_branch.set.request", workspaceId, baseRef },
+      });
+    if (!payload.accepted)
+      throw new Error(payload.error ?? "Changing the workspace base branch failed");
+    return { baseRef: payload.baseRef };
+  }
+
   async inspectWorkspaceRecovery(
     workspaceId: string,
     requestId?: string,
@@ -3681,6 +3707,23 @@ export class DaemonClient {
       });
     if (!payload.accepted) {
       throw new Error(payload.error ?? "Workspace recovery was rejected by the host");
+    }
+  }
+
+  /** Rejects when the host could not put the workspace back; an old host has no such RPC. */
+  async undoWorkspaceArchive(workspaceId: string, requestId?: string): Promise<void> {
+    const payload =
+      await this.sendNamespacedCorrelatedSessionRequest<"workspace.archive.undo.response">({
+        requestId,
+        message: {
+          type: "workspace.archive.undo.request",
+          workspaceId,
+        },
+        // Undoing a finished worktree archive recreates the worktree, like recovery does.
+        timeout: 150_000,
+      });
+    if (!payload.accepted) {
+      throw new Error(payload.error ?? "The host could not undo the workspace archive");
     }
   }
 
@@ -4664,10 +4707,10 @@ export class DaemonClient {
   }
 
   private normalizeCheckoutDiffCompare(compare: {
-    mode: "uncommitted" | "base";
+    mode: "uncommitted" | "base" | "all";
     baseRef?: string;
     ignoreWhitespace?: boolean;
-  }): { mode: "uncommitted" | "base"; baseRef?: string; ignoreWhitespace?: boolean } {
+  }): { mode: "uncommitted" | "base" | "all"; baseRef?: string; ignoreWhitespace?: boolean } {
     if (compare.mode === "uncommitted") {
       return compare.ignoreWhitespace === true
         ? { mode: "uncommitted", ignoreWhitespace: true }
@@ -4676,17 +4719,17 @@ export class DaemonClient {
     const trimmedBaseRef = compare.baseRef?.trim();
     if (!trimmedBaseRef) {
       return compare.ignoreWhitespace === true
-        ? { mode: "base", ignoreWhitespace: true }
-        : { mode: "base" };
+        ? { mode: compare.mode, ignoreWhitespace: true }
+        : { mode: compare.mode };
     }
     return compare.ignoreWhitespace === true
-      ? { mode: "base", baseRef: trimmedBaseRef, ignoreWhitespace: true }
-      : { mode: "base", baseRef: trimmedBaseRef };
+      ? { mode: compare.mode, baseRef: trimmedBaseRef, ignoreWhitespace: true }
+      : { mode: compare.mode, baseRef: trimmedBaseRef };
   }
 
   async getCheckoutDiff(
     cwd: string,
-    compare: { mode: "uncommitted" | "base"; baseRef?: string; ignoreWhitespace?: boolean },
+    compare: { mode: "uncommitted" | "base" | "all"; baseRef?: string; ignoreWhitespace?: boolean },
     requestId?: string,
   ): Promise<CheckoutDiffPayload> {
     const oneShotSubscriptionId = `oneshot-checkout-diff:${crypto.randomUUID()}`;
@@ -4713,7 +4756,7 @@ export class DaemonClient {
 
   async subscribeCheckoutDiff(
     cwd: string,
-    compare: { mode: "uncommitted" | "base"; baseRef?: string; ignoreWhitespace?: boolean },
+    compare: { mode: "uncommitted" | "base" | "all"; baseRef?: string; ignoreWhitespace?: boolean },
     options?: { subscriptionId?: string; requestId?: string },
   ): Promise<SubscribeCheckoutDiffPayload> {
     const subscriptionId = options?.subscriptionId ?? crypto.randomUUID();
@@ -4866,6 +4909,23 @@ export class DaemonClient {
       throw new Error(payload.error.message);
     }
     return { baseRef: payload.baseRef, commits: payload.commits };
+  }
+
+  /** Every git worktree of the repository `cwd` is in, whoever created it. */
+  async listCheckoutWorktrees(cwd: string, requestId?: string): Promise<CheckoutWorktree[]> {
+    const payload =
+      await this.sendNamespacedCorrelatedSessionRequest<"checkout.worktrees.list.response">({
+        requestId,
+        message: {
+          type: "checkout.worktrees.list.request",
+          cwd,
+        },
+        timeout: 60000,
+      });
+    if (payload.error) {
+      throw new Error(payload.error.message);
+    }
+    return payload.worktrees;
   }
 
   async getCommitFileDiff(
@@ -5173,19 +5233,32 @@ export class DaemonClient {
     });
   }
 
+  private assertBackgroundWorkspacesSupported(): void {
+    // COMPAT(backgroundWorkspaces): added in v0.9.59, remove after 2027-05-23 once host floor supports it.
+    if (this.lastServerInfoMessage?.features?.backgroundWorkspaces !== true) {
+      throw new Error("Update the host to use background workspaces");
+    }
+  }
+
   async createWorkspace(
     input: {
       source: WorkspaceCreateRequest["source"];
       title?: string;
+      background?: boolean;
+      callerAgentId?: string;
       firstAgentContext?: WorkspaceCreateRequest["firstAgentContext"];
     },
     requestId?: string,
   ): Promise<WorkspaceCreatePayload> {
+    if (input.background !== undefined || input.callerAgentId)
+      this.assertBackgroundWorkspacesSupported();
     return this.sendCorrelatedSessionRequest({
       requestId,
       message: {
         type: "workspace.create.request",
         source: input.source,
+        ...(input.background !== undefined ? { background: input.background } : {}),
+        ...(input.callerAgentId ? { callerAgentId: input.callerAgentId } : {}),
         ...(input.title !== undefined ? { title: input.title } : {}),
         ...(input.firstAgentContext !== undefined
           ? { firstAgentContext: input.firstAgentContext }
@@ -5211,7 +5284,7 @@ export class DaemonClient {
   }
 
   async getBranchSuggestions(
-    options: { cwd: string; query?: string; limit?: number },
+    options: { cwd: string; query?: string; limit?: number; refMode?: "exact" },
     requestId?: string,
   ): Promise<BranchSuggestionsPayload> {
     return this.sendCorrelatedSessionRequest({
@@ -5221,6 +5294,7 @@ export class DaemonClient {
         cwd: options.cwd,
         query: options.query,
         limit: options.limit,
+        refMode: options.refMode,
       },
       responseType: "branch_suggestions_response",
     });

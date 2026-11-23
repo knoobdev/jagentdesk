@@ -419,7 +419,8 @@ export const es: TranslationResources = {
       recovery: {
         archivedTitle: "Espacio de trabajo archivado",
         restoreDescription:
-          "{{workspaceName}} se archivó y se eliminó su worktree. Restaura la rama {{branch}} para volver a abrirlo.",
+          "Restaura {{workspaceName}} para volver a sus agentes. Su worktree usará la rama {{branch}}.",
+        restoreWithoutBranchDescription: "Restaura {{workspaceName}} para volver a sus agentes.",
         unarchiveDescription:
           "{{workspaceName}} está archivado. Desarchívalo para volver a abrirlo.",
         restoreAction: "Restaurar",
@@ -865,6 +866,9 @@ export const es: TranslationResources = {
         },
       },
       diff: {
+        baseBranch: {
+          title: "Rama base",
+        },
         openChangesTab: "Abrir la pestaña Cambios",
         closeChangesTab: "Cerrar la pestaña Cambios",
         binaryFile: "archivo binario",
@@ -896,6 +900,7 @@ export const es: TranslationResources = {
         checkingRepository: "Comprobando repositorio...",
         notRepository: "No es un repositorio de git",
         diffMode: "modo diferencial",
+        all: "Todos los cambios",
         uncommitted: "No comprometido",
         committed: "Comprometido",
         branchUnknown: "Desconocido",
@@ -1116,6 +1121,9 @@ export const es: TranslationResources = {
         hostDisconnected: "Hostno está conectado",
         hideFailed: "No se pudo ocultar el espacio de trabajo",
         archiveFailed: "No se pudo archivar el espacio de trabajo",
+        archived: "Espacio de trabajo archivado",
+        undoArchive: "Deshacer",
+        undoArchiveFailed: "No se pudo deshacer el archivado",
       },
     },
   },
@@ -1123,8 +1131,9 @@ export const es: TranslationResources = {
     title: "Nuevo espacio de trabajo",
     create: "Crear",
     isolation: {
-      local: "Local",
+      local: "Directorio del proyecto",
       worktree: "Nuevo worktree",
+      existing: "Worktree existente",
       label: "Aislamiento",
     },
     fields: {
@@ -1138,6 +1147,10 @@ export const es: TranslationResources = {
       createWorktreeFailed: "No se pudo crear el árbol de trabajo",
       composerStateRequired: "Se requiere el estado del compositor",
       selectModel: "Selecciona un modelo",
+      branchInProjectDirectory:
+        "{{branch}} está activa en el directorio del proyecto. Elige Directorio del proyecto para trabajar en ella, o crea una rama a partir de ella.",
+      branchInWorktree:
+        "{{branch}} está activa en {{path}}. Elige ese worktree en Worktree existente, o crea una rama a partir de ella.",
     },
     refPicker: {
       startingRef: "Árbitro inicial",
@@ -1146,6 +1159,25 @@ export const es: TranslationResources = {
       searching: "Búsqueda...",
       noMatchingRefs: "No hay árbitros coincidentes.",
       searchPlaceholder: "Buscar sucursales y relaciones públicas",
+      searchBranches: "Buscar ramas",
+      searchPullRequests: "Buscar pull requests",
+      searchPullRequests_mr: "Buscar merge requests",
+      branches: "Ramas",
+      pullRequests: "Pull requests",
+      pullRequests_mr: "Merge requests",
+      pullRequestsShort: "PR",
+      pullRequestsShort_mr: "MR",
+      branchOff: "Nueva rama",
+      checkout: "Usar directamente",
+      branchOffHint: "Crea una rama nueva a partir de ella",
+      checkoutHint: "Trabaja directamente en ella",
+      base: "Base",
+      from: "desde",
+      branch: "Rama",
+      pullRequest: "Pull request",
+      pullRequest_mr: "Merge request",
+      inProjectDirectory: "En el directorio del proyecto",
+      inWorktree: "En un worktree",
       title: "Empezar desde",
     },
   },
@@ -1326,6 +1358,7 @@ export const es: TranslationResources = {
     openPath: "Abrir ruta",
   },
   branchSwitcher: {
+    failedToLoad: "No se pudieron cargar las ramas. Vuelve a abrir el selector para reintentarlo.",
     currentBranch: "Sucursal actual:{{branchName}}. Presione para cambiar de rama.",
     placeholder: "Cambiar de rama...",
     searchPlaceholder: "Filtrar ramas...",

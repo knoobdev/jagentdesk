@@ -3,6 +3,7 @@ import {
   createWorktree as createWorktreePrimitive,
   deriveWorktreeProjectHash,
   deleteJAgentDeskWorktree,
+  readWorktreeHead,
   isJAgentDeskOwnedWorktreeCwd,
   mapWorkspaceCwdToWorktree,
   runWorktreeTeardownCommands,
@@ -17,11 +18,13 @@ import {
   mkdirSync,
   rmSync,
   existsSync,
+  readFileSync,
   realpathSync,
   symlinkSync,
   writeFileSync,
 } from "fs";
 import { join } from "path";
+import { createServer, type AddressInfo, type Socket } from "net";
 import { tmpdir } from "os";
 import { createRealpathAwarePathMatcher } from "./path";
 
@@ -54,6 +57,21 @@ function createLegacyWorktreeForTest(
   });
 }
 
+// A remote that accepts connections and never answers, like a VPN-only host while off the VPN.
+async function startSilentRemote(): Promise<{ url: string; close: () => Promise<void> }> {
+  const connections = new Set<Socket>();
+  const server = createServer((socket) => connections.add(socket));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${port}/repo.git`,
+    close: () => {
+      for (const socket of connections) socket.destroy();
+      return new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  };
+}
+
 describe("jagentdesk worktree manager", () => {
   let tempDir: string;
   let repoDir: string;
@@ -78,6 +96,64 @@ describe("jagentdesk worktree manager", () => {
   afterEach(async () => {
     await rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
+
+  it.each([
+    { existing: [], preferred: "main/patch-1", expected: "main-1/patch-1" },
+    { existing: ["main-1"], preferred: "main/patch-1", expected: "main-2/patch-1" },
+    {
+      existing: ["main-1/patch-1"],
+      preferred: "main/patch-1",
+      expected: "main-1/patch-1-2",
+    },
+    {
+      existing: ["bob/patch-1/child"],
+      preferred: "bob/patch-1",
+      expected: "bob/patch-1-1",
+    },
+  ])(
+    "checks out a fork when $preferred conflicts with existing branch paths",
+    async ({ existing, preferred, expected }) => {
+      const git = (...args: string[]) =>
+        execFileSync("git", args, { cwd: repoDir, encoding: "utf8", stdio: "pipe" }).trim();
+      git("config", "core.autocrlf", "false");
+      const baseHead = git("rev-parse", "main");
+      for (const branch of existing) git("branch", branch);
+      git("checkout", "-b", "fixture-pr");
+      writeFileSync(join(repoDir, "file.txt"), "from-pr\n");
+      git("add", "file.txt");
+      git("-c", "commit.gpgsign=false", "commit", "-m", "fork patch");
+      const prHead = git("rev-parse", "HEAD");
+      git("checkout", "main");
+      const remote = join(tempDir, "origin.git");
+      git("clone", "--bare", repoDir, remote);
+      git("remote", "add", "origin", remote);
+      git(`--git-dir=${remote}`, "update-ref", "refs/pull/1/head", prHead);
+      git("pack-refs", "--all");
+
+      const result = await createWorktreePrimitive({
+        cwd: repoDir,
+        jagentdeskHome,
+        worktreeSlug: "fork-review",
+        runSetup: false,
+        source: {
+          kind: "checkout-change-request",
+          forge: "gitea",
+          changeRequestNumber: 1,
+          headRef: "patch-1",
+          localBranchName: preferred,
+          baseRefName: "main",
+          checkoutRefs: [{ remoteName: "origin", remoteRef: "refs/pull/1/head" }],
+        },
+      });
+
+      expect(result.branchName).toBe(expected);
+      expect(git("rev-parse", result.branchName)).toBe(prHead);
+      expect(readFileSync(join(result.worktreePath, "file.txt"), "utf8")).toBe("from-pr\n");
+      for (const branch of ["main", ...existing]) {
+        expect(git("rev-parse", branch)).toBe(baseHead);
+      }
+    },
+  );
 
   it("treats a worktree as jagentdesk-owned even when its .git admin is missing", async () => {
     const created = await createLegacyWorktreeForTest({
@@ -114,6 +190,30 @@ describe("jagentdesk worktree manager", () => {
       allowed: true,
       worktreePath: created.worktreePath,
     });
+  });
+
+  it("retains bounded diagnostic text per teardown output stream", async () => {
+    const limit = 1024 * 1024;
+    writeFileSync(
+      join(repoDir, "jagentdesk.json"),
+      JSON.stringify({
+        worktree: {
+          teardown: `node -e "process.stdout.write('x'.repeat(${2 * limit})); process.stderr.write('y'.repeat(${2 * limit}))"`,
+        },
+      }),
+    );
+
+    const [result] = await runWorktreeTeardownCommands({
+      worktreePath: repoDir,
+      repoRootPath: repoDir,
+      branchName: "main",
+    });
+
+    expect({
+      exitCode: result.exitCode,
+      stdoutLength: result.stdout.length,
+      stderrLength: result.stderr.length,
+    }).toEqual({ exitCode: 0, stdoutLength: limit, stderrLength: limit });
   });
 
   it("rejects paths that are not under the jagentdesk worktrees root", async () => {
@@ -249,6 +349,33 @@ describe("jagentdesk worktree manager", () => {
     expect(existsSync(created.worktreePath)).toBe(false);
   });
 
+  it("does not read a parent repository's HEAD when the worktree has no .git", async () => {
+    const directory = join(repoDir, "missing-worktree");
+    mkdirSync(directory);
+    await expect(readWorktreeHead(directory)).resolves.toBeNull();
+  });
+
+  it("keeps a worktree when writing its retention ref fails", async () => {
+    const created = await createLegacyWorktreeForTest({
+      branchName: "ref-write-failure",
+      cwd: repoDir,
+      baseBranch: "main",
+      worktreeSlug: "ref-write-failure",
+      jagentdeskHome,
+    });
+    mkdirSync(join(repoDir, ".git", "refs", "jagentdesk"), { recursive: true });
+    writeFileSync(join(repoDir, ".git", "refs", "jagentdesk", "kept-commits"), "blocked\n");
+
+    await expect(
+      deleteJAgentDeskWorktree({
+        cwd: repoDir,
+        worktreePath: created.worktreePath,
+        jagentdeskHome,
+      }),
+    ).rejects.toThrow();
+    expect(existsSync(created.worktreePath)).toBe(true);
+  });
+
   it("is idempotent: deleting an already-absent worktree succeeds", async () => {
     const created = await createLegacyWorktreeForTest({
       branchName: "idempotent-delete-branch",
@@ -298,6 +425,103 @@ describe("jagentdesk worktree manager", () => {
     });
 
     expect(existsSync(created.worktreePath)).toBe(false);
+  });
+
+  describe("branch-off from a remote-tracking base", () => {
+    function git(args: string[], cwd: string): string {
+      return execFileSync("git", ["-c", "commit.gpgsign=false", ...args], {
+        cwd,
+        encoding: "utf8",
+      }).trim();
+    }
+
+    // The repo caches <remote>/main at "initial" while the remote itself moves one commit ahead,
+    // as when nothing has fetched since someone else pushed.
+    function pushPastCachedRemoteRef(remoteName: string): string {
+      const remoteDir = join(tempDir, "remote.git");
+      git(["clone", "--bare", "-q", repoDir, remoteDir], tempDir);
+      git(["remote", "add", remoteName, remoteDir], repoDir);
+      git(["fetch", "-q", remoteName], repoDir);
+
+      const pusherDir = join(tempDir, "pusher");
+      git(["clone", "-q", remoteDir, pusherDir], tempDir);
+      git(["config", "user.email", "test@test.com"], pusherDir);
+      git(["config", "user.name", "Test"], pusherDir);
+      writeFileSync(join(pusherDir, "file.txt"), "pushed after the last fetch\n");
+      git(["commit", "-q", "-am", "remote ahead"], pusherDir);
+      git(["push", "-q", "origin", "HEAD:main"], pusherDir);
+      return git(["rev-parse", "HEAD"], pusherDir);
+    }
+
+    it("starts the new branch at the remote tip, not the cached origin/main", async () => {
+      const remoteTip = pushPastCachedRemoteRef("origin");
+      const fetchRefspecs = git(["config", "--get-all", "remote.origin.fetch"], repoDir);
+
+      const created = await createLegacyWorktreeForTest({
+        branchName: "from-remote-tip",
+        cwd: repoDir,
+        baseBranch: "origin/main",
+        worktreeSlug: "from-remote-tip",
+        jagentdeskHome,
+      });
+
+      expect(git(["rev-parse", "HEAD"], created.worktreePath)).toBe(remoteTip);
+      expect(git(["config", "--get-all", "remote.origin.fetch"], repoDir)).toBe(fetchRefspecs);
+    });
+
+    it("refreshes a base on a remote other than origin", async () => {
+      const remoteTip = pushPastCachedRemoteRef("team/upstream");
+
+      const created = await createLegacyWorktreeForTest({
+        branchName: "from-upstream-tip",
+        cwd: repoDir,
+        baseBranch: "refs/remotes/team/upstream/main",
+        worktreeSlug: "from-upstream-tip",
+        jagentdeskHome,
+      });
+
+      expect(git(["rev-parse", "HEAD"], created.worktreePath)).toBe(remoteTip);
+    });
+
+    it("branches from the cached ref when the remote is unreachable", async () => {
+      pushPastCachedRemoteRef("origin");
+      const cachedTip = git(["rev-parse", "refs/remotes/origin/main"], repoDir);
+      git(["remote", "set-url", "origin", join(tempDir, "missing.git")], repoDir);
+
+      const created = await createLegacyWorktreeForTest({
+        branchName: "from-cached-ref",
+        cwd: repoDir,
+        baseBranch: "origin/main",
+        worktreeSlug: "from-cached-ref",
+        jagentdeskHome,
+      });
+
+      expect(git(["rev-parse", "HEAD"], created.worktreePath)).toBe(cachedTip);
+    });
+
+    it("branches from the cached ref when the remote accepts but never answers", async () => {
+      pushPastCachedRemoteRef("origin");
+      const cachedTip = git(["rev-parse", "refs/remotes/origin/main"], repoDir);
+      const silentRemote = await startSilentRemote();
+      git(["remote", "set-url", "origin", silentRemote.url], repoDir);
+
+      try {
+        const startedAt = Date.now();
+        const created = await createLegacyWorktreeForTest({
+          branchName: "from-silent-remote",
+          cwd: repoDir,
+          baseBranch: "origin/main",
+          worktreeSlug: "from-silent-remote",
+          jagentdeskHome,
+        });
+
+        // Clients give up on a create request after 60s, so the fallback has to land well before.
+        expect(Date.now() - startedAt).toBeLessThan(30_000);
+        expect(git(["rev-parse", "HEAD"], created.worktreePath)).toBe(cachedTip);
+      } finally {
+        await silentRemote.close();
+      }
+    }, 45_000);
   });
 });
 

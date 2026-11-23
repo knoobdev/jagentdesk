@@ -17,6 +17,7 @@ export function createWorkspaceCommand(): Command {
       .option("--path <path>", "Local directory or source checkout (default: current)")
       .option("--project <id>", "Existing project id")
       .option("--title <title>", "Workspace title")
+      .option("--background", "Hide the workspace from default discovery")
       .option(
         "--mode <mode>",
         "Worktree mode: branch-off, checkout-branch, or checkout-pr (default: branch-off)",
@@ -29,9 +30,12 @@ export function createWorkspaceCommand(): Command {
       .option("--forge <forge>", "Forge for --mode checkout-pr (default: source checkout)"),
   ).action(withOutput(runCreateCommand));
 
-  addJsonAndDaemonHostOptions(workspace.command("ls").description("List active workspaces")).action(
-    withOutput(runLsCommand),
-  );
+  addJsonAndDaemonHostOptions(
+    workspace
+      .command("ls")
+      .description("List active workspaces")
+      .option("--include-background", "Include background workspaces"),
+  ).action(withOutput(runLsCommand));
 
   addJsonAndDaemonHostOptions(
     workspace

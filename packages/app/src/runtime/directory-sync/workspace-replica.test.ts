@@ -6,6 +6,12 @@ import {
   normalizeWorkspaceDescriptor,
   useSessionStore,
 } from "@/stores/session-store";
+import {
+  clearWorkspaceArchivePending,
+  markWorkspaceArchivePending,
+  markWorkspaceArchiveUndoPending,
+  settleWorkspaceArchiveIntent,
+} from "@/contexts/session-workspace-upserts";
 import { WorkspaceDirectoryReplica } from "./workspace-replica";
 
 function workspace(id: string, projectId = "project"): WorkspaceDescriptorPayload {
@@ -161,4 +167,107 @@ it("does not invent a null-key project from a workspace update", () => {
   expect(session?.workspaces.has("main")).toBe(true);
   expect(session?.projects.has("fresh-project")).toBe(false);
   store.clearSession(serverId);
+});
+
+it("keeps live title and pin updates when an older creation response arrives", () => {
+  const serverId = "workspace-create-after-pin";
+  const store = useSessionStore.getState();
+  store.initializeSession(serverId, null);
+  const replica = new WorkspaceDirectoryReplica(serverId);
+  const initial = normalizeWorkspaceDescriptor(workspace("new"));
+  const pinned = {
+    ...workspace(initial.id),
+    title: "Updated title",
+    pinnedAt: "2026-09-26T00:00:00.000Z",
+  };
+  try {
+    replica.applyDelta({ kind: "upsert", workspace: pinned });
+    store.seedWorkspaces(serverId, [initial]);
+    expect(useSessionStore.getState().sessions[serverId]?.workspaces.get(initial.id)).toEqual(
+      normalizeWorkspaceDescriptor(pinned),
+    );
+    const unpinned = { ...pinned, pinnedAt: null };
+    replica.applyDelta({ kind: "upsert", workspace: unpinned });
+    store.seedWorkspaces(serverId, [normalizeWorkspaceDescriptor(pinned)]);
+    expect(useSessionStore.getState().sessions[serverId]?.workspaces.get(initial.id)).toEqual(
+      normalizeWorkspaceDescriptor(unpinned),
+    );
+  } finally {
+    store.clearSession(serverId);
+  }
+});
+
+it("seeds missing rows and restores archive rollback without replacing live rows", () => {
+  const serverId = "workspace-archive-seed";
+  const store = useSessionStore.getState();
+  store.initializeSession(serverId, null);
+  const initial = normalizeWorkspaceDescriptor(workspace("new"));
+  try {
+    store.seedWorkspaces(serverId, [initial]);
+    expect(useSessionStore.getState().sessions[serverId]?.workspaces.get(initial.id)).toEqual(
+      initial,
+    );
+    markWorkspaceArchivePending({ serverId, workspaceId: initial.id });
+    store.removeWorkspace(serverId, initial.id);
+    store.seedWorkspaces(serverId, [initial]);
+    expect(useSessionStore.getState().sessions[serverId]?.workspaces.has(initial.id)).toBe(false);
+    clearWorkspaceArchivePending({ serverId, workspaceId: initial.id });
+    store.seedWorkspaces(serverId, [initial]);
+    expect(useSessionStore.getState().sessions[serverId]?.workspaces.get(initial.id)).toEqual(
+      initial,
+    );
+  } finally {
+    clearWorkspaceArchivePending({ serverId, workspaceId: initial.id });
+    store.clearSession(serverId);
+  }
+});
+
+it("keeps a workspace whose archive is being undone when the host reports its removal", () => {
+  const serverId = "workspace-archive-undo";
+  const store = useSessionStore.getState();
+  store.initializeSession(serverId, null as unknown as DaemonClient);
+  const replica = new WorkspaceDirectoryReplica(serverId);
+  const restored = normalizeWorkspaceDescriptor(workspace("restored"));
+
+  const undo = markWorkspaceArchiveUndoPending({ serverId, workspaceId: restored.id });
+  try {
+    store.seedWorkspaces(serverId, [restored]);
+
+    replica.applyDelta({ kind: "remove", id: restored.id });
+    expect(useSessionStore.getState().sessions[serverId]?.workspaces.has(restored.id)).toBe(true);
+
+    settleWorkspaceArchiveIntent(undo);
+    replica.applyDelta({ kind: "remove", id: restored.id });
+    expect(useSessionStore.getState().sessions[serverId]?.workspaces.has(restored.id)).toBe(false);
+  } finally {
+    settleWorkspaceArchiveIntent(undo);
+    store.clearSession(serverId);
+  }
+});
+
+it("keeps a workspace whose archive is being undone when a refresh snapshot omits it", () => {
+  const serverId = "workspace-archive-undo-refresh";
+  const store = useSessionStore.getState();
+  store.initializeSession(serverId, null as unknown as DaemonClient);
+  const replica = new WorkspaceDirectoryReplica(serverId);
+  const restored = normalizeWorkspaceDescriptor(workspace("restored"));
+  const other = normalizeWorkspaceDescriptor(workspace("other"));
+  const workspaceIds = () => [
+    ...(useSessionStore.getState().sessions[serverId]?.workspaces.keys() ?? []),
+  ];
+
+  const undo = markWorkspaceArchiveUndoPending({ serverId, workspaceId: restored.id });
+  try {
+    store.seedWorkspaces(serverId, [restored]);
+
+    replica.commitSnapshot({ workspaces: new Map([[other.id, other]]), projects: new Map() }, []);
+    expect(workspaceIds().sort()).toEqual(["other", "restored"]);
+
+    settleWorkspaceArchiveIntent(undo);
+    replica.commitSnapshot({ workspaces: new Map([[other.id, other]]), projects: new Map() }, []);
+    expect(workspaceIds()).toEqual(["other"]);
+  } finally {
+    settleWorkspaceArchiveIntent(undo);
+    store.clearSession(serverId);
+  }
 });

@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { CheckoutPrStatusSchema } from "@jagentdesk/protocol/messages";
 import { i18n } from "@/i18n/i18next";
 
-import { buildGitActions, type BuildGitActionsInput } from "./policy";
+import {
+  buildGitActions,
+  isCurrentBranchBase,
+  canMergeIntoLocalBase,
+  type BuildGitActionsInput,
+} from "./policy";
 import { deriveMergeCapability, type ForgeSpecificStatusFacts } from "./merge-capability";
 
 type GithubMergeFactsFixture = ForgeSpecificStatusFacts & {
@@ -72,6 +77,7 @@ function createInput(
     hasRemote: false,
     isJAgentDeskOwnedWorktree: false,
     isOnBaseBranch: true,
+    canMergeLocally: true,
     hasUncommittedChanges: false,
     baseRefAvailable: true,
     baseRefLabel: "main",
@@ -188,6 +194,81 @@ describe("git-actions-policy", () => {
     );
 
     expect(actions.primary).toMatchObject({ id: "pull", label: "Pull" });
+  });
+
+  it("distinguishes exact local and remote base refs and retains legacy names", () => {
+    expect(isCurrentBranchBase("release", "refs/heads/release")).toBe(true);
+    expect(isCurrentBranchBase("release", "refs/remotes/origin/release")).toBe(false);
+    expect(isCurrentBranchBase("release", "release")).toBe(true);
+    expect(isCurrentBranchBase("release", "origin/release")).toBe(true);
+    expect(isCurrentBranchBase(null, "refs/heads/release")).toBe(false);
+    expect(canMergeIntoLocalBase("release", "refs/heads/release")).toBe(false);
+    expect(canMergeIntoLocalBase("feature", "refs/remotes/origin/release")).toBe(true);
+    expect(canMergeIntoLocalBase("release", "refs/remotes/upstream/release")).toBe(false);
+  });
+
+  it("offers local merge when the selected local base starts with origin slash", () => {
+    const actions = buildGitActions(
+      createInput({
+        isJAgentDeskOwnedWorktree: true,
+        isOnBaseBranch: isCurrentBranchBase("release", "refs/heads/origin/release"),
+        canMergeLocally: canMergeIntoLocalBase("release", "refs/heads/origin/release"),
+        baseRefLabel: "origin/release",
+        aheadCount: 1,
+        shipDefault: "merge",
+      }),
+    );
+    expect(actions.primary?.id).toBe("merge-branch");
+  });
+
+  it("offers update but not local merge for a non-origin remote base", () => {
+    const actions = buildGitActions(
+      createInput({
+        isJAgentDeskOwnedWorktree: true,
+        isOnBaseBranch: false,
+        canMergeLocally: canMergeIntoLocalBase("feature", "refs/remotes/upstream/release"),
+        baseRefLabel: "upstream/release",
+        aheadCount: 1,
+        behindBaseCount: 1,
+        aheadOfOrigin: null,
+        behindOfOrigin: null,
+        shipDefault: "merge",
+      }),
+    );
+    expect(actions.primary?.id).toBe("merge-from-base");
+    expect(actions.secondary.map((action) => action.id)).not.toContain("merge-branch");
+  });
+
+  it("does not offer merging into the current local branch when the remote base shares its name", () => {
+    const actions = buildGitActions(
+      createInput({
+        isJAgentDeskOwnedWorktree: true,
+        isOnBaseBranch: false,
+        canMergeLocally: canMergeIntoLocalBase("release", "refs/remotes/origin/release"),
+        baseRefLabel: "release",
+        aheadCount: 1,
+        behindBaseCount: 1,
+        aheadOfOrigin: null,
+        behindOfOrigin: null,
+        shipDefault: "merge",
+      }),
+    );
+    expect(actions.primary?.id).toBe("merge-from-base");
+    expect(actions.secondary.map((action) => action.id)).not.toContain("merge-branch");
+  });
+
+  it("offers update from the same-named remote base when it is ahead", () => {
+    const actions = buildGitActions(
+      createInput({
+        isJAgentDeskOwnedWorktree: true,
+        isOnBaseBranch: isCurrentBranchBase("release", "refs/remotes/origin/release"),
+        baseRefLabel: "release",
+        behindBaseCount: 1,
+        aheadOfOrigin: null,
+        behindOfOrigin: null,
+      }),
+    );
+    expect(actions.primary?.id).toBe("merge-from-base");
   });
 
   it("keeps push clickable with a clearer message when the branch diverged", () => {

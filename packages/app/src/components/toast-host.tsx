@@ -22,6 +22,8 @@ export interface ToastShowOptions {
   durationMs?: number | null;
   nativeAndroid?: boolean;
   testID?: string;
+  /** Runs once when this toast leaves the screen: timed out, dismissed, or replaced. */
+  onDismiss?: () => void;
 }
 
 export interface ToastState {
@@ -32,15 +34,19 @@ export interface ToastState {
   variant: ToastVariant;
   durationMs: number | null;
   testID?: string;
+  onDismiss?: () => void;
 }
 
+export type DismissToast = () => void;
+const noopDismiss = () => {};
+
 export interface ToastApi {
-  show: (content: ReactNode, options?: ToastShowOptions) => void;
+  show: (content: ReactNode, options?: ToastShowOptions) => void | DismissToast;
   copied: (label?: string) => void;
   error: (message: string) => void;
 }
 
-type ToastViewportPlacement = "app-shell" | "panel";
+type ToastViewportPlacement = "app-shell" | "panel" | "sidebar";
 
 const DEFAULT_DURATION_MS = 2200;
 
@@ -51,37 +57,55 @@ export function useToastHost(): {
 } {
   const { theme } = useUnistyles();
   const { t } = useTranslation();
-  const [toast, setToast] = useState<ToastState | null>(null);
+  const [toast, setToastState] = useState<ToastState | null>(null);
+  const toastRef = useRef<ToastState | null>(null);
   const idRef = useRef(0);
 
-  const show = useCallback((content: ReactNode, options?: ToastShowOptions) => {
-    const nativeMessage = typeof content === "string" ? content.trim() : null;
-    if (!content || nativeMessage === "") {
-      return;
-    }
-
-    const variant = options?.variant ?? "default";
-    const durationMs = options?.durationMs === undefined ? DEFAULT_DURATION_MS : options.durationMs;
-    const nativeAndroid = options?.nativeAndroid ?? false;
-
-    if (Platform.OS === "android" && nativeAndroid && nativeMessage) {
-      const duration =
-        durationMs !== null && durationMs <= 2500 ? ToastAndroid.SHORT : ToastAndroid.LONG;
-      ToastAndroid.showWithGravity(nativeMessage, duration, ToastAndroid.TOP);
-      return;
-    }
-
-    idRef.current += 1;
-    setToast({
-      id: idRef.current,
-      content,
-      nativeMessage,
-      icon: options?.icon,
-      variant,
-      durationMs,
-      testID: options?.testID,
-    });
+  const setToast = useCallback((next: ToastState | null) => {
+    const previous = toastRef.current;
+    if (previous === next) return;
+    toastRef.current = next;
+    setToastState(next);
+    previous?.onDismiss?.();
   }, []);
+
+  const show = useCallback(
+    (content: ReactNode, options?: ToastShowOptions): DismissToast => {
+      const nativeMessage = typeof content === "string" ? content.trim() : null;
+      if (!content || nativeMessage === "") {
+        return noopDismiss;
+      }
+
+      const variant = options?.variant ?? "default";
+      const durationMs =
+        options?.durationMs === undefined ? DEFAULT_DURATION_MS : options.durationMs;
+      const nativeAndroid = options?.nativeAndroid ?? false;
+
+      if (Platform.OS === "android" && nativeAndroid && nativeMessage) {
+        const duration =
+          durationMs !== null && durationMs <= 2500 ? ToastAndroid.SHORT : ToastAndroid.LONG;
+        ToastAndroid.showWithGravity(nativeMessage, duration, ToastAndroid.TOP);
+        return noopDismiss;
+      }
+
+      idRef.current += 1;
+      const id = idRef.current;
+      setToast({
+        id,
+        content,
+        nativeMessage,
+        icon: options?.icon,
+        variant,
+        durationMs,
+        testID: options?.testID,
+        onDismiss: options?.onDismiss,
+      });
+      return () => {
+        if (toastRef.current?.id === id) setToast(null);
+      };
+    },
+    [setToast],
+  );
 
   const api = useMemo<ToastApi>(
     () => ({
@@ -98,7 +122,7 @@ export function useToastHost(): {
 
   const dismiss = useCallback(() => {
     setToast(null);
-  }, []);
+  }, [setToast]);
 
   return { api, toast, dismiss };
 }
@@ -219,12 +243,13 @@ export function ToastViewport({
     };
   }, [clearTimer, opacity, scheduleDismiss, toast, translateY]);
 
-  const headerHeight = isMobile ? HEADER_INNER_HEIGHT_MOBILE : HEADER_INNER_HEIGHT;
-  const headerTopPadding = isMobile ? HEADER_TOP_PADDING_MOBILE : 0;
-  const topOffset =
-    placement === "app-shell"
-      ? insets.top + headerTopPadding + headerHeight + theme.spacing[2]
-      : theme.spacing[3];
+  const topOffset = resolveToastTopOffset(
+    placement,
+    isMobile,
+    insets.top,
+    theme.spacing[2],
+    theme.spacing[3],
+  );
 
   const toastVariant = toast?.variant;
   const toastAnimatedStyle = useMemo(
@@ -235,12 +260,12 @@ export function ToastViewport({
       toastVariant === "warning" ? styles.toastWarning : null,
       toastVariant === "error" ? styles.toastError : null,
       {
-        marginTop: topOffset,
+        marginTop: placement === "sidebar" ? 0 : topOffset,
         opacity,
         transform: [{ translateY }],
       },
     ],
-    [toastVariant, topOffset, opacity, translateY],
+    [toastVariant, topOffset, opacity, translateY, placement],
   );
   const toastMessageStyle = useMemo(
     () => [styles.message, toastVariant === "error" ? styles.messageError : null],
@@ -264,7 +289,10 @@ export function ToastViewport({
   const icon = toast.icon ?? defaultIcon;
 
   const content = (
-    <View style={styles.container} pointerEvents="box-none">
+    <View
+      style={placement === "sidebar" ? styles.sidebarContainer : styles.container}
+      pointerEvents="box-none"
+    >
       <Animated.View
         testID={toast.testID ?? "app-toast"}
         onPointerEnter={isWeb ? pauseDismiss : undefined}
@@ -299,6 +327,14 @@ const styles = StyleSheet.create((theme) => ({
     left: theme.spacing[4],
     right: theme.spacing[4],
     top: 0,
+    zIndex: OVERLAY_Z.toast,
+    alignItems: "center",
+  },
+  sidebarContainer: {
+    position: "absolute",
+    left: theme.spacing[2],
+    right: theme.spacing[2],
+    bottom: theme.spacing[2],
     zIndex: OVERLAY_Z.toast,
     alignItems: "center",
   },
@@ -346,3 +382,15 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foreground,
   },
 }));
+
+function resolveToastTopOffset(
+  placement: ToastViewportPlacement,
+  isMobile: boolean,
+  insetTop: number,
+  gap: number,
+  panelOffset: number,
+): number {
+  const headerHeight = isMobile ? HEADER_INNER_HEIGHT_MOBILE : HEADER_INNER_HEIGHT;
+  const headerTopPadding = isMobile ? HEADER_TOP_PADDING_MOBILE : 0;
+  return placement === "app-shell" ? insetTop + headerTopPadding + headerHeight + gap : panelOffset;
+}

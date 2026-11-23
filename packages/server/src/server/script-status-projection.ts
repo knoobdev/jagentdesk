@@ -5,7 +5,8 @@ import type {
   WorkspaceScriptPayload,
 } from "@jagentdesk/protocol/messages";
 import type { JAgentDeskConfig } from "@jagentdesk/protocol/jagentdesk-config-schema";
-import { getScriptConfigs, isServiceScript, readJAgentDeskConfig } from "../utils/worktree.js";
+import { readJAgentDeskConfigOrLastKnown } from "../utils/jagentdesk-config-file.js";
+import { getScriptConfigs, isServiceScript } from "../utils/worktree.js";
 import { deriveProjectSlug } from "./workspace-git-metadata.js";
 import type { ScriptHealthEntry, ScriptHealthState } from "./script-health-monitor.js";
 import type {
@@ -37,7 +38,7 @@ export async function readJAgentDeskConfigForProjection(
   workspaceDirectory: string,
   logger: Logger,
 ): Promise<JAgentDeskConfig | null> {
-  const result = await readJAgentDeskConfig(workspaceDirectory);
+  const result = await readJAgentDeskConfigOrLastKnown(workspaceDirectory);
   if (result.ok) {
     return result.config;
   }

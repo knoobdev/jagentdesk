@@ -15,6 +15,7 @@ import type { PersistedWorkspaceRecord } from "./workspace-registry.js";
 import type { WorkspaceGitService } from "./workspace-git-service.js";
 import {
   runAsyncWorktreeBootstrap,
+  runWorktreeAutoTerminals,
   applyWorktreeSetupProgressEvent,
   buildWorktreeSetupDetail,
   createWorktreeSetupProgressAccumulator,
@@ -102,7 +103,6 @@ interface CreateJAgentDeskWorktreeInBackgroundDependencies {
   emit: EmitSessionMessage;
   sessionLogger: Logger;
   terminalManager: TerminalManager | null;
-  archiveWorkspaceRecord: (workspaceId: string) => Promise<void>;
   serviceProxy: ServiceProxySubsystem | null;
   scriptRuntimeStore: WorkspaceScriptRuntimeStore | null;
   getDaemonTcpPort: (() => number | null) | null;
@@ -694,7 +694,6 @@ export async function runWorktreeSetupInBackground(
 ): Promise<void> {
   let worktree: WorktreeConfig = options.worktree;
   let setupResults: WorktreeSetupCommandResult[] = [];
-  let setupStarted = false;
   const progressAccumulator = createWorktreeSetupProgressAccumulator();
   const workspaceId = options.workspaceId;
 
@@ -730,20 +729,18 @@ export async function runWorktreeSetupInBackground(
       } else {
         const workspaceCwd = options.workspaceCwd ?? worktree.worktreePath;
         const setupCommands = await getWorktreeSetupCommands(workspaceCwd);
+        const runtimeEnv = await resolveWorktreeRuntimeEnv({
+          worktreePath: worktree.worktreePath,
+          branchName: worktree.branchName,
+          repoRootPath: options.repoRoot,
+        });
+        dependencies.terminalManager?.registerCwdEnv({
+          cwd: workspaceCwd,
+          env: runtimeEnv,
+        });
         if (setupCommands.length === 0) {
-          setupStarted = true;
           emitSetupProgress("completed", null);
         } else {
-          const runtimeEnv = await resolveWorktreeRuntimeEnv({
-            worktreePath: worktree.worktreePath,
-            branchName: worktree.branchName,
-            repoRootPath: options.repoRoot,
-          });
-          dependencies.terminalManager?.registerCwdEnv({
-            cwd: workspaceCwd,
-            env: runtimeEnv,
-          });
-          setupStarted = true;
           setupResults = await runWorktreeSetupCommands({
             worktreePath: workspaceCwd,
             branchName: worktree.branchName,
@@ -757,6 +754,14 @@ export async function runWorktreeSetupInBackground(
           });
           emitSetupProgress("completed", null);
         }
+        await runWorktreeAutoTerminals({
+          workspaceId,
+          worktree,
+          workspaceCwd,
+          runtimeEnv,
+          terminalManager: dependencies.terminalManager,
+          logger: dependencies.sessionLogger,
+        });
       }
     } catch (error) {
       if (error instanceof WorktreeSetupError) {
@@ -765,10 +770,6 @@ export async function runWorktreeSetupInBackground(
       const message = error instanceof Error ? error.message : String(error);
       emitSetupProgress("failed", message);
 
-      if (!setupStarted) {
-        await dependencies.archiveWorkspaceRecord(options.workspaceId);
-      }
-
       dependencies.sessionLogger.error(
         {
           err: error,
@@ -776,7 +777,6 @@ export async function runWorktreeSetupInBackground(
           repoRoot: options.repoRoot,
           worktreeSlug: worktree.branchName,
           worktreePath: worktree.worktreePath,
-          setupStarted,
         },
         "Background worktree setup failed",
       );

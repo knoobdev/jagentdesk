@@ -414,7 +414,8 @@ export const ar: TranslationResources = {
       recovery: {
         archivedTitle: "مساحة العمل مؤرشفة",
         restoreDescription:
-          "تمت أرشفة {{workspaceName}} وإزالة شجرة العمل الخاصة بها. استعد الفرع {{branch}} لفتحها مجددًا.",
+          "استعد {{workspaceName}} للعودة إلى وكلائها. ستستخدم شجرة العمل الفرع {{branch}}.",
+        restoreWithoutBranchDescription: "استعد {{workspaceName}} للعودة إلى وكلائها.",
         unarchiveDescription: "{{workspaceName}} مؤرشفة. ألغِ أرشفتها لفتحها مجددًا.",
         restoreAction: "استعادة",
         unarchiveAction: "إلغاء الأرشفة",
@@ -832,6 +833,9 @@ export const ar: TranslationResources = {
         },
       },
       diff: {
+        baseBranch: {
+          title: "الفرع الأساسي",
+        },
         openChangesTab: "فتح علامة تبويب التغييرات",
         closeChangesTab: "إغلاق علامة تبويب التغييرات",
         binaryFile: "ملف ثنائي",
@@ -863,6 +867,7 @@ export const ar: TranslationResources = {
         checkingRepository: "فحص المستودع...",
         notRepository: "ليس مستودع جيت",
         diffMode: "وضع الفرق",
+        all: "كل التغييرات",
         uncommitted: "غير ملتزم",
         committed: "ملتزم",
         branchUnknown: "مجهول",
@@ -1082,6 +1087,9 @@ export const ar: TranslationResources = {
         hostDisconnected: "Host غير متصل",
         hideFailed: "فشل في إخفاء مساحة العمل",
         archiveFailed: "فشل في أرشفة مساحة العمل",
+        archived: "تمت أرشفة مساحة العمل",
+        undoArchive: "تراجع",
+        undoArchiveFailed: "تعذّر التراجع عن الأرشفة",
       },
     },
   },
@@ -1089,8 +1097,9 @@ export const ar: TranslationResources = {
     title: "مساحة عمل جديدة",
     create: "يخلق",
     isolation: {
-      local: "محلي",
+      local: "مجلد المشروع",
       worktree: "شجرة عمل جديدة",
+      existing: "شجرة عمل موجودة",
       label: "العزل",
     },
     fields: {
@@ -1104,6 +1113,10 @@ export const ar: TranslationResources = {
       createWorktreeFailed: "فشل في إنشاء شجرة العمل",
       composerStateRequired: "حالة الملحن مطلوبة",
       selectModel: "اختر نموذجا",
+      branchInProjectDirectory:
+        "الفرع {{branch}} مفعّل في مجلد المشروع. اختر مجلد المشروع للعمل عليه، أو أنشئ فرعًا جديدًا منه.",
+      branchInWorktree:
+        "الفرع {{branch}} مفعّل في {{path}}. اختر شجرة العمل هذه من شجرة عمل موجودة، أو أنشئ فرعًا جديدًا منه.",
     },
     refPicker: {
       startingRef: "بدء المرجع",
@@ -1112,6 +1125,25 @@ export const ar: TranslationResources = {
       searching: "جارٍ البحث...",
       noMatchingRefs: "لا توجد مراجع مطابقة.",
       searchPlaceholder: "بحث الفروع والعلاقات العامة",
+      searchBranches: "ابحث في الفروع",
+      searchPullRequests: "ابحث في طلبات الدمج",
+      searchPullRequests_mr: "ابحث في MR",
+      branches: "الفروع",
+      pullRequests: "طلبات الدمج",
+      pullRequests_mr: "MR",
+      pullRequestsShort: "الدمج",
+      pullRequestsShort_mr: "MR",
+      branchOff: "فرع جديد",
+      checkout: "العمل عليه",
+      branchOffHint: "ينشئ فرعًا جديدًا منه",
+      checkoutHint: "يعمل عليه مباشرة",
+      base: "الأساس",
+      from: "من",
+      branch: "الفرع",
+      pullRequest: "طلب الدمج",
+      pullRequest_mr: "MR",
+      inProjectDirectory: "في مجلد المشروع",
+      inWorktree: "في شجرة عمل",
       title: "ابدأ من",
     },
   },
@@ -1287,6 +1319,7 @@ export const ar: TranslationResources = {
     openPath: "فتح المسار",
   },
   branchSwitcher: {
+    failedToLoad: "تعذّر تحميل الفروع. أعد فتح قائمة الفروع للمحاولة مرة أخرى.",
     currentBranch: "الفرع الحالي:{{branchName}}. اضغط لتبديل الفرع.",
     placeholder: "تبديل الفرع...",
     searchPlaceholder: "تصفية الفروع...",

@@ -11622,3 +11622,33 @@ test("plugin instructions are recomputed for each launch without changing saved 
   expect(client.resumeOverrides.at(-1)?.daemonAppendSystemPrompt).toBe("Daemon");
   expect((await storage.get(snapshot.id))?.config?.systemPrompt).toBe("Saved");
 });
+
+test("workspace archive preserves a loaded history agent stamp and stamps cascaded children", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "workspace-stamp-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const manager = new AgentManager({
+    clients: { codex: new TestAgentClient() },
+    registry: storage,
+    logger,
+  });
+  try {
+    const parent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    const child = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      labels: { [PARENT_AGENT_ID_LABEL]: parent.id },
+      workspaceId: undefined,
+    });
+    const stamp = "2026-11-09T00:00:00.000Z";
+    await manager.archiveAgent(parent.id, stamp);
+    expect((await storage.get(parent.id))?.archivedAt).toBe(stamp);
+    expect((await storage.get(child.id))?.archivedAt).toBe(stamp);
+    await ensureAgentLoaded(parent.id, { agentManager: manager, agentStorage: storage, logger });
+    await manager.archiveAgent(parent.id, "2026-11-09T01:00:00.000Z");
+    expect((await storage.get(parent.id))?.archivedAt).toBe(stamp);
+    expect((await storage.get(parent.id))?.updatedAt).toBe("2026-11-09T01:00:00.000Z");
+  } finally {
+    await storage.flush();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});

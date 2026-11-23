@@ -1,3 +1,4 @@
+import { isWorkspaceArchivePending } from "@/contexts/session-workspace-upserts";
 import equal from "fast-deep-equal";
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
@@ -157,6 +158,7 @@ export interface WorkspaceDescriptor {
   worktreeSlug?: WorkspaceDescriptorPayload["worktreeSlug"];
   projectKind: WorkspaceDescriptorPayload["projectKind"];
   workspaceKind: WorkspaceDescriptorPayload["workspaceKind"];
+  background?: boolean;
   name: string;
   title?: string | null;
   pinnedAt?: string | null;
@@ -168,6 +170,7 @@ export interface WorkspaceDescriptor {
   gitRuntime?: WorkspaceDescriptorPayload["gitRuntime"];
   githubRuntime?: WorkspaceDescriptorPayload["githubRuntime"];
   forge?: WorkspaceDescriptorPayload["forge"];
+  forgeWeb?: WorkspaceDescriptorPayload["forgeWeb"];
   project?: ProjectPlacementPayload;
 }
 
@@ -193,6 +196,7 @@ export function normalizeWorkspaceDescriptor(
     worktreeSlug: payload.worktreeSlug,
     projectKind: payload.projectKind,
     workspaceKind: payload.workspaceKind,
+    background: payload.background ?? false,
     name: payload.name,
     title: payload.title ?? null,
     pinnedAt: payload.pinnedAt ?? null,
@@ -204,6 +208,7 @@ export function normalizeWorkspaceDescriptor(
     gitRuntime: payload.gitRuntime,
     githubRuntime: payload.githubRuntime,
     forge: payload.forge,
+    forgeWeb: payload.forgeWeb,
     project: payload.project,
   };
 }
@@ -314,6 +319,7 @@ interface ExplorerRequestState {
 }
 
 export interface AgentFileExplorerState {
+  listingGeneration: number;
   directories: Map<string, ExplorerDirectory>;
   files: Map<string, ExplorerFile>;
   isLoading: boolean;
@@ -635,6 +641,7 @@ interface SessionStoreActions {
       | ((prev: Map<string, WorkspaceDescriptor>) => Map<string, WorkspaceDescriptor>),
   ) => void;
   mergeWorkspaces: (serverId: string, workspaces: Iterable<WorkspaceDescriptor>) => void;
+  seedWorkspaces: (serverId: string, workspaces: Iterable<WorkspaceDescriptor>) => void;
   removeWorkspace: (serverId: string, workspaceId: string) => void;
   setProjects: (serverId: string, projects: Iterable<ProjectDescriptor>) => void;
   upsertProject: (serverId: string, project: ProjectDescriptor) => void;
@@ -1892,6 +1899,17 @@ export const useSessionStore = create<SessionStore>()(
             },
           };
         });
+      },
+
+      seedWorkspaces: (serverId, workspaces) => {
+        const existing = get().sessions[serverId]?.workspaces;
+        // Creation responses seed missing rows; live directory updates own existing rows.
+        const missing = Array.from(workspaces).filter(
+          (workspace) =>
+            !existing?.has(workspace.id) &&
+            !isWorkspaceArchivePending({ serverId, workspaceId: workspace.id }),
+        );
+        get().mergeWorkspaces(serverId, missing);
       },
 
       mergeWorkspaces: (serverId, workspaces) => {

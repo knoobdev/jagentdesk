@@ -23,10 +23,15 @@ function source(gitActions: GitActions): {
   value: WorkspaceCommandCenterSource;
   runGitActions: GitAction[];
   dispatched: KeyboardActionDefinition[];
+  archivedWorkspaces: number;
 } {
   const runGitActions: GitAction[] = [];
   const dispatched: KeyboardActionDefinition[] = [];
+  let archivedWorkspaces = 0;
   return {
+    get archivedWorkspaces() {
+      return archivedWorkspaces;
+    },
     value: {
       gitActions,
       labels: {
@@ -36,12 +41,20 @@ function source(gitActions: GitActions): {
         newBrowser: "New browser",
         splitRight: "Split pane right",
         splitDown: "Split pane down",
+        archiveWorkspace: "Archive workspace",
       },
       icons: {},
       shortcuts: {},
-      capabilities: { canSplitPanes: true, canOpenBrowserTabs: true },
+      capabilities: {
+        isGit: gitActions.primary !== null || gitActions.secondary.length > 0,
+        canSplitPanes: true,
+        canOpenBrowserTabs: true,
+      },
       dispatch: (action) => dispatched.push(action),
       runGitAction: (action) => runGitActions.push(action),
+      archiveWorkspace: () => {
+        archivedWorkspaces += 1;
+      },
     },
     runGitActions,
     dispatched,
@@ -49,6 +62,41 @@ function source(gitActions: GitActions): {
 }
 
 describe("workspace command center contributions", () => {
+  it("offers archive in a non-Git workspace and runs the workspace's archive", () => {
+    const fixture = source({ primary: null, secondary: [], menu: [] });
+
+    const archive = buildWorkspaceCommandCenterContributions(fixture.value).find(
+      (item) => item.id === "workspace:archive",
+    );
+
+    expect(archive?.visibility).toBe("query");
+    expect(archive?.presentation).toMatchObject({ title: "Archive workspace" });
+    archive?.run();
+    expect(fixture.archivedWorkspaces).toBe(1);
+    expect(fixture.dispatched).toEqual([]);
+  });
+
+  it("omits archive while the workspace cannot be archived", () => {
+    const fixture = source({ primary: null, secondary: [], menu: [] });
+    fixture.value.archiveWorkspace = null;
+
+    const contributions = buildWorkspaceCommandCenterContributions(fixture.value);
+
+    expect(contributions.some((item) => item.id === "workspace:archive")).toBe(false);
+  });
+
+  it("lists archive once in a Git workspace, through its Git action", () => {
+    const archive = gitAction("archive-workspace", "Archive workspace");
+    const fixture = source({ primary: null, secondary: [archive], menu: [] });
+    fixture.value.capabilities.isGit = true;
+
+    const contributions = buildWorkspaceCommandCenterContributions(fixture.value);
+
+    expect(
+      contributions.filter((item) => item.id.includes("archive")).map((item) => item.id),
+    ).toEqual(["git:archive-workspace"]);
+  });
+
   it("makes only the policy-selected primary Git action default-visible and runs it", () => {
     const primary = gitAction("commit", "Commit");
     const fixture = source({
@@ -100,11 +148,15 @@ describe("workspace command center contributions", () => {
 
   it("omits browser and split actions when their existing capabilities are unavailable", () => {
     const fixture = source({ primary: null, secondary: [], menu: [] });
-    fixture.value.capabilities = { canSplitPanes: false, canOpenBrowserTabs: false };
+    fixture.value.capabilities = { isGit: false, canSplitPanes: false, canOpenBrowserTabs: false };
 
     const contributions = buildWorkspaceCommandCenterContributions(fixture.value);
 
-    expect(contributions.map((item) => item.id)).toEqual(["tab:new-agent", "tab:new-terminal"]);
+    expect(contributions.map((item) => item.id)).toEqual([
+      "tab:new-agent",
+      "tab:new-terminal",
+      "workspace:archive",
+    ]);
   });
 
   it("dispatches every tab and pane command to the workspace scope", () => {
@@ -133,6 +185,7 @@ describe("workspace command center contributions", () => {
       "tab:new-browser",
       "pane:split-right",
       "pane:split-down",
+      "workspace:archive",
     ]);
     expect(contributions.some((item) => item.id.startsWith("git:"))).toBe(false);
   });

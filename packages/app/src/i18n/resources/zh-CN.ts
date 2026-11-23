@@ -412,7 +412,8 @@ export const zhCN: TranslationResources = {
       recovery: {
         archivedTitle: "Workspace 已归档",
         restoreDescription:
-          "{{workspaceName}} 已归档，其 worktree 已移除。恢复分支 {{branch}} 以重新打开。",
+          "恢复 {{workspaceName}} 以返回其中的代理。worktree 将使用分支 {{branch}}。",
+        restoreWithoutBranchDescription: "恢复 {{workspaceName}} 以返回其中的代理。",
         unarchiveDescription: "{{workspaceName}} 已归档。取消归档以重新打开。",
         restoreAction: "恢复",
         unarchiveAction: "取消归档",
@@ -822,6 +823,9 @@ export const zhCN: TranslationResources = {
         },
       },
       diff: {
+        baseBranch: {
+          title: "基准分支",
+        },
         openChangesTab: "打开“更改”标签页",
         closeChangesTab: "关闭“更改”标签页",
         binaryFile: "二进制文件",
@@ -853,6 +857,7 @@ export const zhCN: TranslationResources = {
         checkingRepository: "正在检查 repository...",
         notRepository: "不是 git repository",
         diffMode: "Diff 模式",
+        all: "全部更改",
         uncommitted: "未 commit",
         committed: "已 commit",
         branchUnknown: "未知",
@@ -1067,6 +1072,9 @@ export const zhCN: TranslationResources = {
         hostDisconnected: "Host 未连接",
         hideFailed: "隐藏 workspace 失败",
         archiveFailed: "归档工作区失败",
+        archived: "工作区已归档",
+        undoArchive: "撤销",
+        undoArchiveFailed: "无法撤销归档",
       },
     },
   },
@@ -1074,8 +1082,9 @@ export const zhCN: TranslationResources = {
     title: "新建 workspace",
     create: "创建",
     isolation: {
-      local: "本地",
+      local: "项目目录",
       worktree: "新建 worktree",
+      existing: "已有 worktree",
       label: "隔离",
     },
     fields: {
@@ -1089,6 +1098,10 @@ export const zhCN: TranslationResources = {
       createWorktreeFailed: "创建 worktree 失败",
       composerStateRequired: "Composer 状态必填",
       selectModel: "请选择模型",
+      branchInProjectDirectory:
+        "{{branch}} 已在项目目录中检出。选择“项目目录”以在其中工作，或从它创建新分支。",
+      branchInWorktree:
+        "{{branch}} 已在 {{path}} 中检出。在“已有 worktree”中选择该 worktree，或从它创建新分支。",
     },
     refPicker: {
       startingRef: "起始 ref",
@@ -1097,6 +1110,25 @@ export const zhCN: TranslationResources = {
       searching: "正在搜索...",
       noMatchingRefs: "没有匹配的 refs。",
       searchPlaceholder: "搜索分支和 PR",
+      searchBranches: "搜索分支",
+      searchPullRequests: "搜索 PR",
+      searchPullRequests_mr: "搜索 MR",
+      branches: "分支",
+      pullRequests: "Pull request",
+      pullRequests_mr: "Merge request",
+      pullRequestsShort: "PR",
+      pullRequestsShort_mr: "MR",
+      branchOff: "新建分支",
+      checkout: "检出",
+      branchOffHint: "从它创建一个新分支",
+      checkoutHint: "直接在它上面工作",
+      base: "基准",
+      from: "从",
+      branch: "分支",
+      pullRequest: "Pull request",
+      pullRequest_mr: "Merge request",
+      inProjectDirectory: "在项目目录中",
+      inWorktree: "在 worktree 中",
       title: "起始位置",
     },
   },
@@ -1266,6 +1298,7 @@ export const zhCN: TranslationResources = {
     openPath: "打开路径",
   },
   branchSwitcher: {
+    failedToLoad: "无法加载分支，请重新打开选择器以重试。",
     currentBranch: "当前分支：{{branchName}}。按下以切换分支。",
     placeholder: "切换分支...",
     searchPlaceholder: "筛选分支...",

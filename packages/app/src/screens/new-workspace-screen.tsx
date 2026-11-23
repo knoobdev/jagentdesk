@@ -1,3 +1,12 @@
+import { SegmentedControl, type SegmentedControlOption } from "@/components/ui/segmented-control";
+import { useExistingWorktrees, useProjectWorktrees } from "./new-workspace/existing-worktrees";
+import {
+  DEFAULT_REF_ACTION,
+  pickerItemToCheckoutRequest,
+  type RefAction,
+} from "./new-workspace-picker-item";
+import { useRouter } from "expo-router";
+import { buildSettingsAddHostRoute } from "@/utils/host-routes";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ReactElement, RefObject } from "react";
 import { useTranslation } from "react-i18next";
@@ -114,6 +123,8 @@ import {
   resolveNewWorkspaceInitialServerId,
 } from "./new-workspace-initial-context";
 import { useNewWorkspaceProjectPicker } from "./new-workspace/project-picker";
+import { ImportSessionButton } from "./new-workspace/import-session-button";
+import { useImportSession } from "@/hooks/use-import-session";
 
 const ThemedFolderPlus = withUnistyles(FolderPlus);
 const foregroundMutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
@@ -639,7 +650,7 @@ function computePickerOptionData(
   for (const pr of prItems) {
     if (!pr.headRefName) continue;
     const id = prOptionId(pr.number);
-    const option = { id, label: formatPrLabel(pr) };
+    const option = { id, label: formatPrLabel(pr), searchText: pr.body ?? undefined };
     idMap.set(id, { kind: "github-pr", item: pr });
     const updatedAtMs = pr.updatedAt ? Date.parse(pr.updatedAt) : 0;
     const timestamp = Number.isNaN(updatedAtMs) ? 0 : Math.floor(updatedAtMs / 1000);
@@ -664,7 +675,7 @@ function IsolationPickerTrigger({
   onPress: () => void;
   disabled: boolean;
   badgePressableStyle: React.ComponentProps<typeof Pressable>["style"];
-  isolation: "local" | "worktree";
+  isolation: "local" | "worktree" | "existing";
   label: string;
   iconColor: string;
   iconSize: number;
@@ -1379,7 +1390,9 @@ interface NewWorkspaceFormStackInput {
     onSelect: (id: string) => void;
   };
   isolation: FormPickerControl & {
-    effectiveIsolation: "local" | "worktree";
+    effectiveIsolation: "local" | "worktree" | "existing";
+    selectedValue: string;
+    triggerLabel: string;
     options: ComboboxOptionType[];
     onSelect: (id: string) => void;
     renderOption: RefPickerRenderOption;
@@ -1396,7 +1409,95 @@ interface NewWorkspaceFormStackInput {
     emptyText: string;
     renderOption: RefPickerRenderOption;
     showRefPicker: boolean;
+    action: RefAction;
+    canChooseAction: boolean;
+    onActionChange: (action: RefAction) => void;
   };
+}
+
+function useNewWorkspaceWorktreeChoices(input: {
+  client: ReturnType<typeof useHostRuntimeClient>;
+  serverId: string;
+  cwd: string | null;
+  clientReady: boolean;
+  worktreeSupport: "supported" | "unsupported" | "unknown";
+  selectedItem: PickerItem | null;
+  effectiveIsolation: "local" | "worktree";
+}) {
+  const { t } = useTranslation();
+  const supportsCheckoutWorktreeList = useHostFeature(input.serverId, "checkoutWorktreeList");
+  const canChooseRefAction = useHostFeature(input.serverId, "worktreeRefActions");
+  const projectWorktrees = useProjectWorktrees({
+    client: input.client,
+    serverId: input.serverId,
+    cwd: input.cwd,
+    enabled:
+      input.clientReady && supportsCheckoutWorktreeList && input.worktreeSupport === "supported",
+  });
+  const existingWorktrees = useExistingWorktrees(projectWorktrees);
+  const [chosenWorktree, setChosenWorktree] = useState<{
+    serverId: string;
+    projectDirectory: string | null;
+    path: string;
+  } | null>(null);
+  const existingWorktree =
+    chosenWorktree?.serverId === input.serverId && chosenWorktree.projectDirectory === input.cwd
+      ? (existingWorktrees.find((item) => item.path === chosenWorktree.path) ?? null)
+      : null;
+  const [refActions, setRefActions] = useState(DEFAULT_REF_ACTION);
+  const currentRefKind = input.selectedItem?.kind ?? "branch";
+  const handleRefActionChange = useCallback(
+    (action: RefAction) => {
+      setRefActions((current) => ({ ...current, [currentRefKind]: action }));
+    },
+    [currentRefKind],
+  );
+  const isolationFields = {
+    effectiveIsolation: existingWorktree ? ("existing" as const) : input.effectiveIsolation,
+    selectedValue: existingWorktree
+      ? `existing:${existingWorktree.path}`
+      : input.effectiveIsolation,
+    triggerLabel: existingWorktree
+      ? `${t("newWorkspace.isolation.existing")}: ${existingWorktree.name}`
+      : isolationLabel(t, input.effectiveIsolation),
+  };
+  return {
+    projectWorktrees,
+    existingWorktrees,
+    existingWorktree,
+    setChosenWorktree,
+    refActions,
+    currentRefKind,
+    handleRefActionChange,
+    canChooseRefAction,
+    isolationFields,
+  };
+}
+
+function RefActionControl({
+  value,
+  onChange,
+}: {
+  value: RefAction;
+  onChange: (action: RefAction) => void;
+}) {
+  const { t } = useTranslation();
+  const options = useMemo<SegmentedControlOption<RefAction>[]>(
+    () => [
+      {
+        value: "branch-off",
+        label: t("newWorkspace.refPicker.branchOff"),
+        testID: "new-workspace-ref-action-branch-off",
+      },
+      {
+        value: "checkout",
+        label: t("newWorkspace.refPicker.checkout"),
+        testID: "new-workspace-ref-action-checkout",
+      },
+    ],
+    [t],
+  );
+  return <SegmentedControl options={options} value={value} onValueChange={onChange} size="sm" />;
 }
 
 function useNewWorkspaceFormStack(input: NewWorkspaceFormStackInput): ReactElement {
@@ -1406,8 +1507,9 @@ function useNewWorkspaceFormStack(input: NewWorkspaceFormStackInput): ReactEleme
 
   const selectedHostLabel =
     host.allHosts.find((h) => h.serverId === host.selectedServerId)?.label ?? "Host";
-  const showHostControl = host.allHosts.length > 1;
-  const isolationTriggerLabel = isolationLabel(t, isolation.effectiveIsolation);
+  const router = useRouter();
+  const handleAddHost = useCallback(() => router.push(buildSettingsAddHostRoute()), [router]);
+  const isolationTriggerLabel = isolation.triggerLabel;
   const addProjectAction = useMemo(
     () => <AddProjectPickerAction onPress={project.onAddProject} />,
     [project.onAddProject],
@@ -1461,7 +1563,7 @@ function useNewWorkspaceFormStack(input: NewWorkspaceFormStackInput): ReactEleme
     </View>
   );
 
-  const hostControl = showHostControl ? (
+  const hostControl = (
     <View style={desktopControlStyle}>
       <HostPicker
         hosts={host.allHosts}
@@ -1470,6 +1572,9 @@ function useNewWorkspaceFormStack(input: NewWorkspaceFormStackInput): ReactEleme
         open={host.openState}
         onOpenChange={host.onOpenChange}
         anchorRef={host.anchorRef}
+        includeAddHost
+        onAddHost={handleAddHost}
+        addHostTestID="new-workspace-host-picker-add-host"
         searchable={false}
         title="Host"
         desktopPlacement="bottom-start"
@@ -1493,7 +1598,7 @@ function useNewWorkspaceFormStack(input: NewWorkspaceFormStackInput): ReactEleme
         </Pressable>
       </HostPicker>
     </View>
-  ) : null;
+  );
 
   const isolationControl = isolation.canCreateWorktree ? (
     <View style={desktopControlStyle}>
@@ -1509,7 +1614,7 @@ function useNewWorkspaceFormStack(input: NewWorkspaceFormStackInput): ReactEleme
       />
       <Combobox
         options={isolation.options}
-        value={isolation.effectiveIsolation}
+        value={isolation.selectedValue}
         onSelect={isolation.onSelect}
         title={t("newWorkspace.isolation.label")}
         open={isolation.openState}
@@ -1520,6 +1625,14 @@ function useNewWorkspaceFormStack(input: NewWorkspaceFormStackInput): ReactEleme
       />
     </View>
   ) : null;
+
+  const refActionControl = useMemo(
+    () =>
+      base.canChooseAction ? (
+        <RefActionControl value={base.action} onChange={base.onActionChange} />
+      ) : null,
+    [base.action, base.canChooseAction, base.onActionChange],
+  );
 
   const baseControl = base.showRefPicker ? (
     <View style={desktopControlStyle}>
@@ -1536,6 +1649,7 @@ function useNewWorkspaceFormStack(input: NewWorkspaceFormStackInput): ReactEleme
         iconSize={theme.iconSize.sm}
       />
       <Combobox
+        stickyHeader={refActionControl}
         options={base.options}
         value={base.selectedOptionId}
         onSelect={base.onSelect}
@@ -1589,7 +1703,7 @@ export function NewWorkspaceScreen({
   const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
   const toast = useToast();
-  const mergeWorkspaces = useSessionStore((state) => state.mergeWorkspaces);
+  const mergeWorkspaces = useSessionStore((state) => state.seedWorkspaces);
   const {
     allHosts,
     selectedServerId,
@@ -1743,6 +1857,26 @@ export function NewWorkspaceScreen({
       supportsMultiplicity: supportsWorkspaceMultiplicity,
       worktreeSupport,
     });
+
+  const {
+    projectWorktrees,
+    existingWorktrees,
+    existingWorktree,
+    setChosenWorktree,
+    refActions,
+    currentRefKind,
+    handleRefActionChange,
+    canChooseRefAction,
+    isolationFields,
+  } = useNewWorkspaceWorktreeChoices({
+    client,
+    serverId: selectedServerId,
+    cwd: selectedSourceDirectory,
+    clientReady,
+    worktreeSupport,
+    selectedItem,
+    effectiveIsolation,
+  });
 
   const branchSuggestionsQuery = useQuery({
     queryKey: [
@@ -1905,15 +2039,32 @@ export function NewWorkspaceScreen({
   const isolationOptions = useMemo<ComboboxOptionType[]>(() => {
     const localOption = { id: "local", label: isolationLabel(t, "local") };
     if (!canCreateWorktree) return [localOption];
-    return [localOption, { id: "worktree", label: isolationLabel(t, "worktree") }];
-  }, [canCreateWorktree, t]);
+    return [
+      localOption,
+      { id: "worktree", label: isolationLabel(t, "worktree") },
+      ...existingWorktrees.map((item) => ({
+        id: `existing:${item.path}`,
+        label: `${t("newWorkspace.isolation.existing")}: ${item.name}`,
+        description: item.path,
+      })),
+    ];
+  }, [canCreateWorktree, existingWorktrees, t]);
 
   const handleSelectIsolationOption = useCallback(
     (id: string) => {
+      setChosenWorktree(
+        id.startsWith("existing:")
+          ? {
+              serverId: selectedServerId,
+              projectDirectory: selectedSourceDirectory,
+              path: id.slice("existing:".length),
+            }
+          : null,
+      );
       setIsolation(id === "worktree" ? "worktree" : "local");
       setIsolationPickerOpen(false);
     },
-    [setIsolation],
+    [setIsolation, selectedServerId, selectedSourceDirectory, setChosenWorktree],
   );
 
   const renderIsolationOption = useCallback(
@@ -2008,23 +2159,40 @@ export function NewWorkspaceScreen({
       }
       const connectedClient = withConnectedClient();
       const createsWorktree = !supportsWorkspaceMultiplicity || effectiveIsolation === "worktree";
-      const checkoutRequest = createsWorktree
-        ? resolveCheckoutRequest(
-            selectedItem,
-            await ensureCheckoutStatus({
-              queryClient,
-              client: connectedClient,
-              serverId: selectedServerId,
-              cwd: selectedSourceDirectory,
-            }),
-          )
-        : undefined;
+      let checkoutRequest: PickerCheckoutRequest | undefined;
+      if (createsWorktree) {
+        checkoutRequest = selectedItem
+          ? pickerItemToCheckoutRequest(selectedItem, refActions[selectedItem.kind])
+          : resolveCheckoutRequest(
+              null,
+              await ensureCheckoutStatus({
+                queryClient,
+                client: connectedClient,
+                serverId: selectedServerId,
+                cwd: selectedSourceDirectory,
+              }),
+            );
+      }
+      if (checkoutRequest?.action === "checkout" && selectedItem?.kind === "branch") {
+        const held = projectWorktrees.find(
+          (worktree) => worktree.branchName === checkoutRequest.refName,
+        );
+        if (held)
+          throw new Error(
+            t(
+              held.containsCwd
+                ? "newWorkspace.errors.branchInProjectDirectory"
+                : "newWorkspace.errors.branchInWorktree",
+              { branch: checkoutRequest.refName, path: held.path },
+            ),
+          );
+      }
       const normalizedWorkspace = supportsWorkspaceMultiplicity
         ? await createMultiplicityWorkspace({
             client: connectedClient,
             isolation: effectiveIsolation,
             project: selectedProject,
-            sourceDirectory: selectedSourceDirectory,
+            sourceDirectory: existingWorktree?.path ?? selectedSourceDirectory,
             checkoutRequest,
             withInitialAgent: input.withInitialAgent,
             prompt: input.prompt,
@@ -2047,6 +2215,9 @@ export function NewWorkspaceScreen({
     [
       buildCreateWorktreeInput,
       createdWorkspace,
+      existingWorktree,
+      projectWorktrees,
+      refActions,
       effectiveIsolation,
       mergeWorkspaces,
       queryClient,
@@ -2236,7 +2407,7 @@ export function NewWorkspaceScreen({
     isolation: {
       anchorRef: isolationPickerAnchorRef,
       open: openIsolationPicker,
-      effectiveIsolation,
+      ...isolationFields,
       options: isolationOptions,
       onSelect: handleSelectIsolationOption,
       openState: isolationPickerOpen,
@@ -2258,15 +2429,20 @@ export function NewWorkspaceScreen({
       setSearchQuery: setPickerSearchQuery,
       emptyText: pickerEmptyText,
       renderOption: renderPickerOption,
-      showRefPicker,
+      showRefPicker: showRefPicker && !existingWorktree,
+      action: refActions[currentRefKind],
+      canChooseAction: canChooseRefAction,
+      onActionChange: handleRefActionChange,
     },
   });
 
   const screenHeaderLeft = useMemo(() => <SidebarMenuToggle />, []);
+  const importSession = useImportSession({ serverId: selectedServerId });
 
   return (
     <FileDropZone style={styles.container}>
       <ScreenHeader left={screenHeaderLeft} borderless />
+      <ImportSessionButton compact={isCompact} placement="top" onPress={importSession.open} />
       <View style={contentStyle}>
         <TitlebarDragRegion />
         <ReanimatedAnimated.View style={centeredStyle}>
@@ -2301,9 +2477,15 @@ export function NewWorkspaceScreen({
             commandDraftConfig={composerState?.commandDraftConfig}
             agentControls={agentControlsWithDisabled}
           />
+          <ImportSessionButton
+            compact={isCompact}
+            placement="bottom"
+            onPress={importSession.open}
+          />
           {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
         </ReanimatedAnimated.View>
       </View>
+      {importSession.sheet}
     </FileDropZone>
   );
 }

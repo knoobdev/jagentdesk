@@ -233,3 +233,33 @@ describe("hasForgeWebUrls", () => {
     expect(hasForgeWebUrls("bitbucket")).toBe(false);
   });
 });
+
+it("opens the branch and a file on the resolved web host for an SSH config alias", () => {
+  const sshAliasRemote = "git@github.com-work:acme/repo.git";
+  const forgeWeb = { host: "github.com" };
+  expect(
+    buildForgeBranchTreeUrl("github", { remoteUrl: sshAliasRemote, forgeWeb, branch: "main" }),
+  ).toBe("https://github.com/acme/repo/tree/main");
+  expect(
+    buildForgeBlobUrl("github", {
+      remoteUrl: sshAliasRemote,
+      forgeWeb,
+      branch: "main",
+      path: "src/index.ts",
+    }),
+  ).toBe("https://github.com/acme/repo/blob/main/src/index.ts");
+});
+
+it("keeps the branch and file links on the origin repository for a fork", () => {
+  const input = {
+    remoteUrl: "git@github.com:fork-owner/repo.git",
+    forgeWeb: { host: "github.com", referenceRepository: "main-owner/repo" },
+    branch: "feature/only-on-fork",
+  };
+  expect(buildForgeBranchTreeUrl("github", input)).toBe(
+    "https://github.com/fork-owner/repo/tree/feature/only-on-fork",
+  );
+  expect(buildForgeBlobUrl("github", { ...input, path: "a.ts" })).toBe(
+    "https://github.com/fork-owner/repo/blob/feature/only-on-fork/a.ts",
+  );
+});

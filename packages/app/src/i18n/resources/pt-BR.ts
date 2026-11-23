@@ -417,7 +417,8 @@ export const ptBR: TranslationResources = {
       recovery: {
         archivedTitle: "Workspace arquivado",
         restoreDescription:
-          "{{workspaceName}} foi arquivado e sua worktree foi removida. Restaure a branch {{branch}} para abri-lo novamente.",
+          "Restaure {{workspaceName}} para voltar aos seus agentes. A worktree usará a branch {{branch}}.",
+        restoreWithoutBranchDescription: "Restaure {{workspaceName}} para voltar aos seus agentes.",
         unarchiveDescription:
           "{{workspaceName}} está arquivado. Desarquive-o para abri-lo novamente.",
         restoreAction: "Restaurar",
@@ -854,6 +855,9 @@ export const ptBR: TranslationResources = {
         },
       },
       diff: {
+        baseBranch: {
+          title: "Branch base",
+        },
         openChangesTab: "Abrir a aba Alterações",
         closeChangesTab: "Fechar a aba Alterações",
         binaryFile: "Arquivo binário",
@@ -885,6 +889,7 @@ export const ptBR: TranslationResources = {
         checkingRepository: "Verificando repositório...",
         notRepository: "Não é um repositório git",
         diffMode: "Modo de diff",
+        all: "Todas as alterações",
         uncommitted: "Sem commit",
         committed: "Com commit",
         branchUnknown: "Desconhecido",
@@ -1104,6 +1109,9 @@ export const ptBR: TranslationResources = {
         hostDisconnected: "Host não está conectado",
         hideFailed: "Falha ao ocultar workspace",
         archiveFailed: "Falha ao arquivar workspace",
+        archived: "Workspace arquivado",
+        undoArchive: "Desfazer",
+        undoArchiveFailed: "Não foi possível desfazer o arquivamento",
       },
     },
   },
@@ -1111,8 +1119,9 @@ export const ptBR: TranslationResources = {
     title: "Novo workspace",
     create: "Criar",
     isolation: {
-      local: "Local",
+      local: "Diretório do projeto",
       worktree: "Novo worktree",
+      existing: "Worktree existente",
       label: "Isolamento",
     },
     fields: {
@@ -1126,6 +1135,10 @@ export const ptBR: TranslationResources = {
       createWorktreeFailed: "Falha ao criar worktree",
       composerStateRequired: "O estado do composer é obrigatório",
       selectModel: "Selecione um modelo",
+      branchInProjectDirectory:
+        "{{branch}} está em uso no diretório do projeto. Escolha Diretório do projeto para trabalhar nela, ou crie uma branch a partir dela.",
+      branchInWorktree:
+        "{{branch}} está em uso em {{path}}. Escolha esse worktree em Worktree existente, ou crie uma branch a partir dela.",
     },
     refPicker: {
       startingRef: "Ref inicial",
@@ -1134,6 +1147,25 @@ export const ptBR: TranslationResources = {
       searching: "Buscando...",
       noMatchingRefs: "Nenhuma ref correspondente.",
       searchPlaceholder: "Buscar branches e PRs",
+      searchBranches: "Buscar branches",
+      searchPullRequests: "Buscar pull requests",
+      searchPullRequests_mr: "Buscar merge requests",
+      branches: "Branches",
+      pullRequests: "Pull requests",
+      pullRequests_mr: "Merge requests",
+      pullRequestsShort: "PRs",
+      pullRequestsShort_mr: "MRs",
+      branchOff: "Nova branch",
+      checkout: "Usar diretamente",
+      branchOffHint: "Cria uma branch nova a partir dela",
+      checkoutHint: "Trabalha diretamente nela",
+      base: "Base",
+      from: "de",
+      branch: "Branch",
+      pullRequest: "Pull request",
+      pullRequest_mr: "Merge request",
+      inProjectDirectory: "No diretório do projeto",
+      inWorktree: "Em um worktree",
       title: "Começar de",
     },
   },
@@ -1310,6 +1342,7 @@ export const ptBR: TranslationResources = {
     openPath: "Abrir caminho",
   },
   branchSwitcher: {
+    failedToLoad: "Não foi possível carregar as branches. Reabra o seletor para tentar novamente.",
     currentBranch: "Branch atual: {{branchName}}. Pressione para trocar de branch.",
     placeholder: "Trocar branch...",
     searchPlaceholder: "Filtrar branches...",

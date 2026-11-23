@@ -6,16 +6,22 @@
  * format); an unknown forge has no grammar and yields null, so the action is
  * simply absent rather than wrong.
  *
- * URL grammar lives on each client forge module. The repo identity and host
- * both ride the manifest's `cloudHosts` only to canonicalize a cloud SSH alias
- * (e.g. ssh.github.com -> github.com); a self-hosted host is used as-is.
+ * URL grammar lives on each client forge module. The daemon resolves the web
+ * host (SSH config aliases, cloud SSH hosts) and the repository that owns
+ * issue and change-request numbers (a fork's parent) and publishes them as
+ * `forgeWeb`; branch and file links stay on the origin repository.
  */
-import { getForgeDefinition } from "@jagentdesk/protocol/forge-manifest";
-import { normalizeHost, parseGitRemoteLocation } from "@jagentdesk/protocol/git-remote";
+import {
+  forgeWebHost,
+  isForgeCloudHost,
+  parseGitRemoteLocation,
+} from "@jagentdesk/protocol/git-remote";
+import type { ForgeWeb } from "@jagentdesk/protocol/messages";
 import { getClientForgeLogicModule } from "@/git/forges";
 
 export interface ForgeBlobUrlInput {
   remoteUrl: string | null | undefined;
+  forgeWeb?: ForgeWeb | null;
   branch: string | null | undefined;
   path: string | null | undefined;
   lineStart?: number;
@@ -24,23 +30,19 @@ export interface ForgeBlobUrlInput {
 
 export interface ForgeBranchTreeUrlInput {
   remoteUrl: string | null | undefined;
+  forgeWeb?: ForgeWeb | null;
   branch: string | null | undefined;
 }
 
 interface ForgeWebLocation {
+  /** "http" only for a self-hosted http:// remote; every other remote browses over https. */
+  scheme: "http" | "https";
   host: string;
   /** Non-default port for a self-hosted http(s) origin, or undefined. */
   port?: string;
   repo: string;
 }
 
-/**
- * Web host + repo path from a remote. The host is the remote's host, except a
- * cloud SSH alias (a non-first entry in the forge's `cloudHosts`, e.g.
- * ssh.github.com) is canonicalized to the forge's web host (`cloudHosts[0]`).
- * Self-hosted hosts are returned untouched. The repo path supports nested
- * groups (e.g. GitLab subgroups) since it is the full remote path.
- */
 function isValidRepoPath(path: string): boolean {
   const segments = path.split("/").filter((segment) => segment.length > 0);
   if (segments.length === 0) {
@@ -49,9 +51,17 @@ function isValidRepoPath(path: string): boolean {
   return !segments.includes("..");
 }
 
+/**
+ * Web location of the origin repository. The host is the daemon's
+ * `forgeWeb.host`. A daemon without `forgeWeb` publishes none, so the remote's
+ * own host is used, with a cloud SSH alias mapped to the forge's web host.
+ * The repo path supports nested groups (e.g. GitLab subgroups) since it is
+ * the full remote path.
+ */
 function resolveForgeWebLocation(
   forge: string,
   remoteUrl: string | null | undefined,
+  forgeWeb: ForgeWeb | null | undefined,
 ): ForgeWebLocation | null {
   if (!remoteUrl) {
     return null;
@@ -60,9 +70,9 @@ function resolveForgeWebLocation(
   if (!location || !isValidRepoPath(location.path)) {
     return null;
   }
-  const cloudHosts = (getForgeDefinition(forge)?.cloudHosts ?? []).map(normalizeHost);
-  const isCloudHost = cloudHosts.includes(location.host);
-  const webHost = isCloudHost ? cloudHosts[0] : location.host;
+  // COMPAT(forgeWeb): added in v0.9.59; remove the remote-derived host after 2027-05-23 once the host floor supports it.
+  const webHost = forgeWeb?.host ?? forgeWebHost(forge, location.host);
+  const isCloudHost = isForgeCloudHost(forge, location.host);
   // Carry a non-default port only for a self-hosted http(s) origin (e.g.
   // `:60443`): the web UI shares that origin. An SSH/scp remote's port is not the
   // web port, and a canonicalized cloud host always serves on the default port.
@@ -70,16 +80,18 @@ function resolveForgeWebLocation(
     !isCloudHost && (location.transport === "http" || location.transport === "https")
       ? location.port
       : undefined;
-  return { host: webHost, port, repo: location.path };
+  const scheme = !isCloudHost && location.transport === "http" ? "http" : "https";
+  return { scheme, host: webHost, port, repo: location.path };
 }
 
 function encodeBranch(branch: string): string {
   return branch.split("/").map(encodeURIComponent).join("/");
 }
 
-/** Host, plus `:port` when the remote pins a non-default port. */
-function forgeAuthority(location: ForgeWebLocation): string {
-  return location.port ? `${location.host}:${location.port}` : location.host;
+/** Scheme and host, plus `:port` when the remote pins a non-default port. */
+function forgeOrigin(location: ForgeWebLocation): string {
+  const authority = location.port ? `${location.host}:${location.port}` : location.host;
+  return `${location.scheme}://${authority}`;
 }
 
 function normalizeBlobPath(path: string | null | undefined): string | null {
@@ -109,24 +121,24 @@ export function buildForgeBranchTreeUrl(
   input: ForgeBranchTreeUrlInput,
 ): string | null {
   const grammar = getClientForgeLogicModule(forge)?.urlGrammar;
-  const location = resolveForgeWebLocation(forge, input.remoteUrl);
+  const location = resolveForgeWebLocation(forge, input.remoteUrl, input.forgeWeb);
   const branch = input.branch?.trim();
   if (!grammar || !location || !branch || branch === "HEAD") {
     return null;
   }
-  return `https://${forgeAuthority(location)}/${location.repo}${grammar.treeInfix}${encodeBranch(branch)}`;
+  return `${forgeOrigin(location)}/${location.repo}${grammar.treeInfix}${encodeBranch(branch)}`;
 }
 
 export function buildForgeBlobUrl(forge: string, input: ForgeBlobUrlInput): string | null {
   const grammar = getClientForgeLogicModule(forge)?.urlGrammar;
-  const location = resolveForgeWebLocation(forge, input.remoteUrl);
+  const location = resolveForgeWebLocation(forge, input.remoteUrl, input.forgeWeb);
   const branch = input.branch?.trim();
   const filePath = normalizeBlobPath(input.path);
   if (!grammar || !location || !branch || branch === "HEAD" || !filePath) {
     return null;
   }
   const encodedPath = filePath.split("/").map(encodeURIComponent).join("/");
-  let url = `https://${forgeAuthority(location)}/${location.repo}${grammar.blobInfix}${encodeBranch(branch)}/${encodedPath}`;
+  let url = `${forgeOrigin(location)}/${location.repo}${grammar.blobInfix}${encodeBranch(branch)}/${encodedPath}`;
   if (input.lineStart && input.lineStart > 0) {
     url += grammar.lineAnchor(input.lineStart, input.lineEnd);
   }

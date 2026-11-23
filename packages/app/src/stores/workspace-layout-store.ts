@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useEffect, useState } from "react";
 import { create } from "zustand";
-import { createJSONStorage, persist } from "zustand/middleware";
+import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 import type { WorkspaceTab, WorkspaceTabTarget } from "@/workspace-tabs/model";
 import {
   defaultWorkspaceLayoutIds,
@@ -217,8 +217,29 @@ function attachParentTab(input: {
   });
 }
 
+// Preserve saved tabs while Zustand merges the pending persisted read.
+function createWorkspaceLayoutStorage(backingStorage: StateStorage): StateStorage {
+  const reading = new Set<string>();
+  return {
+    getItem: async (name) => {
+      reading.add(name);
+      try {
+        return await backingStorage.getItem(name);
+      } finally {
+        reading.delete(name);
+      }
+    },
+    setItem: async (name, value) => {
+      if (reading.has(name)) return;
+      await backingStorage.setItem(name, value);
+    },
+    removeItem: (name) => backingStorage.removeItem(name),
+  };
+}
+
 export function createWorkspaceLayoutStore(
   ids: WorkspaceLayoutIdSource = defaultWorkspaceLayoutIds,
+  storage: StateStorage = AsyncStorage,
 ) {
   return create<WorkspaceLayoutStore>()(
     persist(
@@ -942,7 +963,16 @@ export function createWorkspaceLayoutStore(
       {
         name: "workspace-layout-state",
         version: 1,
-        storage: createJSONStorage(() => AsyncStorage),
+        storage: createJSONStorage(() => createWorkspaceLayoutStorage(storage)),
+        onRehydrateStorage: () => (state) => {
+          if (!state) return;
+          for (const [workspaceKey, layout] of Object.entries(state.layoutByWorkspace)) {
+            if (layout.focusedPaneId !== null) continue;
+            // Parked focus has an in-memory restoration record that cannot survive reload.
+            const ordinaryPane = collectAllPanes(layout.root)[0];
+            if (ordinaryPane) state.focusPane(workspaceKey, ordinaryPane.id);
+          }
+        },
         partialize: (state) => {
           const layoutByWorkspace: Record<string, WorkspaceLayout> = {};
           for (const key in state.layoutByWorkspace) {

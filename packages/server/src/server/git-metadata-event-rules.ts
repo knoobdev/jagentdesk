@@ -44,7 +44,7 @@ export const GIT_METADATA_EVENT_RULES = [
   },
   {
     id: "jagentdesk-worktree-metadata",
-    scope: "worktree",
+    scope: "both",
     match: "exact",
     path: "jagentdesk/worktree.json",
     route: "owner",

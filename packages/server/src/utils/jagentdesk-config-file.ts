@@ -124,6 +124,12 @@ interface Snapshot {
   runtime: ReadJAgentDeskConfigResult;
 }
 
+// How long a caller waits for the filesystem, including time queued behind other roots.
+const READ_BUDGET_MS = 5_000;
+// Above the roots a busy daemon lists: a listing that visits more roots than this evicts the next one it needs.
+const MAX_SNAPSHOTS = 1_024;
+const UNAVAILABLE = Symbol("project config unavailable");
+
 /** Owns config admission, snapshots and daemon read/modify/write ordering for every consumer. */
 class ProjectConfigOwner {
   // A stalled mount retains its slot until the OS returns; never consume the whole fs pool.
@@ -176,17 +182,39 @@ class ProjectConfigOwner {
     this.snapshots.delete(root);
     this.snapshots.set(root, snapshot);
     // Worktrees come and go; retain only a bounded set of reusable snapshots.
-    if (this.snapshots.size > 256) this.snapshots.delete(this.snapshots.keys().next().value!);
+    if (this.snapshots.size > MAX_SNAPSHOTS)
+      this.snapshots.delete(this.snapshots.keys().next().value!);
     return snapshot;
   }
 
   async read(repoRoot: string): Promise<Snapshot> {
+    const checked = await this.check(resolve(repoRoot));
+    if (checked === UNAVAILABLE) throw new Error("Project config unavailable");
+    return checked;
+  }
+
+  /** A check the filesystem does not answer in time answers the last config read for that root. */
+  async readOrLastKnown(repoRoot: string): Promise<Snapshot> {
     const root = resolve(repoRoot);
-    return withTimeout(
-      this.serialized(root, "read", () => this.load(root)),
-      5_000,
-      "Project config unavailable",
-    );
+    const checked = await this.check(root);
+    if (checked !== UNAVAILABLE) return checked;
+    const known = this.snapshots.get(root);
+    if (!known) throw new Error("Project config unavailable");
+    return known;
+  }
+
+  private async check(root: string): Promise<Snapshot | typeof UNAVAILABLE> {
+    let budget: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        this.serialized(root, "read", () => this.load(root)),
+        new Promise<typeof UNAVAILABLE>((settle) => {
+          budget = setTimeout(settle, READ_BUDGET_MS, UNAVAILABLE);
+        }),
+      ]);
+    } finally {
+      clearTimeout(budget);
+    }
   }
 
   private async load(root: string): Promise<Snapshot> {
@@ -255,7 +283,7 @@ class ProjectConfigOwner {
   ): Promise<WriteJAgentDeskConfigForEditResult> {
     const root = resolve(input.repoRoot);
     return this.serialized(root, "write", async () => {
-      const { edit: parsed } = await validateConfig(input.config);
+      const { edit: parsed, runtime } = await validateConfig(input.config);
       if (!parsed.success) return { ok: false, error: { code: "invalid_project_config" } };
       const content = `${JSON.stringify(parsed.data, null, 2)}\n`;
       if (Buffer.byteLength(content) > MAX_JAGENTDESK_CONFIG_BYTES) {
@@ -267,7 +295,8 @@ class ProjectConfigOwner {
       );
       try {
         await writeFile(tempPath, content, { flag: "wx" });
-        const savedRevision = revision(await stat(tempPath));
+        const savedStats = await stat(tempPath);
+        const savedRevision = revision(savedStats);
         const currentStats = await inspect(root);
         if (currentStats) admit(currentStats);
         const currentRevision = currentStats ? revision(currentStats) : null;
@@ -277,7 +306,13 @@ class ProjectConfigOwner {
         // Serialized against daemon edits. External writers still have the existing
         // optimistic stat/rename race; revision tokens remain mtime + size.
         await rename(tempPath, resolveJAgentDeskConfigPath(root));
-        this.snapshots.delete(root);
+        // Remember what was saved without another read, so a late check right after the save
+        // still has a config to show. A rename that changes ctime only costs the next check a reload.
+        this.remember(root, {
+          fingerprint: fingerprint(savedStats),
+          edit: { ok: true, config: parsed.data, revision: savedRevision },
+          runtime: { ok: true, config: runtime },
+        });
         return { ok: true, config: parsed.data, revision: savedRevision };
       } catch {
         return { ok: false, error: { code: "write_failed" } };
@@ -300,6 +335,20 @@ export function resolveProjectConfigRoot(
 export async function readJAgentDeskConfig(repoRoot: string): Promise<ReadJAgentDeskConfigResult> {
   try {
     return (await projectConfig.read(repoRoot)).runtime;
+  } catch (error) {
+    return { ok: false, configPath: resolveJAgentDeskConfigPath(repoRoot), error };
+  }
+}
+
+/**
+ * For callers that show a config, such as workspace listings and script status: a slow filesystem
+ * answers the last config read instead of none. Edits and execution use readJAgentDeskConfig.
+ */
+export async function readJAgentDeskConfigOrLastKnown(
+  repoRoot: string,
+): Promise<ReadJAgentDeskConfigResult> {
+  try {
+    return (await projectConfig.readOrLastKnown(repoRoot)).runtime;
   } catch (error) {
     return { ok: false, configPath: resolveJAgentDeskConfigPath(repoRoot), error };
   }

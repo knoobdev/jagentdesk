@@ -773,6 +773,7 @@ function createJAgentDeskWorktreeForMcpTest(options: {
     },
   };
   const workspaceProvisioning = createWorkspaceProvisioningService({
+    unarchiveWorkspaceAgents: async () => {},
     projectRegistry,
     workspaceRegistry,
     workspaceGitService,
@@ -824,7 +825,6 @@ function createJAgentDeskWorktreeForMcpTest(options: {
         emit: () => {},
         sessionLogger: createTestLogger(),
         terminalManager: null,
-        archiveWorkspaceRecord: async () => {},
         serviceProxy: null,
         scriptRuntimeStore: null,
         getDaemonTcpPort: null,
@@ -2562,7 +2562,7 @@ describe("create_agent MCP tool", () => {
       });
       expect(await readJAgentDeskWorktreeMetadata(agentCwd)).toMatchObject({
         version: 1,
-        baseRefName: "existing-feature",
+        baseRefName: "main",
       });
       expect(generateCalls).toBe(1);
       expect(workspaceGitService.getSnapshot).not.toHaveBeenCalled();
@@ -2963,7 +2963,10 @@ describe("create_agent MCP tool", () => {
         force: true,
         reason: "archive-worktree",
       });
-      expect(archiveWorkspaceRecord).toHaveBeenCalledWith("ws-archive-tool-worktree");
+      expect(archiveWorkspaceRecord).toHaveBeenCalledWith(
+        "ws-archive-tool-worktree",
+        expect.any(String),
+      );
       expect(markWorkspaceArchiving).toHaveBeenCalledWith(
         ["ws-archive-tool-worktree"],
         expect.any(String),

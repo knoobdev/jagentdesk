@@ -6,12 +6,14 @@ export type SidebarGroupMode = "project" | "status";
 
 const SIDEBAR_VIEW_STORAGE_KEY = "sidebar-view";
 const LEGACY_SIDEBAR_GROUP_MODE_STORAGE_KEY = "sidebar-group-mode";
-const SIDEBAR_VIEW_STORE_VERSION = 2;
+const SIDEBAR_VIEW_STORE_VERSION = 3;
 
 interface SidebarViewStoreState {
   groupMode: SidebarGroupMode;
+  showBackground: boolean;
   // Empty means "all hosts". A non-empty list pins the sidebar to those hosts.
   hostFilters: string[];
+  toggleBackground: () => void;
   setGroupMode: (mode: SidebarGroupMode) => void;
   toggleHostFilter: (serverId: string) => void;
   clearHostFilters: () => void;
@@ -20,6 +22,7 @@ interface SidebarViewStoreState {
 
 interface SidebarViewPersistedState {
   groupMode: SidebarGroupMode;
+  showBackground: boolean;
   hostFilters: string[];
 }
 
@@ -57,15 +60,16 @@ function readHostFilters(persistedState: Record<string, unknown>): string[] {
 
 export function migrateSidebarViewState(persistedState: unknown): SidebarViewPersistedState {
   if (!isRecord(persistedState)) {
-    return { groupMode: "project", hostFilters: [] };
+    return { groupMode: "project", hostFilters: [], showBackground: false };
   }
 
   const legacyGroupMode = readLegacyGroupMode(persistedState);
   if (legacyGroupMode) {
-    return { groupMode: legacyGroupMode, hostFilters: [] };
+    return { groupMode: legacyGroupMode, hostFilters: [], showBackground: false };
   }
 
   return {
+    showBackground: persistedState.showBackground === true,
     groupMode: isSidebarGroupMode(persistedState.groupMode) ? persistedState.groupMode : "project",
     hostFilters: readHostFilters(persistedState),
   };
@@ -91,6 +95,8 @@ export const useSidebarViewStore = create<SidebarViewStoreState>()(
   persist(
     (set) => ({
       groupMode: "project",
+      showBackground: false,
+      toggleBackground: () => set((state) => ({ showBackground: !state.showBackground })),
       hostFilters: [],
       setGroupMode: (mode) => set({ groupMode: mode }),
       toggleHostFilter: (serverId) =>
@@ -119,6 +125,7 @@ export const useSidebarViewStore = create<SidebarViewStoreState>()(
       storage: createJSONStorage(createSidebarViewStorage),
       partialize: (state) => ({
         groupMode: state.groupMode,
+        showBackground: state.showBackground,
         hostFilters: state.hostFilters,
       }),
       migrate: migrateSidebarViewState,

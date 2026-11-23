@@ -36,6 +36,8 @@ import { WindowSidebarMenuToggle } from "@/components/headers/menu-header";
 import { SidebarModelProvider } from "@/components/sidebar/sidebar-model";
 import { WorkspacePinShortcutHandler } from "@/components/workspace-pin-shortcut-handler";
 import { CompactExplorerSidebarHost } from "@/components/compact-explorer-sidebar-host";
+import { WorkspaceArchiveShortcutHandler } from "@/components/workspace-archive-shortcut-handler";
+import { WorkspaceArchiveUndoShortcutHost } from "@/workspace/archive-undo";
 import { ProviderSettingsHost } from "@/components/provider-settings-host";
 import { WorkspaceSetupDialog } from "@/components/workspace-setup-dialog";
 import { WorkspaceShortcutTargetsSubscriber } from "@/components/workspace-shortcut-targets-subscriber";
@@ -635,6 +637,7 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
       <CommandCenterWorkspaceActions />
       <PluginCommandCenterActions />
       <WorkspacePinShortcutHandler />
+      <WorkspaceArchiveUndoShortcutHost />
       <CommandCenter />
       <AddProjectFlowHost />
       <PairDeviceRequestAutoOpener />
@@ -678,7 +681,12 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
     surface
   );
 
-  return <CommandCenterProvider>{content}</CommandCenterProvider>;
+  return (
+    <CommandCenterProvider>
+      <WorkspaceArchiveShortcutHandler />
+      {content}
+    </CommandCenterProvider>
+  );
 }
 
 /** The floating sidebar toggle beside the macOS traffic lights (classic shell only). */

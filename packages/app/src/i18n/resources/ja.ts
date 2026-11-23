@@ -418,7 +418,8 @@ export const ja: TranslationResources = {
       recovery: {
         archivedTitle: "ワークスペースはアーカイブ済みです",
         restoreDescription:
-          "{{workspaceName}} はアーカイブされ、worktree が削除されました。ブランチ {{branch}} を復元して再度開きます。",
+          "{{workspaceName}} を復元してエージェントに戻ります。worktree ではブランチ {{branch}} を使用します。",
+        restoreWithoutBranchDescription: "{{workspaceName}} を復元してエージェントに戻ります。",
         unarchiveDescription:
           "{{workspaceName}} はアーカイブされています。再度開くにはアーカイブを解除してください。",
         restoreAction: "復元",
@@ -844,6 +845,9 @@ export const ja: TranslationResources = {
         },
       },
       diff: {
+        baseBranch: {
+          title: "ベースブランチ",
+        },
         openChangesTab: "変更タブを開く",
         closeChangesTab: "変更タブを閉じる",
         binaryFile: "バイナリファイル",
@@ -875,6 +879,7 @@ export const ja: TranslationResources = {
         checkingRepository: "リポジトリを確認中...",
         notRepository: "gitリポジトリではありません",
         diffMode: "差分モード",
+        all: "すべての変更",
         uncommitted: "未コミット",
         committed: "コミット済み",
         branchUnknown: "不明",
@@ -1094,6 +1099,9 @@ export const ja: TranslationResources = {
         hostDisconnected: "ホストが接続されていません",
         hideFailed: "ワークスペースの非表示に失敗しました",
         archiveFailed: "ワークスペースのアーカイブに失敗しました",
+        archived: "ワークスペースをアーカイブしました",
+        undoArchive: "元に戻す",
+        undoArchiveFailed: "アーカイブを元に戻せませんでした",
       },
     },
   },
@@ -1101,8 +1109,9 @@ export const ja: TranslationResources = {
     title: "新しいワークスペース",
     create: "作成",
     isolation: {
-      local: "ローカル",
+      local: "プロジェクトディレクトリ",
       worktree: "新しいワークツリー",
+      existing: "既存のワークツリー",
       label: "分離方法",
     },
     fields: {
@@ -1116,6 +1125,10 @@ export const ja: TranslationResources = {
       createWorktreeFailed: "ワークツリーの作成に失敗しました",
       composerStateRequired: "コンポーザーの状態が必要です",
       selectModel: "モデルを選択してください",
+      branchInProjectDirectory:
+        "{{branch}} はプロジェクトディレクトリでチェックアウト済みです。そこで作業するにはプロジェクトディレクトリを選ぶか、そこから新しいブランチを作成してください。",
+      branchInWorktree:
+        "{{branch}} は {{path}} でチェックアウト済みです。既存のワークツリーでそのワークツリーを選ぶか、そこから新しいブランチを作成してください。",
     },
     refPicker: {
       startingRef: "開始Ref",
@@ -1124,6 +1137,25 @@ export const ja: TranslationResources = {
       searching: "検索中...",
       noMatchingRefs: "一致するRefがありません。",
       searchPlaceholder: "ブランチとPRを検索",
+      searchBranches: "ブランチを検索",
+      searchPullRequests: "プルリクエストを検索",
+      searchPullRequests_mr: "MRを検索",
+      branches: "ブランチ",
+      pullRequests: "プルリクエスト",
+      pullRequests_mr: "マージリクエスト",
+      pullRequestsShort: "PR",
+      pullRequestsShort_mr: "MR",
+      branchOff: "新しいブランチ",
+      checkout: "チェックアウト",
+      branchOffHint: "ここから新しいブランチを作成します",
+      checkoutHint: "直接作業します",
+      base: "ベース",
+      from: "起点",
+      branch: "ブランチ",
+      pullRequest: "プルリクエスト",
+      pullRequest_mr: "マージリクエスト",
+      inProjectDirectory: "プロジェクトディレクトリ内",
+      inWorktree: "ワークツリー内",
       title: "開始点",
     },
   },
@@ -1299,6 +1331,7 @@ export const ja: TranslationResources = {
     openPath: "パスを開く",
   },
   branchSwitcher: {
+    failedToLoad: "ブランチを読み込めませんでした。選択画面を開き直してお試しください。",
     currentBranch: "現在のブランチ: {{branchName}}。押してブランチを切り替えてください。",
     placeholder: "ブランチを切り替え...",
     searchPlaceholder: "ブランチをフィルタ...",

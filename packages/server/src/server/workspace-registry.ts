@@ -62,14 +62,15 @@ const PersistedWorkspaceRecordSchema = z.object({
     .nullable()
     .optional()
     .transform((value) => value ?? null),
+  head: z.string().optional(),
   // Exact checkout/worktree root backing cwd. This differs from cwd when the
   // selected project is a subdirectory inside a repository. Persist it so
   // archive and recovery do not need the directory to still exist in order to
   // recover placement.
   worktreeRoot: z.string().nullable().default(null),
-  // Comparison base preserved across worktree deletion and restore. New branch-off
+  // Current base preserved across worktree deletion and restore. New branch-off
   // workspaces store the resolved ref (e.g. refs/remotes/upstream/main); legacy and
-  // PR checkout records may contain a bare branch name. Ordinary checkouts use null.
+  // PR checkout records may contain a bare branch name. Null means no recorded base.
   baseBranch: z
     .string()
     .nullable()
@@ -92,6 +93,7 @@ const PersistedWorkspaceRecordSchema = z.object({
     .nullable()
     .optional()
     .transform((value) => value ?? null),
+  background: z.boolean().optional().default(false),
 });
 
 export type PersistedProjectRecord = z.infer<typeof PersistedProjectRecordSchema>;
@@ -110,6 +112,7 @@ export interface WorkspaceMutationContext {
 
 export interface WorkspaceArchiveContext {
   autoArchivedChangeRequestUrl?: string;
+  head?: string;
 }
 
 export interface ProjectMutation {
@@ -488,6 +491,7 @@ export class FileBackedWorkspaceRegistry
         ...existing,
         updatedAt: archivedAt,
         archivedAt,
+        head: context?.head,
         ...(context?.autoArchivedChangeRequestUrl
           ? { autoArchivedChangeRequestUrl: context.autoArchivedChangeRequestUrl }
           : {}),
@@ -501,7 +505,7 @@ export class FileBackedWorkspaceRegistry
   override async remove(workspaceId: string): Promise<void> {
     const workspace = await this.removeIfPresent(workspaceId);
     if (!workspace) return;
-    await this.notifyMutation({ kind: "remove", workspaceId, workspace: null });
+    await this.notifyMutation({ kind: "remove", workspaceId, workspace });
   }
 
   private async notifyMutation(mutation: WorkspaceMutation): Promise<void> {
@@ -551,9 +555,12 @@ export function createPersistedWorkspaceRecord(input: {
   archivedAt?: string | null;
   autoArchivedChangeRequestUrl?: string | null;
   pinnedAt?: string | null;
+  background?: boolean;
 }): PersistedWorkspaceRecord {
+  const { background, ...rest } = input;
   return PersistedWorkspaceRecordSchema.parse({
-    ...input,
+    ...rest,
+    background: background ?? false,
     title: input.title ?? null,
     branch: input.branch ?? null,
     worktreeRoot: input.worktreeRoot ?? null,

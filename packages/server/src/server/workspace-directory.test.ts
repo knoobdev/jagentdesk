@@ -66,6 +66,7 @@ class WorkspaceStatus {
     activity: TerminalActivity | null;
   }> = [];
   private readonly directory = new WorkspaceDirectory({
+    getArchivingAt: () => null,
     logger: createTestLogger(),
     projectRegistry: { list: async () => [this.project] },
     workspaceRegistry: { list: async () => this.workspaces },
@@ -555,6 +556,7 @@ describe("WorkspaceDirectory empty projects", () => {
     workspaces: PersistedWorkspaceRecord[];
   }): WorkspaceDirectory {
     return new WorkspaceDirectory({
+      getArchivingAt: () => null,
       logger: createTestLogger(),
       projectRegistry: { list: async () => input.projects },
       workspaceRegistry: { list: async () => input.workspaces },

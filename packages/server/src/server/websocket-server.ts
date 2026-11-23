@@ -2,6 +2,11 @@ import {
   ChunkedTransport,
   ChunkedTransportProtocolError,
 } from "@jagentdesk/protocol/chunked-transport";
+import { type WorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
+import {
+  createWorkspaceBaseBranchService,
+  type WorkspaceBaseBranchService,
+} from "./session/workspace-base-branch/service.js";
 import { WebSocket, WebSocketServer } from "ws";
 import type { IncomingMessage, Server as HTTPServer } from "http";
 import { join } from "path";
@@ -47,6 +52,7 @@ import type { DaemonConfigStore, MutableDaemonConfig } from "./daemon-config-sto
 import {
   type ServerInfoStatusPayload,
   type SessionInboundMessage,
+  type ScriptStatusUpdateMessage,
   type SessionOutboundMessage,
   type WorkspaceSetupSnapshot,
   type WSHelloMessage,
@@ -72,6 +78,7 @@ import {
 type PluginRuntimePort = NonNullable<SessionOptions["pluginRuntime"]>;
 import type { HubRelationshipManagement } from "./hub/relationship-controller.js";
 import type { PairingCodeDetails, PairingCodeManager } from "./pairing/pairing-code.js";
+import { WorkspaceArchiveOperations } from "./workspace-archive-operations.js";
 import type { HubExecutionAgents } from "./hub/daemon-executions.js";
 import type { AgentProvider } from "./agent/agent-sdk-types.js";
 import { ProviderSnapshotManager } from "./agent/provider-snapshot-manager.js";
@@ -295,7 +302,6 @@ function createFallbackWorkspaceGitService(): WorkspaceGitService {
     onSnapshotUpdated: () => ({
       unsubscribe: () => {},
     }),
-    peekSnapshot: () => null,
     getCheckout: async (cwd: string) => ({
       cwd,
       isGit: false,
@@ -668,6 +674,7 @@ export class VoiceAssistantWebSocketServer {
   private readonly sshService: SshService;
   private readonly argocdService: ArgoCdService | null;
   private readonly sideloadService: SideloadService | null;
+  private readonly workspaceBaseBranch: WorkspaceBaseBranchService;
   private readonly scheduleService: ScheduleService;
   private autorunService!: AutorunService | null;
   private sessionShareService!: SessionShareService | null;
@@ -768,6 +775,7 @@ export class VoiceAssistantWebSocketServer {
     mcpBaseUrl: string | null,
     wsConfig: WebSocketServerConfig,
     workspaceAutoName: WorkspaceAutoName,
+    private readonly workspaceRuntimeStore: WorkspaceRuntimeStore,
     auth?: DaemonAuthConfig,
     speech?: SpeechService | null,
     terminalManager?: TerminalManager | null,
@@ -811,6 +819,7 @@ export class VoiceAssistantWebSocketServer {
     sshService?: SshService | null,
     argocdService?: ArgoCdService | null,
     sideloadService?: SideloadService | null,
+    private readonly workspaceArchiveOperations: WorkspaceArchiveOperations = new WorkspaceArchiveOperations(),
   ) {
     this.logger = logger.child({ module: "websocket-server" });
     this.argocdService = argocdServiceOrNull(argocdService);
@@ -860,10 +869,16 @@ export class VoiceAssistantWebSocketServer {
     this.checkoutDiffManager = requiredServices.checkoutDiffManager;
     this.github = github ?? createGitHubService();
     this.workspaceGitService = workspaceGitService ?? createFallbackWorkspaceGitService();
+    this.worktreesRoot = daemonRuntimeConfig?.worktreesRoot;
+    this.workspaceBaseBranch = createWorkspaceBaseBranchService({
+      jagentdeskHome,
+      worktreesRoot: this.worktreesRoot,
+      workspaceRegistry: this.workspaceRegistry,
+      workspaceGitService: this.workspaceGitService,
+    });
     this.workspaceAutoName = workspaceAutoName;
     this.downloadTokenStore = downloadTokenStore;
     this.jagentdeskHome = jagentdeskHome;
-    this.worktreesRoot = daemonRuntimeConfig?.worktreesRoot;
     this.daemonConfigStore = daemonConfigStore;
     this.mcpBaseUrl = mcpBaseUrl;
     this.assignOptionalServices({
@@ -1351,8 +1366,27 @@ export class VoiceAssistantWebSocketServer {
     );
   }
 
+  public async publishWorkspaceUpdates(workspaceIds: Iterable<string>): Promise<void> {
+    const ids = Array.from(workspaceIds);
+    await Promise.all(
+      this.listTrustedSessions().map(async (session) => {
+        try {
+          await session.emitWorkspaceUpdatesForExternalWorkspaceIds(ids);
+        } catch (error) {
+          this.logger.warn({ err: error }, "Failed to publish workspace updates");
+        }
+      }),
+    );
+  }
+
   public publishProjectUpdate(update: ProjectUpdate): void {
     for (const session of this.listTrustedSessions()) session.emitProjectUpdate(update);
+  }
+
+  public publishScriptStatusUpdate(message: ScriptStatusUpdateMessage): void {
+    for (const session of this.listTrustedSessions()) {
+      session.emitServerMessage(message);
+    }
   }
 
   public publishSpeechReadiness(readiness: SpeechReadinessSnapshot | null): void {
@@ -2065,6 +2099,7 @@ export class VoiceAssistantWebSocketServer {
       getTransportBufferedAmount: options.getTransportBufferedAmount,
       onLifecycleIntent: options.onLifecycleIntent,
       logger: options.connectionLogger.child({ module: "session" }),
+      publishWorkspaceArchiveUpdates: (workspaceIds) => this.publishWorkspaceUpdates(workspaceIds),
       onWorkspaceRecovered: async (workspace) => {
         await Promise.all(
           this.listTrustedSessions().map((activeSession) =>
@@ -2072,6 +2107,7 @@ export class VoiceAssistantWebSocketServer {
           ),
         );
       },
+      publishScriptStatusUpdate: (message) => this.publishScriptStatusUpdate(message),
       downloadTokenStore: this.downloadTokenStore,
       pushTokenStore: this.pushTokenStore,
       jagentdeskHome: this.jagentdeskHome,
@@ -2096,6 +2132,7 @@ export class VoiceAssistantWebSocketServer {
       figmaService: this.figmaService,
       remoteExecService: this.remoteExecService,
       customProvidersService: this.customProvidersService,
+      workspaceBaseBranch: this.workspaceBaseBranch,
       scheduleService: this.scheduleService,
       autorunService: this.autorunService,
       specModeService: this.specModeService,
@@ -2104,6 +2141,7 @@ export class VoiceAssistantWebSocketServer {
       checkoutDiffManager: this.checkoutDiffManager,
       github: this.github,
       workspaceGitService: this.workspaceGitService,
+      workspaceRuntimeStore: this.workspaceRuntimeStore,
       workspaceAutoName: this.workspaceAutoName,
       daemonConfigStore: this.daemonConfigStore,
       mcpBaseUrl: this.mcpBaseUrl,
@@ -2124,6 +2162,7 @@ export class VoiceAssistantWebSocketServer {
       serviceProxy: this.serviceProxy ?? undefined,
       scriptRuntimeStore: this.scriptRuntimeStore ?? undefined,
       workspaceSetupSnapshots: this.workspaceSetupSnapshots,
+      workspaceArchiveOperations: this.workspaceArchiveOperations,
       onBranchChanged: this.onBranchChanged ?? undefined,
       getDaemonTcpPort: this.getDaemonTcpPort ?? undefined,
       getDaemonTcpHost: this.getDaemonTcpHost ?? undefined,
@@ -2464,6 +2503,11 @@ export class VoiceAssistantWebSocketServer {
       })(),
       features: {
         binaryChunkingV1: true,
+        workspaceBaseBranch: true,
+        // COMPAT(checkoutWorktreeList): added after v0.16.2, remove gate after 2027-11-19.
+        checkoutWorktreeList: true,
+        // COMPAT(worktreeRefActions): added after v0.16.2, remove gate after 2027-11-19.
+        worktreeRefActions: true,
         // COMPAT(providersSnapshot): keep optional until all clients rely on snapshot flow.
         providersSnapshot: true,
         // COMPAT(checkoutForgeSetAutoMerge): added in v0.1.106, remove old
@@ -2502,6 +2546,8 @@ export class VoiceAssistantWebSocketServer {
         worktreeRestore: true,
         // COMPAT(workspaceRecovery): added in v0.1.105, remove after 2027-01-11 once daemon floor >= v0.1.105.
         workspaceRecovery: true,
+        // COMPAT(workspaceArchiveUndo): added in v0.15.3, remove gate after 2027-05-06.
+        workspaceArchiveUndo: true,
         // COMPAT(workspaceFileEditing): added in v0.2.0, remove after 2027-01-18 once daemon floor >= v0.2.0.
         workspaceFileEditing: true,
         // COMPAT(providerUsageList): added in v0.1.98, drop the gate when daemon floor >= v0.1.98.
@@ -2626,6 +2672,8 @@ export class VoiceAssistantWebSocketServer {
         ...(this.pluginRuntime?.builtin
           ? { builtinPlugins: true, ...this.pluginRuntime.builtin.featureFlags() }
           : {}),
+        checkoutDiffAll: true,
+        backgroundWorkspaces: true,
       },
     };
   }

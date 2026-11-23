@@ -53,6 +53,6 @@ export async function createDockWorkspace(input: {
     throw new Error(payload.error ?? "Could not create a workspace for this chat.");
   }
   const workspace = normalizeWorkspaceDescriptor(payload.workspace);
-  useSessionStore.getState().mergeWorkspaces(input.serverId, [workspace]);
+  useSessionStore.getState().seedWorkspaces(input.serverId, [workspace]);
   return { workspaceId: workspace.id, cwd: workspace.workspaceDirectory || input.cwd };
 }

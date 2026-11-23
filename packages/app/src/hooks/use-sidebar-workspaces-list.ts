@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { useCallback, useEffect, useMemo } from "react";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import { useCreateFlowStore } from "@/stores/create-flow-store";
@@ -134,13 +135,30 @@ export function useSidebarWorkspacesList(options?: {
   const hydratedServerIds = useHydratedWorkspaceServerIds(serverIds);
 
   const hostProjects = useHostProjects(hydratedServerIds);
+  const showBackground = useSidebarViewStore((state) => state.showBackground);
+  const workspaceMaps = useSessionStore(
+    useShallow((state) =>
+      hydratedServerIds.map((serverId) => state.sessions[serverId]?.workspaces),
+    ),
+  );
+  const hiddenWorkspaceKeys = useMemo(() => {
+    const keys = new Set<string>();
+    if (showBackground) return keys;
+    workspaceMaps.forEach((workspaces, index) => {
+      for (const workspace of workspaces?.values() ?? []) {
+        if (workspace.background) keys.add(`${hydratedServerIds[index]}:${workspace.id}`);
+      }
+    });
+    return keys;
+  }, [hydratedServerIds, showBackground, workspaceMaps]);
 
   const sidebarModel = useMemo(
     () =>
       buildSidebarWorkspacePlacementModel({
         projects: hostProjects,
+        hiddenWorkspaceKeys,
       }),
-    [hostProjects],
+    [hostProjects, hiddenWorkspaceKeys],
   );
 
   const projects = sidebarModel.projects.length > 0 ? sidebarModel.projects : EMPTY_PROJECTS;

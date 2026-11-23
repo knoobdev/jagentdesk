@@ -524,7 +524,7 @@ describe("archiveIfSafe", () => {
   test("records the consumed change request in the workspace archive mutation", async () => {
     const harness = createHarness({
       archiveByScope: async (dependencies) => {
-        await dependencies.archiveWorkspaceRecord("ws-auto-archive");
+        await dependencies.archiveWorkspaceRecord("ws-auto-archive", "2026-11-09T00:00:00.000Z");
         return {
           archivedAgentIds: [],
           archivedWorkspaceIds: ["ws-auto-archive"],
@@ -535,9 +535,13 @@ describe("archiveIfSafe", () => {
 
     await runArchiveIfSafe(harness);
 
-    expect(harness.options.archiveWorkspaceRecord).toHaveBeenCalledWith("ws-auto-archive", {
-      autoArchivedChangeRequestUrl: "https://github.com/acme/repo/pull/123",
-    });
+    expect(harness.options.archiveWorkspaceRecord).toHaveBeenCalledWith(
+      "ws-auto-archive",
+      {
+        autoArchivedChangeRequestUrl: "https://github.com/acme/repo/pull/123",
+      },
+      "2026-11-09T00:00:00.000Z",
+    );
   });
 
   test("resolves the merged cwd to a single workspace and does not iterate siblings", async () => {
@@ -564,7 +568,11 @@ describe("archiveIfSafe", () => {
   test("real outcome: keeps sibling workspace and directory on last reference", async () => {
     const { tempDir, repoDir } = createGitRepo();
     const jagentdeskHome = path.join(tempDir, ".jagentdesk");
-    const worktree = await createJAgentDeskOwnedWorktree(repoDir, jagentdeskHome, "merged-with-sibling");
+    const worktree = await createJAgentDeskOwnedWorktree(
+      repoDir,
+      jagentdeskHome,
+      "merged-with-sibling",
+    );
     const workspaceA = "ws-merged-with-sibling-a";
     const workspaceB = "ws-merged-with-sibling-b";
     const archivedWorkspaceIds = new Set<string>();
@@ -596,7 +604,11 @@ describe("archiveIfSafe", () => {
   test("real outcome: removes directory when no sibling workspace remains", async () => {
     const { tempDir, repoDir } = createGitRepo();
     const jagentdeskHome = path.join(tempDir, ".jagentdesk");
-    const worktree = await createJAgentDeskOwnedWorktree(repoDir, jagentdeskHome, "merged-last-ref");
+    const worktree = await createJAgentDeskOwnedWorktree(
+      repoDir,
+      jagentdeskHome,
+      "merged-last-ref",
+    );
     const workspaceA = "ws-merged-last-ref";
     const archivedWorkspaceIds = new Set<string>();
 

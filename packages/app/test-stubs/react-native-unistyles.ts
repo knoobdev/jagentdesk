@@ -1,6 +1,7 @@
+import { createElement, type ElementType } from "react";
 import { lightTheme } from "@/styles/theme";
 
-const testTheme = {
+const pinnedTheme = {
   colorScheme: "light",
   // Shell tokens the shared components read directly (see ShellChrome in styles/theme.ts).
   chrome: lightTheme.chrome,
@@ -84,6 +85,14 @@ const testTheme = {
   },
 };
 
+// Tokens a test does not pin come from the real light theme, so a style or `uniProps` mapping
+// that reads one (the markdown renderer reads `colors.terminal`) gets a value instead of crashing.
+const testTheme = {
+  ...lightTheme,
+  ...pinnedTheme,
+  colors: { ...lightTheme.colors, ...pinnedTheme.colors },
+};
+
 type StyleFactory<T> = (theme: typeof testTheme) => T;
 
 function isStyleFactory<T>(styles: T | StyleFactory<T>): styles is StyleFactory<T> {
@@ -95,7 +104,19 @@ export const StyleSheet = {
     isStyleFactory(styles) ? styles(testTheme) : styles,
 };
 
-export const withUnistyles = <T>(Component: T): T => Component;
+type UniPropsMapping = (theme: typeof testTheme, runtime: object) => Record<string, unknown>;
+
+/** Applies `uniProps` with the test theme, the way Unistyles maps theme values onto props. */
+export const withUnistyles = <T>(Component: T): T => {
+  function ThemedComponent({ uniProps, ...props }: { uniProps?: UniPropsMapping }) {
+    // Explicit props win over mapped ones, as in Unistyles' `deepMergeObjects(mappings, uniProps, props)`.
+    return createElement(Component as ElementType, {
+      ...(uniProps ? uniProps(testTheme, {}) : {}),
+      ...props,
+    });
+  }
+  return ThemedComponent as T;
+};
 
 export const useUnistyles = () => ({
   theme: testTheme,

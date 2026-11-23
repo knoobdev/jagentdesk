@@ -14,6 +14,7 @@ import {
   JAgentDeskConfigRawSchema,
   getWorktreeSetupCommands,
   getWorktreeTeardownCommands,
+  getWorktreeTeardownTimeoutMs,
 } from "./worktree.js";
 import {
   readJAgentDeskConfigForEdit,
@@ -229,6 +230,34 @@ describe("jagentdesk config file substrate", () => {
     expect(await getWorktreeSetupCommands(tempDir)).toEqual(["npm install"]);
     expect(await getWorktreeTeardownCommands(tempDir)).toEqual(["npm run clean", "npm run reset"]);
   });
+
+  it("reads the teardown time limit and defaults to one minute", async () => {
+    expect(await getWorktreeTeardownTimeoutMs(tempDir)).toBe(60_000);
+
+    for (const teardownTimeoutMs of [1, 300_000, 2_147_483_647]) {
+      writeFileSync(
+        join(tempDir, "jagentdesk.json"),
+        JSON.stringify({ worktree: { teardownTimeoutMs } }),
+      );
+      expect(await getWorktreeTeardownTimeoutMs(tempDir)).toBe(teardownTimeoutMs);
+    }
+  });
+
+  it.each([0, -1000, 1500.5, 2_147_483_648, "90000", null, true, { ms: 90_000 }])(
+    "falls back to the default teardown time limit for %j and keeps the commands",
+    async (teardownTimeoutMs) => {
+      const config = { worktree: { teardown: "npm run clean", teardownTimeoutMs } };
+      writeFileSync(join(tempDir, "jagentdesk.json"), JSON.stringify(config));
+
+      expect(await getWorktreeTeardownTimeoutMs(tempDir)).toBe(60_000);
+      expect(await getWorktreeTeardownCommands(tempDir)).toEqual(["npm run clean"]);
+      expect(await readJAgentDeskConfigForEdit(tempDir)).toEqual({
+        ok: true,
+        config,
+        revision: await statJAgentDeskConfigPath(tempDir),
+      });
+    },
+  );
 
   it("writes pretty JSON with a trailing newline when revision matches", async () => {
     writeFileSync(join(tempDir, "jagentdesk.json"), JSON.stringify({ worktree: { setup: "old" } }));

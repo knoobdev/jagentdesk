@@ -35,6 +35,8 @@ import {
   writeJAgentDeskWorktreeRuntimeMetadata,
 } from "./worktree-metadata.js";
 import { runGitCommand } from "./run-git-command.js";
+import { getCurrentBranch, resolveRepositoryDefaultBranch } from "./checkout-git.js";
+import { terminateWithTreeKill } from "./tree-kill.js";
 import { spawnProcess } from "./spawn.js";
 import { resolveJAgentDeskHome } from "../server/jagentdesk-home.js";
 import { createExternalProcessEnv } from "../server/jagentdesk-env.js";
@@ -145,6 +147,13 @@ export class WorktreeSetupError extends Error {
 
 export type WorktreeTeardownCommandResult = WorktreeSetupCommandResult;
 
+// jagentdesk.json can change this with worktree.teardownTimeoutMs. Archive waits for teardown before it
+// answers, and the app stops waiting for an archive answer after 60 seconds
+// (DEFAULT_SESSION_RPC_TIMEOUT_MS in the client). A teardown that runs to this limit, or to a longer
+// one, answers after the app has reported the archive as failed.
+const DEFAULT_WORKTREE_TEARDOWN_TIMEOUT_MS = 60_000;
+const MAX_WORKTREE_TEARDOWN_OUTPUT_CHARS_PER_STREAM = 1024 * 1024;
+
 export class WorktreeTeardownError extends Error {
   readonly results: WorktreeTeardownCommandResult[];
 
@@ -184,9 +193,17 @@ export interface WorktreeCheckoutRef {
 }
 
 export type WorktreeSource =
-  | { kind: "branch-off"; baseBranch: string; branchName: string }
+  | {
+      kind: "branch-off";
+      baseBranch: string;
+      branchName: string;
+      /** Where the new branch starts when that is not `baseBranch`, such as a fork's head. */
+      startPoint?: string;
+    }
   | { kind: "checkout-branch"; branchName: string }
   | { kind: "restore"; branchName: string; baseRef: string | null }
+  | { kind: "restore-commit"; commit: string; baseRef: string }
+  | { kind: "restore-from-base"; baseRef: string; branchName: string }
   | {
       kind: "checkout-change-request";
       forge: string;
@@ -284,6 +301,13 @@ export async function getWorktreeSetupCommands(repoRoot: string): Promise<string
 
 export async function getWorktreeTeardownCommands(repoRoot: string): Promise<string[]> {
   return (await readJAgentDeskConfigOrThrow(repoRoot))?.worktree?.teardown ?? [];
+}
+
+export async function getWorktreeTeardownTimeoutMs(repoRoot: string): Promise<number> {
+  return (
+    (await readJAgentDeskConfigOrThrow(repoRoot))?.worktree?.teardownTimeoutMs ??
+    DEFAULT_WORKTREE_TEARDOWN_TIMEOUT_MS
+  );
 }
 
 export async function getWorktreeTerminalSpecs(
@@ -453,23 +477,27 @@ async function execSetupCommandStreamed(options: {
   env: NodeJS.ProcessEnv;
   index: number;
   total: number;
+  signal?: AbortSignal;
+  maxOutputCharsPerStream?: number;
   onEvent?: (event: WorktreeSetupCommandProgressEvent) => void;
 }): Promise<WorktreeSetupCommandResult> {
   return new Promise((resolvePromise) => {
     const startedAt = Date.now();
-    const stdoutChunks: string[] = [];
-    const stderrChunks: string[] = [];
+    const outputChunks: Record<"stdout" | "stderr", string[]> = { stdout: [], stderr: [] };
+    const outputLimit = options.maxOutputCharsPerStream ?? Infinity;
+    const remainingOutputChars = { stdout: outputLimit, stderr: outputLimit };
     let settled = false;
+    let termination: Promise<unknown> | null = null;
 
     const emitOutput = (stream: "stdout" | "stderr", chunk: string) => {
       const text = stripAnsi(chunk);
       if (!text) {
         return;
       }
-      if (stream === "stdout") {
-        stdoutChunks.push(text);
-      } else {
-        stderrChunks.push(text);
+      const retainedText = text.slice(0, remainingOutputChars[stream]);
+      if (retainedText) {
+        outputChunks[stream].push(retainedText);
+        remainingOutputChars[stream] -= retainedText.length;
       }
       options.onEvent?.({
         type: "output",
@@ -482,16 +510,23 @@ async function execSetupCommandStreamed(options: {
       });
     };
 
-    const finish = (exitCode: number | null) => {
+    const finish = async (exitCode: number | null) => {
       if (settled) {
         return;
       }
       settled = true;
+      options.signal?.removeEventListener("abort", abort);
+      if (termination) {
+        await termination;
+        // A descendant can keep these pipes open after the shell exits.
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+      }
       const result: WorktreeSetupCommandResult = {
         command: options.command,
         cwd: options.cwd,
-        stdout: stdoutChunks.join(""),
-        stderr: stderrChunks.join(""),
+        stdout: outputChunks.stdout.join(""),
+        stderr: outputChunks.stderr.join(""),
         exitCode,
         durationMs: Date.now() - startedAt,
       };
@@ -524,6 +559,19 @@ async function execSetupCommandStreamed(options: {
       shell: false,
       stdio: ["ignore", "pipe", "pipe"],
     });
+
+    const abort = () => {
+      termination ??= terminateWithTreeKill(child, {
+        gracefulTimeoutMs: 1000,
+        forceTimeoutMs: 1000,
+      });
+      void finish(null);
+    };
+    if (options.signal?.aborted) {
+      abort();
+    } else {
+      options.signal?.addEventListener("abort", abort, { once: true });
+    }
 
     child.stdout?.on("data", (chunk: Buffer | string) => {
       emitOutput("stdout", chunk.toString());
@@ -766,17 +814,26 @@ export async function runWorktreeTeardownCommands(options: {
     }),
   );
 
+  // One deadline covers every command. Reaching it counts as failure and keeps the worktree.
+  const timeoutMs = await getWorktreeTeardownTimeoutMs(teardownCwd);
+  const deadline = AbortSignal.timeout(timeoutMs);
   const results: WorktreeTeardownCommandResult[] = [];
-  for (const cmd of teardownCommands) {
-    const result = await execSetupCommand(cmd, {
+  for (const [index, cmd] of teardownCommands.entries()) {
+    const result = await execSetupCommandStreamed({
+      command: cmd,
       cwd: teardownCwd,
       env: teardownEnv,
+      index: index + 1,
+      total: teardownCommands.length,
+      signal: deadline,
+      maxOutputCharsPerStream: MAX_WORKTREE_TEARDOWN_OUTPUT_CHARS_PER_STREAM,
     });
     results.push(result);
 
     if (result.exitCode !== 0) {
+      const reason = deadline.aborted ? `Timed out after ${timeoutMs / 1000}s` : result.stderr;
       throw new WorktreeTeardownError(
-        `Worktree teardown command failed: ${cmd}\n${result.stderr}`.trim(),
+        `Worktree teardown command failed: ${cmd}\n${reason}`.trim(),
         results,
       );
     }
@@ -1043,9 +1100,18 @@ async function resolveMetadataOwnedWorktree(
 
 type ParsedJAgentDeskWorktreeInfo = Omit<JAgentDeskWorktreeInfo, "createdAt">;
 
+interface ParsedWorktreeEntry extends ParsedJAgentDeskWorktreeInfo {
+  /** A bare repository or a worktree whose directory is gone; nothing can work there. */
+  unusable?: true;
+}
+
 function parseWorktreeList(output: string): ParsedJAgentDeskWorktreeInfo[] {
-  const entries: ParsedJAgentDeskWorktreeInfo[] = [];
-  let current: ParsedJAgentDeskWorktreeInfo | null = null;
+  return parseWorktreeEntries(output).map(({ unusable: _unusable, ...entry }) => entry);
+}
+
+function parseWorktreeEntries(output: string): ParsedWorktreeEntry[] {
+  const entries: ParsedWorktreeEntry[] = [];
+  let current: ParsedWorktreeEntry | null = null;
 
   for (const line of output.split("\n")) {
     if (line.startsWith("worktree ")) {
@@ -1065,6 +1131,8 @@ function parseWorktreeList(output: string): ParsedJAgentDeskWorktreeInfo[] {
       current.branchName = ref.startsWith("refs/heads/") ? ref.slice("refs/heads/".length) : ref;
     } else if (line.startsWith("HEAD ")) {
       current.head = line.slice("HEAD ".length).trim();
+    } else if (line === "bare" || line.startsWith("prunable")) {
+      current.unusable = true;
     } else if (line.trim().length === 0) {
       if (current.path) {
         entries.push(current);
@@ -1090,6 +1158,49 @@ async function resolveWorktreeCreatedAtIso(worktreePath: string): Promise<string
   } catch {
     return new Date(0).toISOString();
   }
+}
+
+/** One git worktree of a repository, whoever created it. */
+export interface GitWorktree {
+  path: string;
+  /** Null when HEAD is detached. */
+  branchName: string | null;
+  head: string | null;
+  createdAt: string;
+  /** Whether the `cwd` the list was asked for is inside this worktree. */
+  containsCwd: boolean;
+}
+
+/**
+ * Every usable worktree of the repository `cwd` is in. The main worktree comes first; the rest
+ * follow in no meaningful order.
+ * Unlike `listJAgentDeskWorktrees`, ownership plays no part.
+ */
+export async function listGitWorktrees({ cwd }: { cwd: string }): Promise<GitWorktree[]> {
+  const { stdout } = await runGitCommand(["worktree", "list", "--porcelain"], {
+    cwd,
+    envOverlay: READ_ONLY_GIT_ENV,
+  });
+  const { stdout: toplevel } = await runGitCommand(["rev-parse", "--show-toplevel"], {
+    cwd,
+    envOverlay: READ_ONLY_GIT_ENV,
+  });
+  const cwdWorktree = await normalizePathForOwnership(toplevel.trim());
+  const worktrees: GitWorktree[] = [];
+  for (const entry of parseWorktreeEntries(stdout)) {
+    if (entry.unusable) continue;
+    // A locked worktree whose directory was deleted is neither prunable nor workable.
+    if (!(await pathExists(entry.path))) continue;
+    const path = await normalizePathForOwnership(entry.path);
+    worktrees.push({
+      path,
+      branchName: entry.branchName ?? null,
+      head: entry.head ?? null,
+      createdAt: await resolveWorktreeCreatedAtIso(path),
+      containsCwd: path === cwdWorktree,
+    });
+  }
+  return worktrees;
 }
 
 export async function listJAgentDeskWorktrees({
@@ -1189,6 +1300,32 @@ async function assertWorktreeBelongsToRepo(cwd: string, worktreePath: string): P
   }
 }
 
+export async function readWorktreeHead(worktreePath: string): Promise<string | null> {
+  if (!(await pathExists(join(worktreePath, ".git")))) return null;
+  try {
+    const { stdout } = await runGitCommand(["rev-parse", "--verify", "HEAD^{commit}"], {
+      cwd: worktreePath,
+    });
+    return stdout.trim();
+  } catch {
+    return null;
+  }
+}
+
+export async function readWorktreeHeadReference(worktreePath: string): Promise<string | null> {
+  if (!(await pathExists(join(worktreePath, ".git")))) return null;
+  try {
+    const result = await runGitCommand(["symbolic-ref", "--quiet", "HEAD"], {
+      cwd: worktreePath,
+      acceptExitCodes: [0, 1],
+    });
+    if (result.exitCode === 0) return result.stdout.trim();
+    return readWorktreeHead(worktreePath);
+  } catch {
+    return null;
+  }
+}
+
 export async function deleteJAgentDeskWorktree({
   cwd,
   worktreePath,
@@ -1246,6 +1383,12 @@ export async function deleteJAgentDeskWorktree({
       await runWorktreeTeardownCommands({
         worktreePath: resolvedWorktree,
         teardownCwd,
+      });
+    }
+    const commit = await readWorktreeHead(resolvedWorktree);
+    if (commit) {
+      await runGitCommand(["update-ref", `refs/jagentdesk/kept-commits/${commit}`, commit], {
+        cwd: resolvedWorktree,
       });
     }
   }
@@ -1384,6 +1527,26 @@ async function readLocalBranchTip(cwd: string, branchName: string): Promise<stri
   }
 }
 
+async function configureWorktreeSourceRemotes(
+  cwd: string,
+  sourcePlan: WorktreeSourcePlan,
+): Promise<void> {
+  if (sourcePlan.pushRemote && sourcePlan.branchName) {
+    await configureWorktreePushRemote({
+      cwd,
+      branchName: sourcePlan.branchName,
+      remote: sourcePlan.pushRemote,
+    });
+  }
+  if (sourcePlan.trackingRemote && sourcePlan.branchName) {
+    await configureWorktreeTrackingRemote({
+      cwd,
+      branchName: sourcePlan.branchName,
+      remote: sourcePlan.trackingRemote,
+    });
+  }
+}
+
 /** Resolve the default placement once, before presenting it to creation hooks. */
 export async function resolveDefaultWorktreePath(
   options: Pick<CreateWorktreeOptions, "cwd" | "jagentdeskHome" | "worktreesRoot" | "worktreeSlug">,
@@ -1401,7 +1564,13 @@ export async function resolveDefaultWorktreePath(
 /**
  * Create a git worktree with proper naming conventions
  */
-export const createWorktree = async ({
+export function createWorktree(
+  options: CreateWorktreeOptions & { source: Exclude<WorktreeSource, { kind: "restore-commit" }> },
+): Promise<CreatedWorktree>;
+export function createWorktree(
+  options: CreateWorktreeOptions,
+): Promise<Omit<CreatedWorktree, "branchName"> & { branchName: string | null }>;
+export async function createWorktree({
   cwd,
   source,
   worktreeSlug,
@@ -1409,7 +1578,9 @@ export const createWorktree = async ({
   worktreesRoot,
   runSetup,
   worktreePath: explicitWorktreePath,
-}: CreateWorktreeOptions): Promise<CreatedWorktree> => {
+}: CreateWorktreeOptions): Promise<
+  Omit<CreatedWorktree, "branchName"> & { branchName: string | null }
+> {
   const branchesBefore =
     source.kind === "checkout-branch" ||
     source.kind === "checkout-change-request" ||
@@ -1435,20 +1606,7 @@ export const createWorktree = async ({
     });
     worktreePath = await normalizePathForOwnership(worktreePath);
 
-    if (sourcePlan.pushRemote) {
-      await configureWorktreePushRemote({
-        cwd,
-        branchName: sourcePlan.branchName,
-        remote: sourcePlan.pushRemote,
-      });
-    }
-    if (sourcePlan.trackingRemote) {
-      await configureWorktreeTrackingRemote({
-        cwd,
-        branchName: sourcePlan.branchName,
-        remote: sourcePlan.trackingRemote,
-      });
-    }
+    await configureWorktreeSourceRemotes(cwd, sourcePlan);
 
     await writeJAgentDeskWorktreeMetadata(worktreePath, {
       baseRefName: sourcePlan.metadataBaseRefName,
@@ -1460,7 +1618,7 @@ export const createWorktree = async ({
 
     await seedJAgentDeskConfigFile({ sourceCwd: cwd, targetCwd: worktreePath });
 
-    if (runSetup)
+    if (runSetup && sourcePlan.branchName)
       await runWorktreeSetupCommands({
         worktreePath,
         branchName: sourcePlan.branchName,
@@ -1469,10 +1627,7 @@ export const createWorktree = async ({
     return {
       branchName: sourcePlan.branchName,
       worktreePath,
-      comparisonBaseRef:
-        source.kind === "checkout-branch"
-          ? null
-          : (sourcePlan.metadataBaseRef ?? sourcePlan.metadataBaseRefName),
+      comparisonBaseRef: sourcePlan.metadataBaseRef ?? sourcePlan.metadataBaseRefName,
     };
   } catch (error) {
     if (
@@ -1484,7 +1639,7 @@ export const createWorktree = async ({
     }
     throw error;
   }
-};
+}
 
 interface ResolveWorktreeSourcePlanOptions {
   cwd: string;
@@ -1493,7 +1648,7 @@ interface ResolveWorktreeSourcePlanOptions {
 }
 
 interface WorktreeSourcePlan {
-  branchName: string;
+  branchName: string | null;
   // Display name and exact ref are two different facts. The name cannot round-trip to a
   // commit — "main" resolves local-first even when the worktree was cut from a fork's
   // upstream — so comparisons and actions read the ref and the UI reads the name.
@@ -1544,41 +1699,93 @@ async function resolveRestoredWorktreeSourcePlan(
   };
 }
 
+async function resolveRestoredCommitSourcePlan(
+  cwd: string,
+  source: Extract<WorktreeSource, { kind: "restore-commit" }>,
+): Promise<WorktreeSourcePlan> {
+  let exactBase: string | undefined;
+  if (isQualifiedRef(source.baseRef)) {
+    try {
+      exactBase = await resolveBaseBranchForWorktree(cwd, source.baseRef);
+    } catch {
+      // Restore the saved commit even when its comparison ref no longer exists.
+    }
+  }
+  return {
+    branchName: null,
+    metadataBaseRefName: normalizeRequiredBaseBranch(source.baseRef),
+    ...(exactBase ? { metadataBaseRef: exactBase } : {}),
+    addArguments: ["--detach", source.commit],
+  };
+}
+
+async function resolveRestoredWorktreeFromBasePlan(
+  cwd: string,
+  source: Extract<WorktreeSource, { kind: "restore-from-base" }>,
+): Promise<WorktreeSourcePlan> {
+  await validateExistingWorktreeBranchName(cwd, source.branchName);
+  const baseRef = await resolveBaseBranchForWorktree(cwd, source.baseRef);
+  const branchName = await resolveUniqueLocalBranchName(cwd, source.branchName);
+  return {
+    branchName,
+    metadataBaseRefName: normalizeRequiredBaseBranch(source.baseRef),
+    metadataBaseRef: baseRef,
+    addArguments: ["-b", branchName, "--no-track", baseRef],
+  };
+}
+
+async function resolveBranchOffWorktreeSourcePlan(
+  cwd: string,
+  source: Extract<WorktreeSource, { kind: "branch-off" }>,
+  desiredSlug: string,
+): Promise<WorktreeSourcePlan> {
+  const branchName = source.branchName;
+  validateWorktreeBranchName(branchName);
+  const normalizedBaseBranch = normalizeRequiredBaseBranch(source.baseBranch);
+  const resolvedBaseBranch = await resolveBaseBranchForWorktree(cwd, source.baseBranch);
+  const branchExists = await localBranchExists(cwd, branchName);
+  const base = branchExists ? branchName : (source.startPoint ?? resolvedBaseBranch);
+  await refreshRemoteTrackingBaseRef(cwd, base);
+  const candidateBranch = branchExists ? desiredSlug : branchName;
+  const newBranchName = await resolveUniqueLocalBranchName(cwd, candidateBranch);
+
+  return {
+    branchName: newBranchName,
+    metadataBaseRefName: normalizedBaseBranch,
+    metadataBaseRef: resolvedBaseBranch,
+    addArguments: ["-b", newBranchName, "--no-track", base],
+  };
+}
+
 async function resolveWorktreeSourcePlan({
   cwd,
   source,
   desiredSlug,
 }: ResolveWorktreeSourcePlanOptions): Promise<WorktreeSourcePlan> {
   switch (source.kind) {
-    case "branch-off": {
-      const branchName = source.branchName;
-      validateWorktreeBranchName(branchName);
-      const normalizedBaseBranch = normalizeRequiredBaseBranch(source.baseBranch);
-      const resolvedBaseBranch = await resolveBaseBranchForWorktree(cwd, source.baseBranch);
-      const branchExists = await localBranchExists(cwd, branchName);
-      const base = branchExists ? branchName : resolvedBaseBranch;
-      const candidateBranch = branchExists ? desiredSlug : branchName;
-      const newBranchName = await resolveUniqueLocalBranchName(cwd, candidateBranch);
-
-      return {
-        branchName: newBranchName,
-        metadataBaseRefName: normalizedBaseBranch,
-        metadataBaseRef: resolvedBaseBranch,
-        addArguments: ["-b", newBranchName, "--no-track", base],
-      };
-    }
+    case "branch-off":
+      return resolveBranchOffWorktreeSourcePlan(cwd, source, desiredSlug);
     case "restore":
       return resolveRestoredWorktreeSourcePlan(cwd, source);
+    case "restore-commit":
+      return resolveRestoredCommitSourcePlan(cwd, source);
+    case "restore-from-base":
+      return resolveRestoredWorktreeFromBasePlan(cwd, source);
     case "checkout-branch": {
       await validateExistingWorktreeBranchName(cwd, source.branchName);
       await ensureLocalBranch(cwd, source.branchName);
+      const baseRef = await resolveCheckoutBranchBaseRef(cwd, source.branchName);
       if (await isBranchCheckedOut(cwd, source.branchName)) {
         throw new BranchAlreadyCheckedOutError(source.branchName);
       }
 
       return {
         branchName: source.branchName,
-        metadataBaseRefName: source.branchName,
+        metadataBaseRefName: baseRef,
+        changeRequestLookupTarget: createJAgentDeskWorktreeChangeRequestHint({
+          headRef: source.branchName,
+          localBranchName: source.branchName,
+        }),
         addArguments: [source.branchName],
       };
     }
@@ -1590,10 +1797,10 @@ async function resolveWorktreeSourcePlan({
       const normalizedBaseRefName = normalizeRequiredBaseBranch(source.baseRefName);
       const changeRequestNumber =
         source.kind === "checkout-github-pr" ? source.githubPrNumber : source.changeRequestNumber;
-      await fetchWorktreeCheckoutRefs({
+      await fetchFirstAvailableRef({
         cwd,
-        localBranchName,
-        checkoutRefs: source.checkoutRefs ?? [
+        destination: `refs/heads/${localBranchName}`,
+        sources: source.checkoutRefs ?? [
           { remoteName: "origin", remoteRef: `refs/pull/${changeRequestNumber}/head` },
         ],
       });
@@ -1692,23 +1899,23 @@ async function configureWorktreePushRemote(options: {
   }
 }
 
-async function fetchWorktreeCheckoutRefs(options: {
+/**
+ * Fetches the first of `sources` a remote serves into the local ref `destination`, and returns
+ * the name of that remote.
+ */
+export async function fetchFirstAvailableRef(options: {
   cwd: string;
-  localBranchName: string;
-  checkoutRefs: WorktreeCheckoutRef[];
-}): Promise<void> {
+  sources: WorktreeCheckoutRef[];
+  destination: string;
+}): Promise<string> {
   let lastResult:
     | Awaited<ReturnType<typeof runGitCommand>>
     | { stderr: string; stdout: string; exitCode: number | null }
     | null = null;
-  for (const checkoutRef of options.checkoutRefs) {
+  for (const checkoutRef of options.sources) {
+    const remoteName = checkoutRef.remoteName ?? "origin";
     lastResult = await runGitCommand(
-      [
-        "fetch",
-        checkoutRef.remoteName ?? "origin",
-        `+${checkoutRef.remoteRef}:refs/heads/${options.localBranchName}`,
-        "--force",
-      ],
+      ["fetch", remoteName, `+${checkoutRef.remoteRef}:${options.destination}`, "--force"],
       {
         cwd: options.cwd,
         timeout: 120_000,
@@ -1716,14 +1923,14 @@ async function fetchWorktreeCheckoutRefs(options: {
       },
     );
     if (lastResult.exitCode === 0) {
-      return;
+      return remoteName;
     }
   }
-  const attemptedRefs = options.checkoutRefs
+  const attemptedRefs = options.sources
     .map((checkoutRef) => `${checkoutRef.remoteName ?? "origin"} ${checkoutRef.remoteRef}`)
     .join(", ");
   throw new Error(
-    `Unable to fetch change request refs for worktree branch ${options.localBranchName}: ${attemptedRefs}${lastResult?.stderr ? `\n${lastResult.stderr}` : ""}`,
+    `Unable to fetch change request refs into ${options.destination}: ${attemptedRefs}${lastResult?.stderr ? `\n${lastResult.stderr}` : ""}`,
   );
 }
 
@@ -1836,6 +2043,21 @@ function normalizeRequiredBaseBranch(baseBranch: string): string {
   return normalizedBaseBranch;
 }
 
+// The checked-out branch itself isn't a base to diff against — resolve the
+// repository's default branch so the diff panel has a real comparison target.
+// If the default branch can't be determined (no origin/HEAD, no local
+// main/master — e.g. a local-only repo based on "develop"), fall back to
+// whichever branch is currently checked out in the main repo, since that's
+// almost always the branch this one was intended to be compared against.
+async function resolveCheckoutBranchBaseRef(cwd: string, branchName: string): Promise<string> {
+  const defaultBranch = await resolveRepositoryDefaultBranch(cwd);
+  if (defaultBranch) {
+    return defaultBranch;
+  }
+  const currentBranch = await getCurrentBranch(cwd);
+  return currentBranch && currentBranch !== branchName ? currentBranch : branchName;
+}
+
 async function resolveBaseBranchForWorktree(
   cwd: string,
   requestedBaseBranch: string,
@@ -1870,6 +2092,41 @@ async function resolveBaseBranchForWorktree(
   throw new Error(`Base branch not found: ${normalized}`);
 }
 
+// Clients give up on a create request after 60s. A remote that accepts the connection and never
+// answers (a VPN-only host while off the VPN) must fall back to the cached ref well before that.
+const REMOTE_BASE_REFRESH_TIMEOUT_MS = 15_000;
+
+// A remote-tracking base is only as fresh as the last fetch, and the background fetch only runs
+// while a workspace of the repository is observed. Refresh the one base branch so the new branch
+// starts at the remote tip; when the fetch fails (offline, auth) the cached ref is still usable.
+async function refreshRemoteTrackingBaseRef(cwd: string, baseRef: string): Promise<void> {
+  if (!baseRef.startsWith("refs/remotes/")) {
+    return;
+  }
+  try {
+    // Remote names may contain slashes, so the owning remote is looked up rather than parsed.
+    const { stdout } = await runGitCommand(["remote"], { cwd });
+    const remoteName = stdout
+      .split("\n")
+      .map((name) => name.trim())
+      .find((name) => name.length > 0 && baseRef.startsWith(`refs/remotes/${name}/`));
+    if (!remoteName) {
+      return;
+    }
+    const remoteBranch = baseRef.slice(`refs/remotes/${remoteName}/`.length);
+    // No refspec is added to remote.<name>.fetch: one left behind breaks later fetches once the
+    // branch is deleted on the remote.
+    await runGitCommand(["fetch", remoteName, `+refs/heads/${remoteBranch}:${baseRef}`], {
+      cwd,
+      envOverlay: { GIT_TERMINAL_PROMPT: "0" },
+      timeout: REMOTE_BASE_REFRESH_TIMEOUT_MS,
+      acceptExitCodes: [0, 1, 128],
+    });
+  } catch {
+    // The fetch timed out; branch from the cached ref.
+  }
+}
+
 async function ensureLocalBranch(cwd: string, branchName: string): Promise<void> {
   if (await localBranchExists(cwd, branchName)) {
     return;
@@ -1879,9 +2136,38 @@ async function ensureLocalBranch(cwd: string, branchName: string): Promise<void>
       cwd,
       timeout: 120_000,
     });
+    return;
   } catch {
+    // Origin does not have it; another remote may.
+  }
+  const remoteBranch = await uniqueRemoteTrackingBranch(cwd, branchName);
+  if (!remoteBranch) {
     throw new UnknownBranchError({ branchName, cwd });
   }
+  // Tracks the remote it came from, as `git checkout <branch>` does for a branch on one remote.
+  await runGitCommand(["branch", "--track", branchName, remoteBranch], { cwd });
+}
+
+/** The one remote-tracking ref named `<remote>/<branchName>`, if exactly one remote has it. */
+async function uniqueRemoteTrackingBranch(cwd: string, branchName: string): Promise<string | null> {
+  const { stdout: remotes } = await runGitCommand(["remote"], {
+    cwd,
+    envOverlay: READ_ONLY_GIT_ENV,
+  });
+  const candidates: string[] = [];
+  for (const remote of remotes
+    .split("\n")
+    .map((name) => name.trim())
+    .filter(Boolean)) {
+    const ref = `refs/remotes/${remote}/${branchName}`;
+    try {
+      await runGitCommand(["show-ref", "--verify", "--quiet", ref], { cwd });
+      candidates.push(ref);
+    } catch {
+      // This remote does not have the branch.
+    }
+  }
+  return candidates.length === 1 ? candidates[0] : null;
 }
 
 async function localBranchExists(cwd: string, branchName: string): Promise<boolean> {
@@ -1896,13 +2182,30 @@ async function localBranchExists(cwd: string, branchName: string): Promise<boole
 }
 
 async function resolveUniqueLocalBranchName(cwd: string, candidateBranch: string): Promise<string> {
-  let newBranchName = candidateBranch;
+  const { stdout } = await runGitCommand(
+    ["for-each-ref", "--format=%(refname:strip=2)", "refs/heads/"],
+    { cwd, envOverlay: READ_ONLY_GIT_ENV },
+  );
+  const existingBranches = new Set(stdout.trim().split("\n").filter(Boolean));
+  const candidateSegments = candidateBranch.split("/");
+  const segments = [...candidateSegments];
   let suffix = 1;
-  while (await localBranchExists(cwd, newBranchName)) {
-    newBranchName = `${candidateBranch}-${suffix}`;
-    suffix++;
+  while (true) {
+    const branchName = segments.join("/");
+    const parentConflict = segments.findIndex((_, index) =>
+      existingBranches.has(segments.slice(0, index + 1).join("/")),
+    );
+    const childConflict = [...existingBranches].some((branch) =>
+      branch.startsWith(`${branchName}/`),
+    );
+    if (parentConflict === -1 && !childConflict) {
+      return branchName;
+    }
+    // Git refs form a namespace: a branch cannot also be another branch's
+    // parent directory. Rename the conflicting segment, preserving the rest.
+    const conflictIndex = parentConflict === -1 ? segments.length - 1 : parentConflict;
+    segments[conflictIndex] = `${candidateSegments[conflictIndex]}-${suffix++}`;
   }
-  return newBranchName;
 }
 
 async function isBranchCheckedOut(cwd: string, branchName: string): Promise<boolean> {

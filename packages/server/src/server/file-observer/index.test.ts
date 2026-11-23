@@ -47,6 +47,34 @@ test("observes nested files while pruning excluded directories", async () => {
   await subscription.unsubscribe();
 });
 
+// macOS FSEvents can replay writes made just before the stream starts, so the
+// startup contract is only exact on the Linux backend.
+test.skipIf(process.platform !== "linux")(
+  "subscribing to a populated tree reports only later changes",
+  async () => {
+    const root = await createRoot();
+    for (const directory of ["src", join("src", "nested"), "docs"]) {
+      await mkdir(join(root, directory), { recursive: true });
+      await Promise.all(
+        Array.from({ length: 20 }, (_, index) =>
+          writeFile(join(root, directory, `existing-${index}.txt`), `${index}`),
+        ),
+      );
+    }
+    const events: FileChange[] = [];
+    const subscription = await subscribeToFileChanges(root, (error, batch) => {
+      expect(error).toBeNull();
+      events.push(...batch);
+    });
+
+    const laterPath = join(root, "src", "nested", "later.txt");
+    await writeFile(laterPath, "later");
+    await expect.poll(() => events.map((event) => event.path)).toContain(laterPath);
+    expect(new Set(events.map((event) => event.path))).toEqual(new Set([laterPath]));
+    await subscription.unsubscribe();
+  },
+);
+
 test("covers files populated immediately inside a newly created directory", async () => {
   const root = await createRoot();
   const events: FileChange[] = [];
@@ -236,7 +264,8 @@ test("observes a thousand concurrent writes and remains healthy after delete and
   const deletions = expectFileChanges(removedPaths, "delete");
   const movedFiles = expectFileChanges(movedPaths);
   const recovery = expectFileChanges([sentinel]);
-  const subscription = await subscribeToFileChanges(root, (error, events) => {
+  const observer = createObserver();
+  const subscription = await observer.subscribe(root, (error, events) => {
     expect(error).toBeNull();
     for (const event of events) {
       population.record(event);
@@ -254,9 +283,18 @@ test("observes a thousand concurrent writes and remains healthy after delete and
   await Promise.all(paths.map((path, index) => writeFile(path, `${index}`)));
   await writes.complete;
 
-  // A native watcher may recover coalesced paths through its safety audit.
-  // Completion comes from the delivered deletions, not an idle diagnostic or
-  // a deadline shorter than that recovery cycle.
+  // The first notice for each write can arrive before its remaining
+  // classifications. Drain those deliveries before starting a separate deletion
+  // phase, so a late create cannot coalesce with the expected delete as update.
+  await expect
+    .poll(() => observer.getDiagnostics(), { timeout: 10_000 })
+    .toMatchObject({
+      pendingEventCount: 0,
+      pendingClassificationCount: 0,
+      reconciliationInFlightCount: 0,
+    });
+
+  // Completion still requires the delivered deletion notices.
   await Promise.all(removedPaths.map((path) => rm(path)));
   await deletions.complete;
 
@@ -283,6 +321,39 @@ test("unsubscribe cancels reconciliation queued by a write burst", async () => {
   await writeFile(join(root, "after-burst-close.txt"), "closed");
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(callback).toHaveBeenCalledTimes(callsAtClose);
+}, 20_000);
+
+test("aborting a pending subscription stops its startup scan and rejects", async () => {
+  const root = await createRoot();
+  // More directories than the Linux backend watches: a scan that keeps walking after the abort
+  // fails on the directory limit instead of rejecting with the abort reason.
+  await Promise.all(
+    Array.from({ length: 80 }, (_, outer) =>
+      Promise.all(
+        Array.from({ length: 70 }, (__, inner) =>
+          mkdir(join(root, `dir-${outer}`, `nested-${inner}`), { recursive: true }),
+        ),
+      ),
+    ),
+  );
+  const observer = createObserver();
+  const controller = new AbortController();
+  const reason = new Error("setup deadline passed");
+  const callback = vi.fn();
+
+  const subscription = observer.subscribe(root, callback, { signal: controller.signal });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  controller.abort(reason);
+
+  await expect(subscription).rejects.toBe(reason);
+  expect(observer.getDiagnostics()).toMatchObject({
+    activeObservationCount: 0,
+    nativeHandleCount: 0,
+    pendingReconciliationWorkCount: 0,
+  });
+  await writeFile(join(root, "dir-0", "after-abort.txt"), "late");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(callback).not.toHaveBeenCalled();
 }, 20_000);
 
 test("aggregate diagnostics return to their lifecycle baseline", async () => {

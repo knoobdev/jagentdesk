@@ -283,8 +283,17 @@ export function deriveProjectStatusBucket(input: {
 
 export function buildSidebarWorkspacePlacementModel(input: {
   projects: readonly HostProjectListItem[];
+  hiddenWorkspaceKeys?: ReadonlySet<string>;
 }): SidebarWorkspacePlacementModel {
-  const projects = buildSidebarProjectsFromHostProjects({ projects: input.projects });
+  const allProjects = buildSidebarProjectsFromHostProjects({ projects: input.projects });
+  const projects = input.hiddenWorkspaceKeys?.size
+    ? allProjects.map((project) => ({
+        ...project,
+        workspaces: project.workspaces.filter(
+          (workspace) => !input.hiddenWorkspaceKeys?.has(workspace.workspaceKey),
+        ),
+      }))
+    : allProjects;
   return {
     projects,
     workspaces: projects.flatMap((project) => project.workspaces),

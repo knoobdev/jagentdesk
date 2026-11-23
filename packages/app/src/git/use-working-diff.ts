@@ -5,13 +5,11 @@ import {
 } from "@/attachments/workspace-attachments-store";
 import {
   buildReviewDraftKey,
-  buildReviewDraftScopeKey,
   useInlineReviewController,
-  useResolvedDiffMode,
   useReviewAttachmentSnapshot,
-  useSetDiffModeOverride,
 } from "@/review";
 import { useCheckoutDiffQuery } from "@/git/use-diff-query";
+import { useWorkingDiffComparison } from "./working-diff-comparison";
 import { useCheckoutStatusQuery } from "@/git/use-status-query";
 
 interface UseWorkingDiffOptions {
@@ -43,38 +41,18 @@ export function useWorkingDiff({
   const statusErrorMessage =
     status?.error?.message ??
     (isStatusError && statusError instanceof Error ? statusError.message : null);
-  const baseRef = gitStatus?.baseRef ?? undefined;
-  const hasUncommittedChanges = Boolean(gitStatus?.isDirty);
+  const baseRef = gitStatus?.baseRefExact ?? gitStatus?.baseRef ?? undefined;
   const currentBranchName =
     gitStatus?.currentBranch && gitStatus.currentBranch !== "HEAD" ? gitStatus.currentBranch : null;
 
-  const reviewDraftScopeKey = useMemo(
-    () =>
-      buildReviewDraftScopeKey({
-        serverId,
-        workspaceId,
-        cwd,
-        baseRef,
-        ignoreWhitespace,
-      }),
-    [baseRef, cwd, ignoreWhitespace, serverId, workspaceId],
-  );
-  const diffMode = useResolvedDiffMode({
-    scopeKey: reviewDraftScopeKey,
-    hasUncommittedChanges,
+  const { comparison: diffMode, selectComparison } = useWorkingDiffComparison({
+    serverId,
+    workspaceId,
+    cwd,
   });
-  const setDiffModeOverride = useSetDiffModeOverride();
-  const selectDiffMode = useCallback(
-    (mode: "uncommitted" | "base") => {
-      setDiffModeOverride({
-        scopeKey: reviewDraftScopeKey,
-        override: { serverId, cwd, mode, isDirtyAtSelection: hasUncommittedChanges },
-      });
-    },
-    [cwd, hasUncommittedChanges, reviewDraftScopeKey, serverId, setDiffModeOverride],
-  );
-  const selectUncommitted = useCallback(() => selectDiffMode("uncommitted"), [selectDiffMode]);
-  const selectBase = useCallback(() => selectDiffMode("base"), [selectDiffMode]);
+  const selectUncommitted = useCallback(() => selectComparison("uncommitted"), [selectComparison]);
+  const selectAll = useCallback(() => selectComparison("all"), [selectComparison]);
+  const selectBase = useCallback(() => selectComparison("base"), [selectComparison]);
 
   const {
     files,
@@ -122,6 +100,7 @@ export function useWorkingDiff({
     diffMode,
     selectUncommitted,
     selectBase,
+    selectAll,
     files,
     diffPayloadError,
     diffTooLarge,
