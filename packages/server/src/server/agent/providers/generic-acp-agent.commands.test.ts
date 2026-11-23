@@ -8,8 +8,8 @@ import { createTestLogger } from "../../../test-utils/test-logger.js";
 import { GenericACPAgentClient } from "./generic-acp-agent.js";
 
 describe("GenericACPAgentClient slash commands", () => {
-  test("preserves argument hints in commands advertised right after session/new", async () => {
-    await withFakeACPAgent("commands-after-session-new", async (command, cwd) => {
+  test("preserves argument hints in commands advertised before session/new completes", async () => {
+    await withFakeACPAgent("commands-during-session-new", async (command, cwd) => {
       const client = new GenericACPAgentClient({
         logger: createTestLogger(),
         command,
@@ -54,7 +54,7 @@ describe("GenericACPAgentClient slash commands", () => {
 });
 
 async function withFakeACPAgent(
-  mode: "commands-after-session-new" | "silent",
+  mode: "commands-during-session-new" | "silent",
   run: (command: [string, ...string[]], cwd: string) => Promise<void>,
 ): Promise<void> {
   const testDir = await mkdtemp(path.join(tmpdir(), "jagentdesk-acp-commands-"));
@@ -91,9 +91,7 @@ rl.on("line", (line) => {
   }
 
   if (message.method === "session/new") {
-    write({ id: message.id, result: { sessionId: "session-1" } });
-    if (mode === "commands-after-session-new") {
-      setTimeout(() => {
+    if (mode === "commands-during-session-new") {
         write({
           method: "session/update",
           params: {
@@ -107,8 +105,8 @@ rl.on("line", (line) => {
             },
           },
         });
-      }, 0);
     }
+    write({ id: message.id, result: { sessionId: "session-1" } });
     return;
   }
 
