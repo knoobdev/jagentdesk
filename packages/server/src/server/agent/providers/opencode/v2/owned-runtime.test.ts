@@ -140,10 +140,8 @@ test("uses an owned server for MCP servers while a shared service is discoverabl
     expect((await connection.client.server.info()).pid).not.toBe(process.pid);
     await attachMcpServers({
       client: connection.client,
-      sessionID: "session-isolated",
       location: { directory: root },
       mcpServers: config.mcpServers,
-      logger: createTestLogger(),
     });
     const requests = (await readFile(record, "utf8"))
       .trim()
@@ -158,7 +156,6 @@ test("uses an owned server for MCP servers while a shared service is discoverabl
         body: { config: { type: "remote", url: `${url}/mcp`, oauth: false, codemode: false } },
       },
       { method: "GET", pathname: "/api/mcp", body: null },
-      { method: "GET", pathname: "/api/session/session-isolated/context", body: null },
     ]);
     expect(sharedRequests).toHaveLength(sharedReads);
     expect(sharedRequests.every((request) => request === "GET /api/info")).toBe(true);
