@@ -1,4 +1,7 @@
-import { assertPluginTimelineDataSize } from "./agent/agent-timeline-content.js";
+import {
+  assertPluginTimelineDataSize,
+  assertPluginTimelineKind,
+} from "./agent/agent-timeline-content.js";
 import { parsePluginClientId } from "./plugins/plugin-session-identity.js";
 import equal from "fast-deep-equal";
 import { v4 as uuidv4 } from "uuid";
@@ -9107,6 +9110,7 @@ export class Session {
   ): Promise<void> {
     const pluginId = parsePluginClientId(this.clientId);
     if (!pluginId) throw new Error("Only plugin sessions can append plugin timeline items");
+    assertPluginTimelineKind(msg.item.kind);
     assertPluginTimelineDataSize(msg.item.data);
     const { seq, epoch } = await this.agentManager.appendTimelineItem(msg.agentId, {
       ...msg.item,
