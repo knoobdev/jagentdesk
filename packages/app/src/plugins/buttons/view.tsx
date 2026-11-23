@@ -1,4 +1,3 @@
-import { PluginClientStateProvider } from "@jagentdesk/plugin/client/host";
 import type {
   PluginButtonBehavior,
   PluginButtonIcon,
@@ -78,8 +77,12 @@ function resolvePlatform(): PluginHostProps["layout"]["platform"] {
 function ButtonEnvironment({ view, children }: { view: ButtonView; children: ReactNode }) {
   return (
     <ToastApiProvider api={view.toast}>
-      <PluginRuntimeBoundary plugin={view.entry.installation} client={view.client}>
-        <PluginClientStateProvider source={view.state}>{children}</PluginClientStateProvider>
+      <PluginRuntimeBoundary
+        plugin={view.entry.installation}
+        client={view.client}
+        stateSource={view.state}
+      >
+        {children}
       </PluginRuntimeBoundary>
     </ToastApiProvider>
   );
