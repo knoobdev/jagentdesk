@@ -1,4 +1,6 @@
 import { relative } from "node:path";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import type {
   ProviderConnection,
   ProviderLaunch,
@@ -15,6 +17,21 @@ import {
   isStaleProviderSessionError,
   StaleProviderSessionError,
 } from "./stale-provider-session-error.js";
+
+test("long concurrent plugin and child streams retain text-sized history and release it on archive", () => {
+  const fixture = fileURLToPath(new URL("./test-utils/plugin-stream-memory.ts", import.meta.url));
+  const output = execFileSync(
+    process.execPath,
+    ["--expose-gc", "--max-old-space-size=512", "--import", "tsx", fixture],
+    {
+      encoding: "utf8",
+      timeout: 20_000,
+    },
+  );
+  const memory = JSON.parse(output) as { retained: number; closed: number };
+  expect(memory.retained).toBeLessThan(24 * 1024 * 1024);
+  expect(memory.closed).toBeLessThan(6 * 1024 * 1024);
+});
 
 const CAPABILITIES = [
   "prompt.message",
@@ -965,4 +982,95 @@ describe("plugin provider launch and status", () => {
       }
     },
   );
+});
+
+test("history keeps the tool's first position when completion follows later text", async () => {
+  const harness = createProviderHarness();
+  const registry = new PluginAgentClientRegistry(createTestLogger());
+  registry.replace([harness.registration]);
+  const client = registry.clients()[harness.registration.id]!;
+  const session = await client.createSession({ provider: client.provider, cwd: "/tmp" });
+  const opened = harness.inputs.find((input) => input.type === "session.open");
+  if (opened?.type !== "session.open") throw new Error("missing session open");
+  const tool = {
+    type: "tool_call" as const,
+    id: "tool-position",
+    callId: "call-position",
+    name: "read",
+    detail: { type: "unknown" as const, input: null, output: null },
+    error: null,
+  };
+  try {
+    harness.emit({
+      type: "timeline.item",
+      sessionId: opened.sessionId,
+      item: { ...tool, status: "running" },
+    });
+    harness.emit({
+      type: "timeline.item",
+      sessionId: opened.sessionId,
+      item: { type: "assistant_message", id: "later-text", text: "Working" },
+    });
+    harness.emit({
+      type: "timeline.item",
+      sessionId: opened.sessionId,
+      item: { ...tool, status: "completed" },
+    });
+    const items = [];
+    for await (const event of session.streamHistory())
+      if (event.type === "timeline") items.push(event.item);
+    expect(items).toEqual([
+      {
+        type: "tool_call",
+        callId: "call-position",
+        name: "read",
+        detail: tool.detail,
+        error: null,
+        status: "completed",
+      },
+      { type: "assistant_message", messageId: "later-text", text: "Working" },
+    ]);
+  } finally {
+    await session.close();
+    await registry.shutdown();
+  }
+});
+
+test("detached text deltas preserve split surrogates and history replays one complete message", async () => {
+  const harness = createProviderHarness();
+  const registry = new PluginAgentClientRegistry(createTestLogger());
+  registry.replace([harness.registration]);
+  const client = registry.clients()[harness.registration.id]!;
+  const session = await client.createSession({ provider: client.provider, cwd: "/tmp" });
+  const opened = harness.inputs.find((input) => input.type === "session.open");
+  if (opened?.type !== "session.open") throw new Error("missing session open");
+  const events: AgentStreamEvent[] = [];
+  session.subscribe((event) => events.push(event));
+  const prefix = "long prefix ".repeat(10);
+  const first = prefix + "a\uD83D";
+  const complete = first + "\uDE00b";
+  try {
+    for (const text of [first, complete, complete]) {
+      harness.emit({
+        type: "timeline.item",
+        sessionId: opened.sessionId,
+        item: { type: "assistant_message", id: "split-message", text },
+      });
+    }
+    const deltas = events.flatMap((event) =>
+      event.type === "timeline" && event.item.type === "assistant_message" ? [event.item.text] : [],
+    );
+    expect(deltas).toEqual([first, "\uDE00b"]);
+    expect(deltas.join("")).toBe(prefix + "a😀b");
+    const history: AgentStreamEvent[] = [];
+    for await (const event of session.streamHistory()) history.push(event);
+    expect(
+      history.flatMap((event) =>
+        event.type === "timeline" && event.item.type === "assistant_message" ? [event.item] : [],
+      ),
+    ).toEqual([{ type: "assistant_message", messageId: "split-message", text: complete }]);
+  } finally {
+    await session.close();
+    await registry.shutdown();
+  }
 });

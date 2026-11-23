@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
+import { PluginSessionHistory } from "./plugin-session-history.js";
 import { resolve as resolvePath } from "node:path";
 import type { Logger } from "pino";
 import type { JsonValue } from "@jagentdesk/protocol/agent-types";
@@ -571,6 +572,7 @@ class ProviderRuntime {
 
 class ProviderRuntimeSession {
   readonly history: ProviderEvent[] = [];
+  private historyClaimed = false;
   private readonly listeners = new Set<(event: ProviderEvent) => void>();
   private capabilities: readonly string[] = [];
   private openRequest: { requestId: string; deferred: Deferred<void> } | null = null;
@@ -601,6 +603,10 @@ class ProviderRuntimeSession {
   }
 
   onEvent(listener: (event: ProviderEvent) => void): () => void {
+    // This buffer bridges session.open and adapter attachment. Once replayed,
+    // the adapter owns history; retaining live cumulative snapshots is quadratic.
+    this.historyClaimed = true;
+    this.history.length = 0;
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
@@ -671,6 +677,7 @@ class ProviderRuntimeSession {
   }
 
   async close(): Promise<void> {
+    this.history.length = 0;
     if (this.restoration === "parent") {
       this.runtime.removeSession(this.id, this.providerSessionId);
       return;
@@ -784,7 +791,7 @@ class ProviderRuntimeSession {
     if (event.type === "session.persistence" && this.restoration === "core") {
       this.persistence = event.persistence;
     }
-    this.history.push(event);
+    if (!this.historyClaimed) this.history.push(event);
     for (const listener of this.listeners) listener(event);
   }
 }
@@ -1084,16 +1091,29 @@ class PluginAgentClient implements AgentClient {
   }
 }
 
+interface TimelineTextSnapshot {
+  type: "assistant_message" | "reasoning" | "user_message";
+  text: string;
+}
+
+function isTextSnapshotItem(
+  item: ProviderTimelineItem,
+): item is Extract<ProviderTimelineItem, { type: TimelineTextSnapshot["type"] }> {
+  return (
+    item.type === "assistant_message" || item.type === "reasoning" || item.type === "user_message"
+  );
+}
+
 class PluginAgentSession implements AgentSession {
   private readonly listeners = new Set<(event: AgentStreamEvent) => void>();
-  private readonly history: AgentStreamEvent[] = [];
+  private readonly history = new PluginSessionHistory();
   private readonly pendingPermissions = new Map<string, AgentPermissionRequest>();
   private readonly permissionResponses = new Map<string, AgentPermissionResponse>();
   private readonly revertTokens = new Map<string, ProviderTimelineItem["revertToken"]>();
-  private readonly timelineSnapshots = new Map<string, ProviderTimelineItem>();
+  private readonly timelineSnapshots = new Map<string, TimelineTextSnapshot>();
   private readonly subagentIdsBySession = new Map<string, string | null>();
   private readonly childUnsubscribes = new Map<string, () => void>();
-  private readonly childSnapshots = new Map<string, Map<string, ProviderTimelineItem>>();
+  private readonly childSnapshots = new Map<string, Map<string, TimelineTextSnapshot>>();
   private unsubscribe: (() => void) | null = null;
   private currentTurnId: string | null = null;
   private closed = false;
@@ -1183,7 +1203,7 @@ class PluginAgentSession implements AgentSession {
   }
 
   async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
-    for (const event of this.history) yield event;
+    for (const event of this.history.read(this.provider)) yield event;
   }
 
   async getRuntimeInfo() {
@@ -1246,6 +1266,12 @@ class PluginAgentSession implements AgentSession {
     for (const unsubscribe of this.childUnsubscribes.values()) unsubscribe();
     this.childUnsubscribes.clear();
     this.subagentIdsBySession.clear();
+    this.history.clear();
+    this.timelineSnapshots.clear();
+    this.childSnapshots.clear();
+    this.revertTokens.clear();
+    this.pendingPermissions.clear();
+    this.permissionResponses.clear();
     this.listeners.clear();
     this.onClose();
     await this.bridge.close();
@@ -1286,16 +1312,20 @@ class PluginAgentSession implements AgentSession {
   }
 
   timelineHistory(): ImportedProviderSession["timeline"] {
-    return this.history.flatMap((event) =>
-      event.type === "timeline" ? [{ item: event.item, timestamp: event.timestamp }] : [],
-    );
+    return this.history
+      .read(this.provider)
+      .flatMap((event) =>
+        event.type === "timeline" ? [{ item: event.item, timestamp: event.timestamp }] : [],
+      );
   }
 
   subagentHistory(): NonNullable<ImportedProviderSession["providerSubagentEvents"]> {
-    return this.history.filter(
-      (event): event is Extract<AgentStreamEvent, { type: "provider_subagent" }> =>
-        event.type === "provider_subagent",
-    );
+    return this.history
+      .read(this.provider)
+      .filter(
+        (event): event is Extract<AgentStreamEvent, { type: "provider_subagent" }> =>
+          event.type === "provider_subagent",
+      );
   }
 
   attachChild(
@@ -1324,7 +1354,7 @@ class PluginAgentSession implements AgentSession {
         cwd: opened.cwd,
       },
     });
-    const snapshots = new Map<string, ProviderTimelineItem>();
+    const snapshots = new Map<string, TimelineTextSnapshot>();
     this.childSnapshots.set(childId, snapshots);
     for (const event of child.history) this.acceptChildEvent(childId, event, snapshots);
     this.childUnsubscribes.set(
@@ -1509,7 +1539,7 @@ class PluginAgentSession implements AgentSession {
   private acceptChildEvent(
     childId: string,
     event: ProviderEvent,
-    snapshots: Map<string, ProviderTimelineItem>,
+    snapshots: Map<string, TimelineTextSnapshot>,
   ): void {
     if (event.type === "timeline.item") {
       const item = mapTimelineItem(event.item, snapshots);
@@ -1660,24 +1690,24 @@ function mapPromptContent(prompt: AgentPromptInput): ProviderContent[] {
 
 function mapTimelineItem(
   item: ProviderTimelineItem,
-  snapshots: Map<string, ProviderTimelineItem>,
+  snapshots: Map<string, TimelineTextSnapshot>,
   revertTokens?: Map<string, ProviderTimelineItem["revertToken"]>,
 ): AgentTimelineItem | null {
   const previous = snapshots.get(item.id);
-  snapshots.set(item.id, item);
-  const { id, revertToken, ...withoutIdentity } = item;
-  if (revertToken !== undefined && revertTokens) {
-    revertTokens.set(id, revertToken);
-    if (item.type === "user_message" || item.type === "assistant_message") {
-      revertTokens.set(item.messageId ?? id, revertToken);
-    }
+  if (isTextSnapshotItem(item)) {
+    snapshots.set(item.id, { type: item.type, text: item.text });
   }
+  const { id, revertToken: _revertToken, ...withoutIdentity } = item;
+  rememberRevertToken(item, revertTokens);
 
   if (item.type === "assistant_message" || item.type === "reasoning") {
     const previousText = previous?.type === item.type ? previous.text : "";
-    const text = item.text.startsWith(previousText)
+    const suffix = item.text.startsWith(previousText)
       ? item.text.slice(previousText.length)
       : item.text;
+    // Match OpenCode's detachedSuffix: a sliced delta otherwise keeps its entire
+    // cumulative IPC snapshot alive in the projected timeline. Preserve split surrogates.
+    const text = Buffer.from(suffix, "utf16le").toString("utf16le");
     if (text.length === 0) return null;
     return item.type === "assistant_message"
       ? { type: "assistant_message", text, messageId: item.messageId ?? id }
@@ -1703,6 +1733,17 @@ function mapTimelineItem(
     };
   }
   return withoutIdentity as AgentTimelineItem;
+}
+
+function rememberRevertToken(
+  item: ProviderTimelineItem,
+  tokens?: Map<string, ProviderTimelineItem["revertToken"]>,
+): void {
+  if (item.revertToken === undefined || !tokens) return;
+  tokens.set(item.id, item.revertToken);
+  if (item.type === "user_message" || item.type === "assistant_message") {
+    tokens.set(item.messageId ?? item.id, item.revertToken);
+  }
 }
 
 function persistenceHandle(
