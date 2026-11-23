@@ -159,6 +159,7 @@ export class BotsService {
     try {
       const agentId = await this.runtime.ensureSupervisor(bot, this.storage.botHome(bot));
       this.storage.saveBot({ ...this.storage.bot(botId), agentId });
+      if (bot.agentId !== agentId) this.changed(botId);
       if (!this.enabled || this.storage.bot(botId).paused) return;
       this.storage.setState(`active:${botId}`, message);
       await this.runtime.send(agentId, `[${message.source}]\n${message.text}`, message.id);

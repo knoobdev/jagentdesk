@@ -261,3 +261,20 @@ it("records ORC escalation as Needs you and wakes the bot without auto-closing t
   await service.reviewItem(b.id, item.id, "Worker ended while awaiting owner");
   expect(runtime.reviews).toEqual([]);
 });
+
+it("publishes lazy Supervisor readiness so clients can attach permission cards after queued chat", async () => {
+  const { service } = setup();
+  const b = await createBot(service);
+  const changed: string[] = [];
+  service.onEvent((event) => {
+    if (event.type === "bots.changed") changed.push(event.payload.botId);
+  });
+  service.start();
+  service.wake(b.id, "Hello", "chat");
+  await service.settled();
+  expect(changed).toEqual([b.id]);
+  expect(service.storage.bot(b.id).agentId).toBe(`supervisor:${b.id}`);
+  service.wake(b.id, "Another question", "chat");
+  await service.settled();
+  expect(changed).toEqual([b.id]);
+});
