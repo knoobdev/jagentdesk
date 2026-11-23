@@ -10,7 +10,7 @@ Two agents from contrasting providers, fresh context, planning a solution in par
 
 The purpose is to step back, not double down. The committee may propose a completely different approach.
 
-**User's additional context:** $ARGUMENTS
+Use the user's request and current conversation as input, including any arguments supplied with the skill invocation.
 
 ## Prerequisites
 
