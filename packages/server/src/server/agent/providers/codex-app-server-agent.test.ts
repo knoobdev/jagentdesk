@@ -682,24 +682,24 @@ function codexAgentItem(text: string) {
 // app-server serving `threads` from thread/read.
 function createReopenableCodexAgent(threads: Record<string, unknown[]>) {
   const appServers: FakeCodexAppServer[] = [];
-  const provider = new CodexAppServerAgentClient(createTestLogger());
+  const provider = new CodexAppServerAgentClient(createTestLogger(), undefined, {
+    appServerProcess: createFakeCodexAppServerProcess(() => {
+      const appServer = createFakeCodexAppServer({
+        "thread/read": (params) => {
+          const { threadId } = params as { threadId: string };
+          return { thread: { id: threadId, turns: threads[threadId] ?? [] } };
+        },
+      });
+      appServers.push(appServer);
+      return appServer.child;
+    }),
+  });
   const internals = castInternals<{
     goalsEnabledPromise: Promise<boolean> | null;
     autoReviewEnabledPromise: Promise<boolean> | null;
-    spawnAppServer: () => Promise<ChildProcessWithoutNullStreams>;
   }>(provider);
   internals.goalsEnabledPromise = Promise.resolve(false);
   internals.autoReviewEnabledPromise = Promise.resolve(false);
-  internals.spawnAppServer = async () => {
-    const appServer = createFakeCodexAppServer({
-      "thread/read": (params) => {
-        const { threadId } = params as { threadId: string };
-        return { thread: { id: threadId, turns: threads[threadId] ?? [] } };
-      },
-    });
-    appServers.push(appServer);
-    return appServer.child;
-  };
   // The fake app-server stands in for the Codex CLI, which test machines may not have.
   const client: AgentClient = {
     provider: "codex",
@@ -1535,6 +1535,9 @@ describe("Codex app-server provider", () => {
     try {
       await session.startTurn("persist the configured session");
       await appServer.waitForTurnStart();
+      const saved = waitForNextEvent(session, "thread_started");
+      appServer.startsTurn({ threadId: "thread-1" });
+      await saved;
       const handle = session.describePersistence()!;
       expect(handle.metadata).not.toHaveProperty("providerOptions");
       appServer.assertNoErrors();
