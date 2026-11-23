@@ -1615,11 +1615,15 @@ class PluginAgentSession implements AgentSession {
       }
       return;
     }
-    if (event.type === "session.turn" && event.state !== "started") {
+    if (event.type === "session.turn") {
       this.publish({
         type: "provider_subagent",
         provider: this.provider,
-        event: { type: "upsert", id: childId, status: event.state },
+        event: {
+          type: "upsert",
+          id: childId,
+          status: event.state === "started" ? "running" : event.state,
+        },
       });
       return;
     }
