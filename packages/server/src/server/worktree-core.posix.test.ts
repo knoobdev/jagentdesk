@@ -1553,8 +1553,8 @@ describe.skipIf(isPlatform("win32"))("worktree-core POSIX-only", () => {
             before: async (name, request) =>
               validateBeforeResult(
                 name,
-                validateBeforeRequest(name, { ...request, branch: "hook-follow-up" }),
                 request,
+                validateBeforeRequest(name, { ...request, branch: "hook-follow-up" }),
               ),
           },
         },
@@ -1601,8 +1601,8 @@ describe.skipIf(isPlatform("win32"))("worktree-core POSIX-only", () => {
             before: async (name, request) =>
               validateBeforeResult(
                 name,
-                validateBeforeRequest(name, { ...request, baseRef: "main" }),
                 request,
+                validateBeforeRequest(name, { ...request, baseRef: "main" }),
               ),
           },
         },
