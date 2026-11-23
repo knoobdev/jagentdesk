@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,6 +7,7 @@ import { expect, onTestFinished, test } from "vitest";
 import { DaemonClient } from "../test-utils/daemon-client.js";
 import { createTestJAgentDeskDaemon } from "../test-utils/jagentdesk-daemon.js";
 import { resolveDaemonVersion } from "../daemon-version.js";
+import { BuiltinPluginLoader } from "./builtin/index.js";
 
 test("a plugin transforms workspace creation once across receipt replays and observes its committed lifecycle", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "jagentdesk-lifecycle-"));
@@ -67,6 +68,76 @@ export default function contribute(server) {
         { hook: "workspace.before" },
         { hook: "workspace.created", event: { workspace: { id: workspaceId, cwd: directory } } },
         { hook: "workspace.archived", event: { workspace: { id: workspaceId } } },
+      ]);
+  } finally {
+    await client.close();
+    await daemon.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 60_000);
+
+test("addHook transforms workspace creation once across receipt replays and observes its committed lifecycle", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "jagentdesk-lifecycle-"));
+  const daemon = await createTestJAgentDeskDaemon({ daemonVersion: "0.8.0" });
+  const client = new DaemonClient({ url: `ws://127.0.0.1:${daemon.port}/ws`, appVersion: "0.8.0" });
+  try {
+    await writeFile(
+      path.join(directory, "jagentdesk-plugin.json"),
+      JSON.stringify({ id: "lifecycle", requirements: { jagentdesk: ">=0.8.0" } }),
+    );
+    await writeFile(
+      path.join(directory, "index.server.ts"),
+      `
+export default function contribute(server) {
+  server.addHook("workspace.create.before", async ({ request }) => {
+    console.log(JSON.stringify({ hook: "workspace.before" }));
+    return { ...request, title: "Created through a hook" };
+  });
+  server.addHook("workspace.create.after", async (event) => {
+    console.log(JSON.stringify({ hook: "workspace.create.after", event }));
+  });
+  server.addHook("workspace.archive.after", async (event) => {
+    console.log(JSON.stringify({ hook: "workspace.archive.after", event }));
+  });
+  return () => {};
+}
+`,
+    );
+    await client.connect();
+    await client.fetchAgents({ subscribe: {} });
+    await client.patchDaemonConfig({ pluginsEnabled: true });
+    await client.installDirectoryPlugin(directory);
+    const created = await client.createWorkspace({
+      idempotencyKey: "plugin-workspace",
+      source: { kind: "directory", path: directory },
+    });
+    expect(created.workspace?.name).toBe("Created through a hook");
+    const workspaceId = created.workspace!.id;
+    const replay = await client.createWorkspace({
+      idempotencyKey: "plugin-workspace",
+      source: { kind: "directory", path: directory },
+    });
+    expect(replay.error).toBeNull();
+    expect(replay.workspace?.id).toBe(workspaceId);
+    await client.archiveWorkspace(workspaceId);
+    await expect
+      .poll(async () => {
+        const logs = await client.getPluginLogs("lifecycle");
+        return logs
+          .filter((entry) => {
+            return entry.message.startsWith('{"hook":');
+          })
+          .map((entry) => {
+            return JSON.parse(entry.message);
+          });
+      })
+      .toMatchObject([
+        { hook: "workspace.before" },
+        {
+          hook: "workspace.create.after",
+          event: { workspace: { id: workspaceId, cwd: directory } },
+        },
+        { hook: "workspace.archive.after", event: { workspace: { id: workspaceId } } },
       ]);
   } finally {
     await client.close();
@@ -392,7 +463,7 @@ ${options.hooks ?? ""}
 
 test("a clean daemon shutdown leaves a completed plugin-provider agent without an error", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "plugin-provider-shutdown-"));
-  onTestFinished(() => rm(root, { recursive: true, force: true }));
+  onTestFinished(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   const pluginDirectory = await createProviderPlugin(root);
   const workspace = path.join(root, "workspace");
   await mkdir(workspace, { recursive: true });
@@ -436,7 +507,7 @@ test("a clean daemon shutdown leaves a completed plugin-provider agent without a
 
 test("reloading a plugin leaves a completed plugin-provider agent without an error", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "plugin-provider-reload-"));
-  onTestFinished(() => rm(root, { recursive: true, force: true }));
+  onTestFinished(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   const pluginDirectory = await createProviderPlugin(root);
   const workspace = path.join(root, "workspace");
   await mkdir(workspace, { recursive: true });
@@ -485,7 +556,7 @@ test("reloading a plugin leaves a completed plugin-provider agent without an err
 
 test("a provider that never acknowledges session.close does not hold the daemon open", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "plugin-provider-stuck-close-"));
-  onTestFinished(() => rm(root, { recursive: true, force: true }));
+  onTestFinished(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   const pluginDirectory = await createProviderPlugin(root, { acknowledgeClose: false });
   const workspace = path.join(root, "workspace");
   await mkdir(workspace, { recursive: true });
@@ -681,9 +752,36 @@ test.each([false, true])(
       ],
       { cwd: repository, stdio: "pipe" },
     );
+    execFileSync("git", ["checkout", "-b", "plugin-base"], { cwd: repository, stdio: "pipe" });
+    await writeFile(path.join(repository, "from-plugin-base.txt"), "base");
+    execFileSync("git", ["add", "."], { cwd: repository, stdio: "pipe" });
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-m",
+        "plugin base",
+      ],
+      { cwd: repository, stdio: "pipe" },
+    );
+    execFileSync("git", ["checkout", "main"], { cwd: repository, stdio: "pipe" });
     const orderFile = path.join(root, "order.jsonl");
     const pluginDirectory = await createProviderPlugin(root, {
+      acknowledgeClose: true,
       hooks: `
+  server.addHook("worktree.create.before", async ({ request }) => {
+    const { appendFile } = await import("node:fs/promises");
+    await appendFile(${JSON.stringify(orderFile)}, JSON.stringify({ hook: "worktree.create.before", request }) + "\\n");
+    return { ...request, path: ${JSON.stringify(path.join(root, "elsewhere"))} + "/" + request.slug,
+      branch: request.branch === "accept-hook" ? "plugin-branch" : request.branch,
+      baseRef: request.branch === "accept-hook" ? "plugin-base" : request.baseRef };
+  });
   server.addHook("worktree.create.after", async ({ worktree }) => {
     const { appendFile, writeFile } = await import("node:fs/promises");
     await appendFile(${JSON.stringify(orderFile)}, JSON.stringify({ hook: "worktree.create.after", worktree }) + "\\n");
@@ -707,8 +805,11 @@ test.each([false, true])(
     return request;
   });`,
     });
-    const daemon = await createTestJAgentDeskDaemon();
-    const client = new DaemonClient({ url: `ws://127.0.0.1:${daemon.port}/ws` });
+    let daemon = await createTestJAgentDeskDaemon({
+      jagentdeskHomeRoot: path.join(root, "state"),
+      cleanup: false,
+    });
+    let client = new DaemonClient({ url: `ws://127.0.0.1:${daemon.port}/ws` });
     try {
       await client.connect();
       await client.patchDaemonConfig({ pluginsEnabled: true });
@@ -734,6 +835,23 @@ test.each([false, true])(
       });
       expect(created.error).toBeNull();
       const cwd = created.workspace!.workspaceDirectory;
+      expect(created.workspace!.gitRuntime?.currentBranch).toBe("plugin-branch");
+      const persisted = JSON.parse(
+        await readFile(path.join(daemon.jagentdeskHome, "projects", "workspaces.json"), "utf8"),
+      );
+      expect(persisted).toContainEqual(
+        expect.objectContaining({
+          workspaceId: created.workspace!.id,
+          branch: "plugin-branch",
+          baseBranch: "refs/heads/plugin-base",
+          worktreeRoot: cwd,
+        }),
+      );
+      expect(cwd).toBe(path.join(await realpath(root), "elsewhere", "accept-hook"));
+      expect(await readFile(path.join(cwd, "from-plugin-base.txt"), "utf8")).toBe("base");
+      expect(
+        execFileSync("git", ["branch", "--show-current"], { cwd, encoding: "utf8" }).trim(),
+      ).toBe("plugin-branch");
       expect(await readFile(path.join(cwd, "plugin-ready.txt"), "utf8")).toBe("ready");
       const firstAgent = withFirstAgentContext
         ? created.agent!
@@ -764,16 +882,45 @@ test.each([false, true])(
         .split("\n")
         .map((line) => JSON.parse(line));
       expect(records.map((record) => record.hook)).toEqual([
+        "worktree.create.before",
         "worktree.create.after",
         "workspace.create.after",
         "agent.create.before",
       ]);
-      expect(records[0].worktree).toEqual({
+      expect({
+        ...records[1].worktree,
+        sourceCheckout: await realpath(records[1].worktree.sourceCheckout),
+      }).toEqual({
         path: cwd,
-        branch: "accept-hook",
-        sourceCheckout: repository,
+        branch: "plugin-branch",
+        sourceCheckout: await realpath(repository),
       });
+      expect((await client.fetchWorkspaces()).entries.map((workspace) => workspace.id)).toContain(
+        created.workspace!.id,
+      );
+      await client.archiveWorkspace(created.workspace!.id);
+      await expect(stat(cwd)).rejects.toMatchObject({ code: "ENOENT" });
+      const hookRecordsBeforeRestore = await readFile(orderFile, "utf8");
+      await client.close();
+      await daemon.close();
+      daemon = await createTestJAgentDeskDaemon({
+        jagentdeskHomeRoot: path.join(root, "state"),
+        cleanup: false,
+        pluginsEnabled: true,
+        plugins: {
+          "shutdown-provider-plugin": { source: "directory", path: pluginDirectory, enabled: true },
+        },
+      });
+      client = new DaemonClient({ url: `ws://127.0.0.1:${daemon.port}/ws` });
+      await client.connect();
+      await client.restoreWorkspace(created.workspace!.id);
+      expect(await readFile(path.join(cwd, "from-plugin-base.txt"), "utf8")).toBe("base");
+      expect(await readFile(orderFile, "utf8")).toBe(hookRecordsBeforeRestore);
       const beforeFailure = await client.fetchWorkspaces();
+      const worktreesBeforeFailure = execFileSync("git", ["worktree", "list", "--porcelain"], {
+        cwd: repository,
+        encoding: "utf8",
+      });
       const rejected = await client.createWorkspace({
         source: {
           kind: "worktree",
@@ -800,82 +947,363 @@ test.each([false, true])(
           cwd: repository,
           encoding: "utf8",
         }),
-      ).not.toContain(failedPath);
+      ).toBe(worktreesBeforeFailure);
     } finally {
       await client.close();
       await daemon.close();
-      await rm(root, { recursive: true, force: true });
+      await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   },
   60_000,
 );
 
-test("addHook transforms workspace creation once across receipt replays and observes its committed lifecycle", async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), "jagentdesk-lifecycle-"));
-  const daemon = await createTestJAgentDeskDaemon({ daemonVersion: "0.8.0" });
-  const client = new DaemonClient({ url: `ws://127.0.0.1:${daemon.port}/ws`, appVersion: "0.8.0" });
+test("worktree before hook rejects unsafe destinations with plugin attribution before creating branches", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "jagentdesk-worktree-before-invalid-"));
+  const repository = path.join(root, "repository");
+  execFileSync("git", ["init", "-b", "main", repository], { stdio: "pipe" });
+  execFileSync(
+    "git",
+    [
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.com",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "--allow-empty",
+      "-m",
+      "initial",
+    ],
+    { cwd: repository, stdio: "pipe" },
+  );
+  const occupied = path.join(root, "occupied");
+  await mkdir(occupied);
+  const destinations = [
+    occupied,
+    "relative/path",
+    repository,
+    path.join(repository, ".git", "worktree"),
+    root,
+    path.parse(root).root,
+    (await import("node:os")).homedir(),
+  ];
+  const pluginDirectory = await createProviderPlugin(root, {
+    acknowledgeClose: true,
+    hooks: `
+  server.addHook("worktree.create.before", async ({ request }) => {
+    if (request.branch === "throws") throw new Error("creation denied");
+    if (request.branch === "readonly") return { ...request, repoRoot: "/different-repository" };
+    return { ...request, path: ${JSON.stringify(destinations)}[Number(request.branch.slice(4))] };
+  });`,
+  });
+  const daemon = await createTestJAgentDeskDaemon();
+  const client = new DaemonClient({ url: `ws://127.0.0.1:${daemon.port}/ws` });
   try {
-    await writeFile(
-      path.join(directory, "jagentdesk-plugin.json"),
-      JSON.stringify({ id: "lifecycle", requirements: { jagentdesk: ">=0.8.0" } }),
-    );
-    await writeFile(
-      path.join(directory, "index.server.ts"),
-      `
-export default function contribute(server) {
-  server.addHook("workspace.create.before", async ({ request }) => {
-    console.log(JSON.stringify({ hook: "workspace.before" }));
-    return { ...request, title: "Created through a hook" };
-  });
-  server.addHook("workspace.create.after", async (event) => {
-    console.log(JSON.stringify({ hook: "workspace.create.after", event }));
-  });
-  server.addHook("workspace.archive.after", async (event) => {
-    console.log(JSON.stringify({ hook: "workspace.archive.after", event }));
-  });
-  return () => {};
-}
-`,
-    );
     await client.connect();
-    await client.fetchAgents({ subscribe: {} });
     await client.patchDaemonConfig({ pluginsEnabled: true });
-    await client.installDirectoryPlugin(directory);
-    const created = await client.createWorkspace({
-      idempotencyKey: "plugin-workspace",
-      source: { kind: "directory", path: directory },
-    });
-    expect(created.workspace?.name).toBe("Created through a hook");
-    const workspaceId = created.workspace!.id;
-    const replay = await client.createWorkspace({
-      idempotencyKey: "plugin-workspace",
-      source: { kind: "directory", path: directory },
-    });
-    expect(replay.error).toBeNull();
-    expect(replay.workspace?.id).toBe(workspaceId);
-    await client.archiveWorkspace(workspaceId);
-    await expect
-      .poll(async () => {
-        const logs = await client.getPluginLogs("lifecycle");
-        return logs
-          .filter((entry) => {
-            return entry.message.startsWith('{"hook":');
-          })
-          .map((entry) => {
-            return JSON.parse(entry.message);
-          });
-      })
-      .toMatchObject([
-        { hook: "workspace.before" },
-        {
-          hook: "workspace.create.after",
-          event: { workspace: { id: workspaceId, cwd: directory } },
-        },
-        { hook: "workspace.archive.after", event: { workspace: { id: workspaceId } } },
-      ]);
+    await client.installDirectoryPlugin(pluginDirectory);
+    for (const branchName of [
+      ...destinations.map((_, index) => `bad-${index}`),
+      "throws",
+      "readonly",
+    ]) {
+      const created = await client.createWorkspace({
+        source: { kind: "worktree", cwd: repository, branchName, worktreeSlug: branchName },
+      });
+      expect(created.workspace).toBeNull();
+      expect(created.error).toContain(
+        "Plugin shutdown-provider-plugin worktree.create.before failed:",
+      );
+      expect(
+        execFileSync("git", ["branch", "--format=%(refname:short)"], {
+          cwd: repository,
+          encoding: "utf8",
+        }).trim(),
+      ).toBe("main");
+      expect(
+        execFileSync("git", ["worktree", "list", "--porcelain"], {
+          cwd: repository,
+          encoding: "utf8",
+        }).match(/^worktree /gm),
+      ).toHaveLength(1);
+    }
+    expect((await client.fetchWorkspaces()).entries).toEqual([]);
   } finally {
     await client.close();
     await daemon.close();
-    await rm(directory, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+}, 60_000);
+
+test("the placement example creates a sibling worktree, opens its first agent there, lists and archives it", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "jagentdesk-placement-example-"));
+  const repository = path.join(root, "repository");
+  execFileSync("git", ["init", "-b", "main", repository], { stdio: "pipe" });
+  execFileSync(
+    "git",
+    [
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.com",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "--allow-empty",
+      "-m",
+      "initial",
+    ],
+    { cwd: repository, stdio: "pipe" },
+  );
+  const providerDirectory = await createProviderPlugin(root, {
+    acknowledgeClose: true,
+    reportOpen: true,
+  });
+  const daemon = await createTestJAgentDeskDaemon();
+  const client = new DaemonClient({ url: `ws://127.0.0.1:${daemon.port}/ws` });
+  try {
+    await client.connect();
+    await client.patchDaemonConfig({ pluginsEnabled: true });
+    await client.installDirectoryPlugin(providerDirectory);
+    const installed = await client.installDirectoryPlugin(
+      fileURLToPath(new URL("../../../../../plugin-examples/worktree-placement", import.meta.url)),
+    );
+    expect(installed.status).toBe("running");
+    const created = await client.createWorkspace({
+      source: {
+        kind: "worktree",
+        cwd: repository,
+        branchName: "feature/x",
+        worktreeSlug: "feature-x",
+      },
+    });
+    expect(created.error).toBeNull();
+    const cwd = path.join(await realpath(root), "repository.feature-x");
+    expect(created.workspace!.workspaceDirectory).toBe(cwd);
+    expect((await stat(cwd)).isDirectory()).toBe(true);
+    expect((await client.fetchWorkspaces()).entries.map((workspace) => workspace.id)).toContain(
+      created.workspace!.id,
+    );
+    const worktrees = await client.getJAgentDeskWorktreeList({ cwd: repository });
+    expect(worktrees.error).toBeNull();
+    expect(worktrees.worktrees).toContainEqual(
+      expect.objectContaining({ worktreePath: cwd, branchName: "feature/x" }),
+    );
+    const collision = await client.createWorkspace({
+      source: {
+        kind: "worktree",
+        cwd: repository,
+        branchName: "feature/x",
+        worktreeSlug: "another-slug",
+      },
+    });
+    expect(collision.workspace).toBeNull();
+    expect(collision.error).toContain("Plugin worktree-placement worktree.create.before failed:");
+    expect(collision.error).toContain("already exists");
+    const agent = await client.createAgent({
+      provider: PROVIDER_ID,
+      cwd,
+      workspaceId: created.workspace!.id,
+    });
+    expect(agent.cwd).toBe(cwd);
+    const logs = await client.getPluginLogs("shutdown-provider-plugin");
+    const opened = logs
+      .filter((entry) => entry.message.startsWith('{"hook":"provider.open"'))
+      .map((entry) => JSON.parse(entry.message));
+    expect(opened.map((entry) => entry.config.cwd)).toContain(cwd);
+    await client.archiveWorkspace(created.workspace!.id);
+    await expect(stat(cwd)).rejects.toMatchObject({ code: "ENOENT" });
+  } finally {
+    await client.close();
+    await daemon.close();
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+}, 60_000);
+
+test("worktree includes reach the first agent without copying tracked or unignored files", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "jagentdesk-worktree-include-"));
+  const repository = path.join(root, "repository");
+  execFileSync("git", ["init", "-b", "main", repository], { stdio: "pipe" });
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: repository, stdio: "pipe" });
+  await mkdir(path.join(repository, "config"));
+  await writeFile(path.join(repository, ".gitignore"), ".env\nconfig/*.local.json\n");
+  await writeFile(
+    path.join(repository, ".worktreeinclude"),
+    ".env\nconfig/*.local.json\nunignored.txt\n",
+  );
+  await writeFile(path.join(repository, "config/tracked.local.json"), "git version");
+  git("add", ".gitignore", ".worktreeinclude");
+  git("add", "-f", "config/tracked.local.json");
+  git(
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.com",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "-m",
+    "initial",
+  );
+  await writeFile(path.join(repository, ".env"), "SECRET=source");
+  await writeFile(path.join(repository, "config/app.local.json"), "local config");
+  await writeFile(path.join(repository, "config/tracked.local.json"), "uncommitted source version");
+  await writeFile(path.join(repository, "unignored.txt"), "unignored source");
+  const observed = path.join(root, "observed.json");
+  const pluginDirectory = await createProviderPlugin(root, {
+    acknowledgeClose: true,
+    hooks: `
+  server.addHook("agent.open.before", async ({ request }) => {
+    const { readFile, writeFile } = await import("node:fs/promises");
+    const contents = await Promise.all([".env", "config/app.local.json", "config/tracked.local.json"].map(file => readFile(request.cwd + "/" + file, "utf8")));
+    await writeFile(${JSON.stringify(observed)}, JSON.stringify(contents));
+  });`,
+  });
+  const daemon = await createTestJAgentDeskDaemon({ builtinPlugins: new BuiltinPluginLoader() });
+  const client = new DaemonClient({ url: `ws://127.0.0.1:${daemon.port}/ws` });
+  try {
+    await client.connect();
+    await client.patchDaemonConfig({ pluginsEnabled: true });
+    expect((await client.installDirectoryPlugin(pluginDirectory)).status).toBe("running");
+    const created = await client.createWorkspace({
+      source: { kind: "worktree", cwd: repository, branchName: "include", worktreeSlug: "include" },
+    });
+    expect(created.error).toBeNull();
+    await client.createAgent({
+      provider: PROVIDER_ID,
+      cwd: created.workspace!.workspaceDirectory,
+      workspaceId: created.workspace!.id,
+    });
+    expect(JSON.parse(await readFile(observed, "utf8"))).toEqual([
+      "SECRET=source",
+      "local config",
+      "git version",
+    ]);
+    await expect(
+      stat(path.join(created.workspace!.workspaceDirectory, "unignored.txt")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+
+    const sourceWorktree = created.workspace!.workspaceDirectory;
+    await writeFile(path.join(sourceWorktree, ".env"), "SECRET=worktree");
+    await writeFile(path.join(sourceWorktree, "config/app.local.json"), "worktree config");
+    const nested = await client.createWorkspace({
+      source: {
+        kind: "worktree",
+        cwd: sourceWorktree,
+        branchName: "nested",
+        worktreeSlug: "nested",
+      },
+    });
+    expect(nested.error).toBeNull();
+    await client.createAgent({
+      provider: PROVIDER_ID,
+      cwd: nested.workspace!.workspaceDirectory,
+      workspaceId: nested.workspace!.id,
+    });
+    expect(JSON.parse(await readFile(observed, "utf8"))).toEqual([
+      "SECRET=worktree",
+      "worktree config",
+      "git version",
+    ]);
+
+    execFileSync("git", ["add", "-f", ".env"], { cwd: sourceWorktree, stdio: "pipe" });
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-m",
+        "commit branch env",
+      ],
+      { cwd: sourceWorktree, stdio: "pipe" },
+    );
+    const existing = await client.createWorkspace({
+      source: {
+        kind: "worktree",
+        cwd: repository,
+        baseBranch: "include",
+        branchName: "existing",
+        worktreeSlug: "existing",
+      },
+    });
+    expect(existing.error).toBeNull();
+    await client.createAgent({
+      provider: PROVIDER_ID,
+      cwd: existing.workspace!.workspaceDirectory,
+      workspaceId: existing.workspace!.id,
+    });
+    expect(JSON.parse(await readFile(observed, "utf8"))).toEqual([
+      "SECRET=worktree",
+      "local config",
+      "git version",
+    ]);
+
+    await rm(path.join(repository, ".worktreeinclude"));
+    const noIncludes = await client.createWorkspace({
+      source: {
+        kind: "worktree",
+        cwd: repository,
+        baseBranch: "main",
+        branchName: "no-includes",
+        worktreeSlug: "no-includes",
+      },
+    });
+    expect(noIncludes.error).toBeNull();
+    await expect(
+      stat(path.join(noIncludes.workspace!.workspaceDirectory, ".env")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(
+      stat(path.join(noIncludes.workspace!.workspaceDirectory, "config/app.local.json")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+
+    await writeFile(path.join(repository, ".worktreeinclude"), ".env\nconfig/*.local.json\n");
+    await rm(path.join(sourceWorktree, "config"), { recursive: true });
+    await writeFile(
+      path.join(sourceWorktree, "config"),
+      "committed file blocks the config directory",
+    );
+    execFileSync("git", ["add", "-A", "config"], { cwd: sourceWorktree, stdio: "pipe" });
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-m",
+        "block config directory",
+      ],
+      { cwd: sourceWorktree, stdio: "pipe" },
+    );
+    const beforeFailure = await client.fetchWorkspaces();
+    const worktreesBeforeFailure = git("worktree", "list", "--porcelain").toString();
+    const failed = await client.createWorkspace({
+      source: {
+        kind: "worktree",
+        cwd: repository,
+        baseBranch: "include",
+        branchName: "copy-failure",
+        worktreeSlug: "copy-failure",
+      },
+    });
+    expect(failed.workspace).toBeNull();
+    expect(failed.error).toContain("Plugin worktree-include worktree.create.after failed:");
+    expect((await client.fetchWorkspaces()).entries.map(({ id }) => id).sort()).toEqual(
+      beforeFailure.entries.map(({ id }) => id).sort(),
+    );
+    expect(git("worktree", "list", "--porcelain").toString()).toBe(worktreesBeforeFailure);
+  } finally {
+    await client.close();
+    await daemon.close();
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }, 60_000);

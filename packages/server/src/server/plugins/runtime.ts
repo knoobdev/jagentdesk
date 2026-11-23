@@ -5,6 +5,7 @@ import {
   type ProviderStatus,
   type ProviderStatusRequest,
 } from "@jagentdesk/plugin/server/provider";
+import { validateWorktreePath } from "../../utils/worktree-path.js";
 import type { PluginHookPayload } from "@jagentdesk/plugin/server";
 import type { PluginWireBeforeRequests, PluginBeforeResults } from "./lifecycle/index.js";
 import type { SessionOpenWireRequest, AttachedAgentTool } from "./agent-tools.js";
@@ -522,7 +523,14 @@ export class PluginRuntime {
           name,
           input: name === "agent.open.before" ? { ...request, tools: [], mcpServers: {} } : request,
         });
-        request = validateBeforeResult(name, request, output);
+        request = await validateBeforeResult(name, request, output);
+        if (name === "worktree.create.before") {
+          const worktree = request as PluginWireBeforeRequests["worktree.create.before"];
+          worktree.path = await validateWorktreePath({
+            candidate: worktree.path,
+            repoPath: worktree.repoRoot,
+          });
+        }
         if (name === "agent.open.before") {
           const opened = request as SessionOpenWireRequest;
           this.collectMcpServers(mcpServers, mcpServerOwners, loaded, opened.mcpServers);

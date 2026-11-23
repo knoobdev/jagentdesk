@@ -633,7 +633,7 @@ export interface SessionOptions {
   getWebSocketRuntimeMetrics?: () => DaemonWebSocketRuntimeDiagnosticSnapshot | null;
   pluginRuntime?: {
     wait: import("./plugins/lifecycle/index.js").PluginLifecycle["wait"];
-    before?: import("./plugins/lifecycle/index.js").PluginLifecycle["before"];
+    before: import("./plugins/lifecycle/index.js").PluginLifecycle["before"];
     emit?: import("./plugins/lifecycle/index.js").PluginLifecycle["emit"];
     listPlugins(): Promise<import("@jagentdesk/protocol/messages").PluginListItem[]>;
     getLogs(pluginId: string): import("@jagentdesk/protocol/messages").PluginLogEntry[];

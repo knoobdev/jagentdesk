@@ -2,17 +2,9 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const builtinPlugins = [
-  "claude-usage-source",
-  "codex-usage-source",
-  "copilot-usage-source",
-  "cursor-usage-source",
-  "grok-usage-source",
-  "kimi-usage-source",
-  "minimax-usage-source",
-  "opencode-go-usage-source",
-  "zai-usage-source",
-] as const;
+// Usage-source built-ins are owned by the Usage batch. Keep this list limited to
+// built-ins whose host API is present in this fork.
+export const builtinPlugins = ["worktree-include"] as const;
 
 export function resolveBuiltinPluginsRoot(moduleUrl: string | URL = import.meta.url): string {
   const moduleDir = path.dirname(fileURLToPath(moduleUrl));

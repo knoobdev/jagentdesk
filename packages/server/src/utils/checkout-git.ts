@@ -34,6 +34,8 @@ import { readGitFileContents } from "./git-file-contents.js";
 import { isJAgentDeskOwnedWorktreeCwd, resolveJAgentDeskWorktreesBaseRoot } from "./worktree.js";
 import {
   branchNameFromRef,
+  findJAgentDeskWorktreeRootForCwd,
+  hasJAgentDeskWorktreeMetadata,
   getJAgentDeskWorktreeChangeRequestHintForBranch,
   type JAgentDeskWorktreeMetadata,
   readJAgentDeskWorktreeMetadata,
@@ -1085,9 +1087,19 @@ async function getMainRepoRootFromCommonDir(
     },
   );
   const worktrees = parseWorktreeList(worktreeOut);
+  const jagentdeskPaths = new Set(
+    (
+      await Promise.all(
+        worktrees.map(async (wt) =>
+          (await hasJAgentDeskWorktreeMetadata(wt.path)) ? wt.path : null,
+        ),
+      )
+    ).filter((p) => p !== null),
+  );
   const nonBareNonJAgentDesk = worktrees.filter(
     (wt) =>
       !wt.isBare &&
+      !jagentdeskPaths.has(wt.path) &&
       !isJAgentDeskWorktreePath(wt.path, {
         jagentdeskHome: context?.jagentdeskHome,
         worktreesRoot: context?.worktreesRoot,
@@ -1217,7 +1229,7 @@ async function getJAgentDeskWorktreeForCwd(
   options: JAgentDeskWorktreeLookupOptions = {},
 ): Promise<JAgentDeskWorktreeForCwd> {
   // Fast-path reject: non-worktree paths do not need expensive ownership checks.
-  if (!/[\\/]worktrees[\\/]/.test(cwd)) {
+  if (!/[\\/]worktrees[\\/]/.test(cwd) && (await findJAgentDeskWorktreeRootForCwd(cwd)) === null) {
     return { isJAgentDeskOwnedWorktree: false };
   }
 

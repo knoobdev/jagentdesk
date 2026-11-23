@@ -89,7 +89,7 @@ export class WorkspaceProvisioningError extends Error {
 }
 
 export function createWorkspaceProvisioningService(deps: {
-  lifecycle?: PluginLifecycle;
+  lifecycle?: Pick<PluginLifecycle, "emit">;
   serverId?: string;
   workspaceRegistry: WorkspaceRegistry;
   projectRegistry: ProjectRegistry;
@@ -264,6 +264,7 @@ export function createWorkspaceProvisioningService(deps: {
     await workspaceRegistry.upsert(workspace, {
       expectsInitialAgent: input.expectsInitialAgent,
     });
+    deps.lifecycle?.emit("workspace.create.after", { workspace: describeHookWorkspace(workspace) });
     return workspace;
   }
 

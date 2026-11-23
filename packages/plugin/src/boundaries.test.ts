@@ -172,6 +172,24 @@ describe("lifecycle hook SDK types", () => {
       typeErrors(`
       import type { PluginServerContext, PluginHooks, PluginHookPayload, PluginHookResult } from "@jagentdesk/plugin/server";
       export default function contribute(server: PluginServerContext) {
+        server.addHook("worktree.create.before", async ({ request }) => {
+          if (request.kind === "checkout-branch") {
+            // @ts-expect-error Branch checkout has no branch-off base.
+            request.baseRef;
+          } else {
+            const base: string = request.baseRef;
+          }
+          const branch: string = request.branch;
+          // @ts-expect-error Repository identity is read-only.
+          request.repoRoot = "/other";
+          // @ts-expect-error Source checkout identity is read-only.
+          request.sourceCheckout = "/other";
+          if (request.kind === "checkout-change-request") {
+            const number: number = request.changeRequestNumber;
+          }
+          return { ...request, branch: "feature", baseRef: "main", slug: "feature", path: "/work/feature" };
+        });
+        server.addHook("worktree.create.before", async () => {});
         server.addHook("worktree.create.after", async ({ worktree }) => {
           const path: string = worktree.path;
           const branch: string = worktree.branch;
