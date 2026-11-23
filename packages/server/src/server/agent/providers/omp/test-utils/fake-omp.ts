@@ -54,6 +54,7 @@ export class FakeOmp implements OmpRuntime {
   private readonly sessions: FakeOmpSession[] = [];
   private readonly command: [string, ...string[]];
   private readonly queuedCommands: OmpRpcSlashCommand[][] = [];
+  private readonly queuedSessionSetups: Array<(session: FakeOmpSession) => void> = [];
   private readonly queuedSubagentSubscriptionErrors = new Map<
     FakeOmpSubagentSubscriptionLevel,
     Error
@@ -75,12 +76,17 @@ export class FakeOmp implements OmpRuntime {
       session.subagentSubscriptionErrors.set(level, error);
     }
     this.queuedSubagentSubscriptionErrors.clear();
+    this.queuedSessionSetups.shift()?.(session);
     this.sessions.push(session);
     return session;
   }
 
   queueCommands(commands: OmpRpcSlashCommand[]): void {
     this.queuedCommands.push(commands);
+  }
+
+  queueSessionSetup(setup: (session: FakeOmpSession) => void): void {
+    this.queuedSessionSetups.push(setup);
   }
 
   failNextSubagentSubscription(level: FakeOmpSubagentSubscriptionLevel, error: Error): void {

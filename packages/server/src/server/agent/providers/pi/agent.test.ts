@@ -3372,10 +3372,20 @@ const models = [
   { provider: "openrouter", id: "a" },
   { provider: "openrouter", id: "b" },
 ];
+// This fork selects the resume model through argv rather than a later set_model RPC.
+const modelFlag = piArgs.indexOf("--model");
+const requestedModel = modelFlag === -1 ? undefined : piArgs[modelFlag + 1];
+const model = models.find((model) => model.provider + "/" + model.id === requestedModel) ?? models[0];
+if (sessionFile && requestedModel) {
+  fs.appendFileSync(
+    sessionFile,
+    JSON.stringify({ type: "model_change", id: "model-1", provider: model.provider, modelId: model.id }) + "\\n",
+  );
+}
 const state = {
   sessionId: "pi-session-1",
   sessionFile,
-  model: models[0],
+  model,
   thinkingLevel: "medium",
   isStreaming: false,
   isCompacting: false,

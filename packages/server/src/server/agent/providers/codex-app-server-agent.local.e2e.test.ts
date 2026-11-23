@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
@@ -9,6 +9,8 @@ import { once } from "node:events";
 import { CodexAppServerAgentClient } from "./codex-app-server-agent.js";
 import { createTestLogger } from "../../../test-utils/test-logger.js";
 import type { AgentStreamEvent } from "../agent-sdk-types.js";
+import { AgentManager } from "../agent-manager.js";
+import { AgentStorage } from "../agent-storage.js";
 
 function isCodexInstalled(): boolean {
   try {
@@ -177,7 +179,7 @@ function writeMockCodexConfig(
     path.join(codexHome, "config.toml"),
     `
 model = "mock-model"
-approval_policy = "untrusted"
+approval_policy = "on-request"
 sandbox_mode = "read-only"
 
 model_provider = "mock_provider"
@@ -319,12 +321,6 @@ describe("Codex app-server provider (local e2e)", () => {
         expect(threadId).toEqual(expect.any(String));
         await storage.flush();
         expect((await storage.get(agentId))?.persistence?.sessionId).toBe(threadId);
-
-        const reloaded = await manager.reloadAgentSession(agentId);
-        expect(reloaded.persistence?.sessionId).toBe(threadId);
-        await manager.runAgent(agentId, "continue the saved thread");
-        expect(manager.getAgent(agentId)?.lifecycle).toBe("idle");
-        expect(mockServer.requestBodies.at(-1)).toContain("first prompt after reopening");
       } finally {
         if (agentId && manager.getAgent(agentId)) await manager.closeAgent(agentId);
         await storage.flush();

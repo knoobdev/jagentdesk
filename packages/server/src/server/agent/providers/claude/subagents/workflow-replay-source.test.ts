@@ -1,5 +1,28 @@
 import { expect, it } from "vitest";
-import { observeReplayWorkflows } from "./workflow-replay-source.js";
+import {
+  observeReplayWorkflows,
+  type ClaudeWorkflowParentEntry,
+} from "./workflow-replay-source.js";
+
+const TOOL_CALL_ID = "toolu_01XskpjeASyuFyXC5qsLHYps";
+const RUN_ID = "wf_4a0af4f7-f56";
+
+function parentEntries(
+  resultContent: unknown = `Workflow launched in background.\nRun ID: ${RUN_ID}`,
+): ClaudeWorkflowParentEntry[] {
+  return [
+    {
+      message: {
+        content: [{ type: "tool_use", id: TOOL_CALL_ID, name: "Workflow", input: {} }],
+      },
+    },
+    {
+      message: {
+        content: [{ type: "tool_result", tool_use_id: TOOL_CALL_ID, content: resultContent }],
+      },
+    },
+  ];
+}
 
 it("skips parent history when there are no workflow summaries", async () => {
   const entries = {

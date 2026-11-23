@@ -1,14 +1,16 @@
 import { describe, expect, test } from "vitest";
 import { setImmediate as waitForImmediate } from "node:timers/promises";
 
+import { createTestLogger } from "../../../../test-utils/test-logger.js";
 import type { AgentStreamEvent } from "../../agent-sdk-types.js";
 import type { JAgentDeskToolCatalog } from "../../tools/types.js";
 import type { OmpAgentMessage } from "./rpc-types.js";
-import type { OmpNoTurnScheduler, OmpProviderIdleScheduler } from "./agent.js";
+import { OmpAgentClient, type OmpNoTurnScheduler, type OmpProviderIdleScheduler } from "./agent.js";
 import type { OmpUsagePollScheduler } from "./usage-poller.js";
 import { resolveOmpProviderParams } from "./provider-config.js";
 import { OmpRuntimeEventSchema } from "./rpc-types.js";
 import { OmpHarness } from "./test-utils/omp-harness.js";
+import { FakeOmp } from "./test-utils/fake-omp.js";
 
 const TURN_LIFECYCLE_EVENTS = new Set<AgentStreamEvent["type"]>([
   "turn_started",
