@@ -12,7 +12,7 @@ import {
 export type DaemonClientConfig = Omit<
   SharedDaemonClientConfig,
   "webSocketFactory" | "transportFactory" | "clientId"
-> & { clientId?: string };
+> & { clientId?: string; onWebSocket?: (socket: WebSocket) => void };
 export type CreateAgentOptions = CreateAgentRequestOptions;
 export { type SendMessageOptions, type DaemonEvent, type DaemonEventHandler };
 
@@ -25,14 +25,16 @@ function nextTestClientId(): string {
 
 export class DaemonClient extends SharedDaemonClient {
   constructor(config: DaemonClientConfig) {
+    const { onWebSocket, ...clientConfig } = config;
     const clientId = config.clientId ?? nextTestClientId();
     super({
-      ...config,
+      ...clientConfig,
       clientId,
-      webSocketFactory: (url, options) =>
-        new WebSocket(url, options?.protocols, {
-          headers: options?.headers,
-        }) as unknown as WebSocketLike,
+      webSocketFactory: (url, options) => {
+        const socket = new WebSocket(url, options?.protocols, { headers: options?.headers });
+        onWebSocket?.(socket);
+        return socket as unknown as WebSocketLike;
+      },
     });
   }
 }

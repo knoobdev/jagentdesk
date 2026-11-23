@@ -5,6 +5,7 @@ import {
   deleteJAgentDeskWorktree,
   isJAgentDeskOwnedWorktreeCwd,
   mapWorkspaceCwdToWorktree,
+  runWorktreeTeardownCommands,
   slugify,
   type CreateWorktreeOptions,
   type WorktreeConfig,
@@ -96,7 +97,15 @@ describe("jagentdesk worktree manager", () => {
     expect(existsSync(created.worktreePath)).toBe(true);
 
     const ownership = await isJAgentDeskOwnedWorktreeCwd(created.worktreePath, { jagentdeskHome });
-    expect(ownership.allowed).toBe(true);
+    expect(ownership).toMatchObject({ allowed: true, worktreePath: created.worktreePath });
+    // Windows may report the same root through native 8.3 and JS long spellings.
+    const nativeWorktreePath = realpathSync.native(created.worktreePath);
+    await expect(
+      runWorktreeTeardownCommands({
+        worktreePath: created.worktreePath,
+        teardownCwd: nativeWorktreePath,
+      }),
+    ).resolves.toEqual([]);
     await expect(
       isJAgentDeskOwnedWorktreeCwd(join(created.worktreePath, "packages", "app"), {
         jagentdeskHome,

@@ -155,7 +155,7 @@ export interface WorkspaceRegistry {
     workspaceId: string,
     archivedAt: string,
     context?: WorkspaceArchiveContext,
-  ): Promise<void>;
+  ): Promise<boolean>;
   remove(workspaceId: string): Promise<void>;
   /** Central lifecycle seam for daemon-global workspace observers. */
   subscribeToMutations?(
@@ -230,17 +230,6 @@ class FileBackedRegistry<TRecord extends RegistryRecord> {
     this.cache.set(id, next);
     await this.enqueuePersist();
     return next;
-  }
-
-  async archive(id: string, archivedAt: string): Promise<void> {
-    await this.archiveIfPresent(id, archivedAt);
-  }
-
-  protected async archiveIfPresent(id: string, archivedAt: string): Promise<TRecord | null> {
-    await this.load();
-    const existing = this.cache.get(id);
-    if (!existing) return null;
-    return this.persistArchive(existing, archivedAt);
   }
 
   protected async archiveIfActive(id: string, archivedAt: string): Promise<TRecord | null> {
@@ -416,7 +405,7 @@ export class FileBackedProjectRegistry
     return project;
   }
 
-  override async archive(projectId: string, archivedAt: string): Promise<void> {
+  async archive(projectId: string, archivedAt: string): Promise<void> {
     const project = await this.archiveIfActive(projectId, archivedAt);
     if (!project) return;
     await this.notifyMutation({ kind: "archive", projectId, project });
@@ -486,21 +475,27 @@ export class FileBackedWorkspaceRegistry
     });
   }
 
-  override async archive(
+  async archive(
     workspaceId: string,
     archivedAt: string,
     context?: WorkspaceArchiveContext,
-  ): Promise<void> {
-    const workspace = await super.update(workspaceId, (existing) => ({
-      ...existing,
-      updatedAt: archivedAt,
-      archivedAt,
-      ...(context?.autoArchivedChangeRequestUrl
-        ? { autoArchivedChangeRequestUrl: context.autoArchivedChangeRequestUrl }
-        : {}),
-    }));
-    if (!workspace) return;
+  ): Promise<boolean> {
+    let archived = false;
+    const workspace = await super.update(workspaceId, (existing) => {
+      if (existing.archivedAt) return existing;
+      archived = true;
+      return {
+        ...existing,
+        updatedAt: archivedAt,
+        archivedAt,
+        ...(context?.autoArchivedChangeRequestUrl
+          ? { autoArchivedChangeRequestUrl: context.autoArchivedChangeRequestUrl }
+          : {}),
+      };
+    });
+    if (!workspace || !archived) return false;
     await this.notifyMutation({ kind: "archive", workspaceId, workspace });
+    return true;
   }
 
   override async remove(workspaceId: string): Promise<void> {

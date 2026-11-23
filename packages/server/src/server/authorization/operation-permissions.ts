@@ -1,6 +1,8 @@
 import type { SessionInboundMessage, SessionOutboundMessage } from "../messages.js";
 import type { DaemonPermission } from "./index.js";
 
+export type PermissionRequirement = DaemonPermission | readonly DaemonPermission[] | null;
+
 type InboundOperation = SessionInboundMessage["type"];
 type OutboundOperation = SessionOutboundMessage["type"];
 
@@ -249,7 +251,7 @@ const INBOUND_PERMISSION = {
   "project.github.clone.request": "workspace.manage",
   "project.icon.get.request": "workspace.read",
   "project.icon.set.request": "workspace.manage",
-  "project.list.request": "workspace.read",
+  "project.list.request": ["workspace.read", "hub.execute"],
   "project.remove.request": "workspace.manage",
   "project.rename.request": "workspace.manage",
   project_icon_request: "workspace.read",
@@ -679,7 +681,7 @@ const INBOUND_PERMISSION = {
   "sideload.certs.revoke.request": "daemon.manage",
   "sideload.app_ids.list.request": "daemon.manage",
   "android.install.start.request": "daemon.manage",
-} as const satisfies Record<InboundOperation, DaemonPermission | null>;
+} as const satisfies Record<InboundOperation, PermissionRequirement>;
 
 const OUTBOUND_PERMISSION = {
   // Argo CD (spec 30.5): reads need daemon.read, writes daemon.manage.
@@ -947,7 +949,7 @@ const OUTBOUND_PERMISSION = {
   "project.github.clone.response": "workspace.manage",
   "project.icon.get.response": "workspace.read",
   "project.icon.set.response": "workspace.manage",
-  "project.list.response": "workspace.read",
+  "project.list.response": ["workspace.read", "hub.execute"],
   "project.remove.response": "workspace.manage",
   "project.rename.response": "workspace.manage",
   "project.update": "workspace.read",
@@ -1405,14 +1407,12 @@ const OUTBOUND_PERMISSION = {
   "sideload.auth.resolved": "daemon.manage",
   "sideload.install.progress": "daemon.manage",
   "sideload.notice": "daemon.manage",
-} as const satisfies Record<OutboundOperation, DaemonPermission | null>;
+} as const satisfies Record<OutboundOperation, PermissionRequirement>;
 
-export function requiredPermissionForInbound(operation: InboundOperation): DaemonPermission | null {
+export function requiredPermissionForInbound(operation: InboundOperation): PermissionRequirement {
   return INBOUND_PERMISSION[operation];
 }
 
-export function requiredPermissionForOutbound(
-  operation: OutboundOperation,
-): DaemonPermission | null {
+export function requiredPermissionForOutbound(operation: OutboundOperation): PermissionRequirement {
   return OUTBOUND_PERMISSION[operation];
 }

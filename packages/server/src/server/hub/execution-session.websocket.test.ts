@@ -59,6 +59,39 @@ test("Hub session applies its scoped authorization to ordinary protocol messages
   expect(hub.serverInfoPermissions()).toEqual([["hub.execute"]]);
 });
 
+test("Hub execute can list daemon projects but cannot rename them", async () => {
+  const hub = await HubRelationshipHarness.start();
+  relationship = hub;
+  await hub.beginConnectViaRpc().result;
+  hub.connectLatestLegacySocket();
+  await hub.createSiblingWorkspace(hub.repoRoot());
+
+  const listed = await hub.requestOrdinary({
+    type: "project.list.request",
+    requestId: "list-projects",
+  });
+  expect(listed).toMatchObject({
+    type: "project.list.response",
+    payload: {
+      requestId: "list-projects",
+      projects: [{ projectId: expect.any(String), projectRootPath: hub.repoRoot() }],
+    },
+  });
+  if (listed.type !== "project.list.response") throw new Error("Expected project list response");
+
+  expect(
+    await hub.requestOrdinary({
+      type: "project.rename.request",
+      requestId: "rename-project",
+      projectId: listed.payload.projects[0]?.projectId,
+      customName: "Hub rename",
+    }),
+  ).toMatchObject({
+    type: "rpc_error",
+    payload: { requestId: "rename-project", code: "access_denied" },
+  });
+});
+
 test("Hub completes the standard hello before rejecting a second hello", async () => {
   const hub = await launchRelationship();
 

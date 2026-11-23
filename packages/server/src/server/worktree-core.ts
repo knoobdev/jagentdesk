@@ -124,7 +124,7 @@ export async function createWorktreeCore(
     return {
       worktree: {
         ...existingWorktree,
-        comparisonBaseRef: resolveReusedWorktreeComparisonBase(
+        comparisonBaseRef: await resolveReusedWorktreeComparisonBase(
           intent,
           existingWorktree.worktreePath,
         ),
@@ -204,12 +204,12 @@ function normalizeWorktreeSlug(value: string): string {
 
 // A reused worktree keeps the comparison base recorded when it was created; a worktree
 // without JAgentDesk metadata falls back to the base the request named.
-function resolveReusedWorktreeComparisonBase(
+async function resolveReusedWorktreeComparisonBase(
   intent: WorktreeCreationIntent,
   worktreePath: string,
-): string | null {
+): Promise<string | null> {
   if (intent.kind === "checkout-branch") return null;
-  const metadata = readJAgentDeskWorktreeMetadata(worktreePath);
+  const metadata = await readJAgentDeskWorktreeMetadata(worktreePath);
   if (metadata) return metadata.baseRef ?? metadata.baseRefName;
   return normalizeBaseRefName(
     intent.kind === "branch-off" ? intent.baseBranch : intent.baseRefName,

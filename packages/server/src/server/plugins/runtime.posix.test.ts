@@ -1669,9 +1669,9 @@ export default function contribute(plugin: any) {
     const child = createReloadChild("blocked", events);
     const runtime = createTestRuntime({ spawnChild: () => child });
 
-    await expect(runtime.startPlugin("blocked", directory, () => false)).rejects.toThrow(
-      "Plugin start cancelled: blocked",
-    );
+    await expect(
+      runtime.startPlugin("blocked", directory, () => events.length === 0),
+    ).rejects.toThrow("Plugin start cancelled: blocked");
 
     expect(runtime.catalog()).toEqual([]);
     expect(events).toEqual(["start:blocked", "shutdown:blocked", "exit:blocked"]);
@@ -1849,4 +1849,29 @@ export default function contribute(plugin: any) {
       await runtime.stopAll();
     }
   });
+});
+
+it("does not initialize a plugin cancelled during compilation", async () => {
+  const directory = await createPlugin("cancelled-build", "export default () => {};");
+  const marker = path.join(directory, "initialized.txt");
+  await writeFile(
+    path.join(directory, "index.server.ts"),
+    `
+import { writeFileSync } from "node:fs";
+export default function contribute() {
+  writeFileSync(${JSON.stringify(marker)}, "initialized");
+  return () => {};
+}`,
+  );
+  const runtime = createTestRuntime();
+  let allowed = true;
+  try {
+    const loading = runtime.startPlugin("cancelled-build", directory, () => allowed);
+    allowed = false;
+    await expect(loading).rejects.toThrow("Plugin start cancelled: cancelled-build");
+    expect(await readTextIfPresent(marker)).toBeNull();
+    expect(runtime.catalog()).toEqual([]);
+  } finally {
+    await runtime.stopAll();
+  }
 });

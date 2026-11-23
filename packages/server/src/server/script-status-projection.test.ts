@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
@@ -7,6 +7,7 @@ import { ScriptRouteStore } from "./script-proxy.js";
 import {
   buildWorkspaceScriptPayloads,
   createScriptStatusEmitter,
+  readJAgentDeskConfigForProjection,
 } from "./script-status-projection.js";
 import { WorkspaceScriptPayloadSchema } from "@jagentdesk/protocol/messages";
 import type { ScriptHealthState } from "./script-health-monitor.js";
@@ -33,7 +34,10 @@ function createWorkspaceRepo(options?: {
   execFileSync("git", ["config", "user.name", "Test"], { cwd: repoDir, stdio: "pipe" });
   writeFileSync(path.join(repoDir, "README.md"), "hello\n");
   if (options?.jagentdeskConfig) {
-    writeFileSync(path.join(repoDir, "jagentdesk.json"), JSON.stringify(options.jagentdeskConfig, null, 2));
+    writeFileSync(
+      path.join(repoDir, "jagentdesk.json"),
+      JSON.stringify(options.jagentdeskConfig, null, 2),
+    );
   }
   execFileSync("git", ["add", "."], { cwd: repoDir, stdio: "pipe" });
   execFileSync("git", ["-c", "commit.gpgsign=false", "commit", "-m", "initial"], {
@@ -50,7 +54,7 @@ function createWorkspaceRepo(options?: {
   };
 }
 
-function buildPayloads(input: {
+async function buildPayloads(input: {
   workspaceId: string;
   workspaceDirectory: string;
   jagentdeskConfig?: JAgentDeskConfig | null;
@@ -63,7 +67,9 @@ function buildPayloads(input: {
   resolveHealth?: (hostname: string) => ScriptHealthState | null;
 }) {
   const jagentdeskConfig =
-    input.jagentdeskConfig !== undefined ? input.jagentdeskConfig : loadConfig(input.workspaceDirectory);
+    input.jagentdeskConfig !== undefined
+      ? input.jagentdeskConfig
+      : await loadConfig(input.workspaceDirectory);
   const { routeStore, serviceProxy, ...rest } = input;
   return buildWorkspaceScriptPayloads({
     ...rest,
@@ -72,8 +78,8 @@ function buildPayloads(input: {
   });
 }
 
-function loadConfig(repoRoot: string): JAgentDeskConfig | null {
-  const result = readJAgentDeskConfig(repoRoot);
+async function loadConfig(repoRoot: string): Promise<JAgentDeskConfig | null> {
+  const result = await readJAgentDeskConfig(repoRoot);
   return result.ok ? result.config : null;
 }
 
@@ -93,7 +99,7 @@ describe("script-status-projection", () => {
     ).toBeNull();
   });
 
-  it("projects plain scripts and services differently", () => {
+  it("projects plain scripts and services differently", async () => {
     const workspaceId = "workspace-plain-and-service";
     const workspace = createWorkspaceRepo({
       jagentdeskConfig: {
@@ -116,7 +122,7 @@ describe("script-status-projection", () => {
 
     try {
       expect(
-        buildPayloads({
+        await buildPayloads({
           workspaceId,
           workspaceDirectory: workspace.repoDir,
           routeStore,
@@ -154,7 +160,7 @@ describe("script-status-projection", () => {
     }
   });
 
-  it("builds service hostnames from service-provided git metadata", () => {
+  it("builds service hostnames from service-provided git metadata", async () => {
     const workspaceId = "workspace-service-metadata";
     const workspace = createWorkspaceRepo({
       branchName: "local-branch-that-should-not-be-read",
@@ -168,7 +174,7 @@ describe("script-status-projection", () => {
     const runtimeStore = new WorkspaceScriptRuntimeStore();
 
     try {
-      const payloads = buildPayloads({
+      const payloads = await buildPayloads({
         workspaceId,
         workspaceDirectory: workspace.repoDir,
         serviceProxy: routeStore,
@@ -200,7 +206,7 @@ describe("script-status-projection", () => {
     }
   });
 
-  it("projects local and public service URLs while keeping proxyUrl public-first", () => {
+  it("projects local and public service URLs while keeping proxyUrl public-first", async () => {
     const workspaceId = "workspace-public-service";
     const workspace = createWorkspaceRepo({
       jagentdeskConfig: {
@@ -214,7 +220,7 @@ describe("script-status-projection", () => {
 
     try {
       expect(
-        buildPayloads({
+        await buildPayloads({
           workspaceId,
           workspaceDirectory: workspace.repoDir,
           routeStore,
@@ -243,7 +249,7 @@ describe("script-status-projection", () => {
     }
   });
 
-  it("overlays runtime, route, and health state for running services", () => {
+  it("overlays runtime, route, and health state for running services", async () => {
     const workspaceId = "workspace-running-service";
     const workspace = createWorkspaceRepo({
       branchName: "feature/card",
@@ -273,7 +279,7 @@ describe("script-status-projection", () => {
 
     try {
       expect(
-        buildPayloads({
+        await buildPayloads({
           workspaceId,
           workspaceDirectory: workspace.repoDir,
           routeStore,
@@ -301,7 +307,7 @@ describe("script-status-projection", () => {
     }
   });
 
-  it("maps internal pending health to null on the wire", () => {
+  it("maps internal pending health to null on the wire", async () => {
     const workspaceId = "workspace-pending-health";
     const workspace = createWorkspaceRepo({
       jagentdeskConfig: {
@@ -330,7 +336,7 @@ describe("script-status-projection", () => {
 
     try {
       expect(
-        buildPayloads({
+        await buildPayloads({
           workspaceId,
           workspaceDirectory: workspace.repoDir,
           routeStore,
@@ -358,7 +364,7 @@ describe("script-status-projection", () => {
     }
   });
 
-  it("includes orphaned running runtime entries even after config removal", () => {
+  it("includes orphaned running runtime entries even after config removal", async () => {
     const workspaceId = "workspace-orphaned-service";
     const workspace = createWorkspaceRepo();
     const routeStore = new ScriptRouteStore();
@@ -381,7 +387,7 @@ describe("script-status-projection", () => {
 
     try {
       expect(
-        buildPayloads({
+        await buildPayloads({
           workspaceId,
           workspaceDirectory: workspace.repoDir,
           routeStore,
@@ -408,7 +414,7 @@ describe("script-status-projection", () => {
     }
   });
 
-  it("projects orphaned plain scripts as scripts instead of services", () => {
+  it("projects orphaned plain scripts as scripts instead of services", async () => {
     const workspaceId = "workspace-orphaned-script";
     const workspace = createWorkspaceRepo();
     const routeStore = new ScriptRouteStore();
@@ -424,7 +430,7 @@ describe("script-status-projection", () => {
 
     try {
       expect(
-        buildPayloads({
+        await buildPayloads({
           workspaceId,
           workspaceDirectory: workspace.repoDir,
           routeStore,
@@ -449,7 +455,7 @@ describe("script-status-projection", () => {
     }
   });
 
-  it("readJAgentDeskConfig fails with configPath and error when jagentdesk.json is malformed", () => {
+  it("readJAgentDeskConfig fails with configPath and error when jagentdesk.json is malformed", async () => {
     const workspace = createWorkspaceRepo();
     const configPath = path.join(workspace.repoDir, "jagentdesk.json");
     writeFileSync(
@@ -458,7 +464,7 @@ describe("script-status-projection", () => {
     );
 
     try {
-      const result = readJAgentDeskConfig(workspace.repoDir);
+      const result = await readJAgentDeskConfig(workspace.repoDir);
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error("unreachable");
       expect(result.configPath).toBe(configPath);
@@ -468,7 +474,7 @@ describe("script-status-projection", () => {
     }
   });
 
-  it("buildWorkspaceScriptPayloads given jagentdeskConfig=null still surfaces orphaned runtime scripts", () => {
+  it("buildWorkspaceScriptPayloads given jagentdeskConfig=null still surfaces orphaned runtime scripts", async () => {
     const workspaceId = "workspace-null-config";
     const workspace = createWorkspaceRepo();
     const routeStore = new ScriptRouteStore();
@@ -484,7 +490,7 @@ describe("script-status-projection", () => {
 
     try {
       expect(
-        buildPayloads({
+        await buildPayloads({
           workspaceId,
           workspaceDirectory: workspace.repoDir,
           jagentdeskConfig: null,
@@ -538,7 +544,12 @@ describe("script-status-projection", () => {
       exitCode: null,
     });
 
-    const session = { emit: vi.fn() };
+    const messages: unknown[] = [];
+    const session = {
+      emit: (message: unknown) => {
+        messages.push(message);
+      },
+    };
     const emitUpdate = createScriptStatusEmitter({
       sessions: () => [session],
       serviceProxy: routeStore,
@@ -550,7 +561,11 @@ describe("script-status-projection", () => {
     });
 
     try {
-      emitUpdate(workspaceId, [
+      const originalConfig = await readJAgentDeskConfigForProjection(
+        workspace.repoDir,
+        createTestLogger(),
+      );
+      await emitUpdate(workspaceId, [
         {
           scriptName: "api",
           hostname: "api--repo.localhost",
@@ -558,9 +573,25 @@ describe("script-status-projection", () => {
           health: "healthy",
         },
       ]);
-      await Promise.resolve();
 
-      expect(session.emit).toHaveBeenCalledWith({
+      expect(await readJAgentDeskConfigForProjection(workspace.repoDir, createTestLogger())).toBe(
+        originalConfig,
+      );
+      await emitUpdate(workspaceId, [
+        { scriptName: "api", hostname: "api--repo.localhost", port: 3001, health: "unhealthy" },
+      ]);
+      expect(messages.at(-1)).toMatchObject({
+        payload: {
+          scripts: [
+            { scriptName: "api", health: "unhealthy" },
+            { scriptName: "typecheck", health: null },
+          ],
+        },
+      });
+      expect(await readJAgentDeskConfigForProjection(workspace.repoDir, createTestLogger())).toBe(
+        originalConfig,
+      );
+      expect(messages).toContainEqual({
         type: "script_status_update",
         payload: {
           workspaceId,

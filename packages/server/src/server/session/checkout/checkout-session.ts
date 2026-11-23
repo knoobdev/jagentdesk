@@ -285,7 +285,10 @@ export class CheckoutSession {
     }
   }
 
-  async handleCommitFileDiffRequest(msg: CheckoutCommitFileDiffRequest): Promise<void> {
+  async handleCommitFileDiffRequest(
+    msg: CheckoutCommitFileDiffRequest,
+    signal?: AbortSignal,
+  ): Promise<void> {
     const { cwd, sha, path, requestId } = msg;
 
     try {
@@ -293,7 +296,7 @@ export class CheckoutSession {
       if (path.length === 0 || isAbsolute(path) || path.split(/[\\/]/).includes("..")) {
         throw new Error(`Invalid path: ${path}`);
       }
-      const file = await getCommitFileDiff({ cwd: expandTilde(cwd), sha, path });
+      const file = await getCommitFileDiff({ cwd: expandTilde(cwd), sha, path, signal });
       this.host.emit({
         type: "checkout.commits.file_diff.response",
         payload: { cwd, sha, path, file, error: null, requestId },

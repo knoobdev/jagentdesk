@@ -145,7 +145,7 @@ describe("listCheckoutCommits", () => {
     mkdirSync(join(worktreesRoot, "repo-hash"), { recursive: true });
     git(["worktree", "add", "-b", "feature", worktreeDir], repoDir);
     commitFile(worktreeDir, "feature.txt", "feature\n", "Feature work");
-    writeJAgentDeskWorktreeMetadata(worktreeDir, { baseRefName: "deleted-base" });
+    await writeJAgentDeskWorktreeMetadata(worktreeDir, { baseRefName: "deleted-base" });
 
     const { baseRef, commits } = await listCheckoutCommits({
       cwd: worktreeDir,

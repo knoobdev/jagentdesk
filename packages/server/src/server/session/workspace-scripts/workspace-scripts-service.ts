@@ -42,7 +42,7 @@ export interface WorkspaceScriptsService {
   buildSnapshot(
     workspace: PersistedWorkspaceRecord,
     project?: PersistedProjectRecord | null,
-  ): WorkspaceScriptsPayload;
+  ): Promise<WorkspaceScriptsPayload>;
   emitStatusUpdate(workspaceId: string, workspaceDirectory: string): Promise<void>;
   list(workspaceId: string): Promise<WorkspaceScriptPayload[]>;
   launch(input: { workspaceId: string; scriptName: string }): Promise<WorkspaceScriptPayload>;
@@ -106,17 +106,17 @@ export function createWorkspaceScriptsService(deps: {
     };
   }
 
-  function buildSnapshot(
+  async function buildSnapshot(
     workspace: PersistedWorkspaceRecord,
     project: PersistedProjectRecord | null = null,
-  ): WorkspaceScriptsPayload {
+  ): Promise<WorkspaceScriptsPayload> {
     if (!serviceProxy || !scriptRuntimeStore) {
       return [];
     }
     return buildWorkspaceScriptPayloads({
       workspaceId: workspace.workspaceId,
       workspaceDirectory: workspace.cwd,
-      jagentdeskConfig: readJAgentDeskConfigForProjection(workspace.cwd, logger),
+      jagentdeskConfig: await readJAgentDeskConfigForProjection(workspace.cwd, logger),
       serviceProxy,
       runtimeStore: scriptRuntimeStore,
       daemonPort: getDaemonTcpPort?.() ?? null,
@@ -133,7 +133,7 @@ export function createWorkspaceScriptsService(deps: {
       const project = await projectRegistry.get(workspace.projectId);
       emit({
         type: "script_status_update",
-        payload: { workspaceId, scripts: buildSnapshot(workspace, project) },
+        payload: { workspaceId, scripts: await buildSnapshot(workspace, project) },
       });
     } catch (error) {
       logger.warn({ err: error, workspaceId }, "Failed to project workspace script status");
@@ -197,7 +197,7 @@ export function createWorkspaceScriptsService(deps: {
     scriptName: string;
   }): Promise<WorkspaceScriptPayload> {
     const { workspace, project } = await launchProcess(input);
-    const script = buildSnapshot(workspace, project).find(
+    const script = (await buildSnapshot(workspace, project)).find(
       (entry) => entry.scriptName === input.scriptName,
     );
     if (!script) {
@@ -225,7 +225,7 @@ export function createWorkspaceScriptsService(deps: {
     // The launcher's terminal exit listener owns route removal and runtime state updates.
     await available.terminalManager.killTerminalAndWait(runtime.terminalId);
 
-    const script = buildSnapshot(workspace, project).find(
+    const script = (await buildSnapshot(workspace, project)).find(
       (entry) => entry.scriptName === input.scriptName,
     );
     if (!script) {

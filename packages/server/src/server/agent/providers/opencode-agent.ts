@@ -350,7 +350,11 @@ type OpenCodeAgentConfig = Omit<AgentSessionConfig, "providerOptions"> & {
   providerOptions: OpenCodeProviderOptions;
 };
 
-const OPENCODE_SESSION_ENV_KEYS = new Set(["JAGENTDESK_AGENT_ID", "JAGENTDESK_AGENT_CWD"]);
+const OPENCODE_SESSION_ENV_KEYS = new Set([
+  "JAGENTDESK_AGENT_ID",
+  "JAGENTDESK_AGENT_CWD",
+  "JAGENTDESK_WORKSPACE_ID",
+]);
 
 function requiresDedicatedOpenCodeServer(
   config: OpenCodeAgentConfig,

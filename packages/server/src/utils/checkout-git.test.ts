@@ -2675,7 +2675,7 @@ const x = 1;
       execFileSync("git", ["worktree", "add", workspaceDir, "contributor/old-change"], {
         cwd: repoDir,
       });
-      writeJAgentDeskWorktreeMetadata(workspaceDir, {
+      await writeJAgentDeskWorktreeMetadata(workspaceDir, {
         baseRefName: "main",
         changeRequestLookupTarget: {
           headRef: "old-change",
@@ -2715,7 +2715,7 @@ const x = 1;
     const workspaceDir = join(jagentdeskHome, "worktrees", "repo", "renamed-by-agent");
     mkdirSync(join(jagentdeskHome, "worktrees", "repo"), { recursive: true });
     execFileSync("git", ["worktree", "add", workspaceDir, "placeholder"], { cwd: repoDir });
-    writeJAgentDeskWorktreeMetadata(workspaceDir, {
+    await writeJAgentDeskWorktreeMetadata(workspaceDir, {
       baseRefName: "main",
       changeRequestLookupTarget: {
         headRef: "placeholder",
@@ -2752,7 +2752,7 @@ const x = 1;
     const workspaceDir = join(jagentdeskHome, "worktrees", "repo", "pinned-worktree");
     mkdirSync(join(jagentdeskHome, "worktrees", "repo"), { recursive: true });
     execFileSync("git", ["worktree", "add", workspaceDir, "feature/pinned"], { cwd: repoDir });
-    writeJAgentDeskWorktreeMetadata(workspaceDir, {
+    await writeJAgentDeskWorktreeMetadata(workspaceDir, {
       baseRefName: "main",
       changeRequestLookupTarget: {
         headRef: "feature/pinned",
@@ -2791,7 +2791,7 @@ const x = 1;
     execFileSync("git", ["worktree", "add", workspaceDir, "contributor/old-change-1"], {
       cwd: repoDir,
     });
-    writeJAgentDeskWorktreeMetadata(workspaceDir, {
+    await writeJAgentDeskWorktreeMetadata(workspaceDir, {
       baseRefName: "main",
       changeRequestLookupTarget: {
         headRef: "old-change",
@@ -2813,7 +2813,7 @@ const x = 1;
     execFileSync("git", ["worktree", "add", workspaceDir, "contributor/old-change"], {
       cwd: repoDir,
     });
-    writeJAgentDeskWorktreeMetadata(workspaceDir, {
+    await writeJAgentDeskWorktreeMetadata(workspaceDir, {
       baseRefName: "main",
       changeRequestLookupTarget: {
         headRef: "old-change",
@@ -2878,7 +2878,7 @@ const x = 1;
     execFileSync("git", ["worktree", "add", workspaceDir, "mixedowner/old-change"], {
       cwd: repoDir,
     });
-    writeJAgentDeskWorktreeMetadata(workspaceDir, {
+    await writeJAgentDeskWorktreeMetadata(workspaceDir, {
       baseRefName: "main",
       changeRequestLookupTarget: {
         headRef: "old-change",
@@ -2930,7 +2930,7 @@ const x = 1;
     execFileSync("git", ["worktree", "add", workspaceDir, "feature/gitlab-mr"], {
       cwd: repoDir,
     });
-    writeJAgentDeskWorktreeMetadata(workspaceDir, {
+    await writeJAgentDeskWorktreeMetadata(workspaceDir, {
       baseRefName: "main",
       changeRequestLookupTarget: {
         headRef: "feature/gitlab-mr",
@@ -2944,7 +2944,9 @@ const x = 1;
     const forge = createGitHubServiceRecordingPullRequestTargets({ requestedTargets });
 
     await renameCurrentBranch(workspaceCwd, "feature/renamed");
-    expect(readJAgentDeskWorktreeMetadata(workspaceDir)?.changeRequestLookupTarget).toMatchObject({
+    expect(
+      (await readJAgentDeskWorktreeMetadata(workspaceDir))?.changeRequestLookupTarget,
+    ).toMatchObject({
       localBranchName: "feature/renamed",
     });
     const renamedFacts = await getCheckoutSnapshotFacts(workspaceDir, { jagentdeskHome });
@@ -2980,7 +2982,7 @@ const x = 1;
     execFileSync("git", ["worktree", "add", workspaceDir, "feature/placeholder"], {
       cwd: repoDir,
     });
-    writeJAgentDeskWorktreeMetadata(workspaceDir, {
+    await writeJAgentDeskWorktreeMetadata(workspaceDir, {
       baseRefName: "main",
       changeRequestLookupTarget: {
         headRef: "feature/placeholder",
@@ -2990,10 +2992,12 @@ const x = 1;
 
     await renameCurrentBranch(workspaceDir, "feature/generated");
 
-    expect(readJAgentDeskWorktreeMetadata(workspaceDir)?.changeRequestLookupTarget).toEqual({
-      headRef: "feature/generated",
-      localBranchName: "feature/generated",
-    });
+    expect((await readJAgentDeskWorktreeMetadata(workspaceDir))?.changeRequestLookupTarget).toEqual(
+      {
+        headRef: "feature/generated",
+        localBranchName: "feature/generated",
+      },
+    );
     const facts = await getCheckoutSnapshotFacts(workspaceDir, { jagentdeskHome });
     expect(facts.isGit && facts.pullRequestLookupTarget).toMatchObject({
       headRef: "feature/generated",
@@ -3854,7 +3858,7 @@ const x = 1;
       cwd: worktree.worktreePath,
     });
 
-    const metadataPath = getJAgentDeskWorktreeMetadataPath(worktree.worktreePath);
+    const metadataPath = await getJAgentDeskWorktreeMetadataPath(worktree.worktreePath);
     rmSync(metadataPath, { force: true });
 
     const baseDiff = await getCheckoutDiff(
@@ -3877,7 +3881,7 @@ const x = 1;
       jagentdeskHome,
     });
 
-    const metadataPath = getJAgentDeskWorktreeMetadataPath(worktree.worktreePath);
+    const metadataPath = await getJAgentDeskWorktreeMetadataPath(worktree.worktreePath);
     rmSync(metadataPath, { force: true });
 
     const status = await getCheckoutStatus(worktree.worktreePath, { jagentdeskHome });

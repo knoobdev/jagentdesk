@@ -19,8 +19,13 @@ import type {
   RpcErrorMessage,
   CreateAgentWorktreeTarget,
   SessionOutboundMessage,
+  SessionInboundMessage,
 } from "../../messages.js";
-import { createJAgentDeskDaemon, type JAgentDeskDaemon, type JAgentDeskDaemonConfig } from "../../bootstrap.js";
+import {
+  createJAgentDeskDaemon,
+  type JAgentDeskDaemon,
+  type JAgentDeskDaemonConfig,
+} from "../../bootstrap.js";
 import type { WebSocketLike } from "../../websocket-server.js";
 import type {
   AgentClient,
@@ -527,6 +532,98 @@ export class HubRelationshipHarness {
     };
   }
 
+  // The fork CLI has device authorization rather than upstream's --api-key /
+  // permissions flags. New controller tests use the real local session RPCs.
+  beginConnectViaRpc(token = "ceremony-token", hubUrl = HUB_ORIGIN, execute = true): CliProcess {
+    return {
+      result: this.trackCli(
+        this.requestLocal({
+          type: "hub.management.daemon.connect.request",
+          requestId: "local-connect",
+          hubUrl,
+          token,
+          permissions: execute ? ["hub.execute"] : [],
+        }).then((message) => {
+          if (message.type !== "hub.management.daemon.connect.response")
+            throw new Error("Expected Hub connect response");
+          return message.payload.status;
+        }),
+      ),
+    };
+  }
+
+  async updatePermissionViaRpc(granted: boolean): Promise<void> {
+    const response = await this.requestLocal({
+      type: "hub.management.daemon.permissions.update.request",
+      requestId: "local-permission",
+      grant: granted ? ["hub.execute"] : [],
+      revoke: granted ? [] : ["hub.execute"],
+    });
+    if (response.type !== "hub.management.daemon.permissions.update.response")
+      throw new Error("Expected permission update response");
+  }
+
+  private async requestLocal(
+    message: SessionInboundMessage & { requestId: string },
+  ): Promise<SessionOutboundMessage> {
+    let socket: WebSocket | undefined;
+    const client = new DaemonClient({
+      url: `ws://${this.host}/ws`,
+      appVersion: "0.1.106",
+      onWebSocket: (value) => {
+        socket = value;
+      },
+    });
+    await client.connect();
+    try {
+      return await new Promise<SessionOutboundMessage>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          unsubscribe();
+          reject(new Error("Local Hub RPC timed out"));
+        }, 30000);
+        const unsubscribe = client.subscribeRawMessages((response) => {
+          if (
+            !("payload" in response) ||
+            !("requestId" in response.payload) ||
+            response.payload.requestId !== message.requestId
+          )
+            return;
+          clearTimeout(timer);
+          unsubscribe();
+          if (response.type === "rpc_error") reject(new Error(response.payload.error));
+          else resolve(response);
+        });
+        socket!.send(JSON.stringify({ type: "session", message }), (error) => {
+          if (error) {
+            clearTimeout(timer);
+            unsubscribe();
+            reject(error);
+          }
+        });
+      });
+    } finally {
+      await client.close();
+    }
+  }
+
+  async requestOrdinary(
+    message: SessionInboundMessage & { requestId: string },
+  ): Promise<SessionOutboundMessage> {
+    const socket = this.latestSocket().socket;
+    socket.receive(message);
+    return socket.messageFor(message.requestId);
+  }
+
+  async statusViaRpc(): Promise<Record<string, unknown>> {
+    const response = await this.requestLocal({
+      type: "hub.management.daemon.get_status.request",
+      requestId: "local-status",
+    });
+    if (response.type !== "hub.management.daemon.get_status.response")
+      throw new Error("Expected Hub status response");
+    return response.payload.status;
+  }
+
   async status(): Promise<Record<string, unknown>> {
     return this.runCli(["hub", "status"]);
   }
@@ -703,9 +800,9 @@ export class HubRelationshipHarness {
     this.rejectLatestSocket(code);
   }
 
-  closeLatestSocket(code: number): void {
+  closeLatestSocket(code: number, reason?: string): void {
     const socket = this.latestSocket();
-    socket.events.closed(code);
+    socket.events.closed(code, reason);
     socket.socket.close(code);
   }
 

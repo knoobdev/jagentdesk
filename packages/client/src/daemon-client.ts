@@ -1,3 +1,5 @@
+import { messageTooLargeError } from "./daemon-client-transport-utils.js";
+import { MAX_WEBSOCKET_MESSAGE_BYTES } from "@jagentdesk/protocol/websocket-message-limit";
 import type {
   ActivityGraphChangedMessage,
   ActivityGraphGetResponsePayload,
@@ -1803,7 +1805,7 @@ function toReasonCode(reason: string | null | undefined): string | null {
 }
 
 interface PendingSend {
-  message: SessionInboundMessage;
+  send: () => void;
   resolve: () => void;
   reject: (error: Error) => void;
   timeoutHandle: ReturnType<typeof setTimeout>;
@@ -1835,6 +1837,19 @@ export interface SpecModeSetupPreviewResult {
   files: string[];
   missingTools: string[];
   error: SpecModeError | null;
+}
+
+function assertTransportFrameFits(frame: string | Uint8Array | ArrayBuffer): void {
+  if (typeof frame !== "string") {
+    if (frame.byteLength > MAX_WEBSOCKET_MESSAGE_BYTES)
+      throw messageTooLargeError(frame.byteLength, MAX_WEBSOCKET_MESSAGE_BYTES);
+    return;
+  }
+  // UTF-8 needs at most three bytes per UTF-16 unit, so only a string near the limit is measured.
+  if (frame.length * 3 <= MAX_WEBSOCKET_MESSAGE_BYTES) return;
+  const size = new TextEncoder().encode(frame).byteLength;
+  if (size > MAX_WEBSOCKET_MESSAGE_BYTES)
+    throw messageTooLargeError(size, MAX_WEBSOCKET_MESSAGE_BYTES);
 }
 
 export class DaemonClient {
@@ -2381,13 +2396,19 @@ export class DaemonClient {
     }
     const payload = SessionInboundMessageSchema.parse(message);
     try {
-      this.transport.send(JSON.stringify({ type: "session", message: payload }));
+      this.sendTransportFrame(JSON.stringify({ type: "session", message: payload }));
     } catch (error) {
       if (this.config.suppressSendErrors) {
         return;
       }
       throw error instanceof Error ? error : new Error(String(error));
     }
+  }
+
+  private sendTransportFrame(frame: string | Uint8Array | ArrayBuffer): void {
+    if (!this.transport) throw new DaemonConnectionError("Transport not connected");
+    assertTransportFrameFits(frame);
+    this.transport.send(frame);
   }
 
   private sendBinaryFrame(frame: Uint8Array): void {
@@ -2398,7 +2419,7 @@ export class DaemonClient {
       throw new Error(`Transport not connected (status: ${this.connectionState.status})`);
     }
     try {
-      this.transport.send(frame);
+      this.sendTransportFrame(frame);
     } catch (error) {
       if (this.config.suppressSendErrors) {
         return;
@@ -2414,12 +2435,22 @@ export class DaemonClient {
    * This prevents waiters from hanging forever when called during connection.
    */
   private sendSessionMessageOrThrow(message: SessionInboundMessage): Promise<void> {
+    return this.sendWhenConnected(() => {
+      const payload = SessionInboundMessageSchema.parse(message);
+      this.sendTransportFrame(JSON.stringify({ type: "session", message: payload }));
+    });
+  }
+
+  private whenConnected(): Promise<void> {
+    return this.sendWhenConnected(() => undefined);
+  }
+
+  private sendWhenConnected(send: () => void): Promise<void> {
     const status = this.connectionState.status;
 
     // If connected, send immediately
     if (this.transport && status === "connected") {
-      const payload = SessionInboundMessageSchema.parse(message);
-      this.transport.send(JSON.stringify({ type: "session", message: payload }));
+      send();
       return Promise.resolve();
     }
 
@@ -2440,7 +2471,7 @@ export class DaemonClient {
           );
         }, DEFAULT_SEND_QUEUE_TIMEOUT_MS);
 
-        this.pendingSendQueue.push({ message, resolve, reject, timeoutHandle });
+        this.pendingSendQueue.push({ send, resolve, reject, timeoutHandle });
       });
     }
 
@@ -2459,8 +2490,7 @@ export class DaemonClient {
       clearTimeout(pending.timeoutHandle);
       try {
         if (this.transport && this.connectionState.status === "connected") {
-          const payload = SessionInboundMessageSchema.parse(pending.message);
-          this.transport.send(JSON.stringify({ type: "session", message: payload }));
+          pending.send();
           pending.resolve();
         } else {
           pending.reject(new DaemonConnectionError("Connection lost before message could be sent"));
@@ -2614,7 +2644,7 @@ export class DaemonClient {
     }
     const payload = SessionInboundMessageSchema.parse(message);
     try {
-      this.transport.send(JSON.stringify({ type: "session", message: payload }));
+      this.sendTransportFrame(JSON.stringify({ type: "session", message: payload }));
     } catch (error) {
       throw error instanceof Error ? error : new Error(String(error));
     }
@@ -2789,7 +2819,7 @@ export class DaemonClient {
     this.pingProbe = probe;
 
     try {
-      this.transport.send(JSON.stringify({ type: "ping" }));
+      this.sendTransportFrame(JSON.stringify({ type: "ping" }));
     } catch (error) {
       this.clearPingProbe();
       const sendError = error instanceof Error ? error : new Error(String(error));
@@ -5864,6 +5894,8 @@ export class DaemonClient {
     if (!bytes) {
       throw new Error("File bytes are required.");
     }
+    // The file frames bypass the send queue, so start only on an open connection.
+    await this.whenConnected();
     const uploadTransport = this.transport;
     const resolvedRequestId = this.createRequestId(input.requestId);
     const modifiedAt = input.modifiedAt ?? new Date().toISOString();
@@ -10716,7 +10748,7 @@ export class DaemonClient {
     }
 
     try {
-      this.transport.send(
+      this.sendTransportFrame(
         JSON.stringify({
           type: "hello",
           clientId: this.config.clientId,
@@ -10842,7 +10874,7 @@ export class DaemonClient {
     try {
       // This is intentionally sent before hello so the desktop can show the
       // device identity while the mobile screen is waiting for the code.
-      this.transport.send(JSON.stringify({ type: "session", message }));
+      this.sendTransportFrame(JSON.stringify({ type: "session", message }));
     } catch (error) {
       this.logger.debug(
         { error: error instanceof Error ? error.message : String(error) },
@@ -10905,7 +10937,7 @@ export class DaemonClient {
     try {
       // This send is pre-hello, so it bypasses sendSessionMessageOrThrow and
       // sendSessionMessage, which gate on connection state.
-      this.transport.send(JSON.stringify({ type: "session", message }));
+      this.sendTransportFrame(JSON.stringify({ type: "session", message }));
     } catch (error) {
       const sendError = error instanceof Error ? error : new Error(String(error));
       cancel(sendError);

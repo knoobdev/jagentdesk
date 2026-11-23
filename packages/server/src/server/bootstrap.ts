@@ -9,7 +9,8 @@ import { createServer as createHTTPServer, type IncomingMessage, type ServerResp
 import { constants, existsSync, unlinkSync } from "fs";
 import { open } from "fs/promises";
 import { randomUUID } from "node:crypto";
-import { homedir, hostname as getHostname } from "node:os";
+import { homedir } from "node:os";
+import { getHostName } from "./host-name.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -573,7 +574,7 @@ function mountWebUi(
     createWebUiMiddleware({
       enabled: config.webUi?.enabled ?? false,
       distDir: config.webUi?.distDir ?? null,
-      label: getHostname(),
+      label: getHostName(),
       logger,
     }),
   );
@@ -866,7 +867,7 @@ export async function createJAgentDeskDaemon(
     res.json({
       status: "server_info",
       serverId,
-      hostname: getHostname(),
+      hostname: getHostName(),
       version: daemonVersion,
       listen: formatListenTarget(boundListenTarget ?? listenTarget),
     });
@@ -893,6 +894,9 @@ export async function createJAgentDeskDaemon(
     try {
       fileHandle = await open(entry.absolutePath, DOWNLOAD_OPEN_FLAGS);
       const fileStats = await fileHandle.stat();
+      if (res.destroyed) {
+        return;
+      }
       if (!fileStats.isFile()) {
         res.status(404).json({ error: "File not found" });
         return;
@@ -905,6 +909,7 @@ export async function createJAgentDeskDaemon(
 
       const stream = fileHandle.createReadStream();
       fileHandle = null;
+      res.once("close", () => stream.destroy());
       stream.on("error", (err) => {
         logger.error({ err }, "Failed to stream download");
         if (!res.headersSent) {

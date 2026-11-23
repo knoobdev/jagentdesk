@@ -74,6 +74,7 @@ function sendAndWait(message: PluginProcessMessage): Promise<void> {
   });
 }
 
+import { initializeEnvironmentProxy } from "../network/index.js";
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -268,6 +269,7 @@ const transportFactory = createPluginDaemonTransportFactory({
 });
 
 async function initialize(message: Extract<PluginProcessRequest, { type: "initialize" }>) {
+  initializeEnvironmentProxy();
   daemonClient = new DaemonClient({
     url: `ipc://plugin/${encodeURIComponent(message.pluginId)}`,
     clientId: createPluginClientId(message.pluginId),

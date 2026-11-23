@@ -107,3 +107,35 @@ describe("getCommitFileDiff", () => {
     expect(file?.deletions).toBe(0);
   });
 });
+
+it("identical commit-file requests from two requesters both retain syntax tokens", async () => {
+  const repoDir = initRepo();
+  const original = "const value = Math.max(42, 7);\n".repeat(3_000);
+  commitFile(repoDir, "file.ts", original, "initial");
+  commitFile(repoDir, "file.ts", original.replace("42", "43"), "edit");
+  const input = { cwd: repoDir, sha: headSha(repoDir), path: "file.ts" };
+  const results = await Promise.all([getCommitFileDiff(input), getCommitFileDiff(input)]);
+  for (const file of results) {
+    expect(
+      file?.hunks[0].lines
+        .find((line) => line.type === "add")
+        ?.tokens?.some((token) => token.style !== null),
+    ).toBe(true);
+  }
+});
+
+it("an aborted requester omits syntax tokens", async () => {
+  const repoDir = initRepo();
+  commitFile(repoDir, "file.ts", "const value = 42;\n", "initial");
+  commitFile(repoDir, "file.ts", "const value = 43;\n", "edit");
+  const signal = AbortSignal.abort();
+  const result = await getCommitFileDiff({
+    cwd: repoDir,
+    sha: headSha(repoDir),
+    path: "file.ts",
+    signal,
+  });
+  expect(
+    result?.hunks.flatMap((hunk) => hunk.lines).every((line) => line.tokens === undefined),
+  ).toBe(true);
+});

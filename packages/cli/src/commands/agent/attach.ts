@@ -1,3 +1,4 @@
+import { waitForStop } from "../../utils/wait-for-stop.js";
 import type { Command } from "commander";
 
 export function addAttachOptions(cmd: Command): Command {
@@ -133,6 +134,10 @@ export async function runAttachCommand(
     }
     const resolvedId = fetchResult.agent.id;
 
+    // Listen before output or history awaits: a closed reader can report EPIPE
+    // while history is loading. Keep that stop request until the follow loop.
+    const stopped = waitForStop();
+
     // Print header
     console.log(`Attaching to agent ${resolvedId.substring(0, 7)}...`);
     console.log(`(Press Ctrl+C to detach)\n`);
@@ -160,31 +165,10 @@ export async function runAttachCommand(
       printStreamEvent(message.payload.event);
     });
 
-    // Handle Ctrl+C to detach gracefully
-    let detached = false;
-    const detach = () => {
-      if (detached) return;
-      detached = true;
-
-      console.log("\n\nDetaching from agent...");
-      unsubscribe();
-      client
-        .close()
-        .then(() => {
-          process.exit(0);
-        })
-        .catch(() => {
-          process.exit(1);
-        });
-    };
-
-    process.on("SIGINT", detach);
-    process.on("SIGTERM", detach);
-
-    // Keep the process alive
-    await new Promise(() => {
-      // Wait indefinitely until interrupted
-    });
+    await stopped;
+    console.log("\n\nDetaching from agent...");
+    unsubscribe();
+    await client.close();
   } catch (err) {
     await client.close().catch(() => {});
     const message = err instanceof Error ? err.message : String(err);

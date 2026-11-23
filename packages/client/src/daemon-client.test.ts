@@ -6114,6 +6114,70 @@ test("waitForFinish with timeout=0 omits timeoutMs and has no client deadline", 
   }
 });
 
+test("uploadFile started while connecting waits for the connection and uploads", async () => {
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "upload-while-connecting",
+    logger: createMockLogger(),
+    reconnect: { enabled: false },
+    suppressSendErrors: true,
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+  const connection = client.connect();
+  expect(client.getConnectionState().status).toBe("connecting");
+
+  const upload = client.uploadFile({
+    fileName: "notes.txt",
+    mimeType: "text/plain",
+    bytes: new TextEncoder().encode("hello world"),
+    modifiedAt: "2026-05-02T00:00:00.000Z",
+    requestId: "req-upload-connecting",
+    chunkSize: 5,
+  });
+  void upload.catch(() => undefined);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  mock.triggerOpen();
+  await connection;
+
+  await vi.waitFor(() => {
+    const frames = mock.sent
+      .filter((frame) => typeof frame !== "string")
+      .map(assertUint8Array)
+      .map(decodeFileTransferFrame);
+    expect(frames.map((frame) => frame.opcode)).toEqual([
+      FileTransferOpcode.FileBegin,
+      FileTransferOpcode.FileChunk,
+      FileTransferOpcode.FileChunk,
+      FileTransferOpcode.FileChunk,
+      FileTransferOpcode.FileEnd,
+    ]);
+  });
+  const requestIndex = mock.sent.findIndex(
+    (frame) =>
+      typeof frame === "string" && parseSentFrame(frame).requestId === "req-upload-connecting",
+  );
+  expect(parseSentFrame(mock.sent[requestIndex])).toMatchObject({ type: "file.upload.request" });
+  expect(requestIndex).toBeLessThan(mock.sent.findIndex((frame) => typeof frame !== "string"));
+
+  const file = {
+    type: "uploaded_file" as const,
+    id: "upload_req-upload-connecting",
+    fileName: "notes.txt",
+    mimeType: "text/plain",
+    size: 11,
+    path: "/tmp/jagentdesk-uploads/upload_req-upload-connecting/notes.txt",
+  };
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "file.upload.response",
+      payload: { requestId: "req-upload-connecting", file, error: null },
+    }),
+  );
+  await expect(upload).resolves.toEqual({ requestId: "req-upload-connecting", file, error: null });
+});
+
 test("uploadFile stops sending chunks when the connection closes between sends", async () => {
   const mock = createMockTransport();
   const client = new DaemonClient({
@@ -6368,4 +6432,30 @@ test("remote_exec.job_updated pushes reach onRemoteExecJobUpdated", async () => 
 
   expect(updates).toEqual([event]);
   off();
+});
+
+test("measures an outbound message in UTF-8 bytes against the daemon's message limit", async () => {
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "message_limit_unit_test",
+    transportFactory: () => mock.transport,
+    reconnect: { enabled: false },
+  });
+  clients.push(client);
+  const connectPromise = client.connect();
+  mock.triggerOpen();
+  await connectPromise;
+  const mib = 1024 * 1024;
+
+  // "é" is one UTF-16 unit but two UTF-8 bytes, so this text is ~98 MiB on the wire.
+  void client.sendMessage("agent-1", "é".repeat(49 * mib)).catch(() => undefined);
+  expect(mock.sent).toHaveLength(1);
+
+  // ~60M characters is under the 100 MiB limit; ~120 MiB of UTF-8 is over it.
+  await expect(client.sendMessage("agent-1", "é".repeat(60 * mib))).rejects.toThrow(
+    "Message is too large to send (120.0 MiB). The limit is 100.0 MiB",
+  );
+  expect(mock.sent).toHaveLength(1);
+  expect(client.getConnectionState().status).toBe("connected");
 });

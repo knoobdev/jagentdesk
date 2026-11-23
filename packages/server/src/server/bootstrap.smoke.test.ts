@@ -6,7 +6,11 @@ import pino from "pino";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { WebSocket } from "ws";
 
-import { createJAgentDeskDaemon, parseListenString, type JAgentDeskDaemonConfig } from "./bootstrap.js";
+import {
+  createJAgentDeskDaemon,
+  parseListenString,
+  type JAgentDeskDaemonConfig,
+} from "./bootstrap.js";
 import { AgentManagerShuttingDownError } from "./agent/agent-manager.js";
 import { hashDaemonPassword } from "./auth.js";
 import { generateLocalPairingOffer } from "./pairing-offer.js";
@@ -167,7 +171,9 @@ describe("jagentdesk daemon bootstrap", () => {
       throw new Error("Expected occupied TCP address");
     }
 
-    const jagentdeskHomeRoot = await mkdtemp(path.join(os.tmpdir(), "jagentdesk-standalone-rollback-"));
+    const jagentdeskHomeRoot = await mkdtemp(
+      path.join(os.tmpdir(), "jagentdesk-standalone-rollback-"),
+    );
     const jagentdeskHome = path.join(jagentdeskHomeRoot, ".jagentdesk");
     const staticDir = await mkdtemp(path.join(os.tmpdir(), "jagentdesk-static-"));
     await mkdir(jagentdeskHome, { recursive: true });
@@ -388,11 +394,11 @@ describe("jagentdesk daemon bootstrap", () => {
 
   test("rolls back already-open standalone listener when main daemon listen fails", async () => {
     const mainPort = await findFreePort();
-    const standalonePort = await findFreePort();
     const occupiedMain = http.createServer((_req, res) => {
       res.end("occupied-main");
     });
     await new Promise<void>((resolve) => occupiedMain.listen(mainPort, "127.0.0.1", resolve));
+    const standalonePort = await findFreePort();
 
     const jagentdeskHomeRoot = await mkdtemp(path.join(os.tmpdir(), "jagentdesk-main-rollback-"));
     const jagentdeskHome = path.join(jagentdeskHomeRoot, ".jagentdesk");
@@ -606,7 +612,9 @@ describe("jagentdesk daemon bootstrap", () => {
   test.skipIf(isPlatform("win32"))(
     "generates a tailnet pairing offer when a direct address is configured",
     async () => {
-      const jagentdeskHomeRoot = await mkdtemp(path.join(os.tmpdir(), "jagentdesk-socket-tailnet-"));
+      const jagentdeskHomeRoot = await mkdtemp(
+        path.join(os.tmpdir(), "jagentdesk-socket-tailnet-"),
+      );
       const jagentdeskHome = path.join(jagentdeskHomeRoot, ".jagentdesk");
       const staticDir = await mkdtemp(path.join(os.tmpdir(), "jagentdesk-static-"));
       const socketPath = path.join(jagentdeskHomeRoot, "run", "jagentdesk.sock");

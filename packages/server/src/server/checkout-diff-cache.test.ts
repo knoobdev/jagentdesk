@@ -114,3 +114,22 @@ test("active reads survive completed-payload eviction and failed reads can retry
     }),
   ).toEqual({ diff: "retry" });
 });
+
+test("superseding a diff cancels its highlighting while identical readers share work", async () => {
+  const cache = new CheckoutDiffCache(() => 0);
+  const release = Promise.withResolvers<{ diff: string }>();
+  let activeSignal: AbortSignal | undefined;
+  const load = (signal: AbortSignal) => {
+    activeSignal = signal;
+    return release.promise;
+  };
+  const first = cache.read({ cwd: "repo", compare: { mode: "base" }, load });
+  await Promise.resolve();
+  expect(activeSignal).toBeDefined();
+  expect(activeSignal!.aborted).toBe(false);
+  expect(cache.read({ cwd: "repo", compare: { mode: "base" }, load })).toBe(first);
+  cache.invalidate("repo", "base");
+  expect(activeSignal!.aborted).toBe(true);
+  release.resolve({ diff: "old snapshot" });
+  await first;
+});

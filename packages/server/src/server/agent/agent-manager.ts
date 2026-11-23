@@ -1,3 +1,4 @@
+import { ensureAgentLoaded } from "./agent-loading.js";
 import { randomUUID } from "node:crypto";
 import { projectTimelineRows } from "./timeline-projection.js";
 import { isDefaultAgentCreateConfigUnattended } from "./create-agent-mode.js";
@@ -139,6 +140,23 @@ export type AgentRunCancellationResult =
   | { status: "not_running" }
   | { status: "settled" }
   | { status: "refused" };
+
+async function resolveResumePurpose(
+  record: StoredAgentRecord | null,
+  requested: AgentResumePurpose | undefined,
+  cwd: string,
+): Promise<AgentResumePurpose> {
+  if (!record) return requested ?? "interactive";
+  if (record.archivedAt) return "history";
+  if (requested !== "history") return "interactive";
+  try {
+    await stat(cwd);
+    return "interactive";
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "history";
+    throw error;
+  }
+}
 
 interface PreparedSessionConfig {
   storedConfig: AgentSessionConfig;
@@ -613,6 +631,36 @@ function createAbortError(signal: AbortSignal | undefined, fallbackMessage: stri
   return Object.assign(new Error(message), { name: "AbortError" });
 }
 
+// JAGENTDESK_WORKSPACE_ID lets an agent rename or archive its own workspace; several workspaces can
+// share one cwd, so the agent can't work it out from JAGENTDESK_AGENT_CWD.
+function agentIdentityEnv({
+  agentId,
+  cwd,
+  opening,
+}: {
+  agentId: string;
+  cwd: string;
+  opening: { workspaceId?: string | null } | undefined;
+}): Record<string, string> {
+  const workspaceId = opening?.workspaceId;
+  return {
+    JAGENTDESK_AGENT_ID: agentId,
+    JAGENTDESK_AGENT_CWD: cwd,
+    ...(workspaceId ? { JAGENTDESK_WORKSPACE_ID: workspaceId } : {}),
+  };
+}
+
+// Launch env and the registered agent must agree, or the next snapshot erases the stored workspace.
+function resolveResumeWorkspaceId({
+  options,
+  record,
+}: {
+  options: { workspaceId?: string } | undefined;
+  record: Pick<StoredAgentRecord, "workspaceId"> | null;
+}): string | undefined {
+  return options?.workspaceId ?? record?.workspaceId;
+}
+
 function validateAgentId(agentId: string, source: string): string {
   const result = AgentIdSchema.safeParse(agentId);
   if (!result.success) {
@@ -747,6 +795,7 @@ export class AgentManager {
   private readonly backgroundTasks = new Set<Promise<void>>();
   private readonly agentRegistrationTasks = new Set<Promise<void>>();
   private readonly inFlightAgentCloses = new Map<string, Promise<void>>();
+  private readonly historySessions = new WeakSet<AgentSession>();
   private readonly lifecycleMutationTails = new Map<string, Promise<void>>();
   private readonly agentStreamCoalescer: AgentStreamCoalescer;
   private mcpBaseUrl: string | null;
@@ -1258,6 +1307,7 @@ export class AgentManager {
       client,
       storedConfig.cwd,
       options?.env,
+      { workspaceId: options.workspaceId },
     );
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
     const createOptions = this.buildCreateSessionOptions(options);
@@ -1328,7 +1378,10 @@ export class AgentManager {
     } as AgentSessionConfig;
     // A history load reads an archived agent whose working directory may be gone, so only
     // an interactive resume requires the directory to exist.
-    const purpose = resumeOptions?.purpose ?? "interactive";
+    const record = this.registry ? await this.registry.get(resolvedAgentId) : null;
+    const purpose = await resolveResumePurpose(record, resumeOptions?.purpose, mergedConfig.cwd);
+    const currentResumeOptions = { purpose } satisfies AgentResumeSessionOptions;
+    const workspaceId = resolveResumeWorkspaceId({ options, record });
     const { storedConfig, launchConfig } = await this.prepareSessionConfig(
       mergedConfig,
       resolvedAgentId,
@@ -1342,17 +1395,25 @@ export class AgentManager {
         `Provider '${handle.provider}' is not available. Please ensure the CLI is installed.`,
       );
     }
-    const launchContext = await this.buildLaunchContext(resolvedAgentId, client, storedConfig.cwd);
+    const launchContext = await this.buildLaunchContext(
+      resolvedAgentId,
+      client,
+      storedConfig.cwd,
+      undefined,
+      { workspaceId },
+    );
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
     const session = await client.resumeSession(
       handle,
       providerLaunchConfig,
       launchContext,
-      resumeOptions,
+      currentResumeOptions,
     );
+    if (purpose === "history") this.historySessions.add(session);
     await this.requireExternalMcpSupport(session, storedConfig);
     return this.registerSession(session, storedConfig, resolvedAgentId, {
       ...options,
+      workspaceId,
       persistence: handle,
     });
   }
@@ -1391,7 +1452,13 @@ export class AgentManager {
       resolvedAgentId,
       { resolveDefaultModel: false },
     );
-    const launchContext = await this.buildLaunchContext(resolvedAgentId, client, storedConfig.cwd);
+    const launchContext = await this.buildLaunchContext(
+      resolvedAgentId,
+      client,
+      storedConfig.cwd,
+      undefined,
+      { workspaceId: input.workspaceId },
+    );
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
     const imported = await client.importSession(
       {
@@ -1478,7 +1545,13 @@ export class AgentManager {
       provider,
     } as AgentSessionConfig;
     const { storedConfig, launchConfig } = await this.prepareSessionConfig(refreshConfig, agentId);
-    const launchContext = await this.buildLaunchContext(agentId, client, storedConfig.cwd);
+    const launchContext = await this.buildLaunchContext(
+      agentId,
+      client,
+      storedConfig.cwd,
+      undefined,
+      { workspaceId: existing.workspaceId },
+    );
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
 
     const session = handle
@@ -1812,7 +1885,7 @@ export class AgentManager {
   }
 
   async setAgentMode(agentId: string, modeId: string): Promise<AgentProviderNotice | null> {
-    const agent = this.requireSessionAgent(agentId);
+    const agent = await this.ensureInteractiveSession(agentId);
     const notice = (await agent.session.setMode(modeId)) ?? null;
     await this.drainSessionEvents(agentId);
     const currentMode = (await agent.session.getCurrentMode()) ?? modeId;
@@ -1886,7 +1959,13 @@ export class AgentManager {
 
     const client = this.requireClient(provider);
     const { storedConfig, launchConfig } = await this.prepareSessionConfig(newConfig, agentId);
-    const launchContext = await this.buildLaunchContext(agentId, client, storedConfig.cwd);
+    const launchContext = await this.buildLaunchContext(
+      agentId,
+      client,
+      storedConfig.cwd,
+      undefined,
+      { workspaceId: existing.workspaceId },
+    );
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
 
     // The new provider has no native session handle → create a fresh session.
@@ -1941,7 +2020,7 @@ export class AgentManager {
   }
 
   async setAgentModel(agentId: string, modelId: string | null): Promise<void> {
-    const agent = this.requireSessionAgent(agentId);
+    const agent = await this.ensureInteractiveSession(agentId);
     const normalizedModelId =
       typeof modelId === "string" && modelId.trim().length > 0 ? modelId : null;
 
@@ -1965,7 +2044,7 @@ export class AgentManager {
     agentId: string,
     thinkingOptionId: string | null,
   ): Promise<AgentProviderNotice | null> {
-    const agent = this.requireSessionAgent(agentId);
+    const agent = await this.ensureInteractiveSession(agentId);
     const normalizedThinkingOptionId =
       typeof thinkingOptionId === "string" && thinkingOptionId.trim().length > 0
         ? thinkingOptionId
@@ -1996,7 +2075,7 @@ export class AgentManager {
   }
 
   async setAgentFeature(agentId: string, featureId: string, value: unknown): Promise<void> {
-    const agent = this.requireAgent(agentId);
+    const agent = await this.ensureInteractiveSession(agentId);
 
     if (!agent.session.setFeature) {
       throw new Error("Agent session does not support setting features");
@@ -2308,8 +2387,20 @@ export class AgentManager {
    * emitted by the handler flow through dispatchStream so they persist and
    * broadcast like normal timeline events.
    */
-  tryRunOutOfBand(agentId: string, prompt: AgentPromptInput, options?: AgentRunOptions): boolean {
-    const agent = this.requireSessionAgent(agentId);
+  async tryRunOutOfBand(
+    agentId: string,
+    prompt: AgentPromptInput,
+    options?: AgentRunOptions,
+  ): Promise<boolean> {
+    if (this.inFlightAgentCloses.has(agentId) || !this.agents.has(agentId)) {
+      await this.waitForAgentClose(agentId);
+      await ensureAgentLoaded(agentId, {
+        agentManager: this,
+        agentStorage: this.requireRegistry(),
+        logger: this.logger,
+      });
+    }
+    const agent = await this.ensureInteractiveSession(agentId);
     const handler = agent.session.tryHandleOutOfBand?.(prompt);
     if (!handler) {
       return false;
@@ -2448,12 +2539,42 @@ export class AgentManager {
     }
   }
 
+  private async ensureInteractiveSession(agentId: string): Promise<ActiveManagedAgent> {
+    const agent = this.requireSessionAgent(agentId);
+    if (this.historySessions.has(agent.session)) {
+      await this.trackAgentRegistrationOperation(
+        this.runLifecycleMutation(agentId, async () => {
+          const record = await this.registry?.get(agentId);
+          if (record?.archivedAt) throw new Error(`Agent is archived: ${agentId}`);
+          const current = this.requireSessionAgent(agentId);
+          if (this.historySessions.has(current.session)) {
+            // Recheck inside the lane: another prompt may already have upgraded it.
+            // Reload validates the directory before releasing readable history.
+            await this.reloadAgentSessionInternal(agentId);
+          }
+        }),
+      );
+    }
+    return this.requireSessionAgent(agentId);
+  }
+
+  private async *streamAfterHistoryLoad(
+    agentId: string,
+    prompt: AgentPromptInput,
+    options?: AgentRunOptions,
+  ): AsyncGenerator<AgentStreamEvent> {
+    await this.ensureInteractiveSession(agentId);
+    yield* this.streamAgent(agentId, prompt, options);
+  }
+
   streamAgent(
     agentId: string,
     prompt: AgentPromptInput,
     options?: AgentRunOptions,
   ): AsyncGenerator<AgentStreamEvent> {
     const existingAgent = this.requireSessionAgent(agentId);
+    if (this.historySessions.has(existingAgent.session))
+      return this.streamAfterHistoryLoad(agentId, prompt, options);
     this.logger.trace(
       {
         agentId,
@@ -3235,7 +3356,12 @@ export class AgentManager {
   }
 
   async rewind(agentId: string, messageId: string, mode: RewindMode): Promise<void> {
-    const agent = this.requireSessionAgent(agentId);
+    let agent = this.requireSessionAgent(agentId);
+    if (this.historySessions.has(agent.session)) {
+      agent = await this.ensureInteractiveSession(agentId);
+    }
+    // An interactive session must acquire its rewind lock without yielding.
+
     const submittedRow = this.timelineStore
       .getRows(agentId)
       .find(
@@ -5340,14 +5466,14 @@ export class AgentManager {
     client: AgentClient,
     cwd: string,
     env?: Record<string, string>,
+    opening?: { workspaceId?: string | null },
   ): Promise<AgentLaunchContext> {
     const context: AgentLaunchContext = {
       agentId,
       env: {
         ...env,
         ...this.launchEnvProvider?.(agentId),
-        JAGENTDESK_AGENT_ID: agentId,
-        JAGENTDESK_AGENT_CWD: cwd,
+        ...agentIdentityEnv({ agentId, cwd, opening }),
       },
     };
     if (

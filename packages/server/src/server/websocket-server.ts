@@ -1,7 +1,7 @@
 import { WebSocket, WebSocketServer } from "ws";
 import type { IncomingMessage, Server as HTTPServer } from "http";
 import { join } from "path";
-import { hostname as getHostname } from "node:os";
+import { getHostName } from "./host-name.js";
 import { randomUUID } from "node:crypto";
 import { monitorEventLoopDelay } from "node:perf_hooks";
 import type { AgentManager, AgentMetricsSnapshot } from "./agent/agent-manager.js";
@@ -56,6 +56,7 @@ import {
 } from "./messages.js";
 import { asUint8Array, decodeBinaryFrame } from "@jagentdesk/protocol/binary-frames/index";
 import type { TerminalActivity } from "@jagentdesk/protocol/terminal-activity";
+import { MAX_WEBSOCKET_MESSAGE_BYTES } from "@jagentdesk/protocol/websocket-message-limit";
 import type { HostnamesConfig } from "./hostnames.js";
 import { isHostnameAllowed } from "./hostnames.js";
 import {
@@ -399,7 +400,7 @@ function createNoopWorkspaceRegistry(): WorkspaceRegistry {
     get: async () => null,
     update: async () => null,
     upsert: async () => {},
-    archive: async () => {},
+    archive: async () => false,
     remove: async () => {},
   };
 }
@@ -995,6 +996,7 @@ export class VoiceAssistantWebSocketServer {
     const { allowedOrigins, hostnames } = wsConfig;
     const password = auth?.password;
     const wss = new WebSocketServer({
+      maxPayload: MAX_WEBSOCKET_MESSAGE_BYTES,
       server,
       path: "/ws",
       handleProtocols: (protocols) => selectWebSocketProtocol(protocols, password),
@@ -2361,7 +2363,7 @@ export class VoiceAssistantWebSocketServer {
     return {
       status: "server_info",
       serverId: this.serverId,
-      hostname: getHostname(),
+      hostname: getHostName(),
       version: this.daemonVersion,
       // COMPAT(desktopManaged): added in v0.1.X, remove optional parsing after 2027-01-16.
       desktopManaged: this.daemonRuntimeConfig?.desktopManaged === true,

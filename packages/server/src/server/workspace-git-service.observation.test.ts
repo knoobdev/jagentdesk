@@ -1152,7 +1152,7 @@ describe("WorkspaceGitService checkout observation", () => {
       ]);
     await vi.advanceTimersByTimeAsync(1_000);
     await vi.waitFor(() => {
-      expect(getCalledCwds(getCheckoutStatus)).toEqual([WORKTREE_A, WORKTREE_B]);
+      expect(getCalledCwds(getCheckoutStatus).sort()).toEqual([WORKTREE_A, WORKTREE_B].sort());
     });
 
     first.unsubscribe();
@@ -1730,8 +1730,10 @@ describe("WorkspaceGitService checkout observation", () => {
       expect(watcher.subscribe).toHaveBeenCalledTimes(1);
     });
     await vi.advanceTimersByTimeAsync(35_000);
-    expect(service.getMetrics().workingTreeWatchSetupInFlightCount).toBe(0);
-    expect(service.getMetrics().workspaceObservationSetupAdmissionActiveCount).toBe(0);
+    await vi.waitFor(() => {
+      expect(service.getMetrics().workingTreeWatchSetupInFlightCount).toBe(0);
+      expect(service.getMetrics().workspaceObservationSetupAdmissionActiveCount).toBe(0);
+    });
     expect(getWatcherSubscribeCallCount(watcher, REPO_CWD)).toBe(1);
 
     openedSubscription.resolve({

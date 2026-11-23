@@ -1,6 +1,6 @@
+import { MAX_RELAY_WEBSOCKET_MESSAGE_BYTES } from "@jagentdesk/protocol/websocket-message-limit";
 import { resolve, dirname, basename } from "path";
-import { existsSync, realpathSync } from "fs";
-import { open as openFile, readFile, stat as statFile } from "fs/promises";
+import { open as openFile, readFile, stat as statFile, realpath, access } from "fs/promises";
 import { setImmediate } from "node:timers/promises";
 import { TTLCache } from "@isaacs/ttlcache";
 import type { CheckoutCommit, CheckoutCommitFile } from "@jagentdesk/protocol/messages";
@@ -1071,7 +1071,7 @@ async function getMainRepoRootFromCommonDir(
   if (!commonDir) {
     throw new Error("Not in a git repository");
   }
-  const normalized = realpathSync(commonDir);
+  const normalized = await realpath(commonDir);
 
   if (basename(normalized) === ".git") {
     return dirname(normalized);
@@ -1197,7 +1197,7 @@ export async function renameCurrentBranch(
 
   const currentBranch = await getCurrentBranch(cwd);
   if (currentBranch) {
-    rebindJAgentDeskWorktreeChangeRequestHint(worktreeRoot, previousBranch, currentBranch);
+    await rebindJAgentDeskWorktreeChangeRequestHint(worktreeRoot, previousBranch, currentBranch);
   }
   return { previousBranch, currentBranch };
 }
@@ -1242,8 +1242,8 @@ function storedBaseRefFromMetadata(metadata: JAgentDeskWorktreeMetadata | null):
   return metadata?.baseRef ?? metadata?.baseRefName ?? null;
 }
 
-function readJAgentDeskWorktreeBaseRef(worktreeRoot: string): string | null {
-  return storedBaseRefFromMetadata(readJAgentDeskWorktreeMetadata(worktreeRoot));
+async function readJAgentDeskWorktreeBaseRef(worktreeRoot: string): Promise<string | null> {
+  return storedBaseRefFromMetadata(await readJAgentDeskWorktreeMetadata(worktreeRoot));
 }
 
 async function getStoredBaseRefForCwd(
@@ -1517,7 +1517,12 @@ async function abortGitPullConflictState(cwd: string): Promise<void> {
   const rebaseMergePath = resolve(gitDir, "rebase-merge");
   const rebaseApplyPath = resolve(gitDir, "rebase-apply");
 
-  if (existsSync(mergeHeadPath)) {
+  if (
+    await access(mergeHeadPath).then(
+      () => true,
+      () => false,
+    )
+  ) {
     try {
       await runGitCommand(["merge", "--abort"], { cwd, timeout: 120_000 });
     } catch {
@@ -1525,7 +1530,16 @@ async function abortGitPullConflictState(cwd: string): Promise<void> {
     }
   }
 
-  if (existsSync(rebaseMergePath) || existsSync(rebaseApplyPath)) {
+  if (
+    (await access(rebaseMergePath).then(
+      () => true,
+      () => false,
+    )) ||
+    (await access(rebaseApplyPath).then(
+      () => true,
+      () => false,
+    ))
+  ) {
     try {
       await runGitCommand(["rebase", "--abort"], { cwd, timeout: 120_000 });
     } catch {
@@ -2042,7 +2056,7 @@ export async function getCheckoutSnapshotFacts(
   }
 
   const jagentdeskWorktreeMetadata = inspected.jagentdeskWorktree.isJAgentDeskOwnedWorktree
-    ? readJAgentDeskWorktreeMetadata(inspected.jagentdeskWorktree.worktreeRoot)
+    ? await readJAgentDeskWorktreeMetadata(inspected.jagentdeskWorktree.worktreeRoot)
     : null;
   const storedBaseRef = storedBaseRefFromMetadata(jagentdeskWorktreeMetadata);
   const resolvedBaseRef = storedBaseRef ?? (await resolveBaseRef(cwd, context));
@@ -2121,13 +2135,13 @@ export async function getCheckoutSnapshotFacts(
 
 const PER_FILE_DIFF_MAX_BYTES = 1024 * 1024; // 1MB
 const TOTAL_DIFF_MAX_BYTES = 2 * 1024 * 1024; // 2MB
-const RELAY_MAX_FRAME_BYTES = 32 * 1024 * 1024;
 const CHECKOUT_DIFF_FRAME_HEADROOM_BYTES = 1024 * 1024;
 // Temporary until diffs load lazily per file. The JAgentDesk relay's 32 MiB frame limit is
 // binding: string frames are encrypted and base64-encoded. Reserve 1 MiB plaintext for
 // the surrounding WebSocket JSON envelope after inverting that exact wire expansion.
 export const CHECKOUT_DIFF_MAX_STRUCTURED_BYTES =
-  maxBase64EncryptedPlaintextByteLength(RELAY_MAX_FRAME_BYTES) - CHECKOUT_DIFF_FRAME_HEADROOM_BYTES;
+  maxBase64EncryptedPlaintextByteLength(MAX_RELAY_WEBSOCKET_MESSAGE_BYTES) -
+  CHECKOUT_DIFF_FRAME_HEADROOM_BYTES;
 
 interface StructuredDiffAccumulator {
   files: ParsedDiffFile[];
@@ -2629,10 +2643,12 @@ export async function getCommitFileDiff({
   cwd,
   sha,
   path,
+  signal,
 }: {
   cwd: string;
   sha: string;
   path: string;
+  signal?: AbortSignal;
 }): Promise<ParsedDiffFile | null> {
   const { stdout } = await runGitCommand(
     ["show", sha, "--format=", "--diff-merges=first-parent", "--", path],
@@ -2647,6 +2663,7 @@ export async function getCommitFileDiff({
   }
 
   const parsedFiles = await parseAndHighlightDiff(stdout, cwd, {
+    signal,
     getOldFileContent: (file) => readGitFileContentAtRef(cwd, `${sha}^`, file.path),
     getNewFileContent: (file) => readGitFileContentAtRef(cwd, sha, file.path),
   });
@@ -3032,6 +3049,7 @@ export function warmCheckoutShortstatInBackground(
 }
 
 interface AppendStructuredTrackedDiffsInput {
+  signal?: AbortSignal;
   cwd: string;
   trackedChanges: CheckoutFileChange[];
   trackedNumstatByPath: Map<string, FileStat>;
@@ -3047,6 +3065,7 @@ interface AppendStructuredTrackedDiffsInput {
 }
 
 async function buildHighlightedTrackedDiffFile(input: {
+  signal?: AbortSignal;
   cwd: string;
   change: CheckoutFileChange;
   parsedFile: ParsedDiffFile;
@@ -3069,6 +3088,7 @@ async function buildHighlightedTrackedDiffFile(input: {
           : null,
       ]);
   const highlightedFile = await highlightDiffWithFileContent(parsedFile, cwd, {
+    signal: input.signal,
     oldFileContent,
     newFileContent,
   });
@@ -3154,6 +3174,7 @@ async function appendStructuredTrackedDiffs(
       const parsedFile = parsedTrackedByPath.get(change.path);
       if (parsedFile) {
         const file = await buildHighlightedTrackedDiffFile({
+          signal: input.signal,
           cwd,
           change,
           parsedFile,
@@ -3195,6 +3216,7 @@ async function appendStructuredTrackedDiffs(
 }
 
 interface ProcessUntrackedChangeInput {
+  signal?: AbortSignal;
   cwd: string;
   change: CheckoutFileChange;
   ignoreWhitespace: boolean;
@@ -3245,7 +3267,7 @@ async function processUntrackedChange(input: ProcessUntrackedChangeInput): Promi
   }
 
   appendDiff(text);
-  const parsed = await parseAndHighlightDiff(text, cwd);
+  const parsed = await parseAndHighlightDiff(text, cwd, { signal: input.signal });
   const parsedFile =
     parsed[0] ??
     ({
@@ -3391,6 +3413,7 @@ export async function getCheckoutDiff(
   cwd: string,
   compare: CheckoutDiffCompare,
   context?: CheckoutContext,
+  signal?: AbortSignal,
 ): Promise<CheckoutDiffResult> {
   await requireGitRepo(cwd);
 
@@ -3458,6 +3481,7 @@ export async function getCheckoutDiff(
 
   if (compare.includeStructured) {
     const didAppendTrackedDiffs = await appendStructuredTrackedDiffs({
+      signal,
       cwd,
       trackedChanges,
       trackedNumstatByPath: trackedDiff.trackedNumstatByPath,
@@ -3485,6 +3509,7 @@ export async function getCheckoutDiff(
       break;
     }
     const didAppendUntrackedDiff = await processUntrackedChange({
+      signal,
       cwd,
       change,
       ignoreWhitespace,
