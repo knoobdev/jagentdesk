@@ -47,6 +47,7 @@ import {
   type ProviderSessionConfig,
   type ProviderSetting,
   type ProviderTimelineItem,
+  type ProviderUsage,
 } from "../provider.js";
 
 const ADAPTER_CAPABILITIES = [
@@ -387,6 +388,7 @@ class AcpRuntime {
   private notificationLane: Promise<void> = Promise.resolve();
   private promptLane: Promise<void> = Promise.resolve();
   private activePrompt: { turnId: string; settled: Promise<void> } | null = null;
+  private lastUsage: ProviderUsage = {};
 
   static async start(options: StartRuntimeOptions): Promise<AcpRuntime> {
     let child: ChildProcessWithoutNullStreams | null = null;
@@ -599,6 +601,20 @@ class AcpRuntime {
       this.connection.prompt({ sessionId: this.nativeSessionId, prompt }),
     ).then(
       (response): void => {
+        if (response.usage) {
+          this.lastUsage = {
+            ...this.lastUsage,
+            inputTokens: response.usage.inputTokens,
+            outputTokens: response.usage.outputTokens,
+            cachedInputTokens: response.usage.cachedReadTokens ?? undefined,
+          };
+          this.emit({
+            type: "session.usage",
+            sessionId: this.options.boundarySessionId,
+            turnId,
+            usage: this.lastUsage,
+          });
+        }
         const state = response.stopReason === "cancelled" ? "canceled" : "completed";
         this.fallbackChunkIds.clear();
         this.terminalizeTransientItems(state);
@@ -992,14 +1008,16 @@ class AcpRuntime {
       return;
     }
     if (update.sessionUpdate === "usage_update") {
+      this.lastUsage = {
+        ...this.lastUsage,
+        contextWindowUsedTokens: update.used,
+        contextWindowMaxTokens: update.size,
+        totalCostUsd: update.cost?.currency === "USD" ? update.cost.amount : undefined,
+      };
       this.emit({
         type: "session.usage",
         sessionId: this.options.boundarySessionId,
-        usage: {
-          contextWindowUsedTokens: update.used,
-          contextWindowMaxTokens: update.size,
-          totalCostUsd: update.cost?.currency === "USD" ? update.cost.amount : undefined,
-        },
+        usage: this.lastUsage,
       });
       return;
     }
