@@ -27,6 +27,7 @@ export type ProviderSubagentInputEvent =
   | {
       type: "upsert";
       id: string;
+      parentSubagentId?: string | null;
       title?: string | null;
       description?: string | null;
       /**

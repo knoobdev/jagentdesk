@@ -1,3 +1,5 @@
+import { assertPluginTimelineDataSize } from "./agent/agent-timeline-content.js";
+import { parsePluginClientId } from "./plugins/plugin-session-identity.js";
 import equal from "fast-deep-equal";
 import { v4 as uuidv4 } from "uuid";
 import { lstat, mkdir, mkdtemp, rename, rm, stat } from "node:fs/promises";
@@ -1558,11 +1560,22 @@ export class Session {
     return true;
   }
 
+  // COMPAT(timelineItemCapabilities): added in v0.9.59; remove after 2027-05-23 once the client floor accepts these kinds.
+  private supportsTimelineItem(item: { type: string }, source?: object): boolean {
+    let capability: ClientCapability;
+    if (item.type === "plugin") capability = CLIENT_CAPS.pluginTimelineItems;
+    else if (item.type === "notification") capability = CLIENT_CAPS.timelineNotifications;
+    else return true;
+    return source ? this.supportsForSource(capability, source) : this.supports(capability);
+  }
+
   private forwardAgentStream(
     event: Extract<AgentManagerEvent, { type: "agent_stream" }>,
     serializedEvent: Extract<SessionOutboundMessage, { type: "agent_stream" }>["payload"]["event"],
   ): void {
     if (this.clientCapabilitiesBySource.size === 0 || !this.onMessageToSource) {
+      if (serializedEvent.type === "timeline" && !this.supportsTimelineItem(serializedEvent.item))
+        return;
       if (this.usesSelectiveTimelineDelivery() && serializedEvent.type === "attention_required") {
         this.emit({
           type: "agent_attention_required",
@@ -1587,6 +1600,11 @@ export class Session {
     }
 
     for (const [source, capabilities] of this.clientCapabilitiesBySource) {
+      if (
+        serializedEvent.type === "timeline" &&
+        !this.supportsTimelineItem(serializedEvent.item, source)
+      )
+        continue;
       const supportsSelectiveDelivery = capabilities.has(CLIENT_CAPS.selectiveAgentTimeline);
       if (supportsSelectiveDelivery && serializedEvent.type === "attention_required") {
         this.onMessageToSource(source, {
@@ -2091,7 +2109,10 @@ export class Session {
             // COMPAT(projectedSubagentTimeline): added after v0.8.0, remove gate after 2027-03-14.
             // Older clients keep child names/status; the child transcript needs the projected
             // fetch contract, so they get an upgrade notice when opening it instead of live rows.
-            if (!this.supports(CLIENT_CAPS.projectedSubagentTimeline)) {
+            if (
+              !this.supports(CLIENT_CAPS.projectedSubagentTimeline) ||
+              !this.supportsTimelineItem(update.row.item)
+            ) {
               return;
             }
             this.emit({
@@ -2786,6 +2807,8 @@ export class Session {
     switch (msg.type) {
       case "fetch_agent_timeline_request":
         return this.handleFetchAgentTimelineRequest(msg, source);
+      case "agent.timeline.append.request":
+        return this.handleAgentTimelineAppendRequest(msg);
       case "agent.timeline.list_prompts.request":
         return this.handleAgentTimelineListPromptsRequest(msg, source);
       case "agent.timeline.search.request":
@@ -6355,6 +6378,7 @@ export class Session {
     source?: object,
   ): void {
     for (const row of rows) {
+      if (!this.supportsTimelineItem(row.item, source)) continue;
       const event = serializeAgentStreamEvent({
         type: "timeline",
         provider,
@@ -8016,6 +8040,14 @@ export class Session {
     request: Extract<SessionInboundMessage, { type: "workspace.create.request" }>,
   ): Promise<void> {
     try {
+      if (this.pluginRuntime?.before) {
+        const { type, requestId, ...input } = request;
+        request = {
+          ...(await this.pluginRuntime.before("workspace.create", input)),
+          type,
+          requestId,
+        };
+      }
       if (request.source.kind === "directory") {
         await this.handleWorkspaceCreateLocal(request);
         return;
@@ -9015,21 +9047,23 @@ export class Session {
             hasOlder: selectedTimeline.hasOlder,
             hasNewer: selectedTimeline.hasNewer,
             ...(msg.mergeWindow === true ? { mergeWindow: true } : {}),
-            entries: selectedTimeline.entries.map((entry) => ({
-              provider: snapshot.provider,
-              item: entry.item,
-              timestamp: entry.timestamp,
-              seqStart: entry.seqStart,
-              seqEnd: entry.seqEnd,
-              sourceSeqRanges: entry.sourceSeqRanges,
-              collapsed: (
-                source
-                  ? this.supportsForSource(CLIENT_CAPS.reasoningMergeEnum, source)
-                  : this.supports(CLIENT_CAPS.reasoningMergeEnum)
-              )
-                ? entry.collapsed
-                : entry.collapsed.filter((value) => value !== "reasoning_merge"),
-            })),
+            entries: selectedTimeline.entries
+              .filter((entry) => this.supportsTimelineItem(entry.item, source))
+              .map((entry) => ({
+                provider: snapshot.provider,
+                item: entry.item,
+                timestamp: entry.timestamp,
+                seqStart: entry.seqStart,
+                seqEnd: entry.seqEnd,
+                sourceSeqRanges: entry.sourceSeqRanges,
+                collapsed: (
+                  source
+                    ? this.supportsForSource(CLIENT_CAPS.reasoningMergeEnum, source)
+                    : this.supports(CLIENT_CAPS.reasoningMergeEnum)
+                )
+                  ? entry.collapsed
+                  : entry.collapsed.filter((value) => value !== "reasoning_merge"),
+              })),
             error: null,
           },
         },
@@ -9066,6 +9100,22 @@ export class Session {
         source,
       );
     }
+  }
+
+  private async handleAgentTimelineAppendRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.timeline.append.request" }>,
+  ): Promise<void> {
+    const pluginId = parsePluginClientId(this.clientId);
+    if (!pluginId) throw new Error("Only plugin sessions can append plugin timeline items");
+    assertPluginTimelineDataSize(msg.item.data);
+    const { seq, epoch } = await this.agentManager.appendTimelineItem(msg.agentId, {
+      ...msg.item,
+      pluginId,
+    });
+    this.emit({
+      type: "agent.timeline.append.response",
+      payload: { requestId: msg.requestId, seq, epoch },
+    });
   }
 
   private async handleAgentTimelineListPromptsRequest(
@@ -9253,14 +9303,16 @@ export class Session {
             hasOlder: supportsProjection && timeline.hasOlder,
             hasNewer: supportsProjection && timeline.hasNewer,
             rows: supportsProjection
-              ? timeline.rows.map((row) => ({
-                  item: row.item,
-                  timestamp: row.timestamp,
-                  seq: row.seqEnd,
-                  seqStart: row.seqStart,
-                  seqEnd: row.seqEnd,
-                  sourceSeqRanges: row.sourceSeqRanges,
-                }))
+              ? timeline.rows
+                  .filter((row) => this.supportsTimelineItem(row.item, source))
+                  .map((row) => ({
+                    item: row.item,
+                    timestamp: row.timestamp,
+                    seq: row.seqEnd,
+                    seqStart: row.seqStart,
+                    seqEnd: row.seqEnd,
+                    sourceSeqRanges: row.sourceSeqRanges,
+                  }))
               : [
                   {
                     seq: timeline.window.maxSeq,

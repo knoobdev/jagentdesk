@@ -399,10 +399,6 @@ export default function contribute(server: PluginServerContext) {
       label: "Direct example",
       iconPath: "icon.svg",
     });
-    // The daemon's provider registry does not read plugin providers yet; the plugin log says so.
-    expect(pluginMessages(runtime, "provider-round-trip")).toContain(
-      "[jagentdesk] Not supported by this daemon yet, so it will not run: agent provider direct-example",
-    );
     const connection = await runtime.connectProvider("provider-round-trip", "direct-example", {
       versions: [1],
       capabilities: [

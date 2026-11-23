@@ -1,3 +1,4 @@
+import { describeHookWorkspace } from "./plugins/lifecycle/index.js";
 import { PhysicalDeviceHub } from "./devices/hub.js";
 import { clearGrantsWhenSessionsEnd } from "./devices/agent-grants.js";
 import { HostCapabilityService } from "./host-capabilities/service.js";
@@ -984,7 +985,14 @@ export async function createJAgentDeskDaemon(
       forgeOverrides: { github },
     },
   });
+  workspaceRegistry.subscribeToMutations((mutation) => {
+    if (mutation.kind === "archive" && mutation.workspace)
+      pluginRuntime.emit("workspace.archived", {
+        workspace: describeHookWorkspace(mutation.workspace),
+      });
+  });
   const workspaceProvisioning = createWorkspaceProvisioningService({
+    lifecycle: pluginRuntime,
     serverId,
     projectRegistry,
     workspaceRegistry,
@@ -1027,6 +1035,7 @@ export async function createJAgentDeskDaemon(
   await usageHistory.initialize();
   const initialAgentManagerState = providerSnapshotManager.getAgentManagerProviderState();
   const agentManager = new AgentManager({
+    pluginLifecycle: pluginRuntime,
     clients: initialAgentManagerState.clients,
     providerDefinitions: initialAgentManagerState.providerDefinitions,
     registry: agentStorage,
@@ -1038,6 +1047,12 @@ export async function createJAgentDeskDaemon(
     onUsageBilled: (billed) => usageHistory.record(billed),
     mcpAuthToken: agentMcpAuthToken,
     logger,
+  });
+
+  const unsubscribePluginProviders = pluginRuntime.subscribeProviderRegistrations(() => {
+    agentManager.updateProviderRegistry(
+      providerSnapshotManager.replacePluginProviders(pluginRuntime.getProviderRegistrations()),
+    );
   });
 
   const detachAgentStoragePersistence = attachAgentStoragePersistence(
@@ -2236,6 +2251,7 @@ export async function createJAgentDeskDaemon(
       speechService.start();
       scriptHealthMonitor.start();
     } catch (error) {
+      unsubscribePluginProviders();
       await pluginRuntime.stopAllPlugins().catch(() => undefined);
       await serviceProxy.stopStandalone().catch(() => undefined);
       if (mainStarted) {
@@ -2247,6 +2263,7 @@ export async function createJAgentDeskDaemon(
   };
 
   const stop = async () => {
+    unsubscribePluginProviders();
     await pluginRuntime.stopAllPlugins().catch(() => undefined);
     await hubRelationships.stop();
     workspaceReconciliation.dispose();

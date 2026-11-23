@@ -366,6 +366,16 @@ export interface CompactionTimelineItem {
   preTokens?: number;
 }
 
+export interface PluginTimelineItem {
+  [key: string]: unknown;
+  type: "plugin";
+  id: string;
+  pluginId: string;
+  kind: string;
+  version: number;
+  data: import("@jagentdesk/protocol/agent-types").JsonValue;
+}
+
 export type AgentTimelineItem =
   | { type: "user_message"; text: string; messageId?: string; clientMessageId?: string }
   | { type: "assistant_message"; text: string; messageId?: string }
@@ -373,7 +383,9 @@ export type AgentTimelineItem =
   | ToolCallTimelineItem
   | { type: "todo"; items: AgentTaskItem[] }
   | { type: "error"; message: string }
-  | CompactionTimelineItem;
+  | { type: "notification"; level: "info" | "warning" | "error"; message: string }
+  | CompactionTimelineItem
+  | PluginTimelineItem;
 
 export type AgentStreamEvent =
   | { type: "thread_started"; sessionId: string; provider: AgentProvider }

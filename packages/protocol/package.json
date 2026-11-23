@@ -12,6 +12,10 @@
     "./*": {
       "types": "./dist/*.d.ts",
       "default": "./dist/*.js"
+    },
+    "./timeline-identity": {
+      "types": "./dist/timeline-identity.d.ts",
+      "default": "./dist/timeline-identity.js"
     }
   },
   "publishConfig": {

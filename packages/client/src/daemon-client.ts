@@ -6164,6 +6164,19 @@ export class DaemonClient {
     });
   }
 
+  async appendAgentTimelineItem(
+    agentId: string,
+    item: Omit<import("@jagentdesk/protocol/agent-types").PluginTimelineItem, "pluginId">,
+  ): Promise<{ seq: number; epoch: string }> {
+    const requestId = this.createRequestId();
+    const payload = await this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "agent.timeline.append.request", requestId, agentId, item },
+      responseType: "agent.timeline.append.response",
+    });
+    return { seq: payload.seq, epoch: payload.epoch };
+  }
+
   async getPluginCatalog(): Promise<
     Array<{ id: string; clientBundle: string; requirements?: PluginRequirements }>
   > {
@@ -10815,6 +10828,8 @@ export class DaemonClient {
           capabilities: {
             [CLIENT_CAPS.customModeIcons]: true,
             [CLIENT_CAPS.reasoningMergeEnum]: true,
+            [CLIENT_CAPS.pluginTimelineItems]: true,
+            [CLIENT_CAPS.timelineNotifications]: true,
             [CLIENT_CAPS.terminalReflowableSnapshot]: true,
             [CLIENT_CAPS.providerSubagents]: true,
             [CLIENT_CAPS.projectedSubagentTimeline]: true,

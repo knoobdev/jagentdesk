@@ -291,6 +291,9 @@ export type JAgentDeskAgentStream = Extract<
 export type JAgentDeskAgentUpdateHandler = (update: JAgentDeskAgentUpdate) => void;
 
 export interface JAgentDeskAgentTimelineHandle {
+  append(
+    item: Omit<import("@jagentdesk/protocol/agent-types").PluginTimelineItem, "pluginId">,
+  ): Promise<{ seq: number; epoch: string }>;
   /**
    * Fetches a fresh timeline page through the existing daemon RPC. If the daemon
    * includes an agent snapshot in the response, the parent handle is updated to
@@ -751,6 +754,7 @@ function createAgentHandleFactory(daemonClient: DaemonClient): AgentHandleFactor
     const handle: JAgentDeskAgentHandle = {
       id,
       timeline: {
+        append: (item) => daemonClient.appendAgentTimelineItem(id, item),
         refetch: async (options) => {
           const result = await daemonClient.fetchAgentTimeline(id, options);
           if (result.agent) {

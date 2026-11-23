@@ -902,6 +902,19 @@ export const AgentTimelineItemPayloadSchema: z.ZodType<AgentTimelineItem, unknow
     type: z.literal("reasoning"),
     text: z.string(),
   }),
+  z.object({
+    type: z.literal("plugin"),
+    id: z.string(),
+    pluginId: z.string(),
+    kind: z.string(),
+    version: z.number().int().positive(),
+    data: z.json(),
+  }),
+  z.object({
+    type: z.literal("notification"),
+    level: z.enum(["info", "warning", "error"]),
+    message: z.string(),
+  }),
   ToolCallTimelineItemPayloadSchema,
   z.object({
     type: z.literal("todo"),
@@ -1755,6 +1768,19 @@ export const PluginReloadRequestSchema = pluginIdRequest("plugin.reload.request"
 export const PluginEnableRequestSchema = pluginIdRequest("plugin.enable.request");
 export const PluginDisableRequestSchema = pluginIdRequest("plugin.disable.request");
 export const PluginRemoveRequestSchema = pluginIdRequest("plugin.remove.request");
+
+export const AgentTimelineAppendRequestSchema = z.object({
+  type: z.literal("agent.timeline.append.request"),
+  requestId: z.string(),
+  agentId: z.string(),
+  item: z.object({
+    type: z.literal("plugin"),
+    id: z.string(),
+    kind: z.string(),
+    version: z.number().int().positive(),
+    data: z.json(),
+  }),
+});
 
 export const PluginRpcInvokeRequestSchema = z.object({
   type: z.literal("plugin.rpc.invoke.request"),
@@ -4162,6 +4188,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   PluginEnableRequestSchema,
   PluginDisableRequestSchema,
   PluginRemoveRequestSchema,
+  AgentTimelineAppendRequestSchema,
   PluginRpcInvokeRequestSchema,
   GetDaemonConfigRequestMessageSchema,
   SetDaemonConfigRequestMessageSchema,
@@ -5475,7 +5502,7 @@ export const AgentTimelineEntryPayloadSchema = z.object({
   seqStart: z.number().int().nonnegative(),
   seqEnd: z.number().int().nonnegative(),
   sourceSeqRanges: z.array(AgentTimelineSeqRangeSchema),
-  collapsed: z.array(z.enum(["assistant_merge", "reasoning_merge", "tool_lifecycle"])),
+  collapsed: z.array(z.enum(["assistant_merge", "reasoning_merge", "tool_lifecycle", "identity"])),
 });
 
 export const FetchAgentTimelineResponseMessageSchema = z.object({
@@ -6030,6 +6057,15 @@ export const PluginDisableResponseSchema = pluginActionResponse("plugin.disable.
 export const PluginRemoveResponseSchema = z.object({
   type: z.literal("plugin.remove.response"),
   payload: z.object({ requestId: z.string() }).strict(),
+});
+
+export const AgentTimelineAppendResponseSchema = z.object({
+  type: z.literal("agent.timeline.append.response"),
+  payload: z.object({
+    requestId: z.string(),
+    seq: z.number().int().nonnegative(),
+    epoch: z.string(),
+  }),
 });
 
 export const PluginRpcInvokeResponseSchema = z.object({
@@ -8071,6 +8107,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   PluginEnableResponseSchema,
   PluginDisableResponseSchema,
   PluginRemoveResponseSchema,
+  AgentTimelineAppendResponseSchema,
   PluginRpcInvokeResponseSchema,
   GetDaemonConfigResponseMessageSchema,
   SetDaemonConfigResponseMessageSchema,

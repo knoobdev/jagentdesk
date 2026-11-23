@@ -651,7 +651,6 @@ export class PluginRuntime {
       sessionClosed: sessionAttachment.closed,
     };
     session.plugin = loaded;
-    this.warnUnwiredContributions(loaded);
     this.logger.info(
       { pluginId, methods: ready.methods, providers: ready.providers },
       "Loaded plugin",
@@ -722,26 +721,9 @@ export class PluginRuntime {
     );
   }
 
-  // The runtime accepts lifecycle hooks and agent providers, but the daemon's workspace and agent
-  // managers do not dispatch to them yet. Say so in the plugin log instead of failing silently.
-  private warnUnwiredContributions(loaded: LoadedPlugin): void {
-    const unwired = [
-      ...loaded.hooks.events.map((name) => `event hook ${name}`),
-      ...loaded.hooks.before.map((name) => `before hook ${name}`),
-      ...loaded.providers.map((provider) => `agent provider ${provider.id}`),
-    ];
-    if (unwired.length === 0) return;
-    this.appendLog(
-      loaded.id,
-      "stderr",
-      `[jagentdesk] Not supported by this daemon yet, so it will not run: ${unwired.join(", ")}`,
-    );
-  }
-
   private handleChildMessage(loaded: LoadedPlugin, message: PluginProcessMessage): void {
     if (message.type === "hooks.changed") {
       loaded.hooks = message.hooks;
-      this.warnUnwiredContributions(loaded);
       return;
     }
     if (message.type === "settings.changed") {
