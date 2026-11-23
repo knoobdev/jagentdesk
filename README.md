@@ -11,27 +11,6 @@ code) before it can control the daemon.
 
 > **📦 [Download the latest release →](https://github.com/knoobdev/jagentdesk/releases/latest)**
 
-## 👀 Team mode — watch your agents work like a real team
-
-Flip on **Team mode** and a single message spins up a whole team: it plans, splits the work
-into a live **task board**, builds, cross‑reviews itself (BA / Tester / Pentester), and even
-hangs out in a **Telegram‑style team chat** — a shaded little **office** shows every teammate
-at their desk, in real time, doing exactly what they're actually doing.
-
-**▶️ Watch the live demo** — a real team building a small app end‑to‑end (real agents, real chat, real reviews). Click the preview for the full 2‑minute video with audio:
-
-<p align="center">
-  <a href="docs/media/team-mode-demo.mp4">
-    <img src="docs/media/team-mode-demo.gif" alt="JAgentDesk Team mode live demo — a real team plans, splits work into a task board, builds, cross-reviews, and chats" width="100%" />
-  </a>
-</p>
-
-> ▶️ [**Watch / download the full 2‑minute MP4 (with audio) →**](docs/media/team-mode-demo.mp4)
-
-<p align="center">
-  <img src="docs/media/fomo.png" alt="JAgentDesk Team mode — the live virtual office, the Telegram-style team chat, the kanban task board, and the discussion thread" width="100%" />
-</p>
-
 JAgentDesk is a rebranded, independently‑developed fork of [Paseo](https://github.com/getpaseo/paseo)
 with a few deliberate boundaries:
 
@@ -398,9 +377,6 @@ with a few deliberate boundaries:
 - **Skills load natively.** Pick skills in the composer and the agent is asked to load them the
   way its provider expects (`/name`, `$name`, `/skill:name`); approve lessons from replies to train
   them.
-- **Interactive architecture diagrams in Team mode.** The ARCH tab renders archify diagrams —
-  themes, search, upstream/downstream tracing and an animated trace — sandboxed on desktop and
-  mobile.
 - **Long chats stay smooth.** On a 40‑turn chat that keeps streaming: renderer CPU 0.46 → 0.28 of a
   core, p95 frame 25.5 → 15.5 ms. Switching tabs keeps your reading position, hidden chats stop
   rendering, and the daemon keeps one row per timeline item instead of every progress update
@@ -409,7 +385,6 @@ with a few deliberate boundaries:
   status, source and revision; `plugin update` previews changes first.
 - **Ported from Paseo 0.8.0–0.10.1:** OpenCode v2, Codex approvals that stay with you, Sonnet 5.5,
   more robust daemon start, faster first diffs, and many app and provider fixes.
-- **Fix:** Team mode no longer shows your first prompt again after a reconnect.
 
 ### Workbench — an intercepting-proxy security workbench for your simulators (v0.9.43)
 
@@ -436,7 +411,7 @@ with a few deliberate boundaries:
 ### Mobile clean-up: one page header, back buttons, no overlaps (v0.9.42)
 
 - **Every page opens the same way.** Icon + bold title, same-size buttons on the right and a
-  one-line description, at the same height on every page — History, Schedules, Shared, Team,
+  one-line description, at the same height on every page — History, Schedules, Shared,
   Skills, Marketplace, Docker, Simulators, Databases, Clusters, Usage and Forge.
 - **Back button on every page on phones**, and titles are left-aligned instead of centered.
 - **Nothing overlaps on phones** — the drawer header, the workspace header, Docker's

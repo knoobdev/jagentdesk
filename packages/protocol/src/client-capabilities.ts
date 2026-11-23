@@ -30,10 +30,6 @@ export const CLIENT_CAPS = {
   // reconstructed timeline replay after 2027-02-21 once the client floor supports invalidation.
   timelineReplacementInvalidation: "timeline_replacement_invalidation",
   browserHost: "browser_host",
-  // COMPAT(archifyDiagrams): added after v0.9.43, remove after 2027-03-29. Capable clients accept
-  // ForumDiagram.format "archify"; the daemon presents archify versions to older clients as a
-  // Mermaid placeholder because their schema pins format to "mermaid".
-  archifyDiagrams: "archify_diagrams",
   // Spec mode (spec 28.6): only clients that render the Phase review bar may turn it on.
   specMode: "spec_mode",
   // COMPAT(activityGraph): added after v0.9.47 (spec 31.5, ADR-0031). The daemon builds and renders

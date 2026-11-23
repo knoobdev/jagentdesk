@@ -926,17 +926,6 @@ export const zhCN: TranslationResources = {
       },
     },
   },
-  forumArch: {
-    title: "架构图",
-    loading: "正在加载图表…",
-    notFound: "此版本的图表在主机上已不可用。",
-    loadFailed: "无法加载图表。",
-    offline: "连接到主机以查看此图表。",
-    retry: "重试",
-    replay: "重播",
-    replayHint: "重播追踪动画",
-    reducedMotion: "已开启减弱动态效果，动画已关闭",
-  },
   connection: {
     localMode: {
       mobileWarning:

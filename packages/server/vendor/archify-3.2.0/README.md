@@ -3,12 +3,8 @@
 Renders the agent activity graph (spec `31-agent-activity-graph`, ADR-0031):
 the Flow view as a top-down `tree` and the Plan view as a rightward `tree`.
 The `lifecycle` v3 renderer is vendored per ADR-0031 §1 but currently unused. Called only through
-`src/server/agent/activity-graph/activity-graph-renderer.ts`, which runs one
+`src/server/archify/archify-renderer.ts`, which runs one
 renderer script per render as a child process of the daemon's own runtime.
-
-Team-mode diagrams (spec `23`, ADR-0021) keep using `../archify` (3.0.1): the
-3.2.0 lifecycle renderer accepts only `schema_version: 3`, which would reject
-saved Team-mode lifecycle diagrams.
 
 ## Pinned upstream
 

@@ -36,7 +36,6 @@ import type { SpecModeService } from "./spec-mode/service.js";
 import { SpecModePlanSource } from "./spec-mode/plan-source.js";
 import type { SpecModeState } from "@jagentdesk/protocol/spec-mode";
 import type { SessionShareService } from "./session-share/service.js";
-import type { AgentForumService } from "./agent-forum/service.js";
 import { ActivityGraphService } from "./agent/activity-graph/service.js";
 import type { AutorunState } from "@jagentdesk/protocol/messages";
 import type { CheckoutDiffManager, CheckoutDiffMetrics } from "./checkout-diff-manager.js";
@@ -118,7 +117,6 @@ import {
   normalizeClientRestartRpcReason,
 } from "./lifecycle-reasons.js";
 import { CLIENT_CAPS } from "@jagentdesk/protocol/client-capabilities";
-import type { StoredForumTopic } from "@jagentdesk/protocol/agent-forum/types";
 import type {
   BrowserAutomationExecuteResponse,
   BrowserScreenshotRequest,
@@ -668,32 +666,16 @@ export class VoiceAssistantWebSocketServer {
   private readonly scheduleService: ScheduleService;
   private autorunService!: AutorunService | null;
   private sessionShareService!: SessionShareService | null;
-  // Agent Forum / Team mode (docs/plans/active/agent-forum.md). Injected post-construction via
-  // setAgentForum() so the giant positional constructor need not grow.
-  private agentForumService: AgentForumService | null = null;
   private specModeService: SpecModeService | null = null;
   // Agent activity graph (spec 31, ADR-0031): one daemon-wide service shared by every session.
   private readonly activityGraphService: ActivityGraphService;
   private readonly specPlanSource: SpecModePlanSource;
-  // Jira (spec 29), injected post-construction like the Agent Forum.
+  // Jira (spec 29), injected post-construction.
   private jiraService: JiraService | null = null;
   private figmaService: FigmaService | null = null;
   // Remote execution (spec 33 / ADR-0044), injected post-construction like Jira.
   private remoteExecService: RemoteExecService | null = null;
   private customProvidersService: CustomProviderService | null = null;
-  private agentForumBootstrap:
-    | ((input: { topicId: string; prompt: string; originAgentId?: string }) => void | Promise<void>)
-    | null = null;
-  private agentForumNotify:
-    | ((input: {
-        topicId: string;
-        kind: "chat" | "thread";
-        text: string;
-        roomName?: string | null;
-        leadAgentId: string | null;
-        participants: { agentId: string; label: string; role: string }[];
-      }) => void | Promise<void>)
-    | null = null;
   private readonly checkoutDiffManager: CheckoutDiffManager;
   private readonly github: ForgeService;
   private readonly workspaceGitService: WorkspaceGitService;
@@ -1352,12 +1334,6 @@ export class VoiceAssistantWebSocketServer {
     for (const session of this.listTrustedSessions()) session.emitProjectUpdate(update);
   }
 
-  // forum.stream fan-out through each session so it can present archify diagrams per client
-  // capability (COMPAT(archifyDiagrams): added after v0.9.43, remove after 2027-03-29).
-  public publishForumTopic(topic: StoredForumTopic): void {
-    for (const session of this.listTrustedSessions()) session.emitForumStream(topic);
-  }
-
   public publishSpeechReadiness(readiness: SpeechReadinessSnapshot | null): void {
     this.updateServerCapabilities(
       buildServerCapabilities({ readiness, host: this.hostCapabilities?.snapshot() ?? null }),
@@ -1977,32 +1953,6 @@ export class VoiceAssistantWebSocketServer {
     this.customProvidersService = service;
   }
 
-  // Inject the Agent Forum service + its orchestration-bootstrap hook after construction (Team mode).
-  public setAgentForum(
-    service: AgentForumService | null,
-    bootstrap:
-      | ((input: {
-          topicId: string;
-          prompt: string;
-          originAgentId?: string;
-        }) => void | Promise<void>)
-      | null,
-    notify:
-      | ((input: {
-          topicId: string;
-          kind: "chat" | "thread";
-          text: string;
-          roomName?: string | null;
-          leadAgentId: string | null;
-          participants: { agentId: string; label: string; role: string }[];
-        }) => void | Promise<void>)
-      | null = null,
-  ): void {
-    this.agentForumService = service;
-    this.agentForumBootstrap = bootstrap;
-    this.agentForumNotify = notify;
-  }
-
   setSpecModeService(service: SpecModeService): void {
     this.specModeService = service;
   }
@@ -2063,10 +2013,7 @@ export class VoiceAssistantWebSocketServer {
       autorunService: this.autorunService,
       specModeService: this.specModeService,
       sessionShareService: this.sessionShareService,
-      agentForumService: this.agentForumService,
       activityGraphService: this.activityGraphService,
-      agentForumBootstrap: this.agentForumBootstrap,
-      agentForumNotify: this.agentForumNotify,
       checkoutDiffManager: this.checkoutDiffManager,
       github: this.github,
       workspaceGitService: this.workspaceGitService,
@@ -2542,7 +2489,6 @@ export class VoiceAssistantWebSocketServer {
         ...(this.autorunService ? { autorun: true, autorunApproval: true } : {}),
         // Session sharing (spec §21 / ADR-0018); advertised only when the daemon opted in.
         ...(this.sessionShareService ? { sessionSharing: true } : {}),
-        ...(this.agentForumService ? { agentForum: true } : {}),
         // Spec mode (spec 28 / ADR-0030): agent.spec_mode.* surface.
         ...(this.specModeService ? { specMode: true } : {}),
         // Agent activity graph (spec 31 / ADR-0031). COMPAT(activityGraph): added after v0.9.47.

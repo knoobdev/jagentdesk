@@ -18,7 +18,6 @@ import {
   Smartphone,
   Sparkles,
   Store,
-  Users,
   type LucideIcon,
 } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
@@ -42,7 +41,6 @@ const DEVICE_CAPABILITIES: readonly HostCapabilityId[] = [
 ];
 import { useWorkspace } from "@/stores/session-store-hooks";
 import {
-  buildAgentForumRoute,
   buildArgoCdRoute,
   buildClusterWorkloadsRoute,
   buildClustersRoute,
@@ -221,15 +219,7 @@ export function useAppNavItems(): AppNavItem[] {
         isActive: pathname.includes("/shared-sessions"),
         testID: "rail-shared-sessions",
       },
-      {
-        key: "team",
-        icon: Users,
-        label: "Team",
-        shortLabel: "Team",
-        route: buildAgentForumRoute() as Href,
-        isActive: pathname.includes("/agent-forum"),
-        testID: "rail-team",
-      },
+
       navItem("skills", Sparkles, "Skills", "Skills", targets.skillsRoute, pathname, "/skills"),
       navItem(
         "marketplace",

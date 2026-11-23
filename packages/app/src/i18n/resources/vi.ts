@@ -362,17 +362,6 @@ export const vi = {
       pending: "Dự kiến",
     },
   },
-  forumArch: {
-    title: "Sơ đồ kiến trúc",
-    loading: "Đang tải sơ đồ…",
-    notFound: "Phiên bản sơ đồ này không còn trên host.",
-    loadFailed: "Không tải được sơ đồ.",
-    offline: "Kết nối tới host để xem sơ đồ này.",
-    retry: "Thử lại",
-    replay: "Phát lại",
-    replayHint: "Phát lại hoạt ảnh luồng",
-    reducedMotion: "Hoạt ảnh đang tắt vì đã bật giảm chuyển động",
-  },
   marketplace: {
     title: "Chợ plugin",
     subtitle: "Khám phá và cài đặt plugin cộng đồng cho JAgentDesk.",

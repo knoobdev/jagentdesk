@@ -166,8 +166,6 @@ import { SpecModeService } from "./spec-mode/service.js";
 import type { SpecModeState } from "@jagentdesk/protocol/spec-mode";
 import { sendPromptToAgent } from "./agent/agent-prompt.js";
 import { SessionShareService } from "./session-share/service.js";
-import { AgentForumService } from "./agent-forum/service.js";
-import { createForumBootstrap, createForumNotify } from "./agent-forum/bootstrap.js";
 import { TunnelManager } from "./session-share/tunnel-manager.js";
 import { DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
 import { PluginService } from "./plugins/index.js";
@@ -1641,13 +1639,6 @@ export async function createJAgentDeskDaemon(
     { elapsed: elapsed(), enabled: config.sessionSharingEnabled === true },
     "Session share service initialized",
   );
-  // Agent Forum / Team mode (docs/plans/active/agent-forum.md). Persists per-topic JSON under
-  // ~/.jagentdesk/forums and streams topic changes to all connected clients.
-  const agentForumService = new AgentForumService({
-    dir: path.join(config.jagentdeskHome, "forums"),
-    logger,
-    onUpdate: (topic) => wsServer?.publishForumTopic(topic),
-  });
   logger.info({ elapsed: elapsed() }, "Loading persisted agent registry");
   const persistedRecords = await agentStorage.list();
   logger.info(
@@ -1726,7 +1717,6 @@ export async function createJAgentDeskDaemon(
     resolveSpeakHandler: (agentId) => wsServer?.resolveVoiceSpeakHandler(agentId) ?? null,
     resolveCallerContext: (agentId) => wsServer?.resolveVoiceCallerContext(agentId) ?? null,
     orchestrationRuntime,
-    agentForumService,
     clusterRegistry,
     databaseRegistry,
     sshAgentTools: (callerAgentId) => sshServerModules.createAgentTools(callerAgentId),
@@ -1977,11 +1967,9 @@ export async function createJAgentDeskDaemon(
         const onListening = () => {
           httpServer.off("error", onError);
           mainStarted = true;
-          // Host capabilities, physical devices, Spec mode, Jira and Team mode attach to the
+          // Host capabilities, physical devices, Spec mode and Jira attach to the
           // WebSocket server right after it exists (kept out of logAndResolve for its size).
           const attachHostServices = async (server: VoiceAssistantWebSocketServer) => {
-            // Agent Forum / Team mode: expose the service to sessions + the bootstrap hook that turns
-            // the origin chat agent into the topic's lead (it then spawns/delegates peers).
             // Spec 24.2: what this host can run, probed in the background after start.
             // Tools the platform-aware installer added live in $JAGENTDESK_HOME/tools/bin.
             ensureToolDirsOnPath(config.jagentdeskHome);
@@ -2017,11 +2005,6 @@ export async function createJAgentDeskDaemon(
             server.setFigmaService(figmaService);
             server.setRemoteExecService(remoteExecService);
             server.setCustomProvidersService(customProviderService);
-            server.setAgentForum(
-              agentForumService,
-              createForumBootstrap({ agentManager, agentStorage, logger }),
-              createForumNotify({ agentManager, agentStorage, logger }),
-            );
           };
           const logAndResolve = async () => {
             boundListenTarget = resolveBoundListenTarget(listenTarget, httpServer);

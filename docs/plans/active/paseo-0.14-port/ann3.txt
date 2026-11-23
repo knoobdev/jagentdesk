@@ -4,7 +4,7 @@
 06cdc5a0b|CHAT|A|Nested Markdown folder links; X2 (assistant-file-links chain).
 5384abdba|FILES|A|Markdown preview folder links open Files; X1.
 a0aeca967|CHAT|A|Explicit file links regardless of extension; X2.
-f22775a8e|SUBA|A|Agent-to-agent messages default to steering (CLI/MCP). Behavior change; JD Team mode lead/worker messaging must be reviewed (jagentdesk-tools.ts heavily diverged).
+f22775a8e|SUBA|A|Agent-to-agent messages default to steering (CLI/MCP). Behavior change; JD ORC lead/worker messaging must be reviewed (jagentdesk-tools.ts heavily diverged).
 6e5a4682e|MD|D|Own-line images as blocks; needs enriched-markdown `markdown/source.ts`.
 86ab49153|ACP|P|Copilot implements plans after Allow All; applies.
 86817a24f|PERF|A|Fetch project/workspace directories concurrently (directory-sync X1); reconnect speed on mobile.
@@ -74,7 +74,7 @@ c70a6cfb9|FILES|A|Markdown preview links resolve from document folder; 2 F, 2 X.
 006fd053a|NATIVE|S|Android freeze watchdog diagnostics (opt-in builds).
 fbd90cb88|WS|A|Setup execution/output owned by workspace (-3458 lines); 5 F, 10 X; pair with `1c8c68f93`.
 5d70bf064|NATIVE|A|Android image picker after Activity recreation (expo-modules-core patch); check JD Expo version.
-91dca5702|HOST|S|Connected hosts / cross-daemon delegation (86 files, routed binary frames, CLI `host add`). Overlaps JD multi-host + Team mode; transport assumes relay/SSH/direct, not Tailscale. Needs product decision + ADR; skip for this cycle.
+91dca5702|HOST|S|Connected hosts / cross-daemon delegation (86 files, routed binary frames, CLI `host add`). Overlaps JD multi-host + ORC; transport assumes relay/SSH/direct, not Tailscale. Needs product decision + ADR; skip for this cycle.
 d0568f9f1|SUBA|A|Batch agent report + finish notification into one message - PROTOCOL (`agent-message.ts`). Depends on `d0bc188a5`. ORC impact.
 c63e1204b|GIT|A|"All changes" default scope in Changes (34 files); 6 F, 9 X, 2 M.
 23c4df481|DMN|P|Agents no longer shown running after daemon restart; 1/2 apply.
@@ -98,7 +98,7 @@ c3c6a936a|PLG|A|Plugin header buttons in workspace ··· menu on narrow layouts
 3c3c27292|GIT|A|Workspace snapshots published without UI subscribers (diff stats/auto-archive); X1 on workspace-git-service.
 99a1d9a7a|MOB|S|iPhone skill picker above keyboard via `keyboard/shift` (absent). JD skills picker is its own; check bug exists.
 89727f43b|HOST|S|SECURITY (relay): require daemon password on relay. N/A to JD (no relay, no password-on-hello).
-21e7ccb03|SUBA|A|Finish notifications survive daemon restart (`finish-subscriptions/` persistent store). High value for Team mode/autorun; 8 F, 5 X.
+21e7ccb03|SUBA|A|Finish notifications survive daemon restart (`finish-subscriptions/` persistent store). High value for ORC/autorun; 8 F, 5 X.
 4fe006df8|PLG|D|Unified panel props + `useTabState` (needs file panels).
 4b9b2fe13|CC|A|Manual Command Center scroll preserved; 1/2 apply.
 6405edd8d|CC|A|Consistent agent/workspace status in search (`agent-presentation/` new); 3 F, 5 X.
@@ -129,7 +129,7 @@ d0fd2e532|CLI|S|SSH tunnel EPIPE (`client/node/ssh-tunnel.ts` absent; comes with
 652173994|MD|D|enriched-markdown inline code.
 631ed0408|SET|A|Host selection kept across settings navigation (`navigation/settings-selection` new); JD settings structure differs.
 6bc4b73c4|SBR|A|Sidebar survives unhydrated workspace entry (startup crash, 0.13.1 hotfix) - check JD sidebar for same `undefined` access.
-8e5f53676|DMN|A|Release idle agent runtimes after 1h (resume on next prompt) - CONFIG change, `idle-runtime-cleanup/`. Must exempt Team mode leads/autorun/browser-driving agents; plugin-provider part skip.
+8e5f53676|DMN|A|Release idle agent runtimes after 1h (resume on next prompt) - CONFIG change, `idle-runtime-cleanup/`. Must exempt ORC leads/autorun/browser-driving agents; plugin-provider part skip.
 27d6b3b7c|DESK|A|Per-project editor choice + Xcode target; 9 F, 3 X. JD editor-targets registry has 22 targets.
 78a3083fe|PERF|P|Hidden chats skip stream updates (use-agent-stream-tail); 1/2 apply. JD has react-freeze hidden chats already - complementary.
 ff31b6e5b|NATIVE|A|Android Reanimated unmounted views patch (0.13.2); check JD reanimated version.

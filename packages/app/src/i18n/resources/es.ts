@@ -969,17 +969,6 @@ export const es: TranslationResources = {
       },
     },
   },
-  forumArch: {
-    title: "Diagrama de arquitectura",
-    loading: "Cargando diagrama…",
-    notFound: "Esta versión del diagrama ya no está disponible en el host.",
-    loadFailed: "No se pudo cargar el diagrama.",
-    offline: "Conéctate al host para ver este diagrama.",
-    retry: "Reintentar",
-    replay: "Repetir",
-    replayHint: "Repetir la animación del recorrido",
-    reducedMotion: "La animación está desactivada porque la reducción de movimiento está activada",
-  },
   connection: {
     localMode: {
       mobileWarning:

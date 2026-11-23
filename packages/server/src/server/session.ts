@@ -171,12 +171,8 @@ import { SpecModeSession } from "./session/spec-mode/spec-mode-session.js";
 import type { SpecModeService } from "./spec-mode/service.js";
 import type { AutorunService } from "./autorun/service.js";
 import { SessionShareSession } from "./session/session-share/session-share-session.js";
-import { AgentForumSession } from "./session/agent-forum/agent-forum-session.js";
-import type { AgentForumService } from "./agent-forum/service.js";
 import type { ActivityGraphService } from "./agent/activity-graph/service.js";
 import { ActivityGraphSession } from "./session/activity-graph/activity-graph-session.js";
-import { presentForumTopic } from "./agent-forum/archify-compat.js";
-import type { StoredForumTopic } from "@jagentdesk/protocol/agent-forum/types";
 import type { SessionShareService } from "./session-share/service.js";
 import { ClusterSession } from "./session/cluster/cluster-session.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
@@ -535,24 +531,8 @@ export interface SessionOptions {
   autorunService?: AutorunService | null;
   specModeService?: SpecModeService | null;
   sessionShareService?: SessionShareService | null;
-  agentForumService?: AgentForumService | null;
   // Agent activity graph (spec 31, ADR-0031); shared daemon-wide service.
   activityGraphService?: ActivityGraphService | null;
-  // Bootstraps the orchestration lead for a freshly created forum topic (wired in bootstrap.ts).
-  agentForumBootstrap?:
-    | ((input: { topicId: string; prompt: string; originAgentId?: string }) => void | Promise<void>)
-    | null;
-  // Wakes the lead + @mentioned teammates when the human posts in a topic's thread/chat.
-  agentForumNotify?:
-    | ((input: {
-        topicId: string;
-        kind: "chat" | "thread";
-        text: string;
-        roomName?: string | null;
-        leadAgentId: string | null;
-        participants: { agentId: string; label: string; role: string }[];
-      }) => void | Promise<void>)
-    | null;
   loopService: LoopService;
   skillsStorage?: NativeSkillsService | null;
   usageHistory?: UsageHistoryStorage | null;
@@ -912,7 +892,6 @@ export class Session {
   private readonly autorunSession: AutorunSession | null;
   private readonly specMode: SpecModeWiring | null;
   private readonly sessionShareSession: SessionShareSession | null;
-  private readonly agentForumSession: AgentForumSession | null;
   private readonly activityGraphSession: ActivityGraphSession | null;
   private clusterSession!: ClusterSession;
   private databaseSession!: DatabaseSession;
@@ -1139,7 +1118,6 @@ export class Session {
     ({
       autorunSession: this.autorunSession,
       sessionShareSession: this.sessionShareSession,
-      agentForumSession: this.agentForumSession,
       activityGraphSession: this.activityGraphSession,
       jiraSession: this.jiraSession,
     } = this.createOptionalSessions(options));
@@ -1395,7 +1373,6 @@ export class Session {
   private createOptionalSessions(options: SessionOptions): {
     autorunSession: AutorunSession | null;
     sessionShareSession: SessionShareSession | null;
-    agentForumSession: AgentForumSession | null;
     activityGraphSession: ActivityGraphSession | null;
     jiraSession: JiraSession | null;
   } {
@@ -1412,18 +1389,6 @@ export class Session {
             host: { emit: (msg) => this.emit(msg) },
             sessionShareService: options.sessionShareService,
             logger: this.sessionLogger,
-          })
-        : null,
-      agentForumSession: options.agentForumService
-        ? new AgentForumSession({
-            host: {
-              emit: (msg) => this.emit(msg),
-              supportsArchifyDiagrams: () => this.supportsArchifyDiagramsOnEverySource(),
-            },
-            agentForumService: options.agentForumService,
-            logger: this.sessionLogger,
-            bootstrapTopic: options.agentForumBootstrap,
-            notifyForumActivity: options.agentForumNotify,
           })
         : null,
       activityGraphSession: options.activityGraphService
@@ -1640,38 +1605,6 @@ export class Session {
       if (capabilities.has(CLIENT_CAPS.projectUpdates)) {
         this.onMessageToSource(source, message);
       }
-    }
-  }
-
-  // COMPAT(archifyDiagrams): added after v0.9.43, remove after 2027-03-29.
-  // RPC responses go to every socket of the session, so they downgrade unless all of them are capable.
-  private supportsArchifyDiagramsOnEverySource(): boolean {
-    if (this.clientCapabilitiesBySource.size === 0) {
-      return this.supports(CLIENT_CAPS.archifyDiagrams);
-    }
-    for (const capabilities of this.clientCapabilitiesBySource.values()) {
-      if (!capabilities.has(CLIENT_CAPS.archifyDiagrams)) return false;
-    }
-    return true;
-  }
-
-  // Push a changed forum topic (forum.stream). COMPAT(archifyDiagrams): added after v0.9.43, remove
-  // after 2027-03-29 — each socket that did not advertise archify_diagrams gets archify versions as
-  // a Mermaid placeholder its schema accepts.
-  emitForumStream(topic: StoredForumTopic): void {
-    const forSupport = (supported: boolean): SessionOutboundMessage => ({
-      type: "forum.stream",
-      payload: { topic: presentForumTopic(topic, supported) },
-    });
-    if (this.clientCapabilitiesBySource.size === 0 || !this.onMessageToSource) {
-      this.emit(forSupport(this.supports(CLIENT_CAPS.archifyDiagrams)));
-      return;
-    }
-    if (!isSessionRpcAllowed(this.scopes, "forum.stream")) return;
-    for (const [source, capabilities] of this.clientCapabilitiesBySource) {
-      const message = forSupport(capabilities.has(CLIENT_CAPS.archifyDiagrams));
-      if (this.guestAgentId !== null && this.guestMessageTouchesOtherAgent(message)) continue;
-      this.onMessageToSource(source, message);
     }
   }
 
@@ -2498,7 +2431,6 @@ export class Session {
       () => this.dispatchAutorunMessage(msg),
       () => this.dispatchSpecModeMessage(msg, source),
       () => this.dispatchSessionShareMessage(msg),
-      () => this.dispatchAgentForumMessage(msg),
       () => this.activityGraphSession?.dispatch(msg),
       () => this.dispatchClusterMessage(msg),
       () => this.dispatchDatabaseMessage(msg),
@@ -3429,37 +3361,6 @@ export class Session {
         return share.handleSetOptionsRequest(msg);
       case "session.share.list.request":
         return share.handleListRequest(msg);
-      default:
-        return undefined;
-    }
-  }
-
-  private dispatchAgentForumMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    const forum = this.agentForumSession;
-    if (!forum) return undefined;
-    switch (msg.type) {
-      case "forum/create":
-        return forum.handleCreateRequest(msg);
-      case "forum/list":
-        return forum.handleListRequest(msg);
-      case "forum/get":
-        return forum.handleGetRequest(msg);
-      case "forum/archive":
-        return forum.handleArchiveRequest(msg);
-      case "forum/delete":
-        return forum.handleDeleteRequest(msg);
-      case "forum/post":
-        return forum.handlePostRequest(msg);
-      case "forum/vote":
-        return forum.handleVoteRequest(msg);
-      case "forum/chat-post":
-        return forum.handleChatPostRequest(msg);
-      case "forum/chat-react":
-        return forum.handleChatReactRequest(msg);
-      case "forum/chat-room":
-        return forum.handleChatRoomRequest(msg);
-      case "forum.diagram.html.request":
-        return forum.handleDiagramHtmlRequest(msg);
       default:
         return undefined;
     }

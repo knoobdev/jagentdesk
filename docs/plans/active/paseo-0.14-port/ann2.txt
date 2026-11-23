@@ -74,7 +74,7 @@ a162e1075|ACP|P|ACP applies configured models agent doesn't advertise; 1/3 apply
 1e00f452e|FILES|P|Download non-ASCII filenames; applies.
 2323ee684|DMN|P|Linux VM daemon status after host sleep (pid-lock); X1.
 f13bb2136|FILES|P|Accented names on downloads (content-disposition); with `1e00f452e`.
-8ddeb79c8|CLA|A|Claude idle while background helpers work; Stop/send no longer kills them (1504+ lines, live-source). X3; high value for Team mode leads using background agents.
+8ddeb79c8|CLA|A|Claude idle while background helpers work; Stop/send no longer kills them (1504+ lines, live-source). X3; high value for ORC leads using background agents.
 ee6deda07|CLA|P|Claude history under another project folder (WSL/moved daemon); 1/2 apply.
 d46164ce0|CLA|P|Long-running tool calls not shown as subagents; applies.
 1ae979d3d|SUBA|A|Subagents finished while disconnected no longer "working"; session-context drift.
@@ -83,7 +83,7 @@ d46164ce0|CLA|P|Long-running tool calls not shown as subagents; applies.
 99fc204c5|OC|P|Browser screenshots reach OpenCode v2 agents (JD agentic browser screenshots); applies.
 f943e790b|USG|S|Usage plugin icon.
 06fe97c90|DMN|A|Home directory search skips ~/Library on macOS; X2 (session.ts).
-d0bc188a5|SUBA|A|Agent-to-agent messages/notifications carry sender identity - PROTOCOL (`agent-message.ts`, `agent-message-display.ts`). Strong overlap with JD Team mode/forum; design merge needed.
+d0bc188a5|SUBA|A|Agent-to-agent messages/notifications carry sender identity - PROTOCOL (`agent-message.ts`, `agent-message-display.ts`). Strong overlap with JD ORC; design merge needed.
 29db2b798|DMN|A|Keep created agents after first-prompt failure; bound fork history; 2 F, 4 X, 1 M.
 0009a7e71|WS|D|Background workspaces (92 files, protocol + CLI `caller-agent`). JD ORC/Team creates many workspaces - valuable later but large.
 73390346c|MOB|A|iOS clipped chat/Markdown text (reverts uitextview patch); depends on markdown renderer state; verify on JD iOS.

@@ -48,7 +48,7 @@ describe("workspace route parsing", () => {
 
   it("decodes non-canonical base64url workspace IDs used by older links", () => {
     expect(decodeWorkspaceIdFromPathSegment("L2hvbWUvdXNlci9kZXYvcGFzZW8")).toBe(
-      "/home/user/dev/jagentdesk",
+      "/home/user/dev/paseo",
     );
   });
 
@@ -248,6 +248,7 @@ describe("host settings section slugs", () => {
     expect(normalizeHostSectionSlug("connections")).toBe("connections");
     expect(normalizeHostSectionSlug("pair-device")).toBe("pair-device");
     expect(normalizeHostSectionSlug("agents")).toBe("agents");
+    expect(normalizeHostSectionSlug("orchestration")).toBe("orchestration");
     expect(normalizeHostSectionSlug("workspaces")).toBe("workspaces");
     expect(normalizeHostSectionSlug("projects")).toBe("projects");
     expect(normalizeHostSectionSlug("providers")).toBe("providers");
@@ -256,7 +257,6 @@ describe("host settings section slugs", () => {
   });
 
   it("maps old host settings sections to their new names", () => {
-    expect(normalizeHostSectionSlug("orchestration")).toBe("agents");
     expect(normalizeHostSectionSlug("daemon")).toBe("host");
   });
 });

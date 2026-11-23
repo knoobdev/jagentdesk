@@ -68,10 +68,6 @@ function reducer(
 interface CreateRequestResult<TCreateResult> {
   agentId: string | null;
   result: TCreateResult;
-  // False when the daemon will never echo the first message back as this agent's own turn (team
-  // mode hands it to the forum instead). The optimistic copy would then never reconcile and would
-  // resurface at the tail on every resume/reconnect, so it must not be handed off.
-  promptDelivered?: boolean;
 }
 
 interface SubmitContext {
@@ -202,19 +198,17 @@ export function useDraftAgentCreateFlow<TDraftAgent, TCreateResult>({
 
         if (createResult.agentId) {
           updatePendingAgentId({ draftId, agentId: createResult.agentId });
-          if (createResult.promptDelivered !== false) {
-            handoffCreatedAgentMessageSubmission(
-              pendingServerId,
-              createResult.agentId,
-              createUserMessage({
-                clientMessageId: attempt.clientMessageId,
-                text: attempt.text,
-                timestamp: attempt.timestamp,
-                images: attempt.images,
-                attachments: attempt.attachments,
-              }),
-            );
-          }
+          handoffCreatedAgentMessageSubmission(
+            pendingServerId,
+            createResult.agentId,
+            createUserMessage({
+              clientMessageId: attempt.clientMessageId,
+              text: attempt.text,
+              timestamp: attempt.timestamp,
+              images: attempt.images,
+              attachments: attempt.attachments,
+            }),
+          );
           markPendingCreateLifecycle({ draftId, lifecycle: "sent" });
         }
 

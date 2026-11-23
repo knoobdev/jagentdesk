@@ -936,17 +936,6 @@ export const ar: TranslationResources = {
       },
     },
   },
-  forumArch: {
-    title: "مخطط البنية",
-    loading: "جارٍ تحميل المخطط…",
-    notFound: "لم يعد هذا الإصدار من المخطط متاحًا على المضيف.",
-    loadFailed: "تعذّر تحميل المخطط.",
-    offline: "اتصل بالمضيف لعرض هذا المخطط.",
-    retry: "إعادة المحاولة",
-    replay: "إعادة التشغيل",
-    replayHint: "إعادة تشغيل حركة التتبع",
-    reducedMotion: "الحركة متوقفة لأن تقليل الحركة مفعّل",
-  },
   connection: {
     localMode: {
       mobileWarning:

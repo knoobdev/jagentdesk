@@ -25,11 +25,6 @@ import type { Agent } from "@/stores/session-store";
 import { useWorkspaceFields } from "@/stores/session-store-hooks";
 import { useWorkspaceDraftSubmissionStore } from "@/stores/workspace-draft-submission-store";
 import { useAgentControlCommandCenterActions } from "@/command-center/agent-control-registration";
-import {
-  getTeamModeEnabled,
-  teamModeKey,
-  useTeamModeStore,
-} from "@/composer/agent-controls/team-mode-store";
 import { encodeImages } from "@/utils/encode-images";
 import type { WorkspaceFileOpenRequest } from "@/workspace/file-open";
 import { shouldAutoFocusWorkspaceDraftComposer } from "@/screens/workspace/workspace-draft-pane-focus";
@@ -143,8 +138,7 @@ async function submitDraftCreateRequest(input: {
   };
   hostDisconnectedMessage: string;
   selectModelMessage: string;
-  teamMode?: boolean;
-}): Promise<{ agentId: string | null; result: AgentSnapshotPayload; promptDelivered: boolean }> {
+}): Promise<{ agentId: string | null; result: AgentSnapshotPayload }> {
   const {
     attempt,
     text,
@@ -156,7 +150,6 @@ async function submitDraftCreateRequest(input: {
     workspaceId,
     autoSubmitConfig,
     composerState,
-    teamMode,
   } = input;
 
   invariant(workspaceDirectory, "Workspace directory is required");
@@ -188,7 +181,6 @@ async function submitDraftCreateRequest(input: {
     config,
     workspaceId,
     text,
-    teamMode: Boolean(teamMode),
     clientMessageId: attempt.clientMessageId,
     images,
     attachments,
@@ -197,56 +189,30 @@ async function submitDraftCreateRequest(input: {
   return {
     agentId: result.id,
     result,
-    // Team mode never sends the first message as this agent's own turn (see createDraftAgent).
-    promptDelivered: !teamMode,
   };
 }
 
-// Provisions the draft's agent and, when team mode is armed, hands the first message to the forum
-// instead of running it as a solo turn (one-shot arming for a brand-new workspace).
 async function createDraftAgent(input: {
   client: DaemonClient;
   config: ReturnType<typeof buildWorkspaceDraftAgentConfig>;
   workspaceId: string;
   text: string;
-  teamMode: boolean;
   clientMessageId: string;
   images?: UserMessageImageAttachment[];
   attachments?: unknown;
 }): Promise<AgentSnapshotPayload> {
-  const { client, config, workspaceId, text, teamMode, clientMessageId } = input;
+  const { client, config, workspaceId, text, clientMessageId } = input;
   const imagesData = await encodeImages(input.images);
   const attachmentsArray = Array.isArray(input.attachments) ? input.attachments : undefined;
-  // A team-mode agent never runs the prompt as its own turn, so the usual first-message title
-  // generation never fires and its tab would sit on "loading". Seed an explicit title from the brief
-  // (same first-line/120-char derivation the forum topic uses) so the lead's tab reads correctly.
-  const teamTitle = teamMode ? deriveTeamAgentTitle(text) : null;
-  const resolvedConfig = teamTitle ? { ...config, title: teamTitle } : config;
   const result = await client.createAgent({
-    config: resolvedConfig,
+    config,
     workspaceId,
-    // In team mode the first message is the team's brief, not a solo turn — hand it to the forum
-    // instead of running it as this agent's own prompt.
-    ...(text && !teamMode ? { initialPrompt: text } : {}),
+    ...(text ? { initialPrompt: text } : {}),
     clientMessageId,
     ...(imagesData && imagesData.length > 0 ? { images: imagesData } : {}),
     ...(attachmentsArray && attachmentsArray.length > 0 ? { attachments: attachmentsArray } : {}),
   });
-  if (teamMode && text) {
-    try {
-      await client.forumCreate({ prompt: text, originAgentId: result.id, bootstrapLead: true });
-    } catch (error) {
-      console.error("[WorkspaceDraft] Team mode start failed:", error);
-    }
-  }
   return result;
-}
-
-// Title for a team-lead agent, mirroring the forum topic's deriveTitle (first line, 120 chars).
-function deriveTeamAgentTitle(text: string): string | null {
-  const firstLine = text.split("\n", 1)[0]?.trim() ?? "";
-  const title = firstLine.slice(0, 120);
-  return title.length > 0 ? title : null;
 }
 
 function buildDraftAgentSnapshot(input: {
@@ -584,15 +550,11 @@ export function WorkspaceDraftAgentTab({
         composerState,
         hostDisconnectedMessage: t("workspace.terminal.hostDisconnected"),
         selectModelMessage: t("workspaceSetup.errors.selectModel"),
-        teamMode: getTeamModeEnabled(serverId, tabId),
       }),
     onCreateSuccess: ({ result }) => {
       clearDraftInput("sent");
       clearWorkspaceAttachments({ scopeKey: draftAttachmentScopeKey });
       useWorkspaceDraftSubmissionStore.getState().clearDraftSetup({ draftId });
-      // One-shot: consume the team-mode arming so a follow-up solo agent on this tab isn't
-      // silently forced into a forum too.
-      useTeamModeStore.getState().set(teamModeKey(serverId, tabId), false);
       onCreated(result);
     },
   });
