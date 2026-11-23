@@ -1200,6 +1200,8 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
           serverId={view.serverId}
           pluginId={view.pluginId}
           screenId={view.screenId}
+          onBackToPlugins={handleBackFromDetail}
+          showBackToPlugins={!isCompactLayout}
         />
       );
     }

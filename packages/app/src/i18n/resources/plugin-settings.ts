@@ -1,4 +1,10 @@
 const shared = {
+  screens: {
+    backToPlugins: "Back to plugins",
+    offline: "Connect to this host to open plugin settings.",
+    update: "Update this host to use plugin settings.",
+    unavailable: "This plugin settings screen is unavailable.",
+  },
   logs: {
     action: "Logs",
     title: "Logs: {{id}}",
