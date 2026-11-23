@@ -1,3 +1,4 @@
+import { resolveRepositoryDirectory } from "./repository-directory.js";
 import type { Command } from "commander";
 import { homedir } from "node:os";
 import { basename, join, sep } from "node:path";
@@ -55,6 +56,7 @@ export type WorktreeLsResult = ListResult<WorktreeListItem>;
 
 export interface WorktreeLsOptions extends CommandOptions {
   host?: string;
+  cwd?: string;
 }
 
 export async function runLsCommand(
@@ -62,6 +64,7 @@ export async function runLsCommand(
   _command: Command,
 ): Promise<WorktreeLsResult> {
   const host = getDaemonHost({ host: options.host });
+  const cwd = resolveRepositoryDirectory(options);
 
   let client: DaemonClient;
   try {
@@ -81,7 +84,7 @@ export async function runLsCommand(
     const agents = agentsPayload.entries.map((entry) => entry.agent);
 
     // Get worktree list from daemon
-    const response = await client.getJAgentDeskWorktreeList({});
+    const response = await client.getJAgentDeskWorktreeList({ cwd });
 
     await client.close();
 

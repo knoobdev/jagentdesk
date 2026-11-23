@@ -1,3 +1,4 @@
+import { fetchAllAgents } from "../../utils/agent-directory.js";
 import type { Command } from "commander";
 import type { AgentSnapshotPayload } from "@jagentdesk/protocol/messages";
 import { connectToDaemon, describeDaemonAuthFailure, getDaemonHost } from "../../utils/client.js";
@@ -33,6 +34,8 @@ export interface AgentListItem {
   status: string;
   cwd: string;
   created: string;
+  labels: Record<string, string>;
+  workspaceId: string | null;
 }
 
 /** Helper to get relative time string */
@@ -99,6 +102,8 @@ function toListItem(agent: AgentSnapshotPayload): AgentListItem {
     status: agent.status,
     cwd: shortenPath(agent.cwd),
     created: relativeTime(agent.createdAt),
+    labels: agent.labels,
+    workspaceId: agent.workspaceId ?? null,
   };
 }
 
@@ -182,6 +187,14 @@ export function buildAgentLsFetchOptions(
   return fetchOptions;
 }
 
+interface AgentLsClient {
+  fetchAgents(options?: FetchAgentsOptions): Promise<{
+    entries: { agent: AgentSnapshotPayload }[];
+    pageInfo: { nextCursor: string | null };
+  }>;
+  close(): Promise<void>;
+}
+
 /**
  * Agent ls command semantics:
  * - `jagentdesk agent ls`    → active non-archived agents
@@ -193,11 +206,20 @@ export async function runLsCommand(
   options: AgentLsOptions,
   _command: Command,
 ): Promise<AgentLsResult> {
+  return listAgents(options);
+}
+
+export async function listAgents(
+  options: AgentLsOptions,
+  connect: (
+    options: Parameters<typeof connectToDaemon>[0],
+  ) => Promise<AgentLsClient> = connectToDaemon,
+): Promise<AgentLsResult> {
   const host = getDaemonHost({ host: options.host });
 
   let client;
   try {
-    client = await connectToDaemon({ host: options.host });
+    client = await connect({ host: options.host });
   } catch (err) {
     throw daemonConnectionFailure(host, err);
   }
@@ -213,8 +235,8 @@ export async function runLsCommand(
     }
 
     const labelFilters = parseLabelFilters(options.label);
-    const fetchPayload = await client.fetchAgents(buildAgentLsFetchOptions(options));
-    let agents = fetchPayload.entries.map((entry) => entry.agent);
+    const fetchOptions = buildAgentLsFetchOptions(options);
+    let agents = await fetchAllAgents(client, fetchOptions);
 
     // By default, exclude archived agents. `-a` includes them.
     if (!options.all) {

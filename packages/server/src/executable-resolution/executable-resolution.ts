@@ -1,12 +1,16 @@
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
+import { delimiter, resolve } from "node:path";
 import { execCommand } from "../utils/spawn.js";
 import { isWindowsCommandScript } from "../utils/windows-command.js";
 import { windowsExecutableResolution } from "./windows.js";
 
 export { quoteWindowsArgument, quoteWindowsCommand } from "../utils/windows-command.js";
 
-type Which = (command: string, options: { all: true }) => Promise<string[]>;
+type Which = (
+  command: string,
+  options: { all: true; path?: string; pathExt?: string },
+) => Promise<string[]>;
 
 const require = createRequire(import.meta.url);
 const which = require("which") as Which;
@@ -35,10 +39,13 @@ async function enumerateCandidatesViaSystemWhich(name: string): Promise<string[]
   }
 }
 
-async function enumerateCandidatesViaLibrary(name: string): Promise<string[]> {
+async function enumerateCandidatesViaLibrary(
+  name: string,
+  env?: { PATH?: string; PATHEXT?: string },
+): Promise<string[]> {
   let candidates: string[];
   try {
-    candidates = await which(name, { all: true });
+    candidates = await which(name, { all: true, path: env?.PATH, pathExt: env?.PATHEXT });
   } catch (error) {
     // `which` throws ENOENT when the command is absent from PATH.
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
@@ -106,6 +113,29 @@ export function executableExists(
     return windowsExecutableResolution.exists(executablePath, { exists });
   }
   return exists(executablePath) ? executablePath : null;
+}
+
+// PATH lookup that never runs the candidate, unlike findExecutable which probes
+// each one with `--version`. A terminal spawn path cannot afford that probe: it
+// would execute the profile command once before the terminal even opens.
+// `path` overrides the PATH to search, so a caller can resolve against the
+// environment its child process will actually get rather than the daemon's own.
+export async function findExecutableWithoutProbing(
+  name: string,
+  options: { path?: string; cwd: string },
+): Promise<string | null> {
+  if (!name) {
+    return null;
+  }
+  const path =
+    options.path === undefined
+      ? undefined
+      : options.path
+          .split(delimiter)
+          .map((entry) => resolve(options.cwd, entry))
+          .join(delimiter);
+  const candidates = await enumerateCandidatesViaLibrary(name, { PATH: path });
+  return candidates[0] ?? null;
 }
 
 export async function findExecutable(

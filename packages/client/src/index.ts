@@ -18,7 +18,6 @@ import type {
   ProjectPlacementPayload,
   WorkspaceProjectDescriptorPayload,
   RefreshProvidersSnapshotResponseMessage,
-  SendAgentMessageRequest,
   SessionOutboundMessage,
   WorkspaceDescriptorPayload,
   WorkspaceCreateRequest,
@@ -33,6 +32,7 @@ import type {
   FetchAgentTimelineDirection,
   FetchAgentTimelinePayload,
   FetchAgentTimelineProjection,
+  SendMessageOptions,
   WaitForFinishResult,
 } from "./daemon-client.js";
 
@@ -264,11 +264,7 @@ export interface JAgentDeskAgentTimelineRefetchOptions {
   requestId?: string;
 }
 
-export interface JAgentDeskAgentSendOptions {
-  messageId?: string;
-  images?: Array<{ data: string; mimeType: string }>;
-  attachments?: SendAgentMessageRequest["attachments"];
-}
+export type JAgentDeskAgentSendOptions = SendMessageOptions;
 
 export interface JAgentDeskAgentRunOptions extends JAgentDeskAgentSendOptions {
   timeoutMs?: number;

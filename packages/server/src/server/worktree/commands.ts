@@ -64,7 +64,9 @@ export type CreateJAgentDeskWorktreeCommandResult<Result extends CreateJAgentDes
       cause: unknown;
     };
 
-export async function createJAgentDeskWorktreeCommand<Result extends CreateJAgentDeskWorktreeResult>(
+export async function createJAgentDeskWorktreeCommand<
+  Result extends CreateJAgentDeskWorktreeResult,
+>(
   dependencies: CreateJAgentDeskWorktreeCommandDependencies<Result>,
   input: CreateJAgentDeskWorktreeCommandInput,
 ): Promise<CreateJAgentDeskWorktreeCommandResult<Result>> {
@@ -93,7 +95,10 @@ export interface ArchiveCommandDependencies extends Omit<
   ArchiveDependencies,
   "workspaceGitService"
 > {
-  workspaceGitService: Pick<WorkspaceGitService, "getSnapshot" | "listWorktrees">;
+  workspaceGitService: Pick<
+    WorkspaceGitService,
+    "getSnapshot" | "listWorktrees" | "invalidateWorktrees"
+  >;
 }
 
 export interface ArchiveCommandInput {

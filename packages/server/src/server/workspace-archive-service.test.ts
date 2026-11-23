@@ -139,7 +139,8 @@ function createArchiveDeps(input: ArchiveDepsInput): ArchiveTestDependencies {
     github: createGitHubServiceStub(),
     workspaceGitService: {
       getSnapshot: vi.fn(async () => null),
-    } as unknown as Pick<WorkspaceGitService, "getSnapshot">,
+      invalidateWorktrees: () => {},
+    } as unknown as Pick<WorkspaceGitService, "getSnapshot" | "invalidateWorktrees">,
     agentManager: {
       listAgents: () => [],
       archiveAgent: vi.fn(async (agentId: string) => {
@@ -190,7 +191,11 @@ describe("archiveByScope", () => {
   test("workspace scope archives the record and removes the directory on last reference", async () => {
     const { tempDir, repoDir } = createGitRepo();
     const jagentdeskHome = path.join(tempDir, ".jagentdesk");
-    const worktree = await createJAgentDeskOwnedWorktree(repoDir, jagentdeskHome, "last-ref-workspace");
+    const worktree = await createJAgentDeskOwnedWorktree(
+      repoDir,
+      jagentdeskHome,
+      "last-ref-workspace",
+    );
     const workspaceId = "ws-last-ref";
 
     const result = await archiveByScope(
@@ -235,7 +240,11 @@ describe("archiveByScope", () => {
       stdio: "pipe",
     });
     const jagentdeskHome = path.join(tempDir, ".jagentdesk");
-    const worktree = await createJAgentDeskOwnedWorktree(repoDir, jagentdeskHome, "sibling-workspace");
+    const worktree = await createJAgentDeskOwnedWorktree(
+      repoDir,
+      jagentdeskHome,
+      "sibling-workspace",
+    );
     const workspaceA = "ws-sibling-a";
     const workspaceB = "ws-sibling-b";
 
@@ -264,7 +273,11 @@ describe("archiveByScope", () => {
   test("workspace scope keeps a worktree for an active workspace in a subdirectory", async () => {
     const { tempDir, repoDir } = createGitRepo();
     const jagentdeskHome = path.join(tempDir, ".jagentdesk");
-    const worktree = await createJAgentDeskOwnedWorktree(repoDir, jagentdeskHome, "subdirectory-sibling");
+    const worktree = await createJAgentDeskOwnedWorktree(
+      repoDir,
+      jagentdeskHome,
+      "subdirectory-sibling",
+    );
     const sourceWorkspaceId = "ws-subdirectory-source";
     const siblingWorkspaceId = "ws-subdirectory-sibling";
     const siblingDirectory = path.join(worktree.worktreePath, "packages", "app");
@@ -306,7 +319,11 @@ describe("archiveByScope", () => {
   test("archiving a subdirectory workspace keeps its active worktree root", async () => {
     const { tempDir, repoDir } = createGitRepo();
     const jagentdeskHome = path.join(tempDir, ".jagentdesk");
-    const worktree = await createJAgentDeskOwnedWorktree(repoDir, jagentdeskHome, "subdirectory-target");
+    const worktree = await createJAgentDeskOwnedWorktree(
+      repoDir,
+      jagentdeskHome,
+      "subdirectory-target",
+    );
     const rootWorkspaceId = "ws-subdirectory-root";
     const subdirectoryWorkspaceId = "ws-subdirectory-target";
     const subdirectory = path.join(worktree.worktreePath, "packages", "app");
@@ -367,7 +384,11 @@ describe("archiveByScope", () => {
     });
 
     const jagentdeskHome = path.join(tempDir, ".jagentdesk");
-    const worktree = await createJAgentDeskOwnedWorktree(repoDir, jagentdeskHome, "nested-teardown");
+    const worktree = await createJAgentDeskOwnedWorktree(
+      repoDir,
+      jagentdeskHome,
+      "nested-teardown",
+    );
     const workspaceCwd = path.join(worktree.worktreePath, nestedRelative);
     const matchesWorkspaceCwd = createRealpathAwarePathMatcher(workspaceCwd);
     const workspaceId = "ws-nested-teardown";
@@ -508,7 +529,11 @@ describe("archiveByScope", () => {
   test("worktree scope keeps the directory when one record teardown fails", async () => {
     const { tempDir, repoDir } = createGitRepo();
     const jagentdeskHome = path.join(tempDir, ".jagentdesk");
-    const worktree = await createJAgentDeskOwnedWorktree(repoDir, jagentdeskHome, "partial-failure");
+    const worktree = await createJAgentDeskOwnedWorktree(
+      repoDir,
+      jagentdeskHome,
+      "partial-failure",
+    );
     const workspaceA = "ws-partial-a";
     const workspaceB = "ws-partial-b";
 
@@ -565,28 +590,37 @@ describe("archiveByScope", () => {
     expect(deps.emitWorkspaceUpdatesForWorkspaceIds).not.toHaveBeenCalled();
   });
 
-  test("worktree scope removes an owned directory with zero matching records", async () => {
-    const { tempDir, repoDir } = createGitRepo();
-    const jagentdeskHome = path.join(tempDir, ".jagentdesk");
-    const worktree = await createJAgentDeskOwnedWorktree(repoDir, jagentdeskHome, "zero-records");
+  test.each(["intact", "missing"] as const)(
+    "worktree scope removes an owned directory with zero matching records and %s Git administration",
+    async (gitAdministration) => {
+      const { tempDir, repoDir } = createGitRepo();
+      const jagentdeskHome = path.join(tempDir, ".jagentdesk");
+      const worktree = await createJAgentDeskOwnedWorktree(repoDir, jagentdeskHome, "zero-records");
+      if (gitAdministration === "missing") {
+        const gitDir = execFileSync("git", ["rev-parse", "--absolute-git-dir"], {
+          cwd: worktree.worktreePath,
+        })
+          .toString()
+          .trim();
+        rmSync(gitDir, { recursive: true, force: true });
+      }
+      const dependencies = createArchiveDeps({ jagentdeskHome, activeWorkspaces: [] });
+      const invalidateWorktrees = vi.fn();
+      dependencies.workspaceGitService.invalidateWorktrees = invalidateWorktrees;
 
-    const result = await archiveByScope(
-      createArchiveDeps({
-        jagentdeskHome,
-        activeWorkspaces: [],
-      }),
-      {
+      const result = await archiveByScope(dependencies, {
         scope: { kind: "worktree", targetPath: worktree.worktreePath },
         requestId: "req-zero-records",
-      },
-    );
+      });
 
-    assertArchiveResult(result, {
-      archivedWorkspaceIds: [],
-      removedDirectory: true,
-    });
-    expect(existsSync(worktree.worktreePath)).toBe(false);
-  });
+      assertArchiveResult(result, {
+        archivedWorkspaceIds: [],
+        removedDirectory: true,
+      });
+      expect(existsSync(worktree.worktreePath)).toBe(false);
+      expect(invalidateWorktrees).toHaveBeenCalledTimes(1);
+    },
+  );
 
   test("marks archiving, emits an upsert carrying the archiving state, then clears it and emits a remove", async () => {
     const { tempDir, repoDir } = createGitRepo();
@@ -726,7 +760,11 @@ describe("archiveByScope", () => {
   test("worktree scope archives three workspaces on the directory and removes it", async () => {
     const { tempDir, repoDir } = createGitRepo();
     const jagentdeskHome = path.join(tempDir, ".jagentdesk");
-    const worktree = await createJAgentDeskOwnedWorktree(repoDir, jagentdeskHome, "worktree-scope-n3");
+    const worktree = await createJAgentDeskOwnedWorktree(
+      repoDir,
+      jagentdeskHome,
+      "worktree-scope-n3",
+    );
     const workspaceA = "ws-worktree-n3-a";
     const workspaceB = "ws-worktree-n3-b";
     const workspaceC = "ws-worktree-n3-c";

@@ -1,13 +1,19 @@
 import { Command } from "commander";
 import { connectToDaemon, getDaemonHost } from "../../utils/client.js";
-import type { CommandOptions } from "../../output/index.js";
+import {
+  renderError,
+  toCommandError,
+  defaultOutputOptions,
+  type CommandError,
+  type CommandOptions,
+} from "../../output/index.js";
 import {
   fetchProjectedTimelineItems,
   LIVE_HISTORY_FETCH_TIMEOUT_MS,
 } from "../../utils/timeline.js";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { AgentTimelineItem } from "@jagentdesk/protocol/agent-types";
-import type { AgentStreamMessage } from "@jagentdesk/protocol/messages";
+import { waitForStop } from "../../utils/wait-for-stop.js";
 import { curateAgentActivity } from "@jagentdesk/server";
 
 export function addLogsOptions(cmd: Command): Command {
@@ -32,12 +38,29 @@ export type AgentLogsResult = void;
 
 export const NO_ACTIVITY_MESSAGE = "No activity to display.";
 
+interface FetchAgentTimelineItemsOptions {
+  timeoutMs?: number;
+  sinceTimestampMs?: number;
+}
+
+interface FollowModeInput {
+  client: DaemonClient;
+  agentId: string;
+  options: AgentLogsOptions;
+  sinceTimestampMs: number | undefined;
+}
+
 export async function fetchAgentTimelineItems(
   client: DaemonClient,
   agentId: string,
-  options?: { timeoutMs?: number },
+  options?: FetchAgentTimelineItemsOptions,
 ): Promise<AgentTimelineItem[]> {
-  return fetchProjectedTimelineItems({ client, agentId, timeoutMs: options?.timeoutMs });
+  return fetchProjectedTimelineItems({
+    client,
+    agentId,
+    timeoutMs: options?.timeoutMs,
+    sinceTimestampMs: options?.sinceTimestampMs,
+  });
 }
 
 export function formatAgentActivityTranscript(
@@ -53,6 +76,178 @@ export function formatAgentActivityTranscript(
   );
 }
 
+/**
+ * Picks the items `--tail` keeps, the same way the transcript does: the last n
+ * timeline items, before any of them are dropped from the curated view.
+ */
+function selectTailItems(
+  timelineItems: AgentTimelineItem[],
+  tailCount?: number,
+): AgentTimelineItem[] {
+  if (tailCount === undefined) {
+    return timelineItems;
+  }
+  if (tailCount === 0) {
+    return [];
+  }
+  return timelineItems.slice(-tailCount);
+}
+
+function formatAgentLogsJson(
+  agentId: string,
+  timelineItems: AgentTimelineItem[],
+  tailCount?: number,
+): string {
+  return JSON.stringify({ agentId, items: selectTailItems(timelineItems, tailCount) }, null, 2);
+}
+
+function usesJsonOutput(options: AgentLogsOptions): boolean {
+  return options.json === true || options.format?.trim().toLowerCase() === "json";
+}
+
+type StreamingTextType = "assistant_message" | "reasoning";
+
+const THOUGHT_PREFIX = "[Thought] ";
+
+interface PendingStreamingText {
+  type: StreamingTextType;
+  turnId: string | undefined;
+  messageId: string | undefined;
+  buffer: string;
+  emitted: boolean;
+}
+
+export interface FollowTranscriptWriter {
+  push(item: AgentTimelineItem, turnId?: string): void;
+  end(): void;
+}
+
+function lastNonWhitespaceIndex(text: string): number {
+  for (let index = text.length - 1; index >= 0; index -= 1) {
+    if (!/\s/.test(text[index])) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Follow mode receives one streaming fragment per event, while the one-shot
+ * transcript sees the whole timeline and merges consecutive assistant and
+ * reasoning fragments with exact concatenation (`projectTimelineRows`). Printing
+ * each fragment on its own line splits words at fragment boundaries and
+ * reprints the reasoning prefix, so a chain of fragments is written as one
+ * stream instead: text goes out as it arrives, and only the trailing whitespace
+ * is held back so the message ends trimmed the way the transcript does.
+ */
+export function createFollowTranscriptWriter(
+  write: (chunk: string) => void = (chunk) => void process.stdout.write(chunk),
+  filter?: string,
+): FollowTranscriptWriter {
+  let pending: PendingStreamingText | null = null;
+
+  const emit = (chain: PendingStreamingText, text: string): void => {
+    if (!chain.emitted) {
+      chain.emitted = true;
+      if (chain.type === "reasoning") {
+        write(THOUGHT_PREFIX);
+      }
+    }
+    write(text);
+  };
+
+  const flushContent = (chain: PendingStreamingText): void => {
+    if (!chain.emitted) {
+      chain.buffer = chain.buffer.replace(/^\s+/, "");
+    }
+    const lastContent = lastNonWhitespaceIndex(chain.buffer);
+    if (lastContent < 0) {
+      return;
+    }
+    emit(chain, chain.buffer.slice(0, lastContent + 1));
+    chain.buffer = chain.buffer.slice(lastContent + 1);
+  };
+
+  const closePending = (): void => {
+    const chain = pending;
+    pending = null;
+    if (!chain) {
+      return;
+    }
+    const tail = chain.emitted ? chain.buffer.trimEnd() : chain.buffer.trim();
+    if (tail) {
+      emit(chain, tail);
+    }
+    if (chain.emitted) {
+      write("\n");
+    }
+  };
+
+  const continuesChain = (item: AgentTimelineItem, turnId: string | undefined): boolean => {
+    if (!pending || pending.type !== item.type || pending.turnId !== turnId) {
+      return false;
+    }
+    if (item.type !== "assistant_message") {
+      return true;
+    }
+    return item.messageId === undefined || item.messageId === pending.messageId;
+  };
+
+  const startChain = (
+    item: Extract<AgentTimelineItem, { type: StreamingTextType }>,
+    turnId: string | undefined,
+  ): PendingStreamingText => {
+    closePending();
+    const chain: PendingStreamingText = {
+      type: item.type,
+      turnId,
+      messageId: item.type === "assistant_message" ? item.messageId : undefined,
+      buffer: "",
+      emitted: false,
+    };
+    pending = chain;
+    return chain;
+  };
+
+  return {
+    push(item, turnId) {
+      if (!matchesFilter(item, filter)) {
+        closePending();
+        return;
+      }
+      if (item.type === "assistant_message" || item.type === "reasoning") {
+        const chain = continuesChain(item, turnId) && pending ? pending : startChain(item, turnId);
+        chain.buffer += item.text;
+        flushContent(chain);
+        return;
+      }
+      closePending();
+      const transcript = formatAgentActivityTranscript([item]);
+      if (transcript && transcript !== NO_ACTIVITY_MESSAGE) {
+        write(`${transcript}\n`);
+      }
+    },
+    end() {
+      closePending();
+    },
+  };
+}
+
+/** Follow mode with `--json`: one JSON timeline item per line (NDJSON). */
+export function createFollowJsonWriter(
+  filter?: string,
+  write: (chunk: string) => void = (chunk) => void process.stdout.write(chunk),
+): FollowTranscriptWriter {
+  return {
+    push(item) {
+      if (matchesFilter(item, filter)) {
+        write(`${JSON.stringify(item)}\n`);
+      }
+    },
+    end() {},
+  };
+}
+
 function parseTailCount(raw: string | undefined): number | undefined {
   if (raw === undefined) return undefined;
   const parsed = Number.parseInt(raw, 10);
@@ -60,6 +255,19 @@ function parseTailCount(raw: string | undefined): number | undefined {
     return undefined;
   }
   return parsed;
+}
+
+function parseSinceTimestamp(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  const timestampMs = Date.parse(raw);
+  if (Number.isNaN(timestampMs)) {
+    throw {
+      code: "INVALID_TIMESTAMP",
+      message: `Invalid --since value: ${raw}`,
+      details: "Use a timestamp such as 2026-01-01T00:00:00Z.",
+    } satisfies CommandError;
+  }
+  return timestampMs;
 }
 
 /**
@@ -92,6 +300,7 @@ export async function runLogsCommand(
   options: AgentLogsOptions,
   _command: Command,
 ): Promise<AgentLogsResult> {
+  options = { ..._command.optsWithGlobals(), ...options };
   const host = getDaemonHost({ host: options.host });
 
   if (!id) {
@@ -100,6 +309,20 @@ export async function runLogsCommand(
     process.exit(1);
   }
 
+  let sinceTimestampMs: number | undefined;
+  try {
+    sinceTimestampMs = parseSinceTimestamp(options.since);
+  } catch (error) {
+    // Streaming actions bypass withOutput; preserve the CLI error format here.
+    process.stderr.write(
+      renderError(toCommandError(error), {
+        ...defaultOutputOptions,
+        format: usesJsonOutput(options) ? "json" : "table",
+      }) + "\n",
+    );
+    process.exitCode = 1;
+    return;
+  }
   let client: DaemonClient;
   try {
     client = await connectToDaemon({ host: options.host });
@@ -128,12 +351,19 @@ export async function runLogsCommand(
         await client.close().catch(() => {});
         process.exit(1);
       }
-      await runFollowMode(client, resolvedId, options);
+      await runFollowMode({
+        client,
+        agentId: resolvedId,
+        options,
+        sinceTimestampMs,
+      });
       return;
     }
 
     // Fetch timeline directly via cursor RPC.
-    let timelineItems = await fetchAgentTimelineItems(client, resolvedId);
+    let timelineItems = await fetchAgentTimelineItems(client, resolvedId, {
+      sinceTimestampMs,
+    });
 
     // Apply filter
     if (options.filter) {
@@ -149,6 +379,11 @@ export async function runLogsCommand(
     }
 
     await client.close();
+
+    if (usesJsonOutput(options)) {
+      console.log(formatAgentLogsJson(resolvedId, timelineItems, tailCount));
+      return;
+    }
 
     // Use curateAgentActivity to format the transcript
     if (tailCount === 0) {
@@ -168,71 +403,93 @@ export async function runLogsCommand(
 /**
  * Follow mode: stream logs in real-time until interrupted
  */
-async function runFollowMode(
-  client: DaemonClient,
-  agentId: string,
-  options: AgentLogsOptions,
-): Promise<void> {
-  const DEFAULT_FOLLOW_TAIL = 10;
-  const tailCount = parseTailCount(options.tail) ?? DEFAULT_FOLLOW_TAIL;
-
-  // First, get existing timeline.
-  let existingItems: AgentTimelineItem[] = [];
+async function runFollowMode({
+  client,
+  agentId,
+  options,
+  sinceTimestampMs,
+}: FollowModeInput): Promise<void> {
+  // Observe shutdown before history writes can encounter a closed reader.
+  // Keep an early stop resolved while subscription setup is in flight.
+  const stopController = new AbortController();
+  const stopped = waitForStop(stopController.signal);
+  let unsubscribe: (() => void) | undefined;
+  const json = usesJsonOutput(options);
+  const writer = json
+    ? createFollowJsonWriter(options.filter)
+    : createFollowTranscriptWriter(undefined, options.filter);
   try {
-    existingItems = await fetchAgentTimelineItems(client, agentId, {
-      timeoutMs: LIVE_HISTORY_FETCH_TIMEOUT_MS,
+    const DEFAULT_FOLLOW_TAIL = 10;
+    const tailCount = parseTailCount(options.tail) ?? DEFAULT_FOLLOW_TAIL;
+
+    // First, get existing timeline.
+    let existingItems: AgentTimelineItem[] = [];
+    try {
+      const history = await Promise.race([
+        fetchAgentTimelineItems(client, agentId, {
+          timeoutMs: LIVE_HISTORY_FETCH_TIMEOUT_MS,
+          sinceTimestampMs,
+        }),
+        stopped,
+      ]);
+      if (!history) return;
+      existingItems = history;
+    } catch (error) {
+      console.warn("Warning: failed to fetch existing timeline", error);
+    }
+
+    // Apply filter to existing items
+    if (options.filter) {
+      existingItems = existingItems.filter((item) => matchesFilter(item, options.filter));
+    }
+
+    // Print existing transcript (tail-like behavior)
+    if (json) {
+      for (const item of selectTailItems(existingItems, tailCount)) {
+        console.log(JSON.stringify(item));
+      }
+    } else if (tailCount > 0) {
+      const existingTranscript = formatAgentActivityTranscript(existingItems, tailCount);
+      if (existingTranscript !== NO_ACTIVITY_MESSAGE) {
+        console.log(existingTranscript);
+      }
+    }
+
+    // Subscribe to new events
+    const tailLabel =
+      tailCount === 0 ? "no history" : `last ${tailCount} entr${tailCount === 1 ? "y" : "ies"}`;
+
+    // Keep stdout parseable in JSON mode: one timeline item per line, notices on stderr.
+    const notice = json ? console.error : console.log;
+
+    const subscription = client.on("agent_stream", (message) => {
+      if (message.payload.agentId !== agentId) return;
+      if (message.payload.event.type === "timeline") {
+        const matchesSince =
+          sinceTimestampMs === undefined ||
+          Date.parse(message.payload.timestamp) >= sinceTimestampMs;
+        if (!matchesSince) {
+          return;
+        }
+        const item = message.payload.event.item;
+        writer.push(item, message.payload.event.turnId);
+      } else if (
+        message.payload.event.type === "turn_completed" ||
+        message.payload.event.type === "turn_failed" ||
+        message.payload.event.type === "turn_canceled"
+      ) {
+        writer.end();
+      }
     });
-  } catch (error) {
-    console.warn("Warning: failed to fetch existing timeline", error);
+
+    unsubscribe = subscription;
+    notice(`\n--- Following logs (${tailLabel}; Ctrl+C to stop) ---\n`);
+
+    await stopped;
+  } finally {
+    stopController.abort();
+    writer.end();
+    unsubscribe?.();
+    await client.close();
   }
-
-  // Apply filter to existing items
-  if (options.filter) {
-    existingItems = existingItems.filter((item) => matchesFilter(item, options.filter));
-  }
-
-  // Print existing transcript (tail-like behavior)
-  if (tailCount > 0) {
-    const existingTranscript = formatAgentActivityTranscript(existingItems, tailCount);
-    if (existingTranscript !== NO_ACTIVITY_MESSAGE) {
-      console.log(existingTranscript);
-    }
-  }
-
-  // Subscribe to new events
-  const tailLabel =
-    tailCount === 0 ? "no history" : `last ${tailCount} entr${tailCount === 1 ? "y" : "ies"}`;
-  console.log(`\n--- Following logs (${tailLabel}; Ctrl+C to stop) ---\n`);
-
-  const unsubscribe = client.on("agent_stream", (msg: unknown) => {
-    const message = msg as AgentStreamMessage;
-    if (message.type !== "agent_stream") return;
-    if (message.payload.agentId !== agentId) return;
-
-    if (message.payload.event.type === "timeline") {
-      const item = message.payload.event.item;
-      // Apply filter
-      if (options.filter && !matchesFilter(item, options.filter)) {
-        return;
-      }
-      // Print each timeline item as it arrives using the curator format
-      const transcript = formatAgentActivityTranscript([item]);
-      if (transcript !== NO_ACTIVITY_MESSAGE) {
-        console.log(transcript);
-      }
-    }
-  });
-
-  // Wait for interrupt
-  await new Promise<void>((resolve) => {
-    const cleanup = () => {
-      unsubscribe();
-      resolve();
-    };
-
-    process.on("SIGINT", cleanup);
-    process.on("SIGTERM", cleanup);
-  });
-
-  await client.close();
 }
