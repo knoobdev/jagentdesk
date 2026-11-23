@@ -3907,6 +3907,7 @@ export class CodexAppServerAgentSession implements AgentSession {
   }
 
   async connect(): Promise<void> {
+    await this.pendingNotifications;
     if (this.closed) {
       throw this.createClosedError();
     }
@@ -4033,9 +4034,13 @@ export class CodexAppServerAgentSession implements AgentSession {
     };
   }
 
-  private async handleUnexpectedTerminationAfterNotifications(error: Error): Promise<void> {
-    await this.pendingNotifications;
-    this.handleUnexpectedTermination(error);
+  private handleUnexpectedTerminationAfterNotifications(failure: Error): Promise<void> {
+    // Admission closes immediately; reconnect waits for the previous client's final events.
+    this.connected = false;
+    this.pendingNotifications = this.pendingNotifications.then(() =>
+      this.handleUnexpectedTermination(failure),
+    );
+    return this.pendingNotifications;
   }
 
   private handleUnexpectedTermination(error: Error): void {

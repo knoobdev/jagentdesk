@@ -824,6 +824,7 @@ export class OmpAgentSession implements AgentSession {
     streamingBehavior?: "steer" | "followUp";
     announceTurn?: boolean;
   }): Promise<StartTurnResult> {
+    if (this.closed) throw new Error("OMP session is closed");
     if (this.activeTurnId) {
       throw new Error("An OMP turn is already active");
     }
@@ -839,8 +840,7 @@ export class OmpAgentSession implements AgentSession {
     this.activePromptRequestId = null;
     this.clearNoTurnBuffers();
     const payload = await convertPromptInput(prompt, { model: this.state.model });
-    if (this.closed) throw new Error("OMP session is closed");
-    if (this.activeTurnId !== turnId) return { turnId };
+    if (this.closed || this.activeTurnId !== turnId) return { turnId };
     this.rememberClientMessage(options?.clientMessageId ?? null, payload.text);
     this.activeNoTurnPromptText = payload.text;
     this.usagePoller.startTurn();

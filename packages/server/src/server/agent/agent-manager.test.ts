@@ -8363,7 +8363,7 @@ test("archiveAgent cascade archives in-memory children with the full archive con
 
   expectArchivedAgentRecord(storedParent, "closed");
   expectArchivedAgentRecord(storedChild, "closed");
-  expect(storedUnrelated?.archivedAt).toBeUndefined();
+  expect(storedUnrelated?.archivedAt).toBeNull();
 });
 
 test("archiveAgent detaches an open same-workspace child instead of cascading", async () => {
@@ -8395,7 +8395,7 @@ test("archiveAgent detaches an open same-workspace child instead of cascading", 
   await manager.archiveAgent(parent.id);
 
   const storedChild = await storage.get(child.id);
-  expect(storedChild?.archivedAt).toBeUndefined();
+  expect(storedChild?.archivedAt).toBeNull();
   expect(storedChild?.labels[PARENT_AGENT_ID_LABEL]).toBeUndefined();
   expect(storedChild?.labels[DESKTOP_OPEN_AGENT_TAB_LABEL]).toBeUndefined();
   expect(storedChild?.labels[MOBILE_OPEN_AGENT_TAB_LABEL]).toBeUndefined();
@@ -8430,7 +8430,7 @@ test("archiveAgent detaches a cross-workspace child even when its tab is closed"
   await manager.archiveAgent(parent.id);
 
   const storedChild = await storage.get(child.id);
-  expect(storedChild?.archivedAt).toBeUndefined();
+  expect(storedChild?.archivedAt).toBeNull();
   expect(storedChild?.workspaceId).toBe("workspace-b");
   expect(storedChild?.labels[PARENT_AGENT_ID_LABEL]).toBeUndefined();
 });
@@ -8484,7 +8484,7 @@ test("archiveAgent re-reads a child before deciding whether to cascade", async (
   await manager.archiveAgent(parent.id);
 
   const storedChild = await storage.get(child.id);
-  expect(storedChild?.archivedAt).toBeUndefined();
+  expect(storedChild?.archivedAt).toBeNull();
   expect(storedChild?.labels[PARENT_AGENT_ID_LABEL]).toBeUndefined();
 });
 
@@ -8538,7 +8538,7 @@ test("archiveAgent cannot overtake a received child open-tab update", async () =
   await Promise.all([markOpen, archiveParent]);
 
   const storedChild = await storage.get(child.id);
-  expect(storedChild?.archivedAt).toBeUndefined();
+  expect(storedChild?.archivedAt).toBeNull();
   expect(storedChild?.labels[PARENT_AGENT_ID_LABEL]).toBeUndefined();
 });
 
