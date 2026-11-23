@@ -100,16 +100,15 @@ export class V2Runtime {
     if (this.closed) throw new Error("OpenCode runtime is closed");
     input.signal?.throwIfAborted();
     this.assertBridgePort();
-    const selection = await raceProviderRefreshAbort(input.signal, this.selection);
+    const selected = await raceProviderRefreshAbort(input.signal, this.selection);
+    const selection: OpenCodeServiceSelection = this.requiresOwnedServer(input, selected)
+      ? { kind: "owned" }
+      : selected;
     let pending: Promise<Generation>;
-    if (selection.kind !== "owned") {
-      this.assertSharedConfiguration(input, selection);
-      this.current ??= this.startTracked();
-      pending = this.current;
-    } else if (input.env || input.dedicated) {
-      pending = this.startTracked(input.env);
+    if (input.env || input.dedicated) {
+      pending = this.startTracked(selection, input.env);
     } else {
-      if (!this.current) this.current = this.startTracked();
+      if (!this.current) this.current = this.startTracked(selection);
       pending = this.current;
     }
     let generation: Generation;
@@ -157,10 +156,11 @@ export class V2Runtime {
       );
   }
 
-  private assertSharedConfiguration(
+  private requiresOwnedServer(
     input: V2RuntimeAcquireOptions,
     selection: OpenCodeServiceSelection,
-  ): void {
+  ): boolean {
+    if (selection.kind === "owned" || input.env || input.dedicated) return true;
     const connectionEnv = new Set([
       "JAGENTDESK_OPENCODE_SERVER_URL",
       "JAGENTDESK_OPENCODE_SERVER_PASSWORD",
@@ -172,14 +172,7 @@ export class V2Runtime {
       connectionEnv.add("XDG_STATE_HOME");
       connectionEnv.add("OPENCODE_CONFIG_DIR");
     }
-    const processOverrides = Object.keys(this.options.settings?.env ?? {}).filter(
-      (key) => !connectionEnv.has(key),
-    );
-    if (input.env || input.dedicated || processOverrides.length) {
-      throw new Error(
-        `Custom OpenCode MCP servers or process environment require an isolated server and cannot be used with a shared OpenCode service${processOverrides.length ? `: ${processOverrides.join(", ")}` : ""}.`,
-      );
-    }
+    return Object.keys(this.options.settings?.env ?? {}).some((key) => !connectionEnv.has(key));
   }
 
   private lease(generation: Generation, pending: Promise<Generation>): V2Connection {
@@ -215,8 +208,11 @@ export class V2Runtime {
     this.current = null;
   }
 
-  private startTracked(env?: Record<string, string>): Promise<Generation> {
-    const pending = this.start(env);
+  private startTracked(
+    selection: OpenCodeServiceSelection,
+    env?: Record<string, string>,
+  ): Promise<Generation> {
+    const pending = this.start(selection, env);
     this.starts.add(pending);
     void pending.then(
       (generation) =>
@@ -233,8 +229,10 @@ export class V2Runtime {
     return pending;
   }
 
-  private async start(env: Record<string, string> = {}): Promise<Generation> {
-    const selection = await this.selection;
+  private async start(
+    selection: OpenCodeServiceSelection,
+    env: Record<string, string> = {},
+  ): Promise<Generation> {
     if (selection.kind !== "owned") {
       const generation: Generation = {
         ...(await connectSharedService(selection, this.options)),

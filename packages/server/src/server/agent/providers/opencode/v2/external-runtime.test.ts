@@ -170,27 +170,6 @@ describe("V2Runtime against an external server", () => {
     await runtime.shutdown();
   });
 
-  test("rejects session configuration that requires process isolation", async () => {
-    const runtime = new V2Runtime({
-      logger: createTestLogger(),
-      externalServer: { url: "http://127.0.0.1:1" },
-    });
-    await expect(runtime.acquire({ dedicated: true })).rejects.toThrow(
-      "require an isolated server",
-    );
-    await runtime.shutdown();
-  });
-
-  test("rejects provider process environment on an explicit server", async () => {
-    const runtime = new V2Runtime({
-      logger: createTestLogger(),
-      externalServer: { url: "http://127.0.0.1:1" },
-      settings: { env: { XDG_CONFIG_HOME: "/custom", PROVIDER_KEY: "secret" } },
-    });
-    await expect(runtime.acquire()).rejects.toThrow("XDG_CONFIG_HOME, PROVIDER_KEY");
-    await runtime.shutdown();
-  });
-
   test("rejects an unsupported explicit server version", async () => {
     server = createServer((_request, response) => {
       response.writeHead(200, { "content-type": "application/json" });
