@@ -91,7 +91,7 @@ describe("observeReplaySubagents", () => {
     const replay = await observeReplaySubagents({
       subagents: [{ agentId: AGENT_ID, meta: { toolUseId: TOOL_USE_ID }, entries: entries() }],
       parent: parentWithTaskCall(),
-      convertEntry: async () => [],
+      convertEntry: () => [],
     });
     expect(replay.restored).toEqual([
       {

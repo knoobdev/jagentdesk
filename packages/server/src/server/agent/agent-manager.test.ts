@@ -10119,6 +10119,11 @@ test("concurrent explicit closes tear down the runtime once", async () => {
   }
 });
 
+async function drainAsyncGenerator(events: AsyncGenerator<AgentStreamEvent>): Promise<void> {
+  for await (const _event of events) {
+  }
+}
+
 test("close drains provider tool cleanup before retiring the runtime", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-close-cleanup-"));
   const storage = new AgentStorage(join(workdir, "agents"), logger);
@@ -10173,6 +10178,16 @@ test("close drains provider tool cleanup before retiring the runtime", async () 
     timelineStore: timeline,
     logger,
   });
+  const statuses = new Map<string, string>();
+  manager.subscribe((event) => {
+    if (
+      event.type === "agent_stream" &&
+      event.event.type === "timeline" &&
+      event.event.item.type === "tool_call"
+    ) {
+      statuses.set(event.event.item.callId, event.event.item.status);
+    }
+  });
   const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
     workspaceId: undefined,
   });
@@ -10183,12 +10198,7 @@ test("close drains provider tool cleanup before retiring the runtime", async () 
     await manager.closeAgent(agent.id);
     await run;
     await manager.flush();
-    expect(
-      timeline
-        .getItems(agent.id)
-        .filter((item) => item.type === "tool_call")
-        .map((item) => ({ callId: item.callId, status: item.status })),
-    ).toEqual([
+    expect([...statuses].map(([callId, status]) => ({ callId, status }))).toEqual([
       { callId: "first-tool", status: "canceled" },
       { callId: "second-tool", status: "canceled" },
     ]);

@@ -285,7 +285,8 @@ describe("edxeth/pi-subagents adapter", () => {
         expect.objectContaining({
           item: expect.objectContaining({
             type: "assistant_message",
-            text: mode === "foreground" ? "JAGENTDESK_EDXETH_UPSTREAM_OK" : "JAGENTDESK_EDXETH_LEAN_OK",
+            text:
+              mode === "foreground" ? "JAGENTDESK_EDXETH_UPSTREAM_OK" : "JAGENTDESK_EDXETH_LEAN_OK",
           }),
         }),
       );

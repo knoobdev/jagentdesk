@@ -2505,7 +2505,12 @@ export class AgentManager {
         options,
       });
       if (turnId === null) {
-        yield { type: "turn_canceled", provider: agent.provider, reason: "interrupted" };
+        const canceledEvent: AgentStreamEvent = {
+          type: "turn_canceled",
+          provider: agent.provider,
+          reason: "interrupted",
+        };
+        yield canceledEvent;
         return;
       }
 
@@ -4745,12 +4750,6 @@ export class AgentManager {
     this.runs.trackAutonomousRun(agent.id, eventTurnId ?? null);
     if (eventTurnId) {
       this.openActiveTurn(agent, eventTurnId, new Date());
-    }
-    agent.lastError = undefined;
-    // Nobody read the agent, so an unread finish stays unread. Clearing it would make every
-    // turn the agent starts on its own, such as a reaction to background output, notify again.
-    if (agent.attention.requiresAttention && agent.attention.attentionReason === "error") {
-      agent.attention = { requiresAttention: false };
     }
     agent.lifecycle = "running";
     this.emitState(agent);
