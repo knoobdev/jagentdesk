@@ -259,6 +259,7 @@ function send(child: PluginChild, message: PluginProcessRequest): Promise<void> 
 
 export class PluginRuntime {
   private readonly plugins = new Map<string, LoadedPlugin>();
+  private readonly pendingEvents = new Set<Promise<void>>();
   private readonly logTails = new Map<string, PluginLogTail>();
   private readonly logger: pino.Logger;
   private readonly spawnChild: () => PluginChild;
@@ -442,20 +443,28 @@ export class PluginRuntime {
       if (!loaded.hooks.events.includes(name)) {
         continue;
       }
-      void this.request(loaded, {
+      const request = this.request(loaded, {
         type: "hook",
         requestId: randomUUID(),
         kind: "event",
         name,
         input: event,
-      }).catch((error) => {
-        this.appendLog(
-          loaded.id,
-          "stderr",
-          `Lifecycle hook ${name} failed: ${describeError(error)}`,
-        );
-      });
+      })
+        .then(() => undefined)
+        .catch((error) => {
+          this.appendLog(
+            loaded.id,
+            "stderr",
+            `Lifecycle hook ${name} failed: ${describeError(error)}`,
+          );
+        });
+      this.pendingEvents.add(request);
+      void request.finally(() => this.pendingEvents.delete(request));
     }
+  }
+
+  async drainEvents(): Promise<void> {
+    await Promise.all(this.pendingEvents);
   }
 
   async before<Name extends keyof PluginBeforeRequests>(

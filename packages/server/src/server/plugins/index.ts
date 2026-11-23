@@ -42,6 +42,7 @@ async function buildCandidate(
 
 interface PluginRuntimePort {
   emit?: PluginLifecycle["emit"];
+  drainEvents?: PluginRuntime["drainEvents"];
   before?: PluginLifecycle["before"];
   catalog: PluginRuntime["catalog"];
   invoke(pluginId: string, method: string, input: unknown): Promise<unknown>;
@@ -122,6 +123,10 @@ export class PluginService {
   readonly emit: PluginLifecycle["emit"] = (name, event) => {
     this.runtime.emit?.(name, event);
   };
+
+  async drainEvents(): Promise<void> {
+    await this.runtime.drainEvents?.();
+  }
 
   readonly before: PluginLifecycle["before"] = async (name, request) => {
     if (this.runtime.before) {

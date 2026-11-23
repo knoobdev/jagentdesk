@@ -1,4 +1,5 @@
 import type { BuiltinPluginLoader } from "./plugins/builtin/index.js";
+import { withTimeout } from "../utils/promise-timeout.js";
 import { describeHookWorkspace } from "./plugins/lifecycle/index.js";
 import { PhysicalDeviceHub } from "./devices/hub.js";
 import { clearGrantsWhenSessionsEnd } from "./devices/agent-grants.js";
@@ -2275,6 +2276,11 @@ export async function createJAgentDeskDaemon(
     wsServer?.prepareForShutdown();
     agentManager.prepareForShutdown();
     await closeAllAgents(logger, agentManager);
+    await withTimeout({
+      promise: pluginRuntime.drainEvents(),
+      timeoutMs: 5_000,
+      label: "drain plugin lifecycle events",
+    }).catch((error) => logger.warn({ err: error }, "Plugin lifecycle events did not finish"));
     await agentManager.flushForShutdown().catch(() => undefined);
     detachAgentStoragePersistence();
     await agentStorage.flush().catch(() => undefined);
