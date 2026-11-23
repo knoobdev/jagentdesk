@@ -78,6 +78,8 @@ export interface PluginSessionOpenRequest {
   purpose: "interactive" | "history";
   readonly title: string | null;
   readonly labels: Readonly<Record<string, string>>;
+  /** Instructions appended for this open; not saved on the agent. */
+  appendSystemPrompt?: string[];
   tools: AgentToolDefinition[];
   env: Record<string, string>;
   mcpServers: NonNullable<AgentSessionConfig["mcpServers"]>;

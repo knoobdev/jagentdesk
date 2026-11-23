@@ -102,6 +102,7 @@ const beforeSchemas = {
       purpose: z.enum(["interactive", "history"]),
       title: z.string().nullable(),
       labels: z.record(z.string(), z.string()),
+      appendSystemPrompt: z.array(z.string()).optional(),
       tools: z.array(agentToolMetadataSchema),
       env: z.record(z.string(), z.string()),
       mcpServers: CreateAgentRequestMessageSchema.shape.config.shape.mcpServers.unwrap(),
@@ -228,8 +229,12 @@ export async function validateBeforeResult<Name extends keyof PluginWireBeforeRe
       previous.title !== next.title ||
       !isDeepStrictEqual(previous.labels, next.labels)
     ) {
-      throw new Error("agent.open.before hooks can only change env, tools, and mcpServers");
+      throw new Error(
+        "agent.open.before hooks can only change env, tools, mcpServers, and appendSystemPrompt",
+      );
     }
+    if (next.appendSystemPrompt === undefined && previous.appendSystemPrompt !== undefined)
+      return { ...result, appendSystemPrompt: previous.appendSystemPrompt };
   }
   if (name === "agent.create.before") {
     const previous = beforeSchemas["agent.create.before"].parse(input);
@@ -347,6 +352,7 @@ export class PluginHookHandlers implements PluginLifecycleRegistration {
     if (request.purpose === "history") {
       request.tools = [];
       request.mcpServers = {};
+      delete request.appendSystemPrompt;
     } else this.agentTools?.attach(request.agentId, tools);
     return request;
   }

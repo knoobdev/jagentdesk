@@ -475,6 +475,9 @@ export function wrapSessionProvider(provider: AgentProvider, inner: AgentSession
     get capabilities() {
       return inner.capabilities;
     },
+    get persistenceUpdatedOnResume() {
+      return inner.persistenceUpdatedOnResume;
+    },
     get initialTimeline() {
       return inner.initialTimeline;
     },
