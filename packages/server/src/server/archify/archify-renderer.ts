@@ -4,14 +4,11 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  ForumDiagramTypeSchema,
-  type ForumDiagramType,
-} from "@jagentdesk/protocol/agent-forum/types";
+import type { ArchifyDiagramType } from "@jagentdesk/protocol/archify";
 import { buildSelfNodeCommand } from "../jagentdesk-env.js";
 
-// Renders archify JSON (spec 23, ADR-0021) with the archify copy vendored at
-// packages/server/vendor/archify. archify's renderers run their CLI at module load, so each render
+// Renders archify JSON (spec 31, ADR-0021/ADR-0031) with the archify copy vendored at
+// packages/server/vendor/archify-3.2.0. archify's renderers run their CLI at module load, so each render
 // is one child process of the daemon's own runtime (Node, or Electron with ELECTRON_RUN_AS_NODE).
 // No network (the vendored copy has no update check and no brand-mark capture) and no model calls.
 
@@ -21,30 +18,17 @@ export interface ArchifyDiagramError {
   message: string;
 }
 
-export type ArchifyRenderResult =
-  | { ok: true; diagramType: ForumDiagramType; html: string }
-  | { ok: false; errors: ArchifyDiagramError[] };
-
-export interface ArchifyRenderInput {
-  source: string;
-  diagramType?: ForumDiagramType;
-}
-
-export type ArchifyRenderer = (input: ArchifyRenderInput) => Promise<ArchifyRenderResult>;
-
 const RENDER_TIMEOUT_MS = 30_000;
 const MAX_ERRORS = 25;
 const MAX_MESSAGE_CHARS = 2_000;
-// meta.output is required by archify's schema but meaningless here: the daemon chooses where the HTML
-// is stored. The wrapper always sets it so agents need not, and so an authored path is never used.
+// The daemon chooses the output path rather than using an authored host path.
 export const ARCHIFY_RENDER_OUTPUT_NAME = "diagram.html";
 const RENDER_OUTPUT_NAME = ARCHIFY_RENDER_OUTPUT_NAME;
 
-// Source layout: src/server/agent-forum → ../../../vendor/<dir> (packages/server/vendor/<dir>).
-// Build layout:  dist/server/server/agent-forum → ../../vendor/<dir> (dist/server/vendor/<dir>).
-// "archify" is 3.0.1 for Team mode (spec 23); "archify-3.2.0" serves the agent activity graph
-// (spec 31, ADR-0031).
-export type ArchifyVendorName = "archify" | "archify-3.2.0";
+// Source layout: src/server/archify → ../../../vendor/<dir> (packages/server/vendor/<dir>).
+// Build layout:  dist/server/server/archify → ../../vendor/<dir> (dist/server/vendor/<dir>).
+// The activity graph uses the sandboxed archify 3.2.0 renderer (spec 31, ADR-0031).
+export type ArchifyVendorName = "archify-3.2.0";
 const VENDOR_PREFIXES = ["../../../vendor/", "../../vendor/"];
 
 // A child process cannot read inside app.asar, so a packaged daemon uses the unpacked copy
@@ -54,61 +38,13 @@ function toExternalPath(filePath: string): string {
   return unpacked !== filePath && existsSync(unpacked) ? unpacked : filePath;
 }
 
-export function resolveArchifyVendorDir(name: ArchifyVendorName = "archify"): string {
+export function resolveArchifyVendorDir(name: ArchifyVendorName = "archify-3.2.0"): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
   for (const prefix of VENDOR_PREFIXES) {
     const dir = path.resolve(here, `${prefix}${name}`);
     if (existsSync(path.join(dir, "assets", "template.html"))) return toExternalPath(dir);
   }
   throw new Error(`archify renderer is not bundled with this daemon (vendor/${name} missing)`);
-}
-
-function fail(message: string, pointer = "/"): ArchifyRenderResult {
-  return { ok: false, errors: [{ path: pointer, message }] };
-}
-
-type PreparedDocument =
-  | { ok: true; diagramType: ForumDiagramType; json: string }
-  | { ok: false; result: ArchifyRenderResult };
-
-// Parse, pick the renderer, and pin meta.output. Structural validation is archify's job.
-export function prepareArchifyDocument(input: ArchifyRenderInput): PreparedDocument {
-  let document: unknown;
-  try {
-    document = JSON.parse(input.source);
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    return { ok: false, result: fail(`source is not valid JSON: ${reason}`) };
-  }
-  if (!document || typeof document !== "object" || Array.isArray(document)) {
-    return { ok: false, result: fail("source must be a JSON object") };
-  }
-  const record = document as Record<string, unknown>;
-  const declared = ForumDiagramTypeSchema.safeParse(record.diagram_type);
-  const diagramType = input.diagramType ?? (declared.success ? declared.data : undefined);
-  if (!diagramType) {
-    return {
-      ok: false,
-      result: fail(
-        `diagram_type must be one of ${ForumDiagramTypeSchema.options.join(", ")}`,
-        "/diagram_type",
-      ),
-    };
-  }
-  if (declared.success && declared.data !== diagramType) {
-    return {
-      ok: false,
-      result: fail(
-        `diagram_type "${declared.data}" does not match diagramType "${diagramType}"`,
-        "/diagram_type",
-      ),
-    };
-  }
-  const meta = record.meta;
-  if (meta && typeof meta === "object" && !Array.isArray(meta)) {
-    (meta as Record<string, unknown>).output = RENDER_OUTPUT_NAME;
-  }
-  return { ok: true, diagramType, json: JSON.stringify(record) };
 }
 
 interface RendererDiagnostic {
@@ -206,7 +142,7 @@ export type ArchifyRunResult =
 // Runs one vendored renderer on an already prepared document (meta.output pinned by the caller).
 export async function runArchifyRenderer(input: {
   vendor: ArchifyVendorName;
-  diagramType: string;
+  diagramType: ArchifyDiagramType;
   json: string;
   env?: Record<string, string>;
 }): Promise<ArchifyRunResult> {
@@ -237,18 +173,4 @@ export async function runArchifyRenderer(input: {
   } finally {
     await rm(workDir, { recursive: true, force: true });
   }
-}
-
-export async function renderArchifyDiagram(
-  input: ArchifyRenderInput,
-): Promise<ArchifyRenderResult> {
-  const prepared = prepareArchifyDocument(input);
-  if (!prepared.ok) return prepared.result;
-  const result = await runArchifyRenderer({
-    vendor: "archify",
-    diagramType: prepared.diagramType,
-    json: prepared.json,
-  });
-  if (!result.ok) return result;
-  return { ok: true, diagramType: prepared.diagramType, html: result.html };
 }

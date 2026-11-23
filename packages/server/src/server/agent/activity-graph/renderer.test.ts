@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { resolveArchifyVendorDir } from "../../agent-forum/archify-renderer.js";
+import { resolveArchifyVendorDir } from "../../archify/archify-renderer.js";
 import type { AgentTimelineItem } from "../agent-sdk-types.js";
 import { buildFlowGraph, type ActivityRow } from "./flow-builder.js";
 import { buildPlanGraph } from "./plan-builder.js";
@@ -102,13 +102,5 @@ describe("vendor/archify-3.2.0", () => {
     expect(stub).not.toMatch(/https?:\/\//);
     expect(readdirSync(dir)).not.toContain("bin");
     expect(readdirSync(dir)).not.toContain("scripts");
-  });
-
-  it("keeps Team mode on archify 3.0.1 (spec 23)", () => {
-    const teamReadme = readFileSync(
-      path.join(resolveArchifyVendorDir("archify"), "README.md"),
-      "utf8",
-    );
-    expect(teamReadme).toContain("| Version | 3.0.1 |");
   });
 });

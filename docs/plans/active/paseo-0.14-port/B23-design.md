@@ -9,7 +9,7 @@ Authority: spec repo `docs/decisions/ADR-0029-agent-message-envelope.md`. Read i
   (`replaceRunning: true`).
 - Interrupting callers to change to steer: MCP `send_agent_prompt` (`agent/tools/jagentdesk-tools.ts`),
   CLI `agent send` (`packages/cli/src/commands/agent/send.ts`), chat mentions (`chat/chat-mentions.ts` →
-  `session.ts`), forum bootstrap/wake (`agent-forum/bootstrap.ts`), ORC relay/handback/dissent/accept
+  `session.ts`), ORC relay/handback/dissent/accept
   (`orchestration/runtime.ts`).
 - Finish notifications: in-memory `setupFinishNotification` (`agent-prompt.ts`), armed after the first
   prompt in `create-agent/create.ts`, `requireParentOwnership: true` always.
@@ -18,7 +18,7 @@ Authority: spec repo `docs/decisions/ADR-0029-agent-message-envelope.md`. Read i
 
 ## Must not break
 
-1. Forum human wakes and schedules keep the legacy hidden envelope and are dispatched with
+1. Schedules keep the legacy hidden envelope and are dispatched with
    `sendPreparedPromptToAgent` (no re-wrap) — upstream `prepareAgentMessage` would otherwise show raw
    `<jagentdesk-system>` tags.
 2. ORC handback must not await delivery inside `this.mutate`; route ORC messages through the delivery
@@ -38,10 +38,10 @@ Authority: spec repo `docs/decisions/ADR-0029-agent-message-envelope.md`. Read i
    (`session-context.tsx`).
 4. `2a890208c` adapted (app): parent pill/callout in the subagent pane.
 5. `d0bc188a5` adapted: envelope v1 (no serverId), protocol `agentMessage` row + `sourceAgentId` +
-   capability `agentMessageProvenance`, app row "Message from X"/"X finished", + the forum/chat fix above.
+   capability `agentMessageProvenance`, app row "Message from X"/"X finished", + the chat-mention fix above.
 6. `c364b16d4` near as-is: hand-merge the `hasSeenTurn` part of upstream `0009a7e71`.
 7. `f22775a8e` adapted: `activeTurnBehavior` input, CLI `--behavior`, steer defaults; set steer explicitly in
-   ORC, forum and chat-mention paths.
+   ORC and chat-mention paths.
 8. `d0568f9f1` adapted: take `agent-messages/delivery.ts` + `envelope.ts`; 2000 ms quiet window, 10 000 ms
    max; no `MessageReceipts`, no host-operations, no serverId; capability `agentMessageBatching`.
 9. `21e7ccb03` adapted local-only: `finish-subscriptions/` at `$JAGENTDESK_HOME/finish-subscriptions.json`,
@@ -50,7 +50,6 @@ Authority: spec repo `docs/decisions/ADR-0029-agent-message-envelope.md`. Read i
 
 ## Verify
 
-Team mode regression: lead/peer handback (one prompt, steer), forum human post (no raw tags, coders not
-cancelled), autorun with incoming messages (no false no-progress stop), `notifyOnFinish` across a daemon
+ORC regression: lead/peer handback (one prompt, steer), chat mentions (no raw tags), autorun with incoming messages (no false no-progress stop), `notifyOnFinish` across a daemon
 restart (notification arrives with the parent's next turn, parent not woken). Update string-asserting tests
-in `orchestration/runtime.test.ts`, forum tests, `agent-prompt.test.ts`, `mcp-server.test.ts`.
+in `orchestration/runtime.test.ts`, `agent-prompt.test.ts`, `mcp-server.test.ts`.

@@ -3,13 +3,10 @@ import {
   ACTIVITY_GRAPH_STATUS_MESSAGE,
   type ActivityGraphNodeStatus,
 } from "@jagentdesk/protocol/agent-activity-graph";
-import {
-  buildArchifyDocument,
-  type ArchifyColorScheme,
-} from "@/screens/agent-forum-archify/archify-document";
+import { buildArchifyDocument, type ArchifyColorScheme } from "./archify-document";
 
 // Frame document for the agent activity graph (spec 31.3, 31.6): the daemon-rendered archify HTML
-// inside the ADR-0021 sandbox (same CSP and shims as Team mode), plus
+// inside the ADR-0021 sandbox (shared sandbox CSP and shims), plus
 //   - a status overlay: `data-jad-status` on every `[data-node-id]`, painted with the design-system
 //     status colors (docs/reference/paseo-design-system.md §1.4) and updated by message without
 //     reloading the frame;

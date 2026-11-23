@@ -44,12 +44,6 @@ import {
 import { SkillsControl } from "@/composer/agent-controls/skills-control";
 import { AutonomousControl } from "@/composer/agent-controls/autonomous-control";
 import { SpecModeControl } from "@/composer/agent-controls/spec-mode-control";
-import { TeamModeControl } from "@/composer/agent-controls/team-mode-control";
-import {
-  getTeamModeEnabled,
-  teamModeKey,
-  useTeamModeStore,
-} from "@/composer/agent-controls/team-mode-store";
 import { prepareTurnSkills } from "@/skills/turn-skills";
 import { ContextWindowMeter } from "@/components/context-window-meter";
 import { useImageAttachmentPicker } from "@/hooks/use-image-attachment-picker";
@@ -306,7 +300,6 @@ function renderLeftContent(args: RenderLeftContentArgs): ReactElement {
     return (
       <View style={styles.leftContentRow}>
         <DraftAgentControls {...agentControls} isCompactLayout={isCompactLayout} />
-        <TeamModeControl agentId={agentId} serverId={serverId} />
       </View>
     );
   }
@@ -322,7 +315,6 @@ function renderLeftContent(args: RenderLeftContentArgs): ReactElement {
       <SkillsControl agentId={agentId} serverId={serverId} />
       <SpecModeControl agentId={agentId} serverId={serverId} />
       <AutonomousControl agentId={agentId} serverId={serverId} />
-      <TeamModeControl agentId={agentId} serverId={serverId} />
     </View>
   );
 }
@@ -1292,10 +1284,6 @@ export function Composer({
     | null
   >(null);
   const onSubmitMessageRef = useRef(onSubmitMessage);
-  // Guards the team-mode start against a double submit (input onSubmit + keyboard "send", or a fast
-  // double-tap): without it, two forum/create calls mint duplicate threads and re-dispatch the lead.
-  const teamStartInFlightRef = useRef(false);
-
   const addImages = useCallback(
     (images: ImageAttachment[]) => {
       setSelectedAttachments((prev) => [
@@ -1454,43 +1442,6 @@ export function Composer({
       outgoingAttachments: ComposerAttachment[],
       forceSend?: boolean,
     ) => {
-      // Team mode (docs/plans/active/agent-forum.md): route a real coding request to a forum topic
-      // instead of a normal turn. The daemon seeds the topic and hands this agent the team-lead brief.
-      // Skip this for parent-managed create composers (drafts): there is no real agent yet, so its
-      // one-shot arming must run AFTER the agent is provisioned (see workspace-tab createDraftAgent),
-      // otherwise we'd open a forum whose origin/lead points at a non-existent draft id.
-      const teamPrompt = outgoingMessage.trim();
-      if (
-        teamPrompt &&
-        client &&
-        !onSubmitMessageRef.current &&
-        getTeamModeEnabled(serverId, agentId)
-      ) {
-        if (teamStartInFlightRef.current) {
-          return;
-        }
-        teamStartInFlightRef.current = true;
-        setSendError(null);
-        try {
-          await client.forumCreate({
-            prompt: teamPrompt,
-            originAgentId: agentId,
-            bootstrapLead: true,
-          });
-          clearDraft("sent");
-          setUserInput("");
-          // One-shot, like the draft path: once the team is started, later messages to this agent
-          // are normal turns. Left armed, each follow-up would open another forum (and, inside the
-          // 30s dedupe window, be silently dropped).
-          useTeamModeStore.getState().set(teamModeKey(serverId, agentId), false);
-        } catch (error) {
-          console.error("[AgentInput] Team mode start failed:", error);
-          setSendError(t("composer.errors.failedToSend"));
-        } finally {
-          teamStartInFlightRef.current = false;
-        }
-        return;
-      }
       const result = await submitAgentInput({
         message: outgoingMessage,
         attachments: outgoingAttachments,
@@ -1536,17 +1487,14 @@ export function Composer({
       });
     },
     [
-      agentId,
       allowEmptySubmit,
       appSettings.sendBehavior,
       beginSubmit,
       clearDraft,
-      client,
       completeSubmit,
       hasExternalContent,
       isAgentRunning,
       queueMessage,
-      serverId,
       setSelectedAttachments,
       setSendError,
       setUserInput,

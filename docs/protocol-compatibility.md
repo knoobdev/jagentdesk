@@ -65,6 +65,15 @@ A shim that exists for old-app or old-daemon support carries a comment naming it
 
 When a tag's condition is met, delete the shim and the tag in the same change.
 
+## Removed feature: Team mode and agent forum
+
+ADR-0050 retires this feature, including its `forum.*` agent tools, `forum/*` and
+`forum.diagram.html.request` RPCs, stream, and capability flag. This is an explicit
+exception to retaining retired message schemas. Older clients calling these RPCs receive
+the normal `rpc_error` with `code: "unknown_schema"` (unknown request); no feature-specific
+handler or compatibility shim remains. Existing `$JAGENTDESK_HOME/forums/` data stays on
+disk and is no longer read. ORC and Activity graph keep their existing contracts.
+
 ## Recent additive changes
 
 - v0.9.57: `remote_exec.*` RPCs and the `remote_exec.job_updated` push (spec 33 / ADR-0044). `SshServer` gained optional `via` and `remoteExec` fields. Old clients ignore the new fields and never send the new types; old daemons never send them.

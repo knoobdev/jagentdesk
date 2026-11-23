@@ -2,7 +2,7 @@ import type { ProviderJAgentDeskToolsPolicy } from "@jagentdesk/protocol/provide
 import { isJAgentDeskToolEnabled } from "../jagentdesk-tool-policy.js";
 import { registerPluginTools } from "./plugin-tools.js";
 // This file predates lint enforcement on it (lefthook lints only staged files, and this large tool
-// registrar was never staged until the Agent Forum change). It carries pre-existing nested-ternary
+// registrar was not previously linted). It carries pre-existing nested-ternary
 // style violations in the forge/kubectl tool builders; disabling the stylistic rule file-wide avoids
 // rewriting unrelated tooling. New code here should still prefer if/else.
 /* oxlint-disable no-nested-ternary */
@@ -128,8 +128,6 @@ import type {
   OrchestrationAgentContext,
   OrchestrationRuntime,
 } from "../../orchestration/runtime.js";
-import type { AgentForumService } from "../../agent-forum/service.js";
-import { registerForumTools } from "./forum-tools.js";
 import type { ClusterRegistry } from "../../cluster/cluster-registry.js";
 import { registerSshAgentTools, type SshAgentTool } from "../../ssh/environment/agent-tools.js";
 import type { RemoteExecAgentTool } from "../../remote-exec/agent-tools.js";
@@ -203,9 +201,6 @@ export interface JAgentDeskToolHostDependencies {
   resolveSpeakHandler?: (callerAgentId: string) => VoiceSpeakHandler | null;
   resolveCallerContext?: (callerAgentId: string) => VoiceCallerContext | null;
   orchestrationRuntime?: OrchestrationRuntime;
-  // Agent Forum / Team mode (docs/plans/active/agent-forum.md). Lets any agent post to a topic and
-  // manage its tasks via the forum.* tools, mirroring how clusterRegistry backs kubectl_*.
-  agentForumService?: AgentForumService | null;
   clusterRegistry?: ClusterRegistry;
   databaseRegistry?: DatabaseRegistry;
   // SSH servers (spec 25.11): ssh_* tools and the server-aware docker_* tools that replace the
@@ -731,7 +726,7 @@ function resolveTerminalKeyToken({ key, literal, preamble }: TerminalKeyTokenInp
   );
 }
 
-// Docker container management for agents (team-mode devops/dev/lead spin up + run services
+// Docker container management for agents (agents spin up + run services
 // themselves). Backed by the host `docker` CLI via execCommand — read tools return output,
 // write tools (run/exec/build/stop/rm) go through the normal tool-approval flow.
 async function runDocker(
@@ -4354,18 +4349,6 @@ function createToolCatalog(
         tool.handler,
       );
     }
-  }
-  // Agent Forum / Team mode: any agent can post to a topic and manage its task board.
-  if (options.agentForumService && callerAgentId) {
-    const callerManagedTitle = (agentManager.getAgent(callerAgentId) as { title?: unknown } | null)
-      ?.title;
-    registerForumTools({
-      registerTool,
-      agentForumService: options.agentForumService,
-      callerAgentId,
-      callerRoleHint: callerOrchestrationContext?.role,
-      callerTitle: typeof callerManagedTitle === "string" ? callerManagedTitle : undefined,
-    });
   }
 
   if (options.voiceOnly || options.enableVoiceTools || callerContext?.enableVoiceTools) {

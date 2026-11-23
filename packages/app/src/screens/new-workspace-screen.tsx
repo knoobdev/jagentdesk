@@ -51,11 +51,6 @@ import { uniqueTitle } from "@/utils/unique-title";
 import { useWorkspace } from "@/stores/session-store-hooks";
 import { buildNewWorkspaceDraftKey, generateDraftId } from "@/stores/draft-keys";
 import { useDraftStore } from "@/stores/draft-store";
-import {
-  getTeamModeEnabled,
-  teamModeKey,
-  useTeamModeStore,
-} from "@/composer/agent-controls/team-mode-store";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
 import { isActiveCreateFlowForDraft, useCreateFlowStore } from "@/stores/create-flow-store";
 import {
@@ -1067,13 +1062,6 @@ function submitWorkspaceDraft(input: SubmitDraftInput): void {
     initialSetup,
   } = input;
   const draftId = draftIdInput?.trim() || generateDraftId();
-  // Team mode is armed on the new-workspace composer (keyed by draftKey), but the agent is actually
-  // provisioned later by the workspace draft tab (keyed by draftId). Carry the armed flag across that
-  // handoff so the tab's create flow can open a forum instead of a solo turn (one-shot arming).
-  if (getTeamModeEnabled(serverId, draftKey)) {
-    useTeamModeStore.getState().set(teamModeKey(serverId, draftId), true);
-    useTeamModeStore.getState().set(teamModeKey(serverId, draftKey), false);
-  }
   const clientMessageId = generateMessageId();
   const timestamp = Date.now();
   const wirePayload = splitComposerAttachmentsForSubmit(attachments, {

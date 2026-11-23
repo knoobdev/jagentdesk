@@ -61,7 +61,7 @@ Structural differences choose a style from `useIsClickUpTheme()`:
   with a round avatar, a bold name and muted meta, as in ClickUp chat. The user's message drops
   the right-aligned bubble ("You" + time, violet avatar); each agent turn opens with the provider
   mark, provider name and model, and the turn's items are indented under the name.
-- Page headers: every full-screen page (History, Schedules, Shared sessions, Team forum,
+- Page headers: every full-screen page (History, Schedules, Shared sessions,
   Skills, Marketplace, Docker, Simulators, Databases, Clusters, Usage, Forge) uses one
   `PageHeader` (`components/headers/page-header.tsx`): the section's rail icon and a bold `2xl`
   title on one row, same-size `size="sm"` buttons on the right (the primary action is the violet

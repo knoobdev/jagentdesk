@@ -29,7 +29,7 @@ highlight, protocol, client, plugin, server, cli). Baseline `npm run typecheck` 
    commit, message `port(paseo): <upstream subject> (<sha>)` + trailer `Ported-from: Paseo <sha>`).
 4. Check every rebranded string: user-visible text says JAgentDesk; URLs to `paseo.cafe` and
    `github.com/getpaseo` and the `requirements.paseo` / `SUPPORTED_PASEO_PLUGIN_API` names stay.
-5. JAgentDesk-specific areas you must not break: Tailscale transport and pairing, Team mode/forum,
+5. JAgentDesk-specific areas you must not break: Tailscale transport and pairing, ORC,
    skills hub, plugins (`paseo-rebrand.ts`), agentic browser stealth/dialogs, host capabilities,
    databases/k8s/forge/docker/simulators/workbench, the restored code editor, ClickUp theme.
 6. Port the tests the upstream commits add. After the batch run, for every touched workspace:

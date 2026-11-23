@@ -21,13 +21,13 @@
 
 **Recommendation codes**
 
-| Code      | Meaning                                                                                                                                                                                                                                                                       |
-| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **PORT**  | Self-contained and low risk. Cherry-pick and rebrand, or fix small context drift (`X` hunks of a few lines).                                                                                                                                                                  |
-| **ADAPT** | Worth having, but it touches diverged JAgentDesk files or JAgentDesk features (Tailscale/pairing, Team mode/ORC, skills hub, ClickUp shell, agentic browser, restored editor), changes protocol or config, or needs a small prerequisite. Reimplement from the upstream diff. |
-| **DEFER** | Worth having but blocked by a large prerequisite chain that JAgentDesk does not have (see "Epics"). Not for this cycle. Counted under skip in the summary.                                                                                                                    |
-| **SKIP**  | Not applicable to JAgentDesk: relay, Paseo Hub, built-in plugin providers JAgentDesk does not run, Nix, upstream release infrastructure. Also: conflicts with JAgentDesk design (ClickUp sidebar and mobile shell), or reverted upstream.                                     |
-| **HAVE**  | Already in JAgentDesk.                                                                                                                                                                                                                                                        |
+| Code      | Meaning                                                                                                                                                                                                                                                             |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **PORT**  | Self-contained and low risk. Cherry-pick and rebrand, or fix small context drift (`X` hunks of a few lines).                                                                                                                                                        |
+| **ADAPT** | Worth having, but it touches diverged JAgentDesk files or JAgentDesk features (Tailscale/pairing, ORC, skills hub, ClickUp shell, agentic browser, restored editor), changes protocol or config, or needs a small prerequisite. Reimplement from the upstream diff. |
+| **DEFER** | Worth having but blocked by a large prerequisite chain that JAgentDesk does not have (see "Epics"). Not for this cycle. Counted under skip in the summary.                                                                                                          |
+| **SKIP**  | Not applicable to JAgentDesk: relay, Paseo Hub, built-in plugin providers JAgentDesk does not run, Nix, upstream release infrastructure. Also: conflicts with JAgentDesk design (ClickUp sidebar and mobile shell), or reverted upstream.                           |
+| **HAVE**  | Already in JAgentDesk.                                                                                                                                                                                                                                              |
 
 ## Key findings (read before porting)
 
@@ -38,9 +38,9 @@
 5. **Plugin SDK parity is mechanically easy on the SDK side and hard on the app host side.** JAgentDesk `packages/plugin/src` is byte-identical to upstream v0.10.2 after rebrand: of 28 files, only `client/index.ts` differs, plus the renamed `*-context.tsx`. Upstream added 2.7k lines of SDK for 0.11–0.14: agent tools, MCP contributions, `process.ts`, `usage.ts`, translations, `icons.ts` and the `client/ui` entry. Marketplace plugins that declare `requirements.paseo >=0.11` are currently refused by JAgentDesk.
 6. **Security items that apply to JAgentDesk** are listed in their own section below. The two relay fixes, `793b16c0d` (Noise NK replay protection) and `89727f43b` (relay password), are **N/A**: JAgentDesk has no relay. It uses tailnet plus `server/pairing/signed-hello.ts` and `nonce-challenge.ts`. Record that in an ADR rather than port them.
 7. **The JAgentDesk features that conflict most** are listed here so story writers can flag them:
-   - `agent/tools/jagentdesk-tools.ts` (6,159 lines, ORC/Team mode) and `session.ts` (9,228 lines). Touched by 30+ upstream commits.
-   - The agent-to-agent messaging redesign: `d0bc188a5`, `d0568f9f1`, `f22775a8e`, `21e7ccb03`. It overlaps Team mode and `orchestration/runtime.ts`.
-   - Idle runtime release (`8e5f53676`). It must not release Team leads, autorun agents or agents driving the browser.
+   - `agent/tools/jagentdesk-tools.ts` (6,159 lines, ORC) and `session.ts` (9,228 lines). Touched by 30+ upstream commits.
+   - The agent-to-agent messaging redesign: `d0bc188a5`, `d0568f9f1`, `f22775a8e`, `21e7ccb03`. It overlaps ORC and `orchestration/runtime.ts`.
+   - Idle runtime release (`8e5f53676`). It must not release ORC leads, autorun agents or agents driving the browser.
    - Upstream sidebar and compact-header rework (about 25 commits), which conflicts with the ClickUp shell.
    - The plugin file-panel refactor (`1e0e56c72`, `e464fd3bd`, `76b32544c`), which rewires `file-pane/pane.tsx` and `file-pane/editor/view.web.tsx`. That is where JAgentDesk re-added the CodeMirror editor.
    - Upstream `services/forge-service.ts`, `gitea-service.ts` and `gitlab-service.ts`. They are unchanged in JAgentDesk since the 0.7.2 merge (`852ee1c52`), so upstream fixes to them apply. Forge Hub (`forge-registry.ts`, `forge-resolver.ts`) sits beside them, so retest Forge Hub after `0ed57187a` and `1228c01a1`.

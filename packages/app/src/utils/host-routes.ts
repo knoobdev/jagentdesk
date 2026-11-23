@@ -560,10 +560,6 @@ export function buildSharedSessionsRoute() {
   return "/shared-sessions" as const;
 }
 
-export function buildAgentForumRoute() {
-  return "/agent-forum" as const;
-}
-
 export function buildOpenProjectRoute() {
   return "/open-project" as const;
 }

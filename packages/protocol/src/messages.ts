@@ -91,31 +91,6 @@ import {
   ScheduleUpdateResponseSchema,
 } from "./schedule/rpc-schemas.js";
 import {
-  ForumCreateRequestSchema,
-  ForumListRequestSchema,
-  ForumGetRequestSchema,
-  ForumArchiveRequestSchema,
-  ForumDeleteRequestSchema,
-  ForumPostRequestSchema,
-  ForumVoteRequestSchema,
-  ForumChatPostRequestSchema,
-  ForumChatReactRequestSchema,
-  ForumChatRoomRequestSchema,
-  ForumDiagramHtmlRequestSchema,
-  ForumCreateResponseSchema,
-  ForumListResponseSchema,
-  ForumGetResponseSchema,
-  ForumArchiveResponseSchema,
-  ForumDeleteResponseSchema,
-  ForumPostResponseSchema,
-  ForumVoteResponseSchema,
-  ForumChatPostResponseSchema,
-  ForumChatReactResponseSchema,
-  ForumChatRoomResponseSchema,
-  ForumDiagramHtmlResponseSchema,
-  ForumStreamSchema,
-} from "./agent-forum/rpc-schemas.js";
-import {
   ActivityGraphGetRequestSchema,
   ActivityGraphGetResponseSchema,
   ActivityGraphSubscribeRequestSchema,
@@ -4436,17 +4411,6 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ScheduleDeleteRequestSchema,
   ScheduleRunOnceRequestSchema,
   ScheduleUpdateRequestSchema,
-  ForumCreateRequestSchema,
-  ForumListRequestSchema,
-  ForumGetRequestSchema,
-  ForumArchiveRequestSchema,
-  ForumDeleteRequestSchema,
-  ForumPostRequestSchema,
-  ForumVoteRequestSchema,
-  ForumChatPostRequestSchema,
-  ForumChatReactRequestSchema,
-  ForumChatRoomRequestSchema,
-  ForumDiagramHtmlRequestSchema,
   ActivityGraphGetRequestSchema,
   ActivityGraphSubscribeRequestSchema,
   ActivityGraphUnsubscribeRequestSchema,
@@ -4814,7 +4778,6 @@ export const ServerInfoStatusPayloadSchema = z
         autorun: z.boolean().optional(), // Autonomous run (spec §20 / ADR-0017); default OFF, opt-in per daemon
         autorunApproval: z.boolean().optional(), // Per-action approval mode for autorun (§20.7.3)
         sessionSharing: z.boolean().optional(), // Session sharing via Cloudflare tunnel (spec §21 / ADR-0018); default OFF
-        agentForum: z.boolean().optional(), // Agent Forum / Team mode (docs/plans/active/agent-forum.md)
         // Agent activity graph (spec 31 / ADR-0031): agent.activity_graph.* RPCs and pushes.
         // COMPAT(activityGraph): added after v0.9.47; the app hides the toggle without it.
         activityGraph: z.boolean().optional(),
@@ -8290,18 +8253,6 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   SessionShareSetOptionsResponseSchema,
   SessionShareListResponseSchema,
   SessionShareStreamSchema,
-  ForumCreateResponseSchema,
-  ForumListResponseSchema,
-  ForumGetResponseSchema,
-  ForumArchiveResponseSchema,
-  ForumDeleteResponseSchema,
-  ForumPostResponseSchema,
-  ForumVoteResponseSchema,
-  ForumChatPostResponseSchema,
-  ForumChatReactResponseSchema,
-  ForumChatRoomResponseSchema,
-  ForumDiagramHtmlResponseSchema,
-  ForumStreamSchema,
   ActivityGraphGetResponseSchema,
   ActivityGraphSubscribeResponseSchema,
   ActivityGraphUnsubscribeResponseSchema,
@@ -8910,47 +8861,6 @@ export type SessionShareListResponse = z.infer<typeof SessionShareListResponseSc
 export type SessionShareKickRequest = z.infer<typeof SessionShareKickRequestSchema>;
 export type SessionShareKickResponse = z.infer<typeof SessionShareKickResponseSchema>;
 export type SessionShareStream = z.infer<typeof SessionShareStreamSchema>;
-// Agent Forum / Team mode types (docs/plans/active/agent-forum.md)
-export type {
-  ForumTopicStatus,
-  ForumTaskStatus,
-  ForumRole,
-  ForumEstimate,
-  ForumParticipant,
-  ForumTaskEvent,
-  ForumTask,
-  ForumTaskComment,
-  ForumReviewCategory,
-  ForumReviewSeverity,
-  ForumReviewFinding,
-  ForumTaskReview,
-  ForumMessageKind,
-  ForumMessage,
-  ForumChatReaction,
-  ForumChatMessageKind,
-  ForumChatMessage,
-  ForumChatRoom,
-  ForumDiagram,
-  ForumDiagramFormat,
-  ForumDiagramType,
-  ForumDiagramRenderStatus,
-  StoredForumTopic,
-  ForumEpicStat,
-  ForumTopicSummary,
-} from "./agent-forum/types.js";
-export type ForumCreateRequest = z.infer<typeof ForumCreateRequestSchema>;
-export type ForumListRequest = z.infer<typeof ForumListRequestSchema>;
-export type ForumGetRequest = z.infer<typeof ForumGetRequestSchema>;
-export type ForumArchiveRequest = z.infer<typeof ForumArchiveRequestSchema>;
-export type ForumDeleteRequest = z.infer<typeof ForumDeleteRequestSchema>;
-export type ForumPostRequest = z.infer<typeof ForumPostRequestSchema>;
-export type ForumVoteRequest = z.infer<typeof ForumVoteRequestSchema>;
-export type ForumChatPostRequest = z.infer<typeof ForumChatPostRequestSchema>;
-export type ForumChatReactRequest = z.infer<typeof ForumChatReactRequestSchema>;
-export type ForumChatRoomRequest = z.infer<typeof ForumChatRoomRequestSchema>;
-export type ForumStream = z.infer<typeof ForumStreamSchema>;
-export type ForumDiagramHtmlRequest = z.infer<typeof ForumDiagramHtmlRequestSchema>;
-export type ForumDiagramHtmlResponse = z.infer<typeof ForumDiagramHtmlResponseSchema>;
 // Forge Hub — Milestone D types
 export type ForgeChangeRequestCreateRequest = z.infer<typeof ForgeChangeRequestCreateRequestSchema>;
 export type ForgeChangeRequestCreateResponse = z.infer<
@@ -9109,7 +9019,6 @@ export const WSHelloMessageSchema = z.object({
       [CLIENT_CAPS.providerSubagents]: z.boolean().optional(),
       [CLIENT_CAPS.projectedSubagentTimeline]: z.boolean().optional(),
       [CLIENT_CAPS.projectUpdates]: z.boolean().optional(),
-      [CLIENT_CAPS.archifyDiagrams]: z.boolean().optional(),
       [CLIENT_CAPS.specMode]: z.boolean().optional(),
       [CLIENT_CAPS.binaryScreenFrames]: z.boolean().optional(),
       [CLIENT_CAPS.browserHost]: BrowserAutomationHostCapabilitySchema.optional(),

@@ -47,7 +47,6 @@ const LEGACY_ROW_TEST_IDS: Readonly<Record<string, string>> = {
   sessions: "sidebar-sessions",
   schedules: "sidebar-schedules",
   "shared-sessions": "sidebar-shared-sessions",
-  team: "sidebar-agent-forum",
   clusters: "sidebar-clusters-nav",
   databases: "sidebar-databases-nav",
   servers: "sidebar-servers-nav",

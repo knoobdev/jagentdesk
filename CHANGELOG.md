@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Removed Team mode and agent forum. ORC and Activity graph remain available; existing local data is retained.
+- Preserved the BA/Tester/Pentester cross-review rules as a core library for future Bots work.
+
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
 own release line (now `0.9.59`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and

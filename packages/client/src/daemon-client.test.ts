@@ -777,8 +777,11 @@ test("advertises client capabilities in hello", async () => {
     protocolVersion: 1,
     capabilities: {
       activity_graph: true,
-      archify_diagrams: true,
       binary_chunking_v1: true,
+      plugin_binary_payloads: true,
+      explicit_event_subscriptions: true,
+      plugin_timeline_items: true,
+      timeline_notifications: true,
       binary_screen_frames: true,
       custom_mode_icons: true,
       project_updates: true,

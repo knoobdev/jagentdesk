@@ -129,7 +129,7 @@ Each batch is one coherent JAgentDesk commit. A coder agent can do it from a wri
 
 **Needs hand merge (sequential apply):** `host-runtime.ts` (8ddeb79c8); `agent.ts` (8ddeb79c8, f3b0199c1, 566218d68, 173fca3c0); `live-source.ts` (8ddeb79c8); `agent-timeline-content.ts` (f3b0199c1); `replay-source.ts` (f3b0199c1, 173fca3c0); `transcript-history.ts` (173fca3c0)
 
-**Verify:** Upstream tests: `claude/subagents/*.test.ts`, `replay-memory.fixture`. Measure daemon RSS and event-loop delay while opening a large (>50 MB) Claude transcript before and after. Team mode lead with background agents: Stop does not kill the helpers.
+**Verify:** Upstream tests: `claude/subagents/*.test.ts`, `replay-memory.fixture`. Measure daemon RSS and event-loop delay while opening a large (>50 MB) Claude transcript before and after. ORC lead with background agents: Stop does not kill the helpers.
 
 **Notes:** `8ddeb79c8` also touches `app:runtime/host-runtime.ts` (JAgentDesk Tailscale runtime): merge only the subagent-status bits. `64b0afe01`+`869eb5a72`: port the net effect (clear the inherited entrypoint). The opt-in label needs B19 `8a542048b`.
 
@@ -580,9 +580,9 @@ Each batch is one coherent JAgentDesk commit. A coder agent can do it from a wri
 
 **Needs hand merge (sequential apply):** `message.tsx` (d0bc188a5); `index.ts` (d0bc188a5, d0568f9f1, 21e7ccb03); `presentation.ts` (d0bc188a5); `stream.ts` (d0bc188a5); `send.ts` (d0bc188a5, d0568f9f1, f22775a8e); `daemon-client.ts` (d0bc188a5, d0568f9f1); `messages.ts` (d0bc188a5, d0568f9f1); `agent-manager.ts` (d0bc188a5, d0568f9f1); `agent-prompt.ts` (d0bc188a5, d0568f9f1, f22775a8e, 21e7ccb03, c364b16d4); `paseo-tools.ts` (d0bc188a5, d0568f9f1, f22775a8e, 21e7ccb03); `service.ts` (d0bc188a5); `session.ts` (d0bc188a5, d0568f9f1, 21e7ccb03); `websocket-server.ts` (d0bc188a5, d0568f9f1); `index.tsx` (dfa997704); `actions.ts` (d0568f9f1); `create.ts` (d0568f9f1, 21e7ccb03, 1c6274808); `bootstrap.ts` (d0568f9f1, 21e7ccb03); `agent-projections.ts` (23b05bbcc); `directory.ts` (23b05bbcc); `session-context.tsx` (1ae979d3d); `provider-store.ts` (1ae979d3d); `tracks.tsx` (2a890208c); `en.ts` (2a890208c); `agent-panel.tsx` (2a890208c); `agent-tracks.tsx` (2a890208c); `provider-subagent-panel.tsx` (2a890208c)
 
-**Verify:** Team mode regression suite: lead/worker messages, forum, autorun, `notifyOnFinish` across a daemon restart. Upstream `finish-subscription-daemon` and `agent-messages` tests.
+**Verify:** ORC regression suite: lead/worker messages, autorun, `notifyOnFinish` across a daemon restart. Upstream `finish-subscription-daemon` and `agent-messages` tests.
 
-**Notes:** Highest conflict with Team mode/ORC (46 source hunks fail). Needs a short design note or ADR on message envelopes before any code. `f22775a8e` changes the default from interrupt to steer.
+**Notes:** Highest conflict with ORC (46 source hunks fail). Needs a short design note or ADR on message envelopes before any code. `f22775a8e` changes the default from interrupt to steer.
 
 ### B24: Small chat and app fixes
 
@@ -715,7 +715,7 @@ Each batch is one coherent JAgentDesk commit. A coder agent can do it from a wri
 
 **Verify:** Desktop and mobile real app: Up/Down recalls sent messages; the Cmd+Enter setting; long-press Send on iOS queues the message.
 
-**Notes:** The JAgentDesk working tree has uncommitted edits in `composer/index.tsx`, `workspace-tab.tsx` and `workspace-setup-dialog.tsx`; rebase after they land. JAgentDesk composer adds skills, Team and autorun toggles.
+**Notes:** The JAgentDesk working tree has uncommitted edits in `composer/index.tsx`, `workspace-tab.tsx` and `workspace-setup-dialog.tsx`; rebase after they land. JAgentDesk composer adds skills and autorun toggles.
 
 ### B30: Workspace setup, scripts and tab-restore fixes (adapted)
 
@@ -750,7 +750,7 @@ Each batch is one coherent JAgentDesk commit. A coder agent can do it from a wri
 
 **Needs hand merge (sequential apply):** `host-page.tsx` (8e5f53676); `messages.ts` (8e5f53676); `agent-manager.ts` (8e5f53676); `agent-prompt.ts` (8e5f53676); `agent-sdk-types.ts` (8e5f53676); `plugin-provider.ts` (8e5f53676); `agent.ts` (8e5f53676); `app-server-transport.ts` (8e5f53676); `bootstrap.ts` (8e5f53676); `config.ts` (8e5f53676); `daemon-config-store.ts` (8e5f53676); `persisted-config.ts` (8e5f53676); `websocket-server.ts` (8e5f53676)
 
-**Verify:** Agent idle for more than 1 h releases its process and resumes on the next prompt. Team mode lead, autorun agent and browser-driving agent are never released. Config key defaults off.
+**Verify:** Agent idle for more than 1 h releases its process and resumes on the next prompt. ORC lead, autorun agent and browser-driving agent are never released. Config key defaults off.
 
 **Notes:** Product decision on the exemptions first. The plugin-provider and `agent-messages/delivery.ts` parts depend on B23.
 

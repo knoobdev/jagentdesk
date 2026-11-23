@@ -46,7 +46,6 @@ function countMatchingEnglishStrings(resource: unknown): number {
 // native translation, so they are exempt from the structural parity + interpolation assertions.
 const OPTIONAL_ENGLISH_FALLBACK_PREFIXES = [
   "tailscaleLogin.",
-  "forumNotifications.",
   "operatorContext.",
   // SSH feature modules (resources/ssh-modules.ts) ship English in every locale for now.
   "ssh.",

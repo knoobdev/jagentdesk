@@ -948,17 +948,6 @@ export const ja: TranslationResources = {
       },
     },
   },
-  forumArch: {
-    title: "アーキテクチャ図",
-    loading: "図を読み込み中…",
-    notFound: "この図のバージョンはホスト上で利用できなくなりました。",
-    loadFailed: "図を読み込めませんでした。",
-    offline: "この図を表示するにはホストに接続してください。",
-    retry: "再試行",
-    replay: "再生",
-    replayHint: "トレースアニメーションを再生",
-    reducedMotion: "視差効果を減らす設定が有効なため、アニメーションはオフです",
-  },
   connection: {
     localMode: {
       mobileWarning:

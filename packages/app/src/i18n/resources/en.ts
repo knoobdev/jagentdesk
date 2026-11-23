@@ -958,27 +958,7 @@ export const en = {
     save: "Save",
     saving: "Saving...",
   },
-  forumNotifications: {
-    newPost: "💬 {{author}} posted in “{{topic}}”",
-    question: "❓ {{author}} needs the boss in “{{topic}}”",
-    decision: "✅ Decision recorded in “{{topic}}”",
-    review: "🔍 {{author}} posted a review in “{{topic}}”",
-    manyPosts: "💬 {{count}} new posts in “{{topic}}”",
-    taskDone: "✅ Task “{{task}}” shipped in “{{topic}}”",
-    topicDone: "🎉 The team wrapped up “{{topic}}”",
-  },
   activityGraph: activityGraphStrings,
-  forumArch: {
-    title: "Architecture diagram",
-    loading: "Loading diagram…",
-    notFound: "This diagram version is no longer available on the host.",
-    loadFailed: "Couldn't load the diagram.",
-    offline: "Connect to the host to view this diagram.",
-    retry: "Retry",
-    replay: "Replay",
-    replayHint: "Replay the trace animation",
-    reducedMotion: "Animation is off because reduced motion is on",
-  },
   connection: {
     localMode: {
       mobileWarning:
@@ -2919,10 +2899,9 @@ type WidenStringLeaves<T> = {
 // ship translations for the gate screen they fall back to English via
 // i18next's fallbackLng.
 export type TranslationResources = WidenStringLeaves<
-  Omit<typeof en, "tailscaleLogin" | "forumNotifications" | "operatorContext">
+  Omit<typeof en, "tailscaleLogin" | "operatorContext">
 > & {
   tailscaleLogin?: WidenStringLeaves<typeof en>["tailscaleLogin"];
   // Newer sections default to English until each locale is translated (i18next fallbackLng: "en").
-  forumNotifications?: WidenStringLeaves<typeof en>["forumNotifications"];
   operatorContext?: WidenStringLeaves<typeof en>["operatorContext"];
 };

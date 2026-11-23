@@ -8,7 +8,6 @@ import {
   Sparkles,
   CalendarClock,
   Share2,
-  Users,
   FolderPlus,
   History,
   Home,
@@ -82,7 +81,6 @@ import {
   buildOpenProjectRoute,
   buildSchedulesRoute,
   buildSharedSessionsRoute,
-  buildAgentForumRoute,
   buildSessionsRoute,
   buildSettingsAddHostRoute,
   buildSettingsHostSectionRoute,
@@ -225,7 +223,6 @@ interface SidebarLabels {
   sessions: string;
   schedules: string;
   sharedSessions: string;
-  agentForum: string;
   clusters: string;
   databases: string;
   servers: string;
@@ -252,7 +249,6 @@ interface DesktopSidebarProps extends SidebarSharedProps {
   handleViewMore: () => void;
   handleViewSchedules: () => void;
   handleViewSharedSessions: () => void;
-  handleViewAgentForum: () => void;
 }
 
 export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boolean }) {
@@ -485,11 +481,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     router.push(buildSharedSessionsRoute() as Href);
   }, []);
 
-  const handleViewAgentForumNavigate = useCallback(() => {
-    // Cast: expo-router's typed-routes manifest re-indexes /agent-forum on the next dev run.
-    router.push(buildAgentForumRoute() as Href);
-  }, []);
-
   const newWorkspaceKeys = useShortcutKeys("new-workspace");
   const labels = useMemo(
     (): SidebarLabels => ({
@@ -503,7 +494,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       sessions: t("sidebar.sections.sessions"),
       schedules: t("sidebar.sections.schedules"),
       sharedSessions: "Shared sessions",
-      agentForum: "Team",
       clusters: "Clusters",
       databases: "Databases",
       servers: "Servers",
@@ -607,7 +597,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
         handleViewMore={handleViewMoreNavigate}
         handleViewSchedules={handleViewSchedulesNavigate}
         handleViewSharedSessions={handleViewSharedSessionsNavigate}
-        handleViewAgentForum={handleViewAgentForumNavigate}
       />
     </RetainedPanelActivity>
   );
@@ -1089,7 +1078,6 @@ function DesktopSidebar({
   handleViewMore,
   handleViewSchedules,
   handleViewSharedSessions,
-  handleViewAgentForum,
 }: DesktopSidebarProps) {
   const ownsTopLeft = useOwnsWindowChromeCorner("top-left");
   const isClickUp = useIsClickUpTheme();
@@ -1098,7 +1086,6 @@ function DesktopSidebar({
   const isSessionsActive = pathname.includes("/sessions");
   const isSchedulesActive = pathname.includes("/schedules");
   const isSharedSessionsActive = pathname.includes("/shared-sessions");
-  const isAgentForumActive = pathname.includes("/agent-forum");
   const isClustersActive = pathname.includes("/clusters");
   const isDatabasesActive = pathname.includes("/database");
   const isServersActive = pathname.includes("/servers");
@@ -1250,14 +1237,7 @@ function DesktopSidebar({
                 testID="sidebar-shared-sessions"
                 variant="compact"
               />
-              <SidebarHeaderRow
-                icon={Users}
-                label={labels.agentForum}
-                onPress={handleViewAgentForum}
-                isActive={isAgentForumActive}
-                testID="sidebar-agent-forum"
-                variant="compact"
-              />
+
               <SidebarHeaderRow
                 icon={Boxes}
                 label={labels.clusters}

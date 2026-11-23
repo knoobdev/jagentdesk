@@ -8,7 +8,7 @@ import type {
 } from "./activity-graph-frame-types";
 import { acceptSelectMessage } from "./activity-graph-target";
 
-// ADR-0021 §4 on iOS/Android: the same locked-down WebView as the Team-mode diagram (only the
+// ADR-0021 §4 on iOS/Android: a locked-down WebView (only the
 // handed-over document loads, storage/cache off, incognito); the CSP blocks every fetch. Statuses
 // and camera commands are injected; the only message read back is `jad-archify-select` (31.6).
 const ORIGIN_WHITELIST = ["*"];
