@@ -62,13 +62,25 @@ function createFinishNotificationScenario(
   Reflect.set(childAgent, "id", "child-agent");
   Reflect.set(childAgent, "lifecycle", "idle");
   Reflect.set(childAgent, "config", { title: "Child Agent" });
+  Reflect.set(childAgent, "pendingPermissions", new Map());
 
   const callerAgent: ManagedAgent = Object.create(null);
   Reflect.set(callerAgent, "id", "caller-agent");
   Reflect.set(callerAgent, "lifecycle", "idle");
   Reflect.set(callerAgent, "config", { title: "Caller Agent" });
+  Reflect.set(callerAgent, "pendingPermissions", new Map());
 
   const agentManager: AgentManager = Object.create(AgentManager.prototype);
+  Reflect.set(
+    agentManager,
+    "reloadStalePluginSession",
+    vi.fn(async () => {}),
+  );
+  Reflect.set(
+    agentManager,
+    "steerOrReplaceActiveTurn",
+    vi.fn(async () => ({ status: "inactive" })),
+  );
   Reflect.set(agentManager, "getAgent", (agentId: string) => {
     if (agentId === "child-agent") {
       return childAgent;
@@ -166,6 +178,16 @@ test("sendPromptToAgent forwards the client message id as run options", async ()
   const agentManager: AgentManager = Object.create(AgentManager.prototype);
   Reflect.set(
     agentManager,
+    "reloadStalePluginSession",
+    vi.fn(async () => {}),
+  );
+  Reflect.set(
+    agentManager,
+    "steerOrReplaceActiveTurn",
+    vi.fn(async () => ({ status: "inactive" })),
+  );
+  Reflect.set(
+    agentManager,
     "getAgent",
     vi.fn(() => agent),
   );
@@ -192,13 +214,18 @@ test("sendPromptToAgent forwards the client message id as run options", async ()
     logger: createTestLogger(),
   });
 
-  expect(streamAgentSpy).toHaveBeenCalledWith("agent-1", "hello", {
-    outputSchema: { type: "object" },
-    clientMessageId: "msg-client-1",
-  });
+  expect(streamAgentSpy).toHaveBeenCalledWith(
+    "agent-1",
+    "hello",
+    {
+      outputSchema: { type: "object" },
+      clientMessageId: "msg-client-1",
+    },
+    expect.any(Object),
+  );
 });
 
-test("sendPromptToAgent defers instead of interrupting an agent awaiting a user permission", async () => {
+test("sendPromptToAgent uses replacement admission for an agent awaiting a user permission", async () => {
   const agent: ManagedAgent = Object.create(null);
   Reflect.set(agent, "id", "agent-1");
   Reflect.set(agent, "provider", "codex");
@@ -207,6 +234,16 @@ test("sendPromptToAgent defers instead of interrupting an agent awaiting a user 
   const replaceAgentRunSpy = vi.fn(async () => (async function* noop() {})());
   const deferSpy = vi.fn();
   const agentManager: AgentManager = Object.create(AgentManager.prototype);
+  Reflect.set(
+    agentManager,
+    "reloadStalePluginSession",
+    vi.fn(async () => {}),
+  );
+  Reflect.set(
+    agentManager,
+    "steerOrReplaceActiveTurn",
+    vi.fn(async () => ({ status: "inactive" })),
+  );
   Reflect.set(
     agentManager,
     "getAgent",
@@ -234,8 +271,13 @@ test("sendPromptToAgent defers instead of interrupting an agent awaiting a user 
     logger: createTestLogger(),
   });
 
-  expect(deferSpy).toHaveBeenCalledWith("agent-1", "relay", undefined);
-  expect(replaceAgentRunSpy).not.toHaveBeenCalled();
+  expect(deferSpy).not.toHaveBeenCalled();
+  expect(replaceAgentRunSpy).toHaveBeenCalledWith(
+    "agent-1",
+    "relay",
+    undefined,
+    expect.any(Object),
+  );
   expect(streamAgentSpy).not.toHaveBeenCalled();
 });
 
@@ -246,8 +288,20 @@ function createSteerAgentManager(steerStatus: "accepted" | "unavailable") {
 
   const streamAgentSpy = vi.fn(() => (async function* noop() {})());
   const replaceAgentRunSpy = vi.fn(async () => (async function* noop() {})());
-  const steerSpy = vi.fn(async () => ({ status: steerStatus }));
+  const steerSpy = vi.fn(async () => ({
+    status: steerStatus === "accepted" ? "steered" : "inactive",
+  }));
   const agentManager: AgentManager = Object.create(AgentManager.prototype);
+  Reflect.set(
+    agentManager,
+    "reloadStalePluginSession",
+    vi.fn(async () => {}),
+  );
+  Reflect.set(
+    agentManager,
+    "steerOrReplaceActiveTurn",
+    vi.fn(async () => ({ status: "inactive" })),
+  );
   Reflect.set(
     agentManager,
     "getAgent",
@@ -259,7 +313,7 @@ function createSteerAgentManager(steerStatus: "accepted" | "unavailable") {
   Reflect.set(agentManager, "deferPromptUntilPermissionResolved", vi.fn());
   Reflect.set(agentManager, "streamAgent", streamAgentSpy);
   Reflect.set(agentManager, "replaceAgentRun", replaceAgentRunSpy);
-  Reflect.set(agentManager, "steerActiveTurn", steerSpy);
+  Reflect.set(agentManager, "steerOrReplaceActiveTurn", steerSpy);
 
   const agentStorage: AgentStorage = Object.create(AgentStorage.prototype);
   Reflect.set(
@@ -284,8 +338,8 @@ test("sendPromptToAgent steers the live turn without interrupting when steer is 
     logger: createTestLogger(),
   });
 
-  expect(steerSpy).toHaveBeenCalledWith("agent-1", "steer me", undefined);
-  expect(result).toEqual({ outOfBand: false, steered: true });
+  expect(steerSpy).toHaveBeenCalledWith("agent-1", "steer me", undefined, expect.any(Object));
+  expect(result).toEqual({ disposition: "steered" });
   expect(replaceAgentRunSpy).not.toHaveBeenCalled();
   expect(streamAgentSpy).not.toHaveBeenCalled();
 });
@@ -304,8 +358,13 @@ test("sendPromptToAgent falls back to interrupt when steering is unavailable", a
   });
 
   expect(steerSpy).toHaveBeenCalledTimes(1);
-  expect(replaceAgentRunSpy).toHaveBeenCalledWith("agent-1", "steer me", undefined);
-  expect(result).toEqual({ outOfBand: false });
+  expect(replaceAgentRunSpy).toHaveBeenCalledWith(
+    "agent-1",
+    "steer me",
+    undefined,
+    expect.any(Object),
+  );
+  expect(result).toMatchObject({ disposition: "turn_started", started: expect.any(Promise) });
 });
 
 test("sendPromptToAgent interrupts (never steers) when behavior is left default", async () => {
@@ -321,7 +380,12 @@ test("sendPromptToAgent interrupts (never steers) when behavior is left default"
   });
 
   expect(steerSpy).not.toHaveBeenCalled();
-  expect(replaceAgentRunSpy).toHaveBeenCalledWith("agent-1", "no steer", undefined);
+  expect(replaceAgentRunSpy).toHaveBeenCalledWith(
+    "agent-1",
+    "no steer",
+    undefined,
+    expect.any(Object),
+  );
 });
 
 test("finish notifications tell the parent the child's last assistant message", async () => {
@@ -388,16 +452,28 @@ it("does not notify archived callers", async () => {
   Reflect.set(childAgent, "id", "child-agent");
   Reflect.set(childAgent, "lifecycle", "idle");
   Reflect.set(childAgent, "config", { title: "Child Agent" });
+  Reflect.set(childAgent, "pendingPermissions", new Map());
 
   const callerAgent: ManagedAgent = Object.create(null);
   Reflect.set(callerAgent, "id", "caller-agent");
   Reflect.set(callerAgent, "lifecycle", "idle");
   Reflect.set(callerAgent, "config", { title: "Caller Agent" });
+  Reflect.set(callerAgent, "pendingPermissions", new Map());
 
   const streamAgentSpy = vi.fn(() => (async function* noop() {})());
   const replaceAgentRunSpy = vi.fn(() => (async function* noop() {})());
 
   const agentManager: AgentManager = Object.create(AgentManager.prototype);
+  Reflect.set(
+    agentManager,
+    "reloadStalePluginSession",
+    vi.fn(async () => {}),
+  );
+  Reflect.set(
+    agentManager,
+    "steerOrReplaceActiveTurn",
+    vi.fn(async () => ({ status: "inactive" })),
+  );
   Reflect.set(
     agentManager,
     "getAgent",

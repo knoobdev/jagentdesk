@@ -1,3 +1,5 @@
+import type { ProviderJAgentDeskToolsPolicy } from "@jagentdesk/protocol/provider-config";
+import { isJAgentDeskToolPolicyEnabled } from "./jagentdesk-tool-policy.js";
 import type { AttachedAgentTool, PluginAgentToolsRuntime } from "../plugins/agent-tools.js";
 import type { AgentToolResult } from "@jagentdesk/plugin/server";
 import type { PluginLifecycle } from "../plugins/lifecycle/index.js";
@@ -82,6 +84,7 @@ import {
 import { limitAgentTimelineItemContent } from "./agent-timeline-content.js";
 import {
   AgentRunState,
+  type ForegroundPromptStart,
   type ForegroundTurnWaiter,
   type PendingForegroundRun,
 } from "./agent-run-state.js";
@@ -353,6 +356,9 @@ export interface AgentManagerOptions {
   mcpBaseUrl?: string;
   mcpAuthToken?: string;
   pluginAgentTools?: PluginAgentToolsRuntime;
+  resolveJAgentDeskToolPolicy?: (
+    provider: AgentProvider,
+  ) => ProviderJAgentDeskToolsPolicy | undefined;
   jagentdeskToolsEnabled?: boolean;
   jagentdeskToolCatalogFactory?: JAgentDeskToolCatalogFactory;
   appendSystemPrompt?: string;
@@ -822,6 +828,13 @@ export class AgentManager {
   private readonly attachedPluginTools = new Map<string, AttachedAgentTool[]>();
   private readonly pluginAgentTools: PluginAgentToolsRuntime | undefined;
   private jagentdeskToolsEnabled = true;
+  private readonly resolveJAgentDeskToolPolicy: NonNullable<
+    AgentManagerOptions["resolveJAgentDeskToolPolicy"]
+  >;
+  private readonly jagentdeskToolPolicies = new Map<
+    string,
+    ProviderJAgentDeskToolsPolicy | undefined
+  >();
   private jagentdeskToolCatalogFactory: JAgentDeskToolCatalogFactory | null = null;
   private appendSystemPrompt: string;
   private operatorContext = "";
@@ -851,10 +864,11 @@ export class AgentManager {
 
   constructor(options: AgentManagerOptions) {
     this.pluginLifecycle = options.pluginLifecycle;
+    this.resolveJAgentDeskToolPolicy = options.resolveJAgentDeskToolPolicy ?? (() => undefined);
     this.pluginAgentTools = options.pluginAgentTools;
     this.timelineStore = options.timelineStore ?? new InMemoryAgentTimelineStore();
     this.idFactory = options.idFactory ?? (() => randomUUID());
-    this.registry = options?.registry;
+    this.registry = options.registry;
     this.durableTimelineStore = options?.durableTimelineStore;
     this.onAgentAttention = options?.onAgentAttention;
     this.onUsageBilled = options?.onUsageBilled;
@@ -962,6 +976,10 @@ export class AgentManager {
       this.sessionOpenGenerations.get(agentId) !== this.sessionOpenGeneration &&
       !this.hasInFlightRun(agentId)
     );
+  }
+
+  getJAgentDeskToolPolicy(agentId: string): ProviderJAgentDeskToolsPolicy | undefined {
+    return this.jagentdeskToolPolicies.get(agentId);
   }
 
   getPluginTools(agentId: string): readonly AttachedAgentTool[] {
@@ -1795,7 +1813,7 @@ export class AgentManager {
 
   private async closeAgentRuntime(agentId: string): Promise<void> {
     const live = this.agents.get(agentId);
-    if (!live && await this.registry?.get(agentId)) return;
+    if (!live && (await this.registry?.get(agentId))) return;
     const agent = this.requireAgent(agentId);
     this.logger.trace(
       {
@@ -2359,6 +2377,11 @@ export class AgentManager {
 
     const nextRecord = buildArchivedAgentRecord(record, { archivedAt });
     await registry.upsert(nextRecord);
+    if (!record.archivedAt && !record.internal)
+      this.pluginLifecycle?.emit("agent.archive.after", {
+        agent: describeHookAgent(nextRecord),
+        archivedAt,
+      });
 
     await this.syncNativeArchiveState(record.provider, record.persistence, "archive");
 
@@ -2641,6 +2664,7 @@ export class AgentManager {
         this.runs.settleForegroundStart(pendingRun, {
           status: "failed",
           error: error.message,
+          stale: true,
         });
         agent.pendingReplacement = false;
         if (!agent.activeForegroundTurnId) agent.lifecycle = "idle";
@@ -2694,19 +2718,21 @@ export class AgentManager {
     agentId: string,
     prompt: AgentPromptInput,
     options?: AgentRunOptions,
+    promptStart?: ForegroundPromptStart,
   ): AsyncGenerator<AgentStreamEvent> {
     await this.ensureInteractiveSession(agentId);
-    yield* this.streamAgent(agentId, prompt, options);
+    yield* this.streamAgent(agentId, prompt, options, promptStart);
   }
 
   streamAgent(
     agentId: string,
     prompt: AgentPromptInput,
     options?: AgentRunOptions,
+    promptStart?: ForegroundPromptStart,
   ): AsyncGenerator<AgentStreamEvent> {
     const existingAgent = this.requireSessionAgent(agentId);
     if (this.historySessions.has(existingAgent.session))
-      return this.streamAfterHistoryLoad(agentId, prompt, options);
+      return this.streamAfterHistoryLoad(agentId, prompt, options, promptStart);
     this.logger.trace(
       {
         agentId,
@@ -2741,6 +2767,7 @@ export class AgentManager {
     agent.lastError = undefined;
 
     const pendingRun = this.runs.createPendingRun(agentId);
+    promptStart?.bind(pendingRun);
 
     const streamForwarder = async function* streamForwarder(this: AgentManager) {
       let turnId: string | null;
@@ -2914,6 +2941,7 @@ export class AgentManager {
     agentId: string,
     prompt: AgentPromptInput,
     options?: AgentRunOptions,
+    promptStart?: ForegroundPromptStart,
   ): Promise<AsyncGenerator<AgentStreamEvent>> {
     const snapshot = this.requireAgent(agentId);
     if (
@@ -2921,7 +2949,7 @@ export class AgentManager {
       !snapshot.activeForegroundTurnId &&
       !this.runs.hasRun(agentId)
     ) {
-      return this.streamAgent(agentId, prompt, options);
+      return this.streamAgent(agentId, prompt, options, promptStart);
     }
 
     const agent = this.requireSessionAgent(agentId);
@@ -2932,7 +2960,7 @@ export class AgentManager {
 
     try {
       await this.cancelAgentRunBefore(agentId, "replace");
-      return this.streamAgent(agentId, prompt, options);
+      return this.streamAgent(agentId, prompt, options, promptStart);
     } catch (error) {
       const latest = this.agents.get(agentId);
       if (latest) {
@@ -2980,6 +3008,7 @@ export class AgentManager {
     agentId: string,
     prompt: AgentPromptInput,
     options?: AgentSteerOptions,
+    promptStart?: ForegroundPromptStart,
   ): Promise<ActiveTurnSteerDispatchResult> {
     // A turn that is still starting has no id to steer yet. Replacing it would drop its
     // prompt, so wait until it is accepted (or fails) and steer the turn it became.
@@ -3027,6 +3056,7 @@ export class AgentManager {
         expectedTurnId,
         prompt,
         stripSteerOptions(options),
+        promptStart,
       ),
     };
   }
@@ -3084,6 +3114,7 @@ export class AgentManager {
     expectedTurnId: string,
     prompt: AgentPromptInput,
     options?: AgentRunOptions,
+    promptStart?: ForegroundPromptStart,
   ): Promise<AsyncGenerator<AgentStreamEvent>> {
     this.assertSteerAdmissionOwnsTurn(agent, expectedTurnId);
     agent.pendingReplacement = true;
@@ -3093,7 +3124,7 @@ export class AgentManager {
 
     try {
       await this.cancelAgentRunBefore(agent.id, "replace");
-      return this.streamAgent(agent.id, prompt, options);
+      return this.streamAgent(agent.id, prompt, options, promptStart);
     } catch (error) {
       const latest = this.agents.get(agent.id);
       if (latest) {
@@ -4088,6 +4119,7 @@ export class AgentManager {
   }
 
   private discardRetainedAgentState(agentId: string): void {
+    this.jagentdeskToolPolicies.delete(agentId);
     this.timelineStore.delete(agentId);
     this.detachPluginTools(agentId);
     for (const event of this.providerSubagents.deleteParent(agentId)) {
@@ -5592,7 +5624,11 @@ export class AgentManager {
       withRuntimeJAgentDeskMcpServer({
         config: storedConfig,
         agentId,
-        mcpBaseUrl: this.mcpBaseUrl,
+        mcpBaseUrl:
+          this.jagentdeskToolsEnabled &&
+          isJAgentDeskToolPolicyEnabled(this.resolveJAgentDeskToolPolicy(storedConfig.provider))
+            ? this.mcpBaseUrl
+            : null,
         mcpAuthToken: this.mcpAuthToken,
       }),
     );
@@ -5620,6 +5656,17 @@ export class AgentManager {
     return next;
   }
 
+  private canUseNativeJAgentDeskTools(
+    client: AgentClient,
+    policy?: ProviderJAgentDeskToolsPolicy,
+  ): boolean {
+    return (
+      this.jagentdeskToolsEnabled &&
+      isJAgentDeskToolPolicyEnabled(policy) &&
+      client.capabilities.supportsNativeJAgentDeskTools === true
+    );
+  }
+
   private async buildLaunchContext(
     agentId: string,
     client: AgentClient,
@@ -5635,6 +5682,8 @@ export class AgentManager {
   ): Promise<AgentLaunchContext> {
     // A plugin changing during this open must still make the resulting session stale.
     const generation = this.sessionOpenGeneration;
+    const jagentdeskToolPolicy = this.resolveJAgentDeskToolPolicy(client.provider);
+    this.jagentdeskToolPolicies.set(agentId, jagentdeskToolPolicy);
     this.detachPluginTools(agentId);
     let appendSystemPrompt: string[] | undefined;
     let mcpServers: AgentSessionConfig["mcpServers"];
@@ -5673,14 +5722,16 @@ export class AgentManager {
         ...agentIdentityEnv({ agentId, cwd, opening }),
       },
     };
-    const useNativeTools =
-      this.jagentdeskToolsEnabled && client.capabilities.supportsNativeJAgentDeskTools;
+    const useNativeTools = this.canUseNativeJAgentDeskTools(client, jagentdeskToolPolicy);
     if (
       this.jagentdeskToolCatalogFactory &&
       (useNativeTools || this.getPluginTools(agentId).length > 0)
     ) {
       try {
-        const catalog = await this.jagentdeskToolCatalogFactory({ callerAgentId: agentId });
+        const catalog = await this.jagentdeskToolCatalogFactory({
+          callerAgentId: agentId,
+          jagentdeskToolPolicy,
+        });
         if (useNativeTools) context.jagentdeskTools = catalog;
       } catch (error) {
         this.detachPluginTools(agentId);

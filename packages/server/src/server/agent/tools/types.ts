@@ -1,3 +1,4 @@
+import type { ProviderJAgentDeskToolsPolicy } from "@jagentdesk/protocol/provider-config";
 import type { z } from "zod";
 
 export class JAgentDeskToolInputError extends Error {
@@ -50,6 +51,7 @@ export interface JAgentDeskToolCatalog {
 }
 
 export interface JAgentDeskToolRuntimeContext {
+  jagentdeskToolPolicy?: ProviderJAgentDeskToolsPolicy;
   callerAgentId?: string;
   enableVoiceTools?: boolean;
   voiceOnly?: boolean;

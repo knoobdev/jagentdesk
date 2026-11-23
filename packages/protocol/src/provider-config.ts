@@ -54,6 +54,12 @@ export const ProviderApiConfigSchema = z.object({
   sshServerId: z.string().min(1).optional(),
 });
 
+export const ProviderJAgentDeskToolsPolicySchema = z.object({
+  enabled: z.boolean().optional(),
+  disabledTools: z.array(z.string()).optional(),
+});
+export type ProviderJAgentDeskToolsPolicy = z.infer<typeof ProviderJAgentDeskToolsPolicySchema>;
+
 export const ProviderOverrideSchema = z.object({
   extends: z.string().optional(),
   label: z.string().optional(),
@@ -66,6 +72,7 @@ export const ProviderOverrideSchema = z.object({
   models: z.array(ProviderProfileModelSchema).optional(),
   additionalModels: z.array(ProviderProfileModelSchema).optional(),
   disallowedTools: z.array(z.string()).optional(),
+  jagentdeskTools: ProviderJAgentDeskToolsPolicySchema.optional(),
   enabled: z.boolean().optional(),
   order: z.number().optional(),
   api: ProviderApiConfigSchema.optional(),

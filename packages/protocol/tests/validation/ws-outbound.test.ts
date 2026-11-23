@@ -767,3 +767,48 @@ it("preserves the signed-device challenge envelope", () => {
   });
   expect(validateWSOutboundMessage({ type: "challenge", nonce: "" }).success).toBe(false);
 });
+
+it("keeps nested JSON in plugin timeline entries through generated validation", () => {
+  const message = {
+    type: "session",
+    message: {
+      type: "fetch_agent_timeline_response",
+      payload: {
+        requestId: "plugin-history",
+        agentId: "agent",
+        agent: null,
+        direction: "tail",
+        projection: "projected",
+        epoch: "epoch",
+        reset: false,
+        staleCursor: false,
+        gap: false,
+        window: { minSeq: 1, maxSeq: 1, nextSeq: 2 },
+        startCursor: null,
+        endCursor: null,
+        hasOlder: false,
+        hasNewer: false,
+        entries: [
+          {
+            provider: "codex",
+            timestamp: "2026-11-23T00:00:00.000Z",
+            seqStart: 1,
+            seqEnd: 1,
+            sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }],
+            collapsed: [],
+            item: {
+              type: "plugin",
+              id: "review",
+              pluginId: "review",
+              kind: "review",
+              version: 1,
+              data: { status: "complete", nested: [1, null, { text: "kept" }] },
+            },
+          },
+        ],
+        error: null,
+      },
+    },
+  };
+  expect(validateWSOutboundMessage(message)).toEqual({ success: true, data: message });
+});

@@ -1,3 +1,5 @@
+import type { ProviderJAgentDeskToolsPolicy } from "@jagentdesk/protocol/provider-config";
+import { isJAgentDeskToolEnabled } from "../jagentdesk-tool-policy.js";
 import { z } from "zod";
 import type { AgentManager } from "../agent-manager.js";
 import type { JAgentDeskToolDefinition } from "./types.js";
@@ -9,6 +11,7 @@ export function registerPluginTools(options: {
   scope: "agent" | "top-level";
   tools: Map<string, JAgentDeskToolDefinition>;
   builtinNames: Set<string>;
+  policy?: ProviderJAgentDeskToolsPolicy;
 }): void {
   const { agentManager, callerAgentId, scope, tools, builtinNames } = options;
   if (scope !== "agent" || !callerAgentId) return;
@@ -18,6 +21,7 @@ export function registerPluginTools(options: {
         `Agent tool ${tool.name} from plugin ${tool.pluginId} collides with JAgentDesk tool ${tool.name}`,
       );
     }
+    if (!isJAgentDeskToolEnabled(options.policy, tool.name)) continue;
     tools.set(tool.name, {
       name: tool.name,
       title: tool.title,

@@ -3754,6 +3754,10 @@ export class VoiceAssistantWebSocketServer {
       if (connection.kind !== "trusted") {
         continue;
       }
+      const event = connection.session.supportsForSource(CLIENT_CAPS.selectiveAgentTimeline, ws)
+        ? "agent_attention_required"
+        : "agent_stream";
+      if (!connection.session.wantsEvent(event, ws)) continue;
       clientEntries.push({
         ws,
         state: this.getClientActivityState(connection.session),

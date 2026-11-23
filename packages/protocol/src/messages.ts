@@ -1,3 +1,5 @@
+import { ProviderJAgentDeskToolsPolicySchema } from "./provider-config.js";
+import type { JsonValue } from "./agent-types.js";
 import { PluginIdSchema, PluginRequirementsSchema, PluginSourceSchema } from "./plugin-config.js";
 export {
   PluginIdSchema,
@@ -330,6 +332,7 @@ const MutableDaemonProviderModelSchema = z
 const MutableDaemonProviderConfigSchema = z
   .object({
     enabled: z.boolean().optional(),
+    jagentdeskTools: ProviderJAgentDeskToolsPolicySchema.optional(),
     additionalModels: z.array(MutableDaemonProviderModelSchema).optional(),
   })
   .passthrough();
@@ -908,7 +911,8 @@ export const AgentTimelineItemPayloadSchema: z.ZodType<AgentTimelineItem, unknow
     pluginId: z.string(),
     kind: z.string(),
     version: z.number().int().positive(),
-    data: z.json(),
+    // The transport already parsed JSON. zod-aot miscompiles recursive z.json object values.
+    data: z.unknown() as z.ZodType<JsonValue>,
   }),
   z.object({
     type: z.literal("notification"),

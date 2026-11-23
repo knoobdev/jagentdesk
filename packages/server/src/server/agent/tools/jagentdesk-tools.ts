@@ -1,3 +1,5 @@
+import type { ProviderJAgentDeskToolsPolicy } from "@jagentdesk/protocol/provider-config";
+import { isJAgentDeskToolEnabled } from "../jagentdesk-tool-policy.js";
 import { registerPluginTools } from "./plugin-tools.js";
 // This file predates lint enforcement on it (lefthook lints only staged files, and this large tool
 // registrar was never staged until the Agent Forum change). It carries pre-existing nested-ternary
@@ -153,6 +155,7 @@ import { slugifySkillName } from "../../skills-native/frontmatter.js";
 import type { AgentPermissionResponse } from "../agent-sdk-types.js";
 
 export interface JAgentDeskToolHostDependencies {
+  jagentdeskToolPolicy?: ProviderJAgentDeskToolsPolicy;
   agentManager: AgentManager;
   agentStorage: AgentStorage;
   terminalManager?: TerminalManager | null;
@@ -3649,6 +3652,7 @@ function createToolCatalog(
     handler: (input: any, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>,
   ) => {
     builtinNames.add(name);
+    if (!isJAgentDeskToolEnabled(options.jagentdeskToolPolicy, name)) return;
     tools.set(name, {
       name,
       title: config.title,
@@ -5135,7 +5139,7 @@ function createToolCatalog(
         return true;
       }
 
-      const { disposition } = await sendPromptToAgent({
+      const dispatchResult = await sendPromptToAgent({
         agentManager,
         agentStorage,
         agentId,
@@ -5182,8 +5186,8 @@ function createToolCatalog(
       const notifying = armFinishNotification();
 
       // Return once the provider has accepted the turn, so the status reports it running.
-      if (disposition === "turn_started") {
-        await waitForAgentRunStartWithTimeout(agentManager, agentId);
+      if (dispatchResult.disposition === "turn_started") {
+        await waitForAgentRunStartWithTimeout(agentManager, agentId, dispatchResult.started);
       }
       const currentSnapshot = agentManager.getAgent(agentId);
 
@@ -6402,6 +6406,7 @@ function createToolCatalog(
     scope,
     tools,
     builtinNames,
+    policy: options.jagentdeskToolPolicy,
   });
   return toCatalog();
 }

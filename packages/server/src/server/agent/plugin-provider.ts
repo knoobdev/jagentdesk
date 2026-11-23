@@ -582,6 +582,8 @@ class ProviderRuntimeSession {
   >();
   private readonly activeTurnIds = new Set<string>();
   private terminal = false;
+  // The provider ended this session with session.closed, so it has nothing left to close.
+  private closedByProvider = false;
   private closePromise: Promise<void> | null = null;
   config: ProviderConfigState = { models: [], modes: [], thinkingOptions: [], settings: [] };
   commands: Array<{ name: string; description: string; argumentHint?: string }> = [];
@@ -679,7 +681,7 @@ class ProviderRuntimeSession {
 
   async close(): Promise<void> {
     this.history.length = 0;
-    if (this.restoration === "parent") {
+    if (this.restoration === "parent" || this.closedByProvider) {
       this.runtime.removeSession(this.id, this.providerSessionId);
       return;
     }
@@ -744,6 +746,7 @@ class ProviderRuntimeSession {
       return;
     }
     if (event.type === "session.runtime_failed" || event.type === "session.closed") {
+      if (event.type === "session.closed") this.closedByProvider = true;
       if (this.terminal) return;
       this.terminal = true;
       this.publish(event);

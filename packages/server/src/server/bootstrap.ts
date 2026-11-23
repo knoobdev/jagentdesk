@@ -1,4 +1,5 @@
-import type { BuiltinPluginLoader } from "./plugins/builtin/index.js";
+import { resolveJAgentDeskToolPolicy } from "./agent/jagentdesk-tool-policy.js";
+import { BuiltinPluginLoader } from "./plugins/builtin/index.js";
 import { withTimeout } from "../utils/promise-timeout.js";
 import { describeHookWorkspace } from "./plugins/lifecycle/index.js";
 import { PhysicalDeviceHub } from "./devices/hub.js";
@@ -610,6 +611,7 @@ function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): Mutab
       if (override.enabled !== undefined) {
         providerConfig.enabled = override.enabled;
       }
+      if (override.jagentdeskTools) providerConfig.jagentdeskTools = override.jagentdeskTools;
       if (override.additionalModels) {
         providerConfig.additionalModels = override.additionalModels;
       }
@@ -671,11 +673,10 @@ export async function createJAgentDeskDaemon(
   );
   const browserToolsPolicy = new DaemonConfigBrowserToolsPolicy(daemonConfigStore);
   const browserToolsBroker = new BrowserToolsBroker({});
-  // `pluginsEnabled` defaults FALSE, so start() spawns nothing unless the operator
-  // has explicitly enabled plugins. Managed git sources back the marketplace install
-  // flow (a checked-out Paseo plugin is auto-rebranded before it is compiled).
+  // Built-ins load independently of the user-plugin switch. Managed git sources
+  // back marketplace installs and are rebranded before compilation.
   const pluginRuntime = new PluginService(logger, daemonConfigStore, daemonVersion, {
-    builtinPlugins: dependencies.builtinPlugins,
+    builtinPlugins: dependencies.builtinPlugins ?? new BuiltinPluginLoader(),
     managedSources: new ManagedPluginSources(config.jagentdeskHome),
     settingsDirectory: path.join(config.jagentdeskHome, "plugin-settings"),
   });
@@ -1040,6 +1041,8 @@ export async function createJAgentDeskDaemon(
   const initialAgentManagerState = providerSnapshotManager.getAgentManagerProviderState();
   const agentManager = new AgentManager({
     pluginLifecycle: pluginRuntime,
+    resolveJAgentDeskToolPolicy: (provider) =>
+      resolveJAgentDeskToolPolicy(provider, daemonConfigStore.get().providers),
     pluginAgentTools: pluginRuntime,
     clients: initialAgentManagerState.clients,
     providerDefinitions: initialAgentManagerState.providerDefinitions,
@@ -1696,6 +1699,11 @@ export async function createJAgentDeskDaemon(
   const createAgentToolHostDependencies = (
     runtime: JAgentDeskToolRuntimeContext,
   ): JAgentDeskToolHostDependencies => ({
+    jagentdeskToolPolicy:
+      runtime.jagentdeskToolPolicy ??
+      (runtime.callerAgentId
+        ? agentManager.getJAgentDeskToolPolicy(runtime.callerAgentId)
+        : undefined),
     agentManager,
     agentStorage,
     terminalManager,
@@ -2389,7 +2397,11 @@ async function closeAllAgents(logger: Logger, agentManager: AgentManager): Promi
   await Promise.all(
     agents.map(async (agent) => {
       try {
-        await agentManager.closeAgent(agent.id);
+        await withTimeout({
+          promise: agentManager.closeAgent(agent.id),
+          timeoutMs: 5_000,
+          label: `close agent ${agent.id}`,
+        });
       } catch (err) {
         logger.error({ err, agentId: agent.id }, "Failed to close agent");
       }

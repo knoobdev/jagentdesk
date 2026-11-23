@@ -64,7 +64,7 @@ import { ensureAgentLoaded, ensureUnarchivedAgentLoaded } from "./agent/agent-lo
 import { searchTimeline } from "./agent/chat-search/index.js";
 import {
   formatSystemNotificationPrompt,
-  type PromptDispatchDisposition,
+  type PromptDispatchResult,
   sendPromptToAgent,
   waitForAgentRunStartWithTimeout,
   unarchiveAgentState,
@@ -841,6 +841,10 @@ function resolveGuestGrant(options: SessionOptions): {
  * It owns all state management, orchestration logic, and message processing.
  * Session has no knowledge of WebSockets - it only emits and receives messages.
  */
+function workspacePluginLifecycle(runtime: SessionOptions["pluginRuntime"]) {
+  return runtime?.emit ? { emit: runtime.emit } : undefined;
+}
+
 export class Session {
   private readonly eventSubscriptions = new Map<
     string,
@@ -1079,6 +1083,7 @@ export class Session {
     });
     this.workspaceAutoName = workspaceAutoName;
     this.workspaceProvisioning = createWorkspaceProvisioningService({
+      lifecycle: workspacePluginLifecycle(pluginRuntime),
       serverId,
       workspaceRegistry: this.workspaceRegistry,
       projectRegistry: this.projectRegistry,
@@ -9645,7 +9650,7 @@ export class Session {
         },
         "agent.session.send_agent_message",
       );
-      let dispatchResult: { disposition: PromptDispatchDisposition };
+      let dispatchResult: PromptDispatchResult;
       try {
         dispatchResult = await sendPromptToAgent({
           agentManager: this.agentManager,
@@ -9690,7 +9695,7 @@ export class Session {
       }
 
       try {
-        await waitForAgentRunStartWithTimeout(this.agentManager, agentId);
+        await waitForAgentRunStartWithTimeout(this.agentManager, agentId, dispatchResult.started);
       } catch (error) {
         this.emit({
           type: "send_agent_message_response",
@@ -9851,7 +9856,7 @@ export class Session {
   /**
    * Emit a message to the client
    */
-  private wantsEvent(event: string, source?: object): boolean {
+  wantsEvent(event: string, source?: object): boolean {
     const capabilities = source
       ? this.clientCapabilitiesBySource.get(source)
       : this.clientCapabilities;
