@@ -510,6 +510,7 @@ export const AgentFeatureSelectSchema = z.object({
   description: z.string().optional(),
   tooltip: z.string().optional(),
   icon: z.string().optional(),
+  desktopTrigger: z.enum(["icon", "label"]).optional(),
   value: z.string().nullable(),
   options: z.array(AgentSelectOptionSchema),
 });
@@ -608,7 +609,7 @@ const McpServerConfigSchema = z.discriminatedUnion("type", [
   McpSseServerConfigSchema,
 ]);
 
-const ProviderOptionsSchema = z.record(z.string(), z.json());
+const ProviderOptionsSchema = z.record(z.string(), z.unknown());
 export type ProviderOptions = z.infer<typeof ProviderOptionsSchema>;
 
 const McpToolRefSchema = z

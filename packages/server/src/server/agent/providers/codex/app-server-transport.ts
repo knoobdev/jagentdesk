@@ -39,6 +39,20 @@ interface PendingRequest {
   timer: NodeJS.Timeout;
 }
 
+/** A response past the provider line cap. Only its request fails; the session stays up. */
+export class CodexAppServerResponseTooLargeError extends Error {
+  constructor(
+    readonly method: string,
+    readonly limitBytes: number,
+  ) {
+    super(`Codex app-server response to ${method} exceeds ${limitBytes} bytes`);
+    this.name = "CodexAppServerResponseTooLargeError";
+  }
+}
+
+// Codex serializes a response with `id` first, so its head names the request.
+const OVERSIZED_RESPONSE_HEAD = /^\{"id":(\d+),"result":/;
+
 export class CodexAppServerRpcError extends Error {
   constructor(
     message: string,
@@ -352,8 +366,21 @@ export class CodexAppServerClient {
   }
 
   private handleStreamLimit(failure: ProviderStreamLimitError): void {
-    // A rejected response/notification cannot be replayed safely. Fail the session,
+    const responseId = OVERSIZED_RESPONSE_HEAD.exec(failure.lineHead)?.[1];
+    const pending = responseId === undefined ? undefined : this.pending.get(Number(responseId));
+    if (pending) {
+      clearTimeout(pending.timer);
+      this.pending.delete(Number(responseId));
+      this.logger.warn(
+        { method: pending.method, limitBytes: failure.limitBytes },
+        "Codex app-server response exceeded the line cap",
+      );
+      pending.reject(new CodexAppServerResponseTooLargeError(pending.method, failure.limitBytes));
+      return;
+    }
+    // A lost notification or server request cannot be replayed. Fail the session,
     // including live turns with no pending RPC, rather than dropping a stream unit.
+    this.stdoutLineReader.close();
     this.handleUnexpectedTermination(failure);
     void this.dispose().catch((err) => {
       this.logger.warn({ err }, "Failed to terminate oversized Codex stdout producer");

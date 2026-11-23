@@ -16,6 +16,7 @@ import type {
   AgentSessionConfig,
   AgentSlashCommand,
   AgentStreamEvent,
+  AgentTimelineItem,
 } from "../agent-sdk-types.js";
 import {
   buildCodexAppServerEnv,
@@ -88,6 +89,7 @@ import { CodexAppServerClient } from "./codex/app-server-transport.js";
 import {
   createCodexAppServerChildProcess,
   createFakeCodexAppServer,
+  fakeCodexThreadHistory,
   type FakeCodexAppServer,
   waitForNextEvent,
   waitForNextPermission,
@@ -116,7 +118,6 @@ interface CodexSessionTestAccess {
   ensureThreadLoaded(): Promise<void>;
   handleToolApprovalRequest(params: unknown): Promise<unknown>;
   handleNotification(method: string, params: unknown): void;
-  loadPersistedHistory(): Promise<void>;
   refreshResolvedCollaborationMode(): void;
   serviceTier: "fast" | null;
   planModeEnabled: boolean;
@@ -669,6 +670,81 @@ function archivedThreadErrorMessage(threadId: string): string {
   );
 }
 
+function codexUserItem(id: string, text: string) {
+  return { type: "userMessage", id, content: [{ type: "text", text }] };
+}
+
+function codexAgentItem(text: string) {
+  return { type: "agentMessage", id: `agent-${text}`, text };
+}
+
+// An AgentManager over a real Codex provider whose every spawn gets a fresh fake
+// app-server serving `threads` from thread/read.
+function createReopenableCodexAgent(threads: Record<string, unknown[]>) {
+  const appServers: FakeCodexAppServer[] = [];
+  const provider = new CodexAppServerAgentClient(createTestLogger());
+  const internals = castInternals<{
+    goalsEnabledPromise: Promise<boolean> | null;
+    autoReviewEnabledPromise: Promise<boolean> | null;
+    spawnAppServer: () => Promise<ChildProcessWithoutNullStreams>;
+  }>(provider);
+  internals.goalsEnabledPromise = Promise.resolve(false);
+  internals.autoReviewEnabledPromise = Promise.resolve(false);
+  internals.spawnAppServer = async () => {
+    const appServer = createFakeCodexAppServer({
+      "thread/read": (params) => {
+        const { threadId } = params as { threadId: string };
+        return { thread: { id: threadId, turns: threads[threadId] ?? [] } };
+      },
+    });
+    appServers.push(appServer);
+    return appServer.child;
+  };
+  // The fake app-server stands in for the Codex CLI, which test machines may not have.
+  const client: AgentClient = {
+    provider: "codex",
+    capabilities: provider.capabilities,
+    isAvailable: async () => true,
+    fetchCatalog: async () => ({ models: [], modes: [] }),
+    createSession: async () => {
+      throw new Error("Unexpected create");
+    },
+    resumeSession: (...args) => provider.resumeSession(...args),
+  };
+  const manager = new AgentManager({ clients: { codex: client }, logger: createTestLogger() });
+  const agentId = "00000000-0000-4000-8000-000000000001";
+  const handle = { provider: "codex", sessionId: "saved-thread" };
+  const config = createConfig({ cwd: process.cwd() });
+
+  async function open(): Promise<void> {
+    await manager.resumeAgentFromPersistence(handle, config, agentId);
+    await manager.hydrateTimelineFromProvider(agentId);
+  }
+
+  return {
+    manager,
+    agentId,
+    latestAppServer: () => appServers[appServers.length - 1],
+    threadMethods: (index: number) =>
+      appServers[index]
+        .requests()
+        .map((request) => request.method)
+        .filter((method) => typeof method === "string" && method.startsWith("thread/")),
+    // Cold-loads the agent, closes its runtime, and reopens it while JAgentDesk keeps its timeline.
+    async loadCloseAndReopen(): Promise<AgentTimelineItem[]> {
+      await open();
+      const projected = manager.getTimeline(agentId);
+      await manager.closeAgent(agentId);
+      await open();
+      return projected;
+    },
+    async close(): Promise<void> {
+      await manager.closeAgent(agentId);
+      for (const appServer of appServers) appServer.assertNoErrors();
+    },
+  };
+}
+
 function asInternals(session: CodexTestSession): CodexSessionTestAccess {
   return castInternals<CodexSessionTestAccess>(session);
 }
@@ -939,6 +1015,7 @@ let buffer = "";
 function resultFor(method, params) {
   if (method === "initialize") return {};
   if (method === "collaborationMode/list") return { data: [] };
+  if (method === "model/list") return { data: [] };
   if (method === "skills/list") {
     const cwds = params && params.cwds;
     const projectCwd = ${JSON.stringify(projectCwd)};
@@ -1425,6 +1502,41 @@ describe("Codex app-server provider", () => {
     try {
       expect(session.describePersistence()).toMatchObject({ sessionId: "saved-thread" });
       await expect(session.getRuntimeInfo()).resolves.toMatchObject({ sessionId: "saved-thread" });
+      appServer.assertNoErrors();
+    } finally {
+      await session.close();
+    }
+  });
+
+  test("passes a cwd override when loading a persisted Codex thread", async () => {
+    const appServer = createFakeCodexAppServer();
+    const provider = createProviderWithFakeAppServer(appServer);
+    const cwd = "/workspace/new-directory";
+    const session = await provider.resumeSession(
+      { sessionId: "saved-thread", metadata: { cwd: "/workspace/old-directory" } },
+      { cwd },
+    );
+
+    try {
+      const resume = appServer.requests().find((request) => request.method === "thread/resume");
+      expect(resume?.params).toMatchObject({ threadId: "saved-thread", cwd });
+      appServer.assertNoErrors();
+    } finally {
+      await session.close();
+    }
+  });
+
+  test("provider persistence leaves options owned by the stored agent config", async () => {
+    const appServer = createFakeCodexAppServer();
+    const provider = createProviderWithFakeAppServer(appServer);
+    const session = await provider.createSession(
+      createConfig({ providerOptions: { sandbox_mode: "read-only", approval_policy: "never" } }),
+    );
+    try {
+      await session.startTurn("persist the configured session");
+      await appServer.waitForTurnStart();
+      const handle = session.describePersistence()!;
+      expect(handle.metadata).not.toHaveProperty("providerOptions");
       appServer.assertNoErrors();
     } finally {
       await session.close();
@@ -2089,7 +2201,13 @@ describe("Codex app-server provider", () => {
       purpose: "history",
     });
 
-    expect(threadRequests).toEqual(["thread/loaded/list", "thread/resume", "thread/read"]);
+    await Array.fromAsync(session.streamHistory());
+    expect(threadRequests).toEqual([
+      "thread/loaded/list",
+      "thread/resume",
+      "thread/read",
+      "thread/read",
+    ]);
     await session.close();
     appServer.assertNoErrors();
   });
@@ -2128,27 +2246,145 @@ describe("Codex app-server provider", () => {
       "thread/resume",
       "thread/unarchive",
       "thread/resume",
-      "thread/read",
     ]);
     await session.close();
     appServer.assertNoErrors();
   });
 
-  test("passes a cwd override when loading a persisted Codex thread", async () => {
+  test("resumes a Codex thread without asking for its turns", async () => {
     const appServer = createFakeCodexAppServer();
     const provider = createProviderWithFakeAppServer(appServer);
-    const cwd = "/workspace/new-directory";
-    const session = await provider.resumeSession(
-      { sessionId: "saved-thread", metadata: { cwd: "/workspace/old-directory" } },
-      { cwd },
-    );
 
+    const session = await provider.resumeSession({ sessionId: "saved-thread" });
+
+    expect(
+      appServer
+        .requests()
+        .filter((request) => request.method === "thread/resume")
+        .map((request) => request.params),
+    ).toEqual([expect.objectContaining({ threadId: "saved-thread", excludeTurns: true })]);
+    await session.close();
+    appServer.assertNoErrors();
+  });
+
+  test("reopening an agent whose timeline JAgentDesk still holds does not read Codex history", async () => {
+    const codex = createReopenableCodexAgent({
+      "saved-thread": [
+        { id: "turn-1", items: [codexUserItem("user-1", "Hello"), codexAgentItem("Hi there.")] },
+      ],
+    });
     try {
-      const resume = appServer.requests().find((request) => request.method === "thread/resume");
-      expect(resume?.params).toMatchObject({ threadId: "saved-thread", cwd });
-      appServer.assertNoErrors();
+      const projected = await codex.loadCloseAndReopen();
+
+      expect(projected).toEqual([
+        expect.objectContaining({ type: "user_message", messageId: "user-1", text: "Hello" }),
+        expect.objectContaining({ type: "assistant_message", text: "Hi there." }),
+      ]);
+      expect(codex.threadMethods(0)).toEqual([
+        "thread/loaded/list",
+        "thread/resume",
+        "thread/read",
+        "thread/read",
+      ]);
+      expect(codex.threadMethods(1)).toEqual(["thread/loaded/list", "thread/resume"]);
+      expect(codex.manager.getTimeline(codex.agentId)).toEqual(projected);
     } finally {
-      await session.close();
+      await codex.close();
+    }
+  });
+
+  test("rewinds an agent reopened without reading its Codex history", async () => {
+    const firstTurn = {
+      id: "turn-1",
+      items: [codexUserItem("user-1", "First"), codexAgentItem("First answer.")],
+    };
+    const codex = createReopenableCodexAgent({
+      "saved-thread": [
+        firstTurn,
+        { id: "turn-2", items: [codexUserItem("user-2", "Second"), codexAgentItem("Second.")] },
+      ],
+      "forked-thread": [firstTurn],
+    });
+    try {
+      await codex.loadCloseAndReopen();
+
+      await codex.manager.rewind(codex.agentId, "user-2", "conversation");
+
+      expect(codex.latestAppServer().recordedRollbacks).toEqual([
+        { threadId: "forked-thread", numTurns: 1 },
+      ]);
+      expect(codex.manager.getTimeline(codex.agentId)).toEqual([
+        expect.objectContaining({ type: "user_message", messageId: "user-1", text: "First" }),
+        expect.objectContaining({ type: "assistant_message", text: "First answer." }),
+      ]);
+    } finally {
+      await codex.close();
+    }
+  });
+
+  test("keeps a reopened agent's interaction with an earlier sub-agent on its original card", async () => {
+    const codex = createReopenableCodexAgent({
+      "saved-thread": [
+        {
+          id: "turn-1",
+          items: [
+            codexUserItem("user-1", "Delegate"),
+            {
+              type: "subAgentActivity",
+              id: "spawn-child",
+              kind: "started",
+              agentThreadId: "child-thread",
+              agentPath: "/root/child",
+            },
+          ],
+        },
+      ],
+      "child-thread": [{ id: "child-turn-1", items: [codexAgentItem("Child started.")] }],
+    });
+    try {
+      await codex.loadCloseAndReopen();
+      const appServer = codex.latestAppServer();
+
+      const run = codex.manager.runAgent(codex.agentId, "Ask the child again");
+      await appServer.waitForTurnStart();
+      appServer.startsTurn({ threadId: "saved-thread", turnId: "turn-2" });
+      appServer.beginsSubAgentActivity({
+        callId: "interact-child",
+        threadId: "child-thread",
+        parentThreadId: "saved-thread",
+        kind: "interacted",
+        agentPath: "/root/child",
+      });
+      appServer.says({ threadId: "child-thread", itemId: "child-reply", text: "Child replied." });
+      appServer.completesSubAgentActivity({
+        callId: "interact-child",
+        threadId: "child-thread",
+        parentThreadId: "saved-thread",
+        kind: "interacted",
+        agentPath: "/root/child",
+      });
+      appServer.completeTurn({ threadId: "saved-thread" });
+      await run;
+
+      const toolCalls = codex.manager
+        .getTimeline(codex.agentId)
+        .filter((item) => item.type === "tool_call");
+      expect(new Set(toolCalls.map((item) => item.callId))).toEqual(new Set(["spawn-child"]));
+      expect(toolCalls.at(-1)).toMatchObject({ callId: "spawn-child", status: "completed" });
+      expect(codex.manager.getProviderSubagent(codex.agentId, "child-thread")).toMatchObject({
+        toolCallId: "spawn-child",
+        status: "completed",
+      });
+      expect(
+        codex.manager
+          .fetchProviderSubagentTimeline(codex.agentId, "child-thread")
+          .rows.map((row) => row.item),
+      ).toEqual([
+        expect.objectContaining({ type: "assistant_message", text: "Child started." }),
+        expect.objectContaining({ type: "assistant_message", text: "Child replied." }),
+      ]);
+    } finally {
+      await codex.close();
     }
   });
 
@@ -2397,7 +2633,7 @@ describe("Codex app-server provider", () => {
         cwd: "/workspace/project",
         model: "gpt-5.4",
         serviceTier: null,
-        excludeTurns: false,
+        excludeTurns: true,
         persistExtendedHistory: true,
       },
     ]);
@@ -2411,8 +2647,9 @@ describe("Codex app-server provider", () => {
 
   test("rewinds a paginated conversation through the public session capability", async () => {
     const appServer = createFakeCodexAppServer({
-      "thread/read": () => ({
-        thread: { id: "thread-1", historyMode: "paginated", turns: [] },
+      ...fakeCodexThreadHistory({
+        "thread-1": { historyMode: "paginated", turns: [] },
+        "forked-thread": { historyMode: "paginated", turns: [] },
       }),
       "thread/rollback": () => {
         throw new Error("paginated threads do not support thread/rollback");
@@ -2453,7 +2690,7 @@ describe("Codex app-server provider", () => {
         cwd: "/workspace/project",
         model: "gpt-5.4",
         serviceTier: null,
-        excludeTurns: false,
+        excludeTurns: true,
         persistExtendedHistory: true,
       },
     ]);
@@ -2470,11 +2707,10 @@ describe("Codex app-server provider", () => {
     async (historyMode) => {
       const appServer = createFakeCodexAppServer(
         historyMode === "paginated"
-          ? {
-              "thread/read": () => ({
-                thread: { id: "thread-1", historyMode: "paginated", turns: [] },
-              }),
-            }
+          ? fakeCodexThreadHistory({
+              "thread-1": { historyMode: "paginated", turns: [] },
+              "forked-thread": { historyMode: "paginated", turns: [] },
+            })
           : undefined,
       );
       const customCodexConfig = {
@@ -2589,9 +2825,9 @@ describe("Codex app-server provider", () => {
       OPENAI_BASE_URL: "https://custom-relay.example.com",
     });
     expect(capturedThreadStartConfig(capturedRequests)).toEqual({
-      model_provider: "codex-iisb",
+      model_provider: "jagentdesk:codex-iisb",
       model_providers: {
-        "codex-iisb": {
+        "jagentdesk:codex-iisb": {
           name: "Custom Codex",
           base_url: "https://custom-relay.example.com/v1",
           env_key: "OPENAI_API_KEY",
@@ -2609,10 +2845,25 @@ describe("Codex app-server provider", () => {
     );
 
     expect(capturedThreadStartConfig(capturedRequests)).toEqual({
-      model_provider: "codex-custom",
+      model_provider: "jagentdesk:codex-custom",
       model_providers: {
-        "codex-custom": expect.objectContaining({
+        "jagentdesk:codex-custom": expect.objectContaining({
           base_url: "https://custom-relay.example.com/v1",
+        }),
+      },
+    });
+  });
+
+  test("namespaces provider ids that collide with Codex built-ins", async () => {
+    // `ollama` is a reserved Codex provider id: without namespacing, Codex rejects
+    // the generated config outright and the agent never starts.
+    const capturedRequests = await runCustomCodexProviderTurn("ollama", "https://ollama.com");
+
+    expect(capturedThreadStartConfig(capturedRequests)).toEqual({
+      model_provider: "jagentdesk:ollama",
+      model_providers: {
+        "jagentdesk:ollama": expect.objectContaining({
+          base_url: "https://ollama.com/v1",
         }),
       },
     });
@@ -2682,7 +2933,12 @@ describe("Codex app-server provider", () => {
       throw new Error(`resumeSession timed out; thread requests: ${threadRequests.join(", ")}`);
     }
 
-    expect(threadRequests).toEqual(["config/read", "thread/loaded/list", "thread/resume"]);
+    expect(threadRequests).toEqual([
+      "model/list",
+      "config/read",
+      "thread/loaded/list",
+      "thread/resume",
+    ]);
     expect(outcome).toBe("rejected");
     appServer.assertNoErrors();
   });
@@ -4884,14 +5140,13 @@ describe("Codex app-server provider", () => {
       }),
     };
 
-    await asInternals(session).loadPersistedHistory();
-
     const history: AgentStreamEvent[] = [];
     for await (const event of session.streamHistory()) {
       history.push(event);
     }
 
     expect(requests.map((request) => [request.method, request.params])).toEqual([
+      ["thread/read", { threadId: "test-thread", includeTurns: false }],
       ["thread/read", { threadId: "test-thread", includeTurns: true }],
     ]);
     expect(history).toEqual([
@@ -4938,7 +5193,7 @@ describe("Codex app-server provider", () => {
       })),
     };
 
-    await asInternals(session).loadPersistedHistory();
+    await Array.fromAsync(session.streamHistory());
 
     expect(asInternals(session).codexUserMessageTurns().resolve("message-history")).toEqual({
       index: 0,
@@ -5006,8 +5261,6 @@ describe("Codex app-server provider", () => {
         };
       }),
     };
-
-    await asInternals(session).loadPersistedHistory();
 
     const history: AgentStreamEvent[] = [];
     for await (const event of session.streamHistory()) {
@@ -5170,8 +5423,6 @@ describe("Codex app-server provider", () => {
         };
       }),
     };
-
-    await asInternals(session).loadPersistedHistory();
 
     const history: AgentStreamEvent[] = [];
     for await (const event of session.streamHistory()) {
@@ -5345,8 +5596,6 @@ describe("Codex app-server provider", () => {
       }),
     };
 
-    await asInternals(session).loadPersistedHistory();
-
     const history: AgentStreamEvent[] = [];
     for await (const event of session.streamHistory()) {
       history.push(event);
@@ -5405,8 +5654,6 @@ describe("Codex app-server provider", () => {
         };
       }),
     };
-
-    await asInternals(session).loadPersistedHistory();
 
     const history: AgentStreamEvent[] = [];
     for await (const event of session.streamHistory()) {
@@ -6754,8 +7001,6 @@ describe("Codex app-server provider", () => {
       })),
     };
 
-    await asInternals(session).loadPersistedHistory(session.client);
-
     const history: AgentStreamEvent[] = [];
     for await (const event of session.streamHistory()) {
       history.push(event);
@@ -7399,9 +7644,21 @@ describe("Codex importable sessions", () => {
   const threadsByModelProvider = [
     { id: "stock-thread", cwd: "/workspace/project-a", modelProvider: "openai", updatedAt: 2 },
     { id: "custom-thread", cwd: "/workspace/project-a", modelProvider: "my-codex", updatedAt: 1 },
+    {
+      id: "new-custom-thread",
+      cwd: "/workspace/project-a",
+      modelProvider: "jagentdesk:my-codex",
+      updatedAt: 3,
+    },
+    {
+      id: "other-custom-thread",
+      cwd: "/workspace/project-a",
+      modelProvider: "jagentdesk-my-codex",
+      updatedAt: 4,
+    },
   ];
 
-  test("a custom Codex provider lists the threads it created", async () => {
+  test("a custom Codex provider lists its old and namespaced threads without other providers", async () => {
     const appServer = createFakeCodexAppServer({
       "thread/list": providerFilteringThreadListHandler(threadsByModelProvider),
     });
@@ -7414,9 +7671,39 @@ describe("Codex importable sessions", () => {
 
     const sessions = await provider.listImportableSessions({ cwd: "/workspace/project-a" });
 
-    expect(sessions.map((session) => session.providerHandleId)).toEqual(["custom-thread"]);
+    expect(sessions.map((session) => session.providerHandleId)).toEqual([
+      "custom-thread",
+      "new-custom-thread",
+    ]);
     appServer.assertNoErrors();
   });
+
+  test.each(["openai", "ollama", "lmstudio", "amazon-bedrock", "amazon-bedrock-runtime", "gcp"])(
+    "a custom provider named %s excludes native built-in sessions",
+    async (providerId) => {
+      const appServer = createFakeCodexAppServer({
+        "thread/list": providerFilteringThreadListHandler([
+          { id: "native-thread", cwd: "/workspace/project-a", modelProvider: providerId },
+          {
+            id: "custom-thread",
+            cwd: "/workspace/project-a",
+            modelProvider: `jagentdesk:${providerId}`,
+          },
+        ]),
+      });
+      const provider = createProviderWithFakeAppServer(appServer, {
+        runtimeSettings: {
+          env: { OPENAI_BASE_URL: "https://llm.example.test/v1", OPENAI_API_KEY: "test-key" },
+        },
+        customProvider: { id: providerId, label: "Custom Codex", extends: "codex" },
+      });
+
+      const sessions = await provider.listImportableSessions({ cwd: "/workspace/project-a" });
+
+      expect(sessions.map((session) => session.providerHandleId)).toEqual(["custom-thread"]);
+      appServer.assertNoErrors();
+    },
+  );
 
   test("stock Codex keeps listing only its own threads", async () => {
     const appServer = createFakeCodexAppServer({

@@ -10,6 +10,7 @@ import {
   type WorktreeConfig,
 } from "./worktree";
 import { execFileSync } from "child_process";
+import { rm } from "node:fs/promises";
 import {
   mkdtempSync,
   mkdirSync,
@@ -73,8 +74,8 @@ describe("jagentdesk worktree manager", () => {
     });
   });
 
-  afterEach(() => {
-    rmSync(tempDir, { recursive: true, force: true });
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("treats a worktree as jagentdesk-owned even when its .git admin is missing", async () => {
@@ -97,7 +98,9 @@ describe("jagentdesk worktree manager", () => {
     const ownership = await isJAgentDeskOwnedWorktreeCwd(created.worktreePath, { jagentdeskHome });
     expect(ownership.allowed).toBe(true);
     await expect(
-      isJAgentDeskOwnedWorktreeCwd(join(created.worktreePath, "packages", "app"), { jagentdeskHome }),
+      isJAgentDeskOwnedWorktreeCwd(join(created.worktreePath, "packages", "app"), {
+        jagentdeskHome,
+      }),
     ).resolves.toMatchObject({
       allowed: true,
       worktreePath: created.worktreePath,
@@ -185,10 +188,14 @@ describe("jagentdesk worktree manager", () => {
     const projectHashDir = join(worktreesRoot, projectHash);
     mkdirSync(projectHashDir, { recursive: true });
 
-    await expect(isJAgentDeskOwnedWorktreeCwd(worktreesRoot, { jagentdeskHome })).resolves.toMatchObject({
+    await expect(
+      isJAgentDeskOwnedWorktreeCwd(worktreesRoot, { jagentdeskHome }),
+    ).resolves.toMatchObject({
       allowed: false,
     });
-    await expect(isJAgentDeskOwnedWorktreeCwd(projectHashDir, { jagentdeskHome })).resolves.toMatchObject({
+    await expect(
+      isJAgentDeskOwnedWorktreeCwd(projectHashDir, { jagentdeskHome }),
+    ).resolves.toMatchObject({
       allowed: false,
     });
   });
@@ -235,7 +242,11 @@ describe("jagentdesk worktree manager", () => {
 
     // Second call — nothing left on disk and no admin entry — must not throw.
     await expect(
-      deleteJAgentDeskWorktree({ cwd: repoDir, worktreePath: created.worktreePath, jagentdeskHome }),
+      deleteJAgentDeskWorktree({
+        cwd: repoDir,
+        worktreePath: created.worktreePath,
+        jagentdeskHome,
+      }),
     ).resolves.toBeUndefined();
   });
 

@@ -17,6 +17,22 @@ All provider configuration lives under `agents.providers` in config.json:
 
 Provider IDs must be lowercase alphanumeric with hyphens (`/^[a-z][a-z0-9-]*$/`).
 
+## Provider options
+
+Set provider defaults in `agents.providers.<id>.options`. Use `providerOptions` for
+per-agent overrides. The provider validates and applies this opaque record;
+Claude, Codex, and OpenCode reject unknown keys with a key-specific creation error.
+Providers without option handling ignore the record.
+
+The daemon deep-merges agent options over provider defaults at each launch or
+resume. Plain objects merge recursively; arrays, scalars, and `null` replace the
+base value. Only agent overrides are persisted, so changes to defaults apply on
+the next launch or resume. A profile inherits its base provider's options unless
+it supplies its own options record.
+
+`params` remains accepted for existing configurations. Use `options` for new
+configuration; if both are set, the whole `options` record wins.
+
 ---
 
 ## Table of Contents
@@ -403,7 +419,7 @@ Custom OMP profiles should extend `omp`. They inherit the OMP adapter's `rpc-ui`
           "XDG_CONFIG_HOME": "~/.config/omp-work",
           "XDG_STATE_HOME": "~/.local/state/omp-work"
         },
-        "params": {
+        "options": {
           "sessionDir": "~/.local/state/omp-work/omp/agent/sessions",
           "smolModel": "openai/gpt-5-mini",
           "slowModel": "anthropic/claude-opus-4-1",
@@ -415,7 +431,7 @@ Custom OMP profiles should extend `omp`. They inherit the OMP adapter's `rpc-ui`
 }
 ```
 
-`params.sessionDir` is used only for importing sessions that were started outside JAgentDesk. If `command` or XDG env vars move OMP's state directory, set `params.sessionDir` to the resulting OMP JSONL session directory; launching and resuming still go through the configured command.
+`options.sessionDir` is used only for importing sessions that were started outside JAgentDesk. If `command` or XDG env vars move OMP's state directory, set `options.sessionDir` to the resulting OMP JSONL session directory; launching and resuming still go through the configured command.
 
 For other providers that keep Pi's `--mode rpc` API but write sessions somewhere else, extend `pi`, replace the command, and provide the JSONL session directory:
 
@@ -427,7 +443,7 @@ For other providers that keep Pi's `--mode rpc` API but write sessions somewhere
         "extends": "pi",
         "label": "My Pi Fork",
         "command": ["my-pi-fork"],
-        "params": {
+        "options": {
           "sessionDir": "~/.my-pi-fork/sessions"
         }
       }
@@ -494,7 +510,7 @@ Required fields for ACP providers:
 - `label`
 - `command` — the command to spawn the agent process (must support ACP over stdio)
 
-JAgentDesk tools such as subagent creation come from the shared internal tool catalog. ACP providers receive those tools through the MCP fallback by default because ACP exposes `mcpServers`, not JAgentDesk's native tool catalog. Some ACP adapters cannot create sessions when `mcpServers` is non-empty. Disable injected MCP for those providers with `params.supportsMcpServers: false`:
+JAgentDesk tools such as subagent creation come from the shared internal tool catalog. ACP providers receive those tools through the MCP fallback by default because ACP exposes `mcpServers`, not JAgentDesk's native tool catalog. Some ACP adapters cannot create sessions when `mcpServers` is non-empty. Disable injected MCP for those providers with `options.supportsMcpServers: false`:
 
 ```json
 {
@@ -504,7 +520,7 @@ JAgentDesk tools such as subagent creation come from the shared internal tool ca
         "extends": "acp",
         "label": "My Agent",
         "command": ["my-agent", "acp"],
-        "params": {
+        "options": {
           "supportsMcpServers": false
         }
       }
@@ -525,7 +541,7 @@ enable the corresponding client capabilities:
         "extends": "acp",
         "label": "Local Agent",
         "command": ["local-agent", "acp"],
-        "params": {
+        "options": {
           "clientCapabilities": {
             "fs": {
               "readTextFile": true,
@@ -692,7 +708,7 @@ Every entry under `agents.providers` accepts these fields:
 | `description`      | `string`                  | No                | Short description shown in the UI                                  |
 | `command`          | `string[]`                | Yes (ACP only)    | Command to spawn the agent process                                 |
 | `env`              | `Record<string, string>`  | No                | Environment variables to set for the agent process                 |
-| `params`           | `Record<string, unknown>` | No                | Provider-specific options such as `supportsMcpServers: false`      |
+| `options`          | `Record<string, unknown>` | No                | Provider-specific options such as `supportsMcpServers: false`      |
 | `models`           | `ProviderProfileModel[]`  | No                | Static model list (overrides runtime discovery)                    |
 | `additionalModels` | `ProviderProfileModel[]`  | No                | Static model additions (merged with runtime discovery or `models`) |
 | `disallowedTools`  | `string[]`                | No                | Tool names to disable for this provider (e.g. `["WebSearch"]`)     |

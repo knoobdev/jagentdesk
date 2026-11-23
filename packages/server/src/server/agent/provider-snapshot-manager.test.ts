@@ -97,6 +97,79 @@ describe("ProviderSnapshotManager public surface", () => {
     }
   });
 
+  test("validates catalog choices while leaving provider options opaque", async () => {
+    const manager = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      extraClients: {
+        codex: createExtraClient("codex", {
+          isAvailable: async () => true,
+          fetchCatalog: async () => ({
+            models: [
+              {
+                provider: "codex",
+                id: "gpt-5.5",
+                aliases: ["gpt-latest"],
+                label: "GPT 5.5",
+                thinkingOptions: [{ id: "xhigh", label: "Extra high" }],
+              },
+            ],
+            modes: [{ id: "auto-review", label: "Auto review" }],
+          }),
+        }),
+      },
+    });
+
+    try {
+      await expect(
+        manager.validateAgentConfiguration({
+          provider: "codex",
+          model: "gpt-latest",
+          modeId: "auto-review",
+          thinkingOptionId: "xhigh",
+          providerOptions: {
+            sandbox_workspace_write: {
+              writable_roots: ["/var/cache/npm"],
+              network_access: false,
+            },
+          },
+        }),
+      ).resolves.toEqual([]);
+
+      await expect(
+        manager.validateAgentConfiguration({
+          provider: "codex",
+          model: "missing",
+          modeId: "missing",
+          thinkingOptionId: "missing",
+          providerOptions: {
+            sandbox_workspace_write: { network_access: "sometimes" },
+          },
+        }),
+      ).resolves.toEqual([
+        { path: ["model"], message: "Model 'missing' is not available for provider 'codex'" },
+        { path: ["modeId"], message: "Mode 'missing' is not available for provider 'codex'" },
+        {
+          path: ["thinkingOptionId"],
+          message: "Thinking option 'missing' is not available for provider 'codex'",
+        },
+      ]);
+      await expect(
+        manager.validateAgentConfiguration({
+          provider: "codex",
+          model: "gpt-latest",
+          modeId: "auto-review",
+          thinkingOptionId: "xhigh",
+          providerOptions: {
+            sandbox_workspace_write: { network_access: "sometimes" },
+            arbitrary: true,
+          },
+        }),
+      ).resolves.toEqual([]);
+    } finally {
+      manager.destroy();
+    }
+  });
+
   test("listRegisteredProviderIds includes the built-in providers", () => {
     const manager = new ProviderSnapshotManager({ logger: createTestLogger() });
     try {

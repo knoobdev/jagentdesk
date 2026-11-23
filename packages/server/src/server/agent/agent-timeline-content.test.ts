@@ -42,6 +42,7 @@ describe("agent timeline content", () => {
       },
     });
 
+    expect(limitAgentTimelineItemContent(item)).toEqual(item);
     expect(item).toEqual({
       type: "tool_call",
       callId: "terminal-session-4242",

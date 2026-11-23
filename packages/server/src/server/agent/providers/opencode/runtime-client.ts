@@ -20,6 +20,8 @@ import { execCommand } from "../../../../utils/spawn.js";
 import { OpenCodeAgentClient } from "../opencode-agent.js";
 import type { OpenCodeV2AgentClient } from "./v2/agent.js";
 import { withOpenCodeRuntimeNotice } from "./runtime-notice.js";
+import { resolveExternalOpenCodeServer } from "./v2/external-server.js";
+import { selectOpenCodeService } from "./v2/service-selection.js";
 
 // Keep the minimum aligned with the SDK and binary exercised by CI.
 const MINIMUM_V2: readonly [number, number] = [0, 10];
@@ -67,8 +69,28 @@ export class OpenCodeRuntimeClient implements AgentClient {
     this.resolveCreateConfig = this.legacy.resolveCreateConfig;
     this.isCreateConfigUnattended = this.legacy.isCreateConfigUnattended;
   }
+  private selectService() {
+    // API provider configuration is injected at spawn, so it needs an owned service (spec 34.3).
+    if (this.options.providerConfigInjection) return Promise.resolve({ kind: "owned" } as const);
+    return selectOpenCodeService({
+      explicit: resolveExternalOpenCodeServer({ ...globalThis.process.env, ...this.settings?.env }),
+      env: this.settings?.env,
+    });
+  }
   private client(): Promise<OpenCodeAgentClient | OpenCodeV2AgentClient> {
     this.selected ??= (async () => {
+      const selection = await this.selectService();
+      if (selection.kind !== "owned") {
+        const { OpenCodeV2AgentClient } = await import("./v2/agent.js");
+        return new OpenCodeV2AgentClient({
+          logger: this.logger,
+          settings: this.settings,
+          managedProcesses: this.options.managedProcesses,
+          bridge: this.options.bridge,
+          selection,
+          providerConfigInjection: this.options.providerConfigInjection,
+        });
+      }
       let output: string;
       try {
         const launch = await resolveProviderLaunch({
@@ -98,6 +120,7 @@ export class OpenCodeRuntimeClient implements AgentClient {
         managedProcesses: this.options.managedProcesses,
         bridge: this.options.bridge,
         providerConfigInjection: this.options.providerConfigInjection,
+        selection,
       });
     })().catch((error: unknown) => {
       // A failed probe must not poison refresh after the user updates the binary.
@@ -107,9 +130,14 @@ export class OpenCodeRuntimeClient implements AgentClient {
     return this.selected;
   }
   async isAvailable() {
+    const selection = await this.selectService();
+    if (selection.kind !== "owned") return true;
     return this.legacy.isAvailable();
   }
   async getDiagnostic() {
+    const selection = await this.selectService();
+    if (selection.kind !== "owned")
+      return { diagnostic: `OpenCode server: ${selection.server.url}` };
     return this.legacy.getDiagnostic();
   }
   async createSession(

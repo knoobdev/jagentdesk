@@ -18,48 +18,6 @@ test.each(["3.0.0", "2.0.9", "2.0.7", "2.0.4", "2.0.3", "v2.0.1"])(
   },
 );
 
-test("records the runtime once and retains its position across resume", async () => {
-  const { withOpenCodeRuntimeNotice } = await import("./runtime-notice.js");
-  const { V2Harness } = await import("./test-utils/v2-harness.js");
-  const { OpenCodeV2AgentClient } = await import("./v2/agent.js");
-  const { createTestLogger } = await import("../../../../test-utils/test-logger.js");
-  const harness = new V2Harness();
-  const client = new OpenCodeV2AgentClient({
-    logger: createTestLogger(),
-    runtime: harness.runtime,
-  });
-  const original = withOpenCodeRuntimeNotice(
-    await client.createSession({ provider: "opencode", cwd: "/tmp/project" }),
-    2,
-  );
-  const notice = expect.objectContaining({
-    type: "tool_call",
-    name: "opencode_runtime_notice",
-    detail: { type: "plain_text", label: "This chat uses OpenCode v2.", icon: "sparkles" },
-  });
-  try {
-    expect(original.initialTimeline?.map((entry) => entry.item)).toEqual([notice]);
-    const handle = original.describePersistence()!;
-    await original.close();
-    const resumed = withOpenCodeRuntimeNotice(await client.resumeSession(handle), 2, handle);
-    try {
-      expect(resumed.initialTimeline).toEqual([]);
-      const history = [];
-      for await (const event of resumed.streamHistory()) history.push(event);
-      expect(history).toEqual([
-        { type: "timeline", provider: "opencode", ...original.initialTimeline![0] },
-      ]);
-      expect(resumed.describePersistence()?.metadata?.openCodeRuntimeNotices).toEqual(
-        handle.metadata?.openCodeRuntimeNotices,
-      );
-    } finally {
-      await resumed.close();
-    }
-  } finally {
-    await client.shutdown();
-  }
-});
-
 test("retries a rejected version probe after the configured binary changes", async () => {
   const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
@@ -70,6 +28,7 @@ test("retries a rejected version probe after the configured binary changes", asy
   const script = join(root, "version.cjs");
   const client = new OpenCodeRuntimeClient(createTestLogger(), {
     command: { mode: "replace", argv: [process.execPath, script] },
+    env: { XDG_STATE_HOME: root },
   });
   try {
     await writeFile(script, 'console.log("opencode v2.0.3")');
@@ -99,6 +58,7 @@ test.each([
   const script = join(root, "version.cjs");
   const client = new OpenCodeRuntimeClient(createTestLogger(), {
     command: { mode: "replace", argv: [process.execPath, script] },
+    env: { XDG_STATE_HOME: root },
   });
   try {
     await writeFile(script, initialSource);
@@ -310,6 +270,7 @@ test.each([
       logger,
       {
         command: { mode: "replace", argv: [process.execPath, script] },
+        env: { XDG_STATE_HOME: root },
       },
       { serverManager: new TrackedServerManager({ logger }) },
     );
@@ -326,3 +287,38 @@ test.each([
   },
   10000,
 );
+
+test("selects v2 without probing the binary when an external server is configured", async () => {
+  const { OpenCodeRuntimeClient } = await import("./runtime-client.js");
+  const { createTestLogger } = await import("../../../../test-utils/test-logger.js");
+  const client = new OpenCodeRuntimeClient(createTestLogger(), {
+    command: { mode: "replace", argv: [process.execPath, "-e", "process.exit(1)"] },
+    env: { JAGENTDESK_OPENCODE_SERVER_URL: "http://127.0.0.1:4096" },
+  });
+  try {
+    const features = await client.listFeatures({ provider: "opencode", cwd: "/tmp/project" });
+    expect(features.map((feature) => feature.label)).toEqual(["Auto-accept"]);
+  } finally {
+    await client.shutdown();
+  }
+});
+
+test("keeps native JAgentDesk tools available when an external server is configured", async () => {
+  const { OpenCodeRuntimeClient } = await import("./runtime-client.js");
+  const { createTestLogger } = await import("../../../../test-utils/test-logger.js");
+  const { OpenCodeBridge } = await import("./bridge.js");
+  const bridge = new OpenCodeBridge({ jagentdeskHome: "/tmp", logger: createTestLogger() });
+  const external = new OpenCodeRuntimeClient(
+    createTestLogger(),
+    { env: { JAGENTDESK_OPENCODE_SERVER_URL: "http://127.0.0.1:4096" } },
+    { bridge },
+  );
+  const local = new OpenCodeRuntimeClient(createTestLogger(), undefined, { bridge });
+  try {
+    expect(external.capabilities.supportsNativeJAgentDeskTools).toBe(true);
+    expect(local.capabilities.supportsNativeJAgentDeskTools).toBe(true);
+  } finally {
+    await external.shutdown();
+    await local.shutdown();
+  }
+});

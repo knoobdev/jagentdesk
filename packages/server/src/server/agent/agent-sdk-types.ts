@@ -1,5 +1,8 @@
 import type { Options as ClaudeAgentOptions } from "@anthropic-ai/claude-agent-sdk";
 import type {
+  AgentFeature,
+  AgentFeatureSelect,
+  AgentFeatureToggle,
   AgentProviderNotice,
   AgentTaskItem,
   ProviderOptions,
@@ -8,7 +11,13 @@ import type {
 import type { AgentAttachment } from "@jagentdesk/protocol/messages";
 import type { JAgentDeskToolCatalog } from "./tools/types.js";
 
-export type { AgentProviderNotice, AgentTaskItem };
+export type {
+  AgentFeature,
+  AgentFeatureSelect,
+  AgentFeatureToggle,
+  AgentProviderNotice,
+  AgentTaskItem,
+};
 
 export type AgentProvider = string;
 
@@ -154,29 +163,6 @@ export interface AgentCreateConfigUnattendedInput {
   features?: AgentFeature[];
   availableModes: AgentMode[];
 }
-
-export interface AgentFeatureToggle {
-  type: "toggle";
-  id: string;
-  label: string;
-  description?: string;
-  tooltip?: string;
-  icon?: string;
-  value: boolean;
-}
-
-export interface AgentFeatureSelect {
-  type: "select";
-  id: string;
-  label: string;
-  description?: string;
-  tooltip?: string;
-  icon?: string;
-  value: string | null;
-  options: AgentSelectOption[];
-}
-
-export type AgentFeature = AgentFeatureToggle | AgentFeatureSelect;
 
 export interface AgentCapabilityFlags {
   [capability: string]: boolean | undefined;
@@ -530,6 +516,7 @@ export interface AgentSlashCommand {
 }
 
 export interface ListImportableSessionsOptions {
+  providerOptions?: ProviderOptions;
   limit?: number;
   /**
    * How many candidate sessions to scan before ranking down to `limit`. Lets a
@@ -745,7 +732,7 @@ export interface AgentSession {
   steerActiveTurn?(prompt: AgentPromptInput, options: SteerActiveTurnOptions): Promise<SteerResult>;
 }
 
-export type FetchCatalogOptions =
+export type FetchCatalogOptions = { providerOptions?: ProviderOptions } & (
   | {
       scope: "global";
       force: boolean;
@@ -756,7 +743,8 @@ export type FetchCatalogOptions =
       cwd: string;
       force: boolean;
       timeoutMs?: number;
-    };
+    }
+);
 
 export interface ProviderRefreshContext {
   readonly signal: AbortSignal;
