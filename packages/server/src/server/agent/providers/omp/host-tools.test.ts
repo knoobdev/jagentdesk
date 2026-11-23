@@ -2,7 +2,11 @@ import pino from "pino";
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 
-import type { JAgentDeskToolCatalog, JAgentDeskToolDefinition, JAgentDeskToolResult } from "../../tools/types.js";
+import type {
+  JAgentDeskToolCatalog,
+  JAgentDeskToolDefinition,
+  JAgentDeskToolResult,
+} from "../../tools/types.js";
 import {
   clearOmpHostToolState,
   handleOmpHostToolRuntimeEvent,
@@ -123,7 +127,11 @@ class OmpHostToolHarness {
   }
 
   private routerInput() {
-    return { runtimeSession: this.runtimeSession, jagentdeskTools: this.catalog, logger: this.logger };
+    return {
+      runtimeSession: this.runtimeSession,
+      jagentdeskTools: this.catalog,
+      logger: this.logger,
+    };
   }
 }
 

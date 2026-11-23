@@ -561,6 +561,17 @@ describe("OMP agent client and session", () => {
         messageId: "assistant-history",
       },
     ]);
+    await expect(
+      omp.runPrompt("continue after resume", "resumed follow-up complete"),
+    ).resolves.toMatchObject({
+      finalText: "resumed follow-up complete",
+    });
+    expect(omp.timeline()).toContainEqual(
+      expect.objectContaining({
+        type: "assistant_message",
+        text: "resumed follow-up complete",
+      }),
+    );
   });
 
   test("maps permissions and sends the selected OMP response", async () => {
