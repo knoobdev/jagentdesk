@@ -138,6 +138,7 @@ import { AgentManager } from "./agent/agent-manager.js";
 import { AgentStorage } from "./agent/agent-storage.js";
 import { attachAgentStoragePersistence } from "./persistence-hooks.js";
 import { createAgentMcpServer } from "./agent/mcp-server.js";
+import { createAgentMcpProtocolNormalizer } from "./agent/mcp-protocol.js";
 import {
   createJAgentDeskToolCatalog,
   type JAgentDeskToolHostDependencies,
@@ -1799,6 +1800,7 @@ export async function createJAgentDeskDaemon(
   let agentMcpBaseUrl: string | null = null;
   if (mcpEnabled) {
     const agentMcpRoute = "/mcp/agents";
+    const normalizeAgentMcpProtocol = createAgentMcpProtocolNormalizer(logger);
 
     const createAgentMcpSession = async (callerAgentId?: string) => {
       const agentMcpServer = await createAgentMcpServer(
@@ -1879,6 +1881,7 @@ export async function createJAgentDeskDaemon(
           callerAgentId = callerAgentIdRaw[0];
         }
         const { server, transport } = await createAgentMcpSession(callerAgentId);
+        normalizeAgentMcpProtocol({ request: req, transport, callerAgentId });
         res.on("close", () => {
           void transport.close();
           void server.close();
