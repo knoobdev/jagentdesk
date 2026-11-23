@@ -3431,7 +3431,7 @@ test("transitions out of connecting when connect timeout elapses", async () => {
   }
 });
 
-test("reconnects after relay close with replaced-by-new-connection reason", async () => {
+test("reconnects after WebSocket close with replaced-by-new-connection reason", async () => {
   useHeartbeatClock();
   try {
     const logger = createMockLogger();
@@ -3441,7 +3441,7 @@ test("reconnects after relay close with replaced-by-new-connection reason", asyn
     let transportIndex = 0;
 
     const client = new DaemonClient({
-      url: "ws://relay.test/ws?role=client&serverId=srv_test&v=2",
+      url: "ws://test",
       clientId: "clsk_test",
       logger,
       reconnect: {
