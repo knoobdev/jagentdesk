@@ -430,3 +430,57 @@ describe("resolveActiveHostServerId", () => {
     ).toBe("srv_local");
   });
 });
+
+describe("relay connection offers", () => {
+  it("stores a relay-only host and restores its TLS and last successful route", async () => {
+    const { connectionsFromOffer } = await import("./host-connection");
+    const [connection] = connectionsFromOffer({
+      v: 3,
+      serverId: "srv_relay",
+      daemonPublicKeyB64: "public-key",
+      relay: { endpoint: "desk-relay.jagents.workers.dev" },
+    });
+    expect(connection).toEqual({
+      id: "relay:wss:desk-relay.jagents.workers.dev:443",
+      type: "relay",
+      endpoint: "desk-relay.jagents.workers.dev:443",
+      useTls: true,
+      daemonPublicKeyB64: "public-key",
+    });
+    const [profile] = upsertHostConnectionInProfiles({
+      profiles: [],
+      serverId: "srv_relay",
+      connection,
+    });
+    expect(profile.preferredConnectionId).toBeNull();
+    const restored = normalizeStoredHostProfile(
+      JSON.parse(JSON.stringify({ ...profile, lastConnectionId: connection.id })),
+    );
+    expect(restored?.connections).toEqual([connection]);
+    expect(restored?.lastConnectionId).toBe(connection.id);
+    expect(hostHasLocalConnection(restored!)).toBe(true);
+  });
+
+  it("creates both routes from one pairing offer without persisting the pairing code", async () => {
+    const { connectionsFromOffer } = await import("./host-connection");
+    const connections = connectionsFromOffer({
+      v: 3,
+      serverId: "srv_both",
+      daemonPublicKeyB64: "public-key",
+      tailnetAddress: "100.64.0.4:8765",
+      relay: { endpoint: "127.0.0.1:8123", useTls: false },
+    });
+    expect(connections.map((connection) => connection.type)).toEqual(["tailnet", "relay"]);
+    expect(connections[1]).toMatchObject({ endpoint: "127.0.0.1:8123", useTls: false });
+    expect(connections.every((connection) => !("pairingCode" in connection))).toBe(true);
+  });
+
+  it("rejects persisted relay routes without a daemon key", () => {
+    expect(
+      normalizeStoredHostProfile({
+        serverId: "srv_bad",
+        connections: [{ type: "relay", endpoint: "127.0.0.1:8123" }],
+      }),
+    ).toBeNull();
+  });
+});

@@ -29,6 +29,7 @@ const daemon = await createJAgentDeskDaemon(
     corsAllowedOrigins: [],
     hostnames: true,
     mcpEnabled: false,
+    relayEnabled: false,
     staticDir,
     mcpDebug: false,
     agentClients: {},

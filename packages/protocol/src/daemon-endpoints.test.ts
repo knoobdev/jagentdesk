@@ -1,3 +1,4 @@
+import { buildRelayWebSocketUrl } from "./daemon-endpoints.js";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -88,5 +89,37 @@ describe("daemon websocket URLs", () => {
     expect(buildDaemonWebSocketUrl("example.com:6767", { useTls: true })).toBe(
       "wss://example.com:6767/ws",
     );
+  });
+});
+
+describe("relay websocket URLs", () => {
+  test("routes bare hosted endpoints over TLS using protocol v2", () => {
+    const url = new URL(
+      buildRelayWebSocketUrl({
+        endpoint: "desk-relay.jagents.workers.dev",
+        useTls: true,
+        serverId: "srv_1",
+        role: "client",
+      }),
+    );
+    expect(url.origin).toBe("wss://desk-relay.jagents.workers.dev");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      serverId: "srv_1",
+      role: "client",
+      v: "2",
+    });
+  });
+  test("routes data sockets to an explicit local relay port", () => {
+    const url = new URL(
+      buildRelayWebSocketUrl({
+        endpoint: "[::1]:12345",
+        useTls: false,
+        serverId: "srv_1",
+        role: "server",
+        connectionId: "client_1",
+      }),
+    );
+    expect(url.origin).toBe("ws://[::1]:12345");
+    expect(url.searchParams.get("connectionId")).toBe("client_1");
   });
 });

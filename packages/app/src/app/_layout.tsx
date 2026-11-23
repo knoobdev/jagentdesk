@@ -1124,6 +1124,9 @@ function DesktopConnectionGate() {
   const connectionStatuses = useHostRuntimeConnectionStatuses(serverIds);
   // A Tailscale host whose live connection has settled into "error" (retries
   // exhausted, not merely "connecting") has timed out and will not self-recover.
+  const hasRelayHost = hosts.some((host) =>
+    host.connections.some((connection) => connection.type === "relay"),
+  );
   const tailscaleTimedOut =
     mode === "tailscale" &&
     hosts.some(
@@ -1132,6 +1135,7 @@ function DesktopConnectionGate() {
 
   useEffect(() => {
     if (
+      hasRelayHost ||
       !shouldRedirectToDesktopTailscaleLogin({
         desktopRuntime,
         connectionModeLoaded: loaded,
@@ -1144,7 +1148,16 @@ function DesktopConnectionGate() {
       return;
     }
     router.replace("/tailscale-login");
-  }, [desktopRuntime, loaded, loginStatus.kind, mode, pathname, router, tailscaleTimedOut]);
+  }, [
+    desktopRuntime,
+    loaded,
+    loginStatus.kind,
+    mode,
+    pathname,
+    router,
+    tailscaleTimedOut,
+    hasRelayHost,
+  ]);
 
   return null;
 }
@@ -1168,7 +1181,7 @@ function TailscaleHealthMonitor() {
   const pathname = usePathname();
 
   useEffect(() => {
-    if (mode !== "tailscale" || pathname === "/tailscale-login" || isPairingRoute(pathname)) {
+    if (mode === null || pathname === "/tailscale-login" || isPairingRoute(pathname)) {
       return;
     }
 

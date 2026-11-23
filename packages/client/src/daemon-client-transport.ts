@@ -19,3 +19,10 @@ export {
   createWebSocketTransportFactory,
   defaultWebSocketFactory,
 } from "./daemon-client-websocket-transport.js";
+export {
+  createEncryptedTransport,
+  createRelayE2eeTransportFactory,
+  createRelayUpgradeTransportFactory,
+  describeEndpointSecurityClose,
+  type RelayE2eeTransportOptions,
+} from "./daemon-client-relay-e2ee-transport.js";

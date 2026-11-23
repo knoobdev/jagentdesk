@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+import { relayConnectionFromOffer, connectionsFromOffer } from "@/types/host-connection";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Text, TextInput, View } from "react-native";
 import { useLocalSearchParams, useRouter, type Href } from "expo-router";
@@ -5,7 +7,7 @@ import { StyleSheet } from "react-native-unistyles";
 import { BackHeader } from "@/components/headers/back-header";
 import { useHostMutations } from "@/runtime/host-runtime";
 import { connectToDaemon } from "@/utils/test-daemon-connection";
-import { decodeOfferFragmentPayload, normalizeHostPort } from "@/utils/daemon-endpoints";
+import { decodeOfferFragmentPayload } from "@/utils/daemon-endpoints";
 import { ConnectionOfferSchema } from "@jagentdesk/protocol/connection-offer";
 import {
   isTailscaleReady,
@@ -48,6 +50,7 @@ const styles = StyleSheet.create((theme) => ({
 }));
 
 export default function PairVerifyScreen() {
+  const { t } = useTranslation();
   const router = useRouter();
   const params = useLocalSearchParams<{ offer?: string; source?: string }>();
   const { upsertConnectionFromOffer } = useHostMutations();
@@ -92,10 +95,7 @@ export default function PairVerifyScreen() {
           // silently entering a login loop with no offer after navigation.
           setPendingOffer(next);
           setOfferPersisted(false);
-          Alert.alert(
-            "Pairing failed",
-            "JAgentDesk could not save the pairing offer on this device. Paste the link again to retry.",
-          );
+          Alert.alert(t("pairing.verify.failed"), t("pairing.verify.saveFailed"));
         }
       })();
       return () => {
@@ -112,7 +112,7 @@ export default function PairVerifyScreen() {
     return () => {
       active = false;
     };
-  }, [parameterOfferUrl, parameterSource]);
+  }, [parameterOfferUrl, parameterSource, t]);
 
   const offerUrl = pendingOffer?.offerUrl ?? parameterOfferUrl;
   const source = pendingOffer?.source ?? parameterSource;
@@ -140,8 +140,9 @@ export default function PairVerifyScreen() {
     }
   }, [offerUrl]);
 
-  const tailscaleReady = isTailscaleReady(tailscaleLoginStatus);
-  const shouldRouteToLogin = shouldRoutePairVerifyToTailscaleLogin(tailscaleLoginStatus);
+  const tailscaleReady = Boolean(offer?.relay) || isTailscaleReady(tailscaleLoginStatus);
+  const shouldRouteToLogin =
+    !offer?.relay && shouldRoutePairVerifyToTailscaleLogin(tailscaleLoginStatus);
   const [attemptError, setAttemptError] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
@@ -179,14 +180,8 @@ export default function PairVerifyScreen() {
         connectionAttemptAbortControllerRef.current = null;
         connectionAttemptRef.current = null;
       }
-      const connection = {
-        id: `tailnet:${normalizeHostPort(offer.tailnetAddress)}`,
-        type: "tailnet" as const,
-        tailnetAddress: normalizeHostPort(offer.tailnetAddress),
-        useTls: offer.useTls,
-        daemonPublicKeyB64: offer.daemonPublicKeyB64,
-        ...(pairingCode ? { pairingCode } : {}),
-      };
+      const route = offer.relay ? relayConnectionFromOffer(offer) : connectionsFromOffer(offer)[0];
+      const connection = { ...route, ...(pairingCode ? { pairingCode } : {}) };
       const abortController = new AbortController();
       connectionAttemptAbortControllerRef.current = abortController;
       const attempt = connectToDaemon(connection, {
@@ -229,11 +224,11 @@ export default function PairVerifyScreen() {
     async (submittedCode: string) => {
       if (verificationInFlightRef.current) return;
       if (!offer) {
-        Alert.alert("Pairing failed", "This is not a valid JAgentDesk Tailscale offer.");
+        Alert.alert(t("pairing.verify.failed"), t("pairing.verify.invalidOffer"));
         return;
       }
       if (!/^\d{6}$/.test(submittedCode)) {
-        Alert.alert("Pairing failed", "Enter the 6-digit verification code shown on desktop.");
+        Alert.alert(t("pairing.verify.failed"), t("pairing.verify.enterCode"));
         return;
       }
       verificationInFlightRef.current = true;
@@ -245,15 +240,14 @@ export default function PairVerifyScreen() {
         // fresh registration socket carrying this code directly.
         const connectionAttempt = createConnectionAttempt(submittedCode);
         if (!connectionAttempt) {
-          throw new Error("Tailscale connection is still starting. Try entering the code again.");
+          throw new Error(t("pairing.verify.starting"));
         }
         resolvedCodeRef.current = submittedCode;
         const { client } = await connectionAttempt;
         await client.close().catch(() => undefined);
-        // This is explicitly a tailnet pairing flow. Persist that transport
-        // choice before storing the host so runtime cannot probe a stale Local
-        // connection immediately after the offer is accepted.
-        await setConnectionMode("tailscale");
+        // Relay pairing can complete without a Tailscale login. Persist the
+        // mode before the host so runtime starts the saved routes immediately.
+        await setConnectionMode(offer.relay ? "local" : "tailscale");
         // The code is a one-time enrollment proof, not a host connection secret.
         // Store only the offer metadata; reconnects authenticate with the
         // persisted device key and never replay the six-digit proof.
@@ -265,13 +259,16 @@ export default function PairVerifyScreen() {
             : `/settings/hosts/${profile.serverId}`) as Href,
         );
       } catch (error) {
-        Alert.alert("Pairing failed", error instanceof Error ? error.message : String(error));
+        Alert.alert(
+          t("pairing.verify.failed"),
+          error instanceof Error ? error.message : String(error),
+        );
       } finally {
         verificationInFlightRef.current = false;
         setBusy(false);
       }
     },
-    [createConnectionAttempt, offer, router, source, upsertConnectionFromOffer],
+    [createConnectionAttempt, offer, router, source, upsertConnectionFromOffer, t],
   );
 
   const handleCodeChange = useCallback(
@@ -286,19 +283,18 @@ export default function PairVerifyScreen() {
   );
   const handleBack = useCallback(() => router.back(), [router]);
 
-  let helperText = "Waiting for Tailscale to connect...";
+  let helperText = t("pairing.verify.waiting");
   if (tailscaleReady) {
-    helperText = "Enter the 6-digit code shown in the JAgentDesk desktop connection popup.";
+    helperText = t("pairing.verify.helper");
   } else if (shouldRouteToLogin) {
-    helperText =
-      "Pairing offer saved. Sign in to Tailscale first; then this screen will connect to the desktop and ask for the 6-digit code.";
+    helperText = t("pairing.verify.login");
   }
 
   return (
     <View style={styles.container}>
-      <BackHeader title="Verify pairing" onBack={handleBack} />
+      <BackHeader title={t("pairing.verify.title")} onBack={handleBack} />
       <View style={styles.body}>
-        <Text style={styles.title}>Enter verification code</Text>
+        <Text style={styles.title}>{t("pairing.verify.codeTitle")}</Text>
         <Text style={styles.helper}>{helperText}</Text>
         {attemptError ? <Text style={styles.error}>{attemptError}</Text> : null}
         <TextInput
@@ -312,7 +308,7 @@ export default function PairVerifyScreen() {
           placeholderTextColor={styles.placeholderColor.color}
           style={styles.input}
         />
-        {busy ? <Text style={styles.helper}>Verifying…</Text> : null}
+        {busy ? <Text style={styles.helper}>{t("pairing.verify.verifying")}</Text> : null}
       </View>
     </View>
   );

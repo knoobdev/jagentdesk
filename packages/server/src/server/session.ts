@@ -675,6 +675,8 @@ export interface SessionOptions {
     requestId: string;
     reason: string;
   }) => Promise<{ ok: boolean; error?: string }> | { ok: boolean; error?: string };
+  /** Spec 05.5: closes every live socket of a revoked device on all transports. */
+  closeConnectionsForDevice?: (deviceId: string) => number;
 }
 
 export type SessionLifecycleIntent =
@@ -994,6 +996,7 @@ export class Session {
       daemonPublicKeyB64,
       pairingCodeManager,
       cancelPendingPairingRequest,
+      closeConnectionsForDevice,
     } = options;
     this.clientId = clientId;
     this.scopes = [...scopes];
@@ -1222,6 +1225,7 @@ export class Session {
       daemonPublicKeyB64,
       pairingCodeManager,
       cancelPendingPairingRequest,
+      closeConnectionsForDevice,
     });
     this.hubExecutionController = options.hubExecutionAgents
       ? new HubExecutionController({

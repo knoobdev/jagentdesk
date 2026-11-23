@@ -93,6 +93,23 @@ function applyCliFlagOverrides(config: ReturnType<typeof loadConfig>): void {
   if (process.argv.includes("--no-web-ui")) {
     config.webUi = { ...(config.webUi ?? { distDir: null }), enabled: false };
   }
+  // Relay launch flags (spec 35 / ADR-0048): pinning here disables the Settings
+  // toggle for this run, mirroring the JAGENTDESK_RELAY_* env-pin semantics.
+  if (process.argv.includes("--relay")) {
+    config.relayEnabled = true;
+    config.relayEnabledMutable = false;
+  }
+  if (process.argv.includes("--no-relay")) {
+    config.relayEnabled = false;
+    config.relayEnabledMutable = false;
+  }
+  const relayEndpointFlag = process.argv.find((arg) => arg.startsWith("--relay-endpoint="));
+  if (relayEndpointFlag) {
+    config.relayEndpoint = relayEndpointFlag.slice("--relay-endpoint=".length);
+  }
+  if (process.argv.includes("--relay-use-tls")) {
+    config.relayUseTls = true;
+  }
 }
 
 async function main() {

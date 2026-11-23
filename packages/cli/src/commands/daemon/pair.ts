@@ -33,6 +33,7 @@ export interface PairCommandOutput {
 
 export interface PairingOffer {
   tailnetEnabled: boolean;
+  relayEnabled: boolean;
   url: string | null;
   qr: string | null;
 }
@@ -88,11 +89,15 @@ export async function resolveLocalPairingOffer(options: {
   const offer = await generateLocalPairingOffer({
     jagentdeskHome: options.jagentdeskHome,
     tailnetAddress,
+    relayEnabled: config.relayEnabled ?? true,
+    relayEndpoint: config.relayEndpoint ?? null,
+    relayUseTls: config.relayUseTls,
     appBaseUrl: config.appBaseUrl,
     includeQr: true,
   });
   return {
     tailnetEnabled: offer.tailnetEnabled,
+    relayEnabled: offer.relayEnabled,
     url: offer.url || null,
     qr: offer.qr ?? null,
   };
@@ -124,6 +129,7 @@ async function resolveDaemonPairingOffer(
     });
     return {
       tailnetEnabled: offer.tailnetEnabled === true,
+      relayEnabled: offer.relayEnabled === true,
       url: offer.url || null,
       qr: offer.qr ?? null,
     };
@@ -147,22 +153,22 @@ export async function runPairCommand(
   const jagentdeskHome = resolveJAgentDeskHome();
   const pairing = await dependencies.resolveOffer({ jagentdeskHome });
 
-  if (!pairing.tailnetEnabled || !pairing.url) {
+  if ((!pairing.tailnetEnabled && !pairing.relayEnabled) || !pairing.url) {
     if (options.json) {
       dependencies.output.writeStderr(
         `${JSON.stringify({
-          code: "TAILNET_NOT_CONFIGURED",
-          message: "Tailnet pairing is not configured for this daemon.",
+          code: "NO_PAIRING_TRANSPORT",
+          message: "No pairing transport is configured for this daemon.",
           action:
-            "Set JAGENTDESK_TAILNET_HOST and restart the daemon, then run jagentdesk daemon pair again.",
+            "Enable relay in host Connections settings or configure JAGENTDESK_TAILNET_HOST, then run jagentdesk daemon pair again.",
         })}\n`,
       );
     } else {
       dependencies.output.writeStderr(
-        `${chalk.red("Tailnet pairing is not configured for this daemon.")}\n`,
+        `${chalk.red("No pairing transport is configured for this daemon.")}\n`,
       );
       dependencies.output.writeStderr(
-        `${chalk.yellow("Set JAGENTDESK_TAILNET_HOST and restart the daemon, then run jagentdesk daemon pair again.")}\n`,
+        `${chalk.yellow("Set JAGENTDESK_TAILNET_HOST or keep relay enabled, then run jagentdesk daemon pair again.")}\n`,
       );
     }
     dependencies.output.setExitCode(1);
@@ -172,7 +178,12 @@ export async function runPairCommand(
   if (options.json) {
     dependencies.output.writeStdout(
       `${JSON.stringify(
-        { tailnetEnabled: pairing.tailnetEnabled, url: pairing.url, qr: pairing.qr },
+        {
+          tailnetEnabled: pairing.tailnetEnabled,
+          relayEnabled: pairing.relayEnabled,
+          url: pairing.url,
+          qr: pairing.qr,
+        },
         null,
         2,
       )}\n`,

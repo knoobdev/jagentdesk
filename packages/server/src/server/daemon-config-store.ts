@@ -396,6 +396,9 @@ function mergeMutableConfigIntoPersistedConfig(params: {
         ...persisted.daemon?.sessionSharing,
         enabled: sessionSharingEnabled,
       },
+      ...(mutable.relay !== undefined
+        ? { relay: { ...persisted.daemon?.relay, ...mutable.relay } }
+        : {}),
       autoArchiveAfterMerge: mutable.autoArchiveAfterMerge,
       enableTerminalAgentHooks: mutable.enableTerminalAgentHooks,
       appendSystemPrompt: mutable.appendSystemPrompt,

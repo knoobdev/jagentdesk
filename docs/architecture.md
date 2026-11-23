@@ -133,15 +133,13 @@ Commander.js CLI with Docker-style commands. Common agent operations are also ex
 
 Communicates with the daemon via the same WebSocket protocol as the app.
 
-### Remote access — Tailscale (tsnet)
+### Remote access
 
-Remote access no longer uses a relay. The daemon joins a Tailscale tailnet via
-`packages/server/src/server/tsnet-listener.ts` and accepts WebSocket connections
-there; WireGuard provides transport encryption and node identity, so the relay's
-E2EE box layer was removed. Pairing transfers the daemon's public key through a
-tailnet connection offer.
-
-See [SECURITY.md](../SECURITY.md) for the threat model.
+The daemon accepts tailnet connections through embedded tsnet and maintains a
+second path through an encrypted relay. Both paths use the same device pairing
+and signed-hello admission. See [relay.md](relay.md) for relay configuration,
+identity storage, and transport boundaries, and [SECURITY.md](../SECURITY.md)
+for the threat model.
 
 ### `packages/desktop` — Desktop app (Electron)
 

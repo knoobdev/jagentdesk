@@ -455,9 +455,9 @@ export async function runOnboard(options: OnboardOptions): Promise<void> {
   });
 
   const pairing = await resolveLocalPairingOffer({ jagentdeskHome });
-  if (!pairing.tailnetEnabled || !pairing.url) {
+  if ((!pairing.tailnetEnabled && !pairing.relayEnabled) || !pairing.url) {
     log.message(
-      "Tailnet pairing is not configured. Set JAGENTDESK_TAILNET_HOST to pair devices over your tailnet.",
+      "No pairing transport is configured. Set JAGENTDESK_TAILNET_HOST to pair over your tailnet; relay pairing needs daemon.relay.enabled.",
     );
     printNextSteps(null, jagentdeskHome, richUi);
     if (richUi) outro("JAgentDesk daemon is running.");

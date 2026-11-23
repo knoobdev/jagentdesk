@@ -1,5 +1,6 @@
 import {
   buildDaemonWebSocketUrl,
+  buildRelayWebSocketUrl,
   deriveLabelFromEndpoint,
   extractHostPortFromWebSocketUrl,
   normalizeHostPort,
@@ -16,6 +17,7 @@ export type { HostPortParts };
 
 export {
   buildDaemonWebSocketUrl,
+  buildRelayWebSocketUrl,
   deriveLabelFromEndpoint,
   extractHostPortFromWebSocketUrl,
   normalizeHostPort,

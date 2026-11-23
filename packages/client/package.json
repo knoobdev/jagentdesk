@@ -36,6 +36,7 @@
   },
   "dependencies": {
     "@jagentdesk/protocol": "0.9.59",
+    "@jagentdesk/relay": "0.9.59",
     "zod": "^4.4.3"
   },
   "devDependencies": {

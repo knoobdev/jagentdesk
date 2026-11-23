@@ -1,16 +1,16 @@
 # Security
 
 JAgentDesk is local-first. A daemon runs on the work machine and manages coding-agent
-processes. Desktop and mobile clients connect to that daemon through the user&apos;s Tailscale
-network.
+processes. Desktop and mobile clients connect through Tailscale or the encrypted
+relay described in [docs/relay.md](docs/relay.md).
 
 ## Connection security
 
 - Tailscale supplies the network path and WireGuard node authentication.
 - A node being present in the tailnet is not enough to control the daemon.
-- The daemon creates a pairing offer containing its public identity and Tailscale address.
-- The mobile client must complete Tailscale authentication, then enter the six-digit code shown
-  by the desktop pairing request.
+- Pairing offers contain the daemon public identity and available connection routes.
+- On either remote path, the client enters the six-digit code shown by the desktop
+  pairing request and signs the daemon challenge with its device key.
 - The daemon signs and verifies the pairing transcript before registering the device.
 - Each pending request has its own code and expiry; accepting or cancelling a request updates the
   desktop pairing surface immediately.

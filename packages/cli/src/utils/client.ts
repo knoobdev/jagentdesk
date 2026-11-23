@@ -3,6 +3,7 @@ import { createPrivateKey, generateKeyPairSync, sign } from "node:crypto";
 import { loadConfig, resolveJAgentDeskHome } from "@jagentdesk/server";
 import {
   buildDaemonWebSocketUrl,
+  buildRelayWebSocketUrl,
   normalizeHostPort,
   parseConnectionUri,
 } from "@jagentdesk/protocol/daemon-endpoints";
@@ -398,7 +399,25 @@ async function connectViaTailnetOffer(
   timeout: number,
   nodeWebSocketFactory: ReturnType<typeof createNodeWebSocketFactory>,
 ): Promise<DaemonClient> {
-  const url = buildDaemonWebSocketUrl(offer.tailnetAddress, { useTls: offer.useTls ?? false });
+  // Spec 35.4: an offer can carry a tailnet address, a relay endpoint, or both.
+  // Prefer the tailnet when present; relay-only offers dial the Worker E2EE.
+  const relay = offer.relay;
+  const tailnetAddress = offer.tailnetAddress;
+  let url: string;
+  if (tailnetAddress) {
+    url = buildDaemonWebSocketUrl(tailnetAddress, { useTls: offer.useTls ?? false });
+  } else if (relay) {
+    url = buildRelayWebSocketUrl({
+      endpoint: relay.endpoint,
+      useTls: relay.useTls ?? true,
+      serverId: offer.serverId,
+      role: "client",
+    });
+  } else {
+    // Spec 35.4: an offer must carry at least one dialable route.
+    throw new Error("Pairing offer carries no dialable route (tailnet address or relay endpoint)");
+  }
+  const overRelay = !tailnetAddress;
 
   const keypair = loadOrCreateCliDeviceKeypair(resolveJAgentDeskHome());
   const client = new DaemonClient({
@@ -413,6 +432,7 @@ async function connectViaTailnetOffer(
     ) => nodeWebSocketFactory(target, { headers: config?.headers, protocols: config?.protocols }),
     reconnect: { enabled: false },
     expectChallenge: true,
+    ...(overRelay ? { e2ee: { enabled: true, daemonPublicKeyB64: offer.daemonPublicKeyB64 } } : {}),
     deviceSigning: {
       devicePublicKeyB64: keypair.publicKeyB64,
       signNonce: (nonce: string) =>

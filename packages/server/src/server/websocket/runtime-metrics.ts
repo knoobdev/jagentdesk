@@ -15,6 +15,7 @@ export interface WebSocketRuntimeCounters {
   missingConnectionForMessage: number;
   unexpectedHelloOnActiveConnection: number;
   tailnetExternalSocketAttached: number;
+  relayExternalSocketAttached: number;
   tailnetSignedHelloAccepted: number;
   tailnetSignedHelloRejected: number;
   pairingDeviceRegistered: number;
@@ -234,6 +235,7 @@ function createRuntimeCounters(): WebSocketRuntimeCounters {
     missingConnectionForMessage: 0,
     unexpectedHelloOnActiveConnection: 0,
     tailnetExternalSocketAttached: 0,
+    relayExternalSocketAttached: 0,
     tailnetSignedHelloAccepted: 0,
     tailnetSignedHelloRejected: 0,
     pairingDeviceRegistered: 0,

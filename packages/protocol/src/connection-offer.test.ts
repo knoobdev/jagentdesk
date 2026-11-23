@@ -82,4 +82,13 @@ describe("connection offer", () => {
   it("returns null when the URL has no offer fragment", () => {
     expect(parseConnectionOfferFromUrl("jagentdesk://app/pair")).toBeNull();
   });
+  it("accepts a relay-only offer without a tailnet address", () => {
+    const offer = {
+      v: 3,
+      serverId: "srv_1",
+      daemonPublicKeyB64: "pubkey",
+      relay: { endpoint: "desk-relay.jagents.workers.dev", useTls: true },
+    };
+    expect(ConnectionOfferSchema.parse(offer)).toEqual(offer);
+  });
 });

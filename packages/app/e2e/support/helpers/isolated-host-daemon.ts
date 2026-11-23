@@ -138,6 +138,7 @@ export async function startIsolatedHostDaemon(
       cwd: serverDir,
       env: withDisabledE2ESpeechEnv({
         ...process.env,
+        JAGENTDESK_RELAY_ENABLED: "0",
         ...options.environment,
         JAGENTDESK_HOME: jagentdeskHome,
         JAGENTDESK_SERVER_ID: serverId,

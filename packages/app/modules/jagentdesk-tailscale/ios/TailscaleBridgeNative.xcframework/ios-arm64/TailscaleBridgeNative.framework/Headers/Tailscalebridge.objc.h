@@ -32,6 +32,11 @@ tsnet.Start when this embedded node has not been authenticated yet.
 - (NSString* _Nonnull)authURL;
 - (NSString* _Nonnull)devicePublicKeyB64;
 - (NSString* _Nonnull)localAddress;
+/**
+ * PrepareDeviceIdentity loads the same device key used by the tailnet without
+starting tsnet. Relay-only pairing needs this before any Tailscale login.
+ */
+- (BOOL)prepareDeviceIdentity:(NSString* _Nullable)stateDir error:(NSError* _Nullable* _Nullable)error;
 - (BOOL)proxy:(NSString* _Nullable)target error:(NSError* _Nullable* _Nullable)error;
 /**
  * Revive restores the transport after the OS reclaimed the app's sockets
