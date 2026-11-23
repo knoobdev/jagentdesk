@@ -158,11 +158,9 @@ export class OpenCodeV2Session implements AgentSession {
       await awaitJAgentDeskPlugin({ client: this.client, location, signal: this.abort.signal });
     await attachMcpServers({
       client: this.client,
-      sessionID: this.id,
       location,
       mcpServers: this.config.mcpServers,
       signal: this.abort.signal,
-      logger: this.logger,
     });
     if (this.historyOnly) return;
     const system = composeSystemPromptParts(

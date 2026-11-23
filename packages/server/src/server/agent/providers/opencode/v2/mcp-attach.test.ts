@@ -1,251 +1,119 @@
 import { describe, expect, test } from "vitest";
+import type { McpServerConfig } from "../../../agent-sdk-types.js";
 import type { V2Api } from "./api.js";
 import { attachMcpServers } from "./mcp-attach.js";
 
-interface FakeClient {
-  mcp: {
-    add: (input: { server: string }) => Promise<void>;
-    list: (
-      input?: unknown,
-    ) => Promise<{ data: Array<{ name: string; status: { status: string; error?: string } }> }>;
-  };
-  session: {
-    context: (input: { sessionID: string }) => Promise<unknown>;
-  };
+type McpClient = Pick<V2Api, "mcp">;
+const location = { directory: "/tmp/ws" };
+const servers: Record<string, McpServerConfig> = {
+  jagentdesk: { type: "http", url: "http://127.0.0.1:1/mcp" },
+};
+
+function adapter(input: {
+  add?: McpClient["mcp"]["add"];
+  list: McpClient["mcp"]["list"];
+}): McpClient {
+  return { mcp: { add: input.add ?? (async () => undefined), list: input.list } };
 }
 
-const asClient = (fake: FakeClient): Pick<V2Api, "mcp" | "session"> =>
-  fake as unknown as Pick<V2Api, "mcp" | "session">;
-
-const connectedCatalog = (names: string[]) => ({
-  data: names.map((name) => ({ name, status: { status: "connected" } })),
-});
-
-const toolCallMessage = (name: string) => [
-  {
-    id: "msg_1",
-    type: "assistant",
-    content: [{ type: "tool", name, state: { status: "completed" } }],
-  },
-];
-
-function createLogger() {
-  const warnings: Array<{ obj: unknown; message: string }> = [];
+function catalog(names: string[]) {
   return {
-    warnings,
-    warn: (obj: unknown, message: string) => {
-      warnings.push({ obj, message });
-    },
+    location,
+    data: names.map((name) => ({ name, status: { status: "connected" as const } })),
   };
 }
 
 describe("OpenCode v2 MCP attach", () => {
-  test("adds each injected server, waits for its tools in the session context, then moves on", async () => {
+  test("waits for each server's catalog connection without reading session history", async () => {
     const added: string[] = [];
-    let contextPolls = 0;
-    const logger = createLogger();
-    await attachMcpServers({
-      client: asClient({
-        mcp: {
-          add: async (input) => {
-            added.push(input.server);
-          },
-          list: async () => connectedCatalog(["jagentdesk"]),
-        },
-        session: {
-          context: async () => {
-            contextPolls += 1;
-            return contextPolls < 3 ? [] : toolCallMessage("jagentdesk_ssh_run");
-          },
-        },
-      }),
-      sessionID: "ses_1",
-      location: { directory: "/tmp/ws" },
-      mcpServers: { jagentdesk: { type: "http", url: "http://127.0.0.1:1/mcp" } },
-      logger,
-    });
-    expect(added).toEqual(["jagentdesk"]);
-    expect(contextPolls).toBeGreaterThanOrEqual(3);
-    expect(logger.warnings).toEqual([]);
-  });
-
-  test("keeps waiting while the context stays empty, then resolves once a tool appears", async () => {
-    let contextPolls = 0;
-    const logger = createLogger();
-    await attachMcpServers({
-      client: asClient({
-        mcp: {
-          add: async () => undefined,
-          list: async () => connectedCatalog(["jagentdesk"]),
-        },
-        session: {
-          context: async () => {
-            contextPolls += 1;
-            return contextPolls < 4 ? [] : toolCallMessage("jagentdesk_remote_run");
-          },
-        },
-      }),
-      sessionID: "ses_1",
-      location: { directory: "/tmp/ws" },
-      mcpServers: { jagentdesk: { type: "http", url: "http://127.0.0.1:1/mcp" } },
-      toolWaitTimeoutMs: 5_000,
-      logger,
-    });
-    expect(contextPolls).toBe(4);
-  });
-
-  test("matches tool names per server and does not cross-match other servers", async () => {
-    const logger = createLogger();
-    await attachMcpServers({
-      client: asClient({
-        mcp: {
-          add: async () => undefined,
-          list: async () => connectedCatalog(["jagentdesk", "other"]),
-        },
-        session: {
-          context: async () => toolCallMessage("jagentdesk_ssh_run"),
-        },
-      }),
-      sessionID: "ses_1",
-      location: { directory: "/tmp/ws" },
-      mcpServers: {
-        jagentdesk: { type: "http", url: "http://127.0.0.1:1/mcp" },
-        other: { type: "http", url: "http://127.0.0.1:2/mcp" },
+    const reads: string[] = [];
+    let pending = true;
+    const client = adapter({
+      add: async ({ server }) => {
+        added.push(server);
+        pending = true;
       },
-      toolWaitTimeoutMs: 120,
-      logger,
-    });
-    expect(logger.warnings).toEqual([
-      { obj: { server: "other", sessionID: "ses_1" }, message: expect.any(String) },
-    ]);
-  });
-
-  test("accepts a tool name surfaced inside message text", async () => {
-    const logger = createLogger();
-    await attachMcpServers({
-      client: asClient({
-        mcp: {
-          add: async () => undefined,
-          list: async () => connectedCatalog(["jagentdesk"]),
-        },
-        session: {
-          context: async () => [
-            {
-              id: "msg_1",
-              type: "user",
-              text: 'catalog now includes "jagentdesk_ssh_run" and more',
-            },
-          ],
-        },
-      }),
-      sessionID: "ses_1",
-      location: { directory: "/tmp/ws" },
-      mcpServers: { jagentdesk: { type: "http", url: "http://127.0.0.1:1/mcp" } },
-      logger,
-    });
-    expect(logger.warnings).toEqual([]);
-  });
-
-  test("warns and continues when the tools never appear", async () => {
-    const added: string[] = [];
-    const logger = createLogger();
-    await attachMcpServers({
-      client: asClient({
-        mcp: {
-          add: async (input) => {
-            added.push(input.server);
-          },
-          list: async () => connectedCatalog(["jagentdesk", "second"]),
-        },
-        session: { context: async () => [] },
-      }),
-      sessionID: "ses_1",
-      location: { directory: "/tmp/ws" },
-      mcpServers: {
-        jagentdesk: { type: "http", url: "http://127.0.0.1:1/mcp" },
-        second: { type: "http", url: "http://127.0.0.1:2/mcp" },
+      list: async () => {
+        const server = added.at(-1)!;
+        reads.push(server);
+        if (pending) {
+          pending = false;
+          return { location, data: [{ name: server, status: { status: "pending" } }] };
+        }
+        return catalog([server]);
       },
-      toolWaitTimeoutMs: 30,
-      logger,
     });
-    expect(added).toEqual(["jagentdesk", "second"]);
-    expect(logger.warnings).toHaveLength(2);
-    expect(logger.warnings.map((w) => (w.obj as { server: string }).server)).toEqual([
-      "jagentdesk",
-      "second",
-    ]);
-  });
-
-  test("stops waiting when the session aborts", async () => {
-    const controller = new AbortController();
-    const logger = createLogger();
-    const pending = attachMcpServers({
-      client: asClient({
-        mcp: {
-          add: async () => undefined,
-          list: async () => connectedCatalog(["jagentdesk"]),
-        },
-        session: { context: async () => [] },
-      }),
-      sessionID: "ses_1",
-      location: { directory: "/tmp/ws" },
-      mcpServers: { jagentdesk: { type: "http", url: "http://127.0.0.1:1/mcp" } },
-      signal: controller.signal,
-      logger,
+    await attachMcpServers({
+      client,
+      location,
+      mcpServers: { ...servers, other: servers.jagentdesk! },
     });
-    setTimeout(() => controller.abort(), 20);
-    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
-    expect(logger.warnings).toEqual([]);
+    expect(added).toEqual(["jagentdesk", "other"]);
+    expect(reads).toEqual(["jagentdesk", "jagentdesk", "other", "other"]);
   });
 
-  test("fails the attach when a server reports a failed connection", async () => {
-    const logger = createLogger();
-    await expect(
-      attachMcpServers({
-        client: asClient({
-          mcp: {
-            add: async () => undefined,
-            list: async () => ({
-              data: [{ name: "jagentdesk", status: { status: "failed", error: "boom" } }],
-            }),
-          },
-          session: { context: async () => [] },
-        }),
-        sessionID: "ses_1",
-        location: { directory: "/tmp/ws" },
-        mcpServers: { jagentdesk: { type: "http", url: "http://127.0.0.1:1/mcp" } },
-        logger,
-      }),
-    ).rejects.toThrow("OpenCode MCP server jagentdesk failed to connect: boom");
-    expect(logger.warnings).toEqual([]);
+  test.each([
+    { status: "failed" as const, error: "boom", reason: "boom" },
+    { status: "disabled" as const, reason: "disabled" },
+    { status: "needs_auth" as const, error: "Sign in", reason: "needs_auth" },
+  ])("fails when the injected server is $status", async ({ reason, ...status }) => {
+    const client = adapter({
+      list: async () => ({ location, data: [{ name: "jagentdesk", status }] }),
+    });
+    await expect(attachMcpServers({ client, location, mcpServers: servers })).rejects.toThrow(
+      `OpenCode MCP server jagentdesk failed to connect: ${reason}`,
+    );
   });
 
-  test("maps stdio configs to local OpenCode MCP configs with codemode disabled", async () => {
+  test.each(["add", "list"] as const)(
+    "aborts a stalled %s even when the adapter ignores the signal",
+    async (operation) => {
+      const controller = new AbortController();
+      const stalled = () => {
+        queueMicrotask(() => controller.abort(new Error("Session closed")));
+        return new Promise<never>(() => undefined);
+      };
+      const client = adapter({
+        add: operation === "add" ? stalled : async () => undefined,
+        list: operation === "list" ? stalled : async () => catalog(["jagentdesk"]),
+      });
+      await expect(
+        attachMcpServers({ client, location, mcpServers: servers, signal: controller.signal }),
+      ).rejects.toThrow("Session closed");
+    },
+  );
+
+  test("maps HTTP and stdio configuration with codemode disabled", async () => {
     const configs: unknown[] = [];
-    const logger = createLogger();
+    const client = adapter({
+      add: async (input) => {
+        configs.push(input);
+      },
+      list: async () => catalog(["jagentdesk", "tools"]),
+    });
     await attachMcpServers({
-      client: asClient({
-        mcp: {
-          add: async (input) => {
-            configs.push((input as { config: unknown }).config);
-          },
-          list: async () => connectedCatalog(["tools"]),
-        },
-        session: { context: async () => toolCallMessage("tools_probe") },
-      }),
-      sessionID: "ses_1",
-      location: { directory: "/tmp/ws" },
+      client,
+      location,
       mcpServers: {
+        ...servers,
         tools: { type: "stdio", command: "node", args: ["server.mjs"], env: { FOO: "bar" } },
       },
-      logger,
     });
     expect(configs).toEqual([
       {
-        type: "local",
-        command: ["node", "server.mjs"],
-        environment: { FOO: "bar" },
-        codemode: false,
+        server: "jagentdesk",
+        location,
+        config: { type: "remote", url: "http://127.0.0.1:1/mcp", oauth: false, codemode: false },
+      },
+      {
+        server: "tools",
+        location,
+        config: {
+          type: "local",
+          command: ["node", "server.mjs"],
+          environment: { FOO: "bar" },
+          codemode: false,
+        },
       },
     ]);
   });
