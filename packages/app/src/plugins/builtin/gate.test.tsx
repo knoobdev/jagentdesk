@@ -40,3 +40,33 @@ it("hides and restores contributions live for only the changed host", () => {
   act(() => store.updateSessionServerInfo("one", info("one", true)));
   expect(screen.queryByText("First Docker")?.textContent).toBe("First Docker");
 });
+
+it("hides Bots contributions live without hiding another host", () => {
+  const store = useSessionStore.getState();
+  store.initializeSession("one", null);
+  store.initializeSession("two", null);
+  const info = (serverId: string, bots: boolean) => ({
+    status: "server_info" as const,
+    serverId,
+    hostname: "host",
+    version: "0.9.59",
+    features: { builtinPlugins: true, bots },
+  });
+  store.updateSessionServerInfo("one", info("one", true));
+  store.updateSessionServerInfo("two", info("two", true));
+  render(
+    <>
+      <BuiltinPluginGate serverId="one" id="bots">
+        <span>First Bots</span>
+      </BuiltinPluginGate>
+      <BuiltinPluginGate serverId="two" id="bots">
+        <span>Second Bots</span>
+      </BuiltinPluginGate>
+    </>,
+  );
+  act(() => store.updateSessionServerInfo("one", info("one", false)));
+  expect(screen.queryByText("First Bots")).toBe(null);
+  expect(screen.queryByText("Second Bots")).not.toBe(null);
+  act(() => store.updateSessionServerInfo("one", info("one", true)));
+  expect(screen.queryByText("First Bots")).not.toBe(null);
+});

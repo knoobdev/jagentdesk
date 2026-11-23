@@ -102,3 +102,14 @@ describe("buildNotificationRoute", () => {
     ).toBe("/h/srv%2Fwith%2Fslash/workspace/workspace-1?open=agent%3Aagent%20with%20space");
   });
 });
+
+it("routes a Needs-you push directly to its bot item", () => {
+  expect(
+    buildNotificationRoute({
+      serverId: "host",
+      type: "bot_needs_you",
+      botId: "bot",
+      itemId: "item",
+    }),
+  ).toBe("/h/host/bots?botId=bot&tab=items&itemId=item");
+});

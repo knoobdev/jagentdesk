@@ -35,3 +35,8 @@ describe("shouldShowSidebarFooter", () => {
     expect(shouldShowSidebarFooter("")).toBe(true);
   });
 });
+
+it("gives Bots its own left column without a workspace footer", () => {
+  expect(shouldShowAddProject("/h/host/bots")).toBe(false);
+  expect(shouldShowSidebarFooter("/h/host/bots?botId=one")).toBe(false);
+});

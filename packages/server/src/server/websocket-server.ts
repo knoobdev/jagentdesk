@@ -2025,7 +2025,10 @@ export class VoiceAssistantWebSocketServer {
   }
 
   public async sendBotPush(payload: import("./push/notifications.js").PushPayload): Promise<void> {
-    await this.pushNotificationSender.send(payload);
+    await this.pushNotificationSender.send({
+      ...payload,
+      data: { ...payload.data, serverId: this.serverId },
+    });
   }
 
   public setBotsService(service: BotsService | null): void {

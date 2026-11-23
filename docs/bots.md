@@ -93,6 +93,11 @@ Room messages carry `roomId` and `rootId`. `@slug` wakes a member, excluding Mar
 and blockquotes. Each member runs at most once per root post, bounding mention loops.
 Send a new post to ask a member again. No cloud connector or bot sharing is involved.
 
+The Supervisor id is absent until the first delivered message. Keep the bot view subscribed
+to `bots.changed` while no agent is attached, then refetch the roster and bind the existing
+agent timeline. Use the Supervisor cwd for Soul/Memory editing; inferring a path from
+`~/.jagentdesk` fails for remote hosts and checkout-local dev homes.
+
 ## Triggers
 
 Cron, look-around intervals and wait deadlines use persisted occurrence keys. Paused bots

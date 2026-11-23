@@ -1,9 +1,11 @@
+import { botsStrings } from "./bots";
 import { builtinPluginStrings } from "./builtin-plugins";
 import { pluginSettings } from "./plugin-settings";
 import { activityGraphStrings } from "./activity-graph";
 import { sshModuleStrings } from "./ssh-modules";
 
 export const en = {
+  bots: botsStrings,
   builtinPlugins: builtinPluginStrings,
   ssh: sshModuleStrings,
   paneFind: {

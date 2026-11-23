@@ -5,6 +5,7 @@ import { useCallback, useMemo } from "react";
 import {
   BarChart3,
   Boxes,
+  Bot,
   CalendarClock,
   Container,
   Database,
@@ -67,6 +68,7 @@ import {
 
 /** Routes behind the app's primary navigation, shared by the sidebar list and the ClickUp rail. */
 export interface AppNavTargets {
+  botsRoute: Href | null;
   sharedSessionsRoute: Href | null;
   clustersRoute: Href | null;
   databasesRoute: Href | null;
@@ -99,6 +101,7 @@ export function useAppNavTargets(): AppNavTargets {
     : (selection?.serverId ?? hosts[0]?.serverId ?? "");
   const lastCluster = useClusterNavStore((s) => s.lastCluster);
   const lastDatabase = useDatabaseNavStore((s) => s.lastDatabase);
+  const supportsBots = useHostFeature(firstServerId, "bots");
   const dockerEnabled = useBuiltinPluginEnabled(firstServerId, "docker");
   const clustersEnabled = useBuiltinPluginEnabled(firstServerId, "clusters");
   const databasesEnabled = useBuiltinPluginEnabled(firstServerId, "databases");
@@ -153,6 +156,9 @@ export function useAppNavTargets(): AppNavTargets {
       ) as Href;
     }
     return {
+      botsRoute: supportsBots
+        ? perHost((serverId) => `/h/${encodeURIComponent(serverId)}/bots`)
+        : null,
       clustersRoute: clustersEnabled ? clustersRoute : null,
       databasesRoute: databasesEnabled ? databasesRoute : null,
       sharedSessionsRoute: sharingEnabled ? (buildSharedSessionsRoute() as Href) : null,
@@ -172,6 +178,7 @@ export function useAppNavTargets(): AppNavTargets {
       figmaRoute: supportsFigma ? perHost(buildFigmaRoute) : null,
     };
   }, [
+    supportsBots,
     dockerEnabled,
     clustersEnabled,
     databasesEnabled,
@@ -236,6 +243,7 @@ export function useAppNavItems(): AppNavItem[] {
         isActive: pathname.includes("/schedules"),
         testID: "rail-schedules",
       },
+      navItem("bots", Bot, t("bots.title"), t("bots.title"), targets.botsRoute, pathname, "/bots"),
       targets.sharedSessionsRoute
         ? {
             key: "shared-sessions",
