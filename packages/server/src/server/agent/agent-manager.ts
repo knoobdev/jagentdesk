@@ -1028,6 +1028,14 @@ export class AgentManager {
     return this.mcpAuthToken;
   }
 
+  private turnContextProvider?: (
+    agentId: string,
+  ) => Promise<{ text: string; accepted: () => void } | null>;
+
+  setTurnContextProvider(provider: AgentManager["turnContextProvider"]): void {
+    this.turnContextProvider = provider;
+  }
+
   setAppendSystemPrompt(prompt: string | null | undefined): void {
     this.appendSystemPrompt = prompt ?? "";
   }
@@ -2634,7 +2642,15 @@ export class AgentManager {
   }): Promise<string | null> {
     const { agent, agentId, pendingRun, prompt, options } = params;
     try {
-      const result = await agent.session.startTurn(prompt, options);
+      const context = await this.turnContextProvider?.(agentId);
+      let enriched = prompt;
+      if (context?.text)
+        enriched =
+          typeof prompt === "string"
+            ? `${context.text}\n\n${prompt}`
+            : [{ type: "text" as const, text: context.text }, ...prompt];
+      const result = await agent.session.startTurn(enriched, options);
+      context?.accepted();
       if (pendingRun.settled) {
         throw new Error(`Agent ${agentId} run was canceled before its turn started`);
       }
@@ -5730,6 +5746,7 @@ export class AgentManager {
       try {
         const catalog = await this.jagentdeskToolCatalogFactory({
           callerAgentId: agentId,
+          callerAgentLabels: opening?.labels,
           jagentdeskToolPolicy,
         });
         if (useNativeTools) context.jagentdeskTools = catalog;

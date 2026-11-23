@@ -1,3 +1,4 @@
+import { BotsRequestSchemas, BotsResponseSchemas, BotsPushSchemas } from "./bots/rpc-schemas.js";
 import { ProviderJAgentDeskToolsPolicySchema } from "./provider-config.js";
 import type { JsonValue } from "./agent-types.js";
 import { PluginIdSchema, PluginRequirementsSchema, PluginSourceSchema } from "./plugin-config.js";
@@ -4167,6 +4168,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ...SpecModeRequestSchemas,
   ...DatabaseRequestSchemas,
   ...ArgoCdRequestSchemas,
+  ...BotsRequestSchemas,
   ...JiraRequestSchemas,
   ...FigmaRequestSchemas,
   ...SshRequestSchemas,
@@ -4664,6 +4666,7 @@ export const ServerInfoStatusPayloadSchema = z
       .optional(),
     features: z
       .object({
+        bots: z.boolean().optional(),
         binaryChunkingV1: z.boolean().optional(),
         providersSnapshot: z.boolean().optional(),
         // COMPAT(providersSnapshotCwd): added in v0.3.2, remove gate after 2027-02-10.
@@ -8054,6 +8057,8 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ...DatabaseResponseSchemas,
   ...ArgoCdResponseSchemas,
   ...ArgoCdPushSchemas,
+  ...BotsResponseSchemas,
+  ...BotsPushSchemas,
   ...JiraResponseSchemas,
   ...JiraPushSchemas,
   ...FigmaResponseSchemas,

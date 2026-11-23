@@ -1,3 +1,10 @@
+import type {
+  BotsRequestType,
+  BotsRequestParams,
+  BotsResponseFor,
+  BotsResponseTypeFor,
+  BotsPush,
+} from "@jagentdesk/protocol/bots/rpc-schemas";
 import type { BuiltinPluginId, BuiltinPluginListItem } from "@jagentdesk/protocol/builtin-plugins";
 import {
   ChunkedTransport,
@@ -8703,6 +8710,26 @@ export class DaemonClient {
    */
   sendSshModuleMessage(message: { type: `ssh.${string}` } & Record<string, unknown>): void {
     this.sendSessionMessage(SessionInboundMessageSchema.parse(message));
+  }
+
+  async botsRequest<T extends BotsRequestType>(
+    type: T,
+    params: BotsRequestParams<T>,
+    options: { timeoutMs?: number } = {},
+  ): Promise<BotsResponseFor<T>["payload"]> {
+    const responseType = type.replace(/\.request$/, ".response") as BotsResponseTypeFor<T>;
+    return this.sendCorrelatedSessionRequest<BotsResponseTypeFor<T>, BotsResponseFor<T>["payload"]>(
+      { message: { type, ...params }, responseType, timeout: options.timeoutMs },
+    );
+  }
+
+  onBotsPush<T extends BotsPush["type"]>(
+    type: T,
+    handler: (message: Extract<BotsPush, { type: T }>) => void,
+  ): () => void {
+    return this.subscribeRawMessages((message) => {
+      if (message.type === type) handler(message as Extract<BotsPush, { type: T }>);
+    });
   }
 
   // ── Jira (spec 29) ──

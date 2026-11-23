@@ -51,6 +51,7 @@ export interface JAgentDeskToolCatalog {
 }
 
 export interface JAgentDeskToolRuntimeContext {
+  callerAgentLabels?: Record<string, string>;
   jagentdeskToolPolicy?: ProviderJAgentDeskToolsPolicy;
   callerAgentId?: string;
   enableVoiceTools?: boolean;

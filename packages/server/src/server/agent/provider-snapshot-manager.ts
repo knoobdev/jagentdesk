@@ -490,6 +490,20 @@ export class ProviderSnapshotManager {
     }
   }
 
+  async isUnattendedCreateMode(
+    provider: AgentProvider,
+    cwd: string,
+    modeId: string,
+  ): Promise<boolean> {
+    const entry = await this.getReadyProvider({ provider, cwd, wait: true });
+    return this.requireProvider(provider).isCreateConfigUnattended({
+      modeId,
+      config: { provider, cwd, modeId },
+      features: [],
+      availableModes: entry.modes ?? [],
+    });
+  }
+
   async resolveCreateConfig(
     input: ResolveProviderCreateConfigOptions,
   ): Promise<ResolvedProviderCreateConfig> {

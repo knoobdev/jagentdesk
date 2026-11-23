@@ -42,6 +42,8 @@ và `research`, Codex Luna cho `impl_deep`/`audit`, và Gemini UI cho `ui`. Đâ
 cấu hình, không phải mock session; daemon vẫn resolve provider/model qua provider catalog
 trước khi tạo agent.
 
+Bots dùng cùng ORC runtime với một Supervisor sống lâu và một workspace mới cho mỗi worker Lead. Xem [Bots](bots.md).
+
 ## Runtime authority và MCP
 
 Daemon gắn label cho agent thật để trace theo `workspaceId`, `briefId`, role, route và

@@ -1,3 +1,9 @@
+import { BotStorage } from "./bots/storage.js";
+import { BotsService } from "./bots/service.js";
+import type { BotTriggerSource } from "./bots/service.js";
+import { DaemonBotRuntime } from "./bots/daemon-runtime.js";
+import { LocalBotTriggers } from "./bots/triggers.js";
+import { createBotAgentTools } from "./bots/agent-tools.js";
 import { getSharedProxyService } from "./proxy/proxy-service.js";
 import { resolveJAgentDeskToolPolicy } from "./agent/jagentdesk-tool-policy.js";
 import { BuiltinPluginLoader } from "./plugins/builtin/index.js";
@@ -540,6 +546,7 @@ export interface JAgentDeskDaemon {
 }
 
 export interface JAgentDeskDaemonDependencies {
+  botsTriggerSource?: BotTriggerSource;
   sessionShareTunnelManager?: TunnelManager;
   builtinPlugins?: BuiltinPluginLoader;
   hubRelationshipRemote?: HubRelationshipRemote;
@@ -1771,10 +1778,47 @@ export async function createJAgentDeskDaemon(
     logger,
   });
 
+  const botStorage = new BotStorage(config.jagentdeskHome);
+  const botRuntime = new DaemonBotRuntime({
+    agentManager,
+    providerSnapshotManager,
+    orchestration: orchestrationRuntime,
+    storage: botStorage,
+    createWorktree: createJAgentDeskWorktreeForTools,
+    logger,
+    create: {
+      agentManager,
+      agentStorage,
+      providerSnapshotManager,
+      logger,
+      jagentdeskHome: config.jagentdeskHome,
+      ensureWorkspaceForCreate: ensureWorkspaceForCreateAndBroadcastExternal,
+    },
+  });
+  const botsService = new BotsService(botStorage, botRuntime, {
+    logger,
+    triggers:
+      dependencies.botsTriggerSource ??
+      new LocalBotTriggers({
+        storage: botStorage,
+        jira: jiraService,
+        jiraEnabled: () => pluginRuntime.builtin.isEnabled("jira"),
+      }),
+    push: { send: (payload) => wsServer?.sendBotPush(payload) ?? Promise.resolve() },
+  });
+  let botsRuntimeReady = false;
+  await pluginRuntime.builtin.registerLifecycle("bots", {
+    start: () => {
+      if (botsRuntimeReady) botsService.start();
+    },
+    stop: () => botsService.stop(),
+  });
+
   const createAgentToolHostDependencies = (
     runtime: JAgentDeskToolRuntimeContext,
   ): JAgentDeskToolHostDependencies => ({
     builtinPlugins: pluginRuntime.builtin.forAgent(runtime.callerAgentId),
+    callerAgentLabels: runtime.callerAgentLabels,
     jagentdeskToolPolicy:
       runtime.jagentdeskToolPolicy ??
       (runtime.callerAgentId
@@ -1877,6 +1921,13 @@ export async function createJAgentDeskDaemon(
         callerAgentId,
         requestPermission: (agentId, request) =>
           agentManager.requestHostToolPermission(agentId, request),
+      }),
+    botAgentTools: (callerAgentId) =>
+      createBotAgentTools({
+        service: botsService,
+        agentManager,
+        callerAgentId,
+        callerLabels: runtime.callerAgentLabels,
       }),
     jiraAgentTools: (callerAgentId) =>
       createJiraAgentTools({
@@ -2129,6 +2180,7 @@ export async function createJAgentDeskDaemon(
               start: () => specModeService!.initialize(),
               stop: () => specModeService!.stop(),
             });
+            server.setBotsService(botsService);
             server.setJiraService(jiraService);
             server.setFigmaService(figmaService);
             server.setRemoteExecService(remoteExecService);
@@ -2264,6 +2316,8 @@ export async function createJAgentDeskDaemon(
               wsServer?.updateGuestScopesForAgent(agentId, scopes),
             );
             await attachHostServices(wsServer);
+            botsRuntimeReady = true;
+            if (pluginRuntime.builtin.isEnabled("bots")) botsService.start();
             // Bind the plugin session host and start configured plugins before any
             // external ingress attaches, mirroring upstream's pre-accept ordering.
             pluginRuntime.bindJAgentDeskSessionHost(wsServer);
@@ -2368,6 +2422,7 @@ export async function createJAgentDeskDaemon(
     scriptHealthMonitor.stop();
     // Freeze both ingress and registration before taking the agent closure snapshot.
     wsServer?.prepareForShutdown();
+    botsService.suspendForShutdown();
     agentManager.prepareForShutdown();
     await closeAllAgents(logger, agentManager);
     await withTimeout({
@@ -2396,6 +2451,7 @@ export async function createJAgentDeskDaemon(
     sshService.dispose();
     argocdService.dispose();
     sideloadService.dispose();
+    await botsService.dispose();
     jiraService.dispose();
     void figmaService.dispose();
     speechService.stop();

@@ -1,3 +1,5 @@
+import { BotsSession } from "./bots/session.js";
+import type { BotsService } from "./bots/service.js";
 import { builtinPluginForRpc } from "./plugins/builtin/gates.js";
 import { BuiltinPluginError, type BuiltinPluginState } from "./plugins/builtin/state.js";
 import { SessionDelivery, type OwnedSubscription } from "./session/owned-subscriptions/index.js";
@@ -572,6 +574,7 @@ export interface SessionOptions {
   sideloadService?: SideloadService | null;
   // Daemon-wide Jira service (spec 29); absent in tests that do not exercise Jira.
   jiraService?: JiraService | null;
+  botsService?: BotsService | null;
   // Daemon-wide Figma service (spec 32); absent in tests that do not exercise Figma.
   figmaService?: FigmaService | null;
   checkoutDiffManager: CheckoutDiffManager;
@@ -937,6 +940,7 @@ export class Session {
   private sshSession!: SshSession;
   private argocdSession!: ArgoCdSession;
   private jiraSession: JiraSession | null = null;
+  private botsSession: BotsSession | null = null;
   private figmaSession: FigmaSession | null = null;
   private sshService!: SshService;
   private remoteExecService: RemoteExecService | null = null;
@@ -1128,6 +1132,9 @@ export class Session {
       onBranchChanged,
       logger: this.sessionLogger,
     });
+    this.botsSession = options.botsService
+      ? new BotsSession(options.botsService, (msg) => this.emit(msg))
+      : null;
     this.chatScheduleLoopSession = new ChatScheduleLoopSession({
       host: {
         emit: (msg) => this.emit(msg),
@@ -2551,6 +2558,7 @@ export class Session {
       () => this.dispatchCustomProvidersMessage(msg),
       () => this.dispatchArgoCdMessage(msg),
       () => this.dispatchSideloadMessage(msg),
+      () => this.botsSession?.dispatch(msg),
       () => this.dispatchJiraMessage(msg),
       () => this.dispatchFigmaMessage(msg),
       () => this.dispatchDockerMessage(msg),
@@ -9943,6 +9951,7 @@ export class Session {
 
     await this.voiceSession.cleanup();
 
+    this.botsSession?.dispose();
     this.jiraSession?.dispose();
     this.figmaSession?.dispose();
     this.dockerStreams.disposeAll();
