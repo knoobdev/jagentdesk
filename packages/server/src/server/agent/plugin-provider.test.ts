@@ -871,6 +871,38 @@ function expectNestedChildren(events: AgentStreamEvent[]) {
 }
 
 describe("PluginAgentClientRegistry", () => {
+  test("returns the provider's actual model when an unavailable choice is not applied", async () => {
+    const harness = createProviderHarness({
+      async handleInput(input, emit) {
+        if (input.type !== "session.configure") return false;
+        emit({
+          type: "session.config",
+          sessionId: input.sessionId,
+          config: {
+            model: "plugin-model",
+            models: [{ id: "plugin-model", label: "Plugin model" }],
+            modes: [],
+            thinkingOptions: [],
+            settings: [],
+          },
+        });
+        emit({ type: "request.completed", requestId: input.requestId });
+        return true;
+      },
+    });
+    const registry = new PluginAgentClientRegistry(createTestLogger());
+    registry.replace([harness.registration]);
+    try {
+      const client = registry.definitions()["plugin-direct"].createClient(createTestLogger());
+      const session = await client.createSession({ provider: "plugin-direct", cwd: "/workspace" });
+      await expect(session.setModel!("unavailable-model")).resolves.toEqual({
+        model: "plugin-model",
+      });
+    } finally {
+      await registry.shutdown();
+    }
+  });
+
   test.each([false, true])(
     "contains a failed session open while send is pending: %s",
     async (pendingSend) => {
