@@ -1,3 +1,4 @@
+import { registerPluginTools } from "./plugin-tools.js";
 // This file predates lint enforcement on it (lefthook lints only staged files, and this large tool
 // registrar was never staged until the Agent Forum change). It carries pre-existing nested-ternary
 // style violations in the forge/kubectl tool builders; disabling the stylistic rule file-wide avoids
@@ -3640,12 +3641,14 @@ function createToolCatalog(
   };
 
   const tools = new Map<string, JAgentDeskToolDefinition>();
+  const builtinNames = new Set<string>();
   const registerTool = (
     name: string,
     config: JAgentDeskToolConfig,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool handlers are schema-validated at registration boundaries.
     handler: (input: any, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>,
   ) => {
+    builtinNames.add(name);
     tools.set(name, {
       name,
       title: config.title,
@@ -6393,6 +6396,13 @@ function createToolCatalog(
     },
   );
 
+  registerPluginTools({
+    agentManager,
+    callerAgentId,
+    scope,
+    tools,
+    builtinNames,
+  });
   return toCatalog();
 }
 

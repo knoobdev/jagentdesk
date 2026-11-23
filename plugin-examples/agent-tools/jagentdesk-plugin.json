@@ -1,0 +1,4 @@
+{
+  "id": "agent-tools",
+  "requirements": { "jagentdesk": ">=0.13.2" }
+}

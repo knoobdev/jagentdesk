@@ -18,6 +18,7 @@ export type AgentRunController = Pick<
   | "getAgent"
   | "tryRunOutOfBand"
   | "hasInFlightRun"
+  | "reloadStalePluginSession"
   | "replaceAgentRun"
   | "steerOrReplaceActiveTurn"
   | "streamAgent"
@@ -104,6 +105,7 @@ export async function startAgentRun(
   if (await agentManager.tryRunOutOfBand(agentId, prompt, options?.runOptions)) {
     return { disposition: "out_of_band" };
   }
+  await agentManager.reloadStalePluginSession(agentId);
   const steered = await steerOrReplaceActiveRun(agentManager, agentId, prompt, options);
   if (steered?.disposition === "steered") {
     return steered;

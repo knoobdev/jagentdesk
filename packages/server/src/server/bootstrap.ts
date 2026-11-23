@@ -1040,6 +1040,7 @@ export async function createJAgentDeskDaemon(
   const initialAgentManagerState = providerSnapshotManager.getAgentManagerProviderState();
   const agentManager = new AgentManager({
     pluginLifecycle: pluginRuntime,
+    pluginAgentTools: pluginRuntime,
     clients: initialAgentManagerState.clients,
     providerDefinitions: initialAgentManagerState.providerDefinitions,
     registry: agentStorage,
@@ -1057,6 +1058,10 @@ export async function createJAgentDeskDaemon(
     agentManager.updateProviderRegistry(
       providerSnapshotManager.replacePluginProviders(pluginRuntime.getProviderRegistrations()),
     );
+  });
+
+  const unsubscribePluginSessionChanges = pluginRuntime.subscribeSessionOpenChanges(() => {
+    agentManager.invalidatePluginSessions();
   });
 
   const detachAgentStoragePersistence = attachAgentStoragePersistence(
@@ -2257,6 +2262,7 @@ export async function createJAgentDeskDaemon(
       scriptHealthMonitor.start();
     } catch (error) {
       unsubscribePluginProviders();
+      unsubscribePluginSessionChanges();
       await pluginRuntime.stopAllPlugins().catch(() => undefined);
       await serviceProxy.stopStandalone().catch(() => undefined);
       if (mainStarted) {
@@ -2269,6 +2275,7 @@ export async function createJAgentDeskDaemon(
 
   const stop = async () => {
     unsubscribePluginProviders();
+    unsubscribePluginSessionChanges();
     await hubRelationships.stop();
     workspaceReconciliation.dispose();
     scriptHealthMonitor.stop();

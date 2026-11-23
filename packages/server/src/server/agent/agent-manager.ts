@@ -1,3 +1,5 @@
+import type { AttachedAgentTool, PluginAgentToolsRuntime } from "../plugins/agent-tools.js";
+import type { AgentToolResult } from "@jagentdesk/plugin/server";
 import type { PluginLifecycle } from "../plugins/lifecycle/index.js";
 import { describeHookAgent, publishAgentStream } from "../plugins/lifecycle/index.js";
 import type { PluginSessionOpenRequest } from "@jagentdesk/plugin/server";
@@ -349,6 +351,7 @@ export interface AgentManagerOptions {
   terminalManager?: TerminalManager | null;
   mcpBaseUrl?: string;
   mcpAuthToken?: string;
+  pluginAgentTools?: PluginAgentToolsRuntime;
   jagentdeskToolsEnabled?: boolean;
   jagentdeskToolCatalogFactory?: JAgentDeskToolCatalogFactory;
   appendSystemPrompt?: string;
@@ -806,6 +809,10 @@ export class AgentManager {
   private readonly agentStreamCoalescer: AgentStreamCoalescer;
   private mcpBaseUrl: string | null;
   private readonly mcpAuthToken: string | null;
+  private sessionOpenGeneration = 0;
+  private readonly sessionOpenGenerations = new Map<string, number>();
+  private readonly attachedPluginTools = new Map<string, AttachedAgentTool[]>();
+  private readonly pluginAgentTools: PluginAgentToolsRuntime | undefined;
   private jagentdeskToolsEnabled = true;
   private jagentdeskToolCatalogFactory: JAgentDeskToolCatalogFactory | null = null;
   private appendSystemPrompt: string;
@@ -836,6 +843,7 @@ export class AgentManager {
 
   constructor(options: AgentManagerOptions) {
     this.pluginLifecycle = options.pluginLifecycle;
+    this.pluginAgentTools = options.pluginAgentTools;
     this.timelineStore = options.timelineStore ?? new InMemoryAgentTimelineStore();
     this.idFactory = options.idFactory ?? (() => randomUUID());
     this.registry = options?.registry;
@@ -922,6 +930,62 @@ export class AgentManager {
 
   setJAgentDeskToolsEnabled(enabled: boolean): void {
     this.jagentdeskToolsEnabled = enabled;
+  }
+
+  invalidatePluginSessions(): void {
+    this.sessionOpenGeneration++;
+  }
+
+  async reloadStalePluginSession(agentId: string): Promise<void> {
+    if (!this.needsPluginSessionReload(agentId)) return;
+    await this.trackAgentRegistrationOperation(
+      this.runLifecycleMutation(agentId, async () => {
+        if (!this.needsPluginSessionReload(agentId)) return;
+        await this.reloadAgentSessionInternal(agentId);
+      }),
+    );
+  }
+
+  private needsPluginSessionReload(agentId: string): boolean {
+    const agent = this.getAgent(agentId);
+    return (
+      agent !== null &&
+      agent.lifecycle !== "closed" &&
+      this.sessionOpenGenerations.get(agentId) !== this.sessionOpenGeneration &&
+      !this.hasInFlightRun(agentId)
+    );
+  }
+
+  getPluginTools(agentId: string): readonly AttachedAgentTool[] {
+    return (this.attachedPluginTools.get(agentId) ?? []).filter((tool) =>
+      this.pluginAgentTools?.isToolPluginAvailable(tool.pluginId, tool.pluginInstanceId),
+    );
+  }
+
+  async executePluginTool(
+    tool: AttachedAgentTool,
+    agentId: string,
+    input: unknown,
+    signal?: AbortSignal,
+  ): Promise<AgentToolResult> {
+    const agent = this.getAgent(agentId);
+    if (!agent || agent.lifecycle === "closed") throw new Error(`Agent is not live: ${agentId}`);
+    if (!this.pluginAgentTools) throw new Error("Plugin tools are unavailable");
+    const record = await this.registry?.get(agentId);
+    return this.pluginAgentTools.callTool(
+      tool.pluginId,
+      tool.pluginInstanceId,
+      describeHookAgent({ ...agent, title: record?.title ?? agent.config.title }),
+      tool.name,
+      input,
+      signal,
+    );
+  }
+
+  private detachPluginTools(agentId: string): void {
+    this.attachedPluginTools.delete(agentId);
+    this.sessionOpenGenerations.delete(agentId);
+    this.pluginAgentTools?.detachTools(agentId);
   }
 
   setJAgentDeskToolCatalogFactory(factory: JAgentDeskToolCatalogFactory | null): void {
@@ -1421,7 +1485,13 @@ export class AgentManager {
       client,
       storedConfig.cwd,
       undefined,
-      { workspaceId },
+      {
+        reason: "resume",
+        purpose,
+        workspaceId,
+        title: record?.title ?? mergedConfig.title ?? null,
+        labels: record?.labels ?? options?.labels ?? {},
+      },
     );
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
     const session = await client.resumeSession(
@@ -1478,7 +1548,12 @@ export class AgentManager {
       client,
       storedConfig.cwd,
       undefined,
-      { workspaceId: input.workspaceId },
+      {
+        reason: "import",
+        purpose: "interactive",
+        workspaceId: input.workspaceId,
+        labels: input.labels ?? {},
+      },
     );
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
     const imported = await client.importSession(
@@ -1519,6 +1594,7 @@ export class AgentManager {
       return agent;
     } finally {
       if (!handedToRegistration) {
+        this.detachPluginTools(resolvedAgentId);
         await this.closeUnregisteredSession(imported.session);
       }
     }
@@ -1571,7 +1647,13 @@ export class AgentManager {
       client,
       storedConfig.cwd,
       undefined,
-      { workspaceId: existing.workspaceId },
+      {
+        reason: "refresh",
+        purpose: "interactive",
+        workspaceId: existing.workspaceId,
+        title: await this.resolveInitialPersistedTitle(agentId, existing.config, null),
+        labels: existing.labels,
+      },
     );
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
 
@@ -1727,6 +1809,7 @@ export class AgentManager {
     } catch (error) {
       persistError = error;
     }
+    this.detachPluginTools(agentId);
     this.emitClosedAgent(closedAgent, { persist: false });
     this.logger.trace(
       {
@@ -3975,6 +4058,7 @@ export class AgentManager {
 
   private discardRetainedAgentState(agentId: string): void {
     this.timelineStore.delete(agentId);
+    this.detachPluginTools(agentId);
     for (const event of this.providerSubagents.deleteParent(agentId)) {
       this.dispatch({ type: "provider_subagent", event });
     }
@@ -5514,10 +5598,15 @@ export class AgentManager {
       workspaceId?: string | null;
       reason?: PluginSessionOpenRequest["reason"];
       purpose?: PluginSessionOpenRequest["purpose"];
+      title?: string | null;
+      labels?: Record<string, string>;
     },
   ): Promise<AgentLaunchContext> {
+    // A plugin changing during this open must still make the resulting session stale.
+    const generation = this.sessionOpenGeneration;
+    this.detachPluginTools(agentId);
     if (this.pluginLifecycle) {
-      const request: PluginSessionOpenRequest = {
+      const request = {
         agentId,
         provider: client.provider,
         cwd,
@@ -5525,8 +5614,14 @@ export class AgentManager {
         reason: opening?.reason ?? "resume",
         purpose: opening?.purpose ?? "interactive",
         env: { ...env },
+        title: opening?.title ?? null,
+        labels: opening?.labels ?? {},
+        tools: [],
       };
-      env = (await this.pluginLifecycle.before("agent.session_open", request)).env;
+      const transformed = await this.pluginLifecycle.before("agent.session_open", request);
+      env = transformed.env;
+      if (request.purpose === "interactive")
+        this.attachedPluginTools.set(agentId, transformed.tools as AttachedAgentTool[]);
     }
     const context: AgentLaunchContext = {
       agentId,
@@ -5536,13 +5631,21 @@ export class AgentManager {
         ...agentIdentityEnv({ agentId, cwd, opening }),
       },
     };
+    const useNativeTools =
+      this.jagentdeskToolsEnabled && client.capabilities.supportsNativeJAgentDeskTools;
     if (
-      this.jagentdeskToolsEnabled &&
-      client.capabilities.supportsNativeJAgentDeskTools &&
-      this.jagentdeskToolCatalogFactory
+      this.jagentdeskToolCatalogFactory &&
+      (useNativeTools || this.getPluginTools(agentId).length > 0)
     ) {
-      context.jagentdeskTools = await this.jagentdeskToolCatalogFactory({ callerAgentId: agentId });
+      try {
+        const catalog = await this.jagentdeskToolCatalogFactory({ callerAgentId: agentId });
+        if (useNativeTools) context.jagentdeskTools = catalog;
+      } catch (error) {
+        this.detachPluginTools(agentId);
+        throw error;
+      }
     }
+    this.sessionOpenGenerations.set(agentId, generation);
     return context;
   }
 

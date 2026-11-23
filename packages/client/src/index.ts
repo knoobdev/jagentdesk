@@ -331,6 +331,11 @@ export interface JAgentDeskAgentHandle {
   readonly timeline: JAgentDeskAgentTimelineHandle;
   current(): JAgentDeskAgent | null;
   refresh(requestId?: string): Promise<JAgentDeskAgentRefetchResult | null>;
+  /**
+   * Reopens the provider session with current configuration, rerunning session-open hooks.
+   * Interrupts a running turn and returns the refreshed snapshot.
+   */
+  reload(options?: { requestId?: string }): Promise<JAgentDeskAgentRefetchResult | null>;
   send(text: string, options?: JAgentDeskAgentSendOptions): Promise<void>;
   /** Sends a prompt and resolves when that turn finishes or needs attention. */
   run(text: string, options?: JAgentDeskAgentRunOptions): Promise<JAgentDeskAgentRunResult>;
@@ -808,6 +813,12 @@ function createAgentHandleFactory(daemonClient: DaemonClient): AgentHandleFactor
       current: () => current,
       refresh: async (requestId) => {
         const result = await daemonClient.fetchAgent({ agentId: id, requestId });
+        current = result?.agent ?? null;
+        return result;
+      },
+      reload: async (options) => {
+        await daemonClient.refreshAgent(id, options?.requestId);
+        const result = await daemonClient.fetchAgent({ agentId: id });
         current = result?.agent ?? null;
         return result;
       },

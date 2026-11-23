@@ -65,7 +65,12 @@ function boundaryViolations(entry: string, runtime: "shared" | "server" | "clien
 
 describe("plugin SDK import boundaries", () => {
   it("publishes process capabilities without their Windows implementation helpers", () => {
-    expect(Object.keys(server).sort()).toEqual(["execCommand", "spawnProcess", "terminateProcess"]);
+    expect(Object.keys(server).sort()).toEqual([
+      "defineAgentTool",
+      "execCommand",
+      "spawnProcess",
+      "terminateProcess",
+    ]);
   });
 
   it("classifies every published entry", () => {
@@ -124,5 +129,56 @@ describe("plugin example import boundaries", () => {
       }
     }
     expect(violations).toEqual([]);
+  });
+});
+
+describe("plugin agent tools SDK boundary", () => {
+  it("lets a session hook attach typed tools without exposing their transport", () => {
+    expect(
+      typeErrors(`
+      import { z } from "zod";
+      import { defineAgentTool, type PluginServerContext, type AgentToolResult, type AgentToolContext, type AgentToolDefinition } from "@jagentdesk/plugin/server";
+      const tool: AgentToolDefinition = defineAgentTool({
+        name: "create_issue",
+        description: "Create an issue",
+        input: z.object({ title: z.string(), count: z.string().transform(Number) }),
+        async execute(input, { agent, jagentdesk, signal }) {
+          const count: number = input.count;
+          // @ts-expect-error input is inferred from the schema
+          input.missing;
+          return { text: agent.id + input.title, structuredContent: { count } };
+        },
+      });
+      export default function contribute(server: PluginServerContext) {
+        server.before("agent.session_open", ({ request }) => {
+          const title: string | null = request.title;
+          // @ts-expect-error labels are read-only
+          request.labels.x = "changed";
+          if (request.labels.x !== "y") return;
+          return { ...request, tools: [...request.tools, tool] };
+        });
+        return () => {};
+      }
+    `),
+    ).toEqual([]);
+  });
+});
+
+describe("agent session reload SDK boundary", () => {
+  it("exposes reload separately from snapshot refresh", () => {
+    expect(
+      typeErrors(`
+      import { type PluginServerContext } from "@jagentdesk/plugin/server";
+      import { type JAgentDeskAgentRefetchResult } from "@jagentdesk/client";
+      async function reload(server: PluginServerContext, jagentdesk: import("@jagentdesk/client").JAgentDeskApi) {
+        const agent = jagentdesk.agents.ref("chosen-agent");
+        const read: JAgentDeskAgentRefetchResult | null = await agent.refresh("read-snapshot");
+        const reopened: JAgentDeskAgentRefetchResult | null = await agent.reload({ requestId: "reload-session" });
+        await agent.reload();
+        // @ts-expect-error reload options can grow without a positional signature change
+        await agent.reload("reload-session");
+      }
+    `),
+    ).toEqual([]);
   });
 });
