@@ -85,8 +85,10 @@ definition, no longer eligible to begin.
 - Animated panel nodes use React Native static styles plus inline theme values. Do not attach
   Unistyles-generated styles to those nodes; Unistyles and Reanimated patching the same Fabric node
   has caused native crashes.
-- The plain React wrapper owns `display: none` after settlement. This prevents a stale Fabric animated
-  prop commit from resurrecting a closed overlay.
+- The plain React wrapper owns visibility after settlement: `display: none` on web and opacity on
+  native. Keep hidden native overlays laid out so Android touch cancellation cannot reset their
+  retained scroll range. Reanimated never writes visibility props; stale Fabric commits must not
+  resurrect a closed overlay.
 - Hidden tabs and workspaces use `RetainedPanel`. It owns a non-collapsible native root, visibility,
   pointer events, and the active signal consumed by `useRetainedPanelActive`.
 - Panels whose gesture wrapper already owns visibility use `RetainedPanelActivity` to provide the
