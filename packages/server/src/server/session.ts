@@ -650,7 +650,6 @@ export interface SessionOptions {
     builtin?: BuiltinPluginState;
     refreshBuiltinAvailability?(): Promise<void>;
     listUsageReports?: NonNullable<UsageSessionOptions["runtime"]>["listUsageReports"];
-    resolveUsageReference?: NonNullable<UsageSessionOptions["runtime"]>["resolveUsageReference"];
     listLegacyUsage?: NonNullable<UsageSessionOptions["runtime"]>["listLegacyUsage"];
     wait: import("./plugins/lifecycle/index.js").PluginLifecycle["wait"];
     before: import("./plugins/lifecycle/index.js").PluginLifecycle["before"];
@@ -1235,8 +1234,6 @@ export class Session {
     this.figmaSession = this.createFigmaSession(options.figmaService);
     this.usageSession = new UsageSession({
       emit: (message) => this.emit(message),
-      listAgents: () => this.agentManager.listAgents(),
-      getAgent: (agentId) => this.agentManager.getAgent(agentId),
       runtime: createPluginUsageRuntime(options.pluginRuntime),
       logger: this.sessionLogger,
     });
@@ -3608,8 +3605,6 @@ export class Session {
         return this.providerCatalogSession.handleProviderDiagnosticRequest(msg);
       case "usage.list_reports.request":
         return this.usageSession.handleListReports(msg);
-      case "agent.resolve_usage_report.request":
-        return this.usageSession.handleResolveAgentReport(msg);
       case "provider.usage.list.request":
         return this.providerCatalogSession.handleProviderUsageListRequest(msg);
       default:
@@ -10248,11 +10243,9 @@ function isValidGitHubRepoSegment(value: string): boolean {
 function createPluginUsageRuntime(
   runtime: SessionOptions["pluginRuntime"],
 ): UsageSessionOptions["runtime"] {
-  if (!runtime?.listUsageReports || !runtime.resolveUsageReference || !runtime.listLegacyUsage)
-    return undefined;
+  if (!runtime?.listUsageReports || !runtime.listLegacyUsage) return undefined;
   return {
     listUsageReports: runtime.listUsageReports.bind(runtime),
-    resolveUsageReference: runtime.resolveUsageReference.bind(runtime),
     listLegacyUsage: runtime.listLegacyUsage.bind(runtime),
   };
 }

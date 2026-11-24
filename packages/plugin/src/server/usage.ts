@@ -5,13 +5,19 @@ import type { JsonValue } from "@jagentdesk/protocol/agent-types";
 export interface UsageWindow {
   id: string;
   label: string;
+  /**
+   * A few characters naming the window where space is tight, e.g. "5h" or "wk". An empty string
+   * shows the percent alone; leaving it out shows `label`.
+   */
+  shortLabel?: string;
+  /** Shown in the usage summary until the user pins windows of their own. */
+  summary?: boolean;
   usedPct?: number | null;
   remainingPct?: number | null;
   resetsAt?: string | null;
   runsOutAt?: string | null;
   shortfallPct?: number | null;
   tone?: "default" | "ok" | "warning" | "danger";
-  headline?: boolean;
 }
 
 export interface UsageBalance {
@@ -32,13 +38,28 @@ export interface UsageDetail {
   tone?: UsageWindow["tone"];
 }
 
-export interface UsageReport {
-  status: "available" | "unavailable" | "error";
-  planLabel?: string;
-  windows: UsageWindow[];
-  balances?: UsageBalance[];
-  details?: UsageDetail[];
-  error?: string;
+export type UsageProblem =
+  | { kind: "expired"; expiresAt: string; refreshedBy?: string }
+  | { kind: "rejected"; status: number; refreshedBy?: string }
+  | { kind: "no_quota"; detail: string };
+
+export type UsageReport =
+  | {
+      status: "available";
+      planLabel?: string;
+      windows: UsageWindow[];
+      balances?: UsageBalance[];
+      details?: UsageDetail[];
+    }
+  | { status: "unavailable"; problem: UsageProblem }
+  | { status: "error"; error: string };
+
+export interface UsageAccount {
+  /** Stable across token rotation; [A-Za-z0-9._-]{1,128}. Never a credential or raw email. */
+  key: string;
+  label?: string;
+  /** Store locator, opaque to the daemon. */
+  input: JsonValue;
 }
 
 export interface UsageSourceRegistration {
@@ -46,19 +67,20 @@ export interface UsageSourceRegistration {
   label: string;
   icon?: string;
   input: ZodType;
-  /** Stable account identity, resolved without fetching usage. */
-  identify(input: unknown): Promise<{ key: string; label?: string } | null>;
+  /** Every account whose login exists on this machine. Empty when none. */
+  discover(): Promise<UsageAccount[]>;
+  /** Re-reads the login store; never writes it. */
   fetch(input: unknown): Promise<UsageReport>;
-  discover?(): Promise<JsonValue[]>;
 }
 
 export function windowFromUsedPct(input: {
   id: string;
   label: string;
+  shortLabel?: string;
+  summary?: boolean;
   utilizationPct: number | null | undefined;
   resetsAt?: string | null;
   tone?: UsageWindow["tone"];
-  headline?: boolean;
 }): UsageWindow {
   const usedPct = typeof input.utilizationPct === "number" ? input.utilizationPct : null;
   const window: UsageWindow = {
@@ -68,8 +90,9 @@ export function windowFromUsedPct(input: {
     remainingPct: usedPct === null ? null : Math.max(0, 100 - usedPct),
     resetsAt: input.resetsAt ?? null,
   };
+  if (input.shortLabel !== undefined) window.shortLabel = input.shortLabel;
+  if (input.summary) window.summary = true;
   if (input.tone) window.tone = input.tone;
-  if (input.headline) window.headline = true;
   return window;
 }
 
@@ -114,11 +137,6 @@ export function hashAccountKey(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-export function unavailableUsage(): UsageReport {
-  return {
-    status: "unavailable",
-    windows: [],
-    balances: [],
-    details: [],
-  };
+export function unavailable(problem: UsageProblem): UsageReport {
+  return { status: "unavailable", problem };
 }

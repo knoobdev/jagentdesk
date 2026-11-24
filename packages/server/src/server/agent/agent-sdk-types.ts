@@ -1,6 +1,5 @@
 import type { Options as ClaudeAgentOptions } from "@anthropic-ai/claude-agent-sdk";
 import type {
-  JsonValue,
   AgentFeature,
   AgentFeatureSelect,
   AgentFeatureToggle,
@@ -695,13 +694,7 @@ export interface AgentUsageSession {
   sessionKey: string;
 }
 
-export interface UsageReference {
-  source: string;
-  input: JsonValue;
-}
-
 export interface AgentSession {
-  getUsageReference?(): Promise<UsageReference | null>;
   /** Persist the session's current handle immediately after an interactive resume. */
   readonly persistenceUpdatedOnResume?: boolean;
   usageSession?(): AgentUsageSession | null;

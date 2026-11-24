@@ -1,6 +1,5 @@
 import { UsageSourceRegistry } from "./usage-sources/index.js";
 import type { PluginUsageSourceMetadata } from "./plugin-process-protocol.js";
-import type { UsageReference } from "../agent/agent-sdk-types.js";
 import { isCommandAvailable } from "../../executable-resolution/executable-resolution.js";
 import type { BuiltinPluginId } from "@jagentdesk/protocol/builtin-plugins";
 import { BuiltinPluginState } from "./builtin/state.js";
@@ -63,7 +62,6 @@ interface PluginRuntimePort {
   getLogs(pluginId: string): PluginLogEntry[];
   clearLogs(pluginId: string): void;
   getUsageSourceRegistrations?(pluginId: string): readonly PluginUsageSourceMetadata[];
-  identifyUsage?: PluginRuntime["identifyUsage"];
   fetchUsage?: PluginRuntime["fetchUsage"];
   discoverUsage?: PluginRuntime["discoverUsage"];
   getProviderRegistrations?(pluginId: string): readonly PluginProviderMetadata[];
@@ -210,16 +208,8 @@ export class PluginService {
     return [...this.providers.values()].sort((left, right) => left.id.localeCompare(right.id));
   }
 
-  listUsageReports(options?: {
-    forceRefresh?: boolean;
-    reportIds?: string[];
-    references?: UsageReference[];
-  }) {
+  listUsageReports(options?: { forceRefresh?: boolean; reportIds?: string[] }) {
     return this.usageSources.listReports(options);
-  }
-
-  resolveUsageReference(reference: UsageReference) {
-    return this.usageSources.resolveReference(reference);
   }
 
   listLegacyUsage() {
@@ -698,11 +688,6 @@ export class PluginService {
               throw new Error(`Invalid usage discovery from ${source.id}`);
             return result;
           },
-          identify: (input) =>
-            this.runtime.identifyUsage!(pluginId, source.id, input) as Promise<{
-              key: string;
-              label?: string;
-            } | null>,
           fetch: (input) => {
             return this.runtime.fetchUsage!(pluginId, source.id, input);
           },

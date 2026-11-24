@@ -384,34 +384,18 @@ export function createPluginWorker(options: {
 
   function isUsageMessage(
     message: PluginProcessRequest,
-  ): message is Extract<
-    PluginProcessRequest,
-    { type: "usage.identify" | "usage.fetch" | "usage.discover" }
-  > {
-    return (
-      message.type === "usage.identify" ||
-      message.type === "usage.fetch" ||
-      message.type === "usage.discover"
-    );
+  ): message is Extract<PluginProcessRequest, { type: "usage.fetch" | "usage.discover" }> {
+    return message.type === "usage.fetch" || message.type === "usage.discover";
   }
-
   function handleUsageRequest(
-    message: Extract<
-      PluginProcessRequest,
-      { type: "usage.identify" | "usage.fetch" | "usage.discover" }
-    >,
+    message: Extract<PluginProcessRequest, { type: "usage.fetch" | "usage.discover" }>,
   ): void {
     void (async () => {
       const source = usageSources.get(message.sourceId);
       if (!source) throw new Error(`Unknown usage source: ${message.sourceId}`);
-      if (message.type === "usage.discover")
-        return jsonTransportValue(source.discover ? await source.discover() : []);
+      if (message.type === "usage.discover") return jsonTransportValue(await source.discover());
       const input = await source.input.parseAsync(message.input);
-      return jsonTransportValue(
-        message.type === "usage.identify"
-          ? await source.identify(input)
-          : await source.fetch(input),
-      );
+      return jsonTransportValue(await source.fetch(input));
     })().then(
       (output) => send({ type: "result", requestId: message.requestId, output }),
       (error) => send({ type: "error", requestId: message.requestId, error: describeError(error) }),
