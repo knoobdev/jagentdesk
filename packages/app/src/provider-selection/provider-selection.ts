@@ -122,18 +122,20 @@ export function buildProviderSelectorProviders(input: {
   }));
 }
 
+/** Keep the saved choice visible even when this host cannot run it. */
 export function buildSelectableProviderSelectorProviders(
   entries: ProviderSnapshotEntry[] | undefined,
+  options: { selectedProvider: string | null },
 ): ProviderSelectorProvider[] {
   return (entries ?? [])
-    .filter((entry) => entry.enabled)
+    .filter(
+      (entry) =>
+        entry.provider === options.selectedProvider ||
+        (entry.enabled && entry.status !== "unavailable"),
+    )
     .map((entry) => {
       const label = entry.label ?? entry.provider;
-      return {
-        id: entry.provider,
-        label,
-        modelSelection: buildEntryModelSelection(entry, label),
-      };
+      return { id: entry.provider, label, modelSelection: buildEntryModelSelection(entry, label) };
     });
 }
 

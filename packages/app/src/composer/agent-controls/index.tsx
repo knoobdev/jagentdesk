@@ -1479,13 +1479,15 @@ export const AgentControls = memo(function AgentControls({
     // pick just changes the model; a cross-provider pick routes through
     // switchAgentProvider (context carries over).
     if (snapshotEntries && snapshotEntries.length > 0) {
-      return buildSelectableProviderSelectorProviders(snapshotEntries);
+      return buildSelectableProviderSelectorProviders(snapshotEntries, {
+        selectedProvider: agent?.provider ?? null,
+      });
     }
     return buildProviderSelectorProviders({
       providerDefinitions: agentProviderDefinitions,
       modelsByProvider: agentProviderModels,
     });
-  }, [agentProviderDefinitions, agentProviderModels, snapshotEntries]);
+  }, [agentProviderDefinitions, agentProviderModels, snapshotEntries, agent]);
 
   const modelSelection = resolveAgentModelSelection({
     models,
