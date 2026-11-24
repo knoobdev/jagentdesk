@@ -22,7 +22,7 @@ export const STATIC_BUILTIN_PLUGIN_IDS = [
   "session-share",
   "browser-tools",
 ] as const;
-export const BUNDLED_PLUGIN_IDS = ["worktree-include"] as const;
+export const BUNDLED_PLUGIN_IDS = ["worktree-include", "muse-provider"] as const;
 export const BUILTIN_PLUGIN_IDS = [...STATIC_BUILTIN_PLUGIN_IDS, ...BUNDLED_PLUGIN_IDS] as const;
 export type BuiltinPluginId = (typeof BUILTIN_PLUGIN_IDS)[number];
 export const BuiltinPluginIdSchema = z.enum(BUILTIN_PLUGIN_IDS);
@@ -190,10 +190,19 @@ export const BUILTIN_PLUGIN_MANIFESTS: readonly BuiltinPluginManifest[] = [
     defaultEnabled: true,
     requires: [],
   },
+  {
+    id: "muse-provider",
+    name: "Muse Code",
+    description: "Run Muse Code through its local muse CLI.",
+    defaultEnabled: true,
+    requires: [],
+    command: "muse",
+  },
 ];
 
 /** Existing and new server-info flags owned by each feature. Core forge checkout stays independent. */
 export const BUILTIN_PLUGIN_FEATURES = {
+  "muse-provider": [],
   "worktree-include": [],
   docker: ["docker"],
   clusters: ["clusters"],
