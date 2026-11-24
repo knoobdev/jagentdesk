@@ -648,6 +648,7 @@ export interface CreateAgentRequestOptions extends AgentConfigOverrides {
   git?: GitSetupOptions;
   worktree?: CreateAgentRequestMessage["worktree"];
   autoArchive?: CreateAgentRequestMessage["autoArchive"];
+  background?: CreateAgentRequestMessage["background"];
   // COMPAT(createAgentWorktree): low-level old callers may still send the
   // create-agent worktree field. Added in v0.2.0; remove after 2027-01-17.
   worktreeName?: string;
@@ -1364,6 +1365,9 @@ type ShutdownRequestedStatusPayload = z.infer<typeof ShutdownRequestedStatusPayl
 export interface ShutdownServerOptions {
   requestId?: string;
   timeout?: number;
+  // Leave terminals running for the next daemon. Only daemons advertising
+  // `features.terminalsSurviveRestart` honor it; check before sending.
+  keepTerminals?: boolean;
 }
 export interface DaemonStatusOptions {
   requestId?: string;
@@ -1659,6 +1663,9 @@ type CorrelatedResponsePayload<TType extends CorrelatedResponseType> = Extract<
   CorrelatedResponseMessage,
   { type: TType }
 >["payload"];
+export type AgentBackgroundWorkListPayload =
+  CorrelatedResponsePayload<"agent.background_work.list.response">;
+export type AgentBackgroundWorkItem = AgentBackgroundWorkListPayload["items"][number];
 
 // Argo CD (spec 30.5): one typed entry point for every `argocd.*.request`; the response type is
 // the request type with `.response`, its payload carries `error` + `errorCode`.
@@ -1891,6 +1898,36 @@ function assertTransportFrameFits(frame: string | Uint8Array | ArrayBuffer): voi
   const size = new TextEncoder().encode(frame).byteLength;
   if (size > MAX_WEBSOCKET_MESSAGE_BYTES)
     throw messageTooLargeError(size, MAX_WEBSOCKET_MESSAGE_BYTES);
+}
+
+export class TerminalKeepUnsupportedError extends Error {
+  readonly code = "TERMINALS_KEEP_UNSUPPORTED";
+  // Own fields reach the CLI's JSON error output, which desktop reads.
+  readonly version: string | null;
+
+  constructor(target: string, version: string | null) {
+    super(
+      `The daemon at ${target}${version ? ` (v${version})` : ""} closes terminals when it stops. Update it first, or run \`jagentdesk daemon stop\` to stop it and close them.`,
+    );
+    this.name = "TerminalKeepUnsupportedError";
+    this.version = version;
+  }
+}
+
+/**
+ * Gate for an explicit "keep terminals" stop. Older daemons drop `keepTerminals` and close the
+ * terminals anyway, so read the capability on the connection that will carry the shutdown and
+ * refuse before sending it.
+ */
+// COMPAT(terminalsSurviveRestart): added in v0.12.0, remove gate after 2027-04-21.
+export function requireTerminalKeepCapability(
+  client: Pick<DaemonClient, "getLastServerInfoMessage">,
+  target: string,
+): void {
+  const serverInfo = client.getLastServerInfoMessage();
+  if (serverInfo?.features?.terminalsSurviveRestart !== true) {
+    throw new TerminalKeepUnsupportedError(target, serverInfo?.version ?? null);
+  }
 }
 
 export class DaemonClient {
@@ -3046,6 +3083,7 @@ export class DaemonClient {
     const message = SessionInboundMessageSchema.parse({
       type: "fetch_agents_request",
       requestId: resolvedRequestId,
+      includeBackground: options?.includeBackground,
       ...(options?.scope ? { scope: options.scope } : {}),
       ...(options?.filter ? { filter: options.filter } : {}),
       ...(options?.sort ? { sort: options.sort } : {}),
@@ -3074,6 +3112,7 @@ export class DaemonClient {
     const message = SessionInboundMessageSchema.parse({
       type: "fetch_agent_history_request",
       requestId: resolvedRequestId,
+      includeBackground: options?.includeBackground,
       ...(options?.filter ? { filter: options.filter } : {}),
       ...(options?.sort ? { sort: options.sort } : {}),
       ...(options?.page ? { page: options.page } : {}),
@@ -3437,7 +3476,16 @@ export class DaemonClient {
   // Agent Lifecycle
   // ============================================================================
 
+  private requireBackgroundAgentCreation(options: CreateAgentRequestOptions): void {
+    if (
+      options.background !== undefined &&
+      this.lastServerInfoMessage?.features?.backgroundAgents !== true
+    )
+      throw new Error("Update the host to use background agents.");
+  }
+
   async createAgent(options: CreateAgentRequestOptions): Promise<AgentSnapshotPayload> {
+    this.requireBackgroundAgentCreation(options);
     const requestId = this.createRequestId(options.requestId);
     const config = resolveAgentConfig(options);
 
@@ -3447,6 +3495,7 @@ export class DaemonClient {
       config,
       ...(options.env ? { env: options.env } : {}),
       ...(options.workspaceId !== undefined ? { workspaceId: options.workspaceId } : {}),
+      background: options.background,
       ...(options.callerAgentId !== undefined ? { callerAgentId: options.callerAgentId } : {}),
       ...(options.initialPrompt ? { initialPrompt: options.initialPrompt } : {}),
       ...(options.clientMessageId ? { clientMessageId: options.clientMessageId } : {}),
@@ -3959,6 +4008,58 @@ export class DaemonClient {
     return payload;
   }
 
+  async listAgentBackgroundWork(
+    agentId: string,
+    options: { requestId?: string; timeout?: number } = {},
+  ): Promise<AgentBackgroundWorkItem[]> {
+    this.assertAgentBackgroundWorkSupported();
+    const payload =
+      await this.sendNamespacedCorrelatedSessionRequest<"agent.background_work.list.response">({
+        requestId: options.requestId,
+        timeout: options.timeout,
+        message: { type: "agent.background_work.list.request", agentId },
+      });
+    if (payload.error) throw new Error(payload.error);
+    return payload.items;
+  }
+
+  async stopAgentBackgroundWork(
+    agentId: string,
+    item: AgentBackgroundWorkItem,
+    options: { requestId?: string; timeout?: number } = {},
+  ): Promise<void> {
+    // COMPAT(agentBackgroundWorkStop): added after v0.15.0, remove after 2027-05-03.
+    if (this.lastServerInfoMessage?.features?.agentBackgroundWorkStop !== true)
+      throw new Error("Update the host to stop background work.");
+    if (!item.canStop || !item.stopToken) throw new Error("Background work cannot be stopped.");
+    const payload =
+      await this.sendNamespacedCorrelatedSessionRequest<"agent.background_work.stop.response">({
+        requestId: options.requestId,
+        timeout: options.timeout ?? 30000,
+        message: {
+          type: "agent.background_work.stop.request",
+          agentId,
+          itemId: item.id,
+          stopToken: item.stopToken,
+        },
+      });
+    if (payload.error) throw new Error(payload.error);
+  }
+
+  observeAgentBackgroundWork(
+    options: { signal?: AbortSignal } = {},
+  ): OwnedSubscription<CorrelatedResponsePayload<"session.events.set_subscription.response">> {
+    this.assertAgentBackgroundWorkSupported();
+    return this.observeEvents(["agent.background_work.update"], options);
+  }
+
+  private assertAgentBackgroundWorkSupported(): void {
+    // COMPAT(agentBackgroundWork): added after v0.11.0-beta.5, remove gate after 2027-04-06.
+    if (this.lastServerInfoMessage?.features?.agentBackgroundWork !== true) {
+      throw new Error("Update the host to see an agent's background work.");
+    }
+  }
+
   async fetchProviderSubagentTimeline(
     parentAgentId: string,
     subagentId: string,
@@ -4316,12 +4417,17 @@ export class DaemonClient {
     return payload.notice ?? null;
   }
 
-  async restartServer(reason?: string, requestId?: string): Promise<RestartRequestedStatusPayload> {
+  async restartServer(
+    reason?: string,
+    requestId?: string,
+    options?: { timeout?: number; killTerminals?: boolean },
+  ): Promise<RestartRequestedStatusPayload> {
     const resolvedRequestId = this.createRequestId(requestId);
     const message = SessionInboundMessageSchema.parse({
       type: "restart_server_request",
       ...(reason && reason.trim().length > 0 ? { reason } : {}),
       requestId: resolvedRequestId,
+      ...(options?.killTerminals ? { killTerminals: true } : {}),
     });
     return this.sendRequest({
       requestId: resolvedRequestId,
@@ -4348,6 +4454,7 @@ export class DaemonClient {
     const message = SessionInboundMessageSchema.parse({
       type: "shutdown_server_request",
       requestId: resolvedRequestId,
+      ...(options?.keepTerminals ? { keepTerminals: true } : {}),
     });
     return this.sendRequest({
       requestId: resolvedRequestId,
@@ -10936,6 +11043,7 @@ export class DaemonClient {
           protocolVersion: 1,
           capabilities: {
             [CLIENT_CAPS.binaryChunkingV1]: true,
+            [CLIENT_CAPS.backgroundAgents]: true,
             [CLIENT_CAPS.customModeIcons]: true,
             [CLIENT_CAPS.reasoningMergeEnum]: true,
             [CLIENT_CAPS.pluginTimelineItems]: true,

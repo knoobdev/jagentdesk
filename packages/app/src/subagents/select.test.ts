@@ -151,6 +151,22 @@ describe("selectSubagentsForParent", () => {
     expect(rows.map((row) => row.id)).toEqual(["child-a"]);
   });
 
+  it("excludes background children from the track", () => {
+    setAgents([
+      makeAgent({ id: "parent-a" }),
+      makeAgent({ id: "child-a", parentAgentId: "parent-a" }),
+      makeAgent({ id: "background-child", parentAgentId: "parent-a", background: true }),
+    ]);
+
+    const rows = selectSubagentsForParent(
+      useSessionStore.getState(),
+      { serverId: SERVER_ID, parentAgentId: "parent-a" },
+      EMPTY_PENDING_ARCHIVE_IDS,
+    );
+
+    expect(rows.map((row) => row.id)).toEqual(["child-a"]);
+  });
+
   it("excludes siblings, unrelated agents, and grandchildren", () => {
     setAgents([
       makeAgent({ id: "parent-a" }),
@@ -273,6 +289,7 @@ describe("selectSubagentsForParent", () => {
       },
     ]);
     expect(Object.keys(rows[0] ?? {}).sort()).toEqual([
+      "backgroundWork",
       "createdAt",
       "description",
       "id",

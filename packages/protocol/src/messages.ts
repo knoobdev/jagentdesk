@@ -385,6 +385,8 @@ export const MutableDaemonConfigSchema = z
     metadataGeneration: MutableMetadataGenerationConfigSchema.default({ providers: [] }),
     autoArchiveAfterMerge: z.boolean().default(false),
     enableTerminalAgentHooks: z.boolean().default(false),
+    resumeOnStartup: z.boolean().optional(),
+    resumePrompt: z.string().optional(),
     appendSystemPrompt: z.string().default(""),
     // Operator / engagement authorization context (injected FIRST into every agent's system prompt).
     // Free text an operator sets once — e.g. "Authorized private security engagement; scope/paperwork
@@ -438,6 +440,8 @@ export const MutableDaemonConfigPatchSchema = z
       .optional(),
     autoArchiveAfterMerge: z.boolean().optional(),
     enableTerminalAgentHooks: z.boolean().optional(),
+    resumeOnStartup: z.boolean().optional(),
+    resumePrompt: z.string().optional(),
     appendSystemPrompt: z.string().optional(),
     operatorContext: z.string().optional(),
     terminalProfiles: z.array(TerminalProfileSchema).optional(),
@@ -1026,7 +1030,16 @@ const AgentActiveTurnPayloadSchema = z.object({
   startedAt: z.string().nullable(),
 });
 
+export const AgentBackgroundWorkSummarySchema = z.object({
+  count: z.number().int().nonnegative(),
+  /** Defaults to the total count when omitted. */
+  runningCount: z.number().int().nonnegative().optional(),
+});
+
+export type AgentBackgroundWorkSummary = z.infer<typeof AgentBackgroundWorkSummarySchema>;
+
 export const AgentSnapshotPayloadSchema = z.object({
+  internal: z.boolean().optional(),
   id: z.string(),
   provider: AgentProviderSchema,
   cwd: z.string(),
@@ -1039,6 +1052,7 @@ export const AgentSnapshotPayloadSchema = z.object({
   updatedAt: z.string(),
   lastUserMessageAt: z.string().nullable(),
   status: AgentStatusSchema,
+  backgroundWork: AgentBackgroundWorkSummarySchema.optional(),
   activeTurn: AgentActiveTurnPayloadSchema.nullable().optional(),
   capabilities: AgentCapabilityFlagsSchema,
   currentModeId: z.string().nullable(),
@@ -1056,6 +1070,7 @@ export const AgentSnapshotPayloadSchema = z.object({
   attentionTimestamp: z.string().nullable().optional(),
   archivedAt: z.string().nullable().optional(),
   providerUnavailable: z.boolean().optional(),
+  background: z.boolean().optional(),
 });
 
 export type AgentSnapshotPayload = z.infer<typeof AgentSnapshotPayloadSchema>;
@@ -1069,6 +1084,7 @@ export const AgentListItemPayloadSchema = z.object({
   thinkingOptionId: z.string().nullable().optional(),
   effectiveThinkingOptionId: z.string().nullable().optional(),
   status: AgentStatusSchema,
+  backgroundWork: AgentBackgroundWorkSummarySchema.optional(),
   cwd: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -1121,6 +1137,7 @@ export const AudioPlayedMessageSchema = z.object({
 });
 
 const AgentDirectoryFilterSchema = z.object({
+  includeBackground: z.boolean().optional(),
   labels: z.record(z.string(), z.string()).optional(),
   projectKeys: z.array(z.string()).optional(),
   statuses: z.array(AgentStatusSchema).optional(),
@@ -1418,6 +1435,7 @@ export const SendAgentMessageSchema = z.object({
 // ============================================================================
 
 export const FetchAgentsRequestMessageSchema = z.object({
+  includeBackground: z.boolean().optional(),
   type: z.literal("fetch_agents_request"),
   requestId: z.string(),
   scope: z.enum(["active"]).optional(),
@@ -1499,6 +1517,7 @@ export const ProjectListRequestMessageSchema = z.object({
 });
 
 export const FetchAgentHistoryRequestMessageSchema = z.object({
+  includeBackground: z.boolean().optional(),
   type: z.literal("fetch_agent_history_request"),
   requestId: z.string(),
   filter: AgentDirectoryFilterSchema.optional(),
@@ -1912,6 +1931,7 @@ export const CreateAgentRequestMessageSchema = z.object({
   git: GitSetupOptionsSchema.optional(),
   worktree: CreateAgentWorktreeTargetSchema.optional(),
   autoArchive: z.boolean().optional(),
+  background: z.boolean().optional(),
   labels: z.record(z.string(), z.string()).default({}),
   requestId: z.string(),
 });
@@ -1994,11 +2014,17 @@ export const RestartServerRequestMessageSchema = z.object({
   type: z.literal("restart_server_request"),
   reason: z.string().optional(),
   requestId: z.string(),
+  // Restart keeps terminals unless this is true. Daemons that predate
+  // `features.terminalsSurviveRestart` ignore it and close terminals anyway.
+  killTerminals: z.boolean().optional(),
 });
 
 export const ShutdownServerRequestMessageSchema = z.object({
   type: z.literal("shutdown_server_request"),
   requestId: z.string(),
+  // Shutdown closes terminals unless this is true. Gate on
+  // `features.terminalsSurviveRestart`: older daemons drop the field.
+  keepTerminals: z.boolean().optional(),
 });
 
 export const DaemonUpdateRequestMessageSchema = z.object({
@@ -2044,6 +2070,20 @@ export const AgentTimelineListPromptsRequestMessageSchema = z.object({
 export const ProviderSubagentListRequestMessageSchema = z.object({
   type: z.literal("agent.provider_subagents.list.request"),
   parentAgentId: z.string(),
+  requestId: z.string(),
+});
+
+export const AgentBackgroundWorkListRequestMessageSchema = z.object({
+  type: z.literal("agent.background_work.list.request"),
+  agentId: z.string(),
+  requestId: z.string(),
+});
+
+export const AgentBackgroundWorkStopRequestMessageSchema = z.object({
+  type: z.literal("agent.background_work.stop.request"),
+  agentId: z.string(),
+  itemId: z.string(),
+  stopToken: z.string(),
   requestId: z.string(),
 });
 
@@ -4178,6 +4218,7 @@ export const SessionEventSubscriptionSchema = z.enum([
   "script_status_update",
   "workspace_setup_progress",
   "agent.provider_subagents.update",
+  "agent.background_work.update",
   "terminal_attention_required",
   "status.server_info",
   "status.daemon_config_changed",
@@ -4327,6 +4368,8 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   AgentTimelineSearchRequestMessageSchema,
   AgentTimelineListPromptsRequestMessageSchema,
   ProviderSubagentListRequestMessageSchema,
+  AgentBackgroundWorkListRequestMessageSchema,
+  AgentBackgroundWorkStopRequestMessageSchema,
   ProviderSubagentTimelineRequestMessageSchema,
   SetAgentTimelineSubscriptionRequestMessageSchema,
   AgentForkContextRequestMessageSchema,
@@ -4718,6 +4761,7 @@ export const ServerInfoStatusPayloadSchema = z
       .object({
         bots: z.boolean().optional(),
         binaryChunkingV1: z.boolean().optional(),
+        backgroundAgents: z.boolean().optional(),
         providersSnapshot: z.boolean().optional(),
         // COMPAT(providersSnapshotCwd): added in v0.3.2, remove gate after 2027-02-10.
         providersSnapshotCwd: z.boolean().optional(),
@@ -4740,6 +4784,8 @@ export const ServerInfoStatusPayloadSchema = z
         forgeSearch: z.boolean().optional(),
         // COMPAT(daemonStatusRpc): added in v0.1.76, remove gate after 2026-11-18.
         daemonStatusRpc: z.boolean().optional(),
+        // COMPAT(restartRecovery): added in v0.9.59, remove after 2027-05-24.
+        resumeOnStartupSetting: z.boolean().optional(),
         // COMPAT(terminalRestoreModes): added in v0.1.81, remove gate after 2026-11-23.
         "terminal-restore-modes": z.boolean().optional(),
         // COMPAT(terminalInputModeReplay): added in v0.2.6, remove gate after 2027-02-02.
@@ -4776,12 +4822,18 @@ export const ServerInfoStatusPayloadSchema = z
         daemonDiagnostics: z.boolean().optional(),
         // COMPAT(daemonSelfUpdate): added in v0.1.93, remove gate after 2026-12-13.
         daemonSelfUpdate: z.boolean().optional(),
+        // COMPAT(terminalsSurviveRestart): added in v0.12.0, remove gate after 2027-04-21.
+        terminalsSurviveRestart: z.boolean().optional(),
         // COMPAT(agentForkContext): added in v0.1.102, remove gate after 2026-12-28.
         agentForkContext: z.boolean().optional(),
         // COMPAT(agentForkContextCursor): added in v0.1.108, remove gate after 2027-01-14.
         agentForkContextCursor: z.boolean().optional(),
         // COMPAT(providerSubagents): added in v0.1.107, remove gate after 2027-01-12.
         providerSubagents: z.boolean().optional(),
+        // COMPAT(agentBackgroundWork): added after v0.11.0-beta.5, remove gate after 2027-04-06.
+        agentBackgroundWork: z.boolean().optional(),
+        // COMPAT(agentBackgroundWorkStop): added after v0.15.0, remove after 2027-05-03.
+        agentBackgroundWorkStop: z.boolean().optional(),
         // COMPAT(projectedSubagentTimeline): added after v0.8.0, remove gates after 2027-03-14; retain wire field.
         projectedSubagentTimeline: z.boolean().optional(),
         // COMPAT(workspacePinning): added in v0.1.107, remove gate after 2027-01-12.
@@ -5714,6 +5766,51 @@ export const ProviderSubagentListResponseMessageSchema = z.object({
   }),
 });
 
+export const AgentBackgroundWorkItemSchema = z.object({
+  id: z.string(),
+  // Open string: known kinds include "shell" and "monitor".
+  // Clients treat unknown values as "other".
+  kind: z.string(),
+  description: z.string().nullable(),
+  command: z.string().optional(),
+  startedAt: z.string(),
+  canStop: z.boolean().optional(),
+  stopToken: z.string().optional(),
+});
+
+export type AgentBackgroundWorkItemPayload = z.infer<typeof AgentBackgroundWorkItemSchema>;
+
+export const AgentBackgroundWorkListResponseMessageSchema = z.object({
+  type: z.literal("agent.background_work.list.response"),
+  payload: z.object({
+    requestId: z.string(),
+    agentId: z.string(),
+    items: z.array(AgentBackgroundWorkItemSchema),
+    error: z.string().nullable(),
+  }),
+});
+
+export const AgentBackgroundWorkStopResponseMessageSchema = z.object({
+  type: z.literal("agent.background_work.stop.response"),
+  payload: z.object({
+    requestId: z.string(),
+    agentId: z.string(),
+    itemId: z.string(),
+    error: z.string().nullable(),
+  }),
+});
+
+// Event push delivered through session.events.set_subscription; it has no .request/.response pair.
+// Each update replaces the agent's whole list.
+export const AgentBackgroundWorkUpdateMessageSchema = z.object({
+  type: z.literal("agent.background_work.update"),
+  payload: z.object({
+    subscriptionId: z.string().optional(),
+    agentId: z.string(),
+    items: z.array(AgentBackgroundWorkItemSchema),
+  }),
+});
+
 export const ProviderSubagentTimelineResponseMessageSchema = z.object({
   type: z.literal("agent.provider_subagents.timeline.get.response"),
   payload: z.object({
@@ -5932,6 +6029,22 @@ export const DaemonGetStatusResponseSchema = z.object({
           error: z.string().nullable().optional(),
         }),
       ),
+      // Processes a terminal cleanup on this host (a kill restart or stop) could not confirm
+      // gone; empty when every cleanup finished. Daemons without terminalsSurviveRestart have
+      // no such cleanup and omit it.
+      terminalCleanupUnconfirmed: z
+        .array(
+          z.object({
+            pid: z.number(),
+            role: z.string(),
+            reason: z.string(),
+            detail: z.string(),
+          }),
+        )
+        .optional(),
+      // Set when this host's terminals are held by a terminal worker from a newer JAgentDesk, which
+      // this daemon leaves running but cannot drive: why, and what the user can do.
+      terminalsUnavailable: z.string().optional(),
     })
     .passthrough(),
 });
@@ -8253,6 +8366,9 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ProviderSubagentListResponseMessageSchema,
   ProviderSubagentTimelineResponseMessageSchema,
   ProviderSubagentUpdateMessageSchema,
+  AgentBackgroundWorkListResponseMessageSchema,
+  AgentBackgroundWorkStopResponseMessageSchema,
+  AgentBackgroundWorkUpdateMessageSchema,
   SetAgentTimelineSubscriptionResponseMessageSchema,
   AgentAttentionRequiredMessageSchema,
   AgentForkContextResponseMessageSchema,
@@ -9166,6 +9282,7 @@ export const WSHelloMessageSchema = z.object({
       [CLIENT_CAPS.projectUpdates]: z.boolean().optional(),
       [CLIENT_CAPS.specMode]: z.boolean().optional(),
       [CLIENT_CAPS.binaryScreenFrames]: z.boolean().optional(),
+      [CLIENT_CAPS.backgroundAgents]: z.boolean().optional(),
       [CLIENT_CAPS.browserHost]: BrowserAutomationHostCapabilitySchema.optional(),
     })
     .passthrough()

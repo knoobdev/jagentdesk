@@ -8,6 +8,7 @@ import type {
 } from "./messages.js";
 import {
   deriveAgentStateBucket,
+  isAgentRunning,
   getWorkspaceStateBucketPriority,
   type WorkspaceStateBucket,
 } from "@jagentdesk/protocol/agent-state-bucket";
@@ -243,8 +244,12 @@ export class WorkspaceDirectory {
       });
     }
 
+    // Background agents report to their creator; they never move the workspace's status.
     const activeAgents = agents.filter(
-      (agent) => !agent.archivedAt && this.deps.isProviderVisibleToClient(agent.provider),
+      (agent) =>
+        !agent.archivedAt &&
+        !agent.background &&
+        this.deps.isProviderVisibleToClient(agent.provider),
     );
     this.applyAgentBucketContributions({
       activeAgents,
@@ -355,7 +360,7 @@ export class WorkspaceDirectory {
         continue;
       }
       const isWorkspaceRoot = workspaceAgent.id === agent.id;
-      if (!isWorkspaceRoot && agent.status !== "running") {
+      if (!isWorkspaceRoot && !isAgentRunning(agent)) {
         continue;
       }
       const bucket = isWorkspaceRoot
@@ -364,6 +369,7 @@ export class WorkspaceDirectory {
             pendingPermissionCount: agent.pendingPermissions?.length ?? 0,
             requiresAttention: agent.requiresAttention,
             attentionReason: agent.attentionReason ?? null,
+            backgroundWork: agent.backgroundWork,
           })
         : "running";
 
@@ -513,6 +519,7 @@ export class WorkspaceDirectory {
           pendingPermissionCount: agent.pendingPermissions?.length ?? 0,
           requiresAttention: agent.requiresAttention,
           attentionReason: agent.attentionReason ?? null,
+          backgroundWork: agent.backgroundWork,
         });
         return derived === winningBucket;
       })

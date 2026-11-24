@@ -2,6 +2,7 @@ import type pino from "pino";
 import type { ProviderAvailability } from "../../agent/agent-manager.js";
 import type { SessionInboundMessage, SessionOutboundMessage } from "../../messages.js";
 import { getPidLockInfo } from "../../pid-lock.js";
+import { readUnconfirmedTerminalCleanup } from "../../../terminal/terminal-worker-reaper.js";
 import { generateLocalPairingOffer } from "../../pairing-offer.js";
 import {
   collectDaemonDiagnostics,
@@ -33,6 +34,7 @@ export interface DaemonSessionHost {
     clientId: string;
     requestId: string;
     reason: string;
+    keepTerminals: boolean;
   }): void;
 }
 
@@ -47,6 +49,8 @@ export interface DaemonSessionOptions {
   listProjects: () => Promise<PersistedProjectRecord[]>;
   listWorkspaces: () => Promise<PersistedWorkspaceRecord[]>;
   listProviderAvailability: () => Promise<ProviderAvailability[]>;
+  /** Why this host's terminals cannot be served (held by a newer JAgentDesk's worker), if so. */
+  getTerminalsUnavailable?: () => string | null;
   getWebSocketRuntimeMetrics?: () => DaemonWebSocketRuntimeDiagnosticSnapshot | null;
   logger: pino.Logger;
   hubRelationships?: HubRelationshipManagement;
@@ -87,6 +91,7 @@ export class DaemonSession {
     expiresAt: number;
   } | null = null;
   private providerAvailabilityRefresh: Promise<ProviderAvailability[]> | null = null;
+  private readonly getTerminalsUnavailable: () => string | null;
   private readonly getWebSocketRuntimeMetrics: () => DaemonWebSocketRuntimeDiagnosticSnapshot | null;
   private readonly logger: pino.Logger;
   private readonly selfUpdate: DaemonSelfUpdateSessionController;
@@ -113,6 +118,7 @@ export class DaemonSession {
     this.listProjects = options.listProjects;
     this.listWorkspaces = options.listWorkspaces;
     this.listProviderAvailability = options.listProviderAvailability;
+    this.getTerminalsUnavailable = options.getTerminalsUnavailable ?? (() => null);
     this.getWebSocketRuntimeMetrics = options.getWebSocketRuntimeMetrics ?? (() => null);
     this.logger = options.logger;
     this.hubRelationships = options.hubRelationships ?? null;
@@ -221,6 +227,12 @@ export class DaemonSession {
   async handleGetStatusRequest(
     msg: Extract<SessionInboundMessage, { type: "daemon.get_status.request" }>,
   ): Promise<void> {
+    // Read outside the degraded-status fallback below: a status that cannot say whether
+    // terminal cleanup finished must fail the request, not report that nothing is left.
+    const terminalCleanupUnconfirmed = (
+      await readUnconfirmedTerminalCleanup(this.jagentdeskHome)
+    ).map(({ pid, role, reason, detail }) => ({ pid, role, reason, detail }));
+    const terminalsUnavailable = this.getTerminalsUnavailable();
     try {
       const pidInfo = await getPidLockInfo(this.jagentdeskHome);
       const providers = (await this.getCachedProviderAvailability()).map((p) => ({
@@ -240,6 +252,8 @@ export class DaemonSession {
           listen: this.daemonRuntimeConfig?.listen ?? null,
           tailnet: this.daemonRuntimeConfig?.getTailnetAddress() ?? null,
           providers,
+          terminalCleanupUnconfirmed,
+          ...(terminalsUnavailable ? { terminalsUnavailable } : {}),
         },
       });
     } catch (error) {
@@ -256,6 +270,8 @@ export class DaemonSession {
           listen: null,
           tailnet: null,
           providers: [],
+          terminalCleanupUnconfirmed,
+          ...(terminalsUnavailable ? { terminalsUnavailable } : {}),
         },
       });
     }

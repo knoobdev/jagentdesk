@@ -12,6 +12,7 @@ import type { ServerMessage, TerminalSession, TerminalStateSnapshot } from "./te
 import { TerminalSessionController } from "./terminal-session-controller.js";
 import type { TerminalManager, TerminalsChangedEvent } from "./terminal-manager.js";
 import { isSameOrDescendantPath } from "../server/path-utils.js";
+import { TerminalWorkerIncompatibleError } from "./terminal-worker-pool.js";
 
 function deferred<T>(): {
   promise: Promise<T>;
@@ -48,6 +49,10 @@ function createLogger(): pino.Logger {
     warn: vi.fn(),
     error: vi.fn(),
   } as unknown as pino.Logger;
+}
+
+function decodedTerminalFrames(frames: TerminalStreamFrame[]): string {
+  return frames.map((frame) => new TextDecoder().decode(frame.payload)).join("");
 }
 
 describe("terminal-session-controller restore", () => {
@@ -130,7 +135,10 @@ describe("terminal-session-controller restore", () => {
     terminalListener?.({ type: "output", data: "restore-after\n", revision: 2 });
     snapshot.resolve({ state: terminalState("restore-before"), revision: 1 });
     await snapshot.promise;
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await vi.waitFor(() => {
+      const output = decodedTerminalFrames(binaryFrames.slice(1));
+      expect(output).toBe("\x1b[?1h\x1b[?2004hrestore-after\n");
+    });
 
     expect(outboundMessages).toContainEqual({
       type: "subscribe_terminal_response",
@@ -141,14 +149,12 @@ describe("terminal-session-controller restore", () => {
         requestId: "req-1",
       },
     });
-    expect(binaryFrames.map((frame) => frame.opcode)).toEqual([
-      TerminalStreamOpcode.Restore,
-      TerminalStreamOpcode.Output,
-    ]);
+    expect(binaryFrames[0]?.opcode).toBe(TerminalStreamOpcode.Restore);
+    const outputFrames = binaryFrames.slice(1);
+    expect(outputFrames.length).toBeGreaterThan(0);
+    expect(outputFrames.every((frame) => frame.opcode === TerminalStreamOpcode.Output)).toBe(true);
     expect(new TextDecoder().decode(binaryFrames[0]?.payload)).toContain("restore-before");
-    expect(new TextDecoder().decode(binaryFrames[1]?.payload)).toBe(
-      "\x1b[?1h\x1b[?2004hrestore-after\n",
-    );
+    expect(decodedTerminalFrames(outputFrames)).toBe("\x1b[?1h\x1b[?2004hrestore-after\n");
   });
 });
 
@@ -314,6 +320,76 @@ describe("terminal-session-controller legacy terminal creation", () => {
       expect.objectContaining({ cwd: "/work/repo", workspaceId: "ws-1", rows: 55, cols: 136 }),
     );
   });
+});
+
+describe("terminal-session-controller with terminals held by a newer JAgentDesk", () => {
+  const incompatible = new TerminalWorkerIncompatibleError({
+    jagentdeskVersion: "9.9.9",
+    protocolVersion: 7,
+  });
+
+  function incompatibleManager(): TerminalManager {
+    return {
+      getUnavailableError: () => incompatible,
+      getTerminals: vi.fn(async () => Promise.reject(incompatible)),
+      createTerminal: vi.fn(async () => Promise.reject(incompatible)),
+      registerCwdEnv: vi.fn(),
+      validateTerminalActivityToken: vi.fn(() => "unknown"),
+      getTerminal: vi.fn(),
+      getTerminalState: vi.fn(),
+      setTerminalTitle: vi.fn(),
+      setTerminalActivity: vi.fn(),
+      clearTerminalAttention: vi.fn(),
+      killTerminal: vi.fn(),
+      killTerminalAndWait: vi.fn(),
+      captureTerminal: vi.fn(),
+      // The incompatible worker's terminals are not in this daemon's view.
+      listDirectories: vi.fn(() => []),
+      killAll: vi.fn(),
+      subscribeTerminalsChanged: vi.fn(() => vi.fn()),
+      subscribeTerminalActivity: vi.fn(() => vi.fn()),
+      subscribeTerminalWorkspaceContributionChanged: vi.fn(() => vi.fn()),
+    };
+  }
+
+  test.each([
+    { type: "list_terminals_request" as const, requestId: "req-list" },
+    { type: "list_terminals_request" as const, requestId: "req-list-cwd", cwd: "/work/repo" },
+    {
+      type: "create_terminal_request" as const,
+      requestId: "req-create",
+      cwd: "/work/repo",
+      workspaceId: "ws-1",
+    },
+  ])(
+    "answers $type ($requestId) with a terminal_worker_incompatible rpc_error",
+    async (request) => {
+      const outboundMessages: SessionOutboundMessage[] = [];
+      const controller = new TerminalSessionController({
+        terminalManager: incompatibleManager(),
+        emit: (message) => outboundMessages.push(message),
+        emitBinary: vi.fn(),
+        hasBinaryChannel: () => true,
+        isPathWithinRoot: isSameOrDescendantPath,
+        sessionLogger: createLogger(),
+        listTerminalWorkspaceRefs: async () => [{ workspaceId: "ws-1", cwd: "/work/repo" }],
+      });
+
+      await controller.dispatch(request);
+
+      expect(outboundMessages).toEqual([
+        {
+          type: "rpc_error",
+          payload: {
+            requestId: request.requestId,
+            requestType: request.type,
+            error: incompatible.message,
+            code: "terminal_worker_incompatible",
+          },
+        },
+      ]);
+    },
+  );
 });
 
 async function flushMicrotasks(): Promise<void> {

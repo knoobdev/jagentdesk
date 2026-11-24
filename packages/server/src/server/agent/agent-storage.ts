@@ -55,8 +55,10 @@ const STORED_AGENT_SCHEMA = z.object({
   title: z.string().nullable().optional(),
   labels: z.record(z.string(), z.string()).default({}),
   lastStatus: AgentStatusSchema.default("closed"),
+  resumeOnStartup: z.boolean().optional(),
   lastModeId: z.string().nullable().optional(),
   config: SERIALIZABLE_CONFIG_SCHEMA,
+  launchEnv: z.record(z.string(), z.string()).optional(),
   runtimeInfo: z
     .object({
       provider: z.string(),
@@ -83,6 +85,7 @@ const STORED_AGENT_SCHEMA = z.object({
   attentionReason: z.enum(["finished", "error", "permission"]).nullable().optional(),
   attentionTimestamp: z.string().nullable().optional(),
   internal: z.boolean().optional(),
+  background: z.boolean().optional(),
   archivedAt: z.string().nullable().optional(),
   owner: AgentOwnerSchema.optional(),
 });
@@ -270,6 +273,10 @@ export class AgentStorage {
       if (existing && existing.archivedAt !== undefined) {
         record.archivedAt = existing.archivedAt;
       }
+      // Background is fixed at creation; a runtime opened without it cannot clear it.
+      if (existing?.background) record.background = true;
+      record.resumeOnStartup =
+        existing?.resumeOnStartup && agent.lifecycle !== "idle" && agent.lifecycle !== "error";
       return record;
     });
   }

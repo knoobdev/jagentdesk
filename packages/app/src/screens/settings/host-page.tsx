@@ -75,6 +75,7 @@ import type { Theme } from "@/styles/theme";
 import { getProviderIcon } from "@/components/provider-icons";
 import { getConnectionMode } from "@/tailscale";
 import { BrowserToolsOptInCard } from "./browser-tools-card";
+import { RestartRecoveryCard } from "./restart-recovery-card";
 import { AutorunOptInCard } from "./autorun-card";
 import { SessionShareOptInCard } from "./session-share-card";
 import { BrowserFingerprintProfilesCard } from "./browser-fingerprint-profiles-card";
@@ -285,6 +286,7 @@ export function HostAgentsPage({ serverId }: { serverId: string }) {
           </BuiltinPluginGate>
           <AppendSystemPromptCard serverId={serverId} />
           <OperatorContextCard serverId={serverId} />
+          <RestartRecoveryCard serverId={serverId} />
         </SettingsSection>
       ) : (
         <View style={[settingsStyles.card, styles.emptyCard]}>

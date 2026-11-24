@@ -33,7 +33,7 @@ interface FakeTerminalCommand {
   threadId: string;
   turnId: string;
   itemId: string;
-  processId: string;
+  processId?: string;
   command: string;
 }
 interface FakeTerminalInput {
@@ -187,6 +187,7 @@ export function createFakeCodexAppServer(
     "skills/list": () => ({ data: [] }),
     "thread/start": () => ({ thread: { id: "thread-1" } }),
     "thread/loaded/list": () => ({ data: [] }),
+    "thread/backgroundTerminals/list": () => ({ data: [], nextCursor: null }),
     "thread/resume": () => ({}),
     "thread/inject_items": () => ({}),
     "turn/start": () => ({}),

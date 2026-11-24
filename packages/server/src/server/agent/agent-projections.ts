@@ -91,6 +91,7 @@ export function toStoredAgentRecord(
     lastStatus: agent.lifecycle,
     lastModeId: agent.currentModeId ?? config?.modeId ?? null,
     config: config ?? null,
+    launchEnv: agent.launchEnv ? { ...agent.launchEnv } : undefined,
     runtimeInfo,
     features: normalizeFeatures(agent.features),
     persistence,
@@ -102,6 +103,7 @@ export function toStoredAgentRecord(
       ? agent.attention.attentionTimestamp.toISOString()
       : null,
     internal: options?.internal,
+    ...(agent.background ? { background: true } : {}),
     owner: agent.owner,
   } satisfies StoredAgentRecord;
 }
@@ -145,6 +147,7 @@ export function toAgentPayload(
     title: options?.title ?? null,
     labels: agent.labels,
     archivedAt: options?.archivedAt ?? null,
+    ...visibilityFlags(agent),
   };
 
   const usage = sanitizeUsage(agent.lastUsage);
@@ -205,9 +208,28 @@ function buildStoredPersistenceHandle(
   return toAgentPersistenceHandle(validProviders, record.persistence);
 }
 
+/** The wire carries `internal` and `background` only when set. */
+function visibilityFlags(agent: {
+  internal?: boolean;
+  background?: boolean;
+}): Pick<AgentSnapshotPayload, "internal" | "background"> {
+  return {
+    ...(agent.internal ? { internal: true } : {}),
+    ...(agent.background ? { background: true } : {}),
+  };
+}
+
+function visibleStoredBackgroundWork(
+  record: StoredAgentRecord,
+  summary: AgentSnapshotPayload["backgroundWork"],
+): AgentSnapshotPayload["backgroundWork"] {
+  return record.internal || record.archivedAt ? undefined : summary;
+}
+
 export function buildStoredAgentPayload(
   record: StoredAgentRecord,
   validProviders: Iterable<AgentProvider>,
+  backgroundWork?: AgentSnapshotPayload["backgroundWork"],
 ): AgentSnapshotPayload {
   const defaultCapabilities = {
     supportsStreaming: false,
@@ -247,6 +269,7 @@ export function buildStoredAgentPayload(
     updatedAt: updatedAt.toISOString(),
     lastUserMessageAt: lastUserMessageAt ? lastUserMessageAt.toISOString() : null,
     status: record.lastStatus,
+    backgroundWork: visibleStoredBackgroundWork(record, backgroundWork),
     capabilities: defaultCapabilities,
     currentModeId: record.lastModeId ?? null,
     availableModes: [],
@@ -257,6 +280,7 @@ export function buildStoredAgentPayload(
     attentionReason: record.attentionReason ?? null,
     attentionTimestamp: record.attentionTimestamp ?? null,
     archivedAt: record.archivedAt ?? null,
+    ...visibilityFlags(record),
     labels: normalizeLabels(record.labels),
     ...(record.usageTotals ? { usageTotals: record.usageTotals } : {}),
     ...(providerAvailable ? {} : { providerUnavailable: true }),
@@ -273,6 +297,7 @@ export function toAgentListItemPayload(agent: AgentSnapshotPayload): AgentListIt
     thinkingOptionId: agent.thinkingOptionId,
     effectiveThinkingOptionId: agent.effectiveThinkingOptionId,
     status: agent.status,
+    ...(agent.backgroundWork ? { backgroundWork: agent.backgroundWork } : {}),
     cwd: agent.cwd,
     createdAt: agent.createdAt,
     updatedAt: agent.updatedAt,

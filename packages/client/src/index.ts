@@ -25,6 +25,7 @@ import type {
 import { DaemonClient } from "./daemon-client.js";
 export { DaemonClient };
 import type {
+  AgentBackgroundWorkItem,
   FetchAgentsEntry,
   FetchAgentsOptions,
   FetchAgentsPageInfo,
@@ -250,6 +251,12 @@ export interface JAgentDeskAgentCreateOptions {
   git?: CreateAgentRequestMessage["git"];
   worktree?: CreateAgentRequestMessage["worktree"];
   autoArchive?: CreateAgentRequestMessage["autoArchive"];
+  /**
+   * Creates a background agent: hidden from default lists, tabs, the parent's subagent track
+   * and notifications, and still addressable by id. A workspace this call creates is
+   * background too. With a parent and no value, the parent's own background applies.
+   */
+  background?: CreateAgentRequestMessage["background"];
   requestId?: string;
   labels?: Record<string, string>;
 }
@@ -317,6 +324,39 @@ export interface JAgentDeskAgentTimelineHandle {
   subscribe(handler: (event: JAgentDeskAgentStream) => void): () => void;
 }
 
+export type JAgentDeskAgentBackgroundWorkItem = AgentBackgroundWorkItem;
+
+export interface JAgentDeskAgentBackgroundWorkHandle {
+  /** Stop one item and wait for provider confirmation. */
+  stop(
+    item: JAgentDeskAgentBackgroundWorkItem,
+    options?: { requestId?: string; timeout?: number },
+  ): Promise<void>;
+  /** Reads the agent's current background work once. */
+  list(options?: {
+    requestId?: string;
+    timeout?: number;
+  }): Promise<JAgentDeskAgentBackgroundWorkItem[]>;
+  /**
+   * Calls `listener` with the agent's current list once the subscription is established, again
+   * after each reconnect, then with the full list each time it changes. Returns the unsubscribe
+   * function.
+   *
+   * When reading the current list fails, `options.onError` receives the error and `listener` is
+   * not called; without `onError` the error is logged. The read is not retried: the next
+   * reconnect reads the list again.
+   */
+  subscribe(
+    listener: (items: JAgentDeskAgentBackgroundWorkItem[]) => void,
+    options?: JAgentDeskAgentBackgroundWorkSubscribeOptions,
+  ): () => void;
+}
+
+export interface JAgentDeskAgentBackgroundWorkSubscribeOptions {
+  /** Receives the error when reading the agent's current list fails. */
+  onError?: (error: unknown) => void;
+}
+
 export interface JAgentDeskAgentHandle {
   readonly id: string;
   /**
@@ -339,6 +379,7 @@ export interface JAgentDeskAgentHandle {
   readonly runtimeInfo: NonNullable<JAgentDeskAgent["runtimeInfo"]> | null;
   readonly archivedAt: NonNullable<JAgentDeskAgent["archivedAt"]> | null;
   readonly timeline: JAgentDeskAgentTimelineHandle;
+  readonly backgroundWork: JAgentDeskAgentBackgroundWorkHandle;
   current(): JAgentDeskAgent | null;
   refresh(requestId?: string): Promise<JAgentDeskAgentRefetchResult | null>;
   /**
@@ -785,6 +826,48 @@ function createAgentHandleFactory(daemonClient: DaemonClient): AgentHandleFactor
               handler(message.payload);
             }
           }),
+      },
+      backgroundWork: {
+        stop: (item, options) => daemonClient.stopAgentBackgroundWork(id, item, options),
+        list: (options) => daemonClient.listAgentBackgroundWork(id, options),
+        subscribe: (listener, options) => {
+          const observation = daemonClient.observeAgentBackgroundWork();
+          // Bumped by every delivery so a list answered after a newer update is dropped.
+          let sequence = 0;
+          let released = false;
+          const reportError = (error: unknown) => {
+            if (released) return;
+            if (options?.onError) options.onError(error);
+            else console.error("Background work subscription failed", error);
+          };
+          observation.subscribe({
+            error: reportError,
+            snapshot: () => {
+              const listed = ++sequence;
+              void daemonClient
+                .listAgentBackgroundWork(id)
+                .then((items) => {
+                  if (!released && listed === sequence) listener(items);
+                  return undefined;
+                })
+                .catch(reportError);
+            },
+            update: (message) => {
+              if (message.type !== "agent.background_work.update") return;
+              if (message.payload.agentId !== id) return;
+              sequence++;
+              listener(message.payload.items);
+            },
+          });
+          return () => {
+            released = true;
+            void observation
+              .release()
+              .catch((error) =>
+                console.error("Background work subscription cleanup failed", error),
+              );
+          };
+        },
       },
       get workspaceId() {
         return current?.workspaceId ?? null;

@@ -280,7 +280,6 @@ test("session-open instructions compose, survive old hooks, and are ignored for 
     env: {},
     title: null,
     labels: {},
-    metadata: {},
     tools: [],
     mcpServers: {},
   };

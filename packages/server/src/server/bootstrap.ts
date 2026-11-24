@@ -4,6 +4,7 @@ import type { BotTriggerSource } from "./bots/service.js";
 import { DaemonBotRuntime } from "./bots/daemon-runtime.js";
 import { LocalBotTriggers } from "./bots/triggers.js";
 import { createBotAgentTools } from "./bots/agent-tools.js";
+import { createRestartRecovery } from "./agent/restart-recovery/index.js";
 import { getSharedProxyService } from "./proxy/proxy-service.js";
 import { resolveJAgentDeskToolPolicy } from "./agent/jagentdesk-tool-policy.js";
 import { BuiltinPluginLoader } from "./plugins/builtin/index.js";
@@ -205,7 +206,7 @@ import {
 import { setupAutoArchiveOnMerge } from "./auto-archive-on-merge/index.js";
 import { wrapSessionMessage, type SessionOutboundMessage } from "./messages.js";
 import type { TerminalManager } from "../terminal/terminal-manager.js";
-import { createConfiguredTerminalManager } from "../terminal/terminal-manager-factory.js";
+import { startWorkerTerminalManager } from "../terminal/worker-terminal-manager.js";
 import { createSshTerminalManager } from "../terminal/ssh-terminal-manager.js";
 import { SshService } from "./ssh/ssh-service.js";
 import { SideloadService, type SideloadSigner } from "./sideload/sideload-service.js";
@@ -444,18 +445,22 @@ export type DaemonLifecycleIntent =
       clientId: string;
       requestId: string;
       reason: string;
+      keepTerminals: boolean;
     }
   | {
       type: "restart";
       clientId: string;
       requestId: string;
       reason: string;
+      keepTerminals: boolean;
     };
 
 export interface JAgentDeskDaemonConfig {
   listen: string;
   jagentdeskHome: string;
   daemonVersion?: string;
+  resumeOnStartup?: boolean;
+  resumePrompt?: string;
   desktopManaged?: boolean;
   worktreesRoot?: string;
   corsAllowedOrigins: string[];
@@ -545,7 +550,8 @@ export interface JAgentDeskDaemon {
   /** Sideload accounts other features sign with (spec 27 signs WebDriverAgent). */
   sideload: SideloadSigner;
   start(): Promise<void>;
-  stop(): Promise<void>;
+  /** Stops the daemon. Terminals keep running for the next daemon only with keepTerminals. */
+  stop(options?: { keepTerminals?: boolean }): Promise<void>;
   getListenTarget(): ListenTarget | null;
 }
 
@@ -649,6 +655,8 @@ function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): Mutab
     autoArchiveAfterMerge: config.autoArchiveAfterMerge ?? false,
     enableTerminalAgentHooks: config.enableTerminalAgentHooks ?? false,
     appendSystemPrompt: config.appendSystemPrompt ?? "",
+    resumeOnStartup: config.resumeOnStartup === true,
+    resumePrompt: config.resumePrompt ?? "Resume working.",
     operatorContext: config.operatorContext ?? "",
     orchestration: config.orchestration ?? createDefaultOrchestrationConfig(),
   };
@@ -774,12 +782,13 @@ export async function createJAgentDeskDaemon(
     // and re-read on every connect attempt).
     tailnetSocks: () => tsnetListener?.getTailnetSocks() ?? null,
   });
-  const terminalManager = createSshTerminalManager(
-    createConfiguredTerminalManager({
-      getTerminalActivityUrl: () => createTerminalActivityUrl(boundListenTarget),
-    }),
-    () => sshService,
-  );
+  const localTerminalManager = await startWorkerTerminalManager({
+    jagentdeskHome: config.jagentdeskHome,
+    jagentdeskVersion: daemonVersion,
+    logger,
+    getTerminalActivityUrl: () => createTerminalActivityUrl(boundListenTarget),
+  });
+  const terminalManager = createSshTerminalManager(localTerminalManager, () => sshService);
   applyTerminalAgentHookSetting({ store: daemonConfigStore, logger });
 
   const serviceProxyPublicBaseUrl = config.serviceProxy?.publicBaseUrl
@@ -1112,6 +1121,20 @@ export async function createJAgentDeskDaemon(
   );
   await agentStorage.initialize();
 
+  const restartRecovery = createRestartRecovery({
+    storage: agentStorage,
+    settings: () => ({
+      enabled: daemonConfigStore.get().resumeOnStartup === true,
+      prompt: daemonConfigStore.get().resumePrompt ?? "Resume working.",
+    }),
+    eligible: async (record) =>
+      !record.workspaceId || !(await workspaceRegistry?.get(record.workspaceId))?.archivedAt,
+    dispatch: (agentId, prompt) =>
+      sendPromptToAgent({ agentId, prompt, agentManager, agentStorage, logger, unarchive: false }),
+    report: (agentId, err) => logger.error({ agentId, err }, "Agent restart recovery failed"),
+  });
+  await restartRecovery.prepareStartup();
+
   // Spec 34.6 hot reload: after a custom provider save/delete, re-read the
   // persisted config, rebuild the provider registry (base overrides replaced,
   // removed providers dropped) and swap it into the live agent manager. The
@@ -1208,10 +1231,13 @@ export async function createJAgentDeskDaemon(
   const ensureWorkspaceForCreateExternal = async (
     cwd: string,
     firstAgentContext?: FirstAgentContext,
+    context?: { background?: boolean; callerWorkspaceId?: string },
   ): Promise<string> => {
     const workspace = await workspaceProvisioning.createWorkspaceForDirectory(
       cwd,
       resolveFirstAgentPromptTitle(firstAgentContext),
+      undefined,
+      context,
     );
     if (firstAgentContext) {
       workspaceAutoName.scheduleForDirectory({
@@ -1245,8 +1271,9 @@ export async function createJAgentDeskDaemon(
   const ensureWorkspaceForCreateAndBroadcastExternal = async (
     cwd: string,
     firstAgentContext?: FirstAgentContext,
+    context?: { background?: boolean; callerWorkspaceId?: string },
   ): Promise<string> => {
-    const workspaceId = await ensureWorkspaceForCreateExternal(cwd, firstAgentContext);
+    const workspaceId = await ensureWorkspaceForCreateExternal(cwd, firstAgentContext, context);
     await emitWorkspaceUpdatesExternal([workspaceId]);
     return workspaceId;
   };
@@ -2342,6 +2369,7 @@ export async function createJAgentDeskDaemon(
             pluginRuntime.bindJAgentDeskSessionHost(wsServer);
             await pluginRuntime.start();
             providerSnapshotManager.settlePluginProviders();
+            restartRecovery.resumePending();
             tsnetListener = createTsnetListener({
               logger,
               port: boundListenTarget.type === "tcp" ? boundListenTarget.port : 0,
@@ -2433,7 +2461,9 @@ export async function createJAgentDeskDaemon(
     }
   };
 
-  const stop = async () => {
+  const stop = async (options?: { keepTerminals?: boolean }) => {
+    const keepTerminals = options?.keepTerminals === true;
+    let terminalShutdownError: unknown = null;
     unsubscribePluginProviders();
     unsubscribePluginSessionChanges();
     await hubRelationships.stop();
@@ -2443,6 +2473,7 @@ export async function createJAgentDeskDaemon(
     wsServer?.prepareForShutdown();
     botsService.suspendForShutdown();
     agentManager.prepareForShutdown();
+    await restartRecovery.captureRunningAgents();
     await closeAllAgents(logger, agentManager);
     await withTimeout({
       promise: pluginRuntime.drainEvents(),
@@ -2456,7 +2487,19 @@ export async function createJAgentDeskDaemon(
     customProviderService.closeAll();
     await pluginRuntime.stopAllPlugins().catch(() => undefined);
     await providerSnapshotManager.shutdown();
-    terminalManager.killAll();
+    try {
+      if (keepTerminals) {
+        await localTerminalManager.detach();
+        logger.info("Terminals left running for the next daemon");
+      } else {
+        await localTerminalManager.closeTerminals();
+      }
+    } catch (error) {
+      // Finish the rest of the shutdown, then report it: the supervisor and `daemon stop`
+      // retry the cleanup from the record the reaper kept.
+      terminalShutdownError = error;
+      logger.error({ err: error }, "Terminal shutdown failed");
+    }
     unsubscribeBuiltinAgentSnapshots();
     stopDeviceGrantWatch();
     physicalDevices.dispose();
@@ -2498,6 +2541,9 @@ export async function createJAgentDeskDaemon(
     // Clean up socket files
     if (listenTarget.type === "socket" && existsSync(listenTarget.path)) {
       unlinkSync(listenTarget.path);
+    }
+    if (terminalShutdownError) {
+      throw terminalShutdownError;
     }
   };
 

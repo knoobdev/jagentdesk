@@ -17,7 +17,12 @@ export function buildWorkspaceAgentActivityIndex(
 
   for (const agent of agents.values()) {
     const parentAgent = agent.parentAgentId ? agents.get(agent.parentAgentId) : undefined;
-    if (agent.archivedAt || !agent.workspaceId || !isWorkspaceRootAgent(agent, parentAgent)) {
+    if (
+      agent.archivedAt ||
+      agent.background ||
+      !agent.workspaceId ||
+      !isWorkspaceRootAgent(agent, parentAgent)
+    ) {
       continue;
     }
 
@@ -30,6 +35,7 @@ export function buildWorkspaceAgentActivityIndex(
 
     const status = deriveSidebarStateBucket({
       status: agent.status,
+      backgroundWork: agent.backgroundWork,
       pendingPermissionCount: agent.pendingPermissions.length,
       requiresAttention: agent.requiresAttention,
       attentionReason: agent.attentionReason,

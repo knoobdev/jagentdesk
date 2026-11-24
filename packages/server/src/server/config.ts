@@ -565,9 +565,17 @@ export function loadConfig(
     voiceLlmProvider: voiceLlm.provider,
     voiceLlmProviderExplicit: voiceLlm.providerExplicit,
     voiceLlmModel: voiceLlm.model,
+    ...resolveRestartRecoveryConfig(persisted.agents),
     agentProviderSettings: extractAgentProviderSettings(providerOverrides),
     metadataGeneration: persisted.agents?.metadataGeneration,
     providerOverrides,
     log: resolveLogConfigFromEnv(env, persisted),
+  };
+}
+
+function resolveRestartRecoveryConfig(agents: PersistedConfig["agents"]) {
+  return {
+    resumeOnStartup: agents?.resumeOnStartup ?? false,
+    resumePrompt: agents?.resumePrompt ?? "Resume working.",
   };
 }

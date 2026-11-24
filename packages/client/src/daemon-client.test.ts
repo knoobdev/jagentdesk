@@ -4526,114 +4526,124 @@ test("detaches an agent through the namespaced detach RPC", async () => {
   await expect(promise).resolves.toBeUndefined();
 });
 
-test("sends active-scoped fetch_agents_request", async () => {
-  const logger = createMockLogger();
-  const mock = createMockTransport();
+test.each([undefined, false, true])(
+  "sends active-scoped fetch_agents_request with includeBackground=%s",
+  async (includeBackground) => {
+    const logger = createMockLogger();
+    const mock = createMockTransport();
 
-  const client = new DaemonClient({
-    url: "ws://test",
-    clientId: "clsk_unit_test",
-    logger,
-    reconnect: { enabled: false },
-    transportFactory: () => mock.transport,
-  });
-  clients.push(client);
+    const client = new DaemonClient({
+      url: "ws://test",
+      clientId: "clsk_unit_test",
+      logger,
+      reconnect: { enabled: false },
+      transportFactory: () => mock.transport,
+    });
+    clients.push(client);
 
-  const connectPromise = client.connect();
-  mock.triggerOpen();
-  await connectPromise;
+    const connectPromise = client.connect();
+    mock.triggerOpen();
+    await connectPromise;
 
-  const promise = client.fetchAgents({
-    scope: "active",
-    page: { limit: 50 },
-  });
+    const promise = client.fetchAgents({
+      scope: "active",
+      includeBackground,
+      page: { limit: 50 },
+    });
 
-  expect(mock.sent).toHaveLength(1);
-  const request = parseSentFrame(mock.sent[0]);
-  expect(request).toMatchObject({
-    type: "fetch_agents_request",
-    scope: "active",
-  });
+    expect(mock.sent).toHaveLength(1);
+    const request = parseSentFrame(mock.sent[0]);
+    expect(request).toMatchObject({
+      type: "fetch_agents_request",
+      scope: "active",
+    });
+    expect(request.includeBackground).toBe(includeBackground);
 
-  mock.triggerMessage(
-    JSON.stringify({
-      type: "session",
-      message: {
-        type: "fetch_agents_response",
-        payload: {
-          requestId: request.requestId,
-          entries: [],
-          pageInfo: {
-            nextCursor: null,
-            prevCursor: null,
-            hasMore: false,
+    mock.triggerMessage(
+      JSON.stringify({
+        type: "session",
+        message: {
+          type: "fetch_agents_response",
+          payload: {
+            requestId: request.requestId,
+            entries: [],
+            pageInfo: {
+              nextCursor: null,
+              prevCursor: null,
+              hasMore: false,
+            },
           },
         },
-      },
-    }),
-  );
+      }),
+    );
 
-  await expect(promise).resolves.toMatchObject({
-    requestId: request.requestId,
-    entries: [],
-  });
-});
+    await expect(promise).resolves.toMatchObject({
+      requestId: request.requestId,
+      entries: [],
+    });
+  },
+);
 
-test("fetches paginated agent history separately from active agents", async () => {
-  const logger = createMockLogger();
-  const mock = createMockTransport();
+test.each([undefined, false, true])(
+  "fetches paginated agent history with includeBackground=%s",
+  async (includeBackground) => {
+    const logger = createMockLogger();
+    const mock = createMockTransport();
 
-  const client = new DaemonClient({
-    url: "ws://test",
-    clientId: "clsk_unit_test",
-    logger,
-    reconnect: { enabled: false },
-    transportFactory: () => mock.transport,
-  });
-  clients.push(client);
+    const client = new DaemonClient({
+      url: "ws://test",
+      clientId: "clsk_unit_test",
+      logger,
+      reconnect: { enabled: false },
+      transportFactory: () => mock.transport,
+    });
+    clients.push(client);
 
-  const connectPromise = client.connect();
-  mock.triggerOpen();
-  await connectPromise;
+    const connectPromise = client.connect();
+    mock.triggerOpen();
+    await connectPromise;
 
-  const promise = client.fetchAgentHistory({
-    page: { limit: 25, cursor: "cursor-1" },
-    sort: [{ key: "updated_at", direction: "desc" }],
-  });
+    const promise = client.fetchAgentHistory({
+      includeBackground,
+      page: { limit: 25, cursor: "cursor-1" },
+      sort: [{ key: "updated_at", direction: "desc" }],
+    });
 
-  expect(mock.sent).toHaveLength(1);
-  const request = parseSentFrame(mock.sent[0]);
-  expect(request.type).toBe("fetch_agent_history_request");
-  expect(request.page).toEqual({ limit: 25, cursor: "cursor-1" });
+    expect(mock.sent).toHaveLength(1);
+    const request = parseSentFrame(mock.sent[0]);
+    expect(request.type).toBe("fetch_agent_history_request");
+    expect(request.includeBackground).toBe(includeBackground);
+    expect(request.page).toEqual({ limit: 25, cursor: "cursor-1" });
 
-  mock.triggerMessage(
-    JSON.stringify({
-      type: "session",
-      message: {
-        type: "fetch_agent_history_response",
-        payload: {
-          requestId: request.requestId,
-          entries: [],
-          pageInfo: {
-            nextCursor: null,
-            prevCursor: "cursor-1",
-            hasMore: false,
+    mock.triggerMessage(
+      JSON.stringify({
+        type: "session",
+        message: {
+          type: "fetch_agent_history_response",
+          payload: {
+            requestId: request.requestId,
+            entries: [],
+            pageInfo: {
+              nextCursor: null,
+              prevCursor: "cursor-1",
+              hasMore: false,
+            },
           },
         },
-      },
-    }),
-  );
+      }),
+    );
 
-  await expect(promise).resolves.toEqual({
-    requestId: request.requestId,
-    entries: [],
-    pageInfo: {
-      nextCursor: null,
-      prevCursor: "cursor-1",
-      hasMore: false,
-    },
-  });
-});
+    await expect(promise).resolves.toEqual({
+      requestId: request.requestId,
+      entries: [],
+      pageInfo: {
+        nextCursor: null,
+        prevCursor: "cursor-1",
+        hasMore: false,
+      },
+    });
+  },
+);
 
 test("fetches scoped recent provider sessions", async () => {
   const logger = createMockLogger();

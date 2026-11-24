@@ -378,7 +378,11 @@ function mergeMutableConfigIntoPersistedConfig(params: {
   const shouldPersistMetadataGeneration =
     metadataGenerationProviders.length > 0 || persisted.agents?.metadataGeneration !== undefined;
 
-  let nextAgents = persistedAgents as PersistedConfig["agents"];
+  let nextAgents = {
+    ...persistedAgents,
+    resumeOnStartup: mutable.resumeOnStartup,
+    resumePrompt: mutable.resumePrompt,
+  } as PersistedConfig["agents"];
   if (providerOverrides && Object.keys(providerOverrides).length > 0) {
     nextAgents = {
       ...persistedAgents,
@@ -394,6 +398,11 @@ function mergeMutableConfigIntoPersistedConfig(params: {
     } as PersistedConfig["agents"];
   }
 
+  nextAgents = {
+    ...nextAgents,
+    resumeOnStartup: mutable.resumeOnStartup,
+    resumePrompt: mutable.resumePrompt,
+  };
   return {
     ...persisted,
     // The live plugin map already has removePlugins applied, so it replaces the stored one.

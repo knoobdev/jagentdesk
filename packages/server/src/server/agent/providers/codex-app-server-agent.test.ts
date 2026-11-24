@@ -747,7 +747,12 @@ function createReopenableCodexAgent(threads: Record<string, unknown[]>, registry
       appServers[index]
         .requests()
         .map((request) => request.method)
-        .filter((method) => typeof method === "string" && method.startsWith("thread/")),
+        .filter(
+          (method) =>
+            typeof method === "string" &&
+            method.startsWith("thread/") &&
+            !method.startsWith("thread/backgroundTerminals/"),
+        ),
     // Cold-loads the agent, closes its runtime, and reopens it while JAgentDesk keeps its timeline.
     async loadCloseAndReopen(): Promise<AgentTimelineItem[]> {
       await open();
@@ -8242,6 +8247,49 @@ describe("Codex denied plan approvals", () => {
 });
 
 describe("Codex interactive resume startup", () => {
+  test("keeps an autonomous command started during resume out of background work until settlement", async () => {
+    const appServer = createFakeCodexAppServer({
+      "thread/resume": () => {
+        appServer.startsTurn({ threadId: "saved-thread", turnId: "autonomous-turn" });
+        appServer.startsTerminalCommand({
+          threadId: "saved-thread",
+          turnId: "autonomous-turn",
+          itemId: "resumed-command",
+          processId: "123",
+          command: "sleep 120",
+        });
+        return { thread: { id: "saved-thread" } };
+      },
+      "thread/read": () => ({ thread: { turns: [] } }),
+      "thread/backgroundTerminals/list": () => ({
+        data: [{ itemId: "resumed-command", processId: "123", command: "sleep 120" }],
+        nextCursor: null,
+      }),
+    });
+    const session = new CodexAppServerAgentSession(
+      createConfig({ modeId: "full-access" }),
+      { sessionId: "saved-thread" },
+      createTestLogger(),
+      async () => appServer.child,
+    );
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+    try {
+      await session.connect();
+      await expect.poll(() => latestBackgroundWork(events)?.items).toEqual([]);
+      appServer.completeTurn({ threadId: "saved-thread" });
+      await expect
+        .poll(() => latestBackgroundWork(events)?.items)
+        .toMatchObject([{ command: "sleep 120" }]);
+      expect(
+        events.filter((event) => event.type === "background_work" && event.items?.length),
+      ).toHaveLength(1);
+    } finally {
+      await session.close();
+      appServer.assertNoErrors();
+    }
+  });
+
   test("delivers an autonomous turn that starts during resume to the first subscriber", async () => {
     const appServer = createFakeCodexAppServer({
       "turn/interrupt": () => ({}),
@@ -8278,7 +8326,7 @@ describe("Codex interactive resume startup", () => {
       unsubscribe();
       const laterEvents: AgentStreamEvent[] = [];
       session.subscribe((event) => laterEvents.push(event));
-      expect(laterEvents).toEqual([]);
+      expect(laterEvents.filter((event) => event.type !== "background_work")).toEqual([]);
     } finally {
       await session.close();
       appServer.assertNoErrors();
@@ -8331,6 +8379,150 @@ describe("Codex interactive resume startup", () => {
       }
     },
   );
+});
+
+test.each([true, false])(
+  "Codex background work excludes a live turn's commands (inventory item IDs: %s)",
+  async (itemIds) => {
+    let terminals = [{ itemId: "earlier", processId: "1", command: "sleep 180" }];
+    const appServer = createFakeCodexAppServer({
+      "thread/backgroundTerminals/list": () => ({
+        data: terminals.map(({ itemId, ...row }) => (itemIds ? { ...row, itemId } : row)),
+        nextCursor: null,
+      }),
+    });
+    const session = new CodexAppServerAgentSession(
+      createConfig(),
+      null,
+      createTestLogger(),
+      async () => appServer.child,
+    );
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+    try {
+      await session.startTurn("first");
+      await appServer.waitForTurnStart();
+      appServer.completeTurn();
+      await expect
+        .poll(() => latestBackgroundWork(events)?.items)
+        .toMatchObject([{ command: "sleep 180" }]);
+      await session.startTurn("git status");
+      appServer.startsTurn({ threadId: "thread-1", turnId: "second" });
+      terminals = [...terminals, { itemId: "status", processId: "2", command: "git status" }];
+      const before = appServer.requests().length;
+      appServer.startsTerminalCommand({
+        threadId: "thread-1",
+        turnId: "second",
+        itemId: "status",
+        processId: itemIds ? undefined : "2",
+        command: "git status",
+      });
+      await expect
+        .poll(() =>
+          appServer
+            .requests()
+            .slice(before)
+            .some((request) => request.method === "thread/backgroundTerminals/list"),
+        )
+        .toBe(true);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(latestBackgroundWork(events)?.items).toMatchObject([{ command: "sleep 180" }]);
+      terminals = terminals.filter((row) => row.itemId !== "status");
+      appServer.completesCommand({
+        threadId: "thread-1",
+        callId: "status",
+        command: "git status",
+        output: "clean",
+      });
+      terminals.push({ itemId: "server", processId: "3", command: "npm run dev" });
+      appServer.startsTerminalCommand({
+        threadId: "thread-1",
+        turnId: "second",
+        itemId: "server",
+        processId: itemIds ? undefined : "3",
+        command: "npm run dev",
+      });
+      // A process surviving settlement becomes background work even if its item has not completed.
+      appServer.completeTurn();
+      await expect
+        .poll(() => latestBackgroundWork(events)?.items)
+        .toMatchObject([{ command: "sleep 180" }, { command: "npm run dev" }]);
+      expect(
+        events
+          .filter((event) => event.type === "background_work")
+          .flatMap((event) => event.items ?? [])
+          .some((item) => item.command === "git status"),
+      ).toBe(false);
+      terminals = [];
+      appServer.completesCommand({
+        threadId: "thread-1",
+        callId: "server",
+        command: "npm run dev",
+        output: "exited",
+      });
+      await expect.poll(() => latestBackgroundWork(events)?.items).toEqual([]);
+      appServer.assertNoErrors();
+    } finally {
+      await session.close();
+    }
+  },
+);
+
+test("publishes a materialized image before dispatching the following turn completion", async () => {
+  const appServer = createFakeCodexAppServer();
+  const session = new CodexAppServerAgentSession(
+    createConfig(),
+    null,
+    createTestLogger(),
+    async () => appServer.child,
+  );
+  const events: AgentStreamEvent[] = [];
+  session.subscribe((event) => events.push(event));
+  try {
+    await session.startTurn("generate an image");
+    const data = Buffer.alloc(1024 * 1024, 47).toString("base64");
+    const imageFrame =
+      JSON.stringify({
+        method: "item/completed",
+        params: {
+          item: {
+            id: "ordered-image",
+            type: "imageGeneration",
+            status: "completed",
+            result: { data, mimeType: "image/png" },
+          },
+        },
+      }) + "\n";
+    const completed = new Promise<void>((resolve) =>
+      session.subscribe((event) => {
+        if (event.type === "turn_completed") resolve();
+      }),
+    );
+    appServer.child.stdout.write(imageFrame);
+    appServer.child.stdout.write(
+      JSON.stringify({
+        method: "turn/completed",
+        params: { turn: { status: "completed", error: null } },
+      }) + "\n",
+    );
+    await completed;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const imageIndex = events.findIndex(
+      (event) =>
+        event.type === "timeline" &&
+        event.item.type === "assistant_message" &&
+        event.item.text.includes("![Image]"),
+    );
+    const completedIndex = events.findIndex((event) => event.type === "turn_completed");
+    expect(imageIndex).toBeGreaterThanOrEqual(0);
+    expect(imageIndex).toBeLessThan(completedIndex);
+    const imageEvent = events[imageIndex];
+    if (imageEvent.type !== "timeline" || imageEvent.item.type !== "assistant_message")
+      throw new Error("Expected image");
+    expect(existsSync(markdownImageSource(imageEvent.item.text))).toBe(true);
+  } finally {
+    await session.close();
+  }
 });
 
 describe("legacy multi-file diff budget", () => {
@@ -8422,3 +8614,7 @@ describe("legacy empty additions", () => {
     expect(item.detail.unifiedDiff).toContain("diff --git a/second.txt b/second.txt");
   });
 });
+
+function latestBackgroundWork(events: AgentStreamEvent[]) {
+  return events.findLast((event) => event.type === "background_work");
+}

@@ -25,7 +25,16 @@ import {
   appendTimelineItemIfAgentKnown,
   emitLiveTimelineItemIfAgentKnown,
 } from "../timeline-append.js";
-import { resolveCreateAgentIntent } from "./intent.js";
+import {
+  inheritAgentBackground,
+  inheritWorkspaceBackground,
+  resolveCreateAgentIntent,
+} from "./intent.js";
+
+interface McpWorkspaceIntent {
+  background?: boolean;
+  callerWorkspaceId?: string;
+}
 
 export interface CreateAgentSessionWorktreeResult {
   sessionConfig: AgentSessionConfig;
@@ -51,6 +60,7 @@ export interface CreateAgentCommandDependencies {
 export type EnsureWorkspaceForCreate = (
   cwd: string,
   firstAgentContext?: FirstAgentContext,
+  context?: { background?: boolean; callerWorkspaceId?: string },
 ) => Promise<string>;
 
 export interface CreateAgentFromSessionInput {
@@ -58,6 +68,7 @@ export interface CreateAgentFromSessionInput {
   config: AgentSessionConfig;
   workspaceId: string;
   worktreeName?: string;
+  background: boolean;
   initialPrompt?: string;
   clientMessageId?: string;
   outputSchema?: Record<string, unknown>;
@@ -77,6 +88,7 @@ export interface CreateAgentFromSessionInput {
 }
 
 export interface CreateAgentFromMcpInput {
+  agentBackground?: boolean;
   kind: "mcp";
   provider: string;
   title: string;
@@ -288,6 +300,7 @@ async function resolveSessionCreateAgent(
       // agent belongs to that workspace, not the source one. createdWorkspaceId
       // is the freshly created worktree's workspace.
       workspaceId: requireResolvedWorkspaceId(workspaceId),
+      background: input.background,
     },
     prompt: hasPromptContent ? prompt : undefined,
     runOptions,
@@ -310,12 +323,17 @@ async function resolveMcpCreateAgent(
     ? requireParentAgent(dependencies.agentManager, input.callerAgentId)
     : null;
   const cwd = resolveMcpInitialCwd(input, parentAgent);
+  const workspaceIntent = {
+    background: inheritWorkspaceBackground(input.agentBackground, parentAgent),
+    callerWorkspaceId: parentAgent?.workspaceId,
+  };
   const { resolvedCwd, setupContinuation, createdWorkspaceId, createdWorktree } =
     await resolveMcpCwd({
       dependencies,
       cwd,
       worktree: input.worktree,
       initialPrompt: input.initialPrompt ?? "",
+      workspaceIntent,
     });
   if (createdWorktree) input.onWorktreeCreated?.(createdWorktree);
 
@@ -330,7 +348,12 @@ async function resolveMcpCreateAgent(
     resolveWorkspace: async (workspaceId) => ({ workspaceId, cwd: resolvedCwd }),
     createWorkspace: async () => ({
       workspaceId: requireResolvedWorkspaceId(
-        await ensureWorkspaceForMcpCreate(dependencies, resolvedCwd, input.initialPrompt ?? ""),
+        await ensureWorkspaceForMcpCreate(
+          dependencies,
+          resolvedCwd,
+          input.initialPrompt ?? "",
+          workspaceIntent,
+        ),
       ),
       cwd: resolvedCwd,
     }),
@@ -358,6 +381,7 @@ async function resolveMcpCreateAgent(
       ...(Object.keys(intent.labels).length > 0 ? { labels: intent.labels } : {}),
       workspaceId: intent.workspaceId,
       owner: input.owner,
+      background: inheritAgentBackground(input.agentBackground, parentAgent),
       env: input.env,
     },
     prompt: trimmedPrompt ? trimmedPrompt : undefined,
@@ -438,11 +462,12 @@ async function ensureWorkspaceForMcpCreate(
   dependencies: CreateAgentCommandDependencies,
   cwd: string,
   initialPrompt: string,
+  workspaceIntent: McpWorkspaceIntent,
 ): Promise<string | undefined> {
   if (!dependencies.ensureWorkspaceForCreate) {
     return undefined;
   }
-  return dependencies.ensureWorkspaceForCreate(cwd, { prompt: initialPrompt });
+  return dependencies.ensureWorkspaceForCreate(cwd, { prompt: initialPrompt }, workspaceIntent);
 }
 
 async function sendInitialPrompt(
@@ -507,6 +532,7 @@ async function resolveMcpCwd(params: {
   dependencies: CreateAgentCommandDependencies;
   cwd: string;
   initialPrompt: string;
+  workspaceIntent: McpWorkspaceIntent;
   worktree: CreateAgentFromMcpInput["worktree"];
 }): Promise<{
   resolvedCwd: string;
@@ -537,6 +563,7 @@ async function resolveMcpCwd(params: {
   const createdWorktree = await createMcpWorktree({
     input: {
       cwd: params.cwd,
+      ...params.workspaceIntent,
       worktreeSlug: worktree.worktreeName,
       branchName: worktree.branchName,
       refName: worktree.refName,

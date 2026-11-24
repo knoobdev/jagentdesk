@@ -102,6 +102,12 @@ import {
   type ProviderSubagentDescriptor,
   type ProviderSubagentStoreEvent,
 } from "./provider-subagents/store.js";
+import {
+  AgentBackgroundWorkStore,
+  isHeartbeatBackgroundWorkItem,
+  type AgentBackgroundWorkItem,
+  type HeartbeatBackgroundWorkInput,
+} from "./background-work/index.js";
 
 const RELOAD_SESSION_CLOSE_TIMEOUT_MS = 3_000;
 const INTERRUPT_SESSION_TIMEOUT_MS = 2_000;
@@ -149,6 +155,13 @@ export type AgentRunCancellationResult =
   | { status: "not_running" }
   | { status: "settled" }
   | { status: "refused" };
+
+interface StopAgentBackgroundWorkOptions {
+  agentId: string;
+  itemId: string;
+  stopToken: string;
+  canManageAutomation?: boolean;
+}
 
 async function resolveResumePurpose(
   record: StoredAgentRecord | null,
@@ -255,6 +268,7 @@ export type {
 export type AgentManagerEvent =
   | { type: "agent_state"; agent: ManagedAgent }
   | { type: "provider_subagent"; event: ProviderSubagentStoreEvent }
+  | { type: "background_work"; agentId: string; items: AgentBackgroundWorkItem[] }
   | { type: "timeline_replacement"; agentId: string; epoch: string }
   | {
       type: "agent_stream";
@@ -333,6 +347,8 @@ export interface CreateAgentOptions {
   // undefined is an explicit decision: the agent never appears in the sidebar.
   workspaceId: string | undefined;
   owner?: AgentOwner;
+  /** Background agents stay out of discovery, tabs, tracks and attention. Fixed at creation. */
+  background?: boolean;
 }
 
 export interface AgentManagerOptions {
@@ -405,6 +421,11 @@ type AttentionState =
       attentionTimestamp: Date;
     };
 
+/** Private helpers and background agents report to their creator, never to the user. */
+function raisesAttention(agent: Pick<ManagedAgent, "internal" | "background">): boolean {
+  return !agent.internal && !agent.background;
+}
+
 function resolveInitialAttention(input: AttentionState | undefined): AttentionState {
   if (input == null || !input.requiresAttention) {
     return { requiresAttention: false };
@@ -440,6 +461,8 @@ interface ManagedAgentBase {
   owner?: AgentOwner;
   capabilities: AgentCapabilityFlags;
   config: AgentSessionConfig;
+  /** Explicit launch overrides, before per-opening hooks and daemon-owned variables. */
+  launchEnv?: Record<string, string>;
   runtimeInfo?: AgentRuntimeInfo;
   createdAt: Date;
   updatedAt: Date;
@@ -481,6 +504,11 @@ interface ManagedAgentBase {
    * Internal agents are hidden from listings and don't trigger notifications.
    */
   internal?: boolean;
+  /**
+   * Background agents are durable but hidden from default discovery and never raise attention.
+   * Fixed at creation.
+   */
+  background?: boolean;
   /**
    * User-defined labels for categorizing agents (e.g., { surface: "workspace" }).
    */
@@ -805,6 +833,7 @@ export class AgentManager {
   private readonly agents = new Map<string, LiveManagedAgent>();
   private readonly timelineStore: InMemoryAgentTimelineStore;
   private readonly providerSubagents = new ProviderSubagentStore();
+  private readonly backgroundWork = new AgentBackgroundWorkStore();
   private readonly agentsAwaitingInitialSnapshotPersist = new Set<string>();
   private readonly sessionEventTails = new Map<string, Promise<void>>();
   private readonly steerEventBarriers = new Map<string, SteerEventBarrier>();
@@ -1355,6 +1384,57 @@ export class AgentManager {
     return this.providerSubagents.list(parentAgentId);
   }
 
+  listAgentBackgroundWork(agentId: string): AgentBackgroundWorkItem[] {
+    const agent = this.agents.get(agentId);
+    if (agent?.internal || (!agent && !this.backgroundWork.summary(agentId))) {
+      throw new Error(`Unknown agent '${agentId}'`);
+    }
+    return this.backgroundWork.list(agentId);
+  }
+
+  setHeartbeatBackgroundWork(input: HeartbeatBackgroundWorkInput): void {
+    this.publishBackgroundWork(input.agentId, this.backgroundWork.setHeartbeat(input));
+  }
+
+  removeHeartbeatBackgroundWork(agentId: string, scheduleId: string): void {
+    this.publishBackgroundWork(agentId, this.backgroundWork.removeHeartbeat(agentId, scheduleId));
+  }
+
+  async stopAgentBackgroundWork({
+    agentId,
+    itemId,
+    stopToken,
+    canManageAutomation,
+  }: StopAgentBackgroundWorkOptions): Promise<void> {
+    if (isHeartbeatBackgroundWorkItem({ id: itemId })) {
+      if (this.agents.get(agentId)?.internal) throw new Error(`Unknown agent '${agentId}'`);
+      if (!canManageAutomation)
+        throw new Error("Managing automation is required to stop a heartbeat");
+      await this.backgroundWork.stopHeartbeat(agentId, itemId, stopToken);
+      return;
+    }
+    this.requirePublicAgent(agentId);
+    // Inventory events share the session queue; drain events already received before
+    // authorizing the token, including a reconnect's ownership revocation.
+    await this.sessionEventTails.get(agentId)?.catch(() => undefined);
+    const { session } = this.requirePublicAgent(agentId);
+    if (!session?.stopBackgroundWork) throw new Error("Background work cannot be stopped");
+    const providerItemId = this.backgroundWork.authorizeProviderStop(agentId, itemId, stopToken);
+    await session.stopBackgroundWork(providerItemId);
+  }
+
+  getAgentBackgroundWorkSummary(agentId: string) {
+    return this.backgroundWork.summary(agentId);
+  }
+
+  private publishBackgroundWork(agentId: string, items: AgentBackgroundWorkItem[] | null): void {
+    if (items) this.dispatch({ type: "background_work", agentId, items });
+  }
+
+  private clearProviderBackgroundWork(agentId: string): void {
+    this.publishBackgroundWork(agentId, this.backgroundWork.clear(agentId));
+  }
+
   listProviderSubagentActivity(): ProviderSubagentDescriptor[] {
     const publicParentIds = new Set(
       Array.from(this.agents.values())
@@ -1425,6 +1505,7 @@ export class AgentManager {
         workspaceId: options.workspaceId,
         reason: "create",
         title: options.initialTitle ?? storedConfig.title ?? null,
+        background: options.background,
         labels: options.labels ?? {},
       },
     );
@@ -1437,6 +1518,8 @@ export class AgentManager {
       initialTitle: options.initialTitle,
       workspaceId: options.workspaceId,
       owner: options.owner,
+      background: options.background,
+      launchEnv: options.env ? { ...options.env } : undefined,
       historyPrimed: true,
     });
     if (!agent.internal)
@@ -1467,6 +1550,7 @@ export class AgentManager {
       labels?: Record<string, string>;
       workspaceId?: string;
       owner?: AgentOwner;
+      background?: boolean;
     },
     resumeOptions?: AgentResumeSessionOptions,
   ): Promise<ManagedAgent> {
@@ -1486,6 +1570,7 @@ export class AgentManager {
       labels?: Record<string, string>;
       workspaceId?: string;
       owner?: AgentOwner;
+      background?: boolean;
     },
     resumeOptions?: AgentResumeSessionOptions,
   ): Promise<ManagedAgent> {
@@ -1506,10 +1591,11 @@ export class AgentManager {
     const purpose = await resolveResumePurpose(record, resumeOptions?.purpose, mergedConfig.cwd);
     const currentResumeOptions = { purpose } satisfies AgentResumeSessionOptions;
     const workspaceId = resolveResumeWorkspaceId({ options, record });
+    const launchEnv = record?.launchEnv;
     const { storedConfig, launchConfig } = await this.prepareSessionConfig(
       mergedConfig,
       resolvedAgentId,
-      { purpose },
+      { purpose, env: launchEnv },
     );
 
     const client = this.requireClient(handle.provider);
@@ -1523,13 +1609,14 @@ export class AgentManager {
       resolvedAgentId,
       client,
       storedConfig.cwd,
-      undefined,
+      launchEnv,
       {
         reason: "resume",
         purpose,
         workspaceId,
         title: record?.title ?? mergedConfig.title ?? null,
         labels: record?.labels ?? options?.labels ?? {},
+        background: options?.background,
       },
     );
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
@@ -1543,6 +1630,7 @@ export class AgentManager {
     await this.requireExternalMcpSupport(session, providerLaunchConfig, launchContext);
     return this.registerSession(session, storedConfig, resolvedAgentId, {
       ...options,
+      launchEnv,
       workspaceId,
       persistence:
         purpose === "interactive" && session.persistenceUpdatedOnResume
@@ -1684,17 +1772,20 @@ export class AgentManager {
       ...overrides,
       provider,
     } as AgentSessionConfig;
-    const { storedConfig, launchConfig } = await this.prepareSessionConfig(refreshConfig, agentId);
+    const { storedConfig, launchConfig } = await this.prepareSessionConfig(refreshConfig, agentId, {
+      env: existing.launchEnv,
+    });
     const launchContext = await this.buildLaunchContext(
       agentId,
       client,
       storedConfig.cwd,
-      undefined,
+      existing.launchEnv,
       {
         reason: "refresh",
         purpose: "interactive",
         workspaceId: existing.workspaceId,
         title: await this.resolveInitialPersistedTitle(agentId, existing.config, null),
+        background: existing.background,
         labels: existing.labels,
       },
     );
@@ -1732,6 +1823,8 @@ export class AgentManager {
         labels: existing.labels,
         workspaceId: existing.workspaceId,
         owner: existing.owner,
+        background: existing.background,
+        launchEnv: existing.launchEnv,
         createdAt: existing.createdAt,
         updatedAt: existing.updatedAt,
         lastUserMessageAt: existing.lastUserMessageAt,
@@ -1845,6 +1938,8 @@ export class AgentManager {
 
     await this.drainSessionEvents(agentId);
     this.cancelRunningProviderSubagents(agentId);
+    // close() drops the session's subscribers before the provider could report an empty list.
+    this.clearProviderBackgroundWork(agentId);
     const closedAgent = this.prepareAgentForClosure(agent, "agent closed");
     let persistError: unknown;
     try {
@@ -2045,6 +2140,7 @@ export class AgentManager {
         lastError: record.lastError ?? undefined,
         attention: { requiresAttention: false },
         internal: record.internal,
+        background: record.background,
         labels: record.labels,
       },
     });
@@ -3877,6 +3973,8 @@ export class AgentManager {
       publishWhenReady?: boolean;
       workspaceId?: string;
       owner?: AgentOwner;
+      background?: boolean;
+      launchEnv?: Record<string, string>;
     },
   ): Promise<ManagedAgent> {
     let registered = false;
@@ -3899,14 +3997,18 @@ export class AgentManager {
         options,
       });
 
+      const launchEnv = options?.launchEnv;
       const managed = this.buildManagedAgentForRegister({
         resolvedAgentId,
         session,
         config,
         now,
         durableTimelineHasRows,
+        background: options?.background === true,
         options,
       });
+
+      managed.launchEnv = launchEnv;
 
       // Read history before publishing the agent: a provider failure must leave the
       // session unregistered so the registration catch closes it.
@@ -4044,6 +4146,7 @@ export class AgentManager {
     config: AgentSessionConfig;
     now: Date;
     durableTimelineHasRows: boolean;
+    background: boolean;
     options:
       | {
           createdAt?: Date;
@@ -4058,6 +4161,7 @@ export class AgentManager {
           persistence?: AgentPersistenceHandle;
           workspaceId?: string;
           owner?: AgentOwner;
+          launchEnv?: Record<string, string>;
         }
       | undefined;
   }): ActiveManagedAgent {
@@ -4098,6 +4202,7 @@ export class AgentManager {
       lastError: options?.lastError,
       attention: resolveInitialAttention(options?.attention),
       internal: config.internal ?? false,
+      background: params.background,
       labels: options?.labels ?? {},
     } as ActiveManagedAgent;
   }
@@ -4157,6 +4262,7 @@ export class AgentManager {
     for (const event of this.providerSubagents.deleteParent(agentId)) {
       this.dispatch({ type: "provider_subagent", event });
     }
+    this.clearProviderBackgroundWork(agentId);
   }
 
   private emitClosedAgent(agent: ManagedAgentClosed, options?: { persist?: boolean }): void {
@@ -4264,6 +4370,14 @@ export class AgentManager {
     if (event.type === "provider_subagent") {
       const update = this.providerSubagents.apply(agent.id, event.provider, event.event);
       this.dispatch({ type: "provider_subagent", event: update });
+      return;
+    }
+    if (event.type === "background_work") {
+      const items =
+        event.items === null
+          ? this.backgroundWork.clear(agent.id)
+          : this.backgroundWork.apply(agent.id, event.items);
+      this.publishBackgroundWork(agent.id, items);
       return;
     }
     const turnId = getAgentStreamEventTurnId(event);
@@ -5098,7 +5212,7 @@ export class AgentManager {
   ): void {
     const hadPendingPermissions = agent.pendingPermissions.size > 0;
     agent.pendingPermissions.set(event.request.id, event.request);
-    if (!hadPendingPermissions && !agent.internal) {
+    if (!hadPendingPermissions && raisesAttention(agent)) {
       this.broadcastAgentAttention(agent, "permission");
     }
     this.emitState(agent);
@@ -5333,8 +5447,7 @@ export class AgentManager {
     // Track the new status
     this.previousStatuses.set(agent.id, currentStatus);
 
-    // Skip attention tracking for internal agents
-    if (agent.internal) {
+    if (!raisesAttention(agent)) {
       return;
     }
 
@@ -5532,6 +5645,13 @@ export class AgentManager {
       }
       if (
         subscriber.agentId &&
+        event.type === "background_work" &&
+        subscriber.agentId !== event.agentId
+      ) {
+        continue;
+      }
+      if (
+        subscriber.agentId &&
         event.type === "agent_state" &&
         subscriber.agentId !== event.agent.id
       ) {
@@ -5558,6 +5678,7 @@ export class AgentManager {
   private eventBelongsToInternalAgent(event: AgentManagerEvent): boolean {
     if (event.type === "agent_state") return event.agent.internal === true;
     if (event.type === "agent_stream") return this.agents.get(event.agentId)?.internal === true;
+    if (event.type === "background_work") return this.agents.get(event.agentId)?.internal === true;
     if (event.type !== "provider_subagent") return false;
     const parentAgentId =
       event.event.type === "upsert"
@@ -5709,6 +5830,7 @@ export class AgentManager {
       reason?: PluginSessionOpenRequest["reason"];
       purpose?: PluginSessionOpenRequest["purpose"];
       title?: string | null;
+      background?: boolean;
       labels?: Record<string, string>;
     },
   ): Promise<AgentLaunchContext> {
@@ -5730,7 +5852,7 @@ export class AgentManager {
         purpose: opening?.purpose ?? "interactive",
         env: { ...env },
         title: opening?.title ?? null,
-        labels: opening?.labels ?? {},
+        ...pluginOpeningVisibility(opening),
         tools: [],
         mcpServers: {},
       };
@@ -5922,4 +6044,11 @@ function pluginPromptContext(
   appendSystemPrompt: string[] | undefined,
 ): Pick<AgentLaunchContext, "appendSystemPrompt"> {
   return appendSystemPrompt?.length ? { appendSystemPrompt } : {};
+}
+
+function pluginOpeningVisibility(opening?: {
+  labels?: Record<string, string>;
+  background?: boolean;
+}) {
+  return { labels: opening?.labels ?? {}, background: opening?.background === true };
 }

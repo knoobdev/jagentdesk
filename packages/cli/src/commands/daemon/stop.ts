@@ -69,7 +69,13 @@ export async function runStopCommand(
   );
 
   try {
-    const result = await stopLocalDaemon({ home, force, timeoutMs, killTimeoutMs });
+    const result = await stopLocalDaemon({
+      home,
+      force,
+      timeoutMs,
+      killTimeoutMs,
+      keepTerminals: options.keepTerminals === true,
+    });
     return {
       type: "single",
       data: {

@@ -24,6 +24,8 @@ import { areEquivalentPaths, createRealpathAwarePathMatcher } from "../../../uti
 import { readJAgentDeskWorktreeMetadata } from "../../../utils/worktree-metadata.js";
 
 export interface ResolveOrCreateWorkspaceIdInput {
+  background?: boolean;
+  callerWorkspaceId?: string;
   createdWorktree: CreateJAgentDeskWorktreeWorkflowResult | null;
   requestedWorkspaceId?: string;
   cwd: string;
@@ -388,6 +390,8 @@ export function createWorkspaceProvisioningService(deps: {
     return (
       await createWorkspaceForDirectory(input.cwd, input.initialTitle, undefined, {
         expectsInitialAgent: true,
+        background: input.background,
+        callerWorkspaceId: input.callerWorkspaceId,
       })
     ).workspaceId;
   }
