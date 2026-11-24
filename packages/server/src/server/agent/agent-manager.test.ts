@@ -457,7 +457,7 @@ class TestAgentSession implements AgentSession {
 
   async startTurn(): Promise<{ turnId: string }> {
     this.interrupted = false;
-    const turnId = `turn-${++this.turnIdCounter}`;
+    const turnId = `turn-${this.id}-${++this.turnIdCounter}`;
     // Use setTimeout so events arrive after the caller sets up the foreground waiter
     setTimeout(() => {
       this.pushEvent({ type: "turn_started", provider: this.provider, turnId });
