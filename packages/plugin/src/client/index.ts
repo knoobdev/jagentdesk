@@ -1,5 +1,11 @@
 export type {
   PluginHostProps,
+  PluginAgentPanelContribution,
+  PluginTab,
+  PluginPanelProps,
+  PluginWorkspacePanelParams,
+  PluginAgentPanelParams,
+  PluginFilePanelParams,
   PluginFilePanelProps,
   PluginFilePanelContribution,
   PluginScreenProps,
@@ -78,3 +84,5 @@ export declare function getJAgentDeskClient(
 export declare function openExternalUrl(url: string): Promise<void>;
 
 export * from "./file.js";
+
+export { useTabState } from "./tab.js";

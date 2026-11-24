@@ -1,7 +1,7 @@
-import type { PluginFile, PluginFileLocation, PluginFileTab } from "./file.js";
+import type { PluginFile, PluginFileLocation } from "./file.js";
 import type { ComponentType } from "react";
 import type { JAgentDeskApi } from "@jagentdesk/client";
-import type { AgentTimelineItem } from "@jagentdesk/protocol/agent-types";
+import type { AgentTimelineItem, JsonValue } from "@jagentdesk/protocol/agent-types";
 import type { ZodType, input as ZodInput, output as ZodOutput } from "zod";
 import type {
   PluginRpcContract,
@@ -113,22 +113,38 @@ interface PluginWorkspacePanelBase {
   locations?: readonly PluginPanelLocation[];
 }
 
-export interface PluginWorkspacePanelProps extends PluginNavigableHostProps {
-  context: "workspace";
-  workspaceId: string;
+export interface PluginTab {
+  setModified(modified: boolean): void;
+  readonly state: unknown;
+  setState(state: JsonValue): void;
 }
-
-export interface PluginAgentPanelProps extends PluginNavigableHostProps {
-  context: "agent";
+export interface PluginPanelProps<Params> extends PluginNavigableHostProps {
   workspaceId: string;
+  readonly params: Readonly<Params>;
+  revision: number;
+  tab: PluginTab;
+}
+export interface PluginWorkspacePanelParams {}
+export interface PluginAgentPanelParams {
+  readonly agentId: string;
+}
+export interface PluginFilePanelParams {
+  readonly path: string;
+  readonly lineStart?: number;
+  readonly lineEnd?: number;
+}
+export interface PluginWorkspacePanelProps extends PluginPanelProps<PluginWorkspacePanelParams> {
+  // COMPAT(pluginPanelFlatProps): added in v0.9.59, remove after 2027-04-23.
+  context: "workspace";
+}
+export interface PluginAgentPanelProps extends PluginPanelProps<PluginAgentPanelParams> {
+  // COMPAT(pluginPanelFlatProps): added in v0.9.59, remove after 2027-04-23.
+  context: "agent";
   agentId: string;
 }
-
-export interface PluginFilePanelProps extends PluginNavigableHostProps {
-  workspaceId: string;
-  /** The file itself. The panel decides how to read it, show it, and save it. */
+export interface PluginFilePanelProps extends PluginPanelProps<PluginFilePanelParams> {
   file: PluginFile;
-  tab: PluginFileTab;
+  // COMPAT(pluginFileLocation): added in v0.9.59, remove after 2027-04-23.
   location: PluginFileLocation;
 }
 
@@ -156,6 +172,7 @@ export interface PluginClientContext extends PluginCommandCapabilities {
   addSurface(id: string, Component: ComponentType<PluginSurfaceProps>): PluginCleanup;
   addSidebarItem(contribution: PluginSidebarContribution): PluginCleanup;
   addFilePanel(contribution: PluginFilePanelContribution): PluginCleanup;
+  addAgentPanel(contribution: PluginAgentPanelContribution): PluginCleanup;
   addWorkspacePanel(contribution: PluginWorkspacePanelContribution): PluginCleanup;
   addCommandCenterItem(contribution: PluginCommandCenterItemContribution): PluginCleanup;
   addSlashCommand(contribution: PluginClientSlashCommandContribution): PluginCleanup;
@@ -186,13 +203,17 @@ export type PluginClientContribution = (client: PluginClientContext) => PluginCl
 
 export type PluginWorkspacePanelContribution =
   | (PluginWorkspacePanelBase & {
-      context: "workspace";
+      context?: "workspace";
       Component: ComponentType<PluginWorkspacePanelProps>;
     })
   | (PluginWorkspacePanelBase & {
       context: "agent";
       Component: ComponentType<PluginAgentPanelProps>;
     });
+
+export interface PluginAgentPanelContribution extends PluginWorkspacePanelBase {
+  Component: ComponentType<PluginAgentPanelProps>;
+}
 
 export interface PluginSettingsScreenContribution {
   id: string;

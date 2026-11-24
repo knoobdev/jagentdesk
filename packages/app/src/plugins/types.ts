@@ -21,6 +21,7 @@ import type {
 } from "@jagentdesk/plugin/client";
 
 export type EvaluatedPluginWorkspacePanelContribution = PluginWorkspacePanelContribution & {
+  context: "workspace" | "agent";
   locations: readonly PluginPanelLocation[];
 };
 

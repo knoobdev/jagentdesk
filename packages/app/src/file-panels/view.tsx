@@ -1,8 +1,5 @@
-import type {
-  PluginFilePanelContribution,
-  PluginFilePanelProps,
-  PluginFileTab,
-} from "@jagentdesk/plugin/client";
+import { usePluginPanelTab } from "@/plugins/panel-tab";
+import type { PluginFilePanelContribution, PluginFilePanelProps } from "@jagentdesk/plugin/client";
 import { useCallback, useMemo, useState } from "react";
 import { Platform, Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -11,10 +8,7 @@ import { FilePane } from "@/file-pane/pane";
 import { useAppSettings } from "@/hooks/use-settings";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { usePaneContext } from "@/panels/pane-context";
-import {
-  usePanelInstanceAttributes,
-  usePublishPanelInstanceAttributes,
-} from "@/panels/panel-instance-attributes";
+import { usePanelInstanceAttributes } from "@/panels/panel-instance-attributes";
 import { useInstalledPlugins } from "@/plugins/registry";
 import { PluginRuntimeBoundary } from "@/plugins/runtime-boundary";
 import { SurfaceErrorBoundary } from "@/plugins/surface-error-boundary";
@@ -190,13 +184,14 @@ function PluginFileHost({
   revision: number;
 }) {
   const client = useHostRuntimeClient(plugin.serverId);
-  const [modified, setModified] = useState(false);
-  const attributes = useMemo(() => ({ modified }), [modified]);
-  usePublishPanelInstanceAttributes(attributes);
-  const tab = useMemo<PluginFileTab>(() => ({ setModified }), []);
+  const { tab } = usePluginPanelTab();
   const pluginLocation = useMemo(
     () => ({ lineStart: location.lineStart, lineEnd: location.lineEnd, revision }),
     [location.lineStart, location.lineEnd, revision],
+  );
+  const params = useMemo(
+    () => ({ path: file.path, lineStart: location.lineStart, lineEnd: location.lineEnd }),
+    [file.path, location.lineStart, location.lineEnd],
   );
   if (!client) return <Text style={styles.label}>Plugin host is offline.</Text>;
   return (
@@ -207,6 +202,8 @@ function PluginFileHost({
           file={file}
           tab={tab}
           location={pluginLocation}
+          revision={revision}
+          params={params}
           uniProps={themeMapping}
         />
       </PluginRuntimeBoundary>
@@ -217,7 +214,7 @@ function PluginFileContent({
   contribution,
   theme,
   ...props
-}: Pick<PluginFilePanelProps, "file" | "tab" | "location" | "theme"> & {
+}: Pick<PluginFilePanelProps, "file" | "tab" | "location" | "theme" | "params" | "revision"> & {
   contribution: PluginFilePanelContribution;
 }) {
   const { serverId, workspaceId } = usePaneContext();

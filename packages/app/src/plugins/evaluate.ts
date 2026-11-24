@@ -262,7 +262,14 @@ export function runPluginClientBundle(
         throw new Error(`File panel ${panelId} is not a component`);
       return register(collector.filePanels!, { ...contribution, id: panelId }, () => {});
     },
-    addWorkspacePanel(contribution: PluginWorkspacePanelContribution) {
+    addAgentPanel(contribution) {
+      return pluginContext.addWorkspacePanel({ ...contribution, context: "agent" });
+    },
+    addWorkspacePanel(input: PluginWorkspacePanelContribution) {
+      const contribution = {
+        ...input,
+        context: input.context ?? "workspace",
+      } as PluginWorkspacePanelContribution;
       const normalizedId = requireId(contribution.id, "workspace panel id");
       if (workspacePanelIds.has(normalizedId)) {
         throw new Error(`Duplicate workspace panel: ${normalizedId}`);
