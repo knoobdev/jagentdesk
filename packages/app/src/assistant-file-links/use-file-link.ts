@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { useStableEvent } from "@/hooks/use-stable-event";
 import type { OpenFileDisposition } from "@/workspace/file-open";
 import { openExternalUrl } from "@/utils/open-external-url";
+import { formatFileLinkTooltipPath } from "./tooltip-path";
 import type { InlinePathTarget } from "./parse";
 import {
   useAssistantFileLinkResolverContext,
@@ -15,10 +16,12 @@ import {
   fetchDaemonResolution,
   type AssistantFileLinkResolution,
   type AssistantFileLinkSource,
+  type AssistantFileLinkContext,
 } from "./resolver";
 
 export interface UseFileLinkResult {
   target: InlinePathTarget | null;
+  tooltipPath: string | null;
   onHoverIn: () => void;
   onPress: () => void;
   onAuxPress: () => void;
@@ -55,13 +58,15 @@ export function useFileLink(source: AssistantFileLinkSource): UseFileLinkResult 
   const stableSource = useStableSource(source);
   const activeConfig = context.configRef.current;
   const workspaceRoot = activeConfig.workspaceRoot;
+  const relativePathBase = activeConfig.relativePathBase;
   const serverId = activeConfig.serverId;
   const resolution = useMemo(
     () =>
       classifyForResolution(stableSource, {
         workspaceRoot,
+        relativePathBase,
       }),
-    [stableSource, workspaceRoot],
+    [stableSource, workspaceRoot, relativePathBase],
   );
   const queryKey = useMemo(
     () =>
@@ -136,6 +141,7 @@ export function useFileLink(source: AssistantFileLinkSource): UseFileLinkResult 
   const onPress = useStableEvent(() => {
     open(stableSource, "main");
   });
+
   const onAuxPress = useStableEvent(() => {
     open(stableSource, "side");
   });
@@ -147,9 +153,10 @@ export function useFileLink(source: AssistantFileLinkSource): UseFileLinkResult 
     return query.data ?? null;
   }, [query.data, resolution]);
 
+  const tooltipPath = target ? formatFileLinkTooltipPath({ target, workspaceRoot }) : null;
   return useMemo(
-    () => ({ target, onHoverIn, onPress, onAuxPress, open }),
-    [target, onHoverIn, onPress, onAuxPress, open],
+    () => ({ target, tooltipPath, onHoverIn, onPress, onAuxPress, open }),
+    [target, tooltipPath, onHoverIn, onPress, onAuxPress, open],
   );
 }
 
@@ -167,14 +174,14 @@ export function useAssistantFileLinkActions(): AssistantFileLinkActions {
     (source: AssistantFileLinkSource) =>
       Boolean(
         hints && matchCommandLink(source.href, source.sourceType ?? "markdown", hints.names),
-      ) || canOpenAssistantFileLink(source, context.configRef.current.workspaceRoot),
+      ) || canOpenAssistantFileLink(source, context.configRef.current),
     [context.configRef, hints],
   );
   const canResolveFile = useCallback(
     (source: AssistantFileLinkSource) =>
       Boolean(
         hints && matchCommandLink(source.href, source.sourceType ?? "markdown", hints.names),
-      ) || canResolveAssistantFileLinkToFile(source, context.configRef.current.workspaceRoot),
+      ) || canResolveAssistantFileLinkToFile(source, context.configRef.current),
     [context.configRef, hints],
   );
 
@@ -191,6 +198,7 @@ function openAssistantFileLink(input: {
   const capturedConfig = input.context.configRef.current;
   const capturedResolution = classifyForResolution(input.source, {
     workspaceRoot: capturedConfig.workspaceRoot,
+    relativePathBase: capturedConfig.relativePathBase,
   });
 
   if (capturedResolution.kind === "resolved") {
@@ -248,17 +256,17 @@ function openAssistantFileLink(input: {
 
 function canOpenAssistantFileLink(
   source: AssistantFileLinkSource,
-  workspaceRoot: string | undefined,
+  context: AssistantFileLinkContext,
 ): boolean {
-  const resolution = classifyForResolution(source, { workspaceRoot });
+  const resolution = classifyForResolution(source, context);
   return resolution.kind === "needsLookup" || resolution.value.kind !== "ignored";
 }
 
 function canResolveAssistantFileLinkToFile(
   source: AssistantFileLinkSource,
-  workspaceRoot: string | undefined,
+  context: AssistantFileLinkContext,
 ): boolean {
-  const resolution = classifyForResolution(source, { workspaceRoot });
+  const resolution = classifyForResolution(source, context);
   return resolution.kind === "needsLookup" || resolution.value.kind === "file";
 }
 

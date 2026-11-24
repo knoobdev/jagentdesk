@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { View, Text } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 
@@ -7,16 +7,19 @@ type StatusBadgeVariant = "success" | "error" | "muted";
 interface StatusBadgeProps {
   label: string;
   variant?: StatusBadgeVariant;
+  leading?: ReactNode;
+  size?: "sm" | "xs";
 }
 
-export function StatusBadge({ label, variant = "muted" }: StatusBadgeProps) {
+export function StatusBadge({ label, variant = "muted", leading, size = "sm" }: StatusBadgeProps) {
   const pillStyle = useMemo(
     () => [
       styles.pill,
+      size === "xs" && styles.pillXs,
       variant === "success" && styles.pillSuccess,
       variant === "error" && styles.pillError,
     ],
-    [variant],
+    [size, variant],
   );
   const textStyle = useMemo(
     () => [
@@ -29,6 +32,7 @@ export function StatusBadge({ label, variant = "muted" }: StatusBadgeProps) {
 
   return (
     <View style={pillStyle}>
+      {leading}
       <Text style={textStyle}>{label}</Text>
     </View>
   );
@@ -37,6 +41,7 @@ export function StatusBadge({ label, variant = "muted" }: StatusBadgeProps) {
 const styles = StyleSheet.create((theme) => ({
   pill: {
     flexDirection: "row",
+    gap: 6,
     alignItems: "center",
     borderRadius: theme.borderRadius.full,
     borderWidth: 1,
@@ -45,6 +50,7 @@ const styles = StyleSheet.create((theme) => ({
     paddingHorizontal: theme.spacing[2],
     paddingVertical: 3,
   },
+  pillXs: { paddingHorizontal: theme.spacing[1.5], paddingVertical: 1 },
   pillSuccess: {
     backgroundColor: theme.colors.palette.green[900],
     borderColor: theme.colors.palette.green[800],

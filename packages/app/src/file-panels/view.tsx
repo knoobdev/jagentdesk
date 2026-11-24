@@ -24,6 +24,7 @@ import { useFileHandle, useFileHandleSnapshot } from "./file";
 import { resolveFilePanel } from "./resolve";
 
 interface FilePanelProps {
+  workspaceId?: string | null;
   serverId: string;
   workspaceRoot: string;
   location: WorkspaceFileLocation;

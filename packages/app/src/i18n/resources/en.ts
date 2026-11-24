@@ -85,7 +85,7 @@ export const en = {
       close: "Close menu",
     },
     commandCenter: {
-      placeholder: "Search commands, workspaces, and agents...",
+      placeholder: "Search workspaces, files, and actions...",
       noMatches: "No matches",
       actions: "Actions",
       workspaces: "Workspaces",
@@ -105,6 +105,19 @@ export const en = {
       fastModeSearchKeywords: "fast speed low latency",
       settingOn: "On",
       settingOff: "Off",
+      filePlaceholder: "Search files...",
+      searchingFiles: "Searching files...",
+      files: "Files",
+      open: "Open {{name}}",
+      openInSidePane: "Open {{name}} in side pane",
+      openInFocusedPane: "Open {{name}} in focused pane",
+      groupByProject: "Group by project",
+      groupByStatus: "Group by status",
+      placeholderWithoutFiles: "Search workspaces and actions...",
+      workspacePlaceholder: "Search workspaces...",
+      actionPlaceholder: "Search actions...",
+      recentWorkspaces: "Recent workspaces",
+      tabs: { all: "All", workspaces: "Workspaces", files: "Files", actions: "Actions" },
     },
   },
   composer: {
@@ -389,6 +402,7 @@ export const en = {
       withTokens: "Context compacted ({{tokens}}K tokens)",
       completed: "Context compacted",
     },
+    turnFooter: { workedFor: "Worked for {{duration}}" },
   },
   importSession: {
     title: "Import session",
@@ -623,6 +637,10 @@ export const en = {
         editTerminalProfiles: "Edit profiles…",
         pinTarget: "Pin",
         unpinTarget: "Unpin",
+        newTab: "New tab",
+        changes: "Changes",
+        files: "Files",
+        pullRequest: "Pull request",
       },
       explorer: {
         open: "Open explorer",
@@ -938,22 +956,29 @@ export const en = {
         actions: {
           viewPullRequest: "View",
           openOn: "Open on {{brand}}",
+          addToChat: "Add to chat",
+          addAllToChat: "Add all to chat",
+          addingToChat: "Adding...",
         },
         sections: {
           checks: "Checks",
           pipeline: "Pipeline",
           reviews: "Reviews",
+          activity: "Activity",
         },
         empty: {
           noJobs: "No jobs",
           loadingPipeline: "Loading pipeline…",
           pipelineJobsLoadFailed: "Could not load pipeline jobs",
           allowedToFail: "allowed to fail",
+          noActivity: "No activity yet",
         },
         approvals: "{{given}} of {{required}} approvals",
         accessibility: {
           pullRequest: "Pull request #{{number}}",
           pullRequest_mr: "Merge request !{{number}}",
+          commentActions: "Comment actions",
+          threadActions: "Thread actions",
         },
         states: {
           draft: "Draft",
@@ -972,10 +997,50 @@ export const en = {
         },
         thread: {
           discussion: "Discussion thread",
+          resolved: "Resolved",
+          outdated: "Outdated",
         },
         errors: {
           statusLoadFailed: "Unable to load pull request status",
           activityLoadFailed: "Unable to load pull request activity",
+        },
+        checksOverview: {
+          headline: {
+            actionRequired: "Some checks need your attention",
+            failure: "Some checks were not successful",
+            pending: "Some checks haven't completed yet",
+            success: "All checks have passed",
+            none: "No checks",
+          },
+          count: {
+            actionRequired: "{{count}} needs action",
+            warning: "{{count}} warning",
+            failure: "{{count}} failing",
+            pending: "{{count}} in progress",
+            manual: "{{count}} manual",
+            success: "{{count}} successful",
+            ignored: "{{count}} skipped",
+          },
+          detailOne: "{{parts}} check",
+          detailMany: "{{parts}} checks",
+          groupOne: {
+            actionRequired: "{{count}} needs action check",
+            warning: "{{count}} warning check",
+            failure: "{{count}} failing check",
+            pending: "{{count}} in progress check",
+            manual: "{{count}} manual check",
+            success: "{{count}} successful check",
+            ignored: "{{count}} skipped check",
+          },
+          groupMany: {
+            actionRequired: "{{count}} needs action checks",
+            warning: "{{count}} warning checks",
+            failure: "{{count}} failing checks",
+            pending: "{{count}} in progress checks",
+            manual: "{{count}} manual checks",
+            success: "{{count}} successful checks",
+            ignored: "{{count}} skipped checks",
+          },
         },
       },
       forgeSetup: {
@@ -1062,6 +1127,10 @@ export const en = {
       shortcuts: "Keyboard shortcuts",
       reportIssue: "Report an issue",
       version: "JAgentDesk {{version}}",
+      discord: "Discord",
+      github: "Create GitHub issue",
+      whatsNew: "What's new",
+      appName: "JAgentDesk",
     },
     sections: {
       sessions: "History",
@@ -1147,6 +1216,14 @@ export const en = {
         undoArchiveFailed: "Couldn't undo the archive",
       },
     },
+    statusBucket: {
+      needsInput: "Needs input",
+      failed: "Failed",
+      readyToReview: "Ready to review",
+      working: "Working",
+      done: "Done",
+    },
+    statusGroupAccessibility: "{{label}} group",
   },
   newWorkspace: {
     title: "New workspace",
@@ -1399,6 +1476,11 @@ export const en = {
     failedToLoad: "Failed to load",
     chooseProjectForCommands: "Choose a project to see commands",
     chooseModelForCommands: "Select a model to see commands",
+    loadingProviderCommands: "Loading {{provider}} commands...",
+    commandsFailed: "Couldn't load commands",
+    providerCommandsFailed: "Couldn't load {{provider}} commands",
+    filesFailed: "Couldn't search files",
+    skillTag: "Skill",
   },
   loadOlderHistory: {
     failed: "Couldn't load older history",
@@ -1542,7 +1624,6 @@ export const en = {
       keyChanged: "Warning: the daemon key has changed. Verify this change with the host owner.",
       connect: "Connect",
     },
-
     verify: {
       failed: "Pairing failed",
       saveFailed:
@@ -1767,6 +1848,13 @@ export const en = {
       loadError: "Failed to load diff",
       capabilityMissing: "Update the host to view commit diffs.",
     },
+    files: { label: "Files", subtitle: "Workspace files", tooltip: "Browse workspace files" },
+    pullRequest: {
+      label: "Pull request",
+      subtitle: "Pull request details",
+      emptyTitle: "No pull request yet",
+      emptyDescription: "Create a pull request for this checkout to see its details here.",
+    },
   },
   toolCallDetails: {
     error: "Error",
@@ -1810,6 +1898,8 @@ export const en = {
     dismiss: "Dismiss",
   },
   contextWindow: {
+    noData: "No context data",
+    accessibilityNoData: "Context window: No context data",
     title: "Context window",
     used: "{{percentage}}% used",
     tokens: "{{used}} / {{max}} tokens",
@@ -3088,6 +3178,18 @@ export const en = {
       forkHint: "JAgentDesk does not own {{name}}, so it is never edited.",
       fork: "Create copy",
       forked: "Training {{name}}",
+    },
+  },
+  changelog: {
+    title: "What's new",
+    installed: "Installed",
+    showMore: "Show more",
+    showAllChanges: "Show all changes",
+    hideAllChanges: "Hide all changes",
+    openWebsite: "Full changelog",
+    error: {
+      title: "Unable to load the changelog",
+      description: "Check your connection and try again.",
     },
   },
 } as const;

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import {
   View,
   Text,
@@ -45,6 +45,7 @@ import { useDraftStore } from "@/stores/draft-store";
 function logExplorerSidebar(_event: string, _details: Record<string, unknown>): void {}
 
 interface ExplorerSidebarProps {
+  children?: ReactNode;
   serverId: string;
   workspaceId?: string | null;
   workspaceRoot: string;
@@ -144,6 +145,7 @@ export function CompactExplorerSidebar({
 }
 
 export function ExplorerSidebar({
+  children,
   serverId,
   workspaceId,
   workspaceRoot,
@@ -210,32 +212,32 @@ export function ExplorerSidebar({
     [resizeAnimatedStyle, insets.top],
   );
 
-  if (!isOpen) {
-    return null;
-  }
-
   return (
-    <Animated.View style={desktopSidebarStyle}>
-      <View style={[styles.desktopSidebarBorder, { flex: 1 }]}>
-        <SidebarResizeHandle
-          edge="left"
-          gesture={resizeGesture}
-          testID="explorer-sidebar-resize-handle"
-        />
+    <RetainedPanelActivity active={isOpen}>
+      <Animated.View style={isOpen ? desktopSidebarStyle : styles.hiddenSidebar}>
+        <View style={[styles.desktopSidebarBorder, { flex: 1 }]}>
+          <SidebarResizeHandle
+            edge="left"
+            gesture={resizeGesture}
+            testID="explorer-sidebar-resize-handle"
+          />
 
-        <ExplorerSidebarContent
-          activeTab={explorerTab}
-          onTabPress={handleTabPress}
-          onClose={handleDesktopClose}
-          serverId={serverId}
-          workspaceId={workspaceId}
-          workspaceRoot={workspaceRoot}
-          isGit={isGit}
-          isOpen={isOpen}
-          onOpenFile={onOpenFile}
-        />
-      </View>
-    </Animated.View>
+          {children ?? (
+            <ExplorerSidebarContent
+              activeTab={explorerTab}
+              onTabPress={handleTabPress}
+              onClose={handleDesktopClose}
+              serverId={serverId}
+              workspaceId={workspaceId}
+              workspaceRoot={workspaceRoot}
+              isGit={isGit}
+              isOpen={isOpen}
+              onOpenFile={onOpenFile}
+            />
+          )}
+        </View>
+      </Animated.View>
+    </RetainedPanelActivity>
   );
 }
 
@@ -457,7 +459,7 @@ function useAddFileToChat({
   return { addFile, canAddToChat: focusedChat !== null };
 }
 
-function ChangedFilesPane({
+export function ChangedFilesPane({
   serverId,
   workspaceId,
   workspaceRoot,
@@ -480,7 +482,7 @@ function ChangedFilesPane({
   );
 }
 
-function FilesPane({
+export function FilesPane({
   serverId,
   workspaceId,
   workspaceRoot,
@@ -506,13 +508,14 @@ interface PrTabContentProps {
   onRetry: () => void;
 }
 
-function PrTabContent({
+export function PrTabContent({
   serverId,
   cwd,
   prPane,
   workspaceAttachmentScopeKey,
   onRetry,
 }: PrTabContentProps) {
+  const { t } = useTranslation();
   if (prPane.data) {
     return (
       <PullRequestPane
@@ -527,6 +530,13 @@ function PrTabContent({
   if (prPane.error) {
     return <PullRequestPaneError onRetry={onRetry} />;
   }
+  if (!prPane.isLoading)
+    return (
+      <View style={styles.prEmpty}>
+        <Text style={styles.prEmptyTitle}>{t("panels.pullRequest.emptyTitle")}</Text>
+        <Text style={styles.prEmptyDescription}>{t("panels.pullRequest.emptyDescription")}</Text>
+      </View>
+    );
   return <PullRequestPaneSkeleton />;
 }
 
@@ -540,6 +550,10 @@ const explorerStaticStyles = RNStyleSheet.create({
 });
 
 const styles = StyleSheet.create((theme) => ({
+  hiddenSidebar: { display: "none" },
+  prEmpty: { flex: 1, justifyContent: "center", padding: theme.spacing[4], gap: theme.spacing[2] },
+  prEmptyTitle: { color: theme.colors.foreground, fontSize: theme.fontSize.base },
+  prEmptyDescription: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
   desktopSidebarBorder: {
     borderLeftWidth: 1,
     borderLeftColor: theme.colors.border,

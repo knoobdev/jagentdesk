@@ -202,7 +202,7 @@ describe("translation resources", () => {
     expect(en.shell.menu.toggleSidebar).toBe("Toggle sidebar");
     expect(en.shell.menu.open).toBe("Open menu");
     expect(en.shell.menu.close).toBe("Close menu");
-    expect(en.shell.commandCenter.placeholder).toBe("Search commands, workspaces, and agents...");
+    expect(en.shell.commandCenter.placeholder).toBe("Search workspaces, files, and actions...");
     expect(en.shell.commandCenter.noMatches).toBe("No matches");
     expect(en.shell.commandCenter.actions).toBe("Actions");
     expect(en.shell.commandCenter.workspaces).toBe("Workspaces");
@@ -631,7 +631,7 @@ describe("translation resources", () => {
     expect(en.branchSwitcher.stashRestored).toBe("Stashed changes restored");
     expect(en.agentAutocomplete.searchingWorkspace).toBe("Searching workspace...");
     expect(en.agentAutocomplete.noCommands).toBe("No commands found");
-    expect(en.agentAutocomplete.failedToLoad).toBe("Failed to load");
+    expect(en.agentAutocomplete.commandsFailed).toBe("Couldn't load commands");
     expect(en.loadOlderHistory.failed).toBe("Couldn't load older history");
     expect(en.agentControls.thinking.extraHigh).toBe("Extra high");
     expect(en.agentControls.model.unknown).toBe("Unknown model");

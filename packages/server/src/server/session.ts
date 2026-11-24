@@ -9,6 +9,7 @@ import {
 import { UsageSession, type UsageSessionOptions } from "./session/usage/usage-session.js";
 import { builtinPluginWireState } from "@jagentdesk/protocol/builtin-plugins";
 import { CreationService } from "./creation/index.js";
+import { describeAgentHistoryMatches, rankAgentHistoryCandidates } from "./agent-history-search.js";
 import { builtinPluginForRpc } from "./plugins/builtin/gates.js";
 import { BuiltinPluginError, type BuiltinPluginState } from "./plugins/builtin/state.js";
 import { SessionDelivery, type OwnedSubscription } from "./session/owned-subscriptions/index.js";
@@ -478,6 +479,15 @@ type FetchAgentHistoryRequestMessage = Extract<
   { type: "fetch_agent_history_request" }
 >;
 type AgentDirectoryRequestMessage = FetchAgentsRequestMessage | FetchAgentHistoryRequestMessage;
+
+/**
+ * Only history carries a query. The active-agents directory filters on
+ * structure and never ranks, so it always reads as no query at all.
+ */
+function agentDirectorySearchQuery(request: AgentDirectoryRequestMessage): string {
+  if (request.type !== "fetch_agent_history_request") return "";
+  return request.search?.trim() ?? "";
+}
 type FetchAgentsRequestFilter = NonNullable<FetchAgentsRequestMessage["filter"]>;
 type FetchAgentsRequestSort = NonNullable<FetchAgentsRequestMessage["sort"]>[number];
 type FetchAgentsResponsePayload = Extract<
@@ -2241,6 +2251,24 @@ export class Session {
       (event) => {
         if (event.type === "timeline_replacement") {
           this.deliverTimelineReplacement(event.agentId, this.rewindInitiators.get(event.agentId));
+          return;
+        }
+
+        if (event.type === "agent_removed") {
+          if (event.internal) return;
+          void this.agentUpdates
+            .removeAgent(event.agentId)
+            .then(() => {
+              if (event.workspaceId)
+                return this.emitWorkspaceUpdateForWorkspaceId(event.workspaceId);
+              return undefined;
+            })
+            .catch((error) => {
+              this.sessionLogger.error(
+                { err: error, agentId: event.agentId },
+                "Failed to emit agent removal",
+              );
+            });
           return;
         }
 
@@ -5495,10 +5523,8 @@ export class Session {
   private async handleDeleteAgentRequest(agentId: string, requestId: string): Promise<void> {
     this.sessionLogger.info({ agentId }, `Deleting agent ${agentId} from registry`);
 
-    const knownWorkspaceId =
-      this.agentManager.getAgent(agentId)?.workspaceId ??
-      (await this.agentStorage.get(agentId))?.workspaceId ??
-      null;
+    const knownAgent =
+      this.agentManager.getAgent(agentId) ?? (await this.agentStorage.get(agentId));
 
     // File-backed storage still needs an early delete fence before closeAgent().
     beginAgentDeleteIfSupported(this.agentStorage, agentId);
@@ -5519,6 +5545,8 @@ export class Session {
     try {
       await this.agentStorage.remove(agentId);
       await this.agentManager.deleteAgentState(agentId);
+      // Directory removal is daemon-wide; agent_deleted below stays a source-scoped RPC reply.
+      if (knownAgent) this.agentManager.notifyAgentRemoved(knownAgent);
     } catch (error) {
       this.sessionLogger.error({ err: error, agentId }, `Failed to fully delete agent ${agentId}`);
     }
@@ -5530,12 +5558,6 @@ export class Session {
         requestId,
       },
     });
-
-    await this.agentUpdates.removeAgent(agentId);
-
-    if (knownWorkspaceId) {
-      await this.emitWorkspaceUpdateForWorkspaceId(knownWorkspaceId);
-    }
   }
 
   private async handleArchiveAgentRequest(agentId: string, requestId: string): Promise<void> {
@@ -7527,6 +7549,7 @@ export class Session {
   private async listFetchAgentsEntries(request: AgentDirectoryRequestMessage): Promise<{
     entries: FetchAgentsResponseEntry[];
     pageInfo: FetchAgentsResponsePageInfo;
+    searchTruncated?: boolean;
   }> {
     const filter =
       request.type === "fetch_agent_history_request" &&
@@ -7574,6 +7597,18 @@ export class Session {
       return placementPromise;
     };
 
+    const search = agentDirectorySearchQuery(request);
+    if (search) {
+      return this.listRankedAgentHistoryEntries({
+        search,
+        agents,
+        sort,
+        filter,
+        getPlacement,
+        page: request.page,
+      });
+    }
+
     let candidates = [...agents];
     candidates.sort((left, right) => this.agentsPager.compare(left, right, sort));
     const cursorToken = request.page?.cursor;
@@ -7607,6 +7642,64 @@ export class Session {
         prevCursor: request.page?.cursor ?? null,
         hasMore,
       },
+    };
+  }
+
+  /**
+   * The searched history page. Ranking has to see every candidate before it can
+   * name the best one, so this path resolves placements for the whole set
+   * instead of stopping at the page limit — that is what makes a query answer
+   * from all persisted sessions rather than from the first page of them.
+   */
+  private async listRankedAgentHistoryEntries(params: {
+    search: string;
+    agents: AgentSnapshotPayload[];
+    sort: FetchAgentsRequestSort[];
+    filter: AgentUpdatesFilter | undefined;
+    getPlacement: (workspaceId: string | undefined) => Promise<ProjectPlacementPayload | null>;
+    page: AgentDirectoryRequestMessage["page"];
+  }): Promise<{
+    entries: FetchAgentsResponseEntry[];
+    pageInfo: FetchAgentsResponsePageInfo;
+    searchTruncated: boolean;
+  }> {
+    const { search, agents, sort, filter, getPlacement, page } = params;
+    if (page?.cursor) {
+      // A ranked result set has no pages to walk, so a cursor here is caller
+      // misuse. Returning the ranked head instead would hide it.
+      throw new SessionRequestError(
+        "invalid_cursor",
+        "A history search returns one ranked page; it cannot be paged with a cursor.",
+      );
+    }
+
+    const allEntries = await this.collectFetchAgentsEntries({
+      candidates: agents,
+      limit: Number.MAX_SAFE_INTEGER,
+      getPlacement,
+      filter,
+    });
+
+    const ranked = rankAgentHistoryCandidates(search, allEntries, (left, right) =>
+      this.agentsPager.compare(left.agent, right.agent, sort),
+    );
+
+    const limit = page?.limit ?? 200;
+    // Ranges are derived only for the rows that will be rendered; ranking
+    // itself never needs them.
+    const entries = ranked.slice(0, limit).map((result) =>
+      Object.assign({}, result.candidate, {
+        searchScore: result.searchScore,
+        searchMatches: describeAgentHistoryMatches(search, result.candidate),
+      }),
+    );
+
+    return {
+      entries,
+      // No next page exists, so `hasMore` is false and truncation is reported
+      // on its own field. See the note on rankAgentHistoryCandidates.
+      pageInfo: { nextCursor: null, prevCursor: null, hasMore: false },
+      searchTruncated: ranked.length > limit,
     };
   }
 

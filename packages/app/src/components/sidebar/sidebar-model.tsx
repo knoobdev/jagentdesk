@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { createContext, useContext, useMemo, type ReactNode } from "react";
 import {
   useSidebarWorkspacesList,
@@ -34,6 +35,7 @@ export function SidebarModelProvider({
   keyboardNavigationActive?: boolean;
   children: ReactNode;
 }) {
+  const { t } = useTranslation();
   const modelActive = active !== false || keyboardNavigationActive;
   const list = useSidebarWorkspacesList({ enabled: modelActive });
   const groupMode = useSidebarViewStore((state) => state.groupMode);
@@ -64,6 +66,7 @@ export function SidebarModelProvider({
         workspaceEntriesByKey: projectionWorkspaceEntriesByKey,
         projectNamesByViewKey: list.projectNamesByViewKey,
         groupMode,
+        t,
         pinnedCollapsed,
         collapsedProjectKeys,
         collapsedStatusGroupKeys,
@@ -77,6 +80,7 @@ export function SidebarModelProvider({
       pinnedCollapsed,
       pinnedKeys,
       projectionWorkspaceEntriesByKey,
+      t,
     ],
   );
   const value = useMemo(

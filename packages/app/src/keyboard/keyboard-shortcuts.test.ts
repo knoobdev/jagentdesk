@@ -7,6 +7,7 @@ import {
   normalizeCapturedShortcutCombo,
   isShortcutCaptureComplete,
   getBindingIdForAction,
+  getDefaultKeysForAction,
   getWorkspaceIndexJumpModifierKey,
   resolveShortcutKeysForAction,
   resolveKeyboardShortcut,
@@ -221,6 +222,20 @@ describe("keyboard-shortcuts", () => {
       payload: { delta: 1 },
     },
     {
+      name: "matches tab relative navigation on macOS desktop via Cmd+Shift+[",
+      event: { key: "{", code: "BracketLeft", metaKey: true, shiftKey: true },
+      context: { isMac: true, usesDesktopBindings: true },
+      action: "workspace.tab.navigate.relative",
+      payload: { delta: -1 },
+    },
+    {
+      name: "matches tab relative navigation on macOS desktop via Cmd+Shift+]",
+      event: { key: "}", code: "BracketRight", metaKey: true, shiftKey: true },
+      context: { isMac: true, usesDesktopBindings: true },
+      action: "workspace.tab.navigate.relative",
+      payload: { delta: 1 },
+    },
+    {
       name: "matches Mod+T to open new tab",
       event: { key: "t", code: "KeyT", metaKey: true },
       context: { isMac: true },
@@ -372,14 +387,14 @@ describe("keyboard-shortcuts", () => {
     {
       name: "matches Alt+Shift+[ to previous tab on macOS when Option substitutes event.key",
       event: { key: "\u201D", code: "BracketLeft", altKey: true, shiftKey: true },
-      context: { isMac: true },
+      context: { isMac: true, usesDesktopBindings: false },
       action: "workspace.tab.navigate.relative",
       payload: { delta: -1 },
     },
     {
       name: "matches Alt+Shift+] to next tab on macOS when Option substitutes event.key",
       event: { key: "\u2019", code: "BracketRight", altKey: true, shiftKey: true },
-      context: { isMac: true },
+      context: { isMac: true, usesDesktopBindings: false },
       action: "workspace.tab.navigate.relative",
       payload: { delta: 1 },
     },
@@ -984,4 +999,10 @@ describe("shortcut capture completion", () => {
     expect(isShortcutCaptureComplete("show-shortcuts", ["Ctrl+K"])).toBe(true);
     expect(isShortcutCaptureComplete("show-shortcuts", ["Ctrl+0"])).toBe(true);
   });
+});
+
+it("advertises macOS desktop tab navigation", () => {
+  const desktopMac = { isMac: true, usesDesktopBindings: true };
+  expect(getDefaultKeysForAction("workspace-tab-prev", desktopMac)).toEqual(["mod", "shift", "["]);
+  expect(getDefaultKeysForAction("workspace-tab-next", desktopMac)).toEqual(["mod", "shift", "]"]);
 });

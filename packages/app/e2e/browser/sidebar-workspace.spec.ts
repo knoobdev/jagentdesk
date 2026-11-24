@@ -199,7 +199,9 @@ test.describe("Sidebar workspace list", () => {
     }
   });
 
-  test("JAgentDesk-owned worktree hover card shows the worktree directory name", async ({ page }) => {
+  test("JAgentDesk-owned worktree hover card shows the worktree directory name", async ({
+    page,
+  }) => {
     await withJAgentDeskOwnedWorktree(async ({ projectName, workspaceId, worktreeSlug }) => {
       await gotoAppShell(page);
       await waitForSidebarProject(page, projectName);

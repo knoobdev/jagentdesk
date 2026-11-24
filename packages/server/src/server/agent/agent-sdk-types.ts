@@ -1,3 +1,4 @@
+import type { AgentMessage } from "@jagentdesk/protocol/agent-message";
 import type { Options as ClaudeAgentOptions } from "@anthropic-ai/claude-agent-sdk";
 import type {
   AgentFeature,
@@ -342,6 +343,8 @@ interface ToolCallBase {
   name: string;
   detail: ToolCallDetail;
   metadata?: Record<string, unknown>;
+  /** Set when the row is a delivered agent message rather than a provider tool call. */
+  agentMessage?: AgentMessage;
 }
 
 type ToolCallRunningTimelineItem = ToolCallBase & {

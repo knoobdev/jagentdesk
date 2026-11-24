@@ -1,16 +1,14 @@
+import { StatusIcon } from "@/components/status-icon";
 import { useCallback, useMemo, type ReactElement, type ReactNode } from "react";
 import { Pressable, Text, View, type PressableStateCallbackType } from "react-native";
 import { Check } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
 import invariant from "tiny-invariant";
-import { SyncedLoader } from "@/components/synced-loader";
 import { ensurePanelsRegistered } from "@/panels/register-panels";
 import { getPanelRegistration } from "@/panels/panel-registry";
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
 import type { SidebarStateBucket } from "@/utils/sidebar-agent-state";
-import { isEmphasizedStatusDotBucket } from "@/utils/status-dot-color";
-import { shouldRenderSyncedStatusLoader } from "@/utils/status-loader";
 import type { Theme } from "@/styles/theme";
 import { usePanelInstanceAttributes } from "@/panels/panel-instance-attributes";
 
@@ -27,9 +25,7 @@ export interface WorkspaceTabPresentation {
 }
 
 const DEFAULT_STATUS_DOT_SIZE = 7;
-const EMPHASIZED_STATUS_DOT_SIZE = 9;
 const DEFAULT_STATUS_DOT_OFFSET = -2;
-const EMPHASIZED_STATUS_DOT_OFFSET = -3;
 
 interface WorkspaceTabPresentationResolverProps {
   tab: WorkspaceTabDescriptor;
@@ -123,60 +119,16 @@ export function WorkspaceTabIcon({
   size = 14,
   statusDotBorderColor,
 }: WorkspaceTabIconProps): ReactElement {
-  const iconColor = active ? styles.iconActive.color : styles.iconInactive.color;
-  const bucket = presentation.statusBucket;
-  let statusDotColor: string | null = null;
-  if (bucket === "needs_input") statusDotColor = styles.statusDotNeedsInput.color;
-  else if (bucket === "failed") statusDotColor = styles.statusDotFailed.color;
-  else if (bucket === "running") statusDotColor = styles.statusDotRunning.color;
-  else if (bucket === "attention") statusDotColor = styles.statusDotAttention.color;
-  const statusDotSize = isEmphasizedStatusDotBucket(presentation.statusBucket)
-    ? EMPHASIZED_STATUS_DOT_SIZE
-    : DEFAULT_STATUS_DOT_SIZE;
-  const statusDotOffset =
-    statusDotSize === EMPHASIZED_STATUS_DOT_SIZE
-      ? EMPHASIZED_STATUS_DOT_OFFSET
-      : DEFAULT_STATUS_DOT_OFFSET;
-  const shouldShowLoader = shouldRenderSyncedStatusLoader({
-    bucket: presentation.statusBucket,
-  });
   const Icon = presentation.icon;
-  const agentIconWrapperStyle = useMemo(
-    () => [styles.agentIconWrapper, { width: size, height: size }],
-    [size],
-  );
-  const statusDotStyle = useMemo(
-    () => [
-      styles.statusDot,
-      {
-        backgroundColor: statusDotColor ?? undefined,
-        borderColor: statusDotBorderColor ?? styles.statusDotBorderDefault.borderColor,
-        width: statusDotSize,
-        height: statusDotSize,
-        right: statusDotOffset,
-        bottom: statusDotOffset,
-      },
-    ],
-    [statusDotColor, statusDotBorderColor, statusDotSize, statusDotOffset],
-  );
-
-  if (shouldShowLoader) {
-    return (
-      <View
-        style={agentIconWrapperStyle}
-        accessibilityRole="progressbar"
-        accessibilityLabel="Agent running"
-      >
-        <SyncedLoader size={size - 1} color={styles.syncedLoader.color} />
-      </View>
-    );
-  }
-
+  const iconColor = active ? styles.iconActive.color : styles.iconInactive.color;
   return (
-    <View style={agentIconWrapperStyle}>
+    <StatusIcon
+      statusBucket={presentation.statusBucket}
+      size={size}
+      statusDotBorderColor={statusDotBorderColor}
+    >
       <Icon size={size} color={iconColor} />
-      {statusDotColor ? <View style={statusDotStyle} /> : null}
-    </View>
+    </StatusIcon>
   );
 }
 

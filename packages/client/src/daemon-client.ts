@@ -3252,6 +3252,7 @@ export class DaemonClient {
       requestId: resolvedRequestId,
       includeBackground: options?.includeBackground,
       ...(options?.filter ? { filter: options.filter } : {}),
+      ...(options?.search ? { search: options.search } : {}),
       ...(options?.sort ? { sort: options.sort } : {}),
       ...(options?.page ? { page: options.page } : {}),
     });

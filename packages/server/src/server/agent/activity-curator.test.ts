@@ -78,6 +78,27 @@ describe("curateAgentActivity", () => {
     );
   });
 
+  it("renders delivered agent messages with their event, sender, and body", () => {
+    const timeline: AgentTimelineItem[] = [
+      {
+        ...toolCallItem({ callId: "message-1", name: "agent_message" }),
+        agentMessage: {
+          event: "message",
+          sender: { id: "agt_lead", title: "CI lead" },
+          text: "Take ownership.\nRead the handoff.",
+        },
+      },
+      {
+        ...toolCallItem({ callId: "message-2", name: "agent_message" }),
+        agentMessage: { event: "finished", sender: { id: "agt_child" }, text: "Child is done." },
+      },
+    ];
+
+    expect(curateAgentActivity(timeline)).toBe(
+      "[Message received] CI lead\nTake ownership.\nRead the handoff.\n[Agent finished] agt_child\nChild is done.",
+    );
+  });
+
   it("renders user/assistant/reasoning entries", () => {
     const timeline: AgentTimelineItem[] = [
       { type: "user_message", text: "Hello" },

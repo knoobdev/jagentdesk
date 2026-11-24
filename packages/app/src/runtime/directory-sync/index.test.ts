@@ -346,5 +346,24 @@ it("starts workspace fetching before projects finish and applies empty-project o
   expect(
     useSessionStore.getState().sessions[serverId]?.projects.get("project-1")?.projectDisplayName,
   ).toBe("overlay");
+});
+
+it("reattaches released directory listeners on the same connection", () => {
+  const { directory, client } = createDirectory("directory-returning-demand");
+  directory.dispose();
+  expect(
+    directory.connectionChanged({
+      client: client as unknown as DaemonClient,
+      status: "online",
+      source: { clientGeneration: 1, connectionEpoch: 1 },
+    }),
+  ).toBe(true);
+  expect(
+    directory.connectionChanged({
+      client: client as unknown as DaemonClient,
+      status: "online",
+      source: { clientGeneration: 1, connectionEpoch: 1 },
+    }),
+  ).toBe(false);
   directory.dispose();
 });

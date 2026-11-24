@@ -1649,10 +1649,11 @@ function ProjectBlock({
     onToggleWorkspacesExpanded(project.viewKey);
   }, [onToggleWorkspacesExpanded, project.viewKey]);
   const {
+    leadingItem: leadingWorkspace,
     visibleItems: visibleWorkspaces,
     canToggle: canToggleWorkspaces,
     toggleExpanded: toggleWorkspacesExpanded,
-  } = useLimitedSidebarGroup(project.workspaces, {
+  } = useLimitedSidebarGroup(project.workspaces, undefined, {
     expanded: workspacesExpanded,
     toggleExpanded: handleToggleWorkspacesExpanded,
   });
@@ -1815,6 +1816,7 @@ function ProjectBlock({
     if (project.workspaces.length > 0) {
       projectChildren = (
         <>
+          {leadingWorkspace ? renderWorkspaceRow(leadingWorkspace) : null}
           <DraggableList
             testID={`sidebar-workspace-list-${project.viewKey}`}
             data={visibleWorkspaces}
@@ -2132,6 +2134,7 @@ function ProjectModeList({
     });
   }, []);
   const {
+    leadingItem: leadingPinnedChat,
     visibleItems: visiblePinnedChats,
     expanded: pinnedChatsExpanded,
     canToggle: canTogglePinnedChats,
@@ -2392,6 +2395,7 @@ function ProjectModeList({
           <PinnedSectionHeader collapsed={pinnedCollapsed} onToggle={togglePinnedCollapsed} />
           {pinnedCollapsed ? null : (
             <>
+              {leadingPinnedChat ? renderPinnedChat(leadingPinnedChat) : null}
               {visiblePinnedChats.map(renderPinnedChat)}
               {canTogglePinnedChats ? (
                 <SidebarGroupToggleRow

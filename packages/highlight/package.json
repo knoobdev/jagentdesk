@@ -3,7 +3,8 @@
   "version": "0.9.59",
   "files": [
     "dist",
-    "!dist/**/*.map"
+    "!dist/**/*.map",
+    "src/hcl/LICENSE"
   ],
   "type": "module",
   "main": "./dist/index.js",

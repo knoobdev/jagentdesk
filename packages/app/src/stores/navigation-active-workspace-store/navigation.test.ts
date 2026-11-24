@@ -8,7 +8,8 @@ import {
   type NavigateToLastWorkspaceDeps,
   type NavigateToWorkspaceDeps,
 } from "./navigation";
-import type { Agent, WorkspaceDescriptor } from "@/stores/session-store";
+import type { Agent } from "@/stores/session-store";
+import type { WorkspaceDescriptor } from "@/stores/session-store";
 
 interface RecordedTab {
   workspaceKey: string;
@@ -20,6 +21,7 @@ function createFakeDeps(overrides: Partial<NavigateToWorkspaceDeps> = {}) {
   const remembered: ActiveWorkspaceSelection[] = [];
   const openedTabs: RecordedTab[] = [];
   const deps: NavigateToWorkspaceDeps = {
+    revealWorkspace: () => undefined,
     getSessionWorkspaces: () => null,
     getSessionAgents: () => [] as Agent[],
     openTabFocused: (workspaceKey, target) => {
@@ -73,7 +75,7 @@ describe("workspace navigation", () => {
     expect(remembered).toEqual([{ serverId: "server-1", workspaceId: "workspace-a" }]);
   });
 
-  it("focuses the attention agent's tab when a workspace has one", () => {
+  it("keeps the selected tab when a workspace has an attention agent", () => {
     const workspace = {
       id: "workspace-a",
       workspaceDirectory: "/repo/workspace-a",
@@ -92,12 +94,7 @@ describe("workspace navigation", () => {
 
     navigateToWorkspace({ serverId: "server-1", workspaceId: "workspace-a" }, deps);
 
-    expect(openedTabs).toEqual([
-      {
-        workspaceKey: "server-1:workspace-a",
-        target: { kind: "agent", agentId: "agent-1" },
-      },
-    ]);
+    expect(openedTabs).toEqual([]);
   });
 
   it("keeps an explicit tab authoritative over an attention agent", () => {
@@ -166,7 +163,7 @@ describe("workspace navigation", () => {
       pathname: "/",
       params: {
         serverId: "server-1",
-        workspaceId: "b64_L3RtcC9wYXNlby1taXNzaW5nLXdvcmtzcGFjZQ",
+        workspaceId: "b64_L3RtcC9qYWdlbnRkZXNrLW1pc3Npbmctd29ya3NwYWNl",
       },
     });
 

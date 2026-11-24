@@ -1,4 +1,5 @@
 import { SidebarFooterIconHighlight } from "./sidebar-footer-icon-highlight";
+import { openChangelog } from "@/changelog";
 import { useCallback, useState } from "react";
 import { Text, View } from "react-native";
 import { Activity, CircleHelp, Keyboard } from "lucide-react-native";
@@ -111,6 +112,9 @@ export function SidebarHelpMenu() {
             {t("sidebar.help.shortcuts")}
           </DropdownMenuItem>
         ) : null}
+        <DropdownMenuItem testID="sidebar-help-whats-new" onSelect={openChangelog}>
+          {t("sidebar.help.whatsNew")}
+        </DropdownMenuItem>
         <DropdownMenuItem
           testID="sidebar-help-diagnostics"
           leading={diagnosticLeadingIcon}

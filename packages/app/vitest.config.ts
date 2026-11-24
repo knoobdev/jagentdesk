@@ -1,3 +1,4 @@
+import { build } from "esbuild";
 import { defineConfig, configDefaults } from "vitest/config";
 import { playwright } from "@vitest/browser-playwright";
 import path from "path";
@@ -30,8 +31,23 @@ export default defineConfig({
         };
       },
     },
-  ],
 
+    {
+      name: "bundle-i18n-resources",
+      async transform(_source, id) {
+        if (path.resolve(id) !== path.resolve(__dirname, "src/i18n/i18next.ts")) return;
+        const result = await build({
+          entryPoints: [id],
+          bundle: true,
+          format: "esm",
+          platform: "neutral",
+          external: ["i18next", "react-i18next"],
+          write: false,
+        });
+        return { code: result.outputFiles[0].text, map: null };
+      },
+    },
+  ],
   // Expo compiles JSX with the automatic runtime (no `import React` needed); esbuild's
   // default is the classic runtime, which breaks files that render JSX without React
   // in scope (e.g. remote-job-card.tsx) under test.

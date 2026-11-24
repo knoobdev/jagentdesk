@@ -2245,13 +2245,13 @@ export function Composer({
     ? t("composer.github.searching")
     : t("composer.github.noResults");
   const autocompleteStatus = useMemo<AutocompleteStatus | null>(() => {
-    if (autocomplete.errorMessage) return { kind: "error", title: autocomplete.errorMessage };
+    if (autocomplete.status) return autocomplete.status;
     if (autocomplete.isLoading) return { kind: "loading", message: autocomplete.loadingText };
     if (autocomplete.options.length === 0)
       return { kind: "empty", message: autocomplete.emptyText };
     return null;
   }, [
-    autocomplete.errorMessage,
+    autocomplete.status,
     autocomplete.isLoading,
     autocomplete.loadingText,
     autocomplete.options.length,

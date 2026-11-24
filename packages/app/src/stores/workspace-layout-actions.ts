@@ -13,6 +13,7 @@ export interface SplitPane {
   id: string;
   tabIds: string[];
   focusedTabId: string | null;
+  hidden?: boolean;
 }
 
 export interface SplitGroup {
@@ -240,6 +241,7 @@ function createPaneNode(input: {
   id: string;
   tabs?: WorkspaceTab[];
   focusedTabId?: string | null;
+  hidden?: boolean;
 }): SplitNodeInternal {
   const normalizedTabs = normalizeWorkspaceTabs(input.tabs ?? []);
   const tabIds = normalizedTabs.map((tab) => tab.tabId);
@@ -254,6 +256,7 @@ function createPaneNode(input: {
       tabs: normalizedTabs,
       tabIds,
       focusedTabId,
+      ...(input.hidden === true ? { hidden: true } : {}),
     },
   };
 }
@@ -507,7 +510,7 @@ function insertChildIntoGroup(
 
 function listPaneIds(node: SplitNodeInternal): string[] {
   if (node.kind === "pane") {
-    return [node.pane.id];
+    return node.pane.hidden === true ? [] : [node.pane.id];
   }
   const next: string[] = [];
   for (const child of node.group.children) {
@@ -558,6 +561,7 @@ function normalizePaneAfterTabChange(pane: SplitPaneInternal): SplitPaneInternal
     tabs,
     tabIds,
     focusedTabId,
+    ...(pane.hidden === true ? { hidden: true } : {}),
   };
 }
 
@@ -580,6 +584,7 @@ function normalizePaneNode(rawPane: SplitPaneInternal | undefined): SplitNodeInt
     id: paneId,
     tabs: mergedTabs,
     focusedTabId: trimNonEmpty(rawPane?.focusedTabId) ?? null,
+    hidden: rawPane?.hidden === true,
   });
 }
 
@@ -752,6 +757,7 @@ function focusTabInPane(root: SplitNodeInternal, paneId: string, tabId: string):
       pane: normalizePaneAfterTabChange({
         ...node.pane,
         focusedTabId: tabId,
+        hidden: undefined,
       }),
     };
   });
@@ -1029,7 +1035,7 @@ export function collectAllTabs(root: SplitNode): WorkspaceTab[] {
 export function collectAllPanes(root: SplitNode): SplitPane[] {
   const internalRoot = asInternalNode(root);
   if (internalRoot.kind === "pane") {
-    return [internalRoot.pane];
+    return internalRoot.pane.hidden === true ? [] : [internalRoot.pane];
   }
   return internalRoot.group.children.flatMap((child) => collectAllPanes(child));
 }
@@ -1052,6 +1058,7 @@ function stripEphemeralTabsFromNode(node: SplitNodeInternal): SplitNodeInternal 
       id: node.pane.id,
       tabs: nextTabs,
       focusedTabId: node.pane.focusedTabId,
+      hidden: node.pane.hidden,
     });
   }
   return createGroupNode({
@@ -1085,7 +1092,7 @@ export function getFocusedBrowserId(layout: WorkspaceLayout | null | undefined):
     return null;
   }
   const focusedPane = findPaneById(layout.root, layout.focusedPaneId);
-  if (!focusedPane?.focusedTabId) {
+  if (!focusedPane?.focusedTabId || focusedPane.hidden === true) {
     return null;
   }
   const focusedTab = collectAllTabs(layout.root).find(
@@ -1279,7 +1286,11 @@ export function focusTabInLayout(input: FocusTabInLayoutInput): WorkspaceLayout 
     return null;
   }
 
-  if (pane.focusedTabId === input.tabId && layout.focusedPaneId === pane.id) {
+  if (
+    pane.focusedTabId === input.tabId &&
+    layout.focusedPaneId === pane.id &&
+    pane.hidden !== true
+  ) {
     return null;
   }
 
@@ -1506,7 +1517,8 @@ export function splitPaneEmptyInLayout(
 export function moveTabToPaneInLayout(input: MoveTabToPaneInLayoutInput): WorkspaceLayout | null {
   const layout = asInternalLayout(input.layout);
   const sourcePane = findPaneContainingTab(layout.root, input.tabId);
-  if (!sourcePane || !findPaneById(layout.root, input.toPaneId)) {
+  const targetPane = findPaneById(layout.root, input.toPaneId);
+  if (!sourcePane || !targetPane || targetPane.hidden === true) {
     return null;
   }
 
@@ -1530,15 +1542,55 @@ export function moveTabToPaneInLayout(input: MoveTabToPaneInLayoutInput): Worksp
 }
 
 export function focusPaneInLayout(input: FocusPaneInLayoutInput): WorkspaceLayout | null {
-  if (!findPaneById(input.layout.root, input.paneId)) {
+  const pane = findPaneById(input.layout.root, input.paneId);
+  if (!pane) {
     return null;
   }
-  if (input.layout.focusedPaneId === input.paneId) {
+  if (input.layout.focusedPaneId === input.paneId && pane.hidden !== true) {
     return null;
   }
   return withNormalizedParentTabMap({
-    root: input.layout.root,
+    root:
+      pane.hidden === true
+        ? updatePaneInTree(asInternalNode(input.layout.root), {
+            paneId: input.paneId,
+            updater: (currentPane) => ({ ...currentPane, hidden: undefined }),
+          })
+        : input.layout.root,
     focusedPaneId: input.paneId,
+    parentTabIdByTabId: input.layout.parentTabIdByTabId,
+  });
+}
+
+export function setPaneHiddenInLayout(input: {
+  layout: WorkspaceLayout;
+  paneId: string;
+  hidden: boolean;
+}): WorkspaceLayout | null {
+  const pane = findPaneById(input.layout.root, input.paneId);
+  const isHidden = pane?.hidden === true;
+  if (!pane || isHidden === input.hidden) {
+    return null;
+  }
+  if (input.hidden && collectAllPanes(input.layout.root).length === 1) {
+    return null;
+  }
+
+  const root = updatePaneInTree(asInternalNode(input.layout.root), {
+    paneId: input.paneId,
+    updater: (currentPane) => ({
+      ...currentPane,
+      hidden: input.hidden ? true : undefined,
+    }),
+  });
+  const focusedPaneId =
+    input.hidden && input.layout.focusedPaneId === input.paneId
+      ? (collectAllPanes(root)[0]?.id ?? null)
+      : input.layout.focusedPaneId;
+
+  return withNormalizedParentTabMap({
+    root,
+    focusedPaneId,
     parentTabIdByTabId: input.layout.parentTabIdByTabId,
   });
 }

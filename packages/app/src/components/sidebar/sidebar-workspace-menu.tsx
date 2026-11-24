@@ -337,6 +337,7 @@ export function SidebarWorkspaceContextMenu({
       })
     : null;
   const rowAccessibilityLabel = resolveSidebarWorkspaceAccessibilityLabel({
+    t,
     workspace,
     workspaceTitleSource,
     leadingProjectName,

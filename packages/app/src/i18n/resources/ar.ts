@@ -87,26 +87,60 @@ export const ar: TranslationResources = {
       close: "إغلاق القائمة",
     },
     commandCenter: {
-      placeholder: "ابحث في الأوامر ومساحات العمل والوكلاء...",
-      noMatches: "لا توجد مباريات",
-      actions: "الإجراءات",
-      workspaces: "مساحات العمل",
-      agents: "الوكلاء",
-      newAgent: "وكيل جديد",
-      addProject: "إضافة مشروع",
-      home: "بيت",
-      modelGroupLabel: "النموذج",
-      modelSearchKeywords: "تبديل النموذج تغيير النموذج تعيين النموذج اختيار النموذج",
-      thinkingGroupLabel: "التفكير",
-      thinkingSearchKeywords: "الاستدلال الجهد التفكير",
-      modeGroupLabel: "الوضع",
-      modeSearchKeywords: "الوصول الإذن الموافقة الوضع",
-      planModeGroupLabel: "وضع التخطيط",
-      planModeSearchKeywords: "التخطيط خطة وضع التخطيط",
-      fastModeGroupLabel: "سريع",
-      fastModeSearchKeywords: "سريع سرعة زمن انتقال منخفض",
-      settingOn: "تشغيل",
-      settingOff: "إيقاف",
+      placeholder:
+        "\u0627\u0644\u0628\u062D\u062B \u0641\u064A \u0645\u0633\u0627\u062D\u0627\u062A \u0627\u0644\u0639\u0645\u0644 \u0648\u0627\u0644\u0645\u0644\u0641\u0627\u062A \u0648\u0627\u0644\u0625\u062C\u0631\u0627\u0621\u0627\u062A...",
+      noMatches: "\u0644\u0627 \u062A\u0648\u062C\u062F \u0645\u0628\u0627\u0631\u064A\u0627\u062A",
+      actions: "\u0627\u0644\u0625\u062C\u0631\u0627\u0621\u0627\u062A",
+      workspaces: "\u0645\u0633\u0627\u062D\u0627\u062A \u0627\u0644\u0639\u0645\u0644",
+      agents: "\u0627\u0644\u0648\u0643\u0644\u0627\u0621",
+      newAgent: "\u0648\u0643\u064A\u0644 \u062C\u062F\u064A\u062F",
+      addProject: "\u0625\u0636\u0627\u0641\u0629 \u0645\u0634\u0631\u0648\u0639",
+      home: "\u0628\u064A\u062A",
+      modelGroupLabel: "\u0627\u0644\u0646\u0645\u0648\u0630\u062C",
+      modelSearchKeywords:
+        "\u062A\u0628\u062F\u064A\u0644 \u0627\u0644\u0646\u0645\u0648\u0630\u062C \u062A\u063A\u064A\u064A\u0631 \u0627\u0644\u0646\u0645\u0648\u0630\u062C \u062A\u0639\u064A\u064A\u0646 \u0627\u0644\u0646\u0645\u0648\u0630\u062C \u0627\u062E\u062A\u064A\u0627\u0631 \u0627\u0644\u0646\u0645\u0648\u0630\u062C",
+      thinkingGroupLabel: "\u0627\u0644\u062A\u0641\u0643\u064A\u0631",
+      thinkingSearchKeywords:
+        "\u0627\u0644\u0627\u0633\u062A\u062F\u0644\u0627\u0644 \u0627\u0644\u062C\u0647\u062F \u0627\u0644\u062A\u0641\u0643\u064A\u0631",
+      modeGroupLabel: "\u0627\u0644\u0648\u0636\u0639",
+      modeSearchKeywords:
+        "\u0627\u0644\u0648\u0635\u0648\u0644 \u0627\u0644\u0625\u0630\u0646 \u0627\u0644\u0645\u0648\u0627\u0641\u0642\u0629 \u0627\u0644\u0648\u0636\u0639",
+      planModeGroupLabel: "\u0648\u0636\u0639 \u0627\u0644\u062A\u062E\u0637\u064A\u0637",
+      planModeSearchKeywords:
+        "\u0627\u0644\u062A\u062E\u0637\u064A\u0637 \u062E\u0637\u0629 \u0648\u0636\u0639 \u0627\u0644\u062A\u062E\u0637\u064A\u0637",
+      fastModeGroupLabel: "\u0633\u0631\u064A\u0639",
+      fastModeSearchKeywords:
+        "\u0633\u0631\u064A\u0639 \u0633\u0631\u0639\u0629 \u0632\u0645\u0646 \u0627\u0646\u062A\u0642\u0627\u0644 \u0645\u0646\u062E\u0641\u0636",
+      settingOn: "\u062A\u0634\u063A\u064A\u0644",
+      settingOff: "\u0625\u064A\u0642\u0627\u0641",
+      filePlaceholder:
+        "\u0627\u0644\u0628\u062D\u062B \u0641\u064A \u0627\u0644\u0645\u0644\u0641\u0627\u062A...",
+      searchingFiles:
+        "\u062C\u0627\u0631\u064D \u0627\u0644\u0628\u062D\u062B \u0641\u064A \u0627\u0644\u0645\u0644\u0641\u0627\u062A...",
+      files: "\u0627\u0644\u0645\u0644\u0641\u0627\u062A",
+      open: "\u0641\u062A\u062D {{name}}",
+      openInSidePane:
+        "\u0641\u062A\u062D {{name}} \u0641\u064A \u0627\u0644\u0644\u0648\u062D\u0629 \u0627\u0644\u062C\u0627\u0646\u0628\u064A\u0629",
+      openInFocusedPane:
+        "\u0641\u062A\u062D {{name}} \u0641\u064A \u0627\u0644\u062C\u0632\u0621 \u0627\u0644\u0646\u0634\u0637",
+      groupByProject:
+        "\u062A\u062C\u0645\u064A\u0639 \u062D\u0633\u0628 \u0627\u0644\u0645\u0634\u0631\u0648\u0639",
+      groupByStatus:
+        "\u062A\u062C\u0645\u064A\u0639 \u062D\u0633\u0628 \u0627\u0644\u062D\u0627\u0644\u0629",
+      placeholderWithoutFiles:
+        "\u0627\u0644\u0628\u062D\u062B \u0641\u064A \u0645\u0633\u0627\u062D\u0627\u062A \u0627\u0644\u0639\u0645\u0644 \u0648\u0627\u0644\u0625\u062C\u0631\u0627\u0621\u0627\u062A...",
+      workspacePlaceholder:
+        "\u0627\u0644\u0628\u062D\u062B \u0641\u064A \u0645\u0633\u0627\u062D\u0627\u062A \u0627\u0644\u0639\u0645\u0644...",
+      actionPlaceholder:
+        "\u0627\u0644\u0628\u062D\u062B \u0641\u064A \u0627\u0644\u0625\u062C\u0631\u0627\u0621\u0627\u062A...",
+      recentWorkspaces:
+        "\u0645\u0633\u0627\u062D\u0627\u062A \u0627\u0644\u0639\u0645\u0644 \u0627\u0644\u0623\u062E\u064A\u0631\u0629",
+      tabs: {
+        all: "\u0627\u0644\u0643\u0644",
+        workspaces: "\u0645\u0633\u0627\u062D\u0627\u062A \u0627\u0644\u0639\u0645\u0644",
+        files: "\u0627\u0644\u0645\u0644\u0641\u0627\u062A",
+        actions: "\u0627\u0644\u0625\u062C\u0631\u0627\u0621\u0627\u062A",
+      },
     },
   },
   composer: {
@@ -390,6 +424,7 @@ export const ar: TranslationResources = {
       withTokens: "تم ضغط السياق (رموز{{tokens}}K)",
       completed: "تم ضغط السياق",
     },
+    turnFooter: { workedFor: "\u0639\u0645\u0644 \u0644\u0645\u062F\u0629 {{duration}}" },
   },
   importSession: {
     title: "جلسة الاستيراد",
@@ -624,6 +659,11 @@ export const ar: TranslationResources = {
         editTerminalProfiles: "Edit profiles…",
         pinTarget: "تثبيت",
         unpinTarget: "إلغاء التثبيت",
+        newTab:
+          "\u0639\u0644\u0627\u0645\u0629 \u062A\u0628\u0648\u064A\u0628 \u062C\u062F\u064A\u062F\u0629",
+        changes: "\u0627\u0644\u062A\u063A\u064A\u064A\u0631\u0627\u062A",
+        files: "\u0627\u0644\u0645\u0644\u0641\u0627\u062A",
+        pullRequest: "\u0637\u0644\u0628 \u0627\u0644\u0633\u062D\u0628",
       },
       explorer: {
         open: "افتح المستكشف",
@@ -928,22 +968,34 @@ export const ar: TranslationResources = {
         actions: {
           viewPullRequest: "عرض",
           openOn: "فتح على {{brand}}",
+          addToChat:
+            "\u0625\u0636\u0627\u0641\u0629 \u0625\u0644\u0649 \u0627\u0644\u062F\u0631\u062F\u0634\u0629",
+          addAllToChat:
+            "\u0625\u0636\u0627\u0641\u0629 \u0627\u0644\u0643\u0644 \u0625\u0644\u0649 \u0627\u0644\u062F\u0631\u062F\u0634\u0629",
+          addingToChat: "\u062C\u0627\u0631\u064D \u0627\u0644\u0625\u0636\u0627\u0641\u0629...",
         },
         sections: {
           checks: "الشيكات",
           pipeline: "خط المعالجة",
           reviews: "التعليقات",
+          activity: "\u0627\u0644\u0646\u0634\u0627\u0637",
         },
         empty: {
           noJobs: "لا توجد مهام",
           loadingPipeline: "جارٍ تحميل خط المعالجة...",
           pipelineJobsLoadFailed: "تعذر تحميل مهام خط المعالجة",
           allowedToFail: "مسموح بالفشل",
+          noActivity:
+            "\u0644\u0627 \u064A\u0648\u062C\u062F \u0646\u0634\u0627\u0637 \u0628\u0639\u062F",
         },
         approvals: "{{given}} من {{required}} موافقات",
         accessibility: {
           pullRequest: "سحب الطلب #{{number}}",
           pullRequest_mr: "طلب دمج !{{number}}",
+          commentActions:
+            "\u0625\u062C\u0631\u0627\u0621\u0627\u062A \u0627\u0644\u062A\u0639\u0644\u064A\u0642",
+          threadActions:
+            "\u0625\u062C\u0631\u0627\u0621\u0627\u062A \u0633\u0644\u0633\u0644\u0629 \u0627\u0644\u0646\u0642\u0627\u0634",
         },
         states: {
           draft: "مسودة",
@@ -962,10 +1014,63 @@ export const ar: TranslationResources = {
         },
         thread: {
           discussion: "سلسلة المناقشة",
+          resolved: "\u062A\u0645 \u0627\u0644\u062D\u0644",
+          outdated: "\u0642\u062F\u064A\u0645",
         },
         errors: {
           statusLoadFailed: "غير قادر على تحميل حالة طلب السحب",
           activityLoadFailed: "غير قادر على تحميل نشاط طلب السحب",
+        },
+        checksOverview: {
+          headline: {
+            actionRequired:
+              "\u0628\u0639\u0636 \u0627\u0644\u0641\u062D\u0648\u0635\u0627\u062A \u062A\u062D\u062A\u0627\u062C \u0625\u0644\u0649 \u0627\u0646\u062A\u0628\u0627\u0647\u0643",
+            failure:
+              "\u0628\u0639\u0636 \u0627\u0644\u0641\u062D\u0648\u0635\u0627\u062A \u0644\u0645 \u062A\u0646\u062C\u062D",
+            pending:
+              "\u0628\u0639\u0636 \u0627\u0644\u0641\u062D\u0648\u0635\u0627\u062A \u0644\u0645 \u062A\u0643\u062A\u0645\u0644 \u0628\u0639\u062F",
+            success:
+              "\u0646\u062C\u062D\u062A \u062C\u0645\u064A\u0639 \u0627\u0644\u0641\u062D\u0648\u0635\u0627\u062A",
+            none: "\u0644\u0627 \u062A\u0648\u062C\u062F \u0641\u062D\u0648\u0635\u0627\u062A",
+          },
+          count: {
+            actionRequired:
+              "{{count}} \u062A\u062D\u062A\u0627\u062C \u0625\u062C\u0631\u0627\u0621\u064B",
+            warning: "{{count}} \u0645\u0639 \u062A\u062D\u0630\u064A\u0631",
+            failure: "{{count}} \u0641\u0627\u0634\u0644\u0629",
+            pending: "{{count}} \u0642\u064A\u062F \u0627\u0644\u062A\u0634\u063A\u064A\u0644",
+            manual: "{{count}} \u064A\u062F\u0648\u064A\u0629",
+            success: "{{count}} \u0646\u0627\u062C\u062D\u0629",
+            ignored: "{{count}} \u0645\u062A\u062E\u0637\u0627\u0629",
+          },
+          detailOne: "\u0627\u0644\u0641\u062D\u0635: {{parts}}",
+          detailMany: "\u0627\u0644\u0641\u062D\u0648\u0635\u0627\u062A: {{parts}}",
+          groupOne: {
+            actionRequired:
+              "{{count}} \u0641\u062D\u0635 \u064A\u062D\u062A\u0627\u062C \u0625\u062C\u0631\u0627\u0621\u064B",
+            warning: "{{count}} \u0641\u062D\u0635 \u0645\u0639 \u062A\u062D\u0630\u064A\u0631",
+            failure: "{{count}} \u0641\u062D\u0635 \u0641\u0627\u0634\u0644",
+            pending:
+              "{{count}} \u0641\u062D\u0635 \u0642\u064A\u062F \u0627\u0644\u062A\u0634\u063A\u064A\u0644",
+            manual: "{{count}} \u0641\u062D\u0635 \u064A\u062F\u0648\u064A",
+            success: "{{count}} \u0641\u062D\u0635 \u0646\u0627\u062C\u062D",
+            ignored: "{{count}} \u0641\u062D\u0635 \u0645\u062A\u062E\u0637\u0649",
+          },
+          groupMany: {
+            actionRequired:
+              "{{count}} \u0641\u062D\u0648\u0635\u0627\u062A \u062A\u062D\u062A\u0627\u062C \u0625\u062C\u0631\u0627\u0621\u064B",
+            warning:
+              "{{count}} \u0641\u062D\u0648\u0635\u0627\u062A \u0645\u0639 \u062A\u062D\u0630\u064A\u0631",
+            failure:
+              "{{count}} \u0641\u062D\u0648\u0635\u0627\u062A \u0641\u0627\u0634\u0644\u0629",
+            pending:
+              "{{count}} \u0641\u062D\u0648\u0635\u0627\u062A \u0642\u064A\u062F \u0627\u0644\u062A\u0634\u063A\u064A\u0644",
+            manual: "{{count}} \u0641\u062D\u0648\u0635\u0627\u062A \u064A\u062F\u0648\u064A\u0629",
+            success:
+              "{{count}} \u0641\u062D\u0648\u0635\u0627\u062A \u0646\u0627\u062C\u062D\u0629",
+            ignored:
+              "{{count}} \u0641\u062D\u0648\u0635\u0627\u062A \u0645\u062A\u062E\u0637\u0627\u0629",
+          },
         },
       },
       forgeSetup: {
@@ -1033,12 +1138,20 @@ export const ar: TranslationResources = {
       closeSidebar: "إغلاق الشريط الجانبي",
     },
     help: {
-      trigger: "المساعدة والدعم",
-      sectionHelp: "المساعدة",
-      diagnostics: "تشغيل التشخيص",
-      shortcuts: "اختصارات لوحة المفاتيح",
-      reportIssue: "الإبلاغ عن مشكلة",
+      trigger:
+        "\u0627\u0644\u0645\u0633\u0627\u0639\u062F\u0629 \u0648\u0627\u0644\u062F\u0639\u0645",
+      sectionHelp: "\u0627\u0644\u0645\u0633\u0627\u0639\u062F\u0629",
+      diagnostics: "\u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u062A\u0634\u062E\u064A\u0635",
+      shortcuts:
+        "\u0627\u062E\u062A\u0635\u0627\u0631\u0627\u062A \u0644\u0648\u062D\u0629 \u0627\u0644\u0645\u0641\u0627\u062A\u064A\u062D",
+      reportIssue:
+        "\u0627\u0644\u0625\u0628\u0644\u0627\u063A \u0639\u0646 \u0645\u0634\u0643\u0644\u0629",
       version: "JAgentDesk {{version}}",
+      discord: "Discord",
+      github:
+        "\u0625\u0646\u0634\u0627\u0621 \u0645\u0634\u0643\u0644\u0629 \u0639\u0644\u0649 GitHub",
+      whatsNew: "\u0645\u0627 \u0627\u0644\u062C\u062F\u064A\u062F",
+      appName: "JAgentDesk",
     },
     sections: {
       sessions: "السجل",
@@ -1124,6 +1237,15 @@ export const ar: TranslationResources = {
         undoArchiveFailed: "تعذّر التراجع عن الأرشفة",
       },
     },
+    statusBucket: {
+      needsInput: "\u062A\u062D\u062A\u0627\u062C \u0625\u062F\u062E\u0627\u0644\u0627\u064B",
+      failed: "\u0641\u0634\u0644",
+      readyToReview:
+        "\u062C\u0627\u0647\u0632\u0629 \u0644\u0644\u0645\u0631\u0627\u062C\u0639\u0629",
+      working: "\u0642\u064A\u062F \u0627\u0644\u0639\u0645\u0644",
+      done: "\u062A\u0645",
+    },
+    statusGroupAccessibility: "\u0645\u062C\u0645\u0648\u0639\u0629 {{label}}",
   },
   newWorkspace: {
     title: "مساحة عمل جديدة",
@@ -1376,6 +1498,15 @@ export const ar: TranslationResources = {
     failedToLoad: "فشل التحميل",
     chooseProjectForCommands: "اختر مشروعًا لعرض الأوامر",
     chooseModelForCommands: "اختر نموذجًا لعرض الأوامر",
+    loadingProviderCommands:
+      "\u062C\u0627\u0631\u064D \u062A\u062D\u0645\u064A\u0644 \u0623\u0648\u0627\u0645\u0631 {{provider}}...",
+    commandsFailed:
+      "\u062A\u0639\u0630\u0631 \u062A\u062D\u0645\u064A\u0644 \u0627\u0644\u0623\u0648\u0627\u0645\u0631",
+    providerCommandsFailed:
+      "\u062A\u0639\u0630\u0631 \u062A\u062D\u0645\u064A\u0644 \u0623\u0648\u0627\u0645\u0631 {{provider}}",
+    filesFailed:
+      "\u062A\u0639\u0630\u0631 \u0627\u0644\u0628\u062D\u062B \u0641\u064A \u0627\u0644\u0645\u0644\u0641\u0627\u062A",
+    skillTag: "\u0645\u0647\u0627\u0631\u0629",
   },
   loadOlderHistory: {
     failed: "تعذر تحميل السجل الأقدم",
@@ -1477,7 +1608,6 @@ export const ar: TranslationResources = {
       keyChanged: "Warning: the daemon key has changed. Verify this change with the host owner.",
       connect: "Connect",
     },
-
     verify: {
       failed: "Pairing failed",
       saveFailed:
@@ -1702,6 +1832,22 @@ export const ar: TranslationResources = {
       loadError: "فشل تحميل الفروقات",
       capabilityMissing: "حدّث المضيف لعرض فروقات الالتزامات.",
     },
+    files: {
+      label: "\u0627\u0644\u0645\u0644\u0641\u0627\u062A",
+      subtitle:
+        "\u0645\u0644\u0641\u0627\u062A \u0645\u0633\u0627\u062D\u0629 \u0627\u0644\u0639\u0645\u0644",
+      tooltip:
+        "\u062A\u0635\u0641\u062D \u0645\u0644\u0641\u0627\u062A \u0645\u0633\u0627\u062D\u0629 \u0627\u0644\u0639\u0645\u0644",
+    },
+    pullRequest: {
+      label: "\u0637\u0644\u0628 \u0627\u0644\u0633\u062D\u0628",
+      subtitle:
+        "\u062A\u0641\u0627\u0635\u064A\u0644 \u0637\u0644\u0628 \u0627\u0644\u0633\u062D\u0628",
+      emptyTitle:
+        "\u0644\u0627 \u064A\u0648\u062C\u062F \u0637\u0644\u0628 \u0633\u062D\u0628 \u0628\u0639\u062F",
+      emptyDescription:
+        "\u0623\u0646\u0634\u0626 \u0637\u0644\u0628 \u0633\u062D\u0628 \u0644\u0646\u0633\u062E\u0629 \u0627\u0644\u0639\u0645\u0644 \u0647\u0630\u0647 \u0644\u0639\u0631\u0636 \u062A\u0641\u0627\u0635\u064A\u0644\u0647 \u0647\u0646\u0627.",
+    },
   },
   toolCallDetails: {
     error: "خطأ",
@@ -1745,6 +1891,8 @@ export const ar: TranslationResources = {
     dismiss: "رفض",
   },
   contextWindow: {
+    noData: "No context data",
+    accessibilityNoData: "Context window: No context data",
     title: "نافذة السياق",
     used: "تم استخدام{{percentage}}%",
     tokens: "رموز{{used}}/{{max}}",
@@ -3022,6 +3170,23 @@ export const ar: TranslationResources = {
       forkHint: "JAgentDesk does not own {{name}}, so it is never edited.",
       fork: "Create copy",
       forked: "Training {{name}}",
+    },
+  },
+  changelog: {
+    title: "\u0645\u0627 \u0627\u0644\u062C\u062F\u064A\u062F",
+    installed: "\u0645\u062B\u0628\u0651\u062A",
+    showMore: "\u0639\u0631\u0636 \u0627\u0644\u0645\u0632\u064A\u062F",
+    showAllChanges:
+      "\u0639\u0631\u0636 \u0643\u0644 \u0627\u0644\u062A\u063A\u064A\u064A\u0631\u0627\u062A",
+    hideAllChanges:
+      "\u0625\u062E\u0641\u0627\u0621 \u0643\u0644 \u0627\u0644\u062A\u063A\u064A\u064A\u0631\u0627\u062A",
+    openWebsite:
+      "\u0633\u062C\u0644 \u0627\u0644\u062A\u063A\u064A\u064A\u0631\u0627\u062A \u0627\u0644\u0643\u0627\u0645\u0644",
+    error: {
+      title:
+        "\u062A\u0639\u0630\u0651\u0631 \u062A\u062D\u0645\u064A\u0644 \u0633\u062C\u0644 \u0627\u0644\u062A\u063A\u064A\u064A\u0631\u0627\u062A",
+      description:
+        "\u062A\u062D\u0642\u0642 \u0645\u0646 \u0627\u062A\u0635\u0627\u0644\u0643 \u0648\u062D\u0627\u0648\u0644 \u0645\u0631\u0629 \u0623\u062E\u0631\u0649.",
     },
   },
 };

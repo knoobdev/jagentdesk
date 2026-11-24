@@ -87,26 +87,49 @@ export const ja: TranslationResources = {
       close: "メニューを閉じる",
     },
     commandCenter: {
-      placeholder: "コマンド、ワークスペース、エージェントを検索...",
-      noMatches: "一致なし",
-      actions: "アクション",
-      workspaces: "ワークスペース",
-      agents: "エージェント",
-      newAgent: "新しいエージェント",
-      addProject: "プロジェクトを追加",
-      home: "ホーム",
-      modelGroupLabel: "モデル",
-      modelSearchKeywords: "モデルを切り替え モデルを変更 モデルを設定 モデルを選択",
-      thinkingGroupLabel: "思考",
-      thinkingSearchKeywords: "推論 思考レベル 考える",
-      modeGroupLabel: "モード",
-      modeSearchKeywords: "アクセス 権限 承認 モード",
-      planModeGroupLabel: "プランモード",
-      planModeSearchKeywords: "プラン 計画 プランモード",
-      fastModeGroupLabel: "高速",
-      fastModeSearchKeywords: "高速 速度 低遅延",
-      settingOn: "オン",
-      settingOff: "オフ",
+      placeholder:
+        "\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u3001\u30D5\u30A1\u30A4\u30EB\u3001\u30A2\u30AF\u30B7\u30E7\u30F3\u3092\u691C\u7D22...",
+      noMatches: "\u4E00\u81F4\u306A\u3057",
+      actions: "\u30A2\u30AF\u30B7\u30E7\u30F3",
+      workspaces: "\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9",
+      agents: "\u30A8\u30FC\u30B8\u30A7\u30F3\u30C8",
+      newAgent: "\u65B0\u3057\u3044\u30A8\u30FC\u30B8\u30A7\u30F3\u30C8",
+      addProject: "\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8\u3092\u8FFD\u52A0",
+      home: "\u30DB\u30FC\u30E0",
+      modelGroupLabel: "\u30E2\u30C7\u30EB",
+      modelSearchKeywords:
+        "\u30E2\u30C7\u30EB\u3092\u5207\u308A\u66FF\u3048 \u30E2\u30C7\u30EB\u3092\u5909\u66F4 \u30E2\u30C7\u30EB\u3092\u8A2D\u5B9A \u30E2\u30C7\u30EB\u3092\u9078\u629E",
+      thinkingGroupLabel: "\u601D\u8003",
+      thinkingSearchKeywords: "\u63A8\u8AD6 \u601D\u8003\u30EC\u30D9\u30EB \u8003\u3048\u308B",
+      modeGroupLabel: "\u30E2\u30FC\u30C9",
+      modeSearchKeywords: "\u30A2\u30AF\u30BB\u30B9 \u6A29\u9650 \u627F\u8A8D \u30E2\u30FC\u30C9",
+      planModeGroupLabel: "\u30D7\u30E9\u30F3\u30E2\u30FC\u30C9",
+      planModeSearchKeywords:
+        "\u30D7\u30E9\u30F3 \u8A08\u753B \u30D7\u30E9\u30F3\u30E2\u30FC\u30C9",
+      fastModeGroupLabel: "\u9AD8\u901F",
+      fastModeSearchKeywords: "\u9AD8\u901F \u901F\u5EA6 \u4F4E\u9045\u5EF6",
+      settingOn: "\u30AA\u30F3",
+      settingOff: "\u30AA\u30D5",
+      filePlaceholder: "\u30D5\u30A1\u30A4\u30EB\u3092\u691C\u7D22...",
+      searchingFiles: "\u30D5\u30A1\u30A4\u30EB\u3092\u691C\u7D22\u4E2D...",
+      files: "\u30D5\u30A1\u30A4\u30EB",
+      open: "{{name}}\u3092\u958B\u304F",
+      openInSidePane: "{{name}}\u3092\u30B5\u30A4\u30C9\u30D1\u30CD\u30EB\u3067\u958B\u304F",
+      openInFocusedPane:
+        "{{name}}\u3092\u30D5\u30A9\u30FC\u30AB\u30B9\u4E2D\u306E\u30DA\u30A4\u30F3\u3067\u958B\u304F",
+      groupByProject: "\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8\u3067\u30B0\u30EB\u30FC\u30D7\u5316",
+      groupByStatus: "\u30B9\u30C6\u30FC\u30BF\u30B9\u3067\u30B0\u30EB\u30FC\u30D7\u5316",
+      placeholderWithoutFiles:
+        "\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u3068\u30A2\u30AF\u30B7\u30E7\u30F3\u3092\u691C\u7D22...",
+      workspacePlaceholder: "\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u3092\u691C\u7D22...",
+      actionPlaceholder: "\u30A2\u30AF\u30B7\u30E7\u30F3\u3092\u691C\u7D22...",
+      recentWorkspaces: "\u6700\u8FD1\u306E\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9",
+      tabs: {
+        all: "\u3059\u3079\u3066",
+        workspaces: "\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9",
+        files: "\u30D5\u30A1\u30A4\u30EB",
+        actions: "\u30A2\u30AF\u30B7\u30E7\u30F3",
+      },
     },
   },
   composer: {
@@ -394,6 +417,7 @@ export const ja: TranslationResources = {
       withTokens: "コンテキストを圧縮しました（{{tokens}}Kトークン）",
       completed: "コンテキストを圧縮しました",
     },
+    turnFooter: { workedFor: "\u4F5C\u696D\u6642\u9593 {{duration}}" },
   },
   importSession: {
     title: "セッションをインポート",
@@ -630,6 +654,10 @@ export const ja: TranslationResources = {
         editTerminalProfiles: "プロファイルを編集…",
         pinTarget: "ピン留め",
         unpinTarget: "ピン留めを解除",
+        newTab: "\u65B0\u3057\u3044\u30BF\u30D6",
+        changes: "\u5909\u66F4",
+        files: "\u30D5\u30A1\u30A4\u30EB",
+        pullRequest: "\u30D7\u30EB\u30EA\u30AF\u30A8\u30B9\u30C8",
       },
       explorer: {
         open: "エクスプローラーを開く",
@@ -940,22 +968,30 @@ export const ja: TranslationResources = {
         actions: {
           viewPullRequest: "表示",
           openOn: "{{brand}}で開く",
+          addToChat: "\u30C1\u30E3\u30C3\u30C8\u306B\u8FFD\u52A0",
+          addAllToChat: "\u3059\u3079\u3066\u30C1\u30E3\u30C3\u30C8\u306B\u8FFD\u52A0",
+          addingToChat: "\u8FFD\u52A0\u4E2D...",
         },
         sections: {
           checks: "チェック",
           pipeline: "パイプライン",
           reviews: "レビュー",
+          activity: "\u30A2\u30AF\u30C6\u30A3\u30D3\u30C6\u30A3",
         },
         empty: {
           noJobs: "ジョブなし",
           loadingPipeline: "パイプラインを読み込み中...",
           pipelineJobsLoadFailed: "パイプラインのジョブを読み込めませんでした",
           allowedToFail: "失敗を許可",
+          noActivity:
+            "\u307E\u3060\u30A2\u30AF\u30C6\u30A3\u30D3\u30C6\u30A3\u306F\u3042\u308A\u307E\u305B\u3093",
         },
         approvals: "{{given}} / {{required}} 承認",
         accessibility: {
           pullRequest: "プルリクエスト#{{number}}",
           pullRequest_mr: "マージリクエスト !{{number}}",
+          commentActions: "\u30B3\u30E1\u30F3\u30C8\u306E\u64CD\u4F5C",
+          threadActions: "\u30B9\u30EC\u30C3\u30C9\u306E\u64CD\u4F5C",
         },
         states: {
           draft: "ドラフト",
@@ -974,10 +1010,56 @@ export const ja: TranslationResources = {
         },
         thread: {
           discussion: "ディスカッションスレッド",
+          resolved: "\u89E3\u6C7A\u6E08\u307F",
+          outdated: "\u53E4\u3044",
         },
         errors: {
           statusLoadFailed: "プルリクエストのステータスを読み込めません",
           activityLoadFailed: "プルリクエストのアクティビティを読み込めません",
+        },
+        checksOverview: {
+          headline: {
+            actionRequired:
+              "\u5BFE\u5FDC\u304C\u5FC5\u8981\u306A\u30C1\u30A7\u30C3\u30AF\u304C\u3042\u308A\u307E\u3059",
+            failure:
+              "\u5931\u6557\u3057\u305F\u30C1\u30A7\u30C3\u30AF\u304C\u3042\u308A\u307E\u3059",
+            pending:
+              "\u5B8C\u4E86\u3057\u3066\u3044\u306A\u3044\u30C1\u30A7\u30C3\u30AF\u304C\u3042\u308A\u307E\u3059",
+            success:
+              "\u3059\u3079\u3066\u306E\u30C1\u30A7\u30C3\u30AF\u306B\u5408\u683C\u3057\u307E\u3057\u305F",
+            none: "\u30C1\u30A7\u30C3\u30AF\u306A\u3057",
+          },
+          count: {
+            actionRequired: "{{count}} \u4EF6\u8981\u5BFE\u5FDC",
+            warning: "{{count}} \u4EF6\u8B66\u544A",
+            failure: "{{count}} \u4EF6\u5931\u6557",
+            pending: "{{count}} \u4EF6\u5B9F\u884C\u4E2D",
+            manual: "{{count}} \u4EF6\u624B\u52D5",
+            success: "{{count}} \u4EF6\u6210\u529F",
+            ignored: "{{count}} \u4EF6\u30B9\u30AD\u30C3\u30D7",
+          },
+          detailOne: "\u30C1\u30A7\u30C3\u30AF: {{parts}}",
+          detailMany: "\u30C1\u30A7\u30C3\u30AF: {{parts}}",
+          groupOne: {
+            actionRequired: "\u8981\u5BFE\u5FDC\u306E\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+            warning: "\u8B66\u544A\u306E\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+            failure: "\u5931\u6557\u3057\u305F\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+            pending: "\u5B9F\u884C\u4E2D\u306E\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+            manual: "\u624B\u52D5\u306E\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+            success: "\u6210\u529F\u3057\u305F\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+            ignored:
+              "\u30B9\u30AD\u30C3\u30D7\u3055\u308C\u305F\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+          },
+          groupMany: {
+            actionRequired: "\u8981\u5BFE\u5FDC\u306E\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+            warning: "\u8B66\u544A\u306E\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+            failure: "\u5931\u6557\u3057\u305F\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+            pending: "\u5B9F\u884C\u4E2D\u306E\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+            manual: "\u624B\u52D5\u306E\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+            success: "\u6210\u529F\u3057\u305F\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+            ignored:
+              "\u30B9\u30AD\u30C3\u30D7\u3055\u308C\u305F\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+          },
         },
       },
       forgeSetup: {
@@ -1045,12 +1127,16 @@ export const ja: TranslationResources = {
       closeSidebar: "サイドバーを閉じる",
     },
     help: {
-      trigger: "ヘルプとサポート",
-      sectionHelp: "ヘルプ",
-      diagnostics: "診断を実行",
-      shortcuts: "キーボードショートカット",
-      reportIssue: "問題を報告",
+      trigger: "\u30D8\u30EB\u30D7\u3068\u30B5\u30DD\u30FC\u30C8",
+      sectionHelp: "\u30D8\u30EB\u30D7",
+      diagnostics: "\u8A3A\u65AD\u3092\u5B9F\u884C",
+      shortcuts: "\u30AD\u30FC\u30DC\u30FC\u30C9\u30B7\u30E7\u30FC\u30C8\u30AB\u30C3\u30C8",
+      reportIssue: "\u554F\u984C\u3092\u5831\u544A",
       version: "JAgentDesk {{version}}",
+      discord: "Discord",
+      github: "GitHub Issue\u3092\u4F5C\u6210",
+      whatsNew: "\u65B0\u7740\u60C5\u5831",
+      appName: "JAgentDesk",
     },
     sections: {
       sessions: "履歴",
@@ -1136,6 +1222,14 @@ export const ja: TranslationResources = {
         undoArchiveFailed: "アーカイブを元に戻せませんでした",
       },
     },
+    statusBucket: {
+      needsInput: "\u5165\u529B\u5F85\u3061",
+      failed: "\u5931\u6557",
+      readyToReview: "\u30EC\u30D3\u30E5\u30FC\u5F85\u3061",
+      working: "\u5B9F\u884C\u4E2D",
+      done: "\u5B8C\u4E86",
+    },
+    statusGroupAccessibility: "{{label}} \u30B0\u30EB\u30FC\u30D7",
   },
   newWorkspace: {
     title: "新しいワークスペース",
@@ -1389,6 +1483,15 @@ export const ja: TranslationResources = {
     failedToLoad: "読み込みに失敗しました",
     chooseProjectForCommands: "コマンドを表示するにはプロジェクトを選択してください",
     chooseModelForCommands: "コマンドを表示するにはモデルを選択してください",
+    loadingProviderCommands:
+      "{{provider}} \u306E\u30B3\u30DE\u30F3\u30C9\u3092\u8AAD\u307F\u8FBC\u307F\u4E2D...",
+    commandsFailed:
+      "\u30B3\u30DE\u30F3\u30C9\u3092\u8AAD\u307F\u8FBC\u3081\u307E\u305B\u3093\u3067\u3057\u305F",
+    providerCommandsFailed:
+      "{{provider}} \u306E\u30B3\u30DE\u30F3\u30C9\u3092\u8AAD\u307F\u8FBC\u3081\u307E\u305B\u3093\u3067\u3057\u305F",
+    filesFailed:
+      "\u30D5\u30A1\u30A4\u30EB\u3092\u691C\u7D22\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F",
+    skillTag: "\u30B9\u30AD\u30EB",
   },
   loadOlderHistory: {
     failed: "古い履歴を読み込めませんでした",
@@ -1715,6 +1818,20 @@ export const ja: TranslationResources = {
       loadError: "差分の読み込みに失敗しました",
       capabilityMissing: "コミット差分を表示するにはホストを更新してください。",
     },
+    files: {
+      label: "\u30D5\u30A1\u30A4\u30EB",
+      subtitle: "\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u30D5\u30A1\u30A4\u30EB",
+      tooltip:
+        "\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u30D5\u30A1\u30A4\u30EB\u3092\u53C2\u7167",
+    },
+    pullRequest: {
+      label: "\u30D7\u30EB\u30EA\u30AF\u30A8\u30B9\u30C8",
+      subtitle: "\u30D7\u30EB\u30EA\u30AF\u30A8\u30B9\u30C8\u306E\u8A73\u7D30",
+      emptyTitle:
+        "\u30D7\u30EB\u30EA\u30AF\u30A8\u30B9\u30C8\u306F\u307E\u3060\u3042\u308A\u307E\u305B\u3093",
+      emptyDescription:
+        "\u3053\u306E\u30C1\u30A7\u30C3\u30AF\u30A2\u30A6\u30C8\u306E\u30D7\u30EB\u30EA\u30AF\u30A8\u30B9\u30C8\u3092\u4F5C\u6210\u3059\u308B\u3068\u3001\u3053\u3053\u306B\u8A73\u7D30\u304C\u8868\u793A\u3055\u308C\u307E\u3059\u3002",
+    },
   },
   toolCallDetails: {
     error: "エラー",
@@ -1758,6 +1875,8 @@ export const ja: TranslationResources = {
     dismiss: "閉じる",
   },
   contextWindow: {
+    noData: "No context data",
+    accessibilityNoData: "Context window: No context data",
     title: "コンテキストウィンドウ",
     used: "{{percentage}}%使用",
     tokens: "{{used}} / {{max}}トークン",
@@ -3042,6 +3161,19 @@ export const ja: TranslationResources = {
       forkHint: "JAgentDesk does not own {{name}}, so it is never edited.",
       fork: "Create copy",
       forked: "Training {{name}}",
+    },
+  },
+  changelog: {
+    title: "\u65B0\u7740\u60C5\u5831",
+    installed: "\u30A4\u30F3\u30B9\u30C8\u30FC\u30EB\u6E08\u307F",
+    showMore: "\u3082\u3063\u3068\u898B\u308B",
+    showAllChanges: "\u3059\u3079\u3066\u306E\u5909\u66F4\u3092\u8868\u793A",
+    hideAllChanges: "\u3059\u3079\u3066\u306E\u5909\u66F4\u3092\u975E\u8868\u793A",
+    openWebsite: "\u5909\u66F4\u5C65\u6B74\u3092\u3059\u3079\u3066\u8868\u793A",
+    error: {
+      title: "\u5909\u66F4\u5C65\u6B74\u3092\u8AAD\u307F\u8FBC\u3081\u307E\u305B\u3093",
+      description:
+        "\u63A5\u7D9A\u3092\u78BA\u8A8D\u3057\u3066\u3082\u3046\u4E00\u5EA6\u304A\u8A66\u3057\u304F\u3060\u3055\u3044\u3002",
     },
   },
 } as const;

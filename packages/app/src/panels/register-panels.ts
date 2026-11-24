@@ -1,3 +1,8 @@
+import {
+  filesPanelRegistration,
+  changesTreePanelRegistration,
+  pullRequestPanelRegistration,
+} from "./explorer-panels";
 import { agentPanelRegistration } from "@/panels/agent-panel";
 import { browserPanelRegistration } from "@/desktop/browser/panel";
 import { commitDiffPanelRegistration, workingDiffPanelRegistration } from "@/panels/diff-panel";
@@ -15,6 +20,9 @@ export function ensurePanelsRegistered(): void {
   if (panelsRegistered) {
     return;
   }
+  registerPanel(filesPanelRegistration);
+  registerPanel(changesTreePanelRegistration);
+  registerPanel(pullRequestPanelRegistration);
   registerPanel(draftPanelRegistration);
   registerPanel(agentPanelRegistration);
   registerPanel(providerSubagentPanelRegistration);

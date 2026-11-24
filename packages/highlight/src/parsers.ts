@@ -17,6 +17,7 @@ import { parser as rustParser } from "@lezer/rust";
 import { parser as xmlParser } from "@lezer/xml";
 import { parser as yamlParser } from "@lezer/yaml";
 import { csharpLanguage } from "@replit/codemirror-lang-csharp";
+import { hclLanguage } from "./hcl/language.js";
 import { nixLanguage } from "./nix/language.js";
 import { parser as elixirParser } from "lezer-elixir";
 import type { Parser } from "@lezer/common";
@@ -95,6 +96,9 @@ const languagesByExtension: Record<string, Language> = {
   mdx: language(markdownParser),
   // Nix
   nix: nixLanguage,
+  tf: hclLanguage,
+  tfvars: hclLanguage,
+  hcl: hclLanguage,
 };
 
 export function getLanguageForFile(filename: string): Language | null {

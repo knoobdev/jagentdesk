@@ -1,3 +1,5 @@
+import { iconButtonChromeStyle } from "@/components/ui/icon-button-chrome";
+import { useAgentFactsLine } from "@/panels/agent-facts-line";
 import { useCallback, useMemo, useState, type ReactElement } from "react";
 import { Pressable, ScrollView, Text, View, type PressableStateCallbackType } from "react-native";
 import { useTranslation } from "react-i18next";
@@ -30,6 +32,7 @@ const foregroundMutedColorMapping = (theme: Theme) => ({
 });
 
 export interface SubagentsTrackProps {
+  serverId: string;
   rows: SubagentRow[];
   onOpenSubagent: (id: string) => void;
   onOpenProviderSubagent: (parentAgentId: string, subagentId: string) => void;
@@ -51,6 +54,7 @@ function buildRowPresentation(row: SubagentRow): WorkspaceTabPresentation {
 }
 
 export function SubagentsTrack({
+  serverId,
   rows,
   onOpenSubagent,
   onOpenProviderSubagent,
@@ -132,6 +136,7 @@ export function SubagentsTrack({
             >
               {rows.map((row) => (
                 <SubagentsTrackRow
+                  serverId={serverId}
                   key={row.id}
                   row={row}
                   onOpenSubagent={onOpenSubagent}
@@ -149,6 +154,7 @@ export function SubagentsTrack({
 }
 
 interface SubagentsTrackRowProps {
+  serverId: string;
   row: SubagentRow;
   onOpenSubagent: (id: string) => void;
   onOpenProviderSubagent: (parentAgentId: string, subagentId: string) => void;
@@ -157,6 +163,7 @@ interface SubagentsTrackRowProps {
 }
 
 function SubagentsTrackRow({
+  serverId,
   row,
   onOpenSubagent,
   onOpenProviderSubagent,
@@ -201,14 +208,16 @@ function SubagentsTrackRow({
         {({ pressed }) => (
           <View style={hovered || pressed ? styles.rowActive : styles.row}>
             <WorkspaceTabIcon presentation={presentation} />
-            <Text style={styles.rowLabel} numberOfLines={1}>
-              {displayLabel}
-            </Text>
-            {presentation.subtitle ? (
-              <Text style={styles.rowSubtitle} numberOfLines={1}>
-                {presentation.subtitle}
+            <View style={styles.rowText}>
+              <Text style={styles.rowTitle} numberOfLines={1}>
+                {displayLabel}
               </Text>
-            ) : null}
+              {row.kind === "jagentdesk" ? (
+                <JAgentDeskSubagentFacts serverId={serverId} agentId={row.id} />
+              ) : (
+                <SubagentFacts rowId={row.id} text={presentation.subtitle} />
+              )}
+            </View>
             {row.kind === "jagentdesk" ? (
               <SubagentRowActions
                 rowId={row.id}
@@ -223,6 +232,18 @@ function SubagentsTrackRow({
       </Pressable>
     </View>
   );
+}
+
+function JAgentDeskSubagentFacts({ serverId, agentId }: { serverId: string; agentId: string }) {
+  const text = useAgentFactsLine(serverId, agentId);
+  return <SubagentFacts rowId={agentId} text={text} />;
+}
+function SubagentFacts({ rowId, text }: { rowId: string; text: string | null }) {
+  return text ? (
+    <Text style={styles.rowFacts} numberOfLines={1} testID={`subagents-track-row-facts-${rowId}`}>
+      {text}
+    </Text>
+  ) : null;
 }
 
 function SubagentRowActions({
@@ -291,6 +312,11 @@ function SubagentActionButton({
   visible: boolean;
   onPress: () => void;
 }): ReactElement {
+  const compact = useIsCompactFormFactor();
+  const actionStyle = useCallback(
+    (state: PressableStateCallbackType) => iconButtonChromeStyle({ size: "small", compact, state }),
+    [compact],
+  );
   return (
     <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
       <TooltipTrigger asChild disabled={!visible}>
@@ -299,7 +325,7 @@ function SubagentActionButton({
           accessibilityLabel={accessibilityLabel}
           testID={testID}
           onPress={onPress}
-          style={styles.actionButton}
+          style={actionStyle}
           hitSlop={8}
         >
           {({ hovered, pressed }) => renderSubagentActionIcon(icon, hovered || pressed)}
@@ -313,6 +339,9 @@ function SubagentActionButton({
 }
 
 const styles = StyleSheet.create((theme) => ({
+  rowText: { flexGrow: 1, flexShrink: 1, flexBasis: "auto", minWidth: 0 },
+  rowTitle: { fontSize: theme.fontSize.base, color: theme.colors.foreground },
+  rowFacts: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
   outer: {
     width: "100%",
     alignItems: "center",
@@ -376,6 +405,7 @@ const styles = StyleSheet.create((theme) => ({
     paddingVertical: theme.spacing[1],
   },
   row: {
+    minHeight: { xs: 44, md: 32 },
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
@@ -383,6 +413,7 @@ const styles = StyleSheet.create((theme) => ({
     paddingVertical: theme.spacing[2],
   },
   rowActive: {
+    minHeight: { xs: 44, md: 32 },
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],

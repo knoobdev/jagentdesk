@@ -1,4 +1,6 @@
 import { useFetchQuery } from "@/data/query";
+import { useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import { useRetainedPanelActive } from "@/components/retained-panel";
@@ -87,6 +89,14 @@ export function useAgentCommandsQuery({
     }),
   );
 
+  const queryClient = useQueryClient();
+  const retry = useCallback(() => {
+    void queryClient.resetQueries({
+      queryKey: agentCommandsQueryKey({ serverId, agentId, draftConfig }),
+      exact: true,
+    });
+  }, [agentId, draftConfig, queryClient, serverId]);
+
   const query = useFetchQuery({
     queryKey: agentCommandsQueryKey({ serverId, agentId, draftConfig }),
     queryFn: async () => {
@@ -113,6 +123,7 @@ export function useAgentCommandsQuery({
   const isLoading = query.isPending || query.isLoading;
 
   return {
+    retry,
     commands: query.data ?? [],
     isLoading,
     isError: query.isError && query.data === undefined,

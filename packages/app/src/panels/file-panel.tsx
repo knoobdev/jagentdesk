@@ -101,6 +101,7 @@ function FilePanel() {
       onOpenWorkspaceFile={openPath}
     >
       <FilePanelView
+        workspaceId={workspaceId}
         serverId={serverId}
         workspaceRoot={workspaceDirectory}
         location={target}

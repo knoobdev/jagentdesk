@@ -1,4 +1,5 @@
 import { useDisclosureHold } from "@/agent-stream/disclosure";
+import { useTargetAgentTitle } from "@/tool-calls/use-target-agent-title";
 import { useBuiltinPluginEnabled } from "@/plugins/builtin/hooks";
 import type { AgentMessage } from "@jagentdesk/protocol/agent-message";
 import { ClickUpUserHeader } from "@/components/clickup-shell/chat-headers";
@@ -87,6 +88,7 @@ import { MarkdownFenceBlock } from "@/components/markdown/fence";
 import type { MarkdownPhase } from "@/components/markdown/fence/types";
 import { splitMarkdownBlocks } from "@/utils/split-markdown-blocks";
 import { getSharedAssistantMarkdownParser } from "@/utils/assistant-markdown-parser";
+import { getTurnDurationLabel } from "./assistant-turn-footer-label";
 import { formatDuration, formatMessageTimestamp } from "@/utils/time";
 import { writeMarkdownToRichClipboard } from "@/utils/rich-clipboard";
 import { getDefaultMarkdownClipboardEnvironment } from "@/utils/rich-clipboard-default-environment";
@@ -763,6 +765,7 @@ export const AssistantTurnFooter = memo(function AssistantTurnFooter({
   durationMs,
   onFork,
 }: AssistantTurnFooterProps) {
+  const { t } = useTranslation();
   const [hovered, setHovered] = useState(false);
   const [pressedReveal, setPressedReveal] = useState(false);
   const revealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -777,8 +780,8 @@ export const AssistantTurnFooter = memo(function AssistantTurnFooter({
   }, []);
 
   const durationLabel = useMemo(
-    () => (durationMs !== undefined ? `Worked for ${formatDuration(durationMs)}` : ""),
-    [durationMs],
+    () => (durationMs !== undefined ? getTurnDurationLabel(durationMs, t) : ""),
+    [durationMs, t],
   );
   const timestampLabel = useMemo(
     () => (completedAt ? formatMessageTimestamp(completedAt) : ""),
@@ -3289,6 +3292,7 @@ function areExpandableBadgePropsEqual(previous: ExpandableBadgeProps, next: Expa
 interface ToolCallProps {
   agentMessage?: AgentMessage;
   onOpenAgent?: (agentId: string) => void;
+  serverId?: string;
   toolName: string;
   args?: unknown;
   result?: unknown;
@@ -3312,6 +3316,7 @@ interface ToolCallProps {
 export const ToolCall = memo(function ToolCall({
   agentMessage,
   onOpenAgent,
+  serverId,
   toolName,
   args,
   result,
@@ -3352,6 +3357,7 @@ export const ToolCall = memo(function ToolCall({
     return undefined;
   }, [detail, args, result]);
 
+  const targetAgentTitle = useTargetAgentTitle({ serverId, toolName, detail: effectiveDetail });
   const presentation = useMemo(
     () =>
       buildToolCallPresentation({
@@ -3360,11 +3366,12 @@ export const ToolCall = memo(function ToolCall({
         status,
         error: error ?? null,
         detail: effectiveDetail,
+        targetAgentTitle,
         metadata,
         cwd,
         resolveIcon: resolveToolCallIcon,
       }),
-    [toolName, status, error, effectiveDetail, metadata, cwd, agentMessage],
+    [toolName, status, error, effectiveDetail, metadata, cwd, agentMessage, targetAgentTitle],
   );
   const handleOpenSender = useMemo(() => {
     if (!agentMessage || !onOpenAgent) return undefined;
@@ -3524,6 +3531,8 @@ function areToolCallPropsEqual(previous: ToolCallProps, next: ToolCallProps) {
   if (previous.agentMessage !== next.agentMessage) return false;
   if (previous.onOpenAgent !== next.onOpenAgent) return false;
   if (previous.toolName !== next.toolName) return false;
+  if (previous.serverId !== next.serverId) return false;
+  if (previous.agentMessage !== next.agentMessage) return false;
   if (previous.args !== next.args) return false;
   if (previous.result !== next.result) return false;
   if (previous.error !== next.error) return false;

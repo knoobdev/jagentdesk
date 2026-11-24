@@ -384,7 +384,7 @@ export function AgentConversationPanel() {
 export const agentPanelRegistration: PanelRegistration<"agent"> = {
   kind: "agent",
   component: AgentConversationPanel,
-  useDescriptor: useAgentPanelDescriptor,
+  useDescriptor: useAgentDescriptor,
 };
 
 export function useDraftPanelDescriptor(
@@ -731,8 +731,6 @@ function ChatAgentContent({
   const { api: toastApi, toast: toastState, dismiss: dismissToast } = useToastHost();
   const { isArchivingAgent } = useArchiveAgent();
   const streamViewRef = useRef<AgentStreamViewHandle>(null);
-  const clearOnAgentBlurRef = useRef<() => void>(() => {});
-  const wasPaneFocusedRef = useRef(isPaneFocused);
   const reconnectToastArmedRef = useRef(false);
   const initAttemptTokenRef = useRef(0);
   const routeBottomAnchorRequestRef = useRef<{
@@ -807,6 +805,20 @@ function ChatAgentContent({
   const hasHydratedHistoryBefore =
     hasAppliedAuthoritativeHistory || replicaTimelineStatus === "painted";
 
+  const { workspaceId: attentionWorkspaceId, tabId: attentionTabId } = usePaneContext();
+  const focusRequest = useWorkspaceLayoutStore((state) => {
+    const request = state.focusRequest;
+    return request?.workspaceKey === `${serverId}:${attentionWorkspaceId}` &&
+      request.tabId === attentionTabId
+      ? request
+      : null;
+  });
+  const reportAttentionError = useCallback(
+    (error: unknown) => {
+      toastApi.show(String(error), { variant: "error", durationMs: null });
+    },
+    [toastApi],
+  );
   const attentionController = useAgentAttentionClear({
     agentId,
     client,
@@ -814,10 +826,10 @@ function ChatAgentContent({
     requiresAttention: agentState.requiresAttention,
     attentionReason: agentState.attentionReason,
     isScreenFocused: isPaneFocused,
+    isAgentDataReady: agentHistorySyncGeneration === historySyncGeneration,
+    focusRequest,
+    onError: reportAttentionError,
   });
-  useEffect(() => {
-    clearOnAgentBlurRef.current = attentionController.clearOnAgentBlur;
-  }, [attentionController.clearOnAgentBlur]);
 
   const { style: animatedKeyboardStyle } = useKeyboardShiftStyle({
     mode: "translate",
@@ -845,21 +857,6 @@ function ChatAgentContent({
   }, [connectionStatus, dismissToast, toastApi, t]);
 
   const isArchivingCurrentAgent = Boolean(agentId && isArchivingAgent({ serverId, agentId }));
-
-  useEffect(() => {
-    if (wasPaneFocusedRef.current && !isPaneFocused) {
-      clearOnAgentBlurRef.current();
-    }
-    wasPaneFocusedRef.current = isPaneFocused;
-  }, [isPaneFocused]);
-
-  useEffect(() => {
-    return () => {
-      if (wasPaneFocusedRef.current) {
-        clearOnAgentBlurRef.current();
-      }
-    };
-  }, []);
 
   const isInitializing = agentId ? isInitializingFromMap : false;
   const isHistorySyncing = useMemo(() => {
@@ -1224,8 +1221,17 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
       />
     </RenderProfile>
   );
+  const handleAttentionInteraction = useCallback(() => {
+    onAttentionInputFocus();
+    return false;
+  }, [onAttentionInputFocus]);
   const streamContent = (
-    <ReanimatedAnimated.View style={animatedContentStyle}>{streamSection}</ReanimatedAnimated.View>
+    <ReanimatedAnimated.View
+      style={animatedContentStyle}
+      onStartShouldSetResponderCapture={handleAttentionInteraction}
+    >
+      {streamSection}
+    </ReanimatedAnimated.View>
   );
   const contentContainer = <View style={styles.contentContainer}>{streamContent}</View>;
 
@@ -1715,6 +1721,7 @@ function ActiveAgentComposer({
       <BackgroundWorkTrack model={backgroundWorkModel} count={backgroundWorkCount} />
       {parentAgentId ? <ParentAgentPill serverId={serverId} parentAgentId={parentAgentId} /> : null}
       <SubagentsTrack
+        serverId={serverId}
         rows={subagentRows}
         onOpenSubagent={handleOpenSubagent}
         onOpenProviderSubagent={handleOpenProviderSubagent}

@@ -99,6 +99,12 @@ Every app plugin surface supplies the installation host's state source. A surfac
 hosts can pass its own source. Screens and Settings therefore have the same entity hooks as
 workspace panels.
 
+Workspace panels may declare `workspace`, `explorer`, or both locations. On web,
+`explorer` opens a retained right-pane tab and keeps the existing main pane selected.
+Native and compact layouts open that panel in the workspace. Dragging a plugin tab
+between web hosts must respect its declared locations; do not infer host support from
+the generic plugin panel manifest.
+
 ## Built-ins
 
 The daemon loads bundled plugins through `BuiltinPluginLoader` before configured plugins,

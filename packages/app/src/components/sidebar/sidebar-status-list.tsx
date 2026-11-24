@@ -97,6 +97,7 @@ export function SidebarStatusWorkspaceList({
     (state) => state.togglePinnedCollapsed,
   );
   const {
+    leadingItem: leadingPinnedWorkspace,
     visibleItems: visiblePinnedWorkspaces,
     expanded: pinnedWorkspacesExpanded,
     canToggle: canTogglePinnedWorkspaces,
@@ -111,7 +112,10 @@ export function SidebarStatusWorkspaceList({
           <PinnedSectionHeader collapsed={pinnedCollapsed} onToggle={togglePinnedCollapsed} />
           {pinnedCollapsed ? null : (
             <>
-              {visiblePinnedWorkspaces.map((workspace) => (
+              {[
+                ...(leadingPinnedWorkspace ? [leadingPinnedWorkspace] : []),
+                ...visiblePinnedWorkspaces,
+              ].map((workspace) => (
                 <StatusWorkspaceRow
                   key={workspace.workspaceKey}
                   workspace={workspace}
@@ -241,6 +245,7 @@ function StatusGroupRows({
   onToggleWorkspacePin: ToggleSidebarWorkspacePin;
 }) {
   const {
+    leadingItem: leadingWorkspace,
     visibleItems: visibleWorkspaces,
     expanded: workspacesExpanded,
     canToggle: canToggleWorkspaces,
@@ -255,22 +260,24 @@ function StatusGroupRows({
           style={styles.statusWorkspaceListContainer}
           testID={`sidebar-status-group-rows-${group.bucket}`}
         >
-          {visibleWorkspaces.map((workspace) => (
-            <StatusWorkspaceRow
-              key={workspace.workspaceKey}
-              workspace={workspace}
-              {...buildStatusRowProjectPresentation({
-                workspace,
-                projectIconByProjectViewKey,
-                hostBadgeByServerId,
-              })}
-              shortcutNumber={shortcutIndex.get(workspace.workspaceKey) ?? null}
-              showShortcutBadge={showShortcutBadges}
-              canPin={supportsPinningByServerId.get(workspace.serverId) === true}
-              onToggleWorkspacePin={onToggleWorkspacePin}
-              onWorkspacePress={onWorkspacePress}
-            />
-          ))}
+          {[...(leadingWorkspace ? [leadingWorkspace] : []), ...visibleWorkspaces].map(
+            (workspace) => (
+              <StatusWorkspaceRow
+                key={workspace.workspaceKey}
+                workspace={workspace}
+                {...buildStatusRowProjectPresentation({
+                  workspace,
+                  projectIconByProjectViewKey,
+                  hostBadgeByServerId,
+                })}
+                shortcutNumber={shortcutIndex.get(workspace.workspaceKey) ?? null}
+                showShortcutBadge={showShortcutBadges}
+                canPin={supportsPinningByServerId.get(workspace.serverId) === true}
+                onToggleWorkspacePin={onToggleWorkspacePin}
+                onWorkspacePress={onWorkspacePress}
+              />
+            ),
+          )}
           {canToggleWorkspaces ? (
             <SidebarGroupToggleRow
               expanded={workspacesExpanded}

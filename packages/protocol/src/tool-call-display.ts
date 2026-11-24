@@ -1,6 +1,9 @@
 import { buildAgentMessageDisplay } from "./agent-message-display.js";
 import type { ToolCallTimelineItem } from "./agent-types.js";
-import { getJAgentDeskToolLeafName, isJAgentDeskToolName } from "./tool-name-normalization.js";
+import {
+  buildAgentMessageDisplay,
+  buildJAgentDeskToolDisplay,
+} from "./jagentdesk-tool-presentation/index.js";
 import { stripCwdPrefix } from "./path-utils.js";
 
 export type ToolCallDisplayInput = Pick<
@@ -8,6 +11,7 @@ export type ToolCallDisplayInput = Pick<
   "name" | "status" | "error" | "metadata" | "detail" | "agentMessage"
 > & {
   cwd?: string;
+  targetAgentTitle?: string;
 };
 
 export interface ToolCallDisplayModel {
@@ -33,12 +37,6 @@ function humanizeToolName(name: string): string {
   const trimmed = name.trim();
   if (!trimmed) {
     return name;
-  }
-  if (isJAgentDeskToolName(trimmed)) {
-    const leaf = getJAgentDeskToolLeafName(trimmed);
-    if (leaf) {
-      return humanizeToolName(leaf);
-    }
   }
   if (/[:./]/.test(trimmed) || trimmed.includes("__")) {
     return trimmed;
@@ -152,9 +150,20 @@ function buildUnknownDetailOverride(input: ToolCallDisplayInput): DetailDisplay 
 }
 
 export function buildToolCallDisplayModel(input: ToolCallDisplayInput): ToolCallDisplayModel {
-  if (input.agentMessage) {
-    return { displayName: buildAgentMessageDisplay(input.agentMessage).displayName };
-  }
+  const errorText = input.status === "failed" ? formatErrorText(input.error) : undefined;
+  const jagentdeskDisplay = input.agentMessage
+    ? buildAgentMessageDisplay(input.agentMessage)
+    : buildJAgentDeskToolDisplay({
+        toolName: input.name,
+        detail: input.detail,
+        targetAgentTitle: input.targetAgentTitle,
+      });
+  if (jagentdeskDisplay)
+    return {
+      ...jagentdeskDisplay,
+      ...(input.status === "failed" ? { errorText: formatErrorText(input.error) } : {}),
+    };
+
   const canonicalDisplay = buildCanonicalDetailDisplay(input);
   const unknownDetailOverride = buildUnknownDetailOverride(input);
   const displayName =
@@ -162,7 +171,6 @@ export function buildToolCallDisplayModel(input: ToolCallDisplayInput): ToolCall
     canonicalDisplay.displayName ??
     humanizeToolName(input.name);
   const summary = unknownDetailOverride.summary ?? canonicalDisplay.summary;
-  const errorText = input.status === "failed" ? formatErrorText(input.error) : undefined;
 
   return {
     displayName,

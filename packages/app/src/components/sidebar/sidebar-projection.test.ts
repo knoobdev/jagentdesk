@@ -1,3 +1,4 @@
+import { i18n } from "@/i18n/i18next";
 import { describe, expect, it } from "vitest";
 import type {
   SidebarProjectEntry,
@@ -75,6 +76,7 @@ function projectionInput(options?: {
     pinnedCollapsed: options?.pinnedCollapsed ?? false,
     collapsedProjectKeys: new Set<string>(),
     collapsedStatusGroupKeys: new Set<string>(),
+    t: i18n.t,
   };
 }
 

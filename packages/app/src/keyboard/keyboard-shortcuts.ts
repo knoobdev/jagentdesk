@@ -649,6 +649,32 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
       keys: ["alt", "shift", "]"],
     },
   },
+  {
+    id: "workspace-tab-navigate-relative-alt-shift-left-mac-web",
+    action: "workspace.tab.navigate.relative",
+    combo: "Alt+Shift+[",
+    when: { mac: true, desktopBindings: false, commandCenter: false },
+    payload: { type: "delta", delta: -1 },
+    help: {
+      id: "workspace-tab-prev",
+      section: "tabs-panes",
+      label: "Previous tab",
+      keys: ["alt", "shift", "["],
+    },
+  },
+  {
+    id: "workspace-tab-navigate-relative-alt-shift-right-mac-web",
+    action: "workspace.tab.navigate.relative",
+    combo: "Alt+Shift+]",
+    when: { mac: true, desktopBindings: false, commandCenter: false },
+    payload: { type: "delta", delta: 1 },
+    help: {
+      id: "workspace-tab-next",
+      section: "tabs-panes",
+      label: "Next tab",
+      keys: ["alt", "shift", "]"],
+    },
+  },
 
   // --- Pane management (mac only) ---
   {
