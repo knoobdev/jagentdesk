@@ -26,6 +26,7 @@ export type EvaluatedPluginWorkspacePanelContribution = PluginWorkspacePanelCont
 };
 
 export interface EvaluatedPlugin {
+  translations?: import("@jagentdesk/plugin/client/host").PluginTranslationRuntime;
   id: string;
   cleanup: PluginCleanup;
   surfaces: PluginSurfaceContribution[];

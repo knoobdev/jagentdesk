@@ -1,9 +1,9 @@
 import { z } from "zod";
 import type { PluginAttachmentSourceContribution } from "./contracts.js";
 
-export function defineAttachmentSource<Definition extends PluginAttachmentSourceContribution>(
-  definition: Definition,
-): Definition {
+export function defineAttachmentSource<
+  Definition extends PluginAttachmentSourceContribution<import("./text.js").PluginText>,
+>(definition: Definition): Definition {
   return definition;
 }
 

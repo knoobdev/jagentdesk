@@ -34,7 +34,7 @@ const railIconActiveMapping = (theme: Theme) => ({
 });
 
 interface RailButtonProps {
-  icon: ComponentType<{ size: number; color: string }>;
+  icon: ComponentType<{ size: number; color: string; strokeWidth?: number }>;
   label: string;
   shortLabel: string;
   isActive: boolean;

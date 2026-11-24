@@ -1,3 +1,4 @@
+import { i18n } from "@/i18n/i18next";
 import { createPlayAudio, type AudioEngine } from "@/audio";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { createPluginHosts } from "./hosts";
@@ -31,6 +32,15 @@ export function createPluginClientRuntime(
   );
   return {
     ...capabilities,
+    localeSource: {
+      getLocale: () => i18n.resolvedLanguage ?? i18n.language ?? "en",
+      subscribe: (listener) => {
+        i18n.on("languageChanged", listener);
+        return () => {
+          i18n.off("languageChanged", listener);
+        };
+      },
+    },
     playAudio: createPlayAudio(audio, installation.lifetime.signal),
     hosts: createPluginHosts(getHostRuntimeStore(), installation.lifetime.signal),
     addComposerPill(contribution) {

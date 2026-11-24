@@ -68,6 +68,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.4.0",
+    "i18next": "^26.3.0",
     "use-sync-external-store": "^1.6.0"
   },
   "devDependencies": {

@@ -37,3 +37,5 @@ export {
   type PluginSerializableIcon,
   type PluginSvgIcon,
 } from "./icons.js";
+
+export type { PluginText, PluginMessage } from "./text.js";

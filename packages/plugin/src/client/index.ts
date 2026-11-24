@@ -87,3 +87,7 @@ export declare function openExternalUrl(url: string): Promise<void>;
 export * from "./file.js";
 
 export { useTabState } from "./tab.js";
+
+export { defineTranslations, useTranslation } from "./translations.js";
+export type { PluginI18n } from "./translations.js";
+export type { PluginText, PluginMessage, PluginTranslations } from "../text.js";

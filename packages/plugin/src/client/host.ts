@@ -21,3 +21,12 @@ export async function searchPluginAttachments(
 export { callPluginRpc, subscribePluginRpc, JAgentDeskApiProvider, PluginRpcProvider };
 export type { PluginSubscriptionObserver };
 export type { PluginSubscribe } from "./rpc-context.js";
+
+export {
+  PluginTranslationRuntime,
+  PluginTranslationProvider,
+  usePluginTranslationRuntime,
+  requirePluginText,
+  isPluginMessage,
+} from "./translations.js";
+export type { PluginLocaleSource } from "./translations.js";
