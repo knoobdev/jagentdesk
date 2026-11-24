@@ -25,12 +25,16 @@ const iframeStyle = {
 
 export function FileHtmlPreview({ html, testID }: { html: string; testID?: string }) {
   const { t } = useTranslation();
-  const document = useMemo(() => withPreviewCsp(html), [html]);
+  // A document URL keeps fragment links within the preview instead of inheriting the app URL.
+  const source = useMemo(
+    () => `data:text/html;charset=utf-8,${encodeURIComponent(withPreviewCsp(html))}`,
+    [html],
+  );
   return (
     <iframe
       data-testid={testID}
       title={t("panels.file.editor.preview")}
-      srcDoc={document}
+      src={source}
       sandbox={SANDBOX}
       referrerPolicy="no-referrer"
       style={iframeStyle}
