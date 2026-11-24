@@ -45,6 +45,7 @@ export interface ScrollToMessageOccurrence {
 }
 
 export interface StreamViewportHandle {
+  focus?: () => void;
   scrollToBottom: (reason?: BottomAnchorLocalRequest["reason"]) => void;
   prepareForViewportChange: () => void;
   scrollToMessage?: (itemId: string, occurrence?: ScrollToMessageOccurrence) => void;
