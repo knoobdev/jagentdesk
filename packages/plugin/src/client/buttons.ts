@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import type { PluginHostProps } from "./contracts.js";
+import type { PluginHostProps, PluginIcon } from "./contracts.js";
 
 export type PluginButtonContext =
   | { context: "workspace"; workspaceId: string }
@@ -10,7 +10,7 @@ export type PluginButtonIconProps = PluginHostProps &
 
 export type PluginButtonContentProps = PluginHostProps & PluginButtonContext & { close(): void };
 
-export type PluginButtonIcon = string | ComponentType<PluginButtonIconProps>;
+export type PluginButtonIcon = PluginIcon<PluginButtonIconProps>;
 
 export type PluginButtonBehavior =
   | { kind: "action"; onPress(): void | Promise<void> }

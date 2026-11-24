@@ -9,7 +9,7 @@ export const SidebarFrame = createContext<{ title: string; testID: string } | nu
 export function SidebarRow({ id, icon, label, onPress, active, trailing }: SidebarRowProps) {
   const frame = useContext(SidebarFrame);
   if (!frame) throw new Error("SidebarRow must be rendered inside a plugin sidebar item");
-  const Icon = typeof icon === "string" ? resolvePluginIcon(icon) : (icon ?? Blocks);
+  const Icon = icon ? resolvePluginIcon(icon) : Blocks;
   return (
     <View style={styles.row}>
       <View style={styles.rowBody}>

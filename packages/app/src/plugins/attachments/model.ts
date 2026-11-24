@@ -8,7 +8,7 @@ export const PluginResourceComposerAttachmentSchema = z.object({
   pluginId: z.string().min(1),
   sourceId: z.string().min(1),
   sourceTitle: z.string().min(1),
-  sourceIcon: z.string().min(1),
+  sourceIcon: z.union([z.string().min(1), z.object({ svg: z.string().min(1) })]),
   item: PluginAttachmentItemSchema,
 });
 
@@ -20,7 +20,7 @@ export interface PluginResourceSourceIdentity {
   pluginId: string;
   sourceId: string;
   sourceTitle: string;
-  sourceIcon: string;
+  sourceIcon: import("@jagentdesk/plugin").PluginSerializableIcon;
 }
 
 export function createPluginResourceAttachment(

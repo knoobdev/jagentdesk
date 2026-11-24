@@ -32,7 +32,7 @@ import {
 } from "@jagentdesk/plugin/client";
 import type { EvaluatedPlugin } from "./types";
 import type { ComponentType } from "react";
-import { resolvePluginIcon } from "./icons";
+import { resolvePluginIcon, parsePluginIcon, parseSerializablePluginIcon } from "./icons";
 import { pluginReactNativeRuntime } from "./react-native/runtime";
 import { parsePluginThemeContribution } from "./themes";
 
@@ -236,15 +236,14 @@ export function runPluginClientBundle(
       if (sidebarItemIds.has(normalizedId))
         throw new Error(`Duplicate sidebar item: ${normalizedId}`);
       if (!contribution.title.trim()) throw new Error(`Sidebar item ${normalizedId} has no title`);
-      if (!contribution.icon.trim()) throw new Error(`Sidebar item ${normalizedId} has no icon`);
-      resolvePluginIcon(contribution.icon.trim());
+      const icon = parsePluginIcon(`Sidebar item ${normalizedId}`, contribution.icon);
       sidebarItemIds.add(normalizedId);
       return register(
         collector.sidebarItems,
         {
           id: normalizedId,
           title: contribution.title.trim(),
-          icon: contribution.icon.trim(),
+          icon,
           surface: requireId(contribution.surface, "sidebar surface id"),
         },
         () => sidebarItemIds.delete(normalizedId),
@@ -275,7 +274,7 @@ export function runPluginClientBundle(
         throw new Error(`Duplicate workspace panel: ${normalizedId}`);
       }
       const title = contribution.title.trim();
-      const icon = contribution.icon.trim();
+      const icon = parsePluginIcon(`Plugin contribution ${normalizedId}`, contribution.icon);
       if (!title) throw new Error(`Workspace panel ${normalizedId} has no title`);
       if (!icon) throw new Error(`Workspace panel ${normalizedId} has no icon`);
       if (contribution.context !== "workspace" && contribution.context !== "agent") {
@@ -305,7 +304,7 @@ export function runPluginClientBundle(
         throw new Error(`Duplicate Command Center item: ${normalizedId}`);
       }
       const title = contribution.title.trim();
-      const icon = contribution.icon.trim();
+      const icon = parsePluginIcon(`Plugin contribution ${normalizedId}`, contribution.icon);
       if (!title) throw new Error(`Command Center item ${normalizedId} has no title`);
       if (!icon) throw new Error(`Command Center item ${normalizedId} has no icon`);
       if (
@@ -363,7 +362,10 @@ export function runPluginClientBundle(
         throw new Error(`Duplicate attachment source: ${normalizedId}`);
       }
       const title = contribution.title.trim();
-      const icon = contribution.icon.trim();
+      const icon = parseSerializablePluginIcon(
+        `Attachment source ${normalizedId}`,
+        contribution.icon,
+      );
       const pickerTitle = contribution.pickerTitle.trim();
       const searchPlaceholder = contribution.searchPlaceholder.trim();
       const method = contribution.search.name.trim();

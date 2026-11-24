@@ -64,7 +64,7 @@ export interface ExternalLinkProps {
 }
 export declare const ExternalLink: ComponentType<ExternalLinkProps>;
 
-export type SidebarIcon = string | ComponentType<{ size: number; color: string }>;
+export type SidebarIcon = import("./contracts.js").PluginIcon;
 export interface SidebarRowProps {
   /**
    * Tells rows of one item apart when the item renders several: "bot-2". Unique within the item.

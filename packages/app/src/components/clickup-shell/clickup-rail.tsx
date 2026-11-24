@@ -1,3 +1,4 @@
+import type { ComponentType } from "react";
 import { usePluginScreenSidebarItems, openPluginSidebarItem } from "@/plugins/sidebar-screen-items";
 import type { InstalledPlugin } from "@/plugins/types";
 import type { PluginSidebarItemContribution } from "@jagentdesk/plugin/client";
@@ -5,7 +6,7 @@ import { Blocks } from "lucide-react-native";
 import { router, usePathname } from "expo-router";
 import { memo, useCallback, useMemo } from "react";
 import { Pressable, ScrollView, Text, View, type PressableStateCallbackType } from "react-native";
-import { Settings, Smartphone, type LucideIcon } from "lucide-react-native";
+import { Settings, Smartphone } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -33,7 +34,7 @@ const railIconActiveMapping = (theme: Theme) => ({
 });
 
 interface RailButtonProps {
-  icon: LucideIcon;
+  icon: ComponentType<{ size: number; color: string }>;
   label: string;
   shortLabel: string;
   isActive: boolean;

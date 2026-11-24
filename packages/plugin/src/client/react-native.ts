@@ -17,7 +17,7 @@ import type {
   TextInput as NativeTextInput,
   TextInputProps,
 } from "react-native";
-import type { PluginIconProps } from "./contracts.js";
+import type { PluginIconProps, PluginIcon } from "./contracts.js";
 
 export interface ModalProps {
   title: string;
@@ -53,7 +53,9 @@ export interface ToastApi {
   error(message: string): void;
 }
 
-export declare const Icon: ComponentType<PluginIconProps>;
+export type IconProps = Partial<PluginIconProps> &
+  ({ name: string; icon?: never } | { icon: PluginIcon; name?: never });
+export declare const Icon: ComponentType<IconProps>;
 export declare const Modal: ModalComponent;
 export declare function useToast(): ToastApi;
 export declare function useRevealedText(text: string, phase: "streaming" | "complete"): string;

@@ -1,3 +1,4 @@
+import type { PluginSerializableIcon } from "./icons.js";
 import type { JsonValue } from "@jagentdesk/protocol/agent-types";
 import type { PluginRpcContract } from "./rpc.js";
 
@@ -73,7 +74,7 @@ export interface PluginThemeContribution {
 export interface PluginAttachmentSourceContribution {
   id: string;
   title: string;
-  icon: string;
+  icon: PluginSerializableIcon;
   pickerTitle: string;
   searchPlaceholder: string;
   search: PluginRpcContract;

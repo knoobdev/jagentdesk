@@ -1,3 +1,4 @@
+import type { PluginIconProps, PluginSerializableIcon } from "../icons.js";
 import type { PluginFile, PluginFileLocation } from "./file.js";
 import type { ComponentType } from "react";
 import type { JAgentDeskApi } from "@jagentdesk/client";
@@ -94,11 +95,10 @@ export interface PluginSidebarItemContribution {
   Component: ComponentType<PluginSidebarItemProps>;
 }
 
-export interface PluginIconProps {
-  name: string;
-  size?: number;
-  color?: string;
-}
+export type PluginIcon<Props extends PluginIconProps = PluginIconProps> =
+  | PluginSerializableIcon
+  | ComponentType<Props>;
+export type { PluginIconProps } from "../icons.js";
 
 export type PluginPanelLocation = "workspace" | "explorer";
 
@@ -109,7 +109,7 @@ export interface PluginOpenPanelOptions {
 interface PluginWorkspacePanelBase {
   id: string;
   title: string;
-  icon: string;
+  icon: PluginIcon;
   locations?: readonly PluginPanelLocation[];
 }
 
@@ -151,7 +151,7 @@ export interface PluginFilePanelProps extends PluginPanelProps<PluginFilePanelPa
 export interface PluginFilePanelContribution {
   id: string;
   title: string;
-  icon: string;
+  icon: PluginIcon;
   /** Extensions without the dot, case-insensitive, and exact filenames. */
   files: { extensions: readonly string[]; filenames?: readonly string[] };
   Component: ComponentType<PluginFilePanelProps>;
@@ -218,7 +218,7 @@ export interface PluginAgentPanelContribution extends PluginWorkspacePanelBase {
 export interface PluginSettingsScreenContribution {
   id: string;
   title: string;
-  icon: string;
+  icon: PluginIcon;
   Component: ComponentType<PluginSurfaceProps>;
 }
 
@@ -240,7 +240,7 @@ export interface PluginSurfaceContribution {
 export interface PluginSidebarContribution {
   id: string;
   title: string;
-  icon: string;
+  icon: PluginIcon;
   surface: string;
 }
 
@@ -308,7 +308,7 @@ export interface PluginAgentCommandContext extends PluginCommandCapabilities {
 interface PluginCommandCenterItemBase {
   id: string;
   title: string;
-  icon: string;
+  icon: PluginIcon;
   keywords?: readonly string[];
 }
 

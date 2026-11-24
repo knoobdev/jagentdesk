@@ -33,7 +33,7 @@ import { ToastApiProvider, useToast } from "@/contexts/toast-context";
 import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
 import type { Theme } from "@/styles/theme";
 import { createPluginClientStateSource } from "../client-state/source";
-import { Icon } from "../icons";
+import { Icon, pluginIconComponent } from "../icons";
 import { PluginRuntimeBoundary } from "../runtime-boundary";
 import { SurfaceErrorBoundary } from "../surface-error-boundary";
 import { toPluginTheme } from "../theme";
@@ -114,7 +114,8 @@ function renderCustomIcon(
   size: number,
   color: string,
 ) {
-  return <CustomIcon {...view.props} size={size} color={color} />;
+  const Component = pluginIconComponent(CustomIcon);
+  return <Component {...view.props} size={size} color={color} />;
 }
 
 function pressButton(view: ButtonView, path: readonly string[]) {

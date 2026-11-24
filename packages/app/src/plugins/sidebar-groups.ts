@@ -10,7 +10,7 @@ export interface PluginSidebarGroup {
   pluginId: string;
   contributionId: string;
   title: string;
-  icon: string;
+  icon: PluginSidebarContribution["icon"];
   targets: PluginSidebarTarget[];
 }
 

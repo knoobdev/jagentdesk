@@ -62,7 +62,10 @@ function SettingsScreenButton({
 }: {
   serverId: string;
   pluginId: string;
-  screen: { id: string; title: string; icon: string };
+  screen: Pick<
+    import("@jagentdesk/plugin/client").PluginSettingsScreenContribution,
+    "id" | "title" | "icon"
+  >;
 }) {
   const router = useRouter();
   const Icon = useMemo(() => resolvePluginIcon(screen.icon), [screen.icon]);

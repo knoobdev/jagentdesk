@@ -19,6 +19,7 @@ export type {
   PluginPopoverProps,
   PluginSurfaceProps,
   PluginIconProps,
+  PluginIcon,
   PluginPanelLocation,
   PluginOpenPanelOptions,
   PluginWorkspacePanelProps,

@@ -1,7 +1,7 @@
+import type { ComponentType } from "react";
 import { useCallback, useMemo } from "react";
 import { Pressable, Text, View, type PressableStateCallbackType } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import type { LucideIcon } from "lucide-react-native";
 import { HEADER_INNER_HEIGHT, HEADER_INNER_HEIGHT_MOBILE } from "@/constants/layout";
 import { ICON_SIZE } from "@/styles/theme";
 import type { Theme } from "@/styles/theme";
@@ -14,7 +14,7 @@ const foregroundMutedColorMapping = (theme: Theme) => ({ color: theme.colors.for
 type SidebarHeaderRowVariant = "header" | "compact";
 
 interface SidebarHeaderRowProps {
-  icon: LucideIcon;
+  icon: ComponentType<{ size: number; color: string }>;
   label: string;
   onPress: () => void;
   isActive?: boolean;

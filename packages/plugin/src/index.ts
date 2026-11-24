@@ -29,3 +29,11 @@ export {
   type SubscriptionEvent,
   type SubscriptionInput,
 } from "./rpc.js";
+
+export {
+  findSvgIconProblem,
+  PLUGIN_SVG_ICON_MAX_BYTES,
+  type PluginIconProps,
+  type PluginSerializableIcon,
+  type PluginSvgIcon,
+} from "./icons.js";
