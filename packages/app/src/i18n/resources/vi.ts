@@ -241,6 +241,7 @@ export const vi = {
       working: "Working",
       done: "Done",
     },
+    statusGroupAccessibility: "{{label}} group",
   },
   newWorkspace: {
     title: "Workspace mới",
@@ -808,6 +809,14 @@ export const vi = {
             ignored: "{{count}} skipped checks",
           },
         },
+        actions: {
+          addToChat: "Add to chat",
+          addAllToChat: "Add all to chat",
+          addingToChat: "Adding...",
+        },
+        sections: { activity: "Activity" },
+        empty: { noActivity: "No activity yet" },
+        accessibility: { commentActions: "Comment actions", threadActions: "Thread actions" },
       },
     },
   },

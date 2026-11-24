@@ -617,7 +617,7 @@ export function PullRequestPane({
         )}
       </>
       <SectionHeader
-        title="Activity"
+        title={t("workspace.git.pr.sections.activity")}
         open={activityOpen}
         onToggle={handleToggleActivity}
         summary={
@@ -644,7 +644,7 @@ export function PullRequestPane({
         ) : null}
         {activityLoading ? <PrActivitySkeleton /> : null}
         {!activityLoading && visibleEntries.length === 0 ? (
-          <Text style={sectionKitStyles.emptyText}>No activity yet</Text>
+          <Text style={sectionKitStyles.emptyText}>{t("workspace.git.pr.empty.noActivity")}</Text>
         ) : null}
         {!activityLoading
           ? visibleEntries.map(({ entry, collapsed }) => (
@@ -798,14 +798,14 @@ function ActivityKebab({
         <DropdownMenuTrigger
           hitSlop={8}
           style={kebabTriggerStyle}
-          accessibilityLabel="Comment actions"
+          accessibilityLabel={t("workspace.git.pr.accessibility.commentActions")}
         >
           {renderKebabTriggerIcon}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" width={200}>
           {attachEnabled && canAddPullRequestActivityToChat(activity) ? (
             <DropdownMenuItem leading={ADD_TO_CHAT_MENU_ICON} onSelect={handleAddToChat}>
-              Add to chat
+              {t("workspace.git.pr.actions.addToChat")}
             </DropdownMenuItem>
           ) : null}
           {activity.body.trim() !== "" ? (
@@ -911,6 +911,7 @@ function SingleActivityCard({
   entry: Extract<PrTimelineEntry, { kind: "single" }>;
   collapsed: boolean;
 }) {
+  const { t } = useTranslation();
   const { activity } = entry;
   const { actionsVisible, handlePointerEnter, handlePointerLeave, setMenuOpen } =
     useRevealOnHover();
@@ -980,7 +981,7 @@ function SingleActivityCard({
                 leftIcon={MessageSquarePlus}
                 onPress={handleAddToChat}
               >
-                Add to chat
+                {t("workspace.git.pr.actions.addToChat")}
               </Button>
             </View>
           ) : null}
@@ -1031,6 +1032,7 @@ function ReviewCard({
   collapsed: boolean;
   collapsedEntryIds: ReadonlySet<string>;
 }) {
+  const { t } = useTranslation();
   const { review, threads } = entry;
   const { actionsVisible, handlePointerEnter, handlePointerLeave, setMenuOpen } =
     useRevealOnHover();
@@ -1057,7 +1059,7 @@ function ReviewCard({
               onPress={handleAddToChat}
               style={styles.checkAddButton}
             >
-              Add to chat
+              {t("workspace.git.pr.actions.addToChat")}
             </Button>
           ) : null}
           {collapsed ? (
@@ -1091,7 +1093,7 @@ function ReviewCard({
                 leftIcon={MessageSquarePlus}
                 onPress={handleAddToChat}
               >
-                Add to chat
+                {t("workspace.git.pr.actions.addToChat")}
               </Button>
             </View>
           ) : null}
@@ -1176,7 +1178,7 @@ function ThreadBlock({
               <DropdownMenuTrigger
                 hitSlop={8}
                 style={kebabTriggerStyle}
-                accessibilityLabel="Thread actions"
+                accessibilityLabel={t("workspace.git.pr.accessibility.threadActions")}
               >
                 {renderKebabTriggerIcon}
               </DropdownMenuTrigger>
@@ -1220,7 +1222,7 @@ function ThreadBlock({
                 leftIcon={MessageSquarePlus}
                 onPress={handleAddThreadToChat}
               >
-                Add to chat
+                {t("workspace.git.pr.actions.addToChat")}
               </Button>
             </View>
           ) : null}

@@ -897,22 +897,34 @@ export const ar: TranslationResources = {
         actions: {
           viewPullRequest: "عرض",
           openOn: "فتح على {{brand}}",
+          addToChat:
+            "\u0625\u0636\u0627\u0641\u0629 \u0625\u0644\u0649 \u0627\u0644\u062F\u0631\u062F\u0634\u0629",
+          addAllToChat:
+            "\u0625\u0636\u0627\u0641\u0629 \u0627\u0644\u0643\u0644 \u0625\u0644\u0649 \u0627\u0644\u062F\u0631\u062F\u0634\u0629",
+          addingToChat: "\u062C\u0627\u0631\u064D \u0627\u0644\u0625\u0636\u0627\u0641\u0629...",
         },
         sections: {
           checks: "الشيكات",
           pipeline: "خط المعالجة",
           reviews: "التعليقات",
+          activity: "\u0627\u0644\u0646\u0634\u0627\u0637",
         },
         empty: {
           noJobs: "لا توجد مهام",
           loadingPipeline: "جارٍ تحميل خط المعالجة...",
           pipelineJobsLoadFailed: "تعذر تحميل مهام خط المعالجة",
           allowedToFail: "مسموح بالفشل",
+          noActivity:
+            "\u0644\u0627 \u064A\u0648\u062C\u062F \u0646\u0634\u0627\u0637 \u0628\u0639\u062F",
         },
         approvals: "{{given}} من {{required}} موافقات",
         accessibility: {
           pullRequest: "سحب الطلب #{{number}}",
           pullRequest_mr: "طلب دمج !{{number}}",
+          commentActions:
+            "\u0625\u062C\u0631\u0627\u0621\u0627\u062A \u0627\u0644\u062A\u0639\u0644\u064A\u0642",
+          threadActions:
+            "\u0625\u062C\u0631\u0627\u0621\u0627\u062A \u0633\u0644\u0633\u0644\u0629 \u0627\u0644\u0646\u0642\u0627\u0634",
         },
         states: {
           draft: "مسودة",
@@ -1152,6 +1164,7 @@ export const ar: TranslationResources = {
       working: "\u0642\u064A\u062F \u0627\u0644\u0639\u0645\u0644",
       done: "\u062A\u0645",
     },
+    statusGroupAccessibility: "\u0645\u062C\u0645\u0648\u0639\u0629 {{label}}",
   },
   newWorkspace: {
     title: "مساحة عمل جديدة",

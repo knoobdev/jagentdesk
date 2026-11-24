@@ -909,22 +909,30 @@ export const ja: TranslationResources = {
         actions: {
           viewPullRequest: "表示",
           openOn: "{{brand}}で開く",
+          addToChat: "\u30C1\u30E3\u30C3\u30C8\u306B\u8FFD\u52A0",
+          addAllToChat: "\u3059\u3079\u3066\u30C1\u30E3\u30C3\u30C8\u306B\u8FFD\u52A0",
+          addingToChat: "\u8FFD\u52A0\u4E2D...",
         },
         sections: {
           checks: "チェック",
           pipeline: "パイプライン",
           reviews: "レビュー",
+          activity: "\u30A2\u30AF\u30C6\u30A3\u30D3\u30C6\u30A3",
         },
         empty: {
           noJobs: "ジョブなし",
           loadingPipeline: "パイプラインを読み込み中...",
           pipelineJobsLoadFailed: "パイプラインのジョブを読み込めませんでした",
           allowedToFail: "失敗を許可",
+          noActivity:
+            "\u307E\u3060\u30A2\u30AF\u30C6\u30A3\u30D3\u30C6\u30A3\u306F\u3042\u308A\u307E\u305B\u3093",
         },
         approvals: "{{given}} / {{required}} 承認",
         accessibility: {
           pullRequest: "プルリクエスト#{{number}}",
           pullRequest_mr: "マージリクエスト !{{number}}",
+          commentActions: "\u30B3\u30E1\u30F3\u30C8\u306E\u64CD\u4F5C",
+          threadActions: "\u30B9\u30EC\u30C3\u30C9\u306E\u64CD\u4F5C",
         },
         states: {
           draft: "ドラフト",
@@ -1156,6 +1164,7 @@ export const ja: TranslationResources = {
       working: "\u5B9F\u884C\u4E2D",
       done: "\u5B8C\u4E86",
     },
+    statusGroupAccessibility: "{{label}} \u30B0\u30EB\u30FC\u30D7",
   },
   newWorkspace: {
     title: "新しいワークスペース",

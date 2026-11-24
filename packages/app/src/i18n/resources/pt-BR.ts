@@ -919,22 +919,29 @@ export const ptBR: TranslationResources = {
         actions: {
           viewPullRequest: "Ver",
           openOn: "Abrir no {{brand}}",
+          addToChat: "Adicionar ao chat",
+          addAllToChat: "Adicionar tudo ao chat",
+          addingToChat: "Adicionando...",
         },
         sections: {
           checks: "Verificações",
           pipeline: "Pipeline",
           reviews: "Revisões",
+          activity: "Atividade",
         },
         empty: {
           noJobs: "Sem jobs",
           loadingPipeline: "Carregando pipeline...",
           pipelineJobsLoadFailed: "Não foi possível carregar os jobs do pipeline",
           allowedToFail: "permitido falhar",
+          noActivity: "Nenhuma atividade ainda",
         },
         approvals: "{{given}} de {{required}} aprovações",
         accessibility: {
           pullRequest: "Pull request #{{number}}",
           pullRequest_mr: "Merge request !{{number}}",
+          commentActions: "A\u00E7\u00F5es do coment\u00E1rio",
+          threadActions: "A\u00E7\u00F5es da conversa",
         },
         states: {
           draft: "Rascunho",
@@ -1160,6 +1167,7 @@ export const ptBR: TranslationResources = {
       working: "Em execu\u00E7\u00E3o",
       done: "Conclu\u00EDdo",
     },
+    statusGroupAccessibility: "Grupo {{label}}",
   },
   newWorkspace: {
     title: "Novo workspace",

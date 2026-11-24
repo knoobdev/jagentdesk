@@ -887,22 +887,29 @@ export const zhCN: TranslationResources = {
         actions: {
           viewPullRequest: "查看",
           openOn: "在 {{brand}} 上打开",
+          addToChat: "\u6DFB\u52A0\u5230\u804A\u5929",
+          addAllToChat: "\u5168\u90E8\u6DFB\u52A0\u5230\u804A\u5929",
+          addingToChat: "\u6B63\u5728\u6DFB\u52A0...",
         },
         sections: {
           checks: "Checks",
           pipeline: "流水线",
           reviews: "Reviews",
+          activity: "\u52A8\u6001",
         },
         empty: {
           noJobs: "无作业",
           loadingPipeline: "正在加载流水线...",
           pipelineJobsLoadFailed: "无法加载流水线作业",
           allowedToFail: "允许失败",
+          noActivity: "\u6682\u65E0\u52A8\u6001",
         },
         approvals: "{{given}} / {{required}} 批准",
         accessibility: {
           pullRequest: "Pull request #{{number}}",
           pullRequest_mr: "合并请求 !{{number}}",
+          commentActions: "\u8BC4\u8BBA\u64CD\u4F5C",
+          threadActions: "\u8BA8\u8BBA\u4E32\u64CD\u4F5C",
         },
         states: {
           draft: "Draft",
@@ -1123,6 +1130,7 @@ export const zhCN: TranslationResources = {
       working: "\u8FD0\u884C\u4E2D",
       done: "\u5DF2\u5B8C\u6210",
     },
+    statusGroupAccessibility: "{{label}} \u5206\u7EC4",
   },
   newWorkspace: {
     title: "新建 workspace",

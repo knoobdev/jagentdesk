@@ -930,22 +930,29 @@ export const es: TranslationResources = {
         actions: {
           viewPullRequest: "Ver",
           openOn: "Abrir en {{brand}}",
+          addToChat: "A\u00F1adir al chat",
+          addAllToChat: "A\u00F1adir todo al chat",
+          addingToChat: "A\u00F1adiendo...",
         },
         sections: {
           checks: "cheques",
           pipeline: "Pipeline",
           reviews: "Reseñas",
+          activity: "Actividad",
         },
         empty: {
           noJobs: "Sin trabajos",
           loadingPipeline: "Cargando pipeline...",
           pipelineJobsLoadFailed: "No se pudieron cargar los trabajos del pipeline",
           allowedToFail: "permitido fallar",
+          noActivity: "A\u00FAn no hay actividad",
         },
         approvals: "{{given}} de {{required}} aprobaciones",
         accessibility: {
           pullRequest: "Solicitud de extracción n.°{{number}}",
           pullRequest_mr: "Solicitud de fusión !{{number}}",
+          commentActions: "Acciones del comentario",
+          threadActions: "Acciones del hilo",
         },
         states: {
           draft: "Borrador",
@@ -1172,6 +1179,7 @@ export const es: TranslationResources = {
       working: "En ejecuci\u00F3n",
       done: "Terminado",
     },
+    statusGroupAccessibility: "Grupo {{label}}",
   },
   newWorkspace: {
     title: "Nuevo espacio de trabajo",

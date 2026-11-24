@@ -924,22 +924,33 @@ export const ru: TranslationResources = {
         actions: {
           viewPullRequest: "Открыть",
           openOn: "Открыть на {{brand}}",
+          addToChat: "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u0432 \u0447\u0430\u0442",
+          addAllToChat:
+            "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u0432\u0441\u0451 \u0432 \u0447\u0430\u0442",
+          addingToChat: "\u0414\u043E\u0431\u0430\u0432\u043B\u0435\u043D\u0438\u0435...",
         },
         sections: {
           checks: "Чеки",
           pipeline: "Пайплайн",
           reviews: "Отзывы",
+          activity: "\u0410\u043A\u0442\u0438\u0432\u043D\u043E\u0441\u0442\u044C",
         },
         empty: {
           noJobs: "Нет задач",
           loadingPipeline: "Загрузка пайплайна...",
           pipelineJobsLoadFailed: "Не удалось загрузить задачи пайплайна",
           allowedToFail: "допускается сбой",
+          noActivity:
+            "\u0410\u043A\u0442\u0438\u0432\u043D\u043E\u0441\u0442\u0438 \u043F\u043E\u043A\u0430 \u043D\u0435\u0442",
         },
         approvals: "{{given}} из {{required}} одобрений",
         accessibility: {
           pullRequest: "Запрос на извлечение №{{number}}",
           pullRequest_mr: "Запрос на слияние !{{number}}",
+          commentActions:
+            "\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u044F \u0441 \u043A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0435\u043C",
+          threadActions:
+            "\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u044F \u0441 \u043E\u0431\u0441\u0443\u0436\u0434\u0435\u043D\u0438\u0435\u043C",
         },
         states: {
           draft: "Черновик",
@@ -1179,6 +1190,7 @@ export const ru: TranslationResources = {
       working: "\u0412 \u0440\u0430\u0431\u043E\u0442\u0435",
       done: "\u0413\u043E\u0442\u043E\u0432\u043E",
     },
+    statusGroupAccessibility: "\u0413\u0440\u0443\u043F\u043F\u0430 \u00AB{{label}}\u00BB",
   },
   newWorkspace: {
     title: "Новое рабочее пространство",
