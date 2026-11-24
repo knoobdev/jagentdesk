@@ -970,7 +970,11 @@ export function setupFinishNotification(
         return;
       }
 
-      if (event.type === "timeline_replacement" || event.type === "background_work" || event.type === "agent_removed") {
+      if (
+        event.type === "timeline_replacement" ||
+        event.type === "background_work" ||
+        event.type === "agent_removed"
+      ) {
         return;
       }
 

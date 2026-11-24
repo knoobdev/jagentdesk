@@ -1,3 +1,7 @@
+import {
+  AssistantFileLinkResolverProvider,
+  useAssistantFileLinkEnvironment,
+} from "@/assistant-file-links/provider";
 import { useMemo } from "react";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { ASTNode, RenderRules } from "react-native-markdown-display";
@@ -24,6 +28,12 @@ export function FileMarkdownPreview({
   client?: DaemonClient | null;
   serverId?: string;
 }) {
+  const environment = useAssistantFileLinkEnvironment();
+  const documentPath =
+    filePath.startsWith("/") || /^[A-Za-z]:[\\/]/.test(filePath)
+      ? filePath
+      : `${workspaceRoot ?? ""}/${filePath}`;
+  const relativePathBase = documentPath.replace(/[/\\][^/\\]*$/, "");
   const rules = useMemo<RenderRules>(
     () => ({
       ...createSharedMarkdownRules(),
@@ -56,7 +66,15 @@ export function FileMarkdownPreview({
   return (
     <View style={styles.outerGutter}>
       <View style={styles.readingFrame} testID="markdown-preview-frame">
-        <MarkdownRenderer text={source} rules={rules} />
+        <AssistantFileLinkResolverProvider
+          {...environment}
+          client={client}
+          serverId={serverId}
+          workspaceRoot={workspaceRoot}
+          relativePathBase={relativePathBase}
+        >
+          <MarkdownRenderer text={source} rules={rules} />
+        </AssistantFileLinkResolverProvider>
       </View>
     </View>
   );

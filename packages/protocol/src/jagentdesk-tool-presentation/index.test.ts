@@ -127,12 +127,12 @@ describe("JAgentDesk tool display", () => {
 
 describe("agent message display", () => {
   it.each([
-    ["message", "Message received"],
-    ["finished", "Agent finished"],
-    ["errored", "Agent errored"],
-    ["permission-required", "Agent needs permission"],
-    ["closed", "Agent closed"],
-  ] as const)("labels %s noun-first with the sender as context", (event, label) => {
+    ["message", "Message from QA messenger"],
+    ["finished", "QA messenger finished"],
+    ["errored", "QA messenger errored"],
+    ["permission-required", "QA messenger needs permission"],
+    ["closed", "QA messenger closed"],
+  ] as const)("labels %s with its sender heading and context", (event, label) => {
     const result = buildAgentMessageDisplay({
       event,
       sender: { id: "srv::agt_1", title: "QA messenger" },

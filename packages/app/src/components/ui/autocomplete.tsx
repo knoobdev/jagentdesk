@@ -143,7 +143,7 @@ const AutocompleteRow = memo(function AutocompleteRow({
       <Text style={styles.itemDescription} numberOfLines={1}>
         {description ?? ""}
       </Text>
-      {option.tag ? <StatusBadge label={option.tag} /> : null}
+      {option.tag ? <StatusBadge label={option.tag} size="xs" /> : null}
     </Pressable>
   );
 });

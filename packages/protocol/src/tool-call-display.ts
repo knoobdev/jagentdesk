@@ -1,4 +1,3 @@
-import { buildAgentMessageDisplay } from "./agent-message-display.js";
 import type { ToolCallTimelineItem } from "./agent-types.js";
 import {
   buildAgentMessageDisplay,
@@ -160,6 +159,7 @@ export function buildToolCallDisplayModel(input: ToolCallDisplayInput): ToolCall
       });
   if (jagentdeskDisplay)
     return {
+      ...buildCanonicalDetailDisplay(input),
       ...jagentdeskDisplay,
       ...(input.status === "failed" ? { errorText: formatErrorText(input.error) } : {}),
     };

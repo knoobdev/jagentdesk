@@ -339,7 +339,7 @@ function MenuFlyout({
       maxHeight={maxHeight}
       scrollable={scrollable}
       backdrop={false}
-      onPointerEnter={cancelHoverClose}
+      onPointerEnter={handleHoverIn}
       onPointerLeave={handleHoverOut}
       testID={testID}
     >

@@ -347,6 +347,21 @@ function resolveAutocompleteEmptyText(args: {
   return args.t("agentAutocomplete.noCommands");
 }
 
+function autocompleteLoadingKey(mode: ReturnType<typeof resolveAutocompleteMode>) {
+  return mode === "file"
+    ? "agentAutocomplete.searchingWorkspace"
+    : "agentAutocomplete.loadingCommands";
+}
+
+function retryAutocomplete(
+  mode: ReturnType<typeof resolveAutocompleteMode>,
+  commands: () => void,
+  files: () => unknown,
+) {
+  if (mode === "command") commands();
+  else void files();
+}
+
 export function useAgentAutocomplete(input: UseAgentAutocompleteInput): AgentAutocompleteResult {
   const { t } = useTranslation();
   const {
@@ -601,15 +616,11 @@ export function useAgentAutocomplete(input: UseAgentAutocompleteInput): AgentAut
     t,
   });
 
-  const loadingText =
-    mode === "file"
-      ? t("agentAutocomplete.searchingWorkspace")
-      : t("agentAutocomplete.loadingCommands");
+  const loadingText = t(autocompleteLoadingKey(mode));
   const emptyText = resolveAutocompleteEmptyText({ mode, draft, t });
 
   const retry = useCallback(() => {
-    if (mode === "command") retryCommands();
-    else void fileSuggestionsQuery.refetch();
+    retryAutocomplete(mode, retryCommands, fileSuggestionsQuery.refetch);
   }, [fileSuggestionsQuery, mode, retryCommands]);
   const status = useMemo<AutocompleteStatus | null>(() => {
     if (options.length > 0) return null;

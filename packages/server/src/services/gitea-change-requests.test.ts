@@ -1399,6 +1399,7 @@ describe("Gitea-family ChangeRequestSource polling", () => {
         isRunning: () => false,
         subscribe: () => () => {},
         async dispatch(request) {
+          if (!request.admit()) throw new Error("Change-request batch was withdrawn");
           turns.push({ recipientId: request.recipientId, prompt: String(request.prompt) });
           return "turn_started";
         },

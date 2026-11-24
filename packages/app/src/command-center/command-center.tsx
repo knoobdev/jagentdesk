@@ -1012,6 +1012,12 @@ export function CommandCenter() {
       : {}),
     scrollEventThrottle: 16,
   };
+  const handleInputKeyPress = useCallback(
+    (event: { nativeEvent: { key: string } }) => {
+      if (event.nativeEvent.key === "Backspace") state.key({ key: "Backspace" });
+    },
+    [state],
+  );
   const submit = useCallback(() => state.key({ key: "Enter" }), [state]);
   const handleOverlayKeyDown = useCallback(
     (event: KeyboardInputEvent) => {
@@ -1022,10 +1028,11 @@ export function CommandCenter() {
     [state],
   );
   const setOverlayScope = useOverlayRegistration({
-    keys: ["Escape", "Enter", "ArrowUp", "ArrowDown"],
+    keys: ["Escape", "Enter", "ArrowUp", "ArrowDown", "Tab"],
     active: state.open,
     layer: modalLayer,
     onKeyDown: handleOverlayKeyDown,
+    manageFocus: false,
   });
 
   const tabOptions = useMemo<SegmentedControlOption<CommandCenterTab>[]>(
@@ -1070,6 +1077,7 @@ export function CommandCenter() {
             initialValue={state.query}
             variant="bottom-sheet"
             onChangeText={state.setQuery}
+            onKeyPress={handleInputKeyPress}
             onSubmitEditing={submit}
             placeholder={t(placeholderKey(state.tab, state.tabs))}
             style={[styles.input, styles.growingInput]}
@@ -1101,6 +1109,7 @@ export function CommandCenter() {
                 ref={state.inputRef}
                 initialValue={state.query}
                 onChangeText={state.setQuery}
+                onKeyPress={handleInputKeyPress}
                 placeholder={t(placeholderKey(state.tab, state.tabs))}
                 style={[styles.input, styles.growingInput]}
                 autoCapitalize="none"

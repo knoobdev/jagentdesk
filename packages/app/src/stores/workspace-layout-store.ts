@@ -270,6 +270,7 @@ export function createWorkspaceLayoutStore(
       WorkspaceLayoutStore,
       | "layoutByWorkspace"
       | "splitSizesByWorkspace"
+      | "panelStateByWorkspace"
       | "explorerPaneIdByWorkspace"
       | "acknowledgedPullRequestByWorkspace"
     >;
@@ -279,6 +280,7 @@ export function createWorkspaceLayoutStore(
       WorkspaceLayoutStore,
       | "layoutByWorkspace"
       | "splitSizesByWorkspace"
+      | "panelStateByWorkspace"
       | "explorerPaneIdByWorkspace"
       | "acknowledgedPullRequestByWorkspace"
     >
@@ -295,8 +297,14 @@ export function createWorkspaceLayoutStore(
     },
     setItem: async (name, value) => {
       if (accepted?.state === value.state && accepted.version === value.version) return;
-      await jsonStorage.setItem(name, value);
+      const previous = accepted;
       accepted = value;
+      try {
+        await jsonStorage.setItem(name, value);
+      } catch (error) {
+        if (accepted === value) accepted = previous;
+        throw error;
+      }
     },
   };
   return create<WorkspaceLayoutStore>()(
@@ -1292,6 +1300,7 @@ export function createWorkspaceLayoutStore(
           if (
             previousProjection &&
             previousProjection.source.layoutByWorkspace === state.layoutByWorkspace &&
+            previousProjection.source.panelStateByWorkspace === state.panelStateByWorkspace &&
             previousProjection.source.splitSizesByWorkspace === state.splitSizesByWorkspace &&
             previousProjection.source.explorerPaneIdByWorkspace ===
               state.explorerPaneIdByWorkspace &&

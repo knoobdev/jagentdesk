@@ -1984,13 +1984,6 @@ function DesktopWorkspaceChrome({
     row
   );
 }
-function buildWorkspaceTerminalScopeKey(serverId: string, workspaceId: string): string | null {
-  if (!serverId || !workspaceId) {
-    return null;
-  }
-  return `${serverId}:${workspaceId}`;
-}
-
 interface WorkspaceTerminalTabActionsInput {
   persistenceKey: string | null;
   focusWorkspacePane: (workspaceKey: string, paneId: string) => void;

@@ -53,6 +53,7 @@ function createHarness(
       return () => listeners.delete(listener);
     },
     async dispatch(request) {
+      if (!request.admit()) throw new Error("Change-request batch was withdrawn");
       turns.push({ recipientId: request.recipientId, prompt: String(request.prompt) });
       return "turn_started";
     },
@@ -180,7 +181,7 @@ test("lists and stops each agent's subscription through the background work regi
 });
 
 test.each([false, true])(
-  "shares a steered child report when unsubscribe is %s",
+  "shares a queued child report after the recipient becomes idle when unsubscribe is %s",
   async (unsubscribe) => {
     vi.useFakeTimers();
     const home = await createTestHome();
@@ -206,6 +207,10 @@ test.each([false, true])(
           removed: true,
         });
       await vi.advanceTimersByTimeAsync(2_000);
+      expect(h.turns).toEqual([]);
+      expect(report.activeTurnBehavior).toBe("queue");
+      h.idle("parent");
+      await vi.advanceTimersByTimeAsync(0);
       await report.dispatched;
       await dispatches;
       expect(h.turns).toHaveLength(1);

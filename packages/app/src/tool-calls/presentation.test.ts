@@ -115,6 +115,7 @@ describe("tool-call presentation", () => {
     });
     expect(presentation).toMatchObject({
       displayName,
+      summary: "Worker",
       canOpenDetails: true,
       detail: { type: "plain_text", text: "From agent: worker\n\nReview <changes> & report." },
     });
@@ -122,13 +123,13 @@ describe("tool-call presentation", () => {
 });
 
 it.each([
-  ["message", "Message received"],
-  ["finished", "Agent finished"],
-  ["errored", "Agent errored"],
-  ["permission-required", "Agent needs permission"],
-  ["closed", "Agent closed"],
+  ["message", "Message from QA messenger"],
+  ["finished", "QA messenger finished"],
+  ["errored", "QA messenger errored"],
+  ["permission-required", "QA messenger needs permission"],
+  ["closed", "QA messenger closed"],
 ] as const)(
-  "presents %s with a fixed label, the sender as context, and the JAgentDesk icon",
+  "presents %s with its sender heading and context, and the JAgentDesk icon",
   (event, heading) => {
     const presentation = buildToolCallPresentation({
       toolName: "internal_name_should_not_be_visible",
@@ -160,7 +161,7 @@ it("uses an opaque sender ID when no title is available", () => {
     agentMessage: { event: "message", sender: { id: "remote::worker" }, text: "Hello" },
     resolveIcon: fakeResolveIcon,
   });
-  expect(presentation.displayName).toBe("Message received");
+  expect(presentation.displayName).toBe("Message from remote::worker");
   expect(presentation.summary).toBe("remote::worker");
 });
 

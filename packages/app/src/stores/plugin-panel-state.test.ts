@@ -25,6 +25,11 @@ it("restores plugin tab state after reload and advances the revision on repeated
   } as const;
   const tabId = first.getState().openTabFocused("host:workspace", target)!;
   first.getState().setTabState("host:workspace", tabId, { draft: "unsaved panel content" });
+  const stateOnlyReload = createWorkspaceLayoutStore(undefined, storage);
+  await stateOnlyReload.persist.rehydrate();
+  expect(stateOnlyReload.getState().panelStateByWorkspace["host:workspace"]![tabId]).toEqual({
+    draft: "unsaved panel content",
+  });
   const revision = first.getState().panelRevisionByWorkspace["host:workspace"]![tabId]!;
   expect(first.getState().openTabFocused("host:workspace", target)).toBe(tabId);
   expect(first.getState().panelRevisionByWorkspace["host:workspace"]![tabId]).toBe(revision + 1);

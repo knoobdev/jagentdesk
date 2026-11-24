@@ -479,13 +479,7 @@ export class TerminalEmulatorRuntime {
     if (key === "v") {
       if (clipboardAvailable) {
         event.preventDefault();
-        void this.clipboard
-          .readText()
-          .then((text) => {
-            if (text) terminal.paste(text);
-            return undefined;
-          })
-          .catch(() => undefined);
+        this.pasteClipboard(terminal);
       }
       return true;
     }

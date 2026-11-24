@@ -15,10 +15,7 @@ import { FadeIn, FadeOut } from "react-native-reanimated";
 import { StyleSheet } from "react-native-unistyles";
 import { Portal } from "@gorhom/portal";
 import { useBottomSheetModalInternal } from "@gorhom/bottom-sheet";
-import {
-  OverlayLayerProvider,
-  useOverlayLayer,
-} from "@/lib/overlay-root";
+import { OverlayLayerProvider, useOverlayLayer } from "@/lib/overlay-root";
 import { useOverlayRegistration, type KeyboardInputEvent } from "@/keyboard";
 import { FloatingSurface } from "@/components/ui/floating";
 import { isWeb } from "@/constants/platform";
@@ -136,7 +133,7 @@ function WebHoverCard({
         return true;
       } else if (
         focusInside() &&
-        event.target === trigger &&
+        document.activeElement === trigger &&
         ["ArrowDown", "Enter", " "].includes(event.key)
       ) {
         event.preventDefault();
@@ -199,7 +196,7 @@ function WebHoverCard({
         scheduleClose();
       }
     };
-    const activateClosedTrigger = (event: KeyboardInputEvent) => {
+    const activateClosedTrigger = (event: KeyboardEvent) => {
       if (
         !open &&
         !event.defaultPrevented &&

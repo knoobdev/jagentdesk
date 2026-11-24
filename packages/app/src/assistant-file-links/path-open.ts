@@ -1,3 +1,4 @@
+import { resolveMissingNestedRelativeFile, type GetDirectorySuggestions } from "./resolver";
 import { normalizeInlinePathTarget, type InlinePathTarget } from "./parse";
 import {
   normalizeWorkspaceFileLocation,
@@ -50,7 +51,9 @@ export async function resolveInlinePathOpen(input: PathOpenInput): Promise<PathO
 
 export function createInlinePathOpener(input: {
   workspaceRoot: string;
-  client: PathOpenInput["client"];
+  client:
+    | (NonNullable<PathOpenInput["client"]> & { getDirectorySuggestions?: GetDirectorySuggestions })
+    | null;
   openFile: (location: WorkspaceFileLocation, disposition: OpenFileDisposition) => void;
   openDirectory: (path: string) => void;
   openOutsideDirectory: (path: string) => void;
@@ -59,6 +62,14 @@ export function createInlinePathOpener(input: {
   return {
     async open(target: InlinePathTarget, disposition: OpenFileDisposition) {
       const ownGeneration = ++generation;
+      if (input.client?.getDirectorySuggestions) {
+        target = await resolveMissingNestedRelativeFile({
+          target,
+          workspaceRoot: input.workspaceRoot,
+          getDirectorySuggestions: input.client.getDirectorySuggestions.bind(input.client),
+        });
+        if (ownGeneration !== generation) return;
+      }
       const normalized = normalizeInlinePathTarget(target.path, input.workspaceRoot);
       if (!normalized) return;
       const destination = await resolveInlinePathOpen({

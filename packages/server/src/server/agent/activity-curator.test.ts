@@ -95,7 +95,7 @@ describe("curateAgentActivity", () => {
     ];
 
     expect(curateAgentActivity(timeline)).toBe(
-      "[Message received] CI lead\nTake ownership.\nRead the handoff.\n[Agent finished] agt_child\nChild is done.",
+      "[Message from CI lead] CI lead\nTake ownership.\nRead the handoff.\n[agt_child finished] agt_child\nChild is done.",
     );
   });
 

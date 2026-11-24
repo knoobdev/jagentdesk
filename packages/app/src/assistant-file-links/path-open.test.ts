@@ -130,3 +130,29 @@ it("sends folders outside the workspace away from the workspace Files panel", as
   expect(outsideFolders).toEqual(["~/Downloads/contracts", "/tmp/reports"]);
   expect(workspaceFolders).toEqual(["docs"]);
 });
+
+it("resolves a nested relative suffix before opening a file and preserves its line", async () => {
+  const { createInlinePathOpener } = await import("./path-open");
+  const opened: unknown[] = [];
+  const lookups: string[] = [];
+  const opener = createInlinePathOpener({
+    workspaceRoot: "/repo",
+    client: {
+      listDirectory: async () => {
+        throw new Error("Not a directory");
+      },
+      getDirectorySuggestions: async ({ query }) => {
+        lookups.push(query);
+        return { entries: [{ path: "project/schema/x.md", kind: "file" }], error: null };
+      },
+    },
+    openFile: (location, disposition) => opened.push({ location, disposition }),
+    openDirectory: (directory) => opened.push(directory),
+    openOutsideDirectory: (directory) => opened.push(directory),
+  });
+  await opener.open({ raw: "schema/x.md", path: "/repo/schema/x.md", lineStart: 12 }, "side");
+  expect(lookups).toEqual(["schema/x.md"]);
+  expect(opened).toEqual([
+    { location: { path: "project/schema/x.md", lineStart: 12 }, disposition: "side" },
+  ]);
+});

@@ -1070,6 +1070,10 @@ test("default zsh terminal does not eagerly flush full state during repeat burst
   await expectRepeatCadenceForTerminal({
     cwd: process.cwd(),
     name: "default-zsh-repeat-cadence",
+    // Personal prompt hooks can spawn git and other tools on every Enter. Keep the real
+    // default shell and PTY, with a fixed prompt so this measures terminal transport cadence.
+    setupInput:
+      "precmd_functions=(); preexec_functions=(); unset -f precmd preexec 2>/dev/null; unset PROMPT_COMMAND; PS1='cadence> '; RPROMPT=''\r",
   });
 }, 30000);
 

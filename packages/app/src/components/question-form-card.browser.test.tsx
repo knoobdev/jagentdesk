@@ -171,14 +171,14 @@ describe("QuestionFormCard explicit navigation", () => {
     expect(card.submittedAnswers()).toEqual({ Provider: "Codex", Fruits: "Apple" });
   });
 
-  it("selects an option when its description is clicked without submitting", () => {
+  it("keeps the description selectable without picking or submitting an option", () => {
     const card = mountCard({
       ...singleSelectQuestion,
       options: [{ label: "Codex", description: "Use this provider" }],
     });
     act(() => card.view.getByText("Use this provider").click());
     expect(card.view.getByRole("radio", { name: "Codex" }).getAttribute("aria-checked")).toBe(
-      "true",
+      "false",
     );
     expect(card.onRespond).not.toHaveBeenCalled();
   });

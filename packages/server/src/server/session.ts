@@ -2258,20 +2258,7 @@ export class Session {
         }
 
         if (event.type === "agent_removed") {
-          if (event.internal) return;
-          void this.agentUpdates
-            .removeAgent(event.agentId)
-            .then(() => {
-              if (event.workspaceId)
-                return this.emitWorkspaceUpdateForWorkspaceId(event.workspaceId);
-              return undefined;
-            })
-            .catch((error) => {
-              this.sessionLogger.error(
-                { err: error, agentId: event.agentId },
-                "Failed to emit agent removal",
-              );
-            });
+          this.forwardAgentRemoval(event);
           return;
         }
 
@@ -10654,6 +10641,26 @@ export class Session {
       return;
     }
     this.emitBinary(frame);
+  }
+
+  private forwardAgentRemoval(event: {
+    agentId: string;
+    workspaceId?: string;
+    internal: boolean;
+  }): void {
+    if (event.internal) return;
+    void this.agentUpdates
+      .removeAgent(event.agentId)
+      .then(() => {
+        if (event.workspaceId) return this.emitWorkspaceUpdateForWorkspaceId(event.workspaceId);
+        return undefined;
+      })
+      .catch((error) => {
+        this.sessionLogger.error(
+          { err: error, agentId: event.agentId },
+          "Failed to emit agent removal",
+        );
+      });
   }
 
   private emitForSource(msg: SessionOutboundMessage, source?: object): void {

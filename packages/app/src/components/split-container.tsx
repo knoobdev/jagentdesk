@@ -936,7 +936,9 @@ function SplitNodeView({
     );
   }
 
-  const groupSizes = previewSizes ?? (storedGroupSizes?.length === node.group.children.length ? storedGroupSizes : node.group.sizes);
+  const groupSizes =
+    previewSizes ??
+    (storedGroupSizes?.length === node.group.children.length ? storedGroupSizes : node.group.sizes);
 
   return (
     <View style={groupStyle} onLayout={measureContainer}>
