@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Agent } from "@/stores/session-store";
 import {
   buildWorkspaceTabSnapshot,
+  createWorkspaceAgentVisibilitySelector,
   deriveWorkspaceAgentVisibility,
   shouldPruneWorkspaceAgentTab,
   workspaceAgentVisibilityEqual,
@@ -495,4 +496,26 @@ describe("screen dock agents", () => {
     expect([...visibility.autoOpenAgentIds]).toEqual(["sim"]);
     expect([...visibility.activeAgentIds]).toEqual(["sim"]);
   });
+});
+
+it("reuses visibility through stream updates and preserves newly known dock agents", () => {
+  const agent = makeAgent({ id: "a", cwd: "/repo", workspaceId: WORKSPACE_ID });
+  const agents = new Map([[agent.id, agent]]);
+  const agentDetails = new Map<string, Agent>();
+  const select = createWorkspaceAgentVisibilitySelector({
+    serverId: "srv",
+    workspaceId: WORKSPACE_ID,
+  });
+  const before = select({ sessions: { srv: { agents, agentDetails } } });
+  expect(select({ sessions: { srv: { agents, agentDetails } } })).toBe(before);
+  expect(select({ sessions: { srv: { agents: new Map(agents), agentDetails } } })).toBe(before);
+  const dock = makeAgent({
+    id: "dock",
+    cwd: "/repo",
+    workspaceId: WORKSPACE_ID,
+    labels: { "jagentdesk-dock": "database" },
+  });
+  const after = select({ sessions: { srv: { agents, agentDetails: new Map([[dock.id, dock]]) } } });
+  expect(after.knownAgentIds).toEqual(new Set(["a", "dock"]));
+  expect(before.knownAgentIds).toEqual(new Set(["a"]));
 });
