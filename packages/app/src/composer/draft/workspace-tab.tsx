@@ -23,7 +23,6 @@ import { useCreateFlowStore } from "@/stores/create-flow-store";
 import type { Agent } from "@/stores/session-store";
 import { useWorkspaceFields } from "@/stores/session-store-hooks";
 import { useWorkspaceDraftSubmissionStore } from "@/stores/workspace-draft-submission-store";
-import { useAgentControlCommandCenterActions } from "@/command-center/agent-control-registration";
 import { encodeImages } from "@/utils/encode-images";
 import type { WorkspaceFileOpenRequest } from "@/workspace/file-open";
 import { shouldAutoFocusWorkspaceDraftComposer } from "@/screens/workspace/workspace-draft-pane-focus";
@@ -399,17 +398,6 @@ export function WorkspaceDraftAgentTab({
     [client, orchestrationConfig, composerState.workingDir, serverId, workspaceId],
   );
 
-  const draftProvider = composerState.selectedProvider;
-  const draftProviderDefinitions = composerState.providerDefinitions;
-  const draftThinkingOptions = composerState.availableThinkingOptions;
-  const draftSelectedThinkingId = composerState.selectedThinkingOptionId;
-  const draftSetThinkingOption = composerState.setThinkingOptionFromUser;
-  const draftModeOptions = composerState.modeOptions;
-  const draftSelectedMode = composerState.selectedMode;
-  const draftSetMode = composerState.setModeFromUser;
-  const draftFeatures = composerState.agentControls.features;
-  const draftOnSetFeature = composerState.agentControls.onSetFeature;
-
   const clearDraftInput = draftInput.clear;
   const setDraftText = draftInput.setText;
   const setDraftAttachments = draftInput.setAttachments;
@@ -557,36 +545,7 @@ export function WorkspaceDraftAgentTab({
     () => resolveTurnPresentation(TURN_LIVENESS_IDLE, pendingMessageSubmissions.length > 0),
     [pendingMessageSubmissions],
   );
-  useAgentControlCommandCenterActions({
-    sourceId: `draft:${serverId}:${tabId}`,
-    enabled: isPaneFocused && !isSubmitting,
-    controls: {
-      serverId,
-      ownerKey: tabId,
-      provider: draftProvider,
-      providerDefinitions: draftProviderDefinitions,
-      models: {
-        providers: composerState.modelSelectorProviders,
-        selectedProvider: draftProvider,
-        selectedModelId: composerState.effectiveModelId,
-        select: composerState.setProviderAndModelFromUser,
-      },
-      thinking: {
-        options: draftThinkingOptions,
-        selectedId: draftSelectedThinkingId,
-        select: draftSetThinkingOption,
-      },
-      modes: {
-        options: draftModeOptions,
-        selectedId: draftSelectedMode,
-        select: draftSetMode,
-      },
-      features: {
-        list: draftFeatures,
-        set: draftOnSetFeature,
-      },
-    },
-  });
+
   const isReadyForPendingAutoSubmit = Boolean(
     pendingAutoSubmit &&
     draftInput.isHydrated &&

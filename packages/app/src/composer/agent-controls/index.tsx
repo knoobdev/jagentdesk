@@ -2,6 +2,7 @@ import { AgentControlShortcutHint } from "./shortcut-hint";
 import {
   memo,
   useCallback,
+  useId,
   useEffect,
   useMemo,
   useRef,
@@ -69,6 +70,7 @@ import { readMeasuredWidth } from "@/hooks/use-container-width";
 import { useToast } from "@/contexts/toast-context";
 import { toErrorMessage } from "@/utils/error-messages";
 import { showProviderNoticeToast } from "@/utils/provider-notice-toast";
+import { useComposerKeyboardScope } from "@/composer/keyboard-scope";
 import { useAgentControlCommandCenterActions } from "@/command-center/agent-control-registration";
 import { isNative } from "@/constants/platform";
 import {
@@ -129,6 +131,7 @@ export interface DraftAgentControlsProps {
   onSelectMode: (modeId: string) => void;
   models: AgentModelDefinition[];
   selectedModel: string;
+  effectiveModelId?: string;
   onSelectModel: (modelId: string) => void;
   isModelLoading: boolean;
   modelSelectorProviders: ProviderSelectorProvider[];
@@ -1748,6 +1751,7 @@ export function DraftAgentControls({
   onSelectMode,
   models,
   selectedModel,
+  effectiveModelId,
   onSelectModel,
   isModelLoading: _isModelLoading,
   modelSelectorProviders,
@@ -1815,6 +1819,32 @@ export function DraftAgentControls({
         : null,
     [selectedProvider, providerDefinitions, modeOptions, selectedMode, onSelectMode, disabled],
   );
+
+  const ownerKey = useId();
+  const { isActiveComposer } = useComposerKeyboardScope();
+  useAgentControlCommandCenterActions({
+    sourceId: `draft:${modelSelectorServerId}:${ownerKey}`,
+    enabled: isActiveComposer && !disabled && modelSelectorServerId !== null,
+    controls: {
+      serverId: modelSelectorServerId ?? "",
+      ownerKey,
+      provider: selectedProvider,
+      providerDefinitions,
+      models: {
+        providers: modelSelectorProviders,
+        selectedProvider,
+        selectedModelId: effectiveModelId ?? selectedModel,
+        select: onSelectProviderAndModel,
+      },
+      thinking: {
+        options: thinkingOptions,
+        selectedId: selectedThinkingOptionId,
+        select: onSelectThinkingOption,
+      },
+      modes: { options: modeOptions, selectedId: selectedMode, select: onSelectMode },
+      features: { list: features, set: onSetFeature },
+    },
+  });
 
   return (
     <ControlledAgentControls

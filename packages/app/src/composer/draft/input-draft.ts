@@ -242,6 +242,7 @@ export function useAgentInputDraft(input: UseAgentInputDraftInput): AgentInputDr
       featureValues: draftFeatureValues,
       agentControls: buildDraftAgentControls({
         formState,
+        effectiveModelId,
         features: draftFeatures,
         onSetFeature: setDraftFeatureValue,
       }),
