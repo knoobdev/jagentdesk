@@ -64,7 +64,7 @@ import { type DroppedItem } from "@/components/file-drop/types";
 import { MessageInput, type MessageInputRef, type AttachmentMenuItem } from "./input/input";
 import { type ImageAttachment, type MessagePayload, type TextReplacement } from "./types";
 import { ICON_SIZE, type Theme } from "@/styles/theme";
-import { type DraftCommandTarget } from "@/agent-commands";
+import { type DraftCommandTarget, useAgentCommandEditingSession } from "@/agent-commands";
 import { encodeImages } from "@/utils/encode-images";
 import { focusWithRetries } from "@/utils/web-focus";
 import {
@@ -175,7 +175,7 @@ import {
   toolbarSlot,
 } from "@/components/ui/control-geometry";
 import { COMPOSER_TOOLBAR_SHAPES } from "@/composer/input/toolbar-rails";
-import { usePanelStore } from "@/stores/panel-store";
+import { usePanelStore, type MobilePanelView } from "@/stores/panel-store";
 import { usePluginClientSlashCommands } from "@/plugins/client-slash-commands";
 import {
   executePluginClientSlashCommand,
@@ -190,6 +190,11 @@ import { ComposerInputProvider, type ComposerInput } from "@/composer/session";
 import { insertAtSelection } from "@/composer/insert-text";
 import { useComposerForgeAutoAttach } from "./forge-auto-attach";
 import { normalizeNativePastedImages, type NativePastedFile } from "./native-pasted-image";
+import { usePaneHost } from "@/panels/pane-context";
+import { OverlayDismissalScope, useDismissOverlays } from "@/components/ui/overlay-dismissal";
+import { type PaneHost } from "@/panels/panel-manifest";
+import { type ComposerFocusOptions } from "@/composer/model";
+import { useRetainedPanelActive } from "@/components/retained-panel";
 
 const composerImageAttachmentPersister: Pick<
   AttachmentPersister,
@@ -1234,6 +1239,24 @@ function ComposerVoiceModeButton({
   );
 }
 
+// A plugin modal can refuse to close; the request then tries the cursor anyway and settles.
+const OVERLAY_CLOSE_TIMEOUT_MS = 1_000;
+
+function closedWithin(closed: Promise<void>, timeoutMs: number): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<void>((resolve) => {
+    timeout = setTimeout(resolve, timeoutMs);
+  });
+  return Promise.race([closed, expired]).finally(() => clearTimeout(timeout));
+}
+
+/** Only the agent list can cover a screen outside a workspace: the Explorer lives in the workspace. */
+function isMobilePanelCoveringHost(target: MobilePanelView, host: PaneHost | null): boolean {
+  if (target === "agent-list") return true;
+  if (host === null) return false;
+  return target !== (host === "explorer" ? "file-explorer" : "agent");
+}
+
 export function Composer({ isPaneFocused, ...props }: ComposerProps) {
   // A compact overlay panel (agent list, explorer) covers the pane without taking its
   // focus. The composer gives up input from the moment the user asks for the panel,
@@ -1241,16 +1264,21 @@ export function Composer({ isPaneFocused, ...props }: ComposerProps) {
   // Pane focus stays put, so the keyboard the panel dismisses is a blur in the
   // user's own pane: closing the panel does not bring focus back.
   const isCompact = useIsCompactFormFactor();
-  const overlayPanelRequested = usePanelStore((state) => state.mobilePanel.target !== "agent");
+  const paneHost = usePaneHost();
+  const overlayPanelRequested = usePanelStore((state) =>
+    isMobilePanelCoveringHost(state.mobilePanel.target, paneHost),
+  );
   const coveredByOverlayPanel = isCompact && overlayPanelRequested;
   return (
     <ComposerKeyboardScopeProvider
       isPaneFocused={isPaneFocused}
       isActiveComposer={isPaneFocused && !coveredByOverlayPanel}
     >
-      <RenderProfile id="ComposerContent">
-        <ComposerContent {...props} />
-      </RenderProfile>
+      <OverlayDismissalScope>
+        <RenderProfile id="ComposerContent">
+          <ComposerContent {...props} />
+        </RenderProfile>
+      </OverlayDismissalScope>
     </ComposerKeyboardScopeProvider>
   );
 }
@@ -1407,7 +1435,11 @@ function ComposerContentImpl({
   const nextPendingFileId = useRef(0);
   const isUploadingFile = pendingFiles.length > 0;
   const [pendingNativeImagePastes, setPendingNativeImagePastes] = useState(0);
-  const editingSession = useComposerEditingSession(inputMode, providedEditingSession);
+  const commandEditingSession = useAgentCommandEditingSession();
+  const editingSession = useComposerEditingSession(
+    inputMode,
+    providedEditingSession ?? commandEditingSession ?? undefined,
+  );
   const isFullscreen = useComposerFullscreen(editingSession);
   const [sendError, setSendError] = useState<string | null>(null);
   const [isMessageInputFocused, setIsMessageInputFocused] = useState(false);
@@ -1458,6 +1490,52 @@ function ComposerContentImpl({
     [onChangeText, textSource],
   );
   const isInputLive = useIsInputLive(messageInputRef);
+  const isPanelActive = useRetainedPanelActive();
+  const { isActiveComposer } = useComposerKeyboardScope();
+  const inputRevealed = isPanelActive && isActiveComposer;
+  const isActiveComposerRef = useRef(isActiveComposer);
+  isActiveComposerRef.current = isActiveComposer;
+  const isInputRevealed = useCallback(
+    () => isInputLive() && isActiveComposerRef.current,
+    [isInputLive],
+  );
+  const dismissOverlays = useDismissOverlays();
+  const latestFocusRef = useRef<Promise<void> | null>(null);
+  const takeInputFocus = useCallback(
+    (options?: ComposerFocusOptions) => {
+      const isFocused = () => messageInputRef.current?.isFocused() ?? false;
+      const place = () => {
+        messageInputRef.current?.focus();
+        if (options?.selection) messageInputRef.current?.setSelection(options.selection);
+      };
+      // The sheets, menus and modals this composer opened would otherwise cover the cursor, or take
+      // focus back as they close.
+      const request: Promise<void> = closedWithin(dismissOverlays(), OVERLAY_CLOSE_TIMEOUT_MS).then(
+        () => {
+          // A newer request decides where the cursor goes, and this one ends with it.
+          const latest = latestFocusRef.current;
+          if (latest && latest !== request) return latest;
+          if (isNative) {
+            place();
+            // A native input refuses focus without saying so, such as while dictation holds it.
+            if (!isFocused()) throw new Error("The composer input could not take focus.");
+            return;
+          }
+          return new Promise<void>((resolve, reject) => {
+            focusWithRetries({
+              focus: place,
+              isFocused,
+              onSuccess: resolve,
+              onTimeout: () => reject(new Error("The composer input could not take focus.")),
+            });
+          });
+        },
+      );
+      latestFocusRef.current = request;
+      return request;
+    },
+    [dismissOverlays],
+  );
   const isComposerLockedRef = useRef(isComposerLocked);
   isComposerLockedRef.current = isComposerLocked;
   const composerInput = useMemo<ComposerInput>(
@@ -1465,6 +1543,9 @@ function ComposerContentImpl({
       locked: isComposerLocked,
       isLocked: () => isComposerLockedRef.current,
       isLive: isInputLive,
+      revealed: inputRevealed,
+      isRevealed: isInputRevealed,
+      focus: takeInputFocus,
       textSource,
       setText: replaceUserInput,
       insertText: insertUserInput,
@@ -1473,11 +1554,14 @@ function ComposerContentImpl({
     }),
     [
       attachments,
+      inputRevealed,
       insertUserInput,
       isComposerLocked,
       isInputLive,
+      isInputRevealed,
       replaceUserInput,
       setSelectedAttachments,
+      takeInputFocus,
       textSource,
     ],
   );

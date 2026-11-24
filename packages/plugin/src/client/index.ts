@@ -69,6 +69,7 @@ export { useAgent, useWorkspace } from "./client-state.js";
 export type {
   PluginComposer,
   PluginComposerAttachment,
+  PluginComposerFocusOptions,
   PluginComposerItemContribution,
   PluginComposerItemProps,
   PluginComposerSelector,

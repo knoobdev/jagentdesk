@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { ActiveWorkspaceSelection } from "@/stores/last-workspace-selection";
-import type { WorkspaceTabTarget } from "@/workspace-tabs/model";
+import { type ActiveWorkspaceSelection } from "@/stores/last-workspace-selection";
+import { type WorkspaceTabTarget } from "@/workspace-tabs/model";
 import {
   navigateToLastWorkspace,
   navigateToWorkspace,
@@ -8,8 +8,7 @@ import {
   type NavigateToLastWorkspaceDeps,
   type NavigateToWorkspaceDeps,
 } from "./navigation";
-import type { Agent } from "@/stores/session-store";
-import type { WorkspaceDescriptor } from "@/stores/session-store";
+import { type Agent, type WorkspaceDescriptor } from "@/stores/session-store";
 
 interface RecordedTab {
   workspaceKey: string;
@@ -129,6 +128,22 @@ describe("workspace navigation", () => {
         target: { kind: "draft", draftId: "draft-1" },
       },
     ]);
+  });
+
+  it("carries a request for a tab through a deferred open", () => {
+    const { deps, deferredTabs } = createFakeDeps({ getSessionWorkspaces: () => new Map() });
+
+    navigateToWorkspace(
+      {
+        serverId: "server-1",
+        workspaceId: "workspace-a",
+        target: { kind: "agent", agentId: "agent-1" },
+        asTab: true,
+      },
+      deps,
+    );
+
+    expect(deferredTabs[0]).toMatchObject({ asTab: true });
   });
 
   it("defers an agent tab until a missing workspace is recovered", () => {

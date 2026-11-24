@@ -10,7 +10,7 @@ import {
 } from "@/hooks/use-agent-screen-state-machine";
 import { KeyboardTranslateView, useKeyboardShiftStyle } from "@/keyboard/shift";
 import { AgentCommandsProvider } from "@/agent-commands";
-import { ComposerEditingSession } from "@/composer/editing-session";
+import { ComposerEditingSession, useComposerFullscreen } from "@/composer/editing-session";
 import { ParentAgentCallout, ParentAgentPill, useParentAgentId } from "@/subagents/parent";
 import { useAgentDescriptor as useAgentPanelDescriptor } from "@/agent-presentation";
 import { useAgentStreamTail } from "@/agent-stream/use-agent-stream-tail";
@@ -120,6 +120,7 @@ import { applyLegacyDaemonWorkspaceOwnership } from "@/workspace/legacy-daemon-w
 import { type WorkspaceFileOpenRequest } from "@/workspace/file-open";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
 import { buildDraftAgentSetup, type ClientSlashCommand } from "@/client-slash-commands";
+import { OverlayDismissalScope } from "@/components/ui/overlay-dismissal";
 
 interface ChatAgentStateShape {
   serverId: string | null;
@@ -1240,8 +1241,9 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
     </ReanimatedAnimated.View>
   );
   const contentContainer = <View style={styles.contentContainer}>{streamContent}</View>;
+  const composerFullscreen = useComposerFullscreen(composerEditingSession);
   const dock = (
-    <ComposerDock>
+    <ComposerDock fullscreen={composerFullscreen}>
       <View style={styles.contentContainer}>
         {contentContainer}
 
@@ -1266,19 +1268,21 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
     </ComposerDock>
   );
   const chatSurface = (
-    <FileDropZone style={styles.container} disabled={isArchivingCurrentAgent}>
-      {isGuestShareMode() ? null : (
-        <View style={styles.shareHeader}>
-          <BuiltinPluginGate serverId={serverId} id="activity-graph">
-            <ActivityGraphToggle agentId={agentId} serverId={serverId} />
-          </BuiltinPluginGate>
-          <BuiltinPluginGate serverId={serverId} id="session-share">
-            <SessionShareControl agentId={agentId} serverId={serverId} />
-          </BuiltinPluginGate>
-        </View>
-      )}
-      {dock}
-    </FileDropZone>
+    <OverlayDismissalScope>
+      <FileDropZone style={styles.container} disabled={isArchivingCurrentAgent}>
+        {isGuestShareMode() ? null : (
+          <View style={styles.shareHeader}>
+            <BuiltinPluginGate serverId={serverId} id="activity-graph">
+              <ActivityGraphToggle agentId={agentId} serverId={serverId} />
+            </BuiltinPluginGate>
+            <BuiltinPluginGate serverId={serverId} id="session-share">
+              <SessionShareControl agentId={agentId} serverId={serverId} />
+            </BuiltinPluginGate>
+          </View>
+        )}
+        {dock}
+      </FileDropZone>
+    </OverlayDismissalScope>
   );
   const archivingOverlay = isArchivingCurrentAgent ? (
     <View style={styles.archivingOverlay} testID="agent-archiving-overlay">

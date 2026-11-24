@@ -69,6 +69,7 @@ import { FloatingSurface } from "@/components/ui/floating";
 import { useDismissKeyboardOnOpen } from "@/components/ui/keyboard-dismiss";
 import { getOverlayRoot, OverlayLayerProvider, useOverlayLayer } from "@/lib/overlay-root";
 import { buildDesktopFrameStyle } from "./combobox-frame-style";
+import { useDismissibleOverlay } from "@/components/ui/overlay-dismissal";
 
 export { buildDesktopFrameStyle } from "./combobox-frame-style";
 
@@ -1397,6 +1398,7 @@ export function Combobox({
   useEffect(() => {
     if (!active && isOpen) handleClose();
   }, [active, isOpen, handleClose]);
+  useDismissibleOverlay(isOpen, handleClose);
 
   useResetSearchOnOpen(isOpen, setSearchQueryWithCallback, bumpSearchResetKey);
 

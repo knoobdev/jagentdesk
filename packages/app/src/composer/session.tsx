@@ -2,6 +2,7 @@ import { createContext, useContext, type ReactNode } from "react";
 import { type JsonValue, type ProviderOptions } from "@jagentdesk/protocol/agent-types";
 import { type UserComposerAttachment } from "@/attachments/types";
 import { type ComposerTextSource } from "@/composer/text-source";
+import { type ComposerFocusOptions } from "@/composer/model";
 
 /**
  * The text and attachments of the composer a control sits in. `Composer` provides it, so a
@@ -17,6 +18,14 @@ export interface ComposerInput {
    * cannot take the cursor-aware commands below.
    */
   isLive: () => boolean;
+  /**
+   * The input is showing and nothing stands between it and the keyboard: its pane is focused and
+   * no compact overlay panel covers it. A new value of `revealed` is a new `ComposerInput`, which
+   * is how a request waiting for the input to come on screen hears about it.
+   */
+  revealed: boolean;
+  isRevealed: () => boolean;
+  focus: (options?: ComposerFocusOptions) => Promise<void>;
   textSource: ComposerTextSource;
   setText: (text: string) => void;
   /** Inserts at the cursor, replacing the selection. */

@@ -1,7 +1,14 @@
 import { type KeyboardInputEvent, useOverlayRegistration } from "@/keyboard";
-
-import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode, Ref } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type Ref,
+} from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -13,8 +20,10 @@ import {
   TextInput,
   View,
   type DimensionValue,
+  type StyleProp,
+  type TextInputProps,
+  type ViewStyle,
 } from "react-native";
-import type { StyleProp, TextInputProps, ViewStyle } from "react-native";
 import { StyleSheet, useUnistyles, withUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { getOverlayRoot, OverlayLayerProvider, useGlobalOverlayLayer } from "../lib/overlay-root";
@@ -37,6 +46,7 @@ import { getCompactSheetSafeAreaPadding } from "@/components/adaptive-modal-shee
 import { createControlGeometry } from "@/components/ui/control-geometry";
 import { isNative, isWeb } from "@/constants/platform";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useDismissibleOverlay } from "@/components/ui/overlay-dismissal";
 
 // Horizontal indent token shared by the sheet header (title, back arrow,
 // leading icon, search input icon) and any row primitive rendered inside the
@@ -324,6 +334,7 @@ const ThemedBottomSheetTextInput = withUnistyles(BottomSheetTextInput, (theme) =
 export const AdaptiveTextInput = forwardRef<TextInput, AdaptiveTextInputProps>(
   function AdaptiveTextInputInner(props, ref) {
     const isMobile = useIsCompactFormFactor();
+    useDismissibleOverlay(visible && !isMobile, onClose);
     // BottomSheetTextInput calls useBottomSheetInternal(), which throws when it
     // renders outside a BottomSheet (e.g. a plain settings page). Detect the
     // context safely (returns null outside a sheet) and only use the sheet-aware

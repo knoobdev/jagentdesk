@@ -4,7 +4,7 @@ import {
   type AgentNavTarget,
   type NavigateToAgentDeps,
 } from "@/utils/navigate-to-agent/resolve";
-import type { NavigateToWorkspaceInput } from "@/stores/navigation-active-workspace-store";
+import { type NavigateToWorkspaceInput } from "@/stores/navigation-active-workspace-store";
 
 const SERVER_ID = "server-1";
 const WORKSPACE_ID = "workspace-1";
@@ -40,6 +40,14 @@ function createFakeNavigators(target: AgentNavTarget): {
 }
 
 describe("resolveNavigateToAgent", () => {
+  it("carries a request for a tab to the workspace navigation", () => {
+    const { deps, tabNavigations } = createFakeNavigators({ agentWorkspaceId: WORKSPACE_ID });
+
+    resolveNavigateToAgent({ serverId: SERVER_ID, agentId: AGENT_ID, asTab: true }, deps);
+
+    expect(tabNavigations[0]).toMatchObject({ asTab: true });
+  });
+
   it("opens the workspace tab carried by the agent's workspaceId", () => {
     const { deps, hostNavigations, tabNavigations } = createFakeNavigators({
       agentWorkspaceId: WORKSPACE_ID,

@@ -137,6 +137,7 @@ import {
 import { captureWorkspaceDraftCleanup } from "./new-workspace/background-handoff";
 import { useNewWorkspaceScreenPresence } from "./new-workspace/screen-presence";
 import { retriedAgentRequest } from "./new-workspace/retry-agent-request";
+import { useIsFocused } from "expo-router/react-navigation";
 
 function useIsNewWorkspaceDraftHandoffActive(input: {
   draftId: string | undefined;
@@ -920,6 +921,7 @@ export function NewWorkspaceScreen({
   const hostPickerAnchorRef = useRef<View | null>(null);
   const isDraftHandoffActive = useIsNewWorkspaceDraftHandoffActive({ draftId, selectedServerId });
   const isStillOnCreateScreen = useNewWorkspaceScreenPresence();
+  const isScreenFocused = useIsFocused();
 
   // Launch target: what the composer submits to (chat agent, or a terminal
   // profile). Mirrors useWorkspaceIsolation's pattern below: the derived
@@ -1555,7 +1557,7 @@ export function NewWorkspaceScreen({
       submitLabel={terminalSubmitLabel}
       agentId={draftKey}
       serverId={selectedServerId}
-      isPaneFocused={true}
+      isPaneFocused={isScreenFocused}
       onSubmitMessage={handleSubmitTerminalLaunch}
       allowEmptySubmit={true}
       submitButtonAccessibilityLabel={t("newWorkspace.launch.submit")}
@@ -1579,7 +1581,7 @@ export function NewWorkspaceScreen({
       editingSession={composerEditing.chat}
       agentId={draftKey}
       serverId={selectedServerId}
-      isPaneFocused={true}
+      isPaneFocused={isScreenFocused}
       onSubmitMessage={handleSubmitNewWorkspace}
       allowEmptySubmit={true}
       submitButtonAccessibilityLabel={t("newWorkspace.create")}

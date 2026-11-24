@@ -1,4 +1,4 @@
-import type { Agent, WorkspaceDescriptor } from "@/stores/session-store";
+import { type Agent, type WorkspaceDescriptor } from "@/stores/session-store";
 import {
   buildHostWorkspaceOpenRoute,
   buildHostWorkspaceRoute,
@@ -6,8 +6,8 @@ import {
   parseHostWorkspaceRouteFromPathname,
 } from "@/utils/host-routes";
 import { resolveWorkspaceMapKeyByIdentity } from "@/utils/workspace-identity";
-import type { ActiveWorkspaceSelection } from "@/stores/last-workspace-selection";
-import type { WorkspaceTabTarget } from "@/workspace-tabs/model";
+import { type ActiveWorkspaceSelection } from "@/stores/last-workspace-selection";
+import { type WorkspaceTabTarget } from "@/workspace-tabs/model";
 import { prepareWorkspaceTab, type PrepareWorkspaceTabDeps } from "@/utils/prepare-workspace-tab";
 
 export interface RouteSelectionInput {
@@ -24,6 +24,8 @@ export interface NavigateToWorkspaceInput {
   target?: WorkspaceTabTarget;
   pin?: boolean;
   openIntent?: string;
+  placement?: WorkspaceTabPlacement;
+  asTab?: boolean;
 }
 
 export interface NavigateToWorkspaceDeps extends PrepareWorkspaceTabDeps {

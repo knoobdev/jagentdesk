@@ -150,6 +150,164 @@ describe("plugin example import boundaries", () => {
   });
 });
 
+describe("plugin panel SDK boundary", () => {
+  it("accepts uniform params and persisted tab state alongside 0.12 panels", () => {
+    expect(
+      typeErrors(`
+      import { type PluginClientContext, type PluginFilePanelProps, type PluginWorkspacePanelProps, type PluginAgentPanelProps, type PluginTab, useTabState } from "@jagentdesk/plugin/client";
+      import { z } from "zod";
+      function FilePanel({ params, revision, tab, file }: PluginFilePanelProps) {
+        const [state, setState] = useTabState(tab, z.object({ view: z.enum(["preview", "source"]) }), { view: "preview" });
+        setState({ view: "source" });
+        tab.setState({ nested: [true, null, 3] });
+        // @ts-expect-error only JSON state crosses the host boundary
+        tab.setState(() => {});
+        // @ts-expect-error params belong to the opener
+        params.path = "other";
+        return null;
+      }
+      function OldWorkspace({ context, workspaceId }: PluginWorkspacePanelProps) { return null; }
+      function OldAgent({ context, workspaceId, agentId }: PluginAgentPanelProps) { return null; }
+      function Agent({ params }: PluginAgentPanelProps) { params.agentId.toUpperCase(); return null; }
+      function contribute(client: PluginClientContext) {
+        client.addWorkspacePanel({ id: "old-workspace", title: "Old", icon: "File", context: "workspace", Component: OldWorkspace });
+        client.addWorkspacePanel({ id: "old-agent", title: "Old", icon: "File", context: "agent", Component: OldAgent });
+        client.addWorkspacePanel({ id: "workspace", title: "Workspace", icon: "File", Component: OldWorkspace });
+        client.addAgentPanel({ id: "agent", title: "Agent", icon: "File", Component: Agent });
+      }
+    `),
+    ).toEqual([]);
+  });
+});
+
+describe("plugin composer SDK boundary", () => {
+  it("lets a composer item read and change the composer through typed commands and controls", () => {
+    expect(
+      typeErrors(`
+      import { useComposer, type PluginClientContext } from "@jagentdesk/plugin/client";
+      import { Action, Select, Toggle } from "@jagentdesk/plugin/client/ui";
+      function Item() {
+        const composer = useComposer();
+        const context: "agent" | "draft" | "new-workspace" = composer.context;
+        const provider: string | null = composer.agent.provider;
+        const flag: boolean = composer.agent.metadata.flag === true;
+        // @ts-expect-error reads are not writable
+        composer.agent.model = "other";
+        composer.setProvider("codex").then(() => composer.setModel("gpt"));
+        composer.setOptions({ effort: null });
+        composer.setMetadata({ flag: true, stale: null });
+        composer.insertText("text");
+        composer.focus({ selection: { start: 0, end: composer.prompt.length } }).then(() => composer.focus());
+        composer.addAttachment({ sourceId: "issues", item: { id: "1", identifier: "1", title: "t", url: "https://e.com", text: "t", resourceType: "issue" } });
+        // @ts-expect-error commands take JSON values
+        composer.setMetadata({ fn: () => {} });
+        return (
+          <>
+            <Toggle title="Flag" icon="Flag" value={flag} onValueChange={({ value }: { value: boolean }) => composer.setMetadata({ flag: value })} />
+            <Select title="Size" icon="Gauge" value="a" options={[{ value: "a", label: "A" }, { value: "b", label: "B" }]} onValueChange={({ value }: { value: "a" | "b" }) => {}} />
+            <Action title="Insert" icon="Plus" onPress={() => composer.setPrompt("")} />
+          </>
+        );
+      }
+      export default function contribute(client: PluginClientContext) {
+        client.addComposerItem({ id: "item", Component: Item });
+        return () => {};
+      }
+    `),
+    ).toEqual([]);
+  });
+});
+
+describe("plugin composers by reference SDK boundary", () => {
+  it("reaches a running agent's composer from any component and from every command context", () => {
+    expect(
+      typeErrors(`
+      import { useComposers, type PluginClientContext } from "@jagentdesk/plugin/client";
+      function Button() {
+        const [focused] = useComposers({ focused: true });
+        const byId = useComposers({ agentId: "agent-1" });
+        if (!focused) return null;
+        const first: string = byId[0]?.prompt ?? "";
+        focused.insertText("text");
+        focused.setMetadata({ flag: true });
+        // @ts-expect-error a selector names an agent or the focused agent
+        useComposers({ active: true });
+        // @ts-expect-error focused is true or absent
+        useComposers({ focused: false });
+        return null;
+      }
+      export default function contribute(client: PluginClientContext) {
+        client.addWorkspacePanel({ id: "panel", title: "P", icon: "File", context: "workspace", Component: Button });
+        client.addCommandCenterItem({
+          id: "mark",
+          title: "Mark",
+          icon: "Flag",
+          context: "agent",
+          async onSelect(context) {
+            for (const composer of context.composers({ agentId: context.agent.id })) {
+              await composer.setMetadata({ review: true });
+            }
+          },
+        });
+        client.addCommandCenterItem({
+          id: "global",
+          title: "Global",
+          icon: "Flag",
+          context: "global",
+          onSelect: ({ composers }) => composers({ focused: true })[0]?.insertText("x"),
+        });
+        return () => {};
+      }
+    `),
+    ).toEqual([]);
+  });
+});
+
+describe("plugin New workspace SDK boundary", () => {
+  it("lets a New workspace item read the setup and change it through typed commands and a Combobox", () => {
+    expect(
+      typeErrors(`
+      import { useNewWorkspace, type PluginClientContext } from "@jagentdesk/plugin/client";
+      import { Combobox } from "@jagentdesk/plugin/client/ui";
+      interface Issue { id: string; label: string; branch: string }
+      function Item() {
+        const newWorkspace = useNewWorkspace();
+        const isolation: "local" | "worktree" = newWorkspace.isolation;
+        const branch: string | null = newWorkspace.branch;
+        const project: string | undefined = newWorkspace.project?.name;
+        const host: string = newWorkspace.host.label;
+        const base = newWorkspace.baseRef;
+        if (base?.type === "branch") { const name: string = base.name; }
+        // @ts-expect-error project is read-only
+        newWorkspace.project = null;
+        // @ts-expect-error host is read-only
+        newWorkspace.setHost("other");
+        // @ts-expect-error metadata reads are not writable
+        newWorkspace.metadata.key = "x";
+        newWorkspace.setIsolation("worktree").then(() => newWorkspace.setBaseRef({ type: "branch", name: "main" }));
+        newWorkspace.setBranch(null);
+        newWorkspace.setMetadata({ issue: "1", stale: null });
+        // @ts-expect-error commands take JSON values
+        newWorkspace.setMetadata({ fn: () => {} });
+        return (
+          <Combobox<Issue>
+            title="Issue"
+            icon="CircleDot"
+            value={{ id: "1", label: "One" }}
+            search={async ({ query }: { query: string }) => [{ id: query, label: query, branch: "b" }]}
+            onSelect={({ item }) => newWorkspace.setBranch(item.branch)}
+          />
+        );
+      }
+      export default function contribute(client: PluginClientContext) {
+        client.addNewWorkspaceItem({ id: "item", Component: Item });
+        return () => {};
+      }
+    `),
+    ).toEqual([]);
+  });
+});
+
 describe("plugin agent tools SDK boundary", () => {
   it("lets a session hook attach typed tools without exposing their transport", () => {
     expect(

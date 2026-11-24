@@ -2,14 +2,21 @@ import {
   BottomSheetModal as GorhomBottomSheetModal,
   type BottomSheetModalProps,
 } from "@gorhom/bottom-sheet";
-import React from "react";
-import { forwardRef, useCallback, useEffect, useMemo, useRef } from "react";
-import type { ElementRef, ReactNode } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  type ElementRef,
+  type ReactNode,
+} from "react";
 import { systemBackPress } from "./back-press";
 import {
   type BottomSheetController,
   createBottomSheetVisibilityTracker,
 } from "./visibility-tracker";
+import { useDismissibleOverlay } from "@/components/ui/overlay-dismissal";
 
 type GorhomBottomSheetModalMethods = ElementRef<typeof GorhomBottomSheetModal>;
 
@@ -86,6 +93,7 @@ export function useIsolatedBottomSheetVisibility({
   useEffect(() => {
     tracker.syncDesired({ visible, isEnabled });
   }, [isEnabled, tracker, visible]);
+  useDismissibleOverlay(visible && isEnabled !== false, onClose);
 
   return {
     sheetRef: setSheetRef,
