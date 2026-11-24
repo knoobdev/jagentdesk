@@ -1,3 +1,4 @@
+import type { TextReplacement } from "@/composer/types";
 import React, {
   createContext,
   useCallback,
@@ -9,6 +10,12 @@ import React, {
   type ReactNode,
 } from "react";
 import type { ComposerInputMode } from "@/composer/input-mode";
+
+export interface ComposerEditingHandoff {
+  snapshot: { text: string; selection: { start: number; end: number } };
+  focused: boolean;
+  replacementKey: string;
+}
 
 export interface ComposerSelection {
   start: number;
@@ -30,6 +37,8 @@ export interface ComposerRetainedEditor {
  */
 export class ComposerEditingSession {
   private fullscreen = false;
+  private handoff: ComposerEditingHandoff | null = null;
+
   private editor: {
     getText(): string;
     replaceText(text: string, selection: ComposerSelection): void;
@@ -74,6 +83,35 @@ export class ComposerEditingSession {
       this.listeners.delete(listener);
     };
   };
+  changePresentation(fullscreen: boolean, handoff: ComposerEditingHandoff) {
+    this.captureForRemount(handoff);
+    if (fullscreen === this.fullscreen) return;
+    this.fullscreen = fullscreen;
+    for (const listener of this.listeners) listener();
+    this.onChange?.();
+  }
+  captureForRemount(handoff: ComposerEditingHandoff) {
+    this.handoff = handoff;
+  }
+  peekHandoff(replacement: TextReplacement): ComposerEditingHandoff | null {
+    const handoff = this.handoff;
+    if (!handoff || replacement.kind === "initial" || replacement.key === handoff.replacementKey)
+      return handoff;
+    // A replacement command issued since capture supersedes the old editor's live buffer.
+    return {
+      snapshot: {
+        text: replacement.text,
+        selection: { start: replacement.text.length, end: replacement.text.length },
+      },
+      focused: handoff.focused,
+      replacementKey: replacement.key,
+    };
+  }
+  takeHandoff(replacement: TextReplacement) {
+    const handoff = this.peekHandoff(replacement);
+    this.handoff = null;
+    return handoff;
+  }
   setFullscreen(fullscreen: boolean) {
     if (fullscreen === this.fullscreen) return;
     this.fullscreen = fullscreen;

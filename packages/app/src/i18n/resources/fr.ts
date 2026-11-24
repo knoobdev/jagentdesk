@@ -142,6 +142,10 @@ export const fr: TranslationResources = {
       longPressToQueue: "Long press to queue",
 
       accessibilityLabel: "\u00C9crire \u00E0 l\u2019agent\u2026",
+      accessibilityLabel: "Écrire à l’agent…",
+      terminalAccessibilityLabel: "Prompt du terminal",
+      fullscreen: "Plein écran",
+      exitFullscreen: "Quitter le plein écran",
       focusHint: "{{shortcut}} pour saisir",
       addAttachment: "Ajouter une pièce jointe",
       interruptAgent: "Interrompre l\u2019agent",

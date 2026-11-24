@@ -2303,6 +2303,7 @@ export function Composer({
                 <StableMessageInput
                   ref={messageInputRef}
                   value={userInput}
+                  textReplacement={{ kind: "replace", key: userInput, text: userInput }}
                   onChangeText={setUserInput}
                   onSubmit={handleSubmit}
                   hasExternalContent={hasExternalContent}
