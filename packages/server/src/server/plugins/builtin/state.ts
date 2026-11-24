@@ -139,11 +139,15 @@ export class BuiltinPluginState {
   }
 
   async registerLifecycle(id: BuiltinPluginId, lifecycle: BuiltinPluginLifecycle): Promise<void> {
-    this.lifecycles.set(id, lifecycle);
-    if (this.isEnabled(id)) {
-      await lifecycle.start();
-      this.running.add(id);
-    }
+    // Host capability probes can settle while an asynchronous plugin is starting.
+    // Share their queue so the same source cannot be published twice before running is set.
+    const change = this.pending.then(async () => {
+      this.lifecycles.set(id, lifecycle);
+      await this.reconcile();
+      return undefined;
+    });
+    this.pending = change.catch(() => {});
+    await change;
   }
 
   private async reconcile(): Promise<void> {

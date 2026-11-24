@@ -96,6 +96,7 @@ export const fr: TranslationResources = {
       newAgent: "Nouvel agent",
       addProject: "Ajouter un projet",
       home: "Accueil",
+      copyBrowserHostName: "Copier le nom de l’hôte du navigateur",
       modelGroupLabel: "Mod\u00E8le",
       modelSearchKeywords:
         "changer de mod\u00E8le modifier le mod\u00E8le d\u00E9finir le mod\u00E8le s\u00E9lectionner le mod\u00E8le model",
@@ -341,6 +342,7 @@ export const fr: TranslationResources = {
       copyTurn: "Copier l\u2019\u00E9change",
       copyMessage: "Copier le message",
       forkMenu: "Forker la conversation \u00E0 partir d\u2019ici",
+      turnStats: "Statistiques de l’échange",
       forkInNewTab: "Forker dans un nouvel onglet",
       forkInNewWorkspace: "Forker dans un nouvel espace de travail",
       forkUnavailable: "Mettez \u00E0 jour l\u2019h\u00F4te pour utiliser cette fonction.",

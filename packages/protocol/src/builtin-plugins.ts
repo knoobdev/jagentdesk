@@ -24,6 +24,12 @@ export const STATIC_BUILTIN_PLUGIN_IDS = [
   "browser-tools",
 ] as const;
 export const BUNDLED_PLUGIN_IDS = [
+  "worktree-include",
+  "muse-provider",
+  "antigravity-provider",
+  "hoplite-provider",
+  "fx-provider",
+  "goose-provider",
   "claude-usage-source",
   "codex-usage-source",
   "copilot-usage-source",
@@ -34,13 +40,6 @@ export const BUNDLED_PLUGIN_IDS = [
   "opencode-go-usage-source",
   "openrouter-host-usage-source",
   "zai-usage-source",
-
-  "worktree-include",
-  "muse-provider",
-  "antigravity-provider",
-  "hoplite-provider",
-  "fx-provider",
-  "goose-provider",
 ] as const;
 export const BUILTIN_PLUGIN_IDS = [...STATIC_BUILTIN_PLUGIN_IDS, ...BUNDLED_PLUGIN_IDS] as const;
 export type BuiltinPluginId = (typeof BUILTIN_PLUGIN_IDS)[number];

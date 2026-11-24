@@ -6476,3 +6476,30 @@ describe("agent snapshot MCP serialization", () => {
     expect(content).not.toContain("first answer");
   });
 });
+
+it("list_hosts returns a record accepted by the real MCP client", async () => {
+  const { agentManager, agentStorage } = createTestDeps();
+  const server = await createAgentMcpServer({
+    agentManager,
+    agentStorage,
+    providerSnapshotManager: createOpenCodeManager().manager,
+    logger: createTestLogger(),
+    hosts: () => ({
+      directory: async () => ({ self: { serverId: "host-a", label: "Build A" }, hosts: [] }),
+      async use() {
+        throw new Error("This test only lists hosts");
+      },
+    }),
+  });
+  const client = await connectInMemoryMcpClient(server);
+  try {
+    const response = await client.callTool({ name: "list_hosts", arguments: {} });
+    expect(response.isError).not.toBe(true);
+    expect(response.structuredContent).toEqual({
+      hosts: [{ serverId: "host-a", label: "Build A", status: "connected" }],
+    });
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});

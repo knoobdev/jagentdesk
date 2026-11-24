@@ -96,6 +96,7 @@ export const ja: TranslationResources = {
       newAgent: "\u65B0\u3057\u3044\u30A8\u30FC\u30B8\u30A7\u30F3\u30C8",
       addProject: "\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8\u3092\u8FFD\u52A0",
       home: "\u30DB\u30FC\u30E0",
+      copyBrowserHostName: "ブラウザホスト名をコピー",
       modelGroupLabel: "\u30E2\u30C7\u30EB",
       modelSearchKeywords:
         "\u30E2\u30C7\u30EB\u3092\u5207\u308A\u66FF\u3048 \u30E2\u30C7\u30EB\u3092\u5909\u66F4 \u30E2\u30C7\u30EB\u3092\u8A2D\u5B9A \u30E2\u30C7\u30EB\u3092\u9078\u629E",

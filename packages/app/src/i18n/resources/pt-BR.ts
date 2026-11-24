@@ -95,6 +95,7 @@ export const ptBR: TranslationResources = {
       newAgent: "Novo agente",
       addProject: "Adicionar projeto",
       home: "In\u00EDcio",
+      copyBrowserHostName: "Copiar o nome do host do navegador",
       modelGroupLabel: "Modelo",
       modelSearchKeywords: "trocar modelo mudar modelo definir modelo selecionar modelo",
       thinkingGroupLabel: "Racioc\u00EDnio",

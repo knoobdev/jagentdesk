@@ -59,7 +59,7 @@ it("restores the agent pane after parked focus is rehydrated", async () => {
   ).toEqual([{ kind: "agent", agentId: "agent-a" }]);
 });
 
-it("does not persist transient focus intent or local pins, while still saving a changed layout", async () => {
+it("persists changed pin intents and layouts without duplicating focus or repeated pin writes", async () => {
   let writes = 0;
   const storage: StateStorage = {
     getItem: () => null,
@@ -77,12 +77,20 @@ it("does not persist transient focus intent or local pins, while still saving a 
   const initialWrites = writes;
   store.getState().focusTab(key, tabId);
   store.getState().focusPane(key, "main");
-  store.getState().pinAgent(key, "agent-a");
   await Promise.resolve();
   await Promise.resolve();
   expect(writes).toBe(initialWrites);
-  store.getState().openTabFocused(key, { kind: "file", path: "other.md" });
+  store.getState().pinAgent(key, "agent-a");
   await Promise.resolve();
   await Promise.resolve();
   expect(writes).toBe(initialWrites + 1);
+  store.getState().pinAgent(key, "agent-a");
+  store.getState().focusTab(key, tabId);
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(writes).toBe(initialWrites + 1);
+  store.getState().openTabFocused(key, { kind: "file", path: "other.md" });
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(writes).toBe(initialWrites + 2);
 });

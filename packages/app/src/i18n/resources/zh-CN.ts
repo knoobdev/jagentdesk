@@ -95,6 +95,7 @@ export const zhCN: TranslationResources = {
       newAgent: "\u65B0\u5EFA Agent",
       addProject: "\u6DFB\u52A0 project",
       home: "\u9996\u9875",
+      copyBrowserHostName: "复制浏览器宿主名称",
       modelGroupLabel: "\u6A21\u578B",
       modelSearchKeywords:
         "\u5207\u6362\u6A21\u578B \u66F4\u6539\u6A21\u578B \u8BBE\u7F6E\u6A21\u578B \u9009\u62E9\u6A21\u578B",

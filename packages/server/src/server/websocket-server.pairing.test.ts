@@ -368,12 +368,14 @@ function signedHello(input: {
 }
 
 describe("tailnet pairing handshake over a real WebSocket", () => {
-  test("challenge → register → signed hello upgrades the session", async () => {
+  test("existing device: challenge → legacy register → signed hello upgrades the session", async () => {
     const { harness, devices } = createPairingServerHarness();
     harnesses.push(harness);
     const port = await waitForPort(harness);
     const key = generateDeviceKeyPair();
     const publicKeyB64 = exportDevicePublicKey(key.publicKey);
+    // Compatibility fixture: this device was paired before SAS enrollment became mandatory.
+    devices.register({ devicePublicKeyB64: publicKeyB64 });
 
     const client = createBufferedTailnetClient(port);
     await new Promise<void>((resolve, reject) => {
@@ -388,7 +390,7 @@ describe("tailnet pairing handshake over a real WebSocket", () => {
     })) as { type: string; nonce: string };
     expect(challenge.nonce).toBeTruthy();
 
-    // Unpaired device registers its public key.
+    // An existing paired device may repeat the legacy registration without changing its key.
     client.socket.send(
       registerRequest({
         requestId: "req-register-1",
@@ -570,6 +572,8 @@ describe("tailnet pairing handshake over a real WebSocket", () => {
     const directPort = await waitForDirectPort(harness);
     const key = generateDeviceKeyPair();
     const publicKeyB64 = exportDevicePublicKey(key.publicKey);
+    // Compatibility fixture: this device was paired before SAS enrollment became mandatory.
+    devices.register({ devicePublicKeyB64: publicKeyB64 });
 
     const desktop = createBufferedTailnetClient(`ws://127.0.0.1:${directPort}/ws`);
     await waitForSocketOpen(desktop);
@@ -805,6 +809,8 @@ describe("tailnet pairing handshake over a real WebSocket", () => {
     const directPort = await waitForDirectPort(harness);
     const key = generateDeviceKeyPair();
     const publicKeyB64 = exportDevicePublicKey(key.publicKey);
+    // Compatibility fixture: this device was paired before SAS enrollment became mandatory.
+    devices.register({ devicePublicKeyB64: publicKeyB64 });
 
     const desktop = createBufferedTailnetClient(`ws://127.0.0.1:${directPort}/ws`);
     await new Promise<void>((resolve, reject) => {
@@ -1088,6 +1094,8 @@ describe("tailnet pairing handshake over a real WebSocket", () => {
     const port = await waitForPort(harness);
     const key = generateDeviceKeyPair();
     const publicKeyB64 = exportDevicePublicKey(key.publicKey);
+    // Compatibility fixture: this device was paired before SAS enrollment became mandatory.
+    devices.register({ devicePublicKeyB64: publicKeyB64 });
 
     const first = createBufferedTailnetClient(port);
     const second = createBufferedTailnetClient(port);
@@ -1125,11 +1133,13 @@ describe("tailnet pairing handshake over a real WebSocket", () => {
   });
 
   test("nonce is single-use: replaying a signed hello is rejected", async () => {
-    const { harness } = createPairingServerHarness();
+    const { harness, devices } = createPairingServerHarness();
     harnesses.push(harness);
     const port = await waitForPort(harness);
     const key = generateDeviceKeyPair();
     const publicKeyB64 = exportDevicePublicKey(key.publicKey);
+    // Compatibility fixture: this device was paired before SAS enrollment became mandatory.
+    devices.register({ devicePublicKeyB64: publicKeyB64 });
 
     const client = createBufferedTailnetClient(port);
     await new Promise<void>((resolve, reject) => {

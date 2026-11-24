@@ -4618,14 +4618,16 @@ function createToolCatalog(
       const directory = await hostResolver.directory();
       return {
         content: [],
-        structuredContent: ensureValidJson([
-          { serverId: directory.self.serverId, label: directory.self.label, status: "connected" },
-          ...directory.hosts.map((host) => ({
-            serverId: host.serverId,
-            label: host.label,
-            status: host.status,
-          })),
-        ]),
+        structuredContent: {
+          hosts: ensureValidJson([
+            { serverId: directory.self.serverId, label: directory.self.label, status: "connected" },
+            ...directory.hosts.map((host) => ({
+              serverId: host.serverId,
+              label: host.label,
+              status: host.status,
+            })),
+          ]),
+        },
       };
     },
   );

@@ -12,13 +12,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import {
-  Dimensions,
-  View,
-  type Role,
-  type StyleProp,
-  type ViewStyle,
-} from "react-native";
+import { Dimensions, View, type Role, type StyleProp, type ViewStyle } from "react-native";
 import { FadeIn, FadeOut } from "react-native-reanimated";
 import { StyleSheet } from "react-native-unistyles";
 import { Portal } from "@gorhom/portal";

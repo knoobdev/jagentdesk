@@ -2372,6 +2372,7 @@ export class VoiceAssistantWebSocketServer {
           nonce: message.nonce,
           signature: message.signature,
           devicePublicKeyB64: message.devicePublicKeyB64,
+          transport: pending.identity.transport,
           challenges: this.pairing.challenges,
           devices: this.pairing.devices,
           tailnetNodeId:
@@ -3117,11 +3118,9 @@ export class VoiceAssistantWebSocketServer {
       this.socketIdentities.delete(socket);
     }
     connection.sockets.clear();
-    const existing = this.externalSessionsByKey.get(connection.clientId);
-    if (existing === connection) {
-      this.externalSessionsByKey.delete(
-        `${connection.principalId ?? "local"}:${connection.clientId}`,
-      );
+    const key = `${connection.principalId ?? "local"}:${connection.clientId}`;
+    if (this.externalSessionsByKey.get(key) === connection) {
+      this.externalSessionsByKey.delete(key);
     }
     this.unregisterBrowserToolsClient(connection.clientId);
 
@@ -3428,10 +3427,9 @@ export class VoiceAssistantWebSocketServer {
   }
 
   /**
-   * Accepts `pairing.device.register.request` before hello so a new device can
-   * register its public key, then completes the signed-hello handshake. The
-   * request must prove knowledge of the daemon's public key (the value the
-   * client read from the pairing offer); a mismatch is rejected fail-closed.
+   * Legacy clients may repeat registration for an already paired key before
+   * signed hello. Only SasPairing can enroll a new key. The old daemon-key and
+   * code checks remain until those clients leave the compatibility window.
    */
   private handlePairingRegisterPreHello(params: {
     ws: WebSocketLike;
@@ -3507,28 +3505,26 @@ export class VoiceAssistantWebSocketServer {
       }
     }
 
+    const device = this.pairing.devices.getByPublicKey(request.devicePublicKeyB64);
+    if (!device) {
+      respond({
+        requestId: request.requestId,
+        ok: false,
+        error: "New devices require SAS pairing. Generate a new pairing link on the host.",
+      });
+      return;
+    }
+
     try {
-      // A native tsnet node can reconnect while the first registration is
-      // still settling. Treat the same public key as an idempotent register:
-      // otherwise the second socket creates a fresh desktop request and
-      // leaves the approval popup stuck after the first socket has completed.
-      const existingDevice = this.pairing.devices.getByPublicKey(request.devicePublicKeyB64);
-      const device =
-        existingDevice ??
-        this.pairing.devices.register({
-          devicePublicKeyB64: request.devicePublicKeyB64,
-          deviceName: request.deviceName,
-        });
-      if (!existingDevice) {
-        this.incrementRuntimeCounter("pairingDeviceRegistered");
-      }
+      // COMPAT(legacyDeviceRegister): added in v0.9.59, remove after 2027-05-25.
+      // Existing clients can repeat registration; only SAS can create a device now.
       pendingConnection.connectionLogger.info(
         {
           ...toConnectionLogFields(pendingConnection.identity),
           deviceId: device.deviceId,
           requestId: request.requestId,
         },
-        existingDevice ? "Reused paired device registration" : "Registered paired device",
+        "Reused paired device registration",
       );
       respond({ requestId: request.requestId, ok: true, deviceId: device.deviceId });
       if (pendingConnection.pairingRequestId) {
@@ -3594,7 +3590,12 @@ export class VoiceAssistantWebSocketServer {
       const parsed = JSON.parse(buffer.toString());
       if (
         pendingConnection &&
-        this.sasPairing?.handle(ws, parsed, pendingConnection.identity.tailnetNodeId)
+        this.sasPairing?.handle(
+          ws,
+          parsed,
+          pendingConnection.identity.tailnetNodeId,
+          pendingConnection.identity.transport,
+        )
       )
         return;
       const parsedMessage = WSInboundMessageSchema.safeParse(parsed);

@@ -109,7 +109,7 @@ function extractOfferUrlFromScan(result: BarcodeScanningResult): string | null {
   const raw = typeof result.data === "string" ? result.data.trim() : "";
   if (!raw) return null;
 
-  if (raw.includes("#offer=")) return raw;
+  if (raw.startsWith("jagentdesk://pair#")) return raw;
 
   return null;
 }

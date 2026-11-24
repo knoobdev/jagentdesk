@@ -1,3 +1,6 @@
+import { useSasKeyboard } from "@/pairing/use-sas-keyboard";
+import * as QRCode from "qrcode";
+import { SvgXml } from "react-native-svg";
 import { useCallback, useEffect, useState } from "react";
 import { Text, TextInput, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
@@ -15,11 +18,14 @@ const spinnerProps = (theme: import("@/styles/theme").Theme) => ({
 type SasState = Extract<SessionOutboundMessage, { type: "pairing.sas.changed" }>["payload"];
 export function PairDaemonSection({ serverId, onClose }: { serverId: string; onClose(): void }) {
   const client = useHostRuntimeClient(serverId);
+  const [qr, setQr] = useState<string | null>(null);
   const [offer, setOffer] = useState<{ link: string; pk: string; expiresAt: number } | null>(null);
   const [state, setState] = useState<SasState | null>(null);
   const [confirmed, setConfirmed] = useState(false);
+  const setSasScope = useSasKeyboard(state?.state === "comparing");
   const [error, setError] = useState<string | null>(null);
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(performance.now());
+  const [deadline, setDeadline] = useState<number | null>(null);
   const [generation, setGeneration] = useState(0);
   useEffect(() => {
     if (!client) return;
@@ -33,14 +39,24 @@ export function PairDaemonSection({ serverId, onClose }: { serverId: string; onC
     const stop = client.subscribeRawMessages((message) => {
       if (message.type !== "pairing.sas.changed" || message.payload.pk !== pk) return;
       completed = message.payload.state === "completed";
-      if (active) setState(message.payload);
+      if (active) setState((previous) => ({ ...previous, ...message.payload }));
     });
     void client
       .beginSasPairing()
       .then((result) => {
         pk = result.pk;
-        if (active) setOffer(result);
-        else void client.confirmSasPairing(pk, false).catch(() => {});
+        if (active) {
+          setOffer(result);
+          setDeadline(performance.now() + Math.max(0, result.expiresAt - Date.now()));
+          void QRCode.toString(result.link, { type: "svg", errorCorrectionLevel: "M", margin: 4 })
+            .then((svg) => {
+              if (active) setQr(svg);
+              return undefined;
+            })
+            .catch(() => {
+              if (active) setError("Unable to generate pairing QR code");
+            });
+        } else void client.confirmSasPairing(pk, false).catch(() => {});
         return undefined;
       })
       .catch((reason) => {
@@ -53,10 +69,10 @@ export function PairDaemonSection({ serverId, onClose }: { serverId: string; onC
     };
   }, [client, generation]);
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
+    const timer = setInterval(() => setNow(performance.now()), 1000);
     return () => clearInterval(timer);
   }, []);
-  const expired = offer !== null && now >= offer.expiresAt;
+  const expired = deadline !== null && now >= deadline;
   const confirm = useCallback(async () => {
     if (!client || !offer) return;
     try {
@@ -71,19 +87,22 @@ export function PairDaemonSection({ serverId, onClose }: { serverId: string; onC
   }, [confirm]);
   const generate = useCallback(() => setGeneration((value) => value + 1), []);
   const copy = useCallback(() => {
-    if (offer) void Clipboard.setStringAsync(offer.link);
+    if (offer)
+      void Clipboard.setStringAsync(offer.link).catch(() =>
+        setError("Unable to copy pairing link"),
+      );
   }, [offer]);
   if (state?.state === "completed")
     return (
-      <View style={styles.content}>
+      <View ref={setSasScope} style={styles.content}>
         <Text style={styles.title}>Device paired</Text>
-        <Text style={styles.text}>{state.label ?? "The daemon"} can now control this host.</Text>
+        <Text style={styles.text}>{state.label ?? "The device"} can now control this host.</Text>
         <Button onPress={onClose}>Done</Button>
       </View>
     );
   if (error || expired || state?.state === "cancelled")
     return (
-      <View style={styles.content}>
+      <View ref={setSasScope} style={styles.content}>
         <Alert
           variant="warning"
           title={expired ? "Pairing code expired" : "Pairing unavailable"}
@@ -97,7 +116,7 @@ export function PairDaemonSection({ serverId, onClose }: { serverId: string; onC
     );
   if (!offer)
     return (
-      <View style={styles.content}>
+      <View ref={setSasScope} style={styles.content}>
         <ThemedLoadingSpinner uniProps={spinnerProps} />
         <Button variant="outline" onPress={onClose}>
           Cancel
@@ -106,18 +125,18 @@ export function PairDaemonSection({ serverId, onClose }: { serverId: string; onC
     );
   if (state?.code)
     return (
-      <View style={styles.content}>
+      <View ref={setSasScope} style={styles.content}>
         <Text style={styles.title}>Do these codes match?</Text>
         <Text style={styles.text}>Verification code</Text>
         <Text style={styles.code}>
           {state.code.slice(0, 3)} {state.code.slice(3)}
         </Text>
-        <Text style={styles.text}>Shown on {state.label || "the other daemon"}</Text>
+        <Text style={styles.text}>Shown on {state.label || "the other device"}</Text>
         <Text style={styles.text}>
           Compare the code on both screens. If they are different, cancel.
         </Text>
         <Text style={styles.text}>
-          Expires in {Math.max(0, Math.ceil((offer.expiresAt - now) / 1000))}s
+          Expires in {Math.max(0, Math.ceil(((deadline ?? now) - now) / 1000))}s
         </Text>
         {confirmed ? (
           <Text style={styles.text}>Waiting for the other device...</Text>
@@ -132,15 +151,20 @@ export function PairDaemonSection({ serverId, onClose }: { serverId: string; onC
       </View>
     );
   return (
-    <View style={styles.content}>
-      <Text style={styles.title}>Pair a daemon</Text>
+    <View ref={setSasScope} style={styles.content}>
+      <Text style={styles.title}>Pair a device</Text>
       <Text style={styles.text}>
-        On the other host, run jagentdesk host add with this link. Both devices must confirm the
-        same verification code.
+        Scan the QR code or paste this link on the other device. Both devices must confirm the same
+        verification code.
       </Text>
+      {qr ? (
+        <View style={styles.qr}>
+          <SvgXml xml={qr} width={240} height={240} />
+        </View>
+      ) : null}
       <TextInput value={offer.link} editable={false} multiline style={styles.link} />
       <Text style={styles.text}>
-        Expires in {Math.max(0, Math.ceil((offer.expiresAt - now) / 1000))}s
+        Expires in {Math.max(0, Math.ceil(((deadline ?? now) - now) / 1000))}s
       </Text>
       <Button onPress={copy}>Copy pairing link</Button>
       <Button variant="outline" onPress={onClose}>
@@ -150,6 +174,7 @@ export function PairDaemonSection({ serverId, onClose }: { serverId: string; onC
   );
 }
 const styles = StyleSheet.create((theme) => ({
+  qr: { alignSelf: "center", backgroundColor: "#ffffff" },
   content: { gap: theme.spacing[3], padding: theme.spacing[4] },
   title: {
     fontSize: theme.fontSize.base,

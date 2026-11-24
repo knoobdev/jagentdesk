@@ -1371,6 +1371,8 @@ export function createWorkspaceLayoutStore(
             previousProjection &&
             previousProjection.source.layoutByWorkspace === state.layoutByWorkspace &&
             previousProjection.source.panelStateByWorkspace === state.panelStateByWorkspace &&
+            previousProjection.source.pinnedAgentIdsByWorkspace ===
+              state.pinnedAgentIdsByWorkspace &&
             previousProjection.source.splitSizesByWorkspace === state.splitSizesByWorkspace &&
             previousProjection.source.explorerPaneIdByWorkspace ===
               state.explorerPaneIdByWorkspace &&

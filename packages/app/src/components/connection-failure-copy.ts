@@ -70,7 +70,10 @@ export function buildConnectionFailureCopy(input: {
   const rawLower = raw?.toLowerCase() ?? "";
   let detail: string | null = null;
 
-  if (rawLower.includes("timed out")) {
+  if (rawLower.includes("wrong_tailnet_account")) {
+    detail =
+      "Different Tailscale account. Tags on only one side can cause this: use the same account and check device tags in Tailscale settings.";
+  } else if (rawLower.includes("timed out")) {
     detail = labels.timedOut;
   } else if (
     rawLower.includes("econnrefused") ||

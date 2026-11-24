@@ -6,6 +6,7 @@ export type SignedHelloVerification = { ok: true } | { ok: false; reason: string
 
 export function verifySignedHello(args: {
   nonce?: string;
+  transport?: "direct" | "tailnet" | "relay";
   tailnetNodeId?: string;
   signature?: string;
   devicePublicKeyB64?: string;
@@ -28,9 +29,9 @@ export function verifySignedHello(args: {
 
   const device = devices.getByPublicKey(devicePublicKeyB64)!;
   if (
-    args.tailnetNodeId !== undefined &&
-    device.kind === "daemon" &&
-    (!device.tailnetNodeId || args.tailnetNodeId !== device.tailnetNodeId)
+    args.transport === "tailnet" &&
+    device.tailnetNodeId !== undefined &&
+    (!args.tailnetNodeId || args.tailnetNodeId !== device.tailnetNodeId)
   )
     return { ok: false, reason: "node_changed" };
 

@@ -26,3 +26,4 @@ export {
   importSecretKey,
 } from "./crypto.js";
 export type { KeyPair, SharedKey } from "./crypto.js";
+export { createPairingEphemeral, derivePairingSas, pairingBase64Url } from "./pairing-sas.js";

@@ -36,6 +36,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -152,24 +153,25 @@ func main() {
 		request.Header.Set("X-JAgentDesk-Bridge", os.Getenv("JAGENTDESK_TSNET_INGRESS_TOKEN"))
 		request.Header.Set("X-JAgentDesk-Node", request.Context().Value(nodeContextKey{}).(string))
 	}
-	verified := &peerListener{Listener: ln, verify: func(conn net.Conn) (string, error) {
+	verified := newPeerListener(ln, func(conn net.Conn) (string, error) {
 		lookupCtx, lookupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer lookupCancel()
 		who, err := lc.WhoIs(lookupCtx, conn.RemoteAddr().String())
-		if err != nil || who == nil || who.Node == nil {
-			return "", fmt.Errorf("not_a_tailnet_peer")
+
+		login := ""
+		if who != nil && who.UserProfile != nil {
+			login = who.UserProfile.LoginName
+		}
+		encoded, _ := json.Marshal(login)
+		if err != nil || who == nil || who.Node == nil || who.Node.StableID == "" {
+			return "", fmt.Errorf("not_a_tailnet_peer LoginName=%s", encoded)
 		}
 		if who.Node.Sharer != 0 || who.Node.User != status.Self.UserID {
-			login := ""
-			if who.UserProfile != nil {
-				login = who.UserProfile.LoginName
-			}
-			encoded, _ := json.Marshal(login)
-			log.Printf("wrong_tailnet_account login=%s", encoded)
-			return "", fmt.Errorf("wrong_tailnet_account")
+			return "", fmt.Errorf("wrong_tailnet_account LoginName=%s: tags on only one side can cause an account mismatch", encoded)
 		}
 		return string(who.Node.StableID), nil
-	}}
+	})
+	defer verified.Close()
 	httpServer := &http.Server{Handler: proxy, ReadHeaderTimeout: 15 * time.Second,
 		ConnContext: func(ctx context.Context, conn net.Conn) context.Context {
 			return context.WithValue(ctx, nodeContextKey{}, conn.(*peerConn).nodeID)
@@ -201,23 +203,56 @@ type peerConn struct {
 }
 type peerListener struct {
 	net.Listener
-	verify func(net.Conn) (string, error)
+	ready     chan net.Conn
+	failed    chan error
+	done      chan struct{}
+	closeOnce sync.Once
+}
+
+func newPeerListener(underlying net.Listener, verify func(net.Conn) (string, error)) *peerListener {
+	listener := &peerListener{Listener: underlying, ready: make(chan net.Conn), failed: make(chan error, 1), done: make(chan struct{})}
+	go func() {
+		for {
+			conn, err := underlying.Accept()
+			if err != nil {
+				listener.failed <- err
+				return
+			}
+			// A slow WhoIs must never hold the next peer in the accept queue. No application
+			// reader owns this connection until verification hands it to Accept.
+			go func() {
+				nodeID, err := verify(conn)
+				if err != nil || nodeID == "" {
+					conn.Close()
+					log.Printf("tailnet connection rejected: %v", err)
+					return
+				}
+				select {
+				case listener.ready <- &peerConn{Conn: conn, nodeID: nodeID}:
+				case <-listener.done:
+					conn.Close()
+				}
+			}()
+		}
+	}()
+	return listener
 }
 
 func (listener *peerListener) Accept() (net.Conn, error) {
-	for {
-		conn, err := listener.Listener.Accept()
-		if err != nil {
-			return nil, err
-		}
-		nodeID, err := listener.verify(conn)
-		if err != nil || nodeID == "" {
-			conn.Close()
-			log.Printf("tailnet connection rejected: %v", err)
-			continue
-		}
-		return &peerConn{Conn: conn, nodeID: nodeID}, nil
+	select {
+	case conn := <-listener.ready:
+		return conn, nil
+	case err := <-listener.failed:
+		return nil, err
+	case <-listener.done:
+		return nil, net.ErrClosed
 	}
+}
+
+func (listener *peerListener) Close() error {
+	var err error
+	listener.closeOnce.Do(func() { close(listener.done); err = listener.Listener.Close() })
+	return err
 }
 
 func fail(message string) {

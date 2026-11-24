@@ -145,3 +145,12 @@ describe("daemon-client transport helpers", () => {
     expect(decodeMessageData(bytes)).toBe("hello");
   });
 });
+
+test.each([
+  "wrong_tailnet_account",
+  new Error("wrong_tailnet_account"),
+  { message: "wrong_tailnet_account" },
+])("account rejection explains the one-sided tag mismatch", async (event) => {
+  expect(describeTransportClose(event)).toContain("Tags on only one side");
+  expect(describeTransportError(event)).toContain("Tags on only one side");
+});

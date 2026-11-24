@@ -186,8 +186,8 @@ describe("test-daemon-connection connectToDaemon", () => {
     await plainResult.client.close();
 
     const [tlsConfig, plainConfig] = probe.createdConfigs();
-    expect(tlsConfig?.url).toBe("wss://[::1]:8443/ws");
-    expect(plainConfig?.url).toBe("ws://tailnet.example.ts.net:6767/ws");
+    expect(tlsConfig?.url).toBe("wss://[::1]:8443/ws?paired=1");
+    expect(plainConfig?.url).toBe("ws://tailnet.example.ts.net:6767/ws?paired=1");
     expect(tlsConfig).not.toHaveProperty("e2ee");
     expect(plainConfig).not.toHaveProperty("e2ee");
   });

@@ -301,7 +301,7 @@ export function ContextWindowMeter({
           agentId={agentId}
           context={context}
           sessionCost={formattedSessionCost}
-            sessionMetrics={sessionMetrics}
+          sessionMetrics={sessionMetrics}
           showTitle
           refreshable
         />

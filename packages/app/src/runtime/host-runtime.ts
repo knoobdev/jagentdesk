@@ -659,9 +659,9 @@ function createDefaultDeps(
       const proxyAddress = tailscaleAdapter.getProxyAddress?.(connection.tailnetAddress) ?? null;
       return new DaemonClient({
         ...base,
-        url: buildDaemonWebSocketUrl(proxyAddress ?? connection.tailnetAddress, {
+        url: `${buildDaemonWebSocketUrl(proxyAddress ?? connection.tailnetAddress, {
           useTls: connection.useTls ?? false,
-        }),
+        })}?paired=1`,
         expectChallenge: true,
         // Runtime reconnects use the already-held device key only. They must
         // not create a fresh pending Pair a device request; that is reserved

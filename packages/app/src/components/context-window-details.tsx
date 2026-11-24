@@ -35,7 +35,9 @@ export function ContextWindowDetails({
   refreshable,
 }: ContextWindowDetailsProps) {
   const { t } = useTranslation();
-  const providerReportsCost = sessionMetrics.some((metric) => metric.label.toLowerCase() === "cost");
+  const providerReportsCost = sessionMetrics.some(
+    (metric) => metric.label.toLowerCase() === "cost",
+  );
   return (
     <>
       <View style={styles.summary}>

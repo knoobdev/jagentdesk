@@ -737,7 +737,7 @@ function OfferLinkListener() {
     let cancelled = false;
     const handleUrl = (url: string | null) => {
       if (!url) return;
-      if (!url.includes("#offer=")) return;
+      if (!url.includes("#offer=") && !url.startsWith("jagentdesk://pair#")) return;
       if (!cancelled) router.push(`/pair-verify?offer=${encodeURIComponent(url)}` as Href);
     };
 

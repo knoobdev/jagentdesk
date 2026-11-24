@@ -261,3 +261,18 @@ describe("application socket lease", () => {
     expect(ws.readyState).toBe(3);
   });
 });
+
+test("a stopped plugin can reconnect with its reserved clientId using a fresh session", async () => {
+  const { wsServer } = createHarness();
+  const first = new FakeSocket();
+  const { closed } = await wsServer.attachPluginSocket("restarted", first);
+  first.receiveText(hello("plugin:restarted"));
+  expect(first.receivedServerInfo).toBe(true);
+  first.close();
+  await closed;
+  const second = new FakeSocket();
+  await wsServer.attachPluginSocket("restarted", second);
+  second.receiveText(hello("plugin:restarted"));
+  expect(second.receivedServerInfo).toBe(true);
+  expect(second.closeCalls).toEqual([]);
+});

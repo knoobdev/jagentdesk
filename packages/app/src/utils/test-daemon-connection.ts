@@ -208,9 +208,9 @@ async function buildTailnetClientConfig(
           e2ee: { enabled: true, daemonPublicKeyB64: connection.daemonPublicKeyB64 },
         }
       : {
-          url: buildDaemonWebSocketUrl(proxyAddress ?? connection.tailnetAddress, {
+          url: `${buildDaemonWebSocketUrl(proxyAddress ?? connection.tailnetAddress, {
             useTls: connection.useTls ?? false,
-          }),
+          })}?paired=1`,
         }),
     expectChallenge: true,
     ...(signing ? { deviceSigning: signing } : {}),

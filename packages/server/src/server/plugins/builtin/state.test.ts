@@ -308,3 +308,29 @@ it("publishes readiness after an enabled usage source finishes starting", async 
   await state.set("claude-usage-source", true);
   expect(observations).toEqual([false, true]);
 });
+
+it("a capability probe during startup does not start a Usage source twice", async () => {
+  const { state } = await setup();
+  let starts = 0;
+  let entered!: () => void;
+  let release!: () => void;
+  const starting = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const registration = state.registerLifecycle("copilot-usage-source", {
+    start: async () => {
+      starts++;
+      entered();
+      await gate;
+    },
+    stop() {},
+  });
+  await starting;
+  const probe = state.setCapabilities({});
+  release();
+  await Promise.all([registration, probe]);
+  expect(starts).toBe(1);
+});

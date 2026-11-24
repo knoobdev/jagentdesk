@@ -406,13 +406,15 @@ export class DaemonSession {
       return;
     }
     try {
-      const device = this.pairedDevices.register({
-        devicePublicKeyB64: msg.devicePublicKeyB64,
-        deviceName: msg.deviceName,
-      });
+      // COMPAT(legacyDeviceRegister): added in v0.9.59, remove after 2027-05-25.
+      const device = this.pairedDevices.getByPublicKey(msg.devicePublicKeyB64);
+      if (!device)
+        throw new Error(
+          "New devices require SAS pairing. Generate a new pairing link on the host.",
+        );
       this.logger.info(
         { clientId: this.clientId, deviceId: device.deviceId, requestId: msg.requestId },
-        "Registered paired device",
+        "Reused paired device registration",
       );
       this.host.emit({
         type: "pairing.device.register.response",

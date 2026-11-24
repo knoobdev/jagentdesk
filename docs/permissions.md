@@ -53,6 +53,18 @@ Workspace-scoped grants require every resource-bearing operation and outbound ob
 [Connected hosts](connected-hosts.md#authority-and-ownership) carry the intersection of the caller
 session and paired link permissions. Host management requires `daemon.manage`.
 
+## Device pairing
+
+New desktop, mobile and daemon devices use the same two-sided SAS exchange. Open a
+session from an authenticated host, compare the derived six digits, and approve on
+both screens. The former host-code entry path cannot enroll a new device; update
+both apps and generate a new link. Existing paired keys keep working.
+
+A tailnet enrollment pins the verified connection's node identity for every device
+kind. A missing bridge identity fails closed. Reconnecting must never replace a
+stored pin; removing a Tailscale node requires pairing again. A tag on only one side
+can make WhoIs report different accounts even within the same tailnet.
+
 ## Hub
 
 The Hub authenticates as a service principal. Its locally selected grants decide whether it may execute agents, manage the daemon, manage tunnels, or manage access.

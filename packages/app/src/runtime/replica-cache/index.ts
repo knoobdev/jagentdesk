@@ -483,6 +483,7 @@ function serializeAgent(agent: Agent): StoredAgent {
     ...(agent.lastUsage ? { lastUsage: agent.lastUsage } : {}),
     ...(agent.usageTotals ? { usageTotals: agent.usageTotals } : {}),
     ...(agent.sessionMetrics ? { sessionMetrics: agent.sessionMetrics } : {}),
+    ...(agent.usageScopeKey ? { usageScopeKey: agent.usageScopeKey } : {}),
     ...(agent.lastError ? { lastError: agent.lastError } : {}),
     title: agent.title,
     labels: agent.labels,

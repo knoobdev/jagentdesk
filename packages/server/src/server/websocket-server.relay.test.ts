@@ -43,6 +43,7 @@ interface RelayDaemonHarness {
   ingressPort: number;
   directPort: number;
   wsServer: VoiceAssistantWebSocketServer;
+  devices: ReturnType<typeof createPairedDeviceStore>;
   stop(): Promise<void>;
 }
 
@@ -179,6 +180,7 @@ function createRelayServerHarness(
     ingressPort: 0,
     directPort: 0,
     wsServer,
+    devices,
     async stop() {
       wsServer.prepareForShutdown();
       await wsServer.close();
@@ -285,11 +287,13 @@ async function openClient(client: { socket: WebSocket }): Promise<void> {
   });
 }
 
-/** Runs challenge → register → signed hello; returns deviceId + live client. */
+/** Reconnects a previously paired relay device; returns deviceId + live client. */
 async function pairOverRelay(harness: RelayDaemonHarness, deviceName: string) {
   const port = await waitForPort(harness);
   const key = generateDeviceKeyPair();
   const devicePublicKeyB64 = exportDevicePublicKey(key.publicKey);
+  // Relay authentication cases reconnect a key paired before the SAS requirement.
+  harness.devices.register({ devicePublicKeyB64, deviceName });
   const client = createBufferedClient(port);
   await openClient(client);
 

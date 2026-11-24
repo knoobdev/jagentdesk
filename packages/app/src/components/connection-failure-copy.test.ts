@@ -84,3 +84,9 @@ describe("direct connection failure copy", () => {
     ).toMatchObject({ detail: labels.unableToConnect, raw: message });
   });
 });
+
+it("explains tags when WhoIs rejects the Tailscale account", () => {
+  const result = failure("wrong_tailnet_account");
+  expect(result.detail).toContain("Tags on only one side");
+  expect(result.detail).toContain("Tailscale settings");
+});

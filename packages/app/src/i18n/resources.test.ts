@@ -127,10 +127,19 @@ describe("translation resources", () => {
     const englishKeys = flattenKeys(en)
       .filter((key) => !isOptionalEnglishFallbackKey(key))
       .sort();
+    const requiredKeys = new Set(englishKeys);
     const localeKeys = (resource: unknown) =>
-      flattenKeys(resource)
-        .filter((key) => !isOptionalEnglishFallbackKey(key))
-        .sort();
+      [
+        ...new Set(
+          flattenKeys(resource)
+            .filter((key) => !isOptionalEnglishFallbackKey(key))
+            .map((key) => {
+              // i18next selects locale-specific plural forms from the same base key.
+              const base = key.replace(/_(zero|one|two|few|many|other)$/, "");
+              return requiredKeys.has(base) ? base : key;
+            }),
+        ),
+      ].sort();
     expect(localeKeys(ar)).toEqual(englishKeys);
     expect(localeKeys(es)).toEqual(englishKeys);
     expect(localeKeys(fr)).toEqual(englishKeys);

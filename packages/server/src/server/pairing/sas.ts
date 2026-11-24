@@ -102,7 +102,7 @@ export class SasPairing {
       link: `jagentdesk://pair#${Buffer.from(JSON.stringify({ v: 1, ...address, pk })).toString("base64url")}`,
     };
   }
-  handle(socket: Socket, input: unknown, tailnetNodeId?: string): boolean {
+  handle(socket: Socket, input: unknown, tailnetNodeId?: string, transport?: string): boolean {
     const hello = PairHelloSchema.safeParse(input);
     const confirm = PairConfirmSchema.safeParse(input);
     if (!hello.success && !confirm.success) return false;
@@ -110,6 +110,7 @@ export class SasPairing {
     try {
       if (!attempt || performance.now() >= attempt.deadline) throw new Error("pairing_expired");
       if (hello.success) {
+        if (transport === "tailnet" && !tailnetNodeId) throw new Error("node_changed");
         if (hello.data.pk !== attempt.pk) throw new Error("pairing_expired");
         if (attempt.socket) throw new Error("pairing_in_use");
         if (Buffer.from(hello.data.publicKeyEd25519, "base64").length !== 32)
