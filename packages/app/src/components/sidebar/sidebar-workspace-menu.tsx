@@ -392,7 +392,11 @@ function archiveButtonStyle({
 
 const styles = StyleSheet.create((theme) => ({
   trigger: {
-    padding: 2,
+    width: { xs: 32, md: 18 },
+    height: { xs: 32, md: 18 },
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: { xs: -6, md: 0 },
     borderRadius: 4,
     marginLeft: 2,
   },
