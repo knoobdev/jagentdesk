@@ -97,7 +97,8 @@ export class DirectorySync {
       this.connection.source.clientGeneration !== connection.source.clientGeneration ||
       this.connection.source.connectionEpoch !== connection.source.connectionEpoch;
     const wentOffline = this.connection.status === "online" && connection.status === "offline";
-    if (!changed && !wentOffline) {
+    const subscriptionsMissing = connection.status === "online" && this.unsubscribe === null;
+    if (!changed && !wentOffline && !subscriptionsMissing) {
       this.connection = connection;
       return false;
     }

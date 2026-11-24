@@ -8,6 +8,9 @@ type WorkspaceFetchResult = Awaited<ReturnType<DaemonClient["fetchWorkspaces"]>>
 type ProjectListResult = Awaited<ReturnType<DaemonClient["listProjects"]>>;
 
 class FakeDirectoryClient {
+  getLastServerInfoMessage() {
+    return null;
+  }
   fetchAgentsCalls = 0;
   fetchWorkspacesCalls = 0;
   listProjectsCalls = 0;
@@ -291,4 +294,24 @@ describe("DirectorySync session readiness", () => {
     });
     directory.dispose();
   });
+});
+
+it("reattaches released directory listeners on the same connection", () => {
+  const { directory, client } = createDirectory("directory-returning-demand");
+  directory.dispose();
+  expect(
+    directory.connectionChanged({
+      client: client as unknown as DaemonClient,
+      status: "online",
+      source: { clientGeneration: 1, connectionEpoch: 1 },
+    }),
+  ).toBe(true);
+  expect(
+    directory.connectionChanged({
+      client: client as unknown as DaemonClient,
+      status: "online",
+      source: { clientGeneration: 1, connectionEpoch: 1 },
+    }),
+  ).toBe(false);
+  directory.dispose();
 });
