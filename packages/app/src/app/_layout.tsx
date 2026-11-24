@@ -1,3 +1,4 @@
+import { ChangelogHost } from "@/changelog";
 import { HostConfirmationSheet } from "@/hosts/host-confirmation-sheet";
 import "@/styles/unistyles";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
@@ -647,6 +648,7 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
       <WorkspaceSetupDialog />
       <KeyboardShortcutsDialog />
       <AppDiagnosticHost />
+      <ChangelogHost />
       <QuittingOverlay />
     </>
   );

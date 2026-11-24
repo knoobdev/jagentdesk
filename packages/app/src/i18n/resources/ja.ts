@@ -1091,12 +1091,16 @@ export const ja: TranslationResources = {
       closeSidebar: "サイドバーを閉じる",
     },
     help: {
-      trigger: "ヘルプとサポート",
-      sectionHelp: "ヘルプ",
-      diagnostics: "診断を実行",
-      shortcuts: "キーボードショートカット",
-      reportIssue: "問題を報告",
+      trigger: "\u30D8\u30EB\u30D7\u3068\u30B5\u30DD\u30FC\u30C8",
+      sectionHelp: "\u30D8\u30EB\u30D7",
+      diagnostics: "\u8A3A\u65AD\u3092\u5B9F\u884C",
+      shortcuts: "\u30AD\u30FC\u30DC\u30FC\u30C9\u30B7\u30E7\u30FC\u30C8\u30AB\u30C3\u30C8",
+      reportIssue: "\u554F\u984C\u3092\u5831\u544A",
       version: "JAgentDesk {{version}}",
+      discord: "Discord",
+      github: "GitHub Issue\u3092\u4F5C\u6210",
+      whatsNew: "\u65B0\u7740\u60C5\u5831",
+      appName: "JAgentDesk",
     },
     sections: {
       sessions: "履歴",
@@ -2964,6 +2968,19 @@ export const ja: TranslationResources = {
       forkHint: "JAgentDesk does not own {{name}}, so it is never edited.",
       fork: "Create copy",
       forked: "Training {{name}}",
+    },
+  },
+  changelog: {
+    title: "\u65B0\u7740\u60C5\u5831",
+    installed: "\u30A4\u30F3\u30B9\u30C8\u30FC\u30EB\u6E08\u307F",
+    showMore: "\u3082\u3063\u3068\u898B\u308B",
+    showAllChanges: "\u3059\u3079\u3066\u306E\u5909\u66F4\u3092\u8868\u793A",
+    hideAllChanges: "\u3059\u3079\u3066\u306E\u5909\u66F4\u3092\u975E\u8868\u793A",
+    openWebsite: "\u5909\u66F4\u5C65\u6B74\u3092\u3059\u3079\u3066\u8868\u793A",
+    error: {
+      title: "\u5909\u66F4\u5C65\u6B74\u3092\u8AAD\u307F\u8FBC\u3081\u307E\u305B\u3093",
+      description:
+        "\u63A5\u7D9A\u3092\u78BA\u8A8D\u3057\u3066\u3082\u3046\u4E00\u5EA6\u304A\u8A66\u3057\u304F\u3060\u3055\u3044\u3002",
     },
   },
 } as const;

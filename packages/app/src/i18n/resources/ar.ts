@@ -1101,12 +1101,20 @@ export const ar: TranslationResources = {
       closeSidebar: "إغلاق الشريط الجانبي",
     },
     help: {
-      trigger: "المساعدة والدعم",
-      sectionHelp: "المساعدة",
-      diagnostics: "تشغيل التشخيص",
-      shortcuts: "اختصارات لوحة المفاتيح",
-      reportIssue: "الإبلاغ عن مشكلة",
+      trigger:
+        "\u0627\u0644\u0645\u0633\u0627\u0639\u062F\u0629 \u0648\u0627\u0644\u062F\u0639\u0645",
+      sectionHelp: "\u0627\u0644\u0645\u0633\u0627\u0639\u062F\u0629",
+      diagnostics: "\u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u062A\u0634\u062E\u064A\u0635",
+      shortcuts:
+        "\u0627\u062E\u062A\u0635\u0627\u0631\u0627\u062A \u0644\u0648\u062D\u0629 \u0627\u0644\u0645\u0641\u0627\u062A\u064A\u062D",
+      reportIssue:
+        "\u0627\u0644\u0625\u0628\u0644\u0627\u063A \u0639\u0646 \u0645\u0634\u0643\u0644\u0629",
       version: "JAgentDesk {{version}}",
+      discord: "Discord",
+      github:
+        "\u0625\u0646\u0634\u0627\u0621 \u0645\u0634\u0643\u0644\u0629 \u0639\u0644\u0649 GitHub",
+      whatsNew: "\u0645\u0627 \u0627\u0644\u062C\u062F\u064A\u062F",
+      appName: "JAgentDesk",
     },
     sections: {
       sessions: "السجل",
@@ -2966,6 +2974,23 @@ export const ar: TranslationResources = {
       forkHint: "JAgentDesk does not own {{name}}, so it is never edited.",
       fork: "Create copy",
       forked: "Training {{name}}",
+    },
+  },
+  changelog: {
+    title: "\u0645\u0627 \u0627\u0644\u062C\u062F\u064A\u062F",
+    installed: "\u0645\u062B\u0628\u0651\u062A",
+    showMore: "\u0639\u0631\u0636 \u0627\u0644\u0645\u0632\u064A\u062F",
+    showAllChanges:
+      "\u0639\u0631\u0636 \u0643\u0644 \u0627\u0644\u062A\u063A\u064A\u064A\u0631\u0627\u062A",
+    hideAllChanges:
+      "\u0625\u062E\u0641\u0627\u0621 \u0643\u0644 \u0627\u0644\u062A\u063A\u064A\u064A\u0631\u0627\u062A",
+    openWebsite:
+      "\u0633\u062C\u0644 \u0627\u0644\u062A\u063A\u064A\u064A\u0631\u0627\u062A \u0627\u0644\u0643\u0627\u0645\u0644",
+    error: {
+      title:
+        "\u062A\u0639\u0630\u0651\u0631 \u062A\u062D\u0645\u064A\u0644 \u0633\u062C\u0644 \u0627\u0644\u062A\u063A\u064A\u064A\u0631\u0627\u062A",
+      description:
+        "\u062A\u062D\u0642\u0642 \u0645\u0646 \u0627\u062A\u0635\u0627\u0644\u0643 \u0648\u062D\u0627\u0648\u0644 \u0645\u0631\u0629 \u0623\u062E\u0631\u0649.",
     },
   },
 };

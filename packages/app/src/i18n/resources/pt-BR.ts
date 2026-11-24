@@ -1091,10 +1091,14 @@ export const ptBR: TranslationResources = {
     help: {
       trigger: "Ajuda e suporte",
       sectionHelp: "Ajuda",
-      diagnostics: "Executar diagnóstico",
+      diagnostics: "Executar diagn\u00F3stico",
       shortcuts: "Atalhos de teclado",
       reportIssue: "Relatar um problema",
       version: "JAgentDesk {{version}}",
+      discord: "Discord",
+      github: "Criar issue no GitHub",
+      whatsNew: "Novidades",
+      appName: "JAgentDesk",
     },
     sections: {
       sessions: "Histórico",
@@ -2966,6 +2970,18 @@ export const ptBR: TranslationResources = {
       forkHint: "JAgentDesk does not own {{name}}, so it is never edited.",
       fork: "Create copy",
       forked: "Training {{name}}",
+    },
+  },
+  changelog: {
+    title: "Novidades",
+    installed: "Instalada",
+    showMore: "Mostrar mais",
+    showAllChanges: "Mostrar todas as mudan\u00E7as",
+    hideAllChanges: "Ocultar todas as mudan\u00E7as",
+    openWebsite: "Changelog completo",
+    error: {
+      title: "N\u00E3o foi poss\u00EDvel carregar o changelog",
+      description: "Verifique sua conex\u00E3o e tente novamente.",
     },
   },
 };

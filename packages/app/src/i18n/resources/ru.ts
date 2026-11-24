@@ -1130,12 +1130,20 @@ export const ru: TranslationResources = {
       closeSidebar: "Закрыть боковую панель",
     },
     help: {
-      trigger: "Помощь и поддержка",
-      sectionHelp: "Помощь",
-      diagnostics: "Запустить диагностику",
-      shortcuts: "Сочетания клавиш",
-      reportIssue: "Сообщить о проблеме",
+      trigger:
+        "\u041F\u043E\u043C\u043E\u0449\u044C \u0438 \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u043A\u0430",
+      sectionHelp: "\u041F\u043E\u043C\u043E\u0449\u044C",
+      diagnostics:
+        "\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0434\u0438\u0430\u0433\u043D\u043E\u0441\u0442\u0438\u043A\u0443",
+      shortcuts:
+        "\u0421\u043E\u0447\u0435\u0442\u0430\u043D\u0438\u044F \u043A\u043B\u0430\u0432\u0438\u0448",
+      reportIssue:
+        "\u0421\u043E\u043E\u0431\u0449\u0438\u0442\u044C \u043E \u043F\u0440\u043E\u0431\u043B\u0435\u043C\u0435",
       version: "JAgentDesk {{version}}",
+      discord: "Discord",
+      github: "\u0421\u043E\u0437\u0434\u0430\u0442\u044C issue \u043D\u0430 GitHub",
+      whatsNew: "\u0427\u0442\u043E \u043D\u043E\u0432\u043E\u0433\u043E",
+      appName: "JAgentDesk",
     },
     sections: {
       sessions: "История",
@@ -3010,6 +3018,23 @@ export const ru: TranslationResources = {
       forkHint: "JAgentDesk does not own {{name}}, so it is never edited.",
       fork: "Create copy",
       forked: "Training {{name}}",
+    },
+  },
+  changelog: {
+    title: "\u0427\u0442\u043E \u043D\u043E\u0432\u043E\u0433\u043E",
+    installed: "\u0423\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u0430",
+    showMore: "\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u0435\u0449\u0451",
+    showAllChanges:
+      "\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u0432\u0441\u0435 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F",
+    hideAllChanges:
+      "\u0421\u043A\u0440\u044B\u0442\u044C \u0432\u0441\u0435 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F",
+    openWebsite:
+      "\u041F\u043E\u043B\u043D\u044B\u0439 \u0441\u043F\u0438\u0441\u043E\u043A \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439",
+    error: {
+      title:
+        "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044C \u0441\u043F\u0438\u0441\u043E\u043A \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439",
+      description:
+        "\u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435 \u0438 \u043F\u043E\u043F\u0440\u043E\u0431\u0443\u0439\u0442\u0435 \u0441\u043D\u043E\u0432\u0430.",
     },
   },
 };

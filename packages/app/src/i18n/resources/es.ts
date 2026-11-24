@@ -1103,10 +1103,14 @@ export const es: TranslationResources = {
     help: {
       trigger: "Ayuda y soporte",
       sectionHelp: "Ayuda",
-      diagnostics: "Ejecutar diagnóstico",
+      diagnostics: "Ejecutar diagn\u00F3stico",
       shortcuts: "Atajos de teclado",
       reportIssue: "Informar de un problema",
       version: "JAgentDesk {{version}}",
+      discord: "Discord",
+      github: "Crear incidencia en GitHub",
+      whatsNew: "Novedades",
+      appName: "JAgentDesk",
     },
     sections: {
       sessions: "Historial",
@@ -2984,6 +2988,18 @@ export const es: TranslationResources = {
       forkHint: "JAgentDesk does not own {{name}}, so it is never edited.",
       fork: "Create copy",
       forked: "Training {{name}}",
+    },
+  },
+  changelog: {
+    title: "Novedades",
+    installed: "Instalada",
+    showMore: "Mostrar m\u00E1s",
+    showAllChanges: "Mostrar todos los cambios",
+    hideAllChanges: "Ocultar todos los cambios",
+    openWebsite: "Registro de cambios completo",
+    error: {
+      title: "No se pudo cargar el registro de cambios",
+      description: "Comprueba tu conexi\u00F3n e int\u00E9ntalo de nuevo.",
     },
   },
 };

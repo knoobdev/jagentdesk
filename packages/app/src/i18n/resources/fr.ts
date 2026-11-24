@@ -1105,8 +1105,12 @@ export const fr: TranslationResources = {
       sectionHelp: "Aide",
       diagnostics: "Lancer le diagnostic",
       shortcuts: "Raccourcis clavier",
-      reportIssue: "Signaler un problème",
+      reportIssue: "Signaler un probl\u00E8me",
       version: "JAgentDesk {{version}}",
+      discord: "Discord",
+      github: "Cr\u00E9er un ticket GitHub",
+      whatsNew: "Nouveaut\u00E9s",
+      appName: "JAgentDesk",
     },
     sections: {
       sessions: "Historique",
@@ -3023,6 +3027,18 @@ export const fr: TranslationResources = {
       forkHint: "JAgentDesk does not own {{name}}, so it is never edited.",
       fork: "Create copy",
       forked: "Training {{name}}",
+    },
+  },
+  changelog: {
+    title: "Nouveaut\u00E9s",
+    installed: "Install\u00E9e",
+    showMore: "Afficher plus",
+    showAllChanges: "Afficher toutes les modifications",
+    hideAllChanges: "Masquer toutes les modifications",
+    openWebsite: "Journal des modifications complet",
+    error: {
+      title: "Impossible de charger le journal des modifications",
+      description: "V\u00E9rifiez votre connexion et r\u00E9essayez.",
     },
   },
 };

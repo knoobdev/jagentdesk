@@ -1091,6 +1091,10 @@ export const en = {
       shortcuts: "Keyboard shortcuts",
       reportIssue: "Report an issue",
       version: "JAgentDesk {{version}}",
+      discord: "Discord",
+      github: "Create GitHub issue",
+      whatsNew: "What's new",
+      appName: "JAgentDesk",
     },
     sections: {
       sessions: "History",
@@ -2992,6 +2996,18 @@ export const en = {
       forkHint: "JAgentDesk does not own {{name}}, so it is never edited.",
       fork: "Create copy",
       forked: "Training {{name}}",
+    },
+  },
+  changelog: {
+    title: "What's new",
+    installed: "Installed",
+    showMore: "Show more",
+    showAllChanges: "Show all changes",
+    hideAllChanges: "Hide all changes",
+    openWebsite: "Full changelog",
+    error: {
+      title: "Unable to load the changelog",
+      description: "Check your connection and try again.",
     },
   },
 } as const;
