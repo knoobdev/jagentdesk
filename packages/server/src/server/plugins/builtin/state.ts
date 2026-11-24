@@ -51,12 +51,14 @@ export class BuiltinPluginState {
       const available =
         !this.unavailable.has(manifest.id) &&
         (!checks?.length || checks.some(({ state }) => state === "available"));
-      const unavailableReason = this.unavailable.get(manifest.id) ?? (available
-        ? undefined
-        : caps
-            ?.map((id) => this.capabilities?.[id]?.reason)
-            .filter(Boolean)
-            .join(" ") || "Required host tools are unavailable.");
+      const unavailableReason =
+        this.unavailable.get(manifest.id) ??
+        (available
+          ? undefined
+          : caps
+              ?.map((id) => this.capabilities?.[id]?.reason)
+              .filter(Boolean)
+              .join(" ") || "Required host tools are unavailable.");
       return {
         ...manifest,
         requires: [...manifest.requires],

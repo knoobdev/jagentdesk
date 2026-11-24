@@ -71,18 +71,21 @@ async function agent() {
   );
 }
 
-test("36.6 #1: a new host exposes the 20 static built-ins independently of Installed", async () => {
+test("36.6 #1: a new host exposes the 20 static and six bundled built-ins independently of Installed", async () => {
   const state = await client.getBuiltinPluginState();
   expect(state.canManage).toBe(true);
   expect(state.plugins.map(({ id }) => id)).toEqual(BUILTIN_PLUGIN_IDS);
-  expect(state.plugins.filter(({ enabled }) => enabled)).toHaveLength(17);
+  expect(state.plugins.filter(({ enabled }) => enabled)).toHaveLength(20);
   expect(state.plugins.filter(({ enabled }) => !enabled).map(({ id }) => id)).toEqual([
     "autorun",
     "session-share",
     "browser-tools",
+    "hoplite-provider",
+    "fx-provider",
+    "goose-provider",
   ]);
   await client.patchDaemonConfig({ pluginsEnabled: false });
-  expect((await client.listBuiltinPlugins()).filter(({ enabled }) => enabled)).toHaveLength(17);
+  expect((await client.listBuiltinPlugins()).filter(({ enabled }) => enabled)).toHaveLength(20);
 });
 
 test("36.6 #2: Docker RPCs and new agent catalogs change live; old agents retain their tools", async () => {

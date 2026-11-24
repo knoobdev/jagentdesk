@@ -21,7 +21,8 @@ export function observeBuiltinPluginUpdates(
   return source.on("plugins.builtin.changed", ({ payload }) => {
     queryClient.setQueryData<BuiltinPluginQueryState>(
       builtinPluginsQueryKey(serverId),
-      (previous) => (previous ? { ...previous, plugins: mergeBuiltinPluginWireState(payload) } : undefined),
+      (previous) =>
+        previous ? { ...previous, plugins: mergeBuiltinPluginWireState(payload) } : undefined,
     );
   });
 }

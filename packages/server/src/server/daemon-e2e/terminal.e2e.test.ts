@@ -388,7 +388,8 @@ async function collectRawBinaryFrames(
       reject(new Error(`Timed out collecting terminal frames (${timeout}ms)`));
     }, timeout);
 
-    const onMessage = (raw: WebSocket.RawData) => {
+    const onMessage = (raw: WebSocket.RawData, isBinary: boolean) => {
+      if (!isBinary) return;
       const buffer = toWsBuffer(raw);
       if (!buffer) {
         return;
@@ -2008,6 +2009,7 @@ test.each([false, true])(
     const cwd = tmpCwd();
     tempDirs.push(cwd);
     const marker = path.join(cwd, "output-complete");
+    const inputSeen = path.join(cwd, "input-seen");
     const created = await createTerminalInWorkspace(ctx.client, {
       cwd,
       options: {
@@ -2019,6 +2021,7 @@ test.each([false, true])(
       process.stdin.setRawMode?.(true);
       process.stdin.resume();
       process.stdin.once('data', () => {
+        fs.writeFileSync(${JSON.stringify(inputSeen)}, 'seen');
         const chunk = Buffer.alloc(256 * 1024, 120);
         let remaining = 128;
         const write = () => {
@@ -2027,10 +2030,18 @@ test.each([false, true])(
         };
         write();
       });
+      process.stdout.write('INPUT-READY\\r\\n');
     `,
         ],
       },
     });
+    await waitForCondition(
+      async () =>
+        (await ctx.client.captureTerminal(created.terminal!.id)).lines.some((line) =>
+          line.includes("INPUT-READY"),
+        ),
+      10000,
+    );
     const ws = await connectRawWebSocket(ctx.daemon.port, chunked);
     try {
       const slot = await subscribeRawTerminal(ws, created.terminal!.id, "slow-terminal");
@@ -2045,6 +2056,7 @@ test.each([false, true])(
       try {
         ws.pause();
         sendRawTerminalInput(ws, slot, "go\n");
+        await waitForCondition(() => existsSync(inputSeen), 10000);
         await waitForCondition(() => existsSync(marker), 20000);
         ws.resume();
         await waitForCondition(() => capture.snapshotCount > 0, 10000);

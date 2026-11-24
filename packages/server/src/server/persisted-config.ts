@@ -440,14 +440,6 @@ function getLogger(logger: LoggerLike | undefined): LoggerLike | undefined {
   return logger?.child({ module: "config" });
 }
 
-function isConfigRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function configRecord(value: unknown): Record<string, unknown> | undefined {
-  return isConfigRecord(value) ? value : undefined;
-}
-
 // COMPAT(speechProviderConfig): added in v0.12.0, remove after 2027-04-26.
 // Fold shared credentials once at the file boundary; consumers see only the strict
 // per-site shape. Never include credential values in diagnostics.

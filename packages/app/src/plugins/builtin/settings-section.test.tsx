@@ -54,14 +54,14 @@ beforeEach(() => {
   state.confirm.mockReset().mockResolvedValue(true);
 });
 afterEach(cleanup);
-it("renders all 20 names, defaults, descriptions and dependencies", () => {
+it("renders all 26 names, defaults, descriptions and dependencies", () => {
   render(<BuiltinPluginsSection serverId="host" />);
-  expect(screen.getAllByRole("switch")).toHaveLength(20);
+  expect(screen.getAllByRole("switch")).toHaveLength(26);
   expect(
     screen
       .getAllByRole("switch")
       .filter((element) => element.getAttribute("aria-checked") === "true"),
-  ).toHaveLength(17);
+  ).toHaveLength(20);
   expect(screen.getByText(/Requires SSH servers/).textContent).toContain(
     "Run and monitor tasks on SSH servers.",
   );

@@ -527,8 +527,7 @@ export function createPluginWorker(options: {
       message.type === "provider.installation.inspect" ||
       message.type === "provider.installation.check_updates" ||
       message.type === "provider.installation.update" ||
-      message.type === "provider.catalog_key"
- ||
+      message.type === "provider.catalog_key" ||
       isUsageMessage(message)
     ) {
       send({ type: "error", requestId: message.requestId, error: "Plugin is stopping" });

@@ -14,9 +14,12 @@ class Updates implements BuiltinPluginUpdateSource {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
-  send(plugins: BuiltinPluginQueryState["plugins"]) {
+  send(
+    plugins: BuiltinPluginQueryState["plugins"],
+    bundledPlugins?: BuiltinPluginQueryState["plugins"],
+  ) {
     for (const listener of this.listeners)
-      listener({ type: "plugins.builtin.changed", payload: { plugins } });
+      listener({ type: "plugins.builtin.changed", payload: { plugins, bundledPlugins } });
   }
 }
 it("updates checking Devices live as probes settle, preserving manage permission and host isolation", () => {
@@ -45,7 +48,16 @@ it("updates checking Devices live as probes settle, preserving manage permission
   );
   expect(devices().available).toBe(false);
   expect(devices().unavailableReason).toBe("Install adb");
-  source.send(pending);
+  source.send(
+    pending.filter(({ id }) => id !== "worktree-include"),
+    pending.filter(({ id }) => id === "worktree-include"),
+  );
+  expect(client.getQueryData<BuiltinPluginQueryState>(key)!.plugins).toHaveLength(pending.length);
+  expect(
+    client
+      .getQueryData<BuiltinPluginQueryState>(key)!
+      .plugins.find(({ id }) => id === "worktree-include"),
+  ).toEqual(pending.find(({ id }) => id === "worktree-include"));
   expect(devices().available).toBe(true);
   expect(devices().unavailableReason).toBeUndefined();
   expect(client.getQueryData<BuiltinPluginQueryState>(key)!.canManage).toBe(false);
