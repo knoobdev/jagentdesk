@@ -17,6 +17,7 @@ import {
   type CSSProperties,
   type DragEvent as ReactDragEvent,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type Ref,
 } from "react";
 import type { DOMProps } from "expo/dom";
@@ -73,6 +74,12 @@ const HOST_DIV_STYLE: CSSProperties = {
   paddingLeft: 0,
   paddingRight: 0,
 };
+
+interface TerminalTouchFocus {
+  pointerId: number;
+  x: number;
+  y: number;
+}
 
 function buildXtermThemeKey(theme: ITheme): string {
   const values: Array<string> = [
@@ -579,10 +586,46 @@ export default function TerminalEmulator({
     });
   }, []);
 
-  const handleRootPointerDown = useCallback(() => {
-    onFocus?.();
-    runtimeRef.current?.focus();
-  }, [onFocus]);
+  const touchFocusRef = useRef<TerminalTouchFocus | null>(null);
+
+  const handleRootPointerDown = useCallback(
+    (event: ReactPointerEvent) => {
+      onFocus?.();
+      touchFocusRef.current = null;
+      if (event.pointerType !== "touch") {
+        runtimeRef.current?.focus();
+        return;
+      }
+      // Focusing before a touch becomes a tap opens the keyboard during a scroll.
+      if (event.isPrimary) {
+        touchFocusRef.current = {
+          pointerId: event.pointerId,
+          x: event.clientX,
+          y: event.clientY,
+        };
+      }
+    },
+    [onFocus],
+  );
+
+  const handleRootPointerMove = useCallback((event: ReactPointerEvent) => {
+    const touch = touchFocusRef.current;
+    if (touch?.pointerId !== event.pointerId) return;
+    if (Math.hypot(event.clientX - touch.x, event.clientY - touch.y) > 8) {
+      touchFocusRef.current = null;
+      runtimeRef.current?.suppressAutomaticKeyboard();
+    }
+  }, []);
+
+  const handleRootPointerUp = useCallback((event: ReactPointerEvent) => {
+    const touch = touchFocusRef.current;
+    touchFocusRef.current = null;
+    if (touch?.pointerId === event.pointerId) runtimeRef.current?.focus();
+  }, []);
+
+  const handleRootPointerCancel = useCallback(() => {
+    touchFocusRef.current = null;
+  }, []);
 
   const handleRootContextMenu = useCallback(
     (event: ReactMouseEvent) => {
@@ -732,6 +775,9 @@ export default function TerminalEmulator({
       data-terminal-scrollbar-root="true"
       style={rootDivStyle}
       onPointerDown={handleRootPointerDown}
+      onPointerMove={handleRootPointerMove}
+      onPointerUp={handleRootPointerUp}
+      onPointerCancel={handleRootPointerCancel}
       onContextMenu={handleRootContextMenu}
       onDragLeave={handleRootDragLeave}
     >
