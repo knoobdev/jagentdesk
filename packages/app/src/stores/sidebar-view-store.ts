@@ -17,6 +17,7 @@ interface SidebarViewStoreState {
   setGroupMode: (mode: SidebarGroupMode) => void;
   toggleHostFilter: (serverId: string) => void;
   clearHostFilters: () => void;
+  focusHost: (serverId: string) => void;
   reconcileHostFilters: (serverIds: readonly string[]) => void;
 }
 
@@ -106,6 +107,7 @@ export const useSidebarViewStore = create<SidebarViewStoreState>()(
             : [...state.hostFilters, serverId],
         })),
       clearHostFilters: () => set({ hostFilters: [] }),
+      focusHost: (serverId) => set({ hostFilters: [serverId] }),
       reconcileHostFilters: (serverIds) =>
         set((state) => {
           if (state.hostFilters.length === 0) {
