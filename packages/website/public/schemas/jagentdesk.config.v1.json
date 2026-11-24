@@ -1241,6 +1241,12 @@
     "agents": {
       "type": "object",
       "properties": {
+        "resumeOnStartup": {
+          "type": "boolean"
+        },
+        "resumePrompt": {
+          "type": "string"
+        },
         "providers": {
           "type": "object",
           "propertyNames": {

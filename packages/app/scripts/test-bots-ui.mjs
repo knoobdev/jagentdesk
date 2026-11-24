@@ -20,7 +20,10 @@ const { BUILTIN_PLUGIN_IDS } = await import(
   pathToFileURL(path.join(root, "packages/protocol/dist/builtin-plugins.js"))
 );
 const run = promisify(execFile);
-const output = "/tmp/jad-plat";
+const output = process.env.JAGENTDESK_BOTS_UI_OUTPUT ?? "/tmp/jad-plat";
+const port = Number(process.env.JAGENTDESK_BOTS_UI_PORT ?? 6940);
+assert(Number.isInteger(port) && port > 0 && port <= 65535, "Invalid Bots UI test port");
+const endpoint = `127.0.0.1:${port}`;
 await fs.mkdir(path.join(output, "reports"), { recursive: true });
 const home = await fs.mkdtemp(path.join(output, "botsapp-live-"));
 const repo = path.join(home, "sum-repo");
@@ -42,14 +45,14 @@ for (const args of [
 await assert.rejects(run(process.execPath, ["--test"], { cwd: repo }));
 const reserved = net.createServer();
 await new Promise((resolve, reject) =>
-  reserved.once("error", reject).listen(6940, "127.0.0.1", resolve),
+  reserved.once("error", reject).listen(port, "127.0.0.1", resolve),
 );
 await new Promise((resolve) => reserved.close(resolve));
 const env = { ...process.env };
 for (const key of Object.keys(env)) if (key.startsWith("CLAUDE")) delete env[key];
 Object.assign(env, {
   JAGENTDESK_HOME: home,
-  JAGENTDESK_LISTEN: "127.0.0.1:6940",
+  JAGENTDESK_LISTEN: endpoint,
   JAGENTDESK_TAILSCALE_ENABLED: "0",
   JAGENTDESK_RELAY_ENABLED: "0",
   JAGENTDESK_REQUIRE_LOCAL_PAIRING: "0",
@@ -85,11 +88,11 @@ const child = spawn(process.execPath, ["packages/server/dist/scripts/supervisor-
 });
 child.stdout.pipe(log, { end: false });
 child.stderr.pipe(log, { end: false });
-const origin = "http://127.0.0.1:6940";
+const origin = `http://${endpoint}`;
 const result = {
   home,
   repo,
-  port: 6940,
+  port,
   claudeEnvKeys: Object.keys(env).filter((key) => key.startsWith("CLAUDE")),
   checks: [],
   screenshots: [],
@@ -165,7 +168,7 @@ try {
   });
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
   const now = new Date().toISOString();
-  const connection = { id: "direct:127.0.0.1:6940", type: "directTcp", endpoint: "127.0.0.1:6940" };
+  const connection = { id: `direct:${endpoint}`, type: "directTcp", endpoint };
   const testHost = {
     serverId,
     label: "Bots UI isolated host",
@@ -187,7 +190,7 @@ try {
   page = await context.newPage();
   let disconnectBrowser = false;
   const browserSockets = [];
-  await page.routeWebSocket(/:6940\/ws/, (socket) => {
+  await page.routeWebSocket(new RegExp(`:${port}/ws`), (socket) => {
     if (disconnectBrowser) {
       socket.close();
       return;

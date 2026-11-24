@@ -1,3 +1,4 @@
+import { HostCapabilityService } from "../../host-capabilities/service.js";
 import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -8,7 +9,10 @@ import { WebSocket } from "ws";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { afterAll, beforeAll, expect, test } from "vitest";
-import { BUILTIN_PLUGIN_IDS } from "@jagentdesk/protocol/builtin-plugins";
+import {
+  BUILTIN_PLUGIN_IDS,
+  type BuiltinPluginListItem,
+} from "@jagentdesk/protocol/builtin-plugins";
 import { DaemonClient } from "../../test-utils/daemon-client.js";
 import {
   createTestJAgentDeskDaemon,
@@ -32,8 +36,12 @@ class LoopbackTunnel extends TunnelManager {
 let daemon: TestJAgentDeskDaemon;
 let client: DaemonClient;
 const tunnel = new LoopbackTunnel(pino({ level: "silent" }));
+const errorLogs: string[] = [];
 beforeAll(async () => {
-  daemon = await createTestJAgentDeskDaemon({ sessionShareTunnelManager: tunnel });
+  daemon = await createTestJAgentDeskDaemon({
+    sessionShareTunnelManager: tunnel,
+    logger: pino({ level: "error" }, { write: (line) => errorLogs.push(line) }),
+  });
   client = new DaemonClient({ url: `ws://127.0.0.1:${daemon.port}/ws`, appVersion: "0.9.59" });
   await client.connect();
 }, 60_000);
@@ -80,8 +88,10 @@ test("36.6 #1: a new host exposes the 20 static built-ins independently of Insta
 test("36.6 #2: Docker RPCs and new agent catalogs change live; old agents retain their tools", async () => {
   const before = await agent();
   expect((await tools(before.id)).some((name) => name.startsWith("docker_"))).toBe(true);
+  const errorsBefore = errorLogs.length;
   await client.setBuiltinPlugin("docker", false);
   await expect(client.dockerList()).rejects.toMatchObject({ code: "plugin_disabled" });
+  expect(errorLogs).toHaveLength(errorsBefore);
   const after = await agent();
   expect((await tools(after.id)).filter((name) => name.startsWith("docker_"))).toEqual([]);
   expect((await tools(before.id)).some((name) => name.startsWith("docker_"))).toBe(true);
@@ -268,3 +278,60 @@ test("36.6 #6: turning sharing off disconnects real scoped guests and stops the 
     await guest.close();
   }
 }, 30_000);
+
+test("probing Devices stays pending and settling probes pushes built-in availability to clients", async () => {
+  let settle!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    settle = resolve;
+  });
+  const capabilities = new HostCapabilityService({
+    jagentdeskHome: daemon.jagentdeskHome,
+    logger: pino({ level: "silent" }),
+    host: {
+      platform: "linux",
+      arch: "x64",
+      env: {},
+      homeDir: daemon.jagentdeskHome,
+      jagentdeskHome: daemon.jagentdeskHome,
+      exists: () => false,
+    },
+    runner: {
+      find: async () => {
+        await gate;
+        return null;
+      },
+      run: async () => ({ ok: false, stdout: "", stderr: "" }),
+    },
+  });
+  const host = await createTestJAgentDeskDaemon({ hostCapabilities: capabilities });
+  const connection = new DaemonClient({
+    url: `ws://127.0.0.1:${host.port}/ws`,
+    appVersion: "0.9.59",
+  });
+  const pushed: BuiltinPluginListItem[][] = [];
+  const devicesUnavailable = () =>
+    pushed.at(-1)?.find(({ id }) => id === "devices")?.available === false;
+  try {
+    await connection.connect();
+    const pending = (await connection.listBuiltinPlugins()).find(({ id }) => id === "devices")!;
+    expect(pending.available).toBe(true);
+    expect(pending.unavailableReason).toBeUndefined();
+    const unsubscribe = connection.on("plugins.builtin.changed", ({ payload }) =>
+      pushed.push(payload.plugins),
+    );
+    // Flush the client's event-demand update before allowing the probes to finish.
+    await connection.listBuiltinPlugins();
+    settle();
+    await capabilities.refresh();
+    await expect.poll(devicesUnavailable).toBe(true);
+    expect(pushed.at(-1)?.find(({ id }) => id === "devices")?.unavailableReason).toContain("adb");
+    expect(
+      (await connection.listBuiltinPlugins()).find(({ id }) => id === "workbench")?.available,
+    ).toBe(false);
+    unsubscribe();
+  } finally {
+    settle();
+    await connection.close();
+    await host.close();
+  }
+});

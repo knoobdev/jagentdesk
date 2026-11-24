@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { BuiltinPluginId, BuiltinPluginListItem } from "@jagentdesk/protocol/builtin-plugins";
+import type { BuiltinPluginId } from "@jagentdesk/protocol/builtin-plugins";
 import { useFetchQuery } from "@/data/query";
 import { useSessionStore } from "@/stores/session-store";
 import { useHostFeature } from "@/runtime/host-features";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { builtinPluginEnabled } from "./registry";
+import {
+  builtinPluginsQueryKey,
+  observeBuiltinPluginUpdates,
+  type BuiltinPluginQueryState as State,
+} from "./updates";
+export { builtinPluginsQueryKey } from "./updates";
 
 export function useBuiltinPluginEnabled(
   serverId: string | null | undefined,
@@ -16,11 +22,6 @@ export function useBuiltinPluginEnabled(
   );
 }
 
-export const builtinPluginsQueryKey = (serverId: string) => ["builtin-plugins", serverId] as const;
-interface State {
-  plugins: BuiltinPluginListItem[];
-  canManage?: boolean;
-}
 export function useBuiltinPlugins(serverId: string) {
   const client = useHostRuntimeClient(serverId);
   const connected = useHostRuntimeIsConnected(serverId);
@@ -39,12 +40,12 @@ export function useBuiltinPlugins(serverId: string) {
   });
   useEffect(() => {
     if (!client || !supported) return;
-    return client.on("plugins.builtin.changed", ({ payload }) => {
-      queryClient.setQueryData<State>(queryKey, (previous) =>
-        previous ? { ...previous, plugins: payload.plugins } : undefined,
-      );
-    });
-  }, [client, supported, queryClient, queryKey]);
+    return observeBuiltinPluginUpdates(
+      { on: (type, listener) => client.on(type, listener) },
+      queryClient,
+      serverId,
+    );
+  }, [client, supported, queryClient, serverId]);
   const set = useCallback(
     async (id: BuiltinPluginId, enabled: boolean, cascade: boolean) => {
       if (!client || !connected) throw new Error("Host disconnected");

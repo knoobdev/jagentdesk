@@ -204,3 +204,39 @@ describe("static built-in plugin registry", () => {
     expect(builtinPluginForTool("send_agent_prompt")).toBe(null);
   });
 });
+
+it("keeps checking host probes pending and notifies when they settle", async () => {
+  const { state } = await setup();
+  const snapshots: ReturnType<typeof state.list>[] = [];
+  const unsubscribe = state.subscribe(() => snapshots.push(state.list()));
+  await state.setCapabilities({});
+  for (const id of ["devices", "workbench"] as const) {
+    const entry = state.list().find((plugin) => plugin.id === id)!;
+    expect(entry.available).toBe(true);
+    expect(entry.unavailableReason).toBeUndefined();
+  }
+  await state.setCapabilities({
+    androidDevices: {
+      state: "missing_tool",
+      reason: "Install adb",
+      version: null,
+      installable: ["adb"],
+    },
+  });
+  expect(snapshots.at(-1)?.find(({ id }) => id === "devices")).toMatchObject({
+    available: false,
+    unavailableReason: "Install adb",
+  });
+  await state.setCapabilities({
+    androidDevices: {
+      state: "available",
+      reason: "",
+      version: "1",
+      installable: [],
+    },
+  });
+  expect(snapshots.at(-1)?.find(({ id }) => id === "devices")).toMatchObject({ available: true });
+  expect(snapshots.at(-1)?.find(({ id }) => id === "devices")?.unavailableReason).toBeUndefined();
+  expect(snapshots).toHaveLength(3);
+  unsubscribe();
+});

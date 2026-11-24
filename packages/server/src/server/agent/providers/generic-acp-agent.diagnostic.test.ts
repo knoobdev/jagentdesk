@@ -6,6 +6,7 @@ import path from "node:path";
 import { describe, expect, test } from "vitest";
 
 import { createTestLogger } from "../../../test-utils/test-logger.js";
+import { runProviderRefreshWithDeadline } from "../provider-refresh-deadline.js";
 import { buildVersionProbeCommand, GenericACPAgentClient } from "./generic-acp-agent.js";
 
 const TEST_ACP_TIMEOUT_MS = 1_000;
@@ -92,8 +93,15 @@ describe("GenericACPAgentClient diagnostics", () => {
       });
 
       await expect(
-        client.fetchCatalog({ cwd: tmpdir(), force: true, timeoutMs: TEST_ACP_TIMEOUT_MS }),
-      ).rejects.toThrow(`ACP catalog probe timed out after ${TEST_ACP_TIMEOUT_MS}ms`);
+        runProviderRefreshWithDeadline({
+          label: "Grok",
+          timeoutMs: TEST_ACP_TIMEOUT_MS,
+          operation: (context) =>
+            client.fetchCatalog({ scope: "workspace", cwd: tmpdir(), force: true }, context),
+        }),
+      ).rejects.toThrow(
+        `Timed out refreshing Grok after ${TEST_ACP_TIMEOUT_MS}ms; pending: session/new`,
+      );
 
       const pid = Number(await readFile(pidPath, "utf8"));
       await expectProcessExit(pid);

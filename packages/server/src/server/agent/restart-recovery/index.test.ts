@@ -58,7 +58,7 @@ test("recovery saves intent before normalization, clears before dispatch, and re
   }
 });
 
-test("opt-out consumes pending recovery and excludes archived, private, owned and archived-workspace agents", async () => {
+test("opt-out consumes pending recovery and excludes archived, private, owned, bot and archived-workspace agents", async () => {
   const root = await mkdtemp(join(tmpdir(), "restart-recovery-"));
   try {
     const storage = new AgentStorage(root, createTestLogger());
@@ -67,6 +67,7 @@ test("opt-out consumes pending recovery and excludes archived, private, owned an
       { id: "archived", archivedAt: "today" },
       { id: "private", internal: true },
       { id: "owned", owner: { kind: "daemon", daemonId: "hub", executionId: "run" } },
+      { id: "bot", background: true, labels: { "jagentdesk.bot.id": "builder" } },
       { id: "workspace", workspaceId: "archived" },
     ]) {
       await storage.upsert(
@@ -93,6 +94,7 @@ test("opt-out consumes pending recovery and excludes archived, private, owned an
     });
     await recovery.captureRunningAgents();
     expect((await storage.get("running"))?.resumeOnStartup).toBe(true);
+    expect((await storage.get("bot"))?.resumeOnStartup).not.toBe(true);
     enabled = false;
     await recovery.prepareStartup();
     enabled = true;

@@ -560,6 +560,7 @@ export interface JAgentDeskDaemon {
 }
 
 export interface JAgentDeskDaemonDependencies {
+  hostCapabilities?: HostCapabilityService;
   botsTriggerSource?: BotTriggerSource;
   sessionShareTunnelManager?: TunnelManager;
   builtinPlugins?: BuiltinPluginLoader;
@@ -2196,10 +2197,12 @@ export async function createJAgentDeskDaemon(
             // Spec 24.2: what this host can run, probed in the background after start.
             // Tools the platform-aware installer added live in $JAGENTDESK_HOME/tools/bin.
             ensureToolDirsOnPath(config.jagentdeskHome);
-            const hostCapabilities = new HostCapabilityService({
-              jagentdeskHome: config.jagentdeskHome,
-              logger,
-            });
+            const hostCapabilities =
+              dependencies.hostCapabilities ??
+              new HostCapabilityService({
+                jagentdeskHome: config.jagentdeskHome,
+                logger,
+              });
             const hostToolInstaller = new HostToolInstaller({
               jagentdeskHome: config.jagentdeskHome,
               logger,

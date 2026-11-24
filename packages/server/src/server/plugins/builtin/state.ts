@@ -44,10 +44,10 @@ export class BuiltinPluginState {
   list(): BuiltinPluginListItem[] {
     const entries = this.manifests.map((manifest): BuiltinPluginListItem => {
       const caps = manifest.hostCapabilities;
-      const available =
-        !caps?.length ||
-        this.capabilities === null ||
-        caps.some((id) => this.capabilities?.[id]?.state === "available");
+      // Host probes publish an empty snapshot while checking. Only a settled
+      // result can make a plugin unavailable (and stop its dependents).
+      const checks = caps?.flatMap((id) => this.capabilities?.[id] ?? []);
+      const available = !checks?.length || checks.some(({ state }) => state === "available");
       const unavailableReason = available
         ? undefined
         : caps

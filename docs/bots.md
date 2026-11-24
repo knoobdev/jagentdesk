@@ -19,6 +19,11 @@ on the item, not in MEMORY.md. Each new turn reads changed SOUL/MEMORY content a
 open items/questions; only the first 200 MEMORY lines enter context. Receipt state advances
 only after the provider accepts the turn.
 
+Bots owns Supervisor restart scheduling. Generic opt-in agent recovery excludes sessions
+with the bot ownership label, including older records. The durable active wake recovers an
+interrupted chat even before it creates an item; an undelivered wake keeps its existing retry.
+Idle waiting Supervisors do not enter generic recovery.
+
 The daemon freezes the full worktree diff against its dispatch commit, runs BA, Tester and
 Pentester Peers, and derives verdicts with [the shared review rules](../packages/server/src/server/review/cross-review.ts).
 New files must be staged so they appear in the review diff. Oversized diffs, invalid reviewer

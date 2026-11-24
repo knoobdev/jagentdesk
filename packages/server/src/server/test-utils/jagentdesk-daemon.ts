@@ -15,6 +15,7 @@ import { createTestAgentClients } from "./fake-agent-client.js";
 import type { PushNotificationSender } from "../push/notifications.js";
 
 interface TestJAgentDeskDaemonOptions {
+  hostCapabilities?: import("../host-capabilities/service.js").HostCapabilityService;
   botsTriggerSource?: import("../bots/service.js").BotTriggerSource;
   sessionShareTunnelManager?: import("../session-share/tunnel-manager.js").TunnelManager;
   builtinPlugins?: BuiltinPluginLoader;
@@ -100,6 +101,7 @@ export async function createTestJAgentDeskDaemon(
       await prepareTestDaemonConfig(options);
     const logger = options.logger ?? pino({ level: "silent" });
     const daemon = await createJAgentDeskDaemon(config, logger, {
+      hostCapabilities: options.hostCapabilities,
       botsTriggerSource: options.botsTriggerSource,
       sessionShareTunnelManager: options.sessionShareTunnelManager,
       builtinPlugins: options.builtinPlugins ?? new BuiltinPluginLoader(undefined, []),

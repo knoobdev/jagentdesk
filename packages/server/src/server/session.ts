@@ -2521,7 +2521,7 @@ export class Session {
         await this.dispatchInboundMessage(msg, source);
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
-        this.sessionLogger.error({ err }, "Error handling message");
+        this.logRequestError(err);
 
         const requestId =
           "requestId" in msg && typeof msg.requestId === "string" ? msg.requestId : undefined;
@@ -3372,6 +3372,12 @@ export class Session {
       default:
         return undefined;
     }
+  }
+
+  private logRequestError(err: Error): void {
+    if (err instanceof BuiltinPluginError)
+      this.sessionLogger.warn({ err }, "Built-in plugin request rejected");
+    else this.sessionLogger.error({ err }, "Error handling message");
   }
 
   private dispatchUsageMessage(msg: SessionInboundMessage): Promise<void> | undefined {

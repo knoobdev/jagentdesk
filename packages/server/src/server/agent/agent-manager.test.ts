@@ -1257,6 +1257,7 @@ test("orders a concurrent replacement after a pending accepted steer", async () 
     })();
     await consumeInitial;
     await vi.waitFor(() => expect(session.startCount).toBe(2));
+    await manager.waitForAgentRunStart(agent.id);
 
     expect(session.interruptCount).toBe(1);
     expect(

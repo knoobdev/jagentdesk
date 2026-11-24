@@ -1,3 +1,5 @@
+import { AgentStorage, parseStoredAgentRecord } from "../agent/agent-storage.js";
+import { createRestartRecovery } from "../agent/restart-recovery/index.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -277,4 +279,106 @@ it("publishes lazy Supervisor readiness so clients can attach permission cards a
   service.wake(b.id, "Another question", "chat");
   await service.settled();
   expect(changed).toEqual([b.id]);
+});
+
+it("cold restart continues a running background supervisor once with generic recovery enabled", async () => {
+  const { service: before, runtime: oldRuntime } = setup();
+  const bot = await createBot(before);
+  const idle = await before.create({
+    slug: "idle",
+    name: "Idle",
+    identity: "Wait",
+    provider: "claude",
+    model: "default",
+    modeId: "default",
+  });
+  before.start();
+  before.wake(bot.id, "A chat turn with no item yet", "chat", "interrupted");
+  await before.settled();
+  expect(oldRuntime.sent).toHaveLength(1);
+  const home = homes.at(-1)!;
+  const storage = new AgentStorage(home, pino({ level: "silent" }));
+  const supervisorId = before.storage.bot(bot.id).agentId!;
+  for (const [id, lastStatus, labels] of [
+    [supervisorId, "running", { "jagentdesk.bot.id": bot.id }],
+    ["idle-supervisor", "idle", { "jagentdesk.bot.id": idle.id }],
+    ["foreground", "running", {}],
+  ] as const) {
+    await storage.upsert(
+      parseStoredAgentRecord({
+        id,
+        lastStatus,
+        labels,
+        background: id !== "foreground",
+        provider: "claude",
+        cwd: home,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        // Also exclude a stale recovery intent on an idle bot.
+        resumeOnStartup: id === "idle-supervisor",
+      }),
+    );
+  }
+  await before.dispose();
+  services.splice(services.indexOf(before), 1);
+  const runtime = new Runtime();
+  const generic: string[] = [];
+  const recovery = createRestartRecovery({
+    storage,
+    settings: () => ({ enabled: true, prompt: "generic recovery" }),
+    eligible: async () => true,
+    dispatch: async (id) => {
+      generic.push(id);
+      await runtime.send(id, "generic recovery");
+    },
+    report: (_id, error) => {
+      throw error;
+    },
+  });
+  await recovery.prepareStartup();
+  expect((await storage.get(supervisorId))?.resumeOnStartup).toBe(false);
+  expect((await storage.get("idle-supervisor"))?.resumeOnStartup).toBe(false);
+  const restarted = new BotsService(new BotStorage(home), runtime, {
+    logger: pino({ level: "silent" }),
+  });
+  services.push(restarted);
+  restarted.start();
+  recovery.resumePending();
+  await recovery.waitForResume("foreground", new AbortController().signal);
+  await restarted.settled();
+  restarted.start();
+  restarted.stop();
+  restarted.start();
+  await restarted.tick();
+  await restarted.settled();
+  expect(generic).toEqual(["foreground"]);
+  expect(runtime.sent.filter(({ id }) => id === supervisorId)).toHaveLength(1);
+  expect(runtime.sent.filter(({ id }) => id === "idle-supervisor")).toEqual([]);
+  expect(runtime.sent.find(({ id }) => id === supervisorId)?.text).toContain("daemon resumed");
+});
+
+it("cold restart retries an undelivered active wake without also scheduling a continuation", async () => {
+  const { service: before, runtime: oldRuntime } = setup();
+  const bot = await createBot(before);
+  oldRuntime.send = async () => {
+    throw new Error("Provider startup interrupted");
+  };
+  before.start();
+  before.wake(bot.id, "Original chat", "chat", "interrupted-send");
+  await before.settled();
+  expect(before.storage.pending(bot.id)).toHaveLength(1);
+  const home = homes.at(-1)!;
+  await before.dispose();
+  services.splice(services.indexOf(before), 1);
+  const runtime = new Runtime();
+  const restarted = new BotsService(new BotStorage(home), runtime, {
+    logger: pino({ level: "silent" }),
+  });
+  services.push(restarted);
+  restarted.start();
+  await restarted.settled();
+  await restarted.tick();
+  await restarted.settled();
+  expect(runtime.sent).toEqual([{ id: `supervisor:${bot.id}`, text: "[chat]\nOriginal chat" }]);
+  expect(restarted.storage.pending(bot.id)).toEqual([]);
 });

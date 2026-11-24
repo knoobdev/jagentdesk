@@ -163,7 +163,7 @@ describe("background Claude subagents", () => {
   });
 
   test("keeps a filtered task out of the track even when it emits sidechain frames", async () => {
-    // A workflow child is refused at declaration, but its frames still carry a parent_tool_use_id.
+    // Ambient housekeeping is refused at declaration, but can still carry a parent_tool_use_id.
     // Attributing them would recreate exactly what the filter rejected: a descriptor with no
     // title and a defaulted "running" status — a nameless row that never finishes.
     queryFactory.mockImplementation(() =>
@@ -174,9 +174,10 @@ describe("background Claude subagents", () => {
           subtype: "task_started",
           task_id: "wf-1",
           tool_use_id: "toolu_workflow",
-          task_type: "local_workflow",
-          workflow_name: "spec",
-          description: "Run the spec workflow",
+          task_type: "local_agent",
+          subagent_type: "general-purpose",
+          skip_transcript: true,
+          description: "Ambient housekeeping",
         },
         {
           type: "assistant",

@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { Logger } from "pino";
 import {
   BotPatchSchema,
+  BotMessageSchema,
   BotScheduleInputSchema,
   type Bot,
   type BotInput,
@@ -642,11 +643,16 @@ export class BotsService {
     this.hasStarted = true;
     if (firstStart) {
       for (const bot of this.storage.listBots()) {
-        if (this.storage.items(bot.id).length > 0)
+        const active = this.storage.state(`active:${bot.id}`, BotMessageSchema.nullable());
+        // An undelivered wake already owns its retry. Otherwise the active receipt
+        // survives a crash even when a chat turn has not created an item yet.
+        const retryPending = active && this.storage.pending(bot.id).some((m) => m.id === active.id);
+        if (!retryPending && (active || this.storage.items(bot.id).length > 0))
           this.wake(
             bot.id,
             "The daemon resumed. Reconcile your open items with their existing workers and pending questions. Never create a replacement worker for an existing item; inspect or message its worker first.",
             "resume",
+            active ? `resume:${active.id}` : undefined,
           );
       }
     }
