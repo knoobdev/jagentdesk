@@ -62,16 +62,20 @@ describe("resolveNavigateToAgent", () => {
     ]);
   });
 
-  it("prefers the input workspaceId over the stored one", () => {
-    // The store is still read (a screen dock agent must be recognised even when the caller
-    // passes a workspace), but an explicit workspaceId wins for the tab target.
-    const { deps, tabNavigations } = createFakeNavigators({ agentWorkspaceId: "stale-workspace" });
+  it("uses the input workspaceId only when the store has no record", () => {
+    const readTargets: { serverId: string; agentId: string }[] = [];
+    const { deps, tabNavigations } = createFakeNavigators({ agentWorkspaceId: null });
+    deps.readAgentNavTarget = (input) => {
+      readTargets.push(input);
+      return { agentWorkspaceId: null };
+    };
 
     resolveNavigateToAgent(
       { serverId: SERVER_ID, agentId: AGENT_ID, workspaceId: WORKSPACE_ID },
       deps,
     );
 
+    expect(readTargets).toEqual([{ serverId: SERVER_ID, agentId: AGENT_ID }]);
     expect(tabNavigations).toEqual([
       {
         serverId: SERVER_ID,
@@ -80,6 +84,12 @@ describe("resolveNavigateToAgent", () => {
         pin: undefined,
       },
     ]);
+  });
+
+  it("prefers the current agent workspace over a stale input workspace", () => {
+    const { deps, tabNavigations } = createFakeNavigators({ agentWorkspaceId: "current" });
+    resolveNavigateToAgent({ serverId: SERVER_ID, agentId: AGENT_ID, workspaceId: "stale" }, deps);
+    expect(tabNavigations[0]?.workspaceId).toBe("current");
   });
 
   it("falls back to the host agent route when the agent has no workspaceId", () => {

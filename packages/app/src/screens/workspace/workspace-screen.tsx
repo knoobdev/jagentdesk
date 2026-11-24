@@ -1,3 +1,4 @@
+import { usePendingWorkspaceOpen } from "@/stores/workspace-layout-store";
 import { PluginHeaderButtons, usePluginWorkspaceMenu } from "@/plugins/buttons/view";
 import { useActiveWorkspaceArchive } from "@/hooks/use-active-workspace-archive";
 import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
@@ -1928,6 +1929,40 @@ function useWorkspaceTerminalTabActions({
   };
 }
 
+function usePendingWorkspaceRecovery({
+  persistenceKey,
+  hasHydratedWorkspaces,
+  workspaceDescriptor,
+  normalizedServerId,
+  normalizedWorkspaceId,
+  recoveryAgentId,
+  recoveryRequested,
+}: {
+  persistenceKey: string;
+  hasHydratedWorkspaces: boolean;
+  workspaceDescriptor: ReturnType<typeof useWorkspace>;
+  normalizedServerId: string;
+  normalizedWorkspaceId: string;
+  recoveryAgentId: WorkspaceScreenContentProps["recoveryAgentId"];
+  recoveryRequested: WorkspaceScreenContentProps["recoveryRequested"];
+}) {
+  const pendingOpenTarget = usePendingWorkspaceOpen({
+    workspaceKey: persistenceKey,
+    hasHydratedWorkspaces,
+    workspaceExists: workspaceDescriptor !== null,
+  });
+  return useWorkspaceRecovery({
+    serverId: normalizedServerId,
+    workspaceId: normalizedWorkspaceId,
+    agentId: pendingOpenTarget?.kind === "agent" ? pendingOpenTarget.agentId : recoveryAgentId,
+    enabled: shouldInspectWorkspaceRecovery(
+      hasHydratedWorkspaces,
+      workspaceDescriptor,
+      recoveryRequested || pendingOpenTarget?.kind === "agent",
+    ),
+  });
+}
+
 function WorkspaceScreenContent({
   serverId,
   workspaceId,
@@ -2023,15 +2058,14 @@ function WorkspaceScreenContent({
   const hasHydratedWorkspaces = useSessionStore(
     (state) => state.sessions[normalizedServerId]?.hasHydratedWorkspaces ?? false,
   );
-  const workspaceRecovery = useWorkspaceRecovery({
-    serverId: normalizedServerId,
-    workspaceId: normalizedWorkspaceId,
-    agentId: recoveryAgentId,
-    enabled: shouldInspectWorkspaceRecovery(
-      hasHydratedWorkspaces,
-      workspaceDescriptor,
-      recoveryRequested,
-    ),
+  const workspaceRecovery = usePendingWorkspaceRecovery({
+    persistenceKey,
+    hasHydratedWorkspaces,
+    workspaceDescriptor,
+    normalizedServerId,
+    normalizedWorkspaceId,
+    recoveryAgentId,
+    recoveryRequested,
   });
 
   const selectWorkspaceAgentVisibility = useMemo(

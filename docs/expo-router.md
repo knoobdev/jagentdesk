@@ -75,17 +75,15 @@ History returns.
 
 ## Agent Targets
 
-Notifications and agent URLs enter the router with different authoritative
-targets.
+Agent URLs and [notification taps](notifications.md) name a host and agent. Use
+`navigateToAgent()` to resolve the current workspace from the store or host;
+notification workspace hints can be stale. Keep the stable agent URL as
+`/h/[serverId]/agent/[agentId]`.
 
-- Notifications carry `serverId`, `workspaceId`, and `agentId`. Route them
-  directly to the workspace with the agent open intent.
-- Agent URLs carry only `serverId` and `agentId`. Route them through
-  `/h/[serverId]/agent/[agentId]`; that route waits for the named host, resolves
-  the agent's workspace from the host, and then opens the agent there.
-
-Both paths converge on `navigateToAgent()`. Do not make notification routing
-guess a workspace, and do not add a workspace to the stable agent URL format.
+Wait for the host directory and persisted layout before opening a tab. Pending
+opens belong to the workspace layout store, keyed by workspace, and are consumed
+once the workspace is ready. A route's `open` parameter only carries legacy URL
+intents; notification delivery owns its pending target outside the route.
 
 ## Params
 

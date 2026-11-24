@@ -1,6 +1,6 @@
 import type { JsonValue } from "@jagentdesk/protocol/agent-types";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 import type { WorkspaceTab, WorkspaceTabTarget } from "@/workspace-tabs/model";
@@ -67,10 +67,20 @@ export type {
   WorkspaceTabSnapshot,
 };
 
+export interface OpenWorkspaceTabInput {
+  workspaceKey: string;
+  target: WorkspaceTabTarget;
+  intent: "reveal";
+  pin?: boolean;
+}
+
 interface WorkspaceLayoutStore {
   panelStateByWorkspace: Record<string, Record<string, JsonValue>>;
   panelRevisionByWorkspace: Record<string, Record<string, number>>;
   setTabState(workspaceKey: string, tabId: string, value: JsonValue): void;
+  pendingOpenByWorkspace: Record<string, OpenWorkspaceTabInput>;
+  deferOpenTab: (input: OpenWorkspaceTabInput) => null;
+  consumePendingOpen: (workspaceKey: string) => string | null;
   layoutByWorkspace: Record<string, WorkspaceLayout>;
   splitSizesByWorkspace: Record<string, Record<string, number[]>>;
   pinnedAgentIdsByWorkspace: Record<string, Set<string>>;
@@ -259,6 +269,29 @@ export function createWorkspaceLayoutStore(
               [workspaceKey]: { ...state.panelStateByWorkspace[workspaceKey], [tabId]: value },
             },
           }));
+        },
+        pendingOpenByWorkspace: {},
+        deferOpenTab: (input) => {
+          set((state) => ({
+            pendingOpenByWorkspace: {
+              ...state.pendingOpenByWorkspace,
+              [input.workspaceKey]: input,
+            },
+          }));
+          return null;
+        },
+        consumePendingOpen: (workspaceKey) => {
+          const pending = get().pendingOpenByWorkspace[workspaceKey];
+          if (!pending) return null;
+          set((state) => {
+            const { [workspaceKey]: _pending, ...pendingOpenByWorkspace } =
+              state.pendingOpenByWorkspace;
+            return { pendingOpenByWorkspace };
+          });
+          const tabId = get().openTabFocused(pending.workspaceKey, pending.target);
+          if (pending.pin && pending.target.kind === "agent")
+            get().pinAgent(pending.workspaceKey, pending.target.agentId);
+          return tabId;
         },
         layoutByWorkspace: {},
         splitSizesByWorkspace: {},
@@ -996,6 +1029,7 @@ export function createWorkspaceLayoutStore(
 
           set((state) => {
             const hasAny =
+              normalizedWorkspaceKey in state.pendingOpenByWorkspace ||
               normalizedWorkspaceKey in state.layoutByWorkspace ||
               normalizedWorkspaceKey in state.splitSizesByWorkspace ||
               normalizedWorkspaceKey in state.pinnedAgentIdsByWorkspace ||
@@ -1005,6 +1039,8 @@ export function createWorkspaceLayoutStore(
             if (!hasAny) {
               return state;
             }
+            const { [normalizedWorkspaceKey]: _pendingOpen, ...pendingOpenByWorkspace } =
+              state.pendingOpenByWorkspace;
             const { [normalizedWorkspaceKey]: _layout, ...layoutByWorkspace } =
               state.layoutByWorkspace;
             const { [normalizedWorkspaceKey]: _splits, ...splitSizesByWorkspace } =
@@ -1024,6 +1060,7 @@ export function createWorkspaceLayoutStore(
             return {
               panelStateByWorkspace,
               panelRevisionByWorkspace,
+              pendingOpenByWorkspace,
               layoutByWorkspace,
               splitSizesByWorkspace,
               pinnedAgentIdsByWorkspace,
@@ -1096,4 +1133,28 @@ export function useWorkspaceLayoutStoreHydrated(): boolean {
   }, []);
 
   return hasHydrated;
+}
+
+interface PendingWorkspaceOpenReadiness {
+  workspaceKey: string | null;
+  hasHydratedWorkspaces: boolean;
+  workspaceExists: boolean;
+}
+
+export function usePendingWorkspaceOpen({
+  workspaceKey,
+  hasHydratedWorkspaces,
+  workspaceExists,
+}: PendingWorkspaceOpenReadiness): WorkspaceTabTarget | null {
+  const workspaceReady = hasHydratedWorkspaces && workspaceExists;
+  const pending = useWorkspaceLayoutStore((state) =>
+    workspaceKey ? state.pendingOpenByWorkspace[workspaceKey] : undefined,
+  );
+  const layoutHydrated = useWorkspaceLayoutStoreHydrated();
+  useLayoutEffect(() => {
+    if (workspaceKey && workspaceReady && layoutHydrated && pending) {
+      useWorkspaceLayoutStore.getState().consumePendingOpen(workspaceKey);
+    }
+  }, [workspaceKey, workspaceReady, layoutHydrated, pending]);
+  return pending ? pending.target : null;
 }
