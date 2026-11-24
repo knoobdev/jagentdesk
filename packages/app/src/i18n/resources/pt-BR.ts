@@ -113,6 +113,10 @@ export const ptBR: TranslationResources = {
       fallback: "Mensagem...",
     },
     input: {
+      longPressToSendNow: "Long press to send now",
+
+      longPressToQueue: "Long press to queue",
+
       accessibilityLabel: "Enviar mensagem ao agente...",
       focusHint: "{{shortcut}} para focar",
       addAttachment: "Adicionar anexo",

@@ -113,6 +113,10 @@ export const ru: TranslationResources = {
       fallback: "Сообщение...",
     },
     input: {
+      longPressToSendNow: "Long press to send now",
+
+      longPressToQueue: "Long press to queue",
+
       accessibilityLabel: "Агент сообщений...",
       focusHint: "{{shortcut}}, чтобы сосредоточиться",
       addAttachment: "Добавить вложение",

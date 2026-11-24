@@ -112,6 +112,10 @@ export const vi = {
       fallback: "Tin nhắn...",
     },
     input: {
+      longPressToSendNow: "Long press to send now",
+
+      longPressToQueue: "Long press to queue",
+
       accessibilityLabel: "Nhắn cho agent...",
       focusHint: "{{shortcut}} để tập trung",
       addAttachment: "Thêm đính kèm",

@@ -111,6 +111,10 @@ export const en = {
       fallback: "Message...",
     },
     input: {
+      longPressToSendNow: "Long press to send now",
+
+      longPressToQueue: "Long press to queue",
+
       accessibilityLabel: "Message agent...",
       focusHint: "{{shortcut}} to focus",
       addAttachment: "Add attachment",

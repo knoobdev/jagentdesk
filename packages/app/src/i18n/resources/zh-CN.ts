@@ -113,6 +113,10 @@ export const zhCN: TranslationResources = {
       fallback: "输入消息...",
     },
     input: {
+      longPressToSendNow: "Long press to send now",
+
+      longPressToQueue: "Long press to queue",
+
       accessibilityLabel: "给 Agent 发消息...",
       focusHint: "{{shortcut}} 聚焦",
       addAttachment: "添加附件",

@@ -113,6 +113,10 @@ export const ar: TranslationResources = {
       fallback: "رسالة...",
     },
     input: {
+      longPressToSendNow: "Long press to send now",
+
+      longPressToQueue: "Long press to queue",
+
       accessibilityLabel: "وكيل الرسائل...",
       focusHint: "{{shortcut}}للتركيز",
       addAttachment: "إضافة مرفق",

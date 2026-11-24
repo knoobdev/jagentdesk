@@ -113,6 +113,10 @@ export const es: TranslationResources = {
       fallback: "Mensaje...",
     },
     input: {
+      longPressToSendNow: "Long press to send now",
+
+      longPressToQueue: "Long press to queue",
+
       accessibilityLabel: "Agente de mensajes...",
       focusHint: "{{shortcut}}para enfocar",
       addAttachment: "Agregar archivo adjunto",

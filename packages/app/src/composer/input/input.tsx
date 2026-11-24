@@ -1,3 +1,4 @@
+import * as Haptics from "expo-haptics";
 import { DEFAULT_CLIENT_SETTINGS, type SendShortcut } from "@/hooks/use-settings";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
@@ -63,11 +64,12 @@ import { formatShortcut, type ShortcutKey } from "@/utils/format-shortcut";
 import { getShortcutOs } from "@/utils/shortcut-platform";
 import type { MessageInputKeyboardActionKind } from "@/keyboard/actions";
 import { isImeComposingKeyboardEvent } from "@/utils/keyboard-ime";
-import { isWeb } from "@/constants/platform";
+import { isNative, isWeb } from "@/constants/platform";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useComposerHeightMirror } from "./height-mirror";
 import {
   resolveSendTooltipLabel,
+  resolveSubmitAccessibilityHint,
   resolveSubmitAccessibilityLabel,
   resolveVoiceAccessibilityLabel,
   resolveVoiceTooltipText,
@@ -75,7 +77,9 @@ import {
 import {
   applyDictationTranscript,
   computeCanStartDictation,
+  resolveAlternateSendAction,
   resolveComposerSurfacePresentation,
+  resolveMessageInputEnterAction,
   runAlternateSendAction,
   runDefaultSendAction,
   runMessageInputKeyboardAction,
@@ -767,8 +771,10 @@ function SendButtonTooltip({
   canPressLoadingButton,
   onSubmitLoadingPress,
   onDefaultSendAction,
+  onLongPressSend,
   isSendButtonDisabled,
   submitAccessibilityLabel,
+  submitAccessibilityHint,
   sendButtonCombinedStyle,
   isSubmitLoading,
   submitIcon,
@@ -782,8 +788,10 @@ function SendButtonTooltip({
   canPressLoadingButton: boolean;
   onSubmitLoadingPress: (() => void) | undefined;
   onDefaultSendAction: () => void;
+  onLongPressSend: () => void;
   isSendButtonDisabled: boolean;
   submitAccessibilityLabel: string;
+  submitAccessibilityHint: string | undefined;
   sendButtonCombinedStyle: React.ComponentProps<typeof TooltipTrigger>["style"];
   isSubmitLoading: boolean;
   submitIcon: "arrow" | "return";
@@ -798,8 +806,10 @@ function SendButtonTooltip({
     <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
       <TooltipTrigger
         onPress={canPressLoadingButton ? onSubmitLoadingPress : onDefaultSendAction}
+        onLongPress={canPressLoadingButton ? undefined : onLongPressSend}
         disabled={isSendButtonDisabled}
         accessibilityLabel={submitAccessibilityLabel}
+        accessibilityHint={submitAccessibilityHint}
         accessibilityRole="button"
         testID={submitButtonTestID}
         style={sendButtonCombinedStyle}
@@ -1531,6 +1541,17 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       });
     }, [defaultSendBehavior, isAgentRunning, handleSendMessage, handleQueueMessage, onQueue]);
 
+    const alternateSendAction = resolveAlternateSendAction({
+      defaultSendBehavior,
+      isAgentRunning,
+      onQueue,
+    });
+    const handleLongPressSend = useCallback(() => {
+      if (alternateSendAction && isNative)
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+      handleAlternateSendAction();
+    }, [alternateSendAction, handleAlternateSendAction]);
+
     const getWebTextArea = useCallback(
       (): TextAreaHandle | null => getWebTextAreaImpl(textInputRef.current),
       [],
@@ -1647,6 +1668,11 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       canPressLoadingButton,
       defaultActionQueues,
       isAgentRunning,
+      t,
+    });
+    const submitAccessibilityHint = resolveSubmitAccessibilityHint({
+      canPressLoadingButton,
+      alternateSendAction,
       t,
     });
 
@@ -1841,6 +1867,8 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
                   canPressLoadingButton={canPressLoadingButton}
                   onSubmitLoadingPress={onSubmitLoadingPress}
                   onDefaultSendAction={handleDefaultSendAction}
+                  onLongPressSend={handleLongPressSend}
+                  submitAccessibilityHint={submitAccessibilityHint}
                   isSendButtonDisabled={isSendButtonDisabled}
                   submitAccessibilityLabel={submitAccessibilityLabel}
                   sendButtonCombinedStyle={sendButtonCombinedStyle}

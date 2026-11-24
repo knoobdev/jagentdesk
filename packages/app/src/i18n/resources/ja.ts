@@ -113,6 +113,10 @@ export const ja: TranslationResources = {
       fallback: "メッセージ...",
     },
     input: {
+      longPressToSendNow: "Long press to send now",
+
+      longPressToQueue: "Long press to queue",
+
       accessibilityLabel: "エージェントにメッセージ...",
       focusHint: "{{shortcut}}でフォーカス",
       addAttachment: "添付ファイルを追加",
