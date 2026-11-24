@@ -1,3 +1,4 @@
+import type { AgentMetric } from "@jagentdesk/protocol/agent-types";
 import { useCallback, useMemo, useState } from "react";
 import { Pressable, Text, View, useWindowDimensions } from "react-native";
 import Svg, { Circle } from "react-native-svg";
@@ -20,6 +21,7 @@ interface ContextWindowMeterProps {
   maxTokens: number | null;
   usedTokens: number | null;
   totalCostUsd?: number | null;
+  sessionMetrics?: AgentMetric[];
   showPercentage?: boolean;
   /** Optional glyph envelope for icon-toolbar alignment. */
   glyphSize?: number;
@@ -149,6 +151,7 @@ export function ContextWindowMeter({
   maxTokens,
   usedTokens,
   totalCostUsd,
+  sessionMetrics = [],
   showPercentage = false,
   glyphSize,
 }: ContextWindowMeterProps) {
@@ -221,6 +224,7 @@ export function ContextWindowMeter({
             agentId={agentId}
             context={context}
             sessionCost={formattedSessionCost}
+            sessionMetrics={sessionMetrics}
             showTitle={false}
             refreshable
           />
@@ -262,6 +266,7 @@ export function ContextWindowMeter({
             agentId={agentId}
             context={context}
             sessionCost={formattedSessionCost}
+            sessionMetrics={sessionMetrics}
             showTitle
             refreshable={false}
           />
@@ -296,6 +301,7 @@ export function ContextWindowMeter({
           agentId={agentId}
           context={context}
           sessionCost={formattedSessionCost}
+            sessionMetrics={sessionMetrics}
           showTitle
           refreshable
         />

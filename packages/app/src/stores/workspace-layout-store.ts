@@ -1,6 +1,7 @@
+import { z } from "zod";
 import type { JsonValue } from "@jagentdesk/protocol/agent-types";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 import type { WorkspaceTab, WorkspaceTabTarget } from "@/workspace-tabs/model";
@@ -68,12 +69,22 @@ export type {
   WorkspaceTabSnapshot,
 };
 
+export interface OpenWorkspaceTabInput {
+  workspaceKey: string;
+  target: WorkspaceTabTarget;
+  intent: "reveal";
+  pin?: boolean;
+}
+
 interface WorkspaceLayoutStore {
   panelStateByWorkspace: Record<string, Record<string, JsonValue>>;
   panelRevisionByWorkspace: Record<string, Record<string, number>>;
   setTabState(workspaceKey: string, tabId: string, value: JsonValue): void;
   focusRequest: { workspaceKey: string; tabId: string } | null;
   focusWorkspace: (workspaceKey: string) => void;
+  pendingOpenByWorkspace: Record<string, OpenWorkspaceTabInput>;
+  deferOpenTab: (input: OpenWorkspaceTabInput) => null;
+  consumePendingOpen: (workspaceKey: string) => string | null;
   layoutByWorkspace: Record<string, WorkspaceLayout>;
   splitSizesByWorkspace: Record<string, Record<string, number[]>>;
   pinnedAgentIdsByWorkspace: Record<string, Set<string>>;
@@ -260,6 +271,10 @@ function createWorkspaceLayoutStorage(backingStorage: StateStorage): StateStorag
   };
 }
 
+const PersistedPinsSchema = z.object({
+  pinnedAgentIdsByWorkspace: z.record(z.string(), z.array(z.string())).optional(),
+});
+
 export function createWorkspaceLayoutStore(
   ids: WorkspaceLayoutIdSource = defaultWorkspaceLayoutIds,
   storage: StateStorage = AsyncStorage,
@@ -323,6 +338,29 @@ export function createWorkspaceLayoutStore(
           }));
         },
         focusRequest: null,
+        pendingOpenByWorkspace: {},
+        deferOpenTab: (input) => {
+          set((state) => ({
+            pendingOpenByWorkspace: {
+              ...state.pendingOpenByWorkspace,
+              [input.workspaceKey]: input,
+            },
+          }));
+          return null;
+        },
+        consumePendingOpen: (workspaceKey) => {
+          const pending = get().pendingOpenByWorkspace[workspaceKey];
+          if (!pending) return null;
+          set((state) => {
+            const { [workspaceKey]: _pending, ...pendingOpenByWorkspace } =
+              state.pendingOpenByWorkspace;
+            return { pendingOpenByWorkspace };
+          });
+          const tabId = get().openTabFocused(pending.workspaceKey, pending.target);
+          if (pending.pin && pending.target.kind === "agent")
+            get().pinAgent(pending.workspaceKey, pending.target.agentId);
+          return tabId;
+        },
         layoutByWorkspace: {},
         splitSizesByWorkspace: {},
         pinnedAgentIdsByWorkspace: {},
@@ -725,11 +763,24 @@ export function createWorkspaceLayoutStore(
               },
               snapshot,
             );
-            if (nextState.layout === currentLayout) {
-              return state;
+            let pinnedAgentIdsByWorkspace = state.pinnedAgentIdsByWorkspace;
+            for (const agentId of state.pinnedAgentIdsByWorkspace[normalizedWorkspaceKey] ?? []) {
+              if (!nextState.pinnedAgentIds?.has(agentId)) {
+                pinnedAgentIdsByWorkspace = removeAgentIdFromWorkspaceSet(
+                  pinnedAgentIdsByWorkspace,
+                  normalizedWorkspaceKey,
+                  agentId,
+                );
+              }
             }
+            if (
+              nextState.layout === currentLayout &&
+              pinnedAgentIdsByWorkspace === state.pinnedAgentIdsByWorkspace
+            )
+              return state;
 
             return {
+              pinnedAgentIdsByWorkspace,
               layoutByWorkspace: {
                 ...state.layoutByWorkspace,
                 [normalizedWorkspaceKey]: nextState.layout,
@@ -1235,6 +1286,7 @@ export function createWorkspaceLayoutStore(
 
           set((state) => {
             const hasAny =
+              normalizedWorkspaceKey in state.pendingOpenByWorkspace ||
               normalizedWorkspaceKey in state.layoutByWorkspace ||
               normalizedWorkspaceKey in state.splitSizesByWorkspace ||
               normalizedWorkspaceKey in state.pinnedAgentIdsByWorkspace ||
@@ -1246,6 +1298,8 @@ export function createWorkspaceLayoutStore(
             if (!hasAny) {
               return state;
             }
+            const { [normalizedWorkspaceKey]: _pendingOpen, ...pendingOpenByWorkspace } =
+              state.pendingOpenByWorkspace;
             const { [normalizedWorkspaceKey]: _layout, ...layoutByWorkspace } =
               state.layoutByWorkspace;
             const { [normalizedWorkspaceKey]: _splits, ...splitSizesByWorkspace } =
@@ -1271,6 +1325,7 @@ export function createWorkspaceLayoutStore(
             return {
               panelStateByWorkspace,
               panelRevisionByWorkspace,
+              pendingOpenByWorkspace,
               layoutByWorkspace,
               splitSizesByWorkspace,
               pinnedAgentIdsByWorkspace,
@@ -1287,6 +1342,21 @@ export function createWorkspaceLayoutStore(
         name: "workspace-layout-state",
         version: 1,
         storage: persistedStorage,
+        merge: (persistedState, currentState) => {
+          const persisted =
+            typeof persistedState === "object" && persistedState !== null ? persistedState : {};
+          const parsed = PersistedPinsSchema.safeParse(persisted);
+          return {
+            ...currentState,
+            ...persisted,
+            // Decode before publication: selectors can call Set.has during hydration notifications.
+            pinnedAgentIdsByWorkspace: Object.fromEntries(
+              Object.entries(
+                parsed.success ? (parsed.data.pinnedAgentIdsByWorkspace ?? {}) : {},
+              ).map(([key, agentIds]) => [key, new Set(agentIds)]),
+            ),
+          };
+        },
         onRehydrateStorage: () => (state) => {
           if (!state) return;
           for (const [workspaceKey, layout] of Object.entries(state.layoutByWorkspace)) {
@@ -1318,6 +1388,12 @@ export function createWorkspaceLayoutStore(
           }
           const projected = {
             layoutByWorkspace,
+            pinnedAgentIdsByWorkspace: Object.fromEntries(
+              Object.entries(state.pinnedAgentIdsByWorkspace).map(([key, agentIds]) => [
+                key,
+                Array.from(agentIds),
+              ]),
+            ),
             splitSizesByWorkspace: state.splitSizesByWorkspace,
             panelStateByWorkspace: Object.fromEntries(
               Object.entries(layoutByWorkspace).map(([key, layout]) => [
@@ -1360,4 +1436,28 @@ export function useWorkspaceLayoutStoreHydrated(): boolean {
   }, []);
 
   return hasHydrated;
+}
+
+interface PendingWorkspaceOpenReadiness {
+  workspaceKey: string | null;
+  hasHydratedWorkspaces: boolean;
+  workspaceExists: boolean;
+}
+
+export function usePendingWorkspaceOpen({
+  workspaceKey,
+  hasHydratedWorkspaces,
+  workspaceExists,
+}: PendingWorkspaceOpenReadiness): WorkspaceTabTarget | null {
+  const workspaceReady = hasHydratedWorkspaces && workspaceExists;
+  const pending = useWorkspaceLayoutStore((state) =>
+    workspaceKey ? state.pendingOpenByWorkspace[workspaceKey] : undefined,
+  );
+  const layoutHydrated = useWorkspaceLayoutStoreHydrated();
+  useLayoutEffect(() => {
+    if (workspaceKey && workspaceReady && layoutHydrated && pending) {
+      useWorkspaceLayoutStore.getState().consumePendingOpen(workspaceKey);
+    }
+  }, [workspaceKey, workspaceReady, layoutHydrated, pending]);
+  return pending ? pending.target : null;
 }

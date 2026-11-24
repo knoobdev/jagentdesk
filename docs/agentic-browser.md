@@ -4,6 +4,13 @@ The agentic browser runs each tab in an Electron `<webview>` on the desktop app.
 the `browser_*` tools through the daemon (`packages/server/src/server/browser-tools/`); the desktop
 main process executes the commands (`packages/desktop/src/features/browser-automation/`).
 
+## Desktop selection
+
+`browser_list_hosts` lists connected windows, including windows with no tabs. With multiple
+windows, `browser_new_tab` requires a `browserHostId` from that list. Existing tab commands
+follow their tab's window. Copy the window name from Command Center to identify it; the name
+and instance identity survive a renderer reload or daemon reconnect in that window.
+
 ## Identity
 
 A tab presents either the active fingerprint profile or, when none is chosen, a plain Chrome

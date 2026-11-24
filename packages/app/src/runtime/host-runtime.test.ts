@@ -1,3 +1,7 @@
+import { indexedDB, IDBKeyRange } from "fake-indexeddb";
+globalThis.indexedDB = indexedDB;
+globalThis.IDBKeyRange = IDBKeyRange;
+import { createReplicaRowStore } from "./replica-cache/row-store-factory";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   DaemonClient,
@@ -809,6 +813,76 @@ describe("HostRuntimeController", () => {
     expect(activeClient.latencyMeasurements()).toEqual([]);
   });
 
+  it.each([null, 35])(
+    "keeps the reconnected ordered route while an alternative handshake finishes (RTT %s)",
+    async (rtt) => {
+      const host = makeHost();
+      const primary = host.connections[0]!;
+      const alternative = host.connections[1]!;
+      const activeClient = makeConnectedProbeClient(40);
+      const candidateClient = makeConnectedProbeClient(60);
+      const candidate = createDeferred<void>();
+      const candidateStarted = createDeferred<void>();
+      let alternativeProbes = 0;
+      const controller = new HostRuntimeController({
+        host,
+        deps: {
+          createClient: () => {
+            throw new Error("Unexpected client replacement");
+          },
+          connectToDaemon: async ({ connection }) => {
+            if (connection.id === primary.id) throw new Error("Still reconnecting");
+            alternativeProbes += 1;
+            if (alternativeProbes === 1)
+              return {
+                client: makeConnectedProbeClient(60) as unknown as DaemonClient,
+                serverId: host.serverId,
+                hostname: null,
+              };
+            candidateStarted.resolve();
+            await candidate.promise;
+            return {
+              client: candidateClient as unknown as DaemonClient,
+              serverId: host.serverId,
+              hostname: null,
+            };
+          },
+          getClientId: async () => "reconnect-race",
+        },
+      });
+      await controller.start({
+        autoProbe: false,
+        initialConnection: {
+          connectionId: primary.id,
+          existingClient: activeClient as unknown as DaemonClient,
+        },
+      });
+      activeClient.setConnectionState({ status: "disconnected", reason: "Connection lost" });
+      const cycle = controller.runProbeCycleNow();
+      await candidateStarted.promise;
+      activeClient.heartbeatReportsRtt(rtt);
+      activeClient.setConnectionState({ status: "connected" });
+      const states: string[] = [];
+      controller.subscribe(() => states.push(controller.getSnapshot().connectionStatus));
+      candidate.resolve();
+      await cycle;
+      expect(controller.getSnapshot().activeConnectionId).toBe(primary.id);
+      expect(controller.getSnapshot().client).toBe(activeClient);
+      expect(activeClient.isDisposed()).toBe(false);
+      expect(candidateClient.isDisposed()).toBe(true);
+      expect(states.filter((state) => state !== "online")).toEqual([]);
+      expect(controller.getSnapshot().probeByConnectionId.get(primary.id)).toEqual(
+        rtt === null
+          ? { status: "pending", latencyMs: null }
+          : { status: "available", latencyMs: rtt },
+      );
+      expect(controller.getSnapshot().probeByConnectionId.get(alternative.id)?.status).toBe(
+        "pending",
+      );
+      await controller.stop();
+    },
+  );
+
   it("rejects probes that resolve to a different server id", async () => {
     const host = makeHost({
       serverId: "srv_old",
@@ -1504,13 +1578,28 @@ describe("HostRuntimeStore", () => {
         ],
       ]),
     );
-    const cache = new ReplicaCache(storage);
+    const rowStore = createReplicaRowStore();
+    const cache = new ReplicaCache(rowStore);
     cache.setHosts([host.serverId]);
+    cache.replaceDirectoryBaseline(host.serverId, {
+      agents: new Map([[cachedAgent.id, cachedAgent]]),
+      workspaces: new Map(),
+      projects: new Map(),
+    });
+    cache.commitTimeline(host.serverId, cachedAgent.id, {
+      agentId: cachedAgent.id,
+      items: useSessionStore
+        .getState()
+        .sessions[host.serverId]!.agentStreamTail.get(cachedAgent.id)!,
+      range: null,
+      hasOlder: false,
+    });
     await cache.flush();
     session.clearSession(host.serverId);
 
     const store = new HostRuntimeStore({
       storage,
+      replicaRowStore: rowStore,
       deps: {
         createClient: () => {
           throw new Error("createClient should not be called");
@@ -1525,6 +1614,7 @@ describe("HostRuntimeStore", () => {
     store.boot();
     await registryLoaded;
 
+    await store.prepareAgentTimeline(host.serverId, cachedAgent.id);
     const restored = useSessionStore.getState().sessions[host.serverId];
     expect(restored?.agents.get(cachedAgent.id)?.title).toBe("Cached agent");
     expect(restored?.agentStreamTail.get(cachedAgent.id)?.[0]).toMatchObject({
@@ -1754,6 +1844,7 @@ describe("HostRuntimeStore", () => {
       .getState()
       .initializeSession(host.serverId, fakeClient as unknown as DaemonClient, 1);
     store.syncHosts([host]);
+    store.acquireDirectoryDemand(host.serverId);
 
     await fakeClient.waitForFetches(1);
     await waitForDirectoryReady(store, host.serverId);
@@ -1807,6 +1898,7 @@ describe("HostRuntimeStore", () => {
     });
 
     store.syncHosts([host]);
+    store.acquireDirectoryDemand(host.serverId);
 
     await fakeClient.waitForFetches(1);
     await waitForDirectoryReady(store, host.serverId);
@@ -1872,6 +1964,7 @@ describe("HostRuntimeStore", () => {
       version: "0.1.96",
     });
     store.syncHosts([host]);
+    store.acquireDirectoryDemand(host.serverId);
 
     await fakeClient.waitForFetches(1);
     await waitForDirectoryReady(store, host.serverId);
@@ -1917,6 +2010,7 @@ describe("HostRuntimeStore", () => {
     });
 
     store.syncHosts([host]);
+    store.acquireDirectoryDemand(host.serverId);
     await vi.waitFor(() =>
       expect(store.getSnapshot(host.serverId)?.connectionStatus).toBe("online"),
     );
@@ -1998,6 +2092,7 @@ describe("HostRuntimeStore", () => {
       ]),
     );
     store.syncHosts([host]);
+    store.acquireDirectoryDemand(host.serverId);
     await fakeClient.waitForFetches(2);
     fakeClient.agentUpdate({
       kind: "upsert",
@@ -2082,6 +2177,7 @@ describe("HostRuntimeStore", () => {
       .getState()
       .initializeSession(host.serverId, fakeClient as unknown as DaemonClient, 1);
     store.syncHosts([host]);
+    store.acquireDirectoryDemand(host.serverId);
 
     await fakeClient.waitForFetches(2);
     await waitForDirectoryReady(store, host.serverId);
@@ -2167,6 +2263,7 @@ describe("HostRuntimeStore", () => {
       new Map([[recoveredAgent.agent.id, { epoch: "epoch", startSeq: 10, endSeq: 20 }]]),
     );
     store.syncHosts([host]);
+    store.acquireDirectoryDemand(host.serverId);
     await fakeClient.waitForFetches(2);
 
     fakeClient.agentUpdate({
@@ -2251,6 +2348,7 @@ describe("HostRuntimeStore", () => {
     });
 
     store.syncHosts([host]);
+    store.acquireDirectoryDemand(host.serverId);
     await fakeClient.waitForAgentUpdates();
     fakeClient.agentUpdate({
       kind: "upsert",
@@ -2296,6 +2394,7 @@ describe("HostRuntimeStore", () => {
       .getState()
       .initializeSession(host.serverId, fakeClient as unknown as DaemonClient, 1);
     store.syncHosts([host]);
+    store.acquireDirectoryDemand(host.serverId);
     await fakeClient.waitForFetches(1);
     await waitForDirectoryReady(store, host.serverId);
     const olderPage = new Deferred<Awaited<ReturnType<DaemonClient["fetchAgents"]>>>();
@@ -2364,6 +2463,7 @@ describe("HostRuntimeStore", () => {
       .getState()
       .initializeSession(host.serverId, fakeClient as unknown as DaemonClient, 1);
     store.syncHosts([host]);
+    store.acquireDirectoryDemand(host.serverId);
     await fakeClient.waitForFetches(1);
     await waitForDirectoryReady(store, host.serverId);
 
@@ -2423,6 +2523,7 @@ describe("HostRuntimeStore", () => {
     const sessionStore = useSessionStore.getState();
     sessionStore.initializeSession(host.serverId, fakeClient as unknown as DaemonClient, 1);
     store.syncHosts([host]);
+    store.acquireDirectoryDemand(host.serverId);
     await fakeClient.waitForFetches(1);
     await waitForDirectoryReady(store, host.serverId);
     const stalePage = new Deferred<Awaited<ReturnType<DaemonClient["fetchAgents"]>>>();
@@ -2521,6 +2622,7 @@ describe("HostRuntimeStore", () => {
       ]),
     );
     store.syncHosts([host]);
+    store.acquireDirectoryDemand(host.serverId);
     await fakeClient.waitForFetches(2);
     fakeClient.agentUpdate({
       kind: "upsert",
@@ -2849,6 +2951,7 @@ describe("HostRuntimeStore", () => {
       isArchiving: true,
     });
     store.syncHosts([host]);
+    store.acquireDirectoryDemand(host.serverId);
     await fakeClient.waitForFetches(2);
     fakeClient.agentUpdate({
       kind: "upsert",
@@ -2926,6 +3029,7 @@ describe("HostRuntimeStore", () => {
       .getState()
       .initializeSession(host.serverId, fakeClient as unknown as DaemonClient, 1);
     store.syncHosts([host]);
+    store.acquireDirectoryDemand(host.serverId);
 
     await fakeClient.waitForFetches(1);
     await waitForDirectoryReady(store, host.serverId);
@@ -3026,6 +3130,7 @@ describe("HostRuntimeStore", () => {
     });
 
     store.syncHosts([host]);
+    store.acquireDirectoryDemand(host.serverId);
 
     await fakeClient.waitForFetches(1);
     await waitForDirectoryReady(store, host.serverId);
@@ -3061,6 +3166,7 @@ describe("HostRuntimeStore", () => {
     });
 
     store.syncHosts([host]);
+    store.acquireDirectoryDemand(host.serverId);
     let snapshot = store.getSnapshot(host.serverId);
     const timeoutAt = Date.now() + 100;
     while (

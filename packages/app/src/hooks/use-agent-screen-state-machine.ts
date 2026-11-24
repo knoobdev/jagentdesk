@@ -1,3 +1,4 @@
+import type { ViewedTimelineStatus } from "@/timeline/viewed-timeline-sync";
 import { useRef } from "react";
 import type {
   AgentCapabilityFlags,
@@ -47,7 +48,8 @@ export interface AgentScreenMachineInput {
   isArchivingCurrentAgent: boolean;
   isHistorySyncing: boolean;
   needsAuthoritativeSync: boolean;
-  visibilityCatchUpStatus: "ready" | "pending" | "error";
+  visibilityCatchUpStatus: ViewedTimelineStatus;
+  visibilityCatchUpError: string | null;
   continuity: AgentScreenContinuity;
   hasHydratedHistoryBefore: boolean;
 }
@@ -116,6 +118,13 @@ function updateInitialSyncFailureMemory(args: {
   if (args.input.missingAgentState.kind === "error" && !args.input.hasHydratedHistoryBefore) {
     args.nextMemory.hadInitialSyncFailure = true;
   }
+  if (
+    args.input.visibilityCatchUpStatus === "error" &&
+    args.input.visibilityCatchUpError &&
+    !args.input.hasHydratedHistoryBefore
+  ) {
+    args.nextMemory.hadInitialSyncFailure = true;
+  }
 }
 
 function shouldUseOptimisticCreateFlowAgent(input: AgentScreenMachineInput): boolean {
@@ -169,7 +178,7 @@ function resolveAgentScreenSync(args: {
   if (input.isArchived) {
     return { status: "idle" };
   }
-  if (!input.isConnected) {
+  if (!input.isConnected || input.visibilityCatchUpStatus === "reattaching") {
     return { status: "reconnecting" };
   }
   if (input.missingAgentState.kind === "error") {
@@ -180,6 +189,7 @@ function resolveAgentScreenSync(args: {
   }
   if (
     input.visibilityCatchUpStatus === "pending" ||
+    input.visibilityCatchUpStatus === "checking" ||
     input.needsAuthoritativeSync ||
     input.isHistorySyncing
   ) {
@@ -187,7 +197,9 @@ function resolveAgentScreenSync(args: {
       status: "catching_up",
       ui: resolveCatchingUpUi({
         hasOptimisticCreateContinuity: hasOptimisticCreateContinuity(input),
-        isVisibilityCatchUpPending: input.visibilityCatchUpStatus === "pending",
+        isVisibilityCatchUpPending:
+          input.visibilityCatchUpStatus === "pending" ||
+          input.visibilityCatchUpStatus === "checking",
         hasHydratedHistoryBefore: input.hasHydratedHistoryBefore,
         hadInitialSyncFailure,
       }),
@@ -230,6 +242,21 @@ export function deriveAgentScreenViewState({
       state: {
         tag: "error",
         message: input.missingAgentState.message,
+      },
+      memory: nextMemory,
+    };
+  }
+
+  if (
+    input.visibilityCatchUpStatus === "error" &&
+    input.visibilityCatchUpError &&
+    !input.hasHydratedHistoryBefore &&
+    !nextMemory.hasRenderedReady
+  ) {
+    return {
+      state: {
+        tag: "error",
+        message: input.visibilityCatchUpError,
       },
       memory: nextMemory,
     };

@@ -1381,6 +1381,8 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       volume: dictationVolume,
       duration: dictationDuration,
       error: dictationError,
+      startError: dictationStartError,
+      clearStartError: clearDictationStartError,
       status: dictationStatus,
       startDictation,
       cancelDictation,
@@ -1417,16 +1419,27 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       sendAfterTranscriptRef.current = false;
     }, [dictationStatus, isDictating, isDictationProcessing]);
 
-    const startDictationIfAvailable = useCallback(
-      () =>
-        startDictationIfAvailableImpl({
-          dictationUnavailableMessage,
-          canStartDictation,
-          toast,
-          startDictation,
-        }),
-      [canStartDictation, dictationUnavailableMessage, startDictation, toast],
-    );
+    useEffect(() => {
+      if (showRealtimeOverlay) {
+        clearDictationStartError();
+      }
+    }, [showRealtimeOverlay, clearDictationStartError]);
+
+    const startDictationIfAvailable = useCallback(() => {
+      clearDictationStartError();
+      return startDictationIfAvailableImpl({
+        dictationUnavailableMessage,
+        canStartDictation,
+        toast,
+        startDictation,
+      });
+    }, [
+      canStartDictation,
+      clearDictationStartError,
+      dictationUnavailableMessage,
+      startDictation,
+      toast,
+    ]);
 
     const handleVoicePress = useCallback(
       () =>
@@ -1873,6 +1886,11 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
             style={inputWrapperCombinedStyle}
             pointerEvents={surfacePresentation.input.pointerEvents}
           >
+            {!showOverlay && dictationStartError ? (
+              <Text accessibilityRole="alert" style={styles.dictationStartError}>
+                {t(`message.dictation.${dictationStartError}`)}
+              </Text>
+            ) : null}
             {attachmentSlot}
             {/* Text input */}
             <View style={styles.textInputScrollWrapper}>
@@ -2045,6 +2063,12 @@ const styles = StyleSheet.create((theme: Theme) => ({
     alignItems: "flex-end",
     justifyContent: "space-between",
     marginHorizontal: -6,
+  },
+  dictationStartError: {
+    alignSelf: "flex-end",
+    textAlign: "right",
+    color: theme.colors.destructive,
+    fontSize: theme.fontSize.sm,
   },
   leftButtonGroup: {
     minWidth: 0,

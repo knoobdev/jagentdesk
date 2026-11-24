@@ -6,7 +6,7 @@ import { z } from "zod";
  * A skill is a standard Agent Skills directory `<name>/SKILL.md`. The daemon
  * scans the provider skill directories (22.3), installs owned skills as one real
  * directory under `.agents/skills` plus symlinks into `.claude/skills` and
- * `.kiro/skills`, and records everything it wrote in
+ * `.kiro/skills` (plus global Antigravity), and records everything it wrote in
  * `$JAGENTDESK_HOME/skills/lock.json`. Every operation goes through these RPCs so
  * desktop and mobile behave the same.
  *
@@ -40,6 +40,7 @@ export const SKILL_PROVIDER_ORDER = [
   "omp",
   "kimi",
   "kiro",
+  "antigravity",
 ] as const;
 
 export const SkillScopeSchema = z.enum(["global", "project"]);
@@ -103,6 +104,9 @@ export const SkillEntrySchema = z.object({
   projectRoot: z.string().nullable(),
   /** Directory label of the primary location (where `skillId` points). */
   dir: SkillDirLabelSchema.nullable(),
+  /** New provider directories use optional extensions so older clients parse the catalog. */
+  additionalDir: z.string().optional(),
+  additionalLinks: z.array(z.object({ dir: z.string(), path: z.string() })).optional(),
   realPath: z.string(),
   links: z.array(SkillLinkSchema),
   visibleTo: z.array(z.string()),

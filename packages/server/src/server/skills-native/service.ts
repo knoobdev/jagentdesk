@@ -1,3 +1,4 @@
+import { resolveBundledSkillsDir } from "./bundled.js";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { Logger } from "pino";
@@ -73,6 +74,8 @@ export type LegacySkillsListener = (skills: Skill[]) => void;
 
 export interface NativeSkillsServiceOptions {
   jagentdeskHome: string;
+  /** Null disables the packaged source for isolated source fixtures. */
+  bundledDir?: string | null;
   /** Home directory of the daemon user (global skill directories live here). */
   homeDir: string;
   logger: Logger;
@@ -116,6 +119,10 @@ export class NativeSkillsService {
     this.browser = new SkillSourceBrowser({
       cacheDir: path.join(this.skillsHome, "cache"),
       skillsHome: this.skillsHome,
+      bundledDir:
+        options.bundledDir === undefined
+          ? resolveBundledSkillsDir()
+          : (options.bundledDir ?? undefined),
       homeDir: this.homeDir,
       fetch: options.fetch,
       runCommand: options.runCommand,

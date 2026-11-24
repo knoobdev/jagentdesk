@@ -4,7 +4,7 @@ import type { Logger } from "pino";
 import { z } from "zod";
 import { LearnedEntrySchema, SkillExampleSchema } from "@jagentdesk/protocol/skills";
 import {
-  SkillDirLabelSchema,
+  SkillDirLabelSchema as ProtocolSkillDirLabelSchema,
   SkillScopeSchema,
   SkillSourceInfoSchema,
 } from "@jagentdesk/protocol/native-skills";
@@ -28,6 +28,8 @@ export const TrainingStateSchema = z.object({
   pending: z.array(LearnedEntrySchema),
 });
 export type TrainingState = z.infer<typeof TrainingStateSchema>;
+
+const SkillDirLabelSchema = z.union([ProtocolSkillDirLabelSchema, z.literal("antigravity")]);
 
 export const LockLinkSchema = z.object({ dir: SkillDirLabelSchema, path: z.string() });
 

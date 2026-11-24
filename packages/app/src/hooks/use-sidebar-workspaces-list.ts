@@ -186,6 +186,12 @@ export function useSidebarWorkspacesList(options?: {
     }
   }, [persistedProjectOrder, projects]);
 
+  useEffect(() => {
+    if (!isActive) return;
+    const releases = serverIds.map((serverId) => runtime.acquireDirectoryDemand(serverId));
+    return () => releases.forEach((release) => release());
+  }, [isActive, runtime, serverIds]);
+
   const refreshAll = useCallback(() => {
     if (!isActive) return;
     for (const serverId of serverIds) {

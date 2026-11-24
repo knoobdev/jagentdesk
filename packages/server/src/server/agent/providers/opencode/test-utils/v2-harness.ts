@@ -33,6 +33,7 @@ export class V2Harness {
   active = false;
   activeReads = 0;
   autoComplete = true;
+  sessionGetError: Error | null = null;
   constructor(private sequence = 0) {}
   private executions: SessionLogItem[] = [];
   startExecution() {
@@ -147,7 +148,10 @@ export class V2Harness {
         this.creates.push(input);
         return this.info;
       },
-      get: async () => this.info,
+      get: async () => {
+        if (this.sessionGetError) throw this.sessionGetError;
+        return this.info;
+      },
       list: async () => ({ data: [], cursor: {} }),
       // Mirrors the real surface: once an MCP server's tools are listed they
       // appear in the session context as "<server>_<tool>" tool calls.

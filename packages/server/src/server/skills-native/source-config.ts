@@ -29,6 +29,7 @@ export type ConfiguredSource = z.infer<typeof ConfiguredSourceSchema>;
 const SourcesFileSchema = z.object({
   version: z.literal(1),
   sources: z.array(ConfiguredSourceSchema),
+  bundledSourcesInitialized: z.boolean().optional(),
 });
 
 const GITHUB_SEGMENT = /^[A-Za-z0-9_.-]+$/;
@@ -159,6 +160,7 @@ export class SkillSourcesStore {
   constructor(
     private readonly skillsHome: string,
     private readonly now: () => number,
+    private readonly bundledDir?: string,
   ) {}
 
   get filePath(): string {
@@ -219,7 +221,14 @@ export class SkillSourcesStore {
       this.sources = this.defaults();
     } else {
       try {
-        this.sources = SourcesFileSchema.parse(JSON.parse(raw)).sources;
+        const file = SourcesFileSchema.parse(JSON.parse(raw));
+        this.sources = file.sources;
+        if (!file.bundledSourcesInitialized) {
+          const added = this.bundledSources().filter(
+            (source) => !this.sources.some((existing) => existing.sourceId === source.sourceId),
+          );
+          this.sources.unshift(...added);
+        }
       } catch (error) {
         throw invalid(`${this.filePath} is not a valid sources file: ${String(error)}`);
       }
@@ -228,17 +237,32 @@ export class SkillSourcesStore {
   }
 
   private defaults(): ConfiguredSource[] {
-    return officialSpecs().map((spec) => ({
-      sourceId: sourceIdFor(spec),
-      spec,
-      label: null,
-      enabled: true,
-      added_at_ms: 0,
-    }));
+    return [
+      ...this.bundledSources(),
+      ...officialSpecs().map((spec) => ({
+        sourceId: sourceIdFor(spec),
+        spec,
+        label: null,
+        enabled: true,
+        added_at_ms: 0,
+      })),
+    ];
+  }
+
+  private bundledSources(): ConfiguredSource[] {
+    if (!this.bundledDir) return [];
+    const spec: SkillSourceSpec = { kind: "local", path: this.bundledDir };
+    return [
+      { sourceId: sourceIdFor(spec), spec, label: "JAgentDesk", enabled: true, added_at_ms: 0 },
+    ];
   }
 
   private async save(): Promise<void> {
     await fs.mkdir(this.skillsHome, { recursive: true });
-    await writeJsonFileAtomic(this.filePath, { version: 1, sources: this.sources });
+    await writeJsonFileAtomic(this.filePath, {
+      version: 1,
+      sources: this.sources,
+      bundledSourcesInitialized: true,
+    });
   }
 }

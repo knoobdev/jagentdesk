@@ -506,6 +506,7 @@ export type MutableDaemonConfig = z.infer<typeof MutableDaemonConfigSchema>;
 export type MutableDaemonConfigPatch = z.infer<typeof MutableDaemonConfigPatchSchema>;
 import type {
   AgentCapabilityFlags,
+  AgentMetric,
   AgentModelDefinition,
   AgentMode,
   AgentPermissionRequest,
@@ -640,6 +641,12 @@ const AgentUsageTotalsSchema: z.ZodType<AgentUsageTotals> = z.object({
   outputTokens: z.number(),
   totalCostUsd: z.number(),
   turns: z.number(),
+});
+
+export const AgentMetricSchema: z.ZodType<AgentMetric> = z.object({
+  label: z.string(),
+  value: z.string(),
+  tone: z.enum(["default", "ok", "warning", "danger"]).optional(),
 });
 
 const McpStdioServerConfigSchema = z.object({
@@ -1001,6 +1008,7 @@ export const AgentStreamEventPayloadSchema = z.discriminatedUnion("type", [
     provider: AgentProviderSchema,
     turnId: z.string().optional(),
     usage: AgentUsageSchema.optional(),
+    metrics: z.array(AgentMetricSchema).optional(),
   }),
   z.object({
     type: z.literal("turn_failed"),
@@ -1112,6 +1120,7 @@ export const AgentSnapshotPayloadSchema = z.object({
   lastUsage: AgentUsageSchema.optional(),
   usageTotals: AgentUsageTotalsSchema.optional(),
   usageScopeKey: z.string().optional(),
+  sessionMetrics: z.array(AgentMetricSchema).optional(),
   lastError: z.string().optional(),
   title: z.string().nullable(),
   labels: z.record(z.string(), z.string()).default({}),
@@ -2207,10 +2216,16 @@ export const ProviderSubagentTimelineRequestMessageSchema = z.object({
   limit: z.number().int().nonnegative().optional(),
 });
 
+// "current" means the daemon has this agent loaded, the epoch matches, and the cursor is at the head.
+// Anything else is "behind", including an agent the daemon has not loaded.
+export const TimelineFreshnessSchema = z.enum(["current", "behind"]);
+
 export const SetAgentTimelineSubscriptionRequestMessageSchema = z.object({
   type: z.literal("agent.timeline.set_subscription.request"),
   agentIds: z.array(z.string()),
   requestId: z.string(),
+  // COMPAT(timelineFreshnessCheck): added in v0.9.59, remove after 2027-05-25.
+  cursors: z.record(z.string(), AgentTimelineCursorSchema).optional(),
 });
 
 export const AgentForkContextRequestMessageSchema = z.object({
@@ -5018,6 +5033,8 @@ export const ServerInfoStatusPayloadSchema = z
         forgeProviders: z.boolean().optional(),
         // COMPAT(selectiveAgentTimeline): added in v0.1.106, remove after 2027-01-12.
         selectiveAgentTimeline: z.boolean().optional(),
+        // COMPAT(timelineFreshnessCheck): added in v0.9.59, remove after 2027-05-25.
+        timelineFreshnessCheck: z.boolean().optional(),
         // COMPAT(canonicalSubmittedPrompts): added in v0.2.6, remove gate after 2027-01-30.
         canonicalSubmittedPrompts: z.boolean().optional(),
         agentMessageProvenance: z.boolean().optional(),
@@ -5881,6 +5898,8 @@ export const AgentTimelineEntryPayloadSchema = z.object({
   seqEnd: z.number().int().nonnegative(),
   sourceSeqRanges: z.array(AgentTimelineSeqRangeSchema),
   collapsed: z.array(z.enum(["assistant_merge", "reasoning_merge", "tool_lifecycle", "identity"])),
+  /** Set on the row that carries the turn footer: the turn's last assistant message, else its last tool call. */
+  turnMetrics: z.array(AgentMetricSchema).optional(),
 });
 
 export const FetchAgentTimelineResponseMessageSchema = z.object({
@@ -6076,6 +6095,11 @@ export const SetAgentTimelineSubscriptionResponseMessageSchema = z.object({
   payload: z.object({
     agentIds: z.array(z.string()),
     requestId: z.string(),
+    // COMPAT(timelineFreshnessCheck): added in v0.9.59, remove after 2027-05-25.
+    timelines: z.record(z.string(), TimelineFreshnessSchema).optional(),
+    // The agent row for each chat answered "current", which gets no timeline fetch to carry it.
+    // COMPAT(timelineFreshnessCheck): added in v0.9.59, remove after 2027-05-25.
+    agents: z.record(z.string(), AgentSnapshotPayloadSchema).optional(),
   }),
 });
 

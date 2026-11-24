@@ -278,3 +278,44 @@ describe("agent directory reconciliation", () => {
     expect(result.entries[0]?.agent.lastUsage).toEqual({ inputTokens: 10, outputTokens: 5 });
   });
 });
+
+describe("provider metrics", () => {
+  it("accepts session metrics from a stale buffered upsert without regressing metadata", () => {
+    const result = reconcileAgentDirectory({
+      previous: new Map(),
+      snapshot: [
+        {
+          ...entry("agent", "idle"),
+          agent: {
+            ...snapshot("agent", "idle"),
+            title: "newer page",
+            updatedAt: "2026-07-12T12:00:00.000Z",
+            sessionMetrics: [{ label: "Cost", value: "$0.10" }],
+          },
+        },
+      ],
+      deltas: [
+        {
+          kind: "upsert",
+          agent: {
+            ...snapshot("agent", "running"),
+            title: "stale live",
+            updatedAt: "2026-07-12T11:00:00.000Z",
+            sessionMetrics: [{ label: "Cost", value: "$0.42" }],
+          },
+          project: entry("agent", "idle").project,
+        },
+      ],
+    });
+
+    expect({
+      title: result.entries[0]?.agent.title,
+      status: result.entries[0]?.agent.status,
+      sessionMetrics: result.entries[0]?.agent.sessionMetrics,
+    }).toEqual({
+      title: "newer page",
+      status: "idle",
+      sessionMetrics: [{ label: "Cost", value: "$0.42" }],
+    });
+  });
+});

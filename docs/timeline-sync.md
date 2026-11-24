@@ -32,6 +32,11 @@ Client heartbeat reports presence:
 
 Heartbeat is used for notification routing. It must not be used as a correctness gate for `agent_stream` delivery. A stale mobile focus heartbeat may affect whether the user gets notified; it must not make timeline rows disappear from the live stream.
 
+Completed-turn metrics belong to the footer's source row (last assistant message,
+otherwise the last tool). Keep that attribution through projection, cache reload,
+and history replay so a fetch agrees with the live completion. Provider session
+metrics stay on the agent record; they do not bill the Insights usage ledger.
+
 ## Gap recovery is paged but complete
 
 Large unbounded timeline responses can exceed WebSocket frame limits, so catch-up uses bounded pages. Bounded does not mean partial.
@@ -140,6 +145,20 @@ The app chooses one delivery policy from `server_info.features.selectiveAgentTim
 
 This policy is owned by `viewed-timeline-sync.ts`; downstream reducers do not branch on daemon
 version.
+
+## Freshness checks
+
+A daemon advertising `timelineFreshnessCheck` compares each subscribed chat's cursor with the
+head of its loaded projection. It attaches delivery before comparing, so a concurrent append
+is either included in the answer or delivered live. Unloaded agents answer `behind` without
+loading a provider. A `current` answer includes the agent snapshot and settles the cached
+range without fetching history.
+
+Opening a chat stays quiet for 500 ms after sending the freshness request; cache restoration
+does not consume that delay. A resume on a still-connected socket stays quiet until the answer.
+A reconnect stays reconnecting until the answer. A `behind` answer starts visible catch-up. A held running footer settles with the messages or the current
+answer; directory status alone does not settle it. Subscription replacement keeps the existing
+source route attached throughout the request.
 
 ## Projected pages reconcile with live presentation
 

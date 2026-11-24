@@ -45,6 +45,7 @@ function searchResponse(hasNext = false) {
 
 function newService(fetch: ReturnType<typeof fakeFetch>): NativeSkillsService {
   return new NativeSkillsService({
+    bundledDir: null,
     jagentdeskHome: roots.jdHome,
     homeDir: roots.home,
     logger: createTestLogger(),

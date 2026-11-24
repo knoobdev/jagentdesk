@@ -191,6 +191,7 @@ function withInstalled(item: SkillCatalogItem, installed: readonly SkillEntry[])
 export interface SourceBrowserOptions {
   cacheDir: string;
   skillsHome: string;
+  bundledDir?: string;
   homeDir: string;
   fetch?: FetchLike;
   runCommand?: CommandRunner;
@@ -213,6 +214,7 @@ export class SkillSourceBrowser {
   private readonly runCommand: CommandRunner;
   private readonly homeDir: string;
   private readonly now: () => number;
+  private readonly bundledDir: string | undefined;
   /** Provider marketplace lists (local manifest reads). */
   private readonly listCache = new Map<string, { at: number; items: SkillCatalogItem[] }>();
 
@@ -225,7 +227,8 @@ export class SkillSourceBrowser {
       githubToken: options.githubToken ?? (options.fetch ? null : githubTokenFromEnv()),
       onBackgroundError: options.onBackgroundError,
     });
-    this.sources = new SkillSourcesStore(options.skillsHome, options.now);
+    this.bundledDir = options.bundledDir;
+    this.sources = new SkillSourcesStore(options.skillsHome, options.now, options.bundledDir);
     this.credentials = new DirectoryCredentialsStore(options.skillsHome);
     this.directories = new DirectorySearch({
       fetch: options.fetch ?? defaultFetch,
@@ -476,7 +479,9 @@ export class SkillSourceBrowser {
       spec: source.spec,
       label: source.label ?? specLabel(source.spec),
       customLabel: source.label,
-      builtin: isBuiltinSource(source.spec),
+      builtin:
+        isBuiltinSource(source.spec) ||
+        (source.spec.kind === "local" && source.spec.path === this.bundledDir),
       enabled: source.enabled,
       addedAtMs: source.added_at_ms,
       ...status,

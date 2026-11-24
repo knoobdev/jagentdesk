@@ -43,6 +43,8 @@ function navigateDeps(): NavigateToWorkspaceDeps {
       useWorkspaceLayoutStore.getState().openTabFocused(workspaceKey, target),
     pinAgent: (workspaceKey, agentId) =>
       useWorkspaceLayoutStore.getState().pinAgent(workspaceKey, agentId),
+    isWorkspaceLayoutHydrated: () => useWorkspaceLayoutStore.persist.hasHydrated(),
+    deferOpenTab: (input) => useWorkspaceLayoutStore.getState().deferOpenTab(input),
     rememberLastWorkspace: (selection) => lastWorkspaceSelectionStore.remember(selection),
     navigateToRoute: (route) => {
       navigateToHostWorkspaceRoute(route);

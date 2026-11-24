@@ -27,6 +27,7 @@ export const SKILL_PROVIDER_LABELS: Record<SkillProviderId, string> = {
   omp: "Oh My Pi",
   kimi: "Kimi",
   kiro: "Kiro",
+  antigravity: "Antigravity",
 };
 
 export function isSkillProvider(provider: string): provider is SkillProviderId {

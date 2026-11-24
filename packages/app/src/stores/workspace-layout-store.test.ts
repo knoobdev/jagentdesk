@@ -1251,6 +1251,7 @@ describe("workspace-layout-store actions", () => {
 
     expect(persisted).toEqual({
       layoutByWorkspace: { [workspaceKey]: layout },
+      pinnedAgentIdsByWorkspace: {},
       splitSizesByWorkspace: currentState.splitSizesByWorkspace,
       panelStateByWorkspace: { [workspaceKey]: {} },
       explorerPaneIdByWorkspace: {},
@@ -1354,7 +1355,7 @@ describe("workspace-layout-store actions", () => {
     expect(layout).toEqual(createDefaultLayout());
   });
 
-  it("keeps pinned archived agents in memory per workspace without persisting them", () => {
+  it("persists pinned agent intents per workspace until directory reconciliation", () => {
     const workspaceKey = createWorkspaceKey();
     const otherWorkspaceKey = buildWorkspaceTabPersistenceKey({
       serverId: SERVER_ID,
@@ -1386,6 +1387,7 @@ describe("workspace-layout-store actions", () => {
     expect(partialize).toBeTypeOf("function");
     expect(partialize?.(state)).toEqual({
       layoutByWorkspace: {},
+      pinnedAgentIdsByWorkspace: { [otherWorkspaceKey as string]: ["agent-2"] },
       splitSizesByWorkspace: {},
       panelStateByWorkspace: {},
       explorerPaneIdByWorkspace: {},
@@ -1425,6 +1427,7 @@ describe("workspace-layout-store actions", () => {
     expect(partialize).toBeTypeOf("function");
     expect(partialize?.(state)).toEqual({
       layoutByWorkspace: {},
+      pinnedAgentIdsByWorkspace: {},
       splitSizesByWorkspace: {},
       panelStateByWorkspace: {},
       explorerPaneIdByWorkspace: {},
@@ -1811,7 +1814,9 @@ describe("workspace-layout-store actions", () => {
       standaloneTerminalIds: [],
     });
 
-    expect(store.getWorkspaceTabs(workspaceKey).map((tab) => tab.tabId)).toEqual([]);
+    expect(store.getWorkspaceTabs(workspaceKey).map((tab) => tab.tabId)).toEqual([
+      "agent_archived-agent",
+    ]);
 
     store.openTabFocused(workspaceKey, { kind: "agent", agentId: "archived-agent" });
     store.pinAgent(workspaceKey, "archived-agent");
@@ -2005,4 +2010,65 @@ it("repairs a saved preview identity collision across split panes", () => {
   expect(tabs.map((tab) => tab.tabId)).toEqual(["file_b.ts", "file_a.ts"]);
   expect(findPaneById(layout.root, "main")?.focusedTabId).toBe("file_b.ts");
   expect(findPaneById(layout.root, "right")?.focusedTabId).toBe("file_a.ts");
+});
+
+describe("pending workspace opens", () => {
+  it("retains an open across hydration and consumes it once only for its workspace", async () => {
+    const values = new Map<string, string>();
+    const store = createWorkspaceLayoutStore(undefined, {
+      getItem: async (key) => values.get(key) ?? null,
+      setItem: async (key, value) => {
+        values.set(key, value);
+      },
+      removeItem: async (key) => {
+        values.delete(key);
+      },
+    });
+    store.getState().deferOpenTab({
+      workspaceKey: "server:beta",
+      target: { kind: "agent", agentId: "b" },
+      intent: "reveal",
+      pin: true,
+    });
+    await store.persist.rehydrate();
+    expect(store.getState().consumePendingOpen("server:alpha")).toBeNull();
+    expect(
+      store
+        .getState()
+        .getWorkspaceTabs("server:alpha")
+        .filter((tab) => tab.target.kind === "agent"),
+    ).toEqual([]);
+    expect(store.getState().consumePendingOpen("server:beta")).toBe("agent_b");
+    expect(store.getState().consumePendingOpen("server:beta")).toBeNull();
+    expect(
+      store
+        .getState()
+        .getWorkspaceTabs("server:beta")
+        .filter((tab) => tab.target.kind === "agent")
+        .map((tab) => tab.target),
+    ).toEqual([{ kind: "agent", agentId: "b" }]);
+    expect(store.getState().pinnedAgentIdsByWorkspace["server:beta"]).toEqual(new Set(["b"]));
+    expect(store.getState().pendingOpenByWorkspace).toEqual({});
+  });
+});
+
+it("publishes restored pinned intents as Sets to synchronous subscribers", async () => {
+  const value = JSON.stringify({
+    version: 1,
+    state: { pinnedAgentIdsByWorkspace: { "srv:workspace": ["agent"] } },
+  });
+  const store = createWorkspaceLayoutStore(undefined, {
+    getItem: async () => value,
+    setItem: async () => {},
+    removeItem: async () => {},
+  });
+  const observations: boolean[] = [];
+  const release = store.subscribe((state) => {
+    const pins = state.pinnedAgentIdsByWorkspace["srv:workspace"];
+    if (pins) observations.push(pins.has("agent"));
+  });
+  await store.persist.rehydrate();
+  release();
+  expect(observations.length).toBeGreaterThan(0);
+  expect(observations.every(Boolean)).toBe(true);
 });

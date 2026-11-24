@@ -1,8 +1,10 @@
-import { expect, test, vi } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import type { ProjectedTimelineForwardFetchPlan } from "./timeline-sync-plan";
 import {
   createViewedTimelineSync,
   VIEWED_TIMELINE_UNSUBSCRIBE_GRACE_MS,
+  FRESHNESS_CHECK_QUIET_MS,
+  type TimelineSubscriptionAnswer,
 } from "./viewed-timeline-sync";
 
 interface Deferred<T> {
@@ -23,7 +25,8 @@ function deferred<T>(): Deferred<T> {
 
 interface MembershipRequest {
   agentIds: string[];
-  succeed(): void;
+  cursors?: Record<string, { epoch: string; seq: number }>;
+  succeed(answer?: TimelineSubscriptionAnswer): void;
   fail(message: string): void;
 }
 
@@ -35,14 +38,28 @@ interface TimelineFetch {
 }
 
 class TimelineWorld {
+  freshnessEnabled = false;
+  readonly cursors = new Map<string, { epoch: string; endSeq: number }>();
+  readonly currentAnswers: string[] = [];
+  prepareGate: Promise<void> = Promise.resolve();
   readonly errors: string[] = [];
   readonly sync = createViewedTimelineSync({
+    prepare: () => this.prepareGate,
+    readCursor: (agentId) => this.cursors.get(agentId),
+    replaceDemandedAgentIds: () => undefined,
+    onCatchUpOwed: () => undefined,
+    onCatchUpSettled: () => undefined,
+    canCheckFreshness: () => this.freshnessEnabled,
+    applyCurrentTimeline: (agentId) => {
+      this.currentAnswers.push(agentId);
+    },
     initialDeliveryMode: "selective",
-    setSubscription: async (agentIds) => {
-      const result = deferred<void>();
+    setSubscription: async (agentIds, cursors) => {
+      const result = deferred<TimelineSubscriptionAnswer | void>();
       this.memberships.push({
         agentIds,
-        succeed: () => result.resolve(),
+        cursors,
+        succeed: (answer) => result.resolve(answer),
         fail: (message) => result.reject(new Error(message)),
       });
       this.releaseMembershipWaiter();
@@ -737,3 +754,109 @@ test("switching from legacy to selective delivery publishes membership and catch
   world.expectNoPendingMembership();
   world.expectNoPendingFetch();
 });
+
+afterEach(() => vi.useRealTimers());
+
+test("an unchanged chat is confirmed without a history fetch or pending indicator", async () => {
+  const world = new TimelineWorld();
+  world.freshnessEnabled = true;
+  world.cursors.set("a", { epoch: "epoch-a", endSeq: 4 });
+  world.sync.setConnected(true);
+  world.sync.replaceVisibleAgentIds("pane", ["a"]);
+  expect(world.sync.getAgentTimelineStatus("a")).toBe("checking");
+  const membership = await world.nextMembership();
+  expect(membership.cursors).toEqual({ a: { epoch: "epoch-a", seq: 4 } });
+  membership.succeed({ timelines: { a: "current" } });
+  await vi.waitFor(() => expect(world.sync.getAgentTimelineStatus("a")).toBe("ready"));
+  expect(world.currentAnswers).toEqual(["a"]);
+  world.expectNoPendingFetch();
+  world.sync.dispose();
+});
+
+test("a behind answer catches up from the checked cursor", async () => {
+  const world = new TimelineWorld();
+  world.freshnessEnabled = true;
+  world.cursors.set("a", { epoch: "epoch-a", endSeq: 4 });
+  world.sync.setConnected(true);
+  world.sync.replaceVisibleAgentIds("pane", ["a"]);
+  (await world.nextMembership()).succeed({ timelines: { a: "behind" } });
+  const fetch = await world.nextFetch("a");
+  expect(fetch.request).toMatchObject({ direction: "after", cursor: { epoch: "epoch-a", seq: 4 } });
+  expect(world.sync.getAgentTimelineStatus("a")).toBe("pending");
+  fetch.respond({ hasNewer: false });
+  await vi.waitFor(() => expect(world.sync.getAgentTimelineStatus("a")).toBe("ready"));
+  world.sync.dispose();
+});
+
+test("the quiet delay starts with the daemon question, after a slow cache read", async () => {
+  vi.useFakeTimers();
+  const world = new TimelineWorld();
+  const cache = deferred<void>();
+  world.prepareGate = cache.promise;
+  world.freshnessEnabled = true;
+  world.cursors.set("a", { epoch: "epoch-a", endSeq: 4 });
+  world.sync.setConnected(true);
+  world.sync.replaceVisibleAgentIds("pane", ["a"]);
+  await vi.advanceTimersByTimeAsync(FRESHNESS_CHECK_QUIET_MS * 2);
+  expect(world.sync.getAgentTimelineStatus("a")).toBe("checking");
+  cache.resolve();
+  const membership = await world.nextMembership();
+  await vi.advanceTimersByTimeAsync(FRESHNESS_CHECK_QUIET_MS - 1);
+  expect(world.sync.getAgentTimelineStatus("a")).toBe("checking");
+  await vi.advanceTimersByTimeAsync(1);
+  expect(world.sync.getAgentTimelineStatus("a")).toBe("pending");
+  membership.succeed({ timelines: { a: "current" } });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(world.sync.getAgentTimelineStatus("a")).toBe("ready");
+  world.expectNoPendingFetch();
+  world.sync.dispose();
+});
+
+test("a current answer does not erase a stream gap found during the question", async () => {
+  const world = new TimelineWorld();
+  world.freshnessEnabled = true;
+  world.cursors.set("a", { epoch: "epoch-a", endSeq: 4 });
+  world.sync.setConnected(true);
+  world.sync.replaceVisibleAgentIds("pane", ["a"]);
+  const membership = await world.nextMembership();
+  world.sync.recoverGap("a", { epoch: "epoch-a", endSeq: 8 });
+  membership.succeed({ timelines: { a: "current" } });
+  const fetch = await world.nextFetch("a");
+  expect(fetch.request).toMatchObject({ direction: "after", cursor: { epoch: "epoch-a", seq: 8 } });
+  fetch.respond({ hasNewer: false });
+  await vi.waitFor(() => expect(world.sync.getAgentTimelineStatus("a")).toBe("ready"));
+  expect(world.currentAnswers).toEqual([]);
+  world.sync.dispose();
+});
+
+test.each(["resume", "reconnect"] as const)(
+  "a slow %s check stays quiet until its unchanged answer",
+  async (reason) => {
+    vi.useFakeTimers();
+    const world = new TimelineWorld();
+    world.freshnessEnabled = true;
+    world.cursors.set("a", { epoch: "epoch-a", endSeq: 4 });
+    world.sync.setConnected(true);
+    world.sync.replaceVisibleAgentIds("pane", ["a"]);
+    (await world.nextMembership()).succeed({ timelines: { a: "current" } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(world.sync.getAgentTimelineStatus("a")).toBe("ready");
+    if (reason === "resume") {
+      world.sync.setActive(false);
+      world.sync.setActive(true);
+    } else {
+      world.sync.setConnected(false);
+      world.sync.setConnected(true);
+    }
+    const question = await world.nextMembership();
+    await vi.advanceTimersByTimeAsync(FRESHNESS_CHECK_QUIET_MS * 4);
+    expect(world.sync.getAgentTimelineStatus("a")).toBe(
+      reason === "resume" ? "checking" : "reattaching",
+    );
+    question.succeed({ timelines: { a: "current" } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(world.sync.getAgentTimelineStatus("a")).toBe("ready");
+    world.expectNoPendingFetch();
+    world.sync.dispose();
+  },
+);

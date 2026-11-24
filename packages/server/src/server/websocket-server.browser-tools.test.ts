@@ -105,7 +105,7 @@ describe("WebSocketServer browser tools wiring", () => {
       },
     });
 
-    await expect(resultPromise).resolves.toEqual({
+    await expect(resultPromise).resolves.toMatchObject({
       requestId: request.requestId,
       ok: true,
       result: { command: "list_tabs", tabs: [] },

@@ -13,6 +13,17 @@ EAS profiles: `development`, `production`, and `production-apk` in `packages/app
 
 `development` uses Android `debug`.
 
+## Display density
+
+The display-metrics module backports RN's window-density correction for Samsung DeX and
+other external displays. Remove it after upgrading to RN 0.89 with
+`useWindowDensityForDisplayMetricsAndroid` enabled. Run its device regression from the
+generated Android project:
+
+```bash
+./gradlew :jagentdesk-display-metrics:connectedDebugAndroidTest --no-daemon --max-workers=2 -Dorg.gradle.parallel=false
+```
+
 ## Version codes
 
 `packages/app/app.config.js` derives Android `versionCode` from the package version with:

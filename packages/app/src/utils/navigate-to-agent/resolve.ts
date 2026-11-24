@@ -35,7 +35,7 @@ export function resolveNavigateToAgent(
   deps: NavigateToAgentDeps,
 ): string {
   const target = deps.readAgentNavTarget({ serverId: input.serverId, agentId: input.agentId });
-  const agentWorkspaceId = input.workspaceId ?? target.agentWorkspaceId;
+  const agentWorkspaceId = target.agentWorkspaceId ?? input.workspaceId;
   const workspaceId = normalizeWorkspaceOpaqueId(agentWorkspaceId);
 
   if (target.dockOwner && deps.openDockAgent) {

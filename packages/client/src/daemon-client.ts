@@ -4502,7 +4502,10 @@ export class DaemonClient {
     return payload;
   }
 
-  async setAgentTimelineSubscription(agentIds: string[]): Promise<void> {
+  async setAgentTimelineSubscription(
+    agentIds: string[],
+    cursors?: Record<string, { epoch: string; seq: number }>,
+  ): Promise<CorrelatedResponsePayload<"agent.timeline.set_subscription.response"> | void> {
     // COMPAT(selectiveAgentTimeline): added in v0.1.106. Old daemons keep their
     // legacy global stream and do not understand this RPC. Remove after
     // 2027-01-12 once the supported daemon floor is >= v0.1.106.
@@ -4515,10 +4518,13 @@ export class DaemonClient {
     const message = SessionInboundMessageSchema.parse({
       type: "agent.timeline.set_subscription.request",
       agentIds: normalizedAgentIds,
+      ...(cursors && this.lastServerInfoMessage.features?.timelineFreshnessCheck === true
+        ? { cursors }
+        : {}),
       requestId,
     });
 
-    await this.sendRequest({
+    return this.sendRequest({
       requestId,
       message,
       options: { skipQueue: true },

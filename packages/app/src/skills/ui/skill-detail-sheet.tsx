@@ -3,7 +3,7 @@ import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
-import type { SkillEntry, SkillLink } from "@jagentdesk/protocol/native-skills";
+import type { SkillEntry } from "@jagentdesk/protocol/native-skills";
 import { AdaptiveModalSheet, type SheetHeader } from "@/components/adaptive-modal-sheet";
 import { MarkdownRenderer } from "@/components/markdown/renderer";
 import { Alert } from "@/components/ui/alert";
@@ -54,7 +54,7 @@ function SkillPaths({ entry, onCopy }: { entry: SkillEntry; onCopy: (path: strin
   return (
     <View style={styles.block}>
       <PathLine label={t("skillsHub.detail.realPath")} path={entry.realPath} onCopy={onCopy} />
-      {entry.links.map((link: SkillLink) => (
+      {[...entry.links, ...(entry.additionalLinks ?? [])].map((link) => (
         <PathLine
           key={link.path}
           label={t("skillsHub.detail.linkedInto", { dir: link.dir })}

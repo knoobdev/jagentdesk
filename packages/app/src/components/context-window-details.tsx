@@ -1,3 +1,5 @@
+import { MetricsList } from "./metrics-list";
+import type { AgentMetric } from "@jagentdesk/protocol/agent-types";
 import { Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
@@ -13,6 +15,7 @@ interface ContextWindowDetailsProps {
     maxTokens: number;
   } | null;
   sessionCost: string | null;
+  sessionMetrics: AgentMetric[];
   /** The hover card and tooltip title themselves; the sheet's header carries the title instead. */
   showTitle: boolean;
   /** Whether the usage cards have a Refresh button; without one they show their freshness. */
@@ -27,10 +30,12 @@ export function ContextWindowDetails({
   agentId,
   context,
   sessionCost,
+  sessionMetrics,
   showTitle,
   refreshable,
 }: ContextWindowDetailsProps) {
   const { t } = useTranslation();
+  const providerReportsCost = sessionMetrics.some((metric) => metric.label.toLowerCase() === "cost");
   return (
     <>
       <View style={styles.summary}>
@@ -50,10 +55,11 @@ export function ContextWindowDetails({
         ) : (
           <Text style={styles.detail}>{t("contextWindow.noData")}</Text>
         )}
-        {sessionCost ? (
+        {sessionCost && !providerReportsCost ? (
           <Text style={styles.detail}>{t("contextWindow.sessionCost", { cost: sessionCost })}</Text>
         ) : null}
       </View>
+      {sessionMetrics.length > 0 ? <MetricsList metrics={sessionMetrics} /> : null}
       <AgentUsage serverId={serverId} agentId={agentId} refreshable={refreshable} />
     </>
   );
