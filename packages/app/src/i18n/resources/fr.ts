@@ -1754,12 +1754,13 @@ export const fr: TranslationResources = {
     output: "Sortir",
   },
   turnSummary: {
-    messages: {
-      one: "{{count}} message écrit",
-      other: "{{count}} messages écrits",
-    },
+    details: "Voir les détails du tour",
+    sentBy: "Envoyé par {{name}}",
+    showMore: "Afficher plus",
+    showLess: "Afficher moins",
   },
   toolCallGroup: {
+    thought: "Réfléchi",
     editedFiles: {
       one: "a modifié {{count}} fichier",
       other: "a modifié {{count}} fichiers",

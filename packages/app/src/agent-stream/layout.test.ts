@@ -99,7 +99,7 @@ function layoutFor(input: {
       strategy,
       streamHead: input.head ?? [],
     }),
-    timingByAssistantId: timingFor(...(input.timingIds ?? [])),
+    timingByItemId: timingFor(...(input.timingIds ?? [])),
   });
 }
 

@@ -1,3 +1,4 @@
+import { isTurnBoundary } from "./turn-membership";
 import type { ChatDisplay } from "@/hooks/use-settings";
 import type { TimelineItemTransform } from "@/plugins/timeline/model";
 import { projectPluginTimelineItems } from "@/plugins/timeline/projection";
@@ -16,9 +17,11 @@ interface PresentationInput {
   head: StreamItem[];
   transform: TimelineItemTransform | undefined;
   display: ChatDisplay;
+  autoExpandReasoning?: boolean;
   /** User messages whose collapsed turn the reader opened. */
   expandedTurnHostIds: ReadonlySet<string>;
   isTurnActive: boolean;
+  activeTurnId?: string | null;
 }
 
 export interface StreamPresentation extends ToolCallDetailProjection {
@@ -55,6 +58,7 @@ export function createStreamPresentation() {
   let historyTransform: TimelineItemTransform | undefined;
   let historyRows: StreamItem[] = [];
   let preparedTail: StreamItem[] | undefined;
+  let preparedAutoExpandReasoning: boolean | undefined;
   let preparedLevel: ToolCallDetailLevel | undefined;
   let preparedHistory: PreparedToolCallHistory | null = null;
   let collapsedSource: StreamItem[] | undefined;
@@ -75,7 +79,14 @@ export function createStreamPresentation() {
     }
     // Live text updates reach the head only, so the folded history is reused until the
     // retained rows, the latest turn's liveness, or the reader's expanded turns change.
-    const isLatestTurnOpen = input.isTurnActive || projection.head.length > 0;
+    const isLatestTurnOpen =
+      (input.isTurnActive || projection.head.length > 0) &&
+      !isTurnBoundary(projection.tail.at(-1) ?? null, projection.head[0] ?? null) &&
+      !(
+        input.activeTurnId &&
+        projection.tail.at(-1)?.turnId &&
+        input.activeTurnId !== projection.tail.at(-1)?.turnId
+      );
     if (
       !collapsed ||
       collapsedSource !== projection.tail ||
@@ -84,6 +95,7 @@ export function createStreamPresentation() {
     ) {
       collapsed = collapseTurns({
         tail: projection.tail,
+        autoExpandReasoning: input.autoExpandReasoning,
         isLatestTurnOpen,
         expandedHostIds: input.expandedTurnHostIds,
         getGroupedCalls: (itemId) => projection.groupsByHostId.get(itemId)?.run.calls,
@@ -93,7 +105,20 @@ export function createStreamPresentation() {
       collapsedExpandedHostIds = input.expandedTurnHostIds;
     }
     const { tail, ...turns } = collapsed;
-    return { ...projection, tail, turns };
+    if (turns.nestedItemIds.size === 0) return { ...projection, tail, turns };
+    // Opening a turn reveals its raw calls; those rows must not become group hosts again.
+    const withoutExpandedRows = (groups: StreamPresentation["groupsByHostId"]) => ({
+      size: groups.size - [...turns.nestedItemIds].filter((id) => groups.has(id)).length,
+      get: (id: string) => (turns.nestedItemIds.has(id) ? undefined : groups.get(id)),
+      has: (id: string) => !turns.nestedItemIds.has(id) && groups.has(id),
+    });
+    return {
+      ...projection,
+      tail,
+      turns,
+      groupsByHostId: withoutExpandedRows(projection.groupsByHostId),
+      historyGroupUpdatesByHostId: withoutExpandedRows(projection.historyGroupUpdatesByHostId),
+    };
   }
 
   return (input: PresentationInput): StreamPresentation => {
@@ -111,10 +136,15 @@ export function createStreamPresentation() {
       const blocks = presentRows(item);
       head.push(...blocks);
     }
-    if (preparedTail !== historyRows || preparedLevel !== level) {
-      preparedHistory = prepareToolCallHistory(level, historyRows);
+    if (
+      preparedTail !== historyRows ||
+      preparedLevel !== level ||
+      preparedAutoExpandReasoning !== input.autoExpandReasoning
+    ) {
+      preparedHistory = prepareToolCallHistory(level, historyRows, input.autoExpandReasoning);
       preparedTail = historyRows;
       preparedLevel = level;
+      preparedAutoExpandReasoning = input.autoExpandReasoning;
     }
     return collapse(
       projectToolCallDetailLevel({

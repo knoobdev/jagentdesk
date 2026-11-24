@@ -106,6 +106,7 @@ describe("plugin timeline projection", () => {
       expect.objectContaining({
         item: {
           type: "notification",
+          level: "info",
           message: "Extension reported an error",
         },
       }),

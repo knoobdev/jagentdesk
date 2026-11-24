@@ -1737,12 +1737,13 @@ export const ptBR: TranslationResources = {
     output: "Saída",
   },
   turnSummary: {
-    messages: {
-      one: "escreveu {{count}} mensagem",
-      other: "escreveu {{count}} mensagens",
-    },
+    details: "Ver detalhes do turno",
+    sentBy: "Enviado por {{name}}",
+    showMore: "Mostrar mais",
+    showLess: "Mostrar menos",
   },
   toolCallGroup: {
+    thought: "Pensou",
     editedFiles: {
       one: "editou {{count}} arquivo",
       other: "editou {{count}} arquivos",

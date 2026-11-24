@@ -63,6 +63,28 @@ function project(input: {
 }
 
 describe("tool call detail-level projection", () => {
+  it.each(["detailed", "overview"] as const)(
+    "keeps pending approval tools out of %s presentation without removing their canonical position",
+    (level) => {
+      const pending = toolCall(
+        "1",
+        { type: "plan", text: "Ship it" },
+        { name: "ExitPlanMode", status: "running" },
+      );
+      const followUp = {
+        kind: "user_message",
+        id: "question",
+        text: "What about tests?",
+        timestamp: new Date(2),
+      } satisfies StreamItem;
+      const tail = [pending, followUp];
+      expect(project({ level, tail }).tail).toEqual([followUp]);
+      expect(tail).toEqual([pending, followUp]);
+      const rejected = toolCall("1", { type: "plan", text: "Ship it" }, { name: "plan_approval" });
+      expect(project({ level, tail: [rejected, followUp] }).tail).toEqual([rejected, followUp]);
+    },
+  );
+
   it("passes detailed timelines through without grouping work", () => {
     const tail = [toolCall("1", { type: "shell", command: "one" })];
     const head = [toolCall("2", { type: "shell", command: "two" })];
@@ -233,12 +255,13 @@ describe("tool call detail-level projection", () => {
       run: expect.any(Object),
       isLoading: false,
       summary: {
+        thoughtCount: 0,
         editedFileCount: 1,
         commandCount: 1,
         readFileCount: 2,
         searchCount: 0,
         otherToolCount: 0,
-        jagentdeskCallCount: 0,
+        jagentdeskActions: {},
       },
     });
   });
@@ -293,20 +316,27 @@ describe("tool call detail-level projection", () => {
 
   it("counts JAgentDesk calls separately from other tools", () => {
     const calls = [
-      toolCall("1", { type: "unknown", input: null, output: null }, { name: "jagentdesk.list_agents" }),
+      toolCall(
+        "1",
+        { type: "unknown", input: null, output: null },
+        { name: "jagentdesk.list_agents" },
+      ),
       toolCall(
         "2",
         { type: "unknown", input: null, output: null },
         { name: "mcp__jagentdesk__list_worktrees" },
       ),
-      toolCall("3", { type: "fetch", url: "http://localhost:8082" }),
-      toolCall("4", { type: "fetch", url: "https://github.com/acme" }),
+      toolCall("3", { type: "fetch", url: "https://jagentdesk.sh" }),
+      toolCall("4", { type: "fetch", url: "https://github.com/jagentdesk" }),
     ];
 
     const result = project({ level: "overview", head: calls });
 
     expect(result.groupsByHostId.get("1")).toMatchObject({
-      summary: { otherToolCount: 2, jagentdeskCallCount: 2 },
+      summary: {
+        otherToolCount: 2,
+        jagentdeskActions: { "Listed agents": 1, "List worktrees": 1 },
+      },
     });
   });
 
@@ -324,7 +354,11 @@ describe("tool call detail-level projection", () => {
     const result = project({ level: "overview", head: calls });
 
     expect(result.groupsByHostId.get("1")).toMatchObject({
-      summary: { searchCount: 3, otherToolCount: 0, jagentdeskCallCount: 3 },
+      summary: {
+        searchCount: 3,
+        otherToolCount: 0,
+        jagentdeskActions: { "Listed providers": 1, "List worktrees": 2 },
+      },
     });
   });
 
@@ -458,3 +492,56 @@ describe("tool call detail-level projection", () => {
     expect(result.groupsByHostId.size).toBe(1);
   });
 });
+
+it("keeps a heartbeat trigger visible outside grouped work", () => {
+  const trigger = toolCall(
+    "1",
+    { type: "plain_text", text: "Check progress" },
+    { name: "heartbeat" },
+  );
+  const work = toolCall("2", { type: "shell", command: "pwd" });
+  const result = project({ level: "overview", tail: [trigger, work] });
+  expect(result.tail.map((item) => item.id)).toEqual(["1", "2"]);
+  expect(result.groupsByHostId.has("1")).toBe(false);
+});
+
+it("does not merge tools from different canonical turns", () => {
+  const first = toolCall("1", { type: "shell", command: "pwd" });
+  first.turnId = "first";
+  const second = toolCall("2", { type: "shell", command: "ls" });
+  second.turnId = "second";
+  const result = project({ level: "overview", tail: [first, second] });
+  expect(result.tail.map((item) => item.id)).toEqual(["1", "2"]);
+});
+
+it.each([false, true])(
+  "handles streaming reasoning across retained history (Expand thinking %s)",
+  (autoExpandReasoning) => {
+    const call = { ...toolCall("1", { type: "shell", command: "echo ok" }), turnId: "run" };
+    const thought: StreamItem = {
+      kind: "thought",
+      id: "reasoning",
+      text: "Checking",
+      status: "loading",
+      timestamp: new Date(),
+      turnId: "run",
+    };
+    const tail = [call];
+    const result = project({
+      level: "overview",
+      tail,
+      head: [thought],
+      isTurnActive: true,
+      preparedHistory: prepareToolCallHistory("overview", tail, autoExpandReasoning),
+    });
+    expect(result.head).toEqual(autoExpandReasoning ? [thought] : []);
+    expect(result.groupsByHostId.get(call.id)?.run.calls).toEqual(
+      autoExpandReasoning ? [call] : [call, thought],
+    );
+    expect(result.groupsByHostId.get(call.id)?.summary).toMatchObject({
+      commandCount: 1,
+      otherToolCount: 0,
+      thoughtCount: autoExpandReasoning ? 0 : 1,
+    });
+  },
+);

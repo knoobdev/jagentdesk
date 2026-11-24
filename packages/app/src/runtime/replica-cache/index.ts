@@ -1,3 +1,4 @@
+import { findMountedWindowStart } from "@/agent-stream/history-window";
 import { Buffer } from "buffer";
 import { z } from "zod";
 import {
@@ -453,7 +454,9 @@ export class ReplicaCache {
         focusedAgent && items
           ? {
               agentId: focusedAgent.id,
-              items: encodeDates(items.slice(-MAX_TIMELINE_ITEMS)),
+              items: encodeDates(
+                items.slice(findMountedWindowStart({ items, minMountedCount: MAX_TIMELINE_ITEMS })),
+              ),
             }
           : null;
       const stored: StoredHost = {
