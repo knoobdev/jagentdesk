@@ -538,6 +538,7 @@ function wrapClientProvider(
       return inner.capabilities;
     },
     shutdown: inner.shutdown?.bind(inner),
+    resolveUsageLaunch: inner.resolveUsageLaunch?.bind(inner),
     createSession: async (config, launchContext, options) =>
       wrapSessionProvider(
         provider,

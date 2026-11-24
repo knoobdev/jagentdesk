@@ -1,3 +1,4 @@
+import { UsageScopeSchema, type UsageScope } from "@jagentdesk/plugin/server/usage";
 import type { PluginHookAgent } from "@jagentdesk/plugin/server";
 import type {
   ProviderConnectRequest,
@@ -25,6 +26,7 @@ export interface PluginProviderMetadata {
 }
 
 export interface PluginUsageSourceMetadata {
+  provider?: string;
   id: string;
   label: string;
   icon?: string;
@@ -33,7 +35,7 @@ export interface PluginUsageSourceMetadata {
 
 export type PluginProcessRequest =
   | { type: "usage.fetch"; requestId: string; sourceId: string; input: unknown }
-  | { type: "usage.discover"; requestId: string; sourceId: string }
+  | { type: "usage.discover"; requestId: string; sourceId: string; scope?: UsageScope }
   | { type: "tool.call"; requestId: string; agent: PluginHookAgent; name: string; input: unknown }
   | { type: "tool.cancel"; requestId: string }
   | { type: "tools.detach"; agentId: string }
@@ -140,6 +142,7 @@ const usageSourceMetadataSchema = z
     label: z.string().min(1),
     icon: z.string().optional(),
     discover: z.boolean(),
+    provider: z.string().min(1).optional(),
   })
   .strict();
 const providerConnectRequestSchema = z
@@ -237,7 +240,12 @@ export const PluginProcessRequestSchema: z.ZodType<PluginProcessRequest> = z.dis
       })
       .strict(),
     z
-      .object({ type: z.literal("usage.discover"), requestId: z.string(), sourceId: z.string() })
+      .object({
+        type: z.literal("usage.discover"),
+        requestId: z.string(),
+        sourceId: z.string(),
+        scope: UsageScopeSchema.optional(),
+      })
       .strict(),
     z
       .object({

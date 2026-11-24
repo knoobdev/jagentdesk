@@ -81,6 +81,9 @@ interface PluginRuntimePort {
 }
 
 interface PluginServiceDependencies {
+  resolveUsageLaunch?(
+    provider: string,
+  ): Promise<import("@jagentdesk/plugin/server/provider").ProviderLaunch | undefined>;
   settingsDirectory?: string;
   builtinPlugins?: BuiltinPluginLoader;
   runtime?: PluginRuntimePort;
@@ -684,13 +687,29 @@ export class PluginService {
     const registered: string[] = [];
     try {
       for (const source of metadata) {
+        if (
+          source.provider &&
+          !this.runtime
+            .getProviderRegistrations?.(pluginId)
+            .some((provider) => provider.id === source.provider)
+        ) {
+          throw new Error(
+            `Usage source ${source.id} references a provider outside plugin ${pluginId}`,
+          );
+        }
         this.usageSources.register({
           id: source.id,
           label: source.label,
           icon: source.icon,
           discover: async () => {
             if (!source.discover) return [];
-            const result = await this.runtime.discoverUsage!(pluginId, source.id);
+            const launch = source.provider
+              ? await this.dependencies.resolveUsageLaunch?.(source.provider)
+              : undefined;
+            const result = await this.runtime.discoverUsage!(pluginId, source.id, {
+              kind: "global",
+              launch,
+            });
             if (!Array.isArray(result))
               throw new Error(`Invalid usage discovery from ${source.id}`);
             return result;

@@ -688,6 +688,7 @@ export type SteerResult =
   | { status: "unavailable" };
 
 export interface AgentUsageSession {
+  launch?: import("@jagentdesk/plugin/server/provider").ProviderLaunch;
   provider: string;
   model?: string;
   env: Record<string, string>;
@@ -786,6 +787,9 @@ export interface ResolveAgentDefaultModeInput {
 }
 
 export interface AgentClient {
+  resolveUsageLaunch?(): Promise<
+    import("@jagentdesk/plugin/server/provider").ProviderLaunch | undefined
+  >;
   readonly provider: AgentProvider;
   readonly capabilities: AgentCapabilityFlags;
   createSession(

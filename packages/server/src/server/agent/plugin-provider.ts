@@ -115,6 +115,7 @@ function providerError(error: ProviderError): Error {
 
 class ProviderRuntime {
   private connection: ProviderConnection | null = null;
+  connectedLaunch: ProviderLaunch | undefined;
   private connecting: Promise<ProviderConnection> | null = null;
   private closed = false;
   private generation = 0;
@@ -141,7 +142,11 @@ class ProviderRuntime {
     private readonly runtimeSettings?: ProviderRuntimeSettings,
   ) {}
 
-  private async resolveLaunch(): Promise<ProviderLaunch | undefined> {
+  async resolveUsageLaunch(): Promise<ProviderLaunch | undefined> {
+    return this.resolveLaunch(true);
+  }
+
+  private async resolveLaunch(allowMissing = false): Promise<ProviderLaunch | undefined> {
     const command = this.registration.command;
     if (!command) return undefined;
     const launch = await resolveProviderLaunch({
@@ -152,7 +157,10 @@ class ProviderRuntime {
     const env = createProviderEnv({ runtimeSettings: this.runtimeSettings });
     launch.env = env;
     const availability = await checkProviderLaunchAvailable(launch);
-    if (!availability.resolvedPath) throw new Error(`${launch.command} not found on PATH`);
+    if (!availability.resolvedPath) {
+      if (allowMissing) return undefined;
+      throw new Error(`${launch.command} not found on PATH`);
+    }
     return { command: resolvePath(availability.resolvedPath), args: launch.args, env };
   }
 
@@ -365,8 +373,9 @@ class ProviderRuntime {
   }
 
   private async establishConnection(generation: number): Promise<ProviderConnection> {
+    const launch = await this.resolveLaunch();
     const rawConnection = await this.registration.connect({
-      launch: await this.resolveLaunch(),
+      launch,
       versions: [PROVIDER_PROTOCOL_VERSION],
       capabilities: PROVIDER_CAPABILITIES,
     });
@@ -380,6 +389,7 @@ class ProviderRuntime {
       await rawConnection.close().catch(() => undefined);
       throw error;
     }
+    this.connectedLaunch = launch;
     const connection = normalizeConnection(rawConnection);
     const unsubscribe = connection.onEvent((event) => this.accept(event));
     if (this.closed || generation !== this.generation) {
@@ -931,6 +941,10 @@ class PluginAgentClient implements AgentClient {
     this.runtime.onSessionOpened((session, opened) => this.acceptChild(session, opened));
   }
 
+  resolveUsageLaunch() {
+    return this.runtime.resolveUsageLaunch();
+  }
+
   get capabilities(): AgentCapabilityFlags {
     return agentCapabilities(this.runtime.negotiatedCapabilities);
   }
@@ -1095,6 +1109,12 @@ class PluginAgentClient implements AgentClient {
         });
       },
       bind,
+      this.runtime.connectedLaunch
+        ? {
+            ...this.runtime.connectedLaunch,
+            env: { ...this.runtime.connectedLaunch.env, ...config.env },
+          }
+        : undefined,
     );
     bind(bridge);
     return session;
@@ -1182,10 +1202,22 @@ class PluginAgentSession implements AgentSession {
       state: ProviderConfigState,
     ) => Promise<ProviderRuntimeSession>,
     private readonly onBind: (bridge: ProviderRuntimeSession) => void,
+    private readonly usageLaunch: ProviderLaunch | undefined,
   ) {
     this.subagentIdsBySession.set(bridge.id, null);
     for (const event of bridge.history) this.accept(event, false);
     this.unsubscribe = bridge.onEvent((event) => this.accept(event, true));
+  }
+
+  usageSession() {
+    if (this.closed || !this.usageLaunch) return null;
+    return {
+      provider: this.provider,
+      model: this.bridge.config.model,
+      env: this.usageLaunch.env,
+      launch: this.usageLaunch,
+      sessionKey: this.bridge.id,
+    };
   }
 
   get id(): string {

@@ -390,10 +390,19 @@ export class PluginRuntime {
     return this.request(loaded, { type: "usage.fetch", requestId: randomUUID(), sourceId, input });
   }
 
-  discoverUsage(pluginId: string, sourceId: string): Promise<unknown> {
+  discoverUsage(
+    pluginId: string,
+    sourceId: string,
+    scope?: import("@jagentdesk/plugin/server/usage").UsageScope,
+  ): Promise<unknown> {
     const loaded = this.plugins.get(pluginId);
     if (!loaded) throw new Error(`Plugin is not available: ${pluginId}`);
-    return this.request(loaded, { type: "usage.discover", requestId: randomUUID(), sourceId });
+    return this.request(loaded, {
+      type: "usage.discover",
+      requestId: randomUUID(),
+      sourceId,
+      scope,
+    });
   }
 
   async connectProvider(

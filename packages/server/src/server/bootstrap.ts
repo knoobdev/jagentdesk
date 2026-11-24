@@ -680,6 +680,7 @@ export async function createJAgentDeskDaemon(
   // Built-ins load independently of the user-plugin switch. Managed git sources
   // back marketplace installs and are rebranded before compilation.
   const pluginRuntime = new PluginService(logger, daemonConfigStore, daemonVersion, {
+    resolveUsageLaunch: (provider) => providerSnapshotManager.resolveUsageLaunch(provider),
     builtinPlugins: dependencies.builtinPlugins ?? new BuiltinPluginLoader(),
     managedSources: new ManagedPluginSources(config.jagentdeskHome),
     settingsDirectory: path.join(config.jagentdeskHome, "plugin-settings"),

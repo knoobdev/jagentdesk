@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import type { ZodType } from "zod";
+import { z, type ZodType } from "zod";
+import { ProviderLaunchSchema } from "./provider.js";
 import type { JsonValue } from "@jagentdesk/protocol/agent-types";
 
 export interface UsageWindow {
@@ -62,13 +63,27 @@ export interface UsageAccount {
   input: JsonValue;
 }
 
+export const UsageScopeSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("global"), launch: ProviderLaunchSchema.optional() }),
+  z.object({
+    kind: z.literal("session"),
+    provider: z.string(),
+    model: z.string().optional(),
+    env: z.record(z.string(), z.string()),
+    launch: ProviderLaunchSchema.optional(),
+  }),
+]);
+export type UsageScope = z.infer<typeof UsageScopeSchema>;
+
 export interface UsageSourceRegistration {
   id: string;
   label: string;
   icon?: string;
+  /** Provider whose resolved launch is needed for discovery. */
+  provider?: string;
   input: ZodType;
   /** Every account whose login exists on this machine. Empty when none. */
-  discover(): Promise<UsageAccount[]>;
+  discover(scope: UsageScope): Promise<UsageAccount[]>;
   /** Re-reads the login store; never writes it. */
   fetch(input: unknown): Promise<UsageReport>;
 }
