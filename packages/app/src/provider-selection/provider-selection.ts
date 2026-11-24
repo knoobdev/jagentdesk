@@ -5,7 +5,7 @@ import type {
   ProviderSnapshotEntry,
 } from "@jagentdesk/protocol/agent-types";
 import type { AgentProviderDefinition } from "@jagentdesk/protocol/provider-manifest";
-import type { DraftCommandConfig } from "@/hooks/use-agent-commands-query";
+import type { DraftCommandConfig } from "@/agent-commands";
 import { buildFavoriteModelKey, type FavoriteModelRow } from "@/hooks/use-form-preferences";
 import { i18n } from "@/i18n/i18next";
 import { compareMatchScores, scoreTextFields } from "@/utils/score-match";

@@ -1,12 +1,15 @@
-import { useQuery } from "@tanstack/react-query";
+import { useFetchQuery } from "@/data/query";
 import { useTranslation } from "react-i18next";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import { useRetainedPanelActive } from "@/components/retained-panel";
+import { useSessionStore } from "@/stores/session-store";
+import { useShallow } from "zustand/shallow";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
-import { agentCommandsQueryKey, type AgentCommandsDraftConfig } from "@/hooks/agent-commands-query";
-
-const DRAFT_COMMANDS_STALE_TIME = Number.POSITIVE_INFINITY;
-const SESSION_COMMANDS_STALE_TIME = 60_000;
+import {
+  agentCommandsQueryKey,
+  sessionCommandQueryPolicy,
+  type AgentCommandsDraftConfig,
+} from "./cache";
 
 export interface AgentSlashCommand {
   name: string;
@@ -35,6 +38,7 @@ export async function fetchAgentCommands(input: {
     agentId: input.agentId,
     draftConfig: input.draftConfig,
   });
+  if (response.error) throw new Error(response.error);
   return response.commands as AgentSlashCommand[];
 }
 
@@ -56,8 +60,16 @@ export function useAgentCommandsQuery({
   const queryEnabled = enabled && retainedPanelActive;
   const client = useHostRuntimeClient(serverId);
   const isConnected = useHostRuntimeIsConnected(serverId);
+  const { provider, cwd } = useSessionStore(
+    useShallow((state) => {
+      const agent =
+        state.sessions[serverId]?.agents?.get(agentId) ??
+        state.sessions[serverId]?.agentDetails?.get(agentId);
+      return { provider: agent?.provider, cwd: agent?.cwd };
+    }),
+  );
 
-  const query = useQuery({
+  const query = useFetchQuery({
     queryKey: agentCommandsQueryKey({ serverId, agentId, draftConfig }),
     queryFn: async () => {
       if (!client) {
@@ -66,7 +78,15 @@ export function useAgentCommandsQuery({
       return fetchAgentCommands({ client, agentId, draftConfig });
     },
     enabled: queryEnabled && !!client && isConnected && (!!agentId || !!draftConfig),
-    staleTime: draftConfig ? DRAFT_COMMANDS_STALE_TIME : SESSION_COMMANDS_STALE_TIME,
+    dataShape: "value",
+    meta: {
+      agentCommandProvider: draftConfig?.provider ?? provider,
+      agentCommandCwd: draftConfig?.cwd ?? cwd,
+    },
+    ...(draftConfig
+      ? { immutableWhen: () => true as const }
+      : { ...sessionCommandQueryPolicy, staleTimeMs: sessionCommandQueryPolicy.staleTime }),
+    subscribed: queryEnabled,
     retry: 3,
     retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 5000),
   });
@@ -78,7 +98,7 @@ export function useAgentCommandsQuery({
   return {
     commands: query.data ?? [],
     isLoading,
-    isError: query.isError,
+    isError: query.isError && query.data === undefined,
     error: query.error,
   };
 }

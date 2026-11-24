@@ -11,7 +11,7 @@ import {
   prPanePipelineQueryKey,
   prPaneTimelineQueryKey,
 } from "@/git/pull-request-panel/query-keys";
-import { draftAgentCommandsQueryKey } from "@/hooks/agent-commands-query";
+import { draftAgentCommandsQueryKey } from "@/agent-commands/cache";
 import {
   resetWorkingDiffComparisons,
   selectWorkingDiffComparison,

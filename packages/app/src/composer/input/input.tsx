@@ -1,3 +1,4 @@
+import { useAgentCommandEditingSession } from "@/agent-commands";
 import * as Haptics from "expo-haptics";
 import { DEFAULT_CLIENT_SETTINGS, type SendShortcut } from "@/hooks/use-settings";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
@@ -208,6 +209,7 @@ type WebTextInputKeyPressEvent = NativeSyntheticEvent<
 >;
 
 interface TextAreaHandle {
+  value?: string;
   scrollHeight?: number;
   clientHeight?: number;
   offsetHeight?: number;
@@ -1265,6 +1267,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
     const inputHeightRef = useRef(MIN_INPUT_HEIGHT);
     const sendAfterTranscriptRef = useRef(false);
     const valueRef = useRef(value);
+    const editingSession = useAgentCommandEditingSession();
     const serverInfo = useSessionStore(
       useCallback(
         (state) => {
@@ -1557,6 +1560,27 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       [],
     );
 
+    useLayoutEffect(() => {
+      if (!editingSession) return;
+      return editingSession.attachEditor({
+        getText: () => (isWeb ? getWebTextArea()?.value : undefined) ?? valueRef.current,
+        replaceText: (text, selection) => {
+          valueRef.current = text;
+          onChangeText(text);
+          if (isWeb) {
+            const editor = getWebTextArea();
+            if (editor) {
+              editor.value = text;
+              editor.selectionStart = selection.start;
+              editor.selectionEnd = selection.end;
+            }
+          } else {
+            textInputRef.current?.setNativeProps({ selection });
+          }
+        },
+        focus: () => textInputRef.current?.focus(),
+      });
+    }, [editingSession, getWebTextArea, onChangeText]);
     const webTextareaRef = useRef<HTMLElement | null>(null);
 
     useLayoutEffect(() => {

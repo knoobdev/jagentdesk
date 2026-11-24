@@ -1,3 +1,4 @@
+import { useAgentCommandHints, matchCommandLink } from "@/agent-commands";
 import { useCallback, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
@@ -47,6 +48,7 @@ type AssistantFileLinkQueryKey = readonly [
 const DISABLED_QUERY_KEY = ["assistantFileLink", null, null, null] as const;
 
 export function useFileLink(source: AssistantFileLinkSource): UseFileLinkResult {
+  const hints = useAgentCommandHints();
   const { t } = useTranslation();
   const context = useAssistantFileLinkResolverContext();
   const queryClient = useQueryClient();
@@ -94,6 +96,13 @@ export function useFileLink(source: AssistantFileLinkSource): UseFileLinkResult 
 
   const open = useStableEvent(
     (nextSource: AssistantFileLinkSource, disposition: OpenFileDisposition) => {
+      const command =
+        hints &&
+        matchCommandLink(nextSource.href, nextSource.sourceType ?? "markdown", hints.names);
+      if (command) {
+        hints.insert(command);
+        return;
+      }
       openAssistantFileLink({
         source: nextSource,
         disposition,
@@ -145,6 +154,7 @@ export function useFileLink(source: AssistantFileLinkSource): UseFileLinkResult 
 }
 
 export function useAssistantFileLinkActions(): AssistantFileLinkActions {
+  const hints = useAgentCommandHints();
   const context = useAssistantFileLinkResolverContext();
   const actionLink = useFileLink(ACTION_LINK_SOURCE);
 
@@ -155,13 +165,17 @@ export function useAssistantFileLinkActions(): AssistantFileLinkActions {
   );
   const canOpen = useCallback(
     (source: AssistantFileLinkSource) =>
-      canOpenAssistantFileLink(source, context.configRef.current.workspaceRoot),
-    [context.configRef],
+      Boolean(
+        hints && matchCommandLink(source.href, source.sourceType ?? "markdown", hints.names),
+      ) || canOpenAssistantFileLink(source, context.configRef.current.workspaceRoot),
+    [context.configRef, hints],
   );
   const canResolveFile = useCallback(
     (source: AssistantFileLinkSource) =>
-      canResolveAssistantFileLinkToFile(source, context.configRef.current.workspaceRoot),
-    [context.configRef],
+      Boolean(
+        hints && matchCommandLink(source.href, source.sourceType ?? "markdown", hints.names),
+      ) || canResolveAssistantFileLinkToFile(source, context.configRef.current.workspaceRoot),
+    [context.configRef, hints],
   );
 
   return useMemo(() => ({ open, canOpen, canResolveFile }), [open, canOpen, canResolveFile]);
