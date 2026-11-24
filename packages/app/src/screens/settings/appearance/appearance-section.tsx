@@ -300,22 +300,20 @@ function ChatOutlineRow({ value, onChange }: ChatOutlineRowProps) {
   );
 }
 
-const TOOL_CALL_DETAIL_LEVELS: readonly AppSettings["toolCallDetailLevel"][] = [
-  "detailed",
-  "overview",
+const CHAT_DISPLAYS: readonly AppSettings["chatDisplay"][] = [
+  "full",
+  "collapseToolCalls",
+  "collapseTurns",
 ];
 
-function getToolCallDetailLevelLabel(
-  t: TFunction,
-  value: AppSettings["toolCallDetailLevel"],
-): string {
-  return t(`settings.general.toolCallDetail.options.${value}`);
+function getToolCallDetailLevelLabel(t: TFunction, value: AppSettings["chatDisplay"]): string {
+  return t(`settings.general.chatDisplay.options.${value}`);
 }
 
 interface ToolCallDetailMenuItemProps {
-  value: AppSettings["toolCallDetailLevel"];
+  value: AppSettings["chatDisplay"];
   selected: boolean;
-  onChange: (value: AppSettings["toolCallDetailLevel"]) => void;
+  onChange: (value: AppSettings["chatDisplay"]) => void;
 }
 
 function ToolCallDetailMenuItem({ value, selected, onChange }: ToolCallDetailMenuItemProps) {
@@ -329,8 +327,8 @@ function ToolCallDetailMenuItem({ value, selected, onChange }: ToolCallDetailMen
 }
 
 interface ToolCallDetailRowProps {
-  value: AppSettings["toolCallDetailLevel"];
-  onChange: (value: AppSettings["toolCallDetailLevel"]) => void;
+  value: AppSettings["chatDisplay"];
+  onChange: (value: AppSettings["chatDisplay"]) => void;
 }
 
 function ToolCallDetailRow({ value, onChange }: ToolCallDetailRowProps) {
@@ -339,15 +337,13 @@ function ToolCallDetailRow({ value, onChange }: ToolCallDetailRowProps) {
   return (
     <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
       <View style={settingsStyles.rowContent}>
-        <Text style={settingsStyles.rowTitle}>{t("settings.general.toolCallDetail.label")}</Text>
-        <Text style={settingsStyles.rowHint}>
-          {t("settings.general.toolCallDetail.description")}
-        </Text>
+        <Text style={settingsStyles.rowTitle}>{t("settings.general.chatDisplay.label")}</Text>
+        <Text style={settingsStyles.rowHint}>{t("settings.general.chatDisplay.description")}</Text>
       </View>
       <DropdownMenu>
         <DropdownMenuTrigger
           style={dropdownTriggerStyle}
-          accessibilityLabel={t("settings.general.toolCallDetail.accessibilityLabel", {
+          accessibilityLabel={t("settings.general.chatDisplay.accessibilityLabel", {
             value: selectedLabel,
           })}
         >
@@ -355,7 +351,7 @@ function ToolCallDetailRow({ value, onChange }: ToolCallDetailRowProps) {
           <ThemedChevronDown size={ICON_SIZE.sm} uniProps={mutedColorMapping} />
         </DropdownMenuTrigger>
         <DropdownMenuContent side="bottom" align="end" width={200}>
-          {TOOL_CALL_DETAIL_LEVELS.map((option) => (
+          {CHAT_DISPLAYS.map((option) => (
             <ToolCallDetailMenuItem
               key={option}
               value={option}
@@ -642,8 +638,8 @@ export function AppearanceSection() {
   );
 
   const handleToolCallDetailLevelChange = useCallback(
-    (toolCallDetailLevel: AppSettings["toolCallDetailLevel"]) => {
-      void updateSettings({ toolCallDetailLevel });
+    (chatDisplay: AppSettings["chatDisplay"]) => {
+      void updateSettings({ chatDisplay });
     },
     [updateSettings],
   );
@@ -750,7 +746,7 @@ export function AppearanceSection() {
             onChange={handleAutoExpandReasoningChange}
           />
           <ToolCallDetailRow
-            value={settings.toolCallDetailLevel}
+            value={settings.chatDisplay}
             onChange={handleToolCallDetailLevelChange}
           />
           {!isNative ? (

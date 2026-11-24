@@ -6,6 +6,7 @@ import { pluginSettings } from "./plugin-settings";
 import { sshModuleStrings } from "./ssh-modules";
 
 export const vi = {
+  turnSummary: { messages: { one: "{{count}} tin nhắn", other: "{{count}} tin nhắn" } },
   bots: botsStrings,
   subagents: {
     parent: {

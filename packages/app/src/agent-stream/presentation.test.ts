@@ -3,6 +3,7 @@ import { transformTimelineItem, type TimelineItemTransform } from "@/plugins/tim
 import type { InstalledPlugin } from "@/plugins/types";
 import {
   applyStreamEvent,
+  getStreamItemMessageId,
   hydrateStreamState,
   type StreamItem,
   type ToolCallItem,
@@ -12,7 +13,7 @@ import type { AgentStreamEventPayload } from "@jagentdesk/protocol/messages";
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import { buildAgentStreamRenderModel } from "./model";
-import { createStreamPresentation, getStreamItemMessageId } from "./presentation";
+import { createStreamPresentation } from "./presentation";
 
 const runtime = {
   jagentdesk: {},
@@ -93,7 +94,11 @@ function pluginData(items: StreamItem[]): unknown[] {
   return items.flatMap((item) => (item.kind === "plugin" ? [item.data] : []));
 }
 
-const presentationOptions = { level: "overview" as const, isTurnActive: true };
+const presentationOptions = {
+  display: "collapseToolCalls" as const,
+  expandedTurnHostIds: new Set<string>(),
+  isTurnActive: true,
+};
 
 function streamHarness(transform?: TimelineItemTransform) {
   let state: { tail: StreamItem[]; head: StreamItem[] } = { tail: [], head: [] };
