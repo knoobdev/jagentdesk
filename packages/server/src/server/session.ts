@@ -1,3 +1,4 @@
+import { observeSourceSend } from "./session/source-send.js";
 import { ConnectedHostSession, type ConnectedHosts } from "./connected-hosts/index.js";
 import {
   SessionAuthorization,
@@ -1154,9 +1155,15 @@ export class Session {
     this.hostSourceId = resolveHostSource(options);
     this.connectedHostSession = createHostSession(options, this);
     this.onMessage = onMessage;
-    this.onMessageToSource = onMessageToSource ?? null;
+    this.onMessageToSource = onMessageToSource
+      ? (source, message) =>
+          observeSourceSend(() => onMessageToSource(source, message), this.sessionLogger)
+      : null;
     this.onBinaryMessage = onBinaryMessage ?? null;
-    this.onBinaryMessageToSource = onBinaryMessageToSource ?? null;
+    this.onBinaryMessageToSource = onBinaryMessageToSource
+      ? (source, frame) =>
+          observeSourceSend(() => onBinaryMessageToSource(source, frame), this.sessionLogger)
+      : null;
     this.getTransportBufferedAmount = getTransportBufferedAmount ?? (() => 0);
     this.onLifecycleIntent = onLifecycleIntent ?? null;
     this.onWorkspaceArchiveUpdate = options.publishWorkspaceArchiveUpdates;
