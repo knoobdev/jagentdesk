@@ -353,6 +353,7 @@ export class ClaudeTaskProtocolSource {
 
     const id = readString(message.tool_use_id);
     this.rememberTaskOwner(message.task_id, id);
+    const parentSubagentId = id ? this.ownerSubagentIdByToolUseId.get(id) : undefined;
     // skip_transcript marks ambient housekeeping the transcript should not show.
     if (!id || message.skip_transcript === true || !isProviderSubagentTask(message)) return [];
 
@@ -360,27 +361,40 @@ export class ClaudeTaskProtocolSource {
     const existingId =
       this.subagentIdByTaskId.get(message.task_id) ?? this.adoptRestored(message.task_id);
     this.recordBackgrounded(existingId ?? id, message.is_backgrounded);
-    if (existingId) {
-      this.canonicalIdByToolUseId.set(id, existingId);
-      const observations: SubagentObservation[] = [];
-      if (this.lastStatusById.get(existingId) !== "running") {
-        this.lastStatusById.set(existingId, "running");
-        observations.push({ kind: "status", id: existingId, status: "running" });
-      }
-      const prompt =
-        message.task_type === CLAUDE_WORKFLOW_TASK_TYPE
-          ? readString(message.description)
-          : readString(message.prompt);
-      if (prompt) {
-        observations.push({
-          kind: "timeline",
-          id: existingId,
-          item: { type: "user_message", text: prompt },
-        });
-      }
-      return observations;
-    }
+    if (existingId) return this.observeExistingTaskStart(message, id, existingId);
+    return this.observeNewTaskStart(message, id, parentSubagentId);
+  }
 
+  private observeExistingTaskStart(
+    message: TaskStartedMessage,
+    id: string,
+    existingId: string,
+  ): SubagentObservation[] {
+    this.canonicalIdByToolUseId.set(id, existingId);
+    const observations: SubagentObservation[] = [];
+    if (this.lastStatusById.get(existingId) !== "running") {
+      this.lastStatusById.set(existingId, "running");
+      observations.push({ kind: "status", id: existingId, status: "running" });
+    }
+    const prompt =
+      message.task_type === CLAUDE_WORKFLOW_TASK_TYPE
+        ? readString(message.description)
+        : readString(message.prompt);
+    if (prompt) {
+      observations.push({
+        kind: "timeline",
+        id: existingId,
+        item: { type: "user_message", text: prompt },
+      });
+    }
+    return observations;
+  }
+
+  private observeNewTaskStart(
+    message: TaskStartedMessage,
+    id: string,
+    parentSubagentId: string | undefined,
+  ): SubagentObservation[] {
     this.subagentIdByTaskId.set(message.task_id, id);
     this.canonicalIdByToolUseId.set(id, id);
     this.declaredIds.add(id);
@@ -389,10 +403,8 @@ export class ClaudeTaskProtocolSource {
     // An explicit `name` on the Task call wins over the agent type, matching how replay titles the
     // same subagent. Without it a fan-out of five Explores reads as five identical rows.
     const isWorkflow = message.task_type === CLAUDE_WORKFLOW_TASK_TYPE;
-    if (isWorkflow) {
-      this.idsWithExistingParentToolCard.add(id);
-      this.workflowTaskIds.add(message.task_id);
-    }
+    if (isWorkflow || parentSubagentId) this.idsWithExistingParentToolCard.add(id);
+    if (isWorkflow) this.workflowTaskIds.add(message.task_id);
     const title = isWorkflow
       ? "Workflow"
       : (readString(this.getToolInput(id)?.name) ?? readString(message.subagent_type));
@@ -402,6 +414,7 @@ export class ClaudeTaskProtocolSource {
         kind: "declared",
         id,
         toolCallId: id,
+        ...(parentSubagentId ? { parentSubagentId } : {}),
         ...(title ? { title } : {}),
         ...(description ? { description } : {}),
       },
