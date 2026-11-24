@@ -1,7 +1,7 @@
 import invariant from "tiny-invariant";
 import type { WorkspaceTab, WorkspaceTabTarget } from "@/workspace-tabs/model";
 import { MIN_SPLIT_SIZE } from "@/stores/workspace-layout-constants";
-import { defaultWorkspaceLayoutIds } from "@/stores/workspace-layout-ids";
+import { allocateWorkspaceTabId, defaultWorkspaceLayoutIds } from "@/stores/workspace-layout-ids";
 import type { WorkspaceLayoutNodeIdPrefix } from "@/stores/workspace-layout-ids";
 import {
   buildDeterministicWorkspaceTabId,
@@ -307,15 +307,11 @@ function normalizeWorkspaceTabs(input: unknown): WorkspaceTab[] {
   if (!Array.isArray(input)) {
     return [];
   }
+  // Preserve colliding entries until the whole layout can assign each an identity.
   const next: WorkspaceTab[] = [];
-  const seen = new Set<string>();
   for (const value of input) {
     const tab = normalizeWorkspaceTab(value);
-    if (!tab || seen.has(tab.tabId)) {
-      continue;
-    }
-    seen.add(tab.tabId);
-    next.push(tab);
+    if (tab) next.push(tab);
   }
   return next;
 }
@@ -894,13 +890,65 @@ function insertSplitInternal(input: InsertSplitInternalInput): InsertSplitIntern
   };
 }
 
+function repairDuplicateTabIds(root: SplitNodeInternal): {
+  root: SplitNodeInternal;
+  ambiguousIds: ReadonlySet<string>;
+} {
+  const keepers = new Map<string, WorkspaceTab>();
+  const ambiguousIds = new Set<string>();
+  for (const tab of collectAllTabs(root)) {
+    const keeper = keepers.get(tab.tabId);
+    if (!keeper) {
+      keepers.set(tab.tabId, tab);
+      continue;
+    }
+    ambiguousIds.add(tab.tabId);
+    if (
+      buildDeterministicWorkspaceTabId(tab.target) === tab.tabId &&
+      buildDeterministicWorkspaceTabId(keeper.target) !== keeper.tabId
+    ) {
+      keepers.set(tab.tabId, tab);
+    }
+  }
+  if (ambiguousIds.size === 0) return { root, ambiguousIds };
+
+  // Reserve every original id before assigning replacements, including hidden panes.
+  const occupiedIds = new Set(keepers.keys());
+  function repair(node: SplitNodeInternal): SplitNodeInternal {
+    if (node.kind === "group") {
+      return { ...node, group: { ...node.group, children: node.group.children.map(repair) } };
+    }
+    const focusedCandidates = node.pane.tabs.filter((tab) => tab.tabId === node.pane.focusedTabId);
+    const focusedTab =
+      focusedCandidates.find((tab) => keepers.get(tab.tabId) === tab) ?? focusedCandidates[0];
+    let focusedTabId = node.pane.focusedTabId;
+    const tabs = node.pane.tabs.map((tab) => {
+      if (keepers.get(tab.tabId) === tab) return tab;
+      const tabId = allocateWorkspaceTabId(
+        buildDeterministicWorkspaceTabId(tab.target),
+        occupiedIds,
+      );
+      occupiedIds.add(tabId);
+      if (tab === focusedTab) focusedTabId = tabId;
+      return { ...tab, tabId };
+    });
+    return {
+      ...node,
+      pane: { ...node.pane, tabs, tabIds: tabs.map((tab) => tab.tabId), focusedTabId },
+    };
+  }
+  return { root: repair(root), ambiguousIds };
+}
+
 export function normalizeLayout(layout: unknown): WorkspaceLayout {
   if (!layout || typeof layout !== "object") {
     return createDefaultLayout();
   }
 
   const rawLayout = layout as WorkspaceLayout;
-  const root = normalizeNode(rawLayout.root) ?? asInternalNode(createDefaultLayout().root);
+  const { root, ambiguousIds } = repairDuplicateTabIds(
+    normalizeNode(rawLayout.root) ?? asInternalNode(createDefaultLayout().root),
+  );
   const focusedPaneId =
     rawLayout.focusedPaneId === null ? null : trimNonEmpty(rawLayout.focusedPaneId);
   const resolvedFocusedPaneId =
@@ -919,7 +967,16 @@ export function normalizeLayout(layout: unknown): WorkspaceLayout {
     openTabIds: new Set(collectAllTabs(root).map((tab) => tab.tabId)),
   });
 
-  return parentTabIdByTabId ? { ...normalizedLayout, parentTabIdByTabId } : normalizedLayout;
+  if (parentTabIdByTabId) {
+    // A duplicated id cannot identify either end of a parent relationship unambiguously.
+    for (const [childId, parentId] of Object.entries(parentTabIdByTabId)) {
+      if (ambiguousIds.has(childId) || ambiguousIds.has(parentId))
+        delete parentTabIdByTabId[childId];
+    }
+    if (Object.keys(parentTabIdByTabId).length > 0)
+      return { ...normalizedLayout, parentTabIdByTabId };
+  }
+  return normalizedLayout;
 }
 
 export function findPaneById(root: SplitNode, paneId: string | null | undefined): SplitPane | null {
@@ -1088,7 +1145,10 @@ function insertNewTabIntoFocusedPane(input: {
     findPaneById(createDefaultLayout().root, DEFAULT_PANE_ID);
   invariant(focusedPane, "Workspace layout must always have a pane");
 
-  const tabId = buildDeterministicWorkspaceTabId(input.target);
+  const tabId = allocateWorkspaceTabId(
+    buildDeterministicWorkspaceTabId(input.target),
+    new Set(collectAllTabs(layout.root).map((tab) => tab.tabId)),
+  );
   const nextTab: WorkspaceTab = {
     tabId,
     target: input.target,
@@ -1112,11 +1172,9 @@ function insertNewTabIntoFocusedPane(input: {
 }
 
 function findExistingTabForTarget(root: SplitNodeInternal, target: WorkspaceTabTarget) {
-  const targetTabId = buildDeterministicWorkspaceTabId(target);
+  const key = buildDeterministicWorkspaceTabId(target);
   return (
-    collectAllTabs(root).find(
-      (tab) => tab.tabId === targetTabId || workspaceTabTargetsEqual(tab.target, target),
-    ) ?? null
+    collectAllTabs(root).find((tab) => buildDeterministicWorkspaceTabId(tab.target) === key) ?? null
   );
 }
 

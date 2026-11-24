@@ -1731,3 +1731,33 @@ describe("workspace-layout-store actions", () => {
     expect(state.hiddenAgentIdsByWorkspace[workspaceKey]).toBeUndefined();
   });
 });
+
+it("repairs a saved preview identity collision across split panes", () => {
+  const layout = normalizeLayout({
+    root: {
+      kind: "group",
+      group: {
+        id: "split",
+        direction: "horizontal",
+        sizes: [0.5, 0.5],
+        children: [
+          { id: "main", path: "b.ts" },
+          { id: "right", path: "a.ts" },
+        ].map(({ id, path }) => ({
+          kind: "pane",
+          pane: {
+            id,
+            tabIds: ["file_a.ts"],
+            focusedTabId: "file_a.ts",
+            tabs: [{ tabId: "file_a.ts", target: { kind: "file", path }, createdAt: 1 }],
+          },
+        })),
+      },
+    },
+    focusedPaneId: "right",
+  });
+  const tabs = collectAllTabs(layout.root);
+  expect(tabs.map((tab) => tab.tabId)).toEqual(["file_b.ts", "file_a.ts"]);
+  expect(findPaneById(layout.root, "main")?.focusedTabId).toBe("file_b.ts");
+  expect(findPaneById(layout.root, "right")?.focusedTabId).toBe("file_a.ts");
+});
