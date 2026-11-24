@@ -1,3 +1,4 @@
+import { useIsFocused } from "@react-navigation/native";
 import { SegmentedControl, type SegmentedControlOption } from "@/components/ui/segmented-control";
 import { useExistingWorktrees, useProjectWorktrees } from "./new-workspace/existing-worktrees";
 import {
@@ -7,7 +8,7 @@ import {
 } from "./new-workspace-picker-item";
 import { useRouter } from "expo-router";
 import { buildSettingsAddHostRoute } from "@/utils/host-routes";
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from "react";
 import type { ReactElement, RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -195,7 +196,10 @@ interface PickerOptionData {
 const PR_OPTION_PREFIX = "github-pr:";
 const PROJECT_ICON_FALLBACK_FONT_SIZE = 10;
 // Stable reference so the keyboard-action handler doesn't re-register each render.
-const PROJECT_PICK_ACTIONS: readonly KeyboardActionId[] = ["workspace.project.pick"];
+const PROJECT_PICK_ACTIONS: readonly KeyboardActionId[] = [
+  "workspace.project.pick",
+  "workspace.new",
+];
 // Height of a single picker-trigger badge. The Base-row spacer reserves exactly
 // this so toggling Isolation to Local hides the row without shifting the form.
 const BADGE_HEIGHT = 28;
@@ -1737,6 +1741,8 @@ export function NewWorkspaceScreen({
   const submitInFlightRef = useRef(false);
   const [orchestrationRequested] = useState(startWithOrchestration);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const projectPickHandlerId = useId();
+  const isScreenFocused = useIsFocused();
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const openAddProjectPicker = useOpenAddProject();
   const [isolationPickerOpen, setIsolationPickerOpen] = useState(false);
@@ -2010,19 +2016,17 @@ export function NewWorkspaceScreen({
     setProjectPickerOpen(true);
   }, []);
 
-  // Cmd/Ctrl+P opens the project picker with its search focused so the user can
-  // switch projects from the keyboard. Registered only while this screen is
-  // mounted, so the shortcut doesn't swallow the browser's native print
-  // elsewhere; gated on having projects to pick.
+  // On this screen, both project-pick and new-workspace open the chooser.
+  // Take precedence over global new-workspace navigation to preserve the draft.
   const handleProjectPick = useCallback(() => {
     openProjectPicker();
     return true;
   }, [openProjectPicker]);
   useKeyboardActionHandler({
-    handlerId: "new-workspace-project-pick",
+    handlerId: `new-workspace-project-pick:${projectPickHandlerId}`,
     actions: PROJECT_PICK_ACTIONS,
-    enabled: projectPickerOptions.length > 0,
-    priority: 0,
+    enabled: isScreenFocused,
+    priority: 10,
     handle: handleProjectPick,
   });
 
