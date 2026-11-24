@@ -2,6 +2,8 @@ export const MARKDOWN_COPY_TAG_ATTRIBUTE = "data-jagentdesk-markdown-tag";
 export const MARKDOWN_COPY_IGNORE_ATTRIBUTE = "data-jagentdesk-markdown-ignore";
 export const MARKDOWN_COPY_LIST_MARKER_ATTRIBUTE = "data-jagentdesk-markdown-list-marker";
 export const MARKDOWN_COPY_UNWRAP_ATTRIBUTE = "data-jagentdesk-markdown-unwrap";
+/** A link JAgentDesk recognized in the reply text, as opposed to one the Markdown wrote. */
+export const MARKDOWN_COPY_RECOGNIZED_LINK_ATTRIBUTE = "data-jagentdesk-markdown-recognized-link";
 export const MARKDOWN_COPY_LIST_START_ATTRIBUTE = "data-jagentdesk-markdown-list-start";
 export const MARKDOWN_COPY_LANGUAGE_ATTRIBUTE = "data-jagentdesk-markdown-language";
 export const MARKDOWN_COPY_ALIGN_ATTRIBUTE = "data-jagentdesk-markdown-align";

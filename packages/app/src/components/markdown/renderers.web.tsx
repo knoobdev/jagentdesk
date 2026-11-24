@@ -1,3 +1,4 @@
+import { MARKDOWN_COPY_RECOGNIZED_LINK_ATTRIBUTE } from "@/assistant-selection-copy/markup";
 import { Text } from "react-native";
 import { forwardRef, useMemo, type ComponentProps } from "react";
 import type {
@@ -11,7 +12,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip
 import { HighlightedCodeBlock } from "@/components/highlighted-code-block";
 import type { Theme } from "@/styles/theme";
 import { MermaidFence } from "./fence/mermaid";
-import { markdownLinkSource } from "./source";
+import { isRecognizedLink, markdownLinkSource } from "./source";
 
 const ThemedCodeBlock = withUnistyles(HighlightedCodeBlock);
 const codeStyle = (theme: Theme) => ({
@@ -33,8 +34,17 @@ function WebLink({ link, anchorProps, children }: LinkRendererProps) {
     () => ({ ...anchorProps.style, overflowWrap: "anywhere" as const }),
     [anchorProps.style],
   );
+  // Selection copy pastes a link JAgentDesk recognized as the text the reply showed.
+  const recognized = isRecognizedLink(link);
+  const copyAnchorProps = useMemo(
+    () =>
+      recognized
+        ? { ...anchorProps, [MARKDOWN_COPY_RECOGNIZED_LINK_ATTRIBUTE]: "true" }
+        : anchorProps,
+    [anchorProps, recognized],
+  );
   const anchor = (
-    <a {...anchorProps} style={anchorStyle}>
+    <a {...copyAnchorProps} style={anchorStyle}>
       {children}
     </a>
   );
