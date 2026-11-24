@@ -1,3 +1,4 @@
+import { AgentMessageSchema } from "./agent-message.js";
 import { ProviderJAgentDeskToolsPolicySchema } from "./provider-config.js";
 import type { JsonValue } from "./agent-types.js";
 import { PluginIdSchema, PluginRequirementsSchema, PluginSourceSchema } from "./plugin-config.js";
@@ -837,6 +838,7 @@ const ToolCallDetailPayloadSchema: z.ZodType<ToolCallDetail, unknown> = z.discri
 );
 
 const ToolCallBasePayloadSchema = z.object({
+  agentMessage: AgentMessageSchema.optional(),
   type: z.literal("tool_call"),
   callId: z.string(),
   name: z.string(),

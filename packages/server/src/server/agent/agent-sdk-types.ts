@@ -8,6 +8,7 @@ import type {
   ProviderOptions,
   ToolPolicy,
 } from "@jagentdesk/protocol/agent-types";
+import type { AgentMessage } from "@jagentdesk/protocol/agent-message";
 import type { AgentAttachment } from "@jagentdesk/protocol/messages";
 import type { JAgentDeskToolCatalog } from "./tools/types.js";
 
@@ -330,6 +331,8 @@ interface ToolCallBase {
   name: string;
   detail: ToolCallDetail;
   metadata?: Record<string, unknown>;
+  /** Set when the row is a delivered agent message rather than a provider tool call. */
+  agentMessage?: AgentMessage;
 }
 
 type ToolCallRunningTimelineItem = ToolCallBase & {
