@@ -70,14 +70,14 @@ export interface SheetHeader {
   search?: SheetHeaderSearch;
 }
 
-const ABSOLUTE_FILL_STYLE = { ...StyleSheet.absoluteFillObject };
+const ABSOLUTE_FILL_STYLE = { ...StyleSheet.absoluteFill };
 
 const styles = StyleSheet.create((theme) => ({
   nativeModalRoot: {
     flex: 1,
   },
   desktopOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0,0,0,0.55)",
     justifyContent: "center",
     alignItems: "center",

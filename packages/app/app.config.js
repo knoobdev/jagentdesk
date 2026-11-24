@@ -185,6 +185,7 @@ export default {
       [
         "expo-build-properties",
         {
+          ios: { enableSceneSupport: true },
           android: {
             minSdkVersion: 29,
             kotlinVersion: "2.1.20",

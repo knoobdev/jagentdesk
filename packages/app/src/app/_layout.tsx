@@ -749,7 +749,8 @@ function MobileGestureWrapper({
 function ProvidersWrapper({ children }: { children: ReactNode }) {
   const { settings, isLoading: settingsLoading } = useAppSettings();
 
-  const systemScheme = useColorScheme();
+  const colorScheme = useColorScheme();
+  const systemScheme = colorScheme === "unspecified" ? null : colorScheme;
   const pluginThemeOptions = usePluginThemeCatalog();
 
   // Apply the theme, then the font / size / syntax settings over every registered theme key.

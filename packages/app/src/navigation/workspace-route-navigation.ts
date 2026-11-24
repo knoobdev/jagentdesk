@@ -1,4 +1,7 @@
-import type { NavigationAction, NavigationContainerRefWithCurrent } from "@react-navigation/native";
+import type {
+  NavigationAction,
+  NavigationContainerRefWithCurrent,
+} from "expo-router/react-navigation";
 import { router, type Href } from "expo-router";
 import {
   encodeWorkspaceIdForPathSegment,

@@ -394,7 +394,7 @@ const styles = StyleSheet.create((theme) => ({
   phoneCenter: { flex: 1, alignItems: "center", justifyContent: "center", gap: theme.spacing[2] },
   waitingSkeleton: { position: "absolute", backgroundColor: "#1c1c1e" },
   waitingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: "center",
     justifyContent: "center",
     gap: theme.spacing[2],

@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { Text, View } from "react-native";
-import { useIsFocused } from "@react-navigation/native";
+import { useIsFocused } from "expo-router/react-navigation";
 import { useLocalSearchParams } from "expo-router";
 import { StyleSheet } from "react-native-unistyles";
 import { KanbanSquare, MessageSquare, Settings2 } from "lucide-react-native";

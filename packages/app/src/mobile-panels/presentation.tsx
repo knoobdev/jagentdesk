@@ -84,7 +84,7 @@ export function MobilePanelOverlay({
             importantForAccessibility="no-hide-descendants"
             onPress={showMobileAgent}
             pointerEvents={isOpen ? "auto" : "none"}
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
             testID={`${panel}-backdrop`}
           >
             <Animated.View pointerEvents="none" style={backdropStyle} />
@@ -104,10 +104,10 @@ export function MobilePanelOverlay({
 // native node after Fabric commits.
 const styles = StyleSheet.create({
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   backdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0, 0, 0, 0.5)",
   },
   panel: {

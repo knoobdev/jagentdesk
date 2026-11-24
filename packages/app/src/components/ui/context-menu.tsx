@@ -19,7 +19,6 @@ import {
   Modal,
   Platform,
   Pressable,
-  StatusBar,
   Text,
   View,
   type GestureResponderEvent,
@@ -285,10 +284,10 @@ export function ContextMenuTrigger({
       if (!point) {
         return;
       }
-      const statusBarHeight = Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0;
+
       ctx.setAnchorRect({
         x: point.pageX,
-        y: point.pageY + statusBarHeight,
+        y: point.pageY,
         width: 0,
         height: 0,
       });
@@ -453,12 +452,10 @@ export function ContextMenuContent({
       setTriggerRect(null);
       return () => {};
     }
-
-    const statusBarHeight = Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0;
     let cancelled = false;
 
     void measureElement(triggerRef.current).then((rect) => {
-      if (!cancelled) setTriggerRect({ ...rect, y: rect.y + statusBarHeight });
+      if (!cancelled) setTriggerRect(rect);
       return undefined;
     });
 

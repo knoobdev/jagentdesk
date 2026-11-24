@@ -63,6 +63,8 @@ export default defineConfig({
           "zustand",
           "@tanstack/react-query",
           "react-native-web",
+          "react-native-reanimated",
+          "react-native-worklets",
           "react-native-gesture-handler",
           "react-native-keyboard-controller",
         ],

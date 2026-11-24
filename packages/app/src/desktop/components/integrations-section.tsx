@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { Text, View } from "react-native";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect } from "expo-router/react-navigation";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { Terminal, Blocks, Check, Settings2 } from "lucide-react-native";
 import { settingsStyles } from "@/styles/settings";

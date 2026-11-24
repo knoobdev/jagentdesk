@@ -8,6 +8,17 @@ import { join, relative } from "node:path";
 // workspace root live in their workspace's own node_modules, and patch-package resolves
 // the patch's node_modules/... paths relative to its working directory.
 const patchedPackages = [
+  { nodeModulesPath: "node_modules/@gorhom/bottom-sheet", patchPrefix: "@gorhom+bottom-sheet+" },
+  {
+    nodeModulesPath: "node_modules/react-native-unistyles",
+    patchPrefix: "react-native-unistyles+",
+  },
+  {
+    nodeModulesPath: "packages/app/node_modules/react-native-svg",
+    patchPrefix: "react-native-svg+",
+    cwd: "packages/app",
+  },
+  { nodeModulesPath: "node_modules/react-native-svg", patchPrefix: "react-native-svg+" },
   {
     nodeModulesPath: "node_modules/react-native-markdown-display",
     patchPrefix: "react-native-markdown-display+",
@@ -31,9 +42,14 @@ const patchedPackages = [
   },
 ];
 
-const installedPackages = patchedPackages.filter(({ nodeModulesPath }) =>
-  existsSync(nodeModulesPath),
-);
+const installedPackages = patchedPackages.flatMap((entry) => {
+  if (existsSync(entry.nodeModulesPath)) return [entry];
+  const appPath = join("packages/app", entry.nodeModulesPath);
+  if (!entry.cwd && existsSync(appPath)) {
+    return [{ ...entry, nodeModulesPath: appPath, cwd: "packages/app" }];
+  }
+  return [];
+});
 
 if (!existsSync("patches") || installedPackages.length === 0) {
   process.exit(0);

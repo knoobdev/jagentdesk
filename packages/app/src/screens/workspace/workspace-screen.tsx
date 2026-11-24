@@ -13,7 +13,7 @@ import {
   type ReactNode,
 } from "react";
 import { useStoreWithEqualityFn } from "zustand/traditional";
-import { useIsFocused } from "@react-navigation/native";
+import { useIsFocused } from "expo-router/react-navigation";
 import { BackHandler, Keyboard, Pressable, Text, View } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, type Href } from "expo-router";
@@ -4460,7 +4460,7 @@ const styles = StyleSheet.create((theme) => ({
     position: "relative",
   },
   mobileMountedTabSlot: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   contentPlaceholder: {
     flex: 1,

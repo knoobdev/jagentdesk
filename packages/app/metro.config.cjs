@@ -3,7 +3,8 @@ const { resolve } = require("metro-resolver");
 const path = require("path");
 
 const projectRoot = __dirname;
-const appNodeModulesRoot = path.resolve(projectRoot, "node_modules");
+const reactRoot = path.dirname(require.resolve("react/package.json"));
+const reactDomRoot = path.dirname(require.resolve("react-dom/package.json"));
 const appSrcRoot = path.resolve(projectRoot, "src");
 const isFdroidBuild = process.env.JAGENTDESK_FDROID_BUILD === "1";
 const fdroidModuleOverrides = {
@@ -36,10 +37,10 @@ const workspaceRoot = path.resolve(projectRoot, "..", "..");
 config.watchFolders = Array.from(new Set([...(config.watchFolders ?? []), workspaceRoot]));
 config.resolver.extraNodeModules = {
   ...config.resolver.extraNodeModules,
-  react: path.join(appNodeModulesRoot, "react"),
-  "react-dom": path.join(appNodeModulesRoot, "react-dom"),
-  "react/jsx-runtime": path.join(appNodeModulesRoot, "react/jsx-runtime"),
-  "react/jsx-dev-runtime": path.join(appNodeModulesRoot, "react/jsx-dev-runtime"),
+  react: reactRoot,
+  "react-dom": reactDomRoot,
+  "react/jsx-runtime": path.join(reactRoot, "jsx-runtime"),
+  "react/jsx-dev-runtime": path.join(reactRoot, "jsx-dev-runtime"),
 };
 config.resolver.blockList = new RegExp(
   `(^${escapedAppSrcRoot}${pathSeparatorPattern}.*\\.(test|spec)\\.(ts|tsx)$|${pathSeparatorPattern}__tests__${pathSeparatorPattern}.*)$`,

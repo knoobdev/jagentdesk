@@ -930,7 +930,7 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
   },
   overlayWeb: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     pointerEvents: "auto" as const,
   },
   backdrop: {

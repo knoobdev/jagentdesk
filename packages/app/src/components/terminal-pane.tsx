@@ -1210,7 +1210,7 @@ const styles = StyleSheet.create((theme) => ({
     minHeight: 0,
   },
   attachOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(0, 0, 0, 0.16)",
