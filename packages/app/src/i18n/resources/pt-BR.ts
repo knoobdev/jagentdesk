@@ -1444,6 +1444,11 @@ export const ptBR: TranslationResources = {
     noFiles: "Nenhum arquivo ou diretório encontrado",
     noCommands: "Nenhum comando encontrado",
     failedToLoad: "Falha ao carregar",
+    loadingProviderCommands: "Carregando comandos do {{provider}}...",
+    commandsFailed: "N\u00E3o foi poss\u00EDvel carregar os comandos",
+    providerCommandsFailed: "N\u00E3o foi poss\u00EDvel carregar os comandos do {{provider}}",
+    filesFailed: "N\u00E3o foi poss\u00EDvel buscar arquivos",
+    skillTag: "Skill",
   },
   loadOlderHistory: {
     failed: "Não foi possível carregar o histórico mais antigo",

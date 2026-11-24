@@ -1400,6 +1400,11 @@ export const zhCN: TranslationResources = {
     noFiles: "没有找到文件或目录",
     noCommands: "没有找到 commands",
     failedToLoad: "加载失败",
+    loadingProviderCommands: "\u6B63\u5728\u52A0\u8F7D {{provider}} commands...",
+    commandsFailed: "\u65E0\u6CD5\u52A0\u8F7D commands",
+    providerCommandsFailed: "\u65E0\u6CD5\u52A0\u8F7D {{provider}} commands",
+    filesFailed: "\u65E0\u6CD5\u641C\u7D22\u6587\u4EF6",
+    skillTag: "Skill",
   },
   loadOlderHistory: {
     failed: "无法加载更早历史",

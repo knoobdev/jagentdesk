@@ -1459,6 +1459,15 @@ export const ar: TranslationResources = {
     noFiles: "لم يتم العثور على ملفات أو أدلة",
     noCommands: "لم يتم العثور على أي أوامر",
     failedToLoad: "فشل التحميل",
+    loadingProviderCommands:
+      "\u062C\u0627\u0631\u064D \u062A\u062D\u0645\u064A\u0644 \u0623\u0648\u0627\u0645\u0631 {{provider}}...",
+    commandsFailed:
+      "\u062A\u0639\u0630\u0631 \u062A\u062D\u0645\u064A\u0644 \u0627\u0644\u0623\u0648\u0627\u0645\u0631",
+    providerCommandsFailed:
+      "\u062A\u0639\u0630\u0631 \u062A\u062D\u0645\u064A\u0644 \u0623\u0648\u0627\u0645\u0631 {{provider}}",
+    filesFailed:
+      "\u062A\u0639\u0630\u0631 \u0627\u0644\u0628\u062D\u062B \u0641\u064A \u0627\u0644\u0645\u0644\u0641\u0627\u062A",
+    skillTag: "\u0645\u0647\u0627\u0631\u0629",
   },
   loadOlderHistory: {
     failed: "تعذر تحميل السجل الأقدم",

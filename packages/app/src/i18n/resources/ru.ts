@@ -1492,6 +1492,15 @@ export const ru: TranslationResources = {
     noFiles: "Файлы и каталоги не найдены",
     noCommands: "Команды не найдены",
     failedToLoad: "Не удалось загрузить",
+    loadingProviderCommands:
+      "\u0417\u0430\u0433\u0440\u0443\u0437\u043A\u0430 \u043A\u043E\u043C\u0430\u043D\u0434 {{provider}}...",
+    commandsFailed:
+      "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044C \u043A\u043E\u043C\u0430\u043D\u0434\u044B",
+    providerCommandsFailed:
+      "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044C \u043A\u043E\u043C\u0430\u043D\u0434\u044B {{provider}}",
+    filesFailed:
+      "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043D\u0430\u0439\u0442\u0438 \u0444\u0430\u0439\u043B\u044B",
+    skillTag: "\u041D\u0430\u0432\u044B\u043A",
   },
   loadOlderHistory: {
     failed: "Не удалось загрузить старую историю.",

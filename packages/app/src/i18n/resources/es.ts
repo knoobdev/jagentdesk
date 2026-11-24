@@ -1460,6 +1460,11 @@ export const es: TranslationResources = {
     noFiles: "No se encontraron archivos ni directorios",
     noCommands: "No se encontraron comandos",
     failedToLoad: "No se pudo cargar",
+    loadingProviderCommands: "Cargando comandos de {{provider}}...",
+    commandsFailed: "No se pudieron cargar los comandos",
+    providerCommandsFailed: "No se pudieron cargar los comandos de {{provider}}",
+    filesFailed: "No se pudieron buscar archivos",
+    skillTag: "Skill",
   },
   loadOlderHistory: {
     failed: "No se pudo cargar el historial anterior",

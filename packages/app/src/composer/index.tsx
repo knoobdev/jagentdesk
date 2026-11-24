@@ -2237,10 +2237,7 @@ export function Composer({
                   options={autocomplete.options}
                   selectedIndex={autocomplete.selectedIndex}
                   onSelect={autocomplete.onSelectOption}
-                  isLoading={autocomplete.isLoading}
-                  errorMessage={autocomplete.errorMessage}
-                  loadingText={autocomplete.loadingText}
-                  emptyText={autocomplete.emptyText}
+                  status={autocomplete.status}
                 />
 
                 {/* MessageInput handles everything: text, dictation, attachments, all buttons */}

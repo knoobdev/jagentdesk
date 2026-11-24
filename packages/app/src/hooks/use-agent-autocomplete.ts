@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
-import type { AutocompleteOption } from "@/components/ui/autocomplete";
+import type { AutocompleteOption, AutocompleteStatus } from "@/components/ui/autocomplete";
 import {
   useAgentCommandsQuery,
   type AgentSlashCommand,
@@ -55,6 +55,7 @@ interface AgentAutocompleteResult {
   errorMessage?: string;
   loadingText: string;
   emptyText: string;
+  status: AutocompleteStatus | null;
   onSelectOption: (option: AutocompleteOption) => void;
   onKeyPress: (event: { key: string; preventDefault: () => void }) => boolean;
 }
@@ -122,10 +123,10 @@ function mapCommandToOption(entry: AvailableCommand, t: TFunction): AgentAutocom
   const base = {
     id: command.name,
     label: `/${command.name}`,
-    detail: command.argumentHint || undefined,
+    argumentHint: command.argumentHint || undefined,
     description:
       entry.source === "client" ? t(entry.command.descriptionKey) : entry.command.description,
-    kind: "command" as const,
+    icon: entry.source === "client" ? ("archive" as const) : ("command" as const),
   };
   if (entry.source === "client") {
     return {
@@ -191,7 +192,7 @@ function buildCommandAutocompleteOptions(input: BuildAutocompleteOptionsInput) {
       type: "workspace_entry" as const,
       id: `${entry.kind}:${entry.path}`,
       label: entry.path,
-      kind: entry.kind,
+      icon: entry.kind,
       entryPath: entry.path,
       mention: activeFileMention,
     }));
@@ -354,6 +355,7 @@ export function useAgentAutocomplete(input: UseAgentAutocompleteInput): AgentAut
     isLoading: isCommandsLoading,
     isError,
     error,
+    retry: retryCommands,
   } = useAgentCommandsQuery({
     serverId,
     agentId,
@@ -361,7 +363,7 @@ export function useAgentAutocomplete(input: UseAgentAutocompleteInput): AgentAut
     draftConfig: queryDraftConfig,
   });
 
-  const isVisible = canShowAutocomplete && !(mode === "command" && isCommandsLoading);
+  const isVisible = canShowAutocomplete;
 
   const fileSuggestionsQuery = useQuery({
     queryKey: [
@@ -399,7 +401,7 @@ export function useAgentAutocomplete(input: UseAgentAutocompleteInput): AgentAut
     placeholderData: keepPreviousData,
   });
 
-  const options = useMemo<AgentAutocompleteOption[]>(
+  const availableOptions = useMemo<AgentAutocompleteOption[]>(
     () =>
       buildCommandAutocompleteOptions({
         activeFileMention,
@@ -425,6 +427,9 @@ export function useAgentAutocomplete(input: UseAgentAutocompleteInput): AgentAut
     ],
   );
 
+  const commandStatusVisible =
+    mode === "command" && canLoadCommands && (isCommandsLoading || isError);
+  const options = commandStatusVisible ? [] : availableOptions;
   const onSelectOption = useCallback(
     (option: AutocompleteOption) => {
       const selected = option as AgentAutocompleteOption;
@@ -506,9 +511,37 @@ export function useAgentAutocomplete(input: UseAgentAutocompleteInput): AgentAut
   const emptyText =
     mode === "file" ? t("agentAutocomplete.noFiles") : t("agentAutocomplete.noCommands");
 
+  const retry = useCallback(() => {
+    if (mode === "command") retryCommands();
+    else void fileSuggestionsQuery.refetch();
+  }, [fileSuggestionsQuery, mode, retryCommands]);
+  const status = useMemo<AutocompleteStatus | null>(() => {
+    if (options.length > 0) return null;
+    if (errorMessage)
+      return {
+        kind: "error",
+        title: t("agentAutocomplete.loadCommandsFailed"),
+        reason: errorMessage,
+        onRetry: retry,
+      };
+    if (isLoading && (mode !== "command" || canLoadCommands))
+      return { kind: "loading", message: loadingText };
+    return { kind: "empty", message: emptyText };
+  }, [
+    canLoadCommands,
+    emptyText,
+    errorMessage,
+    isLoading,
+    loadingText,
+    mode,
+    options.length,
+    retry,
+    t,
+  ]);
   return {
     isVisible,
     options,
+    status,
     selectedIndex,
     isLoading,
     errorMessage,

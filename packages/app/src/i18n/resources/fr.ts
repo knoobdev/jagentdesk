@@ -1477,6 +1477,11 @@ export const fr: TranslationResources = {
     noFiles: "Aucun fichier ou répertoire trouvé",
     noCommands: "Aucune commande trouvée",
     failedToLoad: "Échec du chargement",
+    loadingProviderCommands: "Chargement des commandes {{provider}}\u2026",
+    commandsFailed: "Impossible de charger les commandes",
+    providerCommandsFailed: "Impossible de charger les commandes {{provider}}",
+    filesFailed: "Impossible de rechercher les fichiers",
+    skillTag: "Skill",
   },
   loadOlderHistory: {
     failed: "Impossible de charger l\u2019historique plus ancien",

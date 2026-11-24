@@ -850,4 +850,11 @@ export const vi = {
       description: "Check your connection and try again.",
     },
   },
+  agentAutocomplete: {
+    loadingProviderCommands: "Loading {{provider}} commands...",
+    commandsFailed: "Couldn't load commands",
+    providerCommandsFailed: "Couldn't load {{provider}} commands",
+    filesFailed: "Couldn't search files",
+    skillTag: "Skill",
+  },
 } as const;

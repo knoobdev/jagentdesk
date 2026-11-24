@@ -3,7 +3,11 @@ import { Keyboard, View, useWindowDimensions } from "react-native";
 import { Portal } from "@gorhom/portal";
 import Animated, { useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 import { StyleSheet } from "react-native-unistyles";
-import { Autocomplete, type AutocompleteOption } from "@/components/ui/autocomplete";
+import {
+  Autocomplete,
+  type AutocompleteOption,
+  type AutocompleteStatus,
+} from "@/components/ui/autocomplete";
 import {
   measureFloatingPanelPortalHost,
   useFloatingPanelPortalHostName,
@@ -42,10 +46,7 @@ interface AutocompletePopoverProps {
   options: readonly AutocompleteOption[];
   selectedIndex: number;
   onSelect: (option: AutocompleteOption) => void;
-  isLoading?: boolean;
-  errorMessage?: string;
-  loadingText?: string;
-  emptyText?: string;
+  status?: AutocompleteStatus | null;
 }
 
 export function AutocompletePopover({
@@ -54,10 +55,7 @@ export function AutocompletePopover({
   options,
   selectedIndex,
   onSelect,
-  isLoading,
-  errorMessage,
-  loadingText,
-  emptyText,
+  status,
 }: AutocompletePopoverProps): ReactElement | null {
   "use no memo";
   // React Compiler memoizes effect captures by reading SharedValue.value during render.
@@ -146,10 +144,7 @@ export function AutocompletePopover({
             options={options}
             selectedIndex={selectedIndex}
             onSelect={onSelect}
-            isLoading={isLoading}
-            errorMessage={errorMessage}
-            loadingText={loadingText}
-            emptyText={emptyText}
+            status={status}
           />
         </Animated.View>
       </View>

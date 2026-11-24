@@ -1445,6 +1445,15 @@ export const ja: TranslationResources = {
     noFiles: "ファイルまたはディレクトリが見つかりません",
     noCommands: "コマンドが見つかりません",
     failedToLoad: "読み込みに失敗しました",
+    loadingProviderCommands:
+      "{{provider}} \u306E\u30B3\u30DE\u30F3\u30C9\u3092\u8AAD\u307F\u8FBC\u307F\u4E2D...",
+    commandsFailed:
+      "\u30B3\u30DE\u30F3\u30C9\u3092\u8AAD\u307F\u8FBC\u3081\u307E\u305B\u3093\u3067\u3057\u305F",
+    providerCommandsFailed:
+      "{{provider}} \u306E\u30B3\u30DE\u30F3\u30C9\u3092\u8AAD\u307F\u8FBC\u3081\u307E\u305B\u3093\u3067\u3057\u305F",
+    filesFailed:
+      "\u30D5\u30A1\u30A4\u30EB\u3092\u691C\u7D22\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F",
+    skillTag: "\u30B9\u30AD\u30EB",
   },
   loadOlderHistory: {
     failed: "古い履歴を読み込めませんでした",
