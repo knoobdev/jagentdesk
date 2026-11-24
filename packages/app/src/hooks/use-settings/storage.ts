@@ -46,8 +46,9 @@ export const MIN_CODE_FONT_SIZE = 9;
 export const MAX_CODE_FONT_SIZE = 22; // line-height 1.5×22=33 stays safe
 export const MAX_FONT_FAMILY_LENGTH = 200;
 export { DEFAULT_CONTENT_MAX_WIDTH };
-export const MIN_CONTENT_MAX_WIDTH = 600;
-export const MAX_CONTENT_MAX_WIDTH = 4000;
+const WIDE_CONTENT_MAX_WIDTH = 1200;
+export type ContentWidthPreset = "default" | "wide" | "full";
+type ContentWidth = ContentWidthPreset | number;
 
 export interface AppSettings {
   theme: ThemeName | "auto" | typeof PLUGIN_THEME_PREFERENCE;
@@ -64,7 +65,7 @@ export interface AppSettings {
   monoFontFamily: string; // "" = platform default mono stack
   uiFontSize: number; // clamped px, default 16
   codeFontSize: number; // clamped px, default 12
-  contentMaxWidth: number | null;
+  contentWidth: ContentWidth;
   syntaxTheme: SyntaxThemeId; // default "one"
   workspaceTitleSource: WorkspaceTitleSource;
   autoExpandReasoning: boolean;
@@ -77,7 +78,10 @@ export interface Settings extends AppSettings {
   manageBuiltInDaemon: boolean;
 }
 
-type StoredAppSettings = Partial<AppSettings> & { compactToolCalls?: unknown };
+type StoredAppSettings = Partial<AppSettings> & {
+  compactToolCalls?: unknown;
+  contentMaxWidth?: unknown;
+};
 
 export const DEFAULT_CLIENT_SETTINGS: AppSettings = {
   theme: DEFAULT_THEME,
@@ -93,7 +97,7 @@ export const DEFAULT_CLIENT_SETTINGS: AppSettings = {
   monoFontFamily: "",
   uiFontSize: DEFAULT_UI_FONT_SIZE,
   codeFontSize: DEFAULT_CODE_FONT_SIZE,
-  contentMaxWidth: null,
+  contentWidth: "default",
   syntaxTheme: "one",
   workspaceTitleSource: "title",
   autoExpandReasoning: false,
@@ -292,8 +296,7 @@ function pickAppSettings(stored: StoredAppSettings): Partial<AppSettings> {
   if (codeFontSize !== null) {
     result.codeFontSize = codeFontSize;
   }
-  result.contentMaxWidth =
-    stored.contentMaxWidth == null ? null : parseContentMaxWidth(stored.contentMaxWidth);
+  result.contentWidth = normalizeContentWidth(stored);
 
   if (typeof stored.syntaxTheme === "string" && isSyntaxThemeId(stored.syntaxTheme)) {
     result.syntaxTheme = stored.syntaxTheme;
@@ -339,12 +342,30 @@ export function parseTerminalScrollbackLines(value: unknown): number | null {
   );
 }
 
-export function parseContentMaxWidth(value: unknown): number | null {
-  return parseClampedFontSize(value, { min: MIN_CONTENT_MAX_WIDTH, max: MAX_CONTENT_MAX_WIDTH });
+function normalizeContentWidth(stored: StoredAppSettings): ContentWidth {
+  const width = stored.contentWidth;
+  if (width === "default" || width === "wide" || width === "full") return width;
+  if (typeof width === "number" && Number.isFinite(width))
+    return parseClampedFontSize(width, { min: 600, max: 4000 }) ?? "default";
+  // COMPAT(contentMaxWidth): added in v0.9.59, remove after 2027-05-24 once stored presets are established.
+  if (typeof stored.contentMaxWidth === "number" && Number.isFinite(stored.contentMaxWidth))
+    return parseClampedFontSize(stored.contentMaxWidth, { min: 600, max: 4000 }) ?? "default";
+  return "default";
 }
 
-export function resolveContentMaxWidth(settings: Pick<AppSettings, "contentMaxWidth">): number {
-  return settings.contentMaxWidth ?? DEFAULT_CONTENT_MAX_WIDTH;
+export function resolveContentMaxWidth({
+  contentWidth,
+}: Pick<AppSettings, "contentWidth">): number | undefined {
+  switch (contentWidth) {
+    case "default":
+      return DEFAULT_CONTENT_MAX_WIDTH;
+    case "wide":
+      return WIDE_CONTENT_MAX_WIDTH;
+    case "full":
+      return undefined;
+    default:
+      return contentWidth;
+  }
 }
 
 export function parseClampedFontSize(

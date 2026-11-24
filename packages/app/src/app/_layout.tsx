@@ -778,7 +778,7 @@ function ProvidersWrapper({ children }: { children: ReactNode }) {
       uiFontSize: settings.uiFontSize,
       codeFontSize: settings.codeFontSize,
       syntaxTheme: settings.syntaxTheme,
-      contentMaxWidth: resolveContentMaxWidth({ contentMaxWidth: settings.contentMaxWidth }),
+      contentMaxWidth: resolveContentMaxWidth({ contentWidth: settings.contentWidth }),
     });
   }, [
     settingsLoading,
@@ -791,7 +791,7 @@ function ProvidersWrapper({ children }: { children: ReactNode }) {
     settings.uiFontSize,
     settings.codeFontSize,
     settings.syntaxTheme,
-    settings.contentMaxWidth,
+    settings.contentWidth,
   ]);
 
   return (

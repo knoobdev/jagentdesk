@@ -1,7 +1,5 @@
-import { Button } from "@/components/ui/button";
-import { EditingTextInput } from "@/components/ui/text-input";
-import type { EditingTextInputHandle } from "@/components/ui/text-input/types";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { Text, TextInput, View, type PressableStateCallbackType } from "react-native";
@@ -27,11 +25,10 @@ import {
   MIN_CODE_FONT_SIZE,
   MIN_UI_FONT_SIZE,
   parseClampedFontSize,
-  parseContentMaxWidth,
-  resolveContentMaxWidth,
   sanitizeFontFamily,
   useAppSettings,
   type AppSettings,
+  type ContentWidthPreset,
 } from "@/hooks/use-settings";
 import {
   DEFAULT_MONO_FONT_STACK,
@@ -476,74 +473,46 @@ function FontSizeRow({
 }
 
 // ---------------------------------------------------------------------------
-// Content width: numeric field (commit on blur/submit) + reset to the default
+// Content width presets
 // ---------------------------------------------------------------------------
 
-interface ContentWidthRowProps {
-  value: AppSettings["contentMaxWidth"];
-  onChange: (value: AppSettings["contentMaxWidth"]) => void;
-}
-
-function ContentWidthRow({ value, onChange }: ContentWidthRowProps) {
+function ContentWidthRow({
+  value,
+  onChange,
+}: {
+  value: AppSettings["contentWidth"];
+  onChange: (value: ContentWidthPreset) => void;
+}) {
   const { t } = useTranslation();
-  const width = resolveContentMaxWidth({ contentMaxWidth: value });
-  // The field is uncontrolled, so a saved or reset width is written into it directly.
-  const input = useRef<EditingTextInputHandle>(null);
 
-  useEffect(() => {
-    input.current?.replaceText(String(width));
-  }, [width]);
-
-  const commit = useCallback(() => {
-    const next = parseContentMaxWidth(input.current?.getText()) ?? width;
-    input.current?.replaceText(String(next));
-    // Typing the width already in effect keeps following the default.
-    if (next !== width) {
-      onChange(next);
-    }
-  }, [onChange, width]);
-
-  const reset = useCallback(() => {
-    onChange(null);
-  }, [onChange]);
-
+  const options = useMemo(
+    () => [
+      { value: "default" as const, label: t("settings.appearance.layout.contentWidthDefault") },
+      { value: "wide" as const, label: t("settings.appearance.layout.contentWidthWide") },
+      { value: "full" as const, label: t("settings.appearance.layout.contentWidthFull") },
+    ],
+    [t],
+  );
   return (
-    <View style={settingsStyles.row}>
-      <View style={settingsStyles.rowContent}>
+    <View style={styles.contentWidthRow}>
+      <View>
         <Text style={settingsStyles.rowTitle}>{t("settings.appearance.layout.contentWidth")}</Text>
         <Text style={settingsStyles.rowHint}>
-          {t("settings.appearance.layout.contentWidthHint")}
+          {typeof value === "number"
+            ? t("settings.appearance.layout.contentWidthCustom", { width: value })
+            : t("settings.appearance.layout.contentWidthHint")}
         </Text>
       </View>
-      <View style={styles.sizeField}>
-        {value === null ? null : (
-          <Button
-            variant="ghost"
-            size="sm"
-            onPress={reset}
-            accessibilityLabel={t("settings.appearance.layout.resetAccessibility")}
-          >
-            {t("settings.appearance.layout.reset")}
-          </Button>
-        )}
-        <EditingTextInput
-          ref={input}
-          initialValue={String(width)}
-          onBlur={commit}
-          onSubmitEditing={commit}
-          keyboardType="number-pad"
-          inputMode="numeric"
-          selectTextOnFocus
-          style={styles.widthInput}
-          accessibilityLabel={t("settings.appearance.layout.contentWidthAccessibility")}
-        />
-        <Text style={styles.unit}>px</Text>
-      </View>
+      <SegmentedControl<ContentWidthPreset>
+        testID="content-width-options"
+        value={typeof value === "number" ? null : value}
+        onValueChange={onChange}
+        options={options}
+      />
     </View>
   );
 }
 
-// ---------------------------------------------------------------------------
 // Syntax highlight theme picker (commits immediately)
 // ---------------------------------------------------------------------------
 
@@ -651,9 +620,9 @@ export function AppearanceSection() {
     [updateSettings],
   );
 
-  const handleContentMaxWidthChange = useCallback(
-    (contentMaxWidth: AppSettings["contentMaxWidth"]) => {
-      void updateSettings({ contentMaxWidth });
+  const handleContentWidthChange = useCallback(
+    (contentWidth: ContentWidthPreset) => {
+      void updateSettings({ contentWidth });
     },
     [updateSettings],
   );
@@ -839,10 +808,7 @@ export function AppearanceSection() {
       </SettingsSection>
       <SettingsSection title={t("settings.appearance.layout.title")}>
         <View style={settingsStyles.card}>
-          <ContentWidthRow
-            value={settings.contentMaxWidth}
-            onChange={handleContentMaxWidthChange}
-          />
+          <ContentWidthRow value={settings.contentWidth} onChange={handleContentWidthChange} />
         </View>
       </SettingsSection>
       <SettingsSection title={t("settings.appearance.syntax.title")}>
@@ -858,17 +824,7 @@ export function AppearanceSection() {
 }
 
 const styles = StyleSheet.create((theme) => ({
-  widthInput: {
-    width: 80,
-    minHeight: 36,
-    padding: theme.spacing[2],
-    color: theme.colors.foreground,
-    backgroundColor: theme.colors.surface2,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.borderRadius.md,
-    textAlign: "right",
-  },
+  contentWidthRow: { alignItems: "flex-start", gap: theme.spacing[2], padding: theme.spacing[4] },
   preview: {
     marginTop: theme.spacing[4],
   },

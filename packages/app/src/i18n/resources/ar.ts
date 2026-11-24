@@ -1959,6 +1959,14 @@ export const ar: TranslationResources = {
         codeSizeAccessibility: "حجم خط الكود",
       },
       layout: {
+        contentWidthCustom: "Custom width · {{width}} px",
+
+        contentWidthFull: "Full",
+
+        contentWidthWide: "Wide",
+
+        contentWidthDefault: "Default",
+
         title: "Layout",
         contentWidth: "Content width",
         contentWidthHint: "Maximum width of chat and Markdown content",

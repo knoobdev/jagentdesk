@@ -70,7 +70,7 @@ import { OverviewToolCallGroupView } from "@/tool-calls/detail-level/overview/vi
 import { type AgentStreamRenderModel, buildAgentStreamRenderModel } from "./model";
 import { resolveStreamRenderStrategy } from "./strategy-resolver";
 import { type StreamSegmentRenderers, type StreamViewportHandle } from "./strategy";
-import { ChatOutlineRail } from "@/agent-stream/chat-outline/rail";
+import { ChatOutlineRail, useChatOutlineRailLayout } from "@/agent-stream/chat-outline/rail";
 import { useChatOutline } from "@/agent-stream/chat-outline/use-chat-outline";
 import { flashTimelineRow } from "@/agent-stream/flash-row";
 import { resolveNodeAction, type ActivityNodeAction } from "@/activity-graph/activity-graph-target";
@@ -631,13 +631,15 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         ),
       [baseRenderModel.history, baseRenderModel.segments.liveHead],
     );
+    const outlineEnabled = supportsChatOutline && chatOutlineEnabled;
+    const outlineLayout = useChatOutlineRailLayout(outlineEnabled);
     const chatOutline = useChatOutline({
       agentId,
       serverId: resolvedServerId,
       timelineEpoch,
       tail: effectiveStreamItems,
       head: effectiveStreamHead,
-      enabled: supportsChatOutline && chatOutlineEnabled,
+      enabled: outlineEnabled,
       viewportRef,
       onJumpError: handleTimelineHistoryLoadError,
       visibleMessageIds: chatFindVisibleMessageIds,
@@ -1114,7 +1116,10 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
 
     return (
       <ToolCallSheetProvider>
-        <AssistantSelectionCopySurface style={stylesheet.container}>
+        <AssistantSelectionCopySurface
+          style={stylesheet.container}
+          onLayout={outlineLayout.onLayout}
+        >
           <MessageOuterSpacingProvider disableOuterSpacing>
             <ChatFind
               agentId={agentId}
@@ -1144,17 +1149,20 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
                 olderHistoryProgressKey: progressKey,
                 scrollEnabled: streamScrollEnabled,
                 contentMaxWidth,
+                outlineInset: outlineLayout.inset,
                 listStyle: stylesheet.list,
                 baseListContentContainerStyle: stylesheet.listContentContainer,
                 forwardListContentContainerStyle: stylesheet.forwardListContentContainer,
               })}
             </ChatFind>
           </MessageOuterSpacingProvider>
-          <ChatOutlineRail
-            prompts={chatOutline.prompts}
-            activePrompt={chatOutline.activePrompt}
-            onJumpToPrompt={chatOutline.jumpToPrompt}
-          />
+          {outlineLayout.inset > 0 ? (
+            <ChatOutlineRail
+              prompts={chatOutline.prompts}
+              activePrompt={chatOutline.activePrompt}
+              onJumpToPrompt={chatOutline.jumpToPrompt}
+            />
+          ) : null}
           {(!isNearBottom || isTimelineDetached) && (
             <View style={stylesheet.scrollToBottomContainer} pointerEvents="box-none">
               <Animated.View entering={scrollIndicatorFadeIn} exiting={scrollIndicatorFadeOut}>

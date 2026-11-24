@@ -2005,6 +2005,14 @@ export const fr: TranslationResources = {
         codeSizeAccessibility: "Taille de la police du code",
       },
       layout: {
+        contentWidthCustom: "Custom width · {{width}} px",
+
+        contentWidthFull: "Full",
+
+        contentWidthWide: "Wide",
+
+        contentWidthDefault: "Default",
+
         title: "Layout",
         contentWidth: "Content width",
         contentWidthHint: "Maximum width of chat and Markdown content",

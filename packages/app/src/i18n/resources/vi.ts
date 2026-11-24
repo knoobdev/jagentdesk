@@ -355,6 +355,14 @@ export const vi = {
     },
     appearance: {
       layout: {
+        contentWidthCustom: "Custom width · {{width}} px",
+
+        contentWidthFull: "Full",
+
+        contentWidthWide: "Wide",
+
+        contentWidthDefault: "Default",
+
         resetAccessibility: "Reset content width to default",
 
         reset: "Reset",

@@ -133,3 +133,5 @@ export const ZoomOut = StubIcon;
 export const Puzzle = StubIcon;
 
 export const SquareSlash = StubIcon;
+
+export const Sparkles = StubIcon;

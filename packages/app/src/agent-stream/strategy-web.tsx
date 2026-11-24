@@ -161,6 +161,7 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
     scrollEnabled,
     isMobileBreakpoint,
     contentMaxWidth,
+    outlineInset = 0,
   } = props;
   // History rows are memoized on item identity (HistoryStreamRow in view.tsx), so rows whose
   // tool-call group or display state changed must arrive as fresh identities.
@@ -234,7 +235,12 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
   const estimateVirtualItemSize = useCallback(
     (index: number) => {
       const row = historyVirtualized[index];
-      return row ? estimateStreamItemHeight(row, contentMaxWidth) : 120;
+      return row
+        ? estimateStreamItemHeight(
+            row,
+            contentMaxWidth ?? contentRef.current?.getBoundingClientRect().width ?? 0,
+          )
+        : 120;
     },
     [historyVirtualized, contentMaxWidth],
   );
@@ -263,6 +269,9 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
       rowVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = undefined;
     };
   }, [rowVirtualizer]);
+  useLayoutEffect(() => {
+    rowVirtualizer.measure();
+  }, [contentMaxWidth, outlineInset, rowVirtualizer]);
   const virtualRows = rowVirtualizer.getVirtualItems();
   const virtualTotalSize = rowVirtualizer.getTotalSize();
   const getHistoryStartPaginationInput = useStableEvent((): HistoryStartPaginationInput | null => {
@@ -806,17 +815,24 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
   ]);
 
   const contentContainerStyle = useMemo((): CSSProperties => {
+    const gutter = isMobileBreakpoint ? 8 : 16;
+    const leftGutter = gutter + outlineInset;
+    // Balance the outline gutter using only the space the capped column has left over.
+    const rightGutter =
+      outlineInset > 0 && contentMaxWidth !== undefined
+        ? `clamp(${gutter}px, calc(100% - ${leftGutter + contentMaxWidth}px), ${leftGutter}px)`
+        : gutter;
     return {
       display: "flex",
       flexDirection: "column",
       minHeight: "100%",
       paddingTop: CONTENT_PADDING_TOP_PX,
       paddingBottom: 16,
-      paddingLeft: isMobileBreakpoint ? 8 : 16,
-      paddingRight: isMobileBreakpoint ? 8 : 16,
+      paddingLeft: leftGutter,
+      paddingRight: rightGutter,
       boxSizing: "border-box",
     };
-  }, [isMobileBreakpoint]);
+  }, [contentMaxWidth, isMobileBreakpoint, outlineInset]);
   const scrollContainerStyle = useMemo((): CSSProperties => {
     return {
       flex: 1,
