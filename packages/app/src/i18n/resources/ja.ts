@@ -36,6 +36,8 @@ export const ja: TranslationResources = {
     back: "戻る",
     loading: "読み込み中...",
     actions: {
+      copyLine: "行をコピー",
+      selectAll: "すべて選択",
       back: "戻る",
       cancel: "キャンセル",
       close: "閉じる",

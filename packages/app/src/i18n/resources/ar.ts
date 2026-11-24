@@ -36,6 +36,8 @@ export const ar: TranslationResources = {
     back: "خلف",
     loading: "تحميل...",
     actions: {
+      copyLine: "نسخ السطر",
+      selectAll: "تحديد الكل",
       back: "خلف",
       cancel: "يلغي",
       close: "يغلق",

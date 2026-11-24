@@ -6,6 +6,7 @@ import { pluginSettings } from "./plugin-settings";
 import { sshModuleStrings } from "./ssh-modules";
 
 export const vi = {
+  panels: { file: { editor: { preview: "Xem trước", source: "Mã nguồn" } } },
   toolCallGroup: {
     thought: "Suy nghĩ",
     editedFiles: { one: "đã sửa {{count}} tệp", other: "đã sửa {{count}} tệp" },
@@ -63,6 +64,8 @@ export const vi = {
     back: "Quay lại",
     loading: "Đang tải...",
     actions: {
+      copyLine: "Sao chép dòng",
+      selectAll: "Chọn tất cả",
       back: "Quay lại",
       cancel: "Huỷ",
       close: "Đóng",

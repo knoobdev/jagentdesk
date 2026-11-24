@@ -34,6 +34,8 @@ export const en = {
     back: "Back",
     loading: "Loading...",
     actions: {
+      copyLine: "Copy line",
+      selectAll: "Select all",
       back: "Back",
       cancel: "Cancel",
       close: "Close",

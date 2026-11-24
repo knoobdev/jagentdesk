@@ -36,6 +36,8 @@ export const ru: TranslationResources = {
     back: "Назад",
     loading: "Загрузка...",
     actions: {
+      copyLine: "Копировать строку",
+      selectAll: "Выбрать всё",
       back: "Назад",
       cancel: "Отмена",
       close: "Закрывать",

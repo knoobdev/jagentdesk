@@ -36,6 +36,8 @@ export const zhCN: TranslationResources = {
     back: "返回",
     loading: "加载中...",
     actions: {
+      copyLine: "复制行",
+      selectAll: "全选",
       back: "返回",
       cancel: "取消",
       close: "关闭",

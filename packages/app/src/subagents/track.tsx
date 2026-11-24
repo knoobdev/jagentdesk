@@ -1,3 +1,4 @@
+import { CHAT_COLUMN_RAIL_DATASET } from "@/chat-rail";
 import { useCallback, useMemo, useState, type ReactElement } from "react";
 import { Pressable, ScrollView, Text, View, type PressableStateCallbackType } from "react-native";
 import { useTranslation } from "react-i18next";
@@ -90,7 +91,7 @@ export function SubagentsTrack({
   const finishedCount = countFinishedSubagents(rows);
 
   return (
-    <View style={styles.outer} testID="subagents-track">
+    <View style={styles.outer} testID="subagents-track" dataSet={CHAT_COLUMN_RAIL_DATASET}>
       <View style={styles.track}>
         <View style={surfaceStyle}>
           <View style={headerContainerStyle}>

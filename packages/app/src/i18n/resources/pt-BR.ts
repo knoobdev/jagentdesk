@@ -36,6 +36,8 @@ export const ptBR: TranslationResources = {
     back: "Voltar",
     loading: "Carregando...",
     actions: {
+      copyLine: "Copiar linha",
+      selectAll: "Selecionar tudo",
       back: "Voltar",
       cancel: "Cancelar",
       close: "Fechar",

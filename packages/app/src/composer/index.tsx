@@ -1,3 +1,4 @@
+import { CHAT_COLUMN_RAIL_DATASET } from "@/chat-rail";
 import { PluginComposerPills } from "@/plugins/buttons/view";
 import { Alert } from "@/components/ui/alert";
 import type { AutocompleteStatus } from "@/components/ui/autocomplete";
@@ -2268,7 +2269,7 @@ export function Composer({
       <ComposerKeyboardFrame externalKeyboardShift={externalKeyboardShift}>
         <AttachmentLightbox source={lightboxSource} onClose={handleLightboxClose} />
         {/* Input area */}
-        <View style={inputAreaContainerStyle}>
+        <View style={inputAreaContainerStyle} dataSet={CHAT_COLUMN_RAIL_DATASET}>
           <View style={styles.inputAreaContent}>
             {queueList}
             {sendErrorNode}

@@ -1,3 +1,4 @@
+import { useChatOutlineRail } from "@/chat-rail";
 import { SubagentLaunchMarker } from "@/subagents/launch-marker";
 import { useRevealedText } from "@/hooks/use-revealed-text";
 import { createStreamPresentation } from "./presentation";
@@ -79,7 +80,7 @@ import { TurnSummaryLine } from "./turn-collapse/summary-line";
 import { type AgentStreamRenderModel, buildAgentStreamRenderModel } from "./model";
 import { resolveStreamRenderStrategy } from "./strategy-resolver";
 import { type StreamSegmentRenderers, type StreamViewportHandle } from "./strategy";
-import { ChatOutlineRail, useChatOutlineRailLayout } from "@/agent-stream/chat-outline/rail";
+import { ChatOutlineRail } from "@/agent-stream/chat-outline/rail";
 import { useChatOutline } from "@/agent-stream/chat-outline/use-chat-outline";
 import { flashTimelineRow } from "@/agent-stream/flash-row";
 import { resolveNodeAction, type ActivityNodeAction } from "@/activity-graph/activity-graph-target";
@@ -350,7 +351,6 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const { t } = useTranslation();
     const autoExpandReasoning = useSettings((settings) => settings.autoExpandReasoning);
     const chatDisplay = useSettings((settings) => settings.chatDisplay);
-    const chatOutlineEnabled = useSettings((settings) => settings.chatOutlineEnabled);
     const contentMaxWidth = useSettings(resolveContentMaxWidth);
     const viewportRef = useRef<StreamViewportHandle | null>(null);
     const pendingClientMessageIds = useMemo(
@@ -388,10 +388,6 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const supportsAgentForkContextCursor = useSessionStore(
       (state) =>
         state.sessions[resolvedServerId]?.serverInfo?.features?.agentForkContextCursor === true,
-    );
-    const supportsChatOutline = useSessionStore(
-      (state) =>
-        state.sessions[resolvedServerId]?.serverInfo?.features?.agentTimelinePromptIndex === true,
     );
     const timelineEpoch = useSessionStore(
       (state) => state.sessions[resolvedServerId]?.agentTimelineCursor.get(agentId)?.epoch ?? null,
@@ -611,8 +607,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       }),
       [mountedHistoryMessageIds, baseRenderModel.segments.liveHead],
     );
-    const outlineEnabled = supportsChatOutline && chatOutlineEnabled;
-    const outlineLayout = useChatOutlineRailLayout(outlineEnabled);
+    const { enabled: outlineEnabled, inset: outlineInset } = useChatOutlineRail();
     const revealOutlineMessage = useStableEvent((messageId: string) =>
       revealLoadedMessage(messageId),
     );
@@ -1256,10 +1251,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
 
     return (
       <ToolCallSheetProvider>
-        <AssistantSelectionCopySurface
-          style={stylesheet.container}
-          onLayout={outlineLayout.onLayout}
-        >
+        <AssistantSelectionCopySurface style={stylesheet.container}>
           <MessageOuterSpacingProvider disableOuterSpacing>
             <ChatFind
               agentId={agentId}
@@ -1291,8 +1283,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
                   olderHistoryProgressKey: progressKey,
                   scrollEnabled: streamScrollEnabled,
                   contentMaxWidth,
-                  outlineInset: outlineLayout.inset,
-                  imageContext: { serverId: resolvedServerId, workspaceRoot },
+                  outlineInset: outlineInset,
                   listStyle: stylesheet.list,
                   baseListContentContainerStyle: stylesheet.listContentContainer,
                   forwardListContentContainerStyle: stylesheet.forwardListContentContainer,
@@ -1300,7 +1291,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
               </ToolCallExpansionContext.Provider>
             </ChatFind>
           </MessageOuterSpacingProvider>
-          {outlineLayout.inset > 0 ? (
+          {outlineInset > 0 ? (
             <ChatOutlineRail
               prompts={chatOutline.prompts}
               activePrompt={chatOutline.activePrompt}

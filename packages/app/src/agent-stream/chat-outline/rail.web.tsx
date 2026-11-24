@@ -2,7 +2,6 @@ import { memo, useCallback, useEffect, useMemo, useState, useSyncExternalStore }
 import { Pressable, Text, View, type PointerEvent as RNPointerEvent } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { useReducedMotion } from "react-native-reanimated";
-import { useContainerWidthBelow } from "@/hooks/use-container-width";
 import { SPACING } from "@/styles/theme";
 import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
 import { createChatOutlineHoverIntent } from "./hover-intent";
@@ -14,7 +13,6 @@ import type { ChatOutlineRailProps } from "./rail";
 const RAIL_WIDTH = 36;
 const RAIL_LEFT = SPACING[2];
 const SLOT_HEIGHT = 8;
-const MIN_PANEL_WIDTH = 918;
 const RESTING_PILL_HEIGHT = 2;
 const MAGNIFIED_PILL_HEIGHT = 4;
 const RESTING_PILL_WIDTH = 10;
@@ -23,11 +21,6 @@ const MAGNIFIED_PILL_WIDTH = 26;
 const PREVIEW_WIDTH = 260;
 const PREVIEW_HEIGHT = 48;
 const PREVIEW_GAP = 4;
-
-export function useChatOutlineRailLayout(enabled: boolean) {
-  const { onLayout, isBelow } = useContainerWidthBelow(MIN_PANEL_WIDTH);
-  return { onLayout, inset: enabled && !isBelow ? RAIL_LEFT + RAIL_WIDTH : 0 };
-}
 
 export const ChatOutlineRail = memo(function ChatOutlineRail({
   prompts,

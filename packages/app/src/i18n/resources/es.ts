@@ -36,6 +36,8 @@ export const es: TranslationResources = {
     back: "Atrás",
     loading: "Cargando...",
     actions: {
+      copyLine: "Copiar línea",
+      selectAll: "Seleccionar todo",
       back: "Atrás",
       cancel: "Cancelar",
       close: "Cerca",
