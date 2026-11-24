@@ -240,6 +240,8 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
   const rowVirtualizer = useVirtualizer({
     count: historyVirtualized.length,
     enabled: shouldUseVirtualizer,
+    // Older rows can become virtualized after the reader has already scrolled.
+    initialOffset: () => scrollContainerRef.current?.scrollTop ?? 0,
     getScrollElement: () => scrollContainerRef.current,
     getItemKey: getVirtualItemKey,
     estimateSize: estimateVirtualItemSize,
