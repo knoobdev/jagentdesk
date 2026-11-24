@@ -93,6 +93,7 @@ export const en = {
       newAgent: "New agent",
       addProject: "Add project",
       home: "Home",
+      copyBrowserHostName: "Copy browser host name",
       modelGroupLabel: "Model",
       modelSearchKeywords: "switch model change model set model select model",
       thinkingGroupLabel: "Thinking",

@@ -75,7 +75,6 @@ import {
 } from "@/desktop/daemon/desktop-daemon-transport";
 import { getDesktopHost } from "@/desktop/host";
 import { CLIENT_CAPS } from "@jagentdesk/protocol/client-capabilities";
-import { BROWSER_AUTOMATION_COMMAND_NAMES } from "@jagentdesk/protocol/browser-automation/rpc-schemas";
 import { useSessionStore, toDaemonServerInfo } from "@/stores/session-store";
 import { useWorkspaceSetupStore } from "@/stores/workspace-setup-store";
 import { invalidateCheckoutGitQueriesForServer } from "@/git/query-keys";
@@ -84,7 +83,10 @@ import {
   invalidateServerDataQueriesAfterReconnect,
   mountServerDataPushRouter,
 } from "@/data/push-router";
-import { mountBrowserAutomationDaemonClientHandler } from "@/desktop/browser/automation/handler";
+import {
+  getDesktopBrowserHostRegistration,
+  mountBrowserAutomationDaemonClientHandler,
+} from "@/desktop/browser/automation/handler";
 import { mountFingerprintProfileSync } from "@/desktop/browser/fingerprint-profile-sync";
 import { schedulesQueryBaseKey } from "@/schedules/aggregated-schedules";
 import { dispatchComposerAgentMessage, sendQueuedComposerMessageNow } from "@/composer/actions";
@@ -558,14 +560,10 @@ function findConnectionById(host: HostProfile, connectionId: string | null): Hos
 }
 
 function createDefaultDeps(): HostRuntimeControllerDeps {
-  const browserHostAvailable =
-    typeof getDesktopHost()?.browser?.executeAutomationCommand === "function";
-  const browserAutomationCapabilities = browserHostAvailable
+  const browserHostRegistration = getDesktopBrowserHostRegistration();
+  const browserAutomationCapabilities = browserHostRegistration
     ? {
-        [CLIENT_CAPS.browserHost]: {
-          supportedCommands: [...BROWSER_AUTOMATION_COMMAND_NAMES],
-          hostKind: "desktop app",
-        },
+        [CLIENT_CAPS.browserHost]: browserHostRegistration,
       }
     : undefined;
   // Spec 30.2.2: only a desktop that can open the 8085 loopback takes delegated Argo CD SSO.

@@ -147,6 +147,7 @@ const TOOL_SPECS: Readonly<Record<string, ToolDetailSpec>> = {
   inspect_provider: { inputOrder: ["provider", "cwd", "settings"] },
   list_pending_permissions: {},
   respond_to_permission: { inputOrder: ["agentId", "requestId", "response"] },
+  browser_list_hosts: {},
   browser_list_tabs: {},
   browser_new_tab: { inputOrder: BROWSER_FIELDS },
   browser_snapshot: { inputOrder: BROWSER_FIELDS },

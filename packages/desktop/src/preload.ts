@@ -11,6 +11,10 @@ const JAGENTDESK_BROWSER_PROFILE_PARTITION = "persist:jagentdesk-browser";
 
 type EventHandler = (payload: unknown) => void;
 
+function readArgValue(prefix: string): string | undefined {
+  return process.argv.find((argument) => argument.startsWith(prefix))?.slice(prefix.length);
+}
+
 interface AttachedBrowserRegistration {
   browserId: string;
   workspaceId: string;
@@ -19,6 +23,8 @@ interface AttachedBrowserRegistration {
 
 contextBridge.exposeInMainWorld("jagentdeskDesktop", {
   platform: process.platform,
+  browserHostLabel: readArgValue("--jagentdesk-browser-host-label="),
+  browserHostInstanceId: readArgValue("--jagentdesk-browser-host-instance-id="),
   invoke: (command: string, args?: Record<string, unknown>) =>
     ipcRenderer.invoke("jagentdesk:invoke", command, args),
   getPendingOpenProject: () =>

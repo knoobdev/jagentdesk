@@ -95,6 +95,7 @@ export const zhCN: TranslationResources = {
       newAgent: "新建 Agent",
       addProject: "添加 project",
       home: "首页",
+      copyBrowserHostName: "复制浏览器宿主名称",
       modelGroupLabel: "模型",
       modelSearchKeywords: "切换模型 更改模型 设置模型 选择模型",
       thinkingGroupLabel: "思考",

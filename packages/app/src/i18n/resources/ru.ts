@@ -96,6 +96,7 @@ export const ru: TranslationResources = {
       newAgent: "Новый агент",
       addProject: "Добавить проект",
       home: "Дом",
+      copyBrowserHostName: "Скопировать имя хоста браузера",
       modelGroupLabel: "Модель",
       modelSearchKeywords: "сменить модель изменить модель выбрать модель установить модель",
       thinkingGroupLabel: "Мышление",

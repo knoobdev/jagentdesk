@@ -95,6 +95,7 @@ export const ar: TranslationResources = {
       newAgent: "وكيل جديد",
       addProject: "إضافة مشروع",
       home: "بيت",
+      copyBrowserHostName: "نسخ اسم مضيف المتصفح",
       modelGroupLabel: "النموذج",
       modelSearchKeywords: "تبديل النموذج تغيير النموذج تعيين النموذج اختيار النموذج",
       thinkingGroupLabel: "التفكير",

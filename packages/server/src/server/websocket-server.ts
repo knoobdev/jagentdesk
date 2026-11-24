@@ -3010,6 +3010,8 @@ export class VoiceAssistantWebSocketServer {
     const unregister = this.browserToolsBroker.registerClient({
       id: connection.clientId,
       hostKind: browserHostCapability.hostKind,
+      label: browserHostCapability.label,
+      instanceId: browserHostCapability.instanceId,
       supportedCommands: browserHostCapability.supportedCommands,
       sendBrowserAutomationRequest: (request) => {
         this.sendToConnection(connection, wrapSessionMessage(request));
@@ -3534,7 +3536,10 @@ export class VoiceAssistantWebSocketServer {
       activeConnection.kind === "trusted" &&
       message.message.type === "browser.automation.execute.response"
     ) {
-      this.browserToolsBroker?.receiveResponse(message.message as BrowserAutomationExecuteResponse);
+      this.browserToolsBroker?.receiveResponse(
+        message.message as BrowserAutomationExecuteResponse,
+        [activeConnection.clientId],
+      );
       return;
     }
     if (

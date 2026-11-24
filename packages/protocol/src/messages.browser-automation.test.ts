@@ -13,7 +13,7 @@ import {
 describe("browser automation protocol integration", () => {
   const browserId = "11111111-1111-4111-8111-111111111111";
 
-  test("browser host capability parses supported commands in hello", () => {
+  test("browser host capability parses supported commands and a label in hello", () => {
     expect(
       WSHelloMessageSchema.parse({
         type: "hello",
@@ -24,6 +24,7 @@ describe("browser automation protocol integration", () => {
           [CLIENT_CAPS.browserHost]: {
             supportedCommands: [...BROWSER_AUTOMATION_COMMAND_NAMES],
             hostKind: "desktop app",
+            label: "MacBook Pro · Window 2",
           },
         },
       }).capabilities,
@@ -31,6 +32,7 @@ describe("browser automation protocol integration", () => {
       [CLIENT_CAPS.browserHost]: {
         supportedCommands: [...BROWSER_AUTOMATION_COMMAND_NAMES],
         hostKind: "desktop app",
+        label: "MacBook Pro · Window 2",
       },
     });
   });
@@ -131,6 +133,35 @@ describe("browser automation protocol integration", () => {
         protocolVersion: 1,
       }).capabilities,
     ).toBeUndefined();
+  });
+
+  test("browser host hello accepts stable window identity and remains valid without it", () => {
+    const request = {
+      type: "hello",
+      clientId: "desktop",
+      clientType: "mobile",
+      protocolVersion: 1,
+      capabilities: {
+        [CLIENT_CAPS.browserHost]: { hostKind: "desktop app", supportedCommands: ["new_tab"] },
+      },
+    };
+    const label = "MacBook Pro · Window 2";
+    const instanceId = "33333333-3333-4333-8333-333333333333";
+    expect(WSHelloMessageSchema.parse(request).capabilities?.[CLIENT_CAPS.browserHost]).toEqual(
+      request.capabilities[CLIENT_CAPS.browserHost],
+    );
+    expect(
+      WSHelloMessageSchema.parse({
+        ...request,
+        capabilities: {
+          [CLIENT_CAPS.browserHost]: {
+            ...request.capabilities[CLIENT_CAPS.browserHost],
+            label,
+            instanceId,
+          },
+        },
+      }).capabilities?.[CLIENT_CAPS.browserHost],
+    ).toEqual({ ...request.capabilities[CLIENT_CAPS.browserHost], label, instanceId });
   });
 
   test("daemon to browser host execute request is an outbound session message", () => {

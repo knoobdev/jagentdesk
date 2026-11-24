@@ -249,6 +249,8 @@ export interface DesktopHostBridge {
   platform?: string;
   argocd?: DesktopArgoCdBridge;
   figma?: DesktopFigmaBridge;
+  browserHostLabel?: string;
+  browserHostInstanceId?: string;
   invoke?: DesktopInvokeBridge["invoke"];
   getPendingOpenProject?: () => Promise<string | null>;
   agentNavigation?: DesktopAgentNavigationBridge;
