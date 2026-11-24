@@ -89,6 +89,8 @@ function computeHoverCardPosition({
 }
 
 const HOVER_GRACE_MS = 100;
+// Sidebar cards share one overlay; sibling triggers replace the current card immediately.
+let closeOpenWorkspaceCard: (() => void) | null = null;
 const HOVER_CARD_WIDTH = 260;
 
 interface WorkspaceHoverCardProps {
@@ -151,13 +153,27 @@ function WorkspaceHoverCardDesktop({
     }, HOVER_GRACE_MS);
   }, []);
 
+  const closeNow = useCallback(() => {
+    clearGraceTimer();
+    setOpen(false);
+  }, [clearGraceTimer]);
+
+  useEffect(() => {
+    if (!open) return;
+    return () => {
+      if (closeOpenWorkspaceCard === closeNow) closeOpenWorkspaceCard = null;
+    };
+  }, [open, closeNow]);
+
   const handleTriggerEnter = useCallback(() => {
     triggerHoveredRef.current = true;
     clearGraceTimer();
     if (!isDragging && !disabled) {
+      if (closeOpenWorkspaceCard && closeOpenWorkspaceCard !== closeNow) closeOpenWorkspaceCard();
+      closeOpenWorkspaceCard = closeNow;
       setOpen(true);
     }
-  }, [clearGraceTimer, disabled, isDragging]);
+  }, [clearGraceTimer, closeNow, disabled, isDragging]);
 
   const handleTriggerLeave = useCallback(() => {
     triggerHoveredRef.current = false;

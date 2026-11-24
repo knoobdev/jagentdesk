@@ -56,10 +56,6 @@ export function deriveWorkspaceAgentVisibility(input: {
   const activeAgentIds = new Set<string>();
   const autoOpenAgentIds = new Set<string>();
   const knownAgentIds = new Set<string>();
-  const agentsById = new Map<string, Agent>([
-    ...(agentDetails?.entries() ?? []),
-    ...(sessionAgents?.entries() ?? []),
-  ]);
   const earliestRegularAgentAt = earliestRegularAgentCreatedAt(sessionAgents, workspaceId);
   for (const agent of sessionAgents?.values() ?? []) {
     if (!agentBelongsToWorkspace(agent, workspaceId)) {
@@ -68,7 +64,9 @@ export function deriveWorkspaceAgentVisibility(input: {
     knownAgentIds.add(agent.id);
     if (!agent.archivedAt && !isMisfiledDockAgent(agent, earliestRegularAgentAt)) {
       activeAgentIds.add(agent.id);
-      const parentAgent = agent.parentAgentId ? agentsById.get(agent.parentAgentId) : undefined;
+      const parentAgent = agent.parentAgentId
+        ? (sessionAgents?.get(agent.parentAgentId) ?? agentDetails?.get(agent.parentAgentId))
+        : undefined;
       if (shouldAutoOpenBackgroundAgent(agent, parentAgent)) {
         autoOpenAgentIds.add(agent.id);
       }
@@ -82,6 +80,46 @@ export function deriveWorkspaceAgentVisibility(input: {
   }
 
   return { activeAgentIds, autoOpenAgentIds, knownAgentIds };
+}
+
+interface AgentMapsSnapshot {
+  sessions: Record<
+    string,
+    { agents: Map<string, Agent>; agentDetails: Map<string, Agent> } | undefined
+  >;
+}
+
+// Session-store selectors run on every store update, including every stream tick, which
+// leaves the agent maps untouched. Reuse the previous result until either map changes, and
+// keep it when a recompute yields the same sets so the hook's equality check stays O(1).
+export function createWorkspaceAgentVisibilitySelector(input: {
+  serverId: string;
+  workspaceId: string | null | undefined;
+}): (state: AgentMapsSnapshot) => WorkspaceAgentVisibility {
+  let previousAgents: Map<string, Agent> | undefined;
+  let previousAgentDetails: Map<string, Agent> | undefined;
+  let previousVisibility: WorkspaceAgentVisibility | null = null;
+
+  return (state) => {
+    const session = state.sessions[input.serverId];
+    const agents = session?.agents;
+    const agentDetails = session?.agentDetails;
+    if (previousVisibility && agents === previousAgents && agentDetails === previousAgentDetails) {
+      return previousVisibility;
+    }
+
+    const visibility = deriveWorkspaceAgentVisibility({
+      sessionAgents: agents,
+      agentDetails,
+      workspaceId: input.workspaceId,
+    });
+    previousAgents = agents;
+    previousAgentDetails = agentDetails;
+    if (!previousVisibility || !workspaceAgentVisibilityEqual(previousVisibility, visibility)) {
+      previousVisibility = visibility;
+    }
+    return previousVisibility;
+  };
 }
 
 export function buildWorkspaceTabSnapshot(input: {
@@ -108,6 +146,7 @@ export function workspaceAgentVisibilityEqual(
   a: WorkspaceAgentVisibility,
   b: WorkspaceAgentVisibility,
 ): boolean {
+  if (a === b) return true;
   return (
     setsEqual(a.activeAgentIds, b.activeAgentIds) &&
     setsEqual(a.autoOpenAgentIds, b.autoOpenAgentIds) &&

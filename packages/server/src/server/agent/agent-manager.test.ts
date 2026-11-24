@@ -457,7 +457,7 @@ class TestAgentSession implements AgentSession {
 
   async startTurn(): Promise<{ turnId: string }> {
     this.interrupted = false;
-    const turnId = `turn-${++this.turnIdCounter}`;
+    const turnId = `turn-${this.id}-${++this.turnIdCounter}`;
     // Use setTimeout so events arrive after the caller sets up the foreground waiter
     setTimeout(() => {
       this.pushEvent({ type: "turn_started", provider: this.provider, turnId });
@@ -4257,7 +4257,7 @@ test("importProviderSession imports the selected session without listing and pub
       detail: {
         type: "shell",
         command: "print output",
-        output: "x".repeat(64 * 1024),
+        output: expect.stringMatching(/^x+…\[truncated \d+\.\d (?:KB|MB)\]$/),
         exitCode: 0,
       },
     },
@@ -11600,7 +11600,12 @@ test("commits startup notices once on create and after restored history", async 
   };
   const limitedToolOutput: AgentTimelineItem = {
     ...toolOutput,
-    detail: { type: "shell", command: "print output", output: "x".repeat(64 * 1024), exitCode: 0 },
+    detail: {
+      type: "shell",
+      command: "print output",
+      output: expect.stringMatching(/^x+…\[truncated \d+\.\d (?:KB|MB)\]$/),
+      exitCode: 0,
+    },
   };
   class NotifyingSession extends TestAgentSession {
     readonly initialTimeline = [{ item: notice, timestamp: "2026-09-22T00:00:00.000Z" }];

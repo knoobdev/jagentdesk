@@ -16,7 +16,7 @@ import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { useIsCompactFormFactor } from "@/constants/layout";
-import { formatTimeAgo } from "@/utils/time";
+import { useTimeAgo } from "@/hooks/use-time-ago";
 import { type AggregatedAgent } from "@/hooks/use-aggregated-agents";
 import {
   ORCHESTRATION_ROLE_LABEL,
@@ -240,7 +240,6 @@ function SessionRow({
 }) {
   const { theme } = useUnistyles();
   const { t } = useTranslation();
-  const timeAgo = formatTimeAgo(agent.lastActivityAt);
   const agentKey = `${agent.serverId}:${agent.id}`;
   const isSelected = selectedAgentId === agentKey;
   const projectName = agent.projectPlacement?.projectName ?? "";
@@ -333,7 +332,7 @@ function SessionRow({
               {workspaceName}
             </Text>
             <Text style={styles.sessionMetaSeparator}>·</Text>
-            <Text style={styles.sessionMetaText}>{timeAgo}</Text>
+            <AgentActivityTime date={agent.lastActivityAt} isMobile />
             {showHostColumn && agent.serverLabel ? (
               <>
                 <Text style={styles.sessionMetaSeparator}>·</Text>
@@ -366,9 +365,7 @@ function SessionRow({
           >
             {branch}
           </Text>
-          <Text style={styles.columnMetaFixed} numberOfLines={1}>
-            {timeAgo}
-          </Text>
+          <AgentActivityTime date={agent.lastActivityAt} isMobile={false} />
         </View>
       ) : null}
       <SessionRowTrailingAttention
@@ -377,6 +374,15 @@ function SessionRow({
         requiresAttention={agent.requiresAttention}
       />
     </Pressable>
+  );
+}
+
+function AgentActivityTime({ date, isMobile }: { date: Date; isMobile: boolean }) {
+  const label = useTimeAgo(date);
+  return (
+    <Text style={isMobile ? styles.sessionMetaText : styles.columnMetaFixed} numberOfLines={1}>
+      {label}
+    </Text>
   );
 }
 

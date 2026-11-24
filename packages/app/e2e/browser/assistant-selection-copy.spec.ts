@@ -267,7 +267,9 @@ test("copying an assistant selection preserves Markdown structure and links", as
     await copySelection(page);
 
     const fileLinkClipboard = await readRichClipboard(page);
-    expect(fileLinkClipboard.plainText).toBe("[workspace file](file:///tmp/jagentdesk%20notes.md#L4)");
+    expect(fileLinkClipboard.plainText).toBe(
+      "[workspace file](file:///tmp/jagentdesk%20notes.md#L4)",
+    );
     expect(fileLinkClipboard.html).toContain(
       '<a href="file:///tmp/jagentdesk%20notes.md#L4">workspace file</a>',
     );

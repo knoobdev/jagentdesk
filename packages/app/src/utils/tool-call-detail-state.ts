@@ -69,7 +69,7 @@ export function hasMeaningfulToolCallDetail(detail: ToolCallDetail | undefined):
 
   switch (detail.type) {
     case "shell":
-      return true;
+      return Boolean(detail.command.trim() || detail.output);
     case "read":
       return hasMeaningfulReadLikeDetail(detail);
     case "edit":

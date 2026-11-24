@@ -47,6 +47,7 @@ import {
 } from "@/utils/image-attachments-from-files";
 import type { ComposerAttachment } from "@/attachments/types";
 import type { ImageAttachment, MessagePayload } from "@/composer/types";
+import { hasFinePointer } from "@/hooks/pointer-capabilities";
 import { focusWithRetries } from "@/utils/web-focus";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Shortcut } from "@/components/ui/shortcut";
@@ -65,6 +66,7 @@ import { getShortcutOs } from "@/utils/shortcut-platform";
 import type { MessageInputKeyboardActionKind } from "@/keyboard/actions";
 import { isImeComposingKeyboardEvent } from "@/utils/keyboard-ime";
 import { isWeb } from "@/constants/platform";
+import { pasteLinkedClipboardText } from "@/composer/pasted-text";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useComposerHeightMirror } from "./height-mirror";
 import {
@@ -519,7 +521,7 @@ function getTextInputNativeElement(
   return native instanceof HTMLElement ? native : null;
 }
 
-interface PasteImagesEffectArgs {
+interface PasteEffectArgs {
   getWebTextArea: () => TextAreaHandle | null;
   isConnected: boolean;
   disabled: boolean;
@@ -528,7 +530,7 @@ interface PasteImagesEffectArgs {
   onAddImages: ((images: ImageAttachment[]) => void) | undefined;
 }
 
-function usePasteImagesEffect(args: PasteImagesEffectArgs): void {
+function usePasteEffect(args: PasteEffectArgs): void {
   const {
     getWebTextArea,
     isConnected,
@@ -539,28 +541,21 @@ function usePasteImagesEffect(args: PasteImagesEffectArgs): void {
   } = args;
 
   useEffect(() => {
-    if (!isWeb || !onAddImages) return;
+    if (!isWeb) return;
 
-    const textarea = getWebTextArea() as
-      | (TextAreaHandle & {
-          addEventListener?: (type: string, listener: (e: ClipboardEvent) => void) => void;
-          removeEventListener?: (type: string, listener: (e: ClipboardEvent) => void) => void;
-        })
-      | null;
-    if (
-      !textarea ||
-      typeof textarea.addEventListener !== "function" ||
-      typeof textarea.removeEventListener !== "function"
-    ) {
-      return;
-    }
+    const textarea = getWebTextArea();
+    if (!(textarea instanceof HTMLElement)) return;
 
     let disposed = false;
     const handlePaste = (event: ClipboardEvent) => {
-      if (!isConnected || disabled || isDictating || isRealtimeVoiceForCurrentAgent) return;
+      if (disabled || isDictating || isRealtimeVoiceForCurrentAgent) return;
 
       const imageFiles = collectImageFilesFromClipboardData(event.clipboardData);
-      if (imageFiles.length === 0) return;
+      if (imageFiles.length === 0) {
+        if (pasteLinkedClipboardText(textarea, event.clipboardData)) event.preventDefault();
+        return;
+      }
+      if (!isConnected || !onAddImages) return;
 
       event.preventDefault();
 
@@ -1493,6 +1488,9 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
         handleSendMessage,
         handleQueueMessage,
       });
+      if (hasFinePointer()) {
+        textInputRef.current?.focus();
+      }
     }, [defaultSendBehavior, isAgentRunning, onQueue, handleQueueMessage, handleSendMessage]);
 
     const handleAlternateSendAction = useCallback(() => {
@@ -1518,7 +1516,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       }
     }, [getWebTextArea]);
 
-    usePasteImagesEffect({
+    usePasteEffect({
       getWebTextArea,
       isConnected,
       disabled,

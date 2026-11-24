@@ -64,6 +64,9 @@ export function smallIconButtonChromeFrameSize(compact = false): number {
   return compact ? COMPACT_SMALL_ICON_BUTTON_SIZE : SMALL_ICON_BUTTON_SIZE;
 }
 
+// Draw toolbar focus rings inside controls whose parents clip overflow.
+const FOCUS_RING_INSET = -2;
+
 const styles = StyleSheet.create((theme) => ({
   large: {
     width: {
@@ -79,8 +82,7 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
-    outlineWidth: 0,
-    outlineColor: "transparent",
+    outlineOffset: FOCUS_RING_INSET,
   },
   small: {
     width: SMALL_ICON_BUTTON_SIZE,
@@ -90,8 +92,7 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
-    outlineWidth: 0,
-    outlineColor: "transparent",
+    outlineOffset: FOCUS_RING_INSET,
   },
   smallCompact: {
     width: COMPACT_SMALL_ICON_BUTTON_SIZE,
@@ -101,8 +102,7 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
-    outlineWidth: 0,
-    outlineColor: "transparent",
+    outlineOffset: FOCUS_RING_INSET,
   },
   highlighted: {
     backgroundColor: theme.colors.interactionHighlight,

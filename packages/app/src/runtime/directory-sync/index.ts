@@ -250,15 +250,26 @@ export class DirectorySync {
         return;
       }
       const supportsProjectList = serverInfo.features?.projectList === true;
-      if (supportsProjectList) {
-        const payload = await client.listProjects();
-        this.assertWorkspaceTransactionCurrent(client, source, transaction);
-        for (const entry of payload.projects) {
-          const project = normalizeProjectDescriptor(entry);
-          transaction.snapshot.projects.set(project.projectId, project);
-        }
-      }
-      await this.fetchWorkspaceSnapshot(client, source, transaction, input?.subscribe === true);
+      const projectsReady = supportsProjectList
+        ? client.listProjects().then((payload) => {
+            this.assertWorkspaceTransactionCurrent(client, source, transaction);
+            for (const entry of payload.projects) {
+              const project = normalizeProjectDescriptor(entry);
+              transaction.snapshot.projects.set(project.projectId, project);
+            }
+            return undefined;
+          })
+        : Promise.resolve();
+      await Promise.all([
+        projectsReady,
+        this.fetchWorkspaceSnapshot(
+          client,
+          source,
+          transaction,
+          input?.subscribe === true,
+          projectsReady,
+        ),
+      ]);
       if (!supportsProjectList) this.buildLegacyProjectSnapshot(transaction.snapshot);
       if (!this.isCurrent(client, source) || !this.hasMatchingSession(client, source)) {
         throw new DirectoryRefreshSupersededError("workspace completion no longer current");
@@ -280,6 +291,7 @@ export class DirectorySync {
     source: DirectorySourceToken,
     transaction: DirectoryTransaction<WorkspaceDirectorySnapshot, WorkspaceDirectoryDelta>,
     initialSubscribe: boolean,
+    projectsReady: Promise<void>,
   ): Promise<void> {
     let cursor: string | null = null;
     let subscribe = initialSubscribe;
@@ -292,6 +304,8 @@ export class DirectorySync {
         ...(subscribe ? { subscribe: {} } : {}),
         page: cursor ? { limit: PAGE_LIMIT, cursor } : { limit: PAGE_LIMIT },
       });
+      // Apply the project baseline before empty-project overlays, regardless of response order.
+      await projectsReady;
       this.assertWorkspaceTransactionCurrent(client, source, transaction);
       for (const entry of payload.entries) {
         const workspace = normalizeWorkspaceDescriptor(entry);

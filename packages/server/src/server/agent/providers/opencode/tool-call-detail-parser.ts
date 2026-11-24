@@ -20,6 +20,7 @@ import {
   toShellToolDetail,
   toWriteToolDetail,
   toolDetailBranchByToolName,
+  parseKnownToolDetail,
 } from "../tool-call-detail-primitives.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -383,13 +384,13 @@ export function deriveOpencodeToolDetail(
     }
   }
 
-  const parsed = OpencodeKnownToolDetailSchema.safeParse({
+  const detail = parseKnownToolDetail(OpencodeKnownToolDetailSchema, {
     toolName,
-    input,
+    input: input ?? null,
     output,
   });
-  if (parsed.success && parsed.data) {
-    return parsed.data;
+  if (detail) {
+    return detail;
   }
   return {
     type: "unknown",

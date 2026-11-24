@@ -8,6 +8,21 @@ type WorkspaceFetchResult = Awaited<ReturnType<DaemonClient["fetchWorkspaces"]>>
 type ProjectListResult = Awaited<ReturnType<DaemonClient["listProjects"]>>;
 
 class FakeDirectoryClient {
+  getLastServerInfoMessage() {
+    return null;
+  }
+  private pendingProjectFetch: Promise<ProjectListResult> | null = null;
+  holdProjectFetch(): (result: ProjectListResult) => void {
+    let complete!: (result: ProjectListResult) => void;
+    this.pendingProjectFetch = new Promise((resolve) => {
+      complete = resolve;
+    });
+    return complete;
+  }
+  private signalWorkspaceFetch!: () => void;
+  readonly workspaceFetchStarted = new Promise<void>((resolve) => {
+    this.signalWorkspaceFetch = resolve;
+  });
   fetchAgentsCalls = 0;
   fetchWorkspacesCalls = 0;
   listProjectsCalls = 0;
@@ -53,6 +68,7 @@ class FakeDirectoryClient {
 
   async fetchWorkspaces(): Promise<WorkspaceFetchResult> {
     this.fetchWorkspacesCalls += 1;
+    this.signalWorkspaceFetch();
     if (this.pendingWorkspaceFetch) {
       const pending = this.pendingWorkspaceFetch;
       this.pendingWorkspaceFetch = null;
@@ -68,6 +84,7 @@ class FakeDirectoryClient {
 
   async listProjects(): Promise<ProjectListResult> {
     this.listProjectsCalls += 1;
+    if (this.pendingProjectFetch) return this.pendingProjectFetch;
     return {
       requestId: "projects",
       projects: [
@@ -291,4 +308,43 @@ describe("DirectorySync session readiness", () => {
     });
     directory.dispose();
   });
+});
+
+it("starts workspace fetching before projects finish and applies empty-project overlays last", async () => {
+  const serverId = "concurrent-directories";
+  const { client, directory } = createDirectory(serverId);
+  const store = useSessionStore.getState();
+  store.initializeSession(serverId, client as unknown as DaemonClient, 1);
+  store.updateSessionServerInfo(serverId, {
+    serverId,
+    hostname: null,
+    version: "test",
+    features: { workspaceMultiplicity: true, projectList: true },
+  });
+  const completeProjects = client.holdProjectFetch();
+  const completeWorkspaces = client.holdWorkspaceFetch();
+  const refresh = directory.refreshWorkspaces();
+  await client.workspaceFetchStarted;
+  expect(client.listProjectsCalls).toBe(1);
+  expect(client.fetchWorkspacesCalls).toBe(1);
+  const project = {
+    projectId: "project-1",
+    projectDisplayName: "baseline",
+    projectRootPath: "/repo",
+    projectKind: "git" as const,
+  };
+  completeWorkspaces({
+    requestId: "workspaces",
+    entries: [],
+    emptyProjects: [{ ...project, projectDisplayName: "overlay" }],
+    pageInfo: { hasMore: false, nextCursor: null, prevCursor: null },
+  });
+  await Promise.resolve();
+  expect(useSessionStore.getState().sessions[serverId]?.hasHydratedWorkspaces).toBe(false);
+  completeProjects({ requestId: "projects", projects: [project] });
+  await refresh;
+  expect(
+    useSessionStore.getState().sessions[serverId]?.projects.get("project-1")?.projectDisplayName,
+  ).toBe("overlay");
+  directory.dispose();
 });

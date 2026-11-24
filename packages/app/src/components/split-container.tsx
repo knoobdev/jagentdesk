@@ -77,7 +77,7 @@ import {
   type WorkspaceLayout,
 } from "@/stores/workspace-layout-store";
 import type { WorkspaceTab } from "@/workspace-tabs/model";
-import { RenderProfile } from "@/utils/render-profiler";
+import { recordRenderProfileReasons, RenderProfile } from "@/utils/render-profiler";
 import { workspaceTabTargetsEqual } from "@/workspace-tabs/identity";
 import { isNative } from "@/constants/platform";
 
@@ -896,7 +896,7 @@ function SplitNodeView({
   );
 }
 
-function SplitPaneView({
+const SplitPaneView = memo(function SplitPaneView({
   pane,
   uiTabs,
   isFocused,
@@ -934,6 +934,7 @@ function SplitPaneView({
   focusModeEnabled,
   onExitFocusMode,
 }: SplitPaneViewProps) {
+  recordRenderProfileReasons(`SplitPaneView:${pane.id}`, ["render"]);
   const { theme: _theme } = useUnistyles();
   const paneRef = useRef<View | null>(null);
   const stableOnFocusPane = useStableEvent(onFocusPane);
@@ -1107,7 +1108,7 @@ function SplitPaneView({
       </View>
     </RenderProfile>
   );
-}
+});
 
 function collectPanesById(node: SplitNode): Map<string, SplitPane> {
   const next = new Map<string, SplitPane>();

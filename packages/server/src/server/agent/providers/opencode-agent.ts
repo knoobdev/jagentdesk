@@ -13,7 +13,7 @@ import {
   type TextPartInput as OpenCodeTextPartInput,
 } from "@opencode-ai/sdk/v2/client";
 import fs from "node:fs/promises";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { createPathEquivalenceMatcher } from "../../../utils/path.js";
 import pLimit from "p-limit";
@@ -3405,6 +3405,7 @@ class OpenCodeAgentSession implements AgentSession {
   private partTypes = new Map<string, string>();
   private availableModesCache: AgentMode[] | null = null;
   private readonly subscribers = new Set<(event: AgentStreamEvent) => void>();
+  private readonly turnNamespace = randomUUID();
   private nextTurnOrdinal = 0;
   private turnState: OpenCodeTurnState = { status: "idle" };
   /**
@@ -4870,7 +4871,7 @@ class OpenCodeAgentSession implements AgentSession {
 
   private createTurnId(): string {
     this.gapRepairRevision += 1;
-    return `opencode-turn-${this.nextTurnOrdinal++}`;
+    return `opencode-turn-${this.turnNamespace}-${this.nextTurnOrdinal++}`;
   }
 
   private traceOpenCode(msg: OpenCodeTraceMessage, data: OpenCodeTraceData = {}): void {

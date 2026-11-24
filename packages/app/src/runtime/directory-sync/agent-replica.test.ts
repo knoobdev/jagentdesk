@@ -1,3 +1,5 @@
+import { useDraftStore } from "@/stores/draft-store";
+import { buildDraftStoreKey } from "@/stores/draft-keys";
 import { describe, expect, it } from "vitest";
 import type { DaemonClient, FetchAgentsEntry } from "@jagentdesk/client/internal/daemon-client";
 import type { AgentSnapshotPayload } from "@jagentdesk/protocol/messages";
@@ -84,3 +86,23 @@ describe("AgentDirectoryReplica", () => {
     store.clearSession(serverId);
   });
 });
+
+it.each(["delta", "snapshot"] as const)(
+  "retains a draft after directory removal by %s and clears it on entity deletion",
+  (removal) => {
+    const serverId = `draft-removal-${removal}`;
+    const store = useSessionStore.getState();
+    store.initializeSession(serverId, null as unknown as DaemonClient);
+    const replica = new AgentDirectoryReplica(serverId, () => undefined);
+    replica.commitSnapshot([entry(payload("directory"))], []);
+    const draftKey = buildDraftStoreKey({ serverId, agentId: "agent" });
+    const draft = { text: "unsent message", attachments: [] };
+    useDraftStore.getState().saveDraftInput({ draftKey, draft });
+    if (removal === "delta") replica.applyDelta({ kind: "remove", agentId: "agent" });
+    else replica.commitSnapshot([], []);
+    expect(useDraftStore.getState().getDraftInput(draftKey)).toEqual(draft);
+    replica.remove("agent");
+    expect(useDraftStore.getState().getDraftInput(draftKey)).toBeUndefined();
+    store.clearSession(serverId);
+  },
+);

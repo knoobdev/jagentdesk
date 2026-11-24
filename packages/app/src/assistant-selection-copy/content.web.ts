@@ -6,6 +6,8 @@ import {
 } from "@/utils/rich-clipboard";
 import {
   MARKDOWN_COPY_ALIGN_ATTRIBUTE,
+  MARKDOWN_COPY_ALT_ATTRIBUTE,
+  MARKDOWN_COPY_SRC_ATTRIBUTE,
   MARKDOWN_COPY_IGNORE_ATTRIBUTE,
   MARKDOWN_COPY_LANGUAGE_ATTRIBUTE,
   MARKDOWN_COPY_LIST_START_ATTRIBUTE,
@@ -13,6 +15,7 @@ import {
   MARKDOWN_COPY_UNWRAP_ATTRIBUTE,
 } from "./markup";
 
+const IMAGE_FRAME_SELECTOR = `[${MARKDOWN_COPY_TAG_ATTRIBUTE}="img"]`;
 const ASSISTANT_MESSAGE_SELECTOR = '[data-testid="assistant-message"]';
 
 const turndown = new TurndownService({
@@ -45,9 +48,7 @@ turndown.addRule("compactListItem", {
     if (parent?.nodeName !== "OL") {
       return `${options.bulletListMarker} ${item}\n`;
     }
-    const start = Number(parent.getAttribute("start") ?? 1);
-    const index = Array.from(parent.children).indexOf(node);
-    return `${start + index}. ${item}\n`;
+    return `${node.getAttribute("value")}. ${item}\n`;
   },
 });
 
@@ -58,7 +59,7 @@ export function createAssistantSelectionClipboardContent(
     return null;
   }
 
-  const range = selection.getRangeAt(0);
+  const range = startAfterImageFrame(selection.getRangeAt(0));
   const startMessage = closestAssistantMessage(range.startContainer);
   const endMessage = closestAssistantMessage(range.endContainer);
   if (!startMessage || startMessage !== endMessage) {
@@ -73,6 +74,33 @@ export function createAssistantSelectionClipboardContent(
 
   const markdown = turndown.turndown(container.innerHTML).trim();
   return markdown ? createMarkdownClipboardContent(markdown) : null;
+}
+
+/**
+ * A drag that starts in the gap below an image anchors at the start of the image's
+ * rendered internals, ahead of the hidden `img`, while only the text after it is
+ * highlighted. Pressing on the image itself opens it instead of starting a selection,
+ * so a selection that starts inside an image, before any of its text, and ends past it
+ * starts after the image. A failed image shows its error as text, and a selection
+ * starting in that text keeps the image.
+ */
+function startAfterImageFrame(range: Range): Range {
+  const start =
+    range.startContainer instanceof Element
+      ? range.startContainer
+      : range.startContainer.parentElement;
+  const frame = start?.closest(IMAGE_FRAME_SELECTOR);
+  if (!frame || frame.contains(range.endContainer)) {
+    return range;
+  }
+  const insideFrame = range.cloneRange();
+  insideFrame.setEnd(frame, frame.childNodes.length);
+  if (insideFrame.toString()) {
+    return range;
+  }
+  const afterFrame = range.cloneRange();
+  afterFrame.setStartAfter(frame);
+  return afterFrame;
 }
 
 function wrapSelectionWithAncestors(range: Range, message: Element): Node {
@@ -144,14 +172,19 @@ function restoreMarkdownElements(container: HTMLElement): void {
       continue;
     }
     const semanticElement = document.createElement(tagName);
-    if (tagName !== "br") {
+    if (tagName !== "br" && tagName !== "img") {
       semanticElement.append(...element.childNodes);
+    }
+    if (tagName === "img") {
+      semanticElement.setAttribute("src", element.getAttribute(MARKDOWN_COPY_SRC_ATTRIBUTE) ?? "");
+      semanticElement.setAttribute("alt", element.getAttribute(MARKDOWN_COPY_ALT_ATTRIBUTE) ?? "");
     }
     if (tagName === "ol") {
       const start = element.getAttribute(MARKDOWN_COPY_LIST_START_ATTRIBUTE);
       if (start) {
         semanticElement.setAttribute("start", start);
       }
+      numberOrderedListItems(semanticElement, Number(start ?? 1));
     }
     if (tagName === "pre") {
       const language = element.getAttribute(MARKDOWN_COPY_LANGUAGE_ATTRIBUTE);
@@ -182,6 +215,20 @@ function restoreMarkdownElements(container: HTMLElement): void {
   for (const element of presentational.toReversed()) {
     element.replaceWith(...element.childNodes);
   }
+}
+
+/**
+ * Each item carries its number before Turndown re-parses the HTML. Until then every
+ * child of the list is one item, including a partly selected item demoted to a `p`.
+ * The parser splits a `p` that holds a code block into several siblings, so counting
+ * siblings afterwards numbers the next item too high.
+ */
+function numberOrderedListItems(list: Element, start: number): void {
+  Array.from(list.children).forEach((child, index) => {
+    if (child.tagName === "LI") {
+      child.setAttribute("value", String(start + index));
+    }
+  });
 }
 
 function unwrapIncompleteTables(container: HTMLElement): void {

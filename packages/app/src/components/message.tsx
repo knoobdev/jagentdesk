@@ -122,6 +122,7 @@ import { isGuestShareMode } from "@/screens/share/guest-share-mode";
 import { useRetainedPanelActive } from "@/components/retained-panel";
 import {
   markdownCopyDataSet,
+  markdownCopyImageDataSet,
   markdownCopyOrderedListDataSet,
   markdownCopyTableCellDataSet,
   type MarkdownCopyInlineTag,
@@ -1018,9 +1019,11 @@ function AssistantMarkdownImage({
     [containerStyle],
   );
 
+  const copyDataSet = useMemo(() => markdownCopyImageDataSet(source, alt), [source, alt]);
+
   if (image.status === "failed") {
     return (
-      <View style={stateFrameStyle}>
+      <View style={stateFrameStyle} dataSet={copyDataSet}>
         <Text style={assistantMessageStylesheet.imageErrorText}>{image.message}</Text>
       </View>
     );
@@ -1028,14 +1031,14 @@ function AssistantMarkdownImage({
 
   if (!binding) {
     return (
-      <View style={stateFrameStyle}>
+      <View style={stateFrameStyle} dataSet={copyDataSet}>
         <ThemedLoadingSpinner size="small" uniProps={foregroundMutedColorMapping} />
       </View>
     );
   }
 
   return (
-    <View style={frameStyle}>
+    <View style={frameStyle} dataSet={copyDataSet}>
       <Pressable
         accessibilityLabel={t("composer.attachments.openImage")}
         accessibilityRole="button"
