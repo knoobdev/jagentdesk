@@ -1,3 +1,4 @@
+import type { PluginUsageSourceMetadata } from "./plugin-process-protocol.js";
 import { InternalPluginChild } from "./internal-child.js";
 import { evaluateBundle } from "./bundle-evaluator.js";
 import {
@@ -79,6 +80,7 @@ interface LoadedPlugin {
   subscriptions: Map<string, BufferedPluginSubscription>;
   hooks: string[];
   providers: readonly PluginProviderMetadata[];
+  usageSources: readonly PluginUsageSourceMetadata[];
   child: PluginChild | null;
   outputCapture: PluginOutputCapture | null;
   pending: Map<string, PendingInvocation>;
@@ -376,6 +378,33 @@ export class PluginRuntime {
         request,
       }),
     );
+  }
+
+  getUsageSourceRegistrations(pluginId: string): readonly PluginUsageSourceMetadata[] {
+    return this.plugins.get(pluginId)?.usageSources ?? [];
+  }
+
+  identifyUsage(pluginId: string, sourceId: string, input: unknown): Promise<unknown> {
+    const loaded = this.plugins.get(pluginId);
+    if (!loaded) throw new Error(`Plugin is not available: ${pluginId}`);
+    return this.request(loaded, {
+      type: "usage.identify",
+      requestId: randomUUID(),
+      sourceId,
+      input,
+    });
+  }
+
+  fetchUsage(pluginId: string, sourceId: string, input: unknown): Promise<unknown> {
+    const loaded = this.plugins.get(pluginId);
+    if (!loaded) throw new Error(`Plugin is not available: ${pluginId}`);
+    return this.request(loaded, { type: "usage.fetch", requestId: randomUUID(), sourceId, input });
+  }
+
+  discoverUsage(pluginId: string, sourceId: string): Promise<unknown> {
+    const loaded = this.plugins.get(pluginId);
+    if (!loaded) throw new Error(`Plugin is not available: ${pluginId}`);
+    return this.request(loaded, { type: "usage.discover", requestId: randomUUID(), sourceId });
   }
 
   async connectProvider(
@@ -769,6 +798,7 @@ export class PluginRuntime {
         subscriptions: new Map(),
         hooks: [],
         providers: [],
+        usageSources: [],
         child: null,
         outputCapture: null,
         pending: new Map(),
@@ -820,7 +850,6 @@ export class PluginRuntime {
     child: PluginChild;
     serverBundle: string;
   }): Promise<LoadedPlugin> {
-    void directory;
     const { manifest } = bundles;
     const sessionHost = this.sessionHost;
     if (!sessionHost) throw new Error("Plugin JAgentDesk session host is not attached");
@@ -899,6 +928,7 @@ export class PluginRuntime {
           void send(child, {
             type: "initialize",
             pluginId,
+            pluginDirectory: directory,
             appVersion: this.daemonVersion,
             bundle: serverBundle,
             settingsDirectory: this.dependencies.settingsDirectory
@@ -923,6 +953,7 @@ export class PluginRuntime {
       subscriptions: new Map(),
       hooks: ready.hooks ?? [],
       providers: ready.providers ?? [],
+      usageSources: ready.usageSources ?? [],
       child,
       outputCapture,
       pending,

@@ -52,6 +52,10 @@
       "types": "./dist/server/lifecycle.d.ts",
       "source": "./src/server/lifecycle.ts",
       "default": "./dist/server/lifecycle.js"
+    },
+    "./server/usage": {
+      "types": "./dist/server/usage.d.ts",
+      "default": "./dist/server/usage.js"
     }
   },
   "scripts": {

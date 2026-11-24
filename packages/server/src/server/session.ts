@@ -1,3 +1,4 @@
+import { UsageSession, type UsageSessionOptions } from "./session/usage/usage-session.js";
 import { builtinPluginWireState } from "@jagentdesk/protocol/builtin-plugins";
 import { builtinPluginForRpc } from "./plugins/builtin/gates.js";
 import { BuiltinPluginError, type BuiltinPluginState } from "./plugins/builtin/state.js";
@@ -648,6 +649,9 @@ export interface SessionOptions {
   pluginRuntime?: {
     builtin?: BuiltinPluginState;
     refreshBuiltinAvailability?(): Promise<void>;
+    listUsageReports?: NonNullable<UsageSessionOptions["runtime"]>["listUsageReports"];
+    resolveUsageReference?: NonNullable<UsageSessionOptions["runtime"]>["resolveUsageReference"];
+    listLegacyUsage?: NonNullable<UsageSessionOptions["runtime"]>["listLegacyUsage"];
     wait: import("./plugins/lifecycle/index.js").PluginLifecycle["wait"];
     before: import("./plugins/lifecycle/index.js").PluginLifecycle["before"];
     emit?: import("./plugins/lifecycle/index.js").PluginLifecycle["emit"];
@@ -980,6 +984,7 @@ export class Session {
   private readonly physicalDeviceSession: PhysicalDeviceSession | null;
   private readonly proxyService = getSharedProxyService();
   private readonly proxySubscriptionIds = new Set<string>();
+  private readonly usageSession: UsageSession;
   private readonly providerCatalogSession: ProviderCatalogSession;
   private readonly workspaceFilesSession: WorkspaceFilesSession;
   private readonly agentConfigSession: AgentConfigSession;
@@ -1228,6 +1233,13 @@ export class Session {
         })
       : null;
     this.figmaSession = this.createFigmaSession(options.figmaService);
+    this.usageSession = new UsageSession({
+      emit: (message) => this.emit(message),
+      listAgents: () => this.agentManager.listAgents(),
+      getAgent: (agentId) => this.agentManager.getAgent(agentId),
+      runtime: createPluginUsageRuntime(options.pluginRuntime),
+      logger: this.sessionLogger,
+    });
     this.providerCatalogSession = new ProviderCatalogSession({
       host: {
         emit: (msg) => this.emit(msg),
@@ -3594,6 +3606,10 @@ export class Session {
         return this.providerCatalogSession.handleRefreshProvidersSnapshotRequest(msg);
       case "provider_diagnostic_request":
         return this.providerCatalogSession.handleProviderDiagnosticRequest(msg);
+      case "usage.list_reports.request":
+        return this.usageSession.handleListReports(msg);
+      case "agent.resolve_usage_report.request":
+        return this.usageSession.handleResolveAgentReport(msg);
       case "provider.usage.list.request":
         return this.providerCatalogSession.handleProviderUsageListRequest(msg);
       default:
@@ -10227,4 +10243,16 @@ function normalizeCloneRepository(input: {
 
 function isValidGitHubRepoSegment(value: string): boolean {
   return /^[A-Za-z0-9._-]+$/u.test(value);
+}
+
+function createPluginUsageRuntime(
+  runtime: SessionOptions["pluginRuntime"],
+): UsageSessionOptions["runtime"] {
+  if (!runtime?.listUsageReports || !runtime.resolveUsageReference || !runtime.listLegacyUsage)
+    return undefined;
+  return {
+    listUsageReports: runtime.listUsageReports.bind(runtime),
+    resolveUsageReference: runtime.resolveUsageReference.bind(runtime),
+    listLegacyUsage: runtime.listLegacyUsage.bind(runtime),
+  };
 }

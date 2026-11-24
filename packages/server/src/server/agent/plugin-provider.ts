@@ -1,3 +1,4 @@
+import type { UsageReference } from "./agent-sdk-types.js";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { PluginSessionHistory } from "./plugin-session-history.js";
@@ -110,6 +111,20 @@ function providerError(error: ProviderError): Error {
     code: error.code,
     diagnostic: error.diagnostic,
   });
+}
+
+function isProviderRequestReply(
+  event: ProviderEvent,
+): event is Extract<
+  ProviderEvent,
+  { type: "request.completed" | "catalog" | "sessions" | "usage_reference" }
+> {
+  return (
+    event.type === "request.completed" ||
+    event.type === "catalog" ||
+    event.type === "sessions" ||
+    event.type === "usage_reference"
+  );
 }
 
 class ProviderRuntime {
@@ -402,11 +417,7 @@ class ProviderRuntime {
       this.failRequest(event);
       return;
     }
-    if (
-      event.type === "request.completed" ||
-      event.type === "catalog" ||
-      event.type === "sessions"
-    ) {
+    if (isProviderRequestReply(event)) {
       this.finishRequest(event);
       return;
     }
@@ -561,7 +572,10 @@ class ProviderRuntime {
   }
 
   private finishRequest(
-    event: Extract<ProviderEvent, { type: "request.completed" | "catalog" | "sessions" }>,
+    event: Extract<
+      ProviderEvent,
+      { type: "request.completed" | "catalog" | "sessions" | "usage_reference" }
+    >,
   ): void {
     const request = this.requests.get(event.requestId);
     if (!request) return;
@@ -603,6 +617,17 @@ class ProviderRuntimeSession {
 
   get negotiatedCapabilities(): readonly string[] {
     return this.capabilities;
+  }
+
+  async getUsageReference(): Promise<UsageReference | null> {
+    if (!this.negotiatedCapabilities.includes("session.usage_reference")) return null;
+    const event = await this.runtime.complete({
+      type: "session.usage_reference",
+      requestId: randomUUID(),
+      sessionId: this.providerSessionId,
+    });
+    if (event.type !== "usage_reference") throw new Error("Invalid usage reference response");
+    return event.reference;
   }
 
   onEvent(listener: (event: ProviderEvent) => void): () => void {
@@ -1197,6 +1222,10 @@ class PluginAgentSession implements AgentSession {
       supportsRewindConversation: capabilities.supportsRewindConversation && resumable,
       supportsRewindBoth: capabilities.supportsRewindBoth && resumable,
     };
+  }
+
+  getUsageReference(): Promise<UsageReference | null> {
+    return this.bridge.getUsageReference();
   }
 
   get features(): AgentFeature[] {

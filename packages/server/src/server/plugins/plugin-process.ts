@@ -1,3 +1,5 @@
+import type { UsageSourceRegistration } from "@jagentdesk/plugin/server/usage";
+import { readPluginProviderIcon } from "./provider-icon.js";
 import { initializeEnvironmentProxy } from "../network/index.js";
 import { PluginAgentTools } from "./agent-tools.js";
 import { PluginHookHandlers } from "./lifecycle/index.js";
@@ -79,6 +81,7 @@ export function createPluginWorker(options: {
   const handlers = new Map<string, RegisteredRpc>();
   const subscriptions = new PluginSubscriptionHandlers({ send, sendAndWait });
   const providers = new Map<string, ProviderRegistration>();
+  const usageSources = new Map<string, UsageSourceRegistration>();
   const providerConnections = new Map<
     string,
     { connection: ProviderConnection; unsubscribe: () => void; closing?: Promise<void> }
@@ -172,6 +175,21 @@ export function createPluginWorker(options: {
       throw new Error(`Invalid command for plugin provider ${id}`);
     if (providers.has(id)) throw new Error(`Duplicate plugin provider ID: ${id}`);
     providers.set(id, { ...provider, id });
+  }
+
+  function registerUsageSource(source: UsageSourceRegistration): void {
+    const id = source.id.trim();
+    if (
+      !/^[a-z][a-z0-9._-]*$/.test(id) ||
+      !source.label.trim() ||
+      typeof source.fetch !== "function" ||
+      !source.input ||
+      typeof source.input.parseAsync !== "function"
+    ) {
+      throw new Error(`Invalid usage source: ${source.id}`);
+    }
+    if (usageSources.has(id)) throw new Error(`Duplicate usage source: ${id}`);
+    usageSources.set(id, { ...source, id });
   }
 
   function providerMetadata(provider: ProviderRegistration) {
@@ -304,6 +322,7 @@ export function createPluginWorker(options: {
     const contributedCleanup = contribute({
       handle,
       registerProvider,
+      registerUsageSource,
       registerSettings,
       addHook: hooks.addHook,
       on: hooks.on,
@@ -313,8 +332,21 @@ export function createPluginWorker(options: {
       throw new Error("Plugin contribution must return a cleanup function");
     }
     cleanup = contributedCleanup;
+    const usageSourceMetadata = await Promise.all(
+      [...usageSources.values()]
+        .sort((a, b) => a.id.localeCompare(b.id))
+        .map(async (source) => ({
+          id: source.id,
+          label: source.label,
+          icon: source.icon
+            ? await readPluginProviderIcon(message.pluginDirectory, source.icon)
+            : undefined,
+          discover: !!source.discover,
+        })),
+    );
     send({
       type: "ready",
+      usageSources: usageSourceMetadata,
       methods: [...handlers.keys()].sort(),
       subscriptions: subscriptions.catalog(),
       hooks: hooks.catalog(),
@@ -350,8 +382,48 @@ export function createPluginWorker(options: {
     channel.disconnect();
   }
 
+  function isUsageMessage(
+    message: PluginProcessRequest,
+  ): message is Extract<
+    PluginProcessRequest,
+    { type: "usage.identify" | "usage.fetch" | "usage.discover" }
+  > {
+    return (
+      message.type === "usage.identify" ||
+      message.type === "usage.fetch" ||
+      message.type === "usage.discover"
+    );
+  }
+
+  function handleUsageRequest(
+    message: Extract<
+      PluginProcessRequest,
+      { type: "usage.identify" | "usage.fetch" | "usage.discover" }
+    >,
+  ): void {
+    void (async () => {
+      const source = usageSources.get(message.sourceId);
+      if (!source) throw new Error(`Unknown usage source: ${message.sourceId}`);
+      if (message.type === "usage.discover")
+        return jsonTransportValue(source.discover ? await source.discover() : []);
+      const input = await source.input.parseAsync(message.input);
+      return jsonTransportValue(
+        message.type === "usage.identify"
+          ? await source.identify(input)
+          : await source.fetch(input),
+      );
+    })().then(
+      (output) => send({ type: "result", requestId: message.requestId, output }),
+      (error) => send({ type: "error", requestId: message.requestId, error: describeError(error) }),
+    );
+  }
+
   function rejectWhileStopping(message: PluginProcessRequest): void {
-    if (message.type === "provider.status" || message.type === "provider.catalog_key") {
+    if (
+      message.type === "provider.status" ||
+      message.type === "provider.catalog_key" ||
+      isUsageMessage(message)
+    ) {
       send({ type: "error", requestId: message.requestId, error: "Plugin is stopping" });
     } else if (message.type === "provider.connect") {
       send({
@@ -480,6 +552,10 @@ export function createPluginWorker(options: {
       })().catch((error) =>
         send({ type: "error", requestId: message.requestId, error: describeError(error) }),
       );
+      return;
+    }
+    if (isUsageMessage(message)) {
+      handleUsageRequest(message);
       return;
     }
     if (message.type === "provider.connect") {

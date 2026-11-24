@@ -1,3 +1,4 @@
+import type { UsageSourceRegistration } from "./usage.js";
 import type { JAgentDeskApi } from "@jagentdesk/client";
 import type { ZodType, input as ZodInput, output as ZodOutput } from "zod";
 import type { PluginRpcContract, PluginSubscriptionContract, PluginWireInput } from "../rpc.js";
@@ -62,6 +63,7 @@ export interface PluginServerContext extends PluginLifecycleRegistration {
     ) => PluginWireInput<ZodInput<OutputSchema>> | Promise<PluginWireInput<ZodInput<OutputSchema>>>,
   ): void;
   registerProvider(provider: ProviderRegistration): void;
+  registerUsageSource(source: UsageSourceRegistration): void;
 }
 
 export type PluginServerContribution = (server: PluginServerContext) => PluginCleanup;

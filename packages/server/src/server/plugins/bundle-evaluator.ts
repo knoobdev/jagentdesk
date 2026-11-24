@@ -1,3 +1,4 @@
+import * as pluginUsageRuntime from "@jagentdesk/plugin/server/usage";
 import { createRequire } from "node:module";
 import * as pluginServerRuntime from "@jagentdesk/plugin/server";
 import * as pluginSharedRuntime from "@jagentdesk/plugin";
@@ -17,6 +18,7 @@ function runtimeRequire(name: string): unknown {
   if (name === "@jagentdesk/plugin/server") return pluginServerRuntime;
   if (name === "@jagentdesk/plugin/server/provider") return pluginProviderRuntime;
   if (name === "@jagentdesk/plugin/server/acp") return pluginAcpRuntime;
+  if (name === "@jagentdesk/plugin/server/usage") return pluginUsageRuntime;
   if (name === "zod") return zod;
   if (name === "@jagentdesk/plugin/client/host")
     throw new Error(`${name} is private to the app host`);
