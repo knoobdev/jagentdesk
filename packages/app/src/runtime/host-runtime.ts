@@ -1149,6 +1149,10 @@ export class HostRuntimeController {
       client = result.client;
       this.reconcileProbedServerId(result.serverId);
       if (!this.isCurrentProbeRequest(requestVersion)) return false;
+      if (!online && this.reconcileActiveProbeWithClient(activeId, probes)) {
+        retained = this.activeClient === client;
+        return true;
+      }
       probes.set(connectionId, { status: "available", latencyMs: 0 });
       if (!online) {
         await this.switchToConnection({
@@ -1169,6 +1173,7 @@ export class HostRuntimeController {
       }
     } catch (error) {
       if (!this.isCurrentProbeRequest(requestVersion)) return false;
+      if (!online && this.reconcileActiveProbeWithClient(activeId, probes)) return true;
       probes.set(connectionId, { status: "unavailable", latencyMs: null });
       if (!online) {
         this.applyConnectionEvent({
@@ -1187,6 +1192,26 @@ export class HostRuntimeController {
         this.updateSnapshot({ probeByConnectionId: new Map(probes) });
     }
     return false;
+  }
+
+  // A reconnect can finish while a candidate handshake is in flight. Decide from
+  // the selected client's current state before replacing it with that candidate.
+  private reconcileActiveProbeWithClient(
+    connectionId: string | null,
+    probes: Map<string, ConnectionProbeState>,
+  ): boolean {
+    if (!connectionId || this.snapshot.activeConnectionId !== connectionId) return false;
+    const client = this.snapshot.client;
+    if (!client || client.getConnectionState().status !== "connected") return false;
+    const rttMs = client.getLastLivenessRttMs();
+    probes.set(
+      connectionId,
+      rttMs === null
+        ? { status: "pending", latencyMs: null }
+        : { status: "available", latencyMs: rttMs },
+    );
+    this.updateSnapshot({ probeByConnectionId: new Map(probes) });
+    return true;
   }
 
   private async recordConnectedLatency(
