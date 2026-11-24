@@ -27,6 +27,7 @@ export const BUNDLED_PLUGIN_IDS = [
   "muse-provider",
   "antigravity-provider",
   "hoplite-provider",
+  "fx-provider",
 ] as const;
 export const BUILTIN_PLUGIN_IDS = [...STATIC_BUILTIN_PLUGIN_IDS, ...BUNDLED_PLUGIN_IDS] as const;
 export type BuiltinPluginId = (typeof BUILTIN_PLUGIN_IDS)[number];
@@ -219,10 +220,19 @@ export const BUILTIN_PLUGIN_MANIFESTS: readonly BuiltinPluginManifest[] = [
     requires: [],
     command: "hoplite",
   },
+  {
+    id: "fx-provider",
+    name: "fx",
+    description: "Run fx through its local fx CLI.",
+    defaultEnabled: false,
+    requires: [],
+    command: "fx",
+  },
 ];
 
 /** Existing and new server-info flags owned by each feature. Core forge checkout stays independent. */
 export const BUILTIN_PLUGIN_FEATURES = {
+  "fx-provider": [],
   "hoplite-provider": [],
   "antigravity-provider": [],
   "muse-provider": [],

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 // Usage-source built-ins are owned by the Usage batch. Keep this list limited to
 // built-ins whose host API is present in this fork.
 export const builtinPlugins = [
+  "fx-provider",
   "hoplite-provider",
   "antigravity-provider",
   "muse-provider",
