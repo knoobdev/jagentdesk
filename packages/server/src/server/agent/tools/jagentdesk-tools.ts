@@ -1,8 +1,10 @@
 import {
   createHostResolver,
+  HostOperationRejectedError,
   type HostOperations,
   type ToolHosts,
 } from "../host-operations/index.js";
+import type { FinishSubscriptions } from "../remote-finish-subscriptions/index.js";
 import { withSkillInvocation } from "../agent-prompt.js";
 import { AgentActiveTurnBehaviorSchema } from "@jagentdesk/protocol/messages";
 import type { ChangeRequestWatches } from "../change-request-watches/index.js";
@@ -171,6 +173,7 @@ import type { AgentPermissionResponse } from "../agent-sdk-types.js";
 export interface JAgentDeskToolHostDependencies {
   serverId?: string;
   hosts?: () => ToolHosts;
+  remoteFinishSubscriptions?: () => FinishSubscriptions;
   changeRequestWatches?: ChangeRequestWatches;
   builtinPlugins?: ReadonlySet<BuiltinPluginId>;
   jagentdeskToolPolicy?: ProviderJAgentDeskToolsPolicy;
@@ -3767,15 +3770,34 @@ function createToolCatalog(
       const localHandler = handler;
       handler = async ({ serverId, ...input }, context) => {
         if (!serverId || serverId === options.serverId) return localHandler(input, context);
+        let registration: Awaited<ReturnType<FinishSubscriptions["register"]>> | undefined;
         try {
+          if (name === "send_agent_prompt" && callerAgentId && input.notifyOnFinish !== false) {
+            registration = await options
+              .remoteFinishSubscriptions?.()
+              .register({ callerAgentId, childAgentId: input.agentId, serverId }, true);
+          }
           const response = await hostResolver.use(serverId, (host) =>
             host[operation](input, context),
           );
+          if (name === "create_agent" && callerAgentId && input.notifyOnFinish !== false) {
+            await options.remoteFinishSubscriptions?.().register({
+              callerAgentId,
+              childAgentId: (response.structuredContent as { agentId: string }).agentId,
+              serverId,
+              requireParentOwnership: true,
+            });
+          }
+          registration?.accept();
           return {
             ...response,
             structuredContent: { ...(response.structuredContent as object), serverId },
           };
         } catch (error) {
+          if (registration) {
+            if (error instanceof HostOperationRejectedError) await registration.reject();
+            else registration.accept();
+          }
           const failure = {
             serverId,
             error: error instanceof Error ? error.message : String(error),
