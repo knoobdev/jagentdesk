@@ -1,3 +1,4 @@
+import { createExternalProcessEnv } from "../../jagentdesk-env.js";
 import { CodexBackgroundInventory } from "./codex/background-inventory.js";
 import { validateProviderOptions } from "../provider-options.js";
 import {
@@ -3751,6 +3752,17 @@ interface ConsumedRootCompaction {
 }
 
 export class CodexAppServerAgentSession implements AgentSession {
+  private readonly usageSessionKey = randomUUID();
+  private readonly harnessEnvironment: Record<string, string>;
+  usageSession() {
+    if (this.closed) return null;
+    return {
+      provider: "codex",
+      model: this.config.model,
+      env: this.harnessEnvironment,
+      sessionKey: this.usageSessionKey,
+    };
+  }
   readonly provider = CODEX_PROVIDER;
   readonly capabilities = CODEX_APP_SERVER_CAPABILITIES;
   readonly persistenceUpdatedOnResume = true;
@@ -3907,7 +3919,11 @@ export class CodexAppServerAgentSession implements AgentSession {
       composeAgentSystemPrompt(config),
       resumeHandle?.metadata?.jagentdeskInstructionReceipt,
     );
-    this.codexHome = deps.codexHome ?? resolveCodexHomeDir(process.env);
+    this.harnessEnvironment = createExternalProcessEnv(
+      {},
+      deps.environment ?? buildCodexAppServerEnv(),
+    );
+    this.codexHome = deps.codexHome ?? resolveCodexHomeDir(this.harnessEnvironment);
     this.config.thinkingOptionId = normalizeCodexThinkingOptionId(this.config.thinkingOptionId);
     this.serviceTier = readCodexServiceTier(this.config.featureValues);
     if (this.config.featureValues?.plan_mode) {

@@ -1,3 +1,4 @@
+import { createExternalProcessEnv } from "../../../jagentdesk-env.js";
 import { ClaudeRuntimeSafety } from "./runtime-safety.js";
 import { setImmediate } from "node:timers/promises";
 import { validateProviderOptions } from "../../provider-options.js";
@@ -2420,6 +2421,17 @@ class ClaudeContextUsageState {
 }
 
 class ClaudeAgentSession implements AgentSession {
+  private readonly usageSessionKey = randomUUID();
+  private harnessEnvironment: Record<string, string> | null = null;
+  usageSession() {
+    if (this.closed || this.harnessEnvironment === null) return null;
+    return {
+      provider: "claude",
+      model: this.config.model,
+      env: this.harnessEnvironment,
+      sessionKey: this.usageSessionKey,
+    };
+  }
   readonly provider = "claude" as const;
   readonly capabilities = CLAUDE_CAPABILITIES;
 
@@ -3882,6 +3894,7 @@ class ClaudeAgentSession implements AgentSession {
       this.buildSdkEnv(),
       await this.resolveSpawnEnvOverlay(),
     );
+    this.harnessEnvironment = createExternalProcessEnv({}, sdkEnv);
     assertClaudeModeCanRun(permissionMode, sdkEnv);
 
     const claudeBinary = await this.resolveBinary();

@@ -1,3 +1,4 @@
+import { createExternalProcessEnv } from "../../../jagentdesk-env.js";
 import { mapCustomMessageToToolCall } from "../custom-message.js";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -262,6 +263,7 @@ function isPiMissingClearQueueRpc(error: unknown): boolean {
 }
 
 interface PiRpcAgentSessionOptions {
+  usageEnv?: Record<string, string>;
   runtimeSession: PiRuntimeSession;
   config: AgentSessionConfig;
   initialState: PiSessionState;
@@ -1171,6 +1173,17 @@ function createRuntime(
 }
 
 export class PiRpcAgentSession implements AgentSession {
+  private readonly usageSessionKey = randomUUID();
+  private readonly usageEnvironment: Record<string, string>;
+  usageSession() {
+    if (this.closed) return null;
+    return {
+      provider: "pi",
+      model: modelToId(this.state.model) ?? undefined,
+      env: this.usageEnvironment,
+      sessionKey: this.usageSessionKey,
+    };
+  }
   readonly provider: AgentProvider;
   readonly capabilities: AgentCapabilityFlags;
 
@@ -1214,6 +1227,7 @@ export class PiRpcAgentSession implements AgentSession {
 
   constructor(options: PiRpcAgentSessionOptions) {
     this.runtimeSession = options.runtimeSession;
+    this.usageEnvironment = createExternalProcessEnv(process.env, options.usageEnv ?? {});
     this.config = options.config;
     this.state = options.initialState;
     this.config.thinkingOptionId = this.state.thinkingLevel;
@@ -2622,6 +2636,7 @@ export class PiRpcAgentClient implements AgentClient {
         extensionTimeoutMs: providerOptions.extensionTimeoutMs,
         logger: this.logger,
         usagePollScheduler: this.usagePollScheduler,
+        usageEnv: mcpEnv,
       });
     } catch (error) {
       await runtimeSession.close().catch(() => undefined);
@@ -2706,6 +2721,7 @@ export class PiRpcAgentClient implements AgentClient {
         extensionTimeoutMs: providerOptions.extensionTimeoutMs,
         logger: this.logger,
         usagePollScheduler: this.usagePollScheduler,
+        usageEnv: mcpEnv,
       });
     } catch (error) {
       await runtimeSession.close().catch(() => undefined);

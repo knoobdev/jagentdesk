@@ -8618,3 +8618,21 @@ describe("legacy empty additions", () => {
 function latestBackgroundWork(events: AgentStreamEvent[]) {
   return events.findLast((event) => event.type === "background_work");
 }
+
+test("usage identity follows the launched Codex home and retires with the session", async () => {
+  const environment = { HOME: "/usage-test/home", CODEX_HOME: "/usage-test/profile" };
+  const session = new CodexAppServerAgentSession(
+    createConfig(),
+    null,
+    createTestLogger(),
+    () => {
+      throw new Error("Reading usage must not launch Codex");
+    },
+    { environment },
+  );
+  const identity = session.usageSession();
+  expect(identity).toMatchObject({ provider: "codex", model: "gpt-5.4", env: environment });
+  expect(session.usageSession()).toEqual(identity);
+  await session.close();
+  expect(session.usageSession()).toBeNull();
+});
