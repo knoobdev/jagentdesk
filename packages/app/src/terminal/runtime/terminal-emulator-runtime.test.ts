@@ -308,9 +308,11 @@ describe("terminal-emulator-runtime", () => {
       { kittyKeyboardFlags: 7, win32InputMode: false, bracketedPaste: false },
     ]);
 
-    // The plain write carries no onCommitted, so it registers no callback; writeCallbacks[0]
-    // is the barrier gate sentinel.
+    // Every submitted write has a commit callback, even without a caller onCommitted.
+    // Parsing the plain write keeps its mode; the following sentinel then starts the snapshot.
     writeCallbacks[0]?.();
+    expect(inputModeChanges).toHaveLength(1);
+    writeCallbacks[1]?.();
 
     expect(inputModeChanges).toEqual([
       { kittyKeyboardFlags: 7, win32InputMode: false, bracketedPaste: false },
@@ -419,14 +421,16 @@ describe("terminal-emulator-runtime", () => {
     runtime.write({ data: terminalOutput("output") });
     runtime.restoreOutput({ data: terminalOutput("snapshot") });
 
-    // The plain write carries no onCommitted so it registers no callback; writeCallbacks[0]
-    // is the sentinel gate. suppressInput only flips once the gate resolves the barrier.
+    // The plain write has its own commit callback. Input stays enabled until the
+    // following sentinel commits and starts the barrier.
     expect(readSuppressInput()).toBe(false);
     writeCallbacks[0]?.();
+    expect(readSuppressInput()).toBe(false);
+    writeCallbacks[1]?.();
     expect(readSuppressInput()).toBe(true);
 
-    // writeCallbacks[1] is the barrier's own snapshot write; committing it restores input.
-    writeCallbacks[1]?.();
+    // The barrier's own snapshot write restores input when committed.
+    writeCallbacks[2]?.();
     expect(readSuppressInput()).toBe(false);
   });
 
