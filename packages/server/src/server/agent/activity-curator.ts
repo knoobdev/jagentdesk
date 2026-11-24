@@ -1,4 +1,4 @@
-import type { AgentTimelineItem } from "./agent-sdk-types.js";
+import type { AgentTimelineItem, ToolCallTimelineItem } from "./agent-sdk-types.js";
 import type { AgentAttachment } from "@jagentdesk/protocol/messages";
 import type { AgentTimelineRow } from "./agent-timeline-store-types.js";
 import { isLikelyExternalToolName } from "@jagentdesk/protocol/tool-name-normalization";
@@ -234,20 +234,17 @@ function selectForkContextRows(input: {
     );
   }
   const boundarySeq = projectedRows[boundaryIndex].seqEnd;
-  if (projectedRows.some((row) => row.seqStart <= boundarySeq && row.seqEnd > boundarySeq)) {
-    throw new Error(
-      // ADR-0020: source payloads are not retained, so a checkpoint inside an
-      // item that changed afterward cannot be reconstructed (stale anchor).
-      "This checkpoint changed after it was created. Fork from a later completed response or from the current context instead.",
-    );
-  }
-  const projected = projectedRows.filter((row) => row.seqEnd <= boundarySeq);
+  const items = projectedRows.flatMap((row) => {
+    if (row.seqEnd <= boundarySeq) return [row.item];
+    if (row.seqStart > boundarySeq || row.item.type !== "tool_call") return [];
+    return [toolCallAtCheckpoint(row.item)];
+  });
+  return { items, boundaryCursor, boundaryMessageId };
+}
 
-  return {
-    items: projected.map((entry) => entry.item),
-    boundaryCursor,
-    boundaryMessageId,
-  };
+// A projected tool updated after the reply was still running at the checkpoint.
+function toolCallAtCheckpoint(item: ToolCallTimelineItem): ToolCallTimelineItem {
+  return { ...item, status: "running", error: null };
 }
 
 function trimContextMetadata(value: string | null | undefined): string | null {
