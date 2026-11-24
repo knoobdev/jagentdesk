@@ -84,26 +84,46 @@ export const ar: TranslationResources = {
       close: "إغلاق القائمة",
     },
     commandCenter: {
-      placeholder: "ابحث في الأوامر ومساحات العمل والوكلاء...",
-      noMatches: "لا توجد مباريات",
-      actions: "الإجراءات",
-      workspaces: "مساحات العمل",
-      agents: "الوكلاء",
-      newAgent: "وكيل جديد",
-      addProject: "إضافة مشروع",
-      home: "بيت",
-      modelGroupLabel: "النموذج",
-      modelSearchKeywords: "تبديل النموذج تغيير النموذج تعيين النموذج اختيار النموذج",
-      thinkingGroupLabel: "التفكير",
-      thinkingSearchKeywords: "الاستدلال الجهد التفكير",
-      modeGroupLabel: "الوضع",
-      modeSearchKeywords: "الوصول الإذن الموافقة الوضع",
-      planModeGroupLabel: "وضع التخطيط",
-      planModeSearchKeywords: "التخطيط خطة وضع التخطيط",
-      fastModeGroupLabel: "سريع",
-      fastModeSearchKeywords: "سريع سرعة زمن انتقال منخفض",
-      settingOn: "تشغيل",
-      settingOff: "إيقاف",
+      placeholder:
+        "\u0627\u0628\u062D\u062B \u0641\u064A \u0627\u0644\u0623\u0648\u0627\u0645\u0631 \u0648\u0627\u0644\u0645\u0644\u0641\u0627\u062A \u0648\u0645\u0633\u0627\u062D\u0627\u062A \u0627\u0644\u0639\u0645\u0644 \u0648\u0627\u0644\u0648\u0643\u0644\u0627\u0621...",
+      noMatches: "\u0644\u0627 \u062A\u0648\u062C\u062F \u0645\u0628\u0627\u0631\u064A\u0627\u062A",
+      actions: "\u0627\u0644\u0625\u062C\u0631\u0627\u0621\u0627\u062A",
+      workspaces: "\u0645\u0633\u0627\u062D\u0627\u062A \u0627\u0644\u0639\u0645\u0644",
+      agents: "\u0627\u0644\u0648\u0643\u0644\u0627\u0621",
+      newAgent: "\u0648\u0643\u064A\u0644 \u062C\u062F\u064A\u062F",
+      addProject: "\u0625\u0636\u0627\u0641\u0629 \u0645\u0634\u0631\u0648\u0639",
+      home: "\u0628\u064A\u062A",
+      modelGroupLabel: "\u0627\u0644\u0646\u0645\u0648\u0630\u062C",
+      modelSearchKeywords:
+        "\u062A\u0628\u062F\u064A\u0644 \u0627\u0644\u0646\u0645\u0648\u0630\u062C \u062A\u063A\u064A\u064A\u0631 \u0627\u0644\u0646\u0645\u0648\u0630\u062C \u062A\u0639\u064A\u064A\u0646 \u0627\u0644\u0646\u0645\u0648\u0630\u062C \u0627\u062E\u062A\u064A\u0627\u0631 \u0627\u0644\u0646\u0645\u0648\u0630\u062C",
+      thinkingGroupLabel: "\u0627\u0644\u062A\u0641\u0643\u064A\u0631",
+      thinkingSearchKeywords:
+        "\u0627\u0644\u0627\u0633\u062A\u062F\u0644\u0627\u0644 \u0627\u0644\u062C\u0647\u062F \u0627\u0644\u062A\u0641\u0643\u064A\u0631",
+      modeGroupLabel: "\u0627\u0644\u0648\u0636\u0639",
+      modeSearchKeywords:
+        "\u0627\u0644\u0648\u0635\u0648\u0644 \u0627\u0644\u0625\u0630\u0646 \u0627\u0644\u0645\u0648\u0627\u0641\u0642\u0629 \u0627\u0644\u0648\u0636\u0639",
+      planModeGroupLabel: "\u0648\u0636\u0639 \u0627\u0644\u062A\u062E\u0637\u064A\u0637",
+      planModeSearchKeywords:
+        "\u0627\u0644\u062A\u062E\u0637\u064A\u0637 \u062E\u0637\u0629 \u0648\u0636\u0639 \u0627\u0644\u062A\u062E\u0637\u064A\u0637",
+      fastModeGroupLabel: "\u0633\u0631\u064A\u0639",
+      fastModeSearchKeywords:
+        "\u0633\u0631\u064A\u0639 \u0633\u0631\u0639\u0629 \u0632\u0645\u0646 \u0627\u0646\u062A\u0642\u0627\u0644 \u0645\u0646\u062E\u0641\u0636",
+      settingOn: "\u062A\u0634\u063A\u064A\u0644",
+      settingOff: "\u0625\u064A\u0642\u0627\u0641",
+      filePlaceholder:
+        "\u0627\u0644\u0628\u062D\u062B \u0641\u064A \u0627\u0644\u0645\u0644\u0641\u0627\u062A...",
+      searchingFiles:
+        "\u062C\u0627\u0631\u064D \u0627\u0644\u0628\u062D\u062B \u0641\u064A \u0627\u0644\u0645\u0644\u0641\u0627\u062A...",
+      files: "\u0627\u0644\u0645\u0644\u0641\u0627\u062A",
+      open: "\u0641\u062A\u062D {{name}}",
+      openInSidePane:
+        "\u0641\u062A\u062D {{name}} \u0641\u064A \u0627\u0644\u0644\u0648\u062D\u0629 \u0627\u0644\u062C\u0627\u0646\u0628\u064A\u0629",
+      openInFocusedPane:
+        "\u0641\u062A\u062D {{name}} \u0641\u064A \u0627\u0644\u062C\u0632\u0621 \u0627\u0644\u0646\u0634\u0637",
+      groupByProject:
+        "\u062A\u062C\u0645\u064A\u0639 \u062D\u0633\u0628 \u0627\u0644\u0645\u0634\u0631\u0648\u0639",
+      groupByStatus:
+        "\u062A\u062C\u0645\u064A\u0639 \u062D\u0633\u0628 \u0627\u0644\u062D\u0627\u0644\u0629",
     },
   },
   composer: {

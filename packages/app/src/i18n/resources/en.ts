@@ -82,7 +82,7 @@ export const en = {
       close: "Close menu",
     },
     commandCenter: {
-      placeholder: "Search commands, workspaces, and agents...",
+      placeholder: "Search commands, files, workspaces, and agents...",
       noMatches: "No matches",
       actions: "Actions",
       workspaces: "Workspaces",
@@ -102,6 +102,14 @@ export const en = {
       fastModeSearchKeywords: "fast speed low latency",
       settingOn: "On",
       settingOff: "Off",
+      filePlaceholder: "Search files...",
+      searchingFiles: "Searching files...",
+      files: "Files",
+      open: "Open {{name}}",
+      openInSidePane: "Open {{name}} in side pane",
+      openInFocusedPane: "Open {{name}} in focused pane",
+      groupByProject: "Group by project",
+      groupByStatus: "Group by status",
     },
   },
   composer: {

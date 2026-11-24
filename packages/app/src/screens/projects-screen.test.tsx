@@ -228,6 +228,8 @@ import ProjectsScreen from "./projects-screen";
 function workspaceSummary(overrides: Partial<WorkspaceSummary> = {}): WorkspaceSummary {
   return {
     id: "ws-1",
+    changeRequestNumber: null,
+    statusEnteredAt: null,
     name: "main",
     workspaceKind: "directory",
     status: "done",
