@@ -348,6 +348,11 @@ export const es: TranslationResources = {
       details: "Detalles",
     },
     dictation: {
+      insecureContext: "Abre JAgentDesk por HTTPS o en localhost para usar el micrófono.",
+      unsupported: "El dictado no está disponible en este navegador.",
+      noMicrophone: "Conecta un micrófono e inténtalo de nuevo.",
+      permissionDenied: "Permite el acceso al micrófono e inténtalo de nuevo.",
+      startFailed: "No se pudo iniciar el dictado. Inténtalo de nuevo.",
       paused: "Micrófono interrumpido. Esperando para reanudar…",
       start: "Iniciar dictado de voz",
       cancel: "Cancelar dictado",

@@ -348,6 +348,12 @@ export const ru: TranslationResources = {
       details: "Подробности",
     },
     dictation: {
+      insecureContext:
+        "Чтобы использовать микрофон, откройте JAgentDesk по HTTPS или на localhost.",
+      unsupported: "Диктовка недоступна в этом браузере.",
+      noMicrophone: "Подключите микрофон и попробуйте снова.",
+      permissionDenied: "Разрешите доступ к микрофону и попробуйте снова.",
+      startFailed: "Не удалось начать диктовку. Попробуйте снова.",
       paused: "Микрофон прерван. Ожидание возобновления…",
       start: "Начать голосовой диктовку",
       cancel: "Отменить диктовку",
