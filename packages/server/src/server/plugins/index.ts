@@ -6,7 +6,10 @@ import type { PluginLifecycle } from "./lifecycle/index.js";
 import path from "node:path";
 import { stat, rm } from "node:fs/promises";
 import type pino from "pino";
-import type { ProviderRegistration } from "@jagentdesk/plugin/server/provider";
+import type {
+  ProviderInstallation,
+  ProviderRegistration,
+} from "@jagentdesk/plugin/server/provider";
 import {
   PluginIdSchema,
   type PluginLogEntry,
@@ -28,7 +31,10 @@ import { readPluginManifest } from "./manifest.js";
 import { rewritePaseoSdkImports } from "./paseo-rebrand.js";
 import { runPluginBuild } from "./preparation.js";
 import { PluginRuntime } from "./runtime.js";
-import type { PluginProviderMetadata } from "./plugin-process-protocol.js";
+import type {
+  PluginProviderInstallationMetadata,
+  PluginProviderMetadata,
+} from "./plugin-process-protocol.js";
 import { readPluginProviderIcon } from "./provider-icon.js";
 
 const BUILTIN_PROVIDER_ID_SET: ReadonlySet<string> = new Set(BUILTIN_PROVIDER_IDS);
@@ -62,6 +68,9 @@ interface PluginRuntimePort {
   getProviderCatalogCacheKey?: PluginRuntime["getProviderCatalogCacheKey"];
   getProviderStatus?: PluginRuntime["getProviderStatus"];
   startBuiltinPlugin?(plugin: BuiltinPlugin): Promise<void>;
+  inspectProviderInstallation?: PluginRuntime["inspectProviderInstallation"];
+  checkProviderUpdates?: PluginRuntime["checkProviderUpdates"];
+  updateProvider?: PluginRuntime["updateProvider"];
   validatePlugin?(path: string): Promise<void>;
   startPlugin(pluginId: string, path: string, canPublish: () => boolean): Promise<void>;
   stopPluginById(pluginId: string): Promise<boolean>;
@@ -621,6 +630,7 @@ export class PluginService {
           id: provider.id,
           label: provider.label,
           description: provider.description,
+          docsUrl: provider.docsUrl,
           command: provider.command,
           status: provider.hasStatus
             ? (request) => {
@@ -635,6 +645,9 @@ export class PluginService {
                   throw new Error("Plugin runtime cannot resolve catalogue keys");
                 return this.runtime.getProviderCatalogCacheKey(pluginId, provider.id, options);
               }
+            : undefined,
+          installation: provider.installation
+            ? this.providerInstallation(pluginId, provider.id, provider.installation)
             : undefined,
           icon: provider.iconPath
             ? await readPluginProviderIcon(pluginDirectory, provider.iconPath)
@@ -653,6 +666,38 @@ export class PluginService {
       this.providerIdsByPlugin.set(pluginId, ids);
       this.notifyProviderRegistrations();
     }
+  }
+
+  private providerInstallation(
+    pluginId: string,
+    providerId: string,
+    metadata: PluginProviderInstallationMetadata,
+  ): ProviderInstallation {
+    return {
+      installUrl: metadata.installUrl,
+      updateUrl: metadata.updateUrl,
+      inspect: metadata.hasInspect
+        ? (context) => {
+            if (!this.runtime.inspectProviderInstallation)
+              throw new Error("Plugin runtime cannot inspect provider installations");
+            return this.runtime.inspectProviderInstallation(pluginId, providerId, context);
+          }
+        : undefined,
+      checkForUpdates: metadata.hasCheckForUpdates
+        ? (context) => {
+            if (!this.runtime.checkProviderUpdates)
+              throw new Error("Plugin runtime cannot check provider updates");
+            return this.runtime.checkProviderUpdates(pluginId, providerId, context);
+          }
+        : undefined,
+      update: metadata.hasUpdate
+        ? (context) => {
+            if (!this.runtime.updateProvider)
+              throw new Error("Plugin runtime cannot update providers");
+            return this.runtime.updateProvider(pluginId, providerId, context);
+          }
+        : undefined,
+    };
   }
 
   private removeProviderRegistrations(pluginId: string): void {

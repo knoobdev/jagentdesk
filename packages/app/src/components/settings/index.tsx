@@ -151,7 +151,7 @@ export function SettingsInput({
   secureTextEntry,
   ref,
   ...row
-}: SettingsInputProps) {
+}: SettingsInputProps & { labelAccessory?: ReactNode }) {
   const compact = useIsCompactFormFactor();
   // The fork's FormTextInput exposes the plain TextInput, so the current text is tracked here.
   const input = useRef<TextInput>(null);

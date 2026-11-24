@@ -2,6 +2,10 @@ import { BotsSession } from "./bots/session.js";
 import type { BotsService } from "./bots/service.js";
 import { AgentDirectory, type BackgroundVisibility } from "./agent/directory.js";
 import { inheritAgentBackground, inheritWorkspaceBackground } from "./agent/create-agent/intent.js";
+import {
+  SpeechModelsSession,
+  type SpeechModelsSessionOptions,
+} from "./session/speech/speech-models-session.js";
 import { builtinPluginForRpc } from "./plugins/builtin/gates.js";
 import { BuiltinPluginError, type BuiltinPluginState } from "./plugins/builtin/state.js";
 import { SessionDelivery, type OwnedSubscription } from "./session/owned-subscriptions/index.js";
@@ -161,6 +165,7 @@ import {
 } from "./agent/import-sessions.js";
 import { exportHostData } from "./migration/export-host-data.js";
 import { importHostData } from "./migration/import-host-data.js";
+import { listProjectSuggestions, ProjectSuggestionsRequestError } from "./project-suggestions.js";
 import {
   checkoutLiteFromGitSnapshot,
   checkoutFromPersistedWorkspacePlacement,
@@ -616,6 +621,7 @@ export interface SessionOptions {
   stt: Resolvable<SpeechToTextProvider | null>;
   sttLanguage?: string;
   tts: Resolvable<TextToSpeechProvider | null>;
+  speechModels?: SpeechModelsSessionOptions["runtime"];
   terminalManager: TerminalManager | null;
   providerSnapshotManager: ProviderSnapshotManager;
   providerUsageService: ProviderUsageService;
@@ -895,6 +901,7 @@ export class Session {
   private readonly onWorkspaceRecovered:
     | ((workspace: PersistedWorkspaceRecord) => Promise<void>)
     | null;
+  private readonly speechModelsSession: SpeechModelsSession;
   private readonly sessionLogger: pino.Logger;
   private readonly jagentdeskHome: string;
   private readonly worktreesRoot: string | undefined;
@@ -1038,6 +1045,7 @@ export class Session {
       stt,
       sttLanguage,
       tts,
+      speechModels,
       terminalManager,
       providerSnapshotManager,
       providerUsageService,
@@ -1078,6 +1086,10 @@ export class Session {
     this.jagentdeskHome = jagentdeskHome;
     this.worktreesRoot = worktreesRoot;
     this.serverId = serverId ?? "";
+    this.speechModelsSession = new SpeechModelsSession({
+      emit: (msg) => this.emit(msg),
+      runtime: speechModels,
+    });
     this.sessionLogger = logger.child({
       module: "session",
       clientId: this.clientId,
@@ -2654,11 +2666,41 @@ export class Session {
     return this.isPathWithinGuestWorkspace(terminalCwd);
   }
 
+  private async subscribeProviderUpdates(
+    request: Extract<
+      SessionInboundMessage,
+      { type: "provider.installation.update.subscribe.request" }
+    >,
+  ): Promise<void> {
+    if (!this.delivery.isModern(this.delivery.currentSource))
+      throw new Error("Provider update observation requires owned subscriptions");
+    const installations = this.providerSnapshotManager.installations;
+    let stop: (() => void) | undefined;
+    const owner = this.delivery.begin("provider-update", undefined, () => stop?.());
+    // Register and read in one synchronous turn so no progress falls between them.
+    stop = installations.observeUpdates(request.provider, (event) => owner.emit(event));
+    this.emit({
+      type: "provider.installation.update.subscribe.response",
+      payload: {
+        requestId: request.requestId,
+        subscriptionId: owner.responseId,
+        provider: request.provider,
+        update: installations.getUpdate(request.provider),
+        error: null,
+      },
+    });
+  }
+
   private async dispatchInboundMessage(msg: SessionInboundMessage, source?: object): Promise<void> {
     // Ordered dispatchers: the first one that recognizes the message returns a
     // (possibly async) result and the rest are skipped — matching the previous
     // left-to-right `??` short-circuit chain exactly.
     const dispatchers: Array<() => Promise<void> | undefined> = [
+      () =>
+        msg.type === "provider.installation.update.subscribe.request"
+          ? this.subscribeProviderUpdates(msg)
+          : undefined,
+      () => this.speechModelsSession.dispatch(msg),
       () => this.dispatchVoiceAndControlMessage(msg),
       () => this.dispatchAgentRewindMessage(msg),
       () => this.dispatchAgentRelationshipMessage(msg),
@@ -3574,6 +3616,8 @@ export class Session {
         return this.handleFetchWorkspacesRequest(msg);
       case "project.list.request":
         return this.handleProjectListRequest(msg.requestId);
+      case "project.suggestions.request":
+        return this.handleProjectSuggestionsRequest(msg);
       case "jagentdesk_worktree_list_request":
         return this.handleJAgentDeskWorktreeListRequest(msg);
       case "jagentdesk_worktree_archive_request":
@@ -3680,6 +3724,12 @@ export class Session {
         return this.providerCatalogSession.handleRefreshProvidersSnapshotRequest(msg);
       case "provider_diagnostic_request":
         return this.providerCatalogSession.handleProviderDiagnosticRequest(msg);
+      case "provider.installation.inspect.request":
+        return this.providerCatalogSession.handleInspectProviderInstallationRequest(msg);
+      case "provider.installation.check_updates.request":
+        return this.providerCatalogSession.handleCheckProviderUpdatesRequest(msg);
+      case "provider.installation.update.request":
+        return this.providerCatalogSession.handleUpdateProviderRequest(msg);
       case "provider.usage.list.request":
         return this.providerCatalogSession.handleProviderUsageListRequest(msg);
       default:
@@ -8360,6 +8410,37 @@ export class Session {
           requestType: "project.list.request",
           error: error instanceof Error ? error.message : "Failed to list projects",
           code: "project_list_failed",
+        },
+      });
+    }
+  }
+
+  private async handleProjectSuggestionsRequest(
+    request: Extract<SessionInboundMessage, { type: "project.suggestions.request" }>,
+  ): Promise<void> {
+    try {
+      const result = await listProjectSuggestions({
+        request,
+        agentManager: this.agentManager,
+        projectRegistry: this.projectRegistry,
+        workspaceGitService: this.workspaceGitService,
+      });
+      this.emit({
+        type: "project.suggestions.response",
+        payload: { requestId: request.requestId, ...result },
+      });
+    } catch (error) {
+      this.sessionLogger.error({ err: error }, "Failed to handle project.suggestions.request");
+      this.emit({
+        type: "rpc_error",
+        payload: {
+          requestId: request.requestId,
+          requestType: request.type,
+          error: error instanceof Error ? error.message : "Failed to list project suggestions",
+          code:
+            error instanceof ProjectSuggestionsRequestError
+              ? error.code
+              : "project_suggestions_failed",
         },
       });
     }

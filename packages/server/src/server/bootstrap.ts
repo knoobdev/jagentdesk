@@ -5,6 +5,7 @@ import { DaemonBotRuntime } from "./bots/daemon-runtime.js";
 import { LocalBotTriggers } from "./bots/triggers.js";
 import { createBotAgentTools } from "./bots/agent-tools.js";
 import { createRestartRecovery } from "./agent/restart-recovery/index.js";
+import { PROVIDER_BACKGROUND_REFRESH_INTERVAL_MS } from "./agent/provider-refresh-schedule.js";
 import { getSharedProxyService } from "./proxy/proxy-service.js";
 import { resolveJAgentDeskToolPolicy } from "./agent/jagentdesk-tool-policy.js";
 import { BuiltinPluginLoader } from "./plugins/builtin/index.js";
@@ -151,6 +152,7 @@ import type { OpenAiSpeechProviderConfig } from "./speech/providers/openai/confi
 import type { LocalSpeechProviderConfig } from "./speech/providers/local/config.js";
 import type { RequestedSpeechProviders } from "./speech/speech-types.js";
 import { createSpeechService } from "./speech/speech-runtime.js";
+import { createSpeechSettingsOwner } from "./speech/speech-settings.js";
 import { AgentManager } from "./agent/agent-manager.js";
 import { AgentStorage } from "./agent/agent-storage.js";
 import { attachAgentStoragePersistence } from "./persistence-hooks.js";
@@ -435,6 +437,8 @@ export interface JAgentDeskSpeechSttLanguages {
 
 export interface JAgentDeskSpeechConfig {
   providers: RequestedSpeechProviders;
+  // Where local models live, whether or not a feature currently uses the local provider.
+  localModelsDir: string;
   sttLanguages?: JAgentDeskSpeechSttLanguages;
   local?: JAgentDeskLocalSpeechConfig;
 }
@@ -686,10 +690,22 @@ export async function createJAgentDeskDaemon(
   const bootstrapStart = performance.now();
   const elapsed = () => `${(performance.now() - bootstrapStart).toFixed(0)}ms`;
   const daemonVersion = config.daemonVersion ?? resolveDaemonVersion(import.meta.url);
+  const speechService = createSpeechService({
+    logger,
+    openaiConfig: config.openai,
+    speechConfig: config.speech,
+  });
   const daemonConfigStore = new DaemonConfigStore(
     config.jagentdeskHome,
     createInitialMutableDaemonConfig(config),
     logger,
+    {
+      speech: createSpeechSettingsOwner({
+        jagentdeskHome: config.jagentdeskHome,
+        env: process.env,
+        speechService,
+      }),
+    },
   );
   const browserToolsBroker = new BrowserToolsBroker({});
   // Built-ins load independently of the user-plugin switch. Managed git sources
@@ -1065,6 +1081,7 @@ export async function createJAgentDeskDaemon(
   });
   const providerSnapshotLogger = logger.child({ module: "provider-snapshot-manager" });
   const providerSnapshotManager = new ProviderSnapshotManager({
+    backgroundRefresh: { intervalMs: PROVIDER_BACKGROUND_REFRESH_INTERVAL_MS },
     logger: providerSnapshotLogger,
     runtimeSettings: config.agentProviderSettings,
     providerOverrides: config.providerOverrides,
@@ -2144,13 +2161,6 @@ export async function createJAgentDeskDaemon(
     logger.info("Agent MCP HTTP endpoint disabled");
   }
 
-  const speechService = createSpeechService({
-    logger,
-    openaiConfig: config.openai,
-    speechConfig: config.speech,
-  });
-  logger.info({ elapsed: elapsed() }, "Speech service created");
-
   logger.info({ elapsed: elapsed() }, "Bootstrap complete, ready to start listening");
 
   const start = async () => {
@@ -2516,7 +2526,7 @@ export async function createJAgentDeskDaemon(
     await botsService.dispose();
     jiraService.dispose();
     void figmaService.dispose();
-    speechService.stop();
+    await speechService.stop();
     await scheduleService.stop().catch(() => undefined);
     await autorunService?.stop().catch(() => undefined);
     specModeService?.stop();

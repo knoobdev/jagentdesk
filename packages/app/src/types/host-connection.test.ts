@@ -1,3 +1,4 @@
+import { readHostRegistry, writeHostRegistry, forgetUnreadableHost } from "./host-connection";
 import { describe, expect, it } from "vitest";
 import { defaultHostAppearance } from "@/hosts/appearance";
 import {
@@ -482,5 +483,43 @@ describe("relay connection offers", () => {
         connections: [{ type: "relay", endpoint: "127.0.0.1:8123" }],
       }),
     ).toBeNull();
+  });
+});
+
+describe("saved host recovery", () => {
+  const direct = { id: "direct:lan:6767", type: "directTcp", endpoint: "lan:6767", useTls: false };
+  const future = { id: "future:1", type: "futureKind", address: "future.local" };
+  it("keeps readable hosts and writes unreadable hosts and connections back", () => {
+    const unreadable = { serverId: "future", connections: [future] };
+    const stored = [{ serverId: "readable", connections: [direct, future] }, unreadable, "broken"];
+    const registry = readHostRegistry(stored);
+    expect(registry.hosts.map((host) => host.serverId)).toEqual(["readable"]);
+    expect(registry.hosts[0]?.connections).toEqual([direct]);
+    expect(writeHostRegistry(registry.hosts, registry.unreadable)).toEqual([
+      { ...registry.hosts[0], connections: [direct, future] },
+      unreadable,
+      "broken",
+    ]);
+    expect(
+      writeHostRegistry(registry.hosts, forgetUnreadableHost(registry.unreadable, "future")),
+    ).toEqual([{ ...registry.hosts[0], connections: [direct, future] }, "broken"]);
+  });
+  it("keeps tailnet and relay transports readable", () => {
+    const registry = readHostRegistry([
+      {
+        serverId: "tailnet",
+        connections: [
+          { type: "tailnet", tailnetAddress: "100.64.0.1:6767", daemonPublicKeyB64: "key" },
+        ],
+      },
+      {
+        serverId: "relay",
+        connections: [
+          { type: "relay", endpoint: "relay.local:443", useTls: true, daemonPublicKeyB64: "key" },
+        ],
+      },
+    ]);
+    expect(registry.hosts.map((host) => host.connections[0]?.type)).toEqual(["tailnet", "relay"]);
+    expect(registry.unreadable.hosts).toEqual([]);
   });
 });

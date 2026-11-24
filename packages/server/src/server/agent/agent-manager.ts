@@ -300,7 +300,13 @@ export type ImportablePersistedAgentQueryOptions = ListImportableSessionsOptions
    * built-in importable allowlist + enabled + non-derived rules.
    */
   providerFilter?: Set<string>;
+  onProviderError?: (error: ImportableSessionProviderError) => void;
 };
+
+export interface ImportableSessionProviderError {
+  provider: string;
+  message: string;
+}
 
 export interface ManagedImportableProviderSession extends ImportableProviderSession {
   provider: AgentProvider;
@@ -1216,6 +1222,10 @@ export class AgentManager {
             { err: error, provider },
             "Failed to list importable sessions for provider",
           );
+          options?.onProviderError?.({
+            provider,
+            message: error instanceof Error ? error.message : String(error),
+          });
           return [];
         }
       }),

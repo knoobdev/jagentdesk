@@ -8,7 +8,16 @@ import type {
   ProviderOptions,
   ToolPolicy,
 } from "@jagentdesk/protocol/agent-types";
-import type { AgentAttachment } from "@jagentdesk/protocol/messages";
+import type {
+  AgentAttachment,
+  ProviderInstallationInspection,
+} from "@jagentdesk/protocol/messages";
+import type {
+  ProviderInspection,
+  ProviderUpdateCheck,
+  ProviderUpdateReport,
+  ProviderUpdateResult,
+} from "@jagentdesk/plugin/server/provider";
 import type { JAgentDeskToolCatalog } from "./tools/types.js";
 
 export type {
@@ -134,6 +143,9 @@ export interface ProviderSnapshotEntry {
   fetchedAt?: string;
   label?: string;
   description?: string;
+  iconSvg?: string;
+  /** The page that helps users set up and troubleshoot this provider. */
+  docsUrl?: string;
   defaultModeId?: string | null;
 }
 
@@ -785,12 +797,47 @@ export interface ProviderCatalog {
   models: AgentModelDefinition[];
   modes: AgentMode[];
   defaultModeId?: string | null;
+  /** Part of discovery failed, so the catalogue omits models the provider could not confirm. */
+  incomplete?: boolean;
 }
 
 export interface ResolveAgentDefaultModeInput {
   config: AgentSessionConfig;
   env?: Record<string, string>;
   signal?: AbortSignal;
+}
+
+export interface AgentClientInstallationContext {
+  /** Aborted when JAgentDesk stops waiting for the result. */
+  signal: AbortSignal;
+}
+
+export interface AgentClientInstallation {
+  installUrl?: string;
+  updateUrl?: string;
+  inspect?(context: AgentClientInstallationContext): Promise<ProviderInspection>;
+  /** See `ProviderInstallation.checkForUpdates` in the plugin contract. */
+  checkForUpdates?(context: AgentClientUpdateCheckContext): Promise<ProviderUpdateCheck>;
+  /** Runs the provider's updater. See `ProviderInstallation.update` in the plugin contract. */
+  update?(context: AgentClientUpdateContext): Promise<ProviderUpdateResult>;
+}
+
+export interface AgentClientUpdateCheckContext extends AgentClientInstallationContext {
+  /** The version `inspect` reported, as written. Absent when it reported none or there is no `inspect`. */
+  installedVersion?: string;
+}
+
+export interface AgentClientUpdateContext extends AgentClientInstallationContext {
+  report(event: ProviderUpdateReport): void;
+}
+
+/** What the daemon gives a provider's diagnostic report. */
+export interface AgentClientDiagnosticContext {
+  /**
+   * The installation as the provider's Installation row shows it, under the same deadline and
+   * cache. Undefined when the provider does not report its installation.
+   */
+  inspectInstallation(): Promise<ProviderInstallationInspection | undefined>;
 }
 
 export interface AgentClient {
@@ -836,7 +883,13 @@ export interface AgentClient {
    * Returns true if available, false otherwise.
    */
   isAvailable(signal?: AbortSignal): Promise<boolean>;
-  getDiagnostic?(): Promise<{ diagnostic: string }>;
+  getDiagnostic?(context?: AgentClientDiagnosticContext): Promise<{ diagnostic: string }>;
+  /**
+   * Installation links and the installed version. The same contract as plugin providers'
+   * `ProviderRegistration.installation`; built-ins resolve their own launch inside `inspect`.
+   * Never consulted by availability, discovery, or session creation.
+   */
+  readonly installation?: AgentClientInstallation;
   /**
    * Archive a durable native session (best-effort). Runtime release belongs to AgentSession.close().
    * Called when JAgentDesk archives an agent so the provider's own UI reflects the same state.

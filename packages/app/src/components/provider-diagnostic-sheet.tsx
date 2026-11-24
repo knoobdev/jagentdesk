@@ -1,9 +1,11 @@
+import { ExternalLink } from "@/components/ui/external-link";
+import { getAcpProviderCatalog } from "@/hooks/use-acp-provider-catalog";
 import * as Clipboard from "expo-clipboard";
 import { AlertTriangle, Copy, FileText, Plus, RotateCw, Trash2 } from "lucide-react-native";
 import type { TFunction } from "i18next";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Pressable, type PressableStateCallbackType, Text, View } from "react-native";
+import { Pressable, ScrollView, type PressableStateCallbackType, Text, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import {
   AdaptiveModalSheet,
@@ -26,6 +28,8 @@ import { formatTimeAgo } from "@/utils/time";
 import { compareMatchScores, scoreTextFields } from "@/utils/score-match";
 import type { AgentModelDefinition, AgentProvider } from "@jagentdesk/protocol/agent-types";
 import type { ProviderProfileModel } from "@jagentdesk/protocol/provider-config";
+import { ProviderInstallationSection } from "./provider-installation-section";
+import { useProviderInstallation } from "./provider-installation";
 import {
   resolveProviderDiscoveredModels,
   type ProviderDiscoveredModelsCache,
@@ -121,11 +125,22 @@ function CustomModelRow({
   );
 }
 
-function SectionHeader({ title, count, hint }: { title: string; count?: number; hint?: string }) {
+function SectionHeader({
+  title,
+  count,
+  hint,
+  trailing,
+}: {
+  title: string;
+  count?: number;
+  hint?: string;
+  trailing?: React.ReactNode;
+}) {
   return (
     <View style={sheetStyles.sectionHeader}>
       <Text style={settingsStyles.sectionHeaderTitle}>{title}</Text>
       <View style={sheetStyles.sectionHeaderMeta}>
+        {trailing}
         {count !== undefined ? (
           <Text style={settingsStyles.sectionHeaderTitle}>{count}</Text>
         ) : null}
@@ -412,21 +427,17 @@ interface ProviderModalBodyProps {
 interface ProviderSheetFooterInput {
   fetchedAtLabel: string | null;
   isCompact: boolean;
-  modelsRefreshing: boolean;
   t: TFunction;
   onOpenAddSheet: () => void;
   onOpenDiagSheet: () => void;
-  onRefreshModels: () => void;
 }
 
 function renderProviderSheetFooter({
   fetchedAtLabel,
   isCompact,
-  modelsRefreshing,
   t,
   onOpenAddSheet,
   onOpenDiagSheet,
-  onRefreshModels,
 }: ProviderSheetFooterInput) {
   const contentStyle = isCompact ? sheetStyles.compactFooterContent : sheetStyles.footerContent;
   const actionsStyle = isCompact ? sheetStyles.compactFooterActions : sheetStyles.footerActions;
@@ -460,18 +471,6 @@ function renderProviderSheetFooter({
           style={buttonStyle}
         >
           {t("settings.providers.diagnostic.button")}
-        </Button>
-        <Button
-          variant="default"
-          size="sm"
-          leftIcon={modelsRefreshing ? undefined : RotateCw}
-          onPress={onRefreshModels}
-          disabled={modelsRefreshing}
-          style={buttonStyle}
-        >
-          {modelsRefreshing
-            ? t("settings.providers.diagnostic.refreshing")
-            : t("settings.providers.diagnostic.refresh")}
         </Button>
       </View>
     </View>
@@ -534,14 +533,16 @@ function ProviderModalBody(props: ProviderModalBodyProps) {
     <>
       {filteredDiscovered.length > 0 ? (
         <View style={sheetStyles.section}>
-          <SectionHeader
-            title={t("settings.providers.models.discovered")}
-            count={filteredDiscovered.length}
-          />
           <View style={settingsStyles.card}>
-            {filteredDiscovered.map((model) => (
-              <DiscoveredModelRow key={model.id} model={model} />
-            ))}
+            <ScrollView
+              style={sheetStyles.discoveredList}
+              nestedScrollEnabled
+              testID="provider-discovered-models"
+            >
+              {filteredDiscovered.map((model) => (
+                <DiscoveredModelRow key={model.id} model={model} />
+              ))}
+            </ScrollView>
           </View>
         </View>
       ) : null}
@@ -640,9 +641,18 @@ export function ProviderDiagnosticSheet({
     [additionalModels, q],
   );
 
+  const installation = useProviderInstallation({ serverId, provider, visible });
+  const refreshInstallation = installation.refresh;
+  const docsUrl =
+    providerEntry?.docsUrl ??
+    (installation.state.status === "ready"
+      ? installation.state.installation?.installUrl
+      : undefined) ??
+    getAcpProviderCatalog().find((entry) => entry.id === provider)?.installLink;
   const handleRefreshModels = useCallback(() => {
     void refresh([provider]);
-  }, [provider, refresh]);
+    refreshInstallation();
+  }, [provider, refresh, refreshInstallation]);
 
   const handleOpenAddSheet = useCallback(() => setAddSheetOpen(true), []);
   const handleCloseAddSheet = useCallback(() => setAddSheetOpen(false), []);
@@ -679,6 +689,22 @@ export function ProviderDiagnosticSheet({
     [providerLabel, t],
   );
 
+  const modelsRefreshAction = useMemo(
+    () => (
+      <Button
+        size="xs"
+        variant="outline"
+        onPress={handleRefreshModels}
+        loading={modelsRefreshing || installation.refreshing}
+        leftIcon={RotateCw}
+        testID="provider-models-refresh"
+      >
+        {t("settings.providers.diagnostic.refresh")}
+      </Button>
+    ),
+    [handleRefreshModels, modelsRefreshing, installation.refreshing, t],
+  );
+
   return (
     <>
       <AdaptiveModalSheet
@@ -689,14 +715,27 @@ export function ProviderDiagnosticSheet({
         footer={renderProviderSheetFooter({
           fetchedAtLabel,
           isCompact,
-          modelsRefreshing,
           t,
           onOpenAddSheet: handleOpenAddSheet,
           onOpenDiagSheet: handleOpenDiagSheet,
-          onRefreshModels: handleRefreshModels,
         })}
         snapPoints={MAIN_SNAP_POINTS}
       >
+        {docsUrl ? (
+          <View style={sheetStyles.section}>
+            <ExternalLink href={docsUrl} label={"Docs"} testID="provider-docs-link" />
+          </View>
+        ) : null}
+        <ProviderInstallationSection
+          state={installation.state}
+          updates={installation.updates}
+          action={installation.action}
+        />
+        <SectionHeader
+          title={t("settings.providers.models.discovered")}
+          count={discoveredModels.length}
+          trailing={modelsRefreshAction}
+        />
         <ProviderModalBody
           discoveredCount={discoveredModels.length}
           additionalCount={additionalModels.length}
@@ -730,6 +769,7 @@ export function ProviderDiagnosticSheet({
 }
 
 const sheetStyles = StyleSheet.create((theme) => ({
+  discoveredList: { maxHeight: 320 },
   mutedText: {
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,

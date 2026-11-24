@@ -26,6 +26,7 @@ export interface AgentProviderDefinition {
   label: string;
   /** Api providers (spec 34.2) may omit it — the base provider's must not leak in. */
   description?: string;
+  docsUrl?: string;
   enabledByDefault?: boolean;
   defaultModeId: string | null;
   modes: AgentProviderModeDefinition[];

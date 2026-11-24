@@ -284,8 +284,11 @@ export function useAgentFormState(options: UseAgentFormStateOptions = {}): UseAg
     [snapshotEntries],
   );
   const snapshotModelSelectorProviders = useMemo(
-    () => buildSelectableProviderSelectorProviders(snapshotEntries),
-    [snapshotEntries],
+    () =>
+      buildSelectableProviderSelectorProviders(snapshotEntries, {
+        selectedProvider: formState.provider,
+      }),
+    [snapshotEntries, formState.provider],
   );
   const snapshotSelectedEntry = useMemo(
     () =>

@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, type KeyboardEvent } from "react";
 import {
   Pressable,
   type GestureResponderEvent,
@@ -15,6 +15,7 @@ import Animated, {
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { createControlGeometry, switchGeometry } from "@/components/ui/control-geometry";
 import type { Theme } from "@/styles/theme";
+import { isWeb } from "@/constants/platform";
 
 interface SwitchProps {
   value: boolean;
@@ -91,6 +92,16 @@ export function Switch({
   );
 
   const accessibilityState = useMemo(() => ({ checked: value, disabled }), [value, disabled]);
+  // React Native Web handles Enter for a switch, but only handles Space for button roles.
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent) => {
+      if (event.key !== " ") return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!disabled && !event.repeat) onValueChange?.(!value);
+    },
+    [disabled, onValueChange, value],
+  );
   const pressableStyle = useMemo(
     () => [styles.switchControl, disabled ? styles.disabled : null, style],
     [disabled, style],
@@ -98,6 +109,7 @@ export function Switch({
 
   return (
     <Pressable
+      {...(isWeb ? { onKeyDown: handleKeyDown } : {})}
       onPress={handlePress}
       disabled={disabled}
       hitSlop={8}

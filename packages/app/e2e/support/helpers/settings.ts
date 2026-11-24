@@ -31,6 +31,7 @@ const SECTION_LABELS = {
 export type SettingsSection = keyof typeof SECTION_LABELS;
 
 type HostSection =
+  | "voice"
   | "projects"
   | "connections"
   | "pair-device"

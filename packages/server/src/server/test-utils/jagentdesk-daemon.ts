@@ -38,7 +38,8 @@ interface TestJAgentDeskDaemonOptions {
   staticDir?: string;
   cleanup?: boolean;
   openai?: JAgentDeskOpenAIConfig;
-  speech?: JAgentDeskSpeechConfig;
+  // localModelsDir defaults to the local provider's modelsDir, then to a dir under jagentdeskHome.
+  speech?: Omit<JAgentDeskSpeechConfig, "localModelsDir"> & { localModelsDir?: string };
   voiceLlmProvider?: JAgentDeskDaemonConfig["voiceLlmProvider"];
   voiceLlmProviderExplicit?: boolean;
   voiceLlmModel?: string | null;
@@ -204,7 +205,15 @@ async function prepareTestDaemonConfig(
     webUi: options.webUi,
     trustedProxies: options.trustedProxies,
     openai: options.openai,
-    speech: options.speech,
+    speech: options.speech
+      ? {
+          ...options.speech,
+          localModelsDir:
+            options.speech.localModelsDir ??
+            options.speech.local?.modelsDir ??
+            path.join(jagentdeskHome, "models", "local-speech"),
+        }
+      : undefined,
     voiceLlmProvider: options.voiceLlmProvider ?? null,
     voiceLlmProviderExplicit: options.voiceLlmProviderExplicit ?? false,
     voiceLlmModel: options.voiceLlmModel ?? null,
