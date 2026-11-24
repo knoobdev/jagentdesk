@@ -13,6 +13,17 @@ Golden example files:
 - `packages/app/src/schedules/aggregated-schedules.ts` / `hooks/use-schedules.ts` — load-state gating
 - `packages/app/e2e/schedules-*.spec.ts` — the behavioral contract
 
+## Composer inputs
+
+Share one editing session between a composer's dock, editor, and agent commands. Fullscreen changes
+layout while the editor stays mounted; remounting it loses selection, focus intent, and dictation
+state. Draft text replacements are commands from outside the editor. Do not replay the editor's own
+keystrokes as replacements.
+
+Workspace creation belongs to the daemon across route changes and socket disconnects. A draft tab
+observes the creation handed to it and retries the same identity, so mounting a tab cannot create a
+second agent. Keep the ClickUp workspace layout independent of this handoff.
+
 ## The form model
 
 Every non-trivial form gets a **plain TypeScript model** — zero React imports:

@@ -4,23 +4,20 @@ import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
-import {
-  type AgentSnapshotPayload,
-  type CreationSnapshot,
-  type WorkspaceDescriptorPayload,
+import type {
+  AgentSnapshotPayload,
+  CreationSnapshot,
+  WorkspaceDescriptorPayload,
 } from "@jagentdesk/protocol/messages";
 import { CreationService, type CreationInput } from "./index.js";
 
 const silentLogger = pino({ level: "silent" });
-
 const directories: string[] = [];
-
 afterEach(async () => {
   await Promise.all(
     directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })),
   );
 });
-
 function deferred() {
   let resolve!: () => void;
   const promise = new Promise<void>((done) => {
@@ -28,7 +25,6 @@ function deferred() {
   });
   return { promise, resolve };
 }
-
 const workspace: WorkspaceDescriptorPayload = {
   id: "wks_0123456789abcdef",
   projectId: "project",
@@ -44,7 +40,6 @@ const workspace: WorkspaceDescriptorPayload = {
   archivingAt: null,
   scripts: [],
 };
-
 const agent: AgentSnapshotPayload = {
   id: "00000000-0000-4000-8000-000000000001",
   workspaceId: workspace.id,
@@ -73,7 +68,6 @@ const agent: AgentSnapshotPayload = {
   title: "Start once",
   labels: {},
 };
-
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "creation-lifecycle-"));
   directories.push(directory);
@@ -99,7 +93,7 @@ async function fixture() {
       calls.push("agent");
       await onReady(agent);
       calls.push("prompt");
-      return agent;
+      return { agent, initialPromptStarted: true };
     },
   };
   const updates: CreationSnapshot[] = [];
@@ -119,7 +113,7 @@ test("workspace readiness is observable before provider startup and duplicate re
   expect(f.updates[0]).toMatchObject({ workspaceId: workspace.id, agentId: agent.id });
   const duplicate = f.service.create(f.input);
   f.provider.resolve();
-  expect(await first).toMatchObject({ phase: "completed", workspace, agent });
+  expect(await first).toMatchObject({ phase: "completed", error: null, workspace, agent });
   expect(await duplicate).toEqual(await first);
   expect(f.calls).toEqual(["workspace", "agent", "prompt"]);
   expect(await new CreationService(f.directory, silentLogger).create(f.input)).toEqual(await first);
@@ -135,7 +129,7 @@ test("a failed agent startup retries only that stage with the reserved IDs", asy
     expect(readyWorkspace).toEqual(workspace);
     if (attempts === 1) throw new Error("provider unavailable");
     await onReady(agent);
-    return agent;
+    return { agent, initialPromptStarted: true };
   };
   expect(await f.service.create(f.input)).toMatchObject({
     phase: "failed",
@@ -182,7 +176,7 @@ test("conflicting intents and resource IDs cannot start more work", async () => 
     "workspace_id_conflict",
   );
   f.provider.resolve();
-  await first;
+  expect(await first).toMatchObject({ phase: "completed", error: null });
   expect(f.calls).toEqual(["workspace", "agent", "prompt"]);
 });
 
@@ -216,7 +210,7 @@ test("omitted resource IDs are generated once and preserved on replay", async ()
   f.input.createAgent = async (id, createdWorkspace, onReady) => {
     const created = { ...agent, id, workspaceId: createdWorkspace!.id };
     await onReady(created);
-    return created;
+    return { agent: created, initialPromptStarted: true };
   };
   const result = await f.service.create(f.input);
   expect(result.workspaceId).toMatch(/^wks_[a-f0-9]{16}$/);
@@ -237,7 +231,7 @@ test("restart after a committed agent without a prompt completes without recreat
     await onReady(agent);
     // Capture the durable state at the exact milestone a process could stop after.
     await cp(f.directory, recoveredDirectory, { recursive: true });
-    return agent;
+    return { agent, initialPromptStarted: false };
   };
   await f.service.create(f.input);
   const recovered = await new CreationService(recoveredDirectory, silentLogger).create(f.input);

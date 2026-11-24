@@ -1,3 +1,4 @@
+import { WorkspaceSetupObservation } from "./workspace-setup-observation.js";
 import {
   withSkillInvocation,
   formatSystemNotificationPrompt,
@@ -34,7 +35,7 @@ import {
 } from "./session/speech/speech-models-session.js";
 import { UsageSession, type UsageSessionOptions } from "./session/usage/usage-session.js";
 import { builtinPluginWireState } from "@jagentdesk/protocol/builtin-plugins";
-import { CreationService } from "./creation/index.js";
+import { CreationService, type CreatedAgent } from "./creation/index.js";
 import { describeAgentHistoryMatches, rankAgentHistoryCandidates } from "./agent-history-search.js";
 import { builtinPluginForRpc } from "./plugins/builtin/gates.js";
 import { BuiltinPluginError, type BuiltinPluginState } from "./plugins/builtin/state.js";
@@ -69,7 +70,6 @@ import {
   type SessionInboundMessage,
   type SessionOutboundMessage,
   type ScriptStatusUpdateMessage,
-  type GitSetupOptions,
   type StartWorkspaceScriptRequest,
   type WorkspaceScriptListRequest,
   type WorkspaceScriptStartRequest,
@@ -161,10 +161,6 @@ import {
   resolveStoredAgentPayloadUpdatedAt,
   toAgentPayload,
 } from "./agent/agent-projections.js";
-import {
-  appendTimelineItemIfAgentKnown,
-  emitLiveTimelineItemIfAgentKnown,
-} from "./agent/timeline-append.js";
 import { buildAgentForkContextAttachment } from "./agent/activity-curator.js";
 import { buildAgentPrompt } from "./agent/prompt-attachments.js";
 import { type StructuredGenerationDaemonConfig } from "./agent/structured-generation-providers.js";
@@ -348,7 +344,6 @@ import {
 } from "./jagentdesk-worktree-service.js";
 import { WorkspaceAutoName } from "./workspace-auto-name.js";
 import {
-  buildAgentSessionConfig as buildWorktreeAgentSessionConfig,
   createJAgentDeskWorktreeWorkflow as createWorktreeWorkflow,
   type CreateJAgentDeskWorktreeSetupContinuationInput,
   type CreateJAgentDeskWorktreeWorkflowResult,
@@ -371,8 +366,9 @@ import { runGitCommand } from "../utils/run-git-command.js";
 import { CreateAgentLifecycleDispatch } from "./agent/create-agent-lifecycle-dispatch.js";
 import { resolveWorktreeSourceCwd } from "./workspace-source.js";
 import { type MessageReceipts } from "./message-receipts/index.js";
-import { isAbsolute } from "node:path";
+import { isAbsolute, relative } from "node:path";
 import { applyRecordPatch } from "./record-patch.js";
+import { formatWorkspaceAutomationBlockedMessage } from "./workspace-automation-gate.js";
 
 function toolInstallErrorPayload(error: unknown): { code: string; message: string } {
   if (error instanceof ToolInstallError) return { code: error.code, message: error.message };
@@ -529,6 +525,7 @@ interface ResolvedSessionCreateAgentIntent {
   config: AgentSessionConfig;
   intent: CreateAgentIntent;
   createdDirectoryWorkspace: boolean;
+  background: boolean;
 }
 
 type FetchWorkspacesRequestMessage = Extract<
@@ -757,6 +754,7 @@ export interface SessionOptions {
   scriptRuntimeStore?: WorkspaceScriptRuntimeStore;
 
   workspaceSetupSnapshots?: Map<string, WorkspaceSetupSnapshot>;
+  workspaceSetupObservation?: WorkspaceSetupObservation;
 
   workspaceArchiveOperations?: WorkspaceArchiveOperations;
 
@@ -1208,6 +1206,7 @@ export class Session {
   private peakInflightRequests = 0;
 
   private readonly workspaceSetupSnapshots: Map<string, WorkspaceSetupSnapshot>;
+  private readonly workspaceSetupObservation: WorkspaceSetupObservation;
 
   private readonly workspaceArchiveOperations: WorkspaceArchiveOperations;
 
@@ -1374,7 +1373,6 @@ export class Session {
     this.jagentdeskHome = jagentdeskHome;
     this.messageReceipts = options.messageReceipts;
     this.creationService = resolveWorkspaceCreationService(options);
-    this.projectIcons = new ProjectIconReader(jagentdeskHome);
     this.worktreesRoot = worktreesRoot;
     this.serverId = serverId ?? "";
     this.speechModelsSession = new SpeechModelsSession({
@@ -1602,8 +1600,6 @@ export class Session {
         setModel: (agentId, modelId) => agentManager.setAgentModel(agentId, modelId),
         switchProvider: (agentId, provider, modelId) =>
           agentManager.switchAgentProvider(agentId, provider, modelId),
-        setFeature: (agentId, featureId, value) =>
-          agentManager.setAgentFeature(agentId, featureId, value),
         setOptions: (agentId, patch) => agentManager.setAgentOptions(agentId, patch),
         setThinking: (agentId, thinkingOptionId) =>
           agentManager.setAgentThinkingOption(agentId, thinkingOptionId),
@@ -1720,6 +1716,10 @@ export class Session {
     this.serviceProxy = optionalServiceRefs.serviceProxy;
     this.scriptRuntimeStore = optionalServiceRefs.scriptRuntimeStore;
     this.workspaceSetupSnapshots = optionalServiceRefs.workspaceSetupSnapshots;
+    this.workspaceSetupObservation = Session.resolveSetupObservation(
+      options,
+      this.workspaceSetupSnapshots,
+    );
     this.getDaemonTcpPort = optionalServiceRefs.getDaemonTcpPort;
     this.getDaemonTcpHost = optionalServiceRefs.getDaemonTcpHost;
     this.serviceProxyPublicBaseUrl = optionalServiceRefs.serviceProxyPublicBaseUrl;
@@ -1804,6 +1804,13 @@ export class Session {
 
   private initializeBotsSession(service: BotsService | null | undefined): void {
     this.botsSession = service ? new BotsSession(service, (msg) => this.emit(msg)) : null;
+  }
+
+  private static resolveSetupObservation(
+    options: SessionOptions,
+    snapshots: Map<string, WorkspaceSetupSnapshot>,
+  ): WorkspaceSetupObservation {
+    return options.workspaceSetupObservation ?? new WorkspaceSetupObservation(snapshots);
   }
 
   private static resolveOptionalServiceRefs(options: SessionOptions): {
@@ -2995,6 +3002,41 @@ export class Session {
     return this.isPathWithinGuestWorkspace(terminalCwd);
   }
 
+  private async subscribeWorkspaceSetup(
+    request: Extract<SessionInboundMessage, { type: "workspace.setup.subscribe.request" }>,
+  ): Promise<void> {
+    if (!this.delivery.isModern(this.delivery.currentSource))
+      throw new Error("Workspace setup observation requires owned subscriptions");
+    // Resolve persisted blocked state first. Register and read the current cache in one
+    // synchronous turn afterward, so a setup transition during this read cannot be lost.
+    let initial: WorkspaceSetupSnapshot | null = null;
+    await handleWorkspaceSetupStatusRequestMessage(
+      {
+        workspaceSetupSnapshots: this.workspaceSetupObservation,
+        emit: (message) => {
+          if (message.type === "workspace_setup_status_response")
+            initial = message.payload.snapshot;
+        },
+      },
+      { ...request, type: "workspace_setup_status_request" },
+    );
+    let stop: (() => void) | undefined;
+    const owner = this.delivery.begin("workspace-setup", undefined, () => stop?.());
+    stop = this.workspaceSetupObservation.subscribe((workspaceId, snapshot) => {
+      if (workspaceId === request.workspaceId)
+        owner.emit({ type: "workspace_setup_progress", payload: { workspaceId, ...snapshot } });
+    });
+    this.emit({
+      type: "workspace.setup.subscribe.response",
+      payload: {
+        requestId: request.requestId,
+        subscriptionId: owner.responseId,
+        workspaceId: request.workspaceId,
+        snapshot: this.workspaceSetupObservation.get(request.workspaceId) ?? initial,
+      },
+    });
+  }
+
   private async subscribeProviderUpdates(
     request: Extract<
       SessionInboundMessage,
@@ -3021,37 +3063,68 @@ export class Session {
   }
 
   private async dispatchInboundMessage(msg: SessionInboundMessage, source?: object): Promise<void> {
-    const promise =
-      this.dispatchSubscriptionMessage(msg, source) ??
-      this.dispatchVoiceAndControlMessage(msg) ??
-      this.dispatchAgentRewindMessage(msg, source) ??
-      this.dispatchAgentRelationshipMessage(msg) ??
-      this.dispatchAgentTimelineMessage(msg, source) ??
-      this.dispatchHubExecutionMessage(msg) ??
-      this.dispatchCreationMessage(msg, source) ??
-      this.dispatchAgentLifecycleMessage(msg) ??
-      this.dispatchAgentConfigMessage(msg) ??
-      this.dispatchCheckoutMessage(msg) ??
-      this.dispatchWorkspaceLifecycleMessage(msg) ??
-      this.dispatchWorkspaceFileMessage(msg, source) ??
-      this.dispatchProviderMessage(msg) ??
-      this.dispatchOrchestrationSkillsMessage(msg) ??
-      this.dispatchPluginDirectoryMessage(msg) ??
-      this.dispatchPluginMessage(msg) ??
-      this.dispatchTerminalMessage(msg) ??
-      this.dispatchScheduleMessage(msg) ??
-      this.dispatchMiscMessage(msg);
+    // Ordered dispatchers: the first one that recognizes the message returns a
+    // (possibly async) result and the rest are skipped — matching the previous
+    // left-to-right `??` short-circuit chain exactly.
+    const dispatchers: Array<() => Promise<void> | undefined> = [
+      () =>
+        msg.type === "workspace.setup.subscribe.request"
+          ? this.subscribeWorkspaceSetup(msg)
+          : undefined,
+      () =>
+        msg.type === "provider.installation.update.subscribe.request"
+          ? this.subscribeProviderUpdates(msg)
+          : undefined,
+      () => this.speechModelsSession.dispatch(msg),
+      () => this.dispatchVoiceAndControlMessage(msg),
+      () => this.dispatchAgentRewindMessage(msg),
+      () => this.dispatchAgentRelationshipMessage(msg),
+      () => this.dispatchAgentTimelineMessage(msg, source),
+      () => this.dispatchHubExecutionMessage(msg),
+      () => this.dispatchCreationMessage(msg, source),
+      () => this.dispatchMetadataMessage(msg),
+      () => this.dispatchAgentLifecycleMessage(msg),
+      () => this.dispatchOrchestrationMessage(msg),
+      () => this.dispatchSkillsMessage(msg),
+      () => this.dispatchUsageMessage(msg),
+      () => this.dispatchAgentConfigMessage(msg),
+      () => this.dispatchCheckoutMessage(msg),
+      () => this.dispatchWorkspaceRecoveryMessage(msg),
+      () => this.dispatchWorkspaceAndProjectMessage(msg),
+      () => this.dispatchWorkspaceFileMessage(msg, source),
+      () => this.dispatchProviderMessage(msg),
+      () => this.dispatchTerminalMessage(msg, source),
+      () => this.dispatchChatScheduleLoopMessage(msg),
+      () => this.dispatchAutorunMessage(msg),
+      () => this.dispatchSpecModeMessage(msg, source),
+      () => this.dispatchSessionShareMessage(msg),
+      () => this.activityGraphSession?.dispatch(msg),
+      () => this.dispatchClusterMessage(msg),
+      () => this.dispatchDatabaseMessage(msg),
+      () => this.dispatchSshMessage(msg),
+      () => this.dispatchRemoteExecMessage(msg),
+      () => this.dispatchCustomProvidersMessage(msg),
+      () => this.dispatchArgoCdMessage(msg),
+      () => this.dispatchSideloadMessage(msg),
+      () => this.botsSession?.dispatch(msg),
+      () => this.dispatchJiraMessage(msg),
+      () => this.dispatchFigmaMessage(msg),
+      () => this.dispatchDockerMessage(msg),
+      () => this.dispatchSimulatorMessage(msg),
+      () => this.dispatchProxyMessage(msg),
+      () => this.dispatchMigrationMessage(msg),
+      () => this.dispatchBuiltinPluginMessage(msg),
+      () => this.dispatchPluginMessage(msg),
+      () => this.dispatchPluginRpcMessage(msg),
+      () => this.dispatchPluginDirectoryMessage(msg),
+      () => this.dispatchMiscMessage(msg),
+    ];
+    let promise: Promise<void> | undefined;
+    for (const dispatch of dispatchers) {
+      promise = dispatch();
+      if (promise) break;
+    }
     if (promise) await promise;
-  }
-
-  private dispatchWorkspaceLifecycleMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    return (
-      this.dispatchWorkspaceStateMessage(msg) ??
-      this.dispatchWorkspaceLabelMessage(msg) ??
-      this.dispatchWorkspaceSetupMessage(msg) ??
-      this.dispatchMetadataMessage(msg) ??
-      this.dispatchWorkspaceAndProjectMessage(msg)
-    );
   }
 
   private dispatchMetadataMessage(msg: SessionInboundMessage): Promise<void> | undefined {
@@ -3614,6 +3687,8 @@ export class Session {
   /** The per-agent config mutations (mode/model/provider/feature/thinking). */
   private dispatchAgentConfigSessionMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     switch (msg.type) {
+      case "agent.config.apply.request":
+        return this.agentConfigSession.handleAgentConfigApplyRequest(msg);
       case "set_agent_mode_request":
         return this.agentConfigSession.handleSetAgentModeRequest(msg);
       case "set_agent_model_request":
@@ -3982,6 +4057,8 @@ export class Session {
         return this.handleWorkspaceGithubSearchRepositoriesRequest(msg);
       case "project.github.clone.request":
         return this.handleProjectGithubCloneRequest(msg);
+      case "workspace.clear_attention.request":
+        return this.handleWorkspaceClearAttentionRequest(msg);
       case "archive_workspace_request":
         return this.handleArchiveWorkspaceRequest(msg);
       case "project.remove.request":
@@ -6768,8 +6845,8 @@ export class Session {
     try {
       if (
         request.agent &&
-        !this.authorization.allowsPermission("workspace.write") &&
-        !this.authorization.allowsPermission("hub.execute")
+        !isSessionRpcAllowed(this.scopes, "create_agent_request") &&
+        !isSessionRpcAllowed(this.scopes, "hub.execution.agent.create.request")
       ) {
         throw new Error("Session is not authorized to create an agent");
       }
@@ -6874,117 +6951,7 @@ export class Session {
     }
   }
 
-  /**
-   * Handle create agent request
-   */
-  // Idempotency for createAgent: a repeated request carrying the same clientMessageId (double
-  // dispatch, WS resend/reconnect) returns the already-created agent instead of spawning a duplicate.
-  private readonly createdAgentByClientMessageId = new Map<string, string>();
-
-  private readonly createAgentInFlight = new Map<string, Promise<string | null>>();
-
-  private async emitExistingAgentCreated(agentId: string, requestId?: string): Promise<void> {
-    if (!requestId) return;
-    const agent = this.agentManager.getAgent(agentId);
-    if (!agent) return;
-    const agentPayload = await this.buildAgentPayload(agent);
-    this.emit({
-      type: "status",
-      payload: { status: "agent_created", agentId, requestId, agent: agentPayload },
-    });
-  }
-
-  // Returns true (and re-emits the existing agent) if this clientMessageId already produced — or is
-  // producing — an agent, so the caller can skip creating a duplicate.
-  private async reuseExistingCreateAgent(
-    clientMessageId: string,
-    requestId?: string,
-  ): Promise<boolean> {
-    const existingId = this.createdAgentByClientMessageId.get(clientMessageId);
-    if (existingId && this.agentManager.getAgent(existingId)) {
-      await this.emitExistingAgentCreated(existingId, requestId);
-      return true;
-    }
-    const inFlight = this.createAgentInFlight.get(clientMessageId);
-    if (inFlight) {
-      const id = await inFlight.catch(() => null);
-      if (id && this.agentManager.getAgent(id)) {
-        await this.emitExistingAgentCreated(id, requestId);
-        return true;
-      }
-    }
-    return false;
-  }
-
-  // Register an in-flight create for a clientMessageId (no-op when absent); returns its resolver.
-  private beginCreateInFlight(clientMessageId: string | undefined): (id: string | null) => void {
-    if (!clientMessageId) return () => {};
-    let resolveFn: (id: string | null) => void = () => {};
-    this.createAgentInFlight.set(
-      clientMessageId,
-      new Promise<string | null>((r) => {
-        resolveFn = r;
-      }),
-    );
-    return resolveFn;
-  }
-
-  private endCreateInFlight(
-    clientMessageId: string | undefined,
-    resolveInFlight: (id: string | null) => void,
-    createdAgentId: string | null,
-  ): void {
-    if (!clientMessageId) return;
-    resolveInFlight(createdAgentId);
-    this.createAgentInFlight.delete(clientMessageId);
-  }
-
-  private recordCreatedAgent(clientMessageId: string | undefined, agentId: string): void {
-    if (!clientMessageId) return;
-    this.createdAgentByClientMessageId.set(clientMessageId, agentId);
-    if (this.createdAgentByClientMessageId.size > 500) {
-      const oldest = this.createdAgentByClientMessageId.keys().next().value;
-      if (oldest !== undefined) this.createdAgentByClientMessageId.delete(oldest);
-    }
-  }
-
-  private forwardCreatedAgent(agent: ManagedAgent): Promise<void> {
-    return this.agentUpdates.forwardLiveAgent(this.agentManager.getAgent(agent.id) ?? agent);
-  }
-
-  private resolveCallerAgentForBackground(callerAgentId?: string): ManagedAgent | null {
-    return callerAgentId ? (this.agentManager.getAgent(callerAgentId) ?? null) : null;
-  }
-
   private async handleCreateAgentRequest(msg: CreateAgentRequestMessage): Promise<void> {
-    const {
-      config,
-      worktreeName,
-      requestId,
-      initialPrompt,
-      clientMessageId,
-      outputSchema,
-      git,
-      worktree,
-      autoArchive,
-      images,
-      attachments,
-      env,
-    } = msg;
-
-    // De-duplicate by clientMessageId: a repeated create returns the already-created agent.
-    if (clientMessageId && (await this.reuseExistingCreateAgent(clientMessageId, requestId)))
-      return;
-    const resolveInFlight = this.beginCreateInFlight(clientMessageId);
-    this.sessionLogger.info(
-      { cwd: config.cwd, provider: config.provider, worktreeName },
-      `Creating agent in ${config.cwd} (${config.provider})${
-        worktreeName ? ` with worktree ${worktreeName}` : ""
-      }`,
-    );
-
-    let createdWorktreeForCleanup: CreateJAgentDeskWorktreeWorkflowResult | null = null;
-    let createdAgentId: string | null = null;
     try {
       let agent: AgentSnapshotPayload;
       if (msg.idempotencyKey !== undefined) {
@@ -7001,117 +6968,29 @@ export class Session {
         if (!record) throw new Error("Previously created agent no longer exists");
         agent = this.buildStoredAgentPayload(record);
       } else {
-        agent = await this.createSessionAgent(msg);
+        ({ agent } = await this.createSessionAgent(msg));
       }
-      const trimmedPrompt = initialPrompt?.trim();
-      const { provisionalTitle } = resolveCreateAgentTitles({
-        configTitle: config.title,
-        initialPrompt: trimmedPrompt,
-      });
-
-      const firstAgentContext: FirstAgentContext = {
-        ...(trimmedPrompt ? { prompt: trimmedPrompt } : {}),
-        ...(attachments && attachments.length > 0 ? { attachments } : {}),
-      };
-      const callerAgent = this.resolveCallerAgentForBackground(msg.callerAgentId);
-      const background = inheritAgentBackground(msg.background, callerAgent);
-      const workspacePromptTitle = resolveFirstAgentPromptTitle(firstAgentContext);
-      const createdWorktree = await this.createAgentLifecycleDispatch.createWorktreeForRequest({
-        cwd: config.cwd,
-        target: worktree,
-        firstAgentContext,
-        hasLegacyGitOptions: Boolean(git),
-      });
-      createdWorktreeForCleanup = createdWorktree;
-      const resolvedIntent = await this.resolveSessionCreateAgentIntent({
-        request: msg,
-        createdWorktree,
-        workspacePromptTitle,
-      });
-      const resolvedCwd = resolve(resolvedIntent.config.cwd);
-      if (!(await this.filesystem.isDirectory(resolvedCwd))) {
-        throw new Error(`Working directory does not exist or is not a directory: ${resolvedCwd}`);
-      }
-
-      const { snapshot, liveSnapshot } = await createAgentCommand(
-        {
-          agentManager: this.agentManager,
-          agentStorage: this.agentStorage,
-          logger: this.sessionLogger,
-          jagentdeskHome: this.jagentdeskHome,
-          worktreesRoot: this.worktreesRoot,
-          providerSnapshotManager: this.providerSnapshotManager,
+      this.emit({
+        type: "status",
+        payload: {
+          status: "agent_created",
+          agentId: agent.id,
+          requestId: msg.requestId,
+          agent,
         },
-        {
-          kind: "session",
-          config: resolvedIntent.config,
-          workspaceId: resolvedIntent.intent.workspaceId,
-          worktreeName,
-          background,
-          initialPrompt,
-          clientMessageId,
-          outputSchema,
-          images,
-          attachments,
-          git,
-          labels: resolvedIntent.intent.labels,
-          env,
-          provisionalTitle,
-          firstAgentContext,
-          buildSessionConfig: (sessionConfig, gitOptions, legacyWorktreeName, ctx) =>
-            this.buildAgentSessionConfig(sessionConfig, gitOptions, legacyWorktreeName, ctx),
-        },
-      );
-      createdAgentId = snapshot.id;
-      this.recordCreatedAgent(clientMessageId, snapshot.id);
-      // `snapshot` predates the initial prompt; subscribers keep the last state they receive.
-      await this.forwardCreatedAgent(liveSnapshot);
-      if (resolvedIntent.createdDirectoryWorkspace && trimmedPrompt) {
-        this.workspaceAutoName.scheduleForDirectory(
-          {
-            workspaceId: resolvedIntent.intent.workspaceId,
-            cwd: resolvedIntent.config.cwd,
-            firstAgentContext,
-          },
-          { currentSelection: this.getFocusedAgentSelectionForCwd(resolvedIntent.config.cwd) },
-        );
-      }
-      this.createAgentLifecycleDispatch.registerAutoArchiveIfRequested({
-        autoArchive,
-        agentId: snapshot.id,
-        createdWorktree,
       });
-      if (requestId) {
-        const agentPayload = await this.buildAgentPayload(liveSnapshot);
-        this.emit({
-          type: "status",
-          payload: {
-            status: "agent_created",
-            agentId: liveSnapshot.id,
-            requestId,
-            agent: agentPayload,
-          },
-        });
-      }
-
-      this.sessionLogger.info(
-        { agentId: snapshot.id, provider: snapshot.provider },
-        `Created agent ${snapshot.id} (${snapshot.provider})`,
-      );
     } catch (error) {
       const wireError = error instanceof SessionRequestError ? error : toWorktreeWireError(error);
       this.sessionLogger.error({ err: error }, "Failed to create agent");
-      if (requestId) {
-        this.emit({
-          type: "status",
-          payload: {
-            status: "agent_create_failed",
-            requestId,
-            error: wireError.message,
-            errorCode: wireError.code,
-          },
-        });
-      }
+      this.emit({
+        type: "status",
+        payload: {
+          status: "agent_create_failed",
+          requestId: msg.requestId,
+          error: wireError.message,
+          errorCode: wireError.code,
+        },
+      });
       this.emit({
         type: "activity_log",
         payload: {
@@ -7121,8 +7000,6 @@ export class Session {
           content: `Failed to create agent: ${wireError.message}`,
         },
       });
-    } finally {
-      this.endCreateInFlight(clientMessageId, resolveInFlight, createdAgentId);
     }
   }
 
@@ -7130,7 +7007,7 @@ export class Session {
     msg: CreateAgentRequestMessage,
     agentId?: string,
     onAgentReady?: (agent: AgentSnapshotPayload) => Promise<void>,
-  ): Promise<AgentSnapshotPayload> {
+  ): Promise<CreatedAgent> {
     const {
       config,
       worktreeName,
@@ -7297,6 +7174,7 @@ export class Session {
     return {
       config,
       intent,
+      background: inheritAgentBackground(request.background, callerAgent),
       createdDirectoryWorkspace: !createdWorktree && !request.workspaceId && !callerAgent,
     };
   }
@@ -7679,54 +7557,6 @@ export class Session {
         source,
       );
     }
-  }
-
-  private async buildAgentSessionConfig(
-    config: AgentSessionConfig,
-    gitOptions?: GitSetupOptions,
-    legacyWorktreeName?: string,
-    firstAgentContext?: FirstAgentContext,
-  ): Promise<{
-    sessionConfig: AgentSessionConfig;
-    setupContinuation?: CreateJAgentDeskWorktreeWorkflowResult["setupContinuation"];
-    createdWorkspaceId?: string;
-  }> {
-    return buildWorktreeAgentSessionConfig(
-      {
-        jagentdeskHome: this.jagentdeskHome,
-        worktreesRoot: this.worktreesRoot,
-        sessionLogger: this.sessionLogger,
-        workspaceGitService: this.workspaceGitService,
-        createJAgentDeskWorktree: (input, serviceOptions) =>
-          this.createJAgentDeskWorktreeWorkflow(input, {
-            ...serviceOptions,
-            setupContinuation: {
-              kind: "agent",
-              terminalManager: this.terminalManager,
-              appendTimelineItem: ({ agentId, item }) =>
-                appendTimelineItemIfAgentKnown({
-                  agentManager: this.agentManager,
-                  agentId,
-                  item,
-                }),
-              emitLiveTimelineItem: ({ agentId, item }) =>
-                emitLiveTimelineItemIfAgentKnown({
-                  agentManager: this.agentManager,
-                  agentId,
-                  item,
-                }),
-              logger: this.sessionLogger,
-            },
-          }),
-        checkoutExistingBranch: (cwd, branch) =>
-          this.gitMutation.checkoutExistingBranch(cwd, branch),
-        createBranchFromBase: (params) => this.gitMutation.createBranchFromBase(params),
-      },
-      config,
-      gitOptions,
-      legacyWorktreeName,
-      firstAgentContext,
-    );
   }
 
   private isPathWithinRoot(rootPath: string, candidatePath: string): boolean {
@@ -9434,80 +9264,12 @@ export class Session {
     // and must not rerun hooks or compare their potentially changing output.
     if (this.pluginRuntime) {
       const { type, requestId, ...input } = request;
-      const transformed = await this.pluginRuntime.before("workspace.create", input);
+      const transformed = await this.pluginRuntime.before("workspace.create.before", input);
       creationRequest = { ...transformed, type, requestId };
     }
     return creationRequest.source.kind === "directory"
       ? this.handleWorkspaceCreateLocal(creationRequest, workspaceId)
       : this.handleWorkspaceCreateWorktree(creationRequest, workspaceId);
-  }
-
-  private async handleWorkspaceCreateRequest(
-    request: Extract<SessionInboundMessage, { type: "workspace.create.request" }>,
-  ): Promise<void> {
-    try {
-      const provision = async (workspaceId?: string) => {
-        if (this.pluginRuntime?.before) {
-          const { type, requestId, ...input } = request;
-          request = {
-            ...(await this.pluginRuntime.before("workspace.create.before", input)),
-            type,
-            requestId,
-          };
-        }
-        return request.source.kind === "directory"
-          ? this.handleWorkspaceCreateLocal(request, workspaceId)
-          : this.handleWorkspaceCreateWorktree(request, workspaceId);
-      };
-      let workspace: WorkspaceDescriptorPayload | undefined;
-      if (request.idempotencyKey) {
-        const { requestId: _requestId, idempotencyKey, ...fingerprint } = request;
-        const creation = await this.creationService.create({
-          kind: "workspace",
-          key: idempotencyKey,
-          request: fingerprint,
-          hasAgent: false,
-          hasPrompt: false,
-          exists: async (_kind, id) => (await this.workspaceRegistry.get(id)) !== null,
-          provision: async (id) => ({ workspace: await provision(id) }),
-        });
-        if (creation.error || !creation.workspace)
-          throw new Error(creation.error ?? "Workspace creation failed");
-        workspace = creation.workspace;
-      } else {
-        // COMPAT(workspaceRequestReceipts): added in v0.9.59, remove after 2027-05-24.
-        workspace = await provision();
-      }
-      this.emit({
-        type: "workspace.create.response",
-        payload: {
-          requestId: request.requestId,
-          workspace,
-          setupTerminalId: null,
-          error: null,
-        },
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to create workspace";
-      this.sessionLogger.error(
-        { err: error, sourceKind: request.source.kind, requestId: request.requestId },
-        "Failed to create workspace",
-      );
-      const errorCode =
-        error instanceof Error && "code" in error && typeof error.code === "string"
-          ? error.code
-          : undefined;
-      this.emit({
-        type: "workspace.create.response",
-        payload: {
-          requestId: request.requestId,
-          workspace: null,
-          setupTerminalId: null,
-          error: message,
-          errorCode,
-        },
-      });
-    }
   }
 
   private async resolveCreationCaller(
@@ -9524,10 +9286,6 @@ export class Session {
       workspaceId: caller.workspaceId,
       background: caller.background,
     };
-  }
-
-  private async callerWorkspaceForBackground(callerAgentId?: string): Promise<string | undefined> {
-    return (await this.resolveCreationCaller(callerAgentId))?.workspaceId;
   }
 
   private async handleWorkspaceCreateLocal(
@@ -9550,7 +9308,12 @@ export class Session {
       cwd,
       explicitTitle ?? promptTitle,
       request.source.projectId,
-      { expectsInitialAgent: Boolean(request.firstAgentContext), workspaceId },
+      {
+        expectsInitialAgent: Boolean(request.firstAgentContext),
+        workspaceId,
+        metadata: request.metadata,
+        ...(await this.workspaceBackgroundIntent(request.background, request.callerAgentId)),
+      },
     );
     await this.syncWorkspaceGitObserverForWorkspace(workspace);
     const descriptor = await this.describeWorkspaceRecord(workspace);
@@ -11099,6 +10862,7 @@ export class Session {
 
     try {
       const agentId = resolved.agentId;
+      await this.prepareAgentMessage(agentId, msg.text);
       if (!msg.sourceAgentId && msg.activeTurnBehavior === "queue")
         throw new Error('activeTurnBehavior "queue" needs an agent sender');
 
@@ -11119,22 +10883,38 @@ export class Session {
       );
       if (this.queueAgentMessage(msg, agentId, prompt)) return;
 
-      let dispatchResult: PromptDispatchResult;
+      let dispatchResult: PromptDispatchResult | undefined;
       try {
-        dispatchResult = await sendPromptToAgent({
-          agentManager: this.agentManager,
-          agentStorage: this.agentStorage,
-          agentId,
-          prompt,
-          messageId: msg.messageId,
-          source: msg.sourceAgentId
-            ? { kind: "agent-message", agentId: msg.sourceAgentId }
-            : undefined,
-          activeTurnBehavior: msg.activeTurnBehavior === "steer" ? "steer" : "interrupt",
-          skillIds: this.messageSkillIds(msg.skillIds, Boolean(specPhase)),
-          skillInvocation: this.skillsStorage,
-          logger: this.sessionLogger,
-        });
+        const send = async () => {
+          dispatchResult = await sendPromptToAgent({
+            agentManager: this.agentManager,
+            agentStorage: this.agentStorage,
+            agentId,
+            prompt,
+            messageId: msg.messageId,
+            source: msg.sourceAgentId
+              ? { kind: "agent-message", agentId: msg.sourceAgentId }
+              : undefined,
+            activeTurnBehavior: msg.activeTurnBehavior === "steer" ? "steer" : "interrupt",
+            skillIds: this.messageSkillIds(msg.skillIds, Boolean(specPhase)),
+            skillInvocation: this.skillsStorage,
+            logger: this.sessionLogger,
+          });
+        };
+        if (msg.messageId)
+          await this.messageReceipts.send({
+            agentId,
+            messageId: msg.messageId,
+            request: {
+              text: msg.text,
+              images: msg.images,
+              attachments: msg.attachments,
+              skillIds: msg.skillIds,
+              activeTurnBehavior: msg.activeTurnBehavior,
+            },
+            send,
+          });
+        else await send();
       } catch (error) {
         if (specPhase) await this.specMode?.service.revertPhaseStart(agentId, specPhase.phase);
         const message = error instanceof Error ? error.message : String(error);
@@ -11153,7 +10933,7 @@ export class Session {
 
       // A steered message was injected into the already-running turn — there is
       // no new run to wait for, so ack immediately (like an out-of-band prompt).
-      if (dispatchResult.disposition !== "turn_started") {
+      if (!dispatchResult || dispatchResult.disposition !== "turn_started") {
         this.emit({
           type: "send_agent_message_response",
           payload: {
@@ -11344,7 +11124,16 @@ export class Session {
     );
   }
 
+  private publishWorkspaceSetupProgress(msg: SessionOutboundMessage): void {
+    // COMPAT(workspaceSetupObservation): added in v0.9.59, remove global setup delivery after 2027-05-25 when the ClickUp setup panel adopts owned details.
+    if (msg.type === "workspace_setup_progress") {
+      const { workspaceId, ...snapshot } = msg.payload;
+      this.workspaceSetupObservation.publish(workspaceId, snapshot);
+    }
+  }
+
   private emit(msg: SessionOutboundMessage): void {
+    this.publishWorkspaceSetupProgress(msg);
     const event = msg.type === "status" ? `status.${msg.payload.status}` : msg.type;
     if (
       SessionEventSubscriptionSchema.safeParse(event).success &&
@@ -11482,6 +11271,29 @@ export class Session {
     this.workspaceFilesSession.dispose();
     this.clusterSession.dispose();
     this.argocdSession.dispose();
+  }
+
+  private validatePublicAgentWorkspaceIntent(request: CreateAgentRequestMessage): void {
+    if (request.git !== undefined || request.worktreeName !== undefined) {
+      throw new Error(
+        "Legacy git/worktreeName agent placement was removed. Use createWorkspace({ source, agent, idempotencyKey }) to create a workspace with an agent, or create the workspace first and pass workspaceId.",
+      );
+    }
+    if (request.internal)
+      throw new Error(
+        "Public internal agents were removed; create a background workspace instead.",
+      );
+  }
+
+  private async workspaceBackgroundIntent(
+    background: boolean | undefined,
+    callerAgentId: string | undefined,
+  ): Promise<{ background?: boolean; callerWorkspaceId?: string }> {
+    const caller = await this.resolveCreationCaller(callerAgentId);
+    return {
+      background: inheritWorkspaceBackground(background, caller),
+      callerWorkspaceId: caller?.workspaceId,
+    };
   }
 }
 

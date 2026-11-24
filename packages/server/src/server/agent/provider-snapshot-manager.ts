@@ -569,7 +569,7 @@ export class ProviderSnapshotManager {
     return this.requireProvider(provider).isCreateConfigUnattended({
       modeId,
       config: { provider, cwd, modeId },
-      features: [],
+      controls: [],
       availableModes: entry.modes ?? [],
     });
   }

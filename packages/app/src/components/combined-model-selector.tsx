@@ -3,18 +3,23 @@ import { Pressable, Text, View, type PressableStateCallbackType } from "react-na
 import { useTranslation } from "react-i18next";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { AgentProvider } from "@jagentdesk/protocol/agent-types";
+import type { AgentProfilePicker, AgentProfileSeed } from "@/agent-profiles";
 import { ComboboxTrigger } from "@/components/ui/combobox-trigger";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { Combobox, type ComboboxOption, type ComboboxProps } from "@/components/ui/combobox";
 import { ModelBrowser, ModelProviderGlyph, useModelBrowser } from "@/components/model-browser";
+import { resolveModelBrowserScrolling } from "@/components/model-browser-view";
+import { useIsCompactFormFactor } from "@/constants/layout";
 import { isNative, isWeb } from "@/constants/platform";
 import type { ProviderSelectorProvider } from "@/provider-selection/provider-selection";
 import { ICON_SIZE, type Theme } from "@/styles/theme";
-
-import { useKeyboardToggle, type KeyboardToggleAction } from "@/hooks/use-keyboard-toggle";
+import {
+  TOOLBAR_GLYPH_SIZES,
+  toolbarContentSlot,
+  type ToolbarGlyph,
+} from "@/components/ui/control-geometry";
 
 const EMPTY_COMBOBOX_OPTIONS: ComboboxOption[] = [];
-const EMPTY_FAVORITE_KEYS = new Set<string>();
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
 
 const foregroundMutedMapping = (theme: Theme) => ({
@@ -29,8 +34,11 @@ interface CombinedModelSelectorProps {
   selectedModel: string;
   onSelect: (provider: AgentProvider, modelId: string) => void;
   isLoading: boolean;
-  favoriteKeys?: Set<string>;
-  onToggleFavorite?: (provider: string, modelId: string) => void;
+  profiles?: AgentProfilePicker | null;
+  onApplyProfile?: (profileId: string) => void;
+  onEditProfiles?: () => void;
+  onCreateProfile?: (seed: AgentProfileSeed) => void;
+  onEditProfile?: (profileId: string) => void;
   renderTrigger?: (input: {
     selectedModelLabel: string;
     onPress: () => void;
@@ -39,7 +47,6 @@ interface CombinedModelSelectorProps {
     hovered: boolean;
     pressed: boolean;
   }) => React.ReactNode;
-  toggleAction?: KeyboardToggleAction;
   onOpen?: () => void;
   onClose?: () => void;
   onRetryProvider?: (provider: AgentProvider) => void;
@@ -58,7 +65,7 @@ interface CombinedModelSelectorProps {
    */
   triggerFill?: boolean;
   toolbar?: {
-    glyphSize: number;
+    glyph: ToolbarGlyph;
     showCaret: boolean;
   };
 }
@@ -69,10 +76,12 @@ export function CombinedModelSelector({
   selectedModel,
   onSelect,
   isLoading,
-  favoriteKeys = EMPTY_FAVORITE_KEYS,
-  onToggleFavorite,
+  profiles = null,
+  onApplyProfile,
+  onEditProfiles,
+  onCreateProfile,
+  onEditProfile,
   renderTrigger,
-  toggleAction,
   onOpen,
   onClose,
   onRetryProvider,
@@ -85,6 +94,8 @@ export function CombinedModelSelector({
   toolbar,
 }: CombinedModelSelectorProps) {
   const { t } = useTranslation();
+  const isCompact = useIsCompactFormFactor();
+  const modelBrowserScrolling = resolveModelBrowserScrolling({ isNative, isCompact });
   const anchorRef = useRef<View>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [isContentReady, setIsContentReady] = useState(isWeb);
@@ -93,7 +104,7 @@ export function CombinedModelSelector({
     selectedProvider,
     selectedModel,
     isLoading,
-    favoriteKeys,
+    profiles,
     serverId,
   });
   const { prepareToOpen, reset } = browser;
@@ -136,14 +147,6 @@ export function CombinedModelSelector({
     handleOpenChange(!isOpen);
   }, [handleOpenChange, isOpen]);
 
-  useKeyboardToggle({
-    action: toggleAction,
-    disabled,
-    open: isOpen,
-    searchFocused: browser.isSearchFocused,
-    onToggle: handleTriggerPress,
-  });
-
   const triggerStyle = useCallback(
     ({ pressed, hovered }: PressableStateCallbackType & { hovered?: boolean }) => {
       if (triggerFill) {
@@ -165,13 +168,46 @@ export function CombinedModelSelector({
     [disabled, isOpen, renderTrigger, triggerFill],
   );
 
+  const handleApplyProfile = useCallback(
+    (profileId: string) => {
+      onApplyProfile?.(profileId);
+      handleOpenChange(false);
+    },
+    [handleOpenChange, onApplyProfile],
+  );
+
+  const handleEditProfiles = useCallback(() => {
+    handleOpenChange(false);
+    onEditProfiles?.();
+  }, [handleOpenChange, onEditProfiles]);
+
+  const handleCreateProfile = useCallback(
+    (seed: AgentProfileSeed) => {
+      handleOpenChange(false);
+      onCreateProfile?.(seed);
+    },
+    [handleOpenChange, onCreateProfile],
+  );
+
+  const handleEditProfile = useCallback(
+    (profileId: string) => {
+      handleOpenChange(false);
+      onEditProfile?.(profileId);
+    },
+    [handleOpenChange, onEditProfile],
+  );
+
   const selectorBody = isContentReady ? (
     <ModelBrowser
       state={browser}
       onSelect={handleSelect}
-      onToggleFavorite={onToggleFavorite}
+      onApplyProfile={handleApplyProfile}
+      onEditProfiles={onEditProfiles ? handleEditProfiles : undefined}
+      onCreateProfile={onCreateProfile ? handleCreateProfile : undefined}
+      onEditProfile={onEditProfile ? handleEditProfile : undefined}
       onRetryProvider={onRetryProvider}
       isRetryingProvider={isRetryingProvider}
+      scrolling={modelBrowserScrolling}
     />
   ) : (
     <View style={styles.sheetLoadingState}>
@@ -221,10 +257,13 @@ export function CombinedModelSelector({
           chevron={toolbar?.showCaret === false ? null : undefined}
         >
           {selectedProvider.trim().length > 0 ? (
-            <View style={toolbar?.glyphSize === 20 ? styles.toolbarGlyph20 : styles.toolbarGlyph16}>
+            <View style={toolbar ? styles.toolbarGlyph : styles.glyph}>
               <ModelProviderGlyph
                 provider={selectedProvider}
-                size={toolbar?.glyphSize ?? ICON_SIZE.md}
+                serverId={serverId}
+                size={toolbar?.glyph.size ?? ICON_SIZE.md}
+                strokeWidth={toolbar?.glyph.strokeWidth}
+                tone={toolbar?.glyph.tone}
               />
             </View>
           ) : null}
@@ -242,7 +281,9 @@ export function CombinedModelSelector({
         anchorRef={anchorRef}
         desktopPlacement={desktopPlacement}
         desktopMinWidth={desktopMinWidth}
+        desktopLockWidth
         desktopFixedHeight={browser.desktopFixedHeight}
+        desktopChildrenScrollEnabled={false}
         header={browser.header}
         mobileChildrenScrollEnabled={!browser.isProviderView || !isNative}
         mobileChildrenContentContainerStyle={styles.mobileBrowserContent}
@@ -258,31 +299,30 @@ const styles = StyleSheet.create((theme) => ({
     paddingHorizontal: 0,
   },
   trigger: {
-    height: 28,
     minWidth: 0,
     flexShrink: 1,
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "transparent",
     gap: theme.spacing[1],
-    paddingHorizontal: theme.spacing[2],
-    borderRadius: theme.borderRadius["2xl"],
+    ...toolbarContentSlot(theme.spacing[2]),
+    borderRadius: theme.borderRadius.full,
   },
   triggerHovered: {
     backgroundColor: theme.colors.surface2,
   },
-  toolbarGlyph16: {
-    width: 16,
-    height: 16,
+  glyph: {
+    width: ICON_SIZE.md,
+    height: ICON_SIZE.md,
     flexShrink: 0,
   },
-  toolbarGlyph20: {
-    width: 20,
-    height: 20,
+  toolbarGlyph: {
+    width: TOOLBAR_GLYPH_SIZES.label,
+    height: TOOLBAR_GLYPH_SIZES.label,
     flexShrink: 0,
   },
   triggerPressed: {
-    backgroundColor: theme.colors.surface0,
+    backgroundColor: theme.colors.surface2,
   },
   triggerDisabled: {
     opacity: 0.5,
@@ -291,12 +331,14 @@ const styles = StyleSheet.create((theme) => ({
     minWidth: 0,
     flexShrink: 1,
     color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.sm,
+    fontSize: theme.fontSize.base,
     fontWeight: theme.fontWeight.normal,
   },
+  // A custom trigger, such as a form field, owns its own box: none of the toolbar slot applies.
   customTriggerWrapper: {
     paddingHorizontal: 0,
     paddingVertical: 0,
+    marginHorizontal: 0,
     height: "auto",
   },
   triggerFill: {
@@ -315,6 +357,6 @@ const styles = StyleSheet.create((theme) => ({
   },
   sheetLoadingText: {
     color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.sm,
+    fontSize: theme.fontSize.base,
   },
 }));

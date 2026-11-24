@@ -182,6 +182,7 @@ export function describeHookAgent(agent: {
     cwd: agent.cwd,
     title: agent.title ?? null,
     metadata: agent.metadata,
+    background: agent.background ?? false,
   };
 }
 
@@ -232,14 +233,18 @@ export async function validateBeforeResult<Name extends keyof PluginWireBeforeRe
     const next = beforeSchemas["agent.open.before"].parse(result);
     if (
       (next.background !== undefined && previous.background !== next.background) ||
-      previous.agentId !== next.agentId ||
-      previous.workspaceId !== next.workspaceId ||
-      previous.provider !== next.provider ||
-      previous.cwd !== next.cwd ||
-      previous.reason !== next.reason ||
-      previous.purpose !== next.purpose ||
-      previous.title !== next.title ||
-      !isDeepStrictEqual(previous.labels, next.labels) ||
+      (
+        [
+          "agentId",
+          "workspaceId",
+          "provider",
+          "cwd",
+          "reason",
+          "purpose",
+          "title",
+          "labels",
+        ] as const
+      ).some((key) => !isDeepStrictEqual(previous[key], next[key])) ||
       (next.metadata !== undefined && !isDeepStrictEqual(previous.metadata, next.metadata))
     ) {
       throw new Error(

@@ -1343,11 +1343,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
     const { t } = useTranslation();
     const isCompact = useIsCompactFormFactor();
     const { height: windowHeight } = useWindowDimensions();
-    const commandSession = useAgentCommandEditingSession();
-    const editingSession = useComposerEditingSession(
-      inputMode,
-      props.editingSession ?? commandSession ?? undefined,
-    );
+    const editingSession = useMessageInputEditingSession(inputMode, props.editingSession);
     const isFullscreen = useComposerFullscreen(editingSession);
     const [renderedLines, setRenderedLines] = useState(1);
     const maxInputHeight = resolveMaxInputHeight(windowHeight, isCompact);
@@ -2455,7 +2451,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     flexShrink: 1,
     width: "100%",
     color: theme.colors.foreground,
-    fontSize: theme.fontSize.content,
+    fontSize: theme.fontSize.base,
     fontWeight: theme.fontWeight.normal,
     // No lineHeight on native. React Native applies it as a span over the text, and an
     // empty trailing line is laid out from the font's own metrics on some devices, so
@@ -2463,7 +2459,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     // line box is the same for every line. Web keeps the CSS value.
     ...(isWeb
       ? ({
-          lineHeight: theme.fontSize.content * 1.4,
+          lineHeight: theme.fontSize.base * 1.4,
           outlineStyle: "none",
           outlineWidth: 0,
           outlineColor: "transparent",
@@ -2599,3 +2595,11 @@ const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
 const iconForegroundMapping = (theme: Theme) => ({ color: theme.colors.foreground });
 const iconForegroundMutedMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const iconAccentForegroundMapping = (theme: Theme) => ({ color: theme.colors.accentForeground });
+
+function useMessageInputEditingSession(
+  inputMode: ComposerInputMode,
+  provided: ComposerEditingSession | undefined,
+) {
+  const commandSession = useAgentCommandEditingSession();
+  return useComposerEditingSession(inputMode, provided ?? commandSession ?? undefined);
+}

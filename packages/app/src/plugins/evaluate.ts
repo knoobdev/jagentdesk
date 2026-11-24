@@ -30,6 +30,8 @@ import * as React from "react";
 import { type ComponentType } from "react";
 import * as ReactJsxRuntime from "react/jsx-runtime";
 import * as ReactNative from "react-native";
+// Plugin bundles receive TanStack hooks as part of their public SDK.
+// oxlint-disable-next-line no-restricted-imports
 import * as ReactQuery from "@tanstack/react-query";
 import * as Zod from "zod";
 import { type EvaluatedPlugin } from "./types";

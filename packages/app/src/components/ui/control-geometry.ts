@@ -271,8 +271,6 @@ const CONTROL_SIZES = {
 /** Pointer-sized header controls run tighter than `sm` so they fit the 36pt header. */
 const POINTER_HEADER_CONTROL_HEIGHT = 26;
 
-const SEGMENTED_INSET = 2;
-
 /**
  * The height of every button, field, and segmented control of a size. Exported so a row that
  * hosts one of those controls can size itself from the same numbers instead of guessing a
@@ -493,7 +491,7 @@ export const ALERT_ICON_SIZE: Record<AlertSize, number> = {
   lg: ICON_SIZE.lg,
 };
 
-function createAlertGeometry(theme: Theme) {
+export function createAlertGeometry(theme: Theme) {
   function alertSize(input: {
     size: AlertSize;
     fontSize: number;

@@ -3560,7 +3560,6 @@ class OpenCodeAgentSession implements AgentSession {
       events,
       url: serverUrl ?? "",
       release: releaseServer,
-      environment: this.harnessEnvironment,
     };
     this.connectServer = connectServer ?? null;
     this.sessionId = sessionId;

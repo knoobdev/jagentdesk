@@ -54,7 +54,11 @@ import {
   navigateToWorkspace,
   useLastWorkspaceSelection,
 } from "@/stores/navigation-active-workspace-store";
-import { normalizeWorkspaceDescriptor, type WorkspaceDescriptor } from "@/stores/session-store";
+import {
+  useSessionStore,
+  normalizeWorkspaceDescriptor,
+  type WorkspaceDescriptor,
+} from "@/stores/session-store";
 import { useWorkspace } from "@/stores/session-store-hooks";
 import { buildNewWorkspaceDraftKey, generateDraftId } from "@/stores/draft-keys";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
@@ -189,6 +193,7 @@ function buildFirstAgentContext(input: {
 }
 
 interface NewWorkspaceScreenProps {
+  startWithOrchestration?: boolean;
   serverId: string;
   sourceDirectory?: string;
   projectId?: string;
@@ -254,6 +259,7 @@ function normalizeBranchDetails(
 type SubmitOutcome = "navigated" | "background";
 
 interface SubmitDraftInput {
+  openOrchestration?: boolean;
   clearConsumedDraft: () => void;
   agentCreation?: {
     result: Promise<AgentSnapshotPayload>;
@@ -361,6 +367,7 @@ async function createMultiplicityWorkspace(input: {
 }
 
 interface CreateChatAgentInput {
+  openOrchestration?: boolean;
   payload: MessagePayload;
   composerState: ReturnType<typeof useAgentInputDraft>["composerState"];
   forkDraftSetup?: PendingWorkspaceDraftSetup | null;
@@ -497,9 +504,7 @@ async function createWorkspaceChatAgent(input: CreateChatAgentInput): Promise<Su
         navigated = true;
         if (!input.isStillOnCreateScreen()) return;
         const workspace = normalizeWorkspaceDescriptor(snapshot.workspace);
-        getHostRuntimeStore().acceptWorkspaceSnapshots(serverId, [
-          { ...workspace, status: "running" },
-        ]);
+        useSessionStore.getState().mergeWorkspaces(serverId, [{ ...workspace, status: "running" }]);
         const initialSetup = buildWorkspaceDraftSetupForCreatedWorkspace({
           forkDraftSetup: input.forkDraftSetup,
           workspaceDirectory: workspace.workspaceDirectory,
@@ -507,6 +512,7 @@ async function createWorkspaceChatAgent(input: CreateChatAgentInput): Promise<Su
           composerState,
         });
         outcome = submitWorkspaceDraft({
+          openOrchestration: input.openOrchestration,
           clearConsumedDraft,
           draftKey: input.draftKey,
           draftContextScopeKey: input.draftContextScopeKey,
@@ -663,6 +669,7 @@ function submitWorkspaceDraft(input: SubmitDraftInput): SubmitOutcome {
     serverId,
     workspaceId,
     target: submission.target,
+    openIntent: input.openOrchestration ? "orchestration" : undefined,
   });
   return "navigated";
 }
@@ -871,6 +878,7 @@ export function NewWorkspaceScreen({
   projectId,
   displayName: displayNameProp,
   draftId,
+  startWithOrchestration = false,
 }: NewWorkspaceScreenProps) {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
@@ -880,7 +888,7 @@ export function NewWorkspaceScreen({
   const { leaveFullscreen } = composerEditing;
   const mergeWorkspaces = useCallback(
     (targetServerId: string, workspaces: Iterable<WorkspaceDescriptor>) => {
-      getHostRuntimeStore().acceptWorkspaceSnapshots(targetServerId, Array.from(workspaces));
+      useSessionStore.getState().mergeWorkspaces(targetServerId, Array.from(workspaces));
     },
     [],
   );
@@ -1330,7 +1338,11 @@ export function NewWorkspaceScreen({
               }
               outcome = "navigated";
               leaveFullscreen();
-              navigateToWorkspace({ serverId: targetServerId, workspaceId });
+              navigateToWorkspace({
+                serverId: targetServerId,
+                workspaceId,
+                openIntent: startWithOrchestration ? "orchestration" : undefined,
+              });
             },
           });
           // Nothing navigated, so this screen may still be mounted under another route. Release
@@ -1343,6 +1355,7 @@ export function NewWorkspaceScreen({
 
         setPendingAction("chat");
         const outcome = await runCreateChatAgent({
+          openOrchestration: startWithOrchestration,
           payload,
           composerState,
           forkDraftSetup,
@@ -1386,6 +1399,7 @@ export function NewWorkspaceScreen({
       t,
       toast,
       updateFormPreferences,
+      startWithOrchestration,
       withConnectedClient,
     ],
   );
@@ -1714,7 +1728,9 @@ function NewWorkspaceLayout({
   children: ReactNode;
 }) {
   // In the header on compact layouts, under the composer otherwise.
-  const importSessionButton = <ImportSessionButton compact={isCompact} onPress={onImportSession} />;
+  const importSessionButton = (
+    <ImportSessionButton placement="bottom" compact={isCompact} onPress={onImportSession} />
+  );
   // Compact has no title: the fields name themselves. The free space above pushes them down onto
   // the composer, where the thumb is.
   const setupFields = isCompact ? (

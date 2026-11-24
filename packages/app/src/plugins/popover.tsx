@@ -39,7 +39,7 @@ export function PluginEnvironmentProvider({
 
 type PluginPopoverSurfaceProps = Pick<
   MenuSurfaceProps,
-  "children" | "pages" | "sheetTitle" | "sheetTrailing" | "side" | "align" | "offset" | "testID"
+  "children" | "pages" | "sheetTitle" | "side" | "align" | "offset" | "testID"
 >;
 
 /**

@@ -34,6 +34,7 @@ export interface HubExecutionAgentCreateInput {
   modeId?: string;
 
   thinkingOptionId?: string;
+  providerOptions?: import("@jagentdesk/protocol/agent-types").ProviderOptions;
 
   env?: Record<string, string>;
 
@@ -214,6 +215,7 @@ export class DaemonExecutions implements HubExecutionAgents {
         workspaceId: input.workspaceId,
         mode: input.modeId,
         thinking: input.thinkingOptionId,
+        providerOptions: input.providerOptions,
         env: input.env,
         ...(input.mcpServers ? { config: { mcpServers: input.mcpServers } } : {}),
         worktree: toCreateAgentWorktree(input.worktree),

@@ -83,7 +83,13 @@ export interface WorkspaceProvisioningService {
     cwd: string,
     title?: string | null,
     projectId?: string,
-    context?: { expectsInitialAgent?: boolean; workspaceId?: string },
+    context?: {
+      expectsInitialAgent?: boolean;
+      workspaceId?: string;
+      metadata?: Record<string, JsonValue>;
+      background?: boolean;
+      callerWorkspaceId?: string;
+    },
   ): Promise<PersistedWorkspaceRecord>;
 
   createWorkspaceForWorktree(
@@ -248,7 +254,13 @@ export function createWorkspaceProvisioningService(deps: {
     cwd: string,
     title?: string | null,
     projectId?: string,
-    context?: { expectsInitialAgent?: boolean; workspaceId?: string },
+    context?: {
+      expectsInitialAgent?: boolean;
+      workspaceId?: string;
+      metadata?: Record<string, JsonValue>;
+      background?: boolean;
+      callerWorkspaceId?: string;
+    },
   ): Promise<PersistedWorkspaceRecord> {
     const normalizedCwd = resolve(cwd);
     const checkout = await workspaceGitService.getCheckout(normalizedCwd);
@@ -259,6 +271,8 @@ export function createWorkspaceProvisioningService(deps: {
     const timestamp = new Date().toISOString();
     const workspace = createPersistedWorkspaceRecord({
       workspaceId: context?.workspaceId ?? generateWorkspaceId(),
+      metadata: context?.metadata,
+      background: await resolveBackground(context),
       projectId: project.projectId,
       ...initialWorkspacePlacement({ source: "checkout", cwd: normalizedCwd, checkout }),
       title: title?.trim() || null,
@@ -266,7 +280,7 @@ export function createWorkspaceProvisioningService(deps: {
       updatedAt: timestamp,
     });
     await workspaceRegistry.upsert(workspace, context);
-    deps.lifecycle?.emit("workspace.created", { workspace: describeHookWorkspace(workspace) });
+    deps.lifecycle?.emit("workspace.create.after", { workspace: describeHookWorkspace(workspace) });
     return workspace;
   }
 

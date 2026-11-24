@@ -13,6 +13,7 @@ function registry() {
       const api = createJAgentDeskApi(client);
       return {
         openScreen() {},
+        composers: () => [],
         playAudio: async () => {},
         hosts: createPluginHosts(
           {

@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  buildFavoriteModelKey,
-  isFavoriteModel,
-  mergeProviderPreferences,
-  toggleFavoriteModel,
-} from "./use-form-preferences";
+import { mergeProviderPreferences } from "./use-form-preferences";
 
 describe("mergeProviderPreferences", () => {
   it("stores the selected model for a provider", () => {
@@ -68,7 +63,7 @@ describe("mergeProviderPreferences", () => {
           providerPreferences: {
             codex: {
               model: "gpt-5.4",
-              featureValues: {
+              options: {
                 fast_mode: true,
               },
             },
@@ -76,7 +71,7 @@ describe("mergeProviderPreferences", () => {
         },
         provider: "codex",
         updates: {
-          featureValues: {
+          options: {
             plan_mode: true,
           },
         },
@@ -86,101 +81,12 @@ describe("mergeProviderPreferences", () => {
       providerPreferences: {
         codex: {
           model: "gpt-5.4",
-          featureValues: {
+          options: {
             fast_mode: true,
             plan_mode: true,
           },
         },
       },
     });
-  });
-});
-
-describe("favorite model preferences", () => {
-  it("builds a stable favorite key from provider and model", () => {
-    expect(buildFavoriteModelKey({ provider: "claude", modelId: "sonnet-4.6" })).toBe(
-      "claude:sonnet-4.6",
-    );
-  });
-
-  it("adds a model to favorites without dropping other preferences", () => {
-    expect(
-      toggleFavoriteModel({
-        preferences: {
-          provider: "claude",
-          providerPreferences: {
-            claude: {
-              model: "claude-sonnet-4-6",
-            },
-          },
-        },
-        provider: "codex",
-        modelId: "gpt-5.4",
-      }),
-    ).toEqual({
-      provider: "claude",
-      providerPreferences: {
-        claude: {
-          model: "claude-sonnet-4-6",
-        },
-      },
-      favoriteModels: [
-        {
-          provider: "codex",
-          modelId: "gpt-5.4",
-        },
-      ],
-    });
-  });
-
-  it("removes a model from favorites when toggled again", () => {
-    expect(
-      toggleFavoriteModel({
-        preferences: {
-          favoriteModels: [
-            {
-              provider: "codex",
-              modelId: "gpt-5.4",
-            },
-          ],
-        },
-        provider: "codex",
-        modelId: "gpt-5.4",
-      }),
-    ).toEqual({
-      favoriteModels: [],
-    });
-  });
-
-  it("reports whether a model is favorited", () => {
-    expect(
-      isFavoriteModel({
-        preferences: {
-          favoriteModels: [
-            {
-              provider: "codex",
-              modelId: "gpt-5.4",
-            },
-          ],
-        },
-        provider: "codex",
-        modelId: "gpt-5.4",
-      }),
-    ).toBe(true);
-
-    expect(
-      isFavoriteModel({
-        preferences: {
-          favoriteModels: [
-            {
-              provider: "codex",
-              modelId: "gpt-5.4",
-            },
-          ],
-        },
-        provider: "claude",
-        modelId: "sonnet-4.6",
-      }),
-    ).toBe(false);
   });
 });

@@ -75,6 +75,8 @@ export type EnsureWorkspaceForCreate = (
 
 export interface CreateAgentFromSessionInput {
   kind: "session";
+  agentId?: string;
+  source?: AgentPromptSource;
 
   onAgentReady?: (agent: ManagedAgent) => Promise<void>;
 
@@ -109,7 +111,7 @@ export interface CreateAgentFromSessionInput {
 
   firstAgentContext: FirstAgentContext;
 
-  buildSessionConfig: (
+  buildSessionConfig?: (
     config: AgentSessionConfig,
     gitOptions?: GitSetupOptions,
     legacyWorktreeName?: string,
@@ -250,7 +252,7 @@ export async function createAgentCommand(
 
   const snapshot = await dependencies.agentManager.createAgent(
     resolved.config,
-    undefined,
+    input.kind === "session" ? input.agentId : undefined,
     resolved.createOptions,
   );
 
@@ -313,12 +315,14 @@ async function resolveSessionCreateAgent(
     sessionConfig: builtSessionConfig,
     setupContinuation,
     createdWorkspaceId,
-  } = await input.buildSessionConfig(
-    foldFeatureValues(input.config),
-    input.git,
-    input.worktreeName,
-    input.firstAgentContext,
-  );
+  }: CreateAgentSessionWorktreeResult = input.buildSessionConfig
+    ? await input.buildSessionConfig(
+        foldFeatureValues(input.config),
+        input.git,
+        input.worktreeName,
+        input.firstAgentContext,
+      )
+    : { sessionConfig: foldFeatureValues(input.config) };
   // Validate the requested mode against the provider's modes for the resolved
   // cwd. The app remembers mode preferences globally, so a saved mode can be
   // stale for a workspace whose provider config no longer defines it — reject
@@ -359,6 +363,7 @@ async function resolveSessionCreateAgent(
 
   return {
     config: sessionConfig,
+    source: input.source,
     createOptions: {
       labels: input.labels,
       metadata: input.metadata,

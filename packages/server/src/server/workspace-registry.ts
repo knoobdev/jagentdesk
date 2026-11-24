@@ -39,7 +39,15 @@ const PersistedProjectRecordSchema = z.object({
   archivedAt: z.string().nullable(),
 });
 
+const UntrustedWorkspaceSourceSchema = z.object({
+  kind: z.literal("change_request"),
+  forge: z.string(),
+  number: z.number().int().positive(),
+  headRepository: z.string(),
+});
+
 const PersistedWorkspaceRecordSchema = z.object({
+  untrustedSource: UntrustedWorkspaceSourceSchema.optional(),
   workspaceId: z.string(),
   projectId: z.string(),
   cwd: z.string(),
@@ -95,7 +103,6 @@ const PersistedWorkspaceRecordSchema = z.object({
   labels: z.array(z.string()).optional(),
   // Plugin-owned data. JAgentDesk stores it and never reads a key.
   metadata: z.record(z.string(), z.custom<JsonValue>()).default({}),
-  untrustedSource: UntrustedWorkspaceSourceSchema.optional(),
   // Public discovery visibility. Contents retain their ordinary lifecycle.
   background: z.boolean().optional().default(false),
 });
@@ -562,7 +569,6 @@ export function createPersistedWorkspaceRecord(input: {
   pinnedAt?: string | null;
   labels?: string[];
   metadata?: Record<string, JsonValue>;
-  untrustedSource?: UntrustedWorkspaceSource;
   background?: boolean;
 }): PersistedWorkspaceRecord {
   const { background, ...rest } = input;

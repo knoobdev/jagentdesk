@@ -1,8 +1,4 @@
-import {
-  Modal as NativeModal,
-  type ModalProps,
-  type ModalProps as NativeModalProps,
-} from "react-native";
+import { Modal as NativeModal, type ModalProps as NativeModalProps } from "react-native";
 import { useDismissibleOverlay } from "@/components/ui/overlay-dismissal";
 
 // React Native defaults iPhone modals to portrait even when the app supports rotation.

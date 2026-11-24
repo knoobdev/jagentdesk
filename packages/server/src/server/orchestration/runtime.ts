@@ -424,7 +424,7 @@ export class OrchestrationRuntime {
         cwd,
         requestedMode: undefined,
         unattended: true,
-        featureValues: undefined,
+        providerOptions: undefined,
         parent: null,
       });
       const mode = resolved.modeId;

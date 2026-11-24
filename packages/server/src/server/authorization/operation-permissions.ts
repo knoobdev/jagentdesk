@@ -360,6 +360,7 @@ const INBOUND_PERMISSION = {
   "workspace.script.start.request": "workspace.write",
   "workspace.script.stop.request": "workspace.write",
   "workspace.title.set.request": "workspace.manage",
+  "workspace.setup.subscribe.request": "workspace.read",
   workspace_setup_status_request: "workspace.read",
   write_project_config_request: "workspace.write",
   // --- JAgentDesk feature operations (browser/cluster/database/skills/orchestration/
@@ -1101,6 +1102,7 @@ const OUTBOUND_PERMISSION = {
   "workspace.script.stop.response": "workspace.write",
   "workspace.title.set.response": "workspace.manage",
   workspace_setup_progress: "workspace.read",
+  "workspace.setup.subscribe.response": "workspace.read",
   workspace_setup_status_response: "workspace.read",
   workspace_update: "workspace.read",
   write_project_config_response: "workspace.write",

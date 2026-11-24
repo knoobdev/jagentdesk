@@ -35,13 +35,22 @@ export function ProjectIcon({
       iconDataUri={iconDataUri}
       initial={placeholderLabel.charAt(0).toUpperCase() || "?"}
       projectViewKey={projectViewKey}
-      size={ICON_SIZE.md}
+      imageStyle={styles.projectImage}
+      fallbackStyle={styles.projectFallback}
       textStyle={styles.fallbackText}
     />
   );
 }
 
 const styles = StyleSheet.create((theme) => ({
+  projectImage: { width: ICON_SIZE.md, height: ICON_SIZE.md, borderRadius: 4 },
+  projectFallback: {
+    width: ICON_SIZE.md,
+    height: ICON_SIZE.md,
+    borderRadius: 4,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   fallbackText: {
     fontSize: PROJECT_ICON_FALLBACK_FONT_SIZE,
     fontWeight: theme.fontWeight.semibold,

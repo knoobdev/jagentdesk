@@ -5,7 +5,7 @@ import { Composer } from "@/composer";
 import { useAgentInputDraft } from "@/composer/draft/input-draft";
 import { useDraftAgentCreateFlow } from "@/composer/draft/create-flow";
 import { buildDraftStoreKey, generateDraftId } from "@/stores/draft-keys";
-import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
+import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { encodeImages } from "@/utils/encode-images";
 import { isWeb } from "@/constants/platform";
 import { type AgentSnapshotPayload, type ForgeRepoRef } from "@jagentdesk/protocol/messages";
@@ -123,10 +123,8 @@ export function ForgeAssistantDraft({
   onCreated: (input: { agentId: string; workspaceId: string | null }) => void;
 }) {
   const client = useHostRuntimeClient(serverId);
-  const isConnected = useHostRuntimeIsConnected(serverId);
   const draftId = useMemo(() => generateDraftId(), []);
   const tabId = "forge-assistant-draft";
-  const onlineServerIds = useMemo(() => (isConnected ? [serverId] : []), [isConnected, serverId]);
   const draftStoreKey = useMemo(
     () => buildDraftStoreKey({ serverId, agentId: tabId, draftId }),
     [serverId, tabId, draftId],
@@ -173,7 +171,7 @@ export function ForgeAssistantDraft({
         ),
         model: composerState?.effectiveModelId || undefined,
         thinkingOptionId: composerState?.effectiveThinkingOptionId || undefined,
-        featureValues: composerState?.featureValues,
+        featureValues: composerState?.providerOptions,
         images: imagesData,
         attachments: Array.isArray(attachments) ? attachments : undefined,
       });

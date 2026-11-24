@@ -1,3 +1,4 @@
+import type { Theme } from "@/styles/theme";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -1035,13 +1036,15 @@ export const AgentControls = memo(function AgentControls({
   );
   const agentModelSelectorProviders = useMemo(() => {
     if (snapshotSelectedEntry) {
-      return buildSelectableProviderSelectorProviders([snapshotSelectedEntry]);
+      return buildSelectableProviderSelectorProviders([snapshotSelectedEntry], {
+        selectedProvider: agent?.provider ?? null,
+      });
     }
     return buildProviderSelectorProviders({
       providerDefinitions: agentProviderDefinitions,
       modelsByProvider: agentProviderModels,
     });
-  }, [agentProviderDefinitions, agentProviderModels, snapshotSelectedEntry]);
+  }, [agentProviderDefinitions, agentProviderModels, snapshotSelectedEntry, agent?.provider]);
 
   const modelSelection = resolveAgentModelSelection({
     models,
@@ -1493,12 +1496,14 @@ const styles = StyleSheet.create((theme) => ({
   },
 }));
 
-const ThemedSettingsIcon = withUnistyles(
-  ({
-    tone: _tone,
-    ...props
-  }: React.ComponentProps<typeof Settings2> & {
-    tone: Parameters<typeof toolbarGlyphColor>[1];
-  }) => <Settings2 {...props} />,
-  (theme, props) => ({ color: toolbarGlyphColor(theme, props.tone) }),
-);
+const ThemedSettingsGlyph = withUnistyles(Settings2);
+function ThemedSettingsIcon({
+  tone,
+  ...props
+}: React.ComponentProps<typeof Settings2> & { tone: Parameters<typeof toolbarGlyphColor>[1] }) {
+  const mapping = useCallback(
+    (theme: Theme) => ({ color: toolbarGlyphColor(theme, tone) }),
+    [tone],
+  );
+  return <ThemedSettingsGlyph {...props} uniProps={mapping} />;
+}

@@ -17,6 +17,7 @@ import { useStore } from "zustand";
 
 export interface ProviderIconProps {
   size: number;
+  strokeWidth?: number;
   color: string;
 }
 

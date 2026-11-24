@@ -7,7 +7,7 @@ import { Composer } from "@/composer";
 import { useAgentInputDraft } from "@/composer/draft/input-draft";
 import { useDraftAgentCreateFlow } from "@/composer/draft/create-flow";
 import { buildDraftStoreKey, generateDraftId } from "@/stores/draft-keys";
-import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
+import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { encodeImages } from "@/utils/encode-images";
 import { isWeb } from "@/constants/platform";
 import { buildSimSystemPrompt, simChatTitle } from "@/components/sim-ask-agent";
@@ -79,10 +79,8 @@ export function SimDraftChat({
   onCreated: (input: { serverId: string; agentId: string; workspaceId: string | null }) => void;
 }) {
   const client = useHostRuntimeClient(serverId);
-  const isConnected = useHostRuntimeIsConnected(serverId);
   const draftId = useMemo(() => generateDraftId(), []);
   const tabId = `simfleet-draft-${serverId}`;
-  const onlineServerIds = useMemo(() => (isConnected ? [serverId] : []), [isConnected, serverId]);
   const draftStoreKey = useMemo(
     () => buildDraftStoreKey({ serverId, agentId: tabId, draftId }),
     [serverId, tabId, draftId],
@@ -131,7 +129,7 @@ export function SimDraftChat({
         ),
         model: composerState?.effectiveModelId || undefined,
         thinkingOptionId: composerState?.effectiveThinkingOptionId || undefined,
-        featureValues: composerState?.featureValues,
+        featureValues: composerState?.providerOptions,
         images: imagesData,
         attachments: Array.isArray(attachments) ? attachments : undefined,
       });

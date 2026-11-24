@@ -510,7 +510,6 @@ export const FONT_SIZE = {
   code: 12,
   sm: 14,
   base: 16,
-  content: 16,
   lg: 18,
   xl: 20,
   "2xl": 22,

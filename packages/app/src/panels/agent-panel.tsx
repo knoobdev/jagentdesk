@@ -8,7 +8,7 @@ import {
   type AgentScreenViewState,
   useAgentScreenStateMachine,
 } from "@/hooks/use-agent-screen-state-machine";
-import { KeyboardTranslateView, useKeyboardShiftStyle } from "@/keyboard/shift";
+import { useKeyboardShiftStyle } from "@/keyboard/shift";
 import { AgentCommandsProvider } from "@/agent-commands";
 import { ComposerEditingSession, useComposerFullscreen } from "@/composer/editing-session";
 import { ParentAgentCallout, ParentAgentPill, useParentAgentId } from "@/subagents/parent";
@@ -1143,40 +1143,7 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
       agentId,
     }),
   });
-  // Stabilize the agentInputDraft object identity so that memo(AgentComposerSection) can bail out
-  // when only toast state changes (which does not affect any draft field).
-  const {
-    text,
-    setText,
-    attachments,
-    setAttachments,
-    clear,
-    isHydrated,
-    attachmentFocusRequestId,
-    composerState,
-  } = rawAgentInputDraft;
-  const agentInputDraft = useMemo(
-    (): AgentInputDraft => ({
-      text,
-      setText,
-      attachments,
-      setAttachments,
-      clear,
-      isHydrated,
-      attachmentFocusRequestId,
-      composerState,
-    }),
-    [
-      text,
-      setText,
-      attachments,
-      setAttachments,
-      clear,
-      isHydrated,
-      attachmentFocusRequestId,
-      composerState,
-    ],
-  );
+  const agentInputDraft = rawAgentInputDraft;
   const getRewindComposerText = useCallback(
     () => composerEditingSession.getText(agentInputDraft.textSource.getSnapshot()),
     [composerEditingSession, agentInputDraft.textSource],
@@ -1267,22 +1234,21 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
       </>
     </ComposerDock>
   );
+  const sharingHeader = isGuestShareMode() ? null : (
+    <View style={styles.shareHeader}>
+      <BuiltinPluginGate serverId={serverId} id="activity-graph">
+        <ActivityGraphToggle agentId={agentId} serverId={serverId} />
+      </BuiltinPluginGate>
+      <BuiltinPluginGate serverId={serverId} id="session-share">
+        <SessionShareControl agentId={agentId} serverId={serverId} />
+      </BuiltinPluginGate>
+    </View>
+  );
   const chatSurface = (
-    <OverlayDismissalScope>
-      <FileDropZone style={styles.container} disabled={isArchivingCurrentAgent}>
-        {isGuestShareMode() ? null : (
-          <View style={styles.shareHeader}>
-            <BuiltinPluginGate serverId={serverId} id="activity-graph">
-              <ActivityGraphToggle agentId={agentId} serverId={serverId} />
-            </BuiltinPluginGate>
-            <BuiltinPluginGate serverId={serverId} id="session-share">
-              <SessionShareControl agentId={agentId} serverId={serverId} />
-            </BuiltinPluginGate>
-          </View>
-        )}
-        {dock}
-      </FileDropZone>
-    </OverlayDismissalScope>
+    <AgentChatSurface disabled={isArchivingCurrentAgent}>
+      {sharingHeader}
+      {dock}
+    </AgentChatSurface>
   );
   const archivingOverlay = isArchivingCurrentAgent ? (
     <View style={styles.archivingOverlay} testID="agent-archiving-overlay">
@@ -1291,12 +1257,11 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
       <Text style={styles.archivingSubtitle}>{t("agentPanel.states.archivingSubtitle")}</Text>
     </View>
   ) : null;
-  const graphSurface = (
-    <ActivityGraphLayout serverId={serverId} agentId={agentId} streamViewRef={streamViewRef}>
-      {chatSurface}
-
-      {archivingOverlay}
-    </ActivityGraphLayout>
+  const graphSurface = React.createElement(
+    ActivityGraphLayout,
+    { serverId, agentId, streamViewRef },
+    chatSurface,
+    archivingOverlay,
   );
 
   return (
@@ -1337,7 +1302,7 @@ function ActivityGraphLayout({
   serverId: string;
   agentId: string;
   streamViewRef: React.RefObject<AgentStreamViewHandle | null>;
-  children: React.ReactNode;
+  children?: React.ReactNode;
 }) {
   const isCompact = useIsCompactFormFactor();
   const { open } = useActivityGraphOpen(serverId, agentId);
@@ -1733,7 +1698,7 @@ function ActiveAgentComposer({
   const inputAreaStyle = useMemo(() => [animatedStaticStyles.inputAreaWrapper], []);
 
   return (
-    <KeyboardTranslateView style={inputAreaStyle} onLayout={onInputAreaLayout}>
+    <View style={inputAreaStyle} onLayout={onInputAreaLayout}>
       {isSupervisorThread ? (
         <OrchestrationLeadPlanCard serverId={serverId} workspaceId={workspaceId} />
       ) : null}
@@ -1783,7 +1748,7 @@ function ActiveAgentComposer({
           topContent={specModeDock}
         />
       )}
-    </KeyboardTranslateView>
+    </View>
   );
 }
 
@@ -1868,6 +1833,8 @@ const animatedStaticStyles = RNStyleSheet.create({
   },
   inputAreaWrapper: {
     width: "100%",
+    flexShrink: 1,
+    flexGrow: 1,
   },
   panelContainer: {
     flex: 1,
@@ -2010,3 +1977,19 @@ const styles = StyleSheet.create((theme) => ({
     textAlign: "center",
   },
 }));
+
+function AgentChatSurface({
+  disabled,
+  children,
+}: {
+  disabled: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <OverlayDismissalScope>
+      <FileDropZone style={styles.container} disabled={disabled}>
+        {children}
+      </FileDropZone>
+    </OverlayDismissalScope>
+  );
+}

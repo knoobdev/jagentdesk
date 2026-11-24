@@ -1,4 +1,5 @@
-import { useCallback, useMemo } from "react";
+import { replaceProviderSnapshotIcons } from "@/data/provider-icons";
+import { useCallback, useEffect, useMemo } from "react";
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { type AgentProvider, type ProviderSnapshotEntry } from "@jagentdesk/protocol/agent-types";
@@ -122,6 +123,11 @@ export function useProvidersSnapshot(
     }),
     enabled: Boolean(enabled && supportsSnapshot && serverId && client && isConnected),
   });
+
+  useEffect(() => {
+    if (serverId && snapshotQuery.data)
+      replaceProviderSnapshotIcons(serverId, snapshotQuery.data.entries);
+  }, [serverId, snapshotQuery.data]);
 
   const refreshMutation = useMutation({
     mutationFn: async (providers?: AgentProvider[]) => {

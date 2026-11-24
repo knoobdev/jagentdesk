@@ -5,6 +5,7 @@ import { type AgentProvider } from "@jagentdesk/protocol/agent-types";
 import { type AgentProviderNotice } from "../../agent/agent-sdk-types.js";
 import { type SessionInboundMessage, type SessionOutboundMessage } from "../../messages.js";
 import { type ProviderOptionsPatch } from "../../agent/option-controls.js";
+import { type AgentConfigApply } from "@jagentdesk/protocol/messages";
 
 /**
  * The four agent-config response messages share one payload shape; deriving the
@@ -239,5 +240,20 @@ export class AgentConfigSession {
         error: getErrorMessageOr(error, failureText),
       });
     }
+  }
+
+  handleAgentConfigApplyRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.config.apply.request" }>,
+  ): Promise<void> {
+    const { agentId, config, requestId } = msg;
+    return this.applyConfigChange({
+      agentId,
+      requestId,
+      logLabel: "agent.config.apply.request",
+      logFields: { agentId, requestId, config },
+      failureText: "Failed to apply agent config",
+      run: () => this.applyBundle(agentId, config),
+      emitResponse: (payload) => this.host.emit({ type: "agent.config.apply.response", payload }),
+    });
   }
 }

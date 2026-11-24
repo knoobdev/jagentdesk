@@ -62,7 +62,7 @@ export function toPluginComposer(input: {
         {
           pluginId: plugin.id,
           sourceId,
-          sourceTitle: plugin.i18n.resolve(source.title, plugin.locale),
+          sourceTitle: plugin.translations?.resolve(source.title) ?? source.title,
           sourceIcon: source.icon,
         },
         ownCopy(item),

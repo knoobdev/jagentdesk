@@ -3,7 +3,6 @@ import { type ProviderSnapshotEntry } from "@jagentdesk/protocol/agent-types";
 import { providersSnapshotQuery } from "@/data/providers-snapshot";
 import { replicaQueryOptions } from "@/data/query";
 import { queryClient as singletonQueryClient } from "@/data/query-client";
-import { type ProviderSnapshotCache } from "@/data/provider-snapshot-cache";
 import {
   resolveAgentModelSelection,
   resolveProviderSnapshotEntry,
@@ -46,7 +45,6 @@ export interface AgentComposer extends ComposerModel {
 
 interface AgentComposerDeps {
   queryClient: QueryClient;
-  cache?: ProviderSnapshotCache;
   /** The last watcher or mounted composer let go, so the composer may be releasable. */
   onUnheld?: () => void;
   /** Brings the agent's composer on screen, wherever the user is. */
@@ -116,7 +114,6 @@ export function createAgentComposer(
         cwd,
         client,
         queryClient: deps.queryClient,
-        cache: deps.cache,
       }),
     );
   }

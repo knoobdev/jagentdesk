@@ -224,6 +224,8 @@ function buildRunOutput(params: {
 
 type ScheduleAgentManager = Pick<
   AgentManager,
+  | "setDaemonBackgroundWork"
+  | "removeDaemonBackgroundWork"
   | "createAgent"
   | "getAgent"
   | "getRegisteredProviderIds"

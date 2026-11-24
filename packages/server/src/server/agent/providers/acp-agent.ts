@@ -65,7 +65,6 @@ import {
   type AgentCapabilityFlags,
   type AgentClient,
   type AgentCreateConfigUnattendedInput,
-  type AgentFeature,
   type AgentLaunchContext,
   type AgentMetadata,
   type AgentMode,
@@ -1255,7 +1254,6 @@ export class ACPAgentClient implements AgentClient {
 
     this.assertProvider(config);
     const probe = await this.spawnProcess(PROBE_ENV);
-    let probeSessionId: string | null = null;
     try {
       const response = await this.runACPRequest(() =>
         probe.connection.newSession({
@@ -1263,7 +1261,6 @@ export class ACPAgentClient implements AgentClient {
           mcpServers: [],
         }),
       );
-      probeSessionId = response.sessionId;
       const transformed = this.transformSessionResponse(response);
       return {
         controls: [
@@ -1277,31 +1274,6 @@ export class ACPAgentClient implements AgentClient {
           ...options,
         },
       };
-    } finally {
-      await this.closeProbe(probe, probeSessionId);
-    }
-  }
-
-  async listFeatures(config: AgentSessionConfig): Promise<AgentFeature[]> {
-    const autoAcceptFeature = buildACPAutoAcceptFeature(config);
-    if (this.configFeatureOptions.length === 0) {
-      return [autoAcceptFeature];
-    }
-
-    this.assertProvider(config);
-    const probe = await this.spawnProcess(PROBE_ENV);
-    try {
-      const response = await this.runACPRequest(() =>
-        probe.connection.newSession({
-          cwd: config.cwd,
-          mcpServers: [],
-        }),
-      );
-      const transformed = this.transformSessionResponse(response);
-      return [
-        autoAcceptFeature,
-        ...deriveFeaturesFromACP(transformed.configOptions, this.configFeatureOptions),
-      ];
     } finally {
       await this.closeProbe(probe);
     }

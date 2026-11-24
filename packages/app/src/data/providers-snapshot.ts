@@ -1,3 +1,6 @@
+import { replaceProviderSnapshotIcons } from "./provider-icons";
+import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
+import type { QueryClient } from "@tanstack/react-query";
 import { type AgentProvider } from "@jagentdesk/protocol/agent-types";
 import { normalizeWorkspacePath } from "@/utils/workspace-identity";
 
@@ -41,24 +44,19 @@ export function isProvidersSnapshotHomeScope(cwd?: string | null): boolean {
 export function providersSnapshotQuery(input: {
   serverId: string;
   cwd?: string | null;
-  client: () => SnapshotClient;
+  client: () => Pick<DaemonClient, "getProvidersSnapshot">;
   queryClient?: QueryClient;
-  cache?: ProviderSnapshotCache;
 }) {
   const cwd = normalizeProvidersSnapshotCwd(input.cwd);
   return {
     queryKey: providersSnapshotQueryKey(input.serverId, cwd),
-    // The content-hash cache already owns catalog and model identity.
-    structuralSharing: false as const,
     pushEvent: "providers_snapshot_update",
-    queryFn: ({ signal }: { signal: AbortSignal }) =>
-      fetchProvidersSnapshot({
-        client: input.client(),
-        serverId: input.serverId,
-        cwd,
-        queryClient: input.queryClient,
-        cache: input.cache,
-        signal,
-      }),
+    queryFn: async () => {
+      const snapshot = await input
+        .client()
+        .getProvidersSnapshot(providersSnapshotRequestOptions({ cwd }));
+      replaceProviderSnapshotIcons(input.serverId, snapshot.entries);
+      return snapshot;
+    },
   };
 }

@@ -36,7 +36,7 @@ const AGENT_DEFAULTS: Agent = {
   title: "Agent",
   cwd: "/tmp/project",
   model: null,
-  features: undefined,
+  controls: undefined,
   thinkingOptionId: undefined,
   requiresAttention: false,
   attentionReason: null,

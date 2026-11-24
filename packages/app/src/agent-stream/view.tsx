@@ -260,6 +260,10 @@ const clickUpStreamStyles = StyleSheet.create((theme) => ({
   agentBody: { paddingLeft: CLICKUP_MESSAGE_INDENT },
 }));
 
+function canShowChatOutline(historyReady: boolean, supported: boolean, enabled: boolean): boolean {
+  return historyReady && supported && enabled;
+}
+
 export interface AgentStreamViewProps {
   agentId: string;
   serverId?: string;
@@ -590,7 +594,11 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         ),
       [baseRenderModel.history, baseRenderModel.segments.liveHead],
     );
-    const outlineEnabled = supportsChatOutline && chatOutlineEnabled;
+    const outlineEnabled = canShowChatOutline(
+      isAuthoritativeHistoryReady,
+      supportsChatOutline,
+      chatOutlineEnabled,
+    );
     const outlineLayout = useChatOutlineRailLayout(outlineEnabled);
     const chatOutline = useChatOutline({
       agentId,

@@ -1026,3 +1026,5 @@ export interface AgentClient {
    */
   shutdown?(): Promise<void>;
 }
+
+export type { AgentFeature, AgentFeatureToggle } from "@jagentdesk/protocol/agent-types";

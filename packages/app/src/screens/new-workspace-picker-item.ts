@@ -237,7 +237,7 @@ export function pickerItemToCheckoutRequest(
  */
 export function startsNewBranch(request: PickerCheckoutRequest | undefined): boolean {
   if (!request) return true;
-  if (request.action === "checkout") return false;
+  if (request.action) return request.action === "branch-off";
   return !request.checkoutSource && request.githubPrNumber === undefined;
 }
 

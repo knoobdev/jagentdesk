@@ -21,6 +21,7 @@ import { isLucideIconName, pluginIconComponent } from "@/plugins/icons";
 
 export interface AgentControlIconProps {
   size: number;
+  strokeWidth?: number;
   color: string;
 }
 

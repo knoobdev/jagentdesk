@@ -95,7 +95,6 @@ import {
   useHostRuntimeAgentDirectoryStatus,
   useHostRuntimeClient,
   useHostRuntimeIsConnected,
-  getHostRuntimeStore,
 } from "@/runtime/host-runtime";
 import {
   deleteAttachments,
@@ -195,6 +194,7 @@ import { OverlayDismissalScope, useDismissOverlays } from "@/components/ui/overl
 import { type PaneHost } from "@/panels/panel-manifest";
 import { type ComposerFocusOptions } from "@/composer/model";
 import { useRetainedPanelActive } from "@/components/retained-panel";
+import { JiraIssuePill } from "@/jira/composer/jira-issue-attachment";
 
 const composerImageAttachmentPersister: Pick<
   AttachmentPersister,
@@ -326,7 +326,7 @@ function renderLeftContent(args: RenderLeftContentArgs): ReactElement | null {
     return <DraftAgentControls {...agentControls} isCompactLayout={isCompactLayout} />;
   }
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+    <View style={styles.controlRow}>
       <AgentControls
         agentId={agentId}
         serverId={serverId}
@@ -491,18 +491,35 @@ function renderComposerAttachmentPill(args: RenderComposerAttachmentPillArgs): R
       onRemove,
     });
   }
+  if (attachment.kind === "jira_issue") {
+    return (
+      <BuiltinPluginGate
+        key={`jira:${attachment.attachment.connectionId}/${attachment.attachment.key}`}
+        serverId={args.serverId}
+        id="jira"
+      >
+        <JiraIssuePill
+          key={`jira:${attachment.attachment.connectionId}/${attachment.attachment.key}`}
+          attachment={attachment}
+          index={index}
+          disabled={disabled}
+          onOpen={onOpen}
+          onRemove={onRemove}
+        />
+      </BuiltinPluginGate>
+    );
+  }
   if (attachment.kind === "plugin_resource") {
     return (
       <PluginResourceAttachmentPill
-        serverId={args.serverId}
-        key={`${attachment.pluginId}:${attachment.sourceId}:${attachment.item.id}`}
+        key={`plugin:${attachment.pluginId}/${attachment.sourceId}/${attachment.item.id}`}
         attachment={attachment}
         index={index}
         disabled={disabled}
         onOpen={onOpen}
         onRemove={onRemove}
-        openLabel={labels.openGithub}
-        removeLabel={labels.removeGithub}
+        openLabel={pluginResourceOpenLabel}
+        removeLabel={pluginResourceRemoveLabel}
       />
     );
   }
@@ -950,6 +967,8 @@ function GithubPickerOption({
 }
 
 interface ComposerProps {
+  error?: string | null;
+  topContent?: ReactNode;
   agentId: string;
   serverId: string;
   workspaceId?: string | null;
@@ -1289,6 +1308,8 @@ const ComposerContent = memo(ComposerContentImpl);
 
 // oxlint-disable-next-line complexity
 function ComposerContentImpl({
+  error: formError,
+  topContent,
   agentId,
   serverId,
   workspaceId,
@@ -1730,13 +1751,6 @@ function ComposerContentImpl({
         submission: createMessageSubmissionWriter(serverId),
         skillIds: turnSkills.skillIds,
         activeTurnBehavior,
-        activeTurnId:
-          activeTurnBehavior === "steer"
-            ? (selectAgentTurnPresentation(
-                useSessionStore.getState().sessions[serverId],
-                targetAgentId,
-              ).turnId ?? undefined)
-            : undefined,
       });
       turnSkills.commit();
       onAttentionPromptSend?.();
@@ -2051,7 +2065,7 @@ function ComposerContentImpl({
       isConnected,
     });
     if (!cancellation) return;
-    const requestId = getHostRuntimeStore().beginAgentCancellation(serverId, targetAgentId);
+    const requestId = useSessionStore.getState().beginAgentCancellation(serverId, targetAgentId);
     void cancellation
       .catch((error) => {
         const message = resolveErrorMessage(error);
@@ -2060,7 +2074,7 @@ function ComposerContentImpl({
         }
       })
       .finally(() => {
-        getHostRuntimeStore().settleAgentCancellation(serverId, targetAgentId, requestId);
+        useSessionStore.getState().settleAgentCancellation(serverId, targetAgentId, requestId);
       });
     messageInputRef.current?.focus();
   }, [client, isAgentRunning, isCancellingAgent, isConnected, serverId]);
@@ -2240,18 +2254,16 @@ function ComposerContentImpl({
         <View style={styles.contextWindowMeterSlot}>
           <ContextWindowMeter
             serverId={serverId}
-            agentId={agentId}
             maxTokens={agentState.contextWindowMaxTokens}
             usedTokens={agentState.contextWindowUsedTokens}
             totalCostUsd={agentState.totalCostUsd}
-            toolbarRing={TOOLBAR_RINGS[controlSizing]}
+            glyphSize={TOOLBAR_RINGS[controlSizing].size}
           />
         </View>
       ) : null,
     [
       hasAgent,
       serverId,
-      agentId,
       agentState.contextWindowMaxTokens,
       agentState.contextWindowUsedTokens,
       agentState.totalCostUsd,
@@ -2375,6 +2387,10 @@ function ComposerContentImpl({
     [attachments, setSelectedAttachments, setGithubSearchQuery, setIsGithubPickerOpen],
   );
 
+  const legacyPluginTarget = useMemo(
+    () => (workspaceId ? { serverId, workspaceId, agentId } : null),
+    [serverId, workspaceId, agentId],
+  );
   const leftContent = useMemo(() => {
     const controls = renderLeftContent({
       agentControls,
@@ -2385,19 +2401,27 @@ function ComposerContentImpl({
       showAgentControls: mode.showAgentControls,
     });
     return controls ? (
-      <PluginComposerTargetProvider value={workspaceId ? { serverId, workspaceId, agentId } : null}>
-        <ComposerInputProvider value={composerInput}>{controls}</ComposerInputProvider>
-      </PluginComposerTargetProvider>
+      <ComposerKeyboardScopeProvider
+        isPaneFocused={isActiveComposer}
+        isActiveComposer={isActiveComposer}
+        isInputFocused={isMessageInputFocused}
+      >
+        <PluginComposerTargetProvider value={legacyPluginTarget}>
+          <ComposerInputProvider value={composerInput}>{controls}</ComposerInputProvider>
+        </PluginComposerTargetProvider>
+      </ComposerKeyboardScopeProvider>
     ) : null;
   }, [
     agentControls,
+    isActiveComposer,
+    isMessageInputFocused,
     agentId,
     composerInput,
     focusInput,
     isCompactLayout,
     mode.showAgentControls,
     serverId,
-    workspaceId,
+    legacyPluginTarget,
   ]);
 
   const handleAttachButtonRef = useCallback((node: View | null) => {
@@ -2603,6 +2627,12 @@ function ComposerContentImpl({
         <View style={inputAreaContainerStyle}>
           <View style={inputAreaContentStyle}>
             {isFullscreen ? null : queueList}
+            {!isFullscreen && topContent}
+            {!isFullscreen && formError ? (
+              <Text accessibilityRole="alert" style={styles.sendErrorText}>
+                {formError}
+              </Text>
+            ) : null}
             {!isFullscreen && sendErrorNode}
 
             <ComposerAutocompleteBinding
@@ -2719,6 +2749,14 @@ const animatedStaticStyles = RNStyleSheet.create({
 });
 
 const styles = StyleSheet.create((theme: Theme) => ({
+  controlRow: {
+    flexDirection: "row",
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
+    alignItems: "center",
+    gap: 8,
+  },
   borderSeparator: {
     height: theme.borderWidth[1],
     backgroundColor: theme.colors.border,
@@ -2895,3 +2933,9 @@ const filePillIcon = <ThemedFileText size={ICON_SIZE.sm} uniProps={iconForegroun
 const pendingFilePillIcon = (
   <ThemedAttachmentSpinner size={18} uniProps={iconForegroundMutedMapping} />
 );
+
+const pluginResourceOpenLabel = (source: string, identifier: string): string =>
+  `Open ${source} ${identifier}`;
+
+const pluginResourceRemoveLabel = (source: string, identifier: string): string =>
+  `Remove ${source} ${identifier}`;

@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
@@ -467,7 +468,11 @@ function GuestReadyView({
   // the composer writes; send typing=true on non-empty text and typing=false after a short idle or
   // when cleared/sent. Only meaningful on the chat tab.
   const draft = useAgentInputDraft({ draftKey: buildDraftStoreKey({ serverId, agentId }) });
-  const draftText = draft.text;
+  const draftText = useSyncExternalStore(
+    draft.textSource.subscribe,
+    draft.textSource.getSnapshot,
+    draft.textSource.getSnapshot,
+  );
   useEffect(() => {
     const typing = tab === "chat" && draftText.trim().length > 0;
     onTyping(typing);

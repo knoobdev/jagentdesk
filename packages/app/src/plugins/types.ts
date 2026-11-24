@@ -87,7 +87,6 @@ export type {
   PluginComposerPillContribution,
   PluginSidebarContribution,
   PluginSidebarItemContribution,
-  PluginScreenContribution,
   PluginSettingsScreenContribution,
   PluginThemeContribution,
   PluginTimelineRendererContribution,
@@ -95,16 +94,4 @@ export type {
   PluginWorkspacePanelContribution,
 };
 
-export type {
-  PluginAttachmentSourceContribution,
-  PluginCommandCenterItemContribution,
-  PluginClientSlashCommandContribution,
-  PluginComposerPillContribution,
-  PluginSidebarContribution,
-  PluginSurfaceContribution,
-  PluginSettingsScreenContribution,
-  PluginThemeContribution,
-  PluginTimelineRendererContribution,
-  PluginTimelineTransformerContribution,
-  PluginWorkspacePanelContribution,
-};
+export type { PluginSurfaceContribution };

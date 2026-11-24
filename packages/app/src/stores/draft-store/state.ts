@@ -1,3 +1,4 @@
+import { PluginResourceComposerAttachmentSchema } from "@/plugins/attachments/model";
 import {
   NEW_WORKSPACE_PICKER_ATTACHMENT_OWNER,
   type AttachmentMetadata,
@@ -94,6 +95,9 @@ export function isUserComposerAttachment(value: unknown): value is UserComposerA
   }
   if (record.kind === "file") {
     return UploadedFileAttachmentSchema.safeParse(record.attachment).success;
+  }
+  if (record.kind === "plugin_resource") {
+    return PluginResourceComposerAttachmentSchema.safeParse(value).success;
   }
   if (record.kind === "jira_issue") {
     return JiraIssueAttachmentSchema.safeParse(record.attachment).success;
@@ -242,5 +246,20 @@ export function applyClearDraftRecord(input: {
     lifecycle: input.lifecycle,
     updatedAt: input.nowMs,
     version: input.record.version + 1,
+  };
+}
+
+export function editDraftRecordText(
+  record: DraftRecord | undefined,
+  text: string,
+  now: number,
+): DraftRecord {
+  if (record?.lifecycle === "active" && record.input.text === text) return record;
+  const attachments = record?.lifecycle === "active" ? record.input.attachments : [];
+  return {
+    input: { text, attachments },
+    lifecycle: text.length > 0 || attachments.length > 0 ? "active" : "abandoned",
+    updatedAt: now,
+    version: (record?.version ?? 0) + 1,
   };
 }

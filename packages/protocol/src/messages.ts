@@ -601,6 +601,7 @@ export const AgentOptionControlSchema = z.discriminatedUnion("type", [
 
 const AgentModelDefinitionSchema: z.ZodType<AgentModelDefinition> = z.object({
   aliases: z.array(z.string()).optional(),
+  isSelectable: z.boolean().optional(),
   provider: AgentProviderSchema,
   id: z.string(),
   label: z.string(),
@@ -2048,6 +2049,7 @@ export const CreateAgentWorktreeTargetSchema = z.discriminatedUnion("mode", [
 export type CreateAgentWorktreeTarget = z.infer<typeof CreateAgentWorktreeTargetSchema>;
 
 export const CreateAgentRequestMessageSchema = z.object({
+  internal: z.boolean().optional(),
   idempotencyKey: z.string().min(1).max(512).optional(),
   type: z.literal("create_agent_request"),
   config: AgentSessionConfigSchema,
@@ -3721,6 +3723,12 @@ export const CreateJAgentDeskWorktreeRequestSchema = z.object({
   requestId: z.string(),
 });
 
+export const WorkspaceSetupSubscribeRequestSchema = z.object({
+  type: z.literal("workspace.setup.subscribe.request"),
+  workspaceId: z.string(),
+  requestId: z.string(),
+});
+
 export const WorkspaceSetupStatusRequestSchema = z.object({
   type: z.literal("workspace_setup_status_request"),
   workspaceId: z.string(),
@@ -3802,6 +3810,9 @@ export const ArchiveWorkspaceRequestSchema = z.object({
 // directory: it always produces a fresh workspace. The source discriminates
 // between an existing local directory and a newly created jagentdesk worktree.
 export const WorkspaceCreateRequestSchema = z.object({
+  background: z.boolean().optional(),
+  callerAgentId: z.string().optional(),
+  internal: z.boolean().optional(),
   idempotencyKey: z.string().min(1).max(512).optional(),
   type: z.literal("workspace.create.request"),
   workspaceId: z
@@ -4192,6 +4203,7 @@ export const CaptureTerminalRequestSchema = z.object({
 });
 
 export const HubExecutionAgentCreateRequestSchema = z.object({
+  providerOptions: ProviderOptionsSchema.optional(),
   type: z.literal("hub.execution.agent.create.request"),
   requestId: z.string(),
   executionId: z.string(),
@@ -4242,6 +4254,7 @@ export type { AgentProfile, AgentSkillSelection } from "./agent-profile.js";
 // AgentModelDefinitionSchema as `z.ZodType<...>`, which hides ZodObject methods.
 export const CompactProviderSnapshotModelSchema = z.object({
   aliases: z.array(z.string()).optional(),
+  isSelectable: z.boolean().optional(),
   id: z.string(),
   label: z.string(),
   description: z.string().optional(),
@@ -4799,6 +4812,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   JAgentDeskWorktreeListRequestSchema,
   JAgentDeskWorktreeArchiveRequestSchema,
   CreateJAgentDeskWorktreeRequestSchema,
+  WorkspaceSetupSubscribeRequestSchema,
   WorkspaceSetupStatusRequestSchema,
   LegacyListAvailableEditorsRequestSchema,
   LegacyOpenInEditorRequestSchema,
@@ -5905,6 +5919,16 @@ export const WorkspaceSetupSnapshotSchema = z.object({
   error: z.string().nullable(),
 });
 
+export const WorkspaceSetupSubscribeResponseSchema = z.object({
+  type: z.literal("workspace.setup.subscribe.response"),
+  payload: z.object({
+    requestId: z.string(),
+    subscriptionId: z.string().optional(),
+    workspaceId: z.string(),
+    snapshot: WorkspaceSetupSnapshotSchema.nullable(),
+  }),
+});
+
 export const WorkspaceSetupStatusResponseMessageSchema = z.object({
   type: z.literal("workspace_setup_status_response"),
   payload: z.object({
@@ -6410,6 +6434,7 @@ export const AgentCreateResponseSchema = z.object({
 export const WorkspaceCreateResponseSchema = z.object({
   type: z.literal("workspace.create.response"),
   payload: z.object({
+    setupSkippedReason: z.string().optional(),
     agent: AgentSnapshotPayloadSchema.optional(),
     creation: CreationSnapshotSchema.optional(),
     workspace: WorkspaceDescriptorPayloadSchema.nullable(),
@@ -9096,6 +9121,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ProjectSuggestionsResponseSchema,
   ScriptStatusUpdateMessageSchema,
   WorkspaceSetupProgressMessageSchema,
+  WorkspaceSetupSubscribeResponseSchema,
   WorkspaceSetupStatusResponseMessageSchema,
   AgentStreamMessageSchema,
   AgentStatusMessageSchema,

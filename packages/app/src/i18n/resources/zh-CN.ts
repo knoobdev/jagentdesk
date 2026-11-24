@@ -1,5 +1,9 @@
 import { type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
+import { botsStrings } from "./bots";
+import { builtinPluginStrings } from "./builtin-plugins";
+import { activityGraphStrings } from "./activity-graph";
+import { sshModuleStrings } from "./ssh-modules";
 
 export const zhCN: TranslationResources = {
   pluginCombobox: {
@@ -130,6 +134,7 @@ export const zhCN: TranslationResources = {
       desktop: "给 Agent 发消息，标记 @files，或使用 /commands 和 /skills",
       mobile: "发消息，@files，/commands",
       fallback: "输入消息...",
+      terminal: "Prompt",
     },
     input: {
       fullscreen: "Fullscreen",
@@ -1205,6 +1210,8 @@ export const zhCN: TranslationResources = {
       project: "项目",
       base: "基线",
       baseNotApplicable: "不适用",
+      host: "主机",
+      branch: "分支",
     },
     titlePlaceholder: "标题（可选）",
     errors: {
@@ -1244,6 +1251,22 @@ export const zhCN: TranslationResources = {
       inProjectDirectory: "在项目目录中",
       inWorktree: "在 worktree 中",
       title: "起始位置",
+    },
+    launch: {
+      commandPlaceholder: "Run a command, or leave empty for a blank terminal",
+      promptPlaceholder: "Prompt {{name}}",
+      submit: "Launch",
+      chat: "Chat",
+      terminal: "Terminal",
+      title: "What to launch",
+      manageProfiles: "Manage profiles",
+    },
+    tooltips: {
+      project: "Choose the project",
+      host: "Choose the host",
+      isolation: "Choose the isolation level",
+      startingRef: "选择起始位置",
+      launch: "Choose what to launch",
     },
   },
   desktop: {
@@ -1491,6 +1514,16 @@ export const zhCN: TranslationResources = {
     noMatches: "没有匹配的模型",
     searchPlaceholder: "搜索模型...",
     openProviderSettings: "打开 {{provider}} 设置",
+    editProfilesLabel: "编辑智能体配置文件",
+    searchAllPlaceholder: "搜索所有模型...",
+    createProfileFromModel: "从此模型创建配置文件",
+    editProfileLabel: "编辑 {{name}}",
+    editProfilesCount: "编辑配置文件 ({{count}})",
+    profiles: "配置文件",
+    createProfile: "创建配置文件",
+    noMatchesForQuery: "没有与“{{query}}”匹配的模型",
+    providers: "提供方",
+    model: "模型",
   },
   providerCatalog: {
     title: "添加 provider",
@@ -2464,6 +2497,41 @@ export const zhCN: TranslationResources = {
           localErrorMessage: "无法移除 localhost 连接",
         },
       },
+      agentProfiles: {
+        featureCountOne: "{{count}} 个 Feature",
+        featureCount: "{{count}} 个 Feature",
+        editProfileTitle: "编辑 Agent 配置",
+        addProfileTitle: "添加 Agent 配置",
+        iconLabel: "图标",
+        nameLabel: "名称",
+        namePlaceholder: "UI 工作",
+        providerLabel: "Provider",
+        providerPlaceholder: "选择一个 Provider",
+        noProviders: "此 Host 上没有可用的 Provider",
+        modelLabel: "Model",
+        noModels: "此 Provider 没有可选择的 Model",
+        modeLabel: "Mode",
+        noModes: "此 Provider 没有可选择的 Mode",
+        thinkingLabel: "Thinking",
+        noThinkingOptions: "此 Model 没有 Thinking 级别",
+        featuresLabel: "Features",
+        notesLabel: "适用场景",
+        notesHint: "帮助 Agent 在启动另一个 Agent 时选择此配置。",
+        notesPlaceholder: "用于 UI 工作 — 组件、布局和设计 token。",
+        saving: "保存中...",
+        save: "保存",
+        moveUp: "上移",
+        moveDown: "下移",
+        editProfile: "编辑配置",
+        remove: "移除",
+        removeConfirmTitle: "移除配置？",
+        removeConfirmMessage: "移除「{{name}}」？",
+        sectionTitle: "Agent 配置",
+        unsupported: "此 Host 运行的 Daemon 尚不支持 Agent 配置",
+        unavailable: "连接到这个 Host 以管理 Agent 配置",
+        emptyState: "还没有配置。添加一个以便使用保存的 Provider 和 Model 启动 Agent。",
+        newProfile: "新建配置",
+      },
     },
     providers: {
       title: "Providers",
@@ -3112,4 +3180,8 @@ export const zhCN: TranslationResources = {
       description: "\u8BF7\u68C0\u67E5\u7F51\u7EDC\u8FDE\u63A5\u540E\u91CD\u8BD5\u3002",
     },
   },
+  bots: botsStrings,
+  builtinPlugins: builtinPluginStrings,
+  ssh: sshModuleStrings,
+  activityGraph: activityGraphStrings,
 };

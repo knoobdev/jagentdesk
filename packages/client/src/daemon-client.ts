@@ -400,7 +400,6 @@ import {
   type SaveApiProvider,
   type TestApiProvider,
 } from "@jagentdesk/protocol/custom-providers/rpc-schemas";
-import { DEFAULT_CLIENT_CAPABILITIES } from "./connection/index.js";
 import { CreationClient } from "./creation/index.js";
 import {
   LegacyProviderOptions,
@@ -690,6 +689,7 @@ export interface AgentAttentionRequiredNotification {
 type AgentConfigOverrides = Partial<Omit<AgentSessionConfig, "provider" | "cwd">>;
 
 export interface CreateAgentRequestOptions extends AgentConfigOverrides {
+  idempotencyKey?: string;
   agentId?: string;
 
   onEvent?: (snapshot: CreationSnapshot) => void;
@@ -3028,16 +3028,6 @@ export class DaemonClient {
     };
   }
 
-  private sendSessionPayload(payload: SessionInboundMessage): Promise<void> {
-    const wire = this.legacyProviderOptions()?.prepare(payload) ?? payload;
-    return this.sendJsonMessage("session", payload.type, { type: "session", message: wire }, () => {
-      if (!("requestId" in payload) || typeof payload.requestId !== "string") return;
-      for (const waiter of this.waiters) {
-        if (waiter.requestId === payload.requestId) waiter.submitted = true;
-      }
-    });
-  }
-
   // ============================================================================
   // Core Send Helpers
   // ============================================================================
@@ -3054,7 +3044,9 @@ export class DaemonClient {
       }
       throw new Error(`Transport not connected (status: ${this.connectionState.status})`);
     }
-    const payload = SessionInboundMessageSchema.parse(message);
+    const payload = SessionInboundMessageSchema.parse(
+      this.legacyProviderOptions()?.prepare(message) ?? message,
+    );
     try {
       this.sendTransportFrame(JSON.stringify({ type: "session", message: payload }));
     } catch (error) {
@@ -3101,7 +3093,9 @@ export class DaemonClient {
    */
   private sendSessionMessageOrThrow(message: SessionInboundMessage): Promise<void> {
     return this.sendWhenConnected(() => {
-      const payload = SessionInboundMessageSchema.parse(message);
+      const payload = SessionInboundMessageSchema.parse(
+        this.legacyProviderOptions()?.prepare(message) ?? message,
+      );
       return this.sendTransportFrame(JSON.stringify({ type: "session", message: payload }));
     });
   }
@@ -3309,7 +3303,9 @@ export class DaemonClient {
     if (!this.transport || this.connectionState.status !== "connected") {
       throw new DaemonConnectionError("Transport not connected");
     }
-    const payload = SessionInboundMessageSchema.parse(message);
+    const payload = SessionInboundMessageSchema.parse(
+      this.legacyProviderOptions()?.prepare(message) ?? message,
+    );
     try {
       return this.sendTransportFrame(JSON.stringify({ type: "session", message: payload }));
     } catch (error) {
@@ -3929,11 +3925,12 @@ export class DaemonClient {
             timeout: 0,
           }),
     observe: (kind, idempotencyKey, next, error) => {
-      const observation = this.observe("creation.subscribe.response", {
-        type: "creation.subscribe.request",
-        kind,
-        idempotencyKey,
-      });
+      const observation = this.owned.observe(() =>
+        this.sendCorrelatedSessionRequest({
+          message: { type: "creation.subscribe.request", kind, idempotencyKey },
+          responseType: "creation.subscribe.response",
+        }),
+      );
       observation.subscribe({
         snapshot: (result) => next(result.snapshot),
         update: (message) => {
@@ -4018,18 +4015,6 @@ export class DaemonClient {
         responseType: "cluster/logs/subscribe/response",
       }).catch(() => undefined);
     }
-  }
-
-  // ============================================================================
-  // Agent Lifecycle
-  // ============================================================================
-
-  private requireBackgroundAgentCreation(options: CreateAgentRequestOptions): void {
-    if (
-      options.background !== undefined &&
-      this.lastServerInfoMessage?.features?.backgroundAgents !== true
-    )
-      throw new Error("Update the host to use background agents.");
   }
 
   async createAgent(options: CreateAgentRequestOptions): Promise<AgentSnapshotPayload> {
@@ -7514,6 +7499,26 @@ export class DaemonClient {
   }
 
   /** One subscription to a plugin subscription handler; events arrive as updates and binary. */
+  observeWorkspaceSetup(
+    workspaceId: string,
+    options?: { signal?: AbortSignal },
+  ): OwnedSubscription<CorrelatedResponsePayload<"workspace.setup.subscribe.response">> {
+    return this.owned.observe(async (accept) => {
+      if (this.lastServerInfoMessage?.features?.workspaceSetupObservation !== true)
+        throw new Error("Update the host to observe workspace setup");
+      const requestId = this.createRequestId();
+      return this.sendCorrelatedSessionRequest({
+        requestId,
+        message: { type: "workspace.setup.subscribe.request", requestId, workspaceId },
+        responseType: "workspace.setup.subscribe.response",
+        selectPayload: (payload) => {
+          accept(payload);
+          return payload;
+        },
+      });
+    }, options?.signal);
+  }
+
   observePluginRpc(
     pluginId: string,
     method: string,
@@ -12719,46 +12724,58 @@ export class DaemonClient {
     return false;
   }
 
-  private handleSessionMessage(msg: SessionOutboundMessage): void {
-    msg = this.owned.normalize(msg);
-    msg = this.legacyProviderOptions()?.normalize(msg) ?? msg;
-    if (
-      msg.type === "providers_snapshot_update" &&
-      this.config.providerSnapshots !== "wire" &&
-      msg.payload.snapshotHash &&
-      !msg.payload.compactSnapshot
-    ) {
-      if (this.owned.owns(msg)) this.providerSnapshotUpdates.receive(msg);
-      return;
-    }
-    this.deliverSessionMessage(msg);
+  private updateChunkedTransport(serverInfo: ServerInfoStatusPayload): void {
+    if (this.chunkedTransport)
+      this.chunkedTransport.enabled =
+        serverInfo.features?.binaryChunkingV1 === true &&
+        this.config.capabilities?.[CLIENT_CAPS.binaryChunkingV1] !== false;
   }
 
-  private deliverSessionMessage(msg: SessionOutboundMessage): void {
-    const consumerMessage = normalizeProviderSnapshotUpdateMessage(
-      msg,
-      this.config.providerSnapshots !== "wire",
-    );
+  private receiveCreationProgress(message: SessionOutboundMessage): void {
+    if (message.type === "workspace.create.update" || message.type === "agent.create.update") {
+      if (!message.payload.subscriptionId) this.creations.receive(message.payload);
+    }
+  }
+
+  private handleSessionMessage(msg: SessionOutboundMessage): void {
+    msg = this.legacyProviderOptions()?.normalize(msg) ?? msg;
+    const consumerMessage = normalizeProviderSnapshotUpdateMessage(msg);
+    this.receiveCreationProgress(consumerMessage);
 
     if (consumerMessage.type === "status") {
       const serverInfo = parseServerInfoStatusPayload(consumerMessage.payload);
       if (serverInfo) {
+        this.updateChunkedTransport(serverInfo);
         this.lastServerInfoMessage = serverInfo;
         if (this.connectionState.status === "connecting") {
           this.resetConnectTimeout();
           this.reconnectAttempt = 0;
           this.updateConnectionState({ status: "connected" }, { event: "HELLO_SERVER_INFO" });
-          this.startLivenessHeartbeat();
-          this.owned.restore(serverInfo, {
-            ...DEFAULT_CLIENT_CAPABILITIES,
-            ...this.config.capabilities,
-          });
+          this.owned.restore();
           this.creations.reconnect();
+          for (const type of this.messageHandlers.keys()) this.syncEventDemand(type);
+          this.startLivenessHeartbeat();
+          this.resubscribeCheckoutDiffSubscriptions();
+          this.resubscribeTerminalDirectorySubscriptions();
+          this.resubscribeFileSubscriptions();
+          this.resubscribeLogSubscriptions();
           this.flushPendingSendQueue();
           this.resolveConnect();
         }
       }
     }
+
+    if (consumerMessage.type === "terminal_stream_exit") {
+      this.terminalStreams.removeTerminal(consumerMessage.payload.terminalId);
+    }
+
+    if (consumerMessage.type === "fs.file.update") {
+      this.fileSubscriptions
+        .get(consumerMessage.payload.subscriptionId)
+        ?.onUpdate(consumerMessage.payload.version);
+    }
+
+    this.handleClusterPushMessage(msg);
 
     if (this.rawMessageListeners.size > 0) {
       for (const handler of this.rawMessageListeners) {
@@ -12788,14 +12805,7 @@ export class DaemonClient {
       }
     }
 
-    if (
-      consumerMessage.type === "workspace.create.update" ||
-      consumerMessage.type === "agent.create.update"
-    ) {
-      if (!consumerMessage.payload.subscriptionId) this.creations.receive(consumerMessage.payload);
-    }
     this.resolveWaiters(consumerMessage);
-    this.owned.receive(consumerMessage);
   }
 
   private resolveWaiters(msg: SessionOutboundMessage): void {

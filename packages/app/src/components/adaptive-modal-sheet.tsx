@@ -334,7 +334,6 @@ const ThemedBottomSheetTextInput = withUnistyles(BottomSheetTextInput, (theme) =
 export const AdaptiveTextInput = forwardRef<TextInput, AdaptiveTextInputProps>(
   function AdaptiveTextInputInner(props, ref) {
     const isMobile = useIsCompactFormFactor();
-    useDismissibleOverlay(visible && !isMobile, onClose);
     // BottomSheetTextInput calls useBottomSheetInternal(), which throws when it
     // renders outside a BottomSheet (e.g. a plain settings page). Detect the
     // context safely (returns null outside a sheet) and only use the sheet-aware
@@ -582,6 +581,7 @@ export function AdaptiveModalSheet({
   const { theme } = useUnistyles();
   const { t } = useTranslation();
   const isMobile = useIsCompactFormFactor();
+  useDismissibleOverlay(visible && !isMobile, onClose);
   const insets = useSafeAreaInsets();
   const resolvedSnapPoints = useMemo(() => snapPoints ?? ["65%", "90%"], [snapPoints]);
   const compactSafeAreaPadding = useMemo(

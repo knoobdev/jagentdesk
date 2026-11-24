@@ -1,29 +1,35 @@
-import { withSkillInvocation } from "../agent-prompt.js";
-import { AgentActiveTurnBehaviorSchema } from "@jagentdesk/protocol/messages";
-import type { ChangeRequestWatches } from "../change-request-watches/index.js";
+import {
+  withSkillInvocation,
+  sendPromptToAgent,
+  enqueueAgentMessage,
+  setupFinishNotification,
+  waitForAgentRunStartWithTimeout,
+} from "../agent-prompt.js";
+import {
+  AgentActiveTurnBehaviorSchema,
+  ActiveTurnBehaviorSchema,
+} from "@jagentdesk/protocol/messages";
+import { type ChangeRequestWatches } from "../change-request-watches/index.js";
 import { changeRequestStatusSchema } from "../../../services/change-request-source.js";
-import type { ManagedAgent } from "../agent-manager.js";
+import { type ManagedAgent, type AgentManager } from "../agent-manager.js";
 import { admitsAgent } from "../directory.js";
-import type { ProviderJAgentDeskToolsPolicy } from "@jagentdesk/protocol/provider-config";
+import { type ProviderJAgentDeskToolsPolicy } from "@jagentdesk/protocol/provider-config";
 import { isJAgentDeskToolEnabled } from "../jagentdesk-tool-policy.js";
 import { registerPluginTools } from "./plugin-tools.js";
-// This file predates lint enforcement on it (lefthook lints only staged files, and this large tool
-// registrar was not previously linted). It carries pre-existing nested-ternary
-// style violations in the forge/kubectl tool builders; disabling the stylistic rule file-wide avoids
-// rewriting unrelated tooling. New code here should still prefer if/else.
-/* oxlint-disable no-nested-ternary */
 import { staticHostSupport, type StaticHostSupport } from "../../host-capabilities/service.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import nodePath from "node:path";
 import { z } from "zod";
-import type { BuiltinPluginId } from "@jagentdesk/protocol/builtin-plugins";
+import { type BuiltinPluginId } from "@jagentdesk/protocol/builtin-plugins";
 import { builtinPluginForTool } from "../../plugins/builtin/gates.js";
 import { ensureValidJson } from "../../json-utils.js";
-import type { Logger } from "pino";
-
-import type { AgentMode, AgentProvider } from "../agent-sdk-types.js";
-import type { AgentManager } from "../agent-manager.js";
+import { type Logger } from "pino";
+import {
+  type AgentMode,
+  type AgentProvider,
+  type AgentPermissionResponse,
+} from "../agent-sdk-types.js";
 import {
   AgentFeatureSchema,
   AgentPermissionRequestPayloadSchema,
@@ -31,8 +37,9 @@ import {
   AgentPermissionResponseSchema,
   AgentSnapshotPayloadSchema,
   WorkspaceScriptPayloadSchema,
+  type AgentListItemPayload,
+  type FirstAgentContext,
 } from "../../messages.js";
-import type { AgentListItemPayload } from "../../messages.js";
 import {
   buildStoredAgentPayload,
   toAgentListItemPayload,
@@ -40,7 +47,7 @@ import {
 } from "../agent-projections.js";
 import { curateAgentActivity } from "../activity-curator.js";
 import { selectItemsByProjectedLimit } from "../timeline-projection.js";
-import type { AgentStorage, StoredAgentRecord } from "../agent-storage.js";
+import { type AgentStorage, type StoredAgentRecord } from "../agent-storage.js";
 import { AgentNotFoundError, ensureAgentLoaded } from "../agent-loading.js";
 import { isStoredAgentProviderAvailable } from "../../persistence-hooks.js";
 import {
@@ -51,14 +58,13 @@ import {
 } from "../../workspace-archive-service.js";
 import { createAgentCommand, type CreateAgentFromMcpInput } from "../create-agent/create.js";
 import { inheritWorkspaceBackground } from "../create-agent/intent.js";
-import type { VoiceCallerContext, VoiceSpeakHandler } from "../../voice-types.js";
-import type { FirstAgentContext } from "../../messages.js";
+import { type VoiceCallerContext, type VoiceSpeakHandler } from "../../voice-types.js";
 import { everyMsToFiveFieldCron } from "@jagentdesk/protocol/schedule/cadence";
 import { expandUserPath, isSameOrDescendantPath, resolvePathFromBase } from "../../path-utils.js";
-import type { TerminalManager } from "../../../terminal/terminal-manager.js";
+import { type TerminalManager } from "../../../terminal/terminal-manager.js";
 import { encodeTerminalKeyInput } from "@jagentdesk/protocol/terminal-key-input";
 import { TerminalInputModeTracker } from "@jagentdesk/protocol/terminal-input-mode";
-import type { CreateJAgentDeskWorktreeWorkflowFn } from "../../worktree-session.js";
+import { type CreateJAgentDeskWorktreeWorkflowFn } from "../../worktree-session.js";
 import { computeNextRunAt, validateScheduleCadence } from "../../schedule/cron.js";
 import {
   ScheduleNotFoundError,
@@ -72,8 +78,7 @@ import {
   type ScheduleCadence,
   type UpdateScheduleInput,
 } from "@jagentdesk/protocol/schedule/types";
-import type { ProviderSnapshotManager } from "../provider-snapshot-manager.js";
-import { ActiveTurnBehaviorSchema } from "@jagentdesk/protocol/messages";
+import { type ProviderSnapshotManager } from "../provider-snapshot-manager.js";
 import {
   AgentModelSchema,
   AgentProviderEnum,
@@ -87,12 +92,6 @@ import {
   toScheduleSummary,
   waitForAgentWithTimeout,
 } from "../mcp-shared.js";
-import {
-  sendPromptToAgent,
-  enqueueAgentMessage,
-  setupFinishNotification,
-  waitForAgentRunStartWithTimeout,
-} from "../agent-prompt.js";
 import { respondToAgentPermission } from "../permission-response.js";
 import {
   archiveAgentCommand,
@@ -101,22 +100,22 @@ import {
   setAgentModeCommand,
   updateAgentCommand,
 } from "../lifecycle-command.js";
-import type { ForgeService } from "../../../services/forge-service.js";
-import type { WorkspaceGitService } from "../../workspace-git-service.js";
-import type {
-  PersistedWorkspaceRecord,
-  ProjectRegistry,
-  WorkspaceRegistry,
+import { type ForgeService } from "../../../services/forge-service.js";
+import { type WorkspaceGitService } from "../../workspace-git-service.js";
+import {
+  type PersistedWorkspaceRecord,
+  type ProjectRegistry,
+  type WorkspaceRegistry,
 } from "../../workspace-registry.js";
 import { resolveWorktreeSourceCwd } from "../../workspace-source.js";
-import type { WorkspaceScriptsService } from "../../session/workspace-scripts/workspace-scripts-service.js";
+import { type WorkspaceScriptsService } from "../../session/workspace-scripts/workspace-scripts-service.js";
 import {
   type ArchiveCommandDependencies,
   type CreateJAgentDeskWorktreeCommandInput,
   createJAgentDeskWorktreeCommand,
 } from "../../worktree/commands.js";
 import { registerBrowserTools } from "../../browser-tools/tools.js";
-import type { BrowserToolsBroker } from "../../browser-tools/broker.js";
+import { type BrowserToolsBroker } from "../../browser-tools/broker.js";
 import {
   generateFingerprintProfile,
   type BrowserFingerprintProfile,
@@ -135,20 +134,20 @@ import {
   OrchestrationHandbackSchema,
   OrchestrationRouteCategorySchema,
 } from "@jagentdesk/protocol/orchestration";
-import type {
-  OrchestrationAgentContext,
-  OrchestrationRuntime,
+import {
+  type OrchestrationAgentContext,
+  type OrchestrationRuntime,
 } from "../../orchestration/runtime.js";
-import type { ClusterRegistry } from "../../cluster/cluster-registry.js";
+import { type ClusterRegistry } from "../../cluster/cluster-registry.js";
 import { registerSshAgentTools, type SshAgentTool } from "../../ssh/environment/agent-tools.js";
-import type { RemoteExecAgentTool } from "../../remote-exec/agent-tools.js";
-import type { CustomProviderAgentTool } from "../../custom-providers/agent-tools.js";
-import type { ArgoCdAgentTool } from "../../argocd/agent-tools.js";
-import type { SideloadAgentTool } from "../../sideload/agent-tools.js";
-import type { JiraAgentTool } from "../../jira/agent-tools.js";
-import type { FigmaAgentTool } from "../../figma/agent-tools.js";
-import type { DatabaseRegistry } from "../../database/database-registry.js";
-import type { DatabaseEngine } from "../../database/database-dto.js";
+import { type RemoteExecAgentTool } from "../../remote-exec/agent-tools.js";
+import { type CustomProviderAgentTool } from "../../custom-providers/agent-tools.js";
+import { type ArgoCdAgentTool } from "../../argocd/agent-tools.js";
+import { type SideloadAgentTool } from "../../sideload/agent-tools.js";
+import { type JiraAgentTool } from "../../jira/agent-tools.js";
+import { type FigmaAgentTool } from "../../figma/agent-tools.js";
+import { type DatabaseRegistry } from "../../database/database-registry.js";
+import { type DatabaseEngine } from "../../database/database-dto.js";
 import { execCommand } from "../../../utils/spawn.js";
 import { SimulatorService } from "../../simulator/simulator-service.js";
 import { fleetSnapshot } from "../../simulator/simulator-streams.js";
@@ -158,10 +157,16 @@ import { resolveDeviceTarget, type PhysicalDeviceAccess } from "./sim-device-tar
 import { getSharedProxyService, installCaToSimulator } from "../../proxy/proxy-service.js";
 import { fridaAvailability, installFrida, launchAndUnpin } from "../../proxy/frida-control.js";
 import { SimButtonSchema, type SimButton } from "@jagentdesk/protocol/simulator/rpc-schemas";
-import type { ForgeHubService } from "../../session/forge/forge-hub-session.js";
-import type { NativeSkillsService } from "../../skills-native/index.js";
+import { type ForgeHubService } from "../../session/forge/forge-hub-session.js";
+import { type NativeSkillsService } from "../../skills-native/index.js";
 import { slugifySkillName } from "../../skills-native/frontmatter.js";
-import type { AgentPermissionResponse } from "../agent-sdk-types.js";
+import { featuresFromControls } from "@jagentdesk/protocol/option-controls";
+
+// This file predates lint enforcement on it (lefthook lints only staged files, and this large tool
+// registrar was not previously linted). It carries pre-existing nested-ternary
+// style violations in the forge/kubectl tool builders; disabling the stylistic rule file-wide avoids
+// rewriting unrelated tooling. New code here should still prefer if/else.
+/* oxlint-disable no-nested-ternary */
 
 export interface JAgentDeskToolHostDependencies {
   changeRequestWatches?: ChangeRequestWatches;
@@ -3848,8 +3853,8 @@ function createToolCatalog(
         ? { webSearch: callerAgent.config.webSearch }
         : {}),
       ...(callerAgent.config.extra ? { extra: callerAgent.config.extra } : {}),
-      ...(callerAgent.config.featureValues
-        ? { featureValues: callerAgent.config.featureValues }
+      ...(callerAgent.config.providerOptions
+        ? { providerOptions: callerAgent.config.providerOptions }
         : {}),
       ...(callerAgent.config.systemPrompt ? { systemPrompt: callerAgent.config.systemPrompt } : {}),
       ...(callerAgent.config.mcpServers ? { mcpServers: callerAgent.config.mcpServers } : {}),
@@ -4769,7 +4774,7 @@ function createToolCatalog(
           cwd: resolvedArgs.cwd,
           workspaceId: resolvedArgs.workspaceId,
           thinking: parsedArgs.settings?.thinkingOptionId,
-          features: parsedArgs.settings?.features,
+          providerOptions: parsedArgs.settings?.features,
           labels: parsedArgs.labels,
           mode: parsedArgs.settings?.modeId,
           background: requestedBackground,
@@ -5443,6 +5448,7 @@ function createToolCatalog(
     return buildStoredAgentPayload(
       record,
       new Set(providerSnapshotManager.listRegisteredProviderIds()),
+      (provider, own) => agentManager.effectiveOptionsFor(provider, own),
       agentManager.getAgentBackgroundWorkSummary(record.id),
     );
   }
@@ -6534,13 +6540,13 @@ function createToolCatalog(
         );
       }
       const selectedModel = settings?.model ?? resolvedProviderModel.model;
-      const features = await agentManager.listDraftFeatures({
+      const described = await agentManager.listDraftControls({
         provider: providerId,
         cwd: resolvedCwd,
         ...(settings?.modeId ? { modeId: settings.modeId } : {}),
         ...(selectedModel ? { model: selectedModel } : {}),
         ...(settings?.thinkingOptionId ? { thinkingOptionId: settings.thinkingOptionId } : {}),
-        ...(settings?.features ? { featureValues: settings.features } : {}),
+        ...(settings?.features ? { providerOptions: settings.features } : {}),
       });
       return {
         content: [],
@@ -6552,7 +6558,7 @@ function createToolCatalog(
           status: summary.status,
           modes: summary.modes,
           selectedModel: selectedModel ?? null,
-          features,
+          features: featuresFromControls(described),
         }),
       };
     },

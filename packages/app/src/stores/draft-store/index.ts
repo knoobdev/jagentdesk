@@ -14,6 +14,7 @@ import { useSessionStore, type SessionState } from "@/stores/session-store";
 import { useWorkspaceAttachmentsStore } from "@/attachments/workspace-attachments-store";
 import {
   applyClearDraftRecord,
+  editDraftRecordText,
   collectReferencedAttachmentIdsFromState,
   DRAFT_STORE_VERSION,
   isAttachmentMetadata,
@@ -53,6 +54,8 @@ interface DraftStoreActions {
    * Sets the text on behalf of something other than the input, which then shows it. Use
    * `editDraftText` for the input's own edits.
    */
+  editDraftText: (input: { draftKey: string; text: string }) => void;
+
   replaceDraftText: (input: { draftKey: string; text: string }) => void;
 
   markDraftLifecycle: (input: { draftKey: string; lifecycle: DraftLifecycleState }) => void;

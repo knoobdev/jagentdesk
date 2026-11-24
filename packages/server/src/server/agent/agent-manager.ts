@@ -1839,10 +1839,7 @@ export class AgentManager {
         reason: "resume",
         purpose,
         workspaceId,
-        title: record?.title ?? mergedConfig.title ?? null,
-        labels: record?.labels ?? options?.labels ?? {},
-        background: options?.background,
-        metadata: (record ?? options)?.metadata,
+        ...resumeLaunchIdentity(record, mergedConfig, options),
       },
     );
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
@@ -2529,7 +2526,7 @@ export class AgentManager {
       model: normalizedModelId,
       modeId: undefined,
       thinkingOptionId: undefined,
-      featureValues: undefined,
+      providerOptions: undefined,
       extra: undefined,
     } as AgentSessionConfig;
 
@@ -2560,6 +2557,8 @@ export class AgentManager {
 
       handedToRegistration = true;
       const registered = await this.registerSession(session, storedConfig, agentId, {
+        launchedOptions: this.launchOptionsFor({ client, own: storedConfig.providerOptions }),
+        metadata: existing.metadata,
         labels: existing.labels,
         workspaceId: existing.workspaceId,
         owner: existing.owner,
@@ -2973,30 +2972,9 @@ export class AgentManager {
     agentId: string,
     updates?: { workspaceId?: string; labels?: AgentLabelPatch },
   ): Promise<boolean> {
-    const registry = this.requireRegistry();
-    const record = await registry.get(agentId);
-    if (!record || !record.archivedAt) {
-      return false;
-    }
-
-    await this.syncNativeArchiveState(record.provider, record.persistence, "restore");
-
-    const nextRecord: StoredAgentRecord = {
-      ...record,
-      ...(updates?.workspaceId ? { workspaceId: updates.workspaceId } : {}),
-      ...(updates?.labels ? { labels: applyLabelPatch(record.labels, updates.labels) } : {}),
-      archivedAt: null,
-      updatedAt: new Date().toISOString(),
-    };
-    await registry.upsert(nextRecord);
-
-    if (this.getAgent(agentId)) {
-      this.notifyAgentState(agentId);
-    } else if (!nextRecord.internal) {
-      // Same publication archiveSnapshot makes, so a stored-only agent reappears for every client.
-      this.dispatchStoredAgentState(nextRecord);
-    }
-    return true;
+    return this.runLifecycleMutation(agentId, () =>
+      this.unarchiveSnapshotUnlocked(agentId, updates),
+    );
   }
 
   private async unarchiveSnapshotUnlocked(
@@ -4095,7 +4073,7 @@ export class AgentManager {
       return isCreateConfigUnattended({
         modeId: agent.currentModeId,
         config: agent.config,
-        features: agent.features,
+        controls: agent.controls,
         availableModes: agent.availableModes,
       });
     } catch (error) {
@@ -6750,4 +6728,19 @@ function pluginOpeningVisibility(opening?: {
   background?: boolean;
 }) {
   return { labels: opening?.labels ?? {}, background: opening?.background === true };
+}
+
+function resumeLaunchIdentity(
+  record: StoredAgentRecord | null,
+  config: AgentSessionConfig,
+  options:
+    | { labels?: Record<string, string>; background?: boolean; metadata?: AgentMetadata }
+    | undefined,
+) {
+  return {
+    title: record?.title ?? config.title ?? null,
+    labels: record?.labels ?? options?.labels ?? {},
+    background: options?.background,
+    metadata: (record ?? options)?.metadata,
+  };
 }

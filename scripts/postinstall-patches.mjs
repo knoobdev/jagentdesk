@@ -43,7 +43,7 @@ const patchedPackages = [
     patchPrefix: "react-native-gesture-handler+",
   },
   // Exports BottomSheetModalInternalProvider so a subtree can host its own sheets on the shared
-  // modal stack (see packages/app/src/components/ui/isolated-bottom-sheet-modal/host-scope.tsx), and
+  // modal stack (see packages/app/src/components/ui/isolated-bottom-sheet-modal/index.tsx), and
   // keeps a dismissing modal's status through its final onChange(-1), so a modal with
   // enableDismissOnClose=false that unmounts while presented still leaves the portal, and removes
   // the portal of a modal that unmounts before its opening animation starts.

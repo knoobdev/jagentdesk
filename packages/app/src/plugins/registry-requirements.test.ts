@@ -15,6 +15,7 @@ function registry(version: string) {
       starts++;
       return {
         openScreen() {},
+        composers: () => [],
         playAudio: async () => {},
         hosts: createPluginHosts(
           {

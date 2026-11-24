@@ -149,6 +149,8 @@ export interface ComboboxProps {
 
   /** Minimum width for the desktop popover (overrides trigger-based width). */
   desktopMinWidth?: number;
+  desktopLockWidth?: boolean;
+  desktopChildrenScrollEnabled?: boolean;
 
   /** Fixed height for the desktop popover (overrides default 400px max). */
   desktopFixedHeight?: number;
@@ -1092,6 +1094,7 @@ function MobileComboboxSheet(props: MobileBodyProps): ReactElement {
 }
 
 interface DesktopBodyProps {
+  desktopChildrenScrollEnabled: boolean;
   overlayLayer: number;
   isOpen: boolean;
   handleClose: () => void;
@@ -1124,6 +1127,7 @@ interface DesktopBodyProps {
 }
 
 function DesktopComboboxChildrenBody(props: {
+  scrollEnabled: boolean;
   header: SheetHeader | undefined;
   stickyHeader: ReactNode;
   children: ReactNode;
@@ -1132,6 +1136,7 @@ function DesktopComboboxChildrenBody(props: {
     <>
       {props.header ? <InlineHeaderView header={props.header} /> : props.stickyHeader}
       <ScrollView
+        scrollEnabled={props.scrollEnabled}
         contentContainerStyle={styles.desktopChildrenScrollContent}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
@@ -1263,7 +1268,11 @@ function DesktopComboboxBody(props: DesktopBodyProps): ReactElement | null {
           onLayout={props.handleDesktopContentLayout}
         >
           {props.hasChildren ? (
-            <DesktopComboboxChildrenBody header={props.header} stickyHeader={props.stickyHeader}>
+            <DesktopComboboxChildrenBody
+              scrollEnabled={props.desktopChildrenScrollEnabled}
+              header={props.header}
+              stickyHeader={props.stickyHeader}
+            >
               {props.children}
             </DesktopComboboxChildrenBody>
           ) : (
@@ -1342,6 +1351,8 @@ export function Combobox({
   desktopPlacement = "bottom-start",
   desktopPreventInitialFlash = true,
   desktopMinWidth,
+  desktopLockWidth,
+  desktopChildrenScrollEnabled = true,
   desktopFixedHeight,
   stickyHeader,
   footer,
@@ -1582,7 +1593,7 @@ export function Combobox({
   );
 
   const desktopFrameStyle = useMemo(
-    () =>
+    () => [
       buildDesktopFrameStyle({
         desktopMinWidth,
         referenceWidth,
@@ -1591,8 +1602,11 @@ export function Combobox({
         shouldHideDesktopContent,
         availableHeight: availableSize?.height,
       }),
+      desktopLockWidth && desktopMinWidth ? { width: desktopMinWidth } : undefined,
+    ],
     [
       desktopMinWidth,
+      desktopLockWidth,
       referenceWidth,
       desktopFixedHeight,
       desktopPositionStyle,
@@ -1655,6 +1669,7 @@ export function Combobox({
 
   return (
     <DesktopComboboxBody
+      desktopChildrenScrollEnabled={desktopChildrenScrollEnabled}
       overlayLayer={floatingLayer}
       isOpen={isOpen}
       handleClose={handleClose}

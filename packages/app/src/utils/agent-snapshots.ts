@@ -31,41 +31,6 @@ export function derivePendingPermissionKey(
   return `${agentId}:${fallbackId}`;
 }
 
-export function projectAgentSnapshot(agent: Agent): AgentSnapshotPayload {
-  return {
-    id: agent.id,
-    provider: agent.provider,
-    cwd: agent.cwd,
-    ...(agent.workspaceId ? { workspaceId: agent.workspaceId } : {}),
-    model: agent.model,
-    ...(agent.options ? { options: agent.options } : {}),
-    ...(agent.controls ? { controls: agent.controls } : {}),
-    thinkingOptionId: agent.thinkingOptionId ?? null,
-    createdAt: agent.createdAt.toISOString(),
-    updatedAt: agent.updatedAt.toISOString(),
-    lastUserMessageAt: agent.lastUserMessageAt?.toISOString() ?? null,
-    status: agent.status,
-    backgroundWork: agent.backgroundWork,
-    ...projectActiveTurn(agent),
-    capabilities: agent.capabilities,
-    currentModeId: agent.currentModeId,
-    availableModes: agent.availableModes,
-    pendingPermissions: agent.pendingPermissions,
-    persistence: agent.persistence,
-    ...(agent.runtimeInfo ? { runtimeInfo: agent.runtimeInfo } : {}),
-    ...(agent.lastUsage ? { lastUsage: agent.lastUsage } : {}),
-    ...(agent.lastError ? { lastError: agent.lastError } : {}),
-    title: agent.title,
-    labels: agent.labels,
-    ...(agent.metadata ? { metadata: agent.metadata } : {}),
-    requiresAttention: agent.requiresAttention ?? false,
-    attentionReason: agent.attentionReason ?? null,
-    attentionTimestamp: agent.attentionTimestamp?.toISOString() ?? null,
-    archivedAt: agent.archivedAt?.toISOString() ?? null,
-    ...(agent.background ? { background: true } : {}),
-  };
-}
-
 export function normalizeAgentSnapshot(snapshot: AgentSnapshotPayload, serverId: string) {
   const createdAt = new Date(snapshot.createdAt);
   const updatedAt = new Date(snapshot.updatedAt);

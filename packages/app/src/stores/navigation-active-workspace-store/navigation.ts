@@ -24,7 +24,6 @@ export interface NavigateToWorkspaceInput {
   target?: WorkspaceTabTarget;
   pin?: boolean;
   openIntent?: string;
-  placement?: WorkspaceTabPlacement;
   asTab?: boolean;
 }
 

@@ -17,7 +17,6 @@ import { ModelBrowser, useModelBrowser } from "@/components/model-browser";
 import { ComposerToolbarGlyph } from "@/composer/agent-controls/glyph";
 import { type ProviderSelectorProvider } from "@/provider-selection/provider-selection";
 import { useIsCompactFormFactor } from "@/constants/layout";
-import { shortModelLabel } from "./utils";
 import { type AgentProfilePicker, type AgentProfileSeed } from "@/agent-profiles";
 import { type ContextBridge } from "@/components/ui/isolated-bottom-sheet-modal";
 import { TailEllipsisText } from "@/components/ui/tail-ellipsis-text";

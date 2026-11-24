@@ -36,4 +36,10 @@ export type { PluginSubscribe } from "./rpc-context.js";
 
 export type { PluginLocaleSource } from "./translations.js";
 
-export type { PluginLocaleSource } from "./translations.js";
+export {
+  PluginTranslationRuntime,
+  PluginTranslationProvider,
+  usePluginTranslationRuntime,
+  requirePluginText,
+  isPluginMessage,
+} from "./translations.js";

@@ -1,3 +1,4 @@
+import { WorkspaceSetupObservation } from "./workspace-setup-observation.js";
 import { type BotsService } from "./bots/service.js";
 import { builtinPluginWireState } from "@jagentdesk/protocol/builtin-plugins";
 import { CreationService } from "./creation/index.js";
@@ -51,11 +52,7 @@ import { type SessionShareService } from "./session-share/service.js";
 import { ActivityGraphService } from "./agent/activity-graph/service.js";
 import { type AutorunState, type CreationSnapshot } from "@jagentdesk/protocol/messages";
 import { type CheckoutDiffManager, type CheckoutDiffMetrics } from "./checkout-diff-manager.js";
-import {
-  type DaemonConfigStore,
-  type MutableDaemonConfig,
-  toWireDaemonConfig,
-} from "./daemon-config-store.js";
+import { type DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
 import {
   type ServerInfoStatusPayload,
   type SessionInboundMessage,
@@ -806,6 +803,9 @@ export class VoiceAssistantWebSocketServer {
   private readonly voiceCallerContexts = new Map<string, VoiceCallerContext>();
 
   private readonly workspaceSetupSnapshots = new Map<string, WorkspaceSetupSnapshot>();
+  private readonly workspaceSetupObservation = new WorkspaceSetupObservation(
+    this.workspaceSetupSnapshots,
+  );
 
   private readonly providerSnapshotManager: ProviderSnapshotManager;
 
@@ -1276,6 +1276,10 @@ export class VoiceAssistantWebSocketServer {
   }
 
   public broadcast(message: WSOutboundMessage): void {
+    if (message.type === "session" && message.message.type === "workspace_setup_progress") {
+      const { workspaceId, ...snapshot } = message.message.payload;
+      this.workspaceSetupObservation.publish(workspaceId, snapshot);
+    }
     const trustedSockets = [...this.sessions]
       .filter(([, connection]) => connection.kind === "trusted")
       .map(([ws]) => ws);
@@ -2326,6 +2330,7 @@ export class VoiceAssistantWebSocketServer {
       serviceProxy: this.serviceProxy ?? undefined,
       scriptRuntimeStore: this.scriptRuntimeStore ?? undefined,
       workspaceSetupSnapshots: this.workspaceSetupSnapshots,
+      workspaceSetupObservation: this.workspaceSetupObservation,
       workspaceArchiveOperations: this.workspaceArchiveOperations,
       onBranchChanged: this.onBranchChanged ?? undefined,
       getDaemonTcpPort: this.getDaemonTcpPort ?? undefined,
@@ -2671,6 +2676,7 @@ export class VoiceAssistantWebSocketServer {
         agentProfiles: true,
         agentConfigApply: true,
         creationLifecycle: true,
+        workspaceSetupObservation: true,
         providerInstallation: true,
         binaryChunkingV1: true,
         workspaceBaseBranch: true,
@@ -2880,16 +2886,6 @@ export class VoiceAssistantWebSocketServer {
         payload: this.buildServerInfoStatusPayload(),
       },
     };
-  }
-
-  private createDaemonConfigChangedMessage(config: MutableDaemonConfig): WSOutboundMessage {
-    return wrapSessionMessage({
-      type: "status",
-      payload: {
-        status: "daemon_config_changed",
-        config: toWireDaemonConfig(config),
-      },
-    });
   }
 
   // Push notification when an autonomous run reaches a terminal state (spec §14). The

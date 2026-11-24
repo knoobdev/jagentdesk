@@ -1,3 +1,4 @@
+import { isWeb } from "@/constants/platform";
 import { useLayoutEffect, useState, type ReactNode, type RefObject } from "react";
 import { StyleSheet, View, type ViewProps } from "react-native";
 
@@ -36,7 +37,7 @@ export function useFullscreenSlotFrame(
 ): ComposerSlotFrame | undefined {
   const [frame, setFrame] = useState<ComposerSlotFrame>();
   useLayoutEffect(() => {
-    if (!active) {
+    if (!isWeb || !active) {
       setFrame(undefined);
       return;
     }

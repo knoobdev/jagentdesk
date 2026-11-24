@@ -1,15 +1,16 @@
-import { callPluginRpc, type PluginClientStateSource } from "@jagentdesk/plugin/client/host";
-import {
-  type PluginOpenScreenInput,
-  type PluginAgentCommandContext,
-  type PluginCommandCapabilities,
-  type PluginPanelLocation,
-  type PluginWorkspaceCommandContext,
-} from "@jagentdesk/plugin/client";
-import { resolvePluginPanelOpenLocation } from "./workspace-panels/locations";
-import { type PluginSurfaceRuntime } from "./surface-runtime";
-import { type InstalledPlugin } from "./types";
 import { pluginComposersSource } from "./composer-items/source";
+import { callPluginRpc } from "@jagentdesk/plugin/client/host";
+import type {
+  PluginOpenScreenInput,
+  PluginAgentCommandContext,
+  PluginCommandCapabilities,
+  PluginPanelLocation,
+  PluginWorkspaceCommandContext,
+} from "@jagentdesk/plugin/client";
+import type { PluginClientStateSource } from "@jagentdesk/plugin/client/host";
+import { resolvePluginPanelOpenLocation } from "./workspace-panels/locations";
+import type { PluginSurfaceRuntime } from "./surface-runtime";
+import type { InstalledPlugin } from "./types";
 
 export interface PluginNavigation {
   openScreen?(pluginId: string, input: PluginOpenScreenInput): void;
@@ -31,6 +32,7 @@ export function createPluginCapabilities(
 ): PluginCommandCapabilities {
   return {
     jagentdesk: runtime.jagentdesk,
+    composers: (selector) => pluginComposersSource(plugin).resolve(selector),
     rpc: (contract, input) => callPluginRpc(contract, runtime.invoke, input),
     openScreen(input) {
       if (!plugin.surfaces.some((surface) => surface.id === input.screenId))
@@ -43,10 +45,12 @@ export function createPluginCapabilities(
         throw new Error(`Plugin settings screen is unavailable: ${screenId}`);
       navigation.openSettings(plugin.id, screenId);
     },
-    openScreen,
-    composers: (selector) => pluginComposersSource(plugin).resolve(selector),
-    // COMPAT(pluginSidebarAliases): added in v0.11.0, remove after 2027-03-29
-    openSurface: (screenId) => openScreen({ screenId }),
+    openSurface(surfaceId) {
+      if (!plugin.surfaces.some((surface) => surface.id === surfaceId)) {
+        throw new Error(`Plugin surface is unavailable: ${surfaceId}`);
+      }
+      navigation.openSurface(plugin.id, surfaceId);
+    },
   };
 }
 

@@ -57,6 +57,8 @@ function installed(serverId: string, themes: PluginThemeContribution[]): Install
     settingsScreens: [],
     surfaces: [],
     sidebarItems: [],
+    composerItems: [],
+    newWorkspaceItems: [],
     workspacePanels: [],
     commandCenterItems: [],
     clientSlashCommands: [],

@@ -1,11 +1,8 @@
+import type { JAgentDeskApi } from "@jagentdesk/client";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { beforeEach, expect, it, vi } from "vitest";
-import {
-  type PluginNewWorkspace,
-  type PluginJAgentDeskApi,
-  useNewWorkspace,
-} from "@jagentdesk/plugin/client";
+import { type PluginNewWorkspace, useNewWorkspace } from "@jagentdesk/plugin/client";
 import {
   JAgentDeskApiProvider,
   PluginNewWorkspaceProvider,
@@ -34,7 +31,7 @@ const translations = new PluginTranslationRuntime({
   getLocale: () => "en",
   subscribe: () => () => undefined,
 });
-const jagentdesk = {} as PluginJAgentDeskApi;
+const jagentdesk = {} as JAgentDeskApi;
 const rejectRpc = () => Promise.reject(new Error("no rpc in this test"));
 const noSubscribe: PluginSubscribe = () =>
   Object.assign(() => undefined, { ready: Promise.resolve(), release: () => Promise.resolve() });

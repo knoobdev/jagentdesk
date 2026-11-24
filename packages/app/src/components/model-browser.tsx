@@ -817,10 +817,11 @@ function ModelRow({
   );
 
   return (
-    <View
+    <Pressable
+      accessible={false}
       style={[styles.modelRowHoverBoundary, styles.browserModelRow]}
-      onPointerEnter={handlePointerEnter}
-      onPointerLeave={handlePointerLeave}
+      onHoverIn={handlePointerEnter}
+      onHoverOut={handlePointerLeave}
     >
       <ModelBrowserPressable
         onPress={onPress}
@@ -857,7 +858,7 @@ function ModelRow({
           {profileAction}
         </View>
       ) : null}
-    </View>
+    </Pressable>
   );
 }
 

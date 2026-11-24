@@ -262,6 +262,7 @@ export function buildStoredAgentPayload(
   record: StoredAgentRecord,
   validProviders: Iterable<AgentProvider>,
   effectiveOptionsFor: EffectiveOptionsResolver,
+  backgroundWork?: AgentSnapshotPayload["backgroundWork"],
 ): AgentSnapshotPayload {
   const defaultCapabilities = {
     supportsStreaming: false,
@@ -317,6 +318,7 @@ export function buildStoredAgentPayload(
     ...visibilityFlags(record),
     labels: normalizeLabels(record.labels),
     metadata: record.metadata,
+    ...(record.usageTotals ? { usageTotals: record.usageTotals } : {}),
     ...(typeof record.lastError === "string" ? { lastError: record.lastError } : {}),
     ...(providerAvailable ? {} : { providerUnavailable: true }),
   };
@@ -389,12 +391,6 @@ function buildSerializableConfig(config: AgentSessionConfig): SerializableAgentC
   }
   if (config.thinkingOptionId) {
     serializable.thinkingOptionId = config.thinkingOptionId;
-  }
-  if (Object.prototype.hasOwnProperty.call(config, "featureValues")) {
-    const featureValues = sanitizeMetadata(config.featureValues);
-    if (featureValues !== undefined) {
-      serializable.featureValues = featureValues;
-    }
   }
   const extra = sanitizeMetadata(config.extra);
   if (extra !== undefined) {

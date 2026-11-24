@@ -23,7 +23,6 @@ import {
   type WorkspaceCreateRequest,
   type ProviderControlsListRequestMessage,
   type ProviderControlsListResponseMessage,
-  type CreationSnapshot,
 } from "@jagentdesk/protocol/messages";
 import {
   DaemonClient,
@@ -38,6 +37,7 @@ import {
   type SendMessageOptions,
   type WaitForFinishResult,
 } from "./daemon-client.js";
+import { type JsonValue } from "@jagentdesk/protocol/agent-types";
 
 export { DaemonClient };
 
@@ -85,23 +85,19 @@ export interface JAgentDeskClientConfig {
 }
 
 export type JAgentDeskWorkspace = WorkspaceDescriptorPayload;
-
 export type JAgentDeskAgent = AgentSnapshotPayload;
-
 /**
  * A list subscription owned by the API: the first snapshot plus live updates until released.
  * Mirrors the upstream plugin API shape; the fork's daemon already pushes agent/workspace
  * updates to every session, so an update is forwarded as it arrives.
  */
 export type SubscriptionSnapshot<T> = T & { subscriptionId: string };
-
 export interface SubscriptionObserver<T> {
   snapshot(snapshot: T): void;
   update(message: SessionOutboundMessage): void;
   binary?(payload: Uint8Array): void;
   error?(error: unknown): void;
 }
-
 export interface OwnedSubscription<T> {
   readonly subscriptionId: string | null;
   readonly ready: Promise<SubscriptionSnapshot<T>>;
@@ -110,13 +106,10 @@ export interface OwnedSubscription<T> {
 }
 
 export type JAgentDeskAgentListOptions = FetchAgentsOptions & { signal?: AbortSignal };
-
 export type JAgentDeskProject = WorkspaceProjectDescriptorPayload;
-
 export type JAgentDeskProjectListOptions = Omit<ProjectListRequestMessage, "type" | "requestId"> & {
   requestId?: string;
 };
-
 export type JAgentDeskProjectListResult = ProjectListResponseMessage["payload"];
 
 export interface JAgentDeskAgentListResult {
@@ -126,7 +119,6 @@ export interface JAgentDeskAgentListResult {
   entries: FetchAgentsEntry[];
   pageInfo: FetchAgentsPageInfo;
 }
-
 export type JAgentDeskWorkspaceListOptions = Omit<
   FetchWorkspacesRequestMessage,
   "type" | "requestId"
@@ -150,14 +142,9 @@ export interface JAgentDeskWorkspaceOpenOptions {
 
 export type JAgentDeskWorkspaceCreateOptions = Omit<
   WorkspaceCreateRequest,
-  "type" | "requestId" | "agent" | "subscribe"
+  "type" | "requestId"
 > & {
   requestId?: string;
-  agent?: Omit<
-    JAgentDeskAgentCreateOptions,
-    "worktree" | "git" | "onEvent" | "idempotencyKey" | "requestId"
-  >;
-  onEvent?: (snapshot: CreationSnapshot) => void;
 };
 
 export interface JAgentDeskWorkspaceArchiveResult {
@@ -176,38 +163,24 @@ export type JAgentDeskWorkspaceUpdateHandler = (update: JAgentDeskWorkspaceUpdat
 
 export interface JAgentDeskWorkspaceHandle {
   readonly id: string;
-
   readonly projectId: string | null;
-
   readonly directory: string | null;
-
   readonly name: string | null;
-
   readonly status: JAgentDeskWorkspace["status"] | null;
-
   /** Data plugins stored on the workspace. JAgentDesk never reads a key. */
   readonly metadata: NonNullable<JAgentDeskWorkspace["metadata"]> | null;
-
   readonly agents: {
     create(options: JAgentDeskWorkspaceAgentCreateOptions): Promise<JAgentDeskAgentHandle>;
   };
-
   current(): JAgentDeskWorkspace | null;
-
   refresh(options?: { requestId?: string }): Promise<JAgentDeskWorkspace | null>;
-
   setTitle(title: string | null, requestId?: string): Promise<{ title: string | null }>;
-
-  /** Top-level keys replace; `null` removes the key. Needs a host with `entityMetadata`. */
   setMetadata(patch: Record<string, JsonValue>): Promise<void>;
-
   setBaseBranch(options: {
     baseRef: string;
     requestId?: string;
   }): Promise<{ baseRef: string | null }>;
-
   archive(requestId?: string): Promise<JAgentDeskWorkspaceArchiveResult>;
-
   /**
    * Subscribes to already-emitted daemon workspace_update events for this id.
    * This returns a local unsubscribe function; it does not own app cache state or
@@ -221,7 +194,6 @@ export type JAgentDeskProjectUpdate = Extract<
   SessionOutboundMessage,
   { type: "project.update" }
 >["payload"];
-
 export type JAgentDeskProjectUpdateHandler = (update: JAgentDeskProjectUpdate) => void;
 
 export interface JAgentDeskProjectActions {
@@ -255,7 +227,6 @@ export interface JAgentDeskWorkspaceActions {
 }
 
 type JAgentDeskAgentSessionConfig = CreateAgentRequestMessage["config"];
-
 export type JAgentDeskAgentProvider = JAgentDeskAgentSessionConfig["provider"];
 
 export type JAgentDeskProviderFeatureValues = Record<string, unknown>;
@@ -265,8 +236,12 @@ export interface JAgentDeskAgentConfig {
   provider: string;
   modeId?: JAgentDeskAgentSessionConfig["modeId"];
   thinkingOptionId?: JAgentDeskAgentSessionConfig["thinkingOptionId"];
+  /** @deprecated Put these in `options`; they are folded into it on send. */
   featureValues?: JAgentDeskProviderFeatureValues;
-  /** JSON-safe provider-native settings, validated by the selected provider. */
+  /**
+   * JSON-safe provider settings, validated by the selected provider. They include the settings the
+   * provider offers a composer control for, such as `service_tier` or `fast_mode`.
+   */
   options?: JAgentDeskAgentSessionConfig["providerOptions"];
   systemPrompt?: JAgentDeskAgentSessionConfig["systemPrompt"];
   toolPolicy?: JAgentDeskAgentSessionConfig["toolPolicy"];
@@ -274,49 +249,27 @@ export interface JAgentDeskAgentConfig {
 }
 
 export interface JAgentDeskAgentCreateOptions {
-  idempotencyKey?: string;
-
-  agentId?: string;
-
-  onEvent?: (snapshot: CreationSnapshot) => void;
-
   config: JAgentDeskAgentConfig;
-
   cwd: string;
-
   parent?: string | JAgentDeskAgentHandle;
-
   title?: JAgentDeskAgentSessionConfig["title"];
-
   env?: CreateAgentRequestMessage["env"];
-
   prompt?: string;
-
   clientMessageId?: string;
-
   outputSchema?: Record<string, unknown>;
-
   images?: CreateAgentRequestMessage["images"];
-
   attachments?: CreateAgentRequestMessage["attachments"];
-
   git?: CreateAgentRequestMessage["git"];
-
   worktree?: CreateAgentRequestMessage["worktree"];
-
   autoArchive?: CreateAgentRequestMessage["autoArchive"];
-
   /**
    * Creates a background agent: hidden from default lists, tabs, the parent's subagent track
    * and notifications, and still addressable by id. A workspace this call creates is
    * background too. With a parent and no value, the parent's own background applies.
    */
   background?: CreateAgentRequestMessage["background"];
-
   requestId?: string;
-
   labels?: Record<string, string>;
-
   /** Data plugins store on the agent: JSON values under keys such as `"linear.issue"`. */
   metadata?: CreateAgentRequestMessage["metadata"];
 }
@@ -419,7 +372,6 @@ export interface JAgentDeskAgentBackgroundWorkSubscribeOptions {
 
 export interface JAgentDeskAgentHandle {
   readonly id: string;
-
   /**
    * `workspaceId` through `archivedAt` mirror the last snapshot this handle
    * observed. A handle from `ref()` reads `null` for all of them until
@@ -428,60 +380,38 @@ export interface JAgentDeskAgentHandle {
    * `null`; use `current()` when you need to distinguish those states.
    */
   readonly workspaceId: string | null;
-
   readonly cwd: string | null;
-
   readonly status: JAgentDeskAgent["status"] | null;
-
   readonly capabilities: JAgentDeskAgent["capabilities"] | null;
-
   readonly availableModes: JAgentDeskAgent["availableModes"] | null;
-
   readonly pendingPermissions: JAgentDeskAgent["pendingPermissions"] | null;
-
   readonly activeTurn: NonNullable<JAgentDeskAgent["activeTurn"]> | null;
-
   readonly lastUsage: NonNullable<JAgentDeskAgent["lastUsage"]> | null;
-
   readonly lastError: NonNullable<JAgentDeskAgent["lastError"]> | null;
-
+  /** @deprecated Use `controls` and `options`. */
   readonly features: NonNullable<JAgentDeskAgent["features"]> | null;
-
   /** The provider options the agent runs with: `config.json` defaults merged with its own. */
   readonly options: NonNullable<JAgentDeskAgent["options"]> | null;
-
   /** How the provider wants its options drawn. Controls hold no value; read `options`. */
   readonly controls: NonNullable<JAgentDeskAgent["controls"]> | null;
-
   /** Data plugins stored on the agent. JAgentDesk never reads a key. */
   readonly metadata: NonNullable<JAgentDeskAgent["metadata"]> | null;
-
   readonly runtimeInfo: NonNullable<JAgentDeskAgent["runtimeInfo"]> | null;
-
   readonly archivedAt: NonNullable<JAgentDeskAgent["archivedAt"]> | null;
-
   readonly timeline: JAgentDeskAgentTimelineHandle;
-
   readonly backgroundWork: JAgentDeskAgentBackgroundWorkHandle;
-
   current(): JAgentDeskAgent | null;
-
   refresh(requestId?: string): Promise<JAgentDeskAgentRefetchResult | null>;
-
   /**
    * Reopens the provider session with current configuration, rerunning session-open hooks.
    * Interrupts a running turn and returns the refreshed snapshot.
    */
   reload(options?: { requestId?: string }): Promise<JAgentDeskAgentRefetchResult | null>;
-
   send(text: string, options?: JAgentDeskAgentSendOptions): Promise<void>;
-
   /** Sends a prompt and resolves when that turn finishes or needs attention. */
   run(text: string, options?: JAgentDeskAgentRunOptions): Promise<JAgentDeskAgentRunResult>;
-
   /** Waits for the current turn, including one started with `prompt`. */
   waitForFinish(timeoutMs?: number): Promise<JAgentDeskAgentRunResult>;
-
   /**
    * Asks the running session for the slash commands and skills it actually
    * loaded. Providers answer from the live session, so this sees built-in and
@@ -490,28 +420,15 @@ export interface JAgentDeskAgentHandle {
    * rejecting.
    */
   commands(options?: JAgentDeskAgentCommandsOptions): Promise<JAgentDeskAgentCommandsResult>;
-
   archive(): Promise<{ archivedAt: string }>;
-
   detach(): Promise<void>;
-
   respondToPermission(options: JAgentDeskAgentRespondToPermissionOptions): Promise<void>;
-
-  /**
-   * Changes the agent's own options: top-level keys replace, `null` removes the key so the
-   * `config.json` default (or the provider's own default) applies again. Resolves once the
-   * provider has applied the patch; a provider that cannot apply a key live rejects it.
-   */
   setOptions(patch: Record<string, unknown>): Promise<void>;
-
-  /** Top-level keys replace; `null` removes the key. Needs a host with `entityMetadata`. */
   setMetadata(patch: Record<string, JsonValue>): Promise<void>;
-
   subscribe(handler: (update: JAgentDeskAgentUpdate) => void): () => void;
 }
 
 export type JAgentDeskAgentPermissionResponse = Parameters<DaemonClient["respondToPermission"]>[2];
-
 export interface JAgentDeskAgentRespondToPermissionOptions {
   requestId: string;
   response: JAgentDeskAgentPermissionResponse;
@@ -535,11 +452,8 @@ export interface JAgentDeskAgentActions {
 }
 
 export type JAgentDeskProviderModelsResult = ListProviderModelsResponseMessage["payload"];
-
 export type JAgentDeskProviderModesResult = ListProviderModesResponseMessage["payload"];
-
 type JAgentDeskProviderControlsDraft = ProviderControlsListRequestMessage["draftConfig"];
-
 export interface JAgentDeskProviderControlsInput extends Omit<
   JAgentDeskProviderControlsDraft,
   "provider" | "model"
@@ -547,28 +461,21 @@ export interface JAgentDeskProviderControlsInput extends Omit<
   /** Provider and model in `provider/model` format. */
   provider: string;
 }
-
 export type JAgentDeskProviderControlsResult = ProviderControlsListResponseMessage["payload"];
-
 /** @deprecated Use `JAgentDeskProviderControlsInput`. */
 export type JAgentDeskProviderFeaturesInput = Omit<
   ListProviderFeaturesRequestMessage["draftConfig"],
   "provider" | "model"
 > & { provider: string };
-
+/** @deprecated Use `JAgentDeskProviderControlsResult`. */
 export type JAgentDeskProviderFeaturesResult = ListProviderFeaturesResponseMessage["payload"];
-
 export type JAgentDeskProviderAvailabilityResult = ListAvailableProvidersResponse["payload"];
-
 export type JAgentDeskProviderSnapshotResult = GetProvidersSnapshotResponseMessage["payload"];
-
 export type JAgentDeskProviderSnapshotUpdate = Extract<
   SessionOutboundMessage,
   { type: "providers_snapshot_update" }
 >["payload"];
-
 export type JAgentDeskProviderRefreshResult = RefreshProvidersSnapshotResponseMessage["payload"];
-
 export type JAgentDeskProviderDiagnosticResult = ProviderDiagnosticResponseMessage["payload"];
 
 export interface JAgentDeskProviderListOptions {
@@ -591,12 +498,10 @@ export interface JAgentDeskProviderActions {
     provider: JAgentDeskAgentProvider,
     options?: JAgentDeskProviderListOptions,
   ): Promise<JAgentDeskProviderModelsResult>;
-
   listModes(
     provider: JAgentDeskAgentProvider,
     options?: JAgentDeskProviderListOptions,
   ): Promise<JAgentDeskProviderModesResult>;
-
   /**
    * The controls a draft agent would show and the options it would run with, resolved by the
    * daemon from `config.json` defaults and the draft's own `providerOptions`.
@@ -605,26 +510,20 @@ export interface JAgentDeskProviderActions {
     draftConfig: JAgentDeskProviderControlsInput,
     options?: { requestId?: string },
   ): Promise<JAgentDeskProviderControlsResult>;
-
+  /** @deprecated Use `listControls`. */
   listFeatures(
     draftConfig: JAgentDeskProviderFeaturesInput,
     options?: { requestId?: string },
   ): Promise<JAgentDeskProviderFeaturesResult>;
-
   listAvailable(options?: { requestId?: string }): Promise<JAgentDeskProviderAvailabilityResult>;
-
   snapshot(options?: JAgentDeskProviderListOptions): Promise<JAgentDeskProviderSnapshotResult>;
-
   /** Resolves after the daemon's lazy provider discovery has finished. */
   waitForReady(options?: JAgentDeskProviderWaitOptions): Promise<JAgentDeskProviderSnapshotResult>;
-
   refresh(options?: JAgentDeskProviderRefreshOptions): Promise<JAgentDeskProviderRefreshResult>;
-
   diagnostic(
     provider: JAgentDeskAgentProvider,
     options?: { requestId?: string },
   ): Promise<JAgentDeskProviderDiagnosticResult>;
-
   subscribe(handler: (update: JAgentDeskProviderSnapshotUpdate) => void): () => void;
 }
 
@@ -680,43 +579,6 @@ export function createJAgentDeskClient(config: JAgentDeskClientConfig): JAgentDe
   };
 }
 
-function toDaemonAgentCreateOptions(
-  options: JAgentDeskAgentCreateOptions,
-  placement?: { workspaceId: string; cwd: string },
-  serverId?: string,
-): CreateAgentRequestOptions {
-  const { config: agentConfig, cwd, parent, title, prompt, ...requestOptions } = options;
-  const {
-    provider: providerModel,
-    options: ownOptions,
-    featureValues,
-    ...runtimeConfig
-  } = agentConfig;
-  // COMPAT(featureValues): added in v0.15.0, remove after 2027-05-01. An explicit option wins.
-  const providerOptions = featureValues ? { ...featureValues, ...ownOptions } : ownOptions;
-  const { provider, model } = parseProviderModel(providerModel);
-  const relationship = parent ? encodeParent(parent, serverId) : {};
-  return {
-    ...requestOptions,
-    config: {
-      ...runtimeConfig,
-      provider,
-      model,
-      cwd: placement?.cwd ?? cwd,
-      ...(title !== undefined ? { title } : {}),
-      ...(providerOptions !== undefined ? { providerOptions } : {}),
-    },
-    ...(placement ? { workspaceId: placement.workspaceId } : {}),
-    ...(parent
-      ? {
-          ...relationship,
-          labels: { ...requestOptions.labels, ...relationship.labels },
-        }
-      : {}),
-    ...(prompt !== undefined ? { initialPrompt: prompt } : {}),
-  };
-}
-
 export function createJAgentDeskApi(
   daemonClient: DaemonClient,
   apiOptions: { signal?: AbortSignal } = {},
@@ -726,7 +588,31 @@ export function createJAgentDeskApi(
     options: JAgentDeskAgentCreateOptions,
     placement?: { workspaceId: string; cwd: string },
   ) => {
-    const agent = await daemonClient.createAgent(toDaemonAgentCreateOptions(options, placement));
+    const { config: agentConfig, cwd, parent, title, prompt, ...requestOptions } = options;
+    const {
+      provider: providerModel,
+      options: ownOptions,
+      featureValues,
+      ...runtimeConfig
+    } = agentConfig;
+    // COMPAT(featureValues): added in v0.9.59, remove after 2027-05-25 once saved callers use options.
+    const providerOptions = featureValues ? { ...featureValues, ...ownOptions } : ownOptions;
+    const { provider, model } = parseProviderModel(providerModel);
+    const effectiveCwd = placement?.cwd ?? cwd;
+    const agent = await daemonClient.createAgent({
+      ...requestOptions,
+      config: {
+        ...runtimeConfig,
+        provider,
+        model,
+        cwd: effectiveCwd,
+        ...(title !== undefined ? { title } : {}),
+        ...(providerOptions !== undefined ? { providerOptions } : {}),
+      },
+      ...(placement ? { workspaceId: placement.workspaceId } : {}),
+      ...(parent ? { callerAgentId: resolveAgentId(parent) } : {}),
+      ...(prompt !== undefined ? { initialPrompt: prompt } : {}),
+    });
     return createAgentHandle(agent);
   };
   const createWorkspaceHandle = createWorkspaceHandleFactory(daemonClient, createAgent);
@@ -810,11 +696,8 @@ export function createJAgentDeskApi(
       ref: (workspace) => createWorkspaceHandle(workspace),
       open: (input, requestId) =>
         openWorkspace(daemonClient, createWorkspaceHandle, input, requestId),
-      create: async ({ requestId, agent, ...options }) => {
-        const result = await daemonClient.createWorkspace(
-          { ...options, ...(agent ? { agent: toDaemonAgentCreateOptions(agent) } : {}) },
-          requestId,
-        );
+      create: async ({ requestId, ...options }) => {
+        const result = await daemonClient.createWorkspace(options, requestId);
         if (result.error || !result.workspace) {
           throw new Error(result.error ?? "The daemon did not create a workspace");
         }
@@ -930,6 +813,9 @@ function createWorkspaceHandleFactory(
       get status() {
         return current?.status ?? null;
       },
+      get metadata() {
+        return current?.metadata ?? null;
+      },
       agents: {
         create: async (options) => {
           const snapshot = current ?? (await refresh());
@@ -945,6 +831,10 @@ function createWorkspaceHandleFactory(
       current: () => current,
       refresh,
       setTitle: (title, requestId) => daemonClient.setWorkspaceTitle(id, title, requestId),
+      setMetadata: async (patch) => {
+        const metadata = await daemonClient.setWorkspaceMetadata(id, patch);
+        if (current) current = { ...current, metadata };
+      },
       setBaseBranch: (options) =>
         daemonClient.setWorkspaceBaseBranch({ ...options, workspaceId: id }),
       archive: async (requestId) => {
@@ -1065,6 +955,15 @@ function createAgentHandleFactory(daemonClient: DaemonClient): AgentHandleFactor
       get features() {
         return current?.features ?? null;
       },
+      get options() {
+        return current?.options ?? null;
+      },
+      get controls() {
+        return current?.controls ?? null;
+      },
+      get metadata() {
+        return current?.metadata ?? null;
+      },
       get runtimeInfo() {
         return current?.runtimeInfo ?? null;
       },
@@ -1085,6 +984,13 @@ function createAgentHandleFactory(daemonClient: DaemonClient): AgentHandleFactor
       },
       send: async (text, options) => {
         await daemonClient.sendAgentMessage(id, text, options);
+      },
+      setOptions: async (patch) => {
+        await daemonClient.setAgentOptions(id, patch);
+      },
+      setMetadata: async (patch) => {
+        const metadata = await daemonClient.setAgentMetadata(id, patch);
+        if (current) current = { ...current, metadata };
       },
       respondToPermission: async ({ requestId, response }) => {
         await daemonClient.respondToPermission(id, requestId, response);
@@ -1264,301 +1170,3 @@ function createGeneratedClientId(): string {
 }
 
 export type { TerminalReplayEvent, TerminalStreamEvent } from "./terminal-stream-router.js";
-
-function createWorkspaceHandleFactory(
-  daemonClient: DaemonClient,
-  createAgent: CreateAgent,
-  terminals: JAgentDeskTerminalActions,
-  listen: (handler: JAgentDeskWorkspaceUpdateHandler) => () => void,
-): WorkspaceHandleFactory {
-  return (workspace) => {
-    const id = typeof workspace === "string" ? workspace : workspace.id;
-    let current = typeof workspace === "string" ? null : workspace;
-
-    const refresh = async (options?: { requestId?: string }) => {
-      current = await daemonClient.findWorkspace(id, options);
-      return current;
-    };
-
-    return {
-      id,
-      get projectId() {
-        return current?.projectId ?? null;
-      },
-      get directory() {
-        return current?.workspaceDirectory ?? null;
-      },
-      get name() {
-        return current?.name ?? null;
-      },
-      get status() {
-        return current?.status ?? null;
-      },
-      get metadata() {
-        return current?.metadata ?? null;
-      },
-      agents: {
-        create: async (options) => {
-          const snapshot = current ?? (await refresh());
-          if (!snapshot?.workspaceDirectory) {
-            throw new Error(`Workspace ${id} has no available directory`);
-          }
-          return createAgent(
-            { ...options, cwd: snapshot.workspaceDirectory },
-            { workspaceId: id, cwd: snapshot.workspaceDirectory },
-          );
-        },
-      },
-      terminals: {
-        create: (options) => terminals.create({ ...options, workspaceId: id }),
-        list: (options) => terminals.list({ ...options, workspaceId: id }),
-      },
-      current: () => current,
-      refresh,
-      setTitle: (title, requestId) => daemonClient.setWorkspaceTitle(id, title, requestId),
-      setMetadata: async (patch) => {
-        const metadata = await daemonClient.setWorkspaceMetadata(id, patch);
-        if (current) current = { ...current, metadata };
-      },
-      setPinned: (pinned) => daemonClient.setWorkspacePinned(id, pinned),
-      setLabel: (name, options) =>
-        assignWorkspaceLabel({
-          client: daemonClient,
-          workspaceId: id,
-          name,
-          assigned: options.assigned,
-        }),
-      setBaseBranch: (options) =>
-        daemonClient.setWorkspaceBaseBranch({ ...options, workspaceId: id }),
-      archive: async (requestId) => {
-        const result = await daemonClient.archiveWorkspace(id, requestId);
-        if (current) {
-          current = { ...current, archivingAt: result.archivedAt };
-        }
-        return result;
-      },
-      subscribe: (handler) =>
-        listen((update) => {
-          if (update.kind === "upsert" && update.workspace.id === id) {
-            current = update.workspace;
-            handler(update);
-          }
-          if (update.kind === "remove" && update.id === id) {
-            handler(update);
-          }
-        }),
-    };
-  };
-}
-
-function createAgentHandleFactory(
-  daemonClient: DaemonClient,
-  listen: (handler: JAgentDeskAgentUpdateHandler) => () => void,
-  subscribeTimeline: DaemonClient["subscribeAgentTimeline"],
-  observeBackgroundWork: () => ReturnType<DaemonClient["observeAgentBackgroundWork"]>,
-): AgentHandleFactory {
-  return (agent) => {
-    const id = typeof agent === "string" ? agent : agent.id;
-    let current = typeof agent === "string" ? null : agent;
-
-    let serverId = daemonClient.getLastServerInfoMessage()?.serverId;
-    const handle: JAgentDeskAgentHandle = {
-      id,
-      get address() {
-        serverId ??= daemonClient.getLastServerInfoMessage()?.serverId;
-        if (!serverId) throw new Error("Connect to a host before obtaining an agent address");
-        return { serverId, agentId: id };
-      },
-      timeline: {
-        append: (item) => daemonClient.appendAgentTimelineItem(id, item),
-        refetch: async (options) => {
-          const result = await daemonClient.fetchAgentTimeline(id, options);
-          if (result.agent) {
-            current = result.agent;
-          }
-          return result;
-        },
-        subscribe: (handler) =>
-          subscribeTimeline(id, (message) => {
-            switch (message.type) {
-              case "agent_stream":
-                return handler(message.payload);
-              case "agent.timeline.subscription_restored":
-                return handler({
-                  agentId: id,
-                  subscriptionId: message.payload.subscriptionId,
-                  event: { type: "subscription_restored" },
-                });
-              case "agent.timeline.error":
-                return handler({
-                  agentId: id,
-                  event: { type: "error", error: message.payload.error },
-                });
-              case "agent.timeline.replacement":
-                return handler({
-                  agentId: id,
-                  event: { type: "replacement", epoch: message.payload.epoch },
-                });
-            }
-          }),
-      },
-      backgroundWork: {
-        stop: (item, options) => daemonClient.stopAgentBackgroundWork(id, item, options),
-        list: (options) => daemonClient.listAgentBackgroundWork(id, options),
-        subscribe: (listener, options) => {
-          const observation = observeBackgroundWork();
-          // Bumped by every delivery so a list answered after a newer update is dropped.
-          let sequence = 0;
-          let released = false;
-          const reportError = (error: unknown) => {
-            if (released) return;
-            if (options?.onError) options.onError(error);
-            else console.error("Background work subscription failed", error);
-          };
-          observation.subscribe({
-            error: reportError,
-            snapshot: () => {
-              const listed = ++sequence;
-              void daemonClient
-                .listAgentBackgroundWork(id)
-                .then((items) => {
-                  if (!released && listed === sequence) listener(items);
-                  return undefined;
-                })
-                .catch(reportError);
-            },
-            update: (message) => {
-              if (message.type !== "agent.background_work.update") return;
-              if (message.payload.agentId !== id) return;
-              sequence++;
-              listener(message.payload.items);
-            },
-          });
-          return () => {
-            released = true;
-            void observation
-              .release()
-              .catch((error) =>
-                console.error("Background work subscription cleanup failed", error),
-              );
-          };
-        },
-      },
-      get workspaceId() {
-        return current?.workspaceId ?? null;
-      },
-      get cwd() {
-        return current?.cwd ?? null;
-      },
-      get status() {
-        return current?.status ?? null;
-      },
-      get capabilities() {
-        return current?.capabilities ?? null;
-      },
-      get availableModes() {
-        return current?.availableModes ?? null;
-      },
-      get pendingPermissions() {
-        return current?.pendingPermissions ?? null;
-      },
-      get activeTurn() {
-        return current?.activeTurn ?? null;
-      },
-      get lastUsage() {
-        return current?.lastUsage ?? null;
-      },
-      get lastError() {
-        return current?.lastError ?? null;
-      },
-      get features() {
-        return current?.features ?? null;
-      },
-      get options() {
-        return current?.options ?? null;
-      },
-      get controls() {
-        return current?.controls ?? null;
-      },
-      get metadata() {
-        return current?.metadata ?? null;
-      },
-      get runtimeInfo() {
-        return current?.runtimeInfo ?? null;
-      },
-      get archivedAt() {
-        return current?.archivedAt ?? null;
-      },
-      current: () => current,
-      refresh: async (requestId) => {
-        const result = await daemonClient.fetchAgent({ agentId: id, requestId });
-        current = result?.agent ?? null;
-        return result;
-      },
-      reload: async (options) => {
-        await daemonClient.refreshAgent(id, options?.requestId);
-        const result = await daemonClient.fetchAgent({ agentId: id });
-        current = result?.agent ?? null;
-        return result;
-      },
-      send: async (text, options) => {
-        await daemonClient.sendAgentMessage(id, text, options);
-      },
-      setOptions: async (patch) => {
-        await daemonClient.setAgentOptions(id, patch);
-      },
-      setMetadata: async (patch) => {
-        const metadata = await daemonClient.setAgentMetadata(id, patch);
-        if (current) current = { ...current, metadata };
-      },
-      respondToPermission: async ({ requestId, response }) => {
-        await daemonClient.respondToPermission(id, requestId, response);
-      },
-      run: async (text, options) => {
-        const { timeoutMs, ...sendOptions } = options ?? {};
-        await daemonClient.sendAgentMessage(id, text, sendOptions);
-        const result = await daemonClient.waitForFinish(
-          id,
-          timeoutMs ?? DEFAULT_WAIT_FOR_FINISH_MS,
-        );
-        if (result.final) {
-          current = result.final;
-        }
-        return result;
-      },
-      waitForFinish: async (timeoutMs) => {
-        const result = await daemonClient.waitForFinish(
-          id,
-          timeoutMs ?? DEFAULT_WAIT_FOR_FINISH_MS,
-        );
-        if (result.final) {
-          current = result.final;
-        }
-        return result;
-      },
-      commands: (options) => daemonClient.listCommands({ agentId: id, ...options }),
-      archive: async () => {
-        const result = await daemonClient.archiveAgent(id);
-        if (current) {
-          current = { ...current, archivedAt: result.archivedAt };
-        }
-        return result;
-      },
-      detach: async () => {
-        await daemonClient.detachAgent(id);
-      },
-      subscribe: (handler) =>
-        listen((update) => {
-          if (update.kind === "upsert" && update.agent.id === id) {
-            current = update.agent;
-            handler(update);
-          }
-          if (update.kind === "remove" && update.agentId === id) {
-            handler(update);
-          }
-        }),
-    };
-
-    return handle;
-  };
-}

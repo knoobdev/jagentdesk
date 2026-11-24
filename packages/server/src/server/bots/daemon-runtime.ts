@@ -153,7 +153,7 @@ export class DaemonBotRuntime implements BotRuntime {
         cwd,
         unattended: bot.unattended,
         requestedMode: bot.unattended ? undefined : bot.modeId,
-        featureValues: undefined,
+        providerOptions: undefined,
         parent: null,
       });
       await this.deps.agentManager.setAgentModel(bot.agentId, bot.model);

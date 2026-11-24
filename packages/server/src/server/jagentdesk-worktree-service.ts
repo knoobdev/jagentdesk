@@ -33,6 +33,7 @@ export interface CreateJAgentDeskWorktreeInput extends CreateWorktreeCoreInput {
   workspaceId?: string;
   projectId?: string;
   title?: string;
+  metadata?: Record<string, import("@jagentdesk/protocol/agent-types").JsonValue>;
   background?: boolean;
   callerWorkspaceId?: string;
 }
@@ -98,6 +99,7 @@ export async function createJAgentDeskWorktree(
     const workspace = await deps.workspaceProvisioning.createWorkspaceForWorktree({
       sourceCwd: workspaceCwdPlan.inputCwd,
       projectId: input.projectId,
+      metadata: input.metadata,
       workspaceId: input.workspaceId,
       repoRoot: createdWorktree.repoRoot,
       cwd: workspaceCwd,

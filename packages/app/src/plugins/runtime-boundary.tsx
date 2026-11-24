@@ -1,5 +1,7 @@
+import { pluginComposersSource } from "./composer-items/source";
 import { QueryClientProvider } from "@tanstack/react-query";
 import {
+  PluginComposersProvider,
   PluginClientStateProvider,
   PluginTranslationProvider,
   type PluginClientStateSource,
@@ -38,7 +40,9 @@ export function PluginRuntimeBoundary({
     <QueryClientProvider client={plugin.queryClient}>
       <JAgentDeskApiProvider jagentdesk={runtime.jagentdesk}>
         <PluginRpcProvider invoke={runtime.invoke} subscribe={runtime.subscribe}>
-          <PluginClientStateProvider source={source}>{content}</PluginClientStateProvider>
+          <PluginComposersProvider source={pluginComposersSource(plugin)}>
+            <PluginClientStateProvider source={source}>{content}</PluginClientStateProvider>
+          </PluginComposersProvider>
         </PluginRpcProvider>
       </JAgentDeskApiProvider>
     </QueryClientProvider>

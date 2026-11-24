@@ -24,26 +24,20 @@ function plugin(): InstalledPlugin {
     serverId,
     clientBundle: "bundle",
     lifetime: new AbortController(),
-    locale: "en",
-    i18n: new PluginTranslationRuntime({ getLocale: () => "en", subscribe: () => () => {} }),
+    translations: new PluginTranslationRuntime({
+      getLocale: () => "en",
+      subscribe: () => () => {},
+    }),
     queryClient: new QueryClient(),
-    jagentdesk: createJAgentDeskApi(
-      new DaemonClient({
-        url: "ws://127.0.0.1:1",
-        clientId: "plugin-composer-test",
-        clientType: "cli",
-      }),
-    ),
-    invoke: async () => undefined,
     subscribe: () => {
       throw new Error("Subscriptions are not used here");
     },
     cleanup: () => {},
     settingsScreens: [],
     surfaces: [],
-    sidebarItems: { header: [], footer: [] },
-    legacySidebarItems: [],
-    sidebarViews: [],
+    sidebarItems: [],
+    sidebarHeaderItems: [],
+    sidebarFooterItems: [],
     filePanels: [],
     composerItems: [],
     newWorkspaceItems: [],
@@ -76,10 +70,10 @@ function agent(id: string, archivedAt: Date | null = null): Agent {
     id,
     provider: "claude",
     status: "idle",
-    turn: { phase: "idle", cancellationRequestId: null },
+    lastUserMessageAt: null,
+    activeTurn: null,
     createdAt: new Date(),
     updatedAt: new Date(),
-    lastUserMessageAt: null,
     lastActivityAt: new Date(),
     capabilities: {
       supportsStreaming: true,
@@ -316,8 +310,6 @@ describe("a Command Center item reaching an agent's composer by id", () => {
   // The real client-state source reads these stores. A lookup that came back empty would make the
   // Command Center return before calling the item, and nothing would be reported.
   const workspace: WorkspaceDescriptor = {
-    createdAt: null,
-    lastUserMessageAt: null,
     id: "workspace-1",
     projectId: "project-1",
     projectDisplayName: "Repo",
@@ -333,6 +325,7 @@ describe("a Command Center item reaching an agent's composer by id", () => {
     archivingAt: null,
     diffStat: null,
     scripts: [],
+    background: false,
   };
 
   function markForReview(rejection?: Error) {
@@ -364,6 +357,11 @@ describe("a Command Center item reaching an agent's composer by id", () => {
     const reported: unknown[] = [];
     const [item] = buildPluginCommandCenterContributions({
       plugins: [installed],
+      runtime: () => ({
+        jagentdesk: createJAgentDeskApi(client),
+        invoke: async () => undefined,
+        subscribe: installed.subscribe,
+      }),
       state: createPluginClientStateSource(serverId),
       workspaceId: "workspace-1",
       agentId: "agent-1",

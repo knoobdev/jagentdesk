@@ -48,7 +48,7 @@ function agent(overrides: Partial<Agent> = {}): Agent {
     id: agentId,
     provider: "claude",
     status: "idle",
-    turn: { phase: "idle", cancellationRequestId: null },
+    activeTurn: null,
     createdAt: new Date("2026-11-04T10:00:00.000Z"),
     updatedAt: new Date("2026-11-04T10:00:00.000Z"),
     lastUserMessageAt: null,

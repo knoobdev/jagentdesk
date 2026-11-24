@@ -61,6 +61,11 @@ function convertLegacyCodexOptions(
   return { ...preferences, codex: { ...codex, options } };
 }
 
+const launchTargetSchema: z.ZodType<LaunchTarget> = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("chat") }),
+  z.strictObject({ kind: z.literal("terminal"), profileId: z.string() }),
+]);
+
 export const FormPreferencesSchema = z.strictObject({
   provider: z.string().optional(),
   providerPreferences: z
@@ -84,26 +89,48 @@ export const FormPreferencesSchema = z.strictObject({
   launchTarget: launchTargetSchema.optional(),
 }) satisfies z.ZodType<FormPreferences>;
 
-const formPreferencesSchema = z.object({
-  provider: z.string().optional(),
-  providerPreferences: z.record(z.string(), providerPreferencesSchema).optional(),
-  favoriteModels: z
-    .array(
-      z.object({
-        provider: z.string(),
-        modelId: z.string(),
-      }),
-    )
-    .optional(),
-  isolation: z.enum(["local", "worktree"]).optional(),
+const LegacyProviderPreferencesSchema = z.strictObject({
+  model: z.string().optional(),
+  mode: z.string().optional(),
+  thinkingOptionId: z.string().optional(),
 });
 
-export type FormPreferences = z.infer<typeof formPreferencesSchema>;
+const LegacyFormPreferencesSchema = z
+  .strictObject({
+    workingDir: z.string().optional(),
+    provider: z.string().optional(),
+    serverId: z.string().optional(),
+    providerPreferences: z.record(z.string(), LegacyProviderPreferencesSchema).optional(),
+  })
+  .transform(({ provider, providerPreferences }): FormPreferences => {
+    const migratedProviderPreferences: Record<string, ProviderPreferences> = {};
+    for (const [providerId, legacy] of Object.entries(providerPreferences ?? {})) {
+      const model = legacy.model;
+      migratedProviderPreferences[providerId] = {
+        ...(model !== undefined ? { model } : {}),
+        ...(legacy.mode !== undefined ? { mode: legacy.mode } : {}),
+        ...(model !== undefined && legacy.thinkingOptionId !== undefined
+          ? { thinkingByModel: { [model]: legacy.thinkingOptionId } }
+          : {}),
+      };
+    }
+    return {
+      ...(provider !== undefined ? { provider } : {}),
+      ...(providerPreferences !== undefined
+        ? { providerPreferences: migratedProviderPreferences }
+        : {}),
+    };
+  });
+
+export const StoredFormPreferencesSchema: z.ZodType<FormPreferences> = z.union([
+  FormPreferencesSchema,
+  LegacyFormPreferencesSchema,
+]);
 
 export const DEFAULT_FORM_PREFERENCES: FormPreferences = {};
 
 export function parseFormPreferences(value: unknown): FormPreferences {
-  const result = formPreferencesSchema.safeParse(value);
+  const result = StoredFormPreferencesSchema.safeParse(value);
   return result.success ? result.data : DEFAULT_FORM_PREFERENCES;
 }
 
@@ -122,7 +149,7 @@ function mergeDefinedRecord<T>(
 
 function applyProviderPreferenceUpdates(
   existing: ProviderPreferences,
-  updates: Partial<ProviderPreferences>,
+  updates: Omit<Partial<ProviderPreferences>, "mode"> & { mode?: string | null },
 ): ProviderPreferences {
   const next: ProviderPreferences = { ...existing };
   const nextThinkingByModel = mergeDefinedRecord(existing.thinkingByModel, updates.thinkingByModel);
@@ -131,7 +158,9 @@ function applyProviderPreferenceUpdates(
   if (updates.model !== undefined) {
     next.model = updates.model;
   }
-  if (updates.mode !== undefined) {
+  if (updates.mode === null) {
+    delete next.mode;
+  } else if (updates.mode !== undefined) {
     next.mode = updates.mode;
   }
   if (nextThinkingByModel !== undefined) {
@@ -147,7 +176,7 @@ function applyProviderPreferenceUpdates(
 export function mergeProviderPreferences(args: {
   preferences: FormPreferences;
   provider: AgentProvider;
-  updates: Partial<ProviderPreferences>;
+  updates: Omit<Partial<ProviderPreferences>, "mode"> & { mode?: string | null };
 }): FormPreferences {
   const { preferences, provider, updates } = args;
   const existingProviderPreferences = preferences.providerPreferences ?? {};
@@ -185,7 +214,7 @@ export function mergeCreateAgentSelectionPreferences(args: {
     provider: args.provider,
     updates: {
       model: modelId || undefined,
-      mode: modeId || undefined,
+      mode: args.modeId === undefined ? undefined : modeId || null,
       ...(modelId && thinkingOptionId ? { thinkingByModel: { [modelId]: thinkingOptionId } } : {}),
       ...(options.success ? { options: options.data } : {}),
     },
@@ -261,4 +290,14 @@ export function toggleFavoriteModel(args: {
       ? existingFavorites.filter((entry) => buildFavoriteModelKey(entry) !== favoriteKey)
       : [...existingFavorites, favorite],
   };
+}
+
+export type LaunchTarget = { kind: "chat" } | { kind: "terminal"; profileId: string };
+
+export interface FormPreferences {
+  provider?: string;
+  providerPreferences?: Record<string, ProviderPreferences>;
+  favoriteModels?: FavoriteModelPreference[];
+  isolation?: "local" | "worktree";
+  launchTarget?: LaunchTarget;
 }
