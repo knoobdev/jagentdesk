@@ -1,3 +1,6 @@
+import { createChangeRequestRouter } from "../services/change-request-router.js";
+import { createForgeService } from "../services/forge-registry.js";
+import { createForgeResolver } from "../services/forge-resolver.js";
 import { createChangeRequestWatches } from "./agent/change-request-watches/index.js";
 import { getAgentMessageDelivery } from "./agent/agent-prompt.js";
 import { BotStorage } from "./bots/storage.js";
@@ -1026,12 +1029,15 @@ export async function createJAgentDeskDaemon(
     logger,
   });
   const github = createGitHubService();
+  const forgeResolver = createForgeResolver({
+    createService: (forge) => (forge === "github" ? github : createForgeService(forge)),
+  });
   const workspaceGitService = new WorkspaceGitServiceImpl({
     logger,
     jagentdeskHome: config.jagentdeskHome,
     worktreesRoot: config.worktreesRoot,
     deps: {
-      forgeOverrides: { github },
+      forgeResolver,
     },
   });
   workspaceRegistry.subscribeToMutations((mutation) => {
@@ -1712,7 +1718,7 @@ export async function createJAgentDeskDaemon(
   });
   await scheduleService.start();
   const changeRequestWatches = createChangeRequestWatches({
-    source: github.changeRequests,
+    router: createChangeRequestRouter({ forgeResolver }),
     backgroundWork: agentManager,
     jagentdeskHome: config.jagentdeskHome,
     logger,
@@ -2577,6 +2583,7 @@ export async function createJAgentDeskDaemon(
     if (wsServer) {
       await wsServer.close();
     }
+    forgeResolver.dispose();
     await serviceProxy.stopStandalone();
     // Force-drop remaining sockets so httpServer.close() resolves promptly.
     // We've already closed wsServer (which sent ws-layer close frames) and
