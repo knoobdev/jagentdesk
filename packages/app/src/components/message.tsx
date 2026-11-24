@@ -1,3 +1,4 @@
+import { useTargetAgentTitle } from "@/tool-calls/use-target-agent-title";
 import { useToolCallExpanded } from "@/tool-calls/expansion-context";
 import { useDisclosureHold } from "@/agent-stream/disclosure";
 import { useBuiltinPluginEnabled } from "@/plugins/builtin/hooks";
@@ -3284,6 +3285,7 @@ function areExpandableBadgePropsEqual(previous: ExpandableBadgeProps, next: Expa
 }
 
 interface ToolCallProps {
+  serverId?: string;
   onOpenSubagent?: () => void;
   agentMessage?: AgentMessage;
   onOpenAgent?: (agentId: string) => void;
@@ -3311,6 +3313,7 @@ interface ToolCallProps {
 
 export const ToolCall = memo(function ToolCall({
   agentMessage,
+  serverId,
   onOpenSubagent,
   onOpenAgent,
   toolName,
@@ -3357,10 +3360,12 @@ export const ToolCall = memo(function ToolCall({
     return undefined;
   }, [detail, args, result]);
 
+  const targetAgentTitle = useTargetAgentTitle({ serverId, toolName, detail: effectiveDetail });
   const presentation = useMemo(
     () =>
       buildToolCallPresentation({
         agentMessage,
+        targetAgentTitle,
         toolName,
         status,
         error: error ?? null,
@@ -3369,7 +3374,7 @@ export const ToolCall = memo(function ToolCall({
         cwd,
         resolveIcon: resolveToolCallIcon,
       }),
-    [toolName, status, error, effectiveDetail, metadata, cwd, agentMessage],
+    [toolName, status, error, effectiveDetail, metadata, cwd, agentMessage, targetAgentTitle],
   );
   const handleOpenSender = useMemo(() => {
     if (!agentMessage || !onOpenAgent) return undefined;
@@ -3524,6 +3529,7 @@ export const ToolCall = memo(function ToolCall({
 function areToolCallPropsEqual(previous: ToolCallProps, next: ToolCallProps) {
   const keys = [
     "onOpenSubagent",
+    "serverId",
     "agentMessage",
     "onOpenAgent",
     "toolName",

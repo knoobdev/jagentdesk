@@ -883,6 +883,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             <ToolCallSlot
               itemId={item.id}
               onInlineDetailsExpandedChangeByItemId={setInlineDetailsExpanded}
+              serverId={resolvedServerId}
               toolName={data.name}
               defaultExpanded={isExpandedTurnItem(item.id)}
               forceInline={isExpandedTurnItem(item.id)}
