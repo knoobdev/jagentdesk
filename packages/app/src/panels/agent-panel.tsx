@@ -1,3 +1,4 @@
+import { useAgentStreamTail } from "@/agent-stream/use-agent-stream-tail";
 import { BuiltinPluginGate } from "@/plugins/builtin/gate";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { SessionShareControl } from "@/composer/agent-controls/session-share-control";
@@ -1394,9 +1395,7 @@ const AgentStreamSection = memo(function AgentStreamSection({
   toast: ReturnType<typeof useToastHost>["api"];
   onOpenWorkspaceFile?: (request: WorkspaceFileOpenRequest) => void;
 }) {
-  const streamItemsRaw = useSessionStore((state) =>
-    agentId ? state.sessions[serverId]?.agentStreamTail?.get(agentId) : undefined,
-  );
+  const streamItemsRaw = useAgentStreamTail(serverId, agentId);
   const pendingMessageSubmissions = useSessionStore(
     useShallow((state) =>
       agentId
