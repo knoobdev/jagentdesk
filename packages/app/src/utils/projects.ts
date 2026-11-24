@@ -6,6 +6,7 @@ import { buildWorkspaceStructureProjects } from "@/projects/workspace-structure"
 export interface WorkspaceSummary {
   changeRequestNumber: number | null;
   statusEnteredAt: Date | null;
+  background: boolean;
   id: string;
   name: string;
   title?: string;
@@ -142,6 +143,7 @@ function toWorkspaceSummary(workspace: WorkspaceDescriptor): WorkspaceSummary {
     ...(workspace.title ? { title: workspace.title } : {}),
     workspaceKind: workspace.workspaceKind,
     status: workspace.status,
+    background: workspace.background ?? false,
     currentBranch: currentBranch && currentBranch !== "HEAD" ? currentBranch : null,
     ...(workspace.archivingAt ? { archivingAt: workspace.archivingAt } : {}),
   };

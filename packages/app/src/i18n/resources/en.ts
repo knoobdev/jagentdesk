@@ -82,7 +82,7 @@ export const en = {
       close: "Close menu",
     },
     commandCenter: {
-      placeholder: "Search commands, files, workspaces, and agents...",
+      placeholder: "Search workspaces, files, and actions...",
       noMatches: "No matches",
       actions: "Actions",
       workspaces: "Workspaces",
@@ -110,6 +110,11 @@ export const en = {
       openInFocusedPane: "Open {{name}} in focused pane",
       groupByProject: "Group by project",
       groupByStatus: "Group by status",
+      placeholderWithoutFiles: "Search workspaces and actions...",
+      workspacePlaceholder: "Search workspaces...",
+      actionPlaceholder: "Search actions...",
+      recentWorkspaces: "Recent workspaces",
+      tabs: { all: "All", workspaces: "Workspaces", files: "Files", actions: "Actions" },
     },
   },
   composer: {

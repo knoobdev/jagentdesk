@@ -84,8 +84,7 @@ export const zhCN: TranslationResources = {
       close: "关闭菜单",
     },
     commandCenter: {
-      placeholder:
-        "\u641C\u7D22\u547D\u4EE4\u3001\u6587\u4EF6\u3001\u5DE5\u4F5C\u533A\u548C Agent...",
+      placeholder: "\u641C\u7D22\u5DE5\u4F5C\u533A\u3001\u6587\u4EF6\u548C\u64CD\u4F5C...",
       noMatches: "\u6CA1\u6709\u5339\u914D\u9879",
       actions: "\u64CD\u4F5C",
       workspaces: "\u5DE5\u4F5C\u533A",
@@ -114,6 +113,16 @@ export const zhCN: TranslationResources = {
       openInFocusedPane: "\u5728\u5F53\u524D\u7A97\u683C\u4E2D\u6253\u5F00{{name}}",
       groupByProject: "\u6309\u9879\u76EE\u5206\u7EC4",
       groupByStatus: "\u6309\u72B6\u6001\u5206\u7EC4",
+      placeholderWithoutFiles: "\u641C\u7D22\u5DE5\u4F5C\u533A\u548C\u64CD\u4F5C...",
+      workspacePlaceholder: "\u641C\u7D22\u5DE5\u4F5C\u533A...",
+      actionPlaceholder: "\u641C\u7D22\u64CD\u4F5C...",
+      recentWorkspaces: "\u6700\u8FD1\u7684\u5DE5\u4F5C\u533A",
+      tabs: {
+        all: "\u5168\u90E8",
+        workspaces: "\u5DE5\u4F5C\u533A",
+        files: "\u6587\u4EF6",
+        actions: "\u64CD\u4F5C",
+      },
     },
   },
   composer: {

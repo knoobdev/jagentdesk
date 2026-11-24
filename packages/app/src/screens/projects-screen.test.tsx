@@ -229,6 +229,7 @@ function workspaceSummary(overrides: Partial<WorkspaceSummary> = {}): WorkspaceS
   return {
     id: "ws-1",
     changeRequestNumber: null,
+    background: false,
     statusEnteredAt: null,
     name: "main",
     workspaceKind: "directory",

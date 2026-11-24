@@ -84,7 +84,7 @@ export const fr: TranslationResources = {
       close: "Fermer le menu",
     },
     commandCenter: {
-      placeholder: "Rechercher des commandes, fichiers, espaces de travail et agents\u2026",
+      placeholder: "Rechercher des espaces de travail, fichiers et actions\u2026",
       noMatches: "Aucun r\u00E9sultat",
       actions: "Actions",
       workspaces: "Espaces de travail",
@@ -113,6 +113,16 @@ export const fr: TranslationResources = {
       openInFocusedPane: "Ouvrir {{name}} dans le panneau actif",
       groupByProject: "Grouper par projet",
       groupByStatus: "Grouper par statut",
+      placeholderWithoutFiles: "Rechercher des espaces de travail et des actions\u2026",
+      workspacePlaceholder: "Rechercher des espaces de travail\u2026",
+      actionPlaceholder: "Rechercher des actions\u2026",
+      recentWorkspaces: "Espaces de travail r\u00E9cents",
+      tabs: {
+        all: "Tout",
+        workspaces: "Espaces de travail",
+        files: "Fichiers",
+        actions: "Actions",
+      },
     },
   },
   composer: {

@@ -84,7 +84,7 @@ export const ptBR: TranslationResources = {
       close: "Fechar menu",
     },
     commandCenter: {
-      placeholder: "Buscar comandos, arquivos, espa\u00E7os de trabalho e agentes...",
+      placeholder: "Pesquisar espa\u00E7os de trabalho, arquivos e a\u00E7\u00F5es...",
       noMatches: "Nenhuma correspond\u00EAncia",
       actions: "A\u00E7\u00F5es",
       workspaces: "Espa\u00E7os de trabalho",
@@ -112,6 +112,16 @@ export const ptBR: TranslationResources = {
       openInFocusedPane: "Abrir {{name}} no painel em foco",
       groupByProject: "Agrupar por projeto",
       groupByStatus: "Agrupar por status",
+      placeholderWithoutFiles: "Pesquisar espa\u00E7os de trabalho e a\u00E7\u00F5es...",
+      workspacePlaceholder: "Pesquisar espa\u00E7os de trabalho...",
+      actionPlaceholder: "Pesquisar a\u00E7\u00F5es...",
+      recentWorkspaces: "Espa\u00E7os de trabalho recentes",
+      tabs: {
+        all: "Tudo",
+        workspaces: "Espa\u00E7os de trabalho",
+        files: "Arquivos",
+        actions: "A\u00E7\u00F5es",
+      },
     },
   },
   composer: {
