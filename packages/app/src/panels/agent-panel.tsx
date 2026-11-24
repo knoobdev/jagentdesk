@@ -1,3 +1,4 @@
+import { KeyboardTranslateView } from "@/keyboard/shift";
 import { AgentCommandsProvider } from "@/agent-commands";
 import { ComposerEditingSession } from "@/composer/editing-session";
 import { ParentAgentCallout, ParentAgentPill, useParentAgentId } from "@/subagents/parent";
@@ -1657,21 +1658,13 @@ function ActiveAgentComposer({
     [agentId, cwd, handleOpenSpecFile, serverId],
   );
 
-  const { style: composerKeyboardStyle } = useKeyboardShiftStyle({
-    mode: "translate",
-  });
-
   const inputAreaStyle = useMemo(
-    () => [
-      animatedStaticStyles.inputAreaWrapper,
-      { paddingBottom: insets.bottom },
-      composerKeyboardStyle,
-    ],
-    [insets.bottom, composerKeyboardStyle],
+    () => [animatedStaticStyles.inputAreaWrapper, { paddingBottom: insets.bottom }],
+    [insets.bottom],
   );
 
   return (
-    <ReanimatedAnimated.View style={inputAreaStyle} onLayout={onInputAreaLayout}>
+    <KeyboardTranslateView style={inputAreaStyle} onLayout={onInputAreaLayout}>
       {isSupervisorThread ? (
         <OrchestrationLeadPlanCard serverId={serverId} workspaceId={workspaceId} />
       ) : null}
@@ -1719,7 +1712,7 @@ function ActiveAgentComposer({
           topContent={specModeDock}
         />
       )}
-    </ReanimatedAnimated.View>
+    </KeyboardTranslateView>
   );
 }
 
