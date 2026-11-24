@@ -1,3 +1,4 @@
+import { iconButtonChromeStyle } from "@/components/ui/icon-button-chrome";
 import { useAgentFactsLine } from "@/panels/agent-facts-line";
 import { useCallback, useMemo, useState, type ReactElement } from "react";
 import { Pressable, ScrollView, Text, View, type PressableStateCallbackType } from "react-native";
@@ -311,6 +312,11 @@ function SubagentActionButton({
   visible: boolean;
   onPress: () => void;
 }): ReactElement {
+  const compact = useIsCompactFormFactor();
+  const actionStyle = useCallback(
+    (state: PressableStateCallbackType) => iconButtonChromeStyle({ size: "small", compact, state }),
+    [compact],
+  );
   return (
     <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
       <TooltipTrigger asChild disabled={!visible}>
@@ -319,7 +325,7 @@ function SubagentActionButton({
           accessibilityLabel={accessibilityLabel}
           testID={testID}
           onPress={onPress}
-          style={styles.actionButton}
+          style={actionStyle}
           hitSlop={8}
         >
           {({ hovered, pressed }) => renderSubagentActionIcon(icon, hovered || pressed)}
@@ -399,6 +405,7 @@ const styles = StyleSheet.create((theme) => ({
     paddingVertical: theme.spacing[1],
   },
   row: {
+    minHeight: { xs: 44, md: 32 },
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
@@ -406,6 +413,7 @@ const styles = StyleSheet.create((theme) => ({
     paddingVertical: theme.spacing[2],
   },
   rowActive: {
+    minHeight: { xs: 44, md: 32 },
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
