@@ -1,15 +1,12 @@
-import { useCallback } from "react";
 import { Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
-import { ProviderUsageTooltipSection } from "@/provider-usage/tooltip-section";
-import { useProviderUsage } from "@/provider-usage/use-provider-usage";
-import { Button } from "@/components/ui/button";
+import { AgentUsage } from "@/usage/agent-usage";
 import { formatTokenCount } from "./context-window-meter.utils";
 
 interface ContextWindowDetailsProps {
   serverId: string;
-  provider?: string | null;
+  agentId: string;
   context: {
     percentage: number;
     usedTokens: number;
@@ -27,17 +24,13 @@ interface ContextWindowDetailsProps {
  */
 export function ContextWindowDetails({
   serverId,
-  provider,
+  agentId,
   context,
   sessionCost,
   showTitle,
   refreshable,
 }: ContextWindowDetailsProps) {
   const { t } = useTranslation();
-  const { view, refresh, canFetch } = useProviderUsage(serverId);
-  const handleRefresh = useCallback(() => {
-    void refresh().catch(() => {});
-  }, [refresh]);
   return (
     <>
       <View style={styles.summary}>
@@ -61,21 +54,7 @@ export function ContextWindowDetails({
           <Text style={styles.detail}>{t("contextWindow.sessionCost", { cost: sessionCost })}</Text>
         ) : null}
       </View>
-      {canFetch ? (
-        <>
-          <ProviderUsageTooltipSection view={view} activeProviderId={provider} />
-          {refreshable ? (
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={view.kind === "loading" || (view.kind === "ready" && view.isRefreshing)}
-              onPress={handleRefresh}
-            >
-              {t("common.refresh")}
-            </Button>
-          ) : null}
-        </>
-      ) : null}
+      <AgentUsage serverId={serverId} agentId={agentId} refreshable={refreshable} />
     </>
   );
 }

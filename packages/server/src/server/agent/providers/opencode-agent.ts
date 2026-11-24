@@ -1,3 +1,4 @@
+import { createExternalProcessEnv } from "../../jagentdesk-env.js";
 import { validateProviderOptions } from "../provider-options.js";
 import {
   createOpencodeClient,
@@ -1506,6 +1507,10 @@ export class OpenCodeAgentClient implements AgentClient {
         false,
         unbindBridge,
         connectServer,
+        createExternalProcessEnv(process.env, {
+          ...this.runtimeSettings?.env,
+          ...launchContext?.env,
+        }),
       );
     } catch (error) {
       await connection.release();
@@ -1561,6 +1566,10 @@ export class OpenCodeAgentClient implements AgentClient {
         registeredAcquisition !== null,
         unbindBridge,
         connectServer,
+        createExternalProcessEnv(process.env, {
+          ...this.runtimeSettings?.env,
+          ...launchContext?.env,
+        }),
       );
     } catch (error) {
       await connection.release();
@@ -3369,6 +3378,16 @@ interface OpenCodeServerConnection {
 }
 
 class OpenCodeAgentSession implements AgentSession {
+  private readonly usageSessionKey = randomUUID();
+  usageSession() {
+    if (this.closed) return null;
+    return {
+      provider: "opencode",
+      model: this.config.model,
+      env: this.harnessEnvironment,
+      sessionKey: this.usageSessionKey,
+    };
+  }
   readonly provider = "opencode" as const;
   readonly capabilities = OPENCODE_CAPABILITIES;
 
@@ -3457,6 +3476,9 @@ class OpenCodeAgentSession implements AgentSession {
     private readonly externallyDriven = false,
     releaseBridge?: () => void,
     connectServer?: () => Promise<OpenCodeServerConnection>,
+    private readonly harnessEnvironment: Record<string, string> = createExternalProcessEnv(
+      process.env,
+    ),
   ) {
     this.config = config;
     this.server = { client, events, url: serverUrl ?? "", release: releaseServer };

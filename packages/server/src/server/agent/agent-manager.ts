@@ -1403,6 +1403,11 @@ export class AgentManager {
     return this.providerDefinitions.get(provider)?.derivedFromProviderId ?? provider;
   }
 
+  usageSession(id: string) {
+    const agent = this.agents.get(id);
+    return agent?.session?.usageSession?.() ?? null;
+  }
+
   getAgent(id: string): ManagedAgent | null {
     const agent = this.agents.get(id);
     return agent ? { ...agent } : null;

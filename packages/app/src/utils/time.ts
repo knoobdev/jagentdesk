@@ -102,7 +102,7 @@ export function formatCompactTimeAgoAsProse(label: string): string {
  * Counted on the calendar rather than in elapsed time, so six days and 23 hours ago on
  * today's weekday is 7, and rounded so a DST day of 23 or 25 hours still counts as one.
  */
-function localCalendarDaysBetween(earlier: Date, later: Date): number {
+export function localCalendarDaysBetween(earlier: Date, later: Date): number {
   const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
   return Math.round((startOfDay(later).getTime() - startOfDay(earlier).getTime()) / DAY_MS);
 }
@@ -175,3 +175,9 @@ export function formatDuration(durationMs: number): string {
   const remMinutes = totalMinutes % 60;
   return remMinutes === 0 ? `${hours}h` : `${hours}h ${remMinutes}m`;
 }
+
+export function formatTimeOfDay(date: Date): string {
+  return getTimeFormatter().format(date);
+}
+
+export type RelativeTimeResolution = "minute" | "hour" | "day" | "static";

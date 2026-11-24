@@ -1,3 +1,4 @@
+import type { AppSettingsUpdate } from "./storage";
 import { useCallback, useMemo } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
@@ -91,7 +92,7 @@ export interface UseAppSettingsReturn {
   settings: AppSettings;
   isLoading: boolean;
   error: unknown;
-  updateSettings: (updates: Partial<AppSettings>) => Promise<void>;
+  updateSettings: (updates: AppSettingsUpdate) => Promise<void>;
   resetSettings: () => Promise<void>;
 }
 
@@ -115,7 +116,7 @@ export function useAppSettings(): UseAppSettingsReturn {
   });
 
   const updateSettings = useCallback(
-    async (updates: Partial<AppSettings>) => {
+    async (updates: AppSettingsUpdate) => {
       try {
         await saveAppSettings({ queryClient, updates });
       } catch (err) {
@@ -254,13 +255,13 @@ export function useSettings<TSelected>(
   };
 }
 
-export async function persistAppSettings(updates: Partial<AppSettings>): Promise<void> {
+export async function persistAppSettings(updates: AppSettingsUpdate): Promise<void> {
   await saveAppSettings({ queryClient: appQueryClient, updates });
 }
 
 export async function saveAppSettings(input: {
   queryClient: QueryClient;
-  updates: Partial<AppSettings>;
+  updates: AppSettingsUpdate;
   deps?: SettingsDeps;
 }): Promise<void> {
   await saveAppSettingsPure({

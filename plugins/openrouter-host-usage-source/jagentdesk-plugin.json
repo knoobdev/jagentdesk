@@ -1,0 +1,1 @@
+{ "id": "openrouter-host-usage-source", "requirements": { "jagentdesk": ">=0.9.59" } }

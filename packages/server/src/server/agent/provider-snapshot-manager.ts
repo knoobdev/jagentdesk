@@ -56,6 +56,8 @@ import {
 } from "./agent-configuration-validator.js";
 import { ProviderInstallations } from "./provider-installation/provider-installations.js";
 
+const USAGE_PROVIDER_ACTIVITY_TIMEOUT_MS = 5_000;
+const USAGE_PROVIDER_ACTIVITY_TTL_MS = 300_000;
 const DEFAULT_REFRESH_TIMEOUT_MS = 120_000;
 const MAX_REFRESH_TIMEOUT_MS = 2_147_483_647;
 const DEFAULT_DIAGNOSTIC_TIMEOUT_MS = 120_000;
@@ -225,6 +227,7 @@ function normalizeModelCatalog(models: AgentModelDefinition[]): AgentModelDefini
 }
 
 export class ProviderSnapshotManager {
+  private readonly usageActivityCache = new Map<AgentProvider, { at: number; active: boolean }>();
   private readonly snapshots = new Map<string, Map<AgentProvider, ProviderSnapshotEntry>>();
   private readonly providerLoads = new Map<string, Map<AgentProvider, ProviderLoad>>();
   private readonly events = new EventEmitter();
@@ -416,6 +419,7 @@ export class ProviderSnapshotManager {
         delete this.providerClients[provider];
       } else definitions[provider] = before;
     }
+    this.usageActivityCache.clear();
     this.providerRegistry = definitions;
     this.updateRefreshProviders();
     this.warnUnknownProviderOverrides();
@@ -436,6 +440,83 @@ export class ProviderSnapshotManager {
     this.providerClients[provider] = client;
     this.ownedClients.add(client);
     return client;
+  }
+
+  async isProviderActiveForUsage(
+    provider: string,
+    options: { forceRefresh?: boolean; timeoutMs?: number; ttlMs?: number } = {},
+  ): Promise<boolean> {
+    const matching = Object.keys(this.providerRegistry)
+      .map((id) => ({ id, definition: this.providerRegistry[id] }))
+      .filter(
+        (candidate): candidate is { id: AgentProvider; definition: ProviderDefinition } =>
+          candidate.definition !== undefined &&
+          candidate.definition.enabled &&
+          (candidate.id === provider || candidate.definition.derivedFromProviderId === provider),
+      );
+    if (matching.length === 0) return false;
+
+    const forceRefresh = options.forceRefresh === true;
+    const ttlMs = options.ttlMs ?? USAGE_PROVIDER_ACTIVITY_TTL_MS;
+    const timeoutMs = options.timeoutMs ?? USAGE_PROVIDER_ACTIVITY_TIMEOUT_MS;
+    const now = Date.now();
+
+    const unresolved: Array<{ id: AgentProvider; definition: ProviderDefinition }> = [];
+    if (forceRefresh) {
+      unresolved.push(...matching);
+    } else {
+      for (const candidate of matching) {
+        const cached = this.usageActivityCache.get(candidate.id);
+        if (cached && now - cached.at < ttlMs) {
+          if (cached.active) return true;
+          continue;
+        }
+        unresolved.push(candidate);
+      }
+      if (unresolved.length === 0) return false;
+    }
+
+    const results = await Promise.all(
+      unresolved.map(({ id, definition }) => this.probeUsageActivity(id, definition, timeoutMs)),
+    );
+    return results.some(Boolean);
+  }
+
+  private async probeUsageActivity(
+    provider: AgentProvider,
+    definition: ProviderDefinition,
+    timeoutMs: number,
+  ): Promise<boolean> {
+    const generation = this.providerRegistry;
+    const controller = new AbortController();
+    const timedOut = Symbol("usage-provider-activity-timeout");
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<typeof timedOut>((finish) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        finish(timedOut);
+      }, timeoutMs);
+    });
+    const probe = this.ensureClient(provider, definition)
+      .isAvailable(controller.signal)
+      .then(
+        (active) => ({ ok: true as const, active }),
+        () => ({ ok: false as const, active: false }),
+      );
+    try {
+      const outcome = await Promise.race([probe, deadline]);
+      if (outcome === timedOut) {
+        // Fail open without caching when a slow probe misses the deadline; a subsequent read
+        // picks up the real status once the provider snapshot finishes loading.
+        return true;
+      }
+      if (outcome.ok && this.providerRegistry === generation) {
+        this.usageActivityCache.set(provider, { at: Date.now(), active: outcome.active });
+      }
+      return outcome.active;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   async resolveUsageLaunch(provider: string) {
@@ -642,6 +723,7 @@ export class ProviderSnapshotManager {
       // The mutable config is the complete provider source after startup. Keeping
       // startup-derived runtime settings here would retain removed command/env fields.
       if (options.replace) this.runtimeSettings = undefined;
+      this.usageActivityCache.clear();
       this.providerRegistry = this.buildRegistry();
       this.updateRefreshProviders();
       this.warnUnknownProviderOverrides();

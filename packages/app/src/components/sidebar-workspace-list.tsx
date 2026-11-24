@@ -2415,7 +2415,14 @@ function ProjectModeList({
             {t("sidebar.project.empty.title")}
           </Text>
           <Text style={styles.emptyText}>{t("sidebar.project.empty.description")}</Text>
-          <Button variant="ghost" size="sm" leftIcon={Plus} onPress={onAddProject}>
+          <Button
+            variant="ghost"
+            size="sm"
+            leftIcon={Plus}
+            style={styles.emptyAction}
+            textStyle={styles.emptyActionText}
+            onPress={onAddProject}
+          >
             {t("sidebar.actions.addProject")}
           </Button>
         </View>
@@ -2534,6 +2541,8 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     gap: theme.spacing[3],
   },
+  emptyAction: { maxWidth: "100%" },
+  emptyActionText: { flexShrink: 1 },
   emptyTitle: {
     color: theme.colors.foreground,
     fontSize: theme.fontSize.sm,

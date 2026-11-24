@@ -1317,6 +1317,7 @@ export class Session {
       : null;
     this.figmaSession = this.createFigmaSession(options.figmaService);
     this.usageSession = new UsageSession({
+      isEnabled: () => this.daemonConfigStore?.get().usage?.enabled !== false,
       emit: (message) => this.emit(message),
       runtime: createPluginUsageRuntime(options.pluginRuntime),
       logger: this.sessionLogger,

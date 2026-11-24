@@ -52,7 +52,7 @@ test.describe("provider usage settings", () => {
     await openSettingsHostSection(page, serverId, "usage");
     await usageFixture.waitForRequestCount(1);
 
-    const card = page.getByTestId("provider-usage-card");
+    const card = page.getByTestId("usage-card");
     await expect(card).toBeVisible({ timeout: 10_000 });
     await expect(card.getByText("Claude", { exact: true })).toBeVisible();
     await expect(card.getByText("Codex", { exact: true })).toBeVisible();
@@ -66,7 +66,6 @@ test.describe("provider usage settings", () => {
     await expect(card.getByText("$5.00 / $20.00", { exact: true })).toBeVisible();
     await expect(card.getByText("Valid until", { exact: true })).toBeVisible();
     await expect(card.getByText("2026-12-31", { exact: true })).toBeVisible();
-    await expect(card.getByText(/OpenUsage 0\.6\.27/)).toBeVisible();
   });
 
   test("refresh invalidates and refetches usage", async ({ page }) => {
@@ -105,7 +104,7 @@ test.describe("provider usage settings", () => {
     await usageFixture.waitForRequestCount(1);
     await expect(page.getByText("23%")).toBeVisible({ timeout: 10_000 });
 
-    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByRole("button", { name: "Refresh all", exact: true }).click();
     await usageFixture.waitForRequestCount(2);
 
     expect(usageFixture.requestCount()).toBe(2);
@@ -142,7 +141,7 @@ test.describe("provider usage settings", () => {
     await openSettings(page);
     await openSettingsHostSection(page, serverId, "usage");
 
-    const card = page.getByTestId("provider-usage-card");
+    const card = page.getByTestId("usage-card");
     await expect(card).toBeVisible({ timeout: 10_000 });
     await expect(card.getByText("Error", { exact: true })).toBeVisible();
     await expect(card.getByText("Claude auth expired", { exact: true })).toBeVisible();

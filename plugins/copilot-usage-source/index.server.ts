@@ -1,0 +1,16 @@
+import type { PluginServerContext } from "@jagentdesk/plugin/server";
+import { inputSchema } from "./shared/input.js";
+import { fetchUsage, discover } from "./server/usage.js";
+
+export default function contribute(server: PluginServerContext) {
+  server.registerUsageSource({
+    id: "copilot",
+    label: "GitHub Copilot",
+    icon: "icon.svg",
+    providers: ["copilot"],
+    input: inputSchema,
+    discover: (scope) => (scope.kind === "global" ? discover() : Promise.resolve([])),
+    fetch: fetchUsage,
+  });
+  return () => {};
+}

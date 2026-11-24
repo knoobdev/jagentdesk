@@ -133,6 +133,7 @@ export interface Agent {
   runtimeInfo?: AgentRuntimeInfo;
   lastUsage?: AgentUsage;
   usageTotals?: AgentUsageTotals;
+  usageScopeKey?: string;
   lastError?: string | null;
   title: string | null;
   cwd: string;

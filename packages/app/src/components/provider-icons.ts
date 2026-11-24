@@ -1,4 +1,6 @@
-import { Bot, PackagePlus } from "lucide-react-native";
+import { AntigravityIcon } from "@/components/icons/antigravity-icon";
+import { KiroIcon } from "@/components/icons/kiro-icon";
+import { Bot } from "lucide-react-native";
 import { createElement, type ComponentType } from "react";
 import { SvgXml } from "react-native-svg";
 import { TERMINAL_PROFILE_ICON_NAMES } from "@jagentdesk/protocol/provider-icon-names";
@@ -24,7 +26,8 @@ const BUILTIN_PROVIDER_ICONS: Record<string, ProviderIconComponent> = {
   claude: ClaudeIcon as unknown as ProviderIconComponent,
   codex: CodexIcon as unknown as ProviderIconComponent,
   copilot: CopilotIcon as unknown as ProviderIconComponent,
-  kiro: PackagePlus,
+  antigravity: AntigravityIcon,
+  kiro: KiroIcon,
   minimax: MiniMaxIcon as unknown as ProviderIconComponent,
   omp: OmpIcon as unknown as ProviderIconComponent,
   opencode: OpenCodeIcon as unknown as ProviderIconComponent,
@@ -41,6 +44,8 @@ for (const name of TERMINAL_PROFILE_ICON_NAMES) {
     CATALOG_ICON_SVGS.set(name, iconSvg);
   }
 }
+
+for (const [id, svg] of Object.entries(ACP_PROVIDER_ICON_SVGS)) CATALOG_ICON_SVGS.set(id, svg);
 
 const catalogIconComponents = new Map<string, ProviderIconComponent>();
 
@@ -79,4 +84,8 @@ export function getProviderIcon(provider: string): ProviderIconComponent {
     return getCatalogProviderIcon(name.id);
   }
   return Bot;
+}
+
+export function SvgIcon({ svg, size, color }: ProviderIconProps & { svg: string }) {
+  return createElement(SvgXml, { xml: svg, width: size, height: size, color });
 }

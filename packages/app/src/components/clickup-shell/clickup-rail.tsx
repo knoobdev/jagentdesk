@@ -100,7 +100,10 @@ const RailButton = memo(function RailButton({
 });
 
 function RailNavItem({ item }: { item: AppNavItem }) {
-  const handlePress = useCallback(() => router.push(item.route), [item.route]);
+  const handlePress = useCallback(() => {
+    if (item.onPress) item.onPress();
+    else router.push(item.route);
+  }, [item]);
   return (
     <RailButton
       icon={item.icon}

@@ -55,8 +55,7 @@ import {
   useHosts,
 } from "@/runtime/host-runtime";
 import { ProvidersSection } from "@/screens/settings/providers-section";
-import { ProviderUsageSettingsSection } from "@/provider-usage/settings-section";
-import { useProviderUsage } from "@/provider-usage/use-provider-usage";
+import { HostUsageSection } from "@/usage/host-usage-section";
 import { HostAppearanceSection } from "@/screens/settings/host-appearance-section";
 import { SettingsSection } from "@/screens/settings/settings-section";
 import { migrateHostData } from "@/runtime/migration/host-migration-service";
@@ -339,10 +338,6 @@ export function HostProvidersPage({ serverId }: { serverId: string }) {
 
 export function HostUsagePage({ serverId }: { serverId: string }) {
   const host = useHostProfile(serverId);
-  const { view: providerUsageView, refresh: refreshProviderUsage } = useProviderUsage(serverId);
-  const handleRefresh = useCallback(() => {
-    void refreshProviderUsage();
-  }, [refreshProviderUsage]);
 
   if (!host) {
     return <HostNotFound />;
@@ -350,7 +345,7 @@ export function HostUsagePage({ serverId }: { serverId: string }) {
 
   return (
     <View>
-      <ProviderUsageSettingsSection view={providerUsageView} onRefresh={handleRefresh} />
+      <HostUsageSection serverId={serverId} />
     </View>
   );
 }

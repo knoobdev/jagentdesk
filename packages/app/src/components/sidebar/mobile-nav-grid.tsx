@@ -1,4 +1,4 @@
-import { router, type Href } from "expo-router";
+import { router } from "expo-router";
 import { memo, useCallback, useMemo, type MutableRefObject } from "react";
 import {
   Pressable,
@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import type { GestureType } from "react-native-gesture-handler";
 import { NestableScrollContainer } from "react-native-draggable-flatlist";
-import { ChevronDown, ChevronUp, type LucideIcon } from "lucide-react-native";
+import { ChevronDown, ChevronUp } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useAppNavItems, type AppNavItem } from "@/components/sidebar/use-app-nav";
 import { useMobileNavGridStore } from "@/stores/mobile-nav-grid-store";
@@ -28,15 +28,7 @@ const foregroundColorMapping = (theme: Theme) => ({ color: theme.colors.foregrou
 const foregroundMutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 
 /** A grid tile: one nav destination, its icon over its short label. */
-export interface MobileNavTile {
-  key: string;
-  icon: LucideIcon;
-  label: string;
-  shortLabel: string;
-  route: Href;
-  isActive: boolean;
-  testID: string;
-}
+export type MobileNavTile = AppNavItem;
 
 /**
  * The drawer rows predate the grid and their `sidebar-*` testIDs are load-bearing for the
@@ -57,7 +49,8 @@ const LEGACY_ROW_TEST_IDS: Readonly<Record<string, string>> = {
   docker: "sidebar-docker-nav",
   simulators: "sidebar-simulator-nav",
   workbench: "sidebar-workbench-nav",
-  usage: "sidebar-insights-nav",
+  insights: "sidebar-insights-nav",
+  usage: "sidebar-usage-nav",
   forge: "sidebar-forge-nav",
 };
 
@@ -68,12 +61,7 @@ export function mobileNavTileTestID(key: string, railTestID: string): string {
 /** The rail's nav items as grid tiles: same order, same active flags, drawer testIDs. */
 export function buildMobileNavTiles(items: AppNavItem[]): MobileNavTile[] {
   return items.map((item) => ({
-    key: item.key,
-    icon: item.icon,
-    label: item.label,
-    shortLabel: item.shortLabel,
-    route: item.route,
-    isActive: item.isActive,
+    ...item,
     testID: mobileNavTileTestID(item.key, item.testID),
   }));
 }
@@ -160,7 +148,8 @@ export function MobileNavGrid({
   const handleTilePress = useCallback(
     (tile: MobileNavTile) => {
       onBeforeNavigate?.();
-      router.push(tile.route);
+      if (tile.onPress) tile.onPress();
+      else router.push(tile.route);
     },
     [onBeforeNavigate],
   );

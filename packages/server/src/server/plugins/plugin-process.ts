@@ -454,6 +454,7 @@ export function createPluginWorker(options: {
           id: source.id,
           label: source.label,
           provider: source.provider,
+          providers: source.providers ? [...source.providers] : undefined,
           icon: source.icon
             ? await readPluginProviderIcon(message.pluginDirectory, source.icon)
             : undefined,

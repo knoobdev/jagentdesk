@@ -1,4 +1,5 @@
 import { SidebarFooterIconHighlight } from "@/components/sidebar/sidebar-footer-icon-highlight";
+import { UsageSidebarItem, useUsageSummary, useOpenSidebarUsage } from "@/usage/sidebar-item";
 import { BotsSidebar } from "@/bots/sidebar";
 import { isNative as platformIsNative } from "@/constants/platform";
 import { PluginSidebarPanel } from "@/plugins/sidebar-screen-items";
@@ -554,7 +555,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       servers: "Servers",
       argoCd: "Argo CD",
       skills: "Skills",
-      insights: "Usage & Cost",
+      insights: "Insights",
       forge: "Forge",
       marketplace: t("sidebar.actions.marketplace"),
       docker: "Docker",
@@ -894,6 +895,8 @@ function SidebarFooter({
   handleOpenHostSettings: (serverId: string) => void;
   showAddProject?: boolean;
 }) {
+  const openUsage = useOpenSidebarUsage();
+  const usageSummary = useUsageSummary();
   const newAgentKeys = useShortcutKeys("new-agent");
   const settingsKeys = useShortcutKeys("toggle-settings");
   const isClickUp = useIsClickUpTheme();
@@ -906,7 +909,15 @@ function SidebarFooter({
   }, [localServerId, openPairDeviceModal]);
 
   return (
-    <View style={styles.sidebarFooter} testID="sidebar-footer">
+    <View style={[styles.sidebarFooter, styles.footerWithUsage]} testID="sidebar-footer">
+      <SidebarHeaderRow
+        icon={BarChart3}
+        label="Usage"
+        onPress={openUsage}
+        testID="sidebar-usage-open"
+        variant="compact"
+      />
+      <UsageSidebarItem sources={usageSummary} />
       {showAddProject ? (
         <FooterAddProjectButton
           onPress={handleOpenProject}
@@ -1658,6 +1669,7 @@ const styles = StyleSheet.create((theme) => ({
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: "transparent",
   },
+  footerWithUsage: { flexDirection: "column", alignItems: "stretch" },
   sidebarFooter: {
     flexDirection: "row",
     alignItems: "center",

@@ -14,6 +14,7 @@ import { ContextWindowSheet } from "./context-window-sheet";
 
 interface ContextWindowMeterProps {
   serverId: string;
+  agentId: string;
   provider?: string | null;
   pending?: boolean;
   maxTokens: number | null;
@@ -144,7 +145,7 @@ const ContextWindowRing = withUnistyles(function ContextWindowRing({
 
 export function ContextWindowMeter({
   serverId,
-  provider,
+  agentId,
   maxTokens,
   usedTokens,
   totalCostUsd,
@@ -155,7 +156,7 @@ export function ContextWindowMeter({
   const { width } = useWindowDimensions();
   // Usage cards need a wider popover; without them it keeps the plain tooltip shape.
   const showsUsage = useSessionStore(
-    (state) => state.sessions[serverId]?.serverInfo?.features?.providerUsageList === true,
+    (state) => state.sessions[serverId]?.serverInfo?.features?.usageSources === true,
   );
   const popoverWidth = Math.min(USAGE_POPOVER_WIDTH, width - 24);
   // Compact screens open the details in a sheet, which can hold a pressable Refresh.
@@ -217,7 +218,7 @@ export function ContextWindowMeter({
         <ContextWindowSheet open={isSheetOpen} onClose={closeSheet}>
           <ContextWindowDetails
             serverId={serverId}
-            provider={provider}
+            agentId={agentId}
             context={context}
             sessionCost={formattedSessionCost}
             showTitle={false}
@@ -258,7 +259,7 @@ export function ContextWindowMeter({
         >
           <ContextWindowDetails
             serverId={serverId}
-            provider={provider}
+            agentId={agentId}
             context={context}
             sessionCost={formattedSessionCost}
             showTitle
@@ -292,7 +293,7 @@ export function ContextWindowMeter({
       >
         <ContextWindowDetails
           serverId={serverId}
-          provider={provider}
+          agentId={agentId}
           context={context}
           sessionCost={formattedSessionCost}
           showTitle

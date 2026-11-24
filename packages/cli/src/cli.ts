@@ -1,3 +1,4 @@
+import { createUsageCommand } from "./commands/usage/index.js";
 import { createRelayCommand } from "./commands/relay.js";
 import { Command, Option } from "commander";
 import { createAgentCommand } from "./commands/agent/index.js";
@@ -50,6 +51,7 @@ function resolveHostnamesOption(hostnames: unknown, allowedHosts: unknown): stri
 
 export function createCli(): Command {
   const program = new Command();
+  program.addCommand(createUsageCommand());
 
   program
     .name("jagentdesk")

@@ -1,3 +1,4 @@
+import { wrapSessionProvider } from "../provider-registry.js";
 import { describe, expect, test, vi } from "vitest";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
@@ -8624,6 +8625,8 @@ function latestBackgroundWork(events: AgentStreamEvent[]) {
 test("Codex runtime safety queries live terminals and retains unsupported app servers", async () => {
   let response: unknown = { data: [], nextCursor: null };
   const appServer = createFakeCodexAppServer({ "thread/backgroundTerminals/list": () => response });
+test("usage identity follows the launched Codex home and retires with the session", async () => {
+  const environment = { HOME: "/usage-test/home", CODEX_HOME: "/usage-test/profile" };
   const session = new CodexAppServerAgentSession(
     createConfig(),
     null,
@@ -8651,4 +8654,17 @@ test("Codex runtime safety queries live terminals and retains unsupported app se
   } finally {
     await session.close();
   }
+    () => {
+      throw new Error("Reading usage must not launch Codex");
+    },
+    { environment },
+  );
+  const identity = session.usageSession();
+  expect(identity).toMatchObject({ provider: "codex", model: "gpt-5.4", env: environment });
+  expect(session.usageSession()).toEqual(identity);
+  const wrapped = wrapSessionProvider("work-codex", session);
+  expect(wrapped.usageSession?.()).toEqual(identity);
+  await wrapped.close();
+  expect(session.usageSession()).toBeNull();
+  expect(wrapped.usageSession?.()).toBeNull();
 });

@@ -1,9 +1,11 @@
+import { useOpenSidebarUsage } from "@/usage/sidebar-item";
 import { useBuiltinPluginEnabled } from "@/plugins/builtin/hooks";
 import { builtinPluginEnabled } from "@/plugins/builtin/registry";
 import { router, usePathname, type Href } from "expo-router";
 import { useCallback, useMemo } from "react";
 import {
   BarChart3,
+  Gauge,
   Boxes,
   Bot,
   CalendarClock,
@@ -198,19 +200,22 @@ export function useAppNavTargets(): AppNavTargets {
   ]);
 }
 
-export interface AppNavItem {
+interface AppNavItemBase {
   key: string;
   icon: LucideIcon;
   label: string;
   /** Short label for the ClickUp rail, where the text sits under the icon. */
   shortLabel: string;
-  route: Href;
   isActive: boolean;
   testID: string;
 }
 
+export type AppNavItem = AppNavItemBase &
+  ({ route: Href; onPress?: never } | { route?: never; onPress: () => void });
+
 /** The primary destinations in display order, with the active flag for the current route. */
 export function useAppNavItems(): AppNavItem[] {
+  const openUsage = useOpenSidebarUsage();
   const { t } = useTranslation();
   const pathname = usePathname();
   const targets = useAppNavTargets();
@@ -297,11 +302,20 @@ export function useAppNavItems(): AppNavItem[] {
         "/cluster",
       ),
       navItem("argocd", Ship, "Argo CD", "Argo CD", targets.argoCdRoute, pathname, "/argocd"),
+      {
+        key: "usage",
+        icon: Gauge,
+        label: "Usage",
+        shortLabel: "Usage",
+        onPress: openUsage,
+        isActive: false,
+        testID: "rail-usage",
+      },
       navItem(
-        "usage",
+        "insights",
         BarChart3,
-        "Usage & Cost",
-        "Usage",
+        "Insights",
+        "Insights",
         targets.insightsRoute,
         pathname,
         "/insights",
@@ -313,7 +327,7 @@ export function useAppNavItems(): AppNavItem[] {
         : null,
     ];
     return items.filter((item): item is AppNavItem => item !== null);
-  }, [pathname, t, targets]);
+  }, [openUsage, pathname, t, targets]);
 }
 
 function navItem(

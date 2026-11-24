@@ -1,3 +1,4 @@
+import { createExternalProcessEnv } from "../../../jagentdesk-env.js";
 import { mapCustomMessageToToolCall } from "../custom-message.js";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -197,6 +198,7 @@ interface StartTurnResult {
 }
 
 interface OmpAgentSessionOptions {
+  usageEnv?: Record<string, string>;
   runtimeSession: OmpRuntimeSession;
   hostTools?: OmpHostToolRouter;
   restartRuntime: (
@@ -668,6 +670,17 @@ class OmpHistorySession implements AgentSession {
 }
 
 export class OmpAgentSession implements AgentSession {
+  private readonly usageSessionKey = randomUUID();
+  private readonly usageEnvironment: Record<string, string>;
+  usageSession() {
+    if (this.closed) return null;
+    return {
+      provider: "omp",
+      model: modelToId(this.state.model) ?? undefined,
+      env: this.usageEnvironment,
+      sessionKey: this.usageSessionKey,
+    };
+  }
   readonly provider: AgentProvider = OMP_PROVIDER;
   readonly capabilities: AgentCapabilityFlags = withOmpCapabilities();
 
@@ -711,6 +724,7 @@ export class OmpAgentSession implements AgentSession {
 
   constructor(options: OmpAgentSessionOptions) {
     this.runtimeSession = options.runtimeSession;
+    this.usageEnvironment = createExternalProcessEnv(process.env, options.usageEnv ?? {});
     this.hostTools = options.hostTools;
     this.restartRuntime = options.restartRuntime;
     this.config = options.config;
@@ -2354,6 +2368,10 @@ export class OmpAgentClient implements AgentClient {
         providerIdleScheduler: this.providerIdleScheduler,
         noTurnScheduler: this.noTurnScheduler,
         usagePollScheduler: this.usagePollScheduler,
+        usageEnv: createExternalProcessEnv(process.env, {
+          ...this.runtimeSettings?.env,
+          ...launchContext?.env,
+        }),
         providerIdleDeadlineMs: this.providerIdleDeadlineMs,
       });
     } catch (error) {
@@ -2426,6 +2444,10 @@ export class OmpAgentClient implements AgentClient {
         providerIdleScheduler: this.providerIdleScheduler,
         noTurnScheduler: this.noTurnScheduler,
         usagePollScheduler: this.usagePollScheduler,
+        usageEnv: createExternalProcessEnv(process.env, {
+          ...this.runtimeSettings?.env,
+          ...launchContext?.env,
+        }),
         providerIdleDeadlineMs: this.providerIdleDeadlineMs,
         live: false,
       });

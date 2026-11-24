@@ -3,9 +3,18 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-// Usage-source built-ins are owned by the Usage batch. Keep this list limited to
-// built-ins whose host API is present in this fork.
 export const builtinPlugins = [
+  "claude-usage-source",
+  "codex-usage-source",
+  "copilot-usage-source",
+  "cursor-usage-source",
+  "grok-usage-source",
+  "kimi-usage-source",
+  "minimax-usage-source",
+  "opencode-go-usage-source",
+  "openrouter-host-usage-source",
+  "zai-usage-source",
+
   "goose-provider",
   "fx-provider",
   "hoplite-provider",

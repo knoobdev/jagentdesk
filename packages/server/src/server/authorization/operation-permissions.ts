@@ -1011,6 +1011,7 @@ const OUTBOUND_PERMISSION = {
   "provider.installation.update.progress": "daemon.read",
   "provider.installation.update.cleared": "daemon.read",
   "provider.usage.list.response": "daemon.read",
+  "usage.list_reports.update": "daemon.read",
   "usage.list_reports.response": "daemon.read",
   provider_diagnostic_response: "daemon.read",
   providers_snapshot_update: "daemon.read",

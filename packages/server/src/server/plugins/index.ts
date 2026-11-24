@@ -1,3 +1,4 @@
+import type { AgentUsageLookup, ListUsageReportsOptions } from "./usage-sources/index.js";
 import { UsageSourceRegistry } from "./usage-sources/index.js";
 import type { PluginUsageSourceMetadata } from "./plugin-process-protocol.js";
 import { findExecutable } from "../../executable-resolution/executable-resolution.js";
@@ -90,6 +91,7 @@ interface PluginRuntimePort {
 }
 
 interface PluginServiceDependencies {
+  usageAgents?: AgentUsageLookup;
   resolveUsageLaunch?(
     provider: string,
   ): Promise<import("@jagentdesk/plugin/server/provider").ProviderLaunch | undefined>;
@@ -118,7 +120,7 @@ export class PluginService {
   private readonly errors = new Map<string, string>();
   private readonly listeners = new Set<(pluginId: string) => void>();
   private readonly providers = new Map<string, ProviderRegistration>();
-  private readonly usageSources = new UsageSourceRegistry();
+  private readonly usageSources: UsageSourceRegistry;
   private readonly usageSourceIdsByPlugin = new Map<string, string[]>();
   private readonly providerIdsByPlugin = new Map<string, readonly string[]>();
   private readonly providerListeners = new Set<() => void>();
@@ -142,6 +144,12 @@ export class PluginService {
           for (const listener of this.settingsListeners) listener(pluginId, settingsId);
         },
       });
+    this.usageSources = new UsageSourceRegistry(
+      Date.now,
+      300_000,
+      logger,
+      dependencies.usageAgents,
+    );
     this.builtinPlugins = dependencies.builtinPlugins ?? new BuiltinPluginLoader(undefined, []);
     this.builtinPluginIds = this.builtinPlugins.ids;
     this.builtin = new BuiltinPluginState(configStore, this.builtinPlugins.featureManifests);
@@ -221,7 +229,7 @@ export class PluginService {
     return [...this.providers.values()].sort((left, right) => left.id.localeCompare(right.id));
   }
 
-  listUsageReports(options?: { forceRefresh?: boolean; reportIds?: string[] }) {
+  listUsageReports(options?: ListUsageReportsOptions) {
     return this.usageSources.listReports(options);
   }
 
@@ -712,15 +720,26 @@ export class PluginService {
           id: source.id,
           label: source.label,
           icon: source.icon,
-          discover: async () => {
-            if (!source.discover) return [];
-            const launch = source.provider
-              ? await this.dependencies.resolveUsageLaunch?.(source.provider)
-              : undefined;
-            const result = await this.runtime.discoverUsage!(pluginId, source.id, {
-              kind: "global",
-              launch,
-            });
+          providers: source.providers ?? (source.provider ? [source.provider] : undefined),
+          discover: async (scope) => {
+            const launch =
+              scope.kind === "global" && source.provider
+                ? await this.dependencies.resolveUsageLaunch?.(source.provider)
+                : undefined;
+            const scoped =
+              scope.kind === "session" && source.provider !== scope.provider
+                ? {
+                    kind: "session" as const,
+                    provider: scope.provider,
+                    model: scope.model,
+                    env: scope.env,
+                  }
+                : scope;
+            const result = await this.runtime.discoverUsage!(
+              pluginId,
+              source.id,
+              scoped.kind === "global" && launch ? { ...scoped, launch } : scoped,
+            );
             if (!Array.isArray(result))
               throw new Error(`Invalid usage discovery from ${source.id}`);
             return result;
