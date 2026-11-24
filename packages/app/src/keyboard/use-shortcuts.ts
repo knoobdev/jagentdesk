@@ -61,7 +61,7 @@ export function useKeyboardShortcuts({
   const keyboardWorkspaceSelectionRef = useRef<ActiveWorkspaceSelection | null>(null);
   const publishBrowserShortcutPolicy = useCallback(
     (chordState?: ChordState) => {
-      publishKeyboardPolicy({ bindings, chordState, isMac, enabled });
+      publishKeyboardPolicy({ bindings, chordState, isMac, usesDesktopBindings, enabled });
     },
     [bindings, enabled, isMac],
   );
@@ -262,6 +262,10 @@ export function useKeyboardShortcuts({
       keyUp: handleKeyUp,
       blur: resetModifiers,
       commandCenterOpen: () => useKeyboardShortcutsStore.getState().commandCenterOpen,
+      subscribeCommandCenter: (listener) =>
+        useKeyboardShortcutsStore.subscribe((state, previous) => {
+          if (state.commandCenterOpen !== previous.commandCenterOpen) listener();
+        }),
     });
     return () => {
       detach();
