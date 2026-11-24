@@ -293,7 +293,8 @@ async function resolveSessionCreateAgent(
     runOptions,
     setupContinuation,
     background: true,
-    promptFailure: "throw",
+    // Registration commits creation. First-turn failures belong to the created agent.
+    promptFailure: "return-error",
     promptLogger: dependencies.logger.child({
       clientMessageId: resolveClientMessageId(input.clientMessageId),
     }),
@@ -469,7 +470,11 @@ async function sendInitialPrompt(
       throw error;
     }
     if (resolved.promptFailure === "return-error") {
-      return { started: false, liveSnapshot: snapshot, error };
+      return {
+        started: false,
+        liveSnapshot: dependencies.agentManager.getAgent(snapshot.id) ?? snapshot,
+        error,
+      };
     }
     dependencies.logger.error({ err: error, agentId: snapshot.id }, "Failed to run initial prompt");
     return { started: false, liveSnapshot: snapshot };
