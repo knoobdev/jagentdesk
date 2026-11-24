@@ -458,9 +458,11 @@ export function FilePane({
   const previewKey = readTarget ? `${readTarget.cwd}:${readTarget.path}` : null;
 
   const preview = resolvedPreview.key === previewKey ? resolvedPreview.file : null;
-  const imagePreviewUri = useAttachmentPreviewUrl(
+  const imagePreview = useAttachmentPreviewUrl(
     resolvedPreview.key === previewKey ? resolvedPreview.imageAttachment : null,
   );
+
+  const imagePreviewUri = imagePreview.status === "ready" ? imagePreview.url : null;
   const lineCount =
     preview?.kind === "text" ? (preview.content ?? "").split("\n").length : undefined;
   const errorMessage = getFileErrorMessage(liveFile.error, t("panels.file.failedToLoad"));
