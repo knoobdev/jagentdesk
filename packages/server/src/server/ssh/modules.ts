@@ -8,7 +8,6 @@ import {
 import { SSH_SERVER_AGENT_LABEL } from "@jagentdesk/protocol/ssh/server-chat-prompt";
 import type { SshServer } from "@jagentdesk/protocol/ssh/rpc-schemas";
 import type { SshModuleHandler } from "../session/ssh/ssh-session.js";
-import { captureTerminalLines } from "../../terminal/terminal-capture.js";
 import {
   createSshAgentTools,
   type RequestToolPermission,
@@ -166,7 +165,7 @@ function terminalAccess(service: SshService): SshTerminalAccess {
       session(terminalId).typeInput(data);
     },
     async capture(terminalId, { lines }) {
-      const captured = captureTerminalLines(session(terminalId), {
+      const captured = session(terminalId).captureLines({
         start: -lines,
         stripAnsi: true,
       });

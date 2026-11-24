@@ -1,16 +1,21 @@
 import {
-  decodeTerminalSnapshotPayload,
+  TerminalReplayMetadataSchema,
   encodeTerminalResizePayload,
   encodeTerminalStreamFrame,
   TerminalStreamOpcode,
   type TerminalStreamFrame,
 } from "@jagentdesk/protocol/binary-frames/index";
-import type { TerminalInput, TerminalState } from "@jagentdesk/protocol/messages";
+import type { TerminalInput } from "@jagentdesk/protocol/messages";
 
-export type TerminalStreamEvent =
-  | { terminalId: string; type: "output"; data: Uint8Array }
-  | { terminalId: string; type: "snapshot"; state: TerminalState }
-  | { terminalId: string; type: "restore"; data: Uint8Array };
+export type TerminalReplayEvent =
+  | { type: "begin"; rows?: number; cols?: number; retainedHistoryLines?: number }
+  | { type: "data"; data: Uint8Array }
+  | { type: "end" };
+
+export type TerminalStreamEvent = { terminalId: string } & (
+  | { type: "output"; data: Uint8Array }
+  | { type: "replay"; replay: TerminalReplayEvent }
+);
 
 export class TerminalStreamRouter {
   private readonly terminalSlots = new Map<string, number>();
@@ -100,24 +105,28 @@ export class TerminalStreamRouter {
     }
 
     if (frame.opcode === TerminalStreamOpcode.Restore) {
-      this.emit({
-        terminalId,
-        type: "restore",
-        data: frame.payload,
-      });
-      return;
-    }
-
-    if (frame.opcode === TerminalStreamOpcode.Snapshot) {
-      const state = decodeTerminalSnapshotPayload(frame.payload);
-      if (!state) {
+      // COMPAT(terminalSingleRestore): ADR-0051, keep accepting released hosts' ANSI restore.
+      for (const replay of [
+        { type: "begin" },
+        { type: "data", data: frame.payload },
+        { type: "end" },
+      ] as TerminalReplayEvent[]) {
+        this.emit({ terminalId, type: "replay", replay });
+      }
+    } else if (frame.opcode === TerminalStreamOpcode.ReplayBegin) {
+      let raw: unknown;
+      try {
+        raw = JSON.parse(new TextDecoder().decode(frame.payload));
+      } catch {
         return;
       }
-      this.emit({
-        terminalId,
-        type: "snapshot",
-        state,
-      });
+      const parsed = TerminalReplayMetadataSchema.safeParse(raw);
+      if (parsed.success)
+        this.emit({ terminalId, type: "replay", replay: { type: "begin", ...parsed.data } });
+    } else if (frame.opcode === TerminalStreamOpcode.ReplayData) {
+      this.emit({ terminalId, type: "replay", replay: { type: "data", data: frame.payload } });
+    } else if (frame.opcode === TerminalStreamOpcode.ReplayEnd) {
+      this.emit({ terminalId, type: "replay", replay: { type: "end" } });
     }
   }
 

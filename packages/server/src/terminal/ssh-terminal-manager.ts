@@ -5,8 +5,8 @@ import type {
   TerminalWorkspaceContributionChangedListener,
   TerminalsChangedListener,
 } from "./terminal-manager.js";
-import { captureTerminalLines } from "./terminal-capture.js";
-import type { TerminalStateSnapshotOptions, TerminalSession } from "./terminal.js";
+import { replayTerminal } from "./terminal-replay.js";
+import type { ReplayTerminalSession } from "./terminal.js";
 
 // Composite manager (spec 25.4): SSH terminal sessions live in the daemon main
 // process (ssh2 is not available inside the forked terminal worker). This wrapper
@@ -17,7 +17,7 @@ import type { TerminalStateSnapshotOptions, TerminalSession } from "./terminal.j
 // workspace-scoped APIs stay purely on the base manager.
 
 export interface SshTerminalRegistryView {
-  getSshTerminal(terminalId: string): TerminalSession | undefined;
+  getSshTerminal(terminalId: string): ReplayTerminalSession | undefined;
   subscribeTerminalActivity(listener: TerminalActivityListener): () => void;
   killAllTerminals(): void;
 }
@@ -26,7 +26,7 @@ export function createSshTerminalManager(
   base: TerminalManager,
   getRegistry: () => SshTerminalRegistryView | null,
 ): TerminalManager {
-  function ssh(terminalId: string): TerminalSession | undefined {
+  function ssh(terminalId: string): ReplayTerminalSession | undefined {
     return getRegistry()?.getSshTerminal(terminalId);
   }
 
@@ -52,12 +52,12 @@ export function createSshTerminalManager(
       return ssh(terminalId) ?? base.getTerminal(terminalId);
     },
 
-    async getTerminalState(terminalId, options?: TerminalStateSnapshotOptions) {
+    async replayTerminal(terminalId, options, sink) {
       const session = ssh(terminalId);
       if (session) {
-        return session.getStateSnapshot(options);
+        return replayTerminal(session, options, sink);
       }
-      return base.getTerminalState(terminalId, options);
+      return base.replayTerminal(terminalId, options, sink);
     },
 
     setTerminalTitle(terminalId, title) {
@@ -107,7 +107,7 @@ export function createSshTerminalManager(
     async captureTerminal(terminalId, options) {
       const session = ssh(terminalId);
       if (session) {
-        return captureTerminalLines(session, options);
+        return session.captureLines(options);
       }
       return base.captureTerminal(terminalId, options);
     },

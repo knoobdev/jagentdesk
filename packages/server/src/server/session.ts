@@ -552,7 +552,7 @@ export interface SessionOptions {
   onMessageToSource?: (source: object, msg: SessionOutboundMessage) => void;
   onBinaryMessage?: (frame: Uint8Array) => void;
   onBinaryMessageToSource?: (source: object, frame: Uint8Array) => Promise<void>;
-  getTransportBufferedAmount?: () => number | null;
+  getTransportBufferedAmount?: (source?: object) => number | null;
   onLifecycleIntent?: (intent: SessionLifecycleIntent) => void;
   publishWorkspaceArchiveUpdates?: (workspaceIds: Iterable<string>) => Promise<void>;
   onWorkspaceRecovered?: (workspace: PersistedWorkspaceRecord) => Promise<void>;
@@ -886,7 +886,7 @@ export class Session {
   private readonly onBinaryMessageToSource:
     | ((source: object, frame: Uint8Array) => Promise<void>)
     | null;
-  private readonly getTransportBufferedAmount: () => number | null;
+  private readonly getTransportBufferedAmount: (source?: object) => number | null;
   private readonly onLifecycleIntent: ((intent: SessionLifecycleIntent) => void) | null;
   private readonly onWorkspaceArchiveUpdate: SessionOptions["publishWorkspaceArchiveUpdates"];
   private readonly onWorkspaceRecovered:
@@ -952,6 +952,8 @@ export class Session {
   private readonly serviceProxyPublicBaseUrl: string | null;
   private readonly resolveScriptHealth: ((hostname: string) => ScriptHealthState | null) | null;
   private readonly terminalController: TerminalSessionController;
+  // A physical viewer owns its slot, replay cut, capability and buffered live tail.
+  private readonly terminalStreamControllers = new Map<object, TerminalSessionController>();
   private inflightRequests = 0;
   private peakInflightRequests = 0;
   private readonly workspaceSetupSnapshots: Map<string, WorkspaceSetupSnapshot>;
@@ -1325,8 +1327,7 @@ export class Session {
       isPathWithinRoot: (rootPath, candidatePath) => this.isPathWithinRoot(rootPath, candidatePath),
       sessionLogger: this.sessionLogger,
       listTerminalWorkspaceRefs: () => this.listActiveWorkspaceRefs(),
-      clientSupportsWrapReflow: () =>
-        this.clientCapabilities.has(CLIENT_CAPS.terminalReflowableSnapshot),
+      supportsChunkedReplay: () => this.supports(CLIENT_CAPS.terminalChunkedReplay),
       getClientBufferedAmount: () => this.getTransportBufferedAmount(),
     });
     this.agentDirectory = new AgentDirectory({
@@ -1614,6 +1615,8 @@ export class Session {
       .catch((error) =>
         this.sessionLogger.warn({ err: error }, "Failed to release source subscriptions"),
       );
+    this.terminalStreamControllers.get(source)?.dispose();
+    this.terminalStreamControllers.delete(source);
     this.clientCapabilitiesBySource.delete(source);
     if (this.viewedTimelineAgentIdsBySource.delete(source)) {
       this.rebuildViewedTimelineAgentIds();
@@ -1907,6 +1910,9 @@ export class Session {
 
   public getRuntimeMetrics(): SessionRuntimeMetrics {
     const terminalMetrics = this.terminalController.getMetrics();
+    for (const controller of this.terminalStreamControllers.values()) {
+      terminalMetrics.streamSubscriptionCount += controller.getMetrics().streamSubscriptionCount;
+    }
     const workspaceGitMetrics = this.workspaceGitObserver.getMetrics();
     return {
       terminalDirectorySubscriptionCount: terminalMetrics.directorySubscriptionCount,
@@ -2665,7 +2671,7 @@ export class Session {
       () => this.dispatchWorkspaceAndProjectMessage(msg),
       () => this.dispatchWorkspaceFileMessage(msg, source),
       () => this.dispatchProviderMessage(msg),
-      () => this.dispatchTerminalMessage(msg),
+      () => this.dispatchTerminalMessage(msg, source),
       () => this.dispatchChatScheduleLoopMessage(msg),
       () => this.dispatchAutorunMessage(msg),
       () => this.dispatchSpecModeMessage(msg, source),
@@ -3677,7 +3683,10 @@ export class Session {
     }
   }
 
-  private dispatchTerminalMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+  private dispatchTerminalMessage(
+    msg: SessionInboundMessage,
+    source?: object,
+  ): Promise<void> | undefined {
     switch (msg.type) {
       case "start_workspace_script_request":
         return this.handleStartWorkspaceScriptRequest(msg);
@@ -3687,9 +3696,37 @@ export class Session {
         return this.handleWorkspaceScriptStartRequest(msg);
       case "workspace.script.stop.request":
         return this.handleWorkspaceScriptStopRequest(msg);
+      case "subscribe_terminal_request":
+      case "unsubscribe_terminal_request":
+      case "terminal_input":
+        return this.terminalStreamControllerForSource(source).dispatch(msg);
       default:
         return this.terminalController.dispatch(msg);
     }
+  }
+
+  private terminalStreamControllerForSource(source?: object): TerminalSessionController {
+    if (!source) return this.terminalController;
+    let controller = this.terminalStreamControllers.get(source);
+    if (!controller) {
+      controller = new TerminalSessionController({
+        terminalManager: this.terminalManager,
+        emit: (message) => this.emitForSource(message, source),
+        emitBinary: (frame) => {
+          void this.emitBinaryReply(frame, source).catch((error) =>
+            this.sessionLogger.warn({ err: error }, "Terminal viewer disconnected"),
+          );
+        },
+        hasBinaryChannel: () => this.onBinaryMessage !== null,
+        supportsChunkedReplay: () =>
+          this.supportsForSource(CLIENT_CAPS.terminalChunkedReplay, source),
+        isPathWithinRoot: (root, candidate) => this.isPathWithinRoot(root, candidate),
+        sessionLogger: this.sessionLogger,
+        getClientBufferedAmount: () => this.getTransportBufferedAmount(source),
+      });
+      this.terminalStreamControllers.set(source, controller);
+    }
+    return controller;
   }
 
   // eslint-disable-next-line complexity
@@ -5258,7 +5295,7 @@ export class Session {
     }
     // Screen frames only flow daemon → client.
     if (binaryFrame.kind === "screen") return;
-    this.terminalController.handleBinaryFrame(binaryFrame.frame);
+    this.terminalStreamControllerForSource(source).handleBinaryFrame(binaryFrame.frame);
   }
 
   private async handleRestartServerRequest(
@@ -10320,6 +10357,8 @@ export class Session {
     for (const id of this.proxySubscriptionIds) this.proxyService.unsubscribe(id);
     this.proxySubscriptionIds.clear();
     this.terminalController.dispose();
+    for (const controller of this.terminalStreamControllers.values()) controller.dispose();
+    this.terminalStreamControllers.clear();
 
     this.checkoutSession.cleanup();
 

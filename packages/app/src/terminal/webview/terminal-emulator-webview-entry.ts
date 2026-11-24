@@ -1,7 +1,6 @@
 import type { TerminalFindResult } from "../runtime/terminal-emulator-runtime";
 import type { ITheme } from "@xterm/xterm";
 import xtermCss from "@xterm/xterm/css/xterm.css";
-import type { TerminalState } from "@jagentdesk/protocol/messages";
 import type { TerminalInputModeState } from "@jagentdesk/protocol/terminal-input-mode";
 import type { PendingTerminalModifiers } from "@/utils/terminal-keys";
 import {
@@ -16,7 +15,6 @@ import type {
 interface MountMessage {
   type: "mount";
   streamKey: string;
-  initialSnapshot: TerminalState | null;
   scrollbackLines: number;
   theme: ITheme;
   fontFamily?: string;
@@ -29,8 +27,14 @@ type InboundMessage =
   | MountMessage
   | { type: "unmount"; streamKey: string }
   | { type: "writeOutput"; streamKey: string; text: string }
-  | { type: "restoreOutput"; streamKey: string; text: string }
-  | { type: "renderSnapshot"; streamKey: string; state: TerminalState | null }
+  | {
+      type: "replay";
+      streamKey: string;
+      replay:
+        | { type: "begin"; rows?: number; cols?: number; retainedHistoryLines?: number }
+        | { type: "data"; text: string }
+        | { type: "end" };
+    }
   | { type: "paste"; streamKey: string; text: string }
   | { type: "clear"; streamKey: string }
   | { type: "find"; streamKey: string; query: string; direction?: "next" | "previous" }
@@ -262,12 +266,13 @@ class TerminalWebViewBridge {
       case "writeOutput":
         this.runtime?.write({ data: encodeTerminalOutput(message.text) });
         break;
-      case "restoreOutput":
-        this.runtime?.restoreOutput({ data: encodeTerminalOutput(message.text) });
+      case "replay": {
+        const event = message.replay;
+        this.runtime?.replay(
+          event.type === "data" ? { type: "data", data: encodeTerminalOutput(event.text) } : event,
+        );
         break;
-      case "renderSnapshot":
-        this.runtime?.renderSnapshot({ state: message.state });
-        break;
+      }
       case "paste":
         this.runtime?.paste(message.text);
         break;
@@ -359,7 +364,6 @@ class TerminalWebViewBridge {
     runtime.mount({
       root: this.root,
       host: this.host,
-      initialSnapshot: message.initialSnapshot,
       scrollback: message.scrollbackLines,
       theme: message.theme,
       fontFamily: message.fontFamily,

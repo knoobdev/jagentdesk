@@ -1,4 +1,5 @@
 export const CLIENT_CAPS = {
+  terminalChunkedReplay: "terminal_chunked_replay",
   binaryChunkingV1: "binary_chunking_v1",
   pluginBinaryPayloads: "plugin_binary_payloads",
   explicitEventSubscriptions: "explicit_event_subscriptions",

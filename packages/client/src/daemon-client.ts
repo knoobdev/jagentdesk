@@ -7638,7 +7638,9 @@ export class DaemonClient {
       | { restore?: SubscribeTerminalRequest["restore"]; requestId?: string }
       | string,
   ): Promise<SubscribeTerminalPayload> {
-    const restore = typeof optionsOrRequestId === "object" ? optionsOrRequestId.restore : undefined;
+    const restore = (typeof optionsOrRequestId === "object"
+      ? optionsOrRequestId.restore
+      : undefined) ?? { mode: "full-snapshot" as const };
     const requestId =
       typeof optionsOrRequestId === "object" ? optionsOrRequestId.requestId : optionsOrRequestId;
     const resolvedRequestId = this.createRequestId(requestId);
@@ -7648,16 +7650,17 @@ export class DaemonClient {
       requestId: resolvedRequestId,
       ...(restore ? { restore } : {}),
     });
-    const payload = await this.sendCorrelatedRequest({
+    return this.sendCorrelatedRequest({
       requestId: resolvedRequestId,
       message,
       responseType: "subscribe_terminal_response",
       options: { skipQueue: true },
+      selectPayload: (payload) => {
+        // Register during ACK delivery: the same network read can contain replay frames.
+        if (payload.error === null) this.terminalStreams.setSlot(terminalId, payload.slot);
+        return payload;
+      },
     });
-    if (payload.error === null) {
-      this.terminalStreams.setSlot(terminalId, payload.slot);
-    }
-    return payload;
   }
 
   unsubscribeTerminal(terminalId: string): void {
@@ -11023,7 +11026,7 @@ export class DaemonClient {
             [CLIENT_CAPS.pluginBinaryPayloads]: true,
             [CLIENT_CAPS.explicitEventSubscriptions]: true,
             [CLIENT_CAPS.timelineNotifications]: true,
-            [CLIENT_CAPS.terminalReflowableSnapshot]: true,
+            [CLIENT_CAPS.terminalChunkedReplay]: true,
             [CLIENT_CAPS.providerSubagents]: true,
             [CLIENT_CAPS.projectedSubagentTimeline]: true,
             [CLIENT_CAPS.projectUpdates]: true,

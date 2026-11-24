@@ -1,4 +1,4 @@
-import type { SubscribeTerminalRequest, TerminalState } from "@jagentdesk/protocol/messages";
+import type { SubscribeTerminalRequest } from "@jagentdesk/protocol/messages";
 import type { TerminalOutputData } from "./terminal-emulator-runtime";
 import { i18n } from "@/i18n/i18next";
 
@@ -19,8 +19,11 @@ export interface TerminalStreamControllerClient {
     handler: (
       event:
         | { terminalId: string; type: "output"; data: Uint8Array }
-        | { terminalId: string; type: "snapshot"; state: TerminalState }
-        | { terminalId: string; type: "restore"; data: Uint8Array },
+        | {
+            terminalId: string;
+            type: "replay";
+            replay: import("@jagentdesk/client").TerminalReplayEvent;
+          },
     ) => void,
   ) => () => void;
 }
@@ -40,8 +43,11 @@ export interface TerminalStreamControllerOptions {
   client: TerminalStreamControllerClient;
   getPreferredSize: () => TerminalStreamControllerSize | null;
   onOutput: (input: { terminalId: string; data: TerminalOutputData }) => void;
-  onSnapshot: (input: { terminalId: string; state: TerminalState }) => void;
-  onRestore?: (input: { terminalId: string; data: TerminalOutputData }) => void;
+  onReplay?: (input: {
+    terminalId: string;
+    replay: import("@jagentdesk/client").TerminalReplayEvent;
+  }) => void;
+  onExit?: (terminalId: string) => void;
   getRestoreOptions?: () => SubscribeTerminalRequest["restore"] | undefined;
   onStatusChange?: (status: TerminalStreamControllerStatus) => void;
 }
@@ -58,14 +64,8 @@ export class TerminalStreamController {
       if (this.disposed || event.terminalId !== this.terminalId) {
         return;
       }
-      if (event.type === "snapshot") {
-        this.options.onSnapshot({ terminalId: event.terminalId, state: event.state });
-        return;
-      }
-      if (event.type === "restore") {
-        if (event.data.length > 0) {
-          this.options.onRestore?.({ terminalId: event.terminalId, data: event.data });
-        }
+      if (event.type === "replay") {
+        this.options.onReplay?.({ terminalId: event.terminalId, replay: event.replay });
         return;
       }
       if (event.data.length > 0) {
@@ -88,7 +88,18 @@ export class TerminalStreamController {
       this.options.onStatusChange?.({ terminalId: null, isAttaching: false, error: null });
       return;
     }
-    const restore = this.options.getRestoreOptions?.();
+    let restore: SubscribeTerminalRequest["restore"];
+    try {
+      restore = this.options.getRestoreOptions?.();
+    } catch (error) {
+      this.terminalId = null;
+      this.options.onStatusChange?.({
+        terminalId: nextTerminalId,
+        isAttaching: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
     this.options.onStatusChange?.({ terminalId: nextTerminalId, isAttaching: true, error: null });
     void this.options.client
       .subscribeTerminal(nextTerminalId, restore ? { restore } : undefined)
@@ -135,15 +146,17 @@ export class TerminalStreamController {
       });
   }
 
-  handleTerminalExit(input: { terminalId: string }): void {
+  handleTerminalExit(input: { terminalId: string; error?: string }): void {
     if (this.disposed || input.terminalId !== this.terminalId) {
       return;
     }
     this.terminalId = null;
+    this.options.client.unsubscribeTerminal(input.terminalId);
+    if (!input.error) this.options.onExit?.(input.terminalId);
     this.options.onStatusChange?.({
       terminalId: input.terminalId,
       isAttaching: false,
-      error: TERMINAL_EXITED_ERROR,
+      error: input.error ?? TERMINAL_EXITED_ERROR,
     });
   }
 

@@ -1,3 +1,9 @@
+import { createTerminalSerializer } from "../../terminal/terminal-serializer.js";
+import type { TerminalReplayOptions } from "../../terminal/terminal-replay.js";
+import {
+  captureTerminalLines,
+  type CaptureTerminalLinesOptions,
+} from "../../terminal/terminal-capture.js";
 import type { Terminal as TerminalType } from "@xterm/headless";
 import xterm from "@xterm/headless";
 import { randomBytes } from "node:crypto";
@@ -8,13 +14,8 @@ import type {
 import { TerminalInputModeTracker } from "@jagentdesk/protocol/terminal-input-mode";
 import { TerminalActivityTracker } from "../../terminal/activity/terminal-activity-tracker.js";
 import {
-  extractCursorState,
-  extractGrid,
-  extractGridWrapped,
   extractLastOutputLines,
   extractLastOutputLinesFromText,
-  extractScrollback,
-  extractScrollbackWrapped,
   resolveInitialTitleMode,
   toTerminalActivity,
   TERMINAL_EXIT_OUTPUT_CHAR_LIMIT,
@@ -27,13 +28,9 @@ import type {
   TerminalActivityTransition,
   TerminalCommandFinishedInfo,
   TerminalExitInfo,
-  TerminalSession,
-  TerminalStateSnapshot,
-  TerminalStateSnapshotOptions,
-  TerminalSubscribeOptions,
+  ReplayTerminalSession,
   ServerMessage,
 } from "../../terminal/terminal.js";
-import type { TerminalState } from "@jagentdesk/protocol/messages";
 
 const { Terminal } = xterm;
 
@@ -71,7 +68,7 @@ export interface SshTerminalExitSource {
   signal?: number | null;
 }
 
-export class SshTerminalSession implements TerminalSession {
+export class SshTerminalSession implements ReplayTerminalSession {
   readonly id: string;
   readonly name: string;
   readonly cwd: string;
@@ -81,6 +78,7 @@ export class SshTerminalSession implements TerminalSession {
   readonly workspaceId = "";
 
   private readonly terminal: TerminalType;
+  private readonly serialize: ReturnType<typeof createTerminalSerializer>;
   private readonly listeners = new Set<(msg: ServerMessage) => void>();
   private readonly exitListeners = new Set<(info: TerminalExitInfo) => void>();
   private readonly titleChangeListeners = new Set<(title?: string) => void>();
@@ -120,9 +118,10 @@ export class SshTerminalSession implements TerminalSession {
     this.terminal = new Terminal({
       rows: options.rows,
       cols: options.cols,
-      scrollback: options.scrollback ?? 5000,
+      scrollback: options.scrollback ?? 10000,
       allowProposedApi: true,
     });
+    this.serialize = createTerminalSerializer(this.terminal);
     this.registerQueryHandlers();
     if (resolveInitialTitleMode(options.title) === "auto") {
       this.titleChangeSubscription = this.terminal.onTitleChange((nextTitle) => {
@@ -246,14 +245,10 @@ export class SshTerminalSession implements TerminalSession {
     }
   }
 
-  subscribe(
-    listener: (msg: ServerMessage) => void,
-    subscribeOptions?: TerminalSubscribeOptions,
-  ): () => void {
+  subscribe(listener: (msg: ServerMessage) => void): () => void {
     let active = true;
     let snapshotDelivered = false;
     const queuedMessages: ServerMessage[] = [];
-    const initialSnapshot = subscribeOptions?.initialSnapshot ?? "state";
     const subscriptionListener = (msg: ServerMessage): void => {
       if (!active) return;
       if (!snapshotDelivered) {
@@ -267,15 +262,12 @@ export class SshTerminalSession implements TerminalSession {
     this.terminal.write("", () => {
       if (!this.disposed && active && this.listeners.has(subscriptionListener)) {
         snapshotDelivered = true;
-        if (initialSnapshot === "ready") {
-          listener({
-            type: "snapshotReady",
-            revision: this.stateRevision,
-            replayPreamble: this.getReplayPreamble(),
-          });
-        } else {
-          listener({ type: "snapshot", ...this.getStateSnapshot() });
-        }
+
+        listener({
+          type: "snapshotReady",
+          revision: this.stateRevision,
+          replayPreamble: this.getReplayPreamble(),
+        });
         for (const message of queuedMessages.splice(0)) {
           listener(message);
         }
@@ -339,29 +331,24 @@ export class SshTerminalSession implements TerminalSession {
     return { rows: this.terminal.rows, cols: this.terminal.cols };
   }
 
-  getState(snapshotOptions?: TerminalStateSnapshotOptions): TerminalState {
+  hasOutput(): boolean {
+    return this.stateRevision > 0;
+  }
+
+  serializeReplay(options?: TerminalReplayOptions) {
     return {
-      rows: this.terminal.rows,
-      cols: this.terminal.cols,
-      grid: extractGrid(this.terminal),
-      scrollback: extractScrollback(this.terminal, {
-        scrollbackLines: snapshotOptions?.scrollbackLines,
-      }),
-      cursor: extractCursorState(this.terminal),
-      ...(this.title ? { title: this.title } : {}),
-      ...(snapshotOptions?.includeWrapFlags
-        ? {
-            gridWrapped: extractGridWrapped(this.terminal),
-            scrollbackWrapped: extractScrollbackWrapped(this.terminal, {
-              scrollbackLines: snapshotOptions?.scrollbackLines,
-            }),
-          }
-        : {}),
+      metadata: {
+        ...this.getSize(),
+        retainedHistoryLines: this.terminal.buffer.normal.baseY,
+        revision: this.stateRevision,
+        replayPreamble: this.getReplayPreamble(),
+      },
+      data: this.serialize(options),
     };
   }
 
-  getStateSnapshot(snapshotOptions?: TerminalStateSnapshotOptions): TerminalStateSnapshot {
-    return { state: this.getState(snapshotOptions), revision: this.stateRevision };
+  captureLines(options?: CaptureTerminalLinesOptions) {
+    return captureTerminalLines(this.terminal.buffer.active, options);
   }
 
   getReplayPreamble(): string {

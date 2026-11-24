@@ -566,6 +566,7 @@ export const ru: TranslationResources = {
       hostDisconnected: "Host не подключен",
       updateHost: "Обновите хост, чтобы использовать нативный терминал.",
       unableToSubscribe: "Невозможно подписаться на терминал",
+      restoreRequiresUpdate: "Обновите хост, чтобы просматривать терминалы.",
     },
     tabs: {
       loading: "Загрузка...",

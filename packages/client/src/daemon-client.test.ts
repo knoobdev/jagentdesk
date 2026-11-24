@@ -788,7 +788,7 @@ test("advertises client capabilities in hello", async () => {
       provider_subagents: true,
       projected_subagent_timeline: true,
       reasoning_merge_enum: true,
-      terminal_reflowable_snapshot: true,
+      terminal_chunked_replay: true,
       browser_host: {
         supportedCommands: ["list_tabs"],
         hostKind: "desktop app",
@@ -5340,6 +5340,7 @@ test("emits output events for the active terminal stream", async () => {
     }),
   );
   await subscribePromise;
+  expect(parseSentFrame(mock.sent.at(-1)).restore).toEqual({ mode: "full-snapshot" });
 
   mock.triggerMessage(
     encodeTerminalStreamFrame({
@@ -5354,7 +5355,7 @@ test("emits output events for the active terminal stream", async () => {
   unsubscribe();
 });
 
-test("emits snapshot events for the subscribed terminal stream", async () => {
+test("ignores retired JSON snapshot frames for the subscribed terminal stream", async () => {
   const logger = createMockLogger();
   const mock = createMockTransport();
 
@@ -5373,10 +5374,7 @@ test("emits snapshot events for the subscribed terminal stream", async () => {
 
   const snapshots: unknown[] = [];
   client.onTerminalStreamEvent((event) => {
-    if (event.type !== "snapshot") {
-      return;
-    }
-    snapshots.push(event.state);
+    snapshots.push(event);
   });
 
   const subscribePromise = client.subscribeTerminal("term-1", "sub-2");
@@ -5408,7 +5406,7 @@ test("emits snapshot events for the subscribed terminal stream", async () => {
     }),
   );
 
-  expect(snapshots).toEqual([state]);
+  expect(snapshots).toEqual([]);
 });
 
 test("sends input and resize frames for the subscribed terminal slot", async () => {
@@ -6578,3 +6576,63 @@ test("measures an outbound message in UTF-8 bytes against the daemon's message l
   expect(mock.sent).toHaveLength(1);
   expect(client.getConnectionState().status).toBe("connected");
 });
+
+test.each([false, true])(
+  "routes terminal replay in the same transport turn as its acknowledgement (chunked=%s)",
+  async (chunked) => {
+    const mock = createMockTransport();
+    const client = new DaemonClient({
+      url: "ws://test",
+      clientId: "clsk_terminal_ack",
+      logger: createMockLogger(),
+      reconnect: { enabled: false },
+      transportFactory: () => mock.transport,
+    });
+    clients.push(client);
+    const connecting = client.connect();
+    mock.triggerOpen();
+    await connecting;
+    const events: import("./terminal-stream-router.js").TerminalStreamEvent[] = [];
+    client.onTerminalStreamEvent((event) => events.push(event));
+    const subscribed = client.subscribeTerminal("ack-terminal", "ack-request");
+    mock.triggerMessage(
+      wrapSessionMessage({
+        type: "subscribe_terminal_response",
+        payload: { terminalId: "ack-terminal", slot: 9, error: null, requestId: "ack-request" },
+      }),
+    );
+    const data = new TextEncoder().encode("retained 界🙂");
+    if (chunked) {
+      mock.triggerMessage(
+        encodeTerminalStreamFrame({
+          opcode: TerminalStreamOpcode.ReplayBegin,
+          slot: 9,
+          payload: JSON.stringify({ rows: 24, cols: 80, retainedHistoryLines: 5000 }),
+        }),
+      );
+      mock.triggerMessage(
+        encodeTerminalStreamFrame({
+          opcode: TerminalStreamOpcode.ReplayData,
+          slot: 9,
+          payload: data,
+        }),
+      );
+      mock.triggerMessage(
+        encodeTerminalStreamFrame({ opcode: TerminalStreamOpcode.ReplayEnd, slot: 9 }),
+      );
+    } else {
+      mock.triggerMessage(
+        encodeTerminalStreamFrame({ opcode: TerminalStreamOpcode.Restore, slot: 9, payload: data }),
+      );
+    }
+    await subscribed;
+    expect(
+      events.map((event) => (event.type === "replay" ? event.replay.type : event.type)),
+    ).toEqual(["begin", "data", "end"]);
+    expect(events[1]).toMatchObject({
+      terminalId: "ack-terminal",
+      type: "replay",
+      replay: { type: "data", data },
+    });
+  },
+);
