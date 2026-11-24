@@ -37,6 +37,9 @@ interface TimelineFetch {
 class TimelineWorld {
   readonly errors: string[] = [];
   readonly sync = createViewedTimelineSync({
+    prepare: async () => undefined,
+    readCursor: () => undefined,
+    replaceDemandedAgentIds: () => undefined,
     initialDeliveryMode: "selective",
     setSubscription: async (agentIds) => {
       const result = deferred<void>();

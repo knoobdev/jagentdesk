@@ -1,16 +1,282 @@
 import {
   planTimelineCatchUpAfter,
   planTimelineTailFetch,
+  planTimelineResumeFetch,
   type ProjectedTimelineForwardFetchPlan,
 } from "./timeline-sync-plan";
+import type { CachedTimeline } from "@/runtime/replica-cache";
+import {
+  selectAgentTimelineState,
+  useSessionStore,
+  type AgentTimelineCursorState,
+  type AgentTimelineState,
+} from "@/stores/session-store";
+import { useCreateFlowStore } from "@/stores/create-flow-store";
+import type { SessionOutboundMessage } from "@jagentdesk/protocol/messages";
+import { getSendingClientMessageIds } from "@/composer/submission/model";
+import {
+  getInitDeferred,
+  getInitKey,
+  rejectInitDeferred,
+  resolveInitDeferred,
+} from "@/utils/agent-initialization";
+import {
+  createSessionAgentStreamReducerQueue,
+  type AgentStreamReducerEvent,
+  type ProcessTimelineResponseOutput,
+  processTimelineResponse,
+} from "./session-stream-reducers";
+import { isTimelineResumeSnapshotAuthoritative } from "./timeline-sync-plan";
 
-interface TimelinePageResult {
+export interface TimelineReplicaStorage {
+  readTimeline(serverId: string, agentId: string): Promise<CachedTimeline | undefined>;
+  commitTimeline(serverId: string, agentId: string, timeline: CachedTimeline): void;
+}
+
+async function prepareCachedTimeline(input: {
+  serverId: string;
+  agentId: string;
+  storage: TimelineReplicaStorage;
+  prepareAgent: (agentId: string) => Promise<void>;
+}): Promise<CachedTimeline | undefined> {
+  const before = useSessionStore.getState().sessions[input.serverId];
+  const beforeTimeline = selectAgentTimelineState(before, input.agentId);
+  if (beforeTimeline.status === "synced") return undefined;
+  const beforeHead = before?.agentStreamHead.get(input.agentId);
+  await input.prepareAgent(input.agentId);
+  const stored = await input.storage.readTimeline(input.serverId, input.agentId);
+  if (!stored) return undefined;
+  const session = useSessionStore.getState().sessions[input.serverId];
+  const currentTimeline = selectAgentTimelineState(session, input.agentId);
+  if (session?.agentStreamHead.get(input.agentId) !== beforeHead) return undefined;
+  if (beforeTimeline.status === "painted") {
+    return currentTimeline.status === "painted" && currentTimeline.items === beforeTimeline.items
+      ? stored
+      : undefined;
+  }
+  if (currentTimeline.status !== "cold") return undefined;
+  useSessionStore.getState().applyAgentTimelineResponseState(input.serverId, input.agentId, {
+    items: stored.items,
+    head: [],
+    range: stored.range,
+    older: stored.hasOlder ? "available" : "none",
+    newer: false,
+    synchronized: false,
+    acknowledgedClientMessageIds: [],
+  });
+  return stored;
+}
+
+export interface TimelineReplica {
+  prepare(agentId: string): Promise<void>;
+  readCursor(agentId: string): { epoch: string; endSeq: number } | undefined;
+  timelineUpdated(agentId: string): void;
+}
+
+class TimelineReplicaOwner implements TimelineReplica {
+  private readonly cachedCursors = new Map<string, { epoch: string; endSeq: number }>();
+  private readonly preparations = new Map<string, Promise<void>>();
+
+  constructor(
+    private readonly serverId: string,
+    private readonly storage: TimelineReplicaStorage,
+    private readonly prepareAgent: (agentId: string) => Promise<void>,
+  ) {}
+
+  async prepare(agentId: string): Promise<void> {
+    const existing = this.preparations.get(agentId);
+    if (existing) return existing;
+    const preparation = this.load(agentId).finally(() => {
+      if (this.preparations.get(agentId) === preparation) {
+        this.preparations.delete(agentId);
+      }
+    });
+    this.preparations.set(agentId, preparation);
+    return preparation;
+  }
+
+  private async load(agentId: string): Promise<void> {
+    const stored = await prepareCachedTimeline({
+      serverId: this.serverId,
+      agentId,
+      storage: this.storage,
+      prepareAgent: this.prepareAgent,
+    });
+    if (!stored) return;
+    if (stored.range) {
+      this.cachedCursors.set(agentId, {
+        epoch: stored.range.epoch,
+        endSeq: stored.range.endSeq,
+      });
+    }
+  }
+
+  readCursor(agentId: string): { epoch: string; endSeq: number } | undefined {
+    return this.cachedCursors.get(agentId);
+  }
+
+  timelineUpdated(agentId: string): void {
+    const session = useSessionStore.getState().sessions[this.serverId];
+    const timeline = selectAgentTimelineState(session, agentId);
+    if (timeline.status !== "synced") return;
+    this.cachedCursors.delete(agentId);
+    this.storage.commitTimeline(this.serverId, agentId, {
+      agentId,
+      items: [...timeline.items, ...(session?.agentStreamHead.get(agentId) ?? [])],
+      range: timeline.range,
+      hasOlder: timeline.older === "available",
+    });
+  }
+}
+
+export function createTimelineReplica(input: {
+  serverId: string;
+  storage: TimelineReplicaStorage;
+  prepareAgent: (agentId: string) => Promise<void>;
+}): TimelineReplica {
+  return new TimelineReplicaOwner(input.serverId, input.storage, input.prepareAgent);
+}
+
+export interface TimelinePageResult {
   hasNewer: boolean;
   endCursor: { epoch: string; seq: number } | null;
 }
 
-interface ViewedTimelineSyncPorts {
+export type TimelineResponsePayload = Extract<
+  SessionOutboundMessage,
+  { type: "fetch_agent_timeline_response" }
+>["payload"];
+
+function clearAgentInitializingFlag(serverId: string, agentId: string): void {
+  useSessionStore.getState().setInitializingAgents(serverId, (previous) => {
+    if (previous.get(agentId) !== true) return previous;
+    const next = new Map(previous);
+    next.set(agentId, false);
+    return next;
+  });
+}
+
+function commitProcessedTimeline(input: {
+  serverId: string;
+  payload: TimelineResponsePayload;
+  result: ProcessTimelineResponseOutput;
+  timeline: AgentTimelineState;
+  currentCursor: AgentTimelineCursorState | undefined;
+  synchronized: boolean;
+}): void {
+  const { serverId, payload, result, timeline, currentCursor, synchronized } = input;
+  const agentId = payload.agentId;
+  const store = useSessionStore.getState();
+  if (result.commit !== "discard") {
+    store.applyAgentTimelineResponseState(serverId, agentId, {
+      items: result.tail,
+      head: result.head,
+      range: result.cursorChanged ? (result.cursor ?? null) : (currentCursor ?? null),
+      older: result.older,
+      newer:
+        payload.direction === "before"
+          ? timeline.status === "synced" && timeline.newer === "available"
+          : payload.hasNewer,
+      synchronized,
+      acknowledgedClientMessageIds: result.acknowledgedClientMessageIds,
+    });
+    return;
+  }
+  if (result.acknowledgedClientMessageIds.length > 0) {
+    store.setAgentStreamState(serverId, agentId, {
+      acknowledgedClientMessageIds: result.acknowledgedClientMessageIds,
+    });
+  }
+  if (payload.direction !== "before") {
+    store.setAgentTimelineHasNewer(serverId, (current) => {
+      const next = new Map(current);
+      next.set(agentId, payload.hasNewer);
+      return next;
+    });
+  }
+  store.markAgentHistorySynchronized(serverId, agentId);
+}
+
+function finalizeProcessedTimeline(input: {
+  serverId: string;
+  agentId: string;
+  initKey: string;
+  result: ProcessTimelineResponseOutput;
+  synchronized: boolean;
+  recoverGap: (agentId: string, cursor: { epoch: string; endSeq: number }) => void;
+  drainQueuedAgentMessage: (agentId: string) => void;
+}): void {
+  for (const effect of input.result.sideEffects) {
+    if (effect.type === "catch_up") input.recoverGap(input.agentId, effect.cursor);
+  }
+  if (input.result.clearInitializing) {
+    clearAgentInitializingFlag(input.serverId, input.agentId);
+  }
+  if (input.synchronized) {
+    useCreateFlowStore
+      .getState()
+      .clearByAgent({ serverId: input.serverId, agentId: input.agentId });
+    const session = useSessionStore.getState().sessions[input.serverId];
+    const agent = session?.agents.get(input.agentId) ?? session?.agentDetails.get(input.agentId);
+    if (input.result.clearInitializing && agent && agent.status !== "running")
+      input.drainQueuedAgentMessage(input.agentId);
+  }
+  if (input.result.initResolution === "resolve") resolveInitDeferred(input.initKey);
+}
+
+function applyAuthoritativeTimelineResponse(input: {
+  serverId: string;
+  payload: TimelineResponsePayload;
+  recoverGap: (agentId: string, cursor: { epoch: string; endSeq: number }) => void;
+  drainQueuedAgentMessage: (agentId: string) => void;
+}): boolean {
+  const { serverId, payload } = input;
+  const agentId = payload.agentId;
+  const initKey = getInitKey(serverId, agentId);
+  const session = useSessionStore.getState().sessions[serverId];
+  const timeline = selectAgentTimelineState(session, agentId);
+  const activeInitDeferred = getInitDeferred(initKey);
+  const currentCursor = timeline.status === "synced" ? (timeline.range ?? undefined) : undefined;
+  const result = processTimelineResponse({
+    payload,
+    currentTail: timeline.status === "cold" ? [] : timeline.items,
+    currentHead: session?.agentStreamHead.get(agentId) ?? [],
+    currentCursor,
+    isInitializing: session?.initializingAgents.get(agentId) === true,
+    hasActiveInitDeferred: Boolean(activeInitDeferred),
+    initRequestDirection: activeInitDeferred?.requestDirection ?? "tail",
+    sendingClientMessageIds: getSendingClientMessageIds(session?.messageSubmissions.get(agentId)),
+  });
+
+  if (result.error) {
+    if (result.clearInitializing) clearAgentInitializingFlag(serverId, agentId);
+    if (result.initResolution === "reject") rejectInitDeferred(initKey, new Error(result.error));
+    return false;
+  }
+
+  const synchronized = isTimelineResumeSnapshotAuthoritative({
+    direction: payload.direction,
+    hasNewer: payload.hasNewer,
+    error: payload.error,
+  });
+  commitProcessedTimeline({ serverId, payload, result, timeline, currentCursor, synchronized });
+  finalizeProcessedTimeline({
+    serverId,
+    agentId,
+    initKey,
+    result,
+    synchronized,
+    recoverGap: input.recoverGap,
+    drainQueuedAgentMessage: input.drainQueuedAgentMessage,
+  });
+  return true;
+}
+
+export interface ViewedTimelineSyncPorts {
   initialDeliveryMode: TimelineDeliveryMode;
+  readCursor(agentId: string): { epoch: string; endSeq: number } | undefined;
+  prepare(agentId: string): Promise<void>;
+  replaceDemandedAgentIds(agentIds: string[]): void;
   setSubscription(agentIds: string[]): Promise<void>;
   fetchPage(
     agentId: string,
@@ -27,6 +293,8 @@ export interface ViewedTimelineUiBridge {
   replaceVisibleAgentIds(sourceId: string, agentIds: string[]): void;
   subscribe(listener: () => void): () => void;
   getAgentTimelineStatus(agentId: string): ViewedTimelineStatus;
+  getAgentTimelineError(agentId: string): string | null;
+  retryVisibleAgentTimeline(agentId: string): void;
 }
 
 export interface ViewedTimelineSync extends ViewedTimelineUiBridge {
@@ -36,6 +304,61 @@ export interface ViewedTimelineSync extends ViewedTimelineUiBridge {
   reconcileAgent(agentId: string): void;
   recoverGap(agentId: string, cursor: { epoch: string; endSeq: number }): void;
   dispose(): void;
+}
+
+export type ViewedTimelineOwnerPorts = Omit<
+  ViewedTimelineSyncPorts,
+  "prepare" | "replaceDemandedAgentIds"
+>;
+
+export interface ViewedTimelineOwner extends ViewedTimelineSync {
+  applyTimelineResponse(payload: TimelineResponsePayload): void;
+  enqueueStreamEvent(agentId: string, event: AgentStreamReducerEvent): void;
+  flushStreamAgent(agentId: string): void;
+}
+
+export function createViewedTimelineOwner(input: {
+  serverId: string;
+  replica: TimelineReplica;
+  replaceDemandedAgentIds: (agentIds: string[]) => void;
+  drainQueuedAgentMessage: (agentId: string) => void;
+  ports: ViewedTimelineOwnerPorts;
+}): ViewedTimelineOwner {
+  const sync = createViewedTimelineSync({
+    ...input.ports,
+    prepare: (agentId) => input.replica.prepare(agentId),
+    readCursor: (agentId) => input.replica.readCursor(agentId) ?? input.ports.readCursor(agentId),
+    replaceDemandedAgentIds: input.replaceDemandedAgentIds,
+  });
+  const streamQueue = createSessionAgentStreamReducerQueue({
+    serverId: input.serverId,
+    setAgentStreamState: (...args) => useSessionStore.getState().setAgentStreamState(...args),
+    setAgentTimelineCursor: (...args) => useSessionStore.getState().setAgentTimelineCursor(...args),
+    recoverTimelineGap: (agentId, cursor) => sync.recoverGap(agentId, cursor),
+    onCommitted: (agentId) => input.replica.timelineUpdated(agentId),
+  });
+  return {
+    ...sync,
+    applyTimelineResponse(payload) {
+      const accepted = applyAuthoritativeTimelineResponse({
+        serverId: input.serverId,
+        payload,
+        recoverGap: (agentId, cursor) => sync.recoverGap(agentId, cursor),
+        drainQueuedAgentMessage: input.drainQueuedAgentMessage,
+      });
+      if (accepted) input.replica.timelineUpdated(payload.agentId);
+    },
+    enqueueStreamEvent(agentId, event) {
+      streamQueue.enqueue(agentId, event);
+    },
+    flushStreamAgent(agentId) {
+      streamQueue.flushAgent(agentId);
+    },
+    dispose() {
+      streamQueue.dispose({ flush: true });
+      sync.dispose();
+    },
+  };
 }
 
 const RETRY_DELAY_MS = 1_000;
@@ -101,7 +424,12 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
   const pendingCatchUps = new Map<string, ProjectedTimelineForwardFetchPlan>();
   const lingeringRemovals = new Map<string, () => void>();
   const visibilityCatchUpPending = new Set<string>();
-  const visibilityCatchUpErrors = new Set<string>();
+  const visibilityCatchUpErrors = new Map<string, string>();
+  // User-initiated retries only. Background retries stay silent; a retry the user asked for
+  // owes them a pending state until it settles.
+  const manualRetries = new Set<string>();
+  const loadedCache = new Set<string>();
+  const cacheLoads = new Map<string, Promise<void>>();
   const listeners = new Set<() => void>();
   let active = true;
   let connected = false;
@@ -132,12 +460,16 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
     if (wasPending || hadError) notifyListeners();
   };
 
-  const setVisibilityCatchUpError = (agentIds: string[]) => {
+  const setVisibilityCatchUpError = (agentIds: string[], error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
     let changed = false;
     for (const agentId of agentIds) {
-      if (!visibilityCatchUpPending.delete(agentId)) continue;
-      visibilityCatchUpErrors.add(agentId);
-      changed = true;
+      if (manualRetries.delete(agentId)) changed = true;
+      if (visibilityCatchUpPending.delete(agentId)) changed = true;
+      if (visibilityCatchUpErrors.get(agentId) !== message) {
+        visibilityCatchUpErrors.set(agentId, message);
+        changed = true;
+      }
     }
     if (changed) notifyListeners();
   };
@@ -196,11 +528,30 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
           if (current?.generation !== generation || current.status !== "error") return;
           startCatchUp(agentId);
         }, RETRY_DELAY_MS);
-        catchUps.set(agentId, { generation, status: "error", cancelRetry });
-        setVisibilityCatchUpError([agentId]);
+        catchUps.set(agentId, {
+          generation,
+          status: "error",
+          request,
+          cancelRetry,
+        });
+        setVisibilityCatchUpError([agentId], error);
         ports.reportError(error);
       }
     }
+  };
+
+  const ensureCacheLoaded = (agentId: string): void => {
+    if (loadedCache.has(agentId) || cacheLoads.has(agentId)) return;
+    const load = ports
+      .prepare(agentId)
+      .catch((error) => ports.reportError(error))
+      .finally(() => {
+        cacheLoads.delete(agentId);
+        loadedCache.add(agentId);
+        const pending = pendingCatchUps.get(agentId);
+        startCatchUp(agentId, { request: pending, supersede: Boolean(pending) });
+      });
+    cacheLoads.set(agentId, load);
   };
 
   const startCatchUp = (
@@ -215,7 +566,12 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       if (request) pendingCatchUps.set(agentId, request);
       return;
     }
-    const nextRequest = request ?? planTimelineTailFetch();
+    if (!loadedCache.has(agentId)) {
+      if (request) pendingCatchUps.set(agentId, request);
+      ensureCacheLoaded(agentId);
+      return;
+    }
+    const nextRequest = request ?? planTimelineResumeFetch(ports.readCursor(agentId));
     const current = catchUps.get(agentId);
     const decision = decideCatchUp({ current, request: nextRequest, supersede });
     if (decision === "keep-and-park") {
@@ -253,7 +609,7 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       await ports.setSubscription(requested);
     } catch (error) {
       membershipNeedsRetry = true;
-      setVisibilityCatchUpError(requested);
+      setVisibilityCatchUpError(requested, error);
       cancelMembershipRetry?.();
       cancelMembershipRetry = ports.schedule(() => {
         cancelMembershipRetry = null;
@@ -346,11 +702,14 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       if (!desired.includes(agentId)) {
         visibilityCatchUpPending.add(agentId);
         visibilityCatchUpErrors.delete(agentId);
+        manualRetries.delete(agentId);
+        ensureCacheLoaded(agentId);
       }
     }
     cancelMembershipRetry?.();
     cancelMembershipRetry = null;
     desired = nextDesired;
+    ports.replaceDemandedAgentIds(desired);
     membershipGeneration += 1;
     notifyListeners();
     if (deliveryMode === "legacy") {
@@ -389,15 +748,37 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
     commitDesiredMembership(effectiveAgentIds());
   };
 
+  const retryVisibleAgentTimeline = (agentId: string) => {
+    if (!isDesired(agentId) || manualRetries.has(agentId)) return;
+    const catchUp = catchUps.get(agentId);
+    const membershipRetryable = deliveryMode === "selective" && membershipNeedsRetry && connected;
+    if (catchUp?.status !== "error" && !membershipRetryable) return;
+    manualRetries.add(agentId);
+    notifyListeners();
+    if (catchUp?.status === "error") {
+      catchUp.cancelRetry?.();
+      startCatchUp(agentId, { request: catchUp.request, supersede: true });
+      return;
+    }
+    cancelMembershipRetry?.();
+    cancelMembershipRetry = null;
+    membershipNeedsRetry = false;
+    void reconcileMembership();
+  };
   return {
+    retryVisibleAgentTimeline,
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
     getAgentTimelineStatus(agentId) {
+      if (manualRetries.has(agentId)) return "pending";
       if (visibilityCatchUpErrors.has(agentId)) return "error";
       if (!isDesired(agentId) || visibilityCatchUpPending.has(agentId)) return "pending";
       return "ready";
+    },
+    getAgentTimelineError(agentId) {
+      return visibilityCatchUpErrors.get(agentId) ?? null;
     },
     replaceVisibleAgentIds(sourceId, agentIds) {
       const normalized = normalizeAgentIds(agentIds);
@@ -440,7 +821,9 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       membershipNeedsRetry = false;
       membershipGeneration += 1;
       for (const agentId of desired) cancelCatchUp(agentId);
-      desired = visibleAgentIds();
+      const visible = active ? visibleAgentIds() : [];
+      desired = visible;
+      ports.replaceDemandedAgentIds(desired);
       visibilityCatchUpPending.clear();
       visibilityCatchUpErrors.clear();
       for (const agentId of desired) visibilityCatchUpPending.add(agentId);
@@ -474,7 +857,10 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       membershipGeneration += 1;
       for (const agentId of desired) cancelCatchUp(agentId);
       desired = [];
+      ports.replaceDemandedAgentIds([]);
       acknowledged = [];
+      loadedCache.clear();
+      cacheLoads.clear();
       visibilityCatchUpPending.clear();
       visibilityCatchUpErrors.clear();
       notifyListeners();

@@ -59,7 +59,6 @@ import { useWorkspaceAttachmentScopeKey } from "@/attachments/workspace-attachme
 import { COMPACT_CONTENT_WIDTH, useIsCompactFormFactor } from "@/constants/layout";
 import { isWeb } from "@/constants/platform";
 import { useAgentAttentionClear } from "@/hooks/use-agent-attention-clear";
-import { useAgentInitialization } from "@/hooks/use-agent-initialization";
 import { useAgentInputDraft, type AgentInputDraft } from "@/composer/draft/input-draft";
 import {
   type AgentScreenAgent,
@@ -115,6 +114,7 @@ import { BackgroundWorkTrack, createHostBackgroundWorkModel } from "@/background
 import { SubagentsTrack } from "@/subagents/track";
 import type { PendingPermission } from "@/types/shared";
 import type { StreamItem } from "@/types/stream";
+import type { ViewedTimelineStatus, ViewedTimelineUiBridge } from "@/timeline/viewed-timeline-sync";
 import { getInitDeferred, getInitKey } from "@/utils/agent-initialization";
 import { derivePendingPermissionKey, normalizeAgentSnapshot } from "@/utils/agent-snapshots";
 import { applyLegacyDaemonWorkspaceOwnership } from "@/workspace/legacy-daemon-workspaces";
@@ -152,6 +152,15 @@ function resolveChatAgentFromSession(
   if (!agentId) return null;
   const session = state.sessions[serverId];
   return session?.agents?.get(agentId) ?? session?.agentDetails?.get(agentId) ?? null;
+}
+
+function readViewedTimelineError(input: {
+  agentId: string | undefined;
+  status: ViewedTimelineStatus;
+  sync: ViewedTimelineUiBridge | null;
+}): string | null {
+  if (!input.agentId || input.status !== "error" || !input.sync) return null;
+  return input.sync.getAgentTimelineError(input.agentId);
 }
 
 const EMPTY_CHAT_AGENT_STATE: ChatAgentSelectedState = {
@@ -220,6 +229,7 @@ function buildChatAgentFromState(
 function renderChatAgentNonReadyView(args: {
   viewState: AgentScreenViewState;
   effectiveAgent: AgentScreenAgent | null;
+  retryAgentLoad: () => void;
   t: TFunction;
 }): React.ReactElement | null {
   const { viewState, effectiveAgent, t } = args;
@@ -238,6 +248,7 @@ function renderChatAgentNonReadyView(args: {
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>{t("agentPanel.states.failedToLoad")}</Text>
           <Text style={styles.statusText}>{viewState.message}</Text>
+          <SidebarCallout actions={[{ label: t("common.retry"), onPress: args.retryAgentLoad }]} />
         </View>
       </View>
     );
@@ -792,14 +803,15 @@ function ChatAgentContent({
     readTimelineStatus,
   );
   const visibilityCatchUpStatus = isPaneVisible ? timelineStatus : "ready";
+  const visibilityCatchUpError = readViewedTimelineError({
+    agentId,
+    status: visibilityCatchUpStatus,
+    sync: viewedTimelineSync,
+  });
   const hasActiveCreateHandoff = useCreateFlowStore((state) =>
     findActiveCreateHandoff({ pendingByDraftId: state.pendingByDraftId, serverId, agentId }),
   );
   const hasSession = useSessionStore((state) => Boolean(state.sessions[serverId]));
-  const { ensureAgentIsInitialized } = useAgentInitialization({
-    serverId,
-    client: hasSession ? client : null,
-  });
   const [missingAgentState, setMissingAgentState] = useState<AgentScreenMissingState>({
     kind: "idle",
   });
@@ -907,6 +919,7 @@ function ChatAgentContent({
       isHistorySyncing,
       needsAuthoritativeSync,
       visibilityCatchUpStatus,
+      visibilityCatchUpError,
       continuity,
       hasHydratedHistoryBefore,
     },
@@ -945,6 +958,17 @@ function ChatAgentContent({
     streamViewRef.current?.scrollToBottom("message-sent");
   }, [agentId]);
 
+  const retryAgentLoad = useCallback(() => {
+    setMissingAgentState({ kind: "idle" });
+    if (!agentId || !viewedTimelineSync) return;
+    viewedTimelineSync.retryVisibleAgentTimeline(agentId);
+  }, [agentId, viewedTimelineSync]);
+
+  const retryTimelineSync = useCallback(() => {
+    if (!agentId || !viewedTimelineSync) return;
+    viewedTimelineSync.retryVisibleAgentTimeline(agentId);
+  }, [agentId, viewedTimelineSync]);
+
   useEffect(() => {
     initAttemptTokenRef.current += 1;
     setMissingAgentState({ kind: "idle" });
@@ -967,7 +991,14 @@ function ChatAgentContent({
       }
       return;
     }
-    if (!client || !isPaneVisible || !isConnected || !hasSession) {
+    if (
+      !client ||
+      !viewedTimelineSync ||
+      !isPaneVisible ||
+      !isConnected ||
+      !hasSession ||
+      visibilityCatchUpStatus !== "ready"
+    ) {
       return;
     }
     if (
@@ -981,7 +1012,7 @@ function ChatAgentContent({
     setMissingAgentState({ kind: "resolving" });
     const attemptToken = ++initAttemptTokenRef.current;
 
-    ensureAgentIsInitialized(agentId)
+    Promise.resolve()
       .then(async () => {
         if (attemptToken !== initAttemptTokenRef.current) {
           return;
@@ -1026,12 +1057,13 @@ function ChatAgentContent({
     hasAppliedAuthoritativeHistory,
     agentId,
     client,
-    ensureAgentIsInitialized,
     hasSession,
     isConnected,
     isPaneVisible,
     missingAgentState.kind,
     serverId,
+    viewedTimelineSync,
+    visibilityCatchUpStatus,
   ]);
 
   const animatedContentStyle = useMemo(
@@ -1042,6 +1074,7 @@ function ChatAgentContent({
   const nonReadyView = renderChatAgentNonReadyView({
     viewState,
     effectiveAgent,
+    retryAgentLoad,
     t,
   });
   if (nonReadyView) return nonReadyView;
@@ -1075,6 +1108,7 @@ function ChatAgentContent({
       handleMessageSent={handleMessageSent}
       showHistorySyncOverlay={showHistorySyncOverlay}
       showHistorySyncError={showHistorySyncError}
+      retryTimelineSync={retryTimelineSync}
       cwd={agentCwd}
       onAttentionInputFocus={attentionController.clearOnInputFocus}
       onAttentionPromptSend={attentionController.clearOnPromptSend}
@@ -1102,6 +1136,7 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
   handleMessageSent,
   showHistorySyncOverlay,
   showHistorySyncError,
+  retryTimelineSync,
   cwd,
   onAttentionInputFocus,
   onAttentionPromptSend,
@@ -1125,6 +1160,7 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
   handleMessageSent: () => void;
   showHistorySyncOverlay: boolean;
   showHistorySyncError: boolean;
+  retryTimelineSync: () => void;
   cwd: string;
   onAttentionInputFocus: () => void;
   onAttentionPromptSend: () => void;
@@ -1267,6 +1303,7 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
               <SidebarCallout
                 title={t("agentPanel.states.timelineSyncFailed")}
                 variant="error"
+                actions={[{ label: t("common.retry"), onPress: retryTimelineSync }]}
                 testID="agent-timeline-sync-error"
               />
             ) : null}

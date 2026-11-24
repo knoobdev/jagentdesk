@@ -1,3 +1,4 @@
+import type { ViewedTimelineStatus } from "@/timeline/viewed-timeline-sync";
 import { useRef } from "react";
 import type {
   AgentCapabilityFlags,
@@ -47,7 +48,8 @@ export interface AgentScreenMachineInput {
   isArchivingCurrentAgent: boolean;
   isHistorySyncing: boolean;
   needsAuthoritativeSync: boolean;
-  visibilityCatchUpStatus: "ready" | "pending" | "error";
+  visibilityCatchUpStatus: ViewedTimelineStatus;
+  visibilityCatchUpError: string | null;
   continuity: AgentScreenContinuity;
   hasHydratedHistoryBefore: boolean;
 }
@@ -114,6 +116,13 @@ function updateInitialSyncFailureMemory(args: {
     args.nextMemory.hadInitialSyncFailure = false;
   }
   if (args.input.missingAgentState.kind === "error" && !args.input.hasHydratedHistoryBefore) {
+    args.nextMemory.hadInitialSyncFailure = true;
+  }
+  if (
+    args.input.visibilityCatchUpStatus === "error" &&
+    args.input.visibilityCatchUpError &&
+    !args.input.hasHydratedHistoryBefore
+  ) {
     args.nextMemory.hadInitialSyncFailure = true;
   }
 }
@@ -230,6 +239,21 @@ export function deriveAgentScreenViewState({
       state: {
         tag: "error",
         message: input.missingAgentState.message,
+      },
+      memory: nextMemory,
+    };
+  }
+
+  if (
+    input.visibilityCatchUpStatus === "error" &&
+    input.visibilityCatchUpError &&
+    !input.hasHydratedHistoryBefore &&
+    !nextMemory.hasRenderedReady
+  ) {
+    return {
+      state: {
+        tag: "error",
+        message: input.visibilityCatchUpError,
       },
       memory: nextMemory,
     };

@@ -91,3 +91,11 @@ export function isTimelineResumeSnapshotAuthoritative(input: {
   if (input.error || input.direction === "before") return false;
   return input.direction === "tail" || !input.hasNewer;
 }
+
+export function planTimelineResumeFetch(
+  range: { epoch: string; endSeq: number } | null | undefined,
+): ProjectedTimelineForwardFetchPlan {
+  return range
+    ? planTimelineCatchUpAfter({ epoch: range.epoch, seq: range.endSeq })
+    : planTimelineTailFetch();
+}

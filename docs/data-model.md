@@ -579,6 +579,14 @@ Right-sidebar client state splits on whether it is determined by the directory o
 - **Directory-backed** (shared by same-`cwd` workspaces): keyed by `(serverId, cwd)`. Git status/diff, GitHub PR status, PR timeline, file preview content. These are TanStack Query caches, not persisted stores.
 - **Workspace-owned** (independent per workspace): keyed by `workspaceId`, with `cwd` used only as a fallback when no `workspaceId` is present. Review draft comments (`@jagentdesk:review-draft-store`), diff-mode overrides (in-memory), workspace composer attachments, and file-explorer nav/expand state. The `workspaceId` part of these keys is **opaque** — never parse it back into a path.
 
+### Offline replica
+
+Host directories and per-agent chats use row storage: IndexedDB on web and SQLite on native.
+Directory demand and viewed timelines restore through their owning runtime, so opening one chat
+never waits for all saved hosts or unrelated streaming agents. The cache is disposable; provider
+history remains authoritative. Changing its schema evicts cached rows rather than migrating them.
+Agent snapshots retain cumulative usage for Insights independently of timeline retention.
+
 ### Draft Store
 
 **AsyncStorage key:** `jagentdesk-drafts` (version 2)
