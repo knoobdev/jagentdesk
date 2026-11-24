@@ -7,11 +7,22 @@ export interface BotRuntimeEvent {
   key: string;
   text: string;
 }
+export interface BotExternalMessage {
+  senderId: string;
+  title: string;
+  beforeDispatch: () => void;
+}
 export interface BotRuntime {
   ensureSupervisor(bot: Bot, home: string): Promise<string>;
   configure(bot: Bot): Promise<void>;
   busy(agentId: string): boolean | Promise<boolean>;
-  send(agentId: string, text: string, messageId?: string, sourceAgentId?: string): Promise<void>;
+  send(
+    agentId: string,
+    text: string,
+    messageId?: string,
+    sourceAgentId?: string,
+    external?: BotExternalMessage,
+  ): Promise<void>;
   startWorker(
     bot: Bot,
     item: BotItem,

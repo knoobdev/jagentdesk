@@ -43,7 +43,7 @@ existing gate. The only setting that permits unattended operation is explicit
 
 Agents cannot change this setting through bot tools, approve their own permission cards,
 or use the generic mode-changing tool. Finish/cancel active worker items before changing
-provider, model, mode or unattended settings. Untrusted Jira/GitHub/room content never
+provider, model, mode or unattended settings. Untrusted Slack/Jira/GitHub/room content never
 changes standing authority. See [permissions](permissions.md).
 
 ## RPC contract for clients
@@ -119,6 +119,28 @@ Jira uses existing daemon connections, never a separate credential store. `jiraA
 maps each site's opaque account ref to the bot. Polling also searches `@slug` mentions and
 account-id text. Events are deduplicated by connection, issue id and update time. Disabling
 the Jira plugin stops Jira polling. No external connector is required.
+
+### Slack
+
+Create one Slack app per bot from Settings → Slack. Keep Relay enabled and the daemon
+online for URL verification and event delivery. The manifest URL exists before you paste
+credentials; connect the token and signing secret before asking Slack to verify the URL.
+The allowed-user list starts empty. Link your account by sending the expiring code in a DM.
+
+Slack credentials use the same encrypted daemon vault as Jira/Figma/SSH. Hook requests end
+TLS at Cloudflare, then cross the authenticated relay control socket without Noise encryption.
+Cloudflare can see Slack content while forwarding it; the Worker persists only hook ids and
+never logs request bodies. Ordinary app relay traffic keeps its existing Noise boundary.
+
+Slack receipts and outgoing replies survive daemon restarts. Thread identity follows the
+queued bot message through Supervisor completion and item creation; it must never be inferred
+from the most recently received Slack event. Reactions on posted replies use the stored root
+thread timestamp. Disconnect rotates the URL; offline unregister operations remain pending
+until the relay reconnects, including when the bot was deleted.
+
+All `bots.slack.*` RPCs require `daemon.manage`, including status and manifest. Disable the
+Bots plugin to unregister its hooks without losing its configuration. The local acceptance
+test uses an injected Slack Web API URL and a local Worker; never run it against Slack itself.
 
 ## Port sources
 

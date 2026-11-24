@@ -100,6 +100,12 @@ export const BotItemSchema = z.object({
   createdAt_ms: z.number().int(),
   updatedAt_ms: z.number().int(),
 });
+export const BotSlackThreadSchema = z.object({
+  hookId: z.string(),
+  channel: z.string(),
+  threadTs: z.string(),
+  userId: z.string(),
+});
 export const BotMessageSchema = z.object({
   id: z.string(),
   botId: z.string(),
@@ -109,6 +115,7 @@ export const BotMessageSchema = z.object({
   createdAt_ms: z.number().int(),
   roomId: z.string().optional(),
   rootId: z.string().optional(),
+  slack: BotSlackThreadSchema.optional(),
 });
 export const BotRoomSchema = z.object({
   id: z.string(),

@@ -7,6 +7,12 @@ type InboundOperation = SessionInboundMessage["type"];
 type OutboundOperation = SessionOutboundMessage["type"];
 
 const INBOUND_PERMISSION = {
+  "bots.slack.manifest.request": "daemon.manage",
+  "bots.slack.connect.request": "daemon.manage",
+  "bots.slack.status.request": "daemon.manage",
+  "bots.slack.link_code.request": "daemon.manage",
+  "bots.slack.allowed.remove.request": "daemon.manage",
+  "bots.slack.disconnect.request": "daemon.manage",
   "bots.list.request": "daemon.read",
   "bots.chat.history.request": "daemon.read",
   "bots.items.list.request": "daemon.read",
@@ -711,6 +717,12 @@ const INBOUND_PERMISSION = {
 } as const satisfies Record<InboundOperation, PermissionRequirement>;
 
 const OUTBOUND_PERMISSION = {
+  "bots.slack.manifest.response": "daemon.manage",
+  "bots.slack.connect.response": "daemon.manage",
+  "bots.slack.status.response": "daemon.manage",
+  "bots.slack.link_code.response": "daemon.manage",
+  "bots.slack.allowed.remove.response": "daemon.manage",
+  "bots.slack.disconnect.response": "daemon.manage",
   "bots.list.response": "daemon.read",
   "bots.chat.history.response": "daemon.read",
   "bots.items.list.response": "daemon.read",

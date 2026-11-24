@@ -93,6 +93,7 @@ export function useBotsMutation<T extends BotsRequestType>(serverId: string, typ
     },
     onSuccess: async () => {
       const domains = ["list"];
+      if (type.startsWith("bots.slack.")) domains.push("slack");
       if (type.startsWith("bots.rooms.")) domains.push("rooms");
       if (type.startsWith("bots.chat.")) domains.push("chat", "items");
       if (type.startsWith("bots.items.")) domains.push("items");

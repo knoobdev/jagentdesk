@@ -15,6 +15,8 @@ import { createTestAgentClients } from "./fake-agent-client.js";
 import type { PushNotificationSender } from "../push/notifications.js";
 
 interface TestJAgentDeskDaemonOptions {
+  relay?: { endpoint: string; useTls: boolean };
+  slackApiBaseUrl?: string;
   hostCapabilities?: import("../host-capabilities/service.js").HostCapabilityService;
   botsTriggerSource?: import("../bots/service.js").BotTriggerSource;
   sessionShareTunnelManager?: import("../session-share/tunnel-manager.js").TunnelManager;
@@ -103,6 +105,7 @@ export async function createTestJAgentDeskDaemon(
     const daemon = await createJAgentDeskDaemon(config, logger, {
       hostCapabilities: options.hostCapabilities,
       botsTriggerSource: options.botsTriggerSource,
+      slackApiBaseUrl: options.slackApiBaseUrl,
       sessionShareTunnelManager: options.sessionShareTunnelManager,
       builtinPlugins: options.builtinPlugins ?? new BuiltinPluginLoader(undefined, []),
       serverFeatureOverrides: {
@@ -190,7 +193,9 @@ async function prepareTestDaemonConfig(
     corsAllowedOrigins: options.corsAllowedOrigins ?? [],
     hostnames: true,
     mcpEnabled: options.mcpEnabled ?? true,
-    relayEnabled: false,
+    relayEnabled: Boolean(options.relay),
+    relayEndpoint: options.relay?.endpoint,
+    relayUseTls: options.relay?.useTls,
     staticDir,
     mcpDebug: options.mcpDebug ?? false,
     sessionSharingEnabled: options.sessionSharingEnabled,

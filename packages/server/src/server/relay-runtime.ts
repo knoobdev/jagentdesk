@@ -4,6 +4,7 @@ import { type RelayOwnershipSigner } from "./daemon-keypair.js";
 import {
   startRelayTransport,
   type RelaySocketLike,
+  type RelayControlHandler,
   type RelayTransportController,
 } from "./relay-transport.js";
 
@@ -14,6 +15,7 @@ export interface RelayRuntimeConfig {
 }
 
 interface RelayRuntimeOptions {
+  controlHandler?: RelayControlHandler;
   config: RelayRuntimeConfig;
   logger: pino.Logger;
   attachSocket(ws: RelaySocketLike, metadata?: ExternalSocketMetadata): Promise<void>;
@@ -43,6 +45,7 @@ export function createRelayRuntime(options: RelayRuntimeOptions): RelayRuntime {
       relayUseTls: config.useTls,
       serverId: options.serverId,
       relayOwnership: options.getRelayOwnership(),
+      controlHandler: options.controlHandler,
     });
   }
 

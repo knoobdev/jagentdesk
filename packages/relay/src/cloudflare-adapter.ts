@@ -1,3 +1,4 @@
+import { RelayHooks, slackHookPath, readHookBody } from "./hooks.js";
 /**
  * Cloudflare Durable Objects adapter for the relay (spec 35.2).
  *
@@ -227,8 +228,15 @@ export class RelayDurableObject {
   private pendingFrames = new Map<string, Array<string | ArrayBuffer>>();
   private pendingFrameBytes = new Map<string, number>();
 
+  private readonly hooks: RelayHooks;
   constructor(state: DurableObjectState) {
     this.state = state;
+    this.hooks = new RelayHooks(state.storage, () =>
+      this.state.getWebSockets("server-control").find((ws) => {
+        const attachment = deserializeAttachment(ws);
+        return ws.readyState === 1 && isRecord(attachment) && attachment.authState === "ok";
+      }),
+    );
   }
 
   private createWebSocketPair(): [WebSocket, WebSocket] {
@@ -706,6 +714,9 @@ export class RelayDurableObject {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    const hook = slackHookPath(url.pathname);
+    if (hook) return this.hooks.fetch(request, hook.hookId);
+    if (url.pathname.startsWith("/hooks/")) return new Response("Unknown hook", { status: 404 });
     const roleRaw = url.searchParams.get("role");
     const role = roleRaw === "server" || roleRaw === "client" ? roleRaw : null;
     const serverId = url.searchParams.get("serverId");
@@ -763,6 +774,12 @@ export class RelayDurableObject {
     if (!connectionId) {
       // Control channel: support simple app-level keepalive.
       if (typeof message === "string") {
+        try {
+          const parsed: unknown = JSON.parse(message);
+          if (isRecord(parsed) && (await this.hooks.controlMessage(ws, parsed))) return;
+        } catch {
+          /* Never log control payloads. */
+        }
         this.handleControlKeepalive(ws, message);
       }
       return;
@@ -907,6 +924,19 @@ export default {
         headers: { "Content-Type": "application/json" },
       });
     }
+
+    const hook = slackHookPath(url.pathname);
+    if (hook) {
+      if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
+      // Consume the bounded upload before handing it to a DO. Returning early from
+      // a DO while the Worker still streams its upload produces a platform 503.
+      const body = await readHookBody(request);
+      if (body instanceof Response) return body;
+      return env.RELAY.get(env.RELAY.idFromName(hook.serverId)).fetch(
+        new Request(request, { method: "POST", body: body.slice().buffer }),
+      );
+    }
+    if (url.pathname.startsWith("/hooks/")) return new Response("Unknown hook", { status: 404 });
 
     // Every other path is a relay connection attempt; validate before
     // waking a Durable Object so abusive requests stay in the free tier.
