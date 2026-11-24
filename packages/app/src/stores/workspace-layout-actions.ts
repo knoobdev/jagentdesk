@@ -204,6 +204,7 @@ export interface WorkspaceTabSnapshot {
   activeAgentIds: Iterable<string>;
   autoOpenAgentIds: Iterable<string>;
   knownAgentIds: Iterable<string>;
+  foreignAgentIds?: Iterable<string>;
   knownTerminalIds?: Iterable<string>;
   standaloneTerminalIds: Iterable<string>;
   hasActivePendingDraftCreate?: boolean;
@@ -1717,20 +1718,11 @@ interface EntityTabGroup {
 function applyPinnedAndHidden(input: {
   baseAgentIds: Set<string>;
   pinnedAgentIds: Set<string>;
-  pendingAgentIds: Set<string>;
   hiddenAgentIds: Set<string>;
-  knownAgentIds: Set<string>;
 }): Set<string> {
-  const { baseAgentIds, pinnedAgentIds, pendingAgentIds, hiddenAgentIds, knownAgentIds } = input;
-  const result = new Set(baseAgentIds);
-  for (const agentId of pinnedAgentIds) {
-    if (knownAgentIds.has(agentId) || pendingAgentIds.has(agentId)) {
-      result.add(agentId);
-    }
-  }
-  for (const agentId of hiddenAgentIds) {
-    result.delete(agentId);
-  }
+  const { baseAgentIds, pinnedAgentIds, hiddenAgentIds } = input;
+  const result = new Set([...baseAgentIds, ...pinnedAgentIds]);
+  for (const agentId of hiddenAgentIds) result.delete(agentId);
   return result;
 }
 
@@ -1848,12 +1840,18 @@ export function reconcileWorkspaceTabs(
   const originalFocusedTabId =
     findPaneById(nextLayout.root, nextLayout.focusedPaneId)?.focusedTabId ?? null;
   let reconciledFocusedTabId = originalFocusedTabId;
-  const pinnedAgentIds = new Set(state.pinnedAgentIds ?? []);
-  const pendingAgentIds = new Set(state.pendingAgentIds ?? []);
   const hiddenAgentIds = new Set(state.hiddenAgentIds ?? []);
   const activeAgentIds = normalizeStringSet(snapshot.activeAgentIds);
   const autoOpenAgentIds = normalizeStringSet(snapshot.autoOpenAgentIds);
-  const knownAgentIds = normalizeStringSet(snapshot.knownAgentIds);
+  const foreignAgentIds = normalizeStringSet(snapshot.foreignAgentIds ?? []);
+  // Explicit opens survive absent directory entries, but not known foreign ownership.
+  // Once an agent joins this workspace's active directory, normal archive rules apply.
+  const pinnedAgentIds = new Set(
+    [...(state.pinnedAgentIds ?? [])].filter(
+      (agentId) =>
+        !snapshot.agentsHydrated || (!activeAgentIds.has(agentId) && !foreignAgentIds.has(agentId)),
+    ),
+  );
   const standaloneTerminalIds = normalizeStringSet(snapshot.standaloneTerminalIds);
   const knownTerminalIds = snapshot.knownTerminalIds
     ? normalizeStringSet(snapshot.knownTerminalIds)
@@ -1861,16 +1859,12 @@ export function reconcileWorkspaceTabs(
   const visibleAgentIds = applyPinnedAndHidden({
     baseAgentIds: activeAgentIds,
     pinnedAgentIds,
-    pendingAgentIds,
     hiddenAgentIds,
-    knownAgentIds,
   });
   const autoOpenSet = applyPinnedAndHidden({
     baseAgentIds: autoOpenAgentIds,
     pinnedAgentIds,
-    pendingAgentIds,
     hiddenAgentIds,
-    knownAgentIds,
   });
 
   const initialTabs = collectAllTabs(nextLayout.root);
@@ -1936,6 +1930,7 @@ export function reconcileWorkspaceTabs(
 
   return {
     ...state,
+    pinnedAgentIds,
     layout: nextLayout,
   };
 }

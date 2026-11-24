@@ -592,11 +592,24 @@ export function createWorkspaceLayoutStore(
               },
               snapshot,
             );
-            if (nextState.layout === currentLayout) {
-              return state;
+            let pinnedAgentIdsByWorkspace = state.pinnedAgentIdsByWorkspace;
+            for (const agentId of state.pinnedAgentIdsByWorkspace[normalizedWorkspaceKey] ?? []) {
+              if (!nextState.pinnedAgentIds?.has(agentId)) {
+                pinnedAgentIdsByWorkspace = removeAgentIdFromWorkspaceSet(
+                  pinnedAgentIdsByWorkspace,
+                  normalizedWorkspaceKey,
+                  agentId,
+                );
+              }
             }
+            if (
+              nextState.layout === currentLayout &&
+              pinnedAgentIdsByWorkspace === state.pinnedAgentIdsByWorkspace
+            )
+              return state;
 
             return {
+              pinnedAgentIdsByWorkspace,
               layoutByWorkspace: {
                 ...state.layoutByWorkspace,
                 [normalizedWorkspaceKey]: nextState.layout,
@@ -1077,6 +1090,9 @@ export function createWorkspaceLayoutStore(
         storage: createJSONStorage(() => createWorkspaceLayoutStorage(storage)),
         onRehydrateStorage: () => (state) => {
           if (!state) return;
+          for (const [key, agentIds] of Object.entries(state.pinnedAgentIdsByWorkspace)) {
+            if (Array.isArray(agentIds)) state.pinnedAgentIdsByWorkspace[key] = new Set(agentIds);
+          }
           for (const [workspaceKey, layout] of Object.entries(state.layoutByWorkspace)) {
             if (layout.focusedPaneId !== null) continue;
             // Parked focus has an in-memory restoration record that cannot survive reload.
@@ -1095,6 +1111,12 @@ export function createWorkspaceLayoutStore(
           }
           return {
             layoutByWorkspace,
+            pinnedAgentIdsByWorkspace: Object.fromEntries(
+              Object.entries(state.pinnedAgentIdsByWorkspace).map(([key, agentIds]) => [
+                key,
+                Array.from(agentIds),
+              ]),
+            ),
             splitSizesByWorkspace: state.splitSizesByWorkspace,
             panelStateByWorkspace: Object.fromEntries(
               Object.entries(layoutByWorkspace).map(([key, layout]) => [

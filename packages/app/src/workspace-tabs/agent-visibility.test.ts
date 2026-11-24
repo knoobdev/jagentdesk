@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Agent } from "@/stores/session-store";
+import { createWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
 import {
   buildWorkspaceTabSnapshot,
   createWorkspaceAgentVisibilitySelector,
@@ -63,6 +64,116 @@ function makeAgent(input: {
 const WORKSPACE_ID = "ws-1";
 
 describe("workspace agent visibility", () => {
+  it("removes a restored pinned tab from an unrelated workspace once its owner is known", async () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: async (key: string) => values.get(key) ?? null,
+      setItem: async (key: string, value: string) => {
+        values.set(key, value);
+      },
+      removeItem: async (key: string) => {
+        values.delete(key);
+      },
+    };
+    const original = createWorkspaceLayoutStore(undefined, storage);
+    await original.persist.rehydrate();
+    const agent = makeAgent({ id: "restored-agent", cwd: "/project-a", workspaceId: "ws-a" });
+    for (const workspaceId of ["ws-a", "ws-b"]) {
+      original
+        .getState()
+        .openTabFocused(`srv:${workspaceId}`, { kind: "agent", agentId: agent.id });
+      original.getState().pinAgent(`srv:${workspaceId}`, agent.id);
+    }
+    const restored = createWorkspaceLayoutStore(undefined, storage);
+    await restored.persist.rehydrate();
+    const sessionAgents = new Map([[agent.id, agent]]);
+    const beforeHydration = buildWorkspaceTabSnapshot({
+      agentVisibility: deriveWorkspaceAgentVisibility({ sessionAgents, workspaceId: "ws-b" }),
+      agentsHydrated: false,
+      terminalsHydrated: true,
+      knownTerminalIds: [],
+      standaloneTerminalIds: [],
+      hasActivePendingTerminalCreate: false,
+      hasActivePendingDraftCreate: false,
+    });
+    restored.getState().reconcileTabs("srv:ws-b", beforeHydration);
+    expect(restored.getState().pinnedAgentIdsByWorkspace["srv:ws-b"]).toEqual(new Set([agent.id]));
+    for (const workspaceId of ["ws-a", "ws-b"]) {
+      restored.getState().reconcileTabs(
+        `srv:${workspaceId}`,
+        buildWorkspaceTabSnapshot({
+          agentVisibility: deriveWorkspaceAgentVisibility({ sessionAgents, workspaceId }),
+          agentsHydrated: true,
+          terminalsHydrated: true,
+          knownTerminalIds: [],
+          standaloneTerminalIds: [],
+          hasActivePendingTerminalCreate: false,
+          hasActivePendingDraftCreate: false,
+        }),
+      );
+    }
+
+    expect(
+      restored
+        .getState()
+        .getWorkspaceTabs("srv:ws-a")
+        .filter((tab) => tab.target.kind === "agent")
+        .map((tab) => tab.target),
+    ).toEqual([{ kind: "agent", agentId: agent.id }]);
+    expect(
+      restored
+        .getState()
+        .getWorkspaceTabs("srv:ws-b")
+        .filter((tab) => tab.target.kind === "agent"),
+    ).toEqual([]);
+    expect(restored.getState().pinnedAgentIdsByWorkspace["srv:ws-b"]).toBeUndefined();
+  });
+
+  it("uses directory ownership before historical details when identifying foreign agents", () => {
+    const own = makeAgent({ id: "own", cwd: "/repo", workspaceId: WORKSPACE_ID });
+    const foreign = makeAgent({ id: "foreign", cwd: "/repo", workspaceId: "ws-2" });
+    const unknown = makeAgent({ id: "unknown", cwd: "/repo" });
+    const result = deriveWorkspaceAgentVisibility({
+      workspaceId: WORKSPACE_ID,
+      sessionAgents: new Map([
+        [own.id, own],
+        [foreign.id, foreign],
+        [unknown.id, unknown],
+      ]),
+      agentDetails: new Map([
+        [own.id, { ...own, workspaceId: "ws-2" }],
+        [foreign.id, { ...foreign, workspaceId: WORKSPACE_ID }],
+        [unknown.id, { ...unknown, workspaceId: "ws-2" }],
+      ]),
+    });
+
+    expect(result.activeAgentIds).toEqual(new Set([own.id]));
+    expect(result.foreignAgentIds).toEqual(new Set([foreign.id]));
+  });
+
+  it("recognizes foreign historical ownership without making archived or unknown agents foreign", () => {
+    const archived = makeAgent({
+      id: "archived",
+      cwd: "/repo",
+      workspaceId: WORKSPACE_ID,
+      archivedAt: new Date("2026-03-04T00:01:00.000Z"),
+    });
+    const foreign = { ...archived, id: "foreign", workspaceId: "ws-2" };
+    const unknown = { ...archived, id: "unknown", workspaceId: undefined };
+    const result = deriveWorkspaceAgentVisibility({
+      workspaceId: WORKSPACE_ID,
+      sessionAgents: new Map(),
+      agentDetails: new Map([
+        [archived.id, archived],
+        [foreign.id, foreign],
+        [unknown.id, unknown],
+      ]),
+    });
+
+    expect(result.activeAgentIds).toEqual(new Set());
+    expect(result.foreignAgentIds).toEqual(new Set([foreign.id]));
+  });
+
   it("keeps subagents active and known while excluding them from auto-open", () => {
     const parent = makeAgent({
       id: "parent-agent",
@@ -325,6 +436,7 @@ describe("workspace agent visibility", () => {
     const agentVisibility = {
       activeAgentIds: new Set(["active-agent"]),
       autoOpenAgentIds: new Set(["root-agent"]),
+      foreignAgentIds: new Set<string>(),
       knownAgentIds: new Set(["active-agent", "archived-agent"]),
     };
 
@@ -342,6 +454,7 @@ describe("workspace agent visibility", () => {
       terminalsHydrated: true,
       activeAgentIds: agentVisibility.activeAgentIds,
       autoOpenAgentIds: agentVisibility.autoOpenAgentIds,
+      foreignAgentIds: new Set<string>(),
       knownAgentIds: agentVisibility.knownAgentIds,
       knownTerminalIds: ["terminal-1", "script-terminal"],
       standaloneTerminalIds: ["terminal-1"],
@@ -354,11 +467,13 @@ describe("workspace agent visibility", () => {
       const a = {
         activeAgentIds: new Set(["a", "b"]),
         autoOpenAgentIds: new Set(["a"]),
+        foreignAgentIds: new Set<string>(),
         knownAgentIds: new Set(["a", "b", "c"]),
       };
       const b = {
         activeAgentIds: new Set(["a", "b"]),
         autoOpenAgentIds: new Set(["a"]),
+        foreignAgentIds: new Set<string>(),
         knownAgentIds: new Set(["a", "b", "c"]),
       };
       expect(workspaceAgentVisibilityEqual(a, b)).toBe(true);
@@ -368,11 +483,13 @@ describe("workspace agent visibility", () => {
       const a = {
         activeAgentIds: new Set(["a"]),
         autoOpenAgentIds: new Set(["a"]),
+        foreignAgentIds: new Set<string>(),
         knownAgentIds: new Set(["a"]),
       };
       const b = {
         activeAgentIds: new Set(["b"]),
         autoOpenAgentIds: new Set(["a"]),
+        foreignAgentIds: new Set<string>(),
         knownAgentIds: new Set(["a"]),
       };
       expect(workspaceAgentVisibilityEqual(a, b)).toBe(false);
@@ -382,11 +499,13 @@ describe("workspace agent visibility", () => {
       const a = {
         activeAgentIds: new Set(["a", "b"]),
         autoOpenAgentIds: new Set(["a"]),
+        foreignAgentIds: new Set<string>(),
         knownAgentIds: new Set(["a", "b"]),
       };
       const b = {
         activeAgentIds: new Set(["a", "b"]),
         autoOpenAgentIds: new Set(["b"]),
+        foreignAgentIds: new Set<string>(),
         knownAgentIds: new Set(["a", "b"]),
       };
       expect(workspaceAgentVisibilityEqual(a, b)).toBe(false);
@@ -396,11 +515,13 @@ describe("workspace agent visibility", () => {
       const a = {
         activeAgentIds: new Set(["a"]),
         autoOpenAgentIds: new Set(["a"]),
+        foreignAgentIds: new Set<string>(),
         knownAgentIds: new Set(["a"]),
       };
       const b = {
         activeAgentIds: new Set(["a"]),
         autoOpenAgentIds: new Set(["a"]),
+        foreignAgentIds: new Set<string>(),
         knownAgentIds: new Set(["a", "b"]),
       };
       expect(workspaceAgentVisibilityEqual(a, b)).toBe(false);
@@ -410,11 +531,13 @@ describe("workspace agent visibility", () => {
       const a = {
         activeAgentIds: new Set<string>(),
         autoOpenAgentIds: new Set<string>(),
+        foreignAgentIds: new Set<string>(),
         knownAgentIds: new Set<string>(),
       };
       const b = {
         activeAgentIds: new Set<string>(),
         autoOpenAgentIds: new Set<string>(),
+        foreignAgentIds: new Set<string>(),
         knownAgentIds: new Set<string>(),
       };
       expect(workspaceAgentVisibilityEqual(a, b)).toBe(true);

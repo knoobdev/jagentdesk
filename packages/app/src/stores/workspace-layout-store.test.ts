@@ -1150,6 +1150,7 @@ describe("workspace-layout-store actions", () => {
 
     expect(persisted).toEqual({
       layoutByWorkspace: { [workspaceKey]: layout },
+      pinnedAgentIdsByWorkspace: {},
       splitSizesByWorkspace: currentState.splitSizesByWorkspace,
       panelStateByWorkspace: { [workspaceKey]: {} },
     });
@@ -1251,7 +1252,7 @@ describe("workspace-layout-store actions", () => {
     expect(layout).toEqual(createDefaultLayout());
   });
 
-  it("keeps pinned archived agents in memory per workspace without persisting them", () => {
+  it("persists pinned agent intents per workspace until directory reconciliation", () => {
     const workspaceKey = createWorkspaceKey();
     const otherWorkspaceKey = buildWorkspaceTabPersistenceKey({
       serverId: SERVER_ID,
@@ -1283,6 +1284,7 @@ describe("workspace-layout-store actions", () => {
     expect(partialize).toBeTypeOf("function");
     expect(partialize?.(state)).toEqual({
       layoutByWorkspace: {},
+      pinnedAgentIdsByWorkspace: { [otherWorkspaceKey as string]: ["agent-2"] },
       splitSizesByWorkspace: {},
       panelStateByWorkspace: {},
     });
@@ -1320,6 +1322,7 @@ describe("workspace-layout-store actions", () => {
     expect(partialize).toBeTypeOf("function");
     expect(partialize?.(state)).toEqual({
       layoutByWorkspace: {},
+      pinnedAgentIdsByWorkspace: {},
       splitSizesByWorkspace: {},
       panelStateByWorkspace: {},
     });
@@ -1704,7 +1707,9 @@ describe("workspace-layout-store actions", () => {
       standaloneTerminalIds: [],
     });
 
-    expect(store.getWorkspaceTabs(workspaceKey).map((tab) => tab.tabId)).toEqual([]);
+    expect(store.getWorkspaceTabs(workspaceKey).map((tab) => tab.tabId)).toEqual([
+      "agent_archived-agent",
+    ]);
 
     store.openTabFocused(workspaceKey, { kind: "agent", agentId: "archived-agent" });
     store.pinAgent(workspaceKey, "archived-agent");
