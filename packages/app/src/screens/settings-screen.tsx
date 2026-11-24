@@ -1,4 +1,8 @@
-import { selectSettingsHost, useSettingsHostSelection } from "@/navigation/settings-selection";
+import {
+  selectSettingsHost,
+  useSettingsHostSelection,
+  useSettingsSidebarScroll,
+} from "@/navigation/settings-presentation";
 import { useKeyboardShortcutsAvailable } from "@/keyboard/availability";
 import { getShortcutOs } from "@/utils/shortcut-platform";
 import type { SendShortcut } from "@/hooks/use-settings";
@@ -790,6 +794,7 @@ function SettingsSidebar({
   );
   const insets = useSafeAreaInsets();
   const isDesktop = layout === "desktop";
+  const sidebarScroll = useSettingsSidebarScroll(isDesktop);
   const outerContainerStyle = useMemo(
     () => [isDesktop ? sidebarStyles.desktopContainer : sidebarStyles.mobileContainer],
     [isDesktop],
@@ -893,7 +898,12 @@ function SettingsSidebar({
               testID="settings-back-to-workspace"
             />
           </View>
-          <ScrollView style={sidebarStyles.scrollBody} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            style={sidebarStyles.scrollBody}
+            showsVerticalScrollIndicator={false}
+            testID="settings-sidebar-scroll-body"
+            {...sidebarScroll}
+          >
             {sidebarBody}
           </ScrollView>
         </View>
@@ -1327,7 +1337,11 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
     return (
       <View style={styles.container}>
         <BackHeader title={t("settings.title")} onBack={handleBackToWorkspace} />
-        <ScrollView style={styles.scrollView} contentContainerStyle={insetBottomStyle}>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={insetBottomStyle}
+          testID="settings-detail-scroll-body"
+        >
           <SettingsSidebar
             view={view}
             onSelectSection={handleSelectSection}
@@ -1352,7 +1366,11 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
           titleAccessory={detailHeader?.titleAccessory}
           onBack={handleBackFromDetail}
         />
-        <ScrollView style={styles.scrollView} contentContainerStyle={insetBottomStyle}>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={insetBottomStyle}
+          testID="settings-detail-scroll-body"
+        >
           <View style={styles.content}>{content}</View>
         </ScrollView>
         {addHostModals}
@@ -1385,7 +1403,11 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
               left={desktopDetailHeaderLeft}
               leftStyle={desktopStyles.detailLeft}
             />
-            <ScrollView style={styles.scrollView} contentContainerStyle={insetBottomStyle}>
+            <ScrollView
+              style={styles.scrollView}
+              contentContainerStyle={insetBottomStyle}
+              testID="settings-detail-scroll-body"
+            >
               <View style={styles.content}>{content}</View>
             </ScrollView>
           </View>
