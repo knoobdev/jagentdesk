@@ -1809,3 +1809,24 @@ describe("pending workspace opens", () => {
     expect(store.getState().pendingOpenByWorkspace).toEqual({});
   });
 });
+
+it("publishes restored pinned intents as Sets to synchronous subscribers", async () => {
+  const value = JSON.stringify({
+    version: 1,
+    state: { pinnedAgentIdsByWorkspace: { "srv:workspace": ["agent"] } },
+  });
+  const store = createWorkspaceLayoutStore(undefined, {
+    getItem: async () => value,
+    setItem: async () => {},
+    removeItem: async () => {},
+  });
+  const observations: boolean[] = [];
+  const release = store.subscribe((state) => {
+    const pins = state.pinnedAgentIdsByWorkspace["srv:workspace"];
+    if (pins) observations.push(pins.has("agent"));
+  });
+  await store.persist.rehydrate();
+  release();
+  expect(observations.length).toBeGreaterThan(0);
+  expect(observations.every(Boolean)).toBe(true);
+});

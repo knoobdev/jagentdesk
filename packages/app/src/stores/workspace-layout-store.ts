@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { JsonValue } from "@jagentdesk/protocol/agent-types";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useEffect, useLayoutEffect, useState } from "react";
@@ -250,6 +251,10 @@ function createWorkspaceLayoutStorage(backingStorage: StateStorage): StateStorag
     removeItem: (name) => backingStorage.removeItem(name),
   };
 }
+
+const PersistedPinsSchema = z.object({
+  pinnedAgentIdsByWorkspace: z.record(z.string(), z.array(z.string())).optional(),
+});
 
 export function createWorkspaceLayoutStore(
   ids: WorkspaceLayoutIdSource = defaultWorkspaceLayoutIds,
@@ -1088,11 +1093,23 @@ export function createWorkspaceLayoutStore(
         name: "workspace-layout-state",
         version: 1,
         storage: createJSONStorage(() => createWorkspaceLayoutStorage(storage)),
+        merge: (persistedState, currentState) => {
+          const persisted =
+            typeof persistedState === "object" && persistedState !== null ? persistedState : {};
+          const parsed = PersistedPinsSchema.safeParse(persisted);
+          return {
+            ...currentState,
+            ...persisted,
+            // Decode before publication: selectors can call Set.has during hydration notifications.
+            pinnedAgentIdsByWorkspace: Object.fromEntries(
+              Object.entries(
+                parsed.success ? (parsed.data.pinnedAgentIdsByWorkspace ?? {}) : {},
+              ).map(([key, agentIds]) => [key, new Set(agentIds)]),
+            ),
+          };
+        },
         onRehydrateStorage: () => (state) => {
           if (!state) return;
-          for (const [key, agentIds] of Object.entries(state.pinnedAgentIdsByWorkspace)) {
-            if (Array.isArray(agentIds)) state.pinnedAgentIdsByWorkspace[key] = new Set(agentIds);
-          }
           for (const [workspaceKey, layout] of Object.entries(state.layoutByWorkspace)) {
             if (layout.focusedPaneId !== null) continue;
             // Parked focus has an in-memory restoration record that cannot survive reload.
