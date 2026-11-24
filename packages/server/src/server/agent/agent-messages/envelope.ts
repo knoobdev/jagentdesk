@@ -12,11 +12,13 @@ const sourceSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("change-request-update"), url: z.url() }),
   z.object({
     kind: z.literal("agent-message"),
+    serverId: z.string().optional(),
     agentId: agentIdSchema,
     title: z.string().min(1).optional(),
   }),
   z.object({
     kind: z.literal("agent-notification"),
+    serverId: z.string().optional(),
     agentId: agentIdSchema,
     title: z.string().min(1).optional(),
     event: z.enum(["finished", "errored", "permission-required", "closed"]),
@@ -73,6 +75,8 @@ export function formatAgentMessage(message: AgentMessage): string {
     attributes = `kind="change-request-update" url="${escapeXml(source.url)}"`;
   } else if (source) {
     attributes = `kind="${source.kind}" source-agent-id="${escapeXml(source.agentId)}"`;
+    if ("serverId" in source && source.serverId)
+      attributes += ` source-server-id="${escapeXml(source.serverId)}"`;
     if (source.title) title = ` source-agent-title="${escapeXml(source.title)}"`;
   }
   const event = source?.kind === "agent-notification" ? ` event="${source.event}"` : "";
@@ -99,6 +103,7 @@ export function parseAgentMessage(text: string): AgentMessage | null {
   }
   const source = sourceSchema.safeParse({
     kind: attributes.get("kind"),
+    serverId: attributes.get("source-server-id"),
     url: attributes.get("url"),
     agentId: attributes.get("source-agent-id"),
     event: attributes.get("event"),

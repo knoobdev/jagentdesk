@@ -5,6 +5,9 @@ import {
   defaultWebSocketFactory,
 } from "@jagentdesk/client/internal/daemon-client-transport";
 import { HostConfirmations, type HostConfirmationRequest } from "./host-confirmation";
+import { createHostChannelTransport } from "@jagentdesk/client/internal/hosts";
+import type { OwnedSubscription } from "@jagentdesk/client";
+import type { HostDirectory } from "@jagentdesk/protocol/hosts";
 import { useSyncExternalStore, useMemo } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import equal from "fast-deep-equal/es6";
@@ -100,6 +103,7 @@ export type HostRuntimeConnectionStatus = "idle" | "connecting" | "online" | "of
 export type HostRegistryStatus = "loading" | "ready";
 
 export type ActiveConnection =
+  | { type: "routed"; endpoint: string; display: string }
   | { type: "directTcp"; endpoint: string; display: string }
   | { type: "directSocket"; endpoint: string; display: "socket" }
   | { type: "directPipe"; endpoint: string; display: "pipe" }
@@ -244,6 +248,12 @@ const CONFIGURED_OVERRIDE_BOOTSTRAP_RETRY_MS = 1_000;
 const MAX_LOCAL_RETRIES = 3;
 
 function toActiveConnection(connection: HostConnection): ActiveConnection {
+  if (connection.type === "routed")
+    return {
+      type: "routed",
+      endpoint: connection.originServerId,
+      display: `via ${connection.originServerId}`,
+    };
   if (connection.type === "directSocket") {
     return {
       type: "directSocket",
@@ -549,7 +559,9 @@ function findConnectionById(host: HostProfile, connectionId: string | null): Hos
   return host.connections.find((connection) => connection.id === connectionId) ?? null;
 }
 
-function createDefaultDeps(): HostRuntimeControllerDeps {
+function createDefaultDeps(
+  resolveOrigin: (serverId: string) => DaemonClient | null = () => null,
+): HostRuntimeControllerDeps {
   const browserHostAvailable =
     typeof getDesktopHost()?.browser?.executeAutomationCommand === "function";
   const browserAutomationCapabilities = browserHostAvailable
@@ -594,6 +606,15 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
         capabilities: appCapabilities,
         logger: createHostLogger(() => host.serverId),
       };
+      if (connection.type === "routed") {
+        const origin = resolveOrigin(connection.originServerId);
+        if (!origin) throw new Error(`Origin host ${connection.originServerId} is unavailable`);
+        return new DaemonClient({
+          ...base,
+          url: "ws://routed-host/ws",
+          transportFactory: createHostChannelTransport(origin, host.serverId, clientId, null),
+        });
+      }
       if (connection.type === "directSocket" || connection.type === "directPipe") {
         return new DaemonClient({
           ...base,
@@ -642,12 +663,37 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
         ...(signing ? { deviceSigning: signing } : {}),
       } as DaemonClientConfig);
     },
-    connectToDaemon: ({ host, connection, timeoutMs }) =>
-      connectToDaemon(connection, {
+    connectToDaemon: async ({ host, connection, timeoutMs }) => {
+      if (connection.type === "routed") {
+        const origin = resolveOrigin(connection.originServerId);
+        if (!origin?.isConnected)
+          throw new Error(`Origin host ${connection.originServerId} is unavailable`);
+        const client = new DaemonClient({
+          url: "ws://routed-host/ws",
+          clientId: crypto.randomUUID(),
+          transportFactory: createHostChannelTransport(
+            origin,
+            host.serverId,
+            crypto.randomUUID(),
+            null,
+          ),
+          reconnect: { enabled: false },
+          appVersion: resolveAppVersion() ?? undefined,
+        });
+        try {
+          await client.connect();
+          return { client, serverId: host.serverId, hostname: null };
+        } catch (error) {
+          await client.close();
+          throw error;
+        }
+      }
+      return connectToDaemon(connection, {
         ...(host.serverId ? { serverId: host.serverId } : {}),
         ...(timeoutMs !== undefined ? { timeoutMs } : {}),
         capabilities: appCapabilities,
-      }),
+      });
+    },
     getClientId: async () => {
       await prepareRelayDeviceSigning().catch(() => undefined);
       return getOrCreateClientId();
@@ -1557,6 +1603,11 @@ interface AgentDirectoryRefreshInput {
 
 export class HostRuntimeStore {
   private controllers = new Map<string, HostRuntimeController>();
+  private hostObservations = new Map<
+    string,
+    { client: DaemonClient; observation: OwnedSubscription<HostDirectory>; unsubscribe: () => void }
+  >();
+  private fleetDirectoryDemand = new Map<string, () => void>();
   private serverListeners = new Map<string, Set<() => void>>();
   private agentStoppedRunningListeners = new Map<string, Set<(agentId: string) => void>>();
   private globalListeners = new Set<() => void>();
@@ -1607,7 +1658,7 @@ export class HostRuntimeStore {
   private sourceHostReconnectListeners = new Set<(serverId: string) => void>();
 
   constructor(input?: { deps?: HostRuntimeControllerDeps; storage?: HostRuntimeStorage }) {
-    this.deps = input?.deps ?? createDefaultDeps();
+    this.deps = input?.deps ?? createDefaultDeps((serverId) => this.getClient(serverId));
     this.storage = input?.storage ?? AsyncStorage;
     this.replicaCache = new ReplicaCache(this.storage);
   }
@@ -2424,6 +2475,11 @@ export class HostRuntimeStore {
       if (nextIds.has(serverId)) {
         continue;
       }
+      this.hostObservations.get(serverId)?.unsubscribe();
+      void this.hostObservations.get(serverId)?.observation.release();
+      this.hostObservations.delete(serverId);
+      this.fleetDirectoryDemand.get(serverId)?.();
+      this.fleetDirectoryDemand.delete(serverId);
       this.controllers.delete(serverId);
       this.lastConnectionStatusByServer.delete(serverId);
       this.directoryBootstrapInFlight.delete(serverId);
@@ -2477,6 +2533,7 @@ export class HostRuntimeStore {
         this.syncSessionReplica(snapshot.serverId, snapshot);
         this.maybeAutoBootstrapDirectories(snapshot.serverId);
         this.trackTimingOutHost(snapshot.serverId, snapshot);
+        this.syncHostDiscovery(snapshot.serverId);
         this.emit(snapshot.serverId);
       });
       void controller
@@ -2493,6 +2550,55 @@ export class HostRuntimeStore {
         });
       this.emit(host.serverId);
     }
+  }
+
+  private syncHostDiscovery(serverId: string): void {
+    const client = this.getClient(serverId);
+    const previous = this.hostObservations.get(serverId);
+    if (previous?.client === client) return;
+    previous?.unsubscribe();
+    void previous?.observation.release();
+    this.hostObservations.delete(serverId);
+    const host = this.hosts.find((candidate) => candidate.serverId === serverId);
+    if (
+      !client?.isConnected ||
+      !client.getLastServerInfoMessage()?.features?.connectedHosts ||
+      host?.connections.some((connection) => connection.type === "routed")
+    )
+      return;
+    for (const candidate of this.hosts) {
+      if (candidate.connections.some((c) => c.type === "routed" && c.originServerId === serverId))
+        this.getClient(candidate.serverId)?.ensureConnected();
+    }
+    const observation = client.observeHosts();
+    const apply = (directory: HostDirectory) => {
+      if (this.hostObservations.get(serverId)?.client !== client) return;
+      for (const target of directory.hosts) {
+        if (!target.serverId || target.serverId === serverId) continue;
+        const next = upsertHostConnectionInProfiles({
+          profiles: this.hosts,
+          serverId: target.serverId,
+          label: target.label ?? undefined,
+          connection: {
+            id: `via:${serverId}`,
+            type: "routed",
+            originServerId: serverId,
+          },
+        });
+        if (next !== this.hosts) {
+          this.setHostsAndSync(next);
+          void this.persistHosts();
+        }
+      }
+    };
+    const unsubscribe = observation.subscribe({
+      snapshot: apply,
+      update: (message) => {
+        if (message.type === "hosts.changed") apply(message.payload.directory);
+      },
+    });
+    this.hostObservations.set(serverId, { client, observation, unsubscribe });
+    void observation.ready.then(apply).catch(() => undefined);
   }
 
   private syncSessionReplica(serverId: string, snapshot: HostRuntimeSnapshot): void {

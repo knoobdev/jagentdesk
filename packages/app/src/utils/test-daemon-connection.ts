@@ -227,6 +227,8 @@ export async function buildClientConfig(
     "getClientId" | "resolveAppVersion" | "createLocalTransportFactory" | "buildLocalTransportUrl"
   > = defaultDaemonConnectionDependencies,
 ): Promise<DaemonClientConfig> {
+  if (connection.type === "routed")
+    throw new Error("Routed host connections are resolved by HostRuntime");
   const clientId = await deps.getClientId();
   const localTransportFactory = deps.createLocalTransportFactory();
   const base = {

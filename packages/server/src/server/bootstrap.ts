@@ -1,3 +1,4 @@
+import { connectThroughProxy } from "./ssh/proxy/connect.js";
 import { createIdleRuntimeCleanup } from "./agent/idle-runtime-cleanup/index.js";
 import { createChangeRequestRouter } from "../services/change-request-router.js";
 import { createForgeService } from "../services/forge-registry.js";
@@ -1955,6 +1956,11 @@ export async function createJAgentDeskDaemon(
       (runtime.callerAgentId
         ? agentManager.getJAgentDeskToolPolicy(runtime.callerAgentId)
         : undefined),
+    serverId,
+    hosts: () => {
+      if (!wsServer) throw new Error("Daemon is not accepting host operations");
+      return wsServer.toolHosts();
+    },
     agentManager,
     agentStorage,
     terminalManager,
@@ -2435,6 +2441,15 @@ export async function createJAgentDeskDaemon(
               sideloadService,
               workspaceArchiveOperations,
             );
+            wsServer.setHostDial(async (target) => {
+              const proxy = tsnetListener?.getTailnetSocks();
+              if (!proxy) throw new Error("tailnet_unavailable");
+              const url = new URL(target.url);
+              return connectThroughProxy(
+                { type: "socks5", ...proxy },
+                { host: url.hostname.replace(/^\[|\]$/g, ""), port: target.pairing.port },
+              );
+            });
             // Session-share guests (ADR-0019): let the scoped ShareServer /ws hand validated guest
             // sockets to the daemon as agent-confined real sessions.
             sessionShareService?.setGuestAttacher((ws, params) =>

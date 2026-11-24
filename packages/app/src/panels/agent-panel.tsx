@@ -1,3 +1,4 @@
+import type { AgentAddress } from "@jagentdesk/protocol/addresses";
 import { BuiltinPluginGate } from "@/plugins/builtin/gate";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { SessionShareControl } from "@/composer/agent-controls/session-share-control";
@@ -1587,20 +1588,17 @@ function ActiveAgentComposer({
   const canDetachSubagents = useSessionStore(
     (state) => state.sessions[serverId]?.serverInfo?.features?.agentDetach === true,
   );
-  const handleOpenSubagent = useCallback(
-    (subagentId: string) => {
-      navigateToAgent({ serverId, agentId: subagentId });
-    },
-    [serverId],
-  );
+  const handleOpenSubagent = useCallback((address: AgentAddress) => {
+    navigateToAgent(address);
+  }, []);
   const handleOpenProviderSubagent = useCallback(
     (parentAgentId: string, subagentId: string) => {
       openTab({ kind: "provider_subagent", parentAgentId, subagentId });
     },
     [openTab],
   );
-  const handleArchiveSubagent = useArchiveSubagent({ serverId });
-  const handleDetachSubagent = useDetachSubagent({ serverId });
+  const handleArchiveSubagent = useArchiveSubagent();
+  const handleDetachSubagent = useDetachSubagent();
   const handleHideFinishedProviderSubagents = useHideFinishedProviderSubagents({
     serverId,
     parentAgentId: agentId,
@@ -1730,6 +1728,7 @@ function ActiveAgentComposer({
       ) : null}
       <BackgroundWorkTrack model={backgroundWorkModel} count={backgroundWorkCount} />
       <SubagentsTrack
+        serverId={serverId}
         rows={subagentRows}
         onOpenSubagent={handleOpenSubagent}
         onOpenProviderSubagent={handleOpenProviderSubagent}

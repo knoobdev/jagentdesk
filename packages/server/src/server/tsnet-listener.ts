@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { createServer, type Server as HTTPServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -399,10 +400,16 @@ export function createTsnetListener(options: TsnetListenerOptions): TsnetListene
 
       // Local ingress the bridge forwards tailnet TCP to. It performs the HTTP
       // upgrade and WebSocket framing, then hands the socket to the daemon.
+      const bridgeToken = randomBytes(32).toString("base64url");
       const server = createServer();
       const wss = new WebSocketServer({ server, path: "/ws" });
-      wss.on("connection", (ws) => {
-        void options.attachSocket(ws as unknown as WebSocketLike, { transport: "tailnet" });
+      wss.on("connection", (ws, request) => {
+        const verified = request.headers["x-jagentdesk-bridge"] === bridgeToken;
+        const nodeId = verified ? request.headers["x-jagentdesk-node"] : undefined;
+        void options.attachSocket(ws as unknown as WebSocketLike, {
+          transport: "tailnet",
+          ...(typeof nodeId === "string" ? { tailnetNodeId: nodeId } : {}),
+        });
       });
       await new Promise<void>((resolve, reject) => {
         server.once("error", reject);
@@ -437,6 +444,7 @@ export function createTsnetListener(options: TsnetListenerOptions): TsnetListene
           spawn(bridgeBinary, bridgeArgs, { env: bridgeEnv }));
       child = spawnBridge(binary, args, {
         ...process.env,
+        JAGENTDESK_TSNET_INGRESS_TOKEN: bridgeToken,
         // The Go bridge consumes the standard Tailscale variable only inside
         // this child process. JAgentDesk configuration uses its own namespace.
         TS_AUTHKEY: options.authKey ?? process.env.JAGENTDESK_TAILSCALE_AUTH_KEY ?? "",

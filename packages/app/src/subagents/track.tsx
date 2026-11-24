@@ -1,3 +1,5 @@
+import type { AgentAddress } from "@jagentdesk/protocol/addresses";
+import { useHosts } from "@/runtime/host-runtime";
 import { useCallback, useMemo, useState, type ReactElement } from "react";
 import { Pressable, ScrollView, Text, View, type PressableStateCallbackType } from "react-native";
 import { useTranslation } from "react-i18next";
@@ -30,12 +32,13 @@ const foregroundMutedColorMapping = (theme: Theme) => ({
 });
 
 export interface SubagentsTrackProps {
+  serverId: string;
   rows: SubagentRow[];
-  onOpenSubagent: (id: string) => void;
+  onOpenSubagent: (address: AgentAddress) => void;
   onOpenProviderSubagent: (parentAgentId: string, subagentId: string) => void;
-  onArchiveSubagent: (id: string) => void;
+  onArchiveSubagent: (address: AgentAddress) => void;
   onArchiveFinished?: () => void;
-  onDetachSubagent?: (id: string) => void;
+  onDetachSubagent?: (address: AgentAddress) => void;
 }
 
 const SUBAGENTS_LIST_MAX_HEIGHT = 200;
@@ -51,6 +54,7 @@ function buildRowPresentation(row: SubagentRow): WorkspaceTabPresentation {
 }
 
 export function SubagentsTrack({
+  serverId,
   rows,
   onOpenSubagent,
   onOpenProviderSubagent,
@@ -132,7 +136,8 @@ export function SubagentsTrack({
             >
               {rows.map((row) => (
                 <SubagentsTrackRow
-                  key={row.id}
+                  serverId={serverId}
+                  key={row.kind === "jagentdesk" ? `${row.address.serverId}:${row.id}` : row.id}
                   row={row}
                   onOpenSubagent={onOpenSubagent}
                   onOpenProviderSubagent={onOpenProviderSubagent}
@@ -149,14 +154,16 @@ export function SubagentsTrack({
 }
 
 interface SubagentsTrackRowProps {
+  serverId: string;
   row: SubagentRow;
-  onOpenSubagent: (id: string) => void;
+  onOpenSubagent: (address: AgentAddress) => void;
   onOpenProviderSubagent: (parentAgentId: string, subagentId: string) => void;
-  onArchiveSubagent: (id: string) => void;
-  onDetachSubagent?: (id: string) => void;
+  onArchiveSubagent: (address: AgentAddress) => void;
+  onDetachSubagent?: (address: AgentAddress) => void;
 }
 
 function SubagentsTrackRow({
+  serverId,
   row,
   onOpenSubagent,
   onOpenProviderSubagent,
@@ -173,17 +180,20 @@ function SubagentsTrackRow({
     if (row.kind === "provider") {
       onOpenProviderSubagent(row.parentAgentId, row.id);
     } else {
-      onOpenSubagent(row.id);
+      onOpenSubagent(row.address);
     }
   }, [onOpenProviderSubagent, onOpenSubagent, row]);
   const handleArchivePress = useCallback(() => {
-    onArchiveSubagent(row.id);
-  }, [onArchiveSubagent, row.id]);
+    if (row.kind === "jagentdesk") onArchiveSubagent(row.address);
+  }, [onArchiveSubagent, row]);
   const handleDetachPress = useCallback(() => {
-    onDetachSubagent?.(row.id);
-  }, [onDetachSubagent, row.id]);
+    if (row.kind === "jagentdesk") onDetachSubagent?.(row.address);
+  }, [onDetachSubagent, row]);
   const handlePointerEnter = useCallback(() => setHovered(true), []);
   const handlePointerLeave = useCallback(() => setHovered(false), []);
+  const hostLabel = useHosts().find(
+    (host) => row.kind === "jagentdesk" && host.serverId === row.address.serverId,
+  )?.label;
   const actionsAlwaysVisible = isNative || isCompact;
   const actionsVisible = actionsAlwaysVisible || hovered;
 
@@ -191,12 +201,14 @@ function SubagentsTrackRow({
     // Wrapper View handles hover so moving the pointer between the row and
     // the archive button doesn't drop the hover state — the same pattern
     // used by sidebar workspace rows.
-    <View onPointerEnter={handlePointerEnter} onPointerLeave={handlePointerLeave}>
+    <View>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={displayLabel}
         testID={`subagents-track-row-${row.id}`}
         onPress={handlePress}
+        onHoverIn={handlePointerEnter}
+        onHoverOut={handlePointerLeave}
       >
         {({ pressed }) => (
           <View style={hovered || pressed ? styles.rowActive : styles.row}>
@@ -204,6 +216,11 @@ function SubagentsTrackRow({
             <Text style={styles.rowLabel} numberOfLines={1}>
               {displayLabel}
             </Text>
+            {row.kind === "jagentdesk" && row.address.serverId !== serverId ? (
+              <Text style={styles.rowSubtitle} numberOfLines={1}>
+                {hostLabel ?? row.address.serverId}
+              </Text>
+            ) : null}
             {presentation.subtitle ? (
               <Text style={styles.rowSubtitle} numberOfLines={1}>
                 {presentation.subtitle}

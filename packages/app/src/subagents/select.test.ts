@@ -48,7 +48,13 @@ const AGENT_DEFAULTS: Agent = {
 };
 
 function makeAgent(input: Partial<Agent> & Pick<Agent, "id">): Agent {
-  return { ...AGENT_DEFAULTS, ...input };
+  return {
+    ...AGENT_DEFAULTS,
+    ...input,
+    labels:
+      input.labels ??
+      (input.parentAgentId ? { "jagentdesk.parent-agent-id": input.parentAgentId } : {}),
+  };
 }
 
 function setAgents(agents: Agent[]): void {
@@ -60,6 +66,7 @@ function setAgents(agents: Agent[]): void {
 
 afterEach(() => {
   useSessionStore.getState().clearSession(SERVER_ID);
+  useSessionStore.getState().clearSession("server-2");
   useProviderSubagentStore.setState({
     descriptors: new Map(),
     timelines: new Map(),
@@ -278,6 +285,7 @@ describe("selectSubagentsForParent", () => {
     expect(rows).toEqual([
       {
         kind: "jagentdesk",
+        address: { serverId: SERVER_ID, agentId: "child" },
         id: "child",
         provider: "claude",
         title: "Review child",
@@ -289,6 +297,7 @@ describe("selectSubagentsForParent", () => {
       },
     ]);
     expect(Object.keys(rows[0] ?? {}).sort()).toEqual([
+      "address",
       "backgroundWork",
       "createdAt",
       "description",
@@ -333,7 +342,7 @@ describe("selectSubagentsForParent", () => {
     setAgents([
       makeAgent({ id: "parent-a" }),
       makeAgent({ id: "parent-b" }),
-      { ...child, parentAgentId: "parent-b" },
+      { ...child, parentAgentId: "parent-b", labels: { "jagentdesk.parent-agent-id": "parent-b" } },
     ]);
 
     expect(
@@ -371,7 +380,7 @@ describe("selectSubagentsForParent", () => {
         serverId: SERVER_ID,
         parentAgentId: "parent",
       },
-      new Set(["child-b"]),
+      new Set([`${SERVER_ID}:child-b`]),
     );
 
     expect(rows.map((row) => row.id)).toEqual(["child-a"]);
@@ -386,7 +395,7 @@ describe("selectSubagentsForParent", () => {
         serverId: SERVER_ID,
         parentAgentId: "parent",
       },
-      new Set(["child"]),
+      new Set([`${SERVER_ID}:child`]),
     );
 
     expect(rows).toEqual([]);
@@ -401,4 +410,34 @@ describe("selectSubagentsForParent", () => {
       ),
     );
   });
+});
+
+it("qualifies remote parent and child identities when two hosts reuse an agent ID", () => {
+  setAgents([
+    makeAgent({ id: "parent" }),
+    makeAgent({ id: "same-child", parentAgentId: "parent" }),
+  ]);
+  useSessionStore.getState().initializeSession("server-2", null as unknown as DaemonClient);
+  const child = makeAgent({
+    serverId: "server-2",
+    id: "same-child",
+    labels: { "jagentdesk.parent-agent-id": "parent", "jagentdesk.parent-server-id": SERVER_ID },
+  });
+  useSessionStore.getState().setAgents("server-2", new Map([[child.id, child]]));
+  const rows = selectSubagentsForParent(
+    useSessionStore.getState(),
+    { serverId: SERVER_ID, parentAgentId: "parent" },
+    EMPTY_PENDING_ARCHIVE_IDS,
+  );
+  expect(rows.map((row) => (row.kind === "jagentdesk" ? row.address : null))).toEqual([
+    { serverId: SERVER_ID, agentId: "same-child" },
+    { serverId: "server-2", agentId: "same-child" },
+  ]);
+  expect(
+    selectSubagentsForParent(
+      useSessionStore.getState(),
+      { serverId: "server-2", parentAgentId: "parent" },
+      EMPTY_PENDING_ARCHIVE_IDS,
+    ),
+  ).toEqual([]);
 });

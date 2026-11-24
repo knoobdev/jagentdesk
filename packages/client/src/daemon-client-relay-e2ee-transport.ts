@@ -27,6 +27,7 @@ export interface RelayE2eeTransportOptions {
   logger: TransportLogger;
   /** Refuse to open unless the daemon negotiates at least this endpoint security mode. */
   minimumMode?: SecurityMode;
+  assertOutboundCapacity?: (wireBytes: number) => void;
   /** Reports the negotiated mode once the daemon has authenticated the handshake. */
   onSecurityMode?: (mode: SecurityMode) => void;
 }
@@ -240,6 +241,7 @@ export function createEncryptedTransport(
       if (wireBytes > MAX_RELAY_WEBSOCKET_MESSAGE_BYTES) {
         throw messageTooLargeError(wireBytes, MAX_RELAY_WEBSOCKET_MESSAGE_BYTES);
       }
+      options.assertOutboundCapacity?.(wireBytes);
       return channel.send(payload).catch((error: unknown) => {
         emitError(error);
         throw error;

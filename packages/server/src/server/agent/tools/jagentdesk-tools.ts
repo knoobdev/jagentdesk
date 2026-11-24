@@ -1,3 +1,8 @@
+import {
+  createHostResolver,
+  type HostOperations,
+  type ToolHosts,
+} from "../host-operations/index.js";
 import { withSkillInvocation } from "../agent-prompt.js";
 import { AgentActiveTurnBehaviorSchema } from "@jagentdesk/protocol/messages";
 import type { ChangeRequestWatches } from "../change-request-watches/index.js";
@@ -164,6 +169,8 @@ import { slugifySkillName } from "../../skills-native/frontmatter.js";
 import type { AgentPermissionResponse } from "../agent-sdk-types.js";
 
 export interface JAgentDeskToolHostDependencies {
+  serverId?: string;
+  hosts?: () => ToolHosts;
   changeRequestWatches?: ChangeRequestWatches;
   builtinPlugins?: ReadonlySet<BuiltinPluginId>;
   jagentdeskToolPolicy?: ProviderJAgentDeskToolsPolicy;
@@ -3669,6 +3676,43 @@ function createToolCatalog(
     return result.data;
   };
 
+  const hostTools = new Map<string, keyof HostOperations>([
+    ["create_agent", "createAgent"],
+    ["create_workspace", "createWorkspace"],
+    ["list_workspaces", "listWorkspaces"],
+    ["send_agent_prompt", "sendPrompt"],
+    ["get_agent_status", "getStatus"],
+    ["get_agent_activity", "getActivity"],
+    ["list_agents", "listAgents"],
+  ]);
+  const localHostOperations = new Map<string, HostOperations["createAgent"]>();
+  const local = Object.fromEntries(
+    [...hostTools].map(([tool, operation]) => [
+      operation,
+      (input: Record<string, unknown>, context: JAgentDeskToolExecutionContext) =>
+        localHostOperations.get(tool)!(input, context),
+    ]),
+  ) as unknown as HostOperations;
+  const hostResolver = createHostResolver({
+    serverId: options.serverId ?? "self",
+    local,
+    hosts: () => {
+      if (!options.hosts) throw new Error("Connected hosts are unavailable");
+      return options.hosts();
+    },
+    callerAgentId,
+    lockedCwd: callerContext?.lockedCwd,
+    caller: () => {
+      const caller = callerAgentId ? agentManager.getAgent(callerAgentId) : null;
+      return caller
+        ? {
+            provider: caller.provider,
+            currentModeId: caller.currentModeId,
+            background: caller.background,
+          }
+        : null;
+    },
+  });
   const tools = new Map<string, JAgentDeskToolDefinition>();
   const builtinNames = new Set<string>();
   const registerTool = (
@@ -3702,6 +3746,50 @@ function createToolCatalog(
     const plugin = builtinPluginForTool(name);
     if (plugin && options.builtinPlugins && !options.builtinPlugins.has(plugin)) return;
     if (!isJAgentDeskToolEnabled(options.jagentdeskToolPolicy, name)) return;
+    const operation = hostTools.get(name);
+    if (operation) {
+      localHostOperations.set(name, handler);
+      const original = config.inputSchema;
+      const selector = {
+        serverId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Destination server ID from list_hosts; omit for this host."),
+      };
+      config = {
+        ...config,
+        inputSchema:
+          original instanceof z.ZodObject
+            ? original.extend(selector)
+            : { ...(original as z.ZodRawShape), ...selector },
+      };
+      const localHandler = handler;
+      handler = async ({ serverId, ...input }, context) => {
+        if (!serverId || serverId === options.serverId) return localHandler(input, context);
+        try {
+          const response = await hostResolver.use(serverId, (host) =>
+            host[operation](input, context),
+          );
+          return {
+            ...response,
+            structuredContent: { ...(response.structuredContent as object), serverId },
+          };
+        } catch (error) {
+          const failure = {
+            serverId,
+            error: error instanceof Error ? error.message : String(error),
+            ...(error instanceof Error && "code" in error ? { code: error.code } : {}),
+            ...(error instanceof Error && "outcome" in error ? { outcome: error.outcome } : {}),
+          };
+          return {
+            isError: true,
+            content: [{ type: "text", text: JSON.stringify(failure) }],
+            structuredContent: failure,
+          };
+        }
+      };
+    }
     tools.set(name, {
       name,
       title: config.title,
@@ -4497,6 +4585,28 @@ function createToolCatalog(
   // workspace/DB/cluster), so it lives here after the voice-only early return.
   registerSkillsTools({ registerTool, options });
 
+  registerTool(
+    "list_hosts",
+    {
+      title: "List hosts",
+      description: "List this daemon and saved connected hosts.",
+      inputSchema: {},
+    },
+    async () => {
+      const directory = await hostResolver.directory();
+      return {
+        content: [],
+        structuredContent: ensureValidJson([
+          { serverId: directory.self.serverId, label: directory.self.label, status: "connected" },
+          ...directory.hosts.map((host) => ({
+            serverId: host.serverId,
+            label: host.label,
+            status: host.status,
+          })),
+        ]),
+      };
+    },
+  );
   registerTool(
     "create_workspace",
     {

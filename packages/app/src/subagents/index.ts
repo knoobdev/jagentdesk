@@ -1,7 +1,7 @@
 export type { SubagentRow } from "./select";
 export { selectSubagentsForParent, useSubagentsForParent } from "./select";
-export { useArchiveSubagent, type UseArchiveSubagentInput } from "./use-archive-subagent";
-export { useDetachSubagent, type UseDetachSubagentInput } from "./use-detach-subagent";
+export { useArchiveSubagent } from "./use-archive-subagent";
+export { useDetachSubagent } from "./use-detach-subagent";
 export {
   useHideFinishedProviderSubagents,
   type UseHideFinishedProviderSubagentsInput,

@@ -1,3 +1,10 @@
+import type { CreateAgentRequestOptions } from "./daemon-client.js";
+import type { AgentAddress } from "@jagentdesk/protocol/addresses";
+import { parentAddressLabels } from "@jagentdesk/protocol/agent-labels";
+export type { AgentAddress } from "@jagentdesk/protocol/addresses";
+import { createHostActions, type JAgentDeskHostActions } from "./hosts/index.js";
+export type { JAgentDeskHostActions } from "./hosts/index.js";
+export type { HostAdd, HostUpdate, HostSummary, HostDirectory } from "@jagentdesk/protocol/hosts";
 import type {
   AgentSnapshotPayload,
   CreateAgentRequestMessage,
@@ -240,7 +247,7 @@ export interface JAgentDeskAgentConfig {
 export interface JAgentDeskAgentCreateOptions {
   config: JAgentDeskAgentConfig;
   cwd: string;
-  parent?: string | JAgentDeskAgentHandle;
+  parent?: string | AgentAddress | JAgentDeskAgentHandle;
   title?: JAgentDeskAgentSessionConfig["title"];
   env?: CreateAgentRequestMessage["env"];
   prompt?: string;
@@ -359,6 +366,7 @@ export interface JAgentDeskAgentBackgroundWorkSubscribeOptions {
 
 export interface JAgentDeskAgentHandle {
   readonly id: string;
+  readonly address: AgentAddress;
   /**
    * `workspaceId` through `archivedAt` mirror the last snapshot this handle
    * observed. A handle from `ref()` reads `null` for all of them until
@@ -510,6 +518,7 @@ export interface JAgentDeskConfigActions {
 }
 
 export interface JAgentDeskApi {
+  readonly hosts: JAgentDeskHostActions;
   readonly workspaces: JAgentDeskWorkspaceActions;
   readonly projects: JAgentDeskProjectActions;
   readonly agents: JAgentDeskAgentActions;
@@ -541,6 +550,36 @@ export function createJAgentDeskClient(config: JAgentDeskClientConfig): JAgentDe
   };
 }
 
+function toDaemonAgentCreateOptions(
+  options: JAgentDeskAgentCreateOptions,
+  placement?: { workspaceId: string; cwd: string },
+  serverId?: string,
+): CreateAgentRequestOptions {
+  const { config: agentConfig, cwd, parent, title, prompt, ...requestOptions } = options;
+  const { provider: providerModel, options: providerOptions, ...runtimeConfig } = agentConfig;
+  const { provider, model } = parseProviderModel(providerModel);
+  const relationship = parent ? encodeParent(parent, serverId) : {};
+  return {
+    ...requestOptions,
+    config: {
+      ...runtimeConfig,
+      provider,
+      model,
+      cwd: placement?.cwd ?? cwd,
+      ...(title !== undefined ? { title } : {}),
+      ...(providerOptions !== undefined ? { providerOptions } : {}),
+    },
+    ...(placement ? { workspaceId: placement.workspaceId } : {}),
+    ...(parent
+      ? {
+          ...relationship,
+          labels: { ...requestOptions.labels, ...relationship.labels },
+        }
+      : {}),
+    ...(prompt !== undefined ? { initialPrompt: prompt } : {}),
+  };
+}
+
 export function createJAgentDeskApi(
   daemonClient: DaemonClient,
   apiOptions: { signal?: AbortSignal } = {},
@@ -550,29 +589,26 @@ export function createJAgentDeskApi(
     options: JAgentDeskAgentCreateOptions,
     placement?: { workspaceId: string; cwd: string },
   ) => {
-    const { config: agentConfig, cwd, parent, title, prompt, ...requestOptions } = options;
-    const { provider: providerModel, options: providerOptions, ...runtimeConfig } = agentConfig;
-    const { provider, model } = parseProviderModel(providerModel);
-    const effectiveCwd = placement?.cwd ?? cwd;
-    const agent = await daemonClient.createAgent({
-      ...requestOptions,
-      config: {
-        ...runtimeConfig,
-        provider,
-        model,
-        cwd: effectiveCwd,
-        ...(title !== undefined ? { title } : {}),
-        ...(providerOptions !== undefined ? { providerOptions } : {}),
-      },
-      ...(placement ? { workspaceId: placement.workspaceId } : {}),
-      ...(parent ? { callerAgentId: resolveAgentId(parent) } : {}),
-      ...(prompt !== undefined ? { initialPrompt: prompt } : {}),
-    });
+    const agent = await daemonClient.createAgent(
+      toDaemonAgentCreateOptions(
+        options,
+        placement,
+        daemonClient.getLastServerInfoMessage()?.serverId,
+      ),
+    );
     return createAgentHandle(agent);
   };
   const createWorkspaceHandle = createWorkspaceHandleFactory(daemonClient, createAgent);
   // Subscriptions opened through this API, released together by dispose().
   const subscriptions = new Set<() => void>();
+  const lifetime = new AbortController();
+  const own = <T extends { release(): Promise<void> }>(create: () => T): T => {
+    const handle = create();
+    subscriptions.add(() => {
+      void handle.release();
+    });
+    return handle;
+  };
   let disposed = false;
   // Fails fast once disposed, before touching a connection the host may already have released.
   const live = <T>(open: () => T): T => {
@@ -588,6 +624,7 @@ export function createJAgentDeskApi(
 
   const dispose = async (): Promise<void> => {
     disposed = true;
+    lifetime.abort();
     for (const unsubscribe of subscriptions) unsubscribe();
     subscriptions.clear();
   };
@@ -632,6 +669,11 @@ export function createJAgentDeskApi(
 
   return {
     dispose,
+    hosts: createHostActions(daemonClient, {
+      own,
+      signal: lifetime.signal,
+      api: createJAgentDeskApi,
+    }),
     projects: {
       list: (options) => daemonClient.listProjects(options),
       subscribe: (handler) =>
@@ -809,8 +851,14 @@ function createAgentHandleFactory(daemonClient: DaemonClient): AgentHandleFactor
     const id = typeof agent === "string" ? agent : agent.id;
     let current = typeof agent === "string" ? null : agent;
 
+    let serverId = daemonClient.getLastServerInfoMessage()?.serverId;
     const handle: JAgentDeskAgentHandle = {
       id,
+      get address() {
+        serverId ??= daemonClient.getLastServerInfoMessage()?.serverId;
+        if (!serverId) throw new Error("Connect to a host before obtaining an agent address");
+        return { serverId, agentId: id };
+      },
       timeline: {
         append: (item) => daemonClient.appendAgentTimelineItem(id, item),
         refetch: async (options) => {
@@ -992,8 +1040,16 @@ function resolveWorkspaceId(workspace: string | JAgentDeskWorkspaceHandle): stri
   return typeof workspace === "string" ? workspace : workspace.id;
 }
 
-function resolveAgentId(agent: string | JAgentDeskAgentHandle): string {
-  return typeof agent === "string" ? agent : agent.id;
+function encodeParent(
+  parent: string | AgentAddress | JAgentDeskAgentHandle,
+  serverId?: string,
+): Pick<CreateAgentRequestOptions, "callerAgentId" | "labels"> {
+  if (typeof parent === "string") return { callerAgentId: parent };
+  const address = "address" in parent ? parent.address : parent;
+  if (!serverId) throw new Error("Connect to a host before creating a child");
+  return address.serverId === serverId
+    ? { callerAgentId: address.agentId, labels: parentAddressLabels(address) }
+    : { labels: parentAddressLabels(address) };
 }
 
 function parseProviderModel(selection: string): { provider: string; model: string } {

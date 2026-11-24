@@ -4,3 +4,4 @@ export * from "./screen.js";
 export * from "./terminal.js";
 
 export * from "./plugin.js";
+export * from "./host-route.js";

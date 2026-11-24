@@ -267,6 +267,8 @@ Example: adding a new enum value
 // 4. Gate the new emitted value: session.supports(CLIENT_CAPS.newThing) ? "new_value" : "old_value"
 ```
 
+Daemon-to-daemon links and routed sessions are described in [connected hosts](connected-hosts.md).
+
 ## Agent lifecycle
 
 The lifecycle states are defined in `shared/agent-lifecycle.ts`:
