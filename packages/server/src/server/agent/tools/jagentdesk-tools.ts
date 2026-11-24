@@ -5439,11 +5439,7 @@ function createToolCatalog(
     async ({ agentId }) => {
       const snapshot = agentManager.getAgent(agentId);
       if (snapshot) {
-        const structuredSnapshot = await serializeSnapshotWithMetadata(
-          agentStorage,
-          snapshot,
-          childLogger,
-        );
+        const structuredSnapshot = await projectLiveAgent(snapshot);
         return {
           content: [],
           structuredContent: ensureValidJson({
@@ -5521,7 +5517,7 @@ function createToolCatalog(
           (record) =>
             includeArchived || isStoredAgentProviderAvailable(record, registeredProviderIds),
         )
-        .map((record) => buildStoredAgentPayload(record, registeredProviderIds));
+        .map(projectStoredAgent);
       const backgroundWorkspaceIds = new Set(
         ((await options.workspaceRegistry?.list()) ?? [])
           .filter((workspace) => workspace.background)
