@@ -1,3 +1,4 @@
+import { builtinPluginWireState } from "@jagentdesk/protocol/builtin-plugins";
 import { builtinPluginForRpc } from "./plugins/builtin/gates.js";
 import { BuiltinPluginError, type BuiltinPluginState } from "./plugins/builtin/state.js";
 import { SessionDelivery, type OwnedSubscription } from "./session/owned-subscriptions/index.js";
@@ -646,6 +647,7 @@ export interface SessionOptions {
   getWebSocketRuntimeMetrics?: () => DaemonWebSocketRuntimeDiagnosticSnapshot | null;
   pluginRuntime?: {
     builtin?: BuiltinPluginState;
+    refreshBuiltinAvailability?(): Promise<void>;
     wait: import("./plugins/lifecycle/index.js").PluginLifecycle["wait"];
     before: import("./plugins/lifecycle/index.js").PluginLifecycle["before"];
     emit?: import("./plugins/lifecycle/index.js").PluginLifecycle["emit"];
@@ -2629,14 +2631,15 @@ export class Session {
 
   private dispatchBuiltinPluginMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     if (msg.type === "plugins.builtin.list.request") {
-      return Promise.resolve().then(() => {
+      return Promise.resolve().then(async () => {
         if (!this.pluginRuntime?.builtin)
           throw new Error("Built-in plugin registry is unavailable");
+        await this.pluginRuntime.refreshBuiltinAvailability?.();
         return this.emit({
           type: "plugins.builtin.list.response",
           payload: {
             requestId: msg.requestId,
-            plugins: this.pluginRuntime.builtin.list(),
+            ...builtinPluginWireState(this.pluginRuntime.builtin.list()),
             canManage: isSessionRpcAllowed(this.scopes, "plugins.builtin.set.request"),
           },
         });
@@ -2647,7 +2650,7 @@ export class Session {
       return this.pluginRuntime.builtin.set(msg.id, msg.enabled, msg.cascade).then((plugins) => {
         return this.emit({
           type: "plugins.builtin.set.response",
-          payload: { requestId: msg.requestId, plugins },
+          payload: { requestId: msg.requestId, ...builtinPluginWireState(plugins) },
         });
       });
     }

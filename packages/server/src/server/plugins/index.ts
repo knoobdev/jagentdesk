@@ -1,3 +1,5 @@
+import { isCommandAvailable } from "../../executable-resolution/executable-resolution.js";
+import type { BuiltinPluginId } from "@jagentdesk/protocol/builtin-plugins";
 import { BuiltinPluginState } from "./builtin/state.js";
 import type { PluginRuntimeSubscription } from "./runtime-subscription.js";
 import { BuiltinPluginLoader, type BuiltinPlugin } from "./builtin/index.js";
@@ -203,18 +205,49 @@ export class PluginService {
     return () => this.providerListeners.delete(listener);
   }
 
+  async refreshBuiltinAvailability(): Promise<void> {
+    for (const manifest of this.builtin.manifests) {
+      if (manifest.command)
+        await this.builtin.setAvailability(
+          manifest.id,
+          (await isCommandAvailable(manifest.command))
+            ? null
+            : `Install ${manifest.command} and ensure it is on the host PATH.`,
+        );
+    }
+  }
+
   async start(): Promise<void> {
     if (this.started) return;
     this.started = true;
     const config = this.configStore.get();
     this.globalStartsBlocked = config.pluginsEnabled !== true;
+    await this.refreshBuiltinAvailability();
     await this.builtinPlugins.load(async (plugin) => {
-      try {
+      if (!this.builtin.manifests.some((manifest) => manifest.id === plugin.id)) {
         await this.runtime.startBuiltinPlugin?.(plugin);
         await this.publishProviderRegistrations(plugin.id, plugin.directory);
+        return;
+      }
+      const id = plugin.id as BuiltinPluginId;
+      try {
+        await this.builtin.registerLifecycle(id, {
+          start: async () => {
+            await this.runtime.startBuiltinPlugin?.(plugin);
+            await this.publishProviderRegistrations(plugin.id, plugin.directory);
+            this.errors.delete(plugin.id);
+            this.notify(plugin.id);
+          },
+          stop: async () => {
+            await this.stopPlugin(plugin.id);
+            this.notify(plugin.id);
+          },
+        });
       } catch (error) {
-        this.errors.set(plugin.id, error instanceof Error ? error.message : String(error));
-        this.logger.error({ err: error, pluginId: plugin.id }, "Built-in plugin failed to load");
+        const reason = error instanceof Error ? error.message : String(error);
+        this.errors.set(plugin.id, reason);
+        await this.builtin.setAvailability(id, reason);
+        this.logger.warn({ err: error, pluginId: plugin.id }, "Built-in plugin is unavailable");
       }
     });
     if (config.pluginsEnabled === true) {

@@ -25,6 +25,7 @@ export interface BuiltinPluginLifecycle {
 
 /** State and lifecycle for the static feature entries in BuiltinPluginLoader. */
 export class BuiltinPluginState {
+  private readonly unavailable = new Map<BuiltinPluginId, string>();
   private capabilities: HostCapabilities | null = null;
   private readonly lifecycles = new Map<BuiltinPluginId, BuiltinPluginLifecycle>();
   private readonly running = new Set<BuiltinPluginId>();
@@ -45,15 +46,18 @@ export class BuiltinPluginState {
     const entries = this.manifests.map((manifest): BuiltinPluginListItem => {
       const caps = manifest.hostCapabilities;
       const available =
-        !caps?.length ||
-        this.capabilities === null ||
-        caps.some((id) => this.capabilities?.[id]?.state === "available");
-      const unavailableReason = available
-        ? undefined
-        : caps
-            ?.map((id) => this.capabilities?.[id]?.reason)
-            .filter(Boolean)
-            .join(" ") || "Required host tools are unavailable.";
+        !this.unavailable.has(manifest.id) &&
+        (!caps?.length ||
+          this.capabilities === null ||
+          caps.some((id) => this.capabilities?.[id]?.state === "available"));
+      const unavailableReason =
+        this.unavailable.get(manifest.id) ??
+        (available
+          ? undefined
+          : caps
+              ?.map((id) => this.capabilities?.[id]?.reason)
+              .filter(Boolean)
+              .join(" ") || "Required host tools are unavailable.");
       return {
         ...manifest,
         requires: [...manifest.requires],
@@ -76,6 +80,21 @@ export class BuiltinPluginState {
       }
     }
     return entries;
+  }
+
+  async setAvailability(id: BuiltinPluginId, reason: string | null): Promise<void> {
+    const change = this.pending.then(async () => {
+      const previous = this.unavailable.get(id);
+      if (reason === null) this.unavailable.delete(id);
+      else this.unavailable.set(id, reason);
+      if (previous !== this.unavailable.get(id)) {
+        await this.reconcile();
+        for (const listener of this.listeners) listener();
+      }
+      return undefined;
+    });
+    this.pending = change.catch(() => {});
+    await change;
   }
 
   isEnabled(id: BuiltinPluginId): boolean {

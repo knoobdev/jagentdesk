@@ -11,7 +11,7 @@ export function builtinPluginEnabled(
   // COMPAT(builtinPlugins): added in v0.9.59; remove after 2027-05-24 once daemon floor supports feature gates.
   if (info?.features?.builtinPlugins !== true) return true;
   const feature = BUILTIN_PLUGIN_FEATURES[id][0];
-  return info.features[feature] === true;
+  return feature !== undefined && info.features[feature] === true;
 }
 
 const ROUTE_PLUGINS: Readonly<Record<string, BuiltinPluginId>> = {

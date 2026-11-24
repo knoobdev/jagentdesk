@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { HostCapabilityId } from "./host-capabilities.js";
 
-export const BUILTIN_PLUGIN_IDS = [
+export const STATIC_BUILTIN_PLUGIN_IDS = [
   "docker",
   "clusters",
   "databases",
@@ -22,6 +22,8 @@ export const BUILTIN_PLUGIN_IDS = [
   "session-share",
   "browser-tools",
 ] as const;
+export const BUNDLED_PLUGIN_IDS = ["worktree-include"] as const;
+export const BUILTIN_PLUGIN_IDS = [...STATIC_BUILTIN_PLUGIN_IDS, ...BUNDLED_PLUGIN_IDS] as const;
 export type BuiltinPluginId = (typeof BUILTIN_PLUGIN_IDS)[number];
 export const BuiltinPluginIdSchema = z.enum(BUILTIN_PLUGIN_IDS);
 export const BuiltinPluginConfigSchema = z.record(z.string(), z.object({ enabled: z.boolean() }));
@@ -32,6 +34,8 @@ export interface BuiltinPluginManifest {
   name: string;
   description: string;
   defaultEnabled: boolean;
+  /** Bundled providers need this executable on the host PATH. */
+  command?: string;
   requires: readonly BuiltinPluginId[];
   /** Alternatives: at least one capability must be available. */
   hostCapabilities?: readonly HostCapabilityId[];
@@ -179,10 +183,18 @@ export const BUILTIN_PLUGIN_MANIFESTS: readonly BuiltinPluginManifest[] = [
     defaultEnabled: false,
     requires: [],
   },
+  {
+    id: "worktree-include",
+    name: "Worktree include",
+    description: "Copy ignored local files listed in .worktreeinclude into new worktrees.",
+    defaultEnabled: true,
+    requires: [],
+  },
 ];
 
 /** Existing and new server-info flags owned by each feature. Core forge checkout stays independent. */
 export const BUILTIN_PLUGIN_FEATURES = {
+  "worktree-include": [],
   docker: ["docker"],
   clusters: ["clusters"],
   databases: ["databases"],
@@ -248,6 +260,7 @@ export const BuiltinPluginSetRequestSchema = z.object({
 const listPayload = z.object({
   requestId: z.string(),
   plugins: z.array(BuiltinPluginListItemSchema),
+  bundledPlugins: z.array(BuiltinPluginListItemSchema).optional(),
   canManage: z.boolean().optional(),
 });
 export const BuiltinPluginListResponseSchema = z.object({
@@ -260,7 +273,10 @@ export const BuiltinPluginSetResponseSchema = z.object({
 });
 export const BuiltinPluginChangedSchema = z.object({
   type: z.literal("plugins.builtin.changed"),
-  payload: z.object({ plugins: z.array(BuiltinPluginListItemSchema) }),
+  payload: z.object({
+    plugins: z.array(BuiltinPluginListItemSchema),
+    bundledPlugins: z.array(BuiltinPluginListItemSchema).optional(),
+  }),
 });
 
 /** Returns the whole dependency closure, excluding the requested id, in registry order. */
@@ -295,4 +311,21 @@ export function builtinPluginCascade(
   return plugins
     .filter((plugin) => plugin.id !== id && affected.has(plugin.id))
     .map((plugin) => plugin.id);
+}
+
+// COMPAT(bundledPluginList): added in v0.9.59; remove after 2027-05-24 once clients accept bundled ids.
+// The original list used an enum. Keep its entries parseable by those clients; the app merges the
+// optional extension into the same Settings list.
+export function builtinPluginWireState(entries: BuiltinPluginListItem[]) {
+  const staticIds: ReadonlySet<string> = new Set(STATIC_BUILTIN_PLUGIN_IDS);
+  return {
+    plugins: entries.filter((entry) => staticIds.has(entry.id)),
+    bundledPlugins: entries.filter((entry) => !staticIds.has(entry.id)),
+  };
+}
+export function mergeBuiltinPluginWireState(state: {
+  plugins: BuiltinPluginListItem[];
+  bundledPlugins?: BuiltinPluginListItem[];
+}) {
+  return [...state.plugins, ...(state.bundledPlugins ?? [])];
 }

@@ -1,3 +1,4 @@
+import { builtinPluginWireState } from "@jagentdesk/protocol/builtin-plugins";
 import {
   ChunkedTransport,
   ChunkedTransportProtocolError,
@@ -921,7 +922,7 @@ export class VoiceAssistantWebSocketServer {
       for (const session of this.listTrustedSessions()) {
         session.emitServerMessage({
           type: "plugins.builtin.changed",
-          payload: { plugins: this.pluginRuntime!.builtin!.list() },
+          payload: builtinPluginWireState(this.pluginRuntime!.builtin!.list()),
         });
       }
       this.broadcastCapabilitiesUpdate();

@@ -1,3 +1,4 @@
+import { mergeBuiltinPluginWireState } from "@jagentdesk/protocol/builtin-plugins";
 import { useCallback, useEffect, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { BuiltinPluginId, BuiltinPluginListItem } from "@jagentdesk/protocol/builtin-plugins";
@@ -41,7 +42,7 @@ export function useBuiltinPlugins(serverId: string) {
     if (!client || !supported) return;
     return client.on("plugins.builtin.changed", ({ payload }) => {
       queryClient.setQueryData<State>(queryKey, (previous) =>
-        previous ? { ...previous, plugins: payload.plugins } : undefined,
+        previous ? { ...previous, plugins: mergeBuiltinPluginWireState(payload) } : undefined,
       );
     });
   }, [client, supported, queryClient, queryKey]);

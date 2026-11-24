@@ -1,3 +1,4 @@
+import { mergeBuiltinPluginWireState } from "@jagentdesk/protocol/builtin-plugins";
 import type { BuiltinPluginId, BuiltinPluginListItem } from "@jagentdesk/protocol/builtin-plugins";
 import {
   ChunkedTransport,
@@ -6424,11 +6425,12 @@ export class DaemonClient {
     canManage?: boolean;
   }> {
     const requestId = this.createRequestId();
-    return this.sendCorrelatedSessionRequest({
+    const payload = await this.sendCorrelatedSessionRequest({
       requestId,
       message: { type: "plugins.builtin.list.request", requestId },
       responseType: "plugins.builtin.list.response",
     });
+    return { ...payload, plugins: mergeBuiltinPluginWireState(payload) };
   }
 
   async listBuiltinPlugins(): Promise<BuiltinPluginListItem[]> {
@@ -6438,7 +6440,7 @@ export class DaemonClient {
       message: { type: "plugins.builtin.list.request", requestId },
       responseType: "plugins.builtin.list.response",
     });
-    return payload.plugins;
+    return mergeBuiltinPluginWireState(payload);
   }
 
   async setBuiltinPlugin(
@@ -6452,7 +6454,7 @@ export class DaemonClient {
       message: { type: "plugins.builtin.set.request", requestId, id, enabled, cascade },
       responseType: "plugins.builtin.set.response",
     });
-    return payload.plugins;
+    return mergeBuiltinPluginWireState(payload);
   }
 
   async listPlugins(): Promise<PluginListItem[]> {
