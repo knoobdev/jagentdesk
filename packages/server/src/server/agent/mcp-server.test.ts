@@ -235,6 +235,7 @@ function buildAgentManagerSpies() {
     notifyAgentState: vi.fn(),
     getAgent,
     listAgents: vi.fn().mockReturnValue([]),
+    getAgentBackgroundWorkSummary: vi.fn().mockReturnValue(undefined),
     getTimeline: vi.fn().mockReturnValue([]),
     resumeAgentFromPersistence: vi.fn(),
     hydrateTimelineFromProvider: vi.fn().mockResolvedValue(undefined),
@@ -283,6 +284,11 @@ function buildAgentStorageSpies() {
 // Delivery formatting tests do not need the 2 s quiet window; the window itself is
 // covered by agent-messages/delivery.test.ts.
 setDefaultAgentMessageDeliveryTimingForTests({ quietMs: 0 });
+
+function childFinishSubscriptionCount(manager: AgentManagerSpies): number {
+  return manager.subscribe.mock.calls.filter(([, options]) => options?.agentId === "child-agent")
+    .length;
+}
 
 function createTestDeps(): TestDeps {
   const agentManagerSpies = buildAgentManagerSpies();
@@ -3329,21 +3335,21 @@ describe("create_agent MCP tool", () => {
 
   it("returns notify-on-finish guidance for caller-created agents", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
-    const parentAgent = {
+    const parentAgent = createManagedAgent({
       id: "parent-agent",
       cwd: existingCwd,
       workspaceId: "wks_parent",
       provider: "codex",
       currentModeId: "full-access",
-    } as ManagedAgent;
-    const childAgent = {
+    });
+    const childAgent = createManagedAgent({
       id: "child-agent",
       cwd: existingCwd,
       lifecycle: "idle",
       currentModeId: null,
       availableModes: [],
       config: { title: "Child" },
-    } as ManagedAgent;
+    });
     spies.agentManager.getAgent.mockImplementation((agentId: string) => {
       if (agentId === "parent-agent") return parentAgent;
       if (agentId === "child-agent") return childAgent;
@@ -3728,13 +3734,13 @@ describe("create_agent MCP tool", () => {
 
   it("passes the real parent agent and explicit unattended intent to the resolver", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
-    const parentAgent = {
+    const parentAgent = createManagedAgent({
       id: "parent-agent",
       cwd: existingCwd,
       workspaceId: "wks_parent",
       provider: "claude",
       currentModeId: "bypassPermissions",
-    } as ManagedAgent;
+    });
     spies.agentManager.getAgent.mockReturnValue(parentAgent);
     spies.agentManager.createAgent.mockResolvedValue({
       id: "child-agent",
@@ -3988,21 +3994,21 @@ describe("send_agent_prompt MCP tool", () => {
 
   it("defaults agent-scoped prompts to background finish notifications", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
-    const parentAgent = {
+    const parentAgent = createManagedAgent({
       id: "parent-agent",
       cwd: existingCwd,
       workspaceId: "wks_parent",
       provider: "codex",
       currentModeId: "full-access",
-    } as ManagedAgent;
-    const childAgent = {
+    });
+    const childAgent = createManagedAgent({
       id: "child-agent",
       cwd: existingCwd,
       lifecycle: "running",
       currentModeId: null,
       availableModes: [],
       config: { title: "Child" },
-    } as ManagedAgent;
+    });
     spies.agentManager.getAgent.mockImplementation((agentId: string) => {
       if (agentId === "parent-agent") return parentAgent;
       if (agentId === "child-agent") return childAgent;
@@ -4036,7 +4042,7 @@ describe("send_agent_prompt MCP tool", () => {
     // The sender gets a queued receipt at once; the notification is armed at dispatch.
     expect(response.structuredContent).toMatchObject({ deliveryStatus: "queued" });
     expect(response.structuredContent.messageId).toEqual(expect.any(String));
-    await vi.waitFor(() => expect(spies.agentManager.subscribe).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(childFinishSubscriptionCount(spies.agentManager)).toBe(1));
     expect(spies.agentManager.waitForAgentEvent).not.toHaveBeenCalled();
     expect(response.structuredContent.guidance).toBe(
       "Queued for delivery after two quiet seconds. You will get notified when the prompted agent finishes, errors, or needs permission. Do not poll for status; continue with other work until the notification arrives.",
@@ -4078,7 +4084,7 @@ describe("send_agent_prompt MCP tool", () => {
 
     await tool.handler(parsed.data as Record<string, unknown>);
 
-    expect(spies.agentManager.subscribe).not.toHaveBeenCalled();
+    expect(childFinishSubscriptionCount(spies.agentManager)).toBe(0);
     expect(spies.agentManager.waitForAgentEvent).toHaveBeenCalledWith(
       "child-agent",
       expect.objectContaining({ waitForActive: true }),
@@ -4087,21 +4093,21 @@ describe("send_agent_prompt MCP tool", () => {
 
   it("does not arm a finish notification for blocking agent-scoped prompts", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
-    const parentAgent = {
+    const parentAgent = createManagedAgent({
       id: "parent-agent",
       cwd: existingCwd,
       workspaceId: "wks_parent",
       provider: "codex",
       currentModeId: "full-access",
-    } as ManagedAgent;
-    const childAgent = {
+    });
+    const childAgent = createManagedAgent({
       id: "child-agent",
       cwd: existingCwd,
       lifecycle: "idle",
       currentModeId: null,
       availableModes: [],
       config: { title: "Child" },
-    } as ManagedAgent;
+    });
     spies.agentManager.getAgent.mockImplementation((agentId: string) => {
       if (agentId === "parent-agent") return parentAgent;
       if (agentId === "child-agent") return childAgent;
@@ -4123,7 +4129,7 @@ describe("send_agent_prompt MCP tool", () => {
       background: false,
     });
 
-    expect(spies.agentManager.subscribe).not.toHaveBeenCalled();
+    expect(childFinishSubscriptionCount(spies.agentManager)).toBe(0);
     expect(spies.agentManager.waitForAgentEvent).toHaveBeenCalledWith(
       "child-agent",
       expect.objectContaining({ waitForActive: true }),
@@ -6065,8 +6071,7 @@ describe("agent snapshot MCP serialization", () => {
     expect(byDefault).toEqual(["live-active"]);
 
     const withArchived = agentsOf(await tool.handler({ includeArchived: true }));
-    const archived = withArchived.find((agent) => agent.id === "live-archived");
-    expect(archived?.archivedAt).toBe(now);
+    expect(withArchived.map((agent) => agent.id)).toEqual(["live-active"]);
   });
 
   it("allows explicit cwd, status, archive, time, and limit filters for list_agents", async () => {
@@ -6123,11 +6128,10 @@ describe("agent snapshot MCP serialization", () => {
     expect(agentsOf(response).map((agent) => agent.id)).toEqual([
       "running-target",
       "old-running-target",
-      "recent-archived",
     ]);
   });
 
-  it("bounds includeArchived by default time window and limit", async () => {
+  it("keeps archived history out of discovery even with includeArchived", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     const now = Date.now();
     const recentArchivedRecords = Array.from({ length: 55 }, (_, index) =>
@@ -6154,17 +6158,10 @@ describe("agent snapshot MCP serialization", () => {
     const response = await tool.handler({ includeArchived: true });
     const agentIds = agentsOf(response).map((agent) => agent.id);
 
-    expect(agentIds).toHaveLength(50);
-    expect(agentIds).toEqual(
-      Array.from(
-        { length: 50 },
-        (_, index) => `recent-archived-${index.toString().padStart(2, "0")}`,
-      ),
-    );
-    expect(agentIds).not.toContain("old-archived");
+    expect(agentIds).toEqual([]);
   });
 
-  it("returns compact list items for stored archived agents", async () => {
+  it("returns compact list items for stored agents", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     const now = new Date().toISOString();
     spies.agentStorage.list.mockResolvedValue([
@@ -6173,7 +6170,7 @@ describe("agent snapshot MCP serialization", () => {
         cwd: REPO_CWD,
         updatedAt: now,
         lastActivityAt: now,
-        archivedAt: now,
+        archivedAt: null,
         features: [
           {
             type: "toggle",
@@ -6208,7 +6205,7 @@ describe("agent snapshot MCP serialization", () => {
       createdAt: "2026-04-11T00:00:00.000Z",
       updatedAt: now,
       lastUserMessageAt: null,
-      archivedAt: now,
+      archivedAt: null,
       requiresAttention: false,
       attentionReason: null,
       attentionTimestamp: null,

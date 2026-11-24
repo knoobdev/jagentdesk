@@ -69,9 +69,9 @@ export class FinishSubscriptionStore {
   ): Promise<void> {
     const next = this.writes.then(async () => {
       const records = update(await this.load());
-      this.cache = records;
       await fs.mkdir(path.dirname(this.filePath), { recursive: true });
       await writeJsonFileAtomic(this.filePath, { version: 1, subscriptions: records });
+      this.cache = records;
       return undefined;
     });
     this.writes = next.catch((error) => {
@@ -115,6 +115,7 @@ export interface PendingFinishNotification {
 interface FinishSubscriptionState {
   store: FinishSubscriptionStore;
   pending: Map<string, PendingFinishNotification[]>;
+  suspended: boolean;
 }
 
 // Keyed by the daemon's AgentManager, like the delivery queue.
@@ -124,11 +125,27 @@ export function configureFinishSubscriptions(
   agentManager: object,
   store: FinishSubscriptionStore,
 ): void {
-  states.set(agentManager, { store, pending: new Map() });
+  states.set(agentManager, { store, pending: new Map(), suspended: false });
+}
+
+export function suspendFinishNotifications(agentManager: object): void {
+  const state = states.get(agentManager);
+  if (state) state.suspended = true;
+}
+
+export function areFinishNotificationsSuspended(agentManager: object): boolean {
+  return states.get(agentManager)?.suspended === true;
 }
 
 export function getFinishSubscriptionStore(agentManager: object): FinishSubscriptionStore | null {
   return states.get(agentManager)?.store ?? null;
+}
+
+export function hasPendingFinishNotifications(
+  agentManager: object,
+  parentAgentId: string,
+): boolean {
+  return Boolean(states.get(agentManager)?.pending.get(parentAgentId)?.length);
 }
 
 /** Take the notifications that ride along with this parent's next turn. */

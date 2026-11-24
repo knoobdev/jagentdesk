@@ -104,6 +104,12 @@ host that is either a known cloud host or one the CLI is already authenticated
 to. Adapter probes must not make anonymous HTTP requests to remote-derived
 hosts, and adapters must not route credentials to an unauthenticated host.
 
+Reuse the daemon's shared `ForgeResolver` for workspace reads and agent change
+request watches. Separate adapters duplicate per-host polling budgets and miss
+shared invalidations. Watches use the existing CLI login; do not add a watch
+credential store. Keep unsubscribe usable from its saved address when the forge
+or its CLI is unavailable.
+
 ## App
 
 Each app forge splits into two modules so pure logic never imports the client

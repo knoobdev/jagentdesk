@@ -5494,14 +5494,7 @@ function createToolCatalog(
         agents: z.array(AgentListItemPayloadSchema),
       },
     },
-    async ({
-      includeArchived = false,
-      includeBackground = false,
-      cwd,
-      sinceHours = 48,
-      statuses,
-      limit = 50,
-    }) => {
+    async ({ includeBackground = false, cwd, sinceHours = 48, statuses, limit = 50 }) => {
       const callerCwd = callerAgentId ? resolveCallerAgent()?.cwd : undefined;
       const requestedCwd = cwd?.trim() ? expandUserPath(cwd) : callerCwd;
       const statusFilter = statuses && statuses.length > 0 ? new Set(statuses) : null;
@@ -5510,19 +5503,14 @@ function createToolCatalog(
       const projectedLiveAgents = await Promise.all(
         liveSnapshots.map((snapshot) => projectLiveAgent(snapshot)),
       );
-      const liveAgents = projectedLiveAgents.filter(
-        (agent) => includeArchived || !agent.archivedAt,
-      );
+      const liveAgents = projectedLiveAgents.filter((agent) => !agent.archivedAt);
       const liveIds = new Set(liveSnapshots.map((snapshot) => snapshot.id));
       const storedRecords = await agentStorage.list();
       const registeredProviderIds = new Set(providerSnapshotManager.listRegisteredProviderIds());
       const storedAgents = storedRecords
         .filter((record) => !record.internal && !liveIds.has(record.id))
-        .filter((record) => includeArchived || !record.archivedAt)
-        .filter(
-          (record) =>
-            includeArchived || isStoredAgentProviderAvailable(record, registeredProviderIds),
-        )
+        .filter((record) => !record.archivedAt)
+        .filter((record) => isStoredAgentProviderAvailable(record, registeredProviderIds))
         .map(projectStoredAgent);
       const backgroundWorkspaceIds = new Set(
         ((await options.workspaceRegistry?.list()) ?? [])
@@ -5537,7 +5525,7 @@ function createToolCatalog(
             includeBackground,
           ),
         )
-        .filter((agent) => includeArchived || !agent.archivedAt)
+        .filter((agent) => !agent.archivedAt)
         .map(toAgentListItemPayload)
         .filter((agent) => !requestedCwd || isSameOrDescendantPath(requestedCwd, agent.cwd))
         .filter((agent) => !statusFilter || statusFilter.has(agent.status))

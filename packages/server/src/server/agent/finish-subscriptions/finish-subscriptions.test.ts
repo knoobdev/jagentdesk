@@ -1,3 +1,4 @@
+import { AgentRunState, type ForegroundPromptStart } from "../agent-run-state.js";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,10 +27,18 @@ function createParentManager() {
     pendingPermissions: new Map(),
   };
   const prompts: unknown[] = [];
-  const streamAgent = vi.fn((_agentId: string, prompt: unknown) => {
-    prompts.push(prompt);
-    return (async function* noop() {})();
-  });
+  const streamAgent = vi.fn(
+    (_agentId: string, prompt: unknown, _options: unknown, promptStart?: ForegroundPromptStart) => {
+      if (promptStart) {
+        const runs = new AgentRunState();
+        const run = runs.createPendingRun(_agentId);
+        promptStart.bind(run);
+        runs.settleForegroundStart(run, { status: "started", turnId: "turn-1" });
+      }
+      prompts.push(prompt);
+      return (async function* noop() {})();
+    },
+  );
   const agentManager = {
     getAgent: vi.fn((agentId: string) => ({ parent, child })[agentId] ?? null),
     reloadStalePluginSession: vi.fn(async () => {}),
@@ -153,6 +162,85 @@ describe("durable finish subscriptions", () => {
       logger,
     });
     expect(restored).toBe(0);
+    expect(await store.list()).toEqual([]);
+  });
+
+  test("a command leaves restart notifications for the next model turn", async () => {
+    const store = FinishSubscriptionStore.forHome(home, logger);
+    await store.add({
+      childAgentId: "child",
+      callerAgentId: "parent",
+      requireParentOwnership: false,
+    });
+    const after = createParentManager();
+    await restoreFinishSubscriptions({
+      agentManager: after.agentManager,
+      store,
+      getAgentTitle: async () => "Child task",
+      isArchived: async () => false,
+      logger,
+    });
+    after.agentManager.tryRunOutOfBand = vi.fn(async () => true);
+    expect(
+      await sendPromptToAgent({
+        agentManager: after.agentManager,
+        agentStorage: after.agentStorage,
+        agentId: "parent",
+        prompt: "/goal pause",
+        logger,
+      }),
+    ).toEqual({ disposition: "out_of_band" });
+    expect(after.streamAgent).not.toHaveBeenCalled();
+    expect(await store.list()).toHaveLength(1);
+
+    after.agentManager.tryRunOutOfBand = vi.fn(async () => false);
+    await sendPromptToAgent({
+      agentManager: after.agentManager,
+      agentStorage: after.agentStorage,
+      agentId: "parent",
+      prompt: "Continue",
+      logger,
+    });
+    expect(parseAgentMessages(String(after.prompts[0]))).toMatchObject([
+      { source: { agentId: "child", event: "closed" } },
+      { source: null, text: "Continue" },
+    ]);
+    expect(await store.list()).toEqual([]);
+  });
+
+  test("a rejected parent dispatch keeps its notification for a retry", async () => {
+    const store = FinishSubscriptionStore.forHome(home, logger);
+    await store.add({
+      childAgentId: "child",
+      callerAgentId: "parent",
+      requireParentOwnership: false,
+    });
+    const after = createParentManager();
+    await restoreFinishSubscriptions({
+      agentManager: after.agentManager,
+      store,
+      getAgentTitle: async () => "Child task",
+      isArchived: async () => false,
+      logger,
+    });
+    after.streamAgent.mockImplementationOnce(() => {
+      throw new Error("Dispatch rejected");
+    });
+    const send = () =>
+      sendPromptToAgent({
+        agentManager: after.agentManager,
+        agentStorage: after.agentStorage,
+        agentId: "parent",
+        prompt: "Continue",
+        logger,
+      });
+    await expect(send()).rejects.toThrow("Dispatch rejected");
+    expect(await store.list()).toHaveLength(1);
+    await send();
+    expect(parseAgentMessages(String(after.prompts[0]))).toMatchObject([
+      { source: { agentId: "child", event: "closed" } },
+      { source: null, text: "Continue" },
+    ]);
     expect(await store.list()).toEqual([]);
   });
 });

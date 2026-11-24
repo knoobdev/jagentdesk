@@ -26,7 +26,9 @@ import type { AgentStorage } from "./agent-storage.js";
 import { ensureAgentLoaded } from "./agent-loading.js";
 import {
   completePendingFinishNotifications,
+  areFinishNotificationsSuspended,
   getFinishSubscriptionStore,
+  hasPendingFinishNotifications,
   returnPendingFinishNotifications,
   type PendingFinishNotification,
   takePendingFinishNotifications,
@@ -529,8 +531,8 @@ export async function sendPromptToAgent(
 
 /**
  * Like {@link sendPromptToAgent}, but the prompt is already in its final form and
- * is not wrapped again. Forum human wakes and other legacy hidden envelopes go
- * through here so they stay hidden instead of being quoted as user text.
+ * is not wrapped again. Hidden schedule envelopes go through here so they stay
+ * hidden instead of being quoted as user text.
  */
 export async function sendPreparedPromptToAgent(
   params: Omit<SendPromptToAgentParams, "source">,
@@ -570,6 +572,28 @@ async function loadPromptRecipient(params: SendPromptToAgentParams): Promise<boo
   return true;
 }
 
+async function acknowledgeCarriedFinishNotifications(
+  params: SendPromptToAgentParams,
+  result: PromptDispatchResult,
+  carried: PendingFinishNotification[],
+): Promise<void> {
+  if (carried.length && result.disposition === "turn_started")
+    await waitForAgentRunStartWithTimeout(params.agentManager, params.agentId, result.started);
+  await completePendingFinishNotifications(params.agentManager, carried);
+}
+
+async function runPendingFinishCommand(params: SendPromptToAgentParams): Promise<boolean> {
+  if (!params.source && hasPendingFinishNotifications(params.agentManager, params.agentId)) {
+    const runOptions = params.messageId
+      ? { ...params.runOptions, clientMessageId: params.messageId }
+      : params.runOptions;
+    if (await params.agentManager.tryRunOutOfBand(params.agentId, params.prompt, runOptions)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 async function dispatchPrompt(
   params: SendPromptToAgentParams,
   options: { prepared: boolean },
@@ -588,11 +612,7 @@ async function dispatchPrompt(
 
   let prompt: AgentPromptInput;
   let messageId = params.messageId;
-  // Notifications kept across a daemon restart ride along with this turn instead of
-  // waking the parent on their own (ADR-0029 decision 5).
-  const attached = params.skillIds?.length
-    ? []
-    : takePendingFinishNotifications(params.agentManager, params.agentId);
+  if (await runPendingFinishCommand(params)) return { disposition: "out_of_band" };
   if (options.prepared) {
     prompt = await withSkillInvocation(params);
   } else {
@@ -608,6 +628,11 @@ async function dispatchPrompt(
     prompt = await withSkillInvocation({ ...params, prompt: delivery.prompt });
   }
 
+  // Notifications kept across a daemon restart ride along with this turn instead of
+  // waking the parent on their own (ADR-0029 decision 5).
+  const attached = params.skillIds?.length
+    ? []
+    : takePendingFinishNotifications(params.agentManager, params.agentId);
   let carried: PendingFinishNotification[] = [];
   if (attached.length > 0) {
     const withNotifications = attachFinishNotifications(prompt, messageId, attached);
@@ -635,7 +660,7 @@ async function dispatchPrompt(
       clearPendingPermissions: params.clearPendingPermissions,
       runOptions,
     });
-    await completePendingFinishNotifications(params.agentManager, carried);
+    await acknowledgeCarriedFinishNotifications(params, result, carried);
     return result;
   } catch (error) {
     returnPendingFinishNotifications(params.agentManager, params.agentId, carried);
@@ -866,15 +891,16 @@ export function setupFinishNotification(
   async function notify(
     reason: FinishNotificationReason,
     permissionRequest?: AgentPermissionRequest,
-  ): Promise<void> {
+  ): Promise<boolean> {
+    if (areFinishNotificationsSuspended(agentManager)) return false;
     const callerRecord = await agentStorage.get(callerAgentId);
     if (callerRecord?.archivedAt) {
-      return;
+      return true;
     }
 
     const record = await agentStorage.get(childAgentId);
     if (requireParentOwnership && getParentAgentIdFromLabels(record?.labels) !== callerAgentId) {
-      return;
+      return true;
     }
     const title = record?.title ?? childAgentId;
     const lastAssistantMessage = await agentManager.getLastAssistantMessage(childAgentId);
@@ -904,6 +930,7 @@ export function setupFinishNotification(
       },
     );
     await receipt.dispatched;
+    return true;
   }
 
   function notifySafely(reason: FinishNotificationReason, options: NotifySafelyOptions = {}): void {
@@ -912,9 +939,9 @@ export function setupFinishNotification(
     if (terminal) stopObserving();
     notificationQueue = notificationQueue
       .then(async () => {
-        await notify(reason, options.permissionRequest);
+        const delivered = await notify(reason, options.permissionRequest);
         // A failed dispatch keeps the record, so a restart can still report it.
-        if (terminal) settle();
+        if (terminal && delivered) settle();
         return undefined;
       })
       .catch((error) => {

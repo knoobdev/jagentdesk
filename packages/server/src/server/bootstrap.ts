@@ -24,6 +24,7 @@ import { closeAgentMessageDelivery } from "./agent/agent-prompt.js";
 import {
   FinishSubscriptionStore,
   restoreFinishSubscriptions,
+  suspendFinishNotifications,
 } from "./agent/finish-subscriptions/index.js";
 import { ensureToolDirsOnPath, HostToolInstaller } from "./host-tools/installer.js";
 import type { HttpFetch } from "./host-tools/release.js";
@@ -2524,10 +2525,10 @@ export async function createJAgentDeskDaemon(
     // Graceful shutdown delivers agent messages still waiting in a 2 s window
     // (ADR-0029 decision 3); a crash loses them.
     wsServer?.prepareForShutdown();
+    suspendFinishNotifications(agentManager);
     await changeRequestWatches.close();
     await closeAgentMessageDelivery(agentManager).catch(() => undefined);
-    // Freeze both ingress and registration before taking the agent closure snapshot.
-    wsServer?.prepareForShutdown();
+    // Freeze registration before taking the agent closure snapshot.
     botsService.suspendForShutdown();
     agentManager.prepareForShutdown();
     await restartRecovery.captureRunningAgents();

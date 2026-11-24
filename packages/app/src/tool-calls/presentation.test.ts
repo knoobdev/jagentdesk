@@ -66,7 +66,7 @@ describe("tool-call presentation", () => {
     });
 
     expect(presentation).toMatchObject({
-      displayName: "Exec Command",
+      displayName: "Exec command",
       icon: fakeIcons.wrench,
       isLoadingDetails: true,
       hasDetails: false,
@@ -90,5 +90,27 @@ describe("tool-call presentation", () => {
 
     expect(presentation.isPlan).toBe(true);
     expect(presentation.icon).toBe(fakeIcons.brain);
+  });
+
+  it.each([
+    ["message", "Message from Worker"],
+    ["finished", "Worker finished"],
+  ] as const)("shows sender identity for %s", (event, displayName) => {
+    const presentation = buildToolCallPresentation({
+      toolName: "agent_message",
+      status: "completed",
+      error: null,
+      agentMessage: {
+        event,
+        sender: { id: "worker", title: "Worker" },
+        text: "Review <changes> & report.",
+      },
+      resolveIcon: fakeResolveIcon,
+    });
+    expect(presentation).toMatchObject({
+      displayName,
+      canOpenDetails: true,
+      detail: { type: "plain_text", text: "From agent: worker\n\nReview <changes> & report." },
+    });
   });
 });
