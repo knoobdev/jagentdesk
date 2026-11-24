@@ -19,6 +19,10 @@ class FakeDirectoryClient {
     });
     return complete;
   }
+  private signalWorkspaceFetch!: () => void;
+  readonly workspaceFetchStarted = new Promise<void>((resolve) => {
+    this.signalWorkspaceFetch = resolve;
+  });
   fetchAgentsCalls = 0;
   fetchWorkspacesCalls = 0;
   listProjectsCalls = 0;
@@ -64,6 +68,7 @@ class FakeDirectoryClient {
 
   async fetchWorkspaces(): Promise<WorkspaceFetchResult> {
     this.fetchWorkspacesCalls += 1;
+    this.signalWorkspaceFetch();
     if (this.pendingWorkspaceFetch) {
       const pending = this.pendingWorkspaceFetch;
       this.pendingWorkspaceFetch = null;
@@ -319,7 +324,7 @@ it("starts workspace fetching before projects finish and applies empty-project o
   const completeProjects = client.holdProjectFetch();
   const completeWorkspaces = client.holdWorkspaceFetch();
   const refresh = directory.refreshWorkspaces();
-  await Promise.resolve();
+  await client.workspaceFetchStarted;
   expect(client.listProjectsCalls).toBe(1);
   expect(client.fetchWorkspacesCalls).toBe(1);
   const project = {
