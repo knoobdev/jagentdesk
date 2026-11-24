@@ -433,7 +433,7 @@ second line'`,
     });
     expect(result.itemCount).toBe(3);
     expect(result.attachment.text).toContain("Partial result.");
-    expect(result.attachment.text).toContain("running");
+    expect(result.attachment.text).toContain("[Terminal] after boundary");
     expect(result.attachment.text).not.toContain("completed");
   });
 

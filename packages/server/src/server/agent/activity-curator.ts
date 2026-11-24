@@ -244,7 +244,13 @@ function selectForkContextRows(input: {
 
 // A projected tool updated after the reply was still running at the checkpoint.
 function toolCallAtCheckpoint(item: ToolCallTimelineItem): ToolCallTimelineItem {
-  return { ...item, status: "running", error: null };
+  return {
+    ...item,
+    status: "running",
+    error: null,
+    // This branch retains child logs; a final log cannot be reconstructed at an earlier reply.
+    ...(item.detail.type === "sub_agent" ? { detail: { ...item.detail, log: "" } } : {}),
+  };
 }
 
 function trimContextMetadata(value: string | null | undefined): string | null {
