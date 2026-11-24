@@ -3,7 +3,11 @@ import { Keyboard, View, useWindowDimensions } from "react-native";
 import { Portal } from "@gorhom/portal";
 import Animated, { useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 import { StyleSheet } from "react-native-unistyles";
-import { Autocomplete, type AutocompleteOption } from "@/components/ui/autocomplete";
+import {
+  Autocomplete,
+  type AutocompleteOption,
+  type AutocompleteStatus,
+} from "@/components/ui/autocomplete";
 import {
   measureFloatingPanelPortalHost,
   useFloatingPanelPortalHostName,
@@ -61,6 +65,12 @@ export function AutocompletePopover({
 }: AutocompletePopoverProps): ReactElement | null {
   "use no memo";
   // React Compiler memoizes effect captures by reading SharedValue.value during render.
+  const status = useMemo<AutocompleteStatus | null>(() => {
+    if (errorMessage) return { kind: "error", title: errorMessage };
+    if (isLoading) return { kind: "loading", message: loadingText ?? "" };
+    if (options.length === 0) return { kind: "empty", message: emptyText ?? "" };
+    return null;
+  }, [errorMessage, isLoading, loadingText, options.length, emptyText]);
   const [relativeAnchorRect, setRelativeAnchorRect] = useState<RelativeAnchorRect | null>(null);
   const windowDimensions = useWindowDimensions();
   const portalHostName = useFloatingPanelPortalHostName();
@@ -146,10 +156,7 @@ export function AutocompletePopover({
             options={options}
             selectedIndex={selectedIndex}
             onSelect={onSelect}
-            isLoading={isLoading}
-            errorMessage={errorMessage}
-            loadingText={loadingText}
-            emptyText={emptyText}
+            status={status}
           />
         </Animated.View>
       </View>
