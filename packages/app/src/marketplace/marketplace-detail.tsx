@@ -7,8 +7,8 @@ import { useTranslation } from "react-i18next";
 import { AdaptiveModalSheet, type SheetHeader } from "@/components/adaptive-modal-sheet";
 import { AttachmentLightbox, type ImageLightboxSource } from "@/components/attachment-lightbox";
 import { MAX_CONTENT_WIDTH } from "@/constants/layout";
-import { createSharedMarkdownRules, MarkdownRenderer } from "@/components/markdown/renderer";
-import type { ASTNode, RenderRules } from "react-native-markdown-display";
+import { MarkdownRenderer } from "@/components/markdown/renderer";
+
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import type { Theme } from "@/styles/theme";
@@ -177,20 +177,6 @@ export function MarketplaceDetail({
   const [lightboxSource, setLightboxSource] = useState<ImageLightboxSource | null>(null);
   const closeLightbox = useCallback(() => setLightboxSource(null), []);
   // README screenshots open in the same zoomable lightbox as the gallery.
-  const markdownRules = useMemo<RenderRules>(
-    () => ({
-      ...createSharedMarkdownRules(),
-      image: (node: ASTNode) => (
-        <ReadmeImage
-          key={node.key}
-          uri={String(node.attributes?.src ?? "")}
-          alt={String(node.attributes?.alt ?? "")}
-          onOpen={setLightboxSource}
-        />
-      ),
-    }),
-    [],
-  );
 
   return (
     <AdaptiveModalSheet
@@ -272,7 +258,7 @@ export function MarketplaceDetail({
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t("marketplace.detail.description")}</Text>
           <View style={styles.divider} />
-          <MarkdownRenderer text={description} rules={markdownRules} />
+          <MarkdownRenderer text={description} />
         </View>
       ) : null}
 
@@ -292,7 +278,6 @@ export function MarketplaceDetail({
   );
 }
 
-const DEFAULT_README_IMAGE_ASPECT = 16 / 9;
 // A plain style object: expo-image's web wrapper ignores the unistyles-managed one.
 const SCREENSHOT_FILL = {
   position: "absolute",
@@ -301,35 +286,6 @@ const SCREENSHOT_FILL = {
   bottom: 0,
   left: 0,
 } as const;
-
-function ReadmeImage({
-  uri,
-  alt,
-  onOpen,
-}: {
-  uri: string;
-  alt: string;
-  onOpen: (source: ImageLightboxSource) => void;
-}) {
-  const [aspectRatio, setAspectRatio] = useState(DEFAULT_README_IMAGE_ASPECT);
-  const handlePress = useCallback(() => onOpen({ type: "uri", uri }), [onOpen, uri]);
-  const handleLoad = useCallback((event: { source: { width: number; height: number } }) => {
-    const { width, height } = event.source;
-    if (width > 0 && height > 0) setAspectRatio(width / height);
-  }, []);
-  const imageStyle = useMemo(() => [styles.readmeImage, { aspectRatio }], [aspectRatio]);
-  if (!uri) return null;
-  return (
-    <Pressable
-      onPress={handlePress}
-      accessibilityRole="imagebutton"
-      accessibilityLabel={alt || uri}
-      style={styles.readmeImageButton}
-    >
-      <ExpoImage source={uri} contentFit="contain" onLoad={handleLoad} style={imageStyle} />
-    </Pressable>
-  );
-}
 
 // A screenshot opens full size in the zoomable lightbox (wheel/pinch zoom, pan, Escape).
 function Screenshot({

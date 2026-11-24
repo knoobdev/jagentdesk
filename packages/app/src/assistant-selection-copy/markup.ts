@@ -19,43 +19,10 @@ export const MARKDOWN_COPY_ALT_ATTRIBUTE = "data-jagentdesk-markdown-alt";
 export const TRAILING_CODE_LINE_BREAKS = /(\r?\n[ \t]*)+$/;
 
 export const markdownCopyDataSet = {
-  blockquote: { jagentdeskMarkdownTag: "blockquote" },
-  br: { jagentdeskMarkdownTag: "br" },
   code: { jagentdeskMarkdownTag: "code" },
-  h1: { jagentdeskMarkdownTag: "h1" },
-  h2: { jagentdeskMarkdownTag: "h2" },
-  h3: { jagentdeskMarkdownTag: "h3" },
-  h4: { jagentdeskMarkdownTag: "h4" },
-  h5: { jagentdeskMarkdownTag: "h5" },
-  h6: { jagentdeskMarkdownTag: "h6" },
-  hr: { jagentdeskMarkdownTag: "hr" },
-  ignore: { jagentdeskMarkdownIgnore: "true" },
-  li: { jagentdeskMarkdownTag: "li" },
-  listMarker: { jagentdeskMarkdownIgnore: "true", jagentdeskMarkdownListMarker: "true" },
-  ol: { jagentdeskMarkdownTag: "ol" },
-  p: { jagentdeskMarkdownTag: "p" },
   pre: { jagentdeskMarkdownTag: "pre" },
-  s: { jagentdeskMarkdownTag: "s" },
-  strong: { jagentdeskMarkdownTag: "strong" },
-  em: { jagentdeskMarkdownTag: "em" },
-  table: { jagentdeskMarkdownTag: "table" },
-  tbody: { jagentdeskMarkdownTag: "tbody" },
-  td: { jagentdeskMarkdownTag: "td" },
-  th: { jagentdeskMarkdownTag: "th" },
-  thead: { jagentdeskMarkdownTag: "thead" },
-  tr: { jagentdeskMarkdownTag: "tr" },
-  ul: { jagentdeskMarkdownTag: "ul" },
-  unwrap: { jagentdeskMarkdownUnwrap: "true" },
+  ignore: { jagentdeskMarkdownIgnore: "true" },
 } as const;
-
-export type MarkdownCopyInlineTag = "br" | "code" | "em" | "s" | "strong";
-
-export function markdownCopyOrderedListDataSet(start: unknown) {
-  return {
-    ...markdownCopyDataSet.ol,
-    jagentdeskMarkdownListStart: String(start ?? 1),
-  } as const;
-}
 
 export function markdownCopyCodeBlockDataSet(language: string | null | undefined) {
   const fenceLanguage = language?.trim().split(/\s+/)[0];
@@ -65,25 +32,7 @@ export function markdownCopyCodeBlockDataSet(language: string | null | undefined
   } as const;
 }
 
-/**
- * An image copies as the Markdown it came from. The rendered `img` points at a preview
- * URL for data and workspace images, and carries no alt text of its own.
- */
-export function markdownCopyImageDataSet(source: string, alt: string | undefined) {
-  return {
-    jagentdeskMarkdownTag: "img",
-    jagentdeskMarkdownSrc: source,
-    ...(alt ? { jagentdeskMarkdownAlt: alt } : {}),
-  } as const;
-}
-
-export function markdownCopyTableCellDataSet(tag: "td" | "th", style: unknown) {
-  const alignment =
-    typeof style === "string"
-      ? style.match(/(?:^|;)\s*text-align\s*:\s*(left|right|center)/i)?.[1]
-      : null;
-  return {
-    ...markdownCopyDataSet[tag],
-    ...(alignment ? { jagentdeskMarkdownAlign: alignment.toLowerCase() } : {}),
-  } as const;
+export const MARKDOWN_COPY_IMAGE_SOURCES_ATTRIBUTE = "data-jagentdesk-markdown-image-sources";
+export function markdownCopyImageSourcesDataSet(sources: Record<string, string>) {
+  return { jagentdeskMarkdownImageSources: JSON.stringify(sources) };
 }

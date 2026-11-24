@@ -1,4 +1,3 @@
-import type { AssistantImageContext } from "@/utils/assistant-image-metadata";
 import type { StreamItem } from "@/types/stream";
 import { estimateAssistantMessageHeightFromCache } from "@/utils/assistant-message-height-estimate";
 import {
@@ -48,13 +47,11 @@ export interface WebVirtualizedHistoryWindow {
 interface StreamItemHeightEstimateInput {
   item: StreamItem;
   contentMaxWidth: number;
-  imageContext?: AssistantImageContext;
 }
 
 export function estimateStreamItemHeight({
   item,
   contentMaxWidth,
-  imageContext,
 }: StreamItemHeightEstimateInput): number {
   switch (item.kind) {
     case "user_message":
@@ -64,7 +61,6 @@ export function estimateStreamItemHeight({
         estimateAssistantMessageHeightFromCache({
           markdown: item.text,
           contentMaxWidth,
-          imageContext,
         }) ?? 220
       );
     case "tool_call":

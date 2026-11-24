@@ -8,6 +8,7 @@ const BARE_URL = String.raw`https?://(?:${URL_CHARACTER}|${URL_GROUP})*(?:[^\s<>
 
 export function recognizeBareUrls(parser: MarkdownIt): void {
   parser.core.ruler.before("linkify", "scheme_urls", (state) => {
+    if (!state.md.options.linkify) return;
     for (const block of state.tokens) {
       if (block.type !== "inline" || !block.children) continue;
       const children: typeof block.children = [];

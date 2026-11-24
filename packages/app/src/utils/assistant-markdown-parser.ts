@@ -8,7 +8,7 @@ export function createAssistantMarkdownParser({ streaming = false } = {}): Markd
   const parser = new MarkdownIt({
     html: false,
     linkify: true,
-    typographer: true,
+    typographer: false,
   });
   const defaultValidateLink = parser.validateLink.bind(parser);
 
@@ -17,10 +17,7 @@ export function createAssistantMarkdownParser({ streaming = false } = {}): Markd
 
   recognizeBareUrls(parser);
 
-  if (streaming) {
-    enableStreamingMarkdown(parser);
-  }
-
+  if (streaming) enableStreamingMarkdown(parser);
   return parser;
 }
 

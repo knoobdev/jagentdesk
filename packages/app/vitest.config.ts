@@ -15,6 +15,15 @@ const resolvePackageEntry = (packageName: string) => {
 export default defineConfig({
   plugins: [
     {
+      name: "markdown-wasm-commonjs-export",
+      transform(source, id) {
+        if (!id.split("?")[0].endsWith("/lib/module/web/wasm/md4c.js")) return;
+        const trailer = source.search(/\nif\s*\(typeof exports === ['"]object['"]/);
+        if (trailer < 0) throw new Error("Markdown WASM CommonJS trailer was not found");
+        return { code: `${source.slice(0, trailer)}\nexport default createMd4cModule;`, map: null };
+      },
+    },
+    {
       name: "reanimated-web-style-helpers",
       transform(_source, id) {
         if (
@@ -87,6 +96,7 @@ export default defineConfig({
       deps: {
         fallbackCJS: true,
         inline: [
+          "react-native-enriched-markdown",
           "zustand",
           "@tanstack/react-query",
           "react-native-web",
@@ -105,6 +115,7 @@ export default defineConfig({
   optimizeDeps: {
     // Bundle the CJS dependencies of the excluded gesture-handler package for the browser.
     include: [
+      "@marijn/find-cluster-break",
       "react-native-web/dist/exports/StyleSheet/compiler/createReactDOMStyle",
       "react-native-web/dist/exports/StyleSheet/preprocess",
       "react/jsx-runtime",
@@ -113,6 +124,7 @@ export default defineConfig({
       "react-native-gesture-handler > invariant",
     ],
     exclude: [
+      "react-native-enriched-markdown",
       "expo/src/winter",
       // Expo core has web modules that must pass through the platform resolver.
       "expo-modules-core",
