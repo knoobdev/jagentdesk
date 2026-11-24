@@ -3297,6 +3297,7 @@ function areExpandableBadgePropsEqual(previous: ExpandableBadgeProps, next: Expa
 }
 
 interface ToolCallProps {
+  onOpenSubagent?: () => void;
   agentMessage?: AgentMessage;
   onOpenAgent?: (agentId: string) => void;
   toolName: string;
@@ -3324,6 +3325,7 @@ interface ToolCallProps {
 
 export const ToolCall = memo(function ToolCall({
   agentMessage,
+  onOpenSubagent,
   onOpenAgent,
   toolName,
   args,
@@ -3388,6 +3390,10 @@ export const ToolCall = memo(function ToolCall({
     if (!agentMessage || !onOpenAgent) return undefined;
     return () => onOpenAgent(agentMessage.sender.id);
   }, [agentMessage, onOpenAgent]);
+  const labelPress = useMemo(
+    () => onOpenSubagent ?? handleOpenSender,
+    [onOpenSubagent, handleOpenSender],
+  );
   const handleOpenFile = useMemo(() => {
     const openFilePath = presentation.openFilePath;
     if (!openFilePath || !onOpenFilePath) {
@@ -3522,7 +3528,7 @@ export const ToolCall = memo(function ToolCall({
     <ExpandableBadge
       testID="tool-call-badge"
       label={presentation.displayName}
-      onLabelPress={handleOpenSender}
+      onLabelPress={labelPress}
       secondaryLabel={presentation.summary}
       icon={presentation.icon}
       isExpanded={shouldRenderInline && isExpanded}
@@ -3539,24 +3545,27 @@ export const ToolCall = memo(function ToolCall({
 }, areToolCallPropsEqual);
 
 function areToolCallPropsEqual(previous: ToolCallProps, next: ToolCallProps) {
-  if (previous.agentMessage !== next.agentMessage) return false;
-  if (previous.onOpenAgent !== next.onOpenAgent) return false;
-  if (previous.toolName !== next.toolName) return false;
-  if (previous.args !== next.args) return false;
-  if (previous.result !== next.result) return false;
-  if (previous.error !== next.error) return false;
-  if (previous.status !== next.status) return false;
-  if (previous.detail !== next.detail) return false;
-  if (previous.cwd !== next.cwd) return false;
-  if (previous.metadata !== next.metadata) return false;
-  if (previous.client !== next.client) return false;
-  if (previous.isLastInSequence !== next.isLastInSequence) return false;
-  if (previous.disableOuterSpacing !== next.disableOuterSpacing) return false;
-  if (previous.onOpenFilePath !== next.onOpenFilePath) return false;
-  if (previous.defaultExpanded !== next.defaultExpanded) return false;
-  if (previous.forceInline !== next.forceInline) return false;
-  if (previous.maxDetailHeight !== next.maxDetailHeight) return false;
-  if (previous.itemId !== next.itemId) return false;
-  if (previous.standalone !== next.standalone) return false;
-  return true;
+  const keys = [
+    "onOpenSubagent",
+    "agentMessage",
+    "onOpenAgent",
+    "toolName",
+    "args",
+    "result",
+    "error",
+    "status",
+    "detail",
+    "cwd",
+    "metadata",
+    "client",
+    "isLastInSequence",
+    "disableOuterSpacing",
+    "onOpenFilePath",
+    "defaultExpanded",
+    "forceInline",
+    "maxDetailHeight",
+    "itemId",
+    "standalone",
+  ] as const;
+  return keys.every((key) => previous[key] === next[key]);
 }

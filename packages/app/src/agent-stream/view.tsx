@@ -1,3 +1,4 @@
+import { SubagentLaunchMarker } from "@/subagents/launch-marker";
 import { useRevealedText } from "@/hooks/use-revealed-text";
 import { createStreamPresentation } from "./presentation";
 import { useInstalledTimelineTransform, PluginTimelineItemView } from "@/plugins/timeline";
@@ -862,6 +863,22 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             );
           }
 
+          if (data.detail.type === "sub_agent") {
+            return (
+              <SubagentLaunchMarker
+                serverId={resolvedServerId}
+                parentAgentId={agentId}
+                callId={data.callId}
+                itemId={item.id}
+                toolName={data.name}
+                status={data.status}
+                error={data.error}
+                detail={data.detail}
+                isLastInSequence={isLastInSequence}
+              />
+            );
+          }
+
           return (
             <ToolCallSlot
               itemId={item.id}
@@ -903,6 +920,8 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       },
       [
         context.cwd,
+        resolvedServerId,
+        agentId,
         client,
         setInlineDetailsExpanded,
         handleToolCallOpenFile,

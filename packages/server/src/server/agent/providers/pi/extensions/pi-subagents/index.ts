@@ -166,7 +166,8 @@ export const piSubagents: PiExtension = {
         type: "sub_agent" as const,
         subAgentType: args.agent,
         description: args.task,
-        log: extractTextFromToolResult(call.result)?.trim() ?? "",
+        // COMPAT(subagent-log): added in v0.9.59, remove after 2027-05-25.
+        log: "",
       };
       const base = {
         type: "upsert" as const,
