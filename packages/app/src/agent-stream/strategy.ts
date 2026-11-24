@@ -39,9 +39,16 @@ export interface ScrollToMessageOccurrence {
   targetTop(): number | null;
 }
 
+/**
+ * The edge of its row a disclosure's trigger sits on. A header trigger sits on the top: the content
+ * it opens grows below it. A trigger under the content it opens, such as a long message's show
+ * more, sits on the bottom.
+ */
+export type DisclosureTriggerEdge = "top" | "bottom";
+
 export interface StreamViewportHandle {
   focus?: () => void;
-  holdRow?: (rowId: string, apply: () => void) => void;
+  holdRow?: (rowId: string, apply: () => void, triggerEdge: DisclosureTriggerEdge) => void;
   scrollToBottom: (reason?: BottomAnchorLocalRequest["reason"]) => void;
   prepareForViewportChange: () => void;
   scrollToMessage?: (itemId: string, occurrence?: ScrollToMessageOccurrence) => void;
