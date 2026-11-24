@@ -1,10 +1,15 @@
 import { usePendingWorkspaceOpen } from "@/stores/workspace-layout-store";
+import { SessionShareControl } from "@/composer/agent-controls/session-share-control";
+import { BuiltinPluginGate } from "@/plugins/builtin/gate";
 import { PluginHeaderButtons, usePluginWorkspaceMenu } from "@/plugins/buttons/view";
 import { useActiveWorkspaceArchive } from "@/hooks/use-active-workspace-archive";
 import { usePrPaneData } from "@/git/pull-request-panel";
 import { COMPACT_CONTENT_WIDTH } from "@/constants/layout";
 import { findPaneById, collectAllPanes } from "@/stores/workspace-layout-store";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import {
+  useGumloopDesktopShell,
+  useIsGumloopTheme,
+} from "@/components/gumloop-shell/use-gumloop-chrome";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
   memo,
@@ -1297,6 +1302,44 @@ interface WorkspaceHeaderTitleBarProps {
   onOpenUrlInBrowserTab: (url: string) => void;
 }
 
+function WorkspaceScreenHeader(props: ComponentProps<typeof ScreenHeader>) {
+  const gumloop = useGumloopDesktopShell(true);
+  return <ScreenHeader {...props} desktopHeight={gumloop ? 64 : undefined} />;
+}
+
+function GumloopHeaderShare({ serverId }: { serverId: string }) {
+  const gumloop = useGumloopDesktopShell(true);
+  const agentId = useSessionStore((state) => state.sessions[serverId]?.focusedAgentId);
+  if (!gumloop || !agentId) return null;
+  return (
+    <BuiltinPluginGate serverId={serverId} id="session-share">
+      <SessionShareControl serverId={serverId} agentId={agentId} />
+    </BuiltinPluginGate>
+  );
+}
+
+function GumloopChatTitle({
+  serverId,
+  fallback,
+  enabled,
+}: {
+  serverId: string;
+  fallback: string;
+  enabled: boolean;
+}) {
+  const title = useSessionStore((state) => {
+    const session = state.sessions[serverId];
+    if (!session?.focusedAgentId) return fallback;
+    return session.agents.get(session.focusedAgentId)?.title ?? fallback;
+  });
+  if (!enabled) return null;
+  return (
+    <Text numberOfLines={1} style={styles.gumloopChatTitle}>
+      {title}
+    </Text>
+  );
+}
+
 function WorkspaceHeaderTitleBar({
   isLoading,
   title,
@@ -1332,7 +1375,8 @@ function WorkspaceHeaderTitleBar({
   onOpenUrlInBrowserTab,
 }: WorkspaceHeaderTitleBarProps) {
   // The breadcrumb needs desktop width; phones keep the single-line title.
-  const isClickUp = useIsClickUpTheme() && !isMobile;
+  const isGumloop = useIsGumloopTheme() && !isMobile;
+  if (isGumloop) return <View style={styles.headerTitleContainer} />;
   return (
     <View style={styles.headerTitleContainer}>
       {isLoading ? (
@@ -1340,30 +1384,30 @@ function WorkspaceHeaderTitleBar({
           <View style={styles.headerTitleSkeleton} />
         </View>
       ) : null}
-      {!isLoading && isClickUp ? (
-        // ClickUp breadcrumb: [space icon] Project / Title.
+      {!isLoading && isGumloop ? (
+        // Gumloop breadcrumb: [space icon] Project / Title.
         <View style={styles.headerTitleTextGroup}>
           {showSubtitle ? (
             <>
-              <View style={styles.clickUpCrumbIcon}>
-                <Text style={styles.clickUpCrumbIconText}>
+              <View style={styles.gumloopCrumbIcon}>
+                <Text style={styles.gumloopCrumbIconText}>
                   {subtitle.trim().charAt(0).toUpperCase()}
                 </Text>
               </View>
               <Text
                 testID="workspace-header-subtitle"
-                style={styles.clickUpCrumbProject}
+                style={styles.gumloopCrumbProject}
                 numberOfLines={1}
               >
                 {subtitle}
               </Text>
-              <Text style={styles.clickUpCrumbSeparator}>/</Text>
+              <Text style={styles.gumloopCrumbSeparator}>/</Text>
             </>
           ) : null}
           <ScreenTitle testID="workspace-header-title">{title}</ScreenTitle>
         </View>
       ) : null}
-      {isLoading || isClickUp ? null : (
+      {isLoading || isGumloop ? null : (
         <View style={styles.headerTitleTextGroup}>
           <ScreenTitle testID="workspace-header-title">{title}</ScreenTitle>
           {showSubtitle ? (
@@ -2103,6 +2147,7 @@ function WorkspaceScreenContent({
   const _insets = useSafeAreaInsets();
   const toast = useToast();
   const isMobile = useIsCompactFormFactor();
+  const gumloopDesktop = useGumloopDesktopShell(true);
   const isFocusModeEnabled = usePanelStore((state) => state.desktop.focusModeEnabled);
   const toggleFocusMode = usePanelStore((state) => state.toggleFocusMode);
 
@@ -3883,11 +3928,13 @@ function WorkspaceScreenContent({
   const headerRight = useMemo(
     () => (
       <View style={styles.headerRight}>
+        <GumloopHeaderShare serverId={normalizedServerId} />
         <WorkspaceOrchestrationPanel
           serverId={normalizedServerId}
           workspaceId={normalizedWorkspaceId}
           cwd={workspaceDirectory}
           openOnMount={isRouteFocused && orchestrationRequested}
+          hideLabel={gumloopDesktop}
         />
         {!isMobile &&
         !compactHeader &&
@@ -3919,7 +3966,7 @@ function WorkspaceScreenContent({
               <WorkspaceActions
                 serverId={normalizedServerId}
                 cwd={workspaceDirectory}
-                hideLabels={showCompactButtonLabels}
+                hideLabels={gumloopDesktop || showCompactButtonLabels}
               />
             ) : null}
             {isGitCheckout ? (
@@ -3939,7 +3986,7 @@ function WorkspaceScreenContent({
                       return (
                         <>
                           <ThemedSourceControlPanelIcon size={16} uniProps={colorMapping} />
-                          {workspaceDescriptor?.diffStat ? (
+                          {!gumloopDesktop && workspaceDescriptor?.diffStat ? (
                             <DiffStat
                               additions={workspaceDescriptor.diffStat.additions}
                               deletions={workspaceDescriptor.diffStat.deletions}
@@ -4018,6 +4065,7 @@ function WorkspaceScreenContent({
       </View>
     ),
     [
+      gumloopDesktop,
       isMobile,
       workspaceDescriptor,
       normalizedServerId,
@@ -4187,11 +4235,22 @@ function WorkspaceScreenContent({
   });
   const desktopContent = <DesktopPaneContent paneProps={desktopPaneProps} fallback={content} />;
 
+  const gumloopHeaderTitle = useMemo(
+    () => (
+      <GumloopChatTitle
+        enabled={gumloopDesktop}
+        serverId={normalizedServerId}
+        fallback={workspaceHeaderTitle}
+      />
+    ),
+    [gumloopDesktop, normalizedServerId, workspaceHeaderTitle],
+  );
   const workspaceCenterColumn = (
     <View style={styles.centerColumn}>
       {showScreenHeader && (
-        <ScreenHeader
+        <WorkspaceScreenHeader
           onRowLayout={onHeaderLayout}
+          center={gumloopHeaderTitle}
           left={
             <>
               <SidebarMenuToggle />
@@ -4385,6 +4444,7 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foreground,
     flexShrink: 1,
   },
+  gumloopChatTitle: { fontSize: 18, fontWeight: "500", color: theme.colors.foreground },
   headerTitleContainer: {
     flex: 1,
     flexShrink: 1,
@@ -4419,7 +4479,7 @@ const styles = StyleSheet.create((theme) => ({
       md: theme.spacing[2],
     },
   },
-  clickUpCrumbIcon: {
+  gumloopCrumbIcon: {
     width: 18,
     height: 18,
     borderRadius: theme.borderRadius.base,
@@ -4427,18 +4487,18 @@ const styles = StyleSheet.create((theme) => ({
     justifyContent: "center",
     backgroundColor: theme.chrome.createBackground,
   },
-  clickUpCrumbIconText: {
+  gumloopCrumbIconText: {
     fontSize: 10,
     fontWeight: theme.fontWeight.bold,
     color: theme.chrome.createForeground,
   },
-  clickUpCrumbProject: {
+  gumloopCrumbProject: {
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,
     flexShrink: 1,
     maxWidth: "40%",
   },
-  clickUpCrumbSeparator: {
+  gumloopCrumbSeparator: {
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundExtraMuted,
   },

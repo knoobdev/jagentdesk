@@ -1,3 +1,4 @@
+import type { PluginSidebarViewContribution } from "@jagentdesk/plugin/client";
 import { PluginTranslationRuntime, type PluginLocaleSource } from "@jagentdesk/plugin/client/host";
 import type { PluginText } from "@jagentdesk/plugin/client";
 import { localizePluginContribution, registerTranslatedButton } from "./translations";
@@ -116,10 +117,13 @@ export function runPluginClientBundle(
     runtime.localeSource ?? { getLocale: () => "en", subscribe: () => () => {} },
   );
   const localize = <T extends object>(input: T) => localizePluginContribution(input, translations);
+  const sidebarViews: PluginSidebarViewContribution[] = [];
+  const sidebarViewIds = new Set<string>();
   const collector: Omit<EvaluatedPlugin, "id" | "cleanup"> = {
     workspaceRowBadgeItems: [],
     surfaces: [],
     settingsScreens: [],
+    sidebarViews,
     sidebarItems: [],
     sidebarHeaderItems: [],
     sidebarFooterItems: [],
@@ -259,6 +263,22 @@ export function runPluginClientBundle(
           Component: Component as ComponentType<PluginScreenProps>,
         },
         () => surfaceIds.delete(normalizedId),
+      );
+    },
+    addSidebarView(input) {
+      const contribution = localize(input);
+      const normalizedId = requireId(contribution.id, "sidebar view id");
+      if (sidebarViewIds.has(normalizedId))
+        throw new Error(`Duplicate sidebar view: ${normalizedId}`);
+      if (typeof contribution.Component !== "function")
+        throw new Error(`Sidebar view ${normalizedId} is not a component`);
+      if (!contribution.title.trim()) throw new Error(`Sidebar view ${normalizedId} has no title`);
+      sidebarViewIds.add(normalizedId);
+      return register(
+        sidebarViews,
+        { ...contribution, id: normalizedId },
+        () => sidebarViewIds.delete(normalizedId),
+        contribution,
       );
     },
     addSidebarItem(input: PluginSidebarContribution<PluginText>) {
@@ -538,7 +558,8 @@ export function runPluginClientBundle(
     if (name === "@jagentdesk/plugin/client")
       return {
         ...pluginClientRuntime,
-        useSettings,
+        useSettings: (definition: import("@jagentdesk/plugin").SettingsDefinition) =>
+          useSettings(definition, id),
         openExternalUrl,
         getJAgentDeskClient: (serverId: string) => runtime.hosts.getJAgentDeskClient(serverId),
         useHosts: () =>
@@ -608,6 +629,7 @@ export function runPluginClientBundle(
     workspaceRowBadgeItems: collector.workspaceRowBadgeItems,
     surfaces: collector.surfaces,
     settingsScreens: collector.settingsScreens,
+    sidebarViews,
     sidebarItems: collector.sidebarItems,
     sidebarHeaderItems: collector.sidebarHeaderItems,
     sidebarFooterItems: collector.sidebarFooterItems,

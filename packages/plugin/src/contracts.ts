@@ -59,6 +59,12 @@ export interface PluginAgentSnapshot {
 }
 
 export interface PluginThemeColors {
+  sidebar?: string;
+  surface3?: string;
+  surface4?: string;
+  foregroundExtraMuted?: string;
+  surfaceSidebarHover?: string;
+  surfaceSidebarSelected?: string;
   background: string;
   foreground: string;
   raised: string;

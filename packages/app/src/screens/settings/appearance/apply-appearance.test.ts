@@ -9,7 +9,7 @@ const { updateTheme } = vi.hoisted(() => ({ updateTheme: vi.fn() }));
 vi.mock("react-native-unistyles", () => ({ UnistylesRuntime: { updateTheme } }));
 
 // Every registered Unistyles theme key, in the order applyAppearance patches them — including
-// the ClickUp pair and the two plugin-theme slots, so user fonts/syntax reach those too.
+// the Gumloop pair and the two plugin-theme slots, so user fonts/syntax reach those too.
 const ALL_THEME_KEYS = [
   "light",
   "dark",
@@ -18,8 +18,8 @@ const ALL_THEME_KEYS = [
   "darkClaude",
   "darkGhostty",
   "darkPureBlack",
-  "clickupLight",
-  "clickupDark",
+  "gumloopLight",
+  "gumloopDark",
   "pluginLight",
   "pluginDark",
 ] as const;

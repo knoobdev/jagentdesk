@@ -1,3 +1,4 @@
+import type { SidebarSurfaceBackdrop } from "@/styles/surface-backdrop";
 import { PluginWorkspaceRowBadgeItems } from "@/plugins/workspace-row-badge-items";
 import { memo, useCallback, useId, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -105,10 +106,12 @@ type SidebarWorkspaceScriptIconKind = "service" | "command";
 export function SidebarWorkspaceRowFrame({
   workspace,
   isDragging = false,
+  isEditingTitle = false,
   children,
 }: {
   workspace: SidebarWorkspaceEntry;
   isDragging?: boolean;
+  isEditingTitle?: boolean;
   children: (input: {
     isHovered: boolean;
     contextMenuOpen: boolean;
@@ -119,8 +122,8 @@ export function SidebarWorkspaceRowFrame({
   const [isHovered, setIsHovered] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const handlePointerEnter = useCallback(() => {
-    if (!contextMenuOpen) setIsHovered(true);
-  }, [contextMenuOpen]);
+    if (!contextMenuOpen && !isEditingTitle) setIsHovered(true);
+  }, [contextMenuOpen, isEditingTitle]);
   const handlePointerLeave = useCallback(() => setIsHovered(false), []);
   const handleContextMenuOpenChange = useCallback((open: boolean) => {
     setContextMenuOpen(open);
@@ -150,6 +153,7 @@ export function SidebarWorkspaceRowFrame({
 
 export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowContent({
   workspace,
+  backdrop = "surfaceSidebar",
   hostBadge,
   leadingProjectName = null,
   leadingProjectIconDataUri = null,
@@ -160,9 +164,11 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
   shortcutNumber = null,
   showShortcutBadge = false,
   reserveIdleStatusIndicatorSpace = true,
+  titleEditor = null,
   children,
 }: {
   workspace: SidebarWorkspaceEntry;
+  backdrop?: SidebarSurfaceBackdrop;
   hostBadge?: HostBadgeModel | null;
   /** Hoisted rows use their project icon as the leading visual because no project row contains them. */
   leadingProjectName?: string | null;
@@ -175,6 +181,7 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
   showShortcutBadge?: boolean;
   /** Keep the empty leading slot when the workspace has no active status. */
   reserveIdleStatusIndicatorSpace?: boolean;
+  titleEditor?: ReactNode;
   children?: ReactNode;
 }) {
   const {
@@ -207,6 +214,7 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
       <View style={styles.workspaceRowMain}>
         {leadingProjectName ? (
           <ProjectStatusIndicator
+            backdrop={backdrop}
             iconDataUri={leadingProjectIconDataUri}
             displayName={leadingProjectName}
             projectViewKey={workspace.projectViewKey}
@@ -234,13 +242,17 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
                   showLabel={hostBadge.showLabel}
                 />
               ) : null}
-              <Text
-                style={workspaceBranchTextStyle}
-                numberOfLines={1}
-                testID={`sidebar-workspace-title-${workspace.workspaceKey}`}
-              >
-                {workspaceLabel}
-              </Text>
+              {titleEditor ? (
+                <View style={styles.titleEditor}>{titleEditor}</View>
+              ) : (
+                <Text
+                  style={workspaceBranchTextStyle}
+                  numberOfLines={1}
+                  testID={`sidebar-workspace-title-${workspace.workspaceKey}`}
+                >
+                  {workspaceLabel}
+                </Text>
+              )}
               {scriptIconKind ? <WorkspaceScriptIcon kind={scriptIconKind} /> : null}
             </View>
             <View style={sidebarWorkspaceRowStyles.rowRight}>{children}</View>
@@ -701,6 +713,7 @@ const styles = StyleSheet.create((theme) => ({
   workspaceBranchTextWithAccessory: {
     flexShrink: 1,
   },
+  titleEditor: { flex: 1, height: 20, minWidth: 0 },
   workspaceTitleAccessory: {
     height: 20,
     flexShrink: 0,

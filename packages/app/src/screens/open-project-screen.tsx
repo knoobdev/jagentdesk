@@ -1,3 +1,5 @@
+import { GumloopHome } from "@/components/gumloop-shell/home";
+import { useGumloopDesktopShell } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { useCallback, useEffect, useState, type ComponentType } from "react";
 import { useTranslation } from "react-i18next";
 import { View, Text, Pressable, ScrollView } from "react-native";
@@ -39,12 +41,13 @@ export function OpenProjectScreen() {
   const openPairDeviceModal = usePairDeviceModalStore((state) => state.open);
 
   const isCompactLayout = useIsCompactFormFactor();
+  const gumloop = useGumloopDesktopShell(true);
 
   useEffect(() => {
-    if (!isCompactLayout) {
+    if (!isCompactLayout && !gumloop) {
       openDesktopAgentList();
     }
-  }, [isCompactLayout, openDesktopAgentList]);
+  }, [gumloop, isCompactLayout, openDesktopAgentList]);
 
   const handleOpenPicker = useCallback(() => {
     void openProjectPicker();
@@ -89,6 +92,7 @@ export function OpenProjectScreen() {
     });
   }, [chooseHost, router]);
 
+  if (gumloop) return <GumloopHome />;
   return (
     <View style={styles.container}>
       <MenuHeader borderless />

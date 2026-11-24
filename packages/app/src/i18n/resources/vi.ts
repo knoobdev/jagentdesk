@@ -428,14 +428,14 @@ export const vi = {
           claude: "Claude",
           ghostty: "Ghostty",
           pureBlack: "Đen tuyền",
-          clickup: "ClickUp",
-          clickupDark: "ClickUp Dark",
+          gumloop: "Gumloop",
+          gumloopDark: "Gumloop Dark",
           auto: "Theo hệ thống",
         },
       },
     },
   },
-  clickupShell: {
+  gumloopShell: {
     search: "Tìm kiếm",
     newWorkspace: "Mới",
     workspaces: "Workspace",

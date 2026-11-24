@@ -1,4 +1,4 @@
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { CompactBackButton } from "./compact-back-button";
 import { useCallback, useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -141,11 +141,11 @@ export function WindowSidebarMenuToggle({ style, ...props }: SidebarMenuTogglePr
 }
 
 export function MenuHeader({ title, rightContent, borderless }: MenuHeaderProps) {
-  // Phones with the ClickUp shell reach the drawer from the bottom tab bar, so a page leads with
+  // Phones with the Gumloop shell reach the drawer from the bottom tab bar, so a page leads with
   // a back arrow and a left-aligned title — the same header as the Docker screen.
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const isMobile = useIsCompactFormFactor();
-  const showBack = isClickUp && isMobile;
+  const showBack = isGumloop && isMobile;
   return (
     <ScreenHeader
       left={

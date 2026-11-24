@@ -1,6 +1,7 @@
+import { useDockerNavigation, type DockerTab } from "@/docker/sidebar";
 import { PageHeader } from "@/components/headers/page-header";
-import { clickUpListStyles, clickUpTabStyles } from "@/components/clickup-shell/list-styles";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { gumloopListStyles, gumloopTabStyles } from "@/components/gumloop-shell/list-styles";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Dimensions,
@@ -67,7 +68,6 @@ import type {
 } from "@jagentdesk/protocol/docker/rpc-schemas";
 
 const RUNNING_STATES = new Set(["running", "restarting"]);
-type DockerTab = "containers" | "images" | "volumes";
 type DetailTab = "logs" | "inspect" | "stats" | "files" | "exec";
 
 function randomId(prefix: string): string {
@@ -2011,19 +2011,19 @@ function MetaChip({
   );
 }
 
-/** Table column label: ClickUp's sentence-case gray header, the classic shell's uppercase. */
+/** Table column label: Gumloop's sentence-case gray header, the classic shell's uppercase. */
 function ColumnHead({ label, style }: { label: string; style: StyleProp<TextStyle> }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const resolvedStyle = useMemo(
-    () => (isClickUp ? [style, clickUpListStyles.columnHeader] : style),
-    [isClickUp, style],
+    () => (isGumloop ? [style, gumloopListStyles.columnHeader] : style),
+    [isGumloop, style],
   );
-  return <Text style={resolvedStyle}>{isClickUp ? label : label.toUpperCase()}</Text>;
+  return <Text style={resolvedStyle}>{isGumloop ? label : label.toUpperCase()}</Text>;
 }
 
-// ClickUp tabs are underlined text; the classic shell boxes them in a pill track.
-function detailTabRowStyle(isClickUp: boolean, isCompact: boolean) {
-  if (isClickUp) return clickUpTabStyles.row;
+// Gumloop tabs are underlined text; the classic shell boxes them in a pill track.
+function detailTabRowStyle(isGumloop: boolean, isCompact: boolean) {
+  if (isGumloop) return gumloopTabStyles.row;
   return isCompact ? styles.tabRowWrap : styles.tabRow;
 }
 
@@ -2050,7 +2050,7 @@ function ContainerDetail({
   onAction: (id: string, action: DockerAction) => void;
   onBack: () => void;
 }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const [tab, setTab] = useState<DetailTab>("logs");
   const running = RUNNING_STATES.has(container.state);
   const paused = container.state === "paused";
@@ -2133,7 +2133,7 @@ function ContainerDetail({
       </ScrollView>
 
       <View style={styles.detailTabsWrap}>
-        <View style={detailTabRowStyle(isClickUp, isCompact)}>
+        <View style={detailTabRowStyle(isGumloop, isCompact)}>
           <TabButton label="Logs" active={tab === "logs"} onPress={showLogs} />
           <TabButton label="Stats" active={tab === "stats"} onPress={showStats} />
           <TabButton label="Inspect" active={tab === "inspect"} onPress={showInspect} />
@@ -2156,21 +2156,21 @@ function TabButton({
   active: boolean;
   onPress: () => void;
 }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   return (
-    <Pressable style={dockerTabStyle(isClickUp, active)} onPress={onPress}>
-      <Text style={dockerTabTextStyle(isClickUp, active)}>{label}</Text>
+    <Pressable style={dockerTabStyle(isGumloop, active)} onPress={onPress}>
+      <Text style={dockerTabTextStyle(isGumloop, active)}>{label}</Text>
     </Pressable>
   );
 }
 
-function dockerTabStyle(isClickUp: boolean, active: boolean) {
-  if (isClickUp) return active ? clickUpTabStyles.tabActive : clickUpTabStyles.tab;
+function dockerTabStyle(isGumloop: boolean, active: boolean) {
+  if (isGumloop) return active ? gumloopTabStyles.tabActive : gumloopTabStyles.tab;
   return active ? styles.tabActive : styles.tab;
 }
 
-function dockerTabTextStyle(isClickUp: boolean, active: boolean) {
-  if (isClickUp) return active ? clickUpTabStyles.textActive : clickUpTabStyles.text;
+function dockerTabTextStyle(isGumloop: boolean, active: boolean) {
+  if (isGumloop) return active ? gumloopTabStyles.textActive : gumloopTabStyles.text;
   return active ? styles.tabTextActive : styles.tabText;
 }
 
@@ -2194,7 +2194,7 @@ export function DockerScreen({
   sshDocker,
   hostServerId,
 }: { sshDocker?: SshDockerTarget; hostServerId?: string } = {}) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const hosts = useHosts();
   const serverId = hostServerId ?? hosts[0]?.serverId ?? "";
   const hostClient = useHostRuntimeClient(serverId);
@@ -2214,7 +2214,9 @@ export function DockerScreen({
     [],
   );
 
-  const [tab, setTab] = useState<DockerTab>("containers");
+  const tab = useDockerNavigation((state) => state.tabs[serverId] ?? "containers");
+  const selectTab = useDockerNavigation((state) => state.select);
+  const setTab = useCallback((next: DockerTab) => selectTab(serverId, next), [selectTab, serverId]);
   const [available, setAvailable] = useState(true);
   const [containers, setContainers] = useState<DockerContainer[]>([]);
   const [images, setImages] = useState<DockerImage[]>([]);
@@ -2350,9 +2352,9 @@ export function DockerScreen({
     });
   }, []);
 
-  const showContainers = useCallback(() => setTab("containers"), []);
-  const showImages = useCallback(() => setTab("images"), []);
-  const showVolumes = useCallback(() => setTab("volumes"), []);
+  const showContainers = useCallback(() => setTab("containers"), [setTab]);
+  const showImages = useCallback(() => setTab("images"), [setTab]);
+  const showVolumes = useCallback(() => setTab("volumes"), [setTab]);
   const handleOpen = useCallback((id: string) => setSelectedId(id), []);
   const clearSelected = useCallback(() => setSelectedId(null), []);
 
@@ -2435,7 +2437,7 @@ export function DockerScreen({
         ) : (
           <>
             <View style={styles.toolbar}>
-              <View style={isClickUp ? clickUpTabStyles.row : styles.tabRow}>
+              <View style={isGumloop ? gumloopTabStyles.row : styles.tabRow}>
                 <TabButton
                   label={`Containers · ${containers.length}`}
                   active={tab === "containers"}
@@ -2631,9 +2633,9 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     gap: theme.spacing[1.5],
     paddingHorizontal: theme.spacing[2],
-    height: 34,
+    height: theme.chrome.searchHeight,
     minWidth: 180,
-    borderRadius: theme.borderRadius.md,
+    borderRadius: theme.chrome.searchRadius,
     borderWidth: theme.borderWidth[1],
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surface1,
@@ -2644,7 +2646,7 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foreground,
   },
   sectionCard: {
-    borderRadius: theme.borderRadius.lg,
+    borderRadius: theme.chrome.cardRadius,
     borderWidth: theme.borderWidth[1],
     borderColor: theme.colors.border,
     overflow: "hidden",
@@ -2700,6 +2702,7 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foregroundMuted,
   },
   trow: {
+    minHeight: theme.chrome.tableRowHeight,
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],

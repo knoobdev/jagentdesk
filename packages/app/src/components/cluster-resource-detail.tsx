@@ -16,8 +16,8 @@ import { createMessageSubmissionWriter } from "@/composer/submission/writer";
 import { prepareTurnSkills } from "@/skills/turn-skills";
 import { useClusterChatStore } from "@/stores/cluster-chat-store";
 import type { Theme } from "@/styles/theme";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
-import { clickUpChipStyles } from "@/components/clickup-shell/list-styles";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { gumloopChipStyles } from "@/components/gumloop-shell/list-styles";
 
 const ThemedX = withUnistyles(X);
 const ThemedSparkles = withUnistyles(Sparkles);
@@ -1240,33 +1240,33 @@ function YamlViewButtons({
   );
 }
 
-/** Section caption ("YAML", "Logs"): uppercase in classic, sentence-case ink in ClickUp. */
-function sectionLabelStyle(isClickUp: boolean) {
-  return isClickUp
-    ? [styles.yamlSectionLabel, styles.sectionLabelClickUp]
+/** Section caption ("YAML", "Logs"): uppercase in classic, sentence-case ink in Gumloop. */
+function sectionLabelStyle(isGumloop: boolean) {
+  return isGumloop
+    ? [styles.yamlSectionLabel, styles.sectionLabelGumloop]
     : styles.yamlSectionLabel;
 }
 
-/** Log container picker: ClickUp's filter chips replace the accent-filled classic chips. */
-function containerChipStyle(isClickUp: boolean, active: boolean) {
-  if (!isClickUp) return [styles.containerChip, active && styles.containerChipActive];
-  return active ? clickUpChipStyles.chipActive : clickUpChipStyles.chip;
+/** Log container picker: Gumloop's filter chips replace the accent-filled classic chips. */
+function containerChipStyle(isGumloop: boolean, active: boolean) {
+  if (!isGumloop) return [styles.containerChip, active && styles.containerChipActive];
+  return active ? gumloopChipStyles.chipActive : gumloopChipStyles.chip;
 }
 
-function containerChipTextStyle(isClickUp: boolean, active: boolean) {
-  if (!isClickUp) return [styles.containerChipText, active && styles.containerChipTextActive];
-  return active ? clickUpChipStyles.textActive : clickUpChipStyles.text;
+function containerChipTextStyle(isGumloop: boolean, active: boolean) {
+  if (!isGumloop) return [styles.containerChipText, active && styles.containerChipTextActive];
+  return active ? gumloopChipStyles.textActive : gumloopChipStyles.text;
 }
 
-/** Follow / Timestamps toggles read as chips in ClickUp (lavender when on). */
-function logToggleStyle(isClickUp: boolean, on: boolean) {
-  if (!isClickUp) return on ? styles.followButtonActive : styles.followButton;
-  return on ? clickUpChipStyles.chipActive : clickUpChipStyles.chip;
+/** Follow / Timestamps toggles read as chips in Gumloop (lavender when on). */
+function logToggleStyle(isGumloop: boolean, on: boolean) {
+  if (!isGumloop) return on ? styles.followButtonActive : styles.followButton;
+  return on ? gumloopChipStyles.chipActive : gumloopChipStyles.chip;
 }
 
-function logToggleTextStyle(isClickUp: boolean, on: boolean) {
-  if (!isClickUp) return on ? styles.followButtonTextActive : styles.followButtonText;
-  return on ? clickUpChipStyles.textActive : clickUpChipStyles.text;
+function logToggleTextStyle(isGumloop: boolean, on: boolean) {
+  if (!isGumloop) return on ? styles.followButtonTextActive : styles.followButtonText;
+  return on ? gumloopChipStyles.textActive : gumloopChipStyles.text;
 }
 
 function DetailMainView({
@@ -1282,12 +1282,12 @@ function DetailMainView({
   yamlBody: ReactNode;
   overviewBody: ReactNode;
 }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   if (!visible) return null;
   if (showYaml) {
     return (
       <View style={styles.yamlContainer}>
-        <Text style={sectionLabelStyle(isClickUp)}>{editing ? "Edit YAML" : "YAML"}</Text>
+        <Text style={sectionLabelStyle(isGumloop)}>{editing ? "Edit YAML" : "YAML"}</Text>
         {yamlBody}
       </View>
     );
@@ -1353,7 +1353,7 @@ function ResourceDetailBody({
   handleStopPortForward,
 }: ResourceDetailBodyProps) {
   const handleCancelPfInput = useCallback(() => setPfShowInput(false), [setPfShowInput]);
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
 
   return (
     <>
@@ -1427,18 +1427,18 @@ function ResourceDetailBody({
       {showLogs ? (
         <View style={styles.logsContainer}>
           <View style={styles.logsHeader}>
-            <Text style={sectionLabelStyle(isClickUp)}>Logs</Text>
+            <Text style={sectionLabelStyle(isGumloop)}>Logs</Text>
             <View style={styles.logsHeaderRight}>
               {containers.length > 1 ? (
                 <View style={styles.containerSelector}>
                   {containers.map((c) => (
                     <Pressable
                       key={c}
-                      style={containerChipStyle(isClickUp, selectedContainer === c)}
+                      style={containerChipStyle(isGumloop, selectedContainer === c)}
                       // eslint-disable-next-line react-perf/jsx-no-new-function-as-prop
                       onPress={() => handleSelectContainer(c)}
                     >
-                      <Text style={containerChipTextStyle(isClickUp, selectedContainer === c)}>
+                      <Text style={containerChipTextStyle(isGumloop, selectedContainer === c)}>
                         {c}
                       </Text>
                     </Pressable>
@@ -1446,10 +1446,10 @@ function ResourceDetailBody({
                 </View>
               ) : null}
               <Pressable
-                style={logToggleStyle(isClickUp, followEnabled)}
+                style={logToggleStyle(isGumloop, followEnabled)}
                 onPress={handleToggleFollow}
               >
-                <Text style={logToggleTextStyle(isClickUp, followEnabled)}>
+                <Text style={logToggleTextStyle(isGumloop, followEnabled)}>
                   {followEnabled ? "Follow" : "Follow"}
                 </Text>
               </Pressable>
@@ -1465,10 +1465,10 @@ function ResourceDetailBody({
                 </Pressable>
               ) : null}
               <Pressable
-                style={logToggleStyle(isClickUp, logTimestamps)}
+                style={logToggleStyle(isGumloop, logTimestamps)}
                 onPress={handleToggleTimestamps}
               >
-                <Text style={logToggleTextStyle(isClickUp, logTimestamps)}>Timestamps</Text>
+                <Text style={logToggleTextStyle(isGumloop, logTimestamps)}>Timestamps</Text>
               </Pressable>
               {canDownloadLogs ? (
                 <Pressable style={styles.refreshButton} onPress={handleDownloadLogs}>
@@ -1687,7 +1687,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     letterSpacing: 0.5,
     marginBottom: theme.spacing[2],
   },
-  sectionLabelClickUp: {
+  sectionLabelGumloop: {
     fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.semibold,
     color: theme.chrome.sectionTitleColor,

@@ -6,11 +6,11 @@ import * as Haptics from "expo-haptics";
 import { DEFAULT_CLIENT_SETTINGS, type SendShortcut } from "@/hooks/use-settings";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
-  CLICKUP_COMPOSER_RADIUS,
-  ClickUpComposerFrame,
-  ClickUpSendGradient,
-} from "@/components/clickup-shell/composer-frame";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+  GUMLOOP_COMPOSER_RADIUS,
+  GumloopComposerFrame,
+  GumloopSendGradient,
+} from "@/components/gumloop-shell/composer-frame";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import {
   View,
   Text,
@@ -845,7 +845,7 @@ function SendButtonTooltip({
         testID={submitButtonTestID}
         style={sendButtonCombinedStyle}
       >
-        {gradient && !isSendButtonDisabled ? <ClickUpSendGradient /> : null}
+        {gradient && !isSendButtonDisabled ? <GumloopSendGradient /> : null}
         {/* Positioned so the icon paints above the absolutely filled gradient. */}
         <View style={styles.sendButtonIconLayer}>
           <SendButtonContent
@@ -1814,15 +1814,15 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       void handleStopRealtimeVoice();
     }, [handleStopRealtimeVoice]);
 
-    const isClickUp = useIsClickUpTheme();
+    const isGumloop = useIsGumloopTheme();
     const inputWrapperCombinedStyle = useMemo(
       () => [
         styles.inputWrapper,
-        isClickUp && styles.inputWrapperClickUp,
+        isGumloop && styles.inputWrapperGumloop,
         inputWrapperStyle,
         { opacity: surfacePresentation.input.opacity },
       ],
-      [inputWrapperStyle, isClickUp, surfacePresentation.input.opacity],
+      [inputWrapperStyle, isGumloop, surfacePresentation.input.opacity],
     );
     const focusHint = useFocusHint({
       isPaneFocused,
@@ -1844,10 +1844,10 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
     const sendButtonCombinedStyle = useMemo(
       () => [
         styles.sendButton,
-        isClickUp && styles.sendButtonClickUp,
+        isGumloop && styles.sendButtonGumloop,
         isSendButtonDisabled && styles.buttonDisabled,
       ],
-      [isClickUp, isSendButtonDisabled],
+      [isGumloop, isSendButtonDisabled],
     );
     const overlayContainerStyle = useMemo(
       () => [styles.overlayContainer, { opacity: surfacePresentation.overlay.opacity }],
@@ -1879,8 +1879,8 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
 
     return (
       <View ref={rootRef} style={styles.container} testID="message-input-root">
-        {/* Regular input; the ClickUp theme frames it with ClickUp Brain's gradient border */}
-        <ClickUpComposerFrame enabled={isClickUp}>
+        {/* Regular input; the Gumloop theme frames it with Gumloop Brain's gradient border */}
+        <GumloopComposerFrame enabled={isGumloop}>
           <View
             ref={inputWrapperRef}
             style={inputWrapperCombinedStyle}
@@ -1964,12 +1964,12 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
                   buttonIconSize={buttonIconSize}
                   sendKeys={resolveSendKeys(sendShortcut)}
                   sendTooltipLabel={sendTooltipLabel}
-                  gradient={isClickUp}
+                  gradient={isGumloop}
                 />
               </View>
             </View>
           </View>
-        </ClickUpComposerFrame>
+        </GumloopComposerFrame>
 
         <View
           style={overlayContainerStyle}
@@ -2025,11 +2025,13 @@ const styles = StyleSheet.create((theme: Theme) => ({
         }
       : {}),
   },
-  // Inside ClickUpComposerFrame the gradient is the border, so the box drops its own.
-  inputWrapperClickUp: {
+  // Inside GumloopComposerFrame the gradient is the border, so the box drops its own.
+  inputWrapperGumloop: {
     borderWidth: 0,
-    borderRadius: CLICKUP_COMPOSER_RADIUS,
-    backgroundColor: theme.colors.surface0,
+    borderRadius: GUMLOOP_COMPOSER_RADIUS,
+    backgroundColor: theme.colors.surface1,
+    minHeight: { xs: 96, md: 156 },
+    justifyContent: "space-between",
   },
   textInputScrollWrapper: {
     position: "relative",
@@ -2116,14 +2118,16 @@ const styles = StyleSheet.create((theme: Theme) => ({
     justifyContent: "center",
     marginLeft: theme.spacing[1],
   },
-  // ClickUp Brain: a rounded square whose violet → magenta fill is drawn by ClickUpSendGradient.
+  // The send painter is theme reactive without subscribing the composer model.
   sendButtonIconLayer: {
     position: "relative",
     alignItems: "center",
     justifyContent: "center",
   },
-  sendButtonClickUp: {
-    borderRadius: theme.borderRadius.md,
+  sendButtonGumloop: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     overflow: "hidden",
   },
   iconButtonHovered: {
@@ -2192,5 +2196,6 @@ const iconForegroundMapping = (theme: Theme) => ({ color: theme.colors.foregroun
 const iconForegroundMutedMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const iconAccentForegroundMapping = (theme: Theme) => ({ color: theme.colors.accentForeground });
 const textInputPlaceholderColorMapping = (theme: Theme) => ({
-  placeholderTextColor: theme.colors.surface4,
+  placeholderTextColor:
+    theme.chrome.kind === "gumloop" ? theme.colors.foregroundMuted : theme.colors.surface4,
 });

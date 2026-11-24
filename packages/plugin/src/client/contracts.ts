@@ -1,3 +1,4 @@
+import type { WorkspaceRef, AgentRef, ProjectRef, TerminalRef } from "../refs.js";
 import type { PluginText } from "../text.js";
 import type { PluginIconProps, PluginSerializableIcon } from "../icons.js";
 import type { PluginFile, PluginFileLocation } from "./file.js";
@@ -100,6 +101,23 @@ export interface PluginSidebarItemContribution<Text extends PluginText = string>
   /** Settings row label, accessibility label, and default label for SidebarRow. */
   title: Text;
   Component: ComponentType<PluginSidebarItemProps>;
+}
+
+export interface PluginSidebarViewProps extends Pick<PluginHostProps, "theme" | "layout"> {
+  active: { workspace: WorkspaceRef | null; agent: AgentRef | null };
+  navigation: {
+    openWorkspace(ref: WorkspaceRef): void;
+    openAgent(ref: AgentRef): void;
+    openTerminal(ref: TerminalRef): void;
+    openProject(ref: ProjectRef): void;
+  };
+  dismiss(): void;
+}
+export interface PluginSidebarViewContribution<Text extends PluginText = string> {
+  id: string;
+  title: Text;
+  description?: Text;
+  Component: ComponentType<PluginSidebarViewProps>;
 }
 
 export interface PluginWorkspaceRowBadgeItemProps extends PluginHostProps {
@@ -206,6 +224,7 @@ export interface PluginClientContext extends PluginCommandCapabilities {
     contribution: PluginComposerPillContribution<PluginText>,
   ): PluginButtonRegistration<PluginText>;
   addAttachmentSource(contribution: PluginAttachmentSourceContribution<PluginText>): PluginCleanup;
+  addSidebarView(contribution: PluginSidebarViewContribution<PluginText>): PluginCleanup;
   addTheme(contribution: PluginThemeContribution<PluginText>): PluginCleanup;
   addTimelineTransformer<ItemType extends AgentTimelineItem["type"]>(
     contribution: PluginTimelineTransformerContribution<ItemType>,

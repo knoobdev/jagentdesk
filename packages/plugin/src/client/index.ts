@@ -17,6 +17,8 @@ export type {
   PluginOpenScreenInput,
   PluginScreenContribution,
   PluginSidebarItemProps,
+  PluginSidebarViewProps,
+  PluginSidebarViewContribution,
   PluginSidebarItemContribution,
   PluginPopoverProps,
   PluginSurfaceProps,
@@ -93,3 +95,5 @@ export { useTabState } from "./tab.js";
 export { defineTranslations, useTranslation } from "./translations.js";
 export type { PluginI18n } from "./translations.js";
 export type { PluginText, PluginMessage, PluginTranslations } from "../text.js";
+
+export type { WorkspaceRef, AgentRef, ProjectRef, TerminalRef } from "../refs.js";

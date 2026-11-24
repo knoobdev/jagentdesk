@@ -4,8 +4,8 @@ import { StyleSheet } from "react-native-unistyles";
 import type { QueryResult } from "@jagentdesk/protocol/database/rpc-schemas";
 import type { Theme } from "@/styles/theme";
 import { GridScroll } from "@/components/database-grid-scroll";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
-import { clickUpListStyles } from "@/components/clickup-shell/list-styles";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { gumloopListStyles } from "@/components/gumloop-shell/list-styles";
 
 const MIN_COL_WIDTH = 120;
 const MAX_COL_WIDTH = 320;
@@ -18,9 +18,9 @@ const GUTTER_WIDTH = 56;
  * (viewport-edge scrollbars + pinned header on web), a row-number gutter, and column
  * widths estimated from the header + a sample of cells so wide values stay legible.
  */
-/** Classic zebra-stripes the grid; ClickUp separates rows with its hairline divider only. */
-function rowStripe(isClickUp: boolean, r: number) {
-  if (isClickUp) return clickUpListStyles.row;
+/** Classic zebra-stripes the grid; Gumloop separates rows with its hairline divider only. */
+function rowStripe(isGumloop: boolean, r: number) {
+  if (isGumloop) return gumloopListStyles.row;
   return r % 2 === 1 && styles.bodyRowAlt;
 }
 
@@ -48,7 +48,7 @@ export function DatabaseResultTable({
     });
   }, [result]);
   const totalWidth = useMemo(() => GUTTER_WIDTH + widths.reduce((sum, w) => sum + w, 0), [widths]);
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
 
   const header = useMemo(
     () => (
@@ -59,7 +59,7 @@ export function DatabaseResultTable({
         {result.columns.map((col, i) => (
           <View key={col.name} style={[styles.headerCell, { width: widths[i] }]}>
             <Text
-              style={[styles.headerText, isClickUp && clickUpListStyles.columnHeader]}
+              style={[styles.headerText, isGumloop && gumloopListStyles.columnHeader]}
               numberOfLines={1}
             >
               {col.name}
@@ -73,7 +73,7 @@ export function DatabaseResultTable({
         ))}
       </View>
     ),
-    [totalWidth, result.columns, widths, isClickUp],
+    [totalWidth, result.columns, widths, isGumloop],
   );
 
   return (
@@ -82,7 +82,7 @@ export function DatabaseResultTable({
         // Rows are positional (no stable PK in an arbitrary result set), so the row
         // index is the correct key here.
         // eslint-disable-next-line react/no-array-index-key
-        <View key={r} style={[styles.bodyRow, { width: totalWidth }, rowStripe(isClickUp, r)]}>
+        <View key={r} style={[styles.bodyRow, { width: totalWidth }, rowStripe(isGumloop, r)]}>
           <View style={[styles.gutterCell, styles.bodyCell]}>
             <Text style={styles.gutterText}>{startRow + r}</Text>
           </View>

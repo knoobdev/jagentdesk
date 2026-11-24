@@ -2,9 +2,8 @@ import { useDisclosureHold } from "@/agent-stream/disclosure";
 import { useTargetAgentTitle } from "@/tool-calls/use-target-agent-title";
 import { useBuiltinPluginEnabled } from "@/plugins/builtin/hooks";
 import type { AgentMessage } from "@jagentdesk/protocol/agent-message";
-import { ClickUpUserHeader } from "@/components/clickup-shell/chat-headers";
-import { CLICKUP_MESSAGE_INDENT } from "@/components/clickup-shell/chat-layout";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { GUMLOOP_MESSAGE_INDENT } from "@/components/gumloop-shell/chat-layout";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { SpecModeMessageBody, specModeBubbleText } from "@/spec-mode/message-body";
 import { parseSpecModeMessage, type SpecModeMessage } from "@jagentdesk/protocol/spec-mode";
@@ -421,18 +420,19 @@ const userMessageStylesheet = StyleSheet.create((theme) => ({
     color: theme.colors.foregroundMuted,
     fontSize: STREAM_METADATA_FONT_SIZE,
   },
-  containerClickUp: {
+  gumloopBubble: { backgroundColor: theme.colors.surface2, borderRadius: 12 },
+  containerGumloop: {
     justifyContent: "flex-start",
   },
-  contentClickUp: {
+  contentGumloop: {
     flex: 1,
     minWidth: 0,
     cursor: "auto",
   },
-  bodyClickUp: {
-    paddingLeft: CLICKUP_MESSAGE_INDENT,
+  bodyGumloop: {
+    paddingLeft: GUMLOOP_MESSAGE_INDENT,
   },
-  actionsClickUp: {
+  actionsGumloop: {
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[1],
@@ -578,20 +578,7 @@ export const UserMessage = memo(function UserMessage({
     ],
     [hasText],
   );
-  const isClickUp = useIsClickUpTheme();
-  const clickUpContainerStyle = useMemo(
-    () => [containerStyle, userMessageStylesheet.containerClickUp],
-    [containerStyle],
-  );
-  const clickUpActionsStyle = useMemo(
-    () => [
-      userMessageStylesheet.actionsClickUp,
-      showTrailingRow
-        ? userMessageStylesheet.trailingRowVisible
-        : userMessageStylesheet.trailingRowHidden,
-    ],
-    [showTrailingRow],
-  );
+  const isGumloop = useIsGumloopTheme();
   const trailingRowStyle = useMemo(
     () => [
       userMessageStylesheet.trailingRow,
@@ -651,38 +638,6 @@ export const UserMessage = memo(function UserMessage({
       />
     ) : null;
 
-  if (isClickUp) {
-    // ClickUp chat: left-aligned message under an avatar + "You" + time header, no bubble.
-    return (
-      <View style={clickUpContainerStyle} testID="user-message" aria-busy={isPending}>
-        <View
-          style={userMessageStylesheet.contentClickUp}
-          onPointerEnter={handlePointerEnter}
-          onPointerLeave={handlePointerLeave}
-        >
-          <ClickUpUserHeader time={formattedTimestamp}>
-            {hasText ? (
-              <View
-                style={clickUpActionsStyle}
-                pointerEvents={showTrailingRow ? "auto" : "none"}
-                testID="user-message-trailing-row"
-              >
-                {actions}
-                <TurnCopyButton
-                  getContent={getMessageContent}
-                  containerStyle={userMessageStylesheet.copyButton}
-                  accessibilityLabel={t("message.actions.copyMessage")}
-                />
-              </View>
-            ) : null}
-          </ClickUpUserHeader>
-          <View style={userMessageStylesheet.bodyClickUp}>{bodyContent}</View>
-        </View>
-        <AttachmentLightbox source={lightboxSource} onClose={handleLightboxClose} />
-      </View>
-    );
-  }
-
   return (
     <View style={containerStyle} testID="user-message" aria-busy={isPending}>
       <View
@@ -690,7 +645,11 @@ export const UserMessage = memo(function UserMessage({
         onPointerEnter={handlePointerEnter}
         onPointerLeave={handlePointerLeave}
       >
-        <View style={userMessageStylesheet.bubble}>{bodyContent}</View>
+        <View
+          style={[userMessageStylesheet.bubble, isGumloop && userMessageStylesheet.gumloopBubble]}
+        >
+          {bodyContent}
+        </View>
         {hasText ? (
           <View
             style={trailingRowStyle}

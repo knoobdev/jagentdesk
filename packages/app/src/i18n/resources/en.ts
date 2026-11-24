@@ -2185,8 +2185,8 @@ export const en = {
           claude: "Claude",
           ghostty: "Ghostty",
           pureBlack: "Pure black",
-          clickup: "ClickUp",
-          clickupDark: "ClickUp Dark",
+          gumloop: "Gumloop",
+          gumloopDark: "Gumloop Dark",
           auto: "System",
         },
       },
@@ -2790,7 +2790,7 @@ export const en = {
       },
     },
   },
-  clickupShell: {
+  gumloopShell: {
     search: "Search",
     newWorkspace: "New",
     workspaces: "Workspaces",

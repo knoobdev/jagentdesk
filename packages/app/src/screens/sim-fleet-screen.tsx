@@ -40,7 +40,7 @@ import {
   needsControlSwitch,
   useDeviceScreen,
 } from "@/screens/sim-phone";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useSessionStore } from "@/stores/session-store";
 import { SideloadPane } from "@/screens/sideload/sideload-pane";
@@ -94,12 +94,12 @@ function DeviceTile({
   const gated = isHubDevice(device);
   const select = useCallback(() => onSelect(device.udid), [device.udid, onSelect]);
   const boot = useCallback(() => onBoot(device.udid), [device.udid, onBoot]);
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
 
   return (
     <Pressable
       onPress={select}
-      style={[styles.card, selected ? selectedCardStyle(isClickUp) : null]}
+      style={[styles.card, selected ? selectedCardStyle(isGumloop) : null]}
       accessibilityRole="button"
       accessibilityLabel={`${gated ? "Device" : "Simulator"} ${device.name}`}
       testID={`sim-tile-${device.udid}`}
@@ -154,9 +154,9 @@ function DeviceBadges({ device }: { device: SimDevice }) {
   );
 }
 
-// ClickUp marks the selected tile with its lavender/violet selection instead of the accent border.
-function selectedCardStyle(isClickUp: boolean) {
-  return isClickUp ? styles.cardSelectedClickUp : styles.cardSelected;
+// Gumloop marks the selected tile with its lavender/violet selection instead of the accent border.
+function selectedCardStyle(isGumloop: boolean) {
+  return isGumloop ? styles.cardSelectedGumloop : styles.cardSelected;
 }
 
 // First tile of the grid: always in view, same footprint as a device card.
@@ -754,7 +754,7 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.sm,
   },
-  // chrome card tokens: classic themes carry surface1 / lg / border, ClickUp white / 10 / #ececec.
+  // chrome card tokens: classic themes carry surface1 / lg / border, Gumloop white / 10 / #ececec.
   card: {
     width: CARD_W,
     backgroundColor: theme.chrome.cardBackground,
@@ -765,7 +765,7 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[2],
   },
   cardSelected: { borderColor: theme.colors.accent, backgroundColor: theme.colors.surface2 },
-  cardSelectedClickUp: {
+  cardSelectedGumloop: {
     borderColor: theme.chrome.chipActiveForeground,
     backgroundColor: theme.chrome.chipActiveBackground,
   },

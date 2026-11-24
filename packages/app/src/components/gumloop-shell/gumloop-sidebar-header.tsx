@@ -17,10 +17,10 @@ function createButtonStyle({
 }
 
 /**
- * ClickUp's sidebar header ("Home" + violet "Create" in ClickUp): the section title and the
+ * Gumloop's sidebar header ("Home" + violet "Create" in Gumloop): the section title and the
  * primary create action, here a new workspace. The nav list itself lives on the rail.
  */
-export function ClickUpSidebarHeader({
+export function GumloopSidebarHeader({
   onBeforeNavigate,
   reserveCloseButton = false,
 }: {
@@ -34,7 +34,7 @@ export function ClickUpSidebarHeader({
     () => (
       <>
         <ThemedPlus size={14} strokeWidth={2.4} uniProps={createForegroundMapping} />
-        <Text style={styles.createText}>{t("clickupShell.newWorkspace")}</Text>
+        <Text style={styles.createText}>{t("gumloopShell.newWorkspace")}</Text>
       </>
     ),
     [t],
@@ -42,7 +42,7 @@ export function ClickUpSidebarHeader({
   return (
     <View style={reserveCloseButton ? styles.headerBesideClose : styles.header}>
       <Text style={styles.title} numberOfLines={1}>
-        {t("clickupShell.workspaces")}
+        {t("gumloopShell.workspaces")}
       </Text>
       <Pressable
         onPress={handleNewWorkspace}

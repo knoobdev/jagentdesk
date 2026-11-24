@@ -37,29 +37,45 @@ function makeDeps(
 }
 
 describe("loadAppSettingsFromStorage", () => {
-  it("defaults theme to ClickUp when storage is empty", async () => {
+  it("defaults theme to Gumloop when storage is empty", async () => {
     const deps = makeDeps();
 
     const result = await loadAppSettingsFromStorage(deps);
 
-    expect(result.theme).toBe("clickup");
+    expect(result.theme).toBe("gumloop");
   });
 
-  it("moves a settings file still on the old default (auto) to ClickUp once", async () => {
+  it("moves a settings file still on the old default (auto) to Gumloop once", async () => {
     const legacy = makeDeps({
       storage: createInMemoryKeyValueStorage({
         [APP_SETTINGS_KEY]: JSON.stringify({ theme: "auto" }),
       }),
     });
-    expect((await loadAppSettingsFromStorage(legacy)).theme).toBe("clickup");
+    expect((await loadAppSettingsFromStorage(legacy)).theme).toBe("gumloop");
 
     // After the move, choosing System again is kept.
     const chosen = makeDeps({
       storage: createInMemoryKeyValueStorage({
-        [APP_SETTINGS_KEY]: JSON.stringify({ theme: "auto", defaultThemeVersion: 1 }),
+        [APP_SETTINGS_KEY]: JSON.stringify({ theme: "auto", defaultThemeVersion: 2 }),
       }),
     });
     expect((await loadAppSettingsFromStorage(chosen)).theme).toBe("auto");
+  });
+
+  it.each([
+    ["clickup", "gumloop"],
+    ["clickupDark", "gumloopDark"],
+    ["auto", "gumloop"],
+  ])("migrates %s once and persists %s", async (before, after) => {
+    const deps = makeDeps({
+      storage: createInMemoryKeyValueStorage({
+        [APP_SETTINGS_KEY]: JSON.stringify({ theme: before, defaultThemeVersion: 1 }),
+      }),
+    });
+    expect((await loadAppSettingsFromStorage(deps)).theme).toBe(after);
+    const saved = JSON.parse(deps.storage.entries.get(APP_SETTINGS_KEY)!);
+    expect(saved).toMatchObject({ theme: after, defaultThemeVersion: 2 });
+    expect(await loadAppSettingsFromStorage(deps)).toEqual(saved);
   });
 
   it("keeps a theme the user picked and a selected plugin theme", async () => {

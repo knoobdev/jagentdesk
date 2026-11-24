@@ -179,5 +179,3 @@ export function formatDuration(durationMs: number): string {
 export function formatTimeOfDay(date: Date): string {
   return getTimeFormatter().format(date);
 }
-
-export type RelativeTimeResolution = "minute" | "hour" | "day" | "static";

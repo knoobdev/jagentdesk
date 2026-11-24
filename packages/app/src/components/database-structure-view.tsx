@@ -11,8 +11,8 @@ import { useDatabaseViewStore } from "@/stores/database-view-store";
 import { buildCreateTableDdl } from "@/utils/sql-ddl";
 import { Skeleton, useSkeletonPulse } from "@/components/ui/skeleton";
 import type { Theme } from "@/styles/theme";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
-import { clickUpListStyles, clickUpTabStyles } from "@/components/clickup-shell/list-styles";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { gumloopListStyles, gumloopTabStyles } from "@/components/gumloop-shell/list-styles";
 
 type Tab = "columns" | "ddl" | "relationships";
 
@@ -22,33 +22,33 @@ function keyLabel(c: DbColumn): string {
   return "";
 }
 
-/** Columns / DDL / Relationships: pill tabs in classic, underlined text tabs in ClickUp. */
-function tabStyle(isClickUp: boolean, active: boolean) {
-  if (!isClickUp) return [styles.tab, active && styles.tabActive];
-  return active ? clickUpTabStyles.tabActive : clickUpTabStyles.tab;
+/** Columns / DDL / Relationships: pill tabs in classic, underlined text tabs in Gumloop. */
+function tabStyle(isGumloop: boolean, active: boolean) {
+  if (!isGumloop) return [styles.tab, active && styles.tabActive];
+  return active ? gumloopTabStyles.tabActive : gumloopTabStyles.tab;
 }
 
-function tabTextStyle(isClickUp: boolean, active: boolean) {
-  if (!isClickUp) return [styles.tabText, active && styles.tabTextActive];
-  return active ? clickUpTabStyles.textActive : clickUpTabStyles.text;
+function tabTextStyle(isGumloop: boolean, active: boolean) {
+  if (!isGumloop) return [styles.tabText, active && styles.tabTextActive];
+  return active ? gumloopTabStyles.textActive : gumloopTabStyles.text;
 }
 
-/** ClickUp rows are separated by a hairline only; classic keeps the zebra stripe. */
-function gridRowStyle(isClickUp: boolean, alt: boolean) {
-  if (!isClickUp) return [styles.gridRow, alt && styles.gridRowAlt];
-  return [styles.gridRow, clickUpListStyles.row];
+/** Gumloop rows are separated by a hairline only; classic keeps the zebra stripe. */
+function gridRowStyle(isGumloop: boolean, alt: boolean) {
+  if (!isGumloop) return [styles.gridRow, alt && styles.gridRowAlt];
+  return [styles.gridRow, gumloopListStyles.row];
 }
 
-function relHeaderStyle(isClickUp: boolean) {
-  return isClickUp ? [styles.relHeader, styles.relHeaderClickUp] : styles.relHeader;
+function relHeaderStyle(isGumloop: boolean) {
+  return isGumloop ? [styles.relHeader, styles.relHeaderGumloop] : styles.relHeader;
 }
 
-function GridHeader({ isClickUp }: { isClickUp: boolean }) {
-  const head = isClickUp
-    ? [styles.gridHeadText, clickUpListStyles.columnHeader]
+function GridHeader({ isGumloop }: { isGumloop: boolean }) {
+  const head = isGumloop
+    ? [styles.gridHeadText, gumloopListStyles.columnHeader]
     : styles.gridHeadText;
   return (
-    <View style={isClickUp ? styles.gridHeaderClickUp : styles.gridHeader}>
+    <View style={isGumloop ? styles.gridHeaderGumloop : styles.gridHeader}>
       <Text style={[head, styles.cIdx]}>#</Text>
       <Text style={[head, styles.cName]}>Name</Text>
       <Text style={[head, styles.cType]}>Type</Text>
@@ -78,7 +78,7 @@ export function DatabaseStructureView({
   table: string;
 }) {
   const client = useHostRuntimeClient(serverId);
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const listRefreshKey = useDatabaseViewStore((s) => s.listRefreshKey);
   const [columns, setColumns] = useState<DbColumn[]>([]);
   const [fks, setFks] = useState<DbForeignKey[]>([]);
@@ -130,9 +130,9 @@ export function DatabaseStructureView({
       <ScrollView style={styles.gridV}>
         <ScrollView horizontal contentContainerStyle={styles.gridVContent}>
           <View>
-            <GridHeader isClickUp={isClickUp} />
+            <GridHeader isGumloop={isGumloop} />
             {columns.map((c, i) => (
-              <View key={c.name} style={gridRowStyle(isClickUp, i % 2 === 1)}>
+              <View key={c.name} style={gridRowStyle(isGumloop, i % 2 === 1)}>
                 <Text style={[styles.cIdx, styles.gridMuted]}>{i + 1}</Text>
                 <Text style={[styles.cName, styles.gridName]} numberOfLines={1}>
                   {c.name}
@@ -162,7 +162,7 @@ export function DatabaseStructureView({
   } else {
     body = (
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-        <Text style={relHeaderStyle(isClickUp)}>References (outgoing)</Text>
+        <Text style={relHeaderStyle(isGumloop)}>References (outgoing)</Text>
         {outgoing.length === 0 ? (
           <Text style={styles.relEmpty}>None.</Text>
         ) : (
@@ -172,7 +172,7 @@ export function DatabaseStructureView({
             </Text>
           ))
         )}
-        <Text style={relHeaderStyle(isClickUp)}>Referenced by (incoming)</Text>
+        <Text style={relHeaderStyle(isGumloop)}>Referenced by (incoming)</Text>
         {incoming.length === 0 ? (
           <Text style={styles.relEmpty}>None.</Text>
         ) : (
@@ -188,15 +188,15 @@ export function DatabaseStructureView({
 
   return (
     <View style={styles.container}>
-      <View style={isClickUp ? styles.tabsClickUp : styles.tabs}>
-        <Pressable style={tabStyle(isClickUp, tab === "columns")} onPress={showColumns}>
-          <Text style={tabTextStyle(isClickUp, tab === "columns")}>Columns</Text>
+      <View style={isGumloop ? styles.tabsGumloop : styles.tabs}>
+        <Pressable style={tabStyle(isGumloop, tab === "columns")} onPress={showColumns}>
+          <Text style={tabTextStyle(isGumloop, tab === "columns")}>Columns</Text>
         </Pressable>
-        <Pressable style={tabStyle(isClickUp, tab === "ddl")} onPress={showDdl}>
-          <Text style={tabTextStyle(isClickUp, tab === "ddl")}>DDL</Text>
+        <Pressable style={tabStyle(isGumloop, tab === "ddl")} onPress={showDdl}>
+          <Text style={tabTextStyle(isGumloop, tab === "ddl")}>DDL</Text>
         </Pressable>
-        <Pressable style={tabStyle(isClickUp, tab === "relationships")} onPress={showRel}>
-          <Text style={tabTextStyle(isClickUp, tab === "relationships")}>Relationships</Text>
+        <Pressable style={tabStyle(isGumloop, tab === "relationships")} onPress={showRel}>
+          <Text style={tabTextStyle(isGumloop, tab === "relationships")}>Relationships</Text>
         </Pressable>
       </View>
       {body}
@@ -210,13 +210,13 @@ const SKELETON_LINE_WIDTHS = ["90%", "75%", "60%"] as const;
 /** Loading placeholder that mirrors the eventual tab layout (grid rows vs. text). */
 function StructureSkeleton({ tab }: { tab: Tab }) {
   const pulse = useSkeletonPulse();
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   if (tab === "columns") {
     return (
       <ScrollView style={styles.gridV}>
-        <GridHeader isClickUp={isClickUp} />
+        <GridHeader isGumloop={isGumloop} />
         {SKELETON_ROW_KEYS.map((key) => (
-          <View key={key} style={gridRowStyle(isClickUp, false)}>
+          <View key={key} style={gridRowStyle(isGumloop, false)}>
             <View style={[styles.cIdx, styles.skelCell]}>
               <Skeleton pulse={pulse} width={18} height={12} />
             </View>
@@ -267,7 +267,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: theme.colors.border,
   },
-  tabsClickUp: {
+  tabsGumloop: {
     flexDirection: "row",
     alignItems: "flex-end",
     gap: theme.spacing[6],
@@ -295,7 +295,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     borderBottomColor: theme.colors.border,
     backgroundColor: theme.colors.surface1,
   },
-  gridHeaderClickUp: {
+  gridHeaderGumloop: {
     flexDirection: "row",
     paddingVertical: theme.spacing[1.5],
     borderBottomWidth: 1,
@@ -362,7 +362,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     letterSpacing: 0.5,
     marginTop: theme.spacing[2],
   },
-  relHeaderClickUp: {
+  relHeaderGumloop: {
     fontSize: theme.fontSize.sm,
     color: theme.chrome.sectionTitleColor,
     textTransform: "none" as const,

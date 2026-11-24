@@ -1,3 +1,9 @@
+import { PageHeader } from "@/components/headers/page-header";
+import { SidebarViewPicker } from "@/plugins/sidebar-view/picker";
+import { AppearanceText as Text } from "@/appearance/text";
+import { Portal } from "@gorhom/portal";
+import { GUMLOOP_PANEL_HOST } from "@/components/gumloop-shell/sidebar-state";
+import { useGumloopDesktopShell } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { usePluginDisplayName } from "@/plugins/plugin-list";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { SPACING } from "@/styles/theme";
@@ -16,12 +22,12 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  Text,
   TextInput,
   View,
   type PressableStateCallbackType,
 } from "react-native";
 import { useRouter } from "expo-router";
+import { useIsFocused } from "expo-router/react-navigation";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
@@ -143,6 +149,11 @@ import { navigateToLastWorkspace } from "@/stores/navigation-active-workspace-st
 // View model
 // ---------------------------------------------------------------------------
 
+function SettingsDesktopHeader({ title, children }: { title: string; children: ReactNode }) {
+  const gumloop = useGumloopDesktopShell(true);
+  return gumloop ? <PageHeader icon={Settings} title={title} description="" /> : children;
+}
+
 export type SettingsView =
   | { kind: "root" }
   | { kind: "section"; section: SettingsSectionSlug }
@@ -161,6 +172,7 @@ interface SidebarSectionItem {
 }
 
 const SIDEBAR_SECTION_ITEMS: SidebarSectionItem[] = [
+  { id: "sidebar", labelKey: "Sidebar", icon: FolderGit2 },
   { id: "general", labelKey: "settings.sections.general", icon: Settings },
   { id: "appearance", labelKey: "settings.sections.appearance", icon: Palette },
   { id: "editor", labelKey: "settings.sections.editor", icon: Code2 },
@@ -928,6 +940,7 @@ export interface SettingsScreenProps {
 
 export default function SettingsScreen({ view, openAddHostIntent = null }: SettingsScreenProps) {
   const router = useRouter();
+  const isRouteFocused = useIsFocused();
   const { theme } = useUnistyles();
   const { t } = useTranslation();
   const voiceAudioEngine = useVoiceAudioEngineOptional();
@@ -941,6 +954,7 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   const lastOpenedAddHostIntentRef = useRef<string | null>(null);
   const isDesktopApp = isElectronRuntime();
   const isCompactLayout = useIsCompactFormFactor();
+  const gumloopDesktop = useGumloopDesktopShell(true);
   const insets = useSafeAreaInsets();
   const insetBottomStyle = useMemo(() => ({ paddingBottom: insets.bottom }), [insets.bottom]);
   const hosts = useHosts();
@@ -1259,6 +1273,8 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
               {isDesktopApp ? <BrowserDataSection /> : null}
             </>
           );
+        case "sidebar":
+          return <SidebarViewPicker />;
         case "appearance":
           return <AppearanceSection />;
         case "editor":
@@ -1375,38 +1391,59 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
     );
   }
 
-  // Desktop split view — mirrors AppContainer: sidebar owns the titlebar drag
-  // region + traffic-light padding; detail pane renders whatever header the
-  // selected section provides.
+  const settingsSidebar = (
+    <SettingsSidebar
+      view={view}
+      onSelectSection={handleSelectSection}
+      onSelectHostSection={handleSelectHostSection}
+      onSelectHost={handleSelectHost}
+      onAddHost={handleAddHost}
+      onBackToWorkspace={handleBackToWorkspace}
+      activeHostServerId={activeHostServerId}
+      layout="desktop"
+    />
+  );
   return (
     <View style={styles.container}>
       <View style={desktopStyles.row}>
-        <WindowChromeRegion corners="top-left">
-          <SettingsSidebar
-            view={view}
-            onSelectSection={handleSelectSection}
-            onSelectHostSection={handleSelectHostSection}
-            onSelectHost={handleSelectHost}
-            onAddHost={handleAddHost}
-            onBackToWorkspace={handleBackToWorkspace}
-            activeHostServerId={activeHostServerId}
-            layout="desktop"
-          />
-        </WindowChromeRegion>
+        {gumloopDesktop ? (
+          <Portal hostName={GUMLOOP_PANEL_HOST}>
+            {isRouteFocused ? (
+              <ScrollView style={sidebarStyles.scrollBody} testID="gumloop-settings-panel">
+                <SettingsSidebar
+                  view={view}
+                  onSelectSection={handleSelectSection}
+                  onSelectHostSection={handleSelectHostSection}
+                  onSelectHost={handleSelectHost}
+                  onAddHost={handleAddHost}
+                  onBackToWorkspace={handleBackToWorkspace}
+                  activeHostServerId={activeHostServerId}
+                  layout="mobile"
+                />
+              </ScrollView>
+            ) : null}
+          </Portal>
+        ) : (
+          <WindowChromeRegion corners="top-left">{settingsSidebar}</WindowChromeRegion>
+        )}
         <WindowChromeRegion corners="top-right">
           <View style={desktopStyles.contentPane} testID="settings-detail-pane">
-            <ScreenHeader
-              borderless={!detailHeader}
-              left={desktopDetailHeaderLeft}
-              leftStyle={desktopStyles.detailLeft}
-            />
+            <SettingsDesktopHeader title={detailHeader?.title ?? "Settings"}>
+              <ScreenHeader
+                borderless={!detailHeader}
+                left={desktopDetailHeaderLeft}
+                leftStyle={desktopStyles.detailLeft}
+              />
+            </SettingsDesktopHeader>
             <SettingsScrollView
               {...settingsScrollProps}
               style={styles.scrollView}
               contentContainerStyle={insetBottomStyle}
               testID="settings-detail-scroll-body"
             >
-              <View style={styles.content}>{content}</View>
+              <View style={[styles.content, gumloopDesktop && styles.gumloopContent]}>
+                {content}
+              </View>
             </SettingsScrollView>
           </View>
         </WindowChromeRegion>
@@ -1439,6 +1476,7 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     backgroundColor: theme.chrome.pageCanvas,
   },
+  gumloopContent: { maxWidth: 1134, paddingHorizontal: 82, paddingTop: 0, alignSelf: "stretch" },
   content: {
     padding: theme.spacing[4],
     paddingTop: theme.spacing[6],

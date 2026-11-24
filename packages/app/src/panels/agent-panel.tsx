@@ -1,3 +1,4 @@
+import { useGumloopDesktopShell } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { RewindCommandCenterRegistration } from "@/components/rewind/command-center-registration";
 import type { AgentScreenReadySyncState } from "@/hooks/use-agent-screen-state-machine";
 import { KeyboardTranslateView } from "@/keyboard/shift";
@@ -1161,6 +1162,7 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
   onAttentionPromptSend: () => void;
   onOpenWorkspaceFile?: (request: WorkspaceFileOpenRequest) => void;
 }) {
+  const gumloopDesktop = useGumloopDesktopShell(true);
   const composerEditingSession = useMemo(() => new ComposerEditingSession(), []);
   const active = useRetainedPanelActive();
   const { t } = useTranslation();
@@ -1296,9 +1298,11 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
                 <BuiltinPluginGate serverId={serverId} id="activity-graph">
                   <ActivityGraphToggle agentId={agentId} serverId={serverId} />
                 </BuiltinPluginGate>
-                <BuiltinPluginGate serverId={serverId} id="session-share">
-                  <SessionShareControl agentId={agentId} serverId={serverId} />
-                </BuiltinPluginGate>
+                {gumloopDesktop ? null : (
+                  <BuiltinPluginGate serverId={serverId} id="session-share">
+                    <SessionShareControl agentId={agentId} serverId={serverId} />
+                  </BuiltinPluginGate>
+                )}
               </View>
             )}
             {contentContainer}
@@ -1740,9 +1744,14 @@ function ActiveAgentComposer({
     [agentId, cwd, handleOpenSpecFile, serverId],
   );
 
+  const gumloopDesktop = useGumloopDesktopShell(true);
   const inputAreaStyle = useMemo(
-    () => [animatedStaticStyles.inputAreaWrapper, { paddingBottom: insets.bottom }],
-    [insets.bottom],
+    () => [
+      animatedStaticStyles.inputAreaWrapper,
+      // Composer owns another 16 px below its frame.
+      { paddingBottom: gumloopDesktop ? 32 : insets.bottom },
+    ],
+    [gumloopDesktop, insets.bottom],
   );
 
   return (

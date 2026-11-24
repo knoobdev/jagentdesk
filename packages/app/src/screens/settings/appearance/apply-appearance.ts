@@ -4,6 +4,8 @@ import {
   DEFAULT_UI_FONT_STACK,
   DEFAULT_MONO_FONT_STACK,
   FONT_SIZE,
+  gumloopLightSyntax,
+  gumloopDarkSyntax,
   themeContentMaxWidth,
   type Theme,
 } from "@/styles/theme";
@@ -20,8 +22,8 @@ export const ALL_THEME_KEYS = [
   "darkClaude",
   "darkGhostty",
   "darkPureBlack",
-  "clickupLight",
-  "clickupDark",
+  "gumloopLight",
+  "gumloopDark",
   "pluginLight",
   "pluginDark",
 ] as const;
@@ -94,7 +96,13 @@ export function applyAppearance(input: AppearanceInput): void {
           fontFamily,
           fontSize,
           lineHeight,
-          colors: { ...t.colors, syntax: resolveSyntaxColors(input.syntaxTheme, t.colorScheme) },
+          colors: {
+            ...t.colors,
+            syntax:
+              key === "gumloopLight"
+                ? gumloopLightSyntax
+                : resolveSyntaxColors(input.syntaxTheme, t.colorScheme),
+          },
         };
       }
       return {
@@ -103,7 +111,13 @@ export function applyAppearance(input: AppearanceInput): void {
         fontFamily,
         fontSize,
         lineHeight,
-        colors: { ...t.colors, syntax: resolveSyntaxColors(input.syntaxTheme, t.colorScheme) },
+        colors: {
+          ...t.colors,
+          syntax:
+            key === "gumloopDark"
+              ? gumloopDarkSyntax
+              : resolveSyntaxColors(input.syntaxTheme, t.colorScheme),
+        },
       };
     });
   }

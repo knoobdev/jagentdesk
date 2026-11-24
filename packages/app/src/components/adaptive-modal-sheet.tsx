@@ -90,9 +90,10 @@ const styles = StyleSheet.create((theme) => ({
     flexShrink: 1,
     minHeight: 0,
     backgroundColor: theme.colors.surface1,
-    borderRadius: theme.borderRadius.xl,
+    borderRadius: theme.chrome.modalRadius,
     borderWidth: 1,
-    borderColor: theme.colors.surface2,
+    borderColor: theme.colors.border,
+    ...theme.shadow.lg,
   },
   headerContainer: {
     borderBottomWidth: 1,

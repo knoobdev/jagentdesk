@@ -158,6 +158,9 @@ export interface Agent {
 }
 
 export interface WorkspaceDescriptor {
+  createdAt?: string;
+  lastUserMessageAt?: string | null;
+  activityAt?: string | null;
   id: string;
   projectId: string;
   projectDisplayName: string;
@@ -193,6 +196,9 @@ export function normalizeWorkspaceDescriptor(
       ? new Date(statusEnteredAtRaw)
       : null;
   return {
+    createdAt: payload.createdAt,
+    lastUserMessageAt: payload.lastUserMessageAt,
+    activityAt: payload.activityAt,
     id: normalizeWorkspaceOpaqueId(payload.id) ?? payload.id,
     projectId: payload.projectId,
     projectDisplayName: payload.projectDisplayName,

@@ -1,8 +1,8 @@
 import { navigateToAgent } from "@/utils/navigate-to-agent";
 import { renderStreamRow, type RenderStreamItem } from "./stream-row";
-import { ClickUpAgentHeader } from "@/components/clickup-shell/chat-headers";
-import { CLICKUP_MESSAGE_INDENT } from "@/components/clickup-shell/chat-layout";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { GumloopAgentHeader } from "@/components/gumloop-shell/chat-headers";
+import { GUMLOOP_MESSAGE_INDENT } from "@/components/gumloop-shell/chat-layout";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import React, {
   forwardRef,
@@ -226,10 +226,10 @@ export interface AgentStreamViewHandle {
 }
 
 /**
- * ClickUp chat: an agent turn opens with an avatar + provider + model header, and its items sit
+ * Gumloop chat: an agent turn opens with an avatar + provider + model header, and its items sit
  * indented under the name. A turn starts at the first non-user item after a user message.
  */
-function wrapClickUpAgentItem(input: {
+function wrapGumloopAgentItem(input: {
   layoutItem: StreamLayoutItem;
   content: ReactNode;
   provider?: string;
@@ -239,13 +239,13 @@ function wrapClickUpAgentItem(input: {
   if (item.kind === "user_message") return input.content;
   const startsTurn = aboveItem === null || aboveItem.kind === "user_message";
   return (
-    <View style={clickUpStreamStyles.agentItem}>
+    <View style={gumloopStreamStyles.agentItem}>
       {startsTurn ? (
-        <View style={clickUpStreamStyles.agentHeader}>
-          <ClickUpAgentHeader provider={input.provider} model={input.model} />
+        <View style={gumloopStreamStyles.agentHeader}>
+          <GumloopAgentHeader provider={input.provider} model={input.model} />
         </View>
       ) : null}
-      <View style={clickUpStreamStyles.agentBody}>{input.content}</View>
+      <View style={gumloopStreamStyles.agentBody}>{input.content}</View>
     </View>
   );
 }
@@ -255,10 +255,10 @@ function agentModelLabel(agent: AgentScreenAgent): string | null {
   return agent.runtimeInfo?.model ?? agent.model ?? null;
 }
 
-const clickUpStreamStyles = StyleSheet.create((theme) => ({
+const gumloopStreamStyles = StyleSheet.create((theme) => ({
   agentItem: { width: "100%" },
   agentHeader: { marginTop: theme.spacing[3] },
-  agentBody: { paddingLeft: CLICKUP_MESSAGE_INDENT },
+  agentBody: { paddingLeft: GUMLOOP_MESSAGE_INDENT },
 }));
 
 export interface AgentStreamViewProps {
@@ -869,7 +869,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       ],
     );
 
-    const isClickUp = useIsClickUpTheme();
+    const isGumloop = useIsGumloopTheme();
     const renderStreamItemContent = useCallback(
       (layoutItem: StreamLayoutItem) => {
         const item = layoutItem.item;
@@ -922,8 +922,8 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         const layoutItem =
           originalLayoutItem.item === item ? originalLayoutItem : { ...originalLayoutItem, item };
         const rawContent = renderStreamItemContent(layoutItem);
-        const content = isClickUp
-          ? wrapClickUpAgentItem({
+        const content = isGumloop
+          ? wrapGumloopAgentItem({
               layoutItem,
               content: rawContent,
               provider: context.provider,
@@ -941,7 +941,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       [
         context,
         handleForkAssistantTurn,
-        isClickUp,
+        isGumloop,
         readOnly,
         renderStreamItemContent,
         streamRenderStrategy,

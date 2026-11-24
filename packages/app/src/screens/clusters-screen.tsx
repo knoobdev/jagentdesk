@@ -10,13 +10,13 @@ import { ContextStatusDot, ClusterStatusDot } from "@/components/cluster-dot";
 import { buildClusterWorkloadsRoute } from "@/utils/host-routes";
 import { useClusterNavStore } from "@/stores/cluster-nav-store";
 import type { Theme } from "@/styles/theme";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
-import { clickUpListStyles } from "@/components/clickup-shell/list-styles";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { gumloopListStyles } from "@/components/gumloop-shell/list-styles";
 import type { ClusterInfo, KubeContextInfo } from "@jagentdesk/protocol/cluster/rpc-schemas";
 
-/** Context rows: ClickUp's hairline divider color instead of the classic border. */
-function contextRowStyle(isClickUp: boolean) {
-  return isClickUp ? [styles.contextRow, clickUpListStyles.row] : styles.contextRow;
+/** Context rows: Gumloop's hairline divider color instead of the classic border. */
+function contextRowStyle(isGumloop: boolean) {
+  return isGumloop ? [styles.contextRow, gumloopListStyles.row] : styles.contextRow;
 }
 
 function ContextRow({
@@ -45,13 +45,13 @@ function ContextRow({
     if (cluster) onDisconnect(cluster.id);
   }, [onDisconnect, cluster]);
 
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   let connectLabel = "Connect";
   if (busy) connectLabel = "Connecting…";
   else if (errored) connectLabel = "Retry";
 
   return (
-    <View style={contextRowStyle(isClickUp)}>
+    <View style={contextRowStyle(isGumloop)}>
       <View style={styles.contextHeader}>
         {cluster ? (
           <ClusterStatusDot state={cluster.state} />
@@ -111,7 +111,7 @@ export function ClustersScreen() {
   const client = useHostRuntimeClient(serverId);
   const clearLastCluster = useClusterNavStore((s) => s.clearLastCluster);
   const router = useRouter();
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
 
   // Phones render this screen with no native header, so pad past the status
   // bar / notch. 0 on desktop, real inset on iOS + Android.
@@ -242,7 +242,7 @@ export function ClustersScreen() {
         {contexts.length === 0 ? (
           <Text style={styles.emptyText}>No Kubernetes contexts detected in ~/.kube/config.</Text>
         ) : (
-          <View style={isClickUp ? styles.sectionCardClickUp : styles.sectionCard}>
+          <View style={isGumloop ? styles.sectionCardGumloop : styles.sectionCard}>
             {contexts.map((ctx) => (
               <ContextRow
                 key={ctx.name}
@@ -271,7 +271,7 @@ const styles = StyleSheet.create((theme) => ({
   container: {
     flex: 1,
     minHeight: 0,
-    // pageCanvas is surface0 in classic themes, ClickUp's gray canvas behind white cards.
+    // pageCanvas is surface0 in classic themes, Gumloop's gray canvas behind white cards.
     backgroundColor: theme.chrome.pageCanvas,
   },
   page: { flex: 1 },
@@ -333,7 +333,7 @@ const styles = StyleSheet.create((theme) => ({
     borderColor: theme.colors.border,
     overflow: "hidden",
   },
-  sectionCardClickUp: {
+  sectionCardGumloop: {
     borderRadius: theme.chrome.cardRadius,
     borderWidth: 1,
     borderColor: theme.chrome.cardBorder,

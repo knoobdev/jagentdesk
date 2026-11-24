@@ -90,6 +90,7 @@ export const ja: TranslationResources = {
       placeholder:
         "\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u3001\u30D5\u30A1\u30A4\u30EB\u3001\u30A2\u30AF\u30B7\u30E7\u30F3\u3092\u691C\u7D22...",
       noMatches: "\u4E00\u81F4\u306A\u3057",
+      copyBrowserHostName: "Copy browser host name",
       actions: "\u30A2\u30AF\u30B7\u30E7\u30F3",
       workspaces: "\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9",
       agents: "\u30A8\u30FC\u30B8\u30A7\u30F3\u30C8",
@@ -2162,8 +2163,8 @@ export const ja: TranslationResources = {
           claude: "Claude",
           ghostty: "Ghostty",
           pureBlack: "ピュアブラック",
-          clickup: "ClickUp",
-          clickupDark: "ClickUp Dark",
+          gumloop: "Gumloop",
+          gumloopDark: "Gumloop Dark",
           auto: "システム",
         },
       },
@@ -2773,7 +2774,7 @@ export const ja: TranslationResources = {
       },
     },
   },
-  clickupShell: {
+  gumloopShell: {
     search: "検索",
     newWorkspace: "新規",
     workspaces: "ワークスペース",

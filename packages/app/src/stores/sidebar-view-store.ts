@@ -1,3 +1,4 @@
+import type { WorkspaceSort } from "@/projects/workspace-structure";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
@@ -6,9 +7,11 @@ export type SidebarGroupMode = "project" | "status";
 
 const SIDEBAR_VIEW_STORAGE_KEY = "sidebar-view";
 const LEGACY_SIDEBAR_GROUP_MODE_STORAGE_KEY = "sidebar-group-mode";
-const SIDEBAR_VIEW_STORE_VERSION = 3;
+const SIDEBAR_VIEW_STORE_VERSION = 4;
 
 interface SidebarViewStoreState {
+  workspaceSort: WorkspaceSort;
+  setWorkspaceSort: (workspaceSort: WorkspaceSort) => void;
   groupMode: SidebarGroupMode;
   showBackground: boolean;
   // Empty means "all hosts". A non-empty list pins the sidebar to those hosts.
@@ -22,6 +25,7 @@ interface SidebarViewStoreState {
 }
 
 interface SidebarViewPersistedState {
+  workspaceSort?: WorkspaceSort;
   groupMode: SidebarGroupMode;
   showBackground: boolean;
   hostFilters: string[];
@@ -66,10 +70,19 @@ export function migrateSidebarViewState(persistedState: unknown): SidebarViewPer
 
   const legacyGroupMode = readLegacyGroupMode(persistedState);
   if (legacyGroupMode) {
-    return { groupMode: legacyGroupMode, hostFilters: [], showBackground: false };
+    return {
+      workspaceSort: "created",
+      groupMode: legacyGroupMode,
+      hostFilters: [],
+      showBackground: false,
+    };
   }
 
   return {
+    workspaceSort:
+      persistedState.workspaceSort === "manual" || persistedState.workspaceSort === "lastPrompt"
+        ? persistedState.workspaceSort
+        : "created",
     showBackground: persistedState.showBackground === true,
     groupMode: isSidebarGroupMode(persistedState.groupMode) ? persistedState.groupMode : "project",
     hostFilters: readHostFilters(persistedState),
@@ -95,6 +108,8 @@ export function createSidebarViewStorage(
 export const useSidebarViewStore = create<SidebarViewStoreState>()(
   persist(
     (set) => ({
+      workspaceSort: "created",
+      setWorkspaceSort: (workspaceSort) => set({ workspaceSort }),
       groupMode: "project",
       showBackground: false,
       toggleBackground: () => set((state) => ({ showBackground: !state.showBackground })),
@@ -126,6 +141,7 @@ export const useSidebarViewStore = create<SidebarViewStoreState>()(
       version: SIDEBAR_VIEW_STORE_VERSION,
       storage: createJSONStorage(createSidebarViewStorage),
       partialize: (state) => ({
+        workspaceSort: state.workspaceSort,
         groupMode: state.groupMode,
         showBackground: state.showBackground,
         hostFilters: state.hostFilters,

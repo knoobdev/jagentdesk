@@ -1,8 +1,8 @@
-import { CLICKUP_MESSAGE_INDENT } from "@/components/clickup-shell/chat-layout";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { GUMLOOP_MESSAGE_INDENT } from "@/components/gumloop-shell/chat-layout";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import type { AgentMetric } from "@jagentdesk/protocol/agent-types";
 import React, { memo, useCallback, useMemo, type ReactNode } from "react";
-import { View } from "react-native";
+import { Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { Theme } from "@/styles/theme";
 import type { TurnTiming } from "@/timeline/turn-time";
@@ -131,12 +131,18 @@ const WorkingIndicator = memo(function WorkingIndicator({
   inFlightTurnStartedAt?: Date | null;
   onForkInFlightTurn?: InFlightTurnForkHandler;
 }) {
+  const gumloop = useIsGumloopTheme();
   const active = useRetainedPanelActive();
   return (
     <View style={stylesheet.turnFooterContent}>
       <View style={stylesheet.workingLoader}>
-        <ThemedSyncedLoader size={14} uniProps={workingIndicatorColorMapping} />
+        {gumloop ? (
+          <View style={stylesheet.thinkingDot} />
+        ) : (
+          <ThemedSyncedLoader size={14} uniProps={workingIndicatorColorMapping} />
+        )}
       </View>
+      {gumloop ? <Text style={stylesheet.thinkingLabel}>Thinking…</Text> : null}
       {/* Match the completed-turn footer: actions precede timing metadata. Guests must not fork the
           agent (ADR-0019 — fork_context is out of the guest scope), so hide it on the guest surface. */}
       {onForkInFlightTurn && !isGuestShareMode() ? (
@@ -225,20 +231,22 @@ function CompletedTurnFooter({
 }
 
 function TurnFooterRow({ children }: { children: ReactNode }) {
-  // The ClickUp chat indents agent turns under the avatar; the footer follows.
-  const isClickUp = useIsClickUpTheme();
+  // The Gumloop chat indents agent turns under the avatar; the footer follows.
+  const isGumloop = useIsGumloopTheme();
   const rowStyle = useMemo(
     () => [
       stylesheet.streamItemWrapper,
       stylesheet.turnFooterRow,
-      isClickUp && stylesheet.turnFooterRowClickUp,
+      isGumloop && stylesheet.turnFooterRowGumloop,
     ],
-    [isClickUp],
+    [isGumloop],
   );
   return <View style={rowStyle}>{children}</View>;
 }
 
 const stylesheet = StyleSheet.create((theme) => ({
+  thinkingDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: theme.colors.accentPink },
+  thinkingLabel: { fontSize: 16, color: theme.colors.foregroundMuted },
   streamItemWrapper: {
     width: "100%",
     maxWidth: theme.contentMaxWidth,
@@ -252,8 +260,8 @@ const stylesheet = StyleSheet.create((theme) => ({
   turnFooterRow: {
     marginTop: theme.spacing[4] + theme.spacing[1],
   },
-  turnFooterRowClickUp: {
-    paddingLeft: CLICKUP_MESSAGE_INDENT,
+  turnFooterRowGumloop: {
+    paddingLeft: GUMLOOP_MESSAGE_INDENT,
   },
   turnFooterSlot: {
     flexDirection: "row",

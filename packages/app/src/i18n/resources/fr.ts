@@ -90,6 +90,7 @@ export const fr: TranslationResources = {
     commandCenter: {
       placeholder: "Rechercher des espaces de travail, fichiers et actions\u2026",
       noMatches: "Aucun r\u00E9sultat",
+      copyBrowserHostName: "Copy browser host name",
       actions: "Actions",
       workspaces: "Espaces de travail",
       agents: "Agents",
@@ -338,6 +339,7 @@ export const fr: TranslationResources = {
     },
     actions: {
       copyCode: "Copier le code",
+      turnStats: "Statistiques du tour",
       copyTurn: "Copier l\u2019\u00E9change",
       copyMessage: "Copier le message",
       forkMenu: "Forker la conversation \u00E0 partir d\u2019ici",
@@ -2202,8 +2204,8 @@ export const fr: TranslationResources = {
           claude: "Claude",
           ghostty: "Ghostty",
           pureBlack: "Noir pur",
-          clickup: "ClickUp",
-          clickupDark: "ClickUp Dark",
+          gumloop: "Gumloop",
+          gumloopDark: "Gumloop Dark",
           auto: "Système",
         },
       },
@@ -2827,7 +2829,7 @@ export const fr: TranslationResources = {
       },
     },
   },
-  clickupShell: {
+  gumloopShell: {
     search: "Rechercher",
     newWorkspace: "Nouveau",
     workspaces: "Espaces de travail",

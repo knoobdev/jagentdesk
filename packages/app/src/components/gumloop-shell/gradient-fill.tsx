@@ -8,7 +8,7 @@ type GradientDirection = "vertical" | "horizontal" | "diagonal-up";
 const DIRECTIONS: Record<GradientDirection, { x1: string; y1: string; x2: string; y2: string }> = {
   vertical: { x1: "0", y1: "0", x2: "0", y2: "1" },
   horizontal: { x1: "0", y1: "0", x2: "1", y2: "0" },
-  // Bottom-left to top-right, the direction of ClickUp's Brain composer border.
+  // Bottom-left to top-right, the direction of Gumloop's Brain composer border.
   "diagonal-up": { x1: "0", y1: "1", x2: "1", y2: "0" },
 };
 
@@ -28,7 +28,7 @@ export function GradientFill({
   radius?: number;
   style?: StyleProp<ViewStyle>;
 }) {
-  const colors = useMemo(() => colorList.split(",").filter(Boolean), [colorList]);
+  const colors = useMemo(() => colorList.split(/,(?![^()]*\))/).filter(Boolean), [colorList]);
   const rawId = useId();
   const id = `gradient-${rawId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const solidStyle = useMemo(

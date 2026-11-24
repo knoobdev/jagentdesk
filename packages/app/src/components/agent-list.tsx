@@ -1,6 +1,6 @@
 import { Modal } from "@/components/ui/modal";
-import { clickUpListStyles } from "@/components/clickup-shell/list-styles";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { gumloopListStyles } from "@/components/gumloop-shell/list-styles";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import {
   View,
   Text,
@@ -248,17 +248,17 @@ function SessionRow({
   const ProviderIcon = getProviderIcon(agent.provider);
   const pendingPermissionCount = agent.pendingPermissionCount ?? 0;
   const orchestrationRoleBadge = orchestrationRoleBadgeLabel(agent.labels);
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
 
   const pressableStyle = useCallback(
     ({ pressed, hovered = false }: PressableStateCallbackType & { hovered?: boolean }) => [
       styles.row,
-      isClickUp && clickUpListStyles.row,
+      isGumloop && gumloopListStyles.row,
       isSelected && styles.rowSelected,
       Boolean(hovered) && styles.rowHovered,
       pressed && styles.rowPressed,
     ],
-    [isClickUp, isSelected],
+    [isGumloop, isSelected],
   );
 
   const handlePress = useCallback(() => onPress(agent), [onPress, agent]);
@@ -484,15 +484,15 @@ export function AgentList({
     return result;
   }, [agents]);
 
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const renderItem: ListRenderItem<FlatListItem> = useCallback(
     ({ item }) => {
       if (item.type === "header") {
-        if (isClickUp) {
+        if (isGumloop) {
           return (
-            <View style={clickUpListStyles.groupRow}>
-              <View style={clickUpListStyles.groupPill}>
-                <Text style={clickUpListStyles.groupPillText}>
+            <View style={gumloopListStyles.groupRow}>
+              <View style={gumloopListStyles.groupPill}>
+                <Text style={gumloopListStyles.groupPillText}>
                   {formatDateSectionLabel(t, item.section)}
                 </Text>
               </View>
@@ -520,7 +520,7 @@ export function AgentList({
     [
       handleAgentLongPress,
       handleAgentPress,
-      isClickUp,
+      isGumloop,
       isMobile,
       selectedAgentId,
       showAttentionIndicator,

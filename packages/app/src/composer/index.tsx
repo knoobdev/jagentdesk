@@ -1,3 +1,4 @@
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { PluginComposerPills } from "@/plugins/buttons/view";
 import { Alert } from "@/components/ui/alert";
 import type { AutocompleteStatus } from "@/components/ui/autocomplete";
@@ -1014,13 +1015,19 @@ function ComposerCancelButton({
   agentInterruptKeys,
   t,
 }: ComposerCancelButtonProps) {
+  const gumloop = useIsGumloopTheme();
+  const buttonStyle = useMemo(
+    () => [cancelButtonStyle, gumloop && styles.gumloopStop],
+    [cancelButtonStyle, gumloop],
+  );
+  const stopColor = gumloop ? "#FF4EA6" : "white";
   const accessibilityLabel = isCancellingAgent
     ? t("composer.cancel.cancelingAgent")
     : t("composer.cancel.stopAgent");
   const icon = isCancellingAgent ? (
-    <LoadingSpinner size="small" color="white" />
+    <LoadingSpinner size="small" color={stopColor} />
   ) : (
-    <Square size={buttonIconSize} color="white" fill="white" />
+    <Square size={buttonIconSize} color={stopColor} fill={stopColor} />
   );
   const shortcutNode = agentInterruptKeys ? <Shortcut chord={agentInterruptKeys} /> : null;
   return (
@@ -1030,7 +1037,7 @@ function ComposerCancelButton({
         disabled={!isConnected || isCancellingAgent}
         accessibilityLabel={accessibilityLabel}
         accessibilityRole="button"
-        style={cancelButtonStyle}
+        style={buttonStyle}
       >
         {icon}
       </TooltipTrigger>
@@ -2436,6 +2443,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     width: "100%",
     gap: theme.spacing[3],
   },
+  gumloopStop: { width: 32, height: 32, borderRadius: 16, backgroundColor: "#FFEFF0" },
   cancelButton: {
     width: 28,
     height: 28,

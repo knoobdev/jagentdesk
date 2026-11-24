@@ -1,3 +1,4 @@
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Animated, Easing, Platform, Text, ToastAndroid, View } from "react-native";
@@ -136,6 +137,7 @@ export function ToastViewport({
   onDismiss: () => void;
   placement?: ToastViewportPlacement;
 }) {
+  const gumloop = useIsGumloopTheme();
   const { theme } = useUnistyles();
   const insets = useSafeAreaInsets();
   const isMobile = useIsCompactFormFactor();
@@ -259,17 +261,25 @@ export function ToastViewport({
       toastVariant === "success" ? styles.toastSuccess : null,
       toastVariant === "warning" ? styles.toastWarning : null,
       toastVariant === "error" ? styles.toastError : null,
+      gumloop && styles.gumloopToast,
+      gumloop && toastVariant === "success" && styles.gumloopSuccess,
+      gumloop && toastVariant === "warning" && styles.gumloopWarning,
+      gumloop && toastVariant === "error" && styles.gumloopError,
       {
         marginTop: placement === "sidebar" ? 0 : topOffset,
         opacity,
         transform: [{ translateY }],
       },
     ],
-    [toastVariant, topOffset, opacity, translateY, placement],
+    [gumloop, toastVariant, topOffset, opacity, translateY, placement],
   );
   const toastMessageStyle = useMemo(
-    () => [styles.message, toastVariant === "error" ? styles.messageError : null],
-    [toastVariant],
+    () => [
+      styles.message,
+      toastVariant === "error" ? styles.messageError : null,
+      gumloop && toastVariant === "error" && styles.gumloopErrorText,
+    ],
+    [gumloop, toastVariant],
   );
 
   if (!toast) {
@@ -352,6 +362,20 @@ const styles = StyleSheet.create((theme) => ({
     paddingHorizontal: theme.spacing[3],
     ...theme.shadow.md,
   },
+  gumloopToast: { borderRadius: 12 },
+  gumloopSuccess: {
+    backgroundColor: theme.colors.statusSuccessBackground,
+    borderColor: theme.colors.statusSuccessBackground,
+  },
+  gumloopWarning: {
+    backgroundColor: theme.colors.statusWarningBackground,
+    borderColor: theme.colors.statusWarningBackground,
+  },
+  gumloopError: {
+    backgroundColor: theme.colors.statusDangerBackground,
+    borderColor: theme.colors.statusDangerBackground,
+  },
+  gumloopErrorText: { color: theme.colors.statusDanger },
   toastSuccess: {
     borderColor: theme.colors.border,
   },

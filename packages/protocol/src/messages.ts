@@ -5037,6 +5037,7 @@ export const ServerInfoStatusPayloadSchema = z
         timelineFreshnessCheck: z.boolean().optional(),
         // COMPAT(canonicalSubmittedPrompts): added in v0.2.6, remove gate after 2027-01-30.
         canonicalSubmittedPrompts: z.boolean().optional(),
+        workspaceSortTimes: z.boolean().optional(),
         agentMessageProvenance: z.boolean().optional(),
         agentMessageBatching: z.boolean().optional(),
         // COMPAT(agentActiveTurnBehaviors): added in v0.9.59, remove gate after 2027-05-24.
@@ -5473,6 +5474,8 @@ export const WorkspaceDescriptorPayloadSchema = z
       .nullish()
       .transform((value) => value ?? null),
     activityAt: z.string().nullable(),
+    createdAt: z.string().optional(),
+    lastUserMessageAt: z.string().nullable().optional(),
     diffStat: z
       .object({
         additions: z.number(),

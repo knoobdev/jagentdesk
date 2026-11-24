@@ -4,7 +4,7 @@ import { User } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { getProviderIcon } from "@/components/provider-icons";
 import type { Theme } from "@/styles/theme";
-import { CLICKUP_AVATAR_SIZE } from "./chat-layout";
+import { GUMLOOP_AVATAR_SIZE } from "./chat-layout";
 
 const avatarIconMapping = (theme: Theme) => ({ color: theme.chrome.createForeground });
 const ThemedUser = withUnistyles(User);
@@ -14,7 +14,7 @@ function providerDisplayName(provider: string | undefined): string {
   return provider.charAt(0).toUpperCase() + provider.slice(1);
 }
 
-/** ClickUp chat message header: round avatar, bold name, muted meta, then optional actions. */
+/** Gumloop chat message header: round avatar, bold name, muted meta, then optional actions. */
 function MessageHeader({
   avatarStyle,
   name,
@@ -50,8 +50,8 @@ function renderUserIcon() {
   return <ThemedUser size={15} strokeWidth={2.2} uniProps={avatarIconMapping} />;
 }
 
-/** "You" header over the user's message (violet avatar, as ClickUp's own-user avatar). */
-export const ClickUpUserHeader = memo(function ClickUpUserHeader({
+/** "You" header over the user's message (violet avatar, as Gumloop's own-user avatar). */
+export const GumloopUserHeader = memo(function GumloopUserHeader({
   time,
   children,
 }: {
@@ -66,7 +66,7 @@ export const ClickUpUserHeader = memo(function ClickUpUserHeader({
 });
 
 /** Agent header at the start of each agent turn: provider mark avatar, provider name, model. */
-export const ClickUpAgentHeader = memo(function ClickUpAgentHeader({
+export const GumloopAgentHeader = memo(function GumloopAgentHeader({
   provider,
   model,
 }: {
@@ -96,30 +96,28 @@ const styles = StyleSheet.create((theme: Theme) => ({
     alignItems: "center",
     gap: theme.spacing[2],
     marginBottom: theme.spacing[1],
-    minHeight: CLICKUP_AVATAR_SIZE,
+    minHeight: GUMLOOP_AVATAR_SIZE,
   },
   userAvatar: {
-    width: CLICKUP_AVATAR_SIZE,
-    height: CLICKUP_AVATAR_SIZE,
-    borderRadius: CLICKUP_AVATAR_SIZE / 2,
+    width: GUMLOOP_AVATAR_SIZE,
+    height: GUMLOOP_AVATAR_SIZE,
+    borderRadius: GUMLOOP_AVATAR_SIZE / 2,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: theme.chrome.createBackground,
   },
   agentAvatar: {
-    width: CLICKUP_AVATAR_SIZE,
-    height: CLICKUP_AVATAR_SIZE,
-    borderRadius: CLICKUP_AVATAR_SIZE / 2,
+    width: GUMLOOP_AVATAR_SIZE,
+    height: GUMLOOP_AVATAR_SIZE,
+    borderRadius: GUMLOOP_AVATAR_SIZE / 2,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: theme.chrome.outlineBackground,
-    borderWidth: 1,
-    borderColor: theme.chrome.outlineBorder,
+    backgroundColor: "transparent",
   },
   name: {
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.semibold,
-    color: theme.colors.foreground,
+    fontSize: 16,
+    fontWeight: theme.fontWeight.normal,
+    color: theme.colors.foregroundMuted,
   },
   meta: {
     fontSize: theme.fontSize.xs,

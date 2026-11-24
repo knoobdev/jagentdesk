@@ -1,3 +1,4 @@
+import type { SidebarSurfaceBackdrop } from "@/styles/surface-backdrop";
 import { ActivityIndicator, View, type ViewStyle } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { ChevronDown, ChevronRight, CircleAlert } from "lucide-react-native";
@@ -58,6 +59,7 @@ export function ProjectLeadingVisual({
   chevron = null,
   showChevron = false,
   isArchiving = false,
+  backdrop = "surfaceSidebar",
 }: {
   displayName: string;
   iconDataUri: string | null;
@@ -67,6 +69,7 @@ export function ProjectLeadingVisual({
   chevron?: "expand" | "collapse" | null;
   showChevron?: boolean;
   isArchiving?: boolean;
+  backdrop?: SidebarSurfaceBackdrop;
 }) {
   if (showChevron && chevron !== null) {
     return (
@@ -86,6 +89,7 @@ export function ProjectLeadingVisual({
 
   return (
     <ProjectStatusIndicator
+      backdrop={backdrop}
       iconDataUri={iconDataUri}
       displayName={displayName}
       projectViewKey={projectViewKey}
@@ -105,6 +109,7 @@ export function ProjectStatusIndicator({
   projectViewKey,
   statusBucket,
   loading = false,
+  backdrop = "surfaceSidebar",
   testID,
 }: {
   iconDataUri: string | null;
@@ -112,6 +117,7 @@ export function ProjectStatusIndicator({
   projectViewKey: string;
   statusBucket: SidebarStateBucket | null;
   loading?: boolean;
+  backdrop?: SidebarSurfaceBackdrop;
   testID?: string;
 }) {
   const placeholderInitial = projectIconPlaceholderLabelFromDisplayName(displayName)
@@ -140,7 +146,11 @@ export function ProjectStatusIndicator({
           projectViewKey={projectViewKey}
         />
         {badgeContent === null || badgeBucket === null ? null : (
-          <ProjectStatusBadge content={badgeContent} statusBucket={badgeBucket} />
+          <ProjectStatusBadge
+            content={badgeContent}
+            statusBucket={badgeBucket}
+            backdrop={backdrop}
+          />
         )}
       </View>
     </View>
@@ -148,9 +158,11 @@ export function ProjectStatusIndicator({
 }
 
 function ProjectStatusBadge({
+  backdrop,
   content,
   statusBucket,
 }: {
+  backdrop: SidebarSurfaceBackdrop;
   content: ProjectStatusBadgeContent;
   statusBucket: SidebarStateBucket;
 }) {
@@ -158,7 +170,7 @@ function ProjectStatusBadge({
     <View
       role="status"
       accessibilityLabel={STATUS_BUCKET_LABELS[statusBucket]}
-      style={styles.statusBadge}
+      style={[styles.statusBadge, styles[backdrop]]}
       testID="project-status-badge"
     >
       {content.kind === "alert" ? (
@@ -263,6 +275,19 @@ const styles = StyleSheet.create((theme) => {
     // The shell the alert and dot statuses share. It straddles the icon's bottom-right corner
     // (half in, half out) so the lettered project box stays readable, and its ring is
     // sidebar-colored so the badge separates from the icon underneath rather than blending in.
+    surfaceSidebar: {
+      backgroundColor: theme.colors.surfaceSidebar,
+      borderColor: theme.colors.surfaceSidebar,
+    },
+    surfaceSidebarHover: {
+      backgroundColor: theme.colors.surfaceSidebarHover,
+      borderColor: theme.colors.surfaceSidebarHover,
+    },
+    surfaceSidebarSelected: {
+      backgroundColor: theme.colors.surfaceSidebarSelected,
+      borderColor: theme.colors.surfaceSidebarSelected,
+    },
+    surface2: { backgroundColor: theme.colors.surface2, borderColor: theme.colors.surface2 },
     statusBadge: {
       position: "absolute",
       right: STATUS_BADGE_OFFSET,

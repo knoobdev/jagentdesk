@@ -2176,8 +2176,8 @@ export const es: TranslationResources = {
           claude: "claudio",
           ghostty: "fantasmal",
           pureBlack: "Negro puro",
-          clickup: "ClickUp",
-          clickupDark: "ClickUp Dark",
+          gumloop: "Gumloop",
+          gumloopDark: "Gumloop Dark",
           auto: "Sistema",
         },
       },
@@ -2786,7 +2786,7 @@ export const es: TranslationResources = {
       },
     },
   },
-  clickupShell: {
+  gumloopShell: {
     search: "Buscar",
     newWorkspace: "Nuevo",
     workspaces: "Espacios de trabajo",

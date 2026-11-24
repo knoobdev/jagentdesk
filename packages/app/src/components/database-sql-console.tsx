@@ -9,8 +9,8 @@ import { useDatabaseHistoryStore } from "@/stores/database-history-store";
 import { DatabaseResultTable } from "@/components/database-result-table";
 import { isWeb } from "@/constants/platform";
 import type { Theme } from "@/styles/theme";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
-import { clickUpChipStyles, clickUpTabStyles } from "@/components/clickup-shell/list-styles";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { gumloopChipStyles, gumloopTabStyles } from "@/components/gumloop-shell/list-styles";
 
 const ThemedPlay = withUnistyles(Play);
 const ThemedTextInput = withUnistyles(TextInput);
@@ -80,34 +80,34 @@ function SuggestionRow({
   );
 }
 
-/** Result-set tabs: boxed in classic, ClickUp's underlined text tabs otherwise. */
-function rsTabStyle(isClickUp: boolean, active: boolean) {
-  if (!isClickUp) return [styles.rsTab, active && styles.rsTabActive];
-  return active ? clickUpTabStyles.tabActive : clickUpTabStyles.tab;
+/** Result-set tabs: boxed in classic, Gumloop's underlined text tabs otherwise. */
+function rsTabStyle(isGumloop: boolean, active: boolean) {
+  if (!isGumloop) return [styles.rsTab, active && styles.rsTabActive];
+  return active ? gumloopTabStyles.tabActive : gumloopTabStyles.tab;
 }
 
-function rsTabTextStyle(isClickUp: boolean, active: boolean) {
-  if (!isClickUp) return [styles.rsTabText, active && styles.rsTabTextActive];
-  return active ? clickUpTabStyles.textActive : clickUpTabStyles.text;
+function rsTabTextStyle(isGumloop: boolean, active: boolean) {
+  if (!isGumloop) return [styles.rsTabText, active && styles.rsTabTextActive];
+  return active ? gumloopTabStyles.textActive : gumloopTabStyles.text;
 }
 
-/** Toolbar toggles (History, Result / Query Plan / Output) read as ClickUp filter chips. */
-function toggleBtnStyle(isClickUp: boolean, active: boolean) {
-  if (!isClickUp) return active ? [styles.tabBtn, styles.tabBtnActive] : styles.tabBtn;
-  return active ? clickUpChipStyles.chipActive : clickUpChipStyles.chip;
+/** Toolbar toggles (History, Result / Query Plan / Output) read as Gumloop filter chips. */
+function toggleBtnStyle(isGumloop: boolean, active: boolean) {
+  if (!isGumloop) return active ? [styles.tabBtn, styles.tabBtnActive] : styles.tabBtn;
+  return active ? gumloopChipStyles.chipActive : gumloopChipStyles.chip;
 }
 
-function toggleTextStyle(isClickUp: boolean, active: boolean) {
-  if (!isClickUp) return [styles.tabText, active && styles.tabTextActive];
-  return active ? clickUpChipStyles.textActive : clickUpChipStyles.text;
+function toggleTextStyle(isGumloop: boolean, active: boolean) {
+  if (!isGumloop) return [styles.tabText, active && styles.tabTextActive];
+  return active ? gumloopChipStyles.textActive : gumloopChipStyles.text;
 }
 
-function rsBarStyle(isClickUp: boolean) {
-  return isClickUp ? styles.rsBarClickUp : styles.rsBar;
+function rsBarStyle(isGumloop: boolean) {
+  return isGumloop ? styles.rsBarGumloop : styles.rsBar;
 }
 
-function rsBarContentStyle(isClickUp: boolean) {
-  return isClickUp ? styles.rsBarContentClickUp : styles.rsBarContent;
+function rsBarContentStyle(isGumloop: boolean) {
+  return isGumloop ? styles.rsBarContentGumloop : styles.rsBarContent;
 }
 
 /** One result-set tab (its own component for a stable press handler). */
@@ -123,10 +123,10 @@ function ResultSetTab({
   onPick: (id: number) => void;
 }) {
   const press = useCallback(() => onPick(id), [onPick, id]);
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   return (
-    <Pressable style={rsTabStyle(isClickUp, active)} onPress={press}>
-      <Text style={rsTabTextStyle(isClickUp, active)} numberOfLines={1}>
+    <Pressable style={rsTabStyle(isGumloop, active)} onPress={press}>
+      <Text style={rsTabTextStyle(isGumloop, active)} numberOfLines={1}>
         {label}
       </Text>
     </Pressable>
@@ -155,7 +155,7 @@ export function DatabaseSqlConsole({
   engine: DatabaseEngine;
 }) {
   const client = useHostRuntimeClient(serverId);
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const bumpRefresh = useDatabaseViewStore((s) => s.bumpRefresh);
   const recordHistory = useDatabaseHistoryStore((s) => s.record);
   const history = useDatabaseHistoryStore((s) => s.byDatabase[databaseId] ?? EMPTY_HISTORY);
@@ -424,8 +424,8 @@ export function DatabaseSqlConsole({
         {resultSets.length > 1 ? (
           <ScrollView
             horizontal
-            style={rsBarStyle(isClickUp)}
-            contentContainerStyle={rsBarContentStyle(isClickUp)}
+            style={rsBarStyle(isGumloop)}
+            contentContainerStyle={rsBarContentStyle(isGumloop)}
             keyboardShouldPersistTaps="always"
           >
             {resultSets.map((rs) => (
@@ -511,22 +511,22 @@ export function DatabaseSqlConsole({
         <Pressable style={styles.tabBtn} onPress={handleExplain} disabled={running}>
           <Text style={styles.tabText}>Explain</Text>
         </Pressable>
-        <Pressable style={toggleBtnStyle(isClickUp, historyOpen)} onPress={toggleHistory}>
-          <Text style={toggleTextStyle(isClickUp, historyOpen)}>History</Text>
+        <Pressable style={toggleBtnStyle(isGumloop, historyOpen)} onPress={toggleHistory}>
+          <Text style={toggleTextStyle(isGumloop, historyOpen)}>History</Text>
         </Pressable>
         <View style={styles.writesToggle}>
           <Switch value={allowWrites} onValueChange={setAllowWrites} />
           <Text style={styles.writesLabel}>Allow writes</Text>
         </View>
         <View style={styles.toolbarSpacer} />
-        <Pressable style={toggleBtnStyle(isClickUp, tab === "result")} onPress={showResult}>
-          <Text style={toggleTextStyle(isClickUp, tab === "result")}>Result</Text>
+        <Pressable style={toggleBtnStyle(isGumloop, tab === "result")} onPress={showResult}>
+          <Text style={toggleTextStyle(isGumloop, tab === "result")}>Result</Text>
         </Pressable>
-        <Pressable style={toggleBtnStyle(isClickUp, tab === "plan")} onPress={showPlan}>
-          <Text style={toggleTextStyle(isClickUp, tab === "plan")}>Query Plan</Text>
+        <Pressable style={toggleBtnStyle(isGumloop, tab === "plan")} onPress={showPlan}>
+          <Text style={toggleTextStyle(isGumloop, tab === "plan")}>Query Plan</Text>
         </Pressable>
-        <Pressable style={toggleBtnStyle(isClickUp, tab === "output")} onPress={showOutput}>
-          <Text style={toggleTextStyle(isClickUp, tab === "output")}>Output</Text>
+        <Pressable style={toggleBtnStyle(isGumloop, tab === "output")} onPress={showOutput}>
+          <Text style={toggleTextStyle(isGumloop, tab === "output")}>Output</Text>
         </Pressable>
       </View>
 
@@ -652,13 +652,13 @@ const styles = StyleSheet.create((theme: Theme) => ({
     backgroundColor: theme.colors.surface1,
   },
   rsBarContent: { gap: theme.spacing[1], paddingHorizontal: theme.spacing[2], paddingVertical: 4 },
-  rsBarClickUp: {
+  rsBarGumloop: {
     flexGrow: 0,
     borderBottomWidth: 1,
     borderBottomColor: theme.chrome.cardBorder,
     backgroundColor: theme.chrome.cardBackground,
   },
-  rsBarContentClickUp: {
+  rsBarContentGumloop: {
     alignItems: "flex-end",
     gap: theme.spacing[4],
     paddingHorizontal: theme.spacing[3],

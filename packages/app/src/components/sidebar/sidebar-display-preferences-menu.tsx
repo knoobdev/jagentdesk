@@ -1,3 +1,4 @@
+import type { WorkspaceSort } from "@/projects/workspace-structure";
 import { PluginWorkspaceRowBadgePreferences } from "@/plugins/workspace-row-badge-items";
 import { useCallback, useMemo } from "react";
 import { Text, View, type PressableStateCallbackType } from "react-native";
@@ -15,11 +16,18 @@ import { HostStatusDot } from "@/components/host-status-dot";
 import { isWeb as platformIsWeb } from "@/constants/platform";
 import { useAppSettings, type WorkspaceTitleSource } from "@/hooks/use-settings";
 import { useHosts } from "@/runtime/host-runtime";
+import { useHostFeatureMap } from "@/runtime/host-features";
+import { useToast } from "@/contexts/toast-context";
 import { useSidebarViewStore, type SidebarGroupMode } from "@/stores/sidebar-view-store";
 
 const ThemedSettings2 = withUnistyles(Settings2);
 const filterColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 
+const SORT_ITEMS: DisplayPreferenceOption<WorkspaceSort>[] = [
+  { value: "created", label: "Created" },
+  { value: "lastPrompt", label: "Last prompt" },
+  { value: "manual", label: "Manual" },
+];
 const GROUP_MODE_ITEMS: Array<{ value: SidebarGroupMode; label: string }> = [
   { value: "project", label: "Project" },
   { value: "status", label: "Status" },
@@ -36,6 +44,8 @@ interface DisplayPreferenceOption<Value extends string> {
 }
 
 export function SidebarDisplayPreferencesMenu() {
+  const workspaceSort = useSidebarViewStore((state) => state.workspaceSort);
+  const setWorkspaceSort = useSidebarViewStore((state) => state.setWorkspaceSort);
   const showBackground = useSidebarViewStore((state) => state.showBackground);
   const toggleBackground = useSidebarViewStore((state) => state.toggleBackground);
   const groupMode = useSidebarViewStore((state) => state.groupMode);
@@ -44,6 +54,26 @@ export function SidebarDisplayPreferencesMenu() {
   const toggleHostFilter = useSidebarViewStore((state) => state.toggleHostFilter);
   const clearHostFilters = useSidebarViewStore((state) => state.clearHostFilters);
   const hosts = useHosts();
+  const toast = useToast();
+  const sortHostIds = useMemo(
+    () =>
+      hosts
+        .filter((host) => hostFilters.length === 0 || hostFilters.includes(host.serverId))
+        .map((host) => host.serverId),
+    [hostFilters, hosts],
+  );
+  const sortFeatures = useHostFeatureMap(sortHostIds, "workspaceSortTimes");
+  const sortSupported = [...sortFeatures.values()].every(Boolean);
+  const handleSortSelect = useCallback(
+    (sort: WorkspaceSort) => {
+      if (sort !== "manual" && !sortSupported) {
+        toast.error("Update your host to sort workspaces by creation time or last prompt.");
+        return;
+      }
+      setWorkspaceSort(sort);
+    },
+    [setWorkspaceSort, sortSupported, toast],
+  );
   const {
     settings: { workspaceTitleSource },
     updateSettings,
@@ -93,6 +123,22 @@ export function SidebarDisplayPreferencesMenu() {
         >
           Show background
         </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <View style={styles.menuHeader}>
+          <Text style={styles.menuHeaderLabel}>Sort workspaces</Text>
+          {sortSupported ? null : (
+            <Text style={styles.menuHeaderLabel}>Update your host for automatic sorting.</Text>
+          )}
+        </View>
+        {SORT_ITEMS.map((item) => (
+          <DisplayPreferenceMenuItem
+            key={item.value}
+            item={item}
+            isSelected={workspaceSort === item.value}
+            testIDPrefix="sidebar-sort"
+            onSelect={handleSortSelect}
+          />
+        ))}
         <DropdownMenuSeparator />
         <View style={styles.menuHeader}>
           <Text style={styles.menuHeaderLabel}>Group by</Text>

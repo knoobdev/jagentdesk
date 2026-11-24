@@ -2765,6 +2765,7 @@ export class VoiceAssistantWebSocketServer {
         timelineFreshnessCheck: true,
         // COMPAT(canonicalSubmittedPrompts): added in v0.2.6, remove gate after 2027-01-30.
         canonicalSubmittedPrompts: true,
+        workspaceSortTimes: true,
         agentMessageProvenance: true,
         agentMessageBatching: true,
         // COMPAT(agentActiveTurnBehaviors): added in v0.9.59, remove gate after 2027-05-24.

@@ -4,8 +4,8 @@ import { StyleSheet } from "react-native-unistyles";
 import TerminalEmulator, { type TerminalEmulatorHandle } from "@/components/terminal-emulator";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import type { Theme } from "@/styles/theme";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
-import { clickUpChipStyles } from "@/components/clickup-shell/list-styles";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { gumloopChipStyles } from "@/components/gumloop-shell/list-styles";
 
 interface ClusterPodShellProps {
   serverId: string;
@@ -20,15 +20,15 @@ interface ClusterPodShellProps {
 
 const encoder = new TextEncoder();
 
-/** Container picker: ClickUp's filter chips replace the classic bordered chips. */
-function containerChipStyle(isClickUp: boolean, selected: boolean) {
-  if (!isClickUp) return [styles.containerChip, selected && styles.containerChipActive];
-  return selected ? clickUpChipStyles.chipActive : clickUpChipStyles.chip;
+/** Container picker: Gumloop's filter chips replace the classic bordered chips. */
+function containerChipStyle(isGumloop: boolean, selected: boolean) {
+  if (!isGumloop) return [styles.containerChip, selected && styles.containerChipActive];
+  return selected ? gumloopChipStyles.chipActive : gumloopChipStyles.chip;
 }
 
-function containerChipTextStyle(isClickUp: boolean, selected: boolean) {
-  if (!isClickUp) return [styles.containerChipText, selected && styles.containerChipTextActive];
-  return selected ? clickUpChipStyles.textActive : clickUpChipStyles.text;
+function containerChipTextStyle(isGumloop: boolean, selected: boolean) {
+  if (!isGumloop) return [styles.containerChipText, selected && styles.containerChipTextActive];
+  return selected ? gumloopChipStyles.textActive : gumloopChipStyles.text;
 }
 
 function ContainerChip({
@@ -41,10 +41,10 @@ function ContainerChip({
   onSelect: (name: string) => void;
 }) {
   const handlePress = useCallback(() => onSelect(name), [name, onSelect]);
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   return (
-    <Pressable style={containerChipStyle(isClickUp, selected)} onPress={handlePress}>
-      <Text style={containerChipTextStyle(isClickUp, selected)} numberOfLines={1}>
+    <Pressable style={containerChipStyle(isGumloop, selected)} onPress={handlePress}>
+      <Text style={containerChipTextStyle(isGumloop, selected)} numberOfLines={1}>
         {name}
       </Text>
     </Pressable>
@@ -148,12 +148,12 @@ export function ClusterPodShell({
     onClose();
   }, [onClose]);
 
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={isClickUp ? styles.headerTextClickUp : styles.headerText}>Shell</Text>
+        <Text style={isGumloop ? styles.headerTextGumloop : styles.headerText}>Shell</Text>
         <Pressable style={styles.closeButton} onPress={handleClose}>
           <Text style={styles.closeButtonText}>Close</Text>
         </Pressable>
@@ -220,7 +220,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     textTransform: "uppercase" as const,
     letterSpacing: 0.5,
   },
-  headerTextClickUp: {
+  headerTextGumloop: {
     fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.semibold,
     color: theme.chrome.sectionTitleColor,

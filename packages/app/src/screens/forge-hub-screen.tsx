@@ -63,12 +63,12 @@ import {
 } from "lucide-react-native";
 import * as Clipboard from "expo-clipboard";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import {
-  clickUpChipStyles,
-  clickUpListStyles,
-  clickUpTabStyles,
-} from "@/components/clickup-shell/list-styles";
+  gumloopChipStyles,
+  gumloopListStyles,
+  gumloopTabStyles,
+} from "@/components/gumloop-shell/list-styles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   ForgeArtifactSchema,
@@ -905,12 +905,12 @@ function ProviderChip({
   active: boolean;
   onSelect: (choice: ProviderChoice) => void;
 }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const { theme } = useUnistyles();
   const handlePress = useCallback(() => onSelect(option.choice), [option.choice, onSelect]);
   return (
     <Pressable
-      style={providerPillStyle(isClickUp, active)}
+      style={providerPillStyle(isGumloop, active)}
       onPress={handlePress}
       testID={`forge-provider-${option.choice}`}
     >
@@ -921,7 +921,7 @@ function ProviderChip({
       ) : (
         <ProviderBadge forge={option.forge} small />
       )}
-      <Text style={providerPillTextStyle(isClickUp, active)}>{option.label}</Text>
+      <Text style={providerPillTextStyle(isGumloop, active)}>{option.label}</Text>
     </Pressable>
   );
 }
@@ -1429,7 +1429,7 @@ function ConnectionsView({
   /** True while the first connection fetch is in flight (no cached accounts). */
   loading?: boolean;
 }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const { theme } = useUnistyles();
   const isCompact = useIsCompactFormFactor();
   const [choice, setChoice] = useState<ProviderChoice>("github");
@@ -1506,7 +1506,7 @@ function ConnectionsView({
 
   return (
     <View style={styles.pane}>
-      <Text style={[styles.connSecTitle, isClickUp && styles.sectionTitleClickUp]}>
+      <Text style={[styles.connSecTitle, isGumloop && styles.sectionTitleGumloop]}>
         Connected accounts
       </Text>
 
@@ -1522,7 +1522,7 @@ function ConnectionsView({
                 style={[
                   styles.connColGrow,
                   styles.connHeadText,
-                  isClickUp && clickUpListStyles.columnHeader,
+                  isGumloop && gumloopListStyles.columnHeader,
                 ]}
               >
                 Account
@@ -1531,7 +1531,7 @@ function ConnectionsView({
                 style={[
                   styles.connColAuth,
                   styles.connHeadText,
-                  isClickUp && clickUpListStyles.columnHeader,
+                  isGumloop && gumloopListStyles.columnHeader,
                 ]}
               >
                 Auth
@@ -1540,7 +1540,7 @@ function ConnectionsView({
                 style={[
                   styles.connColScopes,
                   styles.connHeadText,
-                  isClickUp && clickUpListStyles.columnHeader,
+                  isGumloop && gumloopListStyles.columnHeader,
                 ]}
               >
                 Scopes
@@ -1549,7 +1549,7 @@ function ConnectionsView({
                 style={[
                   styles.connColStatus,
                   styles.connHeadText,
-                  isClickUp && clickUpListStyles.columnHeader,
+                  isGumloop && gumloopListStyles.columnHeader,
                 ]}
               >
                 Status
@@ -1572,7 +1572,7 @@ function ConnectionsView({
           toggle. The toolbar "+ Add connection" button and Re-auth still call
           onToggleAdd (kept for parity/back-compat), but visibility no longer
           depends on the `adding` flag. */}
-      <Text style={[styles.connSecTitle, isClickUp && styles.sectionTitleClickUp]}>
+      <Text style={[styles.connSecTitle, isGumloop && styles.sectionTitleGumloop]}>
         Add a connection
       </Text>
       <View style={styles.formCard}>
@@ -1644,26 +1644,26 @@ function ConnectionsView({
             <Text style={styles.fieldLabel}>Forge type</Text>
             <View style={styles.chipRow}>
               <Pressable
-                style={providerChipStyle(isClickUp, selfHostedForge === "github")}
+                style={providerChipStyle(isGumloop, selfHostedForge === "github")}
                 onPress={setForgeGithub}
               >
-                <Text style={providerChipTextStyle(isClickUp, selfHostedForge === "github")}>
+                <Text style={providerChipTextStyle(isGumloop, selfHostedForge === "github")}>
                   GitHub Enterprise
                 </Text>
               </Pressable>
               <Pressable
-                style={providerChipStyle(isClickUp, selfHostedForge === "gitlab")}
+                style={providerChipStyle(isGumloop, selfHostedForge === "gitlab")}
                 onPress={setForgeGitlab}
               >
-                <Text style={providerChipTextStyle(isClickUp, selfHostedForge === "gitlab")}>
+                <Text style={providerChipTextStyle(isGumloop, selfHostedForge === "gitlab")}>
                   GitLab self-managed
                 </Text>
               </Pressable>
               <Pressable
-                style={providerChipStyle(isClickUp, selfHostedForge === "gitea")}
+                style={providerChipStyle(isGumloop, selfHostedForge === "gitea")}
                 onPress={setForgeGitea}
               >
-                <Text style={providerChipTextStyle(isClickUp, selfHostedForge === "gitea")}>
+                <Text style={providerChipTextStyle(isGumloop, selfHostedForge === "gitea")}>
                   Gitea
                 </Text>
               </Pressable>
@@ -1890,17 +1890,17 @@ function AccountFilterChip({
   active: boolean;
   onSelect: (id: string | null) => void;
 }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const handlePress = useCallback(() => onSelect(id), [id, onSelect]);
   return (
     <Pressable
-      style={providerChipStyle(isClickUp, active)}
+      style={providerChipStyle(isGumloop, active)}
       onPress={handlePress}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
       testID={`forge-repos-account-${id ?? "all"}`}
     >
-      <Text style={providerChipTextStyle(isClickUp, active)} numberOfLines={1}>
+      <Text style={providerChipTextStyle(isGumloop, active)} numberOfLines={1}>
         {label}
       </Text>
     </Pressable>
@@ -1928,7 +1928,7 @@ function RepositoriesView({
   onRetry: () => void;
   connections: ForgeConnection[];
 }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const { theme } = useUnistyles();
   const isCompact = useIsCompactFormFactor();
   const [query, setQuery] = useState("");
@@ -2062,7 +2062,7 @@ function RepositoriesView({
                 style={[
                   styles.colGrow,
                   styles.tableHeadText,
-                  isClickUp && clickUpListStyles.columnHeader,
+                  isGumloop && gumloopListStyles.columnHeader,
                 ]}
               >
                 Repository
@@ -2071,7 +2071,7 @@ function RepositoriesView({
                 style={[
                   styles.colDefault,
                   styles.tableHeadText,
-                  isClickUp && clickUpListStyles.columnHeader,
+                  isGumloop && gumloopListStyles.columnHeader,
                 ]}
               >
                 Default
@@ -2080,7 +2080,7 @@ function RepositoriesView({
                 style={[
                   styles.colVisibility,
                   styles.tableHeadText,
-                  isClickUp && clickUpListStyles.columnHeader,
+                  isGumloop && gumloopListStyles.columnHeader,
                 ]}
               >
                 Visibility
@@ -2089,7 +2089,7 @@ function RepositoriesView({
                 style={[
                   styles.colOpenCr,
                   styles.tableHeadText,
-                  isClickUp && clickUpListStyles.columnHeader,
+                  isGumloop && gumloopListStyles.columnHeader,
                 ]}
               >
                 Open PR/MR · CI
@@ -2098,7 +2098,7 @@ function RepositoriesView({
                 style={[
                   styles.colUpdated,
                   styles.tableHeadText,
-                  isClickUp && clickUpListStyles.columnHeader,
+                  isGumloop && gumloopListStyles.columnHeader,
                 ]}
               >
                 Updated
@@ -2214,9 +2214,9 @@ function PullRequestRow({
 }
 
 function StateFilter({ state, onChange }: { state: CrState; onChange: (state: CrState) => void }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   return (
-    <View style={isClickUp ? clickUpTabStyles.row : styles.segmented}>
+    <View style={isGumloop ? gumloopTabStyles.row : styles.segmented}>
       {CR_STATES.map((s) => (
         <StateFilterButton key={s} value={s} active={state === s} onChange={onChange} />
       ))}
@@ -2233,15 +2233,15 @@ function StateFilterButton({
   active: boolean;
   onChange: (state: CrState) => void;
 }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const handlePress = useCallback(() => onChange(value), [value, onChange]);
   return (
     <Pressable
-      style={segmentBtnStyle(isClickUp, active)}
+      style={segmentBtnStyle(isGumloop, active)}
       onPress={handlePress}
       testID={`forge-cr-state-${value}`}
     >
-      <Text style={segmentTextStyle(isClickUp, active)}>
+      <Text style={segmentTextStyle(isGumloop, active)}>
         {value === "all" ? "All" : crStateLabel(value)}
       </Text>
     </Pressable>
@@ -2599,7 +2599,7 @@ function DiffFileList({
   error: string | null;
   onRetry: () => void;
 }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const { theme } = useUnistyles();
   if (error) {
     return (
@@ -2621,7 +2621,7 @@ function DiffFileList({
   return (
     <View style={styles.filesPane}>
       {files.length > 1 ? (
-        <Text style={[styles.sectionTitle, isClickUp && styles.sectionTitleClickUp]}>
+        <Text style={[styles.sectionTitle, isGumloop && styles.sectionTitleGumloop]}>
           {files.length} files changed — tap a file to view its diff
         </Text>
       ) : null}
@@ -2823,7 +2823,7 @@ function MergeBox({
   cr: ForgeChangeRequestSummary;
   onMerged: () => void;
 }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const { theme } = useUnistyles();
   const def = getForgeDefinitionOrNeutral(repo.forge);
   const [method, setMethod] = useState<ForgeMergeMethod>("merge");
@@ -2924,7 +2924,7 @@ function MergeBox({
             <Text style={styles.mergeableText}>No conflicts with the base branch.</Text>
           </View>
         ) : null}
-        <View style={isClickUp ? clickUpTabStyles.row : styles.segmented}>
+        <View style={isGumloop ? gumloopTabStyles.row : styles.segmented}>
           {MERGE_METHODS.map((m) => (
             <MergeMethodButton key={m} value={m} active={method === m} onSelect={setMethod} />
           ))}
@@ -2977,15 +2977,15 @@ function MergeMethodButton({
   active: boolean;
   onSelect: (method: ForgeMergeMethod) => void;
 }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const handlePress = useCallback(() => onSelect(value), [value, onSelect]);
   return (
     <Pressable
-      style={segmentBtnStyle(isClickUp, active)}
+      style={segmentBtnStyle(isGumloop, active)}
       onPress={handlePress}
       testID={`forge-merge-method-${value}`}
     >
-      <Text style={segmentTextStyle(isClickUp, active)}>{MERGE_METHOD_LABELS[value]}</Text>
+      <Text style={segmentTextStyle(isGumloop, active)}>{MERGE_METHOD_LABELS[value]}</Text>
     </Pressable>
   );
 }
@@ -3258,14 +3258,14 @@ function RailCheckRow({ job, divider }: { job: ForgePipelineJob; divider: boolea
 // linked issue, and a per-assignee field aren't in ForgeChangeRequestSummary, so they
 // are omitted rather than fabricated (see report note).
 function DetailsRailPanel({ cr }: { cr: ForgeChangeRequestSummary }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const hasLabels = Boolean(cr.labels && cr.labels.length > 0);
   const hasBranches = Boolean(cr.headRef || cr.baseRef);
   const hasAuthor = Boolean(cr.authorLogin);
   if (!hasLabels && !hasBranches && !hasAuthor) return null;
   return (
     <View style={styles.railDetails}>
-      <Text style={[styles.sectionTitle, isClickUp && styles.sectionTitleClickUp]}>Details</Text>
+      <Text style={[styles.sectionTitle, isGumloop && styles.sectionTitleGumloop]}>Details</Text>
       <View style={styles.metaGrid}>
         {hasLabels ? (
           <View style={styles.metaRow}>
@@ -3680,13 +3680,13 @@ function TabButton({
   active: boolean;
   onPress: () => void;
 }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   return (
     <Pressable
       style={[
         styles.tab,
         active && styles.tabActive,
-        active && isClickUp && styles.tabActiveClickUp,
+        active && isGumloop && styles.tabActiveGumloop,
       ]}
       onPress={onPress}
     >
@@ -3824,7 +3824,7 @@ function BranchRow({
 // history that used to live under the Code tab — it now has its own sub-nav tab
 // so the Code tab can be a file-tree browser (like GitHub's Code tab).
 function CommitsView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const { theme } = useUnistyles();
   const isCompact = useIsCompactFormFactor();
 
@@ -4112,7 +4112,7 @@ function CommitsView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }
                   style={[
                     styles.colGrow,
                     styles.tableHeadText,
-                    isClickUp && clickUpListStyles.columnHeader,
+                    isGumloop && gumloopListStyles.columnHeader,
                   ]}
                 >
                   Commit
@@ -4121,7 +4121,7 @@ function CommitsView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }
                   style={[
                     styles.colAuthor,
                     styles.tableHeadText,
-                    isClickUp && clickUpListStyles.columnHeader,
+                    isGumloop && gumloopListStyles.columnHeader,
                   ]}
                 >
                   Author
@@ -4130,7 +4130,7 @@ function CommitsView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }
                   style={[
                     styles.colSha,
                     styles.tableHeadText,
-                    isClickUp && clickUpListStyles.columnHeader,
+                    isGumloop && gumloopListStyles.columnHeader,
                   ]}
                 >
                   SHA
@@ -4139,7 +4139,7 @@ function CommitsView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }
                   style={[
                     styles.colCiCol,
                     styles.tableHeadText,
-                    isClickUp && clickUpListStyles.columnHeader,
+                    isGumloop && gumloopListStyles.columnHeader,
                   ]}
                 >
                   CI
@@ -4148,7 +4148,7 @@ function CommitsView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }
                   style={[
                     styles.colWhen2,
                     styles.tableHeadText,
-                    isClickUp && clickUpListStyles.columnHeader,
+                    isGumloop && gumloopListStyles.columnHeader,
                   ]}
                 >
                   When
@@ -4345,7 +4345,7 @@ function CodeFileLines({ code, ext }: { code: string; ext: string | null }) {
 // GitHub Code tab). Directory listing + breadcrumb navigation + a read-only file
 // viewer. Commit history lives in the separate Commits tab (CommitsView).
 function CodeView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const { theme } = useUnistyles();
 
   const [branches, setBranches] = useState<ForgeBranch[]>([]);
@@ -4574,20 +4574,20 @@ function CodeView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
             </Text>
           </View>
           {isMarkdown ? (
-            <View style={isClickUp ? clickUpTabStyles.row : styles.segmented}>
+            <View style={isGumloop ? gumloopTabStyles.row : styles.segmented}>
               <Pressable
-                style={segmentBtnStyle(isClickUp, viewMode === "preview")}
+                style={segmentBtnStyle(isGumloop, viewMode === "preview")}
                 onPress={() => setViewMode("preview")}
                 testID="forge-code-view-preview"
               >
-                <Text style={segmentTextStyle(isClickUp, viewMode === "preview")}>Preview</Text>
+                <Text style={segmentTextStyle(isGumloop, viewMode === "preview")}>Preview</Text>
               </Pressable>
               <Pressable
-                style={segmentBtnStyle(isClickUp, viewMode === "source")}
+                style={segmentBtnStyle(isGumloop, viewMode === "source")}
                 onPress={() => setViewMode("source")}
                 testID="forge-code-view-source"
               >
-                <Text style={segmentTextStyle(isClickUp, viewMode === "source")}>Source</Text>
+                <Text style={segmentTextStyle(isGumloop, viewMode === "source")}>Source</Text>
               </Pressable>
             </View>
           ) : null}
@@ -4941,7 +4941,7 @@ function PipelineRunDetail({
   releasesEnabled: boolean;
   onBack: () => void;
 }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const { theme } = useUnistyles();
   const isCompact = useIsCompactFormFactor();
   const statusColor = usePipelineStatusColor();
@@ -5060,7 +5060,7 @@ function PipelineRunDetail({
         <View key={`${stage.name}:${i}`}>
           {/* Providers without explicit stage grouping report a single,
               possibly unnamed stage — fall back to a "Jobs" header. */}
-          <Text style={[styles.stageHeader, isClickUp && clickUpListStyles.columnHeader]}>
+          <Text style={[styles.stageHeader, isGumloop && gumloopListStyles.columnHeader]}>
             {stage.name.trim() || "Jobs"}
           </Text>
           {stage.jobs.map((job) => (
@@ -5262,7 +5262,7 @@ function ArtifactsPanel({
   repo: ForgeRepo;
   runId: string;
 }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const { theme } = useUnistyles();
   const [artifacts, setArtifacts] = useState<ForgeArtifact[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -5326,7 +5326,7 @@ function ArtifactsPanel({
   return (
     <View style={styles.artifactsBody}>
       <View style={styles.artifactsLabelRow}>
-        <Text style={[styles.sectionTitle, isClickUp && styles.sectionTitleClickUp]}>
+        <Text style={[styles.sectionTitle, isGumloop && styles.sectionTitleGumloop]}>
           Artifacts
         </Text>
         <View style={styles.grow} />
@@ -5946,7 +5946,7 @@ function ReleaseDetail({
   release: ForgeRelease;
   onBack: () => void;
 }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const { theme } = useUnistyles();
   const def = getForgeDefinitionOrNeutral(repo.forge);
   const [detail, setDetail] = useState<ForgeRelease | null>(null);
@@ -6041,7 +6041,7 @@ function ReleaseDetail({
           </View>
           {shown.assets && shown.assets.length > 0 ? (
             <>
-              <Text style={[styles.sectionTitle, isClickUp && styles.sectionTitleClickUp]}>
+              <Text style={[styles.sectionTitle, isGumloop && styles.sectionTitleGumloop]}>
                 Assets
               </Text>
               <View style={styles.card}>
@@ -6063,7 +6063,7 @@ function ReleaseDetail({
 }
 
 function ReleasesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const { theme } = useUnistyles();
   const [releases, setReleases] = useState<ForgeRelease[] | null>(null);
   const [tags, setTags] = useState<ForgeTag[] | null>(null);
@@ -6194,7 +6194,7 @@ function ReleasesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo 
         </View>
       ) : null}
 
-      <Text style={[styles.sectionTitle, isClickUp && styles.sectionTitleClickUp]}>Releases</Text>
+      <Text style={[styles.sectionTitle, isGumloop && styles.sectionTitleGumloop]}>Releases</Text>
       {releases === null ? (
         <SkeletonRows rows={4} />
       ) : releases.length === 0 ? (
@@ -6221,7 +6221,7 @@ function ReleasesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo 
         </>
       )}
 
-      <Text style={[styles.sectionTitle, isClickUp && styles.sectionTitleClickUp]}>Tags</Text>
+      <Text style={[styles.sectionTitle, isGumloop && styles.sectionTitleGumloop]}>Tags</Text>
       {tags === null ? (
         <SkeletonRows rows={4} />
       ) : tags.length === 0 ? (
@@ -6298,16 +6298,16 @@ function IssueStateFilterButton({
   active: boolean;
   onChange: (state: IssueState) => void;
 }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const handlePress = useCallback(() => onChange(value), [value, onChange]);
   const label = value === "all" ? "All" : value.charAt(0).toUpperCase() + value.slice(1);
   return (
     <Pressable
-      style={segmentBtnStyle(isClickUp, active)}
+      style={segmentBtnStyle(isGumloop, active)}
       onPress={handlePress}
       testID={`forge-issue-state-${value}`}
     >
-      <Text style={segmentTextStyle(isClickUp, active)}>{label}</Text>
+      <Text style={segmentTextStyle(isGumloop, active)}>{label}</Text>
     </Pressable>
   );
 }
@@ -6325,7 +6325,7 @@ function IssueDetail({
   onBack: () => void;
   onChanged: () => void;
 }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const { theme } = useUnistyles();
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
@@ -6458,7 +6458,7 @@ function IssueDetail({
           </View>
           {comments.length > 0 ? (
             <>
-              <Text style={[styles.sectionTitle, isClickUp && styles.sectionTitleClickUp]}>
+              <Text style={[styles.sectionTitle, isGumloop && styles.sectionTitleGumloop]}>
                 Comments
               </Text>
               <View style={styles.card}>
@@ -6530,7 +6530,7 @@ function IssueDetail({
 }
 
 function IssuesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const { theme } = useUnistyles();
   const [state, setState] = useState<IssueState>("open");
   const [issues, setIssues] = useState<ForgeIssue[] | null>(null);
@@ -6720,7 +6720,7 @@ function IssuesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo })
         </View>
       ) : null}
 
-      <View style={isClickUp ? clickUpTabStyles.row : styles.segmented}>
+      <View style={isGumloop ? gumloopTabStyles.row : styles.segmented}>
         {ISSUE_STATES.map((s) => (
           <IssueStateFilterButton
             key={s}
@@ -6832,7 +6832,7 @@ function MemberRow({
 // Members list + invite form + per-row remove (§19.10). GitHub/GitLab support the
 // full set; Bitbucket lists best-effort. Roles are neutral; the daemon maps them.
 function MembersView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const { theme } = useUnistyles();
   const [members, setMembers] = useState<ForgeMember[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -6962,15 +6962,15 @@ function MembersView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }
           </View>
           <View style={styles.field}>
             <Text style={styles.fieldLabel}>Role</Text>
-            <View style={isClickUp ? clickUpTabStyles.row : styles.segmented}>
+            <View style={isGumloop ? gumloopTabStyles.row : styles.segmented}>
               {MEMBER_ROLES.map((r) => (
                 <Pressable
                   key={r}
-                  style={segmentBtnStyle(isClickUp, role === r)}
+                  style={segmentBtnStyle(isGumloop, role === r)}
                   onPress={() => setRole(r)}
                   testID={`forge-member-role-${r}`}
                 >
-                  <Text style={segmentTextStyle(isClickUp, role === r)}>
+                  <Text style={segmentTextStyle(isGumloop, role === r)}>
                     {MEMBER_ROLE_LABEL[r]}
                   </Text>
                 </Pressable>
@@ -7151,7 +7151,7 @@ function SidebarNavItem({
    *  aggregate connection health on the Connections item. */
   dotColor?: string;
 }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const { theme } = useUnistyles();
   const handlePress = useCallback(() => onSelect(section), [section, onSelect]);
   const tint = active ? theme.colors.foreground : theme.colors.foregroundMuted;
@@ -7160,7 +7160,7 @@ function SidebarNavItem({
       style={[
         styles.navItem,
         active && styles.navItemActive,
-        active && isClickUp && styles.navItemActiveClickUp,
+        active && isGumloop && styles.navItemActiveGumloop,
       ]}
       onPress={handlePress}
       testID={`forge-nav-${section}`}
@@ -7199,13 +7199,13 @@ function ForgeRailButton({
   theme: Theme;
   testID: string;
 }) {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   return (
     <Pressable
       style={[
         styles.railItem,
         active && styles.railItemActive,
-        active && isClickUp && styles.navItemActiveClickUp,
+        active && isGumloop && styles.navItemActiveGumloop,
       ]}
       onPress={onPress}
       disabled={active}
@@ -7222,7 +7222,7 @@ function ForgeRailButton({
 }
 
 export function ForgeHubScreen() {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const { theme } = useUnistyles();
   const routeServerId = useHostRouteServerId();
   const hosts = useHosts();
@@ -7711,7 +7711,7 @@ export function ForgeHubScreen() {
     <>
       {repositoriesNavItem}
       {connectionsNavItem}
-      <Text style={[styles.navGroupLabel, isClickUp && clickUpListStyles.columnHeader]}>
+      <Text style={[styles.navGroupLabel, isGumloop && gumloopListStyles.columnHeader]}>
         Matching repos
       </Text>
       {jumpMatches.length === 0 ? (
@@ -7725,7 +7725,7 @@ export function ForgeHubScreen() {
       {repositoriesNavItem}
       {connectionsNavItem}
       <Text
-        style={[styles.navGroupLabel, isClickUp && clickUpListStyles.columnHeader]}
+        style={[styles.navGroupLabel, isGumloop && gumloopListStyles.columnHeader]}
         numberOfLines={1}
       >
         {selectedRepo.owner}/{selectedRepo.name} · {selectedRepo.forge}
@@ -7802,7 +7802,7 @@ export function ForgeHubScreen() {
         active={section === "members"}
         onSelect={handleSelectSection}
       />
-      <Text style={[styles.navGroupLabel, isClickUp && clickUpListStyles.columnHeader]}>
+      <Text style={[styles.navGroupLabel, isGumloop && gumloopListStyles.columnHeader]}>
         Switch repo
       </Text>
       {quickRepos.length === 0 ? (
@@ -7822,7 +7822,7 @@ export function ForgeHubScreen() {
     <>
       {repositoriesNavItem}
       {connectionsNavItem}
-      <Text style={[styles.navGroupLabel, isClickUp && clickUpListStyles.columnHeader]}>
+      <Text style={[styles.navGroupLabel, isGumloop && gumloopListStyles.columnHeader]}>
         Switch repo
       </Text>
       {quickRepos.length === 0 ? (
@@ -7973,7 +7973,7 @@ export function ForgeHubScreen() {
             style={[
               styles.sectionTab,
               section === s && styles.sectionTabActive,
-              section === s && isClickUp && styles.tabActiveClickUp,
+              section === s && isGumloop && styles.tabActiveGumloop,
             ]}
             onPress={() => handleSelectSection(s)}
             testID={`forge-section-tab-${s}`}
@@ -8184,10 +8184,10 @@ export function ForgeHubScreen() {
         <View style={[styles.dragStrip, isWeb ? ({ WebkitAppRegion: "drag" } as object) : null]} />
       )}
       <View style={[styles.shell, isCompact && styles.shellStacked]}>
-        {/* The ClickUp theme already exposes global navigation in its own shell rail, so Forge's
+        {/* The Gumloop theme already exposes global navigation in its own shell rail, so Forge's
             private icon rail duplicates it — drop it there and only render it in themes that hide
             the app rail on Forge. */}
-        {isCompact || isClickUp ? null : (
+        {isCompact || isGumloop ? null : (
           <View style={styles.railCol}>
             <ForgeRailButton
               icon={House}
@@ -8372,35 +8372,35 @@ export function ForgeHubScreen() {
   );
 }
 
-// ClickUp swaps the boxed segmented filters for its underlined text tabs.
-function segmentBtnStyle(isClickUp: boolean, active: boolean) {
-  if (isClickUp) return active ? clickUpTabStyles.tabActive : clickUpTabStyles.tab;
+// Gumloop swaps the boxed segmented filters for its underlined text tabs.
+function segmentBtnStyle(isGumloop: boolean, active: boolean) {
+  if (isGumloop) return active ? gumloopTabStyles.tabActive : gumloopTabStyles.tab;
   return [styles.segmentBtn, active && styles.segmentBtnActive];
 }
 
-function segmentTextStyle(isClickUp: boolean, active: boolean) {
-  if (isClickUp) return active ? clickUpTabStyles.textActive : clickUpTabStyles.text;
+function segmentTextStyle(isGumloop: boolean, active: boolean) {
+  if (isGumloop) return active ? gumloopTabStyles.textActive : gumloopTabStyles.text;
   return [styles.segmentText, active && styles.segmentTextActive];
 }
 
-// ClickUp filter chips: white with a light border, the selected one lavender with violet text.
-function providerChipStyle(isClickUp: boolean, active: boolean) {
-  if (isClickUp) return active ? clickUpChipStyles.chipActive : clickUpChipStyles.chip;
+// Gumloop filter chips: white with a light border, the selected one lavender with violet text.
+function providerChipStyle(isGumloop: boolean, active: boolean) {
+  if (isGumloop) return active ? gumloopChipStyles.chipActive : gumloopChipStyles.chip;
   return [styles.providerChip, active && styles.providerChipActive];
 }
 
-function providerChipTextStyle(isClickUp: boolean, active: boolean) {
-  if (isClickUp) return active ? clickUpChipStyles.textActive : clickUpChipStyles.text;
+function providerChipTextStyle(isGumloop: boolean, active: boolean) {
+  if (isGumloop) return active ? gumloopChipStyles.textActive : gumloopChipStyles.text;
   return [styles.providerChipText, active && styles.providerChipTextActive];
 }
 
-function providerPillStyle(isClickUp: boolean, active: boolean) {
-  if (isClickUp) return active ? clickUpChipStyles.chipActive : clickUpChipStyles.chip;
+function providerPillStyle(isGumloop: boolean, active: boolean) {
+  if (isGumloop) return active ? gumloopChipStyles.chipActive : gumloopChipStyles.chip;
   return [styles.providerPill, active && styles.providerPillActive];
 }
 
-function providerPillTextStyle(isClickUp: boolean, active: boolean) {
-  if (isClickUp) return active ? clickUpChipStyles.textActive : clickUpChipStyles.text;
+function providerPillTextStyle(isGumloop: boolean, active: boolean) {
+  if (isGumloop) return active ? gumloopChipStyles.textActive : gumloopChipStyles.text;
   return [styles.providerPillText, active && styles.providerPillActiveText];
 }
 
@@ -8578,7 +8578,7 @@ const styles = StyleSheet.create((theme) => ({
   navItemActive: {
     backgroundColor: theme.colors.surfaceSidebarHover,
   },
-  navItemActiveClickUp: {
+  navItemActiveGumloop: {
     backgroundColor: theme.chrome.selectedRow,
   },
   navItemText: {
@@ -8727,8 +8727,8 @@ const styles = StyleSheet.create((theme) => ({
   pane: {
     gap: theme.spacing[3],
   },
-  // ClickUp section titles: sentence case, ink, semibold (no small uppercase eyebrow).
-  sectionTitleClickUp: {
+  // Gumloop section titles: sentence case, ink, semibold (no small uppercase eyebrow).
+  sectionTitleGumloop: {
     fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.semibold,
     color: theme.chrome.sectionTitleColor,
@@ -8772,7 +8772,7 @@ const styles = StyleSheet.create((theme) => ({
     minWidth: 0,
   },
   // Card tokens come from theme.chrome: classic themes carry the mockup's 8 / --border /
-  // --surface1, ClickUp its white 10px card with the #ececec hairline.
+  // --surface1, Gumloop its white 10px card with the #ececec hairline.
   card: {
     borderRadius: theme.chrome.cardRadius, // mockup exact value (.card border-radius --r-lg)
     borderWidth: 1, // mockup exact value (.card border)
@@ -9807,8 +9807,8 @@ const styles = StyleSheet.create((theme) => ({
   sectionTabActive: {
     borderBottomColor: theme.colors.accent,
   },
-  // ClickUp underlines the active tab in ink rather than the accent.
-  tabActiveClickUp: {
+  // Gumloop underlines the active tab in ink rather than the accent.
+  tabActiveGumloop: {
     borderBottomColor: theme.colors.foreground,
   },
   sectionTabText: {

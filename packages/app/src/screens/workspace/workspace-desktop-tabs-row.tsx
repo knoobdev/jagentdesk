@@ -4,7 +4,7 @@ import { buildWorkspaceTabPersistenceKey, type WorkspaceTabTarget } from "@/work
 import { useInstalledPlugins } from "@/plugins/registry";
 import { pluginPanelSupportsLocation } from "@/plugins/workspace-panels/locations";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import React, {
   useCallback,
   useEffect,
@@ -639,15 +639,15 @@ function TabChip({
   );
 
   const tabAccessibilityState = useMemo(() => ({ selected: isActive }), [isActive]);
-  // ClickUp marks the active view tab with an underline; the classic shell uses a top edge.
-  const isClickUp = useIsClickUpTheme();
+  // Gumloop marks the active view tab with an underline; the classic shell uses a top edge.
+  const isGumloop = useIsGumloopTheme();
   const tabFocusIndicatorStyle = useMemo(
     () => [
       styles.tabFocusIndicator,
-      isClickUp && styles.tabFocusIndicatorUnderline,
       !isFocused && styles.tabFocusIndicatorUnfocused,
+      isGumloop && styles.tabFocusIndicatorUnderline,
     ],
-    [isClickUp, isFocused],
+    [isGumloop, isFocused],
   );
   const tabLabelSkeletonStyle = useMemo(
     () => [
@@ -659,10 +659,11 @@ function TabChip({
   const tabLabelStyle = useMemo(
     () => [
       styles.tabLabel,
+      isGumloop && styles.gumloopTabLabel,
       isHighlighted && styles.tabLabelActive,
       showTrailingAffordance && styles.tabLabelWithCloseButton,
     ],
-    [isHighlighted, showTrailingAffordance],
+    [isGumloop, isHighlighted, showTrailingAffordance],
   );
 
   return (
@@ -1020,12 +1021,13 @@ export function WorkspaceDesktopTabsRow({
     [layout.requiresHorizontalScrollFallback],
   );
 
+  const gumloop = useIsGumloopTheme();
+  const rowStyle = useMemo(
+    () => [styles.tabsContainer, gumloop && host === "explorer" && styles.gumloopInspectorTabs],
+    [gumloop, host],
+  );
   const row = (
-    <View
-      style={styles.tabsContainer}
-      testID="workspace-tabs-row"
-      onLayout={handleTabsContainerLayout}
-    >
+    <View style={rowStyle} testID="workspace-tabs-row" onLayout={handleTabsContainerLayout}>
       {focusModeEnabled ? (
         <View style={styles.exitFocusModeSlot} onLayout={handleExitFocusModeLayout}>
           <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
@@ -1262,6 +1264,8 @@ function ResolvedDesktopTabChip({
 }
 
 const styles = StyleSheet.create((theme) => ({
+  gumloopInspectorTabs: { height: 64 },
+  gumloopTabLabel: { fontSize: 16 },
   tabsContainer: {
     minWidth: 0,
     height: WORKSPACE_SECONDARY_HEADER_HEIGHT,
@@ -1339,6 +1343,7 @@ const styles = StyleSheet.create((theme) => ({
   tabFocusIndicatorUnderline: {
     top: undefined,
     bottom: 0,
+    backgroundColor: theme.colors.foreground,
   },
   tabFocusIndicatorUnfocused: {
     backgroundColor: theme.colors.borderAccent,

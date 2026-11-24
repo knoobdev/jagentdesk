@@ -13,6 +13,8 @@ import { WindowChromeSafeArea } from "@/utils/desktop-window";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 
 interface ScreenHeaderProps {
+  center?: ReactNode;
+  desktopHeight?: number;
   left?: ReactNode;
   right?: ReactNode;
   leftStyle?: StyleProp<ViewStyle>;
@@ -28,6 +30,8 @@ interface ScreenHeaderProps {
 export function ScreenHeader({
   left,
   right,
+  center,
+  desktopHeight,
   leftStyle,
   rightStyle,
   borderless,
@@ -44,7 +48,14 @@ export function ScreenHeader({
     () => [styles.inner, { paddingTop: insets.top + topPadding }],
     [insets.top, topPadding],
   );
-  const rowStyle = useMemo(() => [styles.row, borderless && styles.borderless], [borderless]);
+  const rowStyle = useMemo(
+    () => [
+      styles.row,
+      !isMobile && desktopHeight ? { height: desktopHeight } : null,
+      borderless && styles.borderless,
+    ],
+    [borderless, desktopHeight, isMobile],
+  );
   const leftCombinedStyle = useMemo(() => [styles.left, leftStyle], [leftStyle]);
   const rightCombinedStyle = useMemo(() => [styles.right, rightStyle], [rightStyle]);
 
@@ -60,6 +71,11 @@ export function ScreenHeader({
           <TitlebarDragRegion />
           <View style={leftCombinedStyle}>{left}</View>
           <View style={rightCombinedStyle}>{right}</View>
+          {center ? (
+            <View style={styles.center} pointerEvents="none">
+              {center}
+            </View>
+          ) : null}
         </WindowChromeSafeArea>
       </View>
     </View>
@@ -67,6 +83,13 @@ export function ScreenHeader({
 }
 
 const styles = StyleSheet.create((theme) => ({
+  center: {
+    position: "absolute",
+    inset: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 100,
+  },
   header: {
     backgroundColor: theme.colors.surface0,
   },

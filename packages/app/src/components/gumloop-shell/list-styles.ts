@@ -2,11 +2,9 @@ import { StyleSheet } from "react-native-unistyles";
 import type { Theme } from "@/styles/theme";
 
 /**
- * ClickUp's list anatomy, shared by list screens while a ClickUp theme is active: a bordered
- * uppercase group pill ("OPEN 10" in ClickUp), sentence-case gray column headers, and rows
- * separated by a hairline divider instead of floating on the page.
+ * Shared list geometry and muted column headers for Gumloop screens.
  */
-export const clickUpListStyles = StyleSheet.create((theme: Theme) => ({
+export const gumloopListStyles = StyleSheet.create((theme: Theme) => ({
   groupRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -21,16 +19,14 @@ export const clickUpListStyles = StyleSheet.create((theme: Theme) => ({
     gap: theme.spacing[1],
     paddingHorizontal: theme.spacing[2],
     paddingVertical: 3,
-    borderRadius: theme.borderRadius.md,
-    borderWidth: 1,
-    borderColor: theme.chrome.outlineBorder,
-    backgroundColor: theme.chrome.outlineBackground,
+    borderRadius: 0,
+    backgroundColor: "transparent",
   },
   groupPillText: {
-    fontSize: 11,
+    fontSize: 14,
     fontWeight: theme.fontWeight.semibold,
     letterSpacing: 0.3,
-    textTransform: "uppercase",
+    textTransform: "none",
     color: theme.colors.foreground,
   },
   groupCount: {
@@ -38,57 +34,45 @@ export const clickUpListStyles = StyleSheet.create((theme: Theme) => ({
     color: theme.colors.foregroundMuted,
   },
   row: {
+    minHeight: 72,
     borderBottomWidth: 1,
     borderBottomColor: theme.chrome.cardBorder,
   },
   columnHeader: {
-    fontSize: theme.fontSize.xs,
-    fontWeight: theme.fontWeight.medium,
+    fontSize: 16,
+    fontWeight: theme.fontWeight.normal,
     color: theme.colors.foregroundMuted,
     textTransform: "none",
     letterSpacing: 0,
   },
 }));
 
-/** ClickUp's text tabs (To Do / Done / Delegated): no pill, an ink underline on the active one. */
-export const clickUpTabStyles = StyleSheet.create((theme: Theme) => ({
+/** Segmented filters share a neutral tray and a raised selected segment. */
+export const gumloopTabStyles = StyleSheet.create((theme: Theme) => ({
   row: {
     flexDirection: "row",
-    alignItems: "flex-end",
-    gap: theme.spacing[6],
-    borderBottomWidth: 1,
-    borderBottomColor: theme.chrome.cardBorder,
+    alignItems: "center",
+    gap: 4,
+    padding: 4,
+    borderRadius: 12,
+    backgroundColor: theme.colors.surface2,
   },
-  tab: {
-    paddingTop: theme.spacing[1],
-    paddingBottom: theme.spacing[2],
-    borderBottomWidth: 2,
-    borderBottomColor: "transparent",
-    marginBottom: -1,
-  },
+  tab: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
   tabActive: {
-    paddingTop: theme.spacing[1],
-    paddingBottom: theme.spacing[2],
-    borderBottomWidth: 2,
-    borderBottomColor: theme.colors.foreground,
-    marginBottom: -1,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: theme.colors.surface1,
+    ...theme.shadow.sm,
   },
-  text: {
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.foregroundMuted,
-  },
-  textActive: {
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.semibold,
-    color: theme.colors.foreground,
-  },
+  text: { fontSize: 16, color: theme.colors.foregroundMuted },
+  textActive: { fontSize: 16, fontWeight: "500", color: theme.colors.foreground },
 }));
 
 /**
- * ClickUp's filter chips ("Assigned to me" / "Mentions" / "Unread" on iOS, the toolbar pills on
- * web): white with a light border, the selected one lavender with violet text.
+ * Filters use neutral surfaces and the theme's selected treatment.
  */
-export const clickUpChipStyles = StyleSheet.create((theme: Theme) => ({
+export const gumloopChipStyles = StyleSheet.create((theme: Theme) => ({
   chip: {
     flexDirection: "row",
     alignItems: "center",

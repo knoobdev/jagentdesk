@@ -90,6 +90,7 @@ export const ar: TranslationResources = {
       placeholder:
         "\u0627\u0644\u0628\u062D\u062B \u0641\u064A \u0645\u0633\u0627\u062D\u0627\u062A \u0627\u0644\u0639\u0645\u0644 \u0648\u0627\u0644\u0645\u0644\u0641\u0627\u062A \u0648\u0627\u0644\u0625\u062C\u0631\u0627\u0621\u0627\u062A...",
       noMatches: "\u0644\u0627 \u062A\u0648\u062C\u062F \u0645\u0628\u0627\u0631\u064A\u0627\u062A",
+      copyBrowserHostName: "Copy browser host name",
       actions: "\u0627\u0644\u0625\u062C\u0631\u0627\u0621\u0627\u062A",
       workspaces: "\u0645\u0633\u0627\u062D\u0627\u062A \u0627\u0644\u0639\u0645\u0644",
       agents: "\u0627\u0644\u0648\u0643\u0644\u0627\u0621",
@@ -2178,8 +2179,8 @@ export const ar: TranslationResources = {
           claude: "كلود",
           ghostty: "شبحي",
           pureBlack: "أسود نقي",
-          clickup: "ClickUp",
-          clickupDark: "ClickUp Dark",
+          gumloop: "Gumloop",
+          gumloopDark: "Gumloop Dark",
           auto: "نظام",
         },
       },
@@ -2781,7 +2782,7 @@ export const ar: TranslationResources = {
       },
     },
   },
-  clickupShell: {
+  gumloopShell: {
     search: "بحث",
     newWorkspace: "جديد",
     workspaces: "مساحات العمل",

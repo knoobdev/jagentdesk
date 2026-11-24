@@ -15,7 +15,7 @@ import {
   buildSettingsRoute,
   parseHostWorkspaceRouteFromPathname,
 } from "@/utils/host-routes";
-import { useIsClickUpTheme } from "./use-clickup-chrome";
+import { useIsGumloopTheme } from "./use-gumloop-chrome";
 
 const TAB_BAR_HEIGHT = 56;
 const ICON_SIZE = 22;
@@ -57,12 +57,12 @@ const Tab = memo(function Tab({ icon, label, isActive, onPress, testID }: TabPro
 });
 
 /**
- * ClickUp's iOS tab bar: four destinations around a violet "Create" square. It shows on list
+ * Gumloop's iOS tab bar: four destinations around a violet "Create" square. It shows on list
  * screens and hides inside a workspace, where the composer owns the bottom edge.
  */
-export function ClickUpMobileTabBar({ chromeEnabled }: { chromeEnabled: boolean }) {
+export function GumloopMobileTabBar({ chromeEnabled }: { chromeEnabled: boolean }) {
   const { t } = useTranslation();
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const isCompact = useIsCompactFormFactor();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
@@ -77,49 +77,49 @@ export function ClickUpMobileTabBar({ chromeEnabled }: { chromeEnabled: boolean 
   );
 
   const isWorkspaceRoute = parseHostWorkspaceRouteFromPathname(pathname) !== null;
-  if (!isClickUp || !isCompact || !chromeEnabled || isWorkspaceRoute) return null;
+  if (!isGumloop || !isCompact || !chromeEnabled || isWorkspaceRoute) return null;
 
   return (
-    <View style={barStyle} accessibilityRole="tablist" testID="clickup-mobile-tab-bar">
+    <View style={barStyle} accessibilityRole="tablist" testID="gumloop-mobile-tab-bar">
       <Tab
         icon={Home}
         label={t("sidebar.actions.home")}
         isActive={pathname === "/open-project"}
         onPress={handleHome}
-        testID="clickup-tab-home"
+        testID="gumloop-tab-home"
       />
       <Tab
         icon={LayoutList}
-        label={t("clickupShell.workspaces")}
+        label={t("gumloopShell.workspaces")}
         isActive={false}
         onPress={toggleMobileAgentList}
-        testID="clickup-tab-workspaces"
+        testID="gumloop-tab-workspaces"
       />
       <Pressable
         onPress={handleCreate}
         style={styles.tab}
         accessibilityRole="button"
         accessibilityLabel={t("sidebar.actions.newWorkspace")}
-        testID="clickup-tab-create"
+        testID="gumloop-tab-create"
       >
         <View style={styles.createSquare}>
           <CreatePlus />
         </View>
-        <Text style={styles.label}>{t("clickupShell.newWorkspace")}</Text>
+        <Text style={styles.label}>{t("gumloopShell.newWorkspace")}</Text>
       </Pressable>
       <Tab
         icon={History}
         label={t("sidebar.sections.sessions")}
         isActive={pathname.includes("/sessions") && !pathname.includes("/shared-sessions")}
         onPress={handleHistory}
-        testID="clickup-tab-history"
+        testID="gumloop-tab-history"
       />
       <Tab
         icon={Settings}
         label={t("sidebar.actions.settings")}
         isActive={pathname.startsWith("/settings")}
         onPress={handleSettings}
-        testID="clickup-tab-settings"
+        testID="gumloop-tab-settings"
       />
     </View>
   );

@@ -1,3 +1,4 @@
+import { useGumloopSidebarShortcut } from "@/components/gumloop-shell/use-sidebar-shortcut";
 import { NotificationOpenRouter } from "@/notification-open/react";
 import { useHardwareKeyboardPresent } from "@/keyboard";
 import { AppearanceSystemBars } from "@/appearance/system-bars";
@@ -128,15 +129,14 @@ import type { ThemeName } from "@/styles/theme";
 import { installWebScrollbarStyles } from "@/styles/install-web-scrollbar-styles";
 import type { HostProfile } from "@/types/host-connection";
 import { toggleDesktopSidebarsWithCheckoutIntent } from "@/utils/desktop-sidebar-toggle";
-import { ClickUpMobileTabBar } from "@/components/clickup-shell/clickup-mobile-tab-bar";
-import { ClickUpRail } from "@/components/clickup-shell/clickup-rail";
-import { ClickUpTopBar } from "@/components/clickup-shell/clickup-top-bar";
-import { useClickUpDesktopShell } from "@/components/clickup-shell/use-clickup-chrome";
+import { GumloopMobileTabBar } from "@/components/gumloop-shell/gumloop-mobile-tab-bar";
+import { GumloopSidebar } from "@/components/gumloop-shell/sidebar";
+
+import { useGumloopDesktopShell } from "@/components/gumloop-shell/use-gumloop-chrome";
 import {
   useHasWindowChromeObstruction,
   WindowChromeProvider,
   WindowChromeRegion,
-  WindowChromeRootRegion,
   WindowChromeSafeArea,
 } from "@/utils/desktop-window";
 import {
@@ -354,8 +354,8 @@ interface AppContainerProps {
 }
 
 const THEME_CYCLE_ORDER: ThemeName[] = [
-  "clickup",
-  "clickupDark",
+  "gumloop",
+  "gumloopDark",
   "dark",
   "zinc",
   "midnight",
@@ -424,12 +424,15 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
   const pathname = usePathname();
   // Forge Hub renders its own thin icon-rail (forge-hub-screen.tsx), so on that
   // route the wide app rail is hidden and Forge fills the full window width.
-  const onForge = !!pathname && pathname.endsWith("/forge");
+
   const isWorkspaceRoute = parseHostWorkspaceRouteFromPathname(pathname) !== null;
   const isWorkspaceFocusModeEnabled = isWorkspaceRoute && isFocusModeEnabled;
   const chromeEnabled = chromeEnabledOverride ?? daemons.length > 0;
-  const clickUpShell = useClickUpDesktopShell(chromeEnabled);
-  const hasMountedDesktopSidebar = useLatchedBoolean(chromeEnabled);
+  const gumloopShell = useGumloopDesktopShell(chromeEnabled);
+  useGumloopSidebarShortcut(gumloopShell);
+  const onForge = !gumloopShell && pathname.endsWith("/forge");
+  const sidebarEnabled = chromeEnabled || gumloopShell;
+  const hasMountedDesktopSidebar = useLatchedBoolean(sidebarEnabled);
   const toggleAgentList = isCompactLayout ? toggleMobileAgentList : toggleDesktopAgentList;
   const toggleDesktopSidebars = useCallback(() => {
     const { desktop } = usePanelStore.getState();
@@ -473,15 +476,17 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
   });
   const desktopSidebarMounted = hasMountedDesktopSidebar && !isWorkspaceFocusModeEnabled;
   const desktopSidebarVisible = resolveDesktopSidebarVisibility({
-    chromeEnabled,
+    chromeEnabled: sidebarEnabled,
     isCompactLayout,
     isMounted: desktopSidebarMounted,
     isOpen: isDesktopAgentListOpen,
-    canShare: canDesktopAppSidebarShare({
-      contentMinimumWidth: appContentMinimumWidth,
-      requestedSidebarWidth: sidebarWidth,
-      viewportWidth,
-    }),
+    canShare:
+      gumloopShell ||
+      canDesktopAppSidebarShare({
+        contentMinimumWidth: appContentMinimumWidth,
+        requestedSidebarWidth: sidebarWidth,
+        viewportWidth,
+      }),
   });
   const hasTopLeftWindowControls = useHasWindowChromeObstruction("top-left");
   const appChromeLayout = resolveDesktopAppChromeLayout({
@@ -489,34 +494,32 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
     hasTopLeftWindowControls,
     sidebarControlsEnabled: chromeEnabled && !isWorkspaceFocusModeEnabled,
   });
-  const sidebarChrome = (
-    <SidebarChrome
-      mounted={isCompactLayout ? chromeEnabled : desktopSidebarMounted}
-      visible={isCompactLayout ? chromeEnabled : desktopSidebarVisible}
-      keyboardShortcutsEnabled={keyboardShortcutsEnabled}
-    />
+  const sidebarChrome = useMemo(
+    () => (
+      <SidebarChrome
+        mounted={isCompactLayout ? chromeEnabled : desktopSidebarMounted}
+        visible={isCompactLayout ? chromeEnabled : desktopSidebarVisible}
+        keyboardShortcutsEnabled={keyboardShortcutsEnabled}
+      />
+    ),
+    [
+      isCompactLayout,
+      chromeEnabled,
+      desktopSidebarMounted,
+      desktopSidebarVisible,
+      keyboardShortcutsEnabled,
+    ],
   );
   const workspaceChrome = (
-    <View style={rowStyle}>
-      {!isCompactLayout && !onForge ? (
-        <WindowChromeRegion corners={appChromeLayout.sidebarCorners}>
-          {sidebarChrome}
-        </WindowChromeRegion>
-      ) : null}
-      {isCompactLayout ? (
-        <CompactExplorerSidebarHost enabled={chromeEnabled}>
-          <WindowChromeRegion corners={chromeEnabled ? "both" : appChromeLayout.contentCorners}>
-            <View style={flexStyle}>{children}</View>
-          </WindowChromeRegion>
-        </CompactExplorerSidebarHost>
-      ) : (
-        // With the wide rail hidden on Forge, the content sits against the left
-        // window edge, so it must own both corners to keep the window rounded.
-        <WindowChromeRegion corners={onForge ? "both" : appChromeLayout.contentCorners}>
-          <View style={flexStyle}>{children}</View>
-        </WindowChromeRegion>
-      )}
-    </View>
+    <AppWorkspaceChrome
+      isCompactLayout={isCompactLayout}
+      onForge={onForge}
+      sidebarChrome={sidebarChrome}
+      chromeEnabled={chromeEnabled}
+      layout={appChromeLayout}
+    >
+      {children}
+    </AppWorkspaceChrome>
   );
 
   const overlays = (
@@ -545,25 +548,15 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
     </>
   );
 
-  // The ClickUp theme brings ClickUp's desktop shell: a global top bar, a vertical icon rail and
-  // the sidebar plus content inside one rounded, bordered panel. Other themes keep the classic shell.
-  const surface = clickUpShell ? (
-    <View style={layoutStyles.clickUpCanvas}>
-      <ClickUpTopBar />
-      <WindowChromeRootRegion corners="none">
-        <View style={rowStyle}>
-          <ClickUpRail />
-          <View style={layoutStyles.clickUpPanel}>{workspaceChrome}</View>
-        </View>
-      </WindowChromeRootRegion>
-      {overlays}
-    </View>
-  ) : (
+  const surface = (
     <View style={layoutStyles.surfaceFill}>
       {workspaceChrome}
-      <ClickUpMobileTabBar chromeEnabled={chromeEnabled} />
+      {gumloopShell ? null : <GumloopMobileTabBar chromeEnabled={chromeEnabled} />}
       <WindowSidebarToggleSlot
-        visible={!isCompactLayout && appChromeLayout.sidebarToggleOwner === "window"}
+        visible={
+          !isCompactLayout &&
+          (gumloopShell ? !isDesktopAgentListOpen : appChromeLayout.sidebarToggleOwner === "window")
+        }
       />
       {overlays}
     </View>
@@ -580,6 +573,44 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
       <WorkspaceArchiveShortcutHandler />
       {content}
     </CommandCenterProvider>
+  );
+}
+
+interface AppWorkspaceChromeProps {
+  isCompactLayout: boolean;
+  onForge: boolean;
+  sidebarChrome: ReactNode;
+  chromeEnabled: boolean;
+  layout: ReturnType<typeof resolveDesktopAppChromeLayout>;
+  children: ReactNode;
+}
+function AppWorkspaceChrome({
+  isCompactLayout,
+  onForge,
+  sidebarChrome,
+  chromeEnabled,
+  layout,
+  children,
+}: AppWorkspaceChromeProps) {
+  return (
+    <View style={rowStyle}>
+      {!isCompactLayout && !onForge ? (
+        <WindowChromeRegion corners={layout.sidebarCorners}>{sidebarChrome}</WindowChromeRegion>
+      ) : null}
+      {isCompactLayout ? (
+        <CompactExplorerSidebarHost enabled={chromeEnabled}>
+          <WindowChromeRegion corners={chromeEnabled ? "both" : layout.contentCorners}>
+            <View style={flexStyle}>{children}</View>
+          </WindowChromeRegion>
+        </CompactExplorerSidebarHost>
+      ) : (
+        // With the wide rail hidden on Forge, the content sits against the left
+        // window edge, so it must own both corners to keep the window rounded.
+        <WindowChromeRegion corners={onForge ? "both" : layout.contentCorners}>
+          <View style={flexStyle}>{children}</View>
+        </WindowChromeRegion>
+      )}
+    </View>
   );
 }
 
@@ -610,6 +641,7 @@ function SidebarChrome({
   keyboardShortcutsEnabled: boolean;
 }) {
   const isCompactLayout = useIsCompactFormFactor();
+  const gumloopShell = useGumloopDesktopShell(true);
   const isOpen = usePanelStore((state) =>
     selectIsAgentListOpen(state, { isCompact: isCompactLayout }),
   );
@@ -620,7 +652,8 @@ function SidebarChrome({
       active={active}
       keyboardNavigationActive={keyboardShortcutsEnabled && hardwareKeyboardPresent}
     >
-      {mounted ? <LeftSidebar active={active} /> : null}
+      {mounted && gumloopShell ? <GumloopSidebar active={active} /> : null}
+      {mounted && !gumloopShell ? <LeftSidebar active={active} /> : null}
       <WorkspaceShortcutTargetsSubscriber enabled={keyboardShortcutsEnabled} />
     </SidebarModelProvider>
   );
@@ -1185,11 +1218,11 @@ const layoutStyles = StyleSheet.create((theme) => ({
     flex: 1,
     backgroundColor: theme.colors.surface0,
   },
-  clickUpCanvas: {
+  gumloopCanvas: {
     flex: 1,
     backgroundColor: theme.chrome.canvas,
   },
-  clickUpPanel: {
+  gumloopPanel: {
     flex: 1,
     borderColor: theme.chrome.panelBorder,
     marginLeft: theme.spacing[2],

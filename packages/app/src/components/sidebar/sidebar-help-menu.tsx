@@ -1,8 +1,9 @@
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { SidebarFooterIconHighlight } from "./sidebar-footer-icon-highlight";
 import { openChangelog } from "@/changelog";
 import { useCallback, useState } from "react";
 import { Text, View } from "react-native";
-import { Activity, CircleHelp, Keyboard } from "lucide-react-native";
+import { Activity, CircleHelp, Keyboard, MoreVertical } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import {
@@ -28,6 +29,7 @@ import { resolveAppVersion } from "@/utils/app-version";
 
 const ThemedActivity = withUnistyles(Activity);
 const ThemedCircleHelp = withUnistyles(CircleHelp);
+const ThemedMoreVertical = withUnistyles(MoreVertical);
 const ThemedKeyboard = withUnistyles(Keyboard);
 const foregroundColorMapping = (theme: Theme) => ({ color: theme.colors.foreground });
 const foregroundMutedColorMapping = (theme: Theme) => ({
@@ -63,6 +65,8 @@ function HostVersionHint({ host }: { host: HostProfile }) {
 export function SidebarHelpMenu() {
   const { t } = useTranslation();
   const isCompactLayout = useIsCompactFormFactor();
+  const gumloop = useIsGumloopTheme();
+  const MenuIcon = gumloop ? ThemedMoreVertical : ThemedCircleHelp;
   const openAppDiagnostic = useAppDiagnosticStore((state) => state.open);
   const setShortcutsDialogOpen = useKeyboardShortcutsStore((state) => state.setShortcutsDialogOpen);
   const [open, setOpen] = useState(false);
@@ -80,7 +84,7 @@ export function SidebarHelpMenu() {
         <TooltipTrigger asChild>
           <View>
             <DropdownMenuTrigger
-              style={styles.trigger}
+              style={isCompactLayout || gumloop ? styles.triggerTouch : styles.trigger}
               testID="sidebar-help"
               accessibilityRole="button"
               accessibilityLabel={t("sidebar.help.trigger")}
@@ -88,7 +92,7 @@ export function SidebarHelpMenu() {
               {({ hovered, pressed, open: menuOpen }) => (
                 <>
                   <SidebarFooterIconHighlight visible={pressed || menuOpen} />
-                  <ThemedCircleHelp
+                  <MenuIcon
                     size={ICON_SIZE.md}
                     uniProps={hovered ? foregroundColorMapping : foregroundMutedColorMapping}
                   />
@@ -137,6 +141,7 @@ export function SidebarHelpMenu() {
 }
 
 const styles = StyleSheet.create((theme) => ({
+  triggerTouch: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   trigger: {
     width: 28,
     height: 28,

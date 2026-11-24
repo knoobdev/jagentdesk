@@ -89,6 +89,7 @@ describe("sidebar view store", () => {
         },
       }),
     ).toEqual({
+      workspaceSort: "created",
       showBackground: false,
       groupMode: "status",
       hostFilters: [],
@@ -102,6 +103,7 @@ describe("sidebar view store", () => {
         hostFilter: "host-a",
       }),
     ).toEqual({
+      workspaceSort: "created",
       showBackground: false,
       groupMode: "status",
       hostFilters: ["host-a"],
@@ -115,6 +117,7 @@ describe("sidebar view store", () => {
         hostFilters: ["host-a", "host-b"],
       }),
     ).toEqual({
+      workspaceSort: "created",
       showBackground: false,
       groupMode: "status",
       hostFilters: ["host-a", "host-b"],

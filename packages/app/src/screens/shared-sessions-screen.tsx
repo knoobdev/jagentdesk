@@ -6,8 +6,8 @@ import { PageHeader } from "@/components/headers/page-header";
 import { Share2 } from "lucide-react-native";
 import { SessionSharesCard } from "@/screens/settings/session-shares-card";
 import { useHosts } from "@/runtime/host-runtime";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
-import { clickUpListStyles } from "@/components/clickup-shell/list-styles";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { gumloopListStyles } from "@/components/gumloop-shell/list-styles";
 
 // Global "Shared sessions" page (spec §21 / ADR-0019): manage every active share across connected
 // hosts from the main menu — outside a specific agent chat and outside Settings. Each host renders a
@@ -15,7 +15,7 @@ import { clickUpListStyles } from "@/components/clickup-shell/list-styles";
 export function SharedSessionsScreen(): ReactElement {
   const isFocused = useIsFocused();
   const hosts = useHosts();
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
 
   if (!isFocused) {
     return <View style={styles.container} />;
@@ -34,7 +34,7 @@ export function SharedSessionsScreen(): ReactElement {
         ) : (
           hosts.map((host) => (
             <View key={host.serverId} style={styles.hostBlock}>
-              {hosts.length > 1 ? <HostLabel label={host.label} isClickUp={isClickUp} /> : null}
+              {hosts.length > 1 ? <HostLabel label={host.label} isGumloop={isGumloop} /> : null}
               <SessionSharesCard serverId={host.serverId} />
             </View>
           ))
@@ -44,15 +44,15 @@ export function SharedSessionsScreen(): ReactElement {
   );
 }
 
-// ClickUp labels each host's group of shares with its bordered uppercase group pill.
-function HostLabel({ label, isClickUp }: { label: string; isClickUp: boolean }): ReactElement {
-  if (!isClickUp) {
+// Gumloop labels each host's group of shares with its bordered uppercase group pill.
+function HostLabel({ label, isGumloop }: { label: string; isGumloop: boolean }): ReactElement {
+  if (!isGumloop) {
     return <Text style={styles.hostLabel}>{label}</Text>;
   }
   return (
     <View style={styles.hostPillRow}>
-      <View style={clickUpListStyles.groupPill}>
-        <Text style={clickUpListStyles.groupPillText}>{label}</Text>
+      <View style={gumloopListStyles.groupPill}>
+        <Text style={gumloopListStyles.groupPillText}>{label}</Text>
       </View>
     </View>
   );
