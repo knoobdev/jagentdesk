@@ -1,5 +1,6 @@
 import * as pty from "node-pty";
-import xterm, { type Terminal as TerminalType } from "@xterm/headless";
+import type { Terminal as TerminalType } from "@xterm/headless";
+import { createHeadlessTerminal } from "./headless-terminal.js";
 import { randomUUID } from "crypto";
 import {
   accessSync,
@@ -33,7 +34,6 @@ import type {
   TerminalActivityState,
 } from "@jagentdesk/protocol/terminal-activity";
 
-const { Terminal } = xterm;
 const require = createRequire(import.meta.url);
 let nodePtySpawnHelperChecked = false;
 export const TERMINAL_TITLE_DEBOUNCE_MS = 150;
@@ -904,13 +904,7 @@ export async function createTerminal(
   const activityChangeListeners = new Set<(transition: TerminalActivityTransition) => void>();
   let titleChangeSubscription: { dispose(): void } | null = null;
 
-  // Create xterm.js headless terminal
-  const terminal = new Terminal({
-    rows,
-    cols,
-    scrollback: 1000,
-    allowProposedApi: true,
-  });
+  const terminal = createHeadlessTerminal({ rows, cols, scrollback: 1000 });
 
   ensureNodePtySpawnHelperExecutableForCurrentPlatform();
 
