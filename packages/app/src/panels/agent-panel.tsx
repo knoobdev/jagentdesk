@@ -1,3 +1,5 @@
+import { RewindCommandCenterRegistration } from "@/components/rewind/command-center-registration";
+import type { AgentScreenReadySyncState } from "@/hooks/use-agent-screen-state-machine";
 import { KeyboardTranslateView } from "@/keyboard/shift";
 import { AgentCommandsProvider } from "@/agent-commands";
 import { ComposerEditingSession } from "@/composer/editing-session";
@@ -1061,6 +1063,7 @@ function ChatAgentContent({
       agentState={agentState}
       effectiveAgent={effectiveAgent}
       routeBottomAnchorRequest={routeBottomAnchorRequest}
+      timelineSync={viewState.tag === "ready" ? viewState.sync : null}
       hasAppliedAuthoritativeHistory={hasAppliedAuthoritativeHistory}
       toastApi={toastApi}
       toast={toastState}
@@ -1087,6 +1090,7 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
   agentState,
   effectiveAgent,
   routeBottomAnchorRequest,
+  timelineSync,
   hasAppliedAuthoritativeHistory,
   toastApi,
   toast,
@@ -1109,6 +1113,7 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
   agentState: ChatAgentSelectedState;
   effectiveAgent: AgentScreenAgent;
   routeBottomAnchorRequest: RouteBottomAnchorRequest;
+  timelineSync: AgentScreenReadySyncState | null;
   hasAppliedAuthoritativeHistory: boolean;
   toastApi: ToastApi;
   toast: ToastState | null;
@@ -1167,6 +1172,25 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
       composerState,
     ],
   );
+  const getRewindComposerText = useCallback(
+    () => composerEditingSession.getText(agentInputDraft.text),
+    [composerEditingSession, agentInputDraft.text],
+  );
+  const handleRewindComplete = useCallback(
+    (restored: boolean) => {
+      streamViewRef.current?.scrollToBottom();
+      if (restored && isPaneFocused && active && !agentState.archivedAt && !isArchivingCurrentAgent)
+        requestAnimationFrame(() => composerEditingSession.focus());
+    },
+    [
+      streamViewRef,
+      isPaneFocused,
+      active,
+      agentState.archivedAt,
+      isArchivingCurrentAgent,
+      composerEditingSession,
+    ],
+  );
   const streamSection = (
     <RenderProfile id={`AgentStreamSection:${agentId}`}>
       <AgentStreamSection
@@ -1211,7 +1235,19 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
       editingSession={composerEditingSession}
       enabled={active && !agentState.archivedAt && !isArchivingCurrentAgent}
     >
-      <RewindComposerRestoreProvider text={agentInputDraft.text} setText={agentInputDraft.setText}>
+      <RewindComposerRestoreProvider
+        text={agentInputDraft.text}
+        setText={agentInputDraft.setText}
+        getText={getRewindComposerText}
+        onRewindComplete={handleRewindComplete}
+      >
+        <RewindCommandCenterRegistration
+          serverId={serverId}
+          agentId={agentId}
+          capabilities={agentState.capabilities}
+          timelineSync={timelineSync}
+          enabled={isPaneFocused && active && !agentState.archivedAt && !isArchivingCurrentAgent}
+        />
         <ActivityGraphLayout serverId={serverId} agentId={agentId} streamViewRef={streamViewRef}>
           <FileDropZone style={styles.container} disabled={isArchivingCurrentAgent}>
             {isGuestShareMode() ? null : (

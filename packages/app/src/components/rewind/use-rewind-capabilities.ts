@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useMemo } from "react";
 import type { AgentCapabilityFlags } from "@jagentdesk/protocol/agent-types";
 
@@ -65,4 +66,22 @@ export function useRewindCapabilities(
   labels?: Partial<RewindMenuLabels>,
 ): RewindMenuItem[] {
   return useMemo(() => resolveRewindMenuItems(capabilities, labels), [capabilities, labels]);
+}
+
+export function isRewindableMessage(messageId: string | undefined, text: string): boolean {
+  return Boolean(messageId) && text.trim().length > 0;
+}
+export function useRewindMenuItems(
+  capabilities: Parameters<typeof resolveRewindMenuItems>[0],
+): RewindMenuItem[] {
+  const { t } = useTranslation();
+  return useMemo(
+    () =>
+      resolveRewindMenuItems(capabilities, {
+        conversation: t("rewind.actions.conversation"),
+        files: t("rewind.actions.files"),
+        both: t("rewind.actions.both"),
+      }),
+    [capabilities, t],
+  );
 }

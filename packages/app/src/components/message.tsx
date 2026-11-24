@@ -114,6 +114,7 @@ import { AttachmentLightbox, type ImageLightboxSource } from "@/components/attac
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import { isWeb, isNative } from "@/constants/platform";
 import type { AgentCapabilityFlags } from "@jagentdesk/protocol/agent-types";
+import { isRewindableMessage } from "@/components/rewind/use-rewind-capabilities";
 import { RewindMenu, type RewindMode } from "@/components/rewind/rewind-menu";
 import { useRewindAgentMutation } from "@/components/rewind/use-rewind-agent-mutation";
 import { AssistantForkMenu, type AssistantForkTarget } from "@/components/assistant-fork-menu";
@@ -634,7 +635,7 @@ export const UserMessage = memo(function UserMessage({
     </>
   );
   const actions =
-    capabilities && messageId ? (
+    capabilities && isRewindableMessage(messageId, message) ? (
       <RewindMenu
         capabilities={capabilities}
         isPending={rewindMutation.isPending}
