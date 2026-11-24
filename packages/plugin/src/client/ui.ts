@@ -178,3 +178,9 @@ export declare const Loading: ComponentType;
 
 /** Render a local document URL in an isolated frame. */
 export declare const DocumentFrame: ComponentType<{ url: string; testID?: string }>;
+
+export interface MarkdownProps {
+  children: string;
+}
+/** Renders Markdown using JAgentDesk's theme, selection, and link behavior. */
+export declare const Markdown: ComponentType<MarkdownProps>;

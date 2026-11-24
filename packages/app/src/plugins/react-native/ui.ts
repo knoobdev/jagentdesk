@@ -23,3 +23,5 @@ export { copyText } from "./clipboard";
 export { useToast } from "./toast";
 export { StreamedText } from "./streamed-text";
 export { FilePanelLoading as Loading } from "@/file-panels/loading";
+
+export { Markdown } from "./markdown";
