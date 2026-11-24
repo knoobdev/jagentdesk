@@ -150,6 +150,7 @@ function reasoningTimeline(
 function canonicalToolTimeline(params: {
   provider: AgentProvider;
   callId: string;
+  turnId?: string;
   name: string;
   status: CanonicalToolStatus;
   input?: unknown;
