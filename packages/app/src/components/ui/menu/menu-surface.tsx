@@ -1,3 +1,5 @@
+import type { PointerEvent } from "react-native";
+import { isHoverPointer } from "./menu-pointer";
 import {
   createContext,
   useCallback,
@@ -308,7 +310,19 @@ function MenuFlyout({
   const menu = useMenuContext("MenuFlyout");
   const { hoverClose, cancelHoverClose } = useMenuSurface("MenuFlyout");
   const handleClose = useCallback(() => menu.setOpen(false), [menu]);
-  const handleHoverOut = useCallback(() => hoverClose(depth), [hoverClose, depth]);
+  const handleHoverIn = useCallback(
+    (event: PointerEvent) => {
+      if (isHoverPointer(event)) cancelHoverClose();
+    },
+    [cancelHoverClose],
+  );
+  // A tap inside the flyout ends with the finger leaving it, which is not the pointer walking off.
+  const handleHoverOut = useCallback(
+    (event: PointerEvent) => {
+      if (isHoverPointer(event)) hoverClose(depth);
+    },
+    [hoverClose, depth],
+  );
 
   if (!anchorRef) return null;
 
@@ -326,7 +340,7 @@ function MenuFlyout({
       scrollable={scrollable}
       backdrop={false}
       revision={page.id}
-      onPointerEnter={cancelHoverClose}
+      onPointerEnter={handleHoverIn}
       onPointerLeave={handleHoverOut}
       testID={testID}
     >

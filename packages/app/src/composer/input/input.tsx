@@ -1,5 +1,7 @@
 import { useKeyboardFocusSurface } from "@/keyboard";
 
+import type { LayoutChangeEvent } from "react-native";
+import { hasFinePointer } from "@/hooks/pointer-capabilities";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
   CLICKUP_COMPOSER_RADIUS,
@@ -676,21 +678,51 @@ function MessageInputOverlay({
   return null;
 }
 
-function FocusHint({
-  visible,
-  focusInputKeys,
-  label,
-}: {
-  visible: boolean;
+interface FocusHintInput {
+  isPaneFocused: boolean;
+  isInputFocused: boolean;
+  value: string;
   focusInputKeys: ShortcutChord | null | undefined;
   label: string;
-}) {
-  if (!visible || !focusInputKeys || !label.trim()) return null;
-  return (
-    <Text style={styles.focusHintText} pointerEvents="none">
+}
+
+function useFocusHint({
+  isPaneFocused,
+  isInputFocused,
+  value,
+  focusInputKeys,
+  label,
+}: FocusHintInput) {
+  const visible =
+    isWeb &&
+    isPaneFocused &&
+    !isInputFocused &&
+    !value &&
+    Boolean(focusInputKeys) &&
+    label.trim().length > 0;
+  const [layout, setLayout] = useState<{ label: string; width: number }>();
+  const onLayout = useCallback(
+    (event: LayoutChangeEvent) => {
+      setLayout({ label, width: event.nativeEvent.layout.width });
+    },
+    [label],
+  );
+  const width = visible && layout?.label === label ? layout.width : undefined;
+  const paddingStyle = useMemo(
+    () => (width === undefined ? undefined : { paddingRight: width }),
+    [width],
+  );
+  const hint = visible ? (
+    <Text
+      key={label}
+      style={[styles.focusHintText, width === undefined && styles.unmeasuredFocusHint]}
+      pointerEvents="none"
+      onLayout={onLayout}
+    >
       {label}
     </Text>
-  );
+  ) : null;
+  return { paddingStyle, hint };
 }
 
 function VoiceButtonTooltip({
@@ -1511,6 +1543,12 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
     const webTextareaRef = useRef<HTMLElement | null>(null);
 
     useLayoutEffect(() => {
+      if (!isPaneFocused && isWeb && !hasFinePointer()) {
+        textInputRef.current?.blur();
+      }
+    }, [isPaneFocused]);
+
+    useLayoutEffect(() => {
       if (isWeb) {
         webTextareaRef.current = getWebTextArea() as HTMLElement | null;
       }
@@ -1686,9 +1724,22 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       ],
       [inputWrapperStyle, isClickUp, surfacePresentation.input.opacity],
     );
+    const focusHint = useFocusHint({
+      isPaneFocused,
+      isInputFocused,
+      value,
+      focusInputKeys,
+      label: t("composer.input.focusHint", {
+        shortcut: focusInputKeys ? formatShortcut(focusInputKeys[0], getShortcutOs()) : "",
+      }),
+    });
     const textInputStyle = useMemo(
-      () => [styles.textInput, computeTextInputHeightStyle(inputHeight, maxInputHeight)],
-      [inputHeight, maxInputHeight],
+      () => [
+        styles.textInput,
+        computeTextInputHeightStyle(inputHeight, maxInputHeight),
+        focusHint.paddingStyle,
+      ],
+      [inputHeight, maxInputHeight, focusHint.paddingStyle],
     );
     const sendButtonCombinedStyle = useMemo(
       () => [
@@ -1757,15 +1808,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
                 onSelectionChange={handleSelectionChange}
                 autoFocus={isWeb && autoFocus}
               />
-              <FocusHint
-                visible={isWeb && isPaneFocused && !isInputFocused && !value}
-                focusInputKeys={focusInputKeys}
-                label={t("composer.input.focusHint", {
-                  shortcut: focusInputKeys
-                    ? formatShortcut(focusInputKeys[0], getShortcutOs())
-                    : "",
-                })}
-              />
+              {focusHint.hint}
             </View>
 
             {/* Button row */}
@@ -1884,10 +1927,12 @@ const styles = StyleSheet.create((theme: Theme) => ({
   textInputScrollWrapper: {
     position: "relative",
   },
+  unmeasuredFocusHint: { opacity: 0 },
   focusHintText: {
     position: "absolute",
     top: 0,
     right: 0,
+    paddingLeft: theme.spacing[2],
     fontSize: theme.fontSize.xs,
     color: theme.colors.foregroundMuted,
     opacity: 0.5,

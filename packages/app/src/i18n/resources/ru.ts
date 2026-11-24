@@ -352,6 +352,7 @@ export const ru: TranslationResources = {
       failedRetry: "Диктант не удался. Нажмите «Повторить».",
     },
     question: {
+      responseFailed: "Не удалось отправить ответ. Попробуйте ещё раз.",
       submit: "Представлять на рассмотрение",
       next: "Далее",
       answerPlaceholder: "Введите ответ...",
@@ -566,6 +567,9 @@ export const ru: TranslationResources = {
       },
     },
     terminal: {
+      fileUploaded: "Файл загружен",
+      pasteFileFailed: "Не удалось вставить файл: {{reason}}",
+      uploadingFile: "Загрузка файла…",
       hostDisconnected: "Host не подключен",
       updateHost: "Обновите хост, чтобы использовать нативный терминал.",
       unableToSubscribe: "Невозможно подписаться на терминал",
@@ -1395,6 +1399,8 @@ export const ru: TranslationResources = {
     noFiles: "Файлы и каталоги не найдены",
     noCommands: "Команды не найдены",
     failedToLoad: "Не удалось загрузить",
+    chooseProjectForCommands: "Выберите проект, чтобы увидеть команды",
+    chooseModelForCommands: "Выберите модель, чтобы увидеть команды",
   },
   loadOlderHistory: {
     failed: "Не удалось загрузить старую историю.",

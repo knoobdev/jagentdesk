@@ -516,7 +516,7 @@ export function WorkspaceDraftAgentTab({
         composerState,
         autoSubmitConfig,
         workspaceDirectory: draftWorkingDirectory,
-        hasClient: Boolean(client),
+        isConnected,
       });
     },
     onBeforeSubmit: async () => {
@@ -736,7 +736,7 @@ export function WorkspaceDraftAgentTab({
           autoFocus={shouldAutoFocusWorkspaceDraftComposer({ isPaneFocused, isSubmitting })}
           autoFocusKey={String(draftInput.attachmentFocusRequestId)}
           onFocusInput={handleFocusInputCallback}
-          commandDraftConfig={composerState.commandDraftConfig}
+          commandDraft={composerState.commandDraft}
           agentControls={composerAgentControls}
           isCompactLayout={isCompactComposerLayout}
         />

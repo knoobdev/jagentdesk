@@ -47,6 +47,14 @@ export async function expectComposerEditable(page: Page): Promise<void> {
   await expect(composerInput(page)).toBeEditable({ timeout: 15_000 });
 }
 
+export async function expectComposerFocused(page: Page): Promise<void> {
+  await expect(composerInput(page)).toBeFocused();
+}
+
+export async function expectComposerNotFocused(page: Page): Promise<void> {
+  await expect(composerInput(page)).not.toBeFocused();
+}
+
 export async function submitMessage(page: Page, text: string): Promise<void> {
   const input = composerInput(page);
   await expect(input).toBeEditable({ timeout: 30_000 });
@@ -265,4 +273,8 @@ export async function openGithubWorkspace(
       await client.close().catch(() => undefined);
     },
   };
+}
+
+export async function typeIntoFocusedComposer(page: Page, text: string): Promise<void> {
+  await page.keyboard.type(text);
 }

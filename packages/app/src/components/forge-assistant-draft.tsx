@@ -217,7 +217,7 @@ export function ForgeAssistantDraft({
         clearDraft={draftInput.clear}
         autoFocus={isPaneFocused}
         autoFocusKey={String(draftInput.attachmentFocusRequestId)}
-        commandDraftConfig={composerState.commandDraftConfig}
+        commandDraft={composerState.commandDraft}
         agentControls={agentControls}
       />
     </View>

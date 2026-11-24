@@ -137,7 +137,7 @@ export function JiraAssistantDraft({
         clearDraft={draftInput.clear}
         autoFocus
         autoFocusKey={String(draftInput.attachmentFocusRequestId)}
-        commandDraftConfig={composerState.commandDraftConfig}
+        commandDraft={composerState.commandDraft}
         agentControls={agentControls}
       />
     </View>

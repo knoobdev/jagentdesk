@@ -104,10 +104,10 @@ export function useComposerHeightMirror({
     const source = textareaRef.current;
     if (!source || !(source instanceof HTMLElement)) return;
     if (typeof ResizeObserver === "undefined") return;
-    let previousWidth = source.clientWidth;
-    const observer = new ResizeObserver(() => {
-      const nextWidth = source.clientWidth;
-      if (Math.abs(nextWidth - previousWidth) < 1) return;
+    let previousWidth: number | undefined;
+    const observer = new ResizeObserver(([entry]) => {
+      const nextWidth = entry.contentRect.width;
+      if (nextWidth === previousWidth) return;
       previousWidth = nextWidth;
       measure();
     });

@@ -122,8 +122,12 @@ function getActiveTabId(input: {
     }
     const matchingTab =
       input.tabs.find((tab) => workspaceTabTargetsEqual(tab.descriptor.target, preferredTarget)) ??
-      null;
-    return matchingTab?.descriptor.tabId ?? buildDeterministicWorkspaceTabId(preferredTarget);
+      input.tabs.find(
+        (tab) =>
+          buildDeterministicWorkspaceTabId(tab.descriptor.target) ===
+          buildDeterministicWorkspaceTabId(preferredTarget),
+      );
+    return matchingTab?.descriptor.tabId ?? null;
   })();
 
   if (preferredTabId && input.openTabIds.has(preferredTabId)) {
@@ -209,9 +213,9 @@ export function resolveSideFileOpenPlacement(input: {
   tabs: WorkspaceTab[];
   target: WorkspaceTabTarget;
 }): WorkspaceSideFileOpenPlacement {
-  const targetTabId = buildDeterministicWorkspaceTabId(input.target);
+  const targetKey = buildDeterministicWorkspaceTabId(input.target);
   const existingTab = input.tabs.find(
-    (tab) => tab.tabId === targetTabId || workspaceTabTargetsEqual(tab.target, input.target),
+    (tab) => buildDeterministicWorkspaceTabId(tab.target) === targetKey,
   );
   if (existingTab) {
     return { kind: "open-in-source" };

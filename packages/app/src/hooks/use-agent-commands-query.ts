@@ -17,6 +17,12 @@ export interface AgentSlashCommand {
 
 export type DraftCommandConfig = AgentCommandsDraftConfig;
 
+/** What a draft composer can list commands for, before an agent exists. */
+export type DraftCommandTarget =
+  | { status: "ready"; config: DraftCommandConfig }
+  | { status: "needs-project" }
+  | { status: "needs-provider" };
+
 interface ListAgentCommandsOptions {
   agentId: string;
   draftConfig?: DraftCommandConfig;
@@ -24,6 +30,18 @@ interface ListAgentCommandsOptions {
 
 export interface AgentCommandsClient {
   listCommands(options: ListAgentCommandsOptions): ReturnType<DaemonClient["listCommands"]>;
+}
+
+// COMPAT(dedupeListCommands): added in v0.17.0, remove after 2027-05-20 once daemon floor >= v0.17.0.
+function dedupeSlashCommands(commands: readonly AgentSlashCommand[]): AgentSlashCommand[] {
+  const seen = new Set<string>();
+  const unique: AgentSlashCommand[] = [];
+  for (const command of commands) {
+    if (seen.has(command.name)) continue;
+    seen.add(command.name);
+    unique.push(command);
+  }
+  return unique;
 }
 
 export async function fetchAgentCommands(input: {
@@ -35,7 +53,7 @@ export async function fetchAgentCommands(input: {
     agentId: input.agentId,
     draftConfig: input.draftConfig,
   });
-  return response.commands as AgentSlashCommand[];
+  return dedupeSlashCommands(response.commands as AgentSlashCommand[]);
 }
 
 interface UseAgentCommandsQueryOptions {

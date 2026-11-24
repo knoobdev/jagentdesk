@@ -26,7 +26,7 @@ import { settingsStyles } from "@/styles/settings";
 import { resolveProviderLabel } from "@/utils/provider-definitions";
 import { useTimeAgo } from "@/hooks/use-time-ago";
 import { compareMatchScores, scoreTextFields } from "@/utils/score-match";
-import type { AgentModelDefinition, AgentProvider } from "@jagentdesk/protocol/agent-types";
+import type { AgentModelDefinition } from "@jagentdesk/protocol/agent-types";
 import type { ProviderProfileModel } from "@jagentdesk/protocol/provider-config";
 import { ProviderInstallationSection } from "./provider-installation-section";
 import { useProviderInstallation } from "./provider-installation";
@@ -158,13 +158,11 @@ function AddCustomModelSubSheet({
   serverId,
   visible,
   onClose,
-  refresh,
 }: {
   provider: string;
   serverId: string;
   visible: boolean;
   onClose: () => void;
-  refresh: (providers?: AgentProvider[]) => Promise<void>;
 }) {
   const { t } = useTranslation();
   const { theme } = useUnistyles();
@@ -198,13 +196,12 @@ function AddCustomModelSubSheet({
         },
       },
     })
-      .then(() => refresh([provider]))
       .then(() => onClose())
       .catch((err) => {
         setError(err instanceof Error ? err.message : t("settings.providers.models.failedToSave"));
       })
       .finally(() => setSaving(false));
-  }, [additionalModels, canAdd, onClose, patchConfig, provider, refresh, t, trimmed]);
+  }, [additionalModels, canAdd, onClose, patchConfig, provider, t, trimmed]);
 
   const header = useMemo<SheetHeader>(
     () => ({ title: t("settings.providers.models.addCustomTitle") }),
@@ -669,13 +666,11 @@ export function ProviderDiagnosticSheet({
             additionalModels: additionalModels.filter((model) => model.id !== modelId),
           },
         },
-      })
-        .then(() => refresh([provider]))
-        .finally(() => {
-          setDeletingModelId((current) => (current === modelId ? null : current));
-        });
+      }).finally(() => {
+        setDeletingModelId((current) => (current === modelId ? null : current));
+      });
     },
-    [additionalModels, patchConfig, provider, refresh],
+    [additionalModels, patchConfig, provider],
   );
 
   const sheetHeader = useMemo<SheetHeader>(
@@ -757,7 +752,6 @@ export function ProviderDiagnosticSheet({
         serverId={serverId}
         visible={addSheetOpen}
         onClose={handleCloseAddSheet}
-        refresh={refresh}
       />
       <DiagnosticSubSheet
         provider={provider}

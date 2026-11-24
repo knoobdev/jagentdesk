@@ -6,7 +6,7 @@ import type {
   AgentProvider,
   ProviderSnapshotEntry,
 } from "@jagentdesk/protocol/agent-types";
-import { useHosts } from "@/runtime/host-runtime";
+import { useHostRuntimeIsConnected, useHosts } from "@/runtime/host-runtime";
 import { buildProviderDefinitions } from "@/utils/provider-definitions";
 import {
   buildSelectableProviderSelectorProviders,
@@ -250,6 +250,8 @@ export function useAgentFormState(options: UseAgentFormStateOptions = {}): UseAg
     refetchIfStale: refetchSnapshotIfStale,
   } = useProvidersSnapshot(formState.serverId, { cwd: formState.workingDir });
 
+  const isConnected = useHostRuntimeIsConnected(formState.serverId ?? "");
+
   const allProviderEntries = useMemo(() => snapshotEntries ?? [], [snapshotEntries]);
   const snapshotProviderDefinitions = useMemo(
     () => buildProviderDefinitions(snapshotEntries),
@@ -287,8 +289,9 @@ export function useAgentFormState(options: UseAgentFormStateOptions = {}): UseAg
     () =>
       buildSelectableProviderSelectorProviders(snapshotEntries, {
         selectedProvider: formState.provider,
+        isConnected,
       }),
-    [snapshotEntries, formState.provider],
+    [snapshotEntries, formState.provider, isConnected],
   );
   const snapshotSelectedEntry = useMemo(
     () =>
@@ -312,7 +315,8 @@ export function useAgentFormState(options: UseAgentFormStateOptions = {}): UseAg
   const availableModels = snapshotSelectedProviderModels;
   const modeOptions = snapshotSelectedProviderModes;
   const isModelSelectionLoading =
-    resolution.status === "pending" || snapshotIsLoading || selectedProviderIsLoading;
+    isConnected &&
+    (resolution.status === "pending" || snapshotIsLoading || selectedProviderIsLoading);
   const isAllModelsLoading = isModelSelectionLoading;
 
   const combinedInitialValues = useMemo(
@@ -583,6 +587,7 @@ export function useAgentFormState(options: UseAgentFormStateOptions = {}): UseAg
       setSelectedServerId,
       setSelectedServerIdFromUser,
       selectedProvider: formState.provider,
+        isConnected,
       setProviderFromUser,
       selectedMode: formState.modeId,
       setModeFromUser,
