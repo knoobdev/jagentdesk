@@ -5251,6 +5251,7 @@ export class DaemonClient {
 
   async createWorkspace(
     input: {
+      idempotencyKey?: string;
       source: WorkspaceCreateRequest["source"];
       title?: string;
       background?: boolean;
@@ -5259,12 +5260,20 @@ export class DaemonClient {
     },
     requestId?: string,
   ): Promise<WorkspaceCreatePayload> {
+    // COMPAT(workspaceRequestReceipts): added in v0.9.59, remove after 2027-05-24.
+    if (
+      input.idempotencyKey &&
+      this.lastServerInfoMessage?.features?.workspaceRequestReceipts !== true
+    ) {
+      throw new Error("Update the host to retry workspace creation safely");
+    }
     if (input.background !== undefined || input.callerAgentId)
       this.assertBackgroundWorkspacesSupported();
     return this.sendCorrelatedSessionRequest({
       requestId,
       message: {
         type: "workspace.create.request",
+        ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
         source: input.source,
         ...(input.background !== undefined ? { background: input.background } : {}),
         ...(input.callerAgentId ? { callerAgentId: input.callerAgentId } : {}),
