@@ -7,7 +7,8 @@ import { settingsRpc } from "@jagentdesk/plugin";
 import { useReplicaQuery } from "@/data/query";
 import { z, type ZodType } from "zod";
 
-export const pluginSettingsKey = (id: string) => ["plugin-settings", id] as const;
+import { pluginSettingsKey } from "./query";
+export { pluginSettingsKey } from "./query";
 function message(error: unknown): string {
   if (error instanceof z.ZodError) return error.issues.map((issue) => issue.message).join("\n");
   return error instanceof Error ? error.message : String(error);

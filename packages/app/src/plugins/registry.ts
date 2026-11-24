@@ -16,6 +16,7 @@ export class PluginRegistry {
   private readonly listeners = new Set<() => void>();
   private snapshot: InstalledPlugin[] = [];
   private readonly disposed = new WeakSet<InstalledPlugin>();
+  private readonly clientByHost = new Map<string, DaemonClient>();
   private readonly evaluationErrors = new Map<string, string>();
 
   constructor(
@@ -46,10 +47,14 @@ export class PluginRegistry {
     },
   ): boolean {
     const previous = this.byHost.get(serverId) ?? [];
+    const previousErrors = this.hostEvaluationErrors(serverId);
+    const sameClient = this.clientByHost.get(serverId) === options.client;
+    this.clientByHost.set(serverId, options.client);
     const previousTimelineBundles = previous
       .filter((plugin) => plugin.timelineTransformers.length > 0)
       .map((plugin) => `${plugin.id}\0${plugin.clientBundle}`);
     const preserved = catalog.flatMap((entry) => {
+      if (!sameClient) return [];
       const existing = previous.find(
         (plugin) =>
           plugin.id !== options.replacePluginId &&
@@ -138,7 +143,11 @@ export class PluginRegistry {
       }
     }
     this.byHost.set(serverId, installed);
-    this.publish();
+    const unchanged =
+      installed.length === previous.length &&
+      installed.every((plugin, index) => plugin === previous[index]) &&
+      this.hostEvaluationErrors(serverId) === previousErrors;
+    if (!unchanged) this.publish();
     const installedTimelineBundles = installed
       .filter((plugin) => plugin.timelineTransformers.length > 0)
       .map((plugin) => `${plugin.id}\0${plugin.clientBundle}`);
@@ -156,7 +165,15 @@ export class PluginRegistry {
       if (key.startsWith(`${serverId}/`)) this.evaluationErrors.delete(key);
     }
     this.byHost.delete(serverId);
+    this.clientByHost.delete(serverId);
     this.publish();
+  }
+
+  private hostEvaluationErrors(serverId: string): string {
+    const prefix = `${serverId}/`;
+    return JSON.stringify(
+      [...this.evaluationErrors].filter(([key]) => key.startsWith(prefix)).sort(),
+    );
   }
 
   private dispose(plugin: InstalledPlugin): void {
