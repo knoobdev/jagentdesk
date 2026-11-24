@@ -1,3 +1,4 @@
+import { CHAT_COLUMN_RAIL_DATASET } from "@/chat-rail";
 import { useCallback, useMemo, useState } from "react";
 import { View, Text } from "react-native";
 import { useTranslation } from "react-i18next";
@@ -45,7 +46,7 @@ export function ArchivedAgentCallout({ serverId, agentId }: ArchivedAgentCallout
 
   return (
     <Animated.View style={containerStyle}>
-      <View style={styles.inputAreaContainer}>
+      <View style={styles.inputAreaContainer} dataSet={CHAT_COLUMN_RAIL_DATASET}>
         <View style={styles.inputAreaContent}>
           <View style={styles.calloutStack}>
             <View style={styles.callout}>

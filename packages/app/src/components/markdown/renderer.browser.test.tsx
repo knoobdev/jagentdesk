@@ -10,9 +10,17 @@ it("parses headings and fenced code through the patched WASM engine", async () =
   const root = createRoot(host);
   const client = new QueryClient();
   try {
-    act(() => root.render(<QueryClientProvider client={client}><MarkdownRenderer text={'# Rendered heading\n\n```typescript\nconst answer = 42;\n```'} /></QueryClientProvider>));
+    act(() =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <MarkdownRenderer text={"# Rendered heading\n\n```typescript\nconst answer = 42;\n```"} />
+        </QueryClientProvider>,
+      ),
+    );
     await expect.poll(() => host.querySelector("h1")?.textContent).toBe("Rendered heading");
-    expect(host.querySelector('[data-jagentdesk-markdown-tag="pre"]')?.textContent).toContain("const answer = 42;");
+    expect(host.querySelector('[data-jagentdesk-markdown-tag="pre"]')?.textContent).toContain(
+      "const answer = 42;",
+    );
     expect(host.textContent).not.toContain("```typescript");
   } finally {
     act(() => root.unmount());

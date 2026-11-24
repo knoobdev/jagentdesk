@@ -12,7 +12,7 @@ provider deltas (every provider streams incrementally)
   → recordTimeline: one canonical row per flushed item
   → agent_stream ws message
   → reducer queue (app, one commit per frame) → session store
-  → paced reveal (app, per assistant/reasoning item) → markdown blocks → paint
+  → paced reveal (app, per assistant/reasoning item) → shared Markdown renderer → paint
 ```
 
 Every provider delivers incremental text, so there is no provider that needs special handling: Claude via `includePartialMessages`, Codex via `agent_message_delta`, ACP agents via `agent_message_chunk`, Pi and OMP via `text_delta`.
@@ -31,15 +31,19 @@ So arrival sets a _target_ and the reveal rate is derived from the backlog inste
 - **First sight of a text is revealed whole.** Only growth is paced. This is what makes history hydration, timeline replay, a virtualized row remounting on scroll, and an already-finished message all render complete on first paint without a special case for each.
 - **Leaving `phase: "streaming"` snaps the reveal.** A completed turn must never be left holding characters. `layoutStream` sets the phase, so anything outside the live head with an active turn is already complete.
 - **The reducer queue commits on a frame, with a timer as the ceiling.** A frame callback never fires in a hidden tab, so a timer races it and wins when nothing is painting — the store has to keep advancing either way.
-- **A history row re-renders only when its item or layout item identity changes.** The inverted
-  FlatList hands every mounted cell a new `index` and `ref` whenever a row is prepended, so without a
-  memo boundary each coalesced tick re-rendered every mounted row (about 50 on a phone, 100–250 ms of
-  JS per tick). `layoutStream` keeps a layout item's identity when nothing about it changed,
-  `useRevisedHistoryRows` hands a fresh item identity to rows whose tool-call group, expanded state,
-  or breakpoint changed, and `HistoryStreamRow` memoizes on both. Every viewport runs its history
-  through that hook; the web viewport once skipped it and history hosts of a live tool group went
-  stale. A new field on `StreamLayoutItem` must be added to `areLayoutItemsEquivalent`, or sharing
-  silently stops.
+- **A history row re-renders only when its item or layout item identity changes.** Native keeps the
+  B11 LegendList viewport. Web retains a row's DOM and local state when recent history becomes
+  virtualized. `layoutStream` shares unchanged layout items; `useRevisedHistoryRows` replaces items
+  whose group, expansion, or breakpoint changed. Add new layout fields to
+  `areLayoutItemsEquivalent`, or sharing silently stops.
+- **Markdown uses one engine across chat and file previews.** Keep pacing in the reveal hook.
+  Native splits only the immutable streaming prefix from the mutable tail, and keeps synchronous
+  updates to populated views in the enriched-markdown patch. Web parses new rows synchronously
+  after WASM initialization so an empty measurement cannot move the reading anchor.
+- **Do not rebrand embedded WASM bytes.** The enriched-markdown patch includes compiler build paths
+  inside its binary payload. Changing their spelling corrupts section lengths. Keep the factory
+  hunks byte-for-byte upstream and run the renderer browser regression; a successful bundle export
+  does not prove the parser can initialize.
 
 ## Measuring
 

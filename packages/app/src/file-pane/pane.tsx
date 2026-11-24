@@ -549,6 +549,7 @@ function FilePanePresentation({
   const [view, setView] = useTextFileView(location, navigationRevision);
   const hasPreview = preview?.kind === "text" && filePreviewRenderKind(location.path) !== null;
   const showPreview = hasPreview && view === "preview";
+  const previewLocation = useMemo(() => ({ path: location.path }), [location.path]);
   if (!client && readTarget) {
     return (
       <View style={styles.container} testID="workspace-file-pane">
@@ -604,12 +605,11 @@ function FilePanePresentation({
       ) : null}
       {hasPreview ? (
         <RetainedFileView active={showPreview}>
-          {" "}
           <FilePreviewBody
             preview={preview}
             isLoading={isLoading}
             isMobile={isMobile}
-            location={location}
+            location={previewLocation}
             navigationRevision={navigationRevision}
             imagePreviewUri={imagePreviewUri}
             workspaceRoot={workspaceRoot}
@@ -619,7 +619,6 @@ function FilePanePresentation({
         </RetainedFileView>
       ) : null}
       <RetainedFileView active={!showPreview}>
-        {" "}
         <FilePreviewBody
           mode="source"
           preview={preview}
@@ -726,6 +725,7 @@ function EditableFilePane({
   const [view, setView] = useTextFileView(location, navigationRevision);
   const hasPreview = filePreviewRenderKind(location.path) !== null;
   const showPreview = hasPreview && view === "preview";
+  const previewLocation = useMemo(() => ({ path: location.path }), [location.path]);
   const snapshot = useSyncExternalStore(model.subscribe, model.getSnapshot, model.getSnapshot);
   const [shownPreviewText, setShownPreviewText] = useState(snapshot.content);
   if (showPreview && shownPreviewText !== snapshot.content) setShownPreviewText(snapshot.content);
@@ -817,7 +817,7 @@ function EditableFilePane({
             preview={previewFile}
             isLoading={false}
             isMobile={false}
-            location={location}
+            location={previewLocation}
             navigationRevision={navigationRevision}
             imagePreviewUri={null}
             workspaceRoot={workspaceRoot}
@@ -827,7 +827,6 @@ function EditableFilePane({
         </RetainedFileView>
       ) : null}
       <RetainedFileView active={!showPreview}>
-        {" "}
         <FileEditorView
           model={model}
           filename={filename}

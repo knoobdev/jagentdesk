@@ -1,3 +1,4 @@
+import { CHAT_COLUMN_RAIL_DATASET } from "@/chat-rail";
 import type { ReactElement } from "react";
 import { Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
@@ -36,7 +37,7 @@ export function ParentAgentCallout({
   const parent = useParentAgent(serverId, parentAgentId);
 
   return (
-    <View style={styles.rail}>
+    <View style={styles.rail} dataSet={CHAT_COLUMN_RAIL_DATASET}>
       <View style={styles.callout} testID="parent-agent-callout">
         <View style={styles.avatar}>
           <ThemedParentIcon icon={parent.icon} size={18} uniProps={foregroundColorMapping} />
