@@ -1851,6 +1851,7 @@ interface PingProbe {
   reject: (error: Error) => void;
   timeoutHandle: ReturnType<typeof setTimeout>;
   startedAt: number;
+  receivedActivity: boolean;
   // Whether a timeout on this ping should be recorded as a liveness failure. Only the
   // heartbeat sets this; a latency measurement never drives teardown, even when a
   // heartbeat tick shares (dedupes onto) an in-flight measurement ping.
@@ -2161,6 +2162,7 @@ export class DaemonClient {
         send: (frame) => transport.send(frame),
         onFailure: () => transport.close(4003, "Transport send failed"),
         deliver: (frame) => this.handleTransportMessage(frame),
+        onActivity: () => this.recordTransportActivity(),
       });
       this.lastServerInfoMessage = null;
       this.owned.disconnected();
@@ -2380,15 +2382,12 @@ export class DaemonClient {
       this.forceReconnect();
       return;
     }
-    try {
-      await this.livenessPing({ timeoutMs: DEFAULT_LIVENESS_TIMEOUT_MS });
-    } catch {
-      this.disposeTransport(1001, "Resume revalidation ping failed");
-      this.scheduleReconnect({
-        reason: "resume-revalidation",
-        reasonCode: "RESUME_REVALIDATE",
-      });
-    }
+    this.tickLivenessHeartbeat();
+  }
+
+  private recordTransportActivity(): void {
+    this.consecutiveLivenessFailures = 0;
+    if (this.pingProbe) this.pingProbe.receivedActivity = true;
   }
 
   /**
@@ -2929,9 +2928,18 @@ export class DaemonClient {
 
   measureLatency(params?: { timeoutMs?: number }): Promise<number> {
     const timeoutMs = Math.max(1, params?.timeoutMs ?? DEFAULT_LIVENESS_TIMEOUT_MS);
-    return this.sendPingAwaitRtt({ timeoutMs, drivesLivenessFailure: false }).catch((error) => {
-      throw toTimeoutError(error, "Latency measurement", timeoutMs);
+    let deadline: ReturnType<typeof setTimeout>;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      deadline = setTimeout(() => reject(new PingTimeoutError(timeoutMs)), timeoutMs);
     });
+    return Promise.race([
+      this.sendPingAwaitRtt({ timeoutMs, drivesLivenessFailure: false }),
+      timeout,
+    ])
+      .catch((error) => {
+        throw toTimeoutError(error, "Latency measurement", timeoutMs);
+      })
+      .finally(() => clearTimeout(deadline));
   }
 
   private async livenessPing(params?: { timeoutMs?: number }): Promise<number> {
@@ -2967,21 +2975,23 @@ export class DaemonClient {
       resolveProbe = resolve;
       rejectProbe = reject;
     });
+    const expire = () => {
+      if (this.pingProbe !== probe) return;
+      this.pingProbe = null;
+      const error = new PingTimeoutError(timeoutMs);
+      probe.reject(error);
+      // Keep the deadline fixed so subsequent pings renew the daemon socket lease
+      // during a long download. Progress proves life even when its pong is queued.
+      if (probe.drivesLivenessFailure && !probe.receivedActivity) {
+        this.recordLivenessFailure(toTimeoutError(error, "Liveness check", timeoutMs));
+      }
+    };
     const probe: PingProbe = {
       promise,
       resolve: (value) => resolveProbe?.(value),
       reject: (error) => rejectProbe?.(error),
-      timeoutHandle: setTimeout(() => {
-        if (this.pingProbe !== probe) {
-          return;
-        }
-        this.pingProbe = null;
-        const error = new PingTimeoutError(timeoutMs);
-        probe.reject(error);
-        if (probe.drivesLivenessFailure) {
-          this.recordLivenessFailure(toTimeoutError(error, "Liveness check", timeoutMs));
-        }
-      }, timeoutMs),
+      timeoutHandle: setTimeout(expire, timeoutMs),
+      receivedActivity: false,
       startedAt,
       drivesLivenessFailure: params.drivesLivenessFailure,
     };
@@ -3022,12 +3032,19 @@ export class DaemonClient {
     }
     this.livenessHeartbeatTimer = setTimeout(() => {
       this.livenessHeartbeatTimer = null;
-      this.livenessPing({ timeoutMs: LIVENESS_HEARTBEAT_TIMEOUT_MS })
-        .catch(() => {})
-        .finally(() => {
-          this.scheduleNextLivenessHeartbeat();
-        });
+      this.tickLivenessHeartbeat();
     }, LIVENESS_HEARTBEAT_INTERVAL_MS);
+  }
+
+  private tickLivenessHeartbeat(): void {
+    this.stopLivenessHeartbeat();
+    const transport = this.transport;
+    const tick = this.livenessPing({ timeoutMs: LIVENESS_HEARTBEAT_TIMEOUT_MS });
+    void tick
+      .catch(() => {})
+      .finally(() => {
+        if (this.transport === transport) this.scheduleNextLivenessHeartbeat();
+      });
   }
 
   // ============================================================================
