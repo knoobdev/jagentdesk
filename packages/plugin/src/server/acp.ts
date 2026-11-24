@@ -3,9 +3,12 @@ import type {
   ProviderCatalog,
   ProviderCommand,
   ProviderConfigState,
+  ProviderMode,
   ProviderNotice,
+  ProviderPersistence,
   ProviderRegistration,
   ProviderTimelineItem,
+  ProviderToolCallDetail,
 } from "./provider.js";
 import { createAcpProviderConnection } from "./acp-internal/connection.js";
 
@@ -42,6 +45,13 @@ export interface AcpStream {
 export type AcpConnector = () => AcpStream | Promise<AcpStream>;
 
 export interface AcpOptions {
+  workspaceOnlyCatalog?: boolean;
+  loadReplayQuietPeriodMs?: number;
+  autoAcceptMode?: {
+    mode: Omit<ProviderMode, "isUnattended">;
+    nativeMode: string;
+    default?: boolean;
+  };
   protocol?: "auto" | "v1";
   startupTimeoutMs?: number;
   waitForInitialCommands?: boolean;
@@ -65,6 +75,8 @@ export interface AcpDiscoveryContext extends AcpContext {
 }
 
 export interface AcpConfigureContext extends AcpContext {
+  catalog(): ProviderCatalog;
+  apply(change: AcpConfigChange): Promise<void>;
   config: AcpConfigAccess;
   request: AcpRequest;
 }
@@ -84,6 +96,7 @@ export interface AcpToolCallSnapshot {
   input: JsonValue;
   output: JsonValue;
   locations: readonly string[];
+  detail?: ProviderToolCallDetail;
 }
 
 export type AcpVendorUpdate =
@@ -93,6 +106,13 @@ export type AcpVendorUpdate =
   | { type: "notice"; notice: ProviderNotice };
 
 export interface AcpTransformer {
+  /** Decode an older saved session and supply extension metadata for session/new or session/load. */
+  sessionOpen?(context: {
+    persistence?: ProviderPersistence;
+    systemPrompt?: string;
+    agentMetadata: JsonValue;
+  }): { sessionId?: string; metadata?: Readonly<Record<string, JsonValue>> };
+
   discover?(
     catalog: ProviderCatalog,
     context: AcpDiscoveryContext,
