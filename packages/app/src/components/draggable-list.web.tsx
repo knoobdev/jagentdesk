@@ -1,4 +1,13 @@
-import { memo, useCallback, useMemo, useRef, type ReactElement } from "react";
+import {
+  createContext,
+  memo,
+  useCallback,
+  useContext,
+  useMemo,
+  useRef,
+  type ReactElement,
+  type Ref,
+} from "react";
 import { ScrollView, View } from "react-native";
 import {
   DndContext,
@@ -17,10 +26,52 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { DraggableListProps, DraggableRenderItemInfo } from "./draggable-list.types";
+import type {
+  DraggableListDragHandleProps,
+  DraggableListHandleProps,
+  DraggableListProps,
+  DraggableRenderItemInfo,
+} from "./draggable-list.types";
 import { getDragActivationConstraints, useDragReorderState } from "./drag-reorder";
 
-export type { DraggableListProps, DraggableRenderItemInfo };
+export type { DraggableListHandleProps, DraggableListProps, DraggableRenderItemInfo };
+
+/** The row's dnd-kit activator, for its handle. Absent unless the list uses drag handles. */
+const RowHandleContext = createContext<DraggableListDragHandleProps | undefined>(undefined);
+
+// React Native's style types have no `cursor: "grab"`; react-native-web passes it through.
+const GRAB_CURSOR = { cursor: "grab" } as object;
+
+export function DraggableListHandle({
+  accessibilityLabel,
+  testID,
+  style,
+  children,
+}: DraggableListHandleProps) {
+  const handle = useContext(RowHandleContext);
+  // The handle is a labelled button; dnd-kit's own role, focus stop and "sortable" description
+  // would replace that.
+  const {
+    role: _role,
+    tabIndex: _tabIndex,
+    "aria-roledescription": _roleDescription,
+    ...attributes
+  } = handle?.attributes ?? {};
+  const handleStyle = useMemo(() => [GRAB_CURSOR, style], [style]);
+  return (
+    <View
+      {...attributes}
+      {...handle?.listeners}
+      ref={handle?.setActivatorNodeRef as unknown as Ref<View>}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      style={handleStyle}
+      testID={testID}
+    >
+      {children}
+    </View>
+  );
+}
 
 const restrictToVerticalAxis: Modifier = ({ transform }) => ({
   ...transform,
@@ -33,6 +84,61 @@ const DRAG_ACTIVATION_CONFIG = {
   touchHoldDelayMs: 180,
   touchHoldTolerance: 8,
 };
+
+function areRecordsEqual(
+  left: Record<string, unknown> | undefined,
+  right: Record<string, unknown> | undefined,
+): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((key) => Object.is(left[key], right[key]));
+}
+
+function useShallowStableRecord(
+  value: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  const stableRef = useRef(value);
+  if (!areRecordsEqual(stableRef.current, value)) {
+    stableRef.current = value;
+  }
+  return stableRef.current;
+}
+
+function useStableListenerRecord(
+  listeners: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  const latestListenersRef = useRef(listeners);
+  latestListenersRef.current = listeners;
+  const listenerKeys = Object.keys(listeners ?? {}).sort();
+  const listenerKeySignature = listenerKeys.join("\u0000");
+  const stableListenersRef = useRef<{
+    keySignature: string;
+    listeners: Record<string, unknown> | undefined;
+  }>(undefined);
+  if (stableListenersRef.current?.keySignature !== listenerKeySignature) {
+    stableListenersRef.current = {
+      keySignature: listenerKeySignature,
+      listeners:
+        listenerKeys.length === 0
+          ? undefined
+          : Object.fromEntries(
+              listenerKeys.map((key) => [
+                key,
+                (...args: unknown[]) => {
+                  const listener = latestListenersRef.current?.[key];
+                  if (typeof listener === "function") {
+                    return Reflect.apply(listener, undefined, args);
+                  }
+                },
+              ]),
+            ),
+    };
+  }
+  return stableListenersRef.current.listeners;
+}
 
 interface SortableItemProps<T> {
   id: string;
@@ -92,19 +198,28 @@ function SortableItemInner<T>({
     }),
     [combinedTransform, transition, isDragging],
   );
+  const stableAttributes = useShallowStableRecord(attributes as unknown as Record<string, unknown>);
+  const stableListeners = useStableListenerRecord(
+    listeners as unknown as Record<string, unknown> | undefined,
+  );
+  const dragHandleProps = useMemo(
+    () =>
+      useDragHandle
+        ? {
+            attributes: stableAttributes,
+            listeners: stableListeners,
+            setActivatorNodeRef: setActivatorNodeRef as unknown as (node: unknown) => void,
+          }
+        : undefined,
+    [setActivatorNodeRef, stableAttributes, stableListeners, useDragHandle],
+  );
 
   const info: DraggableRenderItemInfo<T> = {
     item,
     index,
     drag,
     isActive: activeId === id,
-    dragHandleProps: useDragHandle
-      ? {
-          attributes: attributes as unknown as Record<string, unknown>,
-          listeners: listeners as unknown as Record<string, unknown>,
-          setActivatorNodeRef: setActivatorNodeRef as unknown as (node: unknown) => void,
-        }
-      : undefined,
+    dragHandleProps,
   };
 
   const wrapperProps = useDragHandle
@@ -113,7 +228,9 @@ function SortableItemInner<T>({
 
   return (
     <div {...wrapperProps} style={style}>
-      {renderItem(info)}
+      <RowHandleContext.Provider value={dragHandleProps}>
+        {renderItem(info)}
+      </RowHandleContext.Provider>
     </div>
   );
 }
