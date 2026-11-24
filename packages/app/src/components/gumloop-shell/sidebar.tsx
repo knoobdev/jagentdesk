@@ -1,3 +1,4 @@
+import { AccountButton } from "./account-button";
 import { DockerSidebar } from "@/docker/sidebar";
 import { JAgentDeskLogo } from "@/components/icons/jagentdesk-logo";
 import { WindowChromeSafeArea } from "@/utils/desktop-window";
@@ -5,7 +6,7 @@ import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { SidebarViewSlot } from "@/plugins/sidebar-view/slot";
 import { PortalHost } from "@gorhom/portal";
 import { router, usePathname } from "expo-router";
-import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode, type ComponentType } from "react";
 import { Pressable, ScrollView, Text, View, type PressableStateCallbackType } from "react-native";
 import {
   ArrowLeft,
@@ -19,7 +20,6 @@ import {
   Search,
   Settings,
   Smartphone,
-  type LucideIcon,
 } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { HostPicker } from "@/components/hosts/host-picker";
@@ -94,7 +94,7 @@ export function GumloopRow({
   testID,
   children,
 }: {
-  icon?: LucideIcon;
+  icon?: ComponentType<{ size: number; color: string }>;
   label: string;
   onPress: () => void;
   selected?: boolean;
@@ -233,14 +233,19 @@ function HostRow({ serverId }: { serverId: string }) {
   );
 }
 
-function ConnectionFooter({ serverId }: { serverId: string }) {
+function ConnectionFooter({ serverId, onNavigate }: { serverId: string; onNavigate: () => void }) {
+  const pathname = usePathname();
+  const settingsSelected = resolveSidebarDrillIn(pathname)?.kind === "settings";
   const hosts = useHosts();
   const host = hosts.find((entry) => entry.serverId === serverId);
   const snapshot = useHostRuntimeSnapshot(serverId);
   const sources = useUsageSummary();
   const pair = usePairDeviceModalStore((state) => state.open);
   const handlePair = useCallback(() => pair(serverId), [pair, serverId]);
-  const settings = useCallback(() => router.push(buildSettingsRoute()), []);
+  const settings = useCallback(() => {
+    onNavigate();
+    router.push(buildSettingsRoute());
+  }, [onNavigate]);
   const connections = useCallback(
     () => router.push(buildSettingsHostSectionRoute(serverId, "connections")),
     [serverId],
@@ -252,14 +257,6 @@ function ConnectionFooter({ serverId }: { serverId: string }) {
   if (transport === "tailnet") transportLabel = "Tailscale";
   return (
     <View style={styles.footer} testID="gumloop-sidebar-footer">
-      <GumloopRow
-        icon={Smartphone}
-        label="Pair device"
-        onPress={handlePair}
-        testID="sidebar-pair-device"
-      />
-      <GumloopRow icon={Settings} label="Settings" onPress={settings} testID="sidebar-settings" />
-      <View style={styles.divider} />
       <UsageSidebarItem sources={sources} />
       <Pressable
         onPress={connections}
@@ -291,24 +288,30 @@ function ConnectionFooter({ serverId }: { serverId: string }) {
             {host?.label ?? "No host"}
           </Text>
         </Pressable>
-        <Pressable
+        <AccountButton
+          icon={Smartphone}
+          label="Pair device"
+          onPress={handlePair}
+          testID="sidebar-pair-device"
+        />
+        <AccountButton
+          icon={Settings}
+          label="Settings"
+          onPress={settings}
+          selected={settingsSelected}
+          testID="sidebar-settings"
+        />
+        <AccountButton
+          icon={Bell}
+          label="Notifications"
           onPress={notifications}
-          style={styles.footerButton}
-          accessibilityRole="button"
-          accessibilityLabel="Notification settings"
-        >
-          <ThemedBell />
-        </Pressable>
+          testID="sidebar-notifications"
+        />
         <SidebarHelpMenu />
       </View>
     </View>
   );
 }
-const ThemedBell = withUnistyles(Bell, (theme: Theme) => ({
-  color: theme.colors.foregroundMuted,
-  size: 18,
-}));
-
 function GroupHeading({
   title,
   collapsed,
@@ -424,7 +427,7 @@ function DestinationLinks({ pathname: _pathname }: { pathname: string }) {
   const items = useAppNavItems();
   const navigate = useCallback(() => {}, []);
   return (
-    <ScrollView>
+    <ScrollView contentContainerStyle={styles.drillContent}>
       {items
         .filter((item) => item.isActive)
         .map((item) => (
@@ -481,7 +484,8 @@ export function GumloopSidebar({ active }: { active: boolean }) {
   if (drill?.kind === "workspace")
     middle = <WorkspaceSidebar serverId={drill.serverId} workspaceId={drill.workspaceId} />;
   else if (drill) middle = <DestinationPanel pathname={pathname} />;
-  else if (projectsCollapsed) middle = <ScrollView>{navigation}</ScrollView>;
+  else if (projectsCollapsed)
+    middle = <ScrollView contentContainerStyle={styles.rootScroll}>{navigation}</ScrollView>;
   else
     middle = (
       <SidebarWorkspaceList
@@ -537,7 +541,7 @@ export function GumloopSidebar({ active }: { active: boolean }) {
       <View style={styles.middle} testID="gumloop-sidebar-middle">
         {middle}
       </View>
-      <ConnectionFooter serverId={serverId} />
+      <ConnectionFooter serverId={serverId} onNavigate={resetDrill} />
     </View>
   );
 }
@@ -646,7 +650,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     height: 34,
     flexDirection: "row",
     alignItems: "center",
-    gap: 2,
+    gap: 12,
     paddingHorizontal: 10,
     borderRadius: 8,
   },
@@ -666,6 +670,8 @@ const styles = StyleSheet.create((theme: Theme) => ({
   },
   newAgentLabel: { fontSize: 16, fontWeight: "500", color: theme.colors.foreground },
   middle: { flex: 1, minHeight: 0, overflow: "hidden" },
+  rootScroll: { paddingHorizontal: 8, paddingBottom: 16 },
+  drillContent: { paddingHorizontal: 10, paddingBottom: 16 },
   navigation: { paddingHorizontal: 2 },
   navItems: { gap: 3 },
   groupHeading: { marginTop: 24, height: 34, flexDirection: "row", alignItems: "center" },
@@ -678,8 +684,14 @@ const styles = StyleSheet.create((theme: Theme) => ({
     paddingHorizontal: 8,
   },
   groupLabel: { fontSize: 14, color: theme.colors.foregroundMuted },
-  footer: { paddingHorizontal: 10, paddingBottom: 8, flexShrink: 0 },
-  divider: { height: 1, backgroundColor: theme.colors.border, marginVertical: 12 },
+  footer: {
+    paddingHorizontal: 10,
+    paddingTop: 12,
+    paddingBottom: 8,
+    flexShrink: 0,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
+  },
   connection: {
     borderRadius: 10,
     borderWidth: 1,
@@ -694,8 +706,8 @@ const styles = StyleSheet.create((theme: Theme) => ({
   },
   connectionTitle: { fontSize: 14, fontWeight: "500", color: theme.colors.foreground },
   muted: { fontSize: 13, color: theme.colors.foregroundMuted },
-  account: { minHeight: 44, flexDirection: "row", alignItems: "center", marginTop: 6 },
-  accountHost: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8 },
+  account: { minHeight: 40, flexDirection: "row", alignItems: "center", marginTop: 6 },
+  accountHost: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 8 },
   avatar: {
     width: 28,
     height: 28,
@@ -705,7 +717,6 @@ const styles = StyleSheet.create((theme: Theme) => ({
     justifyContent: "center",
   },
   avatarLetter: { fontSize: 14, color: theme.colors.foreground },
-  footerButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   drillRow: { height: 36, flexDirection: "row", alignItems: "center", gap: 6 },
   quickSwitch: { width: 36, overflow: "hidden" },
   panelHint: { padding: 16, fontSize: 14, color: theme.colors.foregroundMuted },

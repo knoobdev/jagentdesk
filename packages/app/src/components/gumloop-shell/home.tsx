@@ -1,3 +1,4 @@
+import { gumloopListStyles } from "./list-styles";
 import { useMemo } from "react";
 import { Text, View } from "react-native";
 import { History, Plus } from "lucide-react-native";
@@ -35,7 +36,11 @@ export function GumloopHome() {
       <View style={styles.body}>
         <Text style={styles.sectionTitle}>Recent activity</Text>
         {recent.length ? (
-          <AgentList agents={recent} showHostColumn={hosts.length > 1} />
+          <AgentList
+            agents={recent}
+            showHostColumn={hosts.length > 1}
+            contentContainerStyle={gumloopListStyles.embeddedContent}
+          />
         ) : (
           <View style={styles.empty}>
             <Text style={styles.emptyTitle}>Your development environment, in your pocket.</Text>

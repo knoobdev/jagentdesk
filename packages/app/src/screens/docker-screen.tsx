@@ -2210,8 +2210,12 @@ export function DockerScreen({
   const execCwd = useWorkspaceDirectory(serverId, execWorkspaceId) ?? "/";
 
   const contentContainerStyle = useMemo(
-    () => [styles.contentContainer, styles.contentBelowHeader],
-    [],
+    () => [
+      styles.contentContainer,
+      styles.contentBelowHeader,
+      isGumloop && !isCompact && gumloopListStyles.pageContent,
+    ],
+    [isGumloop, isCompact],
   );
 
   const tab = useDockerNavigation((state) => state.tabs[serverId] ?? "containers");

@@ -43,7 +43,11 @@ function AgentDot({ status }: { status: AggregatedAgent["status"] }) {
   let dotStyle = styles.dotIdle;
   if (status === "running") dotStyle = styles.dotRunning;
   if (status === "error") dotStyle = styles.dotFailed;
-  return <View style={[styles.dot, dotStyle]} />;
+  return (
+    <View style={styles.dotSlot}>
+      <View style={[styles.dot, dotStyle]} />
+    </View>
+  );
 }
 
 export function WorkspaceSidebar({
@@ -101,7 +105,11 @@ export function WorkspaceSidebar({
   const openTerminals = useCallback(() => terminals.mutate(), [terminals]);
   const filter = useCallback(() => setRunningOnly((value) => !value), []);
   return (
-    <ScrollView style={styles.container} testID="gumloop-workspace-panel">
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      testID="gumloop-workspace-panel"
+    >
       <GumloopRow icon={Bot} label="Agents" onPress={openAgents} />
       <GumloopRow icon={SquareTerminal} label="Terminals" onPress={openTerminals} />
       <GumloopRow icon={Files} label="Files" onPress={openFiles} />
@@ -133,7 +141,8 @@ export function WorkspaceSidebar({
   );
 }
 const styles = StyleSheet.create((theme: Theme) => ({
-  container: { flex: 1, paddingHorizontal: 10 },
+  container: { flex: 1 },
+  content: { paddingHorizontal: 10, paddingBottom: 16, gap: 3 },
   heading: {
     fontSize: 14,
     color: theme.colors.foregroundMuted,
@@ -166,5 +175,6 @@ const styles = StyleSheet.create((theme: Theme) => ({
   dotIdle: { backgroundColor: theme.colors.foregroundExtraMuted },
   dotRunning: { backgroundColor: theme.colors.palette.amber[500] },
   dotFailed: { backgroundColor: theme.colors.palette.red[500] },
+  dotSlot: { width: 18, height: 18, alignItems: "center", justifyContent: "center" },
   dot: { width: 7, height: 7, borderRadius: 4 },
 }));

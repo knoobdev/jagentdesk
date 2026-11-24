@@ -1,3 +1,4 @@
+import { GumloopRow } from "@/components/gumloop-shell/sidebar";
 import { PageHeader } from "@/components/headers/page-header";
 import { SidebarViewPicker } from "@/plugins/sidebar-view/picker";
 import { AppearanceText as Text } from "@/appearance/text";
@@ -619,6 +620,7 @@ function SidebarSectionButton({
   onSelect,
 }: SidebarSectionButtonProps) {
   const { theme } = useUnistyles();
+  const gumloop = useGumloopDesktopShell(true);
   const handlePress = useCallback(() => {
     onSelect(itemId);
   }, [onSelect, itemId]);
@@ -627,6 +629,10 @@ function SidebarSectionButton({
     () => [sidebarStyles.label, isSelected && { color: theme.colors.foreground }],
     [isSelected, theme.colors.foreground],
   );
+  if (gumloop)
+    return (
+      <GumloopRow icon={IconComponent} label={label} selected={isSelected} onPress={handlePress} />
+    );
   return (
     <Pressable
       accessibilityRole="button"
@@ -661,6 +667,7 @@ function SidebarHostSectionButton({
   onSelect,
 }: SidebarHostSectionButtonProps) {
   const { theme } = useUnistyles();
+  const gumloop = useGumloopDesktopShell(true);
   const handlePress = useCallback(() => {
     onSelect(itemId);
   }, [onSelect, itemId]);
@@ -669,6 +676,10 @@ function SidebarHostSectionButton({
     () => [sidebarStyles.label, isSelected && { color: theme.colors.foreground }],
     [isSelected, theme.colors.foreground],
   );
+  if (gumloop)
+    return (
+      <GumloopRow icon={IconComponent} label={label} selected={isSelected} onPress={handlePress} />
+    );
   return (
     <Pressable
       accessibilityRole="button"
@@ -809,10 +820,14 @@ function SettingsSidebar({
   );
   const insets = useSafeAreaInsets();
   const isDesktop = layout === "desktop";
+  const gumloop = useGumloopDesktopShell(true);
   const sidebarScroll = useSettingsSidebarScroll(isDesktop);
   const outerContainerStyle = useMemo(
-    () => [isDesktop ? sidebarStyles.desktopContainer : sidebarStyles.mobileContainer],
-    [isDesktop],
+    () => [
+      isDesktop ? sidebarStyles.desktopContainer : sidebarStyles.mobileContainer,
+      gumloop && sidebarStyles.gumloopContainer,
+    ],
+    [isDesktop, gumloop],
   );
   const innerContainerStyle = useMemo(
     () => [{ flex: 1 }, isDesktop ? { paddingTop: insets.top } : null],
@@ -826,7 +841,7 @@ function SettingsSidebar({
 
   const sidebarBody = (
     <>
-      <View style={sidebarStyles.list}>
+      <View style={[sidebarStyles.list, gumloop && sidebarStyles.gumloopList]}>
         <Text style={sidebarStyles.groupLabel}>{t("settings.groups.app")}</Text>
         {items.map((item) => (
           <SidebarSectionButton
@@ -841,7 +856,7 @@ function SettingsSidebar({
       </View>
       <SidebarSeparator />
       {hasHosts ? (
-        <View style={sidebarStyles.list}>
+        <View style={[sidebarStyles.list, gumloop && sidebarStyles.gumloopList]}>
           <Text style={sidebarStyles.groupLabel}>{t("settings.groups.host")}</Text>
           <HostPicker
             activeServerId={activeHostServerId}
@@ -862,7 +877,7 @@ function SettingsSidebar({
           ))}
         </View>
       ) : (
-        <View style={sidebarStyles.list}>
+        <View style={[sidebarStyles.list, gumloop && sidebarStyles.gumloopList]}>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={t("settings.addHost")}
@@ -1538,6 +1553,8 @@ const desktopStyles = StyleSheet.create((theme) => ({
 }));
 
 const sidebarStyles = StyleSheet.create((theme) => ({
+  gumloopContainer: { paddingHorizontal: 10, paddingBottom: 16 },
+  gumloopList: { paddingHorizontal: 0, gap: 3 },
   desktopContainer: {
     width: SETTINGS_DESKTOP_SIDEBAR_WIDTH,
     flexShrink: 1,

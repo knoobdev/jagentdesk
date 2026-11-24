@@ -8,6 +8,8 @@ import {
   RefreshControl,
   FlatList,
   type ListRenderItem,
+  type StyleProp,
+  type ViewStyle,
   type PressableStateCallbackType,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -36,6 +38,7 @@ interface AgentListProps {
   selectedAgentId?: string;
   onAgentSelect?: () => void;
   listFooterComponent?: ReactElement | null;
+  contentContainerStyle?: StyleProp<ViewStyle>;
   showAttentionIndicator?: boolean;
   showHostColumn?: boolean;
 }
@@ -393,6 +396,7 @@ export function AgentList({
   selectedAgentId,
   onAgentSelect,
   listFooterComponent,
+  contentContainerStyle,
   showAttentionIndicator = true,
   showHostColumn = false,
 }: AgentListProps) {
@@ -557,12 +561,16 @@ export function AgentList({
     [onRefresh, isRefreshing, theme.colors.foregroundMuted, refreshColors],
   );
 
+  const listContentStyle = useMemo(
+    () => [styles.listContent, contentContainerStyle],
+    [contentContainerStyle],
+  );
   return (
     <>
       <FlatList
         data={flatItems}
         style={styles.list}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={listContentStyle}
         keyExtractor={keyExtractor}
         renderItem={renderItem}
         showsVerticalScrollIndicator={false}

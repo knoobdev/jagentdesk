@@ -1,3 +1,5 @@
+import { useGumloopDesktopShell } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { gumloopListStyles } from "@/components/gumloop-shell/list-styles";
 import Animated from "react-native-reanimated";
 import { isNative } from "@/constants/platform";
 import { useKeyboardShiftStyle } from "@/keyboard/shift";
@@ -247,6 +249,11 @@ function MissingBotTarget({
   return <Alert title={t("bots.missing")} />;
 }
 function HostBotsScreen({ serverId }: { serverId: string }) {
+  const gumloop = useGumloopDesktopShell(true);
+  const bodyStyle = useMemo(
+    () => [styles.body, gumloop && gumloopListStyles.pageContent],
+    [gumloop],
+  );
   const { t } = useTranslation();
   const params = useLocalSearchParams<{
     botId?: string;
@@ -366,7 +373,7 @@ function HostBotsScreen({ serverId }: { serverId: string }) {
         description={t("bots.description")}
         actions={actions}
       />
-      <ScrollView contentContainerStyle={styles.body}>
+      <ScrollView contentContainerStyle={bodyStyle}>
         {!connection.connected ? <Alert title={t("bots.offline")} /> : null}
         <QueryNotice query={bots} />
         <QueryNotice query={rooms} />

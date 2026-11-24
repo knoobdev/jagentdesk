@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { ScrollView } from "react-native";
 import { Container, HardDrive, Image } from "lucide-react-native";
+import { StyleSheet } from "react-native-unistyles";
 import { create } from "zustand";
 import { GumloopRow } from "@/components/gumloop-shell/sidebar";
 export type DockerTab = "containers" | "images" | "volumes";
@@ -19,7 +20,7 @@ export function DockerSidebar({ serverId }: { serverId: string }) {
   const images = useCallback(() => select(serverId, "images"), [select, serverId]);
   const volumes = useCallback(() => select(serverId, "volumes"), [select, serverId]);
   return (
-    <ScrollView testID="gumloop-docker-panel">
+    <ScrollView contentContainerStyle={styles.content} testID="gumloop-docker-panel">
       <GumloopRow
         icon={Container}
         label="Containers"
@@ -31,3 +32,5 @@ export function DockerSidebar({ serverId }: { serverId: string }) {
     </ScrollView>
   );
 }
+
+const styles = StyleSheet.create({ content: { paddingHorizontal: 10, paddingBottom: 16, gap: 3 } });

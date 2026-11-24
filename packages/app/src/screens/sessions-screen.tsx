@@ -1,3 +1,5 @@
+import { useGumloopDesktopShell } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { gumloopListStyles } from "@/components/gumloop-shell/list-styles";
 import { useMemo, useState, useCallback, useEffect } from "react";
 import { View, Text } from "react-native";
 import { useIsFocused } from "expo-router/react-navigation";
@@ -26,6 +28,11 @@ export function SessionsScreen() {
 }
 
 function SessionsScreenContent() {
+  const gumloop = useGumloopDesktopShell(true);
+  const filterStyle = useMemo(
+    () => [styles.filterContainer, gumloop && gumloopListStyles.pageContent],
+    [gumloop],
+  );
   const { theme } = useUnistyles();
   const { t } = useTranslation();
   const hosts = useHosts();
@@ -85,7 +92,7 @@ function SessionsScreenContent() {
         description="Every agent session on your hosts, newest first. Open one to pick it back up."
       />
       {showHostFilter ? (
-        <View style={styles.filterContainer}>
+        <View style={filterStyle}>
           <HostFilter
             hosts={hosts}
             selectedHost={selectedHost}
@@ -118,6 +125,7 @@ function SessionsScreenContent() {
       {!isInitialLoad && !showLoadError && sortedAgents.length > 0 ? (
         <AgentList
           agents={sortedAgents}
+          contentContainerStyle={gumloop ? gumloopListStyles.pageContent : undefined}
           showCheckoutInfo={false}
           isRefreshing={isManualRefresh}
           onRefresh={handleRefresh}

@@ -1,3 +1,4 @@
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { getSidebarRowBackdrop } from "@/components/sidebar/sidebar-row-backdrop";
 import { useCompactTimeAgo } from "@/hooks/use-time-ago";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
@@ -906,6 +907,7 @@ function ProjectHeaderRow({
   removeProjectStatus = "idle",
   dragHandleProps,
 }: ProjectHeaderRowProps) {
+  const gumloop = useIsGumloopTheme();
   const [isHovered, setIsHovered] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const isMobileBreakpoint = useIsCompactFormFactor();
@@ -972,27 +974,29 @@ function ProjectHeaderRow({
 
   const projectRowStyle = useCallback(
     ({ pressed }: PressableStateCallbackType) => [
-      styles.projectRow,
+      styles.projectRow(gumloop),
       isDragging && styles.projectRowDragging,
       selected && styles.sidebarRowSelected,
       isHovered && styles.projectRowHovered,
       pressed && styles.projectRowPressed,
     ],
-    [isDragging, selected, isHovered],
+    [gumloop, isDragging, selected, isHovered],
   );
 
   const rowChildren = (
     <>
-      <View style={styles.projectRowLeft}>
-        <ProjectLeadingVisual
-          displayName={displayName}
-          iconDataUri={iconDataUri}
-          statusBucket={statusBucket}
-          projectViewKey={project.viewKey}
-          chevron={chevron}
-          showChevron={isHovered && chevron !== null}
-          isArchiving={isArchiving}
-        />
+      <View style={styles.projectRowLeft(gumloop)}>
+        <View style={styles.projectLeadingVisual(gumloop)}>
+          <ProjectLeadingVisual
+            displayName={displayName}
+            iconDataUri={iconDataUri}
+            statusBucket={statusBucket}
+            projectViewKey={project.viewKey}
+            chevron={chevron}
+            showChevron={isHovered && chevron !== null}
+            isArchiving={isArchiving}
+          />
+        </View>
 
         <View style={styles.projectTitleGroup}>
           <Text style={styles.projectTitle} numberOfLines={1}>
@@ -2541,11 +2545,12 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.sm,
     textAlign: "center",
   },
-  projectRow: {
+  projectRow: (gumloop: boolean) => ({
     position: "relative",
-    minHeight: 36,
-    paddingVertical: theme.spacing[2],
-    paddingHorizontal: theme.spacing[2],
+    minHeight: gumloop ? 34 : 36,
+    paddingVertical: gumloop ? 0 : theme.spacing[2],
+    paddingHorizontal: gumloop ? 10 : theme.spacing[2],
+    marginHorizontal: gumloop ? 2 : 0,
     borderRadius: theme.borderRadius.lg,
     marginBottom: theme.spacing[1],
     flexDirection: "row",
@@ -2553,7 +2558,7 @@ const styles = StyleSheet.create((theme) => ({
     justifyContent: "space-between",
     gap: theme.spacing[2],
     userSelect: "none",
-  },
+  }),
   projectRowHovered: {
     backgroundColor: theme.colors.surfaceSidebarHover,
   },
@@ -2568,13 +2573,19 @@ const styles = StyleSheet.create((theme) => ({
     zIndex: 3,
     ...theme.shadow.md,
   },
-  projectRowLeft: {
+  projectLeadingVisual: (gumloop: boolean) => ({
+    width: gumloop ? 18 : 16,
+    height: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  }),
+  projectRowLeft: (gumloop: boolean) => ({
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[2],
+    gap: gumloop ? 12 : theme.spacing[2],
     flex: 1,
     minWidth: 0,
-  },
+  }),
   projectTitleGroup: {
     flexDirection: "row",
     alignItems: "center",

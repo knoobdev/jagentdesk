@@ -5,6 +5,8 @@ import type { Theme } from "@/styles/theme";
  * Shared list geometry and muted column headers for Gumloop screens.
  */
 export const gumloopListStyles = StyleSheet.create((theme: Theme) => ({
+  embeddedContent: { paddingHorizontal: 0 },
+  pageContent: { width: "100%", maxWidth: "100%", alignSelf: "stretch", paddingHorizontal: 82 },
   groupRow: {
     flexDirection: "row",
     alignItems: "center",
