@@ -111,6 +111,7 @@ import {
   type DaemonBackgroundWorkInput,
   type DaemonBackgroundWorkKey,
 } from "./background-work/index.js";
+import { extractAttention } from "../persistence-hooks.js";
 
 const RELOAD_SESSION_CLOSE_TIMEOUT_MS = 3_000;
 const INTERRUPT_SESSION_TIMEOUT_MS = 2_000;
@@ -433,7 +434,7 @@ export interface WaitForAgentStartOptions {
   signal?: AbortSignal;
 }
 
-type AttentionState =
+export type AttentionState =
   | { requiresAttention: false }
   | {
       requiresAttention: true;
@@ -1605,6 +1606,7 @@ export class AgentManager {
       workspaceId?: string;
       owner?: AgentOwner;
       background?: boolean;
+      attention?: AttentionState;
     },
     resumeOptions?: AgentResumeSessionOptions,
   ): Promise<ManagedAgent> {
@@ -1625,6 +1627,7 @@ export class AgentManager {
       workspaceId?: string;
       owner?: AgentOwner;
       background?: boolean;
+      attention?: AttentionState;
     },
     resumeOptions?: AgentResumeSessionOptions,
   ): Promise<ManagedAgent> {
@@ -1684,6 +1687,7 @@ export class AgentManager {
     await this.requireExternalMcpSupport(session, providerLaunchConfig, launchContext);
     return this.registerSession(session, storedConfig, resolvedAgentId, {
       ...options,
+      restoring: true,
       launchEnv,
       workspaceId,
       persistence:
@@ -1887,6 +1891,7 @@ export class AgentManager {
         usageTotals: preservedUsageTotals,
         lastError: preservedLastError,
         attention: preservedAttention,
+        restoring: true,
       });
     } finally {
       if (!handedToRegistration) {
@@ -2254,7 +2259,7 @@ export class AgentManager {
         lastUsage: undefined,
         usageTotals: record.usageTotals,
         lastError: record.lastError ?? undefined,
-        attention: { requiresAttention: false },
+        attention: extractAttention(record),
         internal: record.internal,
         background: record.background,
         labels: record.labels,
@@ -4214,6 +4219,12 @@ export class AgentManager {
       usageTotals?: AgentUsageTotals;
       lastError?: string;
       attention?: AttentionState;
+      /**
+       * Bringing a known agent back, rather than starting a new one. Its timestamps and
+       * attention come from what was already recorded, and installing the session is not
+       * activity in it.
+       */
+      restoring?: boolean;
       initialTitle?: string | null;
       publishWhenReady?: boolean;
       workspaceId?: string;
@@ -4294,7 +4305,12 @@ export class AgentManager {
       await this.refreshSessionState(managed, { emit: false });
       this.assertAgentRegistrationActive(managed);
       managed.lifecycle = "idle";
-      this.touchUpdatedAt(managed);
+      // Stamping now over a restored timestamp rewrote the workspace's "last used" in the
+      // sidebar every time a chat was reopened, because workspace `statusEnteredAt` is
+      // re-derived from persisted agent `updatedAt` on every daemon start.
+      if (!options?.restoring) {
+        this.touchUpdatedAt(managed);
+      }
       await this.persistSnapshot(managed);
       this.assertAgentRegistrationActive(managed);
       this.emitState(managed, { persist: false });
