@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from "expo-router";
-import type { PluginSurfaceProps } from "@jagentdesk/plugin/client";
+import type { PluginSurfaceProps, PluginScreenProps } from "@jagentdesk/plugin/client";
 import type { PluginTheme } from "@jagentdesk/plugin";
 import { ChevronDown, X } from "lucide-react-native";
 import { useCallback, useMemo, useRef, useState, type ComponentType } from "react";
@@ -60,18 +60,20 @@ function SurfaceRenderer({
   layout,
   host,
   theme,
+  params,
 }: {
-  Surface: ComponentType<PluginSurfaceProps>;
+  Surface: ComponentType<PluginScreenProps>;
   client: DaemonClient;
   plugin: NonNullable<ReturnType<typeof useInstalledPlugin>>;
   layout: PluginSurfaceProps["layout"];
   host: PluginSurfaceProps["host"];
   theme: PluginTheme;
+  params: Record<string, string>;
 }) {
   const navigation = usePluginHostNavigation(host.id);
   return (
     <PluginRuntimeBoundary plugin={plugin} client={client}>
-      <Surface theme={theme} host={host} layout={layout} navigation={navigation} />
+      <Surface theme={theme} host={host} layout={layout} navigation={navigation} params={params} />
     </PluginRuntimeBoundary>
   );
 }
@@ -173,7 +175,22 @@ export function PluginSurfaceScreen() {
       identity ? getPluginSurfaceContributionServerIds(installations, pluginId, identity) : [],
     [identity, installations, pluginId],
   );
-  const title = sidebarItem?.title ?? surface?.id ?? (pluginId || "Plugin");
+  const screenParams = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(params).flatMap(([key, value]) =>
+          key.startsWith("pluginParam.") && typeof value === "string"
+            ? [[key.slice(12), value]]
+            : [],
+        ),
+      ),
+    [params],
+  );
+  const title =
+    sidebarItem?.title ??
+    (typeof surface?.title === "function" ? surface.title(screenParams) : surface?.title) ??
+    surface?.id ??
+    (pluginId || "Plugin");
   const Icon = sidebarItem ? resolvePluginIcon(sidebarItem.icon) : null;
   const close = useCallback(() => {
     if (router.canGoBack()) router.back();
@@ -232,6 +249,7 @@ export function PluginSurfaceScreen() {
           >
             <ThemedSurfaceRenderer
               Surface={surface.Component}
+              params={screenParams}
               client={client}
               plugin={plugin}
               host={host}

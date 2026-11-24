@@ -12,6 +12,7 @@ function registry() {
     createRuntime: (installation) => {
       const api = createJAgentDeskApi(client);
       return {
+        openScreen() {},
         playAudio: async () => {},
         hosts: createPluginHosts(
           {

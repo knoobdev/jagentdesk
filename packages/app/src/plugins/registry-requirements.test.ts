@@ -14,6 +14,7 @@ function registry(version: string) {
     createRuntime(installation) {
       starts++;
       return {
+        openScreen() {},
         playAudio: async () => {},
         hosts: createPluginHosts(
           {

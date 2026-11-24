@@ -19,6 +19,8 @@ import {
 import {
   type PluginCommandCenterItemContribution,
   type PluginClientContext,
+  type PluginScreenContribution,
+  type PluginSidebarItemContribution,
   type PluginClientSlashCommandContribution,
   type PluginSidebarContribution,
   type PluginSurfaceProps,
@@ -66,6 +68,13 @@ function normalizePanelLocations(
   return normalized;
 }
 
+function isComponentType(value: unknown): boolean {
+  return (
+    typeof value === "function" ||
+    (typeof value === "object" && value !== null && "$$typeof" in value)
+  );
+}
+
 function requireId(value: string, label: string): string {
   const id = value.trim();
   if (!CONTRIBUTION_ID.test(id)) throw new Error(`Invalid ${label}: ${value}`);
@@ -78,6 +87,7 @@ export type PluginClientRuntime = Pick<
   | "jagentdesk"
   | "rpc"
   | "openSettings"
+  | "openScreen"
   | "openSurface"
   | "openPanel"
   | "subscribe"
@@ -95,6 +105,8 @@ export function runPluginClientBundle(
     surfaces: [],
     settingsScreens: [],
     sidebarItems: [],
+    sidebarHeaderItems: [],
+    sidebarFooterItems: [],
     workspacePanels: [],
     commandCenterItems: [],
     clientSlashCommands: [],
@@ -151,8 +163,46 @@ export function runPluginClientBundle(
     removals.add(remove);
     return remove;
   }
+  function addSidebarEntry(
+    section: "header" | "footer",
+    contribution: PluginSidebarItemContribution,
+  ) {
+    const normalizedId = requireId(contribution.id, `sidebar ${section} item normalizedId`);
+    const entries =
+      section === "header" ? collector.sidebarHeaderItems! : collector.sidebarFooterItems!;
+    if (entries.some((entry) => entry.normalizedId === normalizedId))
+      throw new Error(`Duplicate sidebar ${section} item: ${normalizedId}`);
+    const title = contribution.title.trim();
+    if (!title) throw new Error(`Sidebar item ${normalizedId} has no title`);
+    if (!isComponentType(contribution.Component))
+      throw new Error(`Sidebar item ${normalizedId} is not a component`);
+    return register(entries, { ...contribution, id: normalizedId, title }, () => {});
+  }
   const pluginContext: PluginClientContext = {
     ...runtime,
+    addScreen(contribution: PluginScreenContribution) {
+      const normalizedId = requireId(contribution.id, "screen normalizedId");
+      if (surfaceIds.has(normalizedId)) throw new Error(`Duplicate screen: ${normalizedId}`);
+      if (
+        !(
+          typeof contribution.title === "function" ||
+          (typeof contribution.title === "string" && contribution.title.trim())
+        )
+      )
+        throw new Error(`Screen ${normalizedId} needs a title`);
+      if (!isComponentType(contribution.Component))
+        throw new Error(`Screen ${normalizedId} is not a component`);
+      surfaceIds.add(normalizedId);
+      return register(collector.surfaces, { ...contribution, id: normalizedId }, () =>
+        surfaceIds.delete(normalizedId),
+      );
+    },
+    addSidebarHeaderItem(contribution) {
+      return addSidebarEntry("header", contribution);
+    },
+    addSidebarFooterItem(contribution) {
+      return addSidebarEntry("footer", contribution);
+    },
     addSettingsScreen(contribution) {
       const screenId = requireId(contribution.id, "settings screen id");
       if (settingsScreenIds.has(screenId))
@@ -170,8 +220,13 @@ export function runPluginClientBundle(
       if (typeof Component !== "function")
         throw new Error(`Surface ${normalizedId} is not a component`);
       surfaceIds.add(normalizedId);
-      return register(collector.surfaces, { id: normalizedId, Component }, () =>
-        surfaceIds.delete(normalizedId),
+      return register(
+        collector.surfaces,
+        {
+          id: normalizedId,
+          Component,
+        },
+        () => surfaceIds.delete(normalizedId),
       );
     },
     addSidebarItem(contribution: PluginSidebarContribution) {
@@ -451,6 +506,8 @@ export function runPluginClientBundle(
     surfaces: collector.surfaces,
     settingsScreens: collector.settingsScreens,
     sidebarItems: collector.sidebarItems,
+    sidebarHeaderItems: collector.sidebarHeaderItems,
+    sidebarFooterItems: collector.sidebarFooterItems,
     workspacePanels: collector.workspacePanels as EvaluatedPlugin["workspacePanels"],
     commandCenterItems: collector.commandCenterItems,
     clientSlashCommands: collector.clientSlashCommands,

@@ -55,6 +55,44 @@ interface PluginNavigableHostProps extends PluginHostProps {
 
 export interface PluginSurfaceProps extends PluginNavigableHostProps {}
 
+/** String keys and values: params travel in the screen's URL. */
+export type PluginScreenParams = Record<string, string>;
+
+export interface PluginOpenScreenInput {
+  screenId: string;
+  params?: PluginScreenParams;
+}
+
+export interface PluginScreenLocation {
+  screenId: string;
+  params: PluginScreenParams;
+}
+
+export interface PluginScreenProps extends PluginSurfaceProps {
+  /** The params the screen was opened with; `{}` when none. */
+  params: PluginScreenParams;
+}
+
+export interface PluginPopoverProps extends PluginHostProps {
+  close(): void;
+  openScreen(input: PluginOpenScreenInput): void;
+}
+
+export interface PluginSidebarItemProps extends PluginHostProps {
+  /** This plugin's screen open on this item's host, with its params, else null. */
+  currentScreen: PluginScreenLocation | null;
+  openScreen(input: PluginOpenScreenInput): void;
+  /** Anchored to the item on wide layouts; a bottom sheet on compact layouts. */
+  openPopover(Content: ComponentType<PluginPopoverProps>): void;
+}
+
+export interface PluginSidebarItemContribution {
+  id: string;
+  /** Settings row label, accessibility label, and default label for SidebarRow. */
+  title: string;
+  Component: ComponentType<PluginSidebarItemProps>;
+}
+
 export interface PluginIconProps {
   name: string;
   size?: number;
@@ -93,6 +131,9 @@ export interface PluginClientOpenPanelOptions extends PluginOpenPanelOptions {
 export interface PluginClientContext extends PluginCommandCapabilities {
   /** Play a base64-encoded audio file on this client; resolves when playback ends. */
   playAudio(source: { base64: string; mimeType: string }): Promise<void>;
+  addScreen(contribution: PluginScreenContribution): PluginCleanup;
+  addSidebarHeaderItem(contribution: PluginSidebarItemContribution): PluginCleanup;
+  addSidebarFooterItem(contribution: PluginSidebarItemContribution): PluginCleanup;
   addSettingsScreen(contribution: PluginSettingsScreenContribution): PluginCleanup;
   addSurface(id: string, Component: ComponentType<PluginSurfaceProps>): PluginCleanup;
   addSidebarItem(contribution: PluginSidebarContribution): PluginCleanup;
@@ -141,9 +182,19 @@ export interface PluginSettingsScreenContribution {
   Component: ComponentType<PluginSurfaceProps>;
 }
 
+/** The screen header's title: fixed, or derived from the params the screen was opened with. */
+export type PluginScreenTitle = string | ((params: PluginScreenParams) => string);
+
+export interface PluginScreenContribution {
+  id: string;
+  title: PluginScreenTitle;
+  Component: ComponentType<PluginScreenProps>;
+}
+
 export interface PluginSurfaceContribution {
   id: string;
-  Component: ComponentType<PluginSurfaceProps>;
+  title?: PluginScreenTitle;
+  Component: ComponentType<PluginScreenProps>;
 }
 
 export interface PluginSidebarContribution {
@@ -192,6 +243,7 @@ export interface PluginCommandCapabilities {
     contract: PluginRpcContract<InputSchema, OutputSchema>,
     input: PluginWireInput<ZodInput<InputSchema>>,
   ): Promise<ZodOutput<OutputSchema>>;
+  openScreen(input: PluginOpenScreenInput): void;
   openSurface(id: string): void;
   openSettings(id: string): void;
 }

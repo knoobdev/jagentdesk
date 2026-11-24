@@ -1,3 +1,7 @@
+import { usePluginScreenSidebarItems, openPluginSidebarItem } from "@/plugins/sidebar-screen-items";
+import type { InstalledPlugin } from "@/plugins/types";
+import type { PluginSidebarItemContribution } from "@jagentdesk/plugin/client";
+import { Blocks } from "lucide-react-native";
 import { router, usePathname } from "expo-router";
 import { memo, useCallback, useMemo } from "react";
 import { Pressable, ScrollView, Text, View, type PressableStateCallbackType } from "react-native";
@@ -127,10 +131,34 @@ function RailPluginItem({ group }: { group: PluginSidebarGroup }) {
  * rounded rail (violet gradient in light, #191919 in dark), pair-device and settings pinned at the
  * bottom. It stays visible when the workspace sidebar is collapsed.
  */
+function RailScreenPluginItem({
+  plugin,
+  item,
+}: {
+  plugin: InstalledPlugin;
+  item: PluginSidebarItemContribution;
+}) {
+  const pathname = usePathname();
+  const onPress = useCallback(() => openPluginSidebarItem(plugin, item.id), [plugin, item.id]);
+  return (
+    <RailButton
+      icon={Blocks}
+      label={item.title}
+      shortLabel={item.title.split(/\s+/)[0]}
+      isActive={pathname.startsWith(
+        `/h/${encodeURIComponent(plugin.serverId)}/plugin/${encodeURIComponent(plugin.id)}/`,
+      )}
+      onPress={onPress}
+      testID={`rail-plugin-${plugin.id}-${item.id}`}
+    />
+  );
+}
 export function ClickUpRail() {
   const { t } = useTranslation();
   const items = useAppNavItems();
   const pluginGroups = usePluginSidebarGroups();
+  const pluginHeaderItems = usePluginScreenSidebarItems("header");
+  const pluginFooterItems = usePluginScreenSidebarItems("footer");
   const localServerId = useLocalDaemonServerId();
   const openPairDeviceModal = usePairDeviceModalStore((state) => state.open);
   const handlePairDevice = useCallback(() => {
@@ -153,8 +181,14 @@ export function ClickUpRail() {
         {pluginGroups.map((group) => (
           <RailPluginItem key={group.key} group={group} />
         ))}
+        {pluginHeaderItems.map(({ key, plugin, item }) => (
+          <RailScreenPluginItem key={key} plugin={plugin} item={item} />
+        ))}
       </ScrollView>
       <View style={styles.footer}>
+        {pluginFooterItems.map(({ key, plugin, item }) => (
+          <RailScreenPluginItem key={key} plugin={plugin} item={item} />
+        ))}
         {localServerId ? (
           <RailButton
             icon={Smartphone}

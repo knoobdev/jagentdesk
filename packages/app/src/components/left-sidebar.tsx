@@ -1,3 +1,4 @@
+import { PluginSidebarPanel } from "@/plugins/sidebar-screen-items";
 import { BuiltinPluginGate } from "@/plugins/builtin/gate";
 import { router, usePathname, type Href } from "expo-router";
 import {
@@ -114,10 +115,18 @@ function parseArgoCdRoute(
 
 /** Sections whose route owns the desktop left column instead of the workspace list. */
 type SectionRoute =
+  | { section: "plugin"; serverId: string; pluginId: string }
   | { section: "servers" | "jira" | "figma"; serverId: string }
   | { section: "argocd"; serverId: string; instanceId: string | null };
 
 function resolveSectionRoute(pathname: string): SectionRoute | null {
+  const plugin = /^\/h\/([^/]+)\/plugin\/([^/]+)/.exec(pathname);
+  if (plugin)
+    return {
+      section: "plugin",
+      serverId: decodeURIComponent(plugin[1]),
+      pluginId: decodeURIComponent(plugin[2]),
+    };
   const argoCd = parseArgoCdRoute(pathname);
   if (argoCd) return { section: "argocd", ...argoCd };
   const match = pathname.match(/\/h\/([^/]+)\/(servers|jira|figma)(?:$|[/?])/);
@@ -145,6 +154,8 @@ function resolveSidebarNavBody(
   fallback: ReactNode,
   sectionRoute: SectionRoute | null = null,
 ): ReactNode {
+  if (sectionRoute?.section === "plugin")
+    return <PluginSidebarPanel serverId={sectionRoute.serverId} pluginId={sectionRoute.pluginId} />;
   // A section that owns the left column (spec 25.13.1 Servers, 29.3 Jira, 30.3 Argo CD).
   if (sectionRoute?.section === "servers")
     return (
