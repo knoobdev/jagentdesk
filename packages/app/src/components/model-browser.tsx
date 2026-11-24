@@ -1177,7 +1177,7 @@ const styles = StyleSheet.create((theme) => ({
     backgroundColor: theme.colors.surface1,
   },
   emptyState: {
-    paddingVertical: theme.spacing[4],
+    padding: theme.spacing[4],
     alignItems: "center",
     gap: theme.spacing[2],
   },
