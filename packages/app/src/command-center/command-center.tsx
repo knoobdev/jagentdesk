@@ -1,6 +1,6 @@
+import { Modal } from "@/components/ui/modal";
 import {
   FlatList,
-  Modal,
   Pressable,
   Text,
   TextInput,

@@ -118,7 +118,7 @@ export default {
     name: variant.name,
     slug: "jagentdesk-mobile",
     version: pkg.version,
-    orientation: "portrait",
+    orientation: "default",
     icon: "./assets/images/icon.png",
     scheme: "jagentdesk",
     userInterfaceStyle: "automatic",

@@ -1,3 +1,4 @@
+import { Modal } from "@/components/ui/modal";
 import { router } from "expo-router";
 import type { WorkspaceProjectDescriptorPayload } from "@jagentdesk/protocol/messages";
 import {
@@ -22,7 +23,6 @@ import {
   type RefObject,
 } from "react";
 import {
-  Modal,
   Pressable,
   ScrollView,
   Text,
