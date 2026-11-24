@@ -1909,6 +1909,8 @@ export interface PluginTimelineStreamItem {
   kind: "plugin";
   id: string;
   sourceId?: string;
+  /** Source row kind, so plugin-rendered replies remain visible when a turn folds. */
+  sourceKind?: StreamItem["kind"];
   timelineCursor?: TimelinePosition;
   turnId?: string;
   timestamp: Date;
