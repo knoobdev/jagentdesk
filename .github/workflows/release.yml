@@ -52,7 +52,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24.x"
+          go-version-file: packages/server/go/tsnet-bridge/go.mod
           cache-dependency-path: packages/server/go/tsnet-bridge/go.sum
 
       - name: Install dependencies
@@ -135,12 +135,14 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24.x"
+          go-version-file: packages/server/go/tsnet-bridge/go.mod
           cache-dependency-path: packages/server/go/tsnet-bridge/go.sum
 
       - name: Install dependencies
         run: npm ci
 
+      # build:server (also called by the desktop build) stamps both Tailscale
+      # version accessors from go.mod through build-tsnet-bridge.mjs.
       - name: Build desktop package
         shell: bash
         working-directory: packages/desktop
@@ -236,6 +238,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/app/modules/jagentdesk-tailscale/go/tailscale-bridge/go.mod
+          cache-dependency-path: packages/app/modules/jagentdesk-tailscale/go/tailscale-bridge/go.sum
+
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
@@ -279,6 +287,14 @@ jobs:
           sudo swapon /swapfile
           free -h || true
           df -h / || true
+
+      - name: Build embedded Tailscale Android bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager "ndk;27.1.12297006"
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/27.1.12297006"
+          node packages/app/modules/jagentdesk-tailscale/build.mjs android
 
       - name: Build Android app dependencies
         run: |
@@ -361,6 +377,12 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/app/modules/jagentdesk-tailscale/go/tailscale-bridge/go.mod
+          cache-dependency-path: packages/app/modules/jagentdesk-tailscale/go/tailscale-bridge/go.sum
+
       - name: Select and verify compatible Xcode
         shell: bash
         run: |
@@ -388,6 +410,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Build embedded Tailscale iOS bridge
+        run: node packages/app/modules/jagentdesk-tailscale/build.mjs ios
 
       - name: Build iOS app dependencies
         run: |
