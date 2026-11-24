@@ -1,3 +1,4 @@
+import { setTimeout as pause } from "node:timers/promises";
 import { ForegroundPromptStart } from "./agent-run-state.js";
 import { isStaleProviderSessionError } from "./stale-provider-session-error.js";
 import { withTimeout } from "../../utils/promise-timeout.js";
@@ -5,7 +6,6 @@ import type { Logger } from "pino";
 
 import {
   createAgentMessageDelivery,
-  isSystemInjectedEnvelope,
   prepareAgentMessage,
   type AgentMessage,
   type AgentMessageDelivery,
@@ -25,6 +25,7 @@ import { ensureAgentLoaded } from "./agent-loading.js";
 import {
   areFinishNotificationsSuspended,
   getFinishSubscriptionStore,
+  getFinishSubscriptionSignal,
 } from "./finish-subscriptions/index.js";
 import { getParentAgentIdFromLabels } from "@jagentdesk/protocol/agent-labels";
 import type { ActiveTurnBehavior } from "@jagentdesk/protocol/messages";
@@ -286,10 +287,15 @@ export function prependInvocation(prompt: AgentPromptInput, line: string): Agent
   );
 }
 
-async function withSkillInvocation(params: SendPromptToAgentParams): Promise<AgentPromptInput> {
+export async function withSkillInvocation(
+  params: SendPromptToAgentParams,
+): Promise<AgentPromptInput> {
   if (!params.skillIds?.length || !params.skillInvocation) return params.prompt;
-  const agent = params.agentManager.getAgent(params.agentId);
-  if (!agent) return params.prompt;
+  const agent = await ensureAgentLoaded(params.agentId, {
+    agentManager: params.agentManager,
+    agentStorage: params.agentStorage,
+    logger: params.logger,
+  });
   const provider = params.agentManager.getBaseProviderId(agent.provider);
   const line = await params.skillInvocation.buildInvocationPrefix(
     params.skillIds,
@@ -636,9 +642,7 @@ async function dispatchPrompt(
     replaceRunning: !params.idleOnly,
     idleOnly: params.idleOnly,
     admit: params.admit,
-    // Agent- and system-sent messages steer by default; user commands keep
-    // interrupt (ADR-0029 decision 2, amending ADR-0013).
-    activeTurnBehavior: params.activeTurnBehavior ?? (params.source ? "steer" : undefined),
+    activeTurnBehavior: params.activeTurnBehavior,
     clearPendingPermissions: params.clearPendingPermissions,
     runOptions,
   });
@@ -697,6 +701,7 @@ export interface SetupFinishNotificationParams {
   waitForTurnStart?: boolean;
   /** Reattach durable local intent instead of creating a new subscription. */
   restoredSubscriptionId?: string;
+  restoredSubscriptionIds?: readonly string[];
   logger: Logger;
 }
 
@@ -804,15 +809,11 @@ export function setupFinishNotification(
     stopObserving();
   });
 
-  function settle(): void {
-    void subscriptionId
-      .then((id) => (id && store ? store.remove(id) : undefined))
-      .catch((error: unknown) => {
-        logger.warn(
-          { err: error, childAgentId, callerAgentId },
-          "Failed to remove finish subscription",
-        );
-      });
+  async function settle(): Promise<void> {
+    const id = await subscriptionId;
+    if (id && store) {
+      for (const ownedId of params.restoredSubscriptionIds ?? [id]) await store.remove(ownedId);
+    }
   }
 
   function stopObserving(): void {
@@ -827,7 +828,12 @@ export function setupFinishNotification(
   function stop(): void {
     if (stopped) return;
     stopObserving();
-    settle();
+    void settle().catch((error: unknown) =>
+      logger.warn(
+        { err: error, childAgentId, callerAgentId },
+        "Failed to remove finish subscription",
+      ),
+    );
   }
 
   async function notify(
@@ -874,23 +880,54 @@ export function setupFinishNotification(
     return true;
   }
 
+  async function notifyUntilAcknowledged(
+    reason: FinishNotificationReason,
+    terminal: boolean,
+    permissionRequest?: AgentPermissionRequest,
+  ): Promise<void> {
+    let delivered = false;
+    let warned = false;
+    let retries = 0;
+    while (!areFinishNotificationsSuspended(agentManager)) {
+      try {
+        if (!delivered) delivered = await notify(reason, permissionRequest);
+        if (terminal && delivered) await settle();
+        return;
+      } catch (error) {
+        if (!warned) {
+          logger.error(
+            { err: error, childAgentId, callerAgentId, reason },
+            "Failed to notify caller agent",
+          );
+          warned = true;
+        }
+        // Paseo #7683: retry the captured outcome; a storage failure after admission retries
+        // only removal, so an accepted notification is never sent a second time.
+        const signal = getFinishSubscriptionSignal(agentManager);
+        if (!store || !signal) return;
+        try {
+          await pause(Math.min(1000 * 2 ** Math.min(retries++, 3), 5000), undefined, {
+            signal,
+            ref: false,
+          });
+        } catch (pauseError) {
+          if (!signal.aborted) throw pauseError;
+          return;
+        }
+      }
+    }
+  }
+
   function notifySafely(reason: FinishNotificationReason, options: NotifySafelyOptions = {}): void {
     if (stopped) return;
     const terminal = options.terminal ?? true;
     if (terminal) stopObserving();
-    notificationQueue = notificationQueue
-      .then(async () => {
-        const delivered = await notify(reason, options.permissionRequest);
-        // A failed dispatch keeps the record, so a restart can still report it.
-        if (terminal && delivered) settle();
-        return undefined;
-      })
-      .catch((error) => {
-        logger.error(
-          { err: error, childAgentId, callerAgentId, reason },
-          "Failed to notify caller agent",
-        );
-      });
+    notificationQueue = notificationQueue.then(() =>
+      notifyUntilAcknowledged(reason, terminal, options.permissionRequest),
+    );
+    void notificationQueue.catch((error: unknown) =>
+      logger.error({ err: error, childAgentId, callerAgentId }, "Finish notification retry failed"),
+    );
   }
 
   function observeState(agent: ManagedAgent): void {

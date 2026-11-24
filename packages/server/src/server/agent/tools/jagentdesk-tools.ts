@@ -1,3 +1,4 @@
+import { withSkillInvocation } from "../agent-prompt.js";
 import { AgentActiveTurnBehaviorSchema } from "@jagentdesk/protocol/messages";
 import type { ChangeRequestWatches } from "../change-request-watches/index.js";
 import { changeRequestStatusSchema } from "../../../services/change-request-source.js";
@@ -5206,7 +5207,8 @@ function createToolCatalog(
     senderAgentId: string;
     prompt: string;
     sessionMode?: string;
-    activeTurnBehavior: "queue" | "steer" | "interrupt";
+    activeTurnBehavior?: "queue" | "steer" | "interrupt";
+    skillIds?: string[];
     background: boolean;
     notifyOnFinish: boolean;
     armFinishNotification: () => Promise<boolean>;
@@ -5220,6 +5222,7 @@ function createToolCatalog(
       background,
       notifyOnFinish,
       armFinishNotification,
+      skillIds,
     } = input;
     if (!agentManager.getAgent(agentId) && !(await agentStorage.get(agentId))) {
       throw new JAgentDeskToolInputError(`Agent ${agentId} not found`);
@@ -5239,6 +5242,18 @@ function createToolCatalog(
         },
         sessionMode,
         activeTurnBehavior,
+        preparePrompt: skillIds?.length
+          ? (preparedPrompt) =>
+              withSkillInvocation({
+                agentManager,
+                agentStorage,
+                agentId,
+                prompt: preparedPrompt,
+                skillIds,
+                skillInvocation: options.skillsStorage ?? null,
+                logger: childLogger,
+              })
+          : undefined,
         // Arm right before dispatch so the notification follows this task's turn.
         beforeDispatch: async () => {
           if (background) await armFinishNotification();
@@ -5329,14 +5344,12 @@ function createToolCatalog(
         return true;
       }
 
-      // Agent callers go through the recipient's delivery window (ADR-0029 decision 3):
-      // the sender gets a queued receipt at once, and messages that arrive within two
-      // quiet seconds reach the recipient as one prompt. Skill invocations need the
-      // provider prefix in front of the prompt, so they are sent directly.
-      if (callerAgentId && !skillIds?.length) {
+      // Every agent send uses the shared queue; native skill prefixes are added at dispatch.
+      if (callerAgentId) {
         return await sendQueuedAgentPrompt({
           agentId,
           senderAgentId: callerAgentId,
+          skillIds,
           prompt,
           sessionMode,
           activeTurnBehavior,

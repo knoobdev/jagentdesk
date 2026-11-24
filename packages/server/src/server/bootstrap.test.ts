@@ -74,7 +74,7 @@ function liveCleanupHost() {
   const store = new DaemonConfigStore(
     home,
     MutableDaemonConfigSchema.parse({
-      relay: { enabled: true },
+      relay: { enabled: false, endpoint: "localhost:6953", useTls: false },
       mcp: { injectIntoAgents: false },
       idleRuntimeCleanup: true,
     }),

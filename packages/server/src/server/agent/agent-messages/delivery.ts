@@ -25,6 +25,8 @@ export interface AgentMessage {
   /** Absent: queue. */
   activeTurnBehavior?: AgentMessageBehavior;
   beforeDispatch?: () => void | Promise<void>;
+  /** Native invocation prefixes stay outside the sender envelope, after queue admission. */
+  preparePrompt?: (prompt: AgentPromptInput) => Promise<AgentPromptInput>;
   onDispatch?: (disposition: PromptDispatchDisposition) => void;
 }
 export interface AgentMessageReceipt {
@@ -152,7 +154,10 @@ const isQueued = (message: Admitted): boolean => message.state === "queued";
 const isWithdrawn = (message: Admitted): boolean => message.state === "withdrawn";
 const isUrgent = (message: Admitted): boolean => isQueued(message) && message.urgency !== null;
 const isOfferable = (message: Admitted): boolean =>
-  isQueued(message) && !message.outOfBandDeclined && message.sessionMode === undefined;
+  isQueued(message) &&
+  !message.outOfBandDeclined &&
+  message.sessionMode === undefined &&
+  !message.preparePrompt;
 
 /**
  * Providers read a command from the raw start of the prompt: a slash and a name with no
@@ -163,6 +168,17 @@ function isCommand(prompt: AgentPromptInput): boolean {
   if (typeof first !== "string" && first?.type !== "text") return false;
   const text = typeof first === "string" ? first : first.text;
   return /^\/[^\s/]+(\s|$)/.test(text.trim());
+}
+
+const hasPromptPreparation = (message: Admitted): boolean => message.preparePrompt !== undefined;
+
+async function prepareMessagePrompt(
+  messages: Admitted[],
+  prompt: AgentPromptInput,
+): Promise<AgentPromptInput> {
+  for (const message of messages)
+    if (message.preparePrompt) prompt = await message.preparePrompt(prompt);
+  return prompt;
 }
 
 function combine(prompts: AgentPromptInput[]): AgentPromptInput {
@@ -340,6 +356,8 @@ export function createAgentMessageDelivery(
         for (const message of messages) if (message.beforeDispatch) await message.beforeDispatch();
         let disposition: PromptDispatchDisposition;
         try {
+          if (messages.some(hasPromptPreparation))
+            request.prompt = await prepareMessagePrompt(messages, request.prompt);
           disposition = await dependencies.dispatch(request);
         } catch (error) {
           if (!(error instanceof AgentTurnBusyError) || !closed || messages.some(isWithdrawn))
@@ -636,7 +654,10 @@ export function createAgentMessageDelivery(
             for (const message of riders)
               if (message.beforeDispatch) await message.beforeDispatch();
             if (dependencies.resolveSource) await resolveSources(riders);
-            result = await send(join(riders, direct));
+            const joined = join(riders, direct);
+            if (riders.some(hasPromptPreparation))
+              joined.prompt = await prepareMessagePrompt(riders, joined.prompt);
+            result = await send(joined);
           } catch (error) {
             handBack(riders);
             reject(error);

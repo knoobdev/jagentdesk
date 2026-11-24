@@ -7,9 +7,10 @@ import { createTestLogger } from "../../../test-utils/test-logger.js";
 import type { AgentManager } from "../agent-manager.js";
 import type { AgentStorage } from "../agent-storage.js";
 import { parseAgentMessages } from "../agent-messages/index.js";
-import { setupFinishNotification } from "../agent-prompt.js";
+import { configureAgentMessageDelivery, setupFinishNotification } from "../agent-prompt.js";
 import {
   configureFinishSubscriptions,
+  type FinishSubscriptionRecord,
   FINISH_SUBSCRIPTIONS_FILE,
   FinishSubscriptionStore,
   restoreFinishSubscriptions,
@@ -151,5 +152,78 @@ describe("durable finish subscriptions", () => {
     });
     expect(restored).toBe(0);
     expect(await store.list()).toEqual([]);
+  });
+
+  test("restored delivery retries a rejected parent start without dropping durable intent", async () => {
+    const store = FinishSubscriptionStore.forHome(home, logger);
+    await store.add({
+      childAgentId: "child",
+      callerAgentId: "parent",
+      requireParentOwnership: false,
+    });
+    const after = createParentManager();
+    configureAgentMessageDelivery(after.agentManager, { quietMs: 0 });
+    after.streamAgent.mockImplementationOnce(() => {
+      throw new Error("Provider start refused");
+    });
+    await restoreFinishSubscriptions({
+      agentManager: after.agentManager,
+      store,
+      isArchived: async () => false,
+      logger,
+      reconcile: async (record, _signal, ids) => {
+        await setupFinishNotification({
+          agentManager: after.agentManager,
+          agentStorage: after.agentStorage,
+          childAgentId: record.childAgentId,
+          callerAgentId: record.callerAgentId,
+          restoredSubscriptionId: record.id,
+          restoredSubscriptionIds: ids,
+          logger,
+        }).ready;
+      },
+    });
+    await vi.waitFor(() => expect(after.streamAgent).toHaveBeenCalledTimes(1));
+    expect(await store.list()).toHaveLength(1);
+    await vi.waitFor(async () => expect(await store.list()).toEqual([]), { timeout: 5000 });
+    expect(after.streamAgent).toHaveBeenCalledTimes(2);
+    expect(after.prompts).toHaveLength(1);
+  });
+
+  test("restored registrations for the same pair share one acknowledged notification", async () => {
+    const store = FinishSubscriptionStore.forHome(home, logger);
+    for (let i = 0; i < 2; i++)
+      await store.add({
+        childAgentId: "child",
+        callerAgentId: "parent",
+        requireParentOwnership: false,
+      });
+    const after = createParentManager();
+    configureAgentMessageDelivery(after.agentManager, { quietMs: 0 });
+    const reconcile = vi.fn(
+      async (record: FinishSubscriptionRecord, _signal: AbortSignal, ids: readonly string[]) => {
+        await setupFinishNotification({
+          agentManager: after.agentManager,
+          agentStorage: after.agentStorage,
+          childAgentId: record.childAgentId,
+          callerAgentId: record.callerAgentId,
+          restoredSubscriptionId: record.id,
+          restoredSubscriptionIds: ids,
+          logger,
+        }).ready;
+      },
+    );
+    expect(
+      await restoreFinishSubscriptions({
+        agentManager: after.agentManager,
+        store,
+        reconcile,
+        isArchived: async () => false,
+        logger,
+      }),
+    ).toBe(2);
+    await vi.waitFor(async () => expect(await store.list()).toEqual([]));
+    expect(reconcile).toHaveBeenCalledTimes(1);
+    expect(after.prompts).toHaveLength(1);
   });
 });

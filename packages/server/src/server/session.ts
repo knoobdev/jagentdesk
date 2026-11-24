@@ -1,3 +1,4 @@
+import { withSkillInvocation } from "./agent/agent-prompt.js";
 import type { AgentActiveTurnBehavior } from "@jagentdesk/protocol/messages";
 import type { AgentMessageBehavior } from "./agent/agent-messages/index.js";
 import { BotsSession } from "./bots/session.js";
@@ -10163,7 +10164,7 @@ export class Session {
     agentId: string,
     prompt: AgentPromptInput,
   ): boolean {
-    if (msg.sourceAgentId && !msg.skillIds?.length) {
+    if (msg.sourceAgentId) {
       const receipt = enqueueAgentMessage(
         {
           agentManager: this.agentManager,
@@ -10176,6 +10177,18 @@ export class Session {
           messageId: msg.messageId,
           source: { kind: "agent-message", agentId: msg.sourceAgentId },
           activeTurnBehavior: this.agentSenderBehavior(msg.activeTurnBehavior),
+          preparePrompt: msg.skillIds?.length
+            ? (preparedPrompt) =>
+                withSkillInvocation({
+                  agentManager: this.agentManager,
+                  agentStorage: this.agentStorage,
+                  agentId,
+                  prompt: preparedPrompt,
+                  skillIds: msg.skillIds,
+                  skillInvocation: this.skillsStorage,
+                  logger: this.sessionLogger,
+                })
+            : undefined,
           clearPendingPermissions: false,
         },
       );
@@ -10204,8 +10217,8 @@ export class Session {
   private agentSenderBehavior(
     requested: AgentActiveTurnBehavior | undefined,
   ): AgentMessageBehavior {
-    // COMPAT(agentActiveTurnBehaviors): added in v0.17.2, remove after 2027-05-22 once client
-    // floor >= v0.17.2. Older CLIs and connected hosts send steer for every default agent send,
+    // COMPAT(agentActiveTurnBehaviors): added in v0.9.59, remove after 2027-05-24 once client
+    // floor >= v0.9.59. Older CLIs and connected hosts send steer for every default agent send,
     // meaning wait for the turn to end, so only their interrupt stays an interrupt.
     if (!this.supports(CLIENT_CAPS.agentActiveTurnBehaviors))
       return requested === "interrupt" ? "interrupt" : "queue";

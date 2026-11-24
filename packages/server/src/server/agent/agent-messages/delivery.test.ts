@@ -1924,3 +1924,43 @@ test("held messages stay held when the message that reopened the queue is withdr
   expect((await recipient.person("continue", "person-1")).ids).toEqual(["older", "person-1"]);
   await recipient.delivery.close();
 });
+
+test("native skill prefixes wait with the agent message and remain before its envelope", async () => {
+  const clock = createClock();
+  let running = true;
+  let wake!: (recipientId: string) => void;
+  const prompts: AgentPromptInput[] = [];
+  const preparePrompt = async (prompt: AgentPromptInput) => `$native-skill\n\n${prompt}`;
+  const delivery = createAgentMessageDelivery({
+    schedule: clock.schedule,
+    isRunning: () => running,
+    subscribe: (listener) => {
+      wake = listener;
+      return () => {};
+    },
+    dispatch: async (request) => {
+      prompts.push(request.prompt);
+      return "turn_started";
+    },
+    onError: (error) => {
+      throw error;
+    },
+  });
+  const receipt = delivery.enqueue({
+    recipientId: "parent",
+    source: { kind: "agent-message", agentId: "child" },
+    prompt: "Use the native skill",
+    preparePrompt,
+  });
+  clock.advance(2000);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  expect(prompts).toEqual([]);
+  running = false;
+  wake("parent");
+  await receipt.dispatched;
+  expect(String(prompts[0])).toMatch(/^\$native-skill\n\n<jagentdesk-system /);
+  expect(parseAgentMessages(String(prompts[0]).split("\n\n").slice(1).join("\n\n"))).toMatchObject([
+    { source: { agentId: "child" }, text: "Use the native skill" },
+  ]);
+  await delivery.close();
+});

@@ -189,8 +189,8 @@ export function buildNoWaitResult(agentId: string, receipt: AgentMessageReceipt)
 
 function sendReceiptMessage(receipt: AgentMessageReceipt): string {
   if (receipt.deliveryStatus !== "queued") return "Message sent, not waiting for completion";
-  // COMPAT(agentActiveTurnBehaviors): added in v0.17.2, remove after 2027-05-22 once daemon
-  // floor >= v0.17.2. Older hosts return no guidance.
+  // COMPAT(agentActiveTurnBehaviors): added in v0.9.59, remove after 2027-05-24 once daemon
+  // floor >= v0.9.59. Older hosts return no guidance.
   return receipt.guidance ?? "Message queued for delivery after the current turn ends";
 }
 

@@ -56,6 +56,22 @@ Users can also detach an existing subagent from the subagents track. Detach is d
 
 `notifyOnFinish` defaults to `true` for agent-scoped creation and background prompt follow-ups because most delegated work needs to report back to the creating agent. Set it to `false` only for truly fire-and-forget agents or prompts.
 
+## Agent messages
+
+Agent sends default to `queue`. The recipient finishes its running turn, including compaction,
+then collects messages for two quiet seconds, capped at ten seconds from the first arrival.
+Finish notifications and change-request updates always queue. Bots and ORC use the same queue.
+
+Explicit `steer` joins the running turn; providers that cannot steer interrupt instead.
+`interrupt` replaces the turn. Both carry earlier queued messages in admission order. A user
+prompt carries the same queue and defaults to interrupt. Stop retains the queue for the next
+prompt when it stops a running or starting turn; stopping an idle recipient holds nothing.
+
+Receipts report the applied behavior and guidance. A provider must acknowledge admission before
+messages leave the queue. An unread steer and its carried messages can be lost when its turn is
+stopped or interrupted. Follow up with a short steer or interrupt to expedite a queued message;
+do not resend its body.
+
 ## Provider-managed child agents
 
 Some providers can create their own child sessions inside one provider runtime. OMP's task tool reports these with `child_session` events; `AgentManager` imports the live provider handle, stamps `jagentdesk.parent-agent-id`, and surfaces the result as a normal subagent in the parent's subagents track.

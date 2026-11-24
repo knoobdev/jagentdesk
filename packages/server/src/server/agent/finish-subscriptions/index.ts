@@ -128,6 +128,10 @@ export function areFinishNotificationsSuspended(agentManager: object): boolean {
   return states.get(agentManager)?.suspended === true;
 }
 
+export function getFinishSubscriptionSignal(agentManager: object): AbortSignal | undefined {
+  return states.get(agentManager)?.controller.signal;
+}
+
 export function getFinishSubscriptionStore(agentManager: object): FinishSubscriptionStore | null {
   return states.get(agentManager)?.store ?? null;
 }
@@ -135,7 +139,11 @@ export function getFinishSubscriptionStore(agentManager: object): FinishSubscrip
 export interface RestoreFinishSubscriptionsParams {
   agentManager: object;
   store: FinishSubscriptionStore;
-  reconcile(record: FinishSubscriptionRecord, signal: AbortSignal): Promise<void>;
+  reconcile(
+    record: FinishSubscriptionRecord,
+    signal: AbortSignal,
+    subscriptionIds: readonly string[],
+  ): Promise<void>;
   isArchived(agentId: string): Promise<boolean>;
   logger: Logger;
 }
@@ -147,19 +155,36 @@ export async function restoreFinishSubscriptions(
   configureFinishSubscriptions(params.agentManager, params.store);
   const state = states.get(params.agentManager)!;
   let restored = 0;
+  const groups = new Map<string, FinishSubscriptionRecord[]>();
   for (const record of await params.store.list()) {
     if (await params.isArchived(record.callerAgentId)) {
       await params.store.remove(record.id);
       continue;
     }
-    void params.reconcile(record, state.controller.signal).catch((error: unknown) => {
-      if (!state.controller.signal.aborted)
-        params.logger.error(
-          { err: error, subscriptionId: record.id },
-          "Failed to restore finish subscription",
-        );
-    });
-    restored++;
+    const key = JSON.stringify([record.callerAgentId, record.childAgentId]);
+    const records = groups.get(key) ?? [];
+    records.push(record);
+    groups.set(key, records);
+  }
+  for (const records of groups.values()) {
+    const record = {
+      ...records[0]!,
+      requireParentOwnership: records.every((entry) => entry.requireParentOwnership),
+    };
+    void params
+      .reconcile(
+        record,
+        state.controller.signal,
+        records.map((entry) => entry.id),
+      )
+      .catch((error: unknown) => {
+        if (!state.controller.signal.aborted)
+          params.logger.error(
+            { err: error, subscriptionId: record.id },
+            "Failed to restore finish subscription",
+          );
+      });
+    restored += records.length;
   }
   if (restored) params.logger.info({ restored }, "Restored local finish subscriptions");
   return restored;

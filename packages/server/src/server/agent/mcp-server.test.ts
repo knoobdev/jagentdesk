@@ -244,6 +244,9 @@ function buildAgentManagerSpies() {
     getPluginTools: () => [],
     reloadStalePluginSession: async () => {},
     hasInFlightRun: vi.fn().mockReturnValue(false),
+    hasPendingPermissions: vi.fn().mockReturnValue(false),
+    canSteer: vi.fn().mockReturnValue(false),
+    onStop: vi.fn().mockReturnValue(() => {}),
     tryRunOutOfBand: vi.fn().mockReturnValue(false),
     // Agent callers steer by default (ADR-0029); "inactive" falls through to a new turn.
     steerOrReplaceActiveTurn: vi.fn().mockResolvedValue({ status: "inactive" }),
@@ -4045,7 +4048,7 @@ describe("send_agent_prompt MCP tool", () => {
     await vi.waitFor(() => expect(childFinishSubscriptionCount(spies.agentManager)).toBe(1));
     expect(spies.agentManager.waitForAgentEvent).not.toHaveBeenCalled();
     expect(response.structuredContent.guidance).toBe(
-      "Queued for delivery after two quiet seconds. You will get notified when the prompted agent finishes, errors, or needs permission. Do not poll for status; continue with other work until the notification arrives.",
+      "Queued. The agent is idle, so your message starts a turn in about 2 seconds. You will get notified when the prompted agent finishes, errors, or needs permission. Do not poll for status; continue with other work until the notification arrives.",
     );
   });
 
@@ -4235,6 +4238,7 @@ describe("send_agent_prompt MCP tool", () => {
       const sent = await invokeToolWithParsedInput(registeredTool(server, "send_agent_prompt"), {
         agentId: childId,
         prompt: "Stop and reply instead",
+        activeTurnBehavior: "interrupt",
       });
       expect(sent.structuredContent).toMatchObject({
         success: true,
@@ -5744,7 +5748,7 @@ describe("speak MCP tool", () => {
 describe("agent snapshot MCP serialization", () => {
   const logger = createTestLogger();
 
-  it("steers agent-to-agent prompts by default and honors an explicit interrupt", async () => {
+  it("queues agent-to-agent prompts by default and honors an explicit interrupt", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     spies.agentManager.getAgent.mockImplementation((agentId: string) =>
       createManagedAgent({ id: agentId, cwd: "/tmp/workspace" }),
@@ -5761,9 +5765,8 @@ describe("agent snapshot MCP serialization", () => {
     const steered = await tool.inputSchema.safeParseAsync({ agentId: "child-agent", prompt: "a" });
     expect(steered.success).toBe(true);
     await tool.handler({ ...(steered.data as Record<string, unknown>), notifyOnFinish: false });
-    await vi.waitFor(() =>
-      expect(spies.agentManager.steerOrReplaceActiveTurn).toHaveBeenCalledTimes(1),
-    );
+    await vi.waitFor(() => expect(spies.agentManager.streamAgent).toHaveBeenCalled());
+    expect(spies.agentManager.steerOrReplaceActiveTurn).not.toHaveBeenCalled();
 
     spies.agentManager.steerOrReplaceActiveTurn.mockClear();
     await tool.handler({

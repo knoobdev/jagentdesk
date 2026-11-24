@@ -55,7 +55,7 @@ export interface ComposerSendClient {
       /** Native skills to invoke on this turn (spec 22.7); the daemon adds the invocation. */
       skillIds?: string[];
     },
-  ) => Promise<void>;
+  ) => Promise<unknown>;
   uploadFile: (input: { fileName: string; mimeType: string; bytes: Uint8Array }) => Promise<{
     requestId: string;
     file: {

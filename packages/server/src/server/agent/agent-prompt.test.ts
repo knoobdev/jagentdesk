@@ -16,6 +16,16 @@ import type { AgentManagerEvent, ManagedAgent } from "./agent-manager.js";
 
 beforeEach(() => setDefaultAgentMessageDeliveryTimingForTests({ quietMs: 0 }));
 
+function createAgentManagerStub(): AgentManager {
+  const manager = Object.create(AgentManager.prototype);
+  Reflect.set(manager, "subscribers", new Set());
+  Reflect.set(manager, "stopListeners", new Set());
+  Reflect.set(manager, "agents", new Map());
+  Reflect.set(manager, "collectingRuntimes", new Set());
+  Reflect.set(manager, "lifecycleMutationTails", new Map());
+  return manager;
+}
+
 interface CapturedLogger {
   logger: Logger;
   records: Array<Record<string, unknown>>;
@@ -74,7 +84,7 @@ function createFinishNotificationScenario(
   Reflect.set(callerAgent, "config", { title: "Caller Agent" });
   Reflect.set(callerAgent, "pendingPermissions", new Map());
 
-  const agentManager: AgentManager = Object.create(AgentManager.prototype);
+  const agentManager: AgentManager = createAgentManagerStub();
   Reflect.set(
     agentManager,
     "reloadStalePluginSession",
@@ -104,12 +114,13 @@ function createFinishNotificationScenario(
     return options?.childLastAssistantMessage ?? null;
   });
   Reflect.set(agentManager, "tryRunOutOfBand", () => false);
-  Reflect.set(agentManager, "hasInFlightRun", () => Boolean(options?.parentPromptError));
+  Reflect.set(agentManager, "hasInFlightRun", () => false);
   Reflect.set(agentManager, "hasPendingPermissions", () => false);
   Reflect.set(agentManager, "deferPromptUntilPermissionResolved", () => {});
   Reflect.set(agentManager, "streamAgent", (_agentId: string, prompt: string) => {
     parentPrompted = true;
     resolveParentPrompt?.(prompt);
+    if (options?.parentPromptError) throw options.parentPromptError;
     return (async function* noop() {})();
   });
   Reflect.set(agentManager, "replaceAgentRun", async (_agentId: string, prompt: string) => {
@@ -184,7 +195,7 @@ test("sendPromptToAgent forwards the client message id as run options", async ()
   Reflect.set(agent, "provider", "codex");
 
   const streamAgentSpy = vi.fn(() => (async function* noop() {})());
-  const agentManager: AgentManager = Object.create(AgentManager.prototype);
+  const agentManager: AgentManager = createAgentManagerStub();
   Reflect.set(
     agentManager,
     "reloadStalePluginSession",
@@ -242,7 +253,7 @@ test("sendPromptToAgent uses replacement admission for an agent awaiting a user 
   const streamAgentSpy = vi.fn(() => (async function* noop() {})());
   const replaceAgentRunSpy = vi.fn(async () => (async function* noop() {})());
   const deferSpy = vi.fn();
-  const agentManager: AgentManager = Object.create(AgentManager.prototype);
+  const agentManager: AgentManager = createAgentManagerStub();
   Reflect.set(
     agentManager,
     "reloadStalePluginSession",
@@ -300,7 +311,7 @@ function createSteerAgentManager(steerStatus: "accepted" | "unavailable") {
   const steerSpy = vi.fn(async () => ({
     status: steerStatus === "accepted" ? "steered" : "inactive",
   }));
-  const agentManager: AgentManager = Object.create(AgentManager.prototype);
+  const agentManager: AgentManager = createAgentManagerStub();
   Reflect.set(
     agentManager,
     "reloadStalePluginSession",
@@ -480,7 +491,7 @@ it("does not notify archived callers", async () => {
   const streamAgentSpy = vi.fn(() => (async function* noop() {})());
   const replaceAgentRunSpy = vi.fn(() => (async function* noop() {})());
 
-  const agentManager: AgentManager = Object.create(AgentManager.prototype);
+  const agentManager: AgentManager = createAgentManagerStub();
   Reflect.set(
     agentManager,
     "reloadStalePluginSession",

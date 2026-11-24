@@ -1192,7 +1192,7 @@ export async function createJAgentDeskDaemon(
   await restoreFinishSubscriptions({
     agentManager,
     store: FinishSubscriptionStore.forHome(config.jagentdeskHome, logger),
-    reconcile: async (record, signal) => {
+    reconcile: async (record, signal, subscriptionIds) => {
       await restartRecovery.waitForResume(record.childAgentId, signal);
       signal.throwIfAborted();
       await setupFinishNotification({
@@ -1202,6 +1202,7 @@ export async function createJAgentDeskDaemon(
         callerAgentId: record.callerAgentId,
         requireParentOwnership: record.requireParentOwnership,
         restoredSubscriptionId: record.id,
+        restoredSubscriptionIds: subscriptionIds,
         logger,
       }).ready;
     },
