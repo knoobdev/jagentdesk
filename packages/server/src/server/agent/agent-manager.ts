@@ -2056,7 +2056,8 @@ export class AgentManager {
           return;
         }
         if (shouldDetachFromArchivedParent(parent, currentChild)) {
-          await this.detachAgentUnlocked(currentChild.id);
+          const detached = await this.detachAgentUnlocked(currentChild.id);
+          if (!detached.live) this.dispatchStoredAgentState(detached.record);
         } else if (this.agents.has(currentChild.id)) {
           await this.archiveAgentUnlocked(currentChild.id, parent.archivedAt ?? undefined);
         } else {
@@ -2091,7 +2092,7 @@ export class AgentManager {
     if (this.agents.has(record.id)) {
       this.notifyAgentState(record.id);
     } else if (!archivedRecord.internal) {
-      this.dispatchArchivedStoredAgent(archivedRecord);
+      this.dispatchStoredAgentState(archivedRecord);
     }
 
     await this.fireAgentArchived(record.id);
@@ -2111,7 +2112,7 @@ export class AgentManager {
     }
   }
 
-  private dispatchArchivedStoredAgent(record: StoredAgentRecord): void {
+  private dispatchStoredAgentState(record: StoredAgentRecord): void {
     const updatedAt = new Date(record.updatedAt);
     this.dispatch({
       type: "agent_state",
@@ -2124,7 +2125,7 @@ export class AgentManager {
         session: null,
         capabilities: STORED_AGENT_CAPABILITIES,
         config: buildStoredAgentConfig(record),
-        runtimeInfo: undefined,
+        runtimeInfo: record.runtimeInfo,
         lifecycle: "closed",
         createdAt: new Date(record.createdAt),
         updatedAt,
@@ -2515,7 +2516,7 @@ export class AgentManager {
     } else {
       this.discardRetainedAgentState(agentId);
       if (!nextRecord.internal) {
-        this.dispatchArchivedStoredAgent(nextRecord);
+        this.dispatchStoredAgentState(nextRecord);
       }
     }
 
@@ -2550,7 +2551,7 @@ export class AgentManager {
       this.notifyAgentState(agentId);
     } else if (!nextRecord.internal) {
       // Same publication archiveSnapshot makes, so a stored-only agent reappears for every client.
-      this.dispatchArchivedStoredAgent(nextRecord);
+      this.dispatchStoredAgentState(nextRecord);
     }
     return true;
   }
@@ -5203,7 +5204,7 @@ export class AgentManager {
       this.openActiveTurn(agent, eventTurnId, new Date());
     }
     agent.lastError = undefined;
-    if (agent.attention.requiresAttention && agent.attention.reason === "error")
+    if (agent.attention.requiresAttention && agent.attention.attentionReason === "error")
       agent.attention = { requiresAttention: false };
     agent.lifecycle = "running";
     this.emitState(agent);
