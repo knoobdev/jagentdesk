@@ -20,6 +20,7 @@ import {
   type PluginCommandCenterItemContribution,
   type PluginClientContext,
   type PluginScreenContribution,
+  type PluginScreenProps,
   type PluginSidebarItemContribution,
   type PluginClientSlashCommandContribution,
   type PluginSidebarContribution,
@@ -108,6 +109,7 @@ export function runPluginClientBundle(
     sidebarHeaderItems: [],
     sidebarFooterItems: [],
     workspacePanels: [],
+    filePanels: [],
     commandCenterItems: [],
     clientSlashCommands: [],
     attachmentSources: [],
@@ -167,10 +169,10 @@ export function runPluginClientBundle(
     section: "header" | "footer",
     contribution: PluginSidebarItemContribution,
   ) {
-    const normalizedId = requireId(contribution.id, `sidebar ${section} item normalizedId`);
+    const normalizedId = requireId(contribution.id, `sidebar ${section} item id`);
     const entries =
       section === "header" ? collector.sidebarHeaderItems! : collector.sidebarFooterItems!;
-    if (entries.some((entry) => entry.normalizedId === normalizedId))
+    if (entries.some((entry) => entry.id === normalizedId))
       throw new Error(`Duplicate sidebar ${section} item: ${normalizedId}`);
     const title = contribution.title.trim();
     if (!title) throw new Error(`Sidebar item ${normalizedId} has no title`);
@@ -181,7 +183,7 @@ export function runPluginClientBundle(
   const pluginContext: PluginClientContext = {
     ...runtime,
     addScreen(contribution: PluginScreenContribution) {
-      const normalizedId = requireId(contribution.id, "screen normalizedId");
+      const normalizedId = requireId(contribution.id, "screen id");
       if (surfaceIds.has(normalizedId)) throw new Error(`Duplicate screen: ${normalizedId}`);
       if (
         !(
@@ -224,7 +226,7 @@ export function runPluginClientBundle(
         collector.surfaces,
         {
           id: normalizedId,
-          Component,
+          Component: Component as ComponentType<PluginScreenProps>,
         },
         () => surfaceIds.delete(normalizedId),
       );
@@ -247,6 +249,18 @@ export function runPluginClientBundle(
         },
         () => sidebarItemIds.delete(normalizedId),
       );
+    },
+    addFilePanel(contribution) {
+      const panelId = requireId(contribution.id, "file panel id");
+      if (collector.filePanels!.some((panel) => panel.id === panelId))
+        throw new Error(`Duplicate file panel: ${panelId}`);
+      if (!contribution.title.trim()) throw new Error(`File panel ${panelId} has no title`);
+      resolvePluginIcon(contribution.icon);
+      if (!contribution.files || !Array.isArray(contribution.files.extensions))
+        throw new Error(`File panel ${panelId} has no file selector`);
+      if (!isComponentType(contribution.Component))
+        throw new Error(`File panel ${panelId} is not a component`);
+      return register(collector.filePanels!, { ...contribution, id: panelId }, () => {});
     },
     addWorkspacePanel(contribution: PluginWorkspacePanelContribution) {
       const normalizedId = requireId(contribution.id, "workspace panel id");
@@ -508,6 +522,7 @@ export function runPluginClientBundle(
     sidebarItems: collector.sidebarItems,
     sidebarHeaderItems: collector.sidebarHeaderItems,
     sidebarFooterItems: collector.sidebarFooterItems,
+    filePanels: collector.filePanels,
     workspacePanels: collector.workspacePanels as EvaluatedPlugin["workspacePanels"],
     commandCenterItems: collector.commandCenterItems,
     clientSlashCommands: collector.clientSlashCommands,

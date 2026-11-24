@@ -1,3 +1,4 @@
+import type { PluginFile, PluginFileLocation, PluginFileTab } from "./file.js";
 import type { ComponentType } from "react";
 import type { JAgentDeskApi } from "@jagentdesk/client";
 import type { AgentTimelineItem } from "@jagentdesk/protocol/agent-types";
@@ -123,6 +124,23 @@ export interface PluginAgentPanelProps extends PluginNavigableHostProps {
   agentId: string;
 }
 
+export interface PluginFilePanelProps extends PluginNavigableHostProps {
+  workspaceId: string;
+  /** The file itself. The panel decides how to read it, show it, and save it. */
+  file: PluginFile;
+  tab: PluginFileTab;
+  location: PluginFileLocation;
+}
+
+export interface PluginFilePanelContribution {
+  id: string;
+  title: string;
+  icon: string;
+  /** Extensions without the dot, case-insensitive, and exact filenames. */
+  files: { extensions: readonly string[]; filenames?: readonly string[] };
+  Component: ComponentType<PluginFilePanelProps>;
+}
+
 export interface PluginClientOpenPanelOptions extends PluginOpenPanelOptions {
   workspaceId: string;
   agentId?: string;
@@ -137,6 +155,7 @@ export interface PluginClientContext extends PluginCommandCapabilities {
   addSettingsScreen(contribution: PluginSettingsScreenContribution): PluginCleanup;
   addSurface(id: string, Component: ComponentType<PluginSurfaceProps>): PluginCleanup;
   addSidebarItem(contribution: PluginSidebarContribution): PluginCleanup;
+  addFilePanel(contribution: PluginFilePanelContribution): PluginCleanup;
   addWorkspacePanel(contribution: PluginWorkspacePanelContribution): PluginCleanup;
   addCommandCenterItem(contribution: PluginCommandCenterItemContribution): PluginCleanup;
   addSlashCommand(contribution: PluginClientSlashCommandContribution): PluginCleanup;

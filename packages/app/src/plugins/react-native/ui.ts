@@ -12,3 +12,5 @@ export {
 export { ExternalLink } from "@/components/ui/external-link";
 
 export { SidebarRow, SidebarSeparator } from "../sidebar-kit";
+
+export { DocumentFrame } from "@/file-panels/document-frame";

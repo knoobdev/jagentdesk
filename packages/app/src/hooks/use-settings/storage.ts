@@ -47,6 +47,7 @@ export interface AppSettings {
   theme: ThemeName | "auto" | typeof PLUGIN_THEME_PREFERENCE;
   /** The selected plugin-contributed theme when `theme` is "plugin". */
   pluginThemeId: string | null;
+  filePanelAssociations: Record<string, string>;
   defaultThemeVersion: number;
   language: AppLanguage;
   sendBehavior: SendBehavior;
@@ -74,6 +75,7 @@ type StoredAppSettings = Partial<AppSettings> & { compactToolCalls?: unknown };
 export const DEFAULT_CLIENT_SETTINGS: AppSettings = {
   theme: DEFAULT_THEME,
   pluginThemeId: null,
+  filePanelAssociations: {},
   defaultThemeVersion: DEFAULT_THEME_VERSION,
   language: "system",
   sendBehavior: "steer",
@@ -232,6 +234,17 @@ function pickBooleanAppSettings(stored: StoredAppSettings): Partial<AppSettings>
 function pickThemeSettings(stored: StoredAppSettings, result: Partial<AppSettings>): void {
   if (typeof stored.theme === "string" && VALID_THEMES.has(stored.theme)) {
     result.theme = stored.theme;
+  }
+  if (
+    stored.filePanelAssociations &&
+    typeof stored.filePanelAssociations === "object" &&
+    !Array.isArray(stored.filePanelAssociations)
+  ) {
+    result.filePanelAssociations = Object.fromEntries(
+      Object.entries(stored.filePanelAssociations).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
+    );
   }
   if (typeof stored.pluginThemeId === "string" || stored.pluginThemeId === null) {
     result.pluginThemeId = stored.pluginThemeId;

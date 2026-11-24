@@ -6,6 +6,7 @@ import type {
   PluginThemeContribution,
 } from "@jagentdesk/plugin";
 import type {
+  PluginFilePanelContribution,
   PluginSidebarItemContribution,
   PluginCommandCenterItemContribution,
   PluginClientSlashCommandContribution,
@@ -31,6 +32,7 @@ export interface EvaluatedPlugin {
   sidebarItems: PluginSidebarContribution[];
   sidebarHeaderItems?: PluginSidebarItemContribution[];
   sidebarFooterItems?: PluginSidebarItemContribution[];
+  filePanels?: PluginFilePanelContribution[];
   workspacePanels: EvaluatedPluginWorkspacePanelContribution[];
   commandCenterItems: PluginCommandCenterItemContribution[];
   clientSlashCommands: PluginClientSlashCommandContribution[];

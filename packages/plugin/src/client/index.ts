@@ -1,5 +1,7 @@
 export type {
   PluginHostProps,
+  PluginFilePanelProps,
+  PluginFilePanelContribution,
   PluginScreenProps,
   PluginScreenParams,
   PluginScreenLocation,
@@ -74,3 +76,5 @@ export declare function getJAgentDeskClient(
 ): import("@jagentdesk/client").JAgentDeskApi;
 /** Open an absolute HTTP(S) URL using the client platform’s external opener. */
 export declare function openExternalUrl(url: string): Promise<void>;
+
+export * from "./file.js";
