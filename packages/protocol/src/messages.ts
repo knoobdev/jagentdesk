@@ -1,7 +1,32 @@
+import {
+  HostPairingRequestSchemas,
+  HostPairingResponseSchemas,
+  DeviceKindSchema,
+} from "./host-pairing.js";
 import { BotsRequestSchemas, BotsResponseSchemas, BotsPushSchemas } from "./bots/rpc-schemas.js";
 import { ProviderJAgentDeskToolsPolicySchema } from "./provider-config.js";
 import type { JsonValue } from "./agent-types.js";
 import { AgentMessageSchema } from "./agent-message.js";
+import {
+  HostsListRequestSchema,
+  HostsAddRequestSchema,
+  HostsUpdateRequestSchema,
+  HostsRemoveRequestSchema,
+  HostsLinkOpenRequestSchema,
+  HostsLinkAckSchema,
+  HostsRouteOpenRequestSchema,
+  HostsRouteFrameRequestSchema,
+  HostsRouteCloseRequestSchema,
+  HostsListResponseSchema,
+  HostsChangedSchema,
+  HostsAddResponseSchema,
+  HostsUpdateResponseSchema,
+  HostsRemoveResponseSchema,
+  HostsLinkOpenResponseSchema,
+  HostsRouteOpenResponseSchema,
+  HostsRouteFrameSchema,
+  HostsRouteClosedSchema,
+} from "./hosts.js";
 import { PluginIdSchema, PluginRequirementsSchema, PluginSourceSchema } from "./plugin-config.js";
 export {
   PluginIdSchema,
@@ -1602,6 +1627,8 @@ export const SendAgentMessageRequestSchema = z.object({
   text: z.string(),
   /** Opaque sender identity for agent-originated prompts (ADR-0029). */
   sourceAgentId: z.string().min(1).optional(),
+  sourceAgentServerId: z.string().min(1).optional(),
+  sessionMode: z.string().optional(),
   messageId: z.string().optional(), // Client-provided ID for deduplication
   images: z.array(ImageAttachmentSchema).optional(),
   attachments: AgentAttachmentsSchema,
@@ -4341,6 +4368,17 @@ export const SubscriptionReleaseResponseSchema = z.object({
 });
 
 export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
+  ...HostPairingRequestSchemas,
+  HostsListRequestSchema,
+  HostsAddRequestSchema,
+  HostsUpdateRequestSchema,
+  HostsRemoveRequestSchema,
+  HostsLinkOpenRequestSchema,
+  HostsLinkAckSchema,
+  HostsRouteOpenRequestSchema,
+  HostsRouteFrameRequestSchema,
+  HostsRouteCloseRequestSchema,
+
   SessionEventsSetSubscriptionRequestSchema,
   SubscriptionReleaseRequestSchema,
   ...SpecModeRequestSchemas,
@@ -4843,6 +4881,10 @@ export const ServerInfoStatusPayloadSchema = z
     serverId: z.string().trim().min(1),
     hostname: ServerInfoHostnameSchema.optional(),
     version: ServerInfoVersionSchema.optional(),
+    // Authenticated producer for host registration ownership, separate from admission authority.
+    sourceId: z.string().optional(),
+    // COMPAT(sessionPermissions): optional while clients support older daemons.
+    permissions: z.array(DaemonPermissionSchema).optional(),
     // COMPAT(desktopManaged): added in v0.1.X, remove optional parsing after 2027-01-16.
     desktopManaged: z.boolean().optional(),
     capabilities: ServerCapabilitiesFromUnknownSchema.optional(),
@@ -4863,6 +4905,8 @@ export const ServerInfoStatusPayloadSchema = z
         backgroundAgents: z.boolean().optional(),
         providersSnapshot: z.boolean().optional(),
         providerInstallation: z.boolean().optional(),
+        connectedHosts: z.boolean().optional(),
+        hostMultiplexing: z.boolean().optional(),
         usageSources: z.boolean().optional(),
         usageSetting: z.boolean().optional(),
         // COMPAT(providersSnapshotCwd): added in v0.3.2, remove gate after 2027-02-10.
@@ -6316,6 +6360,7 @@ export const PairingDeviceListResponseSchema = z.object({
         devicePublicKeyB64: z.string(),
         deviceName: z.string().optional(),
         pairedAtMs: z.number(),
+        kind: DeviceKindSchema.optional(),
       }),
     ),
   }),
@@ -8661,6 +8706,17 @@ export function parseHubExecutionOutboundMessage(value: unknown): HubExecutionOu
 export type DaemonUpdateProgressMessage = z.infer<typeof DaemonUpdateProgressMessageSchema>;
 
 export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
+  ...HostPairingResponseSchemas,
+  HostsListResponseSchema,
+  HostsChangedSchema,
+  HostsAddResponseSchema,
+  HostsUpdateResponseSchema,
+  HostsRemoveResponseSchema,
+  HostsLinkOpenResponseSchema,
+  HostsRouteOpenResponseSchema,
+  HostsRouteFrameSchema,
+  HostsRouteClosedSchema,
+
   SessionEventsSetSubscriptionResponseSchema,
   SubscriptionReleaseResponseSchema,
   ...SpecModeResponseSchemas,
@@ -9700,6 +9756,11 @@ export const WSChallengeMessageSchema = z.object({
 
 export const WSHelloMessageSchema = z.object({
   type: z.literal("hello"),
+  sessionPermissions: z.array(DaemonPermissionSchema).optional(),
+  routed: z.boolean().optional(),
+  producer: z
+    .object({ serverId: z.string().min(1).max(256), sourceId: z.string().min(1).max(1024) })
+    .optional(),
   clientId: z.string().min(1),
   clientType: z.enum(["mobile", "browser", "cli", "mcp"]),
   protocolVersion: z.number().int(),

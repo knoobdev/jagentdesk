@@ -1,3 +1,4 @@
+import { DeviceKindSchema } from "@jagentdesk/protocol/host-pairing";
 import { existsSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -12,6 +13,8 @@ export interface PairedDevice {
   devicePublicKeyB64: string;
   deviceName?: string;
   pairedAtMs: number;
+  tailnetNodeId?: string;
+  kind?: "desktop" | "mobile" | "daemon";
 }
 
 const PairedDeviceSchema = z.object({
@@ -19,6 +22,8 @@ const PairedDeviceSchema = z.object({
   devicePublicKeyB64: z.string().min(1),
   deviceName: z.string().optional(),
   pairedAtMs: z.number(),
+  tailnetNodeId: z.string().optional(),
+  kind: DeviceKindSchema.optional(),
 });
 
 const PairedDevicesFileSchema = z.object({
@@ -33,7 +38,12 @@ export interface PairedDeviceStore {
   getByPublicKey(publicKeyB64: string): PairedDevice | null;
   getById(deviceId: string): PairedDevice | null;
   isPaired(publicKeyB64: string): boolean;
-  register(input: { devicePublicKeyB64: string; deviceName?: string }): PairedDevice;
+  register(input: {
+    devicePublicKeyB64: string;
+    deviceName?: string;
+    tailnetNodeId?: string;
+    kind?: "desktop" | "mobile" | "daemon";
+  }): PairedDevice;
   revokeById(deviceId: string): boolean;
   revokeByPublicKey(publicKeyB64: string): boolean;
 }
@@ -75,7 +85,12 @@ export function createPairedDeviceStore(args: {
       return findIndexByPublicKey(publicKeyB64) !== -1;
     },
 
-    register(input: { devicePublicKeyB64: string; deviceName?: string }): PairedDevice {
+    register(input: {
+      devicePublicKeyB64: string;
+      deviceName?: string;
+      tailnetNodeId?: string;
+      kind?: "desktop" | "mobile" | "daemon";
+    }): PairedDevice {
       if (findIndexByPublicKey(input.devicePublicKeyB64) !== -1) {
         throw new Error("Device already paired");
       }
@@ -83,6 +98,8 @@ export function createPairedDeviceStore(args: {
         deviceId: generateId(),
         devicePublicKeyB64: input.devicePublicKeyB64,
         pairedAtMs: Date.now(),
+        ...(input.tailnetNodeId ? { tailnetNodeId: input.tailnetNodeId } : {}),
+        ...(input.kind ? { kind: input.kind } : {}),
       };
       if (input.deviceName !== undefined && input.deviceName !== "") {
         device.deviceName = input.deviceName;

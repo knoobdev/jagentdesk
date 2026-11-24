@@ -6,6 +6,7 @@ import { ComposerEditingSession } from "@/composer/editing-session";
 import { ParentAgentCallout, ParentAgentPill, useParentAgentId } from "@/subagents/parent";
 import { useAgentDescriptor as useAgentPanelDescriptor } from "@/agent-presentation";
 import { useAgentStreamTail } from "@/agent-stream/use-agent-stream-tail";
+import type { AgentAddress } from "@jagentdesk/protocol/addresses";
 import { BuiltinPluginGate } from "@/plugins/builtin/gate";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { SessionShareControl } from "@/composer/agent-controls/session-share-control";
@@ -1585,20 +1586,17 @@ function ActiveAgentComposer({
   const canDetachSubagents = useSessionStore(
     (state) => state.sessions[serverId]?.serverInfo?.features?.agentDetach === true,
   );
-  const handleOpenSubagent = useCallback(
-    (subagentId: string) => {
-      navigateToAgent({ serverId, agentId: subagentId });
-    },
-    [serverId],
-  );
+  const handleOpenSubagent = useCallback((address: AgentAddress) => {
+    navigateToAgent(address);
+  }, []);
   const handleOpenProviderSubagent = useCallback(
     (ownerAgentId: string, subagentId: string) => {
       openTab({ kind: "provider_subagent", parentAgentId: ownerAgentId, subagentId });
     },
     [openTab],
   );
-  const handleArchiveSubagent = useArchiveSubagent({ serverId });
-  const handleDetachSubagent = useDetachSubagent({ serverId });
+  const handleArchiveSubagent = useArchiveSubagent();
+  const handleDetachSubagent = useDetachSubagent();
   const handleHideFinishedProviderSubagents = useHideFinishedProviderSubagents({
     serverId,
     parentAgentId: agentId,

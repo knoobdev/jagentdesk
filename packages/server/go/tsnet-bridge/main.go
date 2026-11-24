@@ -24,12 +24,15 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -141,17 +144,41 @@ func main() {
 		os.Exit(0)
 	}()
 
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			if errors.Is(err, net.ErrClosed) {
-				return
-			}
-			log.Printf("accept: %v", err)
-			continue
-		}
-		go forward(conn, *localPort)
+	target, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", *localPort))
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	director := proxy.Director
+	proxy.Director = func(request *http.Request) {
+		director(request)
+		request.Header.Set("X-JAgentDesk-Bridge", os.Getenv("JAGENTDESK_TSNET_INGRESS_TOKEN"))
+		request.Header.Set("X-JAgentDesk-Node", request.Context().Value(nodeContextKey{}).(string))
 	}
+	verified := &peerListener{Listener: ln, verify: func(conn net.Conn) (string, error) {
+		lookupCtx, lookupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer lookupCancel()
+		who, err := lc.WhoIs(lookupCtx, conn.RemoteAddr().String())
+		if err != nil || who == nil || who.Node == nil {
+			return "", fmt.Errorf("not_a_tailnet_peer")
+		}
+		if who.Node.Sharer != 0 || who.Node.User != status.Self.UserID {
+			login := ""
+			if who.UserProfile != nil {
+				login = who.UserProfile.LoginName
+			}
+			encoded, _ := json.Marshal(login)
+			log.Printf("wrong_tailnet_account login=%s", encoded)
+			return "", fmt.Errorf("wrong_tailnet_account")
+		}
+		return string(who.Node.StableID), nil
+	}}
+	httpServer := &http.Server{Handler: proxy, ReadHeaderTimeout: 15 * time.Second,
+		ConnContext: func(ctx context.Context, conn net.Conn) context.Context {
+			return context.WithValue(ctx, nodeContextKey{}, conn.(*peerConn).nodeID)
+		},
+	}
+	if err := httpServer.Serve(verified); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, http.ErrServerClosed) {
+		log.Printf("tailnet serve: %v", err)
+	}
+
 }
 
 // singleLine flattens an error message onto one stdout line.
@@ -166,28 +193,31 @@ func listen(srv *tsnet.Server, useTLS bool, addr string) (net.Listener, error) {
 	return srv.Listen("tcp", addr)
 }
 
-// forward pipes conn to the Node ingress on 127.0.0.1:localPort and closes
-// both sides when either direction finishes.
-func forward(conn net.Conn, localPort int) {
-	local, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", localPort))
-	if err != nil {
-		log.Printf("dial local ingress: %v", err)
-		conn.Close()
-		return
-	}
+// WhoIs runs before the HTTP server reads application bytes.
+type nodeContextKey struct{}
+type peerConn struct {
+	net.Conn
+	nodeID string
+}
+type peerListener struct {
+	net.Listener
+	verify func(net.Conn) (string, error)
+}
 
-	done := make(chan struct{}, 1)
-	go func() {
-		io.Copy(local, conn)
-		done <- struct{}{}
-	}()
-	go func() {
-		io.Copy(conn, local)
-		done <- struct{}{}
-	}()
-	<-done
-	conn.Close()
-	local.Close()
+func (listener *peerListener) Accept() (net.Conn, error) {
+	for {
+		conn, err := listener.Listener.Accept()
+		if err != nil {
+			return nil, err
+		}
+		nodeID, err := listener.verify(conn)
+		if err != nil || nodeID == "" {
+			conn.Close()
+			log.Printf("tailnet connection rejected: %v", err)
+			continue
+		}
+		return &peerConn{Conn: conn, nodeID: nodeID}, nil
+	}
 }
 
 func fail(message string) {

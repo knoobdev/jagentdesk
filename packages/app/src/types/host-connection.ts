@@ -83,7 +83,14 @@ export function connectionsFromOffer(offer: ConnectionOffer): HostConnection[] {
   return connections;
 }
 
+export interface RoutedHostConnection {
+  id: string;
+  type: "routed";
+  originServerId: string;
+}
+
 export type HostConnection =
+  | RoutedHostConnection
   | DirectTcpHostConnection
   | DirectSocketHostConnection
   | DirectPipeHostConnection
@@ -216,6 +223,15 @@ function relayConnectionsEqual(left: RelayHostConnection, right: RelayHostConnec
 }
 
 function hostConnectionEquals(left: HostConnection, right: HostConnection): boolean {
+  if (left.type === "routed")
+    return (
+      right.type === "routed" &&
+      left.id === right.id &&
+      left.originServerId === right.originServerId
+    );
+  return standardConnectionEquals(left, right);
+}
+function standardConnectionEquals(left: HostConnection, right: HostConnection): boolean {
   if (left.id !== right.id) {
     return false;
   }
@@ -262,6 +278,17 @@ function dedupeHostConnections(connections: HostConnection[]): HostConnection[] 
   return next;
 }
 
+function upsertProfileConnections(
+  connections: HostConnection[],
+  incoming: HostConnection,
+): HostConnection[] {
+  const updated = connections.map((connection) =>
+    connection.id === incoming.id ? incoming : connection,
+  );
+  if (!connections.some((connection) => connection.id === incoming.id)) updated.push(incoming);
+  return dedupeHostConnections(updated);
+}
+
 export function upsertHostConnectionInProfiles(input: {
   profiles: HostProfile[];
   serverId: string;
@@ -281,7 +308,11 @@ export function upsertHostConnectionInProfiles(input: {
   const matchingIndexes = existing.reduce<number[]>((matches, daemon, index) => {
     if (
       daemon.serverId === serverId ||
-      daemon.connections.some((connection) => hostConnectionEquals(connection, input.connection))
+      // A routed candidate names its origin; its destination belongs to the host profile.
+      (input.connection.type !== "routed" &&
+        daemon.connections.some((existingConnection) =>
+          hostConnectionEquals(existingConnection, input.connection),
+        ))
     ) {
       matches.push(index);
     }
@@ -295,7 +326,7 @@ export function upsertHostConnectionInProfiles(input: {
       appearance: defaultHostAppearance(),
       lifecycle: defaultLifecycle(),
       connections: [input.connection],
-      preferredConnectionId: null,
+      preferredConnectionId: input.connection.type === "routed" ? input.connection.id : null,
       createdAt: now,
       updatedAt: now,
     };
@@ -304,12 +335,8 @@ export function upsertHostConnectionInProfiles(input: {
 
   const matchedProfiles = matchingIndexes.map((index) => existing[index]);
   const prev = matchedProfiles.find((daemon) => daemon.serverId === serverId) ?? matchedProfiles[0];
-  const nextConnections = dedupeHostConnections([
-    ...matchedProfiles
-      .flatMap((daemon) => daemon.connections)
-      .filter((connection) => connection.id !== input.connection.id),
-    input.connection,
-  ]);
+  const mergedConnections = matchedProfiles.flatMap((daemon) => daemon.connections);
+  const nextConnections = upsertProfileConnections(mergedConnections, input.connection);
   const nextLifecycle = prev.lifecycle;
   const nextLabel = prev.label === prev.serverId ? derivedLabel : prev.label;
   const nextPreferredConnectionId =
@@ -456,6 +483,11 @@ function normalizeStoredConnection(connection: unknown): HostConnection | null {
     return null;
   }
   const type = record.type;
+  if (type === "routed") {
+    const originServerId =
+      typeof record.originServerId === "string" ? record.originServerId.trim() : "";
+    return originServerId ? { id: `via:${originServerId}`, type: "routed", originServerId } : null;
+  }
   if (type === "directTcp") {
     return normalizeStoredDirectTcp(record);
   }

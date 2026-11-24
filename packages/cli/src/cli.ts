@@ -1,5 +1,6 @@
 import { createUsageCommand } from "./commands/usage/index.js";
 import { createRelayCommand } from "./commands/relay.js";
+import { createHostCommand } from "./commands/host/index.js";
 import { Command, Option } from "commander";
 import { createAgentCommand } from "./commands/agent/index.js";
 import { createDaemonCommand } from "./commands/daemon/index.js";
@@ -63,6 +64,8 @@ export function createCli(): Command {
     .option("-q, --quiet", "minimal output (IDs only)")
     .option("--no-headers", "omit table headers")
     .option("--no-color", "disable colored output");
+
+  program.addCommand(createHostCommand());
 
   // Primary agent commands (top-level)
   addJsonAndDaemonHostOptions(addLsOptions(program.command("ls"))).action(withOutput(runLsCommand));

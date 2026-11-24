@@ -1,3 +1,9 @@
+import { ConnectedHostSession, type ConnectedHosts } from "./connected-hosts/index.js";
+import {
+  SessionAuthorization,
+  OWNER_PERMISSIONS,
+  type DaemonPermission,
+} from "./authorization/index.js";
 import { withSkillInvocation } from "./agent/agent-prompt.js";
 import type { AgentActiveTurnBehavior } from "@jagentdesk/protocol/messages";
 import type { AgentMessageBehavior } from "./agent/agent-messages/index.js";
@@ -563,6 +569,9 @@ type AgentMcpTransportFactory = () => Promise<unknown>;
 
 export interface SessionOptions {
   creationService?: Pick<CreationService, "create">;
+  connectedHosts?: ConnectedHosts;
+  sourceId?: string;
+  permissions?: readonly DaemonPermission[];
   clientId: string;
   scopes: readonly string[];
   // Session-share guest sessions (spec §21 / ADR-0019): when set, this session may only touch this
@@ -580,7 +589,7 @@ export interface SessionOptions {
   appVersion?: string | null;
   clientCapabilities?: Record<string, unknown> | null;
   onMessage: (msg: SessionOutboundMessage) => void;
-  onMessageToSource?: (source: object, msg: SessionOutboundMessage) => void;
+  onMessageToSource?: (source: object, msg: SessionOutboundMessage) => void | Promise<void>;
   onBinaryMessage?: (frame: Uint8Array) => void;
   onBinaryMessageToSource?: (source: object, frame: Uint8Array) => Promise<void>;
   getTransportBufferedAmount?: (source?: object) => number | null;
@@ -901,6 +910,31 @@ function resolveWorkspaceCreationService(options: SessionOptions): Pick<Creation
 }
 
 export class Session {
+  private readonly authorization: SessionAuthorization;
+  private readonly connectedHostSession: ConnectedHostSession | null;
+  private routed = false;
+  private hostSourceId: string;
+  isRouted(): boolean {
+    return this.routed;
+  }
+  setRouted(routed: boolean): void {
+    this.routed = routed;
+  }
+  getHostSourceId(): string {
+    return this.hostSourceId;
+  }
+  setHostSource(sourceId: string): void {
+    this.hostSourceId = sourceId;
+    this.connectedHostSession?.setSource(sourceId);
+  }
+  getPermissions(): DaemonPermission[] {
+    return this.scopes.includes("*") ? this.authorization.listPermissions() : [];
+  }
+  setPermissions(permissions: readonly DaemonPermission[]): void {
+    this.authorization.replacePermissions(permissions);
+    this.connectedHostSession?.revoke();
+  }
+
   private readonly agentDirectory: AgentDirectory;
   private readonly creationService: Pick<CreationService, "create">;
   private readonly eventSubscriptions = new Map<
@@ -909,7 +943,11 @@ export class Session {
   >();
   readonly delivery = new SessionDelivery(
     (source, message) => {
-      if (isSessionRpcAllowed(this.scopes, message.type)) this.emitForSource(message, source);
+      if (
+        isSessionRpcAllowed(this.scopes, message.type) &&
+        this.authorization.allowsOutbound(message)
+      )
+        return this.emitForSource(message, source);
     },
     (source, frame) => this.emitBinaryReply(frame, source),
   );
@@ -924,7 +962,7 @@ export class Session {
   private readonly sessionId: string;
   private readonly onMessage: (msg: SessionOutboundMessage) => void;
   private readonly onMessageToSource:
-    | ((source: object, msg: SessionOutboundMessage) => void)
+    | ((source: object, msg: SessionOutboundMessage) => void | Promise<void>)
     | null;
   private readonly onBinaryMessage: ((frame: Uint8Array) => void) | null;
   private readonly onBinaryMessageToSource:
@@ -1112,6 +1150,9 @@ export class Session {
     this.appVersion = appVersion ?? null;
     this.clientCapabilities = parseClientCapabilities(clientCapabilities);
     this.sessionId = uuidv4();
+    this.authorization = new SessionAuthorization(resolveSessionPermissions(options, scopes));
+    this.hostSourceId = resolveHostSource(options);
+    this.connectedHostSession = createHostSession(options, this);
     this.onMessage = onMessage;
     this.onMessageToSource = onMessageToSource ?? null;
     this.onBinaryMessage = onBinaryMessage ?? null;
@@ -2551,7 +2592,7 @@ export class Session {
           },
           "agent.session.inbound",
         );
-      if (!isSessionRpcAllowed(this.scopes, msg.type)) {
+      if (!this.allowsInbound(msg)) {
         const requestId = sessionRequestId(msg);
         if (requestId) {
           this.emit({
@@ -2636,6 +2677,7 @@ export class Session {
   }
 
   public setScopes(scopes: readonly string[]): void {
+    this.connectedHostSession?.revoke();
     if (!isSessionRpcAllowed(scopes, "plugin.rpc.invoke.request"))
       void this.delivery
         .releaseFamily("plugin-rpc")
@@ -2775,6 +2817,7 @@ export class Session {
     // (possibly async) result and the rest are skipped — matching the previous
     // left-to-right `??` short-circuit chain exactly.
     const dispatchers: Array<() => Promise<void> | undefined> = [
+      () => this.connectedHostSession?.dispatch(msg),
       () =>
         msg.type === "provider.installation.update.subscribe.request"
           ? this.subscribeProviderUpdates(msg)
@@ -5416,6 +5459,11 @@ export class Session {
   }
 
   public async handleBinaryFrame(binaryFrame: BinaryFrame, source?: object): Promise<void> {
+    if (binaryFrame.kind === "host_route") {
+      if (source) this.connectedHostSession?.binary(binaryFrame.frame, source);
+      return;
+    }
+    if (!this.authorization.allowsPermission("workspace.write")) return;
     if (binaryFrame.kind === "plugin") {
       const frame = binaryFrame.frame;
       if (frame.opcode !== PluginFrameOpcode.Input) return;
@@ -10270,7 +10318,12 @@ export class Session {
           recipientId: agentId,
           prompt,
           messageId: msg.messageId,
-          source: { kind: "agent-message", agentId: msg.sourceAgentId },
+          source: {
+            kind: "agent-message",
+            agentId: msg.sourceAgentId,
+            ...(msg.sourceAgentServerId ? { serverId: msg.sourceAgentServerId } : {}),
+          },
+          sessionMode: msg.sessionMode,
           activeTurnBehavior: this.agentSenderBehavior(msg.activeTurnBehavior),
           preparePrompt: msg.skillIds?.length
             ? (preparedPrompt) =>
@@ -10584,6 +10637,16 @@ export class Session {
     );
   }
 
+  public publish(msg: SessionOutboundMessage): void {
+    this.emit(msg);
+  }
+
+  private allowsInbound(msg: SessionInboundMessage): boolean {
+    return isSessionRpcAllowed(this.scopes, msg.type) && this.authorization.allowsInbound(msg);
+  }
+  private allowsOutbound(msg: SessionOutboundMessage): boolean {
+    return isSessionRpcAllowed(this.scopes, msg.type) && this.authorization.allowsOutbound(msg);
+  }
   private emit(msg: SessionOutboundMessage): void {
     const event = msg.type === "status" ? `status.${msg.payload.status}` : msg.type;
     if (
@@ -10597,13 +10660,13 @@ export class Session {
             isSessionRpcAllowed(this.scopes, msg.type) &&
             !(this.guestAgentId !== null && this.guestMessageTouchesOtherAgent(msg))
           )
-            this.onMessageToSource(source, msg);
+            void this.onMessageToSource(source, msg);
         }
         return;
       }
       if (!this.wantsEvent(event)) return;
     }
-    if (msg.type !== "rpc_error" && !isSessionRpcAllowed(this.scopes, msg.type)) {
+    if (msg.type !== "rpc_error" && !this.allowsOutbound(msg)) {
       return;
     }
     // Guest sessions never receive another agent's data, even via broadcast (ADR-0019).
@@ -10664,10 +10727,9 @@ export class Session {
       });
   }
 
-  private emitForSource(msg: SessionOutboundMessage, source?: object): void {
+  private emitForSource(msg: SessionOutboundMessage, source?: object): void | Promise<void> {
     if (source && this.onMessageToSource) {
-      this.onMessageToSource(source, msg);
-      return;
+      return this.onMessageToSource(source, msg);
     }
     this.emit(msg);
   }
@@ -10795,4 +10857,28 @@ function dedupeSlashCommands<T extends { name: string }>(commands: readonly T[])
     unique.push(command);
   }
   return unique;
+}
+
+function createHostSession(options: SessionOptions, session: Session): ConnectedHostSession | null {
+  if (!options.connectedHosts) return null;
+  return new ConnectedHostSession(
+    options.connectedHosts,
+    session.delivery,
+    { sourceId: options.sourceId ?? "owner", manageSources: false },
+    () => session.getPermissions(),
+    (message) => session.delivery.reply(message),
+    () => session.isRouted(),
+    session.getSessionId(),
+    (source) => options.getTransportBufferedAmount?.(source) ?? 0,
+  );
+}
+
+function resolveSessionPermissions(
+  options: SessionOptions,
+  _scopes: readonly string[],
+): readonly DaemonPermission[] {
+  return options.permissions ?? OWNER_PERMISSIONS;
+}
+function resolveHostSource(options: SessionOptions): string {
+  return options.sourceId ?? "owner";
 }

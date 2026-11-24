@@ -1,5 +1,7 @@
+import type { AgentAddress } from "@jagentdesk/protocol/addresses";
+import { getParentAddressFromLabels } from "@jagentdesk/protocol/agent-labels";
 import { useEffect, useMemo } from "react";
-import { usePendingArchiveAgentIds } from "@/hooks/use-archive-agent";
+import { usePendingArchiveAgentKeys } from "@/hooks/use-archive-agent";
 import equal from "fast-deep-equal";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import { useSessionStore, type Agent } from "@/stores/session-store";
@@ -8,6 +10,7 @@ import type { ProviderSubagentDescriptorPayload } from "@jagentdesk/protocol/mes
 
 export interface JAgentDeskSubagentRow {
   kind: "jagentdesk";
+  address: AgentAddress;
   id: Agent["id"];
   provider: Agent["provider"];
   title: Agent["title"];
@@ -53,6 +56,7 @@ const EMPTY_PROVIDER_SUBAGENT_ROWS: ProviderSubagentRow[] = [];
 function toSubagentRow(agent: Agent): SubagentRow {
   return {
     kind: "jagentdesk",
+    address: { serverId: agent.serverId, agentId: agent.id },
     id: agent.id,
     provider: agent.provider,
     title: agent.title,
@@ -70,22 +74,20 @@ export function selectSubagentsForParent(
   params: SelectSubagentsParams,
   pendingArchiveIds: ReadonlySet<string>,
 ): SubagentRow[] {
-  const agents = state.sessions[params.serverId]?.agents;
-  if (!agents || agents.size === 0) {
-    return EMPTY_SUBAGENT_ROWS;
-  }
-
   const rows: SubagentRow[] = [];
-  for (const agent of agents.values()) {
-    if (
-      agent.archivedAt ||
-      agent.background ||
-      pendingArchiveIds.has(agent.id) ||
-      agent.parentAgentId !== params.parentAgentId
-    ) {
-      continue;
+  for (const [serverId, session] of Object.entries(state.sessions)) {
+    for (const agent of session.agents.values()) {
+      const parent = getParentAddressFromLabels(agent.labels, serverId);
+      if (
+        agent.archivedAt ||
+        agent.background ||
+        pendingArchiveIds.has(`${serverId}:${agent.id}`) ||
+        parent?.serverId !== params.serverId ||
+        parent.agentId !== params.parentAgentId
+      )
+        continue;
+      rows.push(toSubagentRow(agent));
     }
-    rows.push(toSubagentRow(agent));
   }
 
   if (rows.length === 0) {
@@ -103,12 +105,21 @@ export function createSubagentsForParentSelector(
   params: SelectSubagentsParams,
   pendingArchiveIds: ReadonlySet<string>,
 ): (state: SessionStoreSnapshot) => SubagentRow[] {
-  let previousAgents: Map<string, Agent> | undefined;
+  let previousAgents: Array<[string, Map<string, Agent>]> = [];
   let previousRows: SubagentRow[] | null = null;
 
   return (state) => {
-    const agents = state.sessions[params.serverId]?.agents;
-    if (previousRows && agents === previousAgents) {
+    const agents = Object.entries(state.sessions).map(
+      ([serverId, session]) => [serverId, session.agents] as [string, Map<string, Agent>],
+    );
+    if (
+      previousRows &&
+      agents.length === previousAgents.length &&
+      agents.every(
+        ([serverId, map], index) =>
+          previousAgents[index]?.[0] === serverId && previousAgents[index]?.[1] === map,
+      )
+    ) {
       return previousRows;
     }
 
@@ -150,7 +161,7 @@ export function selectProviderSubagentsForParent(
 
 export function useSubagentsForParent(params: SelectSubagentsParams): SubagentRow[] {
   const { serverId, parentAgentId } = params;
-  const pendingArchiveIds = usePendingArchiveAgentIds(serverId);
+  const pendingArchiveIds = usePendingArchiveAgentKeys();
   const selectJAgentDeskRows = useMemo(
     () => createSubagentsForParentSelector({ serverId, parentAgentId }, pendingArchiveIds),
     [serverId, parentAgentId, pendingArchiveIds],

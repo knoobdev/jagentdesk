@@ -1,3 +1,9 @@
+import { SasPairing } from "./pairing/sas.js";
+import type { HostDial } from "@jagentdesk/client/node";
+import { ConnectedHosts, DaemonLinkEndpoint, VirtualHostSocket } from "./connected-hosts/index.js";
+import { createToolHosts } from "./agent/host-operations/index.js";
+import { HOST_ROUTE_OPCODE } from "@jagentdesk/protocol/binary-frames/index";
+import { OWNER_PERMISSIONS, type DaemonPermission } from "./authorization/index.js";
 import type { BotsService } from "./bots/service.js";
 import { builtinPluginWireState } from "@jagentdesk/protocol/builtin-plugins";
 import { CreationService } from "./creation/index.js";
@@ -161,6 +167,7 @@ const WS_CLOSE_DAEMON_AUTH_FAILED = 4401;
 
 export interface ExternalSocketMetadata {
   transport: "tailnet" | "relay";
+  tailnetNodeId?: string;
   externalSessionKey?: string;
   /** Routing id of the relay data socket (spec 35.2); relay transports only. */
   relayConnectionId?: string;
@@ -229,6 +236,7 @@ interface WebSocketConnectionIdentity {
   sessionId?: string;
   appVersion?: string;
   deviceId?: string;
+  tailnetNodeId?: string;
   relayConnectionId?: string;
   securityMode?: "legacy" | "protected";
 }
@@ -525,6 +533,7 @@ export interface WebSocketLike {
 }
 
 interface TrustedSessionConnection {
+  principalId?: string;
   kind: "trusted";
   session: Session;
   clientId: string;
@@ -561,6 +570,8 @@ interface BrowserToolsRegistration {
 }
 
 interface SocketSessionOptions {
+  sourceId?: string;
+  permissions?: readonly DaemonPermission[];
   clientId: string;
   appVersion: string | null;
   clientCapabilities: Record<string, unknown> | null;
@@ -570,7 +581,7 @@ interface SocketSessionOptions {
   onGuestActivity?: (text: string) => void;
   connectionLogger: pino.Logger;
   onMessage: (message: SessionOutboundMessage) => void;
-  onMessageToSource?: (source: object, message: SessionOutboundMessage) => void;
+  onMessageToSource?: (source: object, message: SessionOutboundMessage) => void | Promise<void>;
   onBinaryMessage?: (frame: Uint8Array) => void;
   onBinaryMessageToSource?: (source: object, frame: Uint8Array) => Promise<void>;
   getTransportBufferedAmount?: (source?: object) => number | null;
@@ -651,6 +662,22 @@ function sshServiceOrInMemory(service: SshService | null | undefined): SshServic
 }
 
 export class VoiceAssistantWebSocketServer {
+  private readonly hostLinks = new Map<WebSocketLike, DaemonLinkEndpoint>();
+  private readonly connectedHosts: ConnectedHosts;
+  private readonly sasPairing: SasPairing | null;
+  private hostDial?: HostDial;
+  setHostDial(dial: HostDial): void {
+    this.hostDial = dial;
+  }
+
+  private readonly virtualAdmissions = new WeakMap<
+    object,
+    { principalId: string; permissions: readonly DaemonPermission[] }
+  >();
+  toolHosts() {
+    return createToolHosts(this.connectedHosts);
+  }
+
   private readonly logger: pino.Logger;
   private readonly wss: WebSocketServer;
   private readonly pendingConnections: Map<WebSocketLike, PendingConnection> = new Map();
@@ -838,6 +865,13 @@ export class VoiceAssistantWebSocketServer {
     this.browserToolsBroker = browserToolsBroker ?? null;
     this.hubRelationships = hubRelationships ?? null;
     this.pairing = pairing ?? null;
+    this.sasPairing = pairing
+      ? new SasPairing(pairing.devices, (message) => {
+          for (const session of this.listTrustedSessions()) {
+            if (session.getPermissions().includes("access.manage")) session.publish(message);
+          }
+        })
+      : null;
     this.pluginRuntime = pluginRuntime ?? null;
     this.agentManager = agentManager;
     // Plan view with Spec mode on (spec 31.1): phases/tasks from the agent's tasks.md. The Spec
@@ -885,6 +919,15 @@ export class VoiceAssistantWebSocketServer {
     this.downloadTokenStore = downloadTokenStore;
     this.jagentdeskHome = jagentdeskHome;
     this.creationService = new CreationService(join(jagentdeskHome, "creations"), logger);
+    this.connectedHosts = new ConnectedHosts(
+      jagentdeskHome,
+      { serverId, label: getHostName() },
+      (target) => {
+        if (!this.hostDial) throw new Error("tailnet_unavailable");
+        return this.hostDial(target);
+      },
+      this.logger,
+    );
     this.daemonConfigStore = daemonConfigStore;
     this.mcpBaseUrl = mcpBaseUrl;
     this.assignOptionalServices({
@@ -1534,6 +1577,8 @@ export class VoiceAssistantWebSocketServer {
 
   public async close(): Promise<void> {
     this.prepareForShutdown();
+    this.sasPairing?.cancel();
+    await this.connectedHosts.close();
     this.activityGraphService.dispose();
     this.specPlanSource.dispose();
     this.unsubscribeSpeechReadiness?.();
@@ -1630,6 +1675,20 @@ export class VoiceAssistantWebSocketServer {
     this.sendMessageToSockets([ws], message);
   }
 
+  private async sendMessageToClientAndWait(
+    ws: WebSocketLike,
+    message: WSOutboundMessage,
+  ): Promise<void> {
+    const frame = JSON.stringify(message);
+    const sent = await sendBoundedPhysicalFrameAndWait({
+      socket: ws,
+      frame,
+      frameBytes: outboundFrameByteLength(frame),
+      onHighWater: () => this.closeAtOutboundHighWater(ws),
+    });
+    if (!sent) throw new Error("Source message delivery unavailable");
+  }
+
   private sendMessageToSockets(sockets: Iterable<WebSocketLike>, message: WSOutboundMessage): void {
     const writableSockets = [...sockets].filter((ws) => this.ensureOutboundCapacity(ws, 0));
     if (writableSockets.length === 0) {
@@ -1670,6 +1729,7 @@ export class VoiceAssistantWebSocketServer {
     let transport = this.chunkedSockets.get(ws);
     if (!transport) {
       transport = new ChunkedTransport({
+        supportsConcurrentWrites: true,
         frameBytes: ws.maxFrameBytes ?? 32 * 1024 * 1024,
         onFailure: (err) =>
           this.closePhysicalSocket({
@@ -1771,6 +1831,9 @@ export class VoiceAssistantWebSocketServer {
 
   private closePhysicalSocket(params: ClosePhysicalSocketParams): void {
     const { ws, logMessage, logFields } = params;
+    this.sasPairing?.disconnected(ws);
+    this.hostLinks.get(ws)?.close();
+    this.hostLinks.delete(ws);
     this.applicationSocketLease.release(ws);
     if (ws.readyState !== 1) {
       return;
@@ -1835,7 +1898,16 @@ export class VoiceAssistantWebSocketServer {
 
     // In-process plugin sockets are trusted: they never require a signed hello
     // even when local device pairing is enforced for direct connections.
-    const signedHelloRequired = !isPluginSocket && this.requiresSignedHello(identity);
+    const explicitlyPaired =
+      typeof request === "object" &&
+      request !== null &&
+      "url" in request &&
+      typeof request.url === "string" &&
+      new URL(request.url, "http://localhost").searchParams.get("paired") === "1";
+    const signedHelloRequired =
+      !(ws instanceof VirtualHostSocket) &&
+      !isPluginSocket &&
+      (explicitlyPaired || this.requiresSignedHello(identity));
 
     const pending: PendingConnection = {
       connectionLogger,
@@ -1915,6 +1987,8 @@ export class VoiceAssistantWebSocketServer {
     clientCapabilities: Record<string, unknown> | null;
     connectionLogger: pino.Logger;
     scopes?: readonly string[];
+    permissions?: readonly DaemonPermission[];
+    sourceId?: string;
     guestAgentId?: string | null;
     guestWorkspaceCwd?: string | null;
     onGuestActivity?: (text: string) => void;
@@ -1927,6 +2001,8 @@ export class VoiceAssistantWebSocketServer {
       appVersion,
       clientCapabilities,
       scopes: params.scopes ?? ["*"],
+      permissions: params.permissions,
+      sourceId: params.sourceId,
       guestAgentId: params.guestAgentId ?? null,
       guestWorkspaceCwd: params.guestWorkspaceCwd ?? null,
       onGuestActivity: params.onGuestActivity,
@@ -1937,11 +2013,11 @@ export class VoiceAssistantWebSocketServer {
         }
         this.sendToConnection(connection, wrapSessionMessage(msg));
       },
-      onMessageToSource: (source, msg) => {
+      onMessageToSource: async (source, msg) => {
         if (!connection || !connection.sockets.has(source as WebSocketLike)) {
           return;
         }
-        this.sendToClient(source as WebSocketLike, wrapSessionMessage(msg));
+        await this.sendMessageToClientAndWait(source as WebSocketLike, wrapSessionMessage(msg));
       },
       onBinaryMessage: (frame) => {
         if (!connection) {
@@ -2107,6 +2183,9 @@ export class VoiceAssistantWebSocketServer {
   private createSocketSession(options: SocketSessionOptions): Session {
     return new Session({
       creationService: this.creationService,
+      connectedHosts: this.connectedHosts,
+      sourceId: options.sourceId,
+      permissions: options.permissions,
       clientId: options.clientId,
       appVersion: options.appVersion,
       clientCapabilities: options.clientCapabilities,
@@ -2295,6 +2374,10 @@ export class VoiceAssistantWebSocketServer {
           devicePublicKeyB64: message.devicePublicKeyB64,
           challenges: this.pairing.challenges,
           devices: this.pairing.devices,
+          tailnetNodeId:
+            pending.identity.transport === "tailnet"
+              ? (pending.identity.tailnetNodeId ?? "")
+              : undefined,
         })
       : { ok: false as const, reason: "pairing is not configured" };
     if (!verification.ok) {
@@ -2329,22 +2412,22 @@ export class VoiceAssistantWebSocketServer {
     return true;
   }
 
-  private handleHello(params: {
+  private verifyHelloTransport(params: {
     ws: WebSocketLike;
     message: WSHelloMessage;
     pending: PendingConnection;
-  }): void {
+  }): boolean {
     const { ws, message, pending } = params;
-
     // Session-share guests (ADR-0019) authenticate by their guest token (already validated by the
     // scoped ShareServer before this socket was attached), not by a signed/device hello.
     if (
+      !(ws instanceof VirtualHostSocket) &&
       !pending.guestGrant &&
       !this.pluginSocketIds.has(ws) &&
-      this.requiresSignedHello(pending.identity) &&
+      (this.requiresSignedHello(pending.identity) || !!pending.challengeNonce) &&
       !this.verifyTailnetSignedHello(params)
     ) {
-      return;
+      return false;
     }
 
     if (message.protocolVersion !== WS_PROTOCOL_VERSION) {
@@ -2361,9 +2444,39 @@ export class VoiceAssistantWebSocketServer {
       } catch {
         // ignore close errors
       }
-      return;
+      return false;
     }
 
+    if (message.routed && !(ws instanceof VirtualHostSocket)) {
+      ws.close(1008, "Routed hello requires a host channel");
+      return false;
+    }
+    return true;
+  }
+
+  private resolveHostAdmission(
+    ws: WebSocketLike,
+    message: WSHelloMessage,
+    pending: PendingConnection,
+  ) {
+    const admission = this.virtualAdmissions.get(ws);
+    const granted = admission?.permissions ?? OWNER_PERMISSIONS;
+    const permissions = message.sessionPermissions
+      ? granted.filter((p) => message.sessionPermissions!.includes(p))
+      : granted;
+    const principalId = admission?.principalId ?? pending.identity.deviceId ?? "local";
+    return { permissions, principalId };
+  }
+
+  private handleHello(params: {
+    ws: WebSocketLike;
+    message: WSHelloMessage;
+    pending: PendingConnection;
+  }): void {
+    const { ws, message, pending } = params;
+
+    if (!this.verifyHelloTransport(params)) return;
+    const { permissions, principalId } = this.resolveHostAdmission(ws, message, pending);
     const clientId = message.clientId.trim();
     if (clientId.length === 0) {
       this.clearPendingConnection(ws);
@@ -2390,7 +2503,7 @@ export class VoiceAssistantWebSocketServer {
     if (message.appVersion) {
       pending.identity.appVersion = message.appVersion;
     }
-    const existing = this.externalSessionsByKey.get(clientId);
+    const existing = this.externalSessionsByKey.get(`${principalId}:${clientId}`);
     if (existing) {
       this.resumeExistingExternalSession({ ws, message, pending, existing });
       return;
@@ -2405,12 +2518,16 @@ export class VoiceAssistantWebSocketServer {
       clientCapabilities: message.capabilities ?? null,
       connectionLogger,
       scopes: pending.guestGrant?.scopes,
+      permissions,
+      sourceId: principalId,
       guestAgentId: pending.guestGrant?.agentId ?? null,
       guestWorkspaceCwd: pending.guestGrant?.workspaceCwd ?? null,
       onGuestActivity: pending.guestGrant?.onGuestActivity,
     });
+    connection.principalId = principalId;
+    connection.session.setRouted(ws instanceof VirtualHostSocket);
     this.sessions.set(ws, connection);
-    this.externalSessionsByKey.set(clientId, connection);
+    this.externalSessionsByKey.set(`${principalId}:${clientId}`, connection);
     pending.identity.sessionId = connection.session.getSessionId();
     this.syncBrowserToolsClientRegistration(connection);
     this.sendHelloResponse(ws, message);
@@ -2468,6 +2585,13 @@ export class VoiceAssistantWebSocketServer {
       clearTimeout(existing.externalDisconnectCleanupTimeout);
       existing.externalDisconnectCleanupTimeout = null;
     }
+    const admission = this.virtualAdmissions.get(ws);
+    const granted = admission?.permissions ?? OWNER_PERMISSIONS;
+    existing.session.setPermissions(
+      message.sessionPermissions
+        ? granted.filter((p) => message.sessionPermissions!.includes(p))
+        : granted,
+    );
     const newAppVersion = message.appVersion ?? null;
     if (newAppVersion && newAppVersion !== existing.appVersion) {
       existing.appVersion = newAppVersion;
@@ -2526,6 +2650,8 @@ export class VoiceAssistantWebSocketServer {
           : {};
       })(),
       features: {
+        connectedHosts: true,
+        hostMultiplexing: true,
         providerInstallation: true,
         binaryChunkingV1: true,
         workspaceBaseBranch: true,
@@ -2862,6 +2988,9 @@ export class VoiceAssistantWebSocketServer {
       error?: Error;
     },
   ): Promise<void> {
+    this.sasPairing?.disconnected(ws);
+    this.hostLinks.get(ws)?.close();
+    this.hostLinks.delete(ws);
     this.applicationSocketLease.release(ws);
     const identity = this.socketIdentities.get(ws);
     const identityFields = identity ? toConnectionLogFields(identity) : {};
@@ -2925,6 +3054,10 @@ export class VoiceAssistantWebSocketServer {
         this.finishPluginSocketCleanup(ws);
         return;
       }
+      if (connection.session.isRouted()) {
+        await this.cleanupConnection(connection, "Routed session disconnected");
+        return;
+      }
       this.incrementRuntimeCounter("sessionDisconnectedWaitingReconnect");
       if (connection.externalDisconnectCleanupTimeout) {
         clearTimeout(connection.externalDisconnectCleanupTimeout);
@@ -2984,7 +3117,9 @@ export class VoiceAssistantWebSocketServer {
     connection.sockets.clear();
     const existing = this.externalSessionsByKey.get(connection.clientId);
     if (existing === connection) {
-      this.externalSessionsByKey.delete(connection.clientId);
+      this.externalSessionsByKey.delete(
+        `${connection.principalId ?? "local"}:${connection.clientId}`,
+      );
     }
     this.unregisterBrowserToolsClient(connection.clientId);
 
@@ -3122,6 +3257,12 @@ export class VoiceAssistantWebSocketServer {
       return false;
     }
     const decodedFrame = decodeBinaryFrame(asBytes);
+    if (asBytes[0] === HOST_ROUTE_OPCODE && !decodedFrame) {
+      ws.close(1008, "Invalid host route");
+      return true;
+    }
+    if (decodedFrame?.kind === "host_route" && this.hostLinks.get(ws)?.binary(decodedFrame.frame))
+      return true;
     if (!decodedFrame) {
       return false;
     }
@@ -3298,6 +3439,7 @@ export class VoiceAssistantWebSocketServer {
       requestId: string;
       ok: boolean;
       deviceId?: string;
+      tailnetNodeId?: string;
       error?: string;
     }): void => {
       this.sendToClient(
@@ -3446,6 +3588,11 @@ export class VoiceAssistantWebSocketServer {
       }
 
       const parsed = JSON.parse(buffer.toString());
+      if (
+        pendingConnection &&
+        this.sasPairing?.handle(ws, parsed, pendingConnection.identity.tailnetNodeId)
+      )
+        return;
       const parsedMessage = WSInboundMessageSchema.safeParse(parsed);
       if (!parsedMessage.success) {
         this.handleInvalidInboundMessage({
@@ -3512,11 +3659,116 @@ export class VoiceAssistantWebSocketServer {
     }
   }
 
+  private hostLink(ws: WebSocketLike, connection: SessionConnection): DaemonLinkEndpoint {
+    let link = this.hostLinks.get(ws);
+    if (!link) {
+      link = new DaemonLinkEndpoint({
+        identity: JSON.stringify([
+          connection.kind === "trusted" ? connection.principalId : connection.daemonId,
+          connection.session.getSessionId(),
+        ]),
+        permissions: () => connection.session.getPermissions(),
+        routed: () => connection.session.isRouted(),
+        bufferedAmount: () => ws.bufferedAmount ?? null,
+        delivery: connection.session.delivery,
+        admit: (socket, permissions) =>
+          Promise.resolve().then(() => {
+            this.virtualAdmissions.set(socket, {
+              principalId:
+                connection.kind === "trusted"
+                  ? (connection.principalId ?? "local")
+                  : connection.daemonId,
+              permissions,
+            });
+            return this.attachSocket(socket);
+          }),
+      });
+      this.hostLinks.set(ws, link);
+    }
+    return link;
+  }
+
+  private beginSasPairingOffer() {
+    const address = this.daemonRuntimeConfig?.getTailnetAddress?.();
+    const localPort = this.getDaemonTcpPort?.();
+    const endpoint = address;
+    const relay = this.daemonRuntimeConfig?.getRelayConfig?.();
+    return this.sasPairing!.begin({
+      serverId: this.serverId,
+      host: endpoint?.host ?? "",
+      ip: endpoint?.host ?? (localPort && !relay?.enabled ? "127.0.0.1" : ""),
+      port: endpoint ? endpoint.port : (localPort ?? 8765),
+      daemonPublicKeyB64: this.pairing!.daemonPublicKeyB64,
+      ...(relay?.enabled ? { relay: { endpoint: relay.endpoint, useTls: relay.useTls } } : {}),
+    });
+  }
+  private async dispatchHostControl(
+    ws: WebSocketLike,
+    activeConnection: SessionConnection,
+    message: Extract<WSInboundMessage, { type: "session" }>,
+  ): Promise<boolean> {
+    const request = message.message;
+    if (
+      request.type === "pairing.sas.begin.request" ||
+      request.type === "pairing.sas.confirm.request"
+    ) {
+      try {
+        if (
+          !activeConnection.session.getPermissions().includes("access.manage") ||
+          activeConnection.session.isRouted()
+        )
+          throw new Error("Pairing requires local access.manage authority");
+        if (!this.sasPairing) throw new Error("Pairing unavailable");
+        if (request.type === "pairing.sas.begin.request") {
+          const result = this.beginSasPairingOffer();
+          this.sendToClient(
+            ws,
+            wrapSessionMessage({
+              type: "pairing.sas.begin.response",
+              payload: { requestId: request.requestId, ...result },
+            }),
+          );
+        } else {
+          this.sasPairing.confirm(request.pk, request.accepted);
+          this.sendToClient(
+            ws,
+            wrapSessionMessage({
+              type: "pairing.sas.confirm.response",
+              payload: { requestId: request.requestId },
+            }),
+          );
+        }
+      } catch (error) {
+        this.sendToClient(
+          ws,
+          wrapSessionMessage({
+            type: "rpc_error",
+            payload: {
+              requestId: request.requestId,
+              error: error instanceof Error ? error.message : "Pairing failed",
+              code: "pairing_failed",
+            },
+          }),
+        );
+      }
+      return true;
+    }
+    const link = this.hostLink(ws, activeConnection);
+    if (link.handles(message.message)) {
+      await activeConnection.session.delivery.request(ws, message.message, () =>
+        link.dispatch(message.message),
+      );
+      return true;
+    }
+    return false;
+  }
+
   private async dispatchSessionMessage(
     ws: WebSocketLike,
     activeConnection: SessionConnection,
     message: Extract<WSInboundMessage, { type: "session" }>,
   ): Promise<void> {
+    if (await this.dispatchHostControl(ws, activeConnection, message)) return;
     this.recordInboundSessionRequestType(message.message.type);
     const controlRpc = getControlRpcLogInfo(message.message);
     if (controlRpc) {
@@ -4086,6 +4338,7 @@ function createWebSocketConnectionIdentity(
     ...(requestMetadata.userAgent ? { userAgent: requestMetadata.userAgent } : {}),
     ...(requestMetadata.remoteAddress ? { remoteAddress: requestMetadata.remoteAddress } : {}),
     ...(metadata?.relayConnectionId ? { relayConnectionId: metadata.relayConnectionId } : {}),
+    ...(metadata?.tailnetNodeId ? { tailnetNodeId: metadata.tailnetNodeId } : {}),
     ...(metadata?.securityMode ? { securityMode: metadata.securityMode } : {}),
   };
 }

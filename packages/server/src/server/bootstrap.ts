@@ -1,3 +1,10 @@
+import {
+  createFinishSubscriptions as createRemoteFinishSubscriptions,
+  createJsonFinishSubscriptionStore as createRemoteFinishStore,
+  createFinishObservation as createRemoteFinishObservation,
+  type FinishSubscriptions as RemoteFinishSubscriptions,
+} from "./agent/remote-finish-subscriptions/index.js";
+import { connectThroughProxy } from "./ssh/proxy/connect.js";
 import { createIdleRuntimeCleanup } from "./agent/idle-runtime-cleanup/index.js";
 import { createChangeRequestRouter } from "../services/change-request-router.js";
 import { createForgeService } from "../services/forge-registry.js";
@@ -784,6 +791,7 @@ export async function createJAgentDeskDaemon(
     logger.warn({ err: error }, "Failed to reconcile managed helper process ledger");
   });
   let tsnetListener: TsnetListener | null = null;
+  let remoteFinishSubscriptions: RemoteFinishSubscriptions | null = null;
   let relayRuntime: RelayRuntime | null = null;
 
   const staticDir = config.staticDir;
@@ -1962,6 +1970,15 @@ export async function createJAgentDeskDaemon(
       (runtime.callerAgentId
         ? agentManager.getJAgentDeskToolPolicy(runtime.callerAgentId)
         : undefined),
+    serverId,
+    remoteFinishSubscriptions: () => {
+      if (!remoteFinishSubscriptions) throw new Error("Remote finish observation unavailable");
+      return remoteFinishSubscriptions;
+    },
+    hosts: () => {
+      if (!wsServer) throw new Error("Daemon is not accepting host operations");
+      return wsServer.toolHosts();
+    },
     agentManager,
     agentStorage,
     terminalManager,
@@ -2442,6 +2459,15 @@ export async function createJAgentDeskDaemon(
               sideloadService,
               workspaceArchiveOperations,
             );
+            wsServer.setHostDial(async (target) => {
+              const proxy = tsnetListener?.getTailnetSocks();
+              if (!proxy) throw new Error("tailnet_unavailable");
+              const url = new URL(target.url);
+              return connectThroughProxy(
+                { type: "socks5", ...proxy },
+                { host: url.hostname.replace(/^\[|\]$/g, ""), port: target.pairing.port },
+              );
+            });
             // Session-share guests (ADR-0019): let the scoped ShareServer /ws hand validated guest
             // sockets to the daemon as agent-confined real sessions.
             sessionShareService?.setGuestAttacher((ws, params) =>
@@ -2451,6 +2477,26 @@ export async function createJAgentDeskDaemon(
             sessionShareService?.setGuestScopeUpdater((agentId, scopes) =>
               wsServer?.updateGuestScopesForAgent(agentId, scopes),
             );
+            const remoteObservation = createRemoteFinishObservation({
+              agentManager,
+              agentStorage,
+              messages: () => getAgentMessageDelivery({ agentManager, agentStorage, logger }),
+              hosts: () => wsServer!.toolHosts(),
+              serverId,
+              logger,
+            });
+            remoteFinishSubscriptions = createRemoteFinishSubscriptions({
+              ...remoteObservation,
+              hostLabel: async (id) =>
+                (await wsServer!.toolHosts().directory()).hosts.find((host) => host.serverId === id)
+                  ?.label ?? undefined,
+              store: createRemoteFinishStore(config.jagentdeskHome),
+              messages: () => getAgentMessageDelivery({ agentManager, agentStorage, logger }),
+              callerIsActive: async (agentId) => !(await agentStorage.get(agentId))?.archivedAt,
+              serverId,
+              logger,
+            });
+            await remoteFinishSubscriptions.start();
             await attachHostServices(wsServer);
             botsRuntimeReady = true;
             if (pluginRuntime.builtin.isEnabled("bots")) botsService.start();
@@ -2638,6 +2684,7 @@ export async function createJAgentDeskDaemon(
     specModeService?.stop();
     await sessionShareService?.stop().catch(() => undefined);
     await relayRuntime?.stop().catch(() => undefined);
+    await remoteFinishSubscriptions?.close();
     await tsnetListener?.stop().catch(() => undefined);
     if (wsServer) {
       await wsServer.close();

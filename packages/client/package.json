@@ -24,6 +24,14 @@
     "./internal/daemon-client-transport": {
       "types": "./dist/daemon-client-transport.d.ts",
       "default": "./dist/daemon-client-transport.js"
+    },
+    "./internal/hosts": {
+      "types": "./dist/hosts/index.d.ts",
+      "default": "./dist/hosts/index.js"
+    },
+    "./node": {
+      "types": "./dist/node/index.d.ts",
+      "default": "./dist/node/index.js"
     }
   },
   "publishConfig": {
@@ -41,6 +49,7 @@
   "dependencies": {
     "@jagentdesk/protocol": "0.9.59",
     "@jagentdesk/relay": "0.9.59",
+    "ws": "^8.20.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

@@ -8625,8 +8625,6 @@ function latestBackgroundWork(events: AgentStreamEvent[]) {
 test("Codex runtime safety queries live terminals and retains unsupported app servers", async () => {
   let response: unknown = { data: [], nextCursor: null };
   const appServer = createFakeCodexAppServer({ "thread/backgroundTerminals/list": () => response });
-test("usage identity follows the launched Codex home and retires with the session", async () => {
-  const environment = { HOME: "/usage-test/home", CODEX_HOME: "/usage-test/profile" };
   const session = new CodexAppServerAgentSession(
     createConfig(),
     null,
@@ -8654,6 +8652,14 @@ test("usage identity follows the launched Codex home and retires with the sessio
   } finally {
     await session.close();
   }
+});
+
+test("usage identity follows the launched Codex home and retires with the session", async () => {
+  const environment = { HOME: "/usage-test/home", CODEX_HOME: "/usage-test/profile" };
+  const session = new CodexAppServerAgentSession(
+    createConfig(),
+    null,
+    createTestLogger(),
     () => {
       throw new Error("Reading usage must not launch Codex");
     },

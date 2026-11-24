@@ -1,6 +1,6 @@
 import type { AgentSnapshotPayload } from "@jagentdesk/protocol/messages";
 import type { AgentPermissionRequest } from "@jagentdesk/protocol/agent-types";
-import { getParentAgentIdFromLabels } from "@jagentdesk/protocol/agent-labels";
+import { getParentAddressFromLabels } from "@jagentdesk/protocol/agent-labels";
 import type { ActiveTurnIdentity } from "@/timeline/turn-liveness";
 
 function normalizeActiveTurn(
@@ -41,7 +41,8 @@ export function normalizeAgentSnapshot(snapshot: AgentSnapshotPayload, serverId:
     ? new Date(snapshot.attentionTimestamp)
     : null;
   const archivedAt = snapshot.archivedAt ? new Date(snapshot.archivedAt) : null;
-  const parentAgentId = getParentAgentIdFromLabels(snapshot.labels);
+  const parent = getParentAddressFromLabels(snapshot.labels, serverId);
+  const parentAgentId = parent?.serverId === serverId ? parent.agentId : null;
   // COMPAT(agentTurnIdentity): added in v0.2.6, remove after 2027-01-31 once daemon floor >= v0.2.6.
   // Old daemons expose only status. Normalize that legacy signal once so the rest
   // of the app consumes one activity shape.
