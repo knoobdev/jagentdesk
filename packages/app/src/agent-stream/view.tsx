@@ -892,23 +892,6 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
                       call,
                       index === group.run.calls.length - 1,
                       GROUPED_TOOL_CALL_DETAIL_MAX_HEIGHT,
-                    {call.kind === "thought" ? (
-                      // Reasoning is grouped only while Expand thinking is off, so an opened
-                      // group shows each thought as a closed row like any other call.
-                      <ThoughtSlot
-                        itemId={call.id}
-                        text={call.text}
-                        status={call.status}
-                        isLastInSequence={index === group.run.calls.length - 1}
-                        defaultExpanded={false}
-                        onInlineDetailsExpandedChangeByItemId={setInlineDetailsExpanded}
-                      />
-                    ) : (
-                      renderSingleToolCallItem(
-                        call,
-                        index === group.run.calls.length - 1,
-                        GROUPED_TOOL_CALL_DETAIL_MAX_HEIGHT,
-                      )
                     )}
                   </React.Fragment>
                 ))
