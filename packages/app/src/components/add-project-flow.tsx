@@ -1,3 +1,5 @@
+import { type KeyboardInputEvent, useOverlayRegistration } from "@/keyboard";
+
 import { Modal } from "@/components/ui/modal";
 import { router } from "expo-router";
 import type { WorkspaceProjectDescriptorPayload } from "@jagentdesk/protocol/messages";
@@ -76,11 +78,7 @@ import { useFetchQuery } from "@/data/query";
 import { getOpenProjectFailureReason, registerProjectDescriptor } from "@/hooks/open-project";
 import { useIsLocalDaemon, useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
 import { useCloneGithubProject, useOpenProject } from "@/hooks/use-open-project";
-import {
-  OverlayLayerProvider,
-  useGlobalWebOverlayLayer,
-  useWebOverlayRegistration,
-} from "@/lib/overlay-root";
+import { OverlayLayerProvider, useGlobalOverlayLayer } from "@/lib/overlay-root";
 import {
   useHosts,
   useHostRuntimeClient,
@@ -444,13 +442,10 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
   });
 
   const handleBack = useCallback(() => {
-    setState((current) => {
-      const previous = backAddProjectPage(current);
-      if (previous) return previous;
-      onClose();
-      return current;
-    });
-  }, [onClose]);
+    const previous = backAddProjectPage(state);
+    if (previous) setState(previous);
+    else onClose();
+  }, [onClose, state]);
 
   const openNewWorkspaceForProject = useCallback(
     (serverId: string, project: WorkspaceProjectDescriptorPayload) => {
@@ -804,29 +799,21 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
     [activeIndex, handleBack, rows, submitActive],
   );
 
-  const modalLayer = useGlobalWebOverlayLayer("modal", isWeb);
-  const handleWebOverlayKeyDown = useCallback(
-    (event: KeyboardEvent) => {
+  const modalLayer = useGlobalOverlayLayer("modal", true);
+  const handleOverlayKeyDown = useCallback(
+    (event: KeyboardInputEvent) => {
       if (!handleKey(event.key)) return false;
       event.preventDefault();
       return true;
     },
     [handleKey],
   );
-  const setWebOverlayScope = useWebOverlayRegistration({
-    active: isWeb,
+  const setOverlayScope = useOverlayRegistration({
+    keys: ["Escape", "Enter", "ArrowUp", "ArrowDown"],
+    active: true,
     layer: modalLayer,
-    onKeyDown: handleWebOverlayKeyDown,
+    onKeyDown: handleOverlayKeyDown,
   });
-
-  const handleNativeKeyPress = useCallback(
-    ({ nativeEvent: { key } }: { nativeEvent: { key: string } }) => {
-      if (key === "ArrowDown" || key === "ArrowUp" || key === "Escape") {
-        handleKey(key);
-      }
-    },
-    [handleKey],
-  );
 
   const handleInputChange = useCallback((value: string) => {
     setState((current) =>
@@ -862,7 +849,7 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
       <View style={styles.overlay} testID="add-project-flow">
         <Pressable style={styles.backdrop} onPress={onClose} testID="add-project-flow-backdrop" />
         <View
-          ref={setWebOverlayScope}
+          ref={setOverlayScope}
           style={styles.panel}
           testID={`add-project-flow-page-${page.kind}`}
           accessibilityLabel={`Add project: ${page.kind}`}
@@ -886,7 +873,6 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
               ref={inputRef}
               value={pageInput(page)}
               onChangeText={handleInputChange}
-              onKeyPress={isWeb ? undefined : handleNativeKeyPress}
               onSubmitEditing={isWeb ? undefined : submitActive}
               placeholder={pagePlaceholder(page)}
               style={styles.input}
@@ -967,7 +953,7 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
     </Modal>
   );
 
-  return createElement(OverlayLayerProvider, { layer: isWeb ? modalLayer : 0 }, modal);
+  return createElement(OverlayLayerProvider, { layer: modalLayer }, modal);
 }
 
 const styles = StyleSheet.create((theme) => ({

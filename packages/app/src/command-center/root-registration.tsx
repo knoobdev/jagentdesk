@@ -1,3 +1,5 @@
+import { usesDesktopBindings } from "@/keyboard";
+
 import { useMemo } from "react";
 import { router, type Href } from "expo-router";
 import { useTranslation } from "react-i18next";
@@ -11,7 +13,6 @@ import {
   Settings,
 } from "lucide-react-native";
 import { withUnistyles } from "react-native-unistyles";
-import { getIsElectronRuntime } from "@/constants/layout";
 import { useKeyboardShortcutOverrides } from "@/hooks/use-keyboard-shortcut-overrides";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
 import { keyboardActionDispatcher } from "@/keyboard/keyboard-action-dispatcher";
@@ -84,7 +85,7 @@ export function CommandCenterRootActions() {
   const schedulesRoute = useMemo<Href>(() => buildSchedulesRoute(), []);
   const setShortcutsDialogOpen = useKeyboardShortcutsStore((state) => state.setShortcutsDialogOpen);
   const shortcutPlatform = useMemo(
-    () => ({ isMac: getShortcutOs() === "mac", isDesktop: getIsElectronRuntime() }),
+    () => ({ isMac: getShortcutOs() === "mac", usesDesktopBindings }),
     [],
   );
   const actions = useMemo<CommandCenterContribution[]>(

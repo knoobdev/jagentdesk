@@ -1,3 +1,5 @@
+import { useKeyboardFocusSurface } from "@/keyboard";
+
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
   CLICKUP_COMPOSER_RADIUS,
@@ -166,6 +168,7 @@ export interface MessageInputRef {
   getNativeElement?: () => HTMLElement | null;
 }
 
+const MESSAGE_INPUT_BUTTON_ICON_SIZE = isWeb ? ICON_SIZE.md : ICON_SIZE.lg;
 const MIN_INPUT_HEIGHT_MOBILE = 30;
 const MIN_INPUT_HEIGHT_DESKTOP = 46;
 const DEFAULT_MAX_INPUT_HEIGHT = 160;
@@ -1184,7 +1187,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
     const isCompact = useIsCompactFormFactor();
     const { height: windowHeight } = useWindowDimensions();
     const maxInputHeight = resolveMaxInputHeight(windowHeight);
-    const buttonIconSize = isWeb ? ICON_SIZE.md : ICON_SIZE.lg;
+    const buttonIconSize = MESSAGE_INPUT_BUTTON_ICON_SIZE;
     const toast = useToast();
     const voice = useVoiceOptional();
     const voiceMuteToggleKeys = useShortcutKeys("voice-mute-toggle");
@@ -1192,6 +1195,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
     const focusInputKeys = useShortcutKeys("focus-message-input");
     const [inputHeight, setInputHeight] = useState(MIN_INPUT_HEIGHT);
     const [isInputFocused, setIsInputFocused] = useState(false);
+    useKeyboardFocusSurface("message-input", isInputFocused && Boolean(isPaneFocused));
     const rootRef = useRef<View | null>(null);
     const inputWrapperRef = useRef<View | null>(null);
     const textInputRef = useRef<TextInput | (TextInput & { getNativeRef?: () => unknown }) | null>(

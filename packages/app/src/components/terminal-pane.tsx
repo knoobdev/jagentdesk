@@ -1,3 +1,4 @@
+import { useKeyboardFocusSurface } from "@/keyboard";
 import { TerminalFind, type TerminalPaneFindHandle } from "@/terminal/find";
 import type { TerminalFindResult } from "@/terminal/runtime/terminal-emulator-runtime";
 import type { TerminalCharacterWidths } from "@/terminal/character-widths";
@@ -72,6 +73,7 @@ import {
 } from "./terminal-resize-debouncer";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { isNative } from "@/constants/platform";
+
 import {
   applyTerminalRendererReadyChange,
   resolveTerminalStreamTarget,
@@ -270,6 +272,17 @@ function KeyboardToggleButton({
   );
 }
 
+function TerminalExtraKeys({ keys }: { keys: readonly TerminalPaneExtraKey[] | undefined }) {
+  if (!keys || keys.length === 0) return null;
+  return (
+    <View style={styles.keyboardRow} testID="terminal-extra-keys">
+      {keys.map((extraKey) => (
+        <ExtraKeyButton key={extraKey.id} extraKey={extraKey} />
+      ))}
+    </View>
+  );
+}
+
 export function TerminalPane({
   serverId,
   cwd,
@@ -451,6 +464,8 @@ export function TerminalPane({
       requestTerminalFocus();
     }
   }, [isMobile, isPaneFocused, isWorkspaceFocused, requestTerminalFocus, scopeKey, terminalId]);
+
+  useKeyboardFocusSurface("terminal", isWorkspaceFocused && isPaneFocused);
 
   useEffect(() => {
     const canRequest = canRequestFocusClaim({
@@ -1224,13 +1239,7 @@ export function TerminalPane({
                 {row.map(renderVirtualKeyboardControl)}
               </View>
             ))}
-            {extraKeys && extraKeys.length > 0 ? (
-              <View style={styles.keyboardRow} testID="terminal-extra-keys">
-                {extraKeys.map((extraKey) => (
-                  <ExtraKeyButton key={extraKey.id} extraKey={extraKey} />
-                ))}
-              </View>
-            ) : null}
+            <TerminalExtraKeys keys={extraKeys} />
           </View>
         </View>
       ) : null}

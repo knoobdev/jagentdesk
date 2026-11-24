@@ -1,3 +1,4 @@
+import { useHardwareKeyboardPresent } from "@/keyboard";
 import { AppearanceSystemBars } from "@/appearance/system-bars";
 import { HostConfirmationSheet } from "@/hosts/host-confirmation-sheet";
 import "@/styles/unistyles";
@@ -83,7 +84,7 @@ import { useGlobalNewWorkspaceAction } from "@/hooks/use-global-new-workspace-ac
 import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
 import { useLatchedBoolean } from "@/hooks/use-latched-boolean";
 import { useFaviconStatus } from "@/hooks/use-favicon-status";
-import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
+import { useKeyboardShortcuts } from "@/keyboard/use-shortcuts";
 import { KeyboardShiftProvider } from "@/keyboard/shift";
 import { useCompactWebViewportZoomLock } from "@/hooks/use-compact-web-viewport-zoom-lock";
 import { useOpenProject } from "@/hooks/use-open-project";
@@ -721,8 +722,12 @@ function SidebarChrome({
     selectIsAgentListOpen(state, { isCompact: isCompactLayout }),
   );
   const active = visible && isOpen;
+  const hardwareKeyboardPresent = useHardwareKeyboardPresent();
   return (
-    <SidebarModelProvider active={active}>
+    <SidebarModelProvider
+      active={active}
+      keyboardNavigationActive={keyboardShortcutsEnabled && hardwareKeyboardPresent}
+    >
       {mounted ? <LeftSidebar active={active} /> : null}
       <WorkspaceShortcutTargetsSubscriber enabled={keyboardShortcutsEnabled} />
     </SidebarModelProvider>

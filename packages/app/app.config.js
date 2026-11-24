@@ -159,6 +159,7 @@ export default {
     },
     plugins: [
       "expo-router",
+      "./modules/jagentdesk-hardware-keyboard/app.plugin.js",
       ...buildProfile.cameraPlugins,
       [
         "expo-splash-screen",
