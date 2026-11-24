@@ -6,7 +6,12 @@ import { pluginSettings } from "./plugin-settings";
 import { sshModuleStrings } from "./ssh-modules";
 
 export const vi = {
-  turnSummary: { messages: { one: "{{count}} tin nhắn", other: "{{count}} tin nhắn" } },
+  turnSummary: {
+    details: "Xem chi tiết lượt",
+    sentBy: "Được gửi bởi {{name}}",
+    showMore: "Xem thêm",
+    showLess: "Thu gọn",
+  },
   bots: botsStrings,
   subagents: {
     parent: {
@@ -327,6 +332,15 @@ export const vi = {
     },
     plugins: pluginSettings.vi,
     general: {
+      chatDisplay: {
+        label: "Hiển thị trò chuyện",
+        description: "Lượng công việc của agent hiển thị trong cuộc trò chuyện",
+        options: {
+          full: "Đầy đủ",
+          collapseToolCalls: "Thu gọn lệnh công cụ",
+          collapseTurns: "Thu gọn lượt",
+        },
+      },
       sendShortcut: {
         options: {
           "mod-enter": "{{modifier}}+Enter",

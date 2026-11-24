@@ -1,6 +1,8 @@
 import type { ComponentType, ReactElement, ReactNode, RefObject } from "react";
 import type { StyleProp, ViewStyle } from "react-native";
 import type { StreamItem } from "@/types/stream";
+import type { ReadingRowReplacements } from "./reading-anchor";
+import { continuesResponse } from "./turn-membership";
 import type { StreamHistoryBoundary, StreamRenderSegments } from "./model";
 import type {
   BottomAnchorLocalRequest,
@@ -48,6 +50,7 @@ export type DisclosureTriggerEdge = "top" | "bottom";
 
 export interface StreamViewportHandle {
   focus?: () => void;
+  holdReadingPosition?: () => void;
   holdRow?: (rowId: string, apply: () => void, triggerEdge: DisclosureTriggerEdge) => void;
   scrollToBottom: (reason?: BottomAnchorLocalRequest["reason"]) => void;
   prepareForViewportChange: () => void;
@@ -72,6 +75,8 @@ export interface StreamRenderInput {
   segments: StreamRenderSegments;
   historyRowRevision?: StreamHistoryRowRevision;
   liveHeadRowRevision?: unknown;
+  /** Presentation rows replaced by another row after history is folded. */
+  readingRowReplacements?: ReadingRowReplacements;
   boundary: StreamHistoryBoundary;
   renderers: StreamSegmentRenderers;
   listEmptyComponent: ReactNode;
@@ -169,18 +174,20 @@ export function createStreamStrategy(config: StreamStrategyConfig): StreamStrate
     },
     collectAssistantTurnContent: (items, startIndex) => {
       const messages: string[] = [];
+      let laterItem: StreamItem | null = null;
       for (
         let index = startIndex;
         index >= 0 && index < items.length;
         index += config.assistantTurnTraversalStep
       ) {
         const currentItem = items[index];
-        if (currentItem.kind === "user_message") {
+        if (!currentItem || (laterItem && !continuesResponse(currentItem, laterItem))) {
           break;
         }
         if (currentItem.kind === "assistant_message") {
           messages.push(currentItem.text);
         }
+        laterItem = currentItem;
       }
       return messages.toReversed().join("\n\n");
     },

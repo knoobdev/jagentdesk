@@ -702,7 +702,10 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         });
       const viewport = viewportRef.current;
       if (viewport?.holdRow) viewport.holdRow(hostId, apply, "top");
-      else apply();
+      else {
+        viewport?.holdReadingPosition?.();
+        apply();
+      }
     }, []);
     // Chat find reveals a match inside a collapsed turn by opening the turn first.
     const revealLoadedMessage = useStableEvent((messageId: string): boolean => {
@@ -1240,6 +1243,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
               visibleMessageIds={chatFindVisibleMessageIds}
             >
               {streamRenderStrategy.render({
+                readingRowReplacements: projectedToolCalls.readingRowReplacements,
                 agentId,
                 segments: renderModel.segments,
                 historyRowRevision,
@@ -1929,12 +1933,11 @@ function StreamItemWrapper({ gapBelow, turnIndent, children }: StreamItemWrapper
   const gapStyle = useMemo(() => ({ paddingBottom: gapBelow }), [gapBelow]);
   switch (turnIndent) {
     case "none":
-      return <View style={wrapperStyle}>{children}</View>;
     case "openedHost":
       return (
         <View style={wrapperStyle}>
           {children}
-          <IndentRail style={gapStyle} />
+          {turnIndent === "openedHost" ? <IndentRail style={gapStyle} /> : null}
         </View>
       );
     case "nested":

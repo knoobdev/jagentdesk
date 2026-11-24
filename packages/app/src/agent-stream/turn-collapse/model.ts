@@ -25,6 +25,8 @@ export interface TurnCollapse {
   nestedItemIds: ReadonlySet<string>;
   /** The turn a folded message belongs to, for surfaces that must reveal it. */
   hostIdByFoldedMessageId: ReadonlyMap<string, string>;
+  /** Mounted rows replaced by a closed turn's host, for preserving the reading position. */
+  hostIdByHiddenRowId: ReadonlyMap<string, string>;
 }
 
 export interface CollapseTurnsInput {
@@ -88,6 +90,7 @@ export function collapseTurns(input: CollapseTurnsInput): TurnCollapse {
   const turnsByHostId = new Map<string, CollapsedTurn>();
   const nestedItemIds = new Set<string>();
   const hostIdByFoldedMessageId = new Map<string, string>();
+  const hostIdByHiddenRowId = new Map<string, string>();
 
   let runStart = 0;
   const flushRun = (runEnd: number) => {
@@ -122,6 +125,7 @@ export function collapseTurns(input: CollapseTurnsInput): TurnCollapse {
       if (staysVisibleWhenCollapsed(item)) continue;
       hostIdByFoldedMessageId.set(getStreamItemMessageId(item), host.id);
       if (expanded) nestedItemIds.add(item.id);
+      else hostIdByHiddenRowId.set(item.id, host.id);
     }
     output.push(
       ...(expanded
@@ -149,6 +153,7 @@ export function collapseTurns(input: CollapseTurnsInput): TurnCollapse {
       turnsByHostId: EMPTY_TURNS,
       nestedItemIds: EMPTY_IDS,
       hostIdByFoldedMessageId: EMPTY_HOSTS,
+      hostIdByHiddenRowId: EMPTY_HOSTS,
     };
   }
   return {
@@ -159,5 +164,6 @@ export function collapseTurns(input: CollapseTurnsInput): TurnCollapse {
     turnsByHostId,
     nestedItemIds,
     hostIdByFoldedMessageId,
+    hostIdByHiddenRowId,
   };
 }
