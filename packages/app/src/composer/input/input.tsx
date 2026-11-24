@@ -99,6 +99,17 @@ export interface AttachmentMenuItem {
   icon?: React.ReactElement | null;
 }
 
+export interface ComposerInputSnapshot {
+  text: string;
+  selection: { start: number; end: number };
+}
+export interface ComposerKeyPressEvent {
+  key: string;
+  hasModifier: boolean;
+  preventDefault: () => void;
+  input: ComposerInputSnapshot;
+}
+
 export interface MessageInputProps {
   value: string;
   onChangeText: (text: string) => void;
@@ -151,7 +162,7 @@ export interface MessageInputProps {
   /** Optional handler used when submit button is in loading state. */
   onSubmitLoadingPress?: () => void;
   /** Intercept key press events before default handling. Return true to prevent default. */
-  onKeyPress?: (event: { key: string; preventDefault: () => void }) => boolean;
+  onKeyPress?: (event: ComposerKeyPressEvent) => boolean;
   /** Reports cursor selection updates from the underlying input. */
   onSelectionChange?: (selection: { start: number; end: number }) => void;
   onFocusChange?: (focused: boolean) => void;
@@ -185,6 +196,7 @@ type WebTextInputKeyPressEvent = NativeSyntheticEvent<
     metaKey?: boolean;
     ctrlKey?: boolean;
     shiftKey?: boolean;
+    altKey?: boolean;
     // Web-only: present on DOM KeyboardEvent during IME composition (CJK input).
     isComposing?: boolean;
     keyCode?: number;
@@ -471,7 +483,8 @@ function SendButtonContent({
 }
 
 interface DesktopKeyPressContext {
-  onKeyPressCallback: ((event: { key: string; preventDefault: () => void }) => boolean) | undefined;
+  onKeyPressCallback: ((event: ComposerKeyPressEvent) => boolean) | undefined;
+  input: ComposerInputSnapshot;
   submitOnEnter: boolean;
   sendShortcut: SendShortcut;
   isAgentRunning: boolean;
@@ -489,15 +502,17 @@ function handleDesktopKeyPressImpl(
 ): void {
   if (isImeComposingKeyboardEvent(event.nativeEvent)) return;
 
+  const { shiftKey, metaKey, ctrlKey, altKey } = event.nativeEvent;
+
   if (ctx.onKeyPressCallback) {
     const handled = ctx.onKeyPressCallback({
       key: event.nativeEvent.key,
+      hasModifier: Boolean(shiftKey || metaKey || ctrlKey || altKey),
+      input: ctx.input,
       preventDefault: () => event.preventDefault(),
     });
     if (handled) return;
   }
-
-  const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
 
   if (event.nativeEvent.key !== "Enter") return;
   const action = resolveMessageInputEnterAction({
@@ -1092,7 +1107,7 @@ interface ResolvedMessageInputProps {
   sendShortcut: SendShortcut;
   onQueue: ((payload: MessagePayload) => void) | undefined;
   onSubmitLoadingPress: (() => void) | undefined;
-  onKeyPressCallback: ((event: { key: string; preventDefault: () => void }) => boolean) | undefined;
+  onKeyPressCallback: ((event: ComposerKeyPressEvent) => boolean) | undefined;
   onSelectionChangeCallback: ((selection: { start: number; end: number }) => void) | undefined;
   onFocusChange: ((focused: boolean) => void) | undefined;
   onHeightChange: ((height: number) => void) | undefined;
@@ -1585,6 +1600,13 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       if (!shouldHandleWebKeyPress) return;
       handleDesktopKeyPressImpl(event, {
         onKeyPressCallback,
+        input: {
+          text: valueRef.current,
+          selection: {
+            start: getWebTextArea()?.selectionStart ?? valueRef.current.length,
+            end: getWebTextArea()?.selectionEnd ?? valueRef.current.length,
+          },
+        },
         submitOnEnter: shouldSubmitOnEnter,
         sendShortcut,
         isAgentRunning,

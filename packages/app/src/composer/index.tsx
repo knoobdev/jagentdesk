@@ -1,3 +1,6 @@
+import { ComposerRecall } from "@/composer/recall";
+import { selectAgentSentMessages } from "@/stores/session-store";
+import type { ComposerKeyPressEvent } from "@/composer/input/input";
 import { BuiltinPluginGate } from "@/plugins/builtin/gate";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
@@ -1165,6 +1168,7 @@ export function Composer({
   const isDesktopWebBreakpoint = resolveIsDesktopWebBreakpoint(isCompactFormFactor);
   const isDesktopLayout = resolveIsDesktopWebBreakpoint(isCompactLayout);
   const messagePlaceholder = resolveMessagePlaceholder(isDesktopLayout, t);
+  const recall = useMemo(() => new ComposerRecall(), []);
   const userInput = value;
   const setUserInput = onChangeText;
   const workspaceAttachments = useWorkspaceAttachmentsForScopes(attachmentScopeKeys);
@@ -1813,9 +1817,19 @@ export function Composer({
 
   // Handle keyboard navigation for command autocomplete.
   const handleCommandKeyPress = useCallback(
-    (event: { key: string; preventDefault: () => void }) =>
-      autocompleteOnKeyPressRef.current(event),
-    [],
+    (event: ComposerKeyPressEvent) => {
+      if (!recall.isShowing(event.input.text) && autocompleteOnKeyPressRef.current(event))
+        return true;
+      const recalledText = recall.handleKeyPress(event, () =>
+        selectAgentSentMessages(useSessionStore.getState().sessions[serverId], agentId),
+      );
+      if (recalledText === null) return false;
+      event.preventDefault();
+      setUserInput(recalledText);
+      setCursorIndex(recalledText.length);
+      return true;
+    },
+    [recall, serverId, agentId, setUserInput],
   );
 
   const cancelButtonStyle = useMemo(
@@ -2216,7 +2230,8 @@ export function Composer({
   const githubEmptyText = githubSearchResultsQuery.isFetching
     ? t("composer.github.searching")
     : t("composer.github.noResults");
-  const autocompleteVisible = autocomplete.isVisible && isPaneFocused;
+  const autocompleteVisible =
+    autocomplete.isVisible && isPaneFocused && !recall.isShowing(userInput);
 
   return (
     <ComposerKeyboardScopeProvider isActiveComposer={isPaneFocused}>
