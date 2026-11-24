@@ -813,9 +813,6 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       [agentId, client, handleInlinePathPress, resolvedServerId, toast, workspaceRoot],
     );
 
-    const isExpandedTurnItem = useStableEvent((id: string) =>
-      projectedToolCalls.turns.nestedItemIds.has(id),
-    );
     const renderThoughtItem = useCallback(
       (layoutItem: StreamLayoutItem, item: Extract<StreamItem, { kind: "thought" }>) => {
         return (
@@ -826,12 +823,12 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             args={item.text}
             status={item.status === "ready" ? "completed" : "executing"}
             isLastInSequence={layoutItem.isLastInToolSequence}
-            defaultExpanded={autoExpandReasoning || isExpandedTurnItem(item.id)}
-            forceInline={autoExpandReasoning || isExpandedTurnItem(item.id)}
+            defaultExpanded={autoExpandReasoning}
+            forceInline={autoExpandReasoning}
           />
         );
       },
-      [autoExpandReasoning, setInlineDetailsExpanded, isExpandedTurnItem],
+      [autoExpandReasoning, setInlineDetailsExpanded],
     );
 
     const handleOpenMessageSender = useCallback(
@@ -885,8 +882,6 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
               onInlineDetailsExpandedChangeByItemId={setInlineDetailsExpanded}
               serverId={resolvedServerId}
               toolName={data.name}
-              defaultExpanded={isExpandedTurnItem(item.id)}
-              forceInline={isExpandedTurnItem(item.id)}
               error={data.error}
               status={data.status}
               detail={data.detail}
@@ -927,7 +922,6 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         setInlineDetailsExpanded,
         handleToolCallOpenFile,
         handleOpenMessageSender,
-        isExpandedTurnItem,
       ],
     );
 
@@ -1234,7 +1228,11 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const { nestedItemIds } = projectedToolCalls.turns;
     const historyRowRevision = useMemo(
       () => ({
-        contentById: projectedToolCalls.historyGroupUpdatesByHostId,
+        contentById: {
+          has: (id: string) =>
+            projectedToolCalls.historyGroupUpdatesByHostId.has(id) ||
+            projectedToolCalls.turns.updatedHostIds.has(id),
+        },
         displayStateById: {
           // An opened lone call also marks its future group open; that row stays unrevised
           // until a group actually forms there.
@@ -1252,6 +1250,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         isMobile,
         nestedItemIds,
         projectedToolCalls.historyGroupUpdatesByHostId,
+        projectedToolCalls.turns.updatedHostIds,
       ],
     );
 

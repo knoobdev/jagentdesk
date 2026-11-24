@@ -27,16 +27,22 @@ export interface TurnCollapse {
   hostIdByFoldedMessageId: ReadonlyMap<string, string>;
   /** Mounted rows replaced by a closed turn's host, for preserving the reading position. */
   hostIdByHiddenRowId: ReadonlyMap<string, string>;
+  /**
+   * Hosts whose summary line appeared, changed or went away since `previousTurnsByHostId`. A
+   * history row renders again only when its item changes, so these rows are revised.
+   */
+  updatedHostIds: ReadonlySet<string>;
 }
 
 export interface CollapseTurnsInput {
   tail: StreamItem[];
-  autoExpandReasoning?: boolean;
   /** The latest turn is still producing output, so it stays unfolded. */
   isLatestTurnOpen: boolean;
   expandedHostIds: ReadonlySet<string>;
   /** The calls a tool-call group row stands for; undefined for a single call. */
   getGroupedCalls: (itemId: string) => readonly (ToolCallItem | ThoughtItem)[] | undefined;
+  /** The previous fold of the same history, the baseline for `updatedHostIds`. */
+  previousTurnsByHostId: ReadonlyMap<string, CollapsedTurn>;
 }
 
 const EMPTY_TURNS: ReadonlyMap<string, CollapsedTurn> = new Map();
@@ -62,13 +68,38 @@ function hasWork(summary: TurnSummary): boolean {
   );
 }
 
-function staysVisibleWhenCollapsed(item: StreamItem, autoExpandReasoning = false): boolean {
+function isSameTurn(a: CollapsedTurn, b: CollapsedTurn): boolean {
+  const { jagentdeskActions: actionsA, ...countsA } = a.summary.tools;
+  const { jagentdeskActions: actionsB, ...countsB } = b.summary.tools;
   return (
-    isTurnTrigger(item) ||
-    item.kind === "compaction" ||
-    item.kind === "activity_log" ||
-    (autoExpandReasoning && item.kind === "thought")
+    a.expanded === b.expanded &&
+    hasSameCounts(countsA, countsB) &&
+    hasSameCounts(actionsA, actionsB)
   );
+}
+
+function hasSameCounts(a: Record<string, number>, b: Record<string, number>): boolean {
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key]);
+}
+
+function findUpdatedHosts(
+  previous: ReadonlyMap<string, CollapsedTurn>,
+  next: ReadonlyMap<string, CollapsedTurn>,
+): ReadonlySet<string> {
+  const updated = new Set<string>();
+  for (const [hostId, turn] of next) {
+    const before = previous.get(hostId);
+    if (!before || !isSameTurn(before, turn)) updated.add(hostId);
+  }
+  for (const hostId of previous.keys()) {
+    if (!next.has(hostId)) updated.add(hostId);
+  }
+  return updated.size === 0 ? EMPTY_IDS : updated;
+}
+
+function staysVisibleWhenCollapsed(item: StreamItem): boolean {
+  return isTurnTrigger(item) || item.kind === "compaction" || item.kind === "activity_log";
 }
 
 function isAssistantReply(item: StreamItem): boolean {
@@ -98,7 +129,7 @@ function findLastReplyIndex(tail: StreamItem[], start: number, end: number): num
  * Folds each answered turn into its user message: everything the agent did before its last
  * message collapses into one summary line, and that message stays in the chat. A turn folds
  * only once it is complete, its user message is loaded, and it sent messages or called tools
- * before its reply. Reasoning stays visible when Expand thinking is enabled.
+ * before its reply. Reasoning is revealed only when the turn opens.
  */
 export function collapseTurns(input: CollapseTurnsInput): TurnCollapse {
   const { tail } = input;
@@ -144,9 +175,7 @@ export function collapseTurns(input: CollapseTurnsInput): TurnCollapse {
       else hostIdByHiddenRowId.set(item.id, host.id);
     }
     output.push(
-      ...(expanded
-        ? revealed
-        : folded.filter((item) => staysVisibleWhenCollapsed(item, input.autoExpandReasoning))),
+      ...(expanded ? revealed : folded.filter((item) => staysVisibleWhenCollapsed(item))),
     );
     output.push(...tail.slice(replyIndex, runEnd));
   };
@@ -163,6 +192,7 @@ export function collapseTurns(input: CollapseTurnsInput): TurnCollapse {
   }
   flushRun(tail.length);
 
+  const updatedHostIds = findUpdatedHosts(input.previousTurnsByHostId, turnsByHostId);
   if (turnsByHostId.size === 0) {
     return {
       tail,
@@ -170,6 +200,7 @@ export function collapseTurns(input: CollapseTurnsInput): TurnCollapse {
       nestedItemIds: EMPTY_IDS,
       hostIdByFoldedMessageId: EMPTY_HOSTS,
       hostIdByHiddenRowId: EMPTY_HOSTS,
+      updatedHostIds,
     };
   }
   return {
@@ -181,5 +212,6 @@ export function collapseTurns(input: CollapseTurnsInput): TurnCollapse {
     nestedItemIds,
     hostIdByFoldedMessageId,
     hostIdByHiddenRowId,
+    updatedHostIds,
   };
 }

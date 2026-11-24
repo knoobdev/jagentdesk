@@ -65,9 +65,10 @@ function sourceTimelineItem(item: StreamItem): AgentTimelineItem | null {
     case "todo_list":
       return { type: "todo", items: item.items };
     case "activity_log":
-      return item.activityType === "error"
+      return item.sourceType === "error" ||
+        (item.sourceType === undefined && item.activityType === "error")
         ? { type: "error", message: item.message }
-        : { type: "notification", level: "info", message: item.message };
+        : { type: "notification", level: item.level ?? "info", message: item.message };
     case "compaction":
       return {
         type: "compaction",

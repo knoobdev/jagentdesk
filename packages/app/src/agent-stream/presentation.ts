@@ -50,6 +50,7 @@ const NO_COLLAPSED_TURNS: StreamPresentation["turns"] = collapseTurns({
   isLatestTurnOpen: false,
   expandedHostIds: new Set(),
   getGroupedCalls: () => undefined,
+  previousTurnsByHostId: new Map(),
 });
 
 /** Source messages reach plugins before display projection. */
@@ -115,10 +116,10 @@ export function createStreamPresentation() {
     ) {
       collapsed = collapseTurns({
         tail: projection.tail,
-        autoExpandReasoning: input.autoExpandReasoning,
         isLatestTurnOpen,
         expandedHostIds: input.expandedTurnHostIds,
         getGroupedCalls: (itemId) => projection.groupsByHostId.get(itemId)?.run.calls,
+        previousTurnsByHostId: collapsed?.turnsByHostId ?? NO_COLLAPSED_TURNS.turnsByHostId,
       });
       collapsedSource = projection.tail;
       collapsedIsLatestTurnOpen = isLatestTurnOpen;

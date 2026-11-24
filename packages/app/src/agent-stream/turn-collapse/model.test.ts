@@ -56,6 +56,7 @@ function collapse(tail: StreamItem[], options: Partial<CollapseTurnsInput> = {})
     isLatestTurnOpen: false,
     expandedHostIds: new Set(),
     getGroupedCalls: () => undefined,
+    previousTurnsByHostId: new Map(),
     ...options,
   });
 }
