@@ -63,7 +63,6 @@ class JAgentDeskTerminalView(context: Context, appContext: AppContext) : ExpoVie
     backgroundColor = argb(value.background)
     cursorColor = argb(value.cursor)
     paints.selectionBackground = argb(value.selectionBackground)
-    paints.selectionForeground = argb(value.selectionForeground)
     invalidate()
   }
 

@@ -43,7 +43,6 @@ export interface JAgentDeskTerminalTheme {
   background: number;
   cursor: number;
   selectionBackground: number;
-  selectionForeground: number;
 }
 
 export interface JAgentDeskTerminalCellMetrics {
