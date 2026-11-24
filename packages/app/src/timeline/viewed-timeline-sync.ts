@@ -393,6 +393,8 @@ export interface ViewedTimelineSyncPorts {
 }
 
 export type TimelineDeliveryMode = "legacy" | "selective";
+type FreshnessCheckReason = "open" | "reconnect" | "resume";
+
 export type ViewedTimelineStatus = "ready" | "checking" | "reattaching" | "pending" | "error";
 
 export interface ViewedTimelineUiBridge {
@@ -558,7 +560,7 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
   const cacheLoads = new Map<string, Promise<void>>();
   const freshnessChecks = new Map<
     string,
-    { quiet: boolean; reattaching: boolean; timer: ReturnType<typeof setTimeout> | null }
+    { quiet: boolean; reason: FreshnessCheckReason; timer: ReturnType<typeof setTimeout> | null }
   >();
   let freshnessCheckOwed = false;
   const listeners = new Set<() => void>();
@@ -607,16 +609,17 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
     if (changed) notifyListeners();
   };
 
-  const startFreshnessCheck = (agentId: string, reattaching = false) => {
+  const startFreshnessCheck = (agentId: string, reason: FreshnessCheckReason = "open") => {
     if (freshnessChecks.has(agentId)) return;
-    freshnessChecks.set(agentId, { quiet: true, reattaching, timer: null });
+    freshnessChecks.set(agentId, { reason, quiet: true, timer: null });
   };
 
-  // The delay measures the daemon's answer, so it starts when the question is sent. On a cold
-  // start the cache read that precedes the question can outlast it on its own.
+  // The delay measures the daemon's answer, after any cache read. Only opening a chat
+  // escalates: reconnecting already has feedback, and a subscribed resume stays quiet.
+  // A socket that died quietly is caught by the foreground liveness probe.
   const startFreshnessCheckDelay = (agentId: string) => {
     const check = freshnessChecks.get(agentId);
-    if (!check || check.timer) return;
+    if (!check || check.timer || check.reason !== "open") return;
     check.timer = setTimeout(() => {
       check.quiet = false;
       notifyListeners();
@@ -983,8 +986,8 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
   const getUnconfirmedStatus = (agentId: string): ViewedTimelineStatus => {
     const check = freshnessChecks.get(agentId);
     if (check) {
-      if (!check.quiet) return "pending";
-      return check.reattaching ? "reattaching" : "checking";
+      if (check.reason === "reconnect") return "reattaching";
+      return check.quiet ? "checking" : "pending";
     }
     if (!ports.canCheckFreshness()) return "pending";
     if (!connected) return "reattaching";
@@ -1043,7 +1046,7 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
           catchUps.delete(agentId);
           visibilityCatchUpPending.add(agentId);
           ports.onCatchUpOwed(agentId);
-          startFreshnessCheck(agentId);
+          startFreshnessCheck(agentId, "resume");
           freshnessCheckOwed = true;
         }
       }
@@ -1066,7 +1069,7 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       }
       if (ports.canCheckFreshness()) {
         for (const agentId of desired) {
-          if (visibilityCatchUpPending.has(agentId)) startFreshnessCheck(agentId, true);
+          if (visibilityCatchUpPending.has(agentId)) startFreshnessCheck(agentId, "reconnect");
         }
       }
       membershipGeneration += 1;

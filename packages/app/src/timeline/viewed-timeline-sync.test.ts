@@ -828,3 +828,35 @@ test("a current answer does not erase a stream gap found during the question", a
   expect(world.currentAnswers).toEqual([]);
   world.sync.dispose();
 });
+
+test.each(["resume", "reconnect"] as const)(
+  "a slow %s check stays quiet until its unchanged answer",
+  async (reason) => {
+    vi.useFakeTimers();
+    const world = new TimelineWorld();
+    world.freshnessEnabled = true;
+    world.cursors.set("a", { epoch: "epoch-a", endSeq: 4 });
+    world.sync.setConnected(true);
+    world.sync.replaceVisibleAgentIds("pane", ["a"]);
+    (await world.nextMembership()).succeed({ timelines: { a: "current" } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(world.sync.getAgentTimelineStatus("a")).toBe("ready");
+    if (reason === "resume") {
+      world.sync.setActive(false);
+      world.sync.setActive(true);
+    } else {
+      world.sync.setConnected(false);
+      world.sync.setConnected(true);
+    }
+    const question = await world.nextMembership();
+    await vi.advanceTimersByTimeAsync(FRESHNESS_CHECK_QUIET_MS * 4);
+    expect(world.sync.getAgentTimelineStatus("a")).toBe(
+      reason === "resume" ? "checking" : "reattaching",
+    );
+    question.succeed({ timelines: { a: "current" } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(world.sync.getAgentTimelineStatus("a")).toBe("ready");
+    world.expectNoPendingFetch();
+    world.sync.dispose();
+  },
+);

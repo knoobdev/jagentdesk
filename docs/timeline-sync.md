@@ -149,8 +149,9 @@ is either included in the answer or delivered live. Unloaded agents answer `behi
 loading a provider. A `current` answer includes the agent snapshot and settles the cached
 range without fetching history.
 
-The timeline owner keeps a check quiet for 500 ms after sending the request. Cache restoration
-does not consume that delay. A held running footer settles with the messages or the current
+Opening a chat stays quiet for 500 ms after sending the freshness request; cache restoration
+does not consume that delay. A resume on a still-connected socket stays quiet until the answer.
+A reconnect stays reconnecting until the answer. A `behind` answer starts visible catch-up. A held running footer settles with the messages or the current
 answer; directory status alone does not settle it. Subscription replacement keeps the existing
 source route attached throughout the request.
 
