@@ -1004,6 +1004,7 @@ describe("browser MCP tools", () => {
   it("does not register browser tools when browser tools are disabled", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     spies.agentManager.getAgent.mockReturnValue({
+      labels: {},
       id: "agent-1",
       cwd: REPO_CWD,
       workspaceId: BROWSER_WORKSPACE_ID,
@@ -1024,6 +1025,7 @@ describe("browser MCP tools", () => {
   it("wires browser tools through the browser tools broker", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     spies.agentManager.getAgent.mockReturnValue({
+      labels: {},
       id: "agent-1",
       cwd: REPO_CWD,
       workspaceId: BROWSER_WORKSPACE_ID,
@@ -1067,7 +1069,7 @@ describe("browser MCP tools", () => {
 
   it("tells browser callers without a workspace how to proceed before broker execution", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
-    spies.agentManager.getAgent.mockReturnValue({ id: "agent-1", cwd: REPO_CWD });
+    spies.agentManager.getAgent.mockReturnValue({ labels: {}, id: "agent-1", cwd: REPO_CWD });
     const execute = vi.fn().mockResolvedValue({
       requestId: "req-browser-tabs",
       ok: true,
@@ -1518,6 +1520,7 @@ describe("create_agent MCP tool", () => {
   it("requires a caller workspace for current workspace intent", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     spies.agentManager.getAgent.mockReturnValue({
+      labels: {},
       id: "parent-agent",
       cwd: existingCwd,
       provider: "codex",
@@ -3225,6 +3228,7 @@ describe("create_agent MCP tool", () => {
     const subdir = join(baseDir, "subdir");
     await mkdir(subdir, { recursive: true });
     spies.agentManager.getAgent.mockReturnValue({
+      labels: {},
       id: "voice-agent",
       cwd: baseDir,
       workspaceId: "wks_voice",
@@ -3279,6 +3283,7 @@ describe("create_agent MCP tool", () => {
   it("rejects background from caller agents and defaults notify-on-finish on", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     spies.agentManager.getAgent.mockReturnValue({
+      labels: {},
       id: "parent-agent",
       cwd: existingCwd,
       workspaceId: "wks_parent",
@@ -3367,9 +3372,54 @@ describe("create_agent MCP tool", () => {
     );
   });
 
+  it("notifies the caller when a created child finishes its initial turn before the turn start returns", async () => {
+    const workdir = await mkdtemp(join(tmpdir(), "mcp-create-fast-child-"));
+    const storage = new AgentStorage(join(workdir, "agents"), logger);
+    const parentClient = new HeldTurnAgentClient("claude", false);
+    const childClient = new HeldTurnAgentClient("codex", false, { finishTurnsDuringStart: true });
+    const agentManager = new AgentManager({
+      clients: { claude: parentClient, codex: childClient },
+      registry: storage,
+      logger,
+    });
+
+    try {
+      const parent = await agentManager.createAgent(
+        { provider: "claude", cwd: existingCwd },
+        undefined,
+        { workspaceId: "wks_parent" },
+      );
+      const server = await createAgentMcpServer({
+        agentManager,
+        agentStorage: storage,
+        callerAgentId: parent.id,
+        providerSnapshotManager: createOpenCodeManager().manager,
+        logger,
+      });
+
+      const response = await invokeToolWithParsedInput(registeredTool(server, "create_agent"), {
+        ...subagentCurrentWorkspace(),
+        title: "Fast Child",
+        provider: "codex/gpt-5.4",
+        initialPrompt: "Finish immediately",
+      });
+      const childId = z.object({ agentId: z.string() }).parse(response.structuredContent).agentId;
+
+      await vi.waitFor(() => {
+        const parentPrompts = parentClient.sessions[0]!.prompts;
+        expect(parentPrompts).toHaveLength(1);
+        expect(parentPrompts[0]).toContain(childId);
+        expect(parentPrompts[0]).toContain("finished");
+      });
+    } finally {
+      await removeAgentStateDir(agentManager, storage, workdir);
+    }
+  });
+
   it("creates detached caller agents without a parent label", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     spies.agentManager.getAgent.mockReturnValue({
+      labels: {},
       id: "parent-agent",
       cwd: existingCwd,
       workspaceId: "wks_parent",
@@ -3422,6 +3472,7 @@ describe("create_agent MCP tool", () => {
   it("accepts provider features from caller agents and passes them through createAgent", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     spies.agentManager.getAgent.mockReturnValue({
+      labels: {},
       id: "parent-agent",
       cwd: existingCwd,
       workspaceId: "wks_parent",
@@ -3730,6 +3781,7 @@ describe("create_agent MCP tool", () => {
   it("accepts an explicit valid mode across providers", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     spies.agentManager.getAgent.mockReturnValue({
+      labels: {},
       id: "parent-agent",
       cwd: existingCwd,
       workspaceId: "wks_parent",
@@ -3779,6 +3831,11 @@ const HELD_TURN_CAPABILITIES = {
   supportsToolInvocations: false,
 } as const;
 
+interface HeldTurnOptions {
+  /** Run the whole turn before the turn-start request returns. */
+  finishTurnsDuringStart?: boolean;
+}
+
 /**
  * Provider session that records every prompt it receives. With `holdTurns`, a started
  * turn stays running until `finishTurn()` so a caller's bounded wait can run out first.
@@ -3794,6 +3851,7 @@ class HeldTurnAgentSession implements AgentSession {
   constructor(
     readonly provider: AgentProvider,
     private readonly holdTurns: boolean,
+    private readonly options: HeldTurnOptions = {},
   ) {}
 
   /** Hold the next turn's acknowledgment, as a provider awaiting its turn-start request does. */
@@ -3813,6 +3871,13 @@ class HeldTurnAgentSession implements AgentSession {
     this.prompts.push(typeof prompt === "string" ? prompt : JSON.stringify(prompt));
     await this.turnStartGate;
     const turnId = randomUUID();
+    if (this.options.finishTurnsDuringStart) {
+      // The whole turn runs before the turn-start request returns, as a provider whose
+      // start acknowledgment arrives together with the turn's completion does.
+      this.pushEvent({ type: "turn_started", provider: this.provider, turnId });
+      this.pushEvent({ type: "turn_completed", provider: this.provider, turnId });
+      return { turnId };
+    }
     this.activeTurnId = turnId;
     setTimeout(() => {
       this.pushEvent({ type: "turn_started", provider: this.provider, turnId });
@@ -3895,6 +3960,7 @@ class HeldTurnAgentClient implements AgentClient {
   constructor(
     readonly provider: AgentProvider,
     private readonly holdTurns: boolean,
+    private readonly options: HeldTurnOptions = {},
   ) {}
 
   async isAvailable(): Promise<boolean> {
@@ -3902,7 +3968,7 @@ class HeldTurnAgentClient implements AgentClient {
   }
 
   async createSession(): Promise<AgentSession> {
-    const session = new HeldTurnAgentSession(this.provider, this.holdTurns);
+    const session = new HeldTurnAgentSession(this.provider, this.holdTurns, this.options);
     this.sessions.push(session);
     return session;
   }
@@ -3980,6 +4046,7 @@ describe("send_agent_prompt MCP tool", () => {
   it("keeps top-level prompts blocking by default", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     spies.agentManager.getAgent.mockReturnValue({
+      labels: {},
       id: "child-agent",
       cwd: existingCwd,
       lifecycle: "idle",
@@ -4696,6 +4763,7 @@ describe("create_schedule MCP tool", () => {
   it("inherits the caller provider, model, and features when provider is omitted", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     spies.agentManager.getAgent.mockReturnValue({
+      labels: {},
       id: "parent-agent",
       provider: "opencode",
       cwd: REPO_CWD,
@@ -4845,6 +4913,7 @@ describe("create_heartbeat MCP tool", () => {
   it("creates a self-targeted cron heartbeat", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     spies.agentManager.getAgent.mockReturnValue({
+      labels: {},
       id: "parent-agent",
       provider: "codex",
       cwd: REPO_CWD,

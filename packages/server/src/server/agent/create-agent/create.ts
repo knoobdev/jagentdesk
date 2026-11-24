@@ -229,6 +229,7 @@ export async function createAgentCommand(
         })
       : null;
 
+  await stopFinishNotification?.ready;
   if (resolved.prompt !== undefined) {
     const sendResult = await sendInitialPrompt(dependencies, resolved, snapshot);
     initialPromptStarted = sendResult.started;

@@ -755,7 +755,9 @@ interface NotifySafelyOptions {
 // next finish reaches the caller once.
 const armedFinishNotifications = new WeakMap<AgentManager, Map<string, () => void>>();
 
-export function setupFinishNotification(params: SetupFinishNotificationParams): () => void {
+export function setupFinishNotification(
+  params: SetupFinishNotificationParams,
+): (() => void) & { ready: Promise<void> } {
   const {
     agentManager,
     agentStorage,
@@ -780,15 +782,14 @@ export function setupFinishNotification(params: SetupFinishNotificationParams): 
   // before the child's first prompt survives a restart; removed only once the
   // notification has been dispatched or the subscription is dropped on purpose.
   const store = getFinishSubscriptionStore(agentManager);
-  const subscriptionId: Promise<string | null> = store
-    ? store.add({ childAgentId, callerAgentId, requireParentOwnership }).catch((error: unknown) => {
-        logger.error(
-          { err: error, childAgentId, callerAgentId },
-          "Failed to save finish subscription",
-        );
-        return null;
-      })
+  const subscriptionId = store
+    ? store.add({ childAgentId, callerAgentId, requireParentOwnership })
     : Promise.resolve(null);
+  const registration = Object.assign(stop, { ready: subscriptionId.then(() => undefined) });
+  void registration.ready.catch((error: unknown) => {
+    logger.error({ err: error, childAgentId, callerAgentId }, "Failed to save finish subscription");
+    stopObserving();
+  });
 
   function settle(): void {
     void subscriptionId
@@ -949,12 +950,12 @@ export function setupFinishNotification(params: SetupFinishNotificationParams): 
   const childSnapshot = agentManager.getAgent(childAgentId);
   if (!childSnapshot || childSnapshot.lifecycle === "closed") {
     stop();
-    return stop;
+    return registration;
   }
   if (childSnapshot.lifecycle === "running") {
     hasSeenRunning = true;
   } else if (childSnapshot.lifecycle === "error" && !params.waitForTurnStart) {
     notifySafely("errored");
   }
-  return stop;
+  return registration;
 }
