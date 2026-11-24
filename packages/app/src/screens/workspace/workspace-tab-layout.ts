@@ -1,3 +1,9 @@
+import { COMPACT_CONTENT_WIDTH } from "@/constants/layout";
+
+export function shouldUseCompactWorkspaceHeader(width: number): boolean {
+  return width < COMPACT_CONTENT_WIDTH;
+}
+
 export type WorkspaceTabCloseButtonPolicy = "all";
 
 export interface WorkspaceTabLayoutInput {
@@ -86,3 +92,13 @@ export function computeWorkspaceTabLayout(
     requiresHorizontalScrollFallback,
   };
 }
+
+export function selectWorkspaceChrome<Compact, Full>(input: {
+  width: number | null;
+  compact: Compact;
+  full: Full;
+}): Compact | Full {
+  const compact = input.width !== null && shouldUseCompactWorkspaceHeader(input.width);
+  return compact ? input.compact : input.full;
+}
+export const workspaceTabSwitcherPopoverLayout = { desktopMinWidth: 320 } as const;

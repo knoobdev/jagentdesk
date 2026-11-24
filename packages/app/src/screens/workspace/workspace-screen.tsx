@@ -1,5 +1,6 @@
 import { usePrPaneData } from "@/git/pull-request-panel";
-import { findPaneById } from "@/stores/workspace-layout-store";
+import { COMPACT_CONTENT_WIDTH } from "@/constants/layout";
+import { findPaneById, collectAllPanes } from "@/stores/workspace-layout-store";
 import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
@@ -2337,8 +2338,19 @@ function WorkspaceScreenContent({
   );
   const pendingByDraftId = useCreateFlowStore((state) => state.pendingByDraftId);
   const { closingTabIds, closeTab } = useCloseTabs();
-  const { onLayout: onHeaderLayout, isBelow: showCompactButtonLabels } =
+  const { onLayout: onButtonHeaderLayout, isBelow: showCompactButtonLabels } =
     useContainerWidthBelow(700);
+  const { onLayout: onCompactHeaderLayout, isBelow: compactHeader } = useContainerWidthBelow(
+    COMPACT_CONTENT_WIDTH,
+    { initialIsBelow: false },
+  );
+  const onHeaderLayout = useCallback(
+    (event: import("react-native").LayoutChangeEvent) => {
+      onButtonHeaderLayout(event);
+      onCompactHeaderLayout(event);
+    },
+    [onButtonHeaderLayout, onCompactHeaderLayout],
+  );
   const closeWorkspaceTabWithCleanup = useCallback(
     function closeWorkspaceTabWithCleanup(input: {
       tabId: string;
@@ -3814,7 +3826,10 @@ function WorkspaceScreenContent({
           cwd={workspaceDirectory}
           openOnMount={isRouteFocused && orchestrationRequested}
         />
-        {!isMobile && workspaceDescriptor && workspaceDescriptor.scripts.length > 0 ? (
+        {!isMobile &&
+        !compactHeader &&
+        workspaceDescriptor &&
+        workspaceDescriptor.scripts.length > 0 ? (
           <WorkspaceScriptsButton
             serverId={normalizedServerId}
             workspaceId={normalizedWorkspaceId}
@@ -3826,7 +3841,7 @@ function WorkspaceScreenContent({
             hideLabels
           />
         ) : null}
-        {!isMobile && workspaceDirectory ? (
+        {!isMobile && !compactHeader && workspaceDirectory ? (
           <WorkspaceOpenInEditorButton
             serverId={normalizedServerId}
             cwd={workspaceDirectory}
@@ -3837,11 +3852,13 @@ function WorkspaceScreenContent({
         ) : null}
         {!isMobile && workspaceDirectory ? (
           <>
-            <WorkspaceActions
-              serverId={normalizedServerId}
-              cwd={workspaceDirectory}
-              hideLabels={showCompactButtonLabels}
-            />
+            {!compactHeader ? (
+              <WorkspaceActions
+                serverId={normalizedServerId}
+                cwd={workspaceDirectory}
+                hideLabels={showCompactButtonLabels}
+              />
+            ) : null}
             {isGitCheckout ? (
               <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
                 <TooltipTrigger asChild>
@@ -3949,6 +3966,7 @@ function WorkspaceScreenContent({
       handleViewScriptTerminal,
       handleOpenUrlInBrowserTab,
       showCompactButtonLabels,
+      compactHeader,
       isGitCheckout,
       handleToggleExplorer,
       isExplorerOpen,
@@ -4004,12 +4022,24 @@ function WorkspaceScreenContent({
     () => (isRouteFocused ? renamingTab : null),
     [isRouteFocused, renamingTab],
   );
+  const compactSinglePane = useMemo(() => {
+    if (isMobile || !compactHeader || !workspaceLayout || !persistenceKey) return false;
+    const explorerId = useWorkspaceLayoutStore.getState().explorerPaneIdByWorkspace[persistenceKey];
+    return (
+      collectAllPanes(workspaceLayout.root).filter((pane) => pane.id !== explorerId).length === 1
+    );
+  }, [isMobile, compactHeader, workspaceLayout, persistenceKey]);
+  const showFallbackTabRail = useMemo(
+    () => shouldRenderDesktopPaneFallback && !compactSinglePane,
+    [shouldRenderDesktopPaneFallback, compactSinglePane],
+  );
   const desktopPaneProps = useMemo(() => {
     if (!canRenderDesktopPaneSplits || !workspaceLayout || !persistenceKey) {
       return null;
     }
     return {
       layout: workspaceLayout,
+      hideTabRail: compactSinglePane,
       focusModeEnabled: desktopFocusModeEnabled,
       onExitFocusMode: toggleFocusMode,
       workspaceKey: persistenceKey,
@@ -4045,6 +4075,7 @@ function WorkspaceScreenContent({
       renderPaneEmptyState: renderSplitPaneEmptyState,
     };
   }, [
+    compactSinglePane,
     canRenderDesktopPaneSplits,
     workspaceLayout,
     persistenceKey,
@@ -4141,7 +4172,7 @@ function WorkspaceScreenContent({
         />
       )}
 
-      {isMobile ? (
+      {isMobile || compactSinglePane ? (
         <>
           {orchestrationRosterCount > 0 ? (
             <OrchestrationAgentsColumn
@@ -4173,7 +4204,7 @@ function WorkspaceScreenContent({
         </>
       ) : null}
 
-      {shouldRenderDesktopPaneFallback ? (
+      {showFallbackTabRail ? (
         <WorkspaceDesktopTabsRow
           paneId={focusedPaneIdOrUndefined}
           isFocused={isRouteFocused}

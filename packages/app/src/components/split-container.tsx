@@ -95,6 +95,7 @@ import { isWeb } from "@/constants/platform";
 const SPLIT_PANE_MOUNTED_TAB_CAP = 8;
 
 interface SplitContainerProps {
+  hideTabRail?: boolean;
   layout: WorkspaceLayout;
   workspaceKey: string;
   normalizedServerId: string;
@@ -645,6 +646,7 @@ export function SplitContainer({
   onSplitPaneEmpty,
   onResizeSplit,
   onReorderTabsInPane,
+  hideTabRail = false,
   renderPaneEmptyState = () => null,
   focusModeEnabled,
   onExitFocusMode,
@@ -674,6 +676,7 @@ export function SplitContainer({
     <RenderProfile id="SplitContainer">
       {splitRoot.usesFallbackStrip && <WindowChromeSafeArea placement="below" />}
       <SplitNodeView
+        hideTabRail={hideTabRail}
         node={renderRoot}
         workspaceKey={workspaceKey}
         uiTabs={uiTabs}
@@ -810,6 +813,7 @@ function SplitGroupChild({ flex, children }: { flex: number; children: ReactNode
 }
 
 function SplitNodeView({
+  hideTabRail,
   node,
   workspaceKey,
   uiTabs,
@@ -890,6 +894,7 @@ function SplitNodeView({
     return (
       <WindowChromeRegion corners={windowChromeCorners}>
         <SplitPaneView
+          hideTabRail={hideTabRail}
           pane={node.pane}
           uiTabs={uiTabs}
           isFocused={node.pane.id === focusedPaneId}
@@ -939,6 +944,7 @@ function SplitNodeView({
         <Fragment key={getNodeKey(child)}>
           <SplitGroupChild flex={groupSizes[index] ?? 1}>
             <SplitNodeView
+              hideTabRail={hideTabRail}
               node={child}
               workspaceKey={workspaceKey}
               uiTabs={uiTabs}
@@ -999,6 +1005,7 @@ function SplitNodeView({
 }
 
 export function SplitPaneView({
+  hideTabRail,
   host = "main",
   onCloseHost,
   pane,
@@ -1162,46 +1169,53 @@ export function SplitPaneView({
 
   return (
     <RenderProfile id={`SplitPaneView:${pane.id}`}>
-      <View ref={paneRef} collapsable={false} style={styles.pane} testID={host === "explorer" ? "workspace-explorer-sidebar" : `workspace-pane-${pane.id}`}>
-        <WindowChromeSafeArea placement="inline" style={styles.paneTabs}>
-          <TitlebarDragRegion />
-          <WorkspaceDesktopTabsRow
-            host={host}
-            trailingAccessory={trailingAccessory}
-            showPaneSplitActions={host === "main"}
-            paneId={pane.id}
-            isFocused={isFocused}
-            tabs={desktopTabRowItems}
-            normalizedServerId={normalizedServerId}
-            normalizedWorkspaceId={normalizedWorkspaceId}
-            setHoveredCloseTabKey={setHoveredCloseTabKey}
-            onNavigateTab={onNavigateTab}
-            onCloseTab={onCloseTab}
-            onCopyResumeCommand={onCopyResumeCommand}
-            onCopyAgentId={onCopyAgentId}
-            onCopyTerminalId={onCopyTerminalId}
-            onCopyFilePath={onCopyFilePath}
-            onReloadAgent={onReloadAgent}
-            onRenameTab={onRenameTab}
-            onCloseTabsToLeft={handleCloseTabsToLeft}
-            onCloseTabsToRight={handleCloseTabsToRight}
-            onCloseOtherTabs={handleCloseOtherTabs}
-            onCreateDraftTab={onCreateDraftTab}
-            onCreateTerminalTab={onCreateTerminalTab}
-            onCreateBrowserTab={onCreateBrowserTab}
-            showCreateBrowserTab={showCreateBrowserTab}
-            onReorderTabs={handleReorderTabs}
-            onSplitRight={handleSplitRight}
-            onSplitDown={handleSplitDown}
-            externalDndContext
-            activeDragTabId={activeDragTabId}
-            tabDropPreviewIndex={
-              tabDropPreview?.paneId === pane.id ? tabDropPreview.indicatorIndex : null
-            }
-            focusModeEnabled={Boolean(focusModeEnabled)}
-            onExitFocusMode={onExitFocusMode}
-          />
-        </WindowChromeSafeArea>
+      <View
+        ref={paneRef}
+        collapsable={false}
+        style={styles.pane}
+        testID={host === "explorer" ? "workspace-explorer-sidebar" : `workspace-pane-${pane.id}`}
+      >
+        {!hideTabRail ? (
+          <WindowChromeSafeArea placement="inline" style={styles.paneTabs}>
+            <TitlebarDragRegion />
+            <WorkspaceDesktopTabsRow
+              host={host}
+              trailingAccessory={trailingAccessory}
+              showPaneSplitActions={host === "main"}
+              paneId={pane.id}
+              isFocused={isFocused}
+              tabs={desktopTabRowItems}
+              normalizedServerId={normalizedServerId}
+              normalizedWorkspaceId={normalizedWorkspaceId}
+              setHoveredCloseTabKey={setHoveredCloseTabKey}
+              onNavigateTab={onNavigateTab}
+              onCloseTab={onCloseTab}
+              onCopyResumeCommand={onCopyResumeCommand}
+              onCopyAgentId={onCopyAgentId}
+              onCopyTerminalId={onCopyTerminalId}
+              onCopyFilePath={onCopyFilePath}
+              onReloadAgent={onReloadAgent}
+              onRenameTab={onRenameTab}
+              onCloseTabsToLeft={handleCloseTabsToLeft}
+              onCloseTabsToRight={handleCloseTabsToRight}
+              onCloseOtherTabs={handleCloseOtherTabs}
+              onCreateDraftTab={onCreateDraftTab}
+              onCreateTerminalTab={onCreateTerminalTab}
+              onCreateBrowserTab={onCreateBrowserTab}
+              showCreateBrowserTab={showCreateBrowserTab}
+              onReorderTabs={handleReorderTabs}
+              onSplitRight={handleSplitRight}
+              onSplitDown={handleSplitDown}
+              externalDndContext
+              activeDragTabId={activeDragTabId}
+              tabDropPreviewIndex={
+                tabDropPreview?.paneId === pane.id ? tabDropPreview.indicatorIndex : null
+              }
+              focusModeEnabled={Boolean(focusModeEnabled)}
+              onExitFocusMode={onExitFocusMode}
+            />
+          </WindowChromeSafeArea>
+        ) : null}
 
         <View style={styles.paneContent}>
           {mountedPaneTabIds.length > 0
@@ -1362,6 +1376,7 @@ export function ExplorerPaneHost({
       {...props}
       {...drag}
       pane={pane}
+      hideTabRail={false}
       host="explorer"
       onCloseHost={closeHost}
       isFocused={pane.id === layout.focusedPaneId}
