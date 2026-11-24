@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { StreamItem } from "@/types/stream";
+import { getStreamItemMessageId, type StreamItem } from "@/types/stream";
 import { findMountedWindowStart, getMountedRecentStreamItems } from "./history-window";
 
 // Callers reveal a message. In this timeline a message is one row, so the row id is the message id.
 function findMessageRowIndex(items: StreamItem[], messageId: string): number {
-  return items.findIndex((item) => item.id === messageId);
+  return items.findIndex((item) => getStreamItemMessageId(item) === messageId);
 }
 
 function findEarlierHistoryWindowStart(input: {
