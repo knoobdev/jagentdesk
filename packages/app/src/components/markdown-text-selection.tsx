@@ -1,6 +1,6 @@
 import { createContext, type ReactNode, useContext } from "react";
 
-export type MarkdownTextSurface = "prose" | "table-cell";
+export type MarkdownTextSurface = "prose" | "table-cell" | "control";
 
 const MarkdownTextSurfaceContext = createContext<MarkdownTextSurface>("prose");
 
@@ -13,5 +13,20 @@ export function useMarkdownTextSurface(): MarkdownTextSurface {
 }
 
 export function iosMarkdownTextIsSelectable(surface: MarkdownTextSurface): boolean {
-  return surface !== "table-cell";
+  return surface === "prose";
+}
+
+export function MarkdownTextSelection({
+  selectable,
+  children,
+}: {
+  selectable: boolean;
+  children: ReactNode;
+}) {
+  const surface = useMarkdownTextSurface();
+  return (
+    <MarkdownTextSurfaceContext value={selectable ? surface : "control"}>
+      {children}
+    </MarkdownTextSurfaceContext>
+  );
 }

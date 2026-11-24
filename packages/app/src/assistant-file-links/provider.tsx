@@ -85,3 +85,7 @@ export function useAssistantFileLinkResolverContext(): AssistantFileLinkResolver
 }
 
 export type { AssistantFileLinkContext };
+
+export function useOptionalAssistantFileLinkResolverContext(): AssistantFileLinkResolverContextValue | null {
+  return useContext(AssistantFileLinkResolverContext);
+}
