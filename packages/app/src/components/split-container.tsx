@@ -832,7 +832,9 @@ function SplitNodeView({
     );
   }
 
-  const groupSizes = storedGroupSizes ?? node.group.sizes;
+  // A group's id survives pane additions; dragged sizes only apply to the same child count.
+  const groupSizes =
+    storedGroupSizes?.length === node.group.children.length ? storedGroupSizes : node.group.sizes;
 
   return (
     <View style={groupStyle}>
