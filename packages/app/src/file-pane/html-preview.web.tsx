@@ -37,6 +37,7 @@ export function FileHtmlPreview({ html, testID }: { html: string; testID?: strin
       src={source}
       sandbox={SANDBOX}
       referrerPolicy="no-referrer"
+      loading="eager"
       style={iframeStyle}
     />
   );

@@ -1,3 +1,6 @@
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import type { TextFileView } from "@/file-panels/source/panel";
+import { useMemo } from "react";
 import { Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
@@ -5,14 +8,34 @@ import { useTranslation } from "react-i18next";
 export function FilePanelBar({
   size,
   lineCount,
+  view,
+  onViewChange,
 }: {
   size: number;
   lineCount?: number;
+  view?: TextFileView;
+  onViewChange?: (view: TextFileView) => void;
 }) {
   const { t } = useTranslation();
+  const views = useMemo(
+    () => [
+      { value: "preview" as const, label: t("panels.file.editor.preview") },
+      { value: "source" as const, label: t("panels.file.editor.source") },
+    ],
+    [t],
+  );
   return (
     <View style={styles.chrome} testID="file-panel-bar">
       <View style={styles.row}>
+        {view && onViewChange ? (
+          <SegmentedControl
+            size="xs"
+            value={view}
+            onValueChange={onViewChange}
+            options={views}
+            testID="file-view-toggle"
+          />
+        ) : null}
         <View style={styles.metadata}>
           <Text
             style={styles.whisper}
