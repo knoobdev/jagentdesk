@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import Svg, { Circle } from "react-native-svg";
-import { StyleSheet, useUnistyles } from "react-native-unistyles";
+import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ContextWindowDetails } from "./context-window-details";
@@ -9,6 +9,7 @@ import { DetailsSheet } from "./details-sheet";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "./ui/hover-card";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { isNative } from "@/constants/platform";
+import type { Theme } from "@/styles/theme";
 import type { AgentMetric } from "@jagentdesk/protocol/agent-types";
 
 interface ContextWindowMeterProps {
@@ -63,10 +64,7 @@ function formatSessionCost(value: number): string | null {
   return `$${value.toFixed(2)}`;
 }
 
-function getMeterColors(
-  percentage: number,
-  theme: ReturnType<typeof useUnistyles>["theme"],
-): { progress: string; track: string } {
+function getMeterColors(percentage: number, theme: Theme): { progress: string; track: string } {
   const track = theme.colors.surface3;
   if (percentage > 90) {
     return { progress: theme.colors.destructive, track };
@@ -106,6 +104,59 @@ function meterContext(maxTokens: number | null, usedTokens: number | null) {
   return percentage === null ? null : { percentage: Math.round(percentage), usedTokens, maxTokens };
 }
 
+const ContextWindowRing = withUnistyles(function ContextWindowRing({
+  size,
+  radius,
+  strokeWidth,
+  percentage,
+  trackColor,
+  progressColor,
+}: {
+  size: number;
+  radius: number;
+  strokeWidth: number;
+  percentage: number | null;
+  trackColor: string;
+  progressColor: string;
+}) {
+  const center = size / 2;
+  const circumference = 2 * Math.PI * radius;
+  return (
+    <Svg
+      width={size}
+      height={size}
+      viewBox={`0 0 ${size} ${size}`}
+      {...(isNative
+        ? { accessibilityElementsHidden: true, importantForAccessibility: "no-hide-descendants" }
+        : { "aria-hidden": true })}
+    >
+      <Circle
+        cx={center}
+        cy={center}
+        r={radius}
+        fill="none"
+        stroke={trackColor}
+        strokeWidth={strokeWidth}
+      />
+      {percentage !== null ? (
+        <Circle
+          cx={center}
+          cy={center}
+          r={radius}
+          fill="none"
+          stroke={progressColor}
+          strokeWidth={strokeWidth}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={circumference - (clampPercentage(percentage) / 100) * circumference}
+          // SVG strokes start at three o'clock; the ring reads clockwise from twelve.
+          transform={`rotate(-90 ${center} ${center})`}
+        />
+      ) : null}
+    </Svg>
+  );
+});
+
 export function ContextWindowMeter({
   maxTokens,
   usedTokens,
@@ -117,7 +168,6 @@ export function ContextWindowMeter({
   pending = false,
   glyphSize,
 }: ContextWindowMeterProps) {
-  const { theme } = useUnistyles();
   const { t } = useTranslation();
   const isCompact = useIsCompactFormFactor();
   const [isSheetOpen, setIsSheetOpen] = useState(false);
@@ -126,6 +176,22 @@ export function ContextWindowMeter({
   const context = useMemo(() => meterContext(maxTokens, usedTokens), [maxTokens, usedTokens]);
   const percentage = context?.percentage ?? null;
   const geometry = getMeterGeometry(showPercentage, glyphSize);
+  const meterColors = useCallback(
+    (theme: Theme) => {
+      const colors = getMeterColors(percentage ?? 0, theme);
+      return { progressColor: colors.progress, trackColor: colors.track };
+    },
+    [percentage],
+  );
+  const ring = (
+    <ContextWindowRing
+      size={geometry.svgSize}
+      radius={geometry.radius}
+      strokeWidth={geometry.strokeWidth}
+      percentage={percentage}
+      uniProps={meterColors}
+    />
+  );
 
   // No usage yet: reserve the footprint with a track-only ring while a session is
   // active so the real ring fades in without shifting siblings. Render nothing when
@@ -136,32 +202,14 @@ export function ContextWindowMeter({
     }
     return (
       <View style={geometry.containerStyle}>
-        <Svg
-          width={geometry.svgSize}
-          height={geometry.svgSize}
-          viewBox={`0 0 ${geometry.svgSize} ${geometry.svgSize}`}
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-        >
-          <Circle
-            cx={geometry.center}
-            cy={geometry.center}
-            r={geometry.radius}
-            fill="none"
-            stroke={theme.colors.surface3}
-            strokeWidth={geometry.strokeWidth}
-          />
-        </Svg>
+        {ring}
         {showPercentage ? <View style={styles.skeletonLabel} /> : null}
       </View>
     );
   }
 
-  const clampedPercentage = clampPercentage(percentage ?? 0);
   const roundedPercentage = Math.round(percentage ?? 0);
-  const { svgSize, center, radius, strokeWidth, circumference, containerStyle } = geometry;
-  const dashOffset = circumference - (clampedPercentage / 100) * circumference;
-  const colors = getMeterColors(clampedPercentage, theme);
+  const { containerStyle } = geometry;
   const formattedSessionCost =
     typeof totalCostUsd === "number" ? formatSessionCost(totalCostUsd) : null;
 
@@ -175,35 +223,7 @@ export function ContextWindowMeter({
         percentage: roundedPercentage,
       })}
     >
-      <Svg
-        width={svgSize}
-        height={svgSize}
-        viewBox={`0 0 ${svgSize} ${svgSize}`}
-        accessibilityElementsHidden
-        importantForAccessibility="no-hide-descendants"
-      >
-        <Circle
-          cx={center}
-          cy={center}
-          r={radius}
-          fill="none"
-          stroke={colors.track}
-          strokeWidth={strokeWidth}
-        />
-        <Circle
-          cx={center}
-          cy={center}
-          r={radius}
-          fill="none"
-          stroke={colors.progress}
-          strokeWidth={strokeWidth}
-          strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={dashOffset}
-          // SVG strokes start at three o'clock; the ring reads clockwise from twelve.
-          transform={`rotate(-90 ${center} ${center})`}
-        />
-      </Svg>
+      {ring}
       {showPercentage ? (
         <Text style={styles.percentageLabel}>{`${roundedPercentage}%`}</Text>
       ) : null}
