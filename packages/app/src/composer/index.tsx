@@ -892,7 +892,7 @@ function ComposerKeyboardFrame({
   externalKeyboardShift,
 }: {
   children: ReactNode;
-  externalKeyboardShift: boolean;
+  externalKeyboardShift?: boolean;
 }) {
   if (externalKeyboardShift) return <View style={animatedStaticStyles.container}>{children}</View>;
   return (

@@ -146,6 +146,7 @@ const styles = StyleSheet.create((theme) => ({
     // edge with the workspace list below (base button uses a wider spacing[3]).
     paddingHorizontal: theme.spacing[2],
   },
+  rowPressed: { backgroundColor: theme.colors.surface2 },
   buttonHovered: {
     backgroundColor: theme.colors.surfaceSidebarHover,
   },

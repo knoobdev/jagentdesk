@@ -579,6 +579,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
       id: "workspace-tab-prev",
       section: "tabs-panes",
       label: "Previous tab",
+      keys: ["mod", "shift", "["],
     },
   },
   {
@@ -591,6 +592,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
       id: "workspace-tab-next",
       section: "tabs-panes",
       label: "Next tab",
+      keys: ["mod", "shift", "]"],
     },
   },
   {
@@ -603,6 +605,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
       id: "workspace-tab-prev",
       section: "tabs-panes",
       label: "Previous tab",
+      keys: ["alt", "shift", "["],
     },
   },
   {
@@ -615,6 +618,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
       id: "workspace-tab-next",
       section: "tabs-panes",
       label: "Next tab",
+      keys: ["alt", "shift", "]"],
     },
   },
   {
@@ -627,6 +631,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
       id: "workspace-tab-prev",
       section: "tabs-panes",
       label: "Previous tab",
+      keys: ["alt", "shift", "["],
     },
   },
   {
@@ -639,6 +644,7 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
       id: "workspace-tab-next",
       section: "tabs-panes",
       label: "Next tab",
+      keys: ["alt", "shift", "]"],
     },
   },
 

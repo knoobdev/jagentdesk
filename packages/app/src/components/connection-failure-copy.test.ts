@@ -70,7 +70,7 @@ describe("direct connection failure copy", () => {
     expect(failure(message).detail).toBe(expected);
   });
 
-  it("preserves authentication failures and their technical details", () => {
+  it("preserves technical details for an unclassified connection failure", () => {
     const message = "Invalid daemon password";
     expect(
       buildConnectionFailureCopy({
@@ -78,10 +78,9 @@ describe("direct connection failure copy", () => {
         error: new DaemonConnectionTestError(message, {
           reason: message,
           lastError: message,
-          authFailureReason: "incorrect_password",
         }),
         labels,
       }),
-    ).toMatchObject({ detail: message, raw: message });
+    ).toMatchObject({ detail: labels.unableToConnect, raw: message });
   });
 });
