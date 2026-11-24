@@ -52,7 +52,7 @@ export class Session {
   private readonly reportedDenials = new Map<string, number>();
 
   constructor(private readonly options: SessionOptions) {
-    this.config = options.config;
+    this.config = { ...options.config, mode: options.config.mode ?? "full-access" };
     this.conversationId = options.persistence
       ? persistenceSchema.parse(options.persistence).data.conversationId
       : null;
@@ -72,6 +72,7 @@ export class Session {
       cwd: this.config.cwd,
       title: this.config.title,
     });
+    this.publishFullAccessNotice();
     this.publishConfig();
     this.emit({ type: "session.commands", sessionId: this.options.id, commands: [] });
     this.emit({ type: "session.ready", requestId, sessionId: this.options.id });
@@ -131,7 +132,7 @@ export class Session {
     const config = {
       ...this.config,
       model: changes.model === null ? undefined : (changes.model ?? this.config.model),
-      mode: changes.mode === null ? undefined : (changes.mode ?? this.config.mode),
+      mode: changes.mode === null ? "full-access" : (changes.mode ?? this.config.mode),
       thinkingOption:
         changes.thinkingOption === null
           ? undefined
@@ -176,6 +177,20 @@ export class Session {
         state: "canceled",
       });
     }
+  }
+
+  private publishFullAccessNotice(): void {
+    this.emit({
+      type: "session.notice",
+      sessionId: this.options.id,
+      notice: {
+        id: `${this.options.id}:full-access`,
+        severity: "warning",
+        title: "Antigravity is running with full access",
+        description:
+          "Antigravity's CLI cannot ask for permission when another app drives it, so JAgentDesk starts it with --dangerously-skip-permissions. Every tool call, including shell commands, runs without asking.",
+      },
+    });
   }
 
   private async ensureDriver(): Promise<void> {
@@ -240,7 +255,7 @@ export class Session {
           id: `${turn.id}:denied`,
           severity: "warning",
           title: denialNoticeTitle(denied),
-          description: "Switch to Full access to allow shell commands.",
+          description: "Antigravity's own policy denied it.",
         },
       });
     }
@@ -342,7 +357,7 @@ export class Session {
       sessionId: this.options.id,
       config: {
         model: this.config.model,
-        mode: this.config.mode || "default",
+        mode: this.config.mode || "full-access",
         models: this.options.catalog().models,
         modes: this.options.catalog().modes,
         thinkingOptions: [],
