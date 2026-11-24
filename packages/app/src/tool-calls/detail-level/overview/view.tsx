@@ -1,3 +1,4 @@
+import { IndentRail } from "@/components/indent-rail";
 import { useOverviewSummaryLabel } from "./label";
 import { useDisclosureHold } from "@/agent-stream/disclosure";
 import { memo, useCallback, useRef, type ReactNode } from "react";
@@ -24,29 +25,14 @@ export const OverviewToolCallGroupView = memo(function OverviewToolCallGroupView
   onExpandedChange,
   children,
 }: OverviewGroupProps) {
-  const scrollRef = useRef<ScrollView>(null);
   const aggregateSummary = useOverviewSummaryLabel(group.summary);
-  const scrollToLatest = useCallback(() => {
-    scrollRef.current?.scrollToEnd({ animated: false });
-  }, []);
   const hold = useDisclosureHold();
   const toggle = useCallback(() => {
     hold(() => onExpandedChange(group.run.id, !expanded));
   }, [expanded, group.run.id, hold, onExpandedChange]);
   const renderDetails = useCallback(
-    () => (
-      <ScrollView
-        ref={scrollRef}
-        style={styles.scroll}
-        contentContainerStyle={styles.content}
-        nestedScrollEnabled
-        showsVerticalScrollIndicator
-        onContentSizeChange={scrollToLatest}
-      >
-        {children}
-      </ScrollView>
-    ),
-    [children, scrollToLatest],
+    () => <InlineGroupDetails latestCallId={group.run.latest.id}>{children}</InlineGroupDetails>,
+    [children, group.run.latest.id],
   );
 
   return (
@@ -63,6 +49,35 @@ export const OverviewToolCallGroupView = memo(function OverviewToolCallGroupView
     />
   );
 });
+
+function InlineGroupDetails({
+  latestCallId,
+  children,
+}: {
+  latestCallId: string;
+  children: ReactNode;
+}) {
+  const scrollRef = useRef<ScrollView>(null);
+  const lastRevealedCall = useRef<string | null>(null);
+  const revealLatestCall = useCallback(() => {
+    // A disclosure changes height without appending a call. Keep the reader's place then.
+    if (lastRevealedCall.current === latestCallId) return;
+    lastRevealedCall.current = latestCallId;
+    scrollRef.current?.scrollToEnd({ animated: false });
+  }, [latestCallId]);
+  return (
+    <ScrollView
+      ref={scrollRef}
+      style={styles.scroll}
+      contentContainerStyle={styles.content}
+      nestedScrollEnabled
+      showsVerticalScrollIndicator
+      onContentSizeChange={revealLatestCall}
+    >
+      <IndentRail>{children}</IndentRail>
+    </ScrollView>
+  );
+}
 
 const styles = StyleSheet.create((theme) => ({
   scroll: {
