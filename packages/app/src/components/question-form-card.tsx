@@ -11,7 +11,7 @@ import { useTranslation } from "react-i18next";
 import type { PendingPermission } from "@/types/shared";
 import type { AgentPermissionResponse } from "@jagentdesk/protocol/agent-types";
 import { isWeb } from "@/constants/platform";
-import { EditingTextInput as TextInput } from "@/components/ui/text-input";
+import { SheetAwareTextInput as TextInput } from "@/components/ui/text-input/sheet-aware";
 import { ScrollableCodeSurface } from "@/components/ui/scrollable-code-surface";
 import {
   areQuestionsAnswered,

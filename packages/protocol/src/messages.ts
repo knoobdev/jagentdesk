@@ -4872,7 +4872,7 @@ export const ServerInfoStatusPayloadSchema = z
         // COMPAT(restartRecovery): added in v0.9.59, remove after 2027-05-24.
         resumeOnStartupSetting: z.boolean().optional(),
         speechSettings: z.boolean().optional(),
-        // COMPAT(terminalRestoreModes): added in v0.1.81, remove gate after 2026-11-23.
+        // ADR-0051: released v0.9.x apps require this optional flag; retain forever.
         "terminal-restore-modes": z.boolean().optional(),
         // COMPAT(terminalInputModeReplay): added in v0.2.6, remove gate after 2027-02-02.
         "terminal-input-mode-replay": z.boolean().optional(),

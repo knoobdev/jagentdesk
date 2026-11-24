@@ -56,6 +56,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -572,7 +573,7 @@ function MobileTabTrailingAccessory({
       <DropdownMenuContent side="bottom" align="end" width={220} testID={menuTestIDBase}>
         {menuEntries.map((entry) =>
           entry.kind === "separator" ? (
-            <MenuSeparator key={entry.key} />
+            <DropdownMenuSeparator key={entry.key} />
           ) : (
             <MobileTabMenuItem key={entry.key} entry={entry} />
           ),
@@ -608,7 +609,7 @@ function MobileTabMenuItem({ entry }: { entry: Extract<WorkspaceTabMenuEntry, { 
     [entry.hint],
   );
   return (
-    <MenuItem
+    <DropdownMenuItem
       testID={entry.testID}
       disabled={entry.disabled}
       destructive={entry.destructive}
@@ -618,7 +619,7 @@ function MobileTabMenuItem({ entry }: { entry: Extract<WorkspaceTabMenuEntry, { 
       trailing={trailing}
     >
       {entry.label}
-    </MenuItem>
+    </DropdownMenuItem>
   );
 }
 

@@ -1745,7 +1745,10 @@ test("keeps enable and disable inside the session RPC deadline", async () => {
       expect(settled).toBe(false);
 
       await vi.advanceTimersByTimeAsync(1);
-      await expect(pending).rejects.toThrow("Timeout waiting for message (60000ms)");
+      await expect(pending).rejects.toMatchObject({
+        code: "DAEMON_REQUEST_TIMEOUT",
+        message: `No response to plugin.${action}.request after 60000ms`,
+      });
     }
   } finally {
     vi.useRealTimers();

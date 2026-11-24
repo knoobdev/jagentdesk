@@ -58,6 +58,7 @@ export default defineConfig({
         extends: true,
         test: {
           name: "browser",
+          setupFiles: [path.resolve(__dirname, "vitest.browser.setup.ts")],
           fileParallelism: false,
           include: ["src/**/*.browser.{test,spec}.{ts,tsx}"],
           browser: {
@@ -112,6 +113,7 @@ export default defineConfig({
       "react-native-gesture-handler > invariant",
     ],
     exclude: [
+      "expo/src/winter",
       // Expo core has web modules that must pass through the platform resolver.
       "expo-modules-core",
       "expo-clipboard",
@@ -147,10 +149,6 @@ export default defineConfig({
       ".json",
     ],
     alias: [
-      {
-        find: /^expo\/src\/winter$/,
-        replacement: path.resolve(__dirname, "test-stubs/expo-winter.ts"),
-      },
       { find: "@", replacement: path.resolve(__dirname, "src") },
       // Keep keyboard-controller's imports in Vite so native aliases and platform extensions apply.
       {

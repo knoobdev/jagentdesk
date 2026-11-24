@@ -2,8 +2,16 @@ import { describe, expect, it } from "vitest";
 import { Terminal } from "@xterm/headless";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { SerializeAddon } from "@xterm/addon-serialize";
-import { createNativeHeadlessTerminal } from "./headless-terminal-state";
+import { createNativeHeadlessTerminal, type TerminalCellRow } from "./headless-terminal-state";
 import { createNativeTerminalOutputDrain } from "./headless-terminal-output-drain";
+
+function rowText(row: TerminalCellRow): string {
+  return row
+    .filter((cell) => cell.width !== 0)
+    .map((cell) => cell.char)
+    .join("")
+    .trimEnd();
+}
 
 describe("native ANSI replay with grapheme widths", () => {
   it("preserves CJK and emoji columns across split UTF-8 replay and live output", async () => {
@@ -34,15 +42,10 @@ describe("native ANSI replay with grapheme widths", () => {
         drain.enqueueText("!");
         await drain.flush();
         const state = native.getViewportState();
-        expect(
-          native.getBufferWindow({ startRow: 0, rowCount: 2 }).rows.map((row) =>
-            row
-              .filter((cell) => cell.width !== 0)
-              .map((cell) => cell.char)
-              .join("")
-              .trimEnd(),
-          ),
-        ).toEqual([lines[0], lines[1] + "!"]);
+        expect(native.getBufferWindow({ startRow: 0, rowCount: 2 }).rows.map(rowText)).toEqual([
+          lines[0],
+          lines[1] + "!",
+        ]);
         expect(state.grid[1][12].char).toBe("E");
         expect(state.cursor).toEqual({ row: 1, col: 14 });
       }
