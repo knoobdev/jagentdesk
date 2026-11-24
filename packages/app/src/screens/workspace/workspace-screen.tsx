@@ -1,3 +1,4 @@
+import { useActiveWorkspaceArchive } from "@/hooks/use-active-workspace-archive";
 import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
@@ -28,6 +29,7 @@ import {
   Copy,
   Ellipsis,
   EllipsisVertical,
+  Archive,
   Globe,
   Import as ImportIcon,
   PanelRight,
@@ -993,6 +995,30 @@ function useCloseTabs(): UseCloseTabsResult {
   return { closingTabIds, closeTab };
 }
 
+const ThemedArchive = withUnistyles(Archive);
+const MENU_ARCHIVE_ICON = <ThemedArchive size={16} uniProps={mutedColorMapping} />;
+
+function WorkspaceArchiveMenuItem() {
+  const { t } = useTranslation();
+  const { canArchive, archive } = useActiveWorkspaceArchive();
+  const handleArchive = useCallback(() => {
+    archive();
+  }, [archive]);
+  return (
+    <>
+      <DropdownMenuItem
+        testID="workspace-header-archive-workspace"
+        leading={MENU_ARCHIVE_ICON}
+        disabled={!canArchive}
+        onSelect={handleArchive}
+      >
+        {t("sidebar.workspace.actions.archiveWorkspace")}
+      </DropdownMenuItem>
+      <DropdownMenuSeparator />
+    </>
+  );
+}
+
 interface WorkspaceHeaderMenuProps {
   normalizedServerId: string;
   currentBranchName: string | null;
@@ -1182,6 +1208,7 @@ function WorkspaceHeaderMenu({
           </>
         ) : null}
         <DropdownMenuSeparator />
+        {isMobile ? <WorkspaceArchiveMenuItem /> : null}
         <DropdownMenuLabel>{t("workspace.tabs.actions.terminalProfilesMenu")}</DropdownMenuLabel>
         <DropdownMenuItem
           testID="workspace-header-new-terminal"
