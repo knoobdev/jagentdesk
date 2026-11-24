@@ -600,13 +600,13 @@ async function dispatchPrompt(
 ): Promise<PromptDispatchResult> {
   if (!(await loadPromptRecipient(params))) return { disposition: "out_of_band" };
 
+  if (params.idleOnly && params.agentManager.hasInFlightRun(params.agentId))
+    throw new AgentTurnBusyError();
   if (params.sessionMode) {
     await params.agentManager.setAgentMode(params.agentId, params.sessionMode);
   }
 
   await params.beforeDispatch?.();
-  if (params.idleOnly && params.agentManager.hasInFlightRun(params.agentId))
-    throw new AgentTurnBusyError();
   if (!params.idleOnly && params.admit?.() === false)
     throw new Error("Queued agent message was withdrawn");
 
@@ -651,7 +651,7 @@ async function dispatchPrompt(
 
   try {
     const result = await startAgentRun(params.agentManager, params.agentId, prompt, params.logger, {
-      replaceRunning: true,
+      replaceRunning: !params.idleOnly,
       idleOnly: params.idleOnly,
       admit: params.admit,
       // Agent- and system-sent messages steer by default; user commands keep

@@ -54,7 +54,7 @@ export function addSendOptions(cmd: Command): Command {
     .addOption(
       new Option(
         "--behavior <behavior>",
-        "Active-turn behavior (agent default: steer; otherwise: interrupt)",
+        "Active-turn behavior (agent default: steer waits for turn end; otherwise: interrupt)",
       ).choices(["interrupt", "steer"]),
     )
     .option("--no-wait", "Return immediately without waiting for completion");

@@ -4270,7 +4270,7 @@ function createToolCatalog(
         "Skill ids (from the Skills screen / create_skill) to invoke for this turn; the daemon prefixes the provider's native skill invocation.",
       ),
     activeTurnBehavior: ActiveTurnBehaviorSchema.optional().describe(
-      'How to send into a running turn: "steer" joins it, falling back to interrupt when unavailable; "interrupt" replaces it. Defaults to steer for agent callers and interrupt otherwise.',
+      'Agent callers: "steer" (default) waits until the current turn ends; "interrupt" replaces it. Human callers: "steer" joins the turn, falling back to interrupt; default is interrupt.',
     ),
   };
   const agentToAgentSendAgentPromptInputSchema = {
@@ -5253,8 +5253,8 @@ function createToolCatalog(
           lastMessage: null,
           permission: null,
           guidance: notifying
-            ? `Queued for delivery after two quiet seconds. ${PROMPTED_AGENT_NOTIFICATION_GUIDANCE}`
-            : "Queued for delivery after two quiet seconds.",
+            ? `Queued for delivery after two quiet seconds and the current turn ends. ${PROMPTED_AGENT_NOTIFICATION_GUIDANCE}`
+            : "Queued for delivery after two quiet seconds and the current turn ends.",
         }),
       };
     }

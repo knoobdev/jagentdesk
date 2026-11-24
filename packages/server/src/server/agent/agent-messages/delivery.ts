@@ -6,7 +6,7 @@ import { AgentTurnBusyError } from "../agent-prompt.js";
 /** Same shape as `PromptDispatchDisposition` in agent-prompt.ts (kept local to avoid a cycle). */
 export type AgentMessageDispatchDisposition = "out_of_band" | "steered" | "turn_started";
 
-/** Messages arriving within this quiet window share one recipient turn (ADR-0029 decision 3). */
+/** Messages share a recipient turn after the current turn ends. */
 export const AGENT_MESSAGE_QUIET_MS = 2_000;
 /** A steady stream of messages still dispatches this long after the first one. */
 export const AGENT_MESSAGE_MAX_WAIT_MS = 10_000;
@@ -130,8 +130,7 @@ export function createAgentMessageDelivery(
       .then(async () => {
         const messages = batch.filter((message) => message.state === "queued");
         if (!messages.length) return;
-        const idleOnly =
-          !closed && messages.every((message) => message.source.kind === "change-request-update");
+        const idleOnly = !closed && messages[0]!.activeTurnBehavior !== "interrupt";
         const request: AgentMessageDispatchRequest = {
           recipientId,
           messageIds: messages.map((message) => message.receipt.messageId),
