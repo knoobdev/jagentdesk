@@ -8,19 +8,17 @@ import {
 
 interface ComposerKeyboardScopeValue {
   /**
-   * The pane this composer sits in is the user's pane. Focus restoration follows it:
-   * the editor keeps its focus intent across blurs that happen while the pane is not
-   * the user's (a retained tab hidden, a sheet over it) and brings focus back when
-   * the pane is theirs again.
+   * The pane this composer sits in is the user's pane. Mouse-driven focus
+   * restoration follows it; touch navigation does not restore editor focus.
    */
-  isPaneFocused: boolean;
+  isPaneFocused?: boolean;
   /**
    * The composer takes input right now: keyboard actions, shortcuts, autocomplete,
    * and the fullscreen exit action. False while a compact overlay panel covers the
    * pane, which does not take pane focus.
    */
   isActiveComposer: boolean;
-  isInputFocused: boolean;
+  isInputFocused?: boolean;
 }
 
 const ComposerKeyboardScopeContext = createContext<ComposerKeyboardScopeValue>({
@@ -36,8 +34,8 @@ export function ComposerKeyboardScopeProvider({
   children,
 }: PropsWithChildren<ComposerKeyboardScopeValue>): ReactElement {
   const value = useMemo(
-    () => ({ isPaneFocused, isActiveComposer }),
-    [isPaneFocused, isActiveComposer],
+    () => ({ isPaneFocused: isPaneFocused ?? isActiveComposer, isActiveComposer, isInputFocused }),
+    [isPaneFocused, isActiveComposer, isInputFocused],
   );
   return (
     <ComposerKeyboardScopeContext.Provider value={value}>
