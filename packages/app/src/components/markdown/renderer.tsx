@@ -1,3 +1,4 @@
+import { getSharedAssistantMarkdownParser } from "@/utils/assistant-markdown-parser";
 import { MarkdownTextSelection } from "@/components/markdown-text-selection";
 import { useOptionalAssistantFileLinkResolverContext } from "@/assistant-file-links/provider";
 import { AssistantMarkdownLink } from "@/assistant-file-links/link";
@@ -77,7 +78,7 @@ function compactMutedMarkdownStyleMapping(theme: Theme): Partial<MarkdownWithSta
   };
 }
 
-const defaultMarkdownParser = MarkdownIt({ typographer: true, linkify: true });
+const defaultMarkdownParser = getSharedAssistantMarkdownParser();
 const EMPTY_TEXT_STYLE: TextStyle = {};
 const MARKDOWN_LIST_ITEM_CONTENT_FLEX: ViewStyle = { flex: 1, flexShrink: 1, minWidth: 0 };
 export interface MarkdownRendererProps {
