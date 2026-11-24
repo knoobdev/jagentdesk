@@ -47,7 +47,7 @@ import {
   type InlinePathTarget,
 } from "@/components/message";
 import { PlanCard } from "@/components/plan-card";
-import { type StreamItem } from "@/types/stream";
+import { getStreamItemMessageId, type StreamItem } from "@/types/stream";
 import type { PendingMessageSubmission } from "@/composer/submission/model";
 import type { TurnPresentation } from "@/timeline/turn-liveness";
 import type { PendingPermission } from "@/types/shared";
@@ -598,15 +598,23 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const handleTimelineHistoryLoadError = useCallback(() => {
       toast?.error(t("agentStream.historyLoadFailed"));
     }, [t, toast]);
+    const mountedHistoryMessageIds = useMemo(
+      () => new Set(baseRenderModel.history.map(getStreamItemMessageId)),
+      [baseRenderModel.history],
+    );
     const chatFindVisibleMessageIds = useMemo(
-      () =>
-        new Set(
-          [...baseRenderModel.history, ...baseRenderModel.segments.liveHead].map((item) => item.id),
-        ),
-      [baseRenderModel.history, baseRenderModel.segments.liveHead],
+      () => ({
+        has: (id: string) =>
+          mountedHistoryMessageIds.has(id) ||
+          baseRenderModel.segments.liveHead.some((item) => getStreamItemMessageId(item) === id),
+      }),
+      [mountedHistoryMessageIds, baseRenderModel.segments.liveHead],
     );
     const outlineEnabled = supportsChatOutline && chatOutlineEnabled;
     const outlineLayout = useChatOutlineRailLayout(outlineEnabled);
+    const revealOutlineMessage = useStableEvent((messageId: string) =>
+      revealLoadedMessage(messageId),
+    );
     const chatOutline = useChatOutline({
       agentId,
       serverId: resolvedServerId,
@@ -616,8 +624,8 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       enabled: outlineEnabled,
       viewportRef,
       onJumpError: handleTimelineHistoryLoadError,
-      visibleMessageIds: chatFindVisibleMessageIds,
-      revealLoadedMessage: revealLoadedHistory,
+      mountedHistoryMessageIds,
+      revealLoadedMessage: revealOutlineMessage,
     });
 
     // Chat find addresses a message by id; a message is one loaded row here. Loaded rows above
