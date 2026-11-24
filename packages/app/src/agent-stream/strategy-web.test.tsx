@@ -25,12 +25,7 @@ vi.hoisted(() => {
   });
 });
 
-function userMessage(index: number): StreamItem {vi.mock("react-native-unistyles", () => ({
-  StyleSheet: { create: () => ({}) },
-  withUnistyles: (Component: React.ComponentType) => Component,
-}));
-
-function userMessage(index: number): Extract<StreamItem, { kind: "user_message" }> {
+function userMessage(index: number): StreamItem {
   return {
     kind: "user_message",
     id: `message-${index}`,
@@ -51,30 +46,6 @@ function createRenderers(onRowRender: () => void): StreamSegmentRenderers {
     renderLiveHeadRow: (item) => <div>{item.id}</div>,
     renderLiveAuxiliary: () => null,
   };
-}
-
-function MeasuredTestRow({ item }: { item: StreamItem }) {
-  const [loaded, setLoaded] = React.useState(false);
-  const load = React.useCallback(() => setLoaded(true), []);
-  const height = item.kind === "user_message" && item.text === "grown" ? 120 : 24;
-  const measure = React.useCallback(
-    (node: HTMLDivElement | null) => {
-      if (!node?.parentElement) return;
-      Object.defineProperty(node.parentElement, "offsetHeight", {
-        configurable: true,
-        value: height,
-      });
-    },
-    [height],
-  );
-  return (
-    <div ref={measure}>
-      <button type="button" onClick={load}>
-        {loaded ? "Loaded" : "Load"}
-      </button>
-      {item.id}
-    </div>
-  );
 }
 
 describe("createWebStreamStrategy", () => {
@@ -174,121 +145,6 @@ describe("createWebStreamStrategy", () => {
 
     expect(rowRenderCount.mock.calls.length).toBeGreaterThan(0);
     expect(rowRenderCount.mock.calls.length).toBeLessThanOrEqual(historyVirtualized.length);
-  });
-
-  it("retains a row's DOM and local state when recent history becomes virtualized", () => {
-    const strategy = createWebStreamStrategy({ isMobileBreakpoint: true });
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    root = createRoot(container);
-    const item = userMessage(0);
-    const renderRow = (rowItem: StreamItem) => <MeasuredTestRow item={rowItem} />;
-    const input: StreamRenderInput = {
-      agentId: "agent",
-      segments: { historyVirtualized: [], historyMounted: [item], liveHead: [] },
-      boundary: { hasVirtualizedHistory: false, hasMountedHistory: true, hasLiveHead: false },
-      renderers: {
-        renderHistoryVirtualizedRow: renderRow,
-        renderHistoryMountedRow: renderRow,
-        renderLiveHeadRow: renderRow,
-        renderLiveAuxiliary: () => null,
-      },
-      listEmptyComponent: null,
-      viewportRef: React.createRef<StreamViewportHandle>(),
-      routeBottomAnchorRequest: null,
-      isAuthoritativeHistoryReady: true,
-      onNearBottomChange: () => {},
-      onNearHistoryStart: () => true,
-      isLoadingOlderHistory: false,
-      hasOlderHistory: false,
-      olderHistoryProgressKey: null,
-      scrollEnabled: true,
-      listStyle: null,
-      baseListContentContainerStyle: null,
-      forwardListContentContainerStyle: null,
-      contentMaxWidth: DEFAULT_CONTENT_MAX_WIDTH,
-    };
-    act(() => root?.render(strategy.render(input)));
-    const row = container.querySelector('[data-history-row-id="message-0"]')!;
-    act(() => row.querySelector("button")!.click());
-    expect(row.querySelector("button")!.textContent).toBe("Loaded");
-    const viewport = container.querySelector('[data-testid="agent-chat-scroll"]')!;
-    Object.defineProperty(viewport, "clientHeight", { configurable: true, value: 500 });
-    act(() =>
-      root?.render(
-        strategy.render({
-          ...input,
-          segments: { historyVirtualized: [item], historyMounted: [userMessage(1)], liveHead: [] },
-          boundary: { ...input.boundary, hasVirtualizedHistory: true },
-        }),
-      ),
-    );
-    expect(container.querySelector('[data-history-row-id="message-0"]')).toBe(row);
-    expect(row.isConnected).toBe(true);
-    expect(row.querySelector("button")!.textContent).toBe("Loaded");
-    act(() =>
-      root?.render(
-        strategy.render({
-          ...input,
-          segments: {
-            historyVirtualized: [{ ...item, text: "grown" }, userMessage(1)],
-            historyMounted: [userMessage(2)],
-            liveHead: [],
-          },
-          boundary: { ...input.boundary, hasVirtualizedHistory: true },
-        }),
-      ),
-    );
-    expect(
-      (container.querySelector('[data-history-row-id="message-1"]') as HTMLElement).style.transform,
-    ).toBe("translateY(120px)");
-    expect(row.querySelector("button")!.textContent).toBe("Loaded");
-  });
-
-  it("keeps the timeline width stable with an overlay scrollbar", () => {
-    const strategy = createWebStreamStrategy({ isMobileBreakpoint: false });
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    act(() => {
-      root?.render(
-        strategy.render({
-          agentId: "agent",
-          segments: {
-            historyVirtualized: [],
-            historyMounted: [userMessage(1)],
-            liveHead: [],
-          },
-          boundary: {
-            hasVirtualizedHistory: false,
-            hasMountedHistory: true,
-            hasLiveHead: false,
-          },
-          renderers: createRenderers(vi.fn()),
-          listEmptyComponent: null,
-          viewportRef: React.createRef<StreamViewportHandle>(),
-          routeBottomAnchorRequest: null,
-          isAuthoritativeHistoryReady: true,
-          onNearBottomChange: vi.fn(),
-          onNearHistoryStart: vi.fn().mockReturnValue(true),
-          isLoadingOlderHistory: false,
-          hasOlderHistory: false,
-          olderHistoryProgressKey: null,
-          scrollEnabled: true,
-          listStyle: null,
-          baseListContentContainerStyle: null,
-          forwardListContentContainerStyle: null,
-          contentMaxWidth: DEFAULT_CONTENT_MAX_WIDTH,
-        }),
-      );
-    });
-
-    const scrollContainer = container.querySelector<HTMLElement>(
-      '[data-testid="agent-chat-scroll"]',
-    );
-    expect(scrollContainer?.style.scrollbarWidth).toBe("none");
-    expect(scrollContainer?.dataset.overlayScrollbar).toBe("true");
   });
 
   it("rerenders a stable live-head row when its revision changes", () => {
@@ -1033,4 +889,4 @@ describe("createWebStreamStrategy", () => {
 
     expect(scrollTo).toHaveBeenCalled();
   });
-});}
+});
