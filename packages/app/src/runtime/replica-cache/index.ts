@@ -134,6 +134,16 @@ function deserializeTimeline(stored: StoredHost["timeline"]): SessionReplica["ti
   if (!Array.isArray(decoded) || !decoded.every(isStreamItem)) {
     return null;
   }
+  // COMPAT(source-timeline-cache): added in v0.9.59, remove after 2027-05-25.
+  // Display fragments cannot be transformed as complete source messages; refetch them.
+  if (
+    decoded.some(
+      (item) =>
+        item.kind === "assistant_message" &&
+        (item.blockGroupId !== undefined || item.blockIndex !== undefined),
+    )
+  )
+    return null;
   return {
     agentId: stored.agentId,
     items: decoded,

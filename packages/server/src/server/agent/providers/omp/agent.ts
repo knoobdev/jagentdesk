@@ -2234,7 +2234,6 @@ export class OmpAgentClient implements AgentClient {
     );
     this.logger = options.logger;
     this.runtimeSettings = runtimeSettings;
-    this.subagentCardScheduler = options.subagentCardScheduler;
     this.installation = createOmpInstallation(runtimeSettings);
     this.providerIdleScheduler = options.providerIdleScheduler;
     this.noTurnScheduler = options.noTurnScheduler;

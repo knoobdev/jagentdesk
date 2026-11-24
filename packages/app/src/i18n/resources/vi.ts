@@ -6,6 +6,15 @@ import { pluginSettings } from "./plugin-settings";
 import { sshModuleStrings } from "./ssh-modules";
 
 export const vi = {
+  toolCallGroup: {
+    thought: "Suy nghĩ",
+    editedFiles: { one: "đã sửa {{count}} tệp", other: "đã sửa {{count}} tệp" },
+    commands: { one: "đã chạy {{count}} lệnh", other: "đã chạy {{count}} lệnh" },
+    readFiles: { one: "đã đọc {{count}} tệp", other: "đã đọc {{count}} tệp" },
+    searches: { one: "đã tìm {{count}} lần", other: "đã tìm {{count}} lần" },
+    otherTools: { one: "đã dùng {{count}} công cụ khác", other: "đã dùng {{count}} công cụ khác" },
+    and: "và",
+  },
   turnSummary: {
     details: "Xem chi tiết lượt",
     sentBy: "Được gửi bởi {{name}}",

@@ -126,6 +126,7 @@ interface TimelineResponseEntry {
   sourceSeqRanges?: TimelineSeqRange[];
   collapsed?: string[];
   provider: string;
+  turnId?: string;
   item: Record<string, unknown>;
   timestamp: string;
 }
@@ -808,6 +809,7 @@ function reconcileOverlappingProjectedAssistant(params: {
     id: blockGroupId ?? match.current.id,
     ...(messageId !== undefined ? { messageId } : {}),
     text: projectedText,
+    ...(unit.event.type === "timeline" && unit.event.turnId ? { turnId: unit.event.turnId } : {}),
     timestamp: unit.timestamp,
     timelineCursor: { epoch: params.epoch, seq: unit.seqEnd },
   };
@@ -1280,6 +1282,7 @@ export function processTimelineResponse(
       type: "timeline",
       provider: entry.provider,
       item: entry.item,
+      ...(entry.turnId ? { turnId: entry.turnId } : {}),
     } as AgentStreamEventPayload,
     timestamp: new Date(entry.timestamp),
   }));

@@ -7,6 +7,7 @@ export function continuesTimelineTurn(
   if (previousTurnId !== undefined && nextTurnId !== undefined) {
     return previousTurnId === nextTurnId;
   }
+  // COMPAT(legacy-turn-membership): added in v0.9.59, remove after 2027-05-25 once timelines carry canonical turn IDs.
   // Missing IDs cannot recover historical batching or steering. Each visible
   // trigger deterministically starts a turn in both paging and presentation.
   return !nextIsTrigger;

@@ -343,9 +343,7 @@ function ToolCallDetailRow({ value, onChange }: ToolCallDetailRowProps) {
       <DropdownMenu>
         <DropdownMenuTrigger
           style={dropdownTriggerStyle}
-          accessibilityLabel={t("settings.general.chatDisplay.accessibilityLabel", {
-            value: selectedLabel,
-          })}
+          accessibilityLabel={`${t("settings.general.chatDisplay.label")}: ${selectedLabel}`}
         >
           <Text style={styles.triggerText}>{selectedLabel}</Text>
           <ThemedChevronDown size={ICON_SIZE.sm} uniProps={mutedColorMapping} />

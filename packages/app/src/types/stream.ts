@@ -1521,7 +1521,6 @@ export function hydrateStreamState(
     event: AgentStreamEventPayload;
     timestamp: Date;
     timelineCursor?: TimelinePosition;
-    turnId?: string;
   }>,
   options?: { source?: StreamUpdateSource; reservedItemIds?: ReadonlySet<string> },
 ): StreamItem[] {
@@ -1715,7 +1714,6 @@ function applyCanonicalUserMessageEvent(params: {
   event: AgentStreamEventPayload;
   timestamp: Date;
   timelineCursor?: TimelinePosition;
-  turnId?: string;
   unmatchedInsert?: "tail" | "head";
 }): ApplyStreamEventResult | null {
   const { tail, head, event, timestamp, timelineCursor, unmatchedInsert = "tail" } = params;
@@ -1806,7 +1804,6 @@ export function applyStreamEvent(params: {
   timestamp: Date;
   source?: StreamUpdateSource;
   timelineCursor?: TimelinePosition;
-  turnId?: string;
   unmatchedUserMessageInsert?: "tail" | "head";
 }): ApplyStreamEventResult {
   const { tail, head, event, timestamp } = params;

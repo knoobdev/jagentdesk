@@ -565,7 +565,7 @@ describe("stream reducer canonical tool calls", () => {
     expect(new Set(messages.map((message) => message.id)).size).toBe(2);
   });
 
-  it("keeps every promoted block when an assistant message resumes after a tool", () => {
+  it("keeps whole messages when an assistant resumes after a tool", () => {
     const messageId = "msg-promoted-resume";
     let tail: StreamItem[] = [];
     let head: StreamItem[] = [];
@@ -608,10 +608,8 @@ describe("stream reducer canonical tool calls", () => {
         item.kind === "assistant_message",
     );
     expect(messages.map((message) => message.text)).toEqual([
-      "Before one.",
-      "Before two.",
-      "After one.",
-      "After two.",
+      "Before one.\n\nBefore two.",
+      "After one.\n\nAfter two.",
     ]);
     expect(new Set(messages.map((message) => message.id)).size).toBe(messages.length);
   });
