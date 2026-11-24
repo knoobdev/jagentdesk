@@ -4,6 +4,8 @@ export const MARKDOWN_COPY_UNWRAP_ATTRIBUTE = "data-jagentdesk-markdown-unwrap";
 export const MARKDOWN_COPY_LIST_START_ATTRIBUTE = "data-jagentdesk-markdown-list-start";
 export const MARKDOWN_COPY_LANGUAGE_ATTRIBUTE = "data-jagentdesk-markdown-language";
 export const MARKDOWN_COPY_ALIGN_ATTRIBUTE = "data-jagentdesk-markdown-align";
+export const MARKDOWN_COPY_SRC_ATTRIBUTE = "data-jagentdesk-markdown-src";
+export const MARKDOWN_COPY_ALT_ATTRIBUTE = "data-jagentdesk-markdown-alt";
 
 /**
  * Trailing line breaks, with any indentation that followed the last one.
@@ -57,6 +59,18 @@ export function markdownCopyCodeBlockDataSet(language: string | null | undefined
   return {
     ...markdownCopyDataSet.pre,
     ...(fenceLanguage ? { jagentdeskMarkdownLanguage: fenceLanguage } : {}),
+  } as const;
+}
+
+/**
+ * An image copies as the Markdown it came from. The rendered `img` points at a preview
+ * URL for data and workspace images, and carries no alt text of its own.
+ */
+export function markdownCopyImageDataSet(source: string, alt: string | undefined) {
+  return {
+    jagentdeskMarkdownTag: "img",
+    jagentdeskMarkdownSrc: source,
+    ...(alt ? { jagentdeskMarkdownAlt: alt } : {}),
   } as const;
 }
 

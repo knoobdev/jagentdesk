@@ -6,6 +6,8 @@ import {
 } from "@/utils/rich-clipboard";
 import {
   MARKDOWN_COPY_ALIGN_ATTRIBUTE,
+  MARKDOWN_COPY_ALT_ATTRIBUTE,
+  MARKDOWN_COPY_SRC_ATTRIBUTE,
   MARKDOWN_COPY_IGNORE_ATTRIBUTE,
   MARKDOWN_COPY_LANGUAGE_ATTRIBUTE,
   MARKDOWN_COPY_LIST_START_ATTRIBUTE,
@@ -170,8 +172,12 @@ function restoreMarkdownElements(container: HTMLElement): void {
       continue;
     }
     const semanticElement = document.createElement(tagName);
-    if (tagName !== "br") {
+    if (tagName !== "br" && tagName !== "img") {
       semanticElement.append(...element.childNodes);
+    }
+    if (tagName === "img") {
+      semanticElement.setAttribute("src", element.getAttribute(MARKDOWN_COPY_SRC_ATTRIBUTE) ?? "");
+      semanticElement.setAttribute("alt", element.getAttribute(MARKDOWN_COPY_ALT_ATTRIBUTE) ?? "");
     }
     if (tagName === "ol") {
       const start = element.getAttribute(MARKDOWN_COPY_LIST_START_ATTRIBUTE);
