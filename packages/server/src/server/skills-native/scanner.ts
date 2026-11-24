@@ -114,6 +114,7 @@ export async function scanLocations(roots: ScanRoots): Promise<Map<string, Skill
   const groups = new Map<string, SkillLocation[]>();
   for (const { scope, root } of scopesFor(roots)) {
     for (const spec of SKILL_DIR_SPECS) {
+      if (scope === "project" && spec.project === null) continue;
       const dir = skillDirPath(spec.label, scope, root);
       for (const location of await scanOneDir(scope, spec.label, dir)) {
         const real = await realpathOrNull(location.path);

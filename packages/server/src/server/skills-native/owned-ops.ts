@@ -77,10 +77,12 @@ export function installTargets(
   const root = scopeRoot(ctx, scope, projectRoot);
   return {
     realPath: path.join(skillDirPath(INSTALL_REAL_DIR, scope, root), name),
-    links: INSTALL_LINK_DIRS.map((dir) => ({
-      dir,
-      path: path.join(skillDirPath(dir, scope, root), name),
-    })),
+    links: INSTALL_LINK_DIRS.filter((dir) => scope === "global" || dir !== "antigravity").map(
+      (dir) => ({
+        dir,
+        path: path.join(skillDirPath(dir, scope, root), name),
+      }),
+    ),
   };
 }
 

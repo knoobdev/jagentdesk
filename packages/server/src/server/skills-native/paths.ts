@@ -10,7 +10,7 @@ interface SkillDirSpec {
   /** Path segments below the user's home directory. */
   global: readonly string[];
   /** Path segments below the project root. */
-  project: readonly string[];
+  project: readonly string[] | null;
   /** Providers that read this directory (spec 22.3). */
   providers: readonly string[];
 }
@@ -28,6 +28,12 @@ export const SKILL_DIR_SPECS: readonly SkillDirSpec[] = [
     global: [".claude", "skills"],
     project: [".claude", "skills"],
     providers: ["claude", "opencode", "cursor", "kimi", "omp"],
+  },
+  {
+    label: "antigravity",
+    global: [".gemini", "config", "skills"],
+    project: null,
+    providers: ["antigravity"],
   },
   { label: "kiro", global: [".kiro", "skills"], project: [".kiro", "skills"], providers: ["kiro"] },
   {
@@ -71,7 +77,7 @@ export const SKILL_DIR_SPECS: readonly SkillDirSpec[] = [
 
 /** ADR-0022 decision 2: one real copy here, symlinked into {@link INSTALL_LINK_DIRS}. */
 export const INSTALL_REAL_DIR: SkillDirLabel = "agents";
-export const INSTALL_LINK_DIRS: readonly SkillDirLabel[] = ["claude", "kiro"];
+export const INSTALL_LINK_DIRS: readonly SkillDirLabel[] = ["claude", "kiro", "antigravity"];
 
 function specFor(label: SkillDirLabel): SkillDirSpec {
   const spec = SKILL_DIR_SPECS.find((candidate) => candidate.label === label);
@@ -83,7 +89,9 @@ function specFor(label: SkillDirLabel): SkillDirSpec {
 
 export function skillDirPath(label: SkillDirLabel, scope: SkillScope, root: string): string {
   const spec = specFor(label);
-  return path.join(root, ...(scope === "global" ? spec.global : spec.project));
+  const segments = scope === "global" ? spec.global : spec.project;
+  if (!segments) throw new Error(`No project skill directory for ${label}`);
+  return path.join(root, ...segments);
 }
 
 export function providersForDir(label: SkillDirLabel): readonly string[] {

@@ -143,7 +143,7 @@ it("routes the skill source RPCs (list, add, browse by sourceId, set_enabled, re
   await session.handleMessage({ type: "skills.sources.list.request", requestId: "s1" });
   expect(payloadOf("skills.sources.list.response")).toMatchObject({
     requestId: "s1",
-    sources: [{ builtin: true }, { builtin: true }],
+    sources: [{ builtin: true, label: "JAgentDesk" }, { builtin: true }, { builtin: true }],
   });
 
   await session.handleMessage({

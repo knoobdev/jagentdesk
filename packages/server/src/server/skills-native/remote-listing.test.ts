@@ -71,6 +71,7 @@ function newCache(fetch: ReturnType<typeof fakeFetch>, now: () => number = () =>
 
 function newService(fetch: ReturnType<typeof fakeFetch>): NativeSkillsService {
   return new NativeSkillsService({
+    bundledDir: null,
     jagentdeskHome: roots.jdHome,
     homeDir: roots.home,
     logger: createTestLogger(),

@@ -79,6 +79,7 @@ describe("remote sources", () => {
       ),
     });
     const service = new NativeSkillsService({
+      bundledDir: null,
       jagentdeskHome: roots.jdHome,
       homeDir: roots.home,
       logger: createTestLogger(),
@@ -190,6 +191,7 @@ describe("provider marketplaces", () => {
     await seedMarketplaces();
     const commands: Array<{ command: string; args: string[]; cwd: string | null }> = [];
     const service = new NativeSkillsService({
+      bundledDir: null,
       jagentdeskHome: roots.jdHome,
       homeDir: roots.home,
       logger: createTestLogger(),
