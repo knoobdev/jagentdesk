@@ -325,6 +325,7 @@ export const ru: TranslationResources = {
       forkUnavailable: "Обновите хост, чтобы использовать это.",
       forkMissingWorkspace: "Этот агент не находится в рабочем пространстве.",
       forkFailed: "Не удалось форкнуть чат",
+      turnStats: "Статистика ответа",
       openFile: "Открыть файл",
       copied: "Скопировано",
     },

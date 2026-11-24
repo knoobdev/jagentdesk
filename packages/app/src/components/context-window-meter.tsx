@@ -1,17 +1,21 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ProviderUsageTooltipSection } from "@/provider-usage/tooltip-section";
-import { useProviderUsage } from "@/provider-usage/use-provider-usage";
-import { formatTokenCount } from "./context-window-meter.utils";
+import { ContextWindowDetails } from "./context-window-details";
+import { DetailsSheet } from "./details-sheet";
+import { HoverCard, HoverCardTrigger, HoverCardContent } from "./ui/hover-card";
+import { useIsCompactFormFactor } from "@/constants/layout";
+import { isNative } from "@/constants/platform";
+import type { AgentMetric } from "@jagentdesk/protocol/agent-types";
 
 interface ContextWindowMeterProps {
   maxTokens: number | null;
   usedTokens: number | null;
   totalCostUsd?: number | null;
+  sessionMetrics?: AgentMetric[];
   showPercentage?: boolean;
   serverId?: string;
   /** The JAgentDesk provider key, e.g. "claude", "gemini", "codex" */
@@ -96,10 +100,17 @@ function getMeterGeometry(showPercentage: boolean, glyphSize?: number) {
   };
 }
 
+function meterContext(maxTokens: number | null, usedTokens: number | null) {
+  if (maxTokens === null || usedTokens === null) return null;
+  const percentage = getUsagePercentage(maxTokens, usedTokens);
+  return percentage === null ? null : { percentage: Math.round(percentage), usedTokens, maxTokens };
+}
+
 export function ContextWindowMeter({
   maxTokens,
   usedTokens,
   totalCostUsd,
+  sessionMetrics = [],
   showPercentage = false,
   serverId,
   provider,
@@ -108,30 +119,19 @@ export function ContextWindowMeter({
 }: ContextWindowMeterProps) {
   const { theme } = useUnistyles();
   const { t } = useTranslation();
-  const [isTooltipOpen, setIsTooltipOpen] = useState(false);
-  const { view: providerUsageView, refresh: refreshProviderUsage } = useProviderUsage(
-    serverId ?? null,
-    { enabled: isTooltipOpen },
-  );
-  const percentage =
-    maxTokens !== null && usedTokens !== null ? getUsagePercentage(maxTokens, usedTokens) : null;
-  const handleTooltipOpenChange = useCallback(
-    (nextOpen: boolean) => {
-      setIsTooltipOpen(nextOpen);
-      if (nextOpen) {
-        void refreshProviderUsage().catch(() => {});
-      }
-    },
-    [refreshProviderUsage],
-  );
-
+  const isCompact = useIsCompactFormFactor();
+  const [isSheetOpen, setIsSheetOpen] = useState(false);
+  const openSheet = useCallback(() => setIsSheetOpen(true), []);
+  const closeSheet = useCallback(() => setIsSheetOpen(false), []);
+  const context = useMemo(() => meterContext(maxTokens, usedTokens), [maxTokens, usedTokens]);
+  const percentage = context?.percentage ?? null;
   const geometry = getMeterGeometry(showPercentage, glyphSize);
 
   // No usage yet: reserve the footprint with a track-only ring while a session is
   // active so the real ring fades in without shifting siblings. Render nothing when
   // no usage is expected.
-  if (percentage === null || maxTokens === null || usedTokens === null) {
-    if (!pending) {
+  if (context === null && sessionMetrics.length === 0) {
+    if (!pending && sessionMetrics.length === 0) {
       return null;
     }
     return (
@@ -157,86 +157,104 @@ export function ContextWindowMeter({
     );
   }
 
-  const clampedPercentage = clampPercentage(percentage);
-  const roundedPercentage = Math.round(percentage);
+  const clampedPercentage = clampPercentage(percentage ?? 0);
+  const roundedPercentage = Math.round(percentage ?? 0);
   const { svgSize, center, radius, strokeWidth, circumference, containerStyle } = geometry;
   const dashOffset = circumference - (clampedPercentage / 100) * circumference;
   const colors = getMeterColors(clampedPercentage, theme);
   const formattedSessionCost =
     typeof totalCostUsd === "number" ? formatSessionCost(totalCostUsd) : null;
 
-  return (
-    <Tooltip
-      open={isTooltipOpen}
-      onOpenChange={handleTooltipOpenChange}
-      delayDuration={0}
-      enabledOnDesktop
-      enabledOnMobile
+  const trigger = (
+    <Pressable
+      style={containerStyle}
+      testID="context-window-meter"
+      accessibilityRole="button"
+      onPress={isCompact ? openSheet : undefined}
+      accessibilityLabel={t("contextWindow.accessibility", {
+        percentage: roundedPercentage,
+      })}
     >
-      <TooltipTrigger asChild triggerRefProp="ref">
-        <Pressable
-          style={containerStyle}
-          testID="context-window-meter"
-          accessibilityRole="image"
-          accessibilityLabel={t("contextWindow.accessibility", {
-            percentage: roundedPercentage,
-          })}
-        >
-          <Svg
-            width={svgSize}
-            height={svgSize}
-            viewBox={`0 0 ${svgSize} ${svgSize}`}
-            accessibilityElementsHidden
-            importantForAccessibility="no-hide-descendants"
-          >
-            <Circle
-              cx={center}
-              cy={center}
-              r={radius}
-              fill="none"
-              stroke={colors.track}
-              strokeWidth={strokeWidth}
-            />
-            <Circle
-              cx={center}
-              cy={center}
-              r={radius}
-              fill="none"
-              stroke={colors.progress}
-              strokeWidth={strokeWidth}
-              strokeLinecap="round"
-              strokeDasharray={circumference}
-              strokeDashoffset={dashOffset}
-              // SVG strokes start at three o'clock; the ring reads clockwise from twelve.
-              transform={`rotate(-90 ${center} ${center})`}
-            />
-          </Svg>
-          {showPercentage ? (
-            <Text style={styles.percentageLabel}>{`${roundedPercentage}%`}</Text>
-          ) : null}
-        </Pressable>
-      </TooltipTrigger>
-      <TooltipContent side="top" align="center" offset={8} testID="context-window-meter-tooltip">
-        <View style={styles.tooltipContent}>
-          <Text style={styles.tooltipTitle}>{t("contextWindow.title")}</Text>
-          <Text style={styles.tooltipText}>
-            {t("contextWindow.used", { percentage: roundedPercentage })}
-          </Text>
-          <Text style={styles.tooltipDetail}>
-            {t("contextWindow.tokens", {
-              used: formatTokenCount(usedTokens),
-              max: formatTokenCount(maxTokens),
-            })}
-          </Text>
-          {formattedSessionCost ? (
-            <Text style={styles.tooltipDetail}>
-              {t("contextWindow.sessionCost", { cost: formattedSessionCost })}
-            </Text>
-          ) : null}
-          <ProviderUsageTooltipSection view={providerUsageView} activeProviderId={provider} />
-        </View>
-      </TooltipContent>
-    </Tooltip>
+      <Svg
+        width={svgSize}
+        height={svgSize}
+        viewBox={`0 0 ${svgSize} ${svgSize}`}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+      >
+        <Circle
+          cx={center}
+          cy={center}
+          r={radius}
+          fill="none"
+          stroke={colors.track}
+          strokeWidth={strokeWidth}
+        />
+        <Circle
+          cx={center}
+          cy={center}
+          r={radius}
+          fill="none"
+          stroke={colors.progress}
+          strokeWidth={strokeWidth}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={dashOffset}
+          // SVG strokes start at three o'clock; the ring reads clockwise from twelve.
+          transform={`rotate(-90 ${center} ${center})`}
+        />
+      </Svg>
+      {showPercentage ? (
+        <Text style={styles.percentageLabel}>{`${roundedPercentage}%`}</Text>
+      ) : null}
+    </Pressable>
+  );
+  const details = (
+    <ContextWindowDetails
+      serverId={serverId ?? ""}
+      provider={provider}
+      context={context}
+      sessionCost={formattedSessionCost}
+      sessionMetrics={sessionMetrics}
+      showTitle={!isCompact}
+      refreshable={isCompact || !isNative}
+    />
+  );
+  if (isCompact)
+    return (
+      <>
+        {trigger}
+        <DetailsSheet open={isSheetOpen} onClose={closeSheet} title={t("contextWindow.title")}>
+          {details}
+        </DetailsSheet>
+      </>
+    );
+  if (isNative)
+    return (
+      <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile>
+        <TooltipTrigger asChild triggerRefProp="ref">
+          {trigger}
+        </TooltipTrigger>
+        <TooltipContent side="top" align="center" offset={8} testID="context-window-meter-tooltip">
+          {details}
+        </TooltipContent>
+      </Tooltip>
+    );
+  return (
+    <HoverCard>
+      <HoverCardTrigger focusable accessibilityLabel={t("contextWindow.title")}>
+        {trigger}
+      </HoverCardTrigger>
+      <HoverCardContent
+        placement="top"
+        offset={8}
+        role="dialog"
+        testID="context-window-details"
+        style={styles.tooltipContent}
+      >
+        {details}
+      </HoverCardContent>
+    </HoverCard>
   );
 }
 

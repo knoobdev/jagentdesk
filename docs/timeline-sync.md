@@ -32,6 +32,11 @@ Client heartbeat reports presence:
 
 Heartbeat is used for notification routing. It must not be used as a correctness gate for `agent_stream` delivery. A stale mobile focus heartbeat may affect whether the user gets notified; it must not make timeline rows disappear from the live stream.
 
+Completed-turn metrics belong to the footer's source row (last assistant message,
+otherwise the last tool). Keep that attribution through projection, cache reload,
+and history replay so a fetch agrees with the live completion. Provider session
+metrics stay on the agent record; they do not bill the Insights usage ledger.
+
 ## Gap recovery is paged but complete
 
 Large unbounded timeline responses can exceed WebSocket frame limits, so catch-up uses bounded pages. Bounded does not mean partial.

@@ -9771,6 +9771,7 @@ export class Session {
                 seqStart: entry.seqStart,
                 seqEnd: entry.seqEnd,
                 sourceSeqRanges: entry.sourceSeqRanges,
+                turnMetrics: entry.turnMetrics,
                 collapsed: (
                   source
                     ? this.supportsForSource(CLIENT_CAPS.reasoningMergeEnum, source)

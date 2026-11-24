@@ -7,6 +7,8 @@ import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { SpecModeMessageBody, specModeBubbleText } from "@/spec-mode/message-body";
 import { parseSpecModeMessage, type SpecModeMessage } from "@jagentdesk/protocol/spec-mode";
+import { TurnMetricsButton } from "@/components/turn-metrics";
+import type { AgentMetric } from "@jagentdesk/protocol/agent-types";
 import {
   View,
   Text,
@@ -715,6 +717,8 @@ interface AssistantTurnFooterProps {
   completedAt?: Date;
   durationMs?: number;
   onFork?: (target: AssistantForkTarget) => Promise<void> | void;
+  /** What the provider reported about the turn. Without any, the footer has no stats button. */
+  metrics?: AgentMetric[];
 }
 
 const assistantTurnFooterStylesheet = StyleSheet.create((theme) => ({
@@ -762,6 +766,7 @@ export const AssistantTurnFooter = memo(function AssistantTurnFooter({
   completedAt,
   durationMs,
   onFork,
+  metrics,
 }: AssistantTurnFooterProps) {
   const [hovered, setHovered] = useState(false);
   const [pressedReveal, setPressedReveal] = useState(false);
@@ -811,6 +816,8 @@ export const AssistantTurnFooter = memo(function AssistantTurnFooter({
   // it anyway; hide the control so a guest never sees a dead button). ADR-0019.
   const canFork = Boolean(onFork) && !isGuestShareMode();
 
+  const hasMetrics = metrics !== undefined && metrics.length > 0;
+
   return (
     <View style={assistantTurnFooterStylesheet.container}>
       <TurnCopyButton
@@ -818,6 +825,7 @@ export const AssistantTurnFooter = memo(function AssistantTurnFooter({
         containerStyle={assistantTurnFooterStylesheet.copyButton}
       />
       {canFork ? <AssistantForkMenu onFork={handleFork} /> : null}
+      {hasMetrics ? <TurnMetricsButton metrics={metrics} /> : null}
       {durationLabel ? (
         <Pressable
           onPress={handlePress}

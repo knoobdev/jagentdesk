@@ -1,3 +1,5 @@
+import type { AgentMetric } from "@jagentdesk/protocol/agent-types";
+import { continuesResponse } from "./turn-membership";
 import type { TurnTiming } from "@/timeline/turn-time";
 import type { StreamItem } from "@/types/stream";
 import { getAssistantBlockSpacing, getGapBetweenStreamItems } from "./spacing";
@@ -9,6 +11,7 @@ export interface TurnFooterHost {
   itemId: string;
   items: StreamItem[];
   timing?: TurnTiming;
+  turnMetrics?: AgentMetric[];
   startIndex: number;
 }
 
@@ -56,7 +59,7 @@ interface LayoutSegmentInput {
 }
 
 interface AssistantFooterSource {
-  item: Extract<StreamItem, { kind: "assistant_message" }>;
+  item: StreamItem;
   items: StreamItem[];
   index: number;
 }
@@ -67,10 +70,15 @@ function createTurnFooterHost(input: {
   index: number;
   timingByAssistantId: Map<string, TurnTiming>;
 }): TurnFooterHost {
+  const turnMetrics =
+    input.item.kind === "assistant_message" || input.item.kind === "tool_call"
+      ? input.item.turnMetrics
+      : undefined;
   return {
     itemId: input.item.id,
     items: input.items,
     timing: input.timingByAssistantId.get(input.item.id),
+    ...(turnMetrics ? { turnMetrics } : {}),
     startIndex: input.index,
   };
 }
@@ -82,6 +90,10 @@ function findLatestAssistantInTurn(input: {
   boundaryAboveItems?: StreamItem[] | null;
   boundaryAboveIndex?: number | null;
 }): AssistantFooterSource | null {
+  const last = input.items[input.startIndex];
+  const toolFallback =
+    last?.kind === "tool_call" ? { item: last, items: input.items, index: input.startIndex } : null;
+  let laterItem: StreamItem | null = null;
   let items = input.items;
   let index = input.startIndex;
   let canCrossBoundary = true;
@@ -93,12 +105,17 @@ function findLatestAssistantInTurn(input: {
       index = input.strategy.getNeighborIndex(index, "above")
     ) {
       const item = items[index];
-      if (!item || item.kind === "user_message") {
-        return null;
+      if (
+        !item ||
+        (laterItem && !continuesResponse(item, laterItem)) ||
+        (!laterItem && item.kind === "user_message")
+      ) {
+        return toolFallback;
       }
       if (item.kind === "assistant_message") {
         return { item, items, index };
       }
+      laterItem = item;
     }
 
     if (
@@ -107,7 +124,7 @@ function findLatestAssistantInTurn(input: {
       input.boundaryAboveIndex === null ||
       input.boundaryAboveIndex === undefined
     ) {
-      return null;
+      return toolFallback;
     }
 
     items = input.boundaryAboveItems;
@@ -155,7 +172,7 @@ function resolveCompletedFooter(input: {
   boundaryAboveItems: StreamItem[] | null;
   boundaryAboveIndex: number | null;
 }): TurnFooterHost | null {
-  if (input.item.kind === "user_message" || input.belowItem?.kind !== "user_message") {
+  if (!input.belowItem || continuesResponse(input.item, input.belowItem)) {
     return null;
   }
 
@@ -238,6 +255,7 @@ function areTurnFooterHostsEqual(
   return (
     left.itemId === right.itemId &&
     left.timing === right.timing &&
+    left.turnMetrics === right.turnMetrics &&
     left.startIndex === right.startIndex &&
     left.items === right.items
   );

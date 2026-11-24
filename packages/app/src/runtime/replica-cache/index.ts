@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   AgentSnapshotPayloadSchema,
   ProjectPlacementPayloadSchema,
+  AgentMetricSchema,
   AgentTimelineItemPayloadSchema,
   WorkspaceGitHubRuntimePayloadSchema,
 } from "@jagentdesk/protocol/messages";
@@ -82,7 +83,7 @@ const TimelinePositionSchema = z.strictObject({
 const TimelineItemBaseShape = {
   id: z.string(),
   timelineCursor: TimelinePositionSchema.optional(),
-  // COMPAT(active-turn-membership): absent on caches written before turn membership.
+  // COMPAT(active-turn-membership): added in v0.9.59, remove after 2027-05-25.
   turnId: z.string().optional(),
   timestamp: IsoDateSchema,
 };
@@ -107,6 +108,7 @@ const StoredTimelineItemSchema = z.discriminatedUnion("kind", [
     ...TimelineItemBaseShape,
     kind: z.literal("assistant_message"),
     messageId: z.string().optional(),
+    turnMetrics: z.array(AgentMetricSchema).optional(),
     text: z.string(),
     // Reject old caches containing display fragments; refetch the complete source text.
   }),
@@ -139,6 +141,7 @@ const StoredTimelineItemSchema = z.discriminatedUnion("kind", [
     ...TimelineItemBaseShape,
     kind: z.literal("tool_call"),
     provider: AgentProviderSchema,
+    turnMetrics: z.array(AgentMetricSchema).optional(),
     item: AgentTimelineItemPayloadSchema.refine((item) => item.type === "tool_call"),
   }),
 ]);
@@ -301,6 +304,7 @@ function deserializeTimeline(stored: StoredTimeline | null): CachedTimeline | nu
 function timelineBase(item: StreamItem) {
   return {
     id: item.id,
+    ...(item.turnId ? { turnId: item.turnId } : {}),
     ...(item.timelineCursor ? { timelineCursor: item.timelineCursor } : {}),
     timestamp: item.timestamp.toISOString(),
   };
@@ -341,6 +345,7 @@ function serializeTimelineItem(item: StreamItem): StoredTimelineItem | null {
         ...base,
         kind: item.kind,
         ...(item.messageId ? { messageId: item.messageId } : {}),
+        ...(item.turnMetrics ? { turnMetrics: item.turnMetrics } : {}),
         text: item.text,
       };
     case "thought":
@@ -373,6 +378,7 @@ function serializeTimelineItem(item: StreamItem): StoredTimelineItem | null {
         ...base,
         kind: item.kind,
         provider: item.payload.data.provider,
+        ...(item.turnMetrics ? { turnMetrics: item.turnMetrics } : {}),
         item: serializeAgentToolCall(item.payload.data),
       };
   }
@@ -383,6 +389,7 @@ function deserializeTimelineItem(
 ): StreamItem {
   const base = {
     id: item.id,
+    ...(item.turnId ? { turnId: item.turnId } : {}),
     ...(item.timelineCursor ? { timelineCursor: item.timelineCursor } : {}),
     timestamp: new Date(item.timestamp),
   };
@@ -400,6 +407,7 @@ function deserializeTimelineItem(
         ...base,
         kind: item.kind,
         ...(item.messageId ? { messageId: item.messageId } : {}),
+        ...(item.turnMetrics ? { turnMetrics: item.turnMetrics } : {}),
         text: item.text,
       };
     case "thought":
@@ -434,6 +442,7 @@ function deserializeTimelineItem(
       return {
         ...base,
         kind: item.kind,
+        ...(item.turnMetrics ? { turnMetrics: item.turnMetrics } : {}),
         payload: {
           source: "agent",
           data: {
@@ -473,6 +482,7 @@ function serializeAgent(agent: Agent): StoredAgent {
     ...(agent.runtimeInfo ? { runtimeInfo: agent.runtimeInfo } : {}),
     ...(agent.lastUsage ? { lastUsage: agent.lastUsage } : {}),
     ...(agent.usageTotals ? { usageTotals: agent.usageTotals } : {}),
+    ...(agent.sessionMetrics ? { sessionMetrics: agent.sessionMetrics } : {}),
     ...(agent.lastError ? { lastError: agent.lastError } : {}),
     title: agent.title,
     labels: agent.labels,

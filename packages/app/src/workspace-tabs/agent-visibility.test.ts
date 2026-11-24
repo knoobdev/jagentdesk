@@ -93,7 +93,6 @@ describe("workspace agent visibility", () => {
       terminalsHydrated: true,
       knownTerminalIds: [],
       standaloneTerminalIds: [],
-      hasActivePendingTerminalCreate: false,
       hasActivePendingDraftCreate: false,
     });
     restored.getState().reconcileTabs("srv:ws-b", beforeHydration);
@@ -107,7 +106,6 @@ describe("workspace agent visibility", () => {
           terminalsHydrated: true,
           knownTerminalIds: [],
           standaloneTerminalIds: [],
-          hasActivePendingTerminalCreate: false,
           hasActivePendingDraftCreate: false,
         }),
       );

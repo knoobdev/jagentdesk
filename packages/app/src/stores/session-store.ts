@@ -32,6 +32,7 @@ import type {
   AgentCapabilityFlags,
   AgentUsage,
   AgentUsageTotals,
+  AgentMetric,
   AgentPersistenceHandle,
 } from "@jagentdesk/protocol/agent-types";
 import type {
@@ -135,6 +136,8 @@ export interface Agent {
   runtimeInfo?: AgentRuntimeInfo;
   lastUsage?: AgentUsage;
   usageTotals?: AgentUsageTotals;
+  /** What the provider reports about the session, as label and value rows. */
+  sessionMetrics?: AgentMetric[];
   lastError?: string | null;
   title: string | null;
   cwd: string;

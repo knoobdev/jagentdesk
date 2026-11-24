@@ -125,6 +125,7 @@ function createManagedAgent(overrides: ManagedAgentOverrides = {}): ManagedAgent
     historyPrimed: overrides.historyPrimed ?? true,
     lastUserMessageAt: overrides.lastUserMessageAt ?? core.now,
     lastUsage: overrides.lastUsage,
+    sessionMetrics: overrides.sessionMetrics,
     lastError: overrides.lastError,
   };
 }
@@ -528,5 +529,19 @@ describe("AgentStorage", () => {
     const afterReload = new AgentStorage(storagePath, logger);
     const after = await afterReload.list();
     expect(after.some((r) => r.id === agentId)).toBe(false);
+  });
+  test("session metrics survive a daemon restart and follow the latest snapshot", async () => {
+    const sessionMetrics = [
+      { label: "Cost", value: "$1.23" },
+      { label: "Cache", value: "82%", tone: "ok" as const },
+    ];
+    await storage.applySnapshot(createManagedAgent({ id: "agent-metrics", sessionMetrics }));
+
+    const reloaded = new AgentStorage(storagePath, createTestLogger());
+    expect((await reloaded.get("agent-metrics"))?.sessionMetrics).toEqual(sessionMetrics);
+
+    await reloaded.applySnapshot(createManagedAgent({ id: "agent-metrics" }));
+    const cleared = new AgentStorage(storagePath, createTestLogger());
+    expect(await cleared.get("agent-metrics")).not.toHaveProperty("sessionMetrics");
   });
 });

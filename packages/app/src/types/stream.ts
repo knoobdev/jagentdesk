@@ -1,7 +1,8 @@
 import type { AgentMessage } from "@jagentdesk/protocol/agent-message";
-import type { AgentProvider, ToolCallDetail } from "@jagentdesk/protocol/agent-types";
+import type { AgentMetric, AgentProvider, ToolCallDetail } from "@jagentdesk/protocol/agent-types";
 import type { AgentAttachment, AgentStreamEventPayload } from "@jagentdesk/protocol/messages";
 import type { AttachmentMetadata } from "@/attachments/types";
+import { stampCompletedTurnMetrics } from "@/timeline/turn-metrics";
 import { extractTaskEntriesFromToolCall } from "../utils/tool-call-parsers";
 import { splitMarkdownBlocks } from "@/utils/split-markdown-blocks";
 
@@ -89,6 +90,7 @@ export interface UserMessageItem {
   id: string;
   clientMessageId?: string;
   messageId?: string;
+  turnId?: string;
   timelineCursor?: TimelinePosition;
   text: string;
   timestamp: Date;
@@ -100,6 +102,7 @@ export interface UserMessageInput {
   id?: string;
   clientMessageId?: string;
   messageId?: string;
+  turnId?: string;
   timelineCursor?: TimelinePosition;
   text: string;
   timestamp: Date;
@@ -117,6 +120,7 @@ export function createUserMessage(input: UserMessageInput): UserMessageItem {
     id,
     ...(input.clientMessageId ? { clientMessageId: input.clientMessageId } : {}),
     ...(input.messageId ? { messageId: input.messageId } : {}),
+    ...(input.turnId ? { turnId: input.turnId } : {}),
     ...(input.timelineCursor ? { timelineCursor: input.timelineCursor } : {}),
     text: input.text,
     timestamp: input.timestamp,
@@ -677,11 +681,13 @@ export interface AssistantMessageItem {
   kind: "assistant_message";
   id: string;
   messageId?: string;
+  turnId?: string;
   timelineCursor?: TimelinePosition;
   text: string;
   timestamp: Date;
   blockGroupId?: string;
   blockIndex?: number;
+  turnMetrics?: AgentMetric[];
 }
 
 export interface TimelinePosition {
@@ -694,6 +700,7 @@ export type ThoughtStatus = "loading" | "ready";
 export interface ThoughtItem {
   kind: "thought";
   id: string;
+  turnId?: string;
   timelineCursor?: TimelinePosition;
   text: string;
   timestamp: Date;
@@ -730,9 +737,12 @@ export type ToolCallPayload =
 export interface ToolCallItem {
   kind: "tool_call";
   id: string;
+  turnId?: string;
   timelineCursor?: TimelinePosition;
   timestamp: Date;
   payload: ToolCallPayload;
+  /** Set when this call carries its turn's footer. */
+  turnMetrics?: AgentMetric[];
 }
 
 export type AgentToolCallItem = ToolCallItem & {
@@ -748,6 +758,7 @@ type ActivityLogType = "system" | "info" | "success" | "error";
 export interface ActivityLogItem {
   kind: "activity_log";
   id: string;
+  turnId?: string;
   timelineCursor?: TimelinePosition;
   timestamp: Date;
   activityType: ActivityLogType;
@@ -758,6 +769,7 @@ export interface ActivityLogItem {
 export interface CompactionItem {
   kind: "compaction";
   id: string;
+  turnId?: string;
   timelineCursor?: TimelinePosition;
   timestamp: Date;
   status: "loading" | "completed";
@@ -785,6 +797,7 @@ export function todoEntryStatus(entry: TodoEntry): TodoEntryStatus {
 export interface TodoListItem {
   kind: "todo_list";
   id: string;
+  turnId?: string;
   timelineCursor?: TimelinePosition;
   timestamp: Date;
   provider: AgentProvider;
@@ -796,6 +809,7 @@ export type StreamUpdateSource = "live" | "canonical";
 interface StreamUpdateOptions {
   source?: StreamUpdateSource;
   reservedItemIds?: ReadonlySet<string>;
+  turnId?: string;
   timelineCursor?: TimelinePosition;
 }
 
@@ -1420,8 +1434,8 @@ export function reduceStreamUpdate(
 ): StreamItem[] {
   const source = options?.source ?? "live";
   switch (event.type) {
-    case "timeline":
-      return reduceTimelineEvent(
+    case "timeline": {
+      const updated = reduceTimelineEvent(
         state,
         event,
         timestamp,
@@ -1429,9 +1443,17 @@ export function reduceStreamUpdate(
         options?.reservedItemIds,
         options?.timelineCursor,
       );
+      if (!event.turnId) return updated;
+      return updated.map((item, index) =>
+        item === state[index] || item.turnId === event.turnId
+          ? item
+          : Object.assign({}, item, { turnId: event.turnId }),
+      );
+    }
+    case "turn_completed":
+      return stampCompletedTurnMetrics(finalizeActiveThoughts(state), event.metrics, event.turnId);
     case "thread_started":
     case "turn_started":
-    case "turn_completed":
     case "turn_failed":
     case "turn_canceled":
     case "permission_requested":
@@ -1450,6 +1472,7 @@ export function hydrateStreamState(
   events: Array<{
     event: AgentStreamEventPayload;
     timestamp: Date;
+    turnId?: string;
     timelineCursor?: TimelinePosition;
   }>,
   options?: { source?: StreamUpdateSource; reservedItemIds?: ReadonlySet<string> },
@@ -1718,6 +1741,7 @@ function applyCanonicalUserMessageEvent(params: {
   head: StreamItem[];
   event: AgentStreamEventPayload;
   timestamp: Date;
+  turnId?: string;
   timelineCursor?: TimelinePosition;
   unmatchedInsert?: "tail" | "head";
 }): ApplyStreamEventResult | null {
@@ -1786,6 +1810,7 @@ export function applyStreamEvent(params: {
   event: AgentStreamEventPayload;
   timestamp: Date;
   source?: StreamUpdateSource;
+  turnId?: string;
   timelineCursor?: TimelinePosition;
   unmatchedUserMessageInsert?: "tail" | "head";
 }): ApplyStreamEventResult {

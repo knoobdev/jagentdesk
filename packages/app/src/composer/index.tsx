@@ -111,6 +111,7 @@ import { ComposerKeyboardScopeProvider } from "@/composer/keyboard-scope";
 import { useAppSettings } from "@/hooks/use-settings";
 import { isWeb, isNative } from "@/constants/platform";
 import type { ActiveTurnBehavior, ForgeSearchItem } from "@jagentdesk/protocol/messages";
+import type { AgentMetric } from "@jagentdesk/protocol/agent-types";
 import type {
   AttachmentMetadata,
   ComposerAttachment,
@@ -244,6 +245,12 @@ function buildRealtimeVoiceButtonStyle(
   );
 }
 
+const EMPTY_METRICS: AgentMetric[] = [];
+
+function readSessionMetrics(agent: { sessionMetrics?: AgentMetric[] } | null): AgentMetric[] {
+  return agent?.sessionMetrics ?? EMPTY_METRICS;
+}
+
 function buildAgentStateSelector(serverId: string, agentId: string) {
   return (state: ReturnType<typeof useSessionStore.getState>) => {
     const agent = state.sessions[serverId]?.agents?.get(agentId) ?? null;
@@ -252,6 +259,7 @@ function buildAgentStateSelector(serverId: string, agentId: string) {
       contextWindowMaxTokens: agent?.lastUsage?.contextWindowMaxTokens ?? null,
       contextWindowUsedTokens: agent?.lastUsage?.contextWindowUsedTokens ?? null,
       totalCostUsd: agent?.lastUsage?.totalCostUsd ?? null,
+      sessionMetrics: readSessionMetrics(agent),
       model: agent?.model ?? null,
       provider: agent?.provider ?? null,
     };
@@ -267,9 +275,10 @@ function renderContextWindowMeter(
   provider: string | null,
   pending: boolean,
   glyphSize: number,
+  sessionMetrics: AgentMetric[],
 ): ReactElement | null {
   const hasData = contextWindowMaxTokens !== null && contextWindowUsedTokens !== null;
-  if (!hasData && !pending) {
+  if (!hasData && !pending && sessionMetrics.length === 0) {
     return null;
   }
   return (
@@ -282,6 +291,7 @@ function renderContextWindowMeter(
       provider={provider}
       pending={pending}
       glyphSize={glyphSize}
+      sessionMetrics={sessionMetrics}
     />
   );
 }
@@ -1935,6 +1945,7 @@ export function Composer({
         agentState.provider,
         contextWindowPending,
         contextWindowMeterGlyphSize,
+        agentState.sessionMetrics,
       ),
     [
       contextWindowMaxTokens,
@@ -1944,6 +1955,7 @@ export function Composer({
       agentState.provider,
       contextWindowPending,
       contextWindowMeterGlyphSize,
+      agentState.sessionMetrics,
     ],
   );
   const beforeVoiceContent = useMemo(

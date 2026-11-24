@@ -2,6 +2,7 @@ import type { ProviderJAgentDeskToolsPolicy } from "@jagentdesk/protocol/provide
 import { isJAgentDeskToolPolicyEnabled } from "./jagentdesk-tool-policy.js";
 import type { AttachedAgentTool, PluginAgentToolsRuntime } from "../plugins/agent-tools.js";
 import type { AgentToolResult } from "@jagentdesk/plugin/server";
+import { TimelineProjection } from "./timeline-projection.js";
 import type { PluginLifecycle } from "../plugins/lifecycle/index.js";
 import { describeHookAgent, publishAgentStream } from "../plugins/lifecycle/index.js";
 import type { PluginSessionOpenRequest } from "@jagentdesk/plugin/server";
@@ -55,6 +56,7 @@ import {
   type SteerResult,
   type AgentStreamEvent,
   type AgentTimelineItem,
+  type AgentMetric,
   type AgentUsage,
   type AgentRuntimeInfo,
   type ImportedTimelineEntry,
@@ -65,6 +67,7 @@ import { buildArchivedAgentRecord, type ArchivedStoredAgentRecord } from "./agen
 import { buildAgentForkContextAttachment } from "./activity-curator.js";
 import type { AgentAttachment } from "@jagentdesk/protocol/messages";
 import type { AgentUsageTotals } from "@jagentdesk/protocol/agent-types";
+import { sanitizeAgentMetrics, withModelMetric } from "./agent-metrics.js";
 import type { StoredAgentRecord, AgentStorage } from "./agent-storage.js";
 import type { AgentOwner } from "./agent-owner.js";
 import {
@@ -511,6 +514,8 @@ interface ManagedAgentBase {
    * persisted; purely per-turn bookkeeping.
    */
   currentTurnUsage?: AgentUsage;
+  /** Provider-owned session metrics, replaced whole on every provider update. */
+  sessionMetrics?: AgentMetric[];
   lastError?: string;
   attention: AttentionState;
   foregroundTurnWaiters: Set<ForegroundTurnWaiter>;
@@ -588,6 +593,41 @@ type ActiveManagedAgent =
 
 type LiveManagedAgent = ActiveManagedAgent;
 type AgentLabelPatch = Record<string, string | null>;
+
+/**
+ * What a provider replay contributes: timeline rows, the metrics of the turn that
+ * wrote the rows before them, and the session's metrics as they stood at that point.
+ */
+type ProviderHistoryEntry =
+  | { type: "row"; event: Extract<AgentStreamEvent, { type: "timeline" }> }
+  | { type: "turn_metrics"; metrics: AgentMetric[] }
+  | { type: "session_metrics"; metrics: AgentMetric[] };
+
+interface ReplayedTimelineRow {
+  event: Extract<AgentStreamEvent, { type: "timeline" }>;
+  row: AgentTimelineRow;
+}
+
+function readSessionMetrics(agent?: { sessionMetrics?: AgentMetric[] }): AgentMetric[] | undefined {
+  return agent?.sessionMetrics;
+}
+
+function providerHistoryEntries(event: AgentStreamEvent): ProviderHistoryEntry[] {
+  if (event.type === "timeline") {
+    return projectAgentMessages(event.item).map((item) => ({
+      type: "row",
+      event: { ...event, item },
+    }));
+  }
+  if (event.type === "turn_completed") {
+    const metrics = sanitizeAgentMetrics(event.metrics);
+    return metrics.length > 0 ? [{ type: "turn_metrics", metrics }] : [];
+  }
+  if (event.type === "session_metrics_updated") {
+    return [{ type: "session_metrics", metrics: sanitizeAgentMetrics(event.metrics) }];
+  }
+  return [];
+}
 
 function attachManagedTurnIdentity(
   agent: ActiveManagedAgent,
@@ -778,13 +818,22 @@ function buildExplicitTimelineSeedForRegister(
 
 function buildImportedTimelineRows(entries: readonly ImportedTimelineEntry[]): AgentTimelineRow[] {
   const rows: AgentTimelineRow[] = [];
+  // Finds the footer row a turn's stats belong on, by the same rule live turns use.
+  const projection = new TimelineProjection();
   for (const entry of entries) {
     for (const item of projectAgentMessages(entry.item)) {
-      rows.push({
+      const row: AgentTimelineRow = {
         seq: rows.length + 1,
         timestamp: entry.timestamp ?? new Date().toISOString(),
         item: limitAgentTimelineItemContent(item),
-      });
+      };
+      rows.push(row);
+      projection.append(row);
+    }
+    if (entry.turnMetrics) {
+      const footer = projection.stampTurnMetrics(entry.turnMetrics);
+      if (footer)
+        rows[footer.seq - 1] = { ...rows[footer.seq - 1], turnMetrics: entry.turnMetrics };
     }
   }
   return rows;
@@ -1656,6 +1705,7 @@ export class AgentManager {
     await this.requireExternalMcpSupport(session, providerLaunchConfig, launchContext);
     return this.registerSession(session, storedConfig, resolvedAgentId, {
       ...options,
+      sessionMetrics: readSessionMetrics(record),
       launchEnv,
       workspaceId,
       persistence:
@@ -1739,6 +1789,7 @@ export class AgentManager {
         workspaceId: input.workspaceId,
         timelineRows,
         timelineNextSeq: timelineRows.length + 1,
+        sessionMetrics: imported.sessionMetrics,
         persistence: imported.persistence,
         historyPrimed: true,
         initialTitle,
@@ -1788,6 +1839,7 @@ export class AgentManager {
     const preservedHistoryPrimed = existing.historyPrimed;
     const preservedLastUsage = existing.lastUsage;
     const preservedUsageTotals = existing.usageTotals;
+    const preservedSessionMetrics = existing.sessionMetrics;
     const preservedLastError = existing.lastError;
     const preservedAttention = existing.attention;
     const handle = existing.persistence;
@@ -1857,6 +1909,7 @@ export class AgentManager {
         historyPrimed: rehydrateFromDisk ? false : preservedHistoryPrimed,
         lastUsage: preservedLastUsage,
         usageTotals: preservedUsageTotals,
+        sessionMetrics: preservedSessionMetrics,
         lastError: preservedLastError,
         attention: preservedAttention,
       });
@@ -2164,6 +2217,7 @@ export class AgentManager {
         lastUserMessageAt: record.lastUserMessageAt ? new Date(record.lastUserMessageAt) : null,
         lastUsage: undefined,
         usageTotals: record.usageTotals,
+        sessionMetrics: record.sessionMetrics,
         lastError: record.lastError ?? undefined,
         attention: { requiresAttention: false },
         internal: record.internal,
@@ -4088,6 +4142,7 @@ export class AgentManager {
       historyPrimed?: boolean;
       lastUsage?: AgentUsage;
       usageTotals?: AgentUsageTotals;
+      sessionMetrics?: AgentMetric[];
       lastError?: string;
       attention?: AttentionState;
       initialTitle?: string | null;
@@ -4277,6 +4332,7 @@ export class AgentManager {
           historyPrimed?: boolean;
           lastUsage?: AgentUsage;
           usageTotals?: AgentUsageTotals;
+          sessionMetrics?: AgentMetric[];
           lastError?: string;
           attention?: AttentionState;
           persistence?: AgentPersistenceHandle;
@@ -4320,6 +4376,7 @@ export class AgentManager {
       lastUserMessageAt: options?.lastUserMessageAt ?? null,
       lastUsage: options?.lastUsage,
       usageTotals: options?.usageTotals,
+      sessionMetrics: readSessionMetrics(options),
       lastError: options?.lastError,
       attention: resolveInitialAttention(options?.attention),
       internal: config.internal ?? false,
@@ -4671,16 +4728,14 @@ export class AgentManager {
     broadcast: boolean,
     broadcastTimeline: boolean,
   ): Promise<void> {
-    const historyEvents: Extract<AgentStreamEvent, { type: "timeline" }>[] = [];
+    const historyEntries: ProviderHistoryEntry[] = [];
     const providerSubagentEvents: Extract<AgentStreamEvent, { type: "provider_subagent" }>[] = [];
     for await (const rawEvent of agent.session.streamHistory()) {
       const event = limitAgentStreamEventContent(rawEvent);
-      if (event.type === "timeline") {
-        for (const item of projectAgentMessages(event.item)) {
-          historyEvents.push({ ...event, item });
-        }
-      } else if (event.type === "provider_subagent") {
+      if (event.type === "provider_subagent") {
         providerSubagentEvents.push(event);
+      } else {
+        historyEntries.push(...providerHistoryEntries(event));
       }
     }
 
@@ -4701,22 +4756,43 @@ export class AgentManager {
         this.dispatch({ type: "provider_subagent", event: update });
       }
     }
-    for (const event of historyEvents) {
-      const row = this.recordTimeline(
-        agent.id,
-        event.item,
-        event.timestamp ? { timestamp: event.timestamp } : undefined,
-      );
-      if (broadcastTimeline) {
-        this.dispatchStream(agent.id, event, {
-          seq: row.seq,
+    for (const entry of historyEntries) {
+      const replayed = this.replayProviderHistoryEntry(agent, entry);
+      if (replayed && broadcastTimeline) {
+        this.dispatchStream(agent.id, replayed.event, {
+          seq: replayed.row.seq,
           epoch: this.timelineStore.getEpoch(agent.id),
-          timestamp: row.timestamp,
+          timestamp: replayed.row.timestamp,
         });
       }
     }
     this.touchUpdatedAt(agent);
     this.emitState(agent);
+  }
+
+  /**
+   * Returns the row a replayed timeline event wrote. Metrics write no row: turn
+   * metrics land on one already written, session metrics on the agent.
+   */
+  private replayProviderHistoryEntry(
+    agent: ActiveManagedAgent,
+    entry: ProviderHistoryEntry,
+  ): ReplayedTimelineRow | null {
+    if (entry.type === "turn_metrics") {
+      this.stampTurnMetrics(agent.id, entry.metrics);
+      return null;
+    }
+    if (entry.type === "session_metrics") {
+      agent.sessionMetrics = entry.metrics;
+      return null;
+    }
+    const { event } = entry;
+    const row = this.recordTimeline(
+      agent.id,
+      event.item,
+      event.timestamp ? { timestamp: event.timestamp } : undefined,
+    );
+    return { event, row };
   }
 
   private async primeTimelineFromLegacyProviderHistory(
@@ -4727,7 +4803,7 @@ export class AgentManager {
       | Iterable<AgentStreamEvent> = agent.session.streamHistory(),
   ): Promise<void> {
     const deferredBroadcast = typeof broadcast === "function";
-    const historyEvents: Extract<AgentStreamEvent, { type: "timeline" }>[] = [];
+    const historyEntries: ProviderHistoryEntry[] = [];
     const historySubagentEvents: Extract<AgentStreamEvent, { type: "provider_subagent" }>[] = [];
     agent.historyPrimed = false;
     try {
@@ -4740,12 +4816,7 @@ export class AgentManager {
           historySubagentEvents.push(event);
           continue;
         }
-        if (event.type !== "timeline") {
-          continue;
-        }
-        for (const item of projectAgentMessages(event.item)) {
-          historyEvents.push({ ...event, item });
-        }
+        historyEntries.push(...providerHistoryEntries(event));
       }
     } catch (error) {
       this.logger.warn({ err: error, agentId: agent.id }, "Failed to hydrate provider history");
@@ -4756,10 +4827,7 @@ export class AgentManager {
     // Keeping them would leave getTimelineRows reading one copy per hydration.
     await this.deleteCommittedTimeline(agent.id);
 
-    const timelineEvents: Array<{
-      event: Extract<AgentStreamEvent, { type: "timeline" }>;
-      row: AgentTimelineRow;
-    }> = [];
+    const timelineEvents: ReplayedTimelineRow[] = [];
     const providerSubagentEvents: AgentManagerEvent[] = [];
     for (const event of historySubagentEvents) {
       const update = this.providerSubagents.apply(agent.id, event.provider, event.event);
@@ -4770,23 +4838,23 @@ export class AgentManager {
         this.dispatch(managerEvent);
       }
     }
-    for (const event of historyEvents) {
-      const row = this.recordTimeline(
-        agent.id,
-        event.item,
-        event.timestamp ? { timestamp: event.timestamp } : undefined,
-      );
+    for (const entry of historyEntries) {
+      const replayed = this.replayProviderHistoryEntry(agent, entry);
+      if (!replayed) continue;
       if (deferredBroadcast) {
-        timelineEvents.push({ event, row });
+        timelineEvents.push(replayed);
       } else if (broadcast) {
-        this.dispatchStream(agent.id, event, {
-          seq: row.seq,
+        this.dispatchStream(agent.id, replayed.event, {
+          seq: replayed.row.seq,
           epoch: this.timelineStore.getEpoch(agent.id),
-          timestamp: row.timestamp,
+          timestamp: replayed.row.timestamp,
         });
       }
     }
     agent.historyPrimed = true;
+    if (historyEntries.some((entry) => entry.type === "session_metrics")) {
+      this.emitState(agent);
+    }
 
     if (typeof broadcast !== "function" || !broadcast()) {
       return;
@@ -4865,6 +4933,8 @@ export class AgentManager {
         options?.fromHistory === true,
       );
     }
+
+    event = this.settleTurnMetrics({ agent, event, options, terminalDisposition });
 
     const flags: StreamEventFlags = { shouldDispatchEvent: true, shouldNotifyWaiters: true };
 
@@ -4979,6 +5049,12 @@ export class AgentManager {
         // Remember this turn's running usage so it can be billed even if the
         // turn ends via cancel/fail (no turn_completed). Reset on turn start.
         agent.currentTurnUsage = event.usage;
+        this.emitState(agent);
+        return undefined;
+      case "session_metrics_updated":
+        // Clients read these from the agent snapshot; the event itself is not on the wire.
+        agent.sessionMetrics = sanitizeAgentMetrics(event.metrics);
+        flags.shouldDispatchEvent = false;
         this.emitState(agent);
         return undefined;
       case "mode_changed":
@@ -5141,6 +5217,36 @@ export class AgentManager {
       model: agent.config?.model ?? agent.runtimeInfo?.model ?? agent.provider,
       usage,
     });
+  }
+
+  /**
+   * Decides what a completed turn shows and records it on the turn's footer row, so
+   * the live event and a later timeline fetch agree.
+   */
+  private settleTurnMetrics(params: {
+    agent: ActiveManagedAgent;
+    event: AgentStreamEvent;
+    options: HandleStreamEventOptions | undefined;
+    terminalDisposition: ActiveTurnTerminalDisposition;
+  }): AgentStreamEvent {
+    if (params.event.type !== "turn_completed") return params.event;
+    const { agent } = params;
+    const { metrics: reported, ...event } = params.event;
+    // A replayed turn may have run on another model than the agent has now.
+    const model = params.options?.fromHistory
+      ? null
+      : (agent.runtimeInfo?.model ?? agent.config.model);
+    const metrics = withModelMetric(sanitizeAgentMetrics(reported), model);
+    if (metrics.length === 0) return event;
+    if (params.terminalDisposition !== "stale") {
+      this.stampTurnMetrics(agent.id, metrics, event.turnId);
+    }
+    return { ...event, metrics };
+  }
+
+  private stampTurnMetrics(agentId: string, metrics: AgentMetric[], turnId?: string): void {
+    const row = this.timelineStore.stampTurnMetrics(agentId, metrics, { turnId });
+    if (row) this.enqueueDurableTimelineUpdate(agentId, row);
   }
 
   private onStreamTurnCompleted(params: {
