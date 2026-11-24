@@ -7,6 +7,23 @@ type InboundOperation = SessionInboundMessage["type"];
 type OutboundOperation = SessionOutboundMessage["type"];
 
 const INBOUND_PERMISSION = {
+  "bots.list.request": "daemon.read",
+  "bots.chat.history.request": "daemon.read",
+  "bots.items.list.request": "daemon.read",
+  "bots.rooms.list.request": "daemon.read",
+  "bots.schedules.list.request": "daemon.read",
+  "bots.create.request": "daemon.manage",
+  "bots.update.request": "daemon.manage",
+  "bots.delete.request": "daemon.manage",
+  "bots.pause.request": "daemon.manage",
+  "bots.chat.send.request": "daemon.manage",
+  "bots.items.answer.request": "daemon.manage",
+  "bots.items.cancel.request": "daemon.manage",
+  "bots.rooms.save.request": "daemon.manage",
+  "bots.rooms.delete.request": "daemon.manage",
+  "bots.rooms.send.request": "daemon.manage",
+  "bots.schedules.save.request": "daemon.manage",
+  "bots.schedules.delete.request": "daemon.manage",
   // Argo CD (spec 30.5): reads need daemon.read, writes daemon.manage.
   "argocd.instances.list.request": "daemon.read",
   "argocd.apps.list.request": "daemon.read",
@@ -682,6 +699,27 @@ const INBOUND_PERMISSION = {
 } as const satisfies Record<InboundOperation, PermissionRequirement>;
 
 const OUTBOUND_PERMISSION = {
+  "bots.list.response": "daemon.read",
+  "bots.chat.history.response": "daemon.read",
+  "bots.items.list.response": "daemon.read",
+  "bots.rooms.list.response": "daemon.read",
+  "bots.schedules.list.response": "daemon.read",
+  "bots.create.response": "daemon.manage",
+  "bots.update.response": "daemon.manage",
+  "bots.delete.response": "daemon.manage",
+  "bots.pause.response": "daemon.manage",
+  "bots.chat.send.response": "daemon.manage",
+  "bots.items.answer.response": "daemon.manage",
+  "bots.items.cancel.response": "daemon.manage",
+  "bots.rooms.save.response": "daemon.manage",
+  "bots.rooms.delete.response": "daemon.manage",
+  "bots.rooms.send.response": "daemon.manage",
+  "bots.schedules.save.response": "daemon.manage",
+  "bots.schedules.delete.response": "daemon.manage",
+  "bots.changed": "daemon.read",
+  "bots.item.changed": "daemon.read",
+  "bots.chat.message": "daemon.read",
+  "bots.room.changed": "daemon.read",
   // Argo CD (spec 30.5): reads need daemon.read, writes daemon.manage.
   "argocd.instances.list.response": "daemon.read",
   "argocd.apps.list.response": "daemon.read",

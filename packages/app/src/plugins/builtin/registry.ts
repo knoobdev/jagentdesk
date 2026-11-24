@@ -15,6 +15,7 @@ export function builtinPluginEnabled(
 }
 
 const ROUTE_PLUGINS: Readonly<Record<string, BuiltinPluginId>> = {
+  bots: "bots",
   docker: "docker",
   clusters: "clusters",
   cluster: "clusters",
@@ -31,6 +32,6 @@ const ROUTE_PLUGINS: Readonly<Record<string, BuiltinPluginId>> = {
   insights: "insights",
 };
 export function builtinPluginForRoute(pathname: string): BuiltinPluginId | null {
-  const hostLeaf = /^\/h\/[^/]+\/([^/]+)/.exec(pathname)?.[1];
+  const hostLeaf = /^\/h\/[^/]+\/([^/?]+)/.exec(pathname)?.[1];
   return hostLeaf ? (ROUTE_PLUGINS[hostLeaf] ?? null) : null;
 }

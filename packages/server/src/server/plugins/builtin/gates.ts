@@ -1,6 +1,7 @@
 import type { BuiltinPluginId } from "@jagentdesk/protocol/builtin-plugins";
 
 const RPC_PREFIXES: readonly [BuiltinPluginId, readonly string[]][] = [
+  ["bots", ["bots."]],
   ["docker", ["docker/", "docker."]],
   ["clusters", ["cluster/", "cluster."]],
   ["databases", ["database/", "database."]],
@@ -30,6 +31,7 @@ export function builtinPluginForRpc(type: string): BuiltinPluginId | null {
 }
 
 const TOOL_PREFIXES: readonly [BuiltinPluginId, readonly string[]][] = [
+  ["bots", ["bot_"]],
   ["docker", ["docker_"]],
   ["clusters", ["kubectl_", "cluster_"]],
   ["databases", ["sql_", "database_"]],

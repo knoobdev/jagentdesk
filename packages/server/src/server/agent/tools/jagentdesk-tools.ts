@@ -198,6 +198,7 @@ export interface JAgentDeskToolHostDependencies {
    * Used for cwd/mode inheritance when agents spawn child agents.
    */
   callerAgentId?: string;
+  callerAgentLabels?: Record<string, string>;
   /**
    * Optional resolver for session-bound speak handlers.
    * Used by hidden voice agents to narrate through daemon-managed TTS.
@@ -220,6 +221,7 @@ export interface JAgentDeskToolHostDependencies {
   sideloadAgentTools?: (callerAgentId: string | null) => SideloadAgentTool[];
   // Jira (spec 29.4): jira_* tools; reads auto-run, writes raise the permission card.
   jiraAgentTools?: (callerAgentId: string | null) => JiraAgentTool[];
+  botAgentTools?: (callerAgentId: string | null) => JAgentDeskToolDefinition[];
   // Figma (spec 32.7): figma_* tools; reads auto-run, writes raise the permission card.
   figmaAgentTools?: (callerAgentId: string | null) => FigmaAgentTool[];
   // Daemon-wide Forge Hub service (spec 19 / ADR-0015). Lets ANY agent read and
@@ -3393,7 +3395,10 @@ function registerSkillsTools(params: {
 }
 
 function validateSendPromptCaller(
-  callerOrchestrationContext: OrchestrationAgentContext | null,
+  callerOrchestrationContext: Pick<
+    OrchestrationAgentContext,
+    "role" | "briefId" | "workspaceId"
+  > | null,
   orchestrationRuntime: OrchestrationRuntime | null | undefined,
   agentId: string,
 ): void {
@@ -3426,7 +3431,7 @@ function registerOrchestrationTools(params: {
   ) => void;
   orchestrationRuntime: OrchestrationRuntime;
   callerAgentId: string;
-  callerOrchestrationContext: OrchestrationAgentContext;
+  callerOrchestrationContext: Pick<OrchestrationAgentContext, "role" | "briefId" | "workspaceId">;
   callerContext: {
     lockedCwd?: string;
     allowCustomCwd?: boolean;
@@ -3619,8 +3624,17 @@ function createToolCatalog(
   } = options;
   const childLogger = logger.child({ module: "agent", component: "jagentdesk-tool-catalog" });
   const callerContext = callerAgentId ? (resolveCallerContext?.(callerAgentId) ?? null) : null;
+  const openingLabels = options.callerAgentLabels;
+  const openingRole = openingLabels?.["jagentdesk.orchestration.role"];
   const callerOrchestrationContext = callerAgentId
-    ? (orchestrationRuntime?.getAgentContext(callerAgentId) ?? null)
+    ? (orchestrationRuntime?.getAgentContext(callerAgentId) ??
+      (openingRole
+        ? {
+            role: openingRole,
+            briefId: openingLabels!["jagentdesk.orchestration.brief-id"],
+            workspaceId: openingLabels!["jagentdesk.orchestration.workspace-id"],
+          }
+        : null))
     : null;
 
   const parseToolInput = async (
@@ -3653,6 +3667,27 @@ function createToolCatalog(
     handler: (input: any, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>,
   ) => {
     builtinNames.add(name);
+    const botId =
+      openingLabels?.["jagentdesk.bot.id"] ??
+      (callerAgentId
+        ? agentManager.getAgent(callerAgentId)?.labels["jagentdesk.bot.id"]
+        : undefined);
+    if (
+      botId &&
+      [
+        "set_agent_mode",
+        "update_agent",
+        "respond_to_permission",
+        "orchestration.bootstrap_lead",
+        "create_schedule",
+        "pause_schedule",
+        "resume_schedule",
+        "delete_schedule",
+        "update_schedule",
+        "run_schedule_once",
+      ].includes(name)
+    )
+      return;
     const plugin = builtinPluginForTool(name);
     if (plugin && options.builtinPlugins && !options.builtinPlugins.has(plugin)) return;
     if (!isJAgentDeskToolEnabled(options.jagentdeskToolPolicy, name)) return;
@@ -4305,6 +4340,14 @@ function createToolCatalog(
   }
   if (options.sideloadAgentTools) {
     registerSshAgentTools(registerTool, options.sideloadAgentTools(callerAgentId ?? null));
+  }
+  if (options.botAgentTools) {
+    for (const tool of options.botAgentTools(callerAgentId ?? null))
+      registerTool(
+        tool.name,
+        { title: tool.title, description: tool.description, inputSchema: tool.inputSchema },
+        tool.handler,
+      );
   }
   if (options.jiraAgentTools) {
     for (const tool of options.jiraAgentTools(callerAgentId ?? null)) {
@@ -5129,6 +5172,18 @@ function createToolCatalog(
       background = Boolean(callerAgentId),
       notifyOnFinish = Boolean(callerAgentId),
     }) => {
+      const callerBotId = callerAgentId
+        ? agentManager.getAgent(callerAgentId)?.labels["jagentdesk.bot.id"]
+        : undefined;
+      if (callerBotId && sessionMode)
+        throw new Error("Only the owner can change bot execution modes");
+      if (
+        callerBotId &&
+        agentManager.getAgent(agentId)?.labels["jagentdesk.bot.id"] !== callerBotId
+      )
+        throw new Error(
+          "Use bot_handoff to contact another bot; bot prompts stay within their own ORC tree",
+        );
       validateSendPromptCaller(callerOrchestrationContext, orchestrationRuntime, agentId);
       function armFinishNotification(): boolean {
         if (!callerAgentId || !notifyOnFinish) {

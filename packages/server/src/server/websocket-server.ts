@@ -1,3 +1,4 @@
+import type { BotsService } from "./bots/service.js";
 import {
   ChunkedTransport,
   ChunkedTransportProtocolError,
@@ -684,6 +685,7 @@ export class VoiceAssistantWebSocketServer {
   private readonly specPlanSource: SpecModePlanSource;
   // Jira (spec 29), injected post-construction.
   private jiraService: JiraService | null = null;
+  private botsService: BotsService | null = null;
   private figmaService: FigmaService | null = null;
   // Remote execution (spec 33 / ADR-0044), injected post-construction like Jira.
   private remoteExecService: RemoteExecService | null = null;
@@ -2056,6 +2058,17 @@ export class VoiceAssistantWebSocketServer {
     return updated;
   }
 
+  public async sendBotPush(payload: import("./push/notifications.js").PushPayload): Promise<void> {
+    await this.pushNotificationSender.send({
+      ...payload,
+      data: { ...payload.data, serverId: this.serverId },
+    });
+  }
+
+  public setBotsService(service: BotsService | null): void {
+    this.botsService = service;
+  }
+
   public setJiraService(service: JiraService | null): void {
     this.jiraService = service;
   }
@@ -2129,6 +2142,7 @@ export class VoiceAssistantWebSocketServer {
       argocdService: this.argocdService,
       sideloadService: this.sideloadService,
       jiraService: this.jiraService,
+      botsService: this.botsService,
       figmaService: this.figmaService,
       remoteExecService: this.remoteExecService,
       customProvidersService: this.customProvidersService,

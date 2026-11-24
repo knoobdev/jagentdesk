@@ -1,0 +1,314 @@
+import { useCallback, useMemo } from "react";
+import { useState, useSyncExternalStore } from "react";
+import { ScrollView, Text, View } from "react-native";
+import { useTranslation } from "react-i18next";
+import type { Bot, BotInput } from "@jagentdesk/protocol/bots/types";
+import type { AgentProvider } from "@jagentdesk/protocol/agent-types";
+import { AdaptiveModalSheet } from "@/components/adaptive-modal-sheet";
+import { Button } from "@/components/ui/button";
+import { Field } from "@/components/ui/form-field";
+import { SelectField, type SelectFieldDisplay } from "@/components/ui/select-field";
+import { Switch } from "@/components/ui/switch";
+import { Alert } from "@/components/ui/alert";
+import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
+import { useIsCompactFormFactor } from "@/constants/layout";
+import { confirmDialog } from "@/utils/confirm-dialog";
+import { BotFormModel } from "./form-model";
+import { useBotsMutation } from "./queries";
+import { Input, ErrorNotice } from "./ui";
+import { styles } from "./styles";
+function ProviderFields({ serverId, model }: { serverId: string; model: BotFormModel }) {
+  const { t } = useTranslation();
+  const draft = useSyncExternalStore(model.subscribe, model.getState, model.getState);
+  const providers = useProvidersSnapshot(serverId);
+  const compact = useIsCompactFormFactor();
+  const size = compact ? "md" : "sm";
+  const entries = useMemo(
+    () => providers.entries?.filter((entry) => entry.enabled && entry.status === "ready") ?? [],
+    [providers.entries],
+  );
+  const selected = useMemo(
+    () => entries.find((entry) => entry.provider === draft.provider),
+    [entries, draft.provider],
+  );
+  const providerOptions = useMemo(
+    () =>
+      entries.map((entry) => ({
+        id: entry.provider,
+        value: entry.provider,
+        label: entry.label ?? entry.provider,
+      })),
+    [entries],
+  );
+  const modelOptions = useMemo(
+    () =>
+      selected?.models?.map((entry) => ({ id: entry.id, value: entry.id, label: entry.label })) ??
+      [],
+    [selected],
+  );
+  const modeOptions = useMemo(
+    () =>
+      selected?.modes?.map((entry) => ({ id: entry.id, value: entry.id, label: entry.label })) ??
+      [],
+    [selected],
+  );
+  const providerDisplay = useMemo(
+    () => (draft.provider ? { label: draft.providerLabel } : null),
+    [draft.provider, draft.providerLabel],
+  );
+  const modelDisplay = useMemo(
+    () => (draft.model ? { label: draft.modelLabel } : null),
+    [draft.model, draft.modelLabel],
+  );
+  const modeDisplay = useMemo(
+    () => (draft.modeId ? { label: draft.modeLabel } : null),
+    [draft.modeId, draft.modeLabel],
+  );
+  const refresh = useCallback(
+    function refresh() {
+      void providers.refresh();
+    },
+    [providers],
+  );
+  const selectProvider = useCallback(
+    function selectProvider(value: AgentProvider) {
+      const entry = entries.find((candidate) => candidate.provider === value);
+      if (entry) model.selectProvider(entry);
+    },
+    [entries, model],
+  );
+  const selectModel = useCallback(
+    function selectModel(value: string, display: SelectFieldDisplay) {
+      model.selectModel(value, display.label);
+    },
+    [model],
+  );
+  const selectMode = useCallback(
+    function selectMode(value: string, display: SelectFieldDisplay) {
+      model.selectMode(value, display.label);
+    },
+    [model],
+  );
+  return (
+    <>
+      {providers.error ? (
+        <Alert variant="error" title={providers.error}>
+          <Button onPress={refresh}>{t("bots.retry")}</Button>
+        </Alert>
+      ) : null}
+      <SelectField
+        label={t("bots.provider")}
+        value={draft.provider}
+        selectedDisplay={providerDisplay}
+        options={providerOptions}
+        onChange={selectProvider}
+        placeholder={t("bots.choose")}
+        emptyText={t("bots.noOptions")}
+        loading={providers.isLoading}
+        size={size}
+        triggerTestID="bot-provider"
+      />
+      <SelectField
+        label={t("bots.model")}
+        value={draft.model || null}
+        selectedDisplay={modelDisplay}
+        options={modelOptions}
+        onChange={selectModel}
+        placeholder={t("bots.choose")}
+        emptyText={t("bots.noOptions")}
+        size={size}
+        triggerTestID="bot-model"
+      />
+      <SelectField
+        label={t("bots.mode")}
+        value={draft.modeId || null}
+        selectedDisplay={modeDisplay}
+        options={modeOptions}
+        onChange={selectMode}
+        placeholder={t("bots.choose")}
+        emptyText={t("bots.noOptions")}
+        size={size}
+        triggerTestID="bot-mode"
+      />
+    </>
+  );
+}
+function AdvancedSettings({ model }: { model: BotFormModel }) {
+  const { t } = useTranslation();
+  const draft = useSyncExternalStore(model.subscribe, model.getState, model.getState);
+  const setLookAround = useCallback(
+    function setLookAround(value: boolean) {
+      model.set("lookAround", value);
+    },
+    [model],
+  );
+  const setInterval = useCallback(
+    function setInterval(value: string) {
+      model.set("interval", value);
+    },
+    [model],
+  );
+  const setUnattended = useCallback(
+    async function setUnattended(value: boolean) {
+      if (
+        value &&
+        !(await confirmDialog({
+          title: t("bots.unattendedConfirm"),
+          message: t("bots.unattendedWarning"),
+          confirmLabel: t("bots.unattendedConfirm"),
+        }))
+      )
+        return;
+      model.set("unattended", value);
+    },
+    [t, model],
+  );
+  return (
+    <>
+      <Field label={t("bots.lookAround")}>
+        <Switch
+          value={draft.lookAround}
+          onValueChange={setLookAround}
+          accessibilityLabel={t("bots.lookAround")}
+        />
+      </Field>
+      <Input label={t("bots.interval")} value={draft.interval} onChange={setInterval} />
+      <Field label={t("bots.unattended")}>
+        <Switch
+          value={draft.unattended}
+          onValueChange={setUnattended}
+          accessibilityLabel={t("bots.unattended")}
+          testID="bot-unattended"
+        />
+      </Field>
+      <Text style={styles.warning}>{t("bots.unattendedWarning")}</Text>
+    </>
+  );
+}
+interface FormProps {
+  serverId: string;
+  bot: Bot | null;
+  save: (input: BotInput) => Promise<unknown>;
+  pending: boolean;
+  error: Error | null;
+  onSaved?: () => void;
+}
+export function BotForm({ serverId, bot, save, pending, error, onSaved }: FormProps) {
+  const { t } = useTranslation();
+  const [model] = useState(() => new BotFormModel(bot));
+  const draft = useSyncExternalStore(model.subscribe, model.getState, model.getState);
+  const [validation, setValidation] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const submit = useCallback(
+    async function submit() {
+      setSaved(false);
+      const input = model.input();
+      setValidation(!input);
+      if (!input) return;
+      try {
+        await save(input);
+        setSaved(true);
+        onSaved?.();
+      } catch {
+        /* The mutation renders the error beside Save. */
+      }
+    },
+    [setSaved, model, setValidation, save, onSaved],
+  );
+  const setName = useCallback(
+    function setName(value: string) {
+      model.set("name", value);
+    },
+    [model],
+  );
+  const setSlug = useCallback(
+    function setSlug(value: string) {
+      model.set("slug", value);
+    },
+    [model],
+  );
+  const setIdentity = useCallback(
+    function setIdentity(value: string) {
+      model.set("identity", value);
+    },
+    [model],
+  );
+  const setRepo = useCallback(
+    function setRepo(value: string) {
+      model.set("defaultRepo", value);
+    },
+    [model],
+  );
+  return (
+    <View style={styles.body}>
+      <Input label={t("bots.name")} value={draft.name} onChange={setName} testID="bot-name" />
+      <Input
+        label={t("bots.slug")}
+        value={draft.slug}
+        onChange={setSlug}
+        editable={!bot}
+        testID="bot-slug"
+      />
+      <Input
+        label={t("bots.identity")}
+        value={draft.identity}
+        onChange={setIdentity}
+        multiline
+        testID="bot-identity"
+      />
+      <ProviderFields serverId={serverId} model={model} />
+      <Input
+        label={t("bots.repo")}
+        value={draft.defaultRepo}
+        onChange={setRepo}
+        testID="bot-repo"
+      />
+      {bot ? <AdvancedSettings model={model} /> : null}
+      {validation ? <Alert variant="error" title={t("bots.validation")} /> : null}
+      <ErrorNotice error={error} />
+      {saved ? <Text style={styles.muted}>{t("bots.saved")}</Text> : null}
+      <Button onPress={submit} loading={pending} disabled={pending} testID="bot-save">
+        {t(bot ? "bots.save" : "bots.create")}
+      </Button>
+    </View>
+  );
+}
+export function CreateBotSheet({
+  serverId,
+  onClose,
+  onCreated,
+}: {
+  serverId: string;
+  onClose: () => void;
+  onCreated: (bot: Bot) => void;
+}) {
+  const { t } = useTranslation();
+  const mutation = useBotsMutation(serverId, "bots.create.request");
+  const header = useMemo(() => ({ title: t("bots.newBot") }), [t]);
+  const save = useCallback(
+    async function save(bot: BotInput) {
+      const result = await mutation.mutateAsync({ bot });
+      onCreated(result.bot);
+    },
+    [mutation, onCreated],
+  );
+  return (
+    <AdaptiveModalSheet
+      visible
+      onClose={onClose}
+      onDismiss={onClose}
+      header={header}
+      testID="bot-create-sheet"
+    >
+      <ScrollView>
+        <BotForm
+          serverId={serverId}
+          bot={null}
+          save={save}
+          pending={mutation.isPending}
+          error={mutation.error}
+        />
+      </ScrollView>
+    </AdaptiveModalSheet>
+  );
+}

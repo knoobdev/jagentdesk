@@ -1395,7 +1395,7 @@ function PermissionActionButton({
   );
 }
 
-function PermissionRequestCard({
+export function PermissionRequestCard({
   permission,
   client,
 }: {

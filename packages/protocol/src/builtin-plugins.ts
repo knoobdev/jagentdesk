@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { HostCapabilityId } from "./host-capabilities.js";
 
 export const BUILTIN_PLUGIN_IDS = [
+  "bots",
   "docker",
   "clusters",
   "databases",
@@ -39,6 +40,13 @@ export interface BuiltinPluginManifest {
 
 // Static manifests are shared by the daemon loader and the statically linked app registry.
 export const BUILTIN_PLUGIN_MANIFESTS: readonly BuiltinPluginManifest[] = [
+  {
+    id: "bots",
+    name: "Bots",
+    description: "Long-lived assistants that delegate work and review results.",
+    defaultEnabled: true,
+    requires: [],
+  },
   {
     id: "docker",
     name: "Docker",
@@ -183,6 +191,7 @@ export const BUILTIN_PLUGIN_MANIFESTS: readonly BuiltinPluginManifest[] = [
 
 /** Existing and new server-info flags owned by each feature. Core forge checkout stays independent. */
 export const BUILTIN_PLUGIN_FEATURES = {
+  bots: ["bots"],
   docker: ["docker"],
   clusters: ["clusters"],
   databases: ["databases"],

@@ -25,6 +25,7 @@ At the start of non-trivial work, list `docs/` and skim anything relevant to the
 | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | [docs/product.md](docs/product.md)                                   | What JAgentDesk is, who it's for, where it's going                                                                             |
 | [docs/architecture.md](docs/architecture.md)                         | System design, package layering, WebSocket protocol, agent lifecycle, data flow                                                |
+| [docs/bots.md](docs/bots.md)                                         | Bots daemon lifecycle, SQLite homes/items/rooms, permission boundary, triggers and client RPC contract                         |
 | [docs/agent-lifecycle.md](docs/agent-lifecycle.md)                   | Agent states, parent/child relationships, archive semantics, tabs vs archive, subagents track                                  |
 | [docs/data-model.md](docs/data-model.md)                             | File-based JSON persistence, Zod schemas, atomic writes, no migrations                                                         |
 | [docs/glossary.md](docs/glossary.md)                                 | Authoritative terminology — UI label wins, no synonyms                                                                         |

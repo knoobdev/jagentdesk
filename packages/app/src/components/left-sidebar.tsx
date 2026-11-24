@@ -1,7 +1,9 @@
+import { BotsSidebar } from "@/bots/sidebar";
 import { BuiltinPluginGate } from "@/plugins/builtin/gate";
 import { router, usePathname, type Href } from "expo-router";
 import {
   Boxes,
+  Bot,
   BarChart3,
   Container,
   Database,
@@ -114,15 +116,18 @@ function parseArgoCdRoute(
 
 /** Sections whose route owns the desktop left column instead of the workspace list. */
 type SectionRoute =
-  | { section: "servers" | "jira" | "figma"; serverId: string }
+  | { section: "servers" | "jira" | "figma" | "bots"; serverId: string }
   | { section: "argocd"; serverId: string; instanceId: string | null };
 
 function resolveSectionRoute(pathname: string): SectionRoute | null {
   const argoCd = parseArgoCdRoute(pathname);
   if (argoCd) return { section: "argocd", ...argoCd };
-  const match = pathname.match(/\/h\/([^/]+)\/(servers|jira|figma)(?:$|[/?])/);
+  const match = pathname.match(/\/h\/([^/]+)\/(servers|jira|figma|bots)(?:$|[/?])/);
   const section = match?.[2];
-  if (!match?.[1] || (section !== "servers" && section !== "jira" && section !== "figma"))
+  if (
+    !match?.[1] ||
+    (section !== "servers" && section !== "jira" && section !== "figma" && section !== "bots")
+  )
     return null;
   return { section, serverId: decodeURIComponent(match[1]) };
 }
@@ -145,6 +150,12 @@ function resolveSidebarNavBody(
   fallback: ReactNode,
   sectionRoute: SectionRoute | null = null,
 ): ReactNode {
+  if (sectionRoute?.section === "bots")
+    return (
+      <BuiltinPluginGate serverId={sectionRoute.serverId} id="bots">
+        <BotsSidebar serverId={sectionRoute.serverId} />
+      </BuiltinPluginGate>
+    );
   // A section that owns the left column (spec 25.13.1 Servers, 29.3 Jira, 30.3 Argo CD).
   if (sectionRoute?.section === "servers")
     return (
@@ -247,6 +258,7 @@ interface SidebarLabels {
   sessions: string;
   schedules: string;
   sharedSessions: string;
+  bots: string;
   clusters: string;
   databases: string;
   servers: string;
@@ -518,6 +530,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       sessions: t("sidebar.sections.sessions"),
       schedules: t("sidebar.sections.schedules"),
       sharedSessions: "Shared sessions",
+      bots: t("bots.title"),
       clusters: "Clusters",
       databases: "Databases",
       servers: "Servers",
@@ -1110,6 +1123,9 @@ function DesktopSidebar({
   handleViewSharedSessions,
 }: DesktopSidebarProps) {
   const builtinTargets = useAppNavTargets();
+  const handleBots = useCallback(() => {
+    if (builtinTargets.botsRoute) router.push(builtinTargets.botsRoute);
+  }, [builtinTargets.botsRoute]);
   const ownsTopLeft = useOwnsWindowChromeCorner("top-left");
   const isClickUp = useIsClickUpTheme();
   const pathname = usePathname();
@@ -1260,6 +1276,16 @@ function DesktopSidebar({
                 testID="sidebar-schedules"
                 variant="compact"
               />
+              <NavTargetGate route={builtinTargets.botsRoute}>
+                <SidebarHeaderRow
+                  icon={Bot}
+                  label={labels.bots}
+                  onPress={handleBots}
+                  isActive={pathname.includes("/bots")}
+                  testID="sidebar-bots"
+                  variant="compact"
+                />
+              </NavTargetGate>
               <NavTargetGate route={builtinTargets.sharedSessionsRoute}>
                 <SidebarHeaderRow
                   icon={Share2}

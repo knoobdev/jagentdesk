@@ -1,3 +1,4 @@
+import { buildBotsRoute } from "@/bots/model";
 import type { Href } from "expo-router";
 import { buildHostRootRoute, buildHostWorkspaceOpenRoute } from "@/utils/host-routes";
 
@@ -29,6 +30,9 @@ export function resolveNotificationTarget(data: NotificationData): {
 
 export function buildNotificationRoute(data: NotificationData): NotificationRoute {
   const { serverId, agentId, workspaceId, terminalId } = resolveNotificationTarget(data);
+  const botId = readNonEmptyString(data, "botId");
+  const itemId = readNonEmptyString(data, "itemId");
+  if (serverId && botId) return buildBotsRoute(serverId, { botId, itemId: itemId ?? undefined });
   if (serverId && workspaceId && agentId) {
     return buildHostWorkspaceOpenRoute(serverId, workspaceId, `agent:${agentId}`);
   }

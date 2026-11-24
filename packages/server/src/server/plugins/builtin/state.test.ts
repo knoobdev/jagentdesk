@@ -28,10 +28,10 @@ async function setup(overrides: Record<string, unknown> = {}) {
 }
 
 describe("static built-in plugin registry", () => {
-  it("lists exactly 19 features with 16 enabled independently of installed plugins", async () => {
+  it("lists exactly 20 features with 17 enabled independently of installed plugins", async () => {
     const { state } = await setup({ pluginsEnabled: false });
     expect(state.list().map(({ id }) => id)).toEqual(BUILTIN_PLUGIN_IDS);
-    expect(state.list().filter(({ enabled }) => enabled)).toHaveLength(16);
+    expect(state.list().filter(({ enabled }) => enabled)).toHaveLength(17);
     expect(
       state
         .list()
@@ -64,7 +64,7 @@ describe("static built-in plugin registry", () => {
     expect(restarted.isEnabled("browser-tools")).toBe(false);
     const persisted = JSON.parse(await readFile(path.join(home, "config.json"), "utf8"));
     expect(persisted.builtinPlugins["browser-tools"]).toEqual({ enabled: false });
-    expect(Object.keys(persisted.builtinPlugins)).toHaveLength(19);
+    expect(Object.keys(persisted.builtinPlugins)).toHaveLength(20);
   });
 
   it("logs migration only on the first boot", async () => {

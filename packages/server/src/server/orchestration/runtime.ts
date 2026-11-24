@@ -38,6 +38,7 @@ const OrchestrationAssignmentStateSchema = z.object({
   routeCategory: z.string().min(1).optional(),
   profileId: z.string().min(1).optional(),
   status: z.enum(["active", "handed_back", "accepted", "failed"]),
+  review: z.boolean().optional(),
   createdAtMs: z.number().int().nonnegative(),
 });
 
@@ -261,6 +262,10 @@ function formatAcceptedResult(input: {
 }
 
 export class OrchestrationRuntime {
+  private botEscalationHandler?: (event: { agentId: string; key: string; text: string }) => void;
+  setBotEscalationHandler(handler: OrchestrationRuntime["botEscalationHandler"]): void {
+    this.botEscalationHandler = handler;
+  }
   private readonly statePath: string;
   private mutation: Promise<void> = Promise.resolve();
 
@@ -383,6 +388,52 @@ export class OrchestrationRuntime {
       );
   }
 
+  private async resolveChildPermissions(
+    caller: OrchestrationAgentContext,
+    profile: OrchestrationProfile,
+    requestedCwd?: string,
+  ): Promise<{ mode: string | undefined; unattended: boolean }> {
+    if (!caller.agent.labels["jagentdesk.bot.id"])
+      return { mode: profile.modeId, unattended: false };
+    const snapshots = this.dependencies.providerSnapshotManager;
+    const unattended = await snapshots.isUnattendedCreateMode(
+      caller.agent.provider,
+      caller.agent.cwd,
+      caller.agent.currentModeId ?? "",
+    );
+    const cwd = requestedCwd ?? caller.agent.cwd;
+    if (unattended) {
+      const resolved = await snapshots.resolveCreateConfig({
+        provider: profile.provider,
+        cwd,
+        requestedMode: undefined,
+        unattended: true,
+        featureValues: undefined,
+        parent: null,
+      });
+      const mode = resolved.modeId;
+      if (!mode || !(await snapshots.isUnattendedCreateMode(profile.provider, cwd, mode)))
+        throw new Error("Worker provider has no unattended mode");
+      return { mode, unattended };
+    }
+    let mode = profile.modeId;
+    if (!mode && profile.provider === caller.agent.provider)
+      mode = caller.agent.currentModeId ?? undefined;
+    if (!mode) {
+      for (const candidate of await snapshots.listModes({
+        provider: profile.provider,
+        cwd,
+        wait: true,
+      })) {
+        if (!(await snapshots.isUnattendedCreateMode(profile.provider, cwd, candidate.id)))
+          return { mode: candidate.id, unattended: false };
+      }
+    }
+    if (mode && (await snapshots.isUnattendedCreateMode(profile.provider, cwd, mode)))
+      throw new Error("Attended bot workers cannot use an unattended ORC profile");
+    return { mode, unattended: false };
+  }
+
   private async createChild(input: {
     caller: OrchestrationAgentContext;
     profile: OrchestrationProfile;
@@ -391,8 +442,16 @@ export class OrchestrationRuntime {
     initialPrompt: string;
     labels: Record<string, string>;
     callerContext?: OrchestrationCallerContext | null;
+    cwd?: string;
+    notifyOnFinish?: boolean;
+    onCreated?: (agentId: string) => void;
   }): Promise<ManagedAgent> {
     const thinkingOptionId = profileThinking(input.target, input.profile);
+    const { mode, unattended } = await this.resolveChildPermissions(
+      input.caller,
+      input.profile,
+      input.cwd,
+    );
     const result = await createAgentCommand(
       {
         agentManager: this.dependencies.agentManager,
@@ -406,12 +465,20 @@ export class OrchestrationRuntime {
         provider: profileProviderModel(input.profile),
         title: compactTitle(input.title, `JAgentDesk ${input.caller.role}`),
         initialPrompt: input.initialPrompt,
+        ...(input.cwd ? { cwd: input.cwd } : {}),
+        onCreated: ({ agentId }) => input.onCreated?.(agentId),
         workspaceId: input.caller.workspaceId,
         thinking: thinkingOptionId,
-        ...(input.profile.modeId ? { mode: input.profile.modeId } : {}),
-        labels: input.labels,
+        ...(mode ? { mode } : {}),
+        unattended,
+        labels: {
+          ...(input.caller.agent.labels["jagentdesk.bot.id"]
+            ? { "jagentdesk.bot.id": input.caller.agent.labels["jagentdesk.bot.id"] }
+            : {}),
+          ...input.labels,
+        },
         background: true,
-        notifyOnFinish: true,
+        notifyOnFinish: input.notifyOnFinish ?? true,
         callerAgentId: input.caller.agent.id,
         callerContext: input.callerContext ?? null,
       },
@@ -422,6 +489,98 @@ export class OrchestrationRuntime {
         : new Error(String(result.initialPromptError));
     }
     return result.snapshot;
+  }
+
+  /** Bot dispatch uses the same ORC ownership/run store, with a fresh workspace per item. */
+  async startBotWorker(input: {
+    supervisorAgentId: string;
+    workspaceId: string;
+    briefId: string;
+    cwd: string;
+    assignment: string;
+    profile: OrchestrationProfile;
+    itemId: string;
+    onCreated: (agentId: string) => void;
+  }): Promise<string> {
+    const caller = this.requireContext(input.supervisorAgentId, "supervisor");
+    if (!caller.agent.labels["jagentdesk.bot.id"])
+      throw new Error("Only bot Supervisors may dispatch bot workers");
+    const context = { ...caller, workspaceId: input.workspaceId, briefId: input.briefId };
+    return this.mutate(async (state) => {
+      const run = this.ensureRun(state, context);
+      if (run.leadAgentId) throw new Error("Item already has an ORC Lead");
+      const lead = await this.createChild({
+        caller: context,
+        cwd: input.cwd,
+        profile: input.profile,
+        title: `Bot worker · ${input.itemId}`,
+        initialPrompt: formatLeadRelay({
+          assignment: input.assignment,
+          briefId: input.briefId,
+          workspaceId: input.workspaceId,
+        }),
+        notifyOnFinish: false,
+        onCreated: input.onCreated,
+        labels: {
+          [ORCHESTRATION_ROLE_LABEL]: "lead",
+          [ORCHESTRATION_WORKSPACE_LABEL]: input.workspaceId,
+          [ORCHESTRATION_BRIEF_LABEL]: input.briefId,
+          [ORCHESTRATION_PROFILE_LABEL]: input.profile.id,
+          "jagentdesk.bot.item-id": input.itemId,
+        },
+      });
+      run.leadAgentId = lead.id;
+      run.updatedAtMs = Date.now();
+      return lead.id;
+    });
+  }
+
+  /** Reviewers are bounded ORC Peers of the worker Lead; verdict authority stays in the daemon. */
+  async createBotReviewer(input: {
+    workerAgentId: string;
+    role: "ba" | "tester" | "pentester";
+    prompt: string;
+    onCreated: (agentId: string) => void;
+  }): Promise<string> {
+    const caller = this.requireContext(input.workerAgentId, "lead");
+    if (!caller.agent.labels["jagentdesk.bot.id"]) throw new Error("Worker is not owned by a bot");
+    return this.mutate(async (state) => {
+      const run = this.ensureRun(state, caller);
+      if (run.leadAgentId !== caller.agent.id) throw new Error("Worker is not the registered Lead");
+      const assignmentId = randomUUID();
+      const agent = await this.createChild({
+        caller,
+        profile: {
+          id: `bot-review-${input.role}`,
+          provider: caller.agent.provider,
+          model: caller.agent.config.model ?? "default",
+          thinkingOptionId: caller.agent.config.thinkingOptionId ?? "default",
+          modeId: caller.agent.config.modeId,
+          enabled: true,
+        },
+        title: `Bot review · ${input.role}`,
+        initialPrompt: input.prompt,
+        notifyOnFinish: false,
+        onCreated: input.onCreated,
+        labels: {
+          [ORCHESTRATION_ROLE_LABEL]: input.role,
+          [ORCHESTRATION_WORKSPACE_LABEL]: caller.workspaceId,
+          [ORCHESTRATION_BRIEF_LABEL]: caller.briefId,
+          "jagentdesk.orchestration.assignment-id": assignmentId,
+          "jagentdesk.bot.review": input.role,
+        },
+      });
+      run.assignments.push({
+        id: assignmentId,
+        agentId: agent.id,
+        parentAgentId: caller.agent.id,
+        status: "active",
+        review: true,
+        createdAtMs: Date.now(),
+      });
+      run.updatedAtMs = Date.now();
+      return agent.id;
+    });
   }
 
   async bootstrapLead(input: {
@@ -555,7 +714,9 @@ export class OrchestrationRuntime {
       const maxPeers = config.limits.maxPeersPerLead;
       const peerAssignments = run.assignments.filter(
         (assignment) =>
-          assignment.parentAgentId === context.agent.id && assignment.status !== "failed",
+          assignment.parentAgentId === context.agent.id &&
+          assignment.status !== "failed" &&
+          !assignment.review,
       );
       if (peerAssignments.length >= maxPeers) {
         throw new Error(`Peer fan-out limit reached (${maxPeers}) for this Lead's active brief`);
@@ -729,6 +890,12 @@ export class OrchestrationRuntime {
         unarchive: false,
         logger: this.dependencies.logger.child({ module: "orchestration-runtime" }),
       });
+      if (outcome === "ESCALATED_TO_HUMAN" && context.agent.labels["jagentdesk.bot.id"])
+        this.botEscalationHandler?.({
+          agentId: context.agent.id,
+          key: dissentId,
+          text: `${input.rationale}\n${input.nextAction}`,
+        });
       return { dissentId, verificationRound };
     });
   }
@@ -758,6 +925,9 @@ export class OrchestrationRuntime {
       run.updatedAtMs = Date.now();
       const supervisor = this.dependencies.agentManager.getAgent(run.supervisorAgentId);
       if (!supervisor) throw new Error(`Supervisor ${run.supervisorAgentId} is not available`);
+      // Bot completion is published after daemon cross-review, through the worker turn event.
+      if (context.agent.labels["jagentdesk.bot.id"])
+        return { supervisorAgentId: run.supervisorAgentId };
       await sendPromptToAgent({
         agentManager: this.dependencies.agentManager,
         agentStorage: this.dependencies.agentStorage,
