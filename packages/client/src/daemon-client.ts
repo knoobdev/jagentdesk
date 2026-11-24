@@ -2288,6 +2288,7 @@ export class DaemonClient {
         get supportsDrain() {
           return transport.supportsDrain;
         },
+        supportsConcurrentWrites: true,
         get frameBytes() {
           return transport.maxFrameBytes ?? 32 * 1024 * 1024;
         },
@@ -2775,6 +2776,11 @@ export class DaemonClient {
   // ============================================================================
   // Message Subscription
   // ============================================================================
+
+  /** Drain capability inherited by transports routed through this connection. */
+  get supportsDrain(): boolean {
+    return this.transport?.supportsDrain !== false;
+  }
 
   subscribe(handler: DaemonEventHandler): () => void {
     this.eventListeners.add(handler);

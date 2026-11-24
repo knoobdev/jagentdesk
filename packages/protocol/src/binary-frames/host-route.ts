@@ -3,6 +3,11 @@ import { MAX_WEBSOCKET_MESSAGE_BYTES } from "../websocket-message-limit.js";
 export const HOST_ROUTE_OPCODE = 0x30;
 export const MAX_HOST_ROUTE_ID_BYTES = 256;
 export const MAX_HOST_ROUTE_HEADER_BYTES = 3 + MAX_HOST_ROUTE_ID_BYTES;
+// Text can expand sixfold inside a route frame. Leave room for routing/control metadata
+// within ADR-0053's 4 MiB channel queue (Paseo uses a larger route admission budget).
+export const MAX_HOST_CHANNEL_FRAME_BYTES = Math.floor(
+  (4 * 1024 * 1024 - 65536 - MAX_HOST_ROUTE_HEADER_BYTES) / 6,
+);
 export const MAX_HOST_ROUTED_PAYLOAD_BYTES =
   MAX_WEBSOCKET_MESSAGE_BYTES - MAX_HOST_ROUTE_HEADER_BYTES;
 export interface HostRouteFrame {

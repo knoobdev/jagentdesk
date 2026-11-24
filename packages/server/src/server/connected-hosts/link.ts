@@ -1,7 +1,9 @@
+import { HostChannelFlowControl, HostChannelOutputLimitError } from "./flow-control.js";
 import type { SessionDelivery } from "../session/owned-subscriptions/index.js";
 import { EventEmitter } from "node:events";
 import { createHash } from "node:crypto";
 import {
+  MAX_HOST_CHANNEL_FRAME_BYTES,
   encodeHostRouteFrame,
   type HostRouteFrame,
 } from "@jagentdesk/protocol/binary-frames/index";
@@ -13,6 +15,7 @@ import type {
 
 /** A logical socket has no network resources or authority of its own. */
 export class VirtualHostSocket extends EventEmitter {
+  readonly maxFrameBytes = MAX_HOST_CHANNEL_FRAME_BYTES;
   readonly supportsConcurrentWrites = true;
   readyState = 1;
   constructor(
@@ -62,8 +65,9 @@ export class VirtualHostSocket extends EventEmitter {
 export class DaemonLinkEndpoint {
   private readonly channels = new Map<
     string,
-    { scopeId: string; socket: VirtualHostSocket }
+    { scopeId: string; socket: VirtualHostSocket; flowControl?: HostChannelFlowControl }
   >();
+  private pendingOutputBytes = 0;
   private closed = false;
   constructor(
     private readonly parent: {
@@ -86,6 +90,10 @@ export class DaemonLinkEndpoint {
     );
   }
   async dispatch(message: SessionInboundMessage): Promise<void> {
+    if (message.type === "hosts.link.ack.request") {
+      this.channels.get(message.routeId)?.flowControl?.acknowledge(message.sequence);
+      return;
+    }
     if (message.type === "hosts.link.open.request") {
       const error = (code: string, text: string) =>
         this.parent.delivery.reply({
@@ -106,8 +114,19 @@ export class DaemonLinkEndpoint {
         return;
       }
       let socket: VirtualHostSocket;
+      const flowControl = message.flowControl
+        ? new HostChannelFlowControl((bytes) => {
+            if (this.pendingOutputBytes + bytes > 32 * 1024 * 1024)
+              throw new HostChannelOutputLimitError();
+            this.pendingOutputBytes += bytes;
+            return () => {
+              this.pendingOutputBytes -= bytes;
+            };
+          })
+        : undefined;
       const owner = this.parent.delivery.begin("host-link", undefined, () => {
         this.channels.delete(owner.id);
+        flowControl?.close();
         socket?.close();
       });
       const id = owner.id;
@@ -137,14 +156,21 @@ export class DaemonLinkEndpoint {
               if (output) await owner.emitAndWait(output);
               else await owner.emitBinaryAndWait(frame!);
             };
-            await write();
+            if (flowControl) await flowControl.send(bytes, write);
+            else await write();
           } catch (failure) {
-            socket.close(1000, "Host channel closed");
+            socket.close(
+              failure instanceof HostChannelOutputLimitError ? 1009 : 1000,
+              failure instanceof HostChannelOutputLimitError
+                ? failure.message
+                : "Host channel closed",
+            );
             throw failure;
           }
         },
         (code, reason) => {
           this.channels.delete(id);
+          flowControl?.close();
           let failure = "host_offline";
           if (code === 1009) failure = "resource_limit";
           if (code === 1008) failure = "permission_denied";
@@ -173,7 +199,7 @@ export class DaemonLinkEndpoint {
           });
         },
       );
-      this.channels.set(id, { scopeId: message.channelId, socket });
+      this.channels.set(id, { scopeId: message.channelId, socket, flowControl });
       try {
         await this.parent.admit(socket, ceiling);
         if (this.closed || socket.readyState !== 1) {
@@ -185,6 +211,7 @@ export class DaemonLinkEndpoint {
           payload: {
             requestId: message.requestId,
             routeId: id,
+            ...(flowControl ? { flowControl: true } : {}),
           },
         });
       } catch {

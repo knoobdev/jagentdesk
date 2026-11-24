@@ -1726,6 +1726,7 @@ export class VoiceAssistantWebSocketServer {
     let transport = this.chunkedSockets.get(ws);
     if (!transport) {
       transport = new ChunkedTransport({
+        supportsConcurrentWrites: true,
         frameBytes: ws.maxFrameBytes ?? 32 * 1024 * 1024,
         onFailure: (err) =>
           this.closePhysicalSocket({

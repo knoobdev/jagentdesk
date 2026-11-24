@@ -1,4 +1,7 @@
-import { encodeHostRouteFrame } from "@jagentdesk/protocol/binary-frames/host-route";
+import {
+  encodeHostRouteFrame,
+  MAX_HOST_CHANNEL_FRAME_BYTES,
+} from "@jagentdesk/protocol/binary-frames/host-route";
 import { safeRandomId } from "../daemon-client-transport-utils.js";
 import { DaemonClient } from "../daemon-client.js";
 import type { DaemonTransportFactory } from "../daemon-client-transport-types.js";
@@ -116,6 +119,10 @@ export function createHostChannelTransport(
       })
       .catch(close);
     return {
+      get supportsDrain() {
+        return origin.supportsDrain;
+      },
+      maxFrameBytes: MAX_HOST_CHANNEL_FRAME_BYTES,
       send(data) {
         if (closed || !routeId)
           throw Object.assign(new Error(`Host ${serverId} is offline`), {
