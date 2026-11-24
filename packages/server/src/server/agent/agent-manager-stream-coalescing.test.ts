@@ -31,7 +31,6 @@ import type {
 
 const COALESCE_WINDOW_MS = AGENT_STREAM_COALESCE_DEFAULT_WINDOW_MS;
 const BEFORE_COALESCE_WINDOW_MS = Math.max(COALESCE_WINDOW_MS - 1, 0);
-const TOOL_CALL_CONTENT_MAX_LENGTH = 64 * 1024;
 
 const TEST_CAPABILITIES: AgentCapabilityFlags = {
   supportsStreaming: false,
@@ -402,7 +401,7 @@ describe("target coalesced behavior", () => {
       const output = `${"a".repeat(512 * 1024)}${"z".repeat(512 * 1024)}`;
       const expectedItem = toolCall({
         status: "completed",
-        output: "a".repeat(TOOL_CALL_CONTENT_MAX_LENGTH),
+        output: expect.stringMatching(/^a+…\[truncated \d+\.\d (?:KB|MB)\]$/),
       });
 
       session.pushEvent(timelineEvent(toolCall({ status: "completed", output })));
@@ -427,7 +426,7 @@ describe("target coalesced behavior", () => {
       const output = `${"a".repeat(512 * 1024)}${"z".repeat(512 * 1024)}`;
       const expectedItem = toolCall({
         status: "completed",
-        output: "a".repeat(TOOL_CALL_CONTENT_MAX_LENGTH),
+        output: expect.stringMatching(/^a+…\[truncated \d+\.\d (?:KB|MB)\]$/),
       });
 
       await harness.manager.appendTimelineItem(agentId, toolCall({ status: "completed", output }));
@@ -451,7 +450,7 @@ describe("target coalesced behavior", () => {
       const output = `${"a".repeat(512 * 1024)}${"z".repeat(512 * 1024)}`;
       const expectedItem = toolCall({
         status: "completed",
-        output: "a".repeat(TOOL_CALL_CONTENT_MAX_LENGTH),
+        output: expect.stringMatching(/^a+…\[truncated \d+\.\d (?:KB|MB)\]$/),
       });
       session.setHistory([timelineEvent(toolCall({ status: "completed", output }))]);
 
@@ -472,7 +471,7 @@ describe("target coalesced behavior", () => {
       const output = `${"a".repeat(512 * 1024)}${"z".repeat(512 * 1024)}`;
       const expectedItem = toolCall({
         status: "completed",
-        output: "a".repeat(TOOL_CALL_CONTENT_MAX_LENGTH),
+        output: expect.stringMatching(/^a+…\[truncated \d+\.\d (?:KB|MB)\]$/),
       });
 
       await harness.manager.emitLiveTimelineItem(
@@ -497,7 +496,7 @@ describe("target coalesced behavior", () => {
       const content = `${"a".repeat(512 * 1024)}${"z".repeat(512 * 1024)}`;
       const expectedItem = toolCall({
         status: "failed",
-        error: { content: "a".repeat(TOOL_CALL_CONTENT_MAX_LENGTH) },
+        error: { content: expect.stringMatching(/^a+…\[truncated \d+\.\d (?:KB|MB)\]$/) },
       });
 
       session.pushEvent(timelineEvent(toolCall({ status: "failed", error: { content } })));
