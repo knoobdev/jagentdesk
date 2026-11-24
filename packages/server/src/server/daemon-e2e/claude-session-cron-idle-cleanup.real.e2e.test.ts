@@ -1,25 +1,14 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import pino from "pino";
-import { beforeAll, beforeEach, describe, expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 
+import { collectSessionTurnEvents } from "../agent/providers/test-utils/session-stream-adapter.js";
 import type { AgentStreamEvent } from "../agent/agent-sdk-types.js";
-import {
-  canRunRealProvider,
-  createRealProviderClient,
-  getRealProviderConfig,
-} from "./real-provider-test-config.js";
+import { createRealProviderClient, getRealProviderConfig } from "./real-provider-test-config.js";
 
 describe("real claude: idle runtime cleanup and session crons", () => {
-  let canRun = false;
-  beforeAll(async () => {
-    canRun = await canRunRealProvider("claude");
-  });
-  beforeEach((context) => {
-    if (!canRun) context.skip();
-  });
-
   test("a runtime holding a session-only cron is kept until the cron is deleted", async () => {
     const logger = pino({ level: "silent" });
     const client = createRealProviderClient("claude", logger);
@@ -31,7 +20,8 @@ describe("real claude: idle runtime cleanup and session crons", () => {
     const events: AgentStreamEvent[] = [];
     session.subscribe((event) => events.push(event));
     try {
-      await session.run(
+      await collectSessionTurnEvents(
+        session,
         "Call the CronCreate tool exactly once with cron '0 */6 * * *', recurring true, durable false, prompt 'say hi'. Then reply with exactly: DONE",
       );
       const cronResult = events.find(
@@ -44,12 +34,14 @@ describe("real claude: idle runtime cleanup and session crons", () => {
       expect(cronResult, JSON.stringify(events.slice(-5))).toBeDefined();
       expect(await session.canStopRuntime!()).toBe(false);
 
-      await session.run(
+      await collectSessionTurnEvents(
+        session,
         "Delete every scheduled cron job with the CronDelete tool. Then reply with exactly: DONE",
       );
       expect(await session.canStopRuntime!()).toBe(true);
     } finally {
       await session.close();
+      rmSync(cwd, { recursive: true, force: true });
     }
   }, 240_000);
 
@@ -83,6 +75,7 @@ describe("real claude: idle runtime cleanup and session crons", () => {
       expect(await session.canStopRuntime!()).toBe(false);
     } finally {
       await session.close();
+      rmSync(cwd, { recursive: true, force: true });
     }
   }, 240_000);
 });
