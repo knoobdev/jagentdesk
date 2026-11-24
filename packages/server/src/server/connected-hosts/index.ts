@@ -5,6 +5,7 @@ import {
   importDeviceSecretKey,
   signNonce,
 } from "../pairing/device-signature-crypto.js";
+import type { DaemonTransportFactory } from "@jagentdesk/client/internal/daemon-client-transport-types";
 import type { HostDial } from "@jagentdesk/client/node";
 export { DaemonLinkEndpoint, VirtualHostSocket } from "./link.js";
 export { ConnectedHostSession } from "./session.js";
@@ -341,10 +342,12 @@ export class ConnectedHosts {
       if (route.registrationId === id)
         route.close(code, "Host access was disabled, replaced or removed");
   }
-  private start(row: Saved): void {
+  private start(row: Saved, failures = 0, transports?: DaemonTransportFactory): void {
     if (!row.enabled || this.closed) return;
     let stopped = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     const factory =
+      transports ??
       createHostTransportFactory(
         row.connection,
         new HostTransportBudget(32 * 1024 * 1024),
@@ -377,6 +380,7 @@ export class ConnectedHosts {
       accepted: false,
       stop: () => {
         stopped = true;
+        clearTimeout(retry);
         void client.close();
       },
     };
@@ -429,6 +433,7 @@ export class ConnectedHosts {
           if (stopped || client.getLastServerInfoMessage() !== info || !client.isConnected) return;
           Object.assign(row, next);
           live.accepted = true;
+          failures = 0;
           this.changed();
         });
       } catch (error) {
@@ -437,8 +442,24 @@ export class ConnectedHosts {
           code: "host_offline",
           message: "Host connection failed",
         };
-        row.status = "error";
-        row.nextRetryAt = null;
+        if (
+          new Set([
+            "server_id_mismatch",
+            "self_host",
+            "duplicate_host",
+            "authentication_failed",
+          ]).has(row.error.code)
+        ) {
+          row.status = "error";
+          row.nextRetryAt = null;
+        } else {
+          stopped = true;
+          const delay = Math.min(1500 * 2 ** failures, 60000);
+          row.status = row.error.code === "unsupported_capability" ? "outdated" : "connecting";
+          row.nextRetryAt = new Date(Date.now() + delay).toISOString();
+          retry = setTimeout(() => this.start(row, failures + 1, factory), delay);
+          retry.unref();
+        }
         this.changed();
         await client.close();
       }
@@ -452,6 +473,12 @@ export class ConnectedHosts {
       }
       for (const route of this.routes)
         if (route.registrationId === row.registrationId) route.close();
+      // Keep the update guidance visible while an outdated host retries acceptance.
+      if (row.error?.code === "unsupported_capability") {
+        row.status = "outdated";
+        this.changed();
+        return;
+      }
       row.status = "connecting";
       row.nextRetryAt = state.status === "disconnected" ? (state.nextRetryAt ?? null) : null;
       row.error =
