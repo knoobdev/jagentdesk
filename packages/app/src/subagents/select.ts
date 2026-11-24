@@ -93,6 +93,31 @@ export function selectSubagentsForParent(
   return rows;
 }
 
+// Session-store selectors run on every store update, including every stream tick, which
+// leaves the agent map untouched. Reuse the previous rows until the map changes, and keep
+// them when a recompute yields equal rows so the hook's equality check stays O(1).
+export function createSubagentsForParentSelector(
+  params: SelectSubagentsParams,
+  pendingArchiveIds: ReadonlySet<string>,
+): (state: SessionStoreSnapshot) => SubagentRow[] {
+  let previousAgents: Map<string, Agent> | undefined;
+  let previousRows: SubagentRow[] | null = null;
+
+  return (state) => {
+    const agents = state.sessions[params.serverId]?.agents;
+    if (previousRows && agents === previousAgents) {
+      return previousRows;
+    }
+
+    const rows = selectSubagentsForParent(state, params, pendingArchiveIds);
+    previousAgents = agents;
+    if (!previousRows || !equal(previousRows, rows)) {
+      previousRows = rows;
+    }
+    return previousRows;
+  };
+}
+
 export function selectProviderSubagentsForParent(
   state: ProviderSubagentStoreSnapshot,
   params: SelectSubagentsParams,
@@ -121,12 +146,13 @@ export function selectProviderSubagentsForParent(
 }
 
 export function useSubagentsForParent(params: SelectSubagentsParams): SubagentRow[] {
-  const pendingArchiveIds = usePendingArchiveAgentIds(params.serverId);
-  const jagentdeskRows = useStoreWithEqualityFn(
-    useSessionStore,
-    (state) => selectSubagentsForParent(state, params, pendingArchiveIds),
-    equal,
+  const { serverId, parentAgentId } = params;
+  const pendingArchiveIds = usePendingArchiveAgentIds(serverId);
+  const selectJAgentDeskRows = useMemo(
+    () => createSubagentsForParentSelector({ serverId, parentAgentId }, pendingArchiveIds),
+    [serverId, parentAgentId, pendingArchiveIds],
   );
+  const jagentdeskRows = useStoreWithEqualityFn(useSessionStore, selectJAgentDeskRows, equal);
   const supported = useSessionStore(
     (state) => state.sessions[params.serverId]?.serverInfo?.features?.providerSubagents === true,
   );
