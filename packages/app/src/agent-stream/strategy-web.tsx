@@ -1,3 +1,4 @@
+import { resolveChatColumnGutters } from "@/chat-rail/gutters";
 import React, {
   type CSSProperties,
   useCallback,
@@ -301,7 +302,6 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
     olderHistoryProgressKey,
     scrollEnabled,
     contentMaxWidth,
-    imageContext,
     isMobileBreakpoint,
   } = props;
   const historyVirtualized = useRevisedHistoryRows(
@@ -453,7 +453,9 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
       const row = segments.historyVirtualized[index];
       const measured = row && measuredRowHeights.current.get(row.id);
       if (measured && measured.width === contentWidth) return measured.height;
-      return row ? estimateStreamItemHeight({ item: row, contentMaxWidth: contentMaxWidth ?? 768, imageContext }) : 120;
+      return row
+        ? estimateStreamItemHeight({ item: row, contentMaxWidth: contentMaxWidth ?? 768 })
+        : 120;
     },
     observeElementOffset: observeVirtualOffset,
     rangeExtractor,
@@ -623,6 +625,15 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
   const markUpwardInputEvidence = useCallback(() => {
     upwardInputEvidenceUntilRef.current =
       window.performance.now() + UPWARD_INPUT_EVIDENCE_TIMEOUT_MS;
+  }, []);
+
+  const hasUpwardInputEvidence = useCallback(() => {
+    const mouseGesture = mouseScrollGestureRef.current;
+    return (
+      mouseGesture?.kind === "scrollbar" ||
+      (mouseGesture?.kind === "autoscroll" && mouseGesture.hasUpwardEvidence) ||
+      window.performance.now() < upwardInputEvidenceUntilRef.current
+    );
   }, []);
 
   useLayoutEffect(() => {
@@ -796,16 +807,16 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
     const scrolledUp = currentScrollTop < lastKnownScrollTopRef.current - USER_SCROLL_DELTA_EPSILON;
     const scrolledDown =
       currentScrollTop > lastKnownScrollTopRef.current + USER_SCROLL_DELTA_EPSILON;
-    const mouseGesture = mouseScrollGestureRef.current;
-    const hasUpwardInputEvidence =
-      mouseGesture?.kind === "scrollbar" ||
-      (mouseGesture?.kind === "autoscroll" && mouseGesture.hasUpwardEvidence) ||
-      window.performance.now() < upwardInputEvidenceUntilRef.current;
+    const userScrolledUp = scrolledUp && hasUpwardInputEvidence();
 
     if (!followOutputRef.current && isAtBottom && scrolledDown && !isJumpSettling()) {
       setFollowOutput(true);
-    } else if (followOutputRef.current && scrolledUp && hasUpwardInputEvidence) {
+    } else if (followOutputRef.current && userScrolledUp) {
       stopFollowingOutputFromUserIntent();
+    } else if (userScrolledUp) {
+      // Wheel listeners can run before or after the browser applies the scroll, so the
+      // upward scroll itself re-arms loading when it reaches the start.
+      rearmHistoryStartFromUserIntent();
     }
 
     lastKnownScrollTopRef.current = currentScrollTop;
@@ -816,8 +827,10 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
     evaluateHistoryStart();
   }, [
     evaluateHistoryStart,
+    hasUpwardInputEvidence,
     isJumpSettling,
     readingAnchor,
+    rearmHistoryStartFromUserIntent,
     stopFollowingOutputFromUserIntent,
     updateScrollMetrics,
   ]);
@@ -1208,11 +1221,14 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
       minHeight: "100%",
       paddingTop: CONTENT_PADDING_TOP_PX,
       paddingBottom: 16,
-      paddingLeft: isMobileBreakpoint ? 8 : 16,
-      paddingRight: isMobileBreakpoint ? 8 : 16,
+      ...resolveChatColumnGutters({
+        gutter: isMobileBreakpoint ? 8 : 16,
+        outlineInset: props.outlineInset ?? 0,
+        contentMaxWidth,
+      }),
       boxSizing: "border-box",
     };
-  }, [isMobileBreakpoint]);
+  }, [isMobileBreakpoint, props.outlineInset, contentMaxWidth]);
   const scrollContainerStyle = useMemo((): CSSProperties => {
     return {
       width: "100%",
