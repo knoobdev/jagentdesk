@@ -365,6 +365,7 @@ export const ptBR: TranslationResources = {
       withTokens: "Contexto compactado ({{tokens}}K tokens)",
       completed: "Contexto compactado",
     },
+    turnFooter: { workedFor: "Trabalhou por {{duration}}" },
   },
   importSession: {
     title: "Importar sessão",
@@ -957,6 +958,44 @@ export const ptBR: TranslationResources = {
           statusLoadFailed: "Não foi possível carregar o status da pull request",
           activityLoadFailed: "Não foi possível carregar a atividade da pull request",
         },
+        checksOverview: {
+          headline: {
+            actionRequired: "Algumas verifica\u00E7\u00F5es precisam da sua aten\u00E7\u00E3o",
+            failure: "Algumas verifica\u00E7\u00F5es n\u00E3o foram bem-sucedidas",
+            pending: "Algumas verifica\u00E7\u00F5es ainda n\u00E3o terminaram",
+            success: "Todas as verifica\u00E7\u00F5es foram aprovadas",
+            none: "Nenhuma verifica\u00E7\u00E3o",
+          },
+          count: {
+            actionRequired: "{{count}} com a\u00E7\u00E3o pendente",
+            warning: "{{count}} com aviso",
+            failure: "{{count}} com falha",
+            pending: "{{count}} em andamento",
+            manual: "{{count}} manual(is)",
+            success: "{{count}} aprovada(s)",
+            ignored: "{{count}} ignorada(s)",
+          },
+          detailOne: "Verifica\u00E7\u00E3o: {{parts}}",
+          detailMany: "Verifica\u00E7\u00F5es: {{parts}}",
+          groupOne: {
+            actionRequired: "{{count}} verifica\u00E7\u00E3o com a\u00E7\u00E3o pendente",
+            warning: "{{count}} verifica\u00E7\u00E3o com aviso",
+            failure: "{{count}} verifica\u00E7\u00E3o com falha",
+            pending: "{{count}} verifica\u00E7\u00E3o em andamento",
+            manual: "{{count}} verifica\u00E7\u00E3o manual",
+            success: "{{count}} verifica\u00E7\u00E3o aprovada",
+            ignored: "{{count}} verifica\u00E7\u00E3o ignorada",
+          },
+          groupMany: {
+            actionRequired: "{{count}} verifica\u00E7\u00F5es com a\u00E7\u00E3o pendente",
+            warning: "{{count}} verifica\u00E7\u00F5es com aviso",
+            failure: "{{count}} verifica\u00E7\u00F5es com falha",
+            pending: "{{count}} verifica\u00E7\u00F5es em andamento",
+            manual: "{{count}} verifica\u00E7\u00F5es manuais",
+            success: "{{count}} verifica\u00E7\u00F5es aprovadas",
+            ignored: "{{count}} verifica\u00E7\u00F5es ignoradas",
+          },
+        },
       },
       forgeSetup: {
         installCli: "Instale a CLI {{cli}} para usar os recursos do {{brand}}.",
@@ -1113,6 +1152,13 @@ export const ptBR: TranslationResources = {
         undoArchive: "Desfazer",
         undoArchiveFailed: "Não foi possível desfazer o arquivamento",
       },
+    },
+    statusBucket: {
+      needsInput: "Precisa de resposta",
+      failed: "Com falha",
+      readyToReview: "Para revisar",
+      working: "Em execu\u00E7\u00E3o",
+      done: "Conclu\u00EDdo",
     },
   },
   newWorkspace: {
@@ -1462,7 +1508,6 @@ export const ptBR: TranslationResources = {
       keyChanged: "Warning: the daemon key has changed. Verify this change with the host owner.",
       connect: "Connect",
     },
-
     verify: {
       failed: "Pairing failed",
       saveFailed:

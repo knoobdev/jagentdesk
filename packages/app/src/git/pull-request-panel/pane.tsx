@@ -571,7 +571,7 @@ export function PullRequestPane({
 
         {nativeChecksSection ?? (
           <Section
-            title="Checks"
+            title={t("workspace.git.pr.sections.checks")}
             open={checksOpen}
             onToggle={handleToggleChecks}
             summary={
@@ -598,7 +598,7 @@ export function PullRequestPane({
             }
           >
             {data.checks.length === 0 ? (
-              <Text style={sectionKitStyles.emptyText}>No checks</Text>
+              <Text style={sectionKitStyles.emptyText}>{t("workspace.git.pr.empty.noChecks")}</Text>
             ) : (
               data.checks.map((check) => {
                 const checkKey = getCheckIdentity(check);

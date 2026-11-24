@@ -365,6 +365,10 @@ export const ru: TranslationResources = {
       withTokens: "Сжатый контекст (токены{{tokens}}K)",
       completed: "Контекст сжат",
     },
+    turnFooter: {
+      workedFor:
+        "\u0412\u0440\u0435\u043C\u044F \u0440\u0430\u0431\u043E\u0442\u044B: {{duration}}",
+    },
   },
   importSession: {
     title: "Импортировать сеанс",
@@ -959,6 +963,57 @@ export const ru: TranslationResources = {
           statusLoadFailed: "Невозможно загрузить статус запроса на включение",
           activityLoadFailed: "Невозможно загрузить активность запроса на включение",
         },
+        checksOverview: {
+          headline: {
+            actionRequired:
+              "\u041D\u0435\u043A\u043E\u0442\u043E\u0440\u044B\u0435 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438 \u0442\u0440\u0435\u0431\u0443\u044E\u0442 \u0432\u043D\u0438\u043C\u0430\u043D\u0438\u044F",
+            failure:
+              "\u041D\u0435\u043A\u043E\u0442\u043E\u0440\u044B\u0435 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438 \u043D\u0435 \u043F\u0440\u043E\u0439\u0434\u0435\u043D\u044B",
+            pending:
+              "\u041D\u0435\u043A\u043E\u0442\u043E\u0440\u044B\u0435 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438 \u0435\u0449\u0451 \u043D\u0435 \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u044B",
+            success:
+              "\u0412\u0441\u0435 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438 \u043F\u0440\u043E\u0439\u0434\u0435\u043D\u044B",
+            none: "\u041D\u0435\u0442 \u043F\u0440\u043E\u0432\u0435\u0440\u043E\u043A",
+          },
+          count: {
+            actionRequired:
+              "\u0442\u0440\u0435\u0431\u0443\u0435\u0442 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0439: {{count}}",
+            warning:
+              "\u0441 \u043F\u0440\u0435\u0434\u0443\u043F\u0440\u0435\u0436\u0434\u0435\u043D\u0438\u0435\u043C: {{count}}",
+            failure: "\u043D\u0435 \u043F\u0440\u043E\u0439\u0434\u0435\u043D\u043E: {{count}}",
+            pending:
+              "\u0432\u044B\u043F\u043E\u043B\u043D\u044F\u0435\u0442\u0441\u044F: {{count}}",
+            manual: "\u0432\u0440\u0443\u0447\u043D\u0443\u044E: {{count}}",
+            success: "\u043F\u0440\u043E\u0439\u0434\u0435\u043D\u043E: {{count}}",
+            ignored: "\u043F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u043E: {{count}}",
+          },
+          detailOne: "\u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 ({{parts}})",
+          detailMany: "\u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0438 ({{parts}})",
+          groupOne: {
+            actionRequired:
+              "\u0422\u0440\u0435\u0431\u0443\u0435\u0442 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0439: {{count}}",
+            warning:
+              "\u0421 \u043F\u0440\u0435\u0434\u0443\u043F\u0440\u0435\u0436\u0434\u0435\u043D\u0438\u0435\u043C: {{count}}",
+            failure: "\u041D\u0435 \u043F\u0440\u043E\u0439\u0434\u0435\u043D\u0430: {{count}}",
+            pending:
+              "\u0412\u044B\u043F\u043E\u043B\u043D\u044F\u0435\u0442\u0441\u044F: {{count}}",
+            manual: "\u0420\u0443\u0447\u043D\u0430\u044F: {{count}}",
+            success: "\u041F\u0440\u043E\u0439\u0434\u0435\u043D\u0430: {{count}}",
+            ignored: "\u041F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u0430: {{count}}",
+          },
+          groupMany: {
+            actionRequired:
+              "\u0422\u0440\u0435\u0431\u0443\u044E\u0442 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0439: {{count}}",
+            warning:
+              "\u0421 \u043F\u0440\u0435\u0434\u0443\u043F\u0440\u0435\u0436\u0434\u0435\u043D\u0438\u0435\u043C: {{count}}",
+            failure: "\u041D\u0435 \u043F\u0440\u043E\u0439\u0434\u0435\u043D\u044B: {{count}}",
+            pending:
+              "\u0412\u044B\u043F\u043E\u043B\u043D\u044F\u044E\u0442\u0441\u044F: {{count}}",
+            manual: "\u0420\u0443\u0447\u043D\u044B\u0435: {{count}}",
+            success: "\u041F\u0440\u043E\u0439\u0434\u0435\u043D\u044B: {{count}}",
+            ignored: "\u041F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u044B: {{count}}",
+          },
+        },
       },
       forgeSetup: {
         installCli: "Установите CLI {{cli}}, чтобы использовать возможности {{brand}}.",
@@ -1116,6 +1171,13 @@ export const ru: TranslationResources = {
         undoArchive: "Отменить",
         undoArchiveFailed: "Не удалось отменить архивацию",
       },
+    },
+    statusBucket: {
+      needsInput: "\u041E\u0436\u0438\u0434\u0430\u0435\u0442 \u0432\u0432\u043E\u0434\u0430",
+      failed: "\u041E\u0448\u0438\u0431\u043A\u0430",
+      readyToReview: "\u041D\u0430 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0443",
+      working: "\u0412 \u0440\u0430\u0431\u043E\u0442\u0435",
+      done: "\u0413\u043E\u0442\u043E\u0432\u043E",
     },
   },
   newWorkspace: {

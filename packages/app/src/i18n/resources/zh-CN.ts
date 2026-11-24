@@ -362,6 +362,7 @@ export const zhCN: TranslationResources = {
       withTokens: "上下文已压缩（{{tokens}}K tokens）",
       completed: "上下文已压缩",
     },
+    turnFooter: { workedFor: "\u5DE5\u4F5C\u4E86 {{duration}}" },
   },
   importSession: {
     title: "导入会话",
@@ -925,6 +926,44 @@ export const zhCN: TranslationResources = {
           statusLoadFailed: "无法加载 Pull Request 状态",
           activityLoadFailed: "无法加载 Pull Request 活动",
         },
+        checksOverview: {
+          headline: {
+            actionRequired: "\u90E8\u5206\u68C0\u67E5\u9700\u8981\u4F60\u5904\u7406",
+            failure: "\u90E8\u5206\u68C0\u67E5\u672A\u901A\u8FC7",
+            pending: "\u90E8\u5206\u68C0\u67E5\u5C1A\u672A\u5B8C\u6210",
+            success: "\u6240\u6709\u68C0\u67E5\u5747\u5DF2\u901A\u8FC7",
+            none: "\u6CA1\u6709\u68C0\u67E5",
+          },
+          count: {
+            actionRequired: "{{count}} \u4E2A\u9700\u5904\u7406",
+            warning: "{{count}} \u4E2A\u8B66\u544A",
+            failure: "{{count}} \u4E2A\u5931\u8D25",
+            pending: "{{count}} \u4E2A\u8FDB\u884C\u4E2D",
+            manual: "{{count}} \u4E2A\u624B\u52A8",
+            success: "{{count}} \u4E2A\u6210\u529F",
+            ignored: "{{count}} \u4E2A\u5DF2\u8DF3\u8FC7",
+          },
+          detailOne: "\u68C0\u67E5\uFF1A{{parts}}",
+          detailMany: "\u68C0\u67E5\uFF1A{{parts}}",
+          groupOne: {
+            actionRequired: "{{count}} \u4E2A\u9700\u5904\u7406\u7684\u68C0\u67E5",
+            warning: "{{count}} \u4E2A\u6709\u8B66\u544A\u7684\u68C0\u67E5",
+            failure: "{{count}} \u4E2A\u5931\u8D25\u7684\u68C0\u67E5",
+            pending: "{{count}} \u4E2A\u8FDB\u884C\u4E2D\u7684\u68C0\u67E5",
+            manual: "{{count}} \u4E2A\u624B\u52A8\u68C0\u67E5",
+            success: "{{count}} \u4E2A\u6210\u529F\u7684\u68C0\u67E5",
+            ignored: "{{count}} \u4E2A\u5DF2\u8DF3\u8FC7\u7684\u68C0\u67E5",
+          },
+          groupMany: {
+            actionRequired: "{{count}} \u4E2A\u9700\u5904\u7406\u7684\u68C0\u67E5",
+            warning: "{{count}} \u4E2A\u6709\u8B66\u544A\u7684\u68C0\u67E5",
+            failure: "{{count}} \u4E2A\u5931\u8D25\u7684\u68C0\u67E5",
+            pending: "{{count}} \u4E2A\u8FDB\u884C\u4E2D\u7684\u68C0\u67E5",
+            manual: "{{count}} \u4E2A\u624B\u52A8\u68C0\u67E5",
+            success: "{{count}} \u4E2A\u6210\u529F\u7684\u68C0\u67E5",
+            ignored: "{{count}} \u4E2A\u5DF2\u8DF3\u8FC7\u7684\u68C0\u67E5",
+          },
+        },
       },
       forgeSetup: {
         installCli: "安装 {{cli}} CLI 以使用 {{brand}} 功能。",
@@ -1076,6 +1115,13 @@ export const zhCN: TranslationResources = {
         undoArchive: "撤销",
         undoArchiveFailed: "无法撤销归档",
       },
+    },
+    statusBucket: {
+      needsInput: "\u9700\u8981\u8F93\u5165",
+      failed: "\u5931\u8D25",
+      readyToReview: "\u5F85\u67E5\u770B",
+      working: "\u8FD0\u884C\u4E2D",
+      done: "\u5DF2\u5B8C\u6210",
     },
   },
   newWorkspace: {
@@ -1417,7 +1463,6 @@ export const zhCN: TranslationResources = {
       keyChanged: "Warning: the daemon key has changed. Verify this change with the host owner.",
       connect: "Connect",
     },
-
     verify: {
       failed: "Pairing failed",
       saveFailed:

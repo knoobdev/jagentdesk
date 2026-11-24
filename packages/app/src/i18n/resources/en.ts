@@ -361,6 +361,7 @@ export const en = {
       withTokens: "Context compacted ({{tokens}}K tokens)",
       completed: "Context compacted",
     },
+    turnFooter: { workedFor: "Worked for {{duration}}" },
   },
   importSession: {
     title: "Import session",
@@ -945,6 +946,44 @@ export const en = {
           statusLoadFailed: "Unable to load pull request status",
           activityLoadFailed: "Unable to load pull request activity",
         },
+        checksOverview: {
+          headline: {
+            actionRequired: "Some checks need your attention",
+            failure: "Some checks were not successful",
+            pending: "Some checks haven't completed yet",
+            success: "All checks have passed",
+            none: "No checks",
+          },
+          count: {
+            actionRequired: "{{count}} needs action",
+            warning: "{{count}} warning",
+            failure: "{{count}} failing",
+            pending: "{{count}} in progress",
+            manual: "{{count}} manual",
+            success: "{{count}} successful",
+            ignored: "{{count}} skipped",
+          },
+          detailOne: "{{parts}} check",
+          detailMany: "{{parts}} checks",
+          groupOne: {
+            actionRequired: "{{count}} needs action check",
+            warning: "{{count}} warning check",
+            failure: "{{count}} failing check",
+            pending: "{{count}} in progress check",
+            manual: "{{count}} manual check",
+            success: "{{count}} successful check",
+            ignored: "{{count}} skipped check",
+          },
+          groupMany: {
+            actionRequired: "{{count}} needs action checks",
+            warning: "{{count}} warning checks",
+            failure: "{{count}} failing checks",
+            pending: "{{count}} in progress checks",
+            manual: "{{count}} manual checks",
+            success: "{{count}} successful checks",
+            ignored: "{{count}} skipped checks",
+          },
+        },
       },
       forgeSetup: {
         installCli: "Install the {{cli}} CLI to use {{brand}} features.",
@@ -1114,6 +1153,13 @@ export const en = {
         undoArchive: "Undo",
         undoArchiveFailed: "Couldn't undo the archive",
       },
+    },
+    statusBucket: {
+      needsInput: "Needs input",
+      failed: "Failed",
+      readyToReview: "Ready to review",
+      working: "Working",
+      done: "Done",
     },
   },
   newWorkspace: {
@@ -1503,7 +1549,6 @@ export const en = {
       keyChanged: "Warning: the daemon key has changed. Verify this change with the host owner.",
       connect: "Connect",
     },
-
     verify: {
       failed: "Pairing failed",
       saveFailed:

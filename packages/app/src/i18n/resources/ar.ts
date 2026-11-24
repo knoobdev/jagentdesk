@@ -362,6 +362,7 @@ export const ar: TranslationResources = {
       withTokens: "تم ضغط السياق (رموز{{tokens}}K)",
       completed: "تم ضغط السياق",
     },
+    turnFooter: { workedFor: "\u0639\u0645\u0644 \u0644\u0645\u062F\u0629 {{duration}}" },
   },
   importSession: {
     title: "جلسة الاستيراد",
@@ -935,6 +936,57 @@ export const ar: TranslationResources = {
           statusLoadFailed: "غير قادر على تحميل حالة طلب السحب",
           activityLoadFailed: "غير قادر على تحميل نشاط طلب السحب",
         },
+        checksOverview: {
+          headline: {
+            actionRequired:
+              "\u0628\u0639\u0636 \u0627\u0644\u0641\u062D\u0648\u0635\u0627\u062A \u062A\u062D\u062A\u0627\u062C \u0625\u0644\u0649 \u0627\u0646\u062A\u0628\u0627\u0647\u0643",
+            failure:
+              "\u0628\u0639\u0636 \u0627\u0644\u0641\u062D\u0648\u0635\u0627\u062A \u0644\u0645 \u062A\u0646\u062C\u062D",
+            pending:
+              "\u0628\u0639\u0636 \u0627\u0644\u0641\u062D\u0648\u0635\u0627\u062A \u0644\u0645 \u062A\u0643\u062A\u0645\u0644 \u0628\u0639\u062F",
+            success:
+              "\u0646\u062C\u062D\u062A \u062C\u0645\u064A\u0639 \u0627\u0644\u0641\u062D\u0648\u0635\u0627\u062A",
+            none: "\u0644\u0627 \u062A\u0648\u062C\u062F \u0641\u062D\u0648\u0635\u0627\u062A",
+          },
+          count: {
+            actionRequired:
+              "{{count}} \u062A\u062D\u062A\u0627\u062C \u0625\u062C\u0631\u0627\u0621\u064B",
+            warning: "{{count}} \u0645\u0639 \u062A\u062D\u0630\u064A\u0631",
+            failure: "{{count}} \u0641\u0627\u0634\u0644\u0629",
+            pending: "{{count}} \u0642\u064A\u062F \u0627\u0644\u062A\u0634\u063A\u064A\u0644",
+            manual: "{{count}} \u064A\u062F\u0648\u064A\u0629",
+            success: "{{count}} \u0646\u0627\u062C\u062D\u0629",
+            ignored: "{{count}} \u0645\u062A\u062E\u0637\u0627\u0629",
+          },
+          detailOne: "\u0627\u0644\u0641\u062D\u0635: {{parts}}",
+          detailMany: "\u0627\u0644\u0641\u062D\u0648\u0635\u0627\u062A: {{parts}}",
+          groupOne: {
+            actionRequired:
+              "{{count}} \u0641\u062D\u0635 \u064A\u062D\u062A\u0627\u062C \u0625\u062C\u0631\u0627\u0621\u064B",
+            warning: "{{count}} \u0641\u062D\u0635 \u0645\u0639 \u062A\u062D\u0630\u064A\u0631",
+            failure: "{{count}} \u0641\u062D\u0635 \u0641\u0627\u0634\u0644",
+            pending:
+              "{{count}} \u0641\u062D\u0635 \u0642\u064A\u062F \u0627\u0644\u062A\u0634\u063A\u064A\u0644",
+            manual: "{{count}} \u0641\u062D\u0635 \u064A\u062F\u0648\u064A",
+            success: "{{count}} \u0641\u062D\u0635 \u0646\u0627\u062C\u062D",
+            ignored: "{{count}} \u0641\u062D\u0635 \u0645\u062A\u062E\u0637\u0649",
+          },
+          groupMany: {
+            actionRequired:
+              "{{count}} \u0641\u062D\u0648\u0635\u0627\u062A \u062A\u062D\u062A\u0627\u062C \u0625\u062C\u0631\u0627\u0621\u064B",
+            warning:
+              "{{count}} \u0641\u062D\u0648\u0635\u0627\u062A \u0645\u0639 \u062A\u062D\u0630\u064A\u0631",
+            failure:
+              "{{count}} \u0641\u062D\u0648\u0635\u0627\u062A \u0641\u0627\u0634\u0644\u0629",
+            pending:
+              "{{count}} \u0641\u062D\u0648\u0635\u0627\u062A \u0642\u064A\u062F \u0627\u0644\u062A\u0634\u063A\u064A\u0644",
+            manual: "{{count}} \u0641\u062D\u0648\u0635\u0627\u062A \u064A\u062F\u0648\u064A\u0629",
+            success:
+              "{{count}} \u0641\u062D\u0648\u0635\u0627\u062A \u0646\u0627\u062C\u062D\u0629",
+            ignored:
+              "{{count}} \u0641\u062D\u0648\u0635\u0627\u062A \u0645\u062A\u062E\u0637\u0627\u0629",
+          },
+        },
       },
       forgeSetup: {
         installCli: "ثبّت واجهة سطر الأوامر {{cli}} لاستخدام ميزات {{brand}}.",
@@ -1091,6 +1143,14 @@ export const ar: TranslationResources = {
         undoArchive: "تراجع",
         undoArchiveFailed: "تعذّر التراجع عن الأرشفة",
       },
+    },
+    statusBucket: {
+      needsInput: "\u062A\u062D\u062A\u0627\u062C \u0625\u062F\u062E\u0627\u0644\u0627\u064B",
+      failed: "\u0641\u0634\u0644",
+      readyToReview:
+        "\u062C\u0627\u0647\u0632\u0629 \u0644\u0644\u0645\u0631\u0627\u062C\u0639\u0629",
+      working: "\u0642\u064A\u062F \u0627\u0644\u0639\u0645\u0644",
+      done: "\u062A\u0645",
     },
   },
   newWorkspace: {
@@ -1438,7 +1498,6 @@ export const ar: TranslationResources = {
       keyChanged: "Warning: the daemon key has changed. Verify this change with the host owner.",
       connect: "Connect",
     },
-
     verify: {
       failed: "Pairing failed",
       saveFailed:

@@ -367,6 +367,7 @@ export const fr: TranslationResources = {
       withTokens: "Contexte compacté (jetons{{tokens}}K)",
       completed: "Contexte compacté",
     },
+    turnFooter: { workedFor: "A travaill\u00E9 pendant {{duration}}" },
   },
   importSession: {
     title: "Session d'importation",
@@ -964,6 +965,44 @@ export const fr: TranslationResources = {
           statusLoadFailed: "Impossible de charger le statut de la demande d'extraction",
           activityLoadFailed: "Impossible de charger l'activité de demande d'extraction",
         },
+        checksOverview: {
+          headline: {
+            actionRequired: "Certaines v\u00E9rifications demandent votre attention",
+            failure: "Certaines v\u00E9rifications ont \u00E9chou\u00E9",
+            pending: "Certaines v\u00E9rifications ne sont pas termin\u00E9es",
+            success: "Toutes les v\u00E9rifications ont r\u00E9ussi",
+            none: "Aucune v\u00E9rification",
+          },
+          count: {
+            actionRequired: "{{count}} \u00E0 traiter",
+            warning: "{{count}} avec avertissement",
+            failure: "{{count}} en \u00E9chec",
+            pending: "{{count}} en cours",
+            manual: "{{count}} manuelle(s)",
+            success: "{{count}} r\u00E9ussie(s)",
+            ignored: "{{count}} ignor\u00E9e(s)",
+          },
+          detailOne: "V\u00E9rification : {{parts}}",
+          detailMany: "V\u00E9rifications : {{parts}}",
+          groupOne: {
+            actionRequired: "{{count}} v\u00E9rification \u00E0 traiter",
+            warning: "{{count}} v\u00E9rification avec avertissement",
+            failure: "{{count}} v\u00E9rification en \u00E9chec",
+            pending: "{{count}} v\u00E9rification en cours",
+            manual: "{{count}} v\u00E9rification manuelle",
+            success: "{{count}} v\u00E9rification r\u00E9ussie",
+            ignored: "{{count}} v\u00E9rification ignor\u00E9e",
+          },
+          groupMany: {
+            actionRequired: "{{count}} v\u00E9rifications \u00E0 traiter",
+            warning: "{{count}} v\u00E9rifications avec avertissement",
+            failure: "{{count}} v\u00E9rifications en \u00E9chec",
+            pending: "{{count}} v\u00E9rifications en cours",
+            manual: "{{count}} v\u00E9rifications manuelles",
+            success: "{{count}} v\u00E9rifications r\u00E9ussies",
+            ignored: "{{count}} v\u00E9rifications ignor\u00E9es",
+          },
+        },
       },
       forgeSetup: {
         installCli: "Installez la CLI {{cli}} pour utiliser les fonctionnalités {{brand}}.",
@@ -1120,6 +1159,13 @@ export const fr: TranslationResources = {
         undoArchive: "Annuler",
         undoArchiveFailed: "Impossible d’annuler l’archivage",
       },
+    },
+    statusBucket: {
+      needsInput: "Attend une r\u00E9ponse",
+      failed: "\u00C9chec",
+      readyToReview: "\u00C0 relire",
+      working: "En cours",
+      done: "Termin\u00E9",
     },
   },
   newWorkspace: {
@@ -1478,7 +1524,6 @@ export const fr: TranslationResources = {
       keyChanged: "Warning: the daemon key has changed. Verify this change with the host owner.",
       connect: "Connect",
     },
-
     verify: {
       failed: "Pairing failed",
       saveFailed:

@@ -366,6 +366,7 @@ export const ja: TranslationResources = {
       withTokens: "コンテキストを圧縮しました（{{tokens}}Kトークン）",
       completed: "コンテキストを圧縮しました",
     },
+    turnFooter: { workedFor: "\u4F5C\u696D\u6642\u9593 {{duration}}" },
   },
   importSession: {
     title: "セッションをインポート",
@@ -947,6 +948,50 @@ export const ja: TranslationResources = {
           statusLoadFailed: "プルリクエストのステータスを読み込めません",
           activityLoadFailed: "プルリクエストのアクティビティを読み込めません",
         },
+        checksOverview: {
+          headline: {
+            actionRequired:
+              "\u5BFE\u5FDC\u304C\u5FC5\u8981\u306A\u30C1\u30A7\u30C3\u30AF\u304C\u3042\u308A\u307E\u3059",
+            failure:
+              "\u5931\u6557\u3057\u305F\u30C1\u30A7\u30C3\u30AF\u304C\u3042\u308A\u307E\u3059",
+            pending:
+              "\u5B8C\u4E86\u3057\u3066\u3044\u306A\u3044\u30C1\u30A7\u30C3\u30AF\u304C\u3042\u308A\u307E\u3059",
+            success:
+              "\u3059\u3079\u3066\u306E\u30C1\u30A7\u30C3\u30AF\u306B\u5408\u683C\u3057\u307E\u3057\u305F",
+            none: "\u30C1\u30A7\u30C3\u30AF\u306A\u3057",
+          },
+          count: {
+            actionRequired: "{{count}} \u4EF6\u8981\u5BFE\u5FDC",
+            warning: "{{count}} \u4EF6\u8B66\u544A",
+            failure: "{{count}} \u4EF6\u5931\u6557",
+            pending: "{{count}} \u4EF6\u5B9F\u884C\u4E2D",
+            manual: "{{count}} \u4EF6\u624B\u52D5",
+            success: "{{count}} \u4EF6\u6210\u529F",
+            ignored: "{{count}} \u4EF6\u30B9\u30AD\u30C3\u30D7",
+          },
+          detailOne: "\u30C1\u30A7\u30C3\u30AF: {{parts}}",
+          detailMany: "\u30C1\u30A7\u30C3\u30AF: {{parts}}",
+          groupOne: {
+            actionRequired: "\u8981\u5BFE\u5FDC\u306E\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+            warning: "\u8B66\u544A\u306E\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+            failure: "\u5931\u6557\u3057\u305F\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+            pending: "\u5B9F\u884C\u4E2D\u306E\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+            manual: "\u624B\u52D5\u306E\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+            success: "\u6210\u529F\u3057\u305F\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+            ignored:
+              "\u30B9\u30AD\u30C3\u30D7\u3055\u308C\u305F\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+          },
+          groupMany: {
+            actionRequired: "\u8981\u5BFE\u5FDC\u306E\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+            warning: "\u8B66\u544A\u306E\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+            failure: "\u5931\u6557\u3057\u305F\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+            pending: "\u5B9F\u884C\u4E2D\u306E\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+            manual: "\u624B\u52D5\u306E\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+            success: "\u6210\u529F\u3057\u305F\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+            ignored:
+              "\u30B9\u30AD\u30C3\u30D7\u3055\u308C\u305F\u30C1\u30A7\u30C3\u30AF {{count}} \u4EF6",
+          },
+        },
       },
       forgeSetup: {
         installCli: "{{brand}} の機能を使うには {{cli}} CLI をインストールしてください。",
@@ -1103,6 +1148,13 @@ export const ja: TranslationResources = {
         undoArchive: "元に戻す",
         undoArchiveFailed: "アーカイブを元に戻せませんでした",
       },
+    },
+    statusBucket: {
+      needsInput: "\u5165\u529B\u5F85\u3061",
+      failed: "\u5931\u6557",
+      readyToReview: "\u30EC\u30D3\u30E5\u30FC\u5F85\u3061",
+      working: "\u5B9F\u884C\u4E2D",
+      done: "\u5B8C\u4E86",
     },
   },
   newWorkspace: {

@@ -366,6 +366,7 @@ export const es: TranslationResources = {
       withTokens: "Contexto compactado (tokens{{tokens}}K)",
       completed: "Contexto compactado",
     },
+    turnFooter: { workedFor: "Trabaj\u00F3 durante {{duration}}" },
   },
   importSession: {
     title: "Importar sesión",
@@ -968,6 +969,44 @@ export const es: TranslationResources = {
           statusLoadFailed: "No se puede cargar el estado de la solicitud de extracción",
           activityLoadFailed: "No se puede cargar la actividad de solicitud de extracción",
         },
+        checksOverview: {
+          headline: {
+            actionRequired: "Algunas comprobaciones requieren tu atenci\u00F3n",
+            failure: "Algunas comprobaciones no se superaron",
+            pending: "Algunas comprobaciones a\u00FAn no han terminado",
+            success: "Todas las comprobaciones se superaron",
+            none: "Sin comprobaciones",
+          },
+          count: {
+            actionRequired: "{{count}} con acci\u00F3n pendiente",
+            warning: "{{count}} con advertencia",
+            failure: "{{count}} con error",
+            pending: "{{count}} en curso",
+            manual: "{{count}} manual(es)",
+            success: "{{count}} superada(s)",
+            ignored: "{{count}} omitida(s)",
+          },
+          detailOne: "Comprobaci\u00F3n: {{parts}}",
+          detailMany: "Comprobaciones: {{parts}}",
+          groupOne: {
+            actionRequired: "{{count}} comprobaci\u00F3n con acci\u00F3n pendiente",
+            warning: "{{count}} comprobaci\u00F3n con advertencia",
+            failure: "{{count}} comprobaci\u00F3n con error",
+            pending: "{{count}} comprobaci\u00F3n en curso",
+            manual: "{{count}} comprobaci\u00F3n manual",
+            success: "{{count}} comprobaci\u00F3n superada",
+            ignored: "{{count}} comprobaci\u00F3n omitida",
+          },
+          groupMany: {
+            actionRequired: "{{count}} comprobaciones con acci\u00F3n pendiente",
+            warning: "{{count}} comprobaciones con advertencia",
+            failure: "{{count}} comprobaciones con error",
+            pending: "{{count}} comprobaciones en curso",
+            manual: "{{count}} comprobaciones manuales",
+            success: "{{count}} comprobaciones superadas",
+            ignored: "{{count}} comprobaciones omitidas",
+          },
+        },
       },
       forgeSetup: {
         installCli: "Instala la CLI de {{cli}} para usar las funciones de {{brand}}.",
@@ -1125,6 +1164,13 @@ export const es: TranslationResources = {
         undoArchive: "Deshacer",
         undoArchiveFailed: "No se pudo deshacer el archivado",
       },
+    },
+    statusBucket: {
+      needsInput: "Necesita datos",
+      failed: "Con error",
+      readyToReview: "Para revisar",
+      working: "En ejecuci\u00F3n",
+      done: "Terminado",
     },
   },
   newWorkspace: {
@@ -1478,7 +1524,6 @@ export const es: TranslationResources = {
       keyChanged: "Warning: the daemon key has changed. Verify this change with the host owner.",
       connect: "Connect",
     },
-
     verify: {
       failed: "Pairing failed",
       saveFailed:
