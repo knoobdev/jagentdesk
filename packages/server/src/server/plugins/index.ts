@@ -734,6 +734,10 @@ export class PluginService {
           label: provider.label,
           description: provider.description,
           command: provider.command,
+          // Bundled opt-in providers are activated by the per-host Built-in switch.
+          requiresConfiguration: this.builtinPluginIds.has(pluginId)
+            ? false
+            : provider.requiresConfiguration,
           status: provider.hasStatus
             ? (request) => {
                 if (!this.runtime.getProviderStatus)

@@ -4,6 +4,7 @@ export const builtinPluginStrings = {
   loading: "Loading built-in plugins...",
   retry: "Retry",
   updating: "Updating...",
+  unavailable: "Unavailable",
   requires: "Requires {{names}}",
   alsoTurnOn: "Also turn on {{names}}?",
   alsoTurnOff: "Also turn off {{names}}?",

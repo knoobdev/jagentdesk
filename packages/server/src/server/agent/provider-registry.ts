@@ -108,6 +108,7 @@ export type ClaudeSpawnEnvResolver = (providerId: string) => Promise<Record<stri
 
 /** Provider metadata and an unconfigured factory; the registry owns override application. */
 export interface RegisteredProviderDefinition extends AgentProviderDefinition {
+  requiresConfiguration?: boolean;
   iconSvg?: string;
   supportsExactMcpPreapproval: boolean;
   createClient: (logger: Logger, runtimeSettings?: ProviderRuntimeSettings) => AgentClient;
@@ -1006,7 +1007,9 @@ export function buildProviderRegistry(
       throw new Error(`Plugin provider '${provider}' conflicts with a built-in provider`);
     }
     const override = providerOverrides[provider];
-    if (override?.extends) {
+    if (requiresMissingConfiguration(definition, override)) continue;
+
+    if (isDerivedOverride(override)) {
       logger.warn({ provider }, "Plugin provider shadowed by configured provider");
       continue;
     }
@@ -1097,4 +1100,14 @@ function configuredProviderOptions(
   // COMPAT(providerParams): added in v0.10.0, remove after 2027-03-30 once configs use options.
   // options wins as a whole record when both spellings are supplied.
   return override?.options ?? override?.params;
+}
+
+function requiresMissingConfiguration(
+  definition: RegisteredProviderDefinition,
+  override: ProviderOverride | undefined,
+): boolean {
+  return definition.requiresConfiguration === true && !override;
+}
+function isDerivedOverride(override: ProviderOverride | undefined): boolean {
+  return Boolean(override?.extends);
 }

@@ -320,6 +320,10 @@ export class ProviderSnapshotManager {
     return Object.prototype.hasOwnProperty.call(this.providerRegistry, provider);
   }
 
+  supportsConfigRequiredProvider(provider: AgentProvider): boolean {
+    return this.pluginProviders.definitions()[provider]?.requiresConfiguration === true;
+  }
+
   getProviderLabel(provider: AgentProvider): string {
     return this.providerRegistry[provider]?.label ?? provider;
   }

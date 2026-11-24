@@ -26,6 +26,7 @@ export const BUNDLED_PLUGIN_IDS = [
   "worktree-include",
   "muse-provider",
   "antigravity-provider",
+  "hoplite-provider",
 ] as const;
 export const BUILTIN_PLUGIN_IDS = [...STATIC_BUILTIN_PLUGIN_IDS, ...BUNDLED_PLUGIN_IDS] as const;
 export type BuiltinPluginId = (typeof BUILTIN_PLUGIN_IDS)[number];
@@ -210,10 +211,19 @@ export const BUILTIN_PLUGIN_MANIFESTS: readonly BuiltinPluginManifest[] = [
     requires: [],
     command: "agy",
   },
+  {
+    id: "hoplite-provider",
+    name: "Hoplite",
+    description: "Run Hoplite through its local hoplite CLI.",
+    defaultEnabled: false,
+    requires: [],
+    command: "hoplite",
+  },
 ];
 
 /** Existing and new server-info flags owned by each feature. Core forge checkout stays independent. */
 export const BUILTIN_PLUGIN_FEATURES = {
+  "hoplite-provider": [],
   "antigravity-provider": [],
   "muse-provider": [],
   "worktree-include": [],
