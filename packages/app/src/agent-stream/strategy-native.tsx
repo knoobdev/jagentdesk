@@ -1,3 +1,6 @@
+import { useRetainedPanelActive } from "@/components/retained-panel";
+import { useIsMobilePanelPresented } from "@/mobile-panels/provider";
+import { createInitialDrawDistanceExpansion } from "./initial-draw-distance";
 import {
   type ReactElement,
   type ReactNode,
@@ -9,6 +12,7 @@ import {
   useState,
 } from "react";
 import {
+  Dimensions,
   View,
   type LayoutChangeEvent,
   type NativeScrollEvent,
@@ -145,11 +149,25 @@ function NativeStreamViewport(props: StreamRenderInput & { strategy: StreamStrat
     baseListContentContainerStyle,
     strategy,
   } = props;
+  const isActive = useRetainedPanelActive();
+  const isSidebarActive = useIsMobilePanelPresented("agent-list");
+  const [drawDistance, setDrawDistance] = useState(() =>
+    Math.min(Dimensions.get("window").height, NATIVE_STREAM_DRAW_DISTANCE),
+  );
+  const [drawDistanceExpansion] = useState(() =>
+    createInitialDrawDistanceExpansion(
+      { requestFrame: requestAnimationFrame, cancelFrame: cancelAnimationFrame },
+      () => setDrawDistance(NATIVE_STREAM_DRAW_DISTANCE),
+    ),
+  );
   const { renderHistoryMountedRow, renderLiveHeadRow, renderLiveAuxiliary } = renderers;
   const listRef = useRef<LegendListRef>(null);
   // LegendList places the rows of each agent once, behind a hidden reveal (`dataKey`).
   const [placedAgentId, setPlacedAgentId] = useState<string | null>(null);
   const isListPlaced = placedAgentId === agentId;
+  useLayoutEffect(() => {
+    if (isActive && isListPlaced && !isSidebarActive) return drawDistanceExpansion.schedule();
+  }, [isActive, isListPlaced, isSidebarActive, drawDistanceExpansion]);
   const isListPlacedRef = useRef(isListPlaced);
   isListPlacedRef.current = isListPlaced;
   const streamViewportMetricsRef = useRef({
@@ -593,6 +611,7 @@ function NativeStreamViewport(props: StreamRenderInput & { strategy: StreamStrat
     // no row LegendList may anchor a history page on. The gesture's end decides following.
     cancelDisclosureHold();
     bottomAnchorController.beginUserScroll();
+    drawDistanceExpansion.pauseForScroll();
     const rearmed = rearmHistoryStartPagination(historyStartPaginationStateRef.current);
     if (rearmed !== historyStartPaginationStateRef.current) {
       historyStartPaginationStateRef.current = rearmed;
@@ -617,6 +636,7 @@ function NativeStreamViewport(props: StreamRenderInput & { strategy: StreamStrat
       bottomAnchorController.endUserScroll({
         isAtEnd: isReleasedAtEndRef.current || isAtEnd(),
       });
+      drawDistanceExpansion.resumeAfterScroll();
     });
   });
 
@@ -636,6 +656,7 @@ function NativeStreamViewport(props: StreamRenderInput & { strategy: StreamStrat
       bottomAnchorController.endUserScroll({
         isAtEnd: isReleasedAtEndRef.current || isScrollEventAtEnd(event),
       });
+      drawDistanceExpansion.resumeAfterScroll();
     },
   );
 
@@ -779,7 +800,7 @@ function NativeStreamViewport(props: StreamRenderInput & { strategy: StreamStrat
       recycleItems={false}
       alignItemsAtEnd
       initialScrollAtEnd
-      drawDistance={NATIVE_STREAM_DRAW_DISTANCE}
+      drawDistance={drawDistance}
       getEstimatedItemSize={getEstimatedItemSize}
       scrollEnabled={scrollEnabled}
       showsVerticalScrollIndicator
