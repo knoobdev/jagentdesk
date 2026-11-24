@@ -610,3 +610,36 @@ describe("content max width", () => {
     expect((await load("wide")).contentMaxWidth).toBeNull();
   });
 });
+
+it("uses Enter to send by default", async () => {
+  const deps = makeDeps();
+
+  const result = await loadAppSettingsFromStorage(deps);
+
+  expect(result.sendShortcut).toBe("enter");
+  expect(DEFAULT_CLIENT_SETTINGS.sendShortcut).toBe("enter");
+});
+
+it("loads the modifier Enter send preference", async () => {
+  const deps = makeDeps({
+    storage: createInMemoryKeyValueStorage({
+      [APP_SETTINGS_KEY]: JSON.stringify({ sendShortcut: "mod-enter" }),
+    }),
+  });
+
+  const result = await loadAppSettingsFromStorage(deps);
+
+  expect(result.sendShortcut).toBe("mod-enter");
+});
+
+it("falls back to Enter when the stored send shortcut is invalid", async () => {
+  const deps = makeDeps({
+    storage: createInMemoryKeyValueStorage({
+      [APP_SETTINGS_KEY]: JSON.stringify({ sendShortcut: "yes" }),
+    }),
+  });
+
+  const result = await loadAppSettingsFromStorage(deps);
+
+  expect(result.sendShortcut).toBe("enter");
+});

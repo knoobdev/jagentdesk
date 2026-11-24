@@ -298,6 +298,25 @@ export const vi = {
     },
     plugins: pluginSettings.vi,
     general: {
+      sendShortcut: {
+        options: {
+          "mod-enter": "{{modifier}}+Enter",
+          enter: "Enter",
+        },
+        label: "Send shortcut",
+      },
+
+      defaultSend: {
+        commandEnterDescriptions: {
+          queue: "When the agent is running, {{modifier}}+Enter queues. Enter inserts a new line.",
+
+          steer:
+            "When the agent is running, {{modifier}}+Enter steers the active turn. Enter inserts a new line.",
+          interrupt:
+            "When the agent is running, {{modifier}}+Enter interrupts. Enter inserts a new line.",
+        },
+      },
+
       language: {
         label: "Ngôn ngữ",
         description: "Ngôn ngữ ứng dụng",
@@ -316,6 +335,19 @@ export const vi = {
       },
     },
     appearance: {
+      layout: {
+        resetAccessibility: "Reset content width to default",
+
+        reset: "Reset",
+
+        contentWidthAccessibility: "Content width in pixels",
+
+        contentWidthHint: "Max width of chat and Markdown files on wide screens",
+
+        contentWidth: "Content width",
+        title: "Layout",
+      },
+
       theme: {
         title: "Giao diện",
         options: {

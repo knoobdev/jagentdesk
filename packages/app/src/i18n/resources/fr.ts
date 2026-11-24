@@ -1848,7 +1848,18 @@ export const fr: TranslationResources = {
         success: "Données du navigateur effacées.",
         error: "Impossible d'effacer les données du navigateur.",
       },
+      sendShortcut: {
+        label: "Send shortcut",
+        options: { enter: "Enter", "mod-enter": "{{modifier}}+Enter" },
+      },
       defaultSend: {
+        commandEnterDescriptions: {
+          interrupt:
+            "When the agent is running, {{modifier}}+Enter interrupts. Enter inserts a new line.",
+          steer:
+            "When the agent is running, {{modifier}}+Enter steers the active turn. Enter inserts a new line.",
+          queue: "When the agent is running, {{modifier}}+Enter queues. Enter inserts a new line.",
+        },
         label: "Envoi par défaut",
         descriptions: {
           steer:

@@ -1832,7 +1832,18 @@ export const ptBR: TranslationResources = {
         success: "Dados do navegador limpos.",
         error: "Não foi possível limpar os dados do navegador.",
       },
+      sendShortcut: {
+        label: "Send shortcut",
+        options: { enter: "Enter", "mod-enter": "{{modifier}}+Enter" },
+      },
       defaultSend: {
+        commandEnterDescriptions: {
+          interrupt:
+            "When the agent is running, {{modifier}}+Enter interrupts. Enter inserts a new line.",
+          steer:
+            "When the agent is running, {{modifier}}+Enter steers the active turn. Enter inserts a new line.",
+          queue: "When the agent is running, {{modifier}}+Enter queues. Enter inserts a new line.",
+        },
         label: "Envio padrão",
         descriptions: {
           steer:

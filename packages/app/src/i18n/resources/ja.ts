@@ -1818,7 +1818,18 @@ export const ja: TranslationResources = {
         success: "ブラウザーデータを消去しました。",
         error: "ブラウザーデータを消去できませんでした。",
       },
+      sendShortcut: {
+        label: "Send shortcut",
+        options: { enter: "Enter", "mod-enter": "{{modifier}}+Enter" },
+      },
       defaultSend: {
+        commandEnterDescriptions: {
+          interrupt:
+            "When the agent is running, {{modifier}}+Enter interrupts. Enter inserts a new line.",
+          steer:
+            "When the agent is running, {{modifier}}+Enter steers the active turn. Enter inserts a new line.",
+          queue: "When the agent is running, {{modifier}}+Enter queues. Enter inserts a new line.",
+        },
         label: "デフォルトの送信",
         descriptions: {
           steer:

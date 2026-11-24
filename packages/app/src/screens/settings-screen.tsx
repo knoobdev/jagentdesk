@@ -1,3 +1,6 @@
+import { useKeyboardShortcutsAvailable } from "@/keyboard/availability";
+import { getShortcutOs } from "@/utils/shortcut-platform";
+import type { SendShortcut } from "@/hooks/use-settings";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 import {
@@ -269,6 +272,7 @@ const SERVICE_URL_BEHAVIOR_VALUES: ServiceUrlBehavior[] = ["ask", "in-app", "ext
 interface GeneralSectionProps {
   settings: AppSettings;
   isDesktopApp: boolean;
+  handleSendShortcutChange: (shortcut: SendShortcut) => void;
   handleSendBehaviorChange: (behavior: SendBehavior) => void;
   handleServiceUrlBehaviorChange: (behavior: ServiceUrlBehavior) => void;
   handleLanguageChange: (language: AppLanguage) => void;
@@ -326,6 +330,7 @@ function GeneralSection({
   settings,
   isDesktopApp,
   handleSendBehaviorChange,
+  handleSendShortcutChange,
   handleServiceUrlBehaviorChange,
   handleLanguageChange,
   handleTerminalScrollbackLinesChange,
@@ -333,7 +338,20 @@ function GeneralSection({
   const { t, i18n } = useTranslation();
   const activeLocale = getActiveLocale(i18n.language);
   const sendBehaviorOptions = useMemo(() => getSendBehaviorOptions(t), [t]);
-  const sendBehaviorDescriptionKey = `settings.general.defaultSend.descriptions.${settings.sendBehavior}`;
+  const shortcutsAvailable = useKeyboardShortcutsAvailable();
+  const modifier = getShortcutOs() === "mac" ? "⌘" : "Ctrl";
+  const shortcutOptions = useMemo(
+    () =>
+      (["enter", "mod-enter"] as const).map((value) => ({
+        value,
+        label: t(`settings.general.sendShortcut.options.${value}`, { modifier }),
+      })),
+    [t, modifier],
+  );
+  const sendBehaviorDescriptionKey =
+    shortcutsAvailable && settings.sendShortcut === "mod-enter"
+      ? `settings.general.defaultSend.commandEnterDescriptions.${settings.sendBehavior}`
+      : `settings.general.defaultSend.descriptions.${settings.sendBehavior}`;
   const selectedLanguageOption = LANGUAGE_OPTIONS.find(
     (option) => option.value === settings.language,
   );
@@ -372,10 +390,27 @@ function GeneralSection({
   return (
     <SettingsSection title={t("settings.general.title")}>
       <View style={settingsStyles.card}>
+        {shortcutsAvailable ? (
+          <View style={settingsStyles.row}>
+            <View style={settingsStyles.rowContent}>
+              <Text style={settingsStyles.rowTitle}>
+                {t("settings.general.sendShortcut.label")}
+              </Text>
+            </View>
+            <SegmentedControl
+              size="sm"
+              value={settings.sendShortcut}
+              onValueChange={handleSendShortcutChange}
+              options={shortcutOptions}
+            />
+          </View>
+        ) : null}
         <View style={settingsStyles.row}>
           <View style={settingsStyles.rowContent}>
             <Text style={settingsStyles.rowTitle}>{t("settings.general.defaultSend.label")}</Text>
-            <Text style={settingsStyles.rowHint}>{t(sendBehaviorDescriptionKey)}</Text>
+            <Text style={settingsStyles.rowHint}>
+              {t(sendBehaviorDescriptionKey, { modifier })}
+            </Text>
           </View>
           <SegmentedControl
             size="sm"
@@ -932,6 +967,12 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
     });
   }, [view, selectedSettingsHostServerId, localServerIdForOrdering, hosts, sortedHosts]);
 
+  const handleSendShortcutChange = useCallback(
+    (sendShortcut: SendShortcut) => {
+      void updateSettings({ sendShortcut });
+    },
+    [updateSettings],
+  );
   const handleSendBehaviorChange = useCallback(
     (behavior: SendBehavior) => {
       void updateSettings({ sendBehavior: behavior });
@@ -1220,6 +1261,7 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
                 settings={settings}
                 isDesktopApp={isDesktopApp}
                 handleSendBehaviorChange={handleSendBehaviorChange}
+                handleSendShortcutChange={handleSendShortcutChange}
                 handleServiceUrlBehaviorChange={handleServiceUrlBehaviorChange}
                 handleLanguageChange={handleLanguageChange}
                 handleTerminalScrollbackLinesChange={handleTerminalScrollbackLinesChange}

@@ -1838,7 +1838,18 @@ export const ru: TranslationResources = {
         success: "Данные браузера очищены.",
         error: "Не удалось очистить данные браузера.",
       },
+      sendShortcut: {
+        label: "Send shortcut",
+        options: { enter: "Enter", "mod-enter": "{{modifier}}+Enter" },
+      },
       defaultSend: {
+        commandEnterDescriptions: {
+          interrupt:
+            "When the agent is running, {{modifier}}+Enter interrupts. Enter inserts a new line.",
+          steer:
+            "When the agent is running, {{modifier}}+Enter steers the active turn. Enter inserts a new line.",
+          queue: "When the agent is running, {{modifier}}+Enter queues. Enter inserts a new line.",
+        },
         label: "Отправка по умолчанию",
         descriptions: {
           steer:

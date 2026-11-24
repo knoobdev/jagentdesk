@@ -16,6 +16,8 @@ export const APP_SETTINGS_QUERY_KEY = ["app-settings"];
 // namespace. New settings are written only under the JAgentDesk namespace.
 const LEGACY_SETTINGS_KEY = "@jagentdesk:settings";
 
+export type SendShortcut = "enter" | "mod-enter";
+
 export type SendBehavior = "interrupt" | "steer" | "queue";
 export type ServiceUrlBehavior = "ask" | "in-app" | "external";
 export type WorkspaceTitleSource = "title" | "branch";
@@ -54,6 +56,7 @@ export interface AppSettings {
   defaultThemeVersion: number;
   language: AppLanguage;
   sendBehavior: SendBehavior;
+  sendShortcut: SendShortcut;
   serviceUrlBehavior: ServiceUrlBehavior;
   terminalScrollbackLines: number;
   useLegacyTerminalRenderer: boolean;
@@ -82,6 +85,7 @@ export const DEFAULT_CLIENT_SETTINGS: AppSettings = {
   defaultThemeVersion: DEFAULT_THEME_VERSION,
   language: "system",
   sendBehavior: "steer",
+  sendShortcut: "enter",
   serviceUrlBehavior: "ask",
   terminalScrollbackLines: DEFAULT_TERMINAL_SCROLLBACK_LINES,
   useLegacyTerminalRenderer: false,
@@ -247,6 +251,8 @@ function pickThemeSettings(stored: StoredAppSettings, result: Partial<AppSetting
 function pickAppSettings(stored: StoredAppSettings): Partial<AppSettings> {
   const result: Partial<AppSettings> = {};
   pickThemeSettings(stored, result);
+  if (stored.sendShortcut === "enter" || stored.sendShortcut === "mod-enter")
+    result.sendShortcut = stored.sendShortcut;
   const language = parseAppLanguage(stored.language);
   if (language !== null) {
     result.language = language;

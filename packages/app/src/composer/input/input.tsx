@@ -1,3 +1,4 @@
+import { DEFAULT_CLIENT_SETTINGS, type SendShortcut } from "@/hooks/use-settings";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
   CLICKUP_COMPOSER_RADIUS,
@@ -83,6 +84,11 @@ import {
 } from "./state";
 
 const DEFAULT_SEND_KEYS: ShortcutKey[][] = [["Enter"]];
+const MOD_ENTER_SEND_KEYS: ShortcutKey[][] = [["mod", "Enter"]];
+
+function resolveSendKeys(sendShortcut: SendShortcut): ShortcutKey[][] {
+  return sendShortcut === "mod-enter" ? MOD_ENTER_SEND_KEYS : DEFAULT_SEND_KEYS;
+}
 const COMPOSER_INPUT_DATASET = { composerInput: "" } as const;
 
 export interface AttachmentMenuItem {
@@ -139,6 +145,7 @@ export interface MessageInputProps {
   /** Controls what the default send action (Enter, send button, dictation) does
    *  when the agent is running. "interrupt" sends immediately, "queue" queues. */
   defaultSendBehavior?: SendBehavior;
+  sendShortcut?: SendShortcut;
   /** Callback for queue button when agent is running */
   onQueue?: (payload: MessagePayload) => void;
   /** Optional handler used when submit button is in loading state. */
@@ -466,6 +473,7 @@ function SendButtonContent({
 interface DesktopKeyPressContext {
   onKeyPressCallback: ((event: { key: string; preventDefault: () => void }) => boolean) | undefined;
   submitOnEnter: boolean;
+  sendShortcut: SendShortcut;
   isAgentRunning: boolean;
   onQueue: ((payload: MessagePayload) => void) | undefined;
   isSubmitDisabled: boolean;
@@ -492,18 +500,22 @@ function handleDesktopKeyPressImpl(
   const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
 
   if (event.nativeEvent.key !== "Enter") return;
-  if (!ctx.submitOnEnter) return;
-  if (shiftKey) return;
-
-  if ((metaKey || ctrlKey) && ctx.isAgentRunning && ctx.onQueue) {
-    if (ctx.isSubmitDisabled || ctx.isSubmitLoading || ctx.disabled) return;
-    event.preventDefault();
+  const action = resolveMessageInputEnterAction({
+    submitOnEnter: ctx.submitOnEnter,
+    sendShortcut: ctx.sendShortcut,
+    shiftKey: shiftKey ?? false,
+    metaKey: metaKey ?? false,
+    ctrlKey: ctrlKey ?? false,
+    isAgentRunning: ctx.isAgentRunning,
+    onQueue: ctx.onQueue,
+  });
+  if (action === null) return;
+  if (ctx.isSubmitDisabled || ctx.isSubmitLoading || ctx.disabled) return;
+  event.preventDefault();
+  if (action === "alternate-send") {
     ctx.handleAlternateSendAction();
     return;
   }
-
-  if (ctx.isSubmitDisabled || ctx.isSubmitLoading || ctx.disabled) return;
-  event.preventDefault();
   ctx.handleDefaultSendAction();
 }
 
@@ -1077,6 +1089,7 @@ interface ResolvedMessageInputProps {
   voiceAgentId: string | undefined;
   isAgentRunning: boolean;
   defaultSendBehavior: SendBehavior;
+  sendShortcut: SendShortcut;
   onQueue: ((payload: MessagePayload) => void) | undefined;
   onSubmitLoadingPress: (() => void) | undefined;
   onKeyPressCallback: ((event: { key: string; preventDefault: () => void }) => boolean) | undefined;
@@ -1120,6 +1133,7 @@ function resolveMessageInputProps(props: MessageInputProps): ResolvedMessageInpu
     voiceAgentId: props.voiceAgentId,
     isAgentRunning: props.isAgentRunning ?? false,
     defaultSendBehavior: props.defaultSendBehavior ?? "interrupt",
+    sendShortcut: props.sendShortcut ?? DEFAULT_CLIENT_SETTINGS.sendShortcut,
     onQueue: props.onQueue,
     onSubmitLoadingPress: props.onSubmitLoadingPress,
     onKeyPressCallback: props.onKeyPress,
@@ -1171,6 +1185,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       voiceAgentId,
       isAgentRunning,
       defaultSendBehavior,
+      sendShortcut,
       onQueue,
       onSubmitLoadingPress,
       onKeyPressCallback,
@@ -1571,6 +1586,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       handleDesktopKeyPressImpl(event, {
         onKeyPressCallback,
         submitOnEnter: shouldSubmitOnEnter,
+        sendShortcut,
         isAgentRunning,
         onQueue,
         isSubmitDisabled,
@@ -1810,7 +1826,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
                   submitIcon={submitIcon}
                   submitButtonTestID={submitButtonTestID}
                   buttonIconSize={buttonIconSize}
-                  sendKeys={DEFAULT_SEND_KEYS}
+                  sendKeys={resolveSendKeys(sendShortcut)}
                   sendTooltipLabel={sendTooltipLabel}
                   gradient={isClickUp}
                 />

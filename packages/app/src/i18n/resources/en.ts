@@ -1870,7 +1870,18 @@ export const en = {
         success: "Browser data cleared.",
         error: "Couldn't clear browser data.",
       },
+      sendShortcut: {
+        label: "Send shortcut",
+        options: { enter: "Enter", "mod-enter": "{{modifier}}+Enter" },
+      },
       defaultSend: {
+        commandEnterDescriptions: {
+          interrupt:
+            "When the agent is running, {{modifier}}+Enter interrupts. Enter inserts a new line.",
+          steer:
+            "When the agent is running, {{modifier}}+Enter steers the active turn. Enter inserts a new line.",
+          queue: "When the agent is running, {{modifier}}+Enter queues. Enter inserts a new line.",
+        },
         label: "Default send",
         descriptions: {
           steer:

@@ -1782,7 +1782,18 @@ export const zhCN: TranslationResources = {
         success: "浏览器数据已清除。",
         error: "无法清除浏览器数据。",
       },
+      sendShortcut: {
+        label: "Send shortcut",
+        options: { enter: "Enter", "mod-enter": "{{modifier}}+Enter" },
+      },
       defaultSend: {
+        commandEnterDescriptions: {
+          interrupt:
+            "When the agent is running, {{modifier}}+Enter interrupts. Enter inserts a new line.",
+          steer:
+            "When the agent is running, {{modifier}}+Enter steers the active turn. Enter inserts a new line.",
+          queue: "When the agent is running, {{modifier}}+Enter queues. Enter inserts a new line.",
+        },
         label: "默认发送",
         descriptions: {
           steer: "Agent 运行时，Enter 会在不中断当前回合的情况下进行引导——若无法引导则回退为中断。",
