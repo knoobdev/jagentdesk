@@ -1,3 +1,6 @@
+import { usePaneContext } from "@/panels/pane-context";
+import { AssistantFileLinkResolverProvider } from "@/assistant-file-links/provider";
+import { useAssistantFileLinkActions } from "@/assistant-file-links/use-file-link";
 import { Download } from "lucide-react-native";
 import { useFileDownload } from "@/hooks/use-file-download";
 import { Button } from "@/components/ui/button";
@@ -222,6 +225,15 @@ function FilePreviewBody({
 }: FilePreviewBodyProps) {
   const theme = UnistylesRuntime.getTheme();
   const { t } = useTranslation();
+  const actions = useAssistantFileLinkActions();
+  const onMarkdownLinkPress = useCallback(
+    (href: string) => {
+      if (!actions.canOpen({ href })) return true;
+      actions.open({ href }, "main");
+      return false;
+    },
+    [actions],
+  );
   const filePath = location.path;
   // A line target means the caller wants to land on that line, so fall back to
   // the highlighted source view even for renderable files.
@@ -305,7 +317,7 @@ function FilePreviewBody({
             contentContainerStyle={styles.previewMarkdownScrollContent}
             showsVerticalScrollIndicator
           >
-            <MarkdownRenderer text={preview.content ?? ""} />
+            <MarkdownRenderer text={preview.content ?? ""} onLinkPress={onMarkdownLinkPress} />
           </RNScrollView>
         </View>
       );
@@ -383,6 +395,15 @@ function FilePreviewBody({
   );
 }
 
+function markdownPreviewDirectory(target: { cwd: string; path: string } | null, root: string) {
+  if (!target) return root;
+  const absolutePath =
+    target.path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(target.path)
+      ? target.path
+      : `${target.cwd}/${target.path}`;
+  return absolutePath.replace(/[/\\][^/\\]*$/, "");
+}
+
 export function FilePane({
   serverId,
   workspaceId,
@@ -405,6 +426,14 @@ export function FilePane({
   }>({ key: null, file: null, imageAttachment: null });
 
   const client = useSessionStore((state) => state.sessions[serverId]?.client ?? null);
+  const { openFileInWorkspace } = usePaneContext();
+  const onOpenWorkspaceFile = useCallback(
+    (
+      target: import("@/assistant-file-links").InlinePathTarget,
+      disposition: import("@/workspace/file-open").OpenFileDisposition,
+    ) => openFileInWorkspace({ location: target, disposition }),
+    [openFileInWorkspace],
+  );
   const normalizedWorkspaceRoot = useMemo(() => workspaceRoot.trim(), [workspaceRoot]);
   const normalizedFilePath = useMemo(() => trimNonEmpty(location.path), [location.path]);
   const readTarget = useMemo(
@@ -490,26 +519,34 @@ export function FilePane({
   );
 
   return (
-    <FilePanePresentation
-      serverId={serverId}
-      onDownload={onDownload}
+    <AssistantFileLinkResolverProvider
       client={client}
-      readTarget={readTarget}
-      preview={preview}
-      liveFileModel={liveFile.model}
-      editable={editable}
-      onRetryRead={liveFile.refresh}
-      retryingRead={liveFile.isRetrying}
-      retryLabel={t("common.actions.retry")}
-      lineCount={lineCount}
-      disconnectedMessage={t("workspace.terminal.hostDisconnected")}
-      errorMessage={errorMessage}
-      isLoading={liveFile.isFetching}
-      isMobile={isMobile}
-      location={location}
-      navigationRevision={navigationRevision}
-      imagePreviewUri={imagePreviewUri}
-    />
+      serverId={serverId}
+      workspaceRoot={normalizedWorkspaceRoot}
+      relativePathBase={markdownPreviewDirectory(readTarget, normalizedWorkspaceRoot)}
+      onOpenWorkspaceFile={onOpenWorkspaceFile}
+    >
+      <FilePanePresentation
+        serverId={serverId}
+        onDownload={onDownload}
+        client={client}
+        readTarget={readTarget}
+        preview={preview}
+        liveFileModel={liveFile.model}
+        editable={editable}
+        onRetryRead={liveFile.refresh}
+        retryingRead={liveFile.isRetrying}
+        retryLabel={t("common.actions.retry")}
+        lineCount={lineCount}
+        disconnectedMessage={t("workspace.terminal.hostDisconnected")}
+        errorMessage={errorMessage}
+        isLoading={liveFile.isFetching}
+        isMobile={isMobile}
+        location={location}
+        navigationRevision={navigationRevision}
+        imagePreviewUri={imagePreviewUri}
+      />
+    </AssistantFileLinkResolverProvider>
   );
 }
 

@@ -274,3 +274,47 @@ describe("getAssistantFileLinkToken", () => {
     ).toBe("workspace-git-service.ts:1553");
   });
 });
+
+it.each([
+  ["guide/details.md", "/repo/docs/guide/details.md"],
+  ["../README.md", "/repo/README.md"],
+  ["guide/details%20page.md", "/repo/docs/guide/details page.md"],
+])("resolves authored href %s from its document directory", (href, expected) => {
+  expect(
+    classifyForResolution({ href }, { workspaceRoot: "/repo", relativePathBase: "/repo/docs" }),
+  ).toMatchObject({ kind: "resolved", value: { kind: "file", target: { path: expected } } });
+});
+
+it.each([
+  ["C:/repo/docs", "../README.md", "C:/repo/README.md"],
+  ["C:/repo/docs", "../../", "C:/"],
+  ["~/.jagentdesk/docs", "../guide.md", "~/.jagentdesk/guide.md"],
+  ["/repo/docs", "/other/file.md", "/other/file.md"],
+  ["/repo/docs", "file:///other/file.md", "/other/file.md"],
+  ["/repo/docs", "guide/details.md#L3", "/repo/docs/guide/details.md"],
+])(
+  "resolves %s with href %s without changing absolute destinations",
+  (relativePathBase, href, expected) => {
+    expect(
+      classifyForResolution({ href }, { workspaceRoot: "/repo", relativePathBase }),
+    ).toMatchObject({
+      kind: "resolved",
+      value: { kind: "file", target: { path: expected } },
+    });
+  },
+);
+
+it("keeps inferred paths and chat links rooted at the workspace", () => {
+  const context = { workspaceRoot: "/repo", relativePathBase: "/repo/docs" };
+  expect(classifyForResolution({ href: "src/file.ts", markup: "linkify" }, context)).toMatchObject({
+    value: { kind: "file", target: { path: "/repo/src/file.ts" } },
+  });
+  expect(
+    classifyForResolution({ href: "guide/details.md" }, { workspaceRoot: "/repo" }),
+  ).toMatchObject({
+    value: { kind: "file", target: { path: "/repo/guide/details.md" } },
+  });
+  expect(classifyForResolution({ href: "https://example.com/docs" }, context)).toMatchObject({
+    value: { kind: "external", url: "https://example.com/docs" },
+  });
+});
