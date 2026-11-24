@@ -1,3 +1,4 @@
+import { Alert } from "@/components/ui/alert";
 import type { AutocompleteStatus } from "@/components/ui/autocomplete";
 import { ComposerRecall } from "@/composer/recall";
 import { selectAgentSentMessages } from "@/stores/session-store";
@@ -892,6 +893,7 @@ function GithubPickerOption({
 }
 
 interface ComposerProps {
+  error?: string | null;
   agentId: string;
   serverId: string;
   workspaceId?: string | null;
@@ -1134,6 +1136,7 @@ export function Composer({
   externalKeyboardShift,
   isCompactLayout: isCompactLayoutOverride,
   topContent,
+  error: externalError,
 }: ComposerProps) {
   const { t } = useTranslation();
   const buttonIconSize = resolveComposerButtonIconSize();
@@ -2216,9 +2219,13 @@ export function Composer({
 
   const messageInputAutoFocus = autoFocus && isDesktopWebBreakpoint;
   const submitLoadingPressHandler = isAgentRunning ? handleCancelAgent : undefined;
+  const displayError = externalError || sendError;
   const sendErrorNode = useMemo(
-    () => (sendError ? <Text style={styles.sendErrorText}>{sendError}</Text> : null),
-    [sendError],
+    () =>
+      displayError ? (
+        <Alert variant="error" description={displayError} testID="composer-error" />
+      ) : null,
+    [displayError],
   );
   const githubEmptyText = githubSearchResultsQuery.isFetching
     ? t("composer.github.searching")
@@ -2472,10 +2479,6 @@ const styles = StyleSheet.create((theme: Theme) => ({
   },
   queueSendButton: {
     backgroundColor: theme.colors.accent,
-  },
-  sendErrorText: {
-    color: theme.colors.palette.red[500],
-    fontSize: theme.fontSize.sm,
   },
 })) as unknown as Record<string, object>;
 

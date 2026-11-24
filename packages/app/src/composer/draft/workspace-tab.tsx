@@ -1,6 +1,6 @@
 import { KeyboardTranslateView } from "@/keyboard/shift";
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { Keyboard, ScrollView, StyleSheet as RNStyleSheet, Text, View } from "react-native";
+import { Keyboard, ScrollView, StyleSheet as RNStyleSheet, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -642,13 +642,7 @@ export function WorkspaceDraftAgentTab({
           </View>
         ) : (
           <ScrollView style={styles.scrollView} contentContainerStyle={styles.configScrollContent}>
-            <View style={styles.configSection}>
-              {formErrorMessage ? (
-                <View style={styles.errorContainer}>
-                  <Text style={styles.errorText}>{formErrorMessage}</Text>
-                </View>
-              ) : null}
-            </View>
+            <View style={styles.configSection}></View>
           </ScrollView>
         )}
       </View>
@@ -662,6 +656,7 @@ export function WorkspaceDraftAgentTab({
           </View>
         ) : null}
         <Composer
+          error={formErrorMessage || null}
           agentId={tabId}
           serverId={serverId}
           workspaceId={workspaceId}
