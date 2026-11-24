@@ -1,4 +1,4 @@
-import type { GitAction, GitActions } from "@/git/policy";
+import { actionsWithoutPrimary, type GitAction, type GitActions } from "@/git/policy";
 import type { KeyboardActionDefinition } from "@/keyboard/keyboard-action-dispatcher";
 import type { ShortcutKey } from "@/utils/format-shortcut";
 import type { CommandCenterContribution, CommandCenterIcon } from "./contributions";
@@ -200,8 +200,7 @@ export function buildWorkspaceCommandCenterContributions(
       }),
     );
   }
-  for (const [index, action] of source.gitActions.secondary.entries()) {
-    if (action.id === primary?.id) continue;
+  for (const [index, action] of actionsWithoutPrimary(source.gitActions).entries()) {
     contributions.push(buildGitContribution(source, action, 10 + index, "query"));
   }
   // A Git workspace lists archive among its Git actions; any other workspace archives here.

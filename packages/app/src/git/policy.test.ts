@@ -3,6 +3,7 @@ import { CheckoutPrStatusSchema } from "@jagentdesk/protocol/messages";
 import { i18n } from "@/i18n/i18next";
 
 import {
+  actionsWithoutPrimary,
   buildGitActions,
   isCurrentBranchBase,
   canMergeIntoLocalBase,
@@ -1166,4 +1167,57 @@ describe("git-actions-policy", () => {
       "merge-pr-rebase",
     ]);
   });
+});
+
+it("drops a promoted remote action from the remaining menu actions", () => {
+  const pull = buildGitActions(createInput({ hasRemote: true, behindOfOrigin: 2 }));
+  expect(pull.primary?.id).toBe("pull");
+  expect(actionsWithoutPrimary(pull).map((action) => action.id)).toEqual([
+    "push",
+    "pull-and-push",
+    "archive-workspace",
+  ]);
+
+  const push = buildGitActions(createInput({ hasRemote: true, aheadOfOrigin: 1 }));
+  expect(push.primary?.id).toBe("push");
+  expect(actionsWithoutPrimary(push).map((action) => action.id)).toEqual([
+    "pull",
+    "pull-and-push",
+    "archive-workspace",
+  ]);
+});
+
+it("drops a promoted merge action from the remaining menu actions", () => {
+  const actions = buildGitActions(
+    createInput({
+      hasRemote: true,
+      isOnBaseBranch: false,
+      aheadCount: 2,
+      hasPullRequest: true,
+      pullRequestUrl: "https://example.com/pr/456",
+      pullRequestState: "open",
+      pullRequestMergeable: "MERGEABLE",
+      pullRequestGithub: githubStatus({
+        repository: {
+          autoMergeAllowed: true,
+          mergeCommitAllowed: true,
+          squashMergeAllowed: false,
+          rebaseMergeAllowed: false,
+          viewerDefaultMergeMethod: "SQUASH",
+        },
+      }),
+      shipDefault: "pr",
+    }),
+  );
+
+  expect(actions.primary).toMatchObject({ id: "merge-pr-merge", label: "Merge PR (merge)" });
+  expect(actionsWithoutPrimary(actions).map((action) => action.id)).toEqual([
+    "pull",
+    "push",
+    "pull-and-push",
+    "merge-from-base",
+    "merge-branch",
+    "pr",
+    "archive-workspace",
+  ]);
 });
