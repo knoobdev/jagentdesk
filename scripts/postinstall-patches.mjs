@@ -94,7 +94,7 @@ for (const [cwd, files] of patchFilesByCwd) {
 
   let result;
   try {
-    result = spawnSync(cmd, ["--patch-dir", relative(cwd, tempPatchDir)], {
+    result = spawnSync(cmd, ["--patch-dir", relative(cwd, tempPatchDir), "--error-on-fail"], {
       cwd,
       shell: isWindows,
       stdio: "inherit",
