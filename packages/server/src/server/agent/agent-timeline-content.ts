@@ -136,7 +136,15 @@ function cut(value: unknown, depth: number, state: CutState): unknown {
 }
 
 /** Returns the item itself when it fits its budget; otherwise a copy with its largest strings cut. */
-export function limitAgentTimelineItemContent(item: AgentTimelineItem): AgentTimelineItem {
+export function limitAgentTimelineItemContent(source: AgentTimelineItem): AgentTimelineItem {
+  // COMPAT(subagent-log): added in v0.9.59, remove after 2027-05-25 once the client floor accepts omitted logs.
+  // Plugin providers can omit the log too; released clients still require it on every card.
+  const item =
+    source.type === "tool_call" &&
+    source.detail.type === "sub_agent" &&
+    source.detail.log === undefined
+      ? { ...source, detail: { ...source.detail, log: "" } }
+      : source;
   const budget = item.type === "tool_call" ? TOOL_CALL_BUDGET : ITEM_BUDGET;
   const size: ItemSize = { nodeCost: 0, stringLengths: [], tooDeep: false };
   measure(item, 0, size);

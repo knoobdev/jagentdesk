@@ -8,15 +8,15 @@ import {
   type ReactNode,
 } from "react";
 import { Image, Pressable, Text, View, type TextStyle } from "react-native";
-import { MarkdownIt, type ASTNode, type RenderRules } from "react-native-markdown-display";
+import Markdown, {
+  MarkdownIt,
+  type ASTNode,
+  type RenderRules,
+} from "react-native-markdown-display";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { Paperclip } from "lucide-react-native";
 import type { JiraAttachment } from "@jagentdesk/protocol/jira/rpc-schemas";
-import {
-  createSharedMarkdownRules,
-  MarkdownInheritedText,
-  MarkdownRenderer,
-} from "@/components/markdown/renderer";
+import { createMarkdownStyles } from "@/styles/markdown-styles";
 import type { Theme } from "@/styles/theme";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { tint } from "../ui/primitives";
@@ -210,11 +210,39 @@ function ExternalImageLink({ src, alt }: { src: string; alt: string }) {
   );
 }
 
+function JiraExternalLink({
+  href,
+  children,
+  style,
+}: {
+  href: string;
+  children: ReactNode;
+  style: TextStyle;
+}) {
+  const open = useCallback(() => {
+    handleJiraLink(href);
+  }, [href]);
+  return (
+    <Text style={style} onPress={open}>
+      {children}
+    </Text>
+  );
+}
 type MarkdownStyles = Record<string, TextStyle>;
 const EMPTY_STYLE: TextStyle = {};
 
 function createJiraRules(): RenderRules {
-  const shared = createSharedMarkdownRules();
+  const shared: RenderRules = {
+    link: (node, children, _parent, styles) => (
+      <JiraExternalLink
+        key={node.key}
+        style={styles.link}
+        href={String(node.attributes?.href ?? "")}
+      >
+        {children}
+      </JiraExternalLink>
+    ),
+  };
   return {
     ...shared,
     // Text inside a link takes the link color (the shared text style would override it).
@@ -225,14 +253,16 @@ function createJiraRules(): RenderRules {
       styles: MarkdownStyles,
       inheritedStyles: TextStyle = EMPTY_STYLE,
     ) => (
-      <MarkdownInheritedText
+      <Text
         key={node.key}
-        inheritedStyles={inheritedStyles}
-        textStyle={styles.text ?? EMPTY_STYLE}
-        style={parent.some((ancestor) => ancestor.type === "link") ? styles.link : undefined}
+        style={[
+          inheritedStyles,
+          styles.text,
+          parent.some((ancestor) => ancestor.type === "link") ? styles.link : undefined,
+        ]}
       >
         {node.content}
-      </MarkdownInheritedText>
+      </Text>
     ),
     image: (node: ASTNode) => {
       const src = typeof node.attributes?.src === "string" ? node.attributes.src : "";
@@ -266,17 +296,29 @@ function createJiraRules(): RenderRules {
 // Bare URLs become links; no typographer, so Jira text keeps its exact quotes and dashes.
 const jiraParser = MarkdownIt({ typographer: false, linkify: true });
 
-export function JiraMarkdown({ text }: { text: string }) {
+function JiraMarkdownContent({
+  text,
+  markdownStyle,
+}: {
+  text: string;
+  markdownStyle: ReturnType<typeof createMarkdownStyles>;
+}) {
   const rules = useMemo(createJiraRules, []);
   return (
-    <MarkdownRenderer
-      text={text}
+    <Markdown
+      style={markdownStyle}
       rules={rules}
       markdownit={jiraParser}
       onLinkPress={handleJiraLink}
-      enableHtmlish={false}
-    />
+    >
+      {text}
+    </Markdown>
   );
+}
+const ThemedJiraMarkdown = withUnistyles(JiraMarkdownContent);
+const jiraMarkdownStyle = (theme: Theme) => ({ markdownStyle: createMarkdownStyles(theme) });
+export function JiraMarkdown({ text }: { text: string }) {
+  return <ThemedJiraMarkdown text={text} uniProps={jiraMarkdownStyle} />;
 }
 
 const styles = StyleSheet.create((theme: Theme) => ({

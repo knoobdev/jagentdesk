@@ -26,6 +26,7 @@ export type SendShortcut = "enter" | "mod-enter";
 export type SendBehavior = "interrupt" | "steer" | "queue";
 export type ServiceUrlBehavior = "ask" | "in-app" | "external";
 export type WorkspaceTitleSource = "title" | "branch";
+export type ChatDisplay = "full" | "collapseToolCalls" | "collapseTurns";
 export type ToolCallDetailLevel = "overview" | "detailed";
 
 const VALID_THEMES = new Set<string>([
@@ -81,6 +82,7 @@ export interface AppSettings {
   sidebarPluginRowBadgeItems: Record<string, boolean>;
   autoExpandReasoning: boolean;
   toolCallDetailLevel: ToolCallDetailLevel;
+  chatDisplay: ChatDisplay;
   chatOutlineEnabled: boolean;
   vimKeybindings: boolean;
 }
@@ -116,6 +118,7 @@ export const DEFAULT_CLIENT_SETTINGS: AppSettings = {
   sidebarPluginRowBadgeItems: {},
   autoExpandReasoning: false,
   toolCallDetailLevel: "detailed",
+  chatDisplay: "collapseTurns",
   chatOutlineEnabled: true,
   vimKeybindings: false,
 };
@@ -223,6 +226,8 @@ export function normalizeAppSettings(value: unknown): AppSettings {
   }
   settings.usage = UsagePreferencesSchema.parse(stored.usage ?? DEFAULT_USAGE_PREFERENCES);
   settings.usageInSidebar = stored.usageInSidebar !== false;
+
+  settings.chatDisplay = parseChatDisplay(stored);
   settings.defaultThemeVersion = DEFAULT_THEME_VERSION;
   return settings;
 }
@@ -492,4 +497,21 @@ async function loadRendererSettingsPayload(
     return null;
   }
   return JSON.parse(legacy) as Record<string, unknown>;
+}
+
+function parseChatDisplay(stored: StoredAppSettings): ChatDisplay {
+  if (
+    stored.chatDisplay === "full" ||
+    stored.chatDisplay === "collapseToolCalls" ||
+    stored.chatDisplay === "collapseTurns"
+  )
+    return stored.chatDisplay;
+  // COMPAT(chatDisplay): added in v0.9.59, remove after 2027-05-25 once stored settings carry chatDisplay.
+  if (
+    stored.toolCallDetailLevel === "overview" ||
+    (stored.toolCallDetailLevel as unknown) === "concise" ||
+    stored.compactToolCalls === true
+  )
+    return "collapseToolCalls";
+  return "full";
 }

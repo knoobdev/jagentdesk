@@ -1,3 +1,4 @@
+import { ChatColumnRailSurface } from "@/chat-rail";
 import { RewindCommandCenterRegistration } from "@/components/rewind/command-center-registration";
 import type { AgentScreenReadySyncState } from "@/hooks/use-agent-screen-state-machine";
 import { KeyboardTranslateView } from "@/keyboard/shift";
@@ -23,6 +24,7 @@ import type { TFunction } from "i18next";
 import { SquarePen } from "lucide-react-native";
 import React, {
   memo,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -1290,7 +1292,7 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
           enabled={isPaneFocused && active && !agentState.archivedAt && !isArchivingCurrentAgent}
         />
         <ActivityGraphLayout serverId={serverId} agentId={agentId} streamViewRef={streamViewRef}>
-          <FileDropZone style={styles.container} disabled={isArchivingCurrentAgent}>
+          <ChatRailDropZone serverId={serverId} disabled={isArchivingCurrentAgent}>
             {isGuestShareMode() ? null : (
               <View style={styles.shareHeader}>
                 <BuiltinPluginGate serverId={serverId} id="activity-graph">
@@ -1321,7 +1323,7 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
             ) : null}
 
             <ToastViewport toast={toast} onDismiss={dismiss} placement="panel" />
-          </FileDropZone>
+          </ChatRailDropZone>
 
           {isArchivingCurrentAgent ? (
             <View style={styles.archivingOverlay} testID="agent-archiving-overlay">
@@ -1481,6 +1483,24 @@ const AgentStreamSection = memo(function AgentStreamSection({
     />
   );
 });
+
+function ChatRailDropZone({
+  serverId,
+  disabled,
+  children,
+}: {
+  serverId: string;
+  disabled: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <ChatColumnRailSurface serverId={serverId}>
+      <FileDropZone style={styles.container} disabled={disabled}>
+        {children}
+      </FileDropZone>
+    </ChatColumnRailSurface>
+  );
+}
 
 const AgentComposerSection = memo(function AgentComposerSection({
   agentId,

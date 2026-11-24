@@ -36,6 +36,8 @@ export const fr: TranslationResources = {
     back: "Retour",
     loading: "Chargement\u2026",
     actions: {
+      copyLine: "Copier la ligne",
+      selectAll: "Tout sélectionner",
       back: "Retour",
       cancel: "Annuler",
       close: "Fermer",
@@ -1883,7 +1885,14 @@ export const fr: TranslationResources = {
     input: "Entr\u00E9e",
     output: "Sortie",
   },
+  turnSummary: {
+    details: "Voir les détails du tour",
+    sentBy: "Envoyé par {{name}}",
+    showMore: "Afficher plus",
+    showLess: "Afficher moins",
+  },
   toolCallGroup: {
+    thought: "Réfléchi",
     editedFiles: {
       one: "{{count}} fichier modifi\u00E9",
       other: "{{count}} fichiers modifi\u00E9s",
@@ -2142,13 +2151,13 @@ export const fr: TranslationResources = {
         description:
           "Afficher par d\u00E9faut le raisonnement de l\u2019agent enti\u00E8rement d\u00E9pli\u00E9",
       },
-      toolCallDetail: {
-        label: "Affichage des appels d’outils",
-        description: "Comment les appels d’outils apparaissent dans la chronologie",
-        accessibilityLabel: "Sélectionner l’affichage des appels d’outils ({{value}})",
+      chatDisplay: {
+        label: "Affichage du chat",
+        description: "La part du travail de l’agent affichée dans le chat",
         options: {
-          overview: "Résumé",
-          detailed: "Détails complets",
+          full: "Complet",
+          collapseToolCalls: "Réduire les appels d’outils",
+          collapseTurns: "Réduire les tours",
         },
       },
       language: {

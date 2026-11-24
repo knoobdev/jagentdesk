@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { within } from "@testing-library/dom";
@@ -11,7 +12,10 @@ import { QuestionFormCard } from "./question-form-card";
 void testI18n;
 
 // App sources compile against the classic JSX runtime, which expects React on the global.
-beforeEach(() => vi.stubGlobal("React", React));
+beforeEach(() => {
+  vi.stubGlobal("React", React);
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+});
 
 /**
  * A real browser with the real web text input, so the Other field's on-screen text and the
@@ -21,6 +25,7 @@ beforeEach(() => vi.stubGlobal("React", React));
 
 interface Mounted {
   root: Root;
+  client: QueryClient;
   container: HTMLDivElement;
 }
 
@@ -30,6 +35,7 @@ afterEach(() => {
   for (const entry of mounted.splice(0)) {
     act(() => entry.root.unmount());
     entry.container.remove();
+    entry.client.clear();
   }
 });
 
@@ -55,17 +61,20 @@ function mountCard(question: Record<string, unknown>, following: Record<string, 
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
+  const client = new QueryClient();
   act(() =>
     root.render(
-      <QuestionFormCard
-        permission={buildPermission(question, following)}
-        onRespond={onRespond}
-        isResponding={false}
-        responseError={null}
-      />,
+      <QueryClientProvider client={client}>
+        <QuestionFormCard
+          permission={buildPermission(question, following)}
+          onRespond={onRespond}
+          isResponding={false}
+          responseError={null}
+        />
+      </QueryClientProvider>,
     ),
   );
-  mounted.push({ root, container });
+  mounted.push({ root, container, client });
 
   const view = within(container);
   const otherInput = () =>

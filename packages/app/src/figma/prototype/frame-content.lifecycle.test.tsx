@@ -242,6 +242,10 @@ async function firstDraw() {
   return nextDraw(0);
 }
 
+const originalCanvasContext = Object.getOwnPropertyDescriptor(
+  HTMLCanvasElement.prototype,
+  "getContext",
+)!;
 beforeEach(() => {
   vi.stubGlobal("React", React);
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -264,10 +268,10 @@ beforeEach(() => {
   // jsdom has no canvas 2D backend and no FontFaceSet: give the draw path a context, and a
   // browser-faithful fonts stub — `check` returns TRUE even for nonexistent families (MDN
   // documents `i-dont-exist` => true), so only real registration can prove availability.
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
-    setTransform: vi.fn(),
-    clearRect: vi.fn(),
-  } as unknown as CanvasRenderingContext2D);
+  Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+    configurable: true,
+    value: () => ({ setTransform: vi.fn(), clearRect: vi.fn() }),
+  });
   const faces: { family: string; weight: string; style: string; status: string }[] = [];
   Object.defineProperty(document, "fonts", {
     configurable: true,
@@ -310,6 +314,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  Object.defineProperty(HTMLCanvasElement.prototype, "getContext", originalCanvasContext);
   for (const stray of activeViews.splice(0)) {
     try {
       stray.unmount();

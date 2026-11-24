@@ -1,3 +1,5 @@
+import { DiffDocument } from "@/git/diff-document";
+import { DiffDocumentWorkspaceCacheProvider } from "@/git/diff-document/workspace-cache";
 import {
   useState,
   useCallback,
@@ -1866,7 +1868,69 @@ interface SharedDiffViewProps {
       };
 }
 
-export function SharedDiffView({ files, displayPreferences, mode }: SharedDiffViewProps) {
+export function SharedDiffView(props: SharedDiffViewProps) {
+  return (
+    <DiffDocumentWorkspaceCacheProvider>
+      <DocumentDiffView {...props} />
+    </DiffDocumentWorkspaceCacheProvider>
+  );
+}
+function DocumentDiffView({ files, displayPreferences, mode }: SharedDiffViewProps) {
+  const collapsedPaths = useMemo(() => {
+    if (mode.kind === "commit" || mode.expandedPaths === null) return [];
+    const expanded = new Set(mode.expandedPaths);
+    return files.filter((file) => !expanded.has(file.path)).map((file) => file.path);
+  }, [files, mode]);
+  const onCollapseChange = useCallback(
+    (paths: string[]) => {
+      if (mode.kind === "commit") return;
+      const collapsed = new Set(paths);
+      mode.onExpandedPathsChange(
+        files.filter((file) => !collapsed.has(file.path)).map((file) => file.path),
+      );
+    },
+    [files, mode],
+  );
+  const working = useMemo(() => {
+    if (mode.kind === "commit") return null;
+    if (mode.kind === "working_tree")
+      return {
+        kind: "working" as const,
+        reviewActions: mode.reviewActions,
+        onFilePress: mode.onFilePress,
+        workspaceFileDragScope: mode.workspaceFileDragScope,
+        onOpenFile: mode.onOpenFile,
+        onAddToChat: mode.onAddToChat,
+        onCopyPath: mode.onCopyPath,
+        onDownload: mode.onDownload,
+      };
+    return {
+      kind: "working" as const,
+      reviewActions: mode.reviewActions,
+      focusPath: mode.focusPath,
+      focusRequestId: mode.focusRequestId,
+    };
+  }, [mode]);
+  const collapseState = useMemo(
+    () => ({ paths: collapsedPaths, onChange: onCollapseChange }),
+    [collapsedPaths, onCollapseChange],
+  );
+  if (mode.kind === "working_tree" && mode.viewMode === "tree")
+    return <TreeDiffView files={files} displayPreferences={displayPreferences} mode={mode} />;
+  if (mode.kind === "commit")
+    return <DiffDocument files={files} displayPreferences={displayPreferences} mode={mode} />;
+  if (!working) return null;
+  return (
+    <DiffDocument
+      files={files}
+      displayPreferences={displayPreferences}
+      mode={working}
+      collapseState={collapseState}
+    />
+  );
+}
+
+function TreeDiffView({ files, displayPreferences, mode }: SharedDiffViewProps) {
   const { layout, wrapLines, codeFontSize, monoFontFamily } = displayPreferences;
   const diffBodyLineHeight = Math.round(codeFontSize * 1.5);
   const typographyKey = [monoFontFamily, codeFontSize, diffBodyLineHeight].join(":");

@@ -61,3 +61,12 @@ export function getGapBetweenStreamItems(
   }
   return SPACING[4];
 }
+
+export function getAssistantMessageSpacing(params: {
+  item: StreamItem;
+  hasFooterBelow?: boolean;
+}): "default" | "compactBottom" {
+  return params.item.kind === "assistant_message" && params.hasFooterBelow
+    ? "compactBottom"
+    : "default";
+}

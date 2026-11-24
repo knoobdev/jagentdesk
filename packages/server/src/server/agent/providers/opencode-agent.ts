@@ -2492,6 +2492,7 @@ function appendOpenCodeChildSessionDetected(
     event: {
       type: "upsert",
       id: child.id,
+      parentSubagentId: child.parentSessionId === state.sessionId ? null : child.parentSessionId,
       ...(title ? { title } : {}),
       ...(child.title && !presentation.descriptionFromLink ? { description: child.title } : {}),
       ...(status ? { status } : {}),
@@ -4853,15 +4854,6 @@ class OpenCodeAgentSession implements AgentSession {
             ...item,
             status: "failed",
             error,
-            detail:
-              item.detail.type === "sub_agent"
-                ? {
-                    ...item.detail,
-                    log: [item.detail.log, error.message]
-                      .filter((entry) => entry.trim().length > 0)
-                      .join("\n"),
-                  }
-                : item.detail,
           },
         },
         turnId,
@@ -4875,8 +4867,13 @@ class OpenCodeAgentSession implements AgentSession {
       return;
     }
     if (event.type === "provider_subagent" && event.event.type === "upsert" && event.event.status) {
-      if (isDeepStrictEqual(this.childStatuses.get(event.event.id), event.event)) return;
-      this.childStatuses.set(event.event.id, structuredClone(event.event));
+      const previous = this.childStatuses.get(event.event.id);
+      const current =
+        event.event.parentSubagentId === undefined && previous?.parentSubagentId !== undefined
+          ? { ...event.event, parentSubagentId: previous.parentSubagentId }
+          : event.event;
+      if (isDeepStrictEqual(previous, current)) return;
+      this.childStatuses.set(event.event.id, structuredClone(current));
     }
     const turnId = turnIdOverride === null ? null : (turnIdOverride ?? this.activeForegroundTurnId);
     const tagged = turnId ? { ...event, turnId } : event;

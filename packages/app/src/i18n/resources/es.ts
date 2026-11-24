@@ -36,6 +36,8 @@ export const es: TranslationResources = {
     back: "Atrás",
     loading: "Cargando...",
     actions: {
+      copyLine: "Copiar línea",
+      selectAll: "Seleccionar todo",
       back: "Atrás",
       cancel: "Cancelar",
       close: "Cerca",
@@ -1856,7 +1858,14 @@ export const es: TranslationResources = {
     input: "Aporte",
     output: "Producción",
   },
+  turnSummary: {
+    details: "Ver detalles del turno",
+    sentBy: "Enviado por {{name}}",
+    showMore: "Mostrar más",
+    showLess: "Mostrar menos",
+  },
   toolCallGroup: {
+    thought: "Razonó",
     editedFiles: {
       one: "editó {{count}} archivo",
       other: "editó {{count}} archivos",
@@ -2115,13 +2124,13 @@ export const es: TranslationResources = {
         description:
           "Mostrar los bloques de pensamiento y razonamiento del agente totalmente expandidos de forma predeterminada",
       },
-      toolCallDetail: {
-        label: "Visualización de llamadas a herramientas",
-        description: "Cómo aparecen las llamadas a herramientas en la cronología",
-        accessibilityLabel: "Seleccionar visualización de llamadas a herramientas ({{value}})",
+      chatDisplay: {
+        label: "Visualización del chat",
+        description: "Cuánto del trabajo del agente muestra el chat",
         options: {
-          overview: "Resumen",
-          detailed: "Detalle completo",
+          full: "Completo",
+          collapseToolCalls: "Contraer llamadas a herramientas",
+          collapseTurns: "Contraer turnos",
         },
       },
       language: {

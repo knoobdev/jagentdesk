@@ -36,6 +36,8 @@ export const JAGENTDESK_TOOL_NAMES = Object.keys(
 export function buildJAgentDeskToolDisplay(
   input: JAgentDeskToolDisplayInput,
 ): JAgentDeskToolDisplay | null {
+  // Canonical details own internal lifecycle rows such as worktree setup.
+  if (input.detail.type !== "unknown") return null;
   const leafName = jagentdeskLeafName(input.toolName);
   if (!leafName) return null;
   const entry = getJAgentDeskToolEntry(leafName);
@@ -45,6 +47,13 @@ export function buildJAgentDeskToolDisplay(
   const targetAgent = input.targetAgentTitle ?? readString(toolInput.agentId);
   const summary = formatContext(entry.context?.(toolInput, targetAgent));
   return { displayName: entry.label, ...(summary ? { summary } : {}) };
+}
+
+/** A semantic action label for summaries, sharing the tool presentation catalog. */
+export function getJAgentDeskToolActionLabel(toolName: string): string | null {
+  const leafName = jagentdeskLeafName(toolName);
+  if (!leafName) return null;
+  return getJAgentDeskToolEntry(leafName)?.completedLabel ?? humanizeLeafName(leafName);
 }
 
 /** The agent a JAgentDesk call acts on, so callers can resolve its title. */
@@ -57,7 +66,11 @@ export function getJAgentDeskToolTargetAgentId(
 }
 
 function jagentdeskLeafName(toolName: string): string | null {
-  return isJAgentDeskToolName(toolName) ? getJAgentDeskToolLeafName(toolName) : null;
+  if (isJAgentDeskToolName(toolName)) return getJAgentDeskToolLeafName(toolName);
+  const normalized = toolName.trim().toLowerCase();
+  return normalized.startsWith("jagentdesk_") && !normalized.startsWith("jagentdesk__")
+    ? normalized.slice("jagentdesk_".length)
+    : null;
 }
 
 function readToolInput(detail: ToolCallDetail): Readonly<Record<string, unknown>> {

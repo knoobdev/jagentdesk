@@ -46,12 +46,6 @@ function hasMeaningfulWorktreeSetupDetail(
   return Boolean(detail.branchName || detail.worktreePath || detail.log);
 }
 
-function hasMeaningfulSubAgentDetail(
-  detail: Extract<ToolCallDetail, { type: "sub_agent" }>,
-): boolean {
-  return Boolean(detail.subAgentType || detail.description || detail.log);
-}
-
 function hasMeaningfulPlainTextDetail(
   detail: Extract<ToolCallDetail, { type: "plain_text" }>,
 ): boolean {
@@ -83,7 +77,7 @@ export function hasMeaningfulToolCallDetail(detail: ToolCallDetail | undefined):
     case "worktree_setup":
       return hasMeaningfulWorktreeSetupDetail(detail);
     case "sub_agent":
-      return hasMeaningfulSubAgentDetail(detail);
+      return false;
     case "plain_text":
       return hasMeaningfulPlainTextDetail(detail);
     case "plan":

@@ -9866,6 +9866,7 @@ export class Session {
         direction,
         cursor,
         limit: msg.limit,
+        wholeTurns: msg.wholeTurns,
       });
       const selectedTimeline = {
         timeline: fetchedControlTimeline,

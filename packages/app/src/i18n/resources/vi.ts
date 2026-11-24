@@ -6,6 +6,22 @@ import { pluginSettings } from "./plugin-settings";
 import { sshModuleStrings } from "./ssh-modules";
 
 export const vi = {
+  panels: { file: { editor: { preview: "Xem trước", source: "Mã nguồn" } } },
+  toolCallGroup: {
+    thought: "Suy nghĩ",
+    editedFiles: { one: "đã sửa {{count}} tệp", other: "đã sửa {{count}} tệp" },
+    commands: { one: "đã chạy {{count}} lệnh", other: "đã chạy {{count}} lệnh" },
+    readFiles: { one: "đã đọc {{count}} tệp", other: "đã đọc {{count}} tệp" },
+    searches: { one: "đã tìm {{count}} lần", other: "đã tìm {{count}} lần" },
+    otherTools: { one: "đã dùng {{count}} công cụ khác", other: "đã dùng {{count}} công cụ khác" },
+    and: "và",
+  },
+  turnSummary: {
+    details: "Xem chi tiết lượt",
+    sentBy: "Được gửi bởi {{name}}",
+    showMore: "Xem thêm",
+    showLess: "Thu gọn",
+  },
   bots: botsStrings,
   subagents: {
     parent: {
@@ -48,6 +64,8 @@ export const vi = {
     back: "Quay lại",
     loading: "Đang tải...",
     actions: {
+      copyLine: "Sao chép dòng",
+      selectAll: "Chọn tất cả",
       back: "Quay lại",
       cancel: "Huỷ",
       close: "Đóng",
@@ -360,6 +378,15 @@ export const vi = {
     },
     plugins: pluginSettings.vi,
     general: {
+      chatDisplay: {
+        label: "Hiển thị trò chuyện",
+        description: "Lượng công việc của agent hiển thị trong cuộc trò chuyện",
+        options: {
+          full: "Đầy đủ",
+          collapseToolCalls: "Thu gọn lệnh công cụ",
+          collapseTurns: "Thu gọn lượt",
+        },
+      },
       sendShortcut: {
         options: {
           "mod-enter": "{{modifier}}+Enter",

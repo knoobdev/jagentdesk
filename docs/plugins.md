@@ -105,6 +105,11 @@ Native and compact layouts open that panel in the workspace. Dragging a plugin t
 between web hosts must respect its declared locations; do not infer host support from
 the generic plugin panel manifest.
 
+Timeline transformers receive immutable source items before display grouping. Plugin rows retain
+the source identity for outline navigation and find; a plugin-rendered final reply stays visible
+when its completed turn folds. Client renderers run inside the installation's existing runtime,
+including its translations and state source.
+
 ## Built-ins
 
 The daemon loads bundled plugins through `BuiltinPluginLoader` before configured plugins,
@@ -141,7 +146,6 @@ Insights keeps JAgentDesk’s per-turn token and cost history under its own Buil
 The supported Paseo version range covers the ported runtime API, not every upstream host
 surface. These integrations still depend on other platform batches:
 
-- Plugin timeline sender projection needs the app timeline projection host (B5, #8492).
 - Full owned-list observation recovery needs the client list subscription engine (B5).
 - Background counts and snapshot flags need background agent/work ownership (B7, #9362).
 - Worktree manager creation/removal/restoration needs workspace automation gates (B9, #10278).

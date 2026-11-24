@@ -1,3 +1,8 @@
+import { useChatOutlineRail } from "@/chat-rail";
+import { SubagentLaunchMarker } from "@/subagents/launch-marker";
+import { useRevealedText } from "@/hooks/use-revealed-text";
+import { createStreamPresentation } from "./presentation";
+import { useInstalledTimelineTransform, PluginTimelineItemView } from "@/plugins/timeline";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
 import { renderStreamRow, type RenderStreamItem } from "./stream-row";
 import { ClickUpAgentHeader } from "@/components/clickup-shell/chat-headers";
@@ -44,7 +49,7 @@ import {
   type InlinePathTarget,
 } from "@/components/message";
 import { PlanCard } from "@/components/plan-card";
-import type { StreamItem } from "@/types/stream";
+import { getStreamItemMessageId, type StreamItem } from "@/types/stream";
 import type { PendingMessageSubmission } from "@/composer/submission/model";
 import type { TurnPresentation } from "@/timeline/turn-liveness";
 import type { PendingPermission } from "@/types/shared";
@@ -63,16 +68,19 @@ import { returnToTimelineTail } from "./timeline-tail-navigation";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import { ToolCallDetailsContent } from "@/components/tool-call-details";
 import { QuestionFormCard } from "@/components/question-form-card";
-import { ToolCallSheetProvider } from "@/components/tool-call-sheet";
 import {
-  prepareToolCallHistory,
-  projectToolCallDetailLevel,
-} from "@/tool-calls/detail-level/projection";
+  ToolCallExpansionContext,
+  useAgentToolCallExpansion,
+  useExpandedToolCallGroups,
+} from "@/tool-calls/expansion-context";
+import { ToolCallSheetProvider } from "@/components/tool-call-sheet";
 import { OverviewToolCallGroupView } from "@/tool-calls/detail-level/overview/view";
+import { IndentRail } from "@/components/indent-rail";
+import { TurnSummaryLine } from "./turn-collapse/summary-line";
 import { type AgentStreamRenderModel, buildAgentStreamRenderModel } from "./model";
 import { resolveStreamRenderStrategy } from "./strategy-resolver";
 import { type StreamSegmentRenderers, type StreamViewportHandle } from "./strategy";
-import { ChatOutlineRail, useChatOutlineRailLayout } from "@/agent-stream/chat-outline/rail";
+import { ChatOutlineRail } from "@/agent-stream/chat-outline/rail";
 import { useChatOutline } from "@/agent-stream/chat-outline/use-chat-outline";
 import { flashTimelineRow } from "@/agent-stream/flash-row";
 import { resolveNodeAction, type ActivityNodeAction } from "@/activity-graph/activity-graph-target";
@@ -149,9 +157,16 @@ function renderPendingPermissionsNode(input: {
   );
 }
 
+/**
+ * Where a row sits in an opened turn: its summary line's row, a row inside the turn, or the
+ * turn's last row. The rail runs through the gaps between them so the turn reads as one block.
+ */
+type TurnIndent = "none" | "openedHost" | "nested" | "lastNested";
+
 function renderStreamItemWithTurnFooter(input: {
   content: ReactNode;
   layoutItem: StreamLayoutItem;
+  turnIndent: TurnIndent;
   strategy: TurnContentStrategy;
   supportsTimelineCursor: boolean;
   onForkAssistantTurn?: AssistantTurnForkHandler;
@@ -173,7 +188,7 @@ function renderStreamItemWithTurnFooter(input: {
     />
   ) : null;
   const content = (
-    <StreamItemWrapper itemId={input.layoutItem.item.id} gapBelow={input.layoutItem.gapBelow}>
+    <StreamItemWrapper gapBelow={input.layoutItem.gapBelow} turnIndent={input.turnIndent}>
       {input.content}
     </StreamItemWrapper>
   );
@@ -336,8 +351,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
   ) {
     const { t } = useTranslation();
     const autoExpandReasoning = useSettings((settings) => settings.autoExpandReasoning);
-    const toolCallDetailLevel = useSettings((settings) => settings.toolCallDetailLevel);
-    const chatOutlineEnabled = useSettings((settings) => settings.chatOutlineEnabled);
+    const chatDisplay = useSettings((settings) => settings.chatDisplay);
     const contentMaxWidth = useSettings(resolveContentMaxWidth);
     const viewportRef = useRef<StreamViewportHandle | null>(null);
     const pendingClientMessageIds = useMemo(
@@ -357,11 +371,11 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const [expandedInlineToolCallIds, setExpandedInlineToolCallIds] = useState<Set<string>>(
       new Set(),
     );
-    const [expandedToolCallGroupIds, setExpandedToolCallGroupIds] = useState<Set<string>>(
-      new Set(),
-    );
+    const toolCallExpansion = useAgentToolCallExpansion(agentId);
+    const expandedToolCallGroups = useExpandedToolCallGroups(toolCallExpansion);
     const openFileExplorerForCheckout = usePanelStore((state) => state.openFileExplorerForCheckout);
     const setExplorerTabForCheckout = usePanelStore((state) => state.setExplorerTabForCheckout);
+    const [expandedTurnHostIds, setExpandedTurnHostIds] = useState<ReadonlySet<string>>(new Set());
 
     // Get serverId (fallback to agent's serverId if not provided)
     const resolvedServerId = serverId ?? context.serverId ?? "";
@@ -375,10 +389,6 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const supportsAgentForkContextCursor = useSessionStore(
       (state) =>
         state.sessions[resolvedServerId]?.serverInfo?.features?.agentForkContextCursor === true,
-    );
-    const supportsChatOutline = useSessionStore(
-      (state) =>
-        state.sessions[resolvedServerId]?.serverInfo?.features?.agentTimelinePromptIndex === true,
     );
     const timelineEpoch = useSessionStore(
       (state) => state.sessions[resolvedServerId]?.agentTimelineCursor.get(agentId)?.epoch ?? null,
@@ -415,7 +425,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     useEffect(() => {
       setIsNearBottom(true);
       setExpandedInlineToolCallIds(new Set());
-      setExpandedToolCallGroupIds(new Set());
+      setExpandedTurnHostIds(new Set());
     }, [agentId]);
 
     const isActive = useRetainedPanelActive();
@@ -506,26 +516,30 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const effectiveStreamItems = isActive ? streamItems : frozenStreamItemsRef.current;
     const effectiveStreamHead = isActive ? streamHead : frozenStreamHeadRef.current;
     const isTurnActive = turnPresentation.isActive;
-    // Keep retained history outside the 48ms live-head flush path.
-    const preparedToolCallHistory = useMemo(
-      () => prepareToolCallHistory(toolCallDetailLevel, effectiveStreamItems),
-      [effectiveStreamItems, toolCallDetailLevel],
-    );
+    const transformTimelineItem = useInstalledTimelineTransform(resolvedServerId);
+    const presentStream = useMemo(() => createStreamPresentation(), []);
     const projectedToolCalls = useMemo(
       () =>
-        projectToolCallDetailLevel({
-          level: toolCallDetailLevel,
+        presentStream({
           tail: effectiveStreamItems,
           head: effectiveStreamHead ?? EMPTY_STREAM_HEAD,
-          preparedHistory: preparedToolCallHistory,
+          transform: transformTimelineItem,
+          display: chatDisplay,
+          autoExpandReasoning,
+          expandedTurnHostIds,
           isTurnActive,
+          activeTurnId: turnPresentation.turnId,
         }),
       [
-        effectiveStreamHead,
+        presentStream,
         effectiveStreamItems,
+        effectiveStreamHead,
+        transformTimelineItem,
+        chatDisplay,
+        autoExpandReasoning,
+        expandedTurnHostIds,
         isTurnActive,
-        preparedToolCallHistory,
-        toolCallDetailLevel,
+        turnPresentation.turnId,
       ],
     );
 
@@ -569,12 +583,12 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
           isTurnActive,
           history: baseRenderModel.history,
           liveHead: baseRenderModel.segments.liveHead,
-          timingByAssistantId: baseRenderModel.turnTiming.byAssistantId,
+          timingByItemId: baseRenderModel.turnTiming.byItemId,
         }),
       [
         baseRenderModel.history,
         baseRenderModel.segments.liveHead,
-        baseRenderModel.turnTiming.byAssistantId,
+        baseRenderModel.turnTiming.byItemId,
         isTurnActive,
         streamRenderStrategy,
       ],
@@ -582,15 +596,22 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const handleTimelineHistoryLoadError = useCallback(() => {
       toast?.error(t("agentStream.historyLoadFailed"));
     }, [t, toast]);
-    const chatFindVisibleMessageIds = useMemo(
-      () =>
-        new Set(
-          [...baseRenderModel.history, ...baseRenderModel.segments.liveHead].map((item) => item.id),
-        ),
-      [baseRenderModel.history, baseRenderModel.segments.liveHead],
+    const mountedHistoryMessageIds = useMemo(
+      () => new Set(baseRenderModel.history.map(getStreamItemMessageId)),
+      [baseRenderModel.history],
     );
-    const outlineEnabled = supportsChatOutline && chatOutlineEnabled;
-    const outlineLayout = useChatOutlineRailLayout(outlineEnabled);
+    const chatFindVisibleMessageIds = useMemo(
+      () => ({
+        has: (id: string) =>
+          mountedHistoryMessageIds.has(id) ||
+          baseRenderModel.segments.liveHead.some((item) => getStreamItemMessageId(item) === id),
+      }),
+      [mountedHistoryMessageIds, baseRenderModel.segments.liveHead],
+    );
+    const { enabled: outlineEnabled, inset: outlineInset } = useChatOutlineRail();
+    const revealOutlineMessage = useStableEvent((messageId: string) =>
+      revealLoadedMessage(messageId),
+    );
     const chatOutline = useChatOutline({
       agentId,
       serverId: resolvedServerId,
@@ -600,8 +621,8 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       enabled: outlineEnabled,
       viewportRef,
       onJumpError: handleTimelineHistoryLoadError,
-      visibleMessageIds: chatFindVisibleMessageIds,
-      revealLoadedMessage: revealLoadedHistory,
+      mountedHistoryMessageIds,
+      revealLoadedMessage: revealOutlineMessage,
     });
 
     // Chat find addresses a message by id; a message is one loaded row here. Loaded rows above
@@ -674,21 +695,55 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       [streamRenderStrategy],
     );
 
-    const setToolCallGroupExpanded = useCallback((groupId: string, expanded: boolean) => {
-      setExpandedToolCallGroupIds((previous) => {
-        const next = new Set(previous);
-        if (expanded) {
-          next.add(groupId);
-        } else {
-          next.delete(groupId);
-        }
-        return next;
-      });
+    const setTurnExpanded = useCallback((hostId: string, expanded: boolean) => {
+      // A turn opens below its summary line; keep that line under the reader's pointer.
+      const apply = () =>
+        setExpandedTurnHostIds((previous) => {
+          if (previous.has(hostId) === expanded) return previous;
+          const next = new Set(previous);
+          if (expanded) {
+            next.add(hostId);
+          } else {
+            next.delete(hostId);
+          }
+          return next;
+        });
+      const viewport = viewportRef.current;
+      if (viewport?.holdRow) viewport.holdRow(hostId, apply, "top");
+      else {
+        viewport?.holdReadingPosition?.();
+        apply();
+      }
     }, []);
+    // Chat find reveals a match inside a collapsed turn by opening the turn first.
+    const revealLoadedMessage = useStableEvent((messageId: string): boolean => {
+      const hostId = projectedToolCalls.turns.hostIdByFoldedMessageId.get(messageId);
+      if (hostId && !expandedTurnHostIds.has(hostId)) {
+        setTurnExpanded(hostId, true);
+        return true;
+      }
+      return revealLoadedHistory(messageId);
+    });
+    // Read through stable events so a collapse rerun does not change the renderer identity;
+    // rows whose turn state changed are revised through `historyRowRevision`.
+    const getCollapsedTurn = useStableEvent((hostId: string) =>
+      projectedToolCalls.turns.turnsByHostId.get(hostId),
+    );
+    const getTurnIndent = useStableEvent((layoutItem: StreamLayoutItem): TurnIndent => {
+      const { nestedItemIds } = projectedToolCalls.turns;
+      if (nestedItemIds.has(layoutItem.item.id)) {
+        const below = layoutItem.belowItem;
+        return below && nestedItemIds.has(below.id) ? "nested" : "lastNested";
+      }
+      return getCollapsedTurn(layoutItem.item.id)?.expanded ? "openedHost" : "none";
+    });
+
+    const setToolCallGroupExpanded = toolCallExpansion.setGroupExpanded;
 
     const renderUserMessageItem = useCallback(
       (layoutItem: StreamLayoutItem, item: Extract<StreamItem, { kind: "user_message" }>) => {
-        return (
+        const collapsedTurn = getCollapsedTurn(item.id);
+        const message = (
           <UserMessage
             serverId={resolvedServerId}
             agentId={agentId}
@@ -707,8 +762,25 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             }
           />
         );
+        if (!collapsedTurn) {
+          return message;
+        }
+        return (
+          <>
+            {message}
+            <TurnSummaryLine turn={collapsedTurn} onExpandedChange={setTurnExpanded} />
+          </>
+        );
       },
-      [context.capabilities, agentId, client, pendingClientMessageIds, resolvedServerId],
+      [
+        context.capabilities,
+        agentId,
+        client,
+        getCollapsedTurn,
+        pendingClientMessageIds,
+        resolvedServerId,
+        setTurnExpanded,
+      ],
     );
 
     const renderAssistantMessageItem = useCallback(
@@ -766,7 +838,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       (
         item: Extract<StreamItem, { kind: "tool_call" }>,
         isLastInSequence: boolean,
-        maxDetailHeight?: number,
+        options: { maxDetailHeight?: number; standalone?: boolean } = {},
       ) => {
         const { payload } = item;
 
@@ -784,10 +856,27 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             );
           }
 
+          if (data.detail.type === "sub_agent") {
+            return (
+              <SubagentLaunchMarker
+                serverId={resolvedServerId}
+                parentAgentId={agentId}
+                callId={data.callId}
+                itemId={item.id}
+                toolName={data.name}
+                status={data.status}
+                error={data.error}
+                detail={data.detail}
+                isLastInSequence={isLastInSequence}
+              />
+            );
+          }
+
           return (
             <ToolCallSlot
               itemId={item.id}
               onInlineDetailsExpandedChangeByItemId={setInlineDetailsExpanded}
+              serverId={resolvedServerId}
               toolName={data.name}
               error={data.error}
               status={data.status}
@@ -799,7 +888,8 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
               onOpenAgent={handleOpenMessageSender}
               isLastInSequence={isLastInSequence}
               onOpenFilePath={handleToolCallOpenFile}
-              maxDetailHeight={maxDetailHeight}
+              standalone={options.standalone}
+              maxDetailHeight={options.maxDetailHeight}
             />
           );
         }
@@ -815,12 +905,15 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             status={data.status}
             isLastInSequence={isLastInSequence}
             onOpenFilePath={handleToolCallOpenFile}
-            maxDetailHeight={maxDetailHeight}
+            standalone={options.standalone}
+            maxDetailHeight={options.maxDetailHeight}
           />
         );
       },
       [
         context.cwd,
+        resolvedServerId,
+        agentId,
         client,
         setInlineDetailsExpanded,
         handleToolCallOpenFile,
@@ -834,12 +927,17 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       projectedToolCalls.groupsByHostId.get(hostId),
     );
     const renderToolCallItem = useCallback(
-      (layoutItem: StreamLayoutItem, item: Extract<StreamItem, { kind: "tool_call" }>) => {
+      (
+        layoutItem: StreamLayoutItem,
+        item: Extract<StreamItem, { kind: "tool_call" | "thought" }>,
+      ) => {
         const group = getToolCallGroup(item.id);
         if (!group) {
-          return renderSingleToolCallItem(item, layoutItem.isLastInToolSequence);
+          return item.kind === "thought"
+            ? renderThoughtItem(layoutItem, item)
+            : renderSingleToolCallItem(item, layoutItem.isLastInToolSequence);
         }
-        const expanded = expandedToolCallGroupIds.has(group.run.id);
+        const expanded = expandedToolCallGroups.has(group.run.id);
         return (
           <OverviewToolCallGroupView
             group={group}
@@ -850,10 +948,24 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             {expanded
               ? group.run.calls.map((call, index) => (
                   <React.Fragment key={call.id}>
-                    {renderSingleToolCallItem(
-                      call,
-                      index === group.run.calls.length - 1,
-                      GROUPED_TOOL_CALL_DETAIL_MAX_HEIGHT,
+                    {call.kind === "thought" ? (
+                      // Reasoning is grouped only while Expand thinking is off, so an opened
+                      // group shows each thought as a closed row like any other call.
+                      <ThoughtSlot
+                        itemId={call.id}
+                        text={call.text}
+                        status={call.status}
+                        isLastInSequence={index === group.run.calls.length - 1}
+                        defaultExpanded={false}
+                        maxDetailHeight={GROUPED_TOOL_CALL_DETAIL_MAX_HEIGHT}
+                        standalone={false}
+                        onInlineDetailsExpandedChangeByItemId={setInlineDetailsExpanded}
+                      />
+                    ) : (
+                      renderSingleToolCallItem(call, index === group.run.calls.length - 1, {
+                        maxDetailHeight: GROUPED_TOOL_CALL_DETAIL_MAX_HEIGHT,
+                        standalone: false,
+                      })
                     )}
                   </React.Fragment>
                 ))
@@ -862,7 +974,9 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         );
       },
       [
-        expandedToolCallGroupIds,
+        expandedToolCallGroups,
+        renderThoughtItem,
+        setInlineDetailsExpanded,
         getToolCallGroup,
         renderSingleToolCallItem,
         setToolCallGroupExpanded,
@@ -881,10 +995,25 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             return renderAssistantMessageItem(layoutItem, item);
 
           case "thought":
-            return renderThoughtItem(layoutItem, item);
+            return renderToolCallItem(layoutItem, item);
 
           case "tool_call":
-            return renderToolCallItem(layoutItem, item);
+            return (
+              <>
+                {renderToolCallItem(layoutItem, item)}
+                {getCollapsedTurn(item.id) ? (
+                  <TurnSummaryLine
+                    turn={getCollapsedTurn(item.id)!}
+                    onExpandedChange={setTurnExpanded}
+                  />
+                ) : null}
+              </>
+            );
+
+          case "plugin":
+            return (
+              <PluginTimelineItemView agentId={agentId} serverId={resolvedServerId} item={item} />
+            );
 
           case "activity_log":
             return (
@@ -912,7 +1041,15 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             return null;
         }
       },
-      [renderUserMessageItem, renderAssistantMessageItem, renderThoughtItem, renderToolCallItem],
+      [
+        agentId,
+        resolvedServerId,
+        renderUserMessageItem,
+        renderAssistantMessageItem,
+        renderToolCallItem,
+        getCollapsedTurn,
+        setTurnExpanded,
+      ],
     );
 
     const bottomTurnFooterHost = streamLayout.auxiliaryTurnFooter;
@@ -933,6 +1070,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         return renderStreamItemWithTurnFooter({
           content,
           layoutItem,
+          turnIndent: getTurnIndent(layoutItem),
           strategy: streamRenderStrategy,
           supportsTimelineCursor: supportsAgentForkContextCursor,
           onForkAssistantTurn: readOnly ? undefined : handleForkAssistantTurn,
@@ -940,6 +1078,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       },
       [
         context,
+        getTurnIndent,
         handleForkAssistantTurn,
         isClickUp,
         readOnly,
@@ -1082,21 +1221,38 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const streamScrollEnabled =
       !streamRenderStrategy.shouldDisableParentScrollOnInlineDetailsExpansion() ||
       expandedInlineToolCallIds.size === 0;
+    const { nestedItemIds } = projectedToolCalls.turns;
     const historyRowRevision = useMemo(
       () => ({
-        contentById: projectedToolCalls.historyGroupUpdatesByHostId,
-        displayStateById: expandedToolCallGroupIds,
+        contentById: {
+          has: (id: string) =>
+            projectedToolCalls.historyGroupUpdatesByHostId.has(id) ||
+            projectedToolCalls.turns.updatedHostIds.has(id),
+        },
+        displayStateById: {
+          // An opened lone call also marks its future group open; that row stays unrevised
+          // until a group actually forms there.
+          has: (id: string) =>
+            (expandedToolCallGroups.has(id) && getToolCallGroup(id) !== undefined) ||
+            expandedTurnHostIds.has(id) ||
+            nestedItemIds.has(id),
+        },
         globalDisplayState: isMobile,
       }),
-      [expandedToolCallGroupIds, isMobile, projectedToolCalls.historyGroupUpdatesByHostId],
+      [
+        expandedToolCallGroups,
+        getToolCallGroup,
+        expandedTurnHostIds,
+        isMobile,
+        nestedItemIds,
+        projectedToolCalls.historyGroupUpdatesByHostId,
+        projectedToolCalls.turns.updatedHostIds,
+      ],
     );
 
     return (
       <ToolCallSheetProvider>
-        <AssistantSelectionCopySurface
-          style={stylesheet.container}
-          onLayout={outlineLayout.onLayout}
-        >
+        <AssistantSelectionCopySurface style={stylesheet.container}>
           <MessageOuterSpacingProvider disableOuterSpacing>
             <ChatFind
               agentId={agentId}
@@ -1104,36 +1260,39 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
               epoch={timelineEpoch}
               items={chatFindItems}
               viewportRef={viewportRef}
-              revealLoadedMessage={revealLoadedHistory}
+              revealLoadedMessage={revealLoadedMessage}
               visibleMessageIds={chatFindVisibleMessageIds}
             >
-              {streamRenderStrategy.render({
-                agentId,
-                segments: renderModel.segments,
-                historyRowRevision,
-                liveHeadRowRevision: expandedToolCallGroupIds,
-                boundary,
-                renderers,
-                listEmptyComponent,
-                viewportRef,
-                routeBottomAnchorRequest,
-                isAuthoritativeHistoryReady,
-                onNearBottomChange: setIsNearBottom,
-                onReadingPositionChange: chatOutline.reportReadingPosition,
-                onNearHistoryStart: loadOlder,
-                isLoadingOlderHistory: isLoadingOlder,
-                hasOlderHistory: hasOlder,
-                olderHistoryProgressKey: progressKey,
-                scrollEnabled: streamScrollEnabled,
-                contentMaxWidth,
-                outlineInset: outlineLayout.inset,
-                listStyle: stylesheet.list,
-                baseListContentContainerStyle: stylesheet.listContentContainer,
-                forwardListContentContainerStyle: stylesheet.forwardListContentContainer,
-              })}
+              <ToolCallExpansionContext.Provider value={toolCallExpansion}>
+                {streamRenderStrategy.render({
+                  readingRowReplacements: projectedToolCalls.readingRowReplacements,
+                  agentId,
+                  segments: renderModel.segments,
+                  historyRowRevision,
+                  liveHeadRowRevision: expandedToolCallGroups,
+                  boundary,
+                  renderers,
+                  listEmptyComponent,
+                  viewportRef,
+                  routeBottomAnchorRequest,
+                  isAuthoritativeHistoryReady,
+                  onNearBottomChange: setIsNearBottom,
+                  onReadingPositionChange: chatOutline.reportReadingPosition,
+                  onNearHistoryStart: loadOlder,
+                  isLoadingOlderHistory: isLoadingOlder,
+                  hasOlderHistory: hasOlder,
+                  olderHistoryProgressKey: progressKey,
+                  scrollEnabled: streamScrollEnabled,
+                  contentMaxWidth,
+                  outlineInset: outlineInset,
+                  listStyle: stylesheet.list,
+                  baseListContentContainerStyle: stylesheet.listContentContainer,
+                  forwardListContentContainerStyle: stylesheet.forwardListContentContainer,
+                })}
+              </ToolCallExpansionContext.Provider>
             </ChatFind>
           </MessageOuterSpacingProvider>
-          {outlineLayout.inset > 0 ? (
+          {outlineInset > 0 ? (
             <ChatOutlineRail
               prompts={chatOutline.prompts}
               activePrompt={chatOutline.activePrompt}
@@ -1292,6 +1451,45 @@ interface ToolCallSlotProps extends Omit<
   onInlineDetailsExpandedChangeByItemId: (itemId: string, expanded: boolean) => void;
 }
 
+interface ThoughtSlotProps {
+  itemId: string;
+  onInlineDetailsExpandedChangeByItemId: (itemId: string, expanded: boolean) => void;
+  text: string;
+  status: Extract<StreamItem, { kind: "thought" }>["status"];
+  isLastInSequence: boolean;
+  defaultExpanded: boolean;
+  standalone?: boolean;
+  maxDetailHeight?: number;
+}
+
+// Reasoning text is paced the same way assistant text is; see @/hooks/use-revealed-text.
+function ThoughtSlot({
+  itemId,
+  onInlineDetailsExpandedChangeByItemId,
+  text,
+  status,
+  isLastInSequence,
+  defaultExpanded,
+  standalone,
+  maxDetailHeight,
+}: ThoughtSlotProps) {
+  const revealedText = useRevealedText(text, status === "ready" ? "complete" : "streaming");
+  return (
+    <ToolCallSlot
+      itemId={itemId}
+      onInlineDetailsExpandedChangeByItemId={onInlineDetailsExpandedChangeByItemId}
+      toolName="thinking"
+      args={revealedText}
+      status={status === "ready" ? "completed" : "executing"}
+      isLastInSequence={isLastInSequence}
+      defaultExpanded={defaultExpanded}
+      standalone={standalone}
+      maxDetailHeight={maxDetailHeight}
+      forceInline={defaultExpanded}
+    />
+  );
+}
+
 function ToolCallSlot({
   itemId,
   onInlineDetailsExpandedChangeByItemId,
@@ -1301,7 +1499,9 @@ function ToolCallSlot({
     (expanded: boolean) => onInlineDetailsExpandedChangeByItemId(itemId, expanded),
     [onInlineDetailsExpandedChangeByItemId, itemId],
   );
-  return <ToolCall {...rest} onInlineDetailsExpandedChange={handleExpandedChange} />;
+  return (
+    <ToolCall {...rest} itemId={itemId} onInlineDetailsExpandedChange={handleExpandedChange} />
+  );
 }
 
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
@@ -1748,15 +1948,40 @@ const permissionStyles = StyleSheet.create((theme) => ({
 }));
 
 interface StreamItemWrapperProps {
-  itemId: string;
   gapBelow: number;
+  turnIndent: TurnIndent;
   children: ReactNode;
 }
 
-function StreamItemWrapper({ gapBelow, children }: StreamItemWrapperProps) {
+function StreamItemWrapper({ gapBelow, turnIndent, children }: StreamItemWrapperProps) {
   const wrapperStyle = useMemo(
-    () => [stylesheet.streamItemWrapper, { marginBottom: gapBelow }],
-    [gapBelow],
+    () => [
+      stylesheet.streamItemWrapper,
+      { marginBottom: turnIndent === "nested" || turnIndent === "openedHost" ? 0 : gapBelow },
+    ],
+    [gapBelow, turnIndent],
   );
-  return <View style={wrapperStyle}>{children}</View>;
+  const gapStyle = useMemo(() => ({ paddingBottom: gapBelow }), [gapBelow]);
+  switch (turnIndent) {
+    case "none":
+    case "openedHost":
+      return (
+        <View style={wrapperStyle}>
+          {children}
+          {turnIndent === "openedHost" ? <IndentRail style={gapStyle} /> : null}
+        </View>
+      );
+    case "nested":
+      return (
+        <View style={wrapperStyle}>
+          <IndentRail style={gapStyle}>{children}</IndentRail>
+        </View>
+      );
+    case "lastNested":
+      return (
+        <View style={wrapperStyle}>
+          <IndentRail>{children}</IndentRail>
+        </View>
+      );
+  }
 }

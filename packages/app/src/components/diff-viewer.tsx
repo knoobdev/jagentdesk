@@ -14,8 +14,8 @@ import { isWeb } from "@/constants/platform";
 const ScrollView = isWeb ? RNScrollView : GHScrollView;
 
 interface DiffViewerProps {
-  diffLines: DiffLine[];
   maxHeight?: number;
+  diffLines: DiffLine[];
   emptyLabel?: string;
   fillAvailableHeight?: boolean;
 }
@@ -138,7 +138,7 @@ export function DiffViewer({
       maxHeight !== undefined && inlineUnistylesStyle({ maxHeight }),
       fillAvailableHeight && styles.fillHeight,
     ],
-    [maxHeight, fillAvailableHeight],
+    [fillAvailableHeight, maxHeight],
   );
   const linesContainerStyle = React.useMemo(
     () => [
@@ -183,6 +183,9 @@ export function DiffViewer({
       {lines}
     </ScrollView>
   );
+
+  // Capped tool details own vertical scrolling outside the diff.
+  if (!fillAvailableHeight && maxHeight === undefined) return horizontalScroll;
 
   const content = (
     <ScrollView

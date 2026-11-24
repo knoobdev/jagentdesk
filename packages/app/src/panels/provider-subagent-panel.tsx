@@ -10,6 +10,8 @@ import type { AgentScreenAgent } from "@/hooks/use-agent-screen-state-machine";
 import { usePaneContext } from "@/panels/pane-context";
 import type { PanelDescriptor, PanelRegistration } from "@/panels/panel-registry";
 import { useSessionStore } from "@/stores/session-store";
+import { useSubagentsForParent } from "@/subagents/select";
+import { SubagentsTrack } from "@/subagents/track";
 import {
   providerSubagentKey,
   providerSubagentLifecycleStatus,
@@ -26,6 +28,28 @@ import type { TurnPresentation } from "@/timeline/turn-liveness";
 
 const EMPTY_PERMISSIONS = new Map<string, PendingPermission>();
 const EMPTY_STREAM_ITEMS: StreamItem[] = [];
+const NOOP_SUBAGENT = () => undefined;
+
+function ProviderSubagentChildTrack({
+  rows,
+  onOpenProviderSubagent,
+}: {
+  serverId: string;
+  rows: ReturnType<typeof useSubagentsForParent>;
+  onOpenProviderSubagent: (parentAgentId: string, subagentId: string) => void;
+}) {
+  if (rows.length === 0) return null;
+  return (
+    <View>
+      <SubagentsTrack
+        rows={rows}
+        onOpenSubagent={NOOP_SUBAGENT}
+        onOpenProviderSubagent={onOpenProviderSubagent}
+        onArchiveSubagent={NOOP_SUBAGENT}
+      />
+    </View>
+  );
+}
 
 function formatProviderLabel(provider: string): string {
   return provider
@@ -70,7 +94,7 @@ function useProviderSubagentDescriptor(
 
 function ProviderSubagentPanel() {
   const { t } = useTranslation();
-  const { serverId, target, openFileInWorkspace } = usePaneContext();
+  const { serverId, target, openFileInWorkspace, openTab } = usePaneContext();
   invariant(target.kind === "provider_subagent", "ProviderSubagentPanel requires provider target");
   const key = providerSubagentKey(serverId, target.parentAgentId, target.subagentId);
   const streamId = `provider:${encodeURIComponent(target.parentAgentId)}:${encodeURIComponent(target.subagentId)}`;
@@ -92,6 +116,17 @@ function ProviderSubagentPanel() {
   // COMPAT(projectedSubagentTimeline): added after v0.8.0, remove after 2027-03-14.
   const supported = serverInfo?.features?.projectedSubagentTimeline === true;
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
+  const childRows = useSubagentsForParent({
+    serverId,
+    parentAgentId: target.parentAgentId,
+    providerParentSubagentId: target.subagentId,
+  });
+  const openProviderChild = useCallback(
+    (parentAgentId: string, subagentId: string) => {
+      openTab({ kind: "provider_subagent", parentAgentId, subagentId });
+    },
+    [openTab],
+  );
 
   useEffect(() => {
     if (!client || !supported) return;
@@ -203,6 +238,11 @@ function ProviderSubagentPanel() {
         onOpenWorkspaceFile={openFileInWorkspace}
         readOnly
         historyPagination={historyPagination}
+      />
+      <ProviderSubagentChildTrack
+        serverId={serverId}
+        rows={childRows}
+        onOpenProviderSubagent={openProviderChild}
       />
       <ParentAgentCallout serverId={serverId} parentAgentId={target.parentAgentId} />
     </View>

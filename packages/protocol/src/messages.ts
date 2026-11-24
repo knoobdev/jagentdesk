@@ -864,7 +864,9 @@ const ToolCallDetailPayloadSchema: z.ZodType<ToolCallDetail, unknown> = z.discri
       subAgentType: z.string().optional(),
       description: z.string().optional(),
       childSessionId: z.string().optional(),
-      log: z.string(),
+      // COMPAT(subagent-log): added in v0.14.1, remove after 2027-04-30. A sub-agent card is a
+      // launch marker; apps before v0.14.1 required `log`, so daemons still send it empty.
+      log: z.string().optional(),
       // Compat cruft for clients <= 0.1.65-beta.3 that required this field. Producers still
       // emit `[]`; nothing reads it. Drop the field (and the `[]` emissions) once those
       // clients are no longer in the field.
@@ -2157,6 +2159,8 @@ export const AgentTimelineCursorSchema = z.object({
 });
 
 export const FetchAgentTimelineRequestMessageSchema = z.object({
+  // Keep available turns whole for tail/before pages; after catch-up stays incremental.
+  wholeTurns: z.boolean().optional(),
   type: z.literal("fetch_agent_timeline_request"),
   agentId: z.string(),
   requestId: z.string(),
@@ -5005,6 +5009,9 @@ export const ServerInfoStatusPayloadSchema = z
         agentBackgroundWorkStop: z.boolean().optional(),
         // COMPAT(projectedSubagentTimeline): added after v0.8.0, remove gates after 2027-03-14; retain wire field.
         projectedSubagentTimeline: z.boolean().optional(),
+        wholeTurnTimeline: z.boolean().optional(),
+        // COMPAT(providerSubagentNesting): added in v0.7, remove gate after 2027-03-04.
+        providerSubagentNesting: z.boolean().optional(),
         // COMPAT(workspacePinning): added in v0.1.107, remove gate after 2027-01-12.
         workspacePinning: z.boolean().optional(),
         // COMPAT(hubRelationship): added in v0.1.X, drop the gate when floor >= v0.1.X.
@@ -5949,6 +5956,8 @@ export const AgentTimelineListPromptsResponseMessageSchema = z.object({
 export const ProviderSubagentDescriptorPayloadSchema = z.object({
   id: z.string(),
   parentAgentId: z.string(),
+  // Optional for descriptors from older daemons; retain the optional wire field.
+  parentSubagentId: z.string().nullable().optional(),
   provider: AgentProviderSchema,
   title: z.string().nullable(),
   description: z.string().nullable(),

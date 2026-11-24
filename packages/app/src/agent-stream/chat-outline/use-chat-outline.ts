@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import type { AgentTimelinePromptIndexPayload } from "@jagentdesk/client/internal/daemon-client";
 import { isWeb } from "@/constants/platform";
 import { useStableEvent } from "@/hooks/use-stable-event";
@@ -33,7 +33,8 @@ export interface UseChatOutlineInput {
   enabled: boolean;
   viewportRef: RefObject<StreamViewportHandle | null>;
   onJumpError: () => void;
-  visibleMessageIds?: ReadonlySet<string>;
+  // Message ids of the history the viewport has mounted. Live head messages are always mounted.
+  mountedHistoryMessageIds?: ReadonlySet<string>;
   revealLoadedMessage?: (messageId: string) => boolean;
 }
 
@@ -42,6 +43,14 @@ export interface ChatOutline {
   activePrompt: ActivePromptSource;
   jumpToPrompt: (seq: number) => void;
   reportReadingPosition: (rowId: string | null) => void;
+}
+
+function findLoadedItem(
+  tail: StreamItem[],
+  head: StreamItem[],
+  predicate: (item: StreamItem) => boolean,
+): StreamItem | undefined {
+  return tail.find(predicate) ?? head.find(predicate);
 }
 
 export function useChatOutline({
@@ -53,7 +62,7 @@ export function useChatOutline({
   enabled,
   viewportRef,
   onJumpError,
-  visibleMessageIds,
+  mountedHistoryMessageIds,
   revealLoadedMessage,
 }: UseChatOutlineInput): ChatOutline {
   const [index, setIndex] = useState<AgentTimelinePromptIndexPayload | null>(null);
@@ -62,7 +71,9 @@ export function useChatOutline({
   const readingRowIdRef = useRef<string | null>(null);
   const nextJumpRequestIdRef = useRef(0);
   const nextIndexRequestIdRef = useRef(0);
-  const loadedItems = useMemo(() => [...tail, ...(head ?? NO_STREAM_ITEMS)], [head, tail]);
+  // A disabled outline (every native viewport) must not pay for the timeline per delta.
+  const loadedTail = enabled ? tail : NO_STREAM_ITEMS;
+  const loadedHead = enabled ? (head ?? NO_STREAM_ITEMS) : NO_STREAM_ITEMS;
   const prompts = enabled ? (index?.prompts ?? NO_PROMPTS) : NO_PROMPTS;
 
   useEffect(() => {
@@ -114,7 +125,8 @@ export function useChatOutline({
     const anchorSeq =
       rowId === null
         ? null
-        : (loadedItems.find((item) => item.id === rowId)?.timelineCursor?.seq ?? null);
+        : (findLoadedItem(loadedTail, loadedHead, (item) => item.id === rowId)?.timelineCursor
+            ?.seq ?? null);
     activePrompt.publish(resolveActivePromptSeq(prompts, anchorSeq));
   });
 
@@ -134,16 +146,22 @@ export function useChatOutline({
   // who never scrolls would otherwise sit on an unmarked rail.
   useEffect(() => {
     publishActivePrompt();
-  }, [loadedItems, prompts, publishActivePrompt]);
+  }, [prompts, publishActivePrompt]);
 
   useEffect(() => {
     if (pendingJump === null) return;
-    const target = loadedItems.find((item) => item.timelineCursor?.seq === pendingJump.seq);
+    const target = findLoadedItem(
+      loadedTail,
+      loadedHead,
+      (item) => item.timelineCursor?.seq === pendingJump.seq,
+    );
     if (target) {
       if (pendingJump.hasScrolled) return;
-      // A loaded prompt above the history window mounts first; this effect runs again once the
-      // visible set includes it.
-      if (visibleMessageIds?.has(target.id) === false) {
+      const isMounted =
+        mountedHistoryMessageIds === undefined ||
+        mountedHistoryMessageIds.has(target.id) ||
+        loadedHead.includes(target);
+      if (!isMounted) {
         revealLoadedMessage?.(target.id);
         return;
       }
@@ -155,14 +173,23 @@ export function useChatOutline({
       return;
     }
     if (pendingJump.fetchSettled) setPendingJump(null);
-  }, [loadedItems, pendingJump, revealLoadedMessage, viewportRef, visibleMessageIds]);
+  }, [
+    loadedHead,
+    loadedTail,
+    mountedHistoryMessageIds,
+    pendingJump,
+    revealLoadedMessage,
+    viewportRef,
+  ]);
 
-  // Stable identity: loadedItems changes on every streamed token, and a new callback would
-  // re-render every tick on the rail each time.
   const jumpToPrompt = useStableEvent((seq: number) => {
     nextJumpRequestIdRef.current += 1;
     setPendingJump(null);
-    const loaded = loadedItems.find((item) => item.timelineCursor?.seq === seq);
+    const loaded = findLoadedItem(
+      loadedTail,
+      loadedHead,
+      (item) => item.timelineCursor?.seq === seq,
+    );
     if (loaded) {
       if (revealLoadedMessage?.(loaded.id)) {
         const requestId = nextJumpRequestIdRef.current;

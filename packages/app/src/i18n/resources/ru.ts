@@ -36,6 +36,8 @@ export const ru: TranslationResources = {
     back: "Назад",
     loading: "Загрузка...",
     actions: {
+      copyLine: "Копировать строку",
+      selectAll: "Выбрать всё",
       back: "Назад",
       cancel: "Отмена",
       close: "Закрывать",
@@ -1902,7 +1904,14 @@ export const ru: TranslationResources = {
     input: "Вход",
     output: "Выход",
   },
+  turnSummary: {
+    details: "Показать подробности хода",
+    sentBy: "Отправлено агентом {{name}}",
+    showMore: "Показать больше",
+    showLess: "Свернуть",
+  },
   toolCallGroup: {
+    thought: "Обдумал",
     editedFiles: {
       one: "изменён {{count}} файл",
       other: "изменено {{count}} файлов",
@@ -2159,13 +2168,13 @@ export const ru: TranslationResources = {
         description:
           "По умолчанию показывать блоки размышлений и логики агента полностью развернутыми",
       },
-      toolCallDetail: {
-        label: "Отображение вызовов инструментов",
-        description: "Как вызовы инструментов отображаются на временной шкале",
-        accessibilityLabel: "Выбрать отображение вызовов инструментов ({{value}})",
+      chatDisplay: {
+        label: "Отображение чата",
+        description: "Какую часть работы агента показывает чат",
         options: {
-          overview: "Сводка",
-          detailed: "Полная детализация",
+          full: "Полностью",
+          collapseToolCalls: "Сворачивать вызовы инструментов",
+          collapseTurns: "Сворачивать ходы",
         },
       },
       language: {

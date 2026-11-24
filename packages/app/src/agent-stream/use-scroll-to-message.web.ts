@@ -1,13 +1,15 @@
 import type React from "react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import type { Virtualizer } from "@tanstack/react-virtual";
+import { getStreamItemMessageId, type StreamItem } from "@/types/stream";
 import { createPromptJumpSettleController, PROMPT_JUMP_TOP_INSET_PX } from "./prompt-jump-settle";
 import type { ScrollToMessageOccurrence } from "./strategy";
 
 interface UseScrollToMessageInput {
+  active: boolean;
   scrollContainerRef: React.RefObject<HTMLElement | null>;
   rowVirtualizer: Virtualizer<HTMLElement, Element>;
-  historyVirtualized: readonly { id: string }[];
+  historyVirtualized: readonly StreamItem[];
   cancelPendingStickToBottom: () => void;
   setFollowOutput: (value: boolean) => boolean;
   onNearBottomChange: (value: boolean) => void;
@@ -24,6 +26,7 @@ const SCROLL_AFFECTING_KEYS = new Set([
 ]);
 
 export function useScrollToMessage({
+  active,
   scrollContainerRef,
   rowVirtualizer,
   historyVirtualized,
@@ -37,17 +40,16 @@ export function useScrollToMessage({
     () =>
       createPromptJumpSettleController({
         viewport: {
-          findTargetTop(itemId) {
-            // Chat find pins the viewport to the exact match it revealed; without an
-            // occurrence this falls back to the top of the row.
+          findTargetTop(messageId) {
             const occurrence = occurrenceRef.current;
             if (occurrence?.signal.aborted) return null;
             if (occurrence) return occurrence.targetTop();
-            const container = scrollContainerRef.current;
-            const target = container?.querySelector<HTMLElement>(
-              `[data-history-row-id="${CSS.escape(itemId)}"]`,
+            // Every row of an assistant message carries the message id; the first one
+            // is the message's top.
+            const target = scrollContainerRef.current?.querySelector<HTMLElement>(
+              `[data-message-id="${CSS.escape(messageId)}"]`,
             );
-            return target?.getBoundingClientRect().top ?? null;
+            return target ? target.getBoundingClientRect().top : null;
           },
           getContainerTop() {
             return scrollContainerRef.current?.getBoundingClientRect().top ?? 0;
@@ -93,21 +95,27 @@ export function useScrollToMessage({
     },
     [settleController],
   );
+  useLayoutEffect(() => {
+    if (!active) {
+      settleController.cancel();
+    }
+  }, [active, settleController]);
 
   const scrollToMessage = useCallback(
-    (itemId: string, occurrence?: ScrollToMessageOccurrence) => {
+    (messageId: string, occurrence?: ScrollToMessageOccurrence) => {
       occurrenceRef.current = occurrence;
       removeAbortListener.current?.();
       const cancel = () => settleController.cancel();
       occurrence?.signal.addEventListener("abort", cancel, { once: true });
       removeAbortListener.current = () => occurrence?.signal.removeEventListener("abort", cancel);
+      if (!active) return;
       const container = scrollContainerRef.current;
       if (!container) return;
       cancelPendingStickToBottom();
       setFollowOutput(false);
 
       const mounted = container.querySelector<HTMLElement>(
-        `[data-history-row-id="${CSS.escape(itemId)}"]`,
+        `[data-message-id="${CSS.escape(messageId)}"]`,
       );
       if (mounted) {
         const delta =
@@ -115,19 +123,22 @@ export function useScrollToMessage({
           container.getBoundingClientRect().top -
           PROMPT_JUMP_TOP_INSET_PX;
         container.scrollTop += delta;
-        settleController.start(itemId);
+        settleController.start(messageId);
         onNearBottomChange(false);
         return;
       }
 
-      const index = historyVirtualized.findIndex((item) => item.id === itemId);
+      const index = historyVirtualized.findIndex(
+        (item) => getStreamItemMessageId(item) === messageId,
+      );
       if (index >= 0) {
         rowVirtualizer.scrollToIndex(index, { align: "start" });
-        settleController.start(itemId);
+        settleController.start(messageId);
         onNearBottomChange(false);
       }
     },
     [
+      active,
       cancelPendingStickToBottom,
       historyVirtualized,
       onNearBottomChange,

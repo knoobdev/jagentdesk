@@ -4180,7 +4180,7 @@ describe("Codex app-server provider", () => {
     ]);
   });
 
-  test("folds child-thread Codex activity into the parent sub-agent tool call", async () => {
+  test("keeps child-thread Codex activity out of the parent sub-agent card", async () => {
     const session = createSession();
     const events: AgentStreamEvent[] = [];
     session.subscribe((event) => events.push(event));
@@ -4218,7 +4218,6 @@ describe("Codex app-server provider", () => {
     });
 
     const timelineEvents = events.filter((event) => event.type === "timeline");
-    expect(timelineEvents).toHaveLength(4);
     expect(timelineEvents.every((event) => event.item.type === "tool_call")).toBe(true);
     const finalItem = timelineEvents.at(-1)?.item;
     expect(finalItem).toMatchObject({
@@ -4230,7 +4229,7 @@ describe("Codex app-server provider", () => {
         type: "sub_agent",
         subAgentType: "Sub-agent",
         description: "Report findings.",
-        log: "[Assistant] Found the path.",
+        log: "",
         actions: [],
       },
     });
@@ -4307,13 +4306,9 @@ describe("Codex app-server provider", () => {
         id: "settled-child-thread",
         status: "completed",
       });
-      expect(events.at(-1)).toMatchObject({
+      expect(events.findLast((event) => event.type === "timeline")).toMatchObject({
         type: "timeline",
-        item: {
-          callId: "call-settled-child",
-          status: "completed",
-          detail: { type: "sub_agent", log: "[Assistant] Late trailing output." },
-        },
+        item: { callId: "call-settled-child", status: "completed" },
       });
 
       appServer.completesSubAgentActivity({
@@ -4618,6 +4613,8 @@ describe("Codex app-server provider", () => {
       createTestLogger(),
       async () => appServer.child,
     );
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
 
     try {
       const resultPromise = session.run("Delegate the investigation, then report the result.");
@@ -4661,11 +4658,18 @@ describe("Codex app-server provider", () => {
         type: "tool_call",
         callId: "spawn-child-early",
         status: "completed",
-        detail: {
-          type: "sub_agent",
-          log: "[Assistant] Early child findings.",
-        },
+        detail: { type: "sub_agent", log: "" },
       });
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "provider_subagent",
+          event: expect.objectContaining({
+            type: "timeline",
+            id: "child-thread-early",
+            item: expect.objectContaining({ type: "assistant_message" }),
+          }),
+        }),
+      );
       appServer.assertNoErrors();
     } finally {
       await session.close();
@@ -4736,10 +4740,7 @@ describe("Codex app-server provider", () => {
       expect(toolCalls.at(-1)).toMatchObject({
         callId: "spawn-child-stable",
         status: "canceled",
-        detail: {
-          type: "sub_agent",
-          log: "[Assistant] Still on the same card.",
-        },
+        detail: { type: "sub_agent", log: "" },
       });
       appServer.assertNoErrors();
     } finally {
@@ -4819,11 +4820,10 @@ describe("Codex app-server provider", () => {
 
       const result = await resultPromise;
       const toolCalls = result.timeline.filter((item) => item.type === "tool_call");
-      expect(toolCalls.map((item) => item.status)).toEqual(["running", "completed", "completed"]);
+      expect(toolCalls.map((item) => item.status)).toEqual(["running", "completed"]);
       expect(toolCalls.at(-1)).toMatchObject({
         callId: "spawn-child-late-compaction",
         status: "completed",
-        detail: { type: "sub_agent", log: "[Compacted]" },
       });
       appServer.assertNoErrors();
     } finally {
@@ -4831,7 +4831,7 @@ describe("Codex app-server provider", () => {
     }
   });
 
-  test("projects legacy child tools into one stable sub-agent log", async () => {
+  test("routes legacy child tools to the child timeline", async () => {
     const appServer = createFakeCodexAppServer();
     const session = new CodexAppServerAgentSession(
       createConfig({ cwd: "/workspace/project" }),
@@ -4839,6 +4839,8 @@ describe("Codex app-server provider", () => {
       createTestLogger(),
       async () => appServer.child,
     );
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
 
     try {
       const resultPromise = session.run("Delegate the implementation.");
@@ -4881,19 +4883,26 @@ describe("Codex app-server provider", () => {
       expect(finalToolCall).toMatchObject({
         callId: "spawn-legacy-tool-child",
         status: "completed",
-        detail: { type: "sub_agent" },
+        detail: { type: "sub_agent", log: "" },
       });
-      if (finalToolCall?.detail.type === "sub_agent") {
-        expect(finalToolCall.detail.log.match(/\[Shell\]/g)).toHaveLength(1);
-        expect(finalToolCall.detail.log).toContain("[Edit]");
-      }
+      const childToolCalls = events.flatMap((event) =>
+        event.type === "provider_subagent" &&
+        event.event.type === "timeline" &&
+        event.event.id === "legacy-tool-child" &&
+        event.event.item.type === "tool_call"
+          ? [event.event.item]
+          : [],
+      );
+      expect(new Set(childToolCalls.map((item) => item.detail.type))).toEqual(
+        new Set(["shell", "edit"]),
+      );
       appServer.assertNoErrors();
     } finally {
       await session.close();
     }
   });
 
-  test("keeps nested MultiAgentV2 output inside the root sub-agent card", async () => {
+  test("keeps nested MultiAgentV2 output out of the root sub-agent card", async () => {
     const session = createSession();
     const events: AgentStreamEvent[] = [];
     session.subscribe((event) => events.push(event));
@@ -4937,8 +4946,22 @@ describe("Codex app-server provider", () => {
     expect(beforeParentCompletes.at(-1)).toMatchObject({
       callId: "spawn-child-root",
       status: "running",
-      detail: { type: "sub_agent", log: expect.stringContaining("Grandchild findings.") },
+      detail: { type: "sub_agent", log: "" },
     });
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "provider_subagent",
+        event: {
+          type: "timeline",
+          id: "grandchild-thread",
+          item: {
+            type: "assistant_message",
+            messageId: "grandchild-message",
+            text: "Grandchild findings.",
+          },
+        },
+      }),
+    );
 
     await asInternals(session).handleNotification("turn/completed", {
       threadId: "child-thread-root",
@@ -4948,6 +4971,77 @@ describe("Codex app-server provider", () => {
       type: "timeline",
       item: { callId: "spawn-child-root", status: "completed" },
     });
+  });
+
+  test("keeps a nested child under its spawning parent after a root interaction", async () => {
+    const session = createSession();
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    await asInternals(session).handleNotification("item/completed", {
+      threadId: "test-thread",
+      item: {
+        type: "subAgentActivity",
+        id: "spawn-child-root",
+        kind: "started",
+        agentThreadId: "child-thread-root",
+        agentPath: "/root/child",
+      },
+    });
+    await asInternals(session).handleNotification("item/completed", {
+      threadId: "child-thread-root",
+      item: {
+        type: "subAgentActivity",
+        id: "spawn-grandchild",
+        kind: "started",
+        agentThreadId: "grandchild-thread",
+        agentPath: "/root/child/grandchild",
+      },
+    });
+    await asInternals(session).handleNotification("item/completed", {
+      threadId: "test-thread",
+      item: {
+        type: "collabAgentToolCall",
+        id: "wait-for-grandchild",
+        tool: "wait",
+        status: "completed",
+        receiverThreadIds: ["grandchild-thread"],
+        agentsStates: {
+          "grandchild-thread": { status: "running", message: null },
+        },
+      },
+    });
+    await asInternals(session).handleNotification("item/agentMessage/delta", {
+      threadId: "grandchild-thread",
+      itemId: "grandchild-after-wait",
+      delta: "Still nested.",
+    });
+
+    const grandchildUpserts = events.flatMap((event) =>
+      event.type === "provider_subagent" &&
+      event.event.type === "upsert" &&
+      event.event.id === "grandchild-thread"
+        ? [event.event]
+        : [],
+    );
+    expect(grandchildUpserts.map((event) => event.parentSubagentId)).toEqual([
+      "child-thread-root",
+      "child-thread-root",
+    ]);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "provider_subagent",
+        event: {
+          type: "timeline",
+          id: "grandchild-thread",
+          item: {
+            type: "assistant_message",
+            messageId: "grandchild-after-wait",
+            text: "Still nested.",
+          },
+        },
+      }),
+    );
   });
 
   test("never treats an unmapped foreign terminal as the root terminal", async () => {
@@ -5368,7 +5462,7 @@ describe("Codex app-server provider", () => {
     expect(events).toHaveLength(eventCountAfterSpawn);
   });
 
-  test("keeps child context compaction inside the child card", async () => {
+  test("keeps child context compaction on the child timeline", async () => {
     const session = createSession();
     const events: AgentStreamEvent[] = [];
     session.subscribe((event) => events.push(event));
@@ -5401,10 +5495,70 @@ describe("Codex app-server provider", () => {
         (item) => item.type === "tool_call" && item.callId === "spawn-child-compaction",
       ),
     ).toBe(true);
-    expect(timelineItems.at(-1)).toMatchObject({
-      type: "tool_call",
-      detail: { type: "sub_agent", log: "[Compacted]" },
+    expect(
+      events.flatMap((event) =>
+        event.type === "provider_subagent" && event.event.type === "timeline" ? [event.event] : [],
+      ),
+    ).toEqual([
+      {
+        type: "timeline",
+        id: "child-thread-compaction",
+        item: { type: "compaction", status: "loading" },
+      },
+      {
+        type: "timeline",
+        id: "child-thread-compaction",
+        item: { type: "compaction", status: "completed" },
+      },
+    ]);
+  });
+
+  test("settles a child compaction once when the item completion is missing or duplicated", async () => {
+    const session = createSession();
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    for (const child of ["compacted-child", "turn-ended-child"]) {
+      await asInternals(session).handleNotification("item/completed", {
+        threadId: "test-thread",
+        item: {
+          type: "subAgentActivity",
+          id: `spawn-${child}`,
+          kind: "started",
+          agentThreadId: child,
+          agentPath: `/root/${child}`,
+        },
+      });
+      await asInternals(session).handleNotification("item/started", {
+        threadId: child,
+        item: { type: "contextCompaction", id: `${child}-compaction` },
+      });
+    }
+    await asInternals(session).handleNotification("thread/compacted", {
+      threadId: "compacted-child",
     });
+    await asInternals(session).handleNotification("item/completed", {
+      threadId: "compacted-child",
+      item: { type: "contextCompaction", id: "compacted-child-compaction" },
+    });
+    await asInternals(session).handleNotification("turn/completed", {
+      threadId: "turn-ended-child",
+      turn: { status: "completed" },
+    });
+
+    const compactions = events.flatMap((event) =>
+      event.type === "provider_subagent" && event.event.type === "timeline"
+        ? [
+            `${event.event.id} ${event.event.item.type === "compaction" ? event.event.item.status : ""}`,
+          ]
+        : [],
+    );
+    expect(compactions).toEqual([
+      "compacted-child loading",
+      "turn-ended-child loading",
+      "compacted-child completed",
+      "turn-ended-child completed",
+    ]);
   });
 
   test("keeps the parent sub-agent running when a child command fails during the child turn", async () => {
@@ -5439,7 +5593,7 @@ describe("Codex app-server provider", () => {
       },
     });
 
-    expect(events.at(-1)?.item).toMatchObject({
+    expect(events.findLast((event) => event.type === "timeline")?.item).toMatchObject({
       type: "tool_call",
       callId: "call-sub-agent-child-command-failure",
       name: "Sub-agent",
@@ -5734,7 +5888,7 @@ describe("Codex app-server provider", () => {
     );
     expect(liveToolCalls.at(-1)).toMatchObject({
       status: "running",
-      detail: { type: "sub_agent", log: "[Assistant] More findings after resume." },
+      detail: { type: "sub_agent", log: "" },
     });
 
     liveEvents.length = 0;
@@ -5747,12 +5901,12 @@ describe("Codex app-server provider", () => {
       itemId: "legacy-child-message-after-resume",
       delta: "Legacy findings after resume.",
     });
-    expect(liveEvents.at(-1)).toMatchObject({
+    expect(liveEvents.findLast((event) => event.type === "timeline")).toMatchObject({
       type: "timeline",
       item: {
         callId: "legacy-spawn-history",
         status: "running",
-        detail: { type: "sub_agent", log: "[Assistant] Legacy findings after resume." },
+        detail: { type: "sub_agent", log: "" },
       },
     });
   });

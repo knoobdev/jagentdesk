@@ -36,6 +36,8 @@ export const zhCN: TranslationResources = {
     back: "返回",
     loading: "加载中...",
     actions: {
+      copyLine: "复制行",
+      selectAll: "全选",
       back: "返回",
       cancel: "取消",
       close: "关闭",
@@ -1793,7 +1795,14 @@ export const zhCN: TranslationResources = {
     input: "输入",
     output: "输出",
   },
+  turnSummary: {
+    details: "查看轮次详情",
+    sentBy: "由 {{name}} 发送",
+    showMore: "展开",
+    showLess: "收起",
+  },
   toolCallGroup: {
+    thought: "已思考",
     editedFiles: {
       one: "编辑了 {{count}} 个文件",
       other: "编辑了 {{count}} 个文件",
@@ -2046,13 +2055,13 @@ export const zhCN: TranslationResources = {
         label: "始终展开推理过程",
         description: "默认情况下完全展开 AI 的思考和推理过程",
       },
-      toolCallDetail: {
-        label: "工具调用显示",
-        description: "工具调用在时间线中的显示方式",
-        accessibilityLabel: "选择工具调用显示方式（{{value}}）",
+      chatDisplay: {
+        label: "聊天显示",
+        description: "聊天中显示多少智能体的工作",
         options: {
-          overview: "摘要",
-          detailed: "完整详情",
+          full: "完整",
+          collapseToolCalls: "折叠工具调用",
+          collapseTurns: "折叠轮次",
         },
       },
       language: {

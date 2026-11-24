@@ -36,6 +36,8 @@ export const ja: TranslationResources = {
     back: "戻る",
     loading: "読み込み中...",
     actions: {
+      copyLine: "行をコピー",
+      selectAll: "すべて選択",
       back: "戻る",
       cancel: "キャンセル",
       close: "閉じる",
@@ -1848,7 +1850,14 @@ export const ja: TranslationResources = {
     input: "入力",
     output: "出力",
   },
+  turnSummary: {
+    details: "ターンの詳細を表示",
+    sentBy: "{{name}} から送信",
+    showMore: "もっと見る",
+    showLess: "折りたたむ",
+  },
   toolCallGroup: {
+    thought: "思考",
     editedFiles: {
       one: "{{count}}個のファイルを編集",
       other: "{{count}}個のファイルを編集",
@@ -2102,13 +2111,13 @@ export const ja: TranslationResources = {
         label: "常に思考プロセスを展開",
         description: "デフォルトでAIのエージェント思考・推論ブロックを完全に展開して表示します",
       },
-      toolCallDetail: {
-        label: "ツール呼び出しの表示",
-        description: "タイムラインでのツール呼び出しの表示方法",
-        accessibilityLabel: "ツール呼び出しの表示を選択（{{value}}）",
+      chatDisplay: {
+        label: "チャットの表示",
+        description: "チャットに表示するエージェントの作業量",
         options: {
-          overview: "要約",
-          detailed: "すべての詳細",
+          full: "すべて",
+          collapseToolCalls: "ツール呼び出しを折りたたむ",
+          collapseTurns: "ターンを折りたたむ",
         },
       },
       language: {

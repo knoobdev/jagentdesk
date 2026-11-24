@@ -36,6 +36,8 @@ export const ptBR: TranslationResources = {
     back: "Voltar",
     loading: "Carregando...",
     actions: {
+      copyLine: "Copiar linha",
+      selectAll: "Selecionar tudo",
       back: "Voltar",
       cancel: "Cancelar",
       close: "Fechar",
@@ -1840,7 +1842,14 @@ export const ptBR: TranslationResources = {
     input: "Entrada",
     output: "Saída",
   },
+  turnSummary: {
+    details: "Ver detalhes do turno",
+    sentBy: "Enviado por {{name}}",
+    showMore: "Mostrar mais",
+    showLess: "Mostrar menos",
+  },
   toolCallGroup: {
+    thought: "Pensou",
     editedFiles: {
       one: "editou {{count}} arquivo",
       other: "editou {{count}} arquivos",
@@ -2097,13 +2106,13 @@ export const ptBR: TranslationResources = {
         description:
           "Mostrar os blocos de pensamento e raciocínio do agente totalmente expandidos por padrão",
       },
-      toolCallDetail: {
-        label: "Exibição de chamadas de ferramentas",
-        description: "Como as chamadas de ferramentas aparecem na linha do tempo",
-        accessibilityLabel: "Selecionar exibição de chamadas de ferramentas ({{value}})",
+      chatDisplay: {
+        label: "Exibição do chat",
+        description: "Quanto do trabalho do agente o chat mostra",
         options: {
-          overview: "Resumo",
-          detailed: "Detalhes completos",
+          full: "Completo",
+          collapseToolCalls: "Recolher chamadas de ferramentas",
+          collapseTurns: "Recolher turnos",
         },
       },
       language: {

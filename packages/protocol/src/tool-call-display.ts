@@ -1,8 +1,6 @@
 import type { ToolCallTimelineItem } from "./agent-types.js";
-import {
-  buildAgentMessageDisplay,
-  buildJAgentDeskToolDisplay,
-} from "./jagentdesk-tool-presentation/index.js";
+import { buildAgentMessageDisplay } from "./agent-message-display.js";
+import { buildJAgentDeskToolDisplay } from "./jagentdesk-tool-presentation/index.js";
 import { stripCwdPrefix } from "./path-utils.js";
 
 export type ToolCallDisplayInput = Pick<
@@ -10,6 +8,7 @@ export type ToolCallDisplayInput = Pick<
   "name" | "status" | "error" | "metadata" | "detail" | "agentMessage"
 > & {
   cwd?: string;
+  /** Title of the agent a JAgentDesk call targets, when the caller knows it. */
   targetAgentTitle?: string;
 };
 
@@ -150,20 +149,24 @@ function buildUnknownDetailOverride(input: ToolCallDisplayInput): DetailDisplay 
 
 export function buildToolCallDisplayModel(input: ToolCallDisplayInput): ToolCallDisplayModel {
   const errorText = input.status === "failed" ? formatErrorText(input.error) : undefined;
-  const jagentdeskDisplay = input.agentMessage
-    ? buildAgentMessageDisplay(input.agentMessage)
-    : buildJAgentDeskToolDisplay({
-        toolName: input.name,
-        detail: input.detail,
-        targetAgentTitle: input.targetAgentTitle,
-      });
-  if (jagentdeskDisplay)
+  // ADR-0029 keeps the sender in the envelope row's heading.
+  if (input.agentMessage)
     return {
-      ...buildCanonicalDetailDisplay(input),
-      ...jagentdeskDisplay,
-      ...(input.status === "failed" ? { errorText: formatErrorText(input.error) } : {}),
+      displayName: buildAgentMessageDisplay(input.agentMessage).displayName,
+      ...(errorText ? { errorText } : {}),
     };
-
+  const jagentdeskDisplay = buildJAgentDeskToolDisplay({
+    toolName: input.name,
+    detail: input.detail,
+    targetAgentTitle: input.targetAgentTitle,
+  });
+  if (jagentdeskDisplay) {
+    return {
+      displayName: jagentdeskDisplay.displayName,
+      ...(jagentdeskDisplay.summary ? { summary: jagentdeskDisplay.summary } : {}),
+      ...(errorText ? { errorText } : {}),
+    };
+  }
   const canonicalDisplay = buildCanonicalDetailDisplay(input);
   const unknownDetailOverride = buildUnknownDetailOverride(input);
   const displayName =

@@ -78,3 +78,21 @@ const styles = StyleSheet.create((theme: Theme) => ({
     transform: [{ rotate: "90deg" }],
   },
 }));
+
+export const WORKSPACE_TREE_ICON_SIZE = 16;
+export const WORKSPACE_TREE_ICON_LABEL_GAP = SPACING[2];
+export const WORKSPACE_PANE_TRAILING_GLYPH_RAIL = SPACING[2];
+export const workspaceTreeRowStyles = StyleSheet.create((theme: Theme) => ({
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: WORKSPACE_FILE_ROW_VERTICAL_PADDING,
+    paddingRight: WORKSPACE_PANE_TRAILING_GLYPH_RAIL,
+  },
+  active: {
+    backgroundColor: theme.colors.surfaceSidebarHover,
+  },
+  name: { color: theme.colors.foreground, opacity: 0.76 },
+  nameHovered: { opacity: 1 },
+}));

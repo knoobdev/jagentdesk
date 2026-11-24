@@ -36,6 +36,8 @@ export const ar: TranslationResources = {
     back: "خلف",
     loading: "تحميل...",
     actions: {
+      copyLine: "نسخ السطر",
+      selectAll: "تحديد الكل",
       back: "خلف",
       cancel: "يلغي",
       close: "يغلق",
@@ -1863,7 +1865,14 @@ export const ar: TranslationResources = {
     input: "مدخل",
     output: "الإخراج",
   },
+  turnSummary: {
+    details: "عرض تفاصيل الجولة",
+    sentBy: "أرسلها {{name}}",
+    showMore: "عرض المزيد",
+    showLess: "عرض أقل",
+  },
   toolCallGroup: {
+    thought: "فكّر",
     editedFiles: {
       one: "حرّر {{count}} ملفًا",
       other: "حرّر {{count}} ملفات",
@@ -2118,13 +2127,13 @@ export const ar: TranslationResources = {
         label: "عرض التفكير دائماً",
         description: "إظهار تفكير الوكيل وخطوات الاستدلال بشكل كامل بشكل افتراضي",
       },
-      toolCallDetail: {
-        label: "عرض استدعاءات الأدوات",
-        description: "كيفية ظهور استدعاءات الأدوات في المخطط الزمني",
-        accessibilityLabel: "حدد عرض استدعاءات الأدوات ({{value}})",
+      chatDisplay: {
+        label: "عرض المحادثة",
+        description: "مقدار عمل الوكيل الذي تعرضه المحادثة",
         options: {
-          overview: "ملخص",
-          detailed: "التفاصيل الكاملة",
+          full: "كامل",
+          collapseToolCalls: "طيّ استدعاءات الأدوات",
+          collapseTurns: "طيّ الأدوار",
         },
       },
       language: {

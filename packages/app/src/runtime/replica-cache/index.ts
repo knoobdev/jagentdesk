@@ -1,3 +1,4 @@
+import { findMountedWindowStart } from "@/agent-stream/history-window";
 import { z } from "zod";
 import {
   AgentSnapshotPayloadSchema,
@@ -577,12 +578,16 @@ function serializeTimeline(timeline: CachedTimeline): StoredTimeline | null {
   const canonicalItems = timeline.items.filter(
     (item) => item.kind !== "user_message" || !isUnreconciledLocalUserMessage(item),
   );
-  const items = canonicalItems.map(serializeTimelineItem).filter((item) => item !== null);
+  const windowStart = findMountedWindowStart({
+    items: canonicalItems,
+    minMountedCount: MAX_TIMELINE_ITEMS,
+  });
+  const items = canonicalItems.slice(windowStart).map(serializeTimelineItem).filter((item) => item !== null);
   const range = timeline.range;
   const canPersistCoverage =
     range !== null &&
     range.retainedRanges === undefined &&
-    canonicalItems.length <= MAX_TIMELINE_ITEMS &&
+    windowStart === 0 &&
     items.length === canonicalItems.length &&
     canonicalItems.every(
       (item) =>
@@ -594,7 +599,7 @@ function serializeTimeline(timeline: CachedTimeline): StoredTimeline | null {
     canonicalItems.some((item) => item.timelineCursor?.seq === range.endSeq);
   return {
     agentId: timeline.agentId,
-    items: items.slice(-MAX_TIMELINE_ITEMS),
+    items,
     range: canPersistCoverage
       ? { epoch: range.epoch, startSeq: range.startSeq, endSeq: range.endSeq }
       : null,

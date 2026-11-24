@@ -1,5 +1,6 @@
 export const WEB_SCROLLBAR_WIDTH = "thin";
 export const WEB_SCROLLBAR_SIZE_PX = 8;
+export const WEB_SCROLLBAR_RESTING_OPACITY = 0.4;
 
 export function webScrollbarThumbColor(handleColor: string): string {
   return `color-mix(in srgb, ${handleColor} 62%, transparent)`;

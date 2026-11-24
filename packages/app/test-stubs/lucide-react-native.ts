@@ -135,3 +135,7 @@ export const Puzzle = StubIcon;
 export const SquareSlash = StubIcon;
 
 export const Sparkles = StubIcon;
+
+export const SquareDot = StubIcon;
+export const SquareMinus = StubIcon;
+export const SquarePlus = StubIcon;

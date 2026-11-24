@@ -34,6 +34,8 @@ export const en = {
     back: "Back",
     loading: "Loading...",
     actions: {
+      copyLine: "Copy line",
+      selectAll: "Select all",
       back: "Back",
       cancel: "Cancel",
       close: "Close",
@@ -1870,7 +1872,14 @@ export const en = {
     input: "Input",
     output: "Output",
   },
+  turnSummary: {
+    details: "View turn details",
+    sentBy: "Sent by {{name}}",
+    showMore: "Show more",
+    showLess: "Show less",
+  },
   toolCallGroup: {
+    thought: "Thought",
     editedFiles: {
       one: "edited {{count}} file",
       other: "edited {{count}} files",
@@ -2124,13 +2133,13 @@ export const en = {
         label: "Always expand reasoning",
         description: "Show agent thinking and chain-of-thought blocks fully expanded by default",
       },
-      toolCallDetail: {
-        label: "Tool call display",
-        description: "How tool calls appear in the timeline",
-        accessibilityLabel: "Select tool call display ({{value}})",
+      chatDisplay: {
+        label: "Chat display",
+        description: "How much of an agent's work the chat shows",
         options: {
-          overview: "Summary",
-          detailed: "Full detail",
+          full: "Full",
+          collapseToolCalls: "Collapse tool calls",
+          collapseTurns: "Collapse turns",
         },
       },
       language: {

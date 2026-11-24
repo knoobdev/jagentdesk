@@ -35,6 +35,7 @@ import {
   sanitizeFontFamily,
   saveAppSettings as saveAppSettingsPure,
   type AppSettings,
+  type ChatDisplay,
   type DesktopSettingsBridge,
   type KeyValueStorage,
   type SendBehavior,
@@ -67,6 +68,7 @@ export {
 };
 export type {
   AppSettings,
+  ChatDisplay,
   AppLanguage,
   DesktopSettingsBridge,
   KeyValueStorage,
