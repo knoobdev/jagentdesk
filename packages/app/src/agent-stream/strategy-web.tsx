@@ -893,6 +893,7 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
   return (
     <div
       ref={handleScrollContainerRef}
+      tabIndex={-1}
       data-testid="agent-chat-scroll"
       data-window-content
       id={`agent-chat-scroll-${shouldUseVirtualizer ? "web-dom-virtualized" : "web-dom-scroll"}`}
