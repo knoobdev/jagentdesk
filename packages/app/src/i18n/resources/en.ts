@@ -538,6 +538,9 @@ export const en = {
       },
     },
     terminal: {
+      fileUploaded: "File uploaded",
+      pasteFileFailed: "Failed to paste file: {{reason}}",
+      uploadingFile: "Uploading file…",
       hostDisconnected: "Host is not connected",
       updateHost: "Update the host to use the native terminal renderer.",
       unableToSubscribe: "Unable to subscribe to terminal",

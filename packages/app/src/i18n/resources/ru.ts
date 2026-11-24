@@ -545,6 +545,9 @@ export const ru: TranslationResources = {
       },
     },
     terminal: {
+      fileUploaded: "Файл загружен",
+      pasteFileFailed: "Не удалось вставить файл: {{reason}}",
+      uploadingFile: "Загрузка файла…",
       hostDisconnected: "Host не подключен",
       updateHost: "Обновите хост, чтобы использовать нативный терминал.",
       unableToSubscribe: "Невозможно подписаться на терминал",

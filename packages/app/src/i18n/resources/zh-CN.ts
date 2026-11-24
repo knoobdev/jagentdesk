@@ -537,6 +537,9 @@ export const zhCN: TranslationResources = {
       },
     },
     terminal: {
+      fileUploaded: "文件已上传",
+      pasteFileFailed: "无法粘贴文件：{{reason}}",
+      uploadingFile: "正在上传文件…",
       hostDisconnected: "Host 未连接",
       updateHost: "请更新主机以使用原生终端渲染器。",
       unableToSubscribe: "无法订阅 Terminal",

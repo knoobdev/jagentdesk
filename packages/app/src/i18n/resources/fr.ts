@@ -544,6 +544,9 @@ export const fr: TranslationResources = {
       },
     },
     terminal: {
+      fileUploaded: "Fichier envoyé",
+      pasteFileFailed: "Impossible de coller le fichier : {{reason}}",
+      uploadingFile: "Envoi du fichier…",
       hostDisconnected: "Hostn'est pas connecté",
       updateHost: "Mettez à jour l’hôte pour utiliser le terminal natif.",
       unableToSubscribe: "Impossible de s'abonner au terminal",

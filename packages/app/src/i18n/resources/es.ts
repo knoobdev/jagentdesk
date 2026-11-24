@@ -545,6 +545,9 @@ export const es: TranslationResources = {
       },
     },
     terminal: {
+      fileUploaded: "Archivo subido",
+      pasteFileFailed: "No se pudo pegar el archivo: {{reason}}",
+      uploadingFile: "Subiendo archivo…",
       hostDisconnected: "Hostno está conectado",
       updateHost: "Actualiza el host para usar el renderizador de terminal nativo.",
       unableToSubscribe: "No se puede suscribir al terminal",

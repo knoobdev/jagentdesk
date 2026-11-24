@@ -544,6 +544,9 @@ export const ja: TranslationResources = {
       },
     },
     terminal: {
+      fileUploaded: "ファイルをアップロードしました",
+      pasteFileFailed: "ファイルを貼り付けられませんでした: {{reason}}",
+      uploadingFile: "ファイルをアップロード中…",
       hostDisconnected: "ホストが接続されていません",
       updateHost: "ネイティブターミナルを使用するにはホストを更新してください。",
       unableToSubscribe: "ターミナルに接続できません",
