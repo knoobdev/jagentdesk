@@ -247,6 +247,7 @@ describe("loadSettingsFromStorage", () => {
 
     expect(result).toEqual({
       ...DEFAULT_APP_SETTINGS,
+      chatDisplay: "full",
       theme: "light",
     });
   });
@@ -274,6 +275,7 @@ describe("loadSettingsFromStorage", () => {
     expect(desktop.migrationsApplied).toEqual([{ manageBuiltInDaemon: false }]);
     expect(result).toEqual({
       ...DEFAULT_APP_SETTINGS,
+      chatDisplay: "full",
       theme: "light",
       manageBuiltInDaemon: false,
     });
@@ -293,6 +295,7 @@ describe("loadSettingsFromStorage", () => {
     expect(desktop.migrationsApplied).toEqual([]);
     expect(result).toEqual({
       ...DEFAULT_APP_SETTINGS,
+      chatDisplay: "full",
       theme: "light",
     });
   });
@@ -337,6 +340,7 @@ describe("saveAppSettings", () => {
 
     expect(JSON.parse(deps.storage.entries.get(APP_SETTINGS_KEY) ?? "null")).toEqual({
       ...DEFAULT_CLIENT_SETTINGS,
+      chatDisplay: "collapseToolCalls",
       theme: "light",
       toolCallDetailLevel: "overview",
     });

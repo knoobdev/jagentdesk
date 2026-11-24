@@ -172,7 +172,6 @@ describe("buildAgentStreamRenderModel", () => {
 
     expect(model.turnTiming.runningStartedAt).toBe(null);
     expect(model.turnTiming.byItemId.get("live-a")).toEqual({
-      startedAt: tail[0]?.timestamp,
       completedAt: head[0]?.timestamp,
       durationMs: 3000,
     });
@@ -192,7 +191,6 @@ describe("buildAgentStreamRenderModel", () => {
 
     expect(model.segments.historyMounted.map((item) => item.id)).toEqual(["u1", "a1"]);
     expect(model.turnTiming.byItemId.get("a1")).toEqual({
-      startedAt: tail[0]?.timestamp,
       completedAt: tail[1]?.timestamp,
       durationMs: 3000,
     });
