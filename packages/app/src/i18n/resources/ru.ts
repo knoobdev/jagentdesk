@@ -60,6 +60,8 @@ export const ru: TranslationResources = {
       downloadFailed: "Загрузка не удалась",
     },
     errors: {
+      folderOutsideWorkspace: "{{path}} is outside this workspace",
+
       error: "Ошибка",
       unableToSave: "Не удалось сохранить",
       nameRequired: "Требуется имя",

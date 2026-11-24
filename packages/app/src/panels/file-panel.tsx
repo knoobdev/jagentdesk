@@ -1,3 +1,4 @@
+import { useOpenOutsideWorkspaceFolder } from "@/workspace/open-in-file-manager/outside-folder";
 import { Text, View } from "react-native";
 import { useMemo, useEffect } from "react";
 import invariant from "tiny-invariant";
@@ -65,6 +66,7 @@ function FilePanel() {
     panel.setExplorerTabForCheckout({ ...checkout, tab: "files" });
     panel.openFileExplorerForCheckout({ isCompact, checkout });
   });
+  const openOutsideDirectory = useOpenOutsideWorkspaceFolder(serverId);
   const opener = useMemo(
     () =>
       createInlinePathOpener({
@@ -72,8 +74,9 @@ function FilePanel() {
         client,
         openFile,
         openDirectory,
+        openOutsideDirectory,
       }),
-    [workspaceDirectory, client, openFile, openDirectory],
+    [workspaceDirectory, client, openFile, openDirectory, openOutsideDirectory],
   );
   useEffect(() => {
     if (!isActive) opener.cancel();

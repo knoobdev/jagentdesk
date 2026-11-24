@@ -60,6 +60,8 @@ export const fr: TranslationResources = {
       downloadFailed: "Le téléchargement a échoué",
     },
     errors: {
+      folderOutsideWorkspace: "{{path}} is outside this workspace",
+
       error: "Erreur",
       unableToSave: "Impossible d'enregistrer",
       nameRequired: "Le nom est requis",

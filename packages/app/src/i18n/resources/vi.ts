@@ -72,6 +72,8 @@ export const vi = {
       downloadFailed: "Tải xuống thất bại",
     },
     errors: {
+      folderOutsideWorkspace: "{{path}} is outside this workspace",
+
       error: "Lỗi",
       unableToSave: "Không thể lưu",
       nameRequired: "Cần nhập tên",
