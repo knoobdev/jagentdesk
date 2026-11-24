@@ -9,7 +9,6 @@ import pino from "pino";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Client } from "ssh2";
 import type { SessionOutboundMessage } from "../messages.js";
-import { captureTerminalLines } from "../../terminal/terminal-capture.js";
 import { SshService } from "./ssh-service.js";
 
 // Real-sshd integration test for SSH S1 + S4 (spec 25.3, 25.16 #1–#3, #7, #8, #14).
@@ -174,7 +173,7 @@ describe.skipIf(!E2E)("SshService against a real sshd", () => {
   const screen = (terminalId: string): string => {
     const session = service.getSshTerminalSession(terminalId);
     if (!session) return "";
-    return captureTerminalLines(session, { start: 0 }).lines.join("\n");
+    return session.captureLines({ start: 0 }).lines.join("\n");
   };
   const terminalState = (terminalId: string) =>
     service.listSessions().find((s) => s.terminalId === terminalId)?.state;

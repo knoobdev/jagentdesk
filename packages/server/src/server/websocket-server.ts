@@ -571,7 +571,7 @@ interface SocketSessionOptions {
   onMessageToSource?: (source: object, message: SessionOutboundMessage) => void;
   onBinaryMessage?: (frame: Uint8Array) => void;
   onBinaryMessageToSource?: (source: object, frame: Uint8Array) => Promise<void>;
-  getTransportBufferedAmount?: () => number | null;
+  getTransportBufferedAmount?: (source?: object) => number | null;
   onLifecycleIntent?: (intent: SessionLifecycleIntent) => void;
   hubExecutionAgents?: HubExecutionAgents;
   hubRelationships?: HubRelationshipManagement;
@@ -1951,10 +1951,14 @@ export class VoiceAssistantWebSocketServer {
         }
         await this.sendBinaryToClientAndWait(source as WebSocketLike, frame);
       },
-      getTransportBufferedAmount: () => {
+      getTransportBufferedAmount: (source) => {
         if (!connection) {
           return null;
         }
+        if (source)
+          return connection.sockets.has(source as WebSocketLike)
+            ? this.socketBufferedAmount(source as WebSocketLike)
+            : null;
         // Tailnet-attached sockets are a WebSocketLike that doesn't expose
         // bufferedAmount. Return null when no socket gives a signal so the
         // terminal fallback can't mistake "no signal" for "client keeping up";
@@ -2540,7 +2544,7 @@ export class VoiceAssistantWebSocketServer {
         // COMPAT(daemonStatusRpc): added in v0.1.76, remove gate after 2026-11-18.
         ...(this.advertiseDaemonStatusRpc ? { daemonStatusRpc: true } : {}),
         speechSettings: true,
-        // COMPAT(terminalRestoreModes): added in v0.1.81, remove gate after 2026-11-23.
+        // ADR-0051: released v0.9.x apps require this flag to request ANSI restore; retain forever.
         "terminal-restore-modes": true,
         // COMPAT(terminalInputModeReplay): added in v0.2.6, remove gate after 2027-02-02.
         "terminal-input-mode-replay": true,

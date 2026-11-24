@@ -21,7 +21,6 @@ import type { DOMProps } from "expo/dom";
 import { useDOMImperativeHandle, type DOMImperativeFactory } from "expo/dom";
 import "@xterm/xterm/css/xterm.css";
 import type { ITheme } from "@xterm/xterm";
-import type { TerminalState } from "@jagentdesk/protocol/messages";
 import type { TerminalInputModeState } from "@jagentdesk/protocol/terminal-input-mode";
 import type { PendingTerminalModifiers } from "../utils/terminal-keys";
 import {
@@ -48,8 +47,7 @@ import { getDesktopHost } from "@/desktop/host";
 export interface TerminalEmulatorHandle {
   find?: TerminalFindHandle;
   writeOutput: (data: TerminalOutputData) => void;
-  restoreOutput: (data: TerminalOutputData) => void;
-  renderSnapshot: (state: TerminalState | null) => void;
+  replay: (event: import("@jagentdesk/client").TerminalReplayEvent) => void;
   paste: (text: string) => void;
   copySelection: (clipboard: TerminalClipboardWriter) => Promise<string>;
   clear: () => void;
@@ -115,7 +113,6 @@ interface TerminalEmulatorProps {
   swipeGesturesEnabled?: boolean;
   onSwipeLeft?: () => void;
   onSwipeRight?: () => void;
-  initialSnapshot?: TerminalState | null;
   onFindRequest?: () => void;
   onFindResult?: (result: TerminalFindResult) => void;
   onInput?: (data: string) => Promise<void> | void;
@@ -153,16 +150,6 @@ declare global {
   interface Window {}
 }
 
-function isTerminalState(value: unknown): value is TerminalState {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "rows" in value &&
-    "cols" in value &&
-    "grid" in value
-  );
-}
-
 export default function TerminalEmulator({
   ref,
   streamKey,
@@ -178,7 +165,6 @@ export default function TerminalEmulator({
   swipeGesturesEnabled = false,
   onSwipeLeft,
   onSwipeRight,
-  initialSnapshot = null,
   onFindRequest,
   onFindResult,
   onInput,
@@ -231,8 +217,6 @@ export default function TerminalEmulator({
     onResolveLocalFileLink,
     onOpenLocalFileLink,
   };
-  const initialSnapshotRef = useRef(initialSnapshot);
-  initialSnapshotRef.current = initialSnapshot;
   const pendingModifiersRef = useRef(pendingModifiers);
   pendingModifiersRef.current = pendingModifiers;
   const [isDropActive, setIsDropActive] = useState(false);
@@ -258,17 +242,17 @@ export default function TerminalEmulator({
         const data = args[0];
         if (data instanceof Uint8Array) runtimeRef.current?.write({ data });
       },
-      restoreOutput: (...args) => {
-        const data = args[0];
-        if (data instanceof Uint8Array) runtimeRef.current?.restoreOutput({ data });
-      },
-      renderSnapshot: (...args) => {
-        const state = args[0];
-        if (state === null) {
-          runtimeRef.current?.renderSnapshot({ state: null });
-        } else if (isTerminalState(state)) {
-          runtimeRef.current?.renderSnapshot({ state });
-        }
+      replay: (event) => {
+        if (!event || typeof event !== "object" || Array.isArray(event)) return;
+        if (event.type === "end") runtimeRef.current?.replay({ type: "end" });
+        if (event.type === "data" && event.data instanceof Uint8Array)
+          runtimeRef.current?.replay({ type: "data", data: event.data });
+        if (event.type === "begin")
+          runtimeRef.current?.replay({
+            type: "begin",
+            rows: typeof event.rows === "number" ? event.rows : undefined,
+            cols: typeof event.cols === "number" ? event.cols : undefined,
+          });
       },
       paste: (...args) => {
         const text = args[0];
@@ -304,12 +288,7 @@ export default function TerminalEmulator({
       writeOutput: (data: TerminalOutputData) => {
         runtimeRef.current?.write({ data });
       },
-      restoreOutput: (data: TerminalOutputData) => {
-        runtimeRef.current?.restoreOutput({ data });
-      },
-      renderSnapshot: (state: TerminalState | null) => {
-        runtimeRef.current?.renderSnapshot({ state });
-      },
+      replay: (event) => runtimeRef.current?.replay(event),
       paste: (text: string) => {
         pasteText(text);
       },
@@ -476,7 +455,6 @@ export default function TerminalEmulator({
     runtime.mount({
       root,
       host,
-      initialSnapshot: initialSnapshotRef.current,
       scrollback: scrollbackLinesRef.current,
       theme: mountedThemeRef.current,
       fontFamily: fontFamilyRef.current,

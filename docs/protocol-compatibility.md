@@ -49,6 +49,17 @@ encryption, so each encrypted relay frame fits the Worker's 32 MiB limit while
 the logical message remains bounded at 100 MiB. React Native sockets cannot report
 write drain; their outbound messages retain the physical frame limit.
 
+## Terminal ANSI replay
+
+ADR-0051 in the spec repo defines terminal history compatibility. Keep advertising
+`features["terminal-restore-modes"]` forever: released v0.9.x apps use it to request
+ANSI restore. Without `terminal_chunked_replay`, send one Restore frame with 200
+history rows by default, clamped to 0–500. Capable clients receive bounded ANSI
+chunks and request their configured history, clamped to 0–10,000. JSON snapshot
+opcodes remain parseable but are no longer sent or rendered. Omitting `restore`
+requests subsequent live output only. The SDK supplies an explicit full replay
+when `subscribeTerminal` has no restore options.
+
 ## Every shim is tagged and dated
 
 A shim that exists for old-app or old-daemon support carries a comment naming it, the version it arrived in, and when it can go:

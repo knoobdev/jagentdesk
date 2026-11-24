@@ -1,3 +1,4 @@
+import { readTerminalState } from "../../../terminal/test-utils/terminal-state.js";
 import { describe, expect, it } from "vitest";
 import { createConnection, createServer, type AddressInfo, type Server } from "node:net";
 import type { Socket } from "node:net";
@@ -230,7 +231,7 @@ describe("TelnetTerminalSession against a fake server", () => {
 
       session.send({ type: "resize", rows: 40, cols: 120 });
       expect(session.getSize()).toEqual({ rows: 40, cols: 120 });
-      expect(session.getState().rows).toBe(40);
+      expect(session.getSize().rows).toBe(40);
       const secondNaws = encodeNaws(120, 40);
       await waitFor(
         () => containsBytes(server.received(), secondNaws),
@@ -294,14 +295,11 @@ describe.skipIf(!telnetdReachable)("TelnetTerminalSession against jad-sshd-telne
     });
     try {
       const outputs: string[] = [];
-      const unsubscribe = session.subscribe(
-        (msg) => {
-          if (msg.type === "output") {
-            outputs.push(msg.data);
-          }
-        },
-        { initialSnapshot: "ready" },
-      );
+      const unsubscribe = session.subscribe((msg) => {
+        if (msg.type === "output") {
+          outputs.push(msg.data);
+        }
+      });
 
       session.send({ type: "input", data: "echo hi\n" });
       await waitFor(() => outputs.join("").includes("hi"), "echo output from telnetd");
@@ -310,7 +308,7 @@ describe.skipIf(!telnetdReachable)("TelnetTerminalSession against jad-sshd-telne
       const accumulated = outputs.join("");
       expect(countOccurrences(accumulated, "echo hi")).toBe(1);
 
-      const state = session.getState();
+      const state = await readTerminalState(session);
       expect(state.rows).toBe(24);
       expect(state.cols).toBe(80);
       const gridLines = state.grid.map((row) => rowText(row));

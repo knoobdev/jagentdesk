@@ -7,8 +7,7 @@ import {
   decodeTerminalStreamFrame,
   type TerminalStreamFrame,
 } from "@jagentdesk/protocol/binary-frames/index";
-import type { TerminalCell, TerminalState } from "@jagentdesk/protocol/messages";
-import type { ServerMessage, TerminalSession, TerminalStateSnapshot } from "./terminal.js";
+import type { ServerMessage, TerminalSession } from "./terminal.js";
 import { TerminalSessionController } from "./terminal-session-controller.js";
 import type { TerminalManager, TerminalsChangedEvent } from "./terminal-manager.js";
 import { isSameOrDescendantPath } from "../server/path-utils.js";
@@ -28,19 +27,26 @@ function deferred<T>(): {
   return { promise, resolve, reject };
 }
 
-function terminalRow(text: string, cols = 80): TerminalCell[] {
-  return Array.from({ length: cols }, (_, index) => ({
-    char: text[index] ?? " ",
-  }));
+interface ReplayFixture {
+  data: Uint8Array;
+  metadata: import("./terminal-replay.js").TerminalReplayMetadata;
 }
-
-function terminalState(text: string): TerminalState {
+function terminalReplay(text: string, revision: number, replayPreamble = ""): ReplayFixture {
   return {
-    rows: 1,
-    cols: 80,
-    grid: [terminalRow(text)],
-    scrollback: [],
-    cursor: { row: 0, col: text.length },
+    data: Buffer.from(text),
+    metadata: { rows: 1, cols: 80, retainedHistoryLines: 0, revision, replayPreamble },
+  };
+}
+function replayFixture(
+  read: () => Promise<ReplayFixture | null>,
+): TerminalManager["replayTerminal"] {
+  return async (_id, _options, sink) => {
+    const replay = await read();
+    if (!replay) return null;
+    sink({ type: "begin", metadata: replay.metadata });
+    sink({ type: "data", data: replay.data });
+    sink({ type: "end" });
+    return replay.metadata;
   };
 }
 
@@ -58,7 +64,7 @@ function decodedTerminalFrames(frames: TerminalStreamFrame[]): string {
 describe("terminal-session-controller restore", () => {
   test("delivers output produced while restore is in flight after the restore frame", async () => {
     let terminalListener: ((message: ServerMessage) => void) | null = null;
-    const snapshot = deferred<TerminalStateSnapshot | null>();
+    const snapshot = deferred<ReplayFixture | null>();
     const binaryFrames: TerminalStreamFrame[] = [];
     const outboundMessages: SessionOutboundMessage[] = [];
     const terminal: TerminalSession = {
@@ -77,8 +83,7 @@ describe("terminal-session-controller restore", () => {
       onTitleChange: () => vi.fn(),
       onActivityChange: () => vi.fn(),
       getSize: () => ({ rows: 1, cols: 80 }),
-      getState: () => terminalState("restore-before"),
-      getStateSnapshot: () => ({ state: terminalState("restore-before"), revision: 1 }),
+      hasOutput: () => true,
       getReplayPreamble: () => "\x1b[?1h\x1b[?2004h",
       getTitle: () => undefined,
       getActivity: () => null,
@@ -94,7 +99,7 @@ describe("terminal-session-controller restore", () => {
       registerCwdEnv: vi.fn(),
       validateTerminalActivityToken: vi.fn(() => "unknown"),
       getTerminal: vi.fn(() => terminal),
-      getTerminalState: vi.fn(() => snapshot.promise),
+      replayTerminal: vi.fn(replayFixture(() => snapshot.promise)),
       setTerminalTitle: vi.fn(),
       setTerminalActivity: vi.fn(),
       killTerminal: vi.fn(),
@@ -130,10 +135,10 @@ describe("terminal-session-controller restore", () => {
       },
     });
     await Promise.resolve();
-    expect(terminalManager.getTerminalState).toHaveBeenCalledTimes(1);
+    expect(terminalManager.replayTerminal).toHaveBeenCalledTimes(1);
 
     terminalListener?.({ type: "output", data: "restore-after\n", revision: 2 });
-    snapshot.resolve({ state: terminalState("restore-before"), revision: 1 });
+    snapshot.resolve(terminalReplay("restore-before", 1, "\x1b[?1h\x1b[?2004h"));
     await snapshot.promise;
     await vi.waitFor(() => {
       const output = decodedTerminalFrames(binaryFrames.slice(1));
@@ -176,8 +181,7 @@ function listSession(input: {
     onTitleChange: () => vi.fn(),
     onActivityChange: () => vi.fn(),
     getSize: () => ({ rows: 1, cols: 80 }),
-    getState: () => terminalState(""),
-    getStateSnapshot: () => ({ state: terminalState(""), revision: 0 }),
+    hasOutput: () => true,
     getReplayPreamble: () => "",
     getTitle: () => undefined,
     getActivity: () => null,
@@ -210,7 +214,7 @@ describe("terminal-session-controller legacy terminal creation", () => {
       registerCwdEnv: vi.fn(),
       validateTerminalActivityToken: vi.fn(() => "unknown"),
       getTerminal: vi.fn(),
-      getTerminalState: vi.fn(),
+      replayTerminal: vi.fn(),
       setTerminalTitle: vi.fn(),
       setTerminalActivity: vi.fn(),
       clearTerminalAttention: vi.fn(),
@@ -285,7 +289,7 @@ describe("terminal-session-controller legacy terminal creation", () => {
       registerCwdEnv: vi.fn(),
       validateTerminalActivityToken: vi.fn(() => "unknown"),
       getTerminal: vi.fn(),
-      getTerminalState: vi.fn(),
+      replayTerminal: vi.fn(),
       setTerminalTitle: vi.fn(),
       setTerminalActivity: vi.fn(),
       clearTerminalAttention: vi.fn(),
@@ -336,7 +340,7 @@ describe("terminal-session-controller with terminals held by a newer JAgentDesk"
       registerCwdEnv: vi.fn(),
       validateTerminalActivityToken: vi.fn(() => "unknown"),
       getTerminal: vi.fn(),
-      getTerminalState: vi.fn(),
+      replayTerminal: vi.fn(),
       setTerminalTitle: vi.fn(),
       setTerminalActivity: vi.fn(),
       clearTerminalAttention: vi.fn(),
@@ -402,99 +406,6 @@ async function waitForCoalescerFlush(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 30));
 }
 
-describe("terminal-session-controller wrap-flag gating", () => {
-  function setup(clientSupportsWrapReflow?: () => boolean): {
-    controller: TerminalSessionController;
-    getTerminalState: ReturnType<typeof vi.fn>;
-  } {
-    const terminal: TerminalSession = {
-      id: "term-1",
-      name: "Terminal",
-      cwd: "/tmp",
-      workspaceId: "ws-test",
-      send: vi.fn(),
-      subscribe: (listener) => {
-        queueMicrotask(() => listener({ type: "snapshotReady", revision: 1 }));
-        return vi.fn();
-      },
-      onExit: () => vi.fn(),
-      onCommandFinished: () => vi.fn(),
-      onTitleChange: () => vi.fn(),
-      onActivityChange: () => vi.fn(),
-      getSize: () => ({ rows: 1, cols: 80 }),
-      getState: () => terminalState("hello"),
-      getStateSnapshot: () => ({ state: terminalState("hello"), revision: 1 }),
-      getReplayPreamble: () => "",
-      getTitle: () => undefined,
-      getActivity: () => null,
-      setActivity: vi.fn(),
-      setTitle: vi.fn(),
-      getExitInfo: () => null,
-      kill: vi.fn(),
-      killAndWait: vi.fn(),
-    };
-    const getTerminalState = vi.fn(() =>
-      Promise.resolve<TerminalStateSnapshot>({ state: terminalState("hello"), revision: 1 }),
-    );
-    const terminalManager = {
-      getTerminals: vi.fn(),
-      createTerminal: vi.fn(),
-      registerCwdEnv: vi.fn(),
-      validateTerminalActivityToken: vi.fn(() => "unknown"),
-      getTerminal: vi.fn(() => terminal),
-      getTerminalState,
-      setTerminalTitle: vi.fn(),
-      setTerminalActivity: vi.fn(),
-      killTerminal: vi.fn(),
-      killTerminalAndWait: vi.fn(),
-      captureTerminal: vi.fn(),
-      listDirectories: vi.fn(() => []),
-      killAll: vi.fn(),
-      subscribeTerminalsChanged: vi.fn(() => vi.fn()),
-      subscribeTerminalActivity: vi.fn(() => vi.fn()),
-      subscribeTerminalWorkspaceContributionChanged: vi.fn(() => vi.fn()),
-    } as unknown as TerminalManager;
-    const controller = new TerminalSessionController({
-      terminalManager,
-      emit: vi.fn(),
-      emitBinary: vi.fn(),
-      hasBinaryChannel: () => true,
-      isPathWithinRoot: () => false,
-      sessionLogger: createLogger(),
-      ...(clientSupportsWrapReflow ? { clientSupportsWrapReflow } : {}),
-    });
-    return { controller, getTerminalState };
-  }
-
-  async function subscribe(controller: TerminalSessionController): Promise<void> {
-    await controller.dispatch({
-      type: "subscribe_terminal_request",
-      terminalId: "term-1",
-      requestId: "req-1",
-      restore: { mode: "visible-snapshot", scrollbackLines: 200 },
-    });
-    await flushMicrotasks();
-  }
-
-  test("requests wrap flags when the client supports reflowable snapshots", async () => {
-    const { controller, getTerminalState } = setup(() => true);
-    await subscribe(controller);
-    expect(getTerminalState).toHaveBeenCalledWith(
-      "term-1",
-      expect.objectContaining({ includeWrapFlags: true }),
-    );
-  });
-
-  test("omits wrap flags when the client does not advertise support", async () => {
-    const { controller, getTerminalState } = setup();
-    await subscribe(controller);
-    expect(getTerminalState).toHaveBeenCalledWith(
-      "term-1",
-      expect.objectContaining({ includeWrapFlags: false }),
-    );
-  });
-});
-
 describe("terminal-session-controller subdirectory aggregation", () => {
   test("delivers a subdirectory change to a root subscriber as an aggregated, root-keyed snapshot", async () => {
     const rootCwd = "/work/repo";
@@ -515,7 +426,7 @@ describe("terminal-session-controller subdirectory aggregation", () => {
       registerCwdEnv: vi.fn(),
       validateTerminalActivityToken: vi.fn(() => "unknown"),
       getTerminal: vi.fn(),
-      getTerminalState: vi.fn(),
+      replayTerminal: vi.fn(),
       setTerminalTitle: vi.fn(),
       setTerminalActivity: vi.fn(),
       killTerminal: vi.fn(),
@@ -583,7 +494,7 @@ describe("terminal-session-controller subdirectory aggregation", () => {
       registerCwdEnv: vi.fn(),
       validateTerminalActivityToken: vi.fn(() => "unknown"),
       getTerminal: vi.fn(),
-      getTerminalState: vi.fn(),
+      replayTerminal: vi.fn(),
       setTerminalTitle: vi.fn(),
       setTerminalActivity: vi.fn(),
       killTerminal: vi.fn(),
@@ -663,7 +574,7 @@ describe("terminal-session-controller workspace-scoped subscriptions", () => {
       registerCwdEnv: vi.fn(),
       validateTerminalActivityToken: vi.fn(() => "unknown"),
       getTerminal: vi.fn(),
-      getTerminalState: vi.fn(),
+      replayTerminal: vi.fn(),
       setTerminalTitle: vi.fn(),
       setTerminalActivity: vi.fn(),
       killTerminal: vi.fn(),
@@ -741,17 +652,14 @@ describe("terminal-session-controller backpressure snapshot fallback", () => {
         terminalListener = listener;
         // Legacy stream: a snapshot arrives on subscribe (one Snapshot frame),
         // after which output streams through the coalescer as Output frames.
-        queueMicrotask(() =>
-          listener({ type: "snapshot", state: terminalState("live"), revision: 1 }),
-        );
+        queueMicrotask(() => listener({ type: "snapshotReady", revision: 1 }));
         return vi.fn();
       },
       onExit: () => vi.fn(),
       onCommandFinished: () => vi.fn(),
       onTitleChange: () => vi.fn(),
       getSize: () => ({ rows: 1, cols: 80 }),
-      getState: () => terminalState("live"),
-      getStateSnapshot: () => ({ state: terminalState("live"), revision: 1 }),
+      hasOutput: () => true,
       getReplayPreamble: () => "",
       getTitle: () => undefined,
       setTitle: vi.fn(),
@@ -764,9 +672,7 @@ describe("terminal-session-controller backpressure snapshot fallback", () => {
       createTerminal: vi.fn(),
       registerCwdEnv: vi.fn(),
       getTerminal: vi.fn(() => terminal),
-      getTerminalState: vi.fn(() =>
-        Promise.resolve<TerminalStateSnapshot>({ state: terminalState("live"), revision: 1 }),
-      ),
+      replayTerminal: vi.fn(replayFixture(async () => terminalReplay("live", 1))),
       setTerminalTitle: vi.fn(),
       killTerminal: vi.fn(),
       killTerminalAndWait: vi.fn(),
@@ -815,7 +721,7 @@ describe("terminal-session-controller backpressure snapshot fallback", () => {
     pushOutput(chunk);
     await waitForCoalescerFlush();
 
-    expect(frames.some((frame) => frame.opcode === TerminalStreamOpcode.Snapshot)).toBe(false);
+    expect(frames.some((frame) => frame.opcode === TerminalStreamOpcode.Restore)).toBe(false);
     const outputFrames = frames.filter((frame) => frame.opcode === TerminalStreamOpcode.Output);
     expect(outputFrames.length).toBeGreaterThan(0);
     const receivedBytes = outputFrames.reduce(
@@ -831,7 +737,7 @@ describe("terminal-session-controller backpressure snapshot fallback", () => {
     pushOutput("y".repeat(300 * 1024));
     await waitForCoalescerFlush();
 
-    expect(frames.some((frame) => frame.opcode === TerminalStreamOpcode.Snapshot)).toBe(true);
+    expect(frames.some((frame) => frame.opcode === TerminalStreamOpcode.Restore)).toBe(true);
 
     // After the snapshot the byte counter is reset, so a small follow-up chunk
     // streams as Output rather than tripping the fallback again.
@@ -839,7 +745,7 @@ describe("terminal-session-controller backpressure snapshot fallback", () => {
     pushOutput("z".repeat(1024));
     await waitForCoalescerFlush();
 
-    expect(frames.some((frame) => frame.opcode === TerminalStreamOpcode.Snapshot)).toBe(false);
+    expect(frames.some((frame) => frame.opcode === TerminalStreamOpcode.Restore)).toBe(false);
     expect(frames.some((frame) => frame.opcode === TerminalStreamOpcode.Output)).toBe(true);
   });
 
@@ -852,6 +758,6 @@ describe("terminal-session-controller backpressure snapshot fallback", () => {
     pushOutput("r".repeat(300 * 1024));
     await waitForCoalescerFlush();
 
-    expect(frames.some((frame) => frame.opcode === TerminalStreamOpcode.Snapshot)).toBe(true);
+    expect(frames.some((frame) => frame.opcode === TerminalStreamOpcode.Restore)).toBe(true);
   });
 });

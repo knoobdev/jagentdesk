@@ -16,7 +16,7 @@ import type {
   SshSessionInfo,
 } from "@jagentdesk/protocol/ssh/rpc-schemas";
 import type { TerminalActivityTransitionEvent } from "../../terminal/terminal-manager.js";
-import type { TerminalSession } from "../../terminal/terminal.js";
+import type { ReplayTerminalSession } from "../../terminal/terminal.js";
 import type { SessionOutboundMessage } from "../messages.js";
 import type { TailnetSocksProxy } from "../tsnet-listener.js";
 import type { SecretStore } from "../database/secret-store.js";
@@ -147,7 +147,7 @@ export type SshExternalSessionFactory = (input: {
   host: string;
   port: number;
   size: { cols: number; rows: number };
-}) => Promise<TerminalSession>;
+}) => Promise<ReplayTerminalSession>;
 
 /** Opens a terminal stream for a non-SSH protocol (Telnet module). */
 export type SshShellOpener = (input: {
@@ -205,7 +205,7 @@ export class SshService {
   private readonly sessionFactories = new Map<string, SshExternalSessionFactory>();
   private readonly externalSessions = new Map<
     string,
-    { serverId: string; session: TerminalSession & RemoteSessionHandle; createdAtMs: number }
+    { serverId: string; session: ReplayTerminalSession & RemoteSessionHandle; createdAtMs: number }
   >();
   /** Broadcast input groups (25.4): terminalId → every terminal of its group. */
   private readonly broadcastGroups = new Map<string, ReadonlySet<string>>();
@@ -1388,7 +1388,7 @@ export class SshService {
 
   // ── composite-manager registry surface ─────────────────────────────────
 
-  getSshTerminal(terminalId: string): TerminalSession | undefined {
+  getSshTerminal(terminalId: string): ReplayTerminalSession | undefined {
     return (
       this.terminals.get(terminalId)?.session ?? this.externalSessions.get(terminalId)?.session
     );

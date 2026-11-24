@@ -1096,3 +1096,5 @@ function createGeneratedClientId(): string {
       : Math.random().toString(36).slice(2);
   return `jagentdesk-sdk-${randomId}`;
 }
+
+export type { TerminalReplayEvent, TerminalStreamEvent } from "./terminal-stream-router.js";

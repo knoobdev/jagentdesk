@@ -7,7 +7,6 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { LigaturesAddon } from "@xterm/addon-ligatures/lib/addon-ligatures.mjs";
 import { Terminal, type ITheme, type IMarker } from "@xterm/xterm";
-import type { TerminalState } from "@jagentdesk/protocol/messages";
 import {
   type TerminalInputModeState,
   TerminalInputModeTracker,
@@ -22,7 +21,6 @@ import {
   normalizeTerminalTransportKey,
   shouldInterceptDomTerminalKey,
 } from "@/utils/terminal-keys";
-import { renderTerminalSnapshotToAnsi } from "./terminal-snapshot";
 import {
   createTerminalLocalFileLinkProvider,
   type TerminalLocalFileLinkSource,
@@ -52,7 +50,6 @@ const FIND_HIGHLIGHT_LIMIT = 20_000;
 export interface TerminalEmulatorRuntimeMountInput {
   root: HTMLDivElement;
   host: HTMLDivElement;
-  initialSnapshot: TerminalState | null;
   scrollback: number;
   theme: ITheme;
   fontFamily?: string;
@@ -128,7 +125,7 @@ interface TerminalEmulatorRuntimeDisposables {
 }
 
 interface TerminalOutputOperation {
-  type: "write" | "clear" | "snapshot";
+  type: "write" | "clear" | "snapshot" | "fit";
   data: TerminalOutputData;
   rows?: number;
   cols?: number;
@@ -234,6 +231,7 @@ export class TerminalEmulatorRuntime {
     },
   };
 
+  private replayResize: TerminalResizeRequest | null = null;
   private fitAndEmitResize: ((input?: TerminalResizeRequest) => void) | null = null;
   private lastSize: { rows: number; cols: number } | null = null;
   private cleanup: (() => void) | null = null;
@@ -586,6 +584,7 @@ export class TerminalEmulatorRuntime {
     window.__jagentdeskTerminal = terminal;
 
     const fitAndEmitResize = (resizeInput?: TerminalResizeRequest): void => {
+      if (this.deferReplayResize(resizeInput)) return;
       const forceRefresh = resizeInput?.forceRefresh ?? false;
       const shouldClaim = resizeInput?.shouldClaim ?? true;
       const forceClaim = resizeInput?.forceClaim ?? false;
@@ -701,10 +700,6 @@ export class TerminalEmulatorRuntime {
       fitAndEmitResize({ forceRefresh: true, shouldClaim: false });
     }, 0);
 
-    if (input.initialSnapshot) {
-      this.renderSnapshot({ state: input.initialSnapshot });
-    }
-
     this.processOutputQueue();
 
     const disposables: TerminalEmulatorRuntimeDisposables = {
@@ -813,20 +808,19 @@ export class TerminalEmulatorRuntime {
     return (this.userInputEvent?.eventPhase ?? Event.NONE) !== Event.NONE;
   }
 
-  renderSnapshot(input: { state: TerminalState | null; onCommitted?: () => void }): void {
-    if (!input.state) {
-      this.clear(input);
-      return;
+  replay(event: import("@jagentdesk/client").TerminalReplayEvent): void {
+    if (event.type === "begin") {
+      this.replayResize ??= { shouldClaim: false };
+      this.restoreOutput({ data: EMPTY_TERMINAL_OUTPUT, rows: event.rows, cols: event.cols });
+    } else if (event.type === "data") {
+      this.write({ data: event.data, suppressInput: true });
+    } else {
+      this.outputOperations.push({ type: "fit", data: EMPTY_TERMINAL_OUTPUT });
+      this.processOutputQueue();
     }
-    this.restoreOutput({
-      data: encodeTerminalOutput(renderTerminalSnapshotToAnsi(input.state)),
-      rows: input.state.rows,
-      cols: input.state.cols,
-      ...(input.onCommitted ? { onCommitted: input.onCommitted } : {}),
-    });
   }
 
-  restoreOutput(input: {
+  private restoreOutput(input: {
     data: TerminalOutputData;
     rows?: number;
     cols?: number;
@@ -841,6 +835,16 @@ export class TerminalEmulatorRuntime {
       ...(input.onCommitted ? { onCommitted: input.onCommitted } : {}),
     });
     this.processOutputQueue();
+  }
+
+  private deferReplayResize(input?: TerminalResizeRequest): boolean {
+    if (!this.replayResize) return false;
+    this.replayResize = {
+      forceRefresh: this.replayResize.forceRefresh || input?.forceRefresh,
+      shouldClaim: this.replayResize.shouldClaim || (input?.shouldClaim ?? true),
+      forceClaim: this.replayResize.forceClaim || input?.forceClaim,
+    };
+    return true;
   }
 
   resize(input?: TerminalResizeRequest): void {
@@ -962,6 +966,7 @@ export class TerminalEmulatorRuntime {
       commit();
     }
     this.hasUngatedWrites = false;
+    this.replayResize = null;
 
     this.cleanup?.();
     this.cleanup = null;
@@ -1091,16 +1096,40 @@ export class TerminalEmulatorRuntime {
       this.processOutputQueue();
     };
 
+    if (operation.type === "fit") {
+      // xterm resize flushes its write buffer synchronously. Leave the parser's
+      // commit callback before fitting, or that flush consumes the next write.
+      queueMicrotask(() => {
+        if (this.inFlightOutputOperation !== operation || this.terminal !== terminal) return;
+        const resize = this.replayResize ?? { shouldClaim: false };
+        this.replayResize = null;
+        this.fitAndEmitResize?.(resize);
+        finalizeOperation(operation);
+      });
+      return;
+    }
+
     if (operation.type === "clear") {
       this.inputModeDecoder.decode();
       this.inputModeTracker.reset();
       this.emitInputModeChange();
       terminal.reset();
-      finalizeOperation(operation);
+      if (!this.replayResize) {
+        finalizeOperation(operation);
+        return;
+      }
+      queueMicrotask(() => {
+        if (this.inFlightOutputOperation !== operation || this.terminal !== terminal) return;
+        const resize = this.replayResize ?? { shouldClaim: false };
+        this.replayResize = null;
+        this.fitAndEmitResize?.(resize);
+        finalizeOperation(operation);
+      });
       return;
     }
 
     if (operation.type === "snapshot") {
+      this.replayResize ??= { shouldClaim: false };
       this.inputModeDecoder.decode();
       this.inputModeTracker.reset();
       this.emitInputModeChange();

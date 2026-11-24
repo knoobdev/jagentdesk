@@ -1,3 +1,4 @@
+import { Terminal as HeadlessTerminal } from "@xterm/headless";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
@@ -10,7 +11,6 @@ import {
   type WSOutboundMessage,
 } from "@jagentdesk/protocol/messages";
 import {
-  decodeTerminalSnapshotPayload,
   decodeTerminalStreamFrame,
   encodeTerminalStreamFrame,
   TerminalStreamOpcode,
@@ -80,6 +80,24 @@ async function waitForCondition(
   throw new Error(`Timed out after ${timeoutMs}ms waiting for condition`);
 }
 
+function readHeadlessState(terminal: HeadlessTerminal): TerminalState {
+  const buffer = terminal.buffer.active;
+  const lines: TerminalState["grid"] = [];
+  for (let row = 0; row < buffer.length; row++) {
+    const cells: TerminalState["grid"][number] = [];
+    for (let col = 0; col < terminal.cols; col++)
+      cells.push({ char: buffer.getLine(row)?.getCell(col)?.getChars() ?? "" });
+    lines.push(cells);
+  }
+  return {
+    rows: terminal.rows,
+    cols: terminal.cols,
+    grid: lines.slice(buffer.baseY),
+    scrollback: lines.slice(0, buffer.baseY),
+    cursor: { row: buffer.cursorY, col: buffer.cursorX },
+  };
+}
+
 async function waitForTerminalSnapshot(
   client: DaemonClient,
   terminalId: string,
@@ -92,16 +110,34 @@ async function waitForTerminalSnapshot(
       reject(new Error(`Timeout waiting for terminal snapshot (${timeout}ms)`));
     }, timeout);
 
+    let terminal: HeadlessTerminal | null = null;
+    let writes = Promise.resolve();
     const unsubscribe = client.onTerminalStreamEvent((event) => {
-      if (event.terminalId !== terminalId || event.type !== "snapshot") {
-        return;
+      if (event.terminalId !== terminalId || event.type !== "replay") return;
+      const replay = event.replay;
+      if (replay.type === "begin") {
+        terminal?.dispose();
+        terminal = new HeadlessTerminal({
+          rows: replay.rows ?? 24,
+          cols: replay.cols ?? 80,
+          scrollback: 1000,
+          allowProposedApi: true,
+        });
+      } else if (replay.type === "data") {
+        const active = terminal!;
+        writes = writes.then(() => new Promise<void>((done) => active.write(replay.data, done)));
+      } else {
+        void writes.then(() => {
+          const active = terminal!;
+          const state = readHeadlessState(active);
+          if (!predicate(state)) return null;
+          clearTimeout(timeoutHandle);
+          unsubscribe();
+          active.dispose();
+          resolve(state);
+          return null;
+        });
       }
-      if (!predicate(event.state)) {
-        return;
-      }
-      clearTimeout(timeoutHandle);
-      unsubscribe();
-      resolve(event.state);
     });
   });
 }
@@ -160,7 +196,7 @@ function toWsBuffer(raw: WebSocket.RawData): Buffer | null {
   return null;
 }
 
-async function connectRawWebSocket(port: number): Promise<WebSocket> {
+async function connectRawWebSocket(port: number, chunkedReplay = false): Promise<WebSocket> {
   const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
   await new Promise<void>((resolve, reject) => {
     ws.once("open", () => resolve());
@@ -180,6 +216,7 @@ async function connectRawWebSocket(port: number): Promise<WebSocket> {
       clientId: `terminal-raw-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       clientType: "cli",
       protocolVersion: 1,
+      capabilities: { terminal_chunked_replay: chunkedReplay },
     }),
   );
 
@@ -386,16 +423,23 @@ async function collectRawBinaryFrames(
   });
 }
 
+async function decodeRestoreState(
+  frame: TerminalStreamFrame,
+  terminalId: string,
+): Promise<TerminalState> {
+  const size = ctx.daemon.daemon.terminalManager!.getTerminal(terminalId)!.getSize();
+  const terminal = new HeadlessTerminal({ ...size, scrollback: 1000, allowProposedApi: true });
+  try {
+    await new Promise<void>((resolve) => terminal.write(frame.payload, resolve));
+    return readHeadlessState(terminal);
+  } finally {
+    terminal.dispose();
+  }
+}
+
 function getFrameText(frame: TerminalStreamFrame): string {
   if (frame.opcode === TerminalStreamOpcode.Output) {
     return new TextDecoder().decode(frame.payload);
-  }
-  if (frame.opcode === TerminalStreamOpcode.Snapshot) {
-    const state = decodeTerminalSnapshotPayload(frame.payload);
-    if (!state) {
-      return "";
-    }
-    return extractStateText(state);
   }
   if (frame.opcode === TerminalStreamOpcode.Restore) {
     return new TextDecoder().decode(frame.payload);
@@ -446,7 +490,10 @@ function startTerminalOutputCapture(ws: WebSocket, slot: number): TerminalOutput
     if (!frame || frame.slot !== slot) {
       return;
     }
-    if (frame.opcode === TerminalStreamOpcode.Snapshot) {
+    if (
+      frame.opcode === TerminalStreamOpcode.Restore ||
+      frame.opcode === TerminalStreamOpcode.ReplayEnd
+    ) {
       snapshotCount += 1;
       return;
     }
@@ -634,7 +681,7 @@ async function measureRepeatCadenceForTerminal(input: {
     const slot = await subscribeRawTerminal(ws, terminalId, `sub-repeat-cadence-${input.name}`);
     await waitForRawBinaryFrame(
       ws,
-      (frame) => frame.slot === slot && frame.opcode === TerminalStreamOpcode.Snapshot,
+      (frame) => frame.slot === slot && frame.opcode === TerminalStreamOpcode.Restore,
       10000,
     );
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -699,11 +746,11 @@ async function subscribeRawTerminal(
   ws: WebSocket,
   terminalId: string,
   requestId: string,
-  restore?: {
+  restore: {
     mode: "live" | "visible-snapshot" | "full-snapshot";
     scrollbackLines?: number;
     size?: { rows: number; cols: number };
-  },
+  } = { mode: "full-snapshot" },
 ): Promise<number> {
   const ready = waitForRawSessionMessage(
     ws,
@@ -817,13 +864,7 @@ test("live terminal restore skips the initial snapshot", async () => {
 
     expect(outputText).toContain("after-live");
     expect(outputText).not.toContain("before-live");
-    expect(
-      outputFrames.some(
-        (frame) =>
-          frame.opcode === TerminalStreamOpcode.Snapshot ||
-          frame.opcode === TerminalStreamOpcode.Restore,
-      ),
-    ).toBe(false);
+    expect(outputFrames.some((frame) => frame.opcode === TerminalStreamOpcode.Restore)).toBe(false);
   } finally {
     await closeWebSocket(ws);
   }
@@ -901,15 +942,12 @@ test("propagates debounced terminal titles through list responses and snapshots"
   }
   expect(listedTitle).toBe("Build Output");
 
-  const snapshotPromise = waitForTerminalSnapshot(
-    ctx.client,
-    terminalId,
-    (state) => state.title === "Build Output",
+  const attached = await ctx.client.subscribeTerminal(terminalId);
+  expect(attached.error).toBeNull();
+  const afterAttach = await ctx.client.listTerminals(cwd);
+  expect(afterAttach.terminals.find((terminal) => terminal.id === terminalId)?.title).toBe(
+    "Build Output",
   );
-  await ctx.client.subscribeTerminal(terminalId);
-  const snapshot = await snapshotPromise;
-
-  expect(snapshot.title).toBe("Build Output");
 
   rmSync(cwd, { recursive: true, force: true });
 }, 30000);
@@ -973,13 +1011,10 @@ test("subscribe response is sent before the initial snapshot frame", async () =>
           return;
         }
         const frame = decodeTerminalStreamFrame(new Uint8Array(buffer));
-        if (frame?.opcode !== TerminalStreamOpcode.Snapshot) {
+        if (frame?.opcode !== TerminalStreamOpcode.Restore) {
           return;
         }
-        const state = decodeTerminalSnapshotPayload(frame.payload);
-        if (!state || !extractStateText(state).includes("hello-ordering")) {
-          return;
-        }
+        if (!getFrameText(frame).includes("hello-ordering")) return;
         events.push("snapshot");
         maybeResolve();
       };
@@ -998,6 +1033,7 @@ test("subscribe response is sent before the initial snapshot frame", async () =>
             type: "subscribe_terminal_request",
             terminalId,
             requestId: "sub-ordering",
+            restore: { mode: "visible-snapshot" },
           },
         }),
       );
@@ -1110,7 +1146,7 @@ test("reconnected terminal streams replay active input modes after the snapshot"
     const firstSlot = await subscribeRawTerminal(firstWs, terminalId, "sub-input-mode-first");
     await waitForRawBinaryFrame(
       firstWs,
-      (frame) => frame.slot === firstSlot && frame.opcode === TerminalStreamOpcode.Snapshot,
+      (frame) => frame.slot === firstSlot && frame.opcode === TerminalStreamOpcode.Restore,
     );
     sendRawTerminalInput(firstWs, firstSlot, "e");
     await waitForRawBinaryFrame(
@@ -1137,7 +1173,7 @@ test("reconnected terminal streams replay active input modes after the snapshot"
     const secondSlot = await subscribeRawTerminal(secondWs, terminalId, "sub-input-mode-second");
     await waitForRawBinaryFrame(
       secondWs,
-      (frame) => frame.slot === secondSlot && frame.opcode === TerminalStreamOpcode.Snapshot,
+      (frame) => frame.slot === secondSlot && frame.opcode === TerminalStreamOpcode.Restore,
     );
     const replay = await waitForRawBinaryFrame(
       secondWs,
@@ -1169,7 +1205,7 @@ test("reconnected terminal streams do not replay input modes before they are ena
     const slot = await subscribeRawTerminal(ws, terminalId, "sub-input-mode-inactive");
     await waitForRawBinaryFrame(
       ws,
-      (frame) => frame.slot === slot && frame.opcode === TerminalStreamOpcode.Snapshot,
+      (frame) => frame.slot === slot && frame.opcode === TerminalStreamOpcode.Restore,
     );
     await waitForNoRawBinaryFrame(ws, 300);
   } finally {
@@ -1185,7 +1221,7 @@ test("fast output to a slow websocket client falls back to a snapshot", async ()
   const ws = await connectRawWebSocket(ctx.daemon.port);
 
   await subscribeRawTerminal(ws, terminalId, "sub-raw");
-  await waitForRawBinaryFrame(ws, (frame) => frame.opcode === TerminalStreamOpcode.Snapshot, 10000);
+  await waitForRawBinaryFrame(ws, (frame) => frame.opcode === TerminalStreamOpcode.Restore, 10000);
 
   const rawSocket = (ws as WebSocket & { _socket?: { pause: () => void; resume: () => void } })
     ._socket;
@@ -1200,12 +1236,12 @@ test("fast output to a slow websocket client falls back to a snapshot", async ()
   await new Promise((resolve) => setTimeout(resolve, 750));
   const catchUpFramePromise = waitForRawBinaryFrame(
     ws,
-    (frame) => frame.opcode === TerminalStreamOpcode.Snapshot,
+    (frame) => frame.opcode === TerminalStreamOpcode.Restore,
     15000,
   );
   rawSocket!.resume();
   const catchUpFrame = await catchUpFramePromise;
-  expect(catchUpFrame.opcode).toBe(TerminalStreamOpcode.Snapshot);
+  expect(catchUpFrame.opcode).toBe(TerminalStreamOpcode.Restore);
 
   await closeWebSocket(ws);
   rmSync(cwd, { recursive: true, force: true });
@@ -1257,7 +1293,7 @@ test("resize updates server dimensions without sending a live snapshot", async (
 
   await new Promise((resolve) => setTimeout(resolve, 300));
 
-  const state = ctx.daemon.daemon.terminalManager?.getTerminal(terminalId)?.getState();
+  const state = ctx.daemon.daemon.terminalManager?.getTerminal(terminalId)?.getSize();
   expect(state?.rows).toBe(10);
   expect(state?.cols).toBe(40);
 
@@ -1274,7 +1310,7 @@ test("the latest resize from any attached client owns the PTY size", async () =>
   );
 
   const readSize = () => {
-    const state = ctx.daemon.daemon.terminalManager?.getTerminal(terminalId)?.getState();
+    const state = ctx.daemon.daemon.terminalManager?.getTerminal(terminalId)?.getSize();
     return state ? { rows: state.rows, cols: state.cols } : null;
   };
   const expectSize = async (size: { rows: number; cols: number }) => {
@@ -1400,10 +1436,10 @@ test("websocket terminate then new connection gets snapshot with all prior outpu
     await subscribeRawTerminal(firstSocket, terminalId, "sub-drop-a");
     const initialSnapshot = await waitForRawBinaryFrame(
       firstSocket,
-      (frame) => frame.opcode === TerminalStreamOpcode.Snapshot,
+      (frame) => frame.opcode === TerminalStreamOpcode.Restore,
       10000,
     );
-    expect(initialSnapshot.opcode).toBe(TerminalStreamOpcode.Snapshot);
+    expect(initialSnapshot.opcode).toBe(TerminalStreamOpcode.Restore);
 
     ctx.client.sendTerminalInput(terminalId, {
       type: "input",
@@ -1439,9 +1475,9 @@ test("websocket terminate then new connection gets snapshot with all prior outpu
     try {
       await subscribeRawTerminal(secondSocket, terminalId, "sub-drop-b");
       const reconnectFrame = await waitForRawBinaryFrame(secondSocket, () => true, 10000);
-      expect(reconnectFrame.opcode).toBe(TerminalStreamOpcode.Snapshot);
+      expect(reconnectFrame.opcode).toBe(TerminalStreamOpcode.Restore);
 
-      const state = decodeTerminalSnapshotPayload(reconnectFrame.payload);
+      const state = await decodeRestoreState(reconnectFrame, terminalId);
       expect(state).not.toBeNull();
       expect(extractStateText(state!)).toContain("before-drop");
       expect(extractStateText(state!)).toContain("while-dead");
@@ -1510,11 +1546,11 @@ test("snapshot fidelity through websocket decode preserves dimensions and visibl
     await subscribeRawTerminal(ws, terminalId, "sub-fidelity");
     const snapshotFrame = await waitForRawBinaryFrame(
       ws,
-      (frame) => frame.opcode === TerminalStreamOpcode.Snapshot,
+      (frame) => frame.opcode === TerminalStreamOpcode.Restore,
       10000,
     );
 
-    const state = decodeTerminalSnapshotPayload(snapshotFrame.payload);
+    const state = await decodeRestoreState(snapshotFrame, terminalId);
     expect(state).not.toBeNull();
     expect(state).toMatchObject({
       rows: 24,
@@ -1542,7 +1578,7 @@ test("terminal exit prevents resubscribe and sends no frames after exit", async 
     await subscribeRawTerminal(ws, terminalId, "sub-exit");
     await waitForRawBinaryFrame(
       ws,
-      (frame) => frame.opcode === TerminalStreamOpcode.Snapshot,
+      (frame) => frame.opcode === TerminalStreamOpcode.Restore,
       10000,
     );
 
@@ -1558,8 +1594,9 @@ test("terminal exit prevents resubscribe and sends no frames after exit", async 
     const exitMessage = await exitMessagePromise;
     expect(exitMessage.message.type).toBe("terminal_stream_exit");
 
-    const subscribeResult = await ctx.client.subscribeTerminal(terminalId);
-    expect(subscribeResult.error).toBe("Terminal not found");
+    await expect(ctx.client.subscribeTerminal(terminalId)).resolves.toMatchObject({
+      error: "Terminal not found",
+    });
     await waitForNoRawBinaryFrame(ws, 750);
   } finally {
     await closeWebSocket(ws);
@@ -1577,7 +1614,7 @@ test("empty input frame does not crash the server", async () => {
     const slot = await subscribeRawTerminal(ws, terminalId, "sub-empty-input");
     await waitForRawBinaryFrame(
       ws,
-      (frame) => frame.opcode === TerminalStreamOpcode.Snapshot,
+      (frame) => frame.opcode === TerminalStreamOpcode.Restore,
       10000,
     );
 
@@ -1616,7 +1653,7 @@ test("1MB output burst keeps frames decodable and terminal usable afterward", as
     await subscribeRawTerminal(ws, terminalId, "sub-large-output");
     await waitForRawBinaryFrame(
       ws,
-      (frame) => frame.opcode === TerminalStreamOpcode.Snapshot,
+      (frame) => frame.opcode === TerminalStreamOpcode.Restore,
       10000,
     );
 
@@ -1633,7 +1670,7 @@ test("1MB output burst keeps frames decodable and terminal usable afterward", as
           .reduce((sum, frame) => sum + frame.payload.byteLength, 0);
         return (
           outputBytes >= 1024 * 1024 ||
-          collectedFrames.some((frame) => frame.opcode === TerminalStreamOpcode.Snapshot)
+          collectedFrames.some((frame) => frame.opcode === TerminalStreamOpcode.Restore)
         );
       },
       20000,
@@ -1643,7 +1680,7 @@ test("1MB output burst keeps frames decodable and terminal usable afterward", as
     for (const frame of frames) {
       expect(
         frame.opcode === TerminalStreamOpcode.Output ||
-          frame.opcode === TerminalStreamOpcode.Snapshot,
+          frame.opcode === TerminalStreamOpcode.Restore,
       ).toBe(true);
     }
 
@@ -1833,3 +1870,219 @@ describe("list terminals across directories", () => {
     ]);
   });
 });
+
+test.each([3000, 12050])(
+  "chunked SDK replay retains requested history for %s printed lines",
+  async (count) => {
+    const cwd = tmpCwd();
+    tempDirs.push(cwd);
+    const created = await createTerminalInWorkspace(ctx.client, {
+      cwd,
+      options: {
+        command: "/bin/sh",
+        args: [
+          "-lc",
+          `i=1; while [ $i -le ${count} ]; do printf '\\033[31mreplay-%04d界🙂 payload-abcdefghijklmnopqrstuvwxyz0123456789\\033[0m\\n' $i; i=$((i+1)); done; sleep 30`,
+        ],
+      },
+    });
+    const id = created.terminal!.id;
+    await waitForCondition(
+      async () =>
+        (await ctx.client.captureTerminal(id)).lines
+          .join("\n")
+          .includes(`replay-${String(count).padStart(4, "0")}`),
+      10000,
+    );
+    const events: import("@jagentdesk/client").TerminalStreamEvent[] = [];
+    let end!: () => void;
+    const completed = new Promise<void>((resolve) => {
+      end = resolve;
+    });
+    const subscription = observeTerminal(
+      ctx.client,
+      id,
+      (event) => {
+        events.push(event);
+        if (event.type === "replay" && event.replay.type === "end") end();
+      },
+      { restore: { mode: "visible-snapshot", scrollbackLines: 10000 } },
+    );
+    try {
+      await subscription.ready;
+      await completed;
+      const replay = events.flatMap((event) => (event.type === "replay" ? [event.replay] : []));
+      expect(replay[0]).toMatchObject({
+        type: "begin",
+        retainedHistoryLines: count === 12050 ? 10000 : expect.any(Number),
+      });
+      expect(replay.at(-1)).toEqual({ type: "end" });
+      const chunks = replay.flatMap((event) => (event.type === "data" ? [event.data] : []));
+      expect(chunks.every((chunk) => chunk.length <= 65536)).toBe(true);
+      const text = Buffer.concat(chunks).toString("utf8");
+      const begin = replay[0];
+      if (begin?.type !== "begin" || begin.rows === undefined)
+        throw new Error("Missing replay dimensions");
+      expect(text.match(/replay-\d{4,5}/g)).toHaveLength(Math.min(count, 10000 + begin.rows - 1));
+      expect(text).toContain(`replay-${String(count).padStart(4, "0")}界🙂`);
+      if (count === 3000) expect(text).toContain("replay-0001界🙂");
+      else {
+        expect(text).not.toContain("replay-0001");
+        expect(chunks.length).toBeGreaterThan(1);
+      }
+    } finally {
+      await subscription.release();
+    }
+  },
+  30000,
+);
+
+test.each([false, true])(
+  "default SDK observation replays a terminal without waiting for output (quietScreen=%s)",
+  async (quietScreen) => {
+    const cwd = tmpCwd();
+    tempDirs.push(cwd);
+    const created = await createTerminalInWorkspace(ctx.client, {
+      cwd,
+      options: {
+        command: process.execPath,
+        args: [
+          "-e",
+          `${quietScreen ? 'process.stdout.write("QUIET-SCREEN\\r\\n");' : ""} process.stdin.on("data", data => process.stdout.write("LIVE:" + data)); setInterval(() => {}, 1000);`,
+        ],
+      },
+    });
+    const id = created.terminal!.id;
+    if (quietScreen)
+      await waitForCondition(
+        async () => (await ctx.client.captureTerminal(id)).lines.join("").includes("QUIET-SCREEN"),
+        10000,
+      );
+    const events: import("@jagentdesk/client").TerminalStreamEvent[] = [];
+    const observation = observeTerminal(ctx.client, id, (event) => events.push(event));
+    try {
+      await observation.ready;
+      await waitForCondition(
+        () => events.some((event) => event.type === "replay" && event.replay.type === "end"),
+        10000,
+      );
+      const replay = events.flatMap((event) => (event.type === "replay" ? [event.replay] : []));
+      const begin = replay[0];
+      if (begin?.type !== "begin" || !begin.rows || !begin.cols)
+        throw new Error("Missing replay begin geometry");
+      expect(replay.at(-1)).toEqual({ type: "end" });
+      const terminal = new HeadlessTerminal({
+        rows: begin.rows,
+        cols: begin.cols,
+        allowProposedApi: true,
+      });
+      try {
+        for (const event of replay)
+          if (event.type === "data")
+            await new Promise<void>((resolve) => terminal.write(event.data, resolve));
+        const text = extractStateText(readHeadlessState(terminal));
+        expect(text).toBe(quietScreen ? "QUIET-SCREEN" : "");
+      } finally {
+        terminal.dispose();
+      }
+      ctx.client.sendTerminalInput(id, { type: "input", data: "next\r" });
+      await waitForCondition(
+        () =>
+          events.some(
+            (event) =>
+              event.type === "output" && new TextDecoder().decode(event.data).includes("LIVE:next"),
+          ),
+        10000,
+      );
+    } finally {
+      await observation.release();
+    }
+  },
+  30000,
+);
+
+test.each([false, true])(
+  "a paused terminal consumer catches up through ANSI replay instead of retaining every output frame (chunked=%s)",
+  async (chunked) => {
+    const { existsSync } = await import("node:fs");
+    const cwd = tmpCwd();
+    tempDirs.push(cwd);
+    const marker = path.join(cwd, "output-complete");
+    const created = await createTerminalInWorkspace(ctx.client, {
+      cwd,
+      options: {
+        command: process.execPath,
+        args: [
+          "-e",
+          `
+      const fs = require('node:fs');
+      process.stdin.setRawMode?.(true);
+      process.stdin.resume();
+      process.stdin.once('data', () => {
+        const chunk = Buffer.alloc(256 * 1024, 120);
+        let remaining = 128;
+        const write = () => {
+          if (remaining-- === 0) { fs.writeFileSync(${JSON.stringify(marker)}, 'done'); return; }
+          process.stdout.write(chunk, write);
+        };
+        write();
+      });
+    `,
+        ],
+      },
+    });
+    const ws = await connectRawWebSocket(ctx.daemon.port, chunked);
+    try {
+      const slot = await subscribeRawTerminal(ws, created.terminal!.id, "slow-terminal");
+      await waitForRawBinaryFrame(
+        ws,
+        (frame) =>
+          frame.slot === slot &&
+          frame.opcode ===
+            (chunked ? TerminalStreamOpcode.ReplayEnd : TerminalStreamOpcode.Restore),
+      );
+      const capture = startTerminalOutputCapture(ws, slot);
+      try {
+        ws.pause();
+        sendRawTerminalInput(ws, slot, "go\n");
+        await waitForCondition(() => existsSync(marker), 20000);
+        ws.resume();
+        await waitForCondition(() => capture.snapshotCount > 0, 10000);
+        expect(ws.readyState).toBe(WebSocket.OPEN);
+        expect(capture.frames.reduce((total, frame) => total + frame.payloadBytes, 0)).toBeLessThan(
+          32 * 1024 * 1024,
+        );
+      } finally {
+        ws.resume();
+        capture.stop();
+      }
+    } finally {
+      await closeWebSocket(ws);
+    }
+  },
+  40000,
+);
+
+function observeTerminal(
+  client: DaemonClient,
+  terminalId: string,
+  receive: (event: import("@jagentdesk/client").TerminalStreamEvent) => void,
+  options?: {
+    restore?: import("@jagentdesk/protocol/messages").SubscribeTerminalRequest["restore"];
+  },
+) {
+  const stop = client.onTerminalStreamEvent((event) => {
+    if (event.terminalId === terminalId) receive(event);
+  });
+  const ready = client.subscribeTerminal(
+    terminalId,
+    options ?? { restore: { mode: "full-snapshot" } },
+  );
+  return {
+    ready,
+    release: async () => {
+      stop();
+      client.unsubscribeTerminal(terminalId);
+    },
+  };
+}

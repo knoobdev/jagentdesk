@@ -3879,7 +3879,7 @@ export const SubscribeTerminalRequestSchema = z.object({
   restore: z
     .object({
       mode: z.enum(["live", "visible-snapshot", "full-snapshot"]),
-      scrollbackLines: z.number().int().nonnegative().optional(),
+      scrollbackLines: z.number().int().optional(),
       size: z
         .object({
           rows: z.number().int().positive(),
@@ -8154,6 +8154,7 @@ export const TerminalStreamExitSchema = z.object({
   type: z.literal("terminal_stream_exit"),
   payload: z.object({
     terminalId: z.string(),
+    error: z.string().optional(),
   }),
 });
 

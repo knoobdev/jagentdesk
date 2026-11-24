@@ -2,8 +2,7 @@ import type {
   ClientMessage,
   TerminalExitInfo,
   ServerMessage,
-  TerminalSession,
-  TerminalSubscribeOptions,
+  ReplayTerminalSession,
 } from "../../terminal/terminal.js";
 
 // What the SSH service and the milestone modules need from any remote terminal tab, SSH
@@ -18,11 +17,13 @@ export interface RemoteSessionHandle {
 }
 
 /**
- * Wraps a module-built TerminalSession (Telnet) so it behaves like an SSH tab for the
+ * Wraps a module-built ReplayTerminalSession (Telnet) so it behaves like an SSH tab for the
  * service: client input is observed in `send`, output through one internal subscription.
- * Every TerminalSession call is forwarded unchanged.
+ * Every ReplayTerminalSession call is forwarded unchanged.
  */
-export function wrapRemoteSession(inner: TerminalSession): TerminalSession & RemoteSessionHandle {
+export function wrapRemoteSession(
+  inner: ReplayTerminalSession,
+): ReplayTerminalSession & RemoteSessionHandle {
   const outputTaps = new Set<(data: string) => void>();
   const inputTaps = new Set<(data: string) => void>();
   const notify = (taps: Set<(data: string) => void>, data: string): void => {
@@ -37,19 +38,16 @@ export function wrapRemoteSession(inner: TerminalSession): TerminalSession & Rem
   let unsubscribeOutput: (() => void) | null = null;
   const ensureOutputSubscription = (): void => {
     if (unsubscribeOutput) return;
-    unsubscribeOutput = inner.subscribe(
-      (message: ServerMessage) => {
-        if (message.type === "output") notify(outputTaps, message.data);
-      },
-      { initialSnapshot: "ready" },
-    );
+    unsubscribeOutput = inner.subscribe((message: ServerMessage) => {
+      if (message.type === "output") notify(outputTaps, message.data);
+    });
   };
   inner.onExit(() => {
     unsubscribeOutput?.();
     outputTaps.clear();
     inputTaps.clear();
   });
-  const wrapper: TerminalSession & RemoteSessionHandle = {
+  const wrapper: ReplayTerminalSession & RemoteSessionHandle = {
     id: inner.id,
     name: inner.name,
     cwd: inner.cwd,
@@ -75,15 +73,15 @@ export function wrapRemoteSession(inner: TerminalSession): TerminalSession & Rem
       }
       inner.send(message);
     },
-    subscribe: (listener: (message: ServerMessage) => void, options?: TerminalSubscribeOptions) =>
-      inner.subscribe(listener, options),
+    subscribe: (listener: (message: ServerMessage) => void) => inner.subscribe(listener),
     onExit: (listener) => inner.onExit(listener),
     onCommandFinished: (listener) => inner.onCommandFinished(listener),
     onTitleChange: (listener) => inner.onTitleChange(listener),
     onActivityChange: (listener) => inner.onActivityChange(listener),
     getSize: () => inner.getSize(),
-    getState: () => inner.getState(),
-    getStateSnapshot: (options) => inner.getStateSnapshot(options),
+    hasOutput: () => inner.hasOutput(),
+    serializeReplay: (options) => inner.serializeReplay(options),
+    captureLines: (options) => inner.captureLines(options),
     getReplayPreamble: () => inner.getReplayPreamble(),
     getTitle: () => inner.getTitle(),
     getActivity: () => inner.getActivity(),
