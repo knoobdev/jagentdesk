@@ -15,7 +15,7 @@ import { validateBeforeRequest, validateBeforeResult } from "./lifecycle/index.j
 import { fork } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import type pino from "pino";
 import {
   PROVIDER_CAPABILITIES,
@@ -75,6 +75,7 @@ interface LoadedPlugin {
   instanceId: string;
   requirements: PluginRequirements | undefined;
   clientBundle: string;
+  clientBundleHash: string;
   methods: ReadonlySet<string>;
   subscriptionMethods: ReadonlySet<string>;
   subscriptions: Map<string, BufferedPluginSubscription>;
@@ -353,9 +354,22 @@ export class PluginRuntime {
     return true;
   }
 
-  catalog(): Array<{ id: string; clientBundle: string; requirements?: PluginRequirements }> {
+  catalog(cachedClientBundles: readonly { id: string; clientBundleHash: string }[] = []): Array<{
+    id: string;
+    clientBundle: string;
+    clientBundleHash?: string;
+    requirements?: PluginRequirements;
+  }> {
+    const cached = new Map(
+      cachedClientBundles.map((bundle) => [bundle.id, bundle.clientBundleHash]),
+    );
     return [...this.plugins.values()]
-      .map(({ id, clientBundle, requirements }) => ({ id, clientBundle, requirements }))
+      .map(({ id, clientBundle, clientBundleHash, requirements }) => ({
+        id,
+        requirements,
+        clientBundleHash,
+        clientBundle: cached.get(id) === clientBundleHash ? "" : clientBundle,
+      }))
       .sort((left, right) => left.id.localeCompare(right.id));
   }
 
@@ -790,6 +804,9 @@ export class PluginRuntime {
         id: pluginId,
         instanceId: randomUUID(),
         clientBundle: bundles.clientBundle ?? "",
+        clientBundleHash: createHash("sha256")
+          .update(bundles.clientBundle ?? "")
+          .digest("hex"),
         requirements: manifest.requirements,
         methods: new Set(),
         subscriptionMethods: new Set(),
@@ -945,6 +962,9 @@ export class PluginRuntime {
       id: pluginId,
       instanceId: randomUUID(),
       clientBundle: bundles.clientBundle ?? "",
+      clientBundleHash: createHash("sha256")
+        .update(bundles.clientBundle ?? "")
+        .digest("hex"),
       requirements: manifest.requirements,
       methods: new Set(ready.methods),
       subscriptionMethods: new Set(ready.subscriptions ?? []),

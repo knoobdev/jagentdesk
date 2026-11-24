@@ -1,3 +1,4 @@
+import { createHostPluginClientBundleStore } from "@/plugins/client-bundles";
 import { createHostLogger } from "./host-logger";
 import {
   nativeWebSocketFactory,
@@ -580,6 +581,7 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
     createClient: ({ host, connection, clientId, runtimeGeneration }) => {
       const localTransportFactory = createDesktopLocalDaemonTransportFactory();
       const base = {
+        createPluginClientBundleStore: createHostPluginClientBundleStore,
         suppressSendErrors: true,
         webSocketFactory: isNative ? nativeWebSocketFactory : defaultWebSocketFactory,
         clientId,

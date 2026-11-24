@@ -687,7 +687,7 @@ export interface SessionOptions {
     removePlugin(pluginId: string): Promise<void>;
     subscribe(listener: (pluginId: string) => void): () => void;
     subscribeSettings?(listener: (pluginId: string, settingsId: string) => void): () => void;
-    catalog(): Array<{ id: string; clientBundle: string }>;
+    catalog: import("./plugins/index.js").PluginService["catalog"];
     invokePluginRpc(pluginId: string, method: string, input: unknown): Promise<unknown>;
     subscribePluginRpc(
       pluginId: string,
@@ -2730,7 +2730,7 @@ export class Session {
         type: "plugin.catalog.get.response",
         payload: {
           requestId: msg.requestId,
-          plugins: this.pluginRuntime?.catalog() ?? [],
+          plugins: this.pluginRuntime?.catalog(msg.cachedClientBundles) ?? [],
         },
       });
       return undefined;

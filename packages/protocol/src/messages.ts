@@ -1669,6 +1669,9 @@ export const DiagnosticsRequestSchema = z.object({
 });
 
 export const PluginCatalogGetRequestSchema = z.object({
+  cachedClientBundles: z
+    .array(z.object({ id: PluginIdSchema, clientBundleHash: z.string().regex(/^[a-f0-9]{64}$/) }))
+    .optional(),
   type: z.literal("plugin.catalog.get.request"),
   requestId: z.string(),
 });
@@ -6062,6 +6065,7 @@ export const PluginCatalogGetResponseSchema = z.object({
       z.object({
         id: PluginIdSchema,
         clientBundle: z.string(),
+        clientBundleHash: z.string().optional(),
         requirements: PluginRequirementsSchema.optional(),
       }),
     ),

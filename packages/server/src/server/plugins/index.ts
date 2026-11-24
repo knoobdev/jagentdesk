@@ -343,8 +343,10 @@ export class PluginService {
     return this.runtime.getLogs(pluginId);
   }
 
-  catalog(): ReturnType<PluginRuntime["catalog"]> {
-    return this.runtime.catalog();
+  catalog(
+    cachedClientBundles?: Parameters<PluginRuntime["catalog"]>[0],
+  ): ReturnType<PluginRuntime["catalog"]> {
+    return this.runtime.catalog(cachedClientBundles);
   }
 
   async installDirectory(input: { path: string; id?: string }): Promise<PluginListItem> {
