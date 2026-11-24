@@ -142,6 +142,8 @@ export const vi = {
       fallback: "Tin nhắn...",
     },
     input: {
+      fullscreen: "Fullscreen",
+      exitFullscreen: "Exit fullscreen",
       longPressToSendNow: "Long press to send now",
 
       longPressToQueue: "Long press to queue",

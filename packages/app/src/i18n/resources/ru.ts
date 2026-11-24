@@ -153,17 +153,14 @@ export const ru: TranslationResources = {
       fallback: "Сообщение...",
     },
     input: {
+      fullscreen: "Fullscreen",
+      exitFullscreen: "Exit fullscreen",
       longPressToSendNow: "Long press to send now",
 
       longPressToQueue: "Long press to queue",
 
       accessibilityLabel: "Агент сообщений...",
       focusHint: "{{shortcut}}, чтобы сосредоточиться",
-      accessibilityLabel: "Написать агенту...",
-      terminalAccessibilityLabel: "Terminal prompt",
-      fullscreen: "Полный экран",
-      exitFullscreen: "Выйти из полноэкранного режима",
-      focusHint: "{{shortcut}}, для фокуса",
       addAttachment: "Добавить вложение",
       interruptAgent: "Агент прерываний",
       queueMessage: "Сообщение в очереди",

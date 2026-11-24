@@ -127,14 +127,13 @@ export const en = {
       fallback: "Message...",
     },
     input: {
+      fullscreen: "Fullscreen",
+      exitFullscreen: "Exit fullscreen",
       longPressToSendNow: "Long press to send now",
 
       longPressToQueue: "Long press to queue",
 
       accessibilityLabel: "Message agent...",
-      terminalAccessibilityLabel: "Terminal prompt",
-      fullscreen: "Fullscreen",
-      exitFullscreen: "Exit fullscreen",
       focusHint: "{{shortcut}} to focus",
       addAttachment: "Add attachment",
       interruptAgent: "Interrupt agent",

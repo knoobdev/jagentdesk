@@ -137,15 +137,13 @@ export const fr: TranslationResources = {
       fallback: "Message\u2026",
     },
     input: {
+      fullscreen: "Fullscreen",
+      exitFullscreen: "Exit fullscreen",
       longPressToSendNow: "Long press to send now",
 
       longPressToQueue: "Long press to queue",
 
       accessibilityLabel: "\u00C9crire \u00E0 l\u2019agent\u2026",
-      accessibilityLabel: "Écrire à l’agent…",
-      terminalAccessibilityLabel: "Prompt du terminal",
-      fullscreen: "Plein écran",
-      exitFullscreen: "Quitter le plein écran",
       focusHint: "{{shortcut}} pour saisir",
       addAttachment: "Ajouter une pièce jointe",
       interruptAgent: "Interrompre l\u2019agent",

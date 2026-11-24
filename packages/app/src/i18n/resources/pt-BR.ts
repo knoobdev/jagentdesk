@@ -134,14 +134,13 @@ export const ptBR: TranslationResources = {
       fallback: "Mensagem...",
     },
     input: {
+      fullscreen: "Fullscreen",
+      exitFullscreen: "Exit fullscreen",
       longPressToSendNow: "Long press to send now",
 
       longPressToQueue: "Long press to queue",
 
       accessibilityLabel: "Enviar mensagem ao agente...",
-      terminalAccessibilityLabel: "Terminal prompt",
-      fullscreen: "Tela cheia",
-      exitFullscreen: "Sair da tela cheia",
       focusHint: "{{shortcut}} para focar",
       addAttachment: "Adicionar anexo",
       interruptAgent: "Interromper agente",
