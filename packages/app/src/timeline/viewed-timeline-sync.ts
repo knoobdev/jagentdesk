@@ -22,23 +22,6 @@ interface ViewedTimelineSyncPorts {
 
 export type TimelineDeliveryMode = "legacy" | "selective";
 export type ViewedTimelineStatus = "ready" | "pending" | "error";
-/**
- * Why a freshness check was asked: opening a chat, the socket coming back, or the app
- * returning to the foreground on a socket that stayed connected.
- */
-type FreshnessCheckReason = "open" | "reconnect" | "resume";
-
-/**
- * "checking": the daemon has not said whether this chat is current; nothing to report yet.
- * "reattaching": the same question right after a reconnect, so the chat is still not back.
- */
-export type ViewedTimelineStatus =
-  | "ready"
-  | "checking"
-  | "reattaching"
-  | "pending"
-  | "error"
-  | "retrying";
 
 export interface ViewedTimelineUiBridge {
   replaceVisibleAgentIds(sourceId: string, agentIds: string[]): void;
@@ -119,21 +102,6 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
   const lingeringRemovals = new Map<string, () => void>();
   const visibilityCatchUpPending = new Set<string>();
   const visibilityCatchUpErrors = new Set<string>();
-  const visibilityCatchUpErrors = new Map<string, string>();
-  // A user-initiated retry owes a pending state until it settles.
-  const manualRetries = new Set<string>();
-  const loadedCache = new Set<string>();
-  const cacheLoads = new Map<string, Promise<void>>();
-  // Chats whose freshness answer is outstanding. No catch-up starts for them until it arrives.
-  // An "open" check stays `quiet`, short of "pending", until FRESHNESS_CHECK_QUIET_MS elapses.
-  const freshnessChecks = new Map<
-    string,
-    {
-      reason: FreshnessCheckReason;
-      quiet: boolean;
-      timer: ReturnType<typeof setTimeout> | null;
-    }
-  >();
   const listeners = new Set<() => void>();
   let active = true;
   let connected = false;
@@ -172,41 +140,6 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       changed = true;
     }
     if (changed) notifyListeners();
-  };
-
-  const markCatchUpOwed = (agentId: string) => {
-    visibilityCatchUpPending.add(agentId);
-    ports.onCatchUpOwed(agentId);
-  };
-
-  const startFreshnessCheck = (agentId: string, reason: FreshnessCheckReason = "open") => {
-    if (freshnessChecks.has(agentId)) return;
-    freshnessChecks.set(agentId, { reason, quiet: true, timer: null });
-  };
-
-  // The delay measures the daemon's answer, so it starts when the question is sent. On a cold
-  // start the cache read that precedes the question can outlast it on its own. Only opening a
-  // chat escalates. A reconnect already shows Reconnecting to host until the answer. A resume
-  // kept its socket subscribed, so a slow answer is no reason to doubt the chat; a socket that
-  // died quietly is caught by the foreground liveness probe and becomes a reconnect.
-  const startFreshnessCheckDelay = (agentId: string) => {
-    const check = freshnessChecks.get(agentId);
-    if (!check || check.timer || check.reason !== "open") return;
-    check.timer = setTimeout(() => {
-      check.quiet = false;
-      notifyListeners();
-    }, FRESHNESS_CHECK_QUIET_MS);
-  };
-
-  const endFreshnessCheck = (agentId: string) => {
-    const check = freshnessChecks.get(agentId);
-    if (!check) return;
-    if (check.timer) clearTimeout(check.timer);
-    freshnessChecks.delete(agentId);
-  };
-
-  const endAllFreshnessChecks = () => {
-    for (const agentId of freshnessChecks.keys()) endFreshnessCheck(agentId);
   };
 
   const cancelCatchUp = (agentId: string) => {
@@ -431,17 +364,6 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
   const clearLingeringRemovals = () => {
     for (const cancel of lingeringRemovals.values()) cancel();
     lingeringRemovals.clear();
-  // A render can see the connection return, or a chat become visible, before this owner hears
-  // about it, so those two states answer as if the check had already started.
-  const getUnconfirmedStatus = (agentId: string): ViewedTimelineStatus => {
-    const check = freshnessChecks.get(agentId);
-    if (check) {
-      if (check.reason === "reconnect") return "reattaching";
-      return check.quiet ? "checking" : "pending";
-    }
-    if (!ports.canCheckFreshness()) return "pending";
-    if (!connected) return "reattaching";
-    return isDesired(agentId) ? "pending" : "checking";
   };
 
   const publishVisibleMembership = (allowGrace: boolean) => {
@@ -487,33 +409,6 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       if (active === nextActive) return;
       active = nextActive;
       publishVisibleMembership(true);
-      publishVisibleMembership();
-      if (!active) {
-        startAcknowledgedCatchUps();
-        return;
-      }
-      const canCheck = connected && ports.canCheckFreshness();
-      for (const agentId of visibleAgentIds()) {
-        if (visibilityCatchUpErrors.has(agentId)) continue;
-        markCatchUpOwed(agentId);
-        if (
-          canCheck &&
-          catchUps.get(agentId)?.status === "complete" &&
-          !pendingCatchUps.has(agentId) &&
-          ports.readCursor(agentId)
-        ) {
-          catchUps.delete(agentId);
-          startFreshnessCheck(agentId, "resume");
-          freshnessCheckOwed = true;
-          continue;
-        }
-        startCatchUp(agentId, { supersede: true });
-      }
-      if (freshnessCheckOwed) {
-        membershipGeneration += 1;
-        void reconcileMembership();
-      }
-      notifyListeners();
     },
     setConnected(nextConnected) {
       if (connected === nextConnected) return;
@@ -534,10 +429,6 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
         startAcknowledgedCatchUps();
       } else {
         void reconcileMembership();
-      if (ports.canCheckFreshness()) {
-        for (const agentId of desired) {
-          if (visibilityCatchUpPending.has(agentId)) startFreshnessCheck(agentId, "reconnect");
-        }
       }
     },
     setDeliveryMode(nextMode) {
