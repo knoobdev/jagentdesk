@@ -241,6 +241,29 @@ export function createWorkspaceLayoutStore(
   ids: WorkspaceLayoutIdSource = defaultWorkspaceLayoutIds,
   storage: StateStorage = AsyncStorage,
 ) {
+  let previousProjection: {
+    source: WorkspaceLayoutStore;
+    state: Pick<WorkspaceLayoutStore, "layoutByWorkspace" | "splitSizesByWorkspace">;
+  } | null = null;
+  const jsonStorage = createJSONStorage<
+    Pick<WorkspaceLayoutStore, "layoutByWorkspace" | "splitSizesByWorkspace">
+  >(() => createWorkspaceLayoutStorage(storage))!;
+  let accepted: Parameters<typeof jsonStorage.setItem>[1] | null = null;
+  const persistedStorage: typeof jsonStorage = {
+    getItem: (name) => {
+      accepted = null;
+      return jsonStorage.getItem(name);
+    },
+    removeItem: (name) => {
+      accepted = null;
+      return jsonStorage.removeItem(name);
+    },
+    setItem: async (name, value) => {
+      if (accepted?.state === value.state && accepted.version === value.version) return;
+      await jsonStorage.setItem(name, value);
+      accepted = value;
+    },
+  };
   return create<WorkspaceLayoutStore>()(
     persist(
       (set, get) => ({
@@ -963,7 +986,7 @@ export function createWorkspaceLayoutStore(
       {
         name: "workspace-layout-state",
         version: 1,
-        storage: createJSONStorage(() => createWorkspaceLayoutStorage(storage)),
+        storage: persistedStorage,
         onRehydrateStorage: () => (state) => {
           if (!state) return;
           for (const [workspaceKey, layout] of Object.entries(state.layoutByWorkspace)) {
@@ -974,6 +997,12 @@ export function createWorkspaceLayoutStore(
           }
         },
         partialize: (state) => {
+          if (
+            previousProjection &&
+            previousProjection.source.layoutByWorkspace === state.layoutByWorkspace &&
+            previousProjection.source.splitSizesByWorkspace === state.splitSizesByWorkspace
+          )
+            return previousProjection.state;
           const layoutByWorkspace: Record<string, WorkspaceLayout> = {};
           for (const key in state.layoutByWorkspace) {
             // Strip ephemeral (commit diff) tabs before persisting so they are
@@ -982,10 +1011,12 @@ export function createWorkspaceLayoutStore(
               normalizeLayout(state.layoutByWorkspace[key]),
             );
           }
-          return {
+          const projected = {
             layoutByWorkspace,
             splitSizesByWorkspace: state.splitSizesByWorkspace,
           };
+          previousProjection = { source: state, state: projected };
+          return projected;
         },
       },
     ),
