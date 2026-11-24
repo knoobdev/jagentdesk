@@ -1,3 +1,4 @@
+import { useDisclosureHold } from "@/agent-stream/disclosure";
 import { memo, useCallback, useMemo, useRef, type ReactNode } from "react";
 import { ScrollView } from "react-native";
 import { useTranslation } from "react-i18next";
@@ -63,9 +64,10 @@ export const OverviewToolCallGroupView = memo(function OverviewToolCallGroupView
   const scrollToLatest = useCallback(() => {
     scrollRef.current?.scrollToEnd({ animated: false });
   }, []);
+  const hold = useDisclosureHold();
   const toggle = useCallback(() => {
-    onExpandedChange(group.run.id, !expanded);
-  }, [expanded, group.run.id, onExpandedChange]);
+    hold(() => onExpandedChange(group.run.id, !expanded));
+  }, [expanded, group.run.id, hold, onExpandedChange]);
   const renderDetails = useCallback(
     () => (
       <ScrollView

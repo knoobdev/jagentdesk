@@ -1,3 +1,4 @@
+import { useDisclosureHold } from "@/agent-stream/disclosure";
 import { useBuiltinPluginEnabled } from "@/plugins/builtin/hooks";
 import { ClickUpUserHeader } from "@/components/clickup-shell/chat-headers";
 import { CLICKUP_MESSAGE_INDENT } from "@/components/clickup-shell/chat-layout";
@@ -2522,9 +2523,9 @@ export const TodoListCard = memo(function TodoListCard({
 
   const nextTask = useMemo(() => items.find((item) => !item.completed)?.text, [items]);
 
-  const handleToggle = useCallback(() => {
-    setIsExpanded((prev) => !prev);
-  }, []);
+  const hold = useDisclosureHold();
+  const toggleExpanded = useCallback(() => setIsExpanded((prev) => !prev), []);
+  const handleToggle = useCallback(() => hold(toggleExpanded), [hold, toggleExpanded]);
 
   const renderDetails = useCallback(() => {
     return (
@@ -3307,6 +3308,8 @@ export const ToolCall = memo(function ToolCall({
 
   const isMobile = useIsCompactFormFactor();
   const shouldRenderInline = !isMobile || forceInline;
+  const hold = useDisclosureHold();
+  const toggleExpanded = useCallback(() => setIsExpanded((prev) => !prev), []);
 
   const effectiveDetail = useMemo<ToolCallDetail | undefined>(() => {
     if (detail) {
@@ -3356,9 +3359,11 @@ export const ToolCall = memo(function ToolCall({
         client,
       });
     } else {
-      setIsExpanded((prev) => !prev);
+      hold(toggleExpanded);
     }
   }, [
+    hold,
+    toggleExpanded,
     shouldRenderInline,
     openToolCall,
     presentation.displayName,
