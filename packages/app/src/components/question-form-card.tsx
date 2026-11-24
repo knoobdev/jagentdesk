@@ -357,12 +357,8 @@ export function QuestionFormCard({ permission, onRespond, isResponding }: Questi
           return nextTexts;
         });
       }
-
-      if (!multiSelect && next.size > 0 && qIndex === activeQuestionIndex && questions) {
-        setActiveQuestionIndex(Math.min(qIndex + 1, questions.length - 1));
-      }
     },
-    [activeQuestionIndex, questions, selections],
+    [selections],
   );
 
   const setOtherText = useCallback(
