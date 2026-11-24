@@ -1,15 +1,11 @@
 import type { Agent, WorkspaceDescriptor } from "@/stores/session-store";
-import { pickAttentionAgent } from "@/utils/agent-attention";
 import {
   buildHostWorkspaceOpenRoute,
   buildHostWorkspaceRoute,
   decodeWorkspaceIdFromPathSegment,
   parseHostWorkspaceRouteFromPathname,
 } from "@/utils/host-routes";
-import {
-  normalizeWorkspaceOpaqueId,
-  resolveWorkspaceMapKeyByIdentity,
-} from "@/utils/workspace-identity";
+import { resolveWorkspaceMapKeyByIdentity } from "@/utils/workspace-identity";
 import type { ActiveWorkspaceSelection } from "@/stores/last-workspace-selection";
 import type { WorkspaceTabTarget } from "@/workspace-tabs/model";
 import { prepareWorkspaceTab, type PrepareWorkspaceTabDeps } from "@/utils/prepare-workspace-tab";
@@ -35,6 +31,7 @@ export interface NavigateToWorkspaceDeps extends PrepareWorkspaceTabDeps {
   getSessionAgents: (serverId: string) => Iterable<Agent>;
   rememberLastWorkspace: (selection: ActiveWorkspaceSelection) => void;
   navigateToRoute: (route: string) => void;
+  revealWorkspace: (workspaceKey: string) => void;
 }
 
 export interface NavigateToLastWorkspaceDeps extends NavigateToWorkspaceDeps {
@@ -94,18 +91,7 @@ export function navigateToWorkspace(
       prepareWorkspaceTab({ ...input, target: input.target }, deps);
     }
   } else {
-    const workspaceAgents = resolvedWorkspaceId
-      ? Array.from(deps.getSessionAgents(input.serverId)).filter(
-          (agent) => normalizeWorkspaceOpaqueId(agent.workspaceId) === resolvedWorkspaceId,
-        )
-      : [];
-    const attentionAgentId = pickAttentionAgent(workspaceAgents);
-    if (attentionAgentId && resolvedWorkspaceId) {
-      deps.openTabFocused(`${input.serverId}:${resolvedWorkspaceId}`, {
-        kind: "agent",
-        agentId: attentionAgentId,
-      });
-    }
+    deps.revealWorkspace(`${input.serverId}:${resolvedWorkspaceId ?? input.workspaceId}`);
   }
 
   const openIntentArg =

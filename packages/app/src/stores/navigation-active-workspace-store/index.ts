@@ -33,6 +33,9 @@ const lastWorkspaceSelectionStore = createLastWorkspaceSelectionStore(
 
 function navigateDeps(): NavigateToWorkspaceDeps {
   return {
+    revealWorkspace: (workspaceKey) => {
+      useWorkspaceLayoutStore.getState().focusWorkspace(workspaceKey);
+    },
     getSessionWorkspaces: (serverId) => useSessionStore.getState().sessions[serverId]?.workspaces,
     getSessionAgents: (serverId) =>
       useSessionStore.getState().sessions[serverId]?.agents.values() ?? [],

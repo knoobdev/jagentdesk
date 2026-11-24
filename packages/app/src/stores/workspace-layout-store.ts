@@ -67,6 +67,8 @@ export type {
 };
 
 interface WorkspaceLayoutStore {
+  focusRequest: { workspaceKey: string; tabId: string } | null;
+  focusWorkspace: (workspaceKey: string) => void;
   layoutByWorkspace: Record<string, WorkspaceLayout>;
   splitSizesByWorkspace: Record<string, Record<string, number[]>>;
   pinnedAgentIdsByWorkspace: Record<string, Set<string>>;
@@ -267,6 +269,7 @@ export function createWorkspaceLayoutStore(
   return create<WorkspaceLayoutStore>()(
     persist(
       (set, get) => ({
+        focusRequest: null,
         layoutByWorkspace: {},
         splitSizesByWorkspace: {},
         pinnedAgentIdsByWorkspace: {},
@@ -287,6 +290,7 @@ export function createWorkspaceLayoutStore(
           });
 
           set((state) => ({
+            focusRequest: { workspaceKey: normalizedWorkspaceKey, tabId: result.tabId },
             ...withoutFocusRestoration(state, normalizedWorkspaceKey),
             hiddenAgentIdsByWorkspace:
               normalizedTarget.kind !== "agent"
@@ -410,16 +414,18 @@ export function createWorkspaceLayoutStore(
               layout: getWorkspaceLayout(state.layoutByWorkspace, normalizedWorkspaceKey),
               tabId: normalizedTabId,
             });
-            if (!nextLayout) {
+            const layout = getWorkspaceLayout(state.layoutByWorkspace, normalizedWorkspaceKey);
+            if (!collectAllTabs(layout.root).some((tab) => tab.tabId === normalizedTabId))
               return state;
-            }
-
             return {
+              focusRequest: { workspaceKey: normalizedWorkspaceKey, tabId: normalizedTabId },
               ...withoutFocusRestoration(state, normalizedWorkspaceKey),
-              layoutByWorkspace: {
-                ...state.layoutByWorkspace,
-                [normalizedWorkspaceKey]: nextLayout,
-              },
+              layoutByWorkspace: nextLayout
+                ? {
+                    ...state.layoutByWorkspace,
+                    [normalizedWorkspaceKey]: nextLayout,
+                  }
+                : state.layoutByWorkspace,
             };
           });
         },
@@ -662,6 +668,13 @@ export function createWorkspaceLayoutStore(
             };
           });
         },
+        focusWorkspace: (workspaceKey) => {
+          const state = get();
+          const paneId =
+            state.layoutByWorkspace[workspaceKey]?.focusedPaneId ??
+            state.focusRestorationByWorkspace[workspaceKey]?.restorePaneId;
+          if (paneId) state.focusPane(workspaceKey, paneId);
+        },
         focusPane: (workspaceKey, paneId) => {
           const normalizedWorkspaceKey = trimNonEmpty(workspaceKey);
           const normalizedPaneId = trimNonEmpty(paneId);
@@ -674,16 +687,20 @@ export function createWorkspaceLayoutStore(
               layout: getWorkspaceLayout(state.layoutByWorkspace, normalizedWorkspaceKey),
               paneId: normalizedPaneId,
             });
-            if (!nextLayout) {
-              return state;
-            }
-
+            const layout = getWorkspaceLayout(state.layoutByWorkspace, normalizedWorkspaceKey);
+            const pane = findPaneById(layout.root, normalizedPaneId);
+            if (!pane) return state;
             return {
+              focusRequest: pane.focusedTabId
+                ? { workspaceKey: normalizedWorkspaceKey, tabId: pane.focusedTabId }
+                : null,
               ...withoutFocusRestoration(state, normalizedWorkspaceKey),
-              layoutByWorkspace: {
-                ...state.layoutByWorkspace,
-                [normalizedWorkspaceKey]: nextLayout,
-              },
+              layoutByWorkspace: nextLayout
+                ? {
+                    ...state.layoutByWorkspace,
+                    [normalizedWorkspaceKey]: nextLayout,
+                  }
+                : state.layoutByWorkspace,
             };
           });
         },
