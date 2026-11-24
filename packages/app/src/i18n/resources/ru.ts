@@ -1990,11 +1990,6 @@ export const ru: TranslationResources = {
     },
     diagnostics: {
       title: "Диагностика",
-      legacyTerminalRenderer: {
-        label: "Использовать прежний рендерер терминала",
-        description: "Использовать прежний WebView-терминал после повторного открытия",
-        accessibilityLabel: "Использовать прежний рендерер терминала",
-      },
       testAudio: "Тестирование звука",
       playTest: "Игровой тест",
       playing: "Игра...",

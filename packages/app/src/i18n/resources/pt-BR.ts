@@ -1984,11 +1984,6 @@ export const ptBR: TranslationResources = {
     },
     diagnostics: {
       title: "Diagnósticos",
-      legacyTerminalRenderer: {
-        label: "Usar renderizador de terminal anterior",
-        description: "Usa o terminal WebView anterior após reabrir um terminal",
-        accessibilityLabel: "Usar renderizador de terminal anterior",
-      },
       testAudio: "Testar áudio",
       playTest: "Reproduzir teste",
       playing: "Reproduzindo...",
