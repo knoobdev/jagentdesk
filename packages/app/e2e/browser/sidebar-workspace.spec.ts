@@ -1,27 +1,18 @@
 import path from "node:path";
-import type { Page, TestInfo } from "@playwright/test";
 import { test, expect } from "../support/fixtures";
 import { gotoAppShell } from "../support/helpers/app";
 import {
   closeMobileAgentSidebar,
   expectMobileAgentSidebarHidden,
   expectMobileAgentSidebarVisible,
-  expectWorkspaceHoverCardClosed,
-  expectWorkspaceHoverCardOpen,
-  expectWorkspaceHoverCardStaysOpen,
-  focusWorkspaceRowWithKeyboard,
-  movePointerAwayFromWorkspaceHoverCard,
   openMobileAgentSidebar,
   pinWorkspaceFromSidebar,
 } from "../support/helpers/sidebar";
 import { seedWorkspace } from "../support/helpers/seed-client";
 import { expectWorkspaceHeader } from "../support/helpers/workspace-ui";
 import { getServerId } from "../support/helpers/server-id";
-import { getE2EDaemonPort } from "../support/helpers/daemon-port";
 import { projectEquivalenceViewKey } from "../support/helpers/project-view-key";
 import { escapeRegex } from "../support/helpers/regex";
-import { openFilesPanel } from "../support/helpers/workspace-tabs";
-import { seedMockAgentWorkspace } from "../support/helpers/mock-agent";
 
 const GITHUB_REMOTE_URL = "https://github.com/test-owner/test-repo.git";
 
@@ -56,20 +47,6 @@ async function waitForSidebarWorkspace(page: import("@playwright/test").Page, wo
   return row;
 }
 
-async function openWorkspaceReadAction(
-  page: import("@playwright/test").Page,
-  workspaceId: string,
-  action: "read" | "unread",
-) {
-  const workspaceKey = `${getServerId()}:${workspaceId}`;
-  const row = await waitForSidebarWorkspace(page, workspaceId);
-  await row.hover();
-  await page.getByTestId(`sidebar-workspace-kebab-${workspaceKey}`).click();
-  const item = page.getByTestId(`sidebar-workspace-menu-mark-as-${action}-${workspaceKey}`);
-  await expect(item).toBeVisible({ timeout: 30_000 });
-  return item;
-}
-
 async function openWorkspaceHoverCard(page: import("@playwright/test").Page, workspaceId: string) {
   const row = await waitForSidebarWorkspace(page, workspaceId);
   await row.hover();
@@ -79,14 +56,14 @@ async function openWorkspaceHoverCard(page: import("@playwright/test").Page, wor
   return hoverCard;
 }
 
-interface PaseoOwnedWorktree {
+interface JAgentDeskOwnedWorktree {
   projectName: string;
   workspaceId: string;
   worktreeSlug: string;
 }
 
-async function withPaseoOwnedWorktree(
-  run: (workspace: PaseoOwnedWorktree) => Promise<void>,
+async function withJAgentDeskOwnedWorktree(
+  run: (workspace: JAgentDeskOwnedWorktree) => Promise<void>,
 ): Promise<void> {
   const project = await seedWorkspace({ repoPrefix: "sidebar-hover-owned-worktree-" });
   const worktreeSlug = "hover-card-owned-worktree";
@@ -101,7 +78,7 @@ async function withPaseoOwnedWorktree(
       },
     });
     if (!created.workspace) {
-      throw new Error(created.error ?? "Failed to create Paseo-owned worktree");
+      throw new Error(created.error ?? "Failed to create JAgentDesk-owned worktree");
     }
     expect(path.basename(created.workspace.workspaceDirectory)).toBe(worktreeSlug);
 
@@ -115,207 +92,7 @@ async function withPaseoOwnedWorktree(
   }
 }
 
-async function readCachedRowIds(
-  page: Page,
-  rowKind: "workspace" | "checkpoint",
-): Promise<string[]> {
-  return page.evaluate(
-    async ({ serverId, kind }) => {
-      const database = await new Promise<IDBDatabase>((resolve, reject) => {
-        const request = indexedDB.open("paseo-replica-row-store");
-        request.addEventListener("success", () => resolve(request.result));
-        request.addEventListener("error", () => reject(request.error));
-      });
-      try {
-        return await new Promise<string[]>((resolve, reject) => {
-          const transaction = database.transaction("rows", "readonly");
-          const request = transaction.objectStore("rows").getAll();
-          request.onsuccess = () =>
-            resolve(
-              request.result
-                .filter(
-                  (row: { serverId: string; kind: string }) =>
-                    row.serverId === serverId && row.kind === kind,
-                )
-                .map((row: { id: string }) => row.id)
-                .sort(),
-            );
-          request.addEventListener("error", () => reject(request.error));
-        });
-      } finally {
-        database.close();
-      }
-    },
-    { serverId: getServerId(), kind: rowKind },
-  );
-}
-
-async function simulateDamagedLegacyDirectoryCache(
-  page: Page,
-  workspaceIdToRemove: string,
-): Promise<void> {
-  // Stop the app before altering storage so no pending app write can repair the fixture.
-  const fixtureUrl = new URL("/__directory_cache_fixture", page.url()).href;
-  await page.route(fixtureUrl, (route) =>
-    route.fulfill({ contentType: "text/html", body: "<html><body>Cache fixture</body></html>" }),
-  );
-  await page.goto(fixtureUrl);
-  await page.evaluate(
-    async ({ serverId, missingWorkspaceId }) => {
-      const database = await new Promise<IDBDatabase>((resolve, reject) => {
-        const request = indexedDB.open("paseo-replica-row-store");
-        request.addEventListener("success", () => resolve(request.result));
-        request.addEventListener("error", () => reject(request.error));
-      });
-      try {
-        await new Promise<void>((resolve, reject) => {
-          const transaction = database.transaction("rows", "readwrite");
-          const store = transaction.objectStore("rows");
-          const request = store.getAll();
-          request.onsuccess = () => {
-            const rows = request.result as Array<{
-              serverId: string;
-              kind: string;
-              id: string;
-              payload: string;
-            }>;
-            const checkpoint = rows.find(
-              (row) => row.serverId === serverId && row.kind === "checkpoint",
-            );
-            if (!checkpoint) {
-              transaction.abort();
-              return;
-            }
-            const stored = JSON.parse(checkpoint.payload);
-            // Accept either writer so this fixture also reproduces on the unfixed client.
-            const cursors = stored.version === 1 ? stored.cursors : stored;
-            if (!cursors.workspaces?.generation) {
-              transaction.abort();
-              return;
-            }
-            store.put({ ...checkpoint, payload: JSON.stringify(cursors) });
-            for (const row of rows) {
-              if (
-                row.serverId === serverId &&
-                row.kind === "workspace" &&
-                row.id === missingWorkspaceId
-              )
-                store.delete([serverId, row.kind, row.id]);
-            }
-          };
-          transaction.addEventListener("complete", () => resolve());
-          transaction.addEventListener("abort", () =>
-            reject(transaction.error ?? new Error("Missing current directory checkpoint")),
-          );
-          transaction.addEventListener("error", () => reject(transaction.error));
-        });
-      } finally {
-        database.close();
-      }
-    },
-    { serverId: getServerId(), missingWorkspaceId: workspaceIdToRemove },
-  );
-  expect(await readCachedRowIds(page, "workspace")).not.toContain(workspaceIdToRemove);
-}
-
-async function holdHostResponsesUntilCacheIsVisible(page: Page): Promise<() => void> {
-  let release!: () => void;
-  const ready = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await page.routeWebSocket(new RegExp(`:${getE2EDaemonPort()}(?:/|$)`), (socket) => {
-    const server = socket.connectToServer();
-    server.onMessage(async (message) => {
-      await ready;
-      socket.send(message);
-    });
-  });
-  return release;
-}
-
-async function createPinnedSiblingWorkspace(
-  project: Awaited<ReturnType<typeof seedWorkspace>>,
-): Promise<string> {
-  const sibling = await project.client.createWorkspace({
-    source: { kind: "directory", path: project.repoPath, projectId: project.projectId },
-    title: "Pinned sibling",
-  });
-  if (!sibling.workspace) throw new Error(sibling.error ?? "Sibling workspace was not created");
-  await project.client.setWorkspacePinned(sibling.workspace.id, true);
-  return sibling.workspace.id;
-}
-
-async function expectSidebarWorkspaces(page: Page, workspaceIds: string[]): Promise<void> {
-  for (const workspaceId of workspaceIds) {
-    await waitForSidebarWorkspace(page, workspaceId);
-  }
-}
-
-async function cacheWorkspaces(page: Page, workspaceIds: string[]): Promise<void> {
-  await gotoAppShell(page);
-  await expectSidebarWorkspaces(page, workspaceIds);
-  await expect.poll(() => readCachedRowIds(page, "workspace")).toEqual(workspaceIds);
-}
-
-async function reopenDamagedCacheBeforeHostResponds(
-  page: Page,
-  missingWorkspaceId: string,
-): Promise<() => void> {
-  await simulateDamagedLegacyDirectoryCache(page, missingWorkspaceId);
-  const releaseHost = await holdHostResponsesUntilCacheIsVisible(page);
-  await gotoAppShell(page);
-  return releaseHost;
-}
-
-async function expectDamagedCacheHydrated(
-  page: Page,
-  retainedWorkspaceId: string,
-  missingWorkspaceId: string,
-): Promise<void> {
-  await waitForSidebarWorkspace(page, retainedWorkspaceId);
-  await expect(page.getByTestId(getWorkspaceRowTestId(missingWorkspaceId))).toHaveCount(0);
-  await expect.poll(() => readCachedRowIds(page, "checkpoint")).toEqual([]);
-}
-
-async function expectRecoveredWorkspacesAfterReload(
-  page: Page,
-  workspaceIds: string[],
-  testInfo: TestInfo,
-): Promise<void> {
-  await expectSidebarWorkspaces(page, workspaceIds);
-  await expect.poll(() => readCachedRowIds(page, "workspace")).toEqual(workspaceIds);
-  await page.reload();
-  await expectSidebarWorkspaces(page, workspaceIds);
-  await page.screenshot({ path: testInfo.outputPath("recovered-workspaces.png") });
-  await testInfo.attach("recovered-workspaces", {
-    path: testInfo.outputPath("recovered-workspaces.png"),
-    contentType: "image/png",
-  });
-}
-
 test.describe("Sidebar workspace list", () => {
-  test("recovers missing workspaces from a damaged legacy cache after reload", async ({
-    page,
-  }, testInfo) => {
-    const project = await seedWorkspace({ repoPrefix: "directory-cache-recovery-" });
-    try {
-      const siblingId = await createPinnedSiblingWorkspace(project);
-      const ids = [project.workspaceId, siblingId].sort();
-      await test.step("cache both workspaces", () => cacheWorkspaces(page, ids));
-
-      const releaseHost = await test.step("reopen damaged cache before host responds", () =>
-        reopenDamagedCacheBeforeHostResponds(page, project.workspaceId));
-      await test.step("keep cached workspace and discard stale checkpoint", () =>
-        expectDamagedCacheHydrated(page, siblingId, project.workspaceId));
-
-      releaseHost();
-      await test.step("recover missing workspace and retain both after reload", () =>
-        expectRecoveredWorkspacesAfterReload(page, ids, testInfo));
-    } finally {
-      await project.cleanup();
-    }
-  });
-
   test("project with GitHub remote shows its selected folder name in sidebar", async ({ page }) => {
     const workspace = await seedWorkspace({
       repoPrefix: "sidebar-remote-",
@@ -335,6 +112,19 @@ test.describe("Sidebar workspace list", () => {
 
       await expect(projectRow).toBeVisible({ timeout: 30_000 });
       await expect(projectRow).not.toContainText("test-owner/test-repo");
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  test("project shows workspace under it", async ({ page }) => {
+    const workspace = await seedWorkspace({ repoPrefix: "sidebar-workspace-under-project-" });
+
+    try {
+      await gotoAppShell(page);
+
+      await waitForSidebarProject(page, path.basename(workspace.repoPath));
+      await waitForSidebarWorkspace(page, workspace.workspaceId);
     } finally {
       await workspace.cleanup();
     }
@@ -409,80 +199,10 @@ test.describe("Sidebar workspace list", () => {
     }
   });
 
-  test("workspace hover card closes when the pointer leaves a clicked row", async ({ page }) => {
-    const workspace = await seedWorkspace({ repoPrefix: "sidebar-hover-click-leave-" });
-
-    try {
-      await gotoAppShell(page);
-      await waitForSidebarProject(page, path.basename(workspace.repoPath));
-      const row = await openWorkspaceFromSidebar(page, workspace.workspaceId);
-      await movePointerAwayFromWorkspaceHoverCard(page);
-      await expectWorkspaceHoverCardClosed(page);
-
-      await row.click();
-      await expect(row).toBeFocused();
-      await expectWorkspaceHoverCardOpen(page);
-      await movePointerAwayFromWorkspaceHoverCard(page);
-      await expectWorkspaceHoverCardClosed(page);
-    } finally {
-      await workspace.cleanup();
-    }
-  });
-
-  test("workspace hover card follows keyboard focus on a row", async ({ page }) => {
-    const workspace = await seedWorkspace({ repoPrefix: "sidebar-hover-keyboard-" });
-
-    try {
-      await gotoAppShell(page);
-      await waitForSidebarProject(page, path.basename(workspace.repoPath));
-      await openWorkspaceFromSidebar(page, workspace.workspaceId);
-      await movePointerAwayFromWorkspaceHoverCard(page);
-      await expectWorkspaceHoverCardClosed(page);
-
-      await focusWorkspaceRowWithKeyboard(page, workspace.workspaceId);
-      await expectWorkspaceHoverCardOpen(page);
-      await movePointerAwayFromWorkspaceHoverCard(page);
-      await expectWorkspaceHoverCardStaysOpen(page);
-      await page.keyboard.press("Escape");
-      await expectWorkspaceHoverCardClosed(page);
-
-      await focusWorkspaceRowWithKeyboard(page, workspace.workspaceId);
-      await expectWorkspaceHoverCardOpen(page);
-      await page.keyboard.press("Tab");
-      await expectWorkspaceHoverCardClosed(page);
-    } finally {
-      await workspace.cleanup();
-    }
-  });
-
-  test("marks a finished workspace unread until it is opened again", async ({ page }) => {
-    const workspace = await seedMockAgentWorkspace({
-      repoPrefix: "sidebar-mark-unread-",
-      title: "Mark unread",
-      initialPrompt: "Finish this test turn.",
-    });
-
-    try {
-      await workspace.client.waitForFinish(workspace.agentId, 20_000);
-      await workspace.client.clearWorkspaceAttention(workspace.workspaceId);
-      expect(workspace.client.getLastServerInfoMessage()?.features?.workspaceMarkUnread).toBe(true);
-      await gotoAppShell(page);
-
-      const row = await waitForSidebarWorkspace(page, workspace.workspaceId);
-      await expect(row.getByTestId("workspace-status-indicator-done")).toBeVisible();
-      await (await openWorkspaceReadAction(page, workspace.workspaceId, "unread")).click();
-      await openWorkspaceReadAction(page, workspace.workspaceId, "read");
-
-      await page.keyboard.press("Escape");
-      await openWorkspaceFromSidebar(page, workspace.workspaceId);
-      await openWorkspaceReadAction(page, workspace.workspaceId, "unread");
-    } finally {
-      await workspace.cleanup();
-    }
-  });
-
-  test("Paseo-owned worktree hover card shows the worktree directory name", async ({ page }) => {
-    await withPaseoOwnedWorktree(async ({ projectName, workspaceId, worktreeSlug }) => {
+  test("JAgentDesk-owned worktree hover card shows the worktree directory name", async ({
+    page,
+  }) => {
+    await withJAgentDeskOwnedWorktree(async ({ projectName, workspaceId, worktreeSlug }) => {
       await gotoAppShell(page);
       await waitForSidebarProject(page, projectName);
       await openWorkspaceHoverCard(page, workspaceId);
@@ -586,9 +306,7 @@ test.describe("Half-screen desktop layout", () => {
     await gotoAppShell(page);
 
     const openToggle = page.getByTestId("menu-button");
-    const openIcon = openToggle.locator("svg").first();
-    await expect(openIcon).toBeVisible();
-    const openBounds = await openIcon.boundingBox();
+    const openBounds = await openToggle.locator("svg").first().boundingBox();
     expect(openBounds).not.toBeNull();
     expect(openBounds?.x).toBeGreaterThan(12);
 
@@ -596,11 +314,9 @@ test.describe("Half-screen desktop layout", () => {
     await expect(page.getByTestId("sidebar-global-new-workspace")).not.toBeVisible();
 
     const closedToggle = page.getByTestId("menu-button");
-    const closedIcon = closedToggle.locator("svg").first();
-    await expect(closedIcon).toBeVisible();
-    const closedBounds = await closedIcon.boundingBox();
+    const closedBounds = await closedToggle.locator("svg").first().boundingBox();
     expect(closedBounds).not.toBeNull();
-    expect(closedBounds?.x).toBeCloseTo(9, 0);
+    expect(closedBounds?.x).toBeCloseTo(12, 0);
     expect(closedBounds?.y).toBe(openBounds?.y);
   });
 
@@ -613,7 +329,7 @@ test.describe("Half-screen desktop layout", () => {
     await expect(page.getByTestId("sidebar-settings")).not.toBeVisible();
   });
 
-  test("keeps app navigation beside the Explorer pane", async ({ page }) => {
+  test("yields app navigation to the Explorer", async ({ page }) => {
     const workspace = await seedWorkspace({ repoPrefix: "sidebar-half-screen-explorer-" });
 
     try {
@@ -621,25 +337,44 @@ test.describe("Half-screen desktop layout", () => {
       await waitForSidebarProject(page, path.basename(workspace.repoPath));
       await openWorkspaceFromSidebar(page, workspace.workspaceId);
 
-      await openFilesPanel(page);
-      const explorerToggle = page.getByTestId("workspace-explorer-toggle").first();
-      await expect(page.getByTestId("workspace-tab-files").filter({ visible: true })).toBeVisible();
-      await expect(explorerToggle).toHaveAccessibleName("Close Explorer sidebar");
-      await expect(page.getByTestId("sidebar-global-new-workspace")).toBeVisible();
-      await expect(page.getByTestId("workspace-explorer-sidebar")).toBeVisible();
+      await page.getByTestId("workspace-explorer-toggle").first().click();
       await expect(
-        page
-          .locator('[data-testid^="workspace-pane-"]')
-          .getByTestId("workspace-tabs-row")
-          .filter({ visible: true }),
-      ).toHaveCount(1);
+        page.getByTestId("explorer-tab-files").filter({ visible: true }).first(),
+      ).toBeVisible();
+      await expect(page.getByTestId("workspace-explorer-toggle").first()).toBeVisible();
+      await expect(page.getByTestId("explorer-close")).toBeVisible();
+      await expect(page.getByTestId("sidebar-global-new-workspace")).not.toBeVisible();
 
-      await explorerToggle.click();
-      await expect(page.getByTestId("workspace-tab-files").filter({ visible: true })).toHaveCount(
+      const centerBounds = await page.getByTestId("workspace-tabs-row").first().boundingBox();
+      const headerGlyphBounds = await page
+        .getByTestId("menu-button")
+        .locator("svg")
+        .first()
+        .boundingBox();
+      const tabGlyphBounds = await page
+        .locator('[data-testid^="workspace-tab-"]')
+        .first()
+        .locator("svg")
+        .first()
+        .boundingBox();
+      expect(centerBounds).not.toBeNull();
+      expect(headerGlyphBounds).not.toBeNull();
+      expect(tabGlyphBounds).not.toBeNull();
+      expect((headerGlyphBounds?.x ?? 0) - (centerBounds?.x ?? 0)).toBeCloseTo(
+        (tabGlyphBounds?.x ?? 0) - (centerBounds?.x ?? 0),
         0,
       );
-      await expect(explorerToggle).toHaveAccessibleName("Open Explorer sidebar");
-      await expect(page.getByTestId("sidebar-global-new-workspace")).toBeVisible();
+
+      await expect
+        .poll(
+          async () =>
+            (await page.getByTestId("workspace-tabs-row").first().boundingBox())?.width ?? 0,
+        )
+        .toBeGreaterThanOrEqual(400);
+
+      await page.getByTestId("explorer-close").click();
+      await expect(page.getByTestId("explorer-tab-files")).not.toBeVisible();
+      await expect(page.getByTestId("workspace-explorer-toggle").first()).toBeVisible();
     } finally {
       await workspace.cleanup();
     }

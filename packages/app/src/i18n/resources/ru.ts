@@ -1727,6 +1727,8 @@ export const ru: TranslationResources = {
     dismiss: "Увольнять",
   },
   contextWindow: {
+    noData: "No context data",
+    accessibilityNoData: "Context window: No context data",
     title: "Контекстное окно",
     used: "{{percentage}}% использовано",
     tokens: "Токены{{used}}/{{max}}",

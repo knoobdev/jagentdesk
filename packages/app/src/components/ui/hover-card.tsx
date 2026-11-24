@@ -211,12 +211,16 @@ function WebHoverCard({
       if (!(contentRef.current as unknown as HTMLElement | null)?.contains(event.target as Node))
         close();
     };
+    trigger.addEventListener("mouseenter", openNow);
+    trigger.addEventListener("mouseleave", scheduleClose);
     document.addEventListener("focusin", focusEntered);
     document.addEventListener("focusout", focusLeft);
     trigger.addEventListener("keydown", activateClosedTrigger);
     document.addEventListener("scroll", scrolled, true);
     window.addEventListener("resize", close);
     return () => {
+      trigger.removeEventListener("mouseenter", openNow);
+      trigger.removeEventListener("mouseleave", scheduleClose);
       document.removeEventListener("focusin", focusEntered);
       document.removeEventListener("focusout", focusLeft);
       trigger.removeEventListener("keydown", activateClosedTrigger);
@@ -275,8 +279,6 @@ export function HoverCardTrigger({
       accessibilityRole={focusable ? "button" : undefined}
       accessibilityLabel={accessibilityLabel}
       collapsable={false}
-      onPointerEnter={ctx.openNow}
-      onPointerLeave={ctx.scheduleClose}
     >
       {children}
     </View>
