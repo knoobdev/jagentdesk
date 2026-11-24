@@ -106,8 +106,10 @@ including when the user plugin switch is off. `worktree-include` is bundled in s
 packaged builds. It copies matching ignored files from `.worktreeinclude` before setup or the
 first agent starts. It does not overwrite existing destinations or copy tracked files.
 
-The same loader reserves the 19 statically linked feature ids. Settings → Plugins shows their
-per-host switches above Installed; `pluginsEnabled` applies only to Installed. Feature switches
+The same loader reserves the statically linked feature ids. Bundled providers and
+`worktree-include` use that same Settings → Plugins → Built-in list and per-host switches;
+`pluginsEnabled` applies only to Installed. Provider availability follows the configured
+executable and environment. Missing CLIs show an unavailable reason in the existing row. Feature switches
 persist in top-level `builtinPlugins`. The config store migrates the three legacy opt-in flags
 once; after that, editing those flags does not change built-ins.
 

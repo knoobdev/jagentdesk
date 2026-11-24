@@ -5,7 +5,11 @@ import { fileURLToPath } from "node:url";
 
 // Usage-source built-ins are owned by the Usage batch. Keep this list limited to
 // built-ins whose host API is present in this fork.
-export const builtinPlugins = ["muse-provider", "worktree-include"] as const;
+export const builtinPlugins = [
+  "antigravity-provider",
+  "muse-provider",
+  "worktree-include",
+] as const;
 
 export function resolveBuiltinPluginsRoot(moduleUrl: string | URL = import.meta.url): string {
   const moduleDir = path.dirname(fileURLToPath(moduleUrl));

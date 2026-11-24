@@ -1,6 +1,7 @@
 import { UsageSourceRegistry } from "./usage-sources/index.js";
 import type { PluginUsageSourceMetadata } from "./plugin-process-protocol.js";
-import { isCommandAvailable } from "../../executable-resolution/executable-resolution.js";
+import { findExecutable } from "../../executable-resolution/executable-resolution.js";
+import { ProviderOverrideSchema } from "@jagentdesk/protocol/provider-config";
 import type { BuiltinPluginId } from "@jagentdesk/protocol/builtin-plugins";
 import { BuiltinPluginState } from "./builtin/state.js";
 import type { PluginRuntimeSubscription } from "./runtime-subscription.js";
@@ -223,13 +224,19 @@ export class PluginService {
 
   async refreshBuiltinAvailability(): Promise<void> {
     for (const manifest of this.builtin.manifests) {
-      if (manifest.command)
-        await this.builtin.setAvailability(
-          manifest.id,
-          (await isCommandAvailable(manifest.command))
-            ? null
-            : `Install ${manifest.command} and ensure it is on the host PATH.`,
-        );
+      if (!manifest.command) continue;
+      const providerId = manifest.id.replace(/-provider$/, "");
+      const parsed = ProviderOverrideSchema.safeParse(
+        this.configStore.get().providers?.[providerId],
+      );
+      const override = parsed.success ? parsed.data : undefined;
+      const command = override?.command?.[0] ?? manifest.command;
+      await this.builtin.setAvailability(
+        manifest.id,
+        (await findExecutable(command, { env: { ...process.env, ...override?.env } }))
+          ? null
+          : `Install ${manifest.command} and ensure ${command} is on the host PATH.`,
+      );
     }
   }
 

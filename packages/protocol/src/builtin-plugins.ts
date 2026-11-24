@@ -22,7 +22,11 @@ export const STATIC_BUILTIN_PLUGIN_IDS = [
   "session-share",
   "browser-tools",
 ] as const;
-export const BUNDLED_PLUGIN_IDS = ["worktree-include", "muse-provider"] as const;
+export const BUNDLED_PLUGIN_IDS = [
+  "worktree-include",
+  "muse-provider",
+  "antigravity-provider",
+] as const;
 export const BUILTIN_PLUGIN_IDS = [...STATIC_BUILTIN_PLUGIN_IDS, ...BUNDLED_PLUGIN_IDS] as const;
 export type BuiltinPluginId = (typeof BUILTIN_PLUGIN_IDS)[number];
 export const BuiltinPluginIdSchema = z.enum(BUILTIN_PLUGIN_IDS);
@@ -198,10 +202,19 @@ export const BUILTIN_PLUGIN_MANIFESTS: readonly BuiltinPluginManifest[] = [
     requires: [],
     command: "muse",
   },
+  {
+    id: "antigravity-provider",
+    name: "Antigravity",
+    description: "Run Antigravity through its local agy CLI.",
+    defaultEnabled: true,
+    requires: [],
+    command: "agy",
+  },
 ];
 
 /** Existing and new server-info flags owned by each feature. Core forge checkout stays independent. */
 export const BUILTIN_PLUGIN_FEATURES = {
+  "antigravity-provider": [],
   "muse-provider": [],
   "worktree-include": [],
   docker: ["docker"],
