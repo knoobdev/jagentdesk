@@ -130,7 +130,11 @@ import type {
   ManagedAgent,
 } from "./agent/agent-manager.js";
 import { createAgentCommand } from "./agent/create-agent/create.js";
-import { resolveCreateAgentIntent, type CreateAgentIntent } from "./agent/create-agent/intent.js";
+import {
+  resolveCreateAgentIntent,
+  type CreateAgentIntent,
+  type CreateAgentCaller,
+} from "./agent/create-agent/intent.js";
 import {
   archiveAgentCommand,
   cancelAgentRunCommand,
@@ -6454,12 +6458,7 @@ export class Session {
     workspacePromptTitle: string | null;
   }): Promise<ResolvedSessionCreateAgentIntent> {
     const { request, createdWorktree } = input;
-    const callerAgent = request.callerAgentId
-      ? this.agentManager.getAgent(request.callerAgentId)
-      : null;
-    if (request.callerAgentId && !callerAgent) {
-      throw new Error(`Caller agent ${request.callerAgentId} not found`);
-    }
+    const callerAgent = await this.resolveCreationCaller(request.callerAgentId);
 
     let config = request.config;
 
@@ -8581,11 +8580,17 @@ export class Session {
     }
   }
 
-  private callerWorkspaceForBackground(callerAgentId?: string): string | undefined {
-    if (!callerAgentId) return undefined;
-    const caller = this.agentManager.getAgent(callerAgentId);
+  private async resolveCreationCaller(callerAgentId?: string): Promise<CreateAgentCaller | null> {
+    if (!callerAgentId) return null;
+    const stored = await this.agentStorage.get(callerAgentId);
+    if (stored?.archivedAt) throw new Error(`Caller agent ${callerAgentId} not found`);
+    const caller = this.agentManager.getAgent(callerAgentId) ?? stored;
     if (!caller) throw new Error(`Caller agent ${callerAgentId} not found`);
-    return caller.workspaceId;
+    return { id: caller.id, cwd: caller.cwd, workspaceId: caller.workspaceId };
+  }
+
+  private async callerWorkspaceForBackground(callerAgentId?: string): Promise<string | undefined> {
+    return (await this.resolveCreationCaller(callerAgentId))?.workspaceId;
   }
 
   private async handleWorkspaceCreateLocal(
@@ -8620,7 +8625,7 @@ export class Session {
       {
         expectsInitialAgent: Boolean(request.firstAgentContext),
         background: request.background,
-        callerWorkspaceId: this.callerWorkspaceForBackground(request.callerAgentId),
+        callerWorkspaceId: await this.callerWorkspaceForBackground(request.callerAgentId),
       },
     );
     await this.syncWorkspaceGitObserverForWorkspace(workspace);
@@ -8697,7 +8702,7 @@ export class Session {
         firstAgentContext: request.firstAgentContext,
         title: request.title,
         background: request.background,
-        callerWorkspaceId: this.callerWorkspaceForBackground(request.callerAgentId),
+        callerWorkspaceId: await this.callerWorkspaceForBackground(request.callerAgentId),
       },
       source.baseBranch
         ? { resolveDefaultBranch: async () => source.baseBranch as string }
