@@ -48,6 +48,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 export const SHEET_HORIZONTAL_PADDING_SCALE = 6;
 
 export interface SheetHeaderSearch {
+  onFocus?: () => void;
+  onBlur?: () => void;
   onChange: (value: string) => void;
   resetKey?: string | number;
   placeholder?: string;
@@ -451,6 +453,8 @@ export function SheetHeaderView({
             placeholder={search.placeholder ?? t("common.actions.search")}
             resetKey={search.resetKey}
             onChangeText={handleSearchChange}
+            onFocus={search.onFocus}
+            onBlur={search.onBlur}
             autoCapitalize="none"
             autoCorrect={false}
             autoFocus={search.autoFocus}
@@ -508,6 +512,8 @@ export function InlineHeaderView({ header }: { header: SheetHeader }) {
             placeholder={header.search.placeholder ?? t("common.actions.search")}
             resetKey={header.search.resetKey}
             onChangeText={header.search.onChange}
+            onFocus={header.search.onFocus}
+            onBlur={header.search.onBlur}
             autoCapitalize="none"
             autoCorrect={false}
             autoFocus={header.search.autoFocus}

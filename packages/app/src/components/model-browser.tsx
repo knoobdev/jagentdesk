@@ -125,6 +125,7 @@ export interface ModelBrowserState {
   favoriteKeys: Set<string>;
   view: ModelBrowserView;
   searchQuery: string;
+  isSearchFocused: boolean;
   header: SheetHeader;
   selectedModelLabel: string;
   triggerLabel: string;
@@ -232,6 +233,7 @@ export function useModelBrowser({
 }: ModelBrowserInput): ModelBrowserState {
   const { t } = useTranslation();
   const [view, setView] = useState<ModelBrowserView>({ kind: "all" });
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResetKey, bumpSearchResetKey] = useReducer((key: number) => key + 1, 0);
 
@@ -252,6 +254,7 @@ export function useModelBrowser({
 
   const reset = useCallback(() => {
     setSearchQuery("");
+    setIsSearchFocused(false);
     bumpSearchResetKey();
   }, []);
 
@@ -289,6 +292,8 @@ export function useModelBrowser({
         />
       ),
       search: {
+        onFocus: () => setIsSearchFocused(true),
+        onBlur: () => setIsSearchFocused(false),
         onChange: handleSearchQueryChange,
         resetKey: `${view.providerId}:${searchResetKey}`,
         placeholder: t("modelSelector.searchPlaceholder"),
@@ -336,6 +341,7 @@ export function useModelBrowser({
     favoriteKeys,
     view,
     searchQuery,
+    isSearchFocused,
     header,
     selectedModelLabel,
     triggerLabel,

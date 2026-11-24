@@ -11,6 +11,8 @@ import { isNative, isWeb } from "@/constants/platform";
 import type { ProviderSelectorProvider } from "@/provider-selection/provider-selection";
 import { ICON_SIZE, type Theme } from "@/styles/theme";
 
+import { useKeyboardToggle, type KeyboardToggleAction } from "@/hooks/use-keyboard-toggle";
+
 const EMPTY_COMBOBOX_OPTIONS: ComboboxOption[] = [];
 const EMPTY_FAVORITE_KEYS = new Set<string>();
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
@@ -37,6 +39,7 @@ interface CombinedModelSelectorProps {
     hovered: boolean;
     pressed: boolean;
   }) => React.ReactNode;
+  toggleAction?: KeyboardToggleAction;
   onOpen?: () => void;
   onClose?: () => void;
   onRetryProvider?: (provider: AgentProvider) => void;
@@ -69,6 +72,7 @@ export function CombinedModelSelector({
   favoriteKeys = EMPTY_FAVORITE_KEYS,
   onToggleFavorite,
   renderTrigger,
+  toggleAction,
   onOpen,
   onClose,
   onRetryProvider,
@@ -131,6 +135,14 @@ export function CombinedModelSelector({
   const handleTriggerPress = useCallback(() => {
     handleOpenChange(!isOpen);
   }, [handleOpenChange, isOpen]);
+
+  useKeyboardToggle({
+    action: toggleAction,
+    disabled,
+    open: isOpen,
+    searchFocused: browser.isSearchFocused,
+    onToggle: handleTriggerPress,
+  });
 
   const triggerStyle = useCallback(
     ({ pressed, hovered }: PressableStateCallbackType & { hovered?: boolean }) => {

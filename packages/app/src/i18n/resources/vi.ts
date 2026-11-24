@@ -283,6 +283,13 @@ export const vi = {
     },
   },
   settings: {
+    shortcuts: {
+      help: {
+        cycleEffort: "Cycle effort",
+        toggleModelPicker: "Toggle model picker",
+      },
+    },
+
     hostSections: {
       tools: "Công cụ",
     },

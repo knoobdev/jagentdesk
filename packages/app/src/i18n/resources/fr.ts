@@ -2050,6 +2050,10 @@ export const fr: TranslationResources = {
         agentInput: "EntréeAgent",
       },
       help: {
+        cycleEffort: "Cycle effort",
+
+        toggleModelPicker: "Toggle model picker",
+
         openProject: "Projet ouvert",
         newWorkspace: "Nouvel espace de travail",
         newWorktree: "Nouvel arbre de travail",

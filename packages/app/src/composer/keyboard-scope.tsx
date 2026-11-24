@@ -8,17 +8,23 @@ import {
 
 interface ComposerKeyboardScopeValue {
   isActiveComposer: boolean;
+  isInputFocused: boolean;
 }
 
 const ComposerKeyboardScopeContext = createContext<ComposerKeyboardScopeValue>({
   isActiveComposer: false,
+  isInputFocused: false,
 });
 
 export function ComposerKeyboardScopeProvider({
   isActiveComposer,
+  isInputFocused,
   children,
 }: PropsWithChildren<ComposerKeyboardScopeValue>): ReactElement {
-  const value = useMemo(() => ({ isActiveComposer }), [isActiveComposer]);
+  const value = useMemo(
+    () => ({ isActiveComposer, isInputFocused }),
+    [isActiveComposer, isInputFocused],
+  );
   return (
     <ComposerKeyboardScopeContext.Provider value={value}>
       {children}

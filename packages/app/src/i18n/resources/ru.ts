@@ -2040,6 +2040,10 @@ export const ru: TranslationResources = {
         agentInput: "Вход Agent",
       },
       help: {
+        cycleEffort: "Cycle effort",
+
+        toggleModelPicker: "Toggle model picker",
+
         openProject: "Открыть проект",
         newWorkspace: "Новое рабочее пространство",
         newWorktree: "Новое рабочее дерево",

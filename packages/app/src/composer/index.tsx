@@ -2240,7 +2240,10 @@ export function Composer({
     autocomplete.isVisible && isPaneFocused && !recall.isShowing(userInput);
 
   return (
-    <ComposerKeyboardScopeProvider isActiveComposer={isPaneFocused}>
+    <ComposerKeyboardScopeProvider
+      isActiveComposer={isPaneFocused}
+      isInputFocused={isMessageInputFocused}
+    >
       <ComposerFrame style={composerContainerStyle}>
         <AttachmentLightbox source={lightboxSource} onClose={handleLightboxClose} />
         {/* Input area */}

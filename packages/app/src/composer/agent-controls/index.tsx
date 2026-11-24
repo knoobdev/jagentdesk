@@ -1,3 +1,4 @@
+import { AgentControlShortcutHint } from "./shortcut-hint";
 import {
   memo,
   useCallback,
@@ -402,6 +403,8 @@ function buildOpenChangeHandler(
   };
 }
 
+import { useModelPickerShortcut, useEffortCycleShortcut } from "./shortcuts";
+
 function ControlledAgentControls({
   provider,
   providerOptions,
@@ -429,6 +432,12 @@ function ControlledAgentControls({
   modelSelectorServerId = null,
   isCompactLayout,
 }: ControlledAgentControlsProps) {
+  useEffortCycleShortcut(
+    thinkingOptions ?? [],
+    selectedThinkingOptionId,
+    onSelectThinkingOption,
+    disabled,
+  );
   const { theme } = useUnistyles();
   const { t } = useTranslation();
   const isCompactFormFactor = useIsCompactFormFactor();
@@ -857,6 +866,7 @@ function DesktopAgentControlsContent(props: DesktopAgentControlsContentProps) {
     handleCloseSheet,
     modelSelectorServerId,
   } = props;
+  const modelToggleAction = useModelPickerShortcut(disabled);
   const modelToolbar = useMemo(
     () => ({ glyphSize, showCaret: presentation.showCarets }),
     [glyphSize, presentation.showCarets],
@@ -908,6 +918,7 @@ function DesktopAgentControlsContent(props: DesktopAgentControlsContentProps) {
                 onToggleFavorite={onToggleFavoriteModel}
                 isLoading={isModelLoading}
                 disabled={modelDisabled}
+                toggleAction={modelToggleAction}
                 onOpen={onModelSelectorOpen}
                 onClose={onDropdownClose}
                 onRetryProvider={onRetryModelProvider}
@@ -920,7 +931,10 @@ function DesktopAgentControlsContent(props: DesktopAgentControlsContentProps) {
             </View>
           </TooltipTrigger>
           <TooltipContent side="top" align="center" offset={8}>
-            <Text style={styles.tooltipText}>{t(getAgentControlHintKey("model"))}</Text>
+            <AgentControlShortcutHint
+              label={t(getAgentControlHintKey("model"))}
+              actionId="toggle-model-picker"
+            />
           </TooltipContent>
         </Tooltip>
       ) : null}
@@ -947,7 +961,10 @@ function DesktopAgentControlsContent(props: DesktopAgentControlsContentProps) {
               />
             </TooltipTrigger>
             <TooltipContent side="top" align="center" offset={8}>
-              <Text style={styles.tooltipText}>{t(getAgentControlHintKey("thinking"))}</Text>
+              <AgentControlShortcutHint
+                label={t(getAgentControlHintKey("thinking"))}
+                actionId="cycle-effort"
+              />
             </TooltipContent>
           </Tooltip>
           <Combobox
