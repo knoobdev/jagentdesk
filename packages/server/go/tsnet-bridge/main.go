@@ -40,15 +40,22 @@ import (
 	"time"
 
 	"tailscale.com/tsnet"
+	"tailscale.com/version"
 )
 
 func main() {
+	showVersion := flag.Bool("version", false, "print embedded Tailscale versions and exit")
 	tailnetPort := flag.Int("tailnet-port", 0, "tailnet port clients dial (required)")
 	localPort := flag.Int("local-port", 0, "loopback port of the Node /ws ingress (required)")
 	hostname := flag.String("hostname", "", "tsnet hostname (default: os.Hostname())")
 	useTLS := flag.Bool("tls", false, "use ListenTLS so clients can dial wss")
 	stateDir := flag.String("state-dir", "", "tsnet state directory (default: TS_STATE_DIR)")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("tailscale long=%s short=%s\n", version.Long(), version.Short())
+		return
+	}
 
 	if *tailnetPort <= 0 || *localPort <= 0 {
 		fail("--tailnet-port and --local-port must be positive integers")
