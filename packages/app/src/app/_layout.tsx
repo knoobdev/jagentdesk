@@ -1,3 +1,4 @@
+import { AppearanceSystemBars } from "@/appearance/system-bars";
 import { HostConfirmationSheet } from "@/hosts/host-confirmation-sheet";
 import "@/styles/unistyles";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
@@ -793,6 +794,7 @@ function ProvidersWrapper({ children }: { children: ReactNode }) {
 
   return (
     <VoiceProvider>
+      <AppearanceSystemBars />
       <DesktopWindowControlsSync enabled={!settingsLoading} />
       <OfferLinkListener />
       <HostConfirmationSheet />
