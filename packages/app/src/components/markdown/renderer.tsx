@@ -1,3 +1,4 @@
+import { resolveInlineCodeTextStyle } from "@/components/markdown-text-style";
 import { getSharedAssistantMarkdownParser } from "@/utils/assistant-markdown-parser";
 import { MarkdownTextSelection } from "@/components/markdown-text-selection";
 import { useOptionalAssistantFileLinkResolverContext } from "@/assistant-file-links/provider";
@@ -437,6 +438,7 @@ interface MarkdownInheritedTextProps {
   textStyle: TextStyle;
   style?: TextStyle;
   monoSurface?: boolean;
+  codeBodyFontSize?: number;
   onPress?: TextProps["onPress"];
   accessibilityRole?: TextProps["accessibilityRole"];
   children: ReactNode;
@@ -447,13 +449,20 @@ export function MarkdownInheritedText({
   textStyle,
   style: overrideStyle,
   monoSurface,
+  codeBodyFontSize,
   onPress,
   accessibilityRole,
   children,
 }: MarkdownInheritedTextProps) {
   const style = useMemo(
-    () => [inheritedStyles, textStyle, overrideStyle],
-    [inheritedStyles, textStyle, overrideStyle],
+    () => [
+      inheritedStyles,
+      codeBodyFontSize
+        ? resolveInlineCodeTextStyle(inheritedStyles, textStyle, codeBodyFontSize)
+        : textStyle,
+      overrideStyle,
+    ],
+    [inheritedStyles, textStyle, overrideStyle, codeBodyFontSize],
   );
   return (
     <MarkdownTextSpan
@@ -666,6 +675,7 @@ export function createSharedMarkdownRules(): RenderRules {
         key={node.key}
         inheritedStyles={inheritedStyles}
         textStyle={styles.code_inline}
+        codeBodyFontSize={styles.body.fontSize}
         monoSurface
       >
         {node.content ?? ""}
