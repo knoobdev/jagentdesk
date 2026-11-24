@@ -1,3 +1,4 @@
+import type { PointerEvent } from "react-native";
 import {
   useCallback,
   useEffect,
@@ -236,8 +237,8 @@ export interface AnchoredSurfaceProps {
    * Hover tracking for the surface box, per docs/hover.md: plain View, pointer events, never
    * a Pressable. Web-only by nature, which is all a flyout needs.
    */
-  onPointerEnter?: () => void;
-  onPointerLeave?: () => void;
+  onPointerEnter?: (event: PointerEvent) => void;
+  onPointerLeave?: (event: PointerEvent) => void;
   testID?: string;
   keyboardFocusScope?: KeyboardFocusScope;
   children: ReactElement;
