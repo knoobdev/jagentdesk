@@ -478,6 +478,8 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
     );
     const sync = getHostRuntimeStore().createViewedTimelineOwner(serverId, {
       initialDeliveryMode,
+      canCheckFreshness: () =>
+        client.getLastServerInfoMessage()?.features?.timelineFreshnessCheck === true,
       readCursor: (agentId) => {
         const timeline = selectAgentTimelineState(
           useSessionStore.getState().sessions[serverId],
@@ -485,7 +487,8 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         );
         return timeline.status === "synced" ? (timeline.range ?? undefined) : undefined;
       },
-      setSubscription: (agentIds) => client.setAgentTimelineSubscription(agentIds),
+      setSubscription: (agentIds, cursors) =>
+        client.setAgentTimelineSubscription(agentIds, cursors),
       fetchPage: async (agentId, request) => {
         const session = useSessionStore.getState().sessions[serverId];
         const initKey = getInitKey(serverId, agentId);

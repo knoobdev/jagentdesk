@@ -1,3 +1,4 @@
+import type { AgentSnapshotPayload } from "@jagentdesk/protocol/messages";
 import type {
   DaemonClient,
   FetchAgentsEntry,
@@ -369,6 +370,22 @@ export class DirectorySync {
       this.persistDirectory();
     }
     return page;
+  }
+
+  captureSubscribedAgents(
+    agentIds: string[],
+  ): (agents: Record<string, AgentSnapshotPayload>) => void {
+    const tokens = new Map(agentIds.map((id) => [id, this.agents.captureTimeline(id)]));
+    return (agents) => {
+      let accepted = false;
+      for (const [agentId, agent] of Object.entries(agents)) {
+        const token = tokens.get(agentId);
+        if (token && this.agents.submitTimelineAgent(token, agent)) accepted = true;
+      }
+      if (!accepted) return;
+      this.revision += 1;
+      this.persistDirectory();
+    };
   }
 
   async refreshAgents(

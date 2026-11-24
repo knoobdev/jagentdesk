@@ -1,8 +1,14 @@
+import { mkdtemp } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { CLIENT_CAPS } from "@jagentdesk/protocol/client-capabilities";
 import type { SessionOutboundMessage } from "@jagentdesk/protocol/messages";
 import { DaemonClient } from "./test-utils/daemon-client.js";
-import { createTestJAgentDeskDaemon, type TestJAgentDeskDaemon } from "./test-utils/jagentdesk-daemon.js";
+import {
+  createTestJAgentDeskDaemon,
+  type TestJAgentDeskDaemon,
+} from "./test-utils/jagentdesk-daemon.js";
 import { MockLoadTestAgentClient } from "./agent/providers/mock-load-test-agent.js";
 
 interface MessageWaiter {
@@ -370,3 +376,90 @@ test("real WebSocket sessions enforce selective delivery, retained resets, downg
 
   expect(downgradedDelivery.type).toBe("agent_stream");
 }, 30_000);
+
+async function startDaemonWithMockAgents(
+  home: { jagentdeskHomeRoot: string; cleanup: boolean } | Record<string, never> = {},
+): Promise<void> {
+  await daemon.close();
+  daemon = await createTestJAgentDeskDaemon({
+    isDev: true,
+    agentClients: { mock: new MockLoadTestAgentClient() },
+    ...home,
+  });
+}
+
+async function connectForFreshness(clientId: string): Promise<ConnectedClient> {
+  return connect({ clientId, selective: true });
+}
+
+async function createChatAtHead(connected: ConnectedClient, title: string) {
+  const agent = await connected.client.createAgent({
+    provider: "mock",
+    cwd: "/tmp",
+    title,
+    model: "ten-second-stream",
+  });
+  await daemon.daemon.agentManager.appendTimelineItem(agent.id, {
+    type: "assistant_message",
+    text: "Already on screen",
+  });
+  const page = await connected.client.fetchAgentTimeline(agent.id, { direction: "tail" });
+  if (!page.endCursor) throw new Error("Expected a timeline cursor");
+  return { agentId: agent.id, head: { epoch: page.endCursor.epoch, seq: page.endCursor.seq } };
+}
+
+test("subscribing with a cursor answers whether each chat is at its head", async () => {
+  await startDaemonWithMockAgents();
+  const connected = await connectForFreshness("freshness-loaded");
+  const atHead = await createChatAtHead(connected, "At head");
+  const staleSeq = await createChatAtHead(connected, "Stale seq");
+  const otherEpoch = await createChatAtHead(connected, "Other epoch");
+  const noCursor = await createChatAtHead(connected, "No cursor");
+
+  const answer = await connected.client.setAgentTimelineSubscription(
+    [atHead.agentId, staleSeq.agentId, otherEpoch.agentId, noCursor.agentId],
+    {
+      [atHead.agentId]: atHead.head,
+      [staleSeq.agentId]: { ...staleSeq.head, seq: staleSeq.head.seq - 1 },
+      [otherEpoch.agentId]: { ...otherEpoch.head, epoch: "another-epoch" },
+    },
+  );
+  if (!answer) throw new Error("Freshness response missing");
+  expect(answer.timelines).toEqual({
+    [atHead.agentId]: "current",
+    [staleSeq.agentId]: "behind",
+    [otherEpoch.agentId]: "behind",
+  });
+  // Only a current chat skips the fetch that would have delivered its agent row.
+  expect(Object.keys(answer.agents ?? {})).toEqual([atHead.agentId]);
+  expect(answer.agents?.[atHead.agentId]).toMatchObject({ id: atHead.agentId, title: "At head" });
+
+  connected.clear();
+  await daemon.daemon.agentManager.appendTimelineItem(atHead.agentId, {
+    type: "assistant_message",
+    text: "Arrives after the answer",
+  });
+  await connected.next(isAgentStream(atHead.agentId), "live row after a current answer");
+  await connected.client.setAgentTimelineSubscription([]);
+});
+
+test("subscribing with a cursor answers behind for a stored agent and leaves it unloaded", async () => {
+  const jagentdeskHomeRoot = await mkdtemp(path.join(os.tmpdir(), "jagentdesk-freshness-"));
+  await startDaemonWithMockAgents({ jagentdeskHomeRoot, cleanup: false });
+  const before = await connectForFreshness("freshness-before-restart");
+  const stored = await createChatAtHead(before, "Stored");
+  before.close();
+  await before.client.close();
+  await startDaemonWithMockAgents({ jagentdeskHomeRoot, cleanup: true });
+  expect(daemon.daemon.agentManager.getAgent(stored.agentId)).toBeNull();
+
+  const connected = await connectForFreshness("freshness-after-restart");
+  const answer = await connected.client.setAgentTimelineSubscription([stored.agentId], {
+    [stored.agentId]: stored.head,
+  });
+  if (!answer) throw new Error("Freshness response missing");
+  expect(answer.timelines).toEqual({ [stored.agentId]: "behind" });
+  expect(answer.agents).toEqual({});
+  expect(daemon.daemon.agentManager.getAgent(stored.agentId)).toBeNull();
+  await connected.client.setAgentTimelineSubscription([]);
+});

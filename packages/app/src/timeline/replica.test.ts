@@ -76,6 +76,7 @@ test("an empty current page retains the cached range and settles the held footer
     replaceDemandedAgentIds: () => undefined,
     drainQueuedAgentMessage: () => undefined,
     ports: {
+      canCheckFreshness: () => false,
       initialDeliveryMode: "selective",
       setSubscription: async () => undefined,
       readCursor: () => undefined,

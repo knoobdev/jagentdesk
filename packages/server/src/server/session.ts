@@ -1698,6 +1698,73 @@ export class Session {
     }
   }
 
+  private async handleAgentTimelineSubscription(
+    msg: Extract<SessionInboundMessage, { type: "agent.timeline.set_subscription.request" }>,
+    source?: object,
+  ): Promise<void> {
+    // Guests may only subscribe to the one shared agent. The per-agent guard inspects singular
+    // `agentId`, not this plural `agentIds` array, and agent_stream/attention frames reach the
+    // subscriber via onMessageToSource (which bypasses the outbound emit guard) — so clamp here
+    // or a guest could subscribe to, and receive the live stream of, another agent (ADR-0019).
+    const requestedAgentIds = [...new Set(msg.agentIds)].sort();
+    const agentIds =
+      this.guestAgentId !== null
+        ? requestedAgentIds.filter((id) => id === this.guestAgentId)
+        : requestedAgentIds;
+    if (
+      source
+        ? this.supportsForSource(CLIENT_CAPS.selectiveAgentTimeline, source)
+        : this.supports(CLIENT_CAPS.selectiveAgentTimeline)
+    ) {
+      this.replaceAgentTimelineSubscription(source, agentIds);
+    }
+    const freshness = msg.cursors ? await this.answerTimelineFreshness(agentIds, msg.cursors) : {};
+    const response: SessionOutboundMessage = {
+      type: "agent.timeline.set_subscription.response",
+      payload: { agentIds, requestId: msg.requestId, ...freshness },
+    };
+    if (source && this.onMessageToSource) this.onMessageToSource(source, response);
+    else this.emit(response);
+    return;
+  }
+
+  private compareTimelineCursors(
+    agentIds: string[],
+    cursors: Record<string, AgentTimelineCursor>,
+  ): Record<string, "current" | "behind"> {
+    const timelines: Record<string, "current" | "behind"> = {};
+    for (const agentId of agentIds) {
+      const cursor = cursors[agentId];
+      if (!cursor) continue;
+      const head = this.agentManager.getLoadedTimelineHead(agentId);
+      timelines[agentId] =
+        head?.epoch === cursor.epoch && head.seq === cursor.seq ? "current" : "behind";
+    }
+    return timelines;
+  }
+
+  private async answerTimelineFreshness(
+    agentIds: string[],
+    cursors: Record<string, AgentTimelineCursor>,
+  ): Promise<{
+    timelines: Record<string, "current" | "behind">;
+    agents: Record<string, AgentSnapshotPayload>;
+  }> {
+    const snapshots = await Promise.all(
+      agentIds.flatMap((agentId) => {
+        const agent = cursors[agentId] ? this.agentManager.getAgent(agentId) : null;
+        return agent ? [this.buildAgentPayload(agent)] : [];
+      }),
+    );
+    // Compared after the await, so a row appended while reading the snapshots answers behind.
+    const timelines = this.compareTimelineCursors(agentIds, cursors);
+    const agents: Record<string, AgentSnapshotPayload> = {};
+    for (const snapshot of snapshots) {
+      if (timelines[snapshot.id] === "current") agents[snapshot.id] = snapshot;
+    }
+    return { timelines, agents };
+  }
+
   private replaceAgentTimelineSubscription(source: object | undefined, agentIds: string[]): void {
     const subscriptionSource = source ?? this.defaultTimelineSubscriptionSource;
     if (agentIds.length === 0) this.viewedTimelineAgentIdsBySource.delete(subscriptionSource);
@@ -3253,31 +3320,8 @@ export class Session {
         return this.handleAgentBackgroundWorkStopRequest(msg);
       case "agent.provider_subagents.timeline.get.request":
         return this.handleProviderSubagentTimelineRequest(msg, source);
-      case "agent.timeline.set_subscription.request": {
-        // Guests may only subscribe to the one shared agent. The per-agent guard inspects singular
-        // `agentId`, not this plural `agentIds` array, and agent_stream/attention frames reach the
-        // subscriber via onMessageToSource (which bypasses the outbound emit guard) — so clamp here
-        // or a guest could subscribe to, and receive the live stream of, another agent (ADR-0019).
-        const requestedAgentIds = [...new Set(msg.agentIds)].sort();
-        const agentIds =
-          this.guestAgentId !== null
-            ? requestedAgentIds.filter((id) => id === this.guestAgentId)
-            : requestedAgentIds;
-        if (
-          source
-            ? this.supportsForSource(CLIENT_CAPS.selectiveAgentTimeline, source)
-            : this.supports(CLIENT_CAPS.selectiveAgentTimeline)
-        ) {
-          this.replaceAgentTimelineSubscription(source, agentIds);
-        }
-        const response: SessionOutboundMessage = {
-          type: "agent.timeline.set_subscription.response",
-          payload: { agentIds, requestId: msg.requestId },
-        };
-        if (source && this.onMessageToSource) this.onMessageToSource(source, response);
-        else this.emit(response);
-        return undefined;
-      }
+      case "agent.timeline.set_subscription.request":
+        return this.handleAgentTimelineSubscription(msg, source);
       case "agent.fork_context.request":
         return this.handleAgentForkContextRequest(msg);
       default:

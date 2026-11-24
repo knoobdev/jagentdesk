@@ -2937,7 +2937,15 @@ export class HostRuntimeStore {
       replica,
       replaceDemandedAgentIds: (agentIds) => directory.setAgentRouteDemand(agentIds),
       drainQueuedAgentMessage: (agentId) => this.drainQueuedAgentMessage(serverId, agentId),
-      ports,
+      ports: {
+        ...ports,
+        setSubscription: async (agentIds, cursors) => {
+          const keepAgents = directory.captureSubscribedAgents(agentIds);
+          const answer = await ports.setSubscription(agentIds, cursors);
+          if (answer?.agents) keepAgents(answer.agents);
+          return answer;
+        },
+      },
     });
   }
 

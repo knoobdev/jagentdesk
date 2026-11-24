@@ -178,7 +178,7 @@ function resolveAgentScreenSync(args: {
   if (input.isArchived) {
     return { status: "idle" };
   }
-  if (!input.isConnected) {
+  if (!input.isConnected || input.visibilityCatchUpStatus === "reattaching") {
     return { status: "reconnecting" };
   }
   if (input.missingAgentState.kind === "error") {
@@ -189,6 +189,7 @@ function resolveAgentScreenSync(args: {
   }
   if (
     input.visibilityCatchUpStatus === "pending" ||
+    input.visibilityCatchUpStatus === "checking" ||
     input.needsAuthoritativeSync ||
     input.isHistorySyncing
   ) {
@@ -196,7 +197,9 @@ function resolveAgentScreenSync(args: {
       status: "catching_up",
       ui: resolveCatchingUpUi({
         hasOptimisticCreateContinuity: hasOptimisticCreateContinuity(input),
-        isVisibilityCatchUpPending: input.visibilityCatchUpStatus === "pending",
+        isVisibilityCatchUpPending:
+          input.visibilityCatchUpStatus === "pending" ||
+          input.visibilityCatchUpStatus === "checking",
         hasHydratedHistoryBefore: input.hasHydratedHistoryBefore,
         hadInitialSyncFailure,
       }),

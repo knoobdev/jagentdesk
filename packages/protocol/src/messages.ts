@@ -2164,10 +2164,16 @@ export const ProviderSubagentTimelineRequestMessageSchema = z.object({
   limit: z.number().int().nonnegative().optional(),
 });
 
+// "current" means the daemon has this agent loaded, the epoch matches, and the cursor is at the head.
+// Anything else is "behind", including an agent the daemon has not loaded.
+export const TimelineFreshnessSchema = z.enum(["current", "behind"]);
+
 export const SetAgentTimelineSubscriptionRequestMessageSchema = z.object({
   type: z.literal("agent.timeline.set_subscription.request"),
   agentIds: z.array(z.string()),
   requestId: z.string(),
+  // COMPAT(timelineFreshnessCheck): added in v0.9.59, remove after 2027-05-25.
+  cursors: z.record(z.string(), AgentTimelineCursorSchema).optional(),
 });
 
 export const AgentForkContextRequestMessageSchema = z.object({
@@ -4953,6 +4959,8 @@ export const ServerInfoStatusPayloadSchema = z
         forgeProviders: z.boolean().optional(),
         // COMPAT(selectiveAgentTimeline): added in v0.1.106, remove after 2027-01-12.
         selectiveAgentTimeline: z.boolean().optional(),
+        // COMPAT(timelineFreshnessCheck): added in v0.9.59, remove after 2027-05-25.
+        timelineFreshnessCheck: z.boolean().optional(),
         // COMPAT(canonicalSubmittedPrompts): added in v0.2.6, remove gate after 2027-01-30.
         canonicalSubmittedPrompts: z.boolean().optional(),
         agentMessageProvenance: z.boolean().optional(),
@@ -5997,6 +6005,11 @@ export const SetAgentTimelineSubscriptionResponseMessageSchema = z.object({
   payload: z.object({
     agentIds: z.array(z.string()),
     requestId: z.string(),
+    // COMPAT(timelineFreshnessCheck): added in v0.9.59, remove after 2027-05-25.
+    timelines: z.record(z.string(), TimelineFreshnessSchema).optional(),
+    // The agent row for each chat answered "current", which gets no timeline fetch to carry it.
+    // COMPAT(timelineFreshnessCheck): added in v0.9.59, remove after 2027-05-25.
+    agents: z.record(z.string(), AgentSnapshotPayloadSchema).optional(),
   }),
 });
 

@@ -141,6 +141,19 @@ The app chooses one delivery policy from `server_info.features.selectiveAgentTim
 This policy is owned by `viewed-timeline-sync.ts`; downstream reducers do not branch on daemon
 version.
 
+## Freshness checks
+
+A daemon advertising `timelineFreshnessCheck` compares each subscribed chat's cursor with the
+head of its loaded projection. It attaches delivery before comparing, so a concurrent append
+is either included in the answer or delivered live. Unloaded agents answer `behind` without
+loading a provider. A `current` answer includes the agent snapshot and settles the cached
+range without fetching history.
+
+The timeline owner keeps a check quiet for 500 ms after sending the request. Cache restoration
+does not consume that delay. A held running footer settles with the messages or the current
+answer; directory status alone does not settle it. Subscription replacement keeps the existing
+source route attached throughout the request.
+
 ## Projected pages reconcile with live presentation
 
 A projected page is canonical state, not a sequence of live deltas. One projected item can overlap
