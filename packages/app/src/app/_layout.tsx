@@ -1,3 +1,4 @@
+import { WindowLayoutProvider } from "@/window-layout";
 import { useHardwareKeyboardPresent } from "@/keyboard";
 import { AppearanceSystemBars } from "@/appearance/system-bars";
 import { resolveContentMaxWidth } from "@/hooks/use-settings";
@@ -1246,15 +1247,17 @@ function TailscaleHealthMonitor() {
 // context and need one shared provider for sibling sheets to stack.
 function RootProviders({ children }: { children: ReactNode }) {
   return (
-    <WindowChromeProvider>
-      <KeyboardProvider>
-        <KeyboardShiftProvider>
-          <PortalProvider>
-            <BottomSheetModalProvider>{children}</BottomSheetModalProvider>
-          </PortalProvider>
-        </KeyboardShiftProvider>
-      </KeyboardProvider>
-    </WindowChromeProvider>
+    <WindowLayoutProvider>
+      <WindowChromeProvider>
+        <KeyboardProvider>
+          <KeyboardShiftProvider>
+            <PortalProvider>
+              <BottomSheetModalProvider>{children}</BottomSheetModalProvider>
+            </PortalProvider>
+          </KeyboardShiftProvider>
+        </KeyboardProvider>
+      </WindowChromeProvider>
+    </WindowLayoutProvider>
   );
 }
 
