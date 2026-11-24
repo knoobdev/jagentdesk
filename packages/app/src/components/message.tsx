@@ -1,3 +1,4 @@
+import { useToolCallExpanded } from "@/tool-calls/expansion-context";
 import { useDisclosureHold } from "@/agent-stream/disclosure";
 import { useBuiltinPluginEnabled } from "@/plugins/builtin/hooks";
 import type { AgentMessage } from "@jagentdesk/protocol/agent-message";
@@ -3316,6 +3317,9 @@ interface ToolCallProps {
   defaultExpanded?: boolean;
   forceInline?: boolean;
   maxDetailHeight?: number;
+  itemId?: string;
+  /** Shown as its own row rather than inside a tool call group. */
+  standalone?: boolean;
 }
 
 export const ToolCall = memo(function ToolCall({
@@ -3338,14 +3342,19 @@ export const ToolCall = memo(function ToolCall({
   defaultExpanded,
   forceInline = false,
   maxDetailHeight = 400,
+  itemId = toolName,
+  standalone,
 }: ToolCallProps) {
   const { openToolCall } = useToolCallSheet();
-  const [isExpanded, setIsExpanded] = useState(defaultExpanded ?? false);
+  const { expanded: isExpanded, toggle: toggleExpanded } = useToolCallExpanded({
+    callId: itemId,
+    defaultExpanded,
+    standalone,
+  });
 
   const isMobile = useIsCompactFormFactor();
   const shouldRenderInline = !isMobile || forceInline;
   const hold = useDisclosureHold();
-  const toggleExpanded = useCallback(() => setIsExpanded((prev) => !prev), []);
 
   const effectiveDetail = useMemo<ToolCallDetail | undefined>(() => {
     if (detail) {
@@ -3547,5 +3556,7 @@ function areToolCallPropsEqual(previous: ToolCallProps, next: ToolCallProps) {
   if (previous.defaultExpanded !== next.defaultExpanded) return false;
   if (previous.forceInline !== next.forceInline) return false;
   if (previous.maxDetailHeight !== next.maxDetailHeight) return false;
+  if (previous.itemId !== next.itemId) return false;
+  if (previous.standalone !== next.standalone) return false;
   return true;
 }
