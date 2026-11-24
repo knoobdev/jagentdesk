@@ -1,4 +1,10 @@
 import {
+  BottomSheetScope,
+  type AttachSheetContentDrag,
+  type SheetContentDragGesture,
+} from "@/components/ui/bottom-sheet-scope";
+import { useState } from "react";
+import {
   BottomSheetModal as GorhomBottomSheetModal,
   type BottomSheetModalProps,
 } from "@gorhom/bottom-sheet";
@@ -21,8 +27,9 @@ export type ContextBridge = (children: ReactNode) => ReactNode;
 
 type IsolatedBottomSheetModalProps = Omit<
   BottomSheetModalProps,
-  "enableDismissOnClose" | "stackBehavior"
+  "enableDismissOnClose" | "stackBehavior" | "children"
 > & {
+  children?: ReactNode;
   presentation?: "push" | "replace";
   contextBridge?: ContextBridge | null;
 };
@@ -33,15 +40,45 @@ export const IsolatedBottomSheetModal = forwardRef<
   IsolatedBottomSheetModalRef,
   IsolatedBottomSheetModalProps
 >(function IsolatedBottomSheetModal(props, ref) {
-  const { children, presentation = "push", contextBridge, ...bottomSheetProps } = props;
+  const {
+    children,
+    presentation = "push",
+    contextBridge,
+    waitFor,
+    simultaneousHandlers,
+    ...bottomSheetProps
+  } = props;
+  const [contentDragGesture, setContentDragGesture] = useState<SheetContentDragGesture>();
+  const attachContentDrag = useCallback<AttachSheetContentDrag>((gesture) => {
+    setContentDragGesture(gesture);
+    return () => setContentDragGesture((current) => (current === gesture ? undefined : current));
+  }, []);
+  // RNGH Android's shouldBeCancelledByActiveHandler treats a waiting ancestor's raw ACTIVE
+  // state as ownership and cancels its child at activation. Simultaneity lets the child activate;
+  // waitFor still keeps the sheet stationary until the child fails.
+  const contentDragHandlers = useMemo(() => {
+    if (!contentDragGesture) return { waitFor, simultaneousHandlers };
+    return {
+      waitFor: [...(waitFor ? [waitFor].flat() : []), contentDragGesture],
+      simultaneousHandlers: [
+        ...(simultaneousHandlers ? [simultaneousHandlers].flat() : []),
+        contentDragGesture,
+      ],
+    };
+  }, [contentDragGesture, waitFor, simultaneousHandlers]);
+
   const modal = (
     <GorhomBottomSheetModal
       {...bottomSheetProps}
       ref={ref}
       enableDismissOnClose
       stackBehavior={presentation}
+      waitFor={contentDragHandlers.waitFor}
+      simultaneousHandlers={contentDragHandlers.simultaneousHandlers}
     >
-      {contextBridge ? contextBridge(children as ReactNode) : children}
+      <BottomSheetScope attachContentDrag={attachContentDrag}>
+        {contextBridge ? contextBridge(children) : children}
+      </BottomSheetScope>
     </GorhomBottomSheetModal>
   );
 
