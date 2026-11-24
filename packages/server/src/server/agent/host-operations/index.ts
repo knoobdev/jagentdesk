@@ -224,7 +224,10 @@ export function createHostResolver(input: {
             const parsed = remoteCreate.parse(args);
             const { provider, model } = resolveRequiredProviderModel(parsed.provider);
             const caller = input.caller();
-            const modeId = parsed.settings?.modeId;
+            // Same-provider children inherit the caller's mode, as they would on the same host.
+            const modeId =
+              parsed.settings?.modeId ??
+              (caller?.provider === provider ? (caller.currentModeId ?? undefined) : undefined);
             const workspace = (await client.fetchWorkspaces({})).entries.find(
               (row) => row.id === parsed.workspaceId,
             );
