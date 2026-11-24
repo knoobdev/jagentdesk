@@ -1938,7 +1938,7 @@ function usePendingWorkspaceRecovery({
   recoveryAgentId,
   recoveryRequested,
 }: {
-  persistenceKey: string;
+  persistenceKey: string | null;
   hasHydratedWorkspaces: boolean;
   workspaceDescriptor: ReturnType<typeof useWorkspace>;
   normalizedServerId: string;

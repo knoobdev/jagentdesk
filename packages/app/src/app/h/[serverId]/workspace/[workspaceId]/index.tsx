@@ -9,6 +9,7 @@ import {
   useActiveWorkspaceSelection,
 } from "@/stores/navigation-active-workspace-store";
 import { useHasHydratedWorkspaces, useWorkspaceExists } from "@/stores/session-store-hooks";
+import { useDirectoryDemand } from "@/hooks/use-directory-demand";
 import type { WorkspaceTabTarget } from "@/workspace-tabs/model";
 import { WorkspaceScreen } from "@/screens/workspace/workspace-screen";
 import {
@@ -123,6 +124,7 @@ function HostWorkspaceRouteContent() {
     (isAgentOpenIntent || isOrchestrationOpenIntent) &&
     (!hasHydratedWorkspaces || !workspaceExists),
   );
+  useDirectoryDemand(serverId);
   useEffect(() => {
     if (!serverId || !workspaceId) {
       return;
