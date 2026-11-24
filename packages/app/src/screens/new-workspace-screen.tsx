@@ -13,7 +13,6 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { Pressable, StyleSheet as RNStyleSheet, Text, View } from "react-native";
 import type { PressableStateCallbackType } from "react-native";
-import ReanimatedAnimated from "react-native-reanimated";
 import { StyleSheet, useUnistyles, withUnistyles } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { createNameId } from "mnemonic-id";
@@ -66,7 +65,7 @@ import {
   useWorkspaceDraftSubmissionStore,
   type PendingWorkspaceDraftSetup,
 } from "@/stores/workspace-draft-submission-store";
-import { useKeyboardShiftStyle } from "@/keyboard/shift";
+import { KeyboardTranslateView } from "@/keyboard/shift";
 import { useKeyboardActionHandler } from "@/hooks/use-keyboard-action-handler";
 import type { KeyboardActionId } from "@/keyboard/keyboard-action-dispatcher";
 import { useFormPreferences } from "@/hooks/use-form-preferences";
@@ -2353,15 +2352,6 @@ export function NewWorkspaceScreen({
     [isCompact, insets.bottom],
   );
 
-  const { style: composerKeyboardStyle } = useKeyboardShiftStyle({
-    mode: "translate",
-  });
-
-  const centeredStyle = useMemo(
-    () => [animatedStaticStyles.centered, composerKeyboardStyle],
-    [composerKeyboardStyle],
-  );
-
   const agentControlsWithDisabled = useMemo(
     () =>
       composerState
@@ -2445,7 +2435,7 @@ export function NewWorkspaceScreen({
       <ImportSessionButton compact={isCompact} placement="top" onPress={importSession.open} />
       <View style={contentStyle}>
         <TitlebarDragRegion />
-        <ReanimatedAnimated.View style={centeredStyle}>
+        <KeyboardTranslateView style={animatedStaticStyles.centered}>
           <View style={styles.composerTitleContainer}>
             <Text style={styles.composerTitle}>{t("newWorkspace.title")}</Text>
           </View>
@@ -2483,7 +2473,7 @@ export function NewWorkspaceScreen({
             onPress={importSession.open}
           />
           {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
-        </ReanimatedAnimated.View>
+        </KeyboardTranslateView>
       </View>
       {importSession.sheet}
     </FileDropZone>

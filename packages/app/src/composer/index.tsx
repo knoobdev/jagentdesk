@@ -35,7 +35,6 @@ import {
   Paperclip,
 } from "lucide-react-native";
 import * as Clipboard from "expo-clipboard";
-import Animated from "react-native-reanimated";
 import { FOOTER_HEIGHT, MAX_CONTENT_WIDTH } from "@/constants/layout";
 import {
   AgentControls,
@@ -94,7 +93,7 @@ import {
   persistAttachmentFromFileUri,
 } from "@/attachments/service";
 import { resolveAgentControlsMode } from "@/composer/agent-controls/mode";
-import { useKeyboardShiftStyle } from "@/keyboard/shift";
+import { KeyboardTranslateView } from "@/keyboard/shift";
 import { useKeyboardActionHandler } from "@/hooks/use-keyboard-action-handler";
 import type { KeyboardActionDefinition } from "@/keyboard/keyboard-action-dispatcher";
 import type { MessageInputKeyboardActionKind } from "@/keyboard/actions";
@@ -885,6 +884,19 @@ function GithubPickerOption({
       onPress={handlePress}
       leadingSlot={leadingSlot}
     />
+  );
+}
+
+function ComposerKeyboardFrame({
+  children,
+  externalKeyboardShift,
+}: {
+  children: ReactNode;
+  externalKeyboardShift: boolean;
+}) {
+  if (externalKeyboardShift) return <View style={animatedStaticStyles.container}>{children}</View>;
+  return (
+    <KeyboardTranslateView style={animatedStaticStyles.container}>{children}</KeyboardTranslateView>
   );
 }
 
@@ -1743,11 +1755,6 @@ export function Composer({
     handle: handleKeyboardAction,
   });
 
-  const { style: keyboardAnimatedStyle } = useKeyboardShiftStyle({
-    mode: "translate",
-    enabled: !externalKeyboardShift,
-  });
-
   const isVoiceModeForAgent = resolveIsVoiceModeForAgent(voice, serverId, agentId);
 
   const handleToggleRealtimeVoice = useCallback(() => {
@@ -2114,10 +2121,6 @@ export function Composer({
     [githubSearchItems, selectedAttachments, handleToggleGithubItem],
   );
 
-  const composerContainerStyle = useMemo(
-    () => [animatedStaticStyles.container, keyboardAnimatedStyle],
-    [keyboardAnimatedStyle],
-  );
   const inputAreaContainerStyle = useMemo(
     () => [styles.inputAreaContainer, isComposerLocked && styles.inputAreaLocked],
     [isComposerLocked],
@@ -2220,7 +2223,7 @@ export function Composer({
 
   return (
     <ComposerKeyboardScopeProvider isActiveComposer={isPaneFocused}>
-      <Animated.View style={composerContainerStyle}>
+      <ComposerKeyboardFrame externalKeyboardShift={externalKeyboardShift}>
         <AttachmentLightbox source={lightboxSource} onClose={handleLightboxClose} />
         {/* Input area */}
         <View style={inputAreaContainerStyle}>
@@ -2311,7 +2314,7 @@ export function Composer({
             </View>
           </View>
         </View>
-      </Animated.View>
+      </ComposerKeyboardFrame>
     </ComposerKeyboardScopeProvider>
   );
 }
