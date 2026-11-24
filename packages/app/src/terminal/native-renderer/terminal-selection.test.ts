@@ -41,6 +41,48 @@ function rowWithText(
 }
 
 describe("native terminal selection", () => {
+  it.each([
+    { startCol: 1, endCol: 8, expected: "한글 문장" },
+    { startCol: 3, endCol: 8, expected: "글 문장" },
+    { startCol: 1, endCol: 1, expected: "한" },
+    { startCol: 0, endCol: 0, expected: "한" },
+    { startCol: 0, endCol: 1, expected: "한" },
+    { startCol: 4, endCol: 6, expected: " 문" },
+  ])(
+    "copies complete wide characters for selected columns $startCol through $endCol",
+    async ({ startCol, endCol, expected }) => {
+      const terminal = createNativeHeadlessTerminal({ rows: 3, cols: 30 });
+      const copied: string[] = [];
+      try {
+        await terminal.write("한글 문장");
+        const bounds = terminal.getBufferBounds();
+        const selection = createTerminalSelectionModel();
+        selection.begin({
+          coordinate: { row: bounds.cursorRow, col: endCol },
+          bounds,
+        });
+        selection.update({
+          coordinate: { row: bounds.cursorRow, col: startCol },
+          bounds,
+        });
+
+        await copyTerminalSelection({
+          terminal,
+          selection: selection.getSnapshot().range,
+          clipboard: {
+            writeText: async (text) => {
+              copied.push(text);
+            },
+          },
+        });
+
+        expect(copied).toEqual([expected]);
+      } finally {
+        terminal.dispose();
+      }
+    },
+  );
+
   it("copies Korean output without adding spaces for continuation cells", async () => {
     const terminal = createNativeHeadlessTerminal({ rows: 3, cols: 30 });
     const copied: string[] = [];
