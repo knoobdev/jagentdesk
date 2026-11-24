@@ -8,7 +8,10 @@ interface CatalogSyncInput {
   audio: Pick<AudioEngine, "play"> | null;
   connected: boolean;
   supported: boolean;
-  registry: Pick<PluginRegistry, "installCatalog" | "getSnapshot" | "removeHost">;
+  registry: Pick<
+    PluginRegistry,
+    "installCatalog" | "getSnapshot" | "removeHost" | "setCatalogStatus"
+  >;
 }
 export function syncPluginCatalog({
   serverId,
@@ -22,14 +25,18 @@ export function syncPluginCatalog({
   let refreshQueue = Promise.resolve();
   if (!supported || !audio) {
     registry.removeHost(serverId);
+    registry.setCatalogStatus(serverId, "ready");
     return () => {};
   }
   if (!connected) {
     return () => {};
   }
+  registry.setCatalogStatus(serverId, "loading");
   const refresh = (replacePluginId?: string) => {
-    refreshQueue = refreshQueue.then(() =>
-      client
+    refreshQueue = refreshQueue.then(() => {
+      if (cancelled) return undefined;
+      registry.setCatalogStatus(serverId, "loading");
+      return client
         .getPluginCatalog()
         .then((catalog) => {
           if (!cancelled) {
@@ -38,16 +45,18 @@ export function syncPluginCatalog({
               client,
               audio,
             });
+            registry.setCatalogStatus(serverId, "ready");
           }
           return undefined;
         })
         .catch((error) => {
           if (!cancelled) {
+            registry.setCatalogStatus(serverId, "error");
             console.warn(`[Plugins] Failed to load catalog for ${serverId}`, error);
           }
           return undefined;
-        }),
-    );
+        });
+    });
     return refreshQueue;
   };
   // The fork's daemon pushes status events to every session (no explicit event
