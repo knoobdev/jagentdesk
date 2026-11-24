@@ -13,13 +13,8 @@ import {
   MARKDOWN_COPY_UNWRAP_ATTRIBUTE,
 } from "./markup";
 
-const ASSISTANT_MESSAGE_SELECTOR = '[data-testid="assistant-message"]';
-const MESSAGE_ROW_SELECTOR = "[data-message-id]";
-const CHAT_SCROLL_SELECTOR = '[data-testid="agent-chat-scroll"]';
-const messageRowSelector = (messageId: string) => `[data-message-id="${CSS.escape(messageId)}"]`;
-const CODE_BLOCK_SELECTOR = `[${MARKDOWN_COPY_TAG_ATTRIBUTE}="pre"]`;
-const CODE_REGION_SELECTOR = `${CODE_BLOCK_SELECTOR}, [${MARKDOWN_COPY_TAG_ATTRIBUTE}="code"]`;
 const IMAGE_FRAME_SELECTOR = `[${MARKDOWN_COPY_TAG_ATTRIBUTE}="img"]`;
+const ASSISTANT_MESSAGE_SELECTOR = '[data-testid="assistant-message"]';
 
 const turndown = new TurndownService({
   bulletListMarker: "-",
@@ -64,13 +59,10 @@ export function createAssistantSelectionClipboardContent(
     return null;
   }
 
-  const range = selection.getRangeAt(0);
+  const range = startAfterImageFrame(selection.getRangeAt(0));
   const startMessage = closestAssistantMessage(range.startContainer);
   const endMessage = closestAssistantMessage(range.endContainer);
   if (!startMessage || startMessage !== endMessage) {
-  const range = startAfterImageFrame(selection.getRangeAt(0));
-  const parts = selectedMessageParts(range)?.filter((part) => selectsContent(part.range));
-  if (!parts?.length) {
     return null;
   }
 
@@ -82,11 +74,6 @@ export function createAssistantSelectionClipboardContent(
 
   const markdown = turndown.turndown(container.innerHTML).trim();
   return markdown ? createMarkdownClipboardContent(markdown) : null;
-  if (!markdown) {
-    return null;
-  }
-  const content = createMarkdownClipboardContent(markdown);
-  return { ...content, html: flattenClipboardListMarkup(content.html) };
 }
 
 /**
@@ -114,118 +101,6 @@ function startAfterImageFrame(range: Range): Range {
   const afterFrame = range.cloneRange();
   afterFrame.setStartAfter(frame);
   return afterFrame;
-}
-
-/**
- * Partly-selected code copies as the code itself, never through Turndown.
- *
- * `removeUnselectedSemantics` strips the `pre`/`code` tags from a partial selection,
- * which is right for the Markdown syntax but leaves the code being serialized as
- * prose: Turndown collapses the indentation and the line breaks, and escapes
- * Markdown-significant characters inside it. Two selected lines arrive as one.
- *
- * A selection contained inside code always copies as code, even when it contains every
- * character. A selection that crosses the code boundary stays on the Markdown path so
- * a complete block retains its fence. Crossing means selecting content outside the code:
- * a drag that starts or ends in the gap beside a block anchors at the edge of the
- * neighbouring block, which selects nothing there.
- */
-function createPartialCodeContent(range: Range, message: Element): MarkdownClipboardContent | null {
-  const region = selectedCodeRegion(range, message);
-  if (!region) {
-    return null;
-  }
-
-  const code = selectedCodeText(range);
-  if (!code) {
-    return null;
-  }
-
-  // `closest` stops at the inner `code` span, but the fence language lives on the
-  // outer `pre` wrapper.
-  const fence = region.closest(CODE_BLOCK_SELECTOR);
-
-  // Only multi-line code earns markup in the html half, and only because HTML would
-  // otherwise collapse the newlines. A single line stays undecorated, like every
-  // other partial selection.
-  const block = Boolean(fence) && code.includes("\n");
-  return createCodeClipboardContent(code, {
-    language: fence?.getAttribute(MARKDOWN_COPY_LANGUAGE_ATTRIBUTE),
-    block,
-  });
-}
-
-function selectedCodeRegion(range: Range, message: Element): Element | null {
-  const edgeRegions = [range.startContainer, range.endContainer].map((node) =>
-    closestCodeRegion(node, message),
-  );
-  return (
-    edgeRegions.find(
-      // Measure against the whole block, so its own hover Copy button is not outside it.
-      (edge) => edge && selectsNothingOutside(range, edge.closest(CODE_BLOCK_SELECTOR) ?? edge),
-    ) ?? null
-  );
-}
-
-function closestCodeRegion(node: Node, message: Element): Element | null {
-  const element = node instanceof Element ? node : node.parentElement;
-  const region = element?.closest(CODE_REGION_SELECTOR) ?? null;
-  if (!region || !message.contains(region)) {
-    return null;
-  }
-  // A selection sitting entirely inside the block's own hover Copy button is not
-  // code. `cloneContents` of a single text node drops the ignore marker with the
-  // element that carried it, so this has to be asked of the live DOM.
-  return element?.closest(`[${MARKDOWN_COPY_IGNORE_ATTRIBUTE}]`) ? null : region;
-}
-
-function selectedCodeText(range: Range): string {
-  const fragment = range.cloneContents();
-  // The hover Copy button lives inside the `pre`, so a selection that reaches the
-  // end of the block sweeps it up too.
-  for (const ignored of fragment.querySelectorAll(`[${MARKDOWN_COPY_IGNORE_ATTRIBUTE}]`)) {
-    ignored.remove();
-  }
-  // Deliberately untrimmed — leading indentation is part of the code. Trailing line
-  // breaks are the exception: newlines are their own text nodes between rendered
-  // lines, so a selection that overshoots the end of a line sweeps one in.
-  return (fragment.textContent ?? "").replace(TRAILING_CODE_LINE_BREAKS, "");
-}
-
-function flattenClipboardListMarkup(html: string): string {
-  const container = document.createElement("div");
-  container.innerHTML = html;
-
-  const lists = Array.from(container.querySelectorAll("ul, ol")).toReversed();
-  for (const list of lists) {
-    const replacement = document.createDocumentFragment();
-    const items = Array.from(list.children).filter((child) => child.tagName === "LI");
-    const start = list.tagName === "OL" ? Number(list.getAttribute("start") ?? 1) : null;
-
-    items.forEach((item, index) => {
-      const line = document.createElement("div");
-      line.append(start === null ? "- " : `${start + index}. `);
-      const nestedLines: HTMLDivElement[] = [];
-      let hasParagraph = false;
-      for (const child of Array.from(item.childNodes)) {
-        if (child instanceof HTMLDivElement) {
-          nestedLines.push(child);
-        } else if (child instanceof HTMLParagraphElement) {
-          if (hasParagraph) {
-            line.append(document.createElement("br"), document.createElement("br"));
-          }
-          line.append(...child.childNodes);
-          hasParagraph = true;
-        } else {
-          line.append(child);
-        }
-      }
-      replacement.append(line, ...nestedLines);
-    });
-    list.replaceWith(replacement);
-  }
-
-  return container.innerHTML;
 }
 
 function wrapSelectionWithAncestors(range: Range, message: Element): Node {
@@ -362,4 +237,4 @@ function hasUsableTableColumnContract(table: Element): boolean {
       (row) => row.children.length <= headerWidth,
     )
   );
-}}
+}
