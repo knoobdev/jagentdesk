@@ -10111,6 +10111,7 @@ export class Session {
           messageId: msg.messageId,
           source: { kind: "agent-message", agentId: msg.sourceAgentId },
           activeTurnBehavior: msg.activeTurnBehavior ?? "steer",
+          clearPendingPermissions: false,
         },
       );
       receipt.dispatched.catch((error) => {
