@@ -1,5 +1,7 @@
 export type {
   PluginHostProps,
+  PluginWorkspaceRowBadgeItemProps,
+  PluginWorkspaceRowBadgeItemContribution,
   PluginAgentPanelContribution,
   PluginTab,
   PluginPanelProps,

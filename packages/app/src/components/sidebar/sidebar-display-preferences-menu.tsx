@@ -1,3 +1,4 @@
+import { PluginWorkspaceRowBadgePreferences } from "@/plugins/workspace-row-badge-items";
 import { useCallback, useMemo } from "react";
 import { Text, View, type PressableStateCallbackType } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -143,6 +144,7 @@ export function SidebarDisplayPreferencesMenu() {
             onSelect={handleWorkspaceTitleSourceSelect}
           />
         ))}
+        <PluginWorkspaceRowBadgePreferences />
       </DropdownMenuContent>
     </DropdownMenu>
   );

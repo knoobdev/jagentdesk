@@ -1,3 +1,4 @@
+import { PluginWorkspaceRowBadgeItems } from "@/plugins/workspace-row-badge-items";
 import { memo, useCallback, useId, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -243,6 +244,12 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
               {scriptIconKind ? <WorkspaceScriptIcon kind={scriptIconKind} /> : null}
             </View>
             <View style={sidebarWorkspaceRowStyles.rowRight}>{children}</View>
+          </View>
+          <View style={styles.pluginBadges}>
+            <PluginWorkspaceRowBadgeItems
+              serverId={workspace.serverId}
+              workspaceId={workspace.workspaceId}
+            />
           </View>
         </View>
       </View>
@@ -615,6 +622,7 @@ function TrailingActionScrim() {
 }
 
 const styles = StyleSheet.create((theme) => ({
+  pluginBadges: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
   workspaceRowContent: {
     position: "relative",
   },

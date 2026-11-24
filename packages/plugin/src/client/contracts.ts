@@ -102,6 +102,16 @@ export interface PluginSidebarItemContribution<Text extends PluginText = string>
   Component: ComponentType<PluginSidebarItemProps>;
 }
 
+export interface PluginWorkspaceRowBadgeItemProps extends PluginHostProps {
+  workspaceId: string;
+}
+export interface PluginWorkspaceRowBadgeItemContribution<Text extends PluginText = string> {
+  id: string;
+  title: Text;
+  icon: PluginIcon;
+  Component: ComponentType<PluginWorkspaceRowBadgeItemProps>;
+}
+
 export type PluginIcon<Props extends PluginIconProps = PluginIconProps> =
   | PluginSerializableIcon
   | ComponentType<Props>;
@@ -180,6 +190,9 @@ export interface PluginClientContext extends PluginCommandCapabilities {
   addSurface(id: string, Component: ComponentType<PluginSurfaceProps>): PluginCleanup;
   addSidebarItem(contribution: PluginSidebarContribution<PluginText>): PluginCleanup;
   addFilePanel(contribution: PluginFilePanelContribution<PluginText>): PluginCleanup;
+  addWorkspaceRowBadgeItem(
+    contribution: PluginWorkspaceRowBadgeItemContribution<PluginText>,
+  ): PluginCleanup;
   addAgentPanel(contribution: PluginAgentPanelContribution<PluginText>): PluginCleanup;
   addWorkspacePanel(contribution: PluginWorkspacePanelContribution<PluginText>): PluginCleanup;
   addCommandCenterItem(

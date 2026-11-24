@@ -117,6 +117,7 @@ export function runPluginClientBundle(
   );
   const localize = <T extends object>(input: T) => localizePluginContribution(input, translations);
   const collector: Omit<EvaluatedPlugin, "id" | "cleanup"> = {
+    workspaceRowBadgeItems: [],
     surfaces: [],
     settingsScreens: [],
     sidebarItems: [],
@@ -295,6 +296,23 @@ export function runPluginClientBundle(
       return register(
         collector.filePanels!,
         { ...contribution, id: panelId },
+        () => {},
+        contribution,
+      );
+    },
+    addWorkspaceRowBadgeItem(input) {
+      const contribution = localize(input);
+      const normalizedId = requireId(contribution.id, "workspace row badge item id");
+      if (collector.workspaceRowBadgeItems!.some((item) => item.id === normalizedId))
+        throw new Error(`Duplicate workspace row badge item: ${normalizedId}`);
+      if (!contribution.title.trim())
+        throw new Error(`Workspace row badge item ${normalizedId} has no title`);
+      parsePluginIcon(`Workspace row badge item ${normalizedId}`, contribution.icon);
+      if (!isComponentType(contribution.Component))
+        throw new Error(`Workspace row badge item ${normalizedId} is not a component`);
+      return register(
+        collector.workspaceRowBadgeItems!,
+        { ...contribution, id: normalizedId },
         () => {},
         contribution,
       );
@@ -587,6 +605,7 @@ export function runPluginClientBundle(
     id,
     cleanup,
     translations,
+    workspaceRowBadgeItems: collector.workspaceRowBadgeItems,
     surfaces: collector.surfaces,
     settingsScreens: collector.settingsScreens,
     sidebarItems: collector.sidebarItems,

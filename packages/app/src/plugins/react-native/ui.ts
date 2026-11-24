@@ -25,3 +25,5 @@ export { StreamedText } from "./streamed-text";
 export { FilePanelLoading as Loading } from "@/file-panels/loading";
 
 export { Markdown } from "./markdown";
+
+export { WorkspaceRowBadge } from "../workspace-row-badge-items/kit";

@@ -60,6 +60,7 @@ export interface AppSettings {
   codeFontSize: number; // clamped px, default 12
   syntaxTheme: SyntaxThemeId; // default "one"
   workspaceTitleSource: WorkspaceTitleSource;
+  sidebarPluginRowBadgeItems: Record<string, boolean>;
   autoExpandReasoning: boolean;
   toolCallDetailLevel: ToolCallDetailLevel;
   chatOutlineEnabled: boolean;
@@ -88,6 +89,7 @@ export const DEFAULT_CLIENT_SETTINGS: AppSettings = {
   codeFontSize: DEFAULT_CODE_FONT_SIZE,
   syntaxTheme: "one",
   workspaceTitleSource: "title",
+  sidebarPluginRowBadgeItems: {},
   autoExpandReasoning: false,
   toolCallDetailLevel: "detailed",
   chatOutlineEnabled: true,
@@ -305,6 +307,17 @@ function pickAppSettings(stored: StoredAppSettings): Partial<AppSettings> {
   }
   if (typeof stored.autoExpandReasoning === "boolean") {
     result.autoExpandReasoning = stored.autoExpandReasoning;
+  }
+  if (
+    stored.sidebarPluginRowBadgeItems &&
+    typeof stored.sidebarPluginRowBadgeItems === "object" &&
+    !Array.isArray(stored.sidebarPluginRowBadgeItems)
+  ) {
+    result.sidebarPluginRowBadgeItems = Object.fromEntries(
+      Object.entries(stored.sidebarPluginRowBadgeItems).filter(
+        (entry): entry is [string, boolean] => typeof entry[1] === "boolean",
+      ),
+    );
   }
   const toolCallDetailLevel = parseToolCallDetailLevel(stored);
   if (toolCallDetailLevel !== null) {

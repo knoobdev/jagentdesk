@@ -26,6 +26,7 @@ export type EvaluatedPluginWorkspacePanelContribution = PluginWorkspacePanelCont
 };
 
 export interface EvaluatedPlugin {
+  workspaceRowBadgeItems?: import("@jagentdesk/plugin/client").PluginWorkspaceRowBadgeItemContribution[];
   translations?: import("@jagentdesk/plugin/client/host").PluginTranslationRuntime;
   id: string;
   cleanup: PluginCleanup;

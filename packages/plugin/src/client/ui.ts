@@ -184,3 +184,12 @@ export interface MarkdownProps {
 }
 /** Renders Markdown using JAgentDesk's theme, selection, and link behavior. */
 export declare const Markdown: ComponentType<MarkdownProps>;
+
+export type WorkspaceRowBadgeTone = "muted" | "success" | "warning" | "danger" | "info";
+export interface WorkspaceRowBadgeProps {
+  icon?: SidebarIcon;
+  label?: string;
+  tone?: WorkspaceRowBadgeTone;
+  accessibilityLabel?: string;
+}
+export declare const WorkspaceRowBadge: ComponentType<WorkspaceRowBadgeProps>;
