@@ -967,6 +967,8 @@ export const fr: TranslationResources = {
         },
         thread: {
           discussion: "Fil de discussion",
+          resolved: "R\u00E9solu",
+          outdated: "Obsol\u00E8te",
         },
         errors: {
           statusLoadFailed: "Impossible de charger le statut de la demande d'extraction",

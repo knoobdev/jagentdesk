@@ -969,6 +969,8 @@ export const ru: TranslationResources = {
         },
         thread: {
           discussion: "Обсуждение",
+          resolved: "\u0420\u0435\u0448\u0435\u043D\u043E",
+          outdated: "\u0423\u0441\u0442\u0430\u0440\u0435\u043B\u043E",
         },
         errors: {
           statusLoadFailed: "Невозможно загрузить статус запроса на включение",

@@ -65,7 +65,7 @@ import {
   canAddPullRequestActivityToChat,
   canAddPullRequestCheckLogsToChat,
 } from "./context-attachment";
-import { getActivityVerb, getStateLabel } from "./data";
+import { getActivityVerbKey, getStateLabelKey } from "./data";
 import type { PrPaneActivity, PrPaneCheck, PrPaneData, PrState } from "./data";
 import type { ForgeSpecificStatusFacts } from "@/git/merge-capability";
 import {
@@ -553,7 +553,7 @@ export function PullRequestPane({
               <View style={styles.metaLine}>
                 <StateIcon size={14} uniProps={statePresentation.iconColor} />
                 <Text style={stateLabelStyle(data.state)} testID="pr-pane-state">
-                  {getStateLabel(data.state)}
+                  {t(getStateLabelKey(data.state))}
                 </Text>
                 {nativeHeaderMeta}
                 {repoIdentity ? (
@@ -856,7 +856,8 @@ function ActivityAvatar({ activity, size }: { activity: PrPaneActivity; size: nu
 }
 
 function ActivityVerb({ activity }: { activity: PrPaneActivity }) {
-  const verb = getActivityVerb(activity).toLowerCase();
+  const { t } = useTranslation();
+  const verb = t(getActivityVerbKey(activity)).toLowerCase();
   if (activity.kind === "review" && activity.reviewState === "approved") {
     return (
       <View style={styles.verbGroup}>
@@ -1161,8 +1162,12 @@ function ThreadBlock({
             ? formatPullRequestThreadPath(thread.location)
             : t("workspace.git.pr.thread.discussion")}
         </Text>
-        {thread.isResolved ? <StatusBadge label="Resolved" variant="success" /> : null}
-        {thread.location?.isOutdated ? <StatusBadge label="Outdated" /> : null}
+        {thread.isResolved ? (
+          <StatusBadge label={t("workspace.git.pr.thread.resolved")} variant="success" />
+        ) : null}
+        {thread.location?.isOutdated ? (
+          <StatusBadge label={t("workspace.git.pr.thread.outdated")} />
+        ) : null}
         <View style={styles.headerTrailing}>
           {collapsed ? (
             <View style={styles.threadCount}>

@@ -943,6 +943,8 @@ export const ar: TranslationResources = {
         },
         thread: {
           discussion: "سلسلة المناقشة",
+          resolved: "\u062A\u0645 \u0627\u0644\u062D\u0644",
+          outdated: "\u0642\u062F\u064A\u0645",
         },
         errors: {
           statusLoadFailed: "غير قادر على تحميل حالة طلب السحب",

@@ -817,6 +817,7 @@ export const vi = {
         sections: { activity: "Activity" },
         empty: { noActivity: "No activity yet" },
         accessibility: { commentActions: "Comment actions", threadActions: "Thread actions" },
+        thread: { resolved: "Resolved", outdated: "Outdated" },
       },
     },
   },

@@ -951,6 +951,8 @@ export const ja: TranslationResources = {
         },
         thread: {
           discussion: "ディスカッションスレッド",
+          resolved: "\u89E3\u6C7A\u6E08\u307F",
+          outdated: "\u53E4\u3044",
         },
         errors: {
           statusLoadFailed: "プルリクエストのステータスを読み込めません",

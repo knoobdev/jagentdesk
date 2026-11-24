@@ -912,22 +912,24 @@ export const zhCN: TranslationResources = {
           threadActions: "\u8BA8\u8BBA\u4E32\u64CD\u4F5C",
         },
         states: {
-          draft: "Draft",
-          merged: "已 merge",
+          draft: "\u8349\u7A3F",
+          merged: "\u5DF2\u5408\u5E76",
           closed: "已关闭",
-          open: "Open",
+          open: "\u5F00\u653E",
         },
         activity: {
           commented: "已评论",
           approved: "已批准",
           requestedChanges: "请求修改",
-          reviewed: "已 review",
+          reviewed: "\u5DF2\u5BA1\u67E5",
         },
         time: {
           justNow: "刚刚",
         },
         thread: {
           discussion: "讨论主题",
+          resolved: "\u5DF2\u89E3\u51B3",
+          outdated: "\u5DF2\u8FC7\u65F6",
         },
         errors: {
           statusLoadFailed: "无法加载 Pull Request 状态",
