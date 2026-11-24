@@ -1,5 +1,5 @@
 import type { Rectangle } from "electron";
-import { ipcMain } from "electron";
+import { ipcMain, nativeImage } from "electron";
 import { BrowserAutomationExecuteRequestSchema } from "@jagentdesk/protocol/browser-automation/rpc-schemas";
 import type { BrowserAutomationConsoleLogEntry } from "@jagentdesk/protocol/browser-automation/rpc-schemas";
 import type { TabContents, BrowserRegistry, TabImage } from "./service.js";
@@ -122,6 +122,7 @@ export function adaptWebContents(contents: BrowserAutomationWebContents): TabCon
     goForward: () => contents.goForward(),
     reload: () => contents.reload(),
     capturePage: (captureOptions) => contents.capturePage(undefined, captureOptions),
+    decodePng: (png) => nativeImage.createFromBuffer(Buffer.from(png)),
     invalidate: () => contents.invalidate(),
     sendInputEvent: (event) => contents.sendInputEvent(event),
     insertText: (text) => contents.insertText(text),

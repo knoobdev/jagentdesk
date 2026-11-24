@@ -7,12 +7,18 @@ import { adaptWebContents, HostSnapshotEngineRegistry } from "./ipc.js";
 import type { IsolatedKeyboardInputEvent } from "./trusted-input.js";
 
 class FakeImage implements TabImage {
+  public constructor(private readonly alpha = 255) {}
+
   public toPNG(): Uint8Array {
     return new Uint8Array([137, 80, 78, 71]);
   }
 
   public getSize(): { width: number; height: number } {
     return { width: 640, height: 480 };
+  }
+
+  public toBitmap(): Uint8Array {
+    return new Uint8Array([0, 0, 0, 0, 10, 20, 30, this.alpha]);
   }
 }
 
