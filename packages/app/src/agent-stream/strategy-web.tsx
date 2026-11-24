@@ -160,6 +160,7 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
     olderHistoryProgressKey,
     scrollEnabled,
     isMobileBreakpoint,
+    contentMaxWidth,
   } = props;
   // History rows are memoized on item identity (HistoryStreamRow in view.tsx), so rows whose
   // tool-call group or display state changed must arrive as fresh identities.
@@ -233,9 +234,9 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
   const estimateVirtualItemSize = useCallback(
     (index: number) => {
       const row = historyVirtualized[index];
-      return row ? estimateStreamItemHeight(row) : 120;
+      return row ? estimateStreamItemHeight(row, contentMaxWidth) : 120;
     },
-    [historyVirtualized],
+    [historyVirtualized, contentMaxWidth],
   );
   const rowVirtualizer = useVirtualizer({
     count: historyVirtualized.length,

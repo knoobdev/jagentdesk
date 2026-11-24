@@ -33,6 +33,7 @@ export interface AppearanceInput {
   monoFontFamily: string; // "" -> default stack
   uiFontSize: number; // already clamped
   codeFontSize: number; // already clamped
+  contentMaxWidth?: number;
   syntaxTheme: SyntaxThemeId;
 }
 
@@ -88,6 +89,7 @@ export function applyAppearance(input: AppearanceInput): void {
       if (t.colorScheme === "light") {
         return {
           ...t,
+          contentMaxWidth: input.contentMaxWidth ?? t.contentMaxWidth,
           fontFamily,
           fontSize,
           lineHeight,
@@ -96,6 +98,7 @@ export function applyAppearance(input: AppearanceInput): void {
       }
       return {
         ...t,
+        contentMaxWidth: input.contentMaxWidth ?? t.contentMaxWidth,
         fontFamily,
         fontSize,
         lineHeight,

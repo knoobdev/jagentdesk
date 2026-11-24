@@ -3,6 +3,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import type { DesktopSettings } from "@/desktop/settings/desktop-settings";
 import { parseAppLanguage, type AppLanguage } from "@/i18n/locales";
 import {
+  DEFAULT_CONTENT_MAX_WIDTH,
   DEFAULT_THEME,
   PLUGIN_THEME_PREFERENCE,
   THEME_TO_UNISTYLES,
@@ -42,6 +43,9 @@ export const DEFAULT_CODE_FONT_SIZE = 12; // == FONT_SIZE.code
 export const MIN_CODE_FONT_SIZE = 9;
 export const MAX_CODE_FONT_SIZE = 22; // line-height 1.5×22=33 stays safe
 export const MAX_FONT_FAMILY_LENGTH = 200;
+export { DEFAULT_CONTENT_MAX_WIDTH };
+export const MIN_CONTENT_MAX_WIDTH = 600;
+export const MAX_CONTENT_MAX_WIDTH = 4000;
 
 export interface AppSettings {
   theme: ThemeName | "auto" | typeof PLUGIN_THEME_PREFERENCE;
@@ -57,6 +61,7 @@ export interface AppSettings {
   monoFontFamily: string; // "" = platform default mono stack
   uiFontSize: number; // clamped px, default 16
   codeFontSize: number; // clamped px, default 12
+  contentMaxWidth: number | null;
   syntaxTheme: SyntaxThemeId; // default "one"
   workspaceTitleSource: WorkspaceTitleSource;
   autoExpandReasoning: boolean;
@@ -84,6 +89,7 @@ export const DEFAULT_CLIENT_SETTINGS: AppSettings = {
   monoFontFamily: "",
   uiFontSize: DEFAULT_UI_FONT_SIZE,
   codeFontSize: DEFAULT_CODE_FONT_SIZE,
+  contentMaxWidth: null,
   syntaxTheme: "one",
   workspaceTitleSource: "title",
   autoExpandReasoning: false,
@@ -280,6 +286,9 @@ function pickAppSettings(stored: StoredAppSettings): Partial<AppSettings> {
   if (codeFontSize !== null) {
     result.codeFontSize = codeFontSize;
   }
+  result.contentMaxWidth =
+    stored.contentMaxWidth == null ? null : parseContentMaxWidth(stored.contentMaxWidth);
+
   if (typeof stored.syntaxTheme === "string" && isSyntaxThemeId(stored.syntaxTheme)) {
     result.syntaxTheme = stored.syntaxTheme;
   }
@@ -322,6 +331,14 @@ export function parseTerminalScrollbackLines(value: unknown): number | null {
     MAX_TERMINAL_SCROLLBACK_LINES,
     Math.max(MIN_TERMINAL_SCROLLBACK_LINES, Math.floor(numericValue)),
   );
+}
+
+export function parseContentMaxWidth(value: unknown): number | null {
+  return parseClampedFontSize(value, { min: MIN_CONTENT_MAX_WIDTH, max: MAX_CONTENT_MAX_WIDTH });
+}
+
+export function resolveContentMaxWidth(settings: Pick<AppSettings, "contentMaxWidth">): number {
+  return settings.contentMaxWidth ?? DEFAULT_CONTENT_MAX_WIDTH;
 }
 
 export function parseClampedFontSize(

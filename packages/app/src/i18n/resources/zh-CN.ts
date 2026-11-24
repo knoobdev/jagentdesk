@@ -1905,6 +1905,14 @@ export const zhCN: TranslationResources = {
         codeSize: "代码字号",
         codeSizeAccessibility: "代码字号",
       },
+      layout: {
+        title: "Layout",
+        contentWidth: "Content width",
+        contentWidthHint: "Maximum width of chat and Markdown content",
+        contentWidthAccessibility: "Content width in pixels",
+        reset: "Reset",
+        resetAccessibility: "Reset content width",
+      },
       syntax: {
         title: "语法",
         highlightTheme: "高亮主题",

@@ -1959,6 +1959,14 @@ export const ptBR: TranslationResources = {
         codeSize: "Tamanho do código",
         codeSizeAccessibility: "Tamanho da fonte de código",
       },
+      layout: {
+        title: "Layout",
+        contentWidth: "Content width",
+        contentWidthHint: "Maximum width of chat and Markdown content",
+        contentWidthAccessibility: "Content width in pixels",
+        reset: "Reset",
+        resetAccessibility: "Reset content width",
+      },
       syntax: {
         title: "Sintaxe",
         highlightTheme: "Tema de destaque",

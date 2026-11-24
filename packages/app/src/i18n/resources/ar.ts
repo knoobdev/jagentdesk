@@ -1931,6 +1931,14 @@ export const ar: TranslationResources = {
         codeSize: "حجم الكود",
         codeSizeAccessibility: "حجم خط الكود",
       },
+      layout: {
+        title: "Layout",
+        contentWidth: "Content width",
+        contentWidthHint: "Maximum width of chat and Markdown content",
+        contentWidthAccessibility: "Content width in pixels",
+        reset: "Reset",
+        resetAccessibility: "Reset content width",
+      },
       syntax: {
         title: "بناء الجملة",
         highlightTheme: "تسليط الضوء على الموضوع",

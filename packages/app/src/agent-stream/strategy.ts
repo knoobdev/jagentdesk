@@ -86,6 +86,8 @@ export interface StreamRenderInput {
   listStyle: StyleProp<ViewStyle>;
   baseListContentContainerStyle: StyleProp<ViewStyle>;
   forwardListContentContainerStyle: StyleProp<ViewStyle>;
+  // The chat column's max width. The web viewport estimates unmeasured row heights with it.
+  contentMaxWidth: number;
 }
 
 export interface ResolveStreamRenderStrategyInput {

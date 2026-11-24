@@ -1965,6 +1965,14 @@ export const ru: TranslationResources = {
         codeSize: "Размер кода",
         codeSizeAccessibility: "Размер шрифта кода",
       },
+      layout: {
+        title: "Layout",
+        contentWidth: "Content width",
+        contentWidthHint: "Maximum width of chat and Markdown content",
+        contentWidthAccessibility: "Content width in pixels",
+        reset: "Reset",
+        resetAccessibility: "Reset content width",
+      },
       syntax: {
         title: "Синтаксис",
         highlightTheme: "Выделить тему",

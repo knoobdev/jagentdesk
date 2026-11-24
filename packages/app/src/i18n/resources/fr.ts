@@ -1976,6 +1976,14 @@ export const fr: TranslationResources = {
         codeSize: "Taille du code",
         codeSizeAccessibility: "Taille de la police du code",
       },
+      layout: {
+        title: "Layout",
+        contentWidth: "Content width",
+        contentWidthHint: "Maximum width of chat and Markdown content",
+        contentWidthAccessibility: "Content width in pixels",
+        reset: "Reset",
+        resetAccessibility: "Reset content width",
+      },
       syntax: {
         title: "Syntaxe",
         highlightTheme: "Thème de surbrillance",

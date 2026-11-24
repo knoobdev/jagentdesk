@@ -1944,6 +1944,14 @@ export const ja: TranslationResources = {
         codeSize: "コードサイズ",
         codeSizeAccessibility: "コードフォントサイズ",
       },
+      layout: {
+        title: "Layout",
+        contentWidth: "Content width",
+        contentWidthHint: "Maximum width of chat and Markdown content",
+        contentWidthAccessibility: "Content width in pixels",
+        reset: "Reset",
+        resetAccessibility: "Reset content width",
+      },
       syntax: {
         title: "構文ハイライト",
         highlightTheme: "ハイライトテーマ",

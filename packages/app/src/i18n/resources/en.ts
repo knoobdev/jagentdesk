@@ -1995,6 +1995,14 @@ export const en = {
         codeSize: "Code size",
         codeSizeAccessibility: "Code font size",
       },
+      layout: {
+        title: "Layout",
+        contentWidth: "Content width",
+        contentWidthHint: "Maximum width of chat and Markdown content",
+        contentWidthAccessibility: "Content width in pixels",
+        reset: "Reset",
+        resetAccessibility: "Reset content width",
+      },
       syntax: {
         title: "Syntax",
         highlightTheme: "Highlight theme",

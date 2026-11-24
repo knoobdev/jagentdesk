@@ -1,3 +1,4 @@
+import { resolveContentMaxWidth } from "@/hooks/use-settings";
 import { HostConfirmationSheet } from "@/hosts/host-confirmation-sheet";
 import "@/styles/unistyles";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
@@ -776,6 +777,7 @@ function ProvidersWrapper({ children }: { children: ReactNode }) {
       uiFontSize: settings.uiFontSize,
       codeFontSize: settings.codeFontSize,
       syntaxTheme: settings.syntaxTheme,
+      contentMaxWidth: resolveContentMaxWidth({ contentMaxWidth: settings.contentMaxWidth }),
     });
   }, [
     settingsLoading,
@@ -788,6 +790,7 @@ function ProvidersWrapper({ children }: { children: ReactNode }) {
     settings.uiFontSize,
     settings.codeFontSize,
     settings.syntaxTheme,
+    settings.contentMaxWidth,
   ]);
 
   return (
