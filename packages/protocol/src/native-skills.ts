@@ -18,7 +18,6 @@ export const SKILL_DIR_LABELS = [
   "agents",
   "claude",
   "kiro",
-  "antigravity",
   "codex",
   "opencode",
   "copilot",
@@ -105,6 +104,9 @@ export const SkillEntrySchema = z.object({
   projectRoot: z.string().nullable(),
   /** Directory label of the primary location (where `skillId` points). */
   dir: SkillDirLabelSchema.nullable(),
+  /** New provider directories use optional extensions so older clients parse the catalog. */
+  additionalDir: z.string().optional(),
+  additionalLinks: z.array(z.object({ dir: z.string(), path: z.string() })).optional(),
   realPath: z.string(),
   links: z.array(SkillLinkSchema),
   visibleTo: z.array(z.string()),

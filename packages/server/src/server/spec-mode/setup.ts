@@ -56,7 +56,8 @@ function hasInstalledSkill(params: {
   return SKILL_DIR_SPECS.filter((spec) => spec.providers.includes(params.provider)).some(
     (spec) =>
       existsSync(path.join(params.homeDir, ...spec.global, params.skillName, "SKILL.md")) ||
-      existsSync(path.join(params.cwd, ...spec.project, params.skillName, "SKILL.md")),
+      (spec.project !== null &&
+        existsSync(path.join(params.cwd, ...spec.project, params.skillName, "SKILL.md"))),
   );
 }
 

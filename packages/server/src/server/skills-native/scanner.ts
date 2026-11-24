@@ -1,12 +1,8 @@
+import type { SkillDirLabel } from "./paths.js";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type {
-  SkillDirLabel,
-  SkillEntry,
-  SkillLink,
-  SkillScope,
-} from "@jagentdesk/protocol/native-skills";
+import type { SkillEntry, SkillScope } from "@jagentdesk/protocol/native-skills";
 import { hasScripts, listSkillFiles, lstatOrNull, realpathOrNull } from "./fs-utils.js";
 import { parseSkillMarkdown, readSkillMetadata, splitLessons } from "./frontmatter.js";
 import type { MovedSkillRecord, OwnedSkillRecord, SkillsLock } from "./lock-store.js";
@@ -152,13 +148,18 @@ function trainingOf(record: OwnedSkillRecord, lessons: number): SkillEntry["trai
 interface EntryInput {
   realPath: string;
   primary: SkillLocation;
-  links: SkillLink[];
+  links: Array<{ dir: SkillDirLabel; path: string }>;
   labels: SkillDirLabel[];
   info: SkillDirInfo;
   contentHash: string | null;
   owned: OwnedSkillRecord | null;
   enabled: boolean;
   projectRoot: string | null;
+}
+
+function projectAdditionalLinks(links: EntryInput["links"]): Pick<SkillEntry, "additionalLinks"> {
+  const additionalLinks = links.filter((link) => link.dir === "antigravity");
+  return additionalLinks.length > 0 ? { additionalLinks } : {};
 }
 
 function toEntry(input: EntryInput): SkillEntry {
@@ -170,9 +171,14 @@ function toEntry(input: EntryInput): SkillEntry {
     description: info.description,
     scope: primary.scope,
     projectRoot: primary.scope === "project" ? input.projectRoot : null,
-    dir: primary.label,
+    dir: primary.label === "antigravity" ? null : primary.label,
+    ...(primary.label === "antigravity" ? { additionalDir: primary.label } : {}),
     realPath: input.realPath,
-    links: input.links,
+    links: input.links.filter(
+      (link): link is { dir: Exclude<SkillDirLabel, "antigravity">; path: string } =>
+        link.dir !== "antigravity",
+    ),
+    ...projectAdditionalLinks(input.links),
     visibleTo: input.enabled ? visibleToFor(input.labels) : [],
     owned: owned !== null,
     enabled: input.enabled,

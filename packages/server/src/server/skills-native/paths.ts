@@ -1,9 +1,11 @@
 import path from "node:path";
 import {
   SKILL_PROVIDER_ORDER,
-  type SkillDirLabel,
+  type SkillDirLabel as ProtocolSkillDirLabel,
   type SkillScope,
 } from "@jagentdesk/protocol/native-skills";
+
+export type SkillDirLabel = ProtocolSkillDirLabel | "antigravity";
 
 interface SkillDirSpec {
   label: SkillDirLabel;

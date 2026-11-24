@@ -1,12 +1,8 @@
+import type { SkillDirLabel } from "./paths.js";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type {
-  SkillDirLabel,
-  SkillEntry,
-  SkillScope,
-  SkillSourceInfo,
-} from "@jagentdesk/protocol/native-skills";
+import type { SkillEntry, SkillScope, SkillSourceInfo } from "@jagentdesk/protocol/native-skills";
 import { NativeSkillsError } from "./errors.js";
 import {
   createDirSymlink,
@@ -29,6 +25,7 @@ import {
   INSTALL_LINK_DIRS,
   INSTALL_REAL_DIR,
   isWithin,
+  parseSkillId,
   skillDirPath,
 } from "./paths.js";
 
@@ -299,14 +296,18 @@ export function entryLocations(
   ctx: OpsContext,
   entry: SkillEntry,
 ): Array<{ dir: SkillDirLabel; path: string }> {
-  if (!entry.dir) return [];
+  const label = parseSkillId(entry.skillId)?.label;
+  if (!label) return [];
   const root = scopeRoot(ctx, entry.scope, entry.projectRoot);
   const dirName = entry.skillId.split(":").slice(2).join(":");
   const primary = {
-    dir: entry.dir,
-    path: path.join(skillDirPath(entry.dir, entry.scope, root), dirName),
+    dir: label,
+    path: path.join(skillDirPath(label, entry.scope, root), dirName),
   };
-  return [primary, ...entry.links];
+  const extraLinks = (entry.additionalLinks ?? []).filter(
+    (link): link is { dir: "antigravity"; path: string } => link.dir === "antigravity",
+  );
+  return [primary, ...entry.links, ...extraLinks];
 }
 
 /**

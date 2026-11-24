@@ -40,7 +40,9 @@ function SkillCopyRow({ entry, primary, busy, handlers }: SkillCopyRowProps) {
     <View style={styles.copy} testID={`skill-copy-${entry.skillId}`}>
       <Pressable style={styles.main} onPress={handleOpen} accessibilityRole="button">
         <View style={styles.head}>
-          <Text style={styles.copyDir}>{entry.dir ?? t("skillsHub.family.unknownDir")}</Text>
+          <Text style={styles.copyDir}>
+            {entry.additionalDir ?? entry.dir ?? t("skillsHub.family.unknownDir")}
+          </Text>
           {primary ? <SkillBadge label={t("skillsHub.family.primary")} /> : null}
           <SkillRowBadges entry={entry} />
         </View>
@@ -61,7 +63,7 @@ function SkillCopyRow({ entry, primary, busy, handlers }: SkillCopyRowProps) {
           disabled={busy}
           accessibilityLabel={t("skillsHub.family.enableCopy", {
             name: entry.name,
-            dir: entry.dir ?? "",
+            dir: entry.additionalDir ?? entry.dir ?? "",
           })}
           testID={`skill-enabled-${entry.skillId}`}
         />

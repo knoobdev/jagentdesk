@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import { resolveBundledSkillsDir } from "./bundled.js";
+import { SkillEntrySchema } from "@jagentdesk/protocol/native-skills";
 import { NativeSkillsService } from "./service.js";
 import { makeTempRoots, snapshotTree, writeSkill } from "./test-utils/fixtures.js";
 
@@ -62,6 +63,9 @@ describe("bundled orchestration skills", () => {
     expect((await fs.lstat(antigravity)).isSymbolicLink()).toBe(true);
     expect(await fs.realpath(antigravity)).toBe(skill.realPath);
     expect(skill.visibleTo).toContain("antigravity");
+    const legacyEntry = SkillEntrySchema.omit({ additionalDir: true, additionalLinks: true });
+    expect(legacyEntry.safeParse(skill).success).toBe(true);
+    expect(skill.additionalLinks).toEqual([{ dir: "antigravity", path: antigravity }]);
     await fs.writeFile(path.join(roots.home, ".gemini", "config", "keep"), "foreign");
     const restarted = makeService();
     await restarted.initialize();
@@ -74,6 +78,17 @@ describe("bundled orchestration skills", () => {
     expect(await fs.readFile(path.join(roots.home, ".gemini", "config", "keep"), "utf8")).toBe(
       "foreign",
     );
+    const foreignPath = path.join(roots.home, ".gemini", "config", "skills", "foreign");
+    await writeSkill(foreignPath, "name: foreign\ndescription: User owned.");
+    const foreign = (await restarted.listCatalog()).skills.find(
+      (entry) => entry.name === "foreign",
+    )!;
+    expect(foreign).toMatchObject({ dir: null, additionalDir: "antigravity", owned: false });
+    expect(legacyEntry.safeParse(foreign).success).toBe(true);
+    await restarted.setEnabled({ skillId: foreign.skillId, enabled: false, confirm: true });
+    await expect(fs.lstat(foreignPath)).rejects.toMatchObject({ code: "ENOENT" });
+    await restarted.setEnabled({ skillId: foreign.skillId, enabled: true });
+    expect(await fs.readFile(path.join(foreignPath, "SKILL.md"), "utf8")).toContain("User owned.");
     await restarted.removeSource(source.sourceId);
     expect(
       (await makeService().listSources()).some((entry) => entry.sourceId === source.sourceId),

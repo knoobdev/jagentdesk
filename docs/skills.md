@@ -36,7 +36,8 @@ copies differ.
 
 An install writes one real copy to `.agents/skills/<name>` and symlinks it into
 `.claude/skills` and `.kiro/skills`. Global installs also link into
-`~/.gemini/config/skills` for Antigravity. Every path written is recorded in
+`~/.gemini/config/skills` for Antigravity. New provider paths use optional catalog fields so
+older clients can still read installed skills. Every path written is recorded in
 `$JAGENTDESK_HOME/skills/lock.json`; uninstall removes exactly those paths. A skill directory that
 JAgentDesk did not write is never overwritten. Disabling a skill JAgentDesk does not own moves it
 aside and can be undone.
