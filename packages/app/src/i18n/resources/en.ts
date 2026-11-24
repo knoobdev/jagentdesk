@@ -2446,6 +2446,11 @@ export const en = {
           editAccessibilityLabel: "Edit prompt",
         },
         unavailable: "Connect to this host to manage agents",
+        idleRuntimeCleanup: {
+          title: "Release idle agents",
+          hint: "Free up memory after an hour of inactivity.",
+          info: "Stops the agent's process while keeping its conversation. Send a message to resume.\n\nActive work, pending notifications, and provider safety checks prevent cleanup.",
+        },
       },
       workspaces: {
         unavailable: "Connect to this host to manage workspaces",

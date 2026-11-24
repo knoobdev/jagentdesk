@@ -141,6 +141,7 @@ export class V2Harness {
     },
     permission: { list: async () => [], reply: unexpected },
     session: {
+      inbox: { list: async () => [] },
       form: { list: async () => [], reply: unexpected, cancel: unexpected },
       create: async (input = {}) => {
         this.creates.push(input);

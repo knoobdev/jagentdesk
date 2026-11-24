@@ -46,6 +46,17 @@ describe("server config", () => {
     expect(standaloneConfig.desktopManaged).toBe(false);
   });
 
+  test("idle runtime cleanup defaults on and supports a host-wide opt-out", async () => {
+    const jagentdeskHome = await mkdtemp(path.join(os.tmpdir(), "jagentdesk-config-idle-cleanup-"));
+    roots.push(jagentdeskHome);
+    expect(loadConfig(jagentdeskHome, { env: {} }).idleRuntimeCleanup).toBe(true);
+    await writeFile(
+      path.join(jagentdeskHome, "config.json"),
+      JSON.stringify({ agents: { idleRuntimeCleanup: false } }),
+    );
+    expect(loadConfig(jagentdeskHome, { env: {} }).idleRuntimeCleanup).toBe(false);
+  });
+
   // Dev-only providers (mock, mock-slow) are listed only when isDev is true; production daemons,
   // including the packaged desktop (JAGENTDESK_NODE_ENV=production), must never enable them.
   test("enables development-only providers for JAGENTDESK_NODE_ENV=development only", async () => {

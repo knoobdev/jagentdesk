@@ -390,6 +390,7 @@ export const PersistedConfigSchema = z
         resumeOnStartup: z.boolean().optional(),
         resumePrompt: z.string().optional(),
         providers: z.preprocess(normalizeAgentProviders, ProviderOverridesSchema).optional(),
+        idleRuntimeCleanup: z.boolean().optional(),
         metadataGeneration: AgentMetadataGenerationSchema.optional(),
       })
       .strict()

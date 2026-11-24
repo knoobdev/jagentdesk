@@ -384,7 +384,7 @@ export function AgentConversationPanel() {
 export const agentPanelRegistration: PanelRegistration<"agent"> = {
   kind: "agent",
   component: AgentConversationPanel,
-  useDescriptor: useAgentDescriptor,
+  useDescriptor: useAgentPanelDescriptor,
 };
 
 export function useDraftPanelDescriptor(

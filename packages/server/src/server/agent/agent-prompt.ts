@@ -1,13 +1,11 @@
+import { setTimeout as pause } from "node:timers/promises";
 import { ForegroundPromptStart } from "./agent-run-state.js";
 import { isStaleProviderSessionError } from "./stale-provider-session-error.js";
 import { withTimeout } from "../../utils/promise-timeout.js";
 import type { Logger } from "pino";
 
-import { randomUUID } from "node:crypto";
 import {
   createAgentMessageDelivery,
-  isSystemInjectedEnvelope,
-  parseAgentMessages,
   prepareAgentMessage,
   type AgentMessage,
   type AgentMessageDelivery,
@@ -25,13 +23,9 @@ import type { AgentManager, ManagedAgent } from "./agent-manager.js";
 import type { AgentStorage } from "./agent-storage.js";
 import { ensureAgentLoaded } from "./agent-loading.js";
 import {
-  completePendingFinishNotifications,
   areFinishNotificationsSuspended,
   getFinishSubscriptionStore,
-  hasPendingFinishNotifications,
-  returnPendingFinishNotifications,
-  type PendingFinishNotification,
-  takePendingFinishNotifications,
+  getFinishSubscriptionSignal,
 } from "./finish-subscriptions/index.js";
 import { getParentAgentIdFromLabels } from "@jagentdesk/protocol/agent-labels";
 import type { ActiveTurnBehavior } from "@jagentdesk/protocol/messages";
@@ -60,6 +54,7 @@ export interface StartAgentRunOptions {
 }
 
 export class AgentTurnBusyError extends Error {}
+export class AgentTurnChangedError extends Error {}
 
 export type PromptDispatchDisposition = "out_of_band" | "steered" | "turn_started";
 export type PromptDispatchResult =
@@ -292,10 +287,15 @@ export function prependInvocation(prompt: AgentPromptInput, line: string): Agent
   );
 }
 
-async function withSkillInvocation(params: SendPromptToAgentParams): Promise<AgentPromptInput> {
+export async function withSkillInvocation(
+  params: SendPromptToAgentParams,
+): Promise<AgentPromptInput> {
   if (!params.skillIds?.length || !params.skillInvocation) return params.prompt;
-  const agent = params.agentManager.getAgent(params.agentId);
-  if (!agent) return params.prompt;
+  const agent = await ensureAgentLoaded(params.agentId, {
+    agentManager: params.agentManager,
+    agentStorage: params.agentStorage,
+    logger: params.logger,
+  });
   const provider = params.agentManager.getBaseProviderId(agent.provider);
   const line = await params.skillInvocation.buildInvocationPrefix(
     params.skillIds,
@@ -446,6 +446,18 @@ export function getAgentMessageDelivery(
     ...defaultAgentMessageDeliveryTiming,
     ...agentMessageDeliveryTimings.get(context.agentManager),
     isRunning: (agentId) => context.agentManager.hasInFlightRun(agentId),
+    canSteer: (agentId) => context.agentManager.canSteer(agentId),
+    hasPendingPermission: (agentId) => context.agentManager.hasPendingPermissions(agentId),
+    onStop: (listener) => context.agentManager.onStop(listener),
+    awaitStart: (agentId, started) =>
+      waitForAgentRunStartWithTimeout(context.agentManager, agentId, started),
+    tryRunOutOfBand: (request, onAccepted) =>
+      context.agentManager.tryRunOutOfBand(
+        request.recipientId,
+        request.prompt,
+        undefined,
+        onAccepted,
+      ),
     subscribe: (listener) =>
       context.agentManager.subscribe((event) => {
         if (event.type === "agent_state") listener(event.agent.id);
@@ -465,7 +477,7 @@ export function getAgentMessageDelivery(
         clearPendingPermissions: request.clearPendingPermissions,
         idleOnly: request.idleOnly,
         admit: request.admit,
-        beforeDispatch: request.beforeDispatch,
+
         logger: context.logger,
       });
       if (result.disposition === "turn_started") {
@@ -526,7 +538,24 @@ export async function closeAgentMessageDelivery(agentManager: AgentManager): Pro
 export async function sendPromptToAgent(
   params: SendPromptToAgentParams,
 ): Promise<PromptDispatchResult> {
-  return await dispatchPrompt(params, { prepared: false });
+  return getAgentMessageDelivery(params).sendDirect(
+    {
+      recipientId: params.agentId,
+      prompt: params.prompt,
+      source: await resolvePromptSource(params.source, params.agentManager, params.agentStorage),
+      messageId: params.messageId,
+      sessionMode: params.sessionMode,
+      unarchive: params.unarchive,
+    },
+    (joined) =>
+      sendPreparedPromptToAgent({
+        ...params,
+        prompt: joined.prompt,
+        messageId: joined.messageId,
+        sessionMode: joined.sessionMode,
+        unarchive: joined.unarchive,
+      }),
+  );
 }
 
 /**
@@ -572,47 +601,24 @@ async function loadPromptRecipient(params: SendPromptToAgentParams): Promise<boo
   return true;
 }
 
-async function acknowledgeCarriedFinishNotifications(
-  params: SendPromptToAgentParams,
-  result: PromptDispatchResult,
-  carried: PendingFinishNotification[],
-): Promise<void> {
-  if (carried.length && result.disposition === "turn_started")
-    await waitForAgentRunStartWithTimeout(params.agentManager, params.agentId, result.started);
-  await completePendingFinishNotifications(params.agentManager, carried);
-}
-
-async function runPendingFinishCommand(params: SendPromptToAgentParams): Promise<boolean> {
-  if (!params.source && hasPendingFinishNotifications(params.agentManager, params.agentId)) {
-    const runOptions = params.messageId
-      ? { ...params.runOptions, clientMessageId: params.messageId }
-      : params.runOptions;
-    if (await params.agentManager.tryRunOutOfBand(params.agentId, params.prompt, runOptions)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 async function dispatchPrompt(
   params: SendPromptToAgentParams,
   options: { prepared: boolean },
 ): Promise<PromptDispatchResult> {
   if (!(await loadPromptRecipient(params))) return { disposition: "out_of_band" };
 
+  if (params.idleOnly && params.agentManager.hasInFlightRun(params.agentId))
+    throw new AgentTurnBusyError();
   if (params.sessionMode) {
     await params.agentManager.setAgentMode(params.agentId, params.sessionMode);
   }
 
   await params.beforeDispatch?.();
-  if (params.idleOnly && params.agentManager.hasInFlightRun(params.agentId))
-    throw new AgentTurnBusyError();
   if (!params.idleOnly && params.admit?.() === false)
     throw new Error("Queued agent message was withdrawn");
 
   let prompt: AgentPromptInput;
   let messageId = params.messageId;
-  if (await runPendingFinishCommand(params)) return { disposition: "out_of_band" };
   if (options.prepared) {
     prompt = await withSkillInvocation(params);
   } else {
@@ -628,82 +634,18 @@ async function dispatchPrompt(
     prompt = await withSkillInvocation({ ...params, prompt: delivery.prompt });
   }
 
-  // Notifications kept across a daemon restart ride along with this turn instead of
-  // waking the parent on their own (ADR-0029 decision 5).
-  const attached = params.skillIds?.length
-    ? []
-    : takePendingFinishNotifications(params.agentManager, params.agentId);
-  let carried: PendingFinishNotification[] = [];
-  if (attached.length > 0) {
-    const withNotifications = attachFinishNotifications(prompt, messageId, attached);
-    if (withNotifications) {
-      prompt = withNotifications.prompt;
-      messageId = withNotifications.messageId;
-      carried = attached;
-    } else {
-      returnPendingFinishNotifications(params.agentManager, params.agentId, attached);
-    }
-  }
-
   const runOptions = messageId
     ? { ...params.runOptions, clientMessageId: messageId }
     : params.runOptions;
 
-  try {
-    const result = await startAgentRun(params.agentManager, params.agentId, prompt, params.logger, {
-      replaceRunning: true,
-      idleOnly: params.idleOnly,
-      admit: params.admit,
-      // Agent- and system-sent messages steer by default; user commands keep
-      // interrupt (ADR-0029 decision 2, amending ADR-0013).
-      activeTurnBehavior: params.activeTurnBehavior ?? (params.source ? "steer" : undefined),
-      clearPendingPermissions: params.clearPendingPermissions,
-      runOptions,
-    });
-    await acknowledgeCarriedFinishNotifications(params, result, carried);
-    return result;
-  } catch (error) {
-    returnPendingFinishNotifications(params.agentManager, params.agentId, carried);
-    throw error;
-  }
-}
-
-/**
- * Put kept finish notifications in front of a turn, each as its own envelope, so
- * the app shows "X closed" rows and the user's text stays a user row. Returns null
- * when the prompt cannot carry them (a legacy hidden envelope), so they wait.
- */
-function attachFinishNotifications(
-  prompt: AgentPromptInput,
-  messageId: string | undefined,
-  notifications: PendingFinishNotification[],
-): { prompt: AgentPromptInput; messageId: string | undefined } | null {
-  const envelopes = notifications.map(
-    (entry) => prepareAgentMessage(entry.body, entry.source).prompt as string,
-  );
-  const text =
-    typeof prompt === "string"
-      ? prompt
-      : prompt.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("\n");
-  if (isSystemInjectedEnvelope(text)) return null;
-  let body: AgentPromptInput = prompt;
-  let id = messageId;
-  if (!parseAgentMessages(text)) {
-    const wrapped = prepareAgentMessage(prompt, undefined, messageId ?? randomUUID(), {
-      wrapUserMessage: true,
-    });
-    body = wrapped.prompt;
-    id = wrapped.messageId;
-  }
-  if (typeof body === "string") {
-    return { prompt: [...envelopes, body].join("\n\n"), messageId: id };
-  }
-  const [first, ...rest] = body;
-  if (first?.type !== "text") return null;
-  return {
-    prompt: [{ ...first, text: [...envelopes, first.text].join("\n\n") }, ...rest],
-    messageId: id,
-  };
+  return await startAgentRun(params.agentManager, params.agentId, prompt, params.logger, {
+    replaceRunning: !params.idleOnly,
+    idleOnly: params.idleOnly,
+    admit: params.admit,
+    activeTurnBehavior: params.activeTurnBehavior,
+    clearPendingPermissions: params.clearPendingPermissions,
+    runOptions,
+  });
 }
 
 export async function startCreatedAgentInitialPrompt(
@@ -757,6 +699,9 @@ export interface SetupFinishNotificationParams {
   callerAgentId: string;
   requireParentOwnership?: boolean;
   waitForTurnStart?: boolean;
+  /** Reattach durable local intent instead of creating a new subscription. */
+  restoredSubscriptionId?: string;
+  restoredSubscriptionIds?: readonly string[];
   logger: Logger;
 }
 
@@ -853,24 +798,22 @@ export function setupFinishNotification(
   // before the child's first prompt survives a restart; removed only once the
   // notification has been dispatched or the subscription is dropped on purpose.
   const store = getFinishSubscriptionStore(agentManager);
-  const subscriptionId = store
-    ? store.add({ childAgentId, callerAgentId, requireParentOwnership })
-    : Promise.resolve(null);
+  let subscriptionId: Promise<string | null> = Promise.resolve(
+    params.restoredSubscriptionId ?? null,
+  );
+  if (!params.restoredSubscriptionId && store)
+    subscriptionId = store.add({ childAgentId, callerAgentId, requireParentOwnership });
   const registration = Object.assign(stop, { ready: subscriptionId.then(() => undefined) });
   void registration.ready.catch((error: unknown) => {
     logger.error({ err: error, childAgentId, callerAgentId }, "Failed to save finish subscription");
     stopObserving();
   });
 
-  function settle(): void {
-    void subscriptionId
-      .then((id) => (id && store ? store.remove(id) : undefined))
-      .catch((error: unknown) => {
-        logger.warn(
-          { err: error, childAgentId, callerAgentId },
-          "Failed to remove finish subscription",
-        );
-      });
+  async function settle(): Promise<void> {
+    const id = await subscriptionId;
+    if (id && store) {
+      for (const ownedId of params.restoredSubscriptionIds ?? [id]) await store.remove(ownedId);
+    }
   }
 
   function stopObserving(): void {
@@ -885,7 +828,12 @@ export function setupFinishNotification(
   function stop(): void {
     if (stopped) return;
     stopObserving();
-    settle();
+    void settle().catch((error: unknown) =>
+      logger.warn(
+        { err: error, childAgentId, callerAgentId },
+        "Failed to remove finish subscription",
+      ),
+    );
   }
 
   async function notify(
@@ -912,8 +860,7 @@ export function setupFinishNotification(
       permissionRequest,
     });
 
-    // Rides the recipient's delivery window, so a peer's report and its finish
-    // notification reach the caller in one steered prompt (ADR-0029 decision 3).
+    // The report and its completion share the recipient's ordered queue.
     const receipt = enqueueAgentMessage(
       { agentManager, agentStorage, logger },
       {
@@ -925,7 +872,7 @@ export function setupFinishNotification(
           ...(record?.title ? { title: record.title } : {}),
           event: finishNotificationEvents[reason],
         },
-        activeTurnBehavior: "steer",
+        activeTurnBehavior: "queue",
         unarchive: false,
       },
     );
@@ -933,23 +880,54 @@ export function setupFinishNotification(
     return true;
   }
 
+  async function notifyUntilAcknowledged(
+    reason: FinishNotificationReason,
+    terminal: boolean,
+    permissionRequest?: AgentPermissionRequest,
+  ): Promise<void> {
+    let delivered = false;
+    let warned = false;
+    let retries = 0;
+    while (!areFinishNotificationsSuspended(agentManager)) {
+      try {
+        if (!delivered) delivered = await notify(reason, permissionRequest);
+        if (terminal && delivered) await settle();
+        return;
+      } catch (error) {
+        if (!warned) {
+          logger.error(
+            { err: error, childAgentId, callerAgentId, reason },
+            "Failed to notify caller agent",
+          );
+          warned = true;
+        }
+        // Paseo #7683: retry the captured outcome; a storage failure after admission retries
+        // only removal, so an accepted notification is never sent a second time.
+        const signal = getFinishSubscriptionSignal(agentManager);
+        if (!store || !signal) return;
+        try {
+          await pause(Math.min(1000 * 2 ** Math.min(retries++, 3), 5000), undefined, {
+            signal,
+            ref: false,
+          });
+        } catch (pauseError) {
+          if (!signal.aborted) throw pauseError;
+          return;
+        }
+      }
+    }
+  }
+
   function notifySafely(reason: FinishNotificationReason, options: NotifySafelyOptions = {}): void {
     if (stopped) return;
     const terminal = options.terminal ?? true;
     if (terminal) stopObserving();
-    notificationQueue = notificationQueue
-      .then(async () => {
-        const delivered = await notify(reason, options.permissionRequest);
-        // A failed dispatch keeps the record, so a restart can still report it.
-        if (terminal && delivered) settle();
-        return undefined;
-      })
-      .catch((error) => {
-        logger.error(
-          { err: error, childAgentId, callerAgentId, reason },
-          "Failed to notify caller agent",
-        );
-      });
+    notificationQueue = notificationQueue.then(() =>
+      notifyUntilAcknowledged(reason, terminal, options.permissionRequest),
+    );
+    void notificationQueue.catch((error: unknown) =>
+      logger.error({ err: error, childAgentId, callerAgentId }, "Finish notification retry failed"),
+    );
   }
 
   function observeState(agent: ManagedAgent): void {
@@ -1047,7 +1025,12 @@ export function setupFinishNotification(
   // transitioning to "running").
   const childSnapshot = agentManager.getAgent(childAgentId);
   if (!childSnapshot || childSnapshot.lifecycle === "closed") {
-    stop();
+    if (params.restoredSubscriptionId) notifySafely("was closed");
+    else stop();
+    return registration;
+  }
+  if (params.restoredSubscriptionId && !agentManager.hasInFlightRun(childAgentId)) {
+    notifySafely(childSnapshot.lifecycle === "error" ? "errored" : "finished");
     return registration;
   }
   if (childSnapshot.lifecycle === "running" && !waitForTurnStart) {

@@ -7,9 +7,10 @@ import { createTestLogger } from "../../../test-utils/test-logger.js";
 import type { AgentManager } from "../agent-manager.js";
 import type { AgentStorage } from "../agent-storage.js";
 import { parseAgentMessages } from "../agent-messages/index.js";
-import { sendPromptToAgent, setupFinishNotification } from "../agent-prompt.js";
+import { configureAgentMessageDelivery, setupFinishNotification } from "../agent-prompt.js";
 import {
   configureFinishSubscriptions,
+  type FinishSubscriptionRecord,
   FINISH_SUBSCRIPTIONS_FILE,
   FinishSubscriptionStore,
   restoreFinishSubscriptions,
@@ -48,6 +49,9 @@ function createParentManager() {
     replaceAgentRun: vi.fn(),
     streamAgent,
     subscribe: vi.fn(() => () => {}),
+    onStop: vi.fn(() => () => {}),
+    canSteer: vi.fn(() => false),
+    getLastAssistantMessage: vi.fn(async () => "Child answer"),
   } as unknown as AgentManager;
   const agentStorage = {
     get: vi.fn(async (agentId: string) =>
@@ -94,56 +98,39 @@ describe("durable finish subscriptions", () => {
     expect(records).toHaveLength(1);
   });
 
-  test("after a restart the parent is not woken; the notification rides its next turn", async () => {
+  test("after restart a completed child wakes the parent without a user prompt", async () => {
     const store = FinishSubscriptionStore.forHome(home, logger);
     await store.add({
       childAgentId: "child",
       callerAgentId: "parent",
-      requireParentOwnership: true,
+      requireParentOwnership: false,
     });
-
     const after = createParentManager();
     const restored = await restoreFinishSubscriptions({
       agentManager: after.agentManager,
-      store: FinishSubscriptionStore.forHome(home, logger),
-      getAgentTitle: async () => "Child task",
+      store,
       isArchived: async () => false,
+      reconcile: async (record) => {
+        await setupFinishNotification({
+          agentManager: after.agentManager,
+          agentStorage: after.agentStorage,
+          childAgentId: record.childAgentId,
+          callerAgentId: record.callerAgentId,
+          restoredSubscriptionId: record.id,
+          logger,
+        }).ready;
+      },
       logger,
     });
     expect(restored).toBe(1);
-    // No model turn was started for the parent.
-    expect(after.streamAgent).not.toHaveBeenCalled();
-
-    await sendPromptToAgent({
-      agentManager: after.agentManager,
-      agentStorage: after.agentStorage,
-      agentId: "parent",
-      prompt: "What's next?",
-      messageId: "user-msg-1",
-      logger,
-    });
-
-    expect(after.prompts).toHaveLength(1);
-    const messages = parseAgentMessages(after.prompts[0] as string);
-    expect(messages).toMatchObject([
+    await vi.waitFor(() => expect(after.prompts).toHaveLength(1), { timeout: 5000 });
+    expect(parseAgentMessages(String(after.prompts[0]))).toMatchObject([
       {
-        source: { kind: "agent-notification", agentId: "child", event: "closed" },
-        text: expect.stringContaining("daemon restarted"),
+        source: { kind: "agent-notification", agentId: "child", event: "finished" },
+        text: expect.stringContaining("Child answer"),
       },
-      { id: "user-msg-1", source: null, text: "What's next?" },
     ]);
-    // Delivered with the turn, so the record is gone and the next turn is plain.
-    await vi.waitFor(async () =>
-      expect(await FinishSubscriptionStore.forHome(home, logger).list()).toEqual([]),
-    );
-    await sendPromptToAgent({
-      agentManager: after.agentManager,
-      agentStorage: after.agentStorage,
-      agentId: "parent",
-      prompt: "And then?",
-      logger,
-    });
-    expect(after.prompts[1]).toBe("And then?");
+    await vi.waitFor(async () => expect(await store.list()).toEqual([]));
   });
 
   test("subscriptions of archived parents are dropped on restore", async () => {
@@ -157,7 +144,9 @@ describe("durable finish subscriptions", () => {
     const restored = await restoreFinishSubscriptions({
       agentManager: after.agentManager,
       store,
-      getAgentTitle: async () => null,
+      reconcile: async () => {
+        throw new Error("Archived parent must not be reconciled");
+      },
       isArchived: async () => true,
       logger,
     });
@@ -165,7 +154,7 @@ describe("durable finish subscriptions", () => {
     expect(await store.list()).toEqual([]);
   });
 
-  test("a command leaves restart notifications for the next model turn", async () => {
+  test("restored delivery retries a rejected parent start without dropping durable intent", async () => {
     const store = FinishSubscriptionStore.forHome(home, logger);
     await store.add({
       childAgentId: "child",
@@ -173,74 +162,68 @@ describe("durable finish subscriptions", () => {
       requireParentOwnership: false,
     });
     const after = createParentManager();
+    configureAgentMessageDelivery(after.agentManager, { quietMs: 0 });
+    after.streamAgent.mockImplementationOnce(() => {
+      throw new Error("Provider start refused");
+    });
     await restoreFinishSubscriptions({
       agentManager: after.agentManager,
       store,
-      getAgentTitle: async () => "Child task",
       isArchived: async () => false,
       logger,
+      reconcile: async (record, _signal, ids) => {
+        await setupFinishNotification({
+          agentManager: after.agentManager,
+          agentStorage: after.agentStorage,
+          childAgentId: record.childAgentId,
+          callerAgentId: record.callerAgentId,
+          restoredSubscriptionId: record.id,
+          restoredSubscriptionIds: ids,
+          logger,
+        }).ready;
+      },
     });
-    after.agentManager.tryRunOutOfBand = vi.fn(async () => true);
-    expect(
-      await sendPromptToAgent({
-        agentManager: after.agentManager,
-        agentStorage: after.agentStorage,
-        agentId: "parent",
-        prompt: "/goal pause",
-        logger,
-      }),
-    ).toEqual({ disposition: "out_of_band" });
-    expect(after.streamAgent).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(after.streamAgent).toHaveBeenCalledTimes(1));
     expect(await store.list()).toHaveLength(1);
-
-    after.agentManager.tryRunOutOfBand = vi.fn(async () => false);
-    await sendPromptToAgent({
-      agentManager: after.agentManager,
-      agentStorage: after.agentStorage,
-      agentId: "parent",
-      prompt: "Continue",
-      logger,
-    });
-    expect(parseAgentMessages(String(after.prompts[0]))).toMatchObject([
-      { source: { agentId: "child", event: "closed" } },
-      { source: null, text: "Continue" },
-    ]);
-    expect(await store.list()).toEqual([]);
+    await vi.waitFor(async () => expect(await store.list()).toEqual([]), { timeout: 5000 });
+    expect(after.streamAgent).toHaveBeenCalledTimes(2);
+    expect(after.prompts).toHaveLength(1);
   });
 
-  test("a rejected parent dispatch keeps its notification for a retry", async () => {
+  test("restored registrations for the same pair share one acknowledged notification", async () => {
     const store = FinishSubscriptionStore.forHome(home, logger);
-    await store.add({
-      childAgentId: "child",
-      callerAgentId: "parent",
-      requireParentOwnership: false,
-    });
-    const after = createParentManager();
-    await restoreFinishSubscriptions({
-      agentManager: after.agentManager,
-      store,
-      getAgentTitle: async () => "Child task",
-      isArchived: async () => false,
-      logger,
-    });
-    after.streamAgent.mockImplementationOnce(() => {
-      throw new Error("Dispatch rejected");
-    });
-    const send = () =>
-      sendPromptToAgent({
-        agentManager: after.agentManager,
-        agentStorage: after.agentStorage,
-        agentId: "parent",
-        prompt: "Continue",
-        logger,
+    for (let i = 0; i < 2; i++)
+      await store.add({
+        childAgentId: "child",
+        callerAgentId: "parent",
+        requireParentOwnership: false,
       });
-    await expect(send()).rejects.toThrow("Dispatch rejected");
-    expect(await store.list()).toHaveLength(1);
-    await send();
-    expect(parseAgentMessages(String(after.prompts[0]))).toMatchObject([
-      { source: { agentId: "child", event: "closed" } },
-      { source: null, text: "Continue" },
-    ]);
-    expect(await store.list()).toEqual([]);
+    const after = createParentManager();
+    configureAgentMessageDelivery(after.agentManager, { quietMs: 0 });
+    const reconcile = vi.fn(
+      async (record: FinishSubscriptionRecord, _signal: AbortSignal, ids: readonly string[]) => {
+        await setupFinishNotification({
+          agentManager: after.agentManager,
+          agentStorage: after.agentStorage,
+          childAgentId: record.childAgentId,
+          callerAgentId: record.callerAgentId,
+          restoredSubscriptionId: record.id,
+          restoredSubscriptionIds: ids,
+          logger,
+        }).ready;
+      },
+    );
+    expect(
+      await restoreFinishSubscriptions({
+        agentManager: after.agentManager,
+        store,
+        reconcile,
+        isArchived: async () => false,
+        logger,
+      }),
+    ).toBe(2);
+    await vi.waitFor(async () => expect(await store.list()).toEqual([]));
+    expect(reconcile).toHaveBeenCalledTimes(1);
+    expect(after.prompts).toHaveLength(1);
   });
 });

@@ -567,6 +567,7 @@ export function loadConfig(
     voiceLlmModel: voiceLlm.model,
     ...resolveRestartRecoveryConfig(persisted.agents),
     agentProviderSettings: extractAgentProviderSettings(providerOverrides),
+    idleRuntimeCleanup: persisted.agents?.idleRuntimeCleanup ?? true,
     metadataGeneration: persisted.agents?.metadataGeneration,
     providerOverrides,
     log: resolveLogConfigFromEnv(env, persisted),

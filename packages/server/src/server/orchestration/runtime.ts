@@ -466,7 +466,7 @@ export class OrchestrationRuntime {
         recipientId: input.recipientId,
         prompt: input.prompt,
         source: { kind: "agent-message", agentId: input.senderAgentId },
-        activeTurnBehavior: "steer",
+        activeTurnBehavior: "queue",
         unarchive: false,
       },
     );
@@ -665,7 +665,7 @@ export class OrchestrationRuntime {
           [ORCHESTRATION_BRIEF_LABEL]: context.briefId,
         });
         // Queued, not awaited inside the state lock: the recipient gets this together
-        // with anything else arriving in its 2 s window (e.g. a Peer's finish), steered.
+        // with anything else arriving in its 2 s window (e.g. a Peer's finish), queued.
         this.enqueueMessage({
           recipientId: lead.id,
           prompt: formatLeadRelay({
@@ -864,7 +864,7 @@ export class OrchestrationRuntime {
       if (assignment) assignment.status = "handed_back";
       run.updatedAtMs = Date.now();
       // Queued, not awaited inside the state lock: the recipient gets this together
-      // with anything else arriving in its 2 s window (e.g. a Peer's finish), steered.
+      // with anything else arriving in its 2 s window (e.g. a Peer's finish), queued.
       this.enqueueMessage({
         recipientId: parentAgentId,
         prompt: formatHandbackMessage({ peerAgentId: context.agent.id, handback: input.handback }),
@@ -920,7 +920,7 @@ export class OrchestrationRuntime {
       });
       run.updatedAtMs = Date.now();
       // Queued, not awaited inside the state lock: the recipient gets this together
-      // with anything else arriving in its 2 s window (e.g. a Peer's finish), steered.
+      // with anything else arriving in its 2 s window (e.g. a Peer's finish), queued.
       this.enqueueMessage({
         recipientId: input.peerAgentId,
         prompt: formatDissentResolution({
@@ -970,7 +970,7 @@ export class OrchestrationRuntime {
       if (context.agent.labels["jagentdesk.bot.id"])
         return { supervisorAgentId: run.supervisorAgentId };
       // Queued, not awaited inside the state lock: the recipient gets this together
-      // with anything else arriving in its 2 s window (e.g. a Peer's finish), steered.
+      // with anything else arriving in its 2 s window (e.g. a Peer's finish), queued.
       this.enqueueMessage({
         recipientId: run.supervisorAgentId,
         prompt: formatAcceptedResult({

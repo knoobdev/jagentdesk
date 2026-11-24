@@ -2474,6 +2474,11 @@ export const fr: TranslationResources = {
           editAccessibilityLabel: "Modifier le message",
         },
         unavailable: "Connectez-vous \u00E0 cet h\u00F4te pour g\u00E9rer les agents",
+        idleRuntimeCleanup: {
+          title: "Libérer les agents inactifs",
+          hint: "Libère de la mémoire après une heure d’inactivité.",
+          info: "Arrête le processus de l’agent tout en conservant sa conversation. Envoyez un message pour la reprendre.\n\nLe travail en cours, les notifications en attente et les vérifications de sécurité du fournisseur empêchent le nettoyage.",
+        },
       },
       workspaces: {
         unavailable: "Connectez-vous \u00E0 cet h\u00F4te pour g\u00E9rer les espaces de travail",

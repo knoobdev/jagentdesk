@@ -211,7 +211,7 @@ describe("OrchestrationRuntime", () => {
       expect.objectContaining({
         recipientId: lead.agentId,
         source: { kind: "agent-message", agentId: peerResults[0].agentId },
-        activeTurnBehavior: "steer",
+        activeTurnBehavior: "queue",
         unarchive: false,
         prompt: expect.stringContaining("Targeted test passed."),
       }),

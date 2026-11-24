@@ -2366,6 +2366,11 @@ export const zhCN: TranslationResources = {
           editAccessibilityLabel: "编辑提示",
         },
         unavailable: "连接到这个 Host 以管理 Agent",
+        idleRuntimeCleanup: {
+          title: "释放空闲 Agent",
+          hint: "空闲一小时后释放内存。",
+          info: "停止 Agent 进程，但保留对话。发送消息即可继续。\n\n进行中的工作、待处理的通知和 Provider 安全检查会阻止清理。",
+        },
       },
       workspaces: {
         unavailable: "连接到这个 Host 以管理 Workspace",

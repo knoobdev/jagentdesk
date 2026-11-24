@@ -20,8 +20,8 @@ turn. Idle agents stay dormant. Archived, internal, daemon-owned and archived-wo
 are excluded. A slow or unavailable provider holds back only its own agent.
 
 Recovery is best-effort: a crash between clearing intent and dispatch can lose continuation.
-Child completion notifications retained over restart still wait for the parent's next turn
-(ADR-0029); recovery must not turn them into automatic parent wakeups.
+Durable local finish subscriptions are reconciled after startup continuation admission. A child's
+completion queues a notification that starts a parent turn automatically, including after restart.
 
 ## Runtime residency
 
@@ -32,8 +32,12 @@ the agent runs through `ensureAgentLoaded()`, which resumes the durable provider
 same JAgentDesk agent ID. Provider history is not appended again when the canonical timeline is already
 primed.
 
-Idle agents remain resident indefinitely. Runtime closure happens only through an explicit lifecycle
-action such as archive, replacement, reload, workspace teardown, or daemon shutdown.
+Idle runtimes are released after one hour while their saved conversations remain resumable.
+Reopening a runtime starts a fresh idle window without changing sidebar activity timestamps.
+Tracked background work, outstanding local finish subscriptions, queued messages, and provider
+safety vetoes keep runtimes resident. Claude session crons and `/loop` wakeups are process-local
+work and prevent release. Hosts can disable cleanup live with `agents.idleRuntimeCleanup` in
+Settings → host.
 
 ### Cancellation
 
@@ -51,6 +55,22 @@ Runtime ownership is resolved from explicit workspace ID and caller context, nev
 Users can also detach an existing subagent from the subagents track. Detach is deliberately a manual lifecycle gesture, not an agent-facing MCP tool. It removes the `jagentdesk.parent-agent-id` label only: it does not stop, archive, move, or restart the agent. The agent keeps its current `cwd` and `workspaceId`, leaves the former parent's track, and behaves like a root agent for tab close, workspace activity, and future parent archive.
 
 `notifyOnFinish` defaults to `true` for agent-scoped creation and background prompt follow-ups because most delegated work needs to report back to the creating agent. Set it to `false` only for truly fire-and-forget agents or prompts.
+
+## Agent messages
+
+Agent sends default to `queue`. The recipient finishes its running turn, including compaction,
+then collects messages for two quiet seconds, capped at ten seconds from the first arrival.
+Finish notifications and change-request updates always queue. Bots and ORC use the same queue.
+
+Explicit `steer` joins the running turn; providers that cannot steer interrupt instead.
+`interrupt` replaces the turn. Both carry earlier queued messages in admission order. A user
+prompt carries the same queue and defaults to interrupt. Stop retains the queue for the next
+prompt when it stops a running or starting turn; stopping an idle recipient holds nothing.
+
+Receipts report the applied behavior and guidance. A provider must acknowledge admission before
+messages leave the queue. An unread steer and its carried messages can be lost when its turn is
+stopped or interrupted. Follow up with a short steer or interrupt to expedite a queued message;
+do not resend its body.
 
 ## Provider-managed child agents
 

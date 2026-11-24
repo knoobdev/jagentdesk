@@ -1,3 +1,5 @@
+import { withSkillInvocation } from "../agent-prompt.js";
+import { AgentActiveTurnBehaviorSchema } from "@jagentdesk/protocol/messages";
 import type { ChangeRequestWatches } from "../change-request-watches/index.js";
 import { changeRequestStatusSchema } from "../../../services/change-request-source.js";
 import type { ManagedAgent } from "../agent-manager.js";
@@ -4269,8 +4271,8 @@ function createToolCatalog(
       .describe(
         "Skill ids (from the Skills screen / create_skill) to invoke for this turn; the daemon prefixes the provider's native skill invocation.",
       ),
-    activeTurnBehavior: ActiveTurnBehaviorSchema.optional().describe(
-      'How to send into a running turn: "steer" joins it, falling back to interrupt when unavailable; "interrupt" replaces it. Defaults to steer for agent callers and interrupt otherwise.',
+    activeTurnBehavior: AgentActiveTurnBehaviorSchema.optional().describe(
+      'Leave this out unless the message cannot wait. Default "queue" waits for the running turn to end. "steer" joins it, or interrupts if the provider cannot steer. "interrupt" replaces it. A steer or interrupt carries messages queued before it, in order.',
     ),
   };
   const agentToAgentSendAgentPromptInputSchema = {
@@ -4292,6 +4294,9 @@ function createToolCatalog(
   };
   const topLevelSendAgentPromptInputSchema = {
     ...commonSendAgentPromptInputSchema,
+    activeTurnBehavior: ActiveTurnBehaviorSchema.optional().describe(
+      'Default "interrupt": the running turn stops and a new turn starts with the prompt. "steer": the prompt joins the running turn; a provider that cannot steer interrupts the turn instead.',
+    ),
     background: z
       .boolean()
       .optional()
@@ -5202,7 +5207,8 @@ function createToolCatalog(
     senderAgentId: string;
     prompt: string;
     sessionMode?: string;
-    activeTurnBehavior: "steer" | "interrupt";
+    activeTurnBehavior?: "queue" | "steer" | "interrupt";
+    skillIds?: string[];
     background: boolean;
     notifyOnFinish: boolean;
     armFinishNotification: () => Promise<boolean>;
@@ -5216,6 +5222,7 @@ function createToolCatalog(
       background,
       notifyOnFinish,
       armFinishNotification,
+      skillIds,
     } = input;
     if (!agentManager.getAgent(agentId) && !(await agentStorage.get(agentId))) {
       throw new JAgentDeskToolInputError(`Agent ${agentId} not found`);
@@ -5235,6 +5242,18 @@ function createToolCatalog(
         },
         sessionMode,
         activeTurnBehavior,
+        preparePrompt: skillIds?.length
+          ? (preparedPrompt) =>
+              withSkillInvocation({
+                agentManager,
+                agentStorage,
+                agentId,
+                prompt: preparedPrompt,
+                skillIds,
+                skillInvocation: options.skillsStorage ?? null,
+                logger: childLogger,
+              })
+          : undefined,
         // Arm right before dispatch so the notification follows this task's turn.
         beforeDispatch: async () => {
           if (background) await armFinishNotification();
@@ -5248,13 +5267,14 @@ function createToolCatalog(
         structuredContent: ensureValidJson({
           success: true,
           deliveryStatus: receipt.status,
+          activeTurnBehavior: receipt.activeTurnBehavior,
           messageId: receipt.messageId,
           status: agentManager.getAgent(agentId)?.lifecycle ?? "idle",
           lastMessage: null,
           permission: null,
           guidance: notifying
-            ? `Queued for delivery after two quiet seconds. ${PROMPTED_AGENT_NOTIFICATION_GUIDANCE}`
-            : "Queued for delivery after two quiet seconds.",
+            ? `${receipt.guidance} ${PROMPTED_AGENT_NOTIFICATION_GUIDANCE}`
+            : receipt.guidance,
         }),
       };
     }
@@ -5285,7 +5305,7 @@ function createToolCatalog(
     {
       title: "Send agent prompt",
       description:
-        "Send a task to a running agent. Agent-scoped callers run in background by default; top-level callers wait by default.",
+        "Send a message to another agent. Agent callers receive a receipt at once; read its guidance. Leave activeTurnBehavior out to queue until the running turn ends. Use a short steer or interrupt follow-up to deliver waiting messages now instead of resending them. An unread steer is lost if its turn stops or is interrupted, along with the messages it carried. Completion reports include the last response by default. JAgentDesk supplies caller identity.",
       inputSchema: sendAgentPromptInputSchema,
       outputSchema: {
         success: z.boolean(),
@@ -5294,6 +5314,7 @@ function createToolCatalog(
         permission: AgentPermissionRequestPayloadSchema.nullable().optional(),
         guidance: z.string().optional(),
         deliveryStatus: z.literal("queued").optional(),
+        activeTurnBehavior: AgentActiveTurnBehaviorSchema.optional(),
         messageId: z.string().optional(),
       },
     },
@@ -5304,7 +5325,7 @@ function createToolCatalog(
       skillIds,
       background = Boolean(callerAgentId),
       notifyOnFinish = Boolean(callerAgentId),
-      activeTurnBehavior = callerAgentId ? "steer" : "interrupt",
+      activeTurnBehavior,
     }) => {
       validateBotPromptCaller(agentId, sessionMode);
       validateSendPromptCaller(callerOrchestrationContext, orchestrationRuntime, agentId);
@@ -5323,14 +5344,12 @@ function createToolCatalog(
         return true;
       }
 
-      // Agent callers go through the recipient's delivery window (ADR-0029 decision 3):
-      // the sender gets a queued receipt at once, and messages that arrive within two
-      // quiet seconds reach the recipient as one prompt. Skill invocations need the
-      // provider prefix in front of the prompt, so they are sent directly.
-      if (callerAgentId && !skillIds?.length) {
+      // Every agent send uses the shared queue; native skill prefixes are added at dispatch.
+      if (callerAgentId) {
         return await sendQueuedAgentPrompt({
           agentId,
           senderAgentId: callerAgentId,
+          skillIds,
           prompt,
           sessionMode,
           activeTurnBehavior,

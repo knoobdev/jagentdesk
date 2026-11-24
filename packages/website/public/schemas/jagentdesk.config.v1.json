@@ -1241,6 +1241,9 @@
     "agents": {
       "type": "object",
       "properties": {
+        "idleRuntimeCleanup": {
+          "type": "boolean"
+        },
         "resumeOnStartup": {
           "type": "boolean"
         },

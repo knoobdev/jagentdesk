@@ -2598,6 +2598,8 @@ export class VoiceAssistantWebSocketServer {
         // COMPAT(terminalsSurviveRestart): added in v0.12.0, remove gate after 2027-04-21.
         terminalsSurviveRestart: true,
         resumeOnStartupSetting: true,
+        // COMPAT(idleRuntimeCleanupSetting): added in v0.9.59, remove gate after 2027-05-24.
+        idleRuntimeCleanupSetting: true,
         // COMPAT(agentForkContext): added in v0.1.102, remove gate after 2026-12-28.
         agentForkContext: true,
         // COMPAT(agentForkContextCursor): added in v0.1.108, remove gate after 2027-01-14.
@@ -2636,6 +2638,8 @@ export class VoiceAssistantWebSocketServer {
         canonicalSubmittedPrompts: true,
         agentMessageProvenance: true,
         agentMessageBatching: true,
+        // COMPAT(agentActiveTurnBehaviors): added in v0.9.59, remove gate after 2027-05-24.
+        agentActiveTurnBehaviors: true,
         // COMPAT(stableProjectIdentity): added in v0.1.109, remove gate after 2027-01-15.
         stableProjectIdentity: true,
         // COMPAT(workspaceScriptManagement): added in v0.1.105, remove gate after 2027-01-10.

@@ -1,3 +1,4 @@
+import type { AgentActiveTurnBehavior } from "@jagentdesk/protocol/messages";
 import type {
   BotsRequestType,
   BotsRequestParams,
@@ -637,6 +638,12 @@ export interface PairingRegistrationConfig {
   pairingCode?: string;
   /** Resolves when the user enters the code shown by the daemon. */
   pairingCodeProvider?: () => Promise<string>;
+}
+
+export interface AgentMessageReceipt {
+  deliveryStatus?: "queued";
+  activeTurnBehavior?: AgentActiveTurnBehavior;
+  guidance?: string;
 }
 
 export interface SendMessageOptions {
@@ -4320,19 +4327,20 @@ export class DaemonClient {
   async sendAgentMessage(
     agentId: string,
     text: string,
-    options?: SendMessageOptions,
-  ): Promise<void> {
+    options: SendMessageOptions = {},
+  ): Promise<AgentMessageReceipt> {
+    const activeTurnBehavior = this.activeTurnBehaviorForHost(options);
     const requestId = this.createRequestId();
-    const messageId = options?.messageId ?? crypto.randomUUID();
+    const messageId = options.messageId ?? crypto.randomUUID();
     const message = SessionInboundMessageSchema.parse({
       type: "send_agent_message_request",
       requestId,
       agentId,
       text,
-      ...(messageId ? { messageId } : {}),
-      ...(options?.images ? { images: options.images } : {}),
-      ...(options?.attachments ? { attachments: options.attachments } : {}),
-      ...(options?.activeTurnBehavior ? { activeTurnBehavior: options.activeTurnBehavior } : {}),
+      messageId,
+      images: options.images,
+      attachments: options.attachments,
+      activeTurnBehavior,
       ...(options?.skillIds?.length ? { skillIds: options.skillIds } : {}),
       // A host without provenance support would treat the field as unknown; only
       // send it when the host says it understands sender identity.
@@ -4358,10 +4366,37 @@ export class DaemonClient {
     if (!payload.accepted) {
       throw new Error(payload.error ?? "sendAgentMessage rejected");
     }
+    return {
+      ...(payload.deliveryStatus ? { deliveryStatus: payload.deliveryStatus } : {}),
+      ...(payload.activeTurnBehavior ? { activeTurnBehavior: payload.activeTurnBehavior } : {}),
+      ...(payload.guidance ? { guidance: payload.guidance } : {}),
+    };
   }
 
-  async sendMessage(agentId: string, text: string, options?: SendMessageOptions): Promise<void> {
-    await this.sendAgentMessage(agentId, text, options);
+  private activeTurnBehaviorForHost(
+    options: SendMessageOptions,
+  ): AgentActiveTurnBehavior | undefined {
+    const requested = options.activeTurnBehavior;
+    if (!options.sourceAgentId) {
+      if (requested === "queue")
+        throw new Error('activeTurnBehavior "queue" needs an agent sender (sourceAgentId).');
+      return requested;
+    }
+    if (this.lastServerInfoMessage?.features?.agentActiveTurnBehaviors === true) return requested;
+    // COMPAT(agentActiveTurnBehaviors): added in v0.9.59, remove after 2027-05-24 once daemon floor >= v0.9.59.
+    if (requested === "steer")
+      throw new Error(
+        "Update the JAgentDesk host to steer a running turn from an agent. Leave the behavior out to queue the message, or use interrupt.",
+      );
+    return requested === "interrupt" ? "interrupt" : undefined;
+  }
+
+  async sendMessage(
+    agentId: string,
+    text: string,
+    options?: SendMessageOptions,
+  ): Promise<AgentMessageReceipt> {
+    return this.sendAgentMessage(agentId, text, options);
   }
 
   async rewindAgent(
@@ -11398,6 +11433,7 @@ export class DaemonClient {
             [CLIENT_CAPS.pluginBinaryPayloads]: true,
             [CLIENT_CAPS.explicitEventSubscriptions]: true,
             [CLIENT_CAPS.timelineNotifications]: true,
+            [CLIENT_CAPS.agentActiveTurnBehaviors]: true,
             [CLIENT_CAPS.terminalChunkedReplay]: true,
             [CLIENT_CAPS.providerSubagents]: true,
             [CLIENT_CAPS.projectedSubagentTimeline]: true,

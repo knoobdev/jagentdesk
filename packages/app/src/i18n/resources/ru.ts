@@ -2485,6 +2485,11 @@ export const ru: TranslationResources = {
           editAccessibilityLabel: "Изменить сообщение",
         },
         unavailable: "Connect to this host to manage agents",
+        idleRuntimeCleanup: {
+          title: "Освобождать неактивных агентов",
+          hint: "Освобождает память после часа бездействия.",
+          info: "Останавливает процесс агента, сохраняя разговор. Отправьте сообщение, чтобы продолжить.\n\nАктивная работа, ожидающие уведомления и проверки безопасности провайдера предотвращают очистку.",
+        },
       },
       workspaces: {
         unavailable: "Connect to this host to manage workspaces",

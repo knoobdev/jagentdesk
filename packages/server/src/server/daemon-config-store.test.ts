@@ -6,6 +6,7 @@ import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 
 import { DaemonConfigStore, applyMutableProviderConfigToOverrides } from "./daemon-config-store.js";
+import { loadConfig } from "./config.js";
 import { loadPersistedConfig } from "./persisted-config.js";
 import { generateFingerprintProfile } from "@jagentdesk/protocol/browser-automation/fingerprint-profile";
 
@@ -613,6 +614,43 @@ describe("DaemonConfigStore", () => {
 
     const persisted = loadPersistedConfig(jagentdeskHome);
     expect(persisted.agents?.metadataGeneration).toEqual({ providers: [] });
+  });
+
+  test("patch persists the host idle runtime cleanup opt-out for the next daemon start", () => {
+    const jagentdeskHome = mkdtempSync(path.join(tmpdir(), "jagentdesk-daemon-config-store-"));
+    tempDirs.push(jagentdeskHome);
+    writeFileSync(
+      path.join(jagentdeskHome, "config.json"),
+      `${JSON.stringify({
+        version: 1,
+        agents: { metadataGeneration: { providers: [{ provider: "claude" }] } },
+      })}\n`,
+    );
+    const store = new DaemonConfigStore(
+      jagentdeskHome,
+      {
+        mcp: { injectIntoAgents: false },
+        browserTools: { enabled: false },
+        providers: {},
+        autoArchiveAfterMerge: false,
+        enableTerminalAgentHooks: false,
+        idleRuntimeCleanup: true,
+        appendSystemPrompt: "",
+        metadataGeneration: { providers: [{ provider: "claude" }] },
+      },
+      undefined,
+    );
+
+    expect(store.patch({ idleRuntimeCleanup: false }).idleRuntimeCleanup).toBe(false);
+
+    expect(loadPersistedConfig(jagentdeskHome).agents).toEqual({
+      metadataGeneration: { providers: [{ provider: "claude" }] },
+      idleRuntimeCleanup: false,
+    });
+    expect(loadConfig(jagentdeskHome, { env: {} }).idleRuntimeCleanup).toBe(false);
+
+    store.patch({ idleRuntimeCleanup: true });
+    expect(loadConfig(jagentdeskHome, { env: {} }).idleRuntimeCleanup).toBe(true);
   });
 
   test("patch persists custom ACP provider overrides into config.json", () => {

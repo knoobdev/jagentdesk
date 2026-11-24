@@ -1,5 +1,6 @@
+import type { AgentMessageReceipt } from "@jagentdesk/client/internal/daemon-client";
 import { type Command, Option } from "commander";
-import type { ActiveTurnBehavior } from "@jagentdesk/protocol/messages";
+import type { AgentActiveTurnBehavior } from "@jagentdesk/protocol/messages";
 import { collectMultiple } from "../../utils/command-options.js";
 import { connectToDaemon, getDaemonHost } from "../../utils/client.js";
 import type {
@@ -14,7 +15,9 @@ import { extname, resolve } from "node:path";
 /** Result type for agent send command */
 export interface AgentSendResult {
   agentId: string;
-  status: "sent" | "completed" | "timeout" | "permission" | "error";
+  status: "sent" | "queued" | "completed" | "timeout" | "permission" | "error";
+  /** What the host applied to an agent's message with a running turn. */
+  activeTurnBehavior?: AgentActiveTurnBehavior;
   message: string;
 }
 
@@ -34,7 +37,7 @@ export interface AgentSendOptions extends CommandOptions {
   skill?: string[];
   prompt?: string;
   promptFile?: string;
-  behavior?: ActiveTurnBehavior;
+  behavior?: AgentActiveTurnBehavior;
 }
 
 export function addSendOptions(cmd: Command): Command {
@@ -54,8 +57,8 @@ export function addSendOptions(cmd: Command): Command {
     .addOption(
       new Option(
         "--behavior <behavior>",
-        "Active-turn behavior (agent default: steer; otherwise: interrupt)",
-      ).choices(["interrupt", "steer"]),
+        "Leave out unless the message cannot wait. From an agent: queue (default) waits for turn end, steer joins it, interrupt replaces it. From a person: interrupt (default) or steer",
+      ).choices(["queue", "steer", "interrupt"]),
     )
     .option("--no-wait", "Return immediately without waiting for completion");
 }
@@ -175,6 +178,22 @@ function buildSendResult(agentIdArg: string, state: SendWaitState): AgentSendRes
   return { agentId, status: "completed", message: "Agent completed processing the message" };
 }
 
+export function buildNoWaitResult(agentId: string, receipt: AgentMessageReceipt): AgentSendResult {
+  return {
+    agentId,
+    status: receipt.deliveryStatus ?? "sent",
+    ...(receipt.activeTurnBehavior ? { activeTurnBehavior: receipt.activeTurnBehavior } : {}),
+    message: sendReceiptMessage(receipt),
+  };
+}
+
+function sendReceiptMessage(receipt: AgentMessageReceipt): string {
+  if (receipt.deliveryStatus !== "queued") return "Message sent, not waiting for completion";
+  // COMPAT(agentActiveTurnBehaviors): added in v0.9.59, remove after 2027-05-24 once daemon
+  // floor >= v0.9.59. Older hosts return no guidance.
+  return receipt.guidance ?? "Message queued for delivery after the current turn ends";
+}
+
 export async function runSendCommand(
   agentIdArg: string,
   prompt: string | undefined,
@@ -220,11 +239,11 @@ export async function runSendCommand(
     // Send the message
     const skillIds = options.skill && options.skill.length > 0 ? options.skill : undefined;
     const sourceAgentId = process.env.JAGENTDESK_AGENT_ID?.trim() || undefined;
-    await client.sendAgentMessage(agentIdArg, promptInput, {
+    const receipt = await client.sendAgentMessage(agentIdArg, promptInput, {
       images,
       skillIds,
       sourceAgentId,
-      activeTurnBehavior: options.behavior ?? (sourceAgentId ? "steer" : "interrupt"),
+      activeTurnBehavior: options.behavior,
     });
 
     // If --no-wait, return immediately
@@ -233,11 +252,7 @@ export async function runSendCommand(
 
       return {
         type: "single",
-        data: {
-          agentId: agentIdArg,
-          status: "sent",
-          message: "Message sent, not waiting for completion",
-        },
+        data: buildNoWaitResult(agentIdArg, receipt),
         schema: agentSendSchema,
       };
     }

@@ -495,11 +495,7 @@ class ProviderRuntime {
       this.failRequest(event);
       return;
     }
-    if (
-      event.type === "request.completed" ||
-      event.type === "catalog" ||
-      event.type === "sessions"
-    ) {
+    if (isProviderRequestReply(event)) {
       this.finishRequest(event);
       return;
     }
@@ -654,10 +650,21 @@ class ProviderRuntime {
   }
 
   private finishRequest(
-    event: Extract<ProviderEvent, { type: "request.completed" | "catalog" | "sessions" }>,
+    event: Extract<
+      ProviderEvent,
+      { type: "request.completed" | "catalog" | "sessions" | "session.can_stop_runtime" }
+    >,
   ): void {
     const request = this.requests.get(event.requestId);
     if (!request) return;
+    if (
+      event.type === "session.can_stop_runtime" &&
+      this.providerSessions.get(event.sessionId)?.id !== request.sessionId
+    ) {
+      this.requests.delete(event.requestId);
+      request.reject(new Error("Runtime safety response belongs to another session"));
+      return;
+    }
     this.requests.delete(event.requestId);
     request.resolve(event);
   }
@@ -731,6 +738,27 @@ class ProviderRuntimeSession {
     } finally {
       this.prompts.delete(prompt.clientMessageId);
     }
+  }
+
+  async canStopRuntime(): Promise<boolean> {
+    if (
+      this.terminal ||
+      this.prompts.size ||
+      this.activeTurnIds.size ||
+      !this.capabilities.includes("session.can_stop_runtime")
+    )
+      return false;
+    const event = await this.runtime.complete(
+      {
+        type: "session.can_stop_runtime",
+        requestId: randomUUID(),
+        sessionId: this.providerSessionId,
+      },
+      AbortSignal.timeout(10_000),
+    );
+    if (event.type !== "session.can_stop_runtime")
+      throw new Error("Invalid runtime safety response");
+    return event.canStop;
   }
 
   async configure(changes: ProviderConfigChanges): Promise<void> {
@@ -1392,7 +1420,14 @@ class PluginAgentSession implements AgentSession {
     return { turnId };
   }
 
-  async steerActiveTurn(
+  get steerActiveTurn():
+    | ((prompt: AgentPromptInput, options: SteerActiveTurnOptions) => Promise<SteerResult>)
+    | undefined {
+    if (!this.bridge.negotiatedCapabilities.includes("prompt.steer")) return undefined;
+    return (prompt, options) => this.steer(prompt, options);
+  }
+
+  private async steer(
     prompt: AgentPromptInput,
     options: SteerActiveTurnOptions,
   ): Promise<SteerResult> {
@@ -1422,6 +1457,11 @@ class PluginAgentSession implements AgentSession {
   async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
     await this.ensureReplay();
     for (const event of this.history.read(this.provider)) yield event;
+  }
+
+  get canStopRuntime(): (() => Promise<boolean>) | undefined {
+    if (!this.bridge.negotiatedCapabilities.includes("session.can_stop_runtime")) return undefined;
+    return () => this.bridge.canStopRuntime();
   }
 
   async getRuntimeInfo() {
@@ -2114,4 +2154,18 @@ function toJsonValue(value: unknown, label: string): JsonValue {
   const encoded = JSON.stringify(value);
   if (encoded === undefined) throw new Error(`${label} must be JSON-serializable`);
   return JSON.parse(encoded) as JsonValue;
+}
+
+function isProviderRequestReply(
+  event: ProviderEvent,
+): event is Extract<
+  ProviderEvent,
+  { type: "request.completed" | "catalog" | "sessions" | "session.can_stop_runtime" }
+> {
+  return (
+    event.type === "request.completed" ||
+    event.type === "catalog" ||
+    event.type === "sessions" ||
+    event.type === "session.can_stop_runtime"
+  );
 }

@@ -460,6 +460,7 @@ function mergeMutableConfigIntoPersistedConfig(params: {
     ...nextAgents,
     resumeOnStartup: mutable.resumeOnStartup,
     resumePrompt: mutable.resumePrompt,
+    idleRuntimeCleanup: mutable.idleRuntimeCleanup !== false,
   };
   return {
     ...persisted,
