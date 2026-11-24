@@ -1,3 +1,4 @@
+import type { AudioEngine } from "@/audio";
 import { createPluginSubscribe } from "./subscriptions";
 import { useMemo, useSyncExternalStore } from "react";
 import { QueryClient } from "@tanstack/react-query";
@@ -41,6 +42,7 @@ export class PluginRegistry {
     options: {
       replacePluginId?: string;
       client: DaemonClient;
+      audio: Pick<AudioEngine, "play">;
     },
   ): boolean {
     const previous = this.byHost.get(serverId) ?? [];
@@ -102,7 +104,7 @@ export class PluginRegistry {
           timelineTransformers: [],
           timelineRenderers: [],
         };
-        runtime = this.dependencies.createRuntime(installation, options.client);
+        runtime = this.dependencies.createRuntime(installation, options.client, options.audio);
         const evaluated = runPluginClientBundle(entry.id, entry.clientBundle, runtime, () =>
           this.publish(),
         );

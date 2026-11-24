@@ -1,3 +1,4 @@
+import { createPlayAudio, type AudioEngine } from "@/audio";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { createPluginHosts } from "./hosts";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
@@ -18,6 +19,7 @@ import type { InstalledPlugin } from "./types";
 export function createPluginClientRuntime(
   installation: InstalledPlugin,
   daemonClient: DaemonClient,
+  audio: Pick<AudioEngine, "play">,
 ): PluginClientRuntime {
   const runtime = createPluginSurfaceRuntime(daemonClient, installation);
   if (!runtime) throw new Error("Plugin host is offline");
@@ -29,6 +31,7 @@ export function createPluginClientRuntime(
   );
   return {
     ...capabilities,
+    playAudio: createPlayAudio(audio, installation.lifetime.signal),
     hosts: createPluginHosts(getHostRuntimeStore(), installation.lifetime.signal),
     addComposerPill(contribution) {
       return pluginButtonStore.addComposerPill(installation, contribution);

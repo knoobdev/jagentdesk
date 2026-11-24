@@ -74,6 +74,7 @@ function requireId(value: string, label: string): string {
 
 export type PluginClientRuntime = Pick<
   PluginClientContext,
+  | "playAudio"
   | "jagentdesk"
   | "rpc"
   | "openSettings"

@@ -14,6 +14,7 @@ function registry(version: string) {
     createRuntime(installation) {
       starts++;
       return {
+        playAudio: async () => {},
         hosts: createPluginHosts(
           {
             getHosts: () => [],
@@ -60,7 +61,7 @@ it("checks the app version before creating a runtime or evaluating plugin code",
         clientBundle: "throw new Error('executed')",
       },
     ],
-    { client },
+    { client, audio: { play: async () => 0 } },
   );
   expect(starts()).toBe(0);
   expect(result.getSnapshot()).toEqual([]);
@@ -71,7 +72,10 @@ it("checks the app version before creating a runtime or evaluating plugin code",
 
 it("starts catalogs without requirements (pre-split plugins keep loading)", () => {
   const { result, starts } = registry("0.8.0");
-  result.installCatalog("host", [{ id: "example", clientBundle }], { client });
+  result.installCatalog("host", [{ id: "example", clientBundle }], {
+    client,
+    audio: { play: async () => 0 },
+  });
   expect(starts()).toBe(1);
   expect(result.getEvaluationError("host", "example")).toBeUndefined();
 });
@@ -81,6 +85,7 @@ it("unloads on a requirement-only edit and recovers after correction", () => {
   const install = (jagentdesk: string) =>
     result.installCatalog("host", [{ id: "example", clientBundle, requirements: { jagentdesk } }], {
       client,
+      audio: { play: async () => 0 },
     });
   install("^0.8.0");
   expect(result.getSnapshot().map(({ id }) => id)).toEqual(["example"]);
