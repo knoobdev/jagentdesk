@@ -668,7 +668,7 @@ describe("processTimelineResponse", () => {
             provider: "codex",
             item: {
               type: "todo",
-              items: [{ text: "Verify hydration", completed: true }],
+              items: [{ text: "Verify hydration", completed: true, status: "completed" }],
             },
           } as AgentStreamEventPayload,
           timestamp: new Date(2000),
@@ -708,7 +708,7 @@ describe("processTimelineResponse", () => {
     expect([...result.tail, ...result.head].filter((item) => item.kind === "todo_list")).toEqual([
       expect.objectContaining({
         timelineCursor: { epoch: "epoch-1", seq: 2 },
-        items: [{ text: "Verify hydration", completed: true }],
+        items: [{ text: "Verify hydration", completed: true, status: "completed" }],
       }),
     ]);
   });
@@ -4273,5 +4273,59 @@ describe("createAgentStreamReducerQueue", () => {
 
     expect(commits).toEqual(["agent-1:queued"]);
     expect(scheduler.size).toBe(0);
+  });
+});
+
+describe("catch-up over cached assistant prefixes", () => {
+  it("keeps the complete reply after completion removes the live head", () => {
+    const prefix = {
+      ...makeAssistantItem("First paragraph.", "cached"),
+      messageId: "reply",
+      timelineCursor: { epoch: "epoch-1", seq: 4 },
+    };
+    const live = {
+      ...makeAssistantItem(" Second paragraph.", "live"),
+      messageId: "reply",
+      timelineCursor: { epoch: "epoch-1", seq: 5 },
+    };
+    const complete = "First paragraph. Second paragraph. END";
+    const caughtUp = processTimelineResponse({
+      ...baseTimelineInput,
+      currentTail: [prefix],
+      currentHead: [live],
+      currentCursor: { epoch: "epoch-1", startSeq: 1, endSeq: 5 },
+      payload: {
+        agentId: "agent-1",
+        direction: "after",
+        projection: "projected",
+        reset: false,
+        epoch: "epoch-1",
+        window: { minSeq: 1, maxSeq: 6, nextSeq: 7 },
+        startCursor: { seq: 5 },
+        endCursor: { seq: 6 },
+        entries: [
+          {
+            ...makeTimelineEntry(2, complete, "assistant_message", 6),
+            item: { type: "assistant_message", text: complete, messageId: "reply" },
+            sourceSeqRanges: [{ startSeq: 2, endSeq: 6 }],
+            collapsed: ["assistant_merge"],
+          },
+        ],
+        error: null,
+        hasNewer: false,
+        hasOlder: false,
+      },
+    });
+    expect(getAssistantTexts([...caughtUp.tail, ...caughtUp.head])).toEqual([complete]);
+    const completed = processAgentStreamEvent({
+      ...baseStreamInput,
+      currentTail: caughtUp.tail,
+      currentHead: caughtUp.head,
+      currentCursor: caughtUp.cursor ?? undefined,
+      event: { type: "turn_completed", provider: "claude" } as AgentStreamEventPayload,
+      seq: 7,
+      epoch: "epoch-1",
+    });
+    expect(getAssistantTexts([...completed.tail, ...completed.head])).toEqual([complete]);
   });
 });

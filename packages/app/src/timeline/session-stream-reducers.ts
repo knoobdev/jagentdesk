@@ -795,7 +795,7 @@ function reconcileOverlappingProjectedAssistant(params: {
   };
 
   const headMatch = findMatch(params.head);
-  const tailMatch = headMatch ? null : findMatch(params.tail);
+  const tailMatch = findMatch(params.tail);
   const match = headMatch ?? tailMatch;
   if (!match) {
     return { tail: params.tail, head: params.head, reconciled: false };
@@ -837,8 +837,19 @@ function reconcileOverlappingProjectedAssistant(params: {
   };
 
   if (headMatch) {
+    const tailCursor = tailMatch?.current.timelineCursor;
+    const replacesCachedPrefix =
+      tailMatch !== null &&
+      tailCursor?.epoch === params.epoch &&
+      unit.sourceSeqRanges.some(
+        (range) => range.startSeq <= tailCursor.seq && tailCursor.seq <= range.endSeq,
+      );
+    // The catch-up projection owns both the live reply and its covered cached prefix.
+    const tailWithoutPrefix = replacesCachedPrefix
+      ? [...params.tail.slice(0, tailMatch.index), ...params.tail.slice(tailMatch.index + 1)]
+      : params.tail;
     return {
-      tail: removeBlockGroup(params.tail),
+      tail: removeBlockGroup(tailWithoutPrefix),
       head: replaceMatch(params.head, headMatch.index),
       reconciled: true,
     };
