@@ -7,7 +7,7 @@ import { describeHookAgent, publishAgentStream } from "../plugins/lifecycle/inde
 import type { PluginSessionOpenRequest } from "@jagentdesk/plugin/server";
 import { ensureAgentLoaded } from "./agent-loading.js";
 import { randomUUID } from "node:crypto";
-import { projectTimelineRows } from "./timeline-projection.js";
+import { continuesAssistantMessage, projectTimelineRows } from "./timeline-projection.js";
 import { isDefaultAgentCreateConfigUnattended } from "./create-agent-mode.js";
 import { isStaleProviderSessionError } from "./stale-provider-session-error.js";
 import { resolve } from "node:path";
@@ -3803,24 +3803,16 @@ export class AgentManager {
   private getLastAssistantMessageSegmentFromTimeline(
     timeline: readonly Pick<AgentTimelineRow, "item" | "turnId">[],
   ): { text: string; startsAtBeginning: boolean } | null {
-    // Collect the last contiguous assistant messages of one turn (Claude streams chunks).
-    // A turn the provider starts on its own has no user message before its reply.
+    // Collect the chunks of the last assistant message (Claude streams chunks). A turn the
+    // provider starts on its own has no user message before its reply.
     const chunks: string[] = [];
-    let replyTurnId: string | undefined;
     let startsAtBeginning = false;
     for (let i = timeline.length - 1; i >= 0; i--) {
-      const { item, turnId } = timeline[i];
-      if (item.type !== "assistant_message") {
-        if (chunks.length) {
-          break;
-        }
-        continue;
-      }
-      if (chunks.length === 0) {
-        replyTurnId = turnId;
-      } else if (turnId !== replyTurnId) {
+      const { item } = timeline[i];
+      if (chunks.length > 0 && !continuesAssistantMessage(timeline[i], timeline[i + 1])) {
         break;
       }
+      if (item.type !== "assistant_message") continue;
       chunks.push(item.text);
       startsAtBeginning = i === 0;
     }
