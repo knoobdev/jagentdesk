@@ -104,9 +104,10 @@ import {
 } from "./provider-subagents/store.js";
 import {
   AgentBackgroundWorkStore,
-  isHeartbeatBackgroundWorkItem,
+  isDaemonBackgroundWorkItem,
   type AgentBackgroundWorkItem,
-  type HeartbeatBackgroundWorkInput,
+  type DaemonBackgroundWorkInput,
+  type DaemonBackgroundWorkKey,
 } from "./background-work/index.js";
 
 const RELOAD_SESSION_CLOSE_TIMEOUT_MS = 3_000;
@@ -397,6 +398,15 @@ export interface AgentManagerOptions {
 export type ActiveTurnSteerDispatchResult =
   | { status: "inactive" | "steered" }
   | { status: "replaced"; iterator: AsyncGenerator<AgentStreamEvent> };
+
+function prependTurnContext(
+  prompt: AgentPromptInput,
+  context: string | undefined,
+): AgentPromptInput {
+  if (!context) return prompt;
+  if (typeof prompt === "string") return `${context}\n\n${prompt}`;
+  return [{ type: "text", text: context }, ...prompt];
+}
 
 function stripSteerOptions(options?: AgentSteerOptions): AgentRunOptions | undefined {
   if (!options) return undefined;
@@ -1402,12 +1412,12 @@ export class AgentManager {
     return this.backgroundWork.list(agentId);
   }
 
-  setHeartbeatBackgroundWork(input: HeartbeatBackgroundWorkInput): void {
-    this.publishBackgroundWork(input.agentId, this.backgroundWork.setHeartbeat(input));
+  setDaemonBackgroundWork(input: DaemonBackgroundWorkInput): void {
+    this.publishBackgroundWork(input.agentId, this.backgroundWork.setDaemonBackgroundWork(input));
   }
 
-  removeHeartbeatBackgroundWork(agentId: string, scheduleId: string): void {
-    this.publishBackgroundWork(agentId, this.backgroundWork.removeHeartbeat(agentId, scheduleId));
+  removeDaemonBackgroundWork(key: DaemonBackgroundWorkKey): void {
+    this.publishBackgroundWork(key.agentId, this.backgroundWork.removeDaemonBackgroundWork(key));
   }
 
   async stopAgentBackgroundWork({
@@ -1416,11 +1426,11 @@ export class AgentManager {
     stopToken,
     canManageAutomation,
   }: StopAgentBackgroundWorkOptions): Promise<void> {
-    if (isHeartbeatBackgroundWorkItem({ id: itemId })) {
+    if (isDaemonBackgroundWorkItem({ id: itemId })) {
       if (this.agents.get(agentId)?.internal) throw new Error(`Unknown agent '${agentId}'`);
       if (!canManageAutomation)
-        throw new Error("Managing automation is required to stop a heartbeat");
-      await this.backgroundWork.stopHeartbeat(agentId, itemId, stopToken);
+        throw new Error("Managing automation is required to stop daemon background work");
+      await this.backgroundWork.stopDaemon(agentId, itemId, stopToken);
       return;
     }
     this.requirePublicAgent(agentId);
@@ -2673,6 +2683,7 @@ export class AgentManager {
     agentId: string,
     prompt: AgentPromptInput,
     options?: AgentRunOptions,
+    onAccepted?: () => void,
   ): Promise<boolean> {
     if (this.inFlightAgentCloses.has(agentId) || !this.agents.has(agentId)) {
       await this.waitForAgentClose(agentId);
@@ -2687,6 +2698,7 @@ export class AgentManager {
     if (!handler) {
       return false;
     }
+    onAccepted?.();
     if (options?.clientMessageId) {
       this.recordSubmittedPrompt(agent, prompt, options.clientMessageId);
       this.emitState(agent);
@@ -2762,16 +2774,16 @@ export class AgentManager {
     pendingRun: PendingForegroundRun;
     prompt: AgentPromptInput;
     options?: AgentRunOptions;
+    promptStart?: ForegroundPromptStart;
   }): Promise<string | null> {
-    const { agent, agentId, pendingRun, prompt, options } = params;
+    const { agent, agentId, pendingRun, prompt, options, promptStart } = params;
     try {
       const context = await this.turnContextProvider?.(agentId);
-      let enriched = prompt;
-      if (context?.text)
-        enriched =
-          typeof prompt === "string"
-            ? `${context.text}\n\n${prompt}`
-            : [{ type: "text" as const, text: context.text }, ...prompt];
+      const enriched = prependTurnContext(prompt, context?.text);
+      if (promptStart?.admit?.() === false) {
+        this.runs.settleForegroundRun(agentId, pendingRun.token);
+        return null;
+      }
       const result = await agent.session.startTurn(enriched, options);
       context?.accepted();
       if (pendingRun.settled) {
@@ -2917,6 +2929,7 @@ export class AgentManager {
         pendingRun,
         prompt,
         options,
+        promptStart,
       });
       if (turnId === null) {
         const canceledEvent: AgentStreamEvent = {

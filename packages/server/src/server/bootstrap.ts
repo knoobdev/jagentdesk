@@ -1,3 +1,5 @@
+import { createChangeRequestWatches } from "./agent/change-request-watches/index.js";
+import { getAgentMessageDelivery } from "./agent/agent-prompt.js";
 import { BotStorage } from "./bots/storage.js";
 import { BotsService } from "./bots/service.js";
 import type { BotTriggerSource } from "./bots/service.js";
@@ -1709,7 +1711,20 @@ export async function createJAgentDeskDaemon(
     archiveWorkspace: archiveScheduleWorkspaceExternal,
   });
   await scheduleService.start();
+  const changeRequestWatches = createChangeRequestWatches({
+    source: github.changeRequests,
+    backgroundWork: agentManager,
+    jagentdeskHome: config.jagentdeskHome,
+    logger,
+    isActive: async (agentId) => {
+      const record = await agentStorage.get(agentId);
+      return record ? !record.archivedAt : Boolean(agentManager.getAgent(agentId));
+    },
+    messages: () => getAgentMessageDelivery({ agentManager, agentStorage, logger }),
+  });
+
   agentManager.setAgentArchivedCallback(async (agentId) => {
+    await changeRequestWatches.archive(agentId);
     try {
       await scheduleService.completeForAgent(agentId);
     } catch (error) {
@@ -1894,6 +1909,7 @@ export async function createJAgentDeskDaemon(
   const createAgentToolHostDependencies = (
     runtime: JAgentDeskToolRuntimeContext,
   ): JAgentDeskToolHostDependencies => ({
+    changeRequestWatches,
     builtinPlugins: pluginRuntime.builtin.forAgent(runtime.callerAgentId),
     callerAgentLabels: runtime.callerAgentLabels,
     jagentdeskToolPolicy:
@@ -2399,6 +2415,7 @@ export async function createJAgentDeskDaemon(
             await pluginRuntime.start();
             providerSnapshotManager.settlePluginProviders();
             restartRecovery.resumePending();
+            await changeRequestWatches.start();
             tsnetListener = createTsnetListener({
               logger,
               port: boundListenTarget.type === "tcp" ? boundListenTarget.port : 0,
@@ -2500,6 +2517,8 @@ export async function createJAgentDeskDaemon(
     scriptHealthMonitor.stop();
     // Graceful shutdown delivers agent messages still waiting in a 2 s window
     // (ADR-0029 decision 3); a crash loses them.
+    wsServer?.prepareForShutdown();
+    await changeRequestWatches.close();
     await closeAgentMessageDelivery(agentManager).catch(() => undefined);
     // Freeze both ingress and registration before taking the agent closure snapshot.
     wsServer?.prepareForShutdown();

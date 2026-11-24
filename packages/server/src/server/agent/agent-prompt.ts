@@ -48,12 +48,16 @@ export type AgentRunController = Pick<
 > & { reloadAgentSession(agentId: string): Promise<unknown> };
 
 export interface StartAgentRunOptions {
+  idleOnly?: boolean;
+  admit?: () => boolean;
   replaceRunning?: boolean;
   activeTurnBehavior?: ActiveTurnBehavior;
   runOptions?: AgentRunOptions;
   /** Ask the provider to deny permissions blocking this steer. */
   clearPendingPermissions?: boolean;
 }
+
+export class AgentTurnBusyError extends Error {}
 
 export type PromptDispatchDisposition = "out_of_band" | "steered" | "turn_started";
 export type PromptDispatchResult =
@@ -106,6 +110,7 @@ async function startOrReplaceRun(
   replaced: boolean;
 }> {
   const replaced = Boolean(options?.replaceRunning && agentManager.hasInFlightRun(agentId));
+  if (options?.idleOnly && agentManager.hasInFlightRun(agentId)) throw new AgentTurnBusyError();
   const iterator = replaced
     ? await agentManager.replaceAgentRun(agentId, prompt, options?.runOptions, promptStart)
     : agentManager.streamAgent(agentId, prompt, options?.runOptions, promptStart);
@@ -143,10 +148,14 @@ export async function startAgentRun(
   // Out-of-band commands (e.g. /goal pause) must run WITHOUT canceling an
   // in-flight turn — replaceAgentRun would interrupt the running turn. The
   // intercept lives at this layer so it covers every prompt entrypoint.
-  if (await agentManager.tryRunOutOfBand(agentId, prompt, options?.runOptions)) {
+  if (
+    await agentManager.tryRunOutOfBand(agentId, prompt, options?.runOptions, () => {
+      if (options?.admit?.() === false) throw new Error("Queued agent message was withdrawn");
+    })
+  ) {
     return { disposition: "out_of_band" };
   }
-  const promptStart = new ForegroundPromptStart(agentId);
+  const promptStart = new ForegroundPromptStart(agentId, options?.admit);
   try {
     try {
       await agentManager.reloadStalePluginSession(agentId);
@@ -177,13 +186,9 @@ async function startAgentRunInner(
   promptStart: ForegroundPromptStart,
 ): Promise<PromptDispatchResult> {
   const snapshot = agentManager.getAgent(agentId);
-  const steered = await steerOrReplaceActiveRun(
-    agentManager,
-    agentId,
-    prompt,
-    options,
-    promptStart,
-  );
+  const steered = options?.idleOnly
+    ? null
+    : await steerOrReplaceActiveRun(agentManager, agentId, prompt, options, promptStart);
   if (steered?.disposition === "steered") {
     return steered;
   }
@@ -299,6 +304,9 @@ async function withSkillInvocation(params: SendPromptToAgentParams): Promise<Age
 }
 
 export interface SendPromptToAgentParams {
+  idleOnly?: boolean;
+  admit?: () => boolean;
+  beforeDispatch?: () => Promise<void>;
   agentManager: AgentManager;
   agentStorage: AgentStorage;
   agentId: string;
@@ -381,7 +389,7 @@ async function resolvePromptSource(
   manager: Pick<AgentManager, "getAgent">,
   storage: AgentStorage | undefined,
 ): Promise<AgentPromptSource | undefined> {
-  if (!source) return undefined;
+  if (!source || source.kind === "change-request-update") return source;
   if (source.title) return source;
   const title = (
     manager.getAgent(source.agentId)?.config?.title ??
@@ -435,6 +443,11 @@ export function getAgentMessageDelivery(
   const delivery = createAgentMessageDelivery({
     ...defaultAgentMessageDeliveryTiming,
     ...agentMessageDeliveryTimings.get(context.agentManager),
+    isRunning: (agentId) => context.agentManager.hasInFlightRun(agentId),
+    subscribe: (listener) =>
+      context.agentManager.subscribe((event) => {
+        if (event.type === "agent_state") listener(event.agent.id);
+      }),
     resolveSource: async (source) =>
       (await resolvePromptSource(source, context.agentManager, context.agentStorage)) ?? source,
     dispatch: async (request) => {
@@ -448,8 +461,18 @@ export function getAgentMessageDelivery(
         unarchive: request.unarchive,
         activeTurnBehavior: request.activeTurnBehavior,
         clearPendingPermissions: request.clearPendingPermissions,
+        idleOnly: request.idleOnly,
+        admit: request.admit,
+        beforeDispatch: request.beforeDispatch,
         logger: context.logger,
       });
+      if (result.disposition === "turn_started") {
+        await waitForAgentRunStartWithTimeout(
+          context.agentManager,
+          request.recipientId,
+          result.started,
+        );
+      }
       return result.disposition;
     },
     onError: (error, request) =>
@@ -515,17 +538,14 @@ export async function sendPreparedPromptToAgent(
   return await dispatchPrompt(params, { prepared: true });
 }
 
-async function dispatchPrompt(
-  params: SendPromptToAgentParams,
-  options: { prepared: boolean },
-): Promise<PromptDispatchResult> {
+async function loadPromptRecipient(params: SendPromptToAgentParams): Promise<boolean> {
   const unarchive = params.unarchive ?? true;
 
   const record = await params.agentStorage.get(params.agentId);
   let archivedAtToRestore: string | null = null;
   if (record?.archivedAt) {
     if (!unarchive) {
-      return { disposition: "out_of_band" };
+      return false;
     }
     if (await unarchiveAgentState(params.agentStorage, params.agentManager, params.agentId)) {
       archivedAtToRestore = record.archivedAt;
@@ -547,9 +567,24 @@ async function dispatchPrompt(
     throw error;
   }
 
+  return true;
+}
+
+async function dispatchPrompt(
+  params: SendPromptToAgentParams,
+  options: { prepared: boolean },
+): Promise<PromptDispatchResult> {
+  if (!(await loadPromptRecipient(params))) return { disposition: "out_of_band" };
+
   if (params.sessionMode) {
     await params.agentManager.setAgentMode(params.agentId, params.sessionMode);
   }
+
+  await params.beforeDispatch?.();
+  if (params.idleOnly && params.agentManager.hasInFlightRun(params.agentId))
+    throw new AgentTurnBusyError();
+  if (!params.idleOnly && params.admit?.() === false)
+    throw new Error("Queued agent message was withdrawn");
 
   let prompt: AgentPromptInput;
   let messageId = params.messageId;
@@ -592,6 +627,8 @@ async function dispatchPrompt(
   try {
     const result = await startAgentRun(params.agentManager, params.agentId, prompt, params.logger, {
       replaceRunning: true,
+      idleOnly: params.idleOnly,
+      admit: params.admit,
       // Agent- and system-sent messages steer by default; user commands keep
       // interrupt (ADR-0029 decision 2, amending ADR-0013).
       activeTurnBehavior: params.activeTurnBehavior ?? (params.source ? "steer" : undefined),

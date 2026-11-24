@@ -9,6 +9,7 @@ import type {
 
 const agentIdSchema = z.string().min(1);
 const sourceSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("change-request-update"), url: z.url() }),
   z.object({
     kind: z.literal("agent-message"),
     agentId: agentIdSchema,
@@ -66,10 +67,14 @@ function unescapeXml(value: string): string | null {
 
 export function formatAgentMessage(message: AgentMessage): string {
   const { source } = message;
-  const attributes = source
-    ? `kind="${source.kind}" source-agent-id="${escapeXml(source.agentId)}"`
-    : 'kind="user-message"';
-  const title = source?.title ? ` source-agent-title="${escapeXml(source.title)}"` : "";
+  let attributes = 'kind="user-message"';
+  let title = "";
+  if (source?.kind === "change-request-update") {
+    attributes = `kind="change-request-update" url="${escapeXml(source.url)}"`;
+  } else if (source) {
+    attributes = `kind="${source.kind}" source-agent-id="${escapeXml(source.agentId)}"`;
+    if (source.title) title = ` source-agent-title="${escapeXml(source.title)}"`;
+  }
   const event = source?.kind === "agent-notification" ? ` event="${source.event}"` : "";
   return `<jagentdesk-system version="1" ${attributes} message-id="${escapeXml(message.id)}"${title}${event}>\n${escapeXml(message.text)}\n</jagentdesk-system>`;
 }
@@ -94,6 +99,7 @@ export function parseAgentMessage(text: string): AgentMessage | null {
   }
   const source = sourceSchema.safeParse({
     kind: attributes.get("kind"),
+    url: attributes.get("url"),
     agentId: attributes.get("source-agent-id"),
     event: attributes.get("event"),
     title: attributes.get("source-agent-title"),
@@ -181,6 +187,16 @@ export function projectAgentMessage(item: AgentTimelineItem): AgentTimelineItem 
   const { source } = message;
   if (!source) {
     return { ...item, text: message.text, clientMessageId: message.id };
+  }
+  if (source.kind === "change-request-update") {
+    return {
+      type: "tool_call",
+      callId: `jagentdesk-change-request:${message.id}`,
+      name: "change_request_update",
+      status: "completed",
+      error: null,
+      detail: { type: "plain_text", text: message.text },
+    };
   }
   return {
     type: "tool_call",

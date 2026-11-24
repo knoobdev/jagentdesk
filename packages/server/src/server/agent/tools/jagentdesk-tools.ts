@@ -1,3 +1,5 @@
+import type { ChangeRequestWatches } from "../change-request-watches/index.js";
+import { changeRequestStatusSchema } from "../../../services/change-request-source.js";
 import type { ManagedAgent } from "../agent-manager.js";
 import { admitsAgent } from "../directory.js";
 import type { ProviderJAgentDeskToolsPolicy } from "@jagentdesk/protocol/provider-config";
@@ -160,6 +162,7 @@ import { slugifySkillName } from "../../skills-native/frontmatter.js";
 import type { AgentPermissionResponse } from "../agent-sdk-types.js";
 
 export interface JAgentDeskToolHostDependencies {
+  changeRequestWatches?: ChangeRequestWatches;
   builtinPlugins?: ReadonlySet<BuiltinPluginId>;
   jagentdeskToolPolicy?: ProviderJAgentDeskToolsPolicy;
   agentManager: AgentManager;
@@ -5202,7 +5205,7 @@ function createToolCatalog(
     activeTurnBehavior: "steer" | "interrupt";
     background: boolean;
     notifyOnFinish: boolean;
-    armFinishNotification: () => boolean;
+    armFinishNotification: () => Promise<boolean>;
   }) {
     const {
       agentId,
@@ -5233,8 +5236,8 @@ function createToolCatalog(
         sessionMode,
         activeTurnBehavior,
         // Arm right before dispatch so the notification follows this task's turn.
-        beforeDispatch: () => {
-          if (background) armFinishNotification();
+        beforeDispatch: async () => {
+          if (background) await armFinishNotification();
         },
       },
     );
@@ -5263,7 +5266,7 @@ function createToolCatalog(
     notifying =
       result.timedOut &&
       agentManager.getAgent(agentId)?.lifecycle === "running" &&
-      armFinishNotification();
+      (await armFinishNotification());
     return {
       content: [],
       structuredContent: ensureValidJson({
@@ -5305,17 +5308,18 @@ function createToolCatalog(
     }) => {
       validateBotPromptCaller(agentId, sessionMode);
       validateSendPromptCaller(callerOrchestrationContext, orchestrationRuntime, agentId);
-      function armFinishNotification(): boolean {
+      async function armFinishNotification(): Promise<boolean> {
         if (!callerAgentId || !notifyOnFinish) {
           return false;
         }
-        setupFinishNotification({
+        const registration = setupFinishNotification({
           agentManager,
           agentStorage,
           childAgentId: agentId,
           callerAgentId,
           logger: childLogger,
         });
+        await registration.ready;
         return true;
       }
 
@@ -5336,6 +5340,7 @@ function createToolCatalog(
         });
       }
 
+      let notifying = false;
       const dispatchResult = await sendPromptToAgent({
         agentManager,
         agentStorage,
@@ -5346,6 +5351,9 @@ function createToolCatalog(
         sessionMode,
         skillIds,
         skillInvocation: options.skillsStorage ?? null,
+        beforeDispatch: async () => {
+          if (background) notifying = await armFinishNotification();
+        },
         logger: childLogger,
       }).catch((error) => {
         if (error instanceof AgentNotFoundError) {
@@ -5361,17 +5369,17 @@ function createToolCatalog(
         });
         // The wait ran out while the agent keeps working, so its result arrives as a
         // finish notification instead of in this response.
-        const notifying =
+        const timeoutNotifying =
           result.timedOut &&
           agentManager.getAgent(agentId)?.lifecycle === "running" &&
-          armFinishNotification();
+          (await armFinishNotification());
 
         const responseData = {
           success: true,
           status: result.status,
           lastMessage: result.lastMessage,
           permission: sanitizePermissionRequest(result.permission),
-          ...(notifying ? { guidance: PROMPTED_AGENT_NOTIFICATION_GUIDANCE } : {}),
+          ...(timeoutNotifying ? { guidance: PROMPTED_AGENT_NOTIFICATION_GUIDANCE } : {}),
         };
         const validJson = ensureValidJson(responseData);
 
@@ -5381,8 +5389,6 @@ function createToolCatalog(
         };
         return response;
       }
-
-      const notifying = armFinishNotification();
 
       // Return once the provider has accepted the turn, so the status reports it running.
       if (dispatchResult.disposition === "turn_started") {
@@ -6053,6 +6059,61 @@ function createToolCatalog(
       };
     },
   );
+
+  if (options.changeRequestWatches) {
+    const watches = options.changeRequestWatches;
+    const inputSchema = { url: z.string().trim().min(1).describe("URL of a GitHub pull request.") };
+    registerTool(
+      "subscribe_change_request",
+      {
+        title: "Watch change request",
+        description:
+          "Watch a pull request for check failures, passing checks, new comments, reviews, and closure. Returns the current state and sends future updates after your current turn.",
+        inputSchema,
+        outputSchema: {
+          url: z.string(),
+          ...changeRequestStatusSchema.shape,
+          subscribed: z.boolean(),
+          stale: z
+            .boolean()
+            .describe("The last stored status is shown because a fresh read is pending or failed."),
+        },
+      },
+      async ({ url }) => {
+        if (!callerAgentId) {
+          throw new JAgentDeskToolInputError(
+            "subscribe_change_request requires an agent-scoped session",
+          );
+        }
+        resolveCallerAgent();
+        return {
+          content: [],
+          structuredContent: ensureValidJson(await watches.subscribe(callerAgentId, url)),
+        };
+      },
+    );
+    registerTool(
+      "unsubscribe_change_request",
+      {
+        title: "Stop watching change request",
+        description: "Stop your watch and discard its unsent updates.",
+        inputSchema,
+        outputSchema: { url: z.string(), removed: z.boolean() },
+      },
+      async ({ url }) => {
+        if (!callerAgentId) {
+          throw new JAgentDeskToolInputError(
+            "unsubscribe_change_request requires an agent-scoped session",
+          );
+        }
+        resolveCallerAgent();
+        return {
+          content: [],
+          structuredContent: ensureValidJson(await watches.unsubscribe(callerAgentId, url)),
+        };
+      },
+    );
+  }
 
   registerTool(
     "create_heartbeat",

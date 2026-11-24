@@ -25,7 +25,7 @@ import {
 } from "./session/workspace-base-branch/service.js";
 import type { WorkspaceBaseBranchSetRequest } from "@jagentdesk/protocol/messages";
 import {
-  isHeartbeatBackgroundWorkItem,
+  isDaemonBackgroundWorkItem,
   type AgentBackgroundWorkItem,
 } from "./agent/background-work/index.js";
 import equal from "fast-deep-equal";
@@ -2378,7 +2378,7 @@ export class Session {
       return items;
     }
     return items.map((item) => {
-      if (!isHeartbeatBackgroundWorkItem(item)) return item;
+      if (!isDaemonBackgroundWorkItem(item)) return item;
       const { canStop: _canStop, stopToken: _stopToken, ...visible } = item;
       return visible;
     });
@@ -8580,13 +8580,20 @@ export class Session {
     }
   }
 
-  private async resolveCreationCaller(callerAgentId?: string): Promise<CreateAgentCaller | null> {
+  private async resolveCreationCaller(
+    callerAgentId?: string,
+  ): Promise<(CreateAgentCaller & { background?: boolean }) | null> {
     if (!callerAgentId) return null;
     const stored = await this.agentStorage.get(callerAgentId);
     if (stored?.archivedAt) throw new Error(`Caller agent ${callerAgentId} not found`);
     const caller = this.agentManager.getAgent(callerAgentId) ?? stored;
     if (!caller) throw new Error(`Caller agent ${callerAgentId} not found`);
-    return { id: caller.id, cwd: caller.cwd, workspaceId: caller.workspaceId };
+    return {
+      id: caller.id,
+      cwd: caller.cwd,
+      workspaceId: caller.workspaceId,
+      background: caller.background,
+    };
   }
 
   private async callerWorkspaceForBackground(callerAgentId?: string): Promise<string | undefined> {
