@@ -3203,6 +3203,18 @@ class ClaudeAgentSession implements AgentSession {
     return this.persistence;
   }
 
+  async canStopRuntime(): Promise<boolean> {
+    return (
+      !this.activeForegroundTurnId &&
+      !this.autonomousTurn &&
+      !this.mainTurnInFlight &&
+      this.unstartedMessageUuids.size === 0 &&
+      this.pendingPermissions.size === 0 &&
+      this.processingSdkMessages === 0 &&
+      this.runtimeSafety.canStopRuntime()
+    );
+  }
+
   async close(): Promise<void> {
     this.logger.trace(
       {

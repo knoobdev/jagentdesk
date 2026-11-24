@@ -2244,6 +2244,11 @@ export const ar: TranslationResources = {
           editAccessibilityLabel: "تعديل الطلب",
         },
         unavailable: "Connect to this host to manage agents",
+        idleRuntimeCleanup: {
+          title: "تحرير الوكلاء الخاملين",
+          hint: "تحرير الذاكرة بعد ساعة من الخمول.",
+          info: "يوقف عملية الوكيل مع الاحتفاظ بمحادثته. أرسل رسالة لاستئنافها.\n\nيمنع العمل النشط والإشعارات المعلّقة وفحوصات أمان المزوّد عملية التنظيف.",
+        },
       },
       workspaces: {
         unavailable: "Connect to this host to manage workspaces",

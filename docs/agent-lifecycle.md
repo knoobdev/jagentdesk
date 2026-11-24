@@ -32,8 +32,12 @@ the agent runs through `ensureAgentLoaded()`, which resumes the durable provider
 same JAgentDesk agent ID. Provider history is not appended again when the canonical timeline is already
 primed.
 
-Idle agents remain resident indefinitely. Runtime closure happens only through an explicit lifecycle
-action such as archive, replacement, reload, workspace teardown, or daemon shutdown.
+Idle runtimes are released after one hour while their saved conversations remain resumable.
+Reopening a runtime starts a fresh idle window without changing sidebar activity timestamps.
+Tracked background work, outstanding local finish subscriptions, queued messages, and provider
+safety vetoes keep runtimes resident. Claude session crons and `/loop` wakeups are process-local
+work and prevent release. Hosts can disable cleanup live with `agents.idleRuntimeCleanup` in
+Settings → host.
 
 ### Cancellation
 

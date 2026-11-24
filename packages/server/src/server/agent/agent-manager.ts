@@ -1,3 +1,4 @@
+import type { RuntimeCleanupCandidate } from "./idle-runtime-cleanup/index.js";
 import type { ProviderJAgentDeskToolsPolicy } from "@jagentdesk/protocol/provider-config";
 import { isJAgentDeskToolPolicyEnabled } from "./jagentdesk-tool-policy.js";
 import type { AttachedAgentTool, PluginAgentToolsRuntime } from "../plugins/agent-tools.js";
@@ -864,6 +865,8 @@ export class AgentManager {
   private readonly agentRegistrationTasks = new Set<Promise<void>>();
   private readonly inFlightAgentCloses = new Map<string, Promise<void>>();
   private readonly historySessions = new WeakSet<AgentSession>();
+  private readonly runtimeCleanupIdentities = new WeakMap<AgentSession, object>();
+  private readonly collectingRuntimes = new Set<string>();
   private readonly lifecycleMutationTails = new Map<string, Promise<void>>();
   private readonly pendingCancellations = new Map<string, Promise<unknown>>();
   private readonly agentStreamCoalescer: AgentStreamCoalescer;
@@ -1377,6 +1380,8 @@ export class AgentManager {
 
   async waitForAgentClose(agentId: string): Promise<void> {
     await this.inFlightAgentCloses?.get(agentId)?.catch(() => undefined);
+    if (this.collectingRuntimes.has(agentId))
+      await this.lifecycleMutationTails.get(agentId)?.catch(() => undefined);
   }
 
   getTimeline(id: string): AgentTimelineItem[] {
@@ -1916,13 +1921,72 @@ export class AgentManager {
     }
   }
 
+  /** Capture runtime capabilities without handing lifecycle ownership to the collector. */
+  getRuntimeCleanupCandidates(): RuntimeCleanupCandidate[] {
+    if (!this.registry) return [];
+    const candidates: RuntimeCleanupCandidate[] = [];
+    for (const agent of this.agents.values()) {
+      const updatedAt = agent.updatedAt;
+      let identity = this.runtimeCleanupIdentities.get(agent.session);
+      if (!identity) {
+        identity = Object.freeze({});
+        this.runtimeCleanupIdentities.set(agent.session, identity);
+      }
+      const isEligible = () =>
+        this.agents.get(agent.id) === agent &&
+        agent.updatedAt === updatedAt &&
+        this.runtimeHasNoPendingWork(agent);
+      candidates.push({
+        identity,
+        agentId: agent.id,
+        parentAgentId: getParentAgentIdFromLabels(agent.labels) ?? undefined,
+        provider: agent.provider,
+        sessionId: agent.persistence?.sessionId ?? null,
+        lastActivityAt: updatedAt.getTime(),
+        isEligible,
+        canStopRuntime: agent.session.canStopRuntime?.bind(agent.session),
+        closeIfEligible: async (revalidate) => {
+          if (!agent.persistence?.sessionId) return false;
+          // Block prompt admission before entering the close lane. A skipped close also
+          // releases this barrier, so the waiting prompt keeps the existing runtime.
+          this.collectingRuntimes.add(agent.id);
+          try {
+            return await this.runLifecycleMutation(agent.id, () =>
+              this.closeAgentRuntime(agent.id, () => isEligible() && revalidate()),
+            );
+          } finally {
+            this.collectingRuntimes.delete(agent.id);
+          }
+        },
+      });
+    }
+    return candidates;
+  }
+
+  private runtimeHasNoPendingWork(agent: LiveManagedAgent): boolean {
+    return (
+      agent.lifecycle === "idle" &&
+      !agent.internal &&
+      !this.backgroundWork.summary(agent.id)?.count &&
+      agent.activeForegroundTurnId === null &&
+      !this.runs.hasRun(agent.id) &&
+      !agent.pendingReplacement &&
+      agent.pendingPermissions.size === 0 &&
+      agent.inFlightPermissionResponses.size === 0 &&
+      (this.collectingRuntimes.has(agent.id) || !this.lifecycleMutationTails.has(agent.id)) &&
+      !this.foregroundMutationTails.has(agent.id) &&
+      !this.sessionEventTails.has(agent.id) &&
+      !this.providerSubagents.list(agent.id).some((child) => child.status === "running")
+    );
+  }
+
   closeAgent(agentId: string): Promise<void> {
     const existing = this.inFlightAgentCloses.get(agentId);
     if (existing) {
       return existing;
     }
 
-    const close = this.closeAgentRuntime(agentId);
+    const close = this.closeAgentRuntime(agentId).then(() => undefined);
     this.inFlightAgentCloses.set(agentId, close);
     const clearClose = () => {
       if (this.inFlightAgentCloses.get(agentId) === close) {
@@ -1933,9 +1997,9 @@ export class AgentManager {
     return close;
   }
 
-  private async closeAgentRuntime(agentId: string): Promise<void> {
+  private async closeAgentRuntime(agentId: string, canClose?: () => boolean): Promise<boolean> {
     const live = this.agents.get(agentId);
-    if (!live && (await this.registry?.get(agentId))) return;
+    if (!live && (await this.registry?.get(agentId))) return false;
     const agent = this.requireAgent(agentId);
     this.logger.trace(
       {
@@ -1950,6 +2014,7 @@ export class AgentManager {
       "agent.manager.close.start",
     );
     await this.drainSessionEvents(agentId);
+    if (canClose && !canClose()) return false;
     let closeError: unknown;
     try {
       await agent.session.close();
@@ -1985,6 +2050,7 @@ export class AgentManager {
     if (persistError !== undefined) {
       throw persistError;
     }
+    return true;
   }
 
   private cancelRunningProviderSubagents(parentAgentId: string): void {
@@ -2693,7 +2759,11 @@ export class AgentManager {
     options?: AgentRunOptions,
     onAccepted?: () => void,
   ): Promise<boolean> {
-    if (this.inFlightAgentCloses.has(agentId) || !this.agents.has(agentId)) {
+    if (
+      this.collectingRuntimes.has(agentId) ||
+      this.inFlightAgentCloses.has(agentId) ||
+      !this.agents.has(agentId)
+    ) {
       await this.waitForAgentClose(agentId);
       await ensureAgentLoaded(agentId, {
         agentManager: this,
@@ -2706,6 +2776,7 @@ export class AgentManager {
     if (!handler) {
       return false;
     }
+    this.touchUpdatedAt(agent);
     onAccepted?.();
     if (options?.clientMessageId) {
       this.recordSubmittedPrompt(agent, prompt, options.clientMessageId);
@@ -2726,7 +2797,7 @@ export class AgentManager {
       }
       this.dispatchStream(agent.id, event, { timestamp: new Date().toISOString() });
     };
-    void (async () => {
+    void this.runForegroundMutation(agentId, async () => {
       try {
         await handler.run({ emit: dispatch });
       } catch (error) {
@@ -2737,7 +2808,7 @@ export class AgentManager {
           item: { type: "assistant_message", text: `[Error] ${text}` },
         });
       }
-    })();
+    });
     return true;
   }
 
@@ -2908,12 +2979,29 @@ export class AgentManager {
     yield* this.streamAgent(agentId, prompt, options, promptStart);
   }
 
+  private async *streamAfterRuntimeCollection(
+    agentId: string,
+    prompt: AgentPromptInput,
+    options?: AgentRunOptions,
+    promptStart?: ForegroundPromptStart,
+  ): AsyncGenerator<AgentStreamEvent> {
+    await this.waitForAgentClose(agentId);
+    await ensureAgentLoaded(agentId, {
+      agentManager: this,
+      agentStorage: this.requireRegistry(),
+      logger: this.logger,
+    });
+    yield* this.streamAgent(agentId, prompt, options, promptStart);
+  }
+
   streamAgent(
     agentId: string,
     prompt: AgentPromptInput,
     options?: AgentRunOptions,
     promptStart?: ForegroundPromptStart,
   ): AsyncGenerator<AgentStreamEvent> {
+    if (this.collectingRuntimes.has(agentId) || (!this.agents.has(agentId) && this.registry))
+      return this.streamAfterRuntimeCollection(agentId, prompt, options, promptStart);
     const existingAgent = this.requireSessionAgent(agentId);
     if (this.historySessions.has(existingAgent.session))
       return this.streamAfterHistoryLoad(agentId, prompt, options, promptStart);

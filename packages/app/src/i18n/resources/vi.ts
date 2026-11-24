@@ -266,6 +266,15 @@ export const vi = {
     },
   },
   settings: {
+    host: {
+      agents: {
+        idleRuntimeCleanup: {
+          title: "Giải phóng agent nhàn rỗi",
+          hint: "Giải phóng bộ nhớ sau một giờ không hoạt động.",
+          info: "Dừng tiến trình agent và giữ lại cuộc hội thoại. Gửi tin nhắn để tiếp tục.\n\nCông việc đang chạy, thông báo đang chờ và kiểm tra an toàn của nhà cung cấp ngăn việc giải phóng.",
+        },
+      },
+    },
     hostSections: {
       tools: "Công cụ",
     },

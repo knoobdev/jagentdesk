@@ -2260,6 +2260,11 @@ export const ja: TranslationResources = {
           editAccessibilityLabel: "メッセージを編集",
         },
         unavailable: "エージェントを管理するにはこのホストに接続してください",
+        idleRuntimeCleanup: {
+          title: "アイドル状態のエージェントを解放",
+          hint: "1 時間のアイドル状態の後にメモリを解放します。",
+          info: "会話を保持したままエージェントのプロセスを停止します。メッセージを送信すると再開します。\n\n実行中の作業、保留中の通知、プロバイダーの安全性チェックがある場合は解放しません。",
+        },
       },
       workspaces: {
         unavailable: "ワークスペースを管理するにはこのホストに接続してください",

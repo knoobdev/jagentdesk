@@ -1,3 +1,4 @@
+import { createIdleRuntimeCleanup } from "./agent/idle-runtime-cleanup/index.js";
 import { createChangeRequestRouter } from "../services/change-request-router.js";
 import { createForgeService } from "../services/forge-registry.js";
 import { createForgeResolver } from "../services/forge-resolver.js";
@@ -24,6 +25,7 @@ import { closeAgentMessageDelivery } from "./agent/agent-prompt.js";
 import {
   FinishSubscriptionStore,
   restoreFinishSubscriptions,
+  hasOutstandingFinishSubscriptions,
   suspendFinishNotifications,
 } from "./agent/finish-subscriptions/index.js";
 import { ensureToolDirsOnPath, HostToolInstaller } from "./host-tools/installer.js";
@@ -540,6 +542,7 @@ export interface JAgentDeskDaemonConfig {
   dictationFinalTimeoutMs?: number;
   downloadTokenTtlMs?: number;
   agentProviderSettings?: AgentProviderRuntimeSettingsMap;
+  idleRuntimeCleanup?: boolean;
   metadataGeneration?: {
     providers?: Array<{
       provider: string;
@@ -670,6 +673,7 @@ function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): Mutab
     },
     autoArchiveAfterMerge: config.autoArchiveAfterMerge ?? false,
     enableTerminalAgentHooks: config.enableTerminalAgentHooks ?? false,
+    idleRuntimeCleanup: config.idleRuntimeCleanup !== false,
     appendSystemPrompt: config.appendSystemPrompt ?? "",
     resumeOnStartup: config.resumeOnStartup === true,
     resumePrompt: config.resumePrompt ?? "Resume working.",
@@ -1914,6 +1918,20 @@ export async function createJAgentDeskDaemon(
     stop: () => botsService.stop(),
   });
 
+  const idleRuntimeCleanup = createIdleRuntimeCleanup({
+    enabled: daemonConfigStore.get().idleRuntimeCleanup !== false,
+    runtimes: () => agentManager.getRuntimeCleanupCandidates(),
+    isProtected: (agentId) =>
+      hasOutstandingFinishSubscriptions(agentManager, agentId) ||
+      getAgentMessageDelivery({ agentManager, agentStorage, logger }).hasPending(agentId),
+    logger,
+  });
+
+  const unsubscribeIdleRuntimeCleanup = connectIdleRuntimeCleanupConfig(
+    daemonConfigStore,
+    idleRuntimeCleanup,
+  );
+
   const createAgentToolHostDependencies = (
     runtime: JAgentDeskToolRuntimeContext,
   ): JAgentDeskToolHostDependencies => ({
@@ -2523,6 +2541,8 @@ export async function createJAgentDeskDaemon(
     await hubRelationships.stop();
     workspaceReconciliation.dispose();
     scriptHealthMonitor.stop();
+    unsubscribeIdleRuntimeCleanup();
+    await idleRuntimeCleanup.close();
     // Graceful shutdown delivers agent messages still waiting in a 2 s window
     // (ADR-0029 decision 3); a crash loses them.
     wsServer?.prepareForShutdown();
@@ -2724,4 +2744,12 @@ async function startSpecModeService(params: {
     (await service.isEnabled(agentId)) ? "Turn off Spec mode to use autonomous mode" : null,
   );
   return service;
+}
+
+export function connectIdleRuntimeCleanupConfig(
+  store: DaemonConfigStore,
+  cleanup: Pick<ReturnType<typeof createIdleRuntimeCleanup>, "setEnabled">,
+): () => void {
+  cleanup.setEnabled(store.get().idleRuntimeCleanup !== false);
+  return store.onFieldChange("idleRuntimeCleanup", (value) => cleanup.setEnabled(value !== false));
 }

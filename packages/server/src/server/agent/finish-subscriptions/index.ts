@@ -48,6 +48,10 @@ export class FinishSubscriptionStore {
     );
   }
 
+  hasPendingForCaller(agentId: string): boolean {
+    return this.cache?.some((record) => record.callerAgentId === agentId) ?? false;
+  }
+
   async list(): Promise<FinishSubscriptionRecord[]> {
     await this.writes;
     return [...(await this.load())];
@@ -225,4 +229,8 @@ export async function restoreFinishSubscriptions(
     params.logger.info({ restored }, "Restored finish notifications for the parents' next turns");
   }
   return restored;
+}
+
+export function hasOutstandingFinishSubscriptions(agentManager: object, agentId: string): boolean {
+  return states.get(agentManager)?.store.hasPendingForCaller(agentId) ?? false;
 }
