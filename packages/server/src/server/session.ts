@@ -6855,7 +6855,7 @@ export class Session {
           : null;
 
       if (agent?.session?.listCommands) {
-        const commands = await agent.session.listCommands();
+        const commands = dedupeSlashCommands(await agent.session.listCommands());
         this.emit({
           type: "list_commands_response",
           payload: {
@@ -6879,7 +6879,9 @@ export class Session {
             : {}),
         };
 
-        const commands = await this.agentManager.listDraftCommands(sessionConfig);
+        const commands = dedupeSlashCommands(
+          await this.agentManager.listDraftCommands(sessionConfig),
+        );
         this.emit({
           type: "list_commands_response",
           payload: {
@@ -10224,4 +10226,15 @@ function normalizeCloneRepository(input: {
 
 function isValidGitHubRepoSegment(value: string): boolean {
   return /^[A-Za-z0-9._-]+$/u.test(value);
+}
+
+function dedupeSlashCommands<T extends { name: string }>(commands: readonly T[]): T[] {
+  const seen = new Set<string>();
+  const unique: T[] = [];
+  for (const command of commands) {
+    if (seen.has(command.name)) continue;
+    seen.add(command.name);
+    unique.push(command);
+  }
+  return unique;
 }

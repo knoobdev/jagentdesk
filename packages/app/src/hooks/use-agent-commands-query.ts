@@ -32,6 +32,18 @@ export interface AgentCommandsClient {
   listCommands(options: ListAgentCommandsOptions): ReturnType<DaemonClient["listCommands"]>;
 }
 
+// COMPAT(dedupeListCommands): added in v0.17.0, remove after 2027-05-20 once daemon floor >= v0.17.0.
+function dedupeSlashCommands(commands: readonly AgentSlashCommand[]): AgentSlashCommand[] {
+  const seen = new Set<string>();
+  const unique: AgentSlashCommand[] = [];
+  for (const command of commands) {
+    if (seen.has(command.name)) continue;
+    seen.add(command.name);
+    unique.push(command);
+  }
+  return unique;
+}
+
 export async function fetchAgentCommands(input: {
   client: AgentCommandsClient;
   agentId: string;
@@ -41,7 +53,7 @@ export async function fetchAgentCommands(input: {
     agentId: input.agentId,
     draftConfig: input.draftConfig,
   });
-  return response.commands as AgentSlashCommand[];
+  return dedupeSlashCommands(response.commands as AgentSlashCommand[]);
 }
 
 interface UseAgentCommandsQueryOptions {
