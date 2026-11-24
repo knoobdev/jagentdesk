@@ -349,6 +349,7 @@ export const ru: TranslationResources = {
       failedRetry: "Диктант не удался. Нажмите «Повторить».",
     },
     question: {
+      responseFailed: "Не удалось отправить ответ. Попробуйте ещё раз.",
       submit: "Представлять на рассмотрение",
       next: "Далее",
       answerPlaceholder: "Введите ответ...",

@@ -351,6 +351,7 @@ export const fr: TranslationResources = {
       failedRetry: "La dictée a échoué. Appuyez sur réessayer.",
     },
     question: {
+      responseFailed: "Impossible d’envoyer votre réponse. Réessayez.",
       submit: "Soumettre",
       next: "Suivant",
       answerPlaceholder: "Tapez votre réponse...",
