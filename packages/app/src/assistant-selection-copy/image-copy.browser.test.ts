@@ -32,3 +32,13 @@ it.each(["<img src='blob:https://localhost/preview'>", "<span>Image failed to lo
     expect(copy(range)).toBe("![chart](https://localhost/chart.png)");
   },
 );
+
+it("omits the image when a drag starts in the gap below it", () => {
+  const message = mountMessage(
+    '<div data-jagentdesk-markdown-tag="img" data-jagentdesk-markdown-src="https://localhost/chart.png"><div><span></span><img src="blob:https://localhost/preview"></div></div><div data-jagentdesk-markdown-tag="p">After the image.</div>',
+  );
+  const range = document.createRange();
+  range.setStart(message.querySelector("span")!, 0);
+  range.setEnd(message.lastElementChild!.firstChild!, 9);
+  expect(copy(range)).toBe("After the");
+});
