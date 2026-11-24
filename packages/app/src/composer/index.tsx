@@ -94,7 +94,7 @@ import {
   persistAttachmentFromFileUri,
 } from "@/attachments/service";
 import { resolveAgentControlsMode } from "@/composer/agent-controls/mode";
-import { useKeyboardShiftStyle } from "@/hooks/use-keyboard-shift-style";
+import { useKeyboardShiftStyle } from "@/keyboard/shift";
 import { useKeyboardActionHandler } from "@/hooks/use-keyboard-action-handler";
 import type { KeyboardActionDefinition } from "@/keyboard/keyboard-action-dispatcher";
 import type { MessageInputKeyboardActionKind } from "@/keyboard/actions";

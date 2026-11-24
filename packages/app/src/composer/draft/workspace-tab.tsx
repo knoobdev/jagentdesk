@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import ReanimatedAnimated from "react-native-reanimated";
 import { StyleSheet } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useKeyboardShiftStyle } from "@/hooks/use-keyboard-shift-style";
+import { useKeyboardShiftStyle } from "@/keyboard/shift";
 import { useContainerWidthBelow } from "@/hooks/use-container-width";
 import invariant from "tiny-invariant";
 import { Composer } from "@/composer";

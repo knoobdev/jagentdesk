@@ -62,7 +62,7 @@ import {
   useAgentScreenStateMachine,
 } from "@/hooks/use-agent-screen-state-machine";
 import { useArchiveAgent } from "@/hooks/use-archive-agent";
-import { useKeyboardShiftStyle } from "@/hooks/use-keyboard-shift-style";
+import { useKeyboardShiftStyle } from "@/keyboard/shift";
 import { useContainerWidthBelow } from "@/hooks/use-container-width";
 import { reconcileMissingAgentStateWithPresentAgent } from "@/panels/agent-panel-load-state";
 import { usePaneContext, usePaneFocus } from "@/panels/pane-context";

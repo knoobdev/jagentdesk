@@ -66,7 +66,7 @@ import {
   useWorkspaceDraftSubmissionStore,
   type PendingWorkspaceDraftSetup,
 } from "@/stores/workspace-draft-submission-store";
-import { useKeyboardShiftStyle } from "@/hooks/use-keyboard-shift-style";
+import { useKeyboardShiftStyle } from "@/keyboard/shift";
 import { useKeyboardActionHandler } from "@/hooks/use-keyboard-action-handler";
 import type { KeyboardActionId } from "@/keyboard/keyboard-action-dispatcher";
 import { useFormPreferences } from "@/hooks/use-form-preferences";

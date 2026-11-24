@@ -29,7 +29,7 @@ import { MobilePanelOverlay } from "@/mobile-panels/presentation";
 import { HEADER_INNER_HEIGHT } from "@/constants/layout";
 import { GitDiffPane } from "@/git/diff-pane";
 import { FileExplorerPane } from "./file-explorer-pane";
-import { useKeyboardShiftStyle } from "@/hooks/use-keyboard-shift-style";
+import { useKeyboardShiftStyle } from "@/keyboard/shift";
 import { useHasOwnedWindowChromeObstruction, WindowChromeSafeArea } from "@/utils/desktop-window";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { RetainedPanelActivity } from "@/components/retained-panel";
