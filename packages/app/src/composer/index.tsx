@@ -1,7 +1,9 @@
+import { PluginComposerPills } from "@/plugins/buttons/view";
 import { BuiltinPluginGate } from "@/plugins/builtin/gate";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
   View,
+  ScrollView,
   Pressable,
   Text,
   StyleSheet as RNStyleSheet,
@@ -2229,6 +2231,22 @@ export function Composer({
             {sendErrorNode}
 
             <View style={styles.messageInputStack}>
+              {agentState.provider && workspaceId ? (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.pluginComposerTrack}
+                  contentContainerStyle={styles.pluginComposerTrackContent}
+                  testID="plugin-composer-track"
+                >
+                  <PluginComposerPills
+                    serverId={serverId}
+                    workspaceId={workspaceId}
+                    agentId={agentId}
+                    compact={isCompactLayout}
+                  />
+                </ScrollView>
+              ) : null}
               {topContent}
               <View ref={messageInputContainerRef} style={styles.messageInputContainer}>
                 <AutocompletePopover
@@ -2353,6 +2371,8 @@ const styles = StyleSheet.create((theme: Theme) => ({
     maxWidth: MAX_CONTENT_WIDTH,
     gap: theme.spacing[3],
   },
+  pluginComposerTrack: { flexGrow: 0, minHeight: 28 },
+  pluginComposerTrackContent: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
   messageInputStack: {
     width: "100%",
   },

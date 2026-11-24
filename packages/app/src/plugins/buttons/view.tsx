@@ -14,7 +14,7 @@ import {
 } from "react";
 import { Platform, Pressable, Text, View, useWindowDimensions } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { AlertCircle, ChevronDown, MoreHorizontal } from "lucide-react-native";
+import { AlertCircle, ChevronDown, ChevronUp, MoreHorizontal } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import {
   MenuRoot,
@@ -273,7 +273,8 @@ function ButtonControl({ view }: { view: ButtonView }) {
   const composer = entry.placement === "composer";
   const disabled = button.disabled || entry.pending;
   const expanded = button.behavior.kind !== "action";
-  const chevron = !composer && !props.layout.compact && expanded;
+  const chevron = expanded && (composer || !props.layout.compact);
+  const Chevron = composer ? ChevronUp : ChevronDown;
   let label = button.label;
   if (composer) label = button.label ?? button.title;
   else if (props.layout.compact) label = undefined;
@@ -310,7 +311,7 @@ function ButtonControl({ view }: { view: ButtonView }) {
       ) : null}
       {chevron ? (
         <View testID="plugin-button-chevron">
-          <ChevronDown size={12} color={props.theme.colors.foregroundMuted} />
+          <Chevron size={12} color={props.theme.colors.foregroundMuted} />
         </View>
       ) : null}
     </>
