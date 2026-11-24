@@ -35,17 +35,21 @@ import {
 } from "react";
 import {
   Pressable,
+  ScrollView,
   StyleSheet as RNStyleSheet,
   Text,
   useWindowDimensions,
   View,
   type PressableStateCallbackType,
 } from "react-native";
-import { Gesture } from "react-native-gesture-handler";
+import { Gesture, ScrollView as GHScrollView } from "react-native-gesture-handler";
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
+import {
+  TitlebarDragRegion,
+  WINDOW_CONTENT_DATASET,
+} from "@/components/desktop/titlebar-drag-region";
 import { resolveDesktopSidebarWidth } from "@/components/desktop-sidebar-layout";
 import { HostPicker } from "@/components/hosts/host-picker";
 import { MobileNavGrid } from "@/components/sidebar/mobile-nav-grid";
@@ -1011,7 +1015,13 @@ function MobileSidebar({
           <ClickUpSidebarHeader onBeforeNavigate={closeSidebar} reserveCloseButton />
         ) : null}
         {clusterRoute || databaseRoute ? null : (
-          <View style={styles.sidebarHeaderGroup}>
+          <GHScrollView
+            simultaneousHandlers={closeGestureRef}
+            style={styles.navScroll}
+            contentContainerStyle={styles.sidebarHeaderGroup}
+            showsVerticalScrollIndicator={false}
+            testID="sidebar-nav-scroll"
+          >
             {isClickUp ? null : (
               <SidebarNewWorkspaceHeaderRow
                 label={labels.newWorkspace}
@@ -1023,7 +1033,7 @@ function MobileSidebar({
             )}
             <MobileNavGrid onBeforeNavigate={closeSidebar} parentGestureRef={closeGestureRef} />
             <PluginSidebarItems onBeforeNavigate={closeSidebar} />
-          </View>
+          </GHScrollView>
         )}
         <WindowChromeSafeArea placement="inline" style={styles.mobileCloseButtonRow}>
           <Pressable
@@ -1233,158 +1243,166 @@ function DesktopSidebar({
               <TitlebarDragRegion />
             </View>
           ) : (
-            <TitlebarDragRegion />
-          )}
-          {isClickUp && !sectionRoute ? <ClickUpSidebarHeader /> : null}
-          {clusterRoute || databaseRoute || sectionRoute || isClickUp ? null : (
-            <View style={sidebarHeaderGroupStyle}>
-              <SidebarNewWorkspaceHeaderRow
-                label={labels.newWorkspace}
-                testID="sidebar-global-new-workspace"
-                variant="compact"
-                shortcutKeys={newWorkspaceKeys}
-              />
-              <SidebarHeaderRow
-                icon={History}
-                label={labels.sessions}
-                onPress={handleViewMore}
-                isActive={isSessionsActive}
-                testID="sidebar-sessions"
-                variant="compact"
-              />
-              <SidebarHeaderRow
-                icon={CalendarClock}
-                label={labels.schedules}
-                onPress={handleViewSchedules}
-                isActive={isSchedulesActive}
-                testID="sidebar-schedules"
-                variant="compact"
-              />
-              <NavTargetGate route={builtinTargets.sharedSessionsRoute}>
-                <SidebarHeaderRow
-                  icon={Share2}
-                  label={labels.sharedSessions}
-                  onPress={handleViewSharedSessions}
-                  isActive={isSharedSessionsActive}
-                  testID="sidebar-shared-sessions"
-                  variant="compact"
-                />
-              </NavTargetGate>
-
-              <NavTargetGate route={builtinTargets.clustersRoute}>
-                <SidebarHeaderRow
-                  icon={Boxes}
-                  label={labels.clusters}
-                  onPress={handleClusters}
-                  isActive={isClustersActive}
-                  testID="sidebar-clusters-nav"
-                  variant="compact"
-                />
-              </NavTargetGate>
-              <NavTargetGate route={builtinTargets.databasesRoute}>
-                <SidebarHeaderRow
-                  icon={Database}
-                  label={labels.databases}
-                  onPress={handleDatabases}
-                  isActive={isDatabasesActive}
-                  testID="sidebar-databases-nav"
-                  variant="compact"
-                />
-              </NavTargetGate>
-              {supportsSshServers ? (
-                <SidebarHeaderRow
-                  icon={Server}
-                  label={labels.servers}
-                  onPress={handleServers}
-                  isActive={isServersActive}
-                  testID="sidebar-servers-nav"
-                  variant="compact"
-                />
-              ) : null}
-              {supportsArgoCd ? (
-                <SidebarHeaderRow
-                  icon={Ship}
-                  label={labels.argoCd}
-                  onPress={handleArgoCd}
-                  isActive={isArgoCdActive}
-                  testID="sidebar-argocd-nav"
-                  variant="compact"
-                />
-              ) : null}
-              <JiraSidebarEntry closesDrawer={false} />
-              <FigmaSidebarEntry closesDrawer={false} />
-              <NavTargetGate route={builtinTargets.skillsRoute}>
-                <SidebarHeaderRow
-                  icon={Sparkles}
-                  label={labels.skills}
-                  onPress={handleSkills}
-                  isActive={isSkillsActive}
-                  testID="sidebar-skills-nav"
-                  variant="compact"
-                />
-              </NavTargetGate>
-              <SidebarHeaderRow
-                icon={Store}
-                label={labels.marketplace}
-                onPress={handleMarketplace}
-                isActive={isMarketplaceActive}
-                testID="sidebar-marketplace-nav"
-                variant="compact"
-              />
-              <NavTargetGate route={builtinTargets.dockerRoute}>
-                <SidebarHeaderRow
-                  icon={Container}
-                  label={labels.docker}
-                  onPress={handleDocker}
-                  isActive={isDockerActive}
-                  testID="sidebar-docker-nav"
-                  variant="compact"
-                />
-              </NavTargetGate>
-              {supportsDevices ? (
-                <SidebarHeaderRow
-                  icon={Smartphone}
-                  label={labels.simulator}
-                  onPress={handleSimulator}
-                  isActive={isSimulatorActive}
-                  testID="sidebar-simulator-nav"
-                  variant="compact"
-                />
-              ) : null}
-              <NavTargetGate route={builtinTargets.proxyRoute}>
-                <SidebarHeaderRow
-                  icon={Radar}
-                  label={labels.workbench}
-                  onPress={handleWorkbench}
-                  isActive={isWorkbenchActive}
-                  testID="sidebar-workbench-nav"
-                  variant="compact"
-                />
-              </NavTargetGate>
-              <NavTargetGate route={builtinTargets.insightsRoute}>
-                <SidebarHeaderRow
-                  icon={BarChart3}
-                  label={labels.insights}
-                  onPress={handleInsights}
-                  isActive={isInsightsActive}
-                  testID="sidebar-insights-nav"
-                  variant="compact"
-                />
-              </NavTargetGate>
-              {supportsForgeHub ? (
-                <SidebarHeaderRow
-                  icon={GitPullRequest}
-                  label={labels.forge}
-                  onPress={handleForge}
-                  isActive={isForgeActive}
-                  testID="sidebar-forge-nav"
-                  variant="compact"
-                />
-              ) : null}
-              <PluginSidebarItems />
+            <View style={styles.desktopDragStrip}>
+              <TitlebarDragRegion />
             </View>
           )}
+          {isClickUp && !sectionRoute ? <ClickUpSidebarHeader /> : null}
         </View>
+        {clusterRoute || databaseRoute || sectionRoute || isClickUp ? null : (
+          <ScrollView
+            dataSet={WINDOW_CONTENT_DATASET}
+            style={styles.navScroll}
+            contentContainerStyle={sidebarHeaderGroupStyle}
+            showsVerticalScrollIndicator={false}
+            testID="sidebar-nav-scroll"
+          >
+            <SidebarNewWorkspaceHeaderRow
+              label={labels.newWorkspace}
+              testID="sidebar-global-new-workspace"
+              variant="compact"
+              shortcutKeys={newWorkspaceKeys}
+            />
+            <SidebarHeaderRow
+              icon={History}
+              label={labels.sessions}
+              onPress={handleViewMore}
+              isActive={isSessionsActive}
+              testID="sidebar-sessions"
+              variant="compact"
+            />
+            <SidebarHeaderRow
+              icon={CalendarClock}
+              label={labels.schedules}
+              onPress={handleViewSchedules}
+              isActive={isSchedulesActive}
+              testID="sidebar-schedules"
+              variant="compact"
+            />
+            <NavTargetGate route={builtinTargets.sharedSessionsRoute}>
+              <SidebarHeaderRow
+                icon={Share2}
+                label={labels.sharedSessions}
+                onPress={handleViewSharedSessions}
+                isActive={isSharedSessionsActive}
+                testID="sidebar-shared-sessions"
+                variant="compact"
+              />
+            </NavTargetGate>
+
+            <NavTargetGate route={builtinTargets.clustersRoute}>
+              <SidebarHeaderRow
+                icon={Boxes}
+                label={labels.clusters}
+                onPress={handleClusters}
+                isActive={isClustersActive}
+                testID="sidebar-clusters-nav"
+                variant="compact"
+              />
+            </NavTargetGate>
+            <NavTargetGate route={builtinTargets.databasesRoute}>
+              <SidebarHeaderRow
+                icon={Database}
+                label={labels.databases}
+                onPress={handleDatabases}
+                isActive={isDatabasesActive}
+                testID="sidebar-databases-nav"
+                variant="compact"
+              />
+            </NavTargetGate>
+            {supportsSshServers ? (
+              <SidebarHeaderRow
+                icon={Server}
+                label={labels.servers}
+                onPress={handleServers}
+                isActive={isServersActive}
+                testID="sidebar-servers-nav"
+                variant="compact"
+              />
+            ) : null}
+            {supportsArgoCd ? (
+              <SidebarHeaderRow
+                icon={Ship}
+                label={labels.argoCd}
+                onPress={handleArgoCd}
+                isActive={isArgoCdActive}
+                testID="sidebar-argocd-nav"
+                variant="compact"
+              />
+            ) : null}
+            <JiraSidebarEntry closesDrawer={false} />
+            <FigmaSidebarEntry closesDrawer={false} />
+            <NavTargetGate route={builtinTargets.skillsRoute}>
+              <SidebarHeaderRow
+                icon={Sparkles}
+                label={labels.skills}
+                onPress={handleSkills}
+                isActive={isSkillsActive}
+                testID="sidebar-skills-nav"
+                variant="compact"
+              />
+            </NavTargetGate>
+            <SidebarHeaderRow
+              icon={Store}
+              label={labels.marketplace}
+              onPress={handleMarketplace}
+              isActive={isMarketplaceActive}
+              testID="sidebar-marketplace-nav"
+              variant="compact"
+            />
+            <NavTargetGate route={builtinTargets.dockerRoute}>
+              <SidebarHeaderRow
+                icon={Container}
+                label={labels.docker}
+                onPress={handleDocker}
+                isActive={isDockerActive}
+                testID="sidebar-docker-nav"
+                variant="compact"
+              />
+            </NavTargetGate>
+            {supportsDevices ? (
+              <SidebarHeaderRow
+                icon={Smartphone}
+                label={labels.simulator}
+                onPress={handleSimulator}
+                isActive={isSimulatorActive}
+                testID="sidebar-simulator-nav"
+                variant="compact"
+              />
+            ) : null}
+            <NavTargetGate route={builtinTargets.proxyRoute}>
+              <SidebarHeaderRow
+                icon={Radar}
+                label={labels.workbench}
+                onPress={handleWorkbench}
+                isActive={isWorkbenchActive}
+                testID="sidebar-workbench-nav"
+                variant="compact"
+              />
+            </NavTargetGate>
+            <NavTargetGate route={builtinTargets.insightsRoute}>
+              <SidebarHeaderRow
+                icon={BarChart3}
+                label={labels.insights}
+                onPress={handleInsights}
+                isActive={isInsightsActive}
+                testID="sidebar-insights-nav"
+                variant="compact"
+              />
+            </NavTargetGate>
+            {supportsForgeHub ? (
+              <SidebarHeaderRow
+                icon={GitPullRequest}
+                label={labels.forge}
+                onPress={handleForge}
+                isActive={isForgeActive}
+                testID="sidebar-forge-nav"
+                variant="compact"
+              />
+            ) : null}
+            <PluginSidebarItems />
+          </ScrollView>
+        )}
 
         {resolveSidebarNavBody(
           clusterRoute,
@@ -1491,6 +1509,8 @@ const staticStyles = RNStyleSheet.create({
 });
 
 const styles = StyleSheet.create((theme) => ({
+  navScroll: { flexGrow: 0, flexShrink: 1, maxHeight: "50%" },
+  desktopDragStrip: { position: "relative", height: theme.spacing[2] },
   sidebarHeaderGroup: {
     paddingTop: theme.spacing[2],
     gap: 2,

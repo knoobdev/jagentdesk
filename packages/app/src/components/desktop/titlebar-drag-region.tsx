@@ -17,6 +17,8 @@ import { isNative } from "@/constants/platform";
  * On macOS, Electron handles edge resize natively.
  */
 
+export const WINDOW_CONTENT_DATASET = { "window-content": "" };
+
 const DRAG_OVERLAY_STYLE: React.CSSProperties = {
   top: 0,
   left: 0,
