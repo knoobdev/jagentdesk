@@ -189,6 +189,7 @@ function canonicalToolTimeline(params: {
   return {
     type: "timeline",
     provider: params.provider,
+    ...(params.turnId ? { turnId: params.turnId } : {}),
     item,
   };
 }
