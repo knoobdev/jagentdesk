@@ -622,6 +622,10 @@ export const ja: TranslationResources = {
         editTerminalProfiles: "プロファイルを編集…",
         pinTarget: "ピン留め",
         unpinTarget: "ピン留めを解除",
+        newTab: "\u65B0\u3057\u3044\u30BF\u30D6",
+        changes: "\u5909\u66F4",
+        files: "\u30D5\u30A1\u30A4\u30EB",
+        pullRequest: "\u30D7\u30EB\u30EA\u30AF\u30A8\u30B9\u30C8",
       },
       explorer: {
         open: "エクスプローラーを開く",
@@ -1763,6 +1767,20 @@ export const ja: TranslationResources = {
       empty: "変更はありません",
       loadError: "差分の読み込みに失敗しました",
       capabilityMissing: "コミット差分を表示するにはホストを更新してください。",
+    },
+    files: {
+      label: "\u30D5\u30A1\u30A4\u30EB",
+      subtitle: "\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u30D5\u30A1\u30A4\u30EB",
+      tooltip:
+        "\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u30D5\u30A1\u30A4\u30EB\u3092\u53C2\u7167",
+    },
+    pullRequest: {
+      label: "\u30D7\u30EB\u30EA\u30AF\u30A8\u30B9\u30C8",
+      subtitle: "\u30D7\u30EB\u30EA\u30AF\u30A8\u30B9\u30C8\u306E\u8A73\u7D30",
+      emptyTitle:
+        "\u30D7\u30EB\u30EA\u30AF\u30A8\u30B9\u30C8\u306F\u307E\u3060\u3042\u308A\u307E\u305B\u3093",
+      emptyDescription:
+        "\u3053\u306E\u30C1\u30A7\u30C3\u30AF\u30A2\u30A6\u30C8\u306E\u30D7\u30EB\u30EA\u30AF\u30A8\u30B9\u30C8\u3092\u4F5C\u6210\u3059\u308B\u3068\u3001\u3053\u3053\u306B\u8A73\u7D30\u304C\u8868\u793A\u3055\u308C\u307E\u3059\u3002",
     },
   },
   toolCallDetails: {

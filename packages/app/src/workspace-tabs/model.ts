@@ -37,6 +37,9 @@ export type WorkspaceTabTarget =
   | { kind: "provider_subagent"; parentAgentId: string; subagentId: string }
   | { kind: "terminal"; terminalId: string }
   | { kind: "browser"; browserId: string }
+  | { kind: "files" }
+  | { kind: "changes_tree" }
+  | { kind: "pull_request" }
   | WorkspaceFileTabTarget
   | WorkspaceWorkingDiffTabTarget
   | PluginWorkspaceTabTarget

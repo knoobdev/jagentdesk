@@ -627,6 +627,11 @@ export const ar: TranslationResources = {
         editTerminalProfiles: "Edit profiles…",
         pinTarget: "تثبيت",
         unpinTarget: "إلغاء التثبيت",
+        newTab:
+          "\u0639\u0644\u0627\u0645\u0629 \u062A\u0628\u0648\u064A\u0628 \u062C\u062F\u064A\u062F\u0629",
+        changes: "\u0627\u0644\u062A\u063A\u064A\u064A\u0631\u0627\u062A",
+        files: "\u0627\u0644\u0645\u0644\u0641\u0627\u062A",
+        pullRequest: "\u0637\u0644\u0628 \u0627\u0644\u0633\u062D\u0628",
       },
       explorer: {
         open: "افتح المستكشف",
@@ -1776,6 +1781,22 @@ export const ar: TranslationResources = {
       empty: "لا توجد تغييرات",
       loadError: "فشل تحميل الفروقات",
       capabilityMissing: "حدّث المضيف لعرض فروقات الالتزامات.",
+    },
+    files: {
+      label: "\u0627\u0644\u0645\u0644\u0641\u0627\u062A",
+      subtitle:
+        "\u0645\u0644\u0641\u0627\u062A \u0645\u0633\u0627\u062D\u0629 \u0627\u0644\u0639\u0645\u0644",
+      tooltip:
+        "\u062A\u0635\u0641\u062D \u0645\u0644\u0641\u0627\u062A \u0645\u0633\u0627\u062D\u0629 \u0627\u0644\u0639\u0645\u0644",
+    },
+    pullRequest: {
+      label: "\u0637\u0644\u0628 \u0627\u0644\u0633\u062D\u0628",
+      subtitle:
+        "\u062A\u0641\u0627\u0635\u064A\u0644 \u0637\u0644\u0628 \u0627\u0644\u0633\u062D\u0628",
+      emptyTitle:
+        "\u0644\u0627 \u064A\u0648\u062C\u062F \u0637\u0644\u0628 \u0633\u062D\u0628 \u0628\u0639\u062F",
+      emptyDescription:
+        "\u0623\u0646\u0634\u0626 \u0637\u0644\u0628 \u0633\u062D\u0628 \u0644\u0646\u0633\u062E\u0629 \u0627\u0644\u0639\u0645\u0644 \u0647\u0630\u0647 \u0644\u0639\u0631\u0636 \u062A\u0641\u0627\u0635\u064A\u0644\u0647 \u0647\u0646\u0627.",
     },
   },
   toolCallDetails: {

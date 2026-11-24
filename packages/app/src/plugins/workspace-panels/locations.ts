@@ -18,10 +18,6 @@ export function pluginPanelSupportsLocation(
   return getPluginPanelLocations(panel).includes(location);
 }
 
-// JAgentDesk hosts every plugin panel in the workspace pane area; it has no
-// separate explorer sidebar host. We still honor the declared location set so a
-// plugin that opts out of "workspace" surfaces a clear error instead of silently
-// landing somewhere it did not ask for.
 export function resolvePluginPanelOpenLocation(
   panel: PluginWorkspacePanelContribution,
   requested?: PluginPanelLocation,

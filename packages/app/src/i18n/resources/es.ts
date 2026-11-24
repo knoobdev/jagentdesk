@@ -618,6 +618,10 @@ export const es: TranslationResources = {
         editTerminalProfiles: "Edit profiles…",
         pinTarget: "Fijar",
         unpinTarget: "Desfijar",
+        newTab: "Nueva pesta\u00F1a",
+        changes: "Cambios",
+        files: "Archivos",
+        pullRequest: "Solicitud de extracci\u00F3n",
       },
       explorer: {
         open: "Explorador abierto",
@@ -1775,6 +1779,17 @@ export const es: TranslationResources = {
       empty: "Sin cambios",
       loadError: "No se pudieron cargar las diferencias",
       capabilityMissing: "Actualiza el host para ver las diferencias de los commits.",
+    },
+    files: {
+      label: "Archivos",
+      subtitle: "Archivos del espacio de trabajo",
+      tooltip: "Explorar archivos del espacio de trabajo",
+    },
+    pullRequest: {
+      label: "Solicitud de extracci\u00F3n",
+      subtitle: "Detalles de la solicitud de extracci\u00F3n",
+      emptyTitle: "A\u00FAn no hay ninguna solicitud de extracci\u00F3n",
+      emptyDescription: "Crea una solicitud para este checkout y consulta aqu\u00ED sus detalles.",
     },
   },
   toolCallDetails: {

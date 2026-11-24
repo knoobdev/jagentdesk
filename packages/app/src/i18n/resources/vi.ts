@@ -837,6 +837,14 @@ export const vi = {
         thread: { resolved: "Resolved", outdated: "Outdated" },
       },
     },
+    tabs: {
+      actions: {
+        newTab: "New tab",
+        changes: "Changes",
+        files: "Files",
+        pullRequest: "Pull request",
+      },
+    },
   },
   changelog: {
     title: "What's new",
@@ -856,5 +864,14 @@ export const vi = {
     providerCommandsFailed: "Couldn't load {{provider}} commands",
     filesFailed: "Couldn't search files",
     skillTag: "Skill",
+  },
+  panels: {
+    files: { label: "Files", subtitle: "Workspace files", tooltip: "Browse workspace files" },
+    pullRequest: {
+      label: "Pull request",
+      subtitle: "Pull request details",
+      emptyTitle: "No pull request yet",
+      emptyDescription: "Create a pull request for this checkout to see its details here.",
+    },
   },
 } as const;

@@ -70,6 +70,10 @@ function normalizeSimpleWorkspaceTabTarget(value: WorkspaceTabTarget): Workspace
       const browserId = trimNonEmpty(value.browserId);
       return browserId ? { kind: "browser", browserId } : null;
     }
+    case "changes_tree":
+    case "files":
+    case "pull_request":
+      return { kind: value.kind };
     case "setup": {
       const workspaceId = trimNonEmpty(value.workspaceId);
       return workspaceId ? { kind: "setup", workspaceId } : null;
@@ -142,12 +146,26 @@ function secondaryWorkspaceTabTargetsEqual(
   if (left.kind === "working_diff" && right.kind === "working_diff") {
     return left.focusPath === right.focusPath && left.focusRequestId === right.focusRequestId;
   }
+  if (left.kind === "changes_tree" && right.kind === "changes_tree") return true;
+  if (left.kind === "files" && right.kind === "files") {
+    return true;
+  }
+  if (left.kind === "pull_request" && right.kind === "pull_request") {
+    return true;
+  }
   if (left.kind === "setup" && right.kind === "setup") {
     return left.workspaceId === right.workspaceId;
   }
   if (left.kind === "commit_diff" && right.kind === "commit_diff") {
     return left.sha === right.sha;
   }
+  return pluginWorkspaceTabTargetsEqual(left, right);
+}
+
+function pluginWorkspaceTabTargetsEqual(
+  left: WorkspaceTabTarget,
+  right: WorkspaceTabTarget,
+): boolean {
   if (left.kind === "plugin" && right.kind === "plugin") {
     return (
       left.pluginId === right.pluginId &&
@@ -223,6 +241,8 @@ export function buildDeterministicWorkspaceTabId(target: WorkspaceTabTarget): st
     }
     return `plugin_workspace_${target.pluginId.length}_${target.pluginId}_${target.panelId.length}_${target.panelId}`;
   }
+  if (target.kind === "files" || target.kind === "changes_tree" || target.kind === "pull_request")
+    return target.kind;
   return `file_${target.path}`;
 }
 

@@ -610,6 +610,10 @@ export const zhCN: TranslationResources = {
         editTerminalProfiles: "Edit profiles…",
         pinTarget: "固定",
         unpinTarget: "取消固定",
+        newTab: "\u65B0\u5EFA\u6807\u7B7E\u9875",
+        changes: "\u66F4\u6539",
+        files: "\u6587\u4EF6",
+        pullRequest: "\u62C9\u53D6\u8BF7\u6C42",
       },
       explorer: {
         open: "打开 explorer",
@@ -1711,6 +1715,18 @@ export const zhCN: TranslationResources = {
       empty: "没有更改",
       loadError: "加载差异失败",
       capabilityMissing: "请更新主机以查看提交差异。",
+    },
+    files: {
+      label: "\u6587\u4EF6",
+      subtitle: "\u5DE5\u4F5C\u533A\u6587\u4EF6",
+      tooltip: "\u6D4F\u89C8\u5DE5\u4F5C\u533A\u6587\u4EF6",
+    },
+    pullRequest: {
+      label: "\u62C9\u53D6\u8BF7\u6C42",
+      subtitle: "\u62C9\u53D6\u8BF7\u6C42\u8BE6\u60C5",
+      emptyTitle: "\u5C1A\u65E0\u62C9\u53D6\u8BF7\u6C42",
+      emptyDescription:
+        "\u4E3A\u6B64\u68C0\u51FA\u521B\u5EFA\u62C9\u53D6\u8BF7\u6C42\u540E\uFF0C\u53EF\u5728\u6B64\u5904\u67E5\u770B\u5176\u8BE6\u60C5\u3002",
     },
   },
   toolCallDetails: {

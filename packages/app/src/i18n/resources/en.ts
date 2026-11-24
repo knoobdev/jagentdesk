@@ -605,6 +605,10 @@ export const en = {
         editTerminalProfiles: "Edit profiles…",
         pinTarget: "Pin",
         unpinTarget: "Unpin",
+        newTab: "New tab",
+        changes: "Changes",
+        files: "Files",
+        pullRequest: "Pull request",
       },
       explorer: {
         open: "Open explorer",
@@ -1793,6 +1797,13 @@ export const en = {
       empty: "No changes",
       loadError: "Failed to load diff",
       capabilityMissing: "Update the host to view commit diffs.",
+    },
+    files: { label: "Files", subtitle: "Workspace files", tooltip: "Browse workspace files" },
+    pullRequest: {
+      label: "Pull request",
+      subtitle: "Pull request details",
+      emptyTitle: "No pull request yet",
+      emptyDescription: "Create a pull request for this checkout to see its details here.",
     },
   },
   toolCallDetails: {

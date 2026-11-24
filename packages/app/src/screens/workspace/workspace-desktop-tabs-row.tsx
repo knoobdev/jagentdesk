@@ -1,3 +1,8 @@
+import { getPanelManifest, panelCanLaunchInPane } from "@/panels/panel-manifest";
+import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
+import { buildWorkspaceTabPersistenceKey, type WorkspaceTabTarget } from "@/workspace-tabs/model";
+import { useInstalledPlugins } from "@/plugins/registry";
+import { pluginPanelSupportsLocation } from "@/plugins/workspace-panels/locations";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 import React, {
@@ -409,7 +414,9 @@ function SplitActionButton({ onPress, label, shortcutKeys, icon }: SplitActionBu
   );
 }
 
-interface WorkspaceDesktopTabsRowProps {
+export interface WorkspaceDesktopTabsRowProps {
+  host?: "main" | "explorer";
+  trailingAccessory?: React.ReactNode;
   paneId?: string;
   isFocused?: boolean;
   tabs: WorkspaceDesktopTabRowItem[];
@@ -762,6 +769,8 @@ function TabChip({
 }
 
 export function WorkspaceDesktopTabsRow({
+  host = "main",
+  trailingAccessory,
   paneId,
   isFocused = false,
   tabs,
@@ -933,7 +942,9 @@ export function WorkspaceDesktopTabsRow({
       dragHandleProps,
       isActive,
     }: DraggableRenderItemInfo<WorkspaceDesktopTabRowItem>) => {
-      const shouldShowCloseButton = layout.closeButtonPolicy === "all";
+      const shouldShowCloseButton =
+        getPanelManifest(item.tab.target.kind).showCloseButton &&
+        layout.closeButtonPolicy === "all";
       const layoutItem = layout.items[index] ?? null;
       const resolvedTabWidth = layoutItem?.width ?? 150;
       const showLabel = layoutItem?.showLabel ?? true;
@@ -1060,23 +1071,38 @@ export function WorkspaceDesktopTabsRow({
           getItemData={getTabDragData}
           renderItem={renderTab}
         />
-        <WorkspaceInlineAddTabButton
-          shortcutKeys={newTabKeys}
-          onCreateAgentTab={handleCreateAgentTab}
-          onLayout={handleInlineAddButtonLayout}
-        />
+        {host === "explorer" ? (
+          <ExplorerAddTabMenu
+            onCreateAgent={handleCreateAgentTab}
+            onCreateTerminal={handleCreateTerminal}
+            terminalDisabled={terminalDisabled}
+            tabs={tabs}
+            serverId={normalizedServerId}
+            workspaceId={normalizedWorkspaceId}
+            onLayout={handleInlineAddButtonLayout}
+          />
+        ) : (
+          <WorkspaceInlineAddTabButton
+            shortcutKeys={newTabKeys}
+            onCreateAgentTab={handleCreateAgentTab}
+            onLayout={handleInlineAddButtonLayout}
+          />
+        )}
       </ScrollView>
+      {trailingAccessory}
       <View style={styles.tabsActions} onLayout={handleTabsActionsLayout}>
-        <WorkspaceTabRowExtras
-          onCreateAgentTab={handleCreateAgentTab}
-          onCreateTerminal={handleCreateTerminal}
-          onCreateBrowser={handleCreateBrowser}
-          onCreateTerminalWithProfile={handleCreateTerminalWithProfile}
-          onEditProfiles={handleEditProfiles}
-          normalizedServerId={normalizedServerId}
-          showCreateBrowserTab={showCreateBrowserTab}
-          terminalDisabled={terminalDisabled}
-        />
+        {host !== "explorer" ? (
+          <WorkspaceTabRowExtras
+            onCreateAgentTab={handleCreateAgentTab}
+            onCreateTerminal={handleCreateTerminal}
+            onCreateBrowser={handleCreateBrowser}
+            onCreateTerminalWithProfile={handleCreateTerminalWithProfile}
+            onEditProfiles={handleEditProfiles}
+            normalizedServerId={normalizedServerId}
+            showCreateBrowserTab={showCreateBrowserTab}
+            terminalDisabled={terminalDisabled}
+          />
+        ) : null}
         {showPaneSplitActions ? (
           <>
             <SplitActionButton
@@ -1429,3 +1455,105 @@ const styles = StyleSheet.create((theme) => ({
     height: 14,
   },
 }));
+
+function ExplorerLaunchItem({
+  target,
+  label,
+  workspaceKey,
+  disabled,
+}: {
+  target: WorkspaceTabTarget;
+  label: string;
+  workspaceKey: string;
+  disabled: boolean;
+}) {
+  const launch = useCallback(() => {
+    useWorkspaceLayoutStore.getState().openTabInExplorerPaneFocused(workspaceKey, { target });
+  }, [target, workspaceKey]);
+  return (
+    <DropdownMenuItem onSelect={launch} disabled={disabled}>
+      {label}
+    </DropdownMenuItem>
+  );
+}
+function ExplorerAddTabMenu({
+  onCreateAgent,
+  onCreateTerminal,
+  terminalDisabled,
+  tabs,
+  serverId,
+  workspaceId,
+  onLayout,
+}: {
+  onCreateAgent: () => void;
+  onCreateTerminal: () => void;
+  terminalDisabled: boolean;
+  tabs: WorkspaceDesktopTabRowItem[];
+  serverId: string;
+  workspaceId: string;
+  onLayout: (event: LayoutChangeEvent) => void;
+}) {
+  const { t } = useTranslation();
+  const plugins = useInstalledPlugins();
+  const workspaceKey = buildWorkspaceTabPersistenceKey({ serverId, workspaceId })!;
+  const items = useMemo(
+    () => [
+      { target: { kind: "files" } as const, label: t("workspace.tabs.explorer.files") },
+      { target: { kind: "changes_tree" } as const, label: t("workspace.tabs.explorer.changes") },
+      { target: { kind: "pull_request" } as const, label: t("panels.pullRequest.label") },
+      { target: { kind: "working_diff" } as const, label: t("panels.diff.changesSubtitle") },
+      ...plugins
+        .filter((plugin) => plugin.serverId === serverId)
+        .flatMap((plugin) =>
+          plugin.workspacePanels
+            .filter(
+              (panel) =>
+                panel.context === "workspace" && pluginPanelSupportsLocation(panel, "explorer"),
+            )
+            .map((panel) => ({
+              target: {
+                kind: "plugin",
+                pluginId: plugin.id,
+                panelId: panel.id,
+                context: "workspace",
+              } as const,
+              label: panel.title,
+            })),
+        ),
+    ],
+    [plugins, serverId, t],
+  );
+  const kinds = tabs.map((item) => item.tab.kind);
+  return (
+    <View style={styles.inlineAddButton} onLayout={onLayout}>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          testID="explorer-new-tab-button"
+          accessibilityLabel={t("shell.shortcuts.help.newTab")}
+          accessibilityRole="button"
+          style={inlineAddActionButtonStyle}
+        >
+          <ThemedPlus size={14} uniProps={mutedColorMapping} />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent>
+          <DropdownMenuItem onSelect={onCreateAgent}>
+            {t("workspace.tabs.actions.newAgent")}
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={onCreateTerminal} disabled={terminalDisabled}>
+            {t("workspace.tabs.actions.newTerminal")}
+          </DropdownMenuItem>
+          {items
+            .filter((item) => panelCanLaunchInPane(item.target.kind, kinds))
+            .map((item) => (
+              <ExplorerLaunchItem
+                key={buildDeterministicWorkspaceTabId(item.target)}
+                {...item}
+                workspaceKey={workspaceKey}
+                disabled={!panelCanLaunchInPane(item.target.kind, kinds)}
+              />
+            ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </View>
+  );
+}

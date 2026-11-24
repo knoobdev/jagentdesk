@@ -621,6 +621,10 @@ export const fr: TranslationResources = {
         editTerminalProfiles: "Modifier les profils",
         pinTarget: "Épingler",
         unpinTarget: "Détacher",
+        newTab: "Nouvel onglet",
+        changes: "Modifications",
+        files: "Fichiers",
+        pullRequest: "Demande de fusion",
       },
       explorer: {
         open: "Ouvrir l'explorateur",
@@ -1800,6 +1804,18 @@ export const fr: TranslationResources = {
       empty: "Aucune modification",
       loadError: "Impossible de charger le diff",
       capabilityMissing: "Mettez \u00E0 jour l\u2019h\u00F4te pour afficher le diff des commits.",
+    },
+    files: {
+      label: "Fichiers",
+      subtitle: "Fichiers de l\u2019espace de travail",
+      tooltip: "Parcourir les fichiers de l\u2019espace de travail",
+    },
+    pullRequest: {
+      label: "Demande de fusion",
+      subtitle: "D\u00E9tails de la demande de fusion",
+      emptyTitle: "Aucune demande de fusion pour le moment",
+      emptyDescription:
+        "Cr\u00E9ez une demande de fusion pour cette copie de travail afin d\u2019afficher ses d\u00E9tails ici.",
     },
   },
   toolCallDetails: {

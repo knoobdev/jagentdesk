@@ -615,6 +615,10 @@ export const ptBR: TranslationResources = {
         editTerminalProfiles: "Editar perfis…",
         pinTarget: "Fixar",
         unpinTarget: "Desafixar",
+        newTab: "Nova aba",
+        changes: "Altera\u00E7\u00F5es",
+        files: "Arquivos",
+        pullRequest: "Pull request",
       },
       explorer: {
         open: "Abrir explorador",
@@ -1759,6 +1763,17 @@ export const ptBR: TranslationResources = {
       empty: "Nenhuma alteração",
       loadError: "Falha ao carregar diff",
       capabilityMissing: "Atualize o host para ver diffs de commits.",
+    },
+    files: {
+      label: "Arquivos",
+      subtitle: "Arquivos do espa\u00E7o de trabalho",
+      tooltip: "Explorar arquivos do espa\u00E7o de trabalho",
+    },
+    pullRequest: {
+      label: "Pull request",
+      subtitle: "Detalhes do pull request",
+      emptyTitle: "Ainda n\u00E3o h\u00E1 pull request",
+      emptyDescription: "Crie um pull request para este checkout para ver os detalhes aqui.",
     },
   },
   toolCallDetails: {
