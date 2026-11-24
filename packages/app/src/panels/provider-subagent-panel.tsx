@@ -1,3 +1,4 @@
+import { ParentAgentCallout } from "@/subagents/parent";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
@@ -203,6 +204,7 @@ function ProviderSubagentPanel() {
         readOnly
         historyPagination={historyPagination}
       />
+      <ParentAgentCallout serverId={serverId} parentAgentId={target.parentAgentId} />
     </View>
   );
 }

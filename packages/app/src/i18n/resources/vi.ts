@@ -5,6 +5,19 @@ import { pluginSettings } from "./plugin-settings";
 import { sshModuleStrings } from "./ssh-modules";
 
 export const vi = {
+  subagents: {
+    parent: {
+      openParent: "Open parent",
+
+      parentAgent: "Parent agent",
+
+      parent: "Parent",
+
+      backTo: "Back to {{label}}",
+      backToParent: "Back to parent",
+    },
+  },
+
   builtinPlugins: builtinPluginStrings,
   ssh: sshModuleStrings,
   paneFind: {

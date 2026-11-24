@@ -1636,6 +1636,17 @@ export const ru: TranslationResources = {
     backdrop: "Фон меню",
   },
   subagents: {
+    parent: {
+      openParent: "Open parent",
+
+      parentAgent: "Parent agent",
+
+      parent: "Parent",
+
+      backTo: "Back to {{label}}",
+      backToParent: "Back to parent",
+    },
+
     detachAction: "Отсоединить {{label}}",
     detachTooltip: "Отсоединить субагент",
     archiveAction: "Архив{{label}}",

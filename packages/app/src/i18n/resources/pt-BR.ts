@@ -1630,6 +1630,17 @@ export const ptBR: TranslationResources = {
     backdrop: "Fundo do menu",
   },
   subagents: {
+    parent: {
+      openParent: "Open parent",
+
+      parentAgent: "Parent agent",
+
+      parent: "Parent",
+
+      backTo: "Back to {{label}}",
+      backToParent: "Back to parent",
+    },
+
     detachAction: "Desanexar {{label}}",
     detachTooltip: "Desanexar subagente",
     archiveAction: "Arquivar {{label}}",

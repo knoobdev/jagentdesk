@@ -1,3 +1,4 @@
+import { ParentAgentCallout, ParentAgentPill, useParentAgentId } from "@/subagents/parent";
 import { useAgentDescriptor as useAgentPanelDescriptor } from "@/agent-presentation";
 import { useAgentStreamTail } from "@/agent-stream/use-agent-stream-tail";
 import { BuiltinPluginGate } from "@/plugins/builtin/gate";
@@ -1416,11 +1417,19 @@ const AgentComposerSection = memo(function AgentComposerSection({
   onComposerHeightChange: (height: number) => void;
   onMessageSent: () => void;
 }) {
+  const parentAgentId = useParentAgentId(serverId, agentId ?? "");
   if (!agentId) {
     return null;
   }
   if (archivedAt) {
-    return <ArchivedAgentCallout serverId={serverId} agentId={agentId} />;
+    return (
+      <>
+        <ArchivedAgentCallout serverId={serverId} agentId={agentId} />
+        {parentAgentId ? (
+          <ParentAgentCallout serverId={serverId} parentAgentId={parentAgentId} />
+        ) : null}
+      </>
+    );
   }
   if (isArchivingCurrentAgent) {
     return null;
@@ -1465,6 +1474,7 @@ function ActiveAgentComposer({
   onComposerHeightChange: (height: number) => void;
   onMessageSent: () => void;
 }) {
+  const parentAgentId = useParentAgentId(serverId, agentId);
   const insets = useSafeAreaInsets();
   const isCompactFormFactor = useIsCompactFormFactor();
   const { onLayout: onInputAreaLayout, isBelow: isCompactComposerLayout } = useContainerWidthBelow(
@@ -1518,8 +1528,8 @@ function ActiveAgentComposer({
     [serverId],
   );
   const handleOpenProviderSubagent = useCallback(
-    (parentAgentId: string, subagentId: string) => {
-      openTab({ kind: "provider_subagent", parentAgentId, subagentId });
+    (ownerAgentId: string, subagentId: string) => {
+      openTab({ kind: "provider_subagent", parentAgentId: ownerAgentId, subagentId });
     },
     [openTab],
   );
@@ -1652,6 +1662,7 @@ function ActiveAgentComposer({
       {isSupervisorThread ? (
         <OrchestrationLeadPlanCard serverId={serverId} workspaceId={workspaceId} />
       ) : null}
+      {parentAgentId ? <ParentAgentPill serverId={serverId} parentAgentId={parentAgentId} /> : null}
       <SubagentsTrack
         rows={subagentRows}
         onOpenSubagent={handleOpenSubagent}

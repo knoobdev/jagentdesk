@@ -1669,6 +1669,17 @@ export const en = {
     backdrop: "Menu backdrop",
   },
   subagents: {
+    parent: {
+      openParent: "Open parent",
+
+      parentAgent: "Parent agent",
+
+      parent: "Parent",
+
+      backTo: "Back to {{label}}",
+      backToParent: "Back to parent",
+    },
+
     detachAction: "Detach {{label}}",
     detachTooltip: "Detach subagent",
     archiveAction: "Archive {{label}}",
