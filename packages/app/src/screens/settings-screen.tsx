@@ -115,7 +115,11 @@ import { resolvePluginIcon } from "@/plugins/icons";
 import { useHostFeature } from "@/runtime/host-features";
 import ProjectsScreen from "@/screens/projects-screen";
 import ProjectSettingsScreen from "@/screens/project-settings-screen";
-import { SETTINGS_DESKTOP_SIDEBAR_WIDTH, useIsCompactFormFactor } from "@/constants/layout";
+import {
+  SETTINGS_DESKTOP_DETAIL_MIN_WIDTH,
+  SETTINGS_DESKTOP_SIDEBAR_WIDTH,
+  useIsCompactFormFactor,
+} from "@/constants/layout";
 import { isNative } from "@/constants/platform";
 import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
 import {
@@ -1494,6 +1498,7 @@ const desktopStyles = StyleSheet.create((theme) => ({
   },
   contentPane: {
     flex: 1,
+    minWidth: SETTINGS_DESKTOP_DETAIL_MIN_WIDTH,
   },
   detailLeft: {
     gap: theme.spacing[2],
@@ -1503,6 +1508,7 @@ const desktopStyles = StyleSheet.create((theme) => ({
 const sidebarStyles = StyleSheet.create((theme) => ({
   desktopContainer: {
     width: SETTINGS_DESKTOP_SIDEBAR_WIDTH,
+    flexShrink: 1,
     borderRightWidth: 1,
     borderRightColor: theme.colors.border,
     backgroundColor: theme.colors.surfaceSidebar,
