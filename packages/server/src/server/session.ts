@@ -27,7 +27,7 @@ import {
 } from "./session/workspace-base-branch/service.js";
 import type { WorkspaceBaseBranchSetRequest } from "@jagentdesk/protocol/messages";
 import {
-  isHeartbeatBackgroundWorkItem,
+  isDaemonBackgroundWorkItem,
   type AgentBackgroundWorkItem,
 } from "./agent/background-work/index.js";
 import equal from "fast-deep-equal";
@@ -88,7 +88,10 @@ import { searchTimeline } from "./agent/chat-search/index.js";
 import {
   formatSystemNotificationPrompt,
   type PromptDispatchResult,
+  enqueueAgentMessage,
+  sendPreparedPromptToAgent,
   sendPromptToAgent,
+  waitForAgentMessageDispatch,
   waitForAgentRunStartWithTimeout,
   unarchiveAgentState,
 } from "./agent/agent-prompt.js";
@@ -129,7 +132,11 @@ import type {
   ManagedAgent,
 } from "./agent/agent-manager.js";
 import { createAgentCommand } from "./agent/create-agent/create.js";
-import { resolveCreateAgentIntent, type CreateAgentIntent } from "./agent/create-agent/intent.js";
+import {
+  resolveCreateAgentIntent,
+  type CreateAgentIntent,
+  type CreateAgentCaller,
+} from "./agent/create-agent/intent.js";
 import {
   archiveAgentCommand,
   cancelAgentRunCommand,
@@ -154,6 +161,7 @@ import {
   getAgentStreamEventTurnId,
   type AgentPersistenceHandle,
   type AgentPermissionResponse,
+  type AgentPromptInput,
   type AgentRunOptions,
   type AgentSessionConfig,
 } from "./agent/agent-sdk-types.js";
@@ -1215,12 +1223,37 @@ export class Session {
         listStoredAgents: () => this.agentStorage.list(),
         listLiveAgents: () => this.agentManager.listAgents(),
         resolveAgentIdentifier: (identifier) => this.resolveAgentIdentifier(identifier),
-        sendAgentMessage: async (agentId, text) => {
-          await sendPromptToAgent({
+        sendAgentMessage: async (agentId, text, sourceAgentId) => {
+          // A mention written by an agent is an agent message from that author; any
+          // other author keeps the legacy hidden envelope (ADR-0029 decision 1).
+          const authorIsAgent =
+            sourceAgentId !== undefined &&
+            (this.agentManager.getAgent(sourceAgentId) !== null ||
+              Boolean(await this.agentStorage.get(sourceAgentId).catch(() => null)));
+          if (authorIsAgent) {
+            const receipt = enqueueAgentMessage(
+              {
+                agentManager: this.agentManager,
+                agentStorage: this.agentStorage,
+                logger: this.sessionLogger,
+              },
+              {
+                recipientId: agentId,
+                prompt: text,
+                source: { kind: "agent-message", agentId: sourceAgentId },
+                activeTurnBehavior: "steer",
+                unarchive: false,
+              },
+            );
+            await receipt.dispatched;
+            return;
+          }
+          await sendPreparedPromptToAgent({
             agentManager: this.agentManager,
             agentStorage: this.agentStorage,
             agentId,
             prompt: formatSystemNotificationPrompt(text),
+            activeTurnBehavior: "steer",
             unarchive: false,
             logger: this.sessionLogger,
           });
@@ -2362,7 +2395,7 @@ export class Session {
       return items;
     }
     return items.map((item) => {
-      if (!isHeartbeatBackgroundWorkItem(item)) return item;
+      if (!isDaemonBackgroundWorkItem(item)) return item;
       const { canStop: _canStop, stopToken: _stopToken, ...visible } = item;
       return visible;
     });
@@ -6476,12 +6509,7 @@ export class Session {
     workspacePromptTitle: string | null;
   }): Promise<ResolvedSessionCreateAgentIntent> {
     const { request, createdWorktree } = input;
-    const callerAgent = request.callerAgentId
-      ? this.agentManager.getAgent(request.callerAgentId)
-      : null;
-    if (request.callerAgentId && !callerAgent) {
-      throw new Error(`Caller agent ${request.callerAgentId} not found`);
-    }
+    const callerAgent = await this.resolveCreationCaller(request.callerAgentId);
 
     let config = request.config;
 
@@ -8603,11 +8631,24 @@ export class Session {
     }
   }
 
-  private callerWorkspaceForBackground(callerAgentId?: string): string | undefined {
-    if (!callerAgentId) return undefined;
-    const caller = this.agentManager.getAgent(callerAgentId);
+  private async resolveCreationCaller(
+    callerAgentId?: string,
+  ): Promise<(CreateAgentCaller & { background?: boolean }) | null> {
+    if (!callerAgentId) return null;
+    const stored = await this.agentStorage.get(callerAgentId);
+    if (stored?.archivedAt) throw new Error(`Caller agent ${callerAgentId} not found`);
+    const caller = this.agentManager.getAgent(callerAgentId) ?? stored;
     if (!caller) throw new Error(`Caller agent ${callerAgentId} not found`);
-    return caller.workspaceId;
+    return {
+      id: caller.id,
+      cwd: caller.cwd,
+      workspaceId: caller.workspaceId,
+      background: caller.background,
+    };
+  }
+
+  private async callerWorkspaceForBackground(callerAgentId?: string): Promise<string | undefined> {
+    return (await this.resolveCreationCaller(callerAgentId))?.workspaceId;
   }
 
   private async handleWorkspaceCreateLocal(
@@ -8642,7 +8683,7 @@ export class Session {
       {
         expectsInitialAgent: Boolean(request.firstAgentContext),
         background: request.background,
-        callerWorkspaceId: this.callerWorkspaceForBackground(request.callerAgentId),
+        callerWorkspaceId: await this.callerWorkspaceForBackground(request.callerAgentId),
       },
     );
     await this.syncWorkspaceGitObserverForWorkspace(workspace);
@@ -8719,7 +8760,7 @@ export class Session {
         firstAgentContext: request.firstAgentContext,
         title: request.title,
         background: request.background,
-        callerWorkspaceId: this.callerWorkspaceForBackground(request.callerAgentId),
+        callerWorkspaceId: await this.callerWorkspaceForBackground(request.callerAgentId),
       },
       source.baseBranch
         ? { resolveDefaultBranch: async () => source.baseBranch as string }
@@ -10103,6 +10144,58 @@ export class Session {
     }
   }
 
+  private messageSkillIds(
+    skillIds: string[] | undefined,
+    specPhase: boolean,
+  ): string[] | undefined {
+    if (
+      specPhase ||
+      (this.pluginRuntime?.builtin && !this.pluginRuntime.builtin.isEnabled("skills"))
+    )
+      return undefined;
+    return skillIds;
+  }
+
+  private queueAgentMessage(
+    msg: Extract<SessionInboundMessage, { type: "send_agent_message_request" }>,
+    agentId: string,
+    prompt: AgentPromptInput,
+  ): boolean {
+    if (msg.sourceAgentId && !msg.skillIds?.length) {
+      const receipt = enqueueAgentMessage(
+        {
+          agentManager: this.agentManager,
+          agentStorage: this.agentStorage,
+          logger: this.sessionLogger,
+        },
+        {
+          recipientId: agentId,
+          prompt,
+          messageId: msg.messageId,
+          source: { kind: "agent-message", agentId: msg.sourceAgentId },
+          activeTurnBehavior: msg.activeTurnBehavior ?? "steer",
+          clearPendingPermissions: false,
+        },
+      );
+      receipt.dispatched.catch((error) => {
+        this.handleAgentRunError(agentId, error, "Failed to send agent message");
+      });
+      this.emit({
+        type: "send_agent_message_response",
+        payload: {
+          requestId: msg.requestId,
+          agentId,
+          accepted: true,
+          error: null,
+          deliveryStatus: receipt.status,
+          messageId: receipt.messageId,
+        },
+      });
+      return true;
+    }
+    return false;
+  }
+
   private async handleSendAgentMessageRequest(
     msg: Extract<SessionInboundMessage, { type: "send_agent_message_request" }>,
   ): Promise<void> {
@@ -10138,6 +10231,8 @@ export class Session {
         },
         "agent.session.send_agent_message",
       );
+      if (this.queueAgentMessage(msg, agentId, prompt)) return;
+
       let dispatchResult: PromptDispatchResult;
       try {
         dispatchResult = await sendPromptToAgent({
@@ -10146,12 +10241,11 @@ export class Session {
           agentId,
           prompt,
           messageId: msg.messageId,
+          source: msg.sourceAgentId
+            ? { kind: "agent-message", agentId: msg.sourceAgentId }
+            : undefined,
           activeTurnBehavior: msg.activeTurnBehavior,
-          skillIds:
-            specPhase ||
-            (this.pluginRuntime?.builtin && !this.pluginRuntime.builtin.isEnabled("skills"))
-              ? undefined
-              : msg.skillIds,
+          skillIds: this.messageSkillIds(msg.skillIds, Boolean(specPhase)),
           skillInvocation: this.skillsStorage,
           logger: this.sessionLogger,
         });
@@ -10286,6 +10380,10 @@ export class Session {
       : null;
 
     try {
+      // A CLI `send` from an agent is queued; wait for its dispatch before the turn.
+      await waitForAgentMessageDispatch(this.agentManager, agentId, abortController.signal).catch(
+        () => undefined,
+      );
       let result = await this.agentManager.waitForAgentEvent(agentId, {
         signal: abortController.signal,
         waitForActive: true,

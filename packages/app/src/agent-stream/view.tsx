@@ -1,3 +1,4 @@
+import { navigateToAgent } from "@/utils/navigate-to-agent";
 import { ClickUpAgentHeader } from "@/components/clickup-shell/chat-headers";
 import { CLICKUP_MESSAGE_INDENT } from "@/components/clickup-shell/chat-layout";
 import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
@@ -808,6 +809,13 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       [autoExpandReasoning, setInlineDetailsExpanded],
     );
 
+    const handleOpenMessageSender = useCallback(
+      (senderAgentId: string) => {
+        navigateToAgent({ serverId: resolvedServerId, agentId: senderAgentId });
+      },
+      [resolvedServerId],
+    );
+
     const renderSingleToolCallItem = useCallback(
       (
         item: Extract<StreamItem, { kind: "tool_call" }>,
@@ -841,6 +849,8 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
               cwd={context.cwd}
               metadata={data.metadata}
               client={client}
+              agentMessage={data.agentMessage}
+              onOpenAgent={handleOpenMessageSender}
               isLastInSequence={isLastInSequence}
               onOpenFilePath={handleToolCallOpenFile}
               maxDetailHeight={maxDetailHeight}
@@ -863,7 +873,13 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
           />
         );
       },
-      [context.cwd, client, setInlineDetailsExpanded, handleToolCallOpenFile],
+      [
+        context.cwd,
+        client,
+        setInlineDetailsExpanded,
+        handleToolCallOpenFile,
+        handleOpenMessageSender,
+      ],
     );
 
     // Read through a stable event so live group updates do not change the renderer identity on

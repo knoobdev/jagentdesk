@@ -1,3 +1,5 @@
+import type { ChangeRequestWatches } from "../change-request-watches/index.js";
+import { changeRequestStatusSchema } from "../../../services/change-request-source.js";
 import type { ManagedAgent } from "../agent-manager.js";
 import { admitsAgent } from "../directory.js";
 import type { ProviderJAgentDeskToolsPolicy } from "@jagentdesk/protocol/provider-config";
@@ -69,6 +71,7 @@ import {
   type UpdateScheduleInput,
 } from "@jagentdesk/protocol/schedule/types";
 import type { ProviderSnapshotManager } from "../provider-snapshot-manager.js";
+import { ActiveTurnBehaviorSchema } from "@jagentdesk/protocol/messages";
 import {
   AgentModelSchema,
   AgentProviderEnum,
@@ -84,6 +87,7 @@ import {
 } from "../mcp-shared.js";
 import {
   sendPromptToAgent,
+  enqueueAgentMessage,
   setupFinishNotification,
   waitForAgentRunStartWithTimeout,
 } from "../agent-prompt.js";
@@ -158,6 +162,7 @@ import { slugifySkillName } from "../../skills-native/frontmatter.js";
 import type { AgentPermissionResponse } from "../agent-sdk-types.js";
 
 export interface JAgentDeskToolHostDependencies {
+  changeRequestWatches?: ChangeRequestWatches;
   builtinPlugins?: ReadonlySet<BuiltinPluginId>;
   jagentdeskToolPolicy?: ProviderJAgentDeskToolsPolicy;
   agentManager: AgentManager;
@@ -4264,6 +4269,9 @@ function createToolCatalog(
       .describe(
         "Skill ids (from the Skills screen / create_skill) to invoke for this turn; the daemon prefixes the provider's native skill invocation.",
       ),
+    activeTurnBehavior: ActiveTurnBehaviorSchema.optional().describe(
+      'How to send into a running turn: "steer" joins it, falling back to interrupt when unavailable; "interrupt" replaces it. Defaults to steer for agent callers and interrupt otherwise.',
+    ),
   };
   const agentToAgentSendAgentPromptInputSchema = {
     ...commonSendAgentPromptInputSchema,
@@ -4698,7 +4706,7 @@ function createToolCatalog(
     {
       title: "Create agent",
       description:
-        "Create an agent. Agent-scoped creation defaults to your workspace and creates your subagent. Top-level creation without workspaceId creates a new local workspace. Requires provider/model (for example codex/gpt-5.4) and an initial prompt. Do not guess; call list_providers and list_models first if uncertain.",
+        "Create an agent. Agent-scoped creation defaults to your workspace and creates your subagent. Top-level creation without workspaceId creates a new local workspace. Requires provider/model (for example codex/gpt-5.4) and an initial prompt. For a different provider, set settings.modeId from inspect_provider; omission is accepted for targets with no modes and for unattended execution supported by the target. Do not guess; call list_providers and list_models first if uncertain.",
       inputSchema: createAgentInputSchema,
       outputSchema: {
         agentId: z.string(),
@@ -5177,6 +5185,101 @@ function createToolCatalog(
   const PROMPTED_AGENT_NOTIFICATION_GUIDANCE =
     "You will get notified when the prompted agent finishes, errors, or needs permission. Do not poll for status; continue with other work until the notification arrives.";
 
+  function validateBotPromptCaller(agentId: string, sessionMode?: string): void {
+    const callerBotId = callerAgentId
+      ? agentManager.getAgent(callerAgentId)?.labels["jagentdesk.bot.id"]
+      : undefined;
+    if (callerBotId && sessionMode)
+      throw new Error("Only the owner can change bot execution modes");
+    if (callerBotId && agentManager.getAgent(agentId)?.labels["jagentdesk.bot.id"] !== callerBotId)
+      throw new Error(
+        "Use bot_handoff to contact another bot; bot prompts stay within their own ORC tree",
+      );
+  }
+
+  async function sendQueuedAgentPrompt(input: {
+    agentId: string;
+    senderAgentId: string;
+    prompt: string;
+    sessionMode?: string;
+    activeTurnBehavior: "steer" | "interrupt";
+    background: boolean;
+    notifyOnFinish: boolean;
+    armFinishNotification: () => Promise<boolean>;
+  }) {
+    const {
+      agentId,
+      senderAgentId,
+      prompt,
+      sessionMode,
+      activeTurnBehavior,
+      background,
+      notifyOnFinish,
+      armFinishNotification,
+    } = input;
+    if (!agentManager.getAgent(agentId) && !(await agentStorage.get(agentId))) {
+      throw new JAgentDeskToolInputError(`Agent ${agentId} not found`);
+    }
+    let notifying = false;
+    const receipt = enqueueAgentMessage(
+      { agentManager, agentStorage, logger: childLogger },
+      {
+        recipientId: agentId,
+        prompt,
+        source: {
+          kind: "agent-message",
+          agentId: senderAgentId,
+          ...(resolveCallerAgent()?.config?.title
+            ? { title: resolveCallerAgent()!.config.title! }
+            : {}),
+        },
+        sessionMode,
+        activeTurnBehavior,
+        // Arm right before dispatch so the notification follows this task's turn.
+        beforeDispatch: async () => {
+          if (background) await armFinishNotification();
+        },
+      },
+    );
+    if (background) {
+      notifying = Boolean(notifyOnFinish);
+      return {
+        content: [],
+        structuredContent: ensureValidJson({
+          success: true,
+          deliveryStatus: receipt.status,
+          messageId: receipt.messageId,
+          status: agentManager.getAgent(agentId)?.lifecycle ?? "idle",
+          lastMessage: null,
+          permission: null,
+          guidance: notifying
+            ? `Queued for delivery after two quiet seconds. ${PROMPTED_AGENT_NOTIFICATION_GUIDANCE}`
+            : "Queued for delivery after two quiet seconds.",
+        }),
+      };
+    }
+    // Blocking callers wait for the message to be dispatched before waiting for the turn.
+    await receipt.dispatched;
+    const result = await waitForAgentWithTimeout(agentManager, agentId, {
+      waitForActive: true,
+    });
+    notifying =
+      result.timedOut &&
+      agentManager.getAgent(agentId)?.lifecycle === "running" &&
+      (await armFinishNotification());
+    return {
+      content: [],
+      structuredContent: ensureValidJson({
+        success: true,
+        messageId: receipt.messageId,
+        status: result.status,
+        lastMessage: result.lastMessage,
+        permission: sanitizePermissionRequest(result.permission),
+        ...(notifying ? { guidance: PROMPTED_AGENT_NOTIFICATION_GUIDANCE } : {}),
+      }),
+    };
+  }
+
   registerTool(
     "send_agent_prompt",
     {
@@ -5190,6 +5293,8 @@ function createToolCatalog(
         lastMessage: z.string().nullable().optional(),
         permission: AgentPermissionRequestPayloadSchema.nullable().optional(),
         guidance: z.string().optional(),
+        deliveryStatus: z.literal("queued").optional(),
+        messageId: z.string().optional(),
       },
     },
     async ({
@@ -5199,42 +5304,56 @@ function createToolCatalog(
       skillIds,
       background = Boolean(callerAgentId),
       notifyOnFinish = Boolean(callerAgentId),
+      activeTurnBehavior = callerAgentId ? "steer" : "interrupt",
     }) => {
-      const callerBotId = callerAgentId
-        ? agentManager.getAgent(callerAgentId)?.labels["jagentdesk.bot.id"]
-        : undefined;
-      if (callerBotId && sessionMode)
-        throw new Error("Only the owner can change bot execution modes");
-      if (
-        callerBotId &&
-        agentManager.getAgent(agentId)?.labels["jagentdesk.bot.id"] !== callerBotId
-      )
-        throw new Error(
-          "Use bot_handoff to contact another bot; bot prompts stay within their own ORC tree",
-        );
+      validateBotPromptCaller(agentId, sessionMode);
       validateSendPromptCaller(callerOrchestrationContext, orchestrationRuntime, agentId);
-      function armFinishNotification(): boolean {
+      async function armFinishNotification(): Promise<boolean> {
         if (!callerAgentId || !notifyOnFinish) {
           return false;
         }
-        setupFinishNotification({
+        const registration = setupFinishNotification({
           agentManager,
           agentStorage,
           childAgentId: agentId,
           callerAgentId,
           logger: childLogger,
         });
+        await registration.ready;
         return true;
       }
 
+      // Agent callers go through the recipient's delivery window (ADR-0029 decision 3):
+      // the sender gets a queued receipt at once, and messages that arrive within two
+      // quiet seconds reach the recipient as one prompt. Skill invocations need the
+      // provider prefix in front of the prompt, so they are sent directly.
+      if (callerAgentId && !skillIds?.length) {
+        return await sendQueuedAgentPrompt({
+          agentId,
+          senderAgentId: callerAgentId,
+          prompt,
+          sessionMode,
+          activeTurnBehavior,
+          background,
+          notifyOnFinish,
+          armFinishNotification,
+        });
+      }
+
+      let notifying = false;
       const dispatchResult = await sendPromptToAgent({
         agentManager,
         agentStorage,
         agentId,
         prompt,
+        source: callerAgentId ? { kind: "agent-message", agentId: callerAgentId } : undefined,
+        activeTurnBehavior,
         sessionMode,
         skillIds,
         skillInvocation: options.skillsStorage ?? null,
+        beforeDispatch: async () => {
+          if (background) notifying = await armFinishNotification();
+        },
         logger: childLogger,
       }).catch((error) => {
         if (error instanceof AgentNotFoundError) {
@@ -5250,17 +5369,17 @@ function createToolCatalog(
         });
         // The wait ran out while the agent keeps working, so its result arrives as a
         // finish notification instead of in this response.
-        const notifying =
+        const timeoutNotifying =
           result.timedOut &&
           agentManager.getAgent(agentId)?.lifecycle === "running" &&
-          armFinishNotification();
+          (await armFinishNotification());
 
         const responseData = {
           success: true,
           status: result.status,
           lastMessage: result.lastMessage,
           permission: sanitizePermissionRequest(result.permission),
-          ...(notifying ? { guidance: PROMPTED_AGENT_NOTIFICATION_GUIDANCE } : {}),
+          ...(timeoutNotifying ? { guidance: PROMPTED_AGENT_NOTIFICATION_GUIDANCE } : {}),
         };
         const validJson = ensureValidJson(responseData);
 
@@ -5270,8 +5389,6 @@ function createToolCatalog(
         };
         return response;
       }
-
-      const notifying = armFinishNotification();
 
       // Return once the provider has accepted the turn, so the status reports it running.
       if (dispatchResult.disposition === "turn_started") {
@@ -5328,11 +5445,7 @@ function createToolCatalog(
     async ({ agentId }) => {
       const snapshot = agentManager.getAgent(agentId);
       if (snapshot) {
-        const structuredSnapshot = await serializeSnapshotWithMetadata(
-          agentStorage,
-          snapshot,
-          childLogger,
-        );
+        const structuredSnapshot = await projectLiveAgent(snapshot);
         return {
           content: [],
           structuredContent: ensureValidJson({
@@ -5381,33 +5494,24 @@ function createToolCatalog(
         agents: z.array(AgentListItemPayloadSchema),
       },
     },
-    async ({
-      includeArchived = false,
-      includeBackground = false,
-      cwd,
-      sinceHours = 48,
-      statuses,
-      limit = 50,
-    }) => {
+    async ({ includeBackground = false, cwd, sinceHours = 48, statuses, limit = 50 }) => {
       const callerCwd = callerAgentId ? resolveCallerAgent()?.cwd : undefined;
       const requestedCwd = cwd?.trim() ? expandUserPath(cwd) : callerCwd;
       const statusFilter = statuses && statuses.length > 0 ? new Set(statuses) : null;
       const sinceMs = Date.now() - sinceHours * 60 * 60 * 1000;
       const liveSnapshots = agentManager.listAgents();
-      const liveAgents = await Promise.all(
+      const projectedLiveAgents = await Promise.all(
         liveSnapshots.map((snapshot) => projectLiveAgent(snapshot)),
       );
+      const liveAgents = projectedLiveAgents.filter((agent) => !agent.archivedAt);
       const liveIds = new Set(liveSnapshots.map((snapshot) => snapshot.id));
       const storedRecords = await agentStorage.list();
       const registeredProviderIds = new Set(providerSnapshotManager.listRegisteredProviderIds());
       const storedAgents = storedRecords
         .filter((record) => !record.internal && !liveIds.has(record.id))
-        .filter((record) => includeArchived || !record.archivedAt)
-        .filter(
-          (record) =>
-            includeArchived || isStoredAgentProviderAvailable(record, registeredProviderIds),
-        )
-        .map((record) => buildStoredAgentPayload(record, registeredProviderIds));
+        .filter((record) => !record.archivedAt)
+        .filter((record) => isStoredAgentProviderAvailable(record, registeredProviderIds))
+        .map(projectStoredAgent);
       const backgroundWorkspaceIds = new Set(
         ((await options.workspaceRegistry?.list()) ?? [])
           .filter((workspace) => workspace.background)
@@ -5421,7 +5525,7 @@ function createToolCatalog(
             includeBackground,
           ),
         )
-        .filter((agent) => includeArchived || !agent.archivedAt)
+        .filter((agent) => !agent.archivedAt)
         .map(toAgentListItemPayload)
         .filter((agent) => !requestedCwd || isSameOrDescendantPath(requestedCwd, agent.cwd))
         .filter((agent) => !statusFilter || statusFilter.has(agent.status))
@@ -5943,6 +6047,67 @@ function createToolCatalog(
       };
     },
   );
+
+  if (options.changeRequestWatches) {
+    const watches = options.changeRequestWatches;
+    const inputSchema = {
+      url: z
+        .string()
+        .trim()
+        .min(1)
+        .describe("URL of a pull request or merge request on a supported forge."),
+    };
+    registerTool(
+      "subscribe_change_request",
+      {
+        title: "Watch change request",
+        description:
+          "Watch a pull request or merge request for check failures, passing checks, new comments, reviews, approvals, and closure. Returns the current state and sends future updates after your current turn.",
+        inputSchema,
+        outputSchema: {
+          url: z.string(),
+          ...changeRequestStatusSchema.shape,
+          subscribed: z.boolean(),
+          stale: z
+            .boolean()
+            .describe("The last stored status is shown because a fresh read is pending or failed."),
+        },
+      },
+      async ({ url }) => {
+        if (!callerAgentId) {
+          throw new JAgentDeskToolInputError(
+            "subscribe_change_request requires an agent-scoped session",
+          );
+        }
+        resolveCallerAgent();
+        return {
+          content: [],
+          structuredContent: ensureValidJson(await watches.subscribe(callerAgentId, url)),
+        };
+      },
+    );
+    registerTool(
+      "unsubscribe_change_request",
+      {
+        title: "Stop watching change request",
+        description: "Stop your watch and discard its unsent updates.",
+        inputSchema,
+        outputSchema: { url: z.string(), removed: z.boolean() },
+      },
+      async ({ url }) => {
+        if (!callerAgentId) {
+          throw new JAgentDeskToolInputError(
+            "unsubscribe_change_request requires an agent-scoped session",
+          );
+        }
+        resolveCallerAgent();
+        return {
+          content: [],
+          structuredContent: ensureValidJson(await watches.unsubscribe(callerAgentId, url)),
+        };
+      },
+    );
+  }
 
   registerTool(
     "create_heartbeat",

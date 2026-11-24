@@ -1,4 +1,5 @@
 import { useBuiltinPluginEnabled } from "@/plugins/builtin/hooks";
+import type { AgentMessage } from "@jagentdesk/protocol/agent-message";
 import { ClickUpUserHeader } from "@/components/clickup-shell/chat-headers";
 import { CLICKUP_MESSAGE_INDENT } from "@/components/clickup-shell/chat-layout";
 import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
@@ -2562,6 +2563,7 @@ interface ExpandableBadgeProps {
   isExpanded: boolean;
   style?: StyleProp<ViewStyle>;
   onToggle?: () => void;
+  onLabelPress?: () => void;
   onOpenFile?: () => void;
   onDetailHoverChange?: (hovered: boolean) => void;
   renderDetails?: () => ReactNode;
@@ -2638,6 +2640,7 @@ function ExpandableBadgeWebShimmerOverlay({
 }
 
 interface ExpandableBadgeLabelRowProps {
+  onLabelPress?: () => void;
   label: string;
   labelStyle: StyleProp<TextStyle>;
   secondaryLabel?: string;
@@ -2664,6 +2667,7 @@ interface ExpandableBadgeLabelRowProps {
 }
 
 function ExpandableBadgeLabelRow({
+  onLabelPress,
   label,
   labelStyle,
   secondaryLabel,
@@ -2689,12 +2693,21 @@ function ExpandableBadgeLabelRow({
   onOpenFileHoverOut,
 }: ExpandableBadgeLabelRowProps) {
   const { t } = useTranslation();
+  const handleLabelPress = useCallback(
+    (event: GestureResponderEvent) => {
+      event.stopPropagation();
+      onLabelPress?.();
+    },
+    [onLabelPress],
+  );
   return (
     <View
       style={expandableBadgeStylesheet.labelRow}
       onLayout={shouldMeasureNativeShimmer ? onLabelRowLayout : undefined}
     >
       <Text
+        onPress={onLabelPress ? handleLabelPress : undefined}
+        accessibilityRole={onLabelPress ? "link" : undefined}
         style={labelStyle}
         numberOfLines={1}
         onLayout={shouldMeasureWebShimmer ? onLabelLayout : undefined}
@@ -2925,6 +2938,7 @@ export const ExpandableBadge = memo(function ExpandableBadge({
   icon,
   isExpanded,
   onToggle,
+  onLabelPress,
   onOpenFile,
   onDetailHoverChange,
   renderDetails,
@@ -3223,6 +3237,7 @@ export const ExpandableBadge = memo(function ExpandableBadge({
             onSecondaryLayout={handleSecondaryLayout}
             showOpenFileButton={Boolean(onOpenFile && isHovered)}
             isOpenFileHovered={isOpenFileHovered}
+            onLabelPress={onLabelPress}
             onOpenFilePress={handleOpenFilePress}
             onOpenFileHoverIn={handleOpenFileHoverIn}
             onOpenFileHoverOut={handleOpenFileHoverOut}
@@ -3256,6 +3271,7 @@ function areExpandableBadgePropsEqual(previous: ExpandableBadgeProps, next: Expa
   if (previous.borderlessWhenExpanded !== next.borderlessWhenExpanded) return false;
   if (previous.testID !== next.testID) return false;
   if (previous.onToggle !== next.onToggle) return false;
+  if (previous.onLabelPress !== next.onLabelPress) return false;
   if (previous.onOpenFile !== next.onOpenFile) return false;
   if (previous.onDetailHoverChange !== next.onDetailHoverChange) return false;
   if (previous.renderDetails !== next.renderDetails) return false;
@@ -3263,6 +3279,8 @@ function areExpandableBadgePropsEqual(previous: ExpandableBadgeProps, next: Expa
 }
 
 interface ToolCallProps {
+  agentMessage?: AgentMessage;
+  onOpenAgent?: (agentId: string) => void;
   toolName: string;
   args?: unknown;
   result?: unknown;
@@ -3284,6 +3302,8 @@ interface ToolCallProps {
 }
 
 export const ToolCall = memo(function ToolCall({
+  agentMessage,
+  onOpenAgent,
   toolName,
   args,
   result,
@@ -3325,6 +3345,7 @@ export const ToolCall = memo(function ToolCall({
   const presentation = useMemo(
     () =>
       buildToolCallPresentation({
+        agentMessage,
         toolName,
         status,
         error: error ?? null,
@@ -3333,8 +3354,12 @@ export const ToolCall = memo(function ToolCall({
         cwd,
         resolveIcon: resolveToolCallIcon,
       }),
-    [toolName, status, error, effectiveDetail, metadata, cwd],
+    [toolName, status, error, effectiveDetail, metadata, cwd, agentMessage],
   );
+  const handleOpenSender = useMemo(() => {
+    if (!agentMessage || !onOpenAgent) return undefined;
+    return () => onOpenAgent(agentMessage.sender.id);
+  }, [agentMessage, onOpenAgent]);
   const handleOpenFile = useMemo(() => {
     const openFilePath = presentation.openFilePath;
     if (!openFilePath || !onOpenFilePath) {
@@ -3348,7 +3373,7 @@ export const ToolCall = memo(function ToolCall({
       openToolCall({
         displayName: presentation.displayName,
         summary: presentation.summary,
-        detail: effectiveDetail,
+        detail: presentation.detail,
         errorText: presentation.errorText,
         icon: presentation.icon,
         showLoadingSkeleton: presentation.isLoadingDetails,
@@ -3361,12 +3386,12 @@ export const ToolCall = memo(function ToolCall({
   }, [
     shouldRenderInline,
     openToolCall,
+    presentation.detail,
     presentation.displayName,
     presentation.summary,
     presentation.errorText,
     presentation.icon,
     presentation.isLoadingDetails,
-    effectiveDetail,
     toolName,
     client,
   ]);
@@ -3467,6 +3492,7 @@ export const ToolCall = memo(function ToolCall({
     <ExpandableBadge
       testID="tool-call-badge"
       label={presentation.displayName}
+      onLabelPress={handleOpenSender}
       secondaryLabel={presentation.summary}
       icon={presentation.icon}
       isExpanded={shouldRenderInline && isExpanded}
@@ -3483,6 +3509,8 @@ export const ToolCall = memo(function ToolCall({
 }, areToolCallPropsEqual);
 
 function areToolCallPropsEqual(previous: ToolCallProps, next: ToolCallProps) {
+  if (previous.agentMessage !== next.agentMessage) return false;
+  if (previous.onOpenAgent !== next.onOpenAgent) return false;
   if (previous.toolName !== next.toolName) return false;
   if (previous.args !== next.args) return false;
   if (previous.result !== next.result) return false;

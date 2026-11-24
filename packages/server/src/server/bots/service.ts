@@ -152,12 +152,12 @@ export class BotsService {
   }
   private async drain(botId: string): Promise<void> {
     if (!this.enabled || this.dispatching.has(botId)) return;
-    const bot = this.storage.bot(botId);
-    if (bot.paused || (bot.agentId && this.runtime.busy(bot.agentId))) return;
-    const message = this.storage.pending(botId)[0];
-    if (!message) return;
     this.dispatching.add(botId);
     try {
+      const bot = this.storage.bot(botId);
+      if (bot.paused || (bot.agentId && (await this.runtime.busy(bot.agentId)))) return;
+      const message = this.storage.pending(botId)[0];
+      if (!message) return;
       const agentId = await this.runtime.ensureSupervisor(bot, this.storage.botHome(bot));
       this.storage.saveBot({ ...this.storage.bot(botId), agentId });
       if (bot.agentId !== agentId) this.changed(botId);
@@ -512,6 +512,8 @@ export class BotsService {
         await this.runtime.send(
           saved.workerAgentIds[0],
           `Cross-review found blocking findings. Fix round ${saved.reviewRounds}/2. Fix in this worktree and report when ready:\n${reviewSummary(result.reviews)}`,
+          undefined,
+          bot.agentId ?? undefined,
         );
       } else {
         this.saveItem(

@@ -267,6 +267,13 @@ export class AutorunService {
           result = parseTurnResult(r.finalText);
           failures = 0;
         } catch (error) {
+          // A wake turn (agent message, finish notification, forum wake) can start
+          // between the in-flight check and runAgent. That is not an autorun failure:
+          // wait for it like a user turn and try again.
+          if (this.agentManager.hasInFlightRun(agentId)) {
+            await sleep(BUSY_RECHECK_MS);
+            continue;
+          }
           failures += 1;
           const detail = error instanceof Error ? error.message : String(error);
           await this.recordTurn(

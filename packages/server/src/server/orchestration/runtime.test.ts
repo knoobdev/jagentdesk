@@ -12,12 +12,19 @@ import {
 } from "@jagentdesk/protocol/orchestration";
 import type { Logger } from "pino";
 import { createAgentCommand } from "../agent/create-agent/create.js";
-import { sendPromptToAgent } from "../agent/agent-prompt.js";
+import { enqueueAgentMessage } from "../agent/agent-prompt.js";
 import type { ManagedAgent } from "../agent/agent-manager.js";
 import { OrchestrationRuntime } from "./runtime.js";
 
 vi.mock("../agent/create-agent/create.js", () => ({ createAgentCommand: vi.fn() }));
-vi.mock("../agent/agent-prompt.js", () => ({ sendPromptToAgent: vi.fn() }));
+// Delivery never completes here: ORC must not await it inside its state lock.
+vi.mock("../agent/agent-prompt.js", () => ({
+  enqueueAgentMessage: vi.fn(() => ({
+    status: "queued",
+    messageId: "msg-1",
+    dispatched: new Promise(() => {}),
+  })),
+}));
 
 function fakeLogger(): Logger {
   const logger = { child: () => logger };
@@ -82,8 +89,10 @@ describe("OrchestrationRuntime", () => {
   let config: OrchestrationConfig;
   let agents: Map<string, ManagedAgent>;
   let runtime: OrchestrationRuntime;
+  let storedRecords: Map<string, { archivedAt: string | null }>;
 
   beforeEach(async () => {
+    storedRecords = new Map();
     home = await mkdtemp(join(tmpdir(), "jagentdesk-orchestration-"));
     config = createDefaultOrchestrationConfig();
     agents = new Map();
@@ -109,7 +118,7 @@ describe("OrchestrationRuntime", () => {
         model,
         workspaceId: input.workspaceId ?? "workspace-1",
         labels: {
-          ...(input.labels ?? {}),
+          ...input.labels,
           [PARENT_AGENT_ID_LABEL]: input.callerAgentId ?? "",
         },
       });
@@ -135,7 +144,7 @@ describe("OrchestrationRuntime", () => {
     runtime = new OrchestrationRuntime({
       jagentdeskHome: home,
       agentManager: agentManager as never,
-      agentStorage: {} as never,
+      agentStorage: { get: async (id: string) => storedRecords.get(id) ?? null } as never,
       providerSnapshotManager: {} as never,
       getConfig: () => config,
       logger: fakeLogger(),
@@ -195,7 +204,18 @@ describe("OrchestrationRuntime", () => {
       },
     });
     expect(handback.leadAgentId).toBe(lead.agentId);
-    expect(sendPromptToAgent).toHaveBeenCalled();
+    // The handback is queued for the Lead, steered, with the Peer as sender, and the
+    // call returns without waiting for dispatch (the receipt above never settles).
+    expect(enqueueAgentMessage).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        recipientId: lead.agentId,
+        source: { kind: "agent-message", agentId: peerResults[0].agentId },
+        activeTurnBehavior: "steer",
+        unarchive: false,
+        prompt: expect.stringContaining("Targeted test passed."),
+      }),
+    );
   });
 
   test("allows one evidence round for dissent and rejects a second one", async () => {
@@ -296,11 +316,42 @@ describe("OrchestrationRuntime", () => {
 
     expect(reused).toMatchObject({ agentId: lead.agentId, reused: true });
     expect(agents.get(lead.agentId)?.labels[ORCHESTRATION_BRIEF_LABEL]).toBe("brief-2");
-    expect(sendPromptToAgent).toHaveBeenCalledWith(
+    expect(enqueueAgentMessage).toHaveBeenCalledWith(
+      expect.anything(),
       expect.objectContaining({
-        agentId: lead.agentId,
+        recipientId: lead.agentId,
         prompt: expect.stringContaining("second objective"),
       }),
     );
+  });
+
+  test("does not reuse an archived workspace Lead for a subsequent brief", async () => {
+    const lead = await runtime.bootstrapLead({
+      callerAgentId: "supervisor-1",
+      assignment: "Own the first objective.",
+    });
+    // A history read resumes an archived agent into memory; storage still owns
+    // the archive timestamp, so ORC must not treat it as the active Lead.
+    storedRecords.set(lead.agentId, { archivedAt: new Date().toISOString() });
+    const nextSupervisor = makeAgent({
+      id: "supervisor-2",
+      provider: "codex",
+      model: "gpt-5.6-luna",
+      workspaceId: "workspace-1",
+      labels: {
+        [ORCHESTRATION_ROLE_LABEL]: "supervisor",
+        [ORCHESTRATION_WORKSPACE_LABEL]: "workspace-1",
+        [ORCHESTRATION_BRIEF_LABEL]: "brief-2",
+      },
+    });
+    agents.set(nextSupervisor.id, nextSupervisor);
+
+    const next = await runtime.bootstrapLead({
+      callerAgentId: nextSupervisor.id,
+      assignment: "Own the second objective.",
+    });
+
+    expect(next.reused).toBe(false);
+    expect(next.agentId).not.toBe(lead.agentId);
   });
 });

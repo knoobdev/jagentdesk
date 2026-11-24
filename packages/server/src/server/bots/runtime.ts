@@ -10,8 +10,8 @@ export interface BotRuntimeEvent {
 export interface BotRuntime {
   ensureSupervisor(bot: Bot, home: string): Promise<string>;
   configure(bot: Bot): Promise<void>;
-  busy(agentId: string): boolean;
-  send(agentId: string, text: string, messageId?: string): Promise<void>;
+  busy(agentId: string): boolean | Promise<boolean>;
+  send(agentId: string, text: string, messageId?: string, sourceAgentId?: string): Promise<void>;
   startWorker(
     bot: Bot,
     item: BotItem,

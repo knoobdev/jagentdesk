@@ -7,6 +7,7 @@ import { curateAgentActivity } from "./activity-curator.js";
 import { selectItemsByProjectedLimit } from "./timeline-projection.js";
 import type { AgentStorage, StoredAgentRecord } from "./agent-storage.js";
 import { serializeAgentSnapshot } from "../messages.js";
+import { waitForAgentMessageDispatch } from "./agent-prompt.js";
 import { StoredScheduleSchema } from "@jagentdesk/protocol/schedule/types";
 import type { AgentProvider } from "./agent-sdk-types.js";
 
@@ -134,6 +135,13 @@ export async function waitForAgentWithTimeout(
   );
 
   try {
+    // Agent messages admitted before this wait belong to it: wait for their dispatch
+    // first, so the turn they start is the one waited on (ADR-0029 decision 3).
+    if (options?.waitForActive) {
+      await waitForAgentMessageDispatch(agentManager, agentId, combinedController.signal).catch(
+        () => undefined,
+      );
+    }
     const result = await agentManager.waitForAgentEvent(agentId, {
       signal: combinedController.signal,
       waitForActive: options?.waitForActive,

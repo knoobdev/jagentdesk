@@ -12,7 +12,11 @@ import {
   createAgentCommand,
   type CreateAgentCommandDependencies,
 } from "../agent/create-agent/create.js";
-import { sendPromptToAgent, waitForAgentRunStartWithTimeout } from "../agent/agent-prompt.js";
+import {
+  enqueueAgentMessage,
+  sendPromptToAgent,
+  waitForAgentRunStartWithTimeout,
+} from "../agent/agent-prompt.js";
 import { ensureAgentLoaded } from "../agent/agent-loading.js";
 import type { ProviderSnapshotManager } from "../agent/provider-snapshot-manager.js";
 import type { OrchestrationRuntime } from "../orchestration/runtime.js";
@@ -93,9 +97,7 @@ export class DaemonBotRuntime implements BotRuntime {
           if (
             done &&
             manager.getAgent(id)?.labels["jagentdesk.orchestration.role"] === "lead" &&
-            manager
-              .listAgents()
-              .some((a) => a.labels["jagentdesk.parent-agent-id"] === id && this.busy(a.id))
+            (await this.hasBusyChildren(id))
           )
             return;
           if (this.reviewerIds.has(id)) {
@@ -194,7 +196,15 @@ export class DaemonBotRuntime implements BotRuntime {
     });
     return result.snapshot.id;
   }
-  busy(agentId: string): boolean {
+  private async hasBusyChildren(parentId: string): Promise<boolean> {
+    for (const child of this.deps.agentManager.listAgents()) {
+      if (child.labels["jagentdesk.parent-agent-id"] === parentId && (await this.busy(child.id)))
+        return true;
+    }
+    return false;
+  }
+  async busy(agentId: string): Promise<boolean> {
+    if ((await this.deps.create.agentStorage.get(agentId))?.archivedAt) return false;
     const agent = this.deps.agentManager.getAgent(agentId);
     return (
       this.deps.agentManager.hasInFlightRun(agentId) ||
@@ -202,13 +212,38 @@ export class DaemonBotRuntime implements BotRuntime {
       (agent?.pendingPermissions.size ?? 0) > 0
     );
   }
-  async send(agentId: string, text: string, messageId?: string): Promise<void> {
+  async send(
+    agentId: string,
+    text: string,
+    messageId?: string,
+    sourceAgentId?: string,
+  ): Promise<void> {
+    if (sourceAgentId) {
+      const receipt = enqueueAgentMessage(
+        {
+          agentManager: this.deps.agentManager,
+          agentStorage: this.deps.create.agentStorage,
+          logger: this.deps.logger,
+        },
+        {
+          recipientId: agentId,
+          prompt: text,
+          messageId,
+          source: { kind: "agent-message", agentId: sourceAgentId },
+          activeTurnBehavior: "steer",
+          unarchive: false,
+        },
+      );
+      await receipt.dispatched;
+      return;
+    }
     const result = await sendPromptToAgent({
       agentManager: this.deps.agentManager,
       agentStorage: this.deps.create.agentStorage,
       agentId,
       prompt: text,
       messageId,
+      activeTurnBehavior: "steer",
       logger: this.deps.logger,
     });
     if (result.disposition === "turn_started")

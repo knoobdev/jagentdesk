@@ -1,4 +1,5 @@
-import { expect, it, test, vi } from "vitest";
+import { parseAgentMessages } from "./agent-messages/index.js";
+import { beforeEach, expect, it, test, vi } from "vitest";
 import pino, { type Logger } from "pino";
 
 import { createTestLogger } from "../../test-utils/test-logger.js";
@@ -9,8 +10,11 @@ import {
   isSystemInjectedEnvelope,
   sendPromptToAgent,
   setupFinishNotification,
+  setDefaultAgentMessageDeliveryTimingForTests,
 } from "./agent-prompt.js";
 import type { AgentManagerEvent, ManagedAgent } from "./agent-manager.js";
+
+beforeEach(() => setDefaultAgentMessageDeliveryTimingForTests({ quietMs: 0 }));
 
 interface CapturedLogger {
   logger: Logger;
@@ -148,6 +152,11 @@ function createFinishNotificationScenario(
       subscriber?.({
         type: "agent_state",
         agent: childAgent,
+      });
+      subscriber?.({
+        type: "agent_stream",
+        agentId: "child-agent",
+        event: { type: "turn_completed", provider: "codex" },
       });
     },
     async finishChildAndReadParentPrompt() {
@@ -396,11 +405,17 @@ test("finish notifications tell the parent the child's last assistant message", 
   scenario.startWatchingChild();
   const parentPrompt = await scenario.finishChildAndReadParentPrompt();
 
-  expect(parentPrompt).toEqual(
-    formatSystemNotificationPrompt(
-      "Agent child-agent (Child Agent) finished.\n\n<agent-response>\nImplemented the cleanup and all checks pass.\n</agent-response>",
-    ),
-  );
+  expect(parseAgentMessages(parentPrompt)).toMatchObject([
+    {
+      source: {
+        kind: "agent-notification",
+        agentId: "child-agent",
+        title: "Child Agent",
+        event: "finished",
+      },
+      text: "Agent child-agent (Child Agent) finished.\n\n<agent-response>\nImplemented the cleanup and all checks pass.\n</agent-response>",
+    },
+  ]);
 });
 
 test("detaching a child ends its parent-owned finish notification", async () => {
@@ -434,15 +449,17 @@ test("finish notifications log a rejected parent prompt without an unhandled rej
   await scenario.finishChildAndReadParentPrompt();
   await captured.nextRecord;
 
-  expect(captured.records).toEqual([
-    expect.objectContaining({
-      msg: "Failed to notify caller agent",
-      childAgentId: "child-agent",
-      callerAgentId: "caller-agent",
-      reason: "finished",
-      err: expect.objectContaining({ message: "parent provider rejected replacement" }),
-    }),
-  ]);
+  await vi.waitFor(() =>
+    expect(captured.records).toContainEqual(
+      expect.objectContaining({
+        msg: "Failed to notify caller agent",
+        childAgentId: "child-agent",
+        callerAgentId: "caller-agent",
+        reason: "finished",
+        err: expect.objectContaining({ message: "parent provider rejected replacement" }),
+      }),
+    ),
+  );
 });
 
 it("does not notify archived callers", async () => {
@@ -529,6 +546,11 @@ it("does not notify archived callers", async () => {
   subscriber?.({
     type: "agent_state",
     agent: childAgent,
+  });
+  subscriber?.({
+    type: "agent_stream",
+    agentId: "child-agent",
+    event: { type: "turn_completed", provider: "codex" },
   });
 
   await vi.waitFor(() => {

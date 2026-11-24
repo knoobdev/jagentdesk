@@ -1,3 +1,8 @@
+import { createChangeRequestRouter } from "../services/change-request-router.js";
+import { createForgeService } from "../services/forge-registry.js";
+import { createForgeResolver } from "../services/forge-resolver.js";
+import { createChangeRequestWatches } from "./agent/change-request-watches/index.js";
+import { getAgentMessageDelivery } from "./agent/agent-prompt.js";
 import { BotStorage } from "./bots/storage.js";
 import { BotsService } from "./bots/service.js";
 import type { BotTriggerSource } from "./bots/service.js";
@@ -15,6 +20,12 @@ import { WorkspaceArchiveOperations } from "./workspace-archive-operations.js";
 import { PhysicalDeviceHub } from "./devices/hub.js";
 import { clearGrantsWhenSessionsEnd } from "./devices/agent-grants.js";
 import { HostCapabilityService } from "./host-capabilities/service.js";
+import { closeAgentMessageDelivery } from "./agent/agent-prompt.js";
+import {
+  FinishSubscriptionStore,
+  restoreFinishSubscriptions,
+  suspendFinishNotifications,
+} from "./agent/finish-subscriptions/index.js";
 import { ensureToolDirsOnPath, HostToolInstaller } from "./host-tools/installer.js";
 import type { HttpFetch } from "./host-tools/release.js";
 import { setForgeToolInstaller } from "./session/forge/forge-cli-installer.js";
@@ -1020,12 +1031,15 @@ export async function createJAgentDeskDaemon(
     logger,
   });
   const github = createGitHubService();
+  const forgeResolver = createForgeResolver({
+    createService: (forge) => (forge === "github" ? github : createForgeService(forge)),
+  });
   const workspaceGitService = new WorkspaceGitServiceImpl({
     logger,
     jagentdeskHome: config.jagentdeskHome,
     worktreesRoot: config.worktreesRoot,
     deps: {
-      forgeOverrides: { github },
+      forgeResolver,
     },
   });
   workspaceRegistry.subscribeToMutations((mutation) => {
@@ -1170,6 +1184,17 @@ export async function createJAgentDeskDaemon(
     agentManager.updateProviderRegistry(nextAgentManagerState);
   };
   logger.info({ elapsed: elapsed() }, "Agent storage initialized");
+  // Durable finish subscriptions (ADR-0029 decisions 4, 5): open ones become
+  // notifications for each parent's next turn; no parent is woken here.
+  await restoreFinishSubscriptions({
+    agentManager,
+    store: FinishSubscriptionStore.forHome(config.jagentdeskHome, logger),
+    getAgentTitle: async (agentId) => (await agentStorage.get(agentId))?.title ?? null,
+    isArchived: async (agentId) => Boolean((await agentStorage.get(agentId))?.archivedAt),
+    logger,
+  }).catch((error: unknown) => {
+    logger.error({ err: error }, "Failed to restore finish subscriptions");
+  });
   // Seed the lifetime usage baseline once from existing agents so headline Usage
   // & Cost figures include usage that predates the time-series and never drop
   // when an agent is deleted. No-op if a baseline was already persisted.
@@ -1694,7 +1719,20 @@ export async function createJAgentDeskDaemon(
     archiveWorkspace: archiveScheduleWorkspaceExternal,
   });
   await scheduleService.start();
+  const changeRequestWatches = createChangeRequestWatches({
+    router: createChangeRequestRouter({ forgeResolver }),
+    backgroundWork: agentManager,
+    jagentdeskHome: config.jagentdeskHome,
+    logger,
+    isActive: async (agentId) => {
+      const record = await agentStorage.get(agentId);
+      return record ? !record.archivedAt : Boolean(agentManager.getAgent(agentId));
+    },
+    messages: () => getAgentMessageDelivery({ agentManager, agentStorage, logger }),
+  });
+
   agentManager.setAgentArchivedCallback(async (agentId) => {
+    await changeRequestWatches.archive(agentId);
     try {
       await scheduleService.completeForAgent(agentId);
     } catch (error) {
@@ -1879,6 +1917,7 @@ export async function createJAgentDeskDaemon(
   const createAgentToolHostDependencies = (
     runtime: JAgentDeskToolRuntimeContext,
   ): JAgentDeskToolHostDependencies => ({
+    changeRequestWatches,
     builtinPlugins: pluginRuntime.builtin.forAgent(runtime.callerAgentId),
     callerAgentLabels: runtime.callerAgentLabels,
     jagentdeskToolPolicy:
@@ -2384,6 +2423,7 @@ export async function createJAgentDeskDaemon(
             await pluginRuntime.start();
             providerSnapshotManager.settlePluginProviders();
             restartRecovery.resumePending();
+            await changeRequestWatches.start();
             tsnetListener = createTsnetListener({
               logger,
               port: boundListenTarget.type === "tcp" ? boundListenTarget.port : 0,
@@ -2483,8 +2523,13 @@ export async function createJAgentDeskDaemon(
     await hubRelationships.stop();
     workspaceReconciliation.dispose();
     scriptHealthMonitor.stop();
-    // Freeze both ingress and registration before taking the agent closure snapshot.
+    // Graceful shutdown delivers agent messages still waiting in a 2 s window
+    // (ADR-0029 decision 3); a crash loses them.
     wsServer?.prepareForShutdown();
+    suspendFinishNotifications(agentManager);
+    await changeRequestWatches.close();
+    await closeAgentMessageDelivery(agentManager).catch(() => undefined);
+    // Freeze registration before taking the agent closure snapshot.
     botsService.suspendForShutdown();
     agentManager.prepareForShutdown();
     await restartRecovery.captureRunningAgents();
@@ -2558,6 +2603,7 @@ export async function createJAgentDeskDaemon(
     if (wsServer) {
       await wsServer.close();
     }
+    forgeResolver.dispose();
     await serviceProxy.stopStandalone();
     // Force-drop remaining sockets so httpServer.close() resolves promptly.
     // We've already closed wsServer (which sent ws-layer close frames) and

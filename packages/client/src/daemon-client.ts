@@ -647,6 +647,8 @@ export interface SendMessageOptions {
   activeTurnBehavior?: SendAgentMessageRequest["activeTurnBehavior"];
   /** Native skills to invoke on this turn (spec 22.7); the daemon adds the invocation. */
   skillIds?: string[];
+  /** Sender agent of an agent-originated prompt (ADR-0029). */
+  sourceAgentId?: string;
 }
 
 export interface AgentAttentionRequiredNotification {
@@ -4244,6 +4246,12 @@ export class DaemonClient {
       ...(options?.attachments ? { attachments: options.attachments } : {}),
       ...(options?.activeTurnBehavior ? { activeTurnBehavior: options.activeTurnBehavior } : {}),
       ...(options?.skillIds?.length ? { skillIds: options.skillIds } : {}),
+      // A host without provenance support would treat the field as unknown; only
+      // send it when the host says it understands sender identity.
+      ...(options?.sourceAgentId &&
+      this.lastServerInfoMessage?.features?.agentMessageProvenance === true
+        ? { sourceAgentId: options.sourceAgentId }
+        : {}),
     });
     const payload = await this.sendRequest({
       requestId,

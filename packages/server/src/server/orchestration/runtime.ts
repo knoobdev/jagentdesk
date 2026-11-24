@@ -28,7 +28,7 @@ import type { AgentStorage } from "../agent/agent-storage.js";
 import type { AgentManager, ManagedAgent } from "../agent/agent-manager.js";
 import { createAgentCommand } from "../agent/create-agent/create.js";
 import type { ProviderSnapshotManager } from "../agent/provider-snapshot-manager.js";
-import { sendPromptToAgent } from "../agent/agent-prompt.js";
+import { enqueueAgentMessage } from "../agent/agent-prompt.js";
 import { resolveConfiguredRouteCandidates } from "./task-brief.js";
 
 const OrchestrationAssignmentStateSchema = z.object({
@@ -377,8 +377,14 @@ export class OrchestrationRuntime {
     return created;
   }
 
-  private activeAgentsForWorkspace(context: OrchestrationAgentContext, role: OrchestrationRole) {
-    return this.dependencies.agentManager
+  // An archived agent can be resumed into memory to serve a history read, so a
+  // live managed agent is not evidence that it is active: storage owns the
+  // archive timestamp (ADR-0029 decision 6).
+  private async activeAgentsForWorkspace(
+    context: OrchestrationAgentContext,
+    role: OrchestrationRole,
+  ): Promise<ManagedAgent[]> {
+    const candidates = this.dependencies.agentManager
       .listAgents()
       .filter(
         (agent) =>
@@ -386,6 +392,16 @@ export class OrchestrationRuntime {
           agent.workspaceId === context.workspaceId &&
           agent.labels[ORCHESTRATION_ROLE_LABEL] === role,
       );
+    const archived = await Promise.all(
+      candidates.map(async (agent) => {
+        try {
+          return Boolean((await this.dependencies.agentStorage.get(agent.id))?.archivedAt);
+        } catch {
+          return false;
+        }
+      }),
+    );
+    return candidates.filter((_, index) => !archived[index]);
   }
 
   private async resolveChildPermissions(
@@ -432,6 +448,34 @@ export class OrchestrationRuntime {
     if (mode && (await snapshots.isUnattendedCreateMode(profile.provider, cwd, mode)))
       throw new Error("Attended bot workers cannot use an unattended ORC profile");
     return { mode, unattended: false };
+  }
+
+  private enqueueMessage(input: {
+    recipientId: string;
+    prompt: string;
+    senderAgentId: string;
+  }): void {
+    const logger = this.dependencies.logger.child({ module: "orchestration-runtime" });
+    const receipt = enqueueAgentMessage(
+      {
+        agentManager: this.dependencies.agentManager,
+        agentStorage: this.dependencies.agentStorage,
+        logger,
+      },
+      {
+        recipientId: input.recipientId,
+        prompt: input.prompt,
+        source: { kind: "agent-message", agentId: input.senderAgentId },
+        activeTurnBehavior: "steer",
+        unarchive: false,
+      },
+    );
+    receipt.dispatched.catch((error) => {
+      logger.warn(
+        { err: error, recipientId: input.recipientId },
+        "Orchestration message delivery failed",
+      );
+    });
   }
 
   private async createChild(input: {
@@ -611,7 +655,7 @@ export class OrchestrationRuntime {
       // The topology has one active Lead per workspace, not one Lead per
       // natural-language request. A subsequent brief must reuse that owner
       // and move its active run label before relaying the new objective.
-      const activeLeads = this.activeAgentsForWorkspace(context, "lead");
+      const activeLeads = await this.activeAgentsForWorkspace(context, "lead");
       if (activeLeads.length > 1) {
         throw new Error("Topology violation: more than one active Lead exists for this workspace");
       }
@@ -620,18 +664,17 @@ export class OrchestrationRuntime {
         await this.dependencies.agentManager.setLabels(lead.id, {
           [ORCHESTRATION_BRIEF_LABEL]: context.briefId,
         });
-        await sendPromptToAgent({
-          agentManager: this.dependencies.agentManager,
-          agentStorage: this.dependencies.agentStorage,
-          agentId: lead.id,
+        // Queued, not awaited inside the state lock: the recipient gets this together
+        // with anything else arriving in its 2 s window (e.g. a Peer's finish), steered.
+        this.enqueueMessage({
+          recipientId: lead.id,
           prompt: formatLeadRelay({
             assignment: input.assignment,
             briefId: context.briefId,
             workspaceId: context.workspaceId,
             roleInstructions: this.dependencies.getConfig().roles.lead.instructions,
           }),
-          unarchive: false,
-          logger: this.dependencies.logger.child({ module: "orchestration-runtime" }),
+          senderAgentId: context.agent.id,
         });
         run.leadAgentId = activeLeads[0].id;
         run.updatedAtMs = Date.now();
@@ -820,13 +863,12 @@ export class OrchestrationRuntime {
       const assignment = run.assignments.find((candidate) => candidate.id === assignmentId);
       if (assignment) assignment.status = "handed_back";
       run.updatedAtMs = Date.now();
-      await sendPromptToAgent({
-        agentManager: this.dependencies.agentManager,
-        agentStorage: this.dependencies.agentStorage,
-        agentId: parentAgentId,
+      // Queued, not awaited inside the state lock: the recipient gets this together
+      // with anything else arriving in its 2 s window (e.g. a Peer's finish), steered.
+      this.enqueueMessage({
+        recipientId: parentAgentId,
         prompt: formatHandbackMessage({ peerAgentId: context.agent.id, handback: input.handback }),
-        unarchive: false,
-        logger: this.dependencies.logger.child({ module: "orchestration-runtime" }),
+        senderAgentId: context.agent.id,
       });
       return { handbackId, leadAgentId: parentAgentId };
     });
@@ -877,18 +919,17 @@ export class OrchestrationRuntime {
         createdAtMs: Date.now(),
       });
       run.updatedAtMs = Date.now();
-      await sendPromptToAgent({
-        agentManager: this.dependencies.agentManager,
-        agentStorage: this.dependencies.agentStorage,
-        agentId: input.peerAgentId,
+      // Queued, not awaited inside the state lock: the recipient gets this together
+      // with anything else arriving in its 2 s window (e.g. a Peer's finish), steered.
+      this.enqueueMessage({
+        recipientId: input.peerAgentId,
         prompt: formatDissentResolution({
           peerAgentId: input.peerAgentId,
           outcome,
           rationale: input.rationale,
           nextAction: input.nextAction,
         }),
-        unarchive: false,
-        logger: this.dependencies.logger.child({ module: "orchestration-runtime" }),
+        senderAgentId: context.agent.id,
       });
       if (outcome === "ESCALATED_TO_HUMAN" && context.agent.labels["jagentdesk.bot.id"])
         this.botEscalationHandler?.({
@@ -928,18 +969,17 @@ export class OrchestrationRuntime {
       // Bot completion is published after daemon cross-review, through the worker turn event.
       if (context.agent.labels["jagentdesk.bot.id"])
         return { supervisorAgentId: run.supervisorAgentId };
-      await sendPromptToAgent({
-        agentManager: this.dependencies.agentManager,
-        agentStorage: this.dependencies.agentStorage,
-        agentId: run.supervisorAgentId,
+      // Queued, not awaited inside the state lock: the recipient gets this together
+      // with anything else arriving in its 2 s window (e.g. a Peer's finish), steered.
+      this.enqueueMessage({
+        recipientId: run.supervisorAgentId,
         prompt: formatAcceptedResult({
           leadAgentId: context.agent.id,
           summary: input.summary,
           evidence: input.evidence,
           remainingUncertainty: input.remainingUncertainty,
         }),
-        unarchive: false,
-        logger: this.dependencies.logger.child({ module: "orchestration-runtime" }),
+        senderAgentId: context.agent.id,
       });
       return { supervisorAgentId: run.supervisorAgentId };
     });

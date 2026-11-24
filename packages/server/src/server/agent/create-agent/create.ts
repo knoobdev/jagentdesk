@@ -16,6 +16,7 @@ import type { AgentPromptInput, AgentRunOptions, AgentSessionConfig } from "../a
 import type { AgentStorage } from "../agent-storage.js";
 import type { AgentOwner } from "../agent-owner.js";
 import type { ProviderSnapshotManager } from "../provider-snapshot-manager.js";
+import type { AgentPromptSource } from "../agent-messages/index.js";
 import { setupFinishNotification, startCreatedAgentInitialPrompt } from "../agent-prompt.js";
 import { resolveCreateAgentTitles } from "../create-agent-title.js";
 import { buildAgentPrompt } from "../prompt-attachments.js";
@@ -174,6 +175,8 @@ interface ResolvedCreateAgent {
   config: AgentSessionConfig;
   createOptions: CreateAgentOptions;
   prompt?: AgentPromptInput;
+  /** Sender of the first prompt when another agent created this one (ADR-0029). */
+  source?: AgentPromptSource;
   runOptions?: AgentRunOptions;
   setupContinuation?: AgentWorktreeSetupContinuation;
   background: boolean;
@@ -207,24 +210,33 @@ export async function createAgentCommand(
   if (input.kind === "mcp") {
     input.onCreated?.({ agentId: snapshot.id, createdWorktree: resolved.createdWorktree ?? null });
   }
+  // Register before the first prompt (ADR-0029 decision 4): a child that finishes
+  // at once is still reported, and the durable record exists before any turn.
+  const stopFinishNotification =
+    input.kind === "mcp" &&
+    input.notifyOnFinish &&
+    input.callerAgentId &&
+    resolved.prompt !== undefined
+      ? setupFinishNotification({
+          agentManager: dependencies.agentManager,
+          agentStorage: dependencies.agentStorage,
+          childAgentId: snapshot.id,
+          callerAgentId: input.callerAgentId,
+          // Detached agents have no parent label, but still notify their creator.
+          requireParentOwnership: !(input.detached ?? false),
+          waitForTurnStart: true,
+          logger: dependencies.logger,
+        })
+      : null;
+
+  await stopFinishNotification?.ready;
   if (resolved.prompt !== undefined) {
     const sendResult = await sendInitialPrompt(dependencies, resolved, snapshot);
     initialPromptStarted = sendResult.started;
     liveSnapshot = sendResult.liveSnapshot;
     initialPromptError = sendResult.error ?? null;
   }
-
-  if (input.kind === "mcp" && input.notifyOnFinish && input.callerAgentId && initialPromptStarted) {
-    setupFinishNotification({
-      agentManager: dependencies.agentManager,
-      agentStorage: dependencies.agentStorage,
-      childAgentId: snapshot.id,
-      callerAgentId: input.callerAgentId,
-      // Detached agents have no parent label, but still notify their creator.
-      requireParentOwnership: !(input.detached ?? false),
-      logger: dependencies.logger,
-    });
-  }
+  if (!initialPromptStarted) stopFinishNotification?.();
 
   return {
     snapshot,
@@ -385,6 +397,9 @@ async function resolveMcpCreateAgent(
       env: input.env,
     },
     prompt: trimmedPrompt ? trimmedPrompt : undefined,
+    source: input.callerAgentId
+      ? { kind: "agent-message", agentId: input.callerAgentId }
+      : undefined,
     setupContinuation,
     createdWorktree,
     background: input.background,
@@ -482,6 +497,8 @@ async function sendInitialPrompt(
     }
     const liveSnapshot = await startCreatedAgentInitialPrompt({
       agentManager: dependencies.agentManager,
+      agentStorage: dependencies.agentStorage,
+      source: resolved.source,
       agentId: snapshot.id,
       snapshot,
       prompt,
