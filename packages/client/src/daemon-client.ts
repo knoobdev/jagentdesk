@@ -1605,6 +1605,7 @@ interface WaitHandle<T> {
 interface WaitOptions {
   skipQueue?: boolean;
   requestId?: string;
+  requestType?: SessionInboundMessage["type"];
 }
 
 interface CorrelatedResponseIdentity {
@@ -1748,7 +1749,7 @@ const DEFAULT_DICTATION_FINISH_FALLBACK_TIMEOUT_MS = 5 * 60 * 1000;
 const DEFAULT_DICTATION_FINISH_TIMEOUT_GRACE_MS = 5000;
 
 function isWaiterTimeoutError(error: unknown): boolean {
-  return error instanceof Error && error.message.startsWith("Timeout waiting for message");
+  return error instanceof DaemonConnectionError && error.code === "DAEMON_REQUEST_TIMEOUT";
 }
 
 function normalizeClientId(value: unknown): string | null {
@@ -2726,7 +2727,7 @@ export class DaemonClient {
         return { kind: "ok", value };
       },
       timeout,
-      { ...params.options, requestId: params.requestId },
+      { ...params.options, requestId: params.requestId, requestType: params.message.type },
     );
 
     void promise.catch(() => undefined);
@@ -11873,7 +11874,9 @@ export class DaemonClient {
   ): WaitHandle<T> {
     // Capture stack trace at call site, not inside setTimeout
     const timeoutError = new DaemonConnectionError(
-      `Timeout waiting for message (${timeout}ms)`,
+      options?.requestType
+        ? `No response to ${options.requestType} after ${timeout}ms`
+        : `Timeout waiting for message (${timeout}ms)`,
       "DAEMON_REQUEST_TIMEOUT",
     );
 

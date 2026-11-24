@@ -1045,7 +1045,7 @@ test("keeps the transport connected when a session RPC ping times out", async ()
   await connectPromise;
   expect(client.getConnectionState().status).toBe("connected");
 
-  await expect(client.ping({ timeoutMs: 1 })).rejects.toThrow("Timeout waiting for message");
+  await expect(client.ping({ timeoutMs: 1 })).rejects.toThrow("No response to ping after 1ms");
 
   expect(client.getConnectionState().status).toBe("connected");
 });
@@ -1094,7 +1094,9 @@ test("bounds the wait for push token revocation", async () => {
   await connectPromise;
 
   const revocation = client.unregisterPushToken("ExponentPushToken[test-device]");
-  const rejection = expect(revocation).rejects.toThrow("Timeout waiting for message (2000ms)");
+  const rejection = expect(revocation).rejects.toThrow(
+    "No response to push.unregister.request after 2000ms",
+  );
   await vi.advanceTimersByTimeAsync(1_999);
   expect(client.getConnectionState().status).toBe("connected");
 
@@ -1147,7 +1149,7 @@ test("defaults session RPC waiters to sixty seconds", async () => {
   expect(settled).toBe(false);
 
   await vi.advanceTimersByTimeAsync(1);
-  await expect(responsePromise).rejects.toThrow("Timeout waiting for message (60000ms)");
+  await expect(responsePromise).rejects.toThrow(/No response to .+ after 60000ms/);
 });
 
 test("honors explicit fetchAgent timeout below the session RPC default", async () => {
@@ -1195,7 +1197,7 @@ test("honors explicit fetchAgent timeout below the session RPC default", async (
   expect(settled).toBe(false);
 
   await vi.advanceTimersByTimeAsync(1);
-  await expect(responsePromise).rejects.toThrow("Timeout waiting for message (5000ms)");
+  await expect(responsePromise).rejects.toThrow(/No response to .+ after 5000ms/);
 });
 
 test("preserves legacy fetchAgent id overload", async () => {
@@ -1288,7 +1290,7 @@ test("honors explicit fetchAgentTimeline timeout below the session RPC default",
   expect(settled).toBe(false);
 
   await vi.advanceTimersByTimeAsync(1);
-  await expect(responsePromise).rejects.toThrow("Timeout waiting for message (2000ms)");
+  await expect(responsePromise).rejects.toThrow(/No response to .+ after 2000ms/);
 });
 
 test("lists the full agent prompt index", async () => {
@@ -1381,7 +1383,7 @@ test("honors explicit fetchAgents timeout below the session RPC default", async 
   expect(settled).toBe(false);
 
   await vi.advanceTimersByTimeAsync(1);
-  await expect(responsePromise).rejects.toThrow("Timeout waiting for message (1200ms)");
+  await expect(responsePromise).rejects.toThrow(/No response to .+ after 1200ms/);
 });
 
 test("honors explicit shutdownServer timeout below the session RPC default", async () => {
@@ -1427,7 +1429,7 @@ test("honors explicit shutdownServer timeout below the session RPC default", asy
   expect(settled).toBe(false);
 
   await vi.advanceTimersByTimeAsync(1);
-  await expect(responsePromise).rejects.toThrow("Timeout waiting for message (1500ms)");
+  await expect(responsePromise).rejects.toThrow(/No response to .+ after 1500ms/);
 });
 
 test("honors explicit getDaemonStatus timeout below the session RPC default", async () => {
@@ -1473,7 +1475,7 @@ test("honors explicit getDaemonStatus timeout below the session RPC default", as
   expect(settled).toBe(false);
 
   await vi.advanceTimersByTimeAsync(1);
-  await expect(responsePromise).rejects.toThrow("Timeout waiting for message (1500ms)");
+  await expect(responsePromise).rejects.toThrow(/No response to .+ after 1500ms/);
 });
 
 test("honors explicit getDaemonPairingOffer timeout below the session RPC default", async () => {
@@ -1519,7 +1521,7 @@ test("honors explicit getDaemonPairingOffer timeout below the session RPC defaul
   expect(settled).toBe(false);
 
   await vi.advanceTimersByTimeAsync(1);
-  await expect(responsePromise).rejects.toThrow("Timeout waiting for message (1500ms)");
+  await expect(responsePromise).rejects.toThrow(/No response to .+ after 1500ms/);
 });
 
 test("gates config reload on the daemon capability", async () => {
