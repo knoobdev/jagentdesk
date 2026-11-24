@@ -1,3 +1,4 @@
+import { ComposerDock } from "@/composer/dock";
 import { draftCreationKey } from "@/composer/draft/creation-key";
 import { useIsFocused } from "@react-navigation/native";
 import { SegmentedControl, type SegmentedControlOption } from "@/components/ui/segmented-control";
@@ -13,10 +14,9 @@ import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } 
 import type { ReactElement, RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { Pressable, StyleSheet as RNStyleSheet, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import type { PressableStateCallbackType } from "react-native";
 import { StyleSheet, useUnistyles, withUnistyles } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { createNameId } from "mnemonic-id";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Folder, FolderPlus, GitBranch, GitPullRequest } from "lucide-react-native";
@@ -37,7 +37,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { SidebarMenuToggle } from "@/components/headers/menu-header";
 import { ScreenHeader } from "@/components/headers/screen-header";
-import { HEADER_INNER_HEIGHT, MAX_CONTENT_WIDTH, useIsCompactFormFactor } from "@/constants/layout";
+import { HEADER_INNER_HEIGHT, useIsCompactFormFactor } from "@/constants/layout";
 import { useToast } from "@/contexts/toast-context";
 import { useAgentInputDraft } from "@/composer/draft/input-draft";
 import { useForgeSearchQuery } from "@/git/use-forge-search-query";
@@ -67,7 +67,6 @@ import {
   useWorkspaceDraftSubmissionStore,
   type PendingWorkspaceDraftSetup,
 } from "@/stores/workspace-draft-submission-store";
-import { KeyboardTranslateView } from "@/keyboard/shift";
 import { useKeyboardActionHandler } from "@/hooks/use-keyboard-action-handler";
 import type { KeyboardActionId } from "@/keyboard/keyboard-action-dispatcher";
 import { useFormPreferences } from "@/hooks/use-form-preferences";
@@ -759,13 +758,6 @@ function isolationLabel(t: TFunction, isolation: "local" | "worktree"): string {
   return isolation === "worktree"
     ? t("newWorkspace.isolation.worktree")
     : t("newWorkspace.isolation.local");
-}
-
-function getContentStyle(input: { isCompact: boolean; insetBottom: number }) {
-  if (input.isCompact) {
-    return [styles.content, styles.contentCompact, { paddingBottom: input.insetBottom }];
-  }
-  return [styles.content, styles.contentCentered];
 }
 
 function normalizeBranchDetails(
@@ -1725,7 +1717,6 @@ export function NewWorkspaceScreen({
   const queryClient = useQueryClient();
   const { theme } = useUnistyles();
   const { t } = useTranslation();
-  const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
   const toast = useToast();
   const mergeWorkspaces = useSessionStore((state) => state.seedWorkspaces);
@@ -2378,11 +2369,6 @@ export function NewWorkspaceScreen({
     ],
   );
 
-  const contentStyle = useMemo(
-    () => getContentStyle({ isCompact, insetBottom: insets.bottom }),
-    [isCompact, insets.bottom],
-  );
-
   const agentControlsWithDisabled = useMemo(
     () =>
       composerState
@@ -2464,59 +2450,56 @@ export function NewWorkspaceScreen({
     <FileDropZone style={styles.container}>
       <ScreenHeader left={screenHeaderLeft} borderless />
       <ImportSessionButton compact={isCompact} placement="top" onPress={importSession.open} />
-      <View style={contentStyle}>
+      <View style={styles.content}>
         <TitlebarDragRegion />
-        <KeyboardTranslateView style={animatedStaticStyles.centered}>
-          <View style={styles.composerTitleContainer}>
-            <Text style={styles.composerTitle}>{t("newWorkspace.title")}</Text>
+        <ComposerDock centered={!isCompact}>
+          <View pointerEvents="box-none">
+            <View style={styles.composerTitleContainer}>
+              <Text style={styles.composerTitle}>{t("newWorkspace.title")}</Text>
+            </View>
+            {formStack}
           </View>
-          {formStack}
-          <Composer
-            error={errorMessage}
-            externalKeyboardShift
-            agentId={draftKey}
-            serverId={selectedServerId}
-            isPaneFocused={true}
-            onSubmitMessage={handleSubmitNewWorkspace}
-            allowEmptySubmit={true}
-            submitButtonAccessibilityLabel={t("newWorkspace.create")}
-            submitButtonTestID="workspace-create-submit"
-            submitIcon="return"
-            isSubmitLoading={isPending}
-            waitForGithubAutoAttachOnSubmit
-            submitBehavior="preserve-and-lock"
-            blurOnSubmit={true}
-            value={chatDraft.text}
-            onChangeText={chatDraft.setText}
-            attachments={chatDraft.attachments}
-            attachmentScopeKeys={visibleDraftContextScopeKeys}
-            onChangeAttachments={chatDraft.setAttachments}
-            onGithubPrDetected={handleGithubPrDetected}
-            onGithubPrAutoAttach={handleGithubPrAutoAttach}
-            cwd={selectedSourceDirectory ?? ""}
-            clearDraft={handleClearDraft}
-            autoFocus
-            commandDraft={composerState?.commandDraft}
-            agentControls={agentControlsWithDisabled}
-          />
-          <ImportSessionButton
-            compact={isCompact}
-            placement="bottom"
-            onPress={importSession.open}
-          />
-        </KeyboardTranslateView>
+          <>
+            <Composer
+              error={errorMessage}
+              externalKeyboardShift
+              agentId={draftKey}
+              serverId={selectedServerId}
+              isPaneFocused={true}
+              onSubmitMessage={handleSubmitNewWorkspace}
+              allowEmptySubmit={true}
+              submitButtonAccessibilityLabel={t("newWorkspace.create")}
+              submitButtonTestID="workspace-create-submit"
+              submitIcon="return"
+              isSubmitLoading={isPending}
+              waitForGithubAutoAttachOnSubmit
+              submitBehavior="preserve-and-lock"
+              blurOnSubmit={true}
+              value={chatDraft.text}
+              onChangeText={chatDraft.setText}
+              attachments={chatDraft.attachments}
+              attachmentScopeKeys={visibleDraftContextScopeKeys}
+              onChangeAttachments={chatDraft.setAttachments}
+              onGithubPrDetected={handleGithubPrDetected}
+              onGithubPrAutoAttach={handleGithubPrAutoAttach}
+              cwd={selectedSourceDirectory ?? ""}
+              clearDraft={handleClearDraft}
+              autoFocus
+              commandDraft={composerState?.commandDraft}
+              agentControls={agentControlsWithDisabled}
+            />
+            <ImportSessionButton
+              compact={isCompact}
+              placement="bottom"
+              onPress={importSession.open}
+            />
+          </>
+        </ComposerDock>
       </View>
       {importSession.sheet}
     </FileDropZone>
   );
 }
-
-const animatedStaticStyles = RNStyleSheet.create({
-  centered: {
-    width: "100%",
-    maxWidth: MAX_CONTENT_WIDTH,
-  },
-});
 
 const styles = StyleSheet.create((theme) => ({
   container: {
@@ -2527,7 +2510,6 @@ const styles = StyleSheet.create((theme) => ({
   content: {
     position: "relative",
     flex: 1,
-    alignItems: "center",
   },
   contentCentered: {
     justifyContent: "center",

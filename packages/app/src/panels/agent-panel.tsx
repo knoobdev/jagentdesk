@@ -1,3 +1,4 @@
+import { ComposerDock } from "@/composer/dock";
 import { RewindCommandCenterRegistration } from "@/components/rewind/command-center-registration";
 import type { AgentScreenReadySyncState } from "@/hooks/use-agent-screen-state-machine";
 import { KeyboardTranslateView } from "@/keyboard/shift";
@@ -32,7 +33,6 @@ import React, {
 import { useTranslation } from "react-i18next";
 import { StyleSheet as RNStyleSheet, Text, View } from "react-native";
 import ReanimatedAnimated from "react-native-reanimated";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import invariant from "tiny-invariant";
 import { shallow, useShallow } from "zustand/shallow";
@@ -1234,6 +1234,60 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
     </ReanimatedAnimated.View>
   );
   const contentContainer = <View style={styles.contentContainer}>{streamContent}</View>;
+  const dock = (
+    <ComposerDock>
+      <View style={styles.contentContainer}>
+        {contentContainer}
+
+        {showHistorySyncError ? (
+          <SidebarCallout
+            title={t("agentPanel.states.timelineSyncFailed")}
+            variant="error"
+            testID="agent-timeline-sync-error"
+          />
+        ) : null}
+      </View>
+      {composerSection}
+      <>
+        {showHistorySyncOverlay ? (
+          <View style={styles.historySyncOverlay} testID="agent-history-overlay">
+            <ThemedLoadingSpinner size="large" uniProps={foregroundMutedColorMapping} />
+          </View>
+        ) : null}
+
+        <ToastViewport toast={toast} onDismiss={dismiss} placement="panel" />
+      </>
+    </ComposerDock>
+  );
+  const chatSurface = (
+    <FileDropZone style={styles.container} disabled={isArchivingCurrentAgent}>
+      {isGuestShareMode() ? null : (
+        <View style={styles.shareHeader}>
+          <BuiltinPluginGate serverId={serverId} id="activity-graph">
+            <ActivityGraphToggle agentId={agentId} serverId={serverId} />
+          </BuiltinPluginGate>
+          <BuiltinPluginGate serverId={serverId} id="session-share">
+            <SessionShareControl agentId={agentId} serverId={serverId} />
+          </BuiltinPluginGate>
+        </View>
+      )}
+      {dock}
+    </FileDropZone>
+  );
+  const archivingOverlay = isArchivingCurrentAgent ? (
+    <View style={styles.archivingOverlay} testID="agent-archiving-overlay">
+      <ThemedLoadingSpinner size="large" uniProps={foregroundColorMapping} />
+      <Text style={styles.archivingTitle}>{t("agentPanel.states.archivingTitle")}</Text>
+      <Text style={styles.archivingSubtitle}>{t("agentPanel.states.archivingSubtitle")}</Text>
+    </View>
+  ) : null;
+  const graphSurface = (
+    <ActivityGraphLayout serverId={serverId} agentId={agentId} streamViewRef={streamViewRef}>
+      {chatSurface}
+
+      {archivingOverlay}
+    </ActivityGraphLayout>
+  );
 
   return (
     <AgentCommandsProvider
@@ -1255,49 +1309,7 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
           timelineSync={timelineSync}
           enabled={isPaneFocused && active && !agentState.archivedAt && !isArchivingCurrentAgent}
         />
-        <ActivityGraphLayout serverId={serverId} agentId={agentId} streamViewRef={streamViewRef}>
-          <FileDropZone style={styles.container} disabled={isArchivingCurrentAgent}>
-            {isGuestShareMode() ? null : (
-              <View style={styles.shareHeader}>
-                <BuiltinPluginGate serverId={serverId} id="activity-graph">
-                  <ActivityGraphToggle agentId={agentId} serverId={serverId} />
-                </BuiltinPluginGate>
-                <BuiltinPluginGate serverId={serverId} id="session-share">
-                  <SessionShareControl agentId={agentId} serverId={serverId} />
-                </BuiltinPluginGate>
-              </View>
-            )}
-            {contentContainer}
-
-            {showHistorySyncError ? (
-              <SidebarCallout
-                title={t("agentPanel.states.timelineSyncFailed")}
-                variant="error"
-                testID="agent-timeline-sync-error"
-              />
-            ) : null}
-
-            {composerSection}
-
-            {showHistorySyncOverlay ? (
-              <View style={styles.historySyncOverlay} testID="agent-history-overlay">
-                <ThemedLoadingSpinner size="large" uniProps={foregroundMutedColorMapping} />
-              </View>
-            ) : null}
-
-            <ToastViewport toast={toast} onDismiss={dismiss} placement="panel" />
-          </FileDropZone>
-
-          {isArchivingCurrentAgent ? (
-            <View style={styles.archivingOverlay} testID="agent-archiving-overlay">
-              <ThemedLoadingSpinner size="large" uniProps={foregroundColorMapping} />
-              <Text style={styles.archivingTitle}>{t("agentPanel.states.archivingTitle")}</Text>
-              <Text style={styles.archivingSubtitle}>
-                {t("agentPanel.states.archivingSubtitle")}
-              </Text>
-            </View>
-          ) : null}
-        </ActivityGraphLayout>
+        {graphSurface}
       </RewindComposerRestoreProvider>
     </AgentCommandsProvider>
   );
@@ -1532,7 +1544,7 @@ function ActiveAgentComposer({
   onMessageSent: () => void;
 }) {
   const parentAgentId = useParentAgentId(serverId, agentId);
-  const insets = useSafeAreaInsets();
+
   const isCompactFormFactor = useIsCompactFormFactor();
   const { onLayout: onInputAreaLayout, isBelow: isCompactComposerLayout } = useContainerWidthBelow(
     COMPACT_CONTENT_WIDTH,
@@ -1708,10 +1720,7 @@ function ActiveAgentComposer({
     [agentId, cwd, handleOpenSpecFile, serverId],
   );
 
-  const inputAreaStyle = useMemo(
-    () => [animatedStaticStyles.inputAreaWrapper, { paddingBottom: insets.bottom }],
-    [insets.bottom],
-  );
+  const inputAreaStyle = useMemo(() => [animatedStaticStyles.inputAreaWrapper], []);
 
   return (
     <KeyboardTranslateView style={inputAreaStyle} onLayout={onInputAreaLayout}>
