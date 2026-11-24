@@ -1,3 +1,5 @@
+import { Download } from "lucide-react-native";
+import { useFileDownload } from "@/hooks/use-file-download";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import React, {
@@ -65,6 +67,7 @@ interface FilePreviewBodyProps {
   location: WorkspaceFileLocation;
   navigationRevision: number;
   imagePreviewUri: string | null;
+  onDownload: () => void;
 }
 
 function trimNonEmpty(value: string | null | undefined): string | null {
@@ -215,6 +218,7 @@ function FilePreviewBody({
   location,
   navigationRevision,
   imagePreviewUri,
+  onDownload,
 }: FilePreviewBodyProps) {
   const theme = UnistylesRuntime.getTheme();
   const { t } = useTranslation();
@@ -372,17 +376,22 @@ function FilePreviewBody({
     <View style={styles.centerState}>
       <Text style={styles.emptyText}>{t("panels.file.binaryPreviewUnavailable")}</Text>
       <Text style={styles.binaryMetaText}>{formatFileSize({ size: preview.size })}</Text>
+      <Button variant="outline" leftIcon={Download} onPress={onDownload}>
+        {t("workspace.fileActions.download")}
+      </Button>
     </View>
   );
 }
 
 export function FilePane({
   serverId,
+  workspaceId,
   workspaceRoot,
   location,
   navigationRevision,
 }: {
   serverId: string;
+  workspaceId?: string | null;
   workspaceRoot: string;
   location: WorkspaceFileLocation;
   navigationRevision: number;
@@ -419,6 +428,18 @@ export function FilePane({
     isTabActive: isActive,
     isAppVisible,
   });
+  const downloadFile = useFileDownload({
+    serverId,
+    workspaceId,
+    workspaceRoot: readTarget?.cwd ?? normalizedWorkspaceRoot,
+  });
+  const onDownload = useCallback(() => {
+    if (readTarget)
+      downloadFile({
+        fileName: location.path.split(/[\\/]/).pop() ?? location.path,
+        path: readTarget.path,
+      });
+  }, [downloadFile, location.path, readTarget]);
   // Live version observation stays on: the file is read-only here, but it can
   // change externally (an agent editing on the host), so the preview keeps
   // following the observed version.
@@ -471,6 +492,7 @@ export function FilePane({
   return (
     <FilePanePresentation
       serverId={serverId}
+      onDownload={onDownload}
       client={client}
       readTarget={readTarget}
       preview={preview}
@@ -515,6 +537,7 @@ function FilePanePresentation({
   location,
   navigationRevision,
   imagePreviewUri,
+  onDownload,
 }: {
   serverId: string;
   client: DaemonClient | null;
@@ -533,6 +556,7 @@ function FilePanePresentation({
   location: WorkspaceFileLocation;
   navigationRevision: number;
   imagePreviewUri: string | null;
+  onDownload: () => void;
 }) {
   if (!client && readTarget) {
     return (
@@ -585,6 +609,7 @@ function FilePanePresentation({
         location={location}
         navigationRevision={navigationRevision}
         imagePreviewUri={imagePreviewUri}
+        onDownload={onDownload}
       />
     </View>
   );
