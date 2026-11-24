@@ -6,6 +6,7 @@ import {
   AgentSnapshotPayloadSchema,
   AgentStreamEventPayloadSchema,
   AgentTimelineItemPayloadSchema,
+  AgentTimelineEntryPayloadSchema,
   ServerInfoStatusPayloadSchema,
   SessionOutboundMessageSchema,
   WSHelloMessageSchema,

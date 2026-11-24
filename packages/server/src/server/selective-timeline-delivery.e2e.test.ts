@@ -141,6 +141,8 @@ async function connect(input: {
     clientId: input.clientId,
     capabilities: {
       [CLIENT_CAPS.selectiveAgentTimeline]: input.selective,
+      // Raw capture does not acquire event demand; exercise pre-demand delivery here.
+      [CLIENT_CAPS.explicitEventSubscriptions]: false,
       ...(input.timelineReplacementInvalidation
         ? { [CLIENT_CAPS.timelineReplacementInvalidation]: true }
         : {}),

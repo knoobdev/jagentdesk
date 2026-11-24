@@ -608,7 +608,9 @@ interface ReplayedTimelineRow {
   row: AgentTimelineRow;
 }
 
-function readSessionMetrics(agent?: { sessionMetrics?: AgentMetric[] }): AgentMetric[] | undefined {
+function readSessionMetrics(
+  agent?: { sessionMetrics?: AgentMetric[] } | null,
+): AgentMetric[] | undefined {
   return agent?.sessionMetrics;
 }
 
