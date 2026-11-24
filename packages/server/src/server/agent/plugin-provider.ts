@@ -641,6 +641,7 @@ class ProviderRuntimeSession {
   }
 
   async configure(changes: ProviderConfigChanges): Promise<void> {
+    if (this.terminal) throw new StaleProviderSessionError(this.id);
     const input: Extract<ProviderInput, { type: "session.configure" }> = {
       type: "session.configure",
       requestId: randomUUID(),

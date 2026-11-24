@@ -45,6 +45,12 @@ export interface AcpStream {
 export type AcpConnector = () => AcpStream | Promise<AcpStream>;
 
 export interface AcpOptions {
+  deferTurnOnRunningTools?: {
+    settleDelayMs?: number;
+    quietLimitMs?: number;
+    keepsTurnOpen?: (toolCall: AcpToolCallSnapshot) => boolean;
+  };
+
   workspaceOnlyCatalog?: boolean;
   loadReplayQuietPeriodMs?: number;
   autoAcceptMode?: {
