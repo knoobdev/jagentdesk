@@ -2474,7 +2474,7 @@ export function NewWorkspaceScreen({
             cwd={selectedSourceDirectory ?? ""}
             clearDraft={handleClearDraft}
             autoFocus
-            commandDraftConfig={composerState?.commandDraftConfig}
+            commandDraft={composerState?.commandDraft}
             agentControls={agentControlsWithDisabled}
           />
           <ImportSessionButton

@@ -5,7 +5,7 @@ import type {
   ProviderSnapshotEntry,
 } from "@jagentdesk/protocol/agent-types";
 import type { AgentProviderDefinition } from "@jagentdesk/protocol/provider-manifest";
-import type { DraftCommandConfig } from "@/hooks/use-agent-commands-query";
+import type { DraftCommandTarget } from "@/hooks/use-agent-commands-query";
 import { buildFavoriteModelKey, type FavoriteModelRow } from "@/hooks/use-form-preferences";
 import { i18n } from "@/i18n/i18next";
 import { compareMatchScores, scoreTextFields } from "@/utils/score-match";
@@ -277,19 +277,22 @@ export function resolveEffectiveComposerThinkingOptionId(
   return selectedModelDefinition?.defaultThinkingOptionId ?? "";
 }
 
-export function buildDraftCommandConfig(input: {
+export function buildDraftCommandTarget(input: {
   selection: ProviderSelectionState;
   cwd: string;
   effectiveModelId: string;
   effectiveThinkingOptionId: string;
   featureValues?: Record<string, unknown>;
-}): DraftCommandConfig | undefined {
+}): DraftCommandTarget {
   const cwd = input.cwd.trim();
-  if (!input.selection.provider || !cwd) {
-    return undefined;
+  if (!cwd) {
+    return { status: "needs-project" };
+  }
+  if (!input.selection.provider) {
+    return { status: "needs-provider" };
   }
 
-  return {
+  const config = {
     provider: input.selection.provider,
     cwd,
     ...(input.selection.modeOptions.length > 0 && input.selection.modeId !== ""
@@ -301,6 +304,7 @@ export function buildDraftCommandConfig(input: {
       : {}),
     ...(input.featureValues ? { featureValues: input.featureValues } : {}),
   };
+  return { status: "ready", config };
 }
 
 export function resolveSubmissionReadiness(input: {

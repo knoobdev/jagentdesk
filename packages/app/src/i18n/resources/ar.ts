@@ -1342,6 +1342,8 @@ export const ar: TranslationResources = {
     noFiles: "لم يتم العثور على ملفات أو أدلة",
     noCommands: "لم يتم العثور على أي أوامر",
     failedToLoad: "فشل التحميل",
+    chooseProjectForCommands: "اختر مشروعًا لعرض الأوامر",
+    chooseModelForCommands: "اختر نموذجًا لعرض الأوامر",
   },
   loadOlderHistory: {
     failed: "تعذر تحميل السجل الأقدم",
