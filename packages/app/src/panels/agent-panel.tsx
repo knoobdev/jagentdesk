@@ -1721,6 +1721,7 @@ function ActiveAgentComposer({
         <OrchestrationLeadPlanCard serverId={serverId} workspaceId={workspaceId} />
       ) : null}
       <SubagentsTrack
+        serverId={serverId}
         rows={subagentRows}
         onOpenSubagent={handleOpenSubagent}
         onOpenProviderSubagent={handleOpenProviderSubagent}
