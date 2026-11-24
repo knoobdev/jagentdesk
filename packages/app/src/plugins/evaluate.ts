@@ -1,3 +1,6 @@
+import { PluginTranslationRuntime, type PluginLocaleSource } from "@jagentdesk/plugin/client/host";
+import type { PluginText } from "@jagentdesk/plugin/client";
+import { localizePluginContribution, registerTranslatedButton } from "./translations";
 import type { createPluginHosts } from "./hosts";
 import { openExternalUrl } from "@/utils/open-external-url";
 import * as pluginUiRuntime from "./react-native/ui";
@@ -19,6 +22,9 @@ import {
 import {
   type PluginCommandCenterItemContribution,
   type PluginClientContext,
+  type PluginScreenContribution,
+  type PluginScreenProps,
+  type PluginSidebarItemContribution,
   type PluginClientSlashCommandContribution,
   type PluginSidebarContribution,
   type PluginSurfaceProps,
@@ -29,7 +35,7 @@ import {
 } from "@jagentdesk/plugin/client";
 import type { EvaluatedPlugin } from "./types";
 import type { ComponentType } from "react";
-import { resolvePluginIcon } from "./icons";
+import { resolvePluginIcon, parsePluginIcon, parseSerializablePluginIcon } from "./icons";
 import { pluginReactNativeRuntime } from "./react-native/runtime";
 import { parsePluginThemeContribution } from "./themes";
 
@@ -41,6 +47,7 @@ const TIMELINE_ITEM_TYPES = new Set([
   "reasoning",
   "tool_call",
   "todo",
+  "notification",
   "error",
   "compaction",
 ]);
@@ -65,6 +72,13 @@ function normalizePanelLocations(
   return normalized;
 }
 
+function isComponentType(value: unknown): boolean {
+  return (
+    typeof value === "function" ||
+    (typeof value === "object" && value !== null && "$$typeof" in value)
+  );
+}
+
 function requireId(value: string, label: string): string {
   const id = value.trim();
   if (!CONTRIBUTION_ID.test(id)) throw new Error(`Invalid ${label}: ${value}`);
@@ -73,15 +87,24 @@ function requireId(value: string, label: string): string {
 
 export type PluginClientRuntime = Pick<
   PluginClientContext,
+  | "playAudio"
   | "jagentdesk"
   | "rpc"
   | "openSettings"
+  | "openScreen"
   | "openSurface"
   | "openPanel"
   | "subscribe"
-  | "addComposerPill"
-  | "addHeaderButton"
-> & { hosts: ReturnType<typeof createPluginHosts> };
+> & {
+  hosts: ReturnType<typeof createPluginHosts>;
+  localeSource?: PluginLocaleSource;
+  addComposerPill(
+    contribution: import("@jagentdesk/plugin/client").PluginComposerPillContribution,
+  ): PluginButtonRegistration;
+  addHeaderButton(
+    contribution: import("@jagentdesk/plugin/client").PluginHeaderButtonContribution,
+  ): PluginButtonRegistration;
+};
 
 export function runPluginClientBundle(
   id: string,
@@ -89,11 +112,19 @@ export function runPluginClientBundle(
   runtime: PluginClientRuntime,
   onChange: () => void = () => undefined,
 ): EvaluatedPlugin {
+  const translations = new PluginTranslationRuntime(
+    runtime.localeSource ?? { getLocale: () => "en", subscribe: () => () => {} },
+  );
+  const localize = <T extends object>(input: T) => localizePluginContribution(input, translations);
   const collector: Omit<EvaluatedPlugin, "id" | "cleanup"> = {
+    workspaceRowBadgeItems: [],
     surfaces: [],
     settingsScreens: [],
     sidebarItems: [],
+    sidebarHeaderItems: [],
+    sidebarFooterItems: [],
     workspacePanels: [],
+    filePanels: [],
     commandCenterItems: [],
     clientSlashCommands: [],
     attachmentSources: [],
@@ -112,9 +143,13 @@ export function runPluginClientBundle(
   const timelineTransformerIds = new Set<string>();
   const timelineRendererIds = new Set<string>();
   const removals = new Set<PluginCleanup>();
+  removals.add(() => translations.dispose());
+  removals.add(translations.subscribe(onChange));
   let setupComplete = false;
   let stopped = false;
-  function trackButton(registration: PluginButtonRegistration): PluginButtonRegistration {
+  function trackButton(
+    registration: PluginButtonRegistration<PluginText>,
+  ): PluginButtonRegistration<PluginText> {
     let active = true;
     const remove = () => {
       if (!active) return;
@@ -133,14 +168,15 @@ export function runPluginClientBundle(
   const notifyChange = () => {
     if (setupComplete) onChange();
   };
-  function register<T>(items: T[], item: T, release: () => void): PluginCleanup {
-    items.push(item);
+  function register<T>(items: T[], item: T, release: () => void, origin?: object): PluginCleanup {
+    const registered = localizePluginContribution(item as object, translations, origin) as T;
+    items.push(registered);
     notifyChange();
     let active = true;
     const remove = () => {
       if (!active) return;
       active = false;
-      const index = items.indexOf(item);
+      const index = items.indexOf(registered);
       if (index !== -1) items.splice(index, 1);
       release();
       removals.delete(remove);
@@ -149,17 +185,65 @@ export function runPluginClientBundle(
     removals.add(remove);
     return remove;
   }
+  function addSidebarEntry(
+    section: "header" | "footer",
+    input: PluginSidebarItemContribution<PluginText>,
+  ) {
+    const contribution = localize(input);
+    const normalizedId = requireId(contribution.id, `sidebar ${section} item id`);
+    const entries =
+      section === "header" ? collector.sidebarHeaderItems! : collector.sidebarFooterItems!;
+    if (entries.some((entry) => entry.id === normalizedId))
+      throw new Error(`Duplicate sidebar ${section} item: ${normalizedId}`);
+    const title = contribution.title.trim();
+    if (!title) throw new Error(`Sidebar item ${normalizedId} has no title`);
+    if (!isComponentType(contribution.Component))
+      throw new Error(`Sidebar item ${normalizedId} is not a component`);
+    return register(entries, { ...contribution, id: normalizedId, title }, () => {}, contribution);
+  }
   const pluginContext: PluginClientContext = {
     ...runtime,
-    addSettingsScreen(contribution) {
+    i18n: translations,
+    addScreen(input: PluginScreenContribution<PluginText>) {
+      const contribution = localize(input);
+      const normalizedId = requireId(contribution.id, "screen id");
+      if (surfaceIds.has(normalizedId)) throw new Error(`Duplicate screen: ${normalizedId}`);
+      if (
+        !(
+          typeof contribution.title === "function" ||
+          (typeof contribution.title === "string" && contribution.title.trim())
+        )
+      )
+        throw new Error(`Screen ${normalizedId} needs a title`);
+      if (!isComponentType(contribution.Component))
+        throw new Error(`Screen ${normalizedId} is not a component`);
+      surfaceIds.add(normalizedId);
+      return register(
+        collector.surfaces,
+        { ...contribution, id: normalizedId },
+        () => surfaceIds.delete(normalizedId),
+        contribution,
+      );
+    },
+    addSidebarHeaderItem(contribution) {
+      return addSidebarEntry("header", contribution);
+    },
+    addSidebarFooterItem(contribution) {
+      return addSidebarEntry("footer", contribution);
+    },
+    addSettingsScreen(input) {
+      const contribution = localize(input);
       const screenId = requireId(contribution.id, "settings screen id");
       if (settingsScreenIds.has(screenId))
         throw new Error(`Duplicate settings screen: ${screenId}`);
       if (!contribution.title.trim()) throw new Error(`Invalid settings screen: ${screenId}`);
       resolvePluginIcon(contribution.icon);
       settingsScreenIds.add(screenId);
-      return register(collector.settingsScreens, { ...contribution, id: screenId }, () =>
-        settingsScreenIds.delete(screenId),
+      return register(
+        collector.settingsScreens,
+        { ...contribution, id: screenId },
+        () => settingsScreenIds.delete(screenId),
+        contribution,
       );
     },
     addSurface(surfaceId: string, Component: ComponentType<PluginSurfaceProps>) {
@@ -168,36 +252,85 @@ export function runPluginClientBundle(
       if (typeof Component !== "function")
         throw new Error(`Surface ${normalizedId} is not a component`);
       surfaceIds.add(normalizedId);
-      return register(collector.surfaces, { id: normalizedId, Component }, () =>
-        surfaceIds.delete(normalizedId),
+      return register(
+        collector.surfaces,
+        {
+          id: normalizedId,
+          Component: Component as ComponentType<PluginScreenProps>,
+        },
+        () => surfaceIds.delete(normalizedId),
       );
     },
-    addSidebarItem(contribution: PluginSidebarContribution) {
+    addSidebarItem(input: PluginSidebarContribution<PluginText>) {
+      const contribution = localize(input);
       const normalizedId = requireId(contribution.id, "sidebar item id");
       if (sidebarItemIds.has(normalizedId))
         throw new Error(`Duplicate sidebar item: ${normalizedId}`);
       if (!contribution.title.trim()) throw new Error(`Sidebar item ${normalizedId} has no title`);
-      if (!contribution.icon.trim()) throw new Error(`Sidebar item ${normalizedId} has no icon`);
-      resolvePluginIcon(contribution.icon.trim());
+      const icon = parsePluginIcon(`Sidebar item ${normalizedId}`, contribution.icon);
       sidebarItemIds.add(normalizedId);
       return register(
         collector.sidebarItems,
         {
+          ...contribution,
           id: normalizedId,
           title: contribution.title.trim(),
-          icon: contribution.icon.trim(),
+          icon,
           surface: requireId(contribution.surface, "sidebar surface id"),
         },
         () => sidebarItemIds.delete(normalizedId),
+        contribution,
       );
     },
-    addWorkspacePanel(contribution: PluginWorkspacePanelContribution) {
+    addFilePanel(input) {
+      const contribution = localize(input);
+      const panelId = requireId(contribution.id, "file panel id");
+      if (collector.filePanels!.some((panel) => panel.id === panelId))
+        throw new Error(`Duplicate file panel: ${panelId}`);
+      if (!contribution.title.trim()) throw new Error(`File panel ${panelId} has no title`);
+      resolvePluginIcon(contribution.icon);
+      if (!contribution.files || !Array.isArray(contribution.files.extensions))
+        throw new Error(`File panel ${panelId} has no file selector`);
+      if (!isComponentType(contribution.Component))
+        throw new Error(`File panel ${panelId} is not a component`);
+      return register(
+        collector.filePanels!,
+        { ...contribution, id: panelId },
+        () => {},
+        contribution,
+      );
+    },
+    addWorkspaceRowBadgeItem(input) {
+      const contribution = localize(input);
+      const normalizedId = requireId(contribution.id, "workspace row badge item id");
+      if (collector.workspaceRowBadgeItems!.some((item) => item.id === normalizedId))
+        throw new Error(`Duplicate workspace row badge item: ${normalizedId}`);
+      if (!contribution.title.trim())
+        throw new Error(`Workspace row badge item ${normalizedId} has no title`);
+      parsePluginIcon(`Workspace row badge item ${normalizedId}`, contribution.icon);
+      if (!isComponentType(contribution.Component))
+        throw new Error(`Workspace row badge item ${normalizedId} is not a component`);
+      return register(
+        collector.workspaceRowBadgeItems!,
+        { ...contribution, id: normalizedId },
+        () => {},
+        contribution,
+      );
+    },
+    addAgentPanel(contribution) {
+      return pluginContext.addWorkspacePanel({ ...contribution, context: "agent" });
+    },
+    addWorkspacePanel(input: PluginWorkspacePanelContribution<PluginText>) {
+      const contribution = localize({
+        ...input,
+        context: input.context ?? "workspace",
+      }) as PluginWorkspacePanelContribution;
       const normalizedId = requireId(contribution.id, "workspace panel id");
       if (workspacePanelIds.has(normalizedId)) {
         throw new Error(`Duplicate workspace panel: ${normalizedId}`);
       }
       const title = contribution.title.trim();
-      const icon = contribution.icon.trim();
+      const icon = parsePluginIcon(`Plugin contribution ${normalizedId}`, contribution.icon);
       if (!title) throw new Error(`Workspace panel ${normalizedId} has no title`);
       if (!icon) throw new Error(`Workspace panel ${normalizedId} has no icon`);
       if (contribution.context !== "workspace" && contribution.context !== "agent") {
@@ -219,15 +352,17 @@ export function runPluginClientBundle(
           locations,
         },
         () => workspacePanelIds.delete(normalizedId),
+        contribution,
       );
     },
-    addCommandCenterItem(contribution: PluginCommandCenterItemContribution) {
+    addCommandCenterItem(input: PluginCommandCenterItemContribution<PluginText>) {
+      const contribution = localize(input);
       const normalizedId = requireId(contribution.id, "Command Center item id");
       if (commandCenterItemIds.has(normalizedId)) {
         throw new Error(`Duplicate Command Center item: ${normalizedId}`);
       }
       const title = contribution.title.trim();
-      const icon = contribution.icon.trim();
+      const icon = parsePluginIcon(`Plugin contribution ${normalizedId}`, contribution.icon);
       if (!title) throw new Error(`Command Center item ${normalizedId} has no title`);
       if (!icon) throw new Error(`Command Center item ${normalizedId} has no icon`);
       if (
@@ -252,9 +387,11 @@ export function runPluginClientBundle(
           keywords: contribution.keywords?.map((keyword) => keyword.trim()).filter(Boolean),
         },
         () => commandCenterItemIds.delete(normalizedId),
+        contribution,
       );
     },
-    addSlashCommand(contribution: PluginClientSlashCommandContribution) {
+    addSlashCommand(input: PluginClientSlashCommandContribution<PluginText>) {
+      const contribution = localize(input);
       const name = requireId(contribution.name, "client slash command name");
       if (clientSlashCommandNames.has(name)) {
         throw new Error(`Duplicate client slash command: ${name}`);
@@ -277,15 +414,20 @@ export function runPluginClientBundle(
           argumentHint: contribution.argumentHint.trim(),
         },
         () => clientSlashCommandNames.delete(name),
+        contribution,
       );
     },
-    addAttachmentSource(contribution: PluginAttachmentSourceContribution) {
+    addAttachmentSource(input: PluginAttachmentSourceContribution<PluginText>) {
+      const contribution = localize(input);
       const normalizedId = requireId(contribution.id, "attachment source id");
       if (attachmentSourceIds.has(normalizedId)) {
         throw new Error(`Duplicate attachment source: ${normalizedId}`);
       }
       const title = contribution.title.trim();
-      const icon = contribution.icon.trim();
+      const icon = parseSerializablePluginIcon(
+        `Attachment source ${normalizedId}`,
+        contribution.icon,
+      );
       const pickerTitle = contribution.pickerTitle.trim();
       const searchPlaceholder = contribution.searchPlaceholder.trim();
       const method = contribution.search.name.trim();
@@ -301,6 +443,7 @@ export function runPluginClientBundle(
       return register(
         collector.attachmentSources,
         {
+          ...contribution,
           id: normalizedId,
           title,
           icon,
@@ -309,14 +452,21 @@ export function runPluginClientBundle(
           search: { ...contribution.search, name: method },
         },
         () => attachmentSourceIds.delete(normalizedId),
+        contribution,
       );
     },
-    addTheme(contribution: PluginThemeContribution) {
+    addTheme(input: PluginThemeContribution<PluginText>) {
+      const contribution = localize(input);
       const normalizedId = requireId(contribution.id, "theme id");
       if (themeIds.has(normalizedId)) throw new Error(`Duplicate theme: ${normalizedId}`);
       const theme = parsePluginThemeContribution({ ...contribution, id: normalizedId });
       themeIds.add(normalizedId);
-      return register(collector.themes, theme, () => themeIds.delete(normalizedId));
+      return register(
+        collector.themes,
+        { ...contribution, ...theme },
+        () => themeIds.delete(normalizedId),
+        contribution,
+      );
     },
     addTimelineTransformer(contribution: PluginTimelineTransformerContribution) {
       const normalizedId = requireId(contribution.id, "timeline transformer id");
@@ -364,11 +514,19 @@ export function runPluginClientBundle(
     },
     addComposerPill(contribution) {
       if (stopped) throw new Error("Plugin has stopped");
-      return trackButton(runtime.addComposerPill(contribution));
+      return trackButton(
+        registerTranslatedButton(contribution.button, translations, (button) =>
+          runtime.addComposerPill({ ...contribution, button }),
+        ),
+      );
     },
     addHeaderButton(contribution) {
       if (stopped) throw new Error("Plugin has stopped");
-      return trackButton(runtime.addHeaderButton(contribution));
+      return trackButton(
+        registerTranslatedButton(contribution.button, translations, (button) =>
+          runtime.addHeaderButton({ ...contribution, button }),
+        ),
+      );
     },
   };
   const runtimeRequire = (name: string): unknown => {
@@ -446,9 +604,14 @@ export function runPluginClientBundle(
   return {
     id,
     cleanup,
+    translations,
+    workspaceRowBadgeItems: collector.workspaceRowBadgeItems,
     surfaces: collector.surfaces,
     settingsScreens: collector.settingsScreens,
     sidebarItems: collector.sidebarItems,
+    sidebarHeaderItems: collector.sidebarHeaderItems,
+    sidebarFooterItems: collector.sidebarFooterItems,
+    filePanels: collector.filePanels,
     workspacePanels: collector.workspacePanels as EvaluatedPlugin["workspacePanels"],
     commandCenterItems: collector.commandCenterItems,
     clientSlashCommands: collector.clientSlashCommands,

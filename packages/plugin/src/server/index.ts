@@ -1,4 +1,13 @@
 export type {
+  UsageSourceRegistration,
+  UsageAccount,
+  UsageProblem,
+  UsageReport,
+  UsageWindow,
+  UsageBalance,
+  UsageDetail,
+} from "./usage.js";
+export type {
   PluginHandlerContext,
   PluginServerContext,
   PluginServerContribution,

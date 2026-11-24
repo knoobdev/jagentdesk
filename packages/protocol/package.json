@@ -16,6 +16,10 @@
     "./timeline-identity": {
       "types": "./dist/timeline-identity.d.ts",
       "default": "./dist/timeline-identity.js"
+    },
+    "./plugin-registry": {
+      "types": "./dist/plugin-registry.d.ts",
+      "default": "./dist/plugin-registry.js"
     }
   },
   "publishConfig": {

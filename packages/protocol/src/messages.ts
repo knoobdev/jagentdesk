@@ -1714,6 +1714,9 @@ export const DiagnosticsRequestSchema = z.object({
 });
 
 export const PluginCatalogGetRequestSchema = z.object({
+  cachedClientBundles: z
+    .array(z.object({ id: PluginIdSchema, clientBundleHash: z.string().regex(/^[a-f0-9]{64}$/) }))
+    .optional(),
   type: z.literal("plugin.catalog.get.request"),
   requestId: z.string(),
 });
@@ -2030,6 +2033,13 @@ export const ProviderInstallationUpdateSubscribeRequestMessageSchema = z.object(
 export const ProviderUsageListRequestMessageSchema = z.object({
   type: z.literal("provider.usage.list.request"),
   requestId: z.string(),
+});
+
+export const UsageListReportsRequestMessageSchema = z.object({
+  type: z.literal("usage.list_reports.request"),
+  requestId: z.string(),
+  reportIds: z.array(z.string()).optional(),
+  forceRefresh: z.boolean().optional(),
 });
 
 export const ResumeAgentRequestMessageSchema = z.object({
@@ -3678,6 +3688,10 @@ export const FileVersionSchema = z.discriminatedUnion("status", [
     size: z.number().int().nonnegative(),
     modifiedAt: z.string(),
     revision: z.string().optional(),
+    // Classified from the extension and the first bytes, so a client can choose how to open the
+    // file before reading it.
+    kind: z.enum(["text", "image", "binary"]).optional(),
+    mimeType: z.string().optional(),
   }),
   z.object({
     status: z.literal("missing"),
@@ -3711,6 +3725,8 @@ export const FileWriteRequestSchema = z.object({
   cwd: z.string(),
   path: z.string(),
   content: z.string(),
+  // COMPAT(fileByteWrites): added in v0.13.0. Daemons without the feature write `content` as text.
+  contentEncoding: z.enum(["utf-8", "base64"]).optional(),
   expectedModifiedAt: z.string(),
   expectedRevision: z.string().optional(),
   requestId: z.string(),
@@ -4415,6 +4431,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ProviderInstallationUpdateRequestMessageSchema,
   ProviderInstallationUpdateSubscribeRequestMessageSchema,
   ProviderUsageListRequestMessageSchema,
+  UsageListReportsRequestMessageSchema,
   ResumeAgentRequestMessageSchema,
   ImportAgentRequestMessageSchema,
   RefreshAgentRequestMessageSchema,
@@ -4825,6 +4842,7 @@ export const ServerInfoStatusPayloadSchema = z
         backgroundAgents: z.boolean().optional(),
         providersSnapshot: z.boolean().optional(),
         providerInstallation: z.boolean().optional(),
+        usageSources: z.boolean().optional(),
         // COMPAT(providersSnapshotCwd): added in v0.3.2, remove gate after 2027-02-10.
         providersSnapshotCwd: z.boolean().optional(),
         // COMPAT(workspaceBaseBranch): added in v0.9.59; remove after 2027-05-23.
@@ -4875,6 +4893,7 @@ export const ServerInfoStatusPayloadSchema = z
         workspaceArchiveUndo: z.boolean().optional(),
         // COMPAT(workspaceFileEditing): added in v0.2.0, remove after 2027-01-18 once daemon floor >= v0.2.0.
         workspaceFileEditing: z.boolean().optional(),
+        fileByteWrites: z.boolean().optional(),
         // COMPAT(providerUsageList): added in v0.1.98, drop the gate when daemon floor >= v0.1.98.
         providerUsageList: z.boolean().optional(),
         // COMPAT(agentDetach): added in v0.1.98, remove gate after 2026-12-19 once daemon floor >= v0.1.98.
@@ -6245,6 +6264,7 @@ export const PluginCatalogGetResponseSchema = z.object({
       z.object({
         id: PluginIdSchema,
         clientBundle: z.string(),
+        clientBundleHash: z.string().optional(),
         requirements: PluginRequirementsSchema.optional(),
       }),
     ),
@@ -6263,6 +6283,9 @@ export const PluginNpmInstallationSchema = z.object({
 
 export const PluginListItemSchema = z.object({
   id: PluginIdSchema,
+  name: z.string().optional(),
+  icon: z.string().optional(),
+  media: z.array(z.string()).optional(),
   description: z.string().optional(),
   path: z.string(),
   enabled: z.boolean(),
@@ -8009,6 +8032,44 @@ export const ProviderUsageListResponseMessageSchema = z.object({
   }),
 });
 
+export const UsageProblemSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("expired"),
+    expiresAt: z.iso.datetime(),
+    refreshedBy: z.string().optional(),
+  }),
+  z.object({
+    kind: z.literal("rejected"),
+    status: z.number().int(),
+    refreshedBy: z.string().optional(),
+  }),
+  z.object({ kind: z.literal("no_quota"), detail: z.string() }),
+]);
+export const UsageReportSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("available"),
+    planLabel: z.string().optional(),
+    windows: z.array(ProviderUsageWindowSchema),
+    balances: z.array(ProviderUsageBalanceSchema).optional(),
+    details: z.array(ProviderUsageDetailSchema).optional(),
+  }),
+  z.object({ status: z.literal("unavailable"), problem: UsageProblemSchema }),
+  z.object({ status: z.literal("error"), error: z.string() }),
+]);
+export const UsageReportEntrySchema = z.object({
+  id: z.string(),
+  account: z.object({ label: z.string().optional() }),
+  fetchedAt: z.string(),
+  sourceId: z.string(),
+  sourceLabel: z.string(),
+  icon: z.string().optional(),
+  report: UsageReportSchema,
+});
+export const UsageListReportsResponseMessageSchema = z.object({
+  type: z.literal("usage.list_reports.response"),
+  payload: z.object({ requestId: z.string(), reports: z.array(UsageReportEntrySchema) }),
+});
+
 const AgentSlashCommandSchema = z.object({
   name: z.string(),
   description: z.string(),
@@ -8773,6 +8834,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ProviderInstallationUpdateProgressMessageSchema,
   ProviderInstallationUpdateClearedMessageSchema,
   ProviderUsageListResponseMessageSchema,
+  UsageListReportsResponseMessageSchema,
   ListCommandsResponseSchema,
   ListTerminalsResponseSchema,
   TerminalsChangedSchema,
@@ -9045,6 +9107,10 @@ export type ProviderInstallationUpdateCleared = Omit<
   "subscriptionId"
 >;
 export type ProviderUsageTone = z.infer<typeof ProviderUsageToneSchema>;
+export type UsageProblem = z.infer<typeof UsageProblemSchema>;
+export type UsageReport = z.infer<typeof UsageReportSchema>;
+export type UsageReportEntry = z.infer<typeof UsageReportEntrySchema>;
+export type UsageListReportsResponseMessage = z.infer<typeof UsageListReportsResponseMessageSchema>;
 export type ProviderUsageStatus = z.infer<typeof ProviderUsageStatusSchema>;
 export type ProviderUsage = z.infer<typeof ProviderUsageSchema>;
 export type ProviderUsageWindow = z.infer<typeof ProviderUsageWindowSchema>;

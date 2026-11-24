@@ -712,6 +712,7 @@ export async function createJAgentDeskDaemon(
   // Built-ins load independently of the user-plugin switch. Managed git sources
   // back marketplace installs and are rebranded before compilation.
   const pluginRuntime = new PluginService(logger, daemonConfigStore, daemonVersion, {
+    resolveUsageLaunch: (provider) => providerSnapshotManager.resolveUsageLaunch(provider),
     builtinPlugins: dependencies.builtinPlugins ?? new BuiltinPluginLoader(),
     managedSources: new ManagedPluginSources(config.jagentdeskHome),
     settingsDirectory: path.join(config.jagentdeskHome, "plugin-settings"),
@@ -2493,13 +2494,31 @@ export async function createJAgentDeskDaemon(
       timeoutMs: 5_000,
       label: "drain plugin lifecycle events",
     }).catch((error) => logger.warn({ err: error }, "Plugin lifecycle events did not finish"));
-    await agentManager.flushForShutdown().catch(() => undefined);
+    let shutdownFlushTimedOut = false;
+    await withTimeout({
+      promise: agentManager.flushForShutdown(),
+      timeoutMs: 5_000,
+      label: "flush agent shutdown tasks",
+    }).catch((error) => {
+      shutdownFlushTimedOut = true;
+      logger.warn({ err: error }, "Agent shutdown tasks did not finish before provider shutdown");
+    });
     detachAgentStoragePersistence();
     await agentStorage.flush().catch(() => undefined);
     // Spec 34: loopback forwards of api providers die with the daemon.
     customProviderService.closeAll();
-    await pluginRuntime.stopAllPlugins().catch(() => undefined);
     await providerSnapshotManager.shutdown();
+    if (shutdownFlushTimedOut) {
+      await withTimeout({
+        promise: agentManager.flushForShutdown(),
+        timeoutMs: 5_000,
+        label: "flush agent shutdown tasks after provider shutdown",
+      }).catch((error) =>
+        logger.warn({ err: error }, "Agent shutdown tasks did not finish after provider shutdown"),
+      );
+      await agentStorage.flush().catch(() => undefined);
+    }
+    await pluginRuntime.stopAllPlugins().catch(() => undefined);
     try {
       if (keepTerminals) {
         await localTerminalManager.detach();

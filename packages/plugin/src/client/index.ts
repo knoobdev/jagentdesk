@@ -1,7 +1,27 @@
 export type {
   PluginHostProps,
+  PluginWorkspaceRowBadgeItemProps,
+  PluginWorkspaceRowBadgeItemContribution,
+  PluginAgentPanelContribution,
+  PluginTab,
+  PluginPanelProps,
+  PluginWorkspacePanelParams,
+  PluginAgentPanelParams,
+  PluginFilePanelParams,
+  PluginFilePanelProps,
+  PluginFilePanelContribution,
+  PluginScreenProps,
+  PluginScreenParams,
+  PluginScreenLocation,
+  PluginScreenTitle,
+  PluginOpenScreenInput,
+  PluginScreenContribution,
+  PluginSidebarItemProps,
+  PluginSidebarItemContribution,
+  PluginPopoverProps,
   PluginSurfaceProps,
   PluginIconProps,
+  PluginIcon,
   PluginPanelLocation,
   PluginOpenPanelOptions,
   PluginWorkspacePanelProps,
@@ -65,3 +85,11 @@ export declare function getJAgentDeskClient(
 ): import("@jagentdesk/client").JAgentDeskApi;
 /** Open an absolute HTTP(S) URL using the client platform’s external opener. */
 export declare function openExternalUrl(url: string): Promise<void>;
+
+export * from "./file.js";
+
+export { useTabState } from "./tab.js";
+
+export { defineTranslations, useTranslation } from "./translations.js";
+export type { PluginI18n } from "./translations.js";
+export type { PluginText, PluginMessage, PluginTranslations } from "../text.js";

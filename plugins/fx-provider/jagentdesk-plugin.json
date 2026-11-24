@@ -1,0 +1,6 @@
+{
+  "id": "fx-provider",
+  "requirements": {
+    "jagentdesk": ">=0.9.59"
+  }
+}

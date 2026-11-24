@@ -4,6 +4,7 @@ import type { InstalledPlugin } from "./types";
 import {
   getPluginSurfaceContributionServerIds,
   resolvePluginSurfaceContribution,
+  resolvePluginSurfacePlaceholder,
 } from "./surface-contribution";
 
 function installation(
@@ -85,4 +86,20 @@ describe("plugin surface contribution identity", () => {
       "same-surface",
     ]);
   });
+});
+
+describe("plugin surface loading", () => {
+  it.each([
+    ["connecting", "loading", "loading"],
+    ["online", "loading", "loading"],
+    ["online", "ready", "unavailable"],
+    ["online", "error", "error"],
+    ["offline", "loading", "offline"],
+    ["error", "ready", "offline"],
+  ] as const)(
+    "shows %s host with %s catalog as %s",
+    (connectionStatus, catalogStatus, expected) => {
+      expect(resolvePluginSurfacePlaceholder({ connectionStatus, catalogStatus })).toBe(expected);
+    },
+  );
 });

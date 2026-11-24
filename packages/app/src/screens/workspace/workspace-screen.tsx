@@ -1,3 +1,4 @@
+import { PluginHeaderButtons, usePluginWorkspaceMenu } from "@/plugins/buttons/view";
 import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
@@ -53,10 +54,17 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  MenuRoot,
+  MenuTrigger,
+  MenuSurface,
+  MenuItem,
+  MenuLabel,
+  MenuSeparator,
+} from "@/components/ui/menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   FloatingPanelPortalHost,
@@ -994,6 +1002,7 @@ function useCloseTabs(): UseCloseTabsResult {
 
 interface WorkspaceHeaderMenuProps {
   normalizedServerId: string;
+  normalizedWorkspaceId: string;
   currentBranchName: string | null;
   showWorkspaceSetup: boolean;
   showCreateBrowserTab: boolean;
@@ -1053,9 +1062,9 @@ function HeaderMenuProfileItem({
   }, [icon]);
 
   return (
-    <DropdownMenuItem leading={leading} disabled={disabled} onSelect={handleSelect}>
+    <MenuItem leading={leading} disabled={disabled} onSelect={handleSelect}>
       {profile.name}
-    </DropdownMenuItem>
+    </MenuItem>
   );
 }
 
@@ -1075,6 +1084,7 @@ function WorkspaceHeaderMenuTriggerIcon({
 
 function WorkspaceHeaderMenu({
   normalizedServerId,
+  normalizedWorkspaceId,
   currentBranchName,
   showWorkspaceSetup,
   showCreateBrowserTab,
@@ -1097,6 +1107,7 @@ function WorkspaceHeaderMenu({
   onCopyBranchName,
   onOpenSetupTab,
 }: WorkspaceHeaderMenuProps) {
+  const pluginMenu = usePluginWorkspaceMenu(normalizedServerId, normalizedWorkspaceId);
   const { t } = useTranslation();
   const router = useRouter();
   const { config } = useDaemonConfig(normalizedServerId);
@@ -1117,79 +1128,86 @@ function WorkspaceHeaderMenu({
   );
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
+    <MenuRoot compactMode="sheet">
+      <MenuTrigger
         testID="workspace-header-menu-trigger"
         style={isMobile ? styles.compactHeaderActionButton : styles.headerActionButton}
         accessibilityRole="button"
         accessibilityLabel={t("workspace.header.actions.workspaceActions")}
       >
         {renderTriggerIcon}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" width={220} testID="workspace-header-menu">
-        <DropdownMenuItem
+      </MenuTrigger>
+      <MenuSurface
+        align="start"
+        width={220}
+        testID="workspace-header-menu"
+        pages={isMobile ? pluginMenu.pages : undefined}
+        sheetTitle={t("workspace.header.actions.workspaceActions")}
+      >
+        {isMobile ? pluginMenu.rows : null}
+        <MenuItem
           testID="workspace-header-new-agent"
           leading={menuNewAgentIcon}
           onSelect={onCreateDraftTab}
         >
           {t("workspace.header.actions.newAgent")}
-        </DropdownMenuItem>
+        </MenuItem>
         {showCreateBrowserTab ? (
-          <DropdownMenuItem
+          <MenuItem
             testID="workspace-header-new-browser"
             leading={menuNewBrowserIcon}
             onSelect={onCreateBrowser}
           >
             {t("workspace.header.actions.newBrowser")}
-          </DropdownMenuItem>
+          </MenuItem>
         ) : null}
-        <DropdownMenuItem
+        <MenuItem
           testID="workspace-header-import-agent"
           leading={menuImportIcon}
           disabled={importAgentDisabled}
           onSelect={onOpenImportSheet}
         >
           {t("workspace.header.actions.importSession")}
-        </DropdownMenuItem>
-        <DropdownMenuItem
+        </MenuItem>
+        <MenuItem
           testID="workspace-header-copy-path"
           leading={menuCopyIcon}
           disabled={copyPathDisabled}
           onSelect={onCopyWorkspacePath}
         >
           {t("workspace.header.actions.copyPath")}
-        </DropdownMenuItem>
+        </MenuItem>
         {currentBranchName ? (
-          <DropdownMenuItem
+          <MenuItem
             testID="workspace-header-copy-branch-name"
             leading={menuCopyIcon}
             onSelect={onCopyBranchName}
           >
             {t("workspace.header.actions.copyBranchName")}
-          </DropdownMenuItem>
+          </MenuItem>
         ) : null}
         {showWorkspaceSetup ? (
           <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
+            <MenuSeparator />
+            <MenuItem
               testID="workspace-header-show-setup"
               leading={menuSettingsIcon}
               onSelect={onOpenSetupTab}
             >
               {t("workspace.header.actions.showSetup")}
-            </DropdownMenuItem>
+            </MenuItem>
           </>
         ) : null}
-        <DropdownMenuSeparator />
-        <DropdownMenuLabel>{t("workspace.tabs.actions.terminalProfilesMenu")}</DropdownMenuLabel>
-        <DropdownMenuItem
+        <MenuSeparator />
+        <MenuLabel>{t("workspace.tabs.actions.terminalProfilesMenu")}</MenuLabel>
+        <MenuItem
           testID="workspace-header-new-terminal"
           leading={menuNewTerminalIcon}
           disabled={createTerminalDisabled}
           onSelect={onCreateTerminal}
         >
           {t("workspace.header.actions.newTerminal")}
-        </DropdownMenuItem>
+        </MenuItem>
         {profiles.map((profile) => (
           <HeaderMenuProfileItem
             key={profile.id}
@@ -1198,15 +1216,12 @@ function WorkspaceHeaderMenu({
             onCreateTerminalWithProfile={onCreateTerminalWithProfile}
           />
         ))}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          testID="workspace-header-edit-terminal-profiles"
-          onSelect={handleEditProfiles}
-        >
+        <MenuSeparator />
+        <MenuItem testID="workspace-header-edit-terminal-profiles" onSelect={handleEditProfiles}>
           {t("workspace.tabs.actions.editTerminalProfiles")}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+        </MenuItem>
+      </MenuSurface>
+    </MenuRoot>
   );
 }
 
@@ -1326,8 +1341,12 @@ function WorkspaceHeaderTitleBar({
         </View>
       )}
       <View style={styles.compactHeaderMenuCluster}>
+        {!isMobile ? (
+          <PluginHeaderButtons serverId={normalizedServerId} workspaceId={normalizedWorkspaceId} />
+        ) : null}
         <WorkspaceHeaderMenu
           normalizedServerId={normalizedServerId}
+          normalizedWorkspaceId={normalizedWorkspaceId}
           currentBranchName={currentBranchName}
           showWorkspaceSetup={showWorkspaceSetup}
           showCreateBrowserTab={showCreateBrowserTab}

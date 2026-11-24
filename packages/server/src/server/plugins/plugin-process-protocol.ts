@@ -1,3 +1,4 @@
+import { UsageScopeSchema, type UsageScope } from "@jagentdesk/plugin/server/usage";
 import type { PluginHookAgent } from "@jagentdesk/plugin/server";
 import type {
   ProviderConnectRequest,
@@ -17,6 +18,7 @@ import {
 import { z } from "zod";
 
 export interface PluginProviderMetadata {
+  requiresConfiguration?: boolean;
   hasCatalogCacheKey?: boolean;
   hasStatus?: boolean;
   installation?: PluginProviderInstallationMetadata;
@@ -36,7 +38,17 @@ export interface PluginProviderInstallationMetadata {
   hasUpdate?: boolean;
 }
 
+export interface PluginUsageSourceMetadata {
+  provider?: string;
+  id: string;
+  label: string;
+  icon?: string;
+  discover: boolean;
+}
+
 export type PluginProcessRequest =
+  | { type: "usage.fetch"; requestId: string; sourceId: string; input: unknown }
+  | { type: "usage.discover"; requestId: string; sourceId: string; scope?: UsageScope }
   | { type: "tool.call"; requestId: string; agent: PluginHookAgent; name: string; input: unknown }
   | { type: "tool.cancel"; requestId: string }
   | { type: "tools.detach"; agentId: string }
@@ -64,6 +76,7 @@ export type PluginProcessRequest =
       pluginId: string;
       bundle: string;
       appVersion: string;
+      pluginDirectory: string;
       settingsDirectory?: string;
     }
   | {
@@ -108,6 +121,7 @@ export type PluginProcessMessage =
       methods: string[];
       subscriptions?: string[];
       providers: PluginProviderMetadata[];
+      usageSources?: PluginUsageSourceMetadata[];
       hooks?: string[];
     }
   | { type: "result"; requestId: string; output: unknown }
@@ -144,6 +158,7 @@ const providerMetadataSchema = z
     description: z.string().optional(),
     iconPath: z.string().optional(),
     docsUrl: z.string().optional(),
+    requiresConfiguration: z.boolean().optional(),
     hasCatalogCacheKey: z.boolean().optional(),
     hasStatus: z.boolean().optional(),
     installation: z
@@ -163,6 +178,15 @@ const ProviderInstallationLaunchSchema = ProviderLaunchSchema.extend({
   resolved: z.boolean(),
 }).strict();
 
+const usageSourceMetadataSchema = z
+  .object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    icon: z.string().optional(),
+    discover: z.boolean(),
+    provider: z.string().min(1).optional(),
+  })
+  .strict();
 const providerConnectRequestSchema = z
   .object({
     launch: ProviderLaunchSchema.optional(),
@@ -235,6 +259,7 @@ export const PluginProcessRequestSchema: z.ZodType<PluginProcessRequest> = z.dis
         pluginId: z.string().min(1),
         bundle: z.string(),
         appVersion: z.string(),
+        pluginDirectory: z.string(),
         settingsDirectory: z.string().optional(),
       })
       .strict(),
@@ -271,6 +296,22 @@ export const PluginProcessRequestSchema: z.ZodType<PluginProcessRequest> = z.dis
       })
       .strict(),
     z.object({ type: z.literal("hook.cancel"), requestId: z.string() }).strict(),
+    z
+      .object({
+        type: z.literal("usage.fetch"),
+        requestId: z.string(),
+        sourceId: z.string(),
+        input: z.unknown(),
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("usage.discover"),
+        requestId: z.string(),
+        sourceId: z.string(),
+        scope: UsageScopeSchema.optional(),
+      })
+      .strict(),
     z
       .object({
         type: z.literal("invoke"),
@@ -323,6 +364,7 @@ export const PluginProcessMessageSchema: z.ZodType<PluginProcessMessage> = z.dis
         methods: z.array(z.string()),
         subscriptions: z.array(z.string()).optional(),
         providers: z.array(providerMetadataSchema),
+        usageSources: z.array(usageSourceMetadataSchema).optional(),
         hooks: hooksSchema.optional(),
       })
       .strict(),

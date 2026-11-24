@@ -349,6 +349,10 @@ export class ProviderSnapshotManager {
     return Object.prototype.hasOwnProperty.call(this.providerRegistry, provider);
   }
 
+  supportsConfigRequiredProvider(provider: AgentProvider): boolean {
+    return this.pluginProviders.definitions()[provider]?.requiresConfiguration === true;
+  }
+
   getProviderLabel(provider: AgentProvider): string {
     return this.providerRegistry[provider]?.label ?? provider;
   }
@@ -432,6 +436,12 @@ export class ProviderSnapshotManager {
     this.providerClients[provider] = client;
     this.ownedClients.add(client);
     return client;
+  }
+
+  async resolveUsageLaunch(provider: string) {
+    const definition = this.providerRegistry[provider];
+    if (!definition?.enabled) return undefined;
+    return this.ensureClient(provider, definition).resolveUsageLaunch?.();
   }
 
   async listProviders(input: ProviderSnapshotReadOptions = {}): Promise<ProviderSnapshotEntry[]> {

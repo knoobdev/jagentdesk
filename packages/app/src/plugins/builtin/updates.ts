@@ -1,3 +1,4 @@
+import { mergeBuiltinPluginWireState } from "@jagentdesk/protocol/builtin-plugins";
 import type { QueryClient } from "@tanstack/react-query";
 import type { BuiltinPluginListItem } from "@jagentdesk/protocol/builtin-plugins";
 import type { SessionOutboundMessage } from "@jagentdesk/protocol/messages";
@@ -20,7 +21,7 @@ export function observeBuiltinPluginUpdates(
   return source.on("plugins.builtin.changed", ({ payload }) => {
     queryClient.setQueryData<BuiltinPluginQueryState>(
       builtinPluginsQueryKey(serverId),
-      (previous) => (previous ? { ...previous, plugins: payload.plugins } : undefined),
+      (previous) => (previous ? { ...previous, plugins: mergeBuiltinPluginWireState(payload) } : undefined),
     );
   });
 }

@@ -3,7 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import pino from "pino";
 import { afterEach, describe, expect, it } from "vitest";
-import { BUILTIN_PLUGIN_IDS } from "@jagentdesk/protocol/builtin-plugins";
+import {
+  BUILTIN_PLUGIN_IDS,
+  STATIC_BUILTIN_PLUGIN_IDS,
+  BUILTIN_PLUGIN_MANIFESTS,
+} from "@jagentdesk/protocol/builtin-plugins";
 import { MutableDaemonConfigSchema } from "@jagentdesk/protocol/messages";
 import { DaemonConfigStore } from "../../daemon-config-store.js";
 import { loadConfig } from "../../config.js";
@@ -28,14 +32,25 @@ async function setup(overrides: Record<string, unknown> = {}) {
 }
 
 describe("static built-in plugin registry", () => {
-  it("lists exactly 20 features with 17 enabled independently of installed plugins", async () => {
+  it("keeps the 20 feature defaults and adds bundled plugins independently of installed plugins", async () => {
     const { state } = await setup({ pluginsEnabled: false });
     expect(state.list().map(({ id }) => id)).toEqual(BUILTIN_PLUGIN_IDS);
-    expect(state.list().filter(({ enabled }) => enabled)).toHaveLength(17);
     expect(
       state
         .list()
-        .filter(({ enabled }) => !enabled)
+        .filter(
+          ({ id, enabled }) =>
+            (STATIC_BUILTIN_PLUGIN_IDS as readonly string[]).includes(id) && enabled,
+        ),
+    ).toHaveLength(17);
+    expect(state.isEnabled("worktree-include")).toBe(true);
+    expect(
+      state
+        .list()
+        .filter(
+          ({ id, enabled }) =>
+            (STATIC_BUILTIN_PLUGIN_IDS as readonly string[]).includes(id) && !enabled,
+        )
         .map(({ id }) => id),
     ).toEqual(["autorun", "session-share", "browser-tools"]);
     const loader = new BuiltinPluginLoader(undefined, []);
@@ -64,7 +79,7 @@ describe("static built-in plugin registry", () => {
     expect(restarted.isEnabled("browser-tools")).toBe(false);
     const persisted = JSON.parse(await readFile(path.join(home, "config.json"), "utf8"));
     expect(persisted.builtinPlugins["browser-tools"]).toEqual({ enabled: false });
-    expect(Object.keys(persisted.builtinPlugins)).toHaveLength(20);
+    expect(Object.keys(persisted.builtinPlugins)).toHaveLength(BUILTIN_PLUGIN_MANIFESTS.length);
   });
 
   it("logs migration only on the first boot", async () => {
@@ -239,4 +254,40 @@ it("keeps checking host probes pending and notifies when they settle", async () 
   expect(snapshots.at(-1)?.find(({ id }) => id === "devices")?.unavailableReason).toBeUndefined();
   expect(snapshots).toHaveLength(3);
   unsubscribe();
+});
+
+it("starts and stops a bundled plugin through the same per-host switch", async () => {
+  const { state, store } = await setup({ pluginsEnabled: false });
+  const calls: string[] = [];
+  await state.registerLifecycle("worktree-include", {
+    start() {
+      calls.push("start");
+    },
+    stop() {
+      calls.push("stop");
+    },
+  });
+  await state.set("worktree-include", false);
+  expect(calls).toEqual(["start", "stop"]);
+  expect(store.get().builtinPlugins?.["worktree-include"]).toEqual({ enabled: false });
+  await state.set("worktree-include", true);
+  expect(calls).toEqual(["start", "stop", "start"]);
+  await state.setAvailability("worktree-include", "Required executable is missing");
+  expect(state.list().find((entry) => entry.id === "worktree-include")).toMatchObject({
+    available: false,
+    unavailableReason: "Required executable is missing",
+  });
+  await expect(state.set("worktree-include", true)).rejects.toMatchObject({
+    code: "plugin_unavailable",
+  });
+});
+
+it("keeps a configured Goose host enabled through the bundled-provider migration without overriding a later switch", async () => {
+  const { state, store, home, initial } = await setup({
+    providers: { goose: { command: ["/opt/bin/goose", "acp"] } },
+  });
+  expect(store.get().builtinPlugins?.["goose-provider"]).toEqual({ enabled: true });
+  await state.set("goose-provider", false);
+  const restarted = new DaemonConfigStore(home, initial);
+  expect(restarted.get().builtinPlugins?.["goose-provider"]).toEqual({ enabled: false });
 });

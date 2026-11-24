@@ -12,6 +12,8 @@ function registry() {
     createRuntime: (installation) => {
       const api = createJAgentDeskApi(client);
       return {
+        openScreen() {},
+        playAudio: async () => {},
         hosts: createPluginHosts(
           {
             getHosts: () => [],
@@ -57,6 +59,7 @@ test("failed plugin initialization disposes its API scope", async () => {
   const h = registry();
   h.plugins.installCatalog("host", [catalog("failed", 'throw new Error("setup failed");')], {
     client: h.client,
+    audio: { play: async () => 0 },
   });
   await expect.poll(() => h.released).toEqual(["failed"]);
   expect(h.plugins.getSnapshot()).toEqual([]);
@@ -66,8 +69,14 @@ test("unloading releases the API even when plugin cleanup throws, preserving ano
   const h = registry();
   const failing = catalog("failing", 'return function() { throw new Error("cleanup failed"); };');
   const surviving = catalog("surviving", "return function() {};");
-  h.plugins.installCatalog("host", [failing, surviving], { client: h.client });
-  h.plugins.installCatalog("host", [surviving], { client: h.client });
+  h.plugins.installCatalog("host", [failing, surviving], {
+    client: h.client,
+    audio: { play: async () => 0 },
+  });
+  h.plugins.installCatalog("host", [surviving], {
+    client: h.client,
+    audio: { play: async () => 0 },
+  });
   await expect.poll(() => h.released).toEqual(["failing"]);
   expect(h.plugins.getSnapshot().map((plugin) => plugin.id)).toEqual(["surviving"]);
   h.plugins.removeHost("host");
@@ -79,7 +88,7 @@ test("an invalid async client entry is disposed and its rejected continuation is
   h.plugins.installCatalog(
     "host",
     [catalog("async-entry", 'return Promise.reject(new Error("asynchronous setup failed"));')],
-    { client: h.client },
+    { client: h.client, audio: { play: async () => 0 } },
   );
   await expect.poll(() => h.released).toEqual(["async-entry"]);
   await new Promise((resolve) => setTimeout(resolve, 0));

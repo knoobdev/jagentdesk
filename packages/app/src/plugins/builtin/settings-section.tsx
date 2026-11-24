@@ -50,8 +50,12 @@ function BuiltinPluginRow({
   }, [plugin, plugins, t]);
   const pendingBadge = useMemo(
     () =>
-      pending ? <StatusBadge label={t("builtinPlugins.updating")} variant="muted" /> : undefined,
-    [pending, t],
+      pending ? (
+        <StatusBadge label={t("builtinPlugins.updating")} variant="muted" />
+      ) : (
+        unavailableBadge(plugin.available, t("builtinPlugins.unavailable"))
+      ),
+    [pending, plugin.available, t],
   );
   return (
     <SettingsRow
@@ -131,4 +135,8 @@ export function BuiltinPluginsSection({ serverId }: { serverId: string }) {
       </SettingsCard>
     </SettingsSection>
   );
+}
+
+function unavailableBadge(available: boolean, label: string) {
+  return available ? undefined : <StatusBadge label={label} variant="muted" />;
 }

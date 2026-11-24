@@ -25,6 +25,7 @@ export interface BuiltinPluginLifecycle {
 
 /** State and lifecycle for the static feature entries in BuiltinPluginLoader. */
 export class BuiltinPluginState {
+  private readonly unavailable = new Map<BuiltinPluginId, string>();
   private capabilities: HostCapabilities | null = null;
   private readonly lifecycles = new Map<BuiltinPluginId, BuiltinPluginLifecycle>();
   private readonly running = new Set<BuiltinPluginId>();
@@ -47,13 +48,15 @@ export class BuiltinPluginState {
       // Host probes publish an empty snapshot while checking. Only a settled
       // result can make a plugin unavailable (and stop its dependents).
       const checks = caps?.flatMap((id) => this.capabilities?.[id] ?? []);
-      const available = !checks?.length || checks.some(({ state }) => state === "available");
-      const unavailableReason = available
+      const available =
+        !this.unavailable.has(manifest.id) &&
+        (!checks?.length || checks.some(({ state }) => state === "available"));
+      const unavailableReason = this.unavailable.get(manifest.id) ?? (available
         ? undefined
         : caps
             ?.map((id) => this.capabilities?.[id]?.reason)
             .filter(Boolean)
-            .join(" ") || "Required host tools are unavailable.";
+            .join(" ") || "Required host tools are unavailable.");
       return {
         ...manifest,
         requires: [...manifest.requires],
@@ -76,6 +79,21 @@ export class BuiltinPluginState {
       }
     }
     return entries;
+  }
+
+  async setAvailability(id: BuiltinPluginId, reason: string | null): Promise<void> {
+    const change = this.pending.then(async () => {
+      const previous = this.unavailable.get(id);
+      if (reason === null) this.unavailable.delete(id);
+      else this.unavailable.set(id, reason);
+      if (previous !== this.unavailable.get(id)) {
+        await this.reconcile();
+        for (const listener of this.listeners) listener();
+      }
+      return undefined;
+    });
+    this.pending = change.catch(() => {});
+    await change;
   }
 
   isEnabled(id: BuiltinPluginId): boolean {

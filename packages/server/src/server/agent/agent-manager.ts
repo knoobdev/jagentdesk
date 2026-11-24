@@ -855,6 +855,7 @@ export class AgentManager {
   private readonly inFlightAgentCloses = new Map<string, Promise<void>>();
   private readonly historySessions = new WeakSet<AgentSession>();
   private readonly lifecycleMutationTails = new Map<string, Promise<void>>();
+  private readonly pendingCancellations = new Map<string, Promise<unknown>>();
   private readonly agentStreamCoalescer: AgentStreamCoalescer;
   private mcpBaseUrl: string | null;
   private readonly mcpAuthToken: string | null;
@@ -2157,21 +2158,23 @@ export class AgentManager {
   }
 
   async setAgentMode(agentId: string, modeId: string): Promise<AgentProviderNotice | null> {
-    const agent = await this.ensureInteractiveSession(agentId);
-    const notice = (await agent.session.setMode(modeId)) ?? null;
-    await this.drainSessionEvents(agentId);
-    const currentMode = (await agent.session.getCurrentMode()) ?? modeId;
-    agent.config.modeId = currentMode ?? undefined;
-    agent.currentModeId = currentMode;
-    // Update runtimeInfo to reflect the new mode
-    if (agent.runtimeInfo) {
-      agent.runtimeInfo = { ...agent.runtimeInfo, modeId: currentMode };
-    }
-    this.touchUpdatedAt(agent);
-    this.emitState(agent);
-    return notice;
+    return this.runLifecycleMutation(agentId, () =>
+      this.withLiveInteractiveSessionUnlocked(agentId, async (agent) => {
+        const notice = (await agent.session.setMode(modeId)) ?? null;
+        await this.drainSessionEvents(agentId);
+        const currentMode = (await agent.session.getCurrentMode()) ?? modeId;
+        agent.config.modeId = currentMode ?? undefined;
+        agent.currentModeId = currentMode;
+        // Update runtimeInfo to reflect the new mode
+        if (agent.runtimeInfo) {
+          agent.runtimeInfo = { ...agent.runtimeInfo, modeId: currentMode };
+        }
+        this.touchUpdatedAt(agent);
+        this.emitState(agent);
+        return notice;
+      }),
+    );
   }
-
   /**
    * Switch a live agent to a DIFFERENT provider mid-conversation while keeping
    * its history. A native provider session is not portable, so we snapshot the
@@ -2292,74 +2295,79 @@ export class AgentManager {
   }
 
   async setAgentModel(agentId: string, modelId: string | null): Promise<void> {
-    const agent = await this.ensureInteractiveSession(agentId);
-    const normalizedModelId =
-      typeof modelId === "string" && modelId.trim().length > 0 ? modelId : null;
+    return this.runLifecycleMutation(agentId, () =>
+      this.withLiveInteractiveSessionUnlocked(agentId, async (agent) => {
+        const normalizedModelId =
+          typeof modelId === "string" && modelId.trim().length > 0 ? modelId : null;
 
-    const selection = await agent.session.setModel?.(normalizedModelId);
-    await this.drainSessionEvents(agentId);
+        const selection = await agent.session.setModel?.(normalizedModelId);
+        await this.drainSessionEvents(agentId);
 
-    // A reset clears the preference even when the provider retains its active model.
-    let effectiveModelId = normalizedModelId;
-    if (normalizedModelId !== null && selection) effectiveModelId = selection.model;
+        // A reset clears the preference even when the provider retains its active model.
+        let effectiveModelId = normalizedModelId;
+        if (normalizedModelId !== null && selection) effectiveModelId = selection.model;
 
-    agent.config.model = effectiveModelId ?? undefined;
-    if (agent.runtimeInfo) {
-      agent.runtimeInfo = { ...agent.runtimeInfo, model: effectiveModelId };
-    }
-    this.refreshSessionPersistence(agent);
-    this.touchUpdatedAt(agent);
-    this.emitState(agent);
+        agent.config.model = effectiveModelId ?? undefined;
+        if (agent.runtimeInfo) {
+          agent.runtimeInfo = { ...agent.runtimeInfo, model: effectiveModelId };
+        }
+        this.refreshSessionPersistence(agent);
+        this.touchUpdatedAt(agent);
+        this.emitState(agent);
+      }),
+    );
   }
-
   async setAgentThinkingOption(
     agentId: string,
     thinkingOptionId: string | null,
   ): Promise<AgentProviderNotice | null> {
-    const agent = await this.ensureInteractiveSession(agentId);
-    const normalizedThinkingOptionId =
-      typeof thinkingOptionId === "string" && thinkingOptionId.trim().length > 0
-        ? thinkingOptionId
-        : null;
+    return this.runLifecycleMutation(agentId, () =>
+      this.withLiveInteractiveSessionUnlocked(agentId, async (agent) => {
+        const normalizedThinkingOptionId =
+          typeof thinkingOptionId === "string" && thinkingOptionId.trim().length > 0
+            ? thinkingOptionId
+            : null;
 
-    let notice: AgentProviderNotice | null = null;
-    if (agent.session.setThinkingOption) {
-      notice = (await agent.session.setThinkingOption(normalizedThinkingOptionId)) ?? null;
-    }
-    await this.drainSessionEvents(agentId);
+        let notice: AgentProviderNotice | null = null;
+        if (agent.session.setThinkingOption) {
+          notice = (await agent.session.setThinkingOption(normalizedThinkingOptionId)) ?? null;
+        }
+        await this.drainSessionEvents(agentId);
 
-    let effectiveThinkingOptionId = normalizedThinkingOptionId;
-    const runtimeInfo = await agent.session.getRuntimeInfo();
-    if (runtimeInfo.thinkingOptionId !== undefined) {
-      effectiveThinkingOptionId = runtimeInfo.thinkingOptionId;
-    }
+        let effectiveThinkingOptionId = normalizedThinkingOptionId;
+        const runtimeInfo = await agent.session.getRuntimeInfo();
+        if (runtimeInfo.thinkingOptionId !== undefined) {
+          effectiveThinkingOptionId = runtimeInfo.thinkingOptionId;
+        }
 
-    agent.config.thinkingOptionId = effectiveThinkingOptionId ?? undefined;
-    if (agent.runtimeInfo) {
-      agent.runtimeInfo = {
-        ...agent.runtimeInfo,
-        thinkingOptionId: effectiveThinkingOptionId,
-      };
-    }
-    this.touchUpdatedAt(agent);
-    this.emitState(agent);
-    return notice;
+        agent.config.thinkingOptionId = effectiveThinkingOptionId ?? undefined;
+        if (agent.runtimeInfo) {
+          agent.runtimeInfo = {
+            ...agent.runtimeInfo,
+            thinkingOptionId: effectiveThinkingOptionId,
+          };
+        }
+        this.touchUpdatedAt(agent);
+        this.emitState(agent);
+        return notice;
+      }),
+    );
   }
-
   async setAgentFeature(agentId: string, featureId: string, value: unknown): Promise<void> {
-    const agent = await this.ensureInteractiveSession(agentId);
+    return this.runLifecycleMutation(agentId, () =>
+      this.withLiveInteractiveSessionUnlocked(agentId, async (agent) => {
+        if (!agent.session.setFeature) {
+          throw new Error("Agent session does not support setting features");
+        }
 
-    if (!agent.session.setFeature) {
-      throw new Error("Agent session does not support setting features");
-    }
-
-    await agent.session.setFeature(featureId, value);
-    await this.drainSessionEvents(agentId);
-    agent.config.featureValues = { ...agent.config.featureValues, [featureId]: value };
-    this.touchUpdatedAt(agent);
-    this.emitState(agent);
+        await agent.session.setFeature(featureId, value);
+        await this.drainSessionEvents(agentId);
+        agent.config.featureValues = { ...agent.config.featureValues, [featureId]: value };
+        this.touchUpdatedAt(agent);
+        this.emitState(agent);
+      }),
+    );
   }
-
   async setTitle(agentId: string, title: string): Promise<void> {
     const agent = this.requireAgent(agentId);
     const normalizedTitle = title.trim();
@@ -2835,21 +2843,46 @@ export class AgentManager {
 
   private async ensureInteractiveSession(agentId: string): Promise<ActiveManagedAgent> {
     const agent = this.requireSessionAgent(agentId);
-    if (this.historySessions.has(agent.session)) {
+    if (this.historySessions.has(agent.session))
       await this.trackAgentRegistrationOperation(
-        this.runLifecycleMutation(agentId, async () => {
-          const record = await this.registry?.get(agentId);
-          if (record?.archivedAt) throw new Error(`Agent is archived: ${agentId}`);
-          const current = this.requireSessionAgent(agentId);
-          if (this.historySessions.has(current.session)) {
-            // Recheck inside the lane: another prompt may already have upgraded it.
-            // Reload validates the directory before releasing readable history.
-            await this.reloadAgentSessionInternal(agentId);
-          }
-        }),
+        this.runLifecycleMutation(agentId, () => this.ensureInteractiveSessionUnlocked(agentId)),
       );
-    }
     return this.requireSessionAgent(agentId);
+  }
+
+  private async ensureInteractiveSessionUnlocked(agentId: string): Promise<ActiveManagedAgent> {
+    const record = await this.registry?.get(agentId);
+    if (record?.archivedAt) throw new Error(`Agent is archived: ${agentId}`);
+    const agent = this.requireSessionAgent(agentId);
+    if (this.historySessions.has(agent.session)) await this.reloadAgentSessionInternal(agentId);
+    return this.requireSessionAgent(agentId);
+  }
+
+  /** Inside the agent's lane: transparently reopens a retired plugin session before applying config. */
+  private async withLiveInteractiveSessionUnlocked<T>(
+    agentId: string,
+    operation: (agent: ActiveManagedAgent) => Promise<T>,
+  ): Promise<T> {
+    const pendingCancellation = this.pendingCancellations.get(agentId);
+    if (pendingCancellation) {
+      await this.waitWithTimeout({
+        operation: pendingCancellation.then(
+          () => undefined,
+          () => undefined,
+        ),
+        timeoutMs: this.rescueTimeouts.interruptSessionMs,
+      });
+    }
+    const agent = await this.ensureInteractiveSessionUnlocked(agentId);
+    try {
+      return await operation(agent);
+    } catch (error) {
+      if (!isStaleProviderSessionError(error)) throw error;
+      await this.runs.getPendingRun(agentId)?.settledPromise.catch(() => undefined);
+      if (this.hasInFlightRun(agentId)) throw error;
+      await this.trackAgentRegistrationOperation(this.reloadAgentSessionInternal(agentId));
+      return await operation(this.requireSessionAgent(agentId));
+    }
   }
 
   private async *streamAfterHistoryLoad(
@@ -3533,7 +3566,14 @@ export class AgentManager {
   }
 
   async cancelAgentRun(agentId: string): Promise<AgentRunCancellationResult> {
-    return this.runForegroundMutation(agentId, () => this.cancelAgentRunNow(agentId));
+    const cancellation = this.runForegroundMutation(agentId, () => this.cancelAgentRunNow(agentId));
+    this.pendingCancellations.set(agentId, cancellation);
+    try {
+      return await cancellation;
+    } finally {
+      if (this.pendingCancellations.get(agentId) === cancellation)
+        this.pendingCancellations.delete(agentId);
+    }
   }
 
   private async cancelAgentRunNow(agentId: string): Promise<AgentRunCancellationResult> {

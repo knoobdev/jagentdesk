@@ -17,6 +17,7 @@ import type {
   ProviderInstallationInspectResponseMessage,
   ProviderInstallationCheckUpdatesResponseMessage,
 } from "@jagentdesk/protocol/messages";
+import { mergeBuiltinPluginWireState } from "@jagentdesk/protocol/builtin-plugins";
 import type { BuiltinPluginId, BuiltinPluginListItem } from "@jagentdesk/protocol/builtin-plugins";
 import {
   ChunkedTransport,
@@ -548,7 +549,19 @@ export type BrowserAutomationExecuteResponseMessage = BrowserAutomationExecuteRe
 /** Endpoint security negotiated on a relay connection. */
 export type RelaySecurityMode = "legacy" | "protected";
 
+export interface PluginClientBundle {
+  id: string;
+  clientBundleHash: string;
+  clientBundle: string;
+}
+
+/** Host-scoped storage. load must return only bundles whose contents have been verified. */
+export interface PluginClientBundleStore {
+  load(): Promise<PluginClientBundle[]>;
+  replace(bundles: PluginClientBundle[]): Promise<void>;
+}
 export interface DaemonClientConfig {
+  createPluginClientBundleStore?: (serverId: string) => PluginClientBundleStore;
   url: string;
   clientId: string;
   clientType?: "mobile" | "browser" | "cli" | "mcp";
@@ -1951,7 +1964,22 @@ export function requireTerminalKeepCapability(
   }
 }
 
+export interface PluginCatalogEntry {
+  id: string;
+  clientBundle: string;
+  clientBundleHash?: string;
+  requirements?: PluginRequirements;
+}
+
 export class DaemonClient {
+  private pluginClientBundles = new Map<
+    string,
+    { clientBundleHash: string; clientBundle: string }
+  >();
+  private pluginClientBundleStore: PluginClientBundleStore | undefined;
+  private pluginClientBundlesLoaded: Promise<void> | undefined;
+  private pluginClientBundlesWrite: PluginClientBundle[] | undefined;
+  private pluginClientBundlesWriting = false;
   private readonly eventObservations = new Set<{
     events: Set<SessionEventSubscription>;
     subscription: OwnedSubscription<unknown>;
@@ -6338,6 +6366,8 @@ export class DaemonClient {
     cwd: string;
     path: string;
     content: string;
+    /** `base64` requires `server_info.features.fileByteWrites`. */
+    contentEncoding?: "utf-8" | "base64";
     expectedModifiedAt: string;
     expectedRevision?: string;
   }): Promise<FileWriteResult> {
@@ -6581,16 +6611,88 @@ export class DaemonClient {
     return { seq: payload.seq, epoch: payload.epoch };
   }
 
-  async getPluginCatalog(): Promise<
-    Array<{ id: string; clientBundle: string; requirements?: PluginRequirements }>
-  > {
+  async getPluginCatalog(): Promise<PluginCatalogEntry[]> {
+    if (this.config.createPluginClientBundleStore && !this.pluginClientBundleStore) {
+      const serverInfo = this.getLastServerInfoMessage();
+      if (!serverInfo) throw new Error("Plugin catalog requires a connected host");
+      this.pluginClientBundleStore = this.config.createPluginClientBundleStore(serverInfo.serverId);
+    }
+    const store = this.pluginClientBundleStore;
+    if (store) {
+      this.pluginClientBundlesLoaded ??= store.load().then(
+        (bundles) => {
+          for (const { id, ...bundle } of bundles) this.pluginClientBundles.set(id, bundle);
+          return undefined;
+        },
+        (error) => this.logger.warn({ err: error }, "Failed to load plugin client bundles"),
+      );
+      await this.pluginClientBundlesLoaded;
+    }
     const requestId = this.createRequestId();
+    const cached = this.pluginClientBundles;
+    const cachedClientBundles = [...cached].map(([id, { clientBundleHash }]) => ({
+      id,
+      clientBundleHash,
+    }));
     const payload = await this.sendCorrelatedSessionRequest({
       requestId,
-      message: { type: "plugin.catalog.get.request", requestId },
+      message: {
+        type: "plugin.catalog.get.request",
+        requestId,
+        ...(cachedClientBundles.length > 0 ? { cachedClientBundles } : {}),
+      },
       responseType: "plugin.catalog.get.response",
     });
-    return payload.plugins;
+    const retained = new Map<string, { clientBundleHash: string; clientBundle: string }>();
+    const plugins = payload.plugins.map(
+      ({ clientBundle: received, ...plugin }): PluginCatalogEntry => {
+        let sent: string | undefined = received;
+        const previous = cached.get(plugin.id);
+        // COMPAT(pluginCatalogBundleRequired): added in v0.9.59, remove after 2027-04-27.
+        // Keep the required wire string for old clients; a known hash marks the omitted code.
+        if (sent === "" && previous?.clientBundleHash === plugin.clientBundleHash) sent = undefined;
+        const clientBundle =
+          sent ??
+          (previous?.clientBundleHash === plugin.clientBundleHash
+            ? previous?.clientBundle
+            : undefined);
+        if (clientBundle === undefined) {
+          throw new Error(`Plugin catalog left out the client bundle for ${plugin.id}`);
+        }
+        // COMPAT(pluginCatalogBundleHash): introduced by PR #6732 (unreleased); remove after
+        // 2027-04-27 once the daemon floor includes bundle hashes. Older bundles are not retained.
+        if (plugin.clientBundleHash !== undefined) {
+          retained.set(plugin.id, { clientBundleHash: plugin.clientBundleHash, clientBundle });
+        }
+        return Object.assign(plugin, { clientBundle });
+      },
+    );
+    this.pluginClientBundles = retained;
+    if (store) {
+      this.pluginClientBundlesWrite = [...retained].map(([id, bundle]) =>
+        Object.assign({ id }, bundle),
+      );
+      void this.persistPluginClientBundles(store);
+    }
+    return plugins;
+  }
+
+  private async persistPluginClientBundles(store: PluginClientBundleStore): Promise<void> {
+    if (this.pluginClientBundlesWriting) return;
+    this.pluginClientBundlesWriting = true;
+    try {
+      while (this.pluginClientBundlesWrite) {
+        const bundles = this.pluginClientBundlesWrite;
+        this.pluginClientBundlesWrite = undefined;
+        try {
+          await store.replace(bundles);
+        } catch (error) {
+          this.logger.warn({ err: error }, "Failed to persist plugin client bundles");
+        }
+      }
+    } finally {
+      this.pluginClientBundlesWriting = false;
+    }
   }
 
   async getBuiltinPluginState(): Promise<{
@@ -6598,11 +6700,12 @@ export class DaemonClient {
     canManage?: boolean;
   }> {
     const requestId = this.createRequestId();
-    return this.sendCorrelatedSessionRequest({
+    const payload = await this.sendCorrelatedSessionRequest({
       requestId,
       message: { type: "plugins.builtin.list.request", requestId },
       responseType: "plugins.builtin.list.response",
     });
+    return { ...payload, plugins: mergeBuiltinPluginWireState(payload) };
   }
 
   async listBuiltinPlugins(): Promise<BuiltinPluginListItem[]> {
@@ -6612,7 +6715,7 @@ export class DaemonClient {
       message: { type: "plugins.builtin.list.request", requestId },
       responseType: "plugins.builtin.list.response",
     });
-    return payload.plugins;
+    return mergeBuiltinPluginWireState(payload);
   }
 
   async setBuiltinPlugin(
@@ -6626,7 +6729,7 @@ export class DaemonClient {
       message: { type: "plugins.builtin.set.request", requestId, id, enabled, cascade },
       responseType: "plugins.builtin.set.response",
     });
-    return payload.plugins;
+    return mergeBuiltinPluginWireState(payload);
   }
 
   async listPlugins(): Promise<PluginListItem[]> {
@@ -6854,6 +6957,10 @@ export class DaemonClient {
       requestId,
       message: { type: `plugin.${action}.request`, requestId, pluginId },
       responseType: `plugin.${action}.response`,
+      // Reload tears the plugin down and starts it again before the daemon answers, and it queues
+      // behind other plugin lifecycle work. Wait for that answer instead of failing the reload at
+      // the request deadline while the daemon keeps loading it.
+      ...(action === "reload" ? { timeout: 0 } : {}),
     });
     return payload.plugin;
   }

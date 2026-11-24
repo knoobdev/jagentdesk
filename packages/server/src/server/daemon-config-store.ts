@@ -247,6 +247,21 @@ export class DaemonConfigStore {
       });
       this.logger?.info("Migrated built-in plugin flags to builtinPlugins in config.json");
     }
+    this.migrateConfiguredGoose(initial, persisted, builtinPlugins);
+  }
+
+  private migrateConfiguredGoose(
+    initial: MutableDaemonConfig,
+    persisted: PersistedConfig,
+    previous: MutableDaemonConfig["builtinPlugins"],
+  ): void {
+    // COMPAT(gooseBuiltinSwitch): added in v0.9.59; remove after 2027-05-24 once configured Goose hosts have migrated.
+    if (
+      (initial.providers?.goose || persisted.agents?.providers?.goose) &&
+      !previous?.["goose-provider"]
+    ) {
+      this.patch({ builtinPlugins: { "goose-provider": { enabled: true } } });
+    }
   }
 
   public get(): MutableDaemonConfig {

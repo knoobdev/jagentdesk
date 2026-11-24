@@ -37,3 +37,14 @@ export function getPluginSurfaceContributionServerIds(
     })
     .map((installation) => installation.serverId);
 }
+
+export type PluginSurfacePlaceholderStatus = "loading" | "offline" | "error" | "unavailable";
+export function resolvePluginSurfacePlaceholder(input: {
+  connectionStatus: import("@/runtime/host-runtime").HostRuntimeConnectionStatus;
+  catalogStatus: import("./registry").PluginCatalogStatus;
+}): PluginSurfacePlaceholderStatus {
+  if (input.connectionStatus === "offline" || input.connectionStatus === "error") return "offline";
+  if (input.connectionStatus !== "online" || input.catalogStatus === "loading") return "loading";
+  if (input.catalogStatus === "error") return "error";
+  return "unavailable";
+}

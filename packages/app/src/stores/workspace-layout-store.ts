@@ -1,3 +1,4 @@
+import type { JsonValue } from "@jagentdesk/protocol/agent-types";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useEffect, useState } from "react";
 import { create } from "zustand";
@@ -67,6 +68,9 @@ export type {
 };
 
 interface WorkspaceLayoutStore {
+  panelStateByWorkspace: Record<string, Record<string, JsonValue>>;
+  panelRevisionByWorkspace: Record<string, Record<string, number>>;
+  setTabState(workspaceKey: string, tabId: string, value: JsonValue): void;
   layoutByWorkspace: Record<string, WorkspaceLayout>;
   splitSizesByWorkspace: Record<string, Record<string, number[]>>;
   pinnedAgentIdsByWorkspace: Record<string, Set<string>>;
@@ -244,6 +248,18 @@ export function createWorkspaceLayoutStore(
   return create<WorkspaceLayoutStore>()(
     persist(
       (set, get) => ({
+        panelStateByWorkspace: {},
+        panelRevisionByWorkspace: {},
+        setTabState: (workspaceKey, tabId, value) => {
+          const layout = get().layoutByWorkspace[workspaceKey];
+          if (!layout || !collectAllTabs(layout.root).some((tab) => tab.tabId === tabId)) return;
+          set((state) => ({
+            panelStateByWorkspace: {
+              ...state.panelStateByWorkspace,
+              [workspaceKey]: { ...state.panelStateByWorkspace[workspaceKey], [tabId]: value },
+            },
+          }));
+        },
         layoutByWorkspace: {},
         splitSizesByWorkspace: {},
         pinnedAgentIdsByWorkspace: {},
@@ -279,6 +295,19 @@ export function createWorkspaceLayoutStore(
             },
           }));
 
+          if (normalizedTarget.kind === "file" || normalizedTarget.kind === "plugin") {
+            set((state) => ({
+              panelRevisionByWorkspace: {
+                ...state.panelRevisionByWorkspace,
+                [normalizedWorkspaceKey]: {
+                  ...state.panelRevisionByWorkspace[normalizedWorkspaceKey],
+                  [result.tabId]:
+                    (state.panelRevisionByWorkspace[normalizedWorkspaceKey]?.[result.tabId] ?? 0) +
+                    1,
+                },
+              },
+            }));
+          }
           return result.tabId;
         },
         openChildTabFocused: (workspaceKey, target, parentTabId) => {
@@ -318,6 +347,19 @@ export function createWorkspaceLayoutStore(
             };
           });
 
+          if (normalizedTarget.kind === "file" || normalizedTarget.kind === "plugin") {
+            set((state) => ({
+              panelRevisionByWorkspace: {
+                ...state.panelRevisionByWorkspace,
+                [normalizedWorkspaceKey]: {
+                  ...state.panelRevisionByWorkspace[normalizedWorkspaceKey],
+                  [result.tabId]:
+                    (state.panelRevisionByWorkspace[normalizedWorkspaceKey]?.[result.tabId] ?? 0) +
+                    1,
+                },
+              },
+            }));
+          }
           return result.tabId;
         },
         openTabInBackground: (workspaceKey, target) => {
@@ -348,6 +390,19 @@ export function createWorkspaceLayoutStore(
             },
           }));
 
+          if (normalizedTarget.kind === "file" || normalizedTarget.kind === "plugin") {
+            set((state) => ({
+              panelRevisionByWorkspace: {
+                ...state.panelRevisionByWorkspace,
+                [normalizedWorkspaceKey]: {
+                  ...state.panelRevisionByWorkspace[normalizedWorkspaceKey],
+                  [result.tabId]:
+                    (state.panelRevisionByWorkspace[normalizedWorkspaceKey]?.[result.tabId] ?? 0) +
+                    1,
+                },
+              },
+            }));
+          }
           return result.tabId;
         },
         closeTab: (workspaceKey, tabId) => {
@@ -435,6 +490,19 @@ export function createWorkspaceLayoutStore(
             },
           }));
 
+          if (normalizedTarget.kind === "file" || normalizedTarget.kind === "plugin") {
+            set((state) => ({
+              panelRevisionByWorkspace: {
+                ...state.panelRevisionByWorkspace,
+                [normalizedWorkspaceKey]: {
+                  ...state.panelRevisionByWorkspace[normalizedWorkspaceKey],
+                  [result.tabId]:
+                    (state.panelRevisionByWorkspace[normalizedWorkspaceKey]?.[result.tabId] ?? 0) +
+                    1,
+                },
+              },
+            }));
+          }
           return result.tabId;
         },
         convertDraftToAgent: (workspaceKey, tabId, agentId) => {
@@ -949,7 +1017,13 @@ export function createWorkspaceLayoutStore(
               state.hiddenAgentIdsByWorkspace;
             const { [normalizedWorkspaceKey]: _restoration, ...focusRestorationByWorkspace } =
               state.focusRestorationByWorkspace;
+            const { [normalizedWorkspaceKey]: _panelState, ...panelStateByWorkspace } =
+              state.panelStateByWorkspace;
+            const { [normalizedWorkspaceKey]: _panelRevisions, ...panelRevisionByWorkspace } =
+              state.panelRevisionByWorkspace;
             return {
+              panelStateByWorkspace,
+              panelRevisionByWorkspace,
               layoutByWorkspace,
               splitSizesByWorkspace,
               pinnedAgentIdsByWorkspace,
@@ -985,6 +1059,17 @@ export function createWorkspaceLayoutStore(
           return {
             layoutByWorkspace,
             splitSizesByWorkspace: state.splitSizesByWorkspace,
+            panelStateByWorkspace: Object.fromEntries(
+              Object.entries(layoutByWorkspace).map(([key, layout]) => [
+                key,
+                Object.fromEntries(
+                  collectAllTabs(layout.root).flatMap((tab) => {
+                    const value = state.panelStateByWorkspace[key]?.[tab.tabId];
+                    return value === undefined ? [] : [[tab.tabId, value]];
+                  }),
+                ),
+              ]),
+            ),
           };
         },
       },

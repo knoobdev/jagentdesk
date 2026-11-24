@@ -1,3 +1,4 @@
+import { keyBelongsToDomPopover } from "@/lib/overlay-root";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { usePathname, useRouter } from "expo-router";
 import { getIsElectronRuntime } from "@/constants/layout";
@@ -292,6 +293,8 @@ export function useKeyboardShortcuts({
     if (!shouldHandle()) {
       return;
     }
+
+    if (keyBelongsToDomPopover(event)) return;
 
     // During IME composition, Enter confirms the candidate selection and must
     // not route through global shortcuts like message send.

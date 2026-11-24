@@ -1,6 +1,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import {
   PluginClientStateProvider,
+  PluginTranslationProvider,
   type PluginClientStateSource,
   JAgentDeskApiProvider,
   PluginRpcProvider,
@@ -28,11 +29,16 @@ export function PluginRuntimeBoundary({
   );
   const runtime = usePluginSurfaceRuntime(client, plugin);
   if (!runtime) return null;
+  const content = plugin.translations ? (
+    <PluginTranslationProvider runtime={plugin.translations}>{children}</PluginTranslationProvider>
+  ) : (
+    children
+  );
   return (
     <QueryClientProvider client={plugin.queryClient}>
       <JAgentDeskApiProvider jagentdesk={runtime.jagentdesk}>
         <PluginRpcProvider invoke={runtime.invoke} subscribe={runtime.subscribe}>
-          <PluginClientStateProvider source={source}>{children}</PluginClientStateProvider>
+          <PluginClientStateProvider source={source}>{content}</PluginClientStateProvider>
         </PluginRpcProvider>
       </JAgentDeskApiProvider>
     </QueryClientProvider>

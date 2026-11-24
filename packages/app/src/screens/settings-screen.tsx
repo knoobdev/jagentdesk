@@ -1,3 +1,4 @@
+import { usePluginDisplayName } from "@/plugins/plugin-list";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 import {
@@ -1168,6 +1169,7 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   }, [router]);
 
   const installedPlugins = useInstalledPlugins();
+  const pluginDisplayName = usePluginDisplayName(view.kind === "plugin" ? view : null);
   const detailHeader = ((): {
     title: string;
     Icon: ComponentType<{ size: number; color: string }>;
@@ -1178,7 +1180,7 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
         .find((plugin) => plugin.serverId === view.serverId && plugin.id === view.pluginId)
         ?.settingsScreens.find((candidate) => candidate.id === view.screenId);
       return {
-        title: `${view.pluginId} · ${screen?.title ?? t("settings.title")}`,
+        title: pluginDisplayName ?? view.pluginId,
         Icon: screen ? resolvePluginIcon(screen.icon) : Puzzle,
       };
     }

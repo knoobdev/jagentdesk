@@ -52,6 +52,10 @@
       "types": "./dist/server/lifecycle.d.ts",
       "source": "./src/server/lifecycle.ts",
       "default": "./dist/server/lifecycle.js"
+    },
+    "./server/usage": {
+      "types": "./dist/server/usage.d.ts",
+      "default": "./dist/server/usage.js"
     }
   },
   "scripts": {
@@ -64,6 +68,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.4.0",
+    "i18next": "^26.3.0",
     "use-sync-external-store": "^1.6.0"
   },
   "devDependencies": {

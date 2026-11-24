@@ -1,4 +1,5 @@
 import type { BotsService } from "./bots/service.js";
+import { builtinPluginWireState } from "@jagentdesk/protocol/builtin-plugins";
 import {
   ChunkedTransport,
   ChunkedTransportProtocolError,
@@ -923,7 +924,7 @@ export class VoiceAssistantWebSocketServer {
       for (const session of this.listTrustedSessions()) {
         session.emitServerMessage({
           type: "plugins.builtin.changed",
-          payload: { plugins: this.pluginRuntime!.builtin!.list() },
+          payload: builtinPluginWireState(this.pluginRuntime!.builtin!.list()),
         });
       }
       this.broadcastCapabilitiesUpdate();
@@ -2531,6 +2532,7 @@ export class VoiceAssistantWebSocketServer {
         backgroundAgents: true,
         // COMPAT(providersSnapshot): keep optional until all clients rely on snapshot flow.
         providersSnapshot: true,
+        usageSources: true,
         // COMPAT(checkoutForgeSetAutoMerge): added in v0.1.106, remove old
         // checkoutGithubSetAutoMerge fallback after 2026-12-28.
         checkoutForgeSetAutoMerge: true,
@@ -2574,6 +2576,7 @@ export class VoiceAssistantWebSocketServer {
         workspaceArchiveUndo: true,
         // COMPAT(workspaceFileEditing): added in v0.2.0, remove after 2027-01-18 once daemon floor >= v0.2.0.
         workspaceFileEditing: true,
+        fileByteWrites: true,
         // COMPAT(providerUsageList): added in v0.1.98, drop the gate when daemon floor >= v0.1.98.
         providerUsageList: true,
         // COMPAT(agentDetach): added in v0.1.98, remove gate after 2026-12-19 once daemon floor >= v0.1.98.

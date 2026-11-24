@@ -3,9 +3,12 @@ import type {
   ProviderCatalog,
   ProviderCommand,
   ProviderConfigState,
+  ProviderMode,
   ProviderNotice,
+  ProviderPersistence,
   ProviderRegistration,
   ProviderTimelineItem,
+  ProviderToolCallDetail,
 } from "./provider.js";
 import { createAcpProviderConnection } from "./acp-internal/connection.js";
 
@@ -42,6 +45,20 @@ export interface AcpStream {
 export type AcpConnector = () => AcpStream | Promise<AcpStream>;
 
 export interface AcpOptions {
+  deferTurnOnRunningTools?: {
+    settleDelayMs?: number;
+    quietLimitMs?: number;
+    keepsTurnOpen?: (toolCall: AcpToolCallSnapshot) => boolean;
+  };
+
+  workspaceOnlyCatalog?: boolean;
+  /** Publish session readiness after this much quiet time following replayed history. */
+  loadReplayQuietPeriodMs?: number;
+  autoAcceptMode?: {
+    mode: Omit<ProviderMode, "isUnattended">;
+    nativeMode: string;
+    default?: boolean;
+  };
   protocol?: "auto" | "v1";
   startupTimeoutMs?: number;
   waitForInitialCommands?: boolean;
@@ -57,12 +74,18 @@ export interface AcpConfigAccess {
   set(id: string, value: JsonValue): Promise<void>;
 }
 
+export type AcpRequest = (method: string, params: JsonValue) => Promise<JsonValue>;
+
 export interface AcpDiscoveryContext extends AcpContext {
   config: AcpConfigAccess;
+  request: AcpRequest;
 }
 
 export interface AcpConfigureContext extends AcpContext {
+  catalog(): ProviderCatalog;
+  apply(change: AcpConfigChange): Promise<void>;
   config: AcpConfigAccess;
+  request: AcpRequest;
 }
 
 export type AcpConfigChange =
@@ -80,6 +103,7 @@ export interface AcpToolCallSnapshot {
   input: JsonValue;
   output: JsonValue;
   locations: readonly string[];
+  detail?: ProviderToolCallDetail;
 }
 
 export type AcpVendorUpdate =
@@ -89,16 +113,30 @@ export type AcpVendorUpdate =
   | { type: "notice"; notice: ProviderNotice };
 
 export interface AcpTransformer {
+  /** Decode an older saved session and supply extension metadata for session/new or session/load. */
+  sessionOpen?(context: {
+    persistence?: ProviderPersistence;
+    systemPrompt?: string;
+    agentMetadata: JsonValue;
+  }): { sessionId?: string; metadata?: Readonly<Record<string, JsonValue>> };
+
   discover?(
     catalog: ProviderCatalog,
     context: AcpDiscoveryContext,
   ): Promise<ProviderCatalog> | ProviderCatalog;
   configure?(change: AcpConfigChange, context: AcpConfigureContext): Promise<"handled" | "pass">;
+  /** Rewrites every session config snapshot before JAgentDesk sees it. */
+  config?(state: ProviderConfigState, context: AcpContext): ProviderConfigState;
+  /** Rewrites each advertised ACP slash command before JAgentDesk sees it. */
+  command?(command: ProviderCommand, context: AcpContext): ProviderCommand;
   notification?(
     notification: { method: string; params: JsonValue },
     context: AcpContext,
   ): AcpVendorUpdate | readonly AcpVendorUpdate[] | null;
-  toolCall?(toolCall: AcpToolCallSnapshot, context: AcpContext): AcpToolCallSnapshot;
+  toolCall?(
+    toolCall: AcpToolCallSnapshot,
+    context: AcpContext & { mcpServerNames?: readonly string[] },
+  ): AcpToolCallSnapshot;
 }
 
 export function runAcpProvider(options: RunAcpProviderOptions): ProviderRegistration {

@@ -1,3 +1,4 @@
+import type { PluginUsageSourceMetadata } from "./plugin-process-protocol.js";
 import { InternalPluginChild } from "./internal-child.js";
 import { evaluateBundle } from "./bundle-evaluator.js";
 import {
@@ -24,7 +25,7 @@ import { validateBeforeRequest, validateBeforeResult } from "./lifecycle/index.j
 import { fork } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import type pino from "pino";
 import {
   PROVIDER_CAPABILITIES,
@@ -92,11 +93,13 @@ interface LoadedPlugin {
   instanceId: string;
   requirements: PluginRequirements | undefined;
   clientBundle: string;
+  clientBundleHash: string;
   methods: ReadonlySet<string>;
   subscriptionMethods: ReadonlySet<string>;
   subscriptions: Map<string, BufferedPluginSubscription>;
   hooks: string[];
   providers: readonly PluginProviderMetadata[];
+  usageSources: readonly PluginUsageSourceMetadata[];
   child: PluginChild | null;
   outputCapture: PluginOutputCapture | null;
   pending: Map<string, PendingInvocation>;
@@ -384,9 +387,22 @@ export class PluginRuntime {
     return true;
   }
 
-  catalog(): Array<{ id: string; clientBundle: string; requirements?: PluginRequirements }> {
+  catalog(cachedClientBundles: readonly { id: string; clientBundleHash: string }[] = []): Array<{
+    id: string;
+    clientBundle: string;
+    clientBundleHash?: string;
+    requirements?: PluginRequirements;
+  }> {
+    const cached = new Map(
+      cachedClientBundles.map((bundle) => [bundle.id, bundle.clientBundleHash]),
+    );
     return [...this.plugins.values()]
-      .map(({ id, clientBundle, requirements }) => ({ id, clientBundle, requirements }))
+      .map(({ id, clientBundle, clientBundleHash, requirements }) => ({
+        id,
+        requirements,
+        clientBundleHash,
+        clientBundle: cached.get(id) === clientBundleHash ? "" : clientBundle,
+      }))
       .sort((left, right) => left.id.localeCompare(right.id));
   }
 
@@ -472,6 +488,31 @@ export class PluginRuntime {
         { signal: context.signal, report: (report) => context.report(report) },
       ),
     );
+  }
+
+  getUsageSourceRegistrations(pluginId: string): readonly PluginUsageSourceMetadata[] {
+    return this.plugins.get(pluginId)?.usageSources ?? [];
+  }
+
+  fetchUsage(pluginId: string, sourceId: string, input: unknown): Promise<unknown> {
+    const loaded = this.plugins.get(pluginId);
+    if (!loaded) throw new Error(`Plugin is not available: ${pluginId}`);
+    return this.request(loaded, { type: "usage.fetch", requestId: randomUUID(), sourceId, input });
+  }
+
+  discoverUsage(
+    pluginId: string,
+    sourceId: string,
+    scope?: import("@jagentdesk/plugin/server/usage").UsageScope,
+  ): Promise<unknown> {
+    const loaded = this.plugins.get(pluginId);
+    if (!loaded) throw new Error(`Plugin is not available: ${pluginId}`);
+    return this.request(loaded, {
+      type: "usage.discover",
+      requestId: randomUUID(),
+      sourceId,
+      scope,
+    });
   }
 
   async connectProvider(
@@ -868,12 +909,16 @@ export class PluginRuntime {
         id: pluginId,
         instanceId: randomUUID(),
         clientBundle: bundles.clientBundle ?? "",
+        clientBundleHash: createHash("sha256")
+          .update(bundles.clientBundle ?? "")
+          .digest("hex"),
         requirements: manifest.requirements,
         methods: new Set(),
         subscriptionMethods: new Set(),
         subscriptions: new Map(),
         hooks: [],
         providers: [],
+        usageSources: [],
         child: null,
         outputCapture: null,
         pending: new Map(),
@@ -925,7 +970,6 @@ export class PluginRuntime {
     child: PluginChild;
     serverBundle: string;
   }): Promise<LoadedPlugin> {
-    void directory;
     const { manifest } = bundles;
     const sessionHost = this.sessionHost;
     if (!sessionHost) throw new Error("Plugin JAgentDesk session host is not attached");
@@ -1004,6 +1048,7 @@ export class PluginRuntime {
           void send(child, {
             type: "initialize",
             pluginId,
+            pluginDirectory: directory,
             appVersion: this.daemonVersion,
             bundle: serverBundle,
             settingsDirectory: this.dependencies.settingsDirectory
@@ -1022,12 +1067,16 @@ export class PluginRuntime {
       id: pluginId,
       instanceId: randomUUID(),
       clientBundle: bundles.clientBundle ?? "",
+      clientBundleHash: createHash("sha256")
+        .update(bundles.clientBundle ?? "")
+        .digest("hex"),
       requirements: manifest.requirements,
       methods: new Set(ready.methods),
       subscriptionMethods: new Set(ready.subscriptions ?? []),
       subscriptions: new Map(),
       hooks: ready.hooks ?? [],
       providers: ready.providers ?? [],
+      usageSources: ready.usageSources ?? [],
       child,
       outputCapture,
       pending,

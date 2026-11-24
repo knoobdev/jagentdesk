@@ -47,6 +47,7 @@ export interface AppSettings {
   theme: ThemeName | "auto" | typeof PLUGIN_THEME_PREFERENCE;
   /** The selected plugin-contributed theme when `theme` is "plugin". */
   pluginThemeId: string | null;
+  filePanelAssociations: Record<string, string>;
   defaultThemeVersion: number;
   language: AppLanguage;
   sendBehavior: SendBehavior;
@@ -59,6 +60,7 @@ export interface AppSettings {
   codeFontSize: number; // clamped px, default 12
   syntaxTheme: SyntaxThemeId; // default "one"
   workspaceTitleSource: WorkspaceTitleSource;
+  sidebarPluginRowBadgeItems: Record<string, boolean>;
   autoExpandReasoning: boolean;
   toolCallDetailLevel: ToolCallDetailLevel;
   chatOutlineEnabled: boolean;
@@ -74,6 +76,7 @@ type StoredAppSettings = Partial<AppSettings> & { compactToolCalls?: unknown };
 export const DEFAULT_CLIENT_SETTINGS: AppSettings = {
   theme: DEFAULT_THEME,
   pluginThemeId: null,
+  filePanelAssociations: {},
   defaultThemeVersion: DEFAULT_THEME_VERSION,
   language: "system",
   sendBehavior: "steer",
@@ -86,6 +89,7 @@ export const DEFAULT_CLIENT_SETTINGS: AppSettings = {
   codeFontSize: DEFAULT_CODE_FONT_SIZE,
   syntaxTheme: "one",
   workspaceTitleSource: "title",
+  sidebarPluginRowBadgeItems: {},
   autoExpandReasoning: false,
   toolCallDetailLevel: "detailed",
   chatOutlineEnabled: true,
@@ -233,6 +237,17 @@ function pickThemeSettings(stored: StoredAppSettings, result: Partial<AppSetting
   if (typeof stored.theme === "string" && VALID_THEMES.has(stored.theme)) {
     result.theme = stored.theme;
   }
+  if (
+    stored.filePanelAssociations &&
+    typeof stored.filePanelAssociations === "object" &&
+    !Array.isArray(stored.filePanelAssociations)
+  ) {
+    result.filePanelAssociations = Object.fromEntries(
+      Object.entries(stored.filePanelAssociations).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
+    );
+  }
   if (typeof stored.pluginThemeId === "string" || stored.pluginThemeId === null) {
     result.pluginThemeId = stored.pluginThemeId;
   }
@@ -292,6 +307,17 @@ function pickAppSettings(stored: StoredAppSettings): Partial<AppSettings> {
   }
   if (typeof stored.autoExpandReasoning === "boolean") {
     result.autoExpandReasoning = stored.autoExpandReasoning;
+  }
+  if (
+    stored.sidebarPluginRowBadgeItems &&
+    typeof stored.sidebarPluginRowBadgeItems === "object" &&
+    !Array.isArray(stored.sidebarPluginRowBadgeItems)
+  ) {
+    result.sidebarPluginRowBadgeItems = Object.fromEntries(
+      Object.entries(stored.sidebarPluginRowBadgeItems).filter(
+        (entry): entry is [string, boolean] => typeof entry[1] === "boolean",
+      ),
+    );
   }
   const toolCallDetailLevel = parseToolCallDetailLevel(stored);
   if (toolCallDetailLevel !== null) {

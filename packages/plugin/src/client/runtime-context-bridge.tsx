@@ -1,3 +1,4 @@
+import { PluginTranslationProvider, usePluginTranslationRuntime } from "./translations.js";
 import { useCallback, type ReactNode } from "react";
 import { PluginClientStateProvider, usePluginClientStateSource } from "./client-state.js";
 import { JAgentDeskApiProvider, useJAgentDeskContextValue } from "./jagentdesk-context.js";
@@ -7,6 +8,7 @@ export type PluginRuntimeContextBridge = (children: ReactNode) => ReactNode;
 
 /** Rebuilds plugin runtime contexts inside React Native portal hosts. */
 export function usePluginRuntimeContextBridge(): PluginRuntimeContextBridge {
+  const translations = usePluginTranslationRuntime();
   const jagentdesk = useJAgentDeskContextValue();
   const rpc = usePluginRpcContextValue();
   const state = usePluginClientStateSource();
@@ -25,11 +27,11 @@ export function usePluginRuntimeContextBridge(): PluginRuntimeContextBridge {
       return (
         <JAgentDeskApiProvider jagentdesk={jagentdesk}>
           <PluginRpcProvider invoke={rpc.invoke} subscribe={rpc.subscribe}>
-            {content}
+            <PluginTranslationProvider runtime={translations}>{content}</PluginTranslationProvider>
           </PluginRpcProvider>
         </JAgentDeskApiProvider>
       );
     },
-    [jagentdesk, rpc, state],
+    [jagentdesk, rpc, state, translations],
   );
 }

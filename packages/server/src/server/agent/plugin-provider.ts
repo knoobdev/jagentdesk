@@ -19,6 +19,7 @@ import {
   type ProviderLaunch,
   requireProviderCapabilities,
   type ProviderCapability,
+  type ProviderCommand,
   type ProviderConfigChanges,
   type ProviderConfigState,
   type ProviderConnection,
@@ -134,6 +135,7 @@ function describeVersion(inspection: ProviderInstallationInspection): string {
 
 class ProviderRuntime {
   private connection: ProviderConnection | null = null;
+  connectedLaunch: ProviderLaunch | undefined;
   private connecting: Promise<ProviderConnection> | null = null;
   private closed = false;
   private generation = 0;
@@ -159,6 +161,12 @@ class ProviderRuntime {
     private readonly registration: ProviderRegistration,
     private readonly runtimeSettings?: ProviderRuntimeSettings,
   ) {}
+
+  async resolveUsageLaunch(): Promise<ProviderLaunch | undefined> {
+    const launch = await this.resolveEffectiveLaunch();
+    if (!launch?.resolved) return undefined;
+    return { command: launch.command, args: launch.args, env: launch.env };
+  }
 
   /** The launch after overrides, and where its executable resolves. */
   private async resolveConfiguredLaunch() {
@@ -447,8 +455,9 @@ class ProviderRuntime {
   }
 
   private async establishConnection(generation: number): Promise<ProviderConnection> {
+    const launch = await this.resolveLaunch();
     const rawConnection = await this.registration.connect({
-      launch: await this.resolveLaunch(),
+      launch,
       versions: [PROVIDER_PROTOCOL_VERSION],
       capabilities: PROVIDER_CAPABILITIES,
     });
@@ -462,6 +471,7 @@ class ProviderRuntime {
       await rawConnection.close().catch(() => undefined);
       throw error;
     }
+    this.connectedLaunch = launch;
     const connection = normalizeConnection(rawConnection);
     const unsubscribe = connection.onEvent((event) => this.accept(event));
     if (this.closed || generation !== this.generation) {
@@ -669,7 +679,7 @@ class ProviderRuntimeSession {
   private closedByProvider = false;
   private closePromise: Promise<void> | null = null;
   config: ProviderConfigState = { models: [], modes: [], thinkingOptions: [], settings: [] };
-  commands: Array<{ name: string; description: string; argumentHint?: string }> = [];
+  commands: ProviderCommand[] = [];
   persistence: ProviderPersistence | null = null;
 
   constructor(
@@ -724,6 +734,7 @@ class ProviderRuntimeSession {
   }
 
   async configure(changes: ProviderConfigChanges): Promise<void> {
+    if (this.terminal) throw new StaleProviderSessionError(this.id);
     const input: Extract<ProviderInput, { type: "session.configure" }> = {
       type: "session.configure",
       requestId: randomUUID(),
@@ -984,6 +995,7 @@ function createPluginProviderDefinition(
     description: registration.description ?? `Plugin provider ${registration.label}`,
     iconSvg: registration.icon,
     docsUrl: registration.docsUrl,
+    requiresConfiguration: registration.requiresConfiguration,
     defaultModeId: null,
     modes: [],
     supportsExactMcpPreapproval: true,
@@ -1026,6 +1038,10 @@ class PluginAgentClient implements AgentClient {
         update: installation.update ? (context) => this.runtime.update(context) : undefined,
       };
     this.runtime.onSessionOpened((session, opened) => this.acceptChild(session, opened));
+  }
+
+  resolveUsageLaunch() {
+    return this.runtime.resolveUsageLaunch();
   }
 
   get capabilities(): AgentCapabilityFlags {
@@ -1205,6 +1221,12 @@ class PluginAgentClient implements AgentClient {
         });
       },
       bind,
+      this.runtime.connectedLaunch
+        ? {
+            ...this.runtime.connectedLaunch,
+            env: { ...this.runtime.connectedLaunch.env, ...config.env },
+          }
+        : undefined,
     );
     bind(bridge);
     return session;
@@ -1292,10 +1314,22 @@ class PluginAgentSession implements AgentSession {
       state: ProviderConfigState,
     ) => Promise<ProviderRuntimeSession>,
     private readonly onBind: (bridge: ProviderRuntimeSession) => void,
+    private readonly usageLaunch: ProviderLaunch | undefined,
   ) {
     this.subagentIdsBySession.set(bridge.id, null);
     for (const event of bridge.history) this.accept(event, false);
     this.unsubscribe = bridge.onEvent((event) => this.accept(event, true));
+  }
+
+  usageSession() {
+    if (this.closed || !this.usageLaunch) return null;
+    return {
+      provider: this.provider,
+      model: this.bridge.config.model,
+      env: this.usageLaunch.env,
+      launch: this.usageLaunch,
+      sessionKey: this.bridge.id,
+    };
   }
 
   get id(): string {
@@ -1360,6 +1394,9 @@ class PluginAgentSession implements AgentSession {
     prompt: AgentPromptInput,
     options: SteerActiveTurnOptions,
   ): Promise<SteerResult> {
+    if (!this.bridge.negotiatedCapabilities.includes("prompt.steer")) {
+      return { status: "unavailable" };
+    }
     this.assertReplayComplete();
     const result = await this.bridge.prompt({
       clientMessageId: options.clientMessageId ?? randomUUID(),
@@ -1454,7 +1491,7 @@ class PluginAgentSession implements AgentSession {
     return this.bridge.commands.map((command) => ({
       ...command,
       argumentHint: command.argumentHint ?? "",
-      kind: "command",
+      kind: command.kind ?? "command",
     }));
   }
 
@@ -2032,6 +2069,10 @@ function decodePersistence(handle: AgentPersistenceHandle): ProviderPersistence 
   const fromMetadata = handle.metadata?.pluginProviderPersistence;
   if (fromMetadata !== undefined) {
     return ProviderPersistenceSchema.parse(fromMetadata);
+  }
+  // COMPAT(gooseProvider): added in v0.17.0, remove after 2027-05-20 once legacy handles have migrated.
+  if (handle.provider === "goose" && !handle.sessionId.startsWith("plugin:")) {
+    return { version: 1, data: { sessionId: handle.sessionId } };
   }
   return decodePersistenceId(handle.sessionId);
 }

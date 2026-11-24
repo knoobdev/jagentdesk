@@ -4,7 +4,6 @@ import { withUnistyles } from "react-native-unistyles";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { PluginAttachmentItem, PluginAttachmentSourceContribution } from "@jagentdesk/plugin";
 import { searchPluginAttachments } from "@jagentdesk/plugin/client/host";
-import type { LucideIcon } from "lucide-react-native";
 import type { UserComposerAttachment } from "@/attachments/types";
 import type { AttachmentMenuItem } from "@/composer/input/input";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
@@ -19,7 +18,13 @@ const SEARCH_STALE_TIME_MS = 30_000;
 const EMPTY_ATTACHMENT_ITEMS: PluginAttachmentItem[] = [];
 const iconColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 
-function SourceIcon({ Icon, color = "" }: { Icon: LucideIcon; color?: string }) {
+function SourceIcon({
+  Icon,
+  color = "",
+}: {
+  Icon: ReturnType<typeof resolvePluginIcon>;
+  color?: string;
+}) {
   return <Icon size={ICON_SIZE.md} color={color} />;
 }
 

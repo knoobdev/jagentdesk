@@ -1,3 +1,4 @@
+import { findSvgIconProblem } from "@jagentdesk/plugin";
 import type {
   PluginButton,
   PluginButtonBehavior,
@@ -35,7 +36,15 @@ function isComponent(value: unknown): boolean {
 
 function validateIcon(icon: PluginButtonIcon, validation: ButtonValidation): void {
   if (typeof icon === "string") validation.validateIconName(icon);
-  else if (!isComponent(icon))
+  else if (
+    typeof icon === "object" &&
+    icon !== null &&
+    "svg" in icon &&
+    typeof icon.svg === "string"
+  ) {
+    const problem = findSvgIconProblem(icon.svg);
+    if (problem) throw new Error(`Plugin button has an invalid icon: ${problem}`);
+  } else if (!isComponent(icon))
     throw new Error("Plugin button icon must be a Lucide name or component");
 }
 

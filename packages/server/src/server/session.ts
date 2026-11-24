@@ -6,6 +6,8 @@ import {
   SpeechModelsSession,
   type SpeechModelsSessionOptions,
 } from "./session/speech/speech-models-session.js";
+import { UsageSession, type UsageSessionOptions } from "./session/usage/usage-session.js";
+import { builtinPluginWireState } from "@jagentdesk/protocol/builtin-plugins";
 import { builtinPluginForRpc } from "./plugins/builtin/gates.js";
 import { BuiltinPluginError, type BuiltinPluginState } from "./plugins/builtin/state.js";
 import { SessionDelivery, type OwnedSubscription } from "./session/owned-subscriptions/index.js";
@@ -661,6 +663,9 @@ export interface SessionOptions {
   getWebSocketRuntimeMetrics?: () => DaemonWebSocketRuntimeDiagnosticSnapshot | null;
   pluginRuntime?: {
     builtin?: BuiltinPluginState;
+    refreshBuiltinAvailability?(): Promise<void>;
+    listUsageReports?: NonNullable<UsageSessionOptions["runtime"]>["listUsageReports"];
+    listLegacyUsage?: NonNullable<UsageSessionOptions["runtime"]>["listLegacyUsage"];
     wait: import("./plugins/lifecycle/index.js").PluginLifecycle["wait"];
     before: import("./plugins/lifecycle/index.js").PluginLifecycle["before"];
     emit?: import("./plugins/lifecycle/index.js").PluginLifecycle["emit"];
@@ -697,7 +702,7 @@ export interface SessionOptions {
     removePlugin(pluginId: string): Promise<void>;
     subscribe(listener: (pluginId: string) => void): () => void;
     subscribeSettings?(listener: (pluginId: string, settingsId: string) => void): () => void;
-    catalog(): Array<{ id: string; clientBundle: string }>;
+    catalog: import("./plugins/index.js").PluginService["catalog"];
     invokePluginRpc(pluginId: string, method: string, input: unknown): Promise<unknown>;
     subscribePluginRpc(
       pluginId: string,
@@ -1000,6 +1005,7 @@ export class Session {
   private readonly physicalDeviceSession: PhysicalDeviceSession | null;
   private readonly proxyService = getSharedProxyService();
   private readonly proxySubscriptionIds = new Set<string>();
+  private readonly usageSession: UsageSession;
   private readonly providerCatalogSession: ProviderCatalogSession;
   private readonly workspaceFilesSession: WorkspaceFilesSession;
   private readonly agentConfigSession: AgentConfigSession;
@@ -1254,6 +1260,11 @@ export class Session {
         })
       : null;
     this.figmaSession = this.createFigmaSession(options.figmaService);
+    this.usageSession = new UsageSession({
+      emit: (message) => this.emit(message),
+      runtime: createPluginUsageRuntime(options.pluginRuntime),
+      logger: this.sessionLogger,
+    });
     this.providerCatalogSession = new ProviderCatalogSession({
       host: {
         emit: (msg) => this.emit(msg),
@@ -2758,14 +2769,15 @@ export class Session {
 
   private dispatchBuiltinPluginMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     if (msg.type === "plugins.builtin.list.request") {
-      return Promise.resolve().then(() => {
+      return Promise.resolve().then(async () => {
         if (!this.pluginRuntime?.builtin)
           throw new Error("Built-in plugin registry is unavailable");
+        await this.pluginRuntime.refreshBuiltinAvailability?.();
         return this.emit({
           type: "plugins.builtin.list.response",
           payload: {
             requestId: msg.requestId,
-            plugins: this.pluginRuntime.builtin.list(),
+            ...builtinPluginWireState(this.pluginRuntime.builtin.list()),
             canManage: isSessionRpcAllowed(this.scopes, "plugins.builtin.set.request"),
           },
         });
@@ -2776,7 +2788,7 @@ export class Session {
       return this.pluginRuntime.builtin.set(msg.id, msg.enabled, msg.cascade).then((plugins) => {
         return this.emit({
           type: "plugins.builtin.set.response",
-          payload: { requestId: msg.requestId, plugins },
+          payload: { requestId: msg.requestId, ...builtinPluginWireState(plugins) },
         });
       });
     }
@@ -2847,7 +2859,7 @@ export class Session {
         type: "plugin.catalog.get.response",
         payload: {
           requestId: msg.requestId,
-          plugins: this.pluginRuntime?.catalog() ?? [],
+          plugins: this.pluginRuntime?.catalog(msg.cachedClientBundles) ?? [],
         },
       });
       return undefined;
@@ -3742,6 +3754,8 @@ export class Session {
         return this.providerCatalogSession.handleCheckProviderUpdatesRequest(msg);
       case "provider.installation.update.request":
         return this.providerCatalogSession.handleUpdateProviderRequest(msg);
+      case "usage.list_reports.request":
+        return this.usageSession.handleListReports(msg);
       case "provider.usage.list.request":
         return this.providerCatalogSession.handleProviderUsageListRequest(msg);
       default:
@@ -10516,4 +10530,14 @@ function normalizeCloneRepository(input: {
 
 function isValidGitHubRepoSegment(value: string): boolean {
   return /^[A-Za-z0-9._-]+$/u.test(value);
+}
+
+function createPluginUsageRuntime(
+  runtime: SessionOptions["pluginRuntime"],
+): UsageSessionOptions["runtime"] {
+  if (!runtime?.listUsageReports || !runtime.listLegacyUsage) return undefined;
+  return {
+    listUsageReports: runtime.listUsageReports.bind(runtime),
+    listLegacyUsage: runtime.listLegacyUsage.bind(runtime),
+  };
 }

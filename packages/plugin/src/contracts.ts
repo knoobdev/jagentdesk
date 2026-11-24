@@ -1,3 +1,5 @@
+import type { PluginText } from "./text.js";
+import type { PluginSerializableIcon } from "./icons.js";
 import type { JsonValue } from "@jagentdesk/protocol/agent-types";
 import type { PluginRpcContract } from "./rpc.js";
 
@@ -67,19 +69,19 @@ export interface PluginThemeColors {
   ring: string;
 }
 
-export interface PluginThemeContribution {
+export interface PluginThemeContribution<Text extends PluginText = string> {
   id: string;
-  name: string;
+  name: Text;
   appearance: "light" | "dark";
   colors: PluginThemeColors;
 }
 
-export interface PluginAttachmentSourceContribution {
+export interface PluginAttachmentSourceContribution<Text extends PluginText = string> {
   id: string;
-  title: string;
-  icon: string;
-  pickerTitle: string;
-  searchPlaceholder: string;
+  title: Text;
+  icon: PluginSerializableIcon;
+  pickerTitle: Text;
+  searchPlaceholder: Text;
   search: PluginRpcContract;
 }
 

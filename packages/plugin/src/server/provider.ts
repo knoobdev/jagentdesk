@@ -26,6 +26,8 @@ export const PROVIDER_CAPABILITIES = [
 export type ProviderCapability = (typeof PROVIDER_CAPABILITIES)[number];
 
 export interface ProviderRegistration {
+  /** Activate only while agents.providers contains this provider ID, independently of enabled. */
+  requiresConfiguration?: boolean;
   /** Equal keys share discovery within this provider. Include effective configuration and execution environment. */
   getCatalogCacheKey?(options: ProviderCatalogOptions): Promise<string | undefined>;
   /** Default executable and arguments; the daemon resolves overrides before status/connect. */
@@ -444,6 +446,7 @@ export interface ProviderCommand {
   name: string;
   description: string;
   argumentHint?: string;
+  kind?: "command" | "skill";
 }
 
 export interface ProviderError {
@@ -1130,7 +1133,12 @@ const noticeSchema = z
   })
   .strip();
 const commandSchema = z
-  .object({ name: idSchema, description: z.string(), argumentHint: z.string().optional() })
+  .object({
+    name: idSchema,
+    description: z.string(),
+    argumentHint: z.string().optional(),
+    kind: z.enum(["command", "skill"]).optional(),
+  })
   .strip();
 const usageSchema = z
   .object({

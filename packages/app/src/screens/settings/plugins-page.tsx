@@ -1,6 +1,7 @@
 import { BuiltinPluginsSection } from "@/plugins/builtin/settings-section";
 import { formatPluginInstallation } from "@jagentdesk/protocol/plugin-source-reference";
-import { buildPluginSettingsRoute } from "@/plugins/settings/routes";
+import { PluginSettingsButton } from "@/plugins/settings";
+import { pluginDisplayName } from "@/plugins/plugin-list";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import { Text, View } from "react-native";
@@ -29,8 +30,7 @@ import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-
 import { SettingsSection } from "@/screens/settings/settings-section";
 import { resolvePluginPageState } from "@/screens/settings/plugins-page-state";
 import { openPluginInstallForm } from "@/screens/settings/plugin-install-form-model";
-import { pluginRegistry, useInstalledPlugin, useInstalledPlugins } from "@/plugins/registry";
-import { resolvePluginIcon } from "@/plugins/icons";
+import { pluginRegistry, useInstalledPlugins } from "@/plugins/registry";
 import { settingsStyles } from "@/styles/settings";
 import type { Theme } from "@/styles/theme";
 import { confirmDialog } from "@/utils/confirm-dialog";
@@ -53,27 +53,6 @@ function pluginRowAction(action: string | undefined): PluginRowAction | undefine
     return action;
   }
   return undefined;
-}
-
-function SettingsScreenButton({
-  serverId,
-  pluginId,
-  screen,
-}: {
-  serverId: string;
-  pluginId: string;
-  screen: { id: string; title: string; icon: string };
-}) {
-  const router = useRouter();
-  const Icon = useMemo(() => resolvePluginIcon(screen.icon), [screen.icon]);
-  const open = useCallback(() => {
-    router.push(buildPluginSettingsRoute(serverId, pluginId, screen.id));
-  }, [pluginId, router, screen.id, serverId]);
-  return (
-    <Button variant="outline" size="sm" leftIcon={Icon} onPress={open}>
-      {screen.title}
-    </Button>
-  );
 }
 
 function PluginActionsMenu({
@@ -158,11 +137,6 @@ function PluginRow({
   supportsLogs: boolean;
 }) {
   const { t } = useTranslation();
-  const installed = useInstalledPlugin(serverId, plugin.id);
-  const settingsScreens = useMemo(
-    () => (plugin.enabled ? (installed?.settingsScreens ?? []) : []),
-    [installed?.settingsScreens, plugin.enabled],
-  );
   const toggle = useCallback(
     (enabled: boolean) => onAction(enabled ? "enable" : "disable", plugin),
     [onAction, plugin],
@@ -185,28 +159,16 @@ function PluginRow({
           <Text style={styles.pluginDescription}>{plugin.description}</Text>
         ) : null}
         <Text style={styles.pluginSource}>{source}</Text>
-        {settingsScreens.length > 0 ? (
-          <View style={styles.settingsScreens}>
-            {settingsScreens.map((screen) => (
-              <SettingsScreenButton
-                key={screen.id}
-                serverId={serverId}
-                pluginId={plugin.id}
-                screen={screen}
-              />
-            ))}
-          </View>
-        ) : null}
       </View>
     ),
-    [plugin.description, plugin.id, serverId, settingsScreens, source],
+    [plugin.description, source],
   );
   const toggleLabel = `${plugin.id}: ${t(
     plugin.enabled ? "settings.plugins.actions.disable" : "settings.plugins.actions.enable",
   )}`;
   return (
     <SettingsRow
-      label={plugin.id}
+      label={pluginDisplayName(plugin)}
       labelAccessory={statusBadge}
       hint={hint}
       error={clientError ?? plugin.error}
@@ -219,6 +181,7 @@ function PluginRow({
           disabled={pending}
           accessibilityLabel={toggleLabel}
         />
+        {plugin.enabled ? <PluginSettingsButton serverId={serverId} pluginId={plugin.id} /> : null}
         <PluginActionsMenu
           plugin={plugin}
           pending={pending}

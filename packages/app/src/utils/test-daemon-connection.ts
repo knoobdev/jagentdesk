@@ -1,3 +1,4 @@
+import { createHostPluginClientBundleStore } from "@/plugins/client-bundles";
 import { createHostLogger } from "@/runtime/host-logger";
 import {
   nativeWebSocketFactory,
@@ -54,7 +55,11 @@ const defaultDaemonConnectionDependencies: DaemonConnectionDependencies<DaemonCl
   resolveAppVersion,
   createLocalTransportFactory: createDesktopLocalDaemonTransportFactory,
   buildLocalTransportUrl: buildLocalDaemonTransportUrl,
-  createClient: (config) => new DaemonClient(config),
+  createClient: (config) =>
+    new DaemonClient({
+      ...config,
+      createPluginClientBundleStore: createHostPluginClientBundleStore,
+    }),
 };
 
 function normalizeNonEmptyString(value: unknown): string | null {

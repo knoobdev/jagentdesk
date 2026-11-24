@@ -1,4 +1,6 @@
 import { BotsSidebar } from "@/bots/sidebar";
+import { isNative as platformIsNative } from "@/constants/platform";
+import { PluginSidebarPanel } from "@/plugins/sidebar-screen-items";
 import { BuiltinPluginGate } from "@/plugins/builtin/gate";
 import { router, usePathname, type Href } from "expo-router";
 import {
@@ -37,13 +39,14 @@ import {
 } from "react";
 import {
   Pressable,
+  ScrollView,
   StyleSheet as RNStyleSheet,
   Text,
   useWindowDimensions,
   View,
   type PressableStateCallbackType,
 } from "react-native";
-import { Gesture } from "react-native-gesture-handler";
+import { Gesture, ScrollView as GHScrollView } from "react-native-gesture-handler";
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
@@ -116,10 +119,18 @@ function parseArgoCdRoute(
 
 /** Sections whose route owns the desktop left column instead of the workspace list. */
 type SectionRoute =
+  | { section: "plugin"; serverId: string; pluginId: string }
   | { section: "servers" | "jira" | "figma" | "bots"; serverId: string }
   | { section: "argocd"; serverId: string; instanceId: string | null };
 
 function resolveSectionRoute(pathname: string): SectionRoute | null {
+  const plugin = /^\/h\/([^/]+)\/plugin\/([^/]+)/.exec(pathname);
+  if (plugin)
+    return {
+      section: "plugin",
+      serverId: decodeURIComponent(plugin[1]),
+      pluginId: decodeURIComponent(plugin[2]),
+    };
   const argoCd = parseArgoCdRoute(pathname);
   if (argoCd) return { section: "argocd", ...argoCd };
   const match = pathname.match(/\/h\/([^/]+)\/(servers|jira|figma|bots)(?:$|[/?])/);
@@ -156,6 +167,8 @@ function resolveSidebarNavBody(
         <BotsSidebar serverId={sectionRoute.serverId} />
       </BuiltinPluginGate>
     );
+  if (sectionRoute?.section === "plugin")
+    return <PluginSidebarPanel serverId={sectionRoute.serverId} pluginId={sectionRoute.pluginId} />;
   // A section that owns the left column (spec 25.13.1 Servers, 29.3 Jira, 30.3 Argo CD).
   if (sectionRoute?.section === "servers")
     return (
@@ -1012,6 +1025,43 @@ function MobileSidebar({
       />
     );
 
+  const mobileNavRows = (
+    <View style={styles.sidebarHeaderGroup}>
+      {isClickUp ? null : (
+        <SidebarNewWorkspaceHeaderRow
+          label={labels.newWorkspace}
+          testID="sidebar-global-new-workspace"
+          variant="compact"
+          shortcutKeys={newWorkspaceKeys}
+          onBeforeNavigate={closeSidebar}
+        />
+      )}
+      <MobileNavGrid onBeforeNavigate={closeSidebar} parentGestureRef={closeGestureRef} />
+      <PluginSidebarItems onBeforeNavigate={closeSidebar} />
+    </View>
+  );
+
+  const mobileNavigation = platformIsNative ? (
+    <GHScrollView
+      simultaneousHandlers={closeGestureRef}
+      style={styles.mobileNavScroll}
+      showsVerticalScrollIndicator={false}
+      alwaysBounceVertical={false}
+      testID="sidebar-nav-scroll"
+    >
+      {mobileNavRows}
+    </GHScrollView>
+  ) : (
+    <ScrollView
+      style={styles.mobileNavScroll}
+      showsVerticalScrollIndicator={false}
+      alwaysBounceVertical={false}
+      testID="sidebar-nav-scroll"
+    >
+      {mobileNavRows}
+    </ScrollView>
+  );
+
   return (
     <MobilePanelOverlay
       panel="agent-list"
@@ -1023,21 +1073,7 @@ function MobileSidebar({
         {isClickUp ? (
           <ClickUpSidebarHeader onBeforeNavigate={closeSidebar} reserveCloseButton />
         ) : null}
-        {clusterRoute || databaseRoute ? null : (
-          <View style={styles.sidebarHeaderGroup}>
-            {isClickUp ? null : (
-              <SidebarNewWorkspaceHeaderRow
-                label={labels.newWorkspace}
-                testID="sidebar-global-new-workspace"
-                variant="compact"
-                shortcutKeys={newWorkspaceKeys}
-                onBeforeNavigate={closeSidebar}
-              />
-            )}
-            <MobileNavGrid onBeforeNavigate={closeSidebar} parentGestureRef={closeGestureRef} />
-            <PluginSidebarItems onBeforeNavigate={closeSidebar} />
-          </View>
-        )}
+        {clusterRoute || databaseRoute ? null : mobileNavigation}
         <WindowChromeSafeArea placement="inline" style={styles.mobileCloseButtonRow}>
           <Pressable
             style={styles.mobileCloseButton}
@@ -1517,6 +1553,7 @@ const staticStyles = RNStyleSheet.create({
 });
 
 const styles = StyleSheet.create((theme) => ({
+  mobileNavScroll: { flexGrow: 0, flexShrink: 1, maxHeight: "50%" },
   sidebarHeaderGroup: {
     paddingTop: theme.spacing[2],
     gap: 2,

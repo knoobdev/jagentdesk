@@ -121,10 +121,8 @@ interface RuntimePlaybackState {
 }
 
 interface CueState {
-  active: boolean;
-  token: number;
+  controller: AbortController | null;
   timeout: ReturnType<typeof setTimeout> | null;
-  playing: boolean;
 }
 
 const INITIAL_SNAPSHOT: VoiceRuntimeSnapshot = {
@@ -213,10 +211,8 @@ export function createVoiceRuntime(deps: VoiceRuntimeDeps): VoiceRuntime {
     generation: 0,
   };
   const cue: CueState = {
-    active: false,
-    token: 0,
+    controller: null,
     timeout: null,
-    playing: false,
   };
   const cuePcm16 = Uint8Array.from(Buffer.from(THINKING_TONE_NATIVE_PCM_BASE64, "base64"));
   const cueSource = {
@@ -445,17 +441,11 @@ export function createVoiceRuntime(deps: VoiceRuntimeDeps): VoiceRuntime {
   }
 
   function stopCue(): void {
-    const hadActive = cue.active || cue.timeout !== null || cue.playing;
-    cue.active = false;
-    cue.token += 1;
+    cue.controller?.abort();
+    cue.controller = null;
     if (cue.timeout) {
       clearTimeout(cue.timeout);
       cue.timeout = null;
-    }
-    cue.playing = false;
-    if (hadActive) {
-      deps.engine.stop();
-      deps.engine.clearQueue();
     }
   }
 
@@ -470,29 +460,26 @@ export function createVoiceRuntime(deps: VoiceRuntimeDeps): VoiceRuntime {
       stopCue();
       return;
     }
-    if (cue.active) {
+    if (cue.controller) {
       return;
     }
-    cue.active = true;
-    cue.token += 1;
-    const token = cue.token;
+    const controller = new AbortController();
+    cue.controller = controller;
 
     const playNext = () => {
-      if (!cue.active || cue.token !== token) {
+      if (controller.signal.aborted) {
         return;
       }
-      cue.playing = true;
       void deps.engine
-        .play(cueSource)
+        .play(cueSource, controller.signal)
         .catch((error) => {
-          if (cue.token !== token) {
+          if (controller.signal.aborted) {
             return;
           }
           console.warn(`[VoiceRuntime#${instanceId}] Cue playback failed:`, error);
         })
         .finally(() => {
-          cue.playing = false;
-          if (!cue.active || cue.token !== token) {
+          if (controller.signal.aborted) {
             return;
           }
           cue.timeout = setTimeout(
@@ -923,10 +910,9 @@ export function createVoiceRuntime(deps: VoiceRuntimeDeps): VoiceRuntime {
       if (isSpeaking) {
         const shouldInterruptPlayback =
           state.snapshot.phase === "playing" || playback.groups.size > 0;
-        const hadCue = cue.active || cue.timeout !== null || cue.playing;
         resetPlaybackState();
         stopCue();
-        if (shouldInterruptPlayback && !hadCue) {
+        if (shouldInterruptPlayback) {
           deps.engine.stop();
           deps.engine.clearQueue();
         }
