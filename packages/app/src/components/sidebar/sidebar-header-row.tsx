@@ -50,10 +50,11 @@ export function SidebarHeaderRow({
   );
 
   const buttonStyle = useCallback(
-    ({ hovered }: PressableStateCallbackType & { hovered?: boolean }) => [
+    ({ hovered, pressed }: PressableStateCallbackType & { hovered?: boolean }) => [
       styles.button,
       variant === "compact" && styles.buttonCompact,
       (Boolean(hovered) || isActive) && styles.buttonHovered,
+      pressed && styles.rowPressed,
     ],
     [isActive, variant],
   );
