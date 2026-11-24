@@ -52,6 +52,7 @@ export interface AcpOptions {
   };
 
   workspaceOnlyCatalog?: boolean;
+  /** Publish session readiness after this much quiet time following replayed history. */
   loadReplayQuietPeriodMs?: number;
   autoAcceptMode?: {
     mode: Omit<ProviderMode, "isUnattended">;
