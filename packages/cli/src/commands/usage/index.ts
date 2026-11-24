@@ -32,7 +32,7 @@ export async function runUsageCommand(
         "--agent cannot be combined with usage inspect. Use usage ls --agent <id> for agent account usage, or usage inspect <report-id> for an exact report.",
     };
   }
-  const client = await connect({ target: options.daemonTarget });
+  const client = await connect({ host: options.host });
   try {
     if (client.getLastServerInfoMessage()?.features?.usageSources !== true) {
       throw { code: "UNSUPPORTED_HOST", message: "Update the host to use usage reports." };

@@ -1,19 +1,12 @@
 import { useCallback } from "react";
-import { useSidebarNavItems } from "@/sidebar-nav/use-sidebar-nav-items";
-
-/**
- * Whether the sidebar footer shows the Usage summary: the same switch as Settings > Sidebar.
- * Window rows pin to the summary only while it is on.
- */
-export function useUsageInSidebar(): {
-  inSidebar: boolean;
-  setInSidebar: (visible: boolean) => void;
-} {
-  const { items, setVisible } = useSidebarNavItems("footer");
-  const inSidebar = items.some((item) => item.key === "usage" && item.visible);
+import { useAppSettings } from "@/hooks/use-settings";
+export function useUsageInSidebar() {
+  const { settings, updateSettings } = useAppSettings();
   const setInSidebar = useCallback(
-    (visible: boolean) => setVisible("usage", visible),
-    [setVisible],
+    (visible: boolean) => {
+      void updateSettings({ usageInSidebar: visible });
+    },
+    [updateSettings],
   );
-  return { inSidebar, setInSidebar };
+  return { inSidebar: settings.usageInSidebar, setInSidebar };
 }

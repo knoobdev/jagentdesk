@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { View } from "react-native";
+import { Pressable, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { DraggableList } from "@/components/draggable-list";
 import type { DraggableRenderItemInfo } from "@/components/draggable-list.types";
@@ -96,10 +96,10 @@ function UsageListCard({
     [dragging, hasFocus, isCompact, isHovered],
   );
   return (
-    <View
+    <Pressable
       style={styles.hoverTarget}
-      onPointerEnter={handlePointerEnter}
-      onPointerLeave={handlePointerLeave}
+      onHoverIn={handlePointerEnter}
+      onHoverOut={handlePointerLeave}
       onFocus={handleFocus}
       onBlur={handleBlur}
     >
@@ -113,7 +113,7 @@ function UsageListCard({
           arrangement={arrangement}
         />
       </View>
-    </View>
+    </Pressable>
   );
 }
 

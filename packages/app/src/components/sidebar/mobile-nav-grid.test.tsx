@@ -26,7 +26,8 @@ interface FixtureItem {
   key: string;
   label: string;
   shortLabel: string;
-  route: string;
+  route?: string;
+  onPress?: () => void;
   isActive: boolean;
   testID: string;
 }
@@ -207,4 +208,22 @@ describe("MobileNavGrid", () => {
 
     expect(openTile(container!, "rail-figma2")).toBeTruthy();
   });
+});
+
+it("closes the drawer and opens Usage as a modal action", async () => {
+  const order: string[] = [];
+  navState.items = [
+    {
+      key: "usage",
+      label: "Usage",
+      shortLabel: "Usage",
+      isActive: false,
+      testID: "rail-usage",
+      onPress: () => order.push("usage"),
+    },
+  ];
+  await renderGrid(() => order.push("close"));
+  pressElement(openTile(container!, "sidebar-usage-nav")!);
+  expect(order).toEqual(["close", "usage"]);
+  expect(pushMock).not.toHaveBeenCalled();
 });

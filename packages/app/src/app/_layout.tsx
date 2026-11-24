@@ -1,3 +1,4 @@
+import { UsageSidebarRoot } from "@/usage/sidebar-item";
 import { HostConfirmationSheet } from "@/hosts/host-confirmation-sheet";
 import "@/styles/unistyles";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
@@ -1024,7 +1025,11 @@ function AppWithSidebar({ children }: { children: ReactNode }) {
       pathname === "/shared-sessions" ||
       routeHasKnownHost);
 
-  return <AppContainer chromeEnabled={shouldShowAppChrome}>{children}</AppContainer>;
+  return (
+    <UsageSidebarRoot>
+      <AppContainer chromeEnabled={shouldShowAppChrome}>{children}</AppContainer>
+    </UsageSidebarRoot>
+  );
 }
 
 function FaviconStatusSync() {

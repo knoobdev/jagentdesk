@@ -223,6 +223,7 @@ export class DaemonConfigStore {
       ...initial,
       ...options.speech?.read(persisted),
       ...(builtinPlugins ? { builtinPlugins } : {}),
+      usage: initial.usage ?? persisted.usage,
     });
     if (!builtinPlugins) {
       const legacy = {
@@ -465,6 +466,7 @@ function mergeMutableConfigIntoPersistedConfig(params: {
     ...persisted,
     // The live plugin map already has removePlugins applied, so it replaces the stored one.
     ...(mutable.builtinPlugins !== undefined ? { builtinPlugins: mutable.builtinPlugins } : {}),
+    usage: mutable.usage,
     ...(mutable.pluginsEnabled !== undefined ? { pluginsEnabled: mutable.pluginsEnabled } : {}),
     ...(mutable.plugins !== undefined ? { plugins: mutable.plugins } : {}),
     daemon: {

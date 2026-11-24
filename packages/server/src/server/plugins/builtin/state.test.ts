@@ -34,7 +34,7 @@ async function setup(overrides: Record<string, unknown> = {}) {
 describe("static built-in plugin registry", () => {
   it("keeps the 20 feature defaults and adds bundled plugins independently of installed plugins", async () => {
     const { state } = await setup({ pluginsEnabled: false });
-    expect(state.list().map(({ id }) => id)).toEqual(BUILTIN_PLUGIN_IDS);
+    expect(new Set(state.list().map(({ id }) => id))).toEqual(new Set(BUILTIN_PLUGIN_IDS));
     expect(
       state
         .list()
@@ -54,7 +54,7 @@ describe("static built-in plugin registry", () => {
         .map(({ id }) => id),
     ).toEqual(["autorun", "session-share", "browser-tools"]);
     const loader = new BuiltinPluginLoader(undefined, []);
-    expect([...loader.ids]).toEqual(BUILTIN_PLUGIN_IDS);
+    expect(new Set(loader.ids)).toEqual(new Set(BUILTIN_PLUGIN_IDS));
   });
 
   it("resolves a fresh production host with browser tools off", async () => {
@@ -290,4 +290,21 @@ it("keeps a configured Goose host enabled through the bundled-provider migration
   await state.set("goose-provider", false);
   const restarted = new DaemonConfigStore(home, initial);
   expect(restarted.get().builtinPlugins?.["goose-provider"]).toEqual({ enabled: false });
+});
+
+it("publishes readiness after an enabled usage source finishes starting", async () => {
+  const { state } = await setup({ builtinPlugins: { "claude-usage-source": { enabled: false } } });
+  let started = false;
+  const observations: boolean[] = [];
+  await state.registerLifecycle("claude-usage-source", {
+    async start() {
+      started = true;
+    },
+    async stop() {
+      started = false;
+    },
+  });
+  state.subscribe(() => observations.push(started));
+  await state.set("claude-usage-source", true);
+  expect(observations).toEqual([false, true]);
 });

@@ -724,6 +724,13 @@ export async function createJAgentDeskDaemon(
   // back marketplace installs and are rebranded before compilation.
   const pluginRuntime = new PluginService(logger, daemonConfigStore, daemonVersion, {
     resolveUsageLaunch: (provider) => providerSnapshotManager.resolveUsageLaunch(provider),
+    usageAgents: {
+      hasAgent: (id) => agentManager.getAgent(id) !== null,
+      usageSession: (id) => agentManager.usageSession(id),
+      resolveLaunch: (provider) => providerSnapshotManager.resolveUsageLaunch(provider),
+      isProviderActive: (provider, options) =>
+        providerSnapshotManager.isProviderActiveForUsage(provider, options),
+    },
     builtinPlugins: dependencies.builtinPlugins ?? new BuiltinPluginLoader(),
     managedSources: new ManagedPluginSources(config.jagentdeskHome),
     settingsDirectory: path.join(config.jagentdeskHome, "plugin-settings"),
@@ -1112,7 +1119,7 @@ export async function createJAgentDeskDaemon(
   const usageHistory = new UsageHistoryStorage(config.jagentdeskHome, logger);
   await usageHistory.initialize();
   const initialAgentManagerState = providerSnapshotManager.getAgentManagerProviderState();
-  const agentManager = new AgentManager({
+  const agentManager: AgentManager = new AgentManager({
     pluginLifecycle: pluginRuntime,
     resolveJAgentDeskToolPolicy: (provider) =>
       resolveJAgentDeskToolPolicy(provider, daemonConfigStore.get().providers),

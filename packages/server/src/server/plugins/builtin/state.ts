@@ -204,6 +204,8 @@ export class BuiltinPluginState {
         builtinPlugins: Object.fromEntries(ids.map((pluginId) => [pluginId, { enabled }])),
       });
       await this.reconcile();
+      // Source plugins publish their accounts during startup, after the config-change event.
+      for (const listener of this.listeners) listener();
       return this.list();
     });
     this.pending = change.then(

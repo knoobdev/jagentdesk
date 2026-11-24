@@ -9,7 +9,7 @@ import {
   DropdownMenuContent,
   DropdownMenuSubTrigger,
   type MenuPageDefinition,
-} from "@/components/ui/dropdown-menu";
+} from "@/components/ui/paged-dropdown-menu";
 import { HostMenuItem } from "@/components/hosts/host-menu-item";
 import { getHostPickerLabel } from "@/components/hosts/host-picker";
 import {
@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/icon-button-chrome";
 import { ToolbarButton } from "@/components/ui/pane-content-toolbar";
 import { useIsCompactFormFactor } from "@/constants/layout";
-import { MenuSettingsRows, SettingsRow, SettingsSwitch } from "@/components/settings";
+import { SettingsRow, SettingsSwitch } from "@/components/settings";
 import { SegmentedControl, type SegmentedControlOption } from "@/components/ui/segmented-control";
 import { Alert } from "@/components/ui/alert";
 import { useHosts } from "@/runtime/host-runtime";
@@ -139,7 +139,7 @@ export function UsageOptions({
           style={hasSubTriggers ? settingsStyles.rowBorder : undefined}
           testID="usage-options-fields"
         >
-          <MenuSettingsRows>
+          <View>
             {setting.error ? <Alert variant="error" description={setting.error.message} /> : null}
             {setting.supported ? (
               <SettingsSwitch
@@ -169,7 +169,7 @@ export function UsageOptions({
                 />
               </SettingsRow>
             </View>
-          </MenuSettingsRows>
+          </View>
         </View>
       </DropdownMenuContent>
     </DropdownMenu>

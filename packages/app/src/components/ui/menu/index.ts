@@ -17,6 +17,8 @@ export {
 } from "./menu-surface";
 export { MenuSubTrigger } from "./menu-sub";
 export {
+  MenuCheckboxItem,
+  type MenuCheckboxItemProps,
   MenuHint,
   MenuItem,
   MenuLabel,

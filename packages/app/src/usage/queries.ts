@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { supportsUsageReports } from "@jagentdesk/client/internal/daemon-client";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useEffect } from "react";
 import {
   skipToken,
   useMutation,
@@ -12,6 +12,7 @@ import { useShallow } from "zustand/shallow";
 import { useFetchQuery } from "@/data/query";
 import {
   getHostRuntimeStore,
+  useHostRuntimeClient,
   useHostRuntimeConnectionStatuses,
   useHostRuntimeIsConnected,
   useHosts,
@@ -102,11 +103,12 @@ async function listReports(
   queryClient: QueryClient,
   serverId: string,
   forceRefresh = false,
+  signal?: AbortSignal,
 ): Promise<UsageReportEntry[]> {
   const queryKey = usageReportsQueryKey(serverId);
   const attempted = queryClient.getQueryData<UsageReportEntry[]>(queryKey) ?? [];
   try {
-    return await streamReports({ queryClient, queryKey, serverId, forceRefresh });
+    return await streamReports({ queryClient, queryKey, serverId, forceRefresh, signal });
   } catch (error) {
     recordUsageRefreshFailure(queryClient, queryKey, attempted);
     throw error;
@@ -163,13 +165,14 @@ function toQueryState(query: {
 
 /** Usage reports for one host, as shown on its settings page. */
 export function useHostUsage(serverId: string): { view: UsageView; refresh: () => void } {
+  useUsageSourceUpdates(serverId);
   const setting = useUsageSetting(serverId);
   const queryClient = useQueryClient();
   const isConnected = useHostRuntimeIsConnected(serverId);
   const isSupported = useSessionStore((state) => supportsUsage(state.sessions[serverId]));
   const query = useFetchQuery({
     queryKey: usageReportsQueryKey(serverId),
-    queryFn: () => listReports(queryClient, serverId),
+    queryFn: ({ signal }) => listReports(queryClient, serverId, false, signal),
     enabled: isConnected && isSupported && setting.enabled,
     dataShape: "value",
     staleTimeMs: REPORTS_STALE_TIME_MS,
@@ -208,12 +211,15 @@ export function useUsageHostReports({
   serverId,
   shouldPoll = false,
 }: UsageHostReportsInput): UsageReportEntry[] {
+  useUsageSourceUpdates(serverId);
   const setting = useUsageSetting(serverId);
   const queryClient = useQueryClient();
   const query = useFetchQuery({
     enabled: setting.enabled,
     queryKey: usageReportsQueryKey(serverId ?? ""),
-    queryFn: serverId ? () => listReports(queryClient, serverId) : skipToken,
+    queryFn: serverId
+      ? ({ signal }) => listReports(queryClient, serverId, false, signal)
+      : skipToken,
     dataShape: "value",
     staleTimeMs: REPORTS_STALE_TIME_MS,
     refetchInterval: shouldPoll ? REPORTS_REFETCH_INTERVAL_MS : false,
@@ -255,6 +261,7 @@ export function useAgentUsage(serverId: string, agentId: string): AgentUsageView
 export function useHostReportsUsage(serverId: string): boolean {
   const isConnected = useHostRuntimeIsConnected(serverId);
   const isSupported = useSessionStore((state) => supportsUsage(state.sessions[serverId]));
+  useUsageSourceUpdates(serverId);
   const setting = useUsageSetting(serverId);
   return isConnected && isSupported && setting.enabled;
 }
@@ -307,4 +314,34 @@ export function useReportRefresh(
   const { mutate } = mutation;
   const refresh = useCallback(() => mutate(entry), [mutate, entry]);
   return { refresh, refreshState: resolveUsageRefresh(mutation) };
+}
+
+function useUsageSourceUpdates(serverId: string | null) {
+  const client = useHostRuntimeClient(serverId ?? "");
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!client || !serverId) return;
+    return client.on("plugins.builtin.changed", ({ payload }) => {
+      const plugins = [...payload.plugins, ...(payload.bundledPlugins ?? [])];
+      const disabled = new Set(
+        plugins
+          .filter((plugin) => !plugin.enabled)
+          .map((plugin) => plugin.id.replace(/-usage-source$/, "")),
+      );
+      const queryKey = hostUsageQueryKey(serverId);
+      void refreshUsageSources(queryClient, queryKey, disabled);
+    });
+  }, [client, queryClient, serverId]);
+}
+
+async function refreshUsageSources(
+  queryClient: QueryClient,
+  queryKey: QueryKey,
+  disabled: ReadonlySet<string>,
+): Promise<void> {
+  await queryClient.cancelQueries({ queryKey });
+  queryClient.setQueriesData<UsageReportEntry[]>({ queryKey }, (reports) =>
+    reports?.filter((entry) => !disabled.has(entry.sourceId)),
+  );
+  await queryClient.invalidateQueries({ queryKey });
 }

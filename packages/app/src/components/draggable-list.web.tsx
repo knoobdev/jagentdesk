@@ -64,6 +64,7 @@ export function DraggableListHandle({
       {...handle?.listeners}
       ref={handle?.setActivatorNodeRef as unknown as Ref<View>}
       accessibilityRole="button"
+      tabIndex={0}
       accessibilityLabel={accessibilityLabel}
       style={handleStyle}
       testID={testID}

@@ -123,7 +123,12 @@ agents' catalogs; existing agents retain their launch tools. Session subscriptio
 background services still stop on disable. Do not clear push listeners while stopping a service:
 the same WebSocket sessions must work when it is enabled again.
 
-Usage-source built-ins await the Usage host API.
+Bundled `*-usage-source` plugins share this Built-in list and its per-host switches.
+Usage reads their account reports; turning off a source stops its plugin and removes its cards.
+Usage opens from the rail or sidebar footer as a dialog or compact sheet. Its Sources list
+controls card visibility on this device; the Built-in switches control discovery on the host.
+Quota fetches run while Usage, a context popover, or the visible sidebar summary needs them.
+Insights keeps JAgentDesk’s per-turn token and cost history under its own Built-in switch.
 
 ## Remaining host gaps
 

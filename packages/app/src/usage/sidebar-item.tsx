@@ -15,7 +15,6 @@ import { PressHighlight } from "@/components/ui/press-highlight";
 import type { Theme } from "@/styles/theme";
 import { useRetainedPanelActive } from "@/components/retained-panel";
 import { useAppVisible } from "@/hooks/use-app-visible";
-import { builtinSidebarNavLabelKey } from "@/sidebar-nav/model";
 import { useUsageDisplay } from "./display";
 import { useUsageInSidebar } from "./in-sidebar";
 import { useUsageHostId } from "./hosts";
@@ -44,7 +43,7 @@ export function useUsageSummary(): readonly PinnedUsageSource[] {
   const { inSidebar } = useUsageInSidebar();
   const serverId = useUsageHostId();
   const reports = useUsageHostReports({
-    serverId: inSidebar ? serverId : null,
+    serverId: active && inSidebar && isAppVisible ? serverId : null,
     shouldPoll: active && inSidebar && isAppVisible,
   });
   const { preferences } = useUsageDisplay(reports);
@@ -58,7 +57,7 @@ export function useUsageSummary(): readonly PinnedUsageSource[] {
  */
 export function UsageSidebarItem({ sources }: { sources: readonly PinnedUsageSource[] }) {
   const { t } = useTranslation();
-  const label = t(builtinSidebarNavLabelKey("usage"));
+  const label = "Usage";
   const openUsage = useOpenSidebarUsage();
   if (sources.length === 0) return null;
   return (

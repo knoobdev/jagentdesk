@@ -1,3 +1,4 @@
+import { wrapSessionProvider } from "../provider-registry.js";
 import { describe, expect, test, vi } from "vitest";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
@@ -8633,6 +8634,9 @@ test("usage identity follows the launched Codex home and retires with the sessio
   const identity = session.usageSession();
   expect(identity).toMatchObject({ provider: "codex", model: "gpt-5.4", env: environment });
   expect(session.usageSession()).toEqual(identity);
-  await session.close();
+  const wrapped = wrapSessionProvider("work-codex", session);
+  expect(wrapped.usageSession?.()).toEqual(identity);
+  await wrapped.close();
   expect(session.usageSession()).toBeNull();
+  expect(wrapped.usageSession?.()).toBeNull();
 });

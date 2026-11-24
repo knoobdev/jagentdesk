@@ -1,4 +1,12 @@
 import type {
+  UsageReportEntry,
+  UsageListReportsResponseMessage,
+} from "@jagentdesk/protocol/messages";
+type UsageListReportsPayload = UsageListReportsResponseMessage["payload"];
+export function supportsUsageReports(features: { usageSources?: boolean } | undefined): boolean {
+  return features?.usageSources === true;
+}
+import type {
   BotsRequestType,
   BotsRequestParams,
   BotsResponseFor,
@@ -7575,6 +7583,62 @@ export class DaemonClient {
         },
       });
     }, options?.signal);
+  }
+
+  async listUsageReports(
+    options?: {
+      agentId?: string;
+      requestId?: string;
+      forceRefresh?: boolean;
+      reportIds?: string[];
+    },
+    onReport?: (report: UsageReportEntry) => void,
+  ): Promise<UsageListReportsPayload> {
+    const features = this.getLastServerInfoMessage()?.features;
+    if (!supportsUsageReports(features)) {
+      throw new Error("Update the host to see usage.");
+    }
+    if (options?.agentId !== undefined && options.reportIds !== undefined)
+      throw new Error("agentId and reportIds cannot be combined");
+    const requestId = this.createRequestId(options?.requestId);
+    let active = true;
+    const unsubscribe = this.subscribeRawMessages((message) => {
+      if (
+        !active ||
+        !("payload" in message) ||
+        !("requestId" in message.payload) ||
+        message.payload.requestId !== requestId
+      )
+        return;
+      if (message.type === "usage.list_reports.response" || message.type === "rpc_error") {
+        active = false;
+        return;
+      }
+      if (message.type !== "usage.list_reports.update") return;
+      onReport?.(message.payload.report);
+    });
+    try {
+      const response = await this.sendRequest({
+        requestId,
+        message: {
+          type: "usage.list_reports.request",
+          stream: true,
+          requestId,
+          forceRefresh: options?.forceRefresh,
+          reportIds: options?.reportIds,
+          agentId: options?.agentId,
+        },
+        select: (message) =>
+          message.type === "usage.list_reports.response" && message.payload.requestId === requestId
+            ? message.payload
+            : null,
+      });
+      if (response.error != null) throw new Error(response.error);
+      return { requestId, reports: response.reports };
+    } finally {
+      active = false;
+      unsubscribe();
+    }
   }
 
   async listProviderUsage(options?: { requestId?: string }): Promise<ProviderUsageListPayload> {

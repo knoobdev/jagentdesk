@@ -16,6 +16,8 @@ export interface UsageWindow {
   usedPct?: number | null;
   remainingPct?: number | null;
   resetsAt?: string | null;
+  /** Full length of the quota window when known. */
+  durationSeconds?: number;
   runsOutAt?: string | null;
   shortfallPct?: number | null;
   tone?: "default" | "ok" | "warning" | "danger";
@@ -48,6 +50,8 @@ export type UsageReport =
   | {
       status: "available";
       planLabel?: string;
+      /** When the provider measured the quota, if the report returns a previous reading. */
+      observedAt?: string;
       windows: UsageWindow[];
       balances?: UsageBalance[];
       details?: UsageDetail[];
@@ -59,6 +63,10 @@ export interface UsageAccount {
   /** Stable across token rotation; [A-Za-z0-9._-]{1,128}. Never a credential or raw email. */
   key: string;
   label?: string;
+  /** Harness owning this login, e.g. Codex, OpenCode, Pi or OMP. */
+  harness?: string;
+  /** Provider ID associated with this login, used as a hint for default visibility. */
+  provider?: string;
   /** Store locator, opaque to the daemon. */
   input: JsonValue;
 }
@@ -81,8 +89,10 @@ export interface UsageSourceRegistration {
   icon?: string;
   /** Provider whose resolved launch is needed for discovery. */
   provider?: string;
+  /** Provider IDs associated with this source, used as a hint for default visibility. */
+  providers?: readonly string[];
   input: ZodType;
-  /** Every account whose login exists on this machine. Empty when none. */
+  /** Accounts for this scope only. The same key in any scope identifies the same account. */
   discover(scope: UsageScope): Promise<UsageAccount[]>;
   /** Re-reads the login store; never writes it. */
   fetch(input: unknown): Promise<UsageReport>;
@@ -94,6 +104,7 @@ export function windowFromUsedPct(input: {
   shortLabel?: string;
   summary?: boolean;
   utilizationPct: number | null | undefined;
+  durationSeconds?: number;
   resetsAt?: string | null;
   tone?: UsageWindow["tone"];
 }): UsageWindow {
@@ -105,10 +116,60 @@ export function windowFromUsedPct(input: {
     remainingPct: usedPct === null ? null : Math.max(0, 100 - usedPct),
     resetsAt: input.resetsAt ?? null,
   };
+  if (input.durationSeconds !== undefined) window.durationSeconds = input.durationSeconds;
   if (input.shortLabel !== undefined) window.shortLabel = input.shortLabel;
   if (input.summary) window.summary = true;
   if (input.tone) window.tone = input.tone;
   return window;
+}
+
+/**
+ * Numeric provider windows have one identity and vocabulary, independent of response slots.
+ * Pass null when the provider omits the duration; reset countdowns are not window lengths.
+ * Named API fields (weekly, monthly, etc.) use windowFromUsedPct instead.
+ */
+export function windowFromReportedDuration(input: {
+  durationSeconds: number | null;
+  /** Stable quota identity and provider name for a model- or feature-scoped limit. */
+  scope?: { id: string; label: string };
+  /** Neutral identity and names when the provider does not report a positive duration. */
+  unknown: { id: string; label: string; shortLabel: string };
+  utilizationPct: number | null | undefined;
+  resetsAt?: string | null;
+  summary?: boolean;
+  tone?: UsageWindow["tone"];
+}): UsageWindow {
+  const reported = input.durationSeconds;
+  const duration =
+    reported !== null && Number.isFinite(reported) && reported > 0 ? reported : undefined;
+  const name = duration === undefined ? input.unknown : durationWindowName(duration);
+  const scope = input.scope;
+  return windowFromUsedPct({
+    id: scope ? `${scope.id}:${name.id}` : name.id,
+    label: scope ? `${scope.label} · ${name.label}` : name.label,
+    shortLabel: scope
+      ? `${scope.label}${name.shortLabel ? ` ${name.shortLabel}` : ""}`
+      : name.shortLabel,
+    utilizationPct: input.utilizationPct,
+    durationSeconds: duration,
+    resetsAt: input.resetsAt,
+    summary: input.summary,
+    tone: input.tone,
+  });
+}
+
+function durationWindowName(seconds: number): { id: string; label: string; shortLabel: string } {
+  if (seconds === 604800) return { id: "weekly", label: "Weekly", shortLabel: "wk" };
+  const id = seconds === 18000 ? "five_hour" : `${seconds}s`;
+  const units = [
+    [86400, "day", "d"],
+    [3600, "hour", "h"],
+    [60, "minute", "m"],
+    [1, "second", "s"],
+  ] as const;
+  const unit = units.find(([size]) => seconds % size === 0) ?? units[units.length - 1]!;
+  const amount = seconds / unit[0];
+  return { id, label: `${amount}-${unit[1]}`, shortLabel: `${amount}${unit[2]}` };
 }
 
 /**

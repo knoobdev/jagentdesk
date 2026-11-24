@@ -1,8 +1,7 @@
 import { useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { View } from "react-native";
-import { AdaptiveModalSheet, SheetHeaderSubtitle } from "@/components/adaptive-modal-sheet";
-import { builtinSidebarNavLabelKey } from "@/sidebar-nav/model";
+import { AdaptiveModalSheet } from "@/components/adaptive-modal-sheet";
 import { useHostUsageWithControls } from "./controls";
 import { getHostPickerLabel } from "@/components/hosts/host-picker";
 import { hasHostChoice, useUsageHostSelection } from "./hosts";
@@ -79,15 +78,11 @@ function UsageModalFrame({
   subtitle,
   children,
 }: UsageModalProps & { actions?: ReactNode; subtitle?: string; children: ReactNode }) {
-  const { t } = useTranslation();
-  const title = t(builtinSidebarNavLabelKey("usage"));
+  const title = "Usage";
   const header = useMemo(
     () => ({
       title,
-      titleTestID: "usage-modal-title",
-      subtitle: subtitle ? (
-        <SheetHeaderSubtitle text={subtitle} testID="usage-modal-host" />
-      ) : undefined,
+      subtitle,
       actions,
     }),
     [actions, subtitle, title],

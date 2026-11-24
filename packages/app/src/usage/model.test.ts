@@ -67,7 +67,7 @@ describe("resolveUsageView", () => {
   });
 
   it("localizes unavailable host messages while retaining the host name", async () => {
-    await i18n.changeLanguage("ko");
+    await i18n.changeLanguage("ja");
     expect(
       resolveUsageView({
         hostLabel: "Laptop",
@@ -75,7 +75,10 @@ describe("resolveUsageView", () => {
         supportsUsage: false,
         query: undefined,
       }),
-    ).toEqual({ kind: "unavailable", message: "Laptop에 연결하여 제공업체 사용량을 확인하세요" });
+    ).toEqual({
+      kind: "unavailable",
+      message: "Laptop に接続してプロバイダーの使用状況を確認してください",
+    });
   });
 
   it("moves from loading to ready to error", () => {

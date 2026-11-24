@@ -97,12 +97,7 @@ export function UsageBody({
 
   if (view.kind === "error") {
     return (
-      <Alert
-        size="sm"
-        variant="error"
-        title={t("providerUsage.errorTitle")}
-        description={view.message}
-      >
+      <Alert variant="error" title={t("providerUsage.errorTitle")} description={view.message}>
         <Button variant="outline" onPress={onRefresh}>
           {t("providerUsage.retry")}
         </Button>
@@ -131,7 +126,7 @@ export function UsageBody({
   return (
     <View style={styles.reports}>
       {view.refreshFailed ? (
-        <Alert size="sm" variant="error" title={t("providerUsage.refreshFailed")} />
+        <Alert variant="error" title={t("providerUsage.refreshFailed")} />
       ) : null}
       {content}
     </View>

@@ -4,11 +4,11 @@ import Svg, { Circle } from "react-native-svg";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ProviderUsageTooltipSection } from "@/provider-usage/tooltip-section";
-import { useProviderUsage } from "@/provider-usage/use-provider-usage";
+import { AgentUsage } from "@/usage/agent-usage";
 import { formatTokenCount } from "./context-window-meter.utils";
 
 interface ContextWindowMeterProps {
+  agentId: string;
   maxTokens: number | null;
   usedTokens: number | null;
   totalCostUsd?: number | null;
@@ -102,28 +102,18 @@ export function ContextWindowMeter({
   totalCostUsd,
   showPercentage = false,
   serverId,
-  provider,
+  agentId,
   pending = false,
   glyphSize,
 }: ContextWindowMeterProps) {
   const { theme } = useUnistyles();
   const { t } = useTranslation();
   const [isTooltipOpen, setIsTooltipOpen] = useState(false);
-  const { view: providerUsageView, refresh: refreshProviderUsage } = useProviderUsage(
-    serverId ?? null,
-    { enabled: isTooltipOpen },
-  );
   const percentage =
     maxTokens !== null && usedTokens !== null ? getUsagePercentage(maxTokens, usedTokens) : null;
-  const handleTooltipOpenChange = useCallback(
-    (nextOpen: boolean) => {
-      setIsTooltipOpen(nextOpen);
-      if (nextOpen) {
-        void refreshProviderUsage().catch(() => {});
-      }
-    },
-    [refreshProviderUsage],
-  );
+  const handleTooltipOpenChange = useCallback((nextOpen: boolean) => {
+    setIsTooltipOpen(nextOpen);
+  }, []);
 
   const geometry = getMeterGeometry(showPercentage, glyphSize);
 
@@ -233,7 +223,9 @@ export function ContextWindowMeter({
               {t("contextWindow.sessionCost", { cost: formattedSessionCost })}
             </Text>
           ) : null}
-          <ProviderUsageTooltipSection view={providerUsageView} activeProviderId={provider} />
+          {isTooltipOpen && serverId ? (
+            <AgentUsage serverId={serverId} agentId={agentId} refreshable />
+          ) : null}
         </View>
       </TooltipContent>
     </Tooltip>

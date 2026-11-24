@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import type { ProviderUsage } from "@jagentdesk/protocol/messages";
+import type { UsageReportEntry, UsageReport, ProviderUsage } from "@jagentdesk/protocol/messages";
 import { daemonWsRoutePattern } from "./daemon-port";
 
 interface ProviderUsageFixturePayload {
@@ -69,6 +69,7 @@ function withProviderUsageFeature(message: WebSocketMessage): string | null {
             ? payload.features
             : {}),
           providerUsageList: true,
+          usageSources: true,
         },
       },
     },
@@ -79,6 +80,9 @@ export async function installProviderUsageFixture(
   page: Page,
   payloads: ProviderUsageFixturePayload[],
 ): Promise<ProviderUsageFixture> {
+  await page.addInitScript(() => {
+    localStorage.setItem("@jagentdesk:app-settings", JSON.stringify({ usageInSidebar: false }));
+  });
   let requests = 0;
   const waiters: Array<{ count: number; resolve: () => void }> = [];
 
@@ -106,11 +110,11 @@ export async function installProviderUsageFixture(
 
     ws.onMessage((message) => {
       const sessionMessage = getSessionMessage(message);
-      if (sessionMessage?.type === "provider.usage.list.request") {
+      if (sessionMessage?.type === "usage.list_reports.request") {
         requests += 1;
         const requestId = sessionMessage.requestId;
         if (typeof requestId !== "string") {
-          throw new Error("provider.usage.list.request missing requestId");
+          throw new Error("usage.list_reports.request missing requestId");
         }
         const payload = payloadForRequest();
         notifyWaiters();
@@ -118,11 +122,13 @@ export async function installProviderUsageFixture(
           JSON.stringify({
             type: "session",
             message: {
-              type: "provider.usage.list.response",
+              type: "usage.list_reports.response",
               payload: {
                 requestId,
-                fetchedAt: payload.fetchedAt,
-                providers: payload.providers,
+                reports: payload.providers.map((provider) =>
+                  usageEntry(provider, payload.fetchedAt),
+                ),
+                error: null,
               },
             },
           }),
@@ -150,5 +156,33 @@ export async function installProviderUsageFixture(
         waiters.push({ count, resolve });
       });
     },
+  };
+}
+
+function usageEntry(provider: ProviderUsage, fetchedAt: string): UsageReportEntry {
+  let report: UsageReport;
+  if (provider.status === "available") {
+    report = {
+      status: "available",
+      windows: provider.windows,
+      planLabel: provider.planLabel ?? undefined,
+      balances: provider.balances,
+      details: provider.details,
+    };
+  } else if (provider.status === "error") {
+    report = { status: "error", error: provider.error ?? "Usage fetch failed" };
+  } else {
+    report = {
+      status: "unavailable",
+      problem: { kind: "no_quota", detail: provider.error ?? "No quota" },
+    };
+  }
+  return {
+    id: provider.providerId,
+    sourceId: provider.providerId,
+    sourceLabel: provider.displayName,
+    account: {},
+    fetchedAt,
+    report,
   };
 }

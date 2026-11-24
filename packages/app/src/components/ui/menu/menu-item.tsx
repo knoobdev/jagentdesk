@@ -222,6 +222,7 @@ function resolveItemLabel(input: {
 }
 
 export interface MenuItemProps {
+  accessibilityRole?: "menuitem" | "checkbox";
   description?: string;
   onSelect?: () => void;
   disabled?: boolean;
@@ -253,7 +254,8 @@ export interface MenuItemProps {
   tooltip?: string;
 }
 
-export function MenuItem({
+function MenuRow({
+  accessibilityRole,
   children,
   description,
   onSelect,
@@ -272,7 +274,9 @@ export function MenuItem({
   closeOnSelect = true,
   testID,
   tooltip,
-}: PropsWithChildren<MenuItemProps>): ReactElement {
+}: PropsWithChildren<
+  MenuItemProps & { accessibilityRole: "menuitem" | "checkbox" }
+>): ReactElement {
   const { selectItem } = useMenuContext("MenuItem");
   const isPending = status === "pending" || loading;
   const isSuccess = status === "success";
@@ -337,7 +341,7 @@ export function MenuItem({
   const content = (
     <Pressable
       testID={testID}
-      accessibilityRole="menuitem"
+      accessibilityRole={accessibilityRole}
       accessibilityState={accessibilityState}
       aria-checked={selected}
       tabIndex={-1}
@@ -533,3 +537,29 @@ const styles = StyleSheet.create((theme) => ({
     minWidth: 0,
   },
 }));
+
+export interface MenuCheckboxItemProps extends Omit<MenuItemProps, "selected" | "onSelect"> {
+  checked: boolean;
+  onToggle: () => void;
+}
+export function MenuCheckboxItem({
+  checked,
+  onToggle,
+  closeOnSelect = false,
+  ...rest
+}: PropsWithChildren<MenuCheckboxItemProps>): ReactElement {
+  return (
+    <MenuItem
+      {...rest}
+      selected={checked}
+      showSelectedCheck
+      onSelect={onToggle}
+      closeOnSelect={closeOnSelect}
+      accessibilityRole="checkbox"
+    />
+  );
+}
+
+export function MenuItem(props: PropsWithChildren<MenuItemProps>): ReactElement {
+  return <MenuRow {...props} accessibilityRole={props.accessibilityRole ?? "menuitem"} />;
+}

@@ -1,3 +1,4 @@
+import { createContext, useCallback, useContext } from "react";
 import type { StyleProp, ViewStyle } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { HEADER_CONTROL_HEIGHT } from "@/components/ui/control-geometry";
@@ -27,7 +28,37 @@ interface IconButtonChromeOptions {
   state?: IconButtonChromeState;
   compact?: boolean;
   disabled?: boolean;
+  round?: boolean;
   style?: StyleProp<ViewStyle>;
+}
+
+const IconButtonChromeContext = createContext<"default" | "header-island">("default");
+
+/** A container owns the chrome of its icon actions, including custom menu and badge triggers. */
+export const IconButtonChromeProvider = IconButtonChromeContext.Provider;
+
+/** The same state callback works with Pressable, TooltipTrigger, and DropdownMenuTrigger. */
+export function useIconButtonChromeStyle({
+  size,
+  compact,
+  disabled,
+  round,
+  style,
+  active,
+}: Omit<IconButtonChromeOptions, "state"> & { active?: boolean }) {
+  const scope = useContext(IconButtonChromeContext);
+  return useCallback(
+    (state: IconButtonChromeState) =>
+      iconButtonChromeStyle({
+        size: scope === "header-island" ? "large" : size,
+        compact,
+        disabled,
+        round: scope === "header-island" || round,
+        style,
+        state: { ...state, active: active || state.active },
+      }),
+    [scope, size, compact, disabled, round, style, active],
+  );
 }
 
 /** Shared hitbox and interaction chrome for icon-only header and toolbar controls. */
@@ -37,10 +68,12 @@ export function iconButtonChromeStyle({
   compact = false,
   disabled = false,
   style,
+  round = false,
 }: IconButtonChromeOptions): StyleProp<ViewStyle> {
   const highlighted = state?.active || state?.hovered || state?.pressed || state?.open;
   return [
     resolveIconButtonFrame(size, compact),
+    round ? { borderRadius: 999 } : null,
     style,
     highlighted ? styles.highlighted : null,
     disabled ? styles.disabled : null,
@@ -62,6 +95,11 @@ export function iconButtonChromeGlyphSize(size: IconButtonChromeSize, compact = 
 
 export function smallIconButtonChromeFrameSize(compact = false): number {
   return compact ? COMPACT_SMALL_ICON_BUTTON_SIZE : SMALL_ICON_BUTTON_SIZE;
+}
+
+export function useIconButtonChromeGlyphSize(size: IconButtonChromeSize, compact = false): number {
+  const scope = useContext(IconButtonChromeContext);
+  return iconButtonChromeGlyphSize(scope === "header-island" ? "large" : size, compact);
 }
 
 const styles = StyleSheet.create((theme) => ({

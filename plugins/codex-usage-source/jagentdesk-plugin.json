@@ -1,1 +1,1 @@
-{ "id": "codex-usage-source", "requirements": { "jagentdesk": ">=0.11.0" } }
+{ "id": "codex-usage-source", "requirements": { "jagentdesk": ">=0.9.59" } }

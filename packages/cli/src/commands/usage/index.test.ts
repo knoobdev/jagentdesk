@@ -4,7 +4,7 @@ import { render } from "../../output/index.js";
 import { createCli } from "../../cli.js";
 import { runUsageCommand } from "./index.js";
 
-const options = { daemonTarget: { kind: "endpoint" as const, host: "example.test:1234" } };
+const options = { host: "127.0.0.1:6954" };
 const reports: UsageReportEntry[] = [
   {
     id: "plugin.source:work.account",
@@ -129,7 +129,7 @@ it("preserves complete JSON entries, numeric values and quiet full IDs", async (
   const result = await runUsageCommand(options, { kind: "list" }, daemon.connect);
   expect(JSON.parse(render(result, { format: "json" }))).toEqual(reports);
   expect(render(result, { quiet: true })).toBe(reports.map((entry) => entry.id).join("\n"));
-  expect(daemon.requests).toEqual([{ target: options.daemonTarget }]);
+  expect(daemon.requests).toEqual([{ host: options.host }]);
   expect(daemon.closed).toBe(1);
 });
 

@@ -1,3 +1,8 @@
+import {
+  DEFAULT_USAGE_PREFERENCES,
+  UsagePreferencesSchema,
+  type UsagePreferences,
+} from "@/usage/preferences";
 import { isSyntaxThemeId, type SyntaxThemeId } from "@jagentdesk/highlight";
 import type { QueryClient } from "@tanstack/react-query";
 import type { DesktopSettings } from "@/desktop/settings/desktop-settings";
@@ -43,7 +48,12 @@ export const MIN_CODE_FONT_SIZE = 9;
 export const MAX_CODE_FONT_SIZE = 22; // line-height 1.5×22=33 stays safe
 export const MAX_FONT_FAMILY_LENGTH = 200;
 
+export type AppSettingsUpdate =
+  | Partial<AppSettings>
+  | ((current: AppSettings) => Partial<AppSettings>);
 export interface AppSettings {
+  usage: UsagePreferences;
+  usageInSidebar: boolean;
   theme: ThemeName | "auto" | typeof PLUGIN_THEME_PREFERENCE;
   /** The selected plugin-contributed theme when `theme` is "plugin". */
   pluginThemeId: string | null;
@@ -74,6 +84,8 @@ export interface Settings extends AppSettings {
 type StoredAppSettings = Partial<AppSettings> & { compactToolCalls?: unknown };
 
 export const DEFAULT_CLIENT_SETTINGS: AppSettings = {
+  usage: DEFAULT_USAGE_PREFERENCES,
+  usageInSidebar: true,
   theme: DEFAULT_THEME,
   pluginThemeId: null,
   filePanelAssociations: {},
@@ -119,14 +131,15 @@ export interface SettingsDeps {
 
 export async function saveAppSettings(input: {
   queryClient: QueryClient;
-  updates: Partial<AppSettings>;
+  updates: AppSettingsUpdate;
   deps: SettingsDeps;
 }): Promise<void> {
   const storedCurrent =
     input.queryClient.getQueryData<AppSettings>(APP_SETTINGS_QUERY_KEY) ??
     (await loadAppSettingsFromStorage(input.deps));
   const current = normalizeAppSettings(storedCurrent);
-  const next = { ...current, ...input.updates };
+  const patch = typeof input.updates === "function" ? input.updates(current) : input.updates;
+  const next = { ...current, ...patch };
   input.queryClient.setQueryData<AppSettings>(APP_SETTINGS_QUERY_KEY, next);
   await input.deps.storage.setItem(APP_SETTINGS_KEY, JSON.stringify(next));
 }
@@ -196,6 +209,8 @@ export function normalizeAppSettings(value: unknown): AppSettings {
   ) {
     settings.theme = DEFAULT_THEME;
   }
+  settings.usage = UsagePreferencesSchema.parse(stored.usage ?? DEFAULT_USAGE_PREFERENCES);
+  settings.usageInSidebar = stored.usageInSidebar !== false;
   settings.defaultThemeVersion = DEFAULT_THEME_VERSION;
   return settings;
 }

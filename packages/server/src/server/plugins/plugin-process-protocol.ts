@@ -39,6 +39,7 @@ export interface PluginProviderInstallationMetadata {
 }
 
 export interface PluginUsageSourceMetadata {
+  providers?: readonly string[];
   provider?: string;
   id: string;
   label: string;
@@ -180,6 +181,7 @@ const ProviderInstallationLaunchSchema = ProviderLaunchSchema.extend({
 
 const usageSourceMetadataSchema = z
   .object({
+    providers: z.array(z.string()).optional(),
     id: z.string().min(1),
     label: z.string().min(1),
     icon: z.string().optional(),

@@ -101,7 +101,7 @@ export function UsageCard({
         <Text style={styles.name} numberOfLines={1}>
           {entry.sourceLabel}
         </Text>
-        {planLabel ? <StatusBadge label={planLabel} variant="muted" size="xs" /> : null}
+        {planLabel ? <StatusBadge label={planLabel} variant="muted" /> : null}
         <View style={styles.headerSpacer} />
         {status ? (
           <View style={styles.statusRow}>
