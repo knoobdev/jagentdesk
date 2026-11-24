@@ -1,7 +1,10 @@
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import { SPACING } from "@/styles/theme";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 import {
   Alert,
+  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -137,6 +140,9 @@ export type SettingsView =
   | { kind: "host"; serverId: string; section: HostSectionSlug }
   | { kind: "project"; serverId: string; projectId: string }
   | { kind: "plugin"; serverId: string; pluginId: string; screenId: string };
+
+const SettingsScrollView = Platform.OS === "android" ? KeyboardAwareScrollView : ScrollView;
+const settingsScrollProps = Platform.OS === "android" ? { bottomOffset: SPACING[4] } : {};
 
 interface SidebarSectionItem {
   id: SettingsSectionSlug;
@@ -1285,7 +1291,11 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
     return (
       <View style={styles.container}>
         <BackHeader title={t("settings.title")} onBack={handleBackToWorkspace} />
-        <ScrollView style={styles.scrollView} contentContainerStyle={insetBottomStyle}>
+        <SettingsScrollView
+          {...settingsScrollProps}
+          style={styles.scrollView}
+          contentContainerStyle={insetBottomStyle}
+        >
           <SettingsSidebar
             view={view}
             onSelectSection={handleSelectSection}
@@ -1296,7 +1306,7 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
             activeHostServerId={activeHostServerId}
             layout="mobile"
           />
-        </ScrollView>
+        </SettingsScrollView>
         {addHostModals}
       </View>
     );
@@ -1310,9 +1320,13 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
           titleAccessory={detailHeader?.titleAccessory}
           onBack={handleBackFromDetail}
         />
-        <ScrollView style={styles.scrollView} contentContainerStyle={insetBottomStyle}>
+        <SettingsScrollView
+          {...settingsScrollProps}
+          style={styles.scrollView}
+          contentContainerStyle={insetBottomStyle}
+        >
           <View style={styles.content}>{content}</View>
-        </ScrollView>
+        </SettingsScrollView>
         {addHostModals}
       </View>
     );
@@ -1343,9 +1357,13 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
               left={desktopDetailHeaderLeft}
               leftStyle={desktopStyles.detailLeft}
             />
-            <ScrollView style={styles.scrollView} contentContainerStyle={insetBottomStyle}>
+            <SettingsScrollView
+              {...settingsScrollProps}
+              style={styles.scrollView}
+              contentContainerStyle={insetBottomStyle}
+            >
               <View style={styles.content}>{content}</View>
-            </ScrollView>
+            </SettingsScrollView>
           </View>
         </WindowChromeRegion>
       </View>
