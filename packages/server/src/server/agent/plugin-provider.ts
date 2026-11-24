@@ -1420,7 +1420,14 @@ class PluginAgentSession implements AgentSession {
     return { turnId };
   }
 
-  async steerActiveTurn(
+  get steerActiveTurn():
+    | ((prompt: AgentPromptInput, options: SteerActiveTurnOptions) => Promise<SteerResult>)
+    | undefined {
+    if (!this.bridge.negotiatedCapabilities.includes("prompt.steer")) return undefined;
+    return (prompt, options) => this.steer(prompt, options);
+  }
+
+  private async steer(
     prompt: AgentPromptInput,
     options: SteerActiveTurnOptions,
   ): Promise<SteerResult> {

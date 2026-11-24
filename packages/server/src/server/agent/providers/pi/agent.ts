@@ -1611,7 +1611,7 @@ export class PiRpcAgentSession implements AgentSession {
       this.pendingExtensionHydrations.size ||
       this.pendingSteerSubmissions.length ||
       this.pendingNoTurnOutputs.length ||
-      this.interruptingTurn
+      this.interruptingTurnId
     )
       return false;
     const state = await this.runtimeSession.getState();

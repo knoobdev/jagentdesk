@@ -60,6 +60,7 @@ export interface StartAgentRunOptions {
 }
 
 export class AgentTurnBusyError extends Error {}
+export class AgentTurnChangedError extends Error {}
 
 export type PromptDispatchDisposition = "out_of_band" | "steered" | "turn_started";
 export type PromptDispatchResult =
@@ -446,6 +447,7 @@ export function getAgentMessageDelivery(
     ...defaultAgentMessageDeliveryTiming,
     ...agentMessageDeliveryTimings.get(context.agentManager),
     isRunning: (agentId) => context.agentManager.hasInFlightRun(agentId),
+    canSteer: (agentId) => context.agentManager.canSteer(agentId),
     hasPendingPermission: (agentId) => context.agentManager.hasPendingPermissions(agentId),
     onStop: (listener) => context.agentManager.onStop(listener),
     awaitStart: (agentId, started) =>

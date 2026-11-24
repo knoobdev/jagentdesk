@@ -1,11 +1,13 @@
 import {
   AgentTurnBusyError,
+  AgentTurnChangedError,
   type PromptDispatchDisposition,
   type PromptDispatchResult,
 } from "../agent-prompt.js";
 import { randomUUID } from "node:crypto";
 import type { AgentPromptInput, AgentPromptContentBlock } from "../agent-sdk-types.js";
 import { envelopeMessage, prepareAgentMessage, type AgentPromptSource } from "./envelope.js";
+import { describeAgentMessage, type AgentMessageBehavior } from "./guidance.js";
 
 /** A message's quiet window closes this long after the latest arrival. */
 const QUIET_MS = 2000;
@@ -20,20 +22,24 @@ export interface AgentMessage {
   sessionMode?: string;
   unarchive?: boolean;
   clearPendingPermissions?: boolean;
-  activeTurnBehavior?: "steer" | "interrupt";
+  /** Absent: queue. */
+  activeTurnBehavior?: AgentMessageBehavior;
   beforeDispatch?: () => void | Promise<void>;
   onDispatch?: (disposition: PromptDispatchDisposition) => void;
 }
 export interface AgentMessageReceipt {
   status: "queued";
   messageId: string;
+  activeTurnBehavior: AgentMessageBehavior;
+  /** What happens to the message, and how the sender can change it. */
+  guidance: string;
   dispatched: Promise<PromptDispatchDisposition>;
 }
 interface Admitted extends AgentMessage {
   /** claimed: a dispatch has it. It leaves the queue when the provider admits the prompt. */
   state: "queued" | "claimed" | "withdrawn" | "rejected";
-  /** An interrupt that was not released yet. After a Stop it waits like any other message. */
-  urgent: boolean;
+  /** A steer or interrupt that was not released yet. After a Stop it waits like any other message. */
+  urgency: "steer" | "interrupt" | null;
   /** A Stop found it in the queue. It waits for a prompt admitted after that Stop. */
   held: boolean;
   outOfBandDeclined: boolean;
@@ -97,6 +103,8 @@ interface JoinedPrompt {
 export interface AgentMessageDeliveryDependencies {
   /** Includes admitted starts and provider turns, including compaction. */
   isRunning?: (recipientId: string) => boolean;
+  /** The recipient's provider can take a message into a running turn. */
+  canSteer?: (recipientId: string) => boolean;
   hasPendingPermission?: (recipientId: string) => boolean;
   /** Notify when recipient state changes; admission still checks whether it is idle. */
   subscribe?: (listener: (recipientId: string) => void) => () => void;
@@ -116,7 +124,10 @@ export interface AgentMessageDeliveryDependencies {
   maxWaitMs?: number;
 }
 export interface AgentMessageDelivery {
-  /** Admit a message that waits its turn. An interrupt releases at once, with everything queued. */
+  /**
+   * Admit a message. A queued one waits for the running turn to end; a steer or an interrupt
+   * releases at once, with everything queued before it.
+   */
   enqueue(message: AgentMessage): AgentMessageReceipt;
   /**
    * Send a prompt that does not wait its turn. The messages admitted before it go ahead of it
@@ -139,7 +150,7 @@ export interface AgentMessageDelivery {
 
 const isQueued = (message: Admitted): boolean => message.state === "queued";
 const isWithdrawn = (message: Admitted): boolean => message.state === "withdrawn";
-const isUrgent = (message: Admitted): boolean => isQueued(message) && message.urgent;
+const isUrgent = (message: Admitted): boolean => isQueued(message) && message.urgency !== null;
 const isOfferable = (message: Admitted): boolean =>
   isQueued(message) && !message.outOfBandDeclined && message.sessionMode === undefined;
 
@@ -240,7 +251,10 @@ export function createAgentMessageDelivery(
       },
       messageIds: messages.map((message) => message.receipt.messageId),
       prompt: combine(messages.map(envelope)),
-      activeTurnBehavior: messages.some((message) => message.urgent) ? "interrupt" : "steer",
+      // A batch that waited for the turn to end is dispatched idle-only, so it never steers.
+      activeTurnBehavior: messages.some((message) => message.urgency === "interrupt")
+        ? "interrupt"
+        : "steer",
       // An interrupt may follow a message that asked for another mode; the latest choice wins.
       sessionMode: messages.findLast((message) => message.sessionMode)?.sessionMode,
       clearPendingPermissions: messages.some((message) => message.clearPendingPermissions),
@@ -346,6 +360,12 @@ export function createAgentMessageDelivery(
           handBack(messages);
           continue;
         }
+        // The turn a steer targeted ended first. The batch goes again, into the next turn or as
+        // a new one, so the messages it carries are not lost.
+        if (error instanceof AgentTurnChangedError) {
+          handBack(messages);
+          continue;
+        }
         if (error instanceof AgentTurnBusyError && request.idleOnly) {
           handBack(messages);
           return;
@@ -387,7 +407,8 @@ export function createAgentMessageDelivery(
   }
 
   /**
-   * Move the queue forward: an interrupt takes it now, a closed window once the turn has ended.
+   * Move the queue forward: a steer or an interrupt takes it now, a closed window once the turn
+   * has ended.
    * `ahead` is what was admitted before this step got in line; it leaves later messages alone.
    */
   async function advance(
@@ -396,13 +417,13 @@ export function createAgentMessageDelivery(
     ahead: Admitted[],
     stopped: () => boolean,
   ): Promise<void> {
-    const interrupts = ahead.filter(isUrgent);
-    if (interrupts.length) {
+    const urgent = ahead.filter(isUrgent);
+    if (urgent.length) {
       // A command the provider runs beside the turn replaces nothing, so it takes nothing along.
-      await offerOutOfBand(recipientId, interrupts, stopped);
+      await offerOutOfBand(recipientId, urgent, stopped);
       const last = ahead.findLastIndex(isUrgent);
       if (last >= 0) {
-        // An interrupt does not jump the queue: everything admitted before it goes first.
+        // A steer or an interrupt does not jump the queue: everything admitted before it goes first.
         await deliver(recipientId, ahead.slice(0, last + 1), false, stopped);
         return;
       }
@@ -428,7 +449,7 @@ export function createAgentMessageDelivery(
     });
   }
 
-  /** Polling lines up one step at a time; an interrupt always reserves its own place. */
+  /** Polling lines up one step at a time; a steer or an interrupt always reserves its own place. */
   function nudge(recipientId: string, inbox: Inbox): void {
     if (inbox.advancing) return;
     inbox.advancing = true;
@@ -464,8 +485,8 @@ export function createAgentMessageDelivery(
     inboxes.set(item.recipientId, inbox);
     inbox.messages.push(item);
     inbox.cancelTimer();
-    if (item.urgent) {
-      // An interrupt does not wait: it closes the window and takes the queue along. Its place
+    if (item.urgency) {
+      // A steer or an interrupt does not wait: it closes the window and takes the queue along. Its place
       // is reserved now, so a prompt admitted after it cannot take it away.
       inbox.cancelCap();
       inbox.phase = "waiting";
@@ -523,7 +544,7 @@ export function createAgentMessageDelivery(
   }
 
   /**
-   * The stopped recipient stays stopped. Its queue, interrupts included, goes with whatever
+   * The stopped recipient stays stopped. Its queue, steers and interrupts included, goes with whatever
    * prompts it next.
    */
   function hold(inbox: Inbox): void {
@@ -532,7 +553,7 @@ export function createAgentMessageDelivery(
     inbox.phase = "held";
     inbox.stops++;
     for (const message of inbox.messages) {
-      message.urgent = false;
+      message.urgency = null;
       message.held = true;
     }
   }
@@ -573,9 +594,16 @@ export function createAgentMessageDelivery(
         reject = failed;
       });
       void dispatched.catch(() => undefined);
+      const activeTurnBehavior = message.activeTurnBehavior ?? "queue";
       const receipt: AgentMessageReceipt = {
         status: "queued",
         messageId: message.messageId ?? randomUUID(),
+        activeTurnBehavior,
+        guidance: describeAgentMessage({
+          activeTurnBehavior,
+          running: isRunning(message.recipientId),
+          canSteer: Boolean(dependencies.canSteer?.(message.recipientId)),
+        }),
         dispatched,
       };
       admit({
@@ -584,7 +612,7 @@ export function createAgentMessageDelivery(
         resolve,
         reject,
         state: "queued",
-        urgent: message.activeTurnBehavior === "interrupt",
+        urgency: activeTurnBehavior === "queue" ? null : activeTurnBehavior,
         held: false,
         outOfBandDeclined: false,
       });

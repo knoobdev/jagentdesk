@@ -1,3 +1,5 @@
+import type { AgentActiveTurnBehavior } from "@jagentdesk/protocol/messages";
+import type { AgentMessageBehavior } from "./agent/agent-messages/index.js";
 import { BotsSession } from "./bots/session.js";
 import type { BotsService } from "./bots/service.js";
 import { AgentDirectory, type BackgroundVisibility } from "./agent/directory.js";
@@ -10173,7 +10175,7 @@ export class Session {
           prompt,
           messageId: msg.messageId,
           source: { kind: "agent-message", agentId: msg.sourceAgentId },
-          activeTurnBehavior: msg.activeTurnBehavior ?? "steer",
+          activeTurnBehavior: this.agentSenderBehavior(msg.activeTurnBehavior),
           clearPendingPermissions: false,
         },
       );
@@ -10188,12 +10190,26 @@ export class Session {
           accepted: true,
           error: null,
           deliveryStatus: receipt.status,
+          activeTurnBehavior: receipt.activeTurnBehavior,
+          guidance: receipt.guidance,
           messageId: receipt.messageId,
         },
       });
       return true;
     }
     return false;
+  }
+
+  /** An agent sender's message waits for the running turn to end unless it asks otherwise. */
+  private agentSenderBehavior(
+    requested: AgentActiveTurnBehavior | undefined,
+  ): AgentMessageBehavior {
+    // COMPAT(agentActiveTurnBehaviors): added in v0.17.2, remove after 2027-05-22 once client
+    // floor >= v0.17.2. Older CLIs and connected hosts send steer for every default agent send,
+    // meaning wait for the turn to end, so only their interrupt stays an interrupt.
+    if (!this.supports(CLIENT_CAPS.agentActiveTurnBehaviors))
+      return requested === "interrupt" ? "interrupt" : "queue";
+    return requested ?? "queue";
   }
 
   private async handleSendAgentMessageRequest(
@@ -10215,6 +10231,8 @@ export class Session {
 
     try {
       const agentId = resolved.agentId;
+      if (!msg.sourceAgentId && msg.activeTurnBehavior === "queue")
+        throw new Error('activeTurnBehavior "queue" needs an agent sender');
 
       // Spec mode (spec 28.4 step 2): the message becomes the pending phase's spec-kit command.
       // The command must lead the turn, so attached skills are not prefixed to it.
@@ -10244,7 +10262,7 @@ export class Session {
           source: msg.sourceAgentId
             ? { kind: "agent-message", agentId: msg.sourceAgentId }
             : undefined,
-          activeTurnBehavior: msg.activeTurnBehavior,
+          activeTurnBehavior: msg.activeTurnBehavior === "steer" ? "steer" : "interrupt",
           skillIds: this.messageSkillIds(msg.skillIds, Boolean(specPhase)),
           skillInvocation: this.skillsStorage,
           logger: this.sessionLogger,

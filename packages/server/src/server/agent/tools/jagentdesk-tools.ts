@@ -4269,8 +4269,8 @@ function createToolCatalog(
       .describe(
         "Skill ids (from the Skills screen / create_skill) to invoke for this turn; the daemon prefixes the provider's native skill invocation.",
       ),
-    activeTurnBehavior: ActiveTurnBehaviorSchema.optional().describe(
-      'Agent callers: "steer" (default) waits until the current turn ends; "interrupt" replaces it. Human callers: "steer" joins the turn, falling back to interrupt; default is interrupt.',
+    activeTurnBehavior: AgentActiveTurnBehaviorSchema.optional().describe(
+      'Leave this out unless the message cannot wait. Default "queue" waits for the running turn to end. "steer" joins it, or interrupts if the provider cannot steer. "interrupt" replaces it. A steer or interrupt carries messages queued before it, in order.',
     ),
   };
   const agentToAgentSendAgentPromptInputSchema = {
@@ -4292,6 +4292,9 @@ function createToolCatalog(
   };
   const topLevelSendAgentPromptInputSchema = {
     ...commonSendAgentPromptInputSchema,
+    activeTurnBehavior: ActiveTurnBehaviorSchema.optional().describe(
+      'Default "interrupt": the running turn stops and a new turn starts with the prompt. "steer": the prompt joins the running turn; a provider that cannot steer interrupts the turn instead.',
+    ),
     background: z
       .boolean()
       .optional()
@@ -5202,7 +5205,7 @@ function createToolCatalog(
     senderAgentId: string;
     prompt: string;
     sessionMode?: string;
-    activeTurnBehavior: "steer" | "interrupt";
+    activeTurnBehavior: "queue" | "steer" | "interrupt";
     background: boolean;
     notifyOnFinish: boolean;
     armFinishNotification: () => Promise<boolean>;
@@ -5248,13 +5251,14 @@ function createToolCatalog(
         structuredContent: ensureValidJson({
           success: true,
           deliveryStatus: receipt.status,
+          activeTurnBehavior: receipt.activeTurnBehavior,
           messageId: receipt.messageId,
           status: agentManager.getAgent(agentId)?.lifecycle ?? "idle",
           lastMessage: null,
           permission: null,
           guidance: notifying
-            ? `Queued for delivery after two quiet seconds and the current turn ends. ${PROMPTED_AGENT_NOTIFICATION_GUIDANCE}`
-            : "Queued for delivery after two quiet seconds and the current turn ends.",
+            ? `${receipt.guidance} ${PROMPTED_AGENT_NOTIFICATION_GUIDANCE}`
+            : receipt.guidance,
         }),
       };
     }
@@ -5285,7 +5289,7 @@ function createToolCatalog(
     {
       title: "Send agent prompt",
       description:
-        "Send a task to a running agent. Agent-scoped callers run in background by default; top-level callers wait by default.",
+        "Send a message to another agent. Agent callers receive a receipt at once; read its guidance. Leave activeTurnBehavior out to queue until the running turn ends. Use a short steer or interrupt follow-up to deliver waiting messages now instead of resending them. An unread steer is lost if its turn stops or is interrupted, along with the messages it carried. Completion reports include the last response by default. JAgentDesk supplies caller identity.",
       inputSchema: sendAgentPromptInputSchema,
       outputSchema: {
         success: z.boolean(),
@@ -5294,6 +5298,7 @@ function createToolCatalog(
         permission: AgentPermissionRequestPayloadSchema.nullable().optional(),
         guidance: z.string().optional(),
         deliveryStatus: z.literal("queued").optional(),
+        activeTurnBehavior: AgentActiveTurnBehaviorSchema.optional(),
         messageId: z.string().optional(),
       },
     },
@@ -5304,7 +5309,7 @@ function createToolCatalog(
       skillIds,
       background = Boolean(callerAgentId),
       notifyOnFinish = Boolean(callerAgentId),
-      activeTurnBehavior = callerAgentId ? "steer" : "interrupt",
+      activeTurnBehavior,
     }) => {
       validateBotPromptCaller(agentId, sessionMode);
       validateSendPromptCaller(callerOrchestrationContext, orchestrationRuntime, agentId);
