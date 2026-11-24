@@ -577,6 +577,10 @@ class FakeDaemon {
     this.onClose({ reason });
   }
 
+  daemonSendsPong(): void {
+    this.onMessage(JSON.stringify({ type: "pong" }));
+  }
+
   triggerError(event?: unknown): void {
     this.onError(event);
   }
@@ -6602,6 +6606,65 @@ test("measures an outbound message in UTF-8 bytes against the daemon's message l
   expect(client.getConnectionState().status).toBe("connected");
 });
 
+test("foreground tears down a silently dead socket after two fresh five-second windows and reconnects at once", async () => {
+  useHeartbeatClock();
+  const first = new FakeDaemon();
+  const second = new FakeDaemon();
+  first.daemonGoesSilent();
+  let attempts = 0;
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "foreground-recovery",
+    logger: noopLogger,
+    transportFactory: () => (++attempts === 1 ? first : second).transport,
+  });
+  clients.push(client);
+  const connection = client.connect();
+  first.openConnection();
+  await connection;
+
+  void client.revalidateConnection();
+  expect(first.pingTimestamps()).toEqual(["0s"]);
+  await vi.advanceTimersByTimeAsync(5_000);
+  // The first silent window is followed by a second check at once, not ten seconds later.
+  expect(first.closesFromClient()).toEqual([]);
+  expect(first.pingTimestamps()).toEqual(["0s", "5s"]);
+  await vi.advanceTimersByTimeAsync(4_999);
+  expect(first.closesFromClient()).toEqual([]);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(first.closesFromClient()).toEqual([{ code: 1001, reason: "Liveness check timed out" }]);
+  // The reconnect is immediate: no 1.5s backoff after a foreground liveness teardown.
+  expect(attempts).toBe(2);
+  second.openConnection();
+  expect(client.getConnectionState()).toEqual({ status: "connected" });
+  // The replacement runs the normal heartbeat cadence.
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(second.pingTimestamps()).toEqual(["20s"]);
+  expect(second.closesFromClient()).toEqual([]);
+});
+
+test("foreground verification preserves a healthy socket and deduplicates simultaneous checks", async () => {
+  useHeartbeatClock();
+  const daemon = new FakeDaemon();
+  daemon.daemonAnswersPingsAfter("0.1s");
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "healthy-resume",
+    logger: noopLogger,
+    transportFactory: () => daemon.transport,
+  });
+  clients.push(client);
+  const connection = client.connect();
+  daemon.openConnection();
+  await connection;
+  void client.revalidateConnection();
+  void client.revalidateConnection();
+  await vi.advanceTimersByTimeAsync(3_000);
+  expect(client.getConnectionState()).toEqual({ status: "connected" });
+  expect(daemon.pingTimestamps()).toEqual(["0s"]);
+  expect(daemon.closesFromClient()).toEqual([]);
+});
+
 test("chunks prevent heartbeat misses until silence causes two misses", async () => {
   useHeartbeatClock();
   const daemon = new FakeDaemon();
@@ -6622,22 +6685,26 @@ test("chunks prevent heartbeat misses until silence causes two misses", async ()
   void client.measureLatency({ timeoutMs: 5_000 }).catch((error: unknown) => {
     measurementError = error;
   });
-  await vi.advanceTimersByTimeAsync(5_000);
+  // Chunks complete every four seconds for the first 36 seconds; no pong ever arrives.
+  for (let index = 0; index < 9; index++) {
+    await vi.advanceTimersByTimeAsync(4_000);
+    daemon.receiveChunk(index === 0);
+    expect(daemon.closesFromClient()).toEqual([]);
+  }
   expect(measurementError).toEqual(
     expect.objectContaining({
       message: "Latency measurement timed out (5000ms)",
     }),
   );
-  for (let index = 0; index < 4; index++) {
-    await vi.advanceTimersByTimeAsync(index === 0 ? 5_000 : 10_000);
-    daemon.receiveChunk(index === 0);
-    expect(daemon.closesFromClient()).toEqual([]);
-  }
-  // No complete message or pong has arrived, but progress prevents misses.
-  expect(daemon.pingTimestamps()).toEqual(["0s", "25s"]);
-  await vi.advanceTimersByTimeAsync(25_000);
+  // Progress inside the foreground window returned the heartbeat to its normal cadence.
+  expect(daemon.pingTimestamps()).toEqual(["0s", "15s"]);
+  await vi.advanceTimersByTimeAsync(19_000);
   expect(daemon.closesFromClient()).toEqual([]);
-  await vi.advanceTimersByTimeAsync(25_000);
+  expect(daemon.pingTimestamps()).toEqual(["0s", "15s", "40s"]);
+  await vi.advanceTimersByTimeAsync(24_999);
+  expect(daemon.closesFromClient()).toEqual([]);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(daemon.pingTimestamps()).toEqual(["0s", "15s", "40s", "65s"]);
   expect(daemon.closesFromClient()).toEqual([{ code: 1001, reason: "Liveness check timed out" }]);
 });
 
@@ -6659,13 +6726,14 @@ test("foreground preserves a multi-MB transfer with its pong queued behind chunk
   void client.revalidateConnection();
   await vi.advanceTimersByTimeAsync(3_001);
   expect(daemon.closesFromClient()).toEqual([]);
-  for (let index = 0; index < 4; index++) {
-    await vi.advanceTimersByTimeAsync(10_000);
+  for (let index = 0; index < 5; index++) {
+    await vi.advanceTimersByTimeAsync(4_000);
     daemon.receiveChunk(index === 0);
     expect(daemon.closesFromClient()).toEqual([]);
   }
-  // No complete message or pong has arrived, but progress prevents misses.
-  expect(daemon.pingTimestamps()).toEqual(["0s", "25s"]);
+  // The first chunk landed seven seconds after foreground: the first window was silent, the
+  // second saw progress, so the cycle ended without a teardown and the cadence is normal again.
+  expect(daemon.pingTimestamps()).toEqual(["0s", "5s", "20s"]);
   daemon.finishTransfer();
   await vi.advanceTimersByTimeAsync(30_000);
   expect(client.getConnectionState()).toEqual({ status: "connected" });
@@ -6689,13 +6757,14 @@ test("chunk progress beyond the daemon lease keeps sending heartbeat pings", asy
   await connection;
   void client.revalidateConnection();
   for (let index = 0; index < 12; index++) {
-    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(4_000);
     daemon.receiveChunk(index === 0);
     // Each completed window starts the next ping ten seconds later,
     // even though the response and all queued pongs are still in flight.
+    const now = (index + 1) * 4;
     const expected = ["0s"];
-    if (index >= 4) expected.push("25s");
-    if (index >= 9) expected.push("50s");
+    if (now >= 15) expected.push("15s");
+    if (now >= 40) expected.push("40s");
     expect(daemon.pingTimestamps()).toEqual(expected);
     expect(daemon.closesFromClient()).toEqual([]);
   }
@@ -6703,4 +6772,391 @@ test("chunk progress beyond the daemon lease keeps sending heartbeat pings", asy
   await vi.advanceTimersByTimeAsync(30_000);
   expect(client.getConnectionState()).toEqual({ status: "connected" });
   expect(daemon.closesFromClient()).toEqual([]);
+});
+
+function connectThroughReplacements(
+  clientId: string,
+  daemons: FakeDaemon[],
+  options?: { reconnect?: { enabled: boolean } },
+): { client: DaemonClient; attempts: () => number } {
+  let attempts = 0;
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId,
+    logger: noopLogger,
+    ...(options?.reconnect ? { reconnect: options.reconnect } : {}),
+    transportFactory: () => {
+      const daemon = daemons[Math.min(attempts, daemons.length - 1)]!;
+      attempts += 1;
+      return daemon.transport;
+    },
+  });
+  clients.push(client);
+  return { client, attempts: () => attempts };
+}
+
+test("foreground supersedes a heartbeat that straddled the suspension without counting a miss", async () => {
+  useHeartbeatClock();
+  const first = new FakeDaemon();
+  const second = new FakeDaemon();
+  const { client, attempts } = connectThroughReplacements("resume-before-expiry", [first, second]);
+  const connection = client.connect();
+  first.openConnection();
+  await connection;
+  first.daemonGoesSilent();
+  await vi.advanceTimersByTimeAsync(10_000); // heartbeat ping outstanding when the OS suspends JS
+  await vi.advanceTimersByTimeAsync(14_990); // resume: AppState lands before the stale timer
+  void client.revalidateConnection();
+  expect(first.pingTimestamps()).toEqual(["10s", "24.99s"]);
+  await vi.advanceTimersByTimeAsync(10); // the stale deadline passes without a miss
+  await vi.advanceTimersByTimeAsync(4_990);
+  expect(first.closesFromClient()).toEqual([]);
+  expect(first.pingTimestamps()).toEqual(["10s", "24.99s", "29.99s"]);
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(first.closesFromClient()).toEqual([{ code: 1001, reason: "Liveness check timed out" }]);
+  expect(attempts()).toBe(2);
+});
+
+test("foreground does not inherit a miss recorded before the app was suspended", async () => {
+  useHeartbeatClock();
+  const first = new FakeDaemon();
+  const second = new FakeDaemon();
+  const { client, attempts } = connectThroughReplacements("resume-after-expiry", [first, second]);
+  const connection = client.connect();
+  first.openConnection();
+  await connection;
+  first.daemonGoesSilent();
+  await vi.advanceTimersByTimeAsync(25_000); // ping at 10s missed at 25s, before or during suspension
+  void client.revalidateConnection();
+  expect(first.pingTimestamps()).toEqual(["10s", "25s"]);
+  await vi.advanceTimersByTimeAsync(5_000);
+  // Two fresh windows: the old miss would have torn down here.
+  expect(first.closesFromClient()).toEqual([]);
+  expect(first.pingTimestamps()).toEqual(["10s", "25s", "30s"]);
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(first.closesFromClient()).toEqual([{ code: 1001, reason: "Liveness check timed out" }]);
+  expect(attempts()).toBe(2);
+});
+
+test("a slow but healthy socket survives foreground after a miss before the suspension", async () => {
+  useHeartbeatClock();
+  const daemon = new FakeDaemon();
+  const { client, attempts } = connectThroughReplacements("resume-slow-pong", [daemon]);
+  const connection = client.connect();
+  daemon.openConnection();
+  await connection;
+  daemon.daemonGoesSilent();
+  await vi.advanceTimersByTimeAsync(25_000); // one miss
+  daemon.daemonAnswersPingsAfter("5.5s");
+  void client.revalidateConnection();
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(daemon.closesFromClient()).toEqual([]);
+  expect(client.getConnectionState()).toEqual({ status: "connected" });
+  expect(attempts()).toBe(1);
+});
+
+test("a pong that arrives after the first foreground window keeps the connection and restores the cadence", async () => {
+  useHeartbeatClock();
+  const daemon = new FakeDaemon();
+  daemon.daemonAnswersPingsAfter("5.5s");
+  const { client, attempts } = connectThroughReplacements("slow-pong", [daemon]);
+  const connection = client.connect();
+  daemon.openConnection();
+  await connection;
+  void client.revalidateConnection();
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(daemon.pingTimestamps()).toEqual(["0s", "5s"]);
+  await vi.advanceTimersByTimeAsync(55_000);
+  expect(client.getConnectionState()).toEqual({ status: "connected" });
+  expect(daemon.closesFromClient()).toEqual([]);
+  expect(attempts()).toBe(1);
+  // After the late pong the heartbeat runs ten seconds after each settled probe again.
+  expect(daemon.pingTimestamps()).toEqual(["0s", "5s", "15.5s", "31s", "46.5s"]);
+});
+
+test("a latency measurement outstanding at foreground keeps its own deadline, then the cycle runs", async () => {
+  useHeartbeatClock();
+  const first = new FakeDaemon();
+  const second = new FakeDaemon();
+  first.daemonGoesSilent();
+  const { client, attempts } = connectThroughReplacements("latency-then-foreground", [
+    first,
+    second,
+  ]);
+  const connection = client.connect();
+  first.openConnection();
+  await connection;
+  const measurement = client.measureLatency({ timeoutMs: 1_000 });
+  const measurementError = measurement.then(
+    () => null,
+    (error: unknown) => error,
+  );
+  void client.revalidateConnection();
+  expect(first.pingTimestamps()).toEqual(["0s"]);
+  await vi.advanceTimersByTimeAsync(1_000);
+  await expect(measurementError).resolves.toEqual(
+    expect.objectContaining({ message: "Latency measurement timed out (1000ms)" }),
+  );
+  expect(first.closesFromClient()).toEqual([]);
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(first.pingTimestamps()).toEqual(["0s", "1s", "6s"]);
+  expect(first.closesFromClient()).toEqual([]);
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(first.closesFromClient()).toEqual([{ code: 1001, reason: "Liveness check timed out" }]);
+  expect(attempts()).toBe(2);
+});
+
+test("a shared latency probe's activity from before foreground does not satisfy the fresh check", async () => {
+  useHeartbeatClock();
+  const first = new FakeDaemon();
+  const second = new FakeDaemon();
+  first.daemonGoesSilent();
+  const { client, attempts } = connectThroughReplacements("stale-activity", [first, second]);
+  const connection = client.connect();
+  first.openConnection();
+  await connection;
+  void client.measureLatency({ timeoutMs: 5_000 }).catch(() => {});
+  first.receiveChunk(true); // a frame arrived while the measurement was outstanding, then the socket died
+  void client.revalidateConnection();
+  expect(first.pingTimestamps()).toEqual(["0s"]);
+  await vi.advanceTimersByTimeAsync(5_000);
+  // The measurement's own deadline passed; the foreground cycle starts its first fresh window now.
+  expect(first.closesFromClient()).toEqual([]);
+  expect(first.pingTimestamps()).toEqual(["0s", "5s"]);
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(first.pingTimestamps()).toEqual(["0s", "5s", "10s"]);
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(first.closesFromClient()).toEqual([{ code: 1001, reason: "Liveness check timed out" }]);
+  expect(attempts()).toBe(2);
+});
+
+test("a latency measurement that joined a heartbeat probe survives the foreground check", async () => {
+  useHeartbeatClock();
+  const daemon = new FakeDaemon();
+  daemon.daemonAnswersPingsAfter("2s");
+  const { client, attempts } = connectThroughReplacements("latency-joins-heartbeat", [daemon]);
+  const connection = client.connect();
+  daemon.openConnection();
+  await connection;
+  await vi.advanceTimersByTimeAsync(10_000); // the first heartbeat ping is outstanding
+  const measurement = client.measureLatency({ timeoutMs: 5_000 });
+  await vi.advanceTimersByTimeAsync(1_000);
+  void client.revalidateConnection();
+  expect(daemon.pingTimestamps()).toEqual(["10s", "11s"]);
+  // The heartbeat's pong lands at 12s and answers the measurement that joined it.
+  await vi.advanceTimersByTimeAsync(1_000);
+  await expect(measurement).resolves.toBe(2000);
+  await vi.advanceTimersByTimeAsync(19_000);
+  expect(client.getConnectionState()).toEqual({ status: "connected" });
+  expect(daemon.closesFromClient()).toEqual([]);
+  expect(attempts()).toBe(1);
+  expect(daemon.pingTimestamps()).toEqual(["10s", "11s", "22s"]);
+});
+
+test("a joined latency measurement outlives a silent foreground window until its own deadline", async () => {
+  useHeartbeatClock();
+  const daemon = new FakeDaemon();
+  daemon.daemonAnswersPingsAfter("7s");
+  const { client, attempts } = connectThroughReplacements("latency-outlives-window", [daemon]);
+  const connection = client.connect();
+  daemon.openConnection();
+  await connection;
+  await vi.advanceTimersByTimeAsync(10_000); // the first heartbeat ping is outstanding
+  const measurement = client.measureLatency({ timeoutMs: 10_000 });
+  await vi.advanceTimersByTimeAsync(1_000);
+  void client.revalidateConnection();
+  await vi.advanceTimersByTimeAsync(5_000); // the first window closes silent at 16s
+  expect(daemon.pingTimestamps()).toEqual(["10s", "11s", "16s"]);
+  // The heartbeat's pong lands at 17s, inside the second window and before the 20s deadline.
+  await vi.advanceTimersByTimeAsync(1_000);
+  await expect(measurement).resolves.toBe(7000);
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(client.getConnectionState()).toEqual({ status: "connected" });
+  expect(daemon.closesFromClient()).toEqual([]);
+  expect(attempts()).toBe(1);
+  expect(daemon.pingTimestamps()).toEqual(["10s", "11s", "16s", "27s"]);
+});
+
+// Fake timers cannot suspend: a suspension is modelled as the wall clock jumping forward while
+// the pending window timer stays queued, then firing late on resume.
+async function suspendFor(ms: number): Promise<void> {
+  vi.setSystemTime(Date.now() + ms);
+}
+
+test("a foreground window that spanned a second suspension is discarded when the timer fires first", async () => {
+  useHeartbeatClock();
+  const daemon = new FakeDaemon();
+  daemon.daemonGoesSilent();
+  const { client, attempts } = connectThroughReplacements("suspended-mid-cycle-timer", [daemon]);
+  const connection = client.connect();
+  daemon.openConnection();
+  await connection;
+  void client.revalidateConnection();
+  await vi.advanceTimersByTimeAsync(5_000); // window 1 silent, window 2 outstanding
+  expect(daemon.pingTimestamps()).toEqual(["0s", "5s"]);
+  await suspendFor(60_000);
+  daemon.daemonAnswersPingsAfter("fast"); // the socket is healthy on resume
+  await vi.advanceTimersByTimeAsync(5_000); // window 2's timer fires late
+  void client.revalidateConnection(); // then AppState lands
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(daemon.closesFromClient()).toEqual([]);
+  expect(client.getConnectionState()).toEqual({ status: "connected" });
+  expect(attempts()).toBe(1);
+});
+
+test("a foreground window that spanned a second suspension is discarded when AppState fires first", async () => {
+  useHeartbeatClock();
+  const daemon = new FakeDaemon();
+  daemon.daemonGoesSilent();
+  const { client, attempts } = connectThroughReplacements("suspended-mid-cycle-appstate", [daemon]);
+  const connection = client.connect();
+  daemon.openConnection();
+  await connection;
+  void client.revalidateConnection();
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(daemon.pingTimestamps()).toEqual(["0s", "5s"]);
+  await suspendFor(60_000);
+  daemon.daemonAnswersPingsAfter("fast");
+  void client.revalidateConnection(); // AppState lands before the queued timer
+  await vi.advanceTimersByTimeAsync(5_000); // window 2's timer fires late
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(daemon.closesFromClient()).toEqual([]);
+  expect(client.getConnectionState()).toEqual({ status: "connected" });
+  expect(attempts()).toBe(1);
+});
+
+test("a dead socket after a second suspension mid-cycle still gets two fresh windows", async () => {
+  useHeartbeatClock();
+  const first = new FakeDaemon();
+  const second = new FakeDaemon();
+  first.daemonGoesSilent();
+  const { client, attempts } = connectThroughReplacements("suspended-mid-cycle-dead", [
+    first,
+    second,
+  ]);
+  const connection = client.connect();
+  first.openConnection();
+  await connection;
+  void client.revalidateConnection();
+  await vi.advanceTimersByTimeAsync(5_000);
+  first.receiveChunk(true); // a frame before the second suspension is not evidence after it
+  await suspendFor(60_000);
+  void client.revalidateConnection();
+  await vi.advanceTimersByTimeAsync(5_000); // the late timer discards window 2 and starts over
+  expect(first.pingTimestamps()).toEqual(["0s", "5s", "10s"]);
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(first.closesFromClient()).toEqual([]);
+  expect(first.pingTimestamps()).toEqual(["0s", "5s", "10s", "15s"]);
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(first.closesFromClient()).toEqual([{ code: 1001, reason: "Liveness check timed out" }]);
+  expect(attempts()).toBe(2);
+});
+
+test("repeated foreground events share one cycle and do not restart its windows", async () => {
+  useHeartbeatClock();
+  const first = new FakeDaemon();
+  const second = new FakeDaemon();
+  first.daemonGoesSilent();
+  const { client, attempts } = connectThroughReplacements("repeated-foreground", [first, second]);
+  const connection = client.connect();
+  first.openConnection();
+  await connection;
+  void client.revalidateConnection();
+  for (let elapsedSeconds = 1; elapsedSeconds <= 9; elapsedSeconds++) {
+    await vi.advanceTimersByTimeAsync(1_000);
+    void client.revalidateConnection();
+    expect(first.closesFromClient()).toEqual([]);
+  }
+  expect(first.pingTimestamps()).toEqual(["0s", "5s"]);
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(first.closesFromClient()).toEqual([{ code: 1001, reason: "Liveness check timed out" }]);
+  expect(attempts()).toBe(2);
+  second.openConnection();
+  expect(client.getConnectionState()).toEqual({ status: "connected" });
+});
+
+test("a late pong from the replaced socket does not count for the replacement", async () => {
+  useHeartbeatClock();
+  const first = new FakeDaemon();
+  const second = new FakeDaemon();
+  first.daemonGoesSilent();
+  second.daemonGoesSilent();
+  const { client, attempts } = connectThroughReplacements("late-pong", [first, second]);
+  const connection = client.connect();
+  first.openConnection();
+  await connection;
+  void client.revalidateConnection();
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(attempts()).toBe(2);
+  second.openConnection();
+  void client.revalidateConnection();
+  expect(second.pingTimestamps()).toEqual(["10s"]);
+  await vi.advanceTimersByTimeAsync(2_000);
+  first.daemonSendsPong();
+  await vi.advanceTimersByTimeAsync(8_000);
+  expect(second.pingTimestamps()).toEqual(["10s", "15s"]);
+  expect(second.closesFromClient()).toEqual([{ code: 1001, reason: "Liveness check timed out" }]);
+  expect(first.closesFromClient()).toEqual([{ code: 1001, reason: "Liveness check timed out" }]);
+});
+
+test("closing the client in the middle of a foreground cycle stops it", async () => {
+  useHeartbeatClock();
+  const first = new FakeDaemon();
+  const second = new FakeDaemon();
+  first.daemonGoesSilent();
+  const { client, attempts } = connectThroughReplacements("close-mid-cycle", [first, second]);
+  const connection = client.connect();
+  first.openConnection();
+  await connection;
+  void client.revalidateConnection();
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(first.pingTimestamps()).toEqual(["0s", "5s"]);
+  await client.close();
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(first.pingTimestamps()).toEqual(["0s", "5s"]);
+  expect(first.closesFromClient()).toEqual([{ code: 1000, reason: "Client closed" }]);
+  expect(attempts()).toBe(1);
+  expect(client.getConnectionState()).toEqual({ status: "disposed" });
+});
+
+test("a foreground teardown with reconnect disabled reports the timeout and stays down", async () => {
+  useHeartbeatClock();
+  const daemon = new FakeDaemon();
+  daemon.daemonGoesSilent();
+  const { client, attempts } = connectThroughReplacements("no-reconnect", [daemon], {
+    reconnect: { enabled: false },
+  });
+  const connection = client.connect();
+  daemon.openConnection();
+  await connection;
+  void client.revalidateConnection();
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(client.getConnectionState()).toEqual({
+    status: "disconnected",
+    reason: "Liveness check timed out (5000ms)",
+  });
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(attempts()).toBe(1);
+});
+
+test("the immediate reconnect after a foreground teardown backs off normally if it fails", async () => {
+  useHeartbeatClock();
+  const first = new FakeDaemon();
+  const second = new FakeDaemon();
+  const third = new FakeDaemon();
+  first.daemonGoesSilent();
+  const { client, attempts } = connectThroughReplacements("no-storm", [first, second, third]);
+  const connection = client.connect();
+  first.openConnection();
+  await connection;
+  void client.revalidateConnection();
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(attempts()).toBe(2);
+  second.daemonClosesWith("connection refused");
+  await vi.advanceTimersByTimeAsync(1_499);
+  expect(attempts()).toBe(2);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(attempts()).toBe(3);
+  third.openConnection();
+  expect(client.getConnectionState()).toEqual({ status: "connected" });
 });
