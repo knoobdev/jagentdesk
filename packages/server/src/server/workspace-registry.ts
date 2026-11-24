@@ -1,8 +1,6 @@
 import { promises as fs } from "node:fs";
-
-import type { Logger } from "pino";
+import { type Logger } from "pino";
 import { z } from "zod";
-
 import { writeJsonFileAtomic } from "./atomic-file.js";
 import { areEquivalentPaths } from "../utils/path.js";
 import {
@@ -10,6 +8,7 @@ import {
   type PersistedProjectKind,
   type PersistedWorkspaceKind,
 } from "./workspace-registry-model.js";
+import { type JsonValue } from "@jagentdesk/protocol/agent-types";
 
 const PersistedProjectRecordSchema = z.object({
   projectId: z.string(),
@@ -93,10 +92,16 @@ const PersistedWorkspaceRecordSchema = z.object({
     .nullable()
     .optional()
     .transform((value) => value ?? null),
+  labels: z.array(z.string()).optional(),
+  // Plugin-owned data. JAgentDesk stores it and never reads a key.
+  metadata: z.record(z.string(), z.custom<JsonValue>()).default({}),
+  untrustedSource: UntrustedWorkspaceSourceSchema.optional(),
+  // Public discovery visibility. Contents retain their ordinary lifecycle.
   background: z.boolean().optional().default(false),
 });
 
 export type PersistedProjectRecord = z.infer<typeof PersistedProjectRecordSchema>;
+
 export type PersistedWorkspaceRecord = z.infer<typeof PersistedWorkspaceRecordSchema>;
 
 export interface WorkspaceMutation {
@@ -555,6 +560,9 @@ export function createPersistedWorkspaceRecord(input: {
   archivedAt?: string | null;
   autoArchivedChangeRequestUrl?: string | null;
   pinnedAt?: string | null;
+  labels?: string[];
+  metadata?: Record<string, JsonValue>;
+  untrustedSource?: UntrustedWorkspaceSource;
   background?: boolean;
 }): PersistedWorkspaceRecord {
   const { background, ...rest } = input;

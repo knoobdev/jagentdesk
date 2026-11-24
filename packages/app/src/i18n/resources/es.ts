@@ -1,15 +1,12 @@
-import { botsStrings } from "./bots";
-import { builtinPluginStrings } from "./builtin-plugins";
-import type { TranslationResources } from "./en";
+import { type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
-import { activityGraphStrings } from "./activity-graph";
-import { sshModuleStrings } from "./ssh-modules";
 
 export const es: TranslationResources = {
-  bots: botsStrings,
-  builtinPlugins: builtinPluginStrings,
-  ssh: sshModuleStrings,
-  activityGraph: activityGraphStrings,
+  pluginCombobox: {
+    searching: "Buscando…",
+    empty: "Sin resultados",
+    failed: "La búsqueda falló: {{message}}",
+  },
   paneFind: {
     connectionFailure: "Could not search this chat. Check the host connection and retry.",
     historyChangedFailure: "The chat changed while searching. Search again.",

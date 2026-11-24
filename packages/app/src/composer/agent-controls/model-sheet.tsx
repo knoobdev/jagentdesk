@@ -1,21 +1,38 @@
-import { AgentControlShortcutHint } from "./shortcut-hint";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Keyboard, ScrollView, Text, View, type PressableStateCallbackType } from "react-native";
+import {
+  Keyboard,
+  ScrollView,
+  Text,
+  View,
+  type PressableStateCallbackType,
+  type LayoutChangeEvent,
+} from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import type { AgentProvider } from "@jagentdesk/protocol/agent-types";
+import { type AgentProvider } from "@jagentdesk/protocol/agent-types";
 import { AdaptiveModalSheet } from "@/components/adaptive-modal-sheet";
 import { ComboboxTrigger } from "@/components/ui/combobox-trigger";
-import { getProviderIcon } from "@/components/provider-icons";
+import { useProviderIcon } from "@/components/provider-icons";
 import { ModelBrowser, useModelBrowser } from "@/components/model-browser";
 import { ComposerToolbarGlyph } from "@/composer/agent-controls/glyph";
-import type { ProviderSelectorProvider } from "@/provider-selection/provider-selection";
+import { type ProviderSelectorProvider } from "@/provider-selection/provider-selection";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { shortModelLabel } from "./utils";
-
-import { useModelPickerShortcut } from "./shortcuts";
-import { useKeyboardToggle } from "@/hooks/use-keyboard-toggle";
+import { type AgentProfilePicker, type AgentProfileSeed } from "@/agent-profiles";
+import { type ContextBridge } from "@/components/ui/isolated-bottom-sheet-modal";
+import { TailEllipsisText } from "@/components/ui/tail-ellipsis-text";
+import { resolveModelBrowserScrolling } from "@/components/model-browser-view";
+import { AgentControlTrigger } from "@/composer/agent-controls/control";
+import { resolveModelTriggerLabels } from "@/composer/agent-controls/layout";
+import { resolveModelSheetOpening } from "@/composer/agent-controls/model-sheet-flow";
+import { isNative, isWeb } from "@/constants/platform";
+import { readMeasuredWidth } from "@/hooks/use-container-width";
+import {
+  TOUCH_ICON_SIZE,
+  toolbarContentSlot,
+  toolbarSlot,
+  type ToolbarGlyphs,
+} from "@/components/ui/control-geometry";
 
 const SNAP_POINTS = ["80%", "90%"];
 const MODEL_LIST_TOP_INSET = 4;
@@ -28,82 +45,242 @@ interface CompactModelSheetProps {
   providers: ProviderSelectorProvider[];
   selectedProvider: string;
   selectedModel: string;
+  thinkingLabel: string | null;
   onSelect: (provider: string, modelId: string) => void;
   isLoading: boolean;
-  favoriteKeys: Set<string>;
-  onToggleFavorite?: (provider: string, modelId: string) => void;
+  profiles?: AgentProfilePicker | null;
+  onApplyProfile?: (profileId: string) => void;
+  onEditProfiles?: () => void;
+  onCreateProfile?: (seed: AgentProfileSeed) => void;
+  onEditProfile?: (profileId: string) => void;
   onOpen?: () => void;
   onClose?: () => void;
   onRetryProvider?: (provider: AgentProvider) => void;
   isRetryingProvider?: boolean;
   disabled?: boolean;
   serverId?: string | null;
-  glyphSize: number;
+  glyphs: ToolbarGlyphs;
+  /** False when the toolbar is too narrow for labels: the trigger shows the provider glyph only. */
+  showLabels: boolean;
+  canSwitchProvider: boolean;
+  /** Carries the composer's contexts into the sheets, which draw away from it. */
+  contextBridge?: ContextBridge | null;
   children: ReactNode;
+}
+
+function shortModelLabel(label: string): string {
+  const separatorIndex = label.lastIndexOf("/");
+  return separatorIndex === -1 ? label : label.slice(separatorIndex + 1);
+}
+
+function resolveModelSheetProfileActions(
+  onCreateProfile: ((seed: AgentProfileSeed) => void) | undefined,
+  onEditProfile: ((profileId: string) => void) | undefined,
+  close: () => void,
+): {
+  create?: (seed: AgentProfileSeed) => void;
+  edit?: (profileId: string) => void;
+} {
+  return {
+    create: onCreateProfile
+      ? (seed: AgentProfileSeed) => {
+          close();
+          onCreateProfile(seed);
+        }
+      : undefined,
+    edit: onEditProfile
+      ? (profileId: string) => {
+          close();
+          onEditProfile(profileId);
+        }
+      : undefined,
+  };
+}
+
+/**
+ * Measures the folded model control and decides which labels it shows; see
+ * `resolveModelTriggerLabels`. The full width is keyed by what was measured, so a new label is
+ * `measuring` until its own width is known instead of reusing the previous label's.
+ */
+function useModelTriggerLabels(input: {
+  modelLabel: string;
+  thinkingLabel: string | null;
+  glyphSize: number;
+}) {
+  const { modelLabel, thinkingLabel, glyphSize } = input;
+  const measuredKey = `${glyphSize}\n${modelLabel}\n${thinkingLabel ?? ""}`;
+  const [availableWidth, setAvailableWidth] = useState<number | undefined>(undefined);
+  const [fullWidth, setFullWidth] = useState<{ key: string; width: number } | null>(null);
+
+  const onFrameLayout = useCallback((event: LayoutChangeEvent) => {
+    const width = readMeasuredWidth(event);
+    if (width !== null) setAvailableWidth(width);
+  }, []);
+  const onFullLayout = useCallback(
+    (event: LayoutChangeEvent) => {
+      const width = readMeasuredWidth(event);
+      if (width !== null) setFullWidth({ key: measuredKey, width });
+    },
+    [measuredKey],
+  );
+
+  const labels = resolveModelTriggerLabels({
+    hasThinking: thinkingLabel !== null,
+    measurements: {
+      availableWidth,
+      fullWidth: fullWidth?.key === measuredKey ? fullWidth.width : undefined,
+    },
+  });
+  return { labels, measuredKey, onFrameLayout, onFullLayout };
 }
 
 export function CompactModelSheet({
   providers,
   selectedProvider,
   selectedModel,
+  thinkingLabel,
   onSelect,
   isLoading,
-  favoriteKeys,
-  onToggleFavorite,
+  profiles = null,
+  onApplyProfile,
+  onEditProfiles,
+  onCreateProfile,
+  onEditProfile,
   onOpen,
   onClose,
   onRetryProvider,
   isRetryingProvider = false,
   disabled = false,
   serverId = null,
-  glyphSize,
+  glyphs,
+  showLabels,
+  canSwitchProvider,
+  contextBridge = null,
   children,
 }: CompactModelSheetProps) {
   const { t } = useTranslation();
   const usesBottomSheet = useIsCompactFormFactor();
+  const modelBrowserScrolling = resolveModelBrowserScrolling({
+    isNative,
+    isCompact: usesBottomSheet,
+  });
   const [isOpen, setIsOpen] = useState(false);
-  const browser = useModelBrowser({
-    providers,
+  const [isModelBrowserOpen, setIsModelBrowserOpen] = useState(false);
+  const availableProviders = useMemo(() => {
+    if (canSwitchProvider) return providers;
+    const fixedProvider =
+      providers.find((entry) => entry.id === selectedProvider) ?? providers[0] ?? null;
+    return fixedProvider ? [fixedProvider] : [];
+  }, [canSwitchProvider, providers, selectedProvider]);
+  const rootBrowser = useModelBrowser({
+    providers: availableProviders,
     selectedProvider,
     selectedModel,
     isLoading,
-    favoriteKeys,
+    autoFocusSearch: isWeb && !usesBottomSheet,
+    profiles,
     serverId,
   });
-  const { prepareToOpen, reset } = browser;
-  const ProviderIcon =
-    selectedProvider.trim().length > 0 ? getProviderIcon(selectedProvider) : null;
-  const compactFooter = useMemo(
-    () =>
-      usesBottomSheet ? (
-        <View style={styles.compactFooter} testID="agent-controls-settings-list">
-          <View style={styles.modelViewportDivider} />
-          <View style={[styles.controlsContent, styles.compactControlsContent]}>{children}</View>
-        </View>
-      ) : undefined,
-    [children, usesBottomSheet],
+  const modelBrowser = useModelBrowser({
+    providers: availableProviders,
+    selectedProvider,
+    selectedModel,
+    isLoading,
+    autoFocusSearch: isWeb && !usesBottomSheet,
+    profiles,
+    serverId,
+  });
+  const ModelIcon = useProviderIcon(selectedProvider, serverId);
+  const hasSelectedProvider = selectedProvider.trim().length > 0;
+  const rootHeader = useMemo(
+    () => ({
+      ...rootBrowser.header,
+      title: t("modelSelector.selectModel"),
+      search:
+        rootBrowser.header.search && !canSwitchProvider
+          ? {
+              ...rootBrowser.header.search,
+              placeholder: t("modelSelector.searchPlaceholder"),
+            }
+          : rootBrowser.header.search,
+    }),
+    [canSwitchProvider, rootBrowser.header, t],
   );
 
   const open = useCallback(() => {
     Keyboard.dismiss();
-    prepareToOpen();
+    rootBrowser.showAll();
     setIsOpen(true);
     onOpen?.();
-  }, [onOpen, prepareToOpen]);
+  }, [onOpen, rootBrowser]);
 
   const close = useCallback(() => {
+    setIsModelBrowserOpen(false);
     setIsOpen(false);
-    reset();
+    rootBrowser.reset();
+    modelBrowser.reset();
     onClose?.();
-  }, [onClose, reset]);
+  }, [modelBrowser, onClose, rootBrowser]);
 
-  const handleSelect = useCallback(
+  const handleSearchSelect = useCallback(
+    (provider: string, modelId: string) => {
+      onSelect(provider, modelId);
+      Keyboard.dismiss();
+      rootBrowser.showAll();
+    },
+    [onSelect, rootBrowser],
+  );
+
+  const openModelBrowser = useCallback(() => {
+    Keyboard.dismiss();
+    const destination = resolveModelSheetOpening({
+      canSwitchProvider,
+      providers: availableProviders,
+      selectedProvider,
+    });
+    if (destination.kind === "all") {
+      modelBrowser.showAll();
+    } else {
+      modelBrowser.drillDown(destination.providerId, destination.providerLabel);
+    }
+    setIsModelBrowserOpen(true);
+  }, [availableProviders, canSwitchProvider, modelBrowser, selectedProvider]);
+
+  const closeModelBrowser = useCallback(() => {
+    setIsModelBrowserOpen(false);
+    modelBrowser.reset();
+  }, [modelBrowser]);
+
+  const handleBrowserSelect = useCallback(
+    (provider: string, modelId: string) => {
+      onSelect(provider, modelId);
+      closeModelBrowser();
+    },
+    [closeModelBrowser, onSelect],
+  );
+
+  const handleDesktopSelect = useCallback(
     (provider: string, modelId: string) => {
       onSelect(provider, modelId);
       close();
     },
     [close, onSelect],
   );
+
+  const handleApplyProfile = useCallback(
+    (profileId: string) => {
+      onApplyProfile?.(profileId);
+      close();
+    },
+    [close, onApplyProfile],
+  );
+
+  const handleEditProfiles = useCallback(() => {
+    close();
+    onEditProfiles?.();
+  }, [close, onEditProfiles]);
+
+  const profileActions = resolveModelSheetProfileActions(onCreateProfile, onEditProfile, close);
 
   const toggle = useCallback(() => {
     if (isOpen) {
@@ -113,69 +290,53 @@ export function CompactModelSheet({
     open();
   }, [close, isOpen, open]);
 
-  const toggleAction = useModelPickerShortcut(disabled);
-  useKeyboardToggle({
-    action: toggleAction,
-    disabled,
-    open: isOpen,
-    searchFocused: browser.isSearchFocused,
-    onToggle: toggle,
-  });
-
-  const triggerStyle = useCallback(
-    ({ hovered, pressed }: PressableStateCallbackType) => [
-      styles.trigger,
-      hovered && styles.triggerHovered,
-      (pressed || isOpen) && styles.triggerPressed,
-      disabled && styles.triggerDisabled,
-    ],
-    [disabled, isOpen],
+  const mobileRootContent = useMemo(
+    () => (
+      <View style={styles.mobileRootContent} testID="agent-controls-settings-list">
+        <View style={styles.controlsContent}>
+          <AgentControlTrigger
+            icon={ModelIcon}
+            surface="sheet"
+            label={t("modelSelector.model")}
+            value={rootBrowser.selectedModelLabel}
+            disabled={disabled}
+            onPress={openModelBrowser}
+            accessibilityLabel={t("modelSelector.selectedModel", {
+              model: rootBrowser.selectedModelLabel,
+            })}
+            testID="agent-controls-model"
+          />
+          {children}
+        </View>
+      </View>
+    ),
+    [ModelIcon, children, disabled, openModelBrowser, rootBrowser.selectedModelLabel, t],
   );
 
   return (
     <>
-      <Tooltip enabledOnDesktop enabledOnMobile={false}>
-        <TooltipTrigger asChild triggerRefProp="ref">
-          <ComboboxTrigger
-            collapsable={false}
-            disabled={disabled}
-            onPress={toggle}
-            style={triggerStyle}
-            accessibilityRole="button"
-            accessibilityLabel={t("modelSelector.selectedModel", {
-              model: browser.selectedModelLabel,
-            })}
-            testID="combined-model-selector"
-            chevron={null}
-          >
-            {ProviderIcon ? (
-              <ComposerToolbarGlyph size={glyphSize}>
-                <ProviderIcon size={glyphSize} color={styles.providerIcon.color} />
-              </ComposerToolbarGlyph>
-            ) : null}
-            <Text style={styles.triggerText} numberOfLines={1}>
-              {shortModelLabel(browser.triggerLabel)}
-            </Text>
-          </ComboboxTrigger>
-        </TooltipTrigger>
-        <TooltipContent side="top" align="center" offset={8}>
-          <AgentControlShortcutHint
-            label={t("settings.shortcuts.help.toggleModelPicker")}
-            actionId="toggle-model-picker"
-          />
-        </TooltipContent>
-      </Tooltip>
+      <ModelSheetTrigger
+        ModelIcon={hasSelectedProvider ? ModelIcon : null}
+        modelLabel={shortModelLabel(rootBrowser.triggerLabel)}
+        thinkingLabel={thinkingLabel}
+        glyphs={glyphs}
+        iconOnly={!showLabels && hasSelectedProvider}
+        isOpen={isOpen}
+        disabled={disabled}
+        onPress={toggle}
+        accessibilityLabel={t("modelSelector.selectedModel", {
+          model: rootBrowser.selectedModelLabel,
+        })}
+      />
 
       <AdaptiveModalSheet
-        header={browser.header}
+        header={rootHeader}
         visible={isOpen}
         onClose={close}
         snapPoints={SNAP_POINTS}
         scrollable={false}
-        sizeContentToCurrentSnapPoint={usesBottomSheet}
-        footer={compactFooter}
-        footerContainerStyle={usesBottomSheet ? styles.compactFooterContainer : undefined}
         contentStyle={styles.sheetBody}
+        contextBridge={contextBridge}
         testID="agent-controls-model-sheet"
       >
         <View
@@ -186,12 +347,17 @@ export function CompactModelSheet({
           testID="agent-controls-model-viewport"
         >
           <ModelBrowser
-            state={browser}
-            onSelect={handleSelect}
-            onToggleFavorite={onToggleFavorite}
+            state={rootBrowser}
+            onSelect={usesBottomSheet ? handleSearchSelect : handleDesktopSelect}
+            onApplyProfile={handleApplyProfile}
+            onEditProfiles={onEditProfiles ? handleEditProfiles : undefined}
+            onCreateProfile={profileActions.create}
+            onEditProfile={profileActions.edit}
             onRetryProvider={onRetryProvider}
             isRetryingProvider={isRetryingProvider}
-            scrolling="independent"
+            scrolling={modelBrowserScrolling}
+            searchAllOnFocus={usesBottomSheet}
+            rootBrowseContent={usesBottomSheet ? mobileRootContent : undefined}
           />
         </View>
         {!usesBottomSheet ? (
@@ -209,27 +375,182 @@ export function CompactModelSheet({
           </>
         ) : null}
       </AdaptiveModalSheet>
+
+      {usesBottomSheet ? (
+        <AdaptiveModalSheet
+          header={modelBrowser.header}
+          visible={isModelBrowserOpen}
+          onClose={closeModelBrowser}
+          snapPoints={SNAP_POINTS}
+          scrollable={false}
+          presentation="push"
+          contentStyle={styles.sheetBody}
+          contextBridge={contextBridge}
+          testID="agent-controls-model-browser-sheet"
+        >
+          <View
+            style={[styles.modelViewport, styles.flexibleModelViewport]}
+            testID="agent-controls-model-browser-viewport"
+          >
+            <ModelBrowser
+              state={modelBrowser}
+              onSelect={handleBrowserSelect}
+              onEditProfiles={onEditProfiles ? handleEditProfiles : undefined}
+              onCreateProfile={profileActions.create}
+              onEditProfile={profileActions.edit}
+              onRetryProvider={onRetryProvider}
+              isRetryingProvider={isRetryingProvider}
+              scrolling={modelBrowserScrolling}
+              searchAllOnFocus
+              showProfilesSection={false}
+            />
+          </View>
+        </AdaptiveModalSheet>
+      ) : null}
     </>
+  );
+}
+
+/**
+ * The folded model control in the toolbar: the provider glyph, then the model and thinking
+ * labels for as long as they fit.
+ */
+function ModelSheetTrigger({
+  ModelIcon,
+  modelLabel,
+  thinkingLabel,
+  glyphs,
+  iconOnly,
+  isOpen,
+  disabled,
+  onPress,
+  accessibilityLabel,
+}: {
+  /** The selected provider's glyph, or null before a provider is selected. */
+  ModelIcon: ReturnType<typeof useProviderIcon> | null;
+  modelLabel: string;
+  thinkingLabel: string | null;
+  glyphs: ToolbarGlyphs;
+  iconOnly: boolean;
+  isOpen: boolean;
+  disabled: boolean;
+  onPress: () => void;
+  accessibilityLabel: string;
+}) {
+  const glyphRole = iconOnly ? "icon" : "label";
+  const glyph = glyphs[glyphRole];
+  const triggerLabels = useModelTriggerLabels({
+    modelLabel,
+    thinkingLabel: iconOnly ? null : thinkingLabel,
+    glyphSize: glyph.size,
+  });
+  const providerIconColor =
+    glyph.tone === "foreground" ? styles.providerIconForeground.color : styles.providerIcon.color;
+  const triggerStyle = useCallback(
+    ({ hovered, pressed }: PressableStateCallbackType) => [
+      styles.trigger,
+      iconOnly && styles.triggerIconOnly,
+      hovered && styles.triggerHovered,
+      (pressed || isOpen) && styles.triggerPressed,
+      disabled && styles.triggerDisabled,
+    ],
+    [disabled, iconOnly, isOpen],
+  );
+
+  return (
+    <View style={styles.triggerFrame} onLayout={triggerLabels.onFrameLayout}>
+      <ComboboxTrigger
+        collapsable={false}
+        disabled={disabled}
+        onPress={onPress}
+        style={triggerStyle}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+        testID="combined-model-selector"
+        chevron={null}
+      >
+        {ModelIcon ? (
+          <ComposerToolbarGlyph role={glyphRole}>
+            <ModelIcon
+              size={glyph.size}
+              strokeWidth={glyph.strokeWidth}
+              color={providerIconColor}
+            />
+          </ComposerToolbarGlyph>
+        ) : null}
+        {!iconOnly ? (
+          <View
+            style={[
+              styles.triggerLabels,
+              triggerLabels.labels === "measuring" && styles.triggerLabelsMeasuring,
+            ]}
+          >
+            <TailEllipsisText
+              text={modelLabel}
+              style={styles.triggerText}
+              testID="combined-model-selector-model-label"
+            />
+            {thinkingLabel && triggerLabels.labels !== "model" ? (
+              <Text
+                style={styles.triggerThinking}
+                numberOfLines={1}
+                testID="combined-model-selector-thinking-label"
+              >
+                {thinkingLabel}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+      </ComboboxTrigger>
+      {!iconOnly && thinkingLabel ? (
+        <View
+          // Keyed by what it measures: a retained node whose size does not change emits no new
+          // layout event, so new labels would never be measured.
+          key={triggerLabels.measuredKey}
+          style={[styles.trigger, styles.triggerMeasurer]}
+          onLayout={triggerLabels.onFullLayout}
+          pointerEvents="none"
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          aria-hidden
+        >
+          {ModelIcon ? <ComposerToolbarGlyph role={glyphRole}>{null}</ComposerToolbarGlyph> : null}
+          <View style={styles.triggerLabels}>
+            <Text style={[styles.triggerText, styles.triggerMeasuredText]} numberOfLines={1}>
+              {modelLabel}
+            </Text>
+            <Text style={styles.triggerThinking} numberOfLines={1}>
+              {thinkingLabel}
+            </Text>
+          </View>
+        </View>
+      ) : null}
+    </View>
   );
 }
 
 const styles = StyleSheet.create((theme) => ({
   trigger: {
-    height: 28,
     minWidth: 0,
     flexShrink: 1,
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[1],
-    paddingHorizontal: theme.spacing[2],
-    borderRadius: theme.borderRadius["2xl"],
+    ...toolbarContentSlot(theme.spacing[2]),
+    borderRadius: theme.borderRadius.full,
     backgroundColor: "transparent",
+  },
+  triggerIconOnly: {
+    ...toolbarSlot(TOUCH_ICON_SIZE.md),
+    flexShrink: 0,
+    paddingHorizontal: 0,
+    justifyContent: "center",
   },
   triggerHovered: {
     backgroundColor: theme.colors.surface2,
   },
   triggerPressed: {
-    backgroundColor: theme.colors.surface0,
+    backgroundColor: theme.colors.surface2,
   },
   triggerDisabled: {
     opacity: 0.5,
@@ -238,11 +559,49 @@ const styles = StyleSheet.create((theme) => ({
     minWidth: 0,
     flexShrink: 1,
     color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.sm,
+    fontSize: theme.fontSize.base,
+    fontWeight: theme.fontWeight.normal,
+  },
+  triggerLabels: {
+    minWidth: 0,
+    flexShrink: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
+  },
+  triggerLabelsMeasuring: {
+    opacity: 0,
+  },
+  /** The space the trigger may take; the trigger itself stays as wide as its content. */
+  triggerFrame: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  /** An invisible copy of the trigger with both labels untruncated. */
+  triggerMeasurer: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    flexShrink: 0,
+    opacity: 0,
+  },
+  triggerMeasuredText: {
+    flexShrink: 0,
+  },
+  triggerThinking: {
+    flexShrink: 0,
+    color: theme.colors.foregroundExtraMuted,
+    fontSize: theme.fontSize.base,
     fontWeight: theme.fontWeight.normal,
   },
   providerIcon: {
     color: theme.colors.foregroundMuted,
+  },
+  providerIconForeground: {
+    color: theme.colors.foreground,
   },
   sheetBody: {
     paddingHorizontal: 0,
@@ -271,20 +630,10 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     minHeight: 0,
   },
-  compactFooterContainer: {
-    flexDirection: "column",
-    alignItems: "stretch",
-    justifyContent: "flex-start",
-    gap: 0,
-    paddingHorizontal: 0,
-    paddingTop: 0,
-    borderTopWidth: 0,
-  },
-  compactFooter: {
-    minWidth: 0,
-  },
-  compactControlsContent: {
-    paddingBottom: 0,
+  mobileRootContent: {
+    backgroundColor: theme.colors.surfaceSidebar,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
   },
   controlsContent: {
     paddingHorizontal: theme.spacing[2],

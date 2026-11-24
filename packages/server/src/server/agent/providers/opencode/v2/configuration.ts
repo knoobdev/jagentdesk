@@ -1,26 +1,17 @@
-import type { SessionInfo, PermissionRuleset } from "@opencode/client";
-import type { V2Api } from "./api.js";
-
-import type {
-  AgentFeature,
-  AgentLaunchContext,
-  AgentSessionConfig,
+import { type SessionInfo, type PermissionRuleset } from "@opencode/client";
+import { type V2Api } from "./api.js";
+import {
+  type AgentLaunchContext,
+  type AgentSessionConfig,
+  type AgentOptionControl,
 } from "../../../agent-sdk-types.js";
-
 import { OpenCodeProviderOptionsSchema, buildOpenCodePermissionRules } from "../options.js";
-
 import { modelRef } from "./mapping.js";
 
-export function features(config: AgentSessionConfig): AgentFeature[] {
-  return [
-    {
-      type: "toggle",
-      id: "auto_accept",
-      label: "Auto-accept",
-      value: config.featureValues?.["auto_accept"] === true,
-    },
-  ];
-}
+export const controls: AgentOptionControl[] = [
+  { type: "toggle", key: "auto_accept", label: "Auto-accept" },
+];
+
 export function permissionRules(config: AgentSessionConfig): PermissionRuleset {
   const rules =
     buildOpenCodePermissionRules(
@@ -41,11 +32,13 @@ export function permissionRules(config: AgentSessionConfig): PermissionRuleset {
     })),
   ];
 }
+
 function nativePermissionAction(action: string): string {
   if (action === "bash") return "shell";
   if (action === "task") return "subagent";
   return action;
 }
+
 export async function applyResumeOverrides(
   client: V2Api,
   info: SessionInfo,

@@ -4,20 +4,23 @@ import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
-import type {
-  AgentSnapshotPayload,
-  CreationSnapshot,
-  WorkspaceDescriptorPayload,
+import {
+  type AgentSnapshotPayload,
+  type CreationSnapshot,
+  type WorkspaceDescriptorPayload,
 } from "@jagentdesk/protocol/messages";
 import { CreationService, type CreationInput } from "./index.js";
 
 const silentLogger = pino({ level: "silent" });
+
 const directories: string[] = [];
+
 afterEach(async () => {
   await Promise.all(
     directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })),
   );
 });
+
 function deferred() {
   let resolve!: () => void;
   const promise = new Promise<void>((done) => {
@@ -25,6 +28,7 @@ function deferred() {
   });
   return { promise, resolve };
 }
+
 const workspace: WorkspaceDescriptorPayload = {
   id: "wks_0123456789abcdef",
   projectId: "project",
@@ -40,6 +44,7 @@ const workspace: WorkspaceDescriptorPayload = {
   archivingAt: null,
   scripts: [],
 };
+
 const agent: AgentSnapshotPayload = {
   id: "00000000-0000-4000-8000-000000000001",
   workspaceId: workspace.id,
@@ -68,6 +73,7 @@ const agent: AgentSnapshotPayload = {
   title: "Start once",
   labels: {},
 };
+
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "creation-lifecycle-"));
   directories.push(directory);

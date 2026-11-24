@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import type { TFunction } from "i18next";
+import { type TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
-import type { AutocompleteOption, AutocompleteStatus } from "@/components/ui/autocomplete";
+import { type AutocompleteOption, type AutocompleteStatus } from "@/components/ui/autocomplete";
 import {
   useAutocompleteCommands,
   type AgentSlashCommand,
@@ -119,19 +119,20 @@ function resolveDraftQueryConfig(draft?: DraftCommandTarget): DraftCommandConfig
   if (draft?.status !== "ready") {
     return undefined;
   }
+
   const draftConfig = draft.config;
   const cwd = draftConfig.cwd.trim();
   const modeId = draftConfig.modeId?.trim() ?? "";
   const model = draftConfig.model?.trim() ?? "";
   const thinkingOptionId = draftConfig.thinkingOptionId?.trim() ?? "";
-  const featureValues = draftConfig.featureValues;
+  const providerOptions = draftConfig.providerOptions;
   return {
     provider: draftConfig.provider,
     cwd,
     ...(modeId ? { modeId } : {}),
     ...(model ? { model } : {}),
     ...(thinkingOptionId ? { thinkingOptionId } : {}),
-    ...(featureValues && Object.keys(featureValues).length > 0 ? { featureValues } : {}),
+    ...(providerOptions && Object.keys(providerOptions).length > 0 ? { providerOptions } : {}),
   };
 }
 

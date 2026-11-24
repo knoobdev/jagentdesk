@@ -1,42 +1,48 @@
 import { randomUUID } from "node:crypto";
-import type { Logger } from "pino";
-import type {
-  AgentCapabilityFlags,
-  AgentClient,
-  AgentFeature,
-  AgentLaunchContext,
-  AgentMode,
-  AgentModelDefinition,
-  AgentPersistenceHandle,
-  AgentPermissionRequest,
-  AgentPermissionResponse,
-  AgentPermissionResult,
-  AgentPromptInput,
-  AgentProvider,
-  AgentRunOptions,
-  AgentRunResult,
-  AgentRuntimeInfo,
-  AgentSession,
-  AgentSessionConfig,
-  AgentStreamEvent,
-  AgentTimelineItem,
-  FetchCatalogOptions,
-  ImportableProviderSession,
-  ImportProviderSessionContext,
-  ImportProviderSessionInput,
-  ProviderCatalog,
-  ToolCallDetail,
-  ToolCallTimelineItem,
+import { type Logger } from "pino";
+import {
+  type AgentCapabilityFlags,
+  type AgentClient,
+  type AgentLaunchContext,
+  type AgentMode,
+  type AgentModelDefinition,
+  type AgentPersistenceHandle,
+  type AgentPermissionRequest,
+  type AgentPermissionResponse,
+  type AgentPermissionResult,
+  type AgentPromptInput,
+  type AgentProvider,
+  type AgentRunOptions,
+  type AgentRunResult,
+  type AgentRuntimeInfo,
+  type AgentSession,
+  type AgentSessionConfig,
+  type AgentStreamEvent,
+  type AgentTimelineItem,
+  type FetchCatalogOptions,
+  type ImportableProviderSession,
+  type ImportProviderSessionContext,
+  type ImportProviderSessionInput,
+  type ProviderCatalog,
+  type ToolCallDetail,
+  type ToolCallTimelineItem,
+  type AgentOptionControl,
 } from "../agent-sdk-types.js";
 import { importSessionFromPersistence } from "../provider-session-import.js";
 import { getAgentProviderDefinition } from "@jagentdesk/protocol/provider-manifest";
 
 export const MOCK_LOAD_TEST_PROVIDER_ID = "mock";
+
 export const MOCK_LOAD_TEST_DEFAULT_MODEL_ID = "five-minute-stream";
+
 export const MOCK_LOAD_TEST_HANDLED_COMMAND = "/mock handled-command";
+
 const MOCK_LOAD_TEST_MODE_ID = "load-test";
+
 const MOCK_LOAD_TEST_DURATION_MS = 5 * 60 * 1000;
+
 const MOCK_LOAD_TEST_INTERVAL_MS = 40;
+
 const ONE_PIXEL_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl4Kj8AAAAASUVORK5CYII=";
 
@@ -734,18 +740,31 @@ export class MockLoadTestAgentClient implements AgentClient {
 
 export class MockLoadTestAgentSession implements AgentSession {
   readonly provider: AgentProvider = MOCK_LOAD_TEST_PROVIDER_ID;
+
   readonly capabilities = CAPABILITIES;
-  readonly features: AgentFeature[] = [];
+
+  readonly controls: AgentOptionControl[] = [];
+
   readonly id: string;
+
   private readonly listeners = new Set<(event: AgentStreamEvent) => void>();
+
   private readonly history: AgentStreamEvent[] = [];
+
   private readonly logger?: Logger;
+
   private activeTurn: ActiveTurn | null = null;
+
   private pendingPermissions = new Map<string, AgentPermissionRequest>();
+
   private modeId: string | null;
+
   private modelId: string | null;
+
   private readonly assistantResponse: string | null;
+
   private readonly rewindError: string | null;
+
   private remainingPromptRejections: number;
 
   constructor(options: { config: AgentSessionConfig; sessionId: string; logger?: Logger }) {
@@ -754,20 +773,38 @@ export class MockLoadTestAgentSession implements AgentSession {
     this.modeId = options.config.modeId ?? MOCK_LOAD_TEST_MODE_ID;
     this.modelId = options.config.model ?? MOCK_LOAD_TEST_DEFAULT_MODEL_ID;
     this.assistantResponse =
-      typeof options.config.featureValues?.mockAssistantResponse === "string"
-        ? options.config.featureValues.mockAssistantResponse
+      typeof options.config.providerOptions?.mockAssistantResponse === "string"
+        ? options.config.providerOptions.mockAssistantResponse
         : null;
+    this.assistantResponses = getConfiguredAssistantResponses(
+      options.config.providerOptions?.mockAssistantResponses,
+    );
+    this.streamingAssistantResponse =
+      typeof options.config.providerOptions?.mockStreamingAssistantResponse === "string"
+        ? options.config.providerOptions.mockStreamingAssistantResponse
+        : null;
+    const requestedStreamingInterval =
+      options.config.providerOptions?.mockStreamingAssistantIntervalMs;
+    this.streamingAssistantIntervalMs =
+      typeof requestedStreamingInterval === "number" &&
+      Number.isFinite(requestedStreamingInterval) &&
+      requestedStreamingInterval >= 1
+        ? Math.min(requestedStreamingInterval, 1_000)
+        : MOCK_LOAD_TEST_INTERVAL_MS;
     this.rewindError =
-      typeof options.config.featureValues?.mockRewindError === "string"
-        ? options.config.featureValues.mockRewindError
+      typeof options.config.providerOptions?.mockRewindError === "string"
+        ? options.config.providerOptions.mockRewindError
         : null;
-    const requestedPromptRejections = options.config.featureValues?.mockPromptRejections;
+    const requestedPromptRejections = options.config.providerOptions?.mockPromptRejections;
     this.remainingPromptRejections =
       typeof requestedPromptRejections === "number" &&
       Number.isSafeInteger(requestedPromptRejections) &&
       requestedPromptRejections > 0
         ? requestedPromptRejections
         : 0;
+    this.remainingSteerFailures = getPositiveFeatureInteger(
+      options.config.providerOptions?.mockSteerAmbiguousFailures,
+    );
   }
 
   async run(prompt: AgentPromptInput, options?: AgentRunOptions): Promise<AgentRunResult> {

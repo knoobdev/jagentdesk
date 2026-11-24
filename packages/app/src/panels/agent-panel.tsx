@@ -1,7 +1,14 @@
 import { ComposerDock } from "@/composer/dock";
 import { RewindCommandCenterRegistration } from "@/components/rewind/command-center-registration";
-import type { AgentScreenReadySyncState } from "@/hooks/use-agent-screen-state-machine";
-import { KeyboardTranslateView } from "@/keyboard/shift";
+import {
+  type AgentScreenReadySyncState,
+  type AgentScreenAgent,
+  type AgentScreenContinuity,
+  type AgentScreenMissingState,
+  type AgentScreenViewState,
+  useAgentScreenStateMachine,
+} from "@/hooks/use-agent-screen-state-machine";
+import { KeyboardTranslateView, useKeyboardShiftStyle } from "@/keyboard/shift";
 import { AgentCommandsProvider } from "@/agent-commands";
 import { ComposerEditingSession } from "@/composer/editing-session";
 import { ParentAgentCallout, ParentAgentPill, useParentAgentId } from "@/subagents/parent";
@@ -16,10 +23,10 @@ import {
   ActivityGraphToggle,
   useActivityGraphOpen,
 } from "@/activity-graph/activity-graph-host";
-import type { ActivityGraphNodeRef } from "@jagentdesk/protocol/agent-activity-graph";
+import { type ActivityGraphNodeRef } from "@jagentdesk/protocol/agent-activity-graph";
 import { isGuestReadOnlyShare, isGuestShareMode } from "@/screens/share/guest-share-mode";
-import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
-import type { TFunction } from "i18next";
+import { type DaemonClient } from "@jagentdesk/client/internal/daemon-client";
+import { type TFunction } from "i18next";
 import { SquarePen } from "lucide-react-native";
 import React, {
   memo,
@@ -54,26 +61,18 @@ import {
   type ToastApi,
   type ToastState,
 } from "@/components/toast-host";
-import type { WorkspaceComposerAttachment } from "@/attachments/types";
+import { type WorkspaceComposerAttachment } from "@/attachments/types";
 import { useWorkspaceAttachmentScopeKey } from "@/attachments/workspace-attachments-store";
 import { COMPACT_CONTENT_WIDTH, useIsCompactFormFactor } from "@/constants/layout";
 import { isWeb } from "@/constants/platform";
 import { useAgentAttentionClear } from "@/hooks/use-agent-attention-clear";
 import { useAgentInitialization } from "@/hooks/use-agent-initialization";
 import { useAgentInputDraft, type AgentInputDraft } from "@/composer/draft/input-draft";
-import {
-  type AgentScreenAgent,
-  type AgentScreenContinuity,
-  type AgentScreenMissingState,
-  type AgentScreenViewState,
-  useAgentScreenStateMachine,
-} from "@/hooks/use-agent-screen-state-machine";
 import { useArchiveAgent } from "@/hooks/use-archive-agent";
-import { useKeyboardShiftStyle } from "@/keyboard/shift";
 import { useContainerWidthBelow } from "@/hooks/use-container-width";
 import { reconcileMissingAgentStateWithPresentAgent } from "@/panels/agent-panel-load-state";
 import { usePaneContext, usePaneFocus } from "@/panels/pane-context";
-import type { PanelRegistration } from "@/panels/panel-registry";
+import { type PanelRegistration } from "@/panels/panel-registry";
 import { RenderProfile } from "@/utils/render-profiler";
 import { buildDraftPanelDescriptor } from "@/panels/draft-panel-descriptor";
 import {
@@ -104,7 +103,7 @@ import {
 } from "@/stores/session-store";
 import { useWorkspaceLayoutStore } from "@/stores/workspace-layout-store";
 import { buildWorkspaceTabPersistenceKey } from "@/workspace-tabs/model";
-import type { Theme } from "@/styles/theme";
+import { type Theme } from "@/styles/theme";
 import {
   useHideFinishedProviderSubagents,
   useArchiveSubagent,
@@ -113,12 +112,12 @@ import {
 } from "@/subagents";
 import { BackgroundWorkTrack, createHostBackgroundWorkModel } from "@/background-work";
 import { SubagentsTrack } from "@/subagents/track";
-import type { PendingPermission } from "@/types/shared";
-import type { StreamItem } from "@/types/stream";
+import { type PendingPermission } from "@/types/shared";
+import { type StreamItem } from "@/types/stream";
 import { getInitDeferred, getInitKey } from "@/utils/agent-initialization";
 import { derivePendingPermissionKey, normalizeAgentSnapshot } from "@/utils/agent-snapshots";
 import { applyLegacyDaemonWorkspaceOwnership } from "@/workspace/legacy-daemon-workspaces";
-import type { WorkspaceFileOpenRequest } from "@/workspace/file-open";
+import { type WorkspaceFileOpenRequest } from "@/workspace/file-open";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
 import { buildDraftAgentSetup, type ClientSlashCommand } from "@/client-slash-commands";
 
@@ -134,7 +133,8 @@ interface ChatAgentStateShape {
   model?: Agent["model"];
   thinkingOptionId?: Agent["thinkingOptionId"];
   runtimeInfo?: Agent["runtimeInfo"];
-  features?: Agent["features"];
+  options?: Agent["options"];
+  controls?: Agent["controls"];
   lastError?: Agent["lastError"] | null;
 }
 
@@ -184,7 +184,8 @@ function selectChatAgentState(
     model: agent.model,
     thinkingOptionId: agent.thinkingOptionId,
     runtimeInfo: agent.runtimeInfo,
-    features: agent.features,
+    options: agent.options,
+    controls: agent.controls,
     lastError: agent.lastError ?? null,
     archivedAt: agent.archivedAt ?? null,
     requiresAttention: agent.requiresAttention ?? false,
@@ -211,7 +212,8 @@ function buildChatAgentFromState(
     model: state.model,
     thinkingOptionId: state.thinkingOptionId,
     runtimeInfo: state.runtimeInfo,
-    features: state.features,
+    options: state.options,
+    controls: state.controls,
     lastError: state.lastError ?? null,
     projectPlacement,
   };
@@ -414,8 +416,11 @@ export function useDraftPanelDescriptor(
 }
 
 const EMPTY_STREAM_ITEMS: StreamItem[] = [];
+
 const EMPTY_MESSAGE_SUBMISSIONS = [] as const;
+
 const EMPTY_PENDING_PERMISSIONS = new Map<string, PendingPermission>();
+
 const EMPTY_PENDING_PERMISSION_LIST: PendingPermission[] = [];
 
 type RouteBottomAnchorRequest = ReturnType<typeof deriveRouteBottomAnchorRequest>;
@@ -680,7 +685,8 @@ function AgentPanelBody({
           model: agentState.model,
           thinkingOptionId: agentState.thinkingOptionId,
           runtimeInfo: agentState.runtimeInfo,
-          features: agentState.features,
+          options: agentState.options,
+          controls: agentState.controls,
           lastError: agentState.lastError ?? null,
           projectPlacement,
         }
@@ -1171,8 +1177,8 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
     ],
   );
   const getRewindComposerText = useCallback(
-    () => composerEditingSession.getText(agentInputDraft.text),
-    [composerEditingSession, agentInputDraft.text],
+    () => composerEditingSession.getText(agentInputDraft.textSource.getSnapshot()),
+    [composerEditingSession, agentInputDraft.textSource],
   );
   const handleRewindComplete = useCallback(
     (restored: boolean) => {
@@ -1297,8 +1303,8 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
       enabled={active && !agentState.archivedAt && !isArchivingCurrentAgent}
     >
       <RewindComposerRestoreProvider
-        text={agentInputDraft.text}
-        setText={agentInputDraft.setText}
+        text={agentInputDraft.textSource.getSnapshot()}
+        setText={agentInputDraft.replaceText}
         getText={getRewindComposerText}
         onRewindComplete={handleRewindComplete}
       >
@@ -1751,10 +1757,10 @@ function ActiveAgentComposer({
           agentId={agentId}
           serverId={serverId}
           workspaceId={workspaceId}
-          externalKeyboardShift
           isPaneFocused={isPaneFocused}
-          value={agentInputDraft.text}
-          onChangeText={agentInputDraft.setText}
+          textSource={agentInputDraft.textSource}
+          textReplacement={agentInputDraft.textReplacement}
+          onChangeText={agentInputDraft.editText}
           attachments={agentInputDraft.attachments}
           attachmentScopeKeys={attachmentScopeKeys}
           onOpenWorkspaceAttachment={handleOpenWorkspaceAttachment}
@@ -1847,6 +1853,7 @@ const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
 const foregroundMutedColorMapping = (theme: Theme) => ({
   color: theme.colors.foregroundMuted,
 });
+
 const foregroundColorMapping = (theme: Theme) => ({
   color: theme.colors.foreground,
 });

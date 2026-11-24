@@ -1,29 +1,30 @@
 import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import type { Logger } from "pino";
-import type { AgentManager } from "../agent/agent-manager.js";
-import type { AgentSessionConfig } from "../agent/agent-sdk-types.js";
-import type { AgentStorage } from "../agent/agent-storage.js";
+import { type Logger } from "pino";
+import { type AgentManager } from "../agent/agent-manager.js";
+import { type AgentSessionConfig } from "../agent/agent-sdk-types.js";
+import { type AgentStorage } from "../agent/agent-storage.js";
 import { curateAgentActivity } from "../agent/activity-curator.js";
 import { ensureAgentLoaded } from "../agent/agent-loading.js";
 import { formatSystemNotificationPrompt } from "../agent/agent-prompt.js";
 import { resolveCreateAgentTitles } from "../agent/create-agent-title.js";
 import { type BoundCreateAgentCommand, formatProviderModel } from "../agent/create-agent/create.js";
-import type { PersistedWorkspaceRecord } from "../workspace-registry.js";
-import type { CreateJAgentDeskWorktreeWorkflowResult } from "../worktree-session.js";
+import { type PersistedWorkspaceRecord } from "../workspace-registry.js";
+import { type CreateJAgentDeskWorktreeWorkflowResult } from "../worktree-session.js";
 import { ScheduleStore } from "./store.js";
 import { computeNextRunAt, validateScheduleCadence } from "./cron.js";
-import type {
-  CreateScheduleInput,
-  ScheduleExecutionResult,
-  ScheduleRun,
-  ScheduleTarget,
-  StoredSchedule,
-  UpdateScheduleInput,
-  UpdateScheduleNewAgentConfig,
+import {
+  type CreateScheduleInput,
+  type ScheduleExecutionResult,
+  type ScheduleRun,
+  type ScheduleTarget,
+  type StoredSchedule,
+  type UpdateScheduleInput,
+  type UpdateScheduleNewAgentConfig,
 } from "@jagentdesk/protocol/schedule/types";
-import type { FirstAgentContext } from "@jagentdesk/protocol/messages";
+import { type FirstAgentContext } from "@jagentdesk/protocol/messages";
+import { foldFeatureValues } from "../agent/option-controls.js";
 
 const SCHEDULE_TICK_INTERVAL_MS = 1000;
 
@@ -227,14 +228,20 @@ type ScheduleAgentManager = Pick<
   | "getAgent"
   | "getRegisteredProviderIds"
   | "hasInFlightRun"
-  | "setDaemonBackgroundWork"
-  | "removeDaemonBackgroundWork"
-  | "hydrateTimelineFromProvider"
-  | "resumeAgentFromPersistence"
-  | "runAgent"
-  | "waitForAgentEvent"
-  | "waitForAgentClose"
->;
+  | "replaceAgentRun"
+  | "steerOrReplaceActiveTurn"
+  | "streamAgent"
+> &
+  Pick<
+    AgentManager,
+    | "createAgentFromRecord"
+    | "getRegisteredProviderIds"
+    | "hydrateTimelineFromProvider"
+    | "resumeAgentFromPersistence"
+    | "runAgent"
+    | "waitForAgentEvent"
+    | "waitForAgentClose"
+  >;
 
 interface ScheduleWorkspaceCreateInput {
   cwd: string;
@@ -260,25 +267,38 @@ export interface ScheduleServiceOptions {
 
 export class ScheduleService {
   private readonly store: ScheduleStore;
+
   private readonly logger: Logger;
+
   private readonly agentManager: ScheduleAgentManager;
+
   private readonly agentStorage: AgentStorage;
+
   private readonly createAgent: BoundCreateAgentCommand;
+
   private readonly createDirectoryWorkspace: (
     input: ScheduleWorkspaceCreateInput,
   ) => Promise<PersistedWorkspaceRecord>;
+
   private readonly createJAgentDeskWorktreeWorkspace: (
     input: ScheduleWorkspaceCreateInput,
   ) => Promise<CreateJAgentDeskWorktreeWorkflowResult>;
+
   private readonly archiveWorkspace: (workspaceId: string) => Promise<void>;
+
   private readonly now: () => Date;
+
   private readonly runner: (
     schedule: StoredSchedule,
     runId: string,
   ) => Promise<ScheduleExecutionResult>;
+
   private readonly runningScheduleIds = new Set<string>();
+
   private readonly heartbeatStops = new Map<string, () => Promise<void>>();
+
   private recovering = false;
+
   private tickTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(options: ScheduleServiceOptions) {
@@ -1037,7 +1057,6 @@ export class ScheduleService {
         },
         mode: config.modeId,
         thinking: config.thinkingOptionId,
-        features: config.featureValues,
         unattended: true,
         promptFailure: "return-error",
         background: true,
@@ -1139,12 +1158,8 @@ function buildScheduleAgentConfig(
     model: config.model,
     thinkingOptionId: config.thinkingOptionId,
     title: config.title,
-    approvalPolicy: config.approvalPolicy,
-    sandboxMode: config.sandboxMode,
-    networkAccess: config.networkAccess,
-    webSearch: config.webSearch,
-    featureValues: config.featureValues,
-    extra: config.extra,
+    // COMPAT(featureValues): added in v0.15.0, remove after 2027-05-01.
+    providerOptions: foldFeatureValues(config).providerOptions,
     systemPrompt: config.systemPrompt,
     mcpServers: config.mcpServers as AgentSessionConfig["mcpServers"],
   };

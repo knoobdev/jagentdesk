@@ -1,21 +1,20 @@
 import { UsageScopeSchema, type UsageScope } from "@jagentdesk/plugin/server/usage";
-import type { PluginHookAgent } from "@jagentdesk/plugin/server";
-import type {
-  ProviderConnectRequest,
-  ProviderCatalogOptions,
-  ProviderEvent,
-  ProviderInput,
-  ProviderInstallationLaunch,
-  ProviderStatusRequest,
-  ProviderUpdateReport,
-} from "@jagentdesk/plugin/server/provider";
+import { type PluginHookAgent } from "@jagentdesk/plugin/server";
 import {
+  type ProviderConnectRequest,
+  type ProviderCatalogOptions,
+  type ProviderEvent,
+  type ProviderInput,
+  type ProviderInstallationLaunch,
+  type ProviderStatusRequest,
+  type ProviderUpdateReport,
   ProviderUpdateReportSchema,
   ProviderEventSchema,
   ProviderInputSchema,
   ProviderLaunchSchema,
 } from "@jagentdesk/plugin/server/provider";
 import { z } from "zod";
+import { type JsonValue } from "@jagentdesk/protocol/agent-types";
 
 export interface PluginProviderMetadata {
   requiresConfiguration?: boolean;
@@ -174,6 +173,7 @@ const providerMetadataSchema = z
     command: z.tuple([z.string().min(1)], z.string()).optional(),
   })
   .strict();
+
 const ProviderInstallationLaunchSchema = ProviderLaunchSchema.extend({
   resolved: z.boolean(),
 }).strict();
@@ -187,6 +187,7 @@ const usageSourceMetadataSchema = z
     provider: z.string().min(1).optional(),
   })
   .strict();
+
 const providerConnectRequestSchema = z
   .object({
     launch: ProviderLaunchSchema.optional(),
@@ -194,6 +195,7 @@ const providerConnectRequestSchema = z
     capabilities: z.array(z.string()),
   })
   .strict();
+
 const frameFields = {
   data: z.union([z.string(), z.instanceof(Uint8Array)]),
   isBinary: z.boolean(),
@@ -214,7 +216,7 @@ export const PluginProcessRequestSchema: z.ZodType<PluginProcessRequest> = z.dis
             provider: z.string(),
             cwd: z.string(),
             title: z.string().nullable(),
-            background: z.boolean(),
+            metadata: z.record(z.string(), z.custom<JsonValue>()),
           })
           .strict(),
         name: z.string(),

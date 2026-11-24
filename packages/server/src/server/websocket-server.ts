@@ -1,4 +1,4 @@
-import type { BotsService } from "./bots/service.js";
+import { type BotsService } from "./bots/service.js";
 import { builtinPluginWireState } from "@jagentdesk/protocol/builtin-plugins";
 import { CreationService } from "./creation/index.js";
 import {
@@ -11,47 +11,51 @@ import {
   type WorkspaceBaseBranchService,
 } from "./session/workspace-base-branch/service.js";
 import { WebSocket, WebSocketServer } from "ws";
-import type { IncomingMessage, Server as HTTPServer } from "http";
+import { type IncomingMessage, type Server as HTTPServer } from "http";
 import { join } from "path";
 import { getHostName } from "./host-name.js";
 import { randomUUID } from "node:crypto";
 import { monitorEventLoopDelay } from "node:perf_hooks";
-import type { AgentManager, AgentMetricsSnapshot } from "./agent/agent-manager.js";
-import type { AgentStorage } from "./agent/agent-storage.js";
-import type { DownloadTokenStore } from "./file-download/token-store.js";
-import type { TerminalManager } from "../terminal/terminal-manager.js";
-import type pino from "pino";
-import type { ProjectRegistry, WorkspaceRegistry } from "./workspace-registry.js";
-import type { ProjectUpdate } from "./workspace-reconciliation-service.js";
-import type { FileBackedChatService } from "./chat/chat-service.js";
-import type { LoopService } from "./loop-service.js";
-import type { NativeSkillsService } from "./skills-native/index.js";
-import type { Skill } from "@jagentdesk/protocol/skills";
-import type { UsageHistoryStorage } from "./usage/usage-history-storage.js";
-import type { HostCapabilityService } from "./host-capabilities/service.js";
-import type { PhysicalDeviceHub } from "./devices/hub.js";
-import type { HostToolInstaller } from "./host-tools/installer.js";
-import type { HostCapabilities } from "@jagentdesk/protocol/host-capabilities";
-import type { LifetimeUsage, UsageDayRollup } from "@jagentdesk/protocol/usage-history";
-import type { ClusterRegistry } from "./cluster/cluster-registry.js";
-import type { ArgoCdService } from "./argocd/service.js";
-import type { DatabaseRegistry } from "./database/database-registry.js";
+import { type AgentManager, type AgentMetricsSnapshot } from "./agent/agent-manager.js";
+import { type AgentStorage } from "./agent/agent-storage.js";
+import { type DownloadTokenStore } from "./file-download/token-store.js";
+import { type TerminalManager } from "../terminal/terminal-manager.js";
+import pino from "pino";
+import { type ProjectRegistry, type WorkspaceRegistry } from "./workspace-registry.js";
+import { type ProjectUpdate } from "./workspace-reconciliation-service.js";
+import { type FileBackedChatService } from "./chat/chat-service.js";
+import { type LoopService } from "./loop-service.js";
+import { type NativeSkillsService } from "./skills-native/index.js";
+import { type Skill } from "@jagentdesk/protocol/skills";
+import { type UsageHistoryStorage } from "./usage/usage-history-storage.js";
+import { type HostCapabilityService } from "./host-capabilities/service.js";
+import { type PhysicalDeviceHub } from "./devices/hub.js";
+import { type HostToolInstaller } from "./host-tools/installer.js";
+import { type HostCapabilities } from "@jagentdesk/protocol/host-capabilities";
+import { type LifetimeUsage, type UsageDayRollup } from "@jagentdesk/protocol/usage-history";
+import { type ClusterRegistry } from "./cluster/cluster-registry.js";
+import { type ArgoCdService } from "./argocd/service.js";
+import { type DatabaseRegistry } from "./database/database-registry.js";
 import { SshService } from "./ssh/ssh-service.js";
-import type { SideloadService } from "./sideload/sideload-service.js";
-import type { JiraService } from "./jira/service.js";
-import type { RemoteExecService } from "./remote-exec/types.js";
-import type { CustomProviderService } from "./custom-providers/types.js";
-import type { FigmaService } from "./figma/service.js";
-import type { ScheduleService } from "./schedule/service.js";
-import type { AutorunService } from "./autorun/service.js";
-import type { SpecModeService } from "./spec-mode/service.js";
+import { type SideloadService } from "./sideload/sideload-service.js";
+import { type JiraService } from "./jira/service.js";
+import { type RemoteExecService } from "./remote-exec/types.js";
+import { type CustomProviderService } from "./custom-providers/types.js";
+import { type FigmaService } from "./figma/service.js";
+import { type ScheduleService } from "./schedule/service.js";
+import { type AutorunService } from "./autorun/service.js";
+import { type SpecModeService } from "./spec-mode/service.js";
 import { SpecModePlanSource } from "./spec-mode/plan-source.js";
-import type { SpecModeState } from "@jagentdesk/protocol/spec-mode";
-import type { SessionShareService } from "./session-share/service.js";
+import { type SpecModeState } from "@jagentdesk/protocol/spec-mode";
+import { type SessionShareService } from "./session-share/service.js";
 import { ActivityGraphService } from "./agent/activity-graph/service.js";
-import type { AutorunState } from "@jagentdesk/protocol/messages";
-import type { CheckoutDiffManager, CheckoutDiffMetrics } from "./checkout-diff-manager.js";
-import type { DaemonConfigStore, MutableDaemonConfig } from "./daemon-config-store.js";
+import { type AutorunState, type CreationSnapshot } from "@jagentdesk/protocol/messages";
+import { type CheckoutDiffManager, type CheckoutDiffMetrics } from "./checkout-diff-manager.js";
+import {
+  type DaemonConfigStore,
+  type MutableDaemonConfig,
+  toWireDaemonConfig,
+} from "./daemon-config-store.js";
 import {
   type ServerInfoStatusPayload,
   type SessionInboundMessage,
@@ -67,40 +71,37 @@ import {
   wrapSessionMessage,
 } from "./messages.js";
 import { asUint8Array, decodeBinaryFrame } from "@jagentdesk/protocol/binary-frames/index";
-import type { TerminalActivity } from "@jagentdesk/protocol/terminal-activity";
+import { type TerminalActivity } from "@jagentdesk/protocol/terminal-activity";
 import { MAX_WEBSOCKET_MESSAGE_BYTES } from "@jagentdesk/protocol/websocket-message-limit";
-import type { HostnamesConfig } from "./hostnames.js";
-import { isHostnameAllowed } from "./hostnames.js";
+import { type HostnamesConfig, isHostnameAllowed } from "./hostnames.js";
 import {
   Session,
   type SessionLifecycleIntent,
   type SessionOptions,
   type SessionRuntimeMetrics,
 } from "./session.js";
-
-type PluginRuntimePort = NonNullable<SessionOptions["pluginRuntime"]>;
-import type { HubRelationshipManagement } from "./hub/relationship-controller.js";
-import type { PairingCodeDetails, PairingCodeManager } from "./pairing/pairing-code.js";
+import { type HubRelationshipManagement } from "./hub/relationship-controller.js";
+import { type PairingCodeDetails, type PairingCodeManager } from "./pairing/pairing-code.js";
 import { WorkspaceArchiveOperations } from "./workspace-archive-operations.js";
-import type { HubExecutionAgents } from "./hub/daemon-executions.js";
-import type { AgentProvider } from "./agent/agent-sdk-types.js";
+import { type HubExecutionAgents } from "./hub/daemon-executions.js";
+import { type AgentProvider } from "./agent/agent-sdk-types.js";
 import { ProviderSnapshotManager } from "./agent/provider-snapshot-manager.js";
-import type {
-  WorkspaceGitRuntimeSnapshot,
-  WorkspaceGitService,
-  WorkspaceGitServiceMetrics,
+import {
+  type WorkspaceGitRuntimeSnapshot,
+  type WorkspaceGitService,
+  type WorkspaceGitServiceMetrics,
 } from "./workspace-git-service.js";
-import type { GitCommandRuntimeMetricsSnapshot } from "../utils/git-command-runtime-metrics.js";
+import { type GitCommandRuntimeMetricsSnapshot } from "../utils/git-command-runtime-metrics.js";
 import { snapshotGitCommandRuntimeMetrics } from "../utils/run-git-command.js";
-import type { WorkspaceAutoName } from "./workspace-auto-name.js";
+import { type WorkspaceAutoName } from "./workspace-auto-name.js";
 import { deriveProjectSlug } from "./workspace-git-metadata.js";
 import { PushTokenStore } from "./push/token-store.js";
 import { createPushNotificationSender, type PushNotificationSender } from "./push/notifications.js";
-import type { ScriptHealthState } from "./script-health-monitor.js";
-import type { ServiceProxySubsystem } from "./service-proxy.js";
-import type { WorkspaceScriptRuntimeStore } from "./workspace-script-runtime-store.js";
-import type { SpeechReadinessSnapshot, SpeechService } from "./speech/speech-runtime.js";
-import type { VoiceCallerContext, VoiceSpeakHandler } from "./voice-types.js";
+import { type ScriptHealthState } from "./script-health-monitor.js";
+import { type ServiceProxySubsystem } from "./service-proxy.js";
+import { type WorkspaceScriptRuntimeStore } from "./workspace-script-runtime-store.js";
+import { type SpeechReadinessSnapshot, type SpeechService } from "./speech/speech-runtime.js";
+import { type VoiceCallerContext, type VoiceSpeakHandler } from "./voice-types.js";
 import {
   computeNotificationPlan,
   isPushEligibleAttentionReason,
@@ -112,7 +113,7 @@ import {
   findLatestPermissionRequest,
 } from "@jagentdesk/protocol/agent-attention-notification";
 import { createGitHubService } from "../services/github-service.js";
-import type { ForgeService } from "../services/forge-service.js";
+import { type ForgeService } from "../services/forge-service.js";
 import {
   extractWsBearerProtocol,
   extractWsBearerToken,
@@ -131,21 +132,21 @@ import {
   normalizeClientRestartRpcReason,
 } from "./lifecycle-reasons.js";
 import { CLIENT_CAPS } from "@jagentdesk/protocol/client-capabilities";
-import type {
-  BrowserAutomationExecuteResponse,
-  BrowserScreenshotRequest,
-  BrowserScreenshotResponse,
-  BrowserListRequest,
-  BrowserListResponse,
+import {
+  type BrowserAutomationExecuteResponse,
+  type BrowserScreenshotRequest,
+  type BrowserScreenshotResponse,
+  type BrowserListRequest,
+  type BrowserListResponse,
 } from "@jagentdesk/protocol/browser-automation/rpc-schemas";
 import {
   BrowserAutomationHostCapabilitySchema,
   type BrowserAutomationHostCapability,
 } from "@jagentdesk/protocol/browser-automation/capabilities";
-import type { BrowserToolsBroker } from "./browser-tools/broker.js";
-import type { DaemonRuntimeConfig } from "./session/daemon/daemon-session.js";
-import type { NonceChallengeManager } from "./pairing/nonce-challenge.js";
-import type { PairedDeviceStore } from "./pairing/paired-devices.js";
+import { type BrowserToolsBroker } from "./browser-tools/broker.js";
+import { type DaemonRuntimeConfig } from "./session/daemon/daemon-session.js";
+import { type NonceChallengeManager } from "./pairing/nonce-challenge.js";
+import { type PairedDeviceStore } from "./pairing/paired-devices.js";
 import { verifySignedHello } from "./pairing/signed-hello.js";
 import {
   APPLICATION_SOCKET_LEASE_CHECK_INTERVAL_MS,
@@ -156,6 +157,10 @@ import {
   sendBoundedPhysicalFrameAndWait,
   sendBoundedPhysicalFrame,
 } from "./websocket/physical-socket.js";
+import { stat } from "node:fs/promises";
+import { MessageReceipts } from "./message-receipts/index.js";
+
+type PluginRuntimePort = NonNullable<SessionOptions["pluginRuntime"]>;
 
 const WS_CLOSE_DAEMON_AUTH_FAILED = 4401;
 
@@ -240,15 +245,18 @@ interface WebSocketServerConfig {
 }
 
 type WebSocketRuntimeMetrics = SessionRuntimeMetrics & CheckoutDiffMetrics;
+
 interface GitRuntimeMetrics {
   commands: GitCommandRuntimeMetricsSnapshot;
   workspaceService: WorkspaceGitServiceMetrics;
 }
+
 type WebSocketRuntimeDiagnosticPayload = WebSocketRuntimeDiagnosticSnapshot<
   WebSocketRuntimeMetrics,
   AgentMetricsSnapshot,
   GitRuntimeMetrics
 >;
+
 type WebSocketRuntimeMetricsLogPayload = Omit<WebSocketRuntimeDiagnosticPayload, "collectedAt">;
 
 type TerminalAttentionReason = "finished" | "needs_input";
@@ -551,8 +559,11 @@ type TrustedLifecycleKey =
   | "clientCapabilities"
   | "sockets"
   | "externalDisconnectCleanupTimeout";
+
 type HubLifecycleOverlap = Extract<keyof HubConnection, TrustedLifecycleKey>;
+
 const HUB_HAS_NO_TRUSTED_LIFECYCLE_STATE: HubLifecycleOverlap extends never ? true : never = true;
+
 void HUB_HAS_NO_TRUSTED_LIFECYCLE_STATE;
 
 interface BrowserToolsRegistration {
@@ -586,20 +597,31 @@ interface ClosePhysicalSocketParams {
 }
 
 const SLOW_REQUEST_THRESHOLD_MS = 500;
+
 const EXTERNAL_SESSION_DISCONNECT_GRACE_MS = 90_000;
+
 const HELLO_TIMEOUT_MS = 15_000;
+
 // A new tailnet device intentionally pauses before hello while its owner
 // reads the code from the desktop and enters it on mobile. Keep that socket
 // alive for the complete pairing-code lifetime instead of returning the
 // misleading "Hello timeout" error after 15 seconds.
 const TAILNET_PAIRING_HELLO_TIMEOUT_MS = 5 * 60 * 1000;
+
 const WS_CLOSE_HELLO_TIMEOUT = 4001;
+
 const WS_CLOSE_INVALID_HELLO = 4002;
+
 const WS_CLOSE_INCOMPATIBLE_PROTOCOL = 4003;
+
 const WS_CLOSE_PAIRING_CANCELLED = 4408;
+
 const PAIRING_ALREADY_IN_PROGRESS_REASON = "Another device pairing is already in progress";
+
 const WS_CLOSE_SERVER_SHUTDOWN = 1001;
+
 const WS_PROTOCOL_VERSION = 1;
+
 const WS_RUNTIME_METRICS_FLUSH_MS = 30_000;
 
 export class MissingDaemonVersionError extends Error {
@@ -652,103 +674,209 @@ function sshServiceOrInMemory(service: SshService | null | undefined): SshServic
 
 export class VoiceAssistantWebSocketServer {
   private readonly logger: pino.Logger;
+
   private readonly wss: WebSocketServer;
+
   private readonly pendingConnections: Map<WebSocketLike, PendingConnection> = new Map();
+
   private readonly sessions: Map<WebSocketLike, SessionConnection> = new Map();
+
   private readonly socketIdentities: Map<WebSocketLike, WebSocketConnectionIdentity> = new Map();
+
   private readonly externalSessionsByKey: Map<string, TrustedSessionConnection> = new Map();
+
   private readonly serverId: string;
+
   private readonly daemonVersion: string;
+
   private readonly daemonRuntimeConfig: DaemonRuntimeConfig | undefined;
+
   private readonly agentManager: AgentManager;
+
   private readonly agentStorage: AgentStorage;
+
+  private readonly messageReceipts: MessageReceipts;
+
   private readonly projectRegistry: ProjectRegistry;
+
   private readonly workspaceRegistry: WorkspaceRegistry;
+
   private readonly chatService: FileBackedChatService;
+
   private readonly loopService: LoopService;
+
   private skillsStorage: NativeSkillsService | null = null;
+
   private usageHistory: UsageHistoryStorage | null = null;
+
   private hostCapabilities: HostCapabilityService | null = null;
+
   private physicalDevices: PhysicalDeviceHub | null = null;
+
   private hostToolInstaller: HostToolInstaller | null = null;
+
   private unsubscribeHostCapabilities: (() => void) | null = null;
+
   private readonly clusterRegistry: ClusterRegistry;
+
   private readonly databaseRegistry: DatabaseRegistry;
+
   private readonly sshService: SshService;
+
   private readonly argocdService: ArgoCdService | null;
+
   private readonly sideloadService: SideloadService | null;
+
   private readonly workspaceBaseBranch: WorkspaceBaseBranchService;
+
   private readonly scheduleService: ScheduleService;
+
   private autorunService!: AutorunService | null;
+
   private sessionShareService!: SessionShareService | null;
+
   private specModeService: SpecModeService | null = null;
+
   // Agent activity graph (spec 31, ADR-0031): one daemon-wide service shared by every session.
   private readonly activityGraphService: ActivityGraphService;
+
   private readonly specPlanSource: SpecModePlanSource;
+
   // Jira (spec 29), injected post-construction.
   private jiraService: JiraService | null = null;
+
   private botsService: BotsService | null = null;
+
   private figmaService: FigmaService | null = null;
+
   // Remote execution (spec 33 / ADR-0044), injected post-construction like Jira.
   private remoteExecService: RemoteExecService | null = null;
+
   private customProvidersService: CustomProviderService | null = null;
+
   private readonly checkoutDiffManager: CheckoutDiffManager;
+
   private readonly github: ForgeService;
+
   private readonly workspaceGitService: WorkspaceGitService;
+
   private readonly workspaceAutoName: WorkspaceAutoName;
+
   private readonly downloadTokenStore: DownloadTokenStore;
+
   private readonly creationService: CreationService;
+
   private readonly jagentdeskHome: string;
+
   private readonly worktreesRoot: string | undefined;
+
   private readonly daemonConfigStore: DaemonConfigStore;
+
   private readonly pushTokenStore: PushTokenStore;
+
   private readonly pushNotificationSender: PushNotificationSender;
+
   // Per agent, the unread finish (by its attention timestamp) that a notification was delivered for.
   private readonly notifiedUnreadFinishAt = new Map<string, number>();
+
   private readonly mcpBaseUrl: string | null;
+
   private speech!: SpeechService | null;
+
   private terminalManager!: TerminalManager | null;
+
   private serviceProxy!: ServiceProxySubsystem | null;
+
   private scriptRuntimeStore!: WorkspaceScriptRuntimeStore | null;
+
   private getDaemonTcpPort!: (() => number | null) | null;
+
   private getDaemonTcpHost!: (() => string | null) | null;
+
   private serviceProxyPublicBaseUrl!: string | null;
+
   private resolveScriptHealth!: ((hostname: string) => ScriptHealthState | null) | null;
+
   private dictation!: {
     finalTimeoutMs?: number;
   } | null;
+
   private readonly voiceSpeakHandlers = new Map<string, VoiceSpeakHandler>();
+
   private readonly voiceCallerContexts = new Map<string, VoiceCallerContext>();
+
   private readonly workspaceSetupSnapshots = new Map<string, WorkspaceSetupSnapshot>();
+
   private readonly providerSnapshotManager: ProviderSnapshotManager;
+
   private onLifecycleIntent!: ((intent: SessionLifecycleIntent) => void) | null;
+
   private onBranchChanged!:
     | ((workspaceId: string, oldBranch: string | null, newBranch: string | null) => void)
     | null;
+
   private serverCapabilities: ServerCapabilities | undefined;
+
   private readonly runtimeMetrics = new WebSocketRuntimeMetricsWindow();
+
   private lastRuntimeMetricsSnapshot: WebSocketRuntimeDiagnosticPayload | null = null;
+
   private runtimeMetricsInterval: ReturnType<typeof setInterval> | null = null;
+
   private applicationSocketLeaseInterval: ReturnType<typeof setInterval> | null = null;
+
   private readonly applicationSocketLease = new ApplicationSocketLease<WebSocketLike>();
+
   private eventLoopDelayMonitor: ReturnType<typeof monitorEventLoopDelay> | null = null;
+
   private unsubscribeSpeechReadiness: (() => void) | null = null;
+
   private unsubscribeDaemonConfigChange: (() => void) | null = null;
+
   private unsubscribeSkillsChange: (() => void) | null = null;
+
   private unsubscribeUsageChange: (() => void) | null = null;
+
   private readonly providerUsageService: ProviderUsageService;
+
   private unsubscribeTerminalActivity: (() => void) | null = null;
+
   private readonly browserToolsBroker: BrowserToolsBroker | null;
+
   private readonly hubRelationships: HubRelationshipManagement | null;
+
   private readonly pairing: PairingServerDependencies | null;
+
   // Sockets attached in-process via attachPluginSocket. The `plugin:<id>` clientId
   // is reserved: only a socket present in this map may claim it during hello, and
   // such a socket may claim ONLY its own `plugin:<id>`. A network socket can never
   // claim any `plugin:`/`hub:` clientId. Plugin sockets also skip the signed-hello
   // requirement (they are trusted in-process) and the external reconnect grace.
   private readonly pluginSocketIds = new Map<WebSocketLike, string>();
+
   private readonly pluginSocketCleanup = new Map<WebSocketLike, () => void>();
+
   private readonly pluginRuntime: PluginRuntimePort | null;
+
+  private async validateCompletedCreation(snapshot: CreationSnapshot): Promise<void> {
+    if (snapshot.workspace && snapshot.kind === "workspace") {
+      const workspace = await this.workspaceRegistry.get(snapshot.workspace.id);
+      if (!workspace) throw new Error("Previously created workspace no longer exists");
+      const directory = await stat(workspace.cwd).catch(() => null);
+      if (!directory?.isDirectory())
+        throw Object.assign(new Error(`Directory not found: ${workspace.cwd}`), {
+          code: "directory_not_found",
+        });
+    }
+    if (
+      snapshot.agentId &&
+      !this.agentManager.getAgent(snapshot.agentId) &&
+      !(await this.agentStorage.get(snapshot.agentId))
+    ) {
+      throw new Error("Previously created agent no longer exists");
+    }
+  }
+
   /**
    * Pairing requests are retained until their code expires or registration
    * completes. The request can arrive while the desktop renderer is still
@@ -762,9 +890,13 @@ export class VoiceAssistantWebSocketServer {
    * second desktop card with a different code.
    */
   private readonly pendingPairingRequests = new Map<string, PendingPairingRequestPayload>();
+
   private readonly pendingPairingRequestTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
   private readonly browserToolsRegistrations = new Map<string, BrowserToolsRegistration>();
+
   private acceptingConnections = true;
+
   private readonly advertiseDaemonStatusRpc: boolean;
 
   // oxlint-disable-next-line complexity
@@ -854,6 +986,13 @@ export class VoiceAssistantWebSocketServer {
       specPlanSource: this.specPlanSource,
     });
     this.agentStorage = agentStorage;
+    this.messageReceipts = new MessageReceipts(join(jagentdeskHome, "agent-requests"));
+    this.creationService = new CreationService(
+      join(jagentdeskHome, "creations"),
+      this.logger.child({ module: "creation" }),
+      (snapshot) => this.validateCompletedCreation(snapshot),
+      join(jagentdeskHome, "agent-requests"),
+    );
     this.projectRegistry = projectRegistry ?? createNoopProjectRegistry();
     this.workspaceRegistry = workspaceRegistry ?? createNoopWorkspaceRegistry();
     const requiredServices = requireWebSocketServices({
@@ -884,7 +1023,7 @@ export class VoiceAssistantWebSocketServer {
     this.workspaceAutoName = workspaceAutoName;
     this.downloadTokenStore = downloadTokenStore;
     this.jagentdeskHome = jagentdeskHome;
-    this.creationService = new CreationService(join(jagentdeskHome, "creations"), logger);
+
     this.daemonConfigStore = daemonConfigStore;
     this.mcpBaseUrl = mcpBaseUrl;
     this.assignOptionalServices({
@@ -2136,6 +2275,7 @@ export class VoiceAssistantWebSocketServer {
       worktreesRoot: this.worktreesRoot,
       agentManager: this.agentManager,
       agentStorage: this.agentStorage,
+      messageReceipts: this.messageReceipts,
       projectRegistry: this.projectRegistry,
       workspaceRegistry: this.workspaceRegistry,
       chatService: this.chatService,
@@ -2526,6 +2666,11 @@ export class VoiceAssistantWebSocketServer {
           : {};
       })(),
       features: {
+        providerOptionControls: true,
+        entityMetadata: true,
+        agentProfiles: true,
+        agentConfigApply: true,
+        creationLifecycle: true,
         providerInstallation: true,
         binaryChunkingV1: true,
         workspaceBaseBranch: true,
@@ -2735,6 +2880,16 @@ export class VoiceAssistantWebSocketServer {
         payload: this.buildServerInfoStatusPayload(),
       },
     };
+  }
+
+  private createDaemonConfigChangedMessage(config: MutableDaemonConfig): WSOutboundMessage {
+    return wrapSessionMessage({
+      type: "status",
+      payload: {
+        status: "daemon_config_changed",
+        config: toWireDaemonConfig(config),
+      },
+    });
   }
 
   // Push notification when an autonomous run reaches a terminal state (spec §14). The

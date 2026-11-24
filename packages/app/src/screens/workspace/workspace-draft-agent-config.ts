@@ -1,4 +1,4 @@
-import type { AgentSessionConfig } from "@jagentdesk/protocol/agent-types";
+import { type AgentSessionConfig } from "@jagentdesk/protocol/agent-types";
 
 export function buildWorkspaceDraftAgentConfig(input: {
   provider: AgentSessionConfig["provider"];
@@ -6,7 +6,7 @@ export function buildWorkspaceDraftAgentConfig(input: {
   modeId?: string;
   model?: string;
   thinkingOptionId?: string;
-  featureValues?: Record<string, unknown>;
+  providerOptions?: Record<string, unknown>;
 }): AgentSessionConfig {
   return {
     provider: input.provider,
@@ -14,6 +14,6 @@ export function buildWorkspaceDraftAgentConfig(input: {
     ...(input.modeId ? { modeId: input.modeId } : {}),
     ...(input.model ? { model: input.model } : {}),
     ...(input.thinkingOptionId ? { thinkingOptionId: input.thinkingOptionId } : {}),
-    ...(input.featureValues ? { featureValues: input.featureValues } : {}),
+    ...(input.providerOptions ? { providerOptions: input.providerOptions } : {}),
   };
 }

@@ -1,4 +1,4 @@
-import type { AgentProvider } from "@jagentdesk/protocol/agent-types";
+import { type AgentProvider } from "@jagentdesk/protocol/agent-types";
 import { normalizeWorkspacePath } from "@/utils/workspace-identity";
 
 export const PROVIDERS_SNAPSHOT_QUERY_ROOT = "providersSnapshot";
@@ -31,4 +31,34 @@ export function providersSnapshotRequestOptions(input: {
 
 export function isProvidersSnapshotHomeScope(cwd?: string | null): boolean {
   return normalizeProvidersSnapshotCwd(cwd) === null;
+}
+
+/**
+ * The providers snapshot as a replica query: its key and its fetch together, so the model picker
+ * and anything else that needs the catalog read the same cache entry. `client` is asked when the
+ * fetch runs.
+ */
+export function providersSnapshotQuery(input: {
+  serverId: string;
+  cwd?: string | null;
+  client: () => SnapshotClient;
+  queryClient?: QueryClient;
+  cache?: ProviderSnapshotCache;
+}) {
+  const cwd = normalizeProvidersSnapshotCwd(input.cwd);
+  return {
+    queryKey: providersSnapshotQueryKey(input.serverId, cwd),
+    // The content-hash cache already owns catalog and model identity.
+    structuralSharing: false as const,
+    pushEvent: "providers_snapshot_update",
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
+      fetchProvidersSnapshot({
+        client: input.client(),
+        serverId: input.serverId,
+        cwd,
+        queryClient: input.queryClient,
+        cache: input.cache,
+        signal,
+      }),
+  };
 }

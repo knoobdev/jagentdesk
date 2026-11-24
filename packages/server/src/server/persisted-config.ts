@@ -3,19 +3,19 @@ import path from "node:path";
 import { z } from "zod";
 import { BuiltinPluginConfigSchema } from "@jagentdesk/protocol/builtin-plugins";
 import { DEFAULT_JAGENTDESK_DAEMON_PORT } from "@jagentdesk/protocol/defaults";
-
 import {
   AgentProviderRuntimeSettingsMapSchema,
   migrateProviderSettings,
   ProviderOverridesSchema,
+  type AgentProviderRuntimeSettingsMap,
 } from "./agent/provider-launch-config.js";
-import type { AgentProviderRuntimeSettingsMap } from "./agent/provider-launch-config.js";
 import { ensurePrivateFile, writePrivateFileAtomicSync } from "./private-files.js";
 import { TerminalProfileSchema } from "@jagentdesk/protocol/messages";
 import { PluginIdSchema, PluginSourceSchema } from "@jagentdesk/protocol/plugin-config";
 import { BrowserFingerprintProfileSchema } from "@jagentdesk/protocol/browser-automation/fingerprint-profile";
 import { JAgentDeskServicePortAllocationSchema } from "@jagentdesk/protocol/jagentdesk-config-schema";
 import { OrchestrationConfigSchema } from "@jagentdesk/protocol/orchestration";
+import { AgentProfileSchema } from "@jagentdesk/protocol/agent-profile";
 
 export const LogLevelSchema = z.enum(["trace", "debug", "info", "warn", "error", "fatal"]);
 export const LogFormatSchema = z.enum(["pretty", "json"]);
@@ -323,6 +323,7 @@ export const PersistedConfigSchema = z
         appendSystemPrompt: z.string().optional(),
         operatorContext: z.string().optional(),
         terminalProfiles: z.array(TerminalProfileSchema).optional(),
+        agentProfiles: z.array(AgentProfileSchema).optional(),
         orchestration: OrchestrationConfigSchema.optional(),
         cors: z
           .object({

@@ -1,5 +1,5 @@
 import { CodexBackgroundInventory } from "./codex/background-inventory.js";
-import { validateProviderOptions } from "../provider-options.js";
+import { validateProviderOptions, assertChangesAreLive } from "../provider-options.js";
 import {
   AgentTurnStartCanceledError,
   getAgentStreamEventTurnId,
@@ -41,13 +41,13 @@ import {
   type ProviderCatalog,
   type ProviderRefreshContext,
   type ResolveAgentDefaultModeInput,
+  type AgentOptionControl,
 } from "../agent-sdk-types.js";
 import { importSessionFromPersistence } from "../provider-session-import.js";
 import { isInternalJAgentDeskMcpServer } from "../runtime-mcp-config.js";
 import { runProviderRefreshActivity } from "../provider-refresh-deadline.js";
-import type { Logger } from "pino";
-
-import type { ChildProcess, ChildProcessWithoutNullStreams } from "node:child_process";
+import { type Logger } from "pino";
+import { type ChildProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Dirent } from "node:fs";
 import fs from "node:fs/promises";
@@ -88,6 +88,7 @@ import {
   CodexServiceTierSchema,
   readCodexServiceTier,
   type CodexServiceTier,
+  buildCodexControls,
 } from "./codex-feature-definitions.js";
 import {
   CodexAppServerClient,
@@ -137,12 +138,14 @@ import {
   MODE_APPLIES_NEXT_TURN_NOTICE,
   THINKING_APPLIES_NEXT_TURN_NOTICE,
 } from "../provider-notices.js";
-import type { WorkspaceGitService } from "../../workspace-git-service.js";
+import { type WorkspaceGitService } from "../../workspace-git-service.js";
 import {
   applyCodexToolPolicy,
   CodexProviderOptionsSchema,
   type CodexProviderOptions,
 } from "./codex/options.js";
+import { type ProviderOptions } from "@jagentdesk/protocol/agent-types";
+import { applyProviderOptionsPatch } from "../option-controls.js";
 
 function assertChildWithPipes(
   child: ChildProcess,
@@ -170,19 +173,26 @@ function isCodexAlreadyUnarchivedError(error: unknown, threadId: string): boolea
 }
 
 const TURN_START_TIMEOUT_MS = 90 * 1000;
+
 const INTERRUPT_TIMEOUT_MS = 2_000;
+
 // `turn/interrupt` ends a turn but leaves the shell commands it started running.
 // Each terminate is bounded by the first constant. A turn start waits for the
 // interrupted turn's commands to end, at most the interrupt's own bound plus one
 // terminate's and a margin, so it gives up only when a request outlives its timeout.
 const INTERRUPTED_TURN_TERMINATE_TIMEOUT_MS = 2_000;
+
 const INTERRUPTED_TURN_CLEANUP_WAIT_MS =
   INTERRUPT_TIMEOUT_MS + INTERRUPTED_TURN_TERMINATE_TIMEOUT_MS + 500;
+
 // Turns whose commands are remembered; older turns are forgotten first.
 const INTERRUPTED_TURN_TRACKED_TURNS = 16;
+
 const CODEX_PROVIDER = "codex" as const;
+
 // Codex 0.156.0 first forwards Flex without a matching entry in the model catalog.
 const CODEX_UNADVERTISED_FLEX_MIN_VERSION: readonly [number, number, number] = [0, 156, 0];
+
 // These native provider identities belong to Codex, not to an older custom
 // JAgentDesk provider. Never include them in a custom provider's legacy import scan.
 const CODEX_BUILTIN_MODEL_PROVIDER_IDS = new Set([
@@ -193,6 +203,7 @@ const CODEX_BUILTIN_MODEL_PROVIDER_IDS = new Set([
   "amazon-bedrock-runtime",
   "gcp",
 ]);
+
 // Codex treats most app-server client names as the model-request originator.
 // This reserved Codex name is non-originating, so requests keep Codex's default
 // CLI identity instead of showing up as JAgentDesk in provider usage logs.
@@ -201,9 +212,13 @@ const CODEX_NON_ORIGINATING_APP_SERVER_CLIENT_INFO = {
   title: "Codex App Server Daemon",
   version: "0.0.0",
 } as const;
+
 const ASSISTANT_MESSAGE_BOUNDARY_MARKDOWN = "\n\n---\n\n";
+
 const MAX_PENDING_SUB_AGENT_THREADS = 32;
+
 const MAX_PENDING_SUB_AGENT_NOTIFICATIONS_PER_THREAD = 128;
+
 // COMPAT(codexLegacyCollabAgentToolCall): Codex <0.143 emits this shape. Added in
 // JAgentDesk v0.1.105; remove after 2027-01-09 once the supported Codex floor is >=0.143.
 const CODEX_TOOL_THREAD_ITEM_TYPES = new Set([
@@ -214,7 +229,9 @@ const CODEX_TOOL_THREAD_ITEM_TYPES = new Set([
   "collabAgentToolCall",
   "subAgentActivity",
 ]);
+
 const CODEX_CONTEXT_COMPACTION_TYPE = "contextCompaction";
+
 const CODEX_PLAN_IMPLEMENTATION_PROMPT_PREFIX =
   "The user approved the plan. Implement it now. Do not restate or revise the plan unless blocked.";
 
@@ -222,7 +239,9 @@ const CODEX_PLAN_IMPLEMENTATION_PROMPT_PREFIX =
 // `--enable goals` at launch, so we gate by version and silently skip the flag
 // (and the /goal slash command) when the binary is too old.
 const CODEX_GOALS_MIN_VERSION: readonly [number, number, number] = [0, 128, 0];
+
 const CODEX_AUTO_REVIEW_MIN_VERSION: readonly [number, number, number] = [0, 115, 0];
+
 // Codex removed `thread/rollback` in 0.156.0, so rewinding a legacy thread there
 // has to fork before the target turn instead.
 const CODEX_THREAD_ROLLBACK_REMOVED_VERSION: readonly [number, number, number] = [0, 156, 0];
@@ -3567,7 +3586,9 @@ function enabledCodexSkills(
 }
 
 type CodexPromptContentBlock = AgentPromptContentBlock | CodexSkillPromptBlock;
+
 type CodexPromptInput = string | CodexPromptContentBlock[];
+
 interface CodexTextElement {
   byteRange: {
     start: number;
@@ -3752,70 +3773,121 @@ interface ConsumedRootCompaction {
 
 export class CodexAppServerAgentSession implements AgentSession {
   readonly provider = CODEX_PROVIDER;
+
   readonly capabilities = CODEX_APP_SERVER_CAPABILITIES;
+
   readonly persistenceUpdatedOnResume = true;
 
   private readonly logger: Logger;
+
   private readonly config: AgentSessionConfig;
+
   private readonly instructionSnapshot: CodexInstructionSnapshot;
+
   private supportsInstructionSnapshots = false;
+
   private readonly codexHome: string;
+
   private currentMode: string;
+
   private hasWorkflowModeOverride: boolean;
+
   private readonly providerOptions: CodexProviderOptions;
+
   private resolvedWorkspaceWrite: NonNullable<
     CodexProviderOptions["sandbox_workspace_write"]
   > | null = null;
+
   private resolvedSandboxPolicy: Record<string, unknown> | null = null;
+
   private currentThreadId: string | null = null;
+
   // Codex writes a new thread's rollout at its first turn. Until then the thread exists only
   // in this app-server, so no other app-server can resume it and it is not reported.
   private savedThreadId: string | null = null;
+
   private currentTurnId: string | null = null;
+
   private pendingForegroundTurnIdentification: {
     foregroundTurnId: string;
     promise: Promise<string | null>;
     resolve: (turnId: string | null) => void;
   } | null = null;
+
   private pendingForegroundStart: {
     promise: Promise<void>;
     resolve: () => void;
     cancelRequested: boolean;
   } | null = null;
+
   private client: CodexAppServerClient | null = null;
+
   private readonly background = new CodexBackgroundInventory((event) => this.emitEvent(event));
+
   private threadRollbackAvailable = true;
+
   private readonly subscribers = new Set<(event: AgentStreamEvent) => void>();
+
   private startupEvents: AgentStreamEvent[] | null = null;
+
+  /** How the opened session differs from the options it was given; reported at first subscribe. */
+  openOptionsPatch: Record<string, unknown> = {};
+
   private readonly turnNamespace = randomUUID();
+
   private nextTurnOrdinal = 0;
+
   private activeForegroundTurnId: string | null = null;
+
   private activeClientMessageId: string | null = null;
+
   private cachedRuntimeInfo: AgentRuntimeInfo | null = null;
-  private serviceTier: string | null = null;
+
+  /** The tier the options ask for; `serviceTier` is what the current model can honor. */
+  private requestedServiceTier: string | null = null;
+
   private speedModels: CodexModel[] = [];
+
   private supportsUnadvertisedFlex = false;
+
   private planModeEnabled = false;
+
   // History read by rewind or an archived resume, held until streamHistory consumes it.
   private stagedHistory: CodexThreadHistory | null = null;
+
   // Collects provider subagent events emitted while a thread history read rebuilds routes.
   private historySubagentEvents: AgentStreamEvent[] | null = null;
+
   // A resumed thread's earlier turns and sub-agents are known only after reading its history.
   private historyIndexed = true;
+
   private pendingPermissions = new Map<string, AgentPermissionRequest>();
+
   private mcpElicitationPermissionIds = new Map<number, string>();
+
   private pendingPermissionHandlers = new Map<string, CodexPendingPermissionHandler>();
+
   private resolvedPermissionRequests = new Set<string>();
+
   private pendingAgentMessages = new Map<string, string>();
+
   private pendingReasoning = new Map<string, string[]>();
+
   private pendingCommandOutputDeltas = new Map<string, string[]>();
+
   private pendingFileChangeOutputDeltas = new Map<string, string[]>();
+
   private pendingToolCallDetails = new Map<string, ToolCallTimelineItem["detail"]>();
+
   private pendingAssistantMessageBoundary = false;
+
   // The root turn's model-stream reconnect run that has not yet resumed or ended.
   private activeStreamRetry: CodexStreamRetry | null = null;
+
   private readonly shownWarningMessages = new Set<string>();
+
   private terminalCommandByProcessId = new Map<string, string>();
+
   // The root thread's still-running command process ids, keyed by the native turn that
   // started them. Codex's `thread/backgroundTerminals/list` carries no turn, so
   // `item/started` is the only record of which turn owns a process.
@@ -3823,41 +3895,72 @@ export class CodexAppServerAgentSession implements AgentSession {
     string,
     { processIds: Set<string>; terminatedProcessIds: Set<string>; interruptAccepted: boolean }
   >();
+
   private interruptedTurnCleanup: Promise<void> | null = null;
+
   private pendingUnlabeledTerminalInteractions = new Map<
     string,
     Array<{ callId: string; stdin: string | null }>
   >();
+
   private nextTerminalInteractionOrdinal = 0;
+
   private emittedTerminalInteractionKeys = new Set<string>();
+
   private emittedExecCommandStartedCallIds = new Set<string>();
+
   private emittedExecCommandCompletedCallIds = new Set<string>();
+
   private emittedItemStartedIds = new Set<string>();
+
   private emittedItemCompletedIds = new Set<string>();
+
   private emittedProviderSubagentUserMessageKeys = new Set<string>();
+
   private subAgentCallsByCallId = new Map<string, CodexSubAgentCallState>();
+
   private subAgentCallIdByChildThreadId = new Map<string, string>();
+
   private pendingSubAgentNotificationsByThreadId = new Map<string, ParsedCodexNotification[]>();
+
   private warnedUnknownNotificationMethods = new Set<string>();
+
   private warnedInvalidNotificationPayloads = new Set<string>();
+
   private warnedIncompleteEditToolCallIds = new Set<string>();
+
   private latestUsage: AgentUsage | undefined;
+
   private latestPlanResult: { callId: string; text: string; turnId: string | null } | null = null;
+
   private readonly userMessageTurnIndexes = new Map<string, number>();
+
   private readonly userMessageTurnIds: string[] = [];
+
   private readonly userMessageProviderTurnIds = new Map<string, string>();
+
   private pendingManualCompactionStarts = 0;
+
   private compactionTriggerByItemId = new Map<string, "auto" | "manual">();
+
   private pendingRootCompactionItemIds = new Set<string>();
+
   private pendingAnonymousRootCompactions = 0;
+
   // Codex can report one completed compaction through both channels:
   // `thread/compacted` and a completed `contextCompaction` item.
   private unpairedCompactionNotificationCompletions = 0;
+
   private unpairedCompactionItemCompletions = 0;
+
   private connected = false;
+
   private connectionPromise: Promise<void> | null = null;
+
   private readonly startupAbort = new AbortController();
+
   private closed = false;
+
   private collaborationModes: Array<{
     name: string;
     mode?: string | null;
@@ -3865,6 +3968,7 @@ export class CodexAppServerAgentSession implements AgentSession {
     reasoning_effort?: string | null;
     developer_instructions?: string | null;
   }> = [];
+
   private restoredCollaborationMode: {
     name: string;
     mode: string;
@@ -3872,11 +3976,13 @@ export class CodexAppServerAgentSession implements AgentSession {
     reasoning_effort: string | null;
     developer_instructions?: never;
   } | null = null;
+
   private resolvedCollaborationMode: {
     mode: string;
     settings: Record<string, unknown>;
     name: string;
   } | null = null;
+
   private cachedSkills: Array<{ name: string; description: string; path: string }> | null = null;
 
   constructor(
@@ -3910,10 +4016,8 @@ export class CodexAppServerAgentSession implements AgentSession {
     );
     this.codexHome = deps.codexHome ?? resolveCodexHomeDir(process.env);
     this.config.thinkingOptionId = normalizeCodexThinkingOptionId(this.config.thinkingOptionId);
-    this.serviceTier = readCodexServiceTier(this.config.featureValues);
-    if (this.config.featureValues?.plan_mode) {
-      this.planModeEnabled = true;
-    }
+    this.requestedServiceTier = readCodexServiceTier(this.providerOptions);
+    this.planModeEnabled = this.providerOptions.plan_mode === true;
 
     if (this.resumeHandle?.sessionId) {
       this.currentThreadId = this.resumeHandle.sessionId;
@@ -3926,6 +4030,13 @@ export class CodexAppServerAgentSession implements AgentSession {
 
   get id(): string | null {
     return this.currentThreadId;
+  }
+
+  get controls(): AgentOptionControl[] {
+    return buildCodexControls({
+      serviceTiers: this.currentServiceTiers(),
+      planModeAvailable: this.hasPlanCollaborationMode(),
+    });
   }
 
   get features(): AgentFeature[] {
@@ -4007,7 +4118,7 @@ export class CodexAppServerAgentSession implements AgentSession {
 
       this.speedModels =
         CodexModelListResponseSchema.parse(await client.request("model/list", {})).data ?? [];
-      this.reconcileServiceTier();
+      this.normalizeSpeed();
       await this.loadResolvedWorkspaceWrite();
       await this.loadCollaborationModes();
       await this.loadSkills();
@@ -4227,6 +4338,36 @@ export class CodexAppServerAgentSession implements AgentSession {
     this.resolvedCollaborationMode = this.resolveCollaborationMode();
   }
 
+  /**
+   * A saved `service_tier: "fast"` runs as the model's Fast tier, and a tier the opening model
+   * lacks runs as Normal; the session says so in `openOptionsPatch`, so the options and the
+   * control agree (as when the model is switched later).
+   */
+  private normalizeSpeed(): void {
+    const requested = this.requestedServiceTier;
+    const resolved = this.resolveServiceTier(requested);
+    if (requested === resolved) return;
+    const runs = resolved ?? "default";
+    this.providerOptions = { ...this.providerOptions, service_tier: runs };
+    this.requestedServiceTier = runs;
+    this.openOptionsPatch = { service_tier: runs };
+  }
+
+  private get serviceTier(): string | null {
+    return this.resolveServiceTier(this.requestedServiceTier);
+  }
+
+  private resolveServiceTier(requested: string | null): string | null {
+    // Until the model list arrives there is nothing to check the request against.
+    if (this.speedModels.length === 0 || requested === "default") return requested;
+    const tiers = this.currentServiceTiers();
+    // `fast` names whichever tier the model calls Fast.
+    if (requested === "fast" && !tiers.some((tier) => tier.id === "fast")) {
+      return tiers.find((tier) => tier.name.toLowerCase() === "fast")?.id ?? null;
+    }
+    return tiers.some((tier) => tier.id === requested) ? requested : null;
+  }
+
   private offeredServiceTiers(): CodexServiceTier[] {
     const selectedModel = this.config.model
       ? this.speedModels.find(
@@ -4247,13 +4388,6 @@ export class CodexAppServerAgentSession implements AgentSession {
     }
     const { fast_mode: _legacyFast, ...values } = this.config.featureValues ?? {};
     this.config.featureValues = { ...values, service_tier: this.serviceTier ?? "default" };
-  }
-
-  private applyFeatureValue(featureId: "plan_mode", value: boolean): void {
-    this.config.featureValues = { ...this.config.featureValues, [featureId]: value };
-    this.planModeEnabled = value;
-    this.refreshResolvedCollaborationMode();
-    this.cachedRuntimeInfo = null;
   }
 
   private rememberPlanResult(item: ToolCallTimelineItem): void {
@@ -4305,7 +4439,13 @@ export class CodexAppServerAgentSession implements AgentSession {
     const planText =
       typeof params.planText === "string" ? normalizePlanMarkdown(params.planText) : "";
 
-    this.applyFeatureValue("plan_mode", false);
+    this.setPlanMode(false);
+    // The user left plan mode; their options follow so controls and reopened sessions agree.
+    this.emitEvent({
+      type: "options_changed",
+      provider: CODEX_PROVIDER,
+      patch: { plan_mode: false },
+    });
 
     return buildCodexPlanImplementationPrompt(planText);
   }
@@ -5045,9 +5185,27 @@ export class CodexAppServerAgentSession implements AgentSession {
 
   async setModel(modelId: string | null): Promise<void> {
     this.config.model = modelId ?? undefined;
-    this.reconcileServiceTier();
     this.refreshResolvedCollaborationMode();
     this.cachedRuntimeInfo = null;
+    this.dropUnavailableServiceTier();
+  }
+
+  /**
+   * A speed the new model does not offer turns into Normal and is reported, so choosing a model
+   * that does offer it again does not bring the paid tier back. It is reported as Normal rather
+   * than removed so a configured default cannot fill the old speed back in.
+   */
+  private dropUnavailableServiceTier(): void {
+    const requested = this.requestedServiceTier;
+    if (requested === null || this.speedModels.length === 0) return;
+    if (this.isServiceTierAvailable(requested)) return;
+    this.requestedServiceTier = "default";
+    this.providerOptions = { ...this.providerOptions, service_tier: "default" };
+    this.emitEvent({
+      type: "options_changed",
+      provider: CODEX_PROVIDER,
+      patch: { service_tier: "default" },
+    });
   }
 
   async setThinkingOption(thinkingOptionId: string | null): Promise<void | AgentProviderNotice> {
@@ -5057,6 +5215,55 @@ export class CodexAppServerAgentSession implements AgentSession {
     if (this.activeForegroundTurnId) {
       return THINKING_APPLIES_NEXT_TURN_NOTICE;
     }
+  }
+
+  /** Applies only the options the patch sets; the rest of the running options stay as they are. */
+  async applyOptions(options: ProviderOptions): Promise<Record<string, unknown>> {
+    // The approval policy and sandbox are sent when the thread starts, not with each turn.
+    assertChangesAreLive({
+      provider: "codex",
+      patch: options,
+      current: this.providerOptions,
+      live: ["service_tier", "plan_mode"],
+    });
+    const valid =
+      validateProviderOptions(
+        "codex",
+        CodexProviderOptionsSchema,
+        applyProviderOptionsPatch({ options: this.providerOptions, patch: options }),
+      ) ?? {};
+    const requested = "service_tier" in options ? readCodexServiceTier(options) : null;
+    let accepted = this.requestedServiceTier;
+    if ("service_tier" in options) {
+      if (requested !== accepted && !this.isServiceTierAvailable(requested)) {
+        throw new Error(
+          `Codex speed '${String(requested)}' is not available for model '${this.config.model ?? "default"}'`,
+        );
+      }
+      // The session keeps the catalog's id for the tier, so a later model switch sees what runs.
+      accepted = requested && (this.resolveServiceTier(requested) ?? requested);
+    }
+    this.providerOptions = { ...valid, ...(accepted ? { service_tier: accepted } : {}) };
+    this.requestedServiceTier = accepted || null;
+    if ("plan_mode" in options) this.setPlanMode(options.plan_mode === true);
+    this.cachedRuntimeInfo = null;
+    // The catalog may name the tier differently from the request (`fast` is the Fast tier's id).
+    const tier = this.serviceTier;
+    return tier !== null && requested !== null && tier !== requested ? { service_tier: tier } : {};
+  }
+
+  private isServiceTierAvailable(tier: string | null): boolean {
+    if (tier === null || tier === "default") return true;
+    const tiers = this.currentServiceTiers();
+    const namesFast = tier === "fast" && tiers.some((entry) => entry.name.toLowerCase() === "fast");
+    return namesFast || tiers.some((entry) => entry.id === tier);
+  }
+
+  private setPlanMode(enabled: boolean): void {
+    if (this.planModeEnabled === enabled) return;
+    this.planModeEnabled = enabled;
+    this.refreshResolvedCollaborationMode();
+    this.cachedRuntimeInfo = null;
   }
 
   async setFeature(featureId: string, value: unknown): Promise<void> {
@@ -5865,7 +6072,6 @@ export class CodexAppServerAgentSession implements AgentSession {
   private async applyDefaultModelAndThinking(): Promise<string> {
     const { model, thinkingOptionId } = await this.resolveModelAndThinking();
     this.config.model = model;
-    this.reconcileServiceTier();
     this.config.thinkingOptionId = thinkingOptionId;
     this.refreshResolvedCollaborationMode();
     return model;
@@ -5931,7 +6137,8 @@ export class CodexAppServerAgentSession implements AgentSession {
 
   private buildCodexInnerConfig(): Record<string, unknown> | null {
     const innerConfig: Record<string, unknown> = {};
-    Object.assign(innerConfig, this.providerOptions);
+    const { service_tier: _tier, plan_mode: _plan, ...codexConfig } = this.providerOptions;
+    Object.assign(innerConfig, codexConfig);
     if (this.deps.customCodexConfig) {
       Object.assign(innerConfig, this.deps.customCodexConfig);
     }

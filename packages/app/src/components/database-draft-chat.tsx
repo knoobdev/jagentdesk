@@ -12,9 +12,9 @@ import { encodeImages } from "@/utils/encode-images";
 import { isWeb } from "@/constants/platform";
 import { buildDatabaseSystemPrompt } from "@/components/database-ask-agent";
 import { databaseChatTitle } from "@/utils/database-chat-title";
-import type { AgentSnapshotPayload } from "@jagentdesk/protocol/messages";
-import type { CreateAgentRequestOptions } from "@jagentdesk/client/internal/daemon-client";
-import type { Theme } from "@/styles/theme";
+import { type AgentSnapshotPayload } from "@jagentdesk/protocol/messages";
+import { type CreateAgentRequestOptions } from "@jagentdesk/client/internal/daemon-client";
+import { type Theme } from "@/styles/theme";
 
 export interface DatabaseComposerContext {
   engine: string;
@@ -108,7 +108,6 @@ export function DatabaseDraftChat({
       initialServerId: serverId,
       initialValues: { workingDir: cwd },
       isVisible: true,
-      onlineServerIds,
       lockedWorkingDir: cwd,
     },
   });
@@ -191,8 +190,9 @@ export function DatabaseDraftChat({
         onSubmitMessage={handleCreateFromInput}
         isSubmitLoading={isSubmitting}
         blurOnSubmit
-        value={draftInput.text}
-        onChangeText={draftInput.setText}
+        textSource={draftInput.textSource}
+        textReplacement={draftInput.textReplacement}
+        onChangeText={draftInput.editText}
         attachments={draftInput.attachments}
         onChangeAttachments={draftInput.setAttachments}
         cwd={composerState.workingDir}

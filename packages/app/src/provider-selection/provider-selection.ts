@@ -1,11 +1,11 @@
-import type {
-  AgentMode,
-  AgentModelDefinition,
-  AgentProvider,
-  ProviderSnapshotEntry,
+import {
+  type AgentMode,
+  type AgentModelDefinition,
+  type AgentProvider,
+  type ProviderSnapshotEntry,
 } from "@jagentdesk/protocol/agent-types";
-import type { AgentProviderDefinition } from "@jagentdesk/protocol/provider-manifest";
-import type { DraftCommandTarget } from "@/agent-commands";
+import { type AgentProviderDefinition } from "@jagentdesk/protocol/provider-manifest";
+import { type DraftCommandTarget } from "@/agent-commands";
 import { buildFavoriteModelKey, type FavoriteModelRow } from "@/hooks/use-form-preferences";
 import { i18n } from "@/i18n/i18next";
 import { compareMatchScores, scoreTextFields } from "@/utils/score-match";
@@ -291,7 +291,7 @@ export function buildDraftCommandTarget(input: {
   cwd: string;
   effectiveModelId: string;
   effectiveThinkingOptionId: string;
-  featureValues?: Record<string, unknown>;
+  providerOptions?: Record<string, unknown>;
 }): DraftCommandTarget {
   const cwd = input.cwd.trim();
   if (!cwd) {
@@ -311,7 +311,7 @@ export function buildDraftCommandTarget(input: {
     ...(input.effectiveThinkingOptionId
       ? { thinkingOptionId: input.effectiveThinkingOptionId }
       : {}),
-    ...(input.featureValues ? { featureValues: input.featureValues } : {}),
+    ...(input.providerOptions ? { providerOptions: input.providerOptions } : {}),
   };
   return { status: "ready", config };
 }

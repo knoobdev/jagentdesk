@@ -490,6 +490,7 @@ const pureBlackDarkColors = buildDarkSemanticColors({
 
 export const SPACING = {
   0: 0,
+  0.5: 2,
   1: 4,
   1.5: 6,
   2: 8,
@@ -509,6 +510,7 @@ export const FONT_SIZE = {
   code: 12,
   sm: 14,
   base: 16,
+  content: 16,
   lg: 18,
   xl: 20,
   "2xl": 22,
@@ -526,6 +528,8 @@ export const ICON_SIZE = {
   md: 16,
   lg: 20,
 } as const;
+
+export const ICON_STROKE_WIDTH = 1.5;
 
 export const FONT_WEIGHT = {
   normal: "normal" as const,

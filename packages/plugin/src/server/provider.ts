@@ -1,4 +1,4 @@
-import type { JsonValue } from "@jagentdesk/protocol/agent-types";
+import { type JsonValue } from "@jagentdesk/protocol/agent-types";
 import { z } from "zod";
 
 export const PROVIDER_PROTOCOL_VERSION = 1 as const;
@@ -215,6 +215,13 @@ export interface ProviderConfigChanges {
   model?: string | null;
   mode?: string | null;
   thinkingOption?: string | null;
+  /**
+   * The option keys to change on the running session, with or without a control. Apply every key
+   * or fail the whole request, for a key you only read when a session opens. `null` returns the
+   * key to the provider's own default. The committed values come back in `session.config`.
+   */
+  providerOptions?: Readonly<Record<string, JsonValue>>;
+  /** @deprecated Sent next to `providerOptions` to a provider that reports `settings`. */
   settings?: Readonly<Record<string, JsonValue>>;
 }
 
@@ -400,6 +407,33 @@ export interface ProviderMode {
   isUnattended?: boolean;
 }
 
+/**
+ * Draws one top-level option key in the composer. The control holds no value: JAgentDesk reads it
+ * from the agent's options.
+ */
+export type ProviderOptionControl =
+  | {
+      type: "toggle";
+      key: string;
+      label: string;
+      description?: string;
+      /** A Lucide icon name. */
+      icon?: string;
+      /** Shown while the key has no value. */
+      defaultValue?: boolean;
+    }
+  | {
+      type: "select";
+      key: string;
+      label: string;
+      description?: string;
+      /** A Lucide icon name. */
+      icon?: string;
+      /** The choice shown while the key has no value. */
+      defaultValue?: string;
+      choices: ReadonlyArray<{ value: string; label: string; description?: string }>;
+    };
+
 export type ProviderSetting =
   | {
       type: "toggle";
@@ -424,7 +458,12 @@ export interface ProviderConfigState {
   models: readonly ProviderModel[];
   modes: readonly ProviderMode[];
   thinkingOptions: readonly ProviderThinkingOption[];
-  settings: readonly ProviderSetting[];
+  /** The option keys that get a composer control. May change at runtime, for example per model. */
+  controls?: readonly ProviderOptionControl[];
+  /** What the session runs with now, for the keys it reports. Publish the committed values. */
+  providerOptions?: Readonly<Record<string, JsonValue>>;
+  /** @deprecated Report `controls` and `providerOptions`. Each setting id is an option key. */
+  settings?: readonly ProviderSetting[];
 }
 
 export interface ProviderCatalog {
@@ -768,13 +807,17 @@ export function requireProviderCapabilities(
 }
 
 const idSchema = z.string().min(1);
+
 const jsonObjectSchema = z.record(z.string(), z.json());
+
 const providerErrorSchema = z
   .object({ message: z.string(), code: z.string().optional(), diagnostic: z.string().optional() })
   .strip();
+
 const persistenceSchema = z
   .object({ version: z.number().int().nonnegative(), data: z.json() })
   .strip();
+
 const mcpServerSchema = z.discriminatedUnion("type", [
   z
     .object({
@@ -802,6 +845,7 @@ const mcpServerSchema = z.discriminatedUnion("type", [
     })
     .strict(),
 ]);
+
 const toolPolicySchema = z
   .object({
     preapproved: z.array(
@@ -809,6 +853,7 @@ const toolPolicySchema = z
     ),
   })
   .strict();
+
 const providerPermissionResponseSchema: z.ZodType<ProviderPermissionResponse> =
   z.discriminatedUnion("behavior", [
     z
@@ -828,6 +873,7 @@ const providerPermissionResponseSchema: z.ZodType<ProviderPermissionResponse> =
       })
       .strip(),
   ]);
+
 const sessionConfigSchema = z
   .object({
     cwd: z.string(),
@@ -844,6 +890,7 @@ const sessionConfigSchema = z
     persist: z.boolean(),
   })
   .strict();
+
 const externalResourceSchema = z
   .object({
     provider: z.string(),
@@ -855,6 +902,7 @@ const externalResourceSchema = z
     url: z.string(),
   })
   .strip();
+
 const reviewContextLineSchema = z
   .object({
     oldLineNumber: z.number().int().positive().nullable(),
@@ -863,6 +911,7 @@ const reviewContextLineSchema = z
     content: z.string(),
   })
   .strip();
+
 const providerContentSchema: z.ZodType<ProviderContent> = z.union([
   z.object({ type: z.literal("text"), text: z.string() }).strict(),
   z.object({ type: z.literal("image"), data: z.string(), mimeType: z.string() }).strict(),
@@ -961,6 +1010,7 @@ const providerContentSchema: z.ZodType<ProviderContent> = z.union([
     })
     .strip(),
 ]);
+
 const promptSchema = z
   .object({
     clientMessageId: idSchema,
@@ -973,11 +1023,13 @@ const promptSchema = z
     clearPendingPermissions: z.boolean().optional(),
   })
   .strict();
+
 const configChangesSchema = z
   .object({
     model: z.string().nullable().optional(),
     mode: z.string().nullable().optional(),
     thinkingOption: z.string().nullable().optional(),
+    providerOptions: jsonObjectSchema.optional(),
     settings: jsonObjectSchema.optional(),
   })
   .strict();
@@ -1070,6 +1122,7 @@ const modeSchema = z
     isUnattended: z.boolean().optional(),
   })
   .strip();
+
 const selectOptionSchema = z
   .object({
     id: idSchema,
@@ -1079,6 +1132,7 @@ const selectOptionSchema = z
     metadata: jsonObjectSchema.optional(),
   })
   .strip();
+
 const modelSchema = z
   .object({
     id: idSchema,
@@ -1093,6 +1147,7 @@ const modelSchema = z
     defaultThinkingOptionId: z.string().optional(),
   })
   .strip();
+
 const settingSchema = z.discriminatedUnion("type", [
   z
     .object({
@@ -1114,6 +1169,35 @@ const settingSchema = z.discriminatedUnion("type", [
     })
     .strip(),
 ]);
+
+const controlSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      type: z.literal("toggle"),
+      key: idSchema,
+      label: z.string(),
+      description: z.string().optional(),
+      icon: z.string().optional(),
+      defaultValue: z.boolean().optional(),
+    })
+    .strip(),
+  z
+    .object({
+      type: z.literal("select"),
+      key: idSchema,
+      label: z.string(),
+      description: z.string().optional(),
+      icon: z.string().optional(),
+      defaultValue: z.string().optional(),
+      choices: z.array(
+        z
+          .object({ value: z.string(), label: z.string(), description: z.string().optional() })
+          .strip(),
+      ),
+    })
+    .strip(),
+]);
+
 const configStateSchema = z
   .object({
     model: z.string().optional(),
@@ -1122,9 +1206,12 @@ const configStateSchema = z
     models: z.array(modelSchema),
     modes: z.array(modeSchema),
     thinkingOptions: z.array(selectOptionSchema),
-    settings: z.array(settingSchema),
+    controls: z.array(controlSchema).optional(),
+    providerOptions: jsonObjectSchema.optional(),
+    settings: z.array(settingSchema).optional(),
   })
   .strip();
+
 const catalogSchema = z
   .object({
     models: z.array(modelSchema),
@@ -1135,6 +1222,7 @@ const catalogSchema = z
     defaultThinkingOption: z.string().optional(),
   })
   .strip();
+
 const noticeSchema = z
   .object({
     id: idSchema,
@@ -1144,6 +1232,7 @@ const noticeSchema = z
     dismissed: z.boolean().optional(),
   })
   .strip();
+
 const commandSchema = z
   .object({
     name: idSchema,
@@ -1152,6 +1241,7 @@ const commandSchema = z
     kind: z.enum(["command", "skill"]).optional(),
   })
   .strip();
+
 const usageSchema = z
   .object({
     inputTokens: z.number().optional(),
@@ -1162,6 +1252,7 @@ const usageSchema = z
     contextWindowUsedTokens: z.number().optional(),
   })
   .strip();
+
 const worktreeCommandSchema = z
   .object({
     index: z.number().int().positive(),
@@ -1173,6 +1264,7 @@ const worktreeCommandSchema = z
     durationMs: z.number().nonnegative().optional(),
   })
   .strip();
+
 const toolCallDetailSchema: z.ZodType<ProviderToolCallDetail> = z.discriminatedUnion("type", [
   z
     .object({
@@ -1286,7 +1378,9 @@ const toolCallDetailSchema: z.ZodType<ProviderToolCallDetail> = z.discriminatedU
   z.object({ type: z.literal("plan"), text: z.string() }).strip(),
   z.object({ type: z.literal("unknown"), input: z.json(), output: z.json() }).strip(),
 ]);
+
 const timelineIdentityShape = { id: idSchema, revertToken: z.json().optional() };
+
 const toolCallBaseShape = {
   ...timelineIdentityShape,
   type: z.literal("tool_call"),
@@ -1295,6 +1389,7 @@ const toolCallBaseShape = {
   detail: toolCallDetailSchema,
   metadata: jsonObjectSchema.optional(),
 };
+
 const timelineItemSchema: z.ZodType<ProviderTimelineItem> = z.union([
   z
     .object({
@@ -1364,6 +1459,7 @@ const timelineItemSchema: z.ZodType<ProviderTimelineItem> = z.union([
     })
     .strip(),
 ]);
+
 const permissionActionSchema = z
   .object({
     id: idSchema,
@@ -1373,6 +1469,7 @@ const permissionActionSchema = z
     intent: z.enum(["implement", "implement_resume", "dismiss"]).optional(),
   })
   .strip();
+
 const providerPermissionRequestSchema: z.ZodType<ProviderPermissionRequest> = z
   .object({
     id: idSchema,

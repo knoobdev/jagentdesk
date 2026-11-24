@@ -1,4 +1,4 @@
-import type { SpeechSettingsPatch } from "@jagentdesk/protocol/speech/rpc-schemas";
+import { type SpeechSettingsPatch } from "@jagentdesk/protocol/speech/rpc-schemas";
 import { mergeSpeechSettingsPatch, type SpeechSettingsOwner } from "./speech/speech-settings.js";
 import { BUILTIN_PLUGIN_MANIFESTS } from "@jagentdesk/protocol/builtin-plugins";
 import {
@@ -11,11 +11,20 @@ import {
   MutableDaemonConfigSchema,
   MutableDaemonConfigPatchSchema,
 } from "@jagentdesk/protocol/messages";
+import {
+  convertLegacyOptions,
+  foldProfileFeatureValues,
+  resolveAdapter,
+  withLegacyProfileFeatureValues,
+} from "./agent/option-controls.js";
+import { type AgentProfile } from "@jagentdesk/protocol/agent-profile";
 
 export type { MutableDaemonConfig, MutableDaemonConfigPatch } from "@jagentdesk/protocol/messages";
 
 type MutableDaemonConfig = import("@jagentdesk/protocol/messages").MutableDaemonConfig;
+
 type MutableDaemonConfigPatch = import("@jagentdesk/protocol/messages").MutableDaemonConfigPatch;
+
 type ProviderOverride = import("./agent/provider-launch-config.js").ProviderOverride;
 
 interface LoggerLike {
@@ -28,6 +37,7 @@ export interface DaemonConfigChangeDetails {
 }
 
 type ConfigListener = (config: MutableDaemonConfig, details: DaemonConfigChangeDetails) => void;
+
 type FieldChangeHandler = (value: unknown) => void;
 
 interface AppliedFieldChange {
@@ -162,6 +172,54 @@ function omitProvidersFromOverrides(
   return Object.keys(nextOverrides).length > 0 ? nextOverrides : undefined;
 }
 
+/**
+ * Profiles are held and persisted with `options` only, in the current keys: a profile is old
+ * data entering, so it is converted for the adapter its provider runs on, which `config.json`'s
+ * `providers` section names through `extends`.
+ */
+function foldConfigProfiles<T extends { agentProfiles?: AgentProfile[] }>(input: {
+  config: T;
+  providers: Record<string, ProviderOverride> | undefined;
+  source: "stored" | "client write";
+  held?: AgentProfile[];
+}): T {
+  const { config, providers, source, held = [] } = input;
+  if (!config.agentProfiles) return config;
+  const convert = (provider: string, options: Record<string, unknown> | undefined) =>
+    convertLegacyOptions({
+      provider: resolveAdapter({ provider, extendsOf: (id) => providers?.[id]?.extends }),
+      options,
+    });
+  const identity = (_provider: string, options: Record<string, unknown> | undefined) => options;
+  const foldWith = (profile: AgentProfile, convertWith: typeof convert) =>
+    foldProfileFeatureValues({
+      profile,
+      stored: held.find((candidate) => candidate.id === profile.id),
+      source,
+      convert: convertWith,
+    });
+  return {
+    ...config,
+    agentProfiles: config.agentProfiles.map((profile) => {
+      // A malformed value rejects a client write before anything is committed.
+      if (source === "client write") return foldWith(profile, convert);
+      try {
+        return foldWith(profile, convert);
+      } catch {
+        // A hand-edited `config.json` value that cannot convert must not stop the daemon from
+        // starting; it keeps its keys and is rejected when an agent is created from it.
+        return foldWith(profile, identity);
+      }
+    }),
+  };
+}
+
+/** The config API boundary: the unchanged app reads profile options from `featureValues`. */
+export function toWireDaemonConfig(config: MutableDaemonConfig): MutableDaemonConfig {
+  if (!config.agentProfiles) return config;
+  return { ...config, agentProfiles: config.agentProfiles.map(withLegacyProfileFeatureValues) };
+}
+
 function omitProvidersFromPersistedAgents(
   agents: PersistedConfig["agents"],
 ): Record<string, unknown> | undefined {
@@ -204,9 +262,13 @@ export function applyMutableProviderConfigToOverrides(
 
 export class DaemonConfigStore {
   private current: MutableDaemonConfig;
+
   private readonly jagentdeskHome: string;
+
   private readonly logger: LoggerLike | undefined;
+
   private readonly changeListeners = new Set<ConfigListener>();
+
   private readonly fieldChangeHandlers = new Map<string, Set<FieldChangeHandler>>();
 
   constructor(
@@ -220,7 +282,7 @@ export class DaemonConfigStore {
     const persisted = loadPersistedConfig(jagentdeskHome, this.logger);
     const builtinPlugins = initial.builtinPlugins ?? persisted.builtinPlugins;
     this.current = MutableDaemonConfigSchema.parse({
-      ...initial,
+      ...foldConfigProfiles({ config: initial, providers: initial.providers, source: "stored" }),
       ...options.speech?.read(persisted),
       ...(builtinPlugins ? { builtinPlugins } : {}),
     });
@@ -352,6 +414,78 @@ export class DaemonConfigStore {
     return next;
   }
 
+  private foldPatchProfiles<
+    T extends { agentProfiles?: AgentProfile[]; providers?: Record<string, ProviderOverride> },
+  >(submittedPatch: T): T {
+    return foldConfigProfiles({
+      config: submittedPatch,
+      // The provider graph this request will commit, so `extends` survives a partial edit.
+      providers: deepMerge(this.current.providers ?? {}, submittedPatch.providers ?? {}),
+      source: "client write",
+      held: this.current.agentProfiles,
+    });
+  }
+
+  private async applySupportedPatch(
+    parsedPatch: SupportedMutableConfigPatch,
+  ): Promise<MutableDaemonConfig> {
+    if (parsedPatch.relay?.enabled !== undefined && !this.relayEnabledMutable) {
+      throw new Error(
+        "Relay is controlled by a daemon launch override. Remove JAGENTDESK_RELAY_ENABLED or the relay CLI flag before changing it here.",
+      );
+    }
+    const { removeProviders = [], ...submittedPatch } = parsedPatch;
+    const patch = this.foldPatchProfiles(submittedPatch);
+    const { features: speechPatch, ...configPatch } = patch;
+    const removedProviders = Array.from(new Set(removeProviders));
+    const merged = deepMerge(this.current, configPatch);
+    if (speechPatch !== undefined) Object.assign(merged, this.readPatchedSpeech(speechPatch));
+    if (parsedPatch.skills?.selection !== undefined) {
+      merged.skills = { selection: parsedPatch.skills.selection };
+    }
+    if (parsedPatch.plugins !== undefined) merged.plugins = parsedPatch.plugins;
+    const next = MutableDaemonConfigSchema.parse(
+      omitMetadataGenerationProvidersFromConfig(
+        omitProvidersFromConfig(merged, removedProviders),
+        removedProviders,
+      ),
+    );
+
+    const configChanged = !isEqualValue(this.current, next);
+
+    // A replaced API key leaves the speech view unchanged, so a speech patch always persists.
+    // Profiles held folded in memory may still be on disk with `featureValues`; saving them writes `options`.
+    const profilesStaleOnDisk =
+      patch.agentProfiles !== undefined &&
+      !isEqualValue(patch.agentProfiles, this.lastKnownPersisted.daemon?.agentProfiles);
+    if (
+      !configChanged &&
+      removedProviders.length === 0 &&
+      speechPatch === undefined &&
+      !profilesStaleOnDisk
+    ) {
+      return this.current;
+    }
+
+    const { previous: persistedBeforePatch, knownNext } = await this.persistConfig(
+      patch,
+      removedProviders,
+    );
+    const speechChanged = this.speechPersistedChanged(this.lastKnownPersisted, knownNext);
+    if (configChanged) {
+      try {
+        this.applyReplacement(next, { removedProviders });
+      } catch (error) {
+        await savePersistedConfigAsync(this.jagentdeskHome, persistedBeforePatch, this.logger);
+        throw error;
+      }
+    }
+    this.lastKnownPersisted = knownNext;
+    if (speechChanged) this.speechOwner?.apply(knownNext);
+
+    return this.current;
+  }
+
   private applySpeech(persisted: PersistedConfig | undefined): void {
     if (persisted) this.options.speech?.apply(persisted);
   }
@@ -369,6 +503,77 @@ export class DaemonConfigStore {
     );
     Object.assign(merged, this.options.speech.read(persisted));
     return persisted;
+  }
+
+  private async reloadPersisted(): Promise<DaemonConfigReloadResult> {
+    if (!this.reloadSource) {
+      throw new Error("Daemon config reload is unavailable for this daemon instance");
+    }
+
+    const persisted = await loadPersistedConfigAsync(this.jagentdeskHome, this.logger);
+    const resolved = this.reloadSource.resolve(persisted);
+    // Plugin source changes require the plugin lifecycle operation or a daemon
+    // restart. The global switch is independently reloadable.
+    const desired = MutableDaemonConfigSchema.parse({
+      ...foldConfigProfiles({
+        config: resolved.mutable,
+        providers: resolved.mutable.providers,
+        source: "stored",
+      }),
+      plugins: this.current.plugins,
+      ...this.readSpeech(persisted),
+    });
+    const changedSinceLastApply = diffPaths(this.lastKnownPersisted, persisted);
+    const overrideControlledPaths = compactOwnedPaths(
+      changedSinceLastApply.filter((path) =>
+        resolved.overrideControlledPaths.some((owner) => pathBelongsTo(path, owner)),
+      ),
+      resolved.overrideControlledPaths,
+    );
+    const appliedPaths: string[] = RELOADABLE_PATHS.filter((persistedPath) => {
+      if (resolved.overrideControlledPaths.some((owner) => pathBelongsTo(persistedPath, owner))) {
+        return false;
+      }
+      const mutablePath = PERSISTED_TO_MUTABLE_PATH.get(persistedPath);
+      return (
+        mutablePath !== undefined &&
+        !isEqualValue(
+          getValueAtPath(this.current, mutablePath),
+          getValueAtPath(desired, mutablePath),
+        )
+      );
+    });
+    const restartRequiredPaths = compactOwnedPaths(
+      diffPaths(this.startupPersisted, persisted).filter((path) => {
+        if (path === "$schema" || path === "version") return false;
+        if (RELOADABLE_PATHS.some((owner) => pathBelongsTo(path, owner))) return false;
+        if (this.speechOwner && SPEECH_PERSISTED_PATHS.some((owner) => pathBelongsTo(path, owner)))
+          return false;
+        return !resolved.overrideControlledPaths.some((owner) => pathBelongsTo(path, owner));
+      }),
+      [],
+    );
+
+    const removedProviders = Object.keys(this.current.providers).filter(
+      (provider) => !(provider in desired.providers),
+    );
+    const speechChanged = this.speechPersistedChanged(this.lastKnownPersisted, persisted);
+    this.applyReplacement(desired, { removedProviders });
+    this.lastKnownPersisted = persisted;
+    if (speechChanged && this.speechOwner) {
+      this.speechOwner.apply(persisted);
+      appliedPaths.push(
+        ...SPEECH_PERSISTED_PATHS.filter((owner) =>
+          changedSinceLastApply.some((path) => pathBelongsTo(path, owner)),
+        ),
+      );
+    }
+
+    return {
+      appliedPaths: [...appliedPaths].sort(),
+      restartRequiredPaths,
+      overrideControlledPaths,
+    };
   }
 
   public onFieldChange(path: string, handler: FieldChangeHandler): () => void {

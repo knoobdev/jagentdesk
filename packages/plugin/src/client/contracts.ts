@@ -1,31 +1,37 @@
-import type { PluginText } from "../text.js";
-import type { PluginIconProps, PluginSerializableIcon } from "../icons.js";
-import type { PluginFile, PluginFileLocation } from "./file.js";
-import type { ComponentType } from "react";
-import type { JAgentDeskApi } from "@jagentdesk/client";
-import type { AgentTimelineItem, JsonValue } from "@jagentdesk/protocol/agent-types";
-import type { ZodType, input as ZodInput, output as ZodOutput } from "zod";
-import type {
-  PluginRpcContract,
-  PluginSubscribeOptions,
-  PluginSubscriptionContract,
-  PluginSubscriptionHandle,
-  PluginWireInput,
+import { type PluginText } from "../text.js";
+import { type PluginIconProps, type PluginSerializableIcon } from "../icons.js";
+import { type PluginFile, type PluginFileLocation } from "./file.js";
+import { type ComponentType } from "react";
+import { type JAgentDeskApi } from "@jagentdesk/client";
+import { type AgentTimelineItem, type JsonValue } from "@jagentdesk/protocol/agent-types";
+import { type ZodType, type input as ZodInput, type output as ZodOutput } from "zod";
+import {
+  type PluginRpcContract,
+  type PluginSubscribeOptions,
+  type PluginSubscriptionContract,
+  type PluginSubscriptionHandle,
+  type PluginWireInput,
 } from "../rpc.js";
-import type {
-  PluginButtonRegistration,
-  PluginHeaderButtonContribution,
-  PluginComposerPillContribution,
+import {
+  type PluginButtonRegistration,
+  type PluginHeaderButtonContribution,
+  type PluginComposerPillContribution,
 } from "./buttons.js";
-import type {
-  PluginTheme,
-  PluginWorkspaceSnapshot,
-  PluginAgentSnapshot,
-  PluginThemeContribution,
-  PluginAttachmentSourceContribution,
-  PluginTimelineTransformResult,
-  PluginCleanup,
+import {
+  type PluginTheme,
+  type PluginWorkspaceSnapshot,
+  type PluginAgentSnapshot,
+  type PluginThemeContribution,
+  type PluginAttachmentSourceContribution,
+  type PluginTimelineTransformResult,
+  type PluginCleanup,
 } from "../contracts.js";
+import {
+  type PluginComposer,
+  type PluginComposerItemContribution,
+  type PluginComposerSelector,
+} from "./composer.js";
+import { type PluginNewWorkspaceItemContribution } from "./new-workspace.js";
 
 export interface PluginHostProps {
   theme: PluginTheme;
@@ -105,6 +111,7 @@ export interface PluginSidebarItemContribution<Text extends PluginText = string>
 export interface PluginWorkspaceRowBadgeItemProps extends PluginHostProps {
   workspaceId: string;
 }
+
 export interface PluginWorkspaceRowBadgeItemContribution<Text extends PluginText = string> {
   id: string;
   title: Text;
@@ -115,6 +122,7 @@ export interface PluginWorkspaceRowBadgeItemContribution<Text extends PluginText
 export type PluginIcon<Props extends PluginIconProps = PluginIconProps> =
   | PluginSerializableIcon
   | ComponentType<Props>;
+
 export type { PluginIconProps } from "../icons.js";
 
 export type PluginPanelLocation = "workspace" | "explorer";
@@ -135,30 +143,37 @@ export interface PluginTab {
   readonly state: unknown;
   setState(state: JsonValue): void;
 }
+
 export interface PluginPanelProps<Params> extends PluginNavigableHostProps {
   workspaceId: string;
   readonly params: Readonly<Params>;
   revision: number;
   tab: PluginTab;
 }
+
 export interface PluginWorkspacePanelParams {}
+
 export interface PluginAgentPanelParams {
   readonly agentId: string;
 }
+
 export interface PluginFilePanelParams {
   readonly path: string;
   readonly lineStart?: number;
   readonly lineEnd?: number;
 }
+
 export interface PluginWorkspacePanelProps extends PluginPanelProps<PluginWorkspacePanelParams> {
   // COMPAT(pluginPanelFlatProps): added in v0.9.59, remove after 2027-04-23.
   context: "workspace";
 }
+
 export interface PluginAgentPanelProps extends PluginPanelProps<PluginAgentPanelParams> {
   // COMPAT(pluginPanelFlatProps): added in v0.9.59, remove after 2027-04-23.
   context: "agent";
   agentId: string;
 }
+
 export interface PluginFilePanelProps extends PluginPanelProps<PluginFilePanelParams> {
   file: PluginFile;
   // COMPAT(pluginFileLocation): added in v0.9.59, remove after 2027-04-23.
@@ -181,39 +196,64 @@ export interface PluginClientOpenPanelOptions extends PluginOpenPanelOptions {
 
 export interface PluginClientContext extends PluginCommandCapabilities {
   readonly i18n: import("./translations.js").PluginI18n;
+
   /** Play a base64-encoded audio file on this client; resolves when playback ends. */
   playAudio(source: { base64: string; mimeType: string }): Promise<void>;
+
   addScreen(contribution: PluginScreenContribution<PluginText>): PluginCleanup;
+
   addSidebarHeaderItem(contribution: PluginSidebarItemContribution<PluginText>): PluginCleanup;
+
   addSidebarFooterItem(contribution: PluginSidebarItemContribution<PluginText>): PluginCleanup;
+
   addSettingsScreen(contribution: PluginSettingsScreenContribution<PluginText>): PluginCleanup;
+
   addSurface(id: string, Component: ComponentType<PluginSurfaceProps>): PluginCleanup;
+
   addSidebarItem(contribution: PluginSidebarContribution<PluginText>): PluginCleanup;
+
   addFilePanel(contribution: PluginFilePanelContribution<PluginText>): PluginCleanup;
+
   addWorkspaceRowBadgeItem(
     contribution: PluginWorkspaceRowBadgeItemContribution<PluginText>,
   ): PluginCleanup;
+
   addAgentPanel(contribution: PluginAgentPanelContribution<PluginText>): PluginCleanup;
+
   addWorkspacePanel(contribution: PluginWorkspacePanelContribution<PluginText>): PluginCleanup;
+
   addCommandCenterItem(
     contribution: PluginCommandCenterItemContribution<PluginText>,
   ): PluginCleanup;
+
   addSlashCommand(contribution: PluginClientSlashCommandContribution<PluginText>): PluginCleanup;
+
   addHeaderButton(
     contribution: PluginHeaderButtonContribution<PluginText>,
   ): PluginButtonRegistration<PluginText>;
+
   addComposerPill(
     contribution: PluginComposerPillContribution<PluginText>,
   ): PluginButtonRegistration<PluginText>;
+
   addAttachmentSource(contribution: PluginAttachmentSourceContribution<PluginText>): PluginCleanup;
+
+  addComposerItem(contribution: PluginComposerItemContribution): PluginCleanup;
+
+  addNewWorkspaceItem(contribution: PluginNewWorkspaceItemContribution): PluginCleanup;
+
   addTheme(contribution: PluginThemeContribution<PluginText>): PluginCleanup;
+
   addTimelineTransformer<ItemType extends AgentTimelineItem["type"]>(
     contribution: PluginTimelineTransformerContribution<ItemType>,
   ): PluginCleanup;
+
   addTimelineRenderer<Schema extends ZodType>(
     contribution: PluginTimelineRendererContribution<Schema>,
   ): PluginCleanup;
+
   openPanel(id: string, options: PluginClientOpenPanelOptions): void;
+
   /**
    * Subscribes to a plugin subscription on this client's host. JAgentDesk re-subscribes after a
    * reconnect and releases what is left when the plugin stops.
@@ -310,12 +350,19 @@ export interface PluginTimelineRendererContribution<Schema extends ZodType = Zod
 
 export interface PluginCommandCapabilities {
   jagentdesk: JAgentDeskApi;
+
   rpc<InputSchema extends ZodType, OutputSchema extends ZodType>(
     contract: PluginRpcContract<InputSchema, OutputSchema>,
     input: PluginWireInput<ZodInput<InputSchema>>,
   ): Promise<ZodOutput<OutputSchema>>;
+
   openScreen(input: PluginOpenScreenInput): void;
+
+  /** The composers `selector` names, whether or not their tabs are open; see `useComposers`. */
+  composers(selector: PluginComposerSelector): readonly PluginComposer[];
+
   openSurface(id: string): void;
+
   openSettings(id: string): void;
 }
 

@@ -1,9 +1,10 @@
-import type pino from "pino";
+import pino from "pino";
 import { v4 as uuidv4 } from "uuid";
 import { getErrorMessage, getErrorMessageOr } from "@jagentdesk/protocol/error-utils";
-import type { AgentProvider } from "@jagentdesk/protocol/agent-types";
-import type { AgentProviderNotice } from "../../agent/agent-sdk-types.js";
-import type { SessionInboundMessage, SessionOutboundMessage } from "../../messages.js";
+import { type AgentProvider } from "@jagentdesk/protocol/agent-types";
+import { type AgentProviderNotice } from "../../agent/agent-sdk-types.js";
+import { type SessionInboundMessage, type SessionOutboundMessage } from "../../messages.js";
+import { type ProviderOptionsPatch } from "../../agent/option-controls.js";
 
 /**
  * The four agent-config response messages share one payload shape; deriving the
@@ -26,10 +27,15 @@ export interface AgentConfigSessionHost {
  */
 export interface AgentConfigOperations {
   ensureLoaded(agentId: string): Promise<void>;
+
   setMode(agentId: string, modeId: string): Promise<AgentProviderNotice | null>;
+
   setModel(agentId: string, modelId: string | null): Promise<void>;
+
+  setOptions(agentId: string, patch: ProviderOptionsPatch): Promise<void>;
+
   switchProvider(agentId: string, provider: AgentProvider, modelId: string | null): Promise<void>;
-  setFeature(agentId: string, featureId: string, value: unknown): Promise<void>;
+
   setThinking(
     agentId: string,
     thinkingOptionId: string | null,
@@ -61,7 +67,9 @@ interface ConfigChange {
  */
 export class AgentConfigSession {
   private readonly host: AgentConfigSessionHost;
+
   private readonly operations: AgentConfigOperations;
+
   private readonly logger: pino.Logger;
 
   constructor(options: AgentConfigSessionOptions) {
@@ -132,8 +140,9 @@ export class AgentConfigSession {
       logLabel: "set_agent_feature_request",
       logFields: { agentId, featureId, value, requestId },
       failureText: "Failed to set agent feature",
+      // COMPAT(featureValues): added in v0.15.0, remove after 2027-05-01. A feature is a one-key options patch.
       run: async () => {
-        await this.operations.setFeature(agentId, featureId, value);
+        await this.operations.setOptions(agentId, { [featureId]: value });
         return undefined;
       },
       emitResponse: (payload) => this.host.emit({ type: "set_agent_feature_response", payload }),
@@ -153,6 +162,54 @@ export class AgentConfigSession {
       run: () => this.operations.setThinking(agentId, thinkingOptionId),
       emitResponse: (payload) => this.host.emit({ type: "set_agent_thinking_response", payload }),
     });
+  }
+
+  /**
+   * Model first, because a thinking option only means anything against the model
+   * that offers it; options last so they settle on top of the rest. An omitted
+   * field is left alone. The first notice produced is the one the client sees —
+   * later steps still run, so a notice never truncates the bundle.
+   *
+   * This is not a transaction. A step that rejects aborts the rest, and steps
+   * that already applied stay applied — provider setters validate against the
+   * agent's live model, so a bundle that omits `modelId` can have its mode land
+   * and its feature rejected. Nothing is hidden by that: every AgentManager
+   * setter emits agent state before returning, so what applied is already
+   * streamed to the client alongside the rejected response and the error frame.
+   *
+   * Rolling back would re-invoke the setters that just failed, most often
+   * against a session that is already gone. Pre-flight validation would restate
+   * each provider's model-dependent checks somewhere they would drift from the
+   * setters that own them. What sending the bundle in one request does remove is
+   * the multi-round-trip failure class: interruption between hops, and
+   * interleaving with another client's mutation.
+   */
+  private async applyBundle(
+    agentId: string,
+    config: AgentConfigApply,
+  ): Promise<AgentProviderNotice | null> {
+    let notice: AgentProviderNotice | null = null;
+
+    if (config.modelId !== undefined) {
+      await this.operations.setModel(agentId, config.modelId);
+    }
+    if (config.modeId !== undefined) {
+      // Await first, assign second: `notice ??= await ...` would skip the call
+      // entirely once an earlier step produced a notice.
+      const modeNotice = await this.operations.setMode(agentId, config.modeId);
+      notice ??= modeNotice;
+    }
+    if (config.thinkingOptionId !== undefined) {
+      const thinkingNotice = await this.operations.setThinking(agentId, config.thinkingOptionId);
+      notice ??= thinkingNotice;
+    }
+    // COMPAT(featureValues): added in v0.15.0, remove after 2027-05-01. `featureValues` is an options patch.
+    const optionsPatch = { ...config.featureValues, ...config.options };
+    if (Object.keys(optionsPatch).length > 0) {
+      await this.operations.setOptions(agentId, optionsPatch);
+    }
+
+    return notice;
   }
 
   private async applyConfigChange(change: ConfigChange): Promise<void> {

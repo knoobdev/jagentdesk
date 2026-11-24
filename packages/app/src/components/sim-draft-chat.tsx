@@ -1,6 +1,5 @@
 import { createDockWorkspace } from "@/components/dock-workspace";
 import { SIM_AGENT_LABEL } from "@/utils/dock-agents";
-export { SIM_AGENT_LABEL } from "@/utils/dock-agents";
 import { useMemo } from "react";
 import { Keyboard, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
@@ -12,10 +11,12 @@ import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-
 import { encodeImages } from "@/utils/encode-images";
 import { isWeb } from "@/constants/platform";
 import { buildSimSystemPrompt, simChatTitle } from "@/components/sim-ask-agent";
-import type { AgentSnapshotPayload } from "@jagentdesk/protocol/messages";
-import type { SimDevice } from "@jagentdesk/protocol/simulator/rpc-schemas";
-import type { CreateAgentRequestOptions } from "@jagentdesk/client/internal/daemon-client";
-import type { Theme } from "@/styles/theme";
+import { type AgentSnapshotPayload } from "@jagentdesk/protocol/messages";
+import { type SimDevice } from "@jagentdesk/protocol/simulator/rpc-schemas";
+import { type CreateAgentRequestOptions } from "@jagentdesk/client/internal/daemon-client";
+import { type Theme } from "@/styles/theme";
+
+export { SIM_AGENT_LABEL } from "@/utils/dock-agents";
 
 function resolveModeId(modeOptionIds: readonly string[], selectedMode: string): string | undefined {
   if (modeOptionIds.length === 0) return undefined;
@@ -92,7 +93,6 @@ export function SimDraftChat({
       initialServerId: serverId,
       initialValues: { workingDir: cwd },
       isVisible: true,
-      onlineServerIds,
       lockedWorkingDir: cwd,
     },
   });
@@ -175,8 +175,9 @@ export function SimDraftChat({
         onSubmitMessage={handleCreateFromInput}
         isSubmitLoading={isSubmitting}
         blurOnSubmit
-        value={draftInput.text}
-        onChangeText={draftInput.setText}
+        textSource={draftInput.textSource}
+        textReplacement={draftInput.textReplacement}
+        onChangeText={draftInput.editText}
         attachments={draftInput.attachments}
         onChangeAttachments={draftInput.setAttachments}
         cwd={composerState.workingDir}

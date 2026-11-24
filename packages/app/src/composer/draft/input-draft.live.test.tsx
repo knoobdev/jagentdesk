@@ -1,10 +1,10 @@
-import React, { act } from "react";
+import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { JSDOM } from "jsdom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { useDraftStore } from "@/stores/draft-store";
-import type { AttachmentMetadata, ComposerAttachment } from "@/attachments/types";
+import { type AttachmentMetadata, type ComposerAttachment } from "@/attachments/types";
 import { createWorkspaceFileAttachment } from "@/attachments/workspace-file";
 
 const { asyncStorage } = vi.hoisted(() => ({
@@ -117,6 +117,7 @@ vi.mock("@/hooks/use-agent-form-state", () => ({
 }));
 
 let useAgentInputDraft: typeof import("./input-draft").useAgentInputDraft;
+
 type DraftRecordForTest = ReturnType<typeof useDraftStore.getState>["drafts"][string];
 
 beforeAll(async () => {
@@ -164,6 +165,7 @@ describe("useAgentInputDraft live contract", () => {
       drafts: {},
       createModalDraft: null,
       attachmentFocusRequestByDraftKey: {},
+      textReplacementRequestByDraftKey: {},
     });
   });
 
@@ -463,6 +465,37 @@ describe("useAgentInputDraft live contract", () => {
         createWorkspaceFileAttachment({ path: "src/app.ts" }),
       ],
     });
+  });
+
+  it("shows text another module put in the draft while the input is retained off screen", async () => {
+    let latest: ReturnType<typeof useAgentInputDraft> | null = null;
+    function getLatest(): ReturnType<typeof useAgentInputDraft> {
+      if (!latest) throw new Error("Expected hook result");
+      return latest;
+    }
+    function Probe() {
+      latest = useAgentInputDraft({ draftKey: "draft:replaced" });
+      return null;
+    }
+    const container = document.getElementById("root");
+    if (!container) throw new Error("Missing root container");
+    const root = createTestRoot(container);
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={new QueryClient()}>
+          <Probe />
+        </QueryClientProvider>,
+      );
+    });
+    const before = getLatest().textReplacement.key;
+
+    await act(async () => {
+      useDraftStore.getState().replaceDraftText({ draftKey: "draft:replaced", text: "from away" });
+    });
+
+    expect(getLatest().textReplacement).toMatchObject({ kind: "replace", text: "from away" });
+    expect(getLatest().textReplacement.key).not.toBe(before);
+    expect(getLatest().textSource.getSnapshot()).toBe("from away");
   });
 
   it("clear resets text and attachments", async () => {

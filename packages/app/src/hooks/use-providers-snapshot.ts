@@ -1,8 +1,8 @@
 import { useCallback, useMemo } from "react";
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import type { AgentProvider, ProviderSnapshotEntry } from "@jagentdesk/protocol/agent-types";
-import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
+import { type AgentProvider, type ProviderSnapshotEntry } from "@jagentdesk/protocol/agent-types";
+import { type DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import { useRetainedPanelActive } from "@/components/retained-panel";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { useSessionStore } from "@/stores/session-store";
@@ -15,9 +15,11 @@ import {
   providersSnapshotQueryKey,
   providersSnapshotQueryRoot,
   providersSnapshotRequestOptions,
+  providersSnapshotQuery,
 } from "@/data/providers-snapshot";
 
 type GetProvidersSnapshotResult = Awaited<ReturnType<DaemonClient["getProvidersSnapshot"]>>;
+
 type RefreshProvidersSnapshotResult = Awaited<ReturnType<DaemonClient["refreshProvidersSnapshot"]>>;
 
 export { providersSnapshotQueryKey, providersSnapshotQueryRoot };
@@ -109,15 +111,16 @@ export function useProvidersSnapshot(
   const queryKey = useMemo(() => providersSnapshotQueryKey(serverId, cwd), [cwd, serverId]);
 
   const snapshotQuery = useReplicaQuery({
-    queryKey,
+    ...providersSnapshotQuery({
+      serverId: serverId ?? "",
+      cwd,
+      client: () => {
+        if (!client || !serverId) throw new Error(t("workspace.terminal.hostDisconnected"));
+        return client;
+      },
+      queryClient,
+    }),
     enabled: Boolean(enabled && supportsSnapshot && serverId && client && isConnected),
-    pushEvent: "providers_snapshot_update",
-    queryFn: async () => {
-      if (!client) {
-        throw new Error(t("workspace.terminal.hostDisconnected"));
-      }
-      return fetchProvidersSnapshot({ client, cwd });
-    },
   });
 
   const refreshMutation = useMutation({

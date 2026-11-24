@@ -1,28 +1,35 @@
 import { createElement, type ComponentType, type ReactElement } from "react";
 import * as LucideIcons from "lucide-react-native";
-import type { LucideIcon } from "lucide-react-native";
+import { type LucideIcon } from "lucide-react-native";
 import {
   findSvgIconProblem,
   type PluginIconProps,
   type PluginSerializableIcon,
   type PluginSvgIcon,
 } from "@jagentdesk/plugin";
-import type { PluginIcon } from "@jagentdesk/plugin/client";
-import type { IconProps } from "@jagentdesk/plugin/client/react-native";
+import { type PluginIcon } from "@jagentdesk/plugin/client";
+import { type IconProps } from "@jagentdesk/plugin/client/react-native";
 import { SvgXml } from "react-native-svg";
 
 /** Host surfaces may thin a Lucide stroke; SVG and plugin components ignore it. */
 type HostIconProps = PluginIconProps & { strokeWidth?: number };
+
 /** A host-drawn icon. A plain function, so it stands in for any plugin icon component type. */
 type HostIcon = (props: HostIconProps) => ReactElement | null;
 
 const lucideIconComponents = new Map<string, HostIcon>();
+
 const svgIconComponents = new Map<string, HostIcon>();
 
 function findLucideIcon(name: string): LucideIcon | null {
   const candidate = Reflect.get(LucideIcons, name);
   if (candidate === LucideIcons.Icon || candidate === LucideIcons.createLucideIcon) return null;
   return isComponent(candidate) ? (candidate as LucideIcon) : null;
+}
+
+/** Whether `name` is a Lucide icon, so a caller can fall back before drawing nothing. */
+export function isLucideIconName(name: string): boolean {
+  return findLucideIcon(name) !== null;
 }
 
 function isComponent(value: unknown): boolean {

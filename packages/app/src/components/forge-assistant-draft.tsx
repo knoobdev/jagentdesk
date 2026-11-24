@@ -8,9 +8,9 @@ import { buildDraftStoreKey, generateDraftId } from "@/stores/draft-keys";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { encodeImages } from "@/utils/encode-images";
 import { isWeb } from "@/constants/platform";
-import type { AgentSnapshotPayload, ForgeRepoRef } from "@jagentdesk/protocol/messages";
-import type { CreateAgentRequestOptions } from "@jagentdesk/client/internal/daemon-client";
-import type { Theme } from "@/styles/theme";
+import { type AgentSnapshotPayload, type ForgeRepoRef } from "@jagentdesk/protocol/messages";
+import { type CreateAgentRequestOptions } from "@jagentdesk/client/internal/daemon-client";
+import { type Theme } from "@/styles/theme";
 
 // A dedicated Forge assistant per host + repo scope; reused across opens (see
 // forge-assistant-panel.tsx). FORGE_ASSISTANT_LABEL marks the agent as a Forge
@@ -137,7 +137,6 @@ export function ForgeAssistantDraft({
       initialServerId: serverId,
       initialValues: { workingDir: cwd },
       isVisible: true,
-      onlineServerIds,
       lockedWorkingDir: cwd,
     },
   });
@@ -209,8 +208,9 @@ export function ForgeAssistantDraft({
         onSubmitMessage={handleCreateFromInput}
         isSubmitLoading={isSubmitting}
         blurOnSubmit
-        value={draftInput.text}
-        onChangeText={draftInput.setText}
+        textSource={draftInput.textSource}
+        textReplacement={draftInput.textReplacement}
+        onChangeText={draftInput.editText}
         attachments={draftInput.attachments}
         onChangeAttachments={draftInput.setAttachments}
         cwd={composerState.workingDir}

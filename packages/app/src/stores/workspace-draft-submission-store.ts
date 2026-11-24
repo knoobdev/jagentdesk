@@ -1,22 +1,43 @@
 import { create } from "zustand";
-import type { ComposerAttachment } from "@/attachments/types";
-import type { AgentProvider } from "@jagentdesk/protocol/agent-types";
-import type { WorkspaceDraftTabSetup } from "@/workspace-tabs/model";
+import { type ComposerAttachment } from "@/attachments/types";
+import { type AgentProvider } from "@jagentdesk/protocol/agent-types";
+import { type WorkspaceDraftTabSetup } from "@/workspace-tabs/model";
+import { type CreateAgentRequestOptions } from "@jagentdesk/client/internal/daemon-client";
+import { type AgentSnapshotPayload } from "@jagentdesk/protocol/messages";
 
 export interface PendingWorkspaceDraftSubmission {
+  /** Already-running creation. Mounting the draft only observes its result. */
+  agentCreation?: {
+    result: Promise<AgentSnapshotPayload>;
+    retry: (input: CreateAgentRequestOptions) => Promise<AgentSnapshotPayload>;
+  };
+
   serverId: string;
+
   workspaceId: string;
+
   draftId: string;
+
   text: string;
+
   attachments: ComposerAttachment[];
+
   cwd: string;
+
   provider: AgentProvider;
+
   clientMessageId: string;
+
   timestamp: number;
+
   modeId?: string;
+
   model?: string;
+
   thinkingOptionId?: string;
-  featureValues?: Record<string, unknown>;
+
+  providerOptions?: Record<string, unknown>;
+
   allowEmptyText?: boolean;
 }
 
@@ -28,6 +49,7 @@ export interface PendingWorkspaceDraftSetup {
 interface WorkspaceDraftSubmissionState {
   pendingByDraftId: Record<string, PendingWorkspaceDraftSubmission>;
   setupByDraftId: Record<string, PendingWorkspaceDraftSetup>;
+  creationByDraftId: Record<string, NonNullable<PendingWorkspaceDraftSubmission["agentCreation"]>>;
   setPending: (submission: PendingWorkspaceDraftSubmission) => void;
   setDraftSetup: (input: {
     draftId: string;
@@ -61,8 +83,12 @@ export const useWorkspaceDraftSubmissionStore = create<WorkspaceDraftSubmissionS
   (set, get) => ({
     pendingByDraftId: {},
     setupByDraftId: {},
+    creationByDraftId: {},
     setPending: (submission) =>
       set((state) => ({
+        creationByDraftId: submission.agentCreation
+          ? { ...state.creationByDraftId, [submission.draftId]: submission.agentCreation }
+          : state.creationByDraftId,
         pendingByDraftId: {
           ...state.pendingByDraftId,
           [submission.draftId]: submission,
@@ -82,9 +108,10 @@ export const useWorkspaceDraftSubmissionStore = create<WorkspaceDraftSubmissionS
       const normalizedDraftId = normalizeDraftId(draftId);
       if (!normalizedDraftId) return;
       set((state) => {
-        if (!state.setupByDraftId[normalizedDraftId]) return state;
+        const creationByDraftId = { ...state.creationByDraftId };
+        delete creationByDraftId[normalizedDraftId];
         const { [normalizedDraftId]: _removed, ...setupByDraftId } = state.setupByDraftId;
-        return { setupByDraftId };
+        return { setupByDraftId, creationByDraftId };
       });
     },
     consumePending: (input) => {
@@ -96,8 +123,10 @@ export const useWorkspaceDraftSubmissionStore = create<WorkspaceDraftSubmissionS
         if (!matchesPendingSubmission(state.pendingByDraftId[input.draftId], input)) {
           return state;
         }
-        const { [input.draftId]: _removed, ...rest } = state.pendingByDraftId;
-        return { pendingByDraftId: rest };
+        // Expo miscompiles computed member-key rest omissions; test the emitted code.
+        const pendingByDraftId = { ...state.pendingByDraftId };
+        delete pendingByDraftId[input.draftId];
+        return { pendingByDraftId };
       });
       return pending;
     },

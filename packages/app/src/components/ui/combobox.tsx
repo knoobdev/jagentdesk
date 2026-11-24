@@ -1,5 +1,4 @@
 import { useOverlayRegistration, type KeyboardInputEvent } from "@/keyboard";
-
 import { Modal } from "@/components/ui/modal";
 import { useRetainedPanelActive } from "@/components/retained-panel";
 import {
@@ -10,8 +9,9 @@ import {
   useReducer,
   useRef,
   useState,
+  type ReactElement,
+  type ReactNode,
 } from "react";
-import type { ReactElement, ReactNode } from "react";
 import {
   View,
   Text,
@@ -52,8 +52,8 @@ import {
   getComboboxFallbackIndex,
   orderVisibleComboboxOptions,
   shouldShowCustomComboboxOption,
+  type ComboboxOptionModel,
 } from "./combobox-options";
-import type { ComboboxOptionModel } from "./combobox-options";
 import { isWeb } from "@/constants/platform";
 import {
   IsolatedBottomSheetModal,
@@ -75,29 +75,48 @@ export { buildDesktopFrameStyle } from "./combobox-frame-style";
 const IS_WEB = isWeb;
 
 export type ComboboxOption = ComboboxOptionModel;
+
 export type ComboboxDesktopPlacement = "top-start" | "bottom-start";
 
 export interface ComboboxProps {
   options: ComboboxOption[];
+
   value: string;
+
   onSelect: (id: string) => void;
+
   renderOption?: (input: {
     option: ComboboxOption;
     selected: boolean;
     active: boolean;
     onPress: () => void;
   }) => ReactElement;
+
   onSearchQueryChange?: (query: string) => void;
+
   searchable?: boolean;
+
+  /** The caller answers the search query itself, so the options are shown as given. */
+  remoteSearch?: boolean;
+
   placeholder?: string;
+
   searchPlaceholder?: string;
+
   emptyText?: string;
+
   allowCustomValue?: boolean;
+
   customValuePrefix?: string;
+
   customValueDescription?: string;
+
   customValueKind?: "directory" | "file";
+
   optionsPosition?: "below-search" | "above-search";
+
   title?: string;
+
   /**
    * Structured header. When provided, replaces `title` + `stickyHeader` and
    * is rendered via the shared SheetHeaderView (mobile) / InlineHeaderView
@@ -106,30 +125,44 @@ export interface ComboboxProps {
    * and any leading icon at the sheet's shared indent.
    */
   header?: SheetHeader;
+
   mobileChildrenScrollEnabled?: boolean;
+
   /** Overrides the mobile scroll container spacing for custom child content. */
   mobileChildrenContentContainerStyle?: StyleProp<ViewStyle>;
+
   presentation?: "push" | "replace";
+
   open?: boolean;
+
   onOpenChange?: (open: boolean) => void;
+
   desktopPlacement?: ComboboxDesktopPlacement;
+
   /**
    * Prevents an initial frame at 0,0 by hiding desktop content until floating
    * coordinates resolve. This intentionally disables fade enter/exit animation
    * for that combobox instance to avoid animation overriding hidden opacity.
    */
   desktopPreventInitialFlash?: boolean;
+
   /** Minimum width for the desktop popover (overrides trigger-based width). */
   desktopMinWidth?: number;
+
   /** Fixed height for the desktop popover (overrides default 400px max). */
   desktopFixedHeight?: number;
+
   /** Content rendered above the scroll area on desktop (sticky header). */
   stickyHeader?: ReactNode;
+
   /** Content rendered below the scroll area. */
   footer?: ReactNode;
+
   /** When true, selecting an option does not close the picker (multi-select mode). */
   keepOpenOnSelect?: boolean;
+
   anchorRef: React.RefObject<View | null>;
+
   children?: ReactNode;
 }
 
@@ -956,6 +989,7 @@ function MobileComboboxBody(props: MobileBodyProps): ReactElement | null {
   if (!active) return null;
   return <MobileComboboxSheet {...props} />;
 }
+
 function MobileComboboxSheet(props: MobileBodyProps): ReactElement {
   const {
     sheetRef: bottomSheetRef,
@@ -1277,6 +1311,10 @@ function DesktopComboboxBody(props: DesktopBodyProps): ReactElement | null {
   );
 }
 
+function filtersLocally(input: { searchable: boolean; remoteSearch?: boolean }): boolean {
+  return input.searchable && !input.remoteSearch;
+}
+
 export function Combobox({
   options,
   value,
@@ -1284,6 +1322,7 @@ export function Combobox({
   renderOption,
   onSearchQueryChange,
   searchable = true,
+  remoteSearch,
   placeholder,
   searchPlaceholder,
   emptyText,
@@ -1442,7 +1481,7 @@ export function Combobox({
       buildVisibleComboboxOptions({
         options,
         searchQuery,
-        searchable,
+        searchable: filtersLocally({ searchable, remoteSearch }),
         allowCustomValue,
         customValuePrefix,
         customValueDescription,
@@ -1454,6 +1493,7 @@ export function Combobox({
       customValueKind,
       customValuePrefix,
       options,
+      remoteSearch,
       searchQuery,
       searchable,
     ],

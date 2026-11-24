@@ -21,15 +21,15 @@ import {
   resolveComposerAttachmentSubmitFormat,
   splitComposerAttachmentsForSubmit,
 } from "@/composer/attachments/submit";
-import type {
-  CreateAgentRequestOptions,
-  DaemonClient,
+import {
+  type CreateAgentRequestOptions,
+  type DaemonClient,
 } from "@jagentdesk/client/internal/daemon-client";
 import { projectIconPlaceholderLabelFromDisplayName } from "@/utils/project-display-name";
 import { requireWorkspaceDirectory } from "@/utils/workspace-directory";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
-import type { MessagePayload } from "@/composer/types";
+import { type MessagePayload } from "@/composer/types";
 
 function toProjectIconDataUri(icon: { mimeType: string; data: string } | null): string | null {
   if (!icon) {
@@ -439,8 +439,9 @@ export function WorkspaceSetupDialog() {
           onSubmitMessage={handleCreateChatAgent}
           isSubmitLoading={pendingAction === "chat"}
           blurOnSubmit={true}
-          value={chatDraft.text}
-          onChangeText={chatDraft.setText}
+          textSource={chatDraft.textSource}
+          textReplacement={chatDraft.textReplacement}
+          onChangeText={chatDraft.editText}
           attachments={chatDraft.attachments}
           onChangeAttachments={chatDraft.setAttachments}
           cwd={sourceDirectory}

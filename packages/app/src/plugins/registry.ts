@@ -1,13 +1,13 @@
-import type { AudioEngine } from "@/audio";
+import { type AudioEngine } from "@/audio";
 import { createPluginSubscribe } from "./subscriptions";
 import { useMemo, useSyncExternalStore } from "react";
 import { QueryClient } from "@tanstack/react-query";
-import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
+import { type DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import { assertPluginCompatibility } from "@jagentdesk/protocol/plugin-requirements";
 import { resolveAppVersion } from "@/utils/app-version";
 import { createPluginClientRuntime } from "./client-runtime";
 import { runPluginClientBundle, type PluginClientRuntime } from "./evaluate";
-import type { InstalledPlugin } from "./types";
+import { type InstalledPlugin } from "./types";
 
 type CatalogPlugin = Awaited<ReturnType<DaemonClient["getPluginCatalog"]>>[number];
 
@@ -15,11 +15,17 @@ export type PluginCatalogStatus = "loading" | "ready" | "error";
 
 export class PluginRegistry {
   private readonly catalogStatuses = new Map<string, PluginCatalogStatus>();
+
   private readonly byHost = new Map<string, InstalledPlugin[]>();
+
   private readonly listeners = new Set<() => void>();
+
   private snapshot: InstalledPlugin[] = [];
+
   private readonly disposed = new WeakSet<InstalledPlugin>();
+
   private readonly clientByHost = new Map<string, DaemonClient>();
+
   private readonly evaluationErrors = new Map<string, string>();
 
   constructor(
@@ -43,6 +49,7 @@ export class PluginRegistry {
   getCatalogStatus(serverId: string): PluginCatalogStatus {
     return this.catalogStatuses.get(serverId) ?? "loading";
   }
+
   setCatalogStatus(serverId: string, status: PluginCatalogStatus): void {
     if (this.catalogStatuses.get(serverId) === status) return;
     this.catalogStatuses.set(serverId, status);
@@ -113,6 +120,8 @@ export class PluginRegistry {
           surfaces: [],
           settingsScreens: [],
           sidebarItems: [],
+          composerItems: [],
+          newWorkspaceItems: [],
           workspacePanels: [],
           commandCenterItems: [],
           clientSlashCommands: [],

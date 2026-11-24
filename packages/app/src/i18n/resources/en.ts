@@ -1,13 +1,12 @@
-import { botsStrings } from "./bots";
-import { builtinPluginStrings } from "./builtin-plugins";
 import { pluginSettings } from "./plugin-settings";
 import { activityGraphStrings } from "./activity-graph";
-import { sshModuleStrings } from "./ssh-modules";
 
 export const en = {
-  bots: botsStrings,
-  builtinPlugins: builtinPluginStrings,
-  ssh: sshModuleStrings,
+  pluginCombobox: {
+    searching: "Searching…",
+    empty: "No results",
+    failed: "Search failed: {{message}}",
+  },
   paneFind: {
     connectionFailure: "Could not search this chat. Check the host connection and retry.",
     historyChangedFailure: "The chat changed while searching. Search again.",
