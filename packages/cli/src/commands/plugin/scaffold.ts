@@ -115,7 +115,19 @@ export async function scaffoldPluginDirectory(
     },
   };
   const files = new Map<string, string>([
-    ["jagentdesk-plugin.json", `${JSON.stringify({ id }, null, 2)}\n`],
+    [
+      "jagentdesk-plugin.json",
+      `${JSON.stringify(
+        {
+          id,
+          $comment:
+            'Add "name": "My plugin" to set a display name. Add "icon": "assets/icon.png" for a PNG inside the package. Add image or video paths (relative to this manifest) or HTTPS URLs to media. Include local assets in package.json files.',
+          media: [],
+        },
+        null,
+        2,
+      )}\n`,
+    ],
     ["OVERVIEW.md", OVERVIEW],
     ["package.json", `${JSON.stringify(packageJson, null, 2)}\n`],
     ["tsconfig.json", `${JSON.stringify(TSCONFIG, null, 2)}\n`],
