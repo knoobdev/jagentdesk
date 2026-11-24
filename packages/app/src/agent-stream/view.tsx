@@ -1,3 +1,4 @@
+import { resolveMissingNestedRelativeFile } from "@/assistant-file-links/resolver";
 import { ClickUpAgentHeader } from "@/components/clickup-shell/chat-headers";
 import { CLICKUP_MESSAGE_INDENT } from "@/components/clickup-shell/chat-layout";
 import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
@@ -462,12 +463,19 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     }, [agentId]);
 
     const handleInlinePathPress = useStableEvent(
-      (target: InlinePathTarget, disposition: OpenFileDisposition) => {
+      async (target: InlinePathTarget, disposition: OpenFileDisposition) => {
         if (!target.path) {
           return;
         }
 
-        const normalized = normalizeInlinePathTarget(target.path, context.cwd);
+        const resolved = client
+          ? await resolveMissingNestedRelativeFile({
+              target,
+              workspaceRoot: context.cwd,
+              getDirectorySuggestions: client.getDirectorySuggestions.bind(client),
+            })
+          : target;
+        const normalized = normalizeInlinePathTarget(resolved.path, context.cwd);
         if (!normalized) {
           return;
         }
