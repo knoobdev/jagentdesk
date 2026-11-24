@@ -144,8 +144,10 @@ export class AgentManagerShuttingDownError extends Error {
   }
 }
 
+type RunCancellationCause = "reload" | "replace" | "rewind" | "stop";
+
 export class AgentRunCancellationError extends Error {
-  constructor(agentId: string, action: "reload" | "replace" | "rewind" | "stop") {
+  constructor(agentId: string, action: RunCancellationCause) {
     super(
       `Cannot ${action} agent ${agentId} because its active run cancellation was not acknowledged`,
     );
@@ -857,6 +859,7 @@ export class AgentManager {
   private readonly replacementMutationTails = new Map<string, Promise<void>>();
   private readonly runs = new AgentRunState();
   private readonly subscribers = new Set<SubscriptionRecord>();
+  private readonly stopListeners = new Set<(agentId: string) => void>();
   private readonly idFactory: () => string;
   private readonly registry?: AgentStorage;
   private readonly durableTimelineStore?: AgentTimelineStore;
@@ -1171,6 +1174,15 @@ export class AgentManager {
       Boolean(agent.activeForegroundTurnId) ||
       this.runs.hasRun(agentId)
     );
+  }
+
+  /**
+   * Notify before a running turn is stopped with no prompt replacing it: Stop and `cancel_agent`,
+   * not a replacing prompt, a reload, or a rewind. Listeners run before the agent settles.
+   */
+  onStop(listener: (agentId: string) => void): () => void {
+    this.stopListeners.add(listener);
+    return () => this.stopListeners.delete(listener);
   }
 
   subscribe(callback: AgentSubscriber, options?: SubscribeOptions): () => void {
@@ -3437,7 +3449,7 @@ export class AgentManager {
         this.touchUpdatedAt(agent);
         this.emitState(agent);
         try {
-          const result = await this.cancelAgentRunNow(agent.id);
+          const result = await this.cancelAgentRunNow(agent.id, "replace");
           if (result.status === "refused") {
             throw new AgentRunCancellationError(agent.id, "replace");
           }
@@ -3723,8 +3735,18 @@ export class AgentManager {
     }
   }
 
-  async cancelAgentRun(agentId: string): Promise<AgentRunCancellationResult> {
-    const cancellation = this.runForegroundMutation(agentId, () => this.cancelAgentRunNow(agentId));
+  cancelAgentRun(agentId: string): Promise<AgentRunCancellationResult> {
+    return this.cancelRun(agentId, "stop");
+  }
+
+  private async cancelRun(
+    agentId: string,
+    cause: RunCancellationCause,
+  ): Promise<AgentRunCancellationResult> {
+    const cancellation = this.runForegroundMutation(agentId, () => {
+      this.requireSessionAgent(agentId).pendingReplacement = false;
+      return this.cancelAgentRunNow(agentId, cause);
+    });
     this.pendingCancellations.set(agentId, cancellation);
     try {
       return await cancellation;
@@ -3734,13 +3756,19 @@ export class AgentManager {
     }
   }
 
-  private async cancelAgentRunNow(agentId: string): Promise<AgentRunCancellationResult> {
+  private async cancelAgentRunNow(
+    agentId: string,
+    cause: RunCancellationCause,
+  ): Promise<AgentRunCancellationResult> {
     const agent = this.requireSessionAgent(agentId);
     const run =
       this.runs.getRun(agentId) ??
       (agent.lifecycle === "running" ? this.runs.trackAutonomousRun(agentId, null) : null);
     if (!run) {
       return { status: "not_running" };
+    }
+    if (cause === "stop") {
+      for (const listener of this.stopListeners) listener(agentId);
     }
 
     const interruptAcknowledged = await this.interruptSession(agent.session, agentId);
@@ -3799,11 +3827,8 @@ export class AgentManager {
     return { status: "settled" };
   }
 
-  private async cancelAgentRunBefore(
-    agentId: string,
-    action: "reload" | "replace" | "rewind",
-  ): Promise<void> {
-    const result = await this.cancelAgentRun(agentId);
+  private async cancelAgentRunBefore(agentId: string, action: "reload" | "rewind"): Promise<void> {
+    const result = await this.cancelRun(agentId, action);
     if (result.status === "refused") {
       throw new AgentRunCancellationError(agentId, action);
     }

@@ -446,6 +446,17 @@ export function getAgentMessageDelivery(
     ...defaultAgentMessageDeliveryTiming,
     ...agentMessageDeliveryTimings.get(context.agentManager),
     isRunning: (agentId) => context.agentManager.hasInFlightRun(agentId),
+    hasPendingPermission: (agentId) => context.agentManager.hasPendingPermissions(agentId),
+    onStop: (listener) => context.agentManager.onStop(listener),
+    awaitStart: (agentId, started) =>
+      waitForAgentRunStartWithTimeout(context.agentManager, agentId, started),
+    tryRunOutOfBand: (request, onAccepted) =>
+      context.agentManager.tryRunOutOfBand(
+        request.recipientId,
+        request.prompt,
+        undefined,
+        onAccepted,
+      ),
     subscribe: (listener) =>
       context.agentManager.subscribe((event) => {
         if (event.type === "agent_state") listener(event.agent.id);
@@ -465,7 +476,7 @@ export function getAgentMessageDelivery(
         clearPendingPermissions: request.clearPendingPermissions,
         idleOnly: request.idleOnly,
         admit: request.admit,
-        beforeDispatch: request.beforeDispatch,
+
         logger: context.logger,
       });
       if (result.disposition === "turn_started") {
@@ -526,7 +537,24 @@ export async function closeAgentMessageDelivery(agentManager: AgentManager): Pro
 export async function sendPromptToAgent(
   params: SendPromptToAgentParams,
 ): Promise<PromptDispatchResult> {
-  return await dispatchPrompt(params, { prepared: false });
+  return getAgentMessageDelivery(params).sendDirect(
+    {
+      recipientId: params.agentId,
+      prompt: params.prompt,
+      source: await resolvePromptSource(params.source, params.agentManager, params.agentStorage),
+      messageId: params.messageId,
+      sessionMode: params.sessionMode,
+      unarchive: params.unarchive,
+    },
+    (joined) =>
+      sendPreparedPromptToAgent({
+        ...params,
+        prompt: joined.prompt,
+        messageId: joined.messageId,
+        sessionMode: joined.sessionMode,
+        unarchive: joined.unarchive,
+      }),
+  );
 }
 
 /**
