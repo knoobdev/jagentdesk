@@ -40,6 +40,8 @@ class TimelineWorld {
     prepare: async () => undefined,
     readCursor: () => undefined,
     replaceDemandedAgentIds: () => undefined,
+    onCatchUpOwed: () => undefined,
+    onCatchUpSettled: () => undefined,
     initialDeliveryMode: "selective",
     setSubscription: async (agentIds) => {
       const result = deferred<void>();
