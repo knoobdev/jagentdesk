@@ -1,6 +1,6 @@
 import { type ReactElement } from "react";
 import { ScrollView, Text, View } from "react-native";
-import { useIsFocused } from "@react-navigation/native";
+import { useIsFocused } from "expo-router/react-navigation";
 import { StyleSheet } from "react-native-unistyles";
 import { PageHeader } from "@/components/headers/page-header";
 import { Share2 } from "lucide-react-native";

@@ -1,8 +1,11 @@
 import { usePluginDisplayName } from "@/plugins/plugin-list";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import { SPACING } from "@/styles/theme";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 import {
   Alert,
+  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -11,7 +14,7 @@ import {
   type PressableStateCallbackType,
 } from "react-native";
 import { useRouter } from "expo-router";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect } from "expo-router/react-navigation";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
@@ -73,7 +76,6 @@ import { PairLinkModal } from "@/components/pair-link-modal";
 import { KeyboardShortcutsSection } from "@/screens/settings/keyboard-shortcuts-section";
 import { EditorSection } from "@/screens/settings/editor-section";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { DesktopPermissionsSection } from "@/desktop/components/desktop-permissions-section";
@@ -139,6 +141,9 @@ export type SettingsView =
   | { kind: "host"; serverId: string; section: HostSectionSlug }
   | { kind: "project"; serverId: string; projectId: string }
   | { kind: "plugin"; serverId: string; pluginId: string; screenId: string };
+
+const SettingsScrollView = Platform.OS === "android" ? KeyboardAwareScrollView : ScrollView;
+const settingsScrollProps = Platform.OS === "android" ? { bottomOffset: SPACING[4] } : {};
 
 interface SidebarSectionItem {
   id: SettingsSectionSlug;
@@ -232,15 +237,26 @@ function themeTriggerStyle({ pressed }: PressableStateCallbackType) {
   return [styles.themeTrigger, pressed && { opacity: 0.85 }];
 }
 
-function sidebarItemStyle({ hovered }: PressableStateCallbackType & { hovered?: boolean }) {
-  return [sidebarStyles.item, Boolean(hovered) && sidebarStyles.itemHovered];
+function sidebarItemStyle({
+  hovered,
+  pressed,
+}: PressableStateCallbackType & { hovered?: boolean }) {
+  return [
+    sidebarStyles.item,
+    Boolean(hovered) && sidebarStyles.itemHovered,
+    pressed && sidebarStyles.itemPressed,
+  ];
 }
 
-function selectedSidebarItemStyle({ hovered }: PressableStateCallbackType & { hovered?: boolean }) {
+function selectedSidebarItemStyle({
+  hovered,
+  pressed,
+}: PressableStateCallbackType & { hovered?: boolean }) {
   return [
     sidebarStyles.item,
     Boolean(hovered) && sidebarStyles.itemHovered,
     sidebarStyles.itemSelected,
+    pressed && sidebarStyles.itemPressed,
   ];
 }
 
@@ -471,8 +487,6 @@ function GeneralSection({
 }
 
 interface DiagnosticsSectionProps {
-  useLegacyTerminalRenderer: boolean;
-  onUseLegacyTerminalRendererChange: (value: boolean) => void;
   voiceAudioEngine: ReturnType<typeof useVoiceAudioEngineOptional>;
   isPlaybackTestRunning: boolean;
   playbackTestResult: string | null;
@@ -480,8 +494,6 @@ interface DiagnosticsSectionProps {
 }
 
 function DiagnosticsSection({
-  useLegacyTerminalRenderer,
-  onUseLegacyTerminalRendererChange,
   voiceAudioEngine,
   isPlaybackTestRunning,
   playbackTestResult,
@@ -495,26 +507,6 @@ function DiagnosticsSection({
   return (
     <SettingsSection title={t("settings.diagnostics.title")}>
       <View style={settingsStyles.card}>
-        {isNative ? (
-          <View style={settingsStyles.row} testID="legacy-terminal-renderer-row">
-            <View style={settingsStyles.rowContent}>
-              <Text style={settingsStyles.rowTitle}>
-                {t("settings.diagnostics.legacyTerminalRenderer.label")}
-              </Text>
-              <Text style={settingsStyles.rowHint}>
-                {t("settings.diagnostics.legacyTerminalRenderer.description")}
-              </Text>
-            </View>
-            <Switch
-              value={useLegacyTerminalRenderer}
-              onValueChange={onUseLegacyTerminalRendererChange}
-              accessibilityLabel={t(
-                "settings.diagnostics.legacyTerminalRenderer.accessibilityLabel",
-              )}
-              testID="legacy-terminal-renderer-switch"
-            />
-          </View>
-        ) : null}
         <View style={settingsStyles.row} testID="app-diagnostic-row">
           <View style={settingsStyles.rowContent}>
             <Text style={settingsStyles.rowTitle}>{t("settings.diagnostics.app.rowTitle")}</Text>
@@ -678,9 +670,10 @@ function HostPicker({
     [],
   );
   const triggerStyle = useCallback(
-    ({ hovered = false }: PressableStateCallbackType & { hovered?: boolean }) => [
+    ({ hovered = false, pressed }: PressableStateCallbackType & { hovered?: boolean }) => [
       sidebarStyles.pickerTrigger,
       hovered && sidebarStyles.pickerTriggerHovered,
+      pressed && sidebarStyles.itemPressed,
     ],
     [],
   );
@@ -966,13 +959,6 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
     [updateSettings],
   );
 
-  const handleUseLegacyTerminalRendererChange = useCallback(
-    (useLegacyTerminalRenderer: boolean) => {
-      void updateSettings({ useLegacyTerminalRenderer });
-    },
-    [updateSettings],
-  );
-
   const handlePlaybackTest = useCallback(async () => {
     if (!voiceAudioEngine || isPlaybackTestRunning) {
       return;
@@ -1247,8 +1233,6 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
         case "diagnostics":
           return (
             <DiagnosticsSection
-              useLegacyTerminalRenderer={settings.useLegacyTerminalRenderer}
-              onUseLegacyTerminalRendererChange={handleUseLegacyTerminalRendererChange}
               voiceAudioEngine={voiceAudioEngine}
               isPlaybackTestRunning={isPlaybackTestRunning}
               playbackTestResult={playbackTestResult}
@@ -1309,7 +1293,11 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
     return (
       <View style={styles.container}>
         <BackHeader title={t("settings.title")} onBack={handleBackToWorkspace} />
-        <ScrollView style={styles.scrollView} contentContainerStyle={insetBottomStyle}>
+        <SettingsScrollView
+          {...settingsScrollProps}
+          style={styles.scrollView}
+          contentContainerStyle={insetBottomStyle}
+        >
           <SettingsSidebar
             view={view}
             onSelectSection={handleSelectSection}
@@ -1320,7 +1308,7 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
             activeHostServerId={activeHostServerId}
             layout="mobile"
           />
-        </ScrollView>
+        </SettingsScrollView>
         {addHostModals}
       </View>
     );
@@ -1334,9 +1322,13 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
           titleAccessory={detailHeader?.titleAccessory}
           onBack={handleBackFromDetail}
         />
-        <ScrollView style={styles.scrollView} contentContainerStyle={insetBottomStyle}>
+        <SettingsScrollView
+          {...settingsScrollProps}
+          style={styles.scrollView}
+          contentContainerStyle={insetBottomStyle}
+        >
           <View style={styles.content}>{content}</View>
-        </ScrollView>
+        </SettingsScrollView>
         {addHostModals}
       </View>
     );
@@ -1367,9 +1359,13 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
               left={desktopDetailHeaderLeft}
               leftStyle={desktopStyles.detailLeft}
             />
-            <ScrollView style={styles.scrollView} contentContainerStyle={insetBottomStyle}>
+            <SettingsScrollView
+              {...settingsScrollProps}
+              style={styles.scrollView}
+              contentContainerStyle={insetBottomStyle}
+            >
               <View style={styles.content}>{content}</View>
-            </ScrollView>
+            </SettingsScrollView>
           </View>
         </WindowChromeRegion>
       </View>
@@ -1503,6 +1499,10 @@ const sidebarStyles = StyleSheet.create((theme) => ({
   },
   itemSelected: {
     backgroundColor: theme.colors.surfaceSidebarHover,
+  },
+  // The workspace rows' pressed fill.
+  itemPressed: {
+    backgroundColor: theme.colors.surface2,
   },
   label: {
     fontSize: theme.fontSize.base,

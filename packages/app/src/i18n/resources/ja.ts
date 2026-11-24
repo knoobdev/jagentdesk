@@ -343,6 +343,7 @@ export const ja: TranslationResources = {
       details: "詳細",
     },
     dictation: {
+      paused: "マイクが中断されました。再開を待っています…",
       start: "音声入力を開始",
       cancel: "音声入力をキャンセル",
       retry: "音声入力を再試行",
@@ -1969,11 +1970,6 @@ export const ja: TranslationResources = {
     },
     diagnostics: {
       title: "診断",
-      legacyTerminalRenderer: {
-        label: "以前のターミナルレンダラーを使用",
-        description: "ターミナルを開き直した後、以前の WebView ターミナルを使用します",
-        accessibilityLabel: "以前のターミナルレンダラーを使用",
-      },
       testAudio: "音声をテスト",
       playTest: "テスト再生",
       playing: "再生中...",

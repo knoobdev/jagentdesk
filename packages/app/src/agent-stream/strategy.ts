@@ -12,11 +12,6 @@ type NeighborRelation = "above" | "below";
 type AssistantTurnTraversalStep = -1 | 1;
 export type StreamFrameChildOrder = "content-then-footer" | "footer-then-content";
 
-export type MaintainVisibleContentPositionConfig = Readonly<{
-  minIndexForVisible: number;
-  autoscrollToTopThreshold: number;
-}>;
-
 export type BottomAnchorTransportBehavior = Readonly<{
   verificationDelayFrames: number;
   verificationRetryMode: "rescroll" | "recheck";
@@ -44,7 +39,16 @@ export interface ScrollToMessageOccurrence {
   targetTop(): number | null;
 }
 
+/**
+ * The edge of its row a disclosure's trigger sits on. A header trigger sits on the top: the content
+ * it opens grows below it. A trigger under the content it opens, such as a long message's show
+ * more, sits on the bottom.
+ */
+export type DisclosureTriggerEdge = "top" | "bottom";
+
 export interface StreamViewportHandle {
+  focus?: () => void;
+  holdRow?: (rowId: string, apply: () => void, triggerEdge: DisclosureTriggerEdge) => void;
   scrollToBottom: (reason?: BottomAnchorLocalRequest["reason"]) => void;
   prepareForViewportChange: () => void;
   scrollToMessage?: (itemId: string, occurrence?: ScrollToMessageOccurrence) => void;
@@ -110,14 +114,11 @@ export interface StreamStrategy {
     component: ReactElement | ComponentType<unknown> | null,
     gapSize: number,
   ) => StreamEdgeSlotProps;
-  getMaintainVisibleContentPosition: () => MaintainVisibleContentPositionConfig | undefined;
   getBottomAnchorTransportBehavior: () => BottomAnchorTransportBehavior;
   getHistoryLiveBoundaryIndex: (history: StreamItem[]) => number | null;
   getLiveHeadHistoryBoundaryIndex: (liveHead: StreamItem[]) => number | null;
   getLatestItemIndex: (items: StreamItem[]) => number | null;
   getFrameChildOrder: () => StreamFrameChildOrder;
-  getFlatListInverted: () => boolean;
-  getOverlayScrollbarInverted: () => boolean;
   shouldDisableParentScrollOnInlineDetailsExpansion: () => boolean;
   shouldAnchorBottomOnContentSizeChange: () => boolean;
   shouldAnimateManualScrollToBottom: () => boolean;
@@ -133,9 +134,6 @@ interface StreamStrategyConfig {
   historyLiveBoundaryEdge: "first" | "last";
   liveHeadHistoryBoundaryEdge: "first" | "last";
   frameChildOrder: StreamFrameChildOrder;
-  flatListInverted: boolean;
-  overlayScrollbarInverted: boolean;
-  maintainVisibleContentPosition?: MaintainVisibleContentPositionConfig;
   bottomAnchorTransportBehavior: BottomAnchorTransportBehavior;
   disableParentScrollOnInlineDetailsExpansion: boolean;
   anchorBottomOnContentSizeChange: boolean;
@@ -144,8 +142,6 @@ interface StreamStrategyConfig {
   isNearBottom: (input: StreamNearBottomInput) => boolean;
   getBottomOffset: (metrics: StreamViewportMetrics) => number;
 }
-
-const NATIVE_SETTLING_VERIFICATION_DELAY_FRAMES = 4;
 
 export function createStreamStrategy(config: StreamStrategyConfig): StreamStrategy {
   return {
@@ -199,7 +195,6 @@ export function createStreamStrategy(config: StreamStrategyConfig): StreamStrate
         ListFooterComponentStyle: { marginTop: gapSize },
       };
     },
-    getMaintainVisibleContentPosition: () => config.maintainVisibleContentPosition,
     getBottomAnchorTransportBehavior: () => config.bottomAnchorTransportBehavior,
     getHistoryLiveBoundaryIndex: (history) => {
       if (history.length === 0) {
@@ -220,30 +215,11 @@ export function createStreamStrategy(config: StreamStrategyConfig): StreamStrate
       return config.historyLiveBoundaryEdge === "first" ? 0 : items.length - 1;
     },
     getFrameChildOrder: () => config.frameChildOrder,
-    getFlatListInverted: () => config.flatListInverted,
-    getOverlayScrollbarInverted: () => config.overlayScrollbarInverted,
     shouldDisableParentScrollOnInlineDetailsExpansion: () =>
       config.disableParentScrollOnInlineDetailsExpansion,
     shouldAnchorBottomOnContentSizeChange: () => config.anchorBottomOnContentSizeChange,
     shouldAnimateManualScrollToBottom: () => config.animateManualScrollToBottom,
     shouldUseVirtualizedList: () => config.useVirtualizedList,
-  };
-}
-
-export function resolveBottomAnchorTransportBehavior(input: {
-  strategy: StreamStrategy;
-  isViewportSettling: boolean;
-}): BottomAnchorTransportBehavior {
-  const baseBehavior = input.strategy.getBottomAnchorTransportBehavior();
-  if (!input.isViewportSettling || !input.strategy.getFlatListInverted()) {
-    return baseBehavior;
-  }
-  return {
-    verificationDelayFrames: Math.max(
-      baseBehavior.verificationDelayFrames,
-      NATIVE_SETTLING_VERIFICATION_DELAY_FRAMES,
-    ),
-    verificationRetryMode: "recheck",
   };
 }
 

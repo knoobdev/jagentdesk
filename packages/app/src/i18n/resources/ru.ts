@@ -342,6 +342,7 @@ export const ru: TranslationResources = {
       details: "Подробности",
     },
     dictation: {
+      paused: "Микрофон прерван. Ожидание возобновления…",
       start: "Начать голосовой диктовку",
       cancel: "Отменить диктовку",
       retry: "Повторить диктовку",
@@ -1991,11 +1992,6 @@ export const ru: TranslationResources = {
     },
     diagnostics: {
       title: "Диагностика",
-      legacyTerminalRenderer: {
-        label: "Использовать прежний рендерер терминала",
-        description: "Использовать прежний WebView-терминал после повторного открытия",
-        accessibilityLabel: "Использовать прежний рендерер терминала",
-      },
       testAudio: "Тестирование звука",
       playTest: "Игровой тест",
       playing: "Игра...",

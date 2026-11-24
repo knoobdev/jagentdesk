@@ -1,3 +1,7 @@
+import { useOverlayRegistration, type KeyboardInputEvent } from "@/keyboard";
+import { navigateMenuKeyboard } from "./keyboard-navigation";
+
+import { Modal } from "@/components/ui/modal";
 import {
   useCallback,
   useEffect,
@@ -11,10 +15,8 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import {
   Dimensions,
-  Modal,
   Platform,
   Pressable,
-  StatusBar,
   View,
   type StyleProp,
   type ViewStyle,
@@ -24,12 +26,7 @@ import { StyleSheet } from "react-native-unistyles";
 import { FloatingScrollView, FloatingSurface } from "@/components/ui/floating";
 import { isWeb } from "@/constants/platform";
 import type { KeyboardFocusScope } from "@/keyboard/actions";
-import {
-  getOverlayRoot,
-  OverlayLayerProvider,
-  useOverlayLayer,
-  useWebOverlayRegistration,
-} from "@/lib/overlay-root";
+import { getOverlayRoot, OverlayLayerProvider, useOverlayLayer } from "@/lib/overlay-root";
 import {
   computePosition,
   getTransformOrigin,
@@ -162,16 +159,13 @@ export function useAnchoredPosition({
       return undefined;
     }
 
-    // Capture status bar height synchronously before async measurement, so it cannot change
-    // or read back null between the measure call and its resolution.
-    const statusBarHeight = Platform.OS === "android" ? (StatusBar.currentHeight ?? 0) : 0;
     let cancelled = false;
 
+    // The app draws edge-to-edge, so measureInWindow and the full-screen Modal share one
+    // coordinate space that starts at the screen top; no status bar offset applies.
     void measureElement(anchorRef.current).then((rect) => {
       if (cancelled) return undefined;
-      // On Android with statusBarTranslucent, measureInWindow returns coordinates relative to
-      // below the status bar while Modal content starts at the screen top.
-      setTriggerRect({ ...rect, y: rect.y + statusBarHeight });
+      setTriggerRect(rect);
       return undefined;
     });
 
@@ -434,8 +428,8 @@ export function MenuOverlay({
 }): ReactElement | null {
   const floatingLayer = useOverlayLayer("floating");
 
-  const handleWebOverlayKeyDown = useCallback(
-    (event: KeyboardEvent) => {
+  const handleOverlayKeyDown = useCallback(
+    (event: KeyboardInputEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
@@ -443,44 +437,15 @@ export function MenuOverlay({
         return true;
       }
 
-      const target = event.target instanceof Element ? event.target : null;
-      const surface = target?.closest<HTMLElement>('[data-menu-surface="true"]');
-      if (!surface) return false;
-      const items = Array.from(
-        surface.querySelectorAll<HTMLElement>(
-          '[data-menu-item="true"]:not([data-menu-disabled="true"])',
-        ),
-      );
-      if (items.length === 0) return false;
-      const currentIndex = items.findIndex((item) => item === document.activeElement);
-      let nextIndex: number | null = null;
-      if (event.key === "ArrowDown")
-        nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % items.length;
-      if (event.key === "ArrowUp")
-        nextIndex =
-          currentIndex < 0 ? items.length - 1 : (currentIndex - 1 + items.length) % items.length;
-      if (event.key === "Home") nextIndex = 0;
-      if (event.key === "End") nextIndex = items.length - 1;
-      if (nextIndex !== null) {
-        event.preventDefault();
-        event.stopPropagation();
-        items[nextIndex]?.focus();
-        return true;
-      }
-      if ((event.key === "Enter" || event.key === " ") && currentIndex >= 0) {
-        event.preventDefault();
-        event.stopPropagation();
-        items[currentIndex]?.click();
-        return true;
-      }
-      return false;
+      return navigateMenuKeyboard(event);
     },
     [onClose],
   );
-  const setWebOverlayScope = useWebOverlayRegistration({
-    active: isWeb && visible,
+  const setOverlayScope = useOverlayRegistration({
+    keys: ["Escape"],
+    active: visible,
     layer: floatingLayer,
-    onKeyDown: handleWebOverlayKeyDown,
+    onKeyDown: handleOverlayKeyDown,
     restoreFocusRef,
   });
 
@@ -492,7 +457,7 @@ export function MenuOverlay({
         {...{
           onContextMenu: (event: { preventDefault?: () => void }) => event.preventDefault?.(),
         }}
-        ref={setWebOverlayScope}
+        ref={setOverlayScope}
         collapsable={false}
         style={[
           styles.overlay,
@@ -527,7 +492,7 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
   },
   overlayWeb: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     pointerEvents: "auto" as const,
   },
   backdrop: {

@@ -1,10 +1,10 @@
+import { Modal } from "@/components/ui/modal";
 import { clickUpListStyles } from "@/components/clickup-shell/list-styles";
 import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 import {
   View,
   Text,
   Pressable,
-  Modal,
   RefreshControl,
   FlatList,
   type ListRenderItem,

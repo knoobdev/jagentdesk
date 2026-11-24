@@ -1,10 +1,18 @@
+import { useKeyboardFocusSurface } from "@/keyboard";
 import { TerminalFind, type TerminalPaneFindHandle } from "@/terminal/find";
 import type { TerminalFindResult } from "@/terminal/runtime/terminal-emulator-runtime";
+import type { TerminalCharacterWidths } from "@/terminal/character-widths";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useRetainedPanelActive } from "@/components/retained-panel";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Clipboard from "expo-clipboard";
-import { Pressable, Text, View, type PressableStateCallbackType } from "react-native";
+import {
+  Pressable,
+  Text,
+  View,
+  type LayoutChangeEvent,
+  type PressableStateCallbackType,
+} from "react-native";
 import Animated, { runOnJS, useAnimatedReaction } from "react-native-reanimated";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { Keyboard as KeyboardIcon, KeyboardOff as KeyboardOffIcon } from "lucide-react-native";
@@ -15,7 +23,7 @@ import {
 } from "@jagentdesk/protocol/terminal-input-mode";
 import { useTranslation } from "react-i18next";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
-import { useKeyboardShiftStyle } from "@/hooks/use-keyboard-shift-style";
+import { useKeyboardShiftStyle } from "@/keyboard/shift";
 import { useAppActivelyVisible } from "@/hooks/use-app-visible";
 import { useStableEvent } from "@/hooks/use-stable-event";
 import {
@@ -30,9 +38,11 @@ import {
 } from "@/terminal/runtime/terminal-key-dispatch";
 import {
   getTerminalVirtualKeyboardControlId,
+  getTerminalVirtualKeyBarTestId,
+  resolveTerminalVirtualKeyboardRows,
+  shouldShowTerminalVirtualKeyBar,
   shouldShowTerminalFloatingCopyAction,
   shouldShowTerminalPasteAction,
-  TERMINAL_VIRTUAL_KEYBOARD_ROWS,
   type TerminalVirtualKeyboardControl,
 } from "@/terminal/runtime/terminal-virtual-keyboard";
 import { pasteTerminalClipboard } from "@/terminal/runtime/terminal-paste";
@@ -61,6 +71,7 @@ import {
 } from "./terminal-resize-debouncer";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { isNative } from "@/constants/platform";
+
 import {
   applyTerminalRendererReadyChange,
   resolveTerminalStreamTarget,
@@ -113,6 +124,7 @@ export interface TerminalPaneAppearance {
 
 const TERMINAL_REFIT_DELAYS_MS = [0, 48, 144, 320];
 const TERMINAL_RESIZE_DEBOUNCE_MS = 100;
+const TERMINAL_KEY_BAR_MAX_WIDTH = 880;
 
 const MODIFIER_LABELS = {
   ctrl: "Ctrl",
@@ -158,8 +170,16 @@ function ModifierButton({ modifier, active, onToggle }: ModifierButtonProps) {
     () => [styles.keyButtonText, active && styles.keyButtonTextActive],
     [active],
   );
+  const accessibilityState = useMemo(() => ({ selected: active }), [active]);
   return (
-    <Pressable testID={`terminal-key-${modifier}`} onPress={handlePress} style={pressableStyle}>
+    <Pressable
+      accessibilityLabel={MODIFIER_LABELS[modifier]}
+      accessibilityRole="button"
+      accessibilityState={accessibilityState}
+      testID={`terminal-key-${modifier}`}
+      onPress={handlePress}
+      style={pressableStyle}
+    >
       <Text style={textStyle}>{MODIFIER_LABELS[modifier]}</Text>
     </Pressable>
   );
@@ -182,7 +202,13 @@ function VirtualKeyButton({ id, label, keyValue, onSend }: VirtualKeyButtonProps
     [],
   );
   return (
-    <Pressable testID={`terminal-key-${id}`} onPress={handlePress} style={pressableStyle}>
+    <Pressable
+      accessibilityLabel={label}
+      accessibilityRole="button"
+      testID={`terminal-key-${id}`}
+      onPress={handlePress}
+      style={pressableStyle}
+    >
       <Text style={styles.keyButtonText}>{label}</Text>
     </Pressable>
   );
@@ -243,6 +269,17 @@ function KeyboardToggleButton({
   );
 }
 
+function TerminalExtraKeys({ keys }: { keys: readonly TerminalPaneExtraKey[] | undefined }) {
+  if (!keys || keys.length === 0) return null;
+  return (
+    <View style={styles.keyboardRow} testID="terminal-extra-keys">
+      {keys.map((extraKey) => (
+        <ExtraKeyButton key={extraKey.id} extraKey={extraKey} />
+      ))}
+    </View>
+  );
+}
+
 export function TerminalPane({
   serverId,
   cwd,
@@ -274,12 +311,18 @@ export function TerminalPane({
     return trimmed.length > 0 ? trimmed : undefined;
   }, [settings.monoFontFamily]);
   const isMobile = useIsCompactFormFactor();
+  const showVirtualKeyBar = shouldShowTerminalVirtualKeyBar({ isNative, isCompact: isMobile });
+  const [keyBarWidth, setKeyBarWidth] = useState(0);
+  const virtualKeyboardRows = resolveTerminalVirtualKeyboardRows({
+    isCompact: isMobile,
+    availableWidth: keyBarWidth,
+  });
   const mobileView = usePanelStore((state) => state.mobilePanel.target);
   const showMobileAgentList = usePanelStore((state) => state.showMobileAgentList);
   const swipeGesturesEnabled = isMobile;
   const { shift: keyboardShift, style: keyboardPaddingStyle } = useKeyboardShiftStyle({
     mode: "padding",
-    enabled: isMobile,
+    enabled: showVirtualKeyBar,
   });
   const [keyboardInset, setKeyboardInset] = useState(0);
 
@@ -295,6 +338,11 @@ export function TerminalPane({
   );
   const supportsTerminalSizeOwnership = useSessionStore(
     (state) => state.sessions[serverId]?.serverInfo?.features?.["terminal-size-ownership"] === true,
+  );
+  const characterWidths: TerminalCharacterWidths = useSessionStore((state) =>
+    state.sessions[serverId]?.serverInfo?.features?.["terminal-grapheme-widths"] === true
+      ? "graphemes"
+      : "legacy",
   );
   const setFocusedTerminalId = useSessionStore((state) => state.setFocusedTerminalId);
 
@@ -338,7 +386,7 @@ export function TerminalPane({
   }, [terminalId]);
 
   const refreshClipboardAvailability = useCallback(async () => {
-    if (!isMobile) {
+    if (!showVirtualKeyBar) {
       setHasClipboardText(false);
       return;
     }
@@ -348,7 +396,7 @@ export function TerminalPane({
     } catch {
       setHasClipboardText(false);
     }
-  }, [isMobile]);
+  }, [showVirtualKeyBar]);
 
   useEffect(() => {
     void refreshClipboardAvailability();
@@ -400,6 +448,8 @@ export function TerminalPane({
       requestTerminalFocus();
     }
   }, [isMobile, isPaneFocused, isWorkspaceFocused, requestTerminalFocus, scopeKey, terminalId]);
+
+  useKeyboardFocusSurface("terminal", isWorkspaceFocused && isPaneFocused);
 
   useEffect(() => {
     const canRequest = canRequestFocusClaim({
@@ -485,7 +535,7 @@ export function TerminalPane({
   }, [clearKeyboardRefitTimeouts]);
 
   useAnimatedReaction(
-    () => (isMobile ? Math.round(keyboardShift.value) : 0),
+    () => (showVirtualKeyBar ? Math.round(keyboardShift.value) : 0),
     (next, prev) => {
       if (next === prev) {
         return;
@@ -981,6 +1031,11 @@ export function TerminalPane({
     [keyboardPaddingStyle],
   );
 
+  const handleKeyBarLayout = useCallback((event: LayoutChangeEvent) => {
+    const width = event.nativeEvent.layout.width;
+    if (width > 0) setKeyBarWidth(width);
+  }, []);
+
   const handleSwipeRight = useCallback(() => {
     if (!swipeGesturesEnabled) return;
     emulatorRef.current?.blur();
@@ -1065,6 +1120,7 @@ export function TerminalPane({
             dom={TERMINAL_EMULATOR_DOM_PROPS}
             streamKey={terminalStreamKey}
             supportsTerminalInputModeReplay={supportsTerminalInputModeReplay}
+            characterWidths={characterWidths}
             testId="terminal-surface"
             xtermTheme={xtermTheme}
             scrollbackLines={settings.terminalScrollbackLines}
@@ -1121,10 +1177,14 @@ export function TerminalPane({
         </View>
       ) : null}
 
-      {isMobile ? (
+      {showVirtualKeyBar ? (
         <View style={styles.keyboardContainer} testID="terminal-virtual-keyboard">
-          <View style={styles.keyboardRows}>
-            {TERMINAL_VIRTUAL_KEYBOARD_ROWS.map((row) => (
+          <View
+            style={styles.keyboardRows}
+            onLayout={handleKeyBarLayout}
+            testID={getTerminalVirtualKeyBarTestId({ isNative, isCompact: isMobile })}
+          >
+            {virtualKeyboardRows.map((row) => (
               <View
                 key={row.map(getTerminalVirtualKeyboardControlId).join(":")}
                 style={styles.keyboardRow}
@@ -1132,13 +1192,7 @@ export function TerminalPane({
                 {row.map(renderVirtualKeyboardControl)}
               </View>
             ))}
-            {extraKeys && extraKeys.length > 0 ? (
-              <View style={styles.keyboardRow} testID="terminal-extra-keys">
-                {extraKeys.map((extraKey) => (
-                  <ExtraKeyButton key={extraKey.id} extraKey={extraKey} />
-                ))}
-              </View>
-            ) : null}
+            <TerminalExtraKeys keys={extraKeys} />
           </View>
         </View>
       ) : null}
@@ -1163,7 +1217,7 @@ const styles = StyleSheet.create((theme) => ({
     minHeight: 0,
   },
   attachOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(0, 0, 0, 0.16)",
@@ -1194,6 +1248,9 @@ const styles = StyleSheet.create((theme) => ({
   },
   keyboardRows: {
     gap: theme.spacing[1],
+    width: "100%",
+    maxWidth: TERMINAL_KEY_BAR_MAX_WIDTH,
+    alignSelf: "center",
   },
   keyboardRow: {
     flexDirection: "row",

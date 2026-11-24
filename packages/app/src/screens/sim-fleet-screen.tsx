@@ -837,7 +837,7 @@ const styles = StyleSheet.create((theme) => ({
   driveRailClosed: { borderLeftWidth: 0 },
   driveInner: { flex: 1, height: "100%" },
   driveSheet: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: theme.colors.surface1,
     zIndex: 30,
   },

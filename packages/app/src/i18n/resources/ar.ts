@@ -339,6 +339,7 @@ export const ar: TranslationResources = {
       details: "تفاصيل",
     },
     dictation: {
+      paused: "تمت مقاطعة الميكروفون. في انتظار الاستئناف…",
       start: "بدء الإملاء الصوتي",
       cancel: "إلغاء الإملاء",
       retry: "أعد محاولة الإملاء",
@@ -1957,11 +1958,6 @@ export const ar: TranslationResources = {
     },
     diagnostics: {
       title: "التشخيص",
-      legacyTerminalRenderer: {
-        label: "استخدام عارض الطرفية السابق",
-        description: "استخدام طرفية WebView السابقة بعد إعادة فتح الطرفية",
-        accessibilityLabel: "استخدام عارض الطرفية السابق",
-      },
       testAudio: "اختبار الصوت",
       playTest: "لعب الاختبار",
       playing: "جارٍ اللعب...",

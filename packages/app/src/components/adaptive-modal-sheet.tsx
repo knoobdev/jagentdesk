@@ -1,3 +1,5 @@
+import { type KeyboardInputEvent, useOverlayRegistration } from "@/keyboard";
+
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode, Ref } from "react";
 import { createPortal } from "react-dom";
@@ -15,12 +17,7 @@ import {
 import type { StyleProp, TextInputProps, ViewStyle } from "react-native";
 import { StyleSheet, useUnistyles, withUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
-import {
-  getOverlayRoot,
-  OverlayLayerProvider,
-  useGlobalWebOverlayLayer,
-  useWebOverlayRegistration,
-} from "../lib/overlay-root";
+import { getOverlayRoot, OverlayLayerProvider, useGlobalOverlayLayer } from "../lib/overlay-root";
 import {
   BottomSheetBackdrop,
   BottomSheetScrollView,
@@ -70,14 +67,14 @@ export interface SheetHeader {
   search?: SheetHeaderSearch;
 }
 
-const ABSOLUTE_FILL_STYLE = { ...StyleSheet.absoluteFillObject };
+const ABSOLUTE_FILL_STYLE = { ...StyleSheet.absoluteFill };
 
 const styles = StyleSheet.create((theme) => ({
   nativeModalRoot: {
     flex: 1,
   },
   desktopOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0,0,0,0.55)",
     justifyContent: "center",
     alignItems: "center",
@@ -623,7 +620,7 @@ export function AdaptiveModalSheet({
   });
   const [shouldRenderWeb, setShouldRenderWeb] = useState(visible);
   const [isWebClosing, setIsWebClosing] = useState(false);
-  const modalLayer = useGlobalWebOverlayLayer("modal", isWeb && !isMobile && shouldRenderWeb);
+  const modalLayer = useGlobalOverlayLayer("modal", visible || shouldRenderWeb);
   const nativeModalDismissNotifiedRef = useRef(!visible);
   const handleDismiss = useCallback(() => {
     handleSheetDismiss();
@@ -666,8 +663,8 @@ export function AdaptiveModalSheet({
     [isWebClosing, modalLayer],
   );
 
-  const handleWebOverlayKeyDown = useCallback(
-    (event: KeyboardEvent) => {
+  const handleOverlayKeyDown = useCallback(
+    (event: KeyboardInputEvent) => {
       if (event.key !== "Escape") return false;
       event.preventDefault();
       event.stopPropagation();
@@ -676,10 +673,11 @@ export function AdaptiveModalSheet({
     },
     [onClose],
   );
-  const setWebOverlayScope = useWebOverlayRegistration({
-    active: isWeb && !isMobile && visible,
+  const setOverlayScope = useOverlayRegistration({
+    keys: ["Escape"],
+    active: visible,
     layer: modalLayer,
-    onKeyDown: handleWebOverlayKeyDown,
+    onKeyDown: handleOverlayKeyDown,
   });
 
   useEffect(() => {
@@ -789,13 +787,7 @@ export function AdaptiveModalSheet({
         style={ABSOLUTE_FILL_STYLE}
         onPress={onClose}
       />
-      <View
-        ref={setWebOverlayScope}
-        style={desktopCardStyle}
-        role="dialog"
-        aria-modal
-        tabIndex={-1}
-      >
+      <View ref={setOverlayScope} style={desktopCardStyle} role="dialog" aria-modal tabIndex={-1}>
         {cardInner}
       </View>
     </View>

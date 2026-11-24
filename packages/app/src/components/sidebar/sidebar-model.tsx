@@ -27,12 +27,15 @@ const EMPTY_WORKSPACE_ENTRIES = new Map<string, SidebarWorkspaceEntry>();
 
 export function SidebarModelProvider({
   active,
+  keyboardNavigationActive = false,
   children,
 }: {
   active?: boolean;
+  keyboardNavigationActive?: boolean;
   children: ReactNode;
 }) {
-  const list = useSidebarWorkspacesList();
+  const modelActive = active !== false || keyboardNavigationActive;
+  const list = useSidebarWorkspacesList({ enabled: modelActive });
   const groupMode = useSidebarViewStore((state) => state.groupMode);
   const collapsedProjectKeys = useSidebarCollapsedSectionsStore(
     (state) => state.collapsedProjectKeys,
@@ -47,7 +50,7 @@ export function SidebarModelProvider({
   const isStatusMode = groupMode === "status";
   const workspaceEntriesByKey = useSidebarWorkspaceEntries(
     list.workspacePlacements,
-    active !== false || isStatusMode,
+    modelActive || isStatusMode,
   );
   const projectionWorkspaceEntriesByKey = isStatusMode
     ? workspaceEntriesByKey

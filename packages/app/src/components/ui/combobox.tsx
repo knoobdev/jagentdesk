@@ -1,3 +1,6 @@
+import { useOverlayRegistration, type KeyboardInputEvent } from "@/keyboard";
+
+import { Modal } from "@/components/ui/modal";
 import {
   useCallback,
   useEffect,
@@ -12,7 +15,6 @@ import {
   View,
   Text,
   Pressable,
-  Modal,
   TextInput,
   ScrollView,
   Platform,
@@ -64,12 +66,7 @@ import {
 } from "@/components/adaptive-modal-sheet";
 import { FloatingSurface } from "@/components/ui/floating";
 import { useDismissKeyboardOnOpen } from "@/components/ui/keyboard-dismiss";
-import {
-  getOverlayRoot,
-  OverlayLayerProvider,
-  useOverlayLayer,
-  useWebOverlayRegistration,
-} from "@/lib/overlay-root";
+import { getOverlayRoot, OverlayLayerProvider, useOverlayLayer } from "@/lib/overlay-root";
 import { buildDesktopFrameStyle } from "./combobox-frame-style";
 
 export { buildDesktopFrameStyle } from "./combobox-frame-style";
@@ -538,7 +535,6 @@ type DesktopKey = "ArrowDown" | "ArrowUp" | "Enter" | "Escape";
 
 interface DesktopKeyHandlerInput {
   isOpen: boolean;
-  isMobile: boolean;
   orderedVisibleOptions: ComboboxOption[];
   activeIndex: number;
   setActiveIndex: React.Dispatch<React.SetStateAction<number>>;
@@ -883,11 +879,12 @@ function isDesktopKey(key: string): key is DesktopKey {
 function dispatchDesktopKey(
   input: DesktopKeyHandlerInput,
   key: DesktopKey,
-  event?: KeyboardEvent,
+  event?: KeyboardInputEvent,
 ): boolean {
   if (!input.isOpen) return false;
-  if (!IS_WEB && input.isMobile) return false;
-
+  // A native mobile bail used to live here because native had no key source, so
+  // nothing could call this. It has one now, and the sheet highlights an active
+  // row like the popover does, so a hardware keyboard drives both.
   if (key === "ArrowDown" || key === "ArrowUp") {
     event?.preventDefault();
     handleDesktopArrowKey(input, key);
@@ -1056,7 +1053,8 @@ interface DesktopBodyProps {
   overlayLayer: number;
   isOpen: boolean;
   handleClose: () => void;
-  handleDesktopKey: (key: DesktopKey, event?: KeyboardEvent) => boolean;
+  setOverlayScope: (node: unknown) => void;
+  handleDesktopKey: (key: DesktopKey, event?: KeyboardInputEvent) => boolean;
   refs: ReturnType<typeof useFloating>["refs"];
   shouldUseDesktopFade: boolean;
   desktopFrameStyle: StyleProp<ViewStyle>;
@@ -1179,7 +1177,8 @@ function DesktopComboboxBody(props: DesktopBodyProps): ReactElement {
     },
     [handleDesktopKey],
   );
-  const setWebOverlayScope = useWebOverlayRegistration({
+  const setOverlayScope = useOverlayRegistration({
+    keys: ["Escape", "Enter", "ArrowUp", "ArrowDown"],
     active: isWeb && props.isOpen,
     layer: props.overlayLayer,
     onKeyDown: handleWebOverlayKeyDown,
@@ -1187,9 +1186,9 @@ function DesktopComboboxBody(props: DesktopBodyProps): ReactElement {
   const setFloatingRef = useCallback(
     (node: View | null) => {
       props.refs.setFloating(node);
-      setWebOverlayScope(node);
+      setOverlayScope(node);
     },
-    [props.refs, setWebOverlayScope],
+    [props.refs, setOverlayScope],
   );
 
   const overlay = (
@@ -1510,11 +1509,10 @@ export function Combobox({
   );
 
   const handleDesktopKey = useCallback(
-    (key: DesktopKey, event?: KeyboardEvent) => {
+    (key: DesktopKey, event?: KeyboardInputEvent) => {
       return dispatchDesktopKey(
         {
           isOpen,
-          isMobile,
           orderedVisibleOptions,
           activeIndex,
           setActiveIndex,
@@ -1525,7 +1523,7 @@ export function Combobox({
         event,
       );
     },
-    [activeIndex, handleClose, handleSelect, isMobile, isOpen, orderedVisibleOptions],
+    [activeIndex, handleClose, handleSelect, isOpen, orderedVisibleOptions],
   );
 
   useDismissKeyboardOnOpen(isOpen, isMobile);
@@ -1559,6 +1557,13 @@ export function Combobox({
     () => [styles.desktopScrollContent, styles.desktopScrollContentAboveSearch],
     [],
   );
+
+  const setOverlayScope = useOverlayRegistration({
+    keys: ["Escape", "Enter", "ArrowUp", "ArrowDown"],
+    active: isOpen,
+    layer: floatingLayer,
+    onKeyDown: (event) => (isDesktopKey(event.key) ? handleDesktopKey(event.key, event) : false),
+  });
 
   const effectiveSearchPlaceholder = searchPlaceholder ?? resolvedPlaceholder;
   const hasChildren = Boolean(children);
@@ -1608,6 +1613,7 @@ export function Combobox({
       isOpen={isOpen}
       handleClose={handleClose}
       handleDesktopKey={handleDesktopKey}
+      setOverlayScope={setOverlayScope}
       refs={refs}
       shouldUseDesktopFade={shouldUseDesktopFade}
       desktopFrameStyle={desktopFrameStyle}
@@ -1758,7 +1764,7 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
   },
   desktopOverlayWeb: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     pointerEvents: "auto" as const,
   },
   desktopBackdrop: {

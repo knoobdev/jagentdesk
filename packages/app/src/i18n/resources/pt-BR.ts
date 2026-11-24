@@ -342,6 +342,7 @@ export const ptBR: TranslationResources = {
       details: "Detalhes",
     },
     dictation: {
+      paused: "Microfone interrompido. Aguardando para retomar…",
       start: "Iniciar ditado por voz",
       cancel: "Cancelar ditado",
       retry: "Tentar ditado novamente",
@@ -1985,11 +1986,6 @@ export const ptBR: TranslationResources = {
     },
     diagnostics: {
       title: "Diagnósticos",
-      legacyTerminalRenderer: {
-        label: "Usar renderizador de terminal anterior",
-        description: "Usa o terminal WebView anterior após reabrir um terminal",
-        accessibilityLabel: "Usar renderizador de terminal anterior",
-      },
       testAudio: "Testar áudio",
       playTest: "Reproduzir teste",
       playing: "Reproduzindo...",

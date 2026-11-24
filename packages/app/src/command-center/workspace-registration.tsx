@@ -1,3 +1,5 @@
+import { usesDesktopBindings } from "@/keyboard";
+
 import { useMemo, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { Columns2, Globe, Rows2, SquarePen, SquareTerminal } from "lucide-react-native";
@@ -39,7 +41,7 @@ function staticIcon(element: ReactElement | undefined): CommandCenterIcon | unde
 function resolveWorkspaceShortcuts(
   overrides: Readonly<Record<string, string>>,
 ): WorkspaceCommandCenterShortcuts {
-  const platform = { isMac: getShortcutOs() === "mac", isDesktop: getIsElectron() };
+  const platform = { isMac: getShortcutOs() === "mac", usesDesktopBindings };
   return {
     newAgent: resolveShortcutKeysForAction("workspace-tab-new", overrides, platform) ?? undefined,
     newTerminal:

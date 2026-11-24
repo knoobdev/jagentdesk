@@ -1,4 +1,5 @@
 import { PluginHeaderButtons, usePluginWorkspaceMenu } from "@/plugins/buttons/view";
+import { useActiveWorkspaceArchive } from "@/hooks/use-active-workspace-archive";
 import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
@@ -14,7 +15,7 @@ import {
   type ReactNode,
 } from "react";
 import { useStoreWithEqualityFn } from "zustand/traditional";
-import { useIsFocused } from "@react-navigation/native";
+import { useIsFocused } from "expo-router/react-navigation";
 import { BackHandler, Keyboard, Pressable, Text, View } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, type Href } from "expo-router";
@@ -29,6 +30,7 @@ import {
   Copy,
   Ellipsis,
   EllipsisVertical,
+  Archive,
   Globe,
   Import as ImportIcon,
   PanelRight,
@@ -53,8 +55,8 @@ import type { ShortcutKey } from "@/utils/format-shortcut";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
+  MenuItem,
+  MenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -571,9 +573,9 @@ function MobileTabTrailingAccessory({
       <DropdownMenuContent side="bottom" align="end" width={220} testID={menuTestIDBase}>
         {menuEntries.map((entry) =>
           entry.kind === "separator" ? (
-            <DropdownMenuSeparator key={entry.key} />
+            <MenuSeparator key={entry.key} />
           ) : (
-            <MobileTabDropdownMenuItem key={entry.key} entry={entry} />
+            <MobileTabMenuItem key={entry.key} entry={entry} />
           ),
         )}
       </DropdownMenuContent>
@@ -581,7 +583,7 @@ function MobileTabTrailingAccessory({
   );
 }
 
-function MobileTabDropdownMenuItem({
+function MobileTabMenuItem({
   entry,
 }: {
   entry: Extract<WorkspaceTabMenuEntry, { kind: "item" }>;
@@ -611,7 +613,7 @@ function MobileTabDropdownMenuItem({
     [entry.hint],
   );
   return (
-    <DropdownMenuItem
+    <MenuItem
       testID={entry.testID}
       disabled={entry.disabled}
       destructive={entry.destructive}
@@ -621,7 +623,7 @@ function MobileTabDropdownMenuItem({
       trailing={trailing}
     >
       {entry.label}
-    </DropdownMenuItem>
+    </MenuItem>
   );
 }
 
@@ -1000,6 +1002,30 @@ function useCloseTabs(): UseCloseTabsResult {
   return { closingTabIds, closeTab };
 }
 
+const ThemedArchive = withUnistyles(Archive);
+const MENU_ARCHIVE_ICON = <ThemedArchive size={16} uniProps={mutedColorMapping} />;
+
+function WorkspaceArchiveMenuItem() {
+  const { t } = useTranslation();
+  const { canArchive, archive } = useActiveWorkspaceArchive();
+  const handleArchive = useCallback(() => {
+    archive();
+  }, [archive]);
+  return (
+    <>
+      <MenuItem
+        testID="workspace-header-archive-workspace"
+        leading={MENU_ARCHIVE_ICON}
+        disabled={!canArchive}
+        onSelect={handleArchive}
+      >
+        {t("sidebar.workspace.actions.archiveWorkspace")}
+      </MenuItem>
+      <MenuSeparator />
+    </>
+  );
+}
+
 interface WorkspaceHeaderMenuProps {
   normalizedServerId: string;
   normalizedWorkspaceId: string;
@@ -1199,6 +1225,7 @@ function WorkspaceHeaderMenu({
           </>
         ) : null}
         <MenuSeparator />
+        {isMobile ? <WorkspaceArchiveMenuItem /> : null}
         <MenuLabel>{t("workspace.tabs.actions.terminalProfilesMenu")}</MenuLabel>
         <MenuItem
           testID="workspace-header-new-terminal"
@@ -4463,7 +4490,7 @@ const styles = StyleSheet.create((theme) => ({
     position: "relative",
   },
   mobileMountedTabSlot: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   contentPlaceholder: {
     flex: 1,

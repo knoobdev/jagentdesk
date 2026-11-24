@@ -36,6 +36,12 @@ vi.mock("@xterm/addon-unicode11", () => ({
   },
 }));
 
+vi.mock("@xterm/addon-unicode-graphemes", () => ({
+  UnicodeGraphemesAddon: class UnicodeGraphemesAddon {
+    dispose(): void {}
+  },
+}));
+
 vi.mock("@xterm/addon-web-links", () => ({
   WebLinksAddon: class WebLinksAddon {
     dispose(): void {}
@@ -369,8 +375,8 @@ describe("terminal-emulator-runtime", () => {
     runtime.write({ data: terminalOutput("output") });
     runtime.replay({ type: "begin" });
 
-    // The plain write carries no onCommitted so it registers no callback; writeCallbacks[0]
-    // is the sentinel gate. suppressInput only flips once the gate resolves the barrier.
+    // The plain write has its own commit callback. Input stays enabled until the
+    // following sentinel commits and starts the barrier.
     expect(readSuppressInput()).toBe(false);
     writeCallbacks[1]?.();
     expect(readSuppressInput()).toBe(true);

@@ -339,6 +339,7 @@ export const zhCN: TranslationResources = {
       details: "详情",
     },
     dictation: {
+      paused: "麦克风已中断，正在等待恢复…",
       start: "开始语音听写",
       cancel: "取消听写",
       retry: "重试听写",
@@ -1932,11 +1933,6 @@ export const zhCN: TranslationResources = {
     },
     diagnostics: {
       title: "诊断",
-      legacyTerminalRenderer: {
-        label: "使用旧版终端渲染器",
-        description: "重新打开终端后使用之前的 WebView 终端",
-        accessibilityLabel: "使用旧版终端渲染器",
-      },
       testAudio: "测试音频",
       playTest: "播放测试",
       playing: "正在播放...",

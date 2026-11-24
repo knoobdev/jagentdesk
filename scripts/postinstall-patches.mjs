@@ -9,6 +9,23 @@ import { join, relative } from "node:path";
 // the patch's node_modules/... paths relative to its working directory.
 const patchedPackages = [
   {
+    nodeModulesPath: "node_modules/react-native-reanimated",
+    patchPrefix: "react-native-reanimated+",
+  },
+  { nodeModulesPath: "node_modules/@legendapp/list", patchPrefix: "@legendapp+list+" },
+  { nodeModulesPath: "node_modules/expo-modules-core", patchPrefix: "expo-modules-core+" },
+  { nodeModulesPath: "node_modules/@gorhom/bottom-sheet", patchPrefix: "@gorhom+bottom-sheet+" },
+  {
+    nodeModulesPath: "node_modules/react-native-unistyles",
+    patchPrefix: "react-native-unistyles+",
+  },
+  {
+    nodeModulesPath: "packages/app/node_modules/react-native-svg",
+    patchPrefix: "react-native-svg+",
+    cwd: "packages/app",
+  },
+  { nodeModulesPath: "node_modules/react-native-svg", patchPrefix: "react-native-svg+" },
+  {
     nodeModulesPath: "node_modules/react-native-markdown-display",
     patchPrefix: "react-native-markdown-display+",
   },
@@ -31,9 +48,14 @@ const patchedPackages = [
   },
 ];
 
-const installedPackages = patchedPackages.filter(({ nodeModulesPath }) =>
-  existsSync(nodeModulesPath),
-);
+const installedPackages = patchedPackages.flatMap((entry) => {
+  if (existsSync(entry.nodeModulesPath)) return [entry];
+  const appPath = join("packages/app", entry.nodeModulesPath);
+  if (!entry.cwd && existsSync(appPath)) {
+    return [{ ...entry, nodeModulesPath: appPath, cwd: "packages/app" }];
+  }
+  return [];
+});
 
 if (!existsSync("patches") || installedPackages.length === 0) {
   process.exit(0);
@@ -72,7 +94,7 @@ for (const [cwd, files] of patchFilesByCwd) {
 
   let result;
   try {
-    result = spawnSync(cmd, ["--patch-dir", relative(cwd, tempPatchDir)], {
+    result = spawnSync(cmd, ["--patch-dir", relative(cwd, tempPatchDir), "--error-on-fail"], {
       cwd,
       shell: isWindows,
       stdio: "inherit",

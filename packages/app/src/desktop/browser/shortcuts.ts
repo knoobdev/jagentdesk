@@ -32,7 +32,7 @@ interface BrowserShortcutPolicyInput {
   bindings: readonly ParsedShortcutBinding[];
   chordState?: ChordState;
   isMac: boolean;
-  isDesktop: boolean;
+  usesDesktopBindings: boolean;
 }
 
 export function shouldPublishBrowserShortcutPolicy(input: {
@@ -149,7 +149,7 @@ function buildBrowserShortcutPrefixes(input: BrowserShortcutPolicyInput): Browse
   const prefixes = new Map<string, BrowserShortcutPrefix>();
   const context = {
     isMac: input.isMac,
-    isDesktop: input.isDesktop,
+    usesDesktopBindings: input.usesDesktopBindings,
     focusScope: "browser" as const,
     commandCenterOpen: false,
   };

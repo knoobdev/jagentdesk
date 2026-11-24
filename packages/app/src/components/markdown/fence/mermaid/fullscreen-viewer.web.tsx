@@ -1,5 +1,7 @@
+import { useOverlayRegistration } from "@/keyboard";
+import { Modal } from "@/components/ui/modal";
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { Modal, View } from "react-native";
+import { View } from "react-native";
 import { X } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
@@ -7,7 +9,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ZoomableViewport } from "@/components/zoomable-viewport";
 import { SPACING } from "@/styles/theme";
 import { WindowChromeRootRegion } from "@/utils/desktop-window";
-import { useGlobalWebOverlayLayer, useWebOverlayRegistration } from "@/lib/overlay-root";
+
+import { useGlobalOverlayLayer } from "@/lib/overlay-root";
 import { MermaidIframeRuntime, type MermaidRenderedMessage } from "./iframe-runtime.web";
 import type { DiagramColorScheme } from "./render-model";
 import { useMermaidRenderModel } from "./use-render-model";
@@ -49,7 +52,7 @@ export function MermaidFullscreenViewer({
 
   // Route Escape through the web overlay owner so dismissal takes first refusal before the
   // app-wide shortcut dispatcher (which would otherwise interrupt the running agent).
-  const modalLayer = useGlobalWebOverlayLayer("modal", true);
+  const modalLayer = useGlobalOverlayLayer("modal", true);
   const handleWebOverlayKeyDown = useCallback(
     (event: KeyboardEvent) => {
       if (event.key !== "Escape") return false;
@@ -60,7 +63,8 @@ export function MermaidFullscreenViewer({
     },
     [onClose],
   );
-  const setWebOverlayScope = useWebOverlayRegistration({
+  const setOverlayScope = useOverlayRegistration({
+    keys: ["Escape"],
     active: true,
     layer: modalLayer,
     onKeyDown: handleWebOverlayKeyDown,
@@ -106,7 +110,7 @@ export function MermaidFullscreenViewer({
   return (
     <Modal transparent animationType="fade" statusBarTranslucent visible onRequestClose={onClose}>
       <WindowChromeRootRegion corners="both">
-        <View ref={setWebOverlayScope} style={styles.root}>
+        <View ref={setOverlayScope} style={styles.root}>
           <View style={styles.backdrop} />
           <View style={contentLayerStyle}>
             {/* biome-ignore lint/a11y/noNoninteractiveTabindex: focus holder for the Escape shortcut */}

@@ -1,3 +1,4 @@
+import { SidebarFooterIconHighlight } from "./sidebar-footer-icon-highlight";
 import { useCallback, useState } from "react";
 import { Text, View } from "react-native";
 import { Activity, CircleHelp, Keyboard } from "lucide-react-native";
@@ -83,11 +84,14 @@ export function SidebarHelpMenu() {
               accessibilityRole="button"
               accessibilityLabel={t("sidebar.help.trigger")}
             >
-              {({ hovered }) => (
-                <ThemedCircleHelp
-                  size={ICON_SIZE.md}
-                  uniProps={hovered ? foregroundColorMapping : foregroundMutedColorMapping}
-                />
+              {({ hovered, pressed, open: menuOpen }) => (
+                <>
+                  <SidebarFooterIconHighlight visible={pressed || menuOpen} />
+                  <ThemedCircleHelp
+                    size={ICON_SIZE.md}
+                    uniProps={hovered ? foregroundColorMapping : foregroundMutedColorMapping}
+                  />
+                </>
               )}
             </DropdownMenuTrigger>
           </View>

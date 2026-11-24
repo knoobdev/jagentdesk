@@ -53,7 +53,6 @@ export interface AppSettings {
   sendBehavior: SendBehavior;
   serviceUrlBehavior: ServiceUrlBehavior;
   terminalScrollbackLines: number;
-  useLegacyTerminalRenderer: boolean;
   uiFontFamily: string; // "" = platform default UI stack
   monoFontFamily: string; // "" = platform default mono stack
   uiFontSize: number; // clamped px, default 16
@@ -82,7 +81,6 @@ export const DEFAULT_CLIENT_SETTINGS: AppSettings = {
   sendBehavior: "steer",
   serviceUrlBehavior: "ask",
   terminalScrollbackLines: DEFAULT_TERMINAL_SCROLLBACK_LINES,
-  useLegacyTerminalRenderer: false,
   uiFontFamily: "",
   monoFontFamily: "",
   uiFontSize: DEFAULT_UI_FONT_SIZE,
@@ -221,9 +219,6 @@ function parseToolCallDetailLevel(stored: StoredAppSettings): ToolCallDetailLeve
 
 function pickBooleanAppSettings(stored: StoredAppSettings): Partial<AppSettings> {
   const result: Partial<AppSettings> = {};
-  if (typeof stored.useLegacyTerminalRenderer === "boolean") {
-    result.useLegacyTerminalRenderer = stored.useLegacyTerminalRenderer;
-  }
   if (typeof stored.vimKeybindings === "boolean") {
     result.vimKeybindings = stored.vimKeybindings;
   }

@@ -43,7 +43,12 @@ export function MobilePanelOverlay({
   }, [isLeft, windowWidth]);
 
   const overlayStyle = useMemo(
-    () => [styles.overlay, { display: isPresented ? ("flex" as const) : ("none" as const) }],
+    () => [
+      styles.overlay,
+      isWeb
+        ? { display: isPresented ? ("flex" as const) : ("none" as const) }
+        : { opacity: isPresented ? 1 : 0 },
+    ],
     [isPresented],
   );
   const positionedPanelStyle = isLeft ? styles.leftPanel : styles.rightPanel;
@@ -73,6 +78,8 @@ export function MobilePanelOverlay({
       {/* Fabric needs an always-mounted native host to attach the close handler while the
           retained panel content is hidden. nativeID keeps that host registered. */}
       <View
+        accessibilityElementsHidden={!isOpen}
+        importantForAccessibility={isOpen ? "auto" : "no-hide-descendants"}
         collapsable={false}
         nativeID={`${panel}-gesture-host`}
         pointerEvents={overlayPointerEvents}
@@ -84,7 +91,7 @@ export function MobilePanelOverlay({
             importantForAccessibility="no-hide-descendants"
             onPress={showMobileAgent}
             pointerEvents={isOpen ? "auto" : "none"}
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
             testID={`${panel}-backdrop`}
           >
             <Animated.View pointerEvents="none" style={backdropStyle} />
@@ -104,10 +111,10 @@ export function MobilePanelOverlay({
 // native node after Fabric commits.
 const styles = StyleSheet.create({
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   backdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0, 0, 0, 0.5)",
   },
   panel: {

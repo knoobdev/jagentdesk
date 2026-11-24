@@ -136,7 +136,7 @@ The EAS `production-apk` profile uses the large Android resource class. Release 
 
 ### React version lockstep
 
-Keep `react` and `react-dom` pinned to the React version embedded by the current `react-native` release. React Native `0.81.x` embeds `react-native-renderer` `19.1.0`, so `packages/app` must use React `19.1.0`. Bumping React to a newer patch can build successfully but crash at JS startup on Android with `Incompatible React versions`, leaving the app on the native splash screen.
+Keep `react` and `react-dom` pinned to the React version embedded by the current `react-native` release. React Native `0.86.3` embeds `react-native-renderer` `19.2.3`, so `packages/app` must use React `19.2.3`. Bumping React to a newer patch can build successfully but crash at JS startup on Android with `Incompatible React versions`, leaving the app on the native splash screen.
 
 ## Screenshots
 

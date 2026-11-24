@@ -26,6 +26,9 @@
       },
       "android": {
         "gradleCommand": ":app:bundleRelease --no-daemon --max-workers=1 -Dorg.gradle.parallel=false -Dorg.gradle.jvmargs=-Xmx2048m"
+      },
+      "ios": {
+        "image": "macos-tahoe-26.6-xcode-27.1"
       }
     },
     "production-apk": {

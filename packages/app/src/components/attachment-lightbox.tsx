@@ -1,5 +1,8 @@
+import { useOverlayRegistration, type KeyboardInputEvent } from "@/keyboard";
+
+import { Modal } from "@/components/ui/modal";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Modal, Pressable, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { StyleSheet } from "react-native-unistyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -7,12 +10,12 @@ import { X } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import type { AttachmentMetadata } from "@/attachments/types";
 import { useAttachmentPreviewUrl } from "@/attachments/use-attachment-preview-url";
-import { isNative, isWeb } from "@/constants/platform";
+import { isNative } from "@/constants/platform";
 import { SPACING } from "@/styles/theme";
 import { WindowChromeRootRegion } from "@/utils/desktop-window";
 import { ZoomableImage } from "@/components/zoomable-viewport/image";
 import type { ViewportSize } from "@/components/zoomable-viewport/geometry";
-import { useGlobalWebOverlayLayer, useWebOverlayRegistration } from "@/lib/overlay-root";
+import { useGlobalOverlayLayer } from "@/lib/overlay-root";
 
 export type ImageLightboxSource =
   | { type: "attachment"; metadata: AttachmentMetadata }
@@ -34,14 +37,14 @@ export function AttachmentLightbox({ source, onClose }: AttachmentLightboxProps)
   const url = source?.type === "uri" ? source.uri : attachmentUrl;
   const contentSize = source?.type === "uri" ? source.contentSize : undefined;
   const [errored, setErrored] = useState(false);
-  const modalLayer = useGlobalWebOverlayLayer("modal", isWeb && source !== null);
+  const modalLayer = useGlobalOverlayLayer("modal", source !== null);
 
   useEffect(() => {
     setErrored(false);
   }, [metadata?.id, url]);
 
-  const handleWebOverlayKeyDown = useCallback(
-    (event: KeyboardEvent) => {
+  const handleOverlayKeyDown = useCallback(
+    (event: KeyboardInputEvent) => {
       if (event.key !== "Escape") return false;
       event.preventDefault();
       event.stopPropagation();
@@ -50,10 +53,11 @@ export function AttachmentLightbox({ source, onClose }: AttachmentLightboxProps)
     },
     [onClose],
   );
-  const setWebOverlayScope = useWebOverlayRegistration({
-    active: isWeb && source !== null,
+  const setOverlayScope = useOverlayRegistration({
+    keys: ["Escape"],
+    active: source !== null,
     layer: modalLayer,
-    onKeyDown: handleWebOverlayKeyDown,
+    onKeyDown: handleOverlayKeyDown,
   });
 
   const contentLayerStyle = useMemo(
@@ -92,7 +96,7 @@ export function AttachmentLightbox({ source, onClose }: AttachmentLightboxProps)
     <Modal transparent animationType="fade" statusBarTranslucent visible onRequestClose={onClose}>
       <ModalRoot style={styles.root}>
         <WindowChromeRootRegion corners="both">
-          <View ref={setWebOverlayScope} style={styles.root}>
+          <View ref={setOverlayScope} style={styles.root}>
             <Pressable
               testID="attachment-lightbox-backdrop"
               accessibilityRole="button"

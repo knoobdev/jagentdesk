@@ -1,6 +1,6 @@
 import Animated from "react-native-reanimated";
 import { isNative } from "@/constants/platform";
-import { useKeyboardShiftStyle } from "@/hooks/use-keyboard-shift-style";
+import { useKeyboardShiftStyle } from "@/keyboard/shift";
 import { useCallback, useMemo } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { useLocalSearchParams, router, type Href } from "expo-router";

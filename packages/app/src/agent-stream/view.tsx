@@ -1,4 +1,5 @@
 import { navigateToAgent } from "@/utils/navigate-to-agent";
+import { renderStreamRow, type RenderStreamItem } from "./stream-row";
 import { ClickUpAgentHeader } from "@/components/clickup-shell/chat-headers";
 import { CLICKUP_MESSAGE_INDENT } from "@/components/clickup-shell/chat-layout";
 import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
@@ -215,51 +216,6 @@ function renderListEmptyComponent(input: {
       <Text style={stylesheet.emptyStateText}>{input.emptyText}</Text>
     </View>
   );
-}
-
-// A history row renders again only when its stream item identity, its layout item identity, or
-// the renderer changes. Without this boundary every new timeline item re-rendered all mounted
-// rows. Item identity is the revision signal: useRevisedHistoryRows clones items whose tool-call
-// group or display state changed, and layout.ts keeps unchanged layout items' identity.
-const HistoryStreamRow = memo(function HistoryStreamRow({
-  layoutItem,
-  renderStreamItem,
-}: {
-  item: StreamItem;
-  layoutItem: StreamLayoutItem;
-  renderStreamItem: (layoutItem: StreamLayoutItem) => ReactNode;
-}) {
-  return <>{renderStreamItem(layoutItem)}</>;
-});
-
-function renderHistoryStreamItem(input: {
-  item: StreamItem;
-  layoutItemById: Map<string, StreamLayoutItem>;
-  renderStreamItem: (layoutItem: StreamLayoutItem) => ReactNode;
-}): ReactNode {
-  const layoutItem = input.layoutItemById.get(input.item.id);
-  if (!layoutItem) {
-    return null;
-  }
-  return (
-    <HistoryStreamRow
-      item={input.item}
-      layoutItem={layoutItem}
-      renderStreamItem={input.renderStreamItem}
-    />
-  );
-}
-
-function renderLiveHeadStreamItem(input: {
-  item: StreamItem;
-  layoutItemById: Map<string, StreamLayoutItem>;
-  renderStreamItem: (layoutItem: StreamLayoutItem) => ReactNode;
-}): ReactNode {
-  const layoutItem = input.layoutItemById.get(input.item.id);
-  if (!layoutItem) {
-    return null;
-  }
-  return input.renderStreamItem(layoutItem);
 }
 
 export interface AgentStreamViewHandle {
@@ -971,8 +927,10 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
 
     const bottomTurnFooterHost = streamLayout.auxiliaryTurnFooter;
 
-    const renderStreamItem = useCallback(
-      (layoutItem: StreamLayoutItem) => {
+    const renderStreamItem = useCallback<RenderStreamItem>(
+      (item, originalLayoutItem) => {
+        const layoutItem =
+          originalLayoutItem.item === item ? originalLayoutItem : { ...originalLayoutItem, item };
         const rawContent = renderStreamItemContent(layoutItem);
         const content = isClickUp
           ? wrapClickUpAgentItem({
@@ -1080,9 +1038,10 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
 
     const renderHistoryRow = useCallback(
       (item: StreamItem) =>
-        renderHistoryStreamItem({
+        renderStreamRow({
           item,
           layoutItemById: layoutHistoryItemById,
+          viewportRef,
           renderStreamItem,
         }),
       [layoutHistoryItemById, renderStreamItem],
@@ -1101,9 +1060,10 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     // to be a new object on every text-chunk flush.
     const renderLiveHeadRow: StreamSegmentRenderers["renderLiveHeadRow"] = useStableEvent(
       (item: StreamItem) =>
-        renderLiveHeadStreamItem({
+        renderStreamRow({
           item,
           layoutItemById: layoutLiveHeadItemById,
+          viewportRef,
           renderStreamItem,
         }),
     );

@@ -1,3 +1,4 @@
+import type { TerminalCharacterWidths } from "../terminal/character-widths";
 import type {
   TerminalFindHandle,
   TerminalFindResult,
@@ -31,6 +32,7 @@ export interface TerminalEmulatorProps {
   ref: Ref<TerminalEmulatorHandle>;
   streamKey: string;
   supportsTerminalInputModeReplay: boolean;
+  characterWidths: TerminalCharacterWidths;
   testId?: string;
   xtermTheme?: ITheme;
   scrollbackLines: number;

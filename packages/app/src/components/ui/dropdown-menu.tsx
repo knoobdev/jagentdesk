@@ -1,3 +1,4 @@
+import { useOverlayRegistration } from "@/keyboard";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
   createContext,
@@ -34,12 +35,8 @@ import { FloatingScrollView, FloatingSurface } from "@/components/ui/floating";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { isWeb } from "@/constants/platform";
 import { useDismissKeyboardOnOpen } from "@/components/ui/keyboard-dismiss";
-import {
-  getOverlayRoot,
-  OverlayLayerProvider,
-  useOverlayLayer,
-  useWebOverlayRegistration,
-} from "@/lib/overlay-root";
+
+import { getOverlayRoot, OverlayLayerProvider, useOverlayLayer } from "@/lib/overlay-root";
 
 // Action status for menu items with loading/success feedback
 export type ActionStatus = "idle" | "pending" | "success";
@@ -524,8 +521,9 @@ export function DropdownMenuContent({
     },
     [handleClose],
   );
-  const setWebOverlayScope = useWebOverlayRegistration({
-    active: isWeb && modalVisible,
+  const setOverlayScope = useOverlayRegistration({
+    keys: ["Escape"],
+    active: modalVisible,
     layer: floatingLayer,
     onKeyDown: handleWebOverlayKeyDown,
   });
@@ -672,7 +670,7 @@ export function DropdownMenuContent({
               scrollViewportStyle,
               content,
               surfaceNativeID,
-              scopeRef: setWebOverlayScope,
+              scopeRef: setOverlayScope,
               onExited: () => setModalVisible(false),
             })
           : null}
@@ -930,7 +928,7 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
   },
   overlayWeb: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     pointerEvents: "auto" as const,
   },
   backdrop: {

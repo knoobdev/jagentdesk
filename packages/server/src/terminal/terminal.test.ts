@@ -30,6 +30,8 @@ import {
 import { spawnSync } from "node:child_process";
 import xterm from "@xterm/headless";
 import { delimiter, join } from "node:path";
+import xterm from "@xterm/headless";
+import { renderTerminalSnapshotToAnsi } from "@jagentdesk/protocol/terminal-snapshot";
 import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 import { setImmediate as waitForImmediate } from "node:timers/promises";
@@ -57,6 +59,10 @@ function getRowText(state: TerminalState, rowIndex: number): string {
 // Extract all visible lines as array (trimmed, empty lines included)
 function getLines(state: TerminalState): string[] {
   return state.grid.map(rowToText);
+}
+
+function rowHasChar(row: TerminalRow, char: string): boolean {
+  return row.some((cell) => cell.char === char);
 }
 
 // Wait for terminal state to match expected lines
@@ -399,6 +405,109 @@ describe("createTerminal", () => {
     // The continuation cell must stay empty so the restore path can skip it.
     expect(state.grid[0][0].char).toBe("통");
     expect(state.grid[0][1].char).toBe("");
+  });
+
+  it("restores CJK text without injected spaces when a snapshot round-trips through the client", async () => {
+    // Each Hangul syllable is a wide char: xterm stores it as a 2-cell pair
+    // whose second cell has no chars. Capturing that continuation as " " made
+    // every restored syllable three columns wide (jagentdesk#3434).
+    const text = "통합 구현은 전체 테스트를 통과했습니다";
+    const session = trackSession(
+      await createTerminal({
+        workspaceId: "ws-test",
+        cwd: realpathSync(tmpdir()),
+        cols: 80,
+        rows: 10,
+        command: process.execPath,
+        args: [
+          "-e",
+          `process.stdout.write(${JSON.stringify(text)}); setInterval(() => {}, 100000);`,
+        ],
+      }),
+    );
+
+    const state = await waitForState(session, (current) => rowHasChar(current.grid[0], "다"));
+
+    // Replay the snapshot the way the client does on tab switch and read the
+    // row back the way a selection copy would.
+    const restored = new xterm.Terminal({ cols: 80, rows: 10, allowProposedApi: true });
+    try {
+      await new Promise<void>((resolve) =>
+        restored.write(renderTerminalSnapshotToAnsi(state), resolve),
+      );
+      expect(restored.buffer.active.getLine(0)?.translateToString(true)).toBe(text);
+    } finally {
+      restored.dispose();
+    }
+
+    // The continuation cell must stay empty so the restore path can skip it.
+    expect(state.grid[0][0].char).toBe("통");
+    expect(state.grid[0][1].char).toBe("");
+  });
+
+  it("reports the cursor column after an emoji cluster in DSR replies", async () => {
+    // Programs that measure the cursor (prompts, TUIs) must see the same
+    // column the client renders: an emoji occupies two cells.
+    const program = `
+      process.stdin.setRawMode(true);
+      process.stdin.once("data", (reply) => {
+        process.stdout.write("\\r\\nREPLY " + JSON.stringify(reply.toString()).slice(2, -1));
+      });
+      process.stdout.write("A😀\\x1b[6n");
+      setInterval(() => {}, 100000);
+    `;
+    const session = trackSession(
+      await createTerminal({
+        workspaceId: "ws-test",
+        cwd: realpathSync(tmpdir()),
+        cols: 40,
+        rows: 5,
+        command: process.execPath,
+        args: ["-e", program],
+      }),
+    );
+
+    const state = await waitForState(session, (current) =>
+      getRowText(current, 1).startsWith("REPLY"),
+    );
+
+    expect(getRowText(state, 1)).toBe("REPLY u001b[1;4R");
+  });
+
+  it("replays emoji clusters at their columns with the cursor after them", async () => {
+    const text = "A😀B❤️C👋🏽D👨‍👩‍👧E";
+    const session = trackSession(
+      await createTerminal({
+        workspaceId: "ws-test",
+        cwd: realpathSync(tmpdir()),
+        cols: 40,
+        rows: 5,
+        command: process.execPath,
+        args: [
+          "-e",
+          `process.stdout.write(${JSON.stringify(text)}); setInterval(() => {}, 100000);`,
+        ],
+      }),
+    );
+
+    const state = await waitForState(session, (current) => rowHasChar(current.grid[0], "E"));
+
+    expect(state.grid[0].slice(0, 13).map((cell) => cell.char)).toEqual([
+      "A",
+      "😀",
+      "",
+      "B",
+      "❤️",
+      "",
+      "C",
+      "👋🏽",
+      "",
+      "D",
+      "👨‍👩‍👧",
+      "",
+      "E",
+    ]);
+    expect(state.cursor).toEqual({ row: 0, col: 13 });
   });
 
   it("captures exit diagnostics from the terminal buffer", async () => {

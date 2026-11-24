@@ -188,6 +188,7 @@ export function ClusterPodShell({
             ref={emulatorRef}
             streamKey={`pod-exec:${clusterId}:${namespace}/${pod}/${activeContainer ?? ""}:${retryKey}`}
             supportsTerminalInputModeReplay={false}
+            characterWidths="graphemes"
             scrollbackLines={5000}
             fontSize={13}
             onInput={handleInput}

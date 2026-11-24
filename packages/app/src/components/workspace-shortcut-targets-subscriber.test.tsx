@@ -22,6 +22,9 @@ vi.hoisted(() => {
   (globalThis as unknown as { __DEV__: boolean }).__DEV__ = false;
 });
 
+// JSDOM supplies browser globals; Expo's Metro startup polyfill requires native TS modules.
+vi.mock("expo/src/winter", () => ({}));
+
 function workspaceDescriptor(input: {
   id: string;
   name?: string;
@@ -122,6 +125,20 @@ describe("WorkspaceShortcutTargetsSubscriber", () => {
       useSessionStore.getState().clearSession("host-a");
       useSessionStore.getState().clearSession("host-b");
     });
+  });
+
+  it("keeps keyboard navigation populated when the sidebar starts hidden", async () => {
+    await act(async () => {
+      root?.render(
+        <SidebarModelProvider active={false} keyboardNavigationActive>
+          <WorkspaceShortcutTargetsSubscriber enabled />
+        </SidebarModelProvider>,
+      );
+    });
+    expect(useKeyboardShortcutsStore.getState().sidebarShortcutWorkspaceTargets).toEqual([
+      { serverId: "srv", workspaceId: "ws-1" },
+      { serverId: "srv", workspaceId: "ws-2" },
+    ]);
   });
 
   it("publishes workspace shortcut targets without rendering the sidebar", async () => {
