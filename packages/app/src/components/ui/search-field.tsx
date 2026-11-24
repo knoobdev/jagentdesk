@@ -3,10 +3,7 @@ import { Pressable, View } from "react-native";
 import { Search, X } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { Theme } from "@/styles/theme";
-import {
-  TextInput,
-  type TextInput as EditingTextInputHandle,
-} from "react-native";
+import { TextInput, type TextInput as EditingTextInputHandle } from "react-native";
 
 const ThemedSearch = withUnistyles(Search);
 const ThemedX = withUnistyles(X);

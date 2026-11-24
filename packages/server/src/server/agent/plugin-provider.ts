@@ -4,6 +4,7 @@ import { PluginSessionHistory } from "./plugin-session-history.js";
 import { resolve as resolvePath } from "node:path";
 import type { Logger } from "pino";
 import type { JsonValue } from "@jagentdesk/protocol/agent-types";
+import type { ProviderInstallationInspection } from "@jagentdesk/protocol/messages";
 import {
   PROVIDER_CAPABILITIES,
   PROVIDER_PROTOCOL_VERSION,
@@ -63,6 +64,7 @@ import type {
   ProviderRefreshContext,
   SteerActiveTurnOptions,
   SteerResult,
+  AgentClientDiagnosticContext,
 } from "./agent-sdk-types.js";
 import {
   resolveProviderLaunch,
@@ -70,6 +72,11 @@ import {
   createProviderEnv,
   type ProviderRuntimeSettings,
 } from "./provider-launch-config.js";
+import {
+  buildCommandResolutionDiagnosticRows,
+  formatProviderDiagnostic,
+  type DiagnosticEntry,
+} from "./providers/diagnostic-utils.js";
 import type { RegisteredProviderDefinition } from "./provider-registry.js";
 import { runProviderTurn } from "./providers/provider-runner.js";
 import { StaleProviderSessionError } from "./stale-provider-session-error.js";
@@ -119,6 +126,12 @@ function providerError(error: ProviderError): Error {
   });
 }
 
+function describeVersion(inspection: ProviderInstallationInspection): string {
+  if (inspection.status === "not_installed") return "not installed";
+  if (inspection.status === "error") return `error: ${inspection.message}`;
+  return inspection.version?.trim() || "unknown";
+}
+
 class ProviderRuntime {
   private connection: ProviderConnection | null = null;
   private connecting: Promise<ProviderConnection> | null = null;
@@ -147,8 +160,8 @@ class ProviderRuntime {
     private readonly runtimeSettings?: ProviderRuntimeSettings,
   ) {}
 
-  /** The effective launch, including when its executable does not resolve. */
-  private async resolveEffectiveLaunch(): Promise<ProviderInstallationLaunch | undefined> {
+  /** The launch after overrides, and where its executable resolves. */
+  private async resolveConfiguredLaunch() {
     const command = this.registration.command;
     if (!command) return undefined;
     const launch = await resolveProviderLaunch({
@@ -158,7 +171,14 @@ class ProviderRuntime {
     if (launch.source !== "override") launch.args.unshift(...command.slice(1));
     const env = createProviderEnv({ runtimeSettings: this.runtimeSettings });
     launch.env = env;
-    const availability = await checkProviderLaunchAvailable(launch);
+    return { launch, env, availability: await checkProviderLaunchAvailable(launch) };
+  }
+
+  /** The effective launch, including when its executable does not resolve. */
+  private async resolveEffectiveLaunch(): Promise<ProviderInstallationLaunch | undefined> {
+    const configured = await this.resolveConfiguredLaunch();
+    if (!configured) return undefined;
+    const { launch, env, availability } = configured;
     if (!availability.resolvedPath)
       return { command: launch.command, args: launch.args, env, resolved: false };
     return {
@@ -198,6 +218,24 @@ class ProviderRuntime {
     const launch = await this.resolveEffectiveLaunch();
     context.signal.throwIfAborted();
     return await update.call(this.registration.installation, { ...context, launch });
+  }
+
+  /** What the daemon launches, where it found the executable and which version it runs. */
+  async launchDiagnosticRows(context: AgentClientDiagnosticContext): Promise<DiagnosticEntry[]> {
+    const configured = await this.resolveConfiguredLaunch();
+    if (!configured) return [];
+    const { launch, env, availability } = configured;
+    const rows = [
+      ...(await buildCommandResolutionDiagnosticRows(launch, {
+        knownBinaryNames: [launch.command],
+        pathValue: env.PATH,
+      })),
+      { label: "Resolved path", value: availability.resolvedPath ?? "not found" },
+    ];
+    if (!availability.resolvedPath) return rows;
+    const inspection = await context.inspectInstallation();
+    if (inspection) rows.push({ label: "Version", value: describeVersion(inspection) });
+    return rows;
   }
 
   async status(): Promise<ProviderStatus> {
@@ -945,6 +983,7 @@ function createPluginProviderDefinition(
     label: registration.label,
     description: registration.description ?? `Plugin provider ${registration.label}`,
     iconSvg: registration.icon,
+    docsUrl: registration.docsUrl,
     defaultModeId: null,
     modes: [],
     supportsExactMcpPreapproval: true,
@@ -959,6 +998,7 @@ interface PendingChild {
 
 class PluginAgentClient implements AgentClient {
   readonly provider: string;
+  private readonly label: string;
   private readonly runtime: ProviderRuntime;
   private readonly rootsBySession = new Map<string, PluginAgentSession>();
   private readonly pendingChildren: PendingChild[] = [];
@@ -968,6 +1008,7 @@ class PluginAgentClient implements AgentClient {
 
   constructor(registration: ProviderRegistration, runtimeSettings?: ProviderRuntimeSettings) {
     this.provider = registration.id;
+    this.label = registration.label;
     this.runtime = new ProviderRuntime(registration, runtimeSettings);
     if (registration.getCatalogCacheKey)
       this.getCatalogCacheKey = (options) => this.runtime.catalogCacheKey(options);
@@ -1049,9 +1090,22 @@ class PluginAgentClient implements AgentClient {
     return await this.runtime.isAvailable();
   }
 
-  async getDiagnostic(): Promise<{ diagnostic: string }> {
-    const status = await this.runtime.status();
-    return { diagnostic: status.diagnostic ?? "Provider is available" };
+  async getDiagnostic(
+    context: AgentClientDiagnosticContext = { inspectInstallation: async () => undefined },
+  ): Promise<{ diagnostic: string }> {
+    const [rows, status] = await Promise.all([
+      this.runtime.launchDiagnosticRows(context),
+      this.runtime.status(),
+    ]);
+    const report = [formatProviderDiagnostic(this.label, rows)];
+    if (!status.available) report.push(`  Error: ${status.diagnostic}`);
+    // An available provider adds its own rows, one per line.
+    else if (status.diagnostic) {
+      for (const line of status.diagnostic.split("\n")) {
+        if (line.trim()) report.push(`  ${line.trim()}`);
+      }
+    }
+    return { diagnostic: report.join("\n") };
   }
 
   async listImportableSessions(

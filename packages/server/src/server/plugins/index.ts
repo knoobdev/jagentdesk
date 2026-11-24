@@ -630,6 +630,7 @@ export class PluginService {
           id: provider.id,
           label: provider.label,
           description: provider.description,
+          docsUrl: provider.docsUrl,
           command: provider.command,
           status: provider.hasStatus
             ? (request) => {

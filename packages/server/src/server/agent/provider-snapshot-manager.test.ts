@@ -605,6 +605,29 @@ describe("ProviderSnapshotManager public surface", () => {
     }
   });
 
+  test("diagnostics read the version through the installation service", async () => {
+    const inspection = { status: "installed", version: "3.4.5" } as const;
+    const inspect = vi.fn(async () => inspection);
+    const client = createExtraClient("codex", {
+      installation: { inspect },
+      getDiagnostic: async (context) => ({
+        diagnostic: JSON.stringify(await context?.inspectInstallation()),
+      }),
+    });
+    const manager = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      extraClients: { codex: client },
+    });
+    try {
+      const result = await manager.getProviderDiagnostic("codex");
+      expect(result.diagnostic).toContain(JSON.stringify(inspection));
+      expect((await manager.installations.inspect("codex"))?.inspection).toEqual(inspection);
+      expect(inspect).toHaveBeenCalledTimes(1);
+    } finally {
+      manager.destroy();
+    }
+  });
+
   test("getProviderDiagnostic force-refreshes the snapshot and appends models/status", async () => {
     const catalogModels: AgentModelDefinition[] = [
       { provider: "codex", id: "gpt-5.4-mini", label: "GPT 5.4 Mini" },

@@ -819,6 +819,8 @@ export class ProviderSnapshotManager {
         source: this.getProviderSource(provider),
         label: definition.label,
         description: definition.description,
+        iconSvg: definition.iconSvg,
+        docsUrl: definition.docsUrl,
         defaultModeId: definition.defaultModeId,
         error: toErrorMessage(error),
       };
@@ -834,7 +836,11 @@ export class ProviderSnapshotManager {
       if (client.getDiagnostic) {
         return (
           await withTimeout(
-            client.getDiagnostic(),
+            client.getDiagnostic({
+              // The report and the Installation row show one answer for the version.
+              inspectInstallation: async () =>
+                (await this.installations.inspect(provider, { refresh: true }))?.inspection,
+            }),
             this.diagnosticTimeoutMs,
             `Timed out collecting ${definition.label ?? provider} diagnostic after ${
               this.diagnosticTimeoutMs
@@ -867,6 +873,8 @@ export class ProviderSnapshotManager {
         source: this.getProviderSource(provider),
         label: definition?.label,
         description: definition?.description,
+        iconSvg: definition?.iconSvg,
+        docsUrl: definition?.docsUrl,
         defaultModeId: definition?.defaultModeId ?? null,
       });
     }
@@ -886,6 +894,8 @@ export class ProviderSnapshotManager {
         source: this.getProviderSource(provider),
         label: definition?.label,
         description: definition?.description,
+        iconSvg: definition?.iconSvg,
+        docsUrl: definition?.docsUrl,
         defaultModeId: definition?.defaultModeId ?? null,
       };
 
@@ -1056,6 +1066,8 @@ export class ProviderSnapshotManager {
       source: this.getProviderSource(provider),
       label: definition.label,
       description: definition.description,
+      iconSvg: definition.iconSvg,
+      docsUrl: definition.docsUrl,
       defaultModeId: definition.defaultModeId,
     };
     const setEntry = (entry: ProviderSnapshotEntry) => {
@@ -1241,7 +1253,13 @@ export class ProviderSnapshotManager {
           snapshotCwd === GLOBAL_PROVIDER_SNAPSHOT_KEY
             ? createGlobalSnapshotTarget()
             : createWorkspaceSnapshotTarget(snapshotCwd);
-        return this.loadProvider({ ...target, provider, force: true, background: true });
+        return this.loadProvider({
+          ...target,
+          provider,
+          providers: [provider],
+          force: true,
+          background: true,
+        });
       }),
     );
   }

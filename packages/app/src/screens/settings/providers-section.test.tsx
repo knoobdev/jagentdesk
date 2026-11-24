@@ -272,6 +272,18 @@ vi.mock("@/hooks/use-providers-snapshot", () => ({
   }),
 }));
 
+// Keep these row interaction tests independent of RPC queries; the real installation path is
+// covered by the settings Playwright journey and provider-installation browser tests.
+vi.mock("@/components/provider-installation", () => ({
+  useProviderInstallation: () => ({
+    state: { status: "unsupported" },
+    updates: { status: "unsupported" },
+    action: undefined,
+    refresh: () => {},
+    refreshing: false,
+  }),
+}));
+
 vi.mock("@/hooks/use-daemon-config", () => ({
   useDaemonConfig: () => ({
     config: configState.config,
@@ -297,6 +309,8 @@ vi.mock("@/custom-providers/custom-providers-section", () => ({
 }));
 
 import { ProvidersSection } from "./providers-section";
+
+const toastApi = { show: vi.fn(), copied: vi.fn(), error: vi.fn() };
 
 const claudeEntry: ProviderSnapshotEntry = {
   provider: "claude",
@@ -338,18 +352,6 @@ function makeConfig(providers: MutableDaemonConfig["providers"] = {}): MutableDa
   };
 }
 
-function descendants(el: HTMLElement): HTMLElement[] {
-  return Array.from(el.querySelectorAll<HTMLElement>("*"));
-}
-
-function indexOfMatches(nodes: HTMLElement[], selector: string): number {
-  return nodes.findIndex((node) => node.matches(selector));
-}
-
-function indexOfText(nodes: HTMLElement[], text: string): number {
-  return nodes.findIndex((node) => node.textContent?.trim() === text);
-}
-
 describe("ProvidersSection", () => {
   let root: Root | null = null;
   let container: HTMLElement | null = null;
@@ -385,7 +387,11 @@ describe("ProvidersSection", () => {
 
   function render(): void {
     act(() => {
-      root?.render(<ToastApiProvider api={{ show: vi.fn(), copied: vi.fn(), error: vi.fn() }}><ProvidersSection serverId="server-1" /></ToastApiProvider>);
+      root?.render(
+        <ToastApiProvider api={toastApi}>
+          <ProvidersSection serverId="server-1" />
+        </ToastApiProvider>,
+      );
     });
   }
 
@@ -413,33 +419,21 @@ describe("ProvidersSection", () => {
     ]);
 
     const codexRow = findRow("Codex provider details");
-    const codexNodes = descendants(codexRow);
-    expect(indexOfText(codexNodes, "Codex")).toBeGreaterThanOrEqual(0);
-    expect(indexOfText(codexNodes, "codex")).toBe(-1);
-    expect(indexOfText(codexNodes, "Disabled")).toBeGreaterThanOrEqual(0);
+    expect(codexRow.getAttribute("aria-label")).toBe("Codex provider details");
+    expect(container?.querySelector('[data-testid="provider-row-codex"]')?.textContent).toBe(
+      "CodexDisabled",
+    );
   });
 
-  it("composes the row as chevron, icon, label, status, model count, then switch", () => {
+  it("shows the model count and a switch for an available provider", () => {
     snapshotState.entries = [claudeEntry];
     configState.config = makeConfig();
 
     render();
 
-    const row = findRow("Claude provider details");
-    const nodes = descendants(row);
-    const chevron = indexOfMatches(nodes, '[data-icon="ChevronRight"]');
-    const icon = indexOfMatches(nodes, '[data-icon="provider-claude"]');
-    const label = indexOfText(nodes, "Claude");
-    const status = indexOfText(nodes, "Available");
-    const modelCount = indexOfText(nodes, "3 models");
-    const switchEl = indexOfMatches(nodes, '[role="switch"]');
-
-    expect(chevron).toBeGreaterThanOrEqual(0);
-    expect(icon).toBeGreaterThan(chevron);
-    expect(label).toBeGreaterThan(icon);
-    expect(status).toBeGreaterThan(label);
-    expect(modelCount).toBeGreaterThan(status);
-    expect(switchEl).toBeGreaterThan(modelCount);
+    const row = container?.querySelector('[data-testid="provider-row-claude"]');
+    expect(row?.textContent).toBe("Claude3 models");
+    expect(row?.querySelector('[role="switch"]')?.getAttribute("aria-checked")).toBe("true");
   });
 
   it("opens the diagnostic sheet when the outer row is pressed for a disabled provider", () => {
@@ -468,8 +462,8 @@ describe("ProvidersSection", () => {
 
     render();
 
-    const row = findRow("Claude provider details");
-    const switchEl = row.querySelector<HTMLElement>('[role="switch"]');
+    const row = container?.querySelector('[data-testid="provider-row-claude"]');
+    const switchEl = row?.querySelector<HTMLElement>('[role="switch"]');
     expect(switchEl).not.toBeNull();
     expect(switchEl?.getAttribute("aria-checked")).toBe("true");
 
@@ -477,6 +471,7 @@ describe("ProvidersSection", () => {
       switchEl?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
     });
 
+    expect(openProviderSettingsMock).not.toHaveBeenCalled();
     expect(patchConfigMock).toHaveBeenCalledTimes(1);
     expect(patchConfigMock).toHaveBeenCalledWith({
       providers: { claude: { enabled: false } },

@@ -25,6 +25,7 @@ export interface PluginProviderMetadata {
   label: string;
   description?: string;
   iconPath?: string;
+  docsUrl?: string;
 }
 
 export interface PluginProviderInstallationMetadata {
@@ -142,6 +143,7 @@ const providerMetadataSchema = z
     label: z.string().min(1),
     description: z.string().optional(),
     iconPath: z.string().optional(),
+    docsUrl: z.string().optional(),
     hasCatalogCacheKey: z.boolean().optional(),
     hasStatus: z.boolean().optional(),
     installation: z

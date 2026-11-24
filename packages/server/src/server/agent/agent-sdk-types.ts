@@ -8,7 +8,10 @@ import type {
   ProviderOptions,
   ToolPolicy,
 } from "@jagentdesk/protocol/agent-types";
-import type { AgentAttachment } from "@jagentdesk/protocol/messages";
+import type {
+  AgentAttachment,
+  ProviderInstallationInspection,
+} from "@jagentdesk/protocol/messages";
 import type {
   ProviderInspection,
   ProviderUpdateCheck,
@@ -140,6 +143,9 @@ export interface ProviderSnapshotEntry {
   fetchedAt?: string;
   label?: string;
   description?: string;
+  iconSvg?: string;
+  /** The page that helps users set up and troubleshoot this provider. */
+  docsUrl?: string;
   defaultModeId?: string | null;
 }
 
@@ -817,6 +823,15 @@ export interface AgentClientUpdateContext extends AgentClientInstallationContext
   report(event: ProviderUpdateReport): void;
 }
 
+/** What the daemon gives a provider's diagnostic report. */
+export interface AgentClientDiagnosticContext {
+  /**
+   * The installation as the provider's Installation row shows it, under the same deadline and
+   * cache. Undefined when the provider does not report its installation.
+   */
+  inspectInstallation(): Promise<ProviderInstallationInspection | undefined>;
+}
+
 export interface AgentClient {
   readonly provider: AgentProvider;
   readonly capabilities: AgentCapabilityFlags;
@@ -860,7 +875,7 @@ export interface AgentClient {
    * Returns true if available, false otherwise.
    */
   isAvailable(signal?: AbortSignal): Promise<boolean>;
-  getDiagnostic?(): Promise<{ diagnostic: string }>;
+  getDiagnostic?(context?: AgentClientDiagnosticContext): Promise<{ diagnostic: string }>;
   /**
    * Installation links and the installed version. The same contract as plugin providers'
    * `ProviderRegistration.installation`; built-ins resolve their own launch inside `inspect`.

@@ -198,6 +198,11 @@ export function createPluginWorker(options: {
     }
     if (provider.status !== undefined && typeof provider.status !== "function")
       throw new Error(`Invalid status callback for plugin provider ${id}`);
+    if (
+      provider.docsUrl !== undefined &&
+      (typeof provider.docsUrl !== "string" || !isHttpUrl(provider.docsUrl))
+    )
+      throw new Error(`Plugin provider ${id} docsUrl must be an http(s) URL`);
     validateProviderInstallation(id, provider.installation);
     if (
       provider.command !== undefined &&
@@ -215,6 +220,7 @@ export function createPluginWorker(options: {
       label: provider.label,
       description: provider.description,
       iconPath: provider.icon,
+      docsUrl: provider.docsUrl,
       hasCatalogCacheKey: provider.getCatalogCacheKey !== undefined,
       hasStatus: provider.status !== undefined,
       installation: provider.installation
