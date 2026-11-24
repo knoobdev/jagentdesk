@@ -698,7 +698,12 @@ export interface SetupFinishNotificationParams {
   logger: Logger;
 }
 
-type FinishNotificationReason = "finished" | "errored" | "needs permission" | "was closed";
+type FinishNotificationReason =
+  | "finished"
+  | "errored"
+  | "needs permission"
+  | "was closed"
+  | "was canceled";
 
 const FINISH_NOTIFICATION_MESSAGE_LIMIT = 4000;
 
@@ -707,6 +712,8 @@ const finishNotificationEvents = {
   errored: "errored",
   "needs permission": "permission-required",
   "was closed": "closed",
+  // Use the existing failure event so older clients still parse agent-message metadata.
+  "was canceled": "errored",
 } as const;
 
 interface FinishNotificationBodyInput {
@@ -764,9 +771,11 @@ export function setupFinishNotification(
     childAgentId,
     callerAgentId,
     requireParentOwnership = false,
+    waitForTurnStart = false,
     logger,
   } = params;
   let hasSeenRunning = false;
+  let hasSeenTurn = false;
   let stopped = false;
   const notifiedPermissionRequestIds = new Set<string>();
   let unsubscribe: (() => void) | null = null;
@@ -879,6 +888,35 @@ export function setupFinishNotification(
       });
   }
 
+  function observeState(agent: ManagedAgent): void {
+    for (const requestId of notifiedPermissionRequestIds) {
+      if (!agent.pendingPermissions.has(requestId)) {
+        notifiedPermissionRequestIds.delete(requestId);
+      }
+    }
+    if (agent.lifecycle === "running") {
+      if (waitForTurnStart && !hasSeenTurn) return;
+      hasSeenTurn = true;
+      if (agent.pendingPermissions.size === 0) {
+        hasSeenRunning = true;
+      }
+      return;
+    }
+    // Prior terminal state is not this task's outcome. A failure before turn start
+    // is reported by the dispatch acknowledgement instead of a finish callback.
+    if (agent.lifecycle === "error" && hasSeenTurn) {
+      notifySafely("errored");
+      return;
+    }
+    // Idle is published before the terminal stream event for both completion
+    // and cancellation. Let that event identify the outcome instead.
+    if (agent.lifecycle === "closed") {
+      notifySafely("was closed");
+      return;
+    }
+    return;
+  }
+
   unsubscribe = agentManager.subscribe(
     (event) => {
       if (stopped) {
@@ -886,33 +924,29 @@ export function setupFinishNotification(
       }
 
       if (event.type === "agent_state") {
-        for (const requestId of notifiedPermissionRequestIds) {
-          if (!event.agent.pendingPermissions.has(requestId)) {
-            notifiedPermissionRequestIds.delete(requestId);
-          }
-        }
-        if (event.agent.lifecycle === "running") {
-          if (event.agent.pendingPermissions.size === 0) {
-            hasSeenRunning = true;
-          }
-          return;
-        }
-        if (event.agent.lifecycle === "error") {
-          notifySafely("errored");
-          return;
-        }
-        if (event.agent.lifecycle === "idle" && hasSeenRunning) {
-          notifySafely("finished");
-          return;
-        }
-        if (event.agent.lifecycle === "closed") {
-          notifySafely("was closed");
-          return;
-        }
+        observeState(event.agent);
         return;
       }
 
       if (event.type === "timeline_replacement" || event.type === "background_work") {
+        return;
+      }
+
+      if (event.event.type === "turn_started") {
+        hasSeenTurn = true;
+        hasSeenRunning = true;
+        return;
+      }
+
+      if (event.event.type === "turn_completed" || event.event.type === "turn_canceled") {
+        // Replacing a turn keeps the child running through the displaced turn's
+        // cancellation. The task settles only when the child becomes idle.
+        if (agentManager.getAgent(childAgentId)?.lifecycle !== "idle") return;
+        if (event.event.type === "turn_completed" && hasSeenRunning) {
+          notifySafely("finished");
+        } else if (event.event.type === "turn_canceled" && hasSeenTurn) {
+          notifySafely("was canceled");
+        }
         return;
       }
 
@@ -952,10 +986,9 @@ export function setupFinishNotification(
     stop();
     return registration;
   }
-  if (childSnapshot.lifecycle === "running") {
+  if (childSnapshot.lifecycle === "running" && !waitForTurnStart) {
+    hasSeenTurn = true;
     hasSeenRunning = true;
-  } else if (childSnapshot.lifecycle === "error" && !params.waitForTurnStart) {
-    notifySafely("errored");
   }
   return registration;
 }

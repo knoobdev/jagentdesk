@@ -153,6 +153,11 @@ function createFinishNotificationScenario(
         type: "agent_state",
         agent: childAgent,
       });
+      subscriber?.({
+        type: "agent_stream",
+        agentId: "child-agent",
+        event: { type: "turn_completed", provider: "codex" },
+      });
     },
     async finishChildAndReadParentPrompt() {
       const parentPrompt = new Promise<string>((resolve) => {
@@ -541,6 +546,11 @@ it("does not notify archived callers", async () => {
   subscriber?.({
     type: "agent_state",
     agent: childAgent,
+  });
+  subscriber?.({
+    type: "agent_stream",
+    agentId: "child-agent",
+    event: { type: "turn_completed", provider: "codex" },
   });
 
   await vi.waitFor(() => {
