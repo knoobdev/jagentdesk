@@ -2,6 +2,7 @@ import { isElectronRuntime } from "@/desktop/host";
 import type {
   AudioEngine,
   AudioEngineCallbacks,
+  AudioEngineOptions,
   AudioPlaybackSource,
 } from "@/voice/audio-engine-types";
 
@@ -87,7 +88,7 @@ async function decodeAudioData(context: AudioContext, buffer: ArrayBuffer): Prom
 
 export function createAudioEngine(
   callbacks: AudioEngineCallbacks,
-  _options?: { traceLabel?: string },
+  _options?: AudioEngineOptions,
 ): AudioEngine {
   const refs: {
     playbackContext: AudioContext | null;

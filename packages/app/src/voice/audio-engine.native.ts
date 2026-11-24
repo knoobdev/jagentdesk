@@ -1,6 +1,7 @@
 import type {
   AudioEngine,
   AudioEngineCallbacks,
+  AudioEngineOptions,
   AudioPlaybackSource,
 } from "@/voice/audio-engine-types";
 
@@ -8,10 +9,6 @@ interface QueuedAudio {
   audio: AudioPlaybackSource;
   resolve: (duration: number) => void;
   reject: (error: Error) => void;
-}
-
-interface AudioEngineTraceOptions {
-  traceLabel?: string;
 }
 
 function parsePcmSampleRate(mimeType: string): number | null {
@@ -68,7 +65,7 @@ function resamplePcm16(pcm: Uint8Array, fromRate: number, toRate: number): Uint8
 
 export function createAudioEngine(
   callbacks: AudioEngineCallbacks,
-  _options?: AudioEngineTraceOptions,
+  options?: AudioEngineOptions,
 ): AudioEngine {
   const native = require("@jagentdesk/expo-two-way-audio");
 
@@ -119,6 +116,12 @@ export function createAudioEngine(
   const interruptionSubscription = native.addExpoTwoWayAudioEventListener(
     "onAudioInterruption",
     (event: { data: string }) => {
+      if (event.data === "capture_paused" || event.data === "capture_resumed") {
+        if (refs.captureActive) {
+          callbacks.onCaptureAvailabilityChange?.(event.data === "capture_resumed");
+        }
+        return;
+      }
       if (event.data !== "blocked") {
         return;
       }
@@ -260,7 +263,10 @@ export function createAudioEngine(
       try {
         await ensureMicrophonePermission();
         await ensureInitialized();
-        const isRecording = native.toggleRecording(true);
+        const isRecording =
+          options?.captureMode === "dictation"
+            ? native.startDictation()
+            : native.toggleRecording(true);
         if (!isRecording) {
           throw new Error(
             "Microphone capture could not start because Android audio focus is unavailable.",
@@ -281,6 +287,7 @@ export function createAudioEngine(
       refs.captureActive = false;
       refs.muted = false;
       callbacks.onVolumeLevel(0);
+      callbacks.onCaptureAvailabilityChange?.(true);
     },
 
     toggleMute() {

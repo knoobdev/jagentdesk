@@ -476,6 +476,7 @@ export function useDictationAudioSource(config: DictationAudioSourceConfig): Dic
       },
       stop,
       volume,
+      isPaused: false,
     }),
     [start, stop, volume],
   );
