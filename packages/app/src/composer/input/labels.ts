@@ -1,3 +1,4 @@
+import type { AlternateSendAction } from "./state";
 import type { TFunction } from "i18next";
 
 export function resolveSubmitAccessibilityLabel(input: {
@@ -12,6 +13,19 @@ export function resolveSubmitAccessibilityLabel(input: {
   if (input.defaultActionQueues) return input.t("composer.input.queueMessage");
   if (input.isAgentRunning) return input.t("composer.input.sendAndInterrupt");
   return input.t("composer.input.sendMessage");
+}
+
+export function resolveSubmitAccessibilityHint(input: {
+  canPressLoadingButton: boolean;
+  alternateSendAction: AlternateSendAction | null;
+  t: TFunction;
+}): string | undefined {
+  if (input.canPressLoadingButton || !input.alternateSendAction) return undefined;
+  return input.t(
+    input.alternateSendAction === "queue"
+      ? "composer.input.longPressToQueue"
+      : "composer.input.longPressToSendNow",
+  );
 }
 
 export function resolveVoiceAccessibilityLabel(input: {

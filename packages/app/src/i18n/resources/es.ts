@@ -69,6 +69,7 @@ export const es: TranslationResources = {
       daemonClientUnavailable: "ClienteDaemonno disponible",
       daemonClientDisconnected: "El clienteDaemonestá desconectado",
       noFileFound: "No se encontró ningún archivo para{{token}}",
+      folderOutsideWorkspace: "{{path}} está fuera de este espacio de trabajo",
       unexpectedDictationError: "Se produjo un error inesperado al manejar el dictado.",
     },
     connectionStatus: {
@@ -115,6 +116,10 @@ export const es: TranslationResources = {
       fallback: "Mensaje...",
     },
     input: {
+      longPressToSendNow: "Long press to send now",
+
+      longPressToQueue: "Long press to queue",
+
       accessibilityLabel: "Agente de mensajes...",
       focusHint: "{{shortcut}}para enfocar",
       addAttachment: "Agregar archivo adjunto",
@@ -1676,6 +1681,17 @@ export const es: TranslationResources = {
     backdrop: "Fondo del menú",
   },
   subagents: {
+    parent: {
+      openParent: "Open parent",
+
+      parentAgent: "Parent agent",
+
+      parent: "Parent",
+
+      backTo: "Back to {{label}}",
+      backToParent: "Back to parent",
+    },
+
     detachAction: "Separar {{label}}",
     detachTooltip: "Separar subagente",
     archiveAction: "Archivo{{label}}",
@@ -1947,7 +1963,18 @@ export const es: TranslationResources = {
         success: "Datos del navegador borrados.",
         error: "No se pudieron borrar los datos del navegador.",
       },
+      sendShortcut: {
+        label: "Send shortcut",
+        options: { enter: "Enter", "mod-enter": "{{modifier}}+Enter" },
+      },
       defaultSend: {
+        commandEnterDescriptions: {
+          interrupt:
+            "When the agent is running, {{modifier}}+Enter interrupts. Enter inserts a new line.",
+          steer:
+            "When the agent is running, {{modifier}}+Enter steers the active turn. Enter inserts a new line.",
+          queue: "When the agent is running, {{modifier}}+Enter queues. Enter inserts a new line.",
+        },
         label: "Envío predeterminado",
         descriptions: {
           steer:
@@ -2071,6 +2098,22 @@ export const es: TranslationResources = {
         codeSize: "Tamaño del código",
         codeSizeAccessibility: "Tamaño de fuente del código",
       },
+      layout: {
+        contentWidthCustom: "Custom width · {{width}} px",
+
+        contentWidthFull: "Full",
+
+        contentWidthWide: "Wide",
+
+        contentWidthDefault: "Default",
+
+        title: "Layout",
+        contentWidth: "Content width",
+        contentWidthHint: "Maximum width of chat and Markdown content",
+        contentWidthAccessibility: "Content width in pixels",
+        reset: "Reset",
+        resetAccessibility: "Reset content width",
+      },
       syntax: {
         title: "Sintaxis",
         highlightTheme: "Tema destacado",
@@ -2134,6 +2177,8 @@ export const es: TranslationResources = {
         toggleFocusMode: "Alternar modo de enfoque",
         cycleTheme: "Tema del ciclo",
         focusMessageInput: "Entrada de mensaje de enfoque",
+        toggleModelPicker: "Abrir o cerrar el selector de modelos",
+        cycleEffort: "Alternar el nivel de esfuerzo",
         cycleAgentMode: "Alternar modo del agente",
         toggleVoiceMode: "Alternar modo de voz",
         startStopDictation: "Iniciar dictado/stop",

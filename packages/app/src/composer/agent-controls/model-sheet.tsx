@@ -1,3 +1,5 @@
+import { AgentControlShortcutHint } from "./shortcut-hint";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Keyboard, ScrollView, Text, View, type PressableStateCallbackType } from "react-native";
@@ -11,6 +13,9 @@ import { ComposerToolbarGlyph } from "@/composer/agent-controls/glyph";
 import type { ProviderSelectorProvider } from "@/provider-selection/provider-selection";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { shortModelLabel } from "./utils";
+
+import { useModelPickerShortcut } from "./shortcuts";
+import { useKeyboardToggle } from "@/hooks/use-keyboard-toggle";
 
 const SNAP_POINTS = ["80%", "90%"];
 const MODEL_LIST_TOP_INSET = 4;
@@ -108,6 +113,15 @@ export function CompactModelSheet({
     open();
   }, [close, isOpen, open]);
 
+  const toggleAction = useModelPickerShortcut(disabled);
+  useKeyboardToggle({
+    action: toggleAction,
+    disabled,
+    open: isOpen,
+    searchFocused: browser.isSearchFocused,
+    onToggle: toggle,
+  });
+
   const triggerStyle = useCallback(
     ({ hovered, pressed }: PressableStateCallbackType) => [
       styles.trigger,
@@ -120,27 +134,37 @@ export function CompactModelSheet({
 
   return (
     <>
-      <ComboboxTrigger
-        collapsable={false}
-        disabled={disabled}
-        onPress={toggle}
-        style={triggerStyle}
-        accessibilityRole="button"
-        accessibilityLabel={t("modelSelector.selectedModel", {
-          model: browser.selectedModelLabel,
-        })}
-        testID="combined-model-selector"
-        chevron={null}
-      >
-        {ProviderIcon ? (
-          <ComposerToolbarGlyph size={glyphSize}>
-            <ProviderIcon size={glyphSize} color={styles.providerIcon.color} />
-          </ComposerToolbarGlyph>
-        ) : null}
-        <Text style={styles.triggerText} numberOfLines={1}>
-          {shortModelLabel(browser.triggerLabel)}
-        </Text>
-      </ComboboxTrigger>
+      <Tooltip enabledOnDesktop enabledOnMobile={false}>
+        <TooltipTrigger asChild triggerRefProp="ref">
+          <ComboboxTrigger
+            collapsable={false}
+            disabled={disabled}
+            onPress={toggle}
+            style={triggerStyle}
+            accessibilityRole="button"
+            accessibilityLabel={t("modelSelector.selectedModel", {
+              model: browser.selectedModelLabel,
+            })}
+            testID="combined-model-selector"
+            chevron={null}
+          >
+            {ProviderIcon ? (
+              <ComposerToolbarGlyph size={glyphSize}>
+                <ProviderIcon size={glyphSize} color={styles.providerIcon.color} />
+              </ComposerToolbarGlyph>
+            ) : null}
+            <Text style={styles.triggerText} numberOfLines={1}>
+              {shortModelLabel(browser.triggerLabel)}
+            </Text>
+          </ComboboxTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top" align="center" offset={8}>
+          <AgentControlShortcutHint
+            label={t("settings.shortcuts.help.toggleModelPicker")}
+            actionId="toggle-model-picker"
+          />
+        </TooltipContent>
+      </Tooltip>
 
       <AdaptiveModalSheet
         header={browser.header}

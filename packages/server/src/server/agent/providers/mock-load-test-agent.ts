@@ -172,6 +172,7 @@ interface AgentStreamStressRequest {
 interface MockQuestionOption {
   label: string;
   description?: string;
+  preview?: string;
 }
 
 interface MockQuestionPromptQuestion {
@@ -204,10 +205,49 @@ function parseSettledAssistantImageMarkdown(prompt: AgentPromptInput): string | 
   return match?.[1] ?? null;
 }
 
+const ROLLOUT_FLAG_PREVIEW = [
+  "Ship it dark behind the new-surface flag, then turn it on for internal users before everyone else.",
+  "",
+  'if (flags.enabled("new-surface")) {',
+  "  render(<NewSurface />);",
+  "}",
+  ...Array.from({ length: 40 }, (_, i) => `// rollout step ${i + 1}`),
+  "// LAST PREVIEW LINE",
+].join("\n");
+
 function parseMockQuestionPrompt(prompt: AgentPromptInput): MockQuestionPromptRequest | null {
   const text = promptToText(prompt);
   if (!/emit\s+(?:a\s+)?synthetic\s+questions?/i.test(text)) {
     return null;
+  }
+
+  if (/with\s+links/i.test(text)) {
+    return {
+      questions: [
+        {
+          question:
+            "Sign in at https://example.com/login, then follow [the setup guide](https://example.com/setup). Done?",
+          header: "signIn",
+          options: [
+            {
+              label: "Done",
+              description: "Logs are at https://example.com/logs if sign-in fails.",
+            },
+            { label: "Not yet, see [status](https://example.com/status)" },
+          ],
+          multiSelect: false,
+        },
+        {
+          question: "Which checks should run?",
+          header: "checks",
+          options: [
+            { label: "Lint", description: "Rules: https://example.com/lint" },
+            { label: "Typecheck" },
+          ],
+          multiSelect: true,
+        },
+      ],
+    };
   }
 
   if (/free[-\s]?write|freeform|text[-\s]?only/i.test(text)) {
@@ -242,7 +282,10 @@ function parseMockQuestionPrompt(prompt: AgentPromptInput): MockQuestionPromptRe
       {
         question: "Which rollout should we use?",
         header: "rollout",
-        options: [{ label: "Immediately" }, { label: "Behind feature flag" }],
+        options: [
+          { label: "Immediately" },
+          { label: "Behind feature flag", preview: ROLLOUT_FLAG_PREVIEW },
+        ],
         multiSelect: false,
       },
       {

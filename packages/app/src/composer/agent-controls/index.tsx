@@ -1,6 +1,8 @@
+import { AgentControlShortcutHint } from "./shortcut-hint";
 import {
   memo,
   useCallback,
+  useId,
   useEffect,
   useMemo,
   useRef,
@@ -68,6 +70,7 @@ import { readMeasuredWidth } from "@/hooks/use-container-width";
 import { useToast } from "@/contexts/toast-context";
 import { toErrorMessage } from "@/utils/error-messages";
 import { showProviderNoticeToast } from "@/utils/provider-notice-toast";
+import { useComposerKeyboardScope } from "@/composer/keyboard-scope";
 import { useAgentControlCommandCenterActions } from "@/command-center/agent-control-registration";
 import { isNative } from "@/constants/platform";
 import {
@@ -128,6 +131,7 @@ export interface DraftAgentControlsProps {
   onSelectMode: (modeId: string) => void;
   models: AgentModelDefinition[];
   selectedModel: string;
+  effectiveModelId?: string;
   onSelectModel: (modelId: string) => void;
   isModelLoading: boolean;
   modelSelectorProviders: ProviderSelectorProvider[];
@@ -402,6 +406,8 @@ function buildOpenChangeHandler(
   };
 }
 
+import { useModelPickerShortcut, useEffortCycleShortcut } from "./shortcuts";
+
 function ControlledAgentControls({
   provider,
   providerOptions,
@@ -429,6 +435,12 @@ function ControlledAgentControls({
   modelSelectorServerId = null,
   isCompactLayout,
 }: ControlledAgentControlsProps) {
+  useEffortCycleShortcut(
+    thinkingOptions ?? [],
+    selectedThinkingOptionId,
+    onSelectThinkingOption,
+    disabled,
+  );
   const { theme } = useUnistyles();
   const { t } = useTranslation();
   const isCompactFormFactor = useIsCompactFormFactor();
@@ -857,6 +869,7 @@ function DesktopAgentControlsContent(props: DesktopAgentControlsContentProps) {
     handleCloseSheet,
     modelSelectorServerId,
   } = props;
+  const modelToggleAction = useModelPickerShortcut(disabled);
   const modelToolbar = useMemo(
     () => ({ glyphSize, showCaret: presentation.showCarets }),
     [glyphSize, presentation.showCarets],
@@ -908,6 +921,7 @@ function DesktopAgentControlsContent(props: DesktopAgentControlsContentProps) {
                 onToggleFavorite={onToggleFavoriteModel}
                 isLoading={isModelLoading}
                 disabled={modelDisabled}
+                toggleAction={modelToggleAction}
                 onOpen={onModelSelectorOpen}
                 onClose={onDropdownClose}
                 onRetryProvider={onRetryModelProvider}
@@ -920,7 +934,10 @@ function DesktopAgentControlsContent(props: DesktopAgentControlsContentProps) {
             </View>
           </TooltipTrigger>
           <TooltipContent side="top" align="center" offset={8}>
-            <Text style={styles.tooltipText}>{t(getAgentControlHintKey("model"))}</Text>
+            <AgentControlShortcutHint
+              label={t(getAgentControlHintKey("model"))}
+              actionId="toggle-model-picker"
+            />
           </TooltipContent>
         </Tooltip>
       ) : null}
@@ -947,7 +964,10 @@ function DesktopAgentControlsContent(props: DesktopAgentControlsContentProps) {
               />
             </TooltipTrigger>
             <TooltipContent side="top" align="center" offset={8}>
-              <Text style={styles.tooltipText}>{t(getAgentControlHintKey("thinking"))}</Text>
+              <AgentControlShortcutHint
+                label={t(getAgentControlHintKey("thinking"))}
+                actionId="cycle-effort"
+              />
             </TooltipContent>
           </Tooltip>
           <Combobox
@@ -1733,6 +1753,7 @@ export function DraftAgentControls({
   onSelectMode,
   models,
   selectedModel,
+  effectiveModelId,
   onSelectModel,
   isModelLoading: _isModelLoading,
   modelSelectorProviders,
@@ -1800,6 +1821,32 @@ export function DraftAgentControls({
         : null,
     [selectedProvider, providerDefinitions, modeOptions, selectedMode, onSelectMode, disabled],
   );
+
+  const ownerKey = useId();
+  const { isActiveComposer } = useComposerKeyboardScope();
+  useAgentControlCommandCenterActions({
+    sourceId: `draft:${modelSelectorServerId}:${ownerKey}`,
+    enabled: isActiveComposer && !disabled && modelSelectorServerId !== null,
+    controls: {
+      serverId: modelSelectorServerId ?? "",
+      ownerKey,
+      provider: selectedProvider,
+      providerDefinitions,
+      models: {
+        providers: modelSelectorProviders,
+        selectedProvider,
+        selectedModelId: effectiveModelId ?? selectedModel,
+        select: onSelectProviderAndModel,
+      },
+      thinking: {
+        options: thinkingOptions,
+        selectedId: selectedThinkingOptionId,
+        select: onSelectThinkingOption,
+      },
+      modes: { options: modeOptions, selectedId: selectedMode, select: onSelectMode },
+      features: { list: features, set: onSetFeature },
+    },
+  });
 
   return (
     <ControlledAgentControls

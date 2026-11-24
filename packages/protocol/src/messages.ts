@@ -3578,6 +3578,7 @@ export const ArchiveWorkspaceRequestSchema = z.object({
 // directory: it always produces a fresh workspace. The source discriminates
 // between an existing local directory and a newly created jagentdesk worktree.
 export const WorkspaceCreateRequestSchema = z.object({
+  idempotencyKey: z.string().min(1).max(512).optional(),
   type: z.literal("workspace.create.request"),
   requestId: z.string(),
   background: z.boolean().optional(),
@@ -5055,6 +5056,7 @@ export const ServerInfoStatusPayloadSchema = z
         // server_info carries the relay descriptor, and the app shows the Relay badge.
         relay: z.boolean().optional(),
         checkoutDiffAll: z.boolean().optional(),
+        workspaceRequestReceipts: z.boolean().optional(),
         backgroundWorkspaces: z.boolean().optional(),
       })
       .optional(),
@@ -6052,6 +6054,29 @@ export const ClearAgentAttentionResponseMessageSchema = z.object({
   }),
 });
 
+export const CreationSnapshotSchema = z.object({
+  kind: z.enum(["workspace", "agent"]),
+  idempotencyKey: z.string(),
+  revision: z.number().int().nonnegative(),
+  phase: z.enum([
+    "accepted",
+    "workspace_ready",
+    "agent_ready",
+    "prompt_started",
+    "completed",
+    "failed",
+  ]),
+  workspaceId: z.string().nullable(),
+  agentId: z.string().nullable(),
+  workspace: WorkspaceDescriptorPayloadSchema.optional(),
+  agent: AgentSnapshotPayloadSchema.optional(),
+  error: z.string().nullable(),
+  setupSkippedReason: z.string().optional(),
+  errorCode: z.string().optional(),
+  failedStage: z.enum(["workspace", "agent", "prompt"]).optional(),
+  outcomeUnknown: z.boolean().optional(),
+});
+export type CreationSnapshot = z.infer<typeof CreationSnapshotSchema>;
 export const WorkspaceCreateResponseSchema = z.object({
   type: z.literal("workspace.create.response"),
   payload: z.object({

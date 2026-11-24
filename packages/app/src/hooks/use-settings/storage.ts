@@ -3,6 +3,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import type { DesktopSettings } from "@/desktop/settings/desktop-settings";
 import { parseAppLanguage, type AppLanguage } from "@/i18n/locales";
 import {
+  DEFAULT_CONTENT_MAX_WIDTH,
   DEFAULT_THEME,
   PLUGIN_THEME_PREFERENCE,
   THEME_TO_UNISTYLES,
@@ -14,6 +15,8 @@ export const APP_SETTINGS_QUERY_KEY = ["app-settings"];
 // COMPAT(predecessorSettings): one-way read/migration from the old storage
 // namespace. New settings are written only under the JAgentDesk namespace.
 const LEGACY_SETTINGS_KEY = "@jagentdesk:settings";
+
+export type SendShortcut = "enter" | "mod-enter";
 
 export type SendBehavior = "interrupt" | "steer" | "queue";
 export type ServiceUrlBehavior = "ask" | "in-app" | "external";
@@ -42,6 +45,10 @@ export const DEFAULT_CODE_FONT_SIZE = 12; // == FONT_SIZE.code
 export const MIN_CODE_FONT_SIZE = 9;
 export const MAX_CODE_FONT_SIZE = 22; // line-height 1.5×22=33 stays safe
 export const MAX_FONT_FAMILY_LENGTH = 200;
+export { DEFAULT_CONTENT_MAX_WIDTH };
+const WIDE_CONTENT_MAX_WIDTH = 1200;
+export type ContentWidthPreset = "default" | "wide" | "full";
+type ContentWidth = ContentWidthPreset | number;
 
 export interface AppSettings {
   theme: ThemeName | "auto" | typeof PLUGIN_THEME_PREFERENCE;
@@ -51,12 +58,14 @@ export interface AppSettings {
   defaultThemeVersion: number;
   language: AppLanguage;
   sendBehavior: SendBehavior;
+  sendShortcut: SendShortcut;
   serviceUrlBehavior: ServiceUrlBehavior;
   terminalScrollbackLines: number;
   uiFontFamily: string; // "" = platform default UI stack
   monoFontFamily: string; // "" = platform default mono stack
   uiFontSize: number; // clamped px, default 16
   codeFontSize: number; // clamped px, default 12
+  contentWidth: ContentWidth;
   syntaxTheme: SyntaxThemeId; // default "one"
   workspaceTitleSource: WorkspaceTitleSource;
   sidebarPluginRowBadgeItems: Record<string, boolean>;
@@ -70,7 +79,10 @@ export interface Settings extends AppSettings {
   manageBuiltInDaemon: boolean;
 }
 
-type StoredAppSettings = Partial<AppSettings> & { compactToolCalls?: unknown };
+type StoredAppSettings = Partial<AppSettings> & {
+  compactToolCalls?: unknown;
+  contentMaxWidth?: unknown;
+};
 
 export const DEFAULT_CLIENT_SETTINGS: AppSettings = {
   theme: DEFAULT_THEME,
@@ -79,12 +91,14 @@ export const DEFAULT_CLIENT_SETTINGS: AppSettings = {
   defaultThemeVersion: DEFAULT_THEME_VERSION,
   language: "system",
   sendBehavior: "steer",
+  sendShortcut: "enter",
   serviceUrlBehavior: "ask",
   terminalScrollbackLines: DEFAULT_TERMINAL_SCROLLBACK_LINES,
   uiFontFamily: "",
   monoFontFamily: "",
   uiFontSize: DEFAULT_UI_FONT_SIZE,
   codeFontSize: DEFAULT_CODE_FONT_SIZE,
+  contentWidth: "default",
   syntaxTheme: "one",
   workspaceTitleSource: "title",
   sidebarPluginRowBadgeItems: {},
@@ -248,9 +262,25 @@ function pickThemeSettings(stored: StoredAppSettings, result: Partial<AppSetting
   }
 }
 
+function pickSidebarPluginSettings(stored: StoredAppSettings, result: Partial<AppSettings>): void {
+  if (
+    stored.sidebarPluginRowBadgeItems &&
+    typeof stored.sidebarPluginRowBadgeItems === "object" &&
+    !Array.isArray(stored.sidebarPluginRowBadgeItems)
+  ) {
+    result.sidebarPluginRowBadgeItems = Object.fromEntries(
+      Object.entries(stored.sidebarPluginRowBadgeItems).filter(
+        (entry): entry is [string, boolean] => typeof entry[1] === "boolean",
+      ),
+    );
+  }
+}
+
 function pickAppSettings(stored: StoredAppSettings): Partial<AppSettings> {
   const result: Partial<AppSettings> = {};
   pickThemeSettings(stored, result);
+  if (stored.sendShortcut === "enter" || stored.sendShortcut === "mod-enter")
+    result.sendShortcut = stored.sendShortcut;
   const language = parseAppLanguage(stored.language);
   if (language !== null) {
     result.language = language;
@@ -290,6 +320,8 @@ function pickAppSettings(stored: StoredAppSettings): Partial<AppSettings> {
   if (codeFontSize !== null) {
     result.codeFontSize = codeFontSize;
   }
+  result.contentWidth = normalizeContentWidth(stored);
+
   if (typeof stored.syntaxTheme === "string" && isSyntaxThemeId(stored.syntaxTheme)) {
     result.syntaxTheme = stored.syntaxTheme;
   }
@@ -303,17 +335,7 @@ function pickAppSettings(stored: StoredAppSettings): Partial<AppSettings> {
   if (typeof stored.autoExpandReasoning === "boolean") {
     result.autoExpandReasoning = stored.autoExpandReasoning;
   }
-  if (
-    stored.sidebarPluginRowBadgeItems &&
-    typeof stored.sidebarPluginRowBadgeItems === "object" &&
-    !Array.isArray(stored.sidebarPluginRowBadgeItems)
-  ) {
-    result.sidebarPluginRowBadgeItems = Object.fromEntries(
-      Object.entries(stored.sidebarPluginRowBadgeItems).filter(
-        (entry): entry is [string, boolean] => typeof entry[1] === "boolean",
-      ),
-    );
-  }
+  pickSidebarPluginSettings(stored, result);
   const toolCallDetailLevel = parseToolCallDetailLevel(stored);
   if (toolCallDetailLevel !== null) {
     result.toolCallDetailLevel = toolCallDetailLevel;
@@ -343,6 +365,32 @@ export function parseTerminalScrollbackLines(value: unknown): number | null {
     MAX_TERMINAL_SCROLLBACK_LINES,
     Math.max(MIN_TERMINAL_SCROLLBACK_LINES, Math.floor(numericValue)),
   );
+}
+
+function normalizeContentWidth(stored: StoredAppSettings): ContentWidth {
+  const width = stored.contentWidth;
+  if (width === "default" || width === "wide" || width === "full") return width;
+  if (typeof width === "number" && Number.isFinite(width))
+    return parseClampedFontSize(width, { min: 600, max: 4000 }) ?? "default";
+  // COMPAT(contentMaxWidth): added in v0.9.59, remove after 2027-05-24 once stored presets are established.
+  if (typeof stored.contentMaxWidth === "number" && Number.isFinite(stored.contentMaxWidth))
+    return parseClampedFontSize(stored.contentMaxWidth, { min: 600, max: 4000 }) ?? "default";
+  return "default";
+}
+
+export function resolveContentMaxWidth({
+  contentWidth,
+}: Pick<AppSettings, "contentWidth">): number | undefined {
+  switch (contentWidth) {
+    case "default":
+      return DEFAULT_CONTENT_MAX_WIDTH;
+    case "wide":
+      return WIDE_CONTENT_MAX_WIDTH;
+    case "full":
+      return undefined;
+    default:
+      return contentWidth;
+  }
 }
 
 export function parseClampedFontSize(

@@ -4,9 +4,12 @@ import { useSessionStore, type AgentFileExplorerState } from "@/stores/session-s
 import { explorerFileFromReadResult } from "@/file-explorer/read-result";
 import {
   loadExplorerDirectory,
+  DIRECTORY_LISTING_INVALIDATED,
   type DirectoryListingResult,
   invalidateExplorerDirectoryListings,
 } from "@/file-explorer/directory-listings";
+import { usePanelStore } from "@/stores/panel-store";
+import { revealExplorerDirectory } from "@/file-explorer/tree";
 
 function createExplorerState(): AgentFileExplorerState {
   return {
@@ -109,6 +112,30 @@ export function useFileExplorerActions(params: { serverId: string } & FileExplor
       });
     },
     [client, normalizedWorkspaceRoot, t, updateExplorerState, workspaceStateKey],
+  );
+
+  const revealDirectory = useCallback(
+    async (directoryPath: string) => {
+      if (!workspaceStateKey) return;
+      await revealExplorerDirectory({
+        directoryPath,
+        requestDirectoryListing: async (path) => {
+          const result = await requestDirectoryListing(path);
+          return result === DIRECTORY_LISTING_INVALIDATED ? null : result;
+        },
+        showHiddenFiles: () => {
+          const panel = usePanelStore.getState();
+          if (!panel.explorerShowHiddenFiles) panel.toggleExplorerShowHiddenFiles();
+        },
+        expandPaths: (paths) =>
+          usePanelStore
+            .getState()
+            .setExpandedPathsForWorkspace(workspaceStateKey, (current) =>
+              Array.from(new Set([...current, ...paths])),
+            ),
+      });
+    },
+    [requestDirectoryListing, workspaceStateKey],
   );
 
   const requestFilePreview = useCallback(
@@ -225,6 +252,7 @@ export function useFileExplorerActions(params: { serverId: string } & FileExplor
 
   return {
     workspaceStateKey,
+    revealDirectory,
     requestDirectoryListing,
     requestFilePreview,
     invalidateDirectoryListings,

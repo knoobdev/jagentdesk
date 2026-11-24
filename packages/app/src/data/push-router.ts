@@ -4,7 +4,8 @@ import type {
   MutableDaemonConfig,
   SessionOutboundMessage,
 } from "@jagentdesk/protocol/messages";
-import { agentCommandsQueryRoot } from "@/hooks/agent-commands-query";
+import { invalidateCommandsForProviderChange } from "@/agent-commands/cache";
+import type { ProviderSnapshotEntry } from "@jagentdesk/protocol/agent-types";
 import { orderCheckoutDiffFiles } from "@/git/diff-order";
 import { daemonConfigQueryKey } from "@/data/daemon-config";
 import { usageHistoryQueryKey, type UsageHistory } from "@/insights/use-usage-history";
@@ -191,14 +192,18 @@ export function applyProvidersSnapshotUpdate(input: {
     return;
   }
   const queryKey = providersSnapshotQueryKey(input.serverId, input.message.payload.cwd);
+  const previous = input.queryClient.getQueryData<{ entries: ProviderSnapshotEntry[] }>(queryKey);
   input.queryClient.setQueryData(queryKey, {
     entries: input.message.payload.entries,
     generatedAt: input.message.payload.generatedAt,
     requestId: "providers_snapshot_update",
   });
-  void input.queryClient.invalidateQueries({
-    queryKey: agentCommandsQueryRoot(input.serverId),
-    exact: false,
+  void invalidateCommandsForProviderChange({
+    queryClient: input.queryClient,
+    serverId: input.serverId,
+    cwd: input.message.payload.cwd ?? null,
+    previous: previous?.entries,
+    current: input.message.payload.entries,
   });
 }
 

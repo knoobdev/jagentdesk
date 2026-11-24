@@ -69,6 +69,7 @@ export const ar: TranslationResources = {
       daemonClientUnavailable: "عميل Daemon غير متوفر",
       daemonClientDisconnected: "تم قطع اتصال عميل Daemon",
       noFileFound: "لم يتم العثور على ملف لـ{{token}}",
+      folderOutsideWorkspace: "{{path}} خارج مساحة العمل هذه",
       unexpectedDictationError: "حدث خطأ غير متوقع أثناء معالجة الإملاء.",
     },
     connectionStatus: {
@@ -115,6 +116,10 @@ export const ar: TranslationResources = {
       fallback: "رسالة...",
     },
     input: {
+      longPressToSendNow: "Long press to send now",
+
+      longPressToQueue: "Long press to queue",
+
       accessibilityLabel: "وكيل الرسائل...",
       focusHint: "{{shortcut}}للتركيز",
       addAttachment: "إضافة مرفق",
@@ -1634,6 +1639,17 @@ export const ar: TranslationResources = {
     backdrop: "خلفية القائمة",
   },
   subagents: {
+    parent: {
+      openParent: "Open parent",
+
+      parentAgent: "Parent agent",
+
+      parent: "Parent",
+
+      backTo: "Back to {{label}}",
+      backToParent: "Back to parent",
+    },
+
     detachAction: "فصل {{label}}",
     detachTooltip: "فصل الوكيل الفرعي",
     archiveAction: "أرشيف{{label}}",
@@ -1903,7 +1919,18 @@ export const ar: TranslationResources = {
         success: "تم مسح بيانات المتصفح.",
         error: "تعذر مسح بيانات المتصفح.",
       },
+      sendShortcut: {
+        label: "Send shortcut",
+        options: { enter: "Enter", "mod-enter": "{{modifier}}+Enter" },
+      },
       defaultSend: {
+        commandEnterDescriptions: {
+          interrupt:
+            "When the agent is running, {{modifier}}+Enter interrupts. Enter inserts a new line.",
+          steer:
+            "When the agent is running, {{modifier}}+Enter steers the active turn. Enter inserts a new line.",
+          queue: "When the agent is running, {{modifier}}+Enter queues. Enter inserts a new line.",
+        },
         label: "إرسال افتراضي",
         descriptions: {
           steer:
@@ -2024,6 +2051,22 @@ export const ar: TranslationResources = {
         codeSize: "حجم الكود",
         codeSizeAccessibility: "حجم خط الكود",
       },
+      layout: {
+        contentWidthCustom: "Custom width · {{width}} px",
+
+        contentWidthFull: "Full",
+
+        contentWidthWide: "Wide",
+
+        contentWidthDefault: "Default",
+
+        title: "Layout",
+        contentWidth: "Content width",
+        contentWidthHint: "Maximum width of chat and Markdown content",
+        contentWidthAccessibility: "Content width in pixels",
+        reset: "Reset",
+        resetAccessibility: "Reset content width",
+      },
       syntax: {
         title: "بناء الجملة",
         highlightTheme: "تسليط الضوء على الموضوع",
@@ -2087,6 +2130,8 @@ export const ar: TranslationResources = {
         toggleFocusMode: "تبديل وضع التركيز",
         cycleTheme: "موضوع الدورة",
         focusMessageInput: "التركيز على إدخال الرسالة",
+        toggleModelPicker: "فتح منتقي النموذج أو إغلاقه",
+        cycleEffort: "التنقل بين مستويات الجهد",
         cycleAgentMode: "تبديل وضع الوكيل",
         toggleVoiceMode: "تبديل الوضع الصوتي",
         startStopDictation: "بدء إملاء /stop",

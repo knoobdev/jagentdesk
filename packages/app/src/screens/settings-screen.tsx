@@ -1,6 +1,14 @@
 import { usePluginDisplayName } from "@/plugins/plugin-list";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { SPACING } from "@/styles/theme";
+import {
+  selectSettingsHost,
+  useSettingsHostSelection,
+  useSettingsSidebarScroll,
+} from "@/navigation/settings-presentation";
+import { useKeyboardShortcutsAvailable } from "@/keyboard/availability";
+import { getShortcutOs } from "@/utils/shortcut-platform";
+import type { SendShortcut } from "@/hooks/use-settings";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 import {
@@ -14,7 +22,6 @@ import {
   type PressableStateCallbackType,
 } from "react-native";
 import { useRouter } from "expo-router";
-import { useFocusEffect } from "expo-router/react-navigation";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
@@ -113,7 +120,11 @@ import { useHostFeature } from "@/runtime/host-features";
 import { HostVoicePage } from "@/screens/settings/voice/voice-page";
 import ProjectsScreen from "@/screens/projects-screen";
 import ProjectSettingsScreen from "@/screens/project-settings-screen";
-import { SETTINGS_DESKTOP_SIDEBAR_WIDTH, useIsCompactFormFactor } from "@/constants/layout";
+import {
+  SETTINGS_DESKTOP_DETAIL_MIN_WIDTH,
+  SETTINGS_DESKTOP_SIDEBAR_WIDTH,
+  useIsCompactFormFactor,
+} from "@/constants/layout";
 import { isNative } from "@/constants/platform";
 import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
 import {
@@ -127,10 +138,7 @@ import {
   type HostSectionSlug,
   type SettingsSectionSlug,
 } from "@/utils/host-routes";
-import {
-  navigateToLastWorkspace,
-  useLastWorkspaceSelection,
-} from "@/stores/navigation-active-workspace-store";
+import { navigateToLastWorkspace } from "@/stores/navigation-active-workspace-store";
 // ---------------------------------------------------------------------------
 // View model
 // ---------------------------------------------------------------------------
@@ -291,6 +299,7 @@ const SERVICE_URL_BEHAVIOR_VALUES: ServiceUrlBehavior[] = ["ask", "in-app", "ext
 interface GeneralSectionProps {
   settings: AppSettings;
   isDesktopApp: boolean;
+  handleSendShortcutChange: (shortcut: SendShortcut) => void;
   handleSendBehaviorChange: (behavior: SendBehavior) => void;
   handleServiceUrlBehaviorChange: (behavior: ServiceUrlBehavior) => void;
   handleLanguageChange: (language: AppLanguage) => void;
@@ -348,6 +357,7 @@ function GeneralSection({
   settings,
   isDesktopApp,
   handleSendBehaviorChange,
+  handleSendShortcutChange,
   handleServiceUrlBehaviorChange,
   handleLanguageChange,
   handleTerminalScrollbackLinesChange,
@@ -355,7 +365,20 @@ function GeneralSection({
   const { t, i18n } = useTranslation();
   const activeLocale = getActiveLocale(i18n.language);
   const sendBehaviorOptions = useMemo(() => getSendBehaviorOptions(t), [t]);
-  const sendBehaviorDescriptionKey = `settings.general.defaultSend.descriptions.${settings.sendBehavior}`;
+  const shortcutsAvailable = useKeyboardShortcutsAvailable();
+  const modifier = getShortcutOs() === "mac" ? "⌘" : "Ctrl";
+  const shortcutOptions = useMemo(
+    () =>
+      (["enter", "mod-enter"] as const).map((value) => ({
+        value,
+        label: t(`settings.general.sendShortcut.options.${value}`, { modifier }),
+      })),
+    [t, modifier],
+  );
+  const sendBehaviorDescriptionKey =
+    shortcutsAvailable && settings.sendShortcut === "mod-enter"
+      ? `settings.general.defaultSend.commandEnterDescriptions.${settings.sendBehavior}`
+      : `settings.general.defaultSend.descriptions.${settings.sendBehavior}`;
   const selectedLanguageOption = LANGUAGE_OPTIONS.find(
     (option) => option.value === settings.language,
   );
@@ -394,10 +417,27 @@ function GeneralSection({
   return (
     <SettingsSection title={t("settings.general.title")}>
       <View style={settingsStyles.card}>
+        {shortcutsAvailable ? (
+          <View style={settingsStyles.row}>
+            <View style={settingsStyles.rowContent}>
+              <Text style={settingsStyles.rowTitle}>
+                {t("settings.general.sendShortcut.label")}
+              </Text>
+            </View>
+            <SegmentedControl
+              size="sm"
+              value={settings.sendShortcut}
+              onValueChange={handleSendShortcutChange}
+              options={shortcutOptions}
+            />
+          </View>
+        ) : null}
         <View style={settingsStyles.row}>
           <View style={settingsStyles.rowContent}>
             <Text style={settingsStyles.rowTitle}>{t("settings.general.defaultSend.label")}</Text>
-            <Text style={settingsStyles.rowHint}>{t(sendBehaviorDescriptionKey)}</Text>
+            <Text style={settingsStyles.rowHint}>
+              {t(sendBehaviorDescriptionKey, { modifier })}
+            </Text>
           </View>
           <SegmentedControl
             size="sm"
@@ -757,6 +797,7 @@ function SettingsSidebar({
   );
   const insets = useSafeAreaInsets();
   const isDesktop = layout === "desktop";
+  const sidebarScroll = useSettingsSidebarScroll(isDesktop);
   const outerContainerStyle = useMemo(
     () => [isDesktop ? sidebarStyles.desktopContainer : sidebarStyles.mobileContainer],
     [isDesktop],
@@ -860,7 +901,12 @@ function SettingsSidebar({
               testID="settings-back-to-workspace"
             />
           </View>
-          <ScrollView style={sidebarStyles.scrollBody} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            style={sidebarStyles.scrollBody}
+            showsVerticalScrollIndicator={false}
+            testID="settings-sidebar-scroll-body"
+            {...sidebarScroll}
+          >
             {sidebarBody}
           </ScrollView>
         </View>
@@ -902,21 +948,7 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   const { mode: connectionMode } = useConnectionMode();
   const localServerIdForOrdering = connectionMode === "local" ? localServerId : null;
   const sortedHosts = useSortedHosts(hosts, localServerIdForOrdering);
-  const lastWorkspaceSelection = useLastWorkspaceSelection();
-  const routedSettingsHostServerId =
-    view.kind === "host" || view.kind === "project" || view.kind === "plugin"
-      ? view.serverId
-      : null;
-  const [selectedSettingsHostServerId, setSelectedSettingsHostServerId] = useState<string | null>(
-    routedSettingsHostServerId ?? lastWorkspaceSelection?.serverId ?? null,
-  );
-  useFocusEffect(
-    useCallback(() => {
-      setSelectedSettingsHostServerId(
-        routedSettingsHostServerId ?? lastWorkspaceSelection?.serverId ?? null,
-      );
-    }, [lastWorkspaceSelection?.serverId, routedSettingsHostServerId]),
-  );
+  const selectedSettingsHostServerId = useSettingsHostSelection();
 
   // The host the four sections scope to: the host on the active view, otherwise
   // the picker choice, otherwise the connected local daemon, otherwise the first host.
@@ -931,6 +963,12 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
     });
   }, [view, selectedSettingsHostServerId, localServerIdForOrdering, hosts, sortedHosts]);
 
+  const handleSendShortcutChange = useCallback(
+    (sendShortcut: SendShortcut) => {
+      void updateSettings({ sendShortcut });
+    },
+    [updateSettings],
+  );
   const handleSendBehaviorChange = useCallback(
     (behavior: SendBehavior) => {
       void updateSettings({ sendBehavior: behavior });
@@ -1077,7 +1115,7 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   // host detail route, keep that detail section and swap only the host segment.
   const handleSelectHost = useCallback(
     (serverId: string) => {
-      setSelectedSettingsHostServerId(serverId);
+      selectSettingsHost(serverId);
       if (view.kind === "project") {
         const target = buildSettingsHostSectionRoute(serverId, "projects");
         if (isCompactLayout) {
@@ -1213,6 +1251,7 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
                 settings={settings}
                 isDesktopApp={isDesktopApp}
                 handleSendBehaviorChange={handleSendBehaviorChange}
+                handleSendShortcutChange={handleSendShortcutChange}
                 handleServiceUrlBehaviorChange={handleServiceUrlBehaviorChange}
                 handleLanguageChange={handleLanguageChange}
                 handleTerminalScrollbackLinesChange={handleTerminalScrollbackLinesChange}
@@ -1297,6 +1336,7 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
           {...settingsScrollProps}
           style={styles.scrollView}
           contentContainerStyle={insetBottomStyle}
+          testID="settings-detail-scroll-body"
         >
           <SettingsSidebar
             view={view}
@@ -1326,6 +1366,7 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
           {...settingsScrollProps}
           style={styles.scrollView}
           contentContainerStyle={insetBottomStyle}
+          testID="settings-detail-scroll-body"
         >
           <View style={styles.content}>{content}</View>
         </SettingsScrollView>
@@ -1363,6 +1404,7 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
               {...settingsScrollProps}
               style={styles.scrollView}
               contentContainerStyle={insetBottomStyle}
+              testID="settings-detail-scroll-body"
             >
               <View style={styles.content}>{content}</View>
             </SettingsScrollView>
@@ -1450,6 +1492,7 @@ const desktopStyles = StyleSheet.create((theme) => ({
   },
   contentPane: {
     flex: 1,
+    minWidth: SETTINGS_DESKTOP_DETAIL_MIN_WIDTH,
   },
   detailLeft: {
     gap: theme.spacing[2],
@@ -1459,6 +1502,7 @@ const desktopStyles = StyleSheet.create((theme) => ({
 const sidebarStyles = StyleSheet.create((theme) => ({
   desktopContainer: {
     width: SETTINGS_DESKTOP_SIDEBAR_WIDTH,
+    flexShrink: 1,
     borderRightWidth: 1,
     borderRightColor: theme.colors.border,
     backgroundColor: theme.colors.surfaceSidebar,

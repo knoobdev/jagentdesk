@@ -11,7 +11,7 @@ import {
   prPanePipelineQueryKey,
   prPaneTimelineQueryKey,
 } from "@/git/pull-request-panel/query-keys";
-import { draftAgentCommandsQueryKey } from "@/hooks/agent-commands-query";
+import { draftAgentCommandsQueryKey } from "@/agent-commands/cache";
 import {
   resetWorkingDiffComparisons,
   selectWorkingDiffComparison,
@@ -196,7 +196,7 @@ describe("applyCheckoutStatusUpdateFromEvent", () => {
     ).toBe(false);
   });
 
-  it("drops the checkout's cached draft slash commands when its branch changes", () => {
+  it("marks draft slash commands stale without clearing them when the branch changes", () => {
     const queryClient = createQueryClient();
     queryClient.setQueryData(
       checkoutStatusQueryKey(serverId, cwd),
@@ -219,7 +219,9 @@ describe("applyCheckoutStatusUpdateFromEvent", () => {
       message: checkoutStatusUpdate(checkoutStatus({ currentBranch: "main" })),
     });
 
-    expect(queryClient.getQueryData(thisCheckout)).toBeUndefined();
+    expect(queryClient.getQueryData(thisCheckout)).toEqual([{ name: "build-jagentdesk" }]);
+    expect(queryClient.getQueryState(thisCheckout)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherCheckout)?.isInvalidated).toBe(false);
     expect(queryClient.getQueryData(otherCheckout)).toEqual([{ name: "build-jagentdesk" }]);
   });
 

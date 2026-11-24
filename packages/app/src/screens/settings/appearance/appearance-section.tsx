@@ -1,3 +1,4 @@
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
@@ -27,6 +28,7 @@ import {
   sanitizeFontFamily,
   useAppSettings,
   type AppSettings,
+  type ContentWidthPreset,
 } from "@/hooks/use-settings";
 import {
   DEFAULT_MONO_FONT_STACK,
@@ -471,6 +473,46 @@ function FontSizeRow({
 }
 
 // ---------------------------------------------------------------------------
+// Content width presets
+// ---------------------------------------------------------------------------
+
+function ContentWidthRow({
+  value,
+  onChange,
+}: {
+  value: AppSettings["contentWidth"];
+  onChange: (value: ContentWidthPreset) => void;
+}) {
+  const { t } = useTranslation();
+
+  const options = useMemo(
+    () => [
+      { value: "default" as const, label: t("settings.appearance.layout.contentWidthDefault") },
+      { value: "wide" as const, label: t("settings.appearance.layout.contentWidthWide") },
+      { value: "full" as const, label: t("settings.appearance.layout.contentWidthFull") },
+    ],
+    [t],
+  );
+  return (
+    <View style={styles.contentWidthRow}>
+      <View>
+        <Text style={settingsStyles.rowTitle}>{t("settings.appearance.layout.contentWidth")}</Text>
+        <Text style={settingsStyles.rowHint}>
+          {typeof value === "number"
+            ? t("settings.appearance.layout.contentWidthCustom", { width: value })
+            : t("settings.appearance.layout.contentWidthHint")}
+        </Text>
+      </View>
+      <SegmentedControl<ContentWidthPreset>
+        testID="content-width-options"
+        value={typeof value === "number" ? null : value}
+        onValueChange={onChange}
+        options={options}
+      />
+    </View>
+  );
+}
+
 // Syntax highlight theme picker (commits immediately)
 // ---------------------------------------------------------------------------
 
@@ -574,6 +616,13 @@ export function AppearanceSection() {
     (option: PluginThemeOption) => {
       rememberPluginThemeHost(option);
       void updateSettings({ theme: PLUGIN_THEME_PREFERENCE, pluginThemeId: option.id });
+    },
+    [updateSettings],
+  );
+
+  const handleContentWidthChange = useCallback(
+    (contentWidth: ContentWidthPreset) => {
+      void updateSettings({ contentWidth });
     },
     [updateSettings],
   );
@@ -757,6 +806,11 @@ export function AppearanceSection() {
           />
         </View>
       </SettingsSection>
+      <SettingsSection title={t("settings.appearance.layout.title")}>
+        <View style={settingsStyles.card}>
+          <ContentWidthRow value={settings.contentWidth} onChange={handleContentWidthChange} />
+        </View>
+      </SettingsSection>
       <SettingsSection title={t("settings.appearance.syntax.title")}>
         <View style={settingsStyles.card}>
           <SyntaxRow value={settings.syntaxTheme} onChange={handleSyntaxThemeChange} />
@@ -770,6 +824,7 @@ export function AppearanceSection() {
 }
 
 const styles = StyleSheet.create((theme) => ({
+  contentWidthRow: { alignItems: "flex-start", gap: theme.spacing[2], padding: theme.spacing[4] },
   preview: {
     marginTop: theme.spacing[4],
   },

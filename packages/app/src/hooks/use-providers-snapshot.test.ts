@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { ProviderSnapshotEntry } from "@jagentdesk/protocol/agent-types";
-import { draftAgentCommandsQueryKey } from "@/hooks/agent-commands-query";
+import { draftAgentCommandsQueryKey } from "@/agent-commands/cache";
 import { applyProvidersSnapshotUpdate, type ProvidersSnapshotUpdate } from "@/data/push-router";
 import {
   fetchProvidersSnapshot,
@@ -287,7 +287,7 @@ describe("applyProvidersSnapshotUpdate", () => {
     });
   });
 
-  it("invalidates cached agent commands when a provider snapshot update arrives", () => {
+  it("keeps cached agent commands during initial provider discovery", () => {
     const commandsKey = draftAgentCommandsQueryKey({
       serverId,
       draftConfig: { provider: "codex", cwd: "/repo-a" },
@@ -300,7 +300,7 @@ describe("applyProvidersSnapshotUpdate", () => {
       message: updateMessage([codexEntry("ready", [readyCodexModel])], "/repo-a"),
     });
 
-    expect(queryClient.getQueryState(commandsKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(commandsKey)?.isInvalidated).toBe(false);
   });
 });
 

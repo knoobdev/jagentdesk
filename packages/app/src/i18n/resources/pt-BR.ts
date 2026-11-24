@@ -69,6 +69,7 @@ export const ptBR: TranslationResources = {
       daemonClientUnavailable: "Cliente do daemon indisponível",
       daemonClientDisconnected: "O cliente do daemon está desconectado",
       noFileFound: "Nenhum arquivo encontrado para {{token}}",
+      folderOutsideWorkspace: "{{path}} está fora deste workspace",
       unexpectedDictationError: "Ocorreu um erro inesperado ao processar o ditado.",
     },
     connectionStatus: {
@@ -115,6 +116,10 @@ export const ptBR: TranslationResources = {
       fallback: "Mensagem...",
     },
     input: {
+      longPressToSendNow: "Long press to send now",
+
+      longPressToQueue: "Long press to queue",
+
       accessibilityLabel: "Enviar mensagem ao agente...",
       focusHint: "{{shortcut}} para focar",
       addAttachment: "Adicionar anexo",
@@ -1660,6 +1665,17 @@ export const ptBR: TranslationResources = {
     backdrop: "Fundo do menu",
   },
   subagents: {
+    parent: {
+      openParent: "Open parent",
+
+      parentAgent: "Parent agent",
+
+      parent: "Parent",
+
+      backTo: "Back to {{label}}",
+      backToParent: "Back to parent",
+    },
+
     detachAction: "Desanexar {{label}}",
     detachTooltip: "Desanexar subagente",
     archiveAction: "Arquivar {{label}}",
@@ -1930,7 +1946,18 @@ export const ptBR: TranslationResources = {
         success: "Dados do navegador limpos.",
         error: "Não foi possível limpar os dados do navegador.",
       },
+      sendShortcut: {
+        label: "Send shortcut",
+        options: { enter: "Enter", "mod-enter": "{{modifier}}+Enter" },
+      },
       defaultSend: {
+        commandEnterDescriptions: {
+          interrupt:
+            "When the agent is running, {{modifier}}+Enter interrupts. Enter inserts a new line.",
+          steer:
+            "When the agent is running, {{modifier}}+Enter steers the active turn. Enter inserts a new line.",
+          queue: "When the agent is running, {{modifier}}+Enter queues. Enter inserts a new line.",
+        },
         label: "Envio padrão",
         descriptions: {
           steer:
@@ -2052,6 +2079,22 @@ export const ptBR: TranslationResources = {
         codeSize: "Tamanho do código",
         codeSizeAccessibility: "Tamanho da fonte de código",
       },
+      layout: {
+        contentWidthCustom: "Custom width · {{width}} px",
+
+        contentWidthFull: "Full",
+
+        contentWidthWide: "Wide",
+
+        contentWidthDefault: "Default",
+
+        title: "Layout",
+        contentWidth: "Content width",
+        contentWidthHint: "Maximum width of chat and Markdown content",
+        contentWidthAccessibility: "Content width in pixels",
+        reset: "Reset",
+        resetAccessibility: "Reset content width",
+      },
       syntax: {
         title: "Sintaxe",
         highlightTheme: "Tema de destaque",
@@ -2115,6 +2158,8 @@ export const ptBR: TranslationResources = {
         toggleFocusMode: "Alternar modo de foco",
         cycleTheme: "Alternar tema",
         focusMessageInput: "Focar entrada de mensagem",
+        toggleModelPicker: "Abrir ou fechar o seletor de modelos",
+        cycleEffort: "Alternar o nível de esforço",
         cycleAgentMode: "Alternar modo do agente",
         toggleVoiceMode: "Alternar modo de voz",
         startStopDictation: "Iniciar/parar ditado",

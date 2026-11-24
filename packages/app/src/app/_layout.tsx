@@ -1,5 +1,6 @@
 import { useHardwareKeyboardPresent } from "@/keyboard";
 import { AppearanceSystemBars } from "@/appearance/system-bars";
+import { resolveContentMaxWidth } from "@/hooks/use-settings";
 import { HostConfirmationSheet } from "@/hosts/host-confirmation-sheet";
 import "@/styles/unistyles";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
@@ -71,6 +72,7 @@ import {
   type StartupBlocker,
 } from "@/navigation/host-runtime-bootstrap";
 import { registerWorkspaceRouteNavigationRef } from "@/navigation/workspace-route-navigation";
+import { useSettingsRouteEntry } from "@/navigation/settings-presentation";
 import { ThemedStack } from "@/navigation/themed-stack";
 import { shouldUseDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
 import { AgentNavigationListener } from "@/desktop/agent-navigation";
@@ -783,6 +785,7 @@ function ProvidersWrapper({ children }: { children: ReactNode }) {
       uiFontSize: settings.uiFontSize,
       codeFontSize: settings.codeFontSize,
       syntaxTheme: settings.syntaxTheme,
+      contentMaxWidth: resolveContentMaxWidth({ contentWidth: settings.contentWidth }),
     });
   }, [
     settingsLoading,
@@ -795,6 +798,7 @@ function ProvidersWrapper({ children }: { children: ReactNode }) {
     settings.uiFontSize,
     settings.codeFontSize,
     settings.syntaxTheme,
+    settings.contentWidth,
   ]);
 
   return (
@@ -1017,6 +1021,7 @@ function ReverseMigrationListener() {
 }
 
 function AppWithSidebar({ children }: { children: ReactNode }) {
+  useSettingsRouteEntry();
   const pathname = usePathname();
   const hosts = useHosts();
   const storeReady = useStoreReady();

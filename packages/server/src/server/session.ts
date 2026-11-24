@@ -8,6 +8,7 @@ import {
 } from "./session/speech/speech-models-session.js";
 import { UsageSession, type UsageSessionOptions } from "./session/usage/usage-session.js";
 import { builtinPluginWireState } from "@jagentdesk/protocol/builtin-plugins";
+import { CreationService } from "./creation/index.js";
 import { builtinPluginForRpc } from "./plugins/builtin/gates.js";
 import { BuiltinPluginError, type BuiltinPluginState } from "./plugins/builtin/state.js";
 import { SessionDelivery, type OwnedSubscription } from "./session/owned-subscriptions/index.js";
@@ -280,7 +281,6 @@ import {
 } from "./session/git-mutation/git-mutation-service.js";
 import {
   createWorkspaceProvisioningService,
-  WorkspaceProvisioningError,
   type WorkspaceProvisioningService,
 } from "./session/workspace-provisioning/workspace-provisioning-service.js";
 import {
@@ -549,6 +549,7 @@ const nodeSessionFileSystem: SessionFileSystem = {
 type AgentMcpTransportFactory = () => Promise<unknown>;
 
 export interface SessionOptions {
+  creationService?: Pick<CreationService, "create">;
   clientId: string;
   scopes: readonly string[];
   // Session-share guest sessions (spec §21 / ADR-0019): when set, this session may only touch this
@@ -879,8 +880,16 @@ function workspacePluginLifecycle(runtime: SessionOptions["pluginRuntime"]) {
   return runtime?.emit ? { emit: runtime.emit } : undefined;
 }
 
+function resolveWorkspaceCreationService(options: SessionOptions): Pick<CreationService, "create"> {
+  return (
+    options.creationService ??
+    new CreationService(resolve(options.jagentdeskHome, "creations"), options.logger)
+  );
+}
+
 export class Session {
   private readonly agentDirectory: AgentDirectory;
+  private readonly creationService: Pick<CreationService, "create">;
   private readonly eventSubscriptions = new Map<
     string,
     { owner: OwnedSubscription; events: Set<SessionEventSubscription> }
@@ -1100,6 +1109,7 @@ export class Session {
     this.onWorkspaceRecovered = onWorkspaceRecovered ?? null;
     this.pushTokenStore = pushTokenStore;
     this.jagentdeskHome = jagentdeskHome;
+    this.creationService = resolveWorkspaceCreationService(options);
     this.worktreesRoot = worktreesRoot;
     this.serverId = serverId ?? "";
     this.speechModelsSession = new SpeechModelsSession({
@@ -8600,26 +8610,57 @@ export class Session {
     request: Extract<SessionInboundMessage, { type: "workspace.create.request" }>,
   ): Promise<void> {
     try {
-      if (this.pluginRuntime?.before) {
-        const { type, requestId, ...input } = request;
-        request = {
-          ...(await this.pluginRuntime.before("workspace.create.before", input)),
-          type,
-          requestId,
-        };
+      const provision = async (workspaceId?: string) => {
+        if (this.pluginRuntime?.before) {
+          const { type, requestId, ...input } = request;
+          request = {
+            ...(await this.pluginRuntime.before("workspace.create.before", input)),
+            type,
+            requestId,
+          };
+        }
+        return request.source.kind === "directory"
+          ? this.handleWorkspaceCreateLocal(request, workspaceId)
+          : this.handleWorkspaceCreateWorktree(request, workspaceId);
+      };
+      let workspace: WorkspaceDescriptorPayload | undefined;
+      if (request.idempotencyKey) {
+        const { requestId: _requestId, idempotencyKey, ...fingerprint } = request;
+        const creation = await this.creationService.create({
+          kind: "workspace",
+          key: idempotencyKey,
+          request: fingerprint,
+          hasAgent: false,
+          hasPrompt: false,
+          exists: async (_kind, id) => (await this.workspaceRegistry.get(id)) !== null,
+          provision: async (id) => ({ workspace: await provision(id) }),
+        });
+        if (creation.error || !creation.workspace)
+          throw new Error(creation.error ?? "Workspace creation failed");
+        workspace = creation.workspace;
+      } else {
+        // COMPAT(workspaceRequestReceipts): added in v0.9.59, remove after 2027-05-24.
+        workspace = await provision();
       }
-      if (request.source.kind === "directory") {
-        await this.handleWorkspaceCreateLocal(request);
-        return;
-      }
-      await this.handleWorkspaceCreateWorktree(request);
+      this.emit({
+        type: "workspace.create.response",
+        payload: {
+          requestId: request.requestId,
+          workspace,
+          setupTerminalId: null,
+          error: null,
+        },
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to create workspace";
       this.sessionLogger.error(
         { err: error, sourceKind: request.source.kind, requestId: request.requestId },
         "Failed to create workspace",
       );
-      const errorCode = error instanceof WorkspaceProvisioningError ? error.code : undefined;
+      const errorCode =
+        error instanceof Error && "code" in error && typeof error.code === "string"
+          ? error.code
+          : undefined;
       this.emit({
         type: "workspace.create.response",
         payload: {
@@ -8655,26 +8696,18 @@ export class Session {
 
   private async handleWorkspaceCreateLocal(
     request: Extract<SessionInboundMessage, { type: "workspace.create.request" }>,
-  ): Promise<void> {
+    workspaceId?: string,
+  ): Promise<WorkspaceDescriptorPayload> {
     if (request.source.kind !== "directory") {
-      return;
+      throw new Error("Invalid workspace source");
     }
 
     const cwd = expandTilde(request.source.path);
     const directoryExists = await this.filesystem.isDirectory(cwd).catch(() => false);
-    if (!directoryExists) {
-      this.emit({
-        type: "workspace.create.response",
-        payload: {
-          requestId: request.requestId,
-          workspace: null,
-          setupTerminalId: null,
-          error: `Directory not found: ${cwd}`,
-          errorCode: "directory_not_found",
-        },
+    if (!directoryExists)
+      throw Object.assign(new Error(`Directory not found: ${cwd}`), {
+        code: "directory_not_found",
       });
-      return;
-    }
 
     const explicitTitle = request.title?.trim() || null;
     const promptTitle = resolveFirstAgentPromptTitle(request.firstAgentContext);
@@ -8684,21 +8717,13 @@ export class Session {
       request.source.projectId,
       {
         expectsInitialAgent: Boolean(request.firstAgentContext),
+        workspaceId,
         background: request.background,
         callerWorkspaceId: await this.callerWorkspaceForBackground(request.callerAgentId),
       },
     );
     await this.syncWorkspaceGitObserverForWorkspace(workspace);
     const descriptor = await this.describeWorkspaceRecord(workspace);
-    this.emit({
-      type: "workspace.create.response",
-      payload: {
-        requestId: request.requestId,
-        workspace: descriptor,
-        setupTerminalId: null,
-        error: null,
-      },
-    });
     await this.emitCreatedWorkspaceUpdate(
       descriptor,
       request.firstAgentContext ? "running" : undefined,
@@ -8722,36 +8747,31 @@ export class Session {
         { currentSelection: this.getFocusedAgentSelectionForCwd(workspace.cwd) },
       );
     }
+    return descriptor;
   }
 
   private async handleWorkspaceCreateWorktree(
     request: Extract<SessionInboundMessage, { type: "workspace.create.request" }>,
-  ): Promise<void> {
+    workspaceId?: string,
+  ): Promise<WorkspaceDescriptorPayload> {
     if (request.source.kind !== "worktree") {
-      return;
+      throw new Error("Invalid workspace source");
     }
 
     const source = request.source;
 
-    if (!source.cwd && !source.projectId) {
-      this.emit({
-        type: "workspace.create.response",
-        payload: {
-          requestId: request.requestId,
-          workspace: null,
-          setupTerminalId: null,
-          error: "cwd or projectId is required for a worktree-backed workspace",
-          errorCode: "source_required",
-        },
-      });
-      return;
-    }
+    if (!source.cwd && !source.projectId)
+      throw Object.assign(
+        new Error("cwd or projectId is required for a worktree-backed workspace"),
+        { code: "source_required" },
+      );
 
     const sourceCwd = await resolveWorktreeSourceCwd(source, this.projectRegistry);
 
     const result = await this.createJAgentDeskWorktreeWorkflow(
       {
         cwd: sourceCwd,
+        workspaceId,
         projectId: source.projectId,
         worktreeSlug: source.worktreeSlug,
         action: source.action,
@@ -8770,19 +8790,11 @@ export class Session {
     );
 
     const descriptor = await this.describeCreatedWorktreeWorkspace(result);
-    this.emit({
-      type: "workspace.create.response",
-      payload: {
-        requestId: request.requestId,
-        workspace: descriptor,
-        setupTerminalId: null,
-        error: null,
-      },
-    });
     await this.emitCreatedWorkspaceUpdate(
       descriptor,
       request.firstAgentContext ? "running" : undefined,
     );
+    return descriptor;
   }
 
   private async handleOpenProjectRequest(

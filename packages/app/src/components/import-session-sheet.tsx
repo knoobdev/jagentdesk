@@ -1,3 +1,4 @@
+import { ImportSessionList } from "./import-session-list";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, type PressableStateCallbackType, Text, View } from "react-native";
 import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
@@ -485,6 +486,107 @@ export function ImportSessionSheet({
   });
   const showFilter = filterProviders.length > 1;
 
+  const virtualized = ImportSessionList !== null && visibleEntries.length > 8;
+  const renderRow = useCallback(
+    (entry: FetchRecentProviderSessionEntry) => (
+      <ImportSessionSheetRow
+        key={`${entry.providerId}:${entry.providerHandleId}`}
+        entry={entry}
+        disabled={importMutation.isPending}
+        importing={importingSessionKey === `${entry.providerId}:${entry.providerHandleId}`}
+        showCwd={!cwd}
+        onImportSession={handleImportSession}
+      />
+    ),
+    [importMutation.isPending, importingSessionKey, cwd, handleImportSession],
+  );
+  const renderItem = useCallback(
+    (entry: FetchRecentProviderSessionEntry) => (
+      <View style={styles.listRow}>{renderRow(entry)}</View>
+    ),
+    [renderRow],
+  );
+  const listHeader = useMemo(
+    () => (
+      <View style={styles.listHeader}>
+        {showFilter ? (
+          <View ref={filterAnchorRef} collapsable={false} style={styles.filterTriggerWrap}>
+            <Pressable
+              onPress={handleFilterOpen}
+              style={filterTriggerStyle}
+              testID="import-session-filter-trigger"
+              accessibilityRole="button"
+              accessibilityLabel={`Filter: ${selectedProviderLabel}`}
+            >
+              {selectedProvider === ALL_FILTER_VALUE ? (
+                <Layers size={14} color={theme.colors.foregroundMuted} />
+              ) : (
+                (() => {
+                  const ProviderIcon = getProviderIcon(selectedProvider);
+                  return <ProviderIcon size={14} color={theme.colors.foregroundMuted} />;
+                })()
+              )}
+              <Text style={styles.filterTriggerText} numberOfLines={1}>
+                {selectedProviderLabel}
+              </Text>
+              <ChevronDown size={14} color={theme.colors.foregroundMuted} />
+            </Pressable>
+            <Combobox
+              options={filterComboboxOptions}
+              value={selectedProvider}
+              onSelect={handleFilterSelect}
+              renderOption={renderFilterOption}
+              searchable={false}
+              title="Filter by provider"
+              open={isFilterOpen}
+              onOpenChange={setIsFilterOpen}
+              anchorRef={filterAnchorRef}
+              desktopPlacement="bottom-start"
+              desktopPreventInitialFlash
+            />
+          </View>
+        ) : null}
+        <SheetStatusMessages
+          isClientReady={Boolean(client)}
+          isSnapshotUnsupported={isSnapshotUnsupported}
+          hasNoImportableProviders={hasNoImportableProviders}
+          isLoadingSessions={isLoadingSessions}
+          hasRows={visibleEntries.length > 0}
+          allQueriesErrored={allQueriesErrored}
+          erroredProviderLabels={erroredProviderLabels}
+          importErrored={importMutation.isError}
+        />
+      </View>
+    ),
+    [
+      showFilter,
+      filterTriggerStyle,
+      handleFilterOpen,
+      selectedProviderLabel,
+      selectedProvider,
+      theme.colors.foregroundMuted,
+      filterComboboxOptions,
+      handleFilterSelect,
+      renderFilterOption,
+      isFilterOpen,
+      client,
+      isSnapshotUnsupported,
+      hasNoImportableProviders,
+      isLoadingSessions,
+      visibleEntries.length,
+      allQueriesErrored,
+      erroredProviderLabels,
+      importMutation.isError,
+    ],
+  );
+  const listFooter = useMemo(
+    () => (
+      <View style={styles.listFooter}>
+        {showEmptyState ? <SheetEmptyState title={emptyStateTitle} /> : null}
+      </View>
+    ),
+    [showEmptyState, emptyStateTitle],
+  );
   return (
     <AdaptiveModalSheet
       visible={visible}
@@ -492,75 +594,39 @@ export function ImportSessionSheet({
       header={header}
       testID="import-session-sheet"
       desktopMaxWidth={560}
+      desktopHeight={virtualized ? "85%" : undefined}
+      scrollable={!virtualized}
+      contentStyle={virtualized ? styles.listBody : undefined}
       snapPoints={IMPORT_SHEET_SNAP_POINTS}
     >
-      {showFilter ? (
-        <View ref={filterAnchorRef} collapsable={false} style={styles.filterTriggerWrap}>
-          <Pressable
-            onPress={handleFilterOpen}
-            style={filterTriggerStyle}
-            testID="import-session-filter-trigger"
-            accessibilityRole="button"
-            accessibilityLabel={`Filter: ${selectedProviderLabel}`}
-          >
-            {selectedProvider === ALL_FILTER_VALUE ? (
-              <Layers size={14} color={theme.colors.foregroundMuted} />
-            ) : (
-              (() => {
-                const ProviderIcon = getProviderIcon(selectedProvider);
-                return <ProviderIcon size={14} color={theme.colors.foregroundMuted} />;
-              })()
-            )}
-            <Text style={styles.filterTriggerText} numberOfLines={1}>
-              {selectedProviderLabel}
-            </Text>
-            <ChevronDown size={14} color={theme.colors.foregroundMuted} />
-          </Pressable>
-          <Combobox
-            options={filterComboboxOptions}
-            value={selectedProvider}
-            onSelect={handleFilterSelect}
-            renderOption={renderFilterOption}
-            searchable={false}
-            title="Filter by provider"
-            open={isFilterOpen}
-            onOpenChange={setIsFilterOpen}
-            anchorRef={filterAnchorRef}
-            desktopPlacement="bottom-start"
-            desktopPreventInitialFlash
-          />
-        </View>
-      ) : null}
-      <SheetStatusMessages
-        isClientReady={Boolean(client)}
-        isSnapshotUnsupported={isSnapshotUnsupported}
-        hasNoImportableProviders={hasNoImportableProviders}
-        isLoadingSessions={isLoadingSessions}
-        hasRows={visibleEntries.length > 0}
-        allQueriesErrored={allQueriesErrored}
-        erroredProviderLabels={erroredProviderLabels}
-        importErrored={importMutation.isError}
-      />
-      {visibleEntries.length > 0 ? (
-        <View style={styles.list}>
-          {visibleEntries.map((entry) => (
-            <ImportSessionSheetRow
-              key={`${entry.providerId}:${entry.providerHandleId}`}
-              entry={entry}
-              disabled={importMutation.isPending}
-              importing={importingSessionKey === `${entry.providerId}:${entry.providerHandleId}`}
-              showCwd={!cwd}
-              onImportSession={handleImportSession}
-            />
-          ))}
-        </View>
-      ) : null}
-      {showEmptyState ? <SheetEmptyState title={emptyStateTitle} /> : null}
+      {ImportSessionList && virtualized ? (
+        <ImportSessionList
+          data={visibleEntries}
+          keyExtractor={getSessionRowKey}
+          renderItem={renderItem}
+          header={listHeader}
+          footer={listFooter}
+        />
+      ) : (
+        <>
+          {listHeader}
+          <View style={styles.list}>{visibleEntries.map(renderRow)}</View>
+          {listFooter}
+        </>
+      )}
     </AdaptiveModalSheet>
   );
 }
 
+function getSessionRowKey(entry: FetchRecentProviderSessionEntry): string {
+  return `${entry.providerId}:${entry.providerHandleId}`;
+}
+
 const styles = StyleSheet.create((theme) => ({
+  listBody: { flex: 1, paddingHorizontal: 0, paddingVertical: 0 },
+  listHeader: { paddingHorizontal: theme.spacing[4] },
+  listRow: { paddingHorizontal: theme.spacing[4], paddingBottom: theme.spacing[1] },
+  listFooter: { paddingHorizontal: theme.spacing[4], paddingBottom: theme.spacing[4] },
   filterTriggerWrap: {
     paddingBottom: theme.spacing[2],
   },

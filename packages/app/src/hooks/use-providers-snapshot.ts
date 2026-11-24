@@ -8,7 +8,7 @@ import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-
 import { useSessionStore } from "@/stores/session-store";
 import { useReplicaQuery } from "@/data/query";
 import { queryClient as singletonQueryClient } from "@/data/query-client";
-import { agentCommandsQueryRoot } from "@/hooks/agent-commands-query";
+import { agentCommandsQueryRoot } from "@/agent-commands/cache";
 import {
   isProvidersSnapshotHomeScope,
   normalizeProvidersSnapshotCwd,

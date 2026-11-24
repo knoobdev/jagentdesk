@@ -20,7 +20,7 @@ describe("combined model selector data", () => {
         snapshotEntry({ provider: "waiting", status: "loading", models: [] }),
         snapshotEntry({ provider: "codex", status: "ready", models: [codexModel] }),
       ],
-      false,
+      { selectedProvider: null, isConnected: false },
     );
     expect(providers[0].modelSelection).toEqual({
       kind: "error",

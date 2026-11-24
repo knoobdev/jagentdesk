@@ -13,6 +13,25 @@ const resolvePackageEntry = (packageName: string) => {
 };
 
 export default defineConfig({
+  plugins: [
+    {
+      name: "reanimated-web-style-helpers",
+      transform(_source, id) {
+        if (
+          !id.split("?")[0].endsWith("/lib/module/ReanimatedModule/js-reanimated/webUtils.web.js")
+        )
+          return;
+        return {
+          code: [
+            'export { default as createReactDOMStyle } from "react-native-web/dist/exports/StyleSheet/compiler/createReactDOMStyle";',
+            'export { createTransformValue, createTextShadowValue } from "react-native-web/dist/exports/StyleSheet/preprocess";',
+          ].join("\n"),
+          map: null,
+        };
+      },
+    },
+  ],
+
   // Expo compiles JSX with the automatic runtime (no `import React` needed); esbuild's
   // default is the classic runtime, which breaks files that render JSX without React
   // in scope (e.g. remote-job-card.tsx) under test.
@@ -85,6 +104,8 @@ export default defineConfig({
   optimizeDeps: {
     // Bundle the CJS dependencies of the excluded gesture-handler package for the browser.
     include: [
+      "react-native-web/dist/exports/StyleSheet/compiler/createReactDOMStyle",
+      "react-native-web/dist/exports/StyleSheet/preprocess",
       "react/jsx-runtime",
       "react/jsx-dev-runtime",
       "react-native-gesture-handler > hoist-non-react-statics",
@@ -126,6 +147,10 @@ export default defineConfig({
       ".json",
     ],
     alias: [
+      {
+        find: /^expo\/src\/winter$/,
+        replacement: path.resolve(__dirname, "test-stubs/expo-winter.ts"),
+      },
       { find: "@", replacement: path.resolve(__dirname, "src") },
       // Keep keyboard-controller's imports in Vite so native aliases and platform extensions apply.
       {
@@ -139,8 +164,8 @@ export default defineConfig({
       {
         find: /^react-native-gesture-handler$/,
         replacement: path.resolve(
-          rootNodeModules,
-          "react-native-gesture-handler/lib/module/index.js",
+          resolvePackageEntry("react-native-gesture-handler"),
+          "lib/module/index.js",
         ),
       },
       // Must precede the `react-native` alias: a string `find` matches by prefix, so this subpath

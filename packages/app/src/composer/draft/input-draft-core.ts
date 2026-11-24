@@ -20,6 +20,7 @@ export function resolveDraftKey(input: {
 
 export function buildDraftAgentControls(input: {
   formState: UseAgentFormStateResult;
+  effectiveModelId?: string;
   features?: DraftAgentControlsProps["features"];
   onSetFeature?: DraftAgentControlsProps["onSetFeature"];
   onDropdownClose?: DraftAgentControlsProps["onDropdownClose"];
@@ -34,6 +35,7 @@ export function buildDraftAgentControls(input: {
     onSelectMode: formState.setModeFromUser,
     models: formState.availableModels,
     selectedModel: formState.selectedModel,
+    effectiveModelId: input.effectiveModelId,
     onSelectModel: formState.setModelFromUser,
     isModelLoading: formState.isModelLoading,
     modelSelectorProviders: formState.modelSelectorProviders,

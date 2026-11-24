@@ -587,7 +587,6 @@ export function useAgentFormState(options: UseAgentFormStateOptions = {}): UseAg
       setSelectedServerId,
       setSelectedServerIdFromUser,
       selectedProvider: formState.provider,
-        isConnected,
       setProviderFromUser,
       selectedMode: formState.modeId,
       setModeFromUser,

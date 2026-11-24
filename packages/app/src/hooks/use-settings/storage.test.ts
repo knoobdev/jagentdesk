@@ -1,3 +1,4 @@
+import { DEFAULT_CONTENT_MAX_WIDTH } from "@/styles/theme";
 import { describe, expect, it } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import {
@@ -10,6 +11,7 @@ import {
   loadAppSettingsFromStorage,
   loadSettingsFromStorage,
   parseClampedFontSize,
+  resolveContentMaxWidth,
   parseTerminalScrollbackLines,
   sanitizeFontFamily,
   saveAppSettings,
@@ -541,4 +543,129 @@ describe("font family CSS safety", () => {
       expect(await loadAppSettingsFromStorage(deps)).toMatchObject({ [field]: "" });
     },
   );
+});
+
+describe("content width", () => {
+  it("uses the default width when no preference is saved", async () => {
+    const deps = makeDeps();
+    const queryClient = new QueryClient();
+
+    await saveAppSettings({ queryClient, updates: { codeFontSize: 14 }, deps });
+
+    const settings = await loadAppSettingsFromStorage(deps);
+    expect(settings.contentWidth).toBe("default");
+    expect(resolveContentMaxWidth(settings)).toBe(DEFAULT_CONTENT_MAX_WIDTH);
+  });
+
+  it.each([
+    ["wide", 1200],
+    ["full", undefined],
+    ["default", DEFAULT_CONTENT_MAX_WIDTH],
+  ] as const)("persists the %s preset and resolves its width", async (contentWidth, expected) => {
+    const deps = makeDeps();
+    const queryClient = new QueryClient();
+    await saveAppSettings({ queryClient, updates: { contentWidth }, deps });
+
+    const settings = await loadAppSettingsFromStorage(deps);
+    expect(settings.contentWidth).toBe(contentWidth);
+    expect(resolveContentMaxWidth(settings)).toBe(expected);
+  });
+
+  it("preserves a legacy custom width until a preset is picked", async () => {
+    const deps = makeDeps({
+      storage: createInMemoryKeyValueStorage({
+        [APP_SETTINGS_KEY]: JSON.stringify({ contentMaxWidth: 1600 }),
+      }),
+    });
+    const queryClient = new QueryClient();
+    const settings = await loadAppSettingsFromStorage(deps);
+    expect(settings.contentWidth).toBe(1600);
+    expect(resolveContentMaxWidth(settings)).toBe(1600);
+
+    await saveAppSettings({ queryClient, updates: { codeFontSize: 14 }, deps });
+    expect((await loadAppSettingsFromStorage(deps)).contentWidth).toBe(1600);
+
+    await saveAppSettings({ queryClient, updates: { contentWidth: "default" }, deps });
+    expect((await loadAppSettingsFromStorage(deps)).contentWidth).toBe("default");
+  });
+
+  it.each([
+    [100_000, 4000],
+    [10, 600],
+    [null, "default"],
+    ["wide", "default"],
+  ])("normalizes legacy width %s on load", async (contentMaxWidth, expected) => {
+    const settings = await loadAppSettingsFromStorage(
+      makeDeps({
+        storage: createInMemoryKeyValueStorage({
+          [APP_SETTINGS_KEY]: JSON.stringify({ contentMaxWidth }),
+        }),
+      }),
+    );
+    expect(settings.contentWidth).toBe(expected);
+  });
+});
+
+describe("font family CSS safety", () => {
+  it.each(["'foo", '"foo', "Menlo, 'foo", "foo\\", "foo/*", "foo(", "foo["])(
+    "rejects unfinished CSS syntax: %s",
+    (value) => expect(sanitizeFontFamily(value)).toBeNull(),
+  );
+
+  it.each([
+    "Menlo",
+    "'Fira Code', monospace",
+    '"Fira Code", monospace',
+    "'Font\\'s name'",
+    "Font\\ Name",
+    "'Font (Mono)'",
+    "'Font [Mono]'",
+  ])("preserves complete font families: %s", (value) =>
+    expect(sanitizeFontFamily(value)).toBe(value),
+  );
+
+  it.each(["uiFontFamily", "monoFontFamily"])(
+    "recovers a persisted unmatched quote in %s",
+    async (field) => {
+      const deps = makeDeps({
+        storage: createInMemoryKeyValueStorage({
+          [APP_SETTINGS_KEY]: JSON.stringify({ [field]: "'foo" }),
+        }),
+      });
+      expect(await loadAppSettingsFromStorage(deps)).toMatchObject({ [field]: "" });
+    },
+  );
+});
+
+it("uses Enter to send by default", async () => {
+  const deps = makeDeps();
+
+  const result = await loadAppSettingsFromStorage(deps);
+
+  expect(result.sendShortcut).toBe("enter");
+  expect(DEFAULT_CLIENT_SETTINGS.sendShortcut).toBe("enter");
+});
+
+it("loads the modifier Enter send preference", async () => {
+  const deps = makeDeps({
+    storage: createInMemoryKeyValueStorage({
+      [APP_SETTINGS_KEY]: JSON.stringify({ sendShortcut: "mod-enter" }),
+    }),
+  });
+
+  const result = await loadAppSettingsFromStorage(deps);
+
+  expect(result.sendShortcut).toBe("mod-enter");
+});
+
+it("falls back to Enter when the stored send shortcut is invalid", async () => {
+  const deps = makeDeps({
+    storage: createInMemoryKeyValueStorage({
+      [APP_SETTINGS_KEY]: JSON.stringify({ sendShortcut: "yes" }),
+    }),
+  });
+
+  const result = await loadAppSettingsFromStorage(deps);
+
+  expect(result.sendShortcut).toBe("enter");
 });

@@ -67,6 +67,7 @@ export const en = {
       daemonClientUnavailable: "Daemon client unavailable",
       daemonClientDisconnected: "Daemon client is disconnected",
       noFileFound: "No file found for {{token}}",
+      folderOutsideWorkspace: "{{path}} is outside this workspace",
       unexpectedDictationError: "An unexpected error occurred while handling dictation.",
     },
     connectionStatus: {
@@ -113,6 +114,10 @@ export const en = {
       fallback: "Message...",
     },
     input: {
+      longPressToSendNow: "Long press to send now",
+
+      longPressToQueue: "Long press to queue",
+
       accessibilityLabel: "Message agent...",
       focusHint: "{{shortcut}} to focus",
       addAttachment: "Add attachment",
@@ -1699,6 +1704,17 @@ export const en = {
     backdrop: "Menu backdrop",
   },
   subagents: {
+    parent: {
+      openParent: "Open parent",
+
+      parentAgent: "Parent agent",
+
+      parent: "Parent",
+
+      backTo: "Back to {{label}}",
+      backToParent: "Back to parent",
+    },
+
     detachAction: "Detach {{label}}",
     detachTooltip: "Detach subagent",
     archiveAction: "Archive {{label}}",
@@ -1968,7 +1984,18 @@ export const en = {
         success: "Browser data cleared.",
         error: "Couldn't clear browser data.",
       },
+      sendShortcut: {
+        label: "Send shortcut",
+        options: { enter: "Enter", "mod-enter": "{{modifier}}+Enter" },
+      },
       defaultSend: {
+        commandEnterDescriptions: {
+          interrupt:
+            "When the agent is running, {{modifier}}+Enter interrupts. Enter inserts a new line.",
+          steer:
+            "When the agent is running, {{modifier}}+Enter steers the active turn. Enter inserts a new line.",
+          queue: "When the agent is running, {{modifier}}+Enter queues. Enter inserts a new line.",
+        },
         label: "Default send",
         descriptions: {
           steer:
@@ -2088,6 +2115,22 @@ export const en = {
         codeSize: "Code size",
         codeSizeAccessibility: "Code font size",
       },
+      layout: {
+        contentWidthCustom: "Custom width · {{width}} px",
+
+        contentWidthFull: "Full",
+
+        contentWidthWide: "Wide",
+
+        contentWidthDefault: "Default",
+
+        title: "Layout",
+        contentWidth: "Content width",
+        contentWidthHint: "Maximum width of chat and Markdown content",
+        contentWidthAccessibility: "Content width in pixels",
+        reset: "Reset",
+        resetAccessibility: "Reset content width",
+      },
       syntax: {
         title: "Syntax",
         highlightTheme: "Highlight theme",
@@ -2151,6 +2194,8 @@ export const en = {
         toggleFocusMode: "Toggle focus mode",
         cycleTheme: "Cycle theme",
         focusMessageInput: "Focus message input",
+        toggleModelPicker: "Toggle model picker",
+        cycleEffort: "Cycle effort",
         cycleAgentMode: "Cycle agent mode",
         toggleVoiceMode: "Toggle voice mode",
         startStopDictation: "Start/stop dictation",

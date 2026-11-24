@@ -123,6 +123,49 @@ describe("checkout discard", () => {
 });
 
 describe("file explorer", () => {
+  test.each([
+    {
+      query: "implementation",
+      expectedPaths: [
+        ".cursor/plans/implementation-plan.md",
+        ".codex/plans/implementation-plan.md",
+        ".claude/plans/implementation-plan.md",
+      ],
+    },
+    {
+      query: ".cursor/plans/implementation",
+      expectedPaths: [".cursor/plans/implementation-plan.md"],
+    },
+  ])(
+    "workspace suggestions find hidden agent plans for '$query'",
+    async ({ query, expectedPaths }) => {
+      const cwd = tmpCwd();
+      try {
+        for (const directory of [".cursor", ".codex", ".claude", ".hidden"]) {
+          mkdirSync(path.join(cwd, directory, "plans"), { recursive: true });
+          writeFileSync(path.join(cwd, directory, "plans", "implementation-plan.md"), "plan\n");
+        }
+
+        const response = await ctx.client.getDirectorySuggestions({
+          cwd,
+          query,
+          limit: 50,
+          includeFiles: true,
+          includeDirectories: true,
+        });
+        expect(response.error).toBeNull();
+        expect(response.entries).toHaveLength(expectedPaths.length);
+        expect(response.entries).toEqual(
+          expect.arrayContaining(
+            expectedPaths.map((entryPath) => ({ path: entryPath, kind: "file" })),
+          ),
+        );
+      } finally {
+        rmSync(cwd, { recursive: true, force: true });
+      }
+    },
+  );
+
   test.each(["..", "..."])(
     "workspace suggestions resolve exact paths starting with %s",
     async (prefix) => {

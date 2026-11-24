@@ -1,4 +1,9 @@
-import type { AudioEngine, AudioEngineCallbacks, AudioEngineOptions, AudioPlaybackSource } from "./audio-engine-types";
+import type {
+  AudioEngine,
+  AudioEngineCallbacks,
+  AudioEngineOptions,
+  AudioPlaybackSource,
+} from "./audio-engine-types";
 
 import { createAudioPlayer, setAudioModeAsync } from "expo-audio";
 import { File, Paths } from "expo-file-system";
@@ -189,7 +194,10 @@ export function createAudioEngine(
       try {
         await ensureMicrophonePermission();
         await ensureInitialized();
-        const isRecording = options?.captureMode === "dictation" ? native.startDictation() : native.toggleRecording(true);
+        const isRecording =
+          options?.captureMode === "dictation"
+            ? native.startDictation()
+            : native.toggleRecording(true);
         if (!isRecording) {
           throw new Error(
             "Microphone capture could not start because Android audio focus is unavailable.",

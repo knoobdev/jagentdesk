@@ -1,3 +1,4 @@
+import { draftCreationKey } from "@/composer/draft/creation-key";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Image, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
@@ -84,21 +85,24 @@ function buildChatDraftComposerArgs({
 
 async function callWorkspaceCreation({
   creationMethod,
+  creationIdentity,
   connectedClient,
   input,
 }: {
   creationMethod: "create_worktree" | "open_project";
+  creationIdentity: { draftId: string; worktreeSlug: string };
   connectedClient: DaemonClient;
   input: { cwd: string };
 }) {
-  if (creationMethod === "create_worktree") {
-    return connectedClient.createJAgentDeskWorktree({
-      cwd: input.cwd,
-      worktreeSlug: createNameId(),
-    });
-  }
+  const request = {
+    source:
+      creationMethod === "create_worktree"
+        ? { kind: "worktree" as const, cwd: input.cwd, worktreeSlug: creationIdentity.worktreeSlug }
+        : { kind: "directory" as const, path: input.cwd },
+  };
   return connectedClient.createWorkspace({
-    source: { kind: "directory", path: input.cwd },
+    ...request,
+    idempotencyKey: draftCreationKey(creationIdentity.draftId, request),
   });
 }
 
@@ -155,6 +159,13 @@ export function WorkspaceSetupDialog() {
   const mergeWorkspaces = useSessionStore((state) => state.seedWorkspaces);
   const setHasHydratedWorkspaces = useSessionStore((state) => state.setHasHydratedWorkspaces);
   const setAgents = useSessionStore((state) => state.setAgents);
+  const creationIdentity = useMemo(
+    () => ({
+      draftId: `${pendingWorkspaceSetup?.serverId ?? "workspace"}:${createNameId()}`,
+      worktreeSlug: createNameId(),
+    }),
+    [pendingWorkspaceSetup],
+  );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [createdWorkspace, setCreatedWorkspace] = useState<ReturnType<
     typeof normalizeWorkspaceDescriptor
@@ -248,6 +259,7 @@ export function WorkspaceSetupDialog() {
       const connectedClient = withConnectedClient();
       const payload = await callWorkspaceCreation({
         creationMethod: pendingWorkspaceSetup.creationMethod,
+        creationIdentity,
         connectedClient,
         input,
       });
@@ -267,6 +279,7 @@ export function WorkspaceSetupDialog() {
       return normalizedWorkspace;
     },
     [
+      creationIdentity,
       createdWorkspace,
       mergeWorkspaces,
       pendingWorkspaceSetup,
@@ -344,7 +357,7 @@ export function WorkspaceSetupDialog() {
       } catch (error) {
         const message = toErrorMessage(error);
         setErrorMessage(message);
-        toast.error(message);
+        if (!getIsStillActive()) toast.error(message);
       } finally {
         if (getIsStillActive()) {
           setPendingAction(null);
@@ -435,11 +448,10 @@ export function WorkspaceSetupDialog() {
           autoFocus
           commandDraft={composerState?.commandDraft}
           agentControls={agentControlsWithDisabled}
+          error={errorMessage}
           inputWrapperStyle={styles.composerInputWrapper}
         />
       </FileDropZone>
-
-      {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
     </AdaptiveModalSheet>
   );
 }
@@ -476,11 +488,6 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[3],
     marginHorizontal: -theme.spacing[6],
     marginVertical: -theme.spacing[2],
-  },
-  errorText: {
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.destructive,
-    lineHeight: 20,
   },
   composerInputWrapper: {
     backgroundColor: theme.colors.surface2,

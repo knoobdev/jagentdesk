@@ -1,7 +1,9 @@
 import { Alert } from "@/components/ui/alert";
+import { MarkdownRenderer } from "@/components/markdown/renderer";
+import type { GestureResponderEvent } from "react-native";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import { useState, useCallback, useMemo } from "react";
-import { View, Text, TextInput, Pressable, type PressableStateCallbackType } from "react-native";
+import { useState, useCallback, useMemo, useRef } from "react";
+import { View, Text, Pressable, type PressableStateCallbackType } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { Check, X } from "lucide-react-native";
@@ -9,6 +11,8 @@ import { useTranslation } from "react-i18next";
 import type { PendingPermission } from "@/types/shared";
 import type { AgentPermissionResponse } from "@jagentdesk/protocol/agent-types";
 import { isWeb } from "@/constants/platform";
+import { EditingTextInput as TextInput } from "@/components/ui/text-input";
+import { ScrollableCodeSurface } from "@/components/ui/scrollable-code-surface";
 import {
   areQuestionsAnswered,
   buildQuestionFormAnswers,
@@ -29,6 +33,23 @@ interface QuestionFormCardProps {
 }
 
 const IS_WEB = isWeb;
+// Native previews are uncapped: inside the option's Pressable, Android never hands a
+// drag to the preview's nested scroll, so lines past a cap would be unreachable.
+const OPTION_PREVIEW_MAX_HEIGHT = IS_WEB ? 240 : undefined;
+
+// Web clicks that must not answer: a link in the label, anything in the description, and the
+// second click of a double-click, which would otherwise land on the next question's options.
+function isNonAnsweringClick(event: GestureResponderEvent, description: View | null): boolean {
+  if (!IS_WEB) return false;
+  const click = event.nativeEvent as unknown as MouseEvent;
+  if (click.detail > 1) return true;
+  const target = click.target as Element | null;
+  const descriptionElement = description as unknown as Element | null;
+  return Boolean(target?.closest("a") || descriptionElement?.contains(target));
+}
+
+// The description is selectable text, so a touch on it belongs to the text, not the option.
+const claimResponder = () => true;
 
 function getQuestionInputPlaceholder({
   question,
@@ -65,9 +86,14 @@ function QuestionOptionRow({
 }: QuestionOptionRowProps) {
   const { theme } = useUnistyles();
 
-  const handlePress = useCallback(() => {
-    onToggle(qIndex, optIndex, multiSelect);
-  }, [onToggle, qIndex, optIndex, multiSelect]);
+  const descriptionRef = useRef<View>(null);
+  const handlePress = useCallback(
+    (event: GestureResponderEvent) => {
+      if (isNonAnsweringClick(event, descriptionRef.current)) return;
+      onToggle(qIndex, optIndex, multiSelect);
+    },
+    [onToggle, qIndex, optIndex, multiSelect],
+  );
 
   const pressableStyle = useCallback(
     ({ pressed, hovered }: PressableStateCallbackType & { hovered?: boolean }) => [
@@ -80,14 +106,6 @@ function QuestionOptionRow({
     [isSelected, theme.colors.surface2],
   );
 
-  const optionLabelStyle = useMemo(
-    () => [styles.optionLabel, { color: theme.colors.foreground }],
-    [theme.colors.foreground],
-  );
-  const optionDescriptionStyle = useMemo(
-    () => [styles.optionDescription, { color: theme.colors.foregroundMuted }],
-    [theme.colors.foregroundMuted],
-  );
   const accessibilityState = useMemo(() => ({ checked: isSelected }), [isSelected]);
 
   // Static left-side control: square for multi-select, circle for single-select.
@@ -126,9 +144,29 @@ function QuestionOptionRow({
           {isSelected && !multiSelect ? <View style={radioDotStyle} /> : null}
         </View>
         <View style={styles.optionTextBlock}>
-          <Text style={optionLabelStyle}>{option.label}</Text>
+          <MarkdownRenderer text={option.label} compact muted={!isSelected} selectable={false} />
           {option.description ? (
-            <Text style={optionDescriptionStyle}>{option.description}</Text>
+            <View
+              ref={descriptionRef}
+              testID="question-form-option-description"
+              onStartShouldSetResponder={claimResponder}
+            >
+              <MarkdownRenderer text={option.description} compact muted />
+            </View>
+          ) : null}
+          {option.preview ? (
+            // Shown for every option at once so they can be compared before picking.
+            // Long lines wrap, as in Claude Code, since most previews are prose.
+            <ScrollableCodeSurface
+              tone="surface0"
+              maxHeight={OPTION_PREVIEW_MAX_HEIGHT}
+              horizontal={false}
+              selectable={false}
+              textStyle={styles.optionPreviewText}
+              testID="question-form-option-preview"
+            >
+              {option.preview}
+            </ScrollableCodeSurface>
           ) : null}
         </View>
       </View>
@@ -494,10 +532,6 @@ export function QuestionFormCard({
     ],
     [theme.colors.surface1, theme.colors.border],
   );
-  const questionTextStyle = useMemo(
-    () => [styles.questionText, { color: theme.colors.foreground }],
-    [theme.colors.foreground],
-  );
   // Single-select radios need a group; checkboxes are valid standalone.
   const optionsGroupAccessibility = useMemo(
     () =>
@@ -542,9 +576,9 @@ export function QuestionFormCard({
         onSelect={handleSelectQuestion}
       />
       <View style={styles.questionHeader}>
-        <Text testID="question-form-current-question" style={questionTextStyle}>
-          {activeQuestion?.question}
-        </Text>
+        <View testID="question-form-current-question" style={styles.questionText}>
+          <MarkdownRenderer text={questions[resolvedActiveQuestionIndex].question} compact />
+        </View>
       </View>
 
       {activeQuestion ? (
@@ -702,6 +736,10 @@ const styles = StyleSheet.create((theme) => ({
   optionDescription: {
     fontSize: theme.fontSize.sm,
     lineHeight: 20,
+  },
+  optionPreviewText: {
+    lineHeight: 20,
+    ...(isWeb ? { whiteSpace: "pre-wrap", overflowWrap: "break-word" } : null),
   },
   selectionControl: {
     width: 18,

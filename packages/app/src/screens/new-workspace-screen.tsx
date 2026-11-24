@@ -1,3 +1,4 @@
+import { draftCreationKey } from "@/composer/draft/creation-key";
 import { SegmentedControl, type SegmentedControlOption } from "@/components/ui/segmented-control";
 import { useExistingWorktrees, useProjectWorktrees } from "./new-workspace/existing-worktrees";
 import {
@@ -826,6 +827,9 @@ async function createAndMergeWorkspace(input: {
 }
 
 async function createMultiplicityWorkspace(input: {
+  idempotencyKey: string;
+  worktreeSlug: string;
+  launchTarget: object;
   client: NonNullable<ReturnType<typeof useHostRuntimeClient>>;
   isolation: "local" | "worktree";
   project: HostProjectListItem;
@@ -849,22 +853,29 @@ async function createMultiplicityWorkspace(input: {
     prompt: input.prompt,
     attachments: input.attachments,
   });
-  const payload = await input.client.createWorkspace({
+  const request = {
     source: isWorktree
       ? {
-          kind: "worktree",
+          kind: "worktree" as const,
           cwd: input.sourceDirectory,
           projectId,
-          worktreeSlug: createNameId(),
+          worktreeSlug: input.worktreeSlug,
           ...input.checkoutRequest,
         }
       : {
-          kind: "directory",
+          kind: "directory" as const,
           path: input.sourceDirectory,
           projectId,
         },
     ...(firstAgentContext ? { firstAgentContext } : {}),
     ...(input.title ? { title: input.title } : {}),
+  };
+  const payload = await input.client.createWorkspace({
+    ...request,
+    idempotencyKey: draftCreationKey(input.idempotencyKey, {
+      request,
+      launchTarget: input.launchTarget,
+    }),
   });
   if (payload.error || !payload.workspace) {
     throw new Error(payload.error ?? input.createFailedMessage);
@@ -1696,6 +1707,17 @@ export function NewWorkspaceScreen({
   draftId,
   startWithOrchestration = false,
 }: NewWorkspaceScreenProps) {
+  const creationIdentity = useMemo(
+    () => ({ draftId: draftId || generateDraftId(), worktreeSlug: createNameId() }),
+    [draftId],
+  );
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
   const queryClient = useQueryClient();
   const { theme } = useUnistyles();
   const { t } = useTranslation();
@@ -2188,6 +2210,9 @@ export function NewWorkspaceScreen({
       }
       const normalizedWorkspace = supportsWorkspaceMultiplicity
         ? await createMultiplicityWorkspace({
+            idempotencyKey: creationIdentity.draftId,
+            worktreeSlug: creationIdentity.worktreeSlug,
+            launchTarget: { kind: orchestrationRequested ? "orchestration" : "chat" },
             client: connectedClient,
             isolation: effectiveIsolation,
             project: selectedProject,
@@ -2212,6 +2237,8 @@ export function NewWorkspaceScreen({
       return normalizedWorkspace;
     },
     [
+      creationIdentity,
+      orchestrationRequested,
       buildCreateWorktreeInput,
       createdWorkspace,
       existingWorktree,
@@ -2281,7 +2308,7 @@ export function NewWorkspaceScreen({
         const message = toErrorMessage(error);
         setPendingAction(null);
         setErrorMessage(message);
-        toast.error(message);
+        if (!isMountedRef.current) toast.error(message);
       }
     },
     [
@@ -2441,6 +2468,7 @@ export function NewWorkspaceScreen({
           </View>
           {formStack}
           <Composer
+            error={errorMessage}
             externalKeyboardShift
             agentId={draftKey}
             serverId={selectedServerId}
@@ -2472,7 +2500,6 @@ export function NewWorkspaceScreen({
             placement="bottom"
             onPress={importSession.open}
           />
-          {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
         </KeyboardTranslateView>
       </View>
       {importSession.sheet}
@@ -2518,11 +2545,6 @@ const styles = StyleSheet.create((theme) => ({
   orchestrationButton: {
     alignSelf: "center",
     marginTop: 8,
-  },
-  errorText: {
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.destructive,
-    lineHeight: 20,
   },
   formStack: {
     marginBottom: theme.spacing[8],

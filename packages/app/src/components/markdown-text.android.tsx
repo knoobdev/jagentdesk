@@ -1,3 +1,4 @@
+import { useMarkdownTextSurface } from "./markdown-text-selection";
 import { useMemo, type ReactNode } from "react";
 import {
   Text,
@@ -28,8 +29,15 @@ export function MarkdownTextSpan({
   onPress,
   accessibilityRole,
 }: MarkdownTextSpanProps) {
+  const selectable = useMarkdownTextSurface() !== "control";
+
   return (
-    <Text selectable style={style} onPress={onPress} accessibilityRole={accessibilityRole}>
+    <Text
+      selectable={selectable}
+      style={style}
+      onPress={onPress}
+      accessibilityRole={accessibilityRole}
+    >
       {children}
     </Text>
   );

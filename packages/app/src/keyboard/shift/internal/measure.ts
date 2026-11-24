@@ -16,10 +16,13 @@ export function measureInWindow(element: View): Promise<WindowRect> {
  * transforms. The frame's parent must not move with the keyboard; the composer dock
  * is the only anchor host, and its parent is the stationary dock viewport.
  */
-function measureInUntranslatedWindow(frame: View, element: View): Promise<WindowRect | null> {
-  const parent = frame.parentElement;
+function measureInUntranslatedWindow(
+  frame: View,
+  element: View,
+  parent: View | null,
+): Promise<WindowRect | null> {
   if (!parent) return Promise.resolve(null);
-  const parentRect = parent.getBoundingClientRect();
+  const parentMeasurement = measureInWindow(parent);
   const frameOrigin = new Promise<{ x: number; y: number }>((resolve) => {
     frame.measure((x, y) => resolve({ x, y }));
   });
@@ -30,7 +33,7 @@ function measureInUntranslatedWindow(frame: View, element: View): Promise<Window
       () => resolve(null),
     );
   });
-  return Promise.all([frameOrigin, offset]).then(([origin, rect]) =>
+  return Promise.all([frameOrigin, offset, parentMeasurement]).then(([origin, rect, parentRect]) =>
     rect
       ? {
           x: parentRect.x + origin.x + rect.x,
@@ -46,15 +49,16 @@ function measureInUntranslatedWindow(frame: View, element: View): Promise<Window
 export function useKeyboardTranslationScope(
   frameRef: RefObject<View | null>,
   translation: KeyboardTranslation,
+  parentRef: RefObject<View | null>,
 ): KeyboardTranslationScope {
   return useMemo(
     () => ({
       translation,
       measureAtRest: (element: View) =>
         frameRef.current
-          ? measureInUntranslatedWindow(frameRef.current, element)
+          ? measureInUntranslatedWindow(frameRef.current, element, parentRef.current)
           : Promise.resolve(null),
     }),
-    [frameRef, translation],
+    [frameRef, parentRef, translation],
   );
 }

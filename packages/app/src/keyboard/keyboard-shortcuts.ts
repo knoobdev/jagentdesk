@@ -73,7 +73,7 @@ interface ShortcutWhen {
   /** false = disabled when command center is open */
   commandCenter?: false;
   /** Exact focus scope match */
-  focusScope?: KeyboardFocusScope;
+  focusScope?: KeyboardFocusScope | readonly KeyboardFocusScope[];
 }
 
 type ShortcutPayloadDef =
@@ -163,6 +163,8 @@ const SHORTCUT_HELP_LABEL_KEYS: Record<string, string> = {
   "toggle-focus": "settings.shortcuts.help.toggleFocusMode",
   "cycle-theme": "settings.shortcuts.help.cycleTheme",
   "focus-message-input": "settings.shortcuts.help.focusMessageInput",
+  "toggle-model-picker": "settings.shortcuts.help.toggleModelPicker",
+  "cycle-effort": "settings.shortcuts.help.cycleEffort",
   "cycle-agent-mode": "settings.shortcuts.help.cycleAgentMode",
   "voice-toggle": "settings.shortcuts.help.toggleVoiceMode",
   "dictation-toggle": "settings.shortcuts.help.startStopDictation",
@@ -1038,6 +1040,35 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     },
   },
   {
+    id: "message-input-model-toggle-mod-slash",
+    action: "message-input.action",
+    combo: "Mod+/",
+    repeat: false,
+    // The handler checks that its composer or its own picker has focus.
+    when: { commandCenter: false, focusScope: ["message-input", "editable", "other"] },
+    payload: { type: "message-input", kind: "model-toggle" },
+    help: {
+      id: "toggle-model-picker",
+      section: "agent-input",
+      label: "Toggle model picker",
+      keys: ["mod", "/"],
+    },
+  },
+  {
+    id: "message-input-effort-cycle-mod-shift-slash",
+    action: "message-input.action",
+    combo: "Mod+Shift+/",
+    repeat: false,
+    when: { commandCenter: false, focusScope: "message-input" },
+    payload: { type: "message-input", kind: "effort-cycle" },
+    help: {
+      id: "cycle-effort",
+      section: "agent-input",
+      label: "Cycle effort",
+      keys: ["mod", "shift", "/"],
+    },
+  },
+  {
     id: "message-input-mode-cycle-shift-tab",
     action: "message-input.action",
     combo: "Shift+Tab",
@@ -1293,7 +1324,13 @@ export function matchesKeyboardShortcutContext(
   }
   if (when.terminal === false && context.focusScope === "terminal") return false;
   if (when.commandCenter === false && context.commandCenterOpen) return false;
-  if (when.focusScope !== undefined && context.focusScope !== when.focusScope) return false;
+  if (
+    when.focusScope !== undefined &&
+    !(Array.isArray(when.focusScope)
+      ? when.focusScope.includes(context.focusScope)
+      : when.focusScope === context.focusScope)
+  )
+    return false;
   return true;
 }
 

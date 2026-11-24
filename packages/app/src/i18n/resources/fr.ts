@@ -62,6 +62,8 @@ export const fr: TranslationResources = {
       downloadFailed: "Le téléchargement a échoué",
     },
     errors: {
+      folderOutsideWorkspace: "{{path}} is outside this workspace",
+
       error: "Erreur",
       unableToSave: "Impossible d'enregistrer",
       nameRequired: "Le nom est requis",
@@ -117,6 +119,10 @@ export const fr: TranslationResources = {
       fallback: "Message...",
     },
     input: {
+      longPressToSendNow: "Long press to send now",
+
+      longPressToQueue: "Long press to queue",
+
       accessibilityLabel: "Agent de messagerie...",
       focusHint: "{{shortcut}}pour se concentrer",
       addAttachment: "Ajouter une pièce jointe",
@@ -1676,6 +1682,17 @@ export const fr: TranslationResources = {
     backdrop: "Toile de fond du menu",
   },
   subagents: {
+    parent: {
+      openParent: "Open parent",
+
+      parentAgent: "Parent agent",
+
+      parent: "Parent",
+
+      backTo: "Back to {{label}}",
+      backToParent: "Back to parent",
+    },
+
     detachAction: "Detacher {{label}}",
     detachTooltip: "Detacher le sous-agent",
     archiveAction: "Archiver{{label}}",
@@ -1946,7 +1963,18 @@ export const fr: TranslationResources = {
         success: "Données du navigateur effacées.",
         error: "Impossible d'effacer les données du navigateur.",
       },
+      sendShortcut: {
+        label: "Send shortcut",
+        options: { enter: "Enter", "mod-enter": "{{modifier}}+Enter" },
+      },
       defaultSend: {
+        commandEnterDescriptions: {
+          interrupt:
+            "When the agent is running, {{modifier}}+Enter interrupts. Enter inserts a new line.",
+          steer:
+            "When the agent is running, {{modifier}}+Enter steers the active turn. Enter inserts a new line.",
+          queue: "When the agent is running, {{modifier}}+Enter queues. Enter inserts a new line.",
+        },
         label: "Envoi par défaut",
         descriptions: {
           steer:
@@ -2069,6 +2097,22 @@ export const fr: TranslationResources = {
         codeSize: "Taille du code",
         codeSizeAccessibility: "Taille de la police du code",
       },
+      layout: {
+        contentWidthCustom: "Custom width · {{width}} px",
+
+        contentWidthFull: "Full",
+
+        contentWidthWide: "Wide",
+
+        contentWidthDefault: "Default",
+
+        title: "Layout",
+        contentWidth: "Content width",
+        contentWidthHint: "Maximum width of chat and Markdown content",
+        contentWidthAccessibility: "Content width in pixels",
+        reset: "Reset",
+        resetAccessibility: "Reset content width",
+      },
       syntax: {
         title: "Syntaxe",
         highlightTheme: "Thème de surbrillance",
@@ -2099,6 +2143,10 @@ export const fr: TranslationResources = {
         agentInput: "EntréeAgent",
       },
       help: {
+        cycleEffort: "Cycle effort",
+
+        toggleModelPicker: "Toggle model picker",
+
         openProject: "Projet ouvert",
         newWorkspace: "Nouvel espace de travail",
         newWorktree: "Nouvel arbre de travail",

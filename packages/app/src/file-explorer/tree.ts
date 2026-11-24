@@ -251,3 +251,24 @@ export async function refreshExplorerDirectories({
   );
   return null;
 }
+
+/** Load and expand the path to a directory selected outside the tree. */
+export async function revealExplorerDirectory(input: {
+  directoryPath: string;
+  requestDirectoryListing: (path: string) => Promise<ExplorerDirectory | null>;
+  expandPaths: (paths: string[]) => void;
+  showHiddenFiles: () => void;
+}): Promise<void> {
+  if (isHiddenExplorerPath(input.directoryPath)) input.showHiddenFiles();
+  const paths = ["."];
+  if (input.directoryPath !== ".") {
+    const segments = input.directoryPath.split("/").filter(Boolean);
+    for (let length = 1; length <= segments.length; length += 1) {
+      paths.push(segments.slice(0, length).join("/"));
+    }
+  }
+  for (const path of paths) {
+    if (!(await input.requestDirectoryListing(path))) return;
+  }
+  input.expandPaths(paths);
+}

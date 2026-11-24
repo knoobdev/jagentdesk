@@ -62,7 +62,6 @@ import { getDesktopHost } from "@/desktop/host";
 import { routeTerminalDrop } from "@/terminal/drop/terminal-file-drop";
 import { prepareDroppedPathsForTerminal } from "@/terminal/drop/terminal-path";
 import { toErrorMessage } from "@/utils/error-messages";
-import { getWorkspaceTerminalSession } from "@/terminal/runtime/workspace-terminal-session";
 import {
   EMPTY_FOCUS_CLAIM_STATE,
   canRequestFocusClaim,

@@ -69,6 +69,7 @@ export const zhCN: TranslationResources = {
       daemonClientUnavailable: "Daemon client 不可用",
       daemonClientDisconnected: "Daemon client 已断开连接",
       noFileFound: "未找到 {{token}} 对应的文件",
+      folderOutsideWorkspace: "{{path}} 不在此工作区内",
       unexpectedDictationError: "处理听写时发生意外错误。",
     },
     connectionStatus: {
@@ -115,6 +116,10 @@ export const zhCN: TranslationResources = {
       fallback: "输入消息...",
     },
     input: {
+      longPressToSendNow: "Long press to send now",
+
+      longPressToQueue: "Long press to queue",
+
       accessibilityLabel: "给 Agent 发消息...",
       focusHint: "{{shortcut}} 聚焦",
       addAttachment: "添加附件",
@@ -1611,6 +1616,17 @@ export const zhCN: TranslationResources = {
     backdrop: "菜单背景",
   },
   subagents: {
+    parent: {
+      openParent: "Open parent",
+
+      parentAgent: "Parent agent",
+
+      parent: "Parent",
+
+      backTo: "Back to {{label}}",
+      backToParent: "Back to parent",
+    },
+
     detachAction: "分离 {{label}}",
     detachTooltip: "分离 subagent",
     archiveAction: "归档 {{label}}",
@@ -1880,7 +1896,18 @@ export const zhCN: TranslationResources = {
         success: "浏览器数据已清除。",
         error: "无法清除浏览器数据。",
       },
+      sendShortcut: {
+        label: "Send shortcut",
+        options: { enter: "Enter", "mod-enter": "{{modifier}}+Enter" },
+      },
       defaultSend: {
+        commandEnterDescriptions: {
+          interrupt:
+            "When the agent is running, {{modifier}}+Enter interrupts. Enter inserts a new line.",
+          steer:
+            "When the agent is running, {{modifier}}+Enter steers the active turn. Enter inserts a new line.",
+          queue: "When the agent is running, {{modifier}}+Enter queues. Enter inserts a new line.",
+        },
         label: "默认发送",
         descriptions: {
           steer: "Agent 运行时，Enter 会在不中断当前回合的情况下进行引导——若无法引导则回退为中断。",
@@ -1998,6 +2025,22 @@ export const zhCN: TranslationResources = {
         codeSize: "代码字号",
         codeSizeAccessibility: "代码字号",
       },
+      layout: {
+        contentWidthCustom: "Custom width · {{width}} px",
+
+        contentWidthFull: "Full",
+
+        contentWidthWide: "Wide",
+
+        contentWidthDefault: "Default",
+
+        title: "Layout",
+        contentWidth: "Content width",
+        contentWidthHint: "Maximum width of chat and Markdown content",
+        contentWidthAccessibility: "Content width in pixels",
+        reset: "Reset",
+        resetAccessibility: "Reset content width",
+      },
       syntax: {
         title: "语法",
         highlightTheme: "高亮主题",
@@ -2061,6 +2104,8 @@ export const zhCN: TranslationResources = {
         toggleFocusMode: "切换专注模式",
         cycleTheme: "循环切换主题",
         focusMessageInput: "聚焦消息输入框",
+        toggleModelPicker: "打开或关闭模型选择器",
+        cycleEffort: "循环切换推理强度",
         cycleAgentMode: "循环切换代理模式",
         toggleVoiceMode: "切换语音模式",
         startStopDictation: "开始/停止听写",

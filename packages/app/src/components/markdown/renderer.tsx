@@ -1,3 +1,8 @@
+import { resolveInlineCodeTextStyle } from "@/components/markdown-text-style";
+import { getSharedAssistantMarkdownParser } from "@/utils/assistant-markdown-parser";
+import { MarkdownTextSelection } from "@/components/markdown-text-selection";
+import { useOptionalAssistantFileLinkResolverContext } from "@/assistant-file-links/provider";
+import { AssistantMarkdownLink } from "@/assistant-file-links/link";
 import React, {
   useCallback,
   useEffect,
@@ -63,12 +68,25 @@ function compactMarkdownStyleMapping(theme: Theme): Partial<MarkdownWithStableRe
   return { style: createCompactMarkdownStyles(theme) };
 }
 
-const defaultMarkdownParser = MarkdownIt({ typographer: true, linkify: true });
+function compactMutedMarkdownStyleMapping(theme: Theme): Partial<MarkdownWithStableRendererProps> {
+  const style = createCompactMarkdownStyles(theme);
+  return {
+    style: {
+      ...style,
+      body: { ...style.body, color: theme.colors.foregroundMuted },
+      text: { ...style.text, color: theme.colors.foregroundMuted },
+    },
+  };
+}
+
+const defaultMarkdownParser = getSharedAssistantMarkdownParser();
 const EMPTY_TEXT_STYLE: TextStyle = {};
 const MARKDOWN_LIST_ITEM_CONTENT_FLEX: ViewStyle = { flex: 1, flexShrink: 1, minWidth: 0 };
 export interface MarkdownRendererProps {
   text: string;
   compact?: boolean;
+  muted?: boolean;
+  selectable?: boolean;
   rules?: RenderRules;
   markdownit?: ReturnType<typeof MarkdownIt>;
   onLinkPress?: (url: string) => boolean;
@@ -80,6 +98,8 @@ export interface MarkdownRendererProps {
 export function MarkdownRenderer({
   text,
   compact = false,
+  muted = false,
+  selectable = true,
   rules,
   markdownit = defaultMarkdownParser,
   onLinkPress,
@@ -95,6 +115,7 @@ export function MarkdownRenderer({
   const rendererProps = useMemo(
     () => ({
       compact,
+      muted,
       rules: markdownRules,
       markdownit,
       onLinkPress,
@@ -104,6 +125,7 @@ export function MarkdownRenderer({
     [
       allowedImageHandlers,
       compact,
+      muted,
       markdownRules,
       markdownit,
       onLinkPress,
@@ -112,9 +134,11 @@ export function MarkdownRenderer({
   );
 
   return (
-    <AppearanceStyleBoundary>
-      <MarkdownPartList parts={parts} rendererProps={rendererProps} />
-    </AppearanceStyleBoundary>
+    <MarkdownTextSelection selectable={selectable}>
+      <AppearanceStyleBoundary>
+        <MarkdownPartList parts={parts} rendererProps={rendererProps} />
+      </AppearanceStyleBoundary>
+    </MarkdownTextSelection>
   );
 }
 
@@ -193,13 +217,15 @@ function MarkdownPart({
 function MarkdownFragment({
   text,
   compact,
+  muted,
   rules,
   markdownit,
   onLinkPress,
   allowedImageHandlers,
   topLevelMaxExceededItem,
 }: MarkdownRendererProps & { rules: RenderRules }) {
-  const uniProps = compact ? compactMarkdownStyleMapping : markdownStyleMapping;
+  let uniProps = markdownStyleMapping;
+  if (compact) uniProps = muted ? compactMutedMarkdownStyleMapping : compactMarkdownStyleMapping;
   return (
     <ThemedMarkdown
       uniProps={uniProps}
@@ -412,6 +438,7 @@ interface MarkdownInheritedTextProps {
   textStyle: TextStyle;
   style?: TextStyle;
   monoSurface?: boolean;
+  codeBodyFontSize?: number;
   onPress?: TextProps["onPress"];
   accessibilityRole?: TextProps["accessibilityRole"];
   children: ReactNode;
@@ -422,13 +449,20 @@ export function MarkdownInheritedText({
   textStyle,
   style: overrideStyle,
   monoSurface,
+  codeBodyFontSize,
   onPress,
   accessibilityRole,
   children,
 }: MarkdownInheritedTextProps) {
   const style = useMemo(
-    () => [inheritedStyles, textStyle, overrideStyle],
-    [inheritedStyles, textStyle, overrideStyle],
+    () => [
+      inheritedStyles,
+      codeBodyFontSize
+        ? resolveInlineCodeTextStyle(inheritedStyles, textStyle, codeBodyFontSize)
+        : textStyle,
+      overrideStyle,
+    ],
+    [inheritedStyles, textStyle, overrideStyle, codeBodyFontSize],
   );
   return (
     <MarkdownTextSpan
@@ -478,12 +512,21 @@ function SharedMarkdownLink({
   onLinkPress,
   children,
 }: SharedMarkdownLinkProps) {
+  const context = useOptionalAssistantFileLinkResolverContext();
+  const source = useMemo(() => ({ href }), [href]);
   const handlePress = useCallback(() => {
     if (!href) return;
     if (onLinkPress?.(href) === false) return;
     void openExternalUrl(href);
   }, [href, onLinkPress]);
 
+  if (context && !onLinkPress) {
+    return (
+      <AssistantMarkdownLink source={source} style={linkStyle}>
+        {children}
+      </AssistantMarkdownLink>
+    );
+  }
   return (
     <MarkdownInheritedText
       inheritedStyles={inheritedStyles}
@@ -632,6 +675,7 @@ export function createSharedMarkdownRules(): RenderRules {
         key={node.key}
         inheritedStyles={inheritedStyles}
         textStyle={styles.code_inline}
+        codeBodyFontSize={styles.body.fontSize}
         monoSurface
       >
         {node.content ?? ""}

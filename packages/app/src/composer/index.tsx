@@ -1,4 +1,9 @@
 import { PluginComposerPills } from "@/plugins/buttons/view";
+import { Alert } from "@/components/ui/alert";
+import type { AutocompleteStatus } from "@/components/ui/autocomplete";
+import { ComposerRecall } from "@/composer/recall";
+import { selectAgentSentMessages } from "@/stores/session-store";
+import type { ComposerKeyPressEvent } from "@/composer/input/input";
 import { BuiltinPluginGate } from "@/plugins/builtin/gate";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
@@ -38,7 +43,7 @@ import {
   Paperclip,
 } from "lucide-react-native";
 import * as Clipboard from "expo-clipboard";
-import { FOOTER_HEIGHT, MAX_CONTENT_WIDTH } from "@/constants/layout";
+import { FOOTER_HEIGHT } from "@/constants/layout";
 import {
   AgentControls,
   DraftAgentControls,
@@ -57,7 +62,7 @@ import type { DroppedItem } from "@/components/file-drop/types";
 import { MessageInput, type MessageInputRef, type AttachmentMenuItem } from "./input/input";
 import type { ImageAttachment, MessagePayload } from "./types";
 import { ICON_SIZE, type Theme } from "@/styles/theme";
-import type { DraftCommandTarget } from "@/hooks/use-agent-commands-query";
+import type { DraftCommandTarget } from "@/agent-commands";
 import { encodeImages } from "@/utils/encode-images";
 import { focusWithRetries } from "@/utils/web-focus";
 import {
@@ -904,6 +909,7 @@ function ComposerKeyboardFrame({
 }
 
 interface ComposerProps {
+  error?: string | null;
   agentId: string;
   serverId: string;
   workspaceId?: string | null;
@@ -1146,6 +1152,7 @@ export function Composer({
   externalKeyboardShift,
   isCompactLayout: isCompactLayoutOverride,
   topContent,
+  error: externalError,
 }: ComposerProps) {
   const { t } = useTranslation();
   const buttonIconSize = resolveComposerButtonIconSize();
@@ -1181,6 +1188,7 @@ export function Composer({
   const { finePointer: hasFinePointer } = usePointerCapabilities();
   const isDesktopLayout = resolveIsDesktopWebBreakpoint(isCompactLayout);
   const messagePlaceholder = resolveMessagePlaceholder(isDesktopLayout, t);
+  const recall = useMemo(() => new ComposerRecall(), []);
   const userInput = value;
   const setUserInput = onChangeText;
   const workspaceAttachments = useWorkspaceAttachmentsForScopes(attachmentScopeKeys);
@@ -1824,9 +1832,19 @@ export function Composer({
 
   // Handle keyboard navigation for command autocomplete.
   const handleCommandKeyPress = useCallback(
-    (event: { key: string; preventDefault: () => void }) =>
-      autocompleteOnKeyPressRef.current(event),
-    [],
+    (event: ComposerKeyPressEvent) => {
+      if (!recall.isShowing(event.input.text) && autocompleteOnKeyPressRef.current(event))
+        return true;
+      const recalledText = recall.handleKeyPress(event, () =>
+        selectAgentSentMessages(useSessionStore.getState().sessions[serverId], agentId),
+      );
+      if (recalledText === null) return false;
+      event.preventDefault();
+      setUserInput(recalledText);
+      setCursorIndex(recalledText.length);
+      return true;
+    },
+    [recall, serverId, agentId, setUserInput],
   );
 
   const cancelButtonStyle = useMemo(
@@ -2215,17 +2233,38 @@ export function Composer({
   // Focusing the composer on a touch screen raises the on-screen keyboard over the conversation.
   const messageInputAutoFocus = autoFocus && isDesktopWebBreakpoint && hasFinePointer;
   const submitLoadingPressHandler = isAgentRunning ? handleCancelAgent : undefined;
+  const displayError = externalError || sendError;
   const sendErrorNode = useMemo(
-    () => (sendError ? <Text style={styles.sendErrorText}>{sendError}</Text> : null),
-    [sendError],
+    () =>
+      displayError ? (
+        <Alert variant="error" description={displayError} testID="composer-error" />
+      ) : null,
+    [displayError],
   );
   const githubEmptyText = githubSearchResultsQuery.isFetching
     ? t("composer.github.searching")
     : t("composer.github.noResults");
-  const autocompleteVisible = autocomplete.isVisible && isPaneFocused;
+  const autocompleteStatus = useMemo<AutocompleteStatus | null>(() => {
+    if (autocomplete.errorMessage) return { kind: "error", title: autocomplete.errorMessage };
+    if (autocomplete.isLoading) return { kind: "loading", message: autocomplete.loadingText };
+    if (autocomplete.options.length === 0)
+      return { kind: "empty", message: autocomplete.emptyText };
+    return null;
+  }, [
+    autocomplete.errorMessage,
+    autocomplete.isLoading,
+    autocomplete.loadingText,
+    autocomplete.options.length,
+    autocomplete.emptyText,
+  ]);
+  const autocompleteVisible =
+    autocomplete.isVisible && isPaneFocused && !recall.isShowing(userInput);
 
   return (
-    <ComposerKeyboardScopeProvider isActiveComposer={isPaneFocused}>
+    <ComposerKeyboardScopeProvider
+      isActiveComposer={isPaneFocused}
+      isInputFocused={isMessageInputFocused}
+    >
       <ComposerKeyboardFrame externalKeyboardShift={externalKeyboardShift}>
         <AttachmentLightbox source={lightboxSource} onClose={handleLightboxClose} />
         {/* Input area */}
@@ -2258,10 +2297,7 @@ export function Composer({
                 options={autocomplete.options}
                 selectedIndex={autocomplete.selectedIndex}
                 onSelect={autocomplete.onSelectOption}
-                isLoading={autocomplete.isLoading}
-                errorMessage={autocomplete.errorMessage}
-                loadingText={autocomplete.loadingText}
-                emptyText={autocomplete.emptyText}
+                status={autocompleteStatus}
               >
                 {/* MessageInput handles everything: text, dictation, attachments, all buttons */}
                 <StableMessageInput
@@ -2297,6 +2333,7 @@ export function Composer({
                   voiceAgentId={agentId}
                   isAgentRunning={isAgentRunning}
                   defaultSendBehavior={appSettings.sendBehavior}
+                  sendShortcut={appSettings.sendShortcut}
                   onQueue={handleQueue}
                   onSubmitLoadingPress={submitLoadingPressHandler}
                   onKeyPress={handleCommandKeyPress}
@@ -2370,7 +2407,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
   },
   inputAreaContent: {
     width: "100%",
-    maxWidth: MAX_CONTENT_WIDTH,
+    maxWidth: theme.contentMaxWidth,
     gap: theme.spacing[3],
   },
   pluginComposerTrack: { flexGrow: 0, minHeight: 28 },
@@ -2474,10 +2511,6 @@ const styles = StyleSheet.create((theme: Theme) => ({
   },
   queueSendButton: {
     backgroundColor: theme.colors.accent,
-  },
-  sendErrorText: {
-    color: theme.colors.palette.red[500],
-    fontSize: theme.fontSize.sm,
   },
 })) as unknown as Record<string, object>;
 

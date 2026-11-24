@@ -62,6 +62,8 @@ export const ru: TranslationResources = {
       downloadFailed: "Загрузка не удалась",
     },
     errors: {
+      folderOutsideWorkspace: "{{path}} is outside this workspace",
+
       error: "Ошибка",
       unableToSave: "Не удалось сохранить",
       nameRequired: "Требуется имя",
@@ -115,6 +117,10 @@ export const ru: TranslationResources = {
       fallback: "Сообщение...",
     },
     input: {
+      longPressToSendNow: "Long press to send now",
+
+      longPressToQueue: "Long press to queue",
+
       accessibilityLabel: "Агент сообщений...",
       focusHint: "{{shortcut}}, чтобы сосредоточиться",
       addAttachment: "Добавить вложение",
@@ -1666,6 +1672,17 @@ export const ru: TranslationResources = {
     backdrop: "Фон меню",
   },
   subagents: {
+    parent: {
+      openParent: "Open parent",
+
+      parentAgent: "Parent agent",
+
+      parent: "Parent",
+
+      backTo: "Back to {{label}}",
+      backToParent: "Back to parent",
+    },
+
     detachAction: "Отсоединить {{label}}",
     detachTooltip: "Отсоединить субагент",
     archiveAction: "Архив{{label}}",
@@ -1937,7 +1954,18 @@ export const ru: TranslationResources = {
         success: "Данные браузера очищены.",
         error: "Не удалось очистить данные браузера.",
       },
+      sendShortcut: {
+        label: "Send shortcut",
+        options: { enter: "Enter", "mod-enter": "{{modifier}}+Enter" },
+      },
       defaultSend: {
+        commandEnterDescriptions: {
+          interrupt:
+            "When the agent is running, {{modifier}}+Enter interrupts. Enter inserts a new line.",
+          steer:
+            "When the agent is running, {{modifier}}+Enter steers the active turn. Enter inserts a new line.",
+          queue: "When the agent is running, {{modifier}}+Enter queues. Enter inserts a new line.",
+        },
         label: "Отправка по умолчанию",
         descriptions: {
           steer:
@@ -2059,6 +2087,22 @@ export const ru: TranslationResources = {
         codeSize: "Размер кода",
         codeSizeAccessibility: "Размер шрифта кода",
       },
+      layout: {
+        contentWidthCustom: "Custom width · {{width}} px",
+
+        contentWidthFull: "Full",
+
+        contentWidthWide: "Wide",
+
+        contentWidthDefault: "Default",
+
+        title: "Layout",
+        contentWidth: "Content width",
+        contentWidthHint: "Maximum width of chat and Markdown content",
+        contentWidthAccessibility: "Content width in pixels",
+        reset: "Reset",
+        resetAccessibility: "Reset content width",
+      },
       syntax: {
         title: "Синтаксис",
         highlightTheme: "Выделить тему",
@@ -2090,6 +2134,10 @@ export const ru: TranslationResources = {
         agentInput: "Вход Agent",
       },
       help: {
+        cycleEffort: "Cycle effort",
+
+        toggleModelPicker: "Toggle model picker",
+
         openProject: "Открыть проект",
         newWorkspace: "Новое рабочее пространство",
         newWorktree: "Новое рабочее дерево",

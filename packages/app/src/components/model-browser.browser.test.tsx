@@ -44,6 +44,7 @@ function buildState(): ModelBrowserState {
     favoriteKeys: new Set([favoriteKey]),
     view: { kind: "all" },
     searchQuery: "",
+    isSearchFocused: false,
     header: { title: "Model" },
     selectedModelLabel: "Sonnet",
     triggerLabel: "Sonnet",

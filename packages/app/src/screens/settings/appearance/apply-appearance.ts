@@ -4,6 +4,7 @@ import {
   DEFAULT_UI_FONT_STACK,
   DEFAULT_MONO_FONT_STACK,
   FONT_SIZE,
+  themeContentMaxWidth,
   type Theme,
 } from "@/styles/theme";
 import { applyRootUiFont } from "./apply-root-font";
@@ -33,6 +34,7 @@ export interface AppearanceInput {
   monoFontFamily: string; // "" -> default stack
   uiFontSize: number; // already clamped
   codeFontSize: number; // already clamped
+  contentMaxWidth?: number;
   syntaxTheme: SyntaxThemeId;
 }
 
@@ -88,6 +90,7 @@ export function applyAppearance(input: AppearanceInput): void {
       if (t.colorScheme === "light") {
         return {
           ...t,
+          contentMaxWidth: themeContentMaxWidth(input.contentMaxWidth),
           fontFamily,
           fontSize,
           lineHeight,
@@ -96,6 +99,7 @@ export function applyAppearance(input: AppearanceInput): void {
       }
       return {
         ...t,
+        contentMaxWidth: themeContentMaxWidth(input.contentMaxWidth),
         fontFamily,
         fontSize,
         lineHeight,

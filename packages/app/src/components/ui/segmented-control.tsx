@@ -22,7 +22,7 @@ export interface SegmentedControlOption<T extends string> {
 
 interface SegmentedControlProps<T extends string> {
   options: SegmentedControlOption<T>[];
-  value: T;
+  value: T | null;
   onValueChange: (value: T) => void;
   size?: SegmentedControlSize;
   hideLabels?: boolean;
@@ -119,7 +119,7 @@ function SegmentItem<T extends string>({
   hideLabels: boolean;
   segmentSizeStyle: StyleProp<ViewStyle>;
   labelSizeStyle: StyleProp<TextStyle>;
-  currentValue: T;
+  currentValue: T | null;
   onValueChange: (value: T) => void;
 }) {
   const labelStyle = useMemo(() => {

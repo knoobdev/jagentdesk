@@ -106,6 +106,7 @@ import {
 } from "@/assistant-file-links";
 import { getCompactionMarkerLabel } from "./message-compaction-label";
 import { useAssistantImage } from "@/assistant-image/use-assistant-image";
+import { localFileSourceToPath } from "@/attachments/utils";
 import {
   AttachmentFrame,
   AttachmentLabel,
@@ -115,6 +116,7 @@ import { AttachmentLightbox, type ImageLightboxSource } from "@/components/attac
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import { isWeb, isNative } from "@/constants/platform";
 import type { AgentCapabilityFlags } from "@jagentdesk/protocol/agent-types";
+import { isRewindableMessage } from "@/components/rewind/use-rewind-capabilities";
 import { RewindMenu, type RewindMode } from "@/components/rewind/rewind-menu";
 import { useRewindAgentMutation } from "@/components/rewind/use-rewind-agent-mutation";
 import { AssistantForkMenu, type AssistantForkTarget } from "@/components/assistant-fork-menu";
@@ -636,7 +638,7 @@ export const UserMessage = memo(function UserMessage({
     </>
   );
   const actions =
-    capabilities && messageId ? (
+    capabilities && isRewindableMessage(messageId, message) ? (
       <RewindMenu
         capabilities={capabilities}
         isPending={rewindMutation.isPending}
@@ -2080,7 +2082,7 @@ export const AssistantMessage = memo(function AssistantMessage({
         return (
           <AssistantMarkdownImage
             key={node.key}
-            source={String(node.attributes?.src ?? "")}
+            source={localFileSourceToPath(String(node.attributes?.src ?? ""), { decodeHref: true })}
             occurrenceKey={`${occurrenceKey}:${node.key}`}
             alt={typeof node.attributes?.alt === "string" ? node.attributes.alt : undefined}
             hasLeadingContent={hasLeadingContent}

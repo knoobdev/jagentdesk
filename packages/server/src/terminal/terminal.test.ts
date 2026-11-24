@@ -29,9 +29,8 @@ import {
 } from "node:fs";
 import { spawnSync } from "node:child_process";
 import xterm from "@xterm/headless";
+import { createHeadlessTerminal } from "./headless-terminal.js";
 import { delimiter, join } from "node:path";
-import xterm from "@xterm/headless";
-import { renderTerminalSnapshotToAnsi } from "@jagentdesk/protocol/terminal-snapshot";
 import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 import { setImmediate as waitForImmediate } from "node:timers/promises";
@@ -59,10 +58,6 @@ function getRowText(state: TerminalState, rowIndex: number): string {
 // Extract all visible lines as array (trimmed, empty lines included)
 function getLines(state: TerminalState): string[] {
   return state.grid.map(rowToText);
-}
-
-function rowHasChar(row: TerminalRow, char: string): boolean {
-  return row.some((cell) => cell.char === char);
 }
 
 // Wait for terminal state to match expected lines
@@ -371,7 +366,7 @@ describe("createTerminal", () => {
     expect(withFlags.gridWrapped?.slice(0, 3)).toEqual([true, true, false]);
   });
 
-  it("restores CJK text without injected spaces when a snapshot round-trips through the client", async () => {
+  it("restores CJK text without injected spaces when a ANSI replay round-trips through the client", async () => {
     // Each Hangul syllable is a wide char: xterm stores it as a 2-cell pair
     // whose second cell has no chars. Capturing that continuation as " " made
     // every restored syllable three columns wide (jagentdesk#3434).
@@ -392,49 +387,11 @@ describe("createTerminal", () => {
 
     const state = await waitForState(session, (current) => rowHasChar(current.grid[0], "다"));
 
-    // Replay the snapshot the way the client does on tab switch and read the
+    // Replay ANSI the way the client does on tab switch and read the
     // row back the way a selection copy would.
     const restored = new xterm.Terminal({ cols: 80, rows: 10, allowProposedApi: true });
     try {
       await new Promise<void>((resolve) => restored.write(session.serializeReplay().data, resolve));
-      expect(restored.buffer.active.getLine(0)?.translateToString(true)).toBe(text);
-    } finally {
-      restored.dispose();
-    }
-
-    // The continuation cell must stay empty so the restore path can skip it.
-    expect(state.grid[0][0].char).toBe("통");
-    expect(state.grid[0][1].char).toBe("");
-  });
-
-  it("restores CJK text without injected spaces when a snapshot round-trips through the client", async () => {
-    // Each Hangul syllable is a wide char: xterm stores it as a 2-cell pair
-    // whose second cell has no chars. Capturing that continuation as " " made
-    // every restored syllable three columns wide (jagentdesk#3434).
-    const text = "통합 구현은 전체 테스트를 통과했습니다";
-    const session = trackSession(
-      await createTerminal({
-        workspaceId: "ws-test",
-        cwd: realpathSync(tmpdir()),
-        cols: 80,
-        rows: 10,
-        command: process.execPath,
-        args: [
-          "-e",
-          `process.stdout.write(${JSON.stringify(text)}); setInterval(() => {}, 100000);`,
-        ],
-      }),
-    );
-
-    const state = await waitForState(session, (current) => rowHasChar(current.grid[0], "다"));
-
-    // Replay the snapshot the way the client does on tab switch and read the
-    // row back the way a selection copy would.
-    const restored = new xterm.Terminal({ cols: 80, rows: 10, allowProposedApi: true });
-    try {
-      await new Promise<void>((resolve) =>
-        restored.write(renderTerminalSnapshotToAnsi(state), resolve),
-      );
       expect(restored.buffer.active.getLine(0)?.translateToString(true)).toBe(text);
     } finally {
       restored.dispose();
@@ -508,6 +465,14 @@ describe("createTerminal", () => {
       "E",
     ]);
     expect(state.cursor).toEqual({ row: 0, col: 13 });
+    const restored = createHeadlessTerminal({ rows: 5, cols: 40 });
+    try {
+      await new Promise<void>((resolve) => restored.write(session.serializeReplay().data, resolve));
+      expect(restored.buffer.active.getLine(0)?.translateToString(true)).toBe(text);
+      expect(restored.buffer.active.cursorX).toBe(13);
+    } finally {
+      restored.dispose();
+    }
   });
 
   it("captures exit diagnostics from the terminal buffer", async () => {
@@ -1482,15 +1447,12 @@ it.each([
   const mouse = (
     receiver as unknown as {
       _core: {
-        coreMouseService: {
-          triggerMouseEvent(event: typeof wheel): boolean;
+        mouseStateService: {
+          encodeMouseEvent(event: typeof wheel): string;
         };
       };
     }
-  )._core.coreMouseService;
-  const reports: string[] = [];
-  receiver.onData((data) => reports.push(data));
-  receiver.onBinary((data) => reports.push(data));
+  )._core.mouseStateService;
   try {
     await new Promise<void>((resolve) =>
       source.write("\x1b[?1049h\x1b[?1002h" + input.modes + "TRANSCRIPT", resolve),
@@ -1500,9 +1462,9 @@ it.each([
       await new Promise<void>((resolve) => receiver.write(serialize(), resolve));
       expect(receiver.buffer.active.type).toBe("alternate");
       expect(receiver.modes.mouseTrackingMode).toBe("drag");
-      reports.length = 0;
-      mouse.triggerMouseEvent({ ...wheel });
-      expect(reports).toEqual([input.wheel]);
+      expect(mouse.encodeMouseEvent({ ...wheel, col: wheel.col + 1, row: wheel.row + 1 })).toBe(
+        input.wheel,
+      );
     }
   } finally {
     receiver.dispose();

@@ -7,6 +7,19 @@ import { sshModuleStrings } from "./ssh-modules";
 
 export const vi = {
   bots: botsStrings,
+  subagents: {
+    parent: {
+      openParent: "Open parent",
+
+      parentAgent: "Parent agent",
+
+      parent: "Parent",
+
+      backTo: "Back to {{label}}",
+      backToParent: "Back to parent",
+    },
+  },
+
   builtinPlugins: builtinPluginStrings,
   ssh: sshModuleStrings,
   paneFind: {
@@ -61,6 +74,8 @@ export const vi = {
       downloadFailed: "Tải xuống thất bại",
     },
     errors: {
+      folderOutsideWorkspace: "{{path}} is outside this workspace",
+
       error: "Lỗi",
       unableToSave: "Không thể lưu",
       nameRequired: "Cần nhập tên",
@@ -114,6 +129,10 @@ export const vi = {
       fallback: "Tin nhắn...",
     },
     input: {
+      longPressToSendNow: "Long press to send now",
+
+      longPressToQueue: "Long press to queue",
+
       accessibilityLabel: "Nhắn cho agent...",
       focusHint: "{{shortcut}} để tập trung",
       addAttachment: "Thêm đính kèm",
@@ -266,6 +285,13 @@ export const vi = {
     },
   },
   settings: {
+    shortcuts: {
+      help: {
+        cycleEffort: "Cycle effort",
+        toggleModelPicker: "Toggle model picker",
+      },
+    },
+
     hostSections: {
       tools: "Công cụ",
     },
@@ -300,6 +326,25 @@ export const vi = {
     },
     plugins: pluginSettings.vi,
     general: {
+      sendShortcut: {
+        options: {
+          "mod-enter": "{{modifier}}+Enter",
+          enter: "Enter",
+        },
+        label: "Send shortcut",
+      },
+
+      defaultSend: {
+        commandEnterDescriptions: {
+          queue: "When the agent is running, {{modifier}}+Enter queues. Enter inserts a new line.",
+
+          steer:
+            "When the agent is running, {{modifier}}+Enter steers the active turn. Enter inserts a new line.",
+          interrupt:
+            "When the agent is running, {{modifier}}+Enter interrupts. Enter inserts a new line.",
+        },
+      },
+
       language: {
         label: "Ngôn ngữ",
         description: "Ngôn ngữ ứng dụng",
@@ -318,6 +363,27 @@ export const vi = {
       },
     },
     appearance: {
+      layout: {
+        contentWidthCustom: "Custom width · {{width}} px",
+
+        contentWidthFull: "Full",
+
+        contentWidthWide: "Wide",
+
+        contentWidthDefault: "Default",
+
+        resetAccessibility: "Reset content width to default",
+
+        reset: "Reset",
+
+        contentWidthAccessibility: "Content width in pixels",
+
+        contentWidthHint: "Max width of chat and Markdown files on wide screens",
+
+        contentWidth: "Content width",
+        title: "Layout",
+      },
+
       theme: {
         title: "Giao diện",
         options: {

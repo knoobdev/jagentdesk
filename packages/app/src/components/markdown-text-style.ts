@@ -23,3 +23,13 @@ function stripUnistylesMetadata(style: TextStyle): TextStyle {
   }
   return plainStyle as TextStyle;
 }
+
+/** Scale code with its enclosing block, retaining the theme's body-to-code ratio (Paseo #7889). */
+export function resolveInlineCodeTextStyle(
+  inheritedStyle: TextStyle,
+  codeStyle: TextStyle,
+  bodyFontSize: number,
+): TextStyle {
+  if (!inheritedStyle.fontSize || !codeStyle.fontSize || !bodyFontSize) return codeStyle;
+  return { ...codeStyle, fontSize: (inheritedStyle.fontSize * codeStyle.fontSize) / bodyFontSize };
+}

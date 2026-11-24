@@ -1,5 +1,6 @@
 import type { BotsService } from "./bots/service.js";
 import { builtinPluginWireState } from "@jagentdesk/protocol/builtin-plugins";
+import { CreationService } from "./creation/index.js";
 import {
   ChunkedTransport,
   ChunkedTransportProtocolError,
@@ -696,6 +697,7 @@ export class VoiceAssistantWebSocketServer {
   private readonly workspaceGitService: WorkspaceGitService;
   private readonly workspaceAutoName: WorkspaceAutoName;
   private readonly downloadTokenStore: DownloadTokenStore;
+  private readonly creationService: CreationService;
   private readonly jagentdeskHome: string;
   private readonly worktreesRoot: string | undefined;
   private readonly daemonConfigStore: DaemonConfigStore;
@@ -882,6 +884,7 @@ export class VoiceAssistantWebSocketServer {
     this.workspaceAutoName = workspaceAutoName;
     this.downloadTokenStore = downloadTokenStore;
     this.jagentdeskHome = jagentdeskHome;
+    this.creationService = new CreationService(join(jagentdeskHome, "creations"), logger);
     this.daemonConfigStore = daemonConfigStore;
     this.mcpBaseUrl = mcpBaseUrl;
     this.assignOptionalServices({
@@ -2103,6 +2106,7 @@ export class VoiceAssistantWebSocketServer {
 
   private createSocketSession(options: SocketSessionOptions): Session {
     return new Session({
+      creationService: this.creationService,
       clientId: options.clientId,
       appVersion: options.appVersion,
       clientCapabilities: options.clientCapabilities,
@@ -2711,6 +2715,7 @@ export class VoiceAssistantWebSocketServer {
           ? { builtinPlugins: true, ...this.pluginRuntime.builtin.featureFlags() }
           : {}),
         checkoutDiffAll: true,
+        workspaceRequestReceipts: true,
         backgroundWorkspaces: true,
       },
     };

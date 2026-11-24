@@ -1,4 +1,5 @@
 import { Modal } from "@/components/ui/modal";
+import { useRetainedPanelActive } from "@/components/retained-panel";
 import {
   Children,
   cloneElement,
@@ -248,7 +249,11 @@ export function Tooltip({
 
   const isCompact = useIsCompactFormFactor();
   const opensOnPress = isNative || isCompact;
-  const enabled = opensOnPress ? enabledOnMobile : enabledOnDesktop;
+  const active = useRetainedPanelActive();
+  const enabled = active && (opensOnPress ? enabledOnMobile : enabledOnDesktop);
+  useEffect(() => {
+    if (!active && isOpen) setIsOpen(false);
+  }, [active, isOpen, setIsOpen]);
 
   const value = useMemo<TooltipContextValue>(
     () => ({
@@ -313,6 +318,10 @@ export function TooltipTrigger({
       clearOpenTimer();
     };
   }, [clearOpenTimer]);
+
+  useEffect(() => {
+    if (!ctx.enabled) clearOpenTimer();
+  }, [ctx.enabled, clearOpenTimer]);
 
   const handleHoverIn = useCallback(
     (e?: unknown) => {

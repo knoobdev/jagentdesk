@@ -1334,10 +1334,16 @@ function DesktopSidebar({
               testID="sidebar-schedules"
               variant="compact"
             />
-              <NavTargetGate route={builtinTargets.botsRoute}>
-                <SidebarHeaderRow icon={Bot} label={labels.bots} onPress={handleBots}
-                  isActive={pathname.includes("/bots")} testID="sidebar-bots" variant="compact" />
-              </NavTargetGate>
+            <NavTargetGate route={builtinTargets.botsRoute}>
+              <SidebarHeaderRow
+                icon={Bot}
+                label={labels.bots}
+                onPress={handleBots}
+                isActive={pathname.includes("/bots")}
+                testID="sidebar-bots"
+                variant="compact"
+              />
+            </NavTargetGate>
             <NavTargetGate route={builtinTargets.sharedSessionsRoute}>
               <SidebarHeaderRow
                 icon={Share2}

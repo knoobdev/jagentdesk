@@ -55,8 +55,7 @@ import type { ShortcutKey } from "@/utils/format-shortcut";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  MenuItem,
-  MenuSeparator,
+  DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -583,11 +582,7 @@ function MobileTabTrailingAccessory({
   );
 }
 
-function MobileTabMenuItem({
-  entry,
-}: {
-  entry: Extract<WorkspaceTabMenuEntry, { kind: "item" }>;
-}) {
+function MobileTabMenuItem({ entry }: { entry: Extract<WorkspaceTabMenuEntry, { kind: "item" }> }) {
   const leading = useMemo(() => {
     switch (entry.icon) {
       case "copy":

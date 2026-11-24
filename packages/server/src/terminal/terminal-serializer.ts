@@ -22,7 +22,7 @@ export function createTerminalSerializer(
 
 // Addon 0.14 omits mouse encoding, DECSCUSR and cursor visibility. xterm 6
 // retains these in internal services rather than the public modes/options.
-// JAgentDesk uses xterm 6.0, where mouse encoding belongs to coreMouseService.
+// Xterm 6.1 keeps mouse encoding in mouseStateService.
 function serializeAdditionalModes(terminal: TerminalType): string {
   const core = (
     terminal as unknown as {
@@ -31,13 +31,13 @@ function serializeAdditionalModes(terminal: TerminalType): string {
           isCursorHidden: boolean;
           decPrivateModes: { cursorStyle?: "block" | "underline" | "bar"; cursorBlink?: boolean };
         };
-        coreMouseService: { activeEncoding: string };
+        mouseStateService: { activeEncoding: string };
       };
     }
   )._core;
   let mouseEncoding = "";
-  if (core.coreMouseService.activeEncoding === "SGR") mouseEncoding = "\x1b[?1006h";
-  else if (core.coreMouseService.activeEncoding === "SGR_PIXELS") mouseEncoding = "\x1b[?1016h";
+  if (core.mouseStateService.activeEncoding === "SGR") mouseEncoding = "\x1b[?1006h";
+  else if (core.mouseStateService.activeEncoding === "SGR_PIXELS") mouseEncoding = "\x1b[?1016h";
   const visibility = `${mouseEncoding}\x1b[?25${core.coreService.isCursorHidden ? "l" : "h"}`;
   const cursorStyle = core.coreService.decPrivateModes.cursorStyle;
   // Unset presentation belongs to each renderer's configured defaults.
