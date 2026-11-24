@@ -731,6 +731,7 @@ const assistantTurnFooterStylesheet = StyleSheet.create((theme) => ({
   labelSizer: {
     color: theme.colors.foregroundMuted,
     fontSize: STREAM_METADATA_FONT_SIZE,
+    ...(isWeb ? { whiteSpace: "normal" } : {}),
     opacity: 0,
   },
   labelOverlay: {
@@ -739,6 +740,7 @@ const assistantTurnFooterStylesheet = StyleSheet.create((theme) => ({
     left: 0,
     color: theme.colors.foregroundMuted,
     fontSize: STREAM_METADATA_FONT_SIZE,
+    ...(isWeb ? { whiteSpace: "normal" } : {}),
   },
 }));
 
