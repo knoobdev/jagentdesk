@@ -1,3 +1,4 @@
+import { hasFinePointer } from "@/hooks/pointer-capabilities";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
   CLICKUP_COMPOSER_RADIUS,
@@ -1507,6 +1508,12 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
     );
 
     const webTextareaRef = useRef<HTMLElement | null>(null);
+
+    useLayoutEffect(() => {
+      if (!isPaneFocused && isWeb && !hasFinePointer()) {
+        textInputRef.current?.blur();
+      }
+    }, [isPaneFocused]);
 
     useLayoutEffect(() => {
       if (isWeb) {
