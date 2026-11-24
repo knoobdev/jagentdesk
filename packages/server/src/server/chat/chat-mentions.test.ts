@@ -196,10 +196,12 @@ describe("chat mentions", () => {
     expect(sendAgentMessage).toHaveBeenCalledWith(
       "agent-a",
       expect.stringContaining('room "coord-room"'),
+      "author-agent",
     );
     expect(sendAgentMessage).toHaveBeenCalledWith(
       "agent-b",
       expect.stringContaining("Check status"),
+      "author-agent",
     );
   });
 });

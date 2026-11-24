@@ -203,6 +203,32 @@ describe("AutorunService (autonomous mode on an existing agent)", () => {
     expect(manager.runCount).toBe(1); // it still ran exactly one driver turn after waiting
   });
 
+  test("a wake turn that starts between the busy check and runAgent is not a failure", async () => {
+    const { service, manager } = build([{ done: true, note: "done after the wake turn" }]);
+    let raced = false;
+    const run = manager.runAgent.bind(manager);
+    const busy = manager.hasInFlightRun.bind(manager);
+    // The first driver turn loses the race to an agent message; the wake turn is
+    // still in flight when runAgent fails.
+    manager.runAgent = async (agentId: string, prompt: string) => {
+      if (!raced) {
+        raced = true;
+        manager.busyFor = Number.POSITIVE_INFINITY;
+        throw new Error(`Agent ${agentId} already has an active run`);
+      }
+      return run(agentId, prompt);
+    };
+    manager.hasInFlightRun = () => {
+      const inFlight = busy();
+      if (inFlight && raced) manager.busyFor = 0;
+      return inFlight;
+    };
+    await service.start(AGENT_ID);
+    const s = await waitForStopped(service);
+    expect(s.stopReason).toBe("done");
+    expect(updates.some((update) => update.lastNote?.startsWith("error:"))).toBe(false);
+  });
+
   test("done record survives a fresh service instance (durable, not in agent context)", async () => {
     const { service } = build([{ doneItems: ["messaged @a"] }, { done: true }]);
     await service.start(AGENT_ID);

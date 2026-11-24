@@ -69,6 +69,7 @@ import {
   type UpdateScheduleInput,
 } from "@jagentdesk/protocol/schedule/types";
 import type { ProviderSnapshotManager } from "../provider-snapshot-manager.js";
+import { ActiveTurnBehaviorSchema } from "@jagentdesk/protocol/messages";
 import {
   AgentModelSchema,
   AgentProviderEnum,
@@ -84,6 +85,7 @@ import {
 } from "../mcp-shared.js";
 import {
   sendPromptToAgent,
+  enqueueAgentMessage,
   setupFinishNotification,
   waitForAgentRunStartWithTimeout,
 } from "../agent-prompt.js";
@@ -4264,6 +4266,9 @@ function createToolCatalog(
       .describe(
         "Skill ids (from the Skills screen / create_skill) to invoke for this turn; the daemon prefixes the provider's native skill invocation.",
       ),
+    activeTurnBehavior: ActiveTurnBehaviorSchema.optional().describe(
+      'How to send into a running turn: "steer" joins it, falling back to interrupt when unavailable; "interrupt" replaces it. Defaults to steer for agent callers and interrupt otherwise.',
+    ),
   };
   const agentToAgentSendAgentPromptInputSchema = {
     ...commonSendAgentPromptInputSchema,
@@ -5177,6 +5182,101 @@ function createToolCatalog(
   const PROMPTED_AGENT_NOTIFICATION_GUIDANCE =
     "You will get notified when the prompted agent finishes, errors, or needs permission. Do not poll for status; continue with other work until the notification arrives.";
 
+  function validateBotPromptCaller(agentId: string, sessionMode?: string): void {
+    const callerBotId = callerAgentId
+      ? agentManager.getAgent(callerAgentId)?.labels["jagentdesk.bot.id"]
+      : undefined;
+    if (callerBotId && sessionMode)
+      throw new Error("Only the owner can change bot execution modes");
+    if (callerBotId && agentManager.getAgent(agentId)?.labels["jagentdesk.bot.id"] !== callerBotId)
+      throw new Error(
+        "Use bot_handoff to contact another bot; bot prompts stay within their own ORC tree",
+      );
+  }
+
+  async function sendQueuedAgentPrompt(input: {
+    agentId: string;
+    senderAgentId: string;
+    prompt: string;
+    sessionMode?: string;
+    activeTurnBehavior: "steer" | "interrupt";
+    background: boolean;
+    notifyOnFinish: boolean;
+    armFinishNotification: () => boolean;
+  }) {
+    const {
+      agentId,
+      senderAgentId,
+      prompt,
+      sessionMode,
+      activeTurnBehavior,
+      background,
+      notifyOnFinish,
+      armFinishNotification,
+    } = input;
+    if (!agentManager.getAgent(agentId) && !(await agentStorage.get(agentId))) {
+      throw new JAgentDeskToolInputError(`Agent ${agentId} not found`);
+    }
+    let notifying = false;
+    const receipt = enqueueAgentMessage(
+      { agentManager, agentStorage, logger: childLogger },
+      {
+        recipientId: agentId,
+        prompt,
+        source: {
+          kind: "agent-message",
+          agentId: senderAgentId,
+          ...(resolveCallerAgent()?.config?.title
+            ? { title: resolveCallerAgent()!.config.title! }
+            : {}),
+        },
+        sessionMode,
+        activeTurnBehavior,
+        // Arm right before dispatch so the notification follows this task's turn.
+        beforeDispatch: () => {
+          if (background) armFinishNotification();
+        },
+      },
+    );
+    if (background) {
+      notifying = Boolean(notifyOnFinish);
+      return {
+        content: [],
+        structuredContent: ensureValidJson({
+          success: true,
+          deliveryStatus: receipt.status,
+          messageId: receipt.messageId,
+          status: agentManager.getAgent(agentId)?.lifecycle ?? "idle",
+          lastMessage: null,
+          permission: null,
+          guidance: notifying
+            ? `Queued for delivery after two quiet seconds. ${PROMPTED_AGENT_NOTIFICATION_GUIDANCE}`
+            : "Queued for delivery after two quiet seconds.",
+        }),
+      };
+    }
+    // Blocking callers wait for the message to be dispatched before waiting for the turn.
+    await receipt.dispatched;
+    const result = await waitForAgentWithTimeout(agentManager, agentId, {
+      waitForActive: true,
+    });
+    notifying =
+      result.timedOut &&
+      agentManager.getAgent(agentId)?.lifecycle === "running" &&
+      armFinishNotification();
+    return {
+      content: [],
+      structuredContent: ensureValidJson({
+        success: true,
+        messageId: receipt.messageId,
+        status: result.status,
+        lastMessage: result.lastMessage,
+        permission: sanitizePermissionRequest(result.permission),
+        ...(notifying ? { guidance: PROMPTED_AGENT_NOTIFICATION_GUIDANCE } : {}),
+      }),
+    };
+  }
+
   registerTool(
     "send_agent_prompt",
     {
@@ -5190,6 +5290,8 @@ function createToolCatalog(
         lastMessage: z.string().nullable().optional(),
         permission: AgentPermissionRequestPayloadSchema.nullable().optional(),
         guidance: z.string().optional(),
+        deliveryStatus: z.literal("queued").optional(),
+        messageId: z.string().optional(),
       },
     },
     async ({
@@ -5199,19 +5301,9 @@ function createToolCatalog(
       skillIds,
       background = Boolean(callerAgentId),
       notifyOnFinish = Boolean(callerAgentId),
+      activeTurnBehavior = callerAgentId ? "steer" : "interrupt",
     }) => {
-      const callerBotId = callerAgentId
-        ? agentManager.getAgent(callerAgentId)?.labels["jagentdesk.bot.id"]
-        : undefined;
-      if (callerBotId && sessionMode)
-        throw new Error("Only the owner can change bot execution modes");
-      if (
-        callerBotId &&
-        agentManager.getAgent(agentId)?.labels["jagentdesk.bot.id"] !== callerBotId
-      )
-        throw new Error(
-          "Use bot_handoff to contact another bot; bot prompts stay within their own ORC tree",
-        );
+      validateBotPromptCaller(agentId, sessionMode);
       validateSendPromptCaller(callerOrchestrationContext, orchestrationRuntime, agentId);
       function armFinishNotification(): boolean {
         if (!callerAgentId || !notifyOnFinish) {
@@ -5227,11 +5319,30 @@ function createToolCatalog(
         return true;
       }
 
+      // Agent callers go through the recipient's delivery window (ADR-0029 decision 3):
+      // the sender gets a queued receipt at once, and messages that arrive within two
+      // quiet seconds reach the recipient as one prompt. Skill invocations need the
+      // provider prefix in front of the prompt, so they are sent directly.
+      if (callerAgentId && !skillIds?.length) {
+        return await sendQueuedAgentPrompt({
+          agentId,
+          senderAgentId: callerAgentId,
+          prompt,
+          sessionMode,
+          activeTurnBehavior,
+          background,
+          notifyOnFinish,
+          armFinishNotification,
+        });
+      }
+
       const dispatchResult = await sendPromptToAgent({
         agentManager,
         agentStorage,
         agentId,
         prompt,
+        source: callerAgentId ? { kind: "agent-message", agentId: callerAgentId } : undefined,
+        activeTurnBehavior,
         sessionMode,
         skillIds,
         skillInvocation: options.skillsStorage ?? null,
@@ -5394,8 +5505,11 @@ function createToolCatalog(
       const statusFilter = statuses && statuses.length > 0 ? new Set(statuses) : null;
       const sinceMs = Date.now() - sinceHours * 60 * 60 * 1000;
       const liveSnapshots = agentManager.listAgents();
-      const liveAgents = await Promise.all(
+      const projectedLiveAgents = await Promise.all(
         liveSnapshots.map((snapshot) => projectLiveAgent(snapshot)),
+      );
+      const liveAgents = projectedLiveAgents.filter(
+        (agent) => includeArchived || !agent.archivedAt,
       );
       const liveIds = new Set(liveSnapshots.map((snapshot) => snapshot.id));
       const storedRecords = await agentStorage.list();

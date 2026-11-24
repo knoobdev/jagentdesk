@@ -1,4 +1,5 @@
 import { useBuiltinPluginEnabled } from "@/plugins/builtin/hooks";
+import type { AgentMessage } from "@jagentdesk/protocol/agent-message";
 import { ClickUpUserHeader } from "@/components/clickup-shell/chat-headers";
 import { CLICKUP_MESSAGE_INDENT } from "@/components/clickup-shell/chat-layout";
 import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
@@ -3263,6 +3264,7 @@ function areExpandableBadgePropsEqual(previous: ExpandableBadgeProps, next: Expa
 }
 
 interface ToolCallProps {
+  agentMessage?: AgentMessage;
   toolName: string;
   args?: unknown;
   result?: unknown;
@@ -3284,6 +3286,7 @@ interface ToolCallProps {
 }
 
 export const ToolCall = memo(function ToolCall({
+  agentMessage,
   toolName,
   args,
   result,
@@ -3325,6 +3328,7 @@ export const ToolCall = memo(function ToolCall({
   const presentation = useMemo(
     () =>
       buildToolCallPresentation({
+        agentMessage,
         toolName,
         status,
         error: error ?? null,
@@ -3333,7 +3337,7 @@ export const ToolCall = memo(function ToolCall({
         cwd,
         resolveIcon: resolveToolCallIcon,
       }),
-    [toolName, status, error, effectiveDetail, metadata, cwd],
+    [toolName, status, error, effectiveDetail, metadata, cwd, agentMessage],
   );
   const handleOpenFile = useMemo(() => {
     const openFilePath = presentation.openFilePath;
@@ -3348,7 +3352,7 @@ export const ToolCall = memo(function ToolCall({
       openToolCall({
         displayName: presentation.displayName,
         summary: presentation.summary,
-        detail: effectiveDetail,
+        detail: presentation.detail,
         errorText: presentation.errorText,
         icon: presentation.icon,
         showLoadingSkeleton: presentation.isLoadingDetails,
@@ -3361,12 +3365,12 @@ export const ToolCall = memo(function ToolCall({
   }, [
     shouldRenderInline,
     openToolCall,
+    presentation.detail,
     presentation.displayName,
     presentation.summary,
     presentation.errorText,
     presentation.icon,
     presentation.isLoadingDetails,
-    effectiveDetail,
     toolName,
     client,
   ]);

@@ -15,6 +15,11 @@ import { WorkspaceArchiveOperations } from "./workspace-archive-operations.js";
 import { PhysicalDeviceHub } from "./devices/hub.js";
 import { clearGrantsWhenSessionsEnd } from "./devices/agent-grants.js";
 import { HostCapabilityService } from "./host-capabilities/service.js";
+import { closeAgentMessageDelivery } from "./agent/agent-prompt.js";
+import {
+  FinishSubscriptionStore,
+  restoreFinishSubscriptions,
+} from "./agent/finish-subscriptions/index.js";
 import { ensureToolDirsOnPath, HostToolInstaller } from "./host-tools/installer.js";
 import type { HttpFetch } from "./host-tools/release.js";
 import { setForgeToolInstaller } from "./session/forge/forge-cli-installer.js";
@@ -1169,6 +1174,17 @@ export async function createJAgentDeskDaemon(
     agentManager.updateProviderRegistry(nextAgentManagerState);
   };
   logger.info({ elapsed: elapsed() }, "Agent storage initialized");
+  // Durable finish subscriptions (ADR-0029 decisions 4, 5): open ones become
+  // notifications for each parent's next turn; no parent is woken here.
+  await restoreFinishSubscriptions({
+    agentManager,
+    store: FinishSubscriptionStore.forHome(config.jagentdeskHome, logger),
+    getAgentTitle: async (agentId) => (await agentStorage.get(agentId))?.title ?? null,
+    isArchived: async (agentId) => Boolean((await agentStorage.get(agentId))?.archivedAt),
+    logger,
+  }).catch((error: unknown) => {
+    logger.error({ err: error }, "Failed to restore finish subscriptions");
+  });
   // Seed the lifetime usage baseline once from existing agents so headline Usage
   // & Cost figures include usage that predates the time-series and never drop
   // when an agent is deleted. No-op if a baseline was already persisted.
@@ -2482,6 +2498,9 @@ export async function createJAgentDeskDaemon(
     await hubRelationships.stop();
     workspaceReconciliation.dispose();
     scriptHealthMonitor.stop();
+    // Graceful shutdown delivers agent messages still waiting in a 2 s window
+    // (ADR-0029 decision 3); a crash loses them.
+    await closeAgentMessageDelivery(agentManager).catch(() => undefined);
     // Freeze both ingress and registration before taking the agent closure snapshot.
     wsServer?.prepareForShutdown();
     botsService.suspendForShutdown();

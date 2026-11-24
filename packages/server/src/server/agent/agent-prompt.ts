@@ -3,6 +3,19 @@ import { isStaleProviderSessionError } from "./stale-provider-session-error.js";
 import { withTimeout } from "../../utils/promise-timeout.js";
 import type { Logger } from "pino";
 
+import { randomUUID } from "node:crypto";
+import {
+  createAgentMessageDelivery,
+  isSystemInjectedEnvelope,
+  parseAgentMessages,
+  prepareAgentMessage,
+  type AgentMessage,
+  type AgentMessageDelivery,
+  type AgentMessageDeliveryDependencies,
+  type AgentMessageReceipt,
+  type AgentPromptSource,
+} from "./agent-messages/index.js";
+
 import type {
   AgentPermissionRequest,
   AgentPromptInput,
@@ -11,6 +24,13 @@ import type {
 import type { AgentManager, ManagedAgent } from "./agent-manager.js";
 import type { AgentStorage } from "./agent-storage.js";
 import { ensureAgentLoaded } from "./agent-loading.js";
+import {
+  completePendingFinishNotifications,
+  getFinishSubscriptionStore,
+  returnPendingFinishNotifications,
+  type PendingFinishNotification,
+  takePendingFinishNotifications,
+} from "./finish-subscriptions/index.js";
 import { getParentAgentIdFromLabels } from "@jagentdesk/protocol/agent-labels";
 import type { ActiveTurnBehavior } from "@jagentdesk/protocol/messages";
 
@@ -236,20 +256,11 @@ export async function unarchiveAgentState(
   return true;
 }
 
-/**
- * Wrap a body in <jagentdesk-system>…</jagentdesk-system> so the receiving agent
- * recognizes the prompt as system-injected context — not a user turn.
- * Used by chat mentions, schedule fires, and notify-on-finish.
- */
-export function formatSystemNotificationPrompt(reason: string): string {
-  return `<jagentdesk-system>\n${reason}\n</jagentdesk-system>`;
-}
-
-const SYSTEM_ENVELOPE_PATTERN = /^<jagentdesk-system>\n[\s\S]*\n<\/jagentdesk-system>$/;
-
-export function isSystemInjectedEnvelope(text: string): boolean {
-  return SYSTEM_ENVELOPE_PATTERN.test(text);
-}
+// The legacy hidden envelope lives with the versioned agent-message envelope.
+export {
+  formatSystemNotificationPrompt,
+  isSystemInjectedEnvelope,
+} from "./agent-messages/index.js";
 
 export interface SkillInvocationResolver {
   buildInvocationPrefix(
@@ -294,6 +305,12 @@ export interface SendPromptToAgentParams {
   /** Prompt to dispatch to the provider (may include image blocks or wrapped text). */
   prompt: AgentPromptInput;
   messageId?: string;
+  /**
+   * Sender of an agent-originated prompt (ADR-0029). When set, the prompt is
+   * wrapped in the versioned `<jagentdesk-system version="1">` envelope so the
+   * recipient and the app know who sent it.
+   */
+  source?: AgentPromptSource;
   activeTurnBehavior?: ActiveTurnBehavior;
   runOptions?: AgentRunOptions;
   /** Optional mode to set on the agent before the run starts. */
@@ -318,6 +335,8 @@ export interface SendPromptToAgentParams {
 
 export interface StartCreatedAgentInitialPromptParams {
   agentManager: AgentManager;
+  agentStorage?: AgentStorage;
+  source?: AgentPromptSource;
   agentId: string;
   snapshot?: ManagedAgent;
   prompt: AgentPromptInput | null;
@@ -357,6 +376,117 @@ export async function waitForAgentRunStartWithTimeout(
   }
 }
 
+async function resolvePromptSource(
+  source: AgentPromptSource | undefined,
+  manager: Pick<AgentManager, "getAgent">,
+  storage: AgentStorage | undefined,
+): Promise<AgentPromptSource | undefined> {
+  if (!source) return undefined;
+  if (source.title) return source;
+  const title = (
+    manager.getAgent(source.agentId)?.config?.title ??
+    (storage ? (await storage.get(source.agentId))?.title : undefined)
+  )?.trim();
+  return title ? { ...source, title } : source;
+}
+
+interface AgentMessageDeliveryContext {
+  agentManager: AgentManager;
+  agentStorage: AgentStorage;
+  logger: Logger;
+}
+
+type AgentMessageDeliveryTiming = Pick<
+  AgentMessageDeliveryDependencies,
+  "schedule" | "now" | "quietMs" | "maxWaitMs"
+>;
+
+// One recipient-owned delivery queue per daemon (keyed by its AgentManager), so
+// every agent/system sender — MCP, CLI, ORC, chat mentions, finish
+// notifications — shares the same 2 s window per recipient (ADR-0029 decision 3).
+const agentMessageDeliveries = new WeakMap<AgentManager, AgentMessageDelivery>();
+const agentMessageDeliveryTimings = new WeakMap<AgentManager, AgentMessageDeliveryTiming>();
+
+let defaultAgentMessageDeliveryTiming: AgentMessageDeliveryTiming = {};
+
+/**
+ * Test-only: timing for deliveries created from now on (e.g. `{ quietMs: 0 }` so
+ * notification-format tests do not wait two seconds per message).
+ */
+export function setDefaultAgentMessageDeliveryTimingForTests(
+  timing: AgentMessageDeliveryTiming,
+): void {
+  defaultAgentMessageDeliveryTiming = timing;
+}
+
+/** Tests use this to run the quiet window on their own clock. */
+export function configureAgentMessageDelivery(
+  agentManager: AgentManager,
+  timing: AgentMessageDeliveryTiming,
+): void {
+  agentMessageDeliveryTimings.set(agentManager, timing);
+}
+
+export function getAgentMessageDelivery(
+  context: AgentMessageDeliveryContext,
+): AgentMessageDelivery {
+  const existing = agentMessageDeliveries.get(context.agentManager);
+  if (existing) return existing;
+  const delivery = createAgentMessageDelivery({
+    ...defaultAgentMessageDeliveryTiming,
+    ...agentMessageDeliveryTimings.get(context.agentManager),
+    resolveSource: async (source) =>
+      (await resolvePromptSource(source, context.agentManager, context.agentStorage)) ?? source,
+    dispatch: async (request) => {
+      const result = await sendPreparedPromptToAgent({
+        agentManager: context.agentManager,
+        agentStorage: context.agentStorage,
+        agentId: request.recipientId,
+        prompt: request.prompt,
+        messageId: request.messageIds[0],
+        sessionMode: request.sessionMode,
+        unarchive: request.unarchive,
+        activeTurnBehavior: request.activeTurnBehavior,
+        clearPendingPermissions: request.clearPendingPermissions,
+        logger: context.logger,
+      });
+      return result.disposition;
+    },
+    onError: (error, request) =>
+      context.logger.error(
+        { err: error, agentId: request.recipientId, messageIds: request.messageIds },
+        "Agent message batch dispatch failed",
+      ),
+  });
+  agentMessageDeliveries.set(context.agentManager, delivery);
+  return delivery;
+}
+
+/** Admit an agent/system message for a recipient; returns at once with a queued receipt. */
+export function enqueueAgentMessage(
+  context: AgentMessageDeliveryContext,
+  message: AgentMessage,
+): AgentMessageReceipt {
+  return getAgentMessageDelivery(context).enqueue(message);
+}
+
+/** Resolve once every agent message admitted for the recipient so far has been dispatched. */
+export async function waitForAgentMessageDispatch(
+  agentManager: AgentManager,
+  recipientId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  await agentMessageDeliveries.get(agentManager)?.waitForDispatch(recipientId, signal);
+}
+
+/** Graceful shutdown: flush every pending window and await the dispatches. */
+export async function closeAgentMessageDelivery(agentManager: AgentManager): Promise<void> {
+  const delivery = agentMessageDeliveries.get(agentManager);
+  if (!delivery) return;
+  agentMessageDeliveries.delete(agentManager);
+  await delivery.close();
+}
+
 /**
  * Full send-prompt orchestration: (optional unarchive) → load → (optional
  * mode change) → start run.
@@ -370,6 +500,24 @@ export async function waitForAgentRunStartWithTimeout(
  */
 export async function sendPromptToAgent(
   params: SendPromptToAgentParams,
+): Promise<PromptDispatchResult> {
+  return await dispatchPrompt(params, { prepared: false });
+}
+
+/**
+ * Like {@link sendPromptToAgent}, but the prompt is already in its final form and
+ * is not wrapped again. Forum human wakes and other legacy hidden envelopes go
+ * through here so they stay hidden instead of being quoted as user text.
+ */
+export async function sendPreparedPromptToAgent(
+  params: Omit<SendPromptToAgentParams, "source">,
+): Promise<PromptDispatchResult> {
+  return await dispatchPrompt(params, { prepared: true });
+}
+
+async function dispatchPrompt(
+  params: SendPromptToAgentParams,
+  options: { prepared: boolean },
 ): Promise<PromptDispatchResult> {
   const unarchive = params.unarchive ?? true;
 
@@ -403,18 +551,97 @@ export async function sendPromptToAgent(
     await params.agentManager.setAgentMode(params.agentId, params.sessionMode);
   }
 
-  const runOptions = params.messageId
-    ? { ...params.runOptions, clientMessageId: params.messageId }
+  let prompt: AgentPromptInput;
+  let messageId = params.messageId;
+  // Notifications kept across a daemon restart ride along with this turn instead of
+  // waking the parent on their own (ADR-0029 decision 5).
+  const attached = params.skillIds?.length
+    ? []
+    : takePendingFinishNotifications(params.agentManager, params.agentId);
+  if (options.prepared) {
+    prompt = await withSkillInvocation(params);
+  } else {
+    const source = await resolvePromptSource(
+      params.source,
+      params.agentManager,
+      params.agentStorage,
+    );
+    const delivery = prepareAgentMessage(params.prompt, source, params.messageId);
+    messageId = delivery.messageId;
+    // The skill invocation line must stay first for the provider, so it goes in
+    // front of the envelope rather than inside it.
+    prompt = await withSkillInvocation({ ...params, prompt: delivery.prompt });
+  }
+
+  let carried: PendingFinishNotification[] = [];
+  if (attached.length > 0) {
+    const withNotifications = attachFinishNotifications(prompt, messageId, attached);
+    if (withNotifications) {
+      prompt = withNotifications.prompt;
+      messageId = withNotifications.messageId;
+      carried = attached;
+    } else {
+      returnPendingFinishNotifications(params.agentManager, params.agentId, attached);
+    }
+  }
+
+  const runOptions = messageId
+    ? { ...params.runOptions, clientMessageId: messageId }
     : params.runOptions;
 
-  const prompt = await withSkillInvocation(params);
+  try {
+    const result = await startAgentRun(params.agentManager, params.agentId, prompt, params.logger, {
+      replaceRunning: true,
+      // Agent- and system-sent messages steer by default; user commands keep
+      // interrupt (ADR-0029 decision 2, amending ADR-0013).
+      activeTurnBehavior: params.activeTurnBehavior ?? (params.source ? "steer" : undefined),
+      clearPendingPermissions: params.clearPendingPermissions,
+      runOptions,
+    });
+    await completePendingFinishNotifications(params.agentManager, carried);
+    return result;
+  } catch (error) {
+    returnPendingFinishNotifications(params.agentManager, params.agentId, carried);
+    throw error;
+  }
+}
 
-  return await startAgentRun(params.agentManager, params.agentId, prompt, params.logger, {
-    replaceRunning: true,
-    activeTurnBehavior: params.activeTurnBehavior,
-    clearPendingPermissions: params.clearPendingPermissions,
-    runOptions,
-  });
+/**
+ * Put kept finish notifications in front of a turn, each as its own envelope, so
+ * the app shows "X closed" rows and the user's text stays a user row. Returns null
+ * when the prompt cannot carry them (a legacy hidden envelope), so they wait.
+ */
+function attachFinishNotifications(
+  prompt: AgentPromptInput,
+  messageId: string | undefined,
+  notifications: PendingFinishNotification[],
+): { prompt: AgentPromptInput; messageId: string | undefined } | null {
+  const envelopes = notifications.map(
+    (entry) => prepareAgentMessage(entry.body, entry.source).prompt as string,
+  );
+  const text =
+    typeof prompt === "string"
+      ? prompt
+      : prompt.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("\n");
+  if (isSystemInjectedEnvelope(text)) return null;
+  let body: AgentPromptInput = prompt;
+  let id = messageId;
+  if (!parseAgentMessages(text)) {
+    const wrapped = prepareAgentMessage(prompt, undefined, messageId ?? randomUUID(), {
+      wrapUserMessage: true,
+    });
+    body = wrapped.prompt;
+    id = wrapped.messageId;
+  }
+  if (typeof body === "string") {
+    return { prompt: [...envelopes, body].join("\n\n"), messageId: id };
+  }
+  const [first, ...rest] = body;
+  if (first?.type !== "text") return null;
+  return {
+    prompt: [{ ...first, text: [...envelopes, first.text].join("\n\n") }, ...rest],
+    messageId: id,
+  };
 }
 
 export async function startCreatedAgentInitialPrompt(
@@ -429,13 +656,20 @@ export async function startCreatedAgentInitialPrompt(
     return currentSnapshot;
   }
 
+  const delivery = prepareAgentMessage(
+    params.prompt,
+    await resolvePromptSource(params.source, params.agentManager, params.agentStorage),
+    params.runOptions?.clientMessageId,
+  );
   const dispatchResult = await startAgentRun(
     params.agentManager,
     params.agentId,
-    params.prompt,
+    delivery.prompt,
     params.logger,
     {
-      runOptions: params.runOptions,
+      runOptions: delivery.messageId
+        ? { ...params.runOptions, clientMessageId: delivery.messageId }
+        : params.runOptions,
     },
   );
 
@@ -460,12 +694,20 @@ export interface SetupFinishNotificationParams {
   childAgentId: string;
   callerAgentId: string;
   requireParentOwnership?: boolean;
+  waitForTurnStart?: boolean;
   logger: Logger;
 }
 
 type FinishNotificationReason = "finished" | "errored" | "needs permission" | "was closed";
 
 const FINISH_NOTIFICATION_MESSAGE_LIMIT = 4000;
+
+const finishNotificationEvents = {
+  finished: "finished",
+  errored: "errored",
+  "needs permission": "permission-required",
+  "was closed": "closed",
+} as const;
 
 interface FinishNotificationBodyInput {
   childAgentId: string;
@@ -513,7 +755,7 @@ interface NotifySafelyOptions {
 // next finish reaches the caller once.
 const armedFinishNotifications = new WeakMap<AgentManager, Map<string, () => void>>();
 
-export function setupFinishNotification(params: SetupFinishNotificationParams): void {
+export function setupFinishNotification(params: SetupFinishNotificationParams): () => void {
   const {
     agentManager,
     agentStorage,
@@ -534,13 +776,44 @@ export function setupFinishNotification(params: SetupFinishNotificationParams): 
   armedByManager.get(armedKey)?.();
   armedByManager.set(armedKey, stop);
 
-  function stop(): void {
+  // Durable record (ADR-0029 decision 4): written now, so a subscription armed
+  // before the child's first prompt survives a restart; removed only once the
+  // notification has been dispatched or the subscription is dropped on purpose.
+  const store = getFinishSubscriptionStore(agentManager);
+  const subscriptionId: Promise<string | null> = store
+    ? store.add({ childAgentId, callerAgentId, requireParentOwnership }).catch((error: unknown) => {
+        logger.error(
+          { err: error, childAgentId, callerAgentId },
+          "Failed to save finish subscription",
+        );
+        return null;
+      })
+    : Promise.resolve(null);
+
+  function settle(): void {
+    void subscriptionId
+      .then((id) => (id && store ? store.remove(id) : undefined))
+      .catch((error: unknown) => {
+        logger.warn(
+          { err: error, childAgentId, callerAgentId },
+          "Failed to remove finish subscription",
+        );
+      });
+  }
+
+  function stopObserving(): void {
     if (stopped) return;
     stopped = true;
     unsubscribe?.();
     if (armedByManager.get(armedKey) === stop) {
       armedByManager.delete(armedKey);
     }
+  }
+
+  function stop(): void {
+    if (stopped) return;
+    stopObserving();
+    settle();
   }
 
   async function notify(
@@ -566,22 +839,37 @@ export function setupFinishNotification(params: SetupFinishNotificationParams): 
       permissionRequest,
     });
 
-    await sendPromptToAgent({
-      agentManager,
-      agentStorage,
-      agentId: callerAgentId,
-      prompt: formatSystemNotificationPrompt(body),
-      activeTurnBehavior: "steer",
-      unarchive: false,
-      logger,
-    });
+    // Rides the recipient's delivery window, so a peer's report and its finish
+    // notification reach the caller in one steered prompt (ADR-0029 decision 3).
+    const receipt = enqueueAgentMessage(
+      { agentManager, agentStorage, logger },
+      {
+        recipientId: callerAgentId,
+        prompt: body,
+        source: {
+          kind: "agent-notification",
+          agentId: childAgentId,
+          ...(record?.title ? { title: record.title } : {}),
+          event: finishNotificationEvents[reason],
+        },
+        activeTurnBehavior: "steer",
+        unarchive: false,
+      },
+    );
+    await receipt.dispatched;
   }
 
   function notifySafely(reason: FinishNotificationReason, options: NotifySafelyOptions = {}): void {
     if (stopped) return;
-    if (options.terminal ?? true) stop();
+    const terminal = options.terminal ?? true;
+    if (terminal) stopObserving();
     notificationQueue = notificationQueue
-      .then(() => notify(reason, options.permissionRequest))
+      .then(async () => {
+        await notify(reason, options.permissionRequest);
+        // A failed dispatch keeps the record, so a restart can still report it.
+        if (terminal) settle();
+        return undefined;
+      })
       .catch((error) => {
         logger.error(
           { err: error, childAgentId, callerAgentId, reason },
@@ -661,11 +949,12 @@ export function setupFinishNotification(params: SetupFinishNotificationParams): 
   const childSnapshot = agentManager.getAgent(childAgentId);
   if (!childSnapshot || childSnapshot.lifecycle === "closed") {
     stop();
-    return;
+    return stop;
   }
   if (childSnapshot.lifecycle === "running") {
     hasSeenRunning = true;
-  } else if (childSnapshot.lifecycle === "error") {
+  } else if (childSnapshot.lifecycle === "error" && !params.waitForTurnStart) {
     notifySafely("errored");
   }
+  return stop;
 }

@@ -1,3 +1,4 @@
+import type { AgentMessage } from "@jagentdesk/protocol/agent-message";
 import type { AgentProvider, ToolCallDetail } from "@jagentdesk/protocol/agent-types";
 import type { AgentAttachment, AgentStreamEventPayload } from "@jagentdesk/protocol/messages";
 import type { AttachmentMetadata } from "@/attachments/types";
@@ -712,6 +713,7 @@ interface OrchestratorToolCallData {
 }
 
 export interface AgentToolCallData {
+  agentMessage?: AgentMessage;
   provider: AgentProvider;
   callId: string;
   name: string;
@@ -1293,6 +1295,7 @@ function reduceTimelineToolCall(
       error: item.error,
       detail: item.detail,
       metadata: item.metadata,
+      ...(item.agentMessage ? { agentMessage: item.agentMessage } : {}),
     },
     timestamp,
     timelineCursor,

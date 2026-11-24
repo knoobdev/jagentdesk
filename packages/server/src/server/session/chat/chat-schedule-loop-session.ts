@@ -24,7 +24,7 @@ export interface ChatScheduleLoopSessionHost {
   resolveAgentIdentifier(
     identifier: string,
   ): Promise<{ ok: true; agentId: string } | { ok: false; error: string }>;
-  sendAgentMessage(agentId: string, text: string): Promise<void>;
+  sendAgentMessage(agentId: string, text: string, sourceAgentId?: string): Promise<void>;
 }
 
 export interface ChatScheduleLoopSessionOptions {
@@ -199,7 +199,8 @@ export class ChatScheduleLoopSession {
         liveAgents,
         prepared: fanout.prepared,
         resolveAgentIdentifier: (identifier) => this.host.resolveAgentIdentifier(identifier),
-        sendAgentMessage: (agentId, text) => this.host.sendAgentMessage(agentId, text),
+        sendAgentMessage: (agentId, text, sourceAgentId) =>
+          this.host.sendAgentMessage(agentId, text, sourceAgentId),
       });
     } catch (error) {
       this.emitChatRpcError(request, error);

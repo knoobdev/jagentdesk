@@ -11,6 +11,7 @@ import { z } from "zod";
 
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import { createAgentMcpServer } from "./mcp-server.js";
+import { setDefaultAgentMessageDeliveryTimingForTests } from "./agent-prompt.js";
 import { AgentManager, type ManagedAgent } from "./agent-manager.js";
 import { AgentStorage, type StoredAgentRecord } from "./agent-storage.js";
 import { AgentRunState } from "./agent-run-state.js";
@@ -243,6 +244,8 @@ function buildAgentManagerSpies() {
     reloadStalePluginSession: async () => {},
     hasInFlightRun: vi.fn().mockReturnValue(false),
     tryRunOutOfBand: vi.fn().mockReturnValue(false),
+    // Agent callers steer by default (ADR-0029); "inactive" falls through to a new turn.
+    steerOrReplaceActiveTurn: vi.fn().mockResolvedValue({ status: "inactive" }),
     subscribe: vi.fn().mockReturnValue(() => {}),
     streamAgent: vi.fn((...args: Parameters<AgentManager["streamAgent"]>) =>
       (async function* admitted() {
@@ -276,6 +279,10 @@ function buildAgentStorageSpies() {
     remove: vi.fn(),
   };
 }
+
+// Delivery formatting tests do not need the 2 s quiet window; the window itself is
+// covered by agent-messages/delivery.test.ts.
+setDefaultAgentMessageDeliveryTimingForTests({ quietMs: 0 });
 
 function createTestDeps(): TestDeps {
   const agentManagerSpies = buildAgentManagerSpies();
@@ -3960,10 +3967,13 @@ describe("send_agent_prompt MCP tool", () => {
 
     const response = await tool.handler(parsed.data as Record<string, unknown>);
 
-    expect(spies.agentManager.subscribe).toHaveBeenCalledTimes(1);
+    // The sender gets a queued receipt at once; the notification is armed at dispatch.
+    expect(response.structuredContent).toMatchObject({ deliveryStatus: "queued" });
+    expect(response.structuredContent.messageId).toEqual(expect.any(String));
+    await vi.waitFor(() => expect(spies.agentManager.subscribe).toHaveBeenCalledTimes(1));
     expect(spies.agentManager.waitForAgentEvent).not.toHaveBeenCalled();
     expect(response.structuredContent.guidance).toBe(
-      "You will get notified when the prompted agent finishes, errors, or needs permission. Do not poll for status; continue with other work until the notification arrives.",
+      "Queued for delivery after two quiet seconds. You will get notified when the prompted agent finishes, errors, or needs permission. Do not poll for status; continue with other work until the notification arrives.",
     );
   });
 
@@ -4212,12 +4222,17 @@ describe("send_agent_prompt MCP tool", () => {
         agentId: child.id,
         prompt: "Follow up",
       });
-      await vi.waitFor(() => expect(childSession.prompts).toEqual(["Follow up"]));
-      acknowledgeTurnStart();
+      await vi.waitFor(() =>
+        expect(childSession.prompts).toEqual([
+          expect.stringMatching(
+            /^<jagentdesk-system version="1" kind="agent-message" source-agent-id="[^"]+" message-id="[^"]+"[^>]*>\nFollow up\n<\/jagentdesk-system>$/,
+          ),
+        ]),
+      );
       const response = await pending;
-
-      expect(response.structuredContent).toMatchObject({ success: true, status: "running" });
-      expect(agentManager.getAgent(child.id)?.lifecycle).toBe("running");
+      expect(response.structuredContent).toMatchObject({ success: true, deliveryStatus: "queued" });
+      acknowledgeTurnStart();
+      await vi.waitFor(() => expect(agentManager.getAgent(child.id)?.lifecycle).toBe("running"));
 
       childSession.finishTurn();
       await vi.waitFor(() => {
@@ -4283,8 +4298,9 @@ describe("send_agent_prompt MCP tool", () => {
           prompt: "Fast reply",
         },
       );
+      expect(response.structuredContent).toMatchObject({ success: true, deliveryStatus: "queued" });
+      await vi.waitFor(() => expect(finished).toBe(true));
       unsubscribe();
-      expect(response.structuredContent).toMatchObject({ success: true, status: "idle" });
       await vi.waitFor(() => {
         const parentPrompts = parentClient.sessions[0]!.prompts;
         expect(parentPrompts).toHaveLength(1);
@@ -5653,6 +5669,37 @@ describe("speak MCP tool", () => {
 describe("agent snapshot MCP serialization", () => {
   const logger = createTestLogger();
 
+  it("steers agent-to-agent prompts by default and honors an explicit interrupt", async () => {
+    const { agentManager, agentStorage, spies } = createTestDeps();
+    spies.agentManager.getAgent.mockImplementation((agentId: string) =>
+      createManagedAgent({ id: agentId, cwd: "/tmp/workspace" }),
+    );
+    const server = await createAgentMcpServer({
+      agentManager,
+      agentStorage,
+      logger,
+      providerSnapshotManager: createClaudeOnlyManager(),
+      callerAgentId: "parent-agent",
+    });
+    const tool = registeredTool(server, "send_agent_prompt");
+
+    const steered = await tool.inputSchema.safeParseAsync({ agentId: "child-agent", prompt: "a" });
+    expect(steered.success).toBe(true);
+    await tool.handler({ ...(steered.data as Record<string, unknown>), notifyOnFinish: false });
+    await vi.waitFor(() =>
+      expect(spies.agentManager.steerOrReplaceActiveTurn).toHaveBeenCalledTimes(1),
+    );
+
+    spies.agentManager.steerOrReplaceActiveTurn.mockClear();
+    await tool.handler({
+      ...(steered.data as Record<string, unknown>),
+      notifyOnFinish: false,
+      activeTurnBehavior: "interrupt",
+    });
+    await vi.waitFor(() => expect(spies.agentManager.streamAgent).toHaveBeenCalled());
+    expect(spies.agentManager.steerOrReplaceActiveTurn).not.toHaveBeenCalled();
+  });
+
   it("returns compact list items from list_agents", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     spies.agentManager.listAgents = vi.fn().mockReturnValue([
@@ -5917,6 +5964,40 @@ describe("agent snapshot MCP serialization", () => {
     const agentIds = agentsOf(response).map((agent) => agent.id);
     expect(agentIds).toHaveLength(3);
     expect(new Set(agentIds)).toEqual(new Set(["in-cwd", "in-child-cwd", "stored-in-cwd"]));
+  });
+
+  it("keeps an archived agent resumed for a history read out of list_agents", async () => {
+    const { agentManager, agentStorage, spies } = createTestDeps();
+    const now = new Date().toISOString();
+    spies.agentManager.getAgent.mockReturnValue(
+      createManagedAgent({ id: "caller-agent", cwd: "/tmp/workspace" }),
+    );
+    spies.agentManager.listAgents.mockReturnValue([
+      createManagedAgent({ id: "live-active", cwd: "/tmp/workspace" }),
+      createManagedAgent({ id: "live-archived", cwd: "/tmp/workspace" }),
+    ]);
+    spies.agentStorage.get.mockImplementation(async (agentId: string) =>
+      agentId === "live-archived"
+        ? createStoredRecord({ id: "live-archived", cwd: "/tmp/workspace", archivedAt: now })
+        : null,
+    );
+    spies.agentStorage.list.mockResolvedValue([]);
+
+    const server = await createAgentMcpServer({
+      agentManager,
+      agentStorage,
+      logger,
+      providerSnapshotManager: createClaudeOnlyManager(),
+      callerAgentId: "caller-agent",
+    });
+    const tool = registeredTool(server, "list_agents");
+
+    const byDefault = agentsOf(await tool.handler({})).map((agent) => agent.id);
+    expect(byDefault).toEqual(["live-active"]);
+
+    const withArchived = agentsOf(await tool.handler({ includeArchived: true }));
+    const archived = withArchived.find((agent) => agent.id === "live-archived");
+    expect(archived?.archivedAt).toBe(now);
   });
 
   it("allows explicit cwd, status, archive, time, and limit filters for list_agents", async () => {

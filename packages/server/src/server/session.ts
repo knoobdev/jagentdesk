@@ -86,7 +86,10 @@ import { searchTimeline } from "./agent/chat-search/index.js";
 import {
   formatSystemNotificationPrompt,
   type PromptDispatchResult,
+  enqueueAgentMessage,
+  sendPreparedPromptToAgent,
   sendPromptToAgent,
+  waitForAgentMessageDispatch,
   waitForAgentRunStartWithTimeout,
   unarchiveAgentState,
 } from "./agent/agent-prompt.js";
@@ -152,6 +155,7 @@ import {
   getAgentStreamEventTurnId,
   type AgentPersistenceHandle,
   type AgentPermissionResponse,
+  type AgentPromptInput,
   type AgentRunOptions,
   type AgentSessionConfig,
 } from "./agent/agent-sdk-types.js";
@@ -1207,12 +1211,37 @@ export class Session {
         listStoredAgents: () => this.agentStorage.list(),
         listLiveAgents: () => this.agentManager.listAgents(),
         resolveAgentIdentifier: (identifier) => this.resolveAgentIdentifier(identifier),
-        sendAgentMessage: async (agentId, text) => {
-          await sendPromptToAgent({
+        sendAgentMessage: async (agentId, text, sourceAgentId) => {
+          // A mention written by an agent is an agent message from that author; any
+          // other author keeps the legacy hidden envelope (ADR-0029 decision 1).
+          const authorIsAgent =
+            sourceAgentId !== undefined &&
+            (this.agentManager.getAgent(sourceAgentId) !== null ||
+              Boolean(await this.agentStorage.get(sourceAgentId).catch(() => null)));
+          if (authorIsAgent) {
+            const receipt = enqueueAgentMessage(
+              {
+                agentManager: this.agentManager,
+                agentStorage: this.agentStorage,
+                logger: this.sessionLogger,
+              },
+              {
+                recipientId: agentId,
+                prompt: text,
+                source: { kind: "agent-message", agentId: sourceAgentId },
+                activeTurnBehavior: "steer",
+                unarchive: false,
+              },
+            );
+            await receipt.dispatched;
+            return;
+          }
+          await sendPreparedPromptToAgent({
             agentManager: this.agentManager,
             agentStorage: this.agentStorage,
             agentId,
             prompt: formatSystemNotificationPrompt(text),
+            activeTurnBehavior: "steer",
             unarchive: false,
             logger: this.sessionLogger,
           });
@@ -10052,6 +10081,57 @@ export class Session {
     }
   }
 
+  private messageSkillIds(
+    skillIds: string[] | undefined,
+    specPhase: boolean,
+  ): string[] | undefined {
+    if (
+      specPhase ||
+      (this.pluginRuntime?.builtin && !this.pluginRuntime.builtin.isEnabled("skills"))
+    )
+      return undefined;
+    return skillIds;
+  }
+
+  private queueAgentMessage(
+    msg: Extract<SessionInboundMessage, { type: "send_agent_message_request" }>,
+    agentId: string,
+    prompt: AgentPromptInput,
+  ): boolean {
+    if (msg.sourceAgentId && !msg.skillIds?.length) {
+      const receipt = enqueueAgentMessage(
+        {
+          agentManager: this.agentManager,
+          agentStorage: this.agentStorage,
+          logger: this.sessionLogger,
+        },
+        {
+          recipientId: agentId,
+          prompt,
+          messageId: msg.messageId,
+          source: { kind: "agent-message", agentId: msg.sourceAgentId },
+          activeTurnBehavior: msg.activeTurnBehavior ?? "steer",
+        },
+      );
+      receipt.dispatched.catch((error) => {
+        this.handleAgentRunError(agentId, error, "Failed to send agent message");
+      });
+      this.emit({
+        type: "send_agent_message_response",
+        payload: {
+          requestId: msg.requestId,
+          agentId,
+          accepted: true,
+          error: null,
+          deliveryStatus: receipt.status,
+          messageId: receipt.messageId,
+        },
+      });
+      return true;
+    }
+    return false;
+  }
+
   private async handleSendAgentMessageRequest(
     msg: Extract<SessionInboundMessage, { type: "send_agent_message_request" }>,
   ): Promise<void> {
@@ -10087,6 +10167,8 @@ export class Session {
         },
         "agent.session.send_agent_message",
       );
+      if (this.queueAgentMessage(msg, agentId, prompt)) return;
+
       let dispatchResult: PromptDispatchResult;
       try {
         dispatchResult = await sendPromptToAgent({
@@ -10095,12 +10177,11 @@ export class Session {
           agentId,
           prompt,
           messageId: msg.messageId,
+          source: msg.sourceAgentId
+            ? { kind: "agent-message", agentId: msg.sourceAgentId }
+            : undefined,
           activeTurnBehavior: msg.activeTurnBehavior,
-          skillIds:
-            specPhase ||
-            (this.pluginRuntime?.builtin && !this.pluginRuntime.builtin.isEnabled("skills"))
-              ? undefined
-              : msg.skillIds,
+          skillIds: this.messageSkillIds(msg.skillIds, Boolean(specPhase)),
           skillInvocation: this.skillsStorage,
           logger: this.sessionLogger,
         });
@@ -10235,6 +10316,10 @@ export class Session {
       : null;
 
     try {
+      // A CLI `send` from an agent is queued; wait for its dispatch before the turn.
+      await waitForAgentMessageDispatch(this.agentManager, agentId, abortController.signal).catch(
+        () => undefined,
+      );
       let result = await this.agentManager.waitForAgentEvent(agentId, {
         signal: abortController.signal,
         waitForActive: true,

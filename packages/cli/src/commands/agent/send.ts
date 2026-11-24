@@ -1,4 +1,5 @@
-import { type Command } from "commander";
+import { type Command, Option } from "commander";
+import type { ActiveTurnBehavior } from "@jagentdesk/protocol/messages";
 import { collectMultiple } from "../../utils/command-options.js";
 import { connectToDaemon, getDaemonHost } from "../../utils/client.js";
 import type {
@@ -33,6 +34,7 @@ export interface AgentSendOptions extends CommandOptions {
   skill?: string[];
   prompt?: string;
   promptFile?: string;
+  behavior?: ActiveTurnBehavior;
 }
 
 export function addSendOptions(cmd: Command): Command {
@@ -48,6 +50,12 @@ export function addSendOptions(cmd: Command): Command {
       "Invoke a skill on this turn (skill id from the Skills screen; repeatable)",
       collectMultiple,
       [],
+    )
+    .addOption(
+      new Option(
+        "--behavior <behavior>",
+        "Active-turn behavior (agent default: steer; otherwise: interrupt)",
+      ).choices(["interrupt", "steer"]),
     )
     .option("--no-wait", "Return immediately without waiting for completion");
 }
@@ -211,7 +219,13 @@ export async function runSendCommand(
 
     // Send the message
     const skillIds = options.skill && options.skill.length > 0 ? options.skill : undefined;
-    await client.sendAgentMessage(agentIdArg, promptInput, { images, skillIds });
+    const sourceAgentId = process.env.JAGENTDESK_AGENT_ID?.trim() || undefined;
+    await client.sendAgentMessage(agentIdArg, promptInput, {
+      images,
+      skillIds,
+      sourceAgentId,
+      activeTurnBehavior: options.behavior ?? (sourceAgentId ? "steer" : "interrupt"),
+    });
 
     // If --no-wait, return immediately
     if (options.wait === false) {
