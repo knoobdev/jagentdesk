@@ -57,12 +57,16 @@ export interface AcpConfigAccess {
   set(id: string, value: JsonValue): Promise<void>;
 }
 
+export type AcpRequest = (method: string, params: JsonValue) => Promise<JsonValue>;
+
 export interface AcpDiscoveryContext extends AcpContext {
   config: AcpConfigAccess;
+  request: AcpRequest;
 }
 
 export interface AcpConfigureContext extends AcpContext {
   config: AcpConfigAccess;
+  request: AcpRequest;
 }
 
 export type AcpConfigChange =
@@ -94,6 +98,8 @@ export interface AcpTransformer {
     context: AcpDiscoveryContext,
   ): Promise<ProviderCatalog> | ProviderCatalog;
   configure?(change: AcpConfigChange, context: AcpConfigureContext): Promise<"handled" | "pass">;
+  /** Rewrites every session config snapshot before JAgentDesk sees it. */
+  config?(state: ProviderConfigState, context: AcpContext): ProviderConfigState;
   notification?(
     notification: { method: string; params: JsonValue },
     context: AcpContext,

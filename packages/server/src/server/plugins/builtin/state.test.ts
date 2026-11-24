@@ -245,3 +245,13 @@ it("starts and stops a bundled plugin through the same per-host switch", async (
     code: "plugin_unavailable",
   });
 });
+
+it("keeps a configured Goose host enabled through the bundled-provider migration without overriding a later switch", async () => {
+  const { state, store, home, initial } = await setup({
+    providers: { goose: { command: ["/opt/bin/goose", "acp"] } },
+  });
+  expect(store.get().builtinPlugins?.["goose-provider"]).toEqual({ enabled: true });
+  await state.set("goose-provider", false);
+  const restarted = new DaemonConfigStore(home, initial);
+  expect(restarted.get().builtinPlugins?.["goose-provider"]).toEqual({ enabled: false });
+});

@@ -28,6 +28,7 @@ export const BUNDLED_PLUGIN_IDS = [
   "antigravity-provider",
   "hoplite-provider",
   "fx-provider",
+  "goose-provider",
 ] as const;
 export const BUILTIN_PLUGIN_IDS = [...STATIC_BUILTIN_PLUGIN_IDS, ...BUNDLED_PLUGIN_IDS] as const;
 export type BuiltinPluginId = (typeof BUILTIN_PLUGIN_IDS)[number];
@@ -228,10 +229,19 @@ export const BUILTIN_PLUGIN_MANIFESTS: readonly BuiltinPluginManifest[] = [
     requires: [],
     command: "fx",
   },
+  {
+    id: "goose-provider",
+    name: "goose",
+    description: "Run goose through its local goose CLI.",
+    defaultEnabled: false,
+    requires: [],
+    command: "goose",
+  },
 ];
 
 /** Existing and new server-info flags owned by each feature. Core forge checkout stays independent. */
 export const BUILTIN_PLUGIN_FEATURES = {
+  "goose-provider": [],
   "fx-provider": [],
   "hoplite-provider": [],
   "antigravity-provider": [],

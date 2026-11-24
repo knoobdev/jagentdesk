@@ -23,6 +23,8 @@ import { z } from "zod";
 import type {
   AcpConfigAccess,
   AcpConfigChange,
+  AcpConfigureContext,
+  AcpRequest,
   AcpToolCallSnapshot,
   AcpTransformer,
   AcpVendorUpdate,
@@ -258,10 +260,10 @@ async function discover(
   });
   try {
     let catalog = await runtime.discover(input.cwd);
-    const config = runtime.configAccess();
+    const context = runtime.configContext();
     for (const transformer of state.options.transformers ?? []) {
       if (transformer.discover) {
-        catalog = await transformer.discover(catalog, { sessionId: "catalog", config });
+        catalog = await transformer.discover(catalog, context);
       }
     }
     state.emit({ type: "catalog", requestId: input.requestId, catalog });
@@ -808,16 +810,9 @@ class AcpRuntime {
   }
 
   private async applyConfigChange(change: AcpConfigChange): Promise<void> {
-    const access = this.configAccess();
+    const context: AcpConfigureContext = this.configContext();
     for (const transformer of this.transformers) {
-      if (
-        (await transformer.configure?.(change, {
-          sessionId: this.options.boundarySessionId,
-          config: access,
-        })) === "handled"
-      ) {
-        return;
-      }
+      if ((await transformer.configure?.(change, context)) === "handled") return;
     }
     if (change.target === "mode") {
       if (!change.value || !this.modes) {
@@ -851,7 +846,20 @@ class AcpRuntime {
     this.configOptions = response.configOptions;
   }
 
-  configAccess(): AcpConfigAccess {
+  configContext() {
+    return {
+      sessionId: this.options.boundarySessionId,
+      config: this.configAccess(),
+      request: this.request,
+    };
+  }
+
+  private readonly request: AcpRequest = async (method, params) =>
+    jsonValue(
+      await this.call(this.connection.extMethod(method, params as Record<string, unknown>)),
+    );
+
+  private configAccess(): AcpConfigAccess {
     return {
       read: async () => configValues(this.configOptions),
       set: async (id, value) => {
@@ -876,6 +884,9 @@ class AcpRuntime {
   }
 
   private emitConfigSnapshot(config: ProviderConfigState): void {
+    const context = { sessionId: this.options.boundarySessionId };
+    for (const transformer of this.transformers)
+      config = transformer.config?.(config, context) ?? config;
     this.emit({
       type: "session.config",
       sessionId: this.options.boundarySessionId,
