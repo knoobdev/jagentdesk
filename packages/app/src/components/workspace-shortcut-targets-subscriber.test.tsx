@@ -22,6 +22,9 @@ vi.hoisted(() => {
   (globalThis as unknown as { __DEV__: boolean }).__DEV__ = false;
 });
 
+// JSDOM supplies browser globals; Expo's Metro startup polyfill requires native TS modules.
+vi.mock("expo/src/winter", () => ({}));
+
 function workspaceDescriptor(input: {
   id: string;
   name?: string;
