@@ -3076,6 +3076,7 @@ export class DaemonClient {
     const message = SessionInboundMessageSchema.parse({
       type: "fetch_agents_request",
       requestId: resolvedRequestId,
+      includeBackground: options?.includeBackground,
       ...(options?.scope ? { scope: options.scope } : {}),
       ...(options?.filter ? { filter: options.filter } : {}),
       ...(options?.sort ? { sort: options.sort } : {}),
@@ -3104,6 +3105,7 @@ export class DaemonClient {
     const message = SessionInboundMessageSchema.parse({
       type: "fetch_agent_history_request",
       requestId: resolvedRequestId,
+      includeBackground: options?.includeBackground,
       ...(options?.filter ? { filter: options.filter } : {}),
       ...(options?.sort ? { sort: options.sort } : {}),
       ...(options?.page ? { page: options.page } : {}),

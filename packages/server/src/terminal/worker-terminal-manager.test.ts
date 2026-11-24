@@ -54,7 +54,7 @@ import {
   TerminalWorkerIncompatibleError,
 } from "./terminal-worker-pool.js";
 import { connectTerminalWorker } from "./terminal-worker-client.js";
-import { launchTerminalWorker, TerminalWorkerLaunchError } from "./terminal-worker-launch.js";
+import { launchTerminalWorker } from "./terminal-worker-launch.js";
 
 type TerminalRow = TerminalState["grid"][number];
 

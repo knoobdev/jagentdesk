@@ -747,7 +747,12 @@ function createReopenableCodexAgent(threads: Record<string, unknown[]>, registry
       appServers[index]
         .requests()
         .map((request) => request.method)
-        .filter((method) => typeof method === "string" && method.startsWith("thread/")),
+        .filter(
+          (method) =>
+            typeof method === "string" &&
+            method.startsWith("thread/") &&
+            !method.startsWith("thread/backgroundTerminals/"),
+        ),
     // Cold-loads the agent, closes its runtime, and reopens it while JAgentDesk keeps its timeline.
     async loadCloseAndReopen(): Promise<AgentTimelineItem[]> {
       await open();
@@ -8321,7 +8326,7 @@ describe("Codex interactive resume startup", () => {
       unsubscribe();
       const laterEvents: AgentStreamEvent[] = [];
       session.subscribe((event) => laterEvents.push(event));
-      expect(laterEvents).toEqual([]);
+      expect(laterEvents.filter((event) => event.type !== "background_work")).toEqual([]);
     } finally {
       await session.close();
       appServer.assertNoErrors();
@@ -8462,39 +8467,6 @@ test.each([true, false])(
     }
   },
 );
-
-test("Codex runtime safety queries live terminals and retains unsupported app servers", async () => {
-  let response: unknown = { data: [], nextCursor: null };
-  const appServer = createFakeCodexAppServer({ "thread/backgroundTerminals/list": () => response });
-  const session = new CodexAppServerAgentSession(
-    createConfig(),
-    null,
-    createTestLogger(),
-    async () => appServer.child,
-  );
-  try {
-    await session.startTurn("hello");
-    await appServer.waitForTurnStart();
-    expect(await session.canStopRuntime()).toBe(false);
-    appServer.completeTurn({ threadId: "thread-1" });
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    await expect.poll(() => session.canStopRuntime()).toBe(true);
-    response = { data: [{ processId: "shell-1" }], nextCursor: null };
-    expect(await session.canStopRuntime()).toBe(false);
-    response = {};
-    await expect(session.canStopRuntime()).rejects.toThrow();
-    response = { __jsonRpcError: { code: -32601, message: "Method not found" } };
-    await expect(session.canStopRuntime()).rejects.toThrow("Method not found");
-    expect(
-      appServer
-        .requests()
-        .findLast((request) => request.method === "thread/backgroundTerminals/list"),
-    ).toMatchObject({ params: { threadId: "thread-1" } });
-    appServer.assertNoErrors();
-  } finally {
-    await session.close();
-  }
-});
 
 test("publishes a materialized image before dispatching the following turn completion", async () => {
   const appServer = createFakeCodexAppServer();

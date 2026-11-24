@@ -61,9 +61,9 @@ Each create carries the controlling daemon's environment and JAgentDesk CLI path
 
 ## Desktop
 
-Desktop app updates and version-mismatch restarts stop the daemon with "keep terminals" on macOS and Linux, through `daemon stop --keep-terminals` (the shutdown RPC; SIGTERM always means "stop and close"). A daemon that predates the feature cannot keep terminals: the CLI refuses before sending anything, and desktop logs that and stops it with its terminals closed.
+Desktop-managed stops still signal the supervisor directly, including version-mismatch restarts, and close terminals. Keeping terminals requires the shutdown RPC through `daemon stop --keep-terminals`; SIGTERM always means "stop and close". Desktop stop handling needs a separate integration with that RPC before updates can preserve terminals.
 
-On Windows every desktop stop closes terminals. In the desktop app the worker runs as `JAgentDesk.exe` with `ELECTRON_RUN_AS_NODE`, and a surviving one would lock the install folder the NSIS update replaces. Restarts, crashes and npm self-updates keep terminals on Windows too.
+Keep desktop update stops destructive on Windows: the worker runs as `JAgentDesk.exe` with `ELECTRON_RUN_AS_NODE`, and a surviving one would lock the install folder the NSIS update replaces. Daemon restarts, crashes and npm self-updates can keep terminals on Windows.
 
 ## Known limits
 

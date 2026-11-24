@@ -4927,6 +4927,7 @@ test.each([
           event: {
             agent: {
               id: agent.id,
+              background: false,
               workspaceId: null,
               parentAgentId: null,
               provider: "codex",

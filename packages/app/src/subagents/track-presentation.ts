@@ -14,7 +14,7 @@ function presentationStatus(row: SubagentRow) {
  * failed child stays visible after the parent's own attention is cleared.
  */
 export function deriveSubagentStatusBucket(
-  status: SubagentRow["status"],
+  status: ReturnType<typeof presentationStatus>,
   backgroundWork?: AgentBackgroundWorkSummary | null,
 ): SidebarStateBucket {
   if (status === "error") return "failed";

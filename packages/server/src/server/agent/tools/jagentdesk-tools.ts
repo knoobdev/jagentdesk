@@ -1,3 +1,4 @@
+import type { ManagedAgent } from "../agent-manager.js";
 import { admitsAgent } from "../directory.js";
 import type { ProviderJAgentDeskToolsPolicy } from "@jagentdesk/protocol/provider-config";
 import { isJAgentDeskToolEnabled } from "../jagentdesk-tool-policy.js";
