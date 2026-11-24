@@ -1018,6 +1018,19 @@ export class HostRuntimeController {
     this.activeClient?.ensureConnected();
   }
 
+  async reconnectVia(originServerId: string): Promise<void> {
+    const routes = this.host.connections.filter(
+      (connection) => connection.type === "routed" && connection.originServerId === originServerId,
+    );
+    if (!routes.length || !this.started || isHostRuntimeConnected(this.snapshot)) return;
+    if (routes.some((route) => route.id === this.snapshot.activeConnectionId))
+      this.ensureConnected();
+    await this.probeCycleInFlight;
+    if (!this.started || this.snapshot.connectionStatus === "online") return;
+    for (const route of routes) this.connectionLastProbedAt.delete(route.id);
+    await this.runProbeCycleNow();
+  }
+
   revalidateConnection(): void {
     void this.activeClient?.revalidateConnection();
   }
@@ -2685,6 +2698,7 @@ export class HostRuntimeStore {
     if (didTransitionOnline) {
       this.rememberAuthenticatedConnection(serverId, snapshot);
       useSessionStore.getState().bumpHistorySyncGeneration(serverId);
+      for (const child of this.controllers.values()) void child.reconnectVia(serverId);
       // Checkout git data is push-driven; pushes emitted while disconnected are gone for
       // good (the daemon dedupes by snapshot fingerprint). Mark the caches stale so active
       // queries refetch now and evicted ones on their next mount.

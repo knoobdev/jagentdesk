@@ -92,7 +92,7 @@ export function createHostChannelTransport(
     );
     cleanups.push(
       origin.subscribeConnectionStatus((connectionState) => {
-        if (connectionState.status !== "connected") close();
+        if (connectionState.status !== "connected") queueMicrotask(close);
       }),
     );
     let opening: Promise<string>;
