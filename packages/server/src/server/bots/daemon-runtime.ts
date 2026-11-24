@@ -22,7 +22,7 @@ import type { ProviderSnapshotManager } from "../agent/provider-snapshot-manager
 import type { OrchestrationRuntime } from "../orchestration/runtime.js";
 import type { CreateJAgentDeskWorktreeWorkflowFn } from "../worktree-session.js";
 import { runGitCommand } from "../../utils/run-git-command.js";
-import type { BotRuntime, BotRuntimeEvent, BotReviewRole } from "./runtime.js";
+import type { BotRuntime, BotRuntimeEvent, BotReviewRole, BotExternalMessage } from "./runtime.js";
 import { BotStorage } from "./storage.js";
 import { planBotContext, type ContextReceipt } from "./context.js";
 import { validateAgentConfigurationAgainstProvider } from "../agent/agent-configuration-validator.js";
@@ -217,8 +217,9 @@ export class DaemonBotRuntime implements BotRuntime {
     text: string,
     messageId?: string,
     sourceAgentId?: string,
+    external?: BotExternalMessage,
   ): Promise<void> {
-    if (sourceAgentId) {
+    if (sourceAgentId || external) {
       const receipt = enqueueAgentMessage(
         {
           agentManager: this.deps.agentManager,
@@ -229,7 +230,10 @@ export class DaemonBotRuntime implements BotRuntime {
           recipientId: agentId,
           prompt: text,
           messageId,
-          source: { kind: "agent-message", agentId: sourceAgentId },
+          source: external
+            ? { kind: "external-message", senderId: external.senderId, title: external.title }
+            : { kind: "agent-message", agentId: sourceAgentId! },
+          beforeDispatch: external?.beforeDispatch,
           activeTurnBehavior: "queue",
           unarchive: false,
         },

@@ -5,6 +5,7 @@ import {
   type FinishSubscriptions as RemoteFinishSubscriptions,
 } from "./agent/remote-finish-subscriptions/index.js";
 import { connectThroughProxy } from "./ssh/proxy/connect.js";
+import { BotsSlack } from "./bots/slack.js";
 import { createIdleRuntimeCleanup } from "./agent/idle-runtime-cleanup/index.js";
 import { createChangeRequestRouter } from "../services/change-request-router.js";
 import { createForgeService } from "../services/forge-registry.js";
@@ -584,6 +585,7 @@ export interface JAgentDeskDaemon {
 export interface JAgentDeskDaemonDependencies {
   hostCapabilities?: HostCapabilityService;
   botsTriggerSource?: BotTriggerSource;
+  slackApiBaseUrl?: string;
   sessionShareTunnelManager?: TunnelManager;
   builtinPlugins?: BuiltinPluginLoader;
   hubRelationshipRemote?: HubRelationshipRemote;
@@ -1937,12 +1939,31 @@ export async function createJAgentDeskDaemon(
       }),
     push: { send: (payload) => wsServer?.sendBotPush(payload) ?? Promise.resolve() },
   });
+  const botsSlack = new BotsSlack(botsService, {
+    logger,
+    relay: () => ({
+      ...(relayRuntime?.getConfig() ?? {
+        enabled: config.relayEnabled ?? true,
+        endpoint: config.relayEndpoint ?? DEFAULT_RELAY_ENDPOINT,
+        useTls: config.relayUseTls ?? true,
+      }),
+      serverId,
+    }),
+    apiBaseUrl: dependencies.slackApiBaseUrl,
+  });
+  botsService.slack = botsSlack;
   let botsRuntimeReady = false;
   await pluginRuntime.builtin.registerLifecycle("bots", {
     start: () => {
-      if (botsRuntimeReady) botsService.start();
+      if (botsRuntimeReady) {
+        botsService.start();
+        botsSlack.start();
+      }
     },
-    stop: () => botsService.stop(),
+    stop: () => {
+      botsService.stop();
+      botsSlack.stop();
+    },
   });
 
   const idleRuntimeCleanup = createIdleRuntimeCleanup({
@@ -2499,7 +2520,10 @@ export async function createJAgentDeskDaemon(
             await remoteFinishSubscriptions.start();
             await attachHostServices(wsServer);
             botsRuntimeReady = true;
-            if (pluginRuntime.builtin.isEnabled("bots")) botsService.start();
+            if (pluginRuntime.builtin.isEnabled("bots")) {
+              botsService.start();
+              botsSlack.start();
+            }
             // Bind the plugin session host and start configured plugins before any
             // external ingress attaches, mirroring upstream's pre-accept ordering.
             pluginRuntime.bindJAgentDeskSessionHost(wsServer);
@@ -2531,6 +2555,7 @@ export async function createJAgentDeskDaemon(
             // Noise E2EE handshake before session admission.
             const relaySecurityLogger = logger.child({ module: "relay-security" });
             relayRuntime = createRelayRuntime({
+              controlHandler: botsSlack,
               config: {
                 enabled: config.relayEnabled ?? true,
                 endpoint: config.relayEndpoint ?? DEFAULT_RELAY_ENDPOINT,
@@ -2675,6 +2700,7 @@ export async function createJAgentDeskDaemon(
     sshService.dispose();
     argocdService.dispose();
     sideloadService.dispose();
+    await botsSlack.dispose();
     await botsService.dispose();
     jiraService.dispose();
     void figmaService.dispose();

@@ -9,6 +9,11 @@ import type {
 
 const agentIdSchema = z.string().min(1);
 const sourceSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("external-message"),
+    senderId: z.string().min(1),
+    title: z.string().min(1),
+  }),
   z.object({ kind: z.literal("change-request-update"), url: z.url() }),
   z.object({
     kind: z.literal("agent-message"),
@@ -73,6 +78,9 @@ export function formatAgentMessage(message: AgentMessage): string {
   let title = "";
   if (source?.kind === "change-request-update") {
     attributes = `kind="change-request-update" url="${escapeXml(source.url)}"`;
+  } else if (source?.kind === "external-message") {
+    attributes = `kind="external-message" sender-id="${escapeXml(source.senderId)}"`;
+    title = ` source-agent-title="${escapeXml(source.title)}"`;
   } else if (source) {
     attributes = `kind="${source.kind}" source-agent-id="${escapeXml(source.agentId)}"`;
     if ("serverId" in source && source.serverId)
@@ -106,6 +114,7 @@ export function parseAgentMessage(text: string): AgentMessage | null {
     serverId: attributes.get("source-server-id"),
     url: attributes.get("url"),
     agentId: attributes.get("source-agent-id"),
+    senderId: attributes.get("sender-id"),
     event: attributes.get("event"),
     title: attributes.get("source-agent-title"),
   });
@@ -214,11 +223,11 @@ export function projectAgentMessage(item: AgentTimelineItem): AgentTimelineItem 
   if (!source) {
     return { ...item, text: message.text, clientMessageId: message.id };
   }
-  if (source.kind === "change-request-update") {
+  if (source.kind === "change-request-update" || source.kind === "external-message") {
     return {
       type: "tool_call",
-      callId: `jagentdesk-change-request:${message.id}`,
-      name: "change_request_update",
+      callId: `jagentdesk-${source.kind === "external-message" ? "external-message" : "change-request"}:${message.id}`,
+      name: source.kind === "external-message" ? "external_message" : "change_request_update",
       status: "completed",
       error: null,
       detail: { type: "plain_text", text: message.text },

@@ -1,3 +1,4 @@
+import type { BotsSlack } from "./slack.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Logger } from "pino";
@@ -31,6 +32,12 @@ export interface BotTriggerSource {
   poll(bot: Bot): Promise<BotTrigger[]>;
 }
 export class BotsService {
+  slack?: BotsSlack;
+  private readonly replyListeners = new Set<(request: BotMessage, reply: BotMessage) => void>();
+  onReply(listener: (request: BotMessage, reply: BotMessage) => void): () => void {
+    this.replyListeners.add(listener);
+    return () => this.replyListeners.delete(listener);
+  }
   private enabled = false;
   private hasStarted = false;
   private shuttingDown = false;
@@ -121,6 +128,7 @@ export class BotsService {
   async delete(id: string): Promise<void> {
     const bot = this.storage.bot(id);
     const rooms = this.storage.rooms().filter((room) => room.memberBotIds.includes(id));
+    await this.slack?.disconnect(id);
     this.storage.saveBot({ ...bot, paused: true });
     for (const item of this.storage.items(id)) await this.cancel(id, item.id, "Bot deleted");
     if (bot.agentId) await this.runtime.cancel(bot.agentId);
@@ -140,7 +148,7 @@ export class BotsService {
     text: string,
     source: string,
     key: string = randomUUID(),
-    place: { roomId?: string; rootId?: string } = {},
+    place: Pick<BotMessage, "roomId" | "rootId" | "slack"> = {},
   ): BotMessage | null {
     this.storage.bot(botId);
     const message = this.storage.enqueue(botId, `${botId}:${key}`, text, source, place);
@@ -162,8 +170,22 @@ export class BotsService {
       this.storage.saveBot({ ...this.storage.bot(botId), agentId });
       if (bot.agentId !== agentId) this.changed(botId);
       if (!this.enabled || this.storage.bot(botId).paused) return;
-      this.storage.setState(`active:${botId}`, message);
-      await this.runtime.send(agentId, `[${message.source}]\n${message.text}`, message.id);
+      const activate = () => this.storage.setState(`active:${botId}`, message);
+      if (!message.slack) activate();
+      await this.runtime.send(
+        agentId,
+        `[${message.source}]\n${message.text}`,
+        message.id,
+        undefined,
+        message.slack
+          ? {
+              senderId: `slack:${message.slack.userId}`,
+              title: message.source,
+              beforeDispatch: activate,
+            }
+          : undefined,
+      );
+
       this.storage.delivered(message.id);
     } finally {
       this.dispatching.delete(botId);
@@ -172,8 +194,11 @@ export class BotsService {
   addItem(botId: string, title: string, doneMeans: string): BotItem {
     this.storage.bot(botId);
     const now = this.now();
+    const id = randomUUID();
+    const active = this.storage.state(`active:${botId}`, BotMessageSchema.nullable());
+    if (active?.slack) this.storage.setState(`slack:item:${id}`, active.slack);
     return this.saveItem({
-      id: randomUUID(),
+      id,
       botId,
       title,
       doneMeans,
@@ -370,22 +395,20 @@ export class BotsService {
     if (this.shuttingDown) return;
     const bot = this.storage.listBots().find((b) => b.agentId === event.agentId);
     if (bot && event.kind !== "ask") {
-      const active = this.storage.state(
-        `active:${bot.id}`,
-        z
-          .object({ id: z.string(), roomId: z.string().optional(), rootId: z.string().optional() })
-          .nullable(),
-      );
+      const active = this.storage.state(`active:${bot.id}`, BotMessageSchema.nullable());
       const message: BotMessage = {
         id: `reply:${bot.id}:${event.key}`,
         botId: bot.id,
         role: "assistant",
         text: event.text,
         source: event.kind,
+        rootId: active?.rootId,
+        slack: active?.slack,
         createdAt_ms: this.now(),
       };
       if (this.storage.append(message)) {
         this.emit({ type: "bots.chat.message", payload: { message } });
+        if (active) for (const listener of this.replyListeners) listener(active, message);
         if (
           active?.roomId &&
           this.storage
@@ -679,8 +702,17 @@ export class BotsService {
     this.storage.close();
   }
 
+  private handleSlack(
+    msg: Extract<BotsRequest, { type: `bots.slack.${string}` }>,
+  ): Promise<Record<string, unknown>> {
+    if (!this.slack) throw new Error("Slack is unavailable");
+    return this.slack.handle(msg);
+  }
   // Successful results are parsed by the matching protocol schema at the session boundary.
   async handle(msg: BotsRequest): Promise<Record<string, unknown>> {
+    if (msg.type.startsWith("bots.slack.")) {
+      return this.handleSlack(msg as Extract<BotsRequest, { type: `bots.slack.${string}` }>);
+    }
     switch (msg.type) {
       case "bots.list.request":
         return { bots: this.storage.listBots() };
@@ -727,6 +759,8 @@ export class BotsService {
       case "bots.schedules.delete.request":
         this.deleteSchedule(msg.botId, msg.scheduleId);
         return {};
+      default:
+        throw new Error("Unknown bots method");
     }
   }
 }

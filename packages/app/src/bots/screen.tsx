@@ -27,6 +27,7 @@ import { CreateBotSheet, BotForm } from "./bot-form";
 import { BotChat } from "./chat";
 import { BotItems, WorkerPermissions } from "./items";
 import { HomeFiles } from "./home-files";
+import { BotSlackSettings } from "./slack";
 import { BotSchedules } from "./schedules";
 import { RoomSheet, RoomChat } from "./rooms";
 type BotTab = "chat" | "items" | "soulMemory" | "schedules" | "settings";
@@ -82,6 +83,7 @@ function BotSettings({
         error={save.error}
       />
       <View style={styles.body}>
+        <BotSlackSettings serverId={serverId} botId={bot.id} />
         <Button
           variant="outline"
           onPress={togglePause}

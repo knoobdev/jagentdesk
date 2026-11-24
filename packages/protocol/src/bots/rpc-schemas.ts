@@ -14,8 +14,27 @@ const request = <T extends string, S extends z.ZodRawShape>(type: T, shape: S) =
   z.object({ type: z.literal(type), requestId: z.string(), ...shape });
 const response = <T extends string, S extends z.ZodRawShape>(type: T, shape: S) =>
   z.object({ type: z.literal(type), payload: z.object({ requestId: z.string(), ...shape }) });
+export const SlackStatusSchema = z.object({
+  connected: z.boolean(),
+  relayConnected: z.boolean(),
+  requestUrl: z.string().optional(),
+  workspace: z.string().optional(),
+  botName: z.string().optional(),
+  allowedUsers: z.array(z.object({ id: z.string(), name: z.string() })),
+});
+export type SlackStatus = z.infer<typeof SlackStatusSchema>;
 const botId = { botId: z.string() };
 export const BotsRequestSchemas = [
+  request("bots.slack.manifest.request", botId),
+  request("bots.slack.connect.request", {
+    ...botId,
+    botToken: z.string().min(1).max(4096),
+    signingSecret: z.string().min(1).max(4096),
+  }),
+  request("bots.slack.status.request", botId),
+  request("bots.slack.link_code.request", botId),
+  request("bots.slack.allowed.remove.request", { ...botId, userId: z.string().min(1) }),
+  request("bots.slack.disconnect.request", botId),
   request("bots.list.request", {}),
   request("bots.create.request", { bot: BotInputSchema }),
   request("bots.update.request", { ...botId, patch: BotPatchSchema }),
@@ -69,6 +88,12 @@ export const BotsRequestSchemas = [
   request("bots.schedules.delete.request", { ...botId, scheduleId: z.string() }),
 ] as const;
 export const BotsResponseSchemas = [
+  response("bots.slack.manifest.response", { manifest: z.string(), requestUrl: z.string() }),
+  response("bots.slack.connect.response", { status: SlackStatusSchema }),
+  response("bots.slack.status.response", { status: SlackStatusSchema }),
+  response("bots.slack.link_code.response", { code: z.string(), expiresAt_ms: z.number() }),
+  response("bots.slack.allowed.remove.response", { status: SlackStatusSchema }),
+  response("bots.slack.disconnect.response", { status: SlackStatusSchema }),
   response("bots.list.response", { bots: z.array(BotSchema) }),
   response("bots.create.response", { bot: BotSchema }),
   response("bots.update.response", { bot: BotSchema }),

@@ -186,7 +186,7 @@ export class BotStorage {
     id: string,
     text: string,
     source: string,
-    place: { roomId?: string; rootId?: string } = {},
+    place: Pick<BotMessage, "roomId" | "rootId" | "slack"> = {},
   ): BotMessage | null {
     const message: BotMessage = {
       id,

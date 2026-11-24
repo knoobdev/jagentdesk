@@ -6,7 +6,13 @@ import type { ExternalSocketMetadata } from "./websocket-server.js";
 import { createRelayOwnershipGuard } from "./relay-ownership.js";
 import type { RelayOwnershipSigner } from "./daemon-keypair.js";
 
+export interface RelayControlHandler {
+  ready(send: (frame: unknown) => void): void;
+  closed(): void;
+  message(frame: unknown): void;
+}
 export interface RelayTransportOptions {
+  controlHandler?: RelayControlHandler;
   logger: pino.Logger;
   attachSocket(ws: RelaySocketLike, metadata?: ExternalSocketMetadata): Promise<void>;
   relayEndpoint: string; // "host[:port]"
@@ -115,6 +121,7 @@ export function startRelayTransport({
   relayUseTls,
   serverId,
   relayOwnership,
+  controlHandler,
   createWebSocket = createDefaultRelayWebSocket,
 }: RelayTransportOptions): RelayTransportController {
   const relayLogger = logger.child({ module: "relay-transport" });
@@ -132,6 +139,7 @@ export function startRelayTransport({
 
   const stop = async (): Promise<void> => {
     stopped = true;
+    controlHandler?.closed();
     if (reconnectTimeout) {
       clearTimeout(reconnectTimeout);
       reconnectTimeout = null;
@@ -151,6 +159,7 @@ export function startRelayTransport({
         // ignore
       }
       controlWs = null;
+      controlHandler?.closed();
     }
     for (const ws of rawDataSockets.values()) {
       try {
@@ -186,6 +195,7 @@ export function startRelayTransport({
       if (controlWs !== socket) return;
       if (controlConnected) return;
       controlConnected = true;
+      controlHandler?.ready((frame) => guardedControl.send(JSON.stringify(frame)));
       controlReadyAt = Date.now();
       if (controlReadyTimeout) {
         clearTimeout(controlReadyTimeout);
@@ -275,6 +285,7 @@ export function startRelayTransport({
         "relay_control_disconnected",
       );
       controlWs = null;
+      controlHandler?.closed();
       if (controlKeepaliveInterval) {
         clearInterval(controlKeepaliveInterval);
         controlKeepaliveInterval = null;
@@ -302,6 +313,14 @@ export function startRelayTransport({
     guardedControl.on("message", (data) => {
       if (controlWs !== socket) return;
       controlLastSeenAt = Date.now();
+      try {
+        const frame: unknown = JSON.parse(
+          Buffer.isBuffer(data) ? data.toString("utf8") : String(data),
+        );
+        controlHandler?.message(frame);
+      } catch {
+        /* Never log hook frames. */
+      }
       const msg = tryParseControlMessage(data);
       if (msg) {
         markControlReady();

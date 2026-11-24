@@ -22,6 +22,10 @@
       "types": "./dist/cloudflare-adapter.d.ts",
       "default": "./dist/cloudflare-adapter.js"
     },
+    "./hooks": {
+      "types": "./dist/hooks.d.ts",
+      "default": "./dist/hooks.js"
+    },
     "./ownership": {
       "types": "./dist/ownership.d.ts",
       "default": "./dist/ownership.js"
