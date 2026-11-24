@@ -230,7 +230,7 @@ export class DaemonBotRuntime implements BotRuntime {
           prompt: text,
           messageId,
           source: { kind: "agent-message", agentId: sourceAgentId },
-          activeTurnBehavior: "steer",
+          activeTurnBehavior: "queue",
           unarchive: false,
         },
       );

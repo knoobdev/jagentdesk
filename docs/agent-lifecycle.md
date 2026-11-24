@@ -20,8 +20,8 @@ turn. Idle agents stay dormant. Archived, internal, daemon-owned and archived-wo
 are excluded. A slow or unavailable provider holds back only its own agent.
 
 Recovery is best-effort: a crash between clearing intent and dispatch can lose continuation.
-Child completion notifications retained over restart still wait for the parent's next turn
-(ADR-0029); recovery must not turn them into automatic parent wakeups.
+Durable local finish subscriptions are reconciled after startup continuation admission. A child's
+completion queues a notification that starts a parent turn automatically, including after restart.
 
 ## Runtime residency
 

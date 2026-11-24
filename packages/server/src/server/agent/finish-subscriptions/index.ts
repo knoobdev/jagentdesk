@@ -4,17 +4,8 @@ import path from "node:path";
 import type { Logger } from "pino";
 import { z } from "zod";
 import { writeJsonFileAtomic } from "../../atomic-file.js";
-import type { AgentPromptSource } from "../agent-messages/index.js";
 
-/**
- * Durable finish subscriptions (ADR-0029 decisions 4 and 5).
- *
- * A caller that asked to be told when a child finishes keeps that request in
- * `$JAGENTDESK_HOME/finish-subscriptions.json` until the notification has been
- * dispatched. After a daemon restart the parent is NOT woken: each subscription
- * that was still open becomes a pending notification that rides along with the
- * parent's next turn (a user message or another agent message).
- */
+/** Durable local finish intent survives until the parent accepts dispatch (Paseo #7683). */
 
 const FinishSubscriptionRecordSchema = z.object({
   id: z.string().min(1),
@@ -109,17 +100,10 @@ export class FinishSubscriptionStore {
   }
 }
 
-/** A notification waiting for the parent's next turn. */
-export interface PendingFinishNotification {
-  subscriptionId: string;
-  source: AgentPromptSource;
-  body: string;
-}
-
 interface FinishSubscriptionState {
   store: FinishSubscriptionStore;
-  pending: Map<string, PendingFinishNotification[]>;
   suspended: boolean;
+  controller: AbortController;
 }
 
 // Keyed by the daemon's AgentManager, like the delivery queue.
@@ -129,12 +113,15 @@ export function configureFinishSubscriptions(
   agentManager: object,
   store: FinishSubscriptionStore,
 ): void {
-  states.set(agentManager, { store, pending: new Map(), suspended: false });
+  states.set(agentManager, { store, suspended: false, controller: new AbortController() });
 }
 
 export function suspendFinishNotifications(agentManager: object): void {
   const state = states.get(agentManager);
-  if (state) state.suspended = true;
+  if (state) {
+    state.suspended = true;
+    state.controller.abort();
+  }
 }
 
 export function areFinishNotificationsSuspended(agentManager: object): boolean {
@@ -145,58 +132,15 @@ export function getFinishSubscriptionStore(agentManager: object): FinishSubscrip
   return states.get(agentManager)?.store ?? null;
 }
 
-export function hasPendingFinishNotifications(
-  agentManager: object,
-  parentAgentId: string,
-): boolean {
-  return Boolean(states.get(agentManager)?.pending.get(parentAgentId)?.length);
-}
-
-/** Take the notifications that ride along with this parent's next turn. */
-export function takePendingFinishNotifications(
-  agentManager: object,
-  parentAgentId: string,
-): PendingFinishNotification[] {
-  const state = states.get(agentManager);
-  const pending = state?.pending.get(parentAgentId);
-  if (!state || !pending?.length) return [];
-  state.pending.delete(parentAgentId);
-  return pending;
-}
-
-/** The turn they rode on was not dispatched; keep them for the next one. */
-export function returnPendingFinishNotifications(
-  agentManager: object,
-  parentAgentId: string,
-  notifications: PendingFinishNotification[],
-): void {
-  const state = states.get(agentManager);
-  if (!state || notifications.length === 0) return;
-  state.pending.set(parentAgentId, [...notifications, ...(state.pending.get(parentAgentId) ?? [])]);
-}
-
-/** Dispatched with the parent's turn: the subscription is done. */
-export async function completePendingFinishNotifications(
-  agentManager: object,
-  notifications: PendingFinishNotification[],
-): Promise<void> {
-  const store = getFinishSubscriptionStore(agentManager);
-  if (!store) return;
-  await Promise.all(notifications.map((entry) => store.remove(entry.subscriptionId)));
-}
-
 export interface RestoreFinishSubscriptionsParams {
   agentManager: object;
   store: FinishSubscriptionStore;
-  getAgentTitle(agentId: string): Promise<string | null>;
+  reconcile(record: FinishSubscriptionRecord, signal: AbortSignal): Promise<void>;
   isArchived(agentId: string): Promise<boolean>;
   logger: Logger;
 }
 
-/**
- * Daemon start: every subscription still open was cut by the restart. Keep it as
- * a pending notification for the parent's next turn — never start a turn here.
- */
+/** Reconcile saved local children and deliver their outcomes just like live observations. */
 export async function restoreFinishSubscriptions(
   params: RestoreFinishSubscriptionsParams,
 ): Promise<number> {
@@ -208,26 +152,16 @@ export async function restoreFinishSubscriptions(
       await params.store.remove(record.id);
       continue;
     }
-    const title = (await params.getAgentTitle(record.childAgentId)) ?? record.childAgentId;
-    const entry: PendingFinishNotification = {
-      subscriptionId: record.id,
-      source: {
-        kind: "agent-notification",
-        agentId: record.childAgentId,
-        title,
-        event: "closed",
-      },
-      body: `Agent ${record.childAgentId} (${title}) was closed: the daemon restarted before it reported back. Use get_agent_activity to read its latest output.`,
-    };
-    state.pending.set(record.callerAgentId, [
-      ...(state.pending.get(record.callerAgentId) ?? []),
-      entry,
-    ]);
-    restored += 1;
+    void params.reconcile(record, state.controller.signal).catch((error: unknown) => {
+      if (!state.controller.signal.aborted)
+        params.logger.error(
+          { err: error, subscriptionId: record.id },
+          "Failed to restore finish subscription",
+        );
+    });
+    restored++;
   }
-  if (restored > 0) {
-    params.logger.info({ restored }, "Restored finish notifications for the parents' next turns");
-  }
+  if (restored) params.logger.info({ restored }, "Restored local finish subscriptions");
   return restored;
 }
 

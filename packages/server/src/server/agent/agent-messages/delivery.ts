@@ -334,10 +334,10 @@ export function createAgentMessageDelivery(
     for (;;) {
       const messages = batch.filter(isQueued);
       if (!messages.length) return;
-      await resolveSources(messages);
+      if (dependencies.resolveSource) await resolveSources(messages);
       const request = requestFor(recipientId, messages, idleOnly && !closed, stopped);
       try {
-        for (const message of messages) await message.beforeDispatch?.();
+        for (const message of messages) if (message.beforeDispatch) await message.beforeDispatch();
         let disposition: PromptDispatchDisposition;
         try {
           disposition = await dependencies.dispatch(request);
@@ -389,7 +389,7 @@ export function createAgentMessageDelivery(
     for (const message of candidates) {
       if (closed || stopped() || !stillDue()) return;
       if (!isOfferable(message)) continue;
-      await resolveSources([message]);
+      if (dependencies.resolveSource) await resolveSources([message]);
       const request = requestFor(recipientId, [message], true, stopped);
       try {
         const accepted = await tryRunOutOfBand(request, () => {
@@ -633,8 +633,9 @@ export function createAgentMessageDelivery(
           for (const message of riders) message.state = "claimed";
           let result: Result;
           try {
-            for (const message of riders) await message.beforeDispatch?.();
-            await resolveSources(riders);
+            for (const message of riders)
+              if (message.beforeDispatch) await message.beforeDispatch();
+            if (dependencies.resolveSource) await resolveSources(riders);
             result = await send(join(riders, direct));
           } catch (error) {
             handBack(riders);

@@ -3,7 +3,7 @@ import { createChangeRequestRouter } from "../services/change-request-router.js"
 import { createForgeService } from "../services/forge-registry.js";
 import { createForgeResolver } from "../services/forge-resolver.js";
 import { createChangeRequestWatches } from "./agent/change-request-watches/index.js";
-import { getAgentMessageDelivery } from "./agent/agent-prompt.js";
+import { getAgentMessageDelivery, setupFinishNotification } from "./agent/agent-prompt.js";
 import { BotStorage } from "./bots/storage.js";
 import { BotsService } from "./bots/service.js";
 import type { BotTriggerSource } from "./bots/service.js";
@@ -1188,12 +1188,23 @@ export async function createJAgentDeskDaemon(
     agentManager.updateProviderRegistry(nextAgentManagerState);
   };
   logger.info({ elapsed: elapsed() }, "Agent storage initialized");
-  // Durable finish subscriptions (ADR-0029 decisions 4, 5): open ones become
-  // notifications for each parent's next turn; no parent is woken here.
+  // Reconcile after startup continuation admission so a running child is observed through its next finish.
   await restoreFinishSubscriptions({
     agentManager,
     store: FinishSubscriptionStore.forHome(config.jagentdeskHome, logger),
-    getAgentTitle: async (agentId) => (await agentStorage.get(agentId))?.title ?? null,
+    reconcile: async (record, signal) => {
+      await restartRecovery.waitForResume(record.childAgentId, signal);
+      signal.throwIfAborted();
+      await setupFinishNotification({
+        agentManager,
+        agentStorage,
+        childAgentId: record.childAgentId,
+        callerAgentId: record.callerAgentId,
+        requireParentOwnership: record.requireParentOwnership,
+        restoredSubscriptionId: record.id,
+        logger,
+      }).ready;
+    },
     isArchived: async (agentId) => Boolean((await agentStorage.get(agentId))?.archivedAt),
     logger,
   }).catch((error: unknown) => {
