@@ -1,5 +1,6 @@
 export const MARKDOWN_COPY_TAG_ATTRIBUTE = "data-jagentdesk-markdown-tag";
 export const MARKDOWN_COPY_IGNORE_ATTRIBUTE = "data-jagentdesk-markdown-ignore";
+export const MARKDOWN_COPY_LIST_MARKER_ATTRIBUTE = "data-jagentdesk-markdown-list-marker";
 export const MARKDOWN_COPY_UNWRAP_ATTRIBUTE = "data-jagentdesk-markdown-unwrap";
 export const MARKDOWN_COPY_LIST_START_ATTRIBUTE = "data-jagentdesk-markdown-list-start";
 export const MARKDOWN_COPY_LANGUAGE_ATTRIBUTE = "data-jagentdesk-markdown-language";
@@ -10,9 +11,10 @@ export const MARKDOWN_COPY_ALT_ATTRIBUTE = "data-jagentdesk-markdown-alt";
 /**
  * Trailing line breaks, with any indentation that followed the last one.
  *
- * Copying code strips these: pasting a trailing newline into a terminal runs the
- * last line. A fence body always ends in one, and ends in several when the author
- * left blank lines before the closing fence.
+ * Both ways of copying code strip these, for the same reason: pasting a trailing
+ * newline into a terminal runs the last line. A fence body always ends in one, and
+ * ends in several when the author left blank lines before the closing fence; a
+ * selection picks one up whenever it overshoots the end of a rendered line.
  */
 export const TRAILING_CODE_LINE_BREAKS = /(\r?\n[ \t]*)+$/;
 
@@ -29,6 +31,7 @@ export const markdownCopyDataSet = {
   hr: { jagentdeskMarkdownTag: "hr" },
   ignore: { jagentdeskMarkdownIgnore: "true" },
   li: { jagentdeskMarkdownTag: "li" },
+  listMarker: { jagentdeskMarkdownIgnore: "true", jagentdeskMarkdownListMarker: "true" },
   ol: { jagentdeskMarkdownTag: "ol" },
   p: { jagentdeskMarkdownTag: "p" },
   pre: { jagentdeskMarkdownTag: "pre" },
