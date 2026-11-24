@@ -6,7 +6,7 @@ import type {
   AgentProvider,
   ProviderSnapshotEntry,
 } from "@jagentdesk/protocol/agent-types";
-import { useHosts } from "@/runtime/host-runtime";
+import { useHostRuntimeIsConnected, useHosts } from "@/runtime/host-runtime";
 import { buildProviderDefinitions } from "@/utils/provider-definitions";
 import {
   buildSelectableProviderSelectorProviders,
@@ -250,6 +250,8 @@ export function useAgentFormState(options: UseAgentFormStateOptions = {}): UseAg
     refetchIfStale: refetchSnapshotIfStale,
   } = useProvidersSnapshot(formState.serverId, { cwd: formState.workingDir });
 
+  const isConnected = useHostRuntimeIsConnected(formState.serverId ?? "");
+
   const allProviderEntries = useMemo(() => snapshotEntries ?? [], [snapshotEntries]);
   const snapshotProviderDefinitions = useMemo(
     () => buildProviderDefinitions(snapshotEntries),
@@ -284,8 +286,8 @@ export function useAgentFormState(options: UseAgentFormStateOptions = {}): UseAg
     [snapshotEntries],
   );
   const snapshotModelSelectorProviders = useMemo(
-    () => buildSelectableProviderSelectorProviders(snapshotEntries),
-    [snapshotEntries],
+    () => buildSelectableProviderSelectorProviders(snapshotEntries, isConnected),
+    [snapshotEntries, isConnected],
   );
   const snapshotSelectedEntry = useMemo(
     () =>
@@ -309,7 +311,8 @@ export function useAgentFormState(options: UseAgentFormStateOptions = {}): UseAg
   const availableModels = snapshotSelectedProviderModels;
   const modeOptions = snapshotSelectedProviderModes;
   const isModelSelectionLoading =
-    resolution.status === "pending" || snapshotIsLoading || selectedProviderIsLoading;
+    isConnected &&
+    (resolution.status === "pending" || snapshotIsLoading || selectedProviderIsLoading);
   const isAllModelsLoading = isModelSelectionLoading;
 
   const combinedInitialValues = useMemo(

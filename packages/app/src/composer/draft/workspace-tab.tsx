@@ -516,7 +516,7 @@ export function WorkspaceDraftAgentTab({
         composerState,
         autoSubmitConfig,
         workspaceDirectory: draftWorkingDirectory,
-        hasClient: Boolean(client),
+        isConnected,
       });
     },
     onBeforeSubmit: async () => {
