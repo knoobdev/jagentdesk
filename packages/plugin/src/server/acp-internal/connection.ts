@@ -16,6 +16,7 @@ import {
   type SessionNotification,
   type SessionUpdate,
   type ToolCall,
+  type ToolCallContent,
   type ToolCallUpdate,
   type Stream,
 } from "@agentclientprotocol/sdk";
@@ -410,6 +411,15 @@ interface ActivePrompt {
 const DEFAULT_DEFERRED_SETTLE_DELAY_MS = 500;
 const DEFAULT_DEFERRED_QUIET_LIMIT_MS = 120_000;
 
+type AcpToolCallSource = AcpToolCallSnapshot & {
+  diff?: Extract<ToolCallContent, { type: "diff" }>;
+};
+
+interface AcpToolCallState {
+  source: AcpToolCallSource;
+  presentation: AcpToolCallSnapshot;
+}
+
 class AcpRuntime {
   readonly connection: ClientSideConnection;
   agentCapabilities: AgentCapabilities = {};
@@ -417,7 +427,8 @@ class AcpRuntime {
   private readonly child: ChildProcessWithoutNullStreams | null;
   private emit: (event: ProviderEvent) => void;
   private readonly messages = new Map<string, string>();
-  private readonly toolCalls = new Map<string, AcpToolCallSnapshot>();
+  private readonly toolCalls = new Map<string, AcpToolCallState>();
+  private mcpServerNames: readonly string[] = [];
   private readonly vendorToolCalls = new Map<string, ToolCallTimelineItem>();
   private readonly liveOpenToolIds = new Set<string>();
   private readonly canceledToolCallIds = new Set<string>();
@@ -579,6 +590,7 @@ class AcpRuntime {
     connectionCapabilities: readonly ProviderCapability[],
   ): Promise<readonly ProviderCapability[]> {
     const mcpServers = toAcpMcpServers(input.config);
+    this.mcpServerNames = mcpServers.map((server) => server.name);
     let nativeSessionId = readNativeSessionId(input.persistence);
     const metadata: Record<string, unknown> = {
       _jagentdesk: {
@@ -1477,7 +1489,8 @@ class AcpRuntime {
     options?: { preserveQualifyingOpenTools?: boolean; suppressTrailingToolEcho?: boolean },
   ): void {
     const preserve = options?.preserveQualifyingOpenTools === true;
-    for (const [id, snapshot] of this.toolCalls) {
+    for (const [id, tool] of this.toolCalls) {
+      const snapshot = tool.presentation;
       if (snapshot.status !== "pending" && snapshot.status !== "in_progress") continue;
       if (preserve && this.liveOpenToolIds.has(id) && this.toolKeepsTurnOpen(snapshot)) continue;
       this.liveOpenToolIds.delete(id);
@@ -1486,7 +1499,10 @@ class AcpRuntime {
         ...snapshot,
         status: state === "completed" ? "completed" : "failed",
       };
-      this.toolCalls.set(id, completed);
+      this.toolCalls.set(id, {
+        source: { ...tool.source, status: completed.status },
+        presentation: completed,
+      });
       this.emit({
         type: "timeline.item",
         sessionId: this.options.boundarySessionId,
@@ -1524,16 +1540,32 @@ class AcpRuntime {
     if (update.sessionUpdate === "tool_call") {
       this.canceledToolCallIds.delete(update.toolCallId);
     }
-    const current = this.toolCalls.get(update.toolCallId);
+    const tool = this.toolCalls.get(update.toolCallId);
+    const current = tool?.presentation;
     const wasOpenQualifying =
       current !== undefined &&
       this.liveOpenToolIds.has(current.id) &&
       this.toolKeepsTurnOpen(current);
-    let snapshot = mergeToolCallSnapshot(update, current);
-    const context = { sessionId: this.options.boundarySessionId };
+    const source = mergeToolCallSnapshot(update, tool?.source);
+    let snapshot: AcpToolCallSnapshot = source;
+    const context = {
+      sessionId: this.options.boundarySessionId,
+      mcpServerNames: this.mcpServerNames,
+    };
     for (const transformer of this.transformers)
       snapshot = transformer.toolCall?.(snapshot, context) ?? snapshot;
-    this.toolCalls.set(snapshot.id, snapshot);
+    if (!snapshot.detail && source.diff && snapshot.kind === "edit") {
+      snapshot = {
+        ...snapshot,
+        detail: {
+          type: "edit",
+          filePath: source.diff.path,
+          oldString: source.diff.oldText ?? undefined,
+          newString: source.diff.newText,
+        },
+      };
+    }
+    this.toolCalls.set(snapshot.id, { source, presentation: snapshot });
     const isOpen = snapshot.status === "pending" || snapshot.status === "in_progress";
     if (this.replayWindow === null) {
       if (isOpen) this.liveOpenToolIds.add(snapshot.id);
@@ -1806,7 +1838,7 @@ class AcpRuntime {
 
   private hasQualifyingOpenTools(): boolean {
     for (const id of this.liveOpenToolIds) {
-      const snapshot = this.toolCalls.get(id);
+      const snapshot = this.toolCalls.get(id)?.presentation;
       if (snapshot && this.toolKeepsTurnOpen(snapshot)) return true;
     }
     return false;
@@ -2044,8 +2076,8 @@ function ownConnectorStream(source: Stream): {
 
 function mergeToolCallSnapshot(
   update: ToolCall | ToolCallUpdate,
-  current: AcpToolCallSnapshot | undefined,
-): AcpToolCallSnapshot {
+  current: AcpToolCallSource | undefined,
+): AcpToolCallSource {
   return {
     id: update.toolCallId,
     name: firstText(update.name, current?.name),
@@ -2055,6 +2087,10 @@ function mergeToolCallSnapshot(
     input: jsonValue(firstDefined(update.rawInput, current?.input, null)),
     output: jsonValue(firstDefined(update.rawOutput, current?.output, null)),
     locations: update.locations?.map((location) => location.path) ?? current?.locations ?? [],
+    diff:
+      update.content === undefined
+        ? current?.diff
+        : update.content?.find((item) => item.type === "diff"),
   };
 }
 
