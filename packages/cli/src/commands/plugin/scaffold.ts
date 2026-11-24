@@ -28,6 +28,9 @@ when they help. Use sentence case and plain factual language, with no em dashes.
 Omit installation commands, badges, changelog, contributing or license sections,
 marketing, and unsupported claims. Avoid implementation filler such as empty
 cleanup functions, theme-token field lists, or lists of absent features.
+
+To translate the overview, add a whole copy beside this file named for the
+language, such as OVERVIEW.zh-CN.md. Readers in that language see it instead.
 -->
 `;
 
@@ -102,7 +105,13 @@ export async function scaffoldPluginDirectory(
     private: true,
     version: "0.0.0",
     // Publishing an npm plugin package ships only what the host loads.
-    files: ["jagentdesk-plugin.json", "OVERVIEW.md", "index.ts", "main.client.tsx"],
+    files: [
+      "jagentdesk-plugin.json",
+      "OVERVIEW.md",
+      "OVERVIEW.*.md",
+      "index.ts",
+      "main.client.tsx",
+    ],
     scripts: { typecheck: "tsc --noEmit" },
     devDependencies: {
       "@jagentdesk/plugin": resolveCliVersion(),
