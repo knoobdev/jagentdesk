@@ -1,3 +1,4 @@
+import type { AutocompleteStatus } from "@/components/ui/autocomplete";
 import { ComposerRecall } from "@/composer/recall";
 import { selectAgentSentMessages } from "@/stores/session-store";
 import type { ComposerKeyPressEvent } from "@/composer/input/input";
@@ -2197,8 +2198,6 @@ export function Composer({
     [handleEditQueuedMessage, handleSendQueuedNow, queuedMessages, t],
   );
 
-  const messageInputContainerRef = useRef<View>(null);
-
   const isSubmitLoadingVisible = isProcessing || isSubmitLoading || isUploadingFile;
   const isSubmitDisabled =
     isSubmitLoadingVisible || (waitForGithubAutoAttachOnSubmit && githubAutoAttach.isResolving);
@@ -2224,6 +2223,19 @@ export function Composer({
   const githubEmptyText = githubSearchResultsQuery.isFetching
     ? t("composer.github.searching")
     : t("composer.github.noResults");
+  const autocompleteStatus = useMemo<AutocompleteStatus | null>(() => {
+    if (autocomplete.errorMessage) return { kind: "error", title: autocomplete.errorMessage };
+    if (autocomplete.isLoading) return { kind: "loading", message: autocomplete.loadingText };
+    if (autocomplete.options.length === 0)
+      return { kind: "empty", message: autocomplete.emptyText };
+    return null;
+  }, [
+    autocomplete.errorMessage,
+    autocomplete.isLoading,
+    autocomplete.loadingText,
+    autocomplete.options.length,
+    autocomplete.emptyText,
+  ]);
   const autocompleteVisible =
     autocomplete.isVisible && isPaneFocused && !recall.isShowing(userInput);
 
@@ -2239,19 +2251,14 @@ export function Composer({
 
             <View style={styles.messageInputStack}>
               {topContent}
-              <View ref={messageInputContainerRef} style={styles.messageInputContainer}>
-                <AutocompletePopover
-                  visible={autocompleteVisible}
-                  anchorRef={messageInputContainerRef}
-                  options={autocomplete.options}
-                  selectedIndex={autocomplete.selectedIndex}
-                  onSelect={autocomplete.onSelectOption}
-                  isLoading={autocomplete.isLoading}
-                  errorMessage={autocomplete.errorMessage}
-                  loadingText={autocomplete.loadingText}
-                  emptyText={autocomplete.emptyText}
-                />
-
+              <AutocompletePopover
+                visible={autocompleteVisible}
+                anchorStyle={styles.messageInputContainer}
+                options={autocomplete.options}
+                selectedIndex={autocomplete.selectedIndex}
+                onSelect={autocomplete.onSelectOption}
+                status={autocompleteStatus}
+              >
                 {/* MessageInput handles everything: text, dictation, attachments, all buttons */}
                 <StableMessageInput
                   ref={messageInputRef}
@@ -2317,7 +2324,7 @@ export function Composer({
                   renderOption={renderGithubPickerOption}
                 />
                 {pluginAttachmentPicker.picker}
-              </View>
+              </AutocompletePopover>
             </View>
           </View>
         </View>
