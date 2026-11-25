@@ -19,7 +19,7 @@ interface TestJAgentDeskDaemonOptions {
   slackApiBaseUrl?: string;
   hostCapabilities?: import("../host-capabilities/service.js").HostCapabilityService;
   botsTriggerSource?: import("../bots/service.js").BotTriggerSource;
-  sessionShareTunnelManager?: import("../session-share/tunnel-manager.js").TunnelManager;
+  sessionShareTunnelManager?: import("../tunnels/tunnel-manager.js").TunnelManager;
   builtinPlugins?: BuiltinPluginLoader;
   daemonVersion?: string;
   desktopManaged?: boolean;

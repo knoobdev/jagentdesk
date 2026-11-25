@@ -1,9 +1,12 @@
+import {
+  useHostFeature,
+  useHostRuntimeClient,
+  useHostRuntimeIsConnected,
+  settingsStyles,
+} from "../../../packages/app/src/plugins/builtin/host-api";
 import { memo, useCallback, useEffect, useState, type ReactElement } from "react";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { useHostFeature } from "@/runtime/host-features";
-import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
-import { settingsStyles } from "@/styles/settings";
 import type { SessionShare } from "@jagentdesk/protocol/messages";
 
 /**

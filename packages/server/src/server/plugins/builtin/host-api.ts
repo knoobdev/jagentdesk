@@ -75,3 +75,8 @@ export type { AgentTimelineRow } from "../../agent/agent-timeline-store-types.js
 export type { ProviderSubagentDescriptor } from "../../agent/provider-subagents/store.js";
 export { ensureUnarchivedAgentLoaded } from "../../agent/agent-loading.js";
 export { runArchifyRenderer, type ArchifyDiagramError } from "../../archify/archify-renderer.js";
+
+// Session sharing: core owns guest confinement and the tunnel binary; the feature owns shares.
+export { guestScopesForCapabilities } from "../../authorization/guest-scopes.js";
+export { TunnelManager, CloudflaredMissingError } from "../../tunnels/tunnel-manager.js";
+export type { AgentStorage } from "../../agent/agent-storage.js";

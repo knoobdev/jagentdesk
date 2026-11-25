@@ -17,7 +17,6 @@ import {
   KanbanSquare,
   Radar,
   Server,
-  Share2,
   Ship,
   Smartphone,
   Store,
@@ -58,7 +57,6 @@ import {
   buildSchedulesRoute,
   buildServersRoute,
   buildSessionsRoute,
-  buildSharedSessionsRoute,
   buildSimulatorRoute,
   buildProxyRoute,
 } from "@/utils/host-routes";
@@ -66,7 +64,6 @@ import {
 /** Routes behind the app's primary navigation, shared by the sidebar list and the Gumloop rail. */
 export interface AppNavTargets {
   botsRoute: Href | null;
-  sharedSessionsRoute: Href | null;
   clustersRoute: Href | null;
   databasesRoute: Href | null;
   serversRoute: Href | null;
@@ -99,7 +96,6 @@ export function useAppNavTargets(): AppNavTargets {
   const clustersEnabled = useBuiltinPluginEnabled(firstServerId, "clusters");
   const databasesEnabled = useBuiltinPluginEnabled(firstServerId, "databases");
   const workbenchEnabled = useBuiltinPluginEnabled(firstServerId, "workbench");
-  const sharingEnabled = useBuiltinPluginEnabled(firstServerId, "session-share");
   // Forge Hub is a post-ADR-0003 surface gated per release milestone (spec 19.12):
   // only advertise the entry when the first/active daemon reports forgeHub.
   const supportsForgeHub = useSessionStore(
@@ -152,7 +148,6 @@ export function useAppNavTargets(): AppNavTargets {
         : null,
       clustersRoute: clustersEnabled ? clustersRoute : null,
       databasesRoute: databasesEnabled ? databasesRoute : null,
-      sharedSessionsRoute: sharingEnabled ? (buildSharedSessionsRoute() as Href) : null,
       // Gated at the route: the entry disappears with the daemon feature flag.
       serversRoute: supportsSshServers ? perHost(buildServersRoute) : null,
       forgeRoute: perHost(buildForgeRoute),
@@ -170,7 +165,6 @@ export function useAppNavTargets(): AppNavTargets {
     clustersEnabled,
     databasesEnabled,
     workbenchEnabled,
-    sharingEnabled,
     supportsJira,
     supportsFigma,
     deviceServerId,
@@ -194,6 +188,8 @@ interface AppNavItemBase {
   testID: string;
   /** Built-in destinations: the core item key this entry precedes. */
   before?: string;
+  /** Built-in destinations: legacy sidebar row test id. */
+  sidebarTestID?: string;
 }
 
 export type AppNavItem = AppNavItemBase &
@@ -236,17 +232,6 @@ export function useAppNavItems(): AppNavItem[] {
         testID: "rail-schedules",
       },
       navItem("bots", Bot, t("bots.title"), t("bots.title"), targets.botsRoute, pathname, "/bots"),
-      targets.sharedSessionsRoute
-        ? {
-            key: "shared-sessions",
-            icon: Share2,
-            label: "Shared sessions",
-            shortLabel: "Shared",
-            route: targets.sharedSessionsRoute,
-            isActive: pathname.includes("/shared-sessions"),
-            testID: "rail-shared-sessions",
-          }
-        : null,
 
       navItem(
         "marketplace",

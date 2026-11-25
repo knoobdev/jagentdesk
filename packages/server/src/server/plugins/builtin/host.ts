@@ -14,6 +14,8 @@ import type { AgentStorage } from "../../agent/agent-storage.js";
 import type { SkillInvocationResolver } from "../../agent/agent-prompt.js";
 import type { SpecPlanSource } from "../../agent/spec-plan.js";
 import type { HostCapabilityService } from "../../host-capabilities/service.js";
+import type { TunnelManager } from "../../tunnels/tunnel-manager.js";
+import type { WebSocket as WsSocket } from "ws";
 import type { SpecModePhase } from "@jagentdesk/protocol/spec-mode";
 import {
   BuiltinPluginError,
@@ -74,6 +76,23 @@ export interface BuiltinDaemonDeps {
   hostCapabilities(): HostCapabilityService | null;
   /** Push notification to paired devices; the daemon adds its serverId to `data`. */
   sendPush(notice: BuiltinPushNotice): void;
+  /** Core resources Session sharing uses; guest confinement stays in the daemon's sessions. */
+  sessionShare: SessionShareDeps;
+}
+export interface GuestSocketParams {
+  agentId: string;
+  scopes: readonly string[];
+  workspaceCwd: string | null;
+  onGuestActivity?: (text: string) => void;
+}
+export interface SessionShareDeps {
+  tunnelManager: TunnelManager;
+  /** App web build served to guests as the real UI; the bespoke page when unset. */
+  appDistDir?: string;
+  /** Hands a validated guest socket to the daemon as an agent-confined session (ADR-0019). */
+  attachGuestSocket(ws: WsSocket, params: GuestSocketParams): void;
+  /** Re-scopes connected guest sessions of an agent after a capability toggle. */
+  updateGuestScopes(agentId: string, scopes: readonly string[]): void;
 }
 export interface BuiltinDaemonContext extends BuiltinCoreServices, BuiltinDaemonDeps {
   /** The daemon home. Preserve a migrated feature's existing storage paths under it. */

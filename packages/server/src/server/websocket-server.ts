@@ -46,7 +46,6 @@ import { type RemoteExecService } from "./remote-exec/types.js";
 import { type CustomProviderService } from "./custom-providers/types.js";
 import { type FigmaService } from "./figma/service.js";
 import { type ScheduleService } from "./schedule/service.js";
-import { type SessionShareService } from "./session-share/service.js";
 import { type CreationSnapshot } from "@jagentdesk/protocol/messages";
 import { type CheckoutDiffManager, type CheckoutDiffMetrics } from "./checkout-diff-manager.js";
 import { type DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
@@ -742,8 +741,6 @@ export class VoiceAssistantWebSocketServer {
 
   private readonly scheduleService: ScheduleService;
 
-  private sessionShareService!: SessionShareService | null;
-
   // Agent activity graph (spec 31, ADR-0031): one daemon-wide service shared by every session.
 
   // Jira (spec 29), injected post-construction.
@@ -952,7 +949,6 @@ export class VoiceAssistantWebSocketServer {
     pairing?: PairingServerDependencies | null,
     pluginRuntime?: PluginRuntimePort | null,
     databaseRegistry?: DatabaseRegistry,
-    sessionShareService?: SessionShareService | null,
     sshService?: SshService | null,
     argocdService?: ArgoCdService | null,
     sideloadService?: SideloadService | null,
@@ -1040,7 +1036,6 @@ export class VoiceAssistantWebSocketServer {
       getDaemonTcpHost,
       serviceProxyPublicBaseUrl,
       resolveScriptHealth,
-      sessionShareService,
     });
     if (!providerSnapshotManager) {
       throw new Error("providerSnapshotManager is required");
@@ -1114,9 +1109,7 @@ export class VoiceAssistantWebSocketServer {
     getDaemonTcpHost: (() => string | null) | undefined;
     serviceProxyPublicBaseUrl: string | null | undefined;
     resolveScriptHealth: ((hostname: string) => ScriptHealthState | null) | undefined;
-    sessionShareService: SessionShareService | null | undefined;
   }): void {
-    this.sessionShareService = params.sessionShareService ?? null;
     this.speech = params.speech ?? null;
     this.terminalManager = params.terminalManager ?? null;
     if (this.terminalManager) {
@@ -2317,7 +2310,6 @@ export class VoiceAssistantWebSocketServer {
       customProvidersService: this.customProvidersService,
       workspaceBaseBranch: this.workspaceBaseBranch,
       scheduleService: this.scheduleService,
-      sessionShareService: this.sessionShareService,
       checkoutDiffManager: this.checkoutDiffManager,
       github: this.github,
       workspaceGitService: this.workspaceGitService,
@@ -2885,8 +2877,6 @@ export class VoiceAssistantWebSocketServer {
         sideload: this.sideloadService !== null,
         sideloadHostBrowse: this.sideloadService !== null,
         ...this.builtinFeatureFlags(),
-        // Session sharing (spec §21 / ADR-0018); advertised only when the daemon opted in.
-        ...(this.sessionShareService ? { sessionSharing: true } : {}),
         // Agent activity graph (spec 31 / ADR-0031). COMPAT(activityGraph): added after v0.9.47.
         activityGraph: true,
         // Argo CD (spec 30 / ADR-0034): advertised only when the daemon runs the service.
@@ -2969,6 +2959,8 @@ export class VoiceAssistantWebSocketServer {
       ...(daemon?.port("autorun") ? { autorun: true, autorunApproval: true } : {}),
       // Spec mode (spec 28 / ADR-0030): agent.spec_mode.* surface.
       ...(daemon?.port("specMode") ? { specMode: true } : {}),
+      // Session sharing (spec §21 / ADR-0018); plugin state turns it off by default.
+      ...(daemon ? { sessionSharing: true } : {}),
     };
   }
 

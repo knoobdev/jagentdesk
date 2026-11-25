@@ -42,12 +42,13 @@ export function useBuiltinDestinations(pathname: string): AppNavItem[] {
               key: destination.id,
               group: destination.group,
               label: destination.title,
-              shortLabel: destination.title,
+              shortLabel: destination.shortTitle ?? destination.title,
               icon: destination.icon,
               route: destination.route(serverId),
               isActive: pathname.includes(`/${destination.routeSegment}`),
               testID: `rail-${destination.id}`,
               before: destination.before,
+              sidebarTestID: destination.sidebarTestID,
             })),
           ),
     [compact, entries, pathname, serverId],
@@ -66,6 +67,18 @@ export function BuiltinScreen({ serverId, segment, ...props }: ScreenProps & { s
       <Screen serverId={serverId} {...props} />
     </BuiltinPluginScreenBoundary>
   ) : null;
+}
+export function BuiltinWorkspaceHeaderControls({ serverId }: BuiltinClientProps) {
+  const entries = useBuiltinClientContributions(serverId);
+  return (
+    <>
+      {[...entries].flatMap(([id, entry]) =>
+        [...entry.workspaceHeader].map(([key, Control]) => (
+          <Control key={`${id}/${key}`} serverId={serverId} />
+        )),
+      )}
+    </>
+  );
 }
 /** Per-host binders render nothing visible; they mount with the host route. */
 export function BuiltinHostBinders({ serverId }: BuiltinClientProps) {
@@ -205,7 +218,7 @@ function BuiltinSidebarDestination({ item }: { item: AppNavItem }) {
       label={item.label}
       onPress={onPress}
       isActive={item.isActive}
-      testID={`sidebar-${item.key}-nav`}
+      testID={item.sidebarTestID ?? `sidebar-${item.key}-nav`}
       variant="compact"
     />
   );

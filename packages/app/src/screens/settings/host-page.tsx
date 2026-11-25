@@ -77,7 +77,6 @@ import { BrowserToolsOptInCard } from "./browser-tools-card";
 import { IdleRuntimeCleanupCard } from "./idle-runtime-cleanup-card";
 import { RestartRecoveryCard } from "./restart-recovery-card";
 import { BuiltinAgentSettingsCards } from "@/plugins/builtin/surfaces";
-import { SessionShareOptInCard } from "./session-share-card";
 import { BrowserFingerprintProfilesCard } from "./browser-fingerprint-profiles-card";
 import { hasDaemonReconnectedAfter, type DaemonConnectionMarker } from "./daemon-reconnect";
 import { restartDaemonFromSettings } from "./daemon-restart";
@@ -277,9 +276,6 @@ export function HostAgentsPage({ serverId }: { serverId: string }) {
             <BrowserToolsOptInCard serverId={serverId} />
           </LegacyPluginSettings>
           <BuiltinAgentSettingsCards serverId={serverId} />
-          <LegacyPluginSettings serverId={serverId}>
-            <SessionShareOptInCard serverId={serverId} />
-          </LegacyPluginSettings>
           <BuiltinPluginGate serverId={serverId} id="browser-tools">
             <BrowserFingerprintProfilesCard serverId={serverId} />
           </BuiltinPluginGate>

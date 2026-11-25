@@ -5,7 +5,6 @@ export {
   gumloopListStyles,
   gumloopTabStyles,
 } from "@/components/gumloop-shell/list-styles";
-export { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 export { useWorkspaceDirectory, useWorkspaceKeys } from "@/stores/session-store-hooks";
 export { getDesktopHost } from "@/desktop/host";
 export { useIsCompactFormFactor } from "@/constants/layout";
@@ -79,3 +78,7 @@ export { acceptSelectMessage } from "@/agent-stream/activity-node-action";
 export { htmlPreviewNavigationKind } from "@/file-pane/html-preview-navigation";
 export { formatTokenCount } from "@/components/context-window-meter.utils";
 export { usageHistoryQueryKey, type UsageHistory } from "@/data/usage-history-query";
+export {
+  useGumloopDesktopShell,
+  useIsGumloopTheme,
+} from "@/components/gumloop-shell/use-gumloop-chrome";

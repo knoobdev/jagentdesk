@@ -11,8 +11,7 @@ import { SheetTabs } from "./sheet-tabs";
 import { SheetPaneHostProvider, type SheetPaneHost } from "./sheet-pane";
 import type { PaneHost } from "@/panels/panel-manifest";
 import { usePendingWorkspaceOpen } from "@/stores/workspace-layout-store";
-import { SessionShareControl } from "@/composer/agent-controls/session-share-control";
-import { BuiltinPluginGate } from "@/plugins/builtin/gate";
+import { BuiltinWorkspaceHeaderControls } from "@/plugins/builtin/surfaces";
 import { PluginHeaderButtons, usePluginWorkspaceMenu } from "@/plugins/buttons/view";
 import { useActiveWorkspaceArchive } from "@/hooks/use-active-workspace-archive";
 import { usePrPaneData } from "@/git/pull-request-panel";
@@ -1368,17 +1367,6 @@ interface WorkspaceHeaderTitleBarProps {
 function WorkspaceScreenHeader(props: ComponentProps<typeof ScreenHeader>) {
   const gumloop = useGumloopDesktopShell(true);
   return <ScreenHeader {...props} desktopHeight={gumloop ? 64 : undefined} />;
-}
-
-function GumloopHeaderShare({ serverId }: { serverId: string }) {
-  const gumloop = useGumloopDesktopShell(true);
-  const agentId = useSessionStore((state) => state.sessions[serverId]?.focusedAgentId);
-  if (!gumloop || !agentId) return null;
-  return (
-    <BuiltinPluginGate serverId={serverId} id="session-share">
-      <SessionShareControl serverId={serverId} agentId={agentId} />
-    </BuiltinPluginGate>
-  );
 }
 
 function GumloopChatTitle({
@@ -4009,7 +3997,7 @@ function WorkspaceScreenContent({
   const headerRight = useMemo(
     () => (
       <View style={[styles.headerRight, actionsInVerticalBar && styles.verticalHeaderRight]}>
-        <GumloopHeaderShare serverId={normalizedServerId} />
+        <BuiltinWorkspaceHeaderControls serverId={normalizedServerId} />
         <WorkspaceOrchestrationPanel
           serverId={normalizedServerId}
           workspaceId={normalizedWorkspaceId}

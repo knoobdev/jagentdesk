@@ -1,12 +1,15 @@
+import {
+  sendPromptToAgent,
+  TunnelManager,
+  CloudflaredMissingError,
+  guestScopesForCapabilities,
+  type AgentManager,
+  type AgentStorage,
+  type AgentTimelineItem,
+} from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 import { randomBytes, randomInt } from "node:crypto";
 import type { Logger } from "pino";
-import type { AgentManager } from "../agent/agent-manager.js";
-import type { AgentStorage } from "../agent/agent-storage.js";
-import { sendPromptToAgent } from "../agent/agent-prompt.js";
-import type { AgentTimelineItem } from "../agent/agent-sdk-types.js";
 import type { WebSocket as WsSocket } from "ws";
-import { TunnelManager, CloudflaredMissingError } from "./tunnel-manager.js";
-import { guestScopesForCapabilities } from "./guest-scopes.js";
 import {
   ShareServer,
   type GuestMember,

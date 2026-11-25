@@ -201,8 +201,7 @@ import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseRegistry } from "./database/database-registry.js";
 import { ScheduleService } from "./schedule/service.js";
 import { sendPromptToAgent } from "./agent/agent-prompt.js";
-import { SessionShareService } from "./session-share/service.js";
-import { TunnelManager } from "./session-share/tunnel-manager.js";
+import { TunnelManager } from "./tunnels/tunnel-manager.js";
 import { DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
 import { PluginService } from "./plugins/index.js";
 import { ManagedPluginSources } from "./plugins/managed-source.js";
@@ -1183,6 +1182,19 @@ export async function createJAgentDeskDaemon(
       broadcast: (message) => wsServer?.broadcast(wrapSessionMessage(message)),
       hostCapabilities: () => daemonHostCapabilities,
       sendPush: (notice) => wsServer?.sendBuiltinPush(notice),
+      sessionShare: {
+        tunnelManager: dependencies.sessionShareTunnelManager ?? new TunnelManager(logger),
+        appDistDir:
+          config.sessionShareAppDistDir ??
+          process.env.JAGENTDESK_SHARE_APP_DIST ??
+          resolveBundledShareAppDist(),
+        // Session-share guests (ADR-0019): the scoped ShareServer /ws hands validated guest
+        // sockets to the daemon as agent-confined real sessions.
+        attachGuestSocket: (ws, params) => wsServer?.attachGuestSocket(ws, params),
+        // A live capability toggle re-scopes already-connected guest sessions (ADR-0019).
+        updateGuestScopes: (agentId, scopes) =>
+          wsServer?.updateGuestScopesForAgent(agentId, scopes),
+      },
     },
   );
   pluginRuntime.builtinDaemon = builtinDaemon;
@@ -1765,26 +1777,6 @@ export async function createJAgentDeskDaemon(
     }
   });
   logger.info({ elapsed: elapsed() }, "Schedule service initialized");
-  // Session sharing stays off by default. Construction is inert; its lifecycle owns
-  // Cloudflare quick tunnels and scoped per-share servers.
-  const shareAppDistDir =
-    config.sessionShareAppDistDir ??
-    process.env.JAGENTDESK_SHARE_APP_DIST ??
-    resolveBundledShareAppDist();
-  const sessionShareService = new SessionShareService({
-    logger,
-    agentManager,
-    agentStorage,
-    tunnelManager: dependencies.sessionShareTunnelManager ?? new TunnelManager(logger),
-    isEnabled: () => pluginRuntime.builtin.isEnabled("session-share"),
-    appDistDir: shareAppDistDir,
-    onUpdate: (share) =>
-      emitExternalSessionMessage({ type: "session.share.stream", payload: { share } }),
-  });
-  logger.info(
-    { elapsed: elapsed(), enabled: config.sessionSharingEnabled === true },
-    "Session share service initialized",
-  );
   await pluginRuntime.builtin.registerLifecycle("clusters", {
     start: () => {},
     stop: async () => {
@@ -1857,10 +1849,6 @@ export async function createJAgentDeskDaemon(
   await pluginRuntime.builtin.registerLifecycle("jira", {
     start: () => {},
     stop: () => jiraService.dispose(),
-  });
-  await pluginRuntime.builtin.registerLifecycle("session-share", {
-    start: () => {},
-    stop: () => sessionShareService.stop(),
   });
   logger.info({ elapsed: elapsed() }, "Loading persisted agent registry");
   const persistedRecords = await agentStorage.list();
@@ -2423,7 +2411,6 @@ export async function createJAgentDeskDaemon(
               },
               pluginRuntime,
               databaseRegistry,
-              sessionShareService,
               sshService,
               argocdService,
               sideloadService,
@@ -2438,15 +2425,6 @@ export async function createJAgentDeskDaemon(
                 { host: url.hostname.replace(/^\[|\]$/g, ""), port: target.pairing.port },
               );
             });
-            // Session-share guests (ADR-0019): let the scoped ShareServer /ws hand validated guest
-            // sockets to the daemon as agent-confined real sessions.
-            sessionShareService?.setGuestAttacher((ws, params) =>
-              wsServer?.attachGuestSocket(ws, params),
-            );
-            // Let a live capability toggle re-scope already-connected guest sessions (ADR-0019).
-            sessionShareService?.setGuestScopeUpdater((agentId, scopes) =>
-              wsServer?.updateGuestScopesForAgent(agentId, scopes),
-            );
             const remoteObservation = createRemoteFinishObservation({
               agentManager,
               agentStorage,
@@ -2656,7 +2634,6 @@ export async function createJAgentDeskDaemon(
     await builtinDaemon.stop();
     await speechService.stop();
     await scheduleService.stop().catch(() => undefined);
-    await sessionShareService?.stop().catch(() => undefined);
     await relayRuntime?.stop().catch(() => undefined);
     await remoteFinishSubscriptions?.close();
     await tsnetListener?.stop().catch(() => undefined);

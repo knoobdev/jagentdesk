@@ -1,23 +1,23 @@
+import {
+  PageHeader,
+  useHosts,
+  useIsGumloopTheme,
+  gumloopListStyles,
+} from "../../../packages/app/src/plugins/builtin/host-api";
 import { type ReactElement } from "react";
 import { ScrollView, Text, View } from "react-native";
-import { useIsFocused } from "expo-router/react-navigation";
 import { StyleSheet } from "react-native-unistyles";
-import { PageHeader } from "@/components/headers/page-header";
 import { Share2 } from "lucide-react-native";
-import { SessionSharesCard } from "@/screens/settings/session-shares-card";
-import { useHosts } from "@/runtime/host-runtime";
-import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
-import { gumloopListStyles } from "@/components/gumloop-shell/list-styles";
+import { SessionSharesCard } from "./shares-card";
 
 // Global "Shared sessions" page (spec §21 / ADR-0019): manage every active share across connected
 // hosts from the main menu — outside a specific agent chat and outside Settings. Each host renders a
 // SessionSharesCard (which self-hides when the host is disconnected or doesn't support sharing).
-export function SharedSessionsScreen(): ReactElement {
-  const isFocused = useIsFocused();
+export function SharedSessionsScreen({ focused }: { focused?: boolean }): ReactElement {
   const hosts = useHosts();
   const isGumloop = useIsGumloopTheme();
 
-  if (!isFocused) {
+  if (focused === false) {
     return <View style={styles.container} />;
   }
 

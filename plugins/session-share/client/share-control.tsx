@@ -1,14 +1,19 @@
+import {
+  Clipboard,
+  AgentControlTrigger,
+  Switch,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+  useHostFeature,
+  useIsGumloopTheme,
+  useHostRuntimeClient,
+  useHostRuntimeIsConnected,
+} from "../../../packages/app/src/plugins/builtin/host-api";
 import { memo, useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { Check, Copy, Plus, Share2, UserX, X } from "lucide-react-native";
-import * as Clipboard from "expo-clipboard";
-import { AgentControlTrigger } from "@/composer/agent-controls/control";
-import { Switch } from "@/components/ui/switch";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useHostFeature } from "@/runtime/host-features";
-import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
-import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import type {
   SessionShare,
   SessionShareActivity,

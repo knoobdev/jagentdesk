@@ -13,7 +13,6 @@ import {
   Database,
   GitPullRequest,
   CalendarClock,
-  Share2,
   FolderPlus,
   History,
   Home,
@@ -91,7 +90,6 @@ import { useIsMobilePanelPresented } from "@/mobile-panels/provider";
 import {
   buildOpenProjectRoute,
   buildSchedulesRoute,
-  buildSharedSessionsRoute,
   buildSessionsRoute,
   buildSettingsAddHostRoute,
   buildSettingsHostSectionRoute,
@@ -271,7 +269,6 @@ interface SidebarLabels {
   searchHosts: string;
   sessions: string;
   schedules: string;
-  sharedSessions: string;
   bots: string;
   clusters: string;
   databases: string;
@@ -296,7 +293,6 @@ interface DesktopSidebarProps extends SidebarSharedProps {
   active: boolean;
   handleViewMore: () => void;
   handleViewSchedules: () => void;
-  handleViewSharedSessions: () => void;
 }
 
 export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boolean }) {
@@ -490,12 +486,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     router.push(buildSchedulesRoute());
   }, []);
 
-  const handleViewSharedSessionsNavigate = useCallback(() => {
-    // Cast: expo-router's typed-routes manifest re-indexes /shared-sessions on the next dev run; the
-    // route file exists and resolves at runtime.
-    router.push(buildSharedSessionsRoute() as Href);
-  }, []);
-
   const newWorkspaceKeys = useShortcutKeys("new-workspace");
   const labels = useMemo(
     (): SidebarLabels => ({
@@ -508,7 +498,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       searchHosts: t("sidebar.host.searchPlaceholder"),
       sessions: t("sidebar.sections.sessions"),
       schedules: t("sidebar.sections.schedules"),
-      sharedSessions: "Shared sessions",
       bots: t("bots.title"),
       clusters: "Clusters",
       databases: "Databases",
@@ -601,7 +590,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
         handleOpenHostSettings={handleOpenHostSettingsDesktop}
         handleViewMore={handleViewMoreNavigate}
         handleViewSchedules={handleViewSchedulesNavigate}
-        handleViewSharedSessions={handleViewSharedSessionsNavigate}
       />
     </RetainedPanelActivity>
   );
@@ -1122,7 +1110,6 @@ function DesktopSidebar({
   active,
   handleViewMore,
   handleViewSchedules,
-  handleViewSharedSessions,
 }: DesktopSidebarProps) {
   const builtinTargets = useAppNavTargets();
   const handleBots = useCallback(() => {
@@ -1134,7 +1121,6 @@ function DesktopSidebar({
   const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
   const isSessionsActive = pathname.includes("/sessions");
   const isSchedulesActive = pathname.includes("/schedules");
-  const isSharedSessionsActive = pathname.includes("/shared-sessions");
   const isClustersActive = pathname.includes("/clusters");
   const isDatabasesActive = pathname.includes("/database");
   const isServersActive = pathname.includes("/servers");
@@ -1297,16 +1283,7 @@ function DesktopSidebar({
                 variant="compact"
               />
             </NavTargetGate>
-            <NavTargetGate route={builtinTargets.sharedSessionsRoute}>
-              <SidebarHeaderRow
-                icon={Share2}
-                label={labels.sharedSessions}
-                onPress={handleViewSharedSessions}
-                isActive={isSharedSessionsActive}
-                testID="sidebar-shared-sessions"
-                variant="compact"
-              />
-            </NavTargetGate>
+            <BuiltinSidebarDestinations before="skills" />
 
             <NavTargetGate route={builtinTargets.clustersRoute}>
               <SidebarHeaderRow

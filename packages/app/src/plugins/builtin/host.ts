@@ -21,6 +21,10 @@ export interface BuiltinDestination {
   routeSegment: string;
   /** Rail position: insert before this core item key instead of after Marketplace. */
   before?: string;
+  /** Rail label under the icon; defaults to `title`. */
+  shortTitle?: string;
+  /** Legacy sidebar row test id; defaults to `sidebar-<id>-nav`. */
+  sidebarTestID?: string;
 }
 export interface BuiltinAgentProps extends BuiltinClientProps {
   agentId: string;
@@ -60,6 +64,8 @@ export type BuiltinTurnPreparer = (input: {
 }) => BuiltinTurnPreparation;
 export interface BuiltinScreen extends BuiltinClientProps {
   sshDocker?: import("@/ssh/ui/ssh-docker-client").SshDockerTarget;
+  /** Set by route adapters that keep a blurred screen mounted but idle. */
+  focused?: boolean;
 }
 export interface BuiltinClientHost {
   readonly id: BuiltinPluginId;
@@ -84,6 +90,8 @@ export interface BuiltinClientHost {
   /** Rendered below an agent's conversation. */
   agentPanelAccessory(id: string, component: ComponentType<BuiltinAgentProps>): void;
   turnPreparer(prepare: BuiltinTurnPreparer): void;
+  /** A control in the workspace screen header (Gumloop desktop shell). */
+  workspaceHeaderControl(id: string, component: ComponentType<BuiltinClientProps>): void;
   /** A control in the agent chat header row, in plugin order. */
   agentHeaderControl(id: string, component: ComponentType<BuiltinAgentProps>): void;
   agentSidePanel(id: string, panel: BuiltinAgentSidePanel): void;
@@ -116,6 +124,7 @@ export interface BuiltinClientContributions {
   turnPreparers: BuiltinTurnPreparer[];
   composerDocks: Map<string, ComponentType<BuiltinComposerDockProps>>;
   agentHeader: Map<string, ComponentType<BuiltinAgentProps>>;
+  workspaceHeader: Map<string, ComponentType<BuiltinClientProps>>;
   sidePanels: Map<string, BuiltinAgentSidePanel>;
   userMessageBody: ComponentType<BuiltinUserMessageBodyProps> | null;
   agentSettings: Map<string, { component: ComponentType<BuiltinClientProps>; order: number }>;
@@ -139,6 +148,7 @@ export class BuiltinClientRegistry {
       turnPreparers: [],
       composerDocks: new Map(),
       agentHeader: new Map(),
+      workspaceHeader: new Map(),
       sidePanels: new Map(),
       userMessageBody: null,
       agentSettings: new Map(),
@@ -164,6 +174,7 @@ export class BuiltinClientRegistry {
       turnPreparer: (prepare) => entry.turnPreparers.push(prepare),
       agentComposerDock: (key, component) => add(entry.composerDocks, key, component),
       agentHeaderControl: (key, component) => add(entry.agentHeader, key, component),
+      workspaceHeaderControl: (key, component) => add(entry.workspaceHeader, key, component),
       agentSidePanel: (key, panel) => add(entry.sidePanels, key, panel),
       agentSettingsCard: (key, component, order) =>
         add(entry.agentSettings, key, { component, order }),

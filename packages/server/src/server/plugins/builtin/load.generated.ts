@@ -5,6 +5,7 @@ import { register as register2 } from "../../../../../../plugins/spec-mode/serve
 import { register as register3 } from "../../../../../../plugins/autorun/server/index.js";
 import { register as register4 } from "../../../../../../plugins/activity-graph/server/index.js";
 import { register as register5 } from "../../../../../../plugins/insights/server/index.js";
+import { register as register6 } from "../../../../../../plugins/session-share/server/index.js";
 import type { BuiltinServerRegistry } from "./host.js";
 export function loadBuiltins(registry: BuiltinServerRegistry) {
   register0(registry.forPlugin("docker"));
@@ -13,4 +14,5 @@ export function loadBuiltins(registry: BuiltinServerRegistry) {
   register3(registry.forPlugin("autorun"));
   register4(registry.forPlugin("activity-graph"));
   register5(registry.forPlugin("insights"));
+  register6(registry.forPlugin("session-share"));
 }

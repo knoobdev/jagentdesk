@@ -112,6 +112,9 @@ Import `BuiltinClientHost` and shared UI/services from
 UI, theme tokens, terminal rendering, host runtime, and workspace selection stay in core.
 Packages installed only under `packages/app/node_modules` (`expo-clipboard`,
 `react-native-safe-area-context`) do not resolve from `plugins/`; import them from the host API.
+Do not re-export `expo-router/react-navigation` there: every core module that reads the registry
+would load it, and its CommonJS entry pulls raw React Native into the app's unit tests. Route
+adapters pass `focused` to the screen instead.
 Feature client tests run in the app's unit Vitest project.
 Unistyles' Babel configuration includes `plugins/` so migrated styles receive the same transform
 on web, iOS, and Android.

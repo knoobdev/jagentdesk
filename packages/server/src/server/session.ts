@@ -229,8 +229,6 @@ import {
   createGitMetadataGenerator,
 } from "./session/checkout/git-metadata-generator.js";
 import { ChatScheduleLoopSession } from "./session/chat/chat-schedule-loop-session.js";
-import { SessionShareSession } from "./session/session-share/session-share-session.js";
-import { type SessionShareService } from "./session-share/service.js";
 import { ClusterSession } from "./session/cluster/cluster-session.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseSession } from "./session/database/database-session.js";
@@ -638,8 +636,6 @@ export interface SessionOptions {
   chatService: FileBackedChatService;
 
   scheduleService: ScheduleService;
-
-  sessionShareService?: SessionShareService | null;
 
   // Agent activity graph (spec 31, ADR-0031); shared daemon-wide service.
 
@@ -1197,8 +1193,6 @@ export class Session {
 
   private readonly chatScheduleLoopSession: ChatScheduleLoopSession;
 
-  private readonly sessionShareSession: SessionShareSession | null;
-
   private clusterSession!: ClusterSession;
 
   private databaseSession!: DatabaseSession;
@@ -1511,8 +1505,7 @@ export class Session {
       clientId: this.clientId,
       logger: this.sessionLogger,
     });
-    ({ sessionShareSession: this.sessionShareSession, jiraSession: this.jiraSession } =
-      this.createOptionalSessions(options));
+    ({ jiraSession: this.jiraSession } = this.createOptionalSessions(options));
     this.initClusterSession(options);
     this.initDatabaseSession(options);
     this.initSshSession(options);
@@ -1818,17 +1811,9 @@ export class Session {
   // The sessions that exist only when their daemon-wide service is enabled. Extracted from the
   // constructor to keep its cyclomatic complexity under the lint limit.
   private createOptionalSessions(options: SessionOptions): {
-    sessionShareSession: SessionShareSession | null;
     jiraSession: JiraSession | null;
   } {
     return {
-      sessionShareSession: options.sessionShareService
-        ? new SessionShareSession({
-            host: { emit: (msg) => this.emit(msg) },
-            sessionShareService: options.sessionShareService,
-            logger: this.sessionLogger,
-          })
-        : null,
       jiraSession: options.jiraService
         ? new JiraSession({
             service: options.jiraService,
@@ -3127,7 +3112,6 @@ export class Session {
       () => this.dispatchProviderMessage(msg),
       () => this.dispatchTerminalMessage(msg, source),
       () => this.dispatchChatScheduleLoopMessage(msg),
-      () => this.dispatchSessionShareMessage(msg),
       () => this.dispatchClusterMessage(msg),
       () => this.dispatchDatabaseMessage(msg),
       () => this.dispatchSshMessage(msg),
@@ -4206,27 +4190,6 @@ export class Session {
         return this.chatScheduleLoopSession.handleScheduleRunOnceRequest(msg);
       case "schedule/update":
         return this.chatScheduleLoopSession.handleScheduleUpdateRequest(msg);
-      default:
-        return undefined;
-    }
-  }
-
-  private dispatchSessionShareMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    const share = this.sessionShareSession;
-    if (!share) return undefined;
-    switch (msg.type) {
-      case "session.share.create.request":
-        return share.handleCreateRequest(msg);
-      case "session.share.stop.request":
-        return share.handleStopRequest(msg);
-      case "session.share.kick.request":
-        return share.handleKickRequest(msg);
-      case "session.share.respond.request":
-        return share.handleRespondRequest(msg);
-      case "session.share.set_options.request":
-        return share.handleSetOptionsRequest(msg);
-      case "session.share.list.request":
-        return share.handleListRequest(msg);
       default:
         return undefined;
     }

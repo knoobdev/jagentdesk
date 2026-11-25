@@ -1,7 +1,6 @@
 import { ChatColumnRailSurface } from "@/chat-rail";
 import { PaneSubtitle } from "./pane-subtitle";
 import { useAgentFactsLine } from "./agent-facts-line";
-import { useGumloopDesktopShell } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { ComposerDock } from "@/composer/dock";
 import { RewindCommandCenterRegistration } from "@/components/rewind/command-center-registration";
 import {
@@ -19,9 +18,7 @@ import { ParentAgentCallout, ParentAgentPill, useParentAgentId } from "@/subagen
 import { useAgentDescriptor as useAgentPanelDescriptor } from "@/agent-presentation";
 import { useAgentStreamTail } from "@/agent-stream/use-agent-stream-tail";
 import type { AgentAddress } from "@jagentdesk/protocol/addresses";
-import { BuiltinPluginGate } from "@/plugins/builtin/gate";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import { SessionShareControl } from "@/composer/agent-controls/session-share-control";
 import { type ActivityGraphNodeRef } from "@jagentdesk/protocol/agent-activity-graph";
 import { isGuestReadOnlyShare, isGuestShareMode } from "@/screens/share/guest-share-mode";
 import { type DaemonClient } from "@jagentdesk/client/internal/daemon-client";
@@ -1167,7 +1164,6 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
   onAttentionPromptSend: () => void;
   onOpenWorkspaceFile?: (request: WorkspaceFileOpenRequest) => void;
 }) {
-  const gumloopDesktop = useGumloopDesktopShell(true);
   const isSheet = usePaneHost() === "sheet";
   const facts = useAgentFactsLine(serverId, agentId);
   const composerEditingSession = useMemo(() => new ComposerEditingSession(), []);
@@ -1274,11 +1270,6 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
   const sharingHeader = isGuestShareMode() ? null : (
     <View style={styles.shareHeader}>
       <BuiltinAgentItems serverId={serverId} agentId={agentId} kind="agentHeader" />
-      {gumloopDesktop ? null : (
-        <BuiltinPluginGate serverId={serverId} id="session-share">
-          <SessionShareControl agentId={agentId} serverId={serverId} />
-        </BuiltinPluginGate>
-      )}
     </View>
   );
   const chatSurface = (

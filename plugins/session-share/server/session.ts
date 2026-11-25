@@ -1,6 +1,9 @@
+import type {
+  SessionInboundMessage,
+  SessionOutboundMessage,
+} from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 import type pino from "pino";
-import type { SessionInboundMessage, SessionOutboundMessage } from "../../messages.js";
-import type { SessionShareService } from "../../session-share/service.js";
+import type { SessionShareService } from "./service.js";
 
 /**
  * Host-side session-sharing RPC surface (spec §21 / ADR-0018). These are host↔daemon over the

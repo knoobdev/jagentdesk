@@ -1,16 +1,18 @@
+import {
+  Switch,
+  useDaemonConfig,
+  useHostRuntimeIsConnected,
+  settingsStyles,
+} from "../../../packages/app/src/plugins/builtin/host-api";
 import React, { useCallback } from "react";
 import { Text, View } from "react-native";
 import { useMutation } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Switch } from "@/components/ui/switch";
-import { useDaemonConfig } from "@/hooks/use-daemon-config";
-import { useHostRuntimeIsConnected } from "@/runtime/host-runtime";
-import { settingsStyles } from "@/styles/settings";
 import {
   createSessionSharePatch,
   getSessionShareCardState,
   getSessionShareMutationViewState,
-} from "./session-share-config";
+} from "./settings-config";
 
 export function SessionShareOptInCard({ serverId }: { serverId: string }) {
   const { t } = useTranslation();
