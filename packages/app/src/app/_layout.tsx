@@ -752,6 +752,12 @@ function MobileGestureWrapper({
   );
 }
 
+// PortalProvider must stay inside normal app-wide context providers.
+// `@gorhom/portal` renders portaled children at the host's location in the
+// tree, so any context a portaled sheet might consume (QueryClient, theme,
+// auth, settings, ...) must wrap PortalProvider, not be wrapped by it.
+// BottomSheetModalProvider is the exception: Gorhom modals consume portal
+// context and need one shared provider for sibling sheets to stack.
 function ProvidersWrapper({ children }: { children: ReactNode }) {
   const { settings, isLoading: settingsLoading } = useAppSettings();
 
@@ -801,14 +807,18 @@ function ProvidersWrapper({ children }: { children: ReactNode }) {
 
   return (
     <VoiceProvider>
-      <AppearanceSystemBars />
-      <DesktopWindowControlsSync enabled={!settingsLoading} />
-      <OfferLinkListener />
-      <HostConfirmationSheet />
-      <HostSessionManager />
-      <ConnectionNotifications />
-      <FaviconStatusSync />
-      {children}
+      <PortalProvider>
+        <BottomSheetModalProvider>
+          <AppearanceSystemBars />
+          <DesktopWindowControlsSync enabled={!settingsLoading} />
+          <OfferLinkListener />
+          <HostConfirmationSheet />
+          <HostSessionManager />
+          <ConnectionNotifications />
+          <FaviconStatusSync />
+          {children}
+        </BottomSheetModalProvider>
+      </PortalProvider>
     </VoiceProvider>
   );
 }
@@ -1240,22 +1250,12 @@ function TailscaleHealthMonitor() {
   return null;
 }
 
-// PortalProvider must stay inside normal app-wide context providers.
-// `@gorhom/portal` renders portaled children at the host's location in the
-// tree, so any context a portaled sheet might consume (QueryClient, theme,
-// auth, settings, ...) must wrap PortalProvider, not be wrapped by it.
-// BottomSheetModalProvider is the exception: Gorhom modals consume portal
-// context and need one shared provider for sibling sheets to stack.
 function RootProviders({ children }: { children: ReactNode }) {
   return (
     <WindowLayoutProvider>
       <WindowChromeProvider>
         <KeyboardProvider>
-          <KeyboardShiftProvider>
-            <PortalProvider>
-              <BottomSheetModalProvider>{children}</BottomSheetModalProvider>
-            </PortalProvider>
-          </KeyboardShiftProvider>
+          <KeyboardShiftProvider>{children}</KeyboardShiftProvider>
         </KeyboardProvider>
       </WindowChromeProvider>
     </WindowLayoutProvider>
