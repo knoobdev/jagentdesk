@@ -30,7 +30,7 @@ export function GumloopComposerFrame({
         radius={GUMLOOP_COMPOSER_RADIUS + FRAME_WIDTH}
         uniProps={composerGradientMapping}
       />
-      {children}
+      <View style={[styles.interior, fullscreen && styles.fullscreen]}>{children}</View>
     </View>
   );
 }
@@ -42,6 +42,12 @@ export function GumloopSendGradient() {
 
 const styles = StyleSheet.create((theme: Theme) => ({
   fullscreen: { flex: 1 },
+  interior: {
+    flexShrink: 1,
+    borderRadius: GUMLOOP_COMPOSER_RADIUS,
+    backgroundColor: theme.colors.surface1,
+    overflow: "hidden",
+  },
   frame: {
     padding: FRAME_WIDTH,
     borderRadius: GUMLOOP_COMPOSER_RADIUS + FRAME_WIDTH,
