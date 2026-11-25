@@ -240,7 +240,6 @@ import { type SessionShareService } from "./session-share/service.js";
 import { ClusterSession } from "./session/cluster/cluster-session.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseSession } from "./session/database/database-session.js";
-import { SshSession } from "./session/ssh/ssh-session.js";
 import { ArgoCdSession } from "./session/argocd/argocd-session.js";
 import { type ArgoCdService } from "./argocd/service.js";
 import { randomUUID } from "node:crypto";
@@ -1265,8 +1264,6 @@ export class Session {
 
   private databaseSession!: DatabaseSession;
 
-  private sshSession!: SshSession;
-
   private argocdSession!: ArgoCdSession;
 
   private jiraSession: JiraSession | null = null;
@@ -1845,7 +1842,14 @@ export class Session {
     pluginRuntime: SessionOptions["pluginRuntime"],
   ): BuiltinServerSession {
     return builtinServerRegistry.session(pluginRuntime?.builtin, {
-      ...createBuiltinCoreServices(this.jagentdeskHome, this.sessionLogger, this.daemonConfigStore),
+      ...createBuiltinCoreServices(
+        this.jagentdeskHome,
+        this.sessionLogger,
+        this.daemonConfigStore,
+        {
+          ssh: this.sshService,
+        },
+      ),
       terminals: this.terminalManager,
       remoteDocker: () => this.sshService.modules?.docker,
       push: (message) => this.emit(message),
@@ -1958,13 +1962,6 @@ export class Session {
 
   private initSshSession(options: SessionOptions): void {
     this.sshService = options.sshService ?? new SshService();
-    this.sshSession = new SshSession({
-      host: {
-        emit: (msg) => this.emit(msg),
-      },
-      sshService: this.sshService,
-      logger: this.sessionLogger,
-    });
     this.remoteExecService = options.remoteExecService ?? null;
     this.customProvidersService = options.customProvidersService ?? null;
   }
@@ -3229,7 +3226,6 @@ export class Session {
       () => this.activityGraphSession?.dispatch(msg),
       () => this.dispatchClusterMessage(msg),
       () => this.dispatchDatabaseMessage(msg),
-      () => this.dispatchSshMessage(msg),
       () => this.dispatchRemoteExecMessage(msg),
       () => this.dispatchCustomProvidersMessage(msg),
       () => this.dispatchArgoCdMessage(msg),
@@ -5365,13 +5361,6 @@ export class Session {
   private dispatchSideloadMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     if (!this.sideloadSession?.handles(msg.type)) return undefined;
     return this.sideloadSession.handle(msg);
-  }
-
-  private dispatchSshMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    if (!msg.type.startsWith("ssh.")) {
-      return undefined;
-    }
-    return this.sshSession.handleMessage(msg);
   }
 
   private dispatchDatabaseMessage(msg: SessionInboundMessage): Promise<void> | undefined {

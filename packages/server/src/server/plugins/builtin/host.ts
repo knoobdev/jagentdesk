@@ -14,6 +14,11 @@ import {
   type BuiltinPluginState,
 } from "./state.js";
 
+/** The opening agent and the daemon's services, captured when its tool catalog is built. */
+export interface BuiltinToolContext {
+  callerAgentId: string | null;
+  services: BuiltinCoreServices | undefined;
+}
 export type RegisterBuiltinTool = <Input>(
   name: string,
   config: JAgentDeskToolConfig,
@@ -34,6 +39,8 @@ export interface BuiltinSessionContribution {
 export interface BuiltinBackgroundService {
   start(signal: AbortSignal): void | Promise<void>;
   stop(): void | Promise<void>;
+  /** Called once when the daemon starts with the plugin turned off. */
+  idle?(): void | Promise<void>;
 }
 async function lifecycleDeadline(
   id: BuiltinPluginId,
@@ -86,7 +93,9 @@ export interface BuiltinServerHost {
     create: (services: BuiltinSessionServices) => BuiltinSessionContribution,
   ): void;
   backgroundService(create: (services: BuiltinCoreServices) => BuiltinBackgroundService): void;
-  agentTools(register: (registerTool: RegisterBuiltinTool) => void): void;
+  agentTools(
+    register: (registerTool: RegisterBuiltinTool, context: BuiltinToolContext) => void,
+  ): void;
 }
 interface RpcRegistration {
   id: BuiltinPluginId;
@@ -101,7 +110,10 @@ export class BuiltinServerRegistry {
     BuiltinPluginId,
     (services: BuiltinCoreServices) => BuiltinBackgroundService
   >();
-  private readonly tools = new Map<BuiltinPluginId, (register: RegisterBuiltinTool) => void>();
+  private readonly tools = new Map<
+    BuiltinPluginId,
+    (register: RegisterBuiltinTool, context: BuiltinToolContext) => void
+  >();
   forPlugin(id: BuiltinPluginId): BuiltinServerHost {
     return {
       id,
@@ -132,8 +144,10 @@ export class BuiltinServerRegistry {
   ): Promise<() => Promise<void>> {
     const running: BuiltinPluginLifecycle[] = [];
     for (const [id, create] of this.backgrounds) {
-      const lifecycle = backgroundLifecycle(id, create(services));
+      const service = create(services);
+      const lifecycle = backgroundLifecycle(id, service);
       await state.registerLifecycle(id, lifecycle);
+      if (!state.isEnabled(id)) await lifecycleDeadline(id, "stop", () => service.idle?.());
       running.push(lifecycle);
     }
     return async () => {
@@ -150,13 +164,14 @@ export class BuiltinServerRegistry {
     snapshot: ReadonlySet<BuiltinPluginId> | undefined,
     register: RegisterBuiltinTool,
     reserve?: (name: string) => void,
+    context: BuiltinToolContext = { callerAgentId: null, services: undefined },
   ): void {
     for (const [id, install] of this.tools) {
       install((name, config, handler) => {
         // Keep names reserved while disabled so installed hooks cannot replace core tools.
         reserve?.(name);
         if (!snapshot || snapshot.has(id)) register(name, config, handler);
-      });
+      }, context);
     }
   }
   session(

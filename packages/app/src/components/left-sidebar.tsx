@@ -1,4 +1,4 @@
-import { BuiltinSidebarDestinations } from "@/plugins/builtin/surfaces";
+import { BuiltinLeftPanel, BuiltinSidebarDestinations } from "@/plugins/builtin/surfaces";
 import { SidebarFooterIconHighlight } from "@/components/sidebar/sidebar-footer-icon-highlight";
 import { UsageSidebarItem, useUsageSummary, useOpenSidebarUsage } from "@/usage/sidebar-item";
 import { BotsSidebar } from "@/bots/sidebar";
@@ -103,7 +103,6 @@ import { SidebarAgentListSkeleton } from "./sidebar-agent-list-skeleton";
 import { shouldShowAddProject, shouldShowSidebarFooter } from "./sidebar-add-project-visibility";
 import { SidebarCalloutSlot } from "./sidebar-callout-slot";
 import { SidebarWorkspaceList } from "./sidebar-workspace-list";
-import { SidebarServersNav } from "@/ssh/ui/sidebar-servers-nav";
 import { JiraSidebarEntry } from "@/jira/sidebar-entry";
 import { SidebarJiraNav } from "@/jira/sidebar-jira-nav";
 import { FigmaSidebarEntry } from "@/figma/sidebar-entry";
@@ -176,11 +175,7 @@ export function resolveSidebarNavBody(
     return <PluginSidebarPanel serverId={sectionRoute.serverId} pluginId={sectionRoute.pluginId} />;
   // A section that owns the left column (spec 25.13.1 Servers, 29.3 Jira, 30.3 Argo CD).
   if (sectionRoute?.section === "servers")
-    return (
-      <BuiltinPluginGate serverId={sectionRoute.serverId} id="ssh-servers">
-        <SidebarServersNav serverId={sectionRoute.serverId} />
-      </BuiltinPluginGate>
-    );
+    return <BuiltinLeftPanel serverId={sectionRoute.serverId} segment="servers" />;
   if (sectionRoute?.section === "jira")
     return (
       <BuiltinPluginGate serverId={sectionRoute.serverId} id="jira">
@@ -243,7 +238,6 @@ interface SidebarSharedProps {
   handleSettings: () => void;
   handleClusters: () => void;
   handleDatabases: () => void;
-  handleServers: () => void;
   handleArgoCd: () => void;
   handleSkills: () => void;
   handleInsights: () => void;
@@ -252,8 +246,6 @@ interface SidebarSharedProps {
   handleSimulator: () => void;
   handleWorkbench: () => void;
   supportsForgeHub: boolean;
-  /** Spec 25: SSH Servers entry only when the daemon advertises sshServers. */
-  supportsSshServers: boolean;
   /** Spec 30.3: Argo CD entry only when the daemon advertises argocd. */
   supportsArgoCd: boolean;
   /** Some connected host can run simulators (spec 24.4). */
@@ -278,7 +270,6 @@ interface SidebarLabels {
   bots: string;
   clusters: string;
   databases: string;
-  servers: string;
   argoCd: string;
   skills: string;
   insights: string;
@@ -392,8 +383,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
   const {
     clustersRoute,
     databasesRoute,
-    serversRoute,
-    supportsSshServers,
     skillsRoute,
     insightsRoute,
     forgeRoute,
@@ -444,17 +433,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       router.push(databasesRoute);
     }
   }, [databasesRoute, showMobileAgent]);
-
-  const handleServersDesktop = useCallback(() => {
-    if (serversRoute) router.push(serversRoute as Href);
-  }, [serversRoute]);
-
-  const handleServersMobile = useCallback(() => {
-    if (serversRoute) {
-      showMobileAgent();
-      router.push(serversRoute as Href);
-    }
-  }, [serversRoute, showMobileAgent]);
 
   const handleArgoCdDesktop = useCallback(() => {
     if (argoCdRoute) router.push(argoCdRoute);
@@ -539,7 +517,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       bots: t("bots.title"),
       clusters: "Clusters",
       databases: "Databases",
-      servers: "Servers",
       argoCd: "Argo CD",
       skills: "Skills",
       insights: "Insights",
@@ -568,7 +545,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     handleRefresh,
     handleClusters: handleClustersDesktop,
     handleDatabases: handleDatabasesDesktop,
-    handleServers: handleServersDesktop,
     handleArgoCd: handleArgoCdDesktop,
     handleSkills: handleSkillsDesktop,
     handleInsights: handleInsightsDesktop,
@@ -577,7 +553,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     handleSimulator: handleSimulatorDesktop,
     handleWorkbench: handleWorkbenchDesktop,
     supportsForgeHub,
-    supportsSshServers,
     supportsArgoCd: argoCdRoute !== null,
     supportsDevices: simulatorRoute !== null,
     labels,
@@ -591,7 +566,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
           {...sharedProps}
           handleClusters={handleClustersMobile}
           handleDatabases={handleDatabasesMobile}
-          handleServers={handleServersMobile}
           handleArgoCd={handleArgoCdMobile}
           handleSkills={handleSkillsMobile}
           handleInsights={handleInsightsMobile}
@@ -618,7 +592,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
         {...sharedProps}
         handleClusters={handleClustersDesktop}
         handleDatabases={handleDatabasesDesktop}
-        handleServers={handleServersDesktop}
         handleArgoCd={handleArgoCdDesktop}
         handleSkills={handleSkillsDesktop}
         handleInsights={handleInsightsDesktop}
@@ -1119,6 +1092,8 @@ function MobileSidebar({
   );
 }
 
+const SERVERS_SLOT = ["servers"] as const;
+
 function DesktopSidebar({
   theme,
   statusGroups,
@@ -1139,7 +1114,6 @@ function DesktopSidebar({
   handleSettings,
   handleClusters,
   handleDatabases,
-  handleServers,
   handleArgoCd,
   handleSkills,
   handleInsights,
@@ -1148,7 +1122,6 @@ function DesktopSidebar({
   handleSimulator,
   handleWorkbench,
   supportsForgeHub,
-  supportsSshServers,
   supportsArgoCd,
   supportsDevices,
   labels,
@@ -1174,7 +1147,6 @@ function DesktopSidebar({
   const isSharedSessionsActive = pathname.includes("/shared-sessions");
   const isClustersActive = pathname.includes("/clusters");
   const isDatabasesActive = pathname.includes("/database");
-  const isServersActive = pathname.includes("/servers");
   const isArgoCdActive = pathname.includes("/argocd");
   const isSkillsActive = pathname.includes("/skills");
   const isInsightsActive = pathname.includes("/insights");
@@ -1367,16 +1339,7 @@ function DesktopSidebar({
                 variant="compact"
               />
             </NavTargetGate>
-            {supportsSshServers ? (
-              <SidebarHeaderRow
-                icon={Server}
-                label={labels.servers}
-                onPress={handleServers}
-                isActive={isServersActive}
-                testID="sidebar-servers-nav"
-                variant="compact"
-              />
-            ) : null}
+            <BuiltinSidebarDestinations only={SERVERS_SLOT} />
             {supportsArgoCd ? (
               <SidebarHeaderRow
                 icon={Ship}

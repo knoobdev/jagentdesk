@@ -16,6 +16,8 @@ export interface BuiltinDestination {
   group: "Tools" | "main";
   route: (serverId: string) => string;
   routeSegment: string;
+  /** Phase 1 daemons advertised some destinations with their own feature flag. */
+  requiresFeature?: string;
 }
 export interface BuiltinScreen extends BuiltinClientProps {
   sshDocker?: import("@/ssh/ui/ssh-docker-client").SshDockerTarget;

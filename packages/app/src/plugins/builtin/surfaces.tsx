@@ -12,9 +12,14 @@ import { builtinClientRegistry } from "./loaded";
 import type { BuiltinClientProps, BuiltinScreen as ScreenProps } from "./host";
 import { BuiltinPluginScreenBoundary } from "./route-boundary";
 
+/** Destinations that keep their historical position in the navigation lists. */
+export const SLOTTED_BUILTIN_DESTINATIONS: ReadonlySet<string> = new Set(["servers"]);
 export function useBuiltinClientContributions(serverId: string) {
   const info = useSessionStore((state) => state.sessions[serverId]?.serverInfo);
   return useMemo(() => builtinClientRegistry.visible(info), [info]);
+}
+function useServerFeatures(serverId: string) {
+  return useSessionStore((state) => state.sessions[serverId]?.serverInfo?.features);
 }
 export function useBuiltinDestinations(pathname: string): AppNavItem[] {
   const hosts = useHosts();
@@ -24,24 +29,31 @@ export function useBuiltinDestinations(pathname: string): AppNavItem[] {
     ? decodeURIComponent(match)
     : (selection?.serverId ?? hosts[0]?.serverId ?? "");
   const entries = useBuiltinClientContributions(serverId);
+  const features = useServerFeatures(serverId);
   const compact = useIsCompactFormFactor();
   return useMemo(
     () =>
       !serverId
         ? []
         : [...entries.values()].flatMap((entry) =>
-            (compact ? entry.mobileEntries : entry.destinations).map((destination) => ({
-              key: destination.id,
-              group: destination.group,
-              label: destination.title,
-              shortLabel: destination.title,
-              icon: destination.icon,
-              route: destination.route(serverId),
-              isActive: pathname.includes(`/${destination.routeSegment}`),
-              testID: `rail-${destination.id}`,
-            })),
+            (compact ? entry.mobileEntries : entry.destinations)
+              .filter(
+                ({ requiresFeature }) =>
+                  !requiresFeature ||
+                  (features as Record<string, unknown> | undefined)?.[requiresFeature] === true,
+              )
+              .map((destination) => ({
+                key: destination.id,
+                group: destination.group,
+                label: destination.title,
+                shortLabel: destination.title,
+                icon: destination.icon,
+                route: destination.route(serverId),
+                isActive: pathname.includes(`/${destination.routeSegment}`),
+                testID: `rail-${destination.id}`,
+              })),
           ),
-    [compact, entries, pathname, serverId],
+    [compact, entries, features, pathname, serverId],
   );
 }
 export function BuiltinLeftPanel({ serverId, segment }: BuiltinClientProps & { segment: string }) {
@@ -92,9 +104,13 @@ function BuiltinSidebarDestination({ item }: { item: AppNavItem }) {
     />
   );
 }
-export function BuiltinSidebarDestinations() {
+/** `only` renders slotted destinations at their position; the default renders the rest. */
+export function BuiltinSidebarDestinations({ only }: { only?: readonly string[] }) {
   const pathname = usePathname();
-  const items = useBuiltinDestinations(pathname);
+  const all = useBuiltinDestinations(pathname);
+  const items = only
+    ? all.filter((item) => only.includes(item.key))
+    : all.filter((item) => !SLOTTED_BUILTIN_DESTINATIONS.has(item.key));
   return (
     <>
       {items.map((item) => (

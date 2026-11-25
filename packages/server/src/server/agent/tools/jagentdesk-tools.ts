@@ -1,4 +1,5 @@
 import { builtinServerRegistry } from "../../plugins/builtin/loaded.js";
+import type { BuiltinCoreServices } from "../../plugins/builtin/services.js";
 import {
   sendPromptToAgent,
   enqueueAgentMessage,
@@ -145,7 +146,6 @@ import {
   type OrchestrationRuntime,
 } from "../../orchestration/runtime.js";
 import { type ClusterRegistry } from "../../cluster/cluster-registry.js";
-import { registerSshAgentTools, type SshAgentTool } from "../../ssh/environment/agent-tools.js";
 import { type RemoteExecAgentTool } from "../../remote-exec/agent-tools.js";
 import { type CustomProviderAgentTool } from "../../custom-providers/agent-tools.js";
 import { type ArgoCdAgentTool } from "../../argocd/agent-tools.js";
@@ -232,9 +232,8 @@ export interface JAgentDeskToolHostDependencies {
   orchestrationRuntime?: OrchestrationRuntime;
   clusterRegistry?: ClusterRegistry;
   databaseRegistry?: DatabaseRegistry;
-  // SSH servers (spec 25.11): ssh_* tools and the server-aware docker_* tools that replace the
-  // host-only ones (same names, same behaviour without serverId). Bound per caller agent.
-  sshAgentTools?: (callerAgentId: string | null) => SshAgentTool[];
+  /** Daemon services handed to built-in tool installers (the ssh-servers tools, for example). */
+  builtinServices?: BuiltinCoreServices;
   // Remote execution (spec 33.7): remote_* tools; [] when no SSH server has remote tasks enabled.
   remoteExecAgentTools?: (callerAgentId: string | null) => RemoteExecAgentTool[];
   // Custom API providers (spec 34.7): provider_* tools; list/test auto-run, mutations raise a card.
@@ -4273,12 +4272,12 @@ function createToolCatalog(
   // drops kubectl_get/kubectl_apply and the agent falls back to shelling out.
   registerKubectlTools({ registerTool, options, callerAgentId });
   registerSqlTools({ registerTool, options, callerAgentId });
-  builtinServerRegistry.registerAgentTools(options.builtinPlugins, registerTool, (name) =>
-    builtinNames.add(name),
+  builtinServerRegistry.registerAgentTools(
+    options.builtinPlugins,
+    registerTool,
+    (name) => builtinNames.add(name),
+    { callerAgentId: callerAgentId ?? null, services: options.builtinServices },
   );
-  if (options.sshAgentTools) {
-    registerSshAgentTools(registerTool, options.sshAgentTools(callerAgentId ?? null));
-  }
   if (options.remoteExecAgentTools) {
     for (const tool of options.remoteExecAgentTools(callerAgentId ?? null)) {
       registerTool(
@@ -4298,7 +4297,12 @@ function createToolCatalog(
     }
   }
   if (options.sideloadAgentTools) {
-    registerSshAgentTools(registerTool, options.sideloadAgentTools(callerAgentId ?? null));
+    for (const tool of options.sideloadAgentTools(callerAgentId ?? null))
+      registerTool(
+        tool.name,
+        { title: tool.title, description: tool.description, inputSchema: tool.inputSchema },
+        tool.handler,
+      );
   }
   if (options.botAgentTools) {
     for (const tool of options.botAgentTools(callerAgentId ?? null))

@@ -18,7 +18,7 @@ import {
   installScript,
   KeyInstallService,
 } from "./install-key.js";
-import { handleLogsImportMessage } from "./rpc.js";
+import { handleLogsImportMessage } from "../../../../../../plugins/ssh-servers/server/rpc/logs-import.js";
 import { SessionLogService } from "./session-log.js";
 import { TerminalTextCleaner } from "./terminal-text.js";
 

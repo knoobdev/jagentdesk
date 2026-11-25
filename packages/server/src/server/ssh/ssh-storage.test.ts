@@ -91,6 +91,18 @@ describe("SshStorage (spec 25.2)", () => {
     expect(reloaded.resolveConfig(server.id)?.username).toBe("deploy");
   });
 
+  it("keeps serving saved servers while a turned-on feature reloads them", async () => {
+    const jagentdeskHome = await home();
+    const service = new SshService({ jagentdeskHome });
+    await service.initialize();
+    const server = await service.saveServer({ id: "", label: "web", address: "<host>" });
+    service.dispose();
+    const reload = service.initialize();
+    expect(service.storage.listServers().map((entry) => entry.id)).toEqual([server.id]);
+    await reload;
+    expect(service.storage.listServers().map((entry) => entry.id)).toEqual([server.id]);
+  });
+
   it("deleting a group moves its servers and child groups to the parent", async () => {
     const service = new SshService({ jagentdeskHome: await home() });
     await service.initialize();

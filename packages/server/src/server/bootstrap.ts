@@ -752,10 +752,6 @@ export async function createJAgentDeskDaemon(
     settingsDirectory: path.join(config.jagentdeskHome, "plugin-settings"),
   });
 
-  const stopBuiltinServices = await builtinServerRegistry.start(
-    pluginRuntime.builtin,
-    createBuiltinCoreServices(config.jagentdeskHome, logger, daemonConfigStore),
-  );
   const serverId = getOrCreateServerId(config.jagentdeskHome, { logger });
   const daemonKeyPair = await loadOrCreateDaemonKeyPair(config.jagentdeskHome, logger);
   const pairedDevices: PairedDeviceStore = createPairedDeviceStore({
@@ -1601,9 +1597,6 @@ export async function createJAgentDeskDaemon(
     sshService,
     jagentdeskHome: config.jagentdeskHome,
     logger,
-    agentLabels: (agentId) => agentManager.getAgent(agentId)?.labels ?? null,
-    requestPermission: (agentId, request) =>
-      agentManager.requestHostToolPermission(agentId, request),
   });
   await sshServerModules.initialize();
   sshService.modules = sshServerModules;
@@ -1615,7 +1608,7 @@ export async function createJAgentDeskDaemon(
     forwarding: sshServerModules.forwarding,
   });
   await sshModules.initialize();
-  sshService.registerModuleHandlers(sshModules.handlers());
+  sshService.sessionModules = sshModules;
   logger.info("SSH service initialized");
   // Remote execution (spec 33 / ADR-0044): one daemon-wide service over the SSH server store
   // and client pool. Job updates fan out to every trusted session (same shape as the script
@@ -1831,28 +1824,26 @@ export async function createJAgentDeskDaemon(
       );
     },
   });
-  const suspendedForwardingRules = new Set<string>();
-  await pluginRuntime.builtin.registerLifecycle("ssh-servers", {
-    start: async () => {
-      await sshService.initialize();
-      await Promise.all(
-        [...suspendedForwardingRules].map((id) => sshServerModules.forwarding.start(id)),
-      );
-      suspendedForwardingRules.clear();
+  // Statically linked features start after the shared libraries they consume exist.
+  const builtinServices = createBuiltinCoreServices(
+    config.jagentdeskHome,
+    logger,
+    daemonConfigStore,
+    {
+      ssh: sshService,
+      agents: {
+        labels: (agentId) => agentManager.getAgent(agentId)?.labels ?? null,
+        cwd: (agentId) => agentManager.getAgent(agentId)?.cwd ?? null,
+        requestHostToolPermission: (agentId, request) =>
+          agentManager.requestHostToolPermission(agentId, request),
+      },
+      beforeSshStop: () => customProviderService.closeAll(),
     },
-    stop: async () => {
-      // Stop dependents before closing the shared SSH pool. Keep module event wiring intact.
-      customProviderService.closeAll();
-      for (const state of sshServerModules.forwarding.list().states) {
-        if (state.status === "active") suspendedForwardingRules.add(state.ruleId);
-      }
-      await sshServerModules.forwarding.dispose();
-      await sshServerModules.docker.stopAll();
-      await sshServerModules.remoteDb.closeAll();
-      sshService.dispose();
-    },
-  });
-  if (!pluginRuntime.builtin.isEnabled("ssh-servers")) sshService.dispose();
+  );
+  const stopBuiltinServices = await builtinServerRegistry.start(
+    pluginRuntime.builtin,
+    builtinServices,
+  );
   await pluginRuntime.builtin.registerLifecycle("remote-tasks", {
     start: async () => {
       await remoteExecService?.start();
@@ -2064,7 +2055,7 @@ export async function createJAgentDeskDaemon(
     orchestrationRuntime,
     clusterRegistry,
     databaseRegistry,
-    sshAgentTools: (callerAgentId) => sshServerModules.createAgentTools(callerAgentId),
+    builtinServices,
     remoteExecAgentTools: (callerAgentId) =>
       remoteExecService
         ? createRemoteExecAgentTools({

@@ -91,6 +91,11 @@ function stripProxyWireOnly<T extends { proxy?: { hasPassword?: boolean } }>(val
   return { ...value, proxy };
 }
 
+function replaceEntries<T>(map: Map<string, T>, values: T[], key: (value: T) => string): void {
+  map.clear();
+  for (const value of values) map.set(key(value), value);
+}
+
 /**
  * File-backed registry for SSH servers, groups, identities, keys, and known hosts.
  * Mirrors DatabaseRegistry: zod-validated persistence, a serialized persist queue,
@@ -114,30 +119,30 @@ export class SshStorage {
       options.secretStore ?? (this.dir ? new FileSecretStore(this.dir) : new MemorySecretStore());
   }
 
-  /** Load every collection from disk. Missing files are an empty state, not an error. */
+  /**
+   * Load every collection from disk. Missing files are an empty state, not an error. A reload
+   * (the SSH servers feature turned back on) waits for queued writes, then replaces the
+   * collections in one synchronous step: requests admitted while it reads see the previous
+   * state, never a half-loaded one.
+   */
   async initialize(): Promise<void> {
     if (!this.dir) return;
     ensurePrivateDirectory(this.dir);
-    this.servers.clear();
-    this.groups.clear();
-    this.identities.clear();
-    this.keys.clear();
-    this.knownHosts.clear();
-    for (const server of await this.readJson("servers.json", z.array(StoredServerSchema))) {
-      this.servers.set(server.id, server);
-    }
-    for (const group of await this.readJson("groups.json", z.array(SshGroupSchema))) {
-      this.groups.set(group.id, group);
-    }
-    for (const identity of await this.readJson("identities.json", z.array(SshIdentitySchema))) {
-      this.identities.set(identity.id, identity);
-    }
-    for (const key of await this.readJson("keys.json", z.array(SshKeySchema))) {
-      this.keys.set(key.id, key);
-    }
-    for (const host of await this.readJson("known_hosts.json", z.array(SshKnownHostSchema))) {
-      this.knownHosts.set(knownHostId(host.host, host.port, host.keyType), host);
-    }
+    await this.persistQueue;
+    const [servers, groups, identities, keys, knownHosts] = await Promise.all([
+      this.readJson("servers.json", z.array(StoredServerSchema)),
+      this.readJson("groups.json", z.array(SshGroupSchema)),
+      this.readJson("identities.json", z.array(SshIdentitySchema)),
+      this.readJson("keys.json", z.array(SshKeySchema)),
+      this.readJson("known_hosts.json", z.array(SshKnownHostSchema)),
+    ]);
+    replaceEntries(this.servers, servers, (server) => server.id);
+    replaceEntries(this.groups, groups, (group) => group.id);
+    replaceEntries(this.identities, identities, (identity) => identity.id);
+    replaceEntries(this.keys, keys, (key) => key.id);
+    replaceEntries(this.knownHosts, knownHosts, (host) =>
+      knownHostId(host.host, host.port, host.keyType),
+    );
   }
 
   private async readJson<T>(fileName: string, schema: z.ZodType<T[]>): Promise<T[]> {

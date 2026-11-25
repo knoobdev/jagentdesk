@@ -1,4 +1,4 @@
-import { useBuiltinDestinations } from "@/plugins/builtin/surfaces";
+import { SLOTTED_BUILTIN_DESTINATIONS, useBuiltinDestinations } from "@/plugins/builtin/surfaces";
 import { useOpenSidebarUsage } from "@/usage/sidebar-item";
 import { useBuiltinPluginEnabled } from "@/plugins/builtin/hooks";
 import { builtinPluginEnabled } from "@/plugins/builtin/registry";
@@ -17,7 +17,6 @@ import {
   Home,
   KanbanSquare,
   Radar,
-  Server,
   Share2,
   Ship,
   Smartphone,
@@ -59,7 +58,6 @@ import {
   buildNewWorkspaceRoute,
   buildOpenProjectRoute,
   buildSchedulesRoute,
-  buildServersRoute,
   buildSessionsRoute,
   buildSharedSessionsRoute,
   buildSimulatorRoute,
@@ -73,7 +71,6 @@ export interface AppNavTargets {
   sharedSessionsRoute: Href | null;
   clustersRoute: Href | null;
   databasesRoute: Href | null;
-  serversRoute: Href | null;
   skillsRoute: Href | null;
   insightsRoute: Href | null;
   forgeRoute: Href | null;
@@ -87,8 +84,6 @@ export interface AppNavTargets {
   jiraRoute: Href | null;
   /** Spec 32: Figma section, when the daemon advertises `figma`. */
   figmaRoute: Href | null;
-  /** Spec 25: daemon build ships the SSH servers surface (S1+). */
-  supportsSshServers: boolean;
 }
 
 export function useAppNavTargets(): AppNavTargets {
@@ -118,9 +113,6 @@ export function useAppNavTargets(): AppNavTargets {
   );
   const supportsFigma = useSessionStore(
     (state) => state.sessions[firstServerId]?.serverInfo?.features?.figma === true,
-  );
-  const supportsSshServers = useSessionStore(
-    (state) => state.sessions[firstServerId]?.serverInfo?.features?.sshServers === true,
   );
   const supportsArgoCd = useSessionStore(
     (state) => state.sessions[firstServerId]?.serverInfo?.features?.argocd === true,
@@ -162,7 +154,6 @@ export function useAppNavTargets(): AppNavTargets {
       databasesRoute: databasesEnabled ? databasesRoute : null,
       sharedSessionsRoute: sharingEnabled ? (buildSharedSessionsRoute() as Href) : null,
       // Gated at the route: the entry disappears with the daemon feature flag.
-      serversRoute: supportsSshServers ? perHost(buildServersRoute) : null,
       skillsRoute: skillsEnabled ? perHost(buildSkillsRoute) : null,
       insightsRoute: insightsEnabled ? perHost(buildInsightsRoute) : null,
       forgeRoute: perHost(buildForgeRoute),
@@ -171,7 +162,6 @@ export function useAppNavTargets(): AppNavTargets {
       proxyRoute: workbenchEnabled ? perHost(buildProxyRoute) : null,
       argoCdRoute: supportsArgoCd ? perHost(buildArgoCdRoute) : null,
       supportsForgeHub,
-      supportsSshServers,
       jiraRoute: supportsJira ? perHost(buildJiraRoute) : null,
       figmaRoute: supportsFigma ? perHost(buildFigmaRoute) : null,
     };
@@ -191,7 +181,6 @@ export function useAppNavTargets(): AppNavTargets {
     lastDatabase,
     supportsArgoCd,
     supportsForgeHub,
-    supportsSshServers,
   ]);
 }
 
@@ -268,7 +257,7 @@ export function useAppNavItems(): AppNavItem[] {
         pathname,
         "/marketplace",
       ),
-      ...builtinDestinations,
+      ...builtinDestinations.filter((item) => !SLOTTED_BUILTIN_DESTINATIONS.has(item.key)),
       navItem(
         "simulators",
         Smartphone,
@@ -288,7 +277,7 @@ export function useAppNavItems(): AppNavItem[] {
         pathname,
         "/database",
       ),
-      navItem("servers", Server, "Servers", "Servers", targets.serversRoute, pathname, "/servers"),
+      builtinDestinations.find((item) => item.key === "servers") ?? null,
       navItem(
         "clusters",
         Boxes,

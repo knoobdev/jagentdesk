@@ -74,9 +74,16 @@ export default defineConfig({
             "src/**/*.{test,spec}.{ts,tsx}",
             "modules/**/*.test.{ts,tsx}",
             "native-release-version.test.ts",
+            // Statically linked built-in features keep their client tests next to their code.
+            "../../plugins/*/client/**/*.{test,spec}.{ts,tsx}",
           ],
           setupFiles: [path.resolve(__dirname, "vitest.setup.ts")],
-          exclude: [...configDefaults.exclude, "e2e/**", "src/**/*.browser.{test,spec}.{ts,tsx}"],
+          exclude: [
+            ...configDefaults.exclude,
+            "e2e/**",
+            "src/**/*.browser.{test,spec}.{ts,tsx}",
+            "../../plugins/*/client/**/*.browser.{test,spec}.{ts,tsx}",
+          ],
         },
       },
       {
@@ -85,7 +92,10 @@ export default defineConfig({
           name: "browser",
           setupFiles: [path.resolve(__dirname, "vitest.browser.setup.ts")],
           fileParallelism: false,
-          include: ["src/**/*.browser.{test,spec}.{ts,tsx}"],
+          include: [
+            "src/**/*.browser.{test,spec}.{ts,tsx}",
+            "../../plugins/*/client/**/*.browser.{test,spec}.{ts,tsx}",
+          ],
           browser: {
             enabled: true,
             provider: playwright({

@@ -11,7 +11,7 @@ import type {
   SshForwardStateEvent,
 } from "@jagentdesk/protocol/ssh/forwarding-schemas";
 import { createTestSshPool, type TestSshPool } from "../test-support/test-sshd.js";
-import { handleForwardingMessage } from "./rpc.js";
+import { handleForwardingMessage } from "../../../../../../plugins/ssh-servers/server/rpc/forwarding.js";
 import { ForwardingService } from "./service.js";
 
 // Integration tests against the real sshd from ../test-support/start-test-sshd.sh. Inside the
