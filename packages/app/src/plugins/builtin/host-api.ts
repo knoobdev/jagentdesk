@@ -82,6 +82,34 @@ export {
 export { buildDatabasesRoute, buildDatabaseBrowseRoute } from "@/utils/host-routes";
 export { BackHeader } from "@/components/headers/back-header";
 export { Button } from "@/components/ui/button";
+export type { SheetHeader } from "@/components/adaptive-modal-sheet";
+export { Alert } from "@/components/ui/alert";
+export { Switch } from "@/components/ui/switch";
+export { CompactBackButton } from "@/components/headers/compact-back-button";
+export {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuHint,
+} from "@/components/ui/dropdown-menu";
+export { SegmentedControl } from "@/components/ui/segmented-control";
+export type { SegmentedControlOption } from "@/components/ui/segmented-control";
+export { confirmDialog } from "@/utils/confirm-dialog";
+export {
+  buildArgoCdInstanceRoute,
+  buildArgoCdAppRoute,
+  buildArgoCdRoute,
+} from "@/utils/host-routes";
+export { DropdownTrigger } from "@/components/ui/dropdown-trigger";
+export { useFetchQuery } from "@/data/query";
+export { settingsStyles } from "@/styles/settings";
+export { DiffViewer } from "@/components/diff-viewer";
+export { parseUnifiedDiff } from "@/utils/tool-call-parsers";
+export type { DesktopArgoCdBridge } from "@/desktop/host";
+export { FormTextInput, Field } from "@/components/ui/form-field";
+export { useToast } from "@/contexts/toast-context";
+export { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
 // App-local dependencies: features outside packages/app resolve them through the host.
 export {
   router,

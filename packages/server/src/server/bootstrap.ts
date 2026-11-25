@@ -219,10 +219,6 @@ import { ForgeHubService } from "./session/forge/forge-hub-session.js";
 import { FileSecretStore } from "./database/secret-store.js";
 import { DEFAULT_RELAY_ENDPOINT, extractProviderOverrides } from "./config.js";
 import { createCustomProviderService } from "./custom-providers/service.js";
-import { ArgoCdService } from "./argocd/service.js";
-import { createArgoCdClusterAccess } from "./argocd/cluster-access.js";
-import { createArgoCdAgentTools } from "./argocd/agent-tools.js";
-import { ARGOCD_INSTANCE_AGENT_LABEL } from "@jagentdesk/protocol/argocd/chat-prompt";
 import {
   archiveByScope,
   archivePersistedWorkspaceRecord,
@@ -1660,14 +1656,6 @@ export async function createJAgentDeskDaemon(
   const forgeSecretDir = path.resolve(config.jagentdeskHome, "forge");
   const forgeHubService = new ForgeHubService(new FileSecretStore(forgeSecretDir), forgeSecretDir);
   logger.info("Forge Hub service created");
-  // Argo CD (spec 30 / ADR-0034): registry + secrets under <home>/argocd, one SSE stream per
-  // instance while viewed, and the argocd_* agent tools.
-  const argocdService = new ArgoCdService({
-    jagentdeskHome: config.jagentdeskHome,
-    logger: logger.child({ module: "argocd" }),
-    clusters: createArgoCdClusterAccess(clusterRegistry),
-  });
-  logger.info("Argo CD service initialized");
   // Daemon-wide Jira service (spec 29 / ADR-0034 §4): the one credential manager for every
   // session, view watch and agent tool. Secrets live under <home>/jira.
   const jiraService = new JiraService({
@@ -1854,10 +1842,6 @@ export async function createJAgentDeskDaemon(
   await pluginRuntime.builtin.registerLifecycle("custom-providers", {
     start: () => {},
     stop: () => customProviderService.closeAll(),
-  });
-  await pluginRuntime.builtin.registerLifecycle("argocd", {
-    start: () => argocdService.initialize(),
-    stop: () => argocdService.dispose(),
   });
   await pluginRuntime.builtin.registerLifecycle("devices", {
     start: () => sideloadService.initialize(),
@@ -2078,16 +2062,6 @@ export async function createJAgentDeskDaemon(
         requestPermission: (agentId, request) =>
           agentManager.requestHostToolPermission(agentId, request),
         sshServerLabel: (id) => sshService.storage.getServer(id)?.label ?? null,
-      }),
-    argocdAgentTools: (callerAgentId) =>
-      createArgoCdAgentTools({
-        service: argocdService,
-        callerAgentId,
-        defaultInstanceId: callerAgentId
-          ? (agentManager.getAgent(callerAgentId)?.labels?.[ARGOCD_INSTANCE_AGENT_LABEL] ?? null)
-          : null,
-        requestPermission: (agentId, request) =>
-          agentManager.requestHostToolPermission(agentId, request),
       }),
     sideloadAgentTools: (callerAgentId) =>
       createSideloadAgentTools({
@@ -2473,7 +2447,6 @@ export async function createJAgentDeskDaemon(
               autorunService,
               sessionShareService,
               sshService,
-              argocdService,
               sideloadService,
               workspaceArchiveOperations,
             );
@@ -2695,7 +2668,6 @@ export async function createJAgentDeskDaemon(
     await remoteExecService?.stop().catch(() => undefined);
     await sshServerModules.dispose().catch(() => undefined);
     sshService.dispose();
-    argocdService.dispose();
     sideloadService.dispose();
     await botsSlack.dispose();
     await botsService.dispose();

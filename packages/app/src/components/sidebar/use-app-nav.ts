@@ -17,7 +17,6 @@ import {
   Radar,
   Server,
   Share2,
-  Ship,
   Smartphone,
   Sparkles,
   Store,
@@ -42,7 +41,6 @@ const DEVICE_CAPABILITIES: readonly HostCapabilityId[] = [
 ];
 import { useWorkspace } from "@/stores/session-store-hooks";
 import {
-  buildArgoCdRoute,
   buildFigmaRoute,
   buildForgeRoute,
   buildInsightsRoute,
@@ -70,8 +68,6 @@ export interface AppNavTargets {
   marketplaceRoute: Href | null;
   simulatorRoute: Href | null;
   proxyRoute: Href | null;
-  /** Spec 30.3: the daemon ships Argo CD; null hides the entry. */
-  argoCdRoute: Href | null;
   supportsForgeHub: boolean;
   /** Spec 29: Jira surface, when the daemon advertises `jira`. */
   jiraRoute: Href | null;
@@ -108,9 +104,6 @@ export function useAppNavTargets(): AppNavTargets {
   const supportsSshServers = useSessionStore(
     (state) => state.sessions[firstServerId]?.serverInfo?.features?.sshServers === true,
   );
-  const supportsArgoCd = useSessionStore(
-    (state) => state.sessions[firstServerId]?.serverInfo?.features?.argocd === true,
-  );
   // Spec 24.4: devices open on the first host that can run simulators; none → no entry.
   const deviceServerId = useSessionStore(
     (state) =>
@@ -137,7 +130,6 @@ export function useAppNavTargets(): AppNavTargets {
       marketplaceRoute: perHost(buildMarketplaceRoute),
       simulatorRoute: deviceServerId ? (buildSimulatorRoute(deviceServerId) as Href) : null,
       proxyRoute: workbenchEnabled ? perHost(buildProxyRoute) : null,
-      argoCdRoute: supportsArgoCd ? perHost(buildArgoCdRoute) : null,
       supportsForgeHub,
       supportsSshServers,
       jiraRoute: supportsJira ? perHost(buildJiraRoute) : null,
@@ -153,7 +145,6 @@ export function useAppNavTargets(): AppNavTargets {
     supportsFigma,
     deviceServerId,
     firstServerId,
-    supportsArgoCd,
     supportsForgeHub,
     supportsSshServers,
   ]);
@@ -244,7 +235,6 @@ export function useAppNavItems(): AppNavItem[] {
       ),
       navItem("workbench", Radar, "Workbench", "WB", targets.proxyRoute, pathname, "/proxy"),
       navItem("servers", Server, "Servers", "Servers", targets.serversRoute, pathname, "/servers"),
-      navItem("argocd", Ship, "Argo CD", "Argo CD", targets.argoCdRoute, pathname, "/argocd"),
       {
         key: "usage",
         icon: Gauge,

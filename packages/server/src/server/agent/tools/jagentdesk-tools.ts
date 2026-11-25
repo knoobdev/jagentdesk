@@ -150,7 +150,6 @@ import { type ClusterRegistry } from "../../cluster/cluster-registry.js";
 import { registerSshAgentTools, type SshAgentTool } from "../../ssh/environment/agent-tools.js";
 import { type RemoteExecAgentTool } from "../../remote-exec/agent-tools.js";
 import { type CustomProviderAgentTool } from "../../custom-providers/agent-tools.js";
-import { type ArgoCdAgentTool } from "../../argocd/agent-tools.js";
 import { type SideloadAgentTool } from "../../sideload/agent-tools.js";
 import { type JiraAgentTool } from "../../jira/agent-tools.js";
 import { type FigmaAgentTool } from "../../figma/agent-tools.js";
@@ -242,8 +241,6 @@ export interface JAgentDeskToolHostDependencies {
   remoteExecAgentTools?: (callerAgentId: string | null) => RemoteExecAgentTool[];
   // Custom API providers (spec 34.7): provider_* tools; list/test auto-run, mutations raise a card.
   customProviderAgentTools?: (callerAgentId: string | null) => CustomProviderAgentTool[];
-  // Argo CD (spec 30.4): argocd_* tools bound per caller agent (default instance from its label).
-  argocdAgentTools?: (callerAgentId: string | null) => ArgoCdAgentTool[];
   /** Sideload tools (spec 26.10); installs raise a permission card. */
   sideloadAgentTools?: (callerAgentId: string | null) => SideloadAgentTool[];
   // Jira (spec 29.4): jira_* tools; reads auto-run, writes raise the permission card.
@@ -3942,15 +3939,14 @@ function createToolCatalog(
   // Forge Hub tools mirror the kubectl precedent: available to every agent and
   // registered before the voice-only early return so a voice session keeps them.
   registerForgeTools({ registerTool, options, callerAgentId });
-  if (options.argocdAgentTools) {
-    for (const tool of options.argocdAgentTools(callerAgentId ?? null)) {
-      registerTool(
-        tool.name,
-        { title: tool.title, description: tool.description, inputSchema: tool.inputSchema },
-        tool.handler,
-      );
-    }
-  }
+  // Argo CD (spec 30.4) and any later built-in feature tools follow Forge Hub.
+  builtinServerRegistry.registerAgentTools(
+    options.builtinPlugins,
+    registerTool,
+    builtinToolContext,
+    reserveBuiltinTool,
+    { except: ["clusters", "databases", "docker"] },
+  );
 
   if (options.voiceOnly || options.enableVoiceTools || callerContext?.enableVoiceTools) {
     registerTool(

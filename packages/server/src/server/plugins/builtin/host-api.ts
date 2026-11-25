@@ -30,3 +30,8 @@ export { GENERIC_KINDS } from "../../cluster/kube-client.js";
 export type { DatabaseRegistry } from "../../database/database-registry.js";
 export type { DatabaseEngine } from "../../database/database-dto.js";
 export { localPortOfTarget } from "../../ssh/remote-db/service.js";
+export { FileSecretStore } from "../../database/secret-store.js";
+export type { SecretStore } from "../../database/secret-store.js";
+export type { AgentPermissionResponse } from "../../agent/agent-sdk-types.js";
+export type { JAgentDeskToolDefinition } from "../../agent/tools/types.js";
+export { ensurePrivateDirectory, writePrivateFileAtomicSync } from "../../private-files.js";

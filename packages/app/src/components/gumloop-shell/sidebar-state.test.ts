@@ -76,6 +76,7 @@ describe("Gumloop sidebar model", () => {
         { routeSegment: "docker", title: "Docker" },
         { routeSegment: "cluster", title: "Clusters" },
         { routeSegment: "database", title: "Data" },
+        { routeSegment: "argocd", title: "Argo CD" },
       ]),
     ).toMatchObject({
       kind: "destination",

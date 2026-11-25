@@ -5,5 +5,9 @@
   "description": "Monitor and deploy Kubernetes applications.",
   "defaultEnabled": true,
   "requires": ["clusters"],
-  "builtinOrder": 9
+  "builtinOrder": 9,
+  "builtinEntrypoints": {
+    "server": "server/index.ts",
+    "client": "client/index.tsx"
+  }
 }

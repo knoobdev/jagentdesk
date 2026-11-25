@@ -239,9 +239,6 @@ import { ActivityGraphSession } from "./session/activity-graph/activity-graph-se
 import { type SessionShareService } from "./session-share/service.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { SshSession } from "./session/ssh/ssh-session.js";
-import { ArgoCdSession } from "./session/argocd/argocd-session.js";
-import { type ArgoCdService } from "./argocd/service.js";
-import { randomUUID } from "node:crypto";
 import { JiraSession } from "./session/jira/jira-session.js";
 import { FigmaSession, isFigmaRequest } from "./session/figma/figma-session.js";
 import { type FigmaService } from "./figma/service.js";
@@ -695,9 +692,6 @@ export interface SessionOptions {
   // Custom API providers (spec 34 / ADR-0047): daemon-wide service; null while it is
   // unavailable — its requests then get an error response instead of timing out silently.
   customProvidersService?: CustomProviderService | null;
-
-  // Argo CD (spec 30): daemon-wide service; null when the host runs without it.
-  argocdService?: ArgoCdService | null;
 
   /** Sideload (spec 26); null in tests and hosts that do not run it. */
   sideloadService?: SideloadService | null;
@@ -1260,8 +1254,6 @@ export class Session {
 
   private sshSession!: SshSession;
 
-  private argocdSession!: ArgoCdSession;
-
   private jiraSession: JiraSession | null = null;
 
   private botsSession: BotsSession | null = null;
@@ -1580,13 +1572,6 @@ export class Session {
     this.initClusterSession(options);
     this.initDatabaseSession(options);
     this.initSshSession(options);
-    this.argocdSession = new ArgoCdSession({
-      host: { emit: (msg) => this.emit(msg) },
-      service: options.argocdService ?? null,
-      logger: this.sessionLogger,
-      sessionKey: randomUUID(),
-      canRunSsoLoopback: () => this.supports(CLIENT_CAPS.argocdSsoLoopback),
-    });
     this.sideloadSession = options.sideloadService
       ? new SideloadSession({
           emit: (msg) => this.emit(msg),
@@ -1987,7 +1972,6 @@ export class Session {
 
   updateClientCapabilities(capabilities: Record<string, unknown> | null, source?: object): void {
     this.clientCapabilities = parseClientCapabilities(capabilities);
-    this.argocdSession?.syncDelegateRegistration();
     this.builtinSession?.capabilitiesChanged();
     if (source) {
       this.delivery.attach(source, true);
@@ -3221,7 +3205,6 @@ export class Session {
       () => this.dispatchSshMessage(msg),
       () => this.dispatchRemoteExecMessage(msg),
       () => this.dispatchCustomProvidersMessage(msg),
-      () => this.dispatchArgoCdMessage(msg),
       () => this.dispatchSideloadMessage(msg),
       () => this.botsSession?.dispatch(msg),
       () => this.dispatchJiraMessage(msg),
@@ -3567,8 +3550,6 @@ export class Session {
       this.simulatorStreams.disposeAll();
       this.physicalDeviceSession?.dispose();
     }
-    if (!builtin.isEnabled("argocd")) this.argocdSession.suspend();
-    else this.argocdSession.syncDelegateRegistration();
     if (!builtin.isEnabled("jira")) this.jiraSession?.suspend();
     if (!builtin.isEnabled("activity-graph")) this.activityGraphSession?.dispose();
     if (!builtin.isEnabled("workbench")) {
@@ -5124,53 +5105,6 @@ export class Session {
       return undefined;
     }
     return undefined;
-  }
-
-  // Argo CD allowlist (spec 30.5): every argocd.* request is listed here AND handled in
-  // ArgoCdSession.handle(); a type missing from either is never answered.
-  // oxlint-disable-next-line complexity
-  private dispatchArgoCdMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    switch (msg.type) {
-      case "argocd.instances.list.request":
-      case "argocd.instances.save.request":
-      case "argocd.instances.delete.request":
-      case "argocd.instances.login.request":
-      case "argocd.instances.logout.request":
-      case "argocd.sso.begin.request":
-      case "argocd.sso.complete.request":
-      case "argocd.sso.delegate.request":
-      case "argocd.apps.list.request":
-      case "argocd.apps.subscribe.request":
-      case "argocd.apps.unsubscribe.request":
-      case "argocd.app.get.request":
-      case "argocd.app.tree.subscribe.request":
-      case "argocd.app.tree.unsubscribe.request":
-      case "argocd.app.diff.request":
-      case "argocd.app.manifests.request":
-      case "argocd.app.events.request":
-      case "argocd.app.logs.subscribe.request":
-      case "argocd.app.logs.unsubscribe.request":
-      case "argocd.app.sync.request":
-      case "argocd.app.refresh.request":
-      case "argocd.app.rollback.request":
-      case "argocd.app.terminate.request":
-      case "argocd.app.delete.request":
-      case "argocd.app.set_auto_sync.request":
-      case "argocd.app.confirm_pruning.request":
-      case "argocd.app.resource_actions.list.request":
-      case "argocd.app.resource_action.request":
-      case "argocd.can_i.request":
-      case "argocd.appsets.list.request":
-      case "argocd.projects.list.request":
-      case "argocd.repos.list.request":
-      case "argocd.clusters.list.request":
-      case "argocd.cluster_links.list.request":
-      case "argocd.cluster_links.set.request":
-      case "argocd.cluster_links.resolve.request":
-        return this.argocdSession.handle(msg);
-      default:
-        return undefined;
-    }
   }
 
   // Jira (spec 29.5). Every jira.* request is listed here AND handled in JiraSession.handle: a
@@ -10900,7 +10834,6 @@ export class Session {
 
     this.workspaceGitObserver.dispose();
     this.workspaceFilesSession.dispose();
-    this.argocdSession.dispose();
   }
 
   private validatePublicAgentWorkspaceIntent(request: CreateAgentRequestMessage): void {

@@ -2,9 +2,11 @@
 import { register as register0 } from "../../../../../plugins/docker/client/index";
 import { register as register1 } from "../../../../../plugins/clusters/client/index";
 import { register as register2 } from "../../../../../plugins/databases/client/index";
+import { register as register3 } from "../../../../../plugins/argocd/client/index";
 import type { BuiltinClientRegistry } from "./host";
 export function loadBuiltins(registry: BuiltinClientRegistry) {
   register0(registry.forPlugin("docker"));
   register1(registry.forPlugin("clusters"));
   register2(registry.forPlugin("databases"));
+  register3(registry.forPlugin("argocd"));
 }

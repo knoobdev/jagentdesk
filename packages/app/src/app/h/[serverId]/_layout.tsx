@@ -1,7 +1,7 @@
 import { BuiltinPluginGate } from "@/plugins/builtin/gate";
 import { builtinPluginScreenLayout } from "@/plugins/builtin/route-boundary";
 import { Redirect, Stack, useLocalSearchParams } from "expo-router";
-import { ArgoCdSsoDelegatePrompt } from "@/argocd/sso-delegate-prompt";
+import { BuiltinHostMounts } from "@/plugins/builtin/surfaces";
 import { useHostRuntimeBootstrapState } from "@/app/_layout";
 import { HostRouteProvider } from "@/navigation/host-route-context";
 import { resolveStartupRoute } from "@/navigation/host-runtime-bootstrap";
@@ -62,9 +62,7 @@ function KnownHostRoute() {
       <BuiltinPluginGate serverId={routeServerId} id="skills">
         <SkillsSyncBinder serverId={routeServerId} />
       </BuiltinPluginGate>
-      <BuiltinPluginGate serverId={routeServerId} id="argocd">
-        <ArgoCdSsoDelegatePrompt serverId={routeServerId} />
-      </BuiltinPluginGate>
+      <BuiltinHostMounts serverId={routeServerId} />
       <BuiltinPluginGate serverId={routeServerId} id="jira">
         <JiraOAuthDelegationBinder serverId={routeServerId} />
       </BuiltinPluginGate>

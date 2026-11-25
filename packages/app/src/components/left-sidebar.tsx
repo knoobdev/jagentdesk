@@ -21,7 +21,6 @@ import {
   Radar,
   Search,
   Server,
-  Ship,
   Settings,
   Smartphone,
   Store,
@@ -107,27 +106,19 @@ import { JiraSidebarEntry } from "@/jira/sidebar-entry";
 import { SidebarJiraNav } from "@/jira/sidebar-jira-nav";
 import { FigmaSidebarEntry } from "@/figma/sidebar-entry";
 import { SidebarFigmaNav } from "@/figma/sidebar-figma-nav";
-import { SidebarArgoCdNav } from "@/argocd/sidebar-argocd-nav";
-
-/** `/h/<serverId>/argocd[/<instanceId>[/app]]` → the host and the open instance. */
-function parseArgoCdRoute(
-  pathname: string,
-): { serverId: string; instanceId: string | null } | null {
-  const match = pathname.match(/\/h\/([^/]+)\/argocd(?:\/([^/?]+))?/);
-  if (!match) return null;
-  const instanceId = match[2] ? decodeURIComponent(match[2]) : null;
-  return { serverId: decodeURIComponent(match[1]), instanceId };
-}
 
 // Classic sidebar positions of migrated built-in destinations; the rest follow Marketplace.
 const CLASSIC_SLOT_INFRA: readonly string[] = ["clusters", "databases"];
-const CLASSIC_PLACED_DESTINATIONS: readonly string[] = [...CLASSIC_SLOT_INFRA];
+const CLASSIC_SLOT_DEPLOY: readonly string[] = ["argocd"];
+const CLASSIC_PLACED_DESTINATIONS: readonly string[] = [
+  ...CLASSIC_SLOT_INFRA,
+  ...CLASSIC_SLOT_DEPLOY,
+];
 
 /** Sections whose route owns the desktop left column instead of the workspace list. */
 type SectionRoute =
   | { section: "plugin"; serverId: string; pluginId: string }
-  | { section: "servers" | "jira" | "figma" | "bots"; serverId: string }
-  | { section: "argocd"; serverId: string; instanceId: string | null };
+  | { section: "servers" | "jira" | "figma" | "bots"; serverId: string };
 
 export function resolveSectionRoute(pathname: string): SectionRoute | null {
   const plugin = /^\/h\/([^/]+)\/plugin\/([^/]+)/.exec(pathname);
@@ -137,8 +128,6 @@ export function resolveSectionRoute(pathname: string): SectionRoute | null {
       serverId: decodeURIComponent(plugin[1]),
       pluginId: decodeURIComponent(plugin[2]),
     };
-  const argoCd = parseArgoCdRoute(pathname);
-  if (argoCd) return { section: "argocd", ...argoCd };
   const match = pathname.match(/\/h\/([^/]+)\/(servers|jira|figma|bots)(?:$|[/?])/);
   const section = match?.[2];
   if (
@@ -174,7 +163,7 @@ export function resolveSidebarNavBody(
     );
   if (sectionRoute?.section === "plugin")
     return <PluginSidebarPanel serverId={sectionRoute.serverId} pluginId={sectionRoute.pluginId} />;
-  // A section that owns the left column (spec 25.13.1 Servers, 29.3 Jira, 30.3 Argo CD).
+  // A section that owns the left column (spec 25.13.1 Servers, 29.3 Jira).
   if (sectionRoute?.section === "servers")
     return (
       <BuiltinPluginGate serverId={sectionRoute.serverId} id="ssh-servers">
@@ -193,13 +182,6 @@ export function resolveSidebarNavBody(
         <SidebarFigmaNav serverId={sectionRoute.serverId} />
       </BuiltinPluginGate>
     );
-  if (sectionRoute?.section === "argocd") {
-    return (
-      <BuiltinPluginGate serverId={sectionRoute.serverId} id="argocd">
-        <SidebarArgoCdNav serverId={sectionRoute.serverId} instanceId={sectionRoute.instanceId} />
-      </BuiltinPluginGate>
-    );
-  }
   if (builtinPanelRoute) {
     return (
       <BuiltinLeftPanel serverId={builtinPanelRoute.serverId} segment={builtinPanelRoute.segment} />
@@ -230,7 +212,6 @@ interface SidebarSharedProps {
   handleHome: () => void;
   handleSettings: () => void;
   handleServers: () => void;
-  handleArgoCd: () => void;
   handleSkills: () => void;
   handleInsights: () => void;
   handleForge: () => void;
@@ -240,8 +221,6 @@ interface SidebarSharedProps {
   supportsForgeHub: boolean;
   /** Spec 25: SSH Servers entry only when the daemon advertises sshServers. */
   supportsSshServers: boolean;
-  /** Spec 30.3: Argo CD entry only when the daemon advertises argocd. */
-  supportsArgoCd: boolean;
   /** Some connected host can run simulators (spec 24.4). */
   supportsDevices: boolean;
   labels: SidebarLabels;
@@ -263,7 +242,6 @@ interface SidebarLabels {
   sharedSessions: string;
   bots: string;
   servers: string;
-  argoCd: string;
   skills: string;
   insights: string;
   forge: string;
@@ -382,7 +360,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     marketplaceRoute,
     simulatorRoute,
     proxyRoute,
-    argoCdRoute,
     supportsForgeHub,
   } = useAppNavTargets();
 
@@ -415,17 +392,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       router.push(serversRoute as Href);
     }
   }, [serversRoute, showMobileAgent]);
-
-  const handleArgoCdDesktop = useCallback(() => {
-    if (argoCdRoute) router.push(argoCdRoute);
-  }, [argoCdRoute]);
-
-  const handleArgoCdMobile = useCallback(() => {
-    if (argoCdRoute) {
-      showMobileAgent();
-      router.push(argoCdRoute);
-    }
-  }, [argoCdRoute, showMobileAgent]);
 
   const handleSkillsMobile = useCallback(() => {
     if (skillsRoute) {
@@ -498,7 +464,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       sharedSessions: "Shared sessions",
       bots: t("bots.title"),
       servers: "Servers",
-      argoCd: "Argo CD",
       skills: "Skills",
       insights: "Insights",
       forge: "Forge",
@@ -525,7 +490,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     toggleProjectCollapsed,
     handleRefresh,
     handleServers: handleServersDesktop,
-    handleArgoCd: handleArgoCdDesktop,
     handleSkills: handleSkillsDesktop,
     handleInsights: handleInsightsDesktop,
     handleForge: handleForgeDesktop,
@@ -534,7 +498,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     handleWorkbench: handleWorkbenchDesktop,
     supportsForgeHub,
     supportsSshServers,
-    supportsArgoCd: argoCdRoute !== null,
     supportsDevices: simulatorRoute !== null,
     labels,
     newWorkspaceKeys,
@@ -546,7 +509,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
         <MobileSidebar
           {...sharedProps}
           handleServers={handleServersMobile}
-          handleArgoCd={handleArgoCdMobile}
           handleSkills={handleSkillsMobile}
           handleInsights={handleInsightsMobile}
           handleForge={handleForgeMobile}
@@ -571,7 +533,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       <DesktopSidebar
         {...sharedProps}
         handleServers={handleServersDesktop}
-        handleArgoCd={handleArgoCdDesktop}
         handleSkills={handleSkillsDesktop}
         handleInsights={handleInsightsDesktop}
         handleForge={handleForgeDesktop}
@@ -926,7 +887,9 @@ function MobileSidebar({
 }: MobileSidebarProps) {
   const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
   const pathname = usePathname();
-  const builtinPanelRoute = builtinClientRegistry.navigationPanelRoute(pathname);
+  // Section panels (Argo CD) are desktop-only, as core sections are.
+  const navigationPanel = builtinClientRegistry.navigationPanelRoute(pathname);
+  const builtinPanelRoute = navigationPanel?.section ? null : navigationPanel;
   const { gesture: closeGesture, gestureRef: closeGestureRef } = useCloseAgentListGesture();
   const isGumloop = useIsGumloopTheme();
   const dragGestureHostPresented = useIsMobilePanelPresented("agent-list");
@@ -1076,7 +1039,6 @@ function DesktopSidebar({
   handleHome,
   handleSettings,
   handleServers,
-  handleArgoCd,
   handleSkills,
   handleInsights,
   handleForge,
@@ -1085,7 +1047,6 @@ function DesktopSidebar({
   handleWorkbench,
   supportsForgeHub,
   supportsSshServers,
-  supportsArgoCd,
   supportsDevices,
   labels,
   handleAddHost,
@@ -1109,7 +1070,6 @@ function DesktopSidebar({
   const isSchedulesActive = pathname.includes("/schedules");
   const isSharedSessionsActive = pathname.includes("/shared-sessions");
   const isServersActive = pathname.includes("/servers");
-  const isArgoCdActive = pathname.includes("/argocd");
   const isSkillsActive = pathname.includes("/skills");
   const isInsightsActive = pathname.includes("/insights");
   const isForgeActive = pathname.includes("/forge");
@@ -1215,7 +1175,9 @@ function DesktopSidebar({
               <TitlebarDragRegion />
             </View>
           )}
-          {isGumloop && !sectionRoute ? <GumloopSidebarHeader /> : null}
+          {isGumloop && !sectionRoute && !builtinPanelRoute?.section ? (
+            <GumloopSidebarHeader />
+          ) : null}
         </View>
         {builtinPanelRoute || sectionRoute || isGumloop ? null : (
           <ScrollView
@@ -1279,16 +1241,7 @@ function DesktopSidebar({
                 variant="compact"
               />
             ) : null}
-            {supportsArgoCd ? (
-              <SidebarHeaderRow
-                icon={Ship}
-                label={labels.argoCd}
-                onPress={handleArgoCd}
-                isActive={isArgoCdActive}
-                testID="sidebar-argocd-nav"
-                variant="compact"
-              />
-            ) : null}
+            <BuiltinSidebarDestinations only={CLASSIC_SLOT_DEPLOY} />
             <JiraSidebarEntry closesDrawer={false} />
             <FigmaSidebarEntry closesDrawer={false} />
             <NavTargetGate route={builtinTargets.skillsRoute}>

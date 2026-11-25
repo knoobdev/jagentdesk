@@ -26,6 +26,11 @@ export interface BuiltinDestination {
 export interface BuiltinLeftPanelOptions {
   /** Replace the navigation list in the classic sidebar while this segment's route is open. */
   ownsNavigation?: boolean;
+  /**
+   * Behave like a core section (Servers, Jira): desktop only, and the panel also replaces the
+   * Gumloop header. Without it the panel is a resource drill-in on desktop and mobile.
+   */
+  section?: boolean;
 }
 export interface BuiltinScreen extends BuiltinClientProps {
   sshDocker?: import("@/ssh/ui/ssh-docker-client").SshDockerTarget;
@@ -61,7 +66,7 @@ export interface BuiltinClientContributions {
   destinations: BuiltinDestination[];
   mobileEntries: BuiltinDestination[];
   panels: Map<string, ComponentType<BuiltinClientProps>>;
-  navigationPanels: Set<string>;
+  navigationPanels: Map<string, BuiltinLeftPanelOptions>;
   mounts: Map<string, ComponentType<BuiltinClientProps>>;
   screens: Map<string, ComponentType<BuiltinScreen>>;
   settings: Map<string, ComponentType<BuiltinClientProps>>;
@@ -77,7 +82,7 @@ export class BuiltinClientRegistry {
       destinations: [],
       mobileEntries: [],
       panels: new Map(),
-      navigationPanels: new Set(),
+      navigationPanels: new Map(),
       mounts: new Map(),
       screens: new Map(),
       settings: new Map(),
@@ -96,7 +101,7 @@ export class BuiltinClientRegistry {
       mobileDrawerEntry: (destination) => entry.mobileEntries.push(destination),
       leftPanel: (key, component, options) => {
         add(entry.panels, key, component);
-        if (options?.ownsNavigation) entry.navigationPanels.add(key);
+        if (options?.ownsNavigation) entry.navigationPanels.set(key, options);
       },
       hostMount: (key, component) => add(entry.mounts, key, component),
       screen: (key, component) => add(entry.screens, key, component),
@@ -128,12 +133,21 @@ export class BuiltinClientRegistry {
     return [...this.entries.values()].some((entry) => entry.panels.has(routeSegment));
   }
   /** `/h/<serverId>/<segment>…` routes whose panel replaces the classic sidebar navigation. */
-  navigationPanelRoute(pathname: string): { serverId: string; segment: string } | null {
+  navigationPanelRoute(
+    pathname: string,
+  ): { serverId: string; segment: string; section: boolean } | null {
     const match = /^\/h\/([^/]+)\/([^/?]+)/.exec(pathname);
     if (!match) return null;
     const segment = match[2];
-    return [...this.entries.values()].some((entry) => entry.navigationPanels.has(segment))
-      ? { serverId: decodeURIComponent(match[1]), segment }
+    const options = [...this.entries.values()]
+      .map((entry) => entry.navigationPanels.get(segment))
+      .find(Boolean);
+    return options
+      ? {
+          serverId: decodeURIComponent(match[1]),
+          segment,
+          section: options.section === true,
+        }
       : null;
   }
   hasPlugin(id: string): boolean {

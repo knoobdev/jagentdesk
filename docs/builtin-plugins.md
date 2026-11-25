@@ -5,7 +5,7 @@ they do not use the installed-plugin process, client bundle evaluator, or `plugi
 Settings → Plugins controls each feature per host. The persisted ids, defaults, dependencies,
 capabilities, RPC names, tool names, and data paths are release contracts.
 
-Docker was the phase 2 pilot. Migrated features declare `builtinEntrypoints`; the other feature
+Docker was the phase 2 pilot; Clusters, Databases, and Argo CD followed. Migrated features declare `builtinEntrypoints`; the other feature
 manifests still describe phase 1 implementations.
 The bundled provider and usage plugins retain their existing SDK runtime. Do not move those
 implementations while migrating a feature.
@@ -121,7 +121,8 @@ A destination owns `routeSegment` plus any `routeSegments` (list and detail rout
 the Gumloop drill-in title (`shortTitle ?? title`). `routeChanges` notifies when `route` would
 change, for example when it reopens the last resource. A left panel registered with
 `{ ownsNavigation: true }` replaces the classic sidebar's navigation on its routes; without it
-the panel appears only in the Gumloop drill-in. Navigation order is the established order in
+the panel appears only in the Gumloop drill-in. Add `section: true` for a desktop-only section
+that also replaces the Gumloop header, as core sections do (Argo CD). Navigation order is the established order in
 `use-app-nav.ts` (`APP_NAV_ORDER`) and the classic sidebar's slots; keep a migrated
 destination where it was.
 
