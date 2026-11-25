@@ -40,7 +40,7 @@ import {
 } from "./agent/finish-subscriptions/index.js";
 import { ensureToolDirsOnPath, HostToolInstaller } from "./host-tools/installer.js";
 import type { HttpFetch } from "./host-tools/release.js";
-import { setForgeToolInstaller } from "./session/forge/forge-cli-installer.js";
+import { setSharedHostToolInstaller } from "./host-tools/shared-installer.js";
 import { unarchiveAgentState } from "./agent/agent-prompt.js";
 import { unarchiveWorkspaceAgents } from "./workspace-archive-service.js";
 import { createWorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
@@ -215,7 +215,6 @@ import { ManagedPluginSources } from "./plugins/managed-source.js";
 import { BrowserToolsBroker } from "./browser-tools/broker.js";
 import { WorkspaceGitServiceImpl } from "./workspace-git-service.js";
 import { resolveWorkspaceIdForPath } from "./resolve-workspace-id-for-path.js";
-import { ForgeHubService } from "./session/forge/forge-hub-session.js";
 import { FileSecretStore } from "./database/secret-store.js";
 import { DEFAULT_RELAY_ENDPOINT, extractProviderOverrides } from "./config.js";
 import { createCustomProviderService } from "./custom-providers/service.js";
@@ -1655,12 +1654,6 @@ export async function createJAgentDeskDaemon(
   });
   logger.info("Sideload service initialized");
   deviceSignerSource = sideloadService;
-  // Daemon-wide Forge Hub service (spec 19 / ADR-0015). One instance shared across
-  // all agents' tool catalogs, mirroring how session.ts builds it per-session. Token
-  // secrets + the connection index live under <home>/forge.
-  const forgeSecretDir = path.resolve(config.jagentdeskHome, "forge");
-  const forgeHubService = new ForgeHubService(new FileSecretStore(forgeSecretDir), forgeSecretDir);
-  logger.info("Forge Hub service created");
   // Argo CD (spec 30 / ADR-0034): registry + secrets under <home>/argocd, one SSE stream per
   // instance while viewed, and the argocd_* agent tools.
   const argocdService = new ArgoCdService({
@@ -2104,7 +2097,6 @@ export async function createJAgentDeskDaemon(
           agentManager.requestHostToolPermission(agentId, request),
       }),
     skillsStorage,
-    forgeHub: forgeHubService,
     browserFingerprintProfiles: {
       list: () => daemonConfigStore.get().browserTools.profiles ?? [],
       activeId: () => daemonConfigStore.get().browserTools.activeProfileId ?? null,
@@ -2308,7 +2300,7 @@ export async function createJAgentDeskDaemon(
               fetch: globalThis.fetch as unknown as HttpFetch,
               githubToken: process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? null,
             });
-            setForgeToolInstaller(hostToolInstaller);
+            setSharedHostToolInstaller(hostToolInstaller);
             server.setHostCapabilities(hostCapabilities, hostToolInstaller);
             server.setPhysicalDevices(physicalDevices);
             void hostCapabilities.refresh().catch((error: unknown) => {

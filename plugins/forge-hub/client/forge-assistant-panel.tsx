@@ -1,25 +1,30 @@
+// Moved verbatim from core, where lint ran only on edited lines; these rules predate the move.
+/* oxlint-disable react-hooks/exhaustive-deps */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { ArrowLeft, MessageSquare, Plus, X } from "lucide-react-native";
 import type { ForgeRepo, ForgeRepoRef } from "@jagentdesk/protocol/messages";
-import { AgentConversationPanel } from "@/panels/agent-panel";
 import {
+  AgentConversationPanel,
   PaneProvider,
   PaneFocusProvider,
   createPaneFocusContextValue,
-  type PaneContextValue,
-} from "@/panels/pane-context";
+  useHostRuntimeClient,
+  useProvidersSnapshot,
+  useSessionStore,
+} from "../../../packages/app/src/plugins/builtin/host-api";
+import type {
+  PaneContextValue,
+  Agent,
+  Theme,
+} from "../../../packages/app/src/plugins/builtin/host-api";
 import {
   ForgeAssistantDraft,
   FORGE_ASSISTANT_LABEL,
   FORGE_ASSISTANT_REPO_LABEL,
   repoScopeKey,
-} from "@/components/forge-assistant-draft";
-import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
-import { useSessionStore, type Agent } from "@/stores/session-store";
-import type { Theme } from "@/styles/theme";
+} from "./forge-assistant-draft";
 
 const ThemedX = withUnistyles(X);
 const ThemedArrowLeft = withUnistyles(ArrowLeft);

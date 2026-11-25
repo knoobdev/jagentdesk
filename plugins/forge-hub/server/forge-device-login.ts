@@ -1,7 +1,12 @@
-import * as pty from "node-pty";
+// Moved verbatim from core, where lint ran only on edited lines; these rules predate the move.
+/* oxlint-disable promise/no-multiple-resolved, unicorn/no-useless-spread */
+import {
+  spawnPty,
+  type Pty,
+} from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 import { getForgeDefinition } from "@jagentdesk/protocol/forge-manifest";
-import { findExecutable } from "../../../executable-resolution/executable-resolution.js";
-import { createExternalCommandProcessEnv } from "../../jagentdesk-env.js";
+import { findExecutable } from "../../../packages/server/src/server/plugins/builtin/host-api.js";
+import { createExternalCommandProcessEnv } from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 
 /**
  * Forge Hub — app-driven device-flow sign-in (spec §19 / ADR-0015).
@@ -92,7 +97,7 @@ interface DriveOptions {
 
 export class ForgeDeviceLogin {
   /** Active login ptys keyed by the login's `requestId` so cancel can target one. */
-  private readonly ptys = new Map<string, pty.IPty>();
+  private readonly ptys = new Map<string, Pty>();
   /** requestIds whose pty was killed by an explicit cancel (vs. a real failure). */
   private readonly cancelled = new Set<string>();
 
@@ -196,6 +201,11 @@ export class ForgeDeviceLogin {
     return true;
   }
 
+  /** Cancels every in-flight login (plugin turned off or client gone). */
+  cancelAll(): void {
+    for (const requestId of [...this.ptys.keys()]) this.cancel(requestId);
+  }
+
   /** Spawn the CLI in a pty, parse its output, and resolve the terminal result. */
   private driveLogin(opts: DriveOptions): Promise<LoginResult> {
     const {
@@ -211,9 +221,9 @@ export class ForgeDeviceLogin {
     return new Promise<LoginResult>((resolve) => {
       const env = createExternalCommandProcessEnv(binPath, process.env, envOverlay);
 
-      let child: pty.IPty;
+      let child: Pty;
       try {
-        child = pty.spawn(binPath, args, {
+        child = spawnPty(binPath, args, {
           name: term ?? "xterm-256color",
           cols: 120,
           rows: 40,

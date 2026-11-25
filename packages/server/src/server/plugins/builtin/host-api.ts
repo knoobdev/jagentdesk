@@ -30,3 +30,9 @@ export type {
   BuiltinSessionContribution,
   RegisterBuiltinTool,
 } from "./host.js";
+// forge-hub
+export { findExecutable } from "../../../executable-resolution/executable-resolution.js";
+export { sharedHostToolInstaller } from "../../host-tools/shared-installer.js";
+export { spawn as spawnPty, type IPty as Pty } from "node-pty";
+export { getToolDefinition, hostTarget } from "../../host-tools/registry.js";
+export { createExternalCommandProcessEnv } from "../../jagentdesk-env.js";

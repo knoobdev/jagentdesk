@@ -76,3 +76,20 @@ export {
   usableWorkspaces,
   workspaceDirectory,
 } from "@/utils/usable-workspaces";
+// forge-hub
+export { DiffViewer } from "@/components/diff-viewer";
+export { gumloopChipStyles } from "@/components/gumloop-shell/list-styles";
+export { MarkdownRenderer } from "@/components/markdown/renderer";
+export { syntaxTokenStyleFor } from "@/styles/syntax-token-styles";
+export { type AnsiLine, parseAnsiLog, stripAnsi } from "@/utils/ansi-log";
+export { highlightDiffLines } from "@/utils/diff-highlight";
+export { tokenizeToLines } from "@/utils/highlight-cache";
+export {
+  buildClustersRoute,
+  buildDatabasesRoute,
+  buildInsightsRoute,
+  buildOpenProjectRoute,
+  buildSettingsRoute,
+  buildSkillsRoute,
+} from "@/utils/host-routes";
+export { parseUnifiedDiff } from "@/utils/tool-call-parsers";

@@ -12,7 +12,6 @@ import {
   Bot,
   BarChart3,
   Database,
-  GitPullRequest,
   Sparkles,
   CalendarClock,
   Share2,
@@ -243,11 +242,9 @@ interface SidebarSharedProps {
   handleArgoCd: () => void;
   handleSkills: () => void;
   handleInsights: () => void;
-  handleForge: () => void;
   handleMarketplace: () => void;
   handleSimulator: () => void;
   handleWorkbench: () => void;
-  supportsForgeHub: boolean;
   /** Spec 25: SSH Servers entry only when the daemon advertises sshServers. */
   supportsSshServers: boolean;
   /** Spec 30.3: Argo CD entry only when the daemon advertises argocd. */
@@ -278,7 +275,6 @@ interface SidebarLabels {
   argoCd: string;
   skills: string;
   insights: string;
-  forge: string;
   marketplace: string;
   simulator: string;
   workbench: string;
@@ -392,12 +388,10 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     supportsSshServers,
     skillsRoute,
     insightsRoute,
-    forgeRoute,
     marketplaceRoute,
     simulatorRoute,
     proxyRoute,
     argoCdRoute,
-    supportsForgeHub,
   } = useAppNavTargets();
 
   const handleSkillsDesktop = useCallback(() => {
@@ -406,9 +400,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
   const handleInsightsDesktop = useCallback(() => {
     if (insightsRoute) router.push(insightsRoute);
   }, [insightsRoute]);
-  const handleForgeDesktop = useCallback(() => {
-    if (forgeRoute) router.push(forgeRoute);
-  }, [forgeRoute]);
   const handleMarketplaceDesktop = useCallback(() => {
     if (marketplaceRoute) router.push(marketplaceRoute);
   }, [marketplaceRoute]);
@@ -477,13 +468,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     }
   }, [insightsRoute, showMobileAgent]);
 
-  const handleForgeMobile = useCallback(() => {
-    if (forgeRoute) {
-      showMobileAgent();
-      router.push(forgeRoute);
-    }
-  }, [forgeRoute, showMobileAgent]);
-
   const handleMarketplaceMobile = useCallback(() => {
     if (marketplaceRoute) {
       showMobileAgent();
@@ -539,7 +523,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       argoCd: "Argo CD",
       skills: "Skills",
       insights: "Insights",
-      forge: "Forge",
       marketplace: t("sidebar.actions.marketplace"),
       simulator: "Simulators",
       workbench: "Workbench",
@@ -568,11 +551,9 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     handleArgoCd: handleArgoCdDesktop,
     handleSkills: handleSkillsDesktop,
     handleInsights: handleInsightsDesktop,
-    handleForge: handleForgeDesktop,
     handleMarketplace: handleMarketplaceDesktop,
     handleSimulator: handleSimulatorDesktop,
     handleWorkbench: handleWorkbenchDesktop,
-    supportsForgeHub,
     supportsSshServers,
     supportsArgoCd: argoCdRoute !== null,
     supportsDevices: simulatorRoute !== null,
@@ -591,7 +572,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
           handleArgoCd={handleArgoCdMobile}
           handleSkills={handleSkillsMobile}
           handleInsights={handleInsightsMobile}
-          handleForge={handleForgeMobile}
           handleMarketplace={handleMarketplaceMobile}
           handleSimulator={handleSimulatorMobile}
           handleWorkbench={handleWorkbenchMobile}
@@ -618,7 +598,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
         handleArgoCd={handleArgoCdDesktop}
         handleSkills={handleSkillsDesktop}
         handleInsights={handleInsightsDesktop}
-        handleForge={handleForgeDesktop}
         handleMarketplace={handleMarketplaceDesktop}
         handleSimulator={handleSimulatorDesktop}
         handleWorkbench={handleWorkbenchDesktop}
@@ -1139,11 +1118,9 @@ function DesktopSidebar({
   handleArgoCd,
   handleSkills,
   handleInsights,
-  handleForge,
   handleMarketplace,
   handleSimulator,
   handleWorkbench,
-  supportsForgeHub,
   supportsSshServers,
   supportsArgoCd,
   supportsDevices,
@@ -1174,7 +1151,6 @@ function DesktopSidebar({
   const isArgoCdActive = pathname.includes("/argocd");
   const isSkillsActive = pathname.includes("/skills");
   const isInsightsActive = pathname.includes("/insights");
-  const isForgeActive = pathname.includes("/forge");
   const isMarketplaceActive = pathname.includes("/marketplace");
   const isSimulatorActive = pathname.includes("/simulator");
   const isWorkbenchActive = pathname.includes("/proxy");
@@ -1434,16 +1410,7 @@ function DesktopSidebar({
                 variant="compact"
               />
             </NavTargetGate>
-            {supportsForgeHub ? (
-              <SidebarHeaderRow
-                icon={GitPullRequest}
-                label={labels.forge}
-                onPress={handleForge}
-                isActive={isForgeActive}
-                testID="sidebar-forge-nav"
-                variant="compact"
-              />
-            ) : null}
+            <BuiltinSidebarDestinations slot="tail" />
             <PluginSidebarItems />
           </ScrollView>
         )}

@@ -1,8 +1,11 @@
 import { getForgeDefinition } from "@jagentdesk/protocol/forge-manifest";
-import { findExecutable } from "../../../executable-resolution/executable-resolution.js";
-import { execCommand } from "../../../utils/spawn.js";
-import type { HostToolInstaller } from "../../host-tools/installer.js";
-import { getToolDefinition, hostTarget } from "../../host-tools/registry.js";
+import { findExecutable } from "../../../packages/server/src/server/plugins/builtin/host-api.js";
+import { execCommand } from "../../../packages/server/src/server/plugins/builtin/host-api.js";
+import { sharedHostToolInstaller } from "../../../packages/server/src/server/plugins/builtin/host-api.js";
+import {
+  getToolDefinition,
+  hostTarget,
+} from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 
 /**
  * Forge Hub — CLI detect + guided auto-install (spec §19.3.5 / §19.3.6, ADR-0016,
@@ -49,17 +52,6 @@ export interface CliStatus {
 }
 
 /**
- * The platform-aware installer (spec 24.8, ADR-0024) that installs forge CLIs:
- * a user-scope package manager, else the vendor release for this OS/arch. Set by
- * bootstrap; without it nothing is auto-installable.
- */
-let toolInstaller: HostToolInstaller | null = null;
-
-export function setForgeToolInstaller(installer: HostToolInstaller | null): void {
-  toolInstaller = installer;
-}
-
-/**
  * Detect whether a forge's CLI is installed and whether it can be auto-installed.
  * Token-only forges (signIn === null, e.g. Bitbucket) — and any forge id with no
  * known CLI — report `installed:true, binary:"", canAutoInstall:false` because
@@ -84,7 +76,7 @@ export async function detectCliStatus(forge: string): Promise<CliStatus> {
   // A registry tool installs through a user-scope manager or its release; only a
   // host with no release build (and no manager) cannot auto-install.
   const canAutoInstall = Boolean(
-    toolInstaller &&
+    sharedHostToolInstaller() &&
     tool &&
     (tool.release && target ? tool.release.assetFor(target, "0.0.0") : true),
   );
@@ -146,6 +138,9 @@ export async function installCli(
     emitProgress({ phase: "done" });
     return { ok: true, binary, version: status.version, packageManager: null };
   }
+  // The platform-aware installer (spec 24.8, ADR-0024): a user-scope package manager, else the
+  // vendor release for this OS/arch. Without it nothing is auto-installable.
+  const toolInstaller = sharedHostToolInstaller();
   if (!toolInstaller || !status.canAutoInstall) {
     emitProgress({ phase: "failed", line: "unsupported" });
     return { ok: false, binary, packageManager: null, error: "unsupported" };

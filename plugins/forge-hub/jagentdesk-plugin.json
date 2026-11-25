@@ -5,5 +5,9 @@
   "description": "Browse repositories, reviews, issues and pipelines.",
   "defaultEnabled": true,
   "requires": [],
-  "builtinOrder": 12
+  "builtinOrder": 12,
+  "builtinEntrypoints": {
+    "server": "server/index.ts",
+    "client": "client/index.tsx"
+  }
 }

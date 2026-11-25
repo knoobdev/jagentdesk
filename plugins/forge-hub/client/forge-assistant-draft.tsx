@@ -1,16 +1,19 @@
 import { useMemo } from "react";
 import { Keyboard, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { Composer } from "@/composer";
-import { useAgentInputDraft } from "@/composer/draft/input-draft";
-import { useDraftAgentCreateFlow } from "@/composer/draft/create-flow";
-import { buildDraftStoreKey, generateDraftId } from "@/stores/draft-keys";
-import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import { encodeImages } from "@/utils/encode-images";
-import { isWeb } from "@/constants/platform";
+import {
+  Composer,
+  useAgentInputDraft,
+  useDraftAgentCreateFlow,
+  buildDraftStoreKey,
+  generateDraftId,
+  useHostRuntimeClient,
+  encodeImages,
+  isWeb,
+} from "../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
 import { type AgentSnapshotPayload, type ForgeRepoRef } from "@jagentdesk/protocol/messages";
 import { type CreateAgentRequestOptions } from "@jagentdesk/client/internal/daemon-client";
-import { type Theme } from "@/styles/theme";
 
 // A dedicated Forge assistant per host + repo scope; reused across opens (see
 // forge-assistant-panel.tsx). FORGE_ASSISTANT_LABEL marks the agent as a Forge

@@ -1,3 +1,5 @@
+// Moved verbatim from core, where lint ran only on edited lines; these rules predate the move.
+/* oxlint-disable no-nested-ternary, no-shadow, no-unneeded-ternary, promise/no-multiple-resolved, typescript/consistent-type-definitions, unicorn/no-useless-fallback-in-spread */
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
@@ -25,11 +27,14 @@ import type {
   SessionInboundMessage,
   SessionOutboundMessage,
 } from "@jagentdesk/protocol/messages";
-import { findExecutable } from "../../../executable-resolution/executable-resolution.js";
-import { execCommand, spawnProcess } from "../../../utils/spawn.js";
+import { findExecutable } from "../../../packages/server/src/server/plugins/builtin/host-api.js";
+import {
+  execCommand,
+  spawnProcess,
+} from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 import { detectCliStatus, installCli } from "./forge-cli-installer.js";
 import { ForgeDeviceLogin } from "./forge-device-login.js";
-import type { SecretStore } from "../../database/secret-store.js";
+import type { SecretStore } from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 
 /**
  * Forge Hub — Milestone A (spec 19 / ADR-0015). Repo-scoped remote-forge reads that
@@ -41,51 +46,52 @@ import type { SecretStore } from "../../database/secret-store.js";
  * their secret in the daemon SecretStore (AES-256-GCM) and never cross the wire.
  */
 
+export const FORGE_HUB_REQUEST_TYPES = [
+  "forge.connection.list.request",
+  "forge.connection.add.request",
+  "forge.connection.remove.request",
+  "forge.repo.list.request",
+  "forge.change_request.list.request",
+  "forge.change_request.files.request",
+  "forge.branch.list.request",
+  "forge.commit.list.request",
+  "forge.commit.compare.request",
+  "forge.tree.list.request",
+  "forge.file.get.request",
+  "forge.change_request.review.request",
+  "forge.change_request.merge.request",
+  "forge.pipeline.list.request",
+  "forge.pipeline.get.request",
+  "forge.job.log.request",
+  "forge.pipeline.rerun.request",
+  "forge.pipeline.cancel.request",
+  "forge.job.play.request",
+  "forge.change_request.set_auto_merge.request",
+  "forge.artifact.list.request",
+  "forge.artifact.download.request",
+  "forge.release.list.request",
+  "forge.tag.list.request",
+  "forge.issue.list.request",
+  "forge.issue.create.request",
+  "forge.issue.comment.request",
+  "forge.issue.close.request",
+  "forge.issue.get.request",
+  "forge.member.list.request",
+  "forge.member.add.request",
+  "forge.member.remove.request",
+  "forge.change_request.create.request",
+  "forge.change_request.close.request",
+  "forge.release.create.request",
+  "forge.release.get.request",
+  "forge.cli.status.request",
+  "forge.cli.install.request",
+  "forge.connection.login.request",
+  "forge.connection.login.cancel.request",
+] as const satisfies readonly SessionInboundMessage["type"][];
+
 type ForgeHubInbound = Extract<
   SessionInboundMessage,
-  {
-    type:
-      | "forge.connection.list.request"
-      | "forge.connection.add.request"
-      | "forge.connection.remove.request"
-      | "forge.repo.list.request"
-      | "forge.change_request.list.request"
-      | "forge.change_request.files.request"
-      | "forge.branch.list.request"
-      | "forge.commit.list.request"
-      | "forge.commit.compare.request"
-      | "forge.tree.list.request"
-      | "forge.file.get.request"
-      | "forge.change_request.review.request"
-      | "forge.change_request.merge.request"
-      | "forge.pipeline.list.request"
-      | "forge.pipeline.get.request"
-      | "forge.job.log.request"
-      | "forge.pipeline.rerun.request"
-      | "forge.pipeline.cancel.request"
-      | "forge.job.play.request"
-      | "forge.change_request.set_auto_merge.request"
-      | "forge.artifact.list.request"
-      | "forge.artifact.download.request"
-      | "forge.release.list.request"
-      | "forge.tag.list.request"
-      | "forge.issue.list.request"
-      | "forge.issue.create.request"
-      | "forge.issue.comment.request"
-      | "forge.issue.close.request"
-      | "forge.issue.get.request"
-      | "forge.member.list.request"
-      | "forge.member.add.request"
-      | "forge.member.remove.request"
-      | "forge.change_request.create.request"
-      | "forge.change_request.close.request"
-      | "forge.release.create.request"
-      | "forge.release.get.request"
-      | "forge.cli.status.request"
-      | "forge.cli.install.request"
-      | "forge.connection.login.request"
-      | "forge.connection.login.cancel.request";
-  }
+  { type: (typeof FORGE_HUB_REQUEST_TYPES)[number] }
 >;
 
 export interface ForgeHubSessionOptions {
@@ -3753,6 +3759,11 @@ export class ForgeHubSession {
   private readonly deviceLogin = new ForgeDeviceLogin();
   constructor(private readonly options: ForgeHubSessionOptions) {
     this.service = new ForgeHubService(options.secretStore, options.secretStoreDir);
+  }
+
+  /** Kills this session's device-login ptys; each resolves as cancelled. */
+  stop(): void {
+    this.deviceLogin.cancelAll();
   }
 
   // oxlint-disable-next-line complexity

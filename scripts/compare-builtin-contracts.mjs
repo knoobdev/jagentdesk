@@ -29,6 +29,13 @@ const PLUGINS = {
     toolFiles: ["packages/server/src/server/jira/agent-tools.ts"],
     tool: /name: "(jira_[a-z_]+)"/g,
   },
+  "forge-hub": {
+    rpcFiles: [SESSION],
+    // forge.search.request is the core checkout search, not Forge Hub.
+    rpc: (name) => requests("forge.")(name) && name !== "forge.search.request",
+    toolFiles: [TOOLS],
+    tool: /registerTool\(\s*"(forge_[^"]+)"/g,
+  },
 };
 const ids = process.argv.slice(4).length ? process.argv.slice(4) : Object.keys(PLUGINS);
 fs.mkdirSync(output, { recursive: true });

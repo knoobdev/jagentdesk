@@ -42,7 +42,8 @@ route ownership. See [Expo Router](expo-router.md).
 Import the declared API at
 `packages/server/src/server/plugins/builtin/host-api.ts`. Extend that facade deliberately when a
 migration needs another shared core service; do not import core implementation files from the
-feature. The facade exposes shared Docker/process primitives and tool types. Per-session
+feature. The facade exposes shared Docker/process/pty primitives, the secret store class, the
+host tool installer, and tool types. Per-session
 services provide the logger, config store, secret store, SQLite opener, Docker service factory
 and remote routing, binary frame codecs, terminal manager, structured push, and binary push.
 SQLite paths stay within the daemon's built-in storage directory. Prefix new secret keys and
@@ -61,7 +62,7 @@ new database paths with the feature id. Preserve existing storage locations duri
   check live plugin state in a tool handler: existing agents retain their opening tool set.
   Approval and provider tool policy remain in core. `slot` keeps catalog order: core calls each
   slot where the tools were registered before migration (`default` with the kubectl/sql tools,
-  `integrations` after the bot tools).
+  `integrations` after the bot tools, `late` before the voice tools).
 - `host.botTriggerSource(source)` adds a source to the Bots poller while the plugin is enabled.
   Core supplies the poll clock and per-key state; the source owns its query and dedupe keys.
 - `host.backgroundService(create)` registers a daemon-owned lifecycle through

@@ -12,7 +12,6 @@ import {
   CalendarClock,
   Database,
   Figma,
-  GitPullRequest,
   History,
   Home,
   Radar,
@@ -51,7 +50,6 @@ import {
   buildDatabaseBrowseRoute,
   buildDatabasesRoute,
   buildFigmaRoute,
-  buildForgeRoute,
   buildInsightsRoute,
   buildMarketplaceRoute,
   buildNewWorkspaceRoute,
@@ -74,13 +72,11 @@ export interface AppNavTargets {
   serversRoute: Href | null;
   skillsRoute: Href | null;
   insightsRoute: Href | null;
-  forgeRoute: Href | null;
   marketplaceRoute: Href | null;
   simulatorRoute: Href | null;
   proxyRoute: Href | null;
   /** Spec 30.3: the daemon ships Argo CD; null hides the entry. */
   argoCdRoute: Href | null;
-  supportsForgeHub: boolean;
   /** Spec 32: Figma section, when the daemon advertises `figma`. */
   figmaRoute: Href | null;
   /** Spec 25: daemon build ships the SSH servers surface (S1+). */
@@ -104,11 +100,6 @@ export function useAppNavTargets(): AppNavTargets {
   const insightsEnabled = useBuiltinPluginEnabled(firstServerId, "insights");
   const workbenchEnabled = useBuiltinPluginEnabled(firstServerId, "workbench");
   const sharingEnabled = useBuiltinPluginEnabled(firstServerId, "session-share");
-  // Forge Hub is a post-ADR-0003 surface gated per release milestone (spec 19.12):
-  // only advertise the entry when the first/active daemon reports forgeHub.
-  const supportsForgeHub = useSessionStore(
-    (state) => state.sessions[firstServerId]?.serverInfo?.features?.forgeHub === true,
-  );
   const supportsFigma = useSessionStore(
     (state) => state.sessions[firstServerId]?.serverInfo?.features?.figma === true,
   );
@@ -158,12 +149,10 @@ export function useAppNavTargets(): AppNavTargets {
       serversRoute: supportsSshServers ? perHost(buildServersRoute) : null,
       skillsRoute: skillsEnabled ? perHost(buildSkillsRoute) : null,
       insightsRoute: insightsEnabled ? perHost(buildInsightsRoute) : null,
-      forgeRoute: perHost(buildForgeRoute),
       marketplaceRoute: perHost(buildMarketplaceRoute),
       simulatorRoute: deviceServerId ? (buildSimulatorRoute(deviceServerId) as Href) : null,
       proxyRoute: workbenchEnabled ? perHost(buildProxyRoute) : null,
       argoCdRoute: supportsArgoCd ? perHost(buildArgoCdRoute) : null,
-      supportsForgeHub,
       supportsSshServers,
       figmaRoute: supportsFigma ? perHost(buildFigmaRoute) : null,
     };
@@ -181,7 +170,6 @@ export function useAppNavTargets(): AppNavTargets {
     lastCluster,
     lastDatabase,
     supportsArgoCd,
-    supportsForgeHub,
     supportsSshServers,
   ]);
 }
@@ -208,6 +196,7 @@ export function useAppNavItems(): AppNavItem[] {
   const targets = useAppNavTargets();
   const builtinDestinations = useBuiltinDestinations(pathname);
   const integrationDestinations = useBuiltinDestinations(pathname, "integrations");
+  const tailDestinations = useBuiltinDestinations(pathname, "tail");
   return useMemo(() => {
     const items: (AppNavItem | null)[] = [
       {
@@ -311,12 +300,18 @@ export function useAppNavItems(): AppNavItem[] {
       ),
       ...integrationDestinations,
       navItem("figma", Figma, "Figma", "Figma", targets.figmaRoute, pathname, "/figma"),
-      targets.supportsForgeHub
-        ? navItem("forge", GitPullRequest, "Forge", "Forge", targets.forgeRoute, pathname, "/forge")
-        : null,
+      ...tailDestinations,
     ];
     return items.filter((item): item is AppNavItem => item !== null);
-  }, [openUsage, pathname, t, targets, builtinDestinations, integrationDestinations]);
+  }, [
+    openUsage,
+    pathname,
+    t,
+    targets,
+    builtinDestinations,
+    integrationDestinations,
+    tailDestinations,
+  ]);
 }
 
 function navItem(

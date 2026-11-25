@@ -76,7 +76,13 @@ import {
 } from "./sidebar-state";
 
 function resolveSidebarDrillIn(pathname: string) {
-  return resolveCoreSidebarDrillIn(pathname, builtinClientRegistry.destinations());
+  // Only a feature with a left panel drills in; others keep the root navigation (Forge).
+  return resolveCoreSidebarDrillIn(
+    pathname,
+    builtinClientRegistry
+      .destinations()
+      .filter((destination) => builtinClientRegistry.ownsLeftPanel(destination.routeSegment)),
+  );
 }
 
 const PRIMARY_ORDER: readonly string[] = [
@@ -382,7 +388,7 @@ function RootNavigation({ onNavigate }: { onNavigate: () => void }) {
 
 function DestinationPanel({ pathname }: { pathname: string }) {
   const drill = resolveSidebarDrillIn(pathname);
-  if (drill?.kind === "destination" && builtinClientRegistry.owner(drill.section))
+  if (drill?.kind === "destination" && builtinClientRegistry.ownsLeftPanel(drill.section))
     return <BuiltinLeftPanel serverId={drill.serverId} segment={drill.section} />;
   if (drill?.kind === "settings") return <PortalHost name={GUMLOOP_PANEL_HOST} />;
   const cluster = /\/h\/([^/]+)\/cluster\/([^/]+)/.exec(pathname);

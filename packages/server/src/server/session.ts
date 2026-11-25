@@ -218,8 +218,6 @@ import {
 } from "../utils/project-custom-icon.js";
 import { VoiceSession } from "./session/voice/voice-session.js";
 import { CheckoutSession } from "./session/checkout/checkout-session.js";
-import { ForgeHubSession } from "./session/forge/forge-hub-session.js";
-import { FileSecretStore } from "./database/secret-store.js";
 import {
   createWorkspaceGitObserverService,
   type WorkspaceGitObserverService,
@@ -1244,8 +1242,6 @@ export class Session {
 
   private readonly checkoutSession: CheckoutSession;
 
-  private readonly forgeHubSession: ForgeHubSession;
-
   private readonly chatScheduleLoopSession: ChatScheduleLoopSession;
 
   private readonly autorunSession: AutorunSession | null;
@@ -1495,16 +1491,6 @@ export class Session {
       }),
       jagentdeskHome: this.jagentdeskHome,
       worktreesRoot: this.worktreesRoot,
-      logger: this.sessionLogger,
-    });
-    // Forge Hub (spec 19 / ADR-0015): repo-scoped remote-forge reads. Token secrets
-    // for method:"token" connections live in a dedicated encrypted store under home.
-    const forgeSecretDir = resolve(this.jagentdeskHome, "forge");
-    this.forgeHubSession = new ForgeHubSession({
-      host: { emit: (msg) => this.emit(msg) },
-      secretStore: new FileSecretStore(forgeSecretDir),
-      // Token-connection index (connections.json) is persisted alongside the secrets.
-      secretStoreDir: forgeSecretDir,
       logger: this.sessionLogger,
     });
     this.workspaceGitObserver = createWorkspaceGitObserverService({
@@ -4057,47 +4043,6 @@ export class Session {
       case "forge.search.request":
       case "github_search_request":
         return this.checkoutSession.handleForgeSearchRequest(msg);
-      case "forge.connection.list.request":
-      case "forge.connection.add.request":
-      case "forge.connection.remove.request":
-      case "forge.repo.list.request":
-      case "forge.change_request.list.request":
-      case "forge.change_request.files.request":
-      case "forge.branch.list.request":
-      case "forge.commit.list.request":
-      case "forge.commit.compare.request":
-      case "forge.tree.list.request":
-      case "forge.file.get.request":
-      case "forge.change_request.review.request":
-      case "forge.change_request.merge.request":
-      case "forge.pipeline.list.request":
-      case "forge.pipeline.get.request":
-      case "forge.job.log.request":
-      case "forge.pipeline.rerun.request":
-      case "forge.pipeline.cancel.request":
-      case "forge.job.play.request":
-      case "forge.change_request.set_auto_merge.request":
-      case "forge.artifact.list.request":
-      case "forge.artifact.download.request":
-      case "forge.release.list.request":
-      case "forge.tag.list.request":
-      case "forge.issue.list.request":
-      case "forge.issue.get.request":
-      case "forge.issue.create.request":
-      case "forge.issue.comment.request":
-      case "forge.issue.close.request":
-      case "forge.member.list.request":
-      case "forge.member.add.request":
-      case "forge.member.remove.request":
-      case "forge.change_request.create.request":
-      case "forge.change_request.close.request":
-      case "forge.release.create.request":
-      case "forge.release.get.request":
-      case "forge.cli.status.request":
-      case "forge.cli.install.request":
-      case "forge.connection.login.request":
-      case "forge.connection.login.cancel.request":
-        return this.forgeHubSession.handle(msg);
       case "stash_save_request":
         return this.checkoutSession.handleStashSaveRequest(msg);
       case "stash_pop_request":
