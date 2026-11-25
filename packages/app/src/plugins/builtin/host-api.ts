@@ -70,3 +70,5 @@ export { buildSettingsHostSectionRoute } from "@/utils/host-routes";
 // Spec mode and autonomous mode read each other's per-agent state.
 export { useAutorunState, useSpecModeState } from "@/hooks/use-agent-mode-state";
 export { specModeBubbleText } from "@/components/spec-mode-bubble-text";
+export { settingsStyles } from "@/styles/settings";
+export { useHostFeature } from "@/runtime/host-features";

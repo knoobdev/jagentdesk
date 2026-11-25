@@ -2,8 +2,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import type { AgentRunResult } from "../agent/agent-sdk-types.js";
-import { createTestLogger } from "../../test-utils/test-logger.js";
+import type { AgentRunResult } from "../../../packages/server/src/server/agent/agent-sdk-types.js";
+import { createTestLogger } from "../../../packages/server/src/test-utils/test-logger.js";
 import { AutorunService, type AutorunServiceOptions } from "./service.js";
 import type { AutorunState } from "@jagentdesk/protocol/messages";
 

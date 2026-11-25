@@ -30,7 +30,8 @@ export type {
 export { ensureValidJson } from "../../json-utils.js";
 export { writeFileAtomic, writeJsonFileAtomic } from "../../atomic-file.js";
 export { sendPromptToAgent } from "../../agent/agent-prompt.js";
-export type { AgentManagerEvent } from "../../agent/agent-manager.js";
+export type { AgentManager, AgentManagerEvent } from "../../agent/agent-manager.js";
+export type { AgentUsage } from "../../agent/agent-sdk-types.js";
 export type { HostCapabilityService } from "../../host-capabilities/service.js";
 export type { SessionInboundMessage, SessionOutboundMessage } from "../../messages.js";
 

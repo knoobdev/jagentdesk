@@ -1,6 +1,9 @@
+import type {
+  SessionInboundMessage,
+  SessionOutboundMessage,
+} from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 import type pino from "pino";
-import type { SessionInboundMessage, SessionOutboundMessage } from "../../messages.js";
-import type { AutorunService } from "../../autorun/service.js";
+import type { AutorunService } from "./service.js";
 
 /**
  * A client's autonomous-mode request surface (spec §20 / ADR-0017). Autonomous mode is a

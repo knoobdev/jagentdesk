@@ -2,9 +2,11 @@
 import { register as register0 } from "../../../../../plugins/docker/client/index";
 import { register as register1 } from "../../../../../plugins/skills/client/index";
 import { register as register2 } from "../../../../../plugins/spec-mode/client/index";
+import { register as register3 } from "../../../../../plugins/autorun/client/index";
 import type { BuiltinClientRegistry } from "./host";
 export function loadBuiltins(registry: BuiltinClientRegistry) {
   register0(registry.forPlugin("docker"));
   register1(registry.forPlugin("skills"));
   register2(registry.forPlugin("spec-mode"));
+  register3(registry.forPlugin("autorun"));
 }

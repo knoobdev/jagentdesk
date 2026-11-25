@@ -229,8 +229,6 @@ import {
   createGitMetadataGenerator,
 } from "./session/checkout/git-metadata-generator.js";
 import { ChatScheduleLoopSession } from "./session/chat/chat-schedule-loop-session.js";
-import { AutorunSession } from "./session/autorun/autorun-session.js";
-import { type AutorunService } from "./autorun/service.js";
 import { SessionShareSession } from "./session/session-share/session-share-session.js";
 import { type ActivityGraphService } from "./agent/activity-graph/service.js";
 import { ActivityGraphSession } from "./session/activity-graph/activity-graph-session.js";
@@ -655,8 +653,6 @@ export interface SessionOptions {
   chatService: FileBackedChatService;
 
   scheduleService: ScheduleService;
-
-  autorunService?: AutorunService | null;
 
   sessionShareService?: SessionShareService | null;
 
@@ -1221,8 +1217,6 @@ export class Session {
 
   private readonly chatScheduleLoopSession: ChatScheduleLoopSession;
 
-  private readonly autorunSession: AutorunSession | null;
-
   private readonly sessionShareSession: SessionShareSession | null;
 
   private readonly activityGraphSession: ActivityGraphSession | null;
@@ -1540,7 +1534,6 @@ export class Session {
       logger: this.sessionLogger,
     });
     ({
-      autorunSession: this.autorunSession,
       sessionShareSession: this.sessionShareSession,
       activityGraphSession: this.activityGraphSession,
       jiraSession: this.jiraSession,
@@ -1848,19 +1841,11 @@ export class Session {
   // The sessions that exist only when their daemon-wide service is enabled. Extracted from the
   // constructor to keep its cyclomatic complexity under the lint limit.
   private createOptionalSessions(options: SessionOptions): {
-    autorunSession: AutorunSession | null;
     sessionShareSession: SessionShareSession | null;
     activityGraphSession: ActivityGraphSession | null;
     jiraSession: JiraSession | null;
   } {
     return {
-      autorunSession: options.autorunService
-        ? new AutorunSession({
-            host: { emit: (msg) => this.emit(msg) },
-            autorunService: options.autorunService,
-            logger: this.sessionLogger,
-          })
-        : null,
       sessionShareSession: options.sessionShareService
         ? new SessionShareSession({
             host: { emit: (msg) => this.emit(msg) },
@@ -3183,7 +3168,6 @@ export class Session {
       () => this.dispatchProviderMessage(msg),
       () => this.dispatchTerminalMessage(msg, source),
       () => this.dispatchChatScheduleLoopMessage(msg),
-      () => this.dispatchAutorunMessage(msg),
       () => this.dispatchSessionShareMessage(msg),
       () => this.activityGraphSession?.dispatch(msg),
       () => this.dispatchClusterMessage(msg),
@@ -4291,23 +4275,6 @@ export class Session {
         return this.chatScheduleLoopSession.handleScheduleRunOnceRequest(msg);
       case "schedule/update":
         return this.chatScheduleLoopSession.handleScheduleUpdateRequest(msg);
-      default:
-        return undefined;
-    }
-  }
-
-  private dispatchAutorunMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    const autorun = this.autorunSession;
-    if (!autorun) return undefined;
-    switch (msg.type) {
-      case "autorun.start.request":
-        return autorun.handleStartRequest(msg);
-      case "autorun.stop.request":
-        return autorun.handleStopRequest(msg);
-      case "autorun.get.request":
-        return autorun.handleGetRequest(msg);
-      case "autorun.list.request":
-        return autorun.handleListRequest(msg);
       default:
         return undefined;
     }

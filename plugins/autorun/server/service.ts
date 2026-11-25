@@ -1,7 +1,9 @@
+import type {
+  AgentManager,
+  AgentUsage,
+} from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 import { join } from "node:path";
 import type { Logger } from "pino";
-import type { AgentManager } from "../agent/agent-manager.js";
-import type { AgentUsage } from "../agent/agent-sdk-types.js";
 import { AutorunStore } from "./store.js";
 import {
   AutorunStateSchema,

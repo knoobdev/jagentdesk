@@ -105,6 +105,25 @@ export function BuiltinComposerDocks(props: BuiltinComposerDockProps) {
     </>
   );
 }
+export function BuiltinAgentSettingsCards({ serverId }: BuiltinClientProps) {
+  const entries = useBuiltinClientContributions(serverId);
+  const cards = [...entries]
+    .flatMap(([id, entry]) =>
+      [...entry.agentSettings].map(([key, card]) => ({
+        key: `${id}/${key}`,
+        component: card.component,
+        order: card.order,
+      })),
+    )
+    .sort((left, right) => left.order - right.order);
+  return (
+    <>
+      {cards.map(({ key, component: Card }) => (
+        <Card key={key} serverId={serverId} />
+      ))}
+    </>
+  );
+}
 /** The enabled message body renderer for this host, or null to render plain text. */
 export function useBuiltinUserMessageBody(
   serverId: string | undefined,

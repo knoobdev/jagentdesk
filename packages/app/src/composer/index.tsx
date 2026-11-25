@@ -54,7 +54,6 @@ import {
   DraftAgentControls,
   type DraftAgentControlsProps,
 } from "@/composer/agent-controls";
-import { AutonomousControl } from "@/composer/agent-controls/autonomous-control";
 import { BuiltinAgentItems, prepareBuiltinTurn } from "@/plugins/builtin/surfaces";
 import { ContextWindowMeter } from "@/components/context-window-meter";
 import { useImageAttachmentPicker } from "@/hooks/use-image-attachment-picker";
@@ -375,9 +374,6 @@ function renderLeftContent(args: RenderLeftContentArgs): ReactElement | null {
         isCompactLayout={isCompactLayout}
       />
       <BuiltinAgentItems serverId={serverId} agentId={agentId} kind="agentControls" />
-      <BuiltinPluginGate serverId={serverId} id="autorun">
-        <AutonomousControl agentId={agentId} serverId={serverId} />
-      </BuiltinPluginGate>
     </View>
   );
 }

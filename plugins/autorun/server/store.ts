@@ -1,6 +1,6 @@
+import { writeFileAtomic } from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 import { mkdir, readFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { writeFileAtomic } from "../atomic-file.js";
 import { AutorunStateSchema, type AutorunState } from "@jagentdesk/protocol/messages";
 
 // Durable per-agent autonomous state (spec §20 / ADR-0017). Autonomous mode is a switch on

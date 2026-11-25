@@ -48,10 +48,9 @@ import { type RemoteExecService } from "./remote-exec/types.js";
 import { type CustomProviderService } from "./custom-providers/types.js";
 import { type FigmaService } from "./figma/service.js";
 import { type ScheduleService } from "./schedule/service.js";
-import { type AutorunService } from "./autorun/service.js";
 import { type SessionShareService } from "./session-share/service.js";
 import { ActivityGraphService } from "./agent/activity-graph/service.js";
-import { type AutorunState, type CreationSnapshot } from "@jagentdesk/protocol/messages";
+import { type CreationSnapshot } from "@jagentdesk/protocol/messages";
 import { type CheckoutDiffManager, type CheckoutDiffMetrics } from "./checkout-diff-manager.js";
 import { type DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
 import {
@@ -748,8 +747,6 @@ export class VoiceAssistantWebSocketServer {
 
   private readonly scheduleService: ScheduleService;
 
-  private autorunService!: AutorunService | null;
-
   private sessionShareService!: SessionShareService | null;
 
   // Agent activity graph (spec 31, ADR-0031): one daemon-wide service shared by every session.
@@ -964,7 +961,6 @@ export class VoiceAssistantWebSocketServer {
     pluginRuntime?: PluginRuntimePort | null,
     usageHistory?: UsageHistoryStorage | null,
     databaseRegistry?: DatabaseRegistry,
-    autorunService?: AutorunService | null,
     sessionShareService?: SessionShareService | null,
     sshService?: SshService | null,
     argocdService?: ArgoCdService | null,
@@ -1059,7 +1055,6 @@ export class VoiceAssistantWebSocketServer {
       getDaemonTcpHost,
       serviceProxyPublicBaseUrl,
       resolveScriptHealth,
-      autorunService,
       sessionShareService,
     });
     if (!providerSnapshotManager) {
@@ -1135,10 +1130,8 @@ export class VoiceAssistantWebSocketServer {
     getDaemonTcpHost: (() => string | null) | undefined;
     serviceProxyPublicBaseUrl: string | null | undefined;
     resolveScriptHealth: ((hostname: string) => ScriptHealthState | null) | undefined;
-    autorunService: AutorunService | null | undefined;
     sessionShareService: SessionShareService | null | undefined;
   }): void {
-    this.autorunService = params.autorunService ?? null;
     this.sessionShareService = params.sessionShareService ?? null;
     this.speech = params.speech ?? null;
     this.terminalManager = params.terminalManager ?? null;
@@ -2344,7 +2337,6 @@ export class VoiceAssistantWebSocketServer {
       customProvidersService: this.customProvidersService,
       workspaceBaseBranch: this.workspaceBaseBranch,
       scheduleService: this.scheduleService,
-      autorunService: this.autorunService,
       sessionShareService: this.sessionShareService,
       activityGraphService: this.activityGraphService,
       checkoutDiffManager: this.checkoutDiffManager,
@@ -2913,14 +2905,9 @@ export class VoiceAssistantWebSocketServer {
         sshServers: true,
         sideload: this.sideloadService !== null,
         sideloadHostBrowse: this.sideloadService !== null,
-        // Autonomous run (spec §20 / ADR-0017). Default OFF: advertised only when the
-        // daemon opted in (autorunService wired). Gates the whole autorun.* surface;
-        // autorunApproval gates the per-action-approval mode toggle (§20.7.3).
-        ...(this.autorunService ? { autorun: true, autorunApproval: true } : {}),
+        ...this.builtinFeatureFlags(),
         // Session sharing (spec §21 / ADR-0018); advertised only when the daemon opted in.
         ...(this.sessionShareService ? { sessionSharing: true } : {}),
-        // Spec mode (spec 28 / ADR-0030): agent.spec_mode.* surface.
-        ...(this.pluginRuntime?.builtinDaemon?.port("specMode") ? { specMode: true } : {}),
         // Agent activity graph (spec 31 / ADR-0031). COMPAT(activityGraph): added after v0.9.47.
         activityGraph: true,
         // Argo CD (spec 30 / ADR-0034): advertised only when the daemon runs the service.
@@ -2985,9 +2972,6 @@ export class VoiceAssistantWebSocketServer {
     };
   }
 
-  // Push notification when an autonomous run reaches a terminal state (spec §14). The
-  // live `autorun.stream` already updates open clients; this reaches a phone that isn't
-  // watching. Wired from AutorunService.onStopped in bootstrap.
   /** Sideload notices (26.6) reach a phone that is not connected. */
   public sendSideloadPush(notice: { title: string; body: string }): void {
     void this.pushNotificationSender
@@ -2997,19 +2981,32 @@ export class VoiceAssistantWebSocketServer {
       });
   }
 
-  public notifyAutorunStopped(state: AutorunState): void {
-    const reason = state.stopReason ?? "stopped";
+  /** Capabilities of migrated built-ins; plugin state then filters them like the others. */
+  private builtinFeatureFlags(): Record<string, true> {
+    const daemon = this.pluginRuntime?.builtinDaemon;
+    return {
+      // Autonomous run (spec §20 / ADR-0017). Gates the whole autorun.* surface; autorunApproval
+      // gates the per-action-approval mode toggle (§20.7.3).
+      ...(daemon?.port("autorun") ? { autorun: true, autorunApproval: true } : {}),
+      // Spec mode (spec 28 / ADR-0030): agent.spec_mode.* surface.
+      ...(daemon?.port("specMode") ? { specMode: true } : {}),
+    };
+  }
+
+  /** Push notification on behalf of a built-in feature (docs/builtin-plugins.md). */
+  public sendBuiltinPush(notice: {
+    title: string;
+    body: string;
+    data?: Record<string, string>;
+  }): void {
     void this.pushNotificationSender
       .send({
-        title: "Autonomous mode stopped",
-        body: `${reason}${state.lastNote ? `: ${state.lastNote}` : ""}`.slice(0, 140),
-        data: { serverId: this.serverId, agentId: state.agentId, stopReason: reason },
+        title: notice.title,
+        body: notice.body,
+        data: { serverId: this.serverId, ...notice.data },
       })
       .catch((err) => {
-        this.logger.warn(
-          { err, agentId: state.agentId },
-          "Failed to send autorun push notification",
-        );
+        this.logger.warn({ err, title: notice.title }, "Failed to send built-in push notification");
       });
   }
 

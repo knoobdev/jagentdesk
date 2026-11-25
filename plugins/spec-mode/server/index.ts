@@ -29,7 +29,8 @@ function createSpecMode(context: BuiltinDaemonContext) {
       snapshot: () => hostCapabilities(context).snapshot(),
       refresh: () => hostCapabilities(context).refresh(),
     },
-    isAutorunActive: (agentId) => context.isAutorunActive(agentId),
+    isAutorunActive: async (agentId) =>
+      (await context.port("autorun")?.isRunning(agentId)) ?? false,
     sendPrompt: async (agentId, text) => {
       await sendPromptToAgent({ agentManager, agentStorage, agentId, prompt: text, logger });
     },

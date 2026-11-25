@@ -74,6 +74,11 @@ export interface BuiltinClientHost {
   turnPreparer(prepare: BuiltinTurnPreparer): void;
   /** Rendered above the agent composer input. */
   agentComposerDock(id: string, component: ComponentType<BuiltinComposerDockProps>): void;
+  /**
+   * A card in the host's Settings → Agents section. `order` keeps cards from several features
+   * in their phase 1 sequence (browser opt-in 10, autorun 20, sharing 30, fingerprints 40).
+   */
+  agentSettingsCard(id: string, component: ComponentType<BuiltinClientProps>, order: number): void;
   /** Renders a parsed phase-command user message; one per host. */
   userMessageBody(component: ComponentType<BuiltinUserMessageBodyProps>): void;
 }
@@ -96,6 +101,7 @@ export interface BuiltinClientContributions {
   turnPreparers: BuiltinTurnPreparer[];
   composerDocks: Map<string, ComponentType<BuiltinComposerDockProps>>;
   userMessageBody: ComponentType<BuiltinUserMessageBodyProps> | null;
+  agentSettings: Map<string, { component: ComponentType<BuiltinClientProps>; order: number }>;
 }
 export class BuiltinClientRegistry {
   private readonly entries = new Map<BuiltinPluginId, BuiltinClientContributions>();
@@ -116,6 +122,7 @@ export class BuiltinClientRegistry {
       turnPreparers: [],
       composerDocks: new Map(),
       userMessageBody: null,
+      agentSettings: new Map(),
     };
     this.entries.set(id, entry);
     const add = <T>(map: Map<string, T>, key: string, value: T) => {
@@ -137,6 +144,8 @@ export class BuiltinClientRegistry {
       agentPanelAccessory: (key, component) => add(entry.agentPanel, key, component),
       turnPreparer: (prepare) => entry.turnPreparers.push(prepare),
       agentComposerDock: (key, component) => add(entry.composerDocks, key, component),
+      agentSettingsCard: (key, component, order) =>
+        add(entry.agentSettings, key, { component, order }),
       userMessageBody: (component) => {
         if (entry.userMessageBody) throw new Error(`Duplicate built-in message body: ${id}`);
         entry.userMessageBody = component;

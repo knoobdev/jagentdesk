@@ -45,6 +45,11 @@ const PLUGINS = {
     },
     branch: { rpc: [`${S}/session.ts`, "plugins/spec-mode/server/index.ts"], tools: [T] },
   },
+  autorun: {
+    rpcPrefixes: ["autorun."],
+    baseline: { rpc: [`${S}/session.ts`, `${S}/session/autorun/autorun-session.ts`], tools: [T] },
+    branch: { rpc: [`${S}/session.ts`, "plugins/autorun/server/index.ts"], tools: [T] },
+  },
 };
 const ids = process.argv.slice(4).length ? process.argv.slice(4) : Object.keys(PLUGINS);
 fs.mkdirSync(output, { recursive: true });

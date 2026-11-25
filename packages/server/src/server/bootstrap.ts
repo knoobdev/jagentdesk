@@ -201,7 +201,6 @@ import { buildLifetimeBaseline, UsageHistoryStorage } from "./usage/usage-histor
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseRegistry } from "./database/database-registry.js";
 import { ScheduleService } from "./schedule/service.js";
-import { AutorunService } from "./autorun/service.js";
 import { sendPromptToAgent } from "./agent/agent-prompt.js";
 import { SessionShareService } from "./session-share/service.js";
 import { TunnelManager } from "./session-share/tunnel-manager.js";
@@ -1161,8 +1160,7 @@ export async function createJAgentDeskDaemon(
       agentStorage,
       broadcast: (message) => wsServer?.broadcast(wrapSessionMessage(message)),
       hostCapabilities: () => daemonHostCapabilities,
-      isAutorunActive: async (agentId) =>
-        autorunService !== null && (await autorunService.get(agentId))?.status === "running",
+      sendPush: (notice) => wsServer?.sendBuiltinPush(notice),
     },
   );
   pluginRuntime.builtinDaemon = builtinDaemon;
@@ -1784,25 +1782,6 @@ export async function createJAgentDeskDaemon(
     }
   });
   logger.info({ elapsed: elapsed() }, "Schedule service initialized");
-  // Construct services once so live sessions keep their references. The built-in loader
-  // starts/stops background work and gates RPCs/features; Autorun stays off by default.
-  const autorunService = new AutorunService({
-    jagentdeskHome: config.jagentdeskHome,
-    logger,
-    agentManager,
-    onUpdate: (state) => emitExternalSessionMessage({ type: "autorun.stream", payload: { state } }),
-    onStopped: (state) => wsServer?.notifyAutorunStopped(state),
-  });
-  // Spec mode and autonomous mode exclude each other (spec 28.4 step 6).
-  autorunService.setStartGuard(async (agentId) =>
-    (await builtinDaemon.port("specMode")?.isEnabled(agentId))
-      ? "Turn off Spec mode to use autonomous mode"
-      : null,
-  );
-  logger.info(
-    { elapsed: elapsed(), enabled: config.autorunEnabled === true },
-    "Autorun service initialized",
-  );
   // Session sharing stays off by default. Construction is inert; its lifecycle owns
   // Cloudflare quick tunnels and scoped per-share servers.
   const shareAppDistDir =
@@ -1895,10 +1874,6 @@ export async function createJAgentDeskDaemon(
   await pluginRuntime.builtin.registerLifecycle("jira", {
     start: () => {},
     stop: () => jiraService.dispose(),
-  });
-  await pluginRuntime.builtin.registerLifecycle("autorun", {
-    start: () => autorunService.initialize(),
-    stop: () => autorunService.stop(),
   });
   await pluginRuntime.builtin.registerLifecycle("session-share", {
     start: () => {},
@@ -2466,7 +2441,6 @@ export async function createJAgentDeskDaemon(
               pluginRuntime,
               usageHistory,
               databaseRegistry,
-              autorunService,
               sessionShareService,
               sshService,
               argocdService,
@@ -2700,7 +2674,6 @@ export async function createJAgentDeskDaemon(
     await builtinDaemon.stop();
     await speechService.stop();
     await scheduleService.stop().catch(() => undefined);
-    await autorunService?.stop().catch(() => undefined);
     await sessionShareService?.stop().catch(() => undefined);
     await relayRuntime?.stop().catch(() => undefined);
     await remoteFinishSubscriptions?.close();

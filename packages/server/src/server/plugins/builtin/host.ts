@@ -37,6 +37,16 @@ export interface BuiltinPorts {
   specMode: SpecModePort;
   /** The Plan view's spec-kit phases and tasks (activity graph). */
   specPlan: SpecPlanSource;
+  /** Autonomous mode status, read by Spec mode (the two exclude each other). */
+  autorun: AutorunPort;
+}
+export interface AutorunPort {
+  isRunning(agentId: string): Promise<boolean>;
+}
+export interface BuiltinPushNotice {
+  title: string;
+  body: string;
+  data?: Record<string, string>;
 }
 export interface SpecModePort {
   /** The pending phase's spec-kit command for this message; null when Spec mode is off. */
@@ -57,8 +67,8 @@ export interface BuiltinDaemonDeps {
   broadcast(message: SessionOutboundMessage): void;
   /** Null until the daemon is listening and has probed the host. */
   hostCapabilities(): HostCapabilityService | null;
-  /** Whether autonomous mode drives this agent. */
-  isAutorunActive(agentId: string): Promise<boolean>;
+  /** Push notification to paired devices; the daemon adds its serverId to `data`. */
+  sendPush(notice: BuiltinPushNotice): void;
 }
 export interface BuiltinDaemonContext extends BuiltinCoreServices, BuiltinDaemonDeps {
   /** The daemon home. Preserve a migrated feature's existing storage paths under it. */
