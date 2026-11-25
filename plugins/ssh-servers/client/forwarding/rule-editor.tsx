@@ -31,7 +31,7 @@ export interface ForwardingServerChoice {
 
 const ThemedTextInput = withUnistyles(TextInput);
 const placeholderColor = (theme: Theme) => ({
-  placeholderTextColor: theme.colors.foregroundExtraMuted,
+  placeholderTextColor: theme.colors.foregroundMuted,
 });
 
 function Field({

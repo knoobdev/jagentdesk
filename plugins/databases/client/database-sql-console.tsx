@@ -24,7 +24,7 @@ const ThemedTextInput = withUnistyles(TextInput);
 const EMPTY_HISTORY: readonly { sql: string; at_ms: number }[] = Object.freeze([]);
 const accentForeground = (theme: Theme) => ({ color: theme.colors.accentForeground });
 const placeholderColor = (theme: Theme) => ({
-  placeholderTextColor: theme.colors.foregroundExtraMuted,
+  placeholderTextColor: theme.colors.foregroundMuted,
 });
 
 /** A statement that mutates data/schema — mirrors the daemon's read-only guard. */

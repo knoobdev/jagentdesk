@@ -120,7 +120,6 @@ export function IntruderPanel({
             autoCapitalize="none"
             autoCorrect={false}
             placeholder={"GET /search?q=§FUZZ§ HTTP/1.1\nHost: example"}
-            placeholderTextColor="#9aa"
           />
         </View>
         <View style={styles.editorCol}>
@@ -133,7 +132,6 @@ export function IntruderPanel({
             autoCapitalize="none"
             autoCorrect={false}
             placeholder={"admin\nroot\ntest"}
-            placeholderTextColor="#9aa"
           />
         </View>
       </View>

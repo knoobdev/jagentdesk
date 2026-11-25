@@ -8,7 +8,7 @@ import type { Theme } from "../../../../packages/app/src/plugins/builtin/host-ap
 
 const ThemedTextInput = withUnistyles(TextInput);
 const placeholderColor = (theme: Theme) => ({
-  placeholderTextColor: theme.colors.foregroundExtraMuted,
+  placeholderTextColor: theme.colors.foregroundMuted,
 });
 
 export interface SshFieldProps {

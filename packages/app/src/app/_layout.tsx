@@ -146,6 +146,7 @@ import { flushDraftPersistStorage } from "@/stores/draft-store";
 import { usePairDeviceModalStore } from "@/stores/pair-device-modal-store";
 import type { ThemeName } from "@/styles/theme";
 import { installWebScrollbarStyles } from "@/styles/install-web-scrollbar-styles";
+import { installWebPlaceholderStyles } from "@/styles/install-web-placeholder-styles";
 import type { HostProfile } from "@/types/host-connection";
 import { toggleDesktopSidebarsWithCheckoutIntent } from "@/utils/desktop-sidebar-toggle";
 import { GumloopSidebar } from "@/components/gumloop-shell/sidebar";
@@ -1279,6 +1280,7 @@ function RootAppTree() {
 
 export default function RootLayout() {
   useEffect(() => installWebScrollbarStyles(), []);
+  useEffect(() => installWebPlaceholderStyles(), []);
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextState) => {
       if (nextState !== "active") {

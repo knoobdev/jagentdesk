@@ -606,7 +606,7 @@ function DatabasesSkeleton() {
 const mutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const redColorMapping = (theme: Theme) => ({ color: theme.colors.palette.red[500] });
 const placeholderColorMapping = (theme: Theme) => ({
-  placeholderTextColor: theme.colors.foregroundExtraMuted,
+  placeholderTextColor: theme.colors.foregroundMuted,
 });
 
 const styles = StyleSheet.create((theme) => ({
