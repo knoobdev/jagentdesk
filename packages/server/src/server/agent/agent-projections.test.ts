@@ -1,3 +1,4 @@
+import { controlsFromFeatures, optionsFromFeatures } from "@jagentdesk/protocol/option-controls";
 import { describe, expect, it } from "vitest";
 
 import { AGENT_LIFECYCLE_STATUSES } from "./agent-manager.js";
@@ -396,7 +397,7 @@ describe("toAgentPayload", () => {
       }),
     );
 
-    const payload = buildStoredAgentPayload(record, ["codex"]);
+    const payload = buildStoredAgentPayload(record, ["codex"], (_provider, own) => own ?? {});
 
     expect(record.persistence?.metadata).toEqual({
       conversationId: "conversation-stored",
@@ -472,7 +473,10 @@ describe("toAgentPayload", () => {
 
   it("includes features in the snapshot payload", () => {
     const features = [createFeature()];
-    const agent = createManagedAgent({ features });
+    const agent = createManagedAgent({
+      controls: controlsFromFeatures(features),
+      effectiveOptions: optionsFromFeatures(features),
+    });
 
     const payload = toAgentPayload(agent);
 
@@ -560,7 +564,9 @@ describe("provider metrics", () => {
 
     expect(toAgentPayload(agent).sessionMetrics).toEqual(sessionMetrics);
     expect(record.sessionMetrics).toEqual(sessionMetrics);
-    expect(buildStoredAgentPayload(record, ["codex"]).sessionMetrics).toEqual(sessionMetrics);
+    expect(
+      buildStoredAgentPayload(record, ["codex"], (_provider, own) => own ?? {}).sessionMetrics,
+    ).toEqual(sessionMetrics);
   });
 
   it("omits session metrics for an agent whose provider reports none", () => {
@@ -569,7 +575,9 @@ describe("provider metrics", () => {
 
     expect(toAgentPayload(agent)).not.toHaveProperty("sessionMetrics");
     expect(record).not.toHaveProperty("sessionMetrics");
-    expect(buildStoredAgentPayload(record, ["codex"])).not.toHaveProperty("sessionMetrics");
+    expect(
+      buildStoredAgentPayload(record, ["codex"], (_provider, own) => own ?? {}),
+    ).not.toHaveProperty("sessionMetrics");
     expect(toAgentPayload({ ...agent, sessionMetrics: [] })).not.toHaveProperty("sessionMetrics");
   });
 });

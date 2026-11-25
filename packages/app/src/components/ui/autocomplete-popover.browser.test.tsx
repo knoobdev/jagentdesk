@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React, { act, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -11,6 +12,8 @@ import { KeyboardShiftProvider } from "@/keyboard/shift";
 import type { AutocompleteOption } from "./autocomplete";
 import { AutocompletePopover } from "./autocomplete-popover";
 import { FloatingPanelPortalHost } from "./floating-panel-portal";
+
+const testQueryClient = new QueryClient();
 
 // App sources compile against the classic JSX runtime, which expects React on the global.
 beforeEach(() => vi.stubGlobal("React", React));
@@ -70,13 +73,15 @@ function ignoreSelection(): void {}
 
 function Providers({ children }: { children: ReactNode }): ReactNode {
   return (
-    <SafeAreaProvider initialMetrics={SAFE_AREA}>
-      <KeyboardProvider>
-        <KeyboardShiftProvider>
-          <PortalProvider>{children}</PortalProvider>
-        </KeyboardShiftProvider>
-      </KeyboardProvider>
-    </SafeAreaProvider>
+    <QueryClientProvider client={testQueryClient}>
+      <SafeAreaProvider initialMetrics={SAFE_AREA}>
+        <KeyboardProvider>
+          <KeyboardShiftProvider>
+            <PortalProvider>{children}</PortalProvider>
+          </KeyboardShiftProvider>
+        </KeyboardProvider>
+      </SafeAreaProvider>
+    </QueryClientProvider>
   );
 }
 

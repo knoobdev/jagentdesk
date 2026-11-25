@@ -77,10 +77,13 @@ vi.mock("react-native-reanimated", () => ({
 }));
 
 vi.mock("@gorhom/bottom-sheet", async () => {
+  const actual =
+    await vi.importActual<typeof import("@gorhom/bottom-sheet")>("@gorhom/bottom-sheet");
   const ReactModule = await vi.importActual<typeof import("react")>("react");
   const { ScrollView, TextInput } =
     await vi.importActual<typeof import("react-native")>("react-native");
   return {
+    ...actual,
     BottomSheetBackdrop: () => null,
     BottomSheetModal: ReactModule.forwardRef(() => null),
     BottomSheetScrollView: ScrollView,
@@ -88,10 +91,6 @@ vi.mock("@gorhom/bottom-sheet", async () => {
     useBottomSheetInternal: () => null,
   };
 });
-
-vi.mock("react-native-safe-area-context", () => ({
-  useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
-}));
 
 const TRUST_TEXT =
   "Skills are instructions and code that run with the agent's permissions. Install only skills you trust.";

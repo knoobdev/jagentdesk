@@ -18,7 +18,6 @@ import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome
 import { useGumloopSidebarShortcut } from "@/components/gumloop-shell/use-sidebar-shortcut";
 import { NotificationOpenRouter } from "@/notification-open/react";
 
-import { WindowLayoutProvider } from "@/window-layout";
 import { useHardwareKeyboardPresent } from "@/keyboard";
 import { AppearanceSystemBars } from "@/appearance/system-bars";
 import { resolveContentMaxWidth } from "@/hooks/use-settings";

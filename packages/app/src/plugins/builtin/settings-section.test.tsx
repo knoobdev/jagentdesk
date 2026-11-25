@@ -1,5 +1,7 @@
 /** @vitest-environment jsdom */
 import React from "react";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { queryClient } from "@/data/query-client";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
@@ -55,7 +57,11 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 it("renders all 36 names, defaults, descriptions and dependencies", () => {
-  render(<BuiltinPluginsSection serverId="host" />);
+  render(
+    <QueryClientProvider client={queryClient}>
+      <BuiltinPluginsSection serverId="host" />
+    </QueryClientProvider>,
+  );
   expect(screen.getAllByRole("switch")).toHaveLength(36);
   expect(
     screen
@@ -68,7 +74,11 @@ it("renders all 36 names, defaults, descriptions and dependencies", () => {
 });
 it("asks about dependents, and declining leaves the host unchanged", async () => {
   state.confirm.mockResolvedValue(false);
-  render(<BuiltinPluginsSection serverId="host" />);
+  render(
+    <QueryClientProvider client={queryClient}>
+      <BuiltinPluginsSection serverId="host" />
+    </QueryClientProvider>,
+  );
   fireEvent.click(screen.getByRole("switch", { name: "SSH servers" }));
   await waitFor(() =>
     expect(state.confirm).toHaveBeenCalledWith(
@@ -78,13 +88,21 @@ it("asks about dependents, and declining leaves the host unchanged", async () =>
   expect(state.set).toHaveBeenCalledTimes(0);
 });
 it("accepting the dependency dialog sends a cascade", async () => {
-  render(<BuiltinPluginsSection serverId="host" />);
+  render(
+    <QueryClientProvider client={queryClient}>
+      <BuiltinPluginsSection serverId="host" />
+    </QueryClientProvider>,
+  );
   fireEvent.click(screen.getByRole("switch", { name: "SSH servers" }));
   await waitFor(() => expect(state.set).toHaveBeenCalledWith("ssh-servers", false, true));
 });
 it("shows an actionable error and permits retry after a failed toggle", async () => {
   state.set.mockRejectedValueOnce(new Error("Host disconnected"));
-  render(<BuiltinPluginsSection serverId="host" />);
+  render(
+    <QueryClientProvider client={queryClient}>
+      <BuiltinPluginsSection serverId="host" />
+    </QueryClientProvider>,
+  );
   fireEvent.click(screen.getByRole("switch", { name: "Docker" }));
   expect((await screen.findByText("Host disconnected")).textContent).toBe("Host disconnected");
   fireEvent.click(screen.getByRole("switch", { name: "Docker" }));
@@ -98,7 +116,11 @@ it("disables unavailable and read-only controls", () => {
     available: false,
     unavailableReason: "Install Docker",
   };
-  render(<BuiltinPluginsSection serverId="host" />);
+  render(
+    <QueryClientProvider client={queryClient}>
+      <BuiltinPluginsSection serverId="host" />
+    </QueryClientProvider>,
+  );
   expect(screen.getByText(/Install Docker/).textContent).toContain("Install Docker");
   fireEvent.click(screen.getByRole("switch", { name: "Docker" }));
   expect(state.set).toHaveBeenCalledTimes(0);
@@ -107,7 +129,9 @@ it("disables unavailable and read-only controls", () => {
 vi.mock("@gorhom/bottom-sheet", async () => {
   const { ScrollView, TextInput } =
     await vi.importActual<typeof import("react-native")>("react-native");
+  const shared = await import("../../../test-stubs/gorhom-bottom-sheet");
   return {
+    ...shared,
     BottomSheetBackdrop: () => null,
     BottomSheetModal: () => null,
     BottomSheetScrollView: ScrollView,
@@ -115,6 +139,3 @@ vi.mock("@gorhom/bottom-sheet", async () => {
     useBottomSheetInternal: () => null,
   };
 });
-vi.mock("react-native-safe-area-context", () => ({
-  useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
-}));

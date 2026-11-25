@@ -2393,7 +2393,10 @@ test("listDraftFeatures does not start a fallback session without a model", asyn
     logger,
   });
 
-  await expect(manager.listDraftFeatures({ provider: "codex", cwd: workdir })).resolves.toEqual([]);
+  await expect(manager.listDraftControls({ provider: "codex", cwd: workdir })).resolves.toEqual({
+    controls: [],
+    options: {},
+  });
 
   expect(client.fetchCatalogCalls).toBe(0);
   expect(client.createSessionCalls).toBe(0);
@@ -2426,9 +2429,12 @@ test("listDraftFeatures uses client feature listing without a model", async () =
       return await super.createSession(config);
     }
 
-    async listFeatures(config: AgentSessionConfig): Promise<AgentFeature[]> {
+    async listControls(config: AgentSessionConfig) {
       this.featureConfigs.push(config);
-      return [draftFeature];
+      return {
+        controls: [{ type: "toggle", key: draftFeature.id, label: draftFeature.label }],
+        options: { [draftFeature.id]: draftFeature.value },
+      };
     }
   }
   const client = new DraftFeatureClient();
@@ -2440,9 +2446,10 @@ test("listDraftFeatures uses client feature listing without a model", async () =
     logger,
   });
 
-  await expect(manager.listDraftFeatures({ provider: "codex", cwd: workdir })).resolves.toEqual([
-    draftFeature,
-  ]);
+  await expect(manager.listDraftControls({ provider: "codex", cwd: workdir })).resolves.toEqual({
+    controls: [{ type: "toggle", key: draftFeature.id, label: draftFeature.label }],
+    options: { [draftFeature.id]: draftFeature.value },
+  });
 
   expect(client.fetchCatalogCalls).toBe(0);
   expect(client.createSessionCalls).toBe(0);
@@ -2475,9 +2482,12 @@ test("listDraftFeatures uses explicit model config without default model fetchin
       return await super.createSession(config);
     }
 
-    async listFeatures(config: AgentSessionConfig): Promise<AgentFeature[]> {
+    async listControls(config: AgentSessionConfig) {
       this.featureConfigs.push(config);
-      return [draftFeature];
+      return {
+        controls: [{ type: "toggle", key: draftFeature.id, label: draftFeature.label }],
+        options: { [draftFeature.id]: draftFeature.value },
+      };
     }
   }
   const client = new DraftFeatureClient();
@@ -2489,13 +2499,16 @@ test("listDraftFeatures uses explicit model config without default model fetchin
     logger,
   });
 
-  const features = await manager.listDraftFeatures({
+  const features = await manager.listDraftControls({
     provider: "codex",
     cwd: workdir,
     model: "gpt-5.4",
   });
 
-  expect(features).toEqual([draftFeature]);
+  expect(features).toEqual({
+    controls: [{ type: "toggle", key: draftFeature.id, label: draftFeature.label }],
+    options: { [draftFeature.id]: draftFeature.value },
+  });
   expect(client.fetchCatalogCalls).toBe(0);
   expect(client.createSessionCalls).toBe(0);
   expect(client.featureConfigs).toEqual([
@@ -5045,6 +5058,7 @@ test.each([
             agent: {
               id: agent.id,
               background: false,
+              metadata: {},
               workspaceId: null,
               parentAgentId: null,
               provider: "codex",
@@ -9733,7 +9747,7 @@ test("respondToPermission refreshes features and runtime info after provider-man
 
   class RefreshingPermissionSession extends TestAgentSession {
     private featureState: AgentFeature[] = [
-      createFeature({ id: "fast_mode", label: "Fast", value: true }),
+      createFeature({ id: "permission_fast", label: "Fast", value: true }),
       createFeature({ id: "plan_mode", label: "Plan", value: true }),
     ];
     private modeId = "auto";
@@ -9747,8 +9761,15 @@ test("respondToPermission refreshes features and runtime info after provider-man
       },
     ];
 
-    get features(): AgentFeature[] {
-      return this.featureState;
+    get controls() {
+      return this.featureState.map(({ id, label }) => ({
+        type: "toggle" as const,
+        key: id,
+        label,
+      }));
+    }
+    get openOptionsPatch() {
+      return Object.fromEntries(this.featureState.map(({ id, value }) => [id, value]));
     }
 
     override async getRuntimeInfo() {
@@ -9757,7 +9778,7 @@ test("respondToPermission refreshes features and runtime info after provider-man
         sessionId: this.id,
         model: "gpt-5.4",
         modeId: this.modeId,
-        extra: { collaborationMode: this.features[1]?.value ? "Plan" : "Code" },
+        extra: { collaborationMode: this.featureState[1]?.value ? "Plan" : "Code" },
       };
     }
 
@@ -9773,9 +9794,14 @@ test("respondToPermission refreshes features and runtime info after provider-man
       this.modeId = "auto";
       this.pending = [];
       this.featureState = [
-        createFeature({ id: "fast_mode", label: "Fast", value: true }),
+        createFeature({ id: "permission_fast", label: "Fast", value: true }),
         createFeature({ id: "plan_mode", label: "Plan", value: false }),
       ];
+      this.pushEvent({
+        type: "options_changed",
+        provider: this.provider,
+        patch: this.openOptionsPatch,
+      });
     }
   }
 
@@ -9822,20 +9848,18 @@ test("respondToPermission refreshes features and runtime info after provider-man
 
   const updated = manager.getAgent(snapshot.id);
   expect(updated?.pendingPermissions.size).toBe(0);
-  expect(updated?.features).toEqual([
-    createFeature({ id: "fast_mode", label: "Fast", value: true }),
-    createFeature({ id: "plan_mode", label: "Plan", value: false }),
+  expect(updated?.controls).toEqual([
+    { type: "toggle", key: "permission_fast", label: "Fast" },
+    { type: "toggle", key: "plan_mode", label: "Plan" },
   ]);
+  expect(updated?.effectiveOptions).toEqual({ permission_fast: true, plan_mode: false });
   expect(updated?.runtimeInfo).toMatchObject({
     model: "gpt-5.4",
     extra: { collaborationMode: "Code" },
   });
 
   const persisted = await storage.get(snapshot.id);
-  expect(persisted?.features).toEqual([
-    createFeature({ id: "fast_mode", label: "Fast", value: true }),
-    createFeature({ id: "plan_mode", label: "Plan", value: false }),
-  ]);
+  expect(persisted?.config?.providerOptions).toEqual({ permission_fast: true, plan_mode: false });
 });
 
 test("respondToPermission emits refreshed state before permission_resolved", async () => {
@@ -9845,7 +9869,7 @@ test("respondToPermission emits refreshed state before permission_resolved", asy
 
   class OrderedPermissionSession extends TestAgentSession {
     private featureState: AgentFeature[] = [
-      createFeature({ id: "fast_mode", label: "Fast", value: true }),
+      createFeature({ id: "permission_fast", label: "Fast", value: true }),
     ];
     private modeId = "plan";
     private pending = [
@@ -9858,8 +9882,15 @@ test("respondToPermission emits refreshed state before permission_resolved", asy
       },
     ];
 
-    get features(): AgentFeature[] {
-      return this.featureState;
+    get controls() {
+      return this.featureState.map(({ id, label }) => ({
+        type: "toggle" as const,
+        key: id,
+        label,
+      }));
+    }
+    get openOptionsPatch() {
+      return Object.fromEntries(this.featureState.map(({ id, value }) => [id, value]));
     }
 
     override async getRuntimeInfo() {
@@ -9887,8 +9918,13 @@ test("respondToPermission emits refreshed state before permission_resolved", asy
         resolution: { behavior: "allow" },
       });
       this.modeId = "acceptEdits";
-      this.featureState = [createFeature({ id: "fast_mode", label: "Fast", value: false })];
+      this.featureState = [createFeature({ id: "permission_fast", label: "Fast", value: false })];
       this.pending = [];
+      this.pushEvent({
+        type: "options_changed",
+        provider: this.provider,
+        patch: this.openOptionsPatch,
+      });
     }
   }
 
@@ -9922,10 +9958,8 @@ test("respondToPermission emits refreshed state before permission_resolved", asy
       return;
     }
     if (event.type === "agent_state" && event.agent.id === snapshot.id) {
-      const fastMode = event.agent.features?.find((feature) => feature.id === "fast_mode");
-      seen.push(
-        `state:${event.agent.currentModeId}:${String(fastMode?.type === "toggle" ? fastMode.value : null)}`,
-      );
+      const fastMode = event.agent.effectiveOptions.permission_fast;
+      seen.push(`state:${event.agent.currentModeId}:${String(fastMode)}`);
       return;
     }
     if (event.type === "agent_stream" && event.event.type === "permission_resolved") {

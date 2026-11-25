@@ -3,12 +3,11 @@ import type { z } from "zod";
 
 export class JAgentDeskToolInputError extends Error {
   readonly status = 400;
+  readonly issues?: z.ZodError["issues"];
 
-  constructor(
-    message: string,
-    readonly issues?: z.ZodError["issues"],
-  ) {
+  constructor(message: string, issues?: z.ZodError["issues"]) {
     super(message);
+    this.issues = issues;
     this.name = "JAgentDeskToolInputError";
   }
 }

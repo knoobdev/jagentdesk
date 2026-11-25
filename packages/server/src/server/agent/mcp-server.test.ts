@@ -1,3 +1,4 @@
+import { controlsFromFeatures, optionsFromFeatures } from "@jagentdesk/protocol/option-controls";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -236,6 +237,7 @@ function buildAgentManagerSpies() {
     getAgent,
     listAgents: vi.fn().mockReturnValue([]),
     getAgentBackgroundWorkSummary: vi.fn().mockReturnValue(undefined),
+    effectiveOptionsFor: (_provider: string, own: Record<string, unknown> | undefined) => own ?? {},
     getTimeline: vi.fn().mockReturnValue([]),
     resumeAgentFromPersistence: vi.fn(),
     hydrateTimelineFromProvider: vi.fn().mockResolvedValue(undefined),
@@ -554,7 +556,9 @@ function createManagedAgent(overrides: Partial<ManagedAgent> = {}): ManagedAgent
     },
     currentModeId: null,
     availableModes: [],
-    features: [],
+    controls: controlsFromFeatures(overrides.features),
+    effectiveOptions: optionsFromFeatures(overrides.features),
+    metadata: {},
     pendingPermissions: new Map(),
     persistence: null,
     labels: {},

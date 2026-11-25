@@ -3056,118 +3056,65 @@ test("sends structured attachments with create_agent_request", async () => {
   await expect(createPromise).rejects.toThrow("attachment test sentinel");
 });
 
-test("sends worktree base-ref fields in create_agent_request git options", async () => {
-  const logger = createMockLogger();
+test.each([
+  {
+    label: "sends worktree base-ref fields through workspace creation source",
+    key: "req-agent-ref",
+    source: {
+      kind: "worktree" as const,
+      cwd: "/tmp/project",
+      worktreeSlug: "review-pr-123",
+      refName: "feature/worktree-base-ref",
+      action: "checkout" as const,
+      githubPrNumber: 123,
+    },
+  },
+  {
+    label: "omitting optional worktree base-ref fields preserves workspace wire shape",
+    key: "req-agent-legacy",
+    source: { kind: "worktree" as const, cwd: "/tmp/project", worktreeSlug: "feature-a" },
+  },
+])("$label", async ({ key, source }) => {
   const mock = createMockTransport();
-
   const client = new DaemonClient({
     url: "ws://test",
     clientId: "clsk_unit_test",
-    logger,
+    logger: createMockLogger(),
     reconnect: { enabled: false },
     transportFactory: () => mock.transport,
   });
   clients.push(client);
-
-  const connectPromise = client.connect();
-  mock.triggerOpen();
-  await connectPromise;
-
-  const createPromise = client.createAgent({
-    provider: "codex",
-    cwd: "/tmp/project",
-    requestId: "req-agent-ref",
-    git: {
-      createWorktree: true,
-      worktreeSlug: "review-pr-123",
-      refName: "feature/worktree-base-ref",
-      action: "checkout",
-      githubPrNumber: 123,
-    },
+  const connected = client.connect();
+  mock.triggerOpen({ features: { creationLifecycle: true } });
+  await connected;
+  const created = client.createWorkspace({
+    source,
+    agent: { config: { provider: "codex", cwd: "/tmp/project" } },
+    requestId: key,
+    idempotencyKey: key,
   });
-
+  void created.catch(() => undefined);
   expect(mock.sent).toHaveLength(1);
-  const request = parseSentFrame(mock.sent[0]);
-  expect(request.git).toEqual({
-    createWorktree: true,
-    worktreeSlug: "review-pr-123",
-    refName: "feature/worktree-base-ref",
-    action: "checkout",
-    githubPrNumber: 123,
+  expect(parseSentFrame(mock.sent[0])).toEqual({
+    type: "workspace.create.request",
+    source,
+    agent: { config: { provider: "codex", cwd: "/tmp/project" }, labels: {} },
+    requestId: key,
+    idempotencyKey: key,
+    subscribe: true,
   });
-
   mock.triggerMessage(
     wrapSessionMessage({
-      type: "status",
+      type: "workspace.create.response",
       payload: {
-        status: "agent_create_failed",
-        requestId: request.requestId,
+        requestId: key,
+        workspace: null,
+        setupTerminalId: null,
         error: "git ref fields sentinel",
       },
     }),
   );
-
-  await expect(createPromise).rejects.toThrow("git ref fields sentinel");
-});
-
-test("omitting create_agent_request worktree base-ref fields preserves legacy wire shape", async () => {
-  const logger = createMockLogger();
-  const mock = createMockTransport();
-
-  const client = new DaemonClient({
-    url: "ws://test",
-    clientId: "clsk_unit_test",
-    logger,
-    reconnect: { enabled: false },
-    transportFactory: () => mock.transport,
-  });
-  clients.push(client);
-
-  const connectPromise = client.connect();
-  mock.triggerOpen();
-  await connectPromise;
-
-  const createPromise = client.createAgent({
-    provider: "codex",
-    cwd: "/tmp/project",
-    requestId: "req-agent-legacy",
-    git: {
-      createWorktree: true,
-      worktreeSlug: "feature-a",
-    },
-  });
-
-  expect(assertStr(mock.sent[0])).toBe(
-    JSON.stringify({
-      type: "session",
-      message: {
-        type: "create_agent_request",
-        config: {
-          provider: "codex",
-          cwd: "/tmp/project",
-        },
-        git: {
-          createWorktree: true,
-          worktreeSlug: "feature-a",
-        },
-        labels: {},
-        requestId: "req-agent-legacy",
-      },
-    }),
-  );
-
-  mock.triggerMessage(
-    wrapSessionMessage({
-      type: "status",
-      payload: {
-        status: "agent_create_failed",
-        requestId: "req-agent-legacy",
-        error: "legacy git shape sentinel",
-      },
-    }),
-  );
-
-  await expect(createPromise).rejects.toThrow("legacy git shape sentinel");
+  await expect(created).resolves.toMatchObject({ error: "git ref fields sentinel" });
 });
 
 test("sends structured first-agent context attachments with create_jagentdesk_worktree_request", async () => {

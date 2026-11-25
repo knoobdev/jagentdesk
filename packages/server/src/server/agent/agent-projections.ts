@@ -321,7 +321,7 @@ export function buildStoredAgentPayload(
     archivedAt: record.archivedAt ?? null,
     ...visibilityFlags(record),
     labels: normalizeLabels(record.labels),
-    metadata: record.metadata,
+    metadata: { ...record.metadata },
     ...(record.usageTotals ? { usageTotals: record.usageTotals } : {}),
     ...projectSessionMetrics(record.sessionMetrics),
     ...(typeof record.lastError === "string" ? { lastError: record.lastError } : {}),

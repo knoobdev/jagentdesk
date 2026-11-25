@@ -120,6 +120,8 @@ export default defineConfig({
           "react-native-worklets",
           "react-native-gesture-handler",
           "react-native-keyboard-controller",
+          "react-native-screens",
+          "@floating-ui/react-native",
         ],
       },
     },
@@ -129,9 +131,30 @@ export default defineConfig({
   // so it scans the native files and dies on imports react-native-web has no answer for.
   // Unbundled, the same imports go through the resolver below and land on the web files.
   optimizeDeps: {
+    // The optimizer must choose the same platform leaves as Vite/Metro, including CJS
+    // imports from Expo Router's native-screen and asset entry points.
+    esbuildOptions: {
+      resolveExtensions: [
+        ".web.mjs",
+        ".web.js",
+        ".web.mts",
+        ".web.ts",
+        ".web.jsx",
+        ".web.tsx",
+        ".mjs",
+        ".js",
+        ".mts",
+        ".ts",
+        ".jsx",
+        ".tsx",
+        ".json",
+      ],
+    },
     // Bundle the CJS dependencies of the excluded gesture-handler package for the browser.
     include: [
       "@marijn/find-cluster-break",
+      "warn-once",
+      "@react-native/assets-registry/registry",
       "react-native-web/dist/exports/StyleSheet/compiler/createReactDOMStyle",
       "react-native-web/dist/exports/StyleSheet/preprocess",
       "react/jsx-runtime",
@@ -144,6 +167,8 @@ export default defineConfig({
       "expo/src/winter",
       // Expo core has web modules that must pass through the platform resolver.
       "expo-modules-core",
+      "expo-asset",
+      "expo-constants",
       "expo-clipboard",
       "expo-crypto",
       "expo-web-browser",
@@ -183,6 +208,22 @@ export default defineConfig({
         find: /^react-native-keyboard-controller$/,
         replacement: path.resolve(
           resolvePackageEntry("react-native-keyboard-controller"),
+          "lib/module/index.js",
+        ),
+      },
+      // The CJS floating-ui entry requires native React Native before aliases can apply.
+      {
+        find: /^@floating-ui\/react-native$/,
+        replacement: path.resolve(
+          resolvePackageEntry("@floating-ui/react-native"),
+          "dist/floating-ui.react-native.esm.js",
+        ),
+      },
+      // Screens exposes platform-specific leaf modules; keep them in Vite's web resolver.
+      {
+        find: /^react-native-screens$/,
+        replacement: path.resolve(
+          resolvePackageEntry("react-native-screens"),
           "lib/module/index.js",
         ),
       },

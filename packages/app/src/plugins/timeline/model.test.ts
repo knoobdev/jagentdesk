@@ -23,6 +23,8 @@ function plugin(input: {
     commandCenterItems: [],
     clientSlashCommands: [],
     attachmentSources: [],
+    composerItems: [],
+    newWorkspaceItems: [],
     themes: [],
     timelineTransformers: [
       {

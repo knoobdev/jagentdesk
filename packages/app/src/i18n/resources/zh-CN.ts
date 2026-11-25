@@ -95,7 +95,6 @@ export const zhCN: TranslationResources = {
     commandCenter: {
       placeholder: "\u641C\u7D22\u5DE5\u4F5C\u533A\u3001\u6587\u4EF6\u548C\u64CD\u4F5C...",
       noMatches: "\u6CA1\u6709\u5339\u914D\u9879",
-      copyBrowserHostName: "Copy browser host name",
       actions: "\u64CD\u4F5C",
       workspaces: "\u5DE5\u4F5C\u533A",
       agents: "Agents",

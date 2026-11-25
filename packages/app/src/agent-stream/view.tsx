@@ -614,7 +614,8 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       }),
       [mountedHistoryMessageIds, baseRenderModel.segments.liveHead],
     );
-    const { enabled: outlineEnabled, inset: outlineInset } = useChatOutlineRail();
+    const { enabled: railEnabled, inset: outlineInset } = useChatOutlineRail();
+    const outlineEnabled = canShowChatOutline(isAuthoritativeHistoryReady, railEnabled, true);
     const revealOutlineMessage = useStableEvent((messageId: string) =>
       revealLoadedMessage(messageId),
     );

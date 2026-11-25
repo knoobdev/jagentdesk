@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +9,8 @@ import { ModelBrowser, type ModelBrowserState } from "./model-browser";
 
 // Load translations so controls expose their real accessible names.
 void testI18n;
+
+const testQueryClient = new QueryClient();
 
 // App sources compile against the classic JSX runtime, which expects React on the global.
 beforeEach(() => vi.stubGlobal("React", React));
@@ -66,7 +69,9 @@ function mountBrowser() {
   const root = createRoot(container);
   act(() =>
     root.render(
-      <ModelBrowser state={buildState()} onSelect={onSelect} onCreateProfile={onCreateProfile} />,
+      <QueryClientProvider client={testQueryClient}>
+        <ModelBrowser state={buildState()} onSelect={onSelect} onCreateProfile={onCreateProfile} />
+      </QueryClientProvider>,
     ),
   );
   mounted.push({ root, container });

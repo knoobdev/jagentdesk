@@ -137,21 +137,18 @@ export function useSidebarWorkspacesList(options?: {
   const workspaceSort = useSidebarViewStore((state) => state.workspaceSort);
   const hostProjects = useHostProjects(hydratedServerIds, workspaceSort);
   const showBackground = useSidebarViewStore((state) => state.showBackground);
-  const workspaceMaps = useSessionStore(
-    useShallow((state) =>
-      hydratedServerIds.map((serverId) => state.sessions[serverId]?.workspaces),
-    ),
-  );
-  const hiddenWorkspaceKeys = useMemo(() => {
-    const keys = new Set<string>();
-    if (showBackground) return keys;
-    workspaceMaps.forEach((workspaces, index) => {
-      for (const workspace of workspaces?.values() ?? []) {
-        if (workspace.background) keys.add(`${hydratedServerIds[index]}:${workspace.id}`);
+  const hiddenWorkspaceKeys = useSessionStore(
+    useShallow((state) => {
+      const keys = new Set<string>();
+      if (showBackground) return keys;
+      for (const serverId of hydratedServerIds) {
+        for (const workspace of state.sessions[serverId]?.workspaces.values() ?? []) {
+          if (workspace.background) keys.add(`${serverId}:${workspace.id}`);
+        }
       }
-    });
-    return keys;
-  }, [hydratedServerIds, showBackground, workspaceMaps]);
+      return keys;
+    }),
+  );
 
   const sidebarModel = useMemo(
     () =>

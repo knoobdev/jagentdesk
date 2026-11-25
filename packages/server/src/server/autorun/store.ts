@@ -1,5 +1,6 @@
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { writeFileAtomic } from "../atomic-file.js";
 import { AutorunStateSchema, type AutorunState } from "@jagentdesk/protocol/messages";
 
 // Durable per-agent autonomous state (spec §20 / ADR-0017). Autonomous mode is a switch on
@@ -25,7 +26,7 @@ export class AutorunStore {
 
   private async write(state: AutorunState): Promise<void> {
     await this.ensureDir();
-    await writeFile(this.filePath(state.agentId), `${JSON.stringify(state, null, 2)}\n`, "utf-8");
+    await writeFileAtomic(this.filePath(state.agentId), `${JSON.stringify(state, null, 2)}\n`);
   }
 
   async list(): Promise<AutorunState[]> {

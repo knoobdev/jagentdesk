@@ -35,7 +35,6 @@ import { type TFunction } from "i18next";
 import { SquarePen } from "lucide-react-native";
 import React, {
   memo,
-  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -2034,11 +2033,11 @@ function AgentChatSurface({
 }) {
   return (
     <ChatColumnRailSurface serverId={serverId}>
-    <OverlayDismissalScope>
-      <FileDropZone style={styles.container} disabled={disabled}>
-        {children}
-      </FileDropZone>
-    </OverlayDismissalScope>
+      <OverlayDismissalScope>
+        <FileDropZone style={styles.container} disabled={disabled}>
+          {children}
+        </FileDropZone>
+      </OverlayDismissalScope>
     </ChatColumnRailSurface>
   );
 }

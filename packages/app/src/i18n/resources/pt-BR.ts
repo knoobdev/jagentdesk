@@ -95,7 +95,6 @@ export const ptBR: TranslationResources = {
     commandCenter: {
       placeholder: "Pesquisar espa\u00E7os de trabalho, arquivos e a\u00E7\u00F5es...",
       noMatches: "Nenhuma correspond\u00EAncia",
-      copyBrowserHostName: "Copy browser host name",
       actions: "A\u00E7\u00F5es",
       workspaces: "Espa\u00E7os de trabalho",
       agents: "Agentes",

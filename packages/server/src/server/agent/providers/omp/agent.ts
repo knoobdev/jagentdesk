@@ -70,8 +70,7 @@ import {
   type OmpRuntimeOptions,
   OmpProviderOptionsSchema,
 } from "./provider-config.js";
-export { formatOmpVersionSupport, resolveOmpDiagnosticPaths } from "./provider-config.js";
-import { OmpSubagentCardTracker, type OmpSubagentCardScheduler } from "./subagent-card-tracker.js";
+import { OmpSubagentCardTracker } from "./subagent-card-tracker.js";
 import { ompSkillPromptUserText, shouldDisplayOmpCustomMessage } from "./custom-message.js";
 import { getUserMessageText } from "./message-history.js";
 import { mapOmpSystemNoticeToToolCall } from "./system-notice.js";
@@ -2386,8 +2385,6 @@ export class OmpAgentClient implements AgentClient {
   private readonly logger: Logger;
 
   private readonly runtimeSettings?: ProviderRuntimeSettings;
-
-  private readonly subagentCardScheduler?: OmpSubagentCardScheduler;
 
   private readonly providerIdleScheduler?: OmpProviderIdleScheduler;
 

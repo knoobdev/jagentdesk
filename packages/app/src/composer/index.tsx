@@ -1,5 +1,4 @@
 import { CHAT_COLUMN_RAIL_DATASET } from "@/chat-rail";
-import { Alert } from "@/components/ui/alert";
 import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { type AutocompleteOption } from "@/components/ui/autocomplete";
 import { ComposerRecall } from "@/composer/recall";

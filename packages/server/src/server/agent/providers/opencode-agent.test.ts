@@ -4160,7 +4160,7 @@ describe("OpenCode provider subagent contract", () => {
     const parent = await client.createSession({
       provider: "opencode",
       cwd: "/workspace/repo",
-      featureValues: { auto_accept: true },
+      providerOptions: { auto_accept: true },
     });
     parent.subscribe(() => undefined);
 

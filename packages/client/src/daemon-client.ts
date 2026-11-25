@@ -4176,10 +4176,16 @@ export class DaemonClient {
             timeout: 0,
           }),
     observe: (kind, idempotencyKey, next, error) => {
-      const observation = this.owned.observe(() =>
+      const observation = this.owned.observe<
+        CorrelatedResponsePayload<"creation.subscribe.response">
+      >(async (accept) =>
         this.sendCorrelatedSessionRequest({
           message: { type: "creation.subscribe.request", kind, idempotencyKey },
           responseType: "creation.subscribe.response",
+          selectPayload: (payload) => {
+            accept(payload);
+            return payload;
+          },
         }),
       );
       observation.subscribe({

@@ -93,7 +93,9 @@ export function GumloopCompactHeader({ enabled }: { enabled: boolean }) {
     });
   }, [route, workspace?.workspaceDirectory, toggleExplorer]);
   const rootStyle = useMemo(() => [styles.root, { paddingTop: insets.top }], [insets.top]);
-  const action = pathname.includes("/settings") ? <View style={styles.button} /> : (
+  const action = pathname.includes("/settings") ? (
+    <View style={styles.button} />
+  ) : (
     <HeaderToggleButton
       onPress={route ? inspect : newAgent}
       tooltipLabel={
