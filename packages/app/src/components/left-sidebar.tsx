@@ -1,4 +1,5 @@
-import { BuiltinSidebarDestinations } from "@/plugins/builtin/surfaces";
+import { BuiltinLeftPanel, BuiltinSidebarDestinations } from "@/plugins/builtin/surfaces";
+import { builtinClientRegistry } from "@/plugins/builtin/loaded";
 import { SidebarFooterIconHighlight } from "@/components/sidebar/sidebar-footer-icon-highlight";
 import { UsageSidebarItem, useUsageSummary, useOpenSidebarUsage } from "@/usage/sidebar-item";
 import { BotsSidebar } from "@/bots/sidebar";
@@ -104,8 +105,6 @@ import { shouldShowAddProject, shouldShowSidebarFooter } from "./sidebar-add-pro
 import { SidebarCalloutSlot } from "./sidebar-callout-slot";
 import { SidebarWorkspaceList } from "./sidebar-workspace-list";
 import { SidebarServersNav } from "@/ssh/ui/sidebar-servers-nav";
-import { JiraSidebarEntry } from "@/jira/sidebar-entry";
-import { SidebarJiraNav } from "@/jira/sidebar-jira-nav";
 import { FigmaSidebarEntry } from "@/figma/sidebar-entry";
 import { SidebarFigmaNav } from "@/figma/sidebar-figma-nav";
 import { SidebarClusterNav } from "./sidebar-cluster-nav";
@@ -125,7 +124,8 @@ function parseArgoCdRoute(
 /** Sections whose route owns the desktop left column instead of the workspace list. */
 type SectionRoute =
   | { section: "plugin"; serverId: string; pluginId: string }
-  | { section: "servers" | "jira" | "figma" | "bots"; serverId: string }
+  | { section: "servers" | "figma" | "bots"; serverId: string }
+  | { section: "builtin"; serverId: string; segment: string }
   | { section: "argocd"; serverId: string; instanceId: string | null };
 
 export function resolveSectionRoute(pathname: string): SectionRoute | null {
@@ -138,12 +138,12 @@ export function resolveSectionRoute(pathname: string): SectionRoute | null {
     };
   const argoCd = parseArgoCdRoute(pathname);
   if (argoCd) return { section: "argocd", ...argoCd };
-  const match = pathname.match(/\/h\/([^/]+)\/(servers|jira|figma|bots)(?:$|[/?])/);
+  const builtin = /^\/h\/([^/]+)\/([^/?]+)/.exec(pathname);
+  if (builtin && builtinClientRegistry.ownsLeftPanel(builtin[2]))
+    return { section: "builtin", serverId: decodeURIComponent(builtin[1]), segment: builtin[2] };
+  const match = pathname.match(/\/h\/([^/]+)\/(servers|figma|bots)(?:$|[/?])/);
   const section = match?.[2];
-  if (
-    !match?.[1] ||
-    (section !== "servers" && section !== "jira" && section !== "figma" && section !== "bots")
-  )
+  if (!match?.[1] || (section !== "servers" && section !== "figma" && section !== "bots"))
     return null;
   return { section, serverId: decodeURIComponent(match[1]) };
 }
@@ -181,12 +181,8 @@ export function resolveSidebarNavBody(
         <SidebarServersNav serverId={sectionRoute.serverId} />
       </BuiltinPluginGate>
     );
-  if (sectionRoute?.section === "jira")
-    return (
-      <BuiltinPluginGate serverId={sectionRoute.serverId} id="jira">
-        <SidebarJiraNav serverId={sectionRoute.serverId} />
-      </BuiltinPluginGate>
-    );
+  if (sectionRoute?.section === "builtin")
+    return <BuiltinLeftPanel serverId={sectionRoute.serverId} segment={sectionRoute.segment} />;
   if (sectionRoute?.section === "figma")
     return (
       <BuiltinPluginGate serverId={sectionRoute.serverId} id="figma">
@@ -1387,7 +1383,7 @@ function DesktopSidebar({
                 variant="compact"
               />
             ) : null}
-            <JiraSidebarEntry closesDrawer={false} />
+            <BuiltinSidebarDestinations slot="integrations" />
             <FigmaSidebarEntry closesDrawer={false} />
             <NavTargetGate route={builtinTargets.skillsRoute}>
               <SidebarHeaderRow

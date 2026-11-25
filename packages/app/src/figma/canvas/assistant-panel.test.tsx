@@ -88,12 +88,12 @@ vi.mock("@/stores/session-store", () => ({
     }),
 }));
 
-vi.mock("@/jira/ui/styles", () => {
+vi.mock("@/components/integration-ui/styles", () => {
   const style = new Proxy({}, { get: () => ({}) });
   return { jiraStyles: style };
 });
 
-vi.mock("@/jira/ui/primitives", () => ({
+vi.mock("@/components/integration-ui/primitives", () => ({
   EmptyState: ({ title, body }: { title: string; body?: string }) =>
     React.createElement(
       "div",
@@ -118,7 +118,7 @@ vi.mock("@/jira/ui/primitives", () => ({
   tint: { muted: () => ({}) },
 }));
 
-vi.mock("@/jira/assistant/workspaces", () => ({
+vi.mock("@/utils/usable-workspaces", () => ({
   firstWorkspaceDirectory: () => runtime.workspaceDirectory,
 }));
 

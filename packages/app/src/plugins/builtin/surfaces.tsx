@@ -9,14 +9,19 @@ import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspac
 import { useIsCompactFormFactor } from "@/constants/layout";
 import type { AppNavItem } from "@/components/sidebar/use-app-nav";
 import { builtinClientRegistry } from "./loaded";
-import type { BuiltinClientProps, BuiltinScreen as ScreenProps } from "./host";
+import type {
+  BuiltinAttachmentPillProps,
+  BuiltinClientProps,
+  BuiltinScreen as ScreenProps,
+} from "./host";
 import { BuiltinPluginScreenBoundary } from "./route-boundary";
 
 export function useBuiltinClientContributions(serverId: string) {
   const info = useSessionStore((state) => state.sessions[serverId]?.serverInfo);
   return useMemo(() => builtinClientRegistry.visible(info), [info]);
 }
-export function useBuiltinDestinations(pathname: string): AppNavItem[] {
+const DEFAULT_SLOT = "default";
+export function useBuiltinDestinations(pathname: string, slot = DEFAULT_SLOT): AppNavItem[] {
   const hosts = useHosts();
   const selection = useActiveWorkspaceSelection();
   const match = /^\/h\/([^/]+)/.exec(pathname)?.[1];
@@ -30,18 +35,20 @@ export function useBuiltinDestinations(pathname: string): AppNavItem[] {
       !serverId
         ? []
         : [...entries.values()].flatMap((entry) =>
-            (compact ? entry.mobileEntries : entry.destinations).map((destination) => ({
-              key: destination.id,
-              group: destination.group,
-              label: destination.title,
-              shortLabel: destination.title,
-              icon: destination.icon,
-              route: destination.route(serverId),
-              isActive: pathname.includes(`/${destination.routeSegment}`),
-              testID: `rail-${destination.id}`,
-            })),
+            (compact ? entry.mobileEntries : entry.destinations)
+              .filter((destination) => (destination.slot ?? DEFAULT_SLOT) === slot)
+              .map((destination) => ({
+                key: destination.id,
+                group: destination.group,
+                label: destination.title,
+                shortLabel: destination.title,
+                icon: destination.icon,
+                route: destination.route(serverId),
+                isActive: pathname.includes(`/${destination.routeSegment}`),
+                testID: `rail-${destination.id}`,
+              })),
           ),
-    [compact, entries, pathname, serverId],
+    [compact, entries, pathname, serverId, slot],
   );
 }
 export function BuiltinLeftPanel({ serverId, segment }: BuiltinClientProps & { segment: string }) {
@@ -92,9 +99,9 @@ function BuiltinSidebarDestination({ item }: { item: AppNavItem }) {
     />
   );
 }
-export function BuiltinSidebarDestinations() {
+export function BuiltinSidebarDestinations({ slot }: { slot?: string }) {
   const pathname = usePathname();
-  const items = useBuiltinDestinations(pathname);
+  const items = useBuiltinDestinations(pathname, slot);
   return (
     <>
       {items.map((item) => (
@@ -102,4 +109,26 @@ export function BuiltinSidebarDestinations() {
       ))}
     </>
   );
+}
+
+/** Every feature's headless per-host mounts; rendered once in the host route layout. */
+export function BuiltinHostMounts({ serverId }: BuiltinClientProps) {
+  const entries = useBuiltinClientContributions(serverId);
+  return (
+    <>
+      {[...entries].flatMap(([id, entry]) =>
+        [...entry.mounts].map(([key, Mount]) => <Mount key={`${id}/${key}`} serverId={serverId} />),
+      )}
+    </>
+  );
+}
+export function BuiltinAttachmentPill({
+  serverId,
+  ...props
+}: BuiltinAttachmentPillProps & BuiltinClientProps) {
+  const entries = useBuiltinClientContributions(serverId);
+  const Pill = [...entries.values()]
+    .map((entry) => entry.pills.get(props.attachment.kind))
+    .find(Boolean);
+  return Pill ? <Pill {...props} /> : null;
 }

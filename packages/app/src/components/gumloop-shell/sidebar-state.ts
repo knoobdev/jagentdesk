@@ -51,7 +51,6 @@ const DESTINATIONS: Readonly<Record<string, string>> = {
   clusters: "Clusters",
   cluster: "Clusters",
   argocd: "Argo CD",
-  jira: "Jira",
   figma: "Figma",
   plugin: "Plugins",
 };

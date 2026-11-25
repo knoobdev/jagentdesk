@@ -14,7 +14,7 @@ import {
 } from "lucide-react-native";
 import type { FigmaNode, FigmaPage } from "@jagentdesk/protocol/figma/rpc-schemas";
 import { Button } from "@/components/ui/button";
-import { jiraStyles } from "@/jira/ui/styles";
+import { jiraStyles } from "@/components/integration-ui/styles";
 import type { ApplyFigmaEdits, FigmaSelection } from "../contracts";
 import { errorMessage } from "./api";
 import { EditFailureBanner } from "./edit-state-view";

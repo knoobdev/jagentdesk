@@ -4,9 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, ScrollView, type StyleProp, type ViewStyle } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import type { Theme } from "@/styles/theme";
-import { Input, ErrorBanner } from "@/jira/ui/primitives";
+import { Input, ErrorBanner } from "@/components/integration-ui/primitives";
 import { Button } from "@/components/ui/button";
-import { jiraStyles } from "@/jira/ui/styles";
+import { jiraStyles } from "@/components/integration-ui/styles";
 import type {
   FigmaNode,
   FigmaBytes,

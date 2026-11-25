@@ -21,13 +21,6 @@ it("does not query GitHub before auth; polls at five minutes and deduplicates ac
     const calls: string[][] = [];
     const triggers = new LocalBotTriggers({
       storage,
-      jira: {
-        listConnections: () => [],
-        site: () => {
-          throw new Error("No Jira connection");
-        },
-      },
-      jiraEnabled: () => false,
       now: () => now,
       gh: async (args) => {
         calls.push(args);
@@ -79,15 +72,12 @@ it("delivers GitHub triggers even when the configured Jira source fails", async 
     });
     const source = new LocalBotTriggers({
       storage,
-      jiraEnabled: () => true,
-      jira: {
-        listConnections: () => {
-          throw new Error("Jira is unavailable");
+      sources: () => [
+        {
+          name: "jira",
+          poll: () => Promise.reject(new Error("Jira is unavailable")),
         },
-        site: () => {
-          throw new Error("No site");
-        },
-      },
+      ],
       gh: async (args) =>
         args[0] === "auth"
           ? ""

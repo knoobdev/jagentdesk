@@ -197,7 +197,8 @@ import { OverlayDismissalScope, useDismissOverlays } from "@/components/ui/overl
 import { type PaneHost } from "@/panels/panel-manifest";
 import { type ComposerFocusOptions } from "@/composer/model";
 import { useRetainedPanelActive } from "@/components/retained-panel";
-import { JiraIssuePill } from "@/jira/composer/jira-issue-attachment";
+import { builtinClientRegistry } from "@/plugins/builtin/loaded";
+import { BuiltinAttachmentPill } from "@/plugins/builtin/surfaces";
 
 const composerImageAttachmentPersister: Pick<
   AttachmentPersister,
@@ -534,22 +535,25 @@ function renderComposerAttachmentPill(args: RenderComposerAttachmentPillArgs): R
       onRemove,
     });
   }
-  if (attachment.kind === "jira_issue") {
+  // `jira_issue` is a core attachment kind whose pill the Jira built-in renders.
+  if (
+    attachment.kind === "jira_issue" ||
+    builtinClientRegistry.ownsAttachmentKind(attachment.kind)
+  ) {
     return (
-      <BuiltinPluginGate
-        key={`jira:${attachment.attachment.connectionId}/${attachment.attachment.key}`}
+      <BuiltinAttachmentPill
+        key={
+          attachment.kind === "jira_issue"
+            ? `jira:${attachment.attachment.connectionId}/${attachment.attachment.key}`
+            : `${attachment.kind}:${index}`
+        }
         serverId={args.serverId}
-        id="jira"
-      >
-        <JiraIssuePill
-          key={`jira:${attachment.attachment.connectionId}/${attachment.attachment.key}`}
-          attachment={attachment}
-          index={index}
-          disabled={disabled}
-          onOpen={onOpen}
-          onRemove={onRemove}
-        />
-      </BuiltinPluginGate>
+        attachment={attachment}
+        index={index}
+        disabled={disabled}
+        onOpen={onOpen}
+        onRemove={onRemove}
+      />
     );
   }
   if (attachment.kind === "plugin_resource") {

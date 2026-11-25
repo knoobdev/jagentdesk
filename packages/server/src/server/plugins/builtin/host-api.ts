@@ -14,7 +14,16 @@ export type {
   JAgentDeskToolExecutionContext,
   JAgentDeskToolResult,
 } from "../../agent/tools/types.js";
+export { FileSecretStore, type SecretStore } from "../../database/secret-store.js";
+export { ensurePrivateDirectory, writePrivateFileAtomicSync } from "../../private-files.js";
+export type { AgentPermissionResponse } from "../../agent/agent-sdk-types.js";
+export type { JAgentDeskToolDefinition } from "../../agent/tools/types.js";
+export type { BotTrigger } from "../../bots/service.js";
 export type {
+  BuiltinAgentToolContext,
+  BuiltinBotTriggerContext,
+  BuiltinBotTriggerSource,
+  BuiltinServiceHandle,
   BuiltinServerHost,
   BuiltinBackgroundService,
   BuiltinSessionServices,

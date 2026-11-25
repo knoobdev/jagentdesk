@@ -8,7 +8,7 @@ import {
   FakeJiraServer,
   LARGE_BOARD,
   RICH_COMMENT,
-} from "../../../server/src/server/jira/test-support/fake-jira-server";
+} from "../../../../plugins/jira/server/test-support/fake-jira-server";
 
 // Jira (spec 29) against the real e2e daemon and a fake Jira Cloud site speaking the documented
 // REST v3 / Software API shapes (test-support only). Desktop and phone viewports.

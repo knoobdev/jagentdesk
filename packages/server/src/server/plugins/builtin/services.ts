@@ -19,6 +19,8 @@ export function createBuiltinCoreServices(home: string, logger: Logger, config: 
     secretStores.set(config, secrets);
   }
   return {
+    /** The daemon home. Preserve a migrated feature's existing storage paths under it. */
+    home,
     logger,
     config,
     secrets,

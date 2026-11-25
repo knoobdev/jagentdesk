@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { jiraStyles } from "@/jira/ui/styles";
+import { jiraStyles } from "@/components/integration-ui/styles";
 
 // Shared building blocks for the canvas-side panels (inspect, toolbar popovers). Labels run the
 // section rail; values render in mono so numbers align the way Figma's own inspect does.

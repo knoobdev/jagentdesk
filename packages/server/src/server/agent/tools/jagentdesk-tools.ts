@@ -1,4 +1,5 @@
 import { builtinServerRegistry } from "../../plugins/builtin/loaded.js";
+import type { BuiltinHostToolPermissionRequest } from "../../plugins/builtin/host.js";
 import {
   sendPromptToAgent,
   enqueueAgentMessage,
@@ -150,7 +151,6 @@ import { type RemoteExecAgentTool } from "../../remote-exec/agent-tools.js";
 import { type CustomProviderAgentTool } from "../../custom-providers/agent-tools.js";
 import { type ArgoCdAgentTool } from "../../argocd/agent-tools.js";
 import { type SideloadAgentTool } from "../../sideload/agent-tools.js";
-import { type JiraAgentTool } from "../../jira/agent-tools.js";
 import { type FigmaAgentTool } from "../../figma/agent-tools.js";
 import { type DatabaseRegistry } from "../../database/database-registry.js";
 import { type DatabaseEngine } from "../../database/database-dto.js";
@@ -243,8 +243,6 @@ export interface JAgentDeskToolHostDependencies {
   argocdAgentTools?: (callerAgentId: string | null) => ArgoCdAgentTool[];
   /** Sideload tools (spec 26.10); installs raise a permission card. */
   sideloadAgentTools?: (callerAgentId: string | null) => SideloadAgentTool[];
-  // Jira (spec 29.4): jira_* tools; reads auto-run, writes raise the permission card.
-  jiraAgentTools?: (callerAgentId: string | null) => JiraAgentTool[];
   botAgentTools?: (callerAgentId: string | null) => JAgentDeskToolDefinition[];
   // Figma (spec 32.7): figma_* tools; reads auto-run, writes raise the permission card.
   figmaAgentTools?: (callerAgentId: string | null) => FigmaAgentTool[];
@@ -4273,8 +4271,20 @@ function createToolCatalog(
   // drops kubectl_get/kubectl_apply and the agent falls back to shelling out.
   registerKubectlTools({ registerTool, options, callerAgentId });
   registerSqlTools({ registerTool, options, callerAgentId });
-  builtinServerRegistry.registerAgentTools(options.builtinPlugins, registerTool, (name) =>
-    builtinNames.add(name),
+  const reserveBuiltinTool = (name: string) => builtinNames.add(name);
+  const builtinToolContext = {
+    callerAgentId: callerAgentId ?? null,
+    requestPermission: (agentId: string, request: BuiltinHostToolPermissionRequest) =>
+      options.requestHostToolPermission
+        ? options.requestHostToolPermission(agentId, request)
+        : agentManager.requestHostToolPermission(agentId, request),
+    service: builtinServerRegistry.lookup(options.jagentdeskHome ?? ""),
+  };
+  builtinServerRegistry.registerAgentTools(
+    options.builtinPlugins,
+    registerTool,
+    reserveBuiltinTool,
+    builtinToolContext,
   );
   if (options.sshAgentTools) {
     registerSshAgentTools(registerTool, options.sshAgentTools(callerAgentId ?? null));
@@ -4308,15 +4318,13 @@ function createToolCatalog(
         tool.handler,
       );
   }
-  if (options.jiraAgentTools) {
-    for (const tool of options.jiraAgentTools(callerAgentId ?? null)) {
-      registerTool(
-        tool.name,
-        { title: tool.title, description: tool.description, inputSchema: tool.inputSchema },
-        tool.handler,
-      );
-    }
-  }
+  builtinServerRegistry.registerAgentTools(
+    options.builtinPlugins,
+    registerTool,
+    reserveBuiltinTool,
+    builtinToolContext,
+    "integrations",
+  );
   if (options.figmaAgentTools) {
     for (const tool of options.figmaAgentTools(callerAgentId ?? null)) {
       registerTool(

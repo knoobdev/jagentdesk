@@ -15,7 +15,6 @@ import {
   GitPullRequest,
   History,
   Home,
-  KanbanSquare,
   Radar,
   Server,
   Share2,
@@ -54,7 +53,6 @@ import {
   buildFigmaRoute,
   buildForgeRoute,
   buildInsightsRoute,
-  buildJiraRoute,
   buildMarketplaceRoute,
   buildNewWorkspaceRoute,
   buildOpenProjectRoute,
@@ -83,8 +81,6 @@ export interface AppNavTargets {
   /** Spec 30.3: the daemon ships Argo CD; null hides the entry. */
   argoCdRoute: Href | null;
   supportsForgeHub: boolean;
-  /** Spec 29: Jira surface, when the daemon advertises `jira`. */
-  jiraRoute: Href | null;
   /** Spec 32: Figma section, when the daemon advertises `figma`. */
   figmaRoute: Href | null;
   /** Spec 25: daemon build ships the SSH servers surface (S1+). */
@@ -112,9 +108,6 @@ export function useAppNavTargets(): AppNavTargets {
   // only advertise the entry when the first/active daemon reports forgeHub.
   const supportsForgeHub = useSessionStore(
     (state) => state.sessions[firstServerId]?.serverInfo?.features?.forgeHub === true,
-  );
-  const supportsJira = useSessionStore(
-    (state) => state.sessions[firstServerId]?.serverInfo?.features?.jira === true,
   );
   const supportsFigma = useSessionStore(
     (state) => state.sessions[firstServerId]?.serverInfo?.features?.figma === true,
@@ -172,7 +165,6 @@ export function useAppNavTargets(): AppNavTargets {
       argoCdRoute: supportsArgoCd ? perHost(buildArgoCdRoute) : null,
       supportsForgeHub,
       supportsSshServers,
-      jiraRoute: supportsJira ? perHost(buildJiraRoute) : null,
       figmaRoute: supportsFigma ? perHost(buildFigmaRoute) : null,
     };
   }, [
@@ -183,7 +175,6 @@ export function useAppNavTargets(): AppNavTargets {
     insightsEnabled,
     workbenchEnabled,
     sharingEnabled,
-    supportsJira,
     supportsFigma,
     deviceServerId,
     firstServerId,
@@ -216,6 +207,7 @@ export function useAppNavItems(): AppNavItem[] {
   const pathname = usePathname();
   const targets = useAppNavTargets();
   const builtinDestinations = useBuiltinDestinations(pathname);
+  const integrationDestinations = useBuiltinDestinations(pathname, "integrations");
   return useMemo(() => {
     const items: (AppNavItem | null)[] = [
       {
@@ -317,14 +309,14 @@ export function useAppNavItems(): AppNavItem[] {
         pathname,
         "/insights",
       ),
-      navItem("jira", KanbanSquare, "Jira", "Jira", targets.jiraRoute, pathname, "/jira"),
+      ...integrationDestinations,
       navItem("figma", Figma, "Figma", "Figma", targets.figmaRoute, pathname, "/figma"),
       targets.supportsForgeHub
         ? navItem("forge", GitPullRequest, "Forge", "Forge", targets.forgeRoute, pathname, "/forge")
         : null,
     ];
     return items.filter((item): item is AppNavItem => item !== null);
-  }, [openUsage, pathname, t, targets, builtinDestinations]);
+  }, [openUsage, pathname, t, targets, builtinDestinations, integrationDestinations]);
 }
 
 function navItem(

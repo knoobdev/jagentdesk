@@ -244,10 +244,8 @@ import { SshSession } from "./session/ssh/ssh-session.js";
 import { ArgoCdSession } from "./session/argocd/argocd-session.js";
 import { type ArgoCdService } from "./argocd/service.js";
 import { randomUUID } from "node:crypto";
-import { JiraSession } from "./session/jira/jira-session.js";
 import { FigmaSession, isFigmaRequest } from "./session/figma/figma-session.js";
 import { type FigmaService } from "./figma/service.js";
-import { type JiraService } from "./jira/service.js";
 import { SshService } from "./ssh/ssh-service.js";
 import { SideloadSession } from "./session/sideload/sideload-session.js";
 import { type SideloadService } from "./sideload/sideload-service.js";
@@ -704,9 +702,6 @@ export interface SessionOptions {
 
   /** Sideload (spec 26); null in tests and hosts that do not run it. */
   sideloadService?: SideloadService | null;
-
-  // Daemon-wide Jira service (spec 29); absent in tests that do not exercise Jira.
-  jiraService?: JiraService | null;
 
   botsService?: BotsService | null;
 
@@ -1269,8 +1264,6 @@ export class Session {
 
   private argocdSession!: ArgoCdSession;
 
-  private jiraSession: JiraSession | null = null;
-
   private botsSession: BotsSession | null = null;
 
   private figmaSession: FigmaSession | null = null;
@@ -1582,7 +1575,6 @@ export class Session {
       autorunSession: this.autorunSession,
       sessionShareSession: this.sessionShareSession,
       activityGraphSession: this.activityGraphSession,
-      jiraSession: this.jiraSession,
     } = this.createOptionalSessions(options));
     this.initClusterSession(options);
     this.initDatabaseSession(options);
@@ -1846,6 +1838,7 @@ export class Session {
   ): BuiltinServerSession {
     return builtinServerRegistry.session(pluginRuntime?.builtin, {
       ...createBuiltinCoreServices(this.jagentdeskHome, this.sessionLogger, this.daemonConfigStore),
+      service: builtinServerRegistry.lookup(this.jagentdeskHome),
       terminals: this.terminalManager,
       remoteDocker: () => this.sshService.modules?.docker,
       push: (message) => this.emit(message),
@@ -1890,7 +1883,6 @@ export class Session {
     autorunSession: AutorunSession | null;
     sessionShareSession: SessionShareSession | null;
     activityGraphSession: ActivityGraphSession | null;
-    jiraSession: JiraSession | null;
   } {
     return {
       autorunSession: options.autorunService
@@ -1921,13 +1913,6 @@ export class Session {
               },
             },
             service: options.activityGraphService,
-            logger: this.sessionLogger,
-          })
-        : null,
-      jiraSession: options.jiraService
-        ? new JiraSession({
-            service: options.jiraService,
-            emit: (msg) => this.emit(msg),
             logger: this.sessionLogger,
           })
         : null,
@@ -3235,7 +3220,6 @@ export class Session {
       () => this.dispatchArgoCdMessage(msg),
       () => this.dispatchSideloadMessage(msg),
       () => this.botsSession?.dispatch(msg),
-      () => this.dispatchJiraMessage(msg),
       () => this.dispatchFigmaMessage(msg),
       () => this.builtinSession.dispatch(msg),
       () => this.dispatchSimulatorMessage(msg),
@@ -3581,7 +3565,6 @@ export class Session {
     if (!builtin.isEnabled("clusters")) this.clusterSession.dispose();
     if (!builtin.isEnabled("argocd")) this.argocdSession.suspend();
     else this.argocdSession.syncDelegateRegistration();
-    if (!builtin.isEnabled("jira")) this.jiraSession?.suspend();
     if (!builtin.isEnabled("activity-graph")) this.activityGraphSession?.dispose();
     if (!builtin.isEnabled("workbench")) {
       for (const id of this.proxySubscriptionIds) this.proxyService.unsubscribe(id);
@@ -5280,66 +5263,6 @@ export class Session {
       case "argocd.cluster_links.set.request":
       case "argocd.cluster_links.resolve.request":
         return this.argocdSession.handle(msg);
-      default:
-        return undefined;
-    }
-  }
-
-  // Jira (spec 29.5). Every jira.* request is listed here AND handled in JiraSession.handle: a
-  // request missing from this list never reaches the handler and times out without a response.
-  // oxlint-disable-next-line complexity
-  private dispatchJiraMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    if (!this.jiraSession) return undefined;
-    switch (msg.type) {
-      case "jira.connections.list.request":
-      case "jira.connections.add.request":
-      case "jira.connections.remove.request":
-      case "jira.connections.test.request":
-      case "jira.oauth.begin.request":
-      case "jira.oauth.complete.request":
-      case "jira.oauth.delegate.request":
-      case "jira.projects.list.request":
-      case "jira.boards.list.request":
-      case "jira.boards.get.request":
-      case "jira.boards.configuration.request":
-      case "jira.board.issues.request":
-      case "jira.board.watch.request":
-      case "jira.board.unwatch.request":
-      case "jira.backlog.get.request":
-      case "jira.sprints.list.request":
-      case "jira.sprints.create.request":
-      case "jira.sprints.start.request":
-      case "jira.sprints.complete.request":
-      case "jira.sprints.move_issues.request":
-      case "jira.issue.get.request":
-      case "jira.issue.create.request":
-      case "jira.issue.create_meta.request":
-      case "jira.issue.update.request":
-      case "jira.issue.transitions.request":
-      case "jira.issue.transition.request":
-      case "jira.issue.assign.request":
-      case "jira.issue.rank.request":
-      case "jira.issue.watch.request":
-      case "jira.issue.unwatch.request":
-      case "jira.issue.watchers.set.request":
-      case "jira.issue.changelog.list.request":
-      case "jira.issue.comments.list.request":
-      case "jira.issue.comments.add.request":
-      case "jira.issue.comments.update.request":
-      case "jira.issue.worklog.list.request":
-      case "jira.issue.worklog.add.request":
-      case "jira.issue.attachments.upload.request":
-      case "jira.issue.attachments.download.request":
-      case "jira.issue.attachments.delete.request":
-      case "jira.issue.links.add.request":
-      case "jira.search.request":
-      case "jira.jql.suggest.request":
-      case "jira.filters.list.request":
-      case "jira.filters.save.request":
-      case "jira.users.find.request":
-      case "jira.swimlanes.get.request":
-      case "jira.swimlanes.set.request":
-        return this.jiraSession.handle(msg);
       default:
         return undefined;
     }
@@ -11044,7 +10967,6 @@ export class Session {
     await this.voiceSession.cleanup();
 
     this.botsSession?.dispose();
-    this.jiraSession?.dispose();
     this.figmaSession?.dispose();
     await this.builtinSession.dispose();
     this.simulatorStreams.disposeAll();

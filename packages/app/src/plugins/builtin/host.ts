@@ -16,6 +16,16 @@ export interface BuiltinDestination {
   group: "Tools" | "main";
   route: (serverId: string) => string;
   routeSegment: string;
+  /** Navigation position. Core renders each slot where the entry sat before migration. */
+  slot?: string;
+}
+/** Renders a composer attachment of a core attachment kind owned by this feature. */
+export interface BuiltinAttachmentPillProps {
+  attachment: import("@/attachments/types").ComposerAttachment;
+  index: number;
+  disabled: boolean;
+  onOpen: (attachment: import("@/attachments/types").ComposerAttachment) => void;
+  onRemove: (index: number) => void;
 }
 export interface BuiltinScreen extends BuiltinClientProps {
   sshDocker?: import("@/ssh/ui/ssh-docker-client").SshDockerTarget;
@@ -36,6 +46,10 @@ export interface BuiltinClientHost {
     source: PluginAttachmentSourceContribution,
     search: BuiltinAttachmentSource["search"],
   ): void;
+  /** Composer pill for attachments of `kind`. */
+  attachmentPill(kind: string, component: ComponentType<BuiltinAttachmentPillProps>): void;
+  /** Headless component mounted once per host route (sign-in delegation, sync binders). */
+  hostMount(id: string, component: ComponentType<BuiltinClientProps>): void;
 }
 export interface BuiltinAttachmentSource {
   source: PluginAttachmentSourceContribution;
@@ -50,6 +64,8 @@ export interface BuiltinClientContributions {
   composer: Map<string, ComponentType<BuiltinClientProps>>;
   timeline: Map<string, ComponentType<BuiltinClientProps & { item: PluginTimelineItem }>>;
   attachments: BuiltinAttachmentSource[];
+  pills: Map<string, ComponentType<BuiltinAttachmentPillProps>>;
+  mounts: Map<string, ComponentType<BuiltinClientProps>>;
 }
 export class BuiltinClientRegistry {
   private readonly entries = new Map<BuiltinPluginId, BuiltinClientContributions>();
@@ -64,6 +80,8 @@ export class BuiltinClientRegistry {
       composer: new Map(),
       timeline: new Map(),
       attachments: [],
+      pills: new Map(),
+      mounts: new Map(),
     };
     this.entries.set(id, entry);
     const add = <T>(map: Map<string, T>, key: string, value: T) => {
@@ -80,6 +98,8 @@ export class BuiltinClientRegistry {
       composerItem: (key, component) => add(entry.composer, key, component),
       timelineRenderer: (key, component) => add(entry.timeline, key, component),
       attachmentSource: (source, search) => entry.attachments.push({ source, search }),
+      attachmentPill: (kind, component) => add(entry.pills, kind, component),
+      hostMount: (key, component) => add(entry.mounts, key, component),
     };
   }
   /** Every consumer selects against live per-host state, including retained screens. */
@@ -96,6 +116,12 @@ export class BuiltinClientRegistry {
   }
   owner(routeSegment: string): BuiltinPluginId | undefined {
     return [...this.entries].find(([, entry]) => entry.screens.has(routeSegment))?.[0];
+  }
+  ownsLeftPanel(routeSegment: string): boolean {
+    return [...this.entries.values()].some((entry) => entry.panels.has(routeSegment));
+  }
+  ownsAttachmentKind(kind: string): boolean {
+    return [...this.entries.values()].some((entry) => entry.pills.has(kind));
   }
   screen(routeSegment: string) {
     return [...this.entries.values()].map((entry) => entry.screens.get(routeSegment)).find(Boolean);

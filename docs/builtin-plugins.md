@@ -5,7 +5,8 @@ they do not use the installed-plugin process, client bundle evaluator, or `plugi
 Settings → Plugins controls each feature per host. The persisted ids, defaults, dependencies,
 capabilities, RPC names, tool names, and data paths are release contracts.
 
-Docker is the phase 2 pilot. The other feature manifests still describe phase 1 implementations.
+Docker was the phase 2 pilot. Migrated features declare `builtinEntrypoints`; the other feature
+manifests still describe phase 1 implementations.
 The bundled provider and usage plugins retain their existing SDK runtime. Do not move those
 implementations while migrating a feature.
 
@@ -54,16 +55,28 @@ new database paths with the feature id. Preserve existing storage locations duri
   it cannot fall through to another dispatcher. The host applies `plugin_disabled` before
   creating or calling a handler, including after an awaited lifecycle transition. Keep existing
   slash names during migrations; new RPCs follow [RPC namespacing](rpc-namespacing.md).
-- `host.agentTools(install)` receives the core tool registrar. The host installs tools from the
-  agent's captured enabled-plugin set. Do not check live plugin state in a tool handler: existing
-  agents retain their opening tool set. Approval and provider tool policy remain in core.
+- `host.agentTools(install, { slot })` receives the core tool registrar and the calling agent's
+  context: `callerAgentId`, `requestPermission` (core's host tool approval card), and
+  `service(handle)`. The host installs tools from the agent's captured enabled-plugin set. Do not
+  check live plugin state in a tool handler: existing agents retain their opening tool set.
+  Approval and provider tool policy remain in core. `slot` keeps catalog order: core calls each
+  slot where the tools were registered before migration (`default` with the kubectl/sql tools,
+  `integrations` after the bot tools).
+- `host.botTriggerSource(source)` adds a source to the Bots poller while the plugin is enabled.
+  Core supplies the poll clock and per-key state; the source owns its query and dedupe keys.
 - `host.backgroundService(create)` registers a daemon-owned lifecycle through
   `BuiltinPluginState`. Its `start(signal)` receives a new abort signal for each enable; disable
   aborts it before cleanup. The host rejects start/stop operations that exceed five seconds. Use
   the signal to cancel pending work and bind resource cleanup. The bootstrap starts these
-  registrations and stops them during daemon shutdown.
+  registrations and stops them during daemon shutdown. The call returns a handle; sessions, tool
+  installers, and bot trigger sources resolve the daemon's instance with `service(handle)`.
+  Instances are scoped by daemon home because e2e tests run several daemons in one process, so
+  never keep a daemon service in a module variable. Jira's service is the example: created at
+  boot, loaded once, disposed on disable.
 - A session contribution supplies `handle`, `stop`, and optional `start`. The host owns its
-  toggle and disconnect lifetime. `stop` must synchronously invalidate pending work before
+  toggle and disconnect lifetime. It is created on the first RPC unless registered with
+  `{ eager: true }`; use eager when the contribution forwards daemon pushes the client listens for
+  before sending any request (Jira's desktop sign-in delegation). `stop` must synchronously invalidate pending work before
   awaiting cleanup, kill children, clear timers, and release subscriptions within five seconds.
   Make start/stop repeatable. A late network result must check its generation before spawning
   another child or publishing an event.
@@ -90,14 +103,19 @@ Compiled features live under `dist/server/builtin-features`; raw SDK plugins kee
 
 Import `BuiltinClientHost` and shared UI/services from
 `packages/app/src/plugins/builtin/host-api.ts`. Feature-internal imports stay relative. Shared
-UI, theme tokens, terminal rendering, host runtime, and workspace selection stay in core.
+UI, theme tokens, terminal rendering, host runtime, and workspace selection stay in core. A UI
+kit that a not-yet-migrated feature also imports moves to a neutral core path, never into the
+feature: Jira's issue primitives live in `components/integration-ui/` because Figma uses them.
 Unistyles' Babel configuration includes `plugins/` so migrated styles receive the same transform
 on web, iOS, and Android.
 
 `register(app)` can contribute a sidebar destination (`Tools` or `main`), a left drill-in panel,
 a route screen, settings sections, mobile drawer entries, composer items, timeline renderers,
-and attachment sources. Use the same destination metadata for desktop and mobile. Screens
-receive the selected `serverId`; never choose the first host inside a migrated screen.
+attachment sources, composer pills for a core attachment kind (`attachmentPill`), and headless
+per-host mounts (`hostMount`, rendered once in the host route layout). Use the same destination
+metadata for desktop and mobile; a destination's `slot` places it where its row sat before
+migration, as with agent tools. Screens receive the selected `serverId`; never choose the first
+host inside a migrated screen.
 
 `BuiltinClientRegistry.visible` selects every contribution against live per-host server state.
 The generic adapters in `surfaces.tsx` feed navigation, drill-in, screens, settings, and composer.
@@ -138,7 +156,8 @@ toggling one host must leave another host's contributions visible.
    then root typecheck, lint, server/client builds, web export, iOS/Android export, and the desktop
    web overlay. Verify emitted daemon imports. Do not run the whole local test suite.
 10. Compare the contract dumps and web JavaScript bytes with the baseline (at most 5% growth).
-    `scripts/compare-builtin-contracts.mjs` is the Docker example. Use an isolated daemon home and
+    Add the feature's baseline sources to `scripts/compare-builtin-contracts.mjs`; it reads the
+    current names from the real registration (`scripts/dump-builtin-registrations.mts`). Use an isolated daemon home and
     port, unset every `CLAUDE*` variable, and disable relay/Tailscale. Verify real data, an
     interactive terminal where applicable, live navigation removal within two seconds, disabled
     RPC errors, existing/new agent tool sets, enable, and restart persistence. Record commands,

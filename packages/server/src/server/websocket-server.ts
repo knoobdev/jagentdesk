@@ -45,7 +45,6 @@ import { type ArgoCdService } from "./argocd/service.js";
 import { type DatabaseRegistry } from "./database/database-registry.js";
 import { SshService } from "./ssh/ssh-service.js";
 import { type SideloadService } from "./sideload/sideload-service.js";
-import { type JiraService } from "./jira/service.js";
 import { type RemoteExecService } from "./remote-exec/types.js";
 import { type CustomProviderService } from "./custom-providers/types.js";
 import { type FigmaService } from "./figma/service.js";
@@ -765,9 +764,6 @@ export class VoiceAssistantWebSocketServer {
   private readonly activityGraphService: ActivityGraphService;
 
   private readonly specPlanSource: SpecModePlanSource;
-
-  // Jira (spec 29), injected post-construction.
-  private jiraService: JiraService | null = null;
 
   private botsService: BotsService | null = null;
 
@@ -2295,10 +2291,6 @@ export class VoiceAssistantWebSocketServer {
     this.botsService = service;
   }
 
-  public setJiraService(service: JiraService | null): void {
-    this.jiraService = service;
-  }
-
   public setFigmaService(service: FigmaService | null): void {
     this.figmaService = service;
   }
@@ -2372,7 +2364,6 @@ export class VoiceAssistantWebSocketServer {
       sshService: this.sshService,
       argocdService: this.argocdService,
       sideloadService: this.sideloadService,
-      jiraService: this.jiraService,
       botsService: this.botsService,
       figmaService: this.figmaService,
       remoteExecService: this.remoteExecService,
@@ -2961,8 +2952,8 @@ export class VoiceAssistantWebSocketServer {
         activityGraph: true,
         // Argo CD (spec 30 / ADR-0034): advertised only when the daemon runs the service.
         ...(this.argocdService ? { argocd: true } : {}),
-        // Jira (spec 29 / ADR-0034): capability `jira`, advertised when the service is wired.
-        ...(this.jiraService ? { jira: true } : {}),
+        // Jira (spec 29 / ADR-0034): the built-in plugin owns the service; its state masks this.
+        jira: true,
         // Figma (spec 32 / ADR-0035). `figmaNodeDepth` (ADR-0039) reports the section-aware
         // outline and the depth-1 metadata read together; viewers gate once on it.
         // `figmaRemoteWrites` (ADR-0040) gates the figma.remote.* write surface.

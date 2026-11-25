@@ -7,6 +7,9 @@ import type {
   JAgentDeskToolExecutionContext,
   JAgentDeskToolResult,
 } from "../../agent/tools/types.js";
+import type { Bot } from "@jagentdesk/protocol/bots/types";
+import type { AgentPermissionResponse } from "../../agent/agent-sdk-types.js";
+import type { BotTrigger } from "../../bots/service.js";
 import type { BuiltinCoreServices } from "./services.js";
 import {
   BuiltinPluginError,
@@ -19,7 +22,52 @@ export type RegisterBuiltinTool = <Input>(
   config: JAgentDeskToolConfig,
   handler: (input: Input, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>,
 ) => void;
+/** A daemon-wide service created by `backgroundService`; resolve it per daemon with `service()`. */
+export interface BuiltinServiceHandle<T> {
+  readonly id: BuiltinPluginId;
+  readonly key: symbol;
+  /** Phantom type marker; never read. */
+  readonly type?: T;
+}
+export type BuiltinServiceLookup = <T>(handle: BuiltinServiceHandle<T>) => T | undefined;
+export interface BuiltinHostToolPermissionRequest {
+  name: string;
+  kind: string;
+  title?: string;
+  description?: string;
+  input?: Record<string, unknown>;
+}
+/** Per-agent catalog context: approval stays in core; the feature only asks for it. */
+export interface BuiltinAgentToolContext {
+  callerAgentId: string | null;
+  requestPermission(
+    agentId: string,
+    request: BuiltinHostToolPermissionRequest,
+  ): Promise<AgentPermissionResponse>;
+  service: BuiltinServiceLookup;
+}
+export interface BuiltinAgentToolOptions {
+  /** Catalog position. Core calls each slot where the tools were registered before migration. */
+  slot?: string;
+}
+export interface BuiltinBotTriggerContext {
+  now: number;
+  state(key: string): number | undefined;
+  setState(key: string, value: number): void;
+  service: BuiltinServiceLookup;
+}
+export interface BuiltinBotTriggerSource {
+  /** Source name in logs and on each trigger. */
+  name: string;
+  poll(bot: Bot, context: BuiltinBotTriggerContext): Promise<BotTrigger[]>;
+}
+export interface BuiltinSessionOptions {
+  /** Create the contribution with the session (and on enable), not on its first RPC. Use when
+   * the contribution forwards daemon pushes the client listens for before sending any request. */
+  eager?: boolean;
+}
 export interface BuiltinSessionServices extends BuiltinCoreServices {
+  service: BuiltinServiceLookup;
   terminals?: TerminalManager | null;
   remoteDocker: () => RemoteDockerHosts | undefined;
   push(message: SessionOutboundMessage): void;
@@ -84,61 +132,122 @@ export interface BuiltinServerHost {
     namespace: string,
     methods: readonly SessionInboundMessage["type"][],
     create: (services: BuiltinSessionServices) => BuiltinSessionContribution,
+    options?: BuiltinSessionOptions,
   ): void;
-  backgroundService(create: (services: BuiltinCoreServices) => BuiltinBackgroundService): void;
-  agentTools(register: (registerTool: RegisterBuiltinTool) => void): void;
+  /** One instance per daemon, started and stopped with the plugin. */
+  backgroundService<T extends BuiltinBackgroundService>(
+    create: (services: BuiltinCoreServices) => T,
+  ): BuiltinServiceHandle<T>;
+  agentTools(
+    register: (registerTool: RegisterBuiltinTool, context: BuiltinAgentToolContext) => void,
+    options?: BuiltinAgentToolOptions,
+  ): void;
+  /** Bots poll every registered source while this plugin is enabled. */
+  botTriggerSource(source: BuiltinBotTriggerSource): void;
 }
 interface RpcRegistration {
   id: BuiltinPluginId;
   namespace: string;
   methods: readonly SessionInboundMessage["type"][];
   create: (services: BuiltinSessionServices) => BuiltinSessionContribution;
+  eager: boolean;
 }
+interface ToolRegistration {
+  install: (registerTool: RegisterBuiltinTool, context: BuiltinAgentToolContext) => void;
+  slot: string;
+}
+interface BackgroundRegistration {
+  key: symbol;
+  create: (services: BuiltinCoreServices) => BuiltinBackgroundService;
+}
+const DEFAULT_TOOL_SLOT = "default";
 
 export class BuiltinServerRegistry {
   private readonly rpcs = new Map<string, RpcRegistration>();
-  private readonly backgrounds = new Map<
-    BuiltinPluginId,
-    (services: BuiltinCoreServices) => BuiltinBackgroundService
-  >();
-  private readonly tools = new Map<BuiltinPluginId, (register: RegisterBuiltinTool) => void>();
+  private readonly backgrounds = new Map<BuiltinPluginId, BackgroundRegistration>();
+  private readonly tools = new Map<BuiltinPluginId, ToolRegistration>();
+  private readonly triggers = new Map<BuiltinPluginId, BuiltinBotTriggerSource>();
+  /** Daemon services keyed by daemon home: several daemons can share one test process. */
+  private readonly scopes = new Map<string, Map<symbol, BuiltinBackgroundService>>();
   forPlugin(id: BuiltinPluginId): BuiltinServerHost {
     return {
       id,
-      rpc: (namespace, methods, create) => {
+      rpc: (namespace, methods, create, options) => {
         if (!/^[a-z][a-z0-9_.-]*[./]$/.test(namespace))
           throw new Error(`Invalid RPC namespace for ${id}`);
-        const registration = { id, namespace, methods, create };
+        const registration = { id, namespace, methods, create, eager: options?.eager === true };
         for (const method of methods) {
           if (!method.startsWith(namespace) || this.rpcs.has(method))
             throw new Error(`Invalid or duplicate built-in RPC: ${method}`);
           this.rpcs.set(method, registration);
         }
       },
-      backgroundService: (create) => {
+      backgroundService: <T extends BuiltinBackgroundService>(
+        create: (services: BuiltinCoreServices) => T,
+      ) => {
         if (this.backgrounds.has(id))
           throw new Error(`Duplicate built-in background service: ${id}`);
-        this.backgrounds.set(id, create);
+        const key = Symbol(id);
+        this.backgrounds.set(id, { key, create });
+        const handle: BuiltinServiceHandle<T> = { id, key };
+        return handle;
       },
-      agentTools: (register) => {
+      agentTools: (install, options) => {
         if (this.tools.has(id)) throw new Error(`Duplicate built-in tools: ${id}`);
-        this.tools.set(id, register);
+        this.tools.set(id, { install, slot: options?.slot ?? DEFAULT_TOOL_SLOT });
+      },
+      botTriggerSource: (source) => {
+        if (this.triggers.has(id)) throw new Error(`Duplicate built-in bot trigger source: ${id}`);
+        this.triggers.set(id, source);
       },
     };
+  }
+  /** Resolves a daemon service for the daemon rooted at `home`. */
+  lookup(home: string): BuiltinServiceLookup {
+    return <T>(handle: BuiltinServiceHandle<T>) =>
+      this.scopes.get(home)?.get(handle.key) as T | undefined;
+  }
+  /** Enabled sources only; the daemon's bot runtime polls them after its own GitHub source. */
+  botTriggerSources(
+    state: Pick<BuiltinPluginState, "isEnabled"> | undefined,
+    home: string,
+  ): {
+    name: string;
+    poll(bot: Bot, context: Omit<BuiltinBotTriggerContext, "service">): Promise<BotTrigger[]>;
+  }[] {
+    const service = this.lookup(home);
+    return [...this.triggers]
+      .filter(([id]) => !state || state.isEnabled(id))
+      .map(([, source]) => ({
+        name: source.name,
+        poll: (bot, context) => source.poll(bot, { ...context, service }),
+      }));
   }
   async start(
     state: BuiltinPluginState,
     services: BuiltinCoreServices,
   ): Promise<() => Promise<void>> {
     const running: BuiltinPluginLifecycle[] = [];
-    for (const [id, create] of this.backgrounds) {
-      const lifecycle = backgroundLifecycle(id, create(services));
+    const scope = new Map<symbol, BuiltinBackgroundService>();
+    this.scopes.set(services.home, scope);
+    // Create every service before starting any, so a session or tool never sees a partial scope.
+    const created = [...this.backgrounds].map(([id, { key, create }]) => {
+      const service = create(services);
+      scope.set(key, service);
+      return [id, service] as const;
+    });
+    for (const [id, service] of created) {
+      const lifecycle = backgroundLifecycle(id, service);
       await state.registerLifecycle(id, lifecycle);
       running.push(lifecycle);
     }
     return async () => {
       await Promise.all(running.map((lifecycle) => lifecycle.stop()));
+      if (this.scopes.get(services.home) === scope) this.scopes.delete(services.home);
     };
+  }
+  toolSlots(): string[] {
+    return [...new Set([...this.tools.values()].map((tools) => tools.slot))];
   }
   rpcNames(): string[] {
     return [...this.rpcs.keys()].sort();
@@ -150,13 +259,23 @@ export class BuiltinServerRegistry {
     snapshot: ReadonlySet<BuiltinPluginId> | undefined,
     register: RegisterBuiltinTool,
     reserve?: (name: string) => void,
+    context: Partial<BuiltinAgentToolContext> = {},
+    slot: string = DEFAULT_TOOL_SLOT,
   ): void {
-    for (const [id, install] of this.tools) {
-      install((name, config, handler) => {
+    const toolContext: BuiltinAgentToolContext = {
+      callerAgentId: context.callerAgentId ?? null,
+      requestPermission:
+        context.requestPermission ??
+        (() => Promise.reject(new Error("Tool permission requests are unavailable"))),
+      service: context.service ?? (() => undefined),
+    };
+    for (const [id, tools] of this.tools) {
+      if (tools.slot !== slot) continue;
+      tools.install((name, config, handler) => {
         // Keep names reserved while disabled so installed hooks cannot replace core tools.
         reserve?.(name);
         if (!snapshot || snapshot.has(id)) register(name, config, handler);
-      });
+      }, toolContext);
     }
   }
   session(
@@ -169,6 +288,7 @@ export class BuiltinServerRegistry {
 
 export class BuiltinServerSession {
   private readonly instances = new Map<RpcRegistration, BuiltinSessionContribution>();
+  private readonly ready = new Map<RpcRegistration, Promise<BuiltinSessionContribution>>();
   private readonly unsubscribe: (() => void) | undefined;
   private pending = Promise.resolve();
   private disposed = false;
@@ -178,9 +298,21 @@ export class BuiltinServerSession {
     private readonly state: BuiltinPluginState | undefined,
     private readonly services: BuiltinSessionServices,
   ) {
+    this.pending = Promise.all(
+      [...this.eagerRegistrations()]
+        .filter((registration) => !state || state.isEnabled(registration.id))
+        .map((registration) => this.ensure(registration)),
+    )
+      .then(() => undefined)
+      .catch((error) => {
+        services.logger.error({ err: error }, "Built-in session lifecycle failed");
+      });
     this.unsubscribe = state?.subscribe(() => {
       // Begin cancellation in the config notification turn, before any further incoming RPC.
       const operations: Promise<void>[] = [];
+      for (const registration of this.eagerRegistrations())
+        if (!this.instances.has(registration) && state.isEnabled(registration.id))
+          operations.push(this.pending.then(() => this.ensure(registration)).then(() => undefined));
       for (const [registration, instance] of this.instances) {
         const enabled = state.isEnabled(registration.id);
         if (enabled === this.active.has(registration)) continue;
@@ -213,24 +345,30 @@ export class BuiltinServerSession {
     await this.pending;
     if (this.disposed || (this.state && !this.state.isEnabled(registration.id)))
       throw new BuiltinPluginError("plugin_disabled", `Plugin turned off: ${registration.id}`);
-    let instance = this.instances.get(registration);
-    if (!instance) {
-      const contribution = registration.create(this.services);
-      instance = {
-        handle: (input) => contribution.handle(input),
-        stop: () => lifecycleDeadline(registration.id, "stop", () => contribution.stop()),
-        ...(contribution.start
-          ? {
-              start: () =>
-                lifecycleDeadline(registration.id, "start", () => contribution.start?.()),
-            }
-          : {}),
-      };
-      this.instances.set(registration, instance);
-      this.active.add(registration);
-      await instance.start?.();
-    }
+    const instance = await this.ensure(registration);
     await instance.handle(message);
+  }
+  private eagerRegistrations(): Set<RpcRegistration> {
+    return new Set([...this.rpcs.values()].filter((registration) => registration.eager));
+  }
+  private ensure(registration: RpcRegistration): Promise<BuiltinSessionContribution> {
+    const existing = this.ready.get(registration);
+    if (existing) return existing;
+    const contribution = registration.create(this.services);
+    const instance: BuiltinSessionContribution = {
+      handle: (input) => contribution.handle(input),
+      stop: () => lifecycleDeadline(registration.id, "stop", () => contribution.stop()),
+      ...(contribution.start
+        ? {
+            start: () => lifecycleDeadline(registration.id, "start", () => contribution.start?.()),
+          }
+        : {}),
+    };
+    this.instances.set(registration, instance);
+    this.active.add(registration);
+    const ready = Promise.resolve(instance.start?.()).then(() => instance);
+    this.ready.set(registration, ready);
+    return ready;
   }
   async dispose(): Promise<void> {
     this.disposed = true;
@@ -238,5 +376,6 @@ export class BuiltinServerSession {
     await this.pending;
     await Promise.all([...this.instances.values()].map((instance) => instance.stop()));
     this.instances.clear();
+    this.ready.clear();
   }
 }

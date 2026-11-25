@@ -238,10 +238,7 @@ import { SshService } from "./ssh/ssh-service.js";
 import { SideloadService, type SideloadSigner } from "./sideload/sideload-service.js";
 import { createSideloadAgentTools } from "./sideload/agent-tools.js";
 import { createSideloadDeviceSigner } from "./devices/sideload-signer.js";
-import { JiraService } from "./jira/service.js";
 import { createFigmaService } from "./figma/create.js";
-import { atlassianEndpointsFromEnv } from "./jira/credentials.js";
-import { createJiraAgentTools } from "./jira/agent-tools.js";
 import { createFigmaAgentTools } from "./figma/agent-tools.js";
 import { createRemoteExecAgentTools } from "./remote-exec/agent-tools.js";
 import { createRemoteExecService } from "./remote-exec/service.js";
@@ -1672,15 +1669,6 @@ export async function createJAgentDeskDaemon(
     clusters: createArgoCdClusterAccess(clusterRegistry),
   });
   logger.info("Argo CD service initialized");
-  // Daemon-wide Jira service (spec 29 / ADR-0034 §4): the one credential manager for every
-  // session, view watch and agent tool. Secrets live under <home>/jira.
-  const jiraService = new JiraService({
-    jagentdeskHome: config.jagentdeskHome,
-    endpoints: atlassianEndpointsFromEnv(process.env),
-    logger,
-  });
-  await jiraService.initialize();
-  logger.info("Jira service initialized");
   // Daemon-wide Figma service (spec 32 / ADR-0035): OAuth, REST budget, Figma Link bridge.
   const figmaService = await createFigmaService({
     jagentdeskHome: config.jagentdeskHome,
@@ -1884,10 +1872,6 @@ export async function createJAgentDeskDaemon(
     start: () => figmaService.start(),
     stop: () => figmaService.stopBackground(),
   });
-  await pluginRuntime.builtin.registerLifecycle("jira", {
-    start: () => {},
-    stop: () => jiraService.dispose(),
-  });
   await pluginRuntime.builtin.registerLifecycle("autorun", {
     start: () => autorunService.initialize(),
     stop: () => autorunService.stop(),
@@ -1939,8 +1923,8 @@ export async function createJAgentDeskDaemon(
       dependencies.botsTriggerSource ??
       new LocalBotTriggers({
         storage: botStorage,
-        jira: jiraService,
-        jiraEnabled: () => pluginRuntime.builtin.isEnabled("jira"),
+        sources: () =>
+          builtinServerRegistry.botTriggerSources(pluginRuntime.builtin, config.jagentdeskHome),
         logger,
       }),
     push: { send: (payload) => wsServer?.sendBotPush(payload) ?? Promise.resolve() },
@@ -2111,13 +2095,6 @@ export async function createJAgentDeskDaemon(
         agentManager,
         callerAgentId,
         callerLabels: runtime.callerAgentLabels,
-      }),
-    jiraAgentTools: (callerAgentId) =>
-      createJiraAgentTools({
-        service: jiraService,
-        callerAgentId,
-        requestPermission: (agentId, request) =>
-          agentManager.requestHostToolPermission(agentId, request),
       }),
     figmaAgentTools: (callerAgentId) =>
       createFigmaAgentTools({
@@ -2359,7 +2336,6 @@ export async function createJAgentDeskDaemon(
               stop: () => specModeService!.stop(),
             });
             server.setBotsService(botsService);
-            server.setJiraService(jiraService);
             server.setFigmaService(figmaService);
             server.setRemoteExecService(remoteExecService);
             server.setCustomProvidersService(customProviderService);
@@ -2708,7 +2684,6 @@ export async function createJAgentDeskDaemon(
     sideloadService.dispose();
     await botsSlack.dispose();
     await botsService.dispose();
-    jiraService.dispose();
     void figmaService.dispose();
     await stopBuiltinServices();
     await speechService.stop();
