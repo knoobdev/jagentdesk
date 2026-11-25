@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { writeFileAtomic } from "../atomic-file.js";
+import { writeFileAtomic } from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 
 // Local mirror of a job's remote output.log (spec 33.6): at most 20 MiB on disk, keeping the first
 // 10 MiB and the newest 10 MiB once the cap is exceeded (outputTruncated). The on-disk layout is

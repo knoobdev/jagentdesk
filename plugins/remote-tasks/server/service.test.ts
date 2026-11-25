@@ -7,7 +7,7 @@ import { Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import pino from "pino";
 import type { Client, ClientChannel } from "ssh2";
-import { SshConnectionError } from "../ssh/ssh-connection.js";
+import { SshConnectionError } from "../../../packages/server/src/server/ssh/ssh-connection.js";
 import { computeWorkspaceKey } from "./ids.js";
 import { createRemoteExecService } from "./service.js";
 import {

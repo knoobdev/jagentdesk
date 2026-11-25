@@ -94,9 +94,6 @@ import {
   type TerminalManager,
   type TerminalWorkspaceContributionChangedEvent,
 } from "../terminal/terminal-manager.js";
-import { type RemoteJob } from "@jagentdesk/protocol/remote-exec/rpc-schemas";
-import { handleRemoteExecMessage, remoteExecJobUpdated } from "./remote-exec/rpc.js";
-import { type RemoteExecService } from "./remote-exec/types.js";
 import { handleCustomProvidersMessage } from "./custom-providers/rpc.js";
 import { type CustomProviderService } from "./custom-providers/types.js";
 import { TerminalSessionController } from "../terminal/terminal-session-controller.js";
@@ -690,10 +687,6 @@ export interface SessionOptions {
 
   sshService?: SshService;
 
-  // Remote execution (spec 33 / ADR-0044): daemon-wide service; null while the engine is
-  // unavailable — its requests then get an error response instead of timing out silently.
-  remoteExecService?: RemoteExecService | null;
-
   // Custom API providers (spec 34 / ADR-0047): daemon-wide service; null while it is
   // unavailable — its requests then get an error response instead of timing out silently.
   customProvidersService?: CustomProviderService | null;
@@ -1273,8 +1266,6 @@ export class Session {
   private figmaSession: FigmaSession | null = null;
 
   private sshService!: SshService;
-
-  private remoteExecService: RemoteExecService | null = null;
 
   private customProvidersService: CustomProviderService | null = null;
 
@@ -1962,18 +1953,7 @@ export class Session {
 
   private initSshSession(options: SessionOptions): void {
     this.sshService = options.sshService ?? new SshService();
-    this.remoteExecService = options.remoteExecService ?? null;
     this.customProvidersService = options.customProvidersService ?? null;
-  }
-
-  // Remote execution (spec 33.8): the allowlist is the `remote_exec.` prefix, the handler map in
-  // remote-exec/rpc.ts is type-checked against the six request schemas. A request missing here
-  // would time out without a response.
-  private dispatchRemoteExecMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    if (!msg.type.startsWith("remote_exec.")) return undefined;
-    return handleRemoteExecMessage(this.remoteExecService, msg, (out) => this.emit(out)).then(
-      () => undefined,
-    );
   }
 
   // Custom API providers (spec 34.7): the allowlist is the `providers.custom.` prefix, the handler
@@ -2398,14 +2378,6 @@ export class Session {
 
   public emitServerMessage(message: SessionOutboundMessage): void {
     this.emit(message);
-  }
-
-  /**
-   * remote_exec.job_updated (spec 33.8): bootstrap pushes every job change here; the emit gate
-   * drops sessions whose scopes cannot read it (workspace.read on the permission table).
-   */
-  public emitRemoteExecJobUpdated(job: RemoteJob): void {
-    this.emit(remoteExecJobUpdated(job));
   }
 
   /**
@@ -3226,7 +3198,6 @@ export class Session {
       () => this.activityGraphSession?.dispatch(msg),
       () => this.dispatchClusterMessage(msg),
       () => this.dispatchDatabaseMessage(msg),
-      () => this.dispatchRemoteExecMessage(msg),
       () => this.dispatchCustomProvidersMessage(msg),
       () => this.dispatchArgoCdMessage(msg),
       () => this.dispatchSideloadMessage(msg),

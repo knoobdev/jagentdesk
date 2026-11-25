@@ -14,6 +14,24 @@ import {
   type BuiltinPluginState,
 } from "./state.js";
 
+/**
+ * One value per daemon, shared by a feature's background service, sessions and tool catalogs.
+ * Every services object of a daemon carries that daemon's config store, which keys the value.
+ */
+export interface BuiltinDaemonSlot<T> {
+  get(services: BuiltinCoreServices): T | undefined;
+  set(services: BuiltinCoreServices, value: T): void;
+}
+export function createDaemonSlot<T>(): BuiltinDaemonSlot<T> {
+  const values = new WeakMap<object, T>();
+  return {
+    get: (services) => values.get(services.config),
+    set: (services, value) => {
+      values.set(services.config, value);
+    },
+  };
+}
+
 /** The opening agent and the daemon's services, captured when its tool catalog is built. */
 export interface BuiltinToolContext {
   callerAgentId: string | null;
@@ -150,8 +168,13 @@ export class BuiltinServerRegistry {
       if (!state.isEnabled(id)) await lifecycleDeadline(id, "stop", () => service.idle?.());
       running.push(lifecycle);
     }
+    // Dependents load after what they require; stop them first.
     return async () => {
-      await Promise.all(running.map((lifecycle) => lifecycle.stop()));
+      for (const lifecycle of running.toReversed()) {
+        await Promise.resolve(lifecycle.stop()).catch((error: unknown) => {
+          services.logger.error({ err: error }, "Built-in shutdown failed");
+        });
+      }
     };
   }
   rpcNames(): string[] {

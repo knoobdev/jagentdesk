@@ -15,7 +15,9 @@ export type {
   JAgentDeskToolResult,
 } from "../../agent/tools/types.js";
 export type { BuiltinCoreServices, BuiltinPlatformServices } from "./services.js";
+export { createDaemonSlot } from "./host.js";
 export type {
+  BuiltinDaemonSlot,
   BuiltinServerHost,
   BuiltinBackgroundService,
   BuiltinToolContext,
@@ -52,3 +54,12 @@ export {
 } from "../../ssh/environment/remote-files.js";
 export { runRemoteCommand } from "../../ssh/environment/remote-exec.js";
 export { remoteDockerArgs } from "../../ssh/remote-docker/cockpit.js";
+
+// remote-tasks migration
+export {
+  ensureSecureDir,
+  writeSecureFileAtomic,
+  WriteQueue,
+} from "../../ssh/snippets/secure-file.js";
+export { writeFileAtomic } from "../../atomic-file.js";
+export { SshConnectionError } from "../../ssh/ssh-connection.js";

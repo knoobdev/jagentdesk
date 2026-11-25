@@ -1,6 +1,6 @@
 import path from "node:path";
 import type { Client } from "ssh2";
-import { SshConnectionError } from "../ssh/ssh-connection.js";
+import { SshConnectionError } from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 import { computeSourcesSnapshotId, computeWorkspaceKey, newJobId } from "./ids.js";
 import { isTerminalStatus, RemoteJobStore } from "./job-store.js";
 import { OutputMirror } from "./output-mirror.js";

@@ -4,6 +4,7 @@ import type { LucideIcon } from "lucide-react-native";
 import type { BuiltinPluginId } from "@jagentdesk/protocol/builtin-plugins";
 import type { PluginAttachmentSourceContribution, PluginTimelineItem } from "@jagentdesk/plugin";
 import type { DaemonServerInfo } from "@/stores/session-store";
+import type { ToolCallDetail } from "@jagentdesk/protocol/agent-types";
 import { builtinPluginEnabled } from "./registry";
 
 export interface BuiltinClientProps {
@@ -22,6 +23,20 @@ export interface BuiltinDestination {
 export interface BuiltinScreen extends BuiltinClientProps {
   sshDocker?: import("@/ssh/ui/ssh-docker-client").SshDockerTarget;
 }
+/** `inline`: the chat timeline row. `details`: the expanded tool call sheet/panel. */
+export type BuiltinToolCallPlacement = "inline" | "details";
+export interface BuiltinToolCallCardProps<Match> {
+  client: DaemonClient | null;
+  toolName: string;
+  match: Match;
+  placement: BuiltinToolCallPlacement;
+}
+/** Replaces a tool call's generic rendering with a feature card when `match` recognizes it. */
+export interface BuiltinToolCallRenderer<Match> {
+  placements: readonly BuiltinToolCallPlacement[];
+  match(toolName: string, detail: ToolCallDetail | undefined): Match | null;
+  Card: ComponentType<BuiltinToolCallCardProps<Match>>;
+}
 export interface BuiltinClientHost {
   readonly id: BuiltinPluginId;
   sidebarDestination(destination: BuiltinDestination): void;
@@ -38,6 +53,7 @@ export interface BuiltinClientHost {
     source: PluginAttachmentSourceContribution,
     search: BuiltinAttachmentSource["search"],
   ): void;
+  toolCallRenderer<Match>(id: string, renderer: BuiltinToolCallRenderer<Match>): void;
 }
 export interface BuiltinAttachmentSource {
   source: PluginAttachmentSourceContribution;
@@ -52,6 +68,7 @@ export interface BuiltinClientContributions {
   composer: Map<string, ComponentType<BuiltinClientProps>>;
   timeline: Map<string, ComponentType<BuiltinClientProps & { item: PluginTimelineItem }>>;
   attachments: BuiltinAttachmentSource[];
+  toolCalls: Map<string, BuiltinToolCallRenderer<unknown>>;
 }
 export class BuiltinClientRegistry {
   private readonly entries = new Map<BuiltinPluginId, BuiltinClientContributions>();
@@ -66,6 +83,7 @@ export class BuiltinClientRegistry {
       composer: new Map(),
       timeline: new Map(),
       attachments: [],
+      toolCalls: new Map(),
     };
     this.entries.set(id, entry);
     const add = <T>(map: Map<string, T>, key: string, value: T) => {
@@ -82,6 +100,8 @@ export class BuiltinClientRegistry {
       composerItem: (key, component) => add(entry.composer, key, component),
       timelineRenderer: (key, component) => add(entry.timeline, key, component),
       attachmentSource: (source, search) => entry.attachments.push({ source, search }),
+      toolCallRenderer: (key, renderer) =>
+        add(entry.toolCalls, key, renderer as BuiltinToolCallRenderer<unknown>),
     };
   }
   /** Every consumer selects against live per-host state, including retained screens. */

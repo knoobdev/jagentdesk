@@ -3,7 +3,7 @@ import {
   getJAgentDeskToolLeafName,
   normalizeToolName,
 } from "@jagentdesk/protocol/tool-name-normalization";
-import { unwrapToolResultPayload } from "./tool-result-payload";
+import { unwrapToolResultPayload } from "../../../../packages/app/src/plugins/builtin/host-api";
 
 const SSH_RUN_TOOL_LEAF_NAME = "ssh_run";
 

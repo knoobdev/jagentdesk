@@ -53,7 +53,14 @@ as `BuiltinPlatformServices` on the same services object: the SSH service (pool,
 remote Docker/database/cluster/forwarding modules), agent access (labels, cwd and
 `requestHostToolPermission`) and the hook that closes SSH dependents. Bootstrap supplies the
 daemon instances; a session receives the same instances. Bootstrap starts built-in background
-services after these libraries exist.
+services after these libraries exist and stops them, dependents first, before it disposes the
+libraries. `home`, `daemonId` and `broadcastToTrustedSessions` (each session's emit gate still
+applies) are on the same object.
+
+A feature that owns a daemon-wide service (a job engine, a cache) creates it in its background
+service and shares it with its sessions and tool installers through `createDaemonSlot()`. A slot
+holds one value per daemon, keyed by the daemon's config store, so in-process test daemons stay
+separate. Do not keep daemon state in plain module variables.
 
 `register(host)` declares contributions once:
 
@@ -106,7 +113,9 @@ on web, iOS, and Android.
 
 `register(app)` can contribute a sidebar destination (`Tools` or `main`), a left drill-in panel,
 a route screen, settings sections, mobile drawer entries, composer items, timeline renderers,
-and attachment sources. Use the same destination metadata for desktop and mobile. Screens
+tool call cards and attachment sources. A tool call card (`toolCallRenderer`) replaces the
+generic rendering of a matching tool call in the chat row (`inline`) or the expanded details
+(`details`); the first enabled feature whose `match` returns non-null renders it. Use the same destination metadata for desktop and mobile. Screens
 receive the selected `serverId`; never choose the first host inside a migrated screen.
 Destinations render in a group at Docker's position unless their id is in
 `SLOTTED_BUILTIN_DESTINATIONS` (`surfaces.tsx`); the navigation lists place those at their

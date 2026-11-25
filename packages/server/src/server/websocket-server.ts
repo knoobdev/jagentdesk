@@ -46,7 +46,6 @@ import { type DatabaseRegistry } from "./database/database-registry.js";
 import { SshService } from "./ssh/ssh-service.js";
 import { type SideloadService } from "./sideload/sideload-service.js";
 import { type JiraService } from "./jira/service.js";
-import { type RemoteExecService } from "./remote-exec/types.js";
 import { type CustomProviderService } from "./custom-providers/types.js";
 import { type FigmaService } from "./figma/service.js";
 import { type ScheduleService } from "./schedule/service.js";
@@ -774,7 +773,6 @@ export class VoiceAssistantWebSocketServer {
   private figmaService: FigmaService | null = null;
 
   // Remote execution (spec 33 / ADR-0044), injected post-construction like Jira.
-  private remoteExecService: RemoteExecService | null = null;
 
   private customProvidersService: CustomProviderService | null = null;
 
@@ -2303,11 +2301,6 @@ export class VoiceAssistantWebSocketServer {
     this.figmaService = service;
   }
 
-  /** Remote execution (spec 33): injected post-construction, like Jira/Figma. */
-  public setRemoteExecService(service: RemoteExecService | null): void {
-    this.remoteExecService = service;
-  }
-
   /** Custom API providers (spec 34): injected post-construction, like Jira/Figma. */
   public setCustomProvidersService(service: CustomProviderService | null): void {
     this.customProvidersService = service;
@@ -2375,7 +2368,6 @@ export class VoiceAssistantWebSocketServer {
       jiraService: this.jiraService,
       botsService: this.botsService,
       figmaService: this.figmaService,
-      remoteExecService: this.remoteExecService,
       customProvidersService: this.customProvidersService,
       workspaceBaseBranch: this.workspaceBaseBranch,
       scheduleService: this.scheduleService,

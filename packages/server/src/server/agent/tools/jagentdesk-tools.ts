@@ -146,7 +146,6 @@ import {
   type OrchestrationRuntime,
 } from "../../orchestration/runtime.js";
 import { type ClusterRegistry } from "../../cluster/cluster-registry.js";
-import { type RemoteExecAgentTool } from "../../remote-exec/agent-tools.js";
 import { type CustomProviderAgentTool } from "../../custom-providers/agent-tools.js";
 import { type ArgoCdAgentTool } from "../../argocd/agent-tools.js";
 import { type SideloadAgentTool } from "../../sideload/agent-tools.js";
@@ -234,8 +233,6 @@ export interface JAgentDeskToolHostDependencies {
   databaseRegistry?: DatabaseRegistry;
   /** Daemon services handed to built-in tool installers (the ssh-servers tools, for example). */
   builtinServices?: BuiltinCoreServices;
-  // Remote execution (spec 33.7): remote_* tools; [] when no SSH server has remote tasks enabled.
-  remoteExecAgentTools?: (callerAgentId: string | null) => RemoteExecAgentTool[];
   // Custom API providers (spec 34.7): provider_* tools; list/test auto-run, mutations raise a card.
   customProviderAgentTools?: (callerAgentId: string | null) => CustomProviderAgentTool[];
   // Argo CD (spec 30.4): argocd_* tools bound per caller agent (default instance from its label).
@@ -4278,15 +4275,6 @@ function createToolCatalog(
     (name) => builtinNames.add(name),
     { callerAgentId: callerAgentId ?? null, services: options.builtinServices },
   );
-  if (options.remoteExecAgentTools) {
-    for (const tool of options.remoteExecAgentTools(callerAgentId ?? null)) {
-      registerTool(
-        tool.name,
-        { title: tool.title, description: tool.description, inputSchema: tool.inputSchema },
-        tool.handler,
-      );
-    }
-  }
   if (options.customProviderAgentTools) {
     for (const tool of options.customProviderAgentTools(callerAgentId ?? null)) {
       registerTool(

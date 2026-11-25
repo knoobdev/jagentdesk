@@ -4,7 +4,7 @@ import {
   getJAgentDeskToolLeafName,
   normalizeToolName,
 } from "@jagentdesk/protocol/tool-name-normalization";
-import { unwrapToolResultPayload } from "./tool-result-payload";
+import { unwrapToolResultPayload } from "../../../packages/app/src/plugins/builtin/host-api";
 
 const REMOTE_JOB_TOOL_LEAF_NAMES: ReadonlySet<string> = new Set(["remote_run", "remote_job_wait"]);
 

@@ -243,10 +243,6 @@ import { createFigmaService } from "./figma/create.js";
 import { atlassianEndpointsFromEnv } from "./jira/credentials.js";
 import { createJiraAgentTools } from "./jira/agent-tools.js";
 import { createFigmaAgentTools } from "./figma/agent-tools.js";
-import { createRemoteExecAgentTools } from "./remote-exec/agent-tools.js";
-import { createRemoteExecService } from "./remote-exec/service.js";
-import { createRemoteExecDeps } from "./remote-exec/wiring.js";
-import type { RemoteExecService } from "./remote-exec/types.js";
 import { createCustomProviderAgentTools } from "./custom-providers/agent-tools.js";
 import { SshModules } from "./ssh/ssh-modules.js";
 import { SshModules as SshServerModules } from "./ssh/modules.js";
@@ -1610,33 +1606,6 @@ export async function createJAgentDeskDaemon(
   await sshModules.initialize();
   sshService.sessionModules = sshModules;
   logger.info("SSH service initialized");
-  // Remote execution (spec 33 / ADR-0044): one daemon-wide service over the SSH server store
-  // and client pool. Job updates fan out to every trusted session (same shape as the script
-  // status emitter); the emit gate drops sessions whose scopes cannot read them.
-  // TEMP(remote-exec-engine): construction and start are guarded so an engine that fails to
-  // come up only disables remote-exec instead of failing boot.
-  let remoteExecService: RemoteExecService | null = null;
-  let unsubscribeRemoteExecJobs: (() => void) | null = null;
-  try {
-    const remoteExecCandidate = createRemoteExecService(
-      createRemoteExecDeps({
-        sshService,
-        homeDir: config.jagentdeskHome,
-        daemonId: serverId,
-        logger: logger.child({ module: "remote-exec" }),
-      }),
-    );
-    remoteExecService = remoteExecCandidate;
-    unsubscribeRemoteExecJobs = remoteExecCandidate.onJobUpdated((job) => {
-      for (const session of wsServer?.listTrustedSessions() ?? []) {
-        session.emitRemoteExecJobUpdated(job);
-      }
-    });
-    logger.info("Remote-exec service initialized");
-  } catch (error) {
-    logger.warn({ err: error }, "Remote-exec service unavailable");
-    remoteExecService = null;
-  }
   // Sideload (spec 26 / ADR-0032): accounts, signing, installs and the hourly refresh job.
   // Secrets stay in <home>/sideload's own secret store; prompts, progress and notices fan out
   // to every client (wsServer is late-bound). The two env knobs shorten the refresh cycle for
@@ -1838,20 +1807,18 @@ export async function createJAgentDeskDaemon(
           agentManager.requestHostToolPermission(agentId, request),
       },
       beforeSshStop: () => customProviderService.closeAll(),
+      daemonId: serverId,
+      broadcastToTrustedSessions: (message) => {
+        for (const session of wsServer?.listTrustedSessions() ?? []) {
+          session.emitServerMessage(message);
+        }
+      },
     },
   );
   const stopBuiltinServices = await builtinServerRegistry.start(
     pluginRuntime.builtin,
     builtinServices,
   );
-  await pluginRuntime.builtin.registerLifecycle("remote-tasks", {
-    start: async () => {
-      await remoteExecService?.start();
-    },
-    stop: async () => {
-      await remoteExecService?.stop();
-    },
-  });
   await pluginRuntime.builtin.registerLifecycle("custom-providers", {
     start: () => {},
     stop: () => customProviderService.closeAll(),
@@ -2056,21 +2023,6 @@ export async function createJAgentDeskDaemon(
     clusterRegistry,
     databaseRegistry,
     builtinServices,
-    remoteExecAgentTools: (callerAgentId) =>
-      remoteExecService
-        ? createRemoteExecAgentTools({
-            service: remoteExecService,
-            // An advertised tool must work, so the whole set is only offered while at least
-            // one SSH server opts into remote tasks (spec 33.7).
-            hasEnabledTarget: () =>
-              sshService.storage.listServers().some((server) => server.remoteExec?.enabled),
-            callerCwd: () =>
-              callerAgentId ? (agentManager.getAgent(callerAgentId)?.cwd ?? null) : null,
-            callerAgentId,
-            requestPermission: (agentId, request) =>
-              agentManager.requestHostToolPermission(agentId, request),
-          })
-        : [],
     customProviderAgentTools: (callerAgentId) =>
       createCustomProviderAgentTools({
         service: customProviderService,
@@ -2352,7 +2304,6 @@ export async function createJAgentDeskDaemon(
             server.setBotsService(botsService);
             server.setJiraService(jiraService);
             server.setFigmaService(figmaService);
-            server.setRemoteExecService(remoteExecService);
             server.setCustomProvidersService(customProviderService);
           };
           const logAndResolve = async () => {
@@ -2687,12 +2638,9 @@ export async function createJAgentDeskDaemon(
     unsubscribeBuiltinAgentSnapshots();
     stopDeviceGrantWatch();
     physicalDevices.dispose();
+    // Built-in features stop before the shared libraries they consume (remote tasks before SSH).
+    await stopBuiltinServices();
     await sshModules.dispose().catch(() => undefined);
-    if (unsubscribeRemoteExecJobs) {
-      unsubscribeRemoteExecJobs();
-      unsubscribeRemoteExecJobs = null;
-    }
-    await remoteExecService?.stop().catch(() => undefined);
     await sshServerModules.dispose().catch(() => undefined);
     sshService.dispose();
     argocdService.dispose();
@@ -2701,7 +2649,6 @@ export async function createJAgentDeskDaemon(
     await botsService.dispose();
     jiraService.dispose();
     void figmaService.dispose();
-    await stopBuiltinServices();
     await speechService.stop();
     await scheduleService.stop().catch(() => undefined);
     await autorunService?.stop().catch(() => undefined);

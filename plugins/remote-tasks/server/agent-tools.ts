@@ -3,13 +3,13 @@
 // permission card (04.21). Availability is evaluated at listing time and per call: the tools
 // exist only while at least one SSH server has remote tasks enabled.
 import { z } from "zod";
-import type { AgentPermissionResponse } from "../agent/agent-sdk-types.js";
+import type { AgentPermissionResponse } from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 import type {
   JAgentDeskToolConfig,
   JAgentDeskToolDefinition,
   JAgentDeskToolExecutionContext,
   JAgentDeskToolResult,
-} from "../agent/tools/types.js";
+} from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 import {
   REMOTE_OUTPUT_READ_MAX_BYTES,
   REMOTE_RUN_DEFAULT_TIMEOUT_MS,

@@ -1,15 +1,15 @@
-// session-routing.test.ts — proves the Session-level wiring of spec 33.8: the six
-// remote_exec.* requests dispatch to the injected RemoteExecService and every request gets a
-// response (also when the engine is unavailable, i.e. service null), and the
+// session-routing.test.ts — proves the Session-level wiring of spec 33.8 through the built-in
+// host: the six remote_exec.* requests dispatch to the daemon's RemoteExecService and every
+// request gets a response (also when the engine is unavailable, i.e. service null), and the
 // remote_exec.job_updated push only reaches sessions whose scopes allow it.
 import pino from "pino";
 import { describe, expect, test, vi } from "vitest";
 
-import { Session, type SessionOptions } from "../session.js";
-import type { SessionOutboundMessage } from "../messages.js";
-import type { WorkspaceAutoName } from "../workspace-auto-name.js";
-import type { ProviderUsageService } from "../../services/quota-fetcher/service.js";
-import { createStub } from "../test-utils/class-mocks.js";
+import { Session, type SessionOptions } from "../../../packages/server/src/server/session.js";
+import type { SessionOutboundMessage } from "../../../packages/server/src/server/messages.js";
+import type { WorkspaceAutoName } from "../../../packages/server/src/server/workspace-auto-name.js";
+import type { ProviderUsageService } from "../../../packages/server/src/services/quota-fetcher/service.js";
+import { createStub } from "../../../packages/server/src/server/test-utils/class-mocks.js";
 import {
   asAgentManager,
   asAgentStorage,
@@ -22,7 +22,10 @@ import {
   asScheduleService,
   asWorkspaceGitService,
   createProviderSnapshotManagerStub,
-} from "../test-utils/session-stubs.js";
+} from "../../../packages/server/src/server/test-utils/session-stubs.js";
+import type { BuiltinCoreServices } from "../../../packages/server/src/server/plugins/builtin/host-api.js";
+import { remoteExecEngines } from "./index.js";
+import { remoteExecJobUpdated } from "./rpc.js";
 import { RemoteExecError, type RemoteExecService, type RemoteJob } from "./types.js";
 
 const job: RemoteJob = {
@@ -106,6 +109,15 @@ function createSessionForTest(options: {
   remoteExecService?: RemoteExecService | null;
 }): Session {
   const logger = pino({ level: "silent" });
+  const daemonConfigStore = asDaemonConfigStore({
+    get: vi.fn(() => ({ mcp: { injectIntoAgents: false }, providers: {} })),
+    onChange: vi.fn(() => () => {}),
+  });
+  // The daemon's background service publishes its engine for every session of that daemon.
+  remoteExecEngines.set(
+    { config: daemonConfigStore } as unknown as BuiltinCoreServices,
+    options.remoteExecService ?? null,
+  );
   return new Session({
     clientId: "test-client",
     scopes: options.scopes ?? ["*"],
@@ -147,16 +159,12 @@ function createSessionForTest(options: {
     checkoutDiffManager: asCheckoutDiffManager({ scheduleRefreshForCwd: vi.fn() }),
     workspaceGitService: asWorkspaceGitService({}),
     workspaceAutoName: createStub<WorkspaceAutoName>({}),
-    daemonConfigStore: asDaemonConfigStore({
-      get: vi.fn(() => ({ mcp: { injectIntoAgents: false }, providers: {} })),
-      onChange: vi.fn(() => () => {}),
-    }),
+    daemonConfigStore,
     stt: null,
     tts: null,
     terminalManager: null,
     providerSnapshotManager: createProviderSnapshotManagerStub().manager,
     providerUsageService: createStub<ProviderUsageService>({}),
-    remoteExecService: options.remoteExecService,
   });
 }
 
@@ -252,7 +260,7 @@ describe("remote_exec session routing", () => {
     const messages: SessionOutboundMessage[] = [];
     const session = createSessionForTest({ messages, scopes: ["*"] });
 
-    session.emitRemoteExecJobUpdated(job);
+    session.emitServerMessage(remoteExecJobUpdated(job));
 
     expect(messages).toEqual([{ type: "remote_exec.job_updated", payload: { job } }]);
   });
@@ -264,7 +272,7 @@ describe("remote_exec session routing", () => {
       scopes: ["remote_exec.list_targets.request"],
     });
 
-    session.emitRemoteExecJobUpdated(job);
+    session.emitServerMessage(remoteExecJobUpdated(job));
 
     expect(messages).toEqual([]);
   });

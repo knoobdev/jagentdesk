@@ -10,6 +10,7 @@ import { DockerStreams } from "../../docker/docker-streams.js";
 import { routeDockerMessage, disposeRemoteDocker } from "../../ssh/remote-docker/route.js";
 import type { AgentManager } from "../../agent/agent-manager.js";
 import type { SshService } from "../../ssh/ssh-service.js";
+import type { SessionOutboundMessage } from "../../messages.js";
 
 /** Agent facts a feature may read for its callers; permission cards stay in core. */
 export interface BuiltinAgentAccess {
@@ -27,6 +28,10 @@ export interface BuiltinPlatformServices {
   agents?: BuiltinAgentAccess;
   /** Closes connections that ride on the SSH pool (custom provider forwarders) before it stops. */
   beforeSshStop?: () => void | Promise<void>;
+  /** This daemon's server id. */
+  daemonId?: string;
+  /** Pushes to every trusted session; each session's emit gate still applies its scopes. */
+  broadcastToTrustedSessions?: (message: SessionOutboundMessage) => void;
 }
 
 const secretStores = new WeakMap<DaemonConfigStore, FileSecretStore>();
@@ -44,6 +49,8 @@ export function createBuiltinCoreServices(
     secretStores.set(config, secrets);
   }
   return {
+    /** JAGENTDESK_HOME. Existing feature stores keep their historical directories under it. */
+    home,
     logger,
     config,
     secrets,

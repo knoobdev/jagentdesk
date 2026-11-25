@@ -11,7 +11,13 @@ export { TerminalPane } from "@/components/terminal-pane";
 export { withSshDocker, type SshDockerTarget } from "@/ssh/ui/ssh-docker-client";
 export type { Theme } from "@/styles/theme";
 export { GumloopRow } from "@/components/gumloop-shell/row";
-export type { BuiltinClientHost, BuiltinClientProps, BuiltinDestination } from "./host";
+export type {
+  BuiltinClientHost,
+  BuiltinClientProps,
+  BuiltinDestination,
+  BuiltinToolCallCardProps,
+  BuiltinToolCallRenderer,
+} from "./host";
 
 export * as Clipboard from "expo-clipboard";
 export { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -69,3 +75,20 @@ export {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 export type { TerminalPaneAppearance, TerminalPaneExtraKey } from "@/components/terminal-pane";
+
+// remote-tasks migration
+export { CODE_SURFACE_DATASET } from "@/styles/code-surface";
+export { nextPinnedState, scrollActionForAppend } from "@/remote-exec/output-scroll";
+export {
+  RemoteJobCommand,
+  RemoteJobDot,
+  RemoteJobOutputBox,
+  remoteJobDotVariant,
+  styles as remoteJobCardStyles,
+} from "@/remote-exec/job-card-ui";
+export type {
+  OutputScrollEvent,
+  RemoteJobDotVariant,
+  ScrollToEndableView,
+} from "@/remote-exec/job-card-ui";
+export { unwrapToolResultPayload } from "@/remote-exec/tool-result-payload";

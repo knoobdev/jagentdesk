@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { ensureSecureDir, writeSecureFileAtomic } from "../ssh/snippets/secure-file.js";
+import {
+  ensureSecureDir,
+  writeSecureFileAtomic,
+} from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 
 // Content-hash cache for snapshots (spec 33.4): (path, size, mtimeMs, ino) -> sha256, persisted in
 // $JAGENTDESK_HOME/remote-exec/hash-cache/<workspaceKey>.json so an unchanged repo of ~5k files

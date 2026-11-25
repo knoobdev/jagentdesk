@@ -3,7 +3,7 @@
 // state and the detected environment (spec 25.10). No new state is invented here.
 import { ServerEnvironmentSchema } from "@jagentdesk/protocol/ssh/environment-schemas";
 import type { Logger } from "pino";
-import type { SshService } from "../ssh/ssh-service.js";
+import type { SshService } from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 import type { RemoteExecDeps, RemoteExecServerConfig } from "./types.js";
 
 function toServerConfig(server: {

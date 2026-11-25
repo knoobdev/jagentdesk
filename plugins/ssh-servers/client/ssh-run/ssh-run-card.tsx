@@ -5,15 +5,15 @@ import { useTranslation } from "react-i18next";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { SshRunToolResult } from "./ssh-run-detection";
 import { useSshServerLabel } from "./use-ssh-server-label";
-import { nextPinnedState } from "./output-scroll";
 import {
+  nextPinnedState,
   RemoteJobCommand,
   RemoteJobDot,
   RemoteJobOutputBox,
-  styles as remoteJobCardStyles,
+  remoteJobCardStyles,
   type OutputScrollEvent,
   type ScrollToEndableView,
-} from "./remote-job-card";
+} from "../../../../packages/app/src/plugins/builtin/host-api";
 
 /**
  * Result card for an `ssh_run` tool call (spec 33.9): server label, command, status dot,

@@ -1,6 +1,10 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { ensureSecureDir, WriteQueue, writeSecureFileAtomic } from "../ssh/snippets/secure-file.js";
+import {
+  ensureSecureDir,
+  WriteQueue,
+  writeSecureFileAtomic,
+} from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 import type { RemoteJob } from "./types.js";
 
 // Job records live in $JAGENTDESK_HOME/remote-exec/jobs.json (spec 33.6): atomic writes, 0600 file

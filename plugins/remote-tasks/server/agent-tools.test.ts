@@ -5,8 +5,8 @@
 // cwd is the workspacePath, and timeoutMs/waitMs are clamped to the contract limits.
 import { describe, expect, it, vi } from "vitest";
 
-import type { AgentPermissionResponse } from "../agent/agent-sdk-types.js";
-import type { JAgentDeskToolResult } from "../agent/tools/types.js";
+import type { AgentPermissionResponse } from "../../../packages/server/src/server/agent/agent-sdk-types.js";
+import type { JAgentDeskToolResult } from "../../../packages/server/src/server/agent/tools/types.js";
 import {
   createRemoteExecAgentTools,
   type RemoteExecAgentToolDependencies,

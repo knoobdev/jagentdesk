@@ -1,4 +1,4 @@
-import { useBuiltinPluginEnabled } from "@/plugins/builtin/hooks";
+import { useBuiltinToolCallCard } from "@/plugins/builtin/tool-call-cards";
 import React, { useMemo, type ReactNode } from "react";
 import {
   View,
@@ -25,8 +25,6 @@ import { DiffViewer } from "./diff-viewer";
 import { getCodeInsets } from "./code-insets";
 import { isWeb } from "@/constants/platform";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
-import { readRemoteJobToolResult } from "@/remote-exec/remote-job-detection";
-import { RemoteJobCard } from "@/remote-exec/remote-job-card";
 
 const ScrollView = isWeb ? RNScrollView : GHScrollView;
 
@@ -591,27 +589,14 @@ function ToolCallDetailsContentInner({
   const ds = useDetailStyles(detail, fillAvailableHeight);
   const diffLines = useDiffLines(detail);
 
-  // Remote job calls (spec 33.9) render a live card instead of the generic result sections.
-  const remoteJob = useMemo(
-    () => readRemoteJobToolResult(toolName ?? "", detail),
-    [toolName, detail],
-  );
-  const remoteTasksEnabled = useBuiltinPluginEnabled(
-    client?.getLastServerInfoMessage()?.serverId,
-    "remote-tasks",
-  );
-  if (remoteJob && remoteTasksEnabled) {
-    return (
-      <RemoteJobCard
-        client={client ?? null}
-        initialJob={remoteJob.job}
-        initialOutput={remoteJob.output}
-        initialOutputOffset={remoteJob.outputOffset}
-        initialTruncated={remoteJob.outputTruncatedHead}
-        testID="remote-job-card"
-      />
-    );
-  }
+  // Feature cards (remote jobs, spec 33.9) replace the generic result sections.
+  const builtinCard = useBuiltinToolCallCard({
+    client,
+    toolName: toolName ?? "",
+    detail,
+    placement: "details",
+  });
+  if (builtinCard) return builtinCard;
 
   const sections: ReactNode[] = buildDetailSections(detail, diffLines, ds, t);
 
