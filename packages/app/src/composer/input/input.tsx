@@ -1289,12 +1289,12 @@ function resolvePresentationSendDisabled(input: {
 }
 
 function shouldShowFullscreenControl(
-  compact: boolean,
+  enabled: boolean,
   readOnly: boolean,
   overlayVisible: boolean,
   renderedLines: number,
 ) {
-  return compact && !readOnly && !overlayVisible && renderedLines > 2;
+  return enabled && !readOnly && !overlayVisible && renderedLines > 2;
 }
 
 export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
@@ -2399,7 +2399,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
           inputPointerEvents={surfacePresentation.input.pointerEvents}
           attachmentSlot={attachmentSlot}
           showFullscreenButton={shouldShowFullscreenControl(
-            isCompact,
+            isCompact || isGumloop,
             readOnly,
             showOverlay,
             renderedLines,
