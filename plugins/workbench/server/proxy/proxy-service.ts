@@ -1,5 +1,3 @@
-// Moved verbatim from core, where lint ran only on edited lines; these rules predate the move.
-/* oxlint-disable no-map-spread, no-shadow */
 import { randomUUID } from "node:crypto";
 import { randomUUID as uuid } from "node:crypto";
 import type {

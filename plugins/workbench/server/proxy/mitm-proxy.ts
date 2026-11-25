@@ -1,5 +1,3 @@
-// Moved verbatim from core, where lint ran only on edited lines; these rules predate the move.
-/* oxlint-disable max-nested-callbacks, promise/always-return */
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";

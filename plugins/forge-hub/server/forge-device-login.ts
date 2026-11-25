@@ -1,5 +1,3 @@
-// Moved verbatim from core, where lint ran only on edited lines; these rules predate the move.
-/* oxlint-disable promise/no-multiple-resolved, unicorn/no-useless-spread */
 import {
   spawnPty,
   type Pty,
@@ -203,7 +201,7 @@ export class ForgeDeviceLogin {
 
   /** Cancels every in-flight login (plugin turned off or client gone). */
   cancelAll(): void {
-    for (const requestId of [...this.ptys.keys()]) this.cancel(requestId);
+    for (const requestId of this.ptys.keys()) this.cancel(requestId);
   }
 
   /** Spawn the CLI in a pty, parse its output, and resolve the terminal result. */

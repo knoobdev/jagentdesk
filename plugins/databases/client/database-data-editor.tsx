@@ -1,7 +1,4 @@
 import { useSafeAreaInsets, Clipboard } from "../../../packages/app/src/plugins/builtin/host-api";
-// Moved verbatim from packages/app/src/components (built-in plugin phase 2). These violations
-// predate lint enforcement on the file and exist at plat/int10; the burn-down is separate work.
-/* oxlint-disable no-restricted-imports, react-perf/jsx-no-new-object-as-prop, react-perf/jsx-no-new-function-as-prop, react-perf/jsx-no-jsx-as-prop */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import {

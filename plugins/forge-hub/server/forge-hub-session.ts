@@ -1,5 +1,3 @@
-// Moved verbatim from core, where lint ran only on edited lines; these rules predate the move.
-/* oxlint-disable no-nested-ternary, no-shadow, no-unneeded-ternary, promise/no-multiple-resolved, typescript/consistent-type-definitions, unicorn/no-useless-fallback-in-spread */
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
@@ -178,13 +176,13 @@ function encodePath(p: string): string {
 }
 
 /** Shape returned by every getFile*() (before the requestId is attached). */
-type ForgeFileResult = {
+interface ForgeFileResult {
   path: string;
   content: string | null;
   isBinary: boolean;
   size: number | null;
   truncated: boolean;
-};
+}
 
 /**
  * Turn raw file bytes into a ForgeFileResult: over the size cap → truncated; a NUL
@@ -1971,7 +1969,7 @@ export class ForgeHubService {
         repo,
         "--disable-auto",
       ]);
-      return ok ? false : true; // on failure the prior (enabled) state is unchanged
+      return !ok; // on failure the prior (enabled) state is unchanged
     }
     const flag =
       input.method === "squash" ? "--squash" : input.method === "rebase" ? "--rebase" : "--merge";
@@ -2567,7 +2565,7 @@ export class ForgeHubService {
         headers: {
           Authorization: `Bearer ${token}`,
           Accept: "application/json",
-          ...(init?.headers ?? {}),
+          ...init?.headers,
         },
       });
       if (!res.ok) return null;

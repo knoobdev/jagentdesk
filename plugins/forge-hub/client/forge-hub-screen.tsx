@@ -1,5 +1,3 @@
-// Moved verbatim from core, where lint ran only on edited lines; these rules predate the move.
-/* oxlint-disable complexity, max-nested-callbacks, no-nested-ternary, no-restricted-imports, no-shadow, no-unused-vars, promise/always-return, react-perf/jsx-no-new-function-as-prop, react-perf/jsx-no-new-object-as-prop, react/jsx-max-depth, react/no-array-index-key, react/no-unescaped-entities, typescript/consistent-type-definitions, unicorn/no-useless-spread */
 import {
   PageHeader,
   useIsGumloopTheme,
@@ -50,7 +48,6 @@ import {
   Text,
   TextInput,
   View,
-  type TextStyle,
 } from "react-native";
 import {
   ArrowLeft,
@@ -218,7 +215,7 @@ function cacheDelete(key: string): void {
 }
 
 function cacheDeletePrefix(prefix: string): void {
-  for (const key of [...forgeCache.keys()]) {
+  for (const key of forgeCache.keys()) {
     if (key.startsWith(prefix)) forgeCache.delete(key);
   }
 }
@@ -949,12 +946,12 @@ function clampPercent(value: number): number {
 // In-app device-flow sign-in (§19.3.7). Progress arrives as unsolicited events
 // over `client.forgeConnectionLogin(..., onProgress)`; the local UI mirrors the
 // same login state the CliInstallSection probe already owns.
-type LoginProgress = {
+interface LoginProgress {
   phase: ForgeConnectionLoginProgress["phase"];
   userCode: string | null;
   verificationUri: string | null;
   line: string | null;
-};
+}
 
 // Map the daemon's short error codes to readable copy; fall back to the raw
 // error/pty line so we never swallow an unexpected failure.
@@ -4178,13 +4175,13 @@ function CommitsView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }
 }
 
 // A cached forge.file.get payload (subset the viewer renders).
-type CodeFile = {
+interface CodeFile {
   path: string;
   content: string | null;
   isBinary: boolean;
   size?: number | null;
   truncated: boolean;
-};
+}
 
 /** Dir of a repo-relative path ("" for a top-level file). */
 function pathDir(path: string): string {
@@ -4697,7 +4694,6 @@ function PipelineRunRow({
   run: ForgePipelineRun;
   onOpen: (run: ForgePipelineRun) => void;
 }) {
-  const { theme } = useUnistyles();
   const statusColor = usePipelineStatusColor();
   const handlePress = useCallback(() => onOpen(run), [run, onOpen]);
   return (
@@ -7598,13 +7594,6 @@ export function ForgeHubScreen({ serverId }: { serverId: string }) {
   const handleSelectSection = useCallback((next: Section) => {
     setSection(next);
     setCompactDetail(true);
-  }, []);
-  // The sidebar header doubles as "home": clear the repo and show the picker.
-  const goToRepoList = useCallback(() => {
-    setSelectedRepo(null);
-    setSelectedCr(null);
-    setRepoQuery("");
-    setSection("overview");
   }, []);
   const goToConnections = useCallback(() => {
     setSection("connections");

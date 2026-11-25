@@ -1,5 +1,3 @@
-// Moved verbatim from core, where lint ran only on edited lines; these rules predate the move.
-/* oxlint-disable max-nested-callbacks */
 import net from "node:net";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";

@@ -1,5 +1,3 @@
-// Moved verbatim from core, where lint ran only on edited lines; these rules predate the move.
-/* oxlint-disable no-nested-ternary */
 import { z } from "zod";
 import type {
   BuiltinAgentToolContext,
