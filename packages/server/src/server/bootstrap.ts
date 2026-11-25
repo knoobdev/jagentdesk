@@ -22,7 +22,6 @@ import { LocalBotTriggers } from "./bots/triggers.js";
 import { createBotAgentTools } from "./bots/agent-tools.js";
 import { createRestartRecovery } from "./agent/restart-recovery/index.js";
 import { PROVIDER_BACKGROUND_REFRESH_INTERVAL_MS } from "./agent/provider-refresh-schedule.js";
-import { getSharedProxyService } from "./proxy/proxy-service.js";
 import { resolveJAgentDeskToolPolicy } from "./agent/jagentdesk-tool-policy.js";
 import { BuiltinPluginLoader } from "./plugins/builtin/index.js";
 import { withTimeout } from "../utils/promise-timeout.js";
@@ -1821,10 +1820,6 @@ export async function createJAgentDeskDaemon(
   await pluginRuntime.builtin.registerLifecycle("argocd", {
     start: () => argocdService.initialize(),
     stop: () => argocdService.dispose(),
-  });
-  await pluginRuntime.builtin.registerLifecycle("workbench", {
-    start: () => {},
-    stop: () => getSharedProxyService().disposeAll(),
   });
   await pluginRuntime.builtin.registerLifecycle("figma", {
     start: () => figmaService.start(),

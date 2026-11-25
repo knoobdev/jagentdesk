@@ -13,7 +13,6 @@ import {
   Figma,
   History,
   Home,
-  Radar,
   Server,
   Share2,
   Ship,
@@ -46,7 +45,6 @@ import {
   buildServersRoute,
   buildSessionsRoute,
   buildSharedSessionsRoute,
-  buildProxyRoute,
   buildSkillsRoute,
 } from "@/utils/host-routes";
 
@@ -60,7 +58,6 @@ export interface AppNavTargets {
   skillsRoute: Href | null;
   insightsRoute: Href | null;
   marketplaceRoute: Href | null;
-  proxyRoute: Href | null;
   /** Spec 30.3: the daemon ships Argo CD; null hides the entry. */
   argoCdRoute: Href | null;
   /** Spec 32: Figma section, when the daemon advertises `figma`. */
@@ -84,7 +81,6 @@ export function useAppNavTargets(): AppNavTargets {
   const databasesEnabled = useBuiltinPluginEnabled(firstServerId, "databases");
   const skillsEnabled = useBuiltinPluginEnabled(firstServerId, "skills");
   const insightsEnabled = useBuiltinPluginEnabled(firstServerId, "insights");
-  const workbenchEnabled = useBuiltinPluginEnabled(firstServerId, "workbench");
   const sharingEnabled = useBuiltinPluginEnabled(firstServerId, "session-share");
   const supportsFigma = useSessionStore(
     (state) => state.sessions[firstServerId]?.serverInfo?.features?.figma === true,
@@ -126,7 +122,6 @@ export function useAppNavTargets(): AppNavTargets {
       skillsRoute: skillsEnabled ? perHost(buildSkillsRoute) : null,
       insightsRoute: insightsEnabled ? perHost(buildInsightsRoute) : null,
       marketplaceRoute: perHost(buildMarketplaceRoute),
-      proxyRoute: workbenchEnabled ? perHost(buildProxyRoute) : null,
       argoCdRoute: supportsArgoCd ? perHost(buildArgoCdRoute) : null,
       supportsSshServers,
       figmaRoute: supportsFigma ? perHost(buildFigmaRoute) : null,
@@ -137,7 +132,6 @@ export function useAppNavTargets(): AppNavTargets {
     databasesEnabled,
     skillsEnabled,
     insightsEnabled,
-    workbenchEnabled,
     sharingEnabled,
     supportsFigma,
     firstServerId,
@@ -224,7 +218,6 @@ export function useAppNavItems(): AppNavItem[] {
         "/marketplace",
       ),
       ...builtinDestinations,
-      navItem("workbench", Radar, "Workbench", "WB", targets.proxyRoute, pathname, "/proxy"),
       navItem(
         "databases",
         Database,

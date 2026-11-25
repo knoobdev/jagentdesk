@@ -1,21 +1,24 @@
-import { createDockWorkspace } from "@/components/dock-workspace";
-import { PROXY_AGENT_LABEL } from "@/utils/dock-agents";
+import {
+  createDockWorkspace,
+  PROXY_AGENT_LABEL,
+  Composer,
+  useAgentInputDraft,
+  useDraftAgentCreateFlow,
+  buildDraftStoreKey,
+  generateDraftId,
+  useHostRuntimeClient,
+  encodeImages,
+  isWeb,
+} from "../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
 import { useMemo } from "react";
 import { Keyboard, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { Composer } from "@/composer";
-import { useAgentInputDraft } from "@/composer/draft/input-draft";
-import { useDraftAgentCreateFlow } from "@/composer/draft/create-flow";
-import { buildDraftStoreKey, generateDraftId } from "@/stores/draft-keys";
-import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import { encodeImages } from "@/utils/encode-images";
-import { isWeb } from "@/constants/platform";
-import { buildProxySystemPrompt, proxyChatTitle } from "@/components/proxy-ask-agent";
+import { buildProxySystemPrompt, proxyChatTitle } from "./proxy-ask-agent";
 import { type AgentSnapshotPayload } from "@jagentdesk/protocol/messages";
 import { type CreateAgentRequestOptions } from "@jagentdesk/client/internal/daemon-client";
-import { type Theme } from "@/styles/theme";
 
-export { PROXY_AGENT_LABEL } from "@/utils/dock-agents";
+export { PROXY_AGENT_LABEL } from "../../../packages/app/src/plugins/builtin/host-api";
 
 function resolveModeId(modeOptionIds: readonly string[], selectedMode: string): string | undefined {
   if (modeOptionIds.length === 0) return undefined;

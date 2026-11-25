@@ -2,10 +2,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { MessageSquare, Radar, X } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { Button } from "@/components/ui/button";
-import { useIsCompactFormFactor } from "@/constants/layout";
-import { ProxyChatDock } from "@/components/proxy-chat-dock";
-import { useProxyChatStore } from "@/stores/proxy-chat-store";
+import {
+  Button,
+  useIsCompactFormFactor,
+  useProxyChatStore,
+  PageHeader,
+  useHostRuntimeClient,
+  Clipboard,
+} from "../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
+import { ProxyChatDock } from "./proxy-chat-dock";
 import type {
   ProxyCaptureSession,
   ProxyHeldRequest,
@@ -13,30 +19,26 @@ import type {
   ProxyTransactionFull,
   ProxyTransactionRow,
 } from "@jagentdesk/protocol/proxy/rpc-schemas";
-import { PageHeader } from "@/components/headers/page-header";
-import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
-import type { Theme } from "@/styles/theme";
-import * as Clipboard from "expo-clipboard";
-import { CapturesPanel } from "@/components/proxy/captures-panel";
-import { HttpHistory, type HistoryRowActions } from "@/components/proxy/http-history";
-import { MessageEditor } from "@/components/proxy/message-editor";
-import { RepeaterPanel } from "@/components/proxy/repeater-panel";
-import { WbButton } from "@/components/proxy/wb-button";
-import { InterceptPanel } from "@/components/proxy/intercept-panel";
-import { WsHistory } from "@/components/proxy/ws-history";
-import { DecoderPanel } from "@/components/proxy/decoder-panel";
-import { ComparerPanel } from "@/components/proxy/comparer-panel";
-import { TargetPanel } from "@/components/proxy/target-panel";
-import { IntruderPanel } from "@/components/proxy/intruder-panel";
-import { SequencerPanel } from "@/components/proxy/sequencer-panel";
-import { absoluteUrl, buildCurl } from "@/components/proxy/curl";
-import { useDragSize, WbSplitBar } from "@/components/proxy/wb-resize";
+import { CapturesPanel } from "./proxy/captures-panel";
+import { HttpHistory, type HistoryRowActions } from "./proxy/http-history";
+import { MessageEditor } from "./proxy/message-editor";
+import { RepeaterPanel } from "./proxy/repeater-panel";
+import { WbButton } from "./proxy/wb-button";
+import { InterceptPanel } from "./proxy/intercept-panel";
+import { WsHistory } from "./proxy/ws-history";
+import { DecoderPanel } from "./proxy/decoder-panel";
+import { ComparerPanel } from "./proxy/comparer-panel";
+import { TargetPanel } from "./proxy/target-panel";
+import { IntruderPanel } from "./proxy/intruder-panel";
+import { SequencerPanel } from "./proxy/sequencer-panel";
+import { absoluteUrl, buildCurl } from "./proxy/curl";
+import { useDragSize, WbSplitBar } from "./proxy/wb-resize";
 import {
   WB_ORANGE,
   WORKBENCH_TABS,
   type WorkbenchTab,
   type WorkbenchTabDef,
-} from "@/components/proxy/workbench-constants";
+} from "./proxy/workbench-constants";
 
 const ThemedClose = withUnistyles(X);
 const mutedIcon = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
@@ -62,9 +64,7 @@ const MAX_ROWS = 5000;
 // The Workbench shell: Burp's top-level tool tabs across the top, the active tool below. P1 ships
 // Captures + Proxy (HTTP history + message editor) live over the daemon MITM engine; the remaining
 // Burp tools are present in the tab row and land phase by phase.
-export function ProxyScreen() {
-  const hosts = useHosts();
-  const serverId = hosts[0]?.serverId ?? "";
+export function ProxyScreen({ serverId }: { serverId: string }) {
   const client = useHostRuntimeClient(serverId);
   const isCompact = useIsCompactFormFactor();
 

@@ -19,7 +19,6 @@ import {
   History,
   Home,
   Plus,
-  Radar,
   Search,
   Server,
   Ship,
@@ -243,7 +242,6 @@ interface SidebarSharedProps {
   handleSkills: () => void;
   handleInsights: () => void;
   handleMarketplace: () => void;
-  handleWorkbench: () => void;
   /** Spec 25: SSH Servers entry only when the daemon advertises sshServers. */
   supportsSshServers: boolean;
   /** Spec 30.3: Argo CD entry only when the daemon advertises argocd. */
@@ -273,7 +271,6 @@ interface SidebarLabels {
   skills: string;
   insights: string;
   marketplace: string;
-  workbench: string;
   closeSidebar: string;
 }
 
@@ -385,7 +382,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     skillsRoute,
     insightsRoute,
     marketplaceRoute,
-    proxyRoute,
     argoCdRoute,
   } = useAppNavTargets();
 
@@ -398,9 +394,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
   const handleMarketplaceDesktop = useCallback(() => {
     if (marketplaceRoute) router.push(marketplaceRoute);
   }, [marketplaceRoute]);
-  const handleWorkbenchDesktop = useCallback(() => {
-    if (proxyRoute) router.push(proxyRoute as Href);
-  }, [proxyRoute]);
 
   const handleClustersDesktop = useCallback(() => {
     if (clustersRoute) router.push(clustersRoute);
@@ -467,13 +460,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     }
   }, [marketplaceRoute, showMobileAgent]);
 
-  const handleWorkbenchMobile = useCallback(() => {
-    if (proxyRoute) {
-      showMobileAgent();
-      router.push(proxyRoute as Href);
-    }
-  }, [proxyRoute, showMobileAgent]);
-
   const handleViewMoreNavigate = useCallback(() => {
     router.push(buildSessionsRoute());
   }, []);
@@ -509,7 +495,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       skills: "Skills",
       insights: "Insights",
       marketplace: t("sidebar.actions.marketplace"),
-      workbench: "Workbench",
       closeSidebar: t("sidebar.actions.closeSidebar"),
     }),
     [t],
@@ -536,7 +521,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     handleSkills: handleSkillsDesktop,
     handleInsights: handleInsightsDesktop,
     handleMarketplace: handleMarketplaceDesktop,
-    handleWorkbench: handleWorkbenchDesktop,
     supportsSshServers,
     supportsArgoCd: argoCdRoute !== null,
     labels,
@@ -555,7 +539,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
           handleSkills={handleSkillsMobile}
           handleInsights={handleInsightsMobile}
           handleMarketplace={handleMarketplaceMobile}
-          handleWorkbench={handleWorkbenchMobile}
           insetsTop={insets.top}
           insetsBottom={insets.bottom}
           closeSidebar={showMobileAgent}
@@ -580,7 +563,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
         handleSkills={handleSkillsDesktop}
         handleInsights={handleInsightsDesktop}
         handleMarketplace={handleMarketplaceDesktop}
-        handleWorkbench={handleWorkbenchDesktop}
         insetsTop={insets.top}
         insetsBottom={insets.bottom}
         active={active}
@@ -1099,7 +1081,6 @@ function DesktopSidebar({
   handleSkills,
   handleInsights,
   handleMarketplace,
-  handleWorkbench,
   supportsSshServers,
   supportsArgoCd,
   labels,
@@ -1130,7 +1111,6 @@ function DesktopSidebar({
   const isSkillsActive = pathname.includes("/skills");
   const isInsightsActive = pathname.includes("/insights");
   const isMarketplaceActive = pathname.includes("/marketplace");
-  const isWorkbenchActive = pathname.includes("/proxy");
   const clusterRouteMatch = pathname.match(/\/h\/([^/]+)\/cluster\/([^/]+)/);
   const clusterRoute = clusterRouteMatch
     ? {
@@ -1357,16 +1337,6 @@ function DesktopSidebar({
               variant="compact"
             />
             <BuiltinSidebarDestinations />
-            <NavTargetGate route={builtinTargets.proxyRoute}>
-              <SidebarHeaderRow
-                icon={Radar}
-                label={labels.workbench}
-                onPress={handleWorkbench}
-                isActive={isWorkbenchActive}
-                testID="sidebar-workbench-nav"
-                variant="compact"
-              />
-            </NavTargetGate>
             <NavTargetGate route={builtinTargets.insightsRoute}>
               <SidebarHeaderRow
                 icon={BarChart3}

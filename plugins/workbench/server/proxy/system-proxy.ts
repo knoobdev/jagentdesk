@@ -1,4 +1,4 @@
-import { execCommand } from "../../utils/spawn.js";
+import { execCommand } from "../../../../packages/server/src/server/plugins/builtin/host-api.js";
 
 // macOS system HTTP/HTTPS proxy control (via `networksetup`). iOS Simulators use the Mac's network
 // stack and honor the system proxy — and, unlike NSURLSession's per-app connectionProxyDictionary

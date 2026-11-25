@@ -6,8 +6,8 @@ import type {
   ProxyTransactionFull,
   ProxyTransactionRow,
 } from "@jagentdesk/protocol/proxy/rpc-schemas";
-import type { Theme } from "@/styles/theme";
-import { useIsCompactFormFactor } from "@/constants/layout";
+import { useIsCompactFormFactor } from "../../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../../packages/app/src/plugins/builtin/host-api";
 import { HttpHistory, type HistoryRowActions } from "./http-history";
 import { MessageEditor } from "./message-editor";
 import { ScopeEditor } from "./scope-editor";

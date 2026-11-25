@@ -3,7 +3,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { execCommand, spawnProcess } from "../../utils/spawn.js";
+import {
+  execCommand,
+  spawnProcess,
+} from "../../../../packages/server/src/server/plugins/builtin/host-api.js";
 
 // Frida-driven, app-agnostic TLS-unpinning for iOS Simulator apps under test. Uses the host `frida`
 // CLI (shelled out, like SimFleet shells out to simctl/idb — avoids a native binding that would

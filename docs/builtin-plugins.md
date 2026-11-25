@@ -109,7 +109,9 @@ pane. Unmounting the feature closes its exec terminal.
 The server build compiles static feature imports with the monorepo as its TypeScript root, then
 `relocate-builtin-build.mjs` preserves the existing published daemon paths and asset locations.
 Compiled features live under `dist/server/builtin-features`; raw SDK plugins keep their existing
-`dist/server/builtin-plugins` location. Validate emitted ESM imports as well as source tests.
+`dist/server/builtin-plugins` location. A feature's runtime asset that its module reads from beside
+itself, such as Workbench's Frida scripts, needs a copy step into `builtin-features` in
+`build:lib`. Validate emitted ESM imports as well as source tests.
 
 ## Client host
 

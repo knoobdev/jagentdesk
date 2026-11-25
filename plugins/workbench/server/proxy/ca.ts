@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import forge from "node-forge";
-import { resolveJAgentDeskHome } from "../jagentdesk-home.js";
-import { ensurePrivateDirectory } from "../private-files.js";
+import { resolveJAgentDeskHome } from "../../../../packages/server/src/server/plugins/builtin/host-api.js";
+import { ensurePrivateDirectory } from "../../../../packages/server/src/server/plugins/builtin/host-api.js";
 
 // The Workbench certificate authority. A MITM proxy must present a certificate the client trusts
 // for each host it terminates TLS for, so we run our own root CA: generated once, cached under

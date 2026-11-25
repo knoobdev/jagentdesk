@@ -3,16 +3,16 @@ import { ScrollView, Text, View } from "react-native";
 import { Copy, MessageSquarePlus, Send, TerminalSquare, Trash2 } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { ProxyTransactionRow } from "@jagentdesk/protocol/proxy/rpc-schemas";
-import { useIsCompactFormFactor } from "@/constants/layout";
-import type { Theme } from "@/styles/theme";
 import {
+  useIsCompactFormFactor,
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuLabel,
   ContextMenuSeparator,
   ContextMenuTrigger,
-} from "@/components/ui/context-menu";
+} from "../../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../../packages/app/src/plugins/builtin/host-api";
 import { WB_ORANGE } from "./workbench-constants";
 
 // Right-click / long-press context menu — the way a tester moves a request between Burp's tools.

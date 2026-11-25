@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import type { Theme } from "@/styles/theme";
+import type { Theme } from "../../../../packages/app/src/plugins/builtin/host-api";
 import { WB_ORANGE, WB_ORANGE_DIM } from "./workbench-constants";
 
 // The Workbench's primary action button, styled like Burp's orange "Send" / "Start attack" buttons

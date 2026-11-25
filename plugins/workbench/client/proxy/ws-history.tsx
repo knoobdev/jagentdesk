@@ -2,7 +2,7 @@ import { memo } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import type { ProxyWsMessage } from "@jagentdesk/protocol/proxy/rpc-schemas";
-import type { Theme } from "@/styles/theme";
+import type { Theme } from "../../../../packages/app/src/plugins/builtin/host-api";
 import { WB_ORANGE } from "./workbench-constants";
 
 // Burp Proxy › WebSockets history: one row per observed WS data frame, with direction, opcode,

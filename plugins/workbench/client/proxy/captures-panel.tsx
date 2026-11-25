@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import * as Clipboard from "expo-clipboard";
+import { Clipboard, Button } from "../../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../../packages/app/src/plugins/builtin/host-api";
 import { StyleSheet } from "react-native-unistyles";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { ProxyCaptureSession } from "@jagentdesk/protocol/proxy/rpc-schemas";
 import type { SimDevice } from "@jagentdesk/protocol/simulator/rpc-schemas";
-import type { Theme } from "@/styles/theme";
-import { Button } from "@/components/ui/button";
 import { WbButton } from "./wb-button";
 import { WB_ORANGE } from "./workbench-constants";
 

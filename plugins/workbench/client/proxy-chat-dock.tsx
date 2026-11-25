@@ -7,28 +7,30 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from "react-native-reanimated";
-import { Gesture } from "react-native-gesture-handler";
-import { Check, History, MessageSquare, Plus, X } from "lucide-react-native";
-import { formatTimeAgo } from "@/utils/time";
-import { AgentConversationPanel } from "@/panels/agent-panel";
 import {
+  Gesture,
+  formatTimeAgo,
+  AgentConversationPanel,
   PaneProvider,
   PaneFocusProvider,
   createPaneFocusContextValue,
-  type PaneContextValue,
-} from "@/panels/pane-context";
-import { ProxyDraftChat, PROXY_AGENT_LABEL } from "@/components/proxy-draft-chat";
-import { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
-import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
-import { useSessionStore, type Agent, type WorkspaceDescriptor } from "@/stores/session-store";
-import { useIsCompactFormFactor } from "@/constants/layout";
-import {
+  SidebarResizeHandle,
+  useHostRuntimeClient,
+  useProvidersSnapshot,
+  useSessionStore,
+  useIsCompactFormFactor,
   useProxyChatStore,
   PROXY_CHAT_MIN_WIDTH,
   PROXY_CHAT_MAX_WIDTH,
-} from "@/stores/proxy-chat-store";
-import type { Theme } from "@/styles/theme";
+} from "../../../packages/app/src/plugins/builtin/host-api";
+import type {
+  PaneContextValue,
+  Agent,
+  WorkspaceDescriptor,
+  Theme,
+} from "../../../packages/app/src/plugins/builtin/host-api";
+import { Check, History, MessageSquare, Plus, X } from "lucide-react-native";
+import { ProxyDraftChat, PROXY_AGENT_LABEL } from "./proxy-draft-chat";
 
 const ThemedX = withUnistyles(X);
 const ThemedMessageSquare = withUnistyles(MessageSquare);

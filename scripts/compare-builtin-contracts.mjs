@@ -45,6 +45,13 @@ const PLUGINS = {
     tool: /(?:(?:registerTool|registerSimulatorOnly|actionTool)\(\s*|name: )"((?:sim|sideload|android)_[a-z_]+)"/g,
     excludeTools: ["sim_install_batch"],
   },
+  workbench: {
+    rpcFiles: [SESSION],
+    rpcPattern: /(?:msg\.type === |case )"([^"]+)"/g,
+    rpc: (name) => name.startsWith("proxy/") && !name.endsWith("/response"),
+    toolFiles: [TOOLS],
+    tool: /registerTool\(\s*"((?:proxy_|sim_install_batch)[a-z_]*)"/g,
+  },
   "forge-hub": {
     rpcFiles: [SESSION],
     // forge.search.request is the core checkout search, not Forge Hub.

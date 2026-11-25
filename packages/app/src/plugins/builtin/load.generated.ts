@@ -2,11 +2,13 @@
 import { register as register0 } from "../../../../../plugins/docker/client/index";
 import { register as register1 } from "../../../../../plugins/jira/client/index";
 import { register as register2 } from "../../../../../plugins/devices/client/index";
-import { register as register3 } from "../../../../../plugins/forge-hub/client/index";
+import { register as register3 } from "../../../../../plugins/workbench/client/index";
+import { register as register4 } from "../../../../../plugins/forge-hub/client/index";
 import type { BuiltinClientRegistry } from "./host";
 export function loadBuiltins(registry: BuiltinClientRegistry) {
   register0(registry.forPlugin("docker"));
   register1(registry.forPlugin("jira"));
   register2(registry.forPlugin("devices"));
-  register3(registry.forPlugin("forge-hub"));
+  register3(registry.forPlugin("workbench"));
+  register4(registry.forPlugin("forge-hub"));
 }

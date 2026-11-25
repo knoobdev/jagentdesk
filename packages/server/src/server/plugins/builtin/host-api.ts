@@ -20,11 +20,12 @@ export type { AgentPermissionResponse } from "../../agent/agent-sdk-types.js";
 export type { JAgentDeskToolDefinition } from "../../agent/tools/types.js";
 export type { BotTrigger } from "../../bots/service.js";
 export type { BuiltinCoreServices } from "./services.js";
-export { staticHostSupport } from "../../host-capabilities/service.js";
+export { staticHostSupport, type StaticHostSupport } from "../../host-capabilities/service.js";
 export type {
   BuiltinAgentToolContext,
   BuiltinBotTriggerContext,
   BuiltinBotTriggerSource,
+  BuiltinProvidedServices,
   BuiltinServiceHandle,
   BuiltinServerHost,
   BuiltinBackgroundService,
@@ -44,3 +45,5 @@ export { androidSdkCandidates } from "../../host-capabilities/service.js";
 export { toolsBinDir } from "../../host-tools/installer.js";
 export { type SessionInboundMessage, type SessionOutboundMessage } from "../../messages.js";
 export { vendorDirectoryCandidates } from "../../vendor-directory.js";
+// workbench
+export { resolveJAgentDeskHome } from "../../jagentdesk-home.js";

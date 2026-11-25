@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { type PointerEvent as RNPointerEvent, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { isWeb } from "@/constants/platform";
-import type { Theme } from "@/styles/theme";
+import { isWeb } from "../../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../../packages/app/src/plugins/builtin/host-api";
 
 // Shared drag-to-resize primitives for the Workbench splits. All panes (HTTP history detail, Target
 // site map, the request/response message editor…) use these so a divider always behaves the same:

@@ -4,21 +4,21 @@ import { ChevronDown, Plus, X } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { ProxyTransactionFull } from "@jagentdesk/protocol/proxy/rpc-schemas";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
-import { useIsCompactFormFactor } from "@/constants/layout";
-import type { Theme } from "@/styles/theme";
 import {
+  useIsCompactFormFactor,
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuTrigger,
-} from "@/components/ui/context-menu";
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { bytesToUtf8, decodeBase64, utf8ToBase64 } from "@/utils/base64-bytes";
+  bytesToUtf8,
+  decodeBase64,
+  utf8ToBase64,
+} from "../../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../../packages/app/src/plugins/builtin/host-api";
 import { HeaderEditor, makeHeaderRows, rowsToHeaders, type HeaderRowValue } from "./header-editor";
 import { MessagePane } from "./message-editor";
 import { useSplitRatio, WbSplitBar } from "./wb-resize";

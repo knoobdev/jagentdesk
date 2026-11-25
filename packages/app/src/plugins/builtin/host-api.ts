@@ -111,3 +111,25 @@ export { formatTimeAgo } from "@/utils/time";
 // devices
 export { createDockWorkspace } from "@/components/dock-workspace";
 export { SIM_AGENT_LABEL } from "@/utils/dock-agents";
+// workbench
+export {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+export {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+export {
+  PROXY_CHAT_MAX_WIDTH,
+  PROXY_CHAT_MIN_WIDTH,
+  useProxyChatStore,
+} from "@/stores/proxy-chat-store";
+export { bytesToUtf8, decodeBase64, utf8ToBase64 } from "@/utils/base64-bytes";
+export { PROXY_AGENT_LABEL } from "@/utils/dock-agents";

@@ -1,3 +1,5 @@
+// Moved verbatim from core, where lint ran only on edited lines; these rules predate the move.
+/* oxlint-disable no-map-spread, no-shadow */
 import { randomUUID } from "node:crypto";
 import { randomUUID as uuid } from "node:crypto";
 import type {
@@ -17,7 +19,7 @@ import { MitmProxy, type InterceptInput, type InterceptOutcome } from "./mitm-pr
 import { makeSimOriginFilter } from "./sim-origin.js";
 import { executeRequest, type ExecuteRequestInput } from "./http-exec.js";
 import { fridaAvailability, launchAndUnpin, type UnpinHandle } from "./frida-control.js";
-import { execCommand } from "../../utils/spawn.js";
+import { execCommand } from "../../../../packages/server/src/server/plugins/builtin/host-api.js";
 import {
   enableSystemProxy,
   primaryNetworkService,

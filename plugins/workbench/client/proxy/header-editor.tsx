@@ -3,13 +3,13 @@ import { Pressable, Text, TextInput, View } from "react-native";
 import { ChevronDown } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { ProxyHeader } from "@jagentdesk/protocol/proxy/rpc-schemas";
-import type { Theme } from "@/styles/theme";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "../../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../../packages/app/src/plugins/builtin/host-api";
 import { WB_ORANGE } from "./workbench-constants";
 
 // Editable request headers as key/value input rows (Burp's Inspector-style editing). The name field

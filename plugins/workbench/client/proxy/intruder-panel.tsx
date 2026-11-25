@@ -6,8 +6,8 @@ import type {
   ProxyIntruderResult,
   ProxyTransactionFull,
 } from "@jagentdesk/protocol/proxy/rpc-schemas";
-import type { Theme } from "@/styles/theme";
-import { bytesToUtf8, decodeBase64 } from "@/utils/base64-bytes";
+import { bytesToUtf8, decodeBase64 } from "../../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../../packages/app/src/plugins/builtin/host-api";
 import { WbButton } from "./wb-button";
 import { WB_ORANGE } from "./workbench-constants";
 
