@@ -878,6 +878,7 @@ function SendButtonTooltip({
   sendKeys: ShortcutChord | null | undefined;
   sendTooltipLabel: string;
 }) {
+  const gumloop = useIsGumloopTheme();
   if (!shouldShow) return null;
   return (
     <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
@@ -891,7 +892,12 @@ function SendButtonTooltip({
         testID={submitButtonTestID}
         style={sendButtonCombinedStyle}
       >
-        <View style={submitLabel ? styles.sendButtonDiscLabeled : styles.sendButtonDisc}>
+        <View
+          style={[
+            submitLabel ? styles.sendButtonDiscLabeled : styles.sendButtonDisc,
+            gumloop && styles.gumloopSendDisc,
+          ]}
+        >
           <SendButtonContent
             isSubmitLoading={isSubmitLoading}
             submitIcon={submitIcon}
@@ -2566,6 +2572,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     alignItems: "center",
     justifyContent: "center",
   },
+  gumloopSendDisc: { width: 32, height: 32, backgroundColor: theme.colors.primary },
   sendButtonDisc: {
     width: TOOLBAR_DISC_SIZE,
     height: TOOLBAR_DISC_SIZE,
@@ -2629,7 +2636,7 @@ const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
 
 const iconForegroundMapping = (theme: Theme) => ({ color: theme.colors.foreground });
 const iconForegroundMutedMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
-const iconAccentForegroundMapping = (theme: Theme) => ({ color: theme.colors.accentForeground });
+const iconAccentForegroundMapping = (theme: Theme) => ({ color: theme.colors.primaryForeground });
 
 function useMessageInputEditingSession(
   inputMode: ComposerInputMode,

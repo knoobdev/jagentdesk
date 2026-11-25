@@ -1212,7 +1212,7 @@ function ComposerCancelButton({
         accessibilityRole="button"
         style={buttonStyle}
       >
-        <View style={styles.cancelButtonDisc}>{icon}</View>
+        <View style={[styles.cancelButtonDisc, gumloop && styles.gumloopStop]}>{icon}</View>
       </TooltipTrigger>
       <TooltipContent side="top" align="center" offset={8}>
         <View style={styles.tooltipRow}>
@@ -2547,13 +2547,15 @@ function ComposerContentImpl({
 
   // Fullscreen fills the dock slot: the chain down to the input stretches and drops
   // the inline padding, which the fullscreen presentation supplies itself.
+  const gumloop = useIsGumloopTheme();
   const inputAreaContainerStyle = useMemo(
     () => [
       styles.inputAreaContainer,
+      gumloop && styles.gumloopInputArea,
       isComposerLocked && styles.inputAreaLocked,
       isFullscreen && styles.inputAreaFullscreen,
     ],
-    [isComposerLocked, isFullscreen],
+    [isComposerLocked, isFullscreen, gumloop],
   );
   const inputAreaContentStyle = useMemo(
     () => [styles.inputAreaContent, isFullscreen && styles.fullscreenFill],
@@ -2817,6 +2819,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     height: theme.borderWidth[1],
     backgroundColor: theme.colors.border,
   },
+  gumloopInputArea: { paddingHorizontal: { xs: 12, md: 16 }, paddingBottom: { xs: 12, md: 48 } },
   inputAreaContainer: {
     flexShrink: 1,
     position: "relative",

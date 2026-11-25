@@ -1,5 +1,5 @@
 import { GumloopHome } from "@/components/gumloop-shell/home";
-import { useGumloopDesktopShell } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { useCallback, useEffect, useState, type ComponentType } from "react";
 import { useTranslation } from "react-i18next";
 import { View, Text, Pressable, ScrollView } from "react-native";
@@ -41,7 +41,7 @@ export function OpenProjectScreen() {
   const openPairDeviceModal = usePairDeviceModalStore((state) => state.open);
 
   const isCompactLayout = useIsCompactFormFactor();
-  const gumloop = useGumloopDesktopShell(true);
+  const gumloop = useIsGumloopTheme();
 
   useEffect(() => {
     if (!isCompactLayout && !gumloop) {

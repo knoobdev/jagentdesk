@@ -1,3 +1,6 @@
+import { GumloopCompactHeader } from "@/components/gumloop-shell/compact-header";
+import { GumloopDrawer } from "@/components/gumloop-shell/drawer";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { useGumloopSidebarShortcut } from "@/components/gumloop-shell/use-sidebar-shortcut";
 import { NotificationOpenRouter } from "@/notification-open/react";
 import { useHardwareKeyboardPresent } from "@/keyboard";
@@ -129,7 +132,6 @@ import type { ThemeName } from "@/styles/theme";
 import { installWebScrollbarStyles } from "@/styles/install-web-scrollbar-styles";
 import type { HostProfile } from "@/types/host-connection";
 import { toggleDesktopSidebarsWithCheckoutIntent } from "@/utils/desktop-sidebar-toggle";
-import { GumloopMobileTabBar } from "@/components/gumloop-shell/gumloop-mobile-tab-bar";
 import { GumloopSidebar } from "@/components/gumloop-shell/sidebar";
 
 import { useGumloopDesktopShell } from "@/components/gumloop-shell/use-gumloop-chrome";
@@ -550,8 +552,8 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
 
   const surface = (
     <View style={layoutStyles.surfaceFill}>
+      <GumloopCompactHeader enabled={sidebarEnabled} />
       {workspaceChrome}
-      {gumloopShell ? null : <GumloopMobileTabBar chromeEnabled={chromeEnabled} />}
       <WindowSidebarToggleSlot
         visible={
           !isCompactLayout &&
@@ -642,6 +644,7 @@ function SidebarChrome({
 }) {
   const isCompactLayout = useIsCompactFormFactor();
   const gumloopShell = useGumloopDesktopShell(true);
+  const gumloopTheme = useIsGumloopTheme();
   const isOpen = usePanelStore((state) =>
     selectIsAgentListOpen(state, { isCompact: isCompactLayout }),
   );
@@ -652,8 +655,9 @@ function SidebarChrome({
       active={active}
       keyboardNavigationActive={keyboardShortcutsEnabled && hardwareKeyboardPresent}
     >
+      {mounted && gumloopTheme && isCompactLayout ? <GumloopDrawer active={active} /> : null}
       {mounted && gumloopShell ? <GumloopSidebar active={active} /> : null}
-      {mounted && !gumloopShell ? <LeftSidebar active={active} /> : null}
+      {mounted && !gumloopTheme ? <LeftSidebar active={active} /> : null}
       <WorkspaceShortcutTargetsSubscriber enabled={keyboardShortcutsEnabled} />
     </SidebarModelProvider>
   );

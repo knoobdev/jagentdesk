@@ -14,6 +14,8 @@ interface MobilePanelOverlayProps {
   children: ReactNode;
   closeGesture: GestureType;
   panel: OverlayPanel;
+  panelWidth?: number;
+  scrimColor?: string;
   panelStyle?: ComponentProps<typeof Animated.View>["style"];
 }
 
@@ -22,6 +24,8 @@ export function MobilePanelOverlay({
   closeGesture,
   panel,
   panelStyle,
+  panelWidth,
+  scrimColor,
 }: MobilePanelOverlayProps) {
   const { position, windowWidth } = useMobilePanelsRuntime();
   const target = usePanelStore((state) => state.mobilePanel.target);
@@ -29,18 +33,19 @@ export function MobilePanelOverlay({
   const isOpen = target === panel;
   const isPresented = useIsMobilePanelPresented(panel);
   const isLeft = panel === "agent-list";
+  const width = panelWidth ?? windowWidth;
 
   const sidebarAnimatedStyle = useAnimatedStyle(() => {
-    const frame = getMobilePanelFrame(position.value, windowWidth);
+    const frame = getMobilePanelFrame(position.value, width);
     return {
       transform: [{ translateX: isLeft ? frame.leftTranslateX : frame.rightTranslateX }],
     };
-  }, [isLeft, windowWidth]);
+  }, [isLeft, width]);
 
   const backdropAnimatedStyle = useAnimatedStyle(() => {
-    const frame = getMobilePanelFrame(position.value, windowWidth);
+    const frame = getMobilePanelFrame(position.value, width);
     return { opacity: isLeft ? frame.leftBackdropOpacity : frame.rightBackdropOpacity };
-  }, [isLeft, windowWidth]);
+  }, [isLeft, width]);
 
   const overlayStyle = useMemo(
     () => [
@@ -53,18 +58,16 @@ export function MobilePanelOverlay({
   );
   const positionedPanelStyle = isLeft ? styles.leftPanel : styles.rightPanel;
   const backdropStyle = useMemo(
-    () => [styles.backdrop, backdropAnimatedStyle],
-    [backdropAnimatedStyle],
+    () => [
+      styles.backdrop,
+      scrimColor ? { backgroundColor: scrimColor } : null,
+      backdropAnimatedStyle,
+    ],
+    [backdropAnimatedStyle, scrimColor],
   );
   const combinedPanelStyle = useMemo(
-    () => [
-      styles.panel,
-      positionedPanelStyle,
-      { width: windowWidth },
-      panelStyle,
-      sidebarAnimatedStyle,
-    ],
-    [panelStyle, positionedPanelStyle, sidebarAnimatedStyle, windowWidth],
+    () => [styles.panel, positionedPanelStyle, { width }, panelStyle, sidebarAnimatedStyle],
+    [panelStyle, positionedPanelStyle, sidebarAnimatedStyle, width],
   );
   let overlayPointerEvents: "auto" | "box-none" | "none";
   if (!isWeb) {

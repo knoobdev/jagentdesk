@@ -57,11 +57,16 @@ export function GumloopHome() {
   );
 }
 const styles = StyleSheet.create((theme: Theme) => ({
-  page: { flex: 1, backgroundColor: theme.colors.surface0, paddingHorizontal: 82, paddingTop: 72 },
+  page: {
+    flex: 1,
+    backgroundColor: theme.colors.surface0,
+    paddingHorizontal: { xs: 12, md: 82 },
+    paddingTop: { xs: 16, md: 72 },
+  },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 16 },
-  title: { fontSize: 30, fontWeight: "600", color: theme.colors.foreground },
+  title: { fontSize: { xs: 22, md: 30 }, fontWeight: "600", color: theme.colors.foreground },
   actions: { flexDirection: "row", gap: 10 },
-  body: { flex: 1, marginTop: 40 },
+  body: { flex: 1, marginTop: { xs: 16, md: 40 } },
   sectionTitle: {
     fontSize: 20,
     color: theme.colors.foregroundMuted,

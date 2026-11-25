@@ -1,3 +1,5 @@
+import { useIsCompactFormFactor } from "@/constants/layout";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AccountButton } from "./account-button";
 import { DockerSidebar } from "@/docker/sidebar";
 import { JAgentDeskLogo } from "@/components/icons/jagentdesk-logo";
@@ -104,6 +106,10 @@ export function GumloopRow({
 }) {
   const Icon = useMemo(() => (icon ? withUnistyles(icon) : null), [icon]);
   const accessibilityState = useMemo(() => ({ selected }), [selected]);
+  const select = useCallback(() => {
+    usePanelStore.getState().showMobileAgent();
+    onPress();
+  }, [onPress]);
   const rowStyle = useCallback(
     ({ hovered, pressed }: PressableStateCallbackType & { hovered?: boolean }) => [
       styles.row,
@@ -117,7 +123,7 @@ export function GumloopRow({
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={accessibilityState}
-      onPress={onPress}
+      onPress={select}
       style={rowStyle}
       testID={testID}
     >
@@ -157,7 +163,10 @@ function BrandRow() {
     () => useKeyboardShortcutsStore.getState().setCommandCenterOpen(true),
     [],
   );
-  const collapse = usePanelStore((state) => state.closeDesktopAgentList);
+  const compact = useIsCompactFormFactor();
+  const collapse = usePanelStore((state) =>
+    compact ? state.showMobileAgent : state.closeDesktopAgentList,
+  );
   return (
     <WindowChromeSafeArea placement="inline" style={styles.brand}>
       <TitlebarDragRegion />
@@ -241,16 +250,22 @@ function ConnectionFooter({ serverId, onNavigate }: { serverId: string; onNaviga
   const snapshot = useHostRuntimeSnapshot(serverId);
   const sources = useUsageSummary();
   const pair = usePairDeviceModalStore((state) => state.open);
-  const handlePair = useCallback(() => pair(serverId), [pair, serverId]);
+  const handlePair = useCallback(() => {
+    onNavigate();
+    pair(serverId);
+  }, [onNavigate, pair, serverId]);
   const settings = useCallback(() => {
     onNavigate();
     router.push(buildSettingsRoute());
   }, [onNavigate]);
-  const connections = useCallback(
-    () => router.push(buildSettingsHostSectionRoute(serverId, "connections")),
-    [serverId],
-  );
-  const notifications = useCallback(() => router.push(buildSettingsSectionRoute("general")), []);
+  const connections = useCallback(() => {
+    onNavigate();
+    router.push(buildSettingsHostSectionRoute(serverId, "connections"));
+  }, [serverId, onNavigate]);
+  const notifications = useCallback(() => {
+    onNavigate();
+    router.push(buildSettingsSectionRoute("general"));
+  }, [onNavigate]);
   const transport = snapshot?.activeConnection?.type;
   let transportLabel = "Direct";
   if (transport === "relay") transportLabel = "Relay";
@@ -473,11 +488,18 @@ export function GumloopSidebar({ active }: { active: boolean }) {
       ? model.workspaceEntriesByKey.get(`${drill.serverId}:${drill.workspaceId}`)
       : null;
   const title = sidebarDrillTitle(drill, workspace?.name);
-  const newAgent = useNewWorkspaceNavigate();
+  const navigateNewAgent = useNewWorkspaceNavigate();
+  const newAgent = useCallback(() => {
+    usePanelStore.getState().showMobileAgent();
+    navigateNewAgent();
+  }, [navigateNewAgent]);
   const projectsCollapsed = useGumloopSidebarState((state) => state.projectsCollapsed);
   const openAddProject = useOpenAddProject();
   const addProject = useCallback(() => openAddProject(), [openAddProject]);
-  const resetDrill = useCallback(() => setDismissedPath(null), []);
+  const resetDrill = useCallback(() => {
+    setDismissedPath(null);
+    usePanelStore.getState().showMobileAgent();
+  }, []);
   const back = useCallback(() => setDismissedPath(pathname), [pathname]);
   const navigation = useMemo(() => <RootNavigation onNavigate={resetDrill} />, [resetDrill]);
   let middle: ReactNode;
@@ -504,9 +526,15 @@ export function GumloopSidebar({ active }: { active: boolean }) {
     );
   const dismissPluginView = useCallback(() => setDismissedPath(null), []);
   if (!drill) middle = <SidebarViewSlot dismiss={dismissPluginView}>{middle}</SidebarViewSlot>;
-  if (!active) return null;
+  const compact = useIsCompactFormFactor();
+  const insets = useSafeAreaInsets();
+  const sidebarStyle = [
+    styles.sidebar,
+    compact && styles.compactSidebar,
+    compact && { paddingTop: insets.top, paddingBottom: insets.bottom },
+  ];
   return (
-    <View style={styles.sidebar} testID="gumloop-sidebar">
+    <View style={sidebarStyle} pointerEvents={active ? "auto" : "none"} testID="gumloop-sidebar">
       <View style={styles.header} testID="gumloop-sidebar-header">
         <BrandRow />
         {drill ? (
@@ -613,6 +641,7 @@ function DrillQuickSwitch({
 }
 
 const styles = StyleSheet.create((theme: Theme) => ({
+  compactSidebar: { width: "100%", flex: 1 },
   sidebar: {
     width: 324,
     flexShrink: 0,
@@ -633,21 +662,21 @@ const styles = StyleSheet.create((theme: Theme) => ({
   logoLetter: { fontSize: 18, fontWeight: "600", color: theme.colors.primaryForeground },
   brandName: { flex: 1, fontSize: 20, fontWeight: "600", color: theme.colors.foreground },
   iconButton: {
-    width: 30,
-    height: 34,
+    width: { xs: 44, md: 30 },
+    height: { xs: 44, md: 34 },
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 8,
   },
   hostRow: {
-    height: 36,
+    height: { xs: 44, md: 36 },
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     paddingHorizontal: 10,
   },
   row: {
-    height: 34,
+    height: { xs: 44, md: 34 },
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
@@ -658,7 +687,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
   selected: { backgroundColor: theme.chrome.selectedRow },
   hovered: { backgroundColor: theme.colors.surfaceSidebarHover },
   newAgent: {
-    height: 34,
+    height: { xs: 44, md: 34 },
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -674,10 +703,15 @@ const styles = StyleSheet.create((theme: Theme) => ({
   drillContent: { paddingHorizontal: 10, paddingBottom: 16 },
   navigation: { paddingHorizontal: 2 },
   navItems: { gap: 3 },
-  groupHeading: { marginTop: 24, height: 34, flexDirection: "row", alignItems: "center" },
+  groupHeading: {
+    marginTop: 24,
+    height: { xs: 44, md: 34 },
+    flexDirection: "row",
+    alignItems: "center",
+  },
   groupToggle: {
     flex: 1,
-    height: 34,
+    height: { xs: 44, md: 34 },
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
@@ -717,7 +751,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     justifyContent: "center",
   },
   avatarLetter: { fontSize: 14, color: theme.colors.foreground },
-  drillRow: { height: 36, flexDirection: "row", alignItems: "center", gap: 6 },
+  drillRow: { height: { xs: 44, md: 36 }, flexDirection: "row", alignItems: "center", gap: 6 },
   quickSwitch: { width: 36, overflow: "hidden" },
   panelHint: { padding: 16, fontSize: 14, color: theme.colors.foregroundMuted },
 }));
