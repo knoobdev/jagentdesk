@@ -1,7 +1,7 @@
 import { Pressable, Text, View } from "react-native";
 import { useMemo } from "react";
-import { ErrorBanner } from "@/jira/ui/primitives";
-import { jiraStyles } from "@/jira/ui/styles";
+import { ErrorBanner } from "@/components/integration-ui/primitives";
+import { jiraStyles } from "@/components/integration-ui/styles";
 import { Badge } from "../ui/primitives";
 
 // UI-only helpers for honest edit states (spec 32.6.1): what the Inspect panel and the edit

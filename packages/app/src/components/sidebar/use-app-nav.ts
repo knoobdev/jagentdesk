@@ -1,7 +1,7 @@
 import { useBuiltinDestinations } from "@/plugins/builtin/surfaces";
+import { orderAppNavItems } from "@/components/sidebar/nav-order";
 import { useOpenSidebarUsage } from "@/usage/sidebar-item";
 import { useBuiltinPluginEnabled } from "@/plugins/builtin/hooks";
-import { builtinPluginEnabled } from "@/plugins/builtin/registry";
 import { router, usePathname, type Href } from "expo-router";
 import { useCallback, useMemo } from "react";
 import {
@@ -10,13 +10,9 @@ import {
   Bot,
   CalendarClock,
   Figma,
-  GitPullRequest,
   History,
   Home,
-  KanbanSquare,
-  Radar,
   Share2,
-  Smartphone,
   Sparkles,
   Store,
   type LucideIcon,
@@ -27,31 +23,17 @@ import { useHosts } from "@/runtime/host-runtime";
 import { canCreateWorktreeForProjectKind } from "@/projects/host-projects";
 import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { useSessionStore } from "@/stores/session-store";
-import { hostSupportsCapability } from "@/utils/server-info-capabilities";
-import type { HostCapabilityId } from "@jagentdesk/protocol/host-capabilities";
 
-/** Capabilities behind the device fleet: simulators, physical phones (spec 27.2), or sideload (26.9). */
-const DEVICE_CAPABILITIES: readonly HostCapabilityId[] = [
-  "iosSimulators",
-  "androidDevices",
-  "androidPhysical",
-  "iosPhysical",
-  "iosSideload",
-];
 import { useWorkspace } from "@/stores/session-store-hooks";
 import {
   buildFigmaRoute,
-  buildForgeRoute,
   buildInsightsRoute,
-  buildJiraRoute,
   buildMarketplaceRoute,
   buildNewWorkspaceRoute,
   buildOpenProjectRoute,
   buildSchedulesRoute,
   buildSessionsRoute,
   buildSharedSessionsRoute,
-  buildSimulatorRoute,
-  buildProxyRoute,
   buildSkillsRoute,
 } from "@/utils/host-routes";
 
@@ -61,13 +43,7 @@ export interface AppNavTargets {
   sharedSessionsRoute: Href | null;
   skillsRoute: Href | null;
   insightsRoute: Href | null;
-  forgeRoute: Href | null;
   marketplaceRoute: Href | null;
-  simulatorRoute: Href | null;
-  proxyRoute: Href | null;
-  supportsForgeHub: boolean;
-  /** Spec 29: Jira surface, when the daemon advertises `jira`. */
-  jiraRoute: Href | null;
   /** Spec 32: Figma section, when the daemon advertises `figma`. */
   figmaRoute: Href | null;
 }
@@ -83,28 +59,9 @@ export function useAppNavTargets(): AppNavTargets {
   const supportsBots = useHostFeature(firstServerId, "bots");
   const skillsEnabled = useBuiltinPluginEnabled(firstServerId, "skills");
   const insightsEnabled = useBuiltinPluginEnabled(firstServerId, "insights");
-  const workbenchEnabled = useBuiltinPluginEnabled(firstServerId, "workbench");
   const sharingEnabled = useBuiltinPluginEnabled(firstServerId, "session-share");
-  // Forge Hub is a post-ADR-0003 surface gated per release milestone (spec 19.12):
-  // only advertise the entry when the first/active daemon reports forgeHub.
-  const supportsForgeHub = useSessionStore(
-    (state) => state.sessions[firstServerId]?.serverInfo?.features?.forgeHub === true,
-  );
-  const supportsJira = useSessionStore(
-    (state) => state.sessions[firstServerId]?.serverInfo?.features?.jira === true,
-  );
   const supportsFigma = useSessionStore(
     (state) => state.sessions[firstServerId]?.serverInfo?.features?.figma === true,
-  );
-  // Spec 24.4: devices open on the first host that can run simulators; none → no entry.
-  const deviceServerId = useSessionStore(
-    (state) =>
-      hosts.find(
-        (host) =>
-          host.serverId === firstServerId &&
-          builtinPluginEnabled(state.sessions[host.serverId]?.serverInfo, "devices") &&
-          hostSupportsCapability(state.sessions[host.serverId]?.serverInfo, DEVICE_CAPABILITIES),
-      )?.serverId ?? null,
   );
   return useMemo(() => {
     const perHost = (build: (serverId: string) => string): Href | null =>
@@ -117,25 +74,16 @@ export function useAppNavTargets(): AppNavTargets {
       // Gated at the route: the entry disappears with the daemon feature flag.
       skillsRoute: skillsEnabled ? perHost(buildSkillsRoute) : null,
       insightsRoute: insightsEnabled ? perHost(buildInsightsRoute) : null,
-      forgeRoute: perHost(buildForgeRoute),
       marketplaceRoute: perHost(buildMarketplaceRoute),
-      simulatorRoute: deviceServerId ? (buildSimulatorRoute(deviceServerId) as Href) : null,
-      proxyRoute: workbenchEnabled ? perHost(buildProxyRoute) : null,
-      supportsForgeHub,
-      jiraRoute: supportsJira ? perHost(buildJiraRoute) : null,
       figmaRoute: supportsFigma ? perHost(buildFigmaRoute) : null,
     };
   }, [
     supportsBots,
     skillsEnabled,
     insightsEnabled,
-    workbenchEnabled,
     sharingEnabled,
-    supportsJira,
     supportsFigma,
-    deviceServerId,
     firstServerId,
-    supportsForgeHub,
   ]);
 }
 
@@ -213,16 +161,6 @@ export function useAppNavItems(): AppNavItem[] {
         "/marketplace",
       ),
       ...builtinDestinations,
-      navItem(
-        "simulators",
-        Smartphone,
-        "Simulators",
-        "Sims",
-        targets.simulatorRoute,
-        pathname,
-        "/simulator",
-      ),
-      navItem("workbench", Radar, "Workbench", "WB", targets.proxyRoute, pathname, "/proxy"),
       {
         key: "usage",
         icon: Gauge,
@@ -241,47 +179,10 @@ export function useAppNavItems(): AppNavItem[] {
         pathname,
         "/insights",
       ),
-      navItem("jira", KanbanSquare, "Jira", "Jira", targets.jiraRoute, pathname, "/jira"),
       navItem("figma", Figma, "Figma", "Figma", targets.figmaRoute, pathname, "/figma"),
-      targets.supportsForgeHub
-        ? navItem("forge", GitPullRequest, "Forge", "Forge", targets.forgeRoute, pathname, "/forge")
-        : null,
     ];
     return orderAppNavItems(items.filter((item): item is AppNavItem => item !== null));
   }, [openUsage, pathname, t, targets, builtinDestinations]);
-}
-
-// Established destination order. Built-in feature destinations keep their positions; any other
-// built-in destination follows Marketplace in load order.
-const APP_NAV_ORDER: readonly string[] = [
-  "home",
-  "sessions",
-  "schedules",
-  "bots",
-  "shared-sessions",
-  "skills",
-  "marketplace",
-  "docker",
-  "simulators",
-  "workbench",
-  "databases",
-  "servers",
-  "clusters",
-  "argocd",
-  "usage",
-  "insights",
-  "jira",
-  "figma",
-  "forge",
-];
-const UNPLACED_NAV_RANK = APP_NAV_ORDER.indexOf("marketplace") + 0.5;
-export function orderAppNavItems(items: AppNavItem[]): AppNavItem[] {
-  const rank = (key: string) => {
-    const index = APP_NAV_ORDER.indexOf(key);
-    return index === -1 ? UNPLACED_NAV_RANK : index;
-  };
-  // Hermes has no `toSorted`; Array.prototype.sort is stable.
-  return [...items].sort((left, right) => rank(left.key) - rank(right.key));
 }
 
 function navItem(

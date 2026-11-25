@@ -1,4 +1,3 @@
-/** Public core UI and service surface for statically linked built-in clients. */
 export { PageHeader } from "@/components/headers/page-header";
 export { gumloopListStyles, gumloopTabStyles } from "@/components/gumloop-shell/list-styles";
 export { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
@@ -12,6 +11,7 @@ export { withSshDocker, type SshDockerTarget } from "@/ssh/ui/ssh-docker-client"
 export type { Theme } from "@/styles/theme";
 export { GumloopRow } from "@/components/gumloop-shell/row";
 export type {
+  BuiltinAttachmentPillProps,
   BuiltinClientHost,
   BuiltinClientProps,
   BuiltinDestination,
@@ -20,7 +20,16 @@ export type {
   BuiltinToolCallRenderer,
 } from "./host";
 
+// Packages installed only in packages/app resolve for features through the host API.
 export * as Clipboard from "expo-clipboard";
+export {
+  router,
+  useGlobalSearchParams,
+  useLocalSearchParams,
+  type Href,
+} from "expo-router";
+export { useIsFocused } from "expo-router/react-navigation";
+export { Gesture, GestureDetector } from "react-native-gesture-handler";
 export { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export { isWeb } from "@/constants/platform";
@@ -113,14 +122,7 @@ export { FormTextInput, Field } from "@/components/ui/form-field";
 export { useToast } from "@/contexts/toast-context";
 export { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
 // App-local dependencies: features outside packages/app resolve them through the host.
-export {
-  router,
-  useRouter,
-  useLocalSearchParams,
-  useGlobalSearchParams,
-  usePathname,
-} from "expo-router";
-export { Gesture, GestureDetector } from "react-native-gesture-handler";
+export { useRouter, usePathname } from "expo-router";
 
 // ssh-servers migration
 export { SelectField } from "@/components/ui/select-field";
@@ -177,4 +179,72 @@ export { unwrapToolResultPayload } from "@/remote-exec/tool-result-payload";
 // custom-providers migration
 export { useBuiltinPluginEnabled } from "@/plugins/builtin/hooks";
 export { SettingsSection } from "@/screens/settings/settings-section";
+
+// Shared UI kit, composer, data, and navigation surfaces
+export { type ComposerAttachment, type UserComposerAttachment } from "@/attachments/types";
+export { AttachmentLabel, AttachmentPill } from "@/components/attachment-pill";
+export {
+  Chip,
+  EmptyState,
+  ErrorBanner,
+  FlagIcon,
+  IconButton,
+  Input,
+  IssueTypeIcon,
+  PressableRow,
+  PriorityIcon,
+  StatusLozenge,
+  Tabs,
+  UserAvatar,
+  tint,
+} from "@/components/integration-ui/primitives";
+export { jiraStyles } from "@/components/integration-ui/styles";
+export { getIsElectron } from "@/constants/platform";
+export { invokeDesktopCommand } from "@/desktop/electron/invoke";
+export { useHostFeature } from "@/runtime/host-features";
+export { createMarkdownStyles } from "@/styles/markdown-styles";
+export { buildHostAgentDetailRoute } from "@/utils/host-routes";
+export { openExternalUrl } from "@/utils/open-external-url";
+export {
+  firstWorkspaceDirectory,
+  usableWorkspaces,
+  workspaceDirectory,
+} from "@/utils/usable-workspaces";
+// forge-hub
+export { MarkdownRenderer } from "@/components/markdown/renderer";
+export { syntaxTokenStyleFor } from "@/styles/syntax-token-styles";
+export {
+  type AnsiLine,
+  parseAnsiLog,
+  stripAnsi,
+} from "@/utils/ansi-log";
+export { highlightDiffLines } from "@/utils/diff-highlight";
+export { tokenizeToLines } from "@/utils/highlight-cache";
+export {
+  buildInsightsRoute,
+  buildOpenProjectRoute,
+  buildSettingsRoute,
+  buildSkillsRoute,
+} from "@/utils/host-routes";
+// devices
+export { SkeletonLines } from "@/components/ui/skeleton";
+export { useSimChatStore } from "@/stores/sim-chat-store";
+export { bytesToBase64 } from "@/utils/base64-bytes";
+// devices
+export { SIM_CHAT_MAX_WIDTH, SIM_CHAT_MIN_WIDTH } from "@/stores/sim-chat-store";
+// devices
+export { SIM_AGENT_LABEL } from "@/utils/dock-agents";
+// workbench
+export {
+  PROXY_CHAT_MAX_WIDTH,
+  PROXY_CHAT_MIN_WIDTH,
+  useProxyChatStore,
+} from "@/stores/proxy-chat-store";
+export {
+  bytesToUtf8,
+  decodeBase64,
+  utf8ToBase64,
+} from "@/utils/base64-bytes";
+export { PROXY_AGENT_LABEL } from "@/utils/dock-agents";
+
 

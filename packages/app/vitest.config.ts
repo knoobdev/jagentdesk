@@ -214,6 +214,12 @@ export default defineConfig({
     ],
     alias: [
       { find: "@", replacement: path.resolve(__dirname, "src") },
+      // Built-in feature tests live in ../../plugins, where app-only packages do not resolve;
+      // pin the subpath their mocks name to the module the host API loads.
+      {
+        find: /^expo-router\/react-navigation$/,
+        replacement: path.join(resolvePackageEntry("expo-router"), "react-navigation.js"),
+      },
       // Keep keyboard-controller's imports in Vite so native aliases and platform extensions apply.
       {
         find: /^react-native-keyboard-controller$/,

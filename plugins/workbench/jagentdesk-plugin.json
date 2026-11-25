@@ -5,5 +5,9 @@
   "description": "Capture and inspect device network traffic.",
   "defaultEnabled": true,
   "requires": ["devices"],
-  "builtinOrder": 11
+  "builtinOrder": 11,
+  "builtinEntrypoints": {
+    "server": "server/index.ts",
+    "client": "client/index.tsx"
+  }
 }

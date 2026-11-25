@@ -4,22 +4,23 @@ import Database from "better-sqlite3";
 import type { Logger } from "pino";
 import * as binaryFrames from "@jagentdesk/protocol/binary-frames/index";
 import type { DaemonConfigStore } from "../../daemon-config-store.js";
+import type { AgentManagerEvent } from "../../agent/agent-manager.js";
+import type { SessionOutboundMessage } from "../../messages.js";
 import { FileSecretStore } from "../../database/secret-store.js";
 import { DockerService } from "../../docker/docker-service.js";
 import { DockerStreams } from "../../docker/docker-streams.js";
 import { routeDockerMessage, disposeRemoteDocker } from "../../ssh/remote-docker/route.js";
 import type { ClusterRegistry } from "../../cluster/cluster-registry.js";
 import type { DatabaseRegistry } from "../../database/database-registry.js";
+import type { AgentManager } from "../../agent/agent-manager.js";
+import type { SshService } from "../../ssh/ssh-service.js";
+import type { CustomProviderService } from "../../custom-providers/types.js";
 
 /** Daemon-wide registries shared with core consumers (SSH remote access, agent tools). */
 export interface BuiltinSharedRegistries {
   clusters: ClusterRegistry;
   databases: DatabaseRegistry;
 }
-import type { AgentManager } from "../../agent/agent-manager.js";
-import type { SshService } from "../../ssh/ssh-service.js";
-import type { CustomProviderService } from "../../custom-providers/types.js";
-import type { SessionOutboundMessage } from "../../messages.js";
 
 /** Agent facts a feature may read for its callers; permission cards stay in core. */
 export interface BuiltinAgentAccess {
@@ -50,12 +51,23 @@ export interface BuiltinPlatformServices {
 const secretStores = new WeakMap<DaemonConfigStore, FileSecretStore>();
 
 /** Core owns persistence and transports; features own their lifecycle and registrations. */
+/** Daemon-wide hooks only the bootstrap can supply; absent for per-session services in tests. */
+export interface BuiltinDaemonHooks {
+  /** Agent lifecycle events, as AgentManager.subscribe delivers them (no replay). */
+  subscribeAgentEvents?: (callback: (event: AgentManagerEvent) => void) => () => void;
+  /** Sends a session message to every connected client. */
+  broadcast?: (message: SessionOutboundMessage) => void;
+  /** Sends an OS notification to paired phones that are not connected. */
+  pushNotification?: (notice: { title: string; body: string }) => void;
+}
+
 export function createBuiltinCoreServices(
   home: string,
   logger: Logger,
   config: DaemonConfigStore,
   registries: BuiltinSharedRegistries,
   platform: BuiltinPlatformServices = {},
+  daemon: BuiltinDaemonHooks = {},
 ) {
   let secrets = secretStores.get(config);
   if (!secrets) {
@@ -63,8 +75,9 @@ export function createBuiltinCoreServices(
     secretStores.set(config, secrets);
   }
   return {
-    /** JAGENTDESK_HOME. Existing feature stores keep their historical directories under it. */
+    /** The daemon home. Preserve a migrated feature's existing storage paths under it. */
     home,
+    daemon,
     logger,
     config,
     secrets,

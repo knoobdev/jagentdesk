@@ -214,8 +214,6 @@ import {
 } from "../utils/project-custom-icon.js";
 import { VoiceSession } from "./session/voice/voice-session.js";
 import { CheckoutSession } from "./session/checkout/checkout-session.js";
-import { ForgeHubSession } from "./session/forge/forge-hub-session.js";
-import { FileSecretStore } from "./database/secret-store.js";
 import {
   createWorkspaceGitObserverService,
   type WorkspaceGitObserverService,
@@ -234,22 +232,9 @@ import { type ActivityGraphService } from "./agent/activity-graph/service.js";
 import { ActivityGraphSession } from "./session/activity-graph/activity-graph-session.js";
 import { type SessionShareService } from "./session-share/service.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
-import { JiraSession } from "./session/jira/jira-session.js";
 import { FigmaSession, isFigmaRequest } from "./session/figma/figma-session.js";
 import { type FigmaService } from "./figma/service.js";
-import { type JiraService } from "./jira/service.js";
 import { SshService } from "./ssh/ssh-service.js";
-import { SideloadSession } from "./session/sideload/sideload-session.js";
-import { type SideloadService } from "./sideload/sideload-service.js";
-import { SimulatorService } from "./simulator/simulator-service.js";
-import { SimulatorStreams, fleetSnapshot } from "./simulator/simulator-streams.js";
-import { type PhysicalDeviceHub } from "./devices/hub.js";
-import {
-  PhysicalDeviceSession,
-  deviceErrorText,
-} from "./session/devices/physical-device-session.js";
-import { getSharedProxyService } from "./proxy/proxy-service.js";
-import { fridaAvailability, installFrida } from "./proxy/frida-control.js";
 import { DatabaseRegistry } from "./database/database-registry.js";
 import { ProviderCatalogSession } from "./session/provider/provider-catalog-session.js";
 import { WorkspaceFilesSession } from "./session/files/workspace-files-session.js";
@@ -671,9 +656,6 @@ export interface SessionOptions {
 
   hostToolInstaller?: HostToolInstaller | null;
 
-  // Spec 27: the daemon-wide physical device hub (null in tests and hosts without it).
-  physicalDevices?: PhysicalDeviceHub | null;
-
   clusterRegistry?: ClusterRegistry;
 
   databaseRegistry?: DatabaseRegistry;
@@ -683,12 +665,6 @@ export interface SessionOptions {
   // Custom API providers (spec 34 / ADR-0047): daemon-wide service; null while it is
   // unavailable — its requests then get an error response instead of timing out silently.
   customProvidersService?: CustomProviderService | null;
-
-  /** Sideload (spec 26); null in tests and hosts that do not run it. */
-  sideloadService?: SideloadService | null;
-
-  // Daemon-wide Jira service (spec 29); absent in tests that do not exercise Jira.
-  jiraService?: JiraService | null;
 
   botsService?: BotsService | null;
 
@@ -1231,8 +1207,6 @@ export class Session {
 
   private readonly checkoutSession: CheckoutSession;
 
-  private readonly forgeHubSession: ForgeHubSession;
-
   private readonly chatScheduleLoopSession: ChatScheduleLoopSession;
 
   private readonly autorunSession: AutorunSession | null;
@@ -1243,8 +1217,6 @@ export class Session {
 
   private readonly activityGraphSession: ActivityGraphSession | null;
 
-  private jiraSession: JiraSession | null = null;
-
   private botsSession: BotsSession | null = null;
 
   private figmaSession: FigmaSession | null = null;
@@ -1253,25 +1225,11 @@ export class Session {
 
   private customProvidersService: CustomProviderService | null = null;
 
-  private sideloadSession: SideloadSession | null = null;
-
   private clusterRegistry!: ClusterRegistry;
 
   private databaseRegistry!: DatabaseRegistry;
 
   private builtinSession!: BuiltinServerSession;
-
-  private readonly simulatorService = new SimulatorService();
-
-  private readonly physicalDevices: PhysicalDeviceHub | null;
-
-  private readonly simulatorStreams: SimulatorStreams;
-
-  private readonly physicalDeviceSession: PhysicalDeviceSession | null;
-
-  private readonly proxyService = getSharedProxyService();
-
-  private readonly proxySubscriptionIds = new Set<string>();
 
   private readonly usageSession: UsageSession;
 
@@ -1476,16 +1434,6 @@ export class Session {
       worktreesRoot: this.worktreesRoot,
       logger: this.sessionLogger,
     });
-    // Forge Hub (spec 19 / ADR-0015): repo-scoped remote-forge reads. Token secrets
-    // for method:"token" connections live in a dedicated encrypted store under home.
-    const forgeSecretDir = resolve(this.jagentdeskHome, "forge");
-    this.forgeHubSession = new ForgeHubSession({
-      host: { emit: (msg) => this.emit(msg) },
-      secretStore: new FileSecretStore(forgeSecretDir),
-      // Token-connection index (connections.json) is persisted alongside the secrets.
-      secretStoreDir: forgeSecretDir,
-      logger: this.sessionLogger,
-    });
     this.workspaceGitObserver = createWorkspaceGitObserverService({
       workspaceGitService: this.workspaceGitService,
       describeWorkspaceRecordWithGitData: (workspace) =>
@@ -1554,18 +1502,10 @@ export class Session {
       autorunSession: this.autorunSession,
       sessionShareSession: this.sessionShareSession,
       activityGraphSession: this.activityGraphSession,
-      jiraSession: this.jiraSession,
     } = this.createOptionalSessions(options));
     this.initClusterSession(options);
     this.initDatabaseSession(options);
     this.initSshSession(options);
-    this.sideloadSession = options.sideloadService
-      ? new SideloadSession({
-          emit: (msg) => this.emit(msg),
-          service: options.sideloadService,
-          logger: this.sessionLogger,
-        })
-      : null;
     this.figmaSession = this.createFigmaSession(options.figmaService);
     this.usageSession = new UsageSession({
       isEnabled: () => this.daemonConfigStore?.get().usage?.enabled !== false,
@@ -1650,9 +1590,6 @@ export class Session {
     this.usageHistory = options.usageHistory ?? null;
     this.hostCapabilities = options.hostCapabilities;
     this.hostToolInstaller = options.hostToolInstaller;
-    this.physicalDevices = options.physicalDevices ?? null;
-    this.simulatorStreams = new SimulatorStreams(this.simulatorService, this.physicalDevices);
-    this.physicalDeviceSession = this.createPhysicalDeviceSession();
     this.terminalManager = terminalManager;
     this.terminalController = new TerminalSessionController({
       terminalManager,
@@ -1823,6 +1760,9 @@ export class Session {
           ...(this.customProvidersService ? { customProviders: this.customProvidersService } : {}),
         },
       ),
+      service: builtinServerRegistry.lookup(this.jagentdeskHome),
+      provided: builtinServerRegistry.provided,
+      transportBufferedAmount: () => this.getTransportBufferedAmount(),
       terminals: this.terminalManager,
       remoteDocker: () => this.sshService.modules?.docker,
       remoteK8s: () => this.sshService.modules?.remoteK8s,
@@ -1870,7 +1810,6 @@ export class Session {
     autorunSession: AutorunSession | null;
     sessionShareSession: SessionShareSession | null;
     activityGraphSession: ActivityGraphSession | null;
-    jiraSession: JiraSession | null;
   } {
     return {
       autorunSession: options.autorunService
@@ -1901,13 +1840,6 @@ export class Session {
               },
             },
             service: options.activityGraphService,
-            logger: this.sessionLogger,
-          })
-        : null,
-      jiraSession: options.jiraService
-        ? new JiraSession({
-            service: options.jiraService,
-            emit: (msg) => this.emit(msg),
             logger: this.sessionLogger,
           })
         : null,
@@ -3157,13 +3089,9 @@ export class Session {
       () => this.dispatchSpecModeMessage(msg, source),
       () => this.dispatchSessionShareMessage(msg),
       () => this.activityGraphSession?.dispatch(msg),
-      () => this.dispatchSideloadMessage(msg),
       () => this.botsSession?.dispatch(msg),
-      () => this.dispatchJiraMessage(msg),
       () => this.dispatchFigmaMessage(msg),
       () => this.builtinSession.dispatch(msg),
-      () => this.dispatchSimulatorMessage(msg),
-      () => this.dispatchProxyMessage(msg),
       () => this.dispatchMigrationMessage(msg),
       () => this.dispatchBuiltinPluginMessage(msg),
       () => this.dispatchPluginMessage(msg),
@@ -3498,16 +3426,7 @@ export class Session {
   private stopDisabledBuiltinStreams(): void {
     const builtin = this.pluginRuntime?.builtin;
     if (!builtin) return;
-    if (!builtin.isEnabled("devices")) {
-      this.simulatorStreams.disposeAll();
-      this.physicalDeviceSession?.dispose();
-    }
-    if (!builtin.isEnabled("jira")) this.jiraSession?.suspend();
     if (!builtin.isEnabled("activity-graph")) this.activityGraphSession?.dispose();
-    if (!builtin.isEnabled("workbench")) {
-      for (const id of this.proxySubscriptionIds) this.proxyService.unsubscribe(id);
-      this.proxySubscriptionIds.clear();
-    }
   }
 
   private subscribeToPluginChanges(
@@ -3995,47 +3914,6 @@ export class Session {
       case "forge.search.request":
       case "github_search_request":
         return this.checkoutSession.handleForgeSearchRequest(msg);
-      case "forge.connection.list.request":
-      case "forge.connection.add.request":
-      case "forge.connection.remove.request":
-      case "forge.repo.list.request":
-      case "forge.change_request.list.request":
-      case "forge.change_request.files.request":
-      case "forge.branch.list.request":
-      case "forge.commit.list.request":
-      case "forge.commit.compare.request":
-      case "forge.tree.list.request":
-      case "forge.file.get.request":
-      case "forge.change_request.review.request":
-      case "forge.change_request.merge.request":
-      case "forge.pipeline.list.request":
-      case "forge.pipeline.get.request":
-      case "forge.job.log.request":
-      case "forge.pipeline.rerun.request":
-      case "forge.pipeline.cancel.request":
-      case "forge.job.play.request":
-      case "forge.change_request.set_auto_merge.request":
-      case "forge.artifact.list.request":
-      case "forge.artifact.download.request":
-      case "forge.release.list.request":
-      case "forge.tag.list.request":
-      case "forge.issue.list.request":
-      case "forge.issue.get.request":
-      case "forge.issue.create.request":
-      case "forge.issue.comment.request":
-      case "forge.issue.close.request":
-      case "forge.member.list.request":
-      case "forge.member.add.request":
-      case "forge.member.remove.request":
-      case "forge.change_request.create.request":
-      case "forge.change_request.close.request":
-      case "forge.release.create.request":
-      case "forge.release.get.request":
-      case "forge.cli.status.request":
-      case "forge.cli.install.request":
-      case "forge.connection.login.request":
-      case "forge.connection.login.cancel.request":
-        return this.forgeHubSession.handle(msg);
       case "stash_save_request":
         return this.checkoutSession.handleStashSaveRequest(msg);
       case "stash_pop_request":
@@ -4338,787 +4216,6 @@ export class Session {
   }
 
   // oxlint-disable-next-line complexity
-  // The fleet itself: listing it, what the host can run, and adding devices to it.
-  private dispatchSimulatorFleet(
-    msg: SessionInboundMessage,
-    fail: (error: unknown) => string,
-  ): Promise<void> | undefined {
-    if (msg.type === "simulator/list") {
-      const { requestId } = msg;
-      return fleetSnapshot(this.simulatorService, this.physicalDevices)
-        .then((result) => {
-          this.emit({
-            type: "simulator/list/response",
-            payload: { requestId, error: null, ...result },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/list/response",
-            payload: {
-              requestId,
-              error: fail(error),
-              availability: { simctl: false, idb: false, maestro: false, xcode: false },
-              devices: [],
-            },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/catalog") {
-      const { requestId } = msg;
-      return this.simulatorService
-        .catalog()
-        .then((runtimes) => {
-          this.emit({
-            type: "simulator/catalog/response",
-            payload: { requestId, error: null, runtimes },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/catalog/response",
-            payload: { requestId, error: fail(error), runtimes: [] },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/create") {
-      const { requestId } = msg;
-      return this.simulatorService
-        .create(msg.name, msg.deviceTypeId, msg.runtimeId, msg.boot ?? false)
-        .then((udid) => {
-          this.emit({
-            type: "simulator/create/response",
-            payload: { requestId, error: null, udid },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/create/response",
-            payload: { requestId, error: fail(error), udid: "" },
-          });
-          return undefined;
-        });
-    }
-    return undefined;
-  }
-
-  private dispatchProxyMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    const fail = (error: unknown): string =>
-      error instanceof Error ? error.message : String(error);
-    if (msg.type === "proxy/capture/start") {
-      const { requestId } = msg;
-      return this.proxyService
-        .captureStart({ mode: msg.mode, label: msg.label, udid: msg.udid, bundleId: msg.bundleId })
-        .then((session) => {
-          this.emit({
-            type: "proxy/capture/start/response",
-            payload: { requestId, error: null, session },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "proxy/capture/start/response",
-            payload: { requestId, error: fail(error), session: null },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "proxy/capture/stop") {
-      const { requestId, sessionId } = msg;
-      return this.proxyService
-        .captureStop(sessionId)
-        .then(() => {
-          this.emit({
-            type: "proxy/capture/stop/response",
-            payload: { requestId, error: null, sessionId },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "proxy/capture/stop/response",
-            payload: { requestId, error: fail(error), sessionId },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "proxy/session/remove") {
-      const { requestId, sessionId } = msg;
-      return this.proxyService
-        .removeSession(sessionId)
-        .then(() => {
-          this.emit({
-            type: "proxy/session/remove/response",
-            payload: { requestId, error: null, sessionId },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "proxy/session/remove/response",
-            payload: { requestId, error: fail(error), sessionId },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "proxy/sessions/list") {
-      const { requestId } = msg;
-      this.emit({
-        type: "proxy/sessions/list/response",
-        payload: { requestId, error: null, sessions: this.proxyService.sessionsList() },
-      });
-      return undefined;
-    }
-    if (msg.type === "proxy/history/query") {
-      const { requestId } = msg;
-      const rows = this.proxyService.historyQuery({
-        sessionId: msg.sessionId,
-        host: msg.host,
-        method: msg.method,
-        status: msg.status,
-        contains: msg.contains,
-        limit: msg.limit,
-      });
-      this.emit({
-        type: "proxy/history/query/response",
-        payload: { requestId, error: null, rows },
-      });
-      return undefined;
-    }
-    if (msg.type === "proxy/transaction/get") {
-      const { requestId } = msg;
-      this.emit({
-        type: "proxy/transaction/get/response",
-        payload: { requestId, error: null, transaction: this.proxyService.transactionGet(msg.id) },
-      });
-      return undefined;
-    }
-    if (msg.type === "proxy/history/clear") {
-      const { requestId } = msg;
-      this.proxyService.clearHistory(msg.sessionId);
-      this.emit({ type: "proxy/history/clear/response", payload: { requestId, error: null } });
-      return undefined;
-    }
-    if (msg.type === "proxy/transaction/delete") {
-      const { requestId, id } = msg;
-      this.proxyService.deleteTransaction(id);
-      this.emit({
-        type: "proxy/transaction/delete/response",
-        payload: { requestId, error: null, id },
-      });
-      return undefined;
-    }
-    if (msg.type === "proxy/transaction/annotate") {
-      const { requestId } = msg;
-      const row = this.proxyService.annotate(msg.id, {
-        comment: msg.comment,
-        highlight: msg.highlight,
-      });
-      this.emit({
-        type: "proxy/transaction/annotate/response",
-        payload: { requestId, error: null, row },
-      });
-      return undefined;
-    }
-    if (msg.type === "proxy/ca/export") {
-      const { requestId } = msg;
-      try {
-        this.emit({
-          type: "proxy/ca/export/response",
-          payload: { requestId, error: null, pem: this.proxyService.caExportPem() },
-        });
-      } catch (error) {
-        this.emit({
-          type: "proxy/ca/export/response",
-          payload: { requestId, error: fail(error), pem: "" },
-        });
-      }
-      return undefined;
-    }
-    return this.dispatchProxyMessageContinued(msg);
-  }
-
-  private dispatchProxyMessageContinued(msg: SessionInboundMessage): Promise<void> | undefined {
-    const fail = (error: unknown): string =>
-      error instanceof Error ? error.message : String(error);
-    if (msg.type === "proxy/repeater/send") {
-      const { requestId } = msg;
-      return this.proxyService
-        .repeaterSend({
-          secure: msg.secure,
-          host: msg.host,
-          port: msg.port,
-          method: msg.method,
-          path: msg.path,
-          headers: msg.headers,
-          body: Buffer.from(msg.bodyB64, "base64"),
-        })
-        .then((transaction) => {
-          this.emit({
-            type: "proxy/repeater/send/response",
-            payload: { requestId, error: null, transaction },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "proxy/repeater/send/response",
-            payload: { requestId, error: fail(error), transaction: null },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "proxy/intercept/set") {
-      const { requestId } = msg;
-      const enabled = this.proxyService.setIntercept(msg.enabled);
-      this.emit({
-        type: "proxy/intercept/set/response",
-        payload: { requestId, error: null, enabled },
-      });
-      return undefined;
-    }
-    if (msg.type === "proxy/intercept/decide") {
-      const { requestId, heldId } = msg;
-      this.proxyService.decideIntercept({
-        heldId,
-        action: msg.action,
-        method: msg.method,
-        path: msg.path,
-        headers: msg.headers,
-        bodyB64: msg.bodyB64,
-      });
-      this.emit({
-        type: "proxy/intercept/decide/response",
-        payload: { requestId, error: null, heldId },
-      });
-      return undefined;
-    }
-    if (msg.type === "proxy/intruder/run") {
-      const { requestId } = msg;
-      return this.proxyService
-        .intruderRun({
-          secure: msg.secure,
-          host: msg.host,
-          port: msg.port,
-          template: msg.template,
-          payloads: msg.payloads,
-        })
-        .then((out) => {
-          this.emit({
-            type: "proxy/intruder/run/response",
-            payload: { requestId, error: null, ...out },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "proxy/intruder/run/response",
-            payload: {
-              requestId,
-              error: fail(error),
-              results: [],
-              throttled: false,
-              truncated: false,
-            },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "proxy/frida/status") {
-      const { requestId } = msg;
-      return fridaAvailability()
-        .then((a) => {
-          this.emit({
-            type: "proxy/frida/status/response",
-            payload: {
-              requestId,
-              error: null,
-              frida: a.frida,
-              version: a.version,
-              installer: a.installer,
-            },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "proxy/frida/status/response",
-            payload: {
-              requestId,
-              error: fail(error),
-              frida: false,
-              version: null,
-              installer: null,
-            },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "proxy/frida/install") {
-      const { requestId } = msg;
-      return installFrida()
-        .then((r) => {
-          this.emit({
-            type: "proxy/frida/install/response",
-            payload: { requestId, error: null, ok: r.ok, log: r.log, frida: r.availability.frida },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "proxy/frida/install/response",
-            payload: { requestId, error: fail(error), ok: false, log: "", frida: false },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "proxy/scope/get") {
-      const { requestId } = msg;
-      this.emit({
-        type: "proxy/scope/get/response",
-        payload: { requestId, error: null, rules: this.proxyService.getScope() },
-      });
-      return undefined;
-    }
-    if (msg.type === "proxy/scope/set") {
-      const { requestId } = msg;
-      this.emit({
-        type: "proxy/scope/set/response",
-        payload: { requestId, error: null, rules: this.proxyService.setScope(msg.rules) },
-      });
-      return undefined;
-    }
-    if (msg.type === "proxy/subscribe") {
-      const { requestId, subscriptionId } = msg;
-      this.proxySubscriptionIds.add(subscriptionId);
-      this.proxyService.subscribe(subscriptionId, {
-        onTransaction: (row) =>
-          this.emit({ type: "proxy/transaction", payload: { subscriptionId, row } }),
-        onSession: (session) =>
-          this.emit({ type: "proxy/session", payload: { subscriptionId, session } }),
-        onHeld: (held) =>
-          this.emit({ type: "proxy/intercept/held", payload: { subscriptionId, held } }),
-        onWsMessage: (message) =>
-          this.emit({ type: "proxy/ws-message", payload: { subscriptionId, message } }),
-      });
-      this.emit({
-        type: "proxy/subscribe/response",
-        payload: { requestId, error: null, subscriptionId },
-      });
-      return undefined;
-    }
-    if (msg.type === "proxy/unsubscribe") {
-      const { requestId, subscriptionId } = msg;
-      this.proxySubscriptionIds.delete(subscriptionId);
-      this.proxyService.unsubscribe(subscriptionId);
-      this.emit({
-        type: "proxy/unsubscribe/response",
-        payload: { requestId, error: null, subscriptionId },
-      });
-      return undefined;
-    }
-    return undefined;
-  }
-
-  private createPhysicalDeviceSession(): PhysicalDeviceSession | null {
-    if (!this.physicalDevices) return null;
-    return new PhysicalDeviceSession(
-      this.physicalDevices,
-      {
-        emit: (msg) => this.emit(msg),
-        emitBinary: (frame) => this.emitBinary(frame),
-        supportsBinaryScreenFrames: () => this.supports(CLIENT_CAPS.binaryScreenFrames),
-        transportBufferedAmount: () => this.getTransportBufferedAmount(),
-      },
-      this.sessionLogger,
-    );
-  }
-
-  private dispatchSimulatorMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    const fail = (error: unknown): string =>
-      error instanceof Error ? error.message : String(error);
-    const physical = this.physicalDeviceSession?.handle(msg);
-    if (physical) return physical;
-    const fleet = this.dispatchSimulatorFleet(msg, fail);
-    if (fleet) return fleet;
-    if (msg.type === "simulator/action") {
-      const { requestId, udid } = msg;
-      return this.simulatorService
-        .action(udid, msg.action)
-        .then(() => {
-          this.emit({
-            type: "simulator/action/response",
-            payload: { requestId, error: null, udid },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/action/response",
-            payload: { requestId, error: fail(error), udid },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/tap") {
-      const { requestId } = msg;
-      return this.simulatorService
-        .tap(msg.udid, msg.x, msg.y)
-        .then(() => {
-          this.emit({ type: "simulator/tap/response", payload: { requestId, error: null } });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({ type: "simulator/tap/response", payload: { requestId, error: fail(error) } });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/swipe") {
-      const { requestId } = msg;
-      return this.simulatorService
-        .swipe(msg.udid, msg.x1, msg.y1, msg.x2, msg.y2, msg.durationMs)
-        .then(() => {
-          this.emit({ type: "simulator/swipe/response", payload: { requestId, error: null } });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/swipe/response",
-            payload: { requestId, error: fail(error) },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/input-text") {
-      const { requestId } = msg;
-      return this.simulatorService
-        .inputText(msg.udid, msg.text)
-        .then(() => {
-          this.emit({ type: "simulator/input-text/response", payload: { requestId, error: null } });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/input-text/response",
-            payload: { requestId, error: fail(error) },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/button") {
-      const { requestId } = msg;
-      return this.simulatorService
-        .button(msg.udid, msg.button)
-        .then(() => {
-          this.emit({ type: "simulator/button/response", payload: { requestId, error: null } });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/button/response",
-            payload: { requestId, error: fail(error) },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/describe-ui") {
-      const { requestId } = msg;
-      return this.simulatorService
-        .describeUi(msg.udid)
-        .then((elements) => {
-          this.emit({
-            type: "simulator/describe-ui/response",
-            payload: { requestId, error: null, elements },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/describe-ui/response",
-            payload: { requestId, error: fail(error), elements: [] },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/screenshot") {
-      const { requestId } = msg;
-      return this.simulatorService
-        .screenshot(msg.udid, { format: msg.format, maxDim: msg.maxDim })
-        .then((shot) => {
-          this.emit({
-            type: "simulator/screenshot/response",
-            payload: {
-              requestId,
-              error: null,
-              pngBase64: shot.mimeType === "image/png" ? shot.base64 : "",
-              imageBase64: shot.base64,
-              mimeType: shot.mimeType,
-              width: shot.width,
-              height: shot.height,
-            },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/screenshot/response",
-            payload: { requestId, error: fail(error), pngBase64: "" },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/install-app") {
-      const { requestId } = msg;
-      return this.simulatorService
-        .installApp(msg.udid, msg.appPath)
-        .then(() => {
-          this.emit({
-            type: "simulator/install-app/response",
-            payload: { requestId, error: null },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/install-app/response",
-            payload: { requestId, error: fail(error) },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/install-batch") {
-      const { requestId } = msg;
-      return this.simulatorService
-        .installOnMany(msg.udids, msg.filePath)
-        .then((results) => {
-          this.emit({
-            type: "simulator/install-batch/response",
-            payload: { requestId, error: null, results },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/install-batch/response",
-            payload: { requestId, error: fail(error), results: [] },
-          });
-          return undefined;
-        });
-    }
-    return this.dispatchSimulatorMessageContinued(msg);
-  }
-
-  private dispatchSimulatorMessageContinued(msg: SessionInboundMessage): Promise<void> | undefined {
-    const fail = (error: unknown): string =>
-      error instanceof Error ? error.message : String(error);
-    if (msg.type === "simulator/launch-app") {
-      const { requestId } = msg;
-      return this.simulatorService
-        .launchApp(msg.udid, msg.bundleId, msg.terminateExisting)
-        .then(() => {
-          this.emit({ type: "simulator/launch-app/response", payload: { requestId, error: null } });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/launch-app/response",
-            payload: { requestId, error: fail(error) },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/terminate-app") {
-      const { requestId } = msg;
-      return this.simulatorService
-        .terminateApp(msg.udid, msg.bundleId)
-        .then(() => {
-          this.emit({
-            type: "simulator/terminate-app/response",
-            payload: { requestId, error: null },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/terminate-app/response",
-            payload: { requestId, error: fail(error) },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/open-url") {
-      const { requestId } = msg;
-      return this.simulatorService
-        .openUrl(msg.udid, msg.url)
-        .then(() => {
-          this.emit({ type: "simulator/open-url/response", payload: { requestId, error: null } });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/open-url/response",
-            payload: { requestId, error: fail(error) },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/slim") {
-      const { requestId, udid } = msg;
-      return this.simulatorService
-        .slim(udid, msg.reboot ?? false)
-        .then((slimState) => {
-          this.emit({
-            type: "simulator/slim/response",
-            payload: { requestId, error: null, udid, slimState },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/slim/response",
-            payload: { requestId, error: fail(error), udid, slimState: "unknown" },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/unslim") {
-      const { requestId, udid } = msg;
-      return this.simulatorService
-        .unslim(udid)
-        .then((slimState) => {
-          this.emit({
-            type: "simulator/unslim/response",
-            payload: { requestId, error: null, udid, slimState },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/unslim/response",
-            payload: { requestId, error: fail(error), udid, slimState: "unknown" },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/subscribe") {
-      const { requestId, subscriptionId } = msg;
-      this.emit({
-        type: "simulator/subscribe/response",
-        payload: { requestId, error: null, subscriptionId },
-      });
-      void this.simulatorStreams.subscribeFleet(subscriptionId, (snapshot) => {
-        this.emit({ type: "simulator/snapshot", payload: { subscriptionId, ...snapshot } });
-      });
-      return undefined;
-    }
-    if (msg.type === "simulator/unsubscribe") {
-      const { requestId, subscriptionId } = msg;
-      this.simulatorStreams.unsubscribeFleet(subscriptionId);
-      this.emit({
-        type: "simulator/unsubscribe/response",
-        payload: { requestId, error: null, subscriptionId },
-      });
-      return undefined;
-    }
-    if (msg.type === "simulator/logs/subscribe") {
-      const { requestId, subscriptionId } = msg;
-      return this.simulatorStreams
-        .subscribeLogs(subscriptionId, msg.udid, (chunk) => {
-          this.emit({ type: "simulator/log-chunk", payload: { subscriptionId, chunk } });
-        })
-        .then(() => {
-          this.emit({
-            type: "simulator/logs/subscribe/response",
-            payload: { requestId, error: null, subscriptionId },
-          });
-          return undefined;
-        })
-        .catch((error: unknown) => {
-          this.emit({
-            type: "simulator/logs/subscribe/response",
-            payload: { requestId, error: deviceErrorText(error), subscriptionId },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/logs/unsubscribe") {
-      const { requestId, subscriptionId } = msg;
-      this.simulatorStreams.unsubscribeLogs(subscriptionId);
-      this.emit({
-        type: "simulator/logs/unsubscribe/response",
-        payload: { requestId, error: null, subscriptionId },
-      });
-      return undefined;
-    }
-    return undefined;
-  }
-
-  // Jira (spec 29.5). Every jira.* request is listed here AND handled in JiraSession.handle: a
-  // request missing from this list never reaches the handler and times out without a response.
-  // oxlint-disable-next-line complexity
-  private dispatchJiraMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    if (!this.jiraSession) return undefined;
-    switch (msg.type) {
-      case "jira.connections.list.request":
-      case "jira.connections.add.request":
-      case "jira.connections.remove.request":
-      case "jira.connections.test.request":
-      case "jira.oauth.begin.request":
-      case "jira.oauth.complete.request":
-      case "jira.oauth.delegate.request":
-      case "jira.projects.list.request":
-      case "jira.boards.list.request":
-      case "jira.boards.get.request":
-      case "jira.boards.configuration.request":
-      case "jira.board.issues.request":
-      case "jira.board.watch.request":
-      case "jira.board.unwatch.request":
-      case "jira.backlog.get.request":
-      case "jira.sprints.list.request":
-      case "jira.sprints.create.request":
-      case "jira.sprints.start.request":
-      case "jira.sprints.complete.request":
-      case "jira.sprints.move_issues.request":
-      case "jira.issue.get.request":
-      case "jira.issue.create.request":
-      case "jira.issue.create_meta.request":
-      case "jira.issue.update.request":
-      case "jira.issue.transitions.request":
-      case "jira.issue.transition.request":
-      case "jira.issue.assign.request":
-      case "jira.issue.rank.request":
-      case "jira.issue.watch.request":
-      case "jira.issue.unwatch.request":
-      case "jira.issue.watchers.set.request":
-      case "jira.issue.changelog.list.request":
-      case "jira.issue.comments.list.request":
-      case "jira.issue.comments.add.request":
-      case "jira.issue.comments.update.request":
-      case "jira.issue.worklog.list.request":
-      case "jira.issue.worklog.add.request":
-      case "jira.issue.attachments.upload.request":
-      case "jira.issue.attachments.download.request":
-      case "jira.issue.attachments.delete.request":
-      case "jira.issue.links.add.request":
-      case "jira.search.request":
-      case "jira.jql.suggest.request":
-      case "jira.filters.list.request":
-      case "jira.filters.save.request":
-      case "jira.users.find.request":
-      case "jira.swimlanes.get.request":
-      case "jira.swimlanes.set.request":
-        return this.jiraSession.handle(msg);
-      default:
-        return undefined;
-    }
-  }
-
   private createFigmaSession(service: FigmaService | null | undefined): FigmaSession | null {
     if (!service) return null;
     return new FigmaSession({
@@ -5134,11 +4231,6 @@ export class Session {
   private dispatchFigmaMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     if (!this.figmaSession || !isFigmaRequest(msg)) return undefined;
     return this.figmaSession.handle(msg);
-  }
-
-  private dispatchSideloadMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    if (!this.sideloadSession?.handles(msg.type)) return undefined;
-    return this.sideloadSession.handle(msg);
   }
 
   private dispatchMigrationMessage(msg: SessionInboundMessage): Promise<void> | undefined {
@@ -10764,13 +9856,8 @@ export class Session {
     await this.voiceSession.cleanup();
 
     this.botsSession?.dispose();
-    this.jiraSession?.dispose();
     this.figmaSession?.dispose();
     await this.builtinSession.dispose();
-    this.simulatorStreams.disposeAll();
-    this.physicalDeviceSession?.dispose();
-    for (const id of this.proxySubscriptionIds) this.proxyService.unsubscribe(id);
-    this.proxySubscriptionIds.clear();
     this.terminalController.dispose();
     for (const controller of this.terminalStreamControllers.values()) controller.dispose();
     this.terminalStreamControllers.clear();

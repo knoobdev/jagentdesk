@@ -85,12 +85,12 @@ vi.mock("react-native-unistyles", () => ({
 
 vi.mock("@/constants/platform", () => ({ isWeb: true, isNative: false }));
 
-vi.mock("@/jira/ui/styles", () => {
+vi.mock("@/components/integration-ui/styles", () => {
   const style = new Proxy({}, { get: () => ({}) });
   return { jiraStyles: style };
 });
 
-vi.mock("@/jira/ui/primitives", () => ({
+vi.mock("@/components/integration-ui/primitives", () => ({
   Input: (props: {
     value?: string;
     placeholder?: string;

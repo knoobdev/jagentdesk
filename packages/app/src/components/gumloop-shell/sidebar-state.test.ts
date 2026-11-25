@@ -78,6 +78,7 @@ describe("Gumloop sidebar model", () => {
         { routeSegment: "database", title: "Data" },
         { routeSegment: "argocd", title: "Argo CD" },
         { routeSegment: "servers", title: "Servers" },
+        { routeSegment: "jira", title: "Jira" },
       ]),
     ).toMatchObject({
       kind: "destination",

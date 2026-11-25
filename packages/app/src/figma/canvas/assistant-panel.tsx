@@ -12,10 +12,10 @@ import {
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { useSessionStore, type Agent } from "@/stores/session-store";
-import { EmptyState, IconButton, tint } from "@/jira/ui/primitives";
-import { jiraStyles } from "@/jira/ui/styles";
+import { EmptyState, IconButton, tint } from "@/components/integration-ui/primitives";
+import { jiraStyles } from "@/components/integration-ui/styles";
 import { FigmaAssistantDraft } from "./assistant-draft";
-import { firstWorkspaceDirectory } from "@/jira/assistant/workspaces";
+import { firstWorkspaceDirectory } from "@/utils/usable-workspaces";
 import {
   FIGMA_ASSISTANT_LABEL,
   FIGMA_ASSISTANT_SCOPE_LABEL,

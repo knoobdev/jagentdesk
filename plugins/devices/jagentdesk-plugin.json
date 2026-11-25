@@ -12,5 +12,9 @@
     "iosPhysical",
     "iosSideload"
   ],
-  "builtinOrder": 10
+  "builtinOrder": 10,
+  "builtinEntrypoints": {
+    "server": "server/index.ts",
+    "client": "client/index.tsx"
+  }
 }

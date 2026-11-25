@@ -25,6 +25,8 @@ export interface BuiltinDestination {
   routeChanges?: (listener: () => void) => () => void;
   /** Phase 1 daemons advertised some destinations with their own feature flag. */
   requiresFeature?: string;
+  /** Shown only when the host reports at least one of these capabilities (spec 24.4). */
+  hostCapabilities?: readonly import("@jagentdesk/protocol/host-capabilities").HostCapabilityId[];
 }
 export interface BuiltinLeftPanelOptions {
   /** Replace the navigation list in the classic sidebar while this segment's route is open. */
@@ -34,6 +36,14 @@ export interface BuiltinLeftPanelOptions {
    * Gumloop header. Without it the panel is a resource drill-in on desktop and mobile.
    */
   section?: boolean;
+}
+/** Renders a composer attachment of a core attachment kind owned by this feature. */
+export interface BuiltinAttachmentPillProps {
+  attachment: import("@/attachments/types").ComposerAttachment;
+  index: number;
+  disabled: boolean;
+  onOpen: (attachment: import("@/attachments/types").ComposerAttachment) => void;
+  onRemove: (index: number) => void;
 }
 export interface BuiltinScreen extends BuiltinClientProps {
   sshDocker?: import("@/ssh/ui/ssh-docker-client").SshDockerTarget;
@@ -77,6 +87,8 @@ export interface BuiltinClientHost {
     search: BuiltinAttachmentSource["search"],
   ): void;
   toolCallRenderer<Match>(id: string, renderer: BuiltinToolCallRenderer<Match>): void;
+  /** Composer pill for attachments of `kind`. */
+  attachmentPill(kind: string, component: ComponentType<BuiltinAttachmentPillProps>): void;
 }
 export interface BuiltinAttachmentSource {
   source: PluginAttachmentSourceContribution;
@@ -95,6 +107,7 @@ export interface BuiltinClientContributions {
   timeline: Map<string, ComponentType<BuiltinClientProps & { item: PluginTimelineItem }>>;
   attachments: BuiltinAttachmentSource[];
   toolCalls: Map<string, BuiltinToolCallRenderer<unknown>>;
+  pills: Map<string, ComponentType<BuiltinAttachmentPillProps>>;
 }
 export class BuiltinClientRegistry {
   private readonly entries = new Map<BuiltinPluginId, BuiltinClientContributions>();
@@ -113,6 +126,7 @@ export class BuiltinClientRegistry {
       timeline: new Map(),
       attachments: [],
       toolCalls: new Map(),
+      pills: new Map(),
     };
     this.entries.set(id, entry);
     const add = <T>(map: Map<string, T>, key: string, value: T) => {
@@ -136,6 +150,7 @@ export class BuiltinClientRegistry {
       attachmentSource: (source, search) => entry.attachments.push({ source, search }),
       toolCallRenderer: (key, renderer) =>
         add(entry.toolCalls, key, renderer as BuiltinToolCallRenderer<unknown>),
+      attachmentPill: (kind, component) => add(entry.pills, kind, component),
     };
   }
   /** Every consumer selects against live per-host state, including retained screens. */
@@ -147,14 +162,23 @@ export class BuiltinClientRegistry {
   destinations(): readonly BuiltinDestination[] {
     return [...this.entries.values()].flatMap((entry) => entry.destinations);
   }
-  /** Drill-in titles for every route segment a destination owns. */
+  /**
+   * Drill-in titles for every route segment of a destination whose feature registers a left
+   * panel for it; other destinations keep the root navigation (Forge).
+   */
   drillTitles(): readonly { routeSegment: string; title: string }[] {
-    return this.destinations().flatMap((destination) =>
-      [destination.routeSegment, ...(destination.routeSegments ?? [])].map((routeSegment) => ({
-        routeSegment,
-        title: destination.shortTitle ?? destination.title,
-      })),
-    );
+    const segments = (destination: BuiltinDestination) => [
+      destination.routeSegment,
+      ...(destination.routeSegments ?? []),
+    ];
+    return this.destinations()
+      .filter((destination) => segments(destination).some((segment) => this.hasPanel(segment)))
+      .flatMap((destination) =>
+        segments(destination).map((routeSegment) => ({
+          routeSegment,
+          title: destination.shortTitle ?? destination.title,
+        })),
+      );
   }
   hasPanel(routeSegment: string): boolean {
     return [...this.entries.values()].some((entry) => entry.panels.has(routeSegment));
@@ -182,6 +206,12 @@ export class BuiltinClientRegistry {
   }
   owner(routeSegment: string): BuiltinPluginId | undefined {
     return [...this.entries].find(([, entry]) => entry.screens.has(routeSegment))?.[0];
+  }
+  ownsLeftPanel(routeSegment: string): boolean {
+    return this.hasPanel(routeSegment);
+  }
+  ownsAttachmentKind(kind: string): boolean {
+    return [...this.entries.values()].some((entry) => entry.pills.has(kind));
   }
   screen(routeSegment: string) {
     return [...this.entries.values()].map((entry) => entry.screens.get(routeSegment)).find(Boolean);

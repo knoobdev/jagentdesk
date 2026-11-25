@@ -1,7 +1,9 @@
-import { ProxyScreen } from "@/screens/proxy-screen";
+import { BuiltinScreen } from "@/plugins/builtin/surfaces";
+import { useHostRouteServerId } from "@/navigation/host-route-context";
 
 export default function HostProxyRoute() {
-  return <ProxyScreen />;
+  const serverId = useHostRouteServerId();
+  return serverId ? <BuiltinScreen segment="proxy" serverId={serverId} /> : null;
 }
 
 export { ErrorBoundary } from "expo-router";

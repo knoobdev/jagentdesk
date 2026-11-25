@@ -68,12 +68,12 @@ vi.mock("react-native-unistyles", () => ({
 
 vi.mock("@/constants/platform", () => ({ isWeb: true, isNative: false }));
 
-vi.mock("@/jira/ui/styles", () => {
+vi.mock("@/components/integration-ui/styles", () => {
   const style = new Proxy({}, { get: () => ({}) });
   return { jiraStyles: style };
 });
 
-vi.mock("@/jira/ui/primitives", () => ({
+vi.mock("@/components/integration-ui/primitives", () => ({
   ErrorBanner: ({ message, action }: { message: string; action?: React.ReactNode }) =>
     React.createElement("span", { "data-testid": "error-banner" }, message, action ?? null),
 }));

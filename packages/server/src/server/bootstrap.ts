@@ -22,14 +22,11 @@ import { LocalBotTriggers } from "./bots/triggers.js";
 import { createBotAgentTools } from "./bots/agent-tools.js";
 import { createRestartRecovery } from "./agent/restart-recovery/index.js";
 import { PROVIDER_BACKGROUND_REFRESH_INTERVAL_MS } from "./agent/provider-refresh-schedule.js";
-import { getSharedProxyService } from "./proxy/proxy-service.js";
 import { resolveJAgentDeskToolPolicy } from "./agent/jagentdesk-tool-policy.js";
 import { BuiltinPluginLoader } from "./plugins/builtin/index.js";
 import { withTimeout } from "../utils/promise-timeout.js";
 import { describeHookWorkspace } from "./plugins/lifecycle/index.js";
 import { WorkspaceArchiveOperations } from "./workspace-archive-operations.js";
-import { PhysicalDeviceHub } from "./devices/hub.js";
-import { clearGrantsWhenSessionsEnd } from "./devices/agent-grants.js";
 import { HostCapabilityService } from "./host-capabilities/service.js";
 import { closeAgentMessageDelivery } from "./agent/agent-prompt.js";
 import {
@@ -40,7 +37,7 @@ import {
 } from "./agent/finish-subscriptions/index.js";
 import { ensureToolDirsOnPath, HostToolInstaller } from "./host-tools/installer.js";
 import type { HttpFetch } from "./host-tools/release.js";
-import { setForgeToolInstaller } from "./session/forge/forge-cli-installer.js";
+import { setSharedHostToolInstaller } from "./host-tools/shared-installer.js";
 import { unarchiveAgentState } from "./agent/agent-prompt.js";
 import { unarchiveWorkspaceAgents } from "./workspace-archive-service.js";
 import { createWorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
@@ -215,7 +212,6 @@ import { ManagedPluginSources } from "./plugins/managed-source.js";
 import { BrowserToolsBroker } from "./browser-tools/broker.js";
 import { WorkspaceGitServiceImpl } from "./workspace-git-service.js";
 import { resolveWorkspaceIdForPath } from "./resolve-workspace-id-for-path.js";
-import { ForgeHubService } from "./session/forge/forge-hub-session.js";
 import { FileSecretStore } from "./database/secret-store.js";
 import { DEFAULT_RELAY_ENDPOINT, extractProviderOverrides } from "./config.js";
 import { createCustomProviderService } from "./custom-providers/service.js";
@@ -231,13 +227,7 @@ import type { TerminalManager } from "../terminal/terminal-manager.js";
 import { startWorkerTerminalManager } from "../terminal/worker-terminal-manager.js";
 import { createSshTerminalManager } from "../terminal/ssh-terminal-manager.js";
 import { SshService } from "./ssh/ssh-service.js";
-import { SideloadService, type SideloadSigner } from "./sideload/sideload-service.js";
-import { createSideloadAgentTools } from "./sideload/agent-tools.js";
-import { createSideloadDeviceSigner } from "./devices/sideload-signer.js";
-import { JiraService } from "./jira/service.js";
 import { createFigmaService } from "./figma/create.js";
-import { atlassianEndpointsFromEnv } from "./jira/credentials.js";
-import { createJiraAgentTools } from "./jira/agent-tools.js";
 import { createFigmaAgentTools } from "./figma/agent-tools.js";
 import { SshModules } from "./ssh/ssh-modules.js";
 import { SshModules as SshServerModules } from "./ssh/modules.js";
@@ -567,8 +557,6 @@ export interface JAgentDeskDaemon {
   serviceProxy: ServiceProxySubsystem;
   scriptRuntimeStore: WorkspaceScriptRuntimeStore;
   browserToolsBroker: BrowserToolsBroker;
-  /** Sideload accounts other features sign with (spec 27 signs WebDriverAgent). */
-  sideload: SideloadSigner;
   start(): Promise<void>;
   /** Stops the daemon. Terminals keep running for the next daemon only with keepTerminals. */
   stop(options?: { keepTerminals?: boolean }): Promise<void>;
@@ -1561,19 +1549,6 @@ export async function createJAgentDeskDaemon(
   });
   await clusterRegistry.initialize();
   logger.info("Cluster registry created");
-  // Spec 27 / ADR-0033: one owner for physical phones and tablets, shared by every client
-  // session and every agent's sim_* tools. Prepare device signs WebDriverAgent with a Sideload
-  // Apple account (spec 26); sideloadService is created further down, hence the late lookup.
-  let deviceSignerSource: SideloadService | null = null;
-  const physicalDevices = new PhysicalDeviceHub({
-    jagentdeskHome: config.jagentdeskHome,
-    logger,
-    signer: createSideloadDeviceSigner(() => deviceSignerSource),
-  });
-  const stopDeviceGrantWatch = clearGrantsWhenSessionsEnd(
-    (callback) => agentManager.subscribe(callback, { replayState: false }),
-    physicalDevices,
-  );
   const databaseRegistry = new DatabaseRegistry({
     jagentdeskHome: config.jagentdeskHome,
     logger,
@@ -1601,35 +1576,6 @@ export async function createJAgentDeskDaemon(
   await sshModules.initialize();
   sshService.sessionModules = sshModules;
   logger.info("SSH service initialized");
-  // Sideload (spec 26 / ADR-0032): accounts, signing, installs and the hourly refresh job.
-  // Secrets stay in <home>/sideload's own secret store; prompts, progress and notices fan out
-  // to every client (wsServer is late-bound). The two env knobs shorten the refresh cycle for
-  // the 26.12.4 acceptance run; they are not user settings.
-  const sideloadService = new SideloadService({
-    jagentdeskHome: config.jagentdeskHome,
-    logger,
-    broadcast: (message) => wsServer?.broadcast(wrapSessionMessage(message)),
-    pushNotification: (notice) => wsServer?.sendSideloadPush(notice),
-    refreshIntervalMs: positiveEnvNumber("JAGENTDESK_SIDELOAD_REFRESH_INTERVAL_MS"),
-    clockOffsetMs: envNumber("JAGENTDESK_SIDELOAD_CLOCK_OFFSET_MS"),
-  });
-  logger.info("Sideload service initialized");
-  deviceSignerSource = sideloadService;
-  // Daemon-wide Forge Hub service (spec 19 / ADR-0015). One instance shared across
-  // all agents' tool catalogs, mirroring how session.ts builds it per-session. Token
-  // secrets + the connection index live under <home>/forge.
-  const forgeSecretDir = path.resolve(config.jagentdeskHome, "forge");
-  const forgeHubService = new ForgeHubService(new FileSecretStore(forgeSecretDir), forgeSecretDir);
-  logger.info("Forge Hub service created");
-  // Daemon-wide Jira service (spec 29 / ADR-0034 §4): the one credential manager for every
-  // session, view watch and agent tool. Secrets live under <home>/jira.
-  const jiraService = new JiraService({
-    jagentdeskHome: config.jagentdeskHome,
-    endpoints: atlassianEndpointsFromEnv(process.env),
-    logger,
-  });
-  await jiraService.initialize();
-  logger.info("Jira service initialized");
   // Daemon-wide Figma service (spec 32 / ADR-0035): OAuth, REST budget, Figma Link bridge.
   const figmaService = await createFigmaService({
     jagentdeskHome: config.jagentdeskHome,
@@ -1764,7 +1710,9 @@ export async function createJAgentDeskDaemon(
     { elapsed: elapsed(), enabled: config.sessionSharingEnabled === true },
     "Session share service initialized",
   );
-  // Statically linked features start after the shared libraries they consume exist.
+  // Statically linked features start after the shared libraries they consume and the agent
+  // manager exist: they subscribe to agent events and reach clients through the WebSocket server
+  // once it is bound.
   const builtinServices = createBuiltinCoreServices(
     config.jagentdeskHome,
     logger,
@@ -1788,29 +1736,19 @@ export async function createJAgentDeskDaemon(
         }
       },
     },
+    {
+      subscribeAgentEvents: (callback) => agentManager.subscribe(callback, { replayState: false }),
+      broadcast: (message) => wsServer?.broadcast(wrapSessionMessage(message)),
+      pushNotification: (notice) => wsServer?.sendSideloadPush(notice),
+    },
   );
   const stopBuiltinServices = await builtinServerRegistry.start(
     pluginRuntime.builtin,
     builtinServices,
   );
-  await pluginRuntime.builtin.registerLifecycle("devices", {
-    start: () => sideloadService.initialize(),
-    stop: () => {
-      sideloadService.dispose();
-      physicalDevices.dispose();
-    },
-  });
-  await pluginRuntime.builtin.registerLifecycle("workbench", {
-    start: () => {},
-    stop: () => getSharedProxyService().disposeAll(),
-  });
   await pluginRuntime.builtin.registerLifecycle("figma", {
     start: () => figmaService.start(),
     stop: () => figmaService.stopBackground(),
-  });
-  await pluginRuntime.builtin.registerLifecycle("jira", {
-    start: () => {},
-    stop: () => jiraService.dispose(),
   });
   await pluginRuntime.builtin.registerLifecycle("autorun", {
     start: () => autorunService.initialize(),
@@ -1863,8 +1801,8 @@ export async function createJAgentDeskDaemon(
       dependencies.botsTriggerSource ??
       new LocalBotTriggers({
         storage: botStorage,
-        jira: jiraService,
-        jiraEnabled: () => pluginRuntime.builtin.isEnabled("jira"),
+        sources: () =>
+          builtinServerRegistry.botTriggerSources(pluginRuntime.builtin, config.jagentdeskHome),
         logger,
       }),
     push: { send: (payload) => wsServer?.sendBotPush(payload) ?? Promise.resolve() },
@@ -1989,26 +1927,12 @@ export async function createJAgentDeskDaemon(
     clusterRegistry,
     databaseRegistry,
     builtinServices,
-    sideloadAgentTools: (callerAgentId) =>
-      createSideloadAgentTools({
-        service: sideloadService,
-        callerAgentId,
-        requestPermission: (agentId, request) =>
-          agentManager.requestHostToolPermission(agentId, request),
-      }),
     botAgentTools: (callerAgentId) =>
       createBotAgentTools({
         service: botsService,
         agentManager,
         callerAgentId,
         callerLabels: runtime.callerAgentLabels,
-      }),
-    jiraAgentTools: (callerAgentId) =>
-      createJiraAgentTools({
-        service: jiraService,
-        callerAgentId,
-        requestPermission: (agentId, request) =>
-          agentManager.requestHostToolPermission(agentId, request),
       }),
     figmaAgentTools: (callerAgentId) =>
       createFigmaAgentTools({
@@ -2018,7 +1942,6 @@ export async function createJAgentDeskDaemon(
           agentManager.requestHostToolPermission(agentId, request),
       }),
     skillsStorage,
-    forgeHub: forgeHubService,
     browserFingerprintProfiles: {
       list: () => daemonConfigStore.get().browserTools.profiles ?? [],
       activeId: () => daemonConfigStore.get().browserTools.activeProfileId ?? null,
@@ -2043,7 +1966,6 @@ export async function createJAgentDeskDaemon(
     },
     requestHostToolPermission: (agentId, req) =>
       agentManager.requestHostToolPermission(agentId, req),
-    physicalDevices,
     logger,
   });
   const createAgentToolCatalog = (runtime: JAgentDeskToolRuntimeContext) =>
@@ -2222,9 +2144,8 @@ export async function createJAgentDeskDaemon(
               fetch: globalThis.fetch as unknown as HttpFetch,
               githubToken: process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? null,
             });
-            setForgeToolInstaller(hostToolInstaller);
+            setSharedHostToolInstaller(hostToolInstaller);
             server.setHostCapabilities(hostCapabilities, hostToolInstaller);
-            server.setPhysicalDevices(physicalDevices);
             void hostCapabilities.refresh().catch((error: unknown) => {
               logger.warn({ err: error }, "Host capability probe failed");
             });
@@ -2250,7 +2171,6 @@ export async function createJAgentDeskDaemon(
               stop: () => specModeService!.stop(),
             });
             server.setBotsService(botsService);
-            server.setJiraService(jiraService);
             server.setFigmaService(figmaService);
             server.setCustomProvidersService(customProviderService);
           };
@@ -2372,7 +2292,6 @@ export async function createJAgentDeskDaemon(
               autorunService,
               sessionShareService,
               sshService,
-              sideloadService,
               workspaceArchiveOperations,
             );
             wsServer.setHostDial(async (target) => {
@@ -2583,17 +2502,13 @@ export async function createJAgentDeskDaemon(
       logger.error({ err: error }, "Terminal shutdown failed");
     }
     unsubscribeBuiltinAgentSnapshots();
-    stopDeviceGrantWatch();
-    physicalDevices.dispose();
     // Built-in features stop before the shared libraries they consume (remote tasks before SSH).
     await stopBuiltinServices();
     await sshModules.dispose().catch(() => undefined);
     await sshServerModules.dispose().catch(() => undefined);
     sshService.dispose();
-    sideloadService.dispose();
     await botsSlack.dispose();
     await botsService.dispose();
-    jiraService.dispose();
     void figmaService.dispose();
     await speechService.stop();
     await scheduleService.stop().catch(() => undefined);
@@ -2636,23 +2551,10 @@ export async function createJAgentDeskDaemon(
     serviceProxy,
     scriptRuntimeStore,
     browserToolsBroker,
-    sideload: sideloadService,
     start,
     stop,
     getListenTarget: () => boundListenTarget,
   };
-}
-
-function envNumber(name: string): number | undefined {
-  const raw = process.env[name];
-  if (raw === undefined || raw.trim() === "") return undefined;
-  const value = Number(raw);
-  return Number.isFinite(value) ? value : undefined;
-}
-
-function positiveEnvNumber(name: string): number | undefined {
-  const value = envNumber(name);
-  return value !== undefined && value > 0 ? value : undefined;
 }
 
 // The app web build bundled next to the server dist (dist/server/share-app-dist), copied there by

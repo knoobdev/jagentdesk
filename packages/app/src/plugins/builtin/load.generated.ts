@@ -5,7 +5,11 @@ import { register as register2 } from "../../../../../plugins/databases/client/i
 import { register as register3 } from "../../../../../plugins/ssh-servers/client/index";
 import { register as register4 } from "../../../../../plugins/remote-tasks/client/index";
 import { register as register5 } from "../../../../../plugins/custom-providers/client/index";
-import { register as register6 } from "../../../../../plugins/argocd/client/index";
+import { register as register6 } from "../../../../../plugins/jira/client/index";
+import { register as register7 } from "../../../../../plugins/argocd/client/index";
+import { register as register8 } from "../../../../../plugins/devices/client/index";
+import { register as register9 } from "../../../../../plugins/workbench/client/index";
+import { register as register10 } from "../../../../../plugins/forge-hub/client/index";
 import type { BuiltinClientRegistry } from "./host";
 export function loadBuiltins(registry: BuiltinClientRegistry) {
   register0(registry.forPlugin("docker"));
@@ -14,5 +18,9 @@ export function loadBuiltins(registry: BuiltinClientRegistry) {
   register3(registry.forPlugin("ssh-servers"));
   register4(registry.forPlugin("remote-tasks"));
   register5(registry.forPlugin("custom-providers"));
-  register6(registry.forPlugin("argocd"));
+  register6(registry.forPlugin("jira"));
+  register7(registry.forPlugin("argocd"));
+  register8(registry.forPlugin("devices"));
+  register9(registry.forPlugin("workbench"));
+  register10(registry.forPlugin("forge-hub"));
 }

@@ -8,6 +8,8 @@ capabilities, RPC names, tool names, and data paths are release contracts.
 Docker was the phase 2 pilot; Clusters, Databases, Argo CD, SSH servers, Remote tasks and Custom
 providers followed. Migrated features declare `builtinEntrypoints`; the other feature manifests
 still describe phase 1 implementations.
+Docker was the phase 2 pilot. Migrated features declare `builtinEntrypoints`; the other feature
+manifests still describe phase 1 implementations.
 The bundled provider and usage plugins retain their existing SDK runtime. Do not move those
 implementations while migrating a feature.
 
@@ -43,9 +45,15 @@ route ownership. See [Expo Router](expo-router.md).
 Import the declared API at
 `packages/server/src/server/plugins/builtin/host-api.ts`. Extend that facade deliberately when a
 migration needs another shared core service; do not import core implementation files from the
-feature. The facade exposes shared Docker/process primitives and tool types. Per-session
+feature. The facade exposes shared Docker/process/pty primitives, the secret store class, the
+host tool installer, and tool types. Per-session
 services provide the logger, config store, secret store, SQLite opener, Docker service factory
-and remote routing, binary frame codecs, terminal manager, structured push, and binary push.
+and remote routing, binary frame codecs, terminal manager, structured push, binary push, the
+client's capabilities, and its transport backlog. `core.daemon` carries the hooks only the
+bootstrap can supply: agent lifecycle events, broadcast to every client, and the offline push
+notice. Bootstrap starts the registry after the agent manager exists for that reason. Vendored
+daemon assets resolve through `vendorDirectoryCandidates`, because compiled features do not sit
+where `src/server` modules do.
 SQLite paths stay within the daemon's built-in storage directory. Prefix new secret keys and
 new database paths with the feature id. Preserve existing storage locations during migrations.
 
@@ -81,6 +89,21 @@ separate. Do not keep daemon state in plain module variables.
   Use it for a feature-owned service that the background lifecycle, every session, and the tools
   share (Argo CD's SSE service). Do not keep such a service in module state: tests run several
   daemons in one process.
+- `host.agentTools(install, { slot })` receives the core tool registrar and the calling agent's
+  context: `callerAgentId`, `requestPermission` (core's host tool approval card), and
+  `service(handle)`. The host installs tools from the agent's captured enabled-plugin set. Do not
+  check live plugin state in a tool handler: existing agents retain their opening tool set.
+  Approval and provider tool policy remain in core. `slot` keeps catalog order: core calls each
+  slot where the tools were registered before migration (`default` with the kubectl/sql tools,
+  `accounts` before the bot tools, `integrations` after them, `late` before the voice tools). A
+  plugin may register once per slot: Devices adds Sideload tools to `accounts` and `sim_*` to
+  `late`.
+- `host.botTriggerSource(source)` adds a source to the Bots poller while the plugin is enabled.
+  Core supplies the poll clock and per-key state; the source owns its query and dedupe keys.
+- `host.provide(key, value)` offers a service to the built-ins that `require` this one; consumers
+  read it with `provided(key)` from session services or the tool context. Core declares each
+  contract in `BuiltinProvidedServices`, so features never import each other. Devices provides
+  the simulator installer Workbench's `sim_install_batch` uses.
 - `host.backgroundService(create)` registers a daemon-owned lifecycle through
   `BuiltinPluginState`. Its `start(signal)` receives a new abort signal for each enable; disable
   aborts it before cleanup. The host rejects start/stop operations that exceed five seconds. Use
@@ -93,6 +116,15 @@ separate. Do not keep daemon state in plain module variables.
   first request unless `host.rpc(..., { eager: true })` asks for creation when the session opens
   and on enable; use that for state the client relies on without sending a request first
   (pushes, delegate registration). `stop` must synchronously invalidate pending work before
+  registrations and stops them during daemon shutdown. The call returns a handle; sessions, tool
+  installers, and bot trigger sources resolve the daemon's instance with `service(handle)`.
+  Instances are scoped by daemon home because e2e tests run several daemons in one process, so
+  never keep a daemon service in a module variable. Jira's service is the example: created at
+  boot, loaded once, disposed on disable.
+- A session contribution supplies `handle`, `stop`, and optional `start`. The host owns its
+  toggle and disconnect lifetime. It is created on the first RPC unless registered with
+  `{ eager: true }`; use eager when the contribution forwards daemon pushes the client listens for
+  before sending any request (Jira's desktop sign-in delegation). `stop` must synchronously invalidate pending work before
   awaiting cleanup, kill children, clear timers, and release subscriptions within five seconds.
   Make start/stop repeatable. A late network result must check its generation before spawning
   another child or publishing an event.
@@ -118,13 +150,17 @@ lifecycle that disconnects open clients.
 The server build compiles static feature imports with the monorepo as its TypeScript root, then
 `relocate-builtin-build.mjs` preserves the existing published daemon paths and asset locations.
 Compiled features live under `dist/server/builtin-features`; raw SDK plugins keep their existing
-`dist/server/builtin-plugins` location. Validate emitted ESM imports as well as source tests.
+`dist/server/builtin-plugins` location. A feature's runtime asset that its module reads from beside
+itself, such as Workbench's Frida scripts, needs a copy step into `builtin-features` in
+`build:lib`. Validate emitted ESM imports as well as source tests.
 
 ## Client host
 
 Import `BuiltinClientHost` and shared UI/services from
 `packages/app/src/plugins/builtin/host-api.ts`. Feature-internal imports stay relative. Shared
-UI, theme tokens, terminal rendering, host runtime, and workspace selection stay in core.
+UI, theme tokens, terminal rendering, host runtime, and workspace selection stay in core. A UI
+kit that a not-yet-migrated feature also imports moves to a neutral core path, never into the
+feature: Jira's issue primitives live in `components/integration-ui/` because Figma uses them.
 Unistyles' Babel configuration includes `plugins/` so migrated styles receive the same transform
 on web, iOS, and Android.
 
@@ -151,6 +187,13 @@ destination where it was.
 State that another feature or core drives stays in core and is exported through the host API:
 the cluster navigation and view stores (Argo CD's "Open in Clusters"), the cluster and database
 chat stores (agent navigation), and `KindIcon`. A feature never imports another feature.
+attachment sources, composer pills for a core attachment kind (`attachmentPill`), and headless
+per-host mounts (`hostMount`, rendered once in the host route layout). Use the same destination
+metadata for desktop and mobile; a destination's `slot` places it where its row sat before
+migration, as with agent tools. `hostCapabilities` hides it on hosts that report none of them,
+`shortTitle` keeps a shorter rail label, and existing `sidebar-*` test IDs come from
+`components/sidebar/nav-test-ids.ts`. Screens receive the selected `serverId`; never choose the first
+host inside a migrated screen.
 
 `BuiltinClientRegistry.visible` selects every contribution against live per-host server state.
 The generic adapters in `surfaces.tsx` feed navigation, drill-in, screens, settings, and composer.
@@ -193,6 +236,8 @@ toggling one host must leave another host's contributions visible.
 10. Compare the contract dumps and web JavaScript bytes with the baseline (at most 5% growth).
     `node scripts/compare-builtin-contracts.mjs <baseline> <out-dir> [plugin...]` compares the
     handled requests, wire names, tool names, and i18n keys; add the feature to its table. Use an isolated daemon home and
+    Add the feature's baseline sources to `scripts/compare-builtin-contracts.mjs`; it reads the
+    current names from the real registration (`scripts/dump-builtin-registrations.mts`). Use an isolated daemon home and
     port, unset every `CLAUDE*` variable, and disable relay/Tailscale. Verify real data, an
     interactive terminal where applicable, live navigation removal within two seconds, disabled
     RPC errors, existing/new agent tool sets, enable, and restart persistence. Record commands,

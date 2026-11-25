@@ -6,7 +6,6 @@ import { useHostRuntimeBootstrapState } from "@/app/_layout";
 import { HostRouteProvider } from "@/navigation/host-route-context";
 import { resolveStartupRoute } from "@/navigation/host-runtime-bootstrap";
 import { SkillsSyncBinder } from "@/skills/skills-sync-binder";
-import { JiraOAuthDelegationBinder } from "@/jira/connections/oauth-delegation-binder";
 import { FigmaOAuthDelegationBinder } from "@/figma/connect/oauth-delegation-binder";
 import { ThemedStack } from "@/navigation/themed-stack";
 import { useHostRegistryStatus, useHosts } from "@/runtime/host-runtime";
@@ -63,9 +62,6 @@ function KnownHostRoute() {
         <SkillsSyncBinder serverId={routeServerId} />
       </BuiltinPluginGate>
       <BuiltinHostMounts serverId={routeServerId} />
-      <BuiltinPluginGate serverId={routeServerId} id="jira">
-        <JiraOAuthDelegationBinder serverId={routeServerId} />
-      </BuiltinPluginGate>
       <BuiltinPluginGate serverId={routeServerId} id="figma">
         <FigmaOAuthDelegationBinder serverId={routeServerId} />
       </BuiltinPluginGate>

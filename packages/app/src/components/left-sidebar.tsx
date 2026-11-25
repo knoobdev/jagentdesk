@@ -10,7 +10,6 @@ import { router, usePathname, type Href } from "expo-router";
 import {
   Bot,
   BarChart3,
-  GitPullRequest,
   Sparkles,
   CalendarClock,
   Share2,
@@ -18,7 +17,6 @@ import {
   History,
   Home,
   Plus,
-  Radar,
   Search,
   Server,
   Settings,
@@ -101,17 +99,19 @@ import { SidebarAgentListSkeleton } from "./sidebar-agent-list-skeleton";
 import { shouldShowAddProject, shouldShowSidebarFooter } from "./sidebar-add-project-visibility";
 import { SidebarCalloutSlot } from "./sidebar-callout-slot";
 import { SidebarWorkspaceList } from "./sidebar-workspace-list";
-import { JiraSidebarEntry } from "@/jira/sidebar-entry";
-import { SidebarJiraNav } from "@/jira/sidebar-jira-nav";
 import { FigmaSidebarEntry } from "@/figma/sidebar-entry";
 import { SidebarFigmaNav } from "@/figma/sidebar-figma-nav";
 
 // Classic sidebar positions of migrated built-in destinations; the rest follow Marketplace.
 const CLASSIC_SLOT_INFRA: readonly string[] = ["clusters", "databases", "servers"];
 const CLASSIC_SLOT_DEPLOY: readonly string[] = ["argocd"];
+const CLASSIC_SLOT_INTEGRATIONS: readonly string[] = ["jira"];
+const CLASSIC_SLOT_TAIL: readonly string[] = ["forge"];
 const CLASSIC_PLACED_DESTINATIONS: readonly string[] = [
   ...CLASSIC_SLOT_INFRA,
   ...CLASSIC_SLOT_DEPLOY,
+  ...CLASSIC_SLOT_INTEGRATIONS,
+  ...CLASSIC_SLOT_TAIL,
 ];
 
 /** Sections whose route owns the desktop left column instead of the workspace list. */
@@ -129,10 +129,7 @@ export function resolveSectionRoute(pathname: string): SectionRoute | null {
     };
   const match = pathname.match(/\/h\/([^/]+)\/(servers|jira|figma|bots)(?:$|[/?])/);
   const section = match?.[2];
-  if (
-    !match?.[1] ||
-    (section !== "servers" && section !== "jira" && section !== "figma" && section !== "bots")
-  )
+  if (!match?.[1] || (section !== "servers" && section !== "figma" && section !== "bots"))
     return null;
   return { section, serverId: decodeURIComponent(match[1]) };
 }
@@ -166,11 +163,7 @@ export function resolveSidebarNavBody(
   if (sectionRoute?.section === "servers")
     return <BuiltinLeftPanel serverId={sectionRoute.serverId} segment="servers" />;
   if (sectionRoute?.section === "jira")
-    return (
-      <BuiltinPluginGate serverId={sectionRoute.serverId} id="jira">
-        <SidebarJiraNav serverId={sectionRoute.serverId} />
-      </BuiltinPluginGate>
-    );
+    return <BuiltinLeftPanel serverId={sectionRoute.serverId} segment="jira" />;
   if (sectionRoute?.section === "figma")
     return (
       <BuiltinPluginGate serverId={sectionRoute.serverId} id="figma">
@@ -208,13 +201,7 @@ interface SidebarSharedProps {
   handleSettings: () => void;
   handleSkills: () => void;
   handleInsights: () => void;
-  handleForge: () => void;
   handleMarketplace: () => void;
-  handleSimulator: () => void;
-  handleWorkbench: () => void;
-  supportsForgeHub: boolean;
-  /** Some connected host can run simulators (spec 24.4). */
-  supportsDevices: boolean;
   labels: SidebarLabels;
   newWorkspaceKeys: ShortcutKey[][] | null;
   handleAddHost: () => void;
@@ -235,10 +222,7 @@ interface SidebarLabels {
   bots: string;
   skills: string;
   insights: string;
-  forge: string;
   marketplace: string;
-  simulator: string;
-  workbench: string;
   closeSidebar: string;
 }
 
@@ -345,11 +329,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
   const {
     skillsRoute,
     insightsRoute,
-    forgeRoute,
     marketplaceRoute,
-    simulatorRoute,
-    proxyRoute,
-    supportsForgeHub,
   } = useAppNavTargets();
 
   const handleSkillsDesktop = useCallback(() => {
@@ -358,18 +338,9 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
   const handleInsightsDesktop = useCallback(() => {
     if (insightsRoute) router.push(insightsRoute);
   }, [insightsRoute]);
-  const handleForgeDesktop = useCallback(() => {
-    if (forgeRoute) router.push(forgeRoute);
-  }, [forgeRoute]);
   const handleMarketplaceDesktop = useCallback(() => {
     if (marketplaceRoute) router.push(marketplaceRoute);
   }, [marketplaceRoute]);
-  const handleSimulatorDesktop = useCallback(() => {
-    if (simulatorRoute) router.push(simulatorRoute as Href);
-  }, [simulatorRoute]);
-  const handleWorkbenchDesktop = useCallback(() => {
-    if (proxyRoute) router.push(proxyRoute as Href);
-  }, [proxyRoute]);
 
   const handleSkillsMobile = useCallback(() => {
     if (skillsRoute) {
@@ -385,33 +356,12 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     }
   }, [insightsRoute, showMobileAgent]);
 
-  const handleForgeMobile = useCallback(() => {
-    if (forgeRoute) {
-      showMobileAgent();
-      router.push(forgeRoute);
-    }
-  }, [forgeRoute, showMobileAgent]);
-
   const handleMarketplaceMobile = useCallback(() => {
     if (marketplaceRoute) {
       showMobileAgent();
       router.push(marketplaceRoute);
     }
   }, [marketplaceRoute, showMobileAgent]);
-
-  const handleSimulatorMobile = useCallback(() => {
-    if (simulatorRoute) {
-      showMobileAgent();
-      router.push(simulatorRoute as Href);
-    }
-  }, [simulatorRoute, showMobileAgent]);
-
-  const handleWorkbenchMobile = useCallback(() => {
-    if (proxyRoute) {
-      showMobileAgent();
-      router.push(proxyRoute as Href);
-    }
-  }, [proxyRoute, showMobileAgent]);
 
   const handleViewMoreNavigate = useCallback(() => {
     router.push(buildSessionsRoute());
@@ -443,10 +393,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       bots: t("bots.title"),
       skills: "Skills",
       insights: "Insights",
-      forge: "Forge",
       marketplace: t("sidebar.actions.marketplace"),
-      simulator: "Simulators",
-      workbench: "Workbench",
       closeSidebar: t("sidebar.actions.closeSidebar"),
     }),
     [t],
@@ -468,12 +415,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     handleRefresh,
     handleSkills: handleSkillsDesktop,
     handleInsights: handleInsightsDesktop,
-    handleForge: handleForgeDesktop,
     handleMarketplace: handleMarketplaceDesktop,
-    handleSimulator: handleSimulatorDesktop,
-    handleWorkbench: handleWorkbenchDesktop,
-    supportsForgeHub,
-    supportsDevices: simulatorRoute !== null,
     labels,
     newWorkspaceKeys,
   };
@@ -485,10 +427,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
           {...sharedProps}
           handleSkills={handleSkillsMobile}
           handleInsights={handleInsightsMobile}
-          handleForge={handleForgeMobile}
           handleMarketplace={handleMarketplaceMobile}
-          handleSimulator={handleSimulatorMobile}
-          handleWorkbench={handleWorkbenchMobile}
           insetsTop={insets.top}
           insetsBottom={insets.bottom}
           closeSidebar={showMobileAgent}
@@ -508,10 +447,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
         {...sharedProps}
         handleSkills={handleSkillsDesktop}
         handleInsights={handleInsightsDesktop}
-        handleForge={handleForgeDesktop}
         handleMarketplace={handleMarketplaceDesktop}
-        handleSimulator={handleSimulatorDesktop}
-        handleWorkbench={handleWorkbenchDesktop}
         insetsTop={insets.top}
         insetsBottom={insets.bottom}
         active={active}
@@ -1013,12 +949,7 @@ function DesktopSidebar({
   handleSettings,
   handleSkills,
   handleInsights,
-  handleForge,
   handleMarketplace,
-  handleSimulator,
-  handleWorkbench,
-  supportsForgeHub,
-  supportsDevices,
   labels,
   handleAddHost,
   handleOpenHostSettings,
@@ -1042,10 +973,7 @@ function DesktopSidebar({
   const isSharedSessionsActive = pathname.includes("/shared-sessions");
   const isSkillsActive = pathname.includes("/skills");
   const isInsightsActive = pathname.includes("/insights");
-  const isForgeActive = pathname.includes("/forge");
   const isMarketplaceActive = pathname.includes("/marketplace");
-  const isSimulatorActive = pathname.includes("/simulator");
-  const isWorkbenchActive = pathname.includes("/proxy");
   const builtinPanelRoute = builtinClientRegistry.navigationPanelRoute(pathname);
   const sectionRoute = resolveSectionRoute(pathname);
   const sidebarWidth = usePanelStore((state) => state.sidebarWidth);
@@ -1202,7 +1130,7 @@ function DesktopSidebar({
 
             <BuiltinSidebarDestinations only={CLASSIC_SLOT_INFRA} />
             <BuiltinSidebarDestinations only={CLASSIC_SLOT_DEPLOY} />
-            <JiraSidebarEntry closesDrawer={false} />
+            <BuiltinSidebarDestinations only={CLASSIC_SLOT_INTEGRATIONS} />
             <FigmaSidebarEntry closesDrawer={false} />
             <NavTargetGate route={builtinTargets.skillsRoute}>
               <SidebarHeaderRow
@@ -1223,26 +1151,6 @@ function DesktopSidebar({
               variant="compact"
             />
             <BuiltinSidebarDestinations except={CLASSIC_PLACED_DESTINATIONS} />
-            {supportsDevices ? (
-              <SidebarHeaderRow
-                icon={Smartphone}
-                label={labels.simulator}
-                onPress={handleSimulator}
-                isActive={isSimulatorActive}
-                testID="sidebar-simulator-nav"
-                variant="compact"
-              />
-            ) : null}
-            <NavTargetGate route={builtinTargets.proxyRoute}>
-              <SidebarHeaderRow
-                icon={Radar}
-                label={labels.workbench}
-                onPress={handleWorkbench}
-                isActive={isWorkbenchActive}
-                testID="sidebar-workbench-nav"
-                variant="compact"
-              />
-            </NavTargetGate>
             <NavTargetGate route={builtinTargets.insightsRoute}>
               <SidebarHeaderRow
                 icon={BarChart3}
@@ -1253,16 +1161,7 @@ function DesktopSidebar({
                 variant="compact"
               />
             </NavTargetGate>
-            {supportsForgeHub ? (
-              <SidebarHeaderRow
-                icon={GitPullRequest}
-                label={labels.forge}
-                onPress={handleForge}
-                isActive={isForgeActive}
-                testID="sidebar-forge-nav"
-                variant="compact"
-              />
-            ) : null}
+            <BuiltinSidebarDestinations only={CLASSIC_SLOT_TAIL} />
             <PluginSidebarItems />
           </ScrollView>
         )}

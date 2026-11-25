@@ -12,7 +12,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { jiraStyles } from "@/jira/ui/styles";
+import { jiraStyles } from "@/components/integration-ui/styles";
 import type { Theme } from "@/styles/theme";
 import { isWeb } from "@/constants/platform";
 import { openExternalUrl } from "@/utils/open-external-url";

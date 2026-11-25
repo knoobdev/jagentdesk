@@ -1,5 +1,8 @@
-/** The only daemon implementation entry point available to statically linked feature plugins. */
-export { DockerService, parseStatsLine, type DockerSnapshot } from "../../docker/docker-service.js";
+export {
+  DockerService,
+  parseStatsLine,
+  type DockerSnapshot,
+} from "../../docker/docker-service.js";
 export { DockerStreams } from "../../docker/docker-streams.js";
 export {
   routeDockerMessage,
@@ -16,8 +19,20 @@ export type {
 } from "../../agent/tools/types.js";
 export type { BuiltinCoreServices, BuiltinPlatformServices } from "./services.js";
 export { createDaemonSlot } from "./host.js";
+export { FileSecretStore, type SecretStore } from "../../database/secret-store.js";
+export { ensurePrivateDirectory, writePrivateFileAtomicSync } from "../../private-files.js";
+export type { AgentPermissionResponse } from "../../agent/agent-sdk-types.js";
+export type { JAgentDeskToolDefinition } from "../../agent/tools/types.js";
+export type { BotTrigger } from "../../bots/service.js";
+export { staticHostSupport, type StaticHostSupport } from "../../host-capabilities/service.js";
+
 export type {
   BuiltinDaemonSlot,
+  BuiltinAgentToolContext,
+  BuiltinBotTriggerContext,
+  BuiltinBotTriggerSource,
+  BuiltinProvidedServices,
+  BuiltinServiceHandle,
   BuiltinServerHost,
   BuiltinBackgroundService,
   BuiltinToolContext,
@@ -34,11 +49,6 @@ export { GENERIC_KINDS } from "../../cluster/kube-client.js";
 export type { DatabaseRegistry } from "../../database/database-registry.js";
 export type { DatabaseEngine } from "../../database/database-dto.js";
 export { localPortOfTarget } from "../../ssh/remote-db/service.js";
-export { FileSecretStore } from "../../database/secret-store.js";
-export type { SecretStore } from "../../database/secret-store.js";
-export type { AgentPermissionResponse } from "../../agent/agent-sdk-types.js";
-export type { JAgentDeskToolDefinition } from "../../agent/tools/types.js";
-export { ensurePrivateDirectory, writePrivateFileAtomicSync } from "../../private-files.js";
 
 // ssh-servers migration
 export type { SshModuleRpcHandler, SshService } from "../../ssh/ssh-service.js";
@@ -85,3 +95,18 @@ export type {
   ApiRoute,
   SaveApiProviderInput,
 } from "../../custom-providers/types.js";
+// forge-hub
+export { findExecutable } from "../../../executable-resolution/executable-resolution.js";
+export { sharedHostToolInstaller } from "../../host-tools/shared-installer.js";
+export { spawn as spawnPty, type IPty as Pty } from "node-pty";
+export { getToolDefinition, hostTarget } from "../../host-tools/registry.js";
+export { createExternalCommandProcessEnv } from "../../jagentdesk-env.js";
+// devices
+export { writeJsonFileAtomic } from "../../atomic-file.js";
+export { androidSdkCandidates } from "../../host-capabilities/service.js";
+export { toolsBinDir } from "../../host-tools/installer.js";
+export { vendorDirectoryCandidates } from "../../vendor-directory.js";
+// workbench
+export { resolveJAgentDeskHome } from "../../jagentdesk-home.js";
+
+

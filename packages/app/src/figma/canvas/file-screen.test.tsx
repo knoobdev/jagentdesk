@@ -204,11 +204,11 @@ vi.mock("expo-router", () => ({
   },
   useLocalSearchParams: () => routeParams.current,
 }));
-vi.mock("@/jira/ui/styles", () => {
+vi.mock("@/components/integration-ui/styles", () => {
   const style = new Proxy({}, { get: () => ({}) });
   return { jiraStyles: style };
 });
-vi.mock("@/jira/ui/primitives", () => ({
+vi.mock("@/components/integration-ui/primitives", () => ({
   EmptyState: () => React.createElement("div", { "data-testid": "empty-state" }),
   ErrorBanner: ({ message }: { message: string }) =>
     React.createElement("span", { "data-testid": "error-banner" }, message),

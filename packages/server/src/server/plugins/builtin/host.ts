@@ -12,6 +12,9 @@ import type {
   JAgentDeskToolExecutionContext,
   JAgentDeskToolResult,
 } from "../../agent/tools/types.js";
+import type { Bot } from "@jagentdesk/protocol/bots/types";
+import type { AgentPermissionResponse } from "../../agent/agent-sdk-types.js";
+import type { BotTrigger } from "../../bots/service.js";
 import type { BuiltinCoreServices } from "./services.js";
 import {
   BuiltinPluginError,
@@ -42,24 +45,98 @@ export type RegisterBuiltinTool = <Input>(
   config: JAgentDeskToolConfig,
   handler: (input: Input, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>,
 ) => void;
-/** Per-agent inputs available while a feature installs its tools into one agent's catalog. */
+/** A daemon-wide service created by `backgroundService`; resolve it per daemon with `service()`. */
+export interface BuiltinServiceHandle<T> {
+  readonly id: BuiltinPluginId;
+  readonly key: symbol;
+  /** Phantom type marker; never read. */
+  readonly type?: T;
+}
+export type BuiltinServiceLookup = <T>(handle: BuiltinServiceHandle<T>) => T | undefined;
+export interface BuiltinHostToolPermissionRequest {
+  name: string;
+  kind: string;
+  title?: string;
+  description?: string;
+  input?: Record<string, unknown>;
+}
+/**
+ * Per-agent inputs available while a feature installs its tools into one agent's catalog.
+ * Approval stays in core; the feature only asks for it.
+ */
 export interface BuiltinToolContext {
   callerAgentId: string | null;
   /** Labels of the calling agent when the catalog is built. */
   callerLabels(): Readonly<Record<string, string>> | undefined;
+  /** The calling agent's non-empty title, for permission prompts. */
+  callerAgentTitle(): string | null;
+  requestPermission(
+    agentId: string,
+    request: BuiltinHostToolPermissionRequest,
+  ): Promise<AgentPermissionResponse>;
   requestHostToolPermission?: JAgentDeskToolHostDependencies["requestHostToolPermission"];
   clusters?: ClusterRegistry;
   databases?: DatabaseRegistry;
   /** Daemon core services; absent in catalogs built without a daemon. */
   services?: BuiltinCoreServices;
+  service: BuiltinServiceLookup;
+  provided: BuiltinProvidedLookup;
 }
+export type BuiltinAgentToolContext = BuiltinToolContext;
+export interface BuiltinAgentToolOptions {
+  /** Catalog position. Core installs each slot where the tools were registered before migration. */
+  slot?: string;
+}
+/**
+ * Which tools one catalog position installs: the tools registered in `slot` (default
+ * `"default"`), restricted to `only` (in that order) or to every feature not in `except`.
+ */
+export interface BuiltinToolSelection {
+  slot?: string;
+  only?: readonly BuiltinPluginId[];
+  except?: readonly BuiltinPluginId[];
+}
+export interface BuiltinBotTriggerContext {
+  now: number;
+  state(key: string): number | undefined;
+  setState(key: string, value: number): void;
+  service: BuiltinServiceLookup;
+}
+export interface BuiltinBotTriggerSource {
+  /** Source name in logs and on each trigger. */
+  name: string;
+  poll(bot: Bot, context: BuiltinBotTriggerContext): Promise<BotTrigger[]>;
+}
+/**
+ * Services one built-in offers the built-ins that require it. Core declares each contract so a
+ * feature never imports another feature; the consumer's `requires` keeps the provider enabled.
+ */
+export interface BuiltinProvidedServices {
+  /** Devices: install one app file on several iOS simulators (Workbench's sim_install_batch). */
+  "devices.simulator-installer": {
+    installOnMany(
+      udids: string[],
+      filePath: string,
+    ): Promise<{ udid: string; ok: boolean; error: string | null }[]>;
+  };
+}
+export type BuiltinProvidedLookup = <K extends keyof BuiltinProvidedServices>(
+  key: K,
+) => BuiltinProvidedServices[K] | undefined;
 export interface BuiltinSessionServices extends BuiltinCoreServices {
+  service: BuiltinServiceLookup;
+  provided: BuiltinProvidedLookup;
+  /**
+   * Whether this client declared a client capability (for example binary screen frames);
+   * re-read on `capabilitiesChanged`.
+   */
+  supportsClientCapability(capability: string): boolean;
+  /** Bytes queued on this client's transport, or null when unknown (backpressure). */
+  transportBufferedAmount(): number | null;
   terminals?: TerminalManager | null;
   remoteDocker: () => RemoteDockerHosts | undefined;
   remoteK8s: () => RemoteK8sClusters | undefined;
   remoteDb: () => RemoteDbTunnels | undefined;
-  /** Whether the connected client advertised a capability; re-read on `capabilitiesChanged`. */
-  supportsClientCapability(capability: string): boolean;
   push(message: SessionOutboundMessage): void;
   pushBinary(frame: Uint8Array): void;
 }
@@ -72,9 +149,14 @@ export interface BuiltinSessionContribution {
   capabilitiesChanged?(): void;
 }
 export interface BuiltinRpcOptions {
-  /** Create the contribution when the session opens (and on enable), not on the first request. */
+  /**
+   * Create the contribution when the session opens (and on enable), not on the first request.
+   * Use it when the contribution forwards daemon pushes or registers a delegate the client
+   * relies on before sending any request.
+   */
   eager?: boolean;
 }
+export type BuiltinSessionOptions = BuiltinRpcOptions;
 export interface BuiltinBackgroundService {
   start(signal: AbortSignal): void | Promise<void>;
   stop(): void | Promise<void>;
@@ -132,12 +214,19 @@ export interface BuiltinServerHost {
     create: (services: BuiltinSessionServices) => BuiltinSessionContribution,
     options?: BuiltinRpcOptions,
   ): void;
-  backgroundService(create: (services: BuiltinCoreServices) => BuiltinBackgroundService): void;
+  /** One instance per daemon, started and stopped with the plugin. */
+  backgroundService<T extends BuiltinBackgroundService>(
+    create: (services: BuiltinCoreServices) => T,
+  ): BuiltinServiceHandle<T>;
   agentTools(
     register: (registerTool: RegisterBuiltinTool, context: BuiltinToolContext) => void,
+    options?: BuiltinAgentToolOptions,
   ): void;
   /** One value per daemon, shared by its background service, sessions and tools. */
   shared<T>(create: (services: BuiltinCoreServices) => T): (services: BuiltinCoreServices) => T;
+  /** Bots poll every registered source while this plugin is enabled. */
+  botTriggerSource(source: BuiltinBotTriggerSource): void;
+  provide<K extends keyof BuiltinProvidedServices>(key: K, value: BuiltinProvidedServices[K]): void;
 }
 interface RpcRegistration {
   id: BuiltinPluginId;
@@ -146,23 +235,25 @@ interface RpcRegistration {
   create: (services: BuiltinSessionServices) => BuiltinSessionContribution;
   eager: boolean;
 }
-/**
- * Which features' tools one catalog position installs. `only` lists features in catalog order;
- * `except` installs every other feature in load order.
- */
-export interface BuiltinToolSelection {
-  only?: readonly BuiltinPluginId[];
-  except?: readonly BuiltinPluginId[];
+interface ToolRegistration {
+  id: BuiltinPluginId;
+  install: (registerTool: RegisterBuiltinTool, context: BuiltinToolContext) => void;
+  slot: string;
 }
-type ToolInstaller = (register: RegisterBuiltinTool, context: BuiltinToolContext) => void;
+interface BackgroundRegistration {
+  key: symbol;
+  create: (services: BuiltinCoreServices) => BuiltinBackgroundService;
+}
+const DEFAULT_TOOL_SLOT = "default";
 
 export class BuiltinServerRegistry {
   private readonly rpcs = new Map<string, RpcRegistration>();
-  private readonly backgrounds = new Map<
-    BuiltinPluginId,
-    (services: BuiltinCoreServices) => BuiltinBackgroundService
-  >();
-  private readonly tools = new Map<BuiltinPluginId, ToolInstaller>();
+  private readonly backgrounds = new Map<BuiltinPluginId, BackgroundRegistration>();
+  private readonly tools: ToolRegistration[] = [];
+  private readonly providedServices = new Map<string, unknown>();
+  private readonly triggers = new Map<BuiltinPluginId, BuiltinBotTriggerSource>();
+  /** Daemon services keyed by daemon home: several daemons can share one test process. */
+  private readonly scopes = new Map<string, Map<symbol, BuiltinBackgroundService>>();
   forPlugin(id: BuiltinPluginId): BuiltinServerHost {
     return {
       id,
@@ -176,14 +267,21 @@ export class BuiltinServerRegistry {
           this.rpcs.set(method, registration);
         }
       },
-      backgroundService: (create) => {
+      backgroundService: <T extends BuiltinBackgroundService>(
+        create: (services: BuiltinCoreServices) => T,
+      ) => {
         if (this.backgrounds.has(id))
           throw new Error(`Duplicate built-in background service: ${id}`);
-        this.backgrounds.set(id, create);
+        const key = Symbol(id);
+        this.backgrounds.set(id, { key, create });
+        const handle: BuiltinServiceHandle<T> = { id, key };
+        return handle;
       },
-      agentTools: (register) => {
-        if (this.tools.has(id)) throw new Error(`Duplicate built-in tools: ${id}`);
-        this.tools.set(id, register);
+      agentTools: (install, options) => {
+        const slot = options?.slot ?? DEFAULT_TOOL_SLOT;
+        if (this.tools.some((tools) => tools.id === id && tools.slot === slot))
+          throw new Error(`Duplicate built-in tools: ${id}/${slot}`);
+        this.tools.push({ id, install, slot });
       },
       shared: (create) => {
         // Keyed by the daemon's config store: every session and tool catalog of one daemon shares it.
@@ -193,15 +291,53 @@ export class BuiltinServerRegistry {
           return values.get(services.config)!;
         };
       },
+      provide: (key, value) => {
+        if (this.providedServices.has(key)) throw new Error(`Duplicate provided service: ${key}`);
+        this.providedServices.set(key, value);
+      },
+      botTriggerSource: (source) => {
+        if (this.triggers.has(id)) throw new Error(`Duplicate built-in bot trigger source: ${id}`);
+        this.triggers.set(id, source);
+      },
     };
+  }
+  provided: BuiltinProvidedLookup = (key) =>
+    this.providedServices.get(key) as BuiltinProvidedServices[typeof key] | undefined;
+  /** Resolves a daemon service for the daemon rooted at `home`. */
+  lookup(home: string): BuiltinServiceLookup {
+    return <T>(handle: BuiltinServiceHandle<T>) =>
+      this.scopes.get(home)?.get(handle.key) as T | undefined;
+  }
+  /** Enabled sources only; the daemon's bot runtime polls them after its own GitHub source. */
+  botTriggerSources(
+    state: Pick<BuiltinPluginState, "isEnabled"> | undefined,
+    home: string,
+  ): {
+    name: string;
+    poll(bot: Bot, context: Omit<BuiltinBotTriggerContext, "service">): Promise<BotTrigger[]>;
+  }[] {
+    const service = this.lookup(home);
+    return [...this.triggers]
+      .filter(([id]) => !state || state.isEnabled(id))
+      .map(([, source]) => ({
+        name: source.name,
+        poll: (bot, context) => source.poll(bot, { ...context, service }),
+      }));
   }
   async start(
     state: BuiltinPluginState,
     services: BuiltinCoreServices,
   ): Promise<() => Promise<void>> {
     const running: BuiltinPluginLifecycle[] = [];
-    for (const [id, create] of this.backgrounds) {
+    const scope = new Map<symbol, BuiltinBackgroundService>();
+    this.scopes.set(services.home, scope);
+    // Create every service before starting any, so a session or tool never sees a partial scope.
+    const created = [...this.backgrounds].map(([id, { key, create }]) => {
       const service = create(services);
+      scope.set(key, service);
+      return [id, service] as const;
+    });
+    for (const [id, service] of created) {
       const lifecycle = backgroundLifecycle(id, service);
       await state.registerLifecycle(id, lifecycle);
       if (!state.isEnabled(id)) await lifecycleDeadline(id, "stop", () => service.idle?.());
@@ -214,7 +350,11 @@ export class BuiltinServerRegistry {
           services.logger.error({ err: error }, "Built-in shutdown failed");
         });
       }
+      if (this.scopes.get(services.home) === scope) this.scopes.delete(services.home);
     };
+  }
+  toolSlots(): string[] {
+    return [...new Set(this.tools.map((tools) => tools.slot))];
   }
   rpcNames(): string[] {
     return [...this.rpcs.keys()].sort();
@@ -223,28 +363,39 @@ export class BuiltinServerRegistry {
     return this.rpcs.has(type);
   }
   /**
-   * Installs feature tools in catalog order. `only` lists the features for one catalog slot in
-   * order; `except` installs every other feature in load order.
+   * Installs feature tools at one catalog position. A string selects a slot. Core calls each
+   * position where the features' tools were registered before migration, so the order agents see
+   * does not change.
    */
   registerAgentTools(
     snapshot: ReadonlySet<BuiltinPluginId> | undefined,
     register: RegisterBuiltinTool,
     reserve?: (name: string) => void,
     context: Partial<BuiltinToolContext> = {},
-    select: BuiltinToolSelection = {},
+    selection: BuiltinToolSelection | string = {},
   ): void {
+    const select = typeof selection === "string" ? { slot: selection } : selection;
+    const slot = select.slot ?? DEFAULT_TOOL_SLOT;
     const toolContext: BuiltinToolContext = {
       ...context,
       callerAgentId: context.callerAgentId ?? null,
       callerLabels: context.callerLabels ?? (() => undefined),
+      callerAgentTitle: context.callerAgentTitle ?? (() => null),
+      requestPermission:
+        context.requestPermission ??
+        (() => Promise.reject(new Error("Tool permission requests are unavailable"))),
+      service: context.service ?? (() => undefined),
+      provided: this.provided,
     };
-    const ids = select.only ?? [...this.tools.keys()].filter((id) => !select.except?.includes(id));
-    for (const id of ids) {
-      const install = this.tools.get(id);
-      install?.((name, config, handler) => {
+    const inSlot = this.tools.filter((tools) => tools.slot === slot);
+    const selected = select.only
+      ? select.only.flatMap((id) => inSlot.filter((tools) => tools.id === id))
+      : inSlot.filter((tools) => !select.except?.includes(tools.id));
+    for (const tools of selected) {
+      tools.install((name, config, handler) => {
         // Keep names reserved while disabled so installed hooks cannot replace core tools.
         reserve?.(name);
-        if (!snapshot || snapshot.has(id)) register(name, config, handler);
+        if (!snapshot || snapshot.has(tools.id)) register(name, config, handler);
       }, toolContext);
     }
   }
@@ -258,6 +409,7 @@ export class BuiltinServerRegistry {
 
 export class BuiltinServerSession {
   private readonly instances = new Map<RpcRegistration, BuiltinSessionContribution>();
+  private readonly ready = new Map<RpcRegistration, Promise<BuiltinSessionContribution>>();
   private readonly unsubscribe: (() => void) | undefined;
   private pending = Promise.resolve();
   private disposed = false;
@@ -267,9 +419,21 @@ export class BuiltinServerSession {
     private readonly state: BuiltinPluginState | undefined,
     private readonly services: BuiltinSessionServices,
   ) {
+    this.pending = Promise.all(
+      [...this.eagerRegistrations()]
+        .filter((registration) => !state || state.isEnabled(registration.id))
+        .map((registration) => this.ensure(registration)),
+    )
+      .then(() => undefined)
+      .catch((error) => {
+        services.logger.error({ err: error }, "Built-in session start failed");
+      });
     this.unsubscribe = state?.subscribe(() => {
       // Begin cancellation in the config notification turn, before any further incoming RPC.
       const operations: Promise<void>[] = [];
+      for (const registration of this.eagerRegistrations())
+        if (!this.instances.has(registration) && state.isEnabled(registration.id))
+          operations.push(this.pending.then(() => this.ensure(registration)).then(() => undefined));
       for (const [registration, instance] of this.instances) {
         const enabled = state.isEnabled(registration.id);
         if (enabled === this.active.has(registration)) continue;
@@ -281,29 +445,12 @@ export class BuiltinServerSession {
           operations.push(Promise.resolve(instance.stop()));
         }
       }
-      for (const registration of this.eagerRegistrations())
-        if (!this.instances.has(registration) && state.isEnabled(registration.id))
-          operations.push(
-            this.pending.then(() => this.instantiate(registration)).then(() => undefined),
-          );
       this.pending = Promise.all([this.pending, ...operations])
         .then(() => undefined)
         .catch((error) => {
           services.logger.error({ err: error }, "Built-in session lifecycle failed");
         });
     });
-    const eager = this.eagerRegistrations().filter(
-      (registration) => !state || state.isEnabled(registration.id),
-    );
-    if (eager.length)
-      this.pending = Promise.all(eager.map((registration) => this.instantiate(registration)))
-        .then(() => undefined)
-        .catch((error) => {
-          services.logger.error({ err: error }, "Built-in session start failed");
-        });
-  }
-  private eagerRegistrations(): RpcRegistration[] {
-    return [...new Set(this.rpcs.values())].filter((registration) => registration.eager);
   }
   /** The client re-sent its capabilities. */
   capabilitiesChanged(): void {
@@ -324,14 +471,19 @@ export class BuiltinServerSession {
     await this.pending;
     if (this.disposed || (this.state && !this.state.isEnabled(registration.id)))
       throw new BuiltinPluginError("plugin_disabled", `Plugin turned off: ${registration.id}`);
-    const instance = this.instances.get(registration) ?? (await this.instantiate(registration));
+    const instance = await this.ensure(registration);
     await instance.handle(message);
   }
-  private async instantiate(registration: RpcRegistration): Promise<BuiltinSessionContribution> {
-    const existing = this.instances.get(registration);
+  private eagerRegistrations(): Set<RpcRegistration> {
+    return new Set([...this.rpcs.values()].filter((registration) => registration.eager));
+  }
+  private ensure(registration: RpcRegistration): Promise<BuiltinSessionContribution> {
+    const existing = this.ready.get(registration);
     if (existing) return existing;
     if (this.disposed)
-      throw new BuiltinPluginError("plugin_disabled", `Plugin turned off: ${registration.id}`);
+      return Promise.reject(
+        new BuiltinPluginError("plugin_disabled", `Plugin turned off: ${registration.id}`),
+      );
     const contribution = registration.create(this.services);
     const instance: BuiltinSessionContribution = {
       handle: (input) => contribution.handle(input),
@@ -347,8 +499,9 @@ export class BuiltinServerSession {
     };
     this.instances.set(registration, instance);
     this.active.add(registration);
-    await instance.start?.();
-    return instance;
+    const ready = Promise.resolve(instance.start?.()).then(() => instance);
+    this.ready.set(registration, ready);
+    return ready;
   }
   async dispose(): Promise<void> {
     this.disposed = true;
@@ -356,5 +509,6 @@ export class BuiltinServerSession {
     await this.pending;
     await Promise.all([...this.instances.values()].map((instance) => instance.stop()));
     this.instances.clear();
+    this.ready.clear();
   }
 }

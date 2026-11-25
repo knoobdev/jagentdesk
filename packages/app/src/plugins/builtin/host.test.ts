@@ -32,6 +32,8 @@ test("all contribution kinds hide and restore together for the selected host", (
     search: { name: "docker.search", input: z.unknown(), output: z.unknown() },
   };
   host.attachmentSource(source, async () => ({ items: [] }));
+  host.attachmentPill("jira_issue", Component);
+  host.hostMount("binder", Component);
   const info = (docker: boolean) => ({
     serverId: "one",
     hostname: null,
@@ -48,7 +50,11 @@ test("all contribution kinds hide and restore together for the selected host", (
   expect(entries.composer.get("docker")).toBe(Component);
   expect(entries.timeline.get("docker")).toBe(Component);
   expect(entries.attachments[0]?.source).toBe(source);
+  expect(entries.pills.get("jira_issue")).toBe(Component);
+  expect(entries.mounts.get("binder")).toBe(Component);
   expect(registry.owner("docker")).toBe("docker");
+  expect(registry.ownsLeftPanel("docker")).toBe(true);
+  expect(registry.ownsAttachmentKind("jira_issue")).toBe(true);
   expect(registry.visible(info(false)).size).toBe(0);
   expect(registry.visible(info(true)).get("docker")).toBe(entries);
 });

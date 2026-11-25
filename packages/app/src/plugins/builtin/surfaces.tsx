@@ -7,9 +7,17 @@ import { useSessionStore } from "@/stores/session-store";
 import { useHosts } from "@/runtime/host-runtime";
 import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { useIsCompactFormFactor } from "@/constants/layout";
+import { hostSupportsCapability } from "@/utils/server-info-capabilities";
+import { mobileNavTileTestID } from "@/components/sidebar/nav-test-ids";
+import { orderAppNavItems } from "@/components/sidebar/nav-order";
 import type { AppNavItem } from "@/components/sidebar/use-app-nav";
 import { builtinClientRegistry } from "./loaded";
-import type { BuiltinClientProps, BuiltinDestination, BuiltinScreen as ScreenProps } from "./host";
+import type {
+  BuiltinAttachmentPillProps,
+  BuiltinClientProps,
+  BuiltinDestination,
+  BuiltinScreen as ScreenProps,
+} from "./host";
 import { BuiltinPluginScreenBoundary } from "./route-boundary";
 
 export function useBuiltinClientContributions(serverId: string) {
@@ -28,17 +36,19 @@ export function useBuiltinDestinations(pathname: string): AppNavItem[] {
     : (selection?.serverId ?? hosts[0]?.serverId ?? "");
   const entries = useBuiltinClientContributions(serverId);
   const features = useServerFeatures(serverId);
+  const info = useSessionStore((state) => state.sessions[serverId]?.serverInfo);
   const compact = useIsCompactFormFactor();
   const destinations = useMemo(
     () =>
       [...entries.values()]
         .flatMap((entry) => (compact ? entry.mobileEntries : entry.destinations))
         .filter(
-          ({ requiresFeature }) =>
-            !requiresFeature ||
-            (features as Record<string, unknown> | undefined)?.[requiresFeature] === true,
+          ({ requiresFeature, hostCapabilities }) =>
+            (!requiresFeature ||
+              (features as Record<string, unknown> | undefined)?.[requiresFeature] === true) &&
+            (!hostCapabilities || hostSupportsCapability(info, hostCapabilities)),
         ),
-    [compact, entries, features],
+    [compact, entries, features, info],
   );
   const routes = useDestinationRoutes(destinations, serverId);
   return useMemo(
@@ -125,7 +135,7 @@ function BuiltinSidebarDestination({ item }: { item: AppNavItem }) {
       label={item.label}
       onPress={onPress}
       isActive={item.isActive}
-      testID={`sidebar-${item.key}-nav`}
+      testID={mobileNavTileTestID(item.key, `sidebar-${item.key}-nav`)}
       variant="compact"
     />
   );
@@ -144,7 +154,7 @@ export function BuiltinSidebarDestinations({
     <>
       {(only
         ? only.flatMap((key) => items.filter((item) => item.key === key))
-        : items.filter((item) => !except?.includes(item.key))
+        : orderAppNavItems(items.filter((item) => !except?.includes(item.key)))
       ).map((item) => (
         <BuiltinSidebarDestination key={item.key} item={item} />
       ))}
@@ -163,4 +173,14 @@ export function BuiltinHostMounts({ serverId }: BuiltinClientProps) {
       )}
     </>
   );
+}
+export function BuiltinAttachmentPill({
+  serverId,
+  ...props
+}: BuiltinAttachmentPillProps & BuiltinClientProps) {
+  const entries = useBuiltinClientContributions(serverId);
+  const Pill = [...entries.values()]
+    .map((entry) => entry.pills.get(props.attachment.kind))
+    .find(Boolean);
+  return Pill ? <Pill {...props} /> : null;
 }
