@@ -49,7 +49,6 @@ import { createServer as createHTTPServer, type IncomingMessage, type ServerResp
 import { constants, existsSync, unlinkSync } from "fs";
 import { open } from "fs/promises";
 import { randomUUID } from "node:crypto";
-import { homedir } from "node:os";
 import { getHostName } from "./host-name.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -198,7 +197,6 @@ import {
 import { FileBackedChatService } from "./chat/chat-service.js";
 import { CheckoutDiffManager } from "./checkout-diff-manager.js";
 import { LoopService } from "./loop-service.js";
-import { NativeSkillsService } from "./skills-native/index.js";
 import { buildLifetimeBaseline, UsageHistoryStorage } from "./usage/usage-history-storage.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseRegistry } from "./database/database-registry.js";
@@ -752,10 +750,6 @@ export async function createJAgentDeskDaemon(
     settingsDirectory: path.join(config.jagentdeskHome, "plugin-settings"),
   });
 
-  const stopBuiltinServices = await builtinServerRegistry.start(
-    pluginRuntime.builtin,
-    createBuiltinCoreServices(config.jagentdeskHome, logger, daemonConfigStore),
-  );
   const serverId = getOrCreateServerId(config.jagentdeskHome, { logger });
   const daemonKeyPair = await loadOrCreateDaemonKeyPair(config.jagentdeskHome, logger);
   const pairedDevices: PairedDeviceStore = createPairedDeviceStore({
@@ -1157,6 +1151,18 @@ export async function createJAgentDeskDaemon(
     logger,
   });
 
+  // Built-in features' daemon services, ports, and background lifecycles (docs/builtin-plugins.md).
+  const builtinDaemon = await builtinServerRegistry.start(
+    pluginRuntime.builtin,
+    createBuiltinCoreServices(config.jagentdeskHome, logger, daemonConfigStore),
+    {
+      home: config.jagentdeskHome,
+      agentManager,
+      agentStorage,
+      broadcast: (message) => wsServer?.broadcast(wrapSessionMessage(message)),
+    },
+  );
+  pluginRuntime.builtinDaemon = builtinDaemon;
   const unsubscribeBuiltinAgentSnapshots = agentManager.subscribe(
     (event) => {
       if (event.type === "agent_state") pluginRuntime.builtin.forAgent(event.agent.id);
@@ -1560,14 +1566,6 @@ export async function createJAgentDeskDaemon(
   });
   await loopService.initialize();
   logger.info({ elapsed: elapsed() }, "Loop service initialized");
-  // Native SKILL.md skills (spec 22 / ADR-0022). Also serves the legacy skills.get /
-  // skills.mutate API (COMPAT(nativeSkills)) and migrates skills.json once (22.10).
-  const skillsStorage = new NativeSkillsService({
-    jagentdeskHome: config.jagentdeskHome,
-    homeDir: homedir(),
-    logger,
-  });
-  await skillsStorage.initialize();
   const clusterRegistry = new ClusterRegistry({
     jagentdeskHome: config.jagentdeskHome,
     logger,
@@ -1991,6 +1989,7 @@ export async function createJAgentDeskDaemon(
   ): JAgentDeskToolHostDependencies => ({
     changeRequestWatches,
     builtinPlugins: pluginRuntime.builtin.forAgent(runtime.callerAgentId),
+    builtinDaemon,
     callerAgentLabels: runtime.callerAgentLabels,
     jagentdeskToolPolicy:
       runtime.jagentdeskToolPolicy ??
@@ -2126,7 +2125,6 @@ export async function createJAgentDeskDaemon(
         requestPermission: (agentId, request) =>
           agentManager.requestHostToolPermission(agentId, request),
       }),
-    skillsStorage,
     forgeHub: forgeHubService,
     browserFingerprintProfiles: {
       list: () => daemonConfigStore.get().browserTools.profiles ?? [],
@@ -2476,7 +2474,6 @@ export async function createJAgentDeskDaemon(
                 requireSignedHelloForDirect,
               },
               pluginRuntime,
-              skillsStorage,
               usageHistory,
               databaseRegistry,
               autorunService,
@@ -2710,7 +2707,7 @@ export async function createJAgentDeskDaemon(
     await botsService.dispose();
     jiraService.dispose();
     void figmaService.dispose();
-    await stopBuiltinServices();
+    await builtinDaemon.stop();
     await speechService.stop();
     await scheduleService.stop().catch(() => undefined);
     await autorunService?.stop().catch(() => undefined);

@@ -161,7 +161,6 @@ function createHarness(): Harness {
     undefined, // browserToolsBroker
     undefined, // hubRelationships
     undefined, // pairing
-    undefined, // pluginRuntime
     undefined, // skillsStorage
     undefined, // usageHistory
     createStub<DatabaseRegistry>({}),

@@ -16,7 +16,23 @@ export interface BuiltinDestination {
   group: "Tools" | "main";
   route: (serverId: string) => string;
   routeSegment: string;
+  /** Rail position: insert before this core item key instead of after Marketplace. */
+  before?: string;
 }
+export interface BuiltinAgentProps extends BuiltinClientProps {
+  agentId: string;
+}
+/** Message fields a feature contributes when the user sends a turn. */
+export interface BuiltinTurnPreparation {
+  skillIds?: string[];
+  /** Called once the daemon accepted the message. */
+  commit(): void;
+}
+export type BuiltinTurnPreparer = (input: {
+  serverId: string;
+  agentId: string;
+  text: string;
+}) => BuiltinTurnPreparation;
 export interface BuiltinScreen extends BuiltinClientProps {
   sshDocker?: import("@/ssh/ui/ssh-docker-client").SshDockerTarget;
 }
@@ -36,6 +52,13 @@ export interface BuiltinClientHost {
     source: PluginAttachmentSourceContribution,
     search: BuiltinAttachmentSource["search"],
   ): void;
+  /** Renders nothing visible; mounted for each host route (sync binders, delegation prompts). */
+  hostBinder(id: string, component: ComponentType<BuiltinClientProps>): void;
+  /** A control in the agent composer's control row, in plugin order. */
+  agentControl(id: string, component: ComponentType<BuiltinAgentProps>): void;
+  /** Rendered below an agent's conversation. */
+  agentPanelAccessory(id: string, component: ComponentType<BuiltinAgentProps>): void;
+  turnPreparer(prepare: BuiltinTurnPreparer): void;
 }
 export interface BuiltinAttachmentSource {
   source: PluginAttachmentSourceContribution;
@@ -50,6 +73,10 @@ export interface BuiltinClientContributions {
   composer: Map<string, ComponentType<BuiltinClientProps>>;
   timeline: Map<string, ComponentType<BuiltinClientProps & { item: PluginTimelineItem }>>;
   attachments: BuiltinAttachmentSource[];
+  binders: Map<string, ComponentType<BuiltinClientProps>>;
+  agentControls: Map<string, ComponentType<BuiltinAgentProps>>;
+  agentPanel: Map<string, ComponentType<BuiltinAgentProps>>;
+  turnPreparers: BuiltinTurnPreparer[];
 }
 export class BuiltinClientRegistry {
   private readonly entries = new Map<BuiltinPluginId, BuiltinClientContributions>();
@@ -64,6 +91,10 @@ export class BuiltinClientRegistry {
       composer: new Map(),
       timeline: new Map(),
       attachments: [],
+      binders: new Map(),
+      agentControls: new Map(),
+      agentPanel: new Map(),
+      turnPreparers: [],
     };
     this.entries.set(id, entry);
     const add = <T>(map: Map<string, T>, key: string, value: T) => {
@@ -80,6 +111,10 @@ export class BuiltinClientRegistry {
       composerItem: (key, component) => add(entry.composer, key, component),
       timelineRenderer: (key, component) => add(entry.timeline, key, component),
       attachmentSource: (source, search) => entry.attachments.push({ source, search }),
+      hostBinder: (key, component) => add(entry.binders, key, component),
+      agentControl: (key, component) => add(entry.agentControls, key, component),
+      agentPanelAccessory: (key, component) => add(entry.agentPanel, key, component),
+      turnPreparer: (prepare) => entry.turnPreparers.push(prepare),
     };
   }
   /** Every consumer selects against live per-host state, including retained screens. */
@@ -88,8 +123,11 @@ export class BuiltinClientRegistry {
   ): ReadonlyMap<BuiltinPluginId, BuiltinClientContributions> {
     return new Map([...this.entries].filter(([id]) => builtinPluginEnabled(info, id)));
   }
-  destinations(): readonly BuiltinDestination[] {
-    return [...this.entries.values()].flatMap((entry) => entry.destinations);
+  /** Destinations that drill the sidebar into the feature's own left panel. */
+  drillInDestinations(): readonly BuiltinDestination[] {
+    return [...this.entries.values()].flatMap((entry) =>
+      entry.destinations.filter((destination) => entry.panels.has(destination.routeSegment)),
+    );
   }
   hasPlugin(id: string): boolean {
     return [...this.entries.keys()].some((pluginId) => pluginId === id);

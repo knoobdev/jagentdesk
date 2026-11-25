@@ -76,7 +76,7 @@ import {
 } from "./sidebar-state";
 
 function resolveSidebarDrillIn(pathname: string) {
-  return resolveCoreSidebarDrillIn(pathname, builtinClientRegistry.destinations());
+  return resolveCoreSidebarDrillIn(pathname, builtinClientRegistry.drillInDestinations());
 }
 
 const PRIMARY_ORDER: readonly string[] = [

@@ -192,7 +192,6 @@ function createServer(terminalManager: TerminalManager, workspaceRegistry?: Work
     undefined,
     undefined,
     undefined,
-    undefined,
     createStub<DatabaseRegistry>({}),
   );
 

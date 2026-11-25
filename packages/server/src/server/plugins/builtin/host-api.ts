@@ -17,7 +17,36 @@ export type {
 export type {
   BuiltinServerHost,
   BuiltinBackgroundService,
+  BuiltinDaemonContext,
+  BuiltinDaemonRef,
+  BuiltinDaemonScope,
+  BuiltinRequestContext,
   BuiltinSessionServices,
   BuiltinSessionContribution,
+  BuiltinToolContext,
   RegisterBuiltinTool,
 } from "./host.js";
+
+export { ensureValidJson } from "../../json-utils.js";
+export { writeJsonFileAtomic } from "../../atomic-file.js";
+export type { SessionInboundMessage, SessionOutboundMessage } from "../../messages.js";
+
+// Shared by skills, spec mode, and host tools.
+export {
+  DEFAULT_LIMITS,
+  safeTarget,
+  extractTarGz,
+  type ExtractLimits,
+} from "../../../utils/tar.js";
+export { resolveBundledSkillsDir } from "../../agent/bundled-skills.js";
+export {
+  buildSkillId,
+  INSTALL_LINK_DIRS,
+  INSTALL_REAL_DIR,
+  isWithin,
+  parseSkillId,
+  skillDirPath,
+  SKILL_DIR_SPECS,
+  visibleToFor,
+  type SkillDirLabel,
+} from "../../agent/native-skill-paths.js";

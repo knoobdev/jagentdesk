@@ -5,5 +5,9 @@
   "description": "Create and manage reusable agent skills.",
   "defaultEnabled": true,
   "requires": [],
-  "builtinOrder": 13
+  "builtinOrder": 13,
+  "builtinEntrypoints": {
+    "server": "server/index.ts",
+    "client": "client/index.tsx"
+  }
 }

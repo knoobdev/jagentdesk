@@ -56,7 +56,7 @@ import { useRetainedPanelActive } from "@/components/retained-panel";
 import { RetainedChatContent } from "./retained-chat-content";
 import { SidebarCallout } from "@/components/sidebar-callout";
 import { Composer } from "@/composer";
-import { AgentSkillTrainBar } from "@/components/agent-skill-train-bar";
+import { BuiltinAgentItems } from "@/plugins/builtin/surfaces";
 import { SpecModeComposerDock } from "@/spec-mode/composer-dock";
 import { getActiveMessageSubmissions } from "@/composer/submission/model";
 import { RewindComposerRestoreProvider } from "@/components/rewind/composer-restore";
@@ -339,9 +339,7 @@ function AgentPanel() {
           isPaneFocused={isInteractive}
           onOpenWorkspaceFile={openFileInWorkspace}
         />
-        <BuiltinPluginGate serverId={serverId} id="skills">
-          <AgentSkillTrainBar serverId={serverId} agentId={target.agentId} />
-        </BuiltinPluginGate>
+        <BuiltinAgentItems serverId={serverId} agentId={target.agentId} kind="agentPanel" />
       </View>
     </RetainedChatContent>
   );

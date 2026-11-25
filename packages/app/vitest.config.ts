@@ -72,6 +72,7 @@ export default defineConfig({
           environment: "node",
           include: [
             "src/**/*.{test,spec}.{ts,tsx}",
+            "../../plugins/*/client/**/*.{test,spec}.{ts,tsx}",
             "modules/**/*.test.{ts,tsx}",
             "native-release-version.test.ts",
           ],

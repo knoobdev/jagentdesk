@@ -32,8 +32,6 @@ import { type ProjectRegistry, type WorkspaceRegistry } from "./workspace-regist
 import { type ProjectUpdate } from "./workspace-reconciliation-service.js";
 import { type FileBackedChatService } from "./chat/chat-service.js";
 import { type LoopService } from "./loop-service.js";
-import { type NativeSkillsService } from "./skills-native/index.js";
-import { type Skill } from "@jagentdesk/protocol/skills";
 import { type UsageHistoryStorage } from "./usage/usage-history-storage.js";
 import { type HostCapabilityService } from "./host-capabilities/service.js";
 import { type PhysicalDeviceHub } from "./devices/hub.js";
@@ -729,8 +727,6 @@ export class VoiceAssistantWebSocketServer {
 
   private readonly loopService: LoopService;
 
-  private skillsStorage: NativeSkillsService | null = null;
-
   private usageHistory: UsageHistoryStorage | null = null;
 
   private hostCapabilities: HostCapabilityService | null = null;
@@ -860,8 +856,6 @@ export class VoiceAssistantWebSocketServer {
 
   private unsubscribeDaemonConfigChange: (() => void) | null = null;
 
-  private unsubscribeSkillsChange: (() => void) | null = null;
-
   private unsubscribeUsageChange: (() => void) | null = null;
 
   private readonly providerUsageService: ProviderUsageService;
@@ -975,7 +969,6 @@ export class VoiceAssistantWebSocketServer {
     hubRelationships?: HubRelationshipManagement | null,
     pairing?: PairingServerDependencies | null,
     pluginRuntime?: PluginRuntimePort | null,
-    skillsStorage?: NativeSkillsService | null,
     usageHistory?: UsageHistoryStorage | null,
     databaseRegistry?: DatabaseRegistry,
     autorunService?: AutorunService | null,
@@ -1118,7 +1111,6 @@ export class VoiceAssistantWebSocketServer {
       unsubscribeBuiltin?.();
       unsubscribeConfig?.();
     };
-    this.setupSkillsBroadcast(skillsStorage);
     this.setupUsageBroadcast(usageHistory);
 
     const pushLogger = this.logger.child({ module: "push" });
@@ -1727,8 +1719,6 @@ export class VoiceAssistantWebSocketServer {
     this.unsubscribeSpeechReadiness = null;
     this.unsubscribeDaemonConfigChange?.();
     this.unsubscribeDaemonConfigChange = null;
-    this.unsubscribeSkillsChange?.();
-    this.unsubscribeSkillsChange = null;
     this.unsubscribeUsageChange?.();
     this.unsubscribeUsageChange = null;
     this.unsubscribeTerminalActivity?.();
@@ -2362,7 +2352,6 @@ export class VoiceAssistantWebSocketServer {
       workspaceRegistry: this.workspaceRegistry,
       chatService: this.chatService,
       loopService: this.loopService,
-      skillsStorage: this.skillsStorage,
       usageHistory: this.usageHistory,
       hostCapabilities: this.hostCapabilities,
       hostToolInstaller: this.hostToolInstaller,
@@ -3062,30 +3051,12 @@ export class VoiceAssistantWebSocketServer {
     }
   }
 
-  private setupSkillsBroadcast(skillsStorage: NativeSkillsService | null | undefined): void {
-    this.skillsStorage = skillsStorage ?? null;
-    this.unsubscribeSkillsChange =
-      this.skillsStorage?.onChange((skills) => {
-        this.broadcastSkillsChanged(skills);
-      }) ?? null;
-  }
-
   private setupUsageBroadcast(usageHistory: UsageHistoryStorage | null | undefined): void {
     this.usageHistory = usageHistory ?? null;
     this.unsubscribeUsageChange =
       this.usageHistory?.onChange((days, lifetime) => {
         this.broadcastUsageChanged(days, lifetime);
       }) ?? null;
-  }
-
-  private broadcastSkillsChanged(skills: Skill[]): void {
-    this.broadcast(
-      wrapSessionMessage({
-        type: "status",
-        // Every change (legacy mutate or native op) also invalidates the native catalog.
-        payload: { status: "skills_changed", skills, catalogChanged: true },
-      }),
-    );
   }
 
   private broadcastUsageChanged(days: UsageDayRollup[], lifetime: LifetimeUsage): void {

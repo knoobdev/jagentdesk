@@ -12,7 +12,6 @@ import {
   BarChart3,
   Database,
   GitPullRequest,
-  Sparkles,
   CalendarClock,
   Share2,
   FolderPlus,
@@ -245,7 +244,6 @@ interface SidebarSharedProps {
   handleDatabases: () => void;
   handleServers: () => void;
   handleArgoCd: () => void;
-  handleSkills: () => void;
   handleInsights: () => void;
   handleForge: () => void;
   handleMarketplace: () => void;
@@ -280,7 +278,6 @@ interface SidebarLabels {
   databases: string;
   servers: string;
   argoCd: string;
-  skills: string;
   insights: string;
   forge: string;
   marketplace: string;
@@ -394,7 +391,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     databasesRoute,
     serversRoute,
     supportsSshServers,
-    skillsRoute,
     insightsRoute,
     forgeRoute,
     marketplaceRoute,
@@ -404,9 +400,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     supportsForgeHub,
   } = useAppNavTargets();
 
-  const handleSkillsDesktop = useCallback(() => {
-    if (skillsRoute) router.push(skillsRoute);
-  }, [skillsRoute]);
   const handleInsightsDesktop = useCallback(() => {
     if (insightsRoute) router.push(insightsRoute);
   }, [insightsRoute]);
@@ -466,13 +459,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       router.push(argoCdRoute);
     }
   }, [argoCdRoute, showMobileAgent]);
-
-  const handleSkillsMobile = useCallback(() => {
-    if (skillsRoute) {
-      showMobileAgent();
-      router.push(skillsRoute);
-    }
-  }, [skillsRoute, showMobileAgent]);
 
   const handleInsightsMobile = useCallback(() => {
     if (insightsRoute) {
@@ -541,7 +527,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       databases: "Databases",
       servers: "Servers",
       argoCd: "Argo CD",
-      skills: "Skills",
       insights: "Insights",
       forge: "Forge",
       marketplace: t("sidebar.actions.marketplace"),
@@ -570,7 +555,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     handleDatabases: handleDatabasesDesktop,
     handleServers: handleServersDesktop,
     handleArgoCd: handleArgoCdDesktop,
-    handleSkills: handleSkillsDesktop,
     handleInsights: handleInsightsDesktop,
     handleForge: handleForgeDesktop,
     handleMarketplace: handleMarketplaceDesktop,
@@ -593,7 +577,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
           handleDatabases={handleDatabasesMobile}
           handleServers={handleServersMobile}
           handleArgoCd={handleArgoCdMobile}
-          handleSkills={handleSkillsMobile}
           handleInsights={handleInsightsMobile}
           handleForge={handleForgeMobile}
           handleMarketplace={handleMarketplaceMobile}
@@ -620,7 +603,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
         handleDatabases={handleDatabasesDesktop}
         handleServers={handleServersDesktop}
         handleArgoCd={handleArgoCdDesktop}
-        handleSkills={handleSkillsDesktop}
         handleInsights={handleInsightsDesktop}
         handleForge={handleForgeDesktop}
         handleMarketplace={handleMarketplaceDesktop}
@@ -1141,7 +1123,6 @@ function DesktopSidebar({
   handleDatabases,
   handleServers,
   handleArgoCd,
-  handleSkills,
   handleInsights,
   handleForge,
   handleMarketplace,
@@ -1176,7 +1157,6 @@ function DesktopSidebar({
   const isDatabasesActive = pathname.includes("/database");
   const isServersActive = pathname.includes("/servers");
   const isArgoCdActive = pathname.includes("/argocd");
-  const isSkillsActive = pathname.includes("/skills");
   const isInsightsActive = pathname.includes("/insights");
   const isForgeActive = pathname.includes("/forge");
   const isMarketplaceActive = pathname.includes("/marketplace");
@@ -1389,16 +1369,7 @@ function DesktopSidebar({
             ) : null}
             <JiraSidebarEntry closesDrawer={false} />
             <FigmaSidebarEntry closesDrawer={false} />
-            <NavTargetGate route={builtinTargets.skillsRoute}>
-              <SidebarHeaderRow
-                icon={Sparkles}
-                label={labels.skills}
-                onPress={handleSkills}
-                isActive={isSkillsActive}
-                testID="sidebar-skills-nav"
-                variant="compact"
-              />
-            </NavTargetGate>
+            <BuiltinSidebarDestinations before="marketplace" />
             <SidebarHeaderRow
               icon={Store}
               label={labels.marketplace}

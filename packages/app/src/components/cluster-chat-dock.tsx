@@ -22,7 +22,7 @@ import { askAgentAboutResource } from "@/components/cluster-ask-agent";
 import { ClusterDraftChat } from "@/components/cluster-draft-chat";
 import { dispatchComposerAgentMessage } from "@/composer/actions";
 import { createMessageSubmissionWriter } from "@/composer/submission/writer";
-import { prepareTurnSkills } from "@/skills/turn-skills";
+import { prepareBuiltinTurn } from "@/plugins/builtin/surfaces";
 import type { ClusterComposerResource } from "@/components/cluster-composer";
 import { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
@@ -82,7 +82,7 @@ function deliverPendingAsk(
   message: string,
 ): void {
   if (!client) return;
-  const turnSkills = prepareTurnSkills({ serverId, agentId, text: message });
+  const turnSkills = prepareBuiltinTurn({ serverId, agentId, text: message });
   void dispatchComposerAgentMessage({
     client,
     agentId,

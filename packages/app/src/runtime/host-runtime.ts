@@ -93,7 +93,7 @@ import {
 import { mountFingerprintProfileSync } from "@/desktop/browser/fingerprint-profile-sync";
 import { schedulesQueryBaseKey } from "@/schedules/aggregated-schedules";
 import { dispatchComposerAgentMessage, sendQueuedComposerMessageNow } from "@/composer/actions";
-import { prepareTurnSkills } from "@/skills/turn-skills";
+import { prepareBuiltinTurn } from "@/plugins/builtin/surfaces";
 import { createMessageSubmissionWriter } from "@/composer/submission/writer";
 import { resolveComposerAttachmentSubmitFormat } from "@/composer/attachments/submit";
 import { encodeImages } from "@/utils/encode-images";
@@ -2788,7 +2788,7 @@ export class HostRuntimeStore {
       submitMessage: async ({ text, attachments }) => {
         const supportsForgeAttachments =
           useSessionStore.getState().sessions[serverId]?.serverInfo?.features?.forgeSearch === true;
-        const turnSkills = prepareTurnSkills({ serverId, agentId, text });
+        const turnSkills = prepareBuiltinTurn({ serverId, agentId, text });
         await dispatchComposerAgentMessage({
           client,
           agentId,

@@ -5,7 +5,7 @@ import { ArgoCdSsoDelegatePrompt } from "@/argocd/sso-delegate-prompt";
 import { useHostRuntimeBootstrapState } from "@/app/_layout";
 import { HostRouteProvider } from "@/navigation/host-route-context";
 import { resolveStartupRoute } from "@/navigation/host-runtime-bootstrap";
-import { SkillsSyncBinder } from "@/skills/skills-sync-binder";
+import { BuiltinHostBinders } from "@/plugins/builtin/surfaces";
 import { JiraOAuthDelegationBinder } from "@/jira/connections/oauth-delegation-binder";
 import { FigmaOAuthDelegationBinder } from "@/figma/connect/oauth-delegation-binder";
 import { ThemedStack } from "@/navigation/themed-stack";
@@ -59,9 +59,7 @@ function KnownHostRoute() {
 
   return (
     <HostRouteProvider serverId={routeServerId}>
-      <BuiltinPluginGate serverId={routeServerId} id="skills">
-        <SkillsSyncBinder serverId={routeServerId} />
-      </BuiltinPluginGate>
+      <BuiltinHostBinders serverId={routeServerId} />
       <BuiltinPluginGate serverId={routeServerId} id="argocd">
         <ArgoCdSsoDelegatePrompt serverId={routeServerId} />
       </BuiltinPluginGate>

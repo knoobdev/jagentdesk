@@ -1,19 +1,59 @@
 /** Public core UI and service surface for statically linked built-in clients. */
 export { PageHeader } from "@/components/headers/page-header";
-export { gumloopListStyles, gumloopTabStyles } from "@/components/gumloop-shell/list-styles";
+export {
+  gumloopChipStyles,
+  gumloopListStyles,
+  gumloopTabStyles,
+} from "@/components/gumloop-shell/list-styles";
 export { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 export { useWorkspaceDirectory, useWorkspaceKeys } from "@/stores/session-store-hooks";
 export { getDesktopHost } from "@/desktop/host";
 export { useIsCompactFormFactor } from "@/constants/layout";
-export { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
+export { useHostRuntimeClient, useHostRuntimeIsConnected, useHosts } from "@/runtime/host-runtime";
 export { Skeleton, useSkeletonPulse } from "@/components/ui/skeleton";
 export { TerminalPane } from "@/components/terminal-pane";
 export { withSshDocker, type SshDockerTarget } from "@/ssh/ui/ssh-docker-client";
 export type { Theme } from "@/styles/theme";
 export { GumloopRow } from "@/components/gumloop-shell/row";
-export type { BuiltinClientHost, BuiltinClientProps, BuiltinDestination } from "./host";
+export type {
+  BuiltinAgentProps,
+  BuiltinClientHost,
+  BuiltinClientProps,
+  BuiltinDestination,
+  BuiltinTurnPreparation,
+} from "./host";
 
 export * as Clipboard from "expo-clipboard";
 export { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export { isWeb } from "@/constants/platform";
+
+// Shared app UI and data hooks used by feature screens.
+export {
+  AdaptiveTextInput,
+  AdaptiveModalSheet,
+  type SheetHeader,
+} from "@/components/adaptive-modal-sheet";
+export { MarkdownRenderer } from "@/components/markdown/renderer";
+export { Alert } from "@/components/ui/alert";
+export { Button } from "@/components/ui/button";
+export { Combobox, ComboboxItem, type ComboboxOption } from "@/components/ui/combobox";
+export {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+export { Field, FormTextInput } from "@/components/ui/form-field";
+export { SegmentedControl, type SegmentedControlOption } from "@/components/ui/segmented-control";
+export { SelectField, type SelectFieldOption } from "@/components/ui/select-field";
+export { Switch } from "@/components/ui/switch";
+export { AgentControlTrigger } from "@/composer/agent-controls/control";
+export { useToast } from "@/contexts/toast-context";
+export { useFetchQueries, useFetchQuery } from "@/data/query";
+export { useDaemonConfig } from "@/hooks/use-daemon-config";
+export { useHostRouteServerId } from "@/navigation/host-route-context";
+export { useSessionStore, type WorkspaceDescriptor } from "@/stores/session-store";
+export { type StreamItem } from "@/types/stream";
+export { confirmDialog } from "@/utils/confirm-dialog";
+export { formatTimeAgo } from "@/utils/time";

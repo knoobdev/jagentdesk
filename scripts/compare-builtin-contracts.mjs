@@ -1,10 +1,60 @@
+// Compares a migrated built-in's wire contract with a baseline revision:
+//   node scripts/compare-builtin-contracts.mjs <baseline> <out-dir> [plugin-id...]
+// RPCs: inbound wire names the plugin's prefixes own that appear in the dispatch sources.
+// Tools: agent tool names registered in the tool sources. i18n: every resource key.
+// Requires a built @jagentdesk/protocol (npm run build:client) for the inbound name list.
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import ts from "typescript";
 const baseline = process.argv[2] ?? "plat/int10";
 const output = process.argv[3] ?? ".dev/builtin-contracts";
+const S = "packages/server/src/server";
+const T = `${S}/agent/tools/jagentdesk-tools.ts`;
+/** Baseline sources are the phase 1 locations; branch sources are the plugin plus remaining core. */
+const PLUGINS = {
+  docker: {
+    rpcPrefixes: ["docker/"],
+    toolPrefixes: ["docker_"],
+    baseline: {
+      rpc: [`${S}/session.ts`],
+      tools: [T, `${S}/ssh/remote-docker/agent-tools.ts`],
+    },
+    branch: {
+      rpc: ["plugins/docker/server/index.ts"],
+      tools: ["plugins/docker/server/agent-tools.ts", `${S}/ssh/remote-docker/agent-tools.ts`],
+    },
+  },
+  skills: {
+    rpcPrefixes: ["skills/", "skills.", "agent.skills."],
+    toolNames: ["create_skill", "update_skill"],
+    baseline: {
+      rpc: [`${S}/session.ts`, `${S}/skills-native/session-handler.ts`],
+      tools: [T],
+    },
+    branch: {
+      rpc: [`${S}/session.ts`, "plugins/skills/server/index.ts"],
+      tools: [T, "plugins/skills/server/agent-tools.ts"],
+    },
+  },
+};
+const ids = process.argv.slice(4).length ? process.argv.slice(4) : Object.keys(PLUGINS);
 fs.mkdirSync(output, { recursive: true });
+const { SessionInboundMessageSchema } = await import(
+  new URL("../packages/protocol/dist/messages.js", import.meta.url)
+);
+const inbound = new Set(
+  SessionInboundMessageSchema.options.map((option) => option.shape.type.value),
+);
+const exists = (revision, file) => {
+  if (revision === "worktree") return fs.existsSync(file);
+  try {
+    execFileSync("git", ["cat-file", "-e", `${revision}:${file}`], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+};
 const read = (revision, file) =>
   revision === "worktree"
     ? fs.readFileSync(file, "utf8")
@@ -26,59 +76,54 @@ function propertyKeys(source) {
   walk(file);
   return keys.sort();
 }
-function dump(revision) {
-  const old = revision !== "worktree";
-  const rpcSource = read(
-    revision,
-    old ? "packages/server/src/server/session.ts" : "plugins/docker/server/index.ts",
-  );
-  const rpc = [...rpcSource.matchAll(/"(docker\/[^"]+)"/g)]
-    .map((m) => m[1])
-    .filter(
-      (name) =>
-        !name.endsWith("/response") &&
-        !["docker/snapshot", "docker/log-chunk", "docker/stats-data"].includes(name),
-    );
-  const toolSource = read(
-    revision,
-    old
-      ? "packages/server/src/server/agent/tools/jagentdesk-tools.ts"
-      : "plugins/docker/server/agent-tools.ts",
-  );
-  const tools = [...toolSource.matchAll(/registerTool\(\s*"(docker_[^"]+)"/g)].map((m) => m[1]);
-  const remoteTools = read(revision, "packages/server/src/server/ssh/remote-docker/agent-tools.ts");
-  tools.push(...[...remoteTools.matchAll(/"(docker_[a-z_]+)"/g)].map((m) => m[1]));
-  const files = execFileSync(
-    "git",
-    ["ls-tree", "-r", "--name-only", baseline, "packages/app/src/i18n/resources"],
-    { encoding: "utf8" },
-  )
-    .trim()
-    .split("\n");
-  const i18n = Object.fromEntries(
-    files
-      .filter((file) => /\.(ts|json)$/.test(file))
-      .map((file) => [file, propertyKeys(read(revision, file))]),
-  );
-  return {
-    rpc: [...new Set(rpc)].filter((name) => name !== "docker/").sort(),
-    tools: [...new Set(tools)].sort(),
-    i18n,
-  };
+function literals(revision, files) {
+  return files
+    .filter((file) => exists(revision, file))
+    .flatMap((file) => [...read(revision, file).matchAll(/"([^"\s]+)"/g)].map((m) => m[1]));
 }
-const before = dump(baseline),
-  after = dump("worktree");
-for (const [name, data] of [
-  ["int10", before],
-  ["branch", after],
-])
-  fs.writeFileSync(path.join(output, `${name}.json`), JSON.stringify(data, null, 2) + "\n");
-if (JSON.stringify(before) !== JSON.stringify(after)) {
-  execFileSync("diff", ["-u", path.join(output, "int10.json"), path.join(output, "branch.json")], {
-    stdio: "inherit",
-  });
-  process.exitCode = 1;
-} else
-  console.log(
-    `Identical: ${after.rpc.length} Docker RPCs, ${after.tools.length} Docker tools, i18n keys in ${Object.keys(after.i18n).length} resource files`,
+function dump(revision, config) {
+  const sources = revision === "worktree" ? config.branch : config.baseline;
+  const rpc = literals(revision, sources.rpc).filter(
+    (name) => inbound.has(name) && config.rpcPrefixes.some((prefix) => name.startsWith(prefix)),
   );
+  const tools = literals(revision, sources.tools).filter(
+    (name) =>
+      config.toolNames?.includes(name) ||
+      (config.toolPrefixes?.some((prefix) => name.startsWith(prefix)) &&
+        /^[a-z][a-z0-9_]*$/.test(name)),
+  );
+  return { rpc: [...new Set(rpc)].sort(), tools: [...new Set(tools)].sort() };
+}
+const files = execFileSync(
+  "git",
+  ["ls-tree", "-r", "--name-only", baseline, "packages/app/src/i18n/resources"],
+  { encoding: "utf8" },
+)
+  .trim()
+  .split("\n")
+  .filter((file) => /\.(ts|json)$/.test(file));
+const i18n = (revision) =>
+  Object.fromEntries(files.map((file) => [file, propertyKeys(read(revision, file))]));
+const baseI18n = i18n(baseline);
+const branchI18n = i18n("worktree");
+let failed = false;
+for (const id of ids) {
+  const config = PLUGINS[id];
+  if (!config) throw new Error(`No contract config for ${id}`);
+  const before = { ...dump(baseline, config), i18n: baseI18n };
+  const after = { ...dump("worktree", config), i18n: branchI18n };
+  const base = path.join(output, `${id}-baseline.json`);
+  const branch = path.join(output, `${id}-branch.json`);
+  fs.writeFileSync(base, JSON.stringify(before, null, 2) + "\n");
+  fs.writeFileSync(branch, JSON.stringify(after, null, 2) + "\n");
+  if (JSON.stringify(before) !== JSON.stringify(after)) {
+    failed = true;
+    try {
+      execFileSync("diff", ["-u", base, branch], { stdio: "inherit" });
+    } catch {}
+  } else
+    console.log(
+      `${id}: identical — ${after.rpc.length} RPCs, ${after.tools.length} tools, i18n keys in ${Object.keys(after.i18n).length} resource files`,
+    );
+}
+if (failed) process.exitCode = 1;

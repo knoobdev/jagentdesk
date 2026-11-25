@@ -1,6 +1,6 @@
 import { createBuiltinCoreServices } from "./plugins/builtin/services.js";
 import { builtinServerRegistry } from "./plugins/builtin/loaded.js";
-import type { BuiltinServerSession } from "./plugins/builtin/host.js";
+import type { BuiltinDaemonScope, BuiltinServerSession } from "./plugins/builtin/host.js";
 import {
   formatSystemNotificationPrompt,
   type PromptDispatchResult,
@@ -312,11 +312,6 @@ import { type SpeechReadinessSnapshot } from "./speech/speech-runtime.js";
 import pino from "pino";
 import { FileBackedChatService } from "./chat/chat-service.js";
 import { LoopService } from "./loop-service.js";
-import { type NativeSkillsService } from "./skills-native/index.js";
-import {
-  handleNativeSkillsRequest,
-  isNativeSkillsRequest,
-} from "./skills-native/session-handler.js";
 import { type UsageHistoryStorage } from "./usage/usage-history-storage.js";
 import { type HostCapabilityService } from "./host-capabilities/service.js";
 import { type HostToolInstaller } from "./host-tools/installer.js";
@@ -674,8 +669,6 @@ export interface SessionOptions {
 
   loopService: LoopService;
 
-  skillsStorage?: NativeSkillsService | null;
-
   usageHistory?: UsageHistoryStorage | null;
 
   hostCapabilities?: HostCapabilityService | null;
@@ -802,6 +795,7 @@ export interface SessionOptions {
 
   pluginRuntime?: {
     builtin?: BuiltinPluginState;
+    builtinDaemon?: BuiltinDaemonScope;
     refreshBuiltinAvailability?(): Promise<void>;
     listUsageReports?: NonNullable<UsageSessionOptions["runtime"]>["listUsageReports"];
     listLegacyUsage?: NonNullable<UsageSessionOptions["runtime"]>["listLegacyUsage"];
@@ -1157,8 +1151,6 @@ export class Session {
   private workspaceBaseBranch: WorkspaceBaseBranchService | undefined;
 
   private readonly daemonConfigStore: DaemonConfigStore;
-
-  private readonly skillsStorage: NativeSkillsService | null;
 
   private readonly usageHistory: UsageHistoryStorage | null;
 
@@ -1681,7 +1673,6 @@ export class Session {
         })
       : null;
     this.daemonConfigStore = daemonConfigStore;
-    this.skillsStorage = options.skillsStorage ?? null;
     this.usageHistory = options.usageHistory ?? null;
     this.hostCapabilities = options.hostCapabilities;
     this.hostToolInstaller = options.hostToolInstaller;
@@ -1846,6 +1837,7 @@ export class Session {
   ): BuiltinServerSession {
     return builtinServerRegistry.session(pluginRuntime?.builtin, {
       ...createBuiltinCoreServices(this.jagentdeskHome, this.sessionLogger, this.daemonConfigStore),
+      daemon: pluginRuntime?.builtinDaemon,
       terminals: this.terminalManager,
       remoteDocker: () => this.sshService.modules?.docker,
       push: (message) => this.emit(message),
@@ -3213,7 +3205,6 @@ export class Session {
       () => this.dispatchMetadataMessage(msg),
       () => this.dispatchAgentLifecycleMessage(msg),
       () => this.dispatchOrchestrationMessage(msg),
-      () => this.dispatchSkillsMessage(msg),
       () => this.dispatchUsageMessage(msg),
       () => this.dispatchAgentConfigMessage(msg),
       () => this.dispatchCheckoutMessage(msg),
@@ -3237,7 +3228,11 @@ export class Session {
       () => this.botsSession?.dispatch(msg),
       () => this.dispatchJiraMessage(msg),
       () => this.dispatchFigmaMessage(msg),
-      () => this.builtinSession.dispatch(msg),
+      () =>
+        this.builtinSession.dispatch(msg, {
+          supports: (capability) =>
+            source ? this.supportsForSource(capability, source) : this.supports(capability),
+        }),
       () => this.dispatchSimulatorMessage(msg),
       () => this.dispatchProxyMessage(msg),
       () => this.dispatchMigrationMessage(msg),
@@ -3859,30 +3854,6 @@ export class Session {
         return this.projectConfigSession.handleWriteProjectConfigRequest(msg);
       default:
         return this.dispatchAgentConfigSessionMessage(msg);
-    }
-  }
-
-  private dispatchSkillsMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    if (isNativeSkillsRequest(msg)) {
-      return handleNativeSkillsRequest(this.skillsStorage, msg, (out) => this.emit(out));
-    }
-    switch (msg.type) {
-      case "skills.get.request":
-        this.emit({
-          type: "skills.get.response",
-          payload: { requestId: msg.requestId, skills: this.skillsStorage?.get() ?? [] },
-        });
-        return undefined;
-      case "skills.mutate.request":
-        return (async () => {
-          const skills = this.skillsStorage ? await this.skillsStorage.mutate(msg.mutation) : [];
-          this.emit({
-            type: "skills.mutate.response",
-            payload: { requestId: msg.requestId, skills },
-          });
-        })();
-      default:
-        return undefined;
     }
   }
 
@@ -10548,10 +10519,7 @@ export class Session {
     skillIds: string[] | undefined,
     specPhase: boolean,
   ): string[] | undefined {
-    if (
-      specPhase ||
-      (this.pluginRuntime?.builtin && !this.pluginRuntime.builtin.isEnabled("skills"))
-    )
+    if (specPhase || !this.pluginRuntime?.builtinDaemon?.enabledPort("skillInvocation"))
       return undefined;
     return skillIds;
   }
@@ -10587,7 +10555,8 @@ export class Session {
                   agentId,
                   prompt: preparedPrompt,
                   skillIds: msg.skillIds,
-                  skillInvocation: this.skillsStorage,
+                  skillInvocation:
+                    this.pluginRuntime?.builtinDaemon?.port("skillInvocation") ?? null,
                   logger: this.sessionLogger,
                 })
             : undefined,
@@ -10681,7 +10650,7 @@ export class Session {
               : undefined,
             activeTurnBehavior: msg.activeTurnBehavior === "steer" ? "steer" : "interrupt",
             skillIds: this.messageSkillIds(msg.skillIds, Boolean(specPhase)),
-            skillInvocation: this.skillsStorage,
+            skillInvocation: this.pluginRuntime?.builtinDaemon?.port("skillInvocation") ?? null,
             logger: this.sessionLogger,
           });
         };

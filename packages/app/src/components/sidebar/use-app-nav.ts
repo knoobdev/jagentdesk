@@ -21,7 +21,6 @@ import {
   Share2,
   Ship,
   Smartphone,
-  Sparkles,
   Store,
   type LucideIcon,
 } from "lucide-react-native";
@@ -64,7 +63,6 @@ import {
   buildSharedSessionsRoute,
   buildSimulatorRoute,
   buildProxyRoute,
-  buildSkillsRoute,
 } from "@/utils/host-routes";
 
 /** Routes behind the app's primary navigation, shared by the sidebar list and the Gumloop rail. */
@@ -74,7 +72,6 @@ export interface AppNavTargets {
   clustersRoute: Href | null;
   databasesRoute: Href | null;
   serversRoute: Href | null;
-  skillsRoute: Href | null;
   insightsRoute: Href | null;
   forgeRoute: Href | null;
   marketplaceRoute: Href | null;
@@ -104,7 +101,6 @@ export function useAppNavTargets(): AppNavTargets {
   const supportsBots = useHostFeature(firstServerId, "bots");
   const clustersEnabled = useBuiltinPluginEnabled(firstServerId, "clusters");
   const databasesEnabled = useBuiltinPluginEnabled(firstServerId, "databases");
-  const skillsEnabled = useBuiltinPluginEnabled(firstServerId, "skills");
   const insightsEnabled = useBuiltinPluginEnabled(firstServerId, "insights");
   const workbenchEnabled = useBuiltinPluginEnabled(firstServerId, "workbench");
   const sharingEnabled = useBuiltinPluginEnabled(firstServerId, "session-share");
@@ -163,7 +159,6 @@ export function useAppNavTargets(): AppNavTargets {
       sharedSessionsRoute: sharingEnabled ? (buildSharedSessionsRoute() as Href) : null,
       // Gated at the route: the entry disappears with the daemon feature flag.
       serversRoute: supportsSshServers ? perHost(buildServersRoute) : null,
-      skillsRoute: skillsEnabled ? perHost(buildSkillsRoute) : null,
       insightsRoute: insightsEnabled ? perHost(buildInsightsRoute) : null,
       forgeRoute: perHost(buildForgeRoute),
       marketplaceRoute: perHost(buildMarketplaceRoute),
@@ -179,7 +174,6 @@ export function useAppNavTargets(): AppNavTargets {
     supportsBots,
     clustersEnabled,
     databasesEnabled,
-    skillsEnabled,
     insightsEnabled,
     workbenchEnabled,
     sharingEnabled,
@@ -204,6 +198,8 @@ interface AppNavItemBase {
   shortLabel: string;
   isActive: boolean;
   testID: string;
+  /** Built-in destinations: the core item key this entry precedes. */
+  before?: string;
 }
 
 export type AppNavItem = AppNavItemBase &
@@ -258,7 +254,6 @@ export function useAppNavItems(): AppNavItem[] {
           }
         : null,
 
-      navItem("skills", Sparkles, "Skills", "Skills", targets.skillsRoute, pathname, "/skills"),
       navItem(
         "marketplace",
         Store,
@@ -268,7 +263,7 @@ export function useAppNavItems(): AppNavItem[] {
         pathname,
         "/marketplace",
       ),
-      ...builtinDestinations,
+      ...builtinDestinations.filter((item) => !item.before),
       navItem(
         "simulators",
         Smartphone,
@@ -323,7 +318,13 @@ export function useAppNavItems(): AppNavItem[] {
         ? navItem("forge", GitPullRequest, "Forge", "Forge", targets.forgeRoute, pathname, "/forge")
         : null,
     ];
-    return items.filter((item): item is AppNavItem => item !== null);
+    const placed = items.filter((item): item is AppNavItem => item !== null);
+    for (const item of builtinDestinations) {
+      if (!item.before) continue;
+      const index = placed.findIndex((entry) => entry.key === item.before);
+      placed.splice(index < 0 ? placed.length : index, 0, item);
+    }
+    return placed;
   }, [openUsage, pathname, t, targets, builtinDestinations]);
 }
 

@@ -5,6 +5,7 @@ import { findExecutable } from "../../executable-resolution/executable-resolutio
 import { ProviderOverrideSchema } from "@jagentdesk/protocol/provider-config";
 import type { BuiltinPluginId } from "@jagentdesk/protocol/builtin-plugins";
 import { BuiltinPluginState } from "./builtin/state.js";
+import type { BuiltinDaemonScope } from "./builtin/host.js";
 import type { PluginRuntimeSubscription } from "./runtime-subscription.js";
 import { BuiltinPluginLoader, type BuiltinPlugin } from "./builtin/index.js";
 import type { PluginAgentToolsRuntime } from "./agent-tools.js";
@@ -112,6 +113,8 @@ function resolvePluginStatus(input: {
 
 export class PluginService {
   readonly builtin: BuiltinPluginState;
+  /** Set by the daemon once built-in daemon services exist; sessions read it at creation. */
+  builtinDaemon?: BuiltinDaemonScope;
   private readonly runtime: PluginRuntimePort;
   private readonly managedSources: ManagedPluginSources | null;
   private readonly builtinPlugins: BuiltinPluginLoader;

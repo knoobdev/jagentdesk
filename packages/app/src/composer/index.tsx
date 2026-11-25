@@ -54,10 +54,9 @@ import {
   DraftAgentControls,
   type DraftAgentControlsProps,
 } from "@/composer/agent-controls";
-import { SkillsControl } from "@/composer/agent-controls/skills-control";
 import { AutonomousControl } from "@/composer/agent-controls/autonomous-control";
 import { SpecModeControl } from "@/composer/agent-controls/spec-mode-control";
-import { prepareTurnSkills } from "@/skills/turn-skills";
+import { BuiltinAgentItems, prepareBuiltinTurn } from "@/plugins/builtin/surfaces";
 import { ContextWindowMeter } from "@/components/context-window-meter";
 import { useImageAttachmentPicker } from "@/hooks/use-image-attachment-picker";
 import { useFilePicker } from "@/hooks/use-file-picker";
@@ -376,9 +375,7 @@ function renderLeftContent(args: RenderLeftContentArgs): ReactElement | null {
         onDropdownClose={focusInput}
         isCompactLayout={isCompactLayout}
       />
-      <BuiltinPluginGate serverId={serverId} id="skills">
-        <SkillsControl agentId={agentId} serverId={serverId} />
-      </BuiltinPluginGate>
+      <BuiltinAgentItems serverId={serverId} agentId={agentId} kind="agentControls" />
       <BuiltinPluginGate serverId={serverId} id="spec-mode">
         <SpecModeControl agentId={agentId} serverId={serverId} />
       </BuiltinPluginGate>
@@ -1787,7 +1784,7 @@ function ComposerContentImpl({
       if (!client) {
         throw new Error(t("workspace.terminal.hostDisconnected"));
       }
-      const turnSkills = prepareTurnSkills({ serverId, agentId: targetAgentId, text });
+      const turnSkills = prepareBuiltinTurn({ serverId, agentId: targetAgentId, text });
       await dispatchComposerAgentMessage({
         client,
         agentId: targetAgentId,

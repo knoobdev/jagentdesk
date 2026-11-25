@@ -162,7 +162,6 @@ function createServer(agentManagerOverrides?: Record<string, unknown>) {
     undefined,
     undefined,
     undefined,
-    undefined,
     createStub<DatabaseRegistry>({}),
   );
 

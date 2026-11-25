@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { SKILL_DIR_SPECS } from "../skills-native/paths.js";
+import { SKILL_DIR_SPECS } from "../agent/native-skill-paths.js";
 import {
   planCommandFiles,
   planSpecKitInit,

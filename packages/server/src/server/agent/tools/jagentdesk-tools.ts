@@ -1,4 +1,5 @@
 import { builtinServerRegistry } from "../../plugins/builtin/loaded.js";
+import type { BuiltinDaemonScope } from "../../plugins/builtin/host.js";
 import {
   sendPromptToAgent,
   enqueueAgentMessage,
@@ -163,8 +164,6 @@ import { getSharedProxyService, installCaToSimulator } from "../../proxy/proxy-s
 import { fridaAvailability, installFrida, launchAndUnpin } from "../../proxy/frida-control.js";
 import { SimButtonSchema, type SimButton } from "@jagentdesk/protocol/simulator/rpc-schemas";
 import { type ForgeHubService } from "../../session/forge/forge-hub-session.js";
-import { type NativeSkillsService } from "../../skills-native/index.js";
-import { slugifySkillName } from "../../skills-native/frontmatter.js";
 import { featuresFromControls } from "@jagentdesk/protocol/option-controls";
 
 // This file predates lint enforcement on it (lefthook lints only staged files, and this large tool
@@ -179,6 +178,8 @@ export interface JAgentDeskToolHostDependencies {
   remoteFinishSubscriptions?: () => FinishSubscriptions;
   changeRequestWatches?: ChangeRequestWatches;
   builtinPlugins?: ReadonlySet<BuiltinPluginId>;
+  /** The daemon's built-in feature services; tool installers read their instances from it. */
+  builtinDaemon?: BuiltinDaemonScope;
   jagentdeskToolPolicy?: ProviderJAgentDeskToolsPolicy;
   agentManager: AgentManager;
   agentStorage: AgentStorage;
@@ -253,10 +254,6 @@ export interface JAgentDeskToolHostDependencies {
   // clusterRegistry backs the kubectl_* tools. Single instance so all agents
   // share one token/connection store.
   forgeHub?: ForgeHubService;
-  // Native skills service (spec 22). Lets a chat agent author a SKILL.md skill
-  // mid-conversation; its change broadcast (status:skills_changed) surfaces it live
-  // in the Skills screen on every device. Also resolves skillIds on send_agent_prompt.
-  skillsStorage?: Pick<NativeSkillsService, "author" | "getSkill" | "buildInvocationPrefix">;
   // Daemon-config-backed store for the agentic browser's anti-detect fingerprint
   // profiles. Lets a chat agent create a coherent profile and switch the active one
   // mid-conversation; the config patch broadcasts status:daemon_config_changed, so
@@ -3065,172 +3062,6 @@ function registerBrowserProfileTools(params: {
   );
 }
 
-function registerSkillsTools(params: {
-  registerTool: (
-    name: string,
-    config: JAgentDeskToolConfig,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool handlers are schema-validated at registration boundaries.
-    handler: (input: any, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>,
-  ) => void;
-  options: JAgentDeskToolHostDependencies;
-}): void {
-  const { registerTool, options } = params;
-
-  // Skills are standard Agent Skills directories (<name>/SKILL.md) installed natively
-  // for every provider (spec 22 / ADR-0022): one real copy in .agents/skills plus
-  // symlinks into .claude/skills and .kiro/skills, recorded in the skills lock.
-  const resolveCwd = (scope: "global" | "project", cwd: string | undefined) => {
-    if (scope === "global") return undefined;
-    if (cwd) return cwd;
-    return options.callerAgentId
-      ? (options.agentManager.getAgent(options.callerAgentId)?.cwd ?? undefined)
-      : undefined;
-  };
-  const skillError = (error: unknown): JAgentDeskToolResult => ({
-    content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
-    isError: true,
-  });
-
-  registerTool(
-    "create_skill",
-    {
-      title: "Create skill",
-      description:
-        "Create a new skill as a standard Agent Skills directory (<name>/SKILL.md) that every coding agent provider loads natively (Claude, Codex, OpenCode, Cursor, Copilot, Pi, OMP, Kimi, Kiro). Use THIS tool when the user asks you to create/make a skill: it installs the real copy in ~/.agents/skills (or <project>/.agents/skills), symlinks it into .claude/skills and .kiro/skills, records it in the JAgentDesk skills lock and shows it in the Skills screen on every device. Never overwrites an existing skill directory. Auto-approved.",
-      inputSchema: {
-        name: z
-          .string()
-          .trim()
-          .min(1, "name is required")
-          .max(64, "name must be 64 characters or fewer")
-          .describe(
-            "Skill name: lowercase letters, digits and hyphens (e.g. pr-reviewer). Other text is converted to that form.",
-          ),
-        instructions: z
-          .string()
-          .trim()
-          .min(1, "instructions are required")
-          .describe("SKILL.md body (markdown): what the skill does and how to apply it."),
-        description: z
-          .string()
-          .trim()
-          .max(1024)
-          .optional()
-          .describe(
-            "When the skill should be used (the provider shows this to the model). Defaults to the first line of the instructions.",
-          ),
-        scope: z
-          .enum(["global", "project"])
-          .optional()
-          .describe("global (default): the user's home. project: the current workspace."),
-        cwd: z
-          .string()
-          .optional()
-          .describe("Workspace directory for scope=project. Defaults to your working directory."),
-      },
-      outputSchema: {
-        id: z.string(),
-        name: z.string(),
-        path: z.string(),
-      },
-    },
-    async (input: {
-      name: string;
-      instructions: string;
-      description?: string;
-      scope?: "global" | "project";
-      cwd?: string;
-    }) => {
-      if (!options.skillsStorage) {
-        return {
-          content: [{ type: "text", text: "Skills storage is not configured" }],
-          isError: true,
-        };
-      }
-      const scope = input.scope ?? "global";
-      const name = slugifySkillName(input.name);
-      const description =
-        input.description?.trim() ||
-        input.instructions
-          .split("\n")
-          .map((line) => line.replace(/^#+\s*/, "").trim())
-          .find(Boolean) ||
-        name;
-      try {
-        const skill = await options.skillsStorage.author({
-          name,
-          description,
-          body: input.instructions,
-          scope,
-          cwd: resolveCwd(scope, input.cwd),
-        });
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Created skill "${skill.name}" (${skill.skillId}) at ${skill.realPath}`,
-            },
-          ],
-          structuredContent: ensureValidJson({
-            id: skill.skillId,
-            name: skill.name,
-            path: skill.realPath,
-          }),
-        };
-      } catch (error) {
-        return skillError(error);
-      }
-    },
-  );
-
-  registerTool(
-    "update_skill",
-    {
-      title: "Update skill",
-      description:
-        "Update the description and/or instructions (SKILL.md body) of a skill JAgentDesk owns, by id (the id returned by create_skill or shown in the Skills screen). Learned lessons are kept. Renaming is not supported. Auto-approved.",
-      inputSchema: {
-        id: z.string().min(1).describe("Skill id to update."),
-        instructions: z.string().trim().min(1).optional(),
-        description: z.string().trim().max(1024).optional(),
-        cwd: z
-          .string()
-          .optional()
-          .describe("Workspace directory, needed only for a project skill."),
-      },
-      outputSchema: {
-        id: z.string(),
-        name: z.string(),
-      },
-    },
-    async (input: { id: string; instructions?: string; description?: string; cwd?: string }) => {
-      if (!options.skillsStorage) {
-        return {
-          content: [{ type: "text", text: "Skills storage is not configured" }],
-          isError: true,
-        };
-      }
-      try {
-        const current = await options.skillsStorage.getSkill(input.id, input.cwd);
-        const skill = await options.skillsStorage.author({
-          skillId: current.skill.skillId,
-          name: current.skill.name,
-          description: input.description ?? current.skill.description,
-          body: input.instructions ?? current.body,
-          scope: current.skill.scope,
-          cwd: current.skill.projectRoot ?? undefined,
-        });
-        return {
-          content: [{ type: "text", text: `Updated skill "${skill.name}" (${skill.skillId})` }],
-          structuredContent: ensureValidJson({ id: skill.skillId, name: skill.name }),
-        };
-      } catch (error) {
-        return skillError(error);
-      }
-    },
-  );
-}
-
 function validateSendPromptCaller(
   callerOrchestrationContext: Pick<
     OrchestrationAgentContext,
@@ -3637,6 +3468,20 @@ function createToolCatalog(
       handler: handler as JAgentDeskToolDefinition["handler"],
     });
   };
+  const builtinToolContext = {
+    daemon: options.builtinDaemon,
+    callerAgentId,
+    agentManager,
+  };
+  // Each built-in's tools install at the catalog position its phase 1 registration held.
+  const installBuiltinTools = (id: BuiltinPluginId) =>
+    builtinServerRegistry.registerAgentTools(
+      options.builtinPlugins,
+      registerTool,
+      (name) => builtinNames.add(name),
+      builtinToolContext,
+      id,
+    );
   const toCatalog = (): JAgentDeskToolCatalog => ({
     tools,
     getTool(name: string): JAgentDeskToolDefinition | undefined {
@@ -4273,9 +4118,7 @@ function createToolCatalog(
   // drops kubectl_get/kubectl_apply and the agent falls back to shelling out.
   registerKubectlTools({ registerTool, options, callerAgentId });
   registerSqlTools({ registerTool, options, callerAgentId });
-  builtinServerRegistry.registerAgentTools(options.builtinPlugins, registerTool, (name) =>
-    builtinNames.add(name),
-  );
+  installBuiltinTools("docker");
   if (options.sshAgentTools) {
     registerSshAgentTools(registerTool, options.sshAgentTools(callerAgentId ?? null));
   }
@@ -4423,7 +4266,7 @@ function createToolCatalog(
 
   // Skill authoring is a normal chat-agent capability (not gated behind a
   // workspace/DB/cluster), so it lives here after the voice-only early return.
-  registerSkillsTools({ registerTool, options });
+  installBuiltinTools("skills");
 
   registerTool(
     "list_hosts",
@@ -5202,7 +5045,7 @@ function createToolCatalog(
                 agentId,
                 prompt: preparedPrompt,
                 skillIds,
-                skillInvocation: options.skillsStorage ?? null,
+                skillInvocation: options.builtinDaemon?.port("skillInvocation") ?? null,
                 logger: childLogger,
               })
           : undefined,
@@ -5321,7 +5164,7 @@ function createToolCatalog(
         activeTurnBehavior,
         sessionMode,
         skillIds,
-        skillInvocation: options.skillsStorage ?? null,
+        skillInvocation: options.builtinDaemon?.port("skillInvocation") ?? null,
         beforeDispatch: async () => {
           if (background) notifying = await armFinishNotification();
         },

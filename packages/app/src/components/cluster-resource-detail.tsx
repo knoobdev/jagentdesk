@@ -13,7 +13,7 @@ import { highlightToKeyedLines } from "@/utils/highlight-cache";
 import { ClusterResourceOverview } from "@/components/cluster-resource-overview";
 import { dispatchComposerAgentMessage } from "@/composer/actions";
 import { createMessageSubmissionWriter } from "@/composer/submission/writer";
-import { prepareTurnSkills } from "@/skills/turn-skills";
+import { prepareBuiltinTurn } from "@/plugins/builtin/surfaces";
 import { useClusterChatStore } from "@/stores/cluster-chat-store";
 import type { Theme } from "@/styles/theme";
 import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
@@ -516,7 +516,7 @@ export function ClusterResourceDetail({
       // is accepted by the daemon but never renders in the panel (which draws the
       // user message from this submission store, not a daemon echo), so the chat
       // looked silent even though the message went through.
-      const turnSkills = prepareTurnSkills({ serverId, agentId: chatAgentId, text: askMessage });
+      const turnSkills = prepareBuiltinTurn({ serverId, agentId: chatAgentId, text: askMessage });
       dispatchComposerAgentMessage({
         client,
         agentId: chatAgentId,
