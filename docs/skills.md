@@ -5,14 +5,15 @@ matter). JAgentDesk does not inject skill text into prompts: it installs skills 
 provider CLI already looks and asks the provider to load them. Product contract: spec 22,
 ADR-0022.
 
-Code: `packages/protocol/src/native-skills.ts` (schemas, invocation),
-`packages/server/src/server/skills-native` (daemon), `packages/app/src/screens/skills-screen.tsx`
-and `packages/app/src/skills` (app).
+Code: `packages/protocol/src/native-skills.ts` (schemas, invocation), the `skills` built-in
+feature in `plugins/skills/` (daemon service, RPCs, tools, screen, composer control), and the
+provider directory table `packages/server/src/server/agent/native-skill-paths.ts`, which stays in
+core because Spec mode installs its commands there too.
 
 ## Where skills live
 
 The daemon scans these directories, globally (below `~`) and per project (below the project root),
-and reports which providers can see each skill (`SKILL_DIR_SPECS` in `paths.ts`).
+and reports which providers can see each skill (`SKILL_DIR_SPECS` in `native-skill-paths.ts`).
 
 | Directory (global / project)                   | Read by                                         |
 | ---------------------------------------------- | ----------------------------------------------- |

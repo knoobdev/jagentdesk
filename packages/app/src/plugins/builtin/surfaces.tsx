@@ -1,5 +1,5 @@
 import { router, usePathname } from "expo-router";
-import { useCallback } from "react";
+import { useCallback, type ComponentType } from "react";
 import { SidebarHeaderRow } from "@/components/sidebar/sidebar-header-row";
 import { usePanelStore } from "@/stores/panel-store";
 import { useMemo, useSyncExternalStore } from "react";
@@ -13,10 +13,15 @@ import { orderAppNavItems } from "@/components/sidebar/nav-order";
 import type { AppNavItem } from "@/components/sidebar/use-app-nav";
 import { builtinClientRegistry } from "./loaded";
 import type {
+  BuiltinAgentProps,
   BuiltinAttachmentPillProps,
   BuiltinClientProps,
+  BuiltinComposerDockProps,
   BuiltinDestination,
+  BuiltinSidePanelProps,
+  BuiltinUserMessageBodyProps,
   BuiltinScreen as ScreenProps,
+  BuiltinTurnPreparation,
 } from "./host";
 import { BuiltinPluginScreenBoundary } from "./route-boundary";
 
@@ -64,6 +69,7 @@ export function useBuiltinDestinations(pathname: string): AppNavItem[] {
             route: routes[index] ?? destination.route(serverId),
             isActive: pathname.includes(`/${destination.routeSegment}`),
             testID: `rail-${destination.id}`,
+            sidebarTestID: destination.sidebarTestID,
           })),
     [destinations, pathname, routes, serverId],
   );
@@ -106,6 +112,114 @@ export function BuiltinScreen({ serverId, segment, ...props }: ScreenProps & { s
     </BuiltinPluginScreenBoundary>
   ) : null;
 }
+export function BuiltinWorkspaceHeaderControls({ serverId }: BuiltinClientProps) {
+  const entries = useBuiltinClientContributions(serverId);
+  return (
+    <>
+      {[...entries].flatMap(([id, entry]) =>
+        [...entry.workspaceHeader].map(([key, Control]) => (
+          <Control key={`${id}/${key}`} serverId={serverId} />
+        )),
+      )}
+    </>
+  );
+}
+export function BuiltinAgentItems({
+  serverId,
+  agentId,
+  kind,
+}: BuiltinAgentProps & { kind: "agentControls" | "agentPanel" | "agentHeader" }) {
+  const entries = useBuiltinClientContributions(serverId);
+  return (
+    <>
+      {[...entries].flatMap(([id, entry]) =>
+        [...entry[kind]].map(([key, Component]) => (
+          <Component key={`${id}/${key}`} serverId={serverId} agentId={agentId} />
+        )),
+      )}
+    </>
+  );
+}
+export function BuiltinComposerDocks(props: BuiltinComposerDockProps) {
+  const entries = useBuiltinClientContributions(props.serverId);
+  return (
+    <>
+      {[...entries].flatMap(([id, entry]) =>
+        [...entry.composerDocks].map(([key, Dock]) => <Dock key={`${id}/${key}`} {...props} />),
+      )}
+    </>
+  );
+}
+export function BuiltinAgentSettingsCards({ serverId }: BuiltinClientProps) {
+  const entries = useBuiltinClientContributions(serverId);
+  const cards = [...entries]
+    .flatMap(([id, entry]) =>
+      [...entry.agentSettings].map(([key, card]) => ({
+        key: `${id}/${key}`,
+        component: card.component,
+        order: card.order,
+      })),
+    )
+    .sort((left, right) => left.order - right.order);
+  return (
+    <>
+      {cards.map(({ key, component: Card }) => (
+        <Card key={key} serverId={serverId} />
+      ))}
+    </>
+  );
+}
+/** Side panels beside the agent chat: wide layouts pass `containerWidth`, compact ones omit it. */
+export function BuiltinAgentSidePanels({
+  containerWidth,
+  ...props
+}: BuiltinSidePanelProps & { containerWidth?: number }) {
+  const entries = useBuiltinClientContributions(props.serverId);
+  return (
+    <>
+      {[...entries].flatMap(([id, entry]) =>
+        [...entry.sidePanels].map(([key, { panel: Panel, sheet: Sheet }]) =>
+          containerWidth === undefined ? (
+            <Sheet key={`${id}/${key}`} {...props} />
+          ) : (
+            <Panel key={`${id}/${key}`} {...props} containerWidth={containerWidth} />
+          ),
+        ),
+      )}
+    </>
+  );
+}
+/** The enabled message body renderer for this host, or null to render plain text. */
+export function useBuiltinUserMessageBody(
+  serverId: string | undefined,
+): ComponentType<BuiltinUserMessageBodyProps> | null {
+  const entries = useBuiltinClientContributions(serverId ?? "");
+  return [...entries.values()].find((entry) => entry.userMessageBody)?.userMessageBody ?? null;
+}
+/**
+ * Reads live host state at send time, including queued sends: a disabled feature contributes
+ * nothing and must not consume its pending state.
+ */
+export function prepareBuiltinTurn(input: {
+  serverId?: string | null;
+  agentId: string;
+  text: string;
+}): BuiltinTurnPreparation {
+  const serverId = input.serverId ?? "";
+  const info = useSessionStore.getState().sessions[serverId]?.serverInfo;
+  const preparations = [...builtinClientRegistry.visible(info).values()].flatMap((entry) =>
+    entry.turnPreparers.map((prepare) =>
+      prepare({ serverId, agentId: input.agentId, text: input.text }),
+    ),
+  );
+  const skillIds = preparations.flatMap((preparation) => preparation.skillIds ?? []);
+  return {
+    skillIds: skillIds.length > 0 ? skillIds : undefined,
+    commit: () => {
+      for (const preparation of preparations) preparation.commit();
+    },
+  };
+}
 /** Shared live selectors for the settings, composer, timeline, and attachment adapters. */
 export function BuiltinClientItems({
   serverId,
@@ -135,7 +249,7 @@ function BuiltinSidebarDestination({ item }: { item: AppNavItem }) {
       label={item.label}
       onPress={onPress}
       isActive={item.isActive}
-      testID={mobileNavTileTestID(item.key, `sidebar-${item.key}-nav`)}
+      testID={item.sidebarTestID ?? mobileNavTileTestID(item.key, `sidebar-${item.key}-nav`)}
       variant="compact"
     />
   );

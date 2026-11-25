@@ -83,7 +83,7 @@ import { type StreamSegmentRenderers, type StreamViewportHandle } from "./strate
 import { ChatOutlineRail } from "@/agent-stream/chat-outline/rail";
 import { useChatOutline } from "@/agent-stream/chat-outline/use-chat-outline";
 import { flashTimelineRow } from "@/agent-stream/flash-row";
-import { resolveNodeAction, type ActivityNodeAction } from "@/activity-graph/activity-graph-target";
+import { resolveNodeAction, type ActivityNodeAction } from "@/agent-stream/activity-node-action";
 import { type ActivityGraphNodeRef } from "@jagentdesk/protocol/agent-activity-graph";
 import { ChatFind } from "@/agent-stream/chat-find";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";

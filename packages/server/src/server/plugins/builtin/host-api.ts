@@ -36,11 +36,19 @@ export type {
   BuiltinServerHost,
   BuiltinBackgroundService,
   BuiltinToolContext,
+  BuiltinDaemonContext,
+  BuiltinDaemonRef,
+  BuiltinDaemonScope,
+  BuiltinRequestContext,
+  BuiltinPorts,
+  BuiltinPortKey,
+  BuiltinDaemonDeps,
+  BuiltinToolSelection,
   BuiltinSessionServices,
   BuiltinSessionContribution,
+  BrowserFingerprintProfileStore,
   RegisterBuiltinTool,
   BuiltinRpcOptions,
-  BuiltinToolSelection,
 } from "./host.js";
 export type { SessionInboundMessage, SessionOutboundMessage } from "../../messages.js";
 export type { ClusterRegistry } from "../../cluster/cluster-registry.js";
@@ -108,5 +116,69 @@ export { toolsBinDir } from "../../host-tools/installer.js";
 export { vendorDirectoryCandidates } from "../../vendor-directory.js";
 // workbench
 export { resolveJAgentDeskHome } from "../../jagentdesk-home.js";
+
+
+
+export { ensureValidJson } from "../../json-utils.js";
+export { sendPromptToAgent } from "../../agent/agent-prompt.js";
+export type {
+  AgentManager,
+  AgentManagerEvent,
+  ManagedAgent,
+} from "../../agent/agent-manager.js";
+export type { HostCapabilityService } from "../../host-capabilities/service.js";
+
+// Shared by skills, spec mode, and host tools.
+export {
+  DEFAULT_LIMITS,
+  safeTarget,
+  extractTarGz,
+  type ExtractLimits,
+} from "../../../utils/tar.js";
+export { resolveBundledSkillsDir } from "../../agent/bundled-skills.js";
+export {
+  buildSkillId,
+  INSTALL_LINK_DIRS,
+  INSTALL_REAL_DIR,
+  isWithin,
+  parseSkillId,
+  skillDirPath,
+  SKILL_DIR_SPECS,
+  visibleToFor,
+  type SkillDirLabel,
+} from "../../agent/native-skill-paths.js";
+
+// Spec mode provides the plan; the activity graph reads it.
+export {
+  NO_SPEC_PLAN_SOURCE,
+  parseSpecKitTasks,
+  type SpecPlan,
+  type SpecPlanSource,
+  type SpecPlanStatus,
+} from "../../agent/spec-plan.js";
+
+// The activity graph reads agent timelines and renders with the vendored archify (core).
+export type {
+  AgentPermissionRequest,
+  AgentTaskItem,
+  AgentUsage,
+  AgentTimelineItem,
+  ToolCallTimelineItem,
+} from "../../agent/agent-sdk-types.js";
+export type { AgentTimelineRow } from "../../agent/agent-timeline-store-types.js";
+export type { ProviderSubagentDescriptor } from "../../agent/provider-subagents/store.js";
+export { ensureUnarchivedAgentLoaded } from "../../agent/agent-loading.js";
+export { runArchifyRenderer, type ArchifyDiagramError } from "../../archify/archify-renderer.js";
+
+// Session sharing: core owns guest confinement and the tunnel binary; the feature owns shares.
+export { guestScopesForCapabilities } from "../../authorization/guest-scopes.js";
+export { TunnelManager, CloudflaredMissingError } from "../../tunnels/tunnel-manager.js";
+export type { AgentStorage } from "../../agent/agent-storage.js";
+
+// The agentic browser's tools drive the core browser broker (basic browser tools stay core).
+export type { BrowserToolsBroker } from "../../browser-tools/broker.js";
+export type { BrowserHostTarget, BrowserToolsResponsePayload } from "../../browser-tools/errors.js";
+export { expandUserPath } from "../../path-utils.js";
+export { JAgentDeskToolInputError } from "../../agent/tools/types.js";
 
 

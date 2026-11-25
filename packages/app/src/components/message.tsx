@@ -10,7 +10,8 @@ import type { AgentMessage } from "@jagentdesk/protocol/agent-message";
 import { GUMLOOP_MESSAGE_INDENT } from "@/components/gumloop-shell/chat-layout";
 import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import { SpecModeMessageBody, specModeBubbleText } from "@/spec-mode/message-body";
+import { specModeBubbleText } from "@/components/spec-mode-bubble-text";
+import { useBuiltinUserMessageBody } from "@/plugins/builtin/surfaces";
 import { parseSpecModeMessage, type SpecModeMessage } from "@jagentdesk/protocol/spec-mode";
 import { TurnMetricsButton } from "@/components/turn-metrics";
 import type { AgentMetric } from "@jagentdesk/protocol/agent-types";
@@ -450,10 +451,10 @@ function UserMessageText({
   message: string;
   specModeMessage: SpecModeMessage | null;
 }) {
-  const specEnabled = useBuiltinPluginEnabled(serverId, "spec-mode");
-  if (specModeMessage && specEnabled) {
+  const MessageBody = useBuiltinUserMessageBody(serverId);
+  if (specModeMessage && MessageBody) {
     return (
-      <SpecModeMessageBody
+      <MessageBody
         message={message}
         parsed={specModeMessage}
         textStyle={userMessageStylesheet.text}

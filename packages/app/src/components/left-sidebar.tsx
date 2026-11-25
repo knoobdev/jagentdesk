@@ -10,9 +10,7 @@ import { router, usePathname, type Href } from "expo-router";
 import {
   Bot,
   BarChart3,
-  Sparkles,
   CalendarClock,
-  Share2,
   FolderPlus,
   History,
   Home,
@@ -88,7 +86,6 @@ import { useIsMobilePanelPresented } from "@/mobile-panels/provider";
 import {
   buildOpenProjectRoute,
   buildSchedulesRoute,
-  buildSharedSessionsRoute,
   buildSessionsRoute,
   buildSettingsAddHostRoute,
   buildSettingsHostSectionRoute,
@@ -103,11 +100,17 @@ import { FigmaSidebarEntry } from "@/figma/sidebar-entry";
 import { SidebarFigmaNav } from "@/figma/sidebar-figma-nav";
 
 // Classic sidebar positions of migrated built-in destinations; the rest follow Marketplace.
+const CLASSIC_SLOT_SHARING: readonly string[] = ["shared-sessions"];
+const CLASSIC_SLOT_SKILLS: readonly string[] = ["skills"];
+const CLASSIC_SLOT_INSIGHTS: readonly string[] = ["insights"];
 const CLASSIC_SLOT_INFRA: readonly string[] = ["clusters", "databases", "servers"];
 const CLASSIC_SLOT_DEPLOY: readonly string[] = ["argocd"];
 const CLASSIC_SLOT_INTEGRATIONS: readonly string[] = ["jira"];
 const CLASSIC_SLOT_TAIL: readonly string[] = ["forge"];
 const CLASSIC_PLACED_DESTINATIONS: readonly string[] = [
+  ...CLASSIC_SLOT_SHARING,
+  ...CLASSIC_SLOT_SKILLS,
+  ...CLASSIC_SLOT_INSIGHTS,
   ...CLASSIC_SLOT_INFRA,
   ...CLASSIC_SLOT_DEPLOY,
   ...CLASSIC_SLOT_INTEGRATIONS,
@@ -199,8 +202,6 @@ interface SidebarSharedProps {
   handleOpenProject: () => void;
   handleHome: () => void;
   handleSettings: () => void;
-  handleSkills: () => void;
-  handleInsights: () => void;
   handleMarketplace: () => void;
   labels: SidebarLabels;
   newWorkspaceKeys: ShortcutKey[][] | null;
@@ -218,10 +219,7 @@ interface SidebarLabels {
   searchHosts: string;
   sessions: string;
   schedules: string;
-  sharedSessions: string;
   bots: string;
-  skills: string;
-  insights: string;
   marketplace: string;
   closeSidebar: string;
 }
@@ -238,7 +236,6 @@ interface DesktopSidebarProps extends SidebarSharedProps {
   active: boolean;
   handleViewMore: () => void;
   handleViewSchedules: () => void;
-  handleViewSharedSessions: () => void;
 }
 
 export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boolean }) {
@@ -327,34 +324,12 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
   }, []);
 
   const {
-    skillsRoute,
-    insightsRoute,
     marketplaceRoute,
   } = useAppNavTargets();
 
-  const handleSkillsDesktop = useCallback(() => {
-    if (skillsRoute) router.push(skillsRoute);
-  }, [skillsRoute]);
-  const handleInsightsDesktop = useCallback(() => {
-    if (insightsRoute) router.push(insightsRoute);
-  }, [insightsRoute]);
   const handleMarketplaceDesktop = useCallback(() => {
     if (marketplaceRoute) router.push(marketplaceRoute);
   }, [marketplaceRoute]);
-
-  const handleSkillsMobile = useCallback(() => {
-    if (skillsRoute) {
-      showMobileAgent();
-      router.push(skillsRoute);
-    }
-  }, [skillsRoute, showMobileAgent]);
-
-  const handleInsightsMobile = useCallback(() => {
-    if (insightsRoute) {
-      showMobileAgent();
-      router.push(insightsRoute);
-    }
-  }, [insightsRoute, showMobileAgent]);
 
   const handleMarketplaceMobile = useCallback(() => {
     if (marketplaceRoute) {
@@ -371,12 +346,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     router.push(buildSchedulesRoute());
   }, []);
 
-  const handleViewSharedSessionsNavigate = useCallback(() => {
-    // Cast: expo-router's typed-routes manifest re-indexes /shared-sessions on the next dev run; the
-    // route file exists and resolves at runtime.
-    router.push(buildSharedSessionsRoute() as Href);
-  }, []);
-
   const newWorkspaceKeys = useShortcutKeys("new-workspace");
   const labels = useMemo(
     (): SidebarLabels => ({
@@ -389,10 +358,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       searchHosts: t("sidebar.host.searchPlaceholder"),
       sessions: t("sidebar.sections.sessions"),
       schedules: t("sidebar.sections.schedules"),
-      sharedSessions: "Shared sessions",
       bots: t("bots.title"),
-      skills: "Skills",
-      insights: "Insights",
       marketplace: t("sidebar.actions.marketplace"),
       closeSidebar: t("sidebar.actions.closeSidebar"),
     }),
@@ -413,8 +379,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     shortcutIndexByWorkspaceKey,
     toggleProjectCollapsed,
     handleRefresh,
-    handleSkills: handleSkillsDesktop,
-    handleInsights: handleInsightsDesktop,
     handleMarketplace: handleMarketplaceDesktop,
     labels,
     newWorkspaceKeys,
@@ -425,8 +389,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       <RetainedPanelActivity active={active}>
         <MobileSidebar
           {...sharedProps}
-          handleSkills={handleSkillsMobile}
-          handleInsights={handleInsightsMobile}
           handleMarketplace={handleMarketplaceMobile}
           insetsTop={insets.top}
           insetsBottom={insets.bottom}
@@ -445,8 +407,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     <RetainedPanelActivity active={active}>
       <DesktopSidebar
         {...sharedProps}
-        handleSkills={handleSkillsDesktop}
-        handleInsights={handleInsightsDesktop}
         handleMarketplace={handleMarketplaceDesktop}
         insetsTop={insets.top}
         insetsBottom={insets.bottom}
@@ -458,7 +418,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
         handleOpenHostSettings={handleOpenHostSettingsDesktop}
         handleViewMore={handleViewMoreNavigate}
         handleViewSchedules={handleViewSchedulesNavigate}
-        handleViewSharedSessions={handleViewSharedSessionsNavigate}
       />
     </RetainedPanelActivity>
   );
@@ -947,8 +906,6 @@ function DesktopSidebar({
   handleOpenProject,
   handleHome,
   handleSettings,
-  handleSkills,
-  handleInsights,
   handleMarketplace,
   labels,
   handleAddHost,
@@ -958,7 +915,6 @@ function DesktopSidebar({
   active,
   handleViewMore,
   handleViewSchedules,
-  handleViewSharedSessions,
 }: DesktopSidebarProps) {
   const builtinTargets = useAppNavTargets();
   const handleBots = useCallback(() => {
@@ -970,9 +926,6 @@ function DesktopSidebar({
   const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
   const isSessionsActive = pathname.includes("/sessions");
   const isSchedulesActive = pathname.includes("/schedules");
-  const isSharedSessionsActive = pathname.includes("/shared-sessions");
-  const isSkillsActive = pathname.includes("/skills");
-  const isInsightsActive = pathname.includes("/insights");
   const isMarketplaceActive = pathname.includes("/marketplace");
   const builtinPanelRoute = builtinClientRegistry.navigationPanelRoute(pathname);
   const sectionRoute = resolveSectionRoute(pathname);
@@ -1117,31 +1070,13 @@ function DesktopSidebar({
                 variant="compact"
               />
             </NavTargetGate>
-            <NavTargetGate route={builtinTargets.sharedSessionsRoute}>
-              <SidebarHeaderRow
-                icon={Share2}
-                label={labels.sharedSessions}
-                onPress={handleViewSharedSessions}
-                isActive={isSharedSessionsActive}
-                testID="sidebar-shared-sessions"
-                variant="compact"
-              />
-            </NavTargetGate>
+            <BuiltinSidebarDestinations only={CLASSIC_SLOT_SHARING} />
 
             <BuiltinSidebarDestinations only={CLASSIC_SLOT_INFRA} />
             <BuiltinSidebarDestinations only={CLASSIC_SLOT_DEPLOY} />
             <BuiltinSidebarDestinations only={CLASSIC_SLOT_INTEGRATIONS} />
             <FigmaSidebarEntry closesDrawer={false} />
-            <NavTargetGate route={builtinTargets.skillsRoute}>
-              <SidebarHeaderRow
-                icon={Sparkles}
-                label={labels.skills}
-                onPress={handleSkills}
-                isActive={isSkillsActive}
-                testID="sidebar-skills-nav"
-                variant="compact"
-              />
-            </NavTargetGate>
+            <BuiltinSidebarDestinations only={CLASSIC_SLOT_SKILLS} />
             <SidebarHeaderRow
               icon={Store}
               label={labels.marketplace}
@@ -1151,16 +1086,7 @@ function DesktopSidebar({
               variant="compact"
             />
             <BuiltinSidebarDestinations except={CLASSIC_PLACED_DESTINATIONS} />
-            <NavTargetGate route={builtinTargets.insightsRoute}>
-              <SidebarHeaderRow
-                icon={BarChart3}
-                label={labels.insights}
-                onPress={handleInsights}
-                isActive={isInsightsActive}
-                testID="sidebar-insights-nav"
-                variant="compact"
-              />
-            </NavTargetGate>
+            <BuiltinSidebarDestinations only={CLASSIC_SLOT_INSIGHTS} />
             <BuiltinSidebarDestinations only={CLASSIC_SLOT_TAIL} />
             <PluginSidebarItems />
           </ScrollView>

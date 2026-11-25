@@ -13,7 +13,7 @@ import { highlightToKeyedLines } from "../../../packages/app/src/plugins/builtin
 import { ClusterResourceOverview } from "./cluster-resource-overview";
 import { dispatchComposerAgentMessage } from "../../../packages/app/src/plugins/builtin/host-api";
 import { createMessageSubmissionWriter } from "../../../packages/app/src/plugins/builtin/host-api";
-import { prepareTurnSkills } from "../../../packages/app/src/plugins/builtin/host-api";
+import { prepareBuiltinTurn } from "../../../packages/app/src/plugins/builtin/host-api";
 import { useClusterChatStore } from "../../../packages/app/src/plugins/builtin/host-api";
 import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
 import { useIsGumloopTheme } from "../../../packages/app/src/plugins/builtin/host-api";
@@ -516,7 +516,7 @@ export function ClusterResourceDetail({
       // is accepted by the daemon but never renders in the panel (which draws the
       // user message from this submission store, not a daemon echo), so the chat
       // looked silent even though the message went through.
-      const turnSkills = prepareTurnSkills({ serverId, agentId: chatAgentId, text: askMessage });
+      const turnSkills = prepareBuiltinTurn({ serverId, agentId: chatAgentId, text: askMessage });
       dispatchComposerAgentMessage({
         client,
         agentId: chatAgentId,

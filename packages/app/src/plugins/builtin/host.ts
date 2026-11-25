@@ -5,6 +5,9 @@ import type { BuiltinPluginId } from "@jagentdesk/protocol/builtin-plugins";
 import type { PluginAttachmentSourceContribution, PluginTimelineItem } from "@jagentdesk/plugin";
 import type { DaemonServerInfo } from "@/stores/session-store";
 import type { ToolCallDetail } from "@jagentdesk/protocol/agent-types";
+import type { StyleProp, TextStyle } from "react-native";
+import type { SpecModeMessage } from "@jagentdesk/protocol/spec-mode";
+import type { ActivityGraphNodeRef } from "@jagentdesk/protocol/agent-activity-graph";
 import { builtinPluginEnabled } from "./registry";
 
 export interface BuiltinClientProps {
@@ -27,6 +30,8 @@ export interface BuiltinDestination {
   requiresFeature?: string;
   /** Shown only when the host reports at least one of these capabilities (spec 24.4). */
   hostCapabilities?: readonly import("@jagentdesk/protocol/host-capabilities").HostCapabilityId[];
+  /** Legacy classic-sidebar row test id; defaults to `sidebar-<id>-nav`. */
+  sidebarTestID?: string;
 }
 export interface BuiltinLeftPanelOptions {
   /** Replace the navigation list in the classic sidebar while this segment's route is open. */
@@ -45,8 +50,46 @@ export interface BuiltinAttachmentPillProps {
   onOpen: (attachment: import("@/attachments/types").ComposerAttachment) => void;
   onRemove: (index: number) => void;
 }
+export interface BuiltinAgentProps extends BuiltinClientProps {
+  agentId: string;
+}
+export interface BuiltinComposerDockProps extends BuiltinAgentProps {
+  cwd: string;
+  onOpenFile: (absolutePath: string) => void;
+}
+export interface BuiltinSidePanelProps extends BuiltinAgentProps {
+  onSelectNode: (nodeId: string, ref: ActivityGraphNodeRef) => void;
+}
+/**
+ * A panel beside the agent chat: `panel` renders right of the chat on wide layouts (null while
+ * closed), `sheet` renders on compact layouts.
+ */
+export interface BuiltinAgentSidePanel {
+  panel: ComponentType<BuiltinSidePanelProps & { containerWidth: number }>;
+  sheet: ComponentType<BuiltinSidePanelProps>;
+}
+/** A user message core parsed as a Spec mode phase command; core keeps copy and rewind text. */
+export interface BuiltinUserMessageBodyProps {
+  message: string;
+  parsed: SpecModeMessage;
+  textStyle: StyleProp<TextStyle>;
+  textDataSet?: Record<string, string>;
+}
+/** Message fields a feature contributes when the user sends a turn. */
+export interface BuiltinTurnPreparation {
+  skillIds?: string[];
+  /** Called once the daemon accepted the message. */
+  commit(): void;
+}
+export type BuiltinTurnPreparer = (input: {
+  serverId: string;
+  agentId: string;
+  text: string;
+}) => BuiltinTurnPreparation;
 export interface BuiltinScreen extends BuiltinClientProps {
   sshDocker?: import("@/ssh/ui/ssh-docker-client").SshDockerTarget;
+  /** Set by route adapters that keep a blurred screen mounted but idle. */
+  focused?: boolean;
 }
 /** `inline`: the chat timeline row. `details`: the expanded tool call sheet/panel. */
 export type BuiltinToolCallPlacement = "inline" | "details";
@@ -89,6 +132,25 @@ export interface BuiltinClientHost {
   toolCallRenderer<Match>(id: string, renderer: BuiltinToolCallRenderer<Match>): void;
   /** Composer pill for attachments of `kind`. */
   attachmentPill(kind: string, component: ComponentType<BuiltinAttachmentPillProps>): void;
+  /** A control in the agent composer's control row, in plugin order. */
+  agentControl(id: string, component: ComponentType<BuiltinAgentProps>): void;
+  /** Rendered below an agent's conversation. */
+  agentPanelAccessory(id: string, component: ComponentType<BuiltinAgentProps>): void;
+  turnPreparer(prepare: BuiltinTurnPreparer): void;
+  /** A control in the workspace screen header (Gumloop desktop shell). */
+  workspaceHeaderControl(id: string, component: ComponentType<BuiltinClientProps>): void;
+  /** A control in the agent chat header row, in plugin order. */
+  agentHeaderControl(id: string, component: ComponentType<BuiltinAgentProps>): void;
+  agentSidePanel(id: string, panel: BuiltinAgentSidePanel): void;
+  /** Rendered above the agent composer input. */
+  agentComposerDock(id: string, component: ComponentType<BuiltinComposerDockProps>): void;
+  /**
+   * A card in the host's Settings → Agents section. `order` keeps cards from several features
+   * in their phase 1 sequence (browser opt-in 10, autorun 20, sharing 30, fingerprints 40).
+   */
+  agentSettingsCard(id: string, component: ComponentType<BuiltinClientProps>, order: number): void;
+  /** Renders a parsed phase-command user message; one per host. */
+  userMessageBody(component: ComponentType<BuiltinUserMessageBodyProps>): void;
 }
 export interface BuiltinAttachmentSource {
   source: PluginAttachmentSourceContribution;
@@ -108,6 +170,15 @@ export interface BuiltinClientContributions {
   attachments: BuiltinAttachmentSource[];
   toolCalls: Map<string, BuiltinToolCallRenderer<unknown>>;
   pills: Map<string, ComponentType<BuiltinAttachmentPillProps>>;
+  agentControls: Map<string, ComponentType<BuiltinAgentProps>>;
+  agentPanel: Map<string, ComponentType<BuiltinAgentProps>>;
+  turnPreparers: BuiltinTurnPreparer[];
+  composerDocks: Map<string, ComponentType<BuiltinComposerDockProps>>;
+  agentHeader: Map<string, ComponentType<BuiltinAgentProps>>;
+  workspaceHeader: Map<string, ComponentType<BuiltinClientProps>>;
+  sidePanels: Map<string, BuiltinAgentSidePanel>;
+  userMessageBody: ComponentType<BuiltinUserMessageBodyProps> | null;
+  agentSettings: Map<string, { component: ComponentType<BuiltinClientProps>; order: number }>;
 }
 export class BuiltinClientRegistry {
   private readonly entries = new Map<BuiltinPluginId, BuiltinClientContributions>();
@@ -127,6 +198,15 @@ export class BuiltinClientRegistry {
       attachments: [],
       toolCalls: new Map(),
       pills: new Map(),
+      agentControls: new Map(),
+      agentPanel: new Map(),
+      turnPreparers: [],
+      composerDocks: new Map(),
+      agentHeader: new Map(),
+      workspaceHeader: new Map(),
+      sidePanels: new Map(),
+      userMessageBody: null,
+      agentSettings: new Map(),
     };
     this.entries.set(id, entry);
     const add = <T>(map: Map<string, T>, key: string, value: T) => {
@@ -151,6 +231,19 @@ export class BuiltinClientRegistry {
       toolCallRenderer: (key, renderer) =>
         add(entry.toolCalls, key, renderer as BuiltinToolCallRenderer<unknown>),
       attachmentPill: (kind, component) => add(entry.pills, kind, component),
+      agentControl: (key, component) => add(entry.agentControls, key, component),
+      agentPanelAccessory: (key, component) => add(entry.agentPanel, key, component),
+      turnPreparer: (prepare) => entry.turnPreparers.push(prepare),
+      agentComposerDock: (key, component) => add(entry.composerDocks, key, component),
+      agentHeaderControl: (key, component) => add(entry.agentHeader, key, component),
+      workspaceHeaderControl: (key, component) => add(entry.workspaceHeader, key, component),
+      agentSidePanel: (key, panel) => add(entry.sidePanels, key, panel),
+      agentSettingsCard: (key, component, order) =>
+        add(entry.agentSettings, key, { component, order }),
+      userMessageBody: (component) => {
+        if (entry.userMessageBody) throw new Error(`Duplicate built-in message body: ${id}`);
+        entry.userMessageBody = component;
+      },
     };
   }
   /** Every consumer selects against live per-host state, including retained screens. */
@@ -159,6 +252,7 @@ export class BuiltinClientRegistry {
   ): ReadonlyMap<BuiltinPluginId, BuiltinClientContributions> {
     return new Map([...this.entries].filter(([id]) => builtinPluginEnabled(info, id)));
   }
+  /** Destinations that drill the sidebar into the feature's own left panel. */
   destinations(): readonly BuiltinDestination[] {
     return [...this.entries.values()].flatMap((entry) => entry.destinations);
   }

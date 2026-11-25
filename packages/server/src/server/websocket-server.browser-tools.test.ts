@@ -342,8 +342,6 @@ function createVoiceAssistantWebSocketServer(params: {
     undefined,
     undefined,
     undefined,
-    undefined,
-    undefined,
     createStub<DatabaseRegistry>({}),
   );
 }

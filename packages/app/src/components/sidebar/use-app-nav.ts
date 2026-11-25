@@ -5,15 +5,12 @@ import { useBuiltinPluginEnabled } from "@/plugins/builtin/hooks";
 import { router, usePathname, type Href } from "expo-router";
 import { useCallback, useMemo } from "react";
 import {
-  BarChart3,
   Gauge,
   Bot,
   CalendarClock,
   Figma,
   History,
   Home,
-  Share2,
-  Sparkles,
   Store,
   type LucideIcon,
 } from "lucide-react-native";
@@ -27,22 +24,16 @@ import { useSessionStore } from "@/stores/session-store";
 import { useWorkspace } from "@/stores/session-store-hooks";
 import {
   buildFigmaRoute,
-  buildInsightsRoute,
   buildMarketplaceRoute,
   buildNewWorkspaceRoute,
   buildOpenProjectRoute,
   buildSchedulesRoute,
   buildSessionsRoute,
-  buildSharedSessionsRoute,
-  buildSkillsRoute,
 } from "@/utils/host-routes";
 
 /** Routes behind the app's primary navigation, shared by the sidebar list and the Gumloop rail. */
 export interface AppNavTargets {
   botsRoute: Href | null;
-  sharedSessionsRoute: Href | null;
-  skillsRoute: Href | null;
-  insightsRoute: Href | null;
   marketplaceRoute: Href | null;
   /** Spec 32: Figma section, when the daemon advertises `figma`. */
   figmaRoute: Href | null;
@@ -57,9 +48,6 @@ export function useAppNavTargets(): AppNavTargets {
     ? decodeURIComponent(routeServerId)
     : (selection?.serverId ?? hosts[0]?.serverId ?? "");
   const supportsBots = useHostFeature(firstServerId, "bots");
-  const skillsEnabled = useBuiltinPluginEnabled(firstServerId, "skills");
-  const insightsEnabled = useBuiltinPluginEnabled(firstServerId, "insights");
-  const sharingEnabled = useBuiltinPluginEnabled(firstServerId, "session-share");
   const supportsFigma = useSessionStore(
     (state) => state.sessions[firstServerId]?.serverInfo?.features?.figma === true,
   );
@@ -70,18 +58,12 @@ export function useAppNavTargets(): AppNavTargets {
       botsRoute: supportsBots
         ? perHost((serverId) => `/h/${encodeURIComponent(serverId)}/bots`)
         : null,
-      sharedSessionsRoute: sharingEnabled ? (buildSharedSessionsRoute() as Href) : null,
       // Gated at the route: the entry disappears with the daemon feature flag.
-      skillsRoute: skillsEnabled ? perHost(buildSkillsRoute) : null,
-      insightsRoute: insightsEnabled ? perHost(buildInsightsRoute) : null,
       marketplaceRoute: perHost(buildMarketplaceRoute),
       figmaRoute: supportsFigma ? perHost(buildFigmaRoute) : null,
     };
   }, [
     supportsBots,
-    skillsEnabled,
-    insightsEnabled,
-    sharingEnabled,
     supportsFigma,
     firstServerId,
   ]);
@@ -96,6 +78,8 @@ interface AppNavItemBase {
   shortLabel: string;
   isActive: boolean;
   testID: string;
+  /** Built-in destinations: legacy sidebar row test id. */
+  sidebarTestID?: string;
 }
 
 export type AppNavItem = AppNavItemBase &
@@ -138,19 +122,7 @@ export function useAppNavItems(): AppNavItem[] {
         testID: "rail-schedules",
       },
       navItem("bots", Bot, t("bots.title"), t("bots.title"), targets.botsRoute, pathname, "/bots"),
-      targets.sharedSessionsRoute
-        ? {
-            key: "shared-sessions",
-            icon: Share2,
-            label: "Shared sessions",
-            shortLabel: "Shared",
-            route: targets.sharedSessionsRoute,
-            isActive: pathname.includes("/shared-sessions"),
-            testID: "rail-shared-sessions",
-          }
-        : null,
 
-      navItem("skills", Sparkles, "Skills", "Skills", targets.skillsRoute, pathname, "/skills"),
       navItem(
         "marketplace",
         Store,
@@ -170,15 +142,6 @@ export function useAppNavItems(): AppNavItem[] {
         isActive: false,
         testID: "rail-usage",
       },
-      navItem(
-        "insights",
-        BarChart3,
-        "Insights",
-        "Insights",
-        targets.insightsRoute,
-        pathname,
-        "/insights",
-      ),
       navItem("figma", Figma, "Figma", "Figma", targets.figmaRoute, pathname, "/figma"),
     ];
     return orderAppNavItems(items.filter((item): item is AppNavItem => item !== null));

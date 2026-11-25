@@ -18,7 +18,7 @@ import {
   createTestJAgentDeskDaemon,
   type TestJAgentDeskDaemon,
 } from "../../test-utils/jagentdesk-daemon.js";
-import { TunnelManager, type TunnelHandle } from "../../session-share/tunnel-manager.js";
+import { TunnelManager, type TunnelHandle } from "../../tunnels/tunnel-manager.js";
 
 // A local transport adapter: the real scoped ShareServer and real guest sessions use loopback.
 // No Cloudflare account or public tunnel is needed to verify revocation.

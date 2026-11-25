@@ -46,7 +46,6 @@ import { createServer as createHTTPServer, type IncomingMessage, type ServerResp
 import { constants, existsSync, unlinkSync } from "fs";
 import { open } from "fs/promises";
 import { randomUUID } from "node:crypto";
-import { homedir } from "node:os";
 import { getHostName } from "./host-name.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -195,17 +194,11 @@ import {
 import { FileBackedChatService } from "./chat/chat-service.js";
 import { CheckoutDiffManager } from "./checkout-diff-manager.js";
 import { LoopService } from "./loop-service.js";
-import { NativeSkillsService } from "./skills-native/index.js";
-import { buildLifetimeBaseline, UsageHistoryStorage } from "./usage/usage-history-storage.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseRegistry } from "./database/database-registry.js";
 import { ScheduleService } from "./schedule/service.js";
-import { AutorunService } from "./autorun/service.js";
-import { SpecModeService } from "./spec-mode/service.js";
-import type { SpecModeState } from "@jagentdesk/protocol/spec-mode";
 import { sendPromptToAgent } from "./agent/agent-prompt.js";
-import { SessionShareService } from "./session-share/service.js";
-import { TunnelManager } from "./session-share/tunnel-manager.js";
+import { TunnelManager } from "./tunnels/tunnel-manager.js";
 import { DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
 import { PluginService } from "./plugins/index.js";
 import { ManagedPluginSources } from "./plugins/managed-source.js";
@@ -1111,8 +1104,6 @@ export async function createJAgentDeskDaemon(
       customProviderService.materializeOpenCodeProvider(providerId),
     claudeSpawnEnv: (providerId) => customProviderService.materializeClaudeEnv(providerId),
   });
-  const usageHistory = new UsageHistoryStorage(config.jagentdeskHome, logger);
-  await usageHistory.initialize();
   const initialAgentManagerState = providerSnapshotManager.getAgentManagerProviderState();
   const agentManager: AgentManager = new AgentManager({
     pluginLifecycle: pluginRuntime,
@@ -1127,7 +1118,8 @@ export async function createJAgentDeskDaemon(
     onWorkspaceStateMayHaveChanged: ({ cwd }) => {
       workspaceGitService.onWorkspaceStateMayHaveChanged(cwd);
     },
-    onUsageBilled: (billed) => usageHistory.record(billed),
+    // Insights records billed turns; agents cannot run before the built-ins start.
+    onUsageBilled: (billed) => builtinDaemon.port("usageHistory")?.record(billed),
     mcpAuthToken: agentMcpAuthToken,
     logger,
   });
@@ -1155,6 +1147,8 @@ export async function createJAgentDeskDaemon(
     agentStorage,
   );
   await agentStorage.initialize();
+  // The host capability probe is created with the WebSocket server below and assigned there.
+  let daemonHostCapabilities: HostCapabilityService | null = null;
 
   const restartRecovery = createRestartRecovery({
     storage: agentStorage,
@@ -1209,22 +1203,6 @@ export async function createJAgentDeskDaemon(
   }).catch((error: unknown) => {
     logger.error({ err: error }, "Failed to restore finish subscriptions");
   });
-  // Seed the lifetime usage baseline once from existing agents so headline Usage
-  // & Cost figures include usage that predates the time-series and never drop
-  // when an agent is deleted. No-op if a baseline was already persisted.
-  try {
-    const records = await agentStorage.list();
-    usageHistory.seedBaselineIfEmpty(
-      buildLifetimeBaseline(
-        records.map((record) => ({
-          usageTotals: record.usageTotals,
-          model: record.config?.model ?? record.runtimeInfo?.model ?? record.provider,
-        })),
-      ),
-    );
-  } catch (error) {
-    logger.warn({ err: error }, "Failed to seed usage baseline from existing agents");
-  }
   await bootstrapWorkspaceRegistries({
     serverId,
     jagentdeskHome: config.jagentdeskHome,
@@ -1535,14 +1513,6 @@ export async function createJAgentDeskDaemon(
   });
   await loopService.initialize();
   logger.info({ elapsed: elapsed() }, "Loop service initialized");
-  // Native SKILL.md skills (spec 22 / ADR-0022). Also serves the legacy skills.get /
-  // skills.mutate API (COMPAT(nativeSkills)) and migrates skills.json once (22.10).
-  const skillsStorage = new NativeSkillsService({
-    jagentdeskHome: config.jagentdeskHome,
-    homeDir: homedir(),
-    logger,
-  });
-  await skillsStorage.initialize();
   const clusterRegistry = new ClusterRegistry({
     jagentdeskHome: config.jagentdeskHome,
     logger,
@@ -1674,42 +1644,6 @@ export async function createJAgentDeskDaemon(
     }
   });
   logger.info({ elapsed: elapsed() }, "Schedule service initialized");
-  // Construct services once so live sessions keep their references. The built-in loader
-  // starts/stops background work and gates RPCs/features; Autorun stays off by default.
-  const autorunService = new AutorunService({
-    jagentdeskHome: config.jagentdeskHome,
-    logger,
-    agentManager,
-    onUpdate: (state) => emitExternalSessionMessage({ type: "autorun.stream", payload: { state } }),
-    onStopped: (state) => wsServer?.notifyAutorunStopped(state),
-  });
-  // Spec mode (spec 28 / ADR-0030) needs the host capability probe, created with the WebSocket
-  // server below; it is assigned there.
-  let specModeService: SpecModeService | null = null;
-  logger.info(
-    { elapsed: elapsed(), enabled: config.autorunEnabled === true },
-    "Autorun service initialized",
-  );
-  // Session sharing stays off by default. Construction is inert; its lifecycle owns
-  // Cloudflare quick tunnels and scoped per-share servers.
-  const shareAppDistDir =
-    config.sessionShareAppDistDir ??
-    process.env.JAGENTDESK_SHARE_APP_DIST ??
-    resolveBundledShareAppDist();
-  const sessionShareService = new SessionShareService({
-    logger,
-    agentManager,
-    agentStorage,
-    tunnelManager: dependencies.sessionShareTunnelManager ?? new TunnelManager(logger),
-    isEnabled: () => pluginRuntime.builtin.isEnabled("session-share"),
-    appDistDir: shareAppDistDir,
-    onUpdate: (share) =>
-      emitExternalSessionMessage({ type: "session.share.stream", payload: { share } }),
-  });
-  logger.info(
-    { elapsed: elapsed(), enabled: config.sessionSharingEnabled === true },
-    "Session share service initialized",
-  );
   // Statically linked features start after the shared libraries they consume and the agent
   // manager exist: they subscribe to agent events and reach clients through the WebSocket server
   // once it is bound.
@@ -1742,21 +1676,41 @@ export async function createJAgentDeskDaemon(
       pushNotification: (notice) => wsServer?.sendSideloadPush(notice),
     },
   );
-  const stopBuiltinServices = await builtinServerRegistry.start(
+  // Built-in features' daemon services, ports, and background lifecycles (docs/builtin-plugins.md).
+  // After storage loads (Insights seeds its lifetime baseline from stored agents) and before the
+  // persisted agents load: agents cannot run before the built-ins start.
+  const builtinDaemon = await builtinServerRegistry.start(
     pluginRuntime.builtin,
     builtinServices,
+    {
+      agentManager,
+      agentStorage,
+      broadcast: (message) => wsServer?.broadcast(wrapSessionMessage(message)),
+      hostCapabilities: () => daemonHostCapabilities,
+      sendPush: (notice) => wsServer?.sendBuiltinPush(notice),
+      sessionShare: {
+        tunnelManager: dependencies.sessionShareTunnelManager ?? new TunnelManager(logger),
+        appDistDir:
+          config.sessionShareAppDistDir ??
+          process.env.JAGENTDESK_SHARE_APP_DIST ??
+          resolveBundledShareAppDist(),
+        // Session-share guests (ADR-0019): the scoped ShareServer /ws hands validated guest
+        // sockets to the daemon as agent-confined real sessions.
+        attachGuestSocket: (ws, params) => wsServer?.attachGuestSocket(ws, params),
+        // A live capability toggle re-scopes already-connected guest sessions (ADR-0019).
+        updateGuestScopes: (agentId, scopes) =>
+          wsServer?.updateGuestScopesForAgent(agentId, scopes),
+      },
+    },
+  );
+  pluginRuntime.builtinDaemon = builtinDaemon;
+  // Spec mode's launch environment (spec 28): the provider process sees the shared checkout env.
+  agentManager.setLaunchEnvProvider(
+    (agentId) => builtinDaemon.enabledPort("specMode")?.launchEnv(agentId) ?? null,
   );
   await pluginRuntime.builtin.registerLifecycle("figma", {
     start: () => figmaService.start(),
     stop: () => figmaService.stopBackground(),
-  });
-  await pluginRuntime.builtin.registerLifecycle("autorun", {
-    start: () => autorunService.initialize(),
-    stop: () => autorunService.stop(),
-  });
-  await pluginRuntime.builtin.registerLifecycle("session-share", {
-    start: () => {},
-    stop: () => sessionShareService.stop(),
   });
   logger.info({ elapsed: elapsed() }, "Loading persisted agent registry");
   const persistedRecords = await agentStorage.list();
@@ -1853,6 +1807,7 @@ export async function createJAgentDeskDaemon(
   ): JAgentDeskToolHostDependencies => ({
     changeRequestWatches,
     builtinPlugins: pluginRuntime.builtin.forAgent(runtime.callerAgentId),
+    builtinDaemon,
     callerAgentLabels: runtime.callerAgentLabels,
     jagentdeskToolPolicy:
       runtime.jagentdeskToolPolicy ??
@@ -1941,7 +1896,6 @@ export async function createJAgentDeskDaemon(
         requestPermission: (agentId, request) =>
           agentManager.requestHostToolPermission(agentId, request),
       }),
-    skillsStorage,
     browserFingerprintProfiles: {
       list: () => daemonConfigStore.get().browserTools.profiles ?? [],
       activeId: () => daemonConfigStore.get().browserTools.activeProfileId ?? null,
@@ -2149,27 +2103,7 @@ export async function createJAgentDeskDaemon(
             void hostCapabilities.refresh().catch((error: unknown) => {
               logger.warn({ err: error }, "Host capability probe failed");
             });
-            specModeService = await startSpecModeService({
-              jagentdeskHome: config.jagentdeskHome,
-              logger,
-              agentManager,
-              agentStorage,
-              hostCapabilities,
-              autorunService,
-              emit: emitExternalSessionMessage,
-              onState: (state) => server.notifySpecModeState(state),
-            });
-            server.setSpecModeService(specModeService);
-            agentManager.setLaunchEnvProvider((agentId) =>
-              pluginRuntime.builtin.isEnabled("spec-mode")
-                ? specModeService!.launchEnv(agentId)
-                : null,
-            );
-            specModeService.stop();
-            await pluginRuntime.builtin.registerLifecycle("spec-mode", {
-              start: () => specModeService!.initialize(),
-              stop: () => specModeService!.stop(),
-            });
+            daemonHostCapabilities = hostCapabilities;
             server.setBotsService(botsService);
             server.setFigmaService(figmaService);
             server.setCustomProvidersService(customProviderService);
@@ -2286,11 +2220,7 @@ export async function createJAgentDeskDaemon(
                 requireSignedHelloForDirect,
               },
               pluginRuntime,
-              skillsStorage,
-              usageHistory,
               databaseRegistry,
-              autorunService,
-              sessionShareService,
               sshService,
               workspaceArchiveOperations,
             );
@@ -2303,15 +2233,6 @@ export async function createJAgentDeskDaemon(
                 { host: url.hostname.replace(/^\[|\]$/g, ""), port: target.pairing.port },
               );
             });
-            // Session-share guests (ADR-0019): let the scoped ShareServer /ws hand validated guest
-            // sockets to the daemon as agent-confined real sessions.
-            sessionShareService?.setGuestAttacher((ws, params) =>
-              wsServer?.attachGuestSocket(ws, params),
-            );
-            // Let a live capability toggle re-scope already-connected guest sessions (ADR-0019).
-            sessionShareService?.setGuestScopeUpdater((agentId, scopes) =>
-              wsServer?.updateGuestScopesForAgent(agentId, scopes),
-            );
             const remoteObservation = createRemoteFinishObservation({
               agentManager,
               agentStorage,
@@ -2503,7 +2424,7 @@ export async function createJAgentDeskDaemon(
     }
     unsubscribeBuiltinAgentSnapshots();
     // Built-in features stop before the shared libraries they consume (remote tasks before SSH).
-    await stopBuiltinServices();
+    await builtinDaemon.stop();
     await sshModules.dispose().catch(() => undefined);
     await sshServerModules.dispose().catch(() => undefined);
     sshService.dispose();
@@ -2512,9 +2433,6 @@ export async function createJAgentDeskDaemon(
     void figmaService.dispose();
     await speechService.stop();
     await scheduleService.stop().catch(() => undefined);
-    await autorunService?.stop().catch(() => undefined);
-    specModeService?.stop();
-    await sessionShareService?.stop().catch(() => undefined);
     await relayRuntime?.stop().catch(() => undefined);
     await remoteFinishSubscriptions?.close();
     await tsnetListener?.stop().catch(() => undefined);
@@ -2597,40 +2515,6 @@ async function closeAllAgents(logger: Logger, agentManager: AgentManager): Promi
  * send path as a user's message; per-agent spec-kit env reaches provider launches; Spec mode
  * and autonomous mode refuse to start while the other is on.
  */
-async function startSpecModeService(params: {
-  jagentdeskHome: string;
-  logger: Logger;
-  agentManager: AgentManager;
-  agentStorage: AgentStorage;
-  hostCapabilities: HostCapabilityService;
-  autorunService: AutorunService | null;
-  emit: (message: SessionOutboundMessage) => void;
-  onState?: (state: SpecModeState) => void;
-}): Promise<SpecModeService> {
-  const { agentManager, agentStorage, autorunService, logger } = params;
-  const service = new SpecModeService({
-    jagentdeskHome: params.jagentdeskHome,
-    logger,
-    agentManager,
-    hostCapabilities: params.hostCapabilities,
-    isAutorunActive: async (agentId) =>
-      autorunService !== null && (await autorunService.get(agentId))?.status === "running",
-    sendPrompt: async (agentId, text) => {
-      await sendPromptToAgent({ agentManager, agentStorage, agentId, prompt: text, logger });
-    },
-    onState: (state) => {
-      params.emit({ type: "agent.spec_mode.state", payload: { agentId: state.agentId, state } });
-      params.onState?.(state);
-    },
-  });
-  await service.initialize();
-  agentManager.setLaunchEnvProvider((agentId) => service.launchEnv(agentId));
-  autorunService?.setStartGuard(async (agentId) =>
-    (await service.isEnabled(agentId)) ? "Turn off Spec mode to use autonomous mode" : null,
-  );
-  return service;
-}
-
 export function connectIdleRuntimeCleanupConfig(
   store: DaemonConfigStore,
   cleanup: Pick<ReturnType<typeof createIdleRuntimeCleanup>, "setEnabled">,

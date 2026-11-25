@@ -42,7 +42,7 @@ test("one RPC registration admits and dispatches, toggles lifecycle once, and sn
     },
     stop() {},
   }));
-  const stopBackground = await registry.start(
+  const daemon = await registry.start(
     state,
     createBuiltinCoreServices(home, pino({ level: "silent" }), config, registries()),
   );
@@ -97,7 +97,7 @@ test("one RPC registration admits and dispatches, toggles lifecycle once, and sn
     expect(calls).toEqual(["start", "list", "stop", "start", "list"]);
   } finally {
     await session.dispose();
-    await stopBackground();
+    await daemon.stop();
     expect(signals[1]?.aborted).toBe(true);
     await rm(home, { recursive: true, force: true });
   }

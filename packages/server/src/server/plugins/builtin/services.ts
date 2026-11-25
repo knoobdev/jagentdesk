@@ -67,7 +67,7 @@ export function createBuiltinCoreServices(
   config: DaemonConfigStore,
   registries: BuiltinSharedRegistries,
   platform: BuiltinPlatformServices = {},
-  daemon: BuiltinDaemonHooks = {},
+  daemonHooks: BuiltinDaemonHooks = {},
 ) {
   let secrets = secretStores.get(config);
   if (!secrets) {
@@ -77,7 +77,7 @@ export function createBuiltinCoreServices(
   return {
     /** The daemon home. Preserve a migrated feature's existing storage paths under it. */
     home,
-    daemon,
+    daemonHooks,
     logger,
     config,
     secrets,

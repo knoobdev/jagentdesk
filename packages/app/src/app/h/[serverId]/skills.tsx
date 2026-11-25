@@ -1,7 +1,9 @@
-import { SkillsScreen } from "@/screens/skills-screen";
+import { BuiltinScreen } from "@/plugins/builtin/surfaces";
+import { useHostRouteServerId } from "@/navigation/host-route-context";
 
 export default function HostSkillsRoute() {
-  return <SkillsScreen />;
+  const serverId = useHostRouteServerId();
+  return serverId ? <BuiltinScreen segment="skills" serverId={serverId} /> : null;
 }
 
 export { ErrorBoundary } from "expo-router";

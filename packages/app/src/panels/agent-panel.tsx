@@ -1,7 +1,6 @@
 import { ChatColumnRailSurface } from "@/chat-rail";
 import { PaneSubtitle } from "./pane-subtitle";
 import { useAgentFactsLine } from "./agent-facts-line";
-import { useGumloopDesktopShell } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { ComposerDock } from "@/composer/dock";
 import { RewindCommandCenterRegistration } from "@/components/rewind/command-center-registration";
 import {
@@ -19,15 +18,7 @@ import { ParentAgentCallout, ParentAgentPill, useParentAgentId } from "@/subagen
 import { useAgentDescriptor as useAgentPanelDescriptor } from "@/agent-presentation";
 import { useAgentStreamTail } from "@/agent-stream/use-agent-stream-tail";
 import type { AgentAddress } from "@jagentdesk/protocol/addresses";
-import { BuiltinPluginGate } from "@/plugins/builtin/gate";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import { SessionShareControl } from "@/composer/agent-controls/session-share-control";
-import {
-  ActivityGraphSheet,
-  ActivityGraphSidePanel,
-  ActivityGraphToggle,
-  useActivityGraphOpen,
-} from "@/activity-graph/activity-graph-host";
 import { type ActivityGraphNodeRef } from "@jagentdesk/protocol/agent-activity-graph";
 import { isGuestReadOnlyShare, isGuestShareMode } from "@/screens/share/guest-share-mode";
 import { type DaemonClient } from "@jagentdesk/client/internal/daemon-client";
@@ -56,8 +47,11 @@ import { useRetainedPanelActive } from "@/components/retained-panel";
 import { RetainedChatContent } from "./retained-chat-content";
 import { SidebarCallout } from "@/components/sidebar-callout";
 import { Composer } from "@/composer";
-import { AgentSkillTrainBar } from "@/components/agent-skill-train-bar";
-import { SpecModeComposerDock } from "@/spec-mode/composer-dock";
+import {
+  BuiltinAgentItems,
+  BuiltinAgentSidePanels,
+  BuiltinComposerDocks,
+} from "@/plugins/builtin/surfaces";
 import { getActiveMessageSubmissions } from "@/composer/submission/model";
 import { RewindComposerRestoreProvider } from "@/components/rewind/composer-restore";
 import {
@@ -339,9 +333,7 @@ function AgentPanel() {
           isPaneFocused={isInteractive}
           onOpenWorkspaceFile={openFileInWorkspace}
         />
-        <BuiltinPluginGate serverId={serverId} id="skills">
-          <AgentSkillTrainBar serverId={serverId} agentId={target.agentId} />
-        </BuiltinPluginGate>
+        <BuiltinAgentItems serverId={serverId} agentId={target.agentId} kind="agentPanel" />
       </View>
     </RetainedChatContent>
   );
@@ -1172,7 +1164,6 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
   onAttentionPromptSend: () => void;
   onOpenWorkspaceFile?: (request: WorkspaceFileOpenRequest) => void;
 }) {
-  const gumloopDesktop = useGumloopDesktopShell(true);
   const isSheet = usePaneHost() === "sheet";
   const facts = useAgentFactsLine(serverId, agentId);
   const composerEditingSession = useMemo(() => new ComposerEditingSession(), []);
@@ -1278,14 +1269,7 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
   );
   const sharingHeader = isGuestShareMode() ? null : (
     <View style={styles.shareHeader}>
-      <BuiltinPluginGate serverId={serverId} id="activity-graph">
-        <ActivityGraphToggle agentId={agentId} serverId={serverId} />
-      </BuiltinPluginGate>
-      {gumloopDesktop ? null : (
-        <BuiltinPluginGate serverId={serverId} id="session-share">
-          <SessionShareControl agentId={agentId} serverId={serverId} />
-        </BuiltinPluginGate>
-      )}
+      <BuiltinAgentItems serverId={serverId} agentId={agentId} kind="agentHeader" />
     </View>
   );
   const chatSurface = (
@@ -1350,7 +1334,6 @@ function ActivityGraphLayout({
   children?: React.ReactNode;
 }) {
   const isCompact = useIsCompactFormFactor();
-  const { open } = useActivityGraphOpen(serverId, agentId);
   const { openTab } = usePaneContext();
   const [width, setWidth] = useState(0);
   const handleLayout = useCallback(
@@ -1375,25 +1358,21 @@ function ActivityGraphLayout({
     <View style={styles.root} onLayout={handleLayout}>
       <View style={styles.chatRow}>
         <View style={styles.chatColumn}>{children}</View>
-        {open && !isCompact && width > 0 ? (
-          <BuiltinPluginGate serverId={serverId} id="activity-graph">
-            <ActivityGraphSidePanel
-              serverId={serverId}
-              agentId={agentId}
-              containerWidth={width}
-              onSelectNode={handleSelectNode}
-            />
-          </BuiltinPluginGate>
+        {!isCompact && width > 0 ? (
+          <BuiltinAgentSidePanels
+            serverId={serverId}
+            agentId={agentId}
+            containerWidth={width}
+            onSelectNode={handleSelectNode}
+          />
         ) : null}
       </View>
       {isCompact ? (
-        <BuiltinPluginGate serverId={serverId} id="activity-graph">
-          <ActivityGraphSheet
-            serverId={serverId}
-            agentId={agentId}
-            onSelectNode={handleSelectNode}
-          />
-        </BuiltinPluginGate>
+        <BuiltinAgentSidePanels
+          serverId={serverId}
+          agentId={agentId}
+          onSelectNode={handleSelectNode}
+        />
       ) : null}
     </View>
   );
@@ -1726,14 +1705,12 @@ function ActiveAgentComposer({
 
   const specModeDock = useMemo(
     () => (
-      <BuiltinPluginGate serverId={serverId} id="spec-mode">
-        <SpecModeComposerDock
-          serverId={serverId}
-          agentId={agentId}
-          cwd={cwd}
-          onOpenFile={handleOpenSpecFile}
-        />
-      </BuiltinPluginGate>
+      <BuiltinComposerDocks
+        serverId={serverId}
+        agentId={agentId}
+        cwd={cwd}
+        onOpenFile={handleOpenSpecFile}
+      />
     ),
     [agentId, cwd, handleOpenSpecFile, serverId],
   );

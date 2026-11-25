@@ -44,13 +44,13 @@ class DevicesDaemon {
       signer: createSideloadDeviceSigner(() => this.sideload),
     });
     // An agent's device grants end with its provider session (spec 27.6).
-    if (core.daemon.subscribeAgentEvents)
-      clearGrantsWhenSessionsEnd(core.daemon.subscribeAgentEvents, this.physicalDevices);
+    if (core.daemonHooks.subscribeAgentEvents)
+      clearGrantsWhenSessionsEnd(core.daemonHooks.subscribeAgentEvents, this.physicalDevices);
     this.sideload = new SideloadService({
       jagentdeskHome: core.home,
       logger: core.logger,
-      broadcast: (message) => core.daemon.broadcast?.(message),
-      pushNotification: (notice) => core.daemon.pushNotification?.(notice),
+      broadcast: (message) => core.daemonHooks.broadcast?.(message),
+      pushNotification: (notice) => core.daemonHooks.pushNotification?.(notice),
       refreshIntervalMs: positiveEnvNumber("JAGENTDESK_SIDELOAD_REFRESH_INTERVAL_MS"),
       clockOffsetMs: envNumber("JAGENTDESK_SIDELOAD_CLOCK_OFFSET_MS"),
     });
@@ -180,5 +180,6 @@ export function register(host: BuiltinServerHost) {
     { slot: "late" },
   );
   // Workbench's sim_install_batch installs through the same simulator control plane.
-  host.provide("devices.simulator-installer", new SimulatorService());
+  const simulatorInstaller = new SimulatorService();
+  host.provide("devices.simulator-installer", () => simulatorInstaller);
 }

@@ -5,5 +5,9 @@
   "description": "Plan and implement work from a specification.",
   "defaultEnabled": true,
   "requires": ["skills"],
-  "builtinOrder": 14
+  "builtinOrder": 14,
+  "builtinEntrypoints": {
+    "server": "server/index.ts",
+    "client": "client/index.tsx"
+  }
 }

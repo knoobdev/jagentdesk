@@ -6,7 +6,7 @@ import path from "node:path";
 import { zipSync } from "fflate";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestLogger } from "../../test-utils/test-logger.js";
-import { makeTarGz } from "../skills-native/test-utils/fixtures.js";
+import { makeTarGz } from "../../../../../plugins/skills/server/test-utils/fixtures.js";
 import { HostToolInstaller, type ManagerRunner } from "./installer.js";
 import { getToolDefinition, hostTarget } from "./registry.js";
 import { findSha256, type HttpFetch, type HttpResponse } from "./release.js";

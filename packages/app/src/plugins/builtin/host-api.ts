@@ -1,10 +1,17 @@
 export { PageHeader } from "@/components/headers/page-header";
-export { gumloopListStyles, gumloopTabStyles } from "@/components/gumloop-shell/list-styles";
-export { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+export {
+  gumloopChipStyles,
+  gumloopListStyles,
+  gumloopTabStyles,
+} from "@/components/gumloop-shell/list-styles";
 export { useWorkspaceDirectory, useWorkspaceKeys } from "@/stores/session-store-hooks";
 export { getDesktopHost } from "@/desktop/host";
 export { useIsCompactFormFactor } from "@/constants/layout";
-export { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
+export {
+  useHostRuntimeClient,
+  useHostRuntimeIsConnected,
+  useHosts,
+} from "@/runtime/host-runtime";
 export { Skeleton, useSkeletonPulse } from "@/components/ui/skeleton";
 export { TerminalPane } from "@/components/terminal-pane";
 export { withSshDocker, type SshDockerTarget } from "@/ssh/ui/ssh-docker-client";
@@ -18,6 +25,11 @@ export type {
   BuiltinLeftPanelOptions,
   BuiltinToolCallCardProps,
   BuiltinToolCallRenderer,
+  BuiltinAgentProps,
+  BuiltinComposerDockProps,
+  BuiltinSidePanelProps,
+  BuiltinUserMessageBodyProps,
+  BuiltinTurnPreparation,
 } from "./host";
 
 // Packages installed only in packages/app resolve for features through the host API.
@@ -52,7 +64,6 @@ export {
   CLUSTER_CHAT_MAX_WIDTH,
 } from "@/stores/cluster-chat-store";
 export type { ClusterChatPendingAsk } from "@/stores/cluster-chat-store";
-export { gumloopChipStyles } from "@/components/gumloop-shell/list-styles";
 export { formatTimeAgo } from "@/utils/time";
 export { AgentConversationPanel } from "@/panels/agent-panel";
 export {
@@ -63,7 +74,7 @@ export {
 export type { PaneContextValue } from "@/panels/pane-context";
 export { dispatchComposerAgentMessage } from "@/composer/actions";
 export { createMessageSubmissionWriter } from "@/composer/submission/writer";
-export { prepareTurnSkills } from "@/skills/turn-skills";
+export { prepareBuiltinTurn } from "@/plugins/builtin/surfaces";
 export { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
 export { AdaptiveTextInput, AdaptiveModalSheet } from "@/components/adaptive-modal-sheet";
 export { HighlightedLines } from "@/components/highlighted-content";
@@ -81,7 +92,6 @@ export {
   DATABASE_CHAT_MIN_WIDTH,
   DATABASE_CHAT_MAX_WIDTH,
 } from "@/stores/database-chat-store";
-export { useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 export {
   ContextMenu,
   ContextMenuContent,
@@ -246,5 +256,48 @@ export {
   utf8ToBase64,
 } from "@/utils/base64-bytes";
 export { PROXY_AGENT_LABEL } from "@/utils/dock-agents";
+
+
+// Packages installed only in packages/app resolve through here.
+
+// Shared app UI and data hooks used by feature screens.
+export {
+  Combobox,
+  ComboboxItem,
+  type ComboboxOption,
+} from "@/components/ui/combobox";
+export { AgentControlTrigger } from "@/composer/agent-controls/control";
+export { useFetchQueries, useReplicaQuery } from "@/data/query";
+export { useDaemonConfig } from "@/hooks/use-daemon-config";
+export { useHostRouteServerId } from "@/navigation/host-route-context";
+export { type StreamItem } from "@/types/stream";
+
+export { ExternalLink } from "@/components/ui/external-link";
+export {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+export { buildSettingsHostSectionRoute } from "@/utils/host-routes";
+
+// Spec mode and autonomous mode read each other's per-agent state.
+export { useAutorunState, useSpecModeState } from "@/hooks/use-agent-mode-state";
+export { specModeBubbleText } from "@/components/spec-mode-bubble-text";
+// The activity graph frame shares the stream's node-selection contract and HTML navigation rules.
+export { acceptSelectMessage } from "@/agent-stream/activity-node-action";
+export { htmlPreviewNavigationKind } from "@/file-pane/html-preview-navigation";
+export { formatTokenCount } from "@/components/context-window-meter.utils";
+export { usageHistoryQueryKey, type UsageHistory } from "@/data/usage-history-query";
+export { useGumloopDesktopShell, useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+
+// Fingerprint profile patches are shared with the desktop browser pane's profile sync.
+export {
+  activeFingerprintProfileId,
+  deleteProfilePatch,
+  listFingerprintProfiles,
+  newFingerprintProfileId,
+  selectProfilePatch,
+  upsertProfilePatch,
+} from "@/screens/settings/browser-fingerprint-config";
 
 

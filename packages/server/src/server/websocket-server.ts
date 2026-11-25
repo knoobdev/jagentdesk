@@ -32,26 +32,16 @@ import { type ProjectRegistry, type WorkspaceRegistry } from "./workspace-regist
 import { type ProjectUpdate } from "./workspace-reconciliation-service.js";
 import { type FileBackedChatService } from "./chat/chat-service.js";
 import { type LoopService } from "./loop-service.js";
-import { type NativeSkillsService } from "./skills-native/index.js";
-import { type Skill } from "@jagentdesk/protocol/skills";
-import { type UsageHistoryStorage } from "./usage/usage-history-storage.js";
 import { type HostCapabilityService } from "./host-capabilities/service.js";
 import { type HostToolInstaller } from "./host-tools/installer.js";
 import { type HostCapabilities } from "@jagentdesk/protocol/host-capabilities";
-import { type LifetimeUsage, type UsageDayRollup } from "@jagentdesk/protocol/usage-history";
 import { type ClusterRegistry } from "./cluster/cluster-registry.js";
 import { type DatabaseRegistry } from "./database/database-registry.js";
 import { SshService } from "./ssh/ssh-service.js";
 import { type CustomProviderService } from "./custom-providers/types.js";
 import { type FigmaService } from "./figma/service.js";
 import { type ScheduleService } from "./schedule/service.js";
-import { type AutorunService } from "./autorun/service.js";
-import { type SpecModeService } from "./spec-mode/service.js";
-import { SpecModePlanSource } from "./spec-mode/plan-source.js";
-import { type SpecModeState } from "@jagentdesk/protocol/spec-mode";
-import { type SessionShareService } from "./session-share/service.js";
-import { ActivityGraphService } from "./agent/activity-graph/service.js";
-import { type AutorunState, type CreationSnapshot } from "@jagentdesk/protocol/messages";
+import { type CreationSnapshot } from "@jagentdesk/protocol/messages";
 import { type CheckoutDiffManager, type CheckoutDiffMetrics } from "./checkout-diff-manager.js";
 import { type DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
 import {
@@ -720,10 +710,6 @@ export class VoiceAssistantWebSocketServer {
 
   private readonly loopService: LoopService;
 
-  private skillsStorage: NativeSkillsService | null = null;
-
-  private usageHistory: UsageHistoryStorage | null = null;
-
   private hostCapabilities: HostCapabilityService | null = null;
 
   private hostToolInstaller: HostToolInstaller | null = null;
@@ -740,16 +726,7 @@ export class VoiceAssistantWebSocketServer {
 
   private readonly scheduleService: ScheduleService;
 
-  private autorunService!: AutorunService | null;
-
-  private sessionShareService!: SessionShareService | null;
-
-  private specModeService: SpecModeService | null = null;
-
   // Agent activity graph (spec 31, ADR-0031): one daemon-wide service shared by every session.
-  private readonly activityGraphService: ActivityGraphService;
-
-  private readonly specPlanSource: SpecModePlanSource;
 
   private botsService: BotsService | null = null;
 
@@ -840,10 +817,6 @@ export class VoiceAssistantWebSocketServer {
   private unsubscribeSpeechReadiness: (() => void) | null = null;
 
   private unsubscribeDaemonConfigChange: (() => void) | null = null;
-
-  private unsubscribeSkillsChange: (() => void) | null = null;
-
-  private unsubscribeUsageChange: (() => void) | null = null;
 
   private readonly providerUsageService: ProviderUsageService;
 
@@ -956,11 +929,7 @@ export class VoiceAssistantWebSocketServer {
     hubRelationships?: HubRelationshipManagement | null,
     pairing?: PairingServerDependencies | null,
     pluginRuntime?: PluginRuntimePort | null,
-    skillsStorage?: NativeSkillsService | null,
-    usageHistory?: UsageHistoryStorage | null,
     databaseRegistry?: DatabaseRegistry,
-    autorunService?: AutorunService | null,
-    sessionShareService?: SessionShareService | null,
     sshService?: SshService | null,
     private readonly workspaceArchiveOperations: WorkspaceArchiveOperations = new WorkspaceArchiveOperations(),
   ) {
@@ -984,19 +953,6 @@ export class VoiceAssistantWebSocketServer {
       : null;
     this.pluginRuntime = pluginRuntime ?? null;
     this.agentManager = agentManager;
-    // Plan view with Spec mode on (spec 31.1): phases/tasks from the agent's tasks.md. The Spec
-    // mode service is injected later (setSpecModeService), so the source looks it up per call.
-    this.specPlanSource = new SpecModePlanSource({
-      getState: async (agentId) =>
-        this.specModeService ? this.specModeService.get(agentId) : null,
-      agentCwd: (agentId) => agentManager.getAgent(agentId)?.cwd ?? null,
-      logger: this.logger,
-    });
-    this.activityGraphService = new ActivityGraphService({
-      agents: agentManager,
-      logger: this.logger,
-      specPlanSource: this.specPlanSource,
-    });
     this.agentStorage = agentStorage;
     this.messageReceipts = new MessageReceipts(join(jagentdeskHome, "agent-requests"));
     this.creationService = new CreationService(
@@ -1057,8 +1013,6 @@ export class VoiceAssistantWebSocketServer {
       getDaemonTcpHost,
       serviceProxyPublicBaseUrl,
       resolveScriptHealth,
-      autorunService,
-      sessionShareService,
     });
     if (!providerSnapshotManager) {
       throw new Error("providerSnapshotManager is required");
@@ -1095,8 +1049,6 @@ export class VoiceAssistantWebSocketServer {
       unsubscribeBuiltin?.();
       unsubscribeConfig?.();
     };
-    this.setupSkillsBroadcast(skillsStorage);
-    this.setupUsageBroadcast(usageHistory);
 
     const pushLogger = this.logger.child({ module: "push" });
     this.pushTokenStore = new PushTokenStore(pushLogger, join(jagentdeskHome, "push-tokens.json"));
@@ -1134,11 +1086,7 @@ export class VoiceAssistantWebSocketServer {
     getDaemonTcpHost: (() => string | null) | undefined;
     serviceProxyPublicBaseUrl: string | null | undefined;
     resolveScriptHealth: ((hostname: string) => ScriptHealthState | null) | undefined;
-    autorunService: AutorunService | null | undefined;
-    sessionShareService: SessionShareService | null | undefined;
   }): void {
-    this.autorunService = params.autorunService ?? null;
-    this.sessionShareService = params.sessionShareService ?? null;
     this.speech = params.speech ?? null;
     this.terminalManager = params.terminalManager ?? null;
     if (this.terminalManager) {
@@ -1693,16 +1641,10 @@ export class VoiceAssistantWebSocketServer {
     this.prepareForShutdown();
     this.sasPairing?.cancel();
     await this.connectedHosts.close();
-    this.activityGraphService.dispose();
-    this.specPlanSource.dispose();
     this.unsubscribeSpeechReadiness?.();
     this.unsubscribeSpeechReadiness = null;
     this.unsubscribeDaemonConfigChange?.();
     this.unsubscribeDaemonConfigChange = null;
-    this.unsubscribeSkillsChange?.();
-    this.unsubscribeSkillsChange = null;
-    this.unsubscribeUsageChange?.();
-    this.unsubscribeUsageChange = null;
     this.unsubscribeTerminalActivity?.();
     this.unsubscribeTerminalActivity = null;
     if (this.runtimeMetricsInterval) {
@@ -2276,15 +2218,6 @@ export class VoiceAssistantWebSocketServer {
     this.customProvidersService = service;
   }
 
-  setSpecModeService(service: SpecModeService): void {
-    this.specModeService = service;
-  }
-
-  /** Spec mode state changed for an agent: refresh its Plan view (spec 31.1). */
-  notifySpecModeState(state: SpecModeState): void {
-    this.specPlanSource.notifyState(state);
-  }
-
   private createSocketSession(options: SocketSessionOptions): Session {
     return new Session({
       creationService: this.creationService,
@@ -2325,8 +2258,6 @@ export class VoiceAssistantWebSocketServer {
       workspaceRegistry: this.workspaceRegistry,
       chatService: this.chatService,
       loopService: this.loopService,
-      skillsStorage: this.skillsStorage,
-      usageHistory: this.usageHistory,
       hostCapabilities: this.hostCapabilities,
       hostToolInstaller: this.hostToolInstaller,
       clusterRegistry: this.clusterRegistry,
@@ -2337,10 +2268,6 @@ export class VoiceAssistantWebSocketServer {
       customProvidersService: this.customProvidersService,
       workspaceBaseBranch: this.workspaceBaseBranch,
       scheduleService: this.scheduleService,
-      autorunService: this.autorunService,
-      specModeService: this.specModeService,
-      sessionShareService: this.sessionShareService,
-      activityGraphService: this.activityGraphService,
       checkoutDiffManager: this.checkoutDiffManager,
       github: this.github,
       workspaceGitService: this.workspaceGitService,
@@ -2908,14 +2835,7 @@ export class VoiceAssistantWebSocketServer {
         // Devices owns Sideload; its built-in state masks these.
         sideload: true,
         sideloadHostBrowse: true,
-        // Autonomous run (spec §20 / ADR-0017). Default OFF: advertised only when the
-        // daemon opted in (autorunService wired). Gates the whole autorun.* surface;
-        // autorunApproval gates the per-action-approval mode toggle (§20.7.3).
-        ...(this.autorunService ? { autorun: true, autorunApproval: true } : {}),
-        // Session sharing (spec §21 / ADR-0018); advertised only when the daemon opted in.
-        ...(this.sessionShareService ? { sessionSharing: true } : {}),
-        // Spec mode (spec 28 / ADR-0030): agent.spec_mode.* surface.
-        ...(this.specModeService ? { specMode: true } : {}),
+        ...this.builtinFeatureFlags(),
         // Agent activity graph (spec 31 / ADR-0031). COMPAT(activityGraph): added after v0.9.47.
         activityGraph: true,
         // Argo CD (spec 30 / ADR-0034); the built-in plugin state below gates it per host.
@@ -2980,9 +2900,6 @@ export class VoiceAssistantWebSocketServer {
     };
   }
 
-  // Push notification when an autonomous run reaches a terminal state (spec §14). The
-  // live `autorun.stream` already updates open clients; this reaches a phone that isn't
-  // watching. Wired from AutorunService.onStopped in bootstrap.
   /** Sideload notices (26.6) reach a phone that is not connected. */
   public sendSideloadPush(notice: { title: string; body: string }): void {
     void this.pushNotificationSender
@@ -2992,19 +2909,34 @@ export class VoiceAssistantWebSocketServer {
       });
   }
 
-  public notifyAutorunStopped(state: AutorunState): void {
-    const reason = state.stopReason ?? "stopped";
+  /** Capabilities of migrated built-ins; plugin state then filters them like the others. */
+  private builtinFeatureFlags(): Record<string, true> {
+    const daemon = this.pluginRuntime?.builtinDaemon;
+    return {
+      // Autonomous run (spec §20 / ADR-0017). Gates the whole autorun.* surface; autorunApproval
+      // gates the per-action-approval mode toggle (§20.7.3).
+      ...(daemon?.port("autorun") ? { autorun: true, autorunApproval: true } : {}),
+      // Spec mode (spec 28 / ADR-0030): agent.spec_mode.* surface.
+      ...(daemon?.port("specMode") ? { specMode: true } : {}),
+      // Session sharing (spec §21 / ADR-0018); plugin state turns it off by default.
+      ...(daemon ? { sessionSharing: true } : {}),
+    };
+  }
+
+  /** Push notification on behalf of a built-in feature (docs/builtin-plugins.md). */
+  public sendBuiltinPush(notice: {
+    title: string;
+    body: string;
+    data?: Record<string, string>;
+  }): void {
     void this.pushNotificationSender
       .send({
-        title: "Autonomous mode stopped",
-        body: `${reason}${state.lastNote ? `: ${state.lastNote}` : ""}`.slice(0, 140),
-        data: { serverId: this.serverId, agentId: state.agentId, stopReason: reason },
+        title: notice.title,
+        body: notice.body,
+        data: { serverId: this.serverId, ...notice.data },
       })
       .catch((err) => {
-        this.logger.warn(
-          { err, agentId: state.agentId },
-          "Failed to send autorun push notification",
-        );
+        this.logger.warn({ err, title: notice.title }, "Failed to send built-in push notification");
       });
   }
 
@@ -3019,41 +2951,6 @@ export class VoiceAssistantWebSocketServer {
         payload: { status: "daemon_config_changed", config },
       });
     }
-  }
-
-  private setupSkillsBroadcast(skillsStorage: NativeSkillsService | null | undefined): void {
-    this.skillsStorage = skillsStorage ?? null;
-    this.unsubscribeSkillsChange =
-      this.skillsStorage?.onChange((skills) => {
-        this.broadcastSkillsChanged(skills);
-      }) ?? null;
-  }
-
-  private setupUsageBroadcast(usageHistory: UsageHistoryStorage | null | undefined): void {
-    this.usageHistory = usageHistory ?? null;
-    this.unsubscribeUsageChange =
-      this.usageHistory?.onChange((days, lifetime) => {
-        this.broadcastUsageChanged(days, lifetime);
-      }) ?? null;
-  }
-
-  private broadcastSkillsChanged(skills: Skill[]): void {
-    this.broadcast(
-      wrapSessionMessage({
-        type: "status",
-        // Every change (legacy mutate or native op) also invalidates the native catalog.
-        payload: { status: "skills_changed", skills, catalogChanged: true },
-      }),
-    );
-  }
-
-  private broadcastUsageChanged(days: UsageDayRollup[], lifetime: LifetimeUsage): void {
-    this.broadcast(
-      wrapSessionMessage({
-        type: "status",
-        payload: { status: "usage_changed", days, lifetime },
-      }),
-    );
   }
 
   private bindSocketHandlers(ws: WebSocketLike): void {

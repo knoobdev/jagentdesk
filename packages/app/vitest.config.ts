@@ -72,7 +72,7 @@ export default defineConfig({
           environment: "node",
           include: [
             "src/**/*.{test,spec}.{ts,tsx}",
-            "../../plugins/*/client/**/*.test.{ts,tsx}",
+            "../../plugins/*/client/**/*.{test,spec}.{ts,tsx}",
             "modules/**/*.test.{ts,tsx}",
             "native-release-version.test.ts",
             // Statically linked built-in features keep their client tests next to their code.
@@ -83,7 +83,7 @@ export default defineConfig({
             ...configDefaults.exclude,
             "e2e/**",
             "src/**/*.browser.{test,spec}.{ts,tsx}",
-            "../../plugins/*/client/**/*.browser.{test,spec}.{ts,tsx}",
+            "../../plugins/**/*.browser.{test,spec}.{ts,tsx}",
           ],
         },
       },

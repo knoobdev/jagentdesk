@@ -1,6 +1,6 @@
 import { createBuiltinCoreServices } from "./plugins/builtin/services.js";
 import { builtinServerRegistry } from "./plugins/builtin/loaded.js";
-import type { BuiltinServerSession } from "./plugins/builtin/host.js";
+import type { BuiltinDaemonScope, BuiltinServerSession } from "./plugins/builtin/host.js";
 import {
   formatSystemNotificationPrompt,
   type PromptDispatchResult,
@@ -223,14 +223,6 @@ import {
   createGitMetadataGenerator,
 } from "./session/checkout/git-metadata-generator.js";
 import { ChatScheduleLoopSession } from "./session/chat/chat-schedule-loop-session.js";
-import { AutorunSession } from "./session/autorun/autorun-session.js";
-import { SpecModeSession } from "./session/spec-mode/spec-mode-session.js";
-import { type SpecModeService } from "./spec-mode/service.js";
-import { type AutorunService } from "./autorun/service.js";
-import { SessionShareSession } from "./session/session-share/session-share-session.js";
-import { type ActivityGraphService } from "./agent/activity-graph/service.js";
-import { ActivityGraphSession } from "./session/activity-graph/activity-graph-session.js";
-import { type SessionShareService } from "./session-share/service.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { FigmaSession, isFigmaRequest } from "./session/figma/figma-session.js";
 import { type FigmaService } from "./figma/service.js";
@@ -286,16 +278,9 @@ import { type SpeechReadinessSnapshot } from "./speech/speech-runtime.js";
 import pino from "pino";
 import { FileBackedChatService } from "./chat/chat-service.js";
 import { LoopService } from "./loop-service.js";
-import { type NativeSkillsService } from "./skills-native/index.js";
-import {
-  handleNativeSkillsRequest,
-  isNativeSkillsRequest,
-} from "./skills-native/session-handler.js";
-import { type UsageHistoryStorage } from "./usage/usage-history-storage.js";
 import { type HostCapabilityService } from "./host-capabilities/service.js";
 import { type HostToolInstaller } from "./host-tools/installer.js";
 import { ToolInstallError } from "./host-tools/release.js";
-import { type LifetimeUsage } from "@jagentdesk/protocol/usage-history";
 import { ScheduleService } from "./schedule/service.js";
 import {
   createGitHubService,
@@ -353,17 +338,6 @@ function toolInstallErrorPayload(error: unknown): { code: string; message: strin
     message: error instanceof Error ? error.message : String(error),
   };
 }
-
-// Zeroed lifetime total, emitted when no usage-history store is wired (and as the
-// post-reset shape). Kept module-scoped so the get + reset handlers share one.
-const EMPTY_LIFETIME_USAGE: LifetimeUsage = {
-  inputTokens: 0,
-  cachedInputTokens: 0,
-  outputTokens: 0,
-  totalCostUsd: 0,
-  turns: 0,
-  byModel: {},
-};
 
 function resolveWorkspaceArchiveOperations(
   operations: WorkspaceArchiveOperations | undefined,
@@ -637,20 +611,9 @@ export interface SessionOptions {
 
   scheduleService: ScheduleService;
 
-  autorunService?: AutorunService | null;
-
-  specModeService?: SpecModeService | null;
-
-  sessionShareService?: SessionShareService | null;
-
   // Agent activity graph (spec 31, ADR-0031); shared daemon-wide service.
-  activityGraphService?: ActivityGraphService | null;
 
   loopService: LoopService;
-
-  skillsStorage?: NativeSkillsService | null;
-
-  usageHistory?: UsageHistoryStorage | null;
 
   hostCapabilities?: HostCapabilityService | null;
 
@@ -760,6 +723,7 @@ export interface SessionOptions {
 
   pluginRuntime?: {
     builtin?: BuiltinPluginState;
+    builtinDaemon?: BuiltinDaemonScope;
     refreshBuiltinAvailability?(): Promise<void>;
     listUsageReports?: NonNullable<UsageSessionOptions["runtime"]>["listUsageReports"];
     listLegacyUsage?: NonNullable<UsageSessionOptions["runtime"]>["listLegacyUsage"];
@@ -841,26 +805,6 @@ export type SessionLifecycleIntent =
       reason: string;
       keepTerminals: boolean;
     };
-
-interface SpecModeWiring {
-  service: SpecModeService;
-  session: SpecModeSession;
-}
-
-function createSpecModeWiring(
-  service: SpecModeService | null | undefined,
-  host: { emit: (msg: SessionOutboundMessage) => void; logger: pino.Logger },
-): SpecModeWiring | null {
-  if (!service) return null;
-  return {
-    service,
-    session: new SpecModeSession({
-      emit: host.emit,
-      specModeService: service,
-      logger: host.logger,
-    }),
-  };
-}
 
 function parseClientCapabilities(
   capabilities: Record<string, unknown> | null | undefined,
@@ -1116,10 +1060,6 @@ export class Session {
 
   private readonly daemonConfigStore: DaemonConfigStore;
 
-  private readonly skillsStorage: NativeSkillsService | null;
-
-  private readonly usageHistory: UsageHistoryStorage | null;
-
   private readonly hostCapabilities: HostCapabilityService | null | undefined;
 
   private readonly hostToolInstaller: HostToolInstaller | null | undefined;
@@ -1209,14 +1149,6 @@ export class Session {
 
   private readonly chatScheduleLoopSession: ChatScheduleLoopSession;
 
-  private readonly autorunSession: AutorunSession | null;
-
-  private readonly specMode: SpecModeWiring | null;
-
-  private readonly sessionShareSession: SessionShareSession | null;
-
-  private readonly activityGraphSession: ActivityGraphSession | null;
-
   private botsSession: BotsSession | null = null;
 
   private figmaSession: FigmaSession | null = null;
@@ -1277,7 +1209,6 @@ export class Session {
       filesystem,
       chatService,
       scheduleService,
-      specModeService,
       loopService,
       checkoutDiffManager,
       github,
@@ -1494,15 +1425,6 @@ export class Session {
       clientId: this.clientId,
       logger: this.sessionLogger,
     });
-    this.specMode = createSpecModeWiring(specModeService, {
-      emit: (msg) => this.emit(msg),
-      logger: this.sessionLogger,
-    });
-    ({
-      autorunSession: this.autorunSession,
-      sessionShareSession: this.sessionShareSession,
-      activityGraphSession: this.activityGraphSession,
-    } = this.createOptionalSessions(options));
     this.initClusterSession(options);
     this.initDatabaseSession(options);
     this.initSshSession(options);
@@ -1586,8 +1508,6 @@ export class Session {
         })
       : null;
     this.daemonConfigStore = daemonConfigStore;
-    this.skillsStorage = options.skillsStorage ?? null;
-    this.usageHistory = options.usageHistory ?? null;
     this.hostCapabilities = options.hostCapabilities;
     this.hostToolInstaller = options.hostToolInstaller;
     this.terminalManager = terminalManager;
@@ -1763,6 +1683,10 @@ export class Session {
       service: builtinServerRegistry.lookup(this.jagentdeskHome),
       provided: builtinServerRegistry.provided,
       transportBufferedAmount: () => this.getTransportBufferedAmount(),
+      daemon: pluginRuntime?.builtinDaemon,
+      supports: (capability) => this.supports(capability),
+      agentManager: this.agentManager,
+      agentStorage: this.agentStorage,
       terminals: this.terminalManager,
       remoteDocker: () => this.sshService.modules?.docker,
       remoteK8s: () => this.sshService.modules?.remoteK8s,
@@ -1806,46 +1730,6 @@ export class Session {
 
   // The sessions that exist only when their daemon-wide service is enabled. Extracted from the
   // constructor to keep its cyclomatic complexity under the lint limit.
-  private createOptionalSessions(options: SessionOptions): {
-    autorunSession: AutorunSession | null;
-    sessionShareSession: SessionShareSession | null;
-    activityGraphSession: ActivityGraphSession | null;
-  } {
-    return {
-      autorunSession: options.autorunService
-        ? new AutorunSession({
-            host: { emit: (msg) => this.emit(msg) },
-            autorunService: options.autorunService,
-            logger: this.sessionLogger,
-          })
-        : null,
-      sessionShareSession: options.sessionShareService
-        ? new SessionShareSession({
-            host: { emit: (msg) => this.emit(msg) },
-            sessionShareService: options.sessionShareService,
-            logger: this.sessionLogger,
-          })
-        : null,
-      activityGraphSession: options.activityGraphService
-        ? new ActivityGraphSession({
-            host: {
-              emit: (msg) => this.emit(msg),
-              supportsActivityGraph: () => this.supports(CLIENT_CAPS.activityGraph),
-              ensureAgentLoaded: async (agentId) => {
-                await ensureUnarchivedAgentLoaded(agentId, {
-                  agentManager: this.agentManager,
-                  agentStorage: this.agentStorage,
-                  logger: this.sessionLogger,
-                });
-              },
-            },
-            service: options.activityGraphService,
-            logger: this.sessionLogger,
-          })
-        : null,
-    };
-  }
-
   private initClusterSession(options: SessionOptions): void {
     this.clusterRegistry = options.clusterRegistry ?? new ClusterRegistry();
   }
@@ -3075,7 +2959,6 @@ export class Session {
       () => this.dispatchMetadataMessage(msg),
       () => this.dispatchAgentLifecycleMessage(msg),
       () => this.dispatchOrchestrationMessage(msg),
-      () => this.dispatchSkillsMessage(msg),
       () => this.dispatchUsageMessage(msg),
       () => this.dispatchAgentConfigMessage(msg),
       () => this.dispatchCheckoutMessage(msg),
@@ -3085,13 +2968,13 @@ export class Session {
       () => this.dispatchProviderMessage(msg),
       () => this.dispatchTerminalMessage(msg, source),
       () => this.dispatchChatScheduleLoopMessage(msg),
-      () => this.dispatchAutorunMessage(msg),
-      () => this.dispatchSpecModeMessage(msg, source),
-      () => this.dispatchSessionShareMessage(msg),
-      () => this.activityGraphSession?.dispatch(msg),
       () => this.botsSession?.dispatch(msg),
       () => this.dispatchFigmaMessage(msg),
-      () => this.builtinSession.dispatch(msg),
+      () =>
+        this.builtinSession.dispatch(msg, {
+          supports: (capability) =>
+            source ? this.supportsForSource(capability, source) : this.supports(capability),
+        }),
       () => this.dispatchMigrationMessage(msg),
       () => this.dispatchBuiltinPluginMessage(msg),
       () => this.dispatchPluginMessage(msg),
@@ -3426,7 +3309,6 @@ export class Session {
   private stopDisabledBuiltinStreams(): void {
     const builtin = this.pluginRuntime?.builtin;
     if (!builtin) return;
-    if (!builtin.isEnabled("activity-graph")) this.activityGraphSession?.dispose();
   }
 
   private subscribeToPluginChanges(
@@ -3702,30 +3584,6 @@ export class Session {
     }
   }
 
-  private dispatchSkillsMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    if (isNativeSkillsRequest(msg)) {
-      return handleNativeSkillsRequest(this.skillsStorage, msg, (out) => this.emit(out));
-    }
-    switch (msg.type) {
-      case "skills.get.request":
-        this.emit({
-          type: "skills.get.response",
-          payload: { requestId: msg.requestId, skills: this.skillsStorage?.get() ?? [] },
-        });
-        return undefined;
-      case "skills.mutate.request":
-        return (async () => {
-          const skills = this.skillsStorage ? await this.skillsStorage.mutate(msg.mutation) : [];
-          this.emit({
-            type: "skills.mutate.response",
-            payload: { requestId: msg.requestId, skills },
-          });
-        })();
-      default:
-        return undefined;
-    }
-  }
-
   private logRequestError(err: Error): void {
     if (err instanceof BuiltinPluginError)
       this.sessionLogger.warn({ err }, "Built-in plugin request rejected");
@@ -3733,32 +3591,6 @@ export class Session {
   }
 
   private dispatchUsageMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    if (msg.type === "usage.history.get.request") {
-      this.emit({
-        type: "usage.history.get.response",
-        payload: {
-          requestId: msg.requestId,
-          days: this.usageHistory?.get() ?? [],
-          lifetime: this.usageHistory?.lifetime() ?? EMPTY_LIFETIME_USAGE,
-        },
-      });
-      return undefined;
-    }
-    if (msg.type === "usage.history.reset.request") {
-      // Destructive: zero the persisted time-series + lifetime baseline. clear()
-      // also notifies listeners so the daemon broadcasts status:usage_changed and
-      // every other viewer's dashboard drops to zero too.
-      this.usageHistory?.clear();
-      this.emit({
-        type: "usage.history.reset.response",
-        payload: {
-          requestId: msg.requestId,
-          days: this.usageHistory?.get() ?? [],
-          lifetime: this.usageHistory?.lifetime() ?? EMPTY_LIFETIME_USAGE,
-        },
-      });
-      return undefined;
-    }
     if (msg.type === "host.capabilities.refresh.request") {
       return this.handleHostCapabilitiesRefresh(msg.requestId);
     }
@@ -4151,65 +3983,6 @@ export class Session {
         return this.chatScheduleLoopSession.handleScheduleRunOnceRequest(msg);
       case "schedule/update":
         return this.chatScheduleLoopSession.handleScheduleUpdateRequest(msg);
-      default:
-        return undefined;
-    }
-  }
-
-  private dispatchAutorunMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    const autorun = this.autorunSession;
-    if (!autorun) return undefined;
-    switch (msg.type) {
-      case "autorun.start.request":
-        return autorun.handleStartRequest(msg);
-      case "autorun.stop.request":
-        return autorun.handleStopRequest(msg);
-      case "autorun.get.request":
-        return autorun.handleGetRequest(msg);
-      case "autorun.list.request":
-        return autorun.handleListRequest(msg);
-      default:
-        return undefined;
-    }
-  }
-
-  private dispatchSpecModeMessage(
-    msg: SessionInboundMessage,
-    source?: object,
-  ): Promise<void> | undefined {
-    const specMode = this.specMode?.session;
-    if (!specMode) return undefined;
-    switch (msg.type) {
-      case "agent.spec_mode.get.request":
-      case "agent.spec_mode.setup.preview.request":
-      case "agent.spec_mode.set.request":
-      case "agent.spec_mode.review.request": {
-        const supported = source
-          ? this.supportsForSource(CLIENT_CAPS.specMode, source)
-          : this.supports(CLIENT_CAPS.specMode);
-        return specMode.handle(msg, supported);
-      }
-      default:
-        return undefined;
-    }
-  }
-
-  private dispatchSessionShareMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    const share = this.sessionShareSession;
-    if (!share) return undefined;
-    switch (msg.type) {
-      case "session.share.create.request":
-        return share.handleCreateRequest(msg);
-      case "session.share.stop.request":
-        return share.handleStopRequest(msg);
-      case "session.share.kick.request":
-        return share.handleKickRequest(msg);
-      case "session.share.respond.request":
-        return share.handleRespondRequest(msg);
-      case "session.share.set_options.request":
-        return share.handleSetOptionsRequest(msg);
-      case "session.share.list.request":
-        return share.handleListRequest(msg);
       default:
         return undefined;
     }
@@ -9360,10 +9133,7 @@ export class Session {
     skillIds: string[] | undefined,
     specPhase: boolean,
   ): string[] | undefined {
-    if (
-      specPhase ||
-      (this.pluginRuntime?.builtin && !this.pluginRuntime.builtin.isEnabled("skills"))
-    )
+    if (specPhase || !this.pluginRuntime?.builtinDaemon?.enabledPort("skillInvocation"))
       return undefined;
     return skillIds;
   }
@@ -9399,7 +9169,8 @@ export class Session {
                   agentId,
                   prompt: preparedPrompt,
                   skillIds: msg.skillIds,
-                  skillInvocation: this.skillsStorage,
+                  skillInvocation:
+                    this.pluginRuntime?.builtinDaemon?.port("skillInvocation") ?? null,
                   logger: this.sessionLogger,
                 })
             : undefined,
@@ -9464,10 +9235,8 @@ export class Session {
 
       // Spec mode (spec 28.4 step 2): the message becomes the pending phase's spec-kit command.
       // The command must lead the turn, so attached skills are not prefixed to it.
-      const specPhase =
-        this.pluginRuntime?.builtin && !this.pluginRuntime.builtin.isEnabled("spec-mode")
-          ? undefined
-          : await this.specMode?.service.prepareUserMessage(agentId, msg.text);
+      const specMode = this.pluginRuntime?.builtinDaemon?.enabledPort("specMode");
+      const specPhase = await specMode?.prepareUserMessage(agentId, msg.text);
       const prompt = buildAgentPrompt(specPhase?.text ?? msg.text, msg.images, msg.attachments);
       this.sessionLogger.trace(
         {
@@ -9493,7 +9262,7 @@ export class Session {
               : undefined,
             activeTurnBehavior: msg.activeTurnBehavior === "steer" ? "steer" : "interrupt",
             skillIds: this.messageSkillIds(msg.skillIds, Boolean(specPhase)),
-            skillInvocation: this.skillsStorage,
+            skillInvocation: this.pluginRuntime?.builtinDaemon?.port("skillInvocation") ?? null,
             logger: this.sessionLogger,
           });
         };
@@ -9512,7 +9281,7 @@ export class Session {
           });
         else await send();
       } catch (error) {
-        if (specPhase) await this.specMode?.service.revertPhaseStart(agentId, specPhase.phase);
+        if (specPhase) await specMode?.revertPhaseStart(agentId, specPhase.phase);
         const message = error instanceof Error ? error.message : String(error);
         this.handleAgentRunError(agentId, error, "Failed to send agent message");
         this.emit({
@@ -9845,7 +9614,6 @@ export class Session {
     this.unsubscribePluginChanges?.();
     this.unsubscribePluginChanges = null;
     this.agentUpdates.dispose();
-    this.activityGraphSession?.dispose();
     await this.hubExecutionController?.cleanup();
     if (this.unsubscribeTerminalWorkspaceContributionEvents) {
       this.unsubscribeTerminalWorkspaceContributionEvents();

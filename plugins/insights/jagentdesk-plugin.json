@@ -5,5 +5,9 @@
   "description": "View usage history and costs.",
   "defaultEnabled": true,
   "requires": [],
-  "builtinOrder": 17
+  "builtinOrder": 17,
+  "builtinEntrypoints": {
+    "server": "server/index.ts",
+    "client": "client/index.tsx"
+  }
 }

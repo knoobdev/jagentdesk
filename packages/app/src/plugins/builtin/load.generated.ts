@@ -10,6 +10,13 @@ import { register as register7 } from "../../../../../plugins/argocd/client/inde
 import { register as register8 } from "../../../../../plugins/devices/client/index";
 import { register as register9 } from "../../../../../plugins/workbench/client/index";
 import { register as register10 } from "../../../../../plugins/forge-hub/client/index";
+import { register as register11 } from "../../../../../plugins/skills/client/index";
+import { register as register12 } from "../../../../../plugins/spec-mode/client/index";
+import { register as register13 } from "../../../../../plugins/autorun/client/index";
+import { register as register14 } from "../../../../../plugins/activity-graph/client/index";
+import { register as register15 } from "../../../../../plugins/insights/client/index";
+import { register as register16 } from "../../../../../plugins/session-share/client/index";
+import { register as register17 } from "../../../../../plugins/browser-tools/client/index";
 import type { BuiltinClientRegistry } from "./host";
 export function loadBuiltins(registry: BuiltinClientRegistry) {
   register0(registry.forPlugin("docker"));
@@ -23,4 +30,11 @@ export function loadBuiltins(registry: BuiltinClientRegistry) {
   register8(registry.forPlugin("devices"));
   register9(registry.forPlugin("workbench"));
   register10(registry.forPlugin("forge-hub"));
+  register11(registry.forPlugin("skills"));
+  register12(registry.forPlugin("spec-mode"));
+  register13(registry.forPlugin("autorun"));
+  register14(registry.forPlugin("activity-graph"));
+  register15(registry.forPlugin("insights"));
+  register16(registry.forPlugin("session-share"));
+  register17(registry.forPlugin("browser-tools"));
 }

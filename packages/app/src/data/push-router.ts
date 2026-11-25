@@ -8,7 +8,7 @@ import { invalidateCommandsForProviderChange } from "@/agent-commands/cache";
 import type { ProviderSnapshotEntry } from "@jagentdesk/protocol/agent-types";
 import { orderCheckoutDiffFiles } from "@/git/diff-order";
 import { daemonConfigQueryKey } from "@/data/daemon-config";
-import { usageHistoryQueryKey, type UsageHistory } from "@/insights/use-usage-history";
+import { usageHistoryQueryKey, type UsageHistory } from "@/data/usage-history-query";
 import type { LifetimeUsage, UsageDayRollup } from "@jagentdesk/protocol/usage-history";
 import { daemonPairingOfferQueryKey } from "@/data/daemon-pairing";
 import { providersSnapshotQueryKey, providersSnapshotQueryRoot } from "@/data/providers-snapshot";
