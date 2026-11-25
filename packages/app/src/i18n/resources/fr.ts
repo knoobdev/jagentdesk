@@ -3,7 +3,6 @@ import { builtinPluginStrings } from "./builtin-plugins";
 import { botsStrings } from "./bots";
 import { type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
-import { activityGraphStrings } from "./activity-graph";
 
 export const fr: TranslationResources = {
   bots: botsStrings,
@@ -3331,7 +3330,6 @@ export const fr: TranslationResources = {
       description: "V\u00E9rifiez votre connexion et r\u00E9essayez.",
     },
   },
-  activityGraph: activityGraphStrings,
   providerUsage: {
     checkUsage: "Vérifier l’utilisation",
     checkUsageHint: "S’applique à {{host}} sur tous les appareils",

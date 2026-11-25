@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-- Removed Team mode and agent forum. ORC and Activity graph remain available; existing local data is retained.
+- Removed Team mode and agent forum. ORC remains available; existing local data is retained.
+- Removed Figma and Activity graph (ADR-0055), including their RPCs, agent tools, screens and
+  `server_info` flags. Old `builtinPlugins.figma` / `builtinPlugins.activity-graph` config keys are
+  ignored. The daemon deletes stored Figma credentials and the Figma cache once at start; saved
+  connection and file lists under `$JAGENTDESK_HOME/figma` stay on disk.
 - Preserved the BA/Tester/Pentester cross-review rules as a core library for future Bots work.
 
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its

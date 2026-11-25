@@ -96,8 +96,6 @@ import { SidebarAgentListSkeleton } from "./sidebar-agent-list-skeleton";
 import { shouldShowAddProject, shouldShowSidebarFooter } from "./sidebar-add-project-visibility";
 import { SidebarCalloutSlot } from "./sidebar-callout-slot";
 import { SidebarWorkspaceList } from "./sidebar-workspace-list";
-import { FigmaSidebarEntry } from "@/figma/sidebar-entry";
-import { SidebarFigmaNav } from "@/figma/sidebar-figma-nav";
 
 // Classic sidebar positions of migrated built-in destinations; the rest follow Marketplace.
 const CLASSIC_SLOT_SHARING: readonly string[] = ["shared-sessions"];
@@ -120,7 +118,7 @@ const CLASSIC_PLACED_DESTINATIONS: readonly string[] = [
 /** Sections whose route owns the desktop left column instead of the workspace list. */
 type SectionRoute =
   | { section: "plugin"; serverId: string; pluginId: string }
-  | { section: "servers" | "jira" | "figma" | "bots"; serverId: string };
+  | { section: "servers" | "jira" | "bots"; serverId: string };
 
 export function resolveSectionRoute(pathname: string): SectionRoute | null {
   const plugin = /^\/h\/([^/]+)\/plugin\/([^/]+)/.exec(pathname);
@@ -130,10 +128,9 @@ export function resolveSectionRoute(pathname: string): SectionRoute | null {
       serverId: decodeURIComponent(plugin[1]),
       pluginId: decodeURIComponent(plugin[2]),
     };
-  const match = pathname.match(/\/h\/([^/]+)\/(servers|jira|figma|bots)(?:$|[/?])/);
+  const match = pathname.match(/\/h\/([^/]+)\/(servers|jira|bots)(?:$|[/?])/);
   const section = match?.[2];
-  if (!match?.[1] || (section !== "servers" && section !== "figma" && section !== "bots"))
-    return null;
+  if (!match?.[1] || (section !== "servers" && section !== "bots")) return null;
   return { section, serverId: decodeURIComponent(match[1]) };
 }
 
@@ -167,12 +164,6 @@ export function resolveSidebarNavBody(
     return <BuiltinLeftPanel serverId={sectionRoute.serverId} segment="servers" />;
   if (sectionRoute?.section === "jira")
     return <BuiltinLeftPanel serverId={sectionRoute.serverId} segment="jira" />;
-  if (sectionRoute?.section === "figma")
-    return (
-      <BuiltinPluginGate serverId={sectionRoute.serverId} id="figma">
-        <SidebarFigmaNav serverId={sectionRoute.serverId} />
-      </BuiltinPluginGate>
-    );
   if (builtinPanelRoute) {
     return (
       <BuiltinLeftPanel serverId={builtinPanelRoute.serverId} segment={builtinPanelRoute.segment} />
@@ -323,9 +314,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     router.push(buildOpenProjectRoute());
   }, []);
 
-  const {
-    marketplaceRoute,
-  } = useAppNavTargets();
+  const { marketplaceRoute } = useAppNavTargets();
 
   const handleMarketplaceDesktop = useCallback(() => {
     if (marketplaceRoute) router.push(marketplaceRoute);
@@ -1075,7 +1064,6 @@ function DesktopSidebar({
             <BuiltinSidebarDestinations only={CLASSIC_SLOT_INFRA} />
             <BuiltinSidebarDestinations only={CLASSIC_SLOT_DEPLOY} />
             <BuiltinSidebarDestinations only={CLASSIC_SLOT_INTEGRATIONS} />
-            <FigmaSidebarEntry closesDrawer={false} />
             <BuiltinSidebarDestinations only={CLASSIC_SLOT_SKILLS} />
             <SidebarHeaderRow
               icon={Store}

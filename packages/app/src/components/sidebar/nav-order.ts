@@ -18,7 +18,6 @@ const APP_NAV_ORDER: readonly string[] = [
   "usage",
   "insights",
   "jira",
-  "figma",
   "forge",
 ];
 const UNPLACED_NAV_RANK = APP_NAV_ORDER.indexOf("marketplace") + 0.5;

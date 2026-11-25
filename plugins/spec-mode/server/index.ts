@@ -6,7 +6,6 @@ import {
   type HostCapabilityService,
   type SessionInboundMessage,
 } from "../../../packages/server/src/server/plugins/builtin/host-api.js";
-import { SpecModePlanSource } from "./plan-source.js";
 import { SpecModeService } from "./service.js";
 import { SpecModeSession } from "./session.js";
 
@@ -20,7 +19,6 @@ function hostCapabilities(context: BuiltinDaemonContext): HostCapabilityService 
 
 function createSpecMode(context: BuiltinDaemonContext) {
   const { agentManager, agentStorage, logger } = context;
-  let plan: SpecModePlanSource | undefined;
   const service = new SpecModeService({
     jagentdeskHome: context.home,
     logger,
@@ -39,22 +37,14 @@ function createSpecMode(context: BuiltinDaemonContext) {
         type: "agent.spec_mode.state",
         payload: { agentId: state.agentId, state },
       });
-      plan?.notifyState(state);
     },
   });
-  // Plan view with Spec mode on (spec 31.1): phases/tasks from the agent's tasks.md.
-  plan = new SpecModePlanSource({
-    getState: (agentId) => service.get(agentId),
-    agentCwd: (agentId) => agentManager.getAgent(agentId)?.cwd ?? null,
-    logger: logger.child({ module: "websocket-server" }),
-  });
-  return { service, plan };
+  return { service };
 }
 
 export function register(host: BuiltinServerHost) {
-  const specMode = host.daemonService(createSpecMode, ({ service, plan }) => {
+  const specMode = host.daemonService(createSpecMode, ({ service }) => {
     service.stop();
-    plan.dispose();
   });
   // The service watches agents only while Spec mode is on.
   host.backgroundService((_services, daemon) => ({
@@ -62,7 +52,6 @@ export function register(host: BuiltinServerHost) {
     stop: () => specMode.get(daemon)?.service.stop(),
   }));
   host.provide("specMode", (daemon) => specMode.get(daemon)?.service);
-  host.provide("specPlan", (daemon) => specMode.get(daemon)?.plan);
   host.rpc(
     "agent.spec_mode.",
     [

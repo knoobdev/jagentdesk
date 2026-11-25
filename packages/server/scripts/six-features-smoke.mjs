@@ -1,4 +1,4 @@
-// Smoke check for the integrated daemon: one real RPC per feature (spec 26–31) against a built
+// Smoke check for the integrated daemon: one real RPC per feature (spec 26–30) against a built
 // daemon. Usage: node scripts/six-features-smoke.mjs <port>
 import { randomBytes } from "node:crypto";
 import { WebSocket } from "ws";
@@ -34,7 +34,7 @@ await client.connect();
 await new Promise((resolve) => setTimeout(resolve, 500));
 const features = client.getLastServerInfoMessage()?.features ?? {};
 await check("server_info features", async () => {
-  const wanted = ["specMode", "activityGraph", "argocd", "sideload", "jira"];
+  const wanted = ["specMode", "argocd", "sideload", "jira"];
   const missing = wanted.filter((key) => features[key] !== true);
   if (missing.length) throw new Error(`missing: ${missing.join(", ")}`);
   return wanted.join(", ");
@@ -61,10 +61,6 @@ await check("simulator/list (physical availability)", async () => {
 });
 await check("agent.spec_mode.get (unknown agent)", async () => {
   const result = await client.specModeGet("agt_smoke_missing");
-  return JSON.stringify(result).slice(0, 120);
-});
-await check("agent.activity_graph.get (unknown agent)", async () => {
-  const result = await client.activityGraphGet({ agentId: "agt_smoke_missing", view: "flow" });
   return JSON.stringify(result).slice(0, 120);
 });
 await client.close?.();

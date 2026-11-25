@@ -19,7 +19,6 @@ import { useAgentDescriptor as useAgentPanelDescriptor } from "@/agent-presentat
 import { useAgentStreamTail } from "@/agent-stream/use-agent-stream-tail";
 import type { AgentAddress } from "@jagentdesk/protocol/addresses";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import { type ActivityGraphNodeRef } from "@jagentdesk/protocol/agent-activity-graph";
 import { isGuestReadOnlyShare, isGuestShareMode } from "@/screens/share/guest-share-mode";
 import { type DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import { type TFunction } from "i18next";
@@ -47,11 +46,7 @@ import { useRetainedPanelActive } from "@/components/retained-panel";
 import { RetainedChatContent } from "./retained-chat-content";
 import { SidebarCallout } from "@/components/sidebar-callout";
 import { Composer } from "@/composer";
-import {
-  BuiltinAgentItems,
-  BuiltinAgentSidePanels,
-  BuiltinComposerDocks,
-} from "@/plugins/builtin/surfaces";
+import { BuiltinAgentItems, BuiltinComposerDocks } from "@/plugins/builtin/surfaces";
 import { getActiveMessageSubmissions } from "@/composer/submission/model";
 import { RewindComposerRestoreProvider } from "@/components/rewind/composer-restore";
 import {
@@ -1286,9 +1281,10 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
       <Text style={styles.archivingSubtitle}>{t("agentPanel.states.archivingSubtitle")}</Text>
     </View>
   ) : null;
-  const graphSurface = React.createElement(
-    ActivityGraphLayout,
-    { serverId, agentId, streamViewRef },
+
+  const chatLayout = React.createElement(
+    View,
+    { style: styles.root },
     chatSurface,
     archivingOverlay,
   );
@@ -1313,70 +1309,11 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
           timelineSync={timelineSync}
           enabled={isPaneFocused && active && !agentState.archivedAt && !isArchivingCurrentAgent}
         />
-        {graphSurface}
+        {chatLayout}
       </RewindComposerRestoreProvider>
     </AgentCommandsProvider>
   );
 });
-
-// Chat + agent activity graph (spec 31.4): on desktop the graph is a resizable panel to the right
-// of the chat; on phones it is a full-screen sheet. A node opens what it stands for: a provider
-// subagent's panel, or the timeline row (scrolled to and flashed).
-function ActivityGraphLayout({
-  serverId,
-  agentId,
-  streamViewRef,
-  children,
-}: {
-  serverId: string;
-  agentId: string;
-  streamViewRef: React.RefObject<AgentStreamViewHandle | null>;
-  children?: React.ReactNode;
-}) {
-  const isCompact = useIsCompactFormFactor();
-  const { openTab } = usePaneContext();
-  const [width, setWidth] = useState(0);
-  const handleLayout = useCallback(
-    (event: { nativeEvent: { layout: { width: number } } }) =>
-      setWidth(event.nativeEvent.layout.width),
-    [],
-  );
-  const handleSelectNode = useCallback(
-    (_nodeId: string, ref: ActivityGraphNodeRef) => {
-      const action = streamViewRef.current?.revealActivityNode(ref);
-      if (action?.kind === "subagent") {
-        openTab({
-          kind: "provider_subagent",
-          parentAgentId: agentId,
-          subagentId: action.subagentId,
-        });
-      }
-    },
-    [agentId, openTab, streamViewRef],
-  );
-  return (
-    <View style={styles.root} onLayout={handleLayout}>
-      <View style={styles.chatRow}>
-        <View style={styles.chatColumn}>{children}</View>
-        {!isCompact && width > 0 ? (
-          <BuiltinAgentSidePanels
-            serverId={serverId}
-            agentId={agentId}
-            containerWidth={width}
-            onSelectNode={handleSelectNode}
-          />
-        ) : null}
-      </View>
-      {isCompact ? (
-        <BuiltinAgentSidePanels
-          serverId={serverId}
-          agentId={agentId}
-          onSelectNode={handleSelectNode}
-        />
-      ) : null}
-    </View>
-  );
-}
 
 const AgentStreamSection = memo(function AgentStreamSection({
   streamViewRef,
@@ -1867,15 +1804,6 @@ const styles = StyleSheet.create((theme) => ({
   root: {
     flex: 1,
     backgroundColor: theme.colors.surface0,
-  },
-  chatRow: {
-    flex: 1,
-    minHeight: 0,
-    flexDirection: "row",
-  },
-  chatColumn: {
-    flex: 1,
-    minWidth: 0,
   },
   shareHeader: {
     flexDirection: "row",

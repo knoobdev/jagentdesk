@@ -41,8 +41,10 @@ const PLUGINS = {
   figma: { rpc: ["figma."], tools: ["figma_"] },
 };
 const REMOVED = new Set(["activity-graph", "figma"]);
-// i18n keys of removed features: any key path segment naming them.
+// i18n keys of removed features: any key path segment naming them, or any key of a resource file
+// the feature owned (resources/activity-graph.ts held the activityGraph subtree).
 const REMOVED_I18N = /(^|\.)(figma[A-Za-z]*|activityGraph[A-Za-z]*)(\.|$)/;
+const REMOVED_I18N_FILE = /[/\\](activity-graph|figma)\.(ts|json)$/;
 const ids = only.length ? only : Object.keys(PLUGINS);
 const ROOTS = ["packages/server/src", "plugins", "packages/protocol/src", "packages/app/src/i18n"];
 
@@ -98,8 +100,8 @@ function scan(revision) {
     for (const match of source.matchAll(/"([a-z][A-Za-z0-9_./-]*)"/g)) wire.add(match[1]);
   }
   const i18n = {};
-  for (const file of walk(path.join(root, "packages/app/src/i18n/resources")).filter((file) =>
-    /\.(ts|json)$/.test(file),
+  for (const file of walk(path.join(root, "packages/app/src/i18n/resources")).filter((entry) =>
+    /\.(ts|json)$/.test(entry),
   ))
     i18n[path.relative(root, file)] = propertyKeys(fs.readFileSync(file, "utf8"));
   // Built-in ids as the protocol declares them (generated from manifests after phase 2).
@@ -188,7 +190,10 @@ for (const file of new Set([...Object.keys(before.i18n), ...Object.keys(after.i1
   const b = new Set(after.i18n[file] ?? []);
   for (const key of a)
     if (!b.has(key))
-      (REMOVED_I18N.test(key) ? i18nDiff.removed : i18nDiff.unexpected).push(`${file}: -${key}`);
+      (REMOVED_I18N.test(key) || REMOVED_I18N_FILE.test(file)
+        ? i18nDiff.removed
+        : i18nDiff.unexpected
+      ).push(`${file}: -${key}`);
   for (const key of b) if (!a.has(key)) i18nDiff.unexpected.push(`${file}: +${key}`);
 }
 if (i18nDiff.unexpected.length) failed = true;

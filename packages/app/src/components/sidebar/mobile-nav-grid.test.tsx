@@ -63,7 +63,7 @@ const ITEMS: FixtureItem[] = [
   fixtureItem({ key: "sessions", shortLabel: "Sessions", isActive: true }),
   fixtureItem({ key: "jira", shortLabel: "Jira" }),
   // A destination added after the grid landed: no legacy row, keeps the rail testID.
-  fixtureItem({ key: "figma", shortLabel: "Figma" }),
+  fixtureItem({ key: "bots", shortLabel: "Bots" }),
 ];
 
 /** The mocked hook receives items without icons; the real hook always provides them. */
@@ -116,21 +116,21 @@ describe("buildMobileNavTiles", () => {
   it("keeps the rail item order, labels and active flags", () => {
     const tiles = buildMobileNavTiles(asNavItems(ITEMS));
 
-    expect(tiles.map((tile) => tile.shortLabel)).toEqual(["Sessions", "Jira", "Figma"]);
-    expect(tiles.map((tile) => tile.route)).toEqual(["/sessions", "/jira", "/figma"]);
+    expect(tiles.map((tile) => tile.shortLabel)).toEqual(["Sessions", "Jira", "Bots"]);
+    expect(tiles.map((tile) => tile.route)).toEqual(["/sessions", "/jira", "/bots"]);
     expect(tiles.map((tile) => tile.isActive)).toEqual([true, false, false]);
   });
 
   it("maps drawer keys to their legacy row testIDs and falls back to the rail testID", () => {
     expect(mobileNavTileTestID("sessions", "rail-sessions")).toBe("sidebar-sessions");
     expect(mobileNavTileTestID("jira", "rail-jira")).toBe("sidebar-jira-nav");
-    expect(mobileNavTileTestID("figma", "rail-figma")).toBe("rail-figma");
+    expect(mobileNavTileTestID("bots", "rail-bots")).toBe("rail-bots");
 
     const tiles = buildMobileNavTiles(asNavItems(ITEMS));
     expect(tiles.map((tile) => tile.testID)).toEqual([
       "sidebar-sessions",
       "sidebar-jira-nav",
-      "rail-figma",
+      "rail-bots",
     ]);
   });
 });
@@ -141,7 +141,7 @@ describe("MobileNavGrid", () => {
 
     expect(openTile(container!, "sidebar-sessions")).toBeTruthy();
     expect(openTile(container!, "sidebar-jira-nav")).toBeTruthy();
-    expect(openTile(container!, "rail-figma")).toBeTruthy();
+    expect(openTile(container!, "rail-bots")).toBeTruthy();
     expect(container!.textContent).toContain("Sessions");
   });
 
@@ -199,14 +199,14 @@ describe("MobileNavGrid", () => {
 
   it("picks up items added after the grid was written", async () => {
     await renderGrid();
-    expect(openTile(container!, "rail-figma")).toBeTruthy();
+    expect(openTile(container!, "rail-bots")).toBeTruthy();
 
-    navState.items = [...ITEMS, fixtureItem({ key: "figma2", shortLabel: "Figma2" })];
+    navState.items = [...ITEMS, fixtureItem({ key: "later", shortLabel: "Later" })];
     await act(async () => {
       root?.render(<MobileNavGrid />);
     });
 
-    expect(openTile(container!, "rail-figma2")).toBeTruthy();
+    expect(openTile(container!, "rail-later")).toBeTruthy();
   });
 });
 

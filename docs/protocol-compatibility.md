@@ -76,14 +76,21 @@ A shim that exists for old-app or old-daemon support carries a comment naming it
 
 When a tag's condition is met, delete the shim and the tag in the same change.
 
-## Removed feature: Team mode and agent forum
+## Removed features
 
-ADR-0050 retires this feature, including its `forum.*` agent tools, `forum/*` and
-`forum.diagram.html.request` RPCs, stream, and capability flag. This is an explicit
-exception to retaining retired message schemas. Older clients calling these RPCs receive
-the normal `rpc_error` with `code: "unknown_schema"` (unknown request); no feature-specific
-handler or compatibility shim remains. Existing `$JAGENTDESK_HOME/forums/` data stays on
-disk and is no longer read. ORC and Activity graph keep their existing contracts.
+A spec-repo ADR can retire a feature together with its message schemas. This is an explicit
+exception to retaining retired message schemas. Older clients calling the removed RPCs receive
+the normal `rpc_error` with `code: "unknown_schema"` (unknown request), and `server_info.features`
+stops advertising the feature, so older apps hide it.
+
+| ADR      | Feature                | Removed                                                                                                                           | Kept                                                                                                                                                                                            |
+| -------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ADR-0050 | Team mode, agent forum | `forum.*` agent tools, `forum/*` and `forum.diagram.html.request` RPCs, stream, capability flag                                   | `$JAGENTDESK_HOME/forums/` stays on disk, unread. ORC keeps its contract.                                                                                                                       |
+| ADR-0055 | Figma, Activity graph  | `figma.*` and `agent.activity_graph.*` RPCs and pushes, `figma_*` tools, `figma*`/`activityGraph` flags, both client capabilities | Built-in list items still accept the `figma` and `activity-graph` ids from older daemons (`COMPAT(adr0055)` in `builtin-plugins.ts`). Stale `builtinPlugins` keys in `config.json` are ignored. |
+
+ADR-0055 also deletes the stored Figma credentials and the Figma cache once at daemon start
+(`packages/server/src/server/retired-figma-data.ts`): nothing reads them any more, and credentials
+should not outlive the code that used them. The saved connection and file lists stay on disk.
 
 ## Recent additive changes
 

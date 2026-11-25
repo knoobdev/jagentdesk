@@ -220,8 +220,7 @@ import type { TerminalManager } from "../terminal/terminal-manager.js";
 import { startWorkerTerminalManager } from "../terminal/worker-terminal-manager.js";
 import { createSshTerminalManager } from "../terminal/ssh-terminal-manager.js";
 import { SshService } from "./ssh/ssh-service.js";
-import { createFigmaService } from "./figma/create.js";
-import { createFigmaAgentTools } from "./figma/agent-tools.js";
+import { removeRetiredFigmaData } from "./retired-figma-data.js";
 import { SshModules } from "./ssh/ssh-modules.js";
 import { SshModules as SshServerModules } from "./ssh/modules.js";
 import { applyTerminalAgentHookSetting } from "../terminal/agent-hooks/terminal-agent-hook-setting.js";
@@ -1546,13 +1545,7 @@ export async function createJAgentDeskDaemon(
   await sshModules.initialize();
   sshService.sessionModules = sshModules;
   logger.info("SSH service initialized");
-  // Daemon-wide Figma service (spec 32 / ADR-0035): OAuth, REST budget, Figma Link bridge.
-  const figmaService = await createFigmaService({
-    jagentdeskHome: config.jagentdeskHome,
-    logger,
-    enabled: false,
-  });
-  logger.info("Figma service initialized");
+  await removeRetiredFigmaData({ jagentdeskHome: config.jagentdeskHome, logger });
   const createScheduleLocalWorkspaceExternal = async (input: {
     cwd: string;
     firstAgentContext: FirstAgentContext;
@@ -1679,39 +1672,30 @@ export async function createJAgentDeskDaemon(
   // Built-in features' daemon services, ports, and background lifecycles (docs/builtin-plugins.md).
   // After storage loads (Insights seeds its lifetime baseline from stored agents) and before the
   // persisted agents load: agents cannot run before the built-ins start.
-  const builtinDaemon = await builtinServerRegistry.start(
-    pluginRuntime.builtin,
-    builtinServices,
-    {
-      agentManager,
-      agentStorage,
-      broadcast: (message) => wsServer?.broadcast(wrapSessionMessage(message)),
-      hostCapabilities: () => daemonHostCapabilities,
-      sendPush: (notice) => wsServer?.sendBuiltinPush(notice),
-      sessionShare: {
-        tunnelManager: dependencies.sessionShareTunnelManager ?? new TunnelManager(logger),
-        appDistDir:
-          config.sessionShareAppDistDir ??
-          process.env.JAGENTDESK_SHARE_APP_DIST ??
-          resolveBundledShareAppDist(),
-        // Session-share guests (ADR-0019): the scoped ShareServer /ws hands validated guest
-        // sockets to the daemon as agent-confined real sessions.
-        attachGuestSocket: (ws, params) => wsServer?.attachGuestSocket(ws, params),
-        // A live capability toggle re-scopes already-connected guest sessions (ADR-0019).
-        updateGuestScopes: (agentId, scopes) =>
-          wsServer?.updateGuestScopesForAgent(agentId, scopes),
-      },
+  const builtinDaemon = await builtinServerRegistry.start(pluginRuntime.builtin, builtinServices, {
+    agentManager,
+    agentStorage,
+    broadcast: (message) => wsServer?.broadcast(wrapSessionMessage(message)),
+    hostCapabilities: () => daemonHostCapabilities,
+    sendPush: (notice) => wsServer?.sendBuiltinPush(notice),
+    sessionShare: {
+      tunnelManager: dependencies.sessionShareTunnelManager ?? new TunnelManager(logger),
+      appDistDir:
+        config.sessionShareAppDistDir ??
+        process.env.JAGENTDESK_SHARE_APP_DIST ??
+        resolveBundledShareAppDist(),
+      // Session-share guests (ADR-0019): the scoped ShareServer /ws hands validated guest
+      // sockets to the daemon as agent-confined real sessions.
+      attachGuestSocket: (ws, params) => wsServer?.attachGuestSocket(ws, params),
+      // A live capability toggle re-scopes already-connected guest sessions (ADR-0019).
+      updateGuestScopes: (agentId, scopes) => wsServer?.updateGuestScopesForAgent(agentId, scopes),
     },
-  );
+  });
   pluginRuntime.builtinDaemon = builtinDaemon;
   // Spec mode's launch environment (spec 28): the provider process sees the shared checkout env.
   agentManager.setLaunchEnvProvider(
     (agentId) => builtinDaemon.enabledPort("specMode")?.launchEnv(agentId) ?? null,
   );
-  await pluginRuntime.builtin.registerLifecycle("figma", {
-    start: () => figmaService.start(),
-    stop: () => figmaService.stopBackground(),
-  });
   logger.info({ elapsed: elapsed() }, "Loading persisted agent registry");
   const persistedRecords = await agentStorage.list();
   logger.info(
@@ -1888,13 +1872,6 @@ export async function createJAgentDeskDaemon(
         agentManager,
         callerAgentId,
         callerLabels: runtime.callerAgentLabels,
-      }),
-    figmaAgentTools: (callerAgentId) =>
-      createFigmaAgentTools({
-        service: figmaService,
-        callerAgentId,
-        requestPermission: (agentId, request) =>
-          agentManager.requestHostToolPermission(agentId, request),
       }),
     browserFingerprintProfiles: {
       list: () => daemonConfigStore.get().browserTools.profiles ?? [],
@@ -2105,7 +2082,6 @@ export async function createJAgentDeskDaemon(
             });
             daemonHostCapabilities = hostCapabilities;
             server.setBotsService(botsService);
-            server.setFigmaService(figmaService);
             server.setCustomProvidersService(customProviderService);
           };
           const logAndResolve = async () => {
@@ -2430,7 +2406,6 @@ export async function createJAgentDeskDaemon(
     sshService.dispose();
     await botsSlack.dispose();
     await botsService.dispose();
-    void figmaService.dispose();
     await speechService.stop();
     await scheduleService.stop().catch(() => undefined);
     await relayRuntime?.stop().catch(() => undefined);

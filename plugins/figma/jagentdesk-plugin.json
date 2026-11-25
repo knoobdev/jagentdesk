@@ -1,9 +1,0 @@
-{
-  "kind": "builtin",
-  "id": "figma",
-  "name": "Figma",
-  "description": "Inspect designs and work with Figma files.",
-  "defaultEnabled": true,
-  "requires": [],
-  "builtinOrder": 7
-}

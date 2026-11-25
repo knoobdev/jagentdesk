@@ -209,16 +209,15 @@ test("36.6 #4: persisted toggles survive restart and legacy browser settings mig
   }
 }, 60_000);
 
-test("36.6 #5: an older app receives live false Figma server-info flags", async () => {
+test("36.6 #5: an older app receives live false Jira server-info flags", async () => {
   const old = new DaemonClient({ url: `ws://127.0.0.1:${daemon.port}/ws`, appVersion: "0.8.0" });
   await old.connect();
   try {
-    expect(old.getLastServerInfoMessage()?.features?.figma).toBe(true);
-    await client.setBuiltinPlugin("figma", false);
-    await expect.poll(() => old.getLastServerInfoMessage()?.features?.figma).toBe(false);
-    expect(old.getLastServerInfoMessage()?.features?.figmaRemoteWrites).toBe(false);
-    await client.setBuiltinPlugin("figma", true);
-    await expect.poll(() => old.getLastServerInfoMessage()?.features?.figma).toBe(true);
+    expect(old.getLastServerInfoMessage()?.features?.jira).toBe(true);
+    await client.setBuiltinPlugin("jira", false);
+    await expect.poll(() => old.getLastServerInfoMessage()?.features?.jira).toBe(false);
+    await client.setBuiltinPlugin("jira", true);
+    await expect.poll(() => old.getLastServerInfoMessage()?.features?.jira).toBe(true);
   } finally {
     await old.close();
   }

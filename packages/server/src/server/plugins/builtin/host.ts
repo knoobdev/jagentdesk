@@ -22,7 +22,6 @@ import type { BrowserToolsBroker } from "../../browser-tools/broker.js";
 import type { BrowserFingerprintProfile } from "@jagentdesk/protocol/browser-automation/fingerprint-profile";
 import type { AgentStorage } from "../../agent/agent-storage.js";
 import type { SkillInvocationResolver } from "../../agent/agent-prompt.js";
-import type { SpecPlanSource } from "../../agent/spec-plan.js";
 import type { HostCapabilityService } from "../../host-capabilities/service.js";
 import type { TunnelManager } from "../../tunnels/tunnel-manager.js";
 import type { WebSocket as WsSocket } from "ws";
@@ -65,8 +64,6 @@ export interface BuiltinPorts extends BuiltinProvidedServices {
   skillInvocation: SkillInvocationResolver;
   /** Spec mode's turn rewriting, agent launch environment, and per-agent state. */
   specMode: SpecModePort;
-  /** The Plan view's spec-kit phases and tasks (activity graph). */
-  specPlan: SpecPlanSource;
   /** Autonomous mode status, read by Spec mode (the two exclude each other). */
   autorun: AutorunPort;
   /** Insights records every billed turn (AgentManager `onUsageBilled`). */

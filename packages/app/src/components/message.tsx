@@ -5,7 +5,6 @@ import { useRevealedText } from "@/hooks/use-revealed-text";
 import { useTargetAgentTitle } from "@/tool-calls/use-target-agent-title";
 import { useToolCallExpanded } from "@/tool-calls/expansion-context";
 import { useDisclosureHold } from "@/agent-stream/disclosure";
-import { useBuiltinPluginEnabled } from "@/plugins/builtin/hooks";
 import type { AgentMessage } from "@jagentdesk/protocol/agent-message";
 import { GUMLOOP_MESSAGE_INDENT } from "@/components/gumloop-shell/chat-layout";
 import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";

@@ -66,7 +66,6 @@ describe("Gumloop sidebar model", () => {
     "database/db",
     "cluster/c",
     "servers",
-    "figma",
     "jira",
     "argocd",
     "plugin/p/surface/s",

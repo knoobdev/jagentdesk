@@ -143,7 +143,6 @@ import {
   type OrchestrationRuntime,
 } from "../../orchestration/runtime.js";
 import { type ClusterRegistry } from "../../cluster/cluster-registry.js";
-import { type FigmaAgentTool } from "../../figma/agent-tools.js";
 import { type DatabaseRegistry } from "../../database/database-registry.js";
 import { featuresFromControls } from "@jagentdesk/protocol/option-controls";
 
@@ -217,8 +216,6 @@ export interface JAgentDeskToolHostDependencies {
   /** Daemon core services handed to built-in feature tool installers. */
   builtinServices?: BuiltinCoreServices;
   botAgentTools?: (callerAgentId: string | null) => JAgentDeskToolDefinition[];
-  // Figma (spec 32.7): figma_* tools; reads auto-run, writes raise the permission card.
-  figmaAgentTools?: (callerAgentId: string | null) => FigmaAgentTool[];
   // Daemon-config-backed store for the agentic browser's anti-detect fingerprint
   // profiles. Lets a chat agent create a coherent profile and switch the active one
   // mid-conversation; the config patch broadcasts status:daemon_config_changed, so
@@ -1771,7 +1768,8 @@ function createToolCatalog(
       options.requestHostToolPermission
         ? options.requestHostToolPermission(agentId, request)
         : agentManager.requestHostToolPermission(agentId, request),
-    service: options.builtinDaemon?.service ?? builtinServerRegistry.lookup(options.jagentdeskHome ?? ""),
+    service:
+      options.builtinDaemon?.service ?? builtinServerRegistry.lookup(options.jagentdeskHome ?? ""),
     provided: options.builtinDaemon?.provided ?? builtinServerRegistry.provided,
     requestHostToolPermission: options.requestHostToolPermission,
     clusters: options.clusterRegistry,
@@ -1827,15 +1825,6 @@ function createToolCatalog(
     builtinToolContext,
     "integrations",
   );
-  if (options.figmaAgentTools) {
-    for (const tool of options.figmaAgentTools(callerAgentId ?? null)) {
-      registerTool(
-        tool.name,
-        { title: tool.title, description: tool.description, inputSchema: tool.inputSchema },
-        tool.handler,
-      );
-    }
-  }
   // Device, workbench and forge tools: available to every agent and registered before the
   // voice-only early return so a voice session keeps them.
   builtinServerRegistry.registerAgentTools(

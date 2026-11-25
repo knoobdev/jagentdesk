@@ -57,17 +57,6 @@ export const BUILTIN_PLUGIN_FEATURES = {
   "ssh-servers": ["sshServers"],
   "remote-tasks": ["remoteTasks"],
   "custom-providers": ["customProviders"],
-  figma: [
-    "figma",
-    "figmaPlayback",
-    "figmaNodeDepth",
-    "figmaPagedOutline",
-    "figmaRemoteWrites",
-    "figmaCommentRegions",
-    "figmaRenderFidelity",
-    "figmaTextOutlines",
-    "figmaCachedRender",
-  ],
   jira: ["jira"],
   argocd: ["argocd"],
   devices: ["devices", "sideload", "sideloadHostBrowse"],
@@ -85,7 +74,6 @@ export const BUILTIN_PLUGIN_FEATURES = {
   skills: ["skills"],
   "spec-mode": ["specMode"],
   autorun: ["autorun", "autorunApproval"],
-  "activity-graph": ["activityGraph"],
   insights: ["insights"],
   "session-share": ["sessionSharing"],
   "browser-tools": ["browserTools"],
@@ -102,6 +90,14 @@ export const BuiltinPluginListItemSchema = z.object({
   unavailableReason: z.string().optional(),
 });
 export type BuiltinPluginListItem = z.infer<typeof BuiltinPluginListItemSchema>;
+// COMPAT(adr0055): added in v0.9.60, remove after 2027-05-25 once the daemon floor no longer lists
+// the removed Figma and Activity graph built-ins. Older daemons still send these ids; accept them on
+// the wire so the whole list parses, and drop them in mergeBuiltinPluginWireState.
+const REMOVED_BUILTIN_PLUGIN_IDS: ReadonlySet<string> = new Set(["figma", "activity-graph"]);
+const BuiltinPluginWireListItemSchema = BuiltinPluginListItemSchema.extend({
+  id: z.enum([...BUILTIN_PLUGIN_IDS, "figma", "activity-graph"] as const),
+});
+type BuiltinPluginWireListItem = z.infer<typeof BuiltinPluginWireListItemSchema>;
 export const BuiltinPluginListRequestSchema = z.object({
   type: z.literal("plugins.builtin.list.request"),
   requestId: z.string(),
@@ -115,8 +111,8 @@ export const BuiltinPluginSetRequestSchema = z.object({
 });
 const listPayload = z.object({
   requestId: z.string(),
-  plugins: z.array(BuiltinPluginListItemSchema),
-  bundledPlugins: z.array(BuiltinPluginListItemSchema).optional(),
+  plugins: z.array(BuiltinPluginWireListItemSchema),
+  bundledPlugins: z.array(BuiltinPluginWireListItemSchema).optional(),
   canManage: z.boolean().optional(),
 });
 export const BuiltinPluginListResponseSchema = z.object({
@@ -130,8 +126,8 @@ export const BuiltinPluginSetResponseSchema = z.object({
 export const BuiltinPluginChangedSchema = z.object({
   type: z.literal("plugins.builtin.changed"),
   payload: z.object({
-    plugins: z.array(BuiltinPluginListItemSchema),
-    bundledPlugins: z.array(BuiltinPluginListItemSchema).optional(),
+    plugins: z.array(BuiltinPluginWireListItemSchema),
+    bundledPlugins: z.array(BuiltinPluginWireListItemSchema).optional(),
   }),
 });
 
@@ -180,8 +176,10 @@ export function builtinPluginWireState(entries: BuiltinPluginListItem[]) {
   };
 }
 export function mergeBuiltinPluginWireState(state: {
-  plugins: BuiltinPluginListItem[];
-  bundledPlugins?: BuiltinPluginListItem[];
-}) {
-  return [...state.plugins, ...(state.bundledPlugins ?? [])];
+  plugins: BuiltinPluginWireListItem[];
+  bundledPlugins?: BuiltinPluginWireListItem[];
+}): BuiltinPluginListItem[] {
+  return [...state.plugins, ...(state.bundledPlugins ?? [])].filter(
+    (entry): entry is BuiltinPluginListItem => !REMOVED_BUILTIN_PLUGIN_IDS.has(entry.id),
+  );
 }

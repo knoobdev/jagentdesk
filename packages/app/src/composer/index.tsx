@@ -8,7 +8,6 @@ import {
   useSessionStore,
 } from "@/stores/session-store";
 import { type ComposerKeyPressEvent } from "@/composer/input/input";
-import { BuiltinPluginGate } from "@/plugins/builtin/gate";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
   View,

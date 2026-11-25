@@ -51,8 +51,6 @@ const OPTIONAL_ENGLISH_FALLBACK_PREFIXES = [
   "ssh.",
   "builtinPlugins.",
   "bots.",
-  // Agent activity graph (spec 31): English and Vietnamese ship first; other locales fall back.
-  "activityGraph.",
 ];
 function isOptionalEnglishFallbackKey(key: string): boolean {
   return OPTIONAL_ENGLISH_FALLBACK_PREFIXES.some((prefix) => key.startsWith(prefix));

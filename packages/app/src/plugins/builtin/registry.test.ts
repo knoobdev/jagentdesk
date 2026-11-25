@@ -7,7 +7,7 @@ const host = (enabled: boolean): DaemonServerInfo => ({
   serverId: "host",
   hostname: null,
   version: "0.9.59",
-  features: { builtinPlugins: true, docker: enabled, figma: enabled, bots: enabled },
+  features: { builtinPlugins: true, docker: enabled, bots: enabled },
 });
 describe("built-in app registry", () => {
   it("gates live host state and keeps old hosts compatible in one boundary", () => {

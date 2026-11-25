@@ -1,7 +1,7 @@
 /**
  * The drawer rows predate the grid and their `sidebar-*` testIDs are load-bearing for the
  * mobile e2e suites, so tiles keep those IDs instead of the rail's `rail-*` ones. Keys that
- * did not exist when the grid landed (Figma, later sections) fall back to the rail testID.
+ * did not exist when the grid landed (later sections) fall back to the rail testID.
  */
 const LEGACY_ROW_TEST_IDS: Readonly<Record<string, string>> = {
   sessions: "sidebar-sessions",

@@ -3,7 +3,6 @@ import { builtinPluginStrings } from "./builtin-plugins";
 import { botsStrings } from "./bots";
 import { type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
-import { activityGraphStrings } from "./activity-graph";
 
 export const ar: TranslationResources = {
   bots: botsStrings,
@@ -3287,7 +3286,6 @@ export const ar: TranslationResources = {
         "\u062A\u062D\u0642\u0642 \u0645\u0646 \u0627\u062A\u0635\u0627\u0644\u0643 \u0648\u062D\u0627\u0648\u0644 \u0645\u0631\u0629 \u0623\u062E\u0631\u0649.",
     },
   },
-  activityGraph: activityGraphStrings,
   providerUsage: {
     checkUsage: "التحقق من الاستخدام",
     checkUsageHint: "ينطبق على {{host}} على جميع الأجهزة",

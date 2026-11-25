@@ -208,12 +208,6 @@ import type { HostAdd, HostUpdate, HostDirectory } from "@jagentdesk/protocol/ho
 import { messageTooLargeError } from "./daemon-client-transport-utils.js";
 import { MAX_WEBSOCKET_MESSAGE_BYTES } from "@jagentdesk/protocol/websocket-message-limit";
 import {
-  type ActivityGraphChangedMessage,
-  type ActivityGraphGetResponsePayload,
-  type ActivityGraphStatusMessage,
-  type ActivityGraphView,
-} from "@jagentdesk/protocol/agent-activity-graph";
-import {
   type HostCapabilities,
   type ToolInstallPlan,
 } from "@jagentdesk/protocol/host-capabilities";
@@ -329,13 +323,6 @@ import {
   type JiraResponseFor,
   type JiraResponseTypeFor,
 } from "@jagentdesk/protocol/jira/rpc-schemas";
-import {
-  type FigmaPush,
-  type FigmaRequestParams,
-  type FigmaRequestType,
-  type FigmaResponseFor,
-  type FigmaResponseTypeFor,
-} from "@jagentdesk/protocol/figma/rpc-schemas";
 import { validateWSOutboundMessage } from "@jagentdesk/protocol/validation/ws-outbound";
 import {
   type AgentPermissionRequest,
@@ -10246,36 +10233,6 @@ export class DaemonClient {
     });
   }
 
-  // ── Figma (spec 32) ──
-  // One typed entry point for the figma.* RPCs: `figmaRequest("figma.file.outline.request", {...})`
-  // resolves with the response payload; a Figma-side failure is `payload.error`, not a throw.
-
-  async figmaRequest<T extends FigmaRequestType>(
-    type: T,
-    params: FigmaRequestParams<T>,
-    options: { timeoutMs?: number } = {},
-  ): Promise<FigmaResponseFor<T>["payload"]> {
-    const responseType = type.replace(/\.request$/, ".response") as FigmaResponseTypeFor<T>;
-    return this.sendCorrelatedSessionRequest<
-      FigmaResponseTypeFor<T>,
-      FigmaResponseFor<T>["payload"]
-    >({
-      message: { type, ...params },
-      responseType,
-      timeout: options.timeoutMs,
-    });
-  }
-
-  /** figma.file.changed / figma.link.changed / figma.pending.changed / figma.oauth.delegation. */
-  onFigmaPush<T extends FigmaPush["type"]>(
-    type: T,
-    handler: (message: Extract<FigmaPush, { type: T }>) => void,
-  ): () => void {
-    return this.subscribeRawMessages((message) => {
-      if (message.type === type) handler(message as Extract<FigmaPush, { type: T }>);
-    });
-  }
-
   /** Raw pushes for SSH modules (`ssh.transfer.progress`, `ssh.forward.state`, …). */
   onSshModulePush(type: string, handler: (message: unknown) => void): () => void {
     // Raw session messages: `on(handler)` only sees mapped daemon events, not module pushes.
@@ -12186,80 +12143,6 @@ export class DaemonClient {
     return this.on("session.share.stream", (message) => handler(message.payload.share));
   }
 
-  // Agent activity graph (spec 31.5, ADR-0031).
-  async activityGraphGet(
-    input: { agentId: string; view: ActivityGraphView; turnIndex?: number },
-    requestId?: string,
-  ): Promise<ActivityGraphGetResponsePayload> {
-    const resolved = this.createRequestId(requestId);
-    const message = SessionInboundMessageSchema.parse({
-      type: "agent.activity_graph.get.request",
-      requestId: resolved,
-      agentId: input.agentId,
-      view: input.view,
-      ...(input.turnIndex !== undefined ? { turnIndex: input.turnIndex } : {}),
-    });
-    return this.sendRequest({
-      requestId: resolved,
-      message,
-      options: { skipQueue: true },
-      select: (msg) =>
-        msg.type === "agent.activity_graph.get.response" && msg.payload.requestId === resolved
-          ? msg.payload
-          : null,
-    });
-  }
-
-  async activityGraphSubscribe(
-    input: { agentId: string; view: ActivityGraphView },
-    requestId?: string,
-  ): Promise<string | null> {
-    const resolved = this.createRequestId(requestId);
-    const message = SessionInboundMessageSchema.parse({
-      type: "agent.activity_graph.subscribe.request",
-      requestId: resolved,
-      agentId: input.agentId,
-      view: input.view,
-    });
-    const payload = await this.sendRequest({
-      requestId: resolved,
-      message,
-      options: { skipQueue: true },
-      select: (msg) =>
-        msg.type === "agent.activity_graph.subscribe.response" && msg.payload.requestId === resolved
-          ? msg.payload
-          : null,
-    });
-    return payload.subscriptionId;
-  }
-
-  async activityGraphUnsubscribe(subscriptionId: string, requestId?: string): Promise<void> {
-    const resolved = this.createRequestId(requestId);
-    const message = SessionInboundMessageSchema.parse({
-      type: "agent.activity_graph.unsubscribe.request",
-      requestId: resolved,
-      subscriptionId,
-    });
-    await this.sendRequest({
-      requestId: resolved,
-      message,
-      options: { skipQueue: true },
-      select: (msg) =>
-        msg.type === "agent.activity_graph.unsubscribe.response" &&
-        msg.payload.requestId === resolved
-          ? msg.payload
-          : null,
-    });
-  }
-
-  onActivityGraphChanged(handler: (payload: ActivityGraphChangedMessage["payload"]) => void) {
-    return this.on("agent.activity_graph.changed", (message) => handler(message.payload));
-  }
-
-  onActivityGraphStatus(handler: (payload: ActivityGraphStatusMessage["payload"]) => void) {
-    return this.on("agent.activity_graph.status", (message) => handler(message.payload));
-  }
-
   private async sessionShareRequest(
     requestId: string,
     message: SessionInboundMessage,
@@ -12360,7 +12243,6 @@ export class DaemonClient {
             [CLIENT_CAPS.providerSubagents]: true,
             [CLIENT_CAPS.projectedSubagentTimeline]: true,
             [CLIENT_CAPS.projectUpdates]: true,
-            [CLIENT_CAPS.activityGraph]: true,
             [CLIENT_CAPS.binaryScreenFrames]: true,
             ...this.config.capabilities,
           },

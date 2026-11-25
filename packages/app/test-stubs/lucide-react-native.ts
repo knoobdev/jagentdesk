@@ -45,7 +45,6 @@ export const Eye = StubIcon;
 export const EyeOff = StubIcon;
 export const File = StubIcon;
 export const FileText = StubIcon;
-export const Figma = StubIcon;
 export const Folder = StubIcon;
 export const FolderPlus = StubIcon;
 export const FolderTree = StubIcon;

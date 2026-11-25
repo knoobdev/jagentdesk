@@ -7,11 +7,7 @@ export {
 export { useWorkspaceDirectory, useWorkspaceKeys } from "@/stores/session-store-hooks";
 export { getDesktopHost } from "@/desktop/host";
 export { useIsCompactFormFactor } from "@/constants/layout";
-export {
-  useHostRuntimeClient,
-  useHostRuntimeIsConnected,
-  useHosts,
-} from "@/runtime/host-runtime";
+export { useHostRuntimeClient, useHostRuntimeIsConnected, useHosts } from "@/runtime/host-runtime";
 export { Skeleton, useSkeletonPulse } from "@/components/ui/skeleton";
 export { TerminalPane } from "@/components/terminal-pane";
 export { withSshDocker, type SshDockerTarget } from "@/ssh/ui/ssh-docker-client";
@@ -27,19 +23,13 @@ export type {
   BuiltinToolCallRenderer,
   BuiltinAgentProps,
   BuiltinComposerDockProps,
-  BuiltinSidePanelProps,
   BuiltinUserMessageBodyProps,
   BuiltinTurnPreparation,
 } from "./host";
 
 // Packages installed only in packages/app resolve for features through the host API.
 export * as Clipboard from "expo-clipboard";
-export {
-  router,
-  useGlobalSearchParams,
-  useLocalSearchParams,
-  type Href,
-} from "expo-router";
+export { router, useGlobalSearchParams, useLocalSearchParams, type Href } from "expo-router";
 export { useIsFocused } from "expo-router/react-navigation";
 export { Gesture, GestureDetector } from "react-native-gesture-handler";
 export { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -223,11 +213,7 @@ export {
 // forge-hub
 export { MarkdownRenderer } from "@/components/markdown/renderer";
 export { syntaxTokenStyleFor } from "@/styles/syntax-token-styles";
-export {
-  type AnsiLine,
-  parseAnsiLog,
-  stripAnsi,
-} from "@/utils/ansi-log";
+export { type AnsiLine, parseAnsiLog, stripAnsi } from "@/utils/ansi-log";
 export { highlightDiffLines } from "@/utils/diff-highlight";
 export { tokenizeToLines } from "@/utils/highlight-cache";
 export {
@@ -250,22 +236,13 @@ export {
   PROXY_CHAT_MIN_WIDTH,
   useProxyChatStore,
 } from "@/stores/proxy-chat-store";
-export {
-  bytesToUtf8,
-  decodeBase64,
-  utf8ToBase64,
-} from "@/utils/base64-bytes";
+export { bytesToUtf8, decodeBase64, utf8ToBase64 } from "@/utils/base64-bytes";
 export { PROXY_AGENT_LABEL } from "@/utils/dock-agents";
-
 
 // Packages installed only in packages/app resolve through here.
 
 // Shared app UI and data hooks used by feature screens.
-export {
-  Combobox,
-  ComboboxItem,
-  type ComboboxOption,
-} from "@/components/ui/combobox";
+export { Combobox, ComboboxItem, type ComboboxOption } from "@/components/ui/combobox";
 export { AgentControlTrigger } from "@/composer/agent-controls/control";
 export { useFetchQueries, useReplicaQuery } from "@/data/query";
 export { useDaemonConfig } from "@/hooks/use-daemon-config";
@@ -273,22 +250,18 @@ export { useHostRouteServerId } from "@/navigation/host-route-context";
 export { type StreamItem } from "@/types/stream";
 
 export { ExternalLink } from "@/components/ui/external-link";
-export {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+export { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 export { buildSettingsHostSectionRoute } from "@/utils/host-routes";
 
 // Spec mode and autonomous mode read each other's per-agent state.
 export { useAutorunState, useSpecModeState } from "@/hooks/use-agent-mode-state";
 export { specModeBubbleText } from "@/components/spec-mode-bubble-text";
-// The activity graph frame shares the stream's node-selection contract and HTML navigation rules.
-export { acceptSelectMessage } from "@/agent-stream/activity-node-action";
-export { htmlPreviewNavigationKind } from "@/file-pane/html-preview-navigation";
 export { formatTokenCount } from "@/components/context-window-meter.utils";
 export { usageHistoryQueryKey, type UsageHistory } from "@/data/usage-history-query";
-export { useGumloopDesktopShell, useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+export {
+  useGumloopDesktopShell,
+  useIsGumloopTheme,
+} from "@/components/gumloop-shell/use-gumloop-chrome";
 
 // Fingerprint profile patches are shared with the desktop browser pane's profile sync.
 export {
@@ -299,5 +272,3 @@ export {
   selectProfilePatch,
   upsertProfilePatch,
 } from "@/screens/settings/browser-fingerprint-config";
-
-

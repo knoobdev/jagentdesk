@@ -224,8 +224,6 @@ import {
 } from "./session/checkout/git-metadata-generator.js";
 import { ChatScheduleLoopSession } from "./session/chat/chat-schedule-loop-session.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
-import { FigmaSession, isFigmaRequest } from "./session/figma/figma-session.js";
-import { type FigmaService } from "./figma/service.js";
 import { SshService } from "./ssh/ssh-service.js";
 import { DatabaseRegistry } from "./database/database-registry.js";
 import { ProviderCatalogSession } from "./session/provider/provider-catalog-session.js";
@@ -611,8 +609,6 @@ export interface SessionOptions {
 
   scheduleService: ScheduleService;
 
-  // Agent activity graph (spec 31, ADR-0031); shared daemon-wide service.
-
   loopService: LoopService;
 
   hostCapabilities?: HostCapabilityService | null;
@@ -630,9 +626,6 @@ export interface SessionOptions {
   customProvidersService?: CustomProviderService | null;
 
   botsService?: BotsService | null;
-
-  // Daemon-wide Figma service (spec 32); absent in tests that do not exercise Figma.
-  figmaService?: FigmaService | null;
 
   checkoutDiffManager: CheckoutDiffManager;
 
@@ -1151,8 +1144,6 @@ export class Session {
 
   private botsSession: BotsSession | null = null;
 
-  private figmaSession: FigmaSession | null = null;
-
   private sshService!: SshService;
 
   private customProvidersService: CustomProviderService | null = null;
@@ -1428,7 +1419,6 @@ export class Session {
     this.initClusterSession(options);
     this.initDatabaseSession(options);
     this.initSshSession(options);
-    this.figmaSession = this.createFigmaSession(options.figmaService);
     this.usageSession = new UsageSession({
       isEnabled: () => this.daemonConfigStore?.get().usage?.enabled !== false,
       emit: (message) => this.emit(message),
@@ -2969,7 +2959,6 @@ export class Session {
       () => this.dispatchTerminalMessage(msg, source),
       () => this.dispatchChatScheduleLoopMessage(msg),
       () => this.botsSession?.dispatch(msg),
-      () => this.dispatchFigmaMessage(msg),
       () =>
         this.builtinSession.dispatch(msg, {
           supports: (capability) =>
@@ -3986,24 +3975,6 @@ export class Session {
       default:
         return undefined;
     }
-  }
-
-  // oxlint-disable-next-line complexity
-  private createFigmaSession(service: FigmaService | null | undefined): FigmaSession | null {
-    if (!service) return null;
-    return new FigmaSession({
-      service,
-      emit: (msg) => this.emit(msg),
-      logger: this.sessionLogger,
-      canRunLoopback: () => this.supports(CLIENT_CAPS.figmaOauthLoopback),
-    });
-  }
-
-  // Figma (spec 32.9): the allowlist is FIGMA_REQUEST_TYPES, the same list FigmaService's handler
-  // map is type-checked against, so every listed type has a handler.
-  private dispatchFigmaMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    if (!this.figmaSession || !isFigmaRequest(msg)) return undefined;
-    return this.figmaSession.handle(msg);
   }
 
   private dispatchMigrationMessage(msg: SessionInboundMessage): Promise<void> | undefined {
@@ -9624,7 +9595,6 @@ export class Session {
     await this.voiceSession.cleanup();
 
     this.botsSession?.dispose();
-    this.figmaSession?.dispose();
     await this.builtinSession.dispose();
     this.terminalController.dispose();
     for (const controller of this.terminalStreamControllers.values()) controller.dispose();

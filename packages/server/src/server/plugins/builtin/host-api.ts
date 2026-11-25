@@ -1,8 +1,4 @@
-export {
-  DockerService,
-  parseStatsLine,
-  type DockerSnapshot,
-} from "../../docker/docker-service.js";
+export { DockerService, parseStatsLine, type DockerSnapshot } from "../../docker/docker-service.js";
 export { DockerStreams } from "../../docker/docker-streams.js";
 export {
   routeDockerMessage,
@@ -117,15 +113,9 @@ export { vendorDirectoryCandidates } from "../../vendor-directory.js";
 // workbench
 export { resolveJAgentDeskHome } from "../../jagentdesk-home.js";
 
-
-
 export { ensureValidJson } from "../../json-utils.js";
 export { sendPromptToAgent } from "../../agent/agent-prompt.js";
-export type {
-  AgentManager,
-  AgentManagerEvent,
-  ManagedAgent,
-} from "../../agent/agent-manager.js";
+export type { AgentManager, AgentManagerEvent, ManagedAgent } from "../../agent/agent-manager.js";
 export type { HostCapabilityService } from "../../host-capabilities/service.js";
 
 // Shared by skills, spec mode, and host tools.
@@ -148,27 +138,8 @@ export {
   type SkillDirLabel,
 } from "../../agent/native-skill-paths.js";
 
-// Spec mode provides the plan; the activity graph reads it.
-export {
-  NO_SPEC_PLAN_SOURCE,
-  parseSpecKitTasks,
-  type SpecPlan,
-  type SpecPlanSource,
-  type SpecPlanStatus,
-} from "../../agent/spec-plan.js";
-
-// The activity graph reads agent timelines and renders with the vendored archify (core).
-export type {
-  AgentPermissionRequest,
-  AgentTaskItem,
-  AgentUsage,
-  AgentTimelineItem,
-  ToolCallTimelineItem,
-} from "../../agent/agent-sdk-types.js";
-export type { AgentTimelineRow } from "../../agent/agent-timeline-store-types.js";
-export type { ProviderSubagentDescriptor } from "../../agent/provider-subagents/store.js";
-export { ensureUnarchivedAgentLoaded } from "../../agent/agent-loading.js";
-export { runArchifyRenderer, type ArchifyDiagramError } from "../../archify/archify-renderer.js";
+// Autorun reads turn usage; Session sharing reads agent timelines.
+export type { AgentTimelineItem, AgentUsage } from "../../agent/agent-sdk-types.js";
 
 // Session sharing: core owns guest confinement and the tunnel binary; the feature owns shares.
 export { guestScopesForCapabilities } from "../../authorization/guest-scopes.js";
@@ -180,5 +151,3 @@ export type { BrowserToolsBroker } from "../../browser-tools/broker.js";
 export type { BrowserHostTarget, BrowserToolsResponsePayload } from "../../browser-tools/errors.js";
 export { expandUserPath } from "../../path-utils.js";
 export { JAgentDeskToolInputError } from "../../agent/tools/types.js";
-
-

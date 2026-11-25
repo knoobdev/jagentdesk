@@ -7,7 +7,6 @@ import type { DaemonServerInfo } from "@/stores/session-store";
 import type { ToolCallDetail } from "@jagentdesk/protocol/agent-types";
 import type { StyleProp, TextStyle } from "react-native";
 import type { SpecModeMessage } from "@jagentdesk/protocol/spec-mode";
-import type { ActivityGraphNodeRef } from "@jagentdesk/protocol/agent-activity-graph";
 import { builtinPluginEnabled } from "./registry";
 
 export interface BuiltinClientProps {
@@ -56,17 +55,6 @@ export interface BuiltinAgentProps extends BuiltinClientProps {
 export interface BuiltinComposerDockProps extends BuiltinAgentProps {
   cwd: string;
   onOpenFile: (absolutePath: string) => void;
-}
-export interface BuiltinSidePanelProps extends BuiltinAgentProps {
-  onSelectNode: (nodeId: string, ref: ActivityGraphNodeRef) => void;
-}
-/**
- * A panel beside the agent chat: `panel` renders right of the chat on wide layouts (null while
- * closed), `sheet` renders on compact layouts.
- */
-export interface BuiltinAgentSidePanel {
-  panel: ComponentType<BuiltinSidePanelProps & { containerWidth: number }>;
-  sheet: ComponentType<BuiltinSidePanelProps>;
 }
 /** A user message core parsed as a Spec mode phase command; core keeps copy and rewind text. */
 export interface BuiltinUserMessageBodyProps {
@@ -141,7 +129,6 @@ export interface BuiltinClientHost {
   workspaceHeaderControl(id: string, component: ComponentType<BuiltinClientProps>): void;
   /** A control in the agent chat header row, in plugin order. */
   agentHeaderControl(id: string, component: ComponentType<BuiltinAgentProps>): void;
-  agentSidePanel(id: string, panel: BuiltinAgentSidePanel): void;
   /** Rendered above the agent composer input. */
   agentComposerDock(id: string, component: ComponentType<BuiltinComposerDockProps>): void;
   /**
@@ -176,7 +163,6 @@ export interface BuiltinClientContributions {
   composerDocks: Map<string, ComponentType<BuiltinComposerDockProps>>;
   agentHeader: Map<string, ComponentType<BuiltinAgentProps>>;
   workspaceHeader: Map<string, ComponentType<BuiltinClientProps>>;
-  sidePanels: Map<string, BuiltinAgentSidePanel>;
   userMessageBody: ComponentType<BuiltinUserMessageBodyProps> | null;
   agentSettings: Map<string, { component: ComponentType<BuiltinClientProps>; order: number }>;
 }
@@ -204,7 +190,6 @@ export class BuiltinClientRegistry {
       composerDocks: new Map(),
       agentHeader: new Map(),
       workspaceHeader: new Map(),
-      sidePanels: new Map(),
       userMessageBody: null,
       agentSettings: new Map(),
     };
@@ -237,7 +222,6 @@ export class BuiltinClientRegistry {
       agentComposerDock: (key, component) => add(entry.composerDocks, key, component),
       agentHeaderControl: (key, component) => add(entry.agentHeader, key, component),
       workspaceHeaderControl: (key, component) => add(entry.workspaceHeader, key, component),
-      agentSidePanel: (key, panel) => add(entry.sidePanels, key, panel),
       agentSettingsCard: (key, component, order) =>
         add(entry.agentSettings, key, { component, order }),
       userMessageBody: (component) => {

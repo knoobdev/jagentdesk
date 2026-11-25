@@ -45,7 +45,6 @@ export type SidebarDrillIn =
 
 const DESTINATIONS: Readonly<Record<string, string>> = {
   bots: "Bots",
-  figma: "Figma",
   plugin: "Plugins",
 };
 

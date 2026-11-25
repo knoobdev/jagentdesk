@@ -3,7 +3,6 @@ import { builtinPluginStrings } from "./builtin-plugins";
 import { botsStrings } from "./bots";
 import { type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
-import { activityGraphStrings } from "./activity-graph";
 
 export const ja: TranslationResources = {
   bots: botsStrings,
@@ -3276,7 +3275,6 @@ export const ja: TranslationResources = {
         "\u63A5\u7D9A\u3092\u78BA\u8A8D\u3057\u3066\u3082\u3046\u4E00\u5EA6\u304A\u8A66\u3057\u304F\u3060\u3055\u3044\u3002",
     },
   },
-  activityGraph: activityGraphStrings,
   providerUsage: {
     checkUsage: "使用状況を確認",
     checkUsageHint: "すべてのデバイスで {{host}} に適用",

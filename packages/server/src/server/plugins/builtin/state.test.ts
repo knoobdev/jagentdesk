@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import pino from "pino";
@@ -32,7 +32,7 @@ async function setup(overrides: Record<string, unknown> = {}) {
 }
 
 describe("static built-in plugin registry", () => {
-  it("keeps the 20 feature defaults and adds bundled plugins independently of installed plugins", async () => {
+  it("keeps the 18 feature defaults and adds bundled plugins independently of installed plugins", async () => {
     const { state } = await setup({ pluginsEnabled: false });
     expect(new Set(state.list().map(({ id }) => id))).toEqual(new Set(BUILTIN_PLUGIN_IDS));
     expect(
@@ -42,7 +42,7 @@ describe("static built-in plugin registry", () => {
           ({ id, enabled }) =>
             (STATIC_BUILTIN_PLUGIN_IDS as readonly string[]).includes(id) && enabled,
         ),
-    ).toHaveLength(17);
+    ).toHaveLength(15);
     expect(state.isEnabled("worktree-include")).toBe(true);
     expect(
       state
@@ -80,6 +80,42 @@ describe("static built-in plugin registry", () => {
     const persisted = JSON.parse(await readFile(path.join(home, "config.json"), "utf8"));
     expect(persisted.builtinPlugins["browser-tools"]).toEqual({ enabled: false });
     expect(Object.keys(persisted.builtinPlugins)).toHaveLength(BUILTIN_PLUGIN_MANIFESTS.length);
+  });
+
+  it("loads a config.json that still names the removed Figma and Activity graph built-ins and ignores them (ADR-0055)", async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), "jad-builtin-state-"));
+    homes.push(home);
+    await writeFile(
+      path.join(home, "config.json"),
+      JSON.stringify({
+        version: 1,
+        builtinPlugins: {
+          figma: { enabled: true },
+          "activity-graph": { enabled: false },
+          docker: { enabled: false },
+        },
+      }),
+    );
+    const config = loadConfig(home, { env: { JAGENTDESK_RELAY_ENABLED: "0" } });
+    const state = new BuiltinPluginState(
+      new DaemonConfigStore(
+        home,
+        MutableDaemonConfigSchema.parse({
+          mcp: { injectIntoAgents: true },
+          browserTools: { enabled: false },
+        }),
+      ),
+    );
+    const ids: string[] = state.list().map(({ id }) => id);
+    expect(ids).not.toContain("figma");
+    expect(ids).not.toContain("activity-graph");
+    expect(state.isEnabled("docker")).toBe(false);
+    expect(state.isEnabled("jira")).toBe(true);
+    const flags = state.featureFlags();
+    expect(Object.keys(flags).filter((flag) => /figma|activityGraph/.test(flag))).toEqual([]);
+    expect(config.builtinPlugins?.docker).toEqual({ enabled: false });
+    await state.set("docker", true);
+    expect(state.isEnabled("docker")).toBe(true);
   });
 
   it("logs migration only on the first boot", async () => {
@@ -185,7 +221,6 @@ describe("static built-in plugin registry", () => {
       ["ssh.forward.start.request", "ssh-servers"],
       ["remote_exec.run.request", "remote-tasks"],
       ["providers.custom.save.request", "custom-providers"],
-      ["figma.file.get.request", "figma"],
       ["jira.board.list.request", "jira"],
       ["argocd.app.sync.request", "argocd"],
       ["simulator/list", "devices"],
@@ -197,7 +232,6 @@ describe("static built-in plugin registry", () => {
       ["agent.skills.save_selection.request", "skills"],
       ["agent.spec_mode.enable.request", "spec-mode"],
       ["autorun.start.request", "autorun"],
-      ["agent.activity_graph.get.request", "activity-graph"],
       ["usage.history.get.request", "insights"],
       ["session.share.create.request", "session-share"],
       ["browser.automation.command.request", "browser-tools"],

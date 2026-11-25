@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import { z } from "zod";
 import {
   BUILTIN_PLUGIN_MANIFESTS,
+  BuiltinPluginListResponseSchema,
   STATIC_BUILTIN_PLUGIN_IDS,
   builtinPluginWireState,
   mergeBuiltinPluginWireState,
@@ -26,5 +27,24 @@ it("lets the original client parse its feature list while new clients see the sa
     ...entries
       .filter((entry) => !(STATIC_BUILTIN_PLUGIN_IDS as readonly string[]).includes(entry.id))
       .map((entry) => entry.id),
+  ]);
+});
+
+it("parses an older daemon's list that still names the removed Figma and Activity graph built-ins", () => {
+  const item = (id: string) => ({
+    id,
+    name: id,
+    description: "",
+    enabled: true,
+    defaultEnabled: true,
+    requires: [],
+    available: true,
+  });
+  const response = BuiltinPluginListResponseSchema.parse({
+    type: "plugins.builtin.list.response",
+    payload: { requestId: "r1", plugins: [item("docker"), item("figma"), item("activity-graph")] },
+  });
+  expect(mergeBuiltinPluginWireState(response.payload).map((entry) => entry.id)).toEqual([
+    "docker",
   ]);
 });

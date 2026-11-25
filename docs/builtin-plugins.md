@@ -14,16 +14,15 @@ Docker was the phase 2 pilot. A manifest with `builtinEntrypoints` is migrated; 
 describe phase 1 implementations. Each migrated feature kept some code in core because another
 feature or a core flow shares it:
 
-| Feature          | Stays in core                                                                                          |
-| ---------------- | ------------------------------------------------------------------------------------------------------ |
-| `docker`         | Docker CLI service, log/stats streams, SSH remote Docker                                               |
-| `skills`         | Provider skill directories (`agent/native-skill-paths.ts`), tar extraction, bundled-skill lookup       |
-| `spec-mode`      | Plan contract and tasks.md parser (`agent/spec-plan.ts`), per-agent mode hooks, phase bubble text      |
-| `autorun`        | Nothing beyond the per-agent mode hooks it shares with Spec mode                                       |
-| `activity-graph` | Archify renderer, the stream's node-selection contract (`agent-stream/activity-node-action.ts`)        |
-| `insights`       | The usage-history query key the push router writes                                                     |
-| `session-share`  | Guest scopes, guest socket attach and re-scoping, guest-mode app entry, the cloudflared tunnel manager |
-| `browser-tools`  | The browser broker and its RPCs (basic browser tools), fingerprint profile patches                     |
+| Feature         | Stays in core                                                                                          |
+| --------------- | ------------------------------------------------------------------------------------------------------ |
+| `docker`        | Docker CLI service, log/stats streams, SSH remote Docker                                               |
+| `skills`        | Provider skill directories (`agent/native-skill-paths.ts`), tar extraction, bundled-skill lookup       |
+| `spec-mode`     | Per-agent mode hooks, phase bubble text                                                                |
+| `autorun`       | Nothing beyond the per-agent mode hooks it shares with Spec mode                                       |
+| `insights`      | The usage-history query key the push router writes                                                     |
+| `session-share` | Guest scopes, guest socket attach and re-scoping, guest-mode app entry, the cloudflared tunnel manager |
+| `browser-tools` | The browser broker and its RPCs (basic browser tools), fingerprint profile patches                     |
 
 The bundled provider and usage plugins retain their existing SDK runtime. Do not move those
 implementations while migrating a feature.
@@ -198,7 +197,7 @@ Import `BuiltinClientHost` and shared UI/services from
 `packages/app/src/plugins/builtin/host-api.ts`. Feature-internal imports stay relative. Shared
 UI, theme tokens, terminal rendering, host runtime, and workspace selection stay in core. A UI
 kit that a not-yet-migrated feature also imports moves to a neutral core path, never into the
-feature: Jira's issue primitives live in `components/integration-ui/` because Figma uses them.
+feature.
 UI, theme tokens, terminal rendering, host runtime, and workspace selection stay in core.
 Packages installed only under `packages/app/node_modules` (`expo-clipboard`,
 `react-native-safe-area-context`) do not resolve from `plugins/`; import them from the host API.
@@ -241,7 +240,7 @@ migration, as with agent tools. `hostCapabilities` hides it on hosts that report
 host inside a migrated screen.
 attachment sources, host binders (mounted per host route), agent controls (the composer's
 control row, in plugin order), agent panel accessories, composer docks, a user message body,
-agent and workspace header controls, side panels beside the chat, Settings → Agents cards
+agent and workspace header controls, Settings → Agents cards
 (`order` keeps several features' cards in sequence), and turn preparers. Use the same
 destination metadata for desktop and mobile; `before` keeps a destination at its old rail
 position. A destination drills the sidebar in only when the feature registers a left panel for

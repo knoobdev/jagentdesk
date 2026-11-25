@@ -127,7 +127,7 @@ online for URL verification and event delivery. The manifest URL exists before y
 credentials; connect the token and signing secret before asking Slack to verify the URL.
 The allowed-user list starts empty. Link your account by sending the expiring code in a DM.
 
-Slack credentials use the same encrypted daemon vault as Jira/Figma/SSH. Hook requests end
+Slack credentials use the same encrypted daemon vault as Jira/SSH. Hook requests end
 TLS at Cloudflare, then cross the authenticated relay control socket without Noise encryption.
 Cloudflare can see Slack content while forwarding it; the Worker persists only hook ids and
 never logs request bodies. Ordinary app relay traffic keeps its existing Noise boundary.

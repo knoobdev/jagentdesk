@@ -815,7 +815,6 @@ test("advertises client capabilities in hello", async () => {
     clientType: "cli",
     protocolVersion: 1,
     capabilities: {
-      activity_graph: true,
       agent_active_turn_behaviors: true,
       background_agents: true,
       binary_chunking_v1: true,

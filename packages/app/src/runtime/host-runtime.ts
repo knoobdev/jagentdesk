@@ -583,19 +583,12 @@ function createDefaultDeps(
     typeof getDesktopHost()?.argocd?.ssoLoopback === "function"
       ? { [CLIENT_CAPS.argocdSsoLoopback]: true }
       : undefined;
-  // Spec 32.2: only a desktop that can serve the 8766/figma/callback loopback takes delegated
-  // Figma OAuth sign-ins.
-  const figmaOauthCapabilities =
-    typeof getDesktopHost()?.figma?.oauthLoopback === "function"
-      ? { [CLIENT_CAPS.figmaOauthLoopback]: true }
-      : undefined;
   const appCapabilities = {
     [CLIENT_CAPS.selectiveAgentTimeline]: true,
     // The app renders the Spec mode Phase review bar (spec 28.6).
     [CLIENT_CAPS.specMode]: true,
     ...browserAutomationCapabilities,
     ...argocdSsoCapabilities,
-    ...figmaOauthCapabilities,
   };
 
   return {

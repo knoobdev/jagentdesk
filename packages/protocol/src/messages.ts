@@ -134,16 +134,6 @@ import {
   ScheduleUpdateResponseSchema,
 } from "./schedule/rpc-schemas.js";
 import {
-  ActivityGraphGetRequestSchema,
-  ActivityGraphGetResponseSchema,
-  ActivityGraphSubscribeRequestSchema,
-  ActivityGraphSubscribeResponseSchema,
-  ActivityGraphUnsubscribeRequestSchema,
-  ActivityGraphUnsubscribeResponseSchema,
-  ActivityGraphChangedMessageSchema,
-  ActivityGraphStatusMessageSchema,
-} from "./agent-activity-graph.js";
-import {
   SpeechLocalModelsDeleteRequestSchema,
   SpeechLocalModelsDeleteResponseSchema,
   SpeechLocalModelsDownloadRequestSchema,
@@ -262,11 +252,6 @@ import {
   SideloadPushSchemas,
 } from "./sideload/rpc-schemas.js";
 import { JiraRequestSchemas, JiraResponseSchemas, JiraPushSchemas } from "./jira/rpc-schemas.js";
-import {
-  FigmaRequestSchemas,
-  FigmaResponseSchemas,
-  FigmaPushSchemas,
-} from "./figma/rpc-schemas.js";
 import { SftpInboundSchemas, SftpOutboundSchemas } from "./ssh/sftp-schemas.js";
 import { ForwardingInboundSchemas, ForwardingOutboundSchemas } from "./ssh/forwarding-schemas.js";
 import { SnippetsInboundSchemas, SnippetsOutboundSchemas } from "./ssh/snippets-schemas.js";
@@ -4659,7 +4644,6 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ...ArgoCdRequestSchemas,
   ...BotsRequestSchemas,
   ...JiraRequestSchemas,
-  ...FigmaRequestSchemas,
   ...SshRequestSchemas,
   ...RemoteExecRequestSchemas,
   ...CustomProvidersRequestSchemas,
@@ -4934,9 +4918,6 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ScheduleDeleteRequestSchema,
   ScheduleRunOnceRequestSchema,
   ScheduleUpdateRequestSchema,
-  ActivityGraphGetRequestSchema,
-  ActivityGraphSubscribeRequestSchema,
-  ActivityGraphUnsubscribeRequestSchema,
   LoopRunRequestSchema,
   LoopListRequestSchema,
   LoopInspectRequestSchema,
@@ -5374,9 +5355,6 @@ export const ServerInfoStatusPayloadSchema = z
         autorun: z.boolean().optional(), // Autonomous run (spec §20 / ADR-0017); default OFF, opt-in per daemon
         autorunApproval: z.boolean().optional(), // Per-action approval mode for autorun (§20.7.3)
         sessionSharing: z.boolean().optional(), // Session sharing via Cloudflare tunnel (spec §21 / ADR-0018); default OFF
-        // Agent activity graph (spec 31 / ADR-0031): agent.activity_graph.* RPCs and pushes.
-        // COMPAT(activityGraph): added after v0.9.47; the app hides the toggle without it.
-        activityGraph: z.boolean().optional(),
         // SSH servers (spec 25 / ADR-0027, story S-20 S1). The client gates the
         // Servers surface on it so an old daemon never receives ssh.* RPCs.
         sshServers: z.boolean().optional(),
@@ -5392,32 +5370,6 @@ export const ServerInfoStatusPayloadSchema = z
         // Jira (spec 29 / ADR-0034): the client capability `jira`; gates the Jira surface,
         // the jira.* RPCs and the `jira_issue` attachment.
         jira: z.boolean().optional(),
-        // Figma (spec 32 / ADR-0035): figma.* RPCs and the Figma section.
-        figma: z.boolean().optional(),
-        // Scoped prototype playback (spec 32 / ADR-0037): figma.file.playback.request. Clients
-        // send that RPC only when this flag is present; older daemons never advertised it.
-        figmaPlayback: z.boolean().optional(),
-        // Section outline + shallow node reads (spec 32.5.1 / ADR-0039): summary parentId/
-        // childrenLoaded and figma.file.nodes.request depth=1. The new viewer gates once; an old
-        // daemon strips depth and returns the full subtree, so it must not receive the option.
-        figmaNodeDepth: z.boolean().optional(),
-        figmaPagedOutline: z.boolean().optional(),
-        // Provider-independent writes over the Codex-backed Remote MCP connector
-        // (spec 32.7 / ADR-0040): the figma.remote.* RPCs. The client gates the write surface
-        // once; old hosts ask the user to update instead of receiving RPCs they cannot answer.
-        figmaRemoteWrites: z.boolean().optional(),
-        // Region-geometry comments (spec 32.5.4 / ADR-0041): `FigmaComment.region` on reads and
-        // the post-request `region`. Clients send `region` only when this flag is present; an old
-        // host strips the unknown field, so sending anyway would pass a point comment off as a
-        // successful region create.
-        figmaCommentRegions: z.boolean().optional(),
-        // Render fidelity (spec 32.5.1 / ADR-0042): the render `svg` format and
-        // `useAbsoluteBounds`, answered version-pinned over REST only. Clients send the new
-        // payloads only when present; an old host's plugin export would answer them with
-        // wrong-meaning bytes, so PNG-crop stays the fallback there and is not new-quality.
-        figmaRenderFidelity: z.boolean().optional(),
-        figmaTextOutlines: z.boolean().optional(),
-        figmaCachedRender: z.boolean().optional(),
         // Relay second path (spec 35 / ADR-0048): pairing offers carry `relay`,
         // server_info carries the relay descriptor, and the app shows the Relay badge.
         relay: z.boolean().optional(),
@@ -9190,8 +9142,6 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ...BotsPushSchemas,
   ...JiraResponseSchemas,
   ...JiraPushSchemas,
-  ...FigmaResponseSchemas,
-  ...FigmaPushSchemas,
   ...SshResponseSchemas,
   ...SshPushSchemas,
   ...RemoteExecResponseSchemas,
@@ -9427,11 +9377,6 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   SessionShareSetOptionsResponseSchema,
   SessionShareListResponseSchema,
   SessionShareStreamSchema,
-  ActivityGraphGetResponseSchema,
-  ActivityGraphSubscribeResponseSchema,
-  ActivityGraphUnsubscribeResponseSchema,
-  ActivityGraphChangedMessageSchema,
-  ActivityGraphStatusMessageSchema,
   ForgeChangeRequestCreateResponseSchema,
   ForgeChangeRequestCloseResponseSchema,
   ForgeReleaseCreateResponseSchema,

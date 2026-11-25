@@ -1,11 +1,9 @@
-import { BuiltinPluginGate } from "@/plugins/builtin/gate";
 import { builtinPluginScreenLayout } from "@/plugins/builtin/route-boundary";
 import { Redirect, Stack, useLocalSearchParams } from "expo-router";
 import { BuiltinHostMounts } from "@/plugins/builtin/surfaces";
 import { useHostRuntimeBootstrapState } from "@/app/_layout";
 import { HostRouteProvider } from "@/navigation/host-route-context";
 import { resolveStartupRoute } from "@/navigation/host-runtime-bootstrap";
-import { FigmaOAuthDelegationBinder } from "@/figma/connect/oauth-delegation-binder";
 import { ThemedStack } from "@/navigation/themed-stack";
 import { useHostRegistryStatus, useHosts } from "@/runtime/host-runtime";
 
@@ -58,9 +56,6 @@ function KnownHostRoute() {
   return (
     <HostRouteProvider serverId={routeServerId}>
       <BuiltinHostMounts serverId={routeServerId} />
-      <BuiltinPluginGate serverId={routeServerId} id="figma">
-        <FigmaOAuthDelegationBinder serverId={routeServerId} />
-      </BuiltinPluginGate>
       {stack}
     </HostRouteProvider>
   );

@@ -39,7 +39,6 @@ import { type ClusterRegistry } from "./cluster/cluster-registry.js";
 import { type DatabaseRegistry } from "./database/database-registry.js";
 import { SshService } from "./ssh/ssh-service.js";
 import { type CustomProviderService } from "./custom-providers/types.js";
-import { type FigmaService } from "./figma/service.js";
 import { type ScheduleService } from "./schedule/service.js";
 import { type CreationSnapshot } from "@jagentdesk/protocol/messages";
 import { type CheckoutDiffManager, type CheckoutDiffMetrics } from "./checkout-diff-manager.js";
@@ -726,11 +725,7 @@ export class VoiceAssistantWebSocketServer {
 
   private readonly scheduleService: ScheduleService;
 
-  // Agent activity graph (spec 31, ADR-0031): one daemon-wide service shared by every session.
-
   private botsService: BotsService | null = null;
-
-  private figmaService: FigmaService | null = null;
 
   // Remote execution (spec 33 / ADR-0044), injected post-construction like Jira.
 
@@ -2209,11 +2204,7 @@ export class VoiceAssistantWebSocketServer {
     this.botsService = service;
   }
 
-  public setFigmaService(service: FigmaService | null): void {
-    this.figmaService = service;
-  }
-
-  /** Custom API providers (spec 34): injected post-construction, like Jira/Figma. */
+  /** Custom API providers (spec 34): injected post-construction, like Jira. */
   public setCustomProvidersService(service: CustomProviderService | null): void {
     this.customProvidersService = service;
   }
@@ -2264,7 +2255,6 @@ export class VoiceAssistantWebSocketServer {
       databaseRegistry: this.databaseRegistry,
       sshService: this.sshService,
       botsService: this.botsService,
-      figmaService: this.figmaService,
       customProvidersService: this.customProvidersService,
       workspaceBaseBranch: this.workspaceBaseBranch,
       scheduleService: this.scheduleService,
@@ -2836,32 +2826,10 @@ export class VoiceAssistantWebSocketServer {
         sideload: true,
         sideloadHostBrowse: true,
         ...this.builtinFeatureFlags(),
-        // Agent activity graph (spec 31 / ADR-0031). COMPAT(activityGraph): added after v0.9.47.
-        activityGraph: true,
         // Argo CD (spec 30 / ADR-0034); the built-in plugin state below gates it per host.
         argocd: true,
         // Jira (spec 29 / ADR-0034): the built-in plugin owns the service; its state masks this.
         jira: true,
-        // Figma (spec 32 / ADR-0035). `figmaNodeDepth` (ADR-0039) reports the section-aware
-        // outline and the depth-1 metadata read together; viewers gate once on it.
-        // `figmaRemoteWrites` (ADR-0040) gates the figma.remote.* write surface.
-        // `figmaCommentRegions` (ADR-0041) gates the region-geometry comment DTO fields; clients
-        // send a post `region` only when present.
-        // `figmaRenderFidelity` (ADR-0042) gates the render `svg` text-outline format and
-        // `useAbsoluteBounds`, answered version-pinned over REST only.
-        ...(this.figmaService
-          ? {
-              figma: true,
-              figmaPlayback: true,
-              figmaNodeDepth: true,
-              figmaPagedOutline: true,
-              figmaRemoteWrites: true,
-              figmaCommentRegions: true,
-              figmaRenderFidelity: true,
-              figmaTextOutlines: true,
-              figmaCachedRender: true,
-            }
-          : {}),
         // Advertise the plugin management surface only when a PluginService is
         // wired; without it the plugin.* RPCs return empty/disabled results.
         ...(this.pluginRuntime

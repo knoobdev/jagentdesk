@@ -1,14 +1,12 @@
 import { useBuiltinDestinations } from "@/plugins/builtin/surfaces";
 import { orderAppNavItems } from "@/components/sidebar/nav-order";
 import { useOpenSidebarUsage } from "@/usage/sidebar-item";
-import { useBuiltinPluginEnabled } from "@/plugins/builtin/hooks";
 import { router, usePathname, type Href } from "expo-router";
 import { useCallback, useMemo } from "react";
 import {
   Gauge,
   Bot,
   CalendarClock,
-  Figma,
   History,
   Home,
   Store,
@@ -19,11 +17,9 @@ import { useHostFeature } from "@/runtime/host-features";
 import { useHosts } from "@/runtime/host-runtime";
 import { canCreateWorktreeForProjectKind } from "@/projects/host-projects";
 import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
-import { useSessionStore } from "@/stores/session-store";
 
 import { useWorkspace } from "@/stores/session-store-hooks";
 import {
-  buildFigmaRoute,
   buildMarketplaceRoute,
   buildNewWorkspaceRoute,
   buildOpenProjectRoute,
@@ -35,8 +31,6 @@ import {
 export interface AppNavTargets {
   botsRoute: Href | null;
   marketplaceRoute: Href | null;
-  /** Spec 32: Figma section, when the daemon advertises `figma`. */
-  figmaRoute: Href | null;
 }
 
 export function useAppNavTargets(): AppNavTargets {
@@ -48,9 +42,6 @@ export function useAppNavTargets(): AppNavTargets {
     ? decodeURIComponent(routeServerId)
     : (selection?.serverId ?? hosts[0]?.serverId ?? "");
   const supportsBots = useHostFeature(firstServerId, "bots");
-  const supportsFigma = useSessionStore(
-    (state) => state.sessions[firstServerId]?.serverInfo?.features?.figma === true,
-  );
   return useMemo(() => {
     const perHost = (build: (serverId: string) => string): Href | null =>
       firstServerId ? (build(firstServerId) as Href) : null;
@@ -60,13 +51,8 @@ export function useAppNavTargets(): AppNavTargets {
         : null,
       // Gated at the route: the entry disappears with the daemon feature flag.
       marketplaceRoute: perHost(buildMarketplaceRoute),
-      figmaRoute: supportsFigma ? perHost(buildFigmaRoute) : null,
     };
-  }, [
-    supportsBots,
-    supportsFigma,
-    firstServerId,
-  ]);
+  }, [supportsBots, firstServerId]);
 }
 
 interface AppNavItemBase {
@@ -142,7 +128,6 @@ export function useAppNavItems(): AppNavItem[] {
         isActive: false,
         testID: "rail-usage",
       },
-      navItem("figma", Figma, "Figma", "Figma", targets.figmaRoute, pathname, "/figma"),
     ];
     return orderAppNavItems(items.filter((item): item is AppNavItem => item !== null));
   }, [openUsage, pathname, t, targets, builtinDestinations]);

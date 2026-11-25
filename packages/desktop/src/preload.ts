@@ -79,13 +79,6 @@ contextBridge.exposeInMainWorld("jagentdeskDesktop", {
     ssoLoopback: (input: { authUrl: string; state: string; timeoutMs: number }) =>
       ipcRenderer.invoke("jagentdesk:argocd:sso-loopback", input),
   },
-  // Figma OAuth (spec 32.2): loopback 127.0.0.1:8766/figma/callback + system browser.
-  figma: {
-    // Browse files (spec 32.1, ADR-0038): sandboxed Figma Files guest; no URL/partition input.
-    pickFile: () => ipcRenderer.invoke("jagentdesk:invoke", "figma_pick_file"),
-    oauthLoopback: (input: { authorizeUrl: string; redirectUri: string; timeoutMs?: number }) =>
-      ipcRenderer.invoke("jagentdesk:invoke", "figma_oauth_loopback", input),
-  },
   dialog: {
     ask: (message: string, options?: Record<string, unknown>) =>
       ipcRenderer.invoke("jagentdesk:dialog:ask", message, options),

@@ -3,7 +3,6 @@ import { builtinPluginStrings } from "./builtin-plugins";
 import { botsStrings } from "./bots";
 import { type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
-import { activityGraphStrings } from "./activity-graph";
 
 export const zhCN: TranslationResources = {
   bots: botsStrings,
@@ -3206,7 +3205,6 @@ export const zhCN: TranslationResources = {
       description: "\u8BF7\u68C0\u67E5\u7F51\u7EDC\u8FDE\u63A5\u540E\u91CD\u8BD5\u3002",
     },
   },
-  activityGraph: activityGraphStrings,
   providerUsage: {
     checkUsage: "检查用量",
     checkUsageHint: "在所有设备上应用于 {{host}}",

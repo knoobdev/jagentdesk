@@ -51,8 +51,6 @@ with a few deliberate boundaries:
   tools.
 - **Spec mode** _(new)_ — a composer toggle that runs GitHub Spec Kit's spec-driven workflow phase by
   phase, with your approval between phases.
-- **Activity graph** _(new)_ — an archify canvas beside the chat showing what the agent did, is doing
-  and still has to do, live.
 - **Databases** _(new)_ — a full database IDE built into the app: seven engines (PostgreSQL,
   MySQL, SQLite, SQL Server, Oracle, MongoDB, ClickHouse), multiple databases per connection, an
   object explorer with counts, a data grid with inline editing, a SQL console with autocomplete and
@@ -147,38 +145,8 @@ with a few deliberate boundaries:
 
 ![Edit server → Remote tasks: route through JAgentDesk Tailscale, use for remote tasks, work folder and a passing Check](docs/media/remote-tasks-server.png)
 
-### Figma: account updates, in-app file browsing and page loading (v0.9.56)
+### iPhone touch fix (v0.9.54)
 
-- Sign-in and Remove update the account list immediately; OAuth setup no longer shows a separate
-  editing connection. Basic sign-in scopes avoid optional-catalog permission failures.
-- Browse files already tracked by the daemon inside JAgentDesk, using the existing REST connection.
-  The Figma website login is no longer the file browser; complete folder discovery remains unfinished.
-- Fit a Section and load its visible screens together; load outlines per page, share versioned snapshots
-  and recover failed reads through Retry. Browse prototype flows on another page without switching
-  the current playback until a flow is chosen; long menus scroll within the window.
-- **First loading is still slow:** a real local-cold 65-preview viewport needed 24.68 seconds. This
-  release does not claim a completed performance fix or full Figma Design parity. See the
-  [changelog](CHANGELOG.md#v0956--2026-11-08) for measurements and limits.
-
-### Figma: clearer designs and scoped prototype playback (v0.9.55)
-
-- **Browse files** from the desktop Figma sidebar; the isolated picker uses your Figma website
-  session, while design data uses the daemon's own authorized connection.
-- **Sections and large files:** see nested frames, expand metadata when needed and load detailed
-  content around the viewport. Loading and failures are shown explicitly.
-- **Sharper rendering:** outlined SVG text, resolution-aware fallbacks and fixes for bounds,
-  opacity, gradients and strokes. Canvas and prototype playback run inside JAgentDesk without
-  requiring Figma Desktop or Link.
-- **Prototype playback:** load the active frames, reuse versioned cache entries and free unused
-  assets; show incomplete content and Retry instead of silently leaving a partial frame.
-- **Current limits:** cold loading can still take tens of seconds. Website file selection,
-  writes to the original file and presence/follow are not yet verified end to end; this release
-  does not provide full Figma Design parity. See the [changelog](CHANGELOG.md#v0955--2026-11-06).
-
-### Figma sign-in and iPhone touch fixes (v0.9.54)
-
-- **Figma sign-in:** fixes React error #185 after login by handling the completed sign-in once,
-  including when the connection list is still loading or you reopen Connections.
 - **Enable touch on iPhone:** newly prepared WebDriverAgent uses a stable bundle identifier for
   your Apple team, fixing Apple error 9401 for the default Facebook runner identifier. Retries and
   refreshes keep the identifier; reinstalling with another account does not reuse the old account's
@@ -186,31 +154,11 @@ with a few deliberate boundaries:
 - [CHANGELOG](CHANGELOG.md#v0954--2026-11-06) includes the regression checks and remaining validation
   limits.
 
-### Figma inside JAgentDesk, and a mobile menu that leaves room for your projects (v0.9.53)
+### A mobile menu that leaves room for your projects (v0.9.53)
 
-- **Sign in with your own Figma account** (OAuth with a private app you create in your team — the
-  connect screen walks you through it). Secrets and tokens stay on the daemon.
-- **Big files without the heavy Figma canvas.** JAgentDesk draws the design itself and loads a frame's
-  layers only when it comes into view, cached per version — pan and zoom cost no extra requests.
-- **Inspect, CSS and export**, versions, threaded comments with reactions, and a **prototype player**
-  JAgentDesk wrote (flows, hotspots, overlays, transitions, smart animate).
-- **Design and edit** through **JAgentDesk Figma Link**, a Figma desktop plugin built on
-  [figma-mcp-forge](https://github.com/HieuAnh87/figma-mcp-forge), paired with a 6-digit code. Without
-  Link, edits wait in a queue and apply with conflict checks when Link connects. **Ask AI** gives chat
-  agents `figma_*` and `figma_link_*` tools.
 - **Mobile drawer**: the menu is a compact grid, so the project list gets the screen.
 
-![Figma file in JAgentDesk: all frames of the page drawn by JAgentDesk's own renderer after Fit](docs/media/figma-canvas-fit.png)
-
-![Inspect: the Sign in button selected, linear gradient with its stops, radius, shadow, local component and generated CSS](docs/media/figma-inspect.png)
-
-![Prototype player: the Home frame after tapping Sign in, with hotspots shown](docs/media/figma-prototype.png)
-
-![Comments next to the canvas: threads, replies and a 👍 reaction](docs/media/figma-comments.png)
-
-![Connect Figma: the steps for your own private OAuth app, callback URL and scopes to copy](docs/media/figma-connect.png)
-
-<img src="docs/media/mobile-nav-grid.png" alt="Mobile drawer: the menu as a 5-column grid with Figma, and the projects list below" width="320" />
+<img src="docs/media/mobile-nav-grid.png" alt="Mobile drawer: the menu as a 5-column grid, and the projects list below" width="320" />
 
 ### iPhone view-first over the cable and Apple ID sign-in that reaches your teams (v0.9.51)
 
@@ -229,7 +177,7 @@ with a few deliberate boundaries:
 - **Jira boards load every issue** (no 500 cap), columns scroll, smart links are clickable, and
   images and files in descriptions and comments show in place.
 
-### Jira, Argo CD, iOS sideload, real devices, Spec mode and the activity graph (v0.9.48)
+### Jira, Argo CD, iOS sideload, real devices and Spec mode (v0.9.48)
 
 #### Jira — boards, backlog and issues inside JAgentDesk
 
@@ -278,8 +226,6 @@ with a few deliberate boundaries:
 
 #### Spec mode — GitHub Spec Kit in the chat
 
-![Activity graph Plan view with Spec mode on: Spec mode · Implement, tasks.md phases and tasks, done tasks green, planned ones dashed, [P] parallel marks](docs/media/spec-mode-plan.png)
-
 ![Spec mode phase review: "Tasks is ready for review" with the tasks.md link, Approve & continue and Revise](docs/media/spec-mode-review.png)
 
 - A **Spec mode** toggle in the composer runs Constitution → Specify → Plan → Tasks → Implement →
@@ -288,14 +234,6 @@ with a few deliberate boundaries:
   command** — and the review bar sits right on top of the composer.
 - Phases are judged from the files on disk, never by a hidden model call; the setup lists every file
   before writing it.
-
-#### Activity graph — see what the agent is doing
-
-<img src="docs/media/activity-graph-flow.png" alt="Activity graph, Flow view: the prompt, grouped tool calls, a running subagent branch and the agent's upcoming todos as dashed nodes, live" width="420" />
-
-- Show or hide an **archify** canvas next to the chat: **Flow** (the current turn, top to bottom, with
-  upcoming todos dashed) and **Plan** (todos, or Spec mode phases and tasks).
-- Live status colours without reloading; click a node to jump to that step in the chat.
 
 #### Release pipeline
 

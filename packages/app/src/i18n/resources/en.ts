@@ -2,7 +2,6 @@ import { sshModuleStrings } from "./ssh-modules";
 import { builtinPluginStrings } from "./builtin-plugins";
 import { botsStrings } from "./bots";
 import { pluginSettings } from "./plugin-settings";
-import { activityGraphStrings } from "./activity-graph";
 
 export const en = {
   bots: botsStrings,
@@ -1085,7 +1084,6 @@ export const en = {
     save: "Save",
     saving: "Saving...",
   },
-  activityGraph: activityGraphStrings,
   connection: {
     localMode: {
       mobileWarning:
