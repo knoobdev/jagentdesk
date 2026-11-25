@@ -1,203 +1,208 @@
-// Compare a migrated feature's contracts with the baseline revision:
-//   node scripts/compare-builtin-contracts.mjs <baseline> <out-dir> [plugin...]
-// For each plugin: handled request names, every wire message literal of the feature, agent tool
-// names, and the app's i18n keys. Missing files at a revision contribute nothing.
+// Compares every built-in feature's contract with a baseline revision:
+//   node scripts/compare-builtin-contracts.mjs <baseline> <out-dir> [plugin-id...]
+// Per plugin: the wire names it owns (protocol literals with its prefixes that daemon code uses),
+// the agent tool names daemon code registers, plus the app's i18n keys and the built-in manifest
+// ids. Both revisions are scanned as whole trees, so a moved file keeps its names in the contract.
+// `REMOVED` lists features deleted on purpose (ADR-0055); the script expects them gone and every
+// other contract identical.
 import fs from "node:fs";
-import { execFileSync } from "node:child_process";
+import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import ts from "typescript";
-const baseline = process.argv[2] ?? "plat/int10";
-const output = process.argv[3] ?? ".dev/builtin-contracts";
-const SESSION = "packages/server/src/server/session.ts";
-const TOOLS = "packages/server/src/server/agent/tools/jagentdesk-tools.ts";
-const DOCKER_PUSHES = new Set(["docker/snapshot", "docker/log-chunk", "docker/stats-data"]);
-const isResponse = (name) => name.endsWith("/response") || name.endsWith(".response");
-// requests: [file, regex] pairs whose first group is a handled inbound request name.
-// wire: files whose string literals matching `wirePattern` are the feature's wire names.
-const FEATURES = {
-  docker: {
-    requests: {
-      baseline: [[SESSION, /"(docker\/[^"]+)"/g]],
-      branch: [["plugins/docker/server/index.ts", /"(docker\/[^"]+)"/g]],
-    },
-    requestFilter: (name) => !isResponse(name) && !DOCKER_PUSHES.has(name) && name !== "docker/",
-    tools: {
-      baseline: [[TOOLS, /registerTool\(\s*"(docker_[^"]+)"/g]],
-      branch: [["plugins/docker/server/agent-tools.ts", /registerTool\(\s*"(docker_[^"]+)"/g]],
-    },
-    sharedTools: [
-      ["packages/server/src/server/ssh/remote-docker/agent-tools.ts", /"(docker_[a-z_]+)"/g],
-    ],
+
+const [baseline = "plat/int10", output = ".dev/builtin-contracts", ...only] = process.argv.slice(2);
+const notResponse = (name) => !name.endsWith("/response") && !name.endsWith(".response");
+// rpc: wire-name prefixes the feature owns. tools: tool-name prefixes or exact names.
+const PLUGINS = {
+  docker: { rpc: ["docker/"], tools: ["docker_"] },
+  clusters: { rpc: ["cluster/"], tools: ["kubectl_", "cluster_"] },
+  databases: { rpc: ["database/"], tools: ["sql_", "database_"] },
+  argocd: { rpc: ["argocd."], tools: ["argocd_"] },
+  "ssh-servers": { rpc: ["ssh."], tools: ["ssh_"] },
+  "remote-tasks": { rpc: ["remote_exec."], tools: ["remote_"] },
+  "custom-providers": { rpc: ["providers.custom."], tools: ["provider_"] },
+  jira: { rpc: ["jira."], tools: ["jira_"] },
+  // forge.search.request is the core checkout search.
+  "forge-hub": { rpc: ["forge."], exclude: ["forge.search.request"], tools: ["forge_"] },
+  devices: {
+    rpc: ["simulator/", "sideload.", "android."],
+    tools: ["sim_", "sideload_", "android_"],
+    excludeTools: ["sim_install_batch"],
   },
-  clusters: {
-    requests: {
-      baseline: [[SESSION, /case "(cluster\/[^"]+)"/g]],
-      branch: [["plugins/clusters/server/session.ts", /^\s*"(cluster\/[^"]+)",$/gm]],
-    },
-    wirePattern: /"(cluster\/[^"]+)"/g,
-    wire: {
-      baseline: [
-        SESSION,
-        "packages/server/src/server/session/cluster/cluster-session.ts",
-        "packages/server/src/server/cluster/helm-client.ts",
-      ],
-      branch: [SESSION, "plugins/clusters/server"],
-    },
-    tools: {
-      baseline: [[TOOLS, /registerTool\(\s*"((?:kubectl|cluster)_[^"]+)"/g]],
-      branch: [
-        [
-          "plugins/clusters/server/agent-tools.ts",
-          /registerTool\(\s*"((?:kubectl|cluster)_[^"]+)"/g,
-        ],
-      ],
-    },
-  },
-  databases: {
-    requests: {
-      baseline: [[SESSION, /case "(database\/[^"]+)"/g]],
-      branch: [["plugins/databases/server/session.ts", /^\s*"(database\/[^"]+)",$/gm]],
-    },
-    wirePattern: /"(database\/[^"]+)"/g,
-    wire: {
-      baseline: [SESSION, "packages/server/src/server/session/database/database-session.ts"],
-      branch: [SESSION, "plugins/databases/server"],
-    },
-    tools: {
-      baseline: [[TOOLS, /registerTool\(\s*"((?:sql|database)_[^"]+)"/g]],
-      branch: [
-        ["plugins/databases/server/agent-tools.ts", /registerTool\(\s*"((?:sql|database)_[^"]+)"/g],
-      ],
-    },
-  },
-  argocd: {
-    requests: {
-      baseline: [[SESSION, /case "(argocd\.[^"]+)"/g]],
-      branch: [["plugins/argocd/server/argocd-session.ts", /^\s*"(argocd\.[^"]+)",$/gm]],
-    },
-    wirePattern: /"(argocd\.[a-z_.]+)"/g,
-    wire: {
-      baseline: [
-        SESSION,
-        "packages/server/src/server/session/argocd/argocd-session.ts",
-        "packages/server/src/server/argocd",
-      ],
-      branch: [SESSION, "plugins/argocd/server"],
-    },
-    tools: {
-      baseline: [["packages/server/src/server/argocd/agent-tools.ts", /name: "(argocd_[^"]+)"/g]],
-      branch: [["plugins/argocd/server/agent-tools.ts", /name: "(argocd_[^"]+)"/g]],
-    },
-  },
+  workbench: { rpc: ["proxy/"], tools: ["proxy_", "sim_install_batch"] },
+  skills: { rpc: ["skills/", "skills.", "agent.skills."], tools: ["create_skill", "update_skill"] },
+  "spec-mode": { rpc: ["agent.spec_mode."], tools: [] },
+  autorun: { rpc: ["autorun."], tools: [] },
+  insights: { rpc: ["usage.history."], tools: [] },
+  "session-share": { rpc: ["session.share."], tools: [] },
+  "browser-tools": { rpc: ["browser."], tools: ["browser_"] },
+  "activity-graph": { rpc: ["agent.activity_graph."], tools: [] },
+  figma: { rpc: ["figma."], tools: ["figma_"] },
 };
-const requested = process.argv.slice(4);
-const plugins = requested.length ? requested : Object.keys(FEATURES);
-fs.mkdirSync(output, { recursive: true });
-const read = (revision, file) => {
-  try {
-    return revision === "worktree"
-      ? fs.readFileSync(file, "utf8")
-      : execFileSync("git", ["show", `${revision}:${file}`], {
-          encoding: "utf8",
-          stdio: ["ignore", "pipe", "ignore"],
-        });
-  } catch {
-    return "";
-  }
-};
-// A directory entry expands to its non-test TypeScript files.
-function expand(revision, entry) {
-  if (entry.endsWith(".ts") || entry.endsWith(".tsx")) return [entry];
-  const listed =
-    revision === "worktree"
-      ? (fs.existsSync(entry) ? fs.readdirSync(entry, { recursive: true }) : []).map((name) =>
-          path.posix.join(entry, name),
-        )
-      : execFileSync("git", ["ls-tree", "-r", "--name-only", revision, entry], {
-          encoding: "utf8",
-        })
-          .trim()
-          .split("\n");
-  return listed.filter((file) => /\.tsx?$/.test(file) && !/\.test\.tsx?$/.test(file));
+const REMOVED = new Set(["activity-graph", "figma"]);
+// i18n keys of removed features: any key path segment naming them.
+const REMOVED_I18N = /(^|\.)(figma[A-Za-z]*|activityGraph[A-Za-z]*)(\.|$)/;
+const ids = only.length ? only : Object.keys(PLUGINS);
+const ROOTS = ["packages/server/src", "plugins", "packages/protocol/src", "packages/app/src/i18n"];
+
+function checkout(revision) {
+  if (revision === "worktree") return process.cwd();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "builtin-contracts-"));
+  const present = ROOTS.filter((root) => {
+    try {
+      execFileSync("git", ["cat-file", "-e", `${revision}:${root}`], { stdio: "ignore" });
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  execFileSync("sh", ["-c", `git archive ${revision} ${present.join(" ")} | tar -x -C "${dir}"`]);
+  return dir;
 }
-const matches = (revision, pairs) =>
-  pairs.flatMap(([file, regex]) =>
-    [...read(revision, file).matchAll(new RegExp(regex))].map((match) => match[1]),
+function walk(dir, files = []) {
+  if (!fs.existsSync(dir)) return files;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === "node_modules" || entry.name === "dist") continue;
+    const file = path.join(dir, entry.name);
+    if (entry.isDirectory()) walk(file, files);
+    else files.push(file);
+  }
+  return files;
+}
+const isSource = (file) =>
+  /\.(ts|tsx|mts)$/.test(file) &&
+  !/\.(test|spec|e2e)\.[mc]?tsx?$|\.e2e\.test\.|[/\\](test-support|test-fixtures|fixtures)[/\\]/.test(
+    file,
   );
+function scan(revision) {
+  const root = checkout(revision);
+  const daemon = [
+    ...walk(path.join(root, "packages/server/src")),
+    ...walk(path.join(root, "plugins")).filter((file) => /[/\\]server[/\\]/.test(file)),
+  ].filter(isSource);
+  const literals = new Set();
+  const tools = new Set();
+  for (const file of daemon) {
+    const source = fs.readFileSync(file, "utf8");
+    for (const match of source.matchAll(/"([a-z][A-Za-z0-9_./-]*)"/g)) literals.add(match[1]);
+    for (const match of source.matchAll(
+      /(?:registerTool|registerSimulatorOnly|actionTool)\(\s*"([a-z][a-z0-9_]*)"|\bname:\s*"([a-z][a-z0-9_]*)"/g,
+    ))
+      tools.add(match[1] ?? match[2]);
+  }
+  const wire = new Set();
+  for (const file of walk(path.join(root, "packages/protocol/src")).filter(isSource)) {
+    const source = fs.readFileSync(file, "utf8");
+    // Schema helpers differ per feature; any protocol string literal is a candidate wire name.
+    for (const match of source.matchAll(/"([a-z][A-Za-z0-9_./-]*)"/g)) wire.add(match[1]);
+  }
+  const i18n = {};
+  for (const file of walk(path.join(root, "packages/app/src/i18n/resources")).filter((file) =>
+    /\.(ts|json)$/.test(file),
+  ))
+    i18n[path.relative(root, file)] = propertyKeys(fs.readFileSync(file, "utf8"));
+  // Built-in ids as the protocol declares them (generated from manifests after phase 2).
+  const manifests = [];
+  for (const name of ["builtin-plugins.ts", "builtin-plugins.generated.ts"]) {
+    const file = path.join(root, "packages/protocol/src", name);
+    if (!fs.existsSync(file)) continue;
+    const source = fs.readFileSync(file, "utf8");
+    for (const match of source.matchAll(
+      /export const (?:STATIC_BUILTIN|BUNDLED)_PLUGIN_IDS = \[([^\]]*)\]/g,
+    ))
+      manifests.push(...[...match[1].matchAll(/"([^"]+)"/g)].map((id) => id[1]));
+  }
+  manifests.sort();
+  if (root !== process.cwd()) fs.rmSync(root, { recursive: true, force: true });
+  return { literals, tools, wire, i18n, manifests };
+}
 function propertyKeys(source) {
   const file = ts.createSourceFile("resource.ts", source, ts.ScriptTarget.Latest, true);
   const keys = [];
-  function walk(node, prefix = []) {
+  function visit(node, prefix = []) {
     if (ts.isPropertyAssignment(node)) {
       const key = ts.isStringLiteral(node.name) ? node.name.text : node.name.getText(file);
       const parts = [...prefix, key];
       if (ts.isObjectLiteralExpression(node.initializer))
-        for (const child of node.initializer.properties) walk(child, parts);
+        for (const child of node.initializer.properties) visit(child, parts);
       else keys.push(parts.join("."));
       return;
     }
-    ts.forEachChild(node, (child) => walk(child, prefix));
+    ts.forEachChild(node, (child) => visit(child, prefix));
   }
-  walk(file);
+  visit(file);
   return keys.sort();
 }
-function i18n(revision) {
-  const files = execFileSync(
-    "git",
-    ["ls-tree", "-r", "--name-only", baseline, "packages/app/src/i18n/resources"],
-    { encoding: "utf8" },
-  )
-    .trim()
-    .split("\n")
-    .filter((file) => /\.(ts|json)$/.test(file));
-  return Object.fromEntries(files.map((file) => [file, propertyKeys(read(revision, file))]));
+const hasPrefix = (name, prefixes) =>
+  prefixes.some((prefix) =>
+    prefix.endsWith("_") || prefix.endsWith(".") || prefix.endsWith("/")
+      ? name.startsWith(prefix)
+      : name === prefix,
+  );
+function contract(id, side) {
+  const spec = PLUGINS[id];
+  const rpc = [...side.literals]
+    .filter((name) => side.wire.has(name) && hasPrefix(name, spec.rpc))
+    .filter((name) => notResponse(name) && !spec.exclude?.includes(name))
+    .sort();
+  const tools = [...side.tools]
+    .filter((name) => hasPrefix(name, spec.tools) && !spec.excludeTools?.includes(name))
+    .sort();
+  return { rpc, tools };
 }
-const unique = (values) => [...new Set(values)].sort();
-function dump(id, revision) {
-  const feature = FEATURES[id];
-  const side = revision === "worktree" ? "branch" : "baseline";
-  const filter = feature.requestFilter ?? ((name) => !isResponse(name));
-  const result = {
-    rpc: unique(matches(revision, feature.requests[side]).filter(filter)),
-    tools: unique([
-      ...matches(revision, feature.tools[side]),
-      ...matches(revision, feature.sharedTools ?? []),
-    ]),
-  };
-  if (feature.wire)
-    result.wire = unique(
-      feature.wire[side]
-        .flatMap((entry) => expand(revision, entry))
-        .flatMap((file) =>
-          [...read(revision, file).matchAll(new RegExp(feature.wirePattern))].map(
-            (match) => match[1],
-          ),
-        ),
-    );
-  return result;
-}
-const baselineI18n = i18n(baseline);
-const branchI18n = i18n("worktree");
+
+fs.mkdirSync(output, { recursive: true });
+const before = scan(baseline);
+const after = scan("worktree");
 let failed = false;
-for (const id of plugins) {
-  if (!FEATURES[id]) throw new Error(`Unknown plugin: ${id}`);
-  const before = { ...dump(id, baseline), i18n: baselineI18n };
-  const after = { ...dump(id, "worktree"), i18n: branchI18n };
-  const beforeFile = path.join(output, `${id}.baseline.json`);
-  const afterFile = path.join(output, `${id}.branch.json`);
-  fs.writeFileSync(beforeFile, JSON.stringify(before, null, 2) + "\n");
-  fs.writeFileSync(afterFile, JSON.stringify(after, null, 2) + "\n");
-  if (JSON.stringify(before) !== JSON.stringify(after)) {
-    failed = true;
-    console.error(`${id}: contracts differ`);
-    try {
-      execFileSync("diff", ["-u", beforeFile, afterFile], { stdio: "inherit" });
-    } catch {
-      // diff exits non-zero on differences
-    }
-  } else
-    console.log(
-      `${id}: identical — ${after.rpc.length} RPCs, ${after.wire ? `${after.wire.length} wire names, ` : ""}${after.tools.length} tools, i18n keys in ${Object.keys(after.i18n).length} resource files`,
+const report = [];
+for (const id of ids) {
+  if (!PLUGINS[id]) throw new Error(`Unknown plugin: ${id}`);
+  const a = contract(id, before);
+  const b = contract(id, after);
+  fs.writeFileSync(path.join(output, `${id}.baseline.json`), JSON.stringify(a, null, 2) + "\n");
+  fs.writeFileSync(path.join(output, `${id}.branch.json`), JSON.stringify(b, null, 2) + "\n");
+  if (REMOVED.has(id)) {
+    const gone = b.rpc.length === 0 && b.tools.length === 0 && !after.manifests.includes(id);
+    if (!gone) failed = true;
+    report.push(
+      `${id}: ${gone ? "removed" : "NOT REMOVED"} — baseline ${a.rpc.length} RPCs/wire names, ${a.tools.length} tools; branch ${b.rpc.length}/${b.tools.length}`,
     );
+    continue;
+  }
+  if (JSON.stringify(a) === JSON.stringify(b)) {
+    report.push(`${id}: identical — ${b.rpc.length} wire names, ${b.tools.length} tools`);
+    continue;
+  }
+  failed = true;
+  const missing = (x, y) => x.filter((name) => !y.includes(name));
+  report.push(
+    `${id}: DIFFERS — rpc -[${missing(a.rpc, b.rpc)}] +[${missing(b.rpc, a.rpc)}] tools -[${missing(a.tools, b.tools)}] +[${missing(b.tools, a.tools)}]`,
+  );
 }
+// i18n: only the removed features' keys may disappear; nothing may be added.
+const i18nDiff = { removed: [], added: [], unexpected: [] };
+for (const file of new Set([...Object.keys(before.i18n), ...Object.keys(after.i18n)])) {
+  const a = new Set(before.i18n[file] ?? []);
+  const b = new Set(after.i18n[file] ?? []);
+  for (const key of a)
+    if (!b.has(key))
+      (REMOVED_I18N.test(key) ? i18nDiff.removed : i18nDiff.unexpected).push(`${file}: -${key}`);
+  for (const key of b) if (!a.has(key)) i18nDiff.unexpected.push(`${file}: +${key}`);
+}
+if (i18nDiff.unexpected.length) failed = true;
+report.push(
+  `i18n: ${Object.keys(after.i18n).length} resource files; ${i18nDiff.removed.length} removed-feature keys gone; ${i18nDiff.unexpected.length} other differences`,
+);
+for (const line of i18nDiff.unexpected.slice(0, 40)) report.push(`  ${line}`);
+const manifestRemoved = before.manifests.filter((id) => !after.manifests.includes(id));
+const manifestAdded = after.manifests.filter((id) => !before.manifests.includes(id));
+if (manifestAdded.length || manifestRemoved.some((id) => !REMOVED.has(id))) failed = true;
+report.push(
+  `manifests: ${after.manifests.length} built-ins; removed [${manifestRemoved}]; added [${manifestAdded}]`,
+);
+fs.writeFileSync(path.join(output, "i18n-diff.json"), JSON.stringify(i18nDiff, null, 2) + "\n");
+fs.writeFileSync(path.join(output, "report.txt"), report.join("\n") + "\n");
+console.log(report.join("\n"));
 if (failed) process.exitCode = 1;
