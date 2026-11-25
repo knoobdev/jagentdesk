@@ -5,7 +5,8 @@ import type { Theme } from "@/styles/theme";
  * Shared list geometry and muted column headers for Gumloop screens.
  */
 export const gumloopListStyles = StyleSheet.create((theme: Theme) => ({
-  embeddedContent: { paddingHorizontal: 0 },
+  /** Home's embedded list: the "Recent activity" label above sets the spacing. */
+  embeddedContent: { paddingHorizontal: 0, paddingTop: 0, gap: 0 },
   pageContent: { width: "100%", maxWidth: "100%", alignSelf: "stretch", paddingHorizontal: 82 },
   groupRow: {
     flexDirection: "row",
@@ -15,6 +16,11 @@ export const gumloopListStyles = StyleSheet.create((theme: Theme) => ({
     marginBottom: theme.spacing[1],
     paddingHorizontal: theme.spacing[1],
   },
+  // Home "Recent activity" (spec 38 §4.1): 16px above a later day label, 12px above the first,
+  // 4px down to its first row.
+  compactGroupRow: { marginTop: theme.spacing[4], marginBottom: theme.spacing[1] },
+  compactFirstGroupRow: { marginTop: theme.spacing[3] },
+  compactPill: { paddingVertical: 0 },
   groupPill: {
     flexDirection: "row",
     alignItems: "center",
@@ -40,6 +46,11 @@ export const gumloopListStyles = StyleSheet.create((theme: Theme) => ({
     borderBottomWidth: 1,
     borderBottomColor: theme.chrome.cardBorder,
   },
+  compactRow: {
+    minHeight: 44,
+    paddingVertical: 0,
+  },
+  compactRowStacked: { minHeight: 44 },
   columnHeader: {
     fontSize: 16,
     fontWeight: theme.fontWeight.normal,

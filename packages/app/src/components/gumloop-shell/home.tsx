@@ -49,6 +49,7 @@ export function GumloopHome() {
           <AgentList
             agents={recent}
             showHostColumn={hosts.length > 1}
+            density="compact"
             contentContainerStyle={gumloopListStyles.embeddedContent}
           />
         ) : (
@@ -74,16 +75,18 @@ const styles = StyleSheet.create((theme: Theme) => ({
     paddingTop: 16,
   },
   desktopPage: { flex: 1, backgroundColor: theme.colors.surface0 },
-  desktopBody: { flex: 1, paddingHorizontal: 82 },
+  // The page header keeps 16px under its title row for every page; Home's label sits 8px under
+  // it (spec 38 §4.1).
+  desktopBody: { flex: 1, paddingHorizontal: 82, marginTop: -theme.spacing[2] },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 16 },
   title: { fontSize: 22, fontWeight: "600", color: theme.colors.foreground },
   actions: { flexDirection: "row", gap: 10 },
-  body: { flex: 1, marginTop: 16 },
+  body: { flex: 1, marginTop: theme.spacing[2] },
   sectionTitle: {
-    fontSize: 20,
+    fontSize: 16,
+    lineHeight: 22,
     color: theme.colors.foregroundMuted,
     fontWeight: "500",
-    marginBottom: 24,
   },
   empty: { paddingTop: 32, alignItems: "flex-start", gap: 16 },
   emptyTitle: { fontSize: 18, fontWeight: "500", color: theme.colors.foreground },

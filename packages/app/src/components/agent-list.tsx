@@ -42,7 +42,11 @@ interface AgentListProps {
   contentContainerStyle?: StyleProp<ViewStyle>;
   showAttentionIndicator?: boolean;
   showHostColumn?: boolean;
+  /** "compact" is the Home recent-activity list: 44px rows and tight day labels (spec 38 §4.1). */
+  density?: AgentListDensity;
 }
+
+type AgentListDensity = "comfortable" | "compact";
 
 type DateSectionKey = "today" | "yesterday" | "thisWeek" | "thisMonth" | "older";
 
@@ -228,6 +232,7 @@ function SessionRowTrailingAttention({
 function SessionRow({
   agent,
   isMobile,
+  compact,
   selectedAgentId,
   showAttentionIndicator,
   showHostColumn,
@@ -236,6 +241,7 @@ function SessionRow({
 }: {
   agent: AggregatedAgent;
   isMobile: boolean;
+  compact: boolean;
   selectedAgentId?: string;
   showAttentionIndicator: boolean;
   showHostColumn: boolean;
@@ -258,11 +264,15 @@ function SessionRow({
     ({ pressed, hovered = false }: PressableStateCallbackType & { hovered?: boolean }) => [
       styles.row,
       isGumloop && gumloopListStyles.row,
+      // Stacked phone rows keep their padding; only the 44px floor applies.
+      isGumloop &&
+        compact &&
+        (isMobile ? gumloopListStyles.compactRowStacked : gumloopListStyles.compactRow),
       isSelected && styles.rowSelected,
       Boolean(hovered) && styles.rowHovered,
       pressed && styles.rowPressed,
     ],
-    [isGumloop, isSelected],
+    [compact, isGumloop, isMobile, isSelected],
   );
 
   const handlePress = useCallback(() => onPress(agent), [onPress, agent]);
@@ -400,6 +410,7 @@ export function AgentList({
   contentContainerStyle,
   showAttentionIndicator = true,
   showHostColumn = false,
+  density = "comfortable",
 }: AgentListProps) {
   const { theme } = useUnistyles();
   const { t } = useTranslation();
@@ -492,13 +503,20 @@ export function AgentList({
     return result;
   }, [agents]);
 
+  const compact = density === "compact";
   const renderItem: ListRenderItem<FlatListItem> = useCallback(
-    ({ item }) => {
+    ({ item, index }) => {
       if (item.type === "header") {
         if (isGumloop) {
           return (
-            <View style={gumloopListStyles.groupRow}>
-              <View style={gumloopListStyles.groupPill}>
+            <View
+              style={[
+                gumloopListStyles.groupRow,
+                compact && gumloopListStyles.compactGroupRow,
+                compact && index === 0 && gumloopListStyles.compactFirstGroupRow,
+              ]}
+            >
+              <View style={[gumloopListStyles.groupPill, compact && gumloopListStyles.compactPill]}>
                 <Text style={gumloopListStyles.groupPillText}>
                   {formatDateSectionLabel(t, item.section)}
                 </Text>
@@ -516,6 +534,7 @@ export function AgentList({
         <SessionRow
           agent={item.agent}
           isMobile={isMobile}
+          compact={compact}
           selectedAgentId={selectedAgentId}
           showAttentionIndicator={showAttentionIndicator}
           showHostColumn={showHostColumn}
@@ -525,6 +544,7 @@ export function AgentList({
       );
     },
     [
+      compact,
       handleAgentLongPress,
       handleAgentPress,
       isGumloop,
