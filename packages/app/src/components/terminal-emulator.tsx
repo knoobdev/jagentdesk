@@ -628,6 +628,8 @@ export default function TerminalEmulator({
     <div
       ref={rootRef}
       data-testid={testId}
+      // Keeps xterm's monospace font: the app-wide UI-font rule skips `data-pmono` subtrees.
+      data-pmono=""
       data-terminal-scrollbar-root="true"
       style={rootDivStyle}
       onPointerDown={handleRootPointerDown}
