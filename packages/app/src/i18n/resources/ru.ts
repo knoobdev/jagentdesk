@@ -1132,10 +1132,6 @@ export const ru: TranslationResources = {
     },
   },
   connection: {
-    localMode: {
-      mobileWarning:
-        "Включён локальный режим. Мобильные устройства не смогут подключиться к этому компьютеру через Tailscale, пока вы не вернётесь в режим Tailscale.",
-    },
     timingOut: {
       tailnet: {
         title: "Не удалось подключить {{hostName}}",
@@ -1609,6 +1605,11 @@ export const ru: TranslationResources = {
   onboarding: {
     title: "Добро пожаловать в JAgentDesk",
     subtitle: "Подключите компьютер, чтобы начать",
+    welcomeDescription:
+      "Управляйте с этого устройства агентами, которые работают на вашей рабочей станции.",
+    getStarted: "Начать",
+    connectTitle: "Подключите рабочую станцию",
+    connectFooter: "На рабочей станции откройте JAgentDesk → Pair a device.",
     actions: {
       settings: "Настройки",
     },
@@ -1717,11 +1718,15 @@ export const ru: TranslationResources = {
       },
       scanQr: {
         title: "Сканировать код QR",
-        description: "Подключение через tailnet.",
+        description: "Зашифрованное подключение через relay.",
       },
       pasteLink: {
         title: "Вставьте ссылку на сопряжение",
-        description: "Подключение через tailnet.",
+        description: "Зашифрованное подключение через relay.",
+      },
+      tailscale: {
+        title: "Войти в Tailscale",
+        description: "Подключитесь к своему tailnet для прямого соединения.",
       },
     },
     direct: {

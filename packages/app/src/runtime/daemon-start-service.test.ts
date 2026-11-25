@@ -3,6 +3,10 @@ import { DaemonStartService, upsertDesktopDaemonConnection } from "./daemon-star
 import type { HostRuntimeStore } from "./host-runtime";
 import type { DesktopDaemonStatus } from "@/desktop/daemon/desktop-daemon";
 import type { HostProfile } from "@/types/host-connection";
+import {
+  isDesktopSignedLocalHost,
+  resetDesktopSignedLocalHostsForTests,
+} from "./desktop-signed-local-hosts";
 
 interface RecordedUpsert {
   listenAddress: string;
@@ -97,7 +101,7 @@ describe("DaemonStartService", () => {
     const service = new DaemonStartService({
       store: fake.store,
       startDesktopDaemon,
-      getConnectionMode: async () => "local",
+      getTailnetMode: async () => "off",
     });
 
     await service.start();
@@ -122,7 +126,7 @@ describe("DaemonStartService", () => {
       store: fake.store,
       startDesktopDaemon,
       getDesktopDaemonStatus,
-      getConnectionMode: async () => "local",
+      getTailnetMode: async () => "off",
     });
 
     await expect(service.start()).resolves.toEqual({ ok: true });
@@ -431,7 +435,7 @@ describe("upsertDesktopDaemonConnection", () => {
     expect(fake.upserts).toEqual([]);
   });
 
-  it("upserts only the verified tailnet connection in Tailscale mode", async () => {
+  it("upserts the Local connection and the verified tailnet connection in tailnet mode", async () => {
     const fake = createTailnetStore();
     const daemon = makeStatus({
       tailnetAddress: "node-3.example.ts.net:6768",
@@ -439,10 +443,12 @@ describe("upsertDesktopDaemonConnection", () => {
       tailscaleConnected: true,
     });
 
-    const result = await upsertDesktopDaemonConnection(fake.store, daemon, "tailscale");
+    const result = await upsertDesktopDaemonConnection(fake.store, daemon, "tailnet");
 
     expect(result).toEqual({ ok: true });
-    expect(fake.localUpserts).toEqual([]);
+    expect(fake.localUpserts).toEqual([
+      { listenAddress: "127.0.0.1:6767", serverId: "srv_desktop", hostname: "desktop" },
+    ]);
     expect(fake.tailnetUpserts).toEqual([
       {
         serverId: "srv_desktop",
@@ -471,14 +477,16 @@ describe("upsertDesktopDaemonConnection", () => {
       },
     ];
     const daemon = makeStatus({
+      listen: "127.0.0.1:6768",
       tailnetAddress: "node-3.example.ts.net:6768",
       daemonPublicKeyB64: "daemon-public-key",
       tailscaleConnected: true,
     });
 
-    const result = await upsertDesktopDaemonConnection(fake.store, daemon, "tailscale");
+    const result = await upsertDesktopDaemonConnection(fake.store, daemon, "tailnet");
 
     expect(result).toEqual({ ok: true });
+    expect(fake.localUpserts).toEqual([]);
     expect(fake.tailnetUpserts).toHaveLength(1);
     expect(fake.tailnetUpserts[0]).toMatchObject({
       serverId: "srv_desktop",
@@ -488,7 +496,7 @@ describe("upsertDesktopDaemonConnection", () => {
     expect(fake.store.getHosts()[0]?.preferredConnectionId).toBe("direct:localhost:6768");
   });
 
-  it("does not create a localhost fallback while Tailscale is not ready", async () => {
+  it("keeps the Local connection while Tailscale is still signing in", async () => {
     const fake = createTailnetStore();
     const daemon = makeStatus({
       tailnetAddress: null,
@@ -496,20 +504,101 @@ describe("upsertDesktopDaemonConnection", () => {
       tailscaleConnected: false,
     });
 
-    const result = await upsertDesktopDaemonConnection(fake.store, daemon, "tailscale");
+    const result = await upsertDesktopDaemonConnection(fake.store, daemon, "tailnet");
 
     expect(result).toEqual({ ok: true });
-    expect(fake.localUpserts).toEqual([]);
+    expect(fake.localUpserts).toHaveLength(1);
     expect(fake.tailnetUpserts).toEqual([]);
   });
 
-  it("does not create any connection before the first mode choice", async () => {
+  it("connects a fresh desktop to its bundled daemon as Local without any Tailscale step", async () => {
     const fake = createTailnetStore();
 
     const result = await upsertDesktopDaemonConnection(fake.store, makeStatus(), null);
 
     expect(result).toEqual({ ok: true });
-    expect(fake.localUpserts).toEqual([]);
+    expect(fake.localUpserts).toEqual([
+      { listenAddress: "127.0.0.1:6767", serverId: "srv_desktop", hostname: "desktop" },
+    ]);
     expect(fake.tailnetUpserts).toEqual([]);
+  });
+
+  it("adds the Local connection to a v0.10.0 desktop host that only had its tailnet route", async () => {
+    const fake = createTailnetStore();
+    fake.store.getHosts = () => [
+      {
+        serverId: "srv_desktop",
+        label: "desktop",
+        appearance: {} as HostProfile["appearance"],
+        lifecycle: {},
+        connections: [
+          {
+            id: "tailnet:node-3.example.ts.net:6768",
+            type: "tailnet",
+            tailnetAddress: "node-3.example.ts.net:6768",
+            daemonPublicKeyB64: "daemon-public-key",
+          },
+        ],
+        preferredConnectionId: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    ];
+
+    const result = await upsertDesktopDaemonConnection(
+      fake.store,
+      makeStatus({ listen: "127.0.0.1:6768" }),
+      "tailnet",
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(fake.localUpserts).toEqual([
+      { listenAddress: "127.0.0.1:6768", serverId: "srv_desktop", hostname: "desktop" },
+    ]);
+  });
+
+  it("accepts a sign-in status without a listen address for a registered host", async () => {
+    const fake = createTailnetStore();
+    fake.store.getHosts = () => [
+      {
+        serverId: "srv_desktop",
+        label: "desktop",
+        appearance: {} as HostProfile["appearance"],
+        lifecycle: {},
+        connections: [
+          { id: "direct:localhost:6768", type: "directTcp", endpoint: "localhost:6768" },
+        ],
+        preferredConnectionId: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    ];
+
+    const result = await upsertDesktopDaemonConnection(
+      fake.store,
+      makeStatus({
+        listen: null,
+        tailnetAddress: "node-3.example.ts.net:6768",
+        daemonPublicKeyB64: "daemon-public-key",
+        tailscaleConnected: true,
+      }),
+      "tailnet",
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(fake.localUpserts).toEqual([]);
+    expect(fake.tailnetUpserts).toHaveLength(1);
+  });
+
+  it("signs the Local hello only for daemons this desktop started", async () => {
+    resetDesktopSignedLocalHostsForTests();
+    await upsertDesktopDaemonConnection(createFakeStore().store, makeStatus());
+    await upsertDesktopDaemonConnection(
+      createFakeStore().store,
+      makeStatus({ serverId: "srv_cli", desktopManaged: false }),
+    );
+
+    expect(isDesktopSignedLocalHost("srv_desktop")).toBe(true);
+    expect(isDesktopSignedLocalHost("srv_cli")).toBe(false);
   });
 });

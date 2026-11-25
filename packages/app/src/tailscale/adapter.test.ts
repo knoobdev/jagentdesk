@@ -143,10 +143,10 @@ describe("NativeTailscaleLoginAdapter without a native module", () => {
     });
   });
 
-  it("explains that Android needs the Local fallback when the native module is absent", async () => {
+  it("points Android at pairing links when the native module is absent", async () => {
     const adapter = new NativeTailscaleLoginAdapter("android", null);
     const unavailableError =
-      "Tailscale support is not included in this Android build. Choose Local or use the iOS build.";
+      "Tailscale support is not included in this Android build. Pair with a pairing link instead.";
 
     expect(adapter.platform).toBe("android");
     expect(adapter.isSupported).toBe(false);

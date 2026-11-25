@@ -7,33 +7,6 @@ import { getHostRuntimeStore, useHostRegistryLoaded } from "@/runtime/host-runti
 import { recreateLocalHost } from "@/runtime/migration/recreate-local-host";
 
 /**
- * REQ 6: show a one-time warning when the user switches to Local connection mode
- * while tailnet hosts exist, because mobile devices can no longer reach the
- * daemon over Tailscale. The runtime store raises the flag; this hook renders it
- * through the shared toast host (which survives the navigation that Local-mode
- * switches typically trigger).
- */
-function useConnectionModeLocalWarning(): void {
-  const toast = useToast();
-  const { t } = useTranslation();
-
-  useEffect(() => {
-    const store = getHostRuntimeStore();
-    const show = () => {
-      if (store.consumeLocalModeWarning()) {
-        toast.show(t("connection.localMode.mobileWarning"), {
-          variant: "warning",
-          durationMs: 6000,
-        });
-      }
-    };
-    // Consume any warning raised before this listener mounted.
-    show();
-    return store.subscribeLocalModeWarning(show);
-  }, [t, toast]);
-}
-
-/**
  * REQ 3: on app startup, re-notify the user about hosts that were still failing
  * to connect when the app was last closed. Tailnet hosts likely need a fresh
  * Tailscale login; local hosts exhausted their retries and are offered a
@@ -112,7 +85,6 @@ function useTimingOutHostNotifications(): void {
  * root layout.
  */
 export function ConnectionNotifications(): null {
-  useConnectionModeLocalWarning();
   useTimingOutHostNotifications();
   return null;
 }

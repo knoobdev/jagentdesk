@@ -15,7 +15,8 @@ import { formatVersionWithPrefix } from "@/desktop/runtime";
 import { buildOpenProjectRoute } from "@/utils/host-routes";
 import { JAgentDeskLogo } from "@/components/icons/jagentdesk-logo";
 import { isFdroidBuild } from "@/constants/build-profile";
-import { isWeb } from "@/constants/platform";
+import { getIsElectron, isNative, isWeb } from "@/constants/platform";
+import { ConnectWorkstationScreen } from "./connect-workstation-screen";
 
 interface WelcomeAction {
   key: "scan-qr" | "direct-connection" | "paste-pairing-link";
@@ -156,7 +157,32 @@ export interface WelcomeScreenProps {
   onHostAdded?: (profile: HostProfile) => void;
 }
 
-export function WelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
+/**
+ * No host online. Phone and desktop get "Connect your workstation" (ADR-0056);
+ * the plain browser build keeps the direct-address welcome since it can
+ * neither scan nor join a tailnet.
+ */
+export function WelcomeScreen(props: WelcomeScreenProps) {
+  if (isNative || getIsElectron()) {
+    return <ConnectWorkstationWelcome />;
+  }
+  return <BrowserWelcomeScreen {...props} />;
+}
+
+function ConnectWorkstationWelcome() {
+  const router = useRouter();
+  const hosts = useHosts();
+  const anyOnlineServerId = useAnyHostOnline(hosts.map((h) => h.serverId));
+
+  useEffect(() => {
+    if (!anyOnlineServerId) return;
+    router.replace(buildOpenProjectRoute());
+  }, [anyOnlineServerId, router]);
+
+  return <ConnectWorkstationScreen initialStep={isNative ? "welcome" : "connect"} />;
+}
+
+function BrowserWelcomeScreen({ onHostAdded }: WelcomeScreenProps) {
   const { theme } = useUnistyles();
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();

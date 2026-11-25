@@ -8,7 +8,6 @@ import { HostStatusDot } from "@/components/host-status-dot";
 import { Combobox, ComboboxItem, type ComboboxProps } from "@/components/ui/combobox";
 import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
 import { useHostRuntimeSnapshot, type ActiveConnection } from "@/runtime/host-runtime";
-import { useConnectionMode } from "@/tailscale";
 import { hostTransportLabelKey, orderHostsLocalFirst } from "@/types/host-connection";
 import {
   ADD_HOST_OPTION_ID,
@@ -220,8 +219,8 @@ export function HostPicker({
   children,
 }: HostPickerProps): ReactElement {
   const localServerId = useLocalDaemonServerId();
-  const { mode: connectionMode } = useConnectionMode();
-  const localServerIdForOrdering = connectionMode === "local" ? localServerId : null;
+  // The desktop always reaches its bundled daemon locally, so it sorts first.
+  const localServerIdForOrdering = localServerId;
   const orderedHosts = useMemo(
     () => orderHostsLocalFirst(hosts, localServerIdForOrdering),
     [hosts, localServerIdForOrdering],

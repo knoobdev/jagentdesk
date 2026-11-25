@@ -1,15 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
-// The store reads the persisted connection mode at boot; pin it to "local" so
-// the REQ 2 filter (hide tailnet-only hosts in local mode) is exercised.
+// The store reads the persisted tailnet mode at boot; pin it to "off" so the
+// REQ 2 filter (hide tailnet-only hosts while the tailnet is off) is exercised.
 vi.mock("@/tailscale", () => ({
-  getConnectionMode: vi.fn(async () => "local" as const),
-  clearConnectionMode: vi.fn(async () => {}),
-  subscribeConnectionMode: () => () => {},
+  getTailnetMode: vi.fn(async () => "off" as const),
+  subscribeTailnetMode: () => () => {},
   getTailscaleLoginAdapter: () => ({}),
 }));
 
-import { clearConnectionMode } from "@/tailscale";
 import { HostRuntimeStore, nextLocalRetryState, type HostRuntimeStorage } from "./host-runtime";
 
 function memoryStorage(entries: Record<string, string>): HostRuntimeStorage {
@@ -53,8 +51,8 @@ function neverConnectDeps() {
   };
 }
 
-describe("HostRuntimeStore.getHosts (REQ 2 local-mode filter)", () => {
-  it("hides tailnet-only hosts in local mode but keeps local hosts, and reports tailnet presence", async () => {
+describe("HostRuntimeStore.getHosts (REQ 2 tailnet-off filter)", () => {
+  it("hides tailnet-only hosts while the tailnet is off but keeps local hosts", async () => {
     const store = new HostRuntimeStore({
       storage: memoryStorage({
         "@jagentdesk:daemon-registry": registry,
@@ -66,35 +64,9 @@ describe("HostRuntimeStore.getHosts (REQ 2 local-mode filter)", () => {
 
     const visibleIds = store.getHosts().map((host) => host.serverId);
     expect(visibleIds).toEqual(["srv_local"]);
-    // A tailnet connection still exists in the registry even though it is hidden.
-    expect(store.hasTailnetHost()).toBe(true);
 
     // The memoized display list is stable across repeated reads.
     expect(store.getHosts()).toBe(store.getHosts());
-  });
-});
-
-describe("HostRuntimeStore.removeHost — reset connection mode when registry empties", () => {
-  it("clears the persisted mode only when the LAST host is removed", async () => {
-    vi.mocked(clearConnectionMode).mockClear();
-    const store = new HostRuntimeStore({
-      storage: memoryStorage({
-        "@jagentdesk:daemon-registry": registry,
-        "@jagentdesk:e2e": "1",
-      }),
-      deps: neverConnectDeps(),
-    });
-    await store.boot();
-
-    // Removing one of two hosts leaves the registry non-empty: mode stays put so
-    // the user is not bounced to the login gate while a host still exists.
-    await store.removeHost("srv_tail");
-    expect(clearConnectionMode).not.toHaveBeenCalled();
-
-    // Removing the final host empties the registry and returns the app to the
-    // Tailscale/Local choice gate instead of silently locking into Local.
-    await store.removeHost("srv_local");
-    expect(clearConnectionMode).toHaveBeenCalledTimes(1);
   });
 });
 

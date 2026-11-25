@@ -3644,12 +3644,12 @@ describe("ordered relay routes", () => {
       preferredConnectionId: null,
     };
     expect(
-      buildConnectionCandidates(host, "tailscale").map((candidate) => candidate.connectionId),
+      buildConnectionCandidates(host, "tailnet").map((candidate) => candidate.connectionId),
     ).toEqual([socket.id, direct.id, tailnet.id, relay.id]);
     expect(
       buildConnectionCandidates(
         { ...host, preferredConnectionId: relay.id, lastConnectionId: tailnet.id },
-        "local",
+        "off",
       ).map((candidate) => candidate.connectionId),
     ).toEqual([relay.id, tailnet.id, socket.id, direct.id]);
     expect(
