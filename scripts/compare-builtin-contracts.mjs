@@ -68,6 +68,24 @@ const PLUGINS = {
     baseline: { rpc: [`${S}/session.ts`], tools: [T] },
     branch: { rpc: [`${S}/session.ts`, "plugins/session-share/server/index.ts"], tools: [T] },
   },
+  "browser-tools": {
+    rpcPrefixes: ["browser."],
+    toolPrefixes: ["browser_"],
+    // Tool names appear as `registerTool("…")` or `name: "…"`; error codes share the prefix.
+    declaredTools: true,
+    baseline: {
+      rpc: [`${S}/session.ts`, `${S}/websocket-server.ts`],
+      tools: [T, `${S}/browser-tools/tools.ts`],
+    },
+    branch: {
+      rpc: [`${S}/session.ts`, `${S}/websocket-server.ts`],
+      tools: [
+        T,
+        "plugins/browser-tools/server/tools.ts",
+        "plugins/browser-tools/server/profile-tools.ts",
+      ],
+    },
+  },
 };
 const ids = process.argv.slice(4).length ? process.argv.slice(4) : Object.keys(PLUGINS);
 fs.mkdirSync(output, { recursive: true });
@@ -117,7 +135,18 @@ function dump(revision, config) {
   const rpc = literals(revision, sources.rpc).filter(
     (name) => inbound.has(name) && config.rpcPrefixes.some((prefix) => name.startsWith(prefix)),
   );
-  const tools = literals(revision, sources.tools).filter(
+  const declared = config.declaredTools
+    ? sources.tools
+        .filter((file) => exists(revision, file))
+        .flatMap((file) =>
+          [
+            ...read(revision, file).matchAll(
+              /(?:registerTool\(\s*|\bname:\s*)"([a-z][a-z0-9_]*)"/g,
+            ),
+          ].map((m) => m[1]),
+        )
+    : literals(revision, sources.tools);
+  const tools = declared.filter(
     (name) =>
       config.toolNames?.includes(name) ||
       (config.toolPrefixes?.some((prefix) => name.startsWith(prefix)) &&

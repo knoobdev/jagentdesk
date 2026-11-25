@@ -9,7 +9,9 @@ import type {
   JAgentDeskToolResult,
 } from "../../agent/tools/types.js";
 import type { BuiltinCoreServices } from "./services.js";
-import type { AgentManager, AgentManagerOptions } from "../../agent/agent-manager.js";
+import type { AgentManager, AgentManagerOptions, ManagedAgent } from "../../agent/agent-manager.js";
+import type { BrowserToolsBroker } from "../../browser-tools/broker.js";
+import type { BrowserFingerprintProfile } from "@jagentdesk/protocol/browser-automation/fingerprint-profile";
 import type { AgentStorage } from "../../agent/agent-storage.js";
 import type { SkillInvocationResolver } from "../../agent/agent-prompt.js";
 import type { SpecPlanSource } from "../../agent/spec-plan.js";
@@ -110,6 +112,22 @@ export interface BuiltinToolContext {
   daemon?: BuiltinDaemonScope;
   callerAgentId?: string;
   agentManager: AgentManager;
+  /** The caller agent, or null without one; throws when the caller is gone. */
+  resolveCallerAgent(): ManagedAgent | null;
+  /** Core browser broker and the daemon-config fingerprint profiles (agentic browser). */
+  browser: {
+    /** The caller agent's opening browser-tools state (tool hosts and tests set it). */
+    enabled: boolean;
+    broker: BrowserToolsBroker | null;
+    fingerprintProfiles: BrowserFingerprintProfileStore | null;
+  };
+}
+export interface BrowserFingerprintProfileStore {
+  list(): BrowserFingerprintProfile[];
+  activeId(): string | null;
+  save(profile: BrowserFingerprintProfile): void;
+  select(id: string | null): void;
+  remove(id: string): void;
 }
 export interface BuiltinSessionServices extends BuiltinCoreServices {
   daemon?: BuiltinDaemonScope;

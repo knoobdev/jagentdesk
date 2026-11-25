@@ -1,5 +1,3 @@
-import { useHostFeature } from "@/runtime/host-features";
-import { BuiltinPluginGate } from "@/plugins/builtin/gate";
 import { hostTransportLabelKey } from "@/types/host-connection";
 import {
   ArrowDown,
@@ -73,11 +71,9 @@ import { ICON_SIZE } from "@/styles/theme";
 import type { Theme } from "@/styles/theme";
 import { getProviderIcon } from "@/components/provider-icons";
 import { getConnectionMode } from "@/tailscale";
-import { BrowserToolsOptInCard } from "./browser-tools-card";
 import { IdleRuntimeCleanupCard } from "./idle-runtime-cleanup-card";
 import { RestartRecoveryCard } from "./restart-recovery-card";
 import { BuiltinAgentSettingsCards } from "@/plugins/builtin/surfaces";
-import { BrowserFingerprintProfilesCard } from "./browser-fingerprint-profiles-card";
 import { hasDaemonReconnectedAfter, type DaemonConnectionMarker } from "./daemon-reconnect";
 import { restartDaemonFromSettings } from "./daemon-restart";
 
@@ -272,13 +268,7 @@ export function HostAgentsPage({ serverId }: { serverId: string }) {
       {isConnected ? (
         <SettingsSection title={t("settings.hostSections.agents")}>
           <InjectJAgentDeskToolsCard serverId={serverId} />
-          <LegacyPluginSettings serverId={serverId}>
-            <BrowserToolsOptInCard serverId={serverId} />
-          </LegacyPluginSettings>
           <BuiltinAgentSettingsCards serverId={serverId} />
-          <BuiltinPluginGate serverId={serverId} id="browser-tools">
-            <BrowserFingerprintProfilesCard serverId={serverId} />
-          </BuiltinPluginGate>
           <AppendSystemPromptCard serverId={serverId} />
           <OperatorContextCard serverId={serverId} />
           <RestartRecoveryCard serverId={serverId} />
@@ -2237,13 +2227,3 @@ const styles = StyleSheet.create((theme) => ({
 }));
 
 const FLEX_1_STYLE = { flex: 1 };
-
-function LegacyPluginSettings({
-  serverId,
-  children,
-}: {
-  serverId: string;
-  children: import("react").ReactNode;
-}) {
-  return useHostFeature(serverId, "builtinPlugins") ? null : children;
-}

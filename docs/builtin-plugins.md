@@ -6,7 +6,20 @@ Settings → Plugins controls each feature per host. The persisted ids, defaults
 capabilities, RPC names, tool names, and data paths are release contracts.
 
 Docker was the phase 2 pilot. A manifest with `builtinEntrypoints` is migrated; the others still
-describe phase 1 implementations.
+describe phase 1 implementations. Each migrated feature kept some code in core because another
+feature or a core flow shares it:
+
+| Feature          | Stays in core                                                                                          |
+| ---------------- | ------------------------------------------------------------------------------------------------------ |
+| `docker`         | Docker CLI service, log/stats streams, SSH remote Docker                                               |
+| `skills`         | Provider skill directories (`agent/native-skill-paths.ts`), tar extraction, bundled-skill lookup       |
+| `spec-mode`      | Plan contract and tasks.md parser (`agent/spec-plan.ts`), per-agent mode hooks, phase bubble text      |
+| `autorun`        | Nothing beyond the per-agent mode hooks it shares with Spec mode                                       |
+| `activity-graph` | Archify renderer, the stream's node-selection contract (`agent-stream/activity-node-action.ts`)        |
+| `insights`       | The usage-history query key the push router writes                                                     |
+| `session-share`  | Guest scopes, guest socket attach and re-scoping, guest-mode app entry, the cloudflared tunnel manager |
+| `browser-tools`  | The browser broker and its RPCs (basic browser tools), fingerprint profile patches                     |
+
 The bundled provider and usage plugins retain their existing SDK runtime. Do not move those
 implementations while migrating a feature.
 
@@ -69,7 +82,9 @@ new database paths with the feature id. Preserve existing storage locations duri
   put work that must stop while disabled in a background service. Read the instance with
   `ref.get(services.daemon)` in a session factory or `ref.get(context.daemon)` in a tool
   installer. The create context adds the daemon home, agent manager and storage, `broadcast`,
-  and `isEnabled`. Tests install an instance with `builtinServerRegistry.createScope()` and
+  `sendPush`, `isEnabled`, the host capability probe once the daemon listens, and the core
+  resources a feature borrows (Session sharing's tunnel manager and guest attach). The daemon
+  creates these after agent storage loads. Tests install an instance with `builtinServerRegistry.createScope()` and
   `scope.set(ref, instance)`.
 - `host.provide(port, get)` serves a core-declared interface (`BuiltinPorts` in `host.ts`) that
   a core flow consumes: prompt delivery, agent launch, guest attach. Core reads it with
@@ -122,7 +137,9 @@ on web, iOS, and Android.
 `register(app)` can contribute a sidebar destination (`Tools` or `main`), a left drill-in panel,
 a route screen, settings sections, mobile drawer entries, composer items, timeline renderers,
 attachment sources, host binders (mounted per host route), agent controls (the composer's
-control row, in plugin order), agent panel accessories, and turn preparers. Use the same
+control row, in plugin order), agent panel accessories, composer docks, a user message body,
+agent and workspace header controls, side panels beside the chat, Settings → Agents cards
+(`order` keeps several features' cards in sequence), and turn preparers. Use the same
 destination metadata for desktop and mobile; `before` keeps a destination at its old rail
 position. A destination drills the sidebar in only when the feature registers a left panel for
 its segment. Screens receive the selected `serverId`; never choose the first host inside a

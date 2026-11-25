@@ -1,13 +1,13 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
-import type { BrowserToolsExecuteInput } from "./broker.js";
-import type { BrowserToolsResponsePayload } from "./errors.js";
+import type { BrowserToolsExecuteInput } from "../../../packages/server/src/server/browser-tools/broker.js";
+import type { BrowserToolsResponsePayload } from "../../../packages/server/src/server/browser-tools/errors.js";
 import { registerBrowserTools, type RegisterBrowserToolsOptions } from "./tools.js";
 import type {
   JAgentDeskToolConfig,
   JAgentDeskToolExecutionContext,
   JAgentDeskToolResult,
-} from "../agent/tools/types.js";
+} from "../../../packages/server/src/server/agent/tools/types.js";
 
 const BROWSER_ID = "11111111-1111-4111-8111-111111111111";
 const BROWSER_HOST = {

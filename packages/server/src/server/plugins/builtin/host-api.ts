@@ -24,6 +24,7 @@ export type {
   BuiltinSessionServices,
   BuiltinSessionContribution,
   BuiltinToolContext,
+  BrowserFingerprintProfileStore,
   RegisterBuiltinTool,
 } from "./host.js";
 
@@ -80,3 +81,9 @@ export { runArchifyRenderer, type ArchifyDiagramError } from "../../archify/arch
 export { guestScopesForCapabilities } from "../../authorization/guest-scopes.js";
 export { TunnelManager, CloudflaredMissingError } from "../../tunnels/tunnel-manager.js";
 export type { AgentStorage } from "../../agent/agent-storage.js";
+
+// The agentic browser's tools drive the core browser broker (basic browser tools stay core).
+export type { BrowserToolsBroker } from "../../browser-tools/broker.js";
+export type { BrowserHostTarget, BrowserToolsResponsePayload } from "../../browser-tools/errors.js";
+export { expandUserPath } from "../../path-utils.js";
+export { JAgentDeskToolInputError } from "../../agent/tools/types.js";

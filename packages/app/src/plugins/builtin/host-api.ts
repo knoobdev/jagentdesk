@@ -82,3 +82,13 @@ export {
   useGumloopDesktopShell,
   useIsGumloopTheme,
 } from "@/components/gumloop-shell/use-gumloop-chrome";
+
+// Fingerprint profile patches are shared with the desktop browser pane's profile sync.
+export {
+  activeFingerprintProfileId,
+  deleteProfilePatch,
+  listFingerprintProfiles,
+  newFingerprintProfileId,
+  selectProfilePatch,
+  upsertProfilePatch,
+} from "@/screens/settings/browser-fingerprint-config";

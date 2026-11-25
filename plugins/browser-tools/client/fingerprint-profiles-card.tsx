@@ -1,3 +1,16 @@
+import {
+  FormTextInput,
+  Switch,
+  useDaemonConfig,
+  useHostRuntimeIsConnected,
+  settingsStyles,
+  activeFingerprintProfileId,
+  deleteProfilePatch,
+  listFingerprintProfiles,
+  newFingerprintProfileId,
+  selectProfilePatch,
+  upsertProfilePatch,
+} from "../../../packages/app/src/plugins/builtin/host-api";
 import React, { useCallback, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
@@ -9,19 +22,6 @@ import {
   type WebRtcPolicy,
 } from "@jagentdesk/protocol/browser-automation/fingerprint-profile";
 import type { MutableDaemonConfigPatch } from "@jagentdesk/protocol/messages";
-import { FormTextInput } from "@/components/ui/form-field";
-import { Switch } from "@/components/ui/switch";
-import { useDaemonConfig } from "@/hooks/use-daemon-config";
-import { useHostRuntimeIsConnected } from "@/runtime/host-runtime";
-import { settingsStyles } from "@/styles/settings";
-import {
-  activeFingerprintProfileId,
-  deleteProfilePatch,
-  listFingerprintProfiles,
-  newFingerprintProfileId,
-  selectProfilePatch,
-  upsertProfilePatch,
-} from "./browser-fingerprint-config";
 
 const OS_LABELS: Record<FingerprintOs, string> = {
   windows: "Windows",

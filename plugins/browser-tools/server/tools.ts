@@ -1,12 +1,13 @@
-import { z } from "zod";
-import { BrowserAutomationBrowserIdSchema } from "@jagentdesk/protocol/browser-automation/rpc-schemas";
-import type { BrowserToolsBroker } from "./broker.js";
-import type { BrowserHostTarget, BrowserToolsResponsePayload } from "./errors.js";
 import type {
+  BrowserToolsBroker,
+  BrowserHostTarget,
+  BrowserToolsResponsePayload,
   JAgentDeskToolConfig,
   JAgentDeskToolExecutionContext,
   JAgentDeskToolResult,
-} from "../agent/tools/types.js";
+} from "../../../packages/server/src/server/plugins/builtin/host-api.js";
+import { z } from "zod";
+import { BrowserAutomationBrowserIdSchema } from "@jagentdesk/protocol/browser-automation/rpc-schemas";
 
 interface CallerAgentContext {
   id: string;

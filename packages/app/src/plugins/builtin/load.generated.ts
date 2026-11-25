@@ -6,6 +6,7 @@ import { register as register3 } from "../../../../../plugins/autorun/client/ind
 import { register as register4 } from "../../../../../plugins/activity-graph/client/index";
 import { register as register5 } from "../../../../../plugins/insights/client/index";
 import { register as register6 } from "../../../../../plugins/session-share/client/index";
+import { register as register7 } from "../../../../../plugins/browser-tools/client/index";
 import type { BuiltinClientRegistry } from "./host";
 export function loadBuiltins(registry: BuiltinClientRegistry) {
   register0(registry.forPlugin("docker"));
@@ -15,4 +16,5 @@ export function loadBuiltins(registry: BuiltinClientRegistry) {
   register4(registry.forPlugin("activity-graph"));
   register5(registry.forPlugin("insights"));
   register6(registry.forPlugin("session-share"));
+  register7(registry.forPlugin("browser-tools"));
 }

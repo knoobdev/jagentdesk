@@ -6,7 +6,7 @@ import {
   createBrowserToolsPatch,
   getBrowserToolsCardState,
   getBrowserToolsMutationViewState,
-} from "./browser-tools-config";
+} from "./settings-config";
 
 function makeConfig(browserToolsEnabled = false): MutableDaemonConfig {
   return {
