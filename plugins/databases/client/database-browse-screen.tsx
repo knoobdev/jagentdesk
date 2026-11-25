@@ -1,0 +1,654 @@
+import { useSafeAreaInsets, useRouter } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Pressable, ScrollView, Text, View } from "react-native";
+import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import { PanelLeft, X } from "lucide-react-native";
+import type { DatabaseInfo } from "@jagentdesk/protocol/database/rpc-schemas";
+import { BackHeader } from "../../../packages/app/src/plugins/builtin/host-api";
+import {
+  useHostRuntimeClient,
+  useHostRuntimeIsConnected,
+} from "../../../packages/app/src/plugins/builtin/host-api";
+import { DatabaseDataEditor } from "./database-data-editor";
+import { DatabaseStructureView } from "./database-structure-view";
+import { DatabaseSqlConsole } from "./database-sql-console";
+import { DatabaseErDiagram } from "./database-er-diagram";
+import { DatabaseFullTextSearch } from "./database-full-text-search";
+import { DatabaseChatDock } from "./database-chat-dock";
+import type { DatabaseComposerContext } from "./database-draft-chat";
+import { useIsCompactFormFactor } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useDatabaseNavStore } from "./database-nav-store";
+import { useDatabaseViewStore } from "./database-view-store";
+import { useDatabaseChatStore } from "../../../packages/app/src/plugins/builtin/host-api";
+import { usePanelStore } from "../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useIsGumloopTheme } from "../../../packages/app/src/plugins/builtin/host-api";
+import {
+  gumloopListStyles,
+  gumloopTabStyles,
+} from "../../../packages/app/src/plugins/builtin/host-api";
+
+const ThemedPanelLeft = withUnistyles(PanelLeft);
+const ThemedX = withUnistyles(X);
+const mutedIconColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
+
+/** An open editor tab (a table/view the user opened), DataGrip-style. */
+type DbTab =
+  | {
+      kind: "object";
+      id: string;
+      label: string;
+      databaseId: string;
+      schema: string;
+      name: string;
+    }
+  | { kind: "console" | "er" | "search"; id: string; label: string };
+
+/** Open-tab chip: Gumloop's underlined text tab replaces the boxed editor tab. */
+function dbTabStyle(isGumloop: boolean, active: boolean) {
+  if (!isGumloop) return [styles.tab, active && styles.tabActive];
+  return [styles.tabGumloop, active ? gumloopTabStyles.tabActive : gumloopTabStyles.tab];
+}
+
+function dbTabLabelStyle(isGumloop: boolean, active: boolean) {
+  if (!isGumloop) return [styles.tabLabel, active && styles.tabLabelActive];
+  return [styles.tabLabelGumloop, active ? gumloopTabStyles.textActive : gumloopTabStyles.text];
+}
+
+/** Data / Structure switch: pill segments in classic, underlined text tabs in Gumloop. */
+function switchBtnStyle(isGumloop: boolean, active: boolean) {
+  if (!isGumloop) return [styles.switchBtn, active && styles.switchBtnActive];
+  return active ? gumloopTabStyles.tabActive : gumloopTabStyles.tab;
+}
+
+function switchTextStyle(isGumloop: boolean, active: boolean) {
+  if (!isGumloop) return [styles.switchText, active && styles.switchTextActive];
+  return active ? gumloopTabStyles.textActive : gumloopTabStyles.text;
+}
+
+/** One tab chip; own component so the press/close handlers stay stable. */
+function DbTabChip({
+  tab,
+  active,
+  onActivate,
+  onClose,
+}: {
+  tab: DbTab;
+  active: boolean;
+  onActivate: (tab: DbTab) => void;
+  onClose: (id: string) => void;
+}) {
+  const activate = useCallback(() => onActivate(tab), [onActivate, tab]);
+  const close = useCallback(() => onClose(tab.id), [onClose, tab.id]);
+  const isGumloop = useIsGumloopTheme();
+  return (
+    <Pressable style={dbTabStyle(isGumloop, active)} onPress={activate}>
+      <Text style={dbTabLabelStyle(isGumloop, active)} numberOfLines={1}>
+        {tab.label}
+      </Text>
+      <Pressable onPress={close} hitSlop={6} style={styles.tabClose} accessibilityLabel="Close tab">
+        <ThemedX size={12} uniProps={mutedIconColor} />
+      </Pressable>
+    </Pressable>
+  );
+}
+
+/** The open-tabs strip above the content pane. */
+function DbTabStrip({
+  tabs,
+  activeId,
+  onActivate,
+  onClose,
+}: {
+  tabs: DbTab[];
+  activeId: string | null;
+  onActivate: (tab: DbTab) => void;
+  onClose: (id: string) => void;
+}) {
+  const isGumloop = useIsGumloopTheme();
+  return (
+    <ScrollView
+      horizontal
+      style={isGumloop ? styles.tabBarGumloop : styles.tabBar}
+      contentContainerStyle={isGumloop ? styles.tabBarContentGumloop : styles.tabBarContent}
+      showsHorizontalScrollIndicator={false}
+    >
+      {tabs.map((t) => (
+        <DbTabChip
+          key={t.id}
+          tab={t}
+          active={t.id === activeId}
+          onActivate={onActivate}
+          onClose={onClose}
+        />
+      ))}
+    </ScrollView>
+  );
+}
+
+/**
+ * The content pane for a connected database. The object navigation lives in the
+ * app left sidebar (SidebarDatabaseNav); this pane shows the active view —
+ * connection overview, a table data grid, or the SQL console — plus the chat
+ * dock on the right (mirrors ClusterWorkloadsScreen).
+ */
+// eslint-disable-next-line complexity
+export function DatabaseBrowseScreen({
+  serverId,
+  databaseId,
+}: {
+  serverId: string;
+  databaseId: string;
+}) {
+  const client = useHostRuntimeClient(serverId);
+  // A deep link mounts this before the host WebSocket has synced; gate the
+  // connect/introspect on a live session so it doesn't no-op on an empty list.
+  const isConnected = useHostRuntimeIsConnected(serverId);
+  const [database, setDatabase] = useState<DatabaseInfo | null>(null);
+  const [schemaCount, setSchemaCount] = useState<number | null>(null);
+  const [objectView, setObjectView] = useState<"data" | "structure">("data");
+  const insets = useSafeAreaInsets();
+  const isCompact = useIsCompactFormFactor();
+  const router = useRouter();
+  const isGumloop = useIsGumloopTheme();
+
+  const selectedObject = useDatabaseNavStore((s) => s.selectedObject);
+  const showingConsole = useDatabaseNavStore((s) => s.showingConsole);
+  const showingEr = useDatabaseNavStore((s) => s.showingEr);
+  const showingSearch = useDatabaseNavStore((s) => s.showingSearch);
+  const selectOverview = useDatabaseNavStore((s) => s.selectOverview);
+  const selectObject = useDatabaseNavStore((s) => s.selectObject);
+  const selectConsole = useDatabaseNavStore((s) => s.selectConsole);
+  const selectEr = useDatabaseNavStore((s) => s.selectEr);
+  const selectSearch = useDatabaseNavStore((s) => s.selectSearch);
+  const setLastDatabase = useDatabaseNavStore((s) => s.setLastDatabase);
+  const bumpRefresh = useDatabaseViewStore((s) => s.bumpRefresh);
+  const resetViewForDatabase = useDatabaseViewStore((s) => s.resetForDatabase);
+  const resetChatForDatabase = useDatabaseChatStore((s) => s.resetForDatabase);
+  const chatOpen = useDatabaseChatStore((s) => s.open);
+  const hideChat = useDatabaseChatStore((s) => s.hideChat);
+
+  // Deep links land here as the first stack entry (no router back target), but
+  // the section still has its own in-screen views (chat, SQL console, search, ER
+  // diagram, a selected table). Show the back affordance whenever there is an
+  // in-section view to unwind, even if the router itself can't go back.
+  const showBack =
+    isCompact &&
+    (chatOpen ||
+      showingConsole ||
+      showingSearch ||
+      showingEr ||
+      selectedObject != null ||
+      router.canGoBack());
+
+  useEffect(() => {
+    resetViewForDatabase(databaseId);
+    setLastDatabase(serverId, databaseId);
+    // Show the chat panel by default on desktop — it's JAgentDesk's edge (a
+    // schema-grounded agent) and belongs visible beside the data, DataGrip-AI
+    // style. On phones it stays collapsed (the grid needs the full width) and is
+    // opened from the explorer's "Ask AI" button.
+    resetChatForDatabase(databaseId, !isCompact);
+  }, [
+    databaseId,
+    serverId,
+    isCompact,
+    resetViewForDatabase,
+    setLastDatabase,
+    resetChatForDatabase,
+  ]);
+
+  const showMobileAgentList = usePanelStore((s) => s.showMobileAgentList);
+  useEffect(() => {
+    // On phones the object nav is a slide-in overlay; reveal it on open so the
+    // user sees the table menu rather than a bare overview.
+    if (isCompact) showMobileAgentList();
+  }, [databaseId, isCompact, showMobileAgentList]);
+
+  useEffect(() => {
+    if (!client || !isConnected) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await client.databaseList();
+        if (cancelled || res.error) return;
+        const found = res.databases.find((d) => d.id === databaseId) ?? null;
+        setDatabase(found);
+        // Ensure connected: the live client lives in-daemon memory and is dropped
+        // on daemon restart; opening via deep link / sidebar jump never ran connect.
+        if (found && found.state !== "connected" && found.state !== "connecting") {
+          const con = await client.databaseConnect({ id: databaseId });
+          if (cancelled || con.error) return;
+          const refreshed = await client.databaseList().catch(() => null);
+          if (cancelled) return;
+          if (refreshed && !refreshed.error) {
+            setDatabase(refreshed.databases.find((d) => d.id === databaseId) ?? found);
+          }
+          bumpRefresh();
+        }
+        const schemas = await client.databaseSchemas({ id: databaseId }).catch(() => null);
+        if (!cancelled && schemas && !schemas.error) setSchemaCount(schemas.schemas.length);
+      } catch {
+        // best-effort; child views surface their own errors
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [client, isConnected, databaseId, bumpRefresh]);
+
+  // Honor the safe area on all edges on compact so child bottom bars (data grid
+  // status/pagination) clear the home indicator and screen edges. When the back
+  // header is shown it already reserves the top inset, so don't double-pad.
+  const contentStyle = useMemo(
+    () => [
+      styles.content,
+      isCompact
+        ? {
+            paddingTop: showBack ? 0 : insets.top,
+            paddingBottom: insets.bottom,
+            paddingLeft: insets.left,
+            paddingRight: insets.right,
+          }
+        : null,
+    ],
+    [isCompact, showBack, insets.top, insets.bottom, insets.left, insets.right],
+  );
+
+  const engine = database?.engine ?? "postgres";
+  const dbName = database?.displayName ?? "this database";
+  const chatContext = useMemo<DatabaseComposerContext>(
+    () => ({ engine, schema: selectedObject?.schema, table: selectedObject?.name }),
+    [engine, selectedObject],
+  );
+  const showDataView = useCallback(() => setObjectView("data"), []);
+  const showStructureView = useCallback(() => setObjectView("structure"), []);
+  // On phones the object nav is a slide-in that closes when you pick a table; this
+  // bar reopens it so the table tree is always one tap away (not just the chat FAB).
+  const handleOpenTables = useCallback(() => showMobileAgentList(), [showMobileAgentList]);
+
+  // DataGrip-style open-object tabs. Each table/view the user opens becomes a tab so
+  // they can switch back with one click; the active tab tracks the nav-store selection.
+  const activeTab = useMemo<DbTab | null>(() => {
+    if (selectedObject) {
+      return {
+        kind: "object",
+        id: `object:${selectedObject.databaseId}:${selectedObject.schema}.${selectedObject.name}`,
+        label: `${selectedObject.schema}.${selectedObject.name}`,
+        databaseId: selectedObject.databaseId,
+        schema: selectedObject.schema,
+        name: selectedObject.name,
+      };
+    }
+    if (showingConsole) return { kind: "console", id: "console", label: "SQL Console" };
+    if (showingEr) return { kind: "er", id: "er", label: "ER Diagram" };
+    if (showingSearch) return { kind: "search", id: "search", label: "Search" };
+    return null;
+  }, [selectedObject, showingConsole, showingEr, showingSearch]);
+
+  const [tabs, setTabs] = useState<DbTab[]>([]);
+  // A new connection clears the tab bar.
+  useEffect(() => setTabs([]), [databaseId]);
+  // Register the active view as a tab (append when new; existing tabs keep their order).
+  useEffect(() => {
+    if (!activeTab) return;
+    setTabs((prev) => (prev.some((t) => t.id === activeTab.id) ? prev : [...prev, activeTab]));
+  }, [activeTab]);
+
+  const activateTab = useCallback(
+    (tab: DbTab) => {
+      if (tab.kind === "object") {
+        selectObject(tab.databaseId, {
+          databaseId: tab.databaseId,
+          schema: tab.schema,
+          name: tab.name,
+        });
+      } else if (tab.kind === "console") {
+        selectConsole(databaseId);
+      } else if (tab.kind === "er") {
+        selectEr(databaseId);
+      } else {
+        selectSearch(databaseId);
+      }
+    },
+    [selectObject, selectConsole, selectEr, selectSearch, databaseId],
+  );
+  const closeTab = useCallback(
+    (tabId: string) => {
+      setTabs((prev) => {
+        const idx = prev.findIndex((t) => t.id === tabId);
+        if (idx < 0) return prev;
+        const next = prev.filter((t) => t.id !== tabId);
+        // Closing the active tab moves to a neighbour (or the overview when none remain).
+        if (activeTab?.id === tabId) {
+          const fallback = next[idx] ?? next[idx - 1] ?? null;
+          if (fallback) activateTab(fallback);
+          else selectOverview(databaseId);
+        }
+        return next;
+      });
+    },
+    [activeTab, activateTab, selectOverview, databaseId],
+  );
+  // Back unwinds the in-section view stack before leaving the DB section: chat
+  // first, then any sub-view (SQL console / full-text search / ER diagram) or a
+  // selected table, all of which return to the connection overview + object
+  // tree. Only when already at the tree root does Back exit to the connection
+  // list. Without this, Back from a table/console jumps straight out of the DB
+  // section, losing the user's place.
+  const handleBack = useCallback(() => {
+    if (chatOpen) {
+      hideChat();
+      return;
+    }
+    // These views are mutually exclusive in the nav store, so a single
+    // selectOverview clears whichever is active (and any selected table) and
+    // lands back on the overview/tree.
+    if (showingConsole || showingSearch || showingEr || selectedObject != null) {
+      selectOverview(databaseId);
+      return;
+    }
+    router.back();
+  }, [
+    chatOpen,
+    hideChat,
+    showingConsole,
+    showingSearch,
+    showingEr,
+    selectedObject,
+    selectOverview,
+    databaseId,
+    router,
+  ]);
+
+  let content;
+  if (showingConsole) {
+    content = <DatabaseSqlConsole serverId={serverId} databaseId={databaseId} engine={engine} />;
+  } else if (showingSearch) {
+    content = (
+      <DatabaseFullTextSearch serverId={serverId} databaseId={databaseId} engine={engine} />
+    );
+  } else if (showingEr) {
+    content = <DatabaseErDiagram serverId={serverId} databaseId={databaseId} />;
+  } else if (selectedObject) {
+    // A table picked from the tree carries its own databaseId (a child database's
+    // composite id), so the grid/structure operate that database, not the parent.
+    const objectDbId = selectedObject.databaseId;
+    const inner =
+      objectView === "data" ? (
+        <DatabaseDataEditor
+          serverId={serverId}
+          databaseId={objectDbId}
+          engine={engine}
+          schema={selectedObject.schema}
+          table={selectedObject.name}
+        />
+      ) : (
+        <DatabaseStructureView
+          serverId={serverId}
+          databaseId={objectDbId}
+          engine={engine}
+          schema={selectedObject.schema}
+          table={selectedObject.name}
+        />
+      );
+    content = (
+      <View style={styles.leftColumn}>
+        <View style={isGumloop ? styles.viewSwitchGumloop : styles.viewSwitch}>
+          <Pressable
+            style={switchBtnStyle(isGumloop, objectView === "data")}
+            onPress={showDataView}
+          >
+            <Text style={switchTextStyle(isGumloop, objectView === "data")}>Data</Text>
+          </Pressable>
+          <Pressable
+            style={switchBtnStyle(isGumloop, objectView === "structure")}
+            onPress={showStructureView}
+          >
+            <Text style={switchTextStyle(isGumloop, objectView === "structure")}>Structure</Text>
+          </Pressable>
+        </View>
+        {inner}
+      </View>
+    );
+  } else {
+    content = (
+      <ScrollView style={styles.overview} contentContainerStyle={styles.overviewContent}>
+        <Text style={styles.overviewTitle}>{dbName}</Text>
+        <View style={styles.metaGrid}>
+          <Meta label="Engine" value={engine} />
+          <Meta label="Target" value={database?.target || "—"} />
+          <Meta label="Server" value={database?.serverVersion ?? "—"} />
+          <Meta label="Schemas" value={schemaCount == null ? "…" : String(schemaCount)} />
+          <Meta label="State" value={database?.state ?? "—"} />
+        </View>
+        <Text style={styles.overviewHint}>
+          Pick a table on the left to browse its data, open the SQL console to run a query, or ask
+          the chat agent on the right a question about this database.
+        </Text>
+      </ScrollView>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      {showBack ? <BackHeader title={dbName} onBack={handleBack} /> : null}
+      <View style={contentStyle}>
+        <View style={styles.row}>
+          <View style={styles.leftColumn}>
+            {isCompact ? (
+              <Pressable
+                style={styles.mobileNavBar}
+                onPress={handleOpenTables}
+                accessibilityLabel="Show tables"
+                testID="database-mobile-tables"
+              >
+                <ThemedPanelLeft size={16} uniProps={mutedIconColor} />
+                <Text style={styles.mobileNavBarText} numberOfLines={1}>
+                  {selectedObject ? `${selectedObject.schema}.${selectedObject.name}` : dbName}
+                </Text>
+              </Pressable>
+            ) : null}
+            {tabs.length > 0 ? (
+              <DbTabStrip
+                tabs={tabs}
+                activeId={activeTab?.id ?? null}
+                onActivate={activateTab}
+                onClose={closeTab}
+              />
+            ) : null}
+            {content}
+          </View>
+          <DatabaseChatDock
+            serverId={serverId}
+            databaseId={databaseId}
+            databaseName={dbName}
+            context={chatContext}
+          />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function Meta({ label, value }: { label: string; value: string }) {
+  const isGumloop = useIsGumloopTheme();
+  return (
+    <View style={styles.meta}>
+      <Text style={[styles.metaLabel, isGumloop && gumloopListStyles.columnHeader]}>{label}</Text>
+      <Text style={styles.metaValue} numberOfLines={1}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create((theme: Theme) => ({
+  container: {
+    flex: 1,
+    backgroundColor: theme.colors.surface0,
+  },
+  content: {
+    flex: 1,
+    minHeight: 0,
+  },
+  row: {
+    flex: 1,
+    flexDirection: "row",
+    minHeight: 0,
+  },
+  leftColumn: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 0,
+  },
+  // Open-object tab strip (DataGrip-style) above the content pane.
+  tabBar: {
+    flexGrow: 0,
+    flexShrink: 0,
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+    backgroundColor: theme.colors.surface0,
+  },
+  tabBarContent: {
+    alignItems: "stretch",
+  },
+  tabBarGumloop: {
+    flexGrow: 0,
+    flexShrink: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.chrome.cardBorder,
+    backgroundColor: theme.chrome.cardBackground,
+  },
+  tabBarContentGumloop: {
+    alignItems: "flex-end",
+    gap: theme.spacing[4],
+    paddingHorizontal: theme.spacing[4],
+    paddingTop: theme.spacing[1.5],
+  },
+  tabGumloop: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1.5],
+    maxWidth: 220,
+  },
+  tabLabelGumloop: {
+    flexShrink: 1,
+  },
+  tab: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1.5],
+    maxWidth: 220,
+    paddingLeft: theme.spacing[3],
+    paddingRight: theme.spacing[2],
+    paddingVertical: theme.spacing[2],
+    borderRightWidth: theme.borderWidth[1],
+    borderRightColor: theme.colors.border,
+    borderBottomWidth: 2,
+    borderBottomColor: "transparent",
+  },
+  tabActive: {
+    backgroundColor: theme.colors.surface1,
+    borderBottomColor: theme.colors.accent,
+  },
+  tabLabel: {
+    flexShrink: 1,
+    fontSize: theme.fontSize.xs,
+    fontFamily: theme.fontFamily.mono,
+    color: theme.colors.foregroundMuted,
+  },
+  tabLabelActive: {
+    color: theme.colors.foreground,
+  },
+  tabClose: {
+    padding: 2,
+    borderRadius: theme.borderRadius.sm,
+  },
+  mobileNavBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+  },
+  mobileNavBarText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+    color: theme.colors.foreground,
+  },
+  viewSwitch: {
+    flexDirection: "row",
+    gap: theme.spacing[1],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1.5],
+    borderBottomWidth: theme.borderWidth[1],
+    borderBottomColor: theme.colors.border,
+  },
+  viewSwitchGumloop: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: theme.spacing[6],
+    paddingHorizontal: theme.spacing[4],
+    paddingTop: theme.spacing[1.5],
+    borderBottomWidth: 1,
+    borderBottomColor: theme.chrome.cardBorder,
+  },
+  switchBtn: {
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1],
+    borderRadius: theme.borderRadius.md,
+  },
+  switchBtnActive: {
+    backgroundColor: theme.colors.surface2,
+  },
+  switchText: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+  },
+  switchTextActive: {
+    color: theme.colors.foreground,
+  },
+  overview: {
+    flex: 1,
+    minHeight: 0,
+  },
+  overviewContent: {
+    padding: theme.spacing[4],
+    gap: theme.spacing[3],
+  },
+  overviewTitle: {
+    fontSize: theme.fontSize.xl,
+    fontWeight: theme.fontWeight.bold,
+    color: theme.colors.foreground,
+  },
+  metaGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: theme.spacing[3],
+  },
+  meta: {
+    minWidth: 140,
+    gap: theme.spacing[1],
+  },
+  metaLabel: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.foregroundMuted,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
+  },
+  metaValue: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foreground,
+  },
+  overviewHint: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.foregroundMuted,
+    marginTop: theme.spacing[2],
+  },
+}));

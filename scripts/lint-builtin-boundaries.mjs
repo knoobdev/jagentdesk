@@ -9,6 +9,29 @@ const allowedApis = new Set([
   "packages/server/src/server/plugins/builtin/host-test-api.ts",
 ]);
 let violations = 0;
+// Repository path for absolute, relative, and workspace-alias specifiers; null for packages.
+function resolveLocal(file, spec) {
+  if (path.isAbsolute(spec)) return path.relative(root, spec).replaceAll(path.sep, "/");
+  if (spec.startsWith("."))
+    return path.posix.normalize(path.posix.join(path.posix.dirname(file), spec));
+  if (spec.startsWith("@/")) return "packages/app/src/" + spec.slice(2);
+  if (spec.startsWith("@server/")) return "packages/server/src/" + spec.slice(8);
+  if (spec.startsWith("@jagentdesk/server"))
+    return "packages/server/src/" + spec.slice("@jagentdesk/server".length);
+  return null;
+}
+// Packages installed only for the app do not resolve from plugins/ (tsc or Metro).
+function appLocalPackage(file, spec) {
+  const packageName = spec
+    .split("/")
+    .slice(0, spec.startsWith("@") ? 2 : 1)
+    .join("/");
+  return (
+    /^plugins\/[^/]+\/client\//.test(file) &&
+    !fs.existsSync(path.join(root, "node_modules", packageName)) &&
+    fs.existsSync(path.join(root, "packages/app/node_modules", packageName))
+  );
+}
 function walk(dir) {
   for (const name of fs.readdirSync(path.join(root, dir))) {
     if (["node_modules", "dist", ".git"].includes(name)) continue;
@@ -57,15 +80,17 @@ function walk(dir) {
       ts.forEachChild(node, visit);
     }
     function check(spec, node) {
-      let resolved;
-      if (path.isAbsolute(spec)) resolved = path.relative(root, spec).replaceAll(path.sep, "/");
-      else if (spec.startsWith("."))
-        resolved = path.posix.normalize(path.posix.join(path.posix.dirname(file), spec));
-      else if (spec.startsWith("@/")) resolved = "packages/app/src/" + spec.slice(2);
-      else if (spec.startsWith("@server/")) resolved = "packages/server/src/" + spec.slice(8);
-      else if (spec.startsWith("@jagentdesk/server"))
-        resolved = "packages/server/src/" + spec.slice("@jagentdesk/server".length);
-      else return;
+      let resolved = resolveLocal(file, spec);
+      if (!resolved) {
+        if (appLocalPackage(file, spec)) {
+          const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+          console.error(
+            `${file}:${line}: feature imports an app-local package; use the host API: ${spec}`,
+          );
+          violations++;
+        }
+        return;
+      }
       resolved = resolved.replace(/\.[cm]?jsx?$/, ".ts");
       const api = allowedApis.has(resolved) || allowedApis.has(resolved + ".ts");
       const feature = /^plugins\/([^/]+)\//.exec(file);

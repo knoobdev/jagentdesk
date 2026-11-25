@@ -1,0 +1,176 @@
+import { useSafeAreaInsets } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { View } from "react-native";
+import { StyleSheet } from "react-native-unistyles";
+import type { ClusterInfo } from "@jagentdesk/protocol/cluster/rpc-schemas";
+import { useHostRuntimeClient } from "../../../packages/app/src/plugins/builtin/host-api";
+import { ClusterResourceBrowser } from "./cluster-resource-browser";
+import { ClusterResourceDetail } from "./cluster-resource-detail";
+import { ClusterTabBar } from "./cluster-tab-bar";
+import { ClusterChatDock } from "./cluster-chat-dock";
+import type { ClusterComposerResource } from "./cluster-composer";
+import { useIsCompactFormFactor } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useClusterChatStore } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useClusterNavStore } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useClusterViewStore } from "../../../packages/app/src/plugins/builtin/host-api";
+import { usePanelStore } from "../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
+
+/**
+ * The content pane for a connected cluster. The category navigation lives in the
+ * app left sidebar (SidebarClusterNav). The resource list + detail tabs stay on
+ * the left; chat lives entirely in the right dock (ClusterChatDock), which
+ * carries whatever the user is currently viewing as context.
+ */
+export function ClusterWorkloadsScreen({
+  serverId,
+  clusterId,
+}: {
+  serverId: string;
+  clusterId: string;
+}) {
+  const client = useHostRuntimeClient(serverId);
+  const [cluster, setCluster] = useState<ClusterInfo | null>(null);
+  const insets = useSafeAreaInsets();
+  const isCompact = useIsCompactFormFactor();
+
+  const resetForCluster = useClusterChatStore((s) => s.resetForCluster);
+
+  // Content tabs: the resource list plus any open detail views.
+  const tabs = useClusterViewStore((s) => s.tabs);
+  const activeTabId = useClusterViewStore((s) => s.activeTabId);
+  const closeTab = useClusterViewStore((s) => s.closeTab);
+  const bumpRefresh = useClusterViewStore((s) => s.bumpRefresh);
+  const resetViewForCluster = useClusterViewStore((s) => s.resetForCluster);
+  const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
+
+  // Whatever the user is currently viewing rides along to the chat as context:
+  // the open detail resource, otherwise the selected kind + namespace.
+  const selectedKind = useClusterNavStore((s) => s.selectedKind);
+  const selectedNamespace = useClusterNavStore((s) => s.selectedNamespace);
+  const setLastCluster = useClusterNavStore((s) => s.setLastCluster);
+  const composerResource = useMemo<ClusterComposerResource>(
+    () =>
+      activeTab
+        ? { kind: activeTab.kind, namespace: activeTab.namespace, name: activeTab.name }
+        : { kind: selectedKind, namespace: selectedNamespace },
+    [activeTab, selectedKind, selectedNamespace],
+  );
+
+  useEffect(() => {
+    // On phones the chat dock is a full-screen overlay, so start it CLOSED and
+    // let the k8s resource view be the landing; desktop keeps the side dock open.
+    resetForCluster(clusterId, !isCompact);
+    resetViewForCluster(clusterId);
+    // Remember this cluster so the sidebar's Clusters entry can jump straight back
+    // to it instead of forcing the user to reconnect + reopen from scratch.
+    setLastCluster(serverId, clusterId);
+  }, [clusterId, serverId, isCompact, resetForCluster, resetViewForCluster, setLastCluster]);
+
+  const showMobileAgentList = usePanelStore((s) => s.showMobileAgentList);
+  useEffect(() => {
+    // On phones the kind nav is a slide-in overlay. Opening a cluster's workloads
+    // reveals it right away so the user sees the resource menu instead of a bare
+    // "pick a resource" pane with no visible way to choose.
+    if (isCompact) showMobileAgentList();
+  }, [clusterId, isCompact, showMobileAgentList]);
+
+  // On phones the host stack has no native header (headerShown: false), so the
+  // screen paints under the status bar / notch / camera cutout. Reserve the
+  // real top inset (0 on desktop) so it fits every device. iOS + Android alike.
+  const containerStyle = useMemo(
+    () => [styles.container, isCompact ? { paddingTop: insets.top } : null],
+    [isCompact, insets.top],
+  );
+
+  useEffect(() => {
+    if (!client) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await client.clusterList();
+        if (cancelled || res.error) return;
+        const found = res.clusters.find((c) => c.id === clusterId) ?? null;
+        setCluster(found);
+        // Ensure the cluster is actually connected before any resource view lists.
+        // The connection lives in-memory on the daemon and is dropped on daemon
+        // restart (e.g. after an app update); and opening a cluster directly (deep
+        // link, or the sidebar "return to last cluster" jump) never runs the
+        // connect flow the clusters list does. Without this, cluster/resource/list
+        // fails with "cluster not connected" and workloads silently don't load.
+        if (found && found.state !== "connected" && found.state !== "connecting") {
+          const con = await client.clusterConnect({ id: clusterId });
+          if (cancelled || con.error) return;
+          const refreshed = await client.clusterList().catch(() => null);
+          if (cancelled) return;
+          if (refreshed && !refreshed.error) {
+            setCluster(refreshed.clusters.find((c) => c.id === clusterId) ?? found);
+          }
+          bumpRefresh(); // reload resource views now that the client is connected
+        }
+      } catch {
+        // best-effort; the resource views surface their own errors + retry
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [client, clusterId, bumpRefresh]);
+
+  const clusterName = cluster?.displayName ?? cluster?.contextName ?? "this cluster";
+  const handleDetailClose = useCallback(() => {
+    if (activeTab) closeTab(activeTab.id);
+  }, [activeTab, closeTab]);
+
+  return (
+    <View style={containerStyle}>
+      <View style={styles.row}>
+        <View style={styles.leftColumn}>
+          <ClusterTabBar />
+          {activeTab ? (
+            <ClusterResourceDetail
+              serverId={serverId}
+              clusterId={clusterId}
+              kind={activeTab.kind}
+              namespace={activeTab.namespace}
+              name={activeTab.name}
+              onClose={handleDetailClose}
+              onChanged={bumpRefresh}
+            />
+          ) : (
+            <View style={styles.body}>
+              <ClusterResourceBrowser serverId={serverId} clusterId={clusterId} />
+            </View>
+          )}
+        </View>
+        <ClusterChatDock
+          serverId={serverId}
+          clusterId={clusterId}
+          clusterName={clusterName}
+          resource={composerResource}
+        />
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create((theme: Theme) => ({
+  container: {
+    flex: 1,
+    backgroundColor: theme.colors.surface0,
+  },
+  row: {
+    flex: 1,
+    flexDirection: "row",
+    minHeight: 0,
+  },
+  leftColumn: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 0,
+  },
+  body: {
+    flex: 1,
+    minHeight: 0,
+  },
+}));

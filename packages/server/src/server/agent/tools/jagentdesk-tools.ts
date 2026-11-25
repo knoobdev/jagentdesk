@@ -1,4 +1,6 @@
 import { builtinServerRegistry } from "../../plugins/builtin/loaded.js";
+import type { BuiltinToolContext } from "../../plugins/builtin/host.js";
+import type { BuiltinCoreServices } from "../../plugins/builtin/services.js";
 import {
   sendPromptToAgent,
   enqueueAgentMessage,
@@ -148,12 +150,10 @@ import { type ClusterRegistry } from "../../cluster/cluster-registry.js";
 import { registerSshAgentTools, type SshAgentTool } from "../../ssh/environment/agent-tools.js";
 import { type RemoteExecAgentTool } from "../../remote-exec/agent-tools.js";
 import { type CustomProviderAgentTool } from "../../custom-providers/agent-tools.js";
-import { type ArgoCdAgentTool } from "../../argocd/agent-tools.js";
 import { type SideloadAgentTool } from "../../sideload/agent-tools.js";
 import { type JiraAgentTool } from "../../jira/agent-tools.js";
 import { type FigmaAgentTool } from "../../figma/agent-tools.js";
 import { type DatabaseRegistry } from "../../database/database-registry.js";
-import { type DatabaseEngine } from "../../database/database-dto.js";
 import { SimulatorService } from "../../simulator/simulator-service.js";
 import { fleetSnapshot } from "../../simulator/simulator-streams.js";
 import { DeviceError } from "../../devices/errors.js";
@@ -232,6 +232,8 @@ export interface JAgentDeskToolHostDependencies {
   orchestrationRuntime?: OrchestrationRuntime;
   clusterRegistry?: ClusterRegistry;
   databaseRegistry?: DatabaseRegistry;
+  /** Daemon core services handed to built-in feature tool installers. */
+  builtinServices?: BuiltinCoreServices;
   // SSH servers (spec 25.11): ssh_* tools and the server-aware docker_* tools that replace the
   // host-only ones (same names, same behaviour without serverId). Bound per caller agent.
   sshAgentTools?: (callerAgentId: string | null) => SshAgentTool[];
@@ -239,8 +241,6 @@ export interface JAgentDeskToolHostDependencies {
   remoteExecAgentTools?: (callerAgentId: string | null) => RemoteExecAgentTool[];
   // Custom API providers (spec 34.7): provider_* tools; list/test auto-run, mutations raise a card.
   customProviderAgentTools?: (callerAgentId: string | null) => CustomProviderAgentTool[];
-  // Argo CD (spec 30.4): argocd_* tools bound per caller agent (default instance from its label).
-  argocdAgentTools?: (callerAgentId: string | null) => ArgoCdAgentTool[];
   /** Sideload tools (spec 26.10); installs raise a permission card. */
   sideloadAgentTools?: (callerAgentId: string | null) => SideloadAgentTool[];
   // Jira (spec 29.4): jira_* tools; reads auto-run, writes raise the permission card.
@@ -1520,222 +1520,6 @@ function registerSimulatorTools(params: {
   );
 }
 
-function registerKubectlTools(params: {
-  registerTool: (
-    name: string,
-    config: JAgentDeskToolConfig,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool handlers are schema-validated at registration boundaries.
-    handler: (input: any, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>,
-  ) => void;
-  options: JAgentDeskToolHostDependencies;
-  callerAgentId: string | undefined;
-}): void {
-  const { registerTool, options, callerAgentId } = params;
-
-  registerTool(
-    "kubectl_get",
-    {
-      title: "Kubectl get",
-      description: "Read Kubernetes resources from a connected cluster. Auto-approved (read-only).",
-      inputSchema: {
-        clusterId: z.string().min(1),
-        action: z.enum(["get", "list", "describe", "logs"]),
-        kind: z.string().optional(),
-        namespace: z.string().optional(),
-        name: z.string().optional(),
-      },
-    },
-    async (input: {
-      clusterId: string;
-      action: "get" | "list" | "describe" | "logs";
-      kind?: string;
-      namespace?: string;
-      name?: string;
-    }) => {
-      const client = options.clusterRegistry?.getClient(input.clusterId);
-      if (!client) {
-        return {
-          content: [
-            { type: "text", text: `Cluster not found or not connected: ${input.clusterId}` },
-          ],
-          isError: true,
-        };
-      }
-      let text: string;
-      try {
-        switch (input.action) {
-          case "list": {
-            if (!input.kind) throw new Error("kind is required for list action");
-            const items = await client.listGeneric(input.kind, input.namespace);
-            // Return a COMPACT summary, not the full objects — a namespace of pods
-            // serializes to hundreds of KB (managedFields, full spec/status) and
-            // blows past the MCP result size limit. Use action=get/describe for the
-            // full manifest of a single resource.
-            const summary = items.map((raw) => {
-              const md = (raw.metadata as Record<string, unknown> | undefined) ?? {};
-              const status = (raw.status as Record<string, unknown> | undefined) ?? {};
-              const cs = (status.containerStatuses as Array<{ ready?: boolean }> | undefined) ?? [];
-              const ready = cs.length
-                ? `${cs.filter((c) => c.ready).length}/${cs.length}`
-                : undefined;
-              return {
-                name: md.name,
-                namespace: md.namespace,
-                status: status.phase ?? undefined,
-                ready,
-                replicas: status.readyReplicas ?? status.availableReplicas ?? undefined,
-                created: md.creationTimestamp,
-              };
-            });
-            text = JSON.stringify(
-              {
-                kind: input.kind,
-                namespace: input.namespace ?? "all",
-                count: items.length,
-                items: summary,
-              },
-              null,
-              2,
-            );
-            break;
-          }
-          case "logs": {
-            if (!input.namespace || !input.name)
-              throw new Error("namespace and name are required for logs action");
-            text = await client.getPodLogs(input.namespace, input.name);
-            break;
-          }
-          case "get":
-          case "describe": {
-            if (!input.kind || !input.name)
-              throw new Error("kind and name are required for get/describe action");
-            text = await client.getGeneric(input.kind, input.namespace, input.name);
-            break;
-          }
-          default:
-            throw new Error(`Unknown action: ${input.action}`);
-        }
-      } catch (err) {
-        return {
-          content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
-          isError: true,
-        };
-      }
-      return { content: [{ type: "text", text }] };
-    },
-  );
-
-  registerTool(
-    "kubectl_apply",
-    {
-      title: "Kubectl apply",
-      description:
-        "Write (apply/delete/scale/restart) Kubernetes resources. Requires user approval via permission card.",
-      inputSchema: {
-        clusterId: z.string().min(1),
-        action: z.enum(["apply", "delete", "scale", "restart"]),
-        manifestYaml: z.string().optional(),
-        kind: z.string().optional(),
-        namespace: z.string().optional(),
-        name: z.string().optional(),
-        replicas: z.number().optional(),
-      },
-    },
-    async (
-      input: {
-        clusterId: string;
-        action: "apply" | "delete" | "scale" | "restart";
-        manifestYaml?: string;
-        kind?: string;
-        namespace?: string;
-        name?: string;
-        replicas?: number;
-      },
-      _context: JAgentDeskToolExecutionContext,
-    ) => {
-      if (!callerAgentId) {
-        return {
-          content: [
-            { type: "text", text: "kubectl_apply is only available to agent-scoped tool sessions" },
-          ],
-          isError: true,
-        };
-      }
-      const client = options.clusterRegistry?.getClient(input.clusterId);
-      if (!client) {
-        return {
-          content: [
-            { type: "text", text: `Cluster not found or not connected: ${input.clusterId}` },
-          ],
-          isError: true,
-        };
-      }
-      const description =
-        input.manifestYaml ?? `${input.action} ${input.kind ?? "?"}/${input.name ?? "?"}`;
-      const decision = await options.requestHostToolPermission!(callerAgentId, {
-        name: "kubectl_apply",
-        kind: "tool",
-        title: `${input.action} on ${input.clusterId}`,
-        description,
-        input: input as unknown as Record<string, unknown>,
-      });
-      if (decision.behavior !== "allow") {
-        return { content: [{ type: "text", text: "Denied by user." }], isError: true };
-      }
-      try {
-        const result = await client.applyWrite({
-          kind: input.kind ?? "",
-          namespace: input.namespace,
-          name: input.name ?? "",
-          action: input.action,
-          replicas: input.replicas,
-          manifestYaml: input.manifestYaml,
-          dryRun: false,
-        });
-        return { content: [{ type: "text", text: JSON.stringify(result) }] };
-      } catch (err) {
-        return {
-          content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
-          isError: true,
-        };
-      }
-    },
-  );
-
-  // Lets ANY agent (a workspace/project agent, not just the k8s chat) discover
-  // the clusters connected in the app and their clusterId, so it can then drive
-  // them with kubectl_get/kubectl_apply — the bridge between workspace agents and
-  // the Kubernetes feature.
-  registerTool(
-    "cluster_list",
-    {
-      title: "List Kubernetes clusters",
-      description:
-        "List the Kubernetes clusters connected in the app (clusterId, name, state, node/pod counts). Pass a returned clusterId to kubectl_get/kubectl_apply. Auto-approved (read-only).",
-      inputSchema: {},
-    },
-    async () => {
-      const clusters = options.clusterRegistry?.list() ?? [];
-      const summary = clusters.map((c) => ({
-        clusterId: c.id,
-        name: c.displayName ?? c.contextName,
-        context: c.contextName,
-        state: c.state,
-        nodes: c.nodeCount,
-        pods: c.podCount,
-      }));
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({ count: summary.length, clusters: summary }, null, 2),
-          },
-        ],
-      };
-    },
-  );
-}
-
 // Forge Hub tools (spec 19 / ADR-0015). These mirror the kubectl_* precedent:
 // read tools are auto-approved, write tools are gated behind requestHostToolPermission.
 // The generic ForgeHubService methods are GitHub-only; GitLab/Bitbucket use the
@@ -2371,214 +2155,6 @@ function registerForgeTools(params: {
       } catch (err) {
         return fail(err);
       }
-    },
-  );
-}
-
-function registerSqlTools(params: {
-  registerTool: (
-    name: string,
-    config: JAgentDeskToolConfig,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool handlers are schema-validated at registration boundaries.
-    handler: (input: any, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>,
-  ) => void;
-  options: JAgentDeskToolHostDependencies;
-  callerAgentId: string | undefined;
-}): void {
-  const { registerTool, options, callerAgentId } = params;
-
-  registerTool(
-    "sql_connect",
-    {
-      title: "Connect a database",
-      description:
-        "Register + open a database connection so it appears in the human's Databases panel (they can watch the schema you design and the data live) and so you can query it with sql_query / sql_exec. Pass the engine and the connection fields (host/port/database/user/password, or a full dsn; for sqlite pass file). Returns the databaseId to use. Use this for the database you set up or work on — e.g. after a devops/dev peer provisions one — with the REAL credentials you configured; never invent credentials.",
-      inputSchema: {
-        engine: z.enum(["postgres", "mysql", "sqlite", "mssql", "oracle", "mongodb", "clickhouse"]),
-        host: z.string().optional(),
-        port: z.number().optional(),
-        database: z.string().optional(),
-        user: z.string().optional(),
-        password: z.string().optional(),
-        dsn: z.string().optional(),
-        file: z.string().optional(),
-        displayName: z.string().optional(),
-      },
-    },
-    async (input: {
-      engine: DatabaseEngine;
-      host?: string;
-      port?: number;
-      database?: string;
-      user?: string;
-      password?: string;
-      dsn?: string;
-      file?: string;
-      displayName?: string;
-    }) => {
-      if (!options.databaseRegistry) {
-        return {
-          content: [{ type: "text", text: "Database service is not available in this session." }],
-          isError: true,
-        };
-      }
-      try {
-        const info = await options.databaseRegistry.addConnection({
-          engine: input.engine,
-          ...(input.displayName ? { displayName: input.displayName } : {}),
-          config: {
-            host: input.host,
-            port: input.port,
-            database: input.database,
-            user: input.user,
-            password: input.password,
-            dsn: input.dsn,
-            file: input.file,
-          },
-        });
-        await options.databaseRegistry.connect(info.id).catch(() => undefined);
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Connected database "${info.displayName}" (databaseId=${info.id}). It now shows in the human's Databases panel; query/inspect it with sql_query and sql_exec.`,
-            },
-          ],
-        };
-      } catch (err) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Failed to connect database: ${err instanceof Error ? err.message : String(err)}`,
-            },
-          ],
-          isError: true,
-        };
-      }
-    },
-  );
-
-  registerTool(
-    "sql_query",
-    {
-      title: "SQL query",
-      description:
-        "Run a read-only SQL SELECT against a connected database and return the rows. Auto-approved (read-only; writes are rejected on this path — use sql_exec).",
-      inputSchema: {
-        databaseId: z.string().min(1),
-        sql: z.string().min(1),
-        limit: z.number().optional(),
-        offset: z.number().optional(),
-      },
-    },
-    async (input: { databaseId: string; sql: string; limit?: number; offset?: number }) => {
-      const client = options.databaseRegistry?.getClient(input.databaseId);
-      if (!client) {
-        return {
-          content: [
-            { type: "text", text: `Database not found or not connected: ${input.databaseId}` },
-          ],
-          isError: true,
-        };
-      }
-      try {
-        const result = await client.runQuery(input.sql, {
-          limit: input.limit,
-          offset: input.offset,
-        });
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-      } catch (err) {
-        return {
-          content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
-          isError: true,
-        };
-      }
-    },
-  );
-
-  registerTool(
-    "sql_exec",
-    {
-      title: "SQL exec",
-      description:
-        "Run a writing SQL statement (INSERT/UPDATE/DELETE/DDL) against a connected database. Requires user approval via permission card.",
-      inputSchema: {
-        databaseId: z.string().min(1),
-        sql: z.string().min(1),
-      },
-    },
-    async (
-      input: { databaseId: string; sql: string },
-      _context: JAgentDeskToolExecutionContext,
-    ) => {
-      if (!callerAgentId) {
-        return {
-          content: [
-            { type: "text", text: "sql_exec is only available to agent-scoped tool sessions" },
-          ],
-          isError: true,
-        };
-      }
-      const client = options.databaseRegistry?.getClient(input.databaseId);
-      if (!client) {
-        return {
-          content: [
-            { type: "text", text: `Database not found or not connected: ${input.databaseId}` },
-          ],
-          isError: true,
-        };
-      }
-      const decision = await options.requestHostToolPermission!(callerAgentId, {
-        name: "sql_exec",
-        kind: "tool",
-        title: `SQL write on ${input.databaseId}`,
-        description: input.sql,
-        input: input as unknown as Record<string, unknown>,
-      });
-      if (decision.behavior !== "allow") {
-        return { content: [{ type: "text", text: "Denied by user." }], isError: true };
-      }
-      try {
-        const result = await client.execWrite(input.sql);
-        return { content: [{ type: "text", text: JSON.stringify(result) }] };
-      } catch (err) {
-        return {
-          content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
-          isError: true,
-        };
-      }
-    },
-  );
-
-  // Lets ANY agent discover the databases connected in the app and their
-  // databaseId, so it can then drive them with sql_query/sql_exec — the bridge
-  // between workspace agents and the database feature.
-  registerTool(
-    "database_list",
-    {
-      title: "List databases",
-      description:
-        "List the databases connected in the app (databaseId, name, engine, state). Pass a returned databaseId to sql_query/sql_exec. Auto-approved (read-only).",
-      inputSchema: {},
-    },
-    async () => {
-      const databases = options.databaseRegistry?.list() ?? [];
-      const summary = databases.map((d) => ({
-        databaseId: d.id,
-        name: d.displayName,
-        engine: d.engine,
-        target: d.target,
-        state: d.state,
-      }));
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({ count: summary.length, databases: summary }, null, 2),
-          },
-        ],
-      };
     },
   );
 }
@@ -4271,10 +3847,22 @@ function createToolCatalog(
   // agent (the k8s chat agent relies on them). Register them BEFORE the
   // voice-only early return below — otherwise a voice-only session silently
   // drops kubectl_get/kubectl_apply and the agent falls back to shelling out.
-  registerKubectlTools({ registerTool, options, callerAgentId });
-  registerSqlTools({ registerTool, options, callerAgentId });
-  builtinServerRegistry.registerAgentTools(options.builtinPlugins, registerTool, (name) =>
-    builtinNames.add(name),
+  const builtinToolContext: BuiltinToolContext = {
+    callerAgentId: callerAgentId ?? null,
+    callerLabels: () => (callerAgentId ? agentManager.getAgent(callerAgentId)?.labels : undefined),
+    requestHostToolPermission: options.requestHostToolPermission,
+    clusters: options.clusterRegistry,
+    databases: options.databaseRegistry,
+    services: options.builtinServices,
+  };
+  const reserveBuiltinTool = (name: string) => builtinNames.add(name);
+  // Keep the catalog order: kubectl_*, sql_*, docker_* precede the SSH tools.
+  builtinServerRegistry.registerAgentTools(
+    options.builtinPlugins,
+    registerTool,
+    builtinToolContext,
+    reserveBuiltinTool,
+    { only: ["clusters", "databases", "docker"] },
   );
   if (options.sshAgentTools) {
     registerSshAgentTools(registerTool, options.sshAgentTools(callerAgentId ?? null));
@@ -4351,15 +3939,14 @@ function createToolCatalog(
   // Forge Hub tools mirror the kubectl precedent: available to every agent and
   // registered before the voice-only early return so a voice session keeps them.
   registerForgeTools({ registerTool, options, callerAgentId });
-  if (options.argocdAgentTools) {
-    for (const tool of options.argocdAgentTools(callerAgentId ?? null)) {
-      registerTool(
-        tool.name,
-        { title: tool.title, description: tool.description, inputSchema: tool.inputSchema },
-        tool.handler,
-      );
-    }
-  }
+  // Argo CD (spec 30.4) and any later built-in feature tools follow Forge Hub.
+  builtinServerRegistry.registerAgentTools(
+    options.builtinPlugins,
+    registerTool,
+    builtinToolContext,
+    reserveBuiltinTool,
+    { except: ["clusters", "databases", "docker"] },
+  );
 
   if (options.voiceOnly || options.enableVoiceTools || callerContext?.enableVoiceTools) {
     registerTool(

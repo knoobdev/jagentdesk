@@ -4,12 +4,19 @@ import {
 } from "@jagentdesk/protocol/builtin-plugins";
 import type { DaemonServerInfo } from "@/stores/session-store";
 
+// COMPAT(builtinPlugins): features that daemons advertised before built-in plugin state existed.
+const LEGACY_FEATURE_GATES: Partial<Record<BuiltinPluginId, string>> = { argocd: "argocd" };
+
 export function builtinPluginEnabled(
   info: DaemonServerInfo | null | undefined,
   id: BuiltinPluginId,
 ): boolean {
   // COMPAT(builtinPlugins): added in v0.9.59; remove after 2027-05-24 once daemon floor supports feature gates.
-  if (info?.features?.builtinPlugins !== true) return true;
+  if (info?.features?.builtinPlugins !== true) {
+    const legacy = LEGACY_FEATURE_GATES[id];
+    const features = info?.features as Readonly<Record<string, unknown>> | undefined;
+    return legacy ? features?.[legacy] === true : true;
+  }
   const feature = BUILTIN_PLUGIN_FEATURES[id][0];
   return feature !== undefined && info.features[feature] === true;
 }

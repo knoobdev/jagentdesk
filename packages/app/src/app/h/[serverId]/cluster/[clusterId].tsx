@@ -1,6 +1,6 @@
 import { useLocalSearchParams } from "expo-router";
 import { HostRouteBootstrapBoundary } from "@/components/host-route-bootstrap-boundary";
-import { ClusterWorkloadsScreen } from "@/screens/cluster-workloads-screen";
+import { BuiltinScreen } from "@/plugins/builtin/surfaces";
 
 export default function HostClusterWorkloadsRoute() {
   return (
@@ -11,10 +11,9 @@ export default function HostClusterWorkloadsRoute() {
 }
 
 function HostClusterWorkloadsRouteContent() {
-  const params = useLocalSearchParams<{ serverId?: string; clusterId?: string }>();
+  const params = useLocalSearchParams<{ serverId?: string }>();
   const serverId = typeof params.serverId === "string" ? params.serverId : "";
-  const clusterId = typeof params.clusterId === "string" ? params.clusterId : "";
-  return <ClusterWorkloadsScreen serverId={serverId} clusterId={clusterId} />;
+  return <BuiltinScreen segment="cluster" serverId={serverId} />;
 }
 
 export { ErrorBoundary } from "expo-router";

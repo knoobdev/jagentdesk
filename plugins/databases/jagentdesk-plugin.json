@@ -5,5 +5,9 @@
   "description": "Browse databases and run SQL queries.",
   "defaultEnabled": true,
   "requires": [],
-  "builtinOrder": 3
+  "builtinOrder": 3,
+  "builtinEntrypoints": {
+    "server": "server/index.ts",
+    "client": "client/index.tsx"
+  }
 }

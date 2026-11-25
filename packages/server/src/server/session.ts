@@ -237,13 +237,8 @@ import { SessionShareSession } from "./session/session-share/session-share-sessi
 import { type ActivityGraphService } from "./agent/activity-graph/service.js";
 import { ActivityGraphSession } from "./session/activity-graph/activity-graph-session.js";
 import { type SessionShareService } from "./session-share/service.js";
-import { ClusterSession } from "./session/cluster/cluster-session.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
-import { DatabaseSession } from "./session/database/database-session.js";
 import { SshSession } from "./session/ssh/ssh-session.js";
-import { ArgoCdSession } from "./session/argocd/argocd-session.js";
-import { type ArgoCdService } from "./argocd/service.js";
-import { randomUUID } from "node:crypto";
 import { JiraSession } from "./session/jira/jira-session.js";
 import { FigmaSession, isFigmaRequest } from "./session/figma/figma-session.js";
 import { type FigmaService } from "./figma/service.js";
@@ -251,7 +246,6 @@ import { type JiraService } from "./jira/service.js";
 import { SshService } from "./ssh/ssh-service.js";
 import { SideloadSession } from "./session/sideload/sideload-session.js";
 import { type SideloadService } from "./sideload/sideload-service.js";
-import { localPortOfTarget } from "./ssh/remote-db/service.js";
 import { SimulatorService } from "./simulator/simulator-service.js";
 import { SimulatorStreams, fleetSnapshot } from "./simulator/simulator-streams.js";
 import { type PhysicalDeviceHub } from "./devices/hub.js";
@@ -698,9 +692,6 @@ export interface SessionOptions {
   // Custom API providers (spec 34 / ADR-0047): daemon-wide service; null while it is
   // unavailable — its requests then get an error response instead of timing out silently.
   customProvidersService?: CustomProviderService | null;
-
-  // Argo CD (spec 30): daemon-wide service; null when the host runs without it.
-  argocdService?: ArgoCdService | null;
 
   /** Sideload (spec 26); null in tests and hosts that do not run it. */
   sideloadService?: SideloadService | null;
@@ -1261,13 +1252,7 @@ export class Session {
 
   private readonly activityGraphSession: ActivityGraphSession | null;
 
-  private clusterSession!: ClusterSession;
-
-  private databaseSession!: DatabaseSession;
-
   private sshSession!: SshSession;
-
-  private argocdSession!: ArgoCdSession;
 
   private jiraSession: JiraSession | null = null;
 
@@ -1587,13 +1572,6 @@ export class Session {
     this.initClusterSession(options);
     this.initDatabaseSession(options);
     this.initSshSession(options);
-    this.argocdSession = new ArgoCdSession({
-      host: { emit: (msg) => this.emit(msg) },
-      service: options.argocdService ?? null,
-      logger: this.sessionLogger,
-      sessionKey: randomUUID(),
-      canRunSsoLoopback: () => this.supports(CLIENT_CAPS.argocdSsoLoopback),
-    });
     this.sideloadSession = options.sideloadService
       ? new SideloadSession({
           emit: (msg) => this.emit(msg),
@@ -1845,9 +1823,20 @@ export class Session {
     pluginRuntime: SessionOptions["pluginRuntime"],
   ): BuiltinServerSession {
     return builtinServerRegistry.session(pluginRuntime?.builtin, {
-      ...createBuiltinCoreServices(this.jagentdeskHome, this.sessionLogger, this.daemonConfigStore),
+      ...createBuiltinCoreServices(
+        this.jagentdeskHome,
+        this.sessionLogger,
+        this.daemonConfigStore,
+        {
+          clusters: this.clusterRegistry,
+          databases: this.databaseRegistry,
+        },
+      ),
       terminals: this.terminalManager,
       remoteDocker: () => this.sshService.modules?.docker,
+      remoteK8s: () => this.sshService.modules?.remoteK8s,
+      remoteDb: () => this.sshService.modules?.remoteDb,
+      supportsClientCapability: (capability) => this.supports(capability as ClientCapability),
       push: (message) => this.emit(message),
       pushBinary: (frame) => this.emitBinary(frame),
     });
@@ -1936,24 +1925,10 @@ export class Session {
 
   private initClusterSession(options: SessionOptions): void {
     this.clusterRegistry = options.clusterRegistry ?? new ClusterRegistry();
-    this.clusterSession = new ClusterSession({
-      host: {
-        emit: (msg) => this.emit(msg),
-      },
-      clusterRegistry: this.clusterRegistry,
-      logger: this.sessionLogger,
-    });
   }
 
   private initDatabaseSession(options: SessionOptions): void {
     this.databaseRegistry = options.databaseRegistry ?? new DatabaseRegistry();
-    this.databaseSession = new DatabaseSession({
-      host: {
-        emit: (msg) => this.emit(msg),
-      },
-      databaseRegistry: this.databaseRegistry,
-      logger: this.sessionLogger,
-    });
   }
 
   private initSshSession(options: SessionOptions): void {
@@ -1997,7 +1972,7 @@ export class Session {
 
   updateClientCapabilities(capabilities: Record<string, unknown> | null, source?: object): void {
     this.clientCapabilities = parseClientCapabilities(capabilities);
-    this.argocdSession?.syncDelegateRegistration();
+    this.builtinSession?.capabilitiesChanged();
     if (source) {
       this.delivery.attach(source, true);
       this.clientCapabilitiesBySource.set(source, this.clientCapabilities);
@@ -3227,12 +3202,9 @@ export class Session {
       () => this.dispatchSpecModeMessage(msg, source),
       () => this.dispatchSessionShareMessage(msg),
       () => this.activityGraphSession?.dispatch(msg),
-      () => this.dispatchClusterMessage(msg),
-      () => this.dispatchDatabaseMessage(msg),
       () => this.dispatchSshMessage(msg),
       () => this.dispatchRemoteExecMessage(msg),
       () => this.dispatchCustomProvidersMessage(msg),
-      () => this.dispatchArgoCdMessage(msg),
       () => this.dispatchSideloadMessage(msg),
       () => this.botsSession?.dispatch(msg),
       () => this.dispatchJiraMessage(msg),
@@ -3578,9 +3550,6 @@ export class Session {
       this.simulatorStreams.disposeAll();
       this.physicalDeviceSession?.dispose();
     }
-    if (!builtin.isEnabled("clusters")) this.clusterSession.dispose();
-    if (!builtin.isEnabled("argocd")) this.argocdSession.suspend();
-    else this.argocdSession.syncDelegateRegistration();
     if (!builtin.isEnabled("jira")) this.jiraSession?.suspend();
     if (!builtin.isEnabled("activity-graph")) this.activityGraphSession?.dispose();
     if (!builtin.isEnabled("workbench")) {
@@ -4417,106 +4386,6 @@ export class Session {
   }
 
   // oxlint-disable-next-line complexity
-  private dispatchClusterMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    switch (msg.type) {
-      case "cluster/contexts":
-        return this.clusterSession.handleContextsRequest(msg);
-      case "cluster/import":
-        return this.clusterSession.handleImportRequest(msg);
-      case "cluster/list":
-        return this.clusterSession.handleListRequest(msg);
-      case "cluster/connect":
-        return this.activateRemoteCluster(msg.id).then(() =>
-          this.clusterSession.handleConnectRequest(msg),
-        );
-      case "cluster/disconnect":
-        return this.clusterSession.handleDisconnectRequest(msg);
-      case "cluster/resources":
-        return this.clusterSession.handleResourcesRequest(msg);
-      case "cluster/get":
-        return this.clusterSession.handleGetRequest(msg);
-      case "cluster/logs":
-        return this.clusterSession.handleLogsRequest(msg);
-      case "cluster/logs/subscribe":
-        return this.clusterSession.handleLogsSubscribeRequest(msg);
-      case "cluster/logs/unsubscribe":
-        return this.clusterSession.handleLogsUnsubscribeRequest(msg);
-      case "cluster/write":
-        return this.clusterSession.handleWriteRequest(msg);
-      case "cluster/kinds":
-        return this.clusterSession.handleClusterKinds(msg);
-      case "cluster/resource/list":
-        return this.clusterSession.handleClusterResourceList(msg);
-      case "cluster/reveal-secret":
-        return this.clusterSession.handleRevealSecretRequest(msg);
-      case "cluster/node-op":
-        return this.clusterSession.handleNodeOpRequest(msg);
-      case "cluster/cronjob-op":
-        return this.clusterSession.handleCronjobOpRequest(msg);
-      case "cluster/metrics":
-        return this.clusterSession.handleClusterMetrics(msg);
-      case "cluster/helm/list":
-        return this.clusterSession.handleHelmListRequest(msg);
-      case "cluster/helm/history":
-        return this.clusterSession.handleHelmHistoryRequest(msg);
-      case "cluster/helm/values":
-        return this.clusterSession.handleHelmValuesRequest(msg);
-      case "cluster/helm/rollback":
-        return this.clusterSession.handleHelmRollbackRequest(msg);
-      case "cluster/helm/uninstall":
-        return this.clusterSession.handleHelmUninstallRequest(msg);
-      case "cluster/exec/start":
-        return this.clusterSession.handleExecStart(
-          msg as unknown as Parameters<typeof this.clusterSession.handleExecStart>[0],
-        );
-      case "cluster/exec/stdin":
-        return this.clusterSession.handleExecStdin(
-          msg as unknown as Parameters<typeof this.clusterSession.handleExecStdin>[0],
-        );
-      case "cluster/exec/close":
-        return this.clusterSession.handleExecClose(
-          msg as unknown as Parameters<typeof this.clusterSession.handleExecClose>[0],
-        );
-      case "cluster/pf/start" as string:
-        return this.clusterSession.handlePfStart(
-          msg as unknown as Parameters<typeof this.clusterSession.handlePfStart>[0],
-        );
-      case "cluster/pf/stdin" as string:
-        return this.clusterSession.handlePfStdin(
-          msg as unknown as Parameters<typeof this.clusterSession.handlePfStdin>[0],
-        );
-      case "cluster/pf/close" as string:
-        return this.clusterSession.handlePfClose(
-          msg as unknown as Parameters<typeof this.clusterSession.handlePfClose>[0],
-        );
-      default:
-        return undefined;
-    }
-  }
-
-  // A cluster imported through an SSH server needs its forward + kubeconfig before KubeClient
-  // connects (ssh/remote-k8s); failures surface through the normal connect response.
-  private async activateRemoteCluster(clusterId: string): Promise<void> {
-    const k8s = this.sshService.modules?.remoteK8s;
-    const cluster = this.clusterRegistry.list().find((candidate) => candidate.id === clusterId);
-    if (!k8s || !cluster || !k8s.isRemoteContext(cluster.contextName)) return;
-    await k8s.activate(cluster.contextName).catch((error: unknown) => {
-      this.sessionLogger.warn({ err: error, clusterId }, "remote cluster activation failed");
-    });
-  }
-
-  // A database reached through an SSH server listens on its fixed 127.0.0.1 port again before
-  // the registry connects (ssh/remote-db).
-  private async reopenRemoteDatabase(databaseId: string): Promise<void> {
-    const tunnels = this.sshService.modules?.remoteDb;
-    const info = this.databaseRegistry.list().find((candidate) => candidate.id === databaseId);
-    const port = info ? localPortOfTarget(info.target) : null;
-    if (!tunnels || port === null || !tunnels.isRemotePort(port)) return;
-    await tunnels.reopenForLocalPort(port).catch((error: unknown) => {
-      this.sessionLogger.warn({ err: error, databaseId }, "remote database tunnel failed");
-    });
-  }
-
   // The fleet itself: listing it, what the host can run, and adding devices to it.
   private dispatchSimulatorFleet(
     msg: SessionInboundMessage,
@@ -5238,53 +5107,6 @@ export class Session {
     return undefined;
   }
 
-  // Argo CD allowlist (spec 30.5): every argocd.* request is listed here AND handled in
-  // ArgoCdSession.handle(); a type missing from either is never answered.
-  // oxlint-disable-next-line complexity
-  private dispatchArgoCdMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    switch (msg.type) {
-      case "argocd.instances.list.request":
-      case "argocd.instances.save.request":
-      case "argocd.instances.delete.request":
-      case "argocd.instances.login.request":
-      case "argocd.instances.logout.request":
-      case "argocd.sso.begin.request":
-      case "argocd.sso.complete.request":
-      case "argocd.sso.delegate.request":
-      case "argocd.apps.list.request":
-      case "argocd.apps.subscribe.request":
-      case "argocd.apps.unsubscribe.request":
-      case "argocd.app.get.request":
-      case "argocd.app.tree.subscribe.request":
-      case "argocd.app.tree.unsubscribe.request":
-      case "argocd.app.diff.request":
-      case "argocd.app.manifests.request":
-      case "argocd.app.events.request":
-      case "argocd.app.logs.subscribe.request":
-      case "argocd.app.logs.unsubscribe.request":
-      case "argocd.app.sync.request":
-      case "argocd.app.refresh.request":
-      case "argocd.app.rollback.request":
-      case "argocd.app.terminate.request":
-      case "argocd.app.delete.request":
-      case "argocd.app.set_auto_sync.request":
-      case "argocd.app.confirm_pruning.request":
-      case "argocd.app.resource_actions.list.request":
-      case "argocd.app.resource_action.request":
-      case "argocd.can_i.request":
-      case "argocd.appsets.list.request":
-      case "argocd.projects.list.request":
-      case "argocd.repos.list.request":
-      case "argocd.clusters.list.request":
-      case "argocd.cluster_links.list.request":
-      case "argocd.cluster_links.set.request":
-      case "argocd.cluster_links.resolve.request":
-        return this.argocdSession.handle(msg);
-      default:
-        return undefined;
-    }
-  }
-
   // Jira (spec 29.5). Every jira.* request is listed here AND handled in JiraSession.handle: a
   // request missing from this list never reaches the handler and times out without a response.
   // oxlint-disable-next-line complexity
@@ -5372,53 +5194,6 @@ export class Session {
       return undefined;
     }
     return this.sshSession.handleMessage(msg);
-  }
-
-  private dispatchDatabaseMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    switch (msg.type) {
-      case "database/list":
-        return this.databaseSession.handleList(msg);
-      case "database/add":
-        return this.databaseSession.handleAdd(msg);
-      case "database/connect":
-        return this.reopenRemoteDatabase(msg.id).then(() =>
-          this.databaseSession.handleConnect(msg),
-        );
-      case "database/disconnect":
-        return this.databaseSession.handleDisconnect(msg);
-      case "database/remove":
-        return this.databaseSession.handleRemove(msg);
-      case "database/databases":
-        return this.databaseSession.handleDatabases(msg);
-      case "database/open-database":
-        return this.databaseSession.handleOpenDatabase(msg);
-      case "database/schemas":
-        return this.databaseSession.handleSchemas(msg);
-      case "database/objects":
-        return this.databaseSession.handleObjects(msg);
-      case "database/columns":
-        return this.databaseSession.handleColumns(msg);
-      case "database/query":
-        return this.databaseSession.handleQuery(msg);
-      case "database/exec":
-        return this.databaseSession.handleExec(msg);
-      case "database/foreign-keys":
-        return this.databaseSession.handleForeignKeys(msg);
-      case "database/indexes":
-        return this.databaseSession.handleIndexes(msg);
-      case "database/routines":
-        return this.databaseSession.handleRoutines(msg);
-      case "database/explain":
-        return this.databaseSession.handleExplain(msg);
-      case "database/begin":
-        return this.databaseSession.handleBegin(msg);
-      case "database/commit":
-        return this.databaseSession.handleCommit(msg);
-      case "database/rollback":
-        return this.databaseSession.handleRollback(msg);
-      default:
-        return undefined;
-    }
   }
 
   private dispatchMigrationMessage(msg: SessionInboundMessage): Promise<void> | undefined {
@@ -11059,8 +10834,6 @@ export class Session {
 
     this.workspaceGitObserver.dispose();
     this.workspaceFilesSession.dispose();
-    this.clusterSession.dispose();
-    this.argocdSession.dispose();
   }
 
   private validatePublicAgentWorkspaceIntent(request: CreateAgentRequestMessage): void {

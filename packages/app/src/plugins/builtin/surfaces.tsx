@@ -2,14 +2,14 @@ import { router, usePathname } from "expo-router";
 import { useCallback } from "react";
 import { SidebarHeaderRow } from "@/components/sidebar/sidebar-header-row";
 import { usePanelStore } from "@/stores/panel-store";
-import { useMemo } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { useSessionStore } from "@/stores/session-store";
 import { useHosts } from "@/runtime/host-runtime";
 import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import type { AppNavItem } from "@/components/sidebar/use-app-nav";
 import { builtinClientRegistry } from "./loaded";
-import type { BuiltinClientProps, BuiltinScreen as ScreenProps } from "./host";
+import type { BuiltinClientProps, BuiltinDestination, BuiltinScreen as ScreenProps } from "./host";
 import { BuiltinPluginScreenBoundary } from "./route-boundary";
 
 export function useBuiltinClientContributions(serverId: string) {
@@ -25,24 +25,54 @@ export function useBuiltinDestinations(pathname: string): AppNavItem[] {
     : (selection?.serverId ?? hosts[0]?.serverId ?? "");
   const entries = useBuiltinClientContributions(serverId);
   const compact = useIsCompactFormFactor();
+  const destinations = useMemo(
+    () =>
+      [...entries.values()].flatMap((entry) =>
+        compact ? entry.mobileEntries : entry.destinations,
+      ),
+    [compact, entries],
+  );
+  const routes = useDestinationRoutes(destinations, serverId);
   return useMemo(
     () =>
       !serverId
         ? []
-        : [...entries.values()].flatMap((entry) =>
-            (compact ? entry.mobileEntries : entry.destinations).map((destination) => ({
-              key: destination.id,
-              group: destination.group,
-              label: destination.title,
-              shortLabel: destination.title,
-              icon: destination.icon,
-              route: destination.route(serverId),
-              isActive: pathname.includes(`/${destination.routeSegment}`),
-              testID: `rail-${destination.id}`,
-            })),
-          ),
-    [compact, entries, pathname, serverId],
+        : destinations.map((destination, index) => ({
+            key: destination.id,
+            group: destination.group,
+            label: destination.title,
+            shortLabel: destination.shortTitle ?? destination.title,
+            icon: destination.icon,
+            route: routes[index] ?? destination.route(serverId),
+            isActive: pathname.includes(`/${destination.routeSegment}`),
+            testID: `rail-${destination.id}`,
+          })),
+    [destinations, pathname, routes, serverId],
   );
+}
+/** Destination routes, re-read when a destination reports that its route changed. */
+function useDestinationRoutes(
+  destinations: readonly BuiltinDestination[],
+  serverId: string,
+): readonly string[] {
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      const unsubscribes = destinations.flatMap((destination) =>
+        destination.routeChanges ? [destination.routeChanges(listener)] : [],
+      );
+      return () => {
+        for (const unsubscribe of unsubscribes) unsubscribe();
+      };
+    },
+    [destinations],
+  );
+  const snapshot = useCallback(
+    () =>
+      serverId ? destinations.map((destination) => destination.route(serverId)).join("\n") : "",
+    [destinations, serverId],
+  );
+  const joined = useSyncExternalStore(subscribe, snapshot, snapshot);
+  return useMemo(() => (joined ? joined.split("\n") : []), [joined]);
 }
 export function BuiltinLeftPanel({ serverId, segment }: BuiltinClientProps & { segment: string }) {
   const entries = useBuiltinClientContributions(serverId);
@@ -92,14 +122,36 @@ function BuiltinSidebarDestination({ item }: { item: AppNavItem }) {
     />
   );
 }
-export function BuiltinSidebarDestinations() {
+/** Classic sidebar rows; `only`/`except` keep each destination at its established position. */
+export function BuiltinSidebarDestinations({
+  only,
+  except,
+}: {
+  only?: readonly string[];
+  except?: readonly string[];
+}) {
   const pathname = usePathname();
   const items = useBuiltinDestinations(pathname);
   return (
     <>
-      {items.map((item) => (
-        <BuiltinSidebarDestination key={item.key} item={item} />
-      ))}
+      {items
+        .filter((item) => (only ? only.includes(item.key) : !except?.includes(item.key)))
+        .map((item) => (
+          <BuiltinSidebarDestination key={item.key} item={item} />
+        ))}
+    </>
+  );
+}
+/** Per-host mounts of every enabled plugin (delegation prompts, binders). */
+export function BuiltinHostMounts({ serverId }: BuiltinClientProps) {
+  const entries = useBuiltinClientContributions(serverId);
+  return (
+    <>
+      {[...entries].flatMap(([id, entry]) =>
+        [...entry.mounts].map(([key, Component]) => (
+          <Component key={`${id}/${key}`} serverId={serverId} />
+        )),
+      )}
     </>
   );
 }
