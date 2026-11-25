@@ -12,9 +12,14 @@ import { useAgentInitialization } from "@/hooks/use-agent-initialization";
 import { useSessionStore, selectAgentTurnPresentation } from "@/stores/session-store";
 import { normalizeAgentSnapshot } from "@/utils/agent-snapshots";
 import { useBotsConnection, useBotAgent, useBotsMutation, useBotHistory, botsKey } from "./queries";
-import { QueryNotice, ErrorNotice, Input } from "./ui";
+import { QueryNotice, ErrorNotice } from "./ui";
+import { Composer } from "@/composer";
+import { useAgentInputDraft } from "@/composer/draft/input-draft";
+import type { MessagePayload } from "@/composer/types";
+import { buildDraftStoreKey } from "@/stores/draft-keys";
 import { styles } from "./styles";
 import { mergeMessages } from "./model";
+import { botIdFromLabels } from "./envelope";
 export function AgentTimeline({ serverId, agentId }: { serverId: string; agentId: string }) {
   const { client, enabled } = useBotsConnection(serverId);
   const agent = useBotAgent(serverId, agentId);
@@ -55,10 +60,11 @@ export function AgentTimeline({ serverId, agentId }: { serverId: string; agentId
     () => createPaneFocusContextValue({ isWorkspaceFocused: true, isPaneFocused: true }),
     [],
   );
-  const context = useMemo(
-    () => (agent.data ? normalizeAgentSnapshot(agent.data.agent, serverId) : null),
-    [agent.data, serverId],
-  );
+  const context = useMemo(() => {
+    if (!agent.data) return null;
+    const snapshot = normalizeAgentSnapshot(agent.data.agent, serverId);
+    return { ...snapshot, botId: botIdFromLabels(snapshot.labels) };
+  }, [agent.data, serverId]);
   return (
     <View style={styles.column}>
       <QueryNotice query={agent} />
@@ -113,13 +119,23 @@ export function Messages({
     </ScrollView>
   );
 }
+/**
+ * The shared composer, sending plain text into a bot's inbox (or a room) instead of an agent
+ * turn. The draft key is synthetic so the composer never treats the supervisor as its target:
+ * the daemon queues the message behind any running turn and adds the `[source]` envelope.
+ */
 export function MessageComposer({
+  serverId,
+  draftId,
   pending,
   error,
   send,
   hint,
   disabled = false,
 }: {
+  serverId: string;
+  /** Stable per conversation (`bot:<id>`, `room:<id>`), so each keeps its own draft. */
+  draftId: string;
   pending: boolean;
   error: Error | null;
   send: (text: string) => Promise<unknown>;
@@ -127,44 +143,42 @@ export function MessageComposer({
   disabled?: boolean;
 }) {
   const { t } = useTranslation();
-  const [draft, setDraft] = useState({ text: "", revision: 0 });
-  const text = draft.text;
-  const setText = useCallback(
-    (value: string) => setDraft((previous) => ({ ...previous, text: value })),
-    [],
+  const composerId = `bots-${draftId}`;
+  const draftKey = useMemo(
+    () => buildDraftStoreKey({ serverId, agentId: composerId }),
+    [serverId, composerId],
   );
-
+  const draft = useAgentInputDraft({ draftKey });
   const submit = useCallback(
-    async function submit() {
-      if (disabled || !text.trim()) return;
-      try {
-        await send(text.trim());
-        setDraft((previous) => ({ text: "", revision: previous.revision + 1 }));
-      } catch {
-        /* Keep the draft; the mutation error remains visible. */
-      }
+    async function submit(payload: MessagePayload) {
+      if (disabled) throw new Error(t("bots.offline"));
+      const text = payload.text.trim();
+      if (!text) return;
+      await send(text);
     },
-    [text, send, disabled],
+    [disabled, send, t],
   );
   return (
     <View style={styles.composer}>
       <ErrorNotice error={error} />
-      <Input
-        label={hint}
-        value={text}
-        onChange={setText}
-        multiline
-        resetKey={draft.revision}
-        testID="bots-message"
+      <Composer
+        agentId={composerId}
+        serverId={serverId}
+        isPaneFocused
+        inputMode="message"
+        placeholder={hint}
+        onSubmitMessage={submit}
+        isSubmitLoading={pending || disabled}
+        submitButtonTestID="bots-send"
+        submitButtonAccessibilityLabel={t("bots.send")}
+        textSource={draft.textSource}
+        textReplacement={draft.textReplacement}
+        onChangeText={draft.editText}
+        attachments={draft.attachments}
+        onChangeAttachments={draft.setAttachments}
+        cwd=""
+        clearDraft={draft.clear}
       />
-      <Button
-        onPress={submit}
-        disabled={disabled || pending || !text.trim()}
-        loading={pending}
-        testID="bots-send"
-      >
-        {t("bots.send")}
-      </Button>
     </View>
   );
 }
@@ -239,6 +253,8 @@ export function BotChat({ serverId, bot }: { serverId: string; bot: Bot }) {
         </>
       )}
       <MessageComposer
+        serverId={serverId}
+        draftId={`bot:${bot.id}`}
         pending={send.isPending}
         error={send.error}
         send={sendMessage}

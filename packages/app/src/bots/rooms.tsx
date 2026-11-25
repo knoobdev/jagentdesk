@@ -175,6 +175,8 @@ export function RoomChat({
       </View>
       <Messages messages={room.messages} bots={bots} />
       <MessageComposer
+        serverId={serverId}
+        draftId={`room:${room.id}`}
         pending={send.isPending}
         error={send.error}
         send={sendMessage}

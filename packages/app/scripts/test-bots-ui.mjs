@@ -118,8 +118,12 @@ async function shot(name) {
   await page.screenshot({ path: target, fullPage: true });
   result.screenshots.push(target);
 }
+// The bots composer is the shared composer; its text area sits inside `message-input-root`.
+function messageInput() {
+  return visible("message-input-root").locator("textarea");
+}
 async function send(text) {
-  await visible("bots-message").fill(text);
+  await messageInput().fill(text);
   await visible("bots-send").click();
 }
 async function clickTab(tab) {
@@ -548,7 +552,7 @@ try {
   );
 
   await page.goto(botUrl + "?botId=" + bot.id + "&tab=chat");
-  await visible("bots-message").fill("Keep this draft while the host reconnects.");
+  await messageInput().fill("Keep this draft while the host reconnects.");
   disconnectBrowser = true;
   for (const socket of browserSockets)
     await socket.close({ code: 1001, reason: "Offline UI acceptance" }).catch(() => {});
@@ -556,10 +560,7 @@ try {
     .getByText("Host disconnected. Reconnect to continue.", { exact: true })
     .filter({ visible: true })
     .waitFor({ timeout: 30000 });
-  assert.equal(
-    await visible("bots-message").inputValue(),
-    "Keep this draft while the host reconnects.",
-  );
+  assert.equal(await messageInput().inputValue(), "Keep this draft while the host reconnects.");
   assert(await visible("bots-send").isDisabled());
   await shot("offline-draft-desktop");
   disconnectBrowser = false;
@@ -568,10 +569,7 @@ try {
     "browser reconnects",
     60000,
   );
-  assert.equal(
-    await visible("bots-message").inputValue(),
-    "Keep this draft while the host reconnects.",
-  );
+  assert.equal(await messageInput().inputValue(), "Keep this draft while the host reconnects.");
   result.checks.push(
     "Disconnect keeps the chat draft visible and disables Send; reconnect preserves the draft and restores Send",
   );

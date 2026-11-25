@@ -22,6 +22,8 @@ export interface AgentScreenAgent {
   options?: Agent["options"];
   controls?: Agent["controls"];
   lastError?: string | null;
+  /** Set when the agent is a bot's supervisor: its prompts carry a `[source]` envelope. */
+  botId?: string | null;
   projectPlacement?: {
     projectKey?: string;
     projectName?: string;

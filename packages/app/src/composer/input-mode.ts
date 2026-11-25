@@ -4,10 +4,13 @@
  * the same bordered surface, grow-on-newline, submit button, focus handling,
  * and keyboard shift that a chat message gets.
  *
+ * `message` is a plain text message to something that is not an agent turn (a bot's
+ * inbox): text only, no attachments, voice or agent chips it could not carry.
+ *
  * Callers pick a mode and nothing else. What a mode implies lives here, so the
  * two presentations cannot drift apart one prop at a time.
  */
-export type ComposerInputMode = "chat" | "terminal";
+export type ComposerInputMode = "chat" | "terminal" | "message";
 
 export interface ComposerInputModePresentation {
   /** Attachments, dictation/voice, slash-and-@ autocomplete, and the model/mode
@@ -38,6 +41,14 @@ const PRESENTATION_BY_MODE: Record<ComposerInputMode, ComposerInputModePresentat
     showAgentControls: false,
     isMonospace: true,
     accessibilityLabelKey: "composer.input.terminalAccessibilityLabel",
+  },
+  message: {
+    showAttachments: false,
+    showVoice: false,
+    showAutocomplete: false,
+    showAgentControls: false,
+    isMonospace: false,
+    accessibilityLabelKey: "composer.input.accessibilityLabel",
   },
 };
 
