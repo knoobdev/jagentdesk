@@ -154,7 +154,7 @@ describe("database RPC round-trip (SQLite, in-process)", () => {
 });
 
 // Infra-gated adapter proofs. Enable with JAD_DB_E2E=1 after starting the
-// throwaway containers (see docs/plans/active/multi-database.md P1).
+// throwaway containers.
 const E2E = process.env.JAD_DB_E2E === "1";
 
 describe.runIf(E2E)("PostgreSQL adapter e2e (throwaway docker)", () => {

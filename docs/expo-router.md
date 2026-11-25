@@ -17,7 +17,11 @@ Each layout owns only the routes directly inside its directory.
   `h/[serverId]/index`.
 - `packages/app/src/app/h/[serverId]/_layout.tsx` owns the host leaves with
   relative screen names: `index`, `workspace/[workspaceId]/index`,
-  `agent/[agentId]`, `sessions`, `open-project`, and `settings`.
+  `agent/[agentId]`, `sessions`, `bots`, `clusters`, `cluster/[clusterId]`,
+  `open-project`, and `settings`. Built-in plugin destinations (`docker.tsx`,
+  `jira.tsx`, `plugin/…`, and the rest of that directory) are route files in the
+  same layout; `builtinPluginScreenLayout` wraps them so a disabled plugin shows
+  its enable prompt. See [builtin-plugins.md](builtin-plugins.md).
 
 Expo Router warns with `[Layout children]: No route named ...` when a layout
 registers grandchildren. Treat that warning as a route-tree bug. On native, that

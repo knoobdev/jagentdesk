@@ -8,7 +8,7 @@ import { z } from "zod";
  * fingerprint is flagged harder than no spoofing at all. Profiles are generated
  * algorithmically from templates (no LLM), persisted daemon-side, listed for the
  * user to pick, and applied by the desktop host via CDP + init scripts. See
- * ADR-0011 and docs/plans/active/agentic-browser-custom-and-anti-detect.md.
+ * ADR-0011 and docs/agentic-browser.md.
  *
  * Honest limits baked into the model: `proxy` is the ONLY real IP control — there
  * is no way to "fake" an IP without routing traffic through a proxy. `webrtcPolicy`

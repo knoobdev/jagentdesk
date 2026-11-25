@@ -32,7 +32,7 @@ So arrival sets a _target_ and the reveal rate is derived from the backlog inste
 - **Leaving `phase: "streaming"` snaps the reveal.** A completed turn must never be left holding characters. `layoutStream` sets the phase, so anything outside the live head with an active turn is already complete.
 - **The reducer queue commits on a frame, with a timer as the ceiling.** A frame callback never fires in a hidden tab, so a timer races it and wins when nothing is painting — the store has to keep advancing either way.
 - **A history row re-renders only when its item or layout item identity changes.** Native keeps the
-  B11 LegendList viewport. Web retains a row's DOM and local state when recent history becomes
+  LegendList viewport. Web retains a row's DOM and local state when recent history becomes
   virtualized. `layoutStream` shares unchanged layout items; `useRevisedHistoryRows` replaces items
   whose group, expansion, or breakpoint changed. Add new layout fields to
   `areLayoutItemsEquivalent`, or sharing silently stops.
@@ -47,19 +47,8 @@ So arrival sets a _target_ and the reveal rate is derived from the backlog inste
 
 ## Measuring
 
-- **Smoothness (user-perceived):** `packages/app/e2e/browser/agent-stream-smoothness.spec.ts`, gated behind `JAGENTDESK_AGENT_STREAM_PERF_E2E=1`. Drives the mock provider's `bursty-stream` model and reports coefficient of variation of characters painted per frame (smoothness) plus p95 gap between visible updates (stalls). Both numbers are needed: a stalled stream is perfectly smooth.
-- **Reproducing bursty arrival:** the `bursty-stream` model in `mock-load-test-agent.ts` emits uneven runs of tokens separated by idle gaps. Burst sizes come from a seeded generator, so a run repeats exactly.
-- **Rate policy in isolation:** `computeRevealStep` in `packages/app/src/agent-stream/text-reveal.ts` is pure; `text-reveal.test.ts` covers convergence and burst flattening without a renderer.
+- **Reproducing bursty arrival:** the `bursty-stream` model of the dev-only `mock` provider (`packages/server/src/server/agent/providers/mock-load-test-agent.ts`) emits uneven runs of tokens separated by idle gaps. Burst sizes come from a seeded generator, so a run repeats exactly.
+- **Rate policy in isolation:** `computeRevealStep` in `packages/app/src/agent-stream/text-reveal.ts` is pure. Setting `TEXT_REVEAL_HORIZON_MS` to 0 paints on arrival, which gives you the unpaced baseline.
+- **User-perceived smoothness:** there is no checked-in browser spec. Sample two numbers per frame while a `bursty-stream` agent streams: the coefficient of variation of characters painted per frame (smoothness) and the p95 gap between visible updates (stalls). You need both, because a stalled stream is perfectly smooth.
 
-Healthy numbers (2026-08, Expo web against a local dev daemon, real Claude Haiku agent, ~8.5s samples during active streaming). Setting `TEXT_REVEAL_HORIZON_MS` to 0 makes the reveal paint on arrival, which is how the baseline column was taken:
-
-|                                  | paint on arrival | paced |
-| -------------------------------- | ---------------- | ----- |
-| frames that advanced the text    | 6%               | 87%   |
-| chars-per-frame CV               | 4.11             | 1.86  |
-| gap between visible updates, p50 | 317ms            | 17ms  |
-| gap between visible updates, p95 | 383ms            | 17ms  |
-
-Total characters painted is roughly the same either way — the reveal changes when they land, not how many arrive.
-
-Measure the **total** length across every `assistant-message` element, not the last one. A turn emits many assistant messages, so the tail element keeps changing identity and its length is not monotonic; sampling only the tail reads those handovers as resets and reports almost no growth. `sampleStreamFrames` does this correctly.
+Measure the **total** length across every `assistant-message` element, not the last one. A turn emits many assistant messages, so the tail element keeps changing identity and its length is not monotonic; sampling only the tail reads those handovers as resets and reports almost no growth.

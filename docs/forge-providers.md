@@ -4,6 +4,11 @@ JAgentDesk's forge layer is a registry/manifest system. A forge is a runtime con
 shared protocol messages carry neutral/open facts, the server adapter owns
 behavior, and the app owns bundled presentation/runtime interpretation.
 
+This layer is core: workspace PR/MR status, checks, merge and `forge.search.request` use it
+whether or not any built-in is on. The Forge Hub screen and the `forge_*` agent tools are the
+`forge-hub` [built-in](builtin-plugins.md) in `plugins/forge-hub/`; it addresses repositories by
+forge, owner and name through the forge CLIs and does not go through `ForgeService`.
+
 The maintainer litmus test is the rule of thumb:
 
 > Adding a new forge means adding files in a new directory/module that implement

@@ -1,118 +1,88 @@
-# Kubernetes cluster management
+# Kubernetes clusters
 
-JAgentDesk ships a Kubernetes cockpit — a full resource browser plus a per‑cluster AI
-chat — that runs identically on the **Electron desktop app** and the **iOS/Android app**. It talks
-to your clusters through the daemon's Kubernetes client, so the app never needs a local `kubectl`
-and the agent can operate a cluster that isn't in any local kubeconfig.
+The Clusters screen is a resource browser plus a per-cluster agent chat, the same on desktop and
+mobile. The daemon talks to the cluster with its own Kubernetes client, so the app needs no local
+`kubectl`. It is the `clusters` [built-in](builtin-plugins.md) (on by default); Argo CD requires
+it.
 
-> Browsing a cluster requires **no project**. Only the AI chat needs a working directory (a
-> project), because the agent runs there.
+Browsing needs no project. Only the chat needs one, because the agent runs in a working directory.
 
----
+Code: `plugins/clusters/` (screens, `cluster/*` handlers, Helm client, agent tools). The cluster
+registry, Kubernetes client and DTOs stay in `packages/server/src/server/cluster/` because SSH
+remote clusters and Argo CD use them.
 
-## 1. Connect a cluster
+## Connect a cluster
 
-1. Open **Clusters** from the left sidebar.
-2. JAgentDesk lists every context from the daemon host's `~/.kube/config`
-   (docker‑desktop, GKE, EKS, …).
-3. Press **Connect** on a context. A green dot marks it connected, and the row gains
-   **Open workloads · Ask an agent · Disconnect**.
+1. Open **Clusters** from the sidebar's Tools group.
+2. The list shows every context in the daemon host's default kubeconfig (`KUBECONFIG`, or
+   `~/.kube/config`). It is read each time the list loads.
+3. Press **Connect** on a context. A green dot marks it connected and the row gains
+   **Open workloads** and **Disconnect**. Errors show inline.
 
-Connection errors are surfaced inline; a failed context shows **Retry**.
+A cluster on a remote machine can be imported through an SSH server; see [SSH servers](ssh.md).
 
----
+## Browse resources
 
-## 2. Browse resources
+**Open workloads** opens the cluster view. Desktop shows the kind navigation, the resource list and
+the chat dock side by side. Mobile slides in the kind menu, and the chat opens from a floating
+button.
 
-Press **Open workloads** to enter the cluster view.
+The navigation opens on **Overview**: node, pod, deployment, service and namespace counts,
+container restarts, a pod health bar and node readiness. Below it are the resource kinds
+(workloads, config, network, storage and cluster kinds, including events) and **Helm → Releases**.
 
-- **Desktop** shows three columns: the resource‑kind navigation, the resource list, and the chat
-  dock (a right‑hand side panel).
-- **Mobile** slides in the kind menu; tapping a kind opens its list, and the chat is a floating
-  button.
+The resource table filters by namespace, searches, and sorts by name or age. On phones it drops
+secondary columns and folds namespace and status into a subtitle.
 
-Supported kinds include **Namespace, Node, Event, Pod, Deployment, DaemonSet, StatefulSet,
-ReplicaSet, ReplicationController, Job, CronJob, ConfigMap, Secret, ResourceQuota, LimitRange,
-HorizontalPodAutoscaler, PodDisruptionBudget, PriorityClass, RuntimeClass, Service, Endpoints,
-Ingress, IngressClass, NetworkPolicy**, and the common storage kinds.
+## Inspect a resource
 
-The resource table is **searchable and sortable** (by name / age) and **responsive** — on phones it
-drops secondary columns and folds namespace + status into a subtitle so the search box and AGE
-stay visible.
+Tap a row to open its detail:
 
-The kind navigation opens on an **Overview** dashboard: KPI cards (Nodes, Pods, Deployments,
-Services, Namespaces, container restarts), a pod‑health bar (Running / Pending / Failed /
-Succeeded), and a node list with readiness — a cluster‑at‑a‑glance landing page before you drill
-into a kind.
+- **Overview**: a structured summary, with the resource's Kubernetes events. ConfigMap and Secret
+  keys render as code blocks; secret values stay masked behind per-key **Show** / **Hide**.
+- **YAML**: the live manifest, with **Edit YAML** → **Apply**.
+- **Logs**: streamed logs with **Follow**, a container selector, timestamps, severity colouring
+  and download of the on-screen buffer.
+- **Shell**: an interactive `exec` terminal into a chosen container.
+- **Port-forward**: forwards a Pod or Service port to localhost; a Service resolves to a backing
+  pod.
 
----
+Actions appear where they apply: **Scale** and **Restart** for Deployments, DaemonSets and
+StatefulSets, **Rollback** for Deployments, **Trigger** / **Suspend** / **Resume** for CronJobs,
+**Cordon** / **Uncordon** for Nodes, and **Delete**. The daemon picks the patch strategy per
+operation, so scale and restart behave like `kubectl`.
 
-## 3. Inspect a resource
+Helm releases show values and history, with rollback and uninstall. They need `helm` on the daemon
+host; Settings → host → Tools can install it ([Host tools](host-tools.md)).
 
-Tap a row to open the detail view:
+## Ask AI
 
-- **Overview** — a structured summary (namespace, node, IPs, QoS, containers,
-  conditions, labels, …). For **ConfigMaps** and **Secrets** the data keys render as
-  scrollable code blocks; secret values stay masked behind a per‑key **Show / Hide**.
-- **YAML** — the live manifest, with **Edit YAML → Apply** for changes.
-- **Logs** — streamed logs with **Follow** and a **container selector**, a **Timestamps**
-  toggle, per‑line severity colouring, and a **Download** button that saves the on‑screen
-  buffer to a file.
-- **Shell** — an interactive `exec` terminal into a chosen container.
-- **Port‑forward** — forward a **Pod _or_ Service** port to localhost (Services resolve to a
-  backing pod automatically).
-- **Events** — Kubernetes Events filtered to the resource.
+Every resource detail has **Ask AI**. It opens the cluster's chat and hands the agent the resource
+you are viewing; with the logs pane open, the on-screen log buffer goes too.
 
-Workload actions appear where they apply: **Scale** and **Restart** (Deployments, DaemonSets,
-StatefulSets), **Rollback** (Deployments), and **Delete**. The daemon applies the correct patch
-strategy for each (JSON / merge / strategic‑merge / server‑side apply) so scale and restart behave
-like `kubectl`.
+Cluster agents carry the label `jagentdesk.cluster.id` and are told to use the cluster tools on the
+`jagentdesk` MCP server:
 
----
+| Tool            | Does                                                         |
+| --------------- | ------------------------------------------------------------ |
+| `kubectl_get`   | get, describe, logs and list on a connected cluster          |
+| `kubectl_apply` | changes; agent-scoped, asks for your approval before it runs |
+| `cluster_list`  | lists connected clusters and their ids                       |
 
-## 4. Ask AI about a resource
+Replies stream into the chat dock, including tool calls. The composer is the full agent composer.
 
-Every resource detail has an **Ask AI** button (a sparkle pill in the header).
+## Chat history and project
 
-- It opens the cluster's chat and hands the agent the exact resource you're viewing. If the **logs**
-  pane is open, the on‑screen log buffer is attached too, so _“what's in this log?”_ has context.
-- The agent is instructed to prefer the daemon's **cluster‑scoped tools**, which are exposed over
-  the `jagentdesk` MCP server:
-  - `mcp__jagentdesk__kubectl_get` — `get` / `describe` / `logs` / `list`, bound to the connected
-    `clusterId`.
-  - `mcp__jagentdesk__kubectl_apply` — changes, bound to the same `clusterId`.
-  - `mcp__jagentdesk__cluster_list` — enumerate connected clusters.
-- Replies stream live — assistant text **and** tool calls (e.g. _Kubectl Get_) — in the chat dock.
+The clock icon in the chat header opens history:
 
-The chat composer is the full agent composer (model / thinking / permission / `@files` /
-`/commands`), so you can keep the conversation going after the first answer.
+- **PROJECT FOR NEW CHATS** (shown with two or more projects) picks the working directory for new
+  cluster chats. The choice is remembered across clusters.
+- **New chat** starts a separate conversation. Empty chats are titled "Cluster chat", "Cluster chat
+  2", and so on; chats started from **Ask AI** take their title from the first message.
+- The list shows the cluster's non-archived chats. Tap one to switch to it.
 
----
+One agent is reused per cluster, so opening workloads never spawns duplicates. **New chat** is the
+way to branch.
 
-## 5. Chat dock: history, new chats, and the project picker
-
-Open the **history** (clock icon) in the chat header:
-
-- **PROJECT FOR NEW CHATS** _(shown when you have 2+ projects)_ — pick which project/workspace new
-  cluster chats run in. This is the agent's working directory; the choice is remembered across
-  clusters. With a single project the picker is hidden and that project is used.
-- **New chat** — start a fresh conversation. Empty chats get distinct titles (_Cluster chat_,
-  _Cluster chat 2_, …); chats started from **Ask AI** are titled from their first message.
-- **Chat list** — every non‑archived conversation for the cluster with its title and relative time.
-  Tap one to switch back to it and its full transcript.
-
-One agent is reused per cluster by default (so opening workloads never spawns duplicate agents);
-**New chat** is how you deliberately branch into a separate conversation.
-
----
-
-## Notes & limitations
-
-- The AI chat needs a **provider** (set up under **Setup providers**) and at least one **project**
-  so the agent has a working directory; until then the dock shows _“Connect a host & add a project
-  to chat with an agent.”_
-- The daemon reads `~/.kube/config` on start; if you connect a cluster right after (re)starting the
-  daemon and the list looks empty, give it a moment or reopen **Clusters**.
-- Agent‑to‑agent tools (`list_agents`, `send_agent_prompt`, `create_agent`) operate on the whole
-  daemon; `list_agents` defaults to the caller's project directory but can look wider — see
-  [docs/architecture.md](architecture.md) and [docs/agent-lifecycle.md](agent-lifecycle.md).
+The chat needs a configured provider and at least one project. Until then the dock shows "Connect a
+host & add a project to chat with an agent".

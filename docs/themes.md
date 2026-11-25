@@ -1,59 +1,98 @@
 # Themes
 
-JAgentDesk starts with **Gumloop**. Gumloop Dark is a separate choice; System follows
-Paseo Light / Dark. The Paseo palettes and plugin themes retain the Paseo shell.
-UI and monospace font stacks stay unchanged.
+Theme objects live in `packages/app/src/styles/theme.ts`; `styles/unistyles.ts` registers them.
+A fresh install starts on **Gumloop** (`DEFAULT_THEME`). UI and monospace font stacks are the same
+in every theme. [design.md](design.md) owns the design rules that apply on top of the tokens.
 
-Theme objects and semantic chrome live in `packages/app/src/styles/theme.ts`.
-`styles/unistyles.ts` registers them. Appearance applies font and size preferences
-at runtime; Gumloop keeps its own syntax palette when that patch runs.
+| Setting value                                                         | Label in Appearance                               | Shell   |
+| --------------------------------------------------------------------- | ------------------------------------------------- | ------- |
+| `gumloop`                                                             | Gumloop                                           | Gumloop |
+| `gumloopDark`                                                         | Gumloop Dark                                      | Gumloop |
+| `light`, `dark`, `zinc`, `midnight`, `claude`, `ghostty`, `pureBlack` | Light, Dark, Zinc, Midnight, Claude, Ghostty, ... | Classic |
+| `auto`                                                                | System (Light or Dark by system appearance)       | Classic |
+| `plugin`                                                              | The selected plugin theme                         | Classic |
 
-## Default and migration
+Gumloop Dark is its own choice; System never selects it. Gumloop keeps its own syntax and terminal
+palettes: `applyAppearance` skips the syntax-theme setting for both Gumloop keys, and Appearance
+shows the syntax row as fixed.
 
-Settings version 2 migrates `clickup` to `gumloop`, `clickupDark` to `gumloopDark`,
-and the previous default `auto` to `gumloop`. Loading persists that migration.
-Choosing System after migration keeps System. Plugin themes fall back to Gumloop
-when their contribution is unavailable.
+## Stored values
 
-## Shell ownership
+`normalizeAppSettings` in `packages/app/src/hooks/use-settings/storage.ts` rewrites the theme once on
+load:
 
-`components/gumloop-shell/` owns the desktop Gumloop shell. There is one 324px
-sidebar, with no global top bar or icon rail. Its header and footer stay fixed;
-primary navigation, Tools and Projects share the scrolling middle. Collapsing the
-sidebar hides it completely. The panel store persists that choice; ⌘\\ reopens it.
-Tools and Projects folds are device-local. Tools starts folded above six entries.
+- `clickup` becomes `gumloop` and `clickupDark` becomes `gumloopDark` (`COMPAT(gumloopTheme)`).
+- Settings written before `defaultThemeVersion` 2 with `auto` or no theme move to `gumloop`. Choosing
+  System afterwards keeps System.
 
-Destinations come from the shared navigation model and installed-plugin registry,
-so pushed plugin enablement changes the visible entries without a reload. Workspace
-routes drill into workspace navigation and Recents. Resource destinations render
-their existing panels; Settings portals its sections into the same sidebar.
-The Back button returns to global navigation without leaving the current page.
+A selected plugin theme whose plugin is gone falls back to Gumloop
+(`packages/app/src/screens/settings/appearance/theme-target.ts`).
 
-A plugin sidebar view replaces only the middle region. Settings → Sidebar selects
-it per device. Missing contributions show Projects; a failed view offers recovery.
-Device-scoped plugin settings use local storage with revision checks and migration.
+## Shell
 
-The compact shell remains on its existing layout until the mobile Gumloop work.
+The theme setting picks the shell. `useIsGumloopTheme()` and `useGumloopDesktopShell()` in
+`packages/app/src/components/gumloop-shell/use-gumloop-chrome.ts` are the only switches; branch on
+them in components, never on theme values in a style factory. The Gumloop shell lives in
+`components/gumloop-shell/`. The classic shell is `components/left-sidebar.tsx`.
 
-## Shared styling
+### Desktop
 
-Read semantic tokens through `StyleSheet.create`. Do not branch on theme values
-inside its factory: Unistyles web turns theme leaves into CSS variables before
-those expressions run. Use `useIsGumloopTheme` for structure, or theme-reactive
-leaf wrappers for third-party props. See [unistyles.md](unistyles.md).
+One 324px sidebar (`sidebar.tsx`) holds all app navigation.
 
-Shared buttons, cards, segmented controls, status chips, switches, modals and
-notifications read semantic chrome. Composer styling changes its frame and action
-buttons; the composer continues to own editing, queueing and submission behavior.
-The gradient painter preserves commas inside rgba stops for the dark border.
+- **Header, fixed:** logo, Command Center search, collapse button; the host switcher; **New agent**.
+- **Middle, scrolls:** the root destinations Home, History, Schedules, Skills, Bots, Market, Usage,
+  Insights; a **Tools** group with every other built-in and installed plugin destination; **Projects**
+  (the workspace list).
+- **Footer, fixed:** the usage row, the connection card (Direct, Tailscale, or Relay), and the account
+  row with Pair device, Settings, Notifications, and More as 32px icon buttons (`account-button.tsx`).
 
-Plugin themes derive neutral fills, hover, selected rows and passive text from
-contrast relationships. Contributions can override those roles. Sidebar status
-badges receive their row's semantic backdrop so selected and hovered rows do not
-leave a halo around the badge. Gumloop's measured surfaces remain explicit.
+Destinations come from `useAppNavItems` and the plugin registries, so a plugin turned on or off on the
+host adds or removes its entry without a reload. A destination only shows while its plugin is
+enabled. Tools starts folded when it has more than six entries. The Tools and Projects folds persist
+per device (`sidebar-state.ts`).
 
-Created / Last prompt sorting uses daemon-owned timestamps, including prompts on
-archived agents. Manual sorting retains its separate stored order. Long workspace
-groups show seven ordinary rows plus active overflow. Wide web rename holds the
-submitted title until a workspace update confirms or supersedes it; compact and
-native layouts keep the modal.
+Opening a workspace, Settings, or a built-in destination with a left panel drills the sidebar in:
+
+| Route        | Drill-in panel                                                                              |
+| ------------ | ------------------------------------------------------------------------------------------- |
+| Workspace    | `workspace-sidebar.tsx`: Agents, Terminals, Files, Changes, then Recents                    |
+| Settings     | The settings list, portalled in through `GUMLOOP_PANEL_HOST`                                |
+| Plugin route | `BuiltinLeftPanel` from the built-in plugin host ([builtin-plugins.md](builtin-plugins.md)) |
+
+The back arrow returns to root navigation without leaving the current page. The switcher next to the
+title jumps to another item of the same kind.
+
+A plugin sidebar view (`packages/app/src/plugins/sidebar-view/`) replaces only the middle region at
+the root level. Settings → Sidebar selects it per device; a failed view offers recovery.
+
+The collapse button and ⌘\ / Ctrl+\ (`use-sidebar-shortcut.web.ts`) hide the sidebar completely; the
+panel store remembers the choice.
+
+### Compact
+
+There is no tab bar. The same `GumloopSidebar` opens as a drawer (`drawer.tsx`), `min(324, 85%)` of
+the window wide. `compact-header.tsx` shows the menu button, a left-aligned title, and one action.
+Panes, files, and subagents open on the shared sheet stack; the explorer opens full screen through
+`GUMLOOP_INSPECTOR_HOST`. Motion and visibility belong to the mobile panel model in
+[mobile-panels.md](mobile-panels.md).
+
+### Composer
+
+`GumloopComposerFrame` (`composer-frame.tsx`) draws a 2px gradient border from
+`chrome.composerGradient` with the SVG painter in `gradient-fill.tsx`. The frame is decoration only;
+the composer owns editing, queueing, and submission.
+
+## Shell tokens
+
+`theme.chrome` (`ShellChrome` in `theme.ts`) holds the tokens shared controls read where the shells
+differ: the primary button fill, outline buttons, cards, switch geometry, title and row weights, the
+composer and send gradients. Every theme carries the full set (`classicChrome` or `gumloopChrome`)
+because Unistyles web compiles style factories against CSS variables; see
+[unistyles.md](unistyles.md#never-branch-on-theme-values-inside-stylesheetcreate-web).
+
+`ShellChrome` still declares rail, top bar, tab bar, search, and hero-glow tokens that nothing reads.
+They are left over from the removed shell. Do not build on them.
+
+Plugin themes derive hover, selected, neutral fill, and quiet text roles from contrast ratios
+(`packages/app/src/styles/derive-colors.ts`); a contribution can override them. Gumloop's measured
+surfaces are set explicitly.

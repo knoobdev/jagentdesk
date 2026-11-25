@@ -15,7 +15,7 @@ import {
 //
 // Scope note: this bypasses pinning for whatever app is RUNNING on the simulator. It does not make
 // App Store apps (device ARM + FairPlay) runnable on a simulator — that is an Apple constraint, not
-// a Frida one. See docs/plans/active/burp-workbench-capture-design.md.
+// a Frida one.
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 // In dist the .js scripts are copied alongside; in source they sit under frida-scripts/.

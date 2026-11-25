@@ -114,9 +114,9 @@ The harness launches the unpacked packaged app with isolated user data and daemo
 - the renderer starts a fresh desktop-managed daemon through the normal startup bootstrap;
 - the bundled CLI can query that daemon and run a terminal command.
 
-Pull-request CI runs the Linux x64 smoke under Xvfb when the cumulative PR diff changes `packages/desktop/**`. The desktop release matrix runs the harness against each host-native packaged app before publishing. All smoke jobs upload renderer, desktop, and daemon diagnostics on failure.
+The harness runs from electron-builder's `afterPack` hook (`packages/desktop/scripts/after-pack.js`) when `JAGENTDESK_DESKTOP_SMOKE=1`, and skips itself when the build arch differs from the host. The release workflow does not set the flag, so run it yourself before a desktop release. On failure it writes renderer, desktop, and daemon diagnostics to `JAGENTDESK_DESKTOP_SMOKE_ARTIFACT_DIR`.
 
-To exercise the smoke locally on Linux:
+On Linux:
 
 ```bash
 JAGENTDESK_DESKTOP_SMOKE=1 \
@@ -128,7 +128,7 @@ npm run build:desktop -- --publish never --linux --x64 --dir
 
 The desktop browser E2E launches an isolated real daemon, Metro, and Electron app. It forces workspace LRU eviction to reparent the original tab and replace its guest `WebContents`, then makes one MCP call each for tab listing, snapshot, and click against that original browser id. A final MCP wait proves the real target page received the click.
 
-Run it locally with the same command owned by the Ubuntu `desktop-tests` required check:
+Run it with:
 
 ```bash
 npm run test:e2e:browser-tabs --workspace=@jagentdesk/desktop
@@ -163,7 +163,7 @@ Codex MultiAgentV2 real tests use local Codex authentication rather than the Ope
 ### Test setup
 
 - Server: `packages/server/src/test-utils/vitest-setup.ts` loads `.env.test`, sets `JAGENTDESK_SUPERVISED=0`, and disables Git/SSH prompts. Add new global env shims here, not in individual tests.
-- App: `packages/app/vitest.setup.ts` provides `expo`/`__DEV__` shims and stubs a few native-only modules (`react-native-unistyles`, `react-native-svg`, `expo-linking`, `@xterm/addon-ligatures`). Stubbing here is for modules that have no meaningful Node behavior — not a license to mock app code.
+- App: `packages/app/vitest.setup.ts` provides `expo`/`__DEV__` shims. Test doubles for native-only modules (`react-native-unistyles`, `react-native-svg`, `expo-linking`, `lucide-react-native`, `@xterm/addon-ligatures`, …) live in `packages/app/test-stubs/` and are wired through `resolve.alias` in `packages/app/vitest.config.ts`. Stubs are for modules with no meaningful Node behavior, not a license to mock app code.
 
 ## Running tests locally
 
@@ -173,7 +173,7 @@ Test suites in this repo are heavy. Running them in bulk freezes the machine, es
 - Never run `npm run test` for a whole workspace unless asked.
 - For a broad sweep, redirect to a file and read it after: `npx vitest run <path> --bail=1 > /tmp/test-output.txt 2>&1`
 - Never re-run a suite another agent already reported green.
-- Never run the full Playwright E2E suite locally — defer whole-suite verification to CI. Targeted Playwright specs are allowed when you changed or need to prove that specific flow.
+- Never run the full Playwright E2E suite locally. Run the targeted spec for the flow you changed or need to prove.
 - App Playwright shares one warmed Metro server per run and gives every Playwright worker its own isolated daemon and `JAGENTDESK_HOME`. Spec files run concurrently without exposing one file's projects, agents, terminals, history, or provider configuration to another worker; tests within a file remain together so file-level setup is not repeated.
 - Helpers that create projects or workspaces own those records until cleanup. Their clients remove the daemon project on close, and an automatic fixture fails any test that still leaks a project record. Deleting only the temporary directory is not cleanup. Agent helpers pass the intended `workspaceId` through to agent creation; they never infer ownership from `cwd`.
 - Tests whose subject is daemon-global state, such as an empty history or daemon restart, start a dedicated host explicitly. Filenames and directories describe product behavior, never execution order or isolation mechanics.
@@ -182,9 +182,9 @@ Test suites in this repo are heavy. Running them in bulk freezes the machine, es
 ## Change validation
 
 Run the smallest relevant package tests locally. Cross-package static compatibility belongs to
-`typecheck`; desktop and mobile integration evidence belongs in the change notes.
+`typecheck`; desktop and mobile integration evidence belongs in the change notes (see [qa.md](qa.md)).
 
-The smallest meaningful contract wins over package ownership. Tiny structural invariants such as daemon launch supervision run unconditionally in the always-running routing job instead of maintaining a transitive file list; this check reads source entrypoints and builds no product. Routed integration contracts use stable domain directories. Browser changes select the required Playwright shards; desktop changes select the existing required desktop jobs, with renderer, real-Electron, and packaged-app coverage together in the Ubuntu leg. CLI-side Hub changes select one focused test inside the existing required server jobs. Repository scripts and the shared Vitest configuration run every PR contract because they are cross-cutting toolchain inputs.
+The repository's only GitHub Actions workflow is `.github/workflows/release.yml`. It runs on version tags, typechecks, and builds release assets. No workflow runs tests on pull requests, so the test evidence for a change is the targeted runs you record yourself.
 
 ## Agent authentication in tests
 

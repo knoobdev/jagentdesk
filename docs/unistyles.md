@@ -2,7 +2,7 @@
 
 This app uses [`react-native-unistyles` v3](https://www.unistyl.es/) for theme-aware styles. Unistyles is fast because most style updates do not go through React renders: the [Babel plugin](https://www.unistyl.es/v3/other/babel-plugin) rewrites React Native component imports, attaches style metadata, and lets the native ShadowRegistry update tracked views when theme or runtime dependencies change.
 
-That model is powerful, but it has sharp edges. Use this note when adding theme-dependent styles.
+That model has sharp edges. Read this before adding theme-dependent styles.
 
 ## STOP — `useUnistyles()` Is Banned
 
@@ -12,7 +12,7 @@ That model is powerful, but it has sharp edges. Use this note when adding theme-
 
 We have hit this gotcha repeatedly in JAgentDesk. The hook subscribes the component to **every** Unistyles runtime change (theme, breakpoint, insets, color scheme, scale) and returns a fresh object reference each call. That means a periodic lockstep re-render of warm subtrees (agent streams, panels, sidebars) even when nothing the user can see has changed — confirmed in profiling, with `theme` as the only changed input every cycle. It also breaks every downstream `useMemo`/`memo` boundary that includes a derived theme value.
 
-Reviewers MUST reject PRs that introduce a new `useUnistyles()` call. There is no last-resort carveout. If you cannot solve a case with the alternatives below, file an issue and stop — do not paper over it with the hook.
+Lint enforces this: `.oxlintrc.json` restricts the import, and grandfathered files may only leave its burn-down list. Reviewers MUST reject PRs that introduce a new `useUnistyles()` call. There is no last-resort carveout. If you cannot solve a case with the alternatives below, file an issue and stop — do not paper over it with the hook.
 
 Use these alternatives in order:
 
@@ -82,7 +82,7 @@ Keep the entries separate so each retains its Unistyles metadata. If composition
 JSX, create the array inside the component or in a `useMemo` that first runs when the component
 mounts—never at module evaluation time.
 
-[`useUnistyles()`](https://www.unistyl.es/v3/references/use-unistyles) is different. It gives React access to the current theme/runtime and can make a component re-render when those values change. Use it for values that must be rendered through React props, such as icon colors or small escape hatches. Do not expect direct reads from `UnistylesRuntime` to re-render a component; [issue #817](https://github.com/jpudysz/react-native-unistyles/issues/817) is a useful reminder of that invariant.
+Values that must reach React props rather than `style`, such as icon colors, go through a `withUnistyles` leaf (alternative 3 above). Do not expect direct reads from `UnistylesRuntime` to re-render a component; [issue #817](https://github.com/jpudysz/react-native-unistyles/issues/817) is a useful reminder of that invariant.
 
 ## Dynamic Pixel Styles On Web
 
@@ -132,7 +132,7 @@ This mistake once produced tens of thousands of warnings from retained sidebar r
 `ScrollView.contentContainerStyle` is the canonical trap. It looks like a style prop, but it is not the `style` prop Unistyles registers. How badly that bites depends on who owns the component:
 
 - **A remapped React Native `ScrollView`** still picks the style up — the Babel plugin rewrites the import and the factory tracks `contentContainerStyle` alongside `style`. The failure mode here is staleness: on first mount it can paint with the theme that was active at mount time and never repaint. The upstream tutorial calls this out in its [ScrollView Background Issue](https://www.unistyl.es/v3/tutorial/settings-screen#scrollview-background-issue) section.
-- **A third-party scroller** — `BottomSheetScrollView`, `FlashList`, anything Unistyles never rewrote — drops the style entirely on web. Nothing throws and the value looks right in JS, but the class Unistyles emitted is never applied, so the padding, gap, or background is simply absent. `AdaptiveModalSheet` shipped its compact sheet content flush to the screen edges for exactly this reason while the desktop card, which uses a real `ScrollView`, looked correct.
+- **A third-party scroller** — `BottomSheetScrollView`, `FlashList`, anything Unistyles never rewrote — drops the style entirely on web. Nothing throws and the value looks right in JS, but the class Unistyles emitted is never applied, so the padding, gap, or background is absent. `AdaptiveModalSheet` shipped its compact sheet content flush to the screen edges for exactly this reason while the desktop card, which uses a real `ScrollView`, looked correct.
 
 The second case is why the wrapper-`View` fix below is not optional styling advice. A themed inset belongs on a `View` you own; a third-party scroller only gets theme-free layout.
 
@@ -180,18 +180,6 @@ In practice the wrapper-`View` pattern is the one we use. Across the app, `withU
 
 In principle, [`withUnistyles`](https://www.unistyl.es/v3/references/with-unistyles) can also wrap a `ScrollView` to make `contentContainerStyle` theme-reactive via its [auto-mapping behavior for `style` and `contentContainerStyle`](https://www.unistyl.es/v3/references/with-unistyles#auto-mapping-for-style-and-contentcontainerstyle-props). We previously did this on the welcome screen and hit the `> *` child-selector leak documented below; we have since moved the welcome screen to the wrapper-`View` pattern. If you find yourself reaching for `withUnistyles(ScrollView)`, treat it as a smell and check whether a wrapper view works first.
 
-The smallest escape hatch is to use `useUnistyles()` and pass an inline value through React:
-
-```tsx
-const { theme } = useUnistyles();
-
-<ScrollView
-  contentContainerStyle={[styles.contentContainer, { backgroundColor: theme.colors.surface0 }]}
-/>;
-```
-
-Use this sparingly. It works because React re-renders the prop, but it gives up the main Unistyles native-update path for that value.
-
 ## `withUnistyles` And The `> *` Child-Selector Leak
 
 `withUnistyles` on a component with a theme-dependent `style` prop works by wrapping the component in a `<div style={{display: 'contents'}} className={hash}>` and emitting the style under a `.hash > *` child selector so the styles cascade onto the wrapped component. This is how auto-mapping for `style` and `contentContainerStyle` works on web.
@@ -236,39 +224,30 @@ Avoid the bug by preferring the wrapper-`View` pattern from the previous section
 
 `@gorhom/bottom-sheet` can keep `BottomSheetModal` content mounted while the sheet is hidden. That matters during JAgentDesk's startup theme transition: a header node can be created under the initial adaptive theme, stay hidden, then appear later with stale native style values even though surrounding content has re-rendered correctly.
 
-We saw this in `AdaptiveModalSheet`: the body text and buttons were dark-theme-correct, but the shared sheet title opened with the initial light-theme text color on a dark sheet background. For tiny values in a reusable sheet header, prefer the inline escape hatch:
+We saw this in `AdaptiveModalSheet`: the body text and buttons were dark-theme-correct, but the shared sheet title opened with the initial light-theme text color on a dark sheet background. Move the stale theme-dependent value onto a `withUnistyles` leaf that owns it, so the theme change re-renders that leaf:
 
 ```tsx
-const { theme } = useUnistyles();
-
-<Text style={[styles.title, { color: theme.colors.foreground }]}>{title}</Text>;
+const ThemedTextInput = withUnistyles(TextInput, (theme) => ({
+  placeholderTextColor: theme.colors.foregroundMuted,
+}));
 ```
 
-Keep layout and typography in `StyleSheet.create`; move only the stale theme-dependent value through React. If a larger subtree shows the same behavior, consider remounting the sheet on theme changes or moving the themed paint onto a wrapper that is mounted with the visible content.
+`packages/app/src/components/adaptive-modal-sheet.tsx` is the example. Keep layout and typography in `StyleSheet.create`. If a larger subtree shows the same behavior, remount the sheet on theme changes or move the themed paint onto a wrapper that is mounted with the visible content.
 
-The same rule applies to bottom-sheet component props such as `backgroundStyle` and `handleIndicatorStyle`: they are library props, not the direct React Native `style` prop Unistyles registers. Prefer a custom `backgroundComponent` that calls `useUnistyles()`, or pass a small inline object from the hook theme.
+The same rule applies to bottom-sheet component props such as `backgroundStyle` and `handleIndicatorStyle`: they are library props, not the direct React Native `style` prop Unistyles registers. Paint the background in a custom `backgroundComponent` that is itself a tracked view or a `withUnistyles` leaf. `SheetBackground` in `adaptive-modal-sheet.tsx` still reads the hook and is on the burn-down list.
 
 ## Memoized Style Objects
 
-When a third-party library receives a plain style object, it is outside Unistyles' native tracking path. Make sure any memo that builds that style object depends on the actual theme values it reads.
-
-Avoid indirect keys like this:
+When a third-party library receives a plain style object, it is outside Unistyles' native tracking path. Build that object in a `withUnistyles` mapping so the theme change itself produces the new object:
 
 ```tsx
-const { theme, rt } = useUnistyles();
-const markdownStyles = useMemo(() => createMarkdownStyles(theme), [rt.themeName]);
+const ThemedMarkdown = withUnistyles(EnrichedMarkdownText);
+const regularStyle = (theme: Theme) => createMarkdownStyles(theme);
+
+<ThemedMarkdown uniProps={regularStyle} />;
 ```
 
-On adaptive system-theme changes, the hook can provide a light/dark theme update while an indirect runtime key is not the value that invalidates the memo. That leaves the library rendering stale colors. Assistant markdown hit this exact failure: the workspace shell switched to light, but assistant text and code spans kept the old dark-theme markdown style object.
-
-Prefer the hook theme itself, or explicit theme tokens, as the dependency:
-
-```tsx
-const { theme } = useUnistyles();
-const markdownStyles = useMemo(() => createMarkdownStyles(theme), [theme]);
-```
-
-If a style factory is cheap, skipping `useMemo` entirely is also fine.
+`packages/app/src/components/markdown/renderer.tsx` is the example. Do not key a memo on an indirect runtime value such as the theme name: on adaptive system-theme changes the theme can switch while that key stays the same. Assistant markdown hit this exact failure: the workspace shell switched to light, but assistant text and code spans kept the old dark-theme markdown style object.
 
 ## Static Theme Imports
 
@@ -289,43 +268,41 @@ const styles = StyleSheet.create((theme) => ({
 <ThemedChevronDown size={theme.iconSize.md} style={styles.icon} />;
 ```
 
-This is the dominant pattern in the app today (see `sidebar-workspace-list.tsx`, `message.tsx`, the workspace screens). Reserve `useUnistyles()` for the last-resort cases described at the top of this file. Importing `baseColors`, theme-name constants, or `type Theme` is fine when the value is intentionally static or type-only.
+This is the dominant pattern in the app today (see `sidebar-workspace-list.tsx`, `message.tsx`, the workspace screens). Importing `baseColors`, theme-name constants, or `type Theme` is fine when the value is intentionally static or type-only.
 
 ## Reanimated `Animated.View` + Dynamic Styles Crashes
 
 Do not apply `StyleSheet.create((theme) => ...)` styles to a Reanimated `Animated.View`. Unistyles wraps styled components in a `<UnistylesComponent>` and patches native view props from C++ via the ShadowRegistry. Reanimated also reaches into the same native node from its worklet runtime. When a theme change fires, both systems try to mutate the same node and the app crashes with `Unable to find node on an unmounted component.` This was a real iOS sidebar crash on theme toggle (commit `4896cfe9`).
 
-Fix: keep static positioning on the `Animated.View` in plain React Native `StyleSheet`, and pass theme-dependent values (e.g. `backgroundColor`) as inline style from `useUnistyles()` — the inline path is acceptable here because no other escape works:
+Fix: keep the `Animated.View` on plain React Native `StyleSheet`, and put the theme-dependent paint on a nested plain view that Reanimated never touches:
 
 ```tsx
-import { StyleSheet as RNStyleSheet } from "react-native";
+import { StyleSheet as RNStyleSheet, View } from "react-native";
 import Animated from "react-native-reanimated";
-import { useUnistyles } from "react-native-unistyles";
+import { StyleSheet } from "react-native-unistyles";
 
-const positionStyles = RNStyleSheet.create({
-  sidebar: { position: "absolute", inset: 0, width: 280 },
+const rotatorStyles = RNStyleSheet.create({
+  rotator: { position: "absolute", width: 16, height: 16 },
 });
+const styles = StyleSheet.create((theme) => ({
+  arc: { borderColor: theme.colors.foreground },
+}));
 
-function Sidebar() {
-  const { theme } = useUnistyles();
-  return (
-    <Animated.View
-      style={[positionStyles.sidebar, animatedStyle, { backgroundColor: theme.colors.surface1 }]}
-    />
-  );
-}
+<Animated.View style={[rotatorStyles.rotator, animatedStyle]}>
+  <View style={styles.arc} />
+</Animated.View>;
 ```
 
-This is one of the rare places `useUnistyles()` is the right tool: there is no `withUnistyles(Animated.View)` equivalent, the affected component is small, and the alternative is a crash.
+`packages/app/src/components/status-ring/` is the example. The mobile panel overlays follow the same split ([mobile-panels.md](mobile-panels.md)).
 
 ## Never Branch On Theme Values Inside `StyleSheet.create` (Web)
 
 On web, Unistyles evaluates a style function once and replaces every theme leaf with a CSS
-variable (`theme.chrome.topBar` becomes `var(--chrome-top-bar)`). A conditional on a theme value
-runs against those variable strings, so `theme.chrome.kind === "clickup" ? a : b` always takes
-the same branch and never updates when the theme changes. Read tokens directly and make every
-theme carry them (see `ShellChrome` in `styles/theme.ts`); for structural differences, choose
-the style in the component from React state (for example the theme setting) instead.
+variable (`theme.chrome.selectedRow` becomes `var(--chrome-selected-row)`). A conditional on a theme
+value runs against those variable strings, so `theme.chrome.kind === "gumloop" ? a : b` always
+takes the same branch and never updates when the theme changes. Read tokens directly and make every
+theme carry them (see `ShellChrome` in `styles/theme.ts`); for structural differences, choose the
+style in the component from React state, such as `useIsGumloopTheme()` ([themes.md](themes.md)).
 
 Dependencies are also detected per style key: `theme` has to be referenced inside that key's
 value. Hoisting `const c = theme.x` above the returned object hides it from the plugin.
@@ -347,7 +324,7 @@ If we ever need to avoid the transition entirely, store at least the theme prefe
 
 ## Runtime Theme Patching For User Preferences
 
-Appearance settings (UI/mono font family, font sizes, syntax-highlight theme) are applied by patching every registered theme at runtime with `UnistylesRuntime.updateTheme(name, updater)` — not by threading preference reads through components. `applyAppearance` in `packages/app/src/screens/settings/appearance/apply-appearance.ts` runs from a `ProvidersWrapper` effect on settings load/change and loops all six theme keys, returning `{ ...theme, fontFamily, fontSize, lineHeight, colors.syntax }`.
+Appearance settings (UI/mono font family, font sizes, syntax-highlight theme) are applied by patching every registered theme at runtime with `UnistylesRuntime.updateTheme(name, updater)` — not by threading preference reads through components. `applyAppearance` in `packages/app/src/screens/settings/appearance/apply-appearance.ts` runs from a `ProvidersWrapper` effect on settings load/change and loops every registered theme key (`ALL_THEME_KEYS`, including the two plugin slots), returning `{ ...theme, contentMaxWidth, fontFamily, fontSize, lineHeight, colors.syntax }`. The Gumloop keys keep their own syntax palette.
 
 This works without `useUnistyles()` because every consumer already reads these tokens through `StyleSheet.create((theme) => …)` (or the `withUnistyles`/`uniProps` path for the markdown renderer), so patching the theme repaints tracked views through the native ShadowRegistry with no React re-render.
 

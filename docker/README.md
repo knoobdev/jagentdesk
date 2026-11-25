@@ -11,7 +11,7 @@ docker run -d --name jagentdesk \
   -e JAGENTDESK_PASSWORD=change-me \
   -v "$PWD/jagentdesk-home:/home/jagentdesk" \
   -v "$PWD:/workspace" \
-  jagentdesk:local:latest
+  jagentdesk:local
 ```
 
 Then open `http://localhost:6767`.
@@ -20,7 +20,7 @@ The base image intentionally does not bundle agent CLIs. Extend it with the
 agents you use:
 
 ```Dockerfile
-FROM jagentdesk:local:latest
+FROM jagentdesk:local
 
 USER root
 RUN npm install -g @openai/codex @anthropic-ai/claude-code

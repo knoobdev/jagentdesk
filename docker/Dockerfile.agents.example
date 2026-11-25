@@ -5,7 +5,7 @@
 #
 # Then set `image: jagentdesk-with-agents` in docker/docker-compose.example.yml.
 
-FROM jagentdesk:local:latest
+FROM jagentdesk:local
 
 USER root
 RUN npm install -g \

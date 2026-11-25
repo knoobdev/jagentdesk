@@ -30,6 +30,17 @@ Run it with the repo Electron:
 npm run capture-harness --workspace=@jagentdesk/desktop
 ```
 
+`JAGENTDESK_CAPTURE_HARNESS_GROUP` selects what runs (`packages/desktop/capture-harness/main.js`):
+
+| Group                         | What it covers                                                                 |
+| ----------------------------- | ------------------------------------------------------------------------------ |
+| `permanent-parking` (default) | Production parking state: fresh, settled, soak, multi-tab, viewport, full-page |
+| `existing`                    | The older multi-webview capture matrix only                                    |
+| `all`                         | `existing`, then `permanent-parking`                                           |
+| `automation`                  | Guest ref contract, page evaluation, keyboard containment                      |
+| `browser-profile`             | Persistent session shared across tabs and process restarts                     |
+| `titlebar-drag`               | macOS only: native window drag and click-through on the titlebar overlays      |
+
 Build the desktop main process before the automation group so its production guest
 preload is available:
 
@@ -67,14 +78,16 @@ the taskbar where Electron supports it, and revealed with `showInactive()` from
 the compositor only needs visible inactive windows, and harness runs must not steal
 focus from the person using the machine.
 
-The harness writes PNG evidence and `results.json` to:
+The `titlebar-drag` group compiles `titlebar-drag-mouse.m` with `clang` and posts native
+mouse events, because CDP mouse events do not move Electron windows. It loads the
+production `index.html` CSS so a regression in the global no-drag rule reproduces.
 
-```text
-packages/desktop/capture-harness/out/
-```
+The harness writes PNG evidence and `results.json` to
+`packages/desktop/capture-harness/out/`, or to `JAGENTDESK_CAPTURE_HARNESS_OUT_DIR` when set.
 
-A passing run prints `PASS` lines for the production P1 attach-off parking state,
-including fresh, settled, 75-second soak, multi-tab, viewport, and full-page checks. The
+A passing `permanent-parking` run prints `PASS` lines for the fresh, settled, soak
+(75 seconds; override with `JAGENTDESK_CAPTURE_HARNESS_SOAK_MS`), multi-tab, viewport,
+and full-page checks. The
 PNG sizes may be device-pixel scaled; on a Retina display the 1280x800 logical viewport
 is usually saved as 2560x1600.
 

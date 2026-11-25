@@ -6,15 +6,19 @@ Compact layouts have three mutually exclusive destinations:
 - `agent` in the center
 - `file-explorer` on the right
 
-They share one navigation model in `packages/app/src/mobile-panels/`. Gumloop presents the left
-destination with the same sidebar used on desktop, capped at 324 points or 85% of the window. The
-right destination is a full-screen inspector above the compact header. Keep their shared motion and
-visibility ownership in `MobilePanelOverlay`; theme-specific placement belongs in the shell.
+They share one navigation model in `packages/app/src/mobile-panels/`. There is no tab bar. With a
+Gumloop theme the left destination is the desktop sidebar as a drawer (`GumloopDrawer` in
+`components/gumloop-shell/drawer.tsx`), capped at 324 points or 85% of the window, and the right
+destination is a full-screen inspector portalled above the compact header (`GUMLOOP_INSPECTOR_HOST`).
+Classic themes present the left destination with `left-sidebar.tsx` at full width. Keep shared motion
+and visibility ownership in `MobilePanelOverlay` (`mobile-panels/presentation.tsx`); theme-specific
+placement belongs in the shell ([themes.md](themes.md#compact)).
 
 Compact file and subagent panes use the workspace sheet stack rather than replacing the main pane.
 Retain the underlying pane while a sheet owns focus. Settings temporarily covers the drawer through
-a presentation session, so returning restores its workspace drill-in without replaying an open
-animation. A different navigation destination clears that return session.
+a presentation session (`navigation/settings-presentation/`), so returning restores its workspace
+drill-in without replaying an open animation. A different navigation destination clears that return
+session.
 
 ## Ownership
 
@@ -76,7 +80,7 @@ definition, no longer eligible to begin.
 ## Integration rules
 
 - Callers request semantic targets through `panel-store`; they never write shared values.
-- Gesture behavior comes from the four explicit hooks in `mobile-panels/gestures.ts`.
+- Gesture behavior comes from the explicit open and close hooks in `mobile-panels/gestures.ts`.
 - A focused interactive surface may block panel-opening gestures through
   `useBlockMobilePanelOpenGestures`. Register only while the conflicting interaction is active and
   unregister when the surface is hidden or unfocused. The blocker never disables gestures that close
@@ -86,7 +90,7 @@ definition, no longer eligible to begin.
   so its injected `collapsable={false}` reaches Android/Fabric.
 - Mobile sidebars render through `MobilePanelOverlay`; do not duplicate overlay lifecycle or motion
   styles in sidebar components.
-- The desktop left sidebar is retained too. App chrome owns separate mounted and visible decisions:
+- The desktop sidebar is retained too. App chrome owns separate mounted and visible decisions:
   closing it or yielding its width marks it inactive and applies `display: none` without conditionally
   removing the sidebar tree.
 - Animated panel nodes use React Native static styles plus inline theme values. Do not attach

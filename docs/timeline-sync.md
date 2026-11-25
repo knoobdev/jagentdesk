@@ -111,16 +111,17 @@ recomposition while the runtime still owns the same directory snapshot and timel
 Removing the host from the registry is the destructive boundary: it stops the runtime and clears the
 session and host-scoped setup state together.
 
-The durable replica cache is a display cache, not a synchronization checkpoint. Its timeline record
-contains only the focused `agentId` and a truncated item tail. It never persists a cursor, epoch,
-older-history availability, authority status, or sync generation because those facts would describe
-the complete source dataset rather than the truncated display dataset.
+The durable replica cache ([data-model.md](data-model.md#offline-replica)) is a display cache, not
+a synchronization checkpoint. Each chat record keeps the latest canonical items. It stores the
+canonical range (epoch, start and end sequence) and older-history availability only when the stored
+items cover that range losslessly; otherwise it stores items with no range. It never stores a sync
+generation or an authority status.
 
-Restoring that cache produces a painted timeline: the items may render immediately, but the first
-daemon timeline request is still `tail`. A successful tail response atomically establishes canonical
-items, range, and older-history availability. Live rows received between cache paint and that tail
-response stay in the separate live head, do not advance a cursor or trigger gap recovery, and are
-reconciled with the authoritative tail and subsequent catch-up.
+Restoring that cache produces a painted timeline: the items render immediately, but the timeline is
+not synchronized until the daemon confirms it through the freshness check or authoritative catch-up.
+A restored range only tells that request where the cache ends. Live rows received between cache
+paint and the daemon's answer stay in the separate live head, do not advance a cursor or trigger gap
+recovery, and are reconciled with the authoritative response and subsequent catch-up.
 
 Every daemon-derived live item carries its timeline epoch and sequence position. Bootstrap
 replacement keeps only positioned rows newer than the page it installs, while unresolved local

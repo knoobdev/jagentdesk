@@ -1,18 +1,112 @@
 # Changelog
 
-## Unreleased
-
-- Removed Team mode and agent forum. ORC remains available; existing local data is retained.
-- Removed Figma and Activity graph (ADR-0055), including their RPCs, agent tools, screens and
-  `server_info` flags. Old `builtinPlugins.figma` / `builtinPlugins.activity-graph` config keys are
-  ignored. The daemon deletes stored Figma credentials and the Figma cache once at start; saved
-  connection and file lists under `$JAGENTDESK_HOME/figma` stay on disk.
-- Preserved the BA/Tester/Pentester cross-review rules as a core library for future Bots work.
-
 All notable changes to JAgentDesk are documented here. JAgentDesk versions its
-own release line (now `0.9.59`); the many `v0.1.x`–`v1.0.x` tags in history are
+own release line (now `0.10.0`); the many `v0.1.x`–`v1.0.x` tags in history are
 inherited from the upstream [Paseo](https://github.com/getpaseo/paseo) fork and
 do not correspond to JAgentDesk releases.
+
+## v0.10.0 — 2026-11-26
+
+A new app, a second way to reach your daemon, and features you can switch off per host. The Gumloop theme
+replaces ClickUp with one sidebar on desktop and a drawer on phones. An encrypted relay works alongside
+Tailscale. Docker, Kubernetes, Databases and fourteen other features are built-in plugins. Bots replace
+Team mode, daemons can connect to each other, and Usage shows your plan limits. JAgentDesk now includes
+Paseo 0.11 through 0.17.3.
+
+### New UI (Gumloop theme, one sidebar, mobile drawer)
+
+- Gumloop light and dark themes are the new default and replace ClickUp; ClickUp, ClickUp Dark and the
+  automatic theme switch over. Other colour themes stay available with the classic layout.
+- One desktop sidebar: host, New agent, Home, History, Schedules, Skills, Bots, Market, Usage, Insights,
+  a Tools group, Projects, and a footer with plan usage, the connection card and Pair device / Settings /
+  Notifications / More. Workspaces, Settings and tools drill in with a back arrow. ⌘\ / Ctrl+\ collapses
+  it.
+- Phones: no tab bar; the sidebar opens as a drawer, panes open as sheets, Settings are grouped tiles,
+  Scripts have their own pages.
+- Composer with a gradient frame, fullscreen editing and model / effort / permission pills.
+
+### Relay alongside Tailscale
+
+- An end-to-end encrypted relay (Cloudflare Worker) reaches the daemon in addition to the embedded
+  Tailscale listener. Pairing links carry both routes; the app fails over between them; Settings → host →
+  Connections enables the relay per connection.
+- `jagentdesk relay reset` clears the relay ownership pin after moving a daemon.
+
+### Built-in plugins with per-host toggles
+
+- Docker, Kubernetes, Databases, Argo CD, SSH servers, Remote tasks, Custom API providers, Jira, Forge
+  Hub, Devices & simulators, Workbench, Skills, Spec mode, Autonomous run, Insights, Session sharing and
+  Agentic browser are built-in plugins, listed in Settings → host → Plugins with a switch each.
+- Turning one off hides its screens and agent tools on that host and stops its services; data is kept.
+  Autonomous run, Session sharing and Agentic browser are off by default.
+- Bundled provider plugins: Antigravity, Muse Code, Hoplite, fx and goose. Worktree include and the Usage
+  sources are built-ins too.
+
+### Bots replace Team mode
+
+- Team mode and the agent forum are removed. Bots are long-lived assistants on Supervisor → Lead → Peer
+  with chat, items, memory, schedules and settings; workers run in their own worktrees and BA / Tester /
+  Pentester cross-review checks their results.
+- Slack: a bot can talk in Slack; events reach the daemon through the relay Worker.
+
+### Connected hosts
+
+- Pair one daemon with another (SAS codes, no password or SSH); agents start and message agents on the
+  other host, files move between hosts, and remote finishes are tracked across restarts.
+- `jagentdesk host ls | add | update` manages connected hosts.
+
+### Usage and Insights
+
+- Usage cards per account (Claude, Codex, Copilot, Cursor, OpenCode Go, OpenRouter, Kimi, Grok, MiniMax,
+  Z.ai) with limits, reset times and run-out forecasts; reorder, hide, pick the host, turn sources on or
+  off; usage in the sidebar footer and in each agent's context details.
+- `jagentdesk usage ls` and `usage inspect`.
+- Insights stays as a built-in plugin, now with per-turn metrics.
+
+### Paseo 0.11 → 0.17.3
+
+- Terminal: 10,000 rows replayed as ANSI on reattach; terminals survive daemon restarts and updates;
+  native renderer on iOS and Android; paste and drop files.
+- Composer: skills in the slash menu, long-press Send to queue, ↑/↓ recall, send-shortcut choice.
+- Chat: completed turns fold behind "Worked for …", tool calls group, a rebuilt native chat list,
+  per-turn metrics.
+- Markdown: one enriched renderer for chat and files; file panel with Preview and editable CodeMirror
+  Source; selectable diffs.
+- Command Center tabs, recent and archived workspaces, rewind; workspaces from existing worktrees,
+  branches or pull requests; archive with undo.
+- OMP as a first-class provider, Codex Fast/Ultrafast, provider updates in Settings, model catalogs
+  refreshed every 30 minutes, new Claude models.
+- Expo 57 / React Native 0.86.
+
+### Agent lifecycle and messaging
+
+- Idle agents release their process after one hour and resume on the next message (Settings → host →
+  Agents → Release idle agents).
+- Agent-to-agent messages queue until the recipient's turn ends (`steer` and `interrupt` remain).
+- Parents are woken after a daemon restart; background work and heartbeats can be listed and stopped.
+
+### Security
+
+- SAS pairing for desktop and mobile: both screens show a six-digit code and you approve on both.
+  **Apps older than 0.10.0 cannot pair new devices with this daemon — update the app.** Paired devices
+  keep working.
+- Signed reconnect, tailnet node pinning for every device kind, and WhoIs admission in the embedded
+  Tailscale bridge (peers must be on the same Tailscale account).
+- Embedded Tailscale 1.80.0 → 1.106.1.
+
+### Removed
+
+- Team mode and the agent forum (data kept on disk), Activity graph and Figma (old config keys are
+  ignored; stored Figma credentials and cache are deleted once at start), the ClickUp theme.
+
+### Fixes
+
+- The daemon no longer crashes when a client disconnects while a message is being delivered; a reload
+  no longer fails with "Session delivery is closed".
+- Phones recover a dead host connection within seconds of returning to the foreground.
+- Hundreds of upstream fixes across chat, Markdown, diffs, workspaces, schedules, terminals, the CLI and
+  the Claude, Codex, OpenCode, Pi, OMP and ACP providers. The release notes list them all:
+  [docs/releases/v0.10.0.md](docs/releases/v0.10.0.md).
 
 ## v0.9.59 — 2026-11-16
 

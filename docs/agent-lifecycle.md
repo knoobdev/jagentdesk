@@ -14,9 +14,9 @@ Each live agent in `AgentManager` carries a `lastStatus` of `initializing`, `idl
 
 ## Restart recovery
 
-Recovery is opt-in under Host settings (`agents.resumeOnStartup`). After restart it sends
-`agents.resumePrompt` (default `Resume working.`) only to agents interrupted during a running
-turn. Idle agents stay dormant. Archived, internal, daemon-owned and archived-workspace agents
+Recovery is opt-in: Settings → host → Agents → **Resume agents after restart**
+(`agents.resumeOnStartup`). After restart it sends `agents.resumePrompt` (default
+`Resume working.`) only to agents interrupted during a running turn. Idle agents stay dormant. Archived, internal, daemon-owned and archived-workspace agents
 are excluded. A slow or unavailable provider holds back only its own agent.
 
 Recovery is best-effort: a crash between clearing intent and dispatch can lose continuation.
@@ -36,8 +36,9 @@ Idle runtimes are released after one hour while their saved conversations remain
 Reopening a runtime starts a fresh idle window without changing sidebar activity timestamps.
 Tracked background work, outstanding local finish subscriptions, queued messages, and provider
 safety vetoes keep runtimes resident. Claude session crons and `/loop` wakeups are process-local
-work and prevent release. Hosts can disable cleanup live with `agents.idleRuntimeCleanup` in
-Settings → host.
+work and prevent release. Hosts can disable cleanup live with Settings → host → Agents → **Release idle agents**
+(`agents.idleRuntimeCleanup`). The timer lives in
+`packages/server/src/server/agent/idle-runtime-cleanup/`.
 
 ### Cancellation
 
@@ -72,11 +73,47 @@ messages leave the queue. An unread steer and its carried messages can be lost w
 stopped or interrupted. Follow up with a short steer or interrupt to expedite a queued message;
 do not resend its body.
 
-## Provider-managed child agents
+## Background visibility
 
-Some providers can create their own child sessions inside one provider runtime. OMP's task tool reports these with `child_session` events; `AgentManager` imports the live provider handle, stamps `jagentdesk.parent-agent-id`, and surfaces the result as a normal subagent in the parent's subagents track.
+An agent is effectively background when it or its workspace is background:
+`agent.background || workspace.background`. Background controls discovery only. Provider history,
+plugin hooks, parentage, finish notifications, archive and restart recovery behave as for any other
+agent. Both flags are fixed at creation.
 
-The provider still owns the underlying runtime. JAgentDesk keeps an agent record so the child can be opened, tracked, archived, and cascaded with the parent, but prompts and history hydration route through the provider adapter for that native child handle.
+- **Agent.** `create_agent_request.background` marks helpers the user does not watch, such as a
+  plugin's classifier or a loop worker. A background agent never raises attention, adds nothing to
+  its workspace's status bucket, and stays out of tabs, the parent's subagents track and agent
+  lists. A tab opened by ID still works.
+- **Workspace.** `background` on workspace creation hides the workspace from the sidebar unless
+  **Show background** is on in the sidebar display preferences.
+- **Inheritance.** When `background` is omitted, an agent created by a caller agent takes the
+  caller's own `background`, and a new workspace takes the caller's effective background
+  (`packages/server/src/server/agent/create-agent/intent.ts`). An explicit value always wins.
+
+`AgentDirectory` (`packages/server/src/server/agent/directory.ts`) owns list visibility. Default
+workspace and agent lists exclude background entries; `includeBackground` includes them. Exact-ID
+operations bypass the filter. The app replicates inclusively and filters per surface. Clients gate
+background workspaces on `features.backgroundWorkspaces` and agent-level background on
+`features.backgroundAgents`. Clients without the `background_agents` hello capability get
+workspace-only visibility, because older apps auto-open a tab for every root agent.
+
+### Private daemon helpers
+
+Internal agents (`internal: true`), such as the git metadata generator for branch names and commit
+messages, are daemon-owned helpers. They are never public: they are excluded from discovery, global
+subscriptions, restart recovery, host data export, chat mentions and plugin archive hooks, and they
+never raise attention. This lifecycle is separate from background visibility and is not a public
+creation option.
+
+## Background work
+
+Background work is provider work that runs outside the foreground turn: background shells and
+monitors reported by Claude, Codex, OpenCode, Pi and ACP providers, plus daemon-owned heartbeats and
+change-request watches. Each item has a kind, description, start time, and a stop handle when it can
+be stopped. Clients list and stop it with `agent.background_work.list.request` and
+`agent.background_work.stop.request`, and receive `agent.background_work.update` pushes; the agent
+pane shows it per agent (`packages/app/src/background-work/`). Tracked background work keeps the
+runtime resident (see [Runtime residency](#runtime-residency)).
 
 ## Archive
 
@@ -95,7 +132,7 @@ Archiving runs through `AgentManager.archiveAgent` (`packages/server/src/server/
 4. Close the runtime (kills the process if still running)
 5. **Cascade-archive children** — any agent whose `jagentdesk.parent-agent-id` label matches the archived agent gets archived too, recursively
 
-Cascade is what keeps subagent fleets from outliving their orchestrator.
+Cascade keeps subagents from outliving their parent.
 
 Workspace archive is a separate lifecycle. Archiving or removing a worktree can close a surviving
 agent record without setting the agent's `archivedAt`, while its `workspaceId` still points at the
@@ -151,7 +188,7 @@ The collapsible track above the composer in an agent's pane (`packages/app/src/s
 parentAgentId === thisAgent.id  AND  !archivedAt
 ```
 
-- **Provider subagents** are child executions owned by Claude, Codex, or OpenCode. They are not inserted into `AgentManager` as managed agents. Providers emit a separate descriptor and timeline stream through `agent.provider_subagents.*`; the client keeps that state outside the normal agent store and merges only the presentation rows into the track.
+- **Provider subagents** are child executions owned by Claude, Codex, OpenCode, Pi, OMP, or a plugin provider. They are not inserted into `AgentManager` as managed agents. Providers emit a separate descriptor and timeline stream through `agent.provider_subagents.*`; the client keeps that state outside the normal agent store and merges only the presentation rows into the track.
 
 Clicking either kind opens a workspace tab. A JAgentDesk subagent tab is a normal interactive agent pane. A provider subagent tab is a read-only timeline pane with no composer, archive, detach, rewind, or fork actions. Both panes use `AgentStreamView`, so message, reasoning, tool-call, and layout rendering stay identical.
 
@@ -161,14 +198,14 @@ Provider descriptors may include one compact subtitle. The provider owns its con
 
 ### Claude provider subagents: the task protocol
 
-Claude Code announces subagent lifecycle on the SDK stream (`task_started` / `task_updated` / `task_notification` / `task_progress`), and JAgentDesk reads those announcements rather than reconstructing them from sidechain frames. The live source (`subagents/live-source.ts`) and the replay source (`subagents/replay-source.ts`) both translate into one observation vocabulary (`subagents/observation.ts`), so a fact is derived once for both paths instead of once per path. Gotchas that are not obvious from the SDK types:
+Claude Code announces subagent lifecycle on the SDK stream (`task_started` / `task_updated` / `task_notification` / `task_progress`), and JAgentDesk reads those announcements rather than reconstructing them from sidechain frames. The live source and the replay source (`packages/server/src/server/agent/providers/claude/subagents/`) both translate into one observation vocabulary, so a fact is derived once for both paths. Gotchas that are not obvious from the SDK types:
 
 - **Not every announced task belongs in the subagents track.** Workflows (`local_workflow`) share the track with Task subagents. Background shells (`local_bash`) use Background work instead, and ambient housekeeping sets `skip_transcript`. All can carry a `tool_use_id`, so that field alone cannot choose the surface.
 - **A task that was never declared gets no descriptor, by any route.** Filtered tasks still emit `task_notification`s carrying a `tool_use_id`, and still emit frames carrying `parent_tool_use_id`. Attributing either produces a descriptor with no identity and a defaulted `running` status — a nameless row that never finishes. Status, presentation updates, and sidechain frames all route through the declaration table.
 - **Task ids are session-scoped, not turn-scoped.** Cancelling a turn must not clear the routing table: a backgrounded child settles after the interrupt and needs its descriptor to still exist. Cancellation instead terminalizes the declared children that were running in the foreground, and a later `task_notification` is free to correct that guess. Backgrounded children are identified by `task_updated.patch.is_backgrounded`.
 - **Effort is only reachable through hooks.** It appears nowhere on the message stream at any depth, and the level JAgentDesk requests is not necessarily the level that runs — a model that does not support it is silently downgraded. A hook firing inside a subagent reports the active post-downgrade level next to its `agent_id`, which is the same id `task_started` calls `task_id`.
 - **Backgrounded subagents emit no frames carrying `parent_tool_use_id` at all.** Everything keyed off that field sees nothing for one; they are visible only because the task protocol announces them.
-- **On replay, `<session>/subagents/` holds every descendant, not just this session's children.** `agent-<id>.meta.json` carries `spawnDepth`: `1` is a direct child, `2+` was spawned by another subagent and its `toolUseId` names a Task call made inside its parent's session, which nothing in this transcript can resolve. Replaying those adds rows the live stream never showed, each with no Task card and no recoverable outcome, so they render as running forever. One recorded session showed 10 subagents live and would have replayed 22.
+- **On replay, `<session>/subagents/` holds every descendant, not only this session's children.** `agent-<id>.meta.json` carries `spawnDepth`: `1` is a direct child, `2+` was spawned by another subagent and its `toolUseId` names a Task call made inside its parent's session, which nothing in this transcript can resolve. Replaying those adds rows the live stream never showed, each with no Task card and no recoverable outcome, so they render as running forever. One recorded session showed 10 subagents live and would have replayed 22.
 - **Replay `totalTokens` is a context-size reading, not cumulative spend.** Claude Code finalizes a subagent by summing the _last_ assistant message's usage block and shipping that as `usage.total_tokens`. Summing per-entry usage instead multiplies the cached prefix by the turn count and reports a number several times larger than the live path.
 
 Archived JAgentDesk subagents disappear from the track, by design. To remove one from the track without closing its tab, use the **archive button** on the row — it opens a confirm dialog and archives the subagent on confirm. Provider-owned rows have no individual JAgentDesk lifecycle controls.

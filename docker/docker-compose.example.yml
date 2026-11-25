@@ -4,7 +4,7 @@
 # For any network-reachable deployment, change JAGENTDESK_PASSWORD first.
 services:
   jagentdesk:
-    image: jagentdesk:local:latest
+    image: jagentdesk:local
     container_name: jagentdesk
     restart: unless-stopped
     ports:

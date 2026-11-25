@@ -2,13 +2,13 @@
 
 Skills are standard Agent Skills folders (`<name>/SKILL.md` with `name` and `description` front
 matter). JAgentDesk does not inject skill text into prompts: it installs skills where each
-provider CLI already looks and asks the provider to load them. Product contract: spec 22,
-ADR-0022.
+provider CLI already looks and asks the provider to load them.
 
 Code: `packages/protocol/src/native-skills.ts` (schemas, invocation), the `skills` built-in
-feature in `plugins/skills/` (daemon service, RPCs, tools, screen, composer control), and the
+feature in `plugins/skills/` (daemon service, RPCs, tools, screen, composer control; file names
+below without a path are in `plugins/skills/server/`), and the
 provider directory table `packages/server/src/server/agent/native-skill-paths.ts`, which stays in
-core because Spec mode installs its commands there too.
+core because Spec mode installs its commands there too. Turn the feature off per host in Settings → host → Plugins.
 
 ## Where skills live
 
@@ -66,7 +66,7 @@ marketplaces already added on the host are listed through the provider CLI
 
 ### Directories
 
-An `index` source whose host has an adapter is a searchable directory (ADR-0023); today that is
+An `index` source whose host has an adapter is a searchable directory; today that is
 `https://skillsmp.com` (`directory-hosts.ts`, `directory-sources.ts`). A directory is never listed:
 a merged browse skips it, and `skills.sources.browse { sourceId, query, page }` sends one
 `/api/v1/skills/search` request per page (20 results, cached 10 minutes). Results are

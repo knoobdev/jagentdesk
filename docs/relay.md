@@ -12,8 +12,9 @@ hostnames or `host:port`; a bare hostname uses port 443. TLS defaults to true.
 `JAGENTDESK_RELAY_ENABLED`, `JAGENTDESK_RELAY_ENDPOINT`, and
 `JAGENTDESK_RELAY_USE_TLS` override persisted values at startup.
 
-Change `relay.enabled` through the daemon config RPC to start or stop the relay
-without restarting the daemon. An explicit enabled override from the environment
+Toggle **Enable relay** in Settings → host → Connections (the daemon config RPC
+behind it sets `relay.enabled`) to start or stop the relay without restarting the
+daemon. An explicit enabled override from the environment
 or a launch flag pins that setting for the run. Endpoint and TLS changes take
 effect at the next daemon launch.
 

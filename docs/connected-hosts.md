@@ -2,21 +2,23 @@
 
 A saved host belongs to the daemon that stores it. The app's saved connections remain separate. Use
 `registrationId` to manage the saved entry and the destination's pinned `serverId` to route work.
+Below, A is the daemon that saves the host and B is the destination.
 
 ## Pairing and recovery
 
-On B, open Pair a device and choose Pair a daemon. On A, run
+In the app, open B's host settings, choose **Pair a device**, and copy the pairing link. On A, run
 `jagentdesk host add '<pairing-link>' --label build`. Compare the six-digit verification code and
 confirm on B and with `y` in the CLI. Neither side can complete pairing alone. The exchange expires
-after two minutes; an incomplete exchange saves no registration.
+after two minutes; an incomplete exchange saves no registration. This is the same SAS exchange as
+[device pairing](permissions.md#device-pairing); A identifies itself as a `daemon` device.
 
-Each registration has its own Ed25519 device key. B records its device kind as `daemon`. Keys live
+Each registration has its own Ed25519 device key. Keys live
 only in A's `hosts.json`, written atomically with fsync and mode `0600`. Startup repairs its mode.
 List and inspect return safe summaries. Keep this file out of diagnostic bundles.
 
 Connections use paired loopback, the daemon's tsnet SOCKS5 egress, or the existing encrypted relay.
-There is no password or SSH connector for saved hosts. The bridge checks WhoIs before reading HTTP
-and binds daemon device keys to the verified tailnet node. See [relay](relay.md) for the relay path.
+There is no password or SSH connector for saved hosts. Tailnet links pin the verified node like any
+other paired device. See [relay](relay.md) for the relay path.
 
 Identity changes, duplicate destinations, self connections, and rejected device credentials stay in
 `error` until an explicit update, enable, or daemon restart. Replacing a connection repeats pairing;

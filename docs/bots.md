@@ -1,8 +1,9 @@
 # Bots
 
-Bots are the built-in `bots` plugin (enabled by default). They use the daemon's existing
-agent sessions, ORC, worktree provisioning and permission cards. Enable or disable them with
-`plugins.builtin.set.request`; installed-plugin settings do not control them. Check
+Bots are long-lived assistants built on [orchestration](orchestration.md) (ORC). They are the
+built-in `bots` plugin (enabled by default) and use the daemon's existing agent sessions, ORC,
+worktree provisioning and permission cards. Enable or disable them per host in Settings → host →
+Plugins (`plugins.builtin.set.request`); installed-plugin settings do not control them. Check
 `server_info.features.bots` before opening the feature.
 
 ## Persistence and ownership
@@ -35,7 +36,8 @@ No merge or push is automatic.
 ## Permission boundary
 
 Bot configuration and chat writes require `daemon.manage`; reads require `daemon.read`.
-All seven bot tools use `requestHostToolPermission`. Worker/provider tools use the same
+All seven bot tools (`bot_item_add`, `bot_item_set`, `bot_item_comment`, `bot_item_done`,
+`bot_worker_start`, `bot_wait`, `bot_handoff`) use `requestHostToolPermission`. Worker/provider tools use the same
 existing gate. The only setting that permits unattended operation is explicit
 `bot.unattended=true`. Show this exact warning before the user enables it:
 
@@ -122,7 +124,7 @@ the Jira plugin stops Jira polling. No external connector is required.
 
 ### Slack
 
-Create one Slack app per bot from Settings → Slack. Keep Relay enabled and the daemon
+Create one Slack app per bot from the bot's **Settings** tab, Slack section. Keep Relay enabled and the daemon
 online for URL verification and event delivery. The manifest URL exists before you paste
 credentials; connect the token and signing secret before asking Slack to verify the URL.
 The allowed-user list starts empty. Link your account by sending the expiring code in a DM.
@@ -138,7 +140,9 @@ from the most recently received Slack event. Reactions on posted replies use the
 thread timestamp. Disconnect rotates the URL; offline unregister operations remain pending
 until the relay reconnects, including when the bot was deleted.
 
-All `bots.slack.*` RPCs require `daemon.manage`, including status and manifest. Disable the
+The Slack RPCs are `bots.slack.status`, `manifest`, `connect`, `disconnect`, `link_code` and
+`allowed.remove` (each `.request` / `.response`). All require `daemon.manage`, including status
+and manifest. Disable the
 Bots plugin to unregister its hooks without losing its configuration. The local acceptance
 test uses an injected Slack Web API URL and a local Worker; never run it against Slack itself.
 
@@ -153,4 +157,4 @@ Orca `dfdb4fda` (MIT, Copyright 2026 Lovecast Inc.):
 `src/main/persistence/scheduling-automations/automation-schedule-operations.ts:1-65`.
 The adaptation keeps local home/context/items/wake/mention behavior, uses JAgentDesk cron
 and ORC instead of Orca orchestration, and applies JAgentDesk permission cards instead of
-Orca's unattended default. The upstream license ships in `vendor/orca-bots/LICENSE`.
+Orca's unattended default. The upstream license ships in `packages/server/vendor/orca-bots/LICENSE`.

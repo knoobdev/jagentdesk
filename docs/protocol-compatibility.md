@@ -51,8 +51,7 @@ write drain; their outbound messages retain the physical frame limit.
 
 ## Terminal ANSI replay
 
-ADR-0051 in the spec repo defines terminal history compatibility. Keep advertising
-`features["terminal-restore-modes"]` forever: released v0.9.x apps use it to request
+Keep advertising `features["terminal-restore-modes"]` forever: released v0.9.x apps use it to request
 ANSI restore. Without `terminal_chunked_replay`, send one Restore frame with 200
 history rows by default, clamped to 0–500. Capable clients receive bounded ANSI
 chunks and request their configured history, clamped to 0–10,000. JSON snapshot
@@ -78,25 +77,23 @@ When a tag's condition is met, delete the shim and the tag in the same change.
 
 ## Removed features
 
-A spec-repo ADR can retire a feature together with its message schemas. This is an explicit
-exception to retaining retired message schemas. Older clients calling the removed RPCs receive
-the normal `rpc_error` with `code: "unknown_schema"` (unknown request), and `server_info.features`
-stops advertising the feature, so older apps hide it.
+Retiring a whole feature is the one case where its message schemas are deleted rather than kept.
+Older clients calling the removed RPCs receive the normal `rpc_error` with `code: "unknown_schema"`,
+and `server_info.features` stops advertising the feature, so older apps hide it.
 
-| ADR      | Feature                | Removed                                                                                                                           | Kept                                                                                                                                                                                            |
-| -------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ADR-0050 | Team mode, agent forum | `forum.*` agent tools, `forum/*` and `forum.diagram.html.request` RPCs, stream, capability flag                                   | `$JAGENTDESK_HOME/forums/` stays on disk, unread. ORC keeps its contract.                                                                                                                       |
-| ADR-0055 | Figma, Activity graph  | `figma.*` and `agent.activity_graph.*` RPCs and pushes, `figma_*` tools, `figma*`/`activityGraph` flags, both client capabilities | Built-in list items still accept the `figma` and `activity-graph` ids from older daemons (`COMPAT(adr0055)` in `builtin-plugins.ts`). Stale `builtinPlugins` keys in `config.json` are ignored. |
-
-ADR-0055 also deletes the stored Figma credentials and the Figma cache once at daemon start
-(`packages/server/src/server/retired-figma-data.ts`): nothing reads them any more, and credentials
-should not outlive the code that used them. The saved connection and file lists stay on disk.
+- Keep accepting ids an older daemon still sends inside shared lists, so the whole list parses, and
+  drop them after parsing. Tag the shim, as `COMPAT(adr0055)` does in
+  `packages/protocol/src/builtin-plugins.ts`.
+- Ignore stale `builtinPlugins` keys in `config.json`.
+- Leave the feature's ordinary data on disk, unread. Delete stored credentials once at daemon start
+  (`packages/server/src/server/retired-figma-data.ts`): credentials must not outlive the code that
+  used them.
 
 ## Recent additive changes
 
-- v0.9.57: `remote_exec.*` RPCs and the `remote_exec.job_updated` push (spec 33 / ADR-0044). `SshServer` gained optional `via` and `remoteExec` fields. Old clients ignore the new fields and never send the new types; old daemons never send them.
-- v0.9.58: `RemoteJob` gained optional `noCode` and `sources` fields (spec 33.4 / ADR-0045). Old clients parse jobs without them; old daemons never send them.
-- v0.9.59: `providers.custom.list|save|delete|test` requests and responses (spec 34 / ADR-0047); provider config entries gained an optional `api` block. Old clients never send the new requests and the settings section shows the daemon's error on old daemons.
+- v0.9.57: `remote_exec.*` RPCs and the `remote_exec.job_updated` push. `SshServer` gained optional `via` and `remoteExec` fields. Old clients ignore the new fields and never send the new types; old daemons never send them.
+- v0.9.58: `RemoteJob` gained optional `noCode` and `sources` fields. Old clients parse jobs without them; old daemons never send them.
+- v0.9.59: `providers.custom.list|save|delete|test` requests and responses; provider config entries gained an optional `api` block. Old clients never send the new requests and the settings section shows the daemon's error on old daemons.
 
 ## QA
 

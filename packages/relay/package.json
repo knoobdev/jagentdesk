@@ -1,6 +1,6 @@
 {
   "name": "@jagentdesk/relay",
-  "version": "0.9.59",
+  "version": "0.10.0",
   "description": "JAgentDesk relay for bridging daemon and client connections",
   "license": "Apache-2.0",
   "files": [

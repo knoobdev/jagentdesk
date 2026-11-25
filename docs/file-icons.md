@@ -8,18 +8,18 @@ Icons are inlined as SVG strings in:
 packages/app/src/components/material-file-icons.ts
 ```
 
-This file is auto-generated. Do not edit it by hand.
+Its header says it is generated from `material-icon-theme`, but the repo has no generator script. Add icons by copying from the package with the steps below; do not hand-write SVG.
 
 ## How it works
 
 - `SVG_ICONS` maps icon names (e.g. `"typescript"`) to raw SVG strings
 - `EXTENSION_TO_ICON` maps file extensions (e.g. `"ts"`) to icon names
 - `getFileIconSvg(fileName)` returns the SVG string for a given filename, falling back to a generic file icon
-- `packages/app/src/components/file-explorer-pane.tsx` is the only consumer; it renders the SVG with `SvgXml` from `react-native-svg`
+- `MaterialFileIcon` (`packages/app/src/components/material-file-icon.tsx`) renders the SVG with `SvgXml` from `react-native-svg`. The file explorer, file panel, Git file header, and Command Center use it; the diff pane (`packages/app/src/git/diff-pane.tsx`) calls `getFileIconSvg` directly
 
 ## Adding a new icon
 
-1. Find the icon name in the material-icon-theme manifest:
+1. From the repo root, find the icon name in the material-icon-theme manifest:
 
 ```bash
 node -e "
@@ -51,7 +51,7 @@ cat node_modules/material-icon-theme/icons/ICON_NAME.svg
 
 ## Currently included icons
 
-53 unique icons covering these extensions:
+53 unique icons plus the `_default` fallback, covering these extensions:
 
 | Extension(s)                               | Icon        |
 | ------------------------------------------ | ----------- |

@@ -40,7 +40,8 @@ The commands return the same script metadata shown by the workspace: lifecycle, 
 
 ## Configuration
 
-Add a `serviceProxy` block under `daemon` in `~/.jagentdesk/config.json`:
+Add a `serviceProxy` block under `daemon` in `$JAGENTDESK_HOME/config.json` (`~/.jagentdesk` for
+the packaged daemon):
 
 ```json
 {
@@ -134,8 +135,8 @@ Treat the forwarded authority as client-influenced input. A service that builds 
 
 The listen address and public base URL can also be set via environment variables, which take precedence over `config.json`:
 
-| Variable                              | Description                                                               |
-| ------------------------------------- | ------------------------------------------------------------------------- |
+| Variable                                   | Description                                                               |
+| ------------------------------------------ | ------------------------------------------------------------------------- |
 | `JAGENTDESK_SERVICE_PROXY_ENABLED`         | Compatibility shim; `false` suppresses optional public/listen layers only |
 | `JAGENTDESK_SERVICE_PROXY_LISTEN`          | Starts the optional service-only listener, e.g. `0.0.0.0:8080`            |
 | `JAGENTDESK_SERVICE_PROXY_PUBLIC_BASE_URL` | Adds public service aliases and links                                     |

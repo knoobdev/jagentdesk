@@ -1,6 +1,7 @@
 # Plugins: JAgentDesk vs upstream
 
-For statically linked feature plugins and migration, see [Built-in feature plugins](builtin-plugins.md).
+This page covers installed plugins and the bundled SDK plugins. Statically linked features
+(Docker, Kubernetes, Databases and the rest) are in [Built-in feature plugins](builtin-plugins.md).
 
 JAgentDesk's plugin system is a selective port of the upstream split plugin API (separate
 client and server entries, `PluginClientContext` / `PluginServerContext`, SDK subpaths
@@ -23,7 +24,7 @@ Code: `packages/plugin` (SDK), `packages/server/src/server/plugins` (daemon runt
 | `index.ts(x)` only (pre-split plugin)       | `index.ts(x)` | —            |
 
 Upstream rejects pre-split single-entry plugins; JAgentDesk keeps loading them as client
-entries (`resolveEntryPaths` in `runtime.ts`).
+entries (`resolveEntryPaths` in `compiler-build.ts`).
 
 ## Requirements
 
@@ -51,13 +52,14 @@ against the Paseo plugin API JAgentDesk implements (`SUPPORTED_PASEO_PLUGIN_API`
 
 ## Installing and updating
 
-Settings → Plugins installs from a directory, Git or npm source and shows each plugin's status,
-source and revision. `jagentdesk plugin update [plugin-id]` shows the available updates and asks before applying
-them (`--yes` skips the prompt, `--check` only shows them). The Marketplace entry (paseo.cafe catalog) is kept alongside the source installer.
+Settings → host → Plugins installs from a directory, Git or npm source and shows each plugin's
+status, source and revision. `jagentdesk plugin update [plugin-id]` shows the available updates and
+asks before applying them (`--yes` skips the prompt, `--check` only shows them). The Marketplace
+(paseo.cafe catalog) sits alongside the source installer.
 
 A Marketplace entry installs from its scanned npm release when it has one and falls back to its
 Git source; npm installs count as installed. Catalog caveats are shown, and entries without a
-manifest show "Can't install". Plugin screenshots and README images open in the zoomable viewer.
+manifest show "Can’t install". Plugin screenshots and README images open in the zoomable viewer.
 
 ## Persistence
 
@@ -112,36 +114,31 @@ the source identity for outline navigation and find; a plugin-rendered final rep
 when its completed turn folds. Client renderers run inside the installation's existing runtime,
 including its translations and state source.
 
-## Built-ins
+## Bundled plugins
 
-The daemon loads bundled plugins through `BuiltinPluginLoader` before configured plugins,
-including when the user plugin switch is off. `worktree-include` is bundled in source and
-packaged builds. It copies matching ignored files from `.worktreeinclude` before setup or the
-first agent starts. It does not overwrite existing destinations or copy tracked files.
+The daemon loads bundled plugins through `BuiltinPluginLoader` before configured plugins, including
+when the user plugin switch is off. They share Settings → host → Plugins → Built-in and its
+per-host switches with the feature built-ins; `pluginsEnabled` applies only to Installed. Toggle
+rules, persistence and dependency checks are in
+[Built-in feature plugins](builtin-plugins.md#turning-a-built-in-off).
 
-The same loader reserves the statically linked feature ids. Bundled providers and
-`worktree-include` use that same Settings → Plugins → Built-in list and per-host switches;
-`pluginsEnabled` applies only to Installed. Provider availability follows the configured
-executable and environment. Missing CLIs show an unavailable reason in the existing row. Feature switches
-persist in top-level `builtinPlugins`. The config store migrates the three legacy opt-in flags
-once; after that, editing those flags does not change built-ins.
+`worktree-include` is bundled in source and packaged builds. It copies matching ignored files from
+`.worktreeinclude` before setup or the first agent starts. It does not overwrite existing
+destinations or copy tracked files.
 
-Use the built-in set RPC for changes so dependency checks, cascades and service lifecycle run
-together. Wire requests use `.request` / `.response` suffixes; a disabled feature answers with
-`plugin_disabled`. Keep workspace Forge checkout/search, shared Docker/secret-store libraries,
-and guest permission checks independent of feature gates.
+Bundled provider plugins follow the configured executable and environment. A missing CLI shows an
+unavailable reason in the existing row.
 
-Capture feature tools once per agent, including stateless HTTP MCP access. A toggle changes new
-agents' catalogs; existing agents retain their launch tools. Session subscriptions and daemon
-background services still stop on disable. Do not clear push listeners while stopping a service:
-the same WebSocket sessions must work when it is enabled again.
+Bundled `*-usage-source` plugins feed Usage with their account reports; turning off a source stops
+its plugin and removes its cards. Usage opens from the sidebar. Its Sources list controls card
+visibility on this device; the Built-in switches control discovery on the host. Quota fetches run
+while Usage, a context popover, or the visible sidebar summary needs them. Per-turn token and cost
+history belongs to the `insights` built-in.
 
-Bundled `*-usage-source` plugins share this Built-in list and its per-host switches.
-Usage reads their account reports; turning off a source stops its plugin and removes its cards.
-Usage opens from the rail or sidebar footer as a dialog or compact sheet. Its Sources list
-controls card visibility on this device; the Built-in switches control discovery on the host.
-Quota fetches run while Usage, a context popover, or the visible sidebar summary needs them.
-Insights keeps JAgentDesk’s per-turn token and cost history under its own Built-in switch.
+Plugin tools are captured once per agent, including stateless HTTP MCP access, so a toggle changes
+new agents' catalogs only. Session subscriptions and background services still stop on disable. Do
+not clear push listeners while stopping a service: the same WebSocket sessions must work when it is
+enabled again.
 
 ## Composer surfaces
 
@@ -154,13 +151,12 @@ surface that opened it. Creating a second runtime loses that surface's draft and
 
 ## Remaining host gaps
 
-The supported Paseo version range covers the ported runtime API, not every upstream host
-surface. These integrations still depend on other platform batches:
+The supported Paseo version range covers the ported runtime API, not every upstream host surface.
+Runtime e2e tests in `packages/server/src/server/plugins/` skip the cases that need a missing host
+integration and name the prerequisite beside the test:
 
-- Full owned-list observation recovery needs the client list subscription engine (B5).
-- Background counts and snapshot flags need background agent/work ownership (B7, #9362).
-- Worktree manager creation/removal/restoration needs workspace automation gates (B9, #10278).
-- Reloading plugin configuration from disk needs the config reload RPC (B2, #7959).
-
-Runtime e2e tests are enabled in `packages/server/src/server/plugins/`. Individual cases that
-need these absent hosts remain skipped with their prerequisite beside the test.
+- Owned-list observation recovery after repeated socket closes needs the client list subscription
+  engine.
+- Worktree creation hooks across receipt replays need idempotency receipts in `CreationService`.
+- Enabling and disabling configured plugins through a daemon config reload, without a restart,
+  waits on the config reload path.

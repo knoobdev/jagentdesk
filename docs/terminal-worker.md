@@ -1,6 +1,6 @@
 # Terminal worker
 
-Every terminal's PTY lives in the terminal worker, a process separate from the daemon. The worker outlives the daemon, so restarts, crashes and upgrades keep terminals running. This doc covers what the code can't tell you: why the process model is shaped this way, the rules nothing enforces, and the known limits.
+Every terminal's PTY lives in the terminal worker, a process separate from the daemon. The worker outlives the daemon, so restarts, crashes and upgrades keep terminals running. On reattach, clients get the retained history replayed as ANSI (see [Display replay](#display-replay)). Desktop-managed stops are the exception; see [Desktop](#desktop).
 
 ## Process model
 
@@ -26,7 +26,7 @@ The worker writes `$JAGENTDESK_HOME/terminal-worker/<pid>.json` (owner-only) wit
 - The first frame must be `hello` with the secret; anything else closes the connection. Anyone authenticated can type into every shell, so the record and Unix socket are `0600` inside a `0700` directory.
 - New socket names include the record id. A stale record whose pid belongs to a newer worker cannot reach that newer worker. Existing records keep their recorded paths. Legacy paths use only the home and pid, so force-killing through one also requires successful authentication. A legacy socket that cannot authenticate stays unconfirmed.
 - A missing pid or refused socket retires the record without signaling the worker. An accepting socket identifies the live worker. Cleanup asks it to shut down, then probes again before force-killing it after the grace period (`taskkill /T` on Windows). An inconclusive probe counts toward the worker limit and is retried on the next start or stop without signaling it.
-- Workers never query their own birth time or command line. Readers accept legacy identity fields but ignore them. Daemons through 0.15.1 report new records unreadable and cannot adopt them.
+- Workers never query their own birth time or command line. Readers accept the legacy birth-time and command-line fields but ignore them. Older daemons that require those fields report new records unreadable and cannot adopt them.
 - Windows terminal programs have no recorded birth time and terminal lifecycle operations never launch PowerShell. Linux and macOS retain program birth-time checks through `ps` with `LC_ALL=C`; Linux also walks sessions to find surviving jobs.
 - Unix socket paths have a byte budget (103 on macOS, 107 on Linux). Long dev homes use an owner-only fallback under `$TMPDIR/jagentdesk-<uid>/` or `/tmp/jagentdesk-<uid>/`. An existing directory must be a real `0700` directory owned by you; a shared root is never chmodded.
 - A home on a filesystem that refuses Unix sockets (AFS, some network mounts) passes those checks and then fails the bind with `EPERM`, `EACCES`, `EOPNOTSUPP` or `ENOTSUP`. The worker moves on to the next directory on those codes only; any other listen error fails the start. The record carries the path the worker bound, so nothing else recomputes it.
@@ -46,7 +46,7 @@ The worker writes `$JAGENTDESK_HOME/terminal-worker/<pid>.json` (owner-only) wit
 
 Never more than two workers run. A new worker launches only when none is current, none is incompatible and fewer than two run. The count comes from the records, so an unreachable worker counts, as does one whose socket probe is inconclusive, and one a cleanup could not confirm gone. When two run, the daemon starts with no current worker, and the first terminal created after one of them exits launches it.
 
-**The frozen envelope never changes across versions:** the frame format (4-byte length + `v8.serialize`), `hello`/`helloAck`, the `listTerminals` info fields and `shutdown`. That is what lets any daemon close any worker: a kill stop sends `shutdown` to a newer worker it cannot otherwise drive. Protocol 5 hard cuts unreleased protocols 1 through 4, including the acknowledgement-based replay contract: those workers are obsolete and close. For future versions, keep a previous-version adapter so the draining worker can still be driven, and drop the adapter for the version before that.
+**The frozen envelope never changes across versions:** the frame format (4-byte length + `v8.serialize`), `hello`/`helloAck`, the `listTerminals` info fields and `shutdown`, so any daemon can close any worker: a kill stop sends `shutdown` to a newer worker it cannot otherwise drive. Protocol 5 hard cuts unreleased protocols 1 through 4, including the acknowledgement-based replay contract: those workers are obsolete and close. For future versions, keep a previous-version adapter so the draining worker can still be driven, and drop the adapter for the version before that.
 
 Tests stand up other versions with `JAGENTDESK_TERMINAL_WORKER_PROTOCOL_OVERRIDE`, read by the worker. It is test-only.
 

@@ -1,12 +1,17 @@
-# iOS simulators (SimFleet)
+# Devices and iOS simulators (SimFleet)
 
-SimFleet is one control plane for the host's iOS simulators, shared by the human UI (the
-**Simulators** screen) and agents (the `sim_*` tools on the `jagentdesk` MCP server). It is
-macOS-only and shells out to `xcrun simctl`, plus `idb` or Maestro for input. Off macOS the
-daemon reports `availability.simctl = false` instead of erroring.
+SimFleet is one control plane for the host's iOS simulators, Android emulators and physical
+devices, shared by the human UI (**Devices** in the sidebar's Tools group) and agents (the `sim_*`
+tools on the `jagentdesk` MCP server). It is the `devices` [built-in](builtin-plugins.md) (on by
+default); Workbench requires it. The destination appears only on hosts that report a simulator,
+emulator, physical-device or sideload capability ([Host tools](host-tools.md)).
 
-Code: `packages/server/src/server/simulator/`, wire schemas in
-`packages/protocol/src/simulator/rpc-schemas.ts`, UI in `packages/app/src/screens/sim-*.tsx`.
+Simulators are macOS-only: the daemon shells out to `xcrun simctl`, plus `idb` or Maestro for
+input. Off macOS it reports `availability.simctl = false` instead of erroring.
+
+Code: `plugins/devices/` (`server/simulator/` for simulators, `server/devices/` for physical
+devices and emulators, `server/sideload/` for Sideload, `client/` for the UI). Wire schemas are in
+`packages/protocol/src/simulator/rpc-schemas.ts`.
 
 ## Input backends
 
@@ -60,7 +65,7 @@ screen with zero crop:
   corner radius and a uniform bezel.
 - Bezels come from Apple's tech-spec enclosure size (mm) versus the active display size
   (native px ÷ ppi), per model. The table and the corner radii live in
-  `packages/app/src/screens/sim-device-spec.ts` with unit tests next to it.
+  `plugins/devices/client/sim-device-spec.ts` with unit tests next to it.
 - The screen aspect comes from the frame's actual pixel size, so an unknown future model
   still fits exactly.
 
@@ -81,12 +86,12 @@ the user's screen.
 
 ## Physical devices (phones, tablets, adb emulators)
 
-Spec 27 / ADR-0033 in the spec repo. `packages/server/src/server/devices/` owns them through one
-daemon-wide `PhysicalDeviceHub` (session and agent tools share it); udids are
+`plugins/devices/server/devices/` owns them through one daemon-wide `PhysicalDeviceHub` (session
+and agent tools share it); udids are
 `android:serial:<serial>` and `ios:<udid>`. Physical devices (`kind: "physical"`) start with
 control off (`$JAGENTDESK_HOME/devices/physical.json`); while off, every capture, log, UI-tree,
 input and install call answers `control_disabled`, and agents also need the card that lasts until
-the agent's session ends (`agent/tools/sim-device-target.ts`, `devices/agent-grants.ts`). Emulators
+the agent's session ends (`server/sim-device-target.ts`, `server/devices/agent-grants.ts`). Emulators
 that adb finds keep simulator behaviour: no switch, no card.
 
 Gotchas that cost time:
@@ -99,10 +104,10 @@ Gotchas that cost time:
 - **`ios forward` and `ios ui run` bind `0.0.0.0`.** WebDriverAgent is reached through the
   daemon's own usbmux forward on `127.0.0.1` (`usbmux.ts`); the go-ios tunnel agent binds
   `127.0.0.1` already.
-- **Cable only (ADR-0033 §4).** `adb.ts` refuses `adb tcpip`, `adb pair` and `adb connect` at the
+- **Cable only.** `adb.ts` refuses `adb tcpip`, `adb pair` and `adb connect` at the
   one place every adb call goes through; there is no wireless debugging. Android serials that are
   network addresses (`<ip>:<port>`, `adb-…._adb-tls-connect._tcp`) and iOS devices go-ios reports
   with `ConnectionType: "Network"` (Wi-Fi sync) are left out of the physical-device list, so
-  `connection` is always `"usb"`. (Sideload still installs on iOS devices over Wi-Fi sync, spec 26.7.)
+  `connection` is always `"usb"`. (Sideload still installs on iOS devices over Wi-Fi sync.)
 - Screen frames are binary opcode `0x20` only for clients advertising `binary_screen_frames`;
   older clients keep polling `simulator/screenshot`, which works for physical devices too.

@@ -1,88 +1,59 @@
 # Orchestration
 
-Orchestration là control plane dùng chung cho desktop, mobile và các client khác của
-JAgentDesk. Client không tự tạo topology; daemon giữ authority, route, lifecycle và trạng
-thái bền vững.
+Orchestration (ORC) is the Supervisor → Lead → Peer control plane. Desktop, mobile and every other client share it; clients never build the topology themselves. The daemon owns authority, routing, lifecycle and durable state. [Bots](bots.md) run on the same runtime. Code: `packages/protocol/src/orchestration.ts` (schemas, defaults, role instructions) and `packages/server/src/server/orchestration/` (task brief compiler, runtime).
 
-## Luồng thực tế
+## Flow
 
 ```text
-Human chat trong Workspace
+/orc in the composer, or the workspace Orchestration panel
   → orchestration.task.prepare.request
-  → Task Brief ready hoặc câu hỏi thiếu thông tin ngay trong cùng panel
-  → một Supervisor của brief/workspace
-  → Supervisor gọi orchestration.bootstrap_lead
-  → đúng một Lead
-  → Lead gọi orchestration.create_peer cho từng assignment bounded
-  → Peer gọi orchestration.handback
-  → Lead gọi orchestration.resolve_dissent nếu có bất đồng
-  → Lead gọi orchestration.accept_result sau validation
-  → runtime gửi handback/accepted result ngược lên parent agent
-  → Supervisor báo cáo lại Human
+  → Task Brief ready, or open questions shown in the same panel
+  → one Supervisor for the brief's workspace
+  → Supervisor calls orchestration.bootstrap_lead
+  → exactly one Lead per workspace
+  → Lead calls orchestration.create_peer per bounded assignment
+  → Peer calls orchestration.handback
+  → Lead calls orchestration.resolve_dissent when a Peer disagrees
+  → Lead calls orchestration.accept_result after validation
+  → handbacks and the accepted result travel back up to the parent agent
+  → Supervisor reports to the human
 ```
 
-Không có nút “Refine request”. Request tự nhiên được compiler giữ nguyên trong
-`rawRequest`, tách thành objective/context/constraints/accepted decisions/acceptance và
-validation. Nếu objective còn thiếu, response có `status: "needs_clarification"` và
-`openQuestions`; daemon không tạo agent khi brief chưa sẵn sàng.
+The brief compiler keeps the natural-language request in `rawRequest` and splits it into objective, context, constraints, accepted decisions, requested outcome, acceptance criteria and validation plan. When the objective is missing, the brief comes back with `status: "needs_clarification"` and `openQuestions`, and the daemon creates no agent. There is no separate refine step.
 
-## Cấu hình provider/model
+A later brief in the same workspace reuses the active Lead. More than one active Lead in a workspace is a topology violation and fails.
 
-Config nằm trong `$JAGENTDESK_HOME/config.json`, nhánh `daemon.orchestration`:
+## Configuration
 
-- `roles.supervisor`, `roles.lead`, `roles.peer` đều có `profiles[]`; mỗi profile gồm
-  `provider`, `model`, `thinkingOptionId`, `enabled` và `defaultProfileId`.
-- `routes` là route semantic (`planning`, `impl`, `impl_deep`, `search`, `research`,
-  `audit`, `ui`) với `primary` và danh sách `fallbacks` có thứ tự.
-- `limits.maxPeersPerLead` mặc định là `3`, giới hạn fan-out của một Lead trong một run
-  để tránh dispatch vô hạn.
+Config lives in `$JAGENTDESK_HOME/config.json` under `daemon.orchestration` and is edited in Settings → host → Orchestration.
 
-Default route thực tế ưu tiên Codex cho Supervisor/Lead, DeepSeek qua OpenCode cho `impl`
-và `research`, Codex Luna cho `impl_deep`/`audit`, và Gemini UI cho `ui`. Đây là profile
-cấu hình, không phải mock session; daemon vẫn resolve provider/model qua provider catalog
-trước khi tạo agent.
+- `enabled`, `autoPrepareBrief` and `askWhenAmbiguous` switch the feature, automatic Task Briefs and clarification questions.
+- `roles.supervisor`, `roles.lead` and `roles.peer` each have `profiles[]` (`provider`, `model`, `thinkingOptionId`, optional `modeId`, `enabled`) and a `defaultProfileId`. Extra roles are allowed.
+- `routes` maps each semantic category (`planning`, `impl`, `impl_deep`, `search`, `research`, `audit`, `ui`) to a `primary` target and an ordered `fallbacks` list.
+- `limits.maxPeersPerLead` (default 3, max 12) bounds one Lead's active Peer fan-out.
 
-Bots dùng cùng ORC runtime với một Supervisor sống lâu và một workspace mới cho mỗi worker Lead. Xem [Bots](bots.md).
+`createDefaultOrchestrationConfig()` holds the shipped profiles and routes. They are real routing policy: the daemon resolves every profile through the provider catalog before it creates an agent.
 
-## Runtime authority và MCP
+## Authority
 
-Daemon gắn label cho agent thật để trace theo `workspaceId`, `briefId`, role, route và
-profile. Runtime state được lưu tại `$JAGENTDESK_HOME/orchestration/runtime.json`, không
-đặt trong UI state.
+The daemon labels real agents with workspace, brief, role and route (`jagentdesk.orchestration.*`). Runtime state is stored in `$JAGENTDESK_HOME/orchestration/runtime.json`, never in UI state.
 
-| Role       | Tool được cấp                                                                               | Giới hạn                                                     |
-| ---------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| Supervisor | `orchestration.bootstrap_lead`                                                              | chỉ giữ/khởi tạo một Lead; không dispatch trực tiếp Peer     |
-| Lead       | `orchestration.create_peer`, `orchestration.resolve_dissent`, `orchestration.accept_result` | chỉ staff Peer bounded, chịu technical acceptance            |
-| Peer       | `orchestration.handback`                                                                    | không tạo agent, không dispatch, không accept toàn bộ result |
+| Role       | Tools                                                                                       | Limits                                                          |
+| ---------- | ------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| Supervisor | `orchestration.bootstrap_lead`                                                              | Keeps or starts the one Lead; never dispatches Peers            |
+| Lead       | `orchestration.create_peer`, `orchestration.resolve_dissent`, `orchestration.accept_result` | Staffs bounded Peers and owns technical acceptance              |
+| Peer       | `orchestration.handback`                                                                    | Cannot create agents, dispatch work, or accept the whole result |
 
-`create_agent` chung bị từ chối khi caller đã thuộc một run orchestration. Các tool scoped
-đều kiểm tra role, workspace, parent agent, brief và route trước khi thực hiện. Dissent chỉ
-nhận đúng một trong `RESOLVED_BY_LEAD`, `NEEDS_MORE_EVIDENCE`,
-`ESCALATED_TO_HUMAN`; outcome `NEEDS_MORE_EVIDENCE` chỉ được mở một verification round.
+Generic `create_agent` is rejected once the caller belongs to an orchestration run. Every scoped tool checks role, workspace, parent agent, brief and route first.
 
-Handback bắt buộc có `whatChangedOrInspected`, `evidence`, `remainingUncertainty` và
-`counterevidence`; `requestedResolution`, `currentDirection`, `claim`, `risk` được dùng
-khi handback là dissent.
+Dissent closes with exactly one of `RESOLVED_BY_LEAD`, `NEEDS_MORE_EVIDENCE` or `ESCALATED_TO_HUMAN`. `NEEDS_MORE_EVIDENCE` allows one verification round per Peer.
+
+A handback requires `whatChangedOrInspected`, `evidence`, `remainingUncertainty` and `counterevidence`. A dissenting handback also uses `requestedResolution`, `currentDirection`, `claim` and `risk`.
 
 ## Wire surface
 
-Các RPC mới dùng namespace dotted và response correlation bằng `requestId`:
+- `orchestration.config.get.request` / `.response`
+- `orchestration.config.update.request` / `.response`
+- `orchestration.task.prepare.request` / `.response`
 
-- `orchestration.config.get.request/response`
-- `orchestration.config.update.request/response`
-- `orchestration.task.prepare.request/response`
-
-Agent lifecycle vẫn đi qua daemon WebSocket/MCP hiện có; không có transport riêng cho
-Orchestration và không có session giả trong app.
-
-## UI surface
-
-- Host → Orchestration: bật/tắt feature, automatic Task Brief, hỏi khi thiếu thông tin,
-  chỉnh fan-out, thêm nhiều profile/provider/model cho từng role, chọn default và chỉnh
-  primary semantic route.
-- Workspace → Orchestration: nhập request tự nhiên, xem brief/status/route/acceptance,
-  gửi cho Supervisor và theo dõi agent thật theo label role.
-
-Desktop và mobile dùng cùng RPC và cùng daemon contract; khác biệt nền tảng không làm
-thay đổi authority hoặc routing semantics.
+Agent lifecycle uses the existing daemon WebSocket and MCP paths. Orchestration has no transport of its own and the app has no simulated sessions.

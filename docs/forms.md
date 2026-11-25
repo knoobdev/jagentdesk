@@ -11,7 +11,7 @@ Golden example files:
 - `packages/app/src/schedules/use-schedule-form-provider-snapshot.ts` — async input adapter
 - `packages/app/src/components/schedules/schedule-form-sheet.tsx` — render + intent dispatch
 - `packages/app/src/schedules/aggregated-schedules.ts` / `hooks/use-schedules.ts` — load-state gating
-- `packages/app/e2e/schedules-*.spec.ts` — the behavioral contract
+- `packages/app/e2e/browser/schedules-*.spec.ts` — the behavioral contract
 
 ## Composer inputs
 
@@ -22,7 +22,7 @@ keystrokes as replacements.
 
 Workspace creation belongs to the daemon across route changes and socket disconnects. A draft tab
 observes the creation handed to it and retries the same identity, so mounting a tab cannot create a
-second agent. Keep the ClickUp workspace layout independent of this handoff.
+second agent.
 
 ## The form model
 
@@ -41,8 +41,9 @@ The component renders state and dispatches intent. That is all it does.
 
 ### Lifecycle rules (each one killed a real shipped bug)
 
-1. **Fresh mount per open.** The sheet returns `null` when not visible and
-   mounts the open form with a `key` derived from mode + record identity.
+1. **Fresh mount per open.** The sheet keeps the last open form mounted only
+   until its dismiss animation ends, then returns `null`. It mounts the open
+   form with a `key` derived from mode + record identity.
    A long-lived component instance shared across create/edit is how edit
    contaminated create.
 2. **Construct the model ONCE per mount** — `useState(() => openXxxForm(snapshot))`.
@@ -53,8 +54,10 @@ The component renders state and dispatches intent. That is all it does.
 3. **Late data is an explicit model input, not a reconstruction.**
    `applyProviderSnapshot(serverId, …)`, `applyProjectTargets(…)`,
    `applyHosts(…)`. Adapters pipe identity changes into these with mechanical
-   effects. Input plumbing is fine; orchestration effects are not — the sheet
-   itself has zero `useEffect`/`useRef`, and that is the target for every form.
+   effects. Input plumbing is fine; orchestration effects are not — the open
+   form has zero `useEffect`/`useRef` (the sheet wrapper's one effect only
+   holds the form through its dismiss animation), and that is the target for
+   every form.
 4. **Resolution is explicit model state, per host** (`idle | pending |
 complete`), keyed off the opened snapshot's serverId. Waiting for data is a
    state you can render, not an effect race.
@@ -67,8 +70,8 @@ complete`), keyed off the opened snapshot's serverId. Waiting for data is a
 
 ## Form kit
 
-- Compose `Field` / `SelectField` / `FormTextInput` / `SegmentedControl` /
-  `Switch` from `components/ui/`. Geometry (heights, padding, radii, focus/hover
+- Compose `Field` / `FormTextInput` (`components/ui/form-field.tsx`) / `SelectField` /
+  `SegmentedControl` / `Switch` from `components/ui/`. Geometry (heights, padding, radii, focus/hover
   states) is owned by `components/ui/control-geometry.ts` — controls never
   declare their own, and screens never nudge global component styles to align
   a row.
@@ -81,7 +84,7 @@ complete`), keyed off the opened snapshot's serverId. Waiting for data is a
 - Copy is opt-in and rare. No hint/subtext unless the maintainer approved the
   exact string; validation errors are the exception. State a fact (like the
   timezone) once — never in a preview line AND a helper line.
-- `useUnistyles` is banned (see docs/unistyles.md); lint enforces.
+- `useUnistyles` is banned (see [unistyles.md](unistyles.md)); lint enforces.
 
 ## Data gating
 

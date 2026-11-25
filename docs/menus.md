@@ -1,12 +1,13 @@
 # Menus
 
-One engine, in `packages/app/src/components/ui/menu/`. `dropdown-menu.tsx` and `context-menu.tsx`
-are wrappers over it and differ only in what opens them — a press, or a long press / right click.
-Import the `DropdownMenu*` or `ContextMenu*` names as before; reach for `@/components/ui/menu`
-directly only when you are building a third trigger shape.
+One engine, in `packages/app/src/components/ui/menu/`. `dropdown-menu.tsx` re-exports it under the
+`DropdownMenu*` names, opened by a press. Reach for `@/components/ui/menu` directly when you need
+pages or a trigger shape the wrapper does not cover.
 
-Do not add a third menu implementation. The two that existed were byte-identical from
-`computePosition` down, and the copies drifted: only one of them ever grew a sheet.
+`context-menu.tsx` is still a separate implementation: a right-click popup at the cursor on web, a
+long press on native only with `enabledOnMobile`, and a bottom sheet on compact only with
+`mobileMode="sheet"`. It does not have pages or the iOS selection wait. Do not add a third menu
+implementation; new menus go on the engine.
 
 ## Two presentations
 
@@ -23,17 +24,13 @@ sheets the same way a phone does.
 flipping every menu in the app to sheets at once is not a change anyone can review. Opt a menu in
 when you have actually looked at it on a phone.
 
-`ContextMenu` is the exception: it defaults to `compactMode="sheet"` and enables native long press.
-Disable mobile triggering explicitly on draggable rows, where long press belongs to drag instead.
-
 ## When the items differ per form factor
 
 A menu whose contents depend on what else is on screen gets one component per surface, not one
-component with `isMobile` branches inside it. The workspace header menu is the example
-(`packages/app/src/screens/workspace/workspace-header-menu.tsx`): compact has no tab strip, so it
-carries new-tab actions, while wide leaves those to the strip's `+` menu and lists workspace
-actions only. Items both surfaces share live in one component that each menu renders, from the same
-callbacks, so the two can't drift.
+component with `isMobile` branches inside it. Items both surfaces share live in one component that
+each menu renders, from the same callbacks, so the two can't drift. `WorkspaceHeaderMenu` in
+`packages/app/src/screens/workspace/workspace-screen.tsx` still branches on `isMobile` for its plugin
+rows; split it when its surfaces diverge further.
 
 ## Selecting an item on iOS
 
@@ -112,8 +109,8 @@ drag would fight that scroll. The page's header drags the sheet instead, through
 
 The content renders on the far side of the sheet's portal, so it brings its own context bridge,
 built where the page is defined. Sheet tabs are the one user: `useSheetPanePage` turns a `SheetTab`
-into a fill page around the same `SheetPane` the workspace's own sheets render. See
-[explorer-sidebar.md](explorer-sidebar.md#sheets).
+into a fill page around the same `SheetPane` the workspace's own sheets render
+(`packages/app/src/screens/workspace/sheet-pane/`).
 
 Back pops one page. The header's Back and Android Back both call `goBack`, which answers `false` at
 the root so the sheet closes instead. A page whose definition disappears while it is open, such as
@@ -226,7 +223,8 @@ its own.
   inactive. An async action can navigate before its menu closes; a hidden panel must not leave a
   portal backdrop blocking the destination. On web the chat suspends one commit after it goes
   inactive, and that inactive commit is where the surface unmounts.
-- Anchoring, flipping, and edge clamping live in `components/ui/anchor.ts`, shared with the hover
-  card, and are unit-tested. Fix positioning bugs there, not at a call site.
+- Anchoring, flipping, and edge clamping for menus live in `components/ui/menu/menu-anchor.ts`; the
+  hover card and tooltip use `components/ui/anchor.ts`. Fix positioning bugs there, not at a call
+  site.
 - Everything else about floating surfaces on Android — Portal/Modal escape, lifecycle gates,
   status-bar offset, the open flash — is in [floating-panels.md](floating-panels.md).
