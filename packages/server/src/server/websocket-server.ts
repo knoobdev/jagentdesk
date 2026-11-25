@@ -49,7 +49,6 @@ import { type CustomProviderService } from "./custom-providers/types.js";
 import { type FigmaService } from "./figma/service.js";
 import { type ScheduleService } from "./schedule/service.js";
 import { type SessionShareService } from "./session-share/service.js";
-import { ActivityGraphService } from "./agent/activity-graph/service.js";
 import { type CreationSnapshot } from "@jagentdesk/protocol/messages";
 import { type CheckoutDiffManager, type CheckoutDiffMetrics } from "./checkout-diff-manager.js";
 import { type DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
@@ -750,7 +749,6 @@ export class VoiceAssistantWebSocketServer {
   private sessionShareService!: SessionShareService | null;
 
   // Agent activity graph (spec 31, ADR-0031): one daemon-wide service shared by every session.
-  private readonly activityGraphService: ActivityGraphService;
 
   // Jira (spec 29), injected post-construction.
   private jiraService: JiraService | null = null;
@@ -988,12 +986,6 @@ export class VoiceAssistantWebSocketServer {
       : null;
     this.pluginRuntime = pluginRuntime ?? null;
     this.agentManager = agentManager;
-    // Plan view with Spec mode on (spec 31.1): the Spec mode built-in provides the plan source.
-    this.activityGraphService = new ActivityGraphService({
-      agents: agentManager,
-      logger: this.logger,
-      specPlanSource: pluginRuntime?.builtinDaemon?.port("specPlan"),
-    });
     this.agentStorage = agentStorage;
     this.messageReceipts = new MessageReceipts(join(jagentdeskHome, "agent-requests"));
     this.creationService = new CreationService(
@@ -1692,7 +1684,6 @@ export class VoiceAssistantWebSocketServer {
     this.prepareForShutdown();
     this.sasPairing?.cancel();
     await this.connectedHosts.close();
-    this.activityGraphService.dispose();
     this.unsubscribeSpeechReadiness?.();
     this.unsubscribeSpeechReadiness = null;
     this.unsubscribeDaemonConfigChange?.();
@@ -2338,7 +2329,6 @@ export class VoiceAssistantWebSocketServer {
       workspaceBaseBranch: this.workspaceBaseBranch,
       scheduleService: this.scheduleService,
       sessionShareService: this.sessionShareService,
-      activityGraphService: this.activityGraphService,
       checkoutDiffManager: this.checkoutDiffManager,
       github: this.github,
       workspaceGitService: this.workspaceGitService,

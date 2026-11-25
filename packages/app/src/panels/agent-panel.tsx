@@ -22,12 +22,6 @@ import type { AgentAddress } from "@jagentdesk/protocol/addresses";
 import { BuiltinPluginGate } from "@/plugins/builtin/gate";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { SessionShareControl } from "@/composer/agent-controls/session-share-control";
-import {
-  ActivityGraphSheet,
-  ActivityGraphSidePanel,
-  ActivityGraphToggle,
-  useActivityGraphOpen,
-} from "@/activity-graph/activity-graph-host";
 import { type ActivityGraphNodeRef } from "@jagentdesk/protocol/agent-activity-graph";
 import { isGuestReadOnlyShare, isGuestShareMode } from "@/screens/share/guest-share-mode";
 import { type DaemonClient } from "@jagentdesk/client/internal/daemon-client";
@@ -56,7 +50,11 @@ import { useRetainedPanelActive } from "@/components/retained-panel";
 import { RetainedChatContent } from "./retained-chat-content";
 import { SidebarCallout } from "@/components/sidebar-callout";
 import { Composer } from "@/composer";
-import { BuiltinAgentItems, BuiltinComposerDocks } from "@/plugins/builtin/surfaces";
+import {
+  BuiltinAgentItems,
+  BuiltinAgentSidePanels,
+  BuiltinComposerDocks,
+} from "@/plugins/builtin/surfaces";
 import { getActiveMessageSubmissions } from "@/composer/submission/model";
 import { RewindComposerRestoreProvider } from "@/components/rewind/composer-restore";
 import {
@@ -1275,9 +1273,7 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
   );
   const sharingHeader = isGuestShareMode() ? null : (
     <View style={styles.shareHeader}>
-      <BuiltinPluginGate serverId={serverId} id="activity-graph">
-        <ActivityGraphToggle agentId={agentId} serverId={serverId} />
-      </BuiltinPluginGate>
+      <BuiltinAgentItems serverId={serverId} agentId={agentId} kind="agentHeader" />
       {gumloopDesktop ? null : (
         <BuiltinPluginGate serverId={serverId} id="session-share">
           <SessionShareControl agentId={agentId} serverId={serverId} />
@@ -1347,7 +1343,6 @@ function ActivityGraphLayout({
   children?: React.ReactNode;
 }) {
   const isCompact = useIsCompactFormFactor();
-  const { open } = useActivityGraphOpen(serverId, agentId);
   const { openTab } = usePaneContext();
   const [width, setWidth] = useState(0);
   const handleLayout = useCallback(
@@ -1372,25 +1367,21 @@ function ActivityGraphLayout({
     <View style={styles.root} onLayout={handleLayout}>
       <View style={styles.chatRow}>
         <View style={styles.chatColumn}>{children}</View>
-        {open && !isCompact && width > 0 ? (
-          <BuiltinPluginGate serverId={serverId} id="activity-graph">
-            <ActivityGraphSidePanel
-              serverId={serverId}
-              agentId={agentId}
-              containerWidth={width}
-              onSelectNode={handleSelectNode}
-            />
-          </BuiltinPluginGate>
+        {!isCompact && width > 0 ? (
+          <BuiltinAgentSidePanels
+            serverId={serverId}
+            agentId={agentId}
+            containerWidth={width}
+            onSelectNode={handleSelectNode}
+          />
         ) : null}
       </View>
       {isCompact ? (
-        <BuiltinPluginGate serverId={serverId} id="activity-graph">
-          <ActivityGraphSheet
-            serverId={serverId}
-            agentId={agentId}
-            onSelectNode={handleSelectNode}
-          />
-        </BuiltinPluginGate>
+        <BuiltinAgentSidePanels
+          serverId={serverId}
+          agentId={agentId}
+          onSelectNode={handleSelectNode}
+        />
       ) : null}
     </View>
   );

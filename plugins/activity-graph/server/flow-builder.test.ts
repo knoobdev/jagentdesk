@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { AgentTimelineItem, ToolCallDetail } from "../agent-sdk-types.js";
+import type {
+  AgentTimelineItem,
+  ToolCallDetail,
+} from "../../../packages/server/src/server/agent/agent-sdk-types.js";
 import { toFlowTreeJson } from "./archify-json.js";
 import { buildFlowGraph, type ActivityInput, type ActivityRow } from "./flow-builder.js";
 import { MAX_FLOW_NODES } from "./model.js";

@@ -3,10 +3,12 @@ import { register as register0 } from "../../../../../../plugins/docker/server/i
 import { register as register1 } from "../../../../../../plugins/skills/server/index.js";
 import { register as register2 } from "../../../../../../plugins/spec-mode/server/index.js";
 import { register as register3 } from "../../../../../../plugins/autorun/server/index.js";
+import { register as register4 } from "../../../../../../plugins/activity-graph/server/index.js";
 import type { BuiltinServerRegistry } from "./host.js";
 export function loadBuiltins(registry: BuiltinServerRegistry) {
   register0(registry.forPlugin("docker"));
   register1(registry.forPlugin("skills"));
   register2(registry.forPlugin("spec-mode"));
   register3(registry.forPlugin("autorun"));
+  register4(registry.forPlugin("activity-graph"));
 }

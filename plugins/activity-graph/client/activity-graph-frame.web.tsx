@@ -1,3 +1,4 @@
+import { acceptSelectMessage } from "../../../packages/app/src/plugins/builtin/host-api";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
 import { ACTIVITY_GRAPH_STATUS_MESSAGE } from "@jagentdesk/protocol/agent-activity-graph";
 import { ACTIVITY_GRAPH_VIEW_MESSAGE } from "./activity-graph-document";
@@ -5,7 +6,6 @@ import type {
   ActivityGraphFrameHandle,
   ActivityGraphFrameProps,
 } from "./activity-graph-frame-types";
-import { acceptSelectMessage } from "./activity-graph-target";
 
 // ADR-0021 §4 on web/Electron: `allow-scripts` only (opaque origin, no storage/cookies, no
 // downloads, popups or top navigation); the CSP in the document blocks every fetch. The only

@@ -13,6 +13,7 @@ import type {
   BuiltinAgentProps,
   BuiltinClientProps,
   BuiltinComposerDockProps,
+  BuiltinSidePanelProps,
   BuiltinUserMessageBodyProps,
   BuiltinScreen as ScreenProps,
   BuiltinTurnPreparation,
@@ -83,7 +84,7 @@ export function BuiltinAgentItems({
   serverId,
   agentId,
   kind,
-}: BuiltinAgentProps & { kind: "agentControls" | "agentPanel" }) {
+}: BuiltinAgentProps & { kind: "agentControls" | "agentPanel" | "agentHeader" }) {
   const entries = useBuiltinClientContributions(serverId);
   return (
     <>
@@ -121,6 +122,26 @@ export function BuiltinAgentSettingsCards({ serverId }: BuiltinClientProps) {
       {cards.map(({ key, component: Card }) => (
         <Card key={key} serverId={serverId} />
       ))}
+    </>
+  );
+}
+/** Side panels beside the agent chat: wide layouts pass `containerWidth`, compact ones omit it. */
+export function BuiltinAgentSidePanels({
+  containerWidth,
+  ...props
+}: BuiltinSidePanelProps & { containerWidth?: number }) {
+  const entries = useBuiltinClientContributions(props.serverId);
+  return (
+    <>
+      {[...entries].flatMap(([id, entry]) =>
+        [...entry.sidePanels].map(([key, { panel: Panel, sheet: Sheet }]) =>
+          containerWidth === undefined ? (
+            <Sheet key={`${id}/${key}`} {...props} />
+          ) : (
+            <Panel key={`${id}/${key}`} {...props} containerWidth={containerWidth} />
+          ),
+        ),
+      )}
     </>
   );
 }

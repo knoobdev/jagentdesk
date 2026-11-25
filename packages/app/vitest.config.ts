@@ -77,7 +77,12 @@ export default defineConfig({
             "native-release-version.test.ts",
           ],
           setupFiles: [path.resolve(__dirname, "vitest.setup.ts")],
-          exclude: [...configDefaults.exclude, "e2e/**", "src/**/*.browser.{test,spec}.{ts,tsx}"],
+          exclude: [
+            ...configDefaults.exclude,
+            "e2e/**",
+            "src/**/*.browser.{test,spec}.{ts,tsx}",
+            "../../plugins/**/*.browser.{test,spec}.{ts,tsx}",
+          ],
         },
       },
       {
@@ -86,7 +91,10 @@ export default defineConfig({
           name: "browser",
           setupFiles: [path.resolve(__dirname, "vitest.browser.setup.ts")],
           fileParallelism: false,
-          include: ["src/**/*.browser.{test,spec}.{ts,tsx}"],
+          include: [
+            "src/**/*.browser.{test,spec}.{ts,tsx}",
+            "../../plugins/*/client/**/*.browser.{test,spec}.{ts,tsx}",
+          ],
           browser: {
             enabled: true,
             provider: playwright({

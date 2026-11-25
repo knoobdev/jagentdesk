@@ -89,6 +89,10 @@ export interface BuiltinToolContext {
 }
 export interface BuiltinSessionServices extends BuiltinCoreServices {
   daemon?: BuiltinDaemonScope;
+  /** Whether the session's client advertised the capability (session-wide). */
+  supports(capability: ClientCapability): boolean;
+  agentManager: AgentManager;
+  agentStorage: AgentStorage;
   terminals?: TerminalManager | null;
   remoteDocker: () => RemoteDockerHosts | undefined;
   push(message: SessionOutboundMessage): void;

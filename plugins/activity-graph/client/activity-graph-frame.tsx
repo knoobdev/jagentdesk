@@ -1,12 +1,14 @@
+import {
+  htmlPreviewNavigationKind,
+  acceptSelectMessage,
+} from "../../../packages/app/src/plugins/builtin/host-api";
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef } from "react";
 import { View } from "react-native";
 import { WebView } from "react-native-webview";
-import { htmlPreviewNavigationKind } from "@/file-pane/html-preview-navigation";
 import type {
   ActivityGraphFrameHandle,
   ActivityGraphFrameProps,
 } from "./activity-graph-frame-types";
-import { acceptSelectMessage } from "./activity-graph-target";
 
 // ADR-0021 §4 on iOS/Android: a locked-down WebView (only the
 // handed-over document loads, storage/cache off, incognito); the CSP blocks every fetch. Statuses

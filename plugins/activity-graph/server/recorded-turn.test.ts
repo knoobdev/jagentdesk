@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import type { AgentTimelineItem } from "../agent-sdk-types.js";
+import type { AgentTimelineItem } from "../../../packages/server/src/server/agent/agent-sdk-types.js";
 import { toFlowTreeJson } from "./archify-json.js";
 import { buildFlowGraph, type ActivityRow } from "./flow-builder.js";
 

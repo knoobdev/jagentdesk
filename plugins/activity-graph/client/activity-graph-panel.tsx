@@ -1,3 +1,13 @@
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  LoadingSpinner,
+  SegmentedControl,
+  useHostRuntimeClient,
+  type Theme,
+} from "../../../packages/app/src/plugins/builtin/host-api";
 import { useCallback, useMemo, useRef, useState, type ReactElement } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
@@ -10,16 +20,6 @@ import type {
   ActivityGraphTurnSummary,
   ActivityGraphView,
 } from "@jagentdesk/protocol/agent-activity-graph";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import { SegmentedControl } from "@/components/ui/segmented-control";
-import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import type { Theme } from "@/styles/theme";
 import {
   ACTIVITY_STATUS_COLORS,
   buildActivityGraphDocument,

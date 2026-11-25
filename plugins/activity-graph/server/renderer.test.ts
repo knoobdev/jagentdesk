@@ -1,12 +1,12 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { resolveArchifyVendorDir } from "../../archify/archify-renderer.js";
-import type { AgentTimelineItem } from "../agent-sdk-types.js";
+import { resolveArchifyVendorDir } from "../../../packages/server/src/server/archify/archify-renderer.js";
+import type { AgentTimelineItem } from "../../../packages/server/src/server/agent/agent-sdk-types.js";
 import { buildFlowGraph, type ActivityRow } from "./flow-builder.js";
 import { buildPlanGraph } from "./plan-builder.js";
 import { renderActivityGraph } from "./renderer.js";
-import { parseSpecKitTasks } from "../spec-plan.js";
+import { parseSpecKitTasks } from "../../../packages/server/src/server/agent/spec-plan.js";
 
 // Real renders with the vendored archify 3.2.0 (ADR-0031): the generated JSON passes archify's
 // validation and layout gates, every node is addressable by data-node-id, and the vendored copy

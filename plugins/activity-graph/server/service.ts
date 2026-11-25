@@ -1,3 +1,11 @@
+import {
+  NO_SPEC_PLAN_SOURCE,
+  type AgentManagerEvent,
+  type ManagedAgent,
+  type AgentTimelineRow,
+  type ProviderSubagentDescriptor,
+  type SpecPlanSource,
+} from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 import { randomUUID } from "node:crypto";
 import type pino from "pino";
 import type {
@@ -8,9 +16,6 @@ import type {
   ActivityGraphTurnSummary,
   ActivityGraphView,
 } from "@jagentdesk/protocol/agent-activity-graph";
-import type { AgentManagerEvent, ManagedAgent } from "../agent-manager.js";
-import type { AgentTimelineRow } from "../agent-timeline-store-types.js";
-import type { ProviderSubagentDescriptor } from "../provider-subagents/store.js";
 import {
   buildFlowGraph,
   type ActivityInput,
@@ -22,7 +27,6 @@ import {
 import { nodeIndexOf, nodeStatuses, structureKey, type GraphModel } from "./model.js";
 import { buildPlanGraph } from "./plan-builder.js";
 import { renderActivityGraph, type ActivityGraphRenderer } from "./renderer.js";
-import { NO_SPEC_PLAN_SOURCE, type SpecPlanSource } from "../spec-plan.js";
 
 // Agent activity graph service (spec 31.3, ADR-0031 §2–3). One per daemon, shared by every client
 // session, so a graph is built and rendered once however many clients watch it.

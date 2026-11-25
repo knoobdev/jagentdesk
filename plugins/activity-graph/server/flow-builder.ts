@@ -1,11 +1,11 @@
-import { buildToolCallDisplayModel } from "@jagentdesk/protocol/tool-call-display";
-import type { ActivityGraphNodeStatus } from "@jagentdesk/protocol/agent-activity-graph";
 import type {
   AgentPermissionRequest,
   AgentTaskItem,
   AgentTimelineItem,
   ToolCallTimelineItem,
-} from "../agent-sdk-types.js";
+} from "../../../packages/server/src/server/plugins/builtin/host-api.js";
+import { buildToolCallDisplayModel } from "@jagentdesk/protocol/tool-call-display";
+import type { ActivityGraphNodeStatus } from "@jagentdesk/protocol/agent-activity-graph";
 import {
   LABEL_UNITS,
   MAX_FLOW_NODES,

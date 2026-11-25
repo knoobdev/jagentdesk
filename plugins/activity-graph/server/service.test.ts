@@ -1,9 +1,12 @@
 import pino from "pino";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AgentManagerEvent, ManagedAgent } from "../agent-manager.js";
-import type { AgentTimelineItem } from "../agent-sdk-types.js";
-import type { AgentTimelineRow } from "../agent-timeline-store-types.js";
-import type { ProviderSubagentDescriptor } from "../provider-subagents/store.js";
+import type {
+  AgentManagerEvent,
+  ManagedAgent,
+} from "../../../packages/server/src/server/agent/agent-manager.js";
+import type { AgentTimelineItem } from "../../../packages/server/src/server/agent/agent-sdk-types.js";
+import type { AgentTimelineRow } from "../../../packages/server/src/server/agent/agent-timeline-store-types.js";
+import type { ProviderSubagentDescriptor } from "../../../packages/server/src/server/agent/provider-subagents/store.js";
 import type { GraphModel } from "./model.js";
 import {
   ActivityGraphService,

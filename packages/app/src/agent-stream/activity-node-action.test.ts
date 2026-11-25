@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { StreamItem } from "@/types/stream";
-import { acceptSelectMessage, resolveNodeAction } from "./activity-graph-target";
+import { acceptSelectMessage, resolveNodeAction } from "./activity-node-action";
 
 // Spec 31.6 (only jad-archify-select for a node of the shown version) and 31.4 (node → row).
 

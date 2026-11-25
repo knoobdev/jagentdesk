@@ -1,13 +1,15 @@
+import {
+  useSafeAreaInsets,
+  AgentControlTrigger,
+  useHostFeature,
+  useHostRuntimeIsConnected,
+} from "../../../packages/app/src/plugins/builtin/host-api";
 import { useCallback, useMemo, useRef, type ReactElement } from "react";
 import { Modal, PanResponder, View } from "react-native";
 import { useTranslation } from "react-i18next";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet } from "react-native-unistyles";
 import { ChartNetwork } from "lucide-react-native";
 import type { ActivityGraphNodeRef } from "@jagentdesk/protocol/agent-activity-graph";
-import { AgentControlTrigger } from "@/composer/agent-controls/control";
-import { useHostFeature } from "@/runtime/host-features";
-import { useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { ActivityGraphPanel } from "./activity-graph-panel";
 import {
   ACTIVITY_PANEL_MIN_WIDTH,

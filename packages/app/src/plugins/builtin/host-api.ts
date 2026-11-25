@@ -20,6 +20,7 @@ export type {
   BuiltinClientHost,
   BuiltinClientProps,
   BuiltinComposerDockProps,
+  BuiltinSidePanelProps,
   BuiltinDestination,
   BuiltinUserMessageBodyProps,
   BuiltinTurnPreparation,
@@ -72,3 +73,7 @@ export { useAutorunState, useSpecModeState } from "@/hooks/use-agent-mode-state"
 export { specModeBubbleText } from "@/components/spec-mode-bubble-text";
 export { settingsStyles } from "@/styles/settings";
 export { useHostFeature } from "@/runtime/host-features";
+export { LoadingSpinner } from "@/components/ui/loading-spinner";
+// The activity graph frame shares the stream's node-selection contract and HTML navigation rules.
+export { acceptSelectMessage } from "@/agent-stream/activity-node-action";
+export { htmlPreviewNavigationKind } from "@/file-pane/html-preview-navigation";

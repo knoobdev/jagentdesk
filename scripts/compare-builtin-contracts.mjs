@@ -50,6 +50,14 @@ const PLUGINS = {
     baseline: { rpc: [`${S}/session.ts`, `${S}/session/autorun/autorun-session.ts`], tools: [T] },
     branch: { rpc: [`${S}/session.ts`, "plugins/autorun/server/index.ts"], tools: [T] },
   },
+  "activity-graph": {
+    rpcPrefixes: ["agent.activity_graph."],
+    baseline: {
+      rpc: [`${S}/session.ts`, `${S}/session/activity-graph/activity-graph-session.ts`],
+      tools: [T],
+    },
+    branch: { rpc: [`${S}/session.ts`, "plugins/activity-graph/server/index.ts"], tools: [T] },
+  },
 };
 const ids = process.argv.slice(4).length ? process.argv.slice(4) : Object.keys(PLUGINS);
 fs.mkdirSync(output, { recursive: true });

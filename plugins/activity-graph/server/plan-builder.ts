@@ -1,5 +1,8 @@
+import type {
+  AgentTaskItem,
+  SpecPlan,
+} from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 import type { ActivityGraphNodeStatus } from "@jagentdesk/protocol/agent-activity-graph";
-import type { AgentTaskItem } from "../agent-sdk-types.js";
 import {
   isTaskListTool,
   resolveTurn,
@@ -18,7 +21,6 @@ import {
   type GraphModel,
   type GraphNode,
 } from "./model.js";
-import type { SpecPlan } from "../spec-plan.js";
 import type { FlowResult } from "./flow-builder.js";
 
 // Plan view (spec 31.1): a tree. Root = the request; children = the agent's todos, or, with Spec

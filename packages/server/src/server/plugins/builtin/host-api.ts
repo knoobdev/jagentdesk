@@ -30,8 +30,7 @@ export type {
 export { ensureValidJson } from "../../json-utils.js";
 export { writeFileAtomic, writeJsonFileAtomic } from "../../atomic-file.js";
 export { sendPromptToAgent } from "../../agent/agent-prompt.js";
-export type { AgentManager, AgentManagerEvent } from "../../agent/agent-manager.js";
-export type { AgentUsage } from "../../agent/agent-sdk-types.js";
+export type { AgentManager, AgentManagerEvent, ManagedAgent } from "../../agent/agent-manager.js";
 export type { HostCapabilityService } from "../../host-capabilities/service.js";
 export type { SessionInboundMessage, SessionOutboundMessage } from "../../messages.js";
 
@@ -63,3 +62,16 @@ export {
   type SpecPlanSource,
   type SpecPlanStatus,
 } from "../../agent/spec-plan.js";
+
+// The activity graph reads agent timelines and renders with the vendored archify (core).
+export type {
+  AgentPermissionRequest,
+  AgentTaskItem,
+  AgentUsage,
+  AgentTimelineItem,
+  ToolCallTimelineItem,
+} from "../../agent/agent-sdk-types.js";
+export type { AgentTimelineRow } from "../../agent/agent-timeline-store-types.js";
+export type { ProviderSubagentDescriptor } from "../../agent/provider-subagents/store.js";
+export { ensureUnarchivedAgentLoaded } from "../../agent/agent-loading.js";
+export { runArchifyRenderer, type ArchifyDiagramError } from "../../archify/archify-renderer.js";

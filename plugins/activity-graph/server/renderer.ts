@@ -1,4 +1,8 @@
-import { runArchifyRenderer, type ArchifyDiagramError } from "../../archify/archify-renderer.js";
+import {
+  runArchifyRenderer,
+  type ArchifyDiagramError,
+} from "../../../packages/server/src/server/plugins/builtin/host-api.js";
+
 import { toArchifyJson } from "./archify-json.js";
 import type { GraphModel } from "./model.js";
 

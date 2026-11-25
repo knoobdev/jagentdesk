@@ -1,9 +1,9 @@
-import type pino from "pino";
-import type { SessionInboundMessage, SessionOutboundMessage } from "../../messages.js";
 import type {
-  ActivityGraphPush,
-  ActivityGraphService,
-} from "../../agent/activity-graph/service.js";
+  SessionInboundMessage,
+  SessionOutboundMessage,
+} from "../../../packages/server/src/server/plugins/builtin/host-api.js";
+import type pino from "pino";
+import type { ActivityGraphPush, ActivityGraphService } from "./service.js";
 
 /**
  * Agent activity graph RPC surface (spec 31.5, ADR-0031). Thin translator over the daemon-wide

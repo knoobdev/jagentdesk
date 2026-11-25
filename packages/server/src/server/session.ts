@@ -230,8 +230,6 @@ import {
 } from "./session/checkout/git-metadata-generator.js";
 import { ChatScheduleLoopSession } from "./session/chat/chat-schedule-loop-session.js";
 import { SessionShareSession } from "./session/session-share/session-share-session.js";
-import { type ActivityGraphService } from "./agent/activity-graph/service.js";
-import { ActivityGraphSession } from "./session/activity-graph/activity-graph-session.js";
 import { type SessionShareService } from "./session-share/service.js";
 import { ClusterSession } from "./session/cluster/cluster-session.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
@@ -657,7 +655,6 @@ export interface SessionOptions {
   sessionShareService?: SessionShareService | null;
 
   // Agent activity graph (spec 31, ADR-0031); shared daemon-wide service.
-  activityGraphService?: ActivityGraphService | null;
 
   loopService: LoopService;
 
@@ -1219,8 +1216,6 @@ export class Session {
 
   private readonly sessionShareSession: SessionShareSession | null;
 
-  private readonly activityGraphSession: ActivityGraphSession | null;
-
   private clusterSession!: ClusterSession;
 
   private databaseSession!: DatabaseSession;
@@ -1533,11 +1528,8 @@ export class Session {
       clientId: this.clientId,
       logger: this.sessionLogger,
     });
-    ({
-      sessionShareSession: this.sessionShareSession,
-      activityGraphSession: this.activityGraphSession,
-      jiraSession: this.jiraSession,
-    } = this.createOptionalSessions(options));
+    ({ sessionShareSession: this.sessionShareSession, jiraSession: this.jiraSession } =
+      this.createOptionalSessions(options));
     this.initClusterSession(options);
     this.initDatabaseSession(options);
     this.initSshSession(options);
@@ -1800,6 +1792,9 @@ export class Session {
     return builtinServerRegistry.session(pluginRuntime?.builtin, {
       ...createBuiltinCoreServices(this.jagentdeskHome, this.sessionLogger, this.daemonConfigStore),
       daemon: pluginRuntime?.builtinDaemon,
+      supports: (capability) => this.supports(capability),
+      agentManager: this.agentManager,
+      agentStorage: this.agentStorage,
       terminals: this.terminalManager,
       remoteDocker: () => this.sshService.modules?.docker,
       push: (message) => this.emit(message),
@@ -1842,7 +1837,6 @@ export class Session {
   // constructor to keep its cyclomatic complexity under the lint limit.
   private createOptionalSessions(options: SessionOptions): {
     sessionShareSession: SessionShareSession | null;
-    activityGraphSession: ActivityGraphSession | null;
     jiraSession: JiraSession | null;
   } {
     return {
@@ -1850,23 +1844,6 @@ export class Session {
         ? new SessionShareSession({
             host: { emit: (msg) => this.emit(msg) },
             sessionShareService: options.sessionShareService,
-            logger: this.sessionLogger,
-          })
-        : null,
-      activityGraphSession: options.activityGraphService
-        ? new ActivityGraphSession({
-            host: {
-              emit: (msg) => this.emit(msg),
-              supportsActivityGraph: () => this.supports(CLIENT_CAPS.activityGraph),
-              ensureAgentLoaded: async (agentId) => {
-                await ensureUnarchivedAgentLoaded(agentId, {
-                  agentManager: this.agentManager,
-                  agentStorage: this.agentStorage,
-                  logger: this.sessionLogger,
-                });
-              },
-            },
-            service: options.activityGraphService,
             logger: this.sessionLogger,
           })
         : null,
@@ -3169,7 +3146,6 @@ export class Session {
       () => this.dispatchTerminalMessage(msg, source),
       () => this.dispatchChatScheduleLoopMessage(msg),
       () => this.dispatchSessionShareMessage(msg),
-      () => this.activityGraphSession?.dispatch(msg),
       () => this.dispatchClusterMessage(msg),
       () => this.dispatchDatabaseMessage(msg),
       () => this.dispatchSshMessage(msg),
@@ -3529,7 +3505,6 @@ export class Session {
     if (!builtin.isEnabled("argocd")) this.argocdSession.suspend();
     else this.argocdSession.syncDelegateRegistration();
     if (!builtin.isEnabled("jira")) this.jiraSession?.suspend();
-    if (!builtin.isEnabled("activity-graph")) this.activityGraphSession?.dispose();
     if (!builtin.isEnabled("workbench")) {
       for (const id of this.proxySubscriptionIds) this.proxyService.unsubscribe(id);
       this.proxySubscriptionIds.clear();
@@ -10914,7 +10889,6 @@ export class Session {
     this.unsubscribePluginChanges?.();
     this.unsubscribePluginChanges = null;
     this.agentUpdates.dispose();
-    this.activityGraphSession?.dispose();
     await this.hubExecutionController?.cleanup();
     if (this.unsubscribeTerminalWorkspaceContributionEvents) {
       this.unsubscribeTerminalWorkspaceContributionEvents();
