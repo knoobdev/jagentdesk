@@ -48,7 +48,7 @@ vi.mock("@/utils/rich-clipboard-default-environment", () => ({
 import { ToolCall } from "./message";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { ToolCallDetail } from "@jagentdesk/protocol/agent-types";
-import claudeSshRunCalls from "@/remote-exec/fixtures/claude-ssh-run-calls.json";
+import claudeSshRunCalls from "../../../../plugins/ssh-servers/client/ssh-run/fixtures/claude-ssh-run-calls.json";
 
 let root: Root | null = null;
 let container: HTMLElement | null = null;

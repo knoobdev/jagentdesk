@@ -304,8 +304,8 @@ vi.mock("@/utils/confirm-dialog", () => ({
   confirmDialog: vi.fn(async () => true),
 }));
 
-vi.mock("@/custom-providers/custom-providers-section", () => ({
-  CustomProvidersSection: () => null,
+vi.mock("@/plugins/builtin/surfaces", () => ({
+  BuiltinClientItems: () => null,
 }));
 
 import { ProvidersSection } from "./providers-section";

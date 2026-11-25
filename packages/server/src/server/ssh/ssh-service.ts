@@ -1,5 +1,6 @@
 import ssh2 from "ssh2";
 import type { SshModules } from "./modules.js";
+import type { SshModules as SshSessionModules } from "./ssh-modules.js";
 import type { Client, ClientChannel, ParsedKey } from "ssh2";
 import type { Logger } from "pino";
 import type {
@@ -201,7 +202,6 @@ export class SshService {
   private readonly connectionListeners = new Set<(event: SshConnectionEvent) => void>();
   private readonly terminalCreatedListeners = new Set<(event: SshTerminalCreatedEvent) => void>();
   private readonly shellOpeners = new Map<string, SshShellOpener>();
-  private moduleHandlerList: readonly SshModuleRpcHandler[] = [];
   private readonly sessionFactories = new Map<string, SshExternalSessionFactory>();
   private readonly externalSessions = new Map<
     string,
@@ -213,6 +213,8 @@ export class SshService {
 
   /** S6–S8 modules (ssh/modules.ts), set by bootstrap; null for in-memory services and tests. */
   modules: SshModules | null = null;
+  /** S2 SFTP, S3 forwarding RPC owner and S5 snippets (ssh/ssh-modules.ts), set by bootstrap. */
+  sessionModules: SshSessionModules | null = null;
 
   /** Bound for modules (CONTRACT.md): `new SftpService(sshService.acquireClient)`. */
   readonly acquireClient: AcquireSshClient = (serverId) => this.acquire(serverId);
@@ -1150,15 +1152,6 @@ export class SshService {
     if (input.connectSteps) this.connectSteps = { ...this.connectSteps, ...input.connectSteps };
     if (input.reconnectDelayMs) this.reconnectDelay = input.reconnectDelayMs;
     if (input.resolveStartupScript) this.resolveStartupScript = input.resolveStartupScript;
-  }
-
-  /** Milestone modules' RPC handlers (ssh-modules.ts); every session dispatches to them. */
-  registerModuleHandlers(handlers: readonly SshModuleRpcHandler[]): void {
-    this.moduleHandlerList = [...this.moduleHandlerList, ...handlers];
-  }
-
-  moduleHandlers(): readonly SshModuleRpcHandler[] {
-    return this.moduleHandlerList;
   }
 
   registerShellOpener(protocol: Exclude<SshProtocol, "ssh">, opener: SshShellOpener): void {

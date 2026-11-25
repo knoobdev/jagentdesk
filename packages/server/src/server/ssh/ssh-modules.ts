@@ -1,13 +1,9 @@
 import path from "node:path";
 import type { Logger } from "pino";
 import type { SessionOutboundMessage } from "../messages.js";
-import type { SshModuleHandler } from "../session/ssh/ssh-session.js";
-import { handleForwardingMessage } from "./forwarding/rpc.js";
 import type { ForwardingService } from "./forwarding/service.js";
-import { handleSftpMessage } from "./sftp/rpc.js";
 import { SftpService } from "./sftp/service.js";
 import { CommandLineTracker } from "./snippets/command-line.js";
-import { handleSnippetsMessage } from "./snippets/rpc.js";
 import { SshSnippetsService } from "./snippets/service.js";
 import type { SshService, SshTerminalCreatedEvent } from "./ssh-service.js";
 import { createTelnetTerminalSession } from "./telnet/terminal-session.js";
@@ -25,8 +21,8 @@ function stripCsi(text: string): string {
 }
 
 // Wires the milestone modules (CONTRACT.md) onto the S1 SSH service: each module gets
-// `acquireClient`, its pushes fan out to every client, and its RPC handler joins the
-// ssh.* dispatch. One instance per daemon (bootstrap), shared by every session.
+// `acquireClient` and its pushes fan out to every client; the ssh-servers built-in owns the
+// ssh.* RPC handlers. One instance per daemon (bootstrap), shared by every session.
 
 export interface SshModulesOptions {
   ssh: SshService;
@@ -104,15 +100,6 @@ export class SshModules {
         });
       }),
     );
-  }
-
-  /** Handlers tried in order for ssh.* messages S1 does not own. */
-  handlers(): SshModuleHandler[] {
-    return [
-      (message, emit) => handleSftpMessage(this.sftp, message, emit),
-      (message, emit) => handleForwardingMessage(this.forwarding, message, emit),
-      (message, emit) => handleSnippetsMessage(this.snippets, message, emit),
-    ];
   }
 
   /**

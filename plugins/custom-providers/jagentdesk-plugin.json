@@ -5,5 +5,9 @@
   "description": "Configure custom model API providers.",
   "defaultEnabled": true,
   "requires": [],
-  "builtinOrder": 6
+  "builtinOrder": 6,
+  "builtinEntrypoints": {
+    "server": "server/index.ts",
+    "client": "client/index.tsx"
+  }
 }

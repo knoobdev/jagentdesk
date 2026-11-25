@@ -5,5 +5,9 @@
   "description": "Run and monitor tasks on SSH servers.",
   "defaultEnabled": true,
   "requires": ["ssh-servers"],
-  "builtinOrder": 5
+  "builtinOrder": 5,
+  "builtinEntrypoints": {
+    "server": "server/index.ts",
+    "client": "client/index.tsx"
+  }
 }

@@ -5,8 +5,9 @@ they do not use the installed-plugin process, client bundle evaluator, or `plugi
 Settings → Plugins controls each feature per host. The persisted ids, defaults, dependencies,
 capabilities, RPC names, tool names, and data paths are release contracts.
 
-Docker was the phase 2 pilot; Clusters, Databases, and Argo CD followed. Migrated features declare `builtinEntrypoints`; the other feature
-manifests still describe phase 1 implementations.
+Docker was the phase 2 pilot; Clusters, Databases, Argo CD, SSH servers, Remote tasks and Custom
+providers followed. Migrated features declare `builtinEntrypoints`; the other feature manifests
+still describe phase 1 implementations.
 The bundled provider and usage plugins retain their existing SDK runtime. Do not move those
 implementations while migrating a feature.
 
@@ -48,6 +49,21 @@ and remote routing, binary frame codecs, terminal manager, structured push, and 
 SQLite paths stay within the daemon's built-in storage directory. Prefix new secret keys and
 new database paths with the feature id. Preserve existing storage locations during migrations.
 
+Shared libraries that several features or core subsystems consume stay in core and reach features
+as `BuiltinPlatformServices` on the same services object: the SSH service (pool, storage and its
+remote Docker/database/cluster/forwarding modules), the custom provider service (the provider
+runtime materializes it at spawn), agent access (labels, cwd and `requestHostToolPermission`) and
+the hooks that close SSH dependents. Bootstrap supplies the
+daemon instances; a session receives the same instances. Bootstrap starts built-in background
+services after these libraries exist and stops them, dependents first, before it disposes the
+libraries. `home`, `daemonId` and `broadcastToTrustedSessions` (each session's emit gate still
+applies) are on the same object.
+
+A feature that owns a daemon-wide service (a job engine, a cache) creates it in its background
+service and shares it with its sessions and tool installers through `createDaemonSlot()`. A slot
+holds one value per daemon, keyed by the daemon's config store, so in-process test daemons stay
+separate. Do not keep daemon state in plain module variables.
+
 `register(host)` declares contributions once:
 
 - `host.rpc(namespace, methods, createSession)` registers exact existing inbound wire names.
@@ -69,7 +85,9 @@ new database paths with the feature id. Preserve existing storage locations duri
   `BuiltinPluginState`. Its `start(signal)` receives a new abort signal for each enable; disable
   aborts it before cleanup. The host rejects start/stop operations that exceed five seconds. Use
   the signal to cancel pending work and bind resource cleanup. The bootstrap starts these
-  registrations and stops them during daemon shutdown.
+  registrations and stops them during daemon shutdown, dependents first. Optional `idle()` runs
+  once when the daemon starts with the feature turned off, for shared resources that boot opened
+  eagerly.
 - A session contribution supplies `handle`, `stop`, and optional `start` and
   `capabilitiesChanged`. The host owns its toggle and disconnect lifetime. It is created on the
   first request unless `host.rpc(..., { eager: true })` asks for creation when the session opens
@@ -112,10 +130,14 @@ on web, iOS, and Android.
 
 `register(app)` can contribute a sidebar destination (`Tools` or `main`), a left drill-in panel,
 a route screen, settings sections, mobile drawer entries, composer items, timeline renderers,
+tool call cards, cards on the host's Settings → Providers page (`providerSettingsSection`),
 attachment sources, and per-host mounts (delegation prompts and binders that must run while the
 plugin is on). Use the same destination metadata for desktop and mobile. Screens receive the
 selected `serverId`; never choose the first host inside a migrated screen. A screen reads its own
-route params (`useLocalSearchParams`).
+route params (`useLocalSearchParams`). A tool call card (`toolCallRenderer`) replaces the generic
+rendering of a matching tool call in the chat row (`inline`) or the expanded details (`details`);
+the first enabled feature whose `match` returns non-null renders it. `requiresFeature` keeps a
+phase 1 `server_info.features` condition for older daemons.
 
 A destination owns `routeSegment` plus any `routeSegments` (list and detail routes). Those give
 the Gumloop drill-in title (`shortTitle ?? title`). `routeChanges` notifies when `route` would

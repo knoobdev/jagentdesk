@@ -16,6 +16,9 @@ export function useBuiltinClientContributions(serverId: string) {
   const info = useSessionStore((state) => state.sessions[serverId]?.serverInfo);
   return useMemo(() => builtinClientRegistry.visible(info), [info]);
 }
+function useServerFeatures(serverId: string) {
+  return useSessionStore((state) => state.sessions[serverId]?.serverInfo?.features);
+}
 export function useBuiltinDestinations(pathname: string): AppNavItem[] {
   const hosts = useHosts();
   const selection = useActiveWorkspaceSelection();
@@ -24,13 +27,18 @@ export function useBuiltinDestinations(pathname: string): AppNavItem[] {
     ? decodeURIComponent(match)
     : (selection?.serverId ?? hosts[0]?.serverId ?? "");
   const entries = useBuiltinClientContributions(serverId);
+  const features = useServerFeatures(serverId);
   const compact = useIsCompactFormFactor();
   const destinations = useMemo(
     () =>
-      [...entries.values()].flatMap((entry) =>
-        compact ? entry.mobileEntries : entry.destinations,
-      ),
-    [compact, entries],
+      [...entries.values()]
+        .flatMap((entry) => (compact ? entry.mobileEntries : entry.destinations))
+        .filter(
+          ({ requiresFeature }) =>
+            !requiresFeature ||
+            (features as Record<string, unknown> | undefined)?.[requiresFeature] === true,
+        ),
+    [compact, entries, features],
   );
   const routes = useDestinationRoutes(destinations, serverId);
   return useMemo(
@@ -92,7 +100,7 @@ export function BuiltinScreen({ serverId, segment, ...props }: ScreenProps & { s
 export function BuiltinClientItems({
   serverId,
   kind,
-}: BuiltinClientProps & { kind: "settings" | "composer" }) {
+}: BuiltinClientProps & { kind: "settings" | "providerSettings" | "composer" }) {
   const entries = useBuiltinClientContributions(serverId);
   return (
     <>
@@ -134,11 +142,12 @@ export function BuiltinSidebarDestinations({
   const items = useBuiltinDestinations(pathname);
   return (
     <>
-      {items
-        .filter((item) => (only ? only.includes(item.key) : !except?.includes(item.key)))
-        .map((item) => (
-          <BuiltinSidebarDestination key={item.key} item={item} />
-        ))}
+      {(only
+        ? only.flatMap((key) => items.filter((item) => item.key === key))
+        : items.filter((item) => !except?.includes(item.key))
+      ).map((item) => (
+        <BuiltinSidebarDestination key={item.key} item={item} />
+      ))}
     </>
   );
 }

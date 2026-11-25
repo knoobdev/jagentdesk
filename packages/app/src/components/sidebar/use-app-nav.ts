@@ -15,7 +15,6 @@ import {
   Home,
   KanbanSquare,
   Radar,
-  Server,
   Share2,
   Smartphone,
   Sparkles,
@@ -49,7 +48,6 @@ import {
   buildNewWorkspaceRoute,
   buildOpenProjectRoute,
   buildSchedulesRoute,
-  buildServersRoute,
   buildSessionsRoute,
   buildSharedSessionsRoute,
   buildSimulatorRoute,
@@ -61,7 +59,6 @@ import {
 export interface AppNavTargets {
   botsRoute: Href | null;
   sharedSessionsRoute: Href | null;
-  serversRoute: Href | null;
   skillsRoute: Href | null;
   insightsRoute: Href | null;
   forgeRoute: Href | null;
@@ -73,8 +70,6 @@ export interface AppNavTargets {
   jiraRoute: Href | null;
   /** Spec 32: Figma section, when the daemon advertises `figma`. */
   figmaRoute: Href | null;
-  /** Spec 25: daemon build ships the SSH servers surface (S1+). */
-  supportsSshServers: boolean;
 }
 
 export function useAppNavTargets(): AppNavTargets {
@@ -101,9 +96,6 @@ export function useAppNavTargets(): AppNavTargets {
   const supportsFigma = useSessionStore(
     (state) => state.sessions[firstServerId]?.serverInfo?.features?.figma === true,
   );
-  const supportsSshServers = useSessionStore(
-    (state) => state.sessions[firstServerId]?.serverInfo?.features?.sshServers === true,
-  );
   // Spec 24.4: devices open on the first host that can run simulators; none → no entry.
   const deviceServerId = useSessionStore(
     (state) =>
@@ -123,7 +115,6 @@ export function useAppNavTargets(): AppNavTargets {
         : null,
       sharedSessionsRoute: sharingEnabled ? (buildSharedSessionsRoute() as Href) : null,
       // Gated at the route: the entry disappears with the daemon feature flag.
-      serversRoute: supportsSshServers ? perHost(buildServersRoute) : null,
       skillsRoute: skillsEnabled ? perHost(buildSkillsRoute) : null,
       insightsRoute: insightsEnabled ? perHost(buildInsightsRoute) : null,
       forgeRoute: perHost(buildForgeRoute),
@@ -131,7 +122,6 @@ export function useAppNavTargets(): AppNavTargets {
       simulatorRoute: deviceServerId ? (buildSimulatorRoute(deviceServerId) as Href) : null,
       proxyRoute: workbenchEnabled ? perHost(buildProxyRoute) : null,
       supportsForgeHub,
-      supportsSshServers,
       jiraRoute: supportsJira ? perHost(buildJiraRoute) : null,
       figmaRoute: supportsFigma ? perHost(buildFigmaRoute) : null,
     };
@@ -146,7 +136,6 @@ export function useAppNavTargets(): AppNavTargets {
     deviceServerId,
     firstServerId,
     supportsForgeHub,
-    supportsSshServers,
   ]);
 }
 
@@ -234,7 +223,6 @@ export function useAppNavItems(): AppNavItem[] {
         "/simulator",
       ),
       navItem("workbench", Radar, "Workbench", "WB", targets.proxyRoute, pathname, "/proxy"),
-      navItem("servers", Server, "Servers", "Servers", targets.serversRoute, pathname, "/servers"),
       {
         key: "usage",
         icon: Gauge,

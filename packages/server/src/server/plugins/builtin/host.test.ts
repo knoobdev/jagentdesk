@@ -76,13 +76,13 @@ test("one RPC registration admits and dispatches, toggles lifecycle once, and sn
     );
     const oldNames: string[] = [],
       newNames: string[] = [];
-    registry.registerAgentTools(before, (name) => oldNames.push(name), toolContext);
+    registry.registerAgentTools(before, (name) => oldNames.push(name), undefined, toolContext);
     const reserved: string[] = [];
     registry.registerAgentTools(
       state.forAgent("after"),
       (name) => newNames.push(name),
-      toolContext,
       (name) => reserved.push(name),
+      toolContext,
     );
     expect(reserved).toEqual(["docker_ps"]);
     expect(oldNames).toEqual(["docker_ps"]);
@@ -169,10 +169,10 @@ test("tool slots install features in the requested catalog order", () => {
       );
   const names: string[] = [];
   const add = (name: string) => names.push(name);
-  registry.registerAgentTools(undefined, add, toolContext, undefined, {
+  registry.registerAgentTools(undefined, add, undefined, toolContext, {
     only: ["clusters", "docker"],
   });
-  registry.registerAgentTools(undefined, add, toolContext, undefined, {
+  registry.registerAgentTools(undefined, add, undefined, toolContext, {
     except: ["clusters", "docker"],
   });
   expect(names).toEqual(["clusters_tool", "docker_tool", "argocd_tool"]);

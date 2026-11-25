@@ -19,6 +19,24 @@ import {
   type BuiltinPluginState,
 } from "./state.js";
 
+/**
+ * One value per daemon, shared by a feature's background service, sessions and tool catalogs.
+ * Every services object of a daemon carries that daemon's config store, which keys the value.
+ */
+export interface BuiltinDaemonSlot<T> {
+  get(services: BuiltinCoreServices): T | undefined;
+  set(services: BuiltinCoreServices, value: T): void;
+}
+export function createDaemonSlot<T>(): BuiltinDaemonSlot<T> {
+  const values = new WeakMap<object, T>();
+  return {
+    get: (services) => values.get(services.config),
+    set: (services, value) => {
+      values.set(services.config, value);
+    },
+  };
+}
+
 export type RegisterBuiltinTool = <Input>(
   name: string,
   config: JAgentDeskToolConfig,
@@ -60,6 +78,8 @@ export interface BuiltinRpcOptions {
 export interface BuiltinBackgroundService {
   start(signal: AbortSignal): void | Promise<void>;
   stop(): void | Promise<void>;
+  /** Called once when the daemon starts with the plugin turned off. */
+  idle?(): void | Promise<void>;
 }
 async function lifecycleDeadline(
   id: BuiltinPluginId,
@@ -126,6 +146,14 @@ interface RpcRegistration {
   create: (services: BuiltinSessionServices) => BuiltinSessionContribution;
   eager: boolean;
 }
+/**
+ * Which features' tools one catalog position installs. `only` lists features in catalog order;
+ * `except` installs every other feature in load order.
+ */
+export interface BuiltinToolSelection {
+  only?: readonly BuiltinPluginId[];
+  except?: readonly BuiltinPluginId[];
+}
 type ToolInstaller = (register: RegisterBuiltinTool, context: BuiltinToolContext) => void;
 
 export class BuiltinServerRegistry {
@@ -173,12 +201,19 @@ export class BuiltinServerRegistry {
   ): Promise<() => Promise<void>> {
     const running: BuiltinPluginLifecycle[] = [];
     for (const [id, create] of this.backgrounds) {
-      const lifecycle = backgroundLifecycle(id, create(services));
+      const service = create(services);
+      const lifecycle = backgroundLifecycle(id, service);
       await state.registerLifecycle(id, lifecycle);
+      if (!state.isEnabled(id)) await lifecycleDeadline(id, "stop", () => service.idle?.());
       running.push(lifecycle);
     }
+    // Dependents load after what they require; stop them first.
     return async () => {
-      await Promise.all(running.map((lifecycle) => lifecycle.stop()));
+      for (const lifecycle of running.toReversed()) {
+        await Promise.resolve(lifecycle.stop()).catch((error: unknown) => {
+          services.logger.error({ err: error }, "Built-in shutdown failed");
+        });
+      }
     };
   }
   rpcNames(): string[] {
@@ -194,18 +229,23 @@ export class BuiltinServerRegistry {
   registerAgentTools(
     snapshot: ReadonlySet<BuiltinPluginId> | undefined,
     register: RegisterBuiltinTool,
-    context: BuiltinToolContext,
     reserve?: (name: string) => void,
-    slot: { only?: readonly BuiltinPluginId[]; except?: readonly BuiltinPluginId[] } = {},
+    context: Partial<BuiltinToolContext> = {},
+    select: BuiltinToolSelection = {},
   ): void {
-    const ids = slot.only ?? [...this.tools.keys()].filter((id) => !slot.except?.includes(id));
+    const toolContext: BuiltinToolContext = {
+      ...context,
+      callerAgentId: context.callerAgentId ?? null,
+      callerLabels: context.callerLabels ?? (() => undefined),
+    };
+    const ids = select.only ?? [...this.tools.keys()].filter((id) => !select.except?.includes(id));
     for (const id of ids) {
       const install = this.tools.get(id);
       install?.((name, config, handler) => {
         // Keep names reserved while disabled so installed hooks cannot replace core tools.
         reserve?.(name);
         if (!snapshot || snapshot.has(id)) register(name, config, handler);
-      }, context);
+      }, toolContext);
     }
   }
   session(

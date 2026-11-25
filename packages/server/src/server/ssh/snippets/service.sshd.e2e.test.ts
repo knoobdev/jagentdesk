@@ -6,7 +6,7 @@ import {
   SnippetsOutboundMessageSchema,
   type SnippetsOutboundMessage,
 } from "@jagentdesk/protocol/ssh/snippets-schemas";
-import { handleSnippetsMessage } from "./rpc.js";
+import { handleSnippetsMessage } from "../../../../../../plugins/ssh-servers/server/rpc/snippets.js";
 import type { SnippetRunEvent } from "./runner.js";
 import { SshSnippetsService } from "./service.js";
 import {

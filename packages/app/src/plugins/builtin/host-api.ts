@@ -16,6 +16,8 @@ export type {
   BuiltinClientProps,
   BuiltinDestination,
   BuiltinLeftPanelOptions,
+  BuiltinToolCallCardProps,
+  BuiltinToolCallRenderer,
 } from "./host";
 
 export * as Clipboard from "expo-clipboard";
@@ -119,3 +121,60 @@ export {
   usePathname,
 } from "expo-router";
 export { Gesture, GestureDetector } from "react-native-gesture-handler";
+
+// ssh-servers migration
+export { SelectField } from "@/components/ui/select-field";
+export type { SelectFieldOption } from "@/components/ui/select-field";
+export { FileEditorModel, getFileConflictCallout } from "@/file-pane/editor/model";
+export type {
+  FileEditorFile,
+  FileEditorObservation,
+  FileEditorSession,
+  FileObservationSource,
+} from "@/file-pane/editor/model";
+export { FileConflictAlert } from "@/file-pane/conflict-alert";
+export type { FileConflictAlertState } from "@/file-pane/conflict-alert";
+export { FileEditorView } from "@/file-pane/editor/view";
+export { AdaptiveRenameModal } from "@/components/rename-modal";
+export {
+  gumloopDarkTheme,
+  gumloopLightTheme,
+  darkClaudeTheme,
+  darkGhosttyTheme,
+  darkMidnightTheme,
+  darkPureBlackTheme,
+  darkTheme,
+  darkZincTheme,
+  lightTheme,
+} from "@/styles/theme";
+export type { ThemeName } from "@/styles/theme";
+export { StatusBadge } from "@/components/ui/status-badge";
+export { useAppSettings } from "@/hooks/use-settings";
+export { BuiltinPluginGate } from "@/plugins/builtin/gate";
+export { useFileDownload } from "@/hooks/use-file-download";
+export { useFilePicker } from "@/hooks/use-file-picker";
+export { BuiltinScreen } from "@/plugins/builtin/surfaces";
+export { getIsElectronMac } from "@/constants/platform";
+export type { TerminalPaneAppearance, TerminalPaneExtraKey } from "@/components/terminal-pane";
+
+// remote-tasks migration
+export { CODE_SURFACE_DATASET } from "@/styles/code-surface";
+export { nextPinnedState, scrollActionForAppend } from "@/remote-exec/output-scroll";
+export {
+  RemoteJobCommand,
+  RemoteJobDot,
+  RemoteJobOutputBox,
+  remoteJobDotVariant,
+  styles as remoteJobCardStyles,
+} from "@/remote-exec/job-card-ui";
+export type {
+  OutputScrollEvent,
+  RemoteJobDotVariant,
+  ScrollToEndableView,
+} from "@/remote-exec/job-card-ui";
+export { unwrapToolResultPayload } from "@/remote-exec/tool-result-payload";
+
+// custom-providers migration
+export { useBuiltinPluginEnabled } from "@/plugins/builtin/hooks";
+export { SettingsSection } from "@/screens/settings/settings-section";
+

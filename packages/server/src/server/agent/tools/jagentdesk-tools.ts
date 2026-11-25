@@ -147,9 +147,6 @@ import {
   type OrchestrationRuntime,
 } from "../../orchestration/runtime.js";
 import { type ClusterRegistry } from "../../cluster/cluster-registry.js";
-import { registerSshAgentTools, type SshAgentTool } from "../../ssh/environment/agent-tools.js";
-import { type RemoteExecAgentTool } from "../../remote-exec/agent-tools.js";
-import { type CustomProviderAgentTool } from "../../custom-providers/agent-tools.js";
 import { type SideloadAgentTool } from "../../sideload/agent-tools.js";
 import { type JiraAgentTool } from "../../jira/agent-tools.js";
 import { type FigmaAgentTool } from "../../figma/agent-tools.js";
@@ -234,13 +231,6 @@ export interface JAgentDeskToolHostDependencies {
   databaseRegistry?: DatabaseRegistry;
   /** Daemon core services handed to built-in feature tool installers. */
   builtinServices?: BuiltinCoreServices;
-  // SSH servers (spec 25.11): ssh_* tools and the server-aware docker_* tools that replace the
-  // host-only ones (same names, same behaviour without serverId). Bound per caller agent.
-  sshAgentTools?: (callerAgentId: string | null) => SshAgentTool[];
-  // Remote execution (spec 33.7): remote_* tools; [] when no SSH server has remote tasks enabled.
-  remoteExecAgentTools?: (callerAgentId: string | null) => RemoteExecAgentTool[];
-  // Custom API providers (spec 34.7): provider_* tools; list/test auto-run, mutations raise a card.
-  customProviderAgentTools?: (callerAgentId: string | null) => CustomProviderAgentTool[];
   /** Sideload tools (spec 26.10); installs raise a permission card. */
   sideloadAgentTools?: (callerAgentId: string | null) => SideloadAgentTool[];
   // Jira (spec 29.4): jira_* tools; reads auto-run, writes raise the permission card.
@@ -3856,37 +3846,29 @@ function createToolCatalog(
     services: options.builtinServices,
   };
   const reserveBuiltinTool = (name: string) => builtinNames.add(name);
-  // Keep the catalog order: kubectl_*, sql_*, docker_* precede the SSH tools.
+  // Keep the catalog order: kubectl_*, sql_*, docker_*, then the SSH, remote and provider tools.
+  const earlyBuiltinTools: BuiltinPluginId[] = [
+    "clusters",
+    "databases",
+    "docker",
+    "ssh-servers",
+    "remote-tasks",
+    "custom-providers",
+  ];
   builtinServerRegistry.registerAgentTools(
     options.builtinPlugins,
     registerTool,
-    builtinToolContext,
     reserveBuiltinTool,
-    { only: ["clusters", "databases", "docker"] },
+    builtinToolContext,
+    { only: earlyBuiltinTools },
   );
-  if (options.sshAgentTools) {
-    registerSshAgentTools(registerTool, options.sshAgentTools(callerAgentId ?? null));
-  }
-  if (options.remoteExecAgentTools) {
-    for (const tool of options.remoteExecAgentTools(callerAgentId ?? null)) {
-      registerTool(
-        tool.name,
-        { title: tool.title, description: tool.description, inputSchema: tool.inputSchema },
-        tool.handler,
-      );
-    }
-  }
-  if (options.customProviderAgentTools) {
-    for (const tool of options.customProviderAgentTools(callerAgentId ?? null)) {
-      registerTool(
-        tool.name,
-        { title: tool.title, description: tool.description, inputSchema: tool.inputSchema },
-        tool.handler,
-      );
-    }
-  }
   if (options.sideloadAgentTools) {
-    registerSshAgentTools(registerTool, options.sideloadAgentTools(callerAgentId ?? null));
+    for (const tool of options.sideloadAgentTools(callerAgentId ?? null))
+      registerTool(
+        tool.name,
+        { title: tool.title, description: tool.description, inputSchema: tool.inputSchema },
+        tool.handler,
+      );
   }
   if (options.botAgentTools) {
     for (const tool of options.botAgentTools(callerAgentId ?? null))
@@ -3943,9 +3925,9 @@ function createToolCatalog(
   builtinServerRegistry.registerAgentTools(
     options.builtinPlugins,
     registerTool,
-    builtinToolContext,
     reserveBuiltinTool,
-    { except: ["clusters", "databases", "docker"] },
+    builtinToolContext,
+    { except: earlyBuiltinTools },
   );
 
   if (options.voiceOnly || options.enableVoiceTools || callerContext?.enableVoiceTools) {

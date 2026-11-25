@@ -101,14 +101,13 @@ import { SidebarAgentListSkeleton } from "./sidebar-agent-list-skeleton";
 import { shouldShowAddProject, shouldShowSidebarFooter } from "./sidebar-add-project-visibility";
 import { SidebarCalloutSlot } from "./sidebar-callout-slot";
 import { SidebarWorkspaceList } from "./sidebar-workspace-list";
-import { SidebarServersNav } from "@/ssh/ui/sidebar-servers-nav";
 import { JiraSidebarEntry } from "@/jira/sidebar-entry";
 import { SidebarJiraNav } from "@/jira/sidebar-jira-nav";
 import { FigmaSidebarEntry } from "@/figma/sidebar-entry";
 import { SidebarFigmaNav } from "@/figma/sidebar-figma-nav";
 
 // Classic sidebar positions of migrated built-in destinations; the rest follow Marketplace.
-const CLASSIC_SLOT_INFRA: readonly string[] = ["clusters", "databases"];
+const CLASSIC_SLOT_INFRA: readonly string[] = ["clusters", "databases", "servers"];
 const CLASSIC_SLOT_DEPLOY: readonly string[] = ["argocd"];
 const CLASSIC_PLACED_DESTINATIONS: readonly string[] = [
   ...CLASSIC_SLOT_INFRA,
@@ -165,11 +164,7 @@ export function resolveSidebarNavBody(
     return <PluginSidebarPanel serverId={sectionRoute.serverId} pluginId={sectionRoute.pluginId} />;
   // A section that owns the left column (spec 25.13.1 Servers, 29.3 Jira).
   if (sectionRoute?.section === "servers")
-    return (
-      <BuiltinPluginGate serverId={sectionRoute.serverId} id="ssh-servers">
-        <SidebarServersNav serverId={sectionRoute.serverId} />
-      </BuiltinPluginGate>
-    );
+    return <BuiltinLeftPanel serverId={sectionRoute.serverId} segment="servers" />;
   if (sectionRoute?.section === "jira")
     return (
       <BuiltinPluginGate serverId={sectionRoute.serverId} id="jira">
@@ -211,7 +206,6 @@ interface SidebarSharedProps {
   handleOpenProject: () => void;
   handleHome: () => void;
   handleSettings: () => void;
-  handleServers: () => void;
   handleSkills: () => void;
   handleInsights: () => void;
   handleForge: () => void;
@@ -219,8 +213,6 @@ interface SidebarSharedProps {
   handleSimulator: () => void;
   handleWorkbench: () => void;
   supportsForgeHub: boolean;
-  /** Spec 25: SSH Servers entry only when the daemon advertises sshServers. */
-  supportsSshServers: boolean;
   /** Some connected host can run simulators (spec 24.4). */
   supportsDevices: boolean;
   labels: SidebarLabels;
@@ -241,7 +233,6 @@ interface SidebarLabels {
   schedules: string;
   sharedSessions: string;
   bots: string;
-  servers: string;
   skills: string;
   insights: string;
   forge: string;
@@ -352,8 +343,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
   }, []);
 
   const {
-    serversRoute,
-    supportsSshServers,
     skillsRoute,
     insightsRoute,
     forgeRoute,
@@ -381,17 +370,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
   const handleWorkbenchDesktop = useCallback(() => {
     if (proxyRoute) router.push(proxyRoute as Href);
   }, [proxyRoute]);
-
-  const handleServersDesktop = useCallback(() => {
-    if (serversRoute) router.push(serversRoute as Href);
-  }, [serversRoute]);
-
-  const handleServersMobile = useCallback(() => {
-    if (serversRoute) {
-      showMobileAgent();
-      router.push(serversRoute as Href);
-    }
-  }, [serversRoute, showMobileAgent]);
 
   const handleSkillsMobile = useCallback(() => {
     if (skillsRoute) {
@@ -463,7 +441,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       schedules: t("sidebar.sections.schedules"),
       sharedSessions: "Shared sessions",
       bots: t("bots.title"),
-      servers: "Servers",
       skills: "Skills",
       insights: "Insights",
       forge: "Forge",
@@ -489,7 +466,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     shortcutIndexByWorkspaceKey,
     toggleProjectCollapsed,
     handleRefresh,
-    handleServers: handleServersDesktop,
     handleSkills: handleSkillsDesktop,
     handleInsights: handleInsightsDesktop,
     handleForge: handleForgeDesktop,
@@ -497,7 +473,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     handleSimulator: handleSimulatorDesktop,
     handleWorkbench: handleWorkbenchDesktop,
     supportsForgeHub,
-    supportsSshServers,
     supportsDevices: simulatorRoute !== null,
     labels,
     newWorkspaceKeys,
@@ -508,7 +483,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       <RetainedPanelActivity active={active}>
         <MobileSidebar
           {...sharedProps}
-          handleServers={handleServersMobile}
           handleSkills={handleSkillsMobile}
           handleInsights={handleInsightsMobile}
           handleForge={handleForgeMobile}
@@ -532,7 +506,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     <RetainedPanelActivity active={active}>
       <DesktopSidebar
         {...sharedProps}
-        handleServers={handleServersDesktop}
         handleSkills={handleSkillsDesktop}
         handleInsights={handleInsightsDesktop}
         handleForge={handleForgeDesktop}
@@ -1038,7 +1011,6 @@ function DesktopSidebar({
   handleOpenProject,
   handleHome,
   handleSettings,
-  handleServers,
   handleSkills,
   handleInsights,
   handleForge,
@@ -1046,7 +1018,6 @@ function DesktopSidebar({
   handleSimulator,
   handleWorkbench,
   supportsForgeHub,
-  supportsSshServers,
   supportsDevices,
   labels,
   handleAddHost,
@@ -1069,7 +1040,6 @@ function DesktopSidebar({
   const isSessionsActive = pathname.includes("/sessions");
   const isSchedulesActive = pathname.includes("/schedules");
   const isSharedSessionsActive = pathname.includes("/shared-sessions");
-  const isServersActive = pathname.includes("/servers");
   const isSkillsActive = pathname.includes("/skills");
   const isInsightsActive = pathname.includes("/insights");
   const isForgeActive = pathname.includes("/forge");
@@ -1231,16 +1201,6 @@ function DesktopSidebar({
             </NavTargetGate>
 
             <BuiltinSidebarDestinations only={CLASSIC_SLOT_INFRA} />
-            {supportsSshServers ? (
-              <SidebarHeaderRow
-                icon={Server}
-                label={labels.servers}
-                onPress={handleServers}
-                isActive={isServersActive}
-                testID="sidebar-servers-nav"
-                variant="compact"
-              />
-            ) : null}
             <BuiltinSidebarDestinations only={CLASSIC_SLOT_DEPLOY} />
             <JiraSidebarEntry closesDrawer={false} />
             <FigmaSidebarEntry closesDrawer={false} />

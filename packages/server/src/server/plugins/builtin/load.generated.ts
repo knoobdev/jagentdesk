@@ -2,11 +2,17 @@
 import { register as register0 } from "../../../../../../plugins/docker/server/index.js";
 import { register as register1 } from "../../../../../../plugins/clusters/server/index.js";
 import { register as register2 } from "../../../../../../plugins/databases/server/index.js";
-import { register as register3 } from "../../../../../../plugins/argocd/server/index.js";
+import { register as register3 } from "../../../../../../plugins/ssh-servers/server/index.js";
+import { register as register4 } from "../../../../../../plugins/remote-tasks/server/index.js";
+import { register as register5 } from "../../../../../../plugins/custom-providers/server/index.js";
+import { register as register6 } from "../../../../../../plugins/argocd/server/index.js";
 import type { BuiltinServerRegistry } from "./host.js";
 export function loadBuiltins(registry: BuiltinServerRegistry) {
   register0(registry.forPlugin("docker"));
   register1(registry.forPlugin("clusters"));
   register2(registry.forPlugin("databases"));
-  register3(registry.forPlugin("argocd"));
+  register3(registry.forPlugin("ssh-servers"));
+  register4(registry.forPlugin("remote-tasks"));
+  register5(registry.forPlugin("custom-providers"));
+  register6(registry.forPlugin("argocd"));
 }

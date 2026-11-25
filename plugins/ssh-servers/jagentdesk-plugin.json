@@ -5,5 +5,9 @@
   "description": "Connect to servers, transfer files and forward ports.",
   "defaultEnabled": true,
   "requires": [],
-  "builtinOrder": 4
+  "builtinOrder": 4,
+  "builtinEntrypoints": {
+    "server": "server/index.ts",
+    "client": "client/index.tsx"
+  }
 }

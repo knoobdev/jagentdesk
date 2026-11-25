@@ -1,3 +1,4 @@
+import { useBuiltinToolCallCard } from "@/plugins/builtin/tool-call-cards";
 import { getTurnDurationLabel } from "./assistant-turn-footer-label";
 import { useRevealedText } from "@/hooks/use-revealed-text";
 
@@ -75,10 +76,6 @@ import type { AgentAttachment } from "@jagentdesk/protocol/messages";
 import type { ToolCallDetail } from "@jagentdesk/protocol/agent-types";
 import { buildToolCallPresentation } from "@/tool-calls/presentation";
 import { resolveToolCallIcon } from "@/utils/tool-call-icon";
-import { readRemoteJobToolResult, remoteJobCardVariant } from "@/remote-exec/remote-job-detection";
-import { RemoteJobCard } from "@/remote-exec/remote-job-card";
-import { readSshRunToolResult } from "@/remote-exec/ssh-run-detection";
-import { SshRunCard } from "@/remote-exec/ssh-run-card";
 
 import { useStableEvent } from "@/hooks/use-stable-event";
 
@@ -2618,37 +2615,16 @@ export const ToolCall = memo(function ToolCall({
     maxDetailHeight,
   ]);
 
-  // A remote job call with a result shows as the live job card directly in the chat
-  // (spec 33.9); an ssh_run call with a parsed result shows the ssh_run card (ADR-0045 §7).
-  // Pending calls and every other tool keep the collapsed badge row. Both hooks run on every
-  // render — the early returns below must not change the hook order.
-  const builtinServerId = client?.getLastServerInfoMessage()?.serverId;
-  const remoteTasksEnabled = useBuiltinPluginEnabled(builtinServerId, "remote-tasks");
-  const sshEnabled = useBuiltinPluginEnabled(builtinServerId, "ssh-servers");
-  const remoteJob = useMemo(
-    () => (remoteTasksEnabled ? readRemoteJobToolResult(toolName, effectiveDetail) : null),
-    [toolName, effectiveDetail, remoteTasksEnabled],
-  );
-  const sshRun = useMemo(
-    () => (sshEnabled ? readSshRunToolResult(toolName, effectiveDetail) : null),
-    [toolName, effectiveDetail, sshEnabled],
-  );
-  if (remoteJob) {
-    return (
-      <RemoteJobCard
-        client={client ?? null}
-        initialJob={remoteJob.job}
-        initialOutput={remoteJob.output}
-        initialOutputOffset={remoteJob.outputOffset}
-        initialTruncated={remoteJob.outputTruncatedHead}
-        variant={remoteJobCardVariant(toolName)}
-        testID="remote-job-card"
-      />
-    );
-  }
-  if (sshRun) {
-    return <SshRunCard client={client ?? null} result={sshRun} />;
-  }
+  // A feature card (a remote job, spec 33.9; an ssh_run result, ADR-0045 §7) replaces the
+  // collapsed badge row once the call has a result. The hook runs on every render — the early
+  // returns below must not change the hook order.
+  const builtinCard = useBuiltinToolCallCard({
+    client,
+    toolName,
+    detail: effectiveDetail,
+    placement: "inline",
+  });
+  if (builtinCard) return builtinCard;
 
   if (presentation.isPlan && effectiveDetail?.type === "plan") {
     return (
