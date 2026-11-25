@@ -299,7 +299,6 @@ jobs:
       - name: Build Android app dependencies
         run: |
           npm run build:app-deps
-          npm --prefix packages/app run build:terminal-webview
 
       - name: Build Android APK locally
         id: artifact
@@ -417,7 +416,6 @@ jobs:
       - name: Build iOS app dependencies
         run: |
           npm run build:app-deps
-          npm --prefix packages/app run build:terminal-webview
 
       - name: Build unsigned iOS device IPA with Xcode
         id: artifact

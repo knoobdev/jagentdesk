@@ -4,7 +4,6 @@ import { useRevealedText } from "@/hooks/use-revealed-text";
 import { useTargetAgentTitle } from "@/tool-calls/use-target-agent-title";
 import { useToolCallExpanded } from "@/tool-calls/expansion-context";
 import { useDisclosureHold } from "@/agent-stream/disclosure";
-import { useTargetAgentTitle } from "@/tool-calls/use-target-agent-title";
 import { useBuiltinPluginEnabled } from "@/plugins/builtin/hooks";
 import type { AgentMessage } from "@jagentdesk/protocol/agent-message";
 import { ClickUpUserHeader } from "@/components/clickup-shell/chat-headers";
@@ -2480,7 +2479,6 @@ function areExpandableBadgePropsEqual(previous: ExpandableBadgeProps, next: Expa
 }
 
 interface ToolCallProps {
-  serverId?: string;
   onOpenSubagent?: () => void;
   agentMessage?: AgentMessage;
   onOpenAgent?: (agentId: string) => void;
@@ -2509,7 +2507,6 @@ interface ToolCallProps {
 
 export const ToolCall = memo(function ToolCall({
   agentMessage,
-  serverId,
   onOpenSubagent,
   onOpenAgent,
   serverId,
@@ -2562,7 +2559,6 @@ export const ToolCall = memo(function ToolCall({
     () =>
       buildToolCallPresentation({
         agentMessage,
-        targetAgentTitle,
         toolName,
         status,
         error: error ?? null,

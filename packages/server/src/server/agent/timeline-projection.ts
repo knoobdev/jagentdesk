@@ -1,7 +1,6 @@
 import { continuesTimelineTurn, isTimelineTurnTrigger } from "@jagentdesk/protocol/timeline-turn";
 import type { AgentMetric } from "./agent-sdk-types.js";
 import { timelineItemIdentity } from "@jagentdesk/protocol/timeline-identity";
-import { continuesTimelineTurn, isTimelineTurnTrigger } from "@jagentdesk/protocol/timeline-turn";
 import type { AgentTimelineItem, ToolCallDetail } from "./agent-sdk-types.js";
 
 import type { AgentTimelineRow } from "./agent-timeline-store-types.js";
@@ -754,13 +753,6 @@ function selectProjectedEntriesAfter(input: {
     entries: selectedEntries,
     endSeq: endSeq >= input.startSeq ? endSeq : null,
   };
-}
-
-function continuesProjectedTurn(
-  previous: TimelineProjectionEntry,
-  next: TimelineProjectionEntry,
-): boolean {
-  return continuesTimelineTurn(previous.turnId, next.turnId, isTimelineTurnTrigger(next.item));
 }
 
 /**

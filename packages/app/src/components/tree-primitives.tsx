@@ -1,4 +1,3 @@
-export const WORKSPACE_PANE_TRAILING_GLYPH_RAIL = SPACING[2];
 import { useMemo } from "react";
 import { View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";

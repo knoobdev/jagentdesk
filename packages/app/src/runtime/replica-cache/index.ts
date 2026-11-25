@@ -333,6 +333,8 @@ function serializeAgentToolCall(data: AgentToolCallData): StoredToolCall {
 function serializeTimelineItem(item: StreamItem): StoredTimelineItem | null {
   const base = timelineBase(item);
   switch (item.kind) {
+    case "plugin":
+      return null;
     case "user_message":
       return {
         ...base,
@@ -582,7 +584,10 @@ function serializeTimeline(timeline: CachedTimeline): StoredTimeline | null {
     items: canonicalItems,
     minMountedCount: MAX_TIMELINE_ITEMS,
   });
-  const items = canonicalItems.slice(windowStart).map(serializeTimelineItem).filter((item) => item !== null);
+  const items = canonicalItems
+    .slice(windowStart)
+    .map(serializeTimelineItem)
+    .filter((item) => item !== null);
   const range = timeline.range;
   const canPersistCoverage =
     range !== null &&

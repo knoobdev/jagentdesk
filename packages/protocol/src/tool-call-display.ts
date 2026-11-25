@@ -1,6 +1,8 @@
 import type { ToolCallTimelineItem } from "./agent-types.js";
-import { buildAgentMessageDisplay } from "./agent-message-display.js";
-import { buildJAgentDeskToolDisplay } from "./jagentdesk-tool-presentation/index.js";
+import {
+  buildAgentMessageDisplay,
+  buildJAgentDeskToolDisplay,
+} from "./jagentdesk-tool-presentation/index.js";
 import { stripCwdPrefix } from "./path-utils.js";
 
 export type ToolCallDisplayInput = Pick<
@@ -152,7 +154,7 @@ export function buildToolCallDisplayModel(input: ToolCallDisplayInput): ToolCall
   // ADR-0029 keeps the sender in the envelope row's heading.
   if (input.agentMessage)
     return {
-      displayName: buildAgentMessageDisplay(input.agentMessage).displayName,
+      ...buildAgentMessageDisplay(input.agentMessage),
       ...(errorText ? { errorText } : {}),
     };
   const jagentdeskDisplay = buildJAgentDeskToolDisplay({

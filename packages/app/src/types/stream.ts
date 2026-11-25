@@ -709,7 +709,6 @@ export interface ThoughtItem {
   id: string;
   turnId?: string;
   timelineCursor?: TimelinePosition;
-  turnId?: string;
   text: string;
   timestamp: Date;
   status: ThoughtStatus;
@@ -747,7 +746,6 @@ export interface ToolCallItem {
   id: string;
   turnId?: string;
   timelineCursor?: TimelinePosition;
-  turnId?: string;
   timestamp: Date;
   payload: ToolCallPayload;
   /** Set when this call carries its turn's footer. */
@@ -777,7 +775,6 @@ export interface ActivityLogItem {
   id: string;
   turnId?: string;
   timelineCursor?: TimelinePosition;
-  turnId?: string;
   timestamp: Date;
   activityType: ActivityLogType;
   message: string;
@@ -789,7 +786,6 @@ export interface CompactionItem {
   id: string;
   turnId?: string;
   timelineCursor?: TimelinePosition;
-  turnId?: string;
   timestamp: Date;
   status: "loading" | "completed";
   trigger?: "auto" | "manual";
@@ -818,7 +814,6 @@ export interface TodoListItem {
   id: string;
   turnId?: string;
   timelineCursor?: TimelinePosition;
-  turnId?: string;
   timestamp: Date;
   provider: AgentProvider;
   items: TodoEntry[];
@@ -831,7 +826,6 @@ interface StreamUpdateOptions {
   reservedItemIds?: ReadonlySet<string>;
   turnId?: string;
   timelineCursor?: TimelinePosition;
-  turnId?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1961,6 +1955,8 @@ export interface PluginTimelineStreamItem {
   sourceId?: string;
   /** Source row kind, so plugin-rendered replies remain visible when a turn folds. */
   sourceKind?: StreamItem["kind"];
+  /** Footer metadata stays attached when a plugin replaces its source row. */
+  turnMetrics?: AgentMetric[];
   timelineCursor?: TimelinePosition;
   turnId?: string;
   timestamp: Date;

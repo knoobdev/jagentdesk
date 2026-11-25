@@ -1778,7 +1778,7 @@ export class Session {
       type: "agent.timeline.set_subscription.response",
       payload: { agentIds, requestId: msg.requestId, ...freshness },
     };
-    if (source && this.onMessageToSource) this.onMessageToSource(source, response);
+    if (source && this.onMessageToSource) this.emitForSource(response, source);
     else this.emit(response);
     return;
   }
@@ -1914,16 +1914,21 @@ export class Session {
       if (this.shouldFilterAgentStream(source, event.agentId, serializedEvent)) continue;
       const supportsSelectiveDelivery = capabilities.has(CLIENT_CAPS.selectiveAgentTimeline);
       if (supportsSelectiveDelivery && serializedEvent.type === "attention_required") {
-        this.onMessageToSource(source, {
-          type: "agent_attention_required",
-          payload: {
-            agentId: event.agentId,
-            reason: serializedEvent.reason,
-            timestamp: serializedEvent.timestamp,
-            shouldNotify: serializedEvent.shouldNotify,
-            ...(serializedEvent.notification ? { notification: serializedEvent.notification } : {}),
+        this.emitForSource(
+          {
+            type: "agent_attention_required",
+            payload: {
+              agentId: event.agentId,
+              reason: serializedEvent.reason,
+              timestamp: serializedEvent.timestamp,
+              shouldNotify: serializedEvent.shouldNotify,
+              ...(serializedEvent.notification
+                ? { notification: serializedEvent.notification }
+                : {}),
+            },
           },
-        });
+          source,
+        );
         continue;
       }
       if (
@@ -1933,10 +1938,13 @@ export class Session {
       ) {
         continue;
       }
-      this.onMessageToSource(source, {
-        type: "agent_stream",
-        payload: this.buildAgentStreamPayload(event, serializedEvent),
-      });
+      this.emitForSource(
+        {
+          type: "agent_stream",
+          payload: this.buildAgentStreamPayload(event, serializedEvent),
+        },
+        source,
+      );
     }
   }
 
@@ -1968,7 +1976,7 @@ export class Session {
         capabilities.has(CLIENT_CAPS.projectUpdates) &&
         this.wantsEvent("project.update", source)
       ) {
-        this.onMessageToSource(source, message);
+        this.emitForSource(message, source);
       }
     }
   }
@@ -10716,7 +10724,7 @@ export class Session {
             isSessionRpcAllowed(this.scopes, msg.type) &&
             !(this.guestAgentId !== null && this.guestMessageTouchesOtherAgent(msg))
           )
-            void this.onMessageToSource(source, msg);
+            void this.emitForSource(msg, source);
         }
         return;
       }
@@ -10785,7 +10793,22 @@ export class Session {
 
   private emitForSource(msg: SessionOutboundMessage, source?: object): void | Promise<void> {
     if (source && this.onMessageToSource) {
-      return this.onMessageToSource(source, msg);
+      let delivery: Promise<void>;
+      try {
+        delivery = Promise.resolve(this.onMessageToSource(source, msg));
+      } catch (error) {
+        delivery = Promise.reject(error);
+      }
+      // Pushes and ordinary replies can outlive a physical socket. Observe their
+      // rejection even when the caller does not await, while returning the original
+      // promise so awaited transfer/control delivery still reports failure.
+      void delivery.catch((error) => {
+        this.sessionLogger.debug(
+          { err: error, messageType: msg.type },
+          "Session source delivery unavailable",
+        );
+      });
+      return delivery;
     }
     this.emit(msg);
   }

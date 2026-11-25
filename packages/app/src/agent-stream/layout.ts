@@ -72,7 +72,9 @@ function createTurnFooterHost(input: {
   timingByItemId: Map<string, TurnTiming>;
 }): TurnFooterHost {
   const turnMetrics =
-    input.item.kind === "assistant_message" || input.item.kind === "tool_call"
+    input.item.kind === "assistant_message" ||
+    input.item.kind === "tool_call" ||
+    input.item.kind === "plugin"
       ? input.item.turnMetrics
       : undefined;
   return {
@@ -93,7 +95,9 @@ function findTurnFooterSource(input: {
 }): TurnFooterSource | null {
   const last = input.items[input.startIndex];
   const toolFallback: TurnFooterSource | null =
-    last?.kind === "tool_call" ? { item: last, items: input.items, index: input.startIndex } : null;
+    last?.kind === "tool_call" || (last?.kind === "plugin" && last.sourceKind === "tool_call")
+      ? { item: last, items: input.items, index: input.startIndex }
+      : null;
   let items = input.items;
   let index = input.startIndex;
   let canCrossBoundary = true;
@@ -109,7 +113,10 @@ function findTurnFooterSource(input: {
       if (!item || (laterItem && !continuesResponse(item, laterItem))) {
         return toolFallback;
       }
-      if (item.kind === "assistant_message") {
+      if (
+        item.kind === "assistant_message" ||
+        (item.kind === "plugin" && item.sourceKind === "assistant_message")
+      ) {
         return { item, items, index };
       }
       laterItem = item;

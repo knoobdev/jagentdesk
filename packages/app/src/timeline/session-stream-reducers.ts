@@ -131,7 +131,6 @@ interface TimelineResponseEntry {
   sourceSeqRanges?: TimelineSeqRange[];
   collapsed?: string[];
   provider: string;
-  turnId?: string;
   item: Record<string, unknown>;
   timestamp: string;
   turnMetrics?: AgentMetric[];

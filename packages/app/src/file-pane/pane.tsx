@@ -587,6 +587,7 @@ function FilePanePresentation({
   if (editable && client && readTarget && preview?.kind === "text") {
     return (
       <EditableFilePane
+        onDownload={onDownload}
         key={`${serverId}:${readTarget.cwd}:${readTarget.path}`}
         client={client}
         cwd={readTarget.cwd}
@@ -636,7 +637,7 @@ function FilePanePresentation({
             location={previewLocation}
             navigationRevision={navigationRevision}
             onDownload={onDownload}
-          imagePreviewUri={imagePreviewUri}
+            imagePreviewUri={imagePreviewUri}
             workspaceRoot={workspaceRoot}
             client={client}
             serverId={serverId}
@@ -687,6 +688,7 @@ const noopCursor = (_position: { line: number; column: number }): void => {};
 const noopVimMode = (_mode: string | null): void => {};
 
 function EditableFilePane({
+  onDownload,
   client,
   cwd,
   path,
@@ -700,6 +702,7 @@ function EditableFilePane({
   workspaceRoot,
   serverId,
 }: {
+  onDownload: () => void;
   client: DaemonClient;
   cwd: string;
   path: string;
@@ -840,6 +843,7 @@ function EditableFilePane({
       {hasPreview ? (
         <RetainedFileView active={showPreview}>
           <FilePreviewBody
+            onDownload={onDownload}
             preview={previewFile}
             isLoading={false}
             isMobile={false}

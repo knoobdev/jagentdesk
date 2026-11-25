@@ -1,3 +1,6 @@
+import { buildAgentStreamRenderModel } from "@/agent-stream/model";
+import { layoutStream } from "@/agent-stream/layout";
+import { resolveStreamRenderStrategy } from "@/agent-stream/strategy-resolver";
 import { describe, expect, it, vi } from "vitest";
 import type { StreamItem } from "@/types/stream";
 import type { TimelineItemTransform } from "./model";
@@ -189,5 +192,60 @@ describe("plugin timeline projection", () => {
       "split/thought-1/right",
     ]);
     expect(filtered).toEqual([]);
+  });
+});
+
+it("keeps completed-turn metrics and timing on a plugin-rendered final reply", () => {
+  const metrics = [{ label: "Cost", value: "$0.01" }];
+  const source: StreamItem[] = [
+    {
+      kind: "user_message",
+      id: "prompt",
+      text: "Hello",
+      turnId: "turn-1",
+      timestamp: new Date("2026-01-01T00:00:00Z"),
+    },
+    {
+      kind: "assistant_message",
+      id: "reply",
+      text: "Done",
+      turnId: "turn-1",
+      timestamp: new Date("2026-01-01T00:00:02Z"),
+      turnMetrics: metrics,
+    },
+  ];
+  const projected = projectPluginTimelineItems(source, ({ item }) =>
+    item.type === "assistant_message"
+      ? [
+          {
+            type: "plugin",
+            pluginId: "test",
+            id: "final",
+            kind: "reply",
+            version: 1,
+            data: { text: "Done" },
+          },
+        ]
+      : undefined,
+  );
+  const model = buildAgentStreamRenderModel({
+    tail: projected,
+    head: [],
+    isTurnActive: false,
+    activeTurnStartedAt: null,
+    platform: "web",
+    isMobileBreakpoint: false,
+  });
+  const layout = layoutStream({
+    strategy: resolveStreamRenderStrategy({ platform: "web", isMobileBreakpoint: false }),
+    isTurnActive: false,
+    history: model.history,
+    liveHead: [],
+    timingByItemId: model.turnTiming.byItemId,
+  });
+  expect(layout.auxiliaryTurnFooter).toMatchObject({
+    itemId: "test/final",
+    turnMetrics: metrics,
+    timing: { durationMs: 2000 },
   });
 });

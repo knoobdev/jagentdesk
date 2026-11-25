@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { within } from "@testing-library/dom";
+import { waitFor, within } from "@testing-library/dom";
 import type { AgentPermissionResponse } from "@jagentdesk/protocol/agent-types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n as testI18n } from "@/i18n/i18next";
@@ -180,12 +180,15 @@ describe("QuestionFormCard explicit navigation", () => {
     expect(card.submittedAnswers()).toEqual({ Provider: "Codex", Fruits: "Apple" });
   });
 
-  it("keeps the description selectable without picking or submitting an option", () => {
+  it("keeps the description selectable without picking or submitting an option", async () => {
     const card = mountCard({
       ...singleSelectQuestion,
       options: [{ label: "Codex", description: "Use this provider" }],
     });
-    act(() => card.view.getByText("Use this provider").click());
+    const description = await waitFor(() => card.view.getByText("Use this provider"), {
+      timeout: 10000,
+    });
+    act(() => description.click());
     expect(card.view.getByRole("radio", { name: "Codex" }).getAttribute("aria-checked")).toBe(
       "false",
     );

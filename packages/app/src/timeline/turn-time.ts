@@ -45,7 +45,11 @@ function closeTurn(turn: OpenTurn, into: Map<string, TurnTiming>): void {
     durationMs: turn.userAt ? Math.max(0, turn.lastItemAt.getTime() - turn.userAt.getTime()) : null,
   };
   let footerIds = turn.assistantIds;
-  if (footerIds.length === 0 && turn.previousItem?.kind === "tool_call") {
+  if (
+    footerIds.length === 0 &&
+    (turn.previousItem?.kind === "tool_call" ||
+      (turn.previousItem?.kind === "plugin" && turn.previousItem.sourceKind === "tool_call"))
+  ) {
     footerIds = [turn.previousItem.id];
   }
   for (const id of footerIds) {
@@ -70,7 +74,10 @@ function walkTurns(
       assistantIds = [];
     }
     lastItemAt = item.timestamp;
-    if (item.kind === "assistant_message") {
+    if (
+      item.kind === "assistant_message" ||
+      (item.kind === "plugin" && item.sourceKind === "assistant_message")
+    ) {
       assistantIds.push(item.id);
     }
     previousItem = item;

@@ -106,6 +106,26 @@ describe("agent message envelope", () => {
     });
   });
 
+  test.each(["Schedule fired", 'Schedule "Heartbeat" fired'])(
+    "a %s body retains its stable heartbeat projection",
+    (heading) => {
+      const text = formatSystemNotificationPrompt(
+        `${heading} (id=schedule-1, run=run-1).\nCheck the workspace`,
+      );
+      const first = projectAgentMessage({ type: "user_message", text, messageId: "provider-1" });
+      const replay = projectAgentMessage({ type: "user_message", text, messageId: "provider-2" });
+      expect(first).toMatchObject({
+        type: "tool_call",
+        name: "heartbeat",
+        detail: {
+          type: "plain_text",
+          text: `${heading} (id=schedule-1, run=run-1).\nCheck the workspace`,
+        },
+      });
+      expect(replay).toEqual(first);
+    },
+  );
+
   test("the legacy hidden envelope stays hidden", () => {
     expect(
       projectAgentMessage({

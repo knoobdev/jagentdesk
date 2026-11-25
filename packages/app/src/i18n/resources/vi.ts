@@ -6,7 +6,6 @@ import { pluginSettings } from "./plugin-settings";
 import { sshModuleStrings } from "./ssh-modules";
 
 export const vi = {
-  panels: { file: { editor: { preview: "Xem trước", source: "Mã nguồn" } } },
   toolCallGroup: {
     thought: "Suy nghĩ",
     editedFiles: { one: "đã sửa {{count}} tệp", other: "đã sửa {{count}} tệp" },
@@ -970,6 +969,7 @@ export const vi = {
     skillTag: "Skill",
   },
   panels: {
+    file: { editor: { preview: "Xem trước", source: "Mã nguồn" } },
     files: { label: "Files", subtitle: "Workspace files", tooltip: "Browse workspace files" },
     pullRequest: {
       label: "Pull request",

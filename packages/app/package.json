@@ -7,7 +7,7 @@
     "start": "npm run start:expo",
     "start:expo": "cross-env APP_VARIANT=development expo start",
     "reset-project": "node ./scripts/reset-project.js",
-    "eas-build-post-install": "npm --prefix ../.. run build:app-deps && npm run build:terminal-webview && npm run build:tailscale",
+    "eas-build-post-install": "npm --prefix ../.. run build:app-deps && npm run build:tailscale",
     "android": "npm run android:development",
     "android:development": "npm run build:tailscale -- android && npm --prefix ../.. run build:client && cross-env APP_VARIANT=development expo prebuild --platform android --non-interactive && cross-env APP_VARIANT=development expo run:android --variant=debug",
     "android:production": "npm run build:tailscale -- android && npm --prefix ../.. run build:client && cross-env APP_VARIANT=production expo prebuild --platform android --non-interactive && cross-env APP_VARIANT=production expo run:android --variant=release",
@@ -29,7 +29,6 @@
     "profile:workspace-tabs": "node ./scripts/profile-workspace-tabs.mjs",
     "deploy:web": "npm run build:web && wrangler pages deploy dist --project-name jagentdesk-app --branch main",
     "build:tailscale": "node modules/jagentdesk-tailscale/build.mjs",
-    "build:terminal-webview": "node ./scripts/build-terminal-webview-html.mjs",
     "build:mermaid-runtime": "node ./src/components/markdown/fence/mermaid/build-runtime.mjs"
   },
   "dependencies": {

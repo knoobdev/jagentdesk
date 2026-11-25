@@ -210,6 +210,11 @@ export function projectAgentMessage(item: AgentTimelineItem): AgentTimelineItem 
     // and provider replay even when the provider assigns its own message ID.
     if (!isSystemInjectedEnvelope(item.text)) return item;
     const text = item.text.slice("<jagentdesk-system>\n".length, -"\n</jagentdesk-system>".length);
+    if (!/^Schedule(?: "[\s\S]*")? fired \(id=[^,\n]+, run=[^)\n]+\)\.\n/.test(text)) {
+      // COMPAT(legacySystemEnvelope): added in v0.11.1; remove after 2027-04-08
+      // once legacy notification history is retired. Only schedule fires are visible.
+      return null;
+    }
     return {
       type: "tool_call",
       callId: `jagentdesk-system:${createHash("sha256").update(item.text).digest("hex")}`,

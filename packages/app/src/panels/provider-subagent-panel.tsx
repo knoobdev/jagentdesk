@@ -31,6 +31,7 @@ const EMPTY_STREAM_ITEMS: StreamItem[] = [];
 const NOOP_SUBAGENT = () => undefined;
 
 function ProviderSubagentChildTrack({
+  serverId,
   rows,
   onOpenProviderSubagent,
 }: {
@@ -42,6 +43,7 @@ function ProviderSubagentChildTrack({
   return (
     <View>
       <SubagentsTrack
+        serverId={serverId}
         rows={rows}
         onOpenSubagent={NOOP_SUBAGENT}
         onOpenProviderSubagent={onOpenProviderSubagent}

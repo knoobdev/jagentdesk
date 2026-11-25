@@ -1,3 +1,7 @@
+import {
+  AssistantFileLinkResolverProvider,
+  useAssistantFileLinkEnvironment,
+} from "@/assistant-file-links/provider";
 import { MarkdownRenderer } from "@/components/markdown/renderer";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import { View } from "react-native";
@@ -16,16 +20,30 @@ export function FileMarkdownPreview({
   client?: DaemonClient | null;
   serverId?: string;
 }) {
+  const environment = useAssistantFileLinkEnvironment();
+  const documentPath =
+    filePath.startsWith("/") || /^[A-Za-z]:[\\/]/.test(filePath)
+      ? filePath
+      : `${workspaceRoot ?? ""}/${filePath}`;
+  const relativePathBase = documentPath.replace(/[/\\][^/\\]*$/, "");
   return (
     <View style={styles.outerGutter}>
       <View style={styles.readingFrame} testID="markdown-preview-frame">
-        <MarkdownRenderer
-          text={source}
-          filePath={filePath}
-          workspaceRoot={workspaceRoot}
+        <AssistantFileLinkResolverProvider
+          {...environment}
           client={client}
           serverId={serverId}
-        />
+          workspaceRoot={workspaceRoot}
+          relativePathBase={relativePathBase}
+        >
+          <MarkdownRenderer
+            text={source}
+            filePath={filePath}
+            workspaceRoot={workspaceRoot}
+            client={client}
+            serverId={serverId}
+          />
+        </AssistantFileLinkResolverProvider>
       </View>
     </View>
   );
