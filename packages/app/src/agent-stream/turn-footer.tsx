@@ -4,7 +4,7 @@ import type { AgentMetric } from "@jagentdesk/protocol/agent-types";
 import React, { memo, useCallback, useMemo, type ReactNode } from "react";
 import { Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import type { Theme } from "@/styles/theme";
+import { SPACING, type Theme } from "@/styles/theme";
 import type { TurnTiming } from "@/timeline/turn-time";
 import type { StreamItem } from "@/types/stream";
 import {
@@ -31,6 +31,11 @@ const workingIndicatorColorMapping = (theme: Theme) => ({
       ? theme.colors.palette.amber[700]
       : theme.colors.palette.amber[500],
 });
+export const TURN_FOOTER_BOTTOM_SPACING = SPACING[8];
+// Every footer variant (running, completed with Copy, completed with only its duration) gets
+// this content height, so a turn ending swaps the footer's controls without moving the rows
+// above it.
+const TURN_FOOTER_CONTENT_HEIGHT = 24;
 
 export type TurnContentStrategy = StreamStrategy;
 export type AssistantTurnForkHandler = (input: {
@@ -231,7 +236,8 @@ function CompletedTurnFooter({
 }
 
 function TurnFooterRow({ children }: { children: ReactNode }) {
-  // The Gumloop chat indents agent turns under the avatar; the footer follows.
+  // The Gumloop chat indents agent turns under the avatar; the footer follows, so the copy
+  // glyph lines up with the reply text (spec 38 §4.4).
   const isGumloop = useIsGumloopTheme();
   const rowStyle = useMemo(
     () => [
@@ -241,7 +247,11 @@ function TurnFooterRow({ children }: { children: ReactNode }) {
     ],
     [isGumloop],
   );
-  return <View style={rowStyle}>{children}</View>;
+  return (
+    <View style={rowStyle} testID="turn-footer">
+      {children}
+    </View>
+  );
 }
 
 const stylesheet = StyleSheet.create((theme) => ({
@@ -260,18 +270,20 @@ const stylesheet = StyleSheet.create((theme) => ({
   turnFooterRow: {
     marginTop: theme.spacing[4] + theme.spacing[1],
   },
+  // Add the indent to the wrapper's own padding; replacing it dropped the footer 8px left of
+  // the reply.
   turnFooterRowGumloop: {
-    paddingLeft: GUMLOOP_MESSAGE_INDENT,
+    paddingLeft: theme.spacing[2] + GUMLOOP_MESSAGE_INDENT,
   },
   turnFooterSlot: {
     flexDirection: "row",
     alignItems: "center",
-    alignSelf: "flex-start",
-    minHeight: 24,
-    paddingBottom: theme.spacing[6],
+    alignSelf: "stretch",
+    minHeight: TURN_FOOTER_CONTENT_HEIGHT + TURN_FOOTER_BOTTOM_SPACING,
+    paddingBottom: TURN_FOOTER_BOTTOM_SPACING,
   },
   turnFooterContent: {
-    height: 24,
+    height: TURN_FOOTER_CONTENT_HEIGHT,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-start",
