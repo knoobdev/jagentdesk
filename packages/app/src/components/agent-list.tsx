@@ -1,3 +1,4 @@
+import { useContainerWidthBelow } from "@/hooks/use-container-width";
 import { Modal } from "@/components/ui/modal";
 import { gumloopListStyles } from "@/components/gumloop-shell/list-styles";
 import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
@@ -404,7 +405,10 @@ export function AgentList({
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const [actionAgent, setActionAgent] = useState<AggregatedAgent | null>(null);
-  const isMobile = useIsCompactFormFactor();
+  const compactWindow = useIsCompactFormFactor();
+  const isGumloop = useIsGumloopTheme();
+  const { onLayout: measureList, isBelow: narrowList } = useContainerWidthBelow(600);
+  const isMobile = compactWindow || (isGumloop && narrowList);
   const { archiveAgent } = useArchiveAgent();
 
   const actionClient = useSessionStore((state) =>
@@ -488,7 +492,6 @@ export function AgentList({
     return result;
   }, [agents]);
 
-  const isGumloop = useIsGumloopTheme();
   const renderItem: ListRenderItem<FlatListItem> = useCallback(
     ({ item }) => {
       if (item.type === "header") {
@@ -568,6 +571,7 @@ export function AgentList({
   return (
     <>
       <FlatList
+        onLayout={measureList}
         data={flatItems}
         style={styles.list}
         contentContainerStyle={listContentStyle}

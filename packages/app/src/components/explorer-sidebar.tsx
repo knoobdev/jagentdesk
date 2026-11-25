@@ -172,12 +172,12 @@ export function ExplorerSidebar({
   });
   const { width: viewportWidth } = useWindowDimensions();
   const gumloop = useGumloopDesktopShell(true);
-  const visibleExplorerWidth = gumloop
-    ? 525
-    : resolveDesktopExplorerWidth({
-        requestedWidth: explorerWidth,
-        viewportWidth,
-      });
+  const sheetInspector = gumloop && viewportWidth < 992;
+  const visibleExplorerWidth = useMemo(() => {
+    if (sheetInspector) return viewportWidth;
+    if (gumloop) return 525;
+    return resolveDesktopExplorerWidth({ requestedWidth: explorerWidth, viewportWidth });
+  }, [sheetInspector, gumloop, explorerWidth, viewportWidth]);
   const startWidthRef = useRef(visibleExplorerWidth);
   const resizeWidth = useSharedValue(visibleExplorerWidth);
 
@@ -219,11 +219,16 @@ export function ExplorerSidebar({
     width: resizeWidth.value,
   }));
   const desktopSidebarStyle = useMemo(
-    () => [explorerStaticStyles.desktopSidebar, resizeAnimatedStyle, { paddingTop: insets.top }],
-    [resizeAnimatedStyle, insets.top],
+    () => [
+      explorerStaticStyles.desktopSidebar,
+      resizeAnimatedStyle,
+      sheetInspector && explorerStaticStyles.fullscreen,
+      { paddingTop: insets.top },
+    ],
+    [resizeAnimatedStyle, insets.top, sheetInspector],
   );
 
-  return (
+  const content = (
     <RetainedPanelActivity active={isOpen}>
       <Animated.View style={isOpen ? desktopSidebarStyle : styles.hiddenSidebar}>
         <View style={[styles.desktopSidebarBorder, { flex: 1 }]}>
@@ -252,6 +257,7 @@ export function ExplorerSidebar({
       </Animated.View>
     </RetainedPanelActivity>
   );
+  return sheetInspector ? <Portal hostName={GUMLOOP_INSPECTOR_HOST}>{content}</Portal> : content;
 }
 
 interface ExplorerTabButtonProps {
@@ -571,6 +577,7 @@ export function PrTabContent({
 // avoid the "Unable to find node on an unmounted component" crash when Unistyles
 // tries to patch the native node that Reanimated also manages.
 const explorerStaticStyles = RNStyleSheet.create({
+  fullscreen: { position: "absolute", top: 0, bottom: 0, left: 0 },
   desktopSidebar: {
     position: "relative" as const,
   },
