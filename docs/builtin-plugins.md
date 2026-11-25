@@ -50,8 +50,9 @@ new database paths with the feature id. Preserve existing storage locations duri
 
 Shared libraries that several features or core subsystems consume stay in core and reach features
 as `BuiltinPlatformServices` on the same services object: the SSH service (pool, storage and its
-remote Docker/database/cluster/forwarding modules), agent access (labels, cwd and
-`requestHostToolPermission`) and the hook that closes SSH dependents. Bootstrap supplies the
+remote Docker/database/cluster/forwarding modules), the custom provider service (the provider
+runtime materializes it at spawn), agent access (labels, cwd and `requestHostToolPermission`) and
+the hooks that close SSH dependents. Bootstrap supplies the
 daemon instances; a session receives the same instances. Bootstrap starts built-in background
 services after these libraries exist and stops them, dependents first, before it disposes the
 libraries. `home`, `daemonId` and `broadcastToTrustedSessions` (each session's emit gate still
@@ -113,7 +114,8 @@ on web, iOS, and Android.
 
 `register(app)` can contribute a sidebar destination (`Tools` or `main`), a left drill-in panel,
 a route screen, settings sections, mobile drawer entries, composer items, timeline renderers,
-tool call cards and attachment sources. A tool call card (`toolCallRenderer`) replaces the
+tool call cards, cards on the host's Settings → Providers page (`providerSettingsSection`) and
+attachment sources. A tool call card (`toolCallRenderer`) replaces the
 generic rendering of a matching tool call in the chat row (`inline`) or the expanded details
 (`details`); the first enabled feature whose `match` returns non-null renders it. Use the same destination metadata for desktop and mobile. Screens
 receive the selected `serverId`; never choose the first host inside a migrated screen.

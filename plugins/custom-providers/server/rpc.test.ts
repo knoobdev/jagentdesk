@@ -12,7 +12,10 @@ import {
   CustomProvidersTestResponseSchema,
 } from "@jagentdesk/protocol/custom-providers/rpc-schemas";
 import { handleCustomProvidersMessage, formatCustomProviderError } from "./rpc.js";
-import { CustomProviderError, type CustomProviderService } from "./types.js";
+import {
+  CustomProviderError,
+  type CustomProviderService,
+} from "../../../packages/server/src/server/custom-providers/types.js";
 
 const provider = {
   id: "local-llama",

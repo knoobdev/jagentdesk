@@ -63,3 +63,14 @@ export {
 } from "../../ssh/snippets/secure-file.js";
 export { writeFileAtomic } from "../../atomic-file.js";
 export { SshConnectionError } from "../../ssh/ssh-connection.js";
+
+// custom-providers migration
+export { CustomProviderError } from "../../custom-providers/types.js";
+export type {
+  CustomProviderService,
+  ApiProtocol,
+  ApiProviderModel,
+  ApiProviderRecord,
+  ApiRoute,
+  SaveApiProviderInput,
+} from "../../custom-providers/types.js";

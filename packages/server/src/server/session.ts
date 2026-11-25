@@ -94,7 +94,6 @@ import {
   type TerminalManager,
   type TerminalWorkspaceContributionChangedEvent,
 } from "../terminal/terminal-manager.js";
-import { handleCustomProvidersMessage } from "./custom-providers/rpc.js";
 import { type CustomProviderService } from "./custom-providers/types.js";
 import { TerminalSessionController } from "../terminal/terminal-session-controller.js";
 import { type TerminalActivity } from "@jagentdesk/protocol/terminal-activity";
@@ -1839,6 +1838,7 @@ export class Session {
         this.daemonConfigStore,
         {
           ssh: this.sshService,
+          ...(this.customProvidersService ? { customProviders: this.customProvidersService } : {}),
         },
       ),
       terminals: this.terminalManager,
@@ -1954,16 +1954,6 @@ export class Session {
   private initSshSession(options: SessionOptions): void {
     this.sshService = options.sshService ?? new SshService();
     this.customProvidersService = options.customProvidersService ?? null;
-  }
-
-  // Custom API providers (spec 34.7): the allowlist is the `providers.custom.` prefix, the handler
-  // map in custom-providers/rpc.ts is type-checked against the four request schemas. A request
-  // missing here would time out without a response.
-  private dispatchCustomProvidersMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    if (!msg.type.startsWith("providers.custom.")) return undefined;
-    return handleCustomProvidersMessage(this.customProvidersService, msg, (out) =>
-      this.emit(out),
-    ).then(() => undefined);
   }
 
   updateAppVersion(appVersion: string | null): void {
@@ -3198,7 +3188,6 @@ export class Session {
       () => this.activityGraphSession?.dispatch(msg),
       () => this.dispatchClusterMessage(msg),
       () => this.dispatchDatabaseMessage(msg),
-      () => this.dispatchCustomProvidersMessage(msg),
       () => this.dispatchArgoCdMessage(msg),
       () => this.dispatchSideloadMessage(msg),
       () => this.botsSession?.dispatch(msg),

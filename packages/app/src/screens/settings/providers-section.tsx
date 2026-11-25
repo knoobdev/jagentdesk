@@ -1,4 +1,3 @@
-import { BuiltinPluginGate } from "@/plugins/builtin/gate";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -33,7 +32,7 @@ import {
 import { SettingsSection } from "@/screens/settings/settings-section";
 import { useProviderSettingsStore } from "@/stores/provider-settings-store";
 import { confirmDialog } from "@/utils/confirm-dialog";
-import { CustomProvidersSection } from "@/custom-providers/custom-providers-section";
+import { BuiltinClientItems } from "@/plugins/builtin/surfaces";
 import { useProviderInstallation } from "@/components/provider-installation";
 import { readRowSummary, rowHasSwitch, type RowSummary } from "@/components/provider-row-summary";
 import { ChevronRight, MoreHorizontal, Trash2 } from "lucide-react-native";
@@ -402,9 +401,7 @@ export function ProvidersSection({ serverId }: ProvidersSectionProps) {
       </SettingsSection>
 
       {hasServer && isConnected ? (
-        <BuiltinPluginGate serverId={serverId} id="custom-providers">
-          <CustomProvidersSection serverId={serverId} />
-        </BuiltinPluginGate>
+        <BuiltinClientItems serverId={serverId} kind="providerSettings" />
       ) : null}
 
       {hasServer && isConnected ? (

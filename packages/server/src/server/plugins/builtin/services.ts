@@ -10,6 +10,7 @@ import { DockerStreams } from "../../docker/docker-streams.js";
 import { routeDockerMessage, disposeRemoteDocker } from "../../ssh/remote-docker/route.js";
 import type { AgentManager } from "../../agent/agent-manager.js";
 import type { SshService } from "../../ssh/ssh-service.js";
+import type { CustomProviderService } from "../../custom-providers/types.js";
 import type { SessionOutboundMessage } from "../../messages.js";
 
 /** Agent facts a feature may read for its callers; permission cards stay in core. */
@@ -28,6 +29,10 @@ export interface BuiltinPlatformServices {
   agents?: BuiltinAgentAccess;
   /** Closes connections that ride on the SSH pool (custom provider forwarders) before it stops. */
   beforeSshStop?: () => void | Promise<void>;
+  /** Custom API providers: config, secrets and the materializers agent providers spawn with. */
+  customProviders?: CustomProviderService;
+  /** Closes the custom providers' SSH forwarders (daemon-wide). */
+  closeCustomProviderForwards?: () => void;
   /** This daemon's server id. */
   daemonId?: string;
   /** Pushes to every trusted session; each session's emit gate still applies its scopes. */

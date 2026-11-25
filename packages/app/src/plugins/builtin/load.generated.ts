@@ -2,9 +2,11 @@
 import { register as register0 } from "../../../../../plugins/docker/client/index";
 import { register as register1 } from "../../../../../plugins/ssh-servers/client/index";
 import { register as register2 } from "../../../../../plugins/remote-tasks/client/index";
+import { register as register3 } from "../../../../../plugins/custom-providers/client/index";
 import type { BuiltinClientRegistry } from "./host";
 export function loadBuiltins(registry: BuiltinClientRegistry) {
   register0(registry.forPlugin("docker"));
   register1(registry.forPlugin("ssh-servers"));
   register2(registry.forPlugin("remote-tasks"));
+  register3(registry.forPlugin("custom-providers"));
 }

@@ -15,7 +15,10 @@ import {
   CustomProvidersTestResponseSchema,
   type ApiProviderRecord,
 } from "@jagentdesk/protocol/custom-providers/rpc-schemas";
-import { CustomProviderError, type CustomProviderService } from "./types.js";
+import {
+  CustomProviderError,
+  type CustomProviderService,
+} from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 
 // The protocol exports response schemas, not response type aliases.
 type CustomProvidersListResponse = z.infer<typeof CustomProvidersListResponseSchema>;

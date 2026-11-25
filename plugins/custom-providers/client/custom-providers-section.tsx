@@ -1,12 +1,15 @@
-import { useBuiltinPluginEnabled } from "@/plugins/builtin/hooks";
+import { useBuiltinPluginEnabled } from "../../../packages/app/src/plugins/builtin/host-api";
 import { useCallback, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { ChevronRight, Plus } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
-import { settingsStyles } from "@/styles/settings";
-import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
-import { SettingsSection } from "@/screens/settings/settings-section";
+import { settingsStyles } from "../../../packages/app/src/plugins/builtin/host-api";
+import {
+  useHostRuntimeClient,
+  useHostRuntimeIsConnected,
+} from "../../../packages/app/src/plugins/builtin/host-api";
+import { SettingsSection } from "../../../packages/app/src/plugins/builtin/host-api";
 import { useCustomProvidersList, type CustomProvidersLoadState } from "./use-custom-providers-list";
 import {
   CustomProviderFormSheet,

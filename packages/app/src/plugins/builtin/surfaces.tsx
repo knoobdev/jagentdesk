@@ -74,7 +74,7 @@ export function BuiltinScreen({ serverId, segment, ...props }: ScreenProps & { s
 export function BuiltinClientItems({
   serverId,
   kind,
-}: BuiltinClientProps & { kind: "settings" | "composer" }) {
+}: BuiltinClientProps & { kind: "settings" | "providerSettings" | "composer" }) {
   const entries = useBuiltinClientContributions(serverId);
   return (
     <>

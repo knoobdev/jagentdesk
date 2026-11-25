@@ -4,13 +4,13 @@
 // in bypass). The API key never appears in a card or a tool output: cards carry `hasApiKey`
 // only, and ApiProviderRecord has no key field.
 import { z } from "zod";
-import type { AgentPermissionResponse } from "../agent/agent-sdk-types.js";
+import type { AgentPermissionResponse } from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 import type {
   JAgentDeskToolConfig,
   JAgentDeskToolDefinition,
   JAgentDeskToolExecutionContext,
   JAgentDeskToolResult,
-} from "../agent/tools/types.js";
+} from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 import {
   CustomProviderError,
   type ApiProtocol,
@@ -19,7 +19,7 @@ import {
   type ApiRoute,
   type CustomProviderService,
   type SaveApiProviderInput,
-} from "./types.js";
+} from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 
 /** Same request the catalog's `requestHostToolPermission` takes (the permission card, 04.21). */
 export interface CustomProviderPermissionRequest {

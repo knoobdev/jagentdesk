@@ -92,3 +92,9 @@ export type {
   ScrollToEndableView,
 } from "@/remote-exec/job-card-ui";
 export { unwrapToolResultPayload } from "@/remote-exec/tool-result-payload";
+
+// custom-providers migration
+export { useBuiltinPluginEnabled } from "@/plugins/builtin/hooks";
+export { settingsStyles } from "@/styles/settings";
+export { useHostRuntimeIsConnected } from "@/runtime/host-runtime";
+export { SettingsSection } from "@/screens/settings/settings-section";

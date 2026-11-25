@@ -243,7 +243,6 @@ import { createFigmaService } from "./figma/create.js";
 import { atlassianEndpointsFromEnv } from "./jira/credentials.js";
 import { createJiraAgentTools } from "./jira/agent-tools.js";
 import { createFigmaAgentTools } from "./figma/agent-tools.js";
-import { createCustomProviderAgentTools } from "./custom-providers/agent-tools.js";
 import { SshModules } from "./ssh/ssh-modules.js";
 import { SshModules as SshServerModules } from "./ssh/modules.js";
 import { applyTerminalAgentHookSetting } from "../terminal/agent-hooks/terminal-agent-hook-setting.js";
@@ -1806,6 +1805,8 @@ export async function createJAgentDeskDaemon(
         requestHostToolPermission: (agentId, request) =>
           agentManager.requestHostToolPermission(agentId, request),
       },
+      customProviders: customProviderService,
+      closeCustomProviderForwards: () => customProviderService.closeAll(),
       beforeSshStop: () => customProviderService.closeAll(),
       daemonId: serverId,
       broadcastToTrustedSessions: (message) => {
@@ -1819,10 +1820,6 @@ export async function createJAgentDeskDaemon(
     pluginRuntime.builtin,
     builtinServices,
   );
-  await pluginRuntime.builtin.registerLifecycle("custom-providers", {
-    start: () => {},
-    stop: () => customProviderService.closeAll(),
-  });
   await pluginRuntime.builtin.registerLifecycle("argocd", {
     start: () => argocdService.initialize(),
     stop: () => argocdService.dispose(),
@@ -2023,14 +2020,6 @@ export async function createJAgentDeskDaemon(
     clusterRegistry,
     databaseRegistry,
     builtinServices,
-    customProviderAgentTools: (callerAgentId) =>
-      createCustomProviderAgentTools({
-        service: customProviderService,
-        callerAgentId,
-        requestPermission: (agentId, request) =>
-          agentManager.requestHostToolPermission(agentId, request),
-        sshServerLabel: (id) => sshService.storage.getServer(id)?.label ?? null,
-      }),
     argocdAgentTools: (callerAgentId) =>
       createArgoCdAgentTools({
         service: argocdService,

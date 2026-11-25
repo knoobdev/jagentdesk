@@ -3,14 +3,17 @@ import { Pressable, Text, View } from "react-native";
 import { Trash2, X } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
-import { AdaptiveModalSheet } from "@/components/adaptive-modal-sheet";
-import { Alert } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
-import { Field, FormTextInput } from "@/components/ui/form-field";
-import { SelectField, type SelectFieldOption } from "@/components/ui/select-field";
-import { SegmentedControl } from "@/components/ui/segmented-control";
-import { StatusBadge } from "@/components/ui/status-badge";
-import { confirmDialog } from "@/utils/confirm-dialog";
+import { AdaptiveModalSheet } from "../../../packages/app/src/plugins/builtin/host-api";
+import { Alert } from "../../../packages/app/src/plugins/builtin/host-api";
+import { Button } from "../../../packages/app/src/plugins/builtin/host-api";
+import { Field, FormTextInput } from "../../../packages/app/src/plugins/builtin/host-api";
+import {
+  SelectField,
+  type SelectFieldOption,
+} from "../../../packages/app/src/plugins/builtin/host-api";
+import { SegmentedControl } from "../../../packages/app/src/plugins/builtin/host-api";
+import { StatusBadge } from "../../../packages/app/src/plugins/builtin/host-api";
+import { confirmDialog } from "../../../packages/app/src/plugins/builtin/host-api";
 import type { CustomProvidersClient } from "./use-custom-providers-list";
 import { useCustomProviderFormModel } from "./use-custom-provider-form-model";
 import type {

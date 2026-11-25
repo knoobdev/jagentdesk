@@ -43,6 +43,8 @@ export interface BuiltinClientHost {
   leftPanel(routeSegment: string, component: ComponentType<BuiltinClientProps>): void;
   screen(routeSegment: string, component: ComponentType<BuiltinScreen>): void;
   settingsSection(id: string, component: ComponentType<BuiltinClientProps>): void;
+  /** A card on the host's Settings → Providers page, below the agent providers. */
+  providerSettingsSection(id: string, component: ComponentType<BuiltinClientProps>): void;
   mobileDrawerEntry(destination: BuiltinDestination): void;
   composerItem(id: string, component: ComponentType<BuiltinClientProps>): void;
   timelineRenderer(
@@ -65,6 +67,7 @@ export interface BuiltinClientContributions {
   panels: Map<string, ComponentType<BuiltinClientProps>>;
   screens: Map<string, ComponentType<BuiltinScreen>>;
   settings: Map<string, ComponentType<BuiltinClientProps>>;
+  providerSettings: Map<string, ComponentType<BuiltinClientProps>>;
   composer: Map<string, ComponentType<BuiltinClientProps>>;
   timeline: Map<string, ComponentType<BuiltinClientProps & { item: PluginTimelineItem }>>;
   attachments: BuiltinAttachmentSource[];
@@ -80,6 +83,7 @@ export class BuiltinClientRegistry {
       panels: new Map(),
       screens: new Map(),
       settings: new Map(),
+      providerSettings: new Map(),
       composer: new Map(),
       timeline: new Map(),
       attachments: [],
@@ -97,6 +101,7 @@ export class BuiltinClientRegistry {
       leftPanel: (key, component) => add(entry.panels, key, component),
       screen: (key, component) => add(entry.screens, key, component),
       settingsSection: (key, component) => add(entry.settings, key, component),
+      providerSettingsSection: (key, component) => add(entry.providerSettings, key, component),
       composerItem: (key, component) => add(entry.composer, key, component),
       timelineRenderer: (key, component) => add(entry.timeline, key, component),
       attachmentSource: (source, search) => entry.attachments.push({ source, search }),

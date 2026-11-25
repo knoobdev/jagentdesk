@@ -5,14 +5,17 @@
 // sshServerId fails fast, and a denial maps to exactly "The user declined".
 import { describe, expect, it, vi } from "vitest";
 
-import type { AgentPermissionResponse } from "../agent/agent-sdk-types.js";
-import type { JAgentDeskToolResult } from "../agent/tools/types.js";
+import type { AgentPermissionResponse } from "../../../packages/server/src/server/agent/agent-sdk-types.js";
+import type { JAgentDeskToolResult } from "../../../packages/server/src/server/agent/tools/types.js";
 import {
   createCustomProviderAgentTools,
   type CustomProviderAgentToolDependencies,
   type CustomProviderPermissionRequest,
 } from "./agent-tools.js";
-import { CustomProviderError, type CustomProviderService } from "./types.js";
+import {
+  CustomProviderError,
+  type CustomProviderService,
+} from "../../../packages/server/src/server/custom-providers/types.js";
 
 const record = {
   id: "local-llama",
