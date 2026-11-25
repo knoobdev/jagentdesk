@@ -1,3 +1,4 @@
+import { useBuiltinDestinations } from "@/plugins/builtin/surfaces";
 import { useOpenSidebarUsage } from "@/usage/sidebar-item";
 import { useBuiltinPluginEnabled } from "@/plugins/builtin/hooks";
 import { builtinPluginEnabled } from "@/plugins/builtin/registry";
@@ -9,7 +10,6 @@ import {
   Boxes,
   Bot,
   CalendarClock,
-  Container,
   Database,
   Figma,
   GitPullRequest,
@@ -51,7 +51,6 @@ import {
   buildClustersRoute,
   buildDatabaseBrowseRoute,
   buildDatabasesRoute,
-  buildDockerRoute,
   buildFigmaRoute,
   buildForgeRoute,
   buildInsightsRoute,
@@ -79,7 +78,6 @@ export interface AppNavTargets {
   insightsRoute: Href | null;
   forgeRoute: Href | null;
   marketplaceRoute: Href | null;
-  dockerRoute: Href | null;
   simulatorRoute: Href | null;
   proxyRoute: Href | null;
   /** Spec 30.3: the daemon ships Argo CD; null hides the entry. */
@@ -104,7 +102,6 @@ export function useAppNavTargets(): AppNavTargets {
   const lastCluster = useClusterNavStore((s) => s.lastCluster);
   const lastDatabase = useDatabaseNavStore((s) => s.lastDatabase);
   const supportsBots = useHostFeature(firstServerId, "bots");
-  const dockerEnabled = useBuiltinPluginEnabled(firstServerId, "docker");
   const clustersEnabled = useBuiltinPluginEnabled(firstServerId, "clusters");
   const databasesEnabled = useBuiltinPluginEnabled(firstServerId, "databases");
   const skillsEnabled = useBuiltinPluginEnabled(firstServerId, "skills");
@@ -170,7 +167,6 @@ export function useAppNavTargets(): AppNavTargets {
       insightsRoute: insightsEnabled ? perHost(buildInsightsRoute) : null,
       forgeRoute: perHost(buildForgeRoute),
       marketplaceRoute: perHost(buildMarketplaceRoute),
-      dockerRoute: dockerEnabled ? perHost(buildDockerRoute) : null,
       simulatorRoute: deviceServerId ? (buildSimulatorRoute(deviceServerId) as Href) : null,
       proxyRoute: workbenchEnabled ? perHost(buildProxyRoute) : null,
       argoCdRoute: supportsArgoCd ? perHost(buildArgoCdRoute) : null,
@@ -181,7 +177,6 @@ export function useAppNavTargets(): AppNavTargets {
     };
   }, [
     supportsBots,
-    dockerEnabled,
     clustersEnabled,
     databasesEnabled,
     skillsEnabled,
@@ -201,6 +196,7 @@ export function useAppNavTargets(): AppNavTargets {
 }
 
 interface AppNavItemBase {
+  group?: "Tools" | "main";
   key: string;
   icon: LucideIcon;
   label: string;
@@ -219,6 +215,7 @@ export function useAppNavItems(): AppNavItem[] {
   const { t } = useTranslation();
   const pathname = usePathname();
   const targets = useAppNavTargets();
+  const builtinDestinations = useBuiltinDestinations(pathname);
   return useMemo(() => {
     const items: (AppNavItem | null)[] = [
       {
@@ -271,7 +268,7 @@ export function useAppNavItems(): AppNavItem[] {
         pathname,
         "/marketplace",
       ),
-      navItem("docker", Container, "Docker", "Docker", targets.dockerRoute, pathname, "/docker"),
+      ...builtinDestinations,
       navItem(
         "simulators",
         Smartphone,
@@ -327,7 +324,7 @@ export function useAppNavItems(): AppNavItem[] {
         : null,
     ];
     return items.filter((item): item is AppNavItem => item !== null);
-  }, [openUsage, pathname, t, targets]);
+  }, [openUsage, pathname, t, targets, builtinDestinations]);
 }
 
 function navItem(

@@ -3,7 +3,7 @@ import { ScrollView } from "react-native";
 import { Container, HardDrive, Image } from "lucide-react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { create } from "zustand";
-import { GumloopRow } from "@/components/gumloop-shell/sidebar";
+import { GumloopRow } from "../../../packages/app/src/plugins/builtin/host-api";
 export type DockerTab = "containers" | "images" | "volumes";
 interface DockerNavigation {
   tabs: Record<string, DockerTab>;

@@ -18,7 +18,7 @@ import type { SshKey, SshServerInfo } from "@jagentdesk/protocol/ssh/rpc-schemas
 import { AdaptiveModalSheet, type SheetHeader } from "@/components/adaptive-modal-sheet";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { DockerScreen } from "@/screens/docker-screen";
+import { BuiltinScreen } from "@/plugins/builtin/surfaces";
 import type { Theme } from "@/styles/theme";
 import { ErrorBanner, TabButton } from "./primitives";
 import type { SshDockerTarget } from "./ssh-docker-client";
@@ -120,7 +120,7 @@ function RemoteDocker({
   }, [client, serverId, t]);
   if (error) return <ErrorBanner message={error} />;
   if (!target) return <Text style={styles.muted}>{t("ssh.server.docker.connecting")}</Text>;
-  return <DockerScreen sshDocker={target} hostServerId={hostServerId} />;
+  return <BuiltinScreen segment="docker" sshDocker={target} serverId={hostServerId} />;
 }
 
 function LogsPanel({ client, serverId }: { client: DaemonClient; serverId: string }) {

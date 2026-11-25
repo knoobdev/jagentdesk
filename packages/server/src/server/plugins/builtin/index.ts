@@ -1,27 +1,9 @@
-import { BUILTIN_PLUGIN_MANIFESTS } from "@jagentdesk/protocol/builtin-plugins";
+import { BUILTIN_PLUGIN_MANIFESTS, BUNDLED_PLUGIN_IDS } from "@jagentdesk/protocol/builtin-plugins";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const builtinPlugins = [
-  "claude-usage-source",
-  "codex-usage-source",
-  "copilot-usage-source",
-  "cursor-usage-source",
-  "grok-usage-source",
-  "kimi-usage-source",
-  "minimax-usage-source",
-  "opencode-go-usage-source",
-  "openrouter-host-usage-source",
-  "zai-usage-source",
-
-  "goose-provider",
-  "fx-provider",
-  "hoplite-provider",
-  "antigravity-provider",
-  "muse-provider",
-  "worktree-include",
-] as const;
+export const builtinPlugins = BUNDLED_PLUGIN_IDS;
 
 export function resolveBuiltinPluginsRoot(moduleUrl: string | URL = import.meta.url): string {
   const moduleDir = path.dirname(fileURLToPath(moduleUrl));

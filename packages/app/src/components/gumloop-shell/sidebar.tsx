@@ -1,3 +1,4 @@
+import { builtinClientRegistry } from "@/plugins/builtin/loaded";
 import { RetainedPanelActivity } from "@/components/retained-panel";
 import { openSettingsFromSidebar } from "@/navigation/settings-navigation";
 import { getSettingsSidebarReturn } from "@/navigation/settings-presentation/session";
@@ -7,15 +8,17 @@ import { useWindowLayout, resolveDesktopDivisionLayout } from "@/window-layout";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AccountButton } from "./account-button";
-import { DockerSidebar } from "@/docker/sidebar";
+import { BuiltinLeftPanel } from "@/plugins/builtin/surfaces";
+import { GumloopRow } from "./row";
+export { GumloopRow } from "./row";
 import { JAgentDeskLogo } from "@/components/icons/jagentdesk-logo";
 import { WindowChromeSafeArea } from "@/utils/desktop-window";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { SidebarViewSlot } from "@/plugins/sidebar-view/slot";
 import { PortalHost } from "@gorhom/portal";
 import { router, usePathname } from "expo-router";
-import { useCallback, useMemo, useRef, useState, type ReactNode, type ComponentType } from "react";
-import { Pressable, ScrollView, Text, View, type PressableStateCallbackType } from "react-native";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import {
   ArrowLeft,
   ArrowDownUp,
@@ -67,10 +70,14 @@ import { resolveSidebarNavBody, resolveSectionRoute } from "@/components/left-si
 import { WorkspaceSidebar } from "./workspace-sidebar";
 import {
   GUMLOOP_PANEL_HOST,
-  resolveSidebarDrillIn,
+  resolveSidebarDrillIn as resolveCoreSidebarDrillIn,
   toolsInitiallyCollapsed,
   useGumloopSidebarState,
 } from "./sidebar-state";
+
+function resolveSidebarDrillIn(pathname: string) {
+  return resolveCoreSidebarDrillIn(pathname, builtinClientRegistry.destinations());
+}
 
 const PRIMARY_ORDER: readonly string[] = [
   "home",
@@ -91,56 +98,6 @@ const ThemedPlus = withUnistyles(Plus);
 const ThemedChevronDown = withUnistyles(ChevronDown);
 const ThemedChevronRight = withUnistyles(ChevronRight);
 const ThemedArrowLeft = withUnistyles(ArrowLeft);
-
-export function GumloopRow({
-  icon,
-  label,
-  onPress,
-  selected = false,
-  leading,
-  testID,
-  children,
-}: {
-  icon?: ComponentType<{ size: number; color: string }>;
-  label: string;
-  onPress: () => void;
-  selected?: boolean;
-  testID?: string;
-  children?: ReactNode;
-  leading?: ReactNode;
-}) {
-  const Icon = useMemo(() => (icon ? withUnistyles(icon) : null), [icon]);
-  const accessibilityState = useMemo(() => ({ selected }), [selected]);
-  const select = useCallback(() => {
-    usePanelStore.getState().showMobileAgent();
-    onPress();
-  }, [onPress]);
-  const rowStyle = useCallback(
-    ({ hovered, pressed }: PressableStateCallbackType & { hovered?: boolean }) => [
-      styles.row,
-      selected && styles.selected,
-      (hovered || pressed) && !selected && styles.hovered,
-    ],
-    [selected],
-  );
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={accessibilityState}
-      onPress={select}
-      style={rowStyle}
-      testID={testID}
-    >
-      {leading}
-      {Icon ? <Icon size={18} uniProps={foreground} /> : null}
-      <Text numberOfLines={1} style={styles.label}>
-        {label}
-      </Text>
-      {children}
-    </Pressable>
-  );
-}
 
 function NavRow({ item, onNavigate }: { item: AppNavItem; onNavigate: () => void }) {
   const onPress = useCallback(() => {
@@ -370,7 +327,7 @@ function RootNavigation({ onNavigate }: { onNavigate: () => void }) {
   const groups = usePluginSidebarGroups();
   const pluginHeaders = usePluginScreenSidebarItems("header");
   const pluginFooters = usePluginScreenSidebarItems("footer");
-  const tools = items.filter((item) => !PRIMARY_KEYS.has(item.key));
+  const tools = items.filter((item) => !PRIMARY_KEYS.has(item.key) && item.group !== "main");
   const savedCollapsed = useGumloopSidebarState((state) => state.toolsCollapsed);
   const projectsCollapsed = useGumloopSidebarState((state) => state.projectsCollapsed);
   const setCollapsed = useGumloopSidebarState((state) => state.setToolsCollapsed);
@@ -390,7 +347,7 @@ function RootNavigation({ onNavigate }: { onNavigate: () => void }) {
     <View style={styles.navigation}>
       <View style={styles.navItems}>
         {items
-          .filter((item) => PRIMARY_KEYS.has(item.key))
+          .filter((item) => PRIMARY_KEYS.has(item.key) || item.group === "main")
           .sort((left, right) => PRIMARY_ORDER.indexOf(left.key) - PRIMARY_ORDER.indexOf(right.key))
           .map((item) => (
             <NavRow key={item.key} item={item} onNavigate={onNavigate} />
@@ -425,8 +382,8 @@ function RootNavigation({ onNavigate }: { onNavigate: () => void }) {
 
 function DestinationPanel({ pathname }: { pathname: string }) {
   const drill = resolveSidebarDrillIn(pathname);
-  if (drill?.kind === "destination" && drill.section === "docker")
-    return <DockerSidebar serverId={drill.serverId} />;
+  if (drill?.kind === "destination" && builtinClientRegistry.owner(drill.section))
+    return <BuiltinLeftPanel serverId={drill.serverId} segment={drill.section} />;
   if (drill?.kind === "settings") return <PortalHost name={GUMLOOP_PANEL_HOST} />;
   const cluster = /\/h\/([^/]+)\/cluster\/([^/]+)/.exec(pathname);
   const database = /\/h\/([^/]+)\/database\/([^/]+)/.exec(pathname);
@@ -636,7 +593,9 @@ function DrillQuickSwitch({
       );
     }
     return destinations
-      .filter((item) => !PRIMARY_KEYS.has(item.key) || item.key === "bots")
+      .filter(
+        (item) => (!PRIMARY_KEYS.has(item.key) && item.group !== "main") || item.key === "bots",
+      )
       .map((item) => ({
         id: item.key,
         label: item.label,

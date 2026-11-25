@@ -1,0 +1,9 @@
+{
+  "kind": "builtin",
+  "id": "activity-graph",
+  "name": "Activity graph",
+  "description": "Explore an agent\u2019s activity and plan graph.",
+  "defaultEnabled": true,
+  "requires": [],
+  "builtinOrder": 16
+}

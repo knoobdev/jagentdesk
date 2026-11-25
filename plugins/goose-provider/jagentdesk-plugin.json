@@ -2,5 +2,12 @@
   "id": "goose-provider",
   "requirements": {
     "jagentdesk": ">=0.9.59"
-  }
+  },
+  "kind": "builtin",
+  "name": "goose",
+  "description": "Run goose through its local goose CLI.",
+  "defaultEnabled": false,
+  "requires": [],
+  "command": "goose",
+  "builtinOrder": 25
 }

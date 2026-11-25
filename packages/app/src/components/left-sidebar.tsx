@@ -1,3 +1,4 @@
+import { BuiltinSidebarDestinations } from "@/plugins/builtin/surfaces";
 import { SidebarFooterIconHighlight } from "@/components/sidebar/sidebar-footer-icon-highlight";
 import { UsageSidebarItem, useUsageSummary, useOpenSidebarUsage } from "@/usage/sidebar-item";
 import { BotsSidebar } from "@/bots/sidebar";
@@ -9,7 +10,6 @@ import {
   Boxes,
   Bot,
   BarChart3,
-  Container,
   Database,
   GitPullRequest,
   Sparkles,
@@ -249,7 +249,6 @@ interface SidebarSharedProps {
   handleInsights: () => void;
   handleForge: () => void;
   handleMarketplace: () => void;
-  handleDocker: () => void;
   handleSimulator: () => void;
   handleWorkbench: () => void;
   supportsForgeHub: boolean;
@@ -285,7 +284,6 @@ interface SidebarLabels {
   insights: string;
   forge: string;
   marketplace: string;
-  docker: string;
   simulator: string;
   workbench: string;
   closeSidebar: string;
@@ -400,7 +398,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     insightsRoute,
     forgeRoute,
     marketplaceRoute,
-    dockerRoute,
     simulatorRoute,
     proxyRoute,
     argoCdRoute,
@@ -419,9 +416,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
   const handleMarketplaceDesktop = useCallback(() => {
     if (marketplaceRoute) router.push(marketplaceRoute);
   }, [marketplaceRoute]);
-  const handleDockerDesktop = useCallback(() => {
-    if (dockerRoute) router.push(dockerRoute as Href);
-  }, [dockerRoute]);
   const handleSimulatorDesktop = useCallback(() => {
     if (simulatorRoute) router.push(simulatorRoute as Href);
   }, [simulatorRoute]);
@@ -501,13 +495,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     }
   }, [marketplaceRoute, showMobileAgent]);
 
-  const handleDockerMobile = useCallback(() => {
-    if (dockerRoute) {
-      showMobileAgent();
-      router.push(dockerRoute as Href);
-    }
-  }, [dockerRoute, showMobileAgent]);
-
   const handleSimulatorMobile = useCallback(() => {
     if (simulatorRoute) {
       showMobileAgent();
@@ -558,7 +545,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       insights: "Insights",
       forge: "Forge",
       marketplace: t("sidebar.actions.marketplace"),
-      docker: "Docker",
       simulator: "Simulators",
       workbench: "Workbench",
       closeSidebar: t("sidebar.actions.closeSidebar"),
@@ -588,7 +574,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     handleInsights: handleInsightsDesktop,
     handleForge: handleForgeDesktop,
     handleMarketplace: handleMarketplaceDesktop,
-    handleDocker: handleDockerDesktop,
     handleSimulator: handleSimulatorDesktop,
     handleWorkbench: handleWorkbenchDesktop,
     supportsForgeHub,
@@ -612,7 +597,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
           handleInsights={handleInsightsMobile}
           handleForge={handleForgeMobile}
           handleMarketplace={handleMarketplaceMobile}
-          handleDocker={handleDockerMobile}
           handleSimulator={handleSimulatorMobile}
           handleWorkbench={handleWorkbenchMobile}
           insetsTop={insets.top}
@@ -640,7 +624,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
         handleInsights={handleInsightsDesktop}
         handleForge={handleForgeDesktop}
         handleMarketplace={handleMarketplaceDesktop}
-        handleDocker={handleDockerDesktop}
         handleSimulator={handleSimulatorDesktop}
         handleWorkbench={handleWorkbenchDesktop}
         insetsTop={insets.top}
@@ -1162,7 +1145,6 @@ function DesktopSidebar({
   handleInsights,
   handleForge,
   handleMarketplace,
-  handleDocker,
   handleSimulator,
   handleWorkbench,
   supportsForgeHub,
@@ -1198,7 +1180,6 @@ function DesktopSidebar({
   const isInsightsActive = pathname.includes("/insights");
   const isForgeActive = pathname.includes("/forge");
   const isMarketplaceActive = pathname.includes("/marketplace");
-  const isDockerActive = pathname.includes("/docker");
   const isSimulatorActive = pathname.includes("/simulator");
   const isWorkbenchActive = pathname.includes("/proxy");
   const clusterRouteMatch = pathname.match(/\/h\/([^/]+)\/cluster\/([^/]+)/);
@@ -1426,16 +1407,7 @@ function DesktopSidebar({
               testID="sidebar-marketplace-nav"
               variant="compact"
             />
-            <NavTargetGate route={builtinTargets.dockerRoute}>
-              <SidebarHeaderRow
-                icon={Container}
-                label={labels.docker}
-                onPress={handleDocker}
-                isActive={isDockerActive}
-                testID="sidebar-docker-nav"
-                variant="compact"
-              />
-            </NavTargetGate>
+            <BuiltinSidebarDestinations />
             {supportsDevices ? (
               <SidebarHeaderRow
                 icon={Smartphone}

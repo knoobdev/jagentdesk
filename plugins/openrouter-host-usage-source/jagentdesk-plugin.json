@@ -1,1 +1,12 @@
-{ "id": "openrouter-host-usage-source", "requirements": { "jagentdesk": ">=0.9.59" } }
+{
+  "id": "openrouter-host-usage-source",
+  "requirements": {
+    "jagentdesk": ">=0.9.59"
+  },
+  "kind": "builtin",
+  "name": "OpenRouter usage",
+  "description": "Read local openrouter-host account quotas.",
+  "defaultEnabled": true,
+  "requires": [],
+  "builtinOrder": 34
+}

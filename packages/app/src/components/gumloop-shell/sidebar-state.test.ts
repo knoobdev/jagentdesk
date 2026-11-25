@@ -71,7 +71,9 @@ describe("Gumloop sidebar model", () => {
     "argocd",
     "plugin/p/surface/s",
   ])("drills into /%s and keeps its owning host", (path) => {
-    expect(resolveSidebarDrillIn(`/h/host%20one/${path}`)).toMatchObject({
+    expect(
+      resolveSidebarDrillIn(`/h/host%20one/${path}`, [{ routeSegment: "docker", title: "Docker" }]),
+    ).toMatchObject({
       kind: "destination",
       serverId: "host one",
     });

@@ -2,11 +2,11 @@ import { mkdtemp, readFile, writeFile, chmod, rm } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { expect, it } from "vitest";
-import { DockerService } from "../../docker/docker-service.js";
-import { DockerStreams } from "../../docker/docker-streams.js";
-import { DaemonConfigStore } from "../../daemon-config-store.js";
+import { DockerService } from "../../../packages/server/src/server/plugins/builtin/host-test-api.js";
+import { DockerStreams } from "./streams.js";
+import { DaemonConfigStore } from "../../../packages/server/src/server/plugins/builtin/host-test-api.js";
 import { MutableDaemonConfigSchema } from "@jagentdesk/protocol/messages";
-import { BuiltinPluginState } from "./state.js";
+import { BuiltinPluginState } from "../../../packages/server/src/server/plugins/builtin/host-test-api.js";
 
 it("stops a real docker events child within five seconds and permits a fresh subscription", async () => {
   const home = await mkdtemp(path.join(os.tmpdir(), "jad-docker-lifecycle-"));

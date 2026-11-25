@@ -330,10 +330,12 @@ function CommitDiffPanel() {
   );
 }
 
-function useWorkingDiffPanelDescriptor(): PanelDescriptor {
+function useWorkingDiffPanelDescriptor(
+  target: Extract<WorkspaceTabTarget, { kind: "working_diff" }>,
+): PanelDescriptor {
   const { t } = useTranslation();
   return {
-    label: t("panels.diff.changesLabel"),
+    label: target.focusPath?.split("/").findLast(Boolean) ?? t("panels.diff.diffLabel"),
     subtitle: t("panels.diff.changesSubtitle"),
     tooltip: t("panels.diff.changesSubtitle"),
     titleState: "ready",

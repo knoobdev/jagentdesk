@@ -1,3 +1,4 @@
+import { useBuiltinClientContributions } from "../builtin/surfaces";
 import { useCallback, useMemo, useState, type ReactElement, type RefObject } from "react";
 import { View } from "react-native";
 import { withUnistyles } from "react-native-unistyles";
@@ -31,7 +32,8 @@ function SourceIcon({
 const ThemedSourceIcon = withUnistyles(SourceIcon);
 
 interface InstalledAttachmentSource {
-  plugin: InstalledPlugin;
+  plugin: Pick<InstalledPlugin, "id"> & Partial<Pick<InstalledPlugin, "queryClient">>;
+  search?: (client: DaemonClient, input: unknown) => Promise<unknown>;
   source: PluginAttachmentSourceContribution;
   key: string;
 }
@@ -83,9 +85,20 @@ export function usePluginAttachmentPicker(
   input: PluginAttachmentPickerInput,
 ): PluginAttachmentPickerBinding {
   const plugins = useInstalledPlugins();
-  const sources = useMemo(
-    () => installedAttachmentSources(plugins, input.serverId),
-    [input.serverId, plugins],
+  const builtins = useBuiltinClientContributions(input.serverId);
+  const sources = useMemo<InstalledAttachmentSource[]>(
+    () => [
+      ...installedAttachmentSources(plugins, input.serverId),
+      ...[...builtins].flatMap(([id, entry]) =>
+        entry.attachments.map(({ source, search }) => ({
+          plugin: { id },
+          source,
+          search,
+          key: `${id}/${source.id}`,
+        })),
+      ),
+    ],
+    [input.serverId, plugins, builtins],
   );
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -105,7 +118,10 @@ export function usePluginAttachmentPicker(
         const client = input.client;
         return searchPluginAttachments(
           active.source,
-          (method, rpcInput) => client.invokePluginRpc(active.plugin.id, method, rpcInput),
+          (method, rpcInput) =>
+            active.search
+              ? active.search(client, rpcInput)
+              : client.invokePluginRpc(active.plugin.id, method, rpcInput),
           trimmedQuery,
         );
       },

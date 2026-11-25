@@ -1,0 +1,9 @@
+{
+  "kind": "builtin",
+  "id": "argocd",
+  "name": "Argo CD",
+  "description": "Monitor and deploy Kubernetes applications.",
+  "defaultEnabled": true,
+  "requires": ["clusters"],
+  "builtinOrder": 9
+}

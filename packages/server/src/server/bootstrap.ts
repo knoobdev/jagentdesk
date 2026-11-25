@@ -1,3 +1,5 @@
+import { builtinServerRegistry } from "./plugins/builtin/loaded.js";
+import { createBuiltinCoreServices } from "./plugins/builtin/services.js";
 import {
   createFinishSubscriptions as createRemoteFinishSubscriptions,
   createJsonFinishSubscriptionStore as createRemoteFinishStore,
@@ -750,6 +752,10 @@ export async function createJAgentDeskDaemon(
     settingsDirectory: path.join(config.jagentdeskHome, "plugin-settings"),
   });
 
+  const stopBuiltinServices = await builtinServerRegistry.start(
+    pluginRuntime.builtin,
+    createBuiltinCoreServices(config.jagentdeskHome, logger, daemonConfigStore),
+  );
   const serverId = getOrCreateServerId(config.jagentdeskHome, { logger });
   const daemonKeyPair = await loadOrCreateDaemonKeyPair(config.jagentdeskHome, logger);
   const pairedDevices: PairedDeviceStore = createPairedDeviceStore({
@@ -2704,6 +2710,7 @@ export async function createJAgentDeskDaemon(
     await botsService.dispose();
     jiraService.dispose();
     void figmaService.dispose();
+    await stopBuiltinServices();
     await speechService.stop();
     await scheduleService.stop().catch(() => undefined);
     await autorunService?.stop().catch(() => undefined);

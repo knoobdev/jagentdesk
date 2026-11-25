@@ -1,1 +1,12 @@
-{ "id": "zai-usage-source", "requirements": { "jagentdesk": ">=0.9.59" } }
+{
+  "id": "zai-usage-source",
+  "requirements": {
+    "jagentdesk": ">=0.9.59"
+  },
+  "kind": "builtin",
+  "name": "Z.ai usage",
+  "description": "Read local zai account quotas.",
+  "defaultEnabled": true,
+  "requires": [],
+  "builtinOrder": 35
+}

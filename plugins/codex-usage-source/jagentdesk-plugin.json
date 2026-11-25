@@ -1,1 +1,12 @@
-{ "id": "codex-usage-source", "requirements": { "jagentdesk": ">=0.9.59" } }
+{
+  "id": "codex-usage-source",
+  "requirements": {
+    "jagentdesk": ">=0.9.59"
+  },
+  "kind": "builtin",
+  "name": "Codex usage",
+  "description": "Read local codex account quotas.",
+  "defaultEnabled": true,
+  "requires": [],
+  "builtinOrder": 27
+}

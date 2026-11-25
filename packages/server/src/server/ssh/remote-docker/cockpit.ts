@@ -263,6 +263,7 @@ interface EventsSubscription {
 
 /** Realtime cockpit streams (`docker events/logs -f/stats`) against a forwarded socket. */
 export class RemoteDockerStreams extends DockerStreams {
+  private generation = 0;
   private readonly remoteEvents = new Map<string, EventsSubscription>();
   private readonly remoteLogs = new Map<string, ChildProcess>();
   private readonly remoteStats = new Map<string, ChildProcess>();
@@ -282,7 +283,11 @@ export class RemoteDockerStreams extends DockerStreams {
     subscriptionId: string,
     emit: (snapshot: DockerSnapshot) => void,
   ): Promise<void> {
-    emit(await this.remote.list());
+    this.unsubscribeSnapshot(subscriptionId);
+    const generation = this.generation;
+    const snapshot = await this.remote.list();
+    if (generation !== this.generation) return;
+    emit(snapshot);
     const child = this.spawnDocker(["events", "--format", "{{json .}}"]);
     const subscription: EventsSubscription = { child, debounce: null };
     this.remoteEvents.set(subscriptionId, subscription);
@@ -358,6 +363,7 @@ export class RemoteDockerStreams extends DockerStreams {
   }
 
   override disposeAll(): void {
+    this.generation++;
     for (const id of Array.from(this.remoteEvents.keys())) this.unsubscribeSnapshot(id);
     for (const id of Array.from(this.remoteLogs.keys())) this.unsubscribeLogs(id);
     for (const id of Array.from(this.remoteStats.keys())) this.unsubscribeStats(id);

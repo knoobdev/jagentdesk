@@ -1,5 +1,7 @@
 # Plugins: JAgentDesk vs upstream
 
+For statically linked feature plugins and migration, see [Built-in feature plugins](builtin-plugins.md).
+
 JAgentDesk's plugin system is a selective port of the upstream split plugin API (separate
 client and server entries, `PluginClientContext` / `PluginServerContext`, SDK subpaths
 `@jagentdesk/plugin`, `/client`, `/client/ui`, `/client/react-native`, `/client/host`,

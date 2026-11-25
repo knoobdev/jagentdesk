@@ -1,0 +1,9 @@
+{
+  "kind": "builtin",
+  "id": "databases",
+  "name": "Databases",
+  "description": "Browse databases and run SQL queries.",
+  "defaultEnabled": true,
+  "requires": [],
+  "builtinOrder": 3
+}

@@ -1,0 +1,9 @@
+{
+  "kind": "builtin",
+  "id": "workbench",
+  "name": "Workbench",
+  "description": "Capture and inspect device network traffic.",
+  "defaultEnabled": true,
+  "requires": ["devices"],
+  "builtinOrder": 11
+}

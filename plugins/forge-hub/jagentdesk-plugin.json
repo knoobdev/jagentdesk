@@ -1,0 +1,9 @@
+{
+  "kind": "builtin",
+  "id": "forge-hub",
+  "name": "Forge Hub",
+  "description": "Browse repositories, reviews, issues and pipelines.",
+  "defaultEnabled": true,
+  "requires": [],
+  "builtinOrder": 12
+}

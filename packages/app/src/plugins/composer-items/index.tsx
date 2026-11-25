@@ -1,3 +1,4 @@
+import { BuiltinClientItems, useBuiltinClientContributions } from "../builtin/surfaces";
 import { PluginComposerPills, useHasPluginComposerPills } from "@/plugins/buttons/view";
 import { createContext, useContext, useMemo, useSyncExternalStore } from "react";
 import { type PluginHostProps } from "@jagentdesk/plugin/client";
@@ -36,6 +37,7 @@ function useServerPlugins(serverId: string | null): InstalledPlugin[] {
 /** How many composer items the host's plugins registered, whether or not each renders anything. */
 export function usePluginComposerItemCount(serverId: string | null): number {
   const plugins = useServerPlugins(serverId);
+  const builtins = useBuiltinClientContributions(serverId ?? "");
   const target = useContext(LegacyTarget);
   const legacy = useHasPluginComposerPills(
     target?.serverId ?? "",
@@ -43,7 +45,9 @@ export function usePluginComposerItemCount(serverId: string | null): number {
     target?.agentId ?? "",
   );
   return (
-    plugins.reduce((count, plugin) => count + plugin.composerItems.length, 0) + (legacy ? 1 : 0)
+    plugins.reduce((count, plugin) => count + plugin.composerItems.length, 0) +
+    [...builtins.values()].reduce((count, entry) => count + entry.composer.size, 0) +
+    (legacy ? 1 : 0)
   );
 }
 
@@ -63,6 +67,7 @@ export function PluginComposerItems({
   if (serverId === null) return null;
   return (
     <ComposerControlSurfaceProvider value={surface}>
+      <BuiltinClientItems serverId={serverId} kind="composer" />
       {target ? <PluginComposerPills {...target} compact={surface === "sheet"} /> : null}
       {plugins.map((plugin) => (
         <ThemedPluginComposerItems key={plugin.id} plugin={plugin} uniProps={pluginThemeMapping} />

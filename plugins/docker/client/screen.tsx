@@ -1,7 +1,11 @@
-import { useDockerNavigation, type DockerTab } from "@/docker/sidebar";
-import { PageHeader } from "@/components/headers/page-header";
-import { gumloopListStyles, gumloopTabStyles } from "@/components/gumloop-shell/list-styles";
-import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { isWeb } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useDockerNavigation, type DockerTab } from "./sidebar";
+import { PageHeader } from "../../../packages/app/src/plugins/builtin/host-api";
+import {
+  gumloopListStyles,
+  gumloopTabStyles,
+} from "../../../packages/app/src/plugins/builtin/host-api";
+import { useIsGumloopTheme } from "../../../packages/app/src/plugins/builtin/host-api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Dimensions,
@@ -44,18 +48,24 @@ import {
   X,
 } from "lucide-react-native";
 import type { ComponentType } from "react";
-import * as Clipboard from "expo-clipboard";
+import { Clipboard } from "../../../packages/app/src/plugins/builtin/host-api";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useWorkspaceDirectory, useWorkspaceKeys } from "@/stores/session-store-hooks";
-import { getDesktopHost } from "@/desktop/host";
-import { useIsCompactFormFactor } from "@/constants/layout";
-import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
-import { Skeleton, useSkeletonPulse } from "@/components/ui/skeleton";
-import { TerminalPane } from "@/components/terminal-pane";
+import { useSafeAreaInsets } from "../../../packages/app/src/plugins/builtin/host-api";
+import {
+  useWorkspaceDirectory,
+  useWorkspaceKeys,
+} from "../../../packages/app/src/plugins/builtin/host-api";
+import { getDesktopHost } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useIsCompactFormFactor } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useHostRuntimeClient, useHosts } from "../../../packages/app/src/plugins/builtin/host-api";
+import { Skeleton, useSkeletonPulse } from "../../../packages/app/src/plugins/builtin/host-api";
+import { TerminalPane } from "../../../packages/app/src/plugins/builtin/host-api";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
-import { withSshDocker, type SshDockerTarget } from "@/ssh/ui/ssh-docker-client";
-import type { Theme } from "@/styles/theme";
+import {
+  withSshDocker,
+  type SshDockerTarget,
+} from "../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
 import type {
   DockerAction,
   DockerContainer,
@@ -92,7 +102,7 @@ async function pickHostPath(mode: "dir" | "file"): Promise<string | null> {
 // Cmd/Ctrl+F toggles an in-panel find bar; Escape closes it. Web-only (Electron renderer).
 function useCmdF(onToggle: () => void, onClose: () => void) {
   useEffect(() => {
-    if (typeof document === "undefined") return;
+    if (!isWeb) return;
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
         e.preventDefault();
@@ -1286,7 +1296,7 @@ function FileRow({
   );
   // Native right-click (web) opens the same menu at the cursor.
   useEffect(() => {
-    if (typeof document === "undefined") return;
+    if (!isWeb) return;
     const node = rowRef.current as unknown as HTMLElement | null;
     if (!node?.addEventListener) return;
     const handler = (ev: MouseEvent) => {

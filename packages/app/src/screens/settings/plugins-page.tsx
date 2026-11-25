@@ -1,3 +1,4 @@
+import { BuiltinClientItems } from "@/plugins/builtin/surfaces";
 import { BuiltinPluginsSection } from "@/plugins/builtin/settings-section";
 import { formatPluginInstallation } from "@jagentdesk/protocol/plugin-source-reference";
 import { PluginSettingsButton } from "@/plugins/settings";
@@ -460,6 +461,7 @@ export function HostPluginsPage({ serverId }: { serverId: string }) {
   return (
     <View>
       <BuiltinPluginsSection serverId={serverId} />
+      <BuiltinClientItems serverId={serverId} kind="settings" />
       <SettingsSection title={t("builtinPlugins.installed")}>
         <View style={settingsStyles.card}>
           <View style={settingsStyles.row}>

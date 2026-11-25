@@ -1,1 +1,12 @@
-{ "id": "kimi-usage-source", "requirements": { "jagentdesk": ">=0.9.59" } }
+{
+  "id": "kimi-usage-source",
+  "requirements": {
+    "jagentdesk": ">=0.9.59"
+  },
+  "kind": "builtin",
+  "name": "Kimi usage",
+  "description": "Read local kimi account quotas.",
+  "defaultEnabled": true,
+  "requires": [],
+  "builtinOrder": 31
+}

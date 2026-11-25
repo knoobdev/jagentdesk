@@ -1,0 +1,13 @@
+{
+  "kind": "builtin",
+  "id": "docker",
+  "name": "Docker",
+  "description": "Manage containers, images and Compose projects.",
+  "defaultEnabled": true,
+  "requires": [],
+  "builtinOrder": 1,
+  "builtinEntrypoints": {
+    "server": "server/index.ts",
+    "client": "client/index.tsx"
+  }
+}

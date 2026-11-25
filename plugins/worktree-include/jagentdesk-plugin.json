@@ -1,1 +1,12 @@
-{ "id": "worktree-include", "requirements": { "jagentdesk": ">=0.9.59" } }
+{
+  "id": "worktree-include",
+  "requirements": {
+    "jagentdesk": ">=0.9.59"
+  },
+  "kind": "builtin",
+  "name": "Worktree include",
+  "description": "Copy ignored local files listed in .worktreeinclude into new worktrees.",
+  "defaultEnabled": true,
+  "requires": [],
+  "builtinOrder": 20
+}

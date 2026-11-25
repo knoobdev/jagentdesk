@@ -1,0 +1,9 @@
+{
+  "kind": "builtin",
+  "id": "ssh-servers",
+  "name": "SSH servers",
+  "description": "Connect to servers, transfer files and forward ports.",
+  "defaultEnabled": true,
+  "requires": [],
+  "builtinOrder": 4
+}

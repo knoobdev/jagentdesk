@@ -71,7 +71,7 @@
     "format:files": "oxfmt",
     "format:check": "oxfmt --check .",
     "format:check:files": "oxfmt --check",
-    "lint": "oxlint",
+    "lint": "node scripts/generate-builtin-plugins.mjs --check && node scripts/lint-builtin-boundaries.mjs && oxlint",
     "lint:fix": "oxlint --fix",
     "knip": "knip",
     "acp:version-drift": "node scripts/check-acp-catalog-version-drift.mjs",
@@ -91,7 +91,8 @@
     "build:desktop": "npm run build:app-deps:clean && cd packages/app && cross-env JAGENTDESK_WEB_PLATFORM=electron npx expo export --platform web && cd ../.. && npm run build --workspace=@jagentdesk/desktop --",
     "db:query": "npm run db:query --workspace=@jagentdesk/server --",
     "cli": "./scripts/dev-home.sh npx tsx packages/cli/src/index.js",
-    "version:sync-internal": "node scripts/sync-workspace-versions.mjs"
+    "version:sync-internal": "node scripts/sync-workspace-versions.mjs",
+    "generate:builtin-plugins": "node scripts/generate-builtin-plugins.mjs"
   },
   "devDependencies": {
     "@types/ws": "^8.5.14",

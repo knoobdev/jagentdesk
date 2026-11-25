@@ -43,6 +43,7 @@ At the start of non-trivial work, list `docs/` and skim anything relevant to the
 | [docs/forge-providers.md](docs/forge-providers.md)                   | Adding a git forge: registry/manifest, drop-in checklist, self-host/GHES, the two facts tiers                                  |
 | [docs/custom-providers.md](docs/custom-providers.md)                 | Custom provider config: Z.AI, Alibaba/Qwen, ACP agents, profiles, custom binaries                                              |
 | [docs/plugins.md](docs/plugins.md)                                   | Local plugin manifest, directory source config, RPCs, native surfaces, and attachment sources                                  |
+| [docs/builtin-plugins.md](docs/builtin-plugins.md)                   | Static feature host APIs, manifest generation, boundaries, and the migration checklist                                         |
 | [docs/relay.md](docs/relay.md)                                       | Encrypted relay alongside Tailscale, configuration, identity storage, and local verification                                   |
 | [docs/service-proxy.md](docs/service-proxy.md)                       | Service proxy: exposing workspace scripts at public URLs, DNS setup, reverse proxy config                                      |
 | [docs/development.md](docs/development.md)                           | Dev server, build sync gotchas, CLI reference, agent state, Playwright MCP                                                     |

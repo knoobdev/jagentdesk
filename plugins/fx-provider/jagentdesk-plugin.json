@@ -2,5 +2,12 @@
   "id": "fx-provider",
   "requirements": {
     "jagentdesk": ">=0.9.59"
-  }
+  },
+  "kind": "builtin",
+  "name": "fx",
+  "description": "Run fx through its local fx CLI.",
+  "defaultEnabled": false,
+  "requires": [],
+  "command": "fx",
+  "builtinOrder": 24
 }

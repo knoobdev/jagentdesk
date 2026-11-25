@@ -153,8 +153,8 @@ export class BuiltinPluginState {
   private async reconcile(): Promise<void> {
     for (const manifest of this.manifests.toReversed()) {
       if (this.running.has(manifest.id) && !this.isEnabled(manifest.id)) {
-        await this.lifecycles.get(manifest.id)?.stop();
         this.running.delete(manifest.id);
+        await this.lifecycles.get(manifest.id)?.stop();
       }
     }
     for (const manifest of this.manifests) {

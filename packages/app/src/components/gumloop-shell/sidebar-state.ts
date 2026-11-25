@@ -45,7 +45,6 @@ export type SidebarDrillIn =
 
 const DESTINATIONS: Readonly<Record<string, string>> = {
   bots: "Bots",
-  docker: "Docker",
   databases: "Data",
   database: "Data",
   servers: "Servers",
@@ -57,7 +56,10 @@ const DESTINATIONS: Readonly<Record<string, string>> = {
   plugin: "Plugins",
 };
 
-export function resolveSidebarDrillIn(pathname: string): SidebarDrillIn {
+export function resolveSidebarDrillIn(
+  pathname: string,
+  destinations: readonly { routeSegment: string; title: string }[] = [],
+): SidebarDrillIn {
   if (pathname.startsWith("/settings")) return { kind: "settings", title: "Settings" };
   const match = /^\/h\/([^/]+)\/([^/]+)(?:\/([^/?]+))?/.exec(pathname);
   if (!match) return null;
@@ -66,6 +68,8 @@ export function resolveSidebarDrillIn(pathname: string): SidebarDrillIn {
   if (section === "workspace" && match[3]) {
     return { kind: "workspace", serverId, workspaceId: decodeURIComponent(match[3]) };
   }
-  const title = DESTINATIONS[section];
+  const title =
+    destinations.find((destination) => destination.routeSegment === section)?.title ??
+    DESTINATIONS[section];
   return title ? { kind: "destination", serverId, section, title } : null;
 }

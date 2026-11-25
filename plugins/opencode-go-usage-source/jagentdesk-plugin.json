@@ -1,1 +1,12 @@
-{ "id": "opencode-go-usage-source", "requirements": { "jagentdesk": ">=0.9.59" } }
+{
+  "id": "opencode-go-usage-source",
+  "requirements": {
+    "jagentdesk": ">=0.9.59"
+  },
+  "kind": "builtin",
+  "name": "OpenCode Go usage",
+  "description": "Read local opencode-go account quotas.",
+  "defaultEnabled": true,
+  "requires": [],
+  "builtinOrder": 33
+}

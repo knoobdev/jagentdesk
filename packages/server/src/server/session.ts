@@ -1,3 +1,6 @@
+import { createBuiltinCoreServices } from "./plugins/builtin/services.js";
+import { builtinServerRegistry } from "./plugins/builtin/loaded.js";
+import type { BuiltinServerSession } from "./plugins/builtin/host.js";
 import {
   formatSystemNotificationPrompt,
   type PromptDispatchResult,
@@ -248,15 +251,7 @@ import { type JiraService } from "./jira/service.js";
 import { SshService } from "./ssh/ssh-service.js";
 import { SideloadSession } from "./session/sideload/sideload-session.js";
 import { type SideloadService } from "./sideload/sideload-service.js";
-import { DockerService } from "./docker/docker-service.js";
-import { DockerStreams } from "./docker/docker-streams.js";
-import { RemoteDockerError, type RemoteDockerHosts } from "./ssh/remote-docker/hosts.js";
 import { localPortOfTarget } from "./ssh/remote-db/service.js";
-import {
-  disposeRemoteDocker,
-  routeDockerMessage,
-  type RoutedDocker,
-} from "./ssh/remote-docker/route.js";
 import { SimulatorService } from "./simulator/simulator-service.js";
 import { SimulatorStreams, fleetSnapshot } from "./simulator/simulator-streams.js";
 import { type PhysicalDeviceHub } from "./devices/hub.js";
@@ -1292,11 +1287,7 @@ export class Session {
 
   private databaseRegistry!: DatabaseRegistry;
 
-  private readonly dockerService = new DockerService();
-
-  private readonly dockerStreams = new DockerStreams(this.dockerService);
-
-  private readonly remoteDockerSubscriptions = new Map<string, RoutedDocker>();
+  private builtinSession!: BuiltinServerSession;
 
   private readonly simulatorService = new SimulatorService();
 
@@ -1844,9 +1835,22 @@ export class Session {
     this.subscribeToRegistryMutations();
 
     this.pluginRuntime = pluginRuntime;
+    this.builtinSession = this.createBuiltinSession(pluginRuntime);
     this.unsubscribePluginChanges = this.subscribeToPluginChanges(pluginRuntime);
 
     this.sessionLogger.trace({}, "agent.session.lifecycle.created");
+  }
+
+  private createBuiltinSession(
+    pluginRuntime: SessionOptions["pluginRuntime"],
+  ): BuiltinServerSession {
+    return builtinServerRegistry.session(pluginRuntime?.builtin, {
+      ...createBuiltinCoreServices(this.jagentdeskHome, this.sessionLogger, this.daemonConfigStore),
+      terminals: this.terminalManager,
+      remoteDocker: () => this.sshService.modules?.docker,
+      push: (message) => this.emit(message),
+      pushBinary: (frame) => this.emitBinary(frame),
+    });
   }
 
   private initializeBotsSession(service: BotsService | null | undefined): void {
@@ -2968,14 +2972,7 @@ export class Session {
         this.trackGuestActivity(msg);
       }
       try {
-        const plugin = builtinPluginForRpc(msg.type);
-        if (
-          plugin &&
-          this.pluginRuntime?.builtin &&
-          !this.pluginRuntime.builtin.isEnabled(plugin)
-        ) {
-          throw new BuiltinPluginError("plugin_disabled", `Plugin turned off: ${plugin}`);
-        }
+        this.checkLegacyBuiltinRpc(msg.type);
         await this.dispatchInboundMessage(msg, source);
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
@@ -3011,6 +3008,13 @@ export class Session {
       }
     } finally {
       this.inflightRequests--;
+    }
+  }
+
+  private checkLegacyBuiltinRpc(type: string): void {
+    const plugin = builtinServerRegistry.owns(type) ? null : builtinPluginForRpc(type);
+    if (plugin && this.pluginRuntime?.builtin && !this.pluginRuntime.builtin.isEnabled(plugin)) {
+      throw new BuiltinPluginError("plugin_disabled", `Plugin turned off: ${plugin}`);
     }
   }
 
@@ -3233,7 +3237,7 @@ export class Session {
       () => this.botsSession?.dispatch(msg),
       () => this.dispatchJiraMessage(msg),
       () => this.dispatchFigmaMessage(msg),
-      () => this.dispatchDockerMessage(msg),
+      () => this.builtinSession.dispatch(msg),
       () => this.dispatchSimulatorMessage(msg),
       () => this.dispatchProxyMessage(msg),
       () => this.dispatchMigrationMessage(msg),
@@ -3570,12 +3574,6 @@ export class Session {
   private stopDisabledBuiltinStreams(): void {
     const builtin = this.pluginRuntime?.builtin;
     if (!builtin) return;
-    if (!builtin.isEnabled("docker")) {
-      this.dockerStreams.disposeAll();
-      disposeRemoteDocker({ service: this.dockerService, streams: this.dockerStreams });
-      for (const routed of this.remoteDockerSubscriptions.values()) routed.release();
-      this.remoteDockerSubscriptions.clear();
-    }
     if (!builtin.isEnabled("devices")) {
       this.simulatorStreams.disposeAll();
       this.physicalDeviceSession?.dispose();
@@ -4496,63 +4494,6 @@ export class Session {
     }
   }
 
-  // docker/* with `serverId` drive the same cockpit against that SSH server's forwarded socket
-  // (spec 25.10, ssh/remote-docker/route.ts). One-shot requests give the socket back when done;
-  // a subscription holds it until its unsubscribe, which is routed by subscription id.
-  private dispatchDockerMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    if (!msg.type.startsWith("docker/")) return undefined;
-    const local = { service: this.dockerService, streams: this.dockerStreams };
-    const subscriptionId = "subscriptionId" in msg ? msg.subscriptionId : undefined;
-    if (subscriptionId && msg.type.endsWith("/unsubscribe")) {
-      const held = this.remoteDockerSubscriptions.get(subscriptionId);
-      if (held) {
-        this.remoteDockerSubscriptions.delete(subscriptionId);
-        const done = this.dispatchDockerMessageWith(msg, held.service, held.streams);
-        held.release();
-        return done;
-      }
-    }
-    const serverId = "serverId" in msg ? msg.serverId : undefined;
-    const hosts = this.sshService.modules?.docker;
-    if (!serverId || !hosts)
-      return this.dispatchDockerMessageWith(msg, local.service, local.streams);
-    return this.dispatchRemoteDockerMessage(msg, serverId, local, hosts, subscriptionId);
-  }
-
-  private async dispatchRemoteDockerMessage(
-    msg: SessionInboundMessage,
-    serverId: string,
-    local: { service: DockerService; streams: DockerStreams },
-    hosts: RemoteDockerHosts,
-    subscriptionId: string | undefined,
-  ): Promise<void> {
-    let routed: RoutedDocker;
-    try {
-      routed = await routeDockerMessage({ serverId }, local, hosts);
-    } catch (error) {
-      this.emit({
-        type: "rpc_error",
-        payload: {
-          requestId: "requestId" in msg && msg.requestId ? msg.requestId : "",
-          requestType: msg.type,
-          error: error instanceof Error ? error.message : String(error),
-          code: error instanceof RemoteDockerError ? error.code : "ssh_docker_unavailable",
-        },
-      });
-      return;
-    }
-    if (subscriptionId && msg.type.endsWith("/subscribe")) {
-      this.remoteDockerSubscriptions.set(subscriptionId, routed);
-      await this.dispatchDockerMessageWith(msg, routed.service, routed.streams);
-      return;
-    }
-    try {
-      await this.dispatchDockerMessageWith(msg, routed.service, routed.streams);
-    } finally {
-      routed.release();
-    }
-  }
-
   // A cluster imported through an SSH server needs its forward + kubeconfig before KubeClient
   // connects (ssh/remote-k8s); failures surface through the normal connect response.
   private async activateRemoteCluster(clusterId: string): Promise<void> {
@@ -4574,286 +4515,6 @@ export class Session {
     await tunnels.reopenForLocalPort(port).catch((error: unknown) => {
       this.sessionLogger.warn({ err: error, databaseId }, "remote database tunnel failed");
     });
-  }
-
-  private dispatchDockerMessageWith(
-    msg: SessionInboundMessage,
-    dockerService: DockerService,
-    dockerStreams: DockerStreams,
-  ): Promise<void> | undefined {
-    const fail = (error: unknown): string =>
-      error instanceof Error ? error.message : String(error);
-    if (msg.type === "docker/list") {
-      const { requestId } = msg;
-      return dockerService
-        .list()
-        .then((result) => {
-          this.emit({
-            type: "docker/list/response",
-            payload: { requestId, error: null, ...result },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "docker/list/response",
-            payload: {
-              requestId,
-              error: fail(error),
-              available: false,
-              containers: [],
-              images: [],
-            },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "docker/logs") {
-      const { requestId } = msg;
-      return dockerService
-        .logs(msg.container, msg.tail)
-        .then((logs) => {
-          this.emit({ type: "docker/logs/response", payload: { requestId, error: null, logs } });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "docker/logs/response",
-            payload: { requestId, error: fail(error), logs: "" },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "docker/inspect") {
-      const { requestId } = msg;
-      return dockerService
-        .inspect(msg.container)
-        .then((inspect) => {
-          this.emit({
-            type: "docker/inspect/response",
-            payload: { requestId, error: null, inspect },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "docker/inspect/response",
-            payload: { requestId, error: fail(error), inspect: "" },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "docker/action") {
-      const { requestId } = msg;
-      return dockerService
-        .action(msg.container, msg.action)
-        .then(() => {
-          this.emit({ type: "docker/action/response", payload: { requestId, error: null } });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "docker/action/response",
-            payload: { requestId, error: fail(error) },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "docker/exec") {
-      const { requestId } = msg;
-      return dockerService
-        .exec(msg.container, msg.command)
-        .then((output) => {
-          this.emit({ type: "docker/exec/response", payload: { requestId, error: null, output } });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "docker/exec/response",
-            payload: { requestId, error: fail(error), output: "" },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "docker/image/action") {
-      const { requestId } = msg;
-      return dockerService
-        .imageAction(msg.image, msg.action)
-        .then(() => {
-          this.emit({ type: "docker/image/action/response", payload: { requestId, error: null } });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "docker/image/action/response",
-            payload: { requestId, error: fail(error) },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "docker/volume/action") {
-      const { requestId } = msg;
-      return dockerService
-        .volumeAction(msg.name, msg.action)
-        .then(() => {
-          this.emit({ type: "docker/volume/action/response", payload: { requestId, error: null } });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "docker/volume/action/response",
-            payload: { requestId, error: fail(error) },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "docker/fs/list") {
-      const { requestId } = msg;
-      return dockerService
-        .fsList(msg.container, msg.path)
-        .then((entries) => {
-          this.emit({
-            type: "docker/fs/list/response",
-            payload: { requestId, error: null, path: msg.path, entries },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "docker/fs/list/response",
-            payload: { requestId, error: fail(error), path: msg.path, entries: [] },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "docker/cp") {
-      const { requestId } = msg;
-      return dockerService
-        .cp(msg.container, msg.direction, msg.containerPath, msg.hostPath)
-        .then(() => {
-          this.emit({ type: "docker/cp/response", payload: { requestId, error: null } });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "docker/cp/response",
-            payload: { requestId, error: fail(error) },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "docker/fs/read") {
-      const { requestId } = msg;
-      return dockerService
-        .fsRead(msg.container, msg.path)
-        .then(({ content, truncated }) => {
-          this.emit({
-            type: "docker/fs/read/response",
-            payload: { requestId, error: null, content, truncated },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "docker/fs/read/response",
-            payload: { requestId, error: fail(error), content: "", truncated: false },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "docker/fs/write") {
-      const { requestId } = msg;
-      return dockerService
-        .fsWrite(msg.container, msg.path, msg.content)
-        .then(() => {
-          this.emit({ type: "docker/fs/write/response", payload: { requestId, error: null } });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "docker/fs/write/response",
-            payload: { requestId, error: fail(error) },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "docker/fs/op") {
-      const { requestId } = msg;
-      return dockerService
-        .fsOp(msg.container, msg.op, msg.path, msg.newPath)
-        .then(() => {
-          this.emit({ type: "docker/fs/op/response", payload: { requestId, error: null } });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "docker/fs/op/response",
-            payload: { requestId, error: fail(error) },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "docker/subscribe") {
-      const { requestId, subscriptionId } = msg;
-      this.emit({
-        type: "docker/subscribe/response",
-        payload: { requestId, error: null, subscriptionId },
-      });
-      void dockerStreams.subscribeSnapshot(subscriptionId, (snapshot) => {
-        this.emit({ type: "docker/snapshot", payload: { subscriptionId, ...snapshot } });
-      });
-      return undefined;
-    }
-    if (msg.type === "docker/unsubscribe") {
-      const { requestId, subscriptionId } = msg;
-      dockerStreams.unsubscribeSnapshot(subscriptionId);
-      this.emit({
-        type: "docker/unsubscribe/response",
-        payload: { requestId, error: null, subscriptionId },
-      });
-      return undefined;
-    }
-    if (msg.type === "docker/logs/subscribe") {
-      const { requestId, subscriptionId } = msg;
-      this.emit({
-        type: "docker/logs/subscribe/response",
-        payload: { requestId, error: null, subscriptionId },
-      });
-      dockerStreams.subscribeLogs(subscriptionId, msg.container, msg.tail ?? 500, (chunk) => {
-        this.emit({ type: "docker/log-chunk", payload: { subscriptionId, chunk } });
-      });
-      return undefined;
-    }
-    if (msg.type === "docker/logs/unsubscribe") {
-      const { requestId, subscriptionId } = msg;
-      dockerStreams.unsubscribeLogs(subscriptionId);
-      this.emit({
-        type: "docker/logs/unsubscribe/response",
-        payload: { requestId, error: null, subscriptionId },
-      });
-      return undefined;
-    }
-    if (msg.type === "docker/stats/subscribe") {
-      const { requestId, subscriptionId } = msg;
-      this.emit({
-        type: "docker/stats/subscribe/response",
-        payload: { requestId, error: null, subscriptionId },
-      });
-      dockerStreams.subscribeStats(subscriptionId, msg.container, (stats) => {
-        this.emit({ type: "docker/stats-data", payload: { subscriptionId, stats } });
-      });
-      return undefined;
-    }
-    if (msg.type === "docker/stats/unsubscribe") {
-      const { requestId, subscriptionId } = msg;
-      dockerStreams.unsubscribeStats(subscriptionId);
-      this.emit({
-        type: "docker/stats/unsubscribe/response",
-        payload: { requestId, error: null, subscriptionId },
-      });
-      return undefined;
-    }
-    return undefined;
   }
 
   // The fleet itself: listing it, what the host can run, and adding devices to it.
@@ -11385,10 +11046,7 @@ export class Session {
     this.botsSession?.dispose();
     this.jiraSession?.dispose();
     this.figmaSession?.dispose();
-    this.dockerStreams.disposeAll();
-    disposeRemoteDocker({ service: this.dockerService, streams: this.dockerStreams });
-    for (const routed of this.remoteDockerSubscriptions.values()) routed.release();
-    this.remoteDockerSubscriptions.clear();
+    await this.builtinSession.dispose();
     this.simulatorStreams.disposeAll();
     this.physicalDeviceSession?.dispose();
     for (const id of this.proxySubscriptionIds) this.proxyService.unsubscribe(id);

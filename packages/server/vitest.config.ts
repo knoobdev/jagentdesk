@@ -1,5 +1,5 @@
 import path from "node:path";
-import { defineConfig } from "vitest/config";
+import { defineConfig, configDefaults } from "vitest/config";
 
 export default defineConfig({
   resolve: {
@@ -15,6 +15,7 @@ export default defineConfig({
     testTimeout: 30000,
     hookTimeout: 60000,
     globals: true,
+    include: [...configDefaults.include, "../../plugins/*/server/**/*.test.ts"],
     environment: "node",
     setupFiles: [path.resolve(__dirname, "./src/test-utils/vitest-setup.ts")],
     pool: "forks",

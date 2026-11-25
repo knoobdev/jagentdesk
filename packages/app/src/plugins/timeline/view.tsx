@@ -1,3 +1,5 @@
+import { builtinClientRegistry } from "../builtin/loaded";
+import { useBuiltinClientContributions } from "../builtin/surfaces";
 import type { PluginTimelineItemProps } from "@jagentdesk/plugin/client";
 import type { PluginTheme } from "@jagentdesk/plugin";
 import React, { type ComponentType, useMemo } from "react";
@@ -107,6 +109,21 @@ export function PluginTimelineItemView(props: {
   item: PluginTimelineStreamItem;
   serverId: string;
 }) {
+  const entries = useBuiltinClientContributions(props.serverId);
+  const item = useMemo(
+    () => ({
+      type: "plugin" as const,
+      kind: props.item.itemKind,
+      version: props.item.version,
+      data: props.item.data,
+    }),
+    [props.item],
+  );
+  const Renderer = [...entries]
+    .find(([id]) => id === props.item.pluginId)?.[1]
+    .timeline.get(props.item.itemKind);
+  if (Renderer) return <Renderer serverId={props.serverId} item={item} />;
+  if (builtinClientRegistry.hasPlugin(props.item.pluginId)) return null;
   return <ThemedPluginTimelineItemBody {...props} uniProps={pluginThemeMapping} />;
 }
 
