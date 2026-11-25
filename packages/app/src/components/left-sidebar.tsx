@@ -10,7 +10,6 @@ import { router, usePathname, type Href } from "expo-router";
 import {
   Bot,
   BarChart3,
-  Database,
   GitPullRequest,
   Sparkles,
   CalendarClock,
@@ -108,7 +107,6 @@ import { JiraSidebarEntry } from "@/jira/sidebar-entry";
 import { SidebarJiraNav } from "@/jira/sidebar-jira-nav";
 import { FigmaSidebarEntry } from "@/figma/sidebar-entry";
 import { SidebarFigmaNav } from "@/figma/sidebar-figma-nav";
-import { SidebarDatabaseNav } from "./sidebar-database-nav";
 import { SidebarArgoCdNav } from "@/argocd/sidebar-argocd-nav";
 
 /** `/h/<serverId>/argocd[/<instanceId>[/app]]` → the host and the open instance. */
@@ -122,7 +120,7 @@ function parseArgoCdRoute(
 }
 
 // Classic sidebar positions of migrated built-in destinations; the rest follow Marketplace.
-const CLASSIC_SLOT_INFRA: readonly string[] = ["clusters"];
+const CLASSIC_SLOT_INFRA: readonly string[] = ["clusters", "databases"];
 const CLASSIC_PLACED_DESTINATIONS: readonly string[] = [...CLASSIC_SLOT_INFRA];
 
 /** Sections whose route owns the desktop left column instead of the workspace list. */
@@ -165,7 +163,6 @@ export { shouldShowAddProject, shouldShowSidebarFooter } from "./sidebar-add-pro
  */
 export function resolveSidebarNavBody(
   builtinPanelRoute: { serverId: string; segment: string } | null,
-  databaseRoute: { serverId: string; databaseId: string } | null,
   fallback: ReactNode,
   sectionRoute: SectionRoute | null = null,
 ): ReactNode {
@@ -208,16 +205,6 @@ export function resolveSidebarNavBody(
       <BuiltinLeftPanel serverId={builtinPanelRoute.serverId} segment={builtinPanelRoute.segment} />
     );
   }
-  if (databaseRoute) {
-    return (
-      <BuiltinPluginGate serverId={databaseRoute.serverId} id="databases">
-        <SidebarDatabaseNav
-          serverId={databaseRoute.serverId}
-          databaseId={databaseRoute.databaseId}
-        />
-      </BuiltinPluginGate>
-    );
-  }
   return fallback;
 }
 import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
@@ -242,7 +229,6 @@ interface SidebarSharedProps {
   handleOpenProject: () => void;
   handleHome: () => void;
   handleSettings: () => void;
-  handleDatabases: () => void;
   handleServers: () => void;
   handleArgoCd: () => void;
   handleSkills: () => void;
@@ -276,7 +262,6 @@ interface SidebarLabels {
   schedules: string;
   sharedSessions: string;
   bots: string;
-  databases: string;
   servers: string;
   argoCd: string;
   skills: string;
@@ -389,7 +374,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
   }, []);
 
   const {
-    databasesRoute,
     serversRoute,
     supportsSshServers,
     skillsRoute,
@@ -420,17 +404,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
   const handleWorkbenchDesktop = useCallback(() => {
     if (proxyRoute) router.push(proxyRoute as Href);
   }, [proxyRoute]);
-
-  const handleDatabasesDesktop = useCallback(() => {
-    if (databasesRoute) router.push(databasesRoute);
-  }, [databasesRoute]);
-
-  const handleDatabasesMobile = useCallback(() => {
-    if (databasesRoute) {
-      showMobileAgent();
-      router.push(databasesRoute);
-    }
-  }, [databasesRoute, showMobileAgent]);
 
   const handleServersDesktop = useCallback(() => {
     if (serversRoute) router.push(serversRoute as Href);
@@ -524,7 +497,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       schedules: t("sidebar.sections.schedules"),
       sharedSessions: "Shared sessions",
       bots: t("bots.title"),
-      databases: "Databases",
       servers: "Servers",
       argoCd: "Argo CD",
       skills: "Skills",
@@ -552,7 +524,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     shortcutIndexByWorkspaceKey,
     toggleProjectCollapsed,
     handleRefresh,
-    handleDatabases: handleDatabasesDesktop,
     handleServers: handleServersDesktop,
     handleArgoCd: handleArgoCdDesktop,
     handleSkills: handleSkillsDesktop,
@@ -574,7 +545,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       <RetainedPanelActivity active={active}>
         <MobileSidebar
           {...sharedProps}
-          handleDatabases={handleDatabasesMobile}
           handleServers={handleServersMobile}
           handleArgoCd={handleArgoCdMobile}
           handleSkills={handleSkillsMobile}
@@ -600,7 +570,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     <RetainedPanelActivity active={active}>
       <DesktopSidebar
         {...sharedProps}
-        handleDatabases={handleDatabasesDesktop}
         handleServers={handleServersDesktop}
         handleArgoCd={handleArgoCdDesktop}
         handleSkills={handleSkillsDesktop}
@@ -958,13 +927,6 @@ function MobileSidebar({
   const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
   const pathname = usePathname();
   const builtinPanelRoute = builtinClientRegistry.navigationPanelRoute(pathname);
-  const databaseRouteMatch = pathname.match(/\/h\/([^/]+)\/database\/([^/]+)/);
-  const databaseRoute = databaseRouteMatch
-    ? {
-        serverId: decodeURIComponent(databaseRouteMatch[1]),
-        databaseId: decodeURIComponent(databaseRouteMatch[2]),
-      }
-    : null;
   const { gesture: closeGesture, gestureRef: closeGestureRef } = useCloseAgentListGesture();
   const isGumloop = useIsGumloopTheme();
   const dragGestureHostPresented = useIsMobilePanelPresented("agent-list");
@@ -1053,7 +1015,7 @@ function MobileSidebar({
         {isGumloop ? (
           <GumloopSidebarHeader onBeforeNavigate={closeSidebar} reserveCloseButton />
         ) : null}
-        {builtinPanelRoute || databaseRoute ? null : mobileNavigation}
+        {builtinPanelRoute ? null : mobileNavigation}
         <WindowChromeSafeArea placement="inline" style={styles.mobileCloseButtonRow}>
           <Pressable
             style={styles.mobileCloseButton}
@@ -1076,7 +1038,6 @@ function MobileSidebar({
 
         {resolveSidebarNavBody(
           builtinPanelRoute,
-          databaseRoute,
           <SidebarToastRegion active={dragGestureHostPresented}>
             {mobileWorkspaceBody}
           </SidebarToastRegion>,
@@ -1114,7 +1075,6 @@ function DesktopSidebar({
   handleOpenProject,
   handleHome,
   handleSettings,
-  handleDatabases,
   handleServers,
   handleArgoCd,
   handleSkills,
@@ -1148,7 +1108,6 @@ function DesktopSidebar({
   const isSessionsActive = pathname.includes("/sessions");
   const isSchedulesActive = pathname.includes("/schedules");
   const isSharedSessionsActive = pathname.includes("/shared-sessions");
-  const isDatabasesActive = pathname.includes("/database");
   const isServersActive = pathname.includes("/servers");
   const isArgoCdActive = pathname.includes("/argocd");
   const isSkillsActive = pathname.includes("/skills");
@@ -1158,13 +1117,6 @@ function DesktopSidebar({
   const isSimulatorActive = pathname.includes("/simulator");
   const isWorkbenchActive = pathname.includes("/proxy");
   const builtinPanelRoute = builtinClientRegistry.navigationPanelRoute(pathname);
-  const databaseRouteMatch = pathname.match(/\/h\/([^/]+)\/database\/([^/]+)/);
-  const databaseRoute = databaseRouteMatch
-    ? {
-        serverId: decodeURIComponent(databaseRouteMatch[1]),
-        databaseId: decodeURIComponent(databaseRouteMatch[2]),
-      }
-    : null;
   const sectionRoute = resolveSectionRoute(pathname);
   const sidebarWidth = usePanelStore((state) => state.sidebarWidth);
   const setSidebarWidth = usePanelStore((state) => state.setSidebarWidth);
@@ -1265,7 +1217,7 @@ function DesktopSidebar({
           )}
           {isGumloop && !sectionRoute ? <GumloopSidebarHeader /> : null}
         </View>
-        {builtinPanelRoute || databaseRoute || sectionRoute || isGumloop ? null : (
+        {builtinPanelRoute || sectionRoute || isGumloop ? null : (
           <ScrollView
             dataSet={WINDOW_CONTENT_DATASET}
             style={styles.navScroll}
@@ -1317,16 +1269,6 @@ function DesktopSidebar({
             </NavTargetGate>
 
             <BuiltinSidebarDestinations only={CLASSIC_SLOT_INFRA} />
-            <NavTargetGate route={builtinTargets.databasesRoute}>
-              <SidebarHeaderRow
-                icon={Database}
-                label={labels.databases}
-                onPress={handleDatabases}
-                isActive={isDatabasesActive}
-                testID="sidebar-databases-nav"
-                variant="compact"
-              />
-            </NavTargetGate>
             {supportsSshServers ? (
               <SidebarHeaderRow
                 icon={Server}
@@ -1414,7 +1356,6 @@ function DesktopSidebar({
 
         {resolveSidebarNavBody(
           builtinPanelRoute,
-          databaseRoute,
           <SidebarToastRegion active={active}>{workspaceListElement}</SidebarToastRegion>,
           sectionRoute,
         )}

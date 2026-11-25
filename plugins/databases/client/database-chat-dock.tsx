@@ -1,4 +1,5 @@
-import { DATABASE_AGENT_LABEL } from "@/utils/dock-agents";
+import { Gesture } from "../../../packages/app/src/plugins/builtin/host-api";
+import { DATABASE_AGENT_LABEL } from "../../../packages/app/src/plugins/builtin/host-api";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { BackHandler, Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -8,28 +9,31 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from "react-native-reanimated";
-import { Gesture } from "react-native-gesture-handler";
 import { Check, History, MessageSquare, Plus, X } from "lucide-react-native";
-import { formatTimeAgo } from "@/utils/time";
-import { AgentConversationPanel } from "@/panels/agent-panel";
+import { formatTimeAgo } from "../../../packages/app/src/plugins/builtin/host-api";
+import { AgentConversationPanel } from "../../../packages/app/src/plugins/builtin/host-api";
 import {
   PaneProvider,
   PaneFocusProvider,
   createPaneFocusContextValue,
   type PaneContextValue,
-} from "@/panels/pane-context";
-import { DatabaseDraftChat, type DatabaseComposerContext } from "@/components/database-draft-chat";
-import { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
-import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
-import { useSessionStore, type Agent, type WorkspaceDescriptor } from "@/stores/session-store";
-import { useIsCompactFormFactor } from "@/constants/layout";
+} from "../../../packages/app/src/plugins/builtin/host-api";
+import { DatabaseDraftChat, type DatabaseComposerContext } from "./database-draft-chat";
+import { SidebarResizeHandle } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useHostRuntimeClient } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useProvidersSnapshot } from "../../../packages/app/src/plugins/builtin/host-api";
+import {
+  useSessionStore,
+  type Agent,
+  type WorkspaceDescriptor,
+} from "../../../packages/app/src/plugins/builtin/host-api";
+import { useIsCompactFormFactor } from "../../../packages/app/src/plugins/builtin/host-api";
 import {
   useDatabaseChatStore,
   DATABASE_CHAT_MIN_WIDTH,
   DATABASE_CHAT_MAX_WIDTH,
-} from "@/stores/database-chat-store";
-import type { Theme } from "@/styles/theme";
+} from "../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
 
 const ThemedX = withUnistyles(X);
 const ThemedMessageSquare = withUnistyles(MessageSquare);

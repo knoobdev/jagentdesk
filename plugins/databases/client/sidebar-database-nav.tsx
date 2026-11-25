@@ -1,7 +1,7 @@
+import { Clipboard, router } from "../../../packages/app/src/plugins/builtin/host-api";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import * as Clipboard from "expo-clipboard";
 import {
   Braces,
   ChevronLeft,
@@ -24,7 +24,6 @@ import {
   Terminal,
   Trash2,
 } from "lucide-react-native";
-import { router } from "expo-router";
 import type {
   DatabaseInfo,
   DbColumn,
@@ -36,8 +35,11 @@ import type {
   DbSchema,
 } from "@jagentdesk/protocol/database/rpc-schemas";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
-import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
-import { DatabaseStatusDot } from "@/components/database-dot";
+import {
+  useHostRuntimeClient,
+  useHostRuntimeIsConnected,
+} from "../../../packages/app/src/plugins/builtin/host-api";
+import { DatabaseStatusDot } from "./database-dot";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -45,19 +47,19 @@ import {
   ContextMenuLabel,
   ContextMenuSeparator,
   ContextMenuTrigger,
-} from "@/components/ui/context-menu";
-import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import { useDatabaseNavStore, type SelectedDbObject } from "@/stores/database-nav-store";
-import { useDatabaseViewStore } from "@/stores/database-view-store";
-import { useDatabaseChatStore } from "@/stores/database-chat-store";
-import { usePanelStore } from "@/stores/panel-store";
-import { useIsCompactFormFactor } from "@/constants/layout";
-import { buildDatabasesRoute } from "@/utils/host-routes";
-import { buildCreateTableDdl } from "@/utils/sql-ddl";
-import { qualifyTable, quoteIdent } from "@/utils/sql-ident";
+} from "../../../packages/app/src/plugins/builtin/host-api";
+import { LoadingSpinner } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useDatabaseNavStore, type SelectedDbObject } from "./database-nav-store";
+import { useDatabaseViewStore } from "./database-view-store";
+import { useDatabaseChatStore } from "../../../packages/app/src/plugins/builtin/host-api";
+import { usePanelStore } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useIsCompactFormFactor } from "../../../packages/app/src/plugins/builtin/host-api";
+import { buildDatabasesRoute } from "../../../packages/app/src/plugins/builtin/host-api";
+import { buildCreateTableDdl } from "./sql-ddl";
+import { qualifyTable, quoteIdent } from "./sql-ident";
 import type { DatabaseEngine } from "@jagentdesk/protocol/database/rpc-schemas";
-import type { Theme } from "@/styles/theme";
-import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useIsGumloopTheme } from "../../../packages/app/src/plugins/builtin/host-api";
 
 /** The daemon returns this while introspection races ahead of the parent
  *  connect — common on a cold tailnet open, where a deep link mounts the tree

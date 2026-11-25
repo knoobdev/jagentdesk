@@ -75,6 +75,7 @@ describe("Gumloop sidebar model", () => {
       resolveSidebarDrillIn(`/h/host%20one/${path}`, [
         { routeSegment: "docker", title: "Docker" },
         { routeSegment: "cluster", title: "Clusters" },
+        { routeSegment: "database", title: "Data" },
       ]),
     ).toMatchObject({
       kind: "destination",

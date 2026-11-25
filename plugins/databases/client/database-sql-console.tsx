@@ -3,14 +3,17 @@ import { Pressable, ScrollView, Switch, Text, TextInput, View } from "react-nati
 import { Play } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { DatabaseEngine, QueryResult } from "@jagentdesk/protocol/database/rpc-schemas";
-import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import { useDatabaseViewStore } from "@/stores/database-view-store";
-import { useDatabaseHistoryStore } from "@/stores/database-history-store";
-import { DatabaseResultTable } from "@/components/database-result-table";
-import { isWeb } from "@/constants/platform";
-import type { Theme } from "@/styles/theme";
-import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
-import { gumloopChipStyles, gumloopTabStyles } from "@/components/gumloop-shell/list-styles";
+import { useHostRuntimeClient } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useDatabaseViewStore } from "./database-view-store";
+import { useDatabaseHistoryStore } from "./database-history-store";
+import { DatabaseResultTable } from "./database-result-table";
+import { isWeb } from "../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useIsGumloopTheme } from "../../../packages/app/src/plugins/builtin/host-api";
+import {
+  gumloopChipStyles,
+  gumloopTabStyles,
+} from "../../../packages/app/src/plugins/builtin/host-api";
 
 const ThemedPlay = withUnistyles(Play);
 const ThemedTextInput = withUnistyles(TextInput);

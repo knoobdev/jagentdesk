@@ -1,3 +1,7 @@
+import { useSafeAreaInsets, Clipboard } from "../../../packages/app/src/plugins/builtin/host-api";
+// Moved verbatim from packages/app/src/components (built-in plugin phase 2). These violations
+// predate lint enforcement on the file and exist at plat/int10; the burn-down is separate work.
+/* oxlint-disable no-restricted-imports, react-perf/jsx-no-new-object-as-prop, react-perf/jsx-no-new-function-as-prop, react-perf/jsx-no-jsx-as-prop */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import {
@@ -10,8 +14,6 @@ import {
   Undo2,
 } from "lucide-react-native";
 import { StyleSheet, useUnistyles, withUnistyles } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import * as Clipboard from "expo-clipboard";
 import type {
   DatabaseEngine,
   DbColumn,
@@ -19,23 +21,23 @@ import type {
   QueryResult,
 } from "@jagentdesk/protocol/database/rpc-schemas";
 import type { GestureResponderEvent } from "react-native";
-import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import { useDatabaseViewStore } from "@/stores/database-view-store";
-import { useDatabaseNavStore } from "@/stores/database-nav-store";
-import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import { isSqlEngine, qualifyTable, quoteIdent } from "@/utils/sql-ident";
+import { useHostRuntimeClient } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useDatabaseViewStore } from "./database-view-store";
+import { useDatabaseNavStore } from "./database-nav-store";
+import { LoadingSpinner } from "../../../packages/app/src/plugins/builtin/host-api";
+import { isSqlEngine, qualifyTable, quoteIdent } from "./sql-ident";
 import {
   applyWhereCompletion as applyWhereCompletionText,
   buildWhereCompletion,
   type WhereAcItem,
-} from "@/components/database-where-completion";
-import { GridScroll } from "@/components/database-grid-scroll";
-import { isNative, isWeb } from "@/constants/platform";
-import { useIsCompactFormFactor } from "@/constants/layout";
-import { buildDelete, buildInsert, buildUpdate, type Cell, type Dml } from "@/utils/sql-dml";
-import type { Theme } from "@/styles/theme";
-import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
-import { gumloopListStyles } from "@/components/gumloop-shell/list-styles";
+} from "./database-where-completion";
+import { GridScroll } from "./database-grid-scroll";
+import { isNative, isWeb } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useIsCompactFormFactor } from "../../../packages/app/src/plugins/builtin/host-api";
+import { buildDelete, buildInsert, buildUpdate, type Cell, type Dml } from "./sql-dml";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useIsGumloopTheme } from "../../../packages/app/src/plugins/builtin/host-api";
+import { gumloopListStyles } from "../../../packages/app/src/plugins/builtin/host-api";
 
 const PAGE_SIZE = 100;
 const GUTTER_W = 52;

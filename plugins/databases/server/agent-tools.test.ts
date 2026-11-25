@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { createJAgentDeskToolCatalog } from "./jagentdesk-tools.js";
-import type { JAgentDeskToolHostDependencies } from "./jagentdesk-tools.js";
-import { DatabaseRegistry } from "../../database/database-registry.js";
+import { createJAgentDeskToolCatalog } from "../../../packages/server/src/server/agent/tools/jagentdesk-tools.js";
+import type { JAgentDeskToolHostDependencies } from "../../../packages/server/src/server/agent/tools/jagentdesk-tools.js";
+import { DatabaseRegistry } from "../../../packages/server/src/server/database/database-registry.js";
 
 function createMockLogger() {
   return {
@@ -23,7 +23,11 @@ function createMinimalDeps(
   overrides?: Partial<JAgentDeskToolHostDependencies>,
 ): JAgentDeskToolHostDependencies {
   return {
-    agentManager: vi.fn() as unknown as JAgentDeskToolHostDependencies["agentManager"],
+    // The catalog reads the caller's labels (bot tool policy) while registering.
+    agentManager: {
+      getAgent: () => null,
+      getPluginTools: () => [],
+    } as unknown as JAgentDeskToolHostDependencies["agentManager"],
     agentStorage: vi.fn() as unknown as JAgentDeskToolHostDependencies["agentStorage"],
     providerSnapshotManager:
       vi.fn() as unknown as JAgentDeskToolHostDependencies["providerSnapshotManager"],

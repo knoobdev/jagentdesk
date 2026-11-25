@@ -63,6 +63,25 @@ export { KindIcon } from "@/components/cluster-kind-icon";
 export { usePanelStore } from "@/stores/panel-store";
 export { buildClustersRoute, buildClusterWorkloadsRoute } from "@/utils/host-routes";
 export { LoadingSpinner } from "@/components/ui/loading-spinner";
+export { DATABASE_AGENT_LABEL } from "@/utils/dock-agents";
+export { isNative } from "@/constants/platform";
+export {
+  useDatabaseChatStore,
+  DATABASE_CHAT_MIN_WIDTH,
+  DATABASE_CHAT_MAX_WIDTH,
+} from "@/stores/database-chat-store";
+export { useHostRuntimeIsConnected } from "@/runtime/host-runtime";
+export {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+export { buildDatabasesRoute, buildDatabaseBrowseRoute } from "@/utils/host-routes";
+export { BackHeader } from "@/components/headers/back-header";
+export { Button } from "@/components/ui/button";
 // App-local dependencies: features outside packages/app resolve them through the host.
 export {
   router,

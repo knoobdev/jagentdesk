@@ -385,13 +385,8 @@ function DestinationPanel({ pathname }: { pathname: string }) {
   if (drill?.kind === "destination" && builtinClientRegistry.hasPanel(drill.section))
     return <BuiltinLeftPanel serverId={drill.serverId} segment={drill.section} />;
   if (drill?.kind === "settings") return <PortalHost name={GUMLOOP_PANEL_HOST} />;
-  const database = /\/h\/([^/]+)\/database\/([^/]+)/.exec(pathname);
-  const databaseRoute = database
-    ? { serverId: decodeURIComponent(database[1]), databaseId: decodeURIComponent(database[2]) }
-    : null;
   return resolveSidebarNavBody(
     null,
-    databaseRoute,
     <DestinationLinks pathname={pathname} />,
     resolveSectionRoute(pathname),
   );

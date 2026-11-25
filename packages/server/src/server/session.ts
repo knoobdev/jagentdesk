@@ -238,7 +238,6 @@ import { type ActivityGraphService } from "./agent/activity-graph/service.js";
 import { ActivityGraphSession } from "./session/activity-graph/activity-graph-session.js";
 import { type SessionShareService } from "./session-share/service.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
-import { DatabaseSession } from "./session/database/database-session.js";
 import { SshSession } from "./session/ssh/ssh-session.js";
 import { ArgoCdSession } from "./session/argocd/argocd-session.js";
 import { type ArgoCdService } from "./argocd/service.js";
@@ -250,7 +249,6 @@ import { type JiraService } from "./jira/service.js";
 import { SshService } from "./ssh/ssh-service.js";
 import { SideloadSession } from "./session/sideload/sideload-session.js";
 import { type SideloadService } from "./sideload/sideload-service.js";
-import { localPortOfTarget } from "./ssh/remote-db/service.js";
 import { SimulatorService } from "./simulator/simulator-service.js";
 import { SimulatorStreams, fleetSnapshot } from "./simulator/simulator-streams.js";
 import { type PhysicalDeviceHub } from "./devices/hub.js";
@@ -1260,8 +1258,6 @@ export class Session {
 
   private readonly activityGraphSession: ActivityGraphSession | null;
 
-  private databaseSession!: DatabaseSession;
-
   private sshSession!: SshSession;
 
   private argocdSession!: ArgoCdSession;
@@ -1948,13 +1944,6 @@ export class Session {
 
   private initDatabaseSession(options: SessionOptions): void {
     this.databaseRegistry = options.databaseRegistry ?? new DatabaseRegistry();
-    this.databaseSession = new DatabaseSession({
-      host: {
-        emit: (msg) => this.emit(msg),
-      },
-      databaseRegistry: this.databaseRegistry,
-      logger: this.sessionLogger,
-    });
   }
 
   private initSshSession(options: SessionOptions): void {
@@ -3229,7 +3218,6 @@ export class Session {
       () => this.dispatchSpecModeMessage(msg, source),
       () => this.dispatchSessionShareMessage(msg),
       () => this.activityGraphSession?.dispatch(msg),
-      () => this.dispatchDatabaseMessage(msg),
       () => this.dispatchSshMessage(msg),
       () => this.dispatchRemoteExecMessage(msg),
       () => this.dispatchCustomProvidersMessage(msg),
@@ -4417,18 +4405,6 @@ export class Session {
   }
 
   // oxlint-disable-next-line complexity
-  // A database reached through an SSH server listens on its fixed 127.0.0.1 port again before
-  // the registry connects (ssh/remote-db).
-  private async reopenRemoteDatabase(databaseId: string): Promise<void> {
-    const tunnels = this.sshService.modules?.remoteDb;
-    const info = this.databaseRegistry.list().find((candidate) => candidate.id === databaseId);
-    const port = info ? localPortOfTarget(info.target) : null;
-    if (!tunnels || port === null || !tunnels.isRemotePort(port)) return;
-    await tunnels.reopenForLocalPort(port).catch((error: unknown) => {
-      this.sessionLogger.warn({ err: error, databaseId }, "remote database tunnel failed");
-    });
-  }
-
   // The fleet itself: listing it, what the host can run, and adding devices to it.
   private dispatchSimulatorFleet(
     msg: SessionInboundMessage,
@@ -5284,53 +5260,6 @@ export class Session {
       return undefined;
     }
     return this.sshSession.handleMessage(msg);
-  }
-
-  private dispatchDatabaseMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    switch (msg.type) {
-      case "database/list":
-        return this.databaseSession.handleList(msg);
-      case "database/add":
-        return this.databaseSession.handleAdd(msg);
-      case "database/connect":
-        return this.reopenRemoteDatabase(msg.id).then(() =>
-          this.databaseSession.handleConnect(msg),
-        );
-      case "database/disconnect":
-        return this.databaseSession.handleDisconnect(msg);
-      case "database/remove":
-        return this.databaseSession.handleRemove(msg);
-      case "database/databases":
-        return this.databaseSession.handleDatabases(msg);
-      case "database/open-database":
-        return this.databaseSession.handleOpenDatabase(msg);
-      case "database/schemas":
-        return this.databaseSession.handleSchemas(msg);
-      case "database/objects":
-        return this.databaseSession.handleObjects(msg);
-      case "database/columns":
-        return this.databaseSession.handleColumns(msg);
-      case "database/query":
-        return this.databaseSession.handleQuery(msg);
-      case "database/exec":
-        return this.databaseSession.handleExec(msg);
-      case "database/foreign-keys":
-        return this.databaseSession.handleForeignKeys(msg);
-      case "database/indexes":
-        return this.databaseSession.handleIndexes(msg);
-      case "database/routines":
-        return this.databaseSession.handleRoutines(msg);
-      case "database/explain":
-        return this.databaseSession.handleExplain(msg);
-      case "database/begin":
-        return this.databaseSession.handleBegin(msg);
-      case "database/commit":
-        return this.databaseSession.handleCommit(msg);
-      case "database/rollback":
-        return this.databaseSession.handleRollback(msg);
-      default:
-        return undefined;
-    }
   }
 
   private dispatchMigrationMessage(msg: SessionInboundMessage): Promise<void> | undefined {

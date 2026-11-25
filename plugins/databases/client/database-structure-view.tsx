@@ -6,13 +6,16 @@ import type {
   DbColumn,
   DbForeignKey,
 } from "@jagentdesk/protocol/database/rpc-schemas";
-import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import { useDatabaseViewStore } from "@/stores/database-view-store";
-import { buildCreateTableDdl } from "@/utils/sql-ddl";
-import { Skeleton, useSkeletonPulse } from "@/components/ui/skeleton";
-import type { Theme } from "@/styles/theme";
-import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
-import { gumloopListStyles, gumloopTabStyles } from "@/components/gumloop-shell/list-styles";
+import { useHostRuntimeClient } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useDatabaseViewStore } from "./database-view-store";
+import { buildCreateTableDdl } from "./sql-ddl";
+import { Skeleton, useSkeletonPulse } from "../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useIsGumloopTheme } from "../../../packages/app/src/plugins/builtin/host-api";
+import {
+  gumloopListStyles,
+  gumloopTabStyles,
+} from "../../../packages/app/src/plugins/builtin/host-api";
 
 type Tab = "columns" | "ddl" | "relationships";
 

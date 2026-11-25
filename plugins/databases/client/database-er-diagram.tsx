@@ -1,16 +1,16 @@
+import { Gesture, GestureDetector } from "../../../packages/app/src/plugins/builtin/host-api";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import Svg, { G, Line, Rect, Text as SvgText } from "react-native-svg";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { runOnJS } from "react-native-reanimated";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { Maximize2, ZoomIn, ZoomOut } from "lucide-react-native";
 import type { DbColumn, DbForeignKey, DbObject } from "@jagentdesk/protocol/database/rpc-schemas";
-import { isNative, isWeb } from "@/constants/platform";
-import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import { useDatabaseNavStore } from "@/stores/database-nav-store";
-import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import type { Theme } from "@/styles/theme";
+import { isNative, isWeb } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useHostRuntimeClient } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useDatabaseNavStore } from "./database-nav-store";
+import { LoadingSpinner } from "../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
 
 // Theme-token hex — SVG props take color strings (matches the dark design system).
 const BOX_FILL = "#1E2120";

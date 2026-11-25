@@ -1,5 +1,5 @@
 import type { DatabaseEngine } from "@jagentdesk/protocol/database/rpc-schemas";
-import { quoteIdent } from "@/utils/sql-ident";
+import { quoteIdent } from "./sql-ident";
 
 /**
  * Context-aware WHERE-clause completion (DataGrip-style), used by the data grid's

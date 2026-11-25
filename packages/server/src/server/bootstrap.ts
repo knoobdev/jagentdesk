@@ -1821,14 +1821,6 @@ export async function createJAgentDeskDaemon(
     pluginRuntime.builtin,
     builtinCoreServices,
   );
-  await pluginRuntime.builtin.registerLifecycle("databases", {
-    start: () => {},
-    stop: async () => {
-      await Promise.all(
-        databaseRegistry.list().map((entry) => databaseRegistry.disconnect(entry.id)),
-      );
-    },
-  });
   const suspendedForwardingRules = new Set<string>();
   await pluginRuntime.builtin.registerLifecycle("ssh-servers", {
     start: async () => {

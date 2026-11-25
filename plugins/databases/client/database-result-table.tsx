@@ -2,10 +2,10 @@ import { useMemo } from "react";
 import { Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import type { QueryResult } from "@jagentdesk/protocol/database/rpc-schemas";
-import type { Theme } from "@/styles/theme";
-import { GridScroll } from "@/components/database-grid-scroll";
-import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
-import { gumloopListStyles } from "@/components/gumloop-shell/list-styles";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
+import { GridScroll } from "./database-grid-scroll";
+import { useIsGumloopTheme } from "../../../packages/app/src/plugins/builtin/host-api";
+import { gumloopListStyles } from "../../../packages/app/src/plugins/builtin/host-api";
 
 const MIN_COL_WIDTH = 120;
 const MAX_COL_WIDTH = 320;

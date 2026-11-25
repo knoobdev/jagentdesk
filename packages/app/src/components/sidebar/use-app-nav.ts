@@ -9,7 +9,6 @@ import {
   Gauge,
   Bot,
   CalendarClock,
-  Database,
   Figma,
   GitPullRequest,
   History,
@@ -28,7 +27,6 @@ import { useTranslation } from "react-i18next";
 import { useHostFeature } from "@/runtime/host-features";
 import { useHosts } from "@/runtime/host-runtime";
 import { canCreateWorktreeForProjectKind } from "@/projects/host-projects";
-import { useDatabaseNavStore } from "@/stores/database-nav-store";
 import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { useSessionStore } from "@/stores/session-store";
 import { hostSupportsCapability } from "@/utils/server-info-capabilities";
@@ -45,8 +43,6 @@ const DEVICE_CAPABILITIES: readonly HostCapabilityId[] = [
 import { useWorkspace } from "@/stores/session-store-hooks";
 import {
   buildArgoCdRoute,
-  buildDatabaseBrowseRoute,
-  buildDatabasesRoute,
   buildFigmaRoute,
   buildForgeRoute,
   buildInsightsRoute,
@@ -67,7 +63,6 @@ import {
 export interface AppNavTargets {
   botsRoute: Href | null;
   sharedSessionsRoute: Href | null;
-  databasesRoute: Href | null;
   serversRoute: Href | null;
   skillsRoute: Href | null;
   insightsRoute: Href | null;
@@ -94,9 +89,7 @@ export function useAppNavTargets(): AppNavTargets {
   const firstServerId = routeServerId
     ? decodeURIComponent(routeServerId)
     : (selection?.serverId ?? hosts[0]?.serverId ?? "");
-  const lastDatabase = useDatabaseNavStore((s) => s.lastDatabase);
   const supportsBots = useHostFeature(firstServerId, "bots");
-  const databasesEnabled = useBuiltinPluginEnabled(firstServerId, "databases");
   const skillsEnabled = useBuiltinPluginEnabled(firstServerId, "skills");
   const insightsEnabled = useBuiltinPluginEnabled(firstServerId, "insights");
   const workbenchEnabled = useBuiltinPluginEnabled(firstServerId, "workbench");
@@ -131,20 +124,10 @@ export function useAppNavTargets(): AppNavTargets {
   return useMemo(() => {
     const perHost = (build: (serverId: string) => string): Href | null =>
       firstServerId ? (build(firstServerId) as Href) : null;
-    // Databases jump straight back to the resource the user last had open,
-    // falling back to the list when there is none.
-    let databasesRoute: Href | null = perHost(buildDatabasesRoute);
-    if (lastDatabase && lastDatabase.serverId === firstServerId) {
-      databasesRoute = buildDatabaseBrowseRoute(
-        lastDatabase.serverId,
-        lastDatabase.databaseId,
-      ) as Href;
-    }
     return {
       botsRoute: supportsBots
         ? perHost((serverId) => `/h/${encodeURIComponent(serverId)}/bots`)
         : null,
-      databasesRoute: databasesEnabled ? databasesRoute : null,
       sharedSessionsRoute: sharingEnabled ? (buildSharedSessionsRoute() as Href) : null,
       // Gated at the route: the entry disappears with the daemon feature flag.
       serversRoute: supportsSshServers ? perHost(buildServersRoute) : null,
@@ -162,7 +145,6 @@ export function useAppNavTargets(): AppNavTargets {
     };
   }, [
     supportsBots,
-    databasesEnabled,
     skillsEnabled,
     insightsEnabled,
     workbenchEnabled,
@@ -171,7 +153,6 @@ export function useAppNavTargets(): AppNavTargets {
     supportsFigma,
     deviceServerId,
     firstServerId,
-    lastDatabase,
     supportsArgoCd,
     supportsForgeHub,
     supportsSshServers,
@@ -262,15 +243,6 @@ export function useAppNavItems(): AppNavItem[] {
         "/simulator",
       ),
       navItem("workbench", Radar, "Workbench", "WB", targets.proxyRoute, pathname, "/proxy"),
-      navItem(
-        "databases",
-        Database,
-        "Databases",
-        "Data",
-        targets.databasesRoute,
-        pathname,
-        "/database",
-      ),
       navItem("servers", Server, "Servers", "Servers", targets.serversRoute, pathname, "/servers"),
       navItem("argocd", Ship, "Argo CD", "Argo CD", targets.argoCdRoute, pathname, "/argocd"),
       {

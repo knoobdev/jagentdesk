@@ -4,10 +4,16 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import pino from "pino";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { SessionInboundMessageSchema, SessionOutboundMessageSchema } from "../messages.js";
-import type { SessionInboundMessage, SessionOutboundMessage } from "../messages.js";
-import { DatabaseRegistry } from "./database-registry.js";
-import { DatabaseSession } from "../session/database/database-session.js";
+import {
+  SessionInboundMessageSchema,
+  SessionOutboundMessageSchema,
+} from "../../../packages/server/src/server/messages.js";
+import type {
+  SessionInboundMessage,
+  SessionOutboundMessage,
+} from "../../../packages/server/src/server/messages.js";
+import { DatabaseRegistry } from "../../../packages/server/src/server/database/database-registry.js";
+import { DatabaseSession } from "./database-session.js";
 
 const silent = pino({ level: "silent" });
 
@@ -153,7 +159,8 @@ const E2E = process.env.JAD_DB_E2E === "1";
 
 describe.runIf(E2E)("PostgreSQL adapter e2e (throwaway docker)", () => {
   it("connects, introspects PK/FK and paginates a real Postgres", async () => {
-    const { PostgresDbClient } = await import("./adapters/postgres.js");
+    const { PostgresDbClient } =
+      await import("../../../packages/server/src/server/database/adapters/postgres.js");
     const client = new PostgresDbClient({
       host: "127.0.0.1",
       port: 55433,
@@ -212,7 +219,8 @@ describe.runIf(E2E)("PostgreSQL adapter e2e (throwaway docker)", () => {
 
 describe.runIf(E2E)("MySQL adapter e2e (throwaway docker)", () => {
   it("connects, introspects PK/FK and paginates a real MySQL", async () => {
-    const { MysqlDbClient } = await import("./adapters/mysql.js");
+    const { MysqlDbClient } =
+      await import("../../../packages/server/src/server/database/adapters/mysql.js");
     const client = new MysqlDbClient({
       host: "127.0.0.1",
       port: 55434,

@@ -7,8 +7,8 @@ import {
   type ViewStyle,
 } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { isWeb } from "@/constants/platform";
-import type { Theme } from "@/styles/theme";
+import { isWeb } from "../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
 
 /**
  * Two-axis grid scroller shared by the data editor and the SQL result table.

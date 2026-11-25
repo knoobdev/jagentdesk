@@ -1,17 +1,17 @@
+import { useRouter } from "../../../packages/app/src/plugins/builtin/host-api";
 import type { ComponentProps } from "react";
-import { Button } from "@/components/ui/button";
-import { PageHeader } from "@/components/headers/page-header";
+import { Button } from "../../../packages/app/src/plugins/builtin/host-api";
+import { PageHeader } from "../../../packages/app/src/plugins/builtin/host-api";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { Database as DatabaseIcon, CircleAlert, Plus, Trash2 } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { useRouter } from "expo-router";
-import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
-import { Skeleton, useSkeletonPulse } from "@/components/ui/skeleton";
-import { DatabaseStatusDot } from "@/components/database-dot";
-import { buildDatabaseBrowseRoute } from "@/utils/host-routes";
-import { useDatabaseNavStore } from "@/stores/database-nav-store";
-import type { Theme } from "@/styles/theme";
+import { useHostRuntimeClient } from "../../../packages/app/src/plugins/builtin/host-api";
+import { Skeleton, useSkeletonPulse } from "../../../packages/app/src/plugins/builtin/host-api";
+import { DatabaseStatusDot } from "./database-dot";
+import { buildDatabaseBrowseRoute } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useDatabaseNavStore } from "./database-nav-store";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
 import type {
   DatabaseEngine,
   DatabaseInfo,
@@ -248,9 +248,7 @@ function HostPortFields({
 const DATABASES_DESCRIPTION =
   "Connect a database, then browse its schema, run SQL and chat with a schema-grounded agent. Credentials stay encrypted on the daemon.";
 
-export function DatabasesScreen() {
-  const hosts = useHosts();
-  const serverId = hosts[0]?.serverId ?? "";
+export function DatabasesScreen({ serverId }: { serverId: string }) {
   const client = useHostRuntimeClient(serverId);
   const clearLastDatabase = useDatabaseNavStore((s) => s.clearLastDatabase);
   const router = useRouter();

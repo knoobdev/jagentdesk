@@ -27,3 +27,6 @@ export type { SessionInboundMessage, SessionOutboundMessage } from "../../messag
 export type { ClusterRegistry } from "../../cluster/cluster-registry.js";
 export { detectKubeContexts } from "../../cluster/kube-config-source.js";
 export { GENERIC_KINDS } from "../../cluster/kube-client.js";
+export type { DatabaseRegistry } from "../../database/database-registry.js";
+export type { DatabaseEngine } from "../../database/database-dto.js";
+export { localPortOfTarget } from "../../ssh/remote-db/service.js";

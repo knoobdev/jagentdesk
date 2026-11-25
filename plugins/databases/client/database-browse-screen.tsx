@@ -1,27 +1,32 @@
+import { useSafeAreaInsets, useRouter } from "../../../packages/app/src/plugins/builtin/host-api";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
 import { PanelLeft, X } from "lucide-react-native";
 import type { DatabaseInfo } from "@jagentdesk/protocol/database/rpc-schemas";
-import { BackHeader } from "@/components/headers/back-header";
-import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
-import { DatabaseDataEditor } from "@/components/database-data-editor";
-import { DatabaseStructureView } from "@/components/database-structure-view";
-import { DatabaseSqlConsole } from "@/components/database-sql-console";
-import { DatabaseErDiagram } from "@/components/database-er-diagram";
-import { DatabaseFullTextSearch } from "@/components/database-full-text-search";
-import { DatabaseChatDock } from "@/components/database-chat-dock";
-import type { DatabaseComposerContext } from "@/components/database-draft-chat";
-import { useIsCompactFormFactor } from "@/constants/layout";
-import { useDatabaseNavStore } from "@/stores/database-nav-store";
-import { useDatabaseViewStore } from "@/stores/database-view-store";
-import { useDatabaseChatStore } from "@/stores/database-chat-store";
-import { usePanelStore } from "@/stores/panel-store";
-import type { Theme } from "@/styles/theme";
-import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
-import { gumloopListStyles, gumloopTabStyles } from "@/components/gumloop-shell/list-styles";
+import { BackHeader } from "../../../packages/app/src/plugins/builtin/host-api";
+import {
+  useHostRuntimeClient,
+  useHostRuntimeIsConnected,
+} from "../../../packages/app/src/plugins/builtin/host-api";
+import { DatabaseDataEditor } from "./database-data-editor";
+import { DatabaseStructureView } from "./database-structure-view";
+import { DatabaseSqlConsole } from "./database-sql-console";
+import { DatabaseErDiagram } from "./database-er-diagram";
+import { DatabaseFullTextSearch } from "./database-full-text-search";
+import { DatabaseChatDock } from "./database-chat-dock";
+import type { DatabaseComposerContext } from "./database-draft-chat";
+import { useIsCompactFormFactor } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useDatabaseNavStore } from "./database-nav-store";
+import { useDatabaseViewStore } from "./database-view-store";
+import { useDatabaseChatStore } from "../../../packages/app/src/plugins/builtin/host-api";
+import { usePanelStore } from "../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useIsGumloopTheme } from "../../../packages/app/src/plugins/builtin/host-api";
+import {
+  gumloopListStyles,
+  gumloopTabStyles,
+} from "../../../packages/app/src/plugins/builtin/host-api";
 
 const ThemedPanelLeft = withUnistyles(PanelLeft);
 const ThemedX = withUnistyles(X);

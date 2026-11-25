@@ -2,14 +2,14 @@ import { useCallback, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type { DatabaseEngine } from "@jagentdesk/protocol/database/rpc-schemas";
-import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import { useDatabaseNavStore, type SelectedDbObject } from "@/stores/database-nav-store";
-import { useDatabaseViewStore } from "@/stores/database-view-store";
-import { qualifyTable, quoteIdent } from "@/utils/sql-ident";
-import { Skeleton, useSkeletonPulse } from "@/components/ui/skeleton";
-import type { Theme } from "@/styles/theme";
-import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
-import { gumloopListStyles } from "@/components/gumloop-shell/list-styles";
+import { useHostRuntimeClient } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useDatabaseNavStore, type SelectedDbObject } from "./database-nav-store";
+import { useDatabaseViewStore } from "./database-view-store";
+import { qualifyTable, quoteIdent } from "./sql-ident";
+import { Skeleton, useSkeletonPulse } from "../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useIsGumloopTheme } from "../../../packages/app/src/plugins/builtin/host-api";
+import { gumloopListStyles } from "../../../packages/app/src/plugins/builtin/host-api";
 
 const ThemedInput = withUnistyles(TextInput);
 const placeholderColor = (theme: Theme) => ({

@@ -1,20 +1,23 @@
-import { createDockWorkspace } from "@/components/dock-workspace";
-import { DATABASE_AGENT_LABEL } from "@/utils/dock-agents";
+import { createDockWorkspace } from "../../../packages/app/src/plugins/builtin/host-api";
+import { DATABASE_AGENT_LABEL } from "../../../packages/app/src/plugins/builtin/host-api";
 import { useMemo } from "react";
 import { Keyboard, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { Composer } from "@/composer";
-import { useAgentInputDraft } from "@/composer/draft/input-draft";
-import { useDraftAgentCreateFlow } from "@/composer/draft/create-flow";
-import { buildDraftStoreKey, generateDraftId } from "@/stores/draft-keys";
-import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import { encodeImages } from "@/utils/encode-images";
-import { isWeb } from "@/constants/platform";
-import { buildDatabaseSystemPrompt } from "@/components/database-ask-agent";
-import { databaseChatTitle } from "@/utils/database-chat-title";
+import { Composer } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useAgentInputDraft } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useDraftAgentCreateFlow } from "../../../packages/app/src/plugins/builtin/host-api";
+import {
+  buildDraftStoreKey,
+  generateDraftId,
+} from "../../../packages/app/src/plugins/builtin/host-api";
+import { useHostRuntimeClient } from "../../../packages/app/src/plugins/builtin/host-api";
+import { encodeImages } from "../../../packages/app/src/plugins/builtin/host-api";
+import { isWeb } from "../../../packages/app/src/plugins/builtin/host-api";
+import { buildDatabaseSystemPrompt } from "./database-ask-agent";
+import { databaseChatTitle } from "./database-chat-title";
 import { type AgentSnapshotPayload } from "@jagentdesk/protocol/messages";
 import { type CreateAgentRequestOptions } from "@jagentdesk/client/internal/daemon-client";
-import { type Theme } from "@/styles/theme";
+import { type Theme } from "../../../packages/app/src/plugins/builtin/host-api";
 
 export interface DatabaseComposerContext {
   engine: string;

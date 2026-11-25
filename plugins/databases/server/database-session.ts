@@ -1,7 +1,10 @@
 import type pino from "pino";
-import type { SessionInboundMessage, SessionOutboundMessage } from "../../messages.js";
-import type { DatabaseRegistry } from "../../database/database-registry.js";
-import type { DatabaseEngine } from "../../database/database-dto.js";
+import type {
+  SessionInboundMessage,
+  SessionOutboundMessage,
+} from "../../../packages/server/src/server/plugins/builtin/host-api.js";
+import type { DatabaseRegistry } from "../../../packages/server/src/server/plugins/builtin/host-api.js";
+import type { DatabaseEngine } from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 
 export interface DatabaseSessionHost {
   emit(msg: SessionOutboundMessage): void;
