@@ -245,16 +245,7 @@ import { randomUUID } from "node:crypto";
 import { FigmaSession, isFigmaRequest } from "./session/figma/figma-session.js";
 import { type FigmaService } from "./figma/service.js";
 import { SshService } from "./ssh/ssh-service.js";
-import { SideloadSession } from "./session/sideload/sideload-session.js";
-import { type SideloadService } from "./sideload/sideload-service.js";
 import { localPortOfTarget } from "./ssh/remote-db/service.js";
-import { SimulatorService } from "./simulator/simulator-service.js";
-import { SimulatorStreams, fleetSnapshot } from "./simulator/simulator-streams.js";
-import { type PhysicalDeviceHub } from "./devices/hub.js";
-import {
-  PhysicalDeviceSession,
-  deviceErrorText,
-} from "./session/devices/physical-device-session.js";
 import { getSharedProxyService } from "./proxy/proxy-service.js";
 import { fridaAvailability, installFrida } from "./proxy/frida-control.js";
 import { DatabaseRegistry } from "./database/database-registry.js";
@@ -678,9 +669,6 @@ export interface SessionOptions {
 
   hostToolInstaller?: HostToolInstaller | null;
 
-  // Spec 27: the daemon-wide physical device hub (null in tests and hosts without it).
-  physicalDevices?: PhysicalDeviceHub | null;
-
   clusterRegistry?: ClusterRegistry;
 
   databaseRegistry?: DatabaseRegistry;
@@ -697,9 +685,6 @@ export interface SessionOptions {
 
   // Argo CD (spec 30): daemon-wide service; null when the host runs without it.
   argocdService?: ArgoCdService | null;
-
-  /** Sideload (spec 26); null in tests and hosts that do not run it. */
-  sideloadService?: SideloadService | null;
 
   botsService?: BotsService | null;
 
@@ -1270,21 +1255,11 @@ export class Session {
 
   private customProvidersService: CustomProviderService | null = null;
 
-  private sideloadSession: SideloadSession | null = null;
-
   private clusterRegistry!: ClusterRegistry;
 
   private databaseRegistry!: DatabaseRegistry;
 
   private builtinSession!: BuiltinServerSession;
-
-  private readonly simulatorService = new SimulatorService();
-
-  private readonly physicalDevices: PhysicalDeviceHub | null;
-
-  private readonly simulatorStreams: SimulatorStreams;
-
-  private readonly physicalDeviceSession: PhysicalDeviceSession | null;
 
   private readonly proxyService = getSharedProxyService();
 
@@ -1572,13 +1547,6 @@ export class Session {
       sessionKey: randomUUID(),
       canRunSsoLoopback: () => this.supports(CLIENT_CAPS.argocdSsoLoopback),
     });
-    this.sideloadSession = options.sideloadService
-      ? new SideloadSession({
-          emit: (msg) => this.emit(msg),
-          service: options.sideloadService,
-          logger: this.sessionLogger,
-        })
-      : null;
     this.figmaSession = this.createFigmaSession(options.figmaService);
     this.usageSession = new UsageSession({
       isEnabled: () => this.daemonConfigStore?.get().usage?.enabled !== false,
@@ -1663,9 +1631,6 @@ export class Session {
     this.usageHistory = options.usageHistory ?? null;
     this.hostCapabilities = options.hostCapabilities;
     this.hostToolInstaller = options.hostToolInstaller;
-    this.physicalDevices = options.physicalDevices ?? null;
-    this.simulatorStreams = new SimulatorStreams(this.simulatorService, this.physicalDevices);
-    this.physicalDeviceSession = this.createPhysicalDeviceSession();
     this.terminalManager = terminalManager;
     this.terminalController = new TerminalSessionController({
       terminalManager,
@@ -1825,6 +1790,9 @@ export class Session {
     return builtinServerRegistry.session(pluginRuntime?.builtin, {
       ...createBuiltinCoreServices(this.jagentdeskHome, this.sessionLogger, this.daemonConfigStore),
       service: builtinServerRegistry.lookup(this.jagentdeskHome),
+      provided: builtinServerRegistry.provided,
+      supportsClientCapability: (capability) => this.supports(capability as ClientCapability),
+      transportBufferedAmount: () => this.getTransportBufferedAmount(),
       terminals: this.terminalManager,
       remoteDocker: () => this.sshService.modules?.docker,
       push: (message) => this.emit(message),
@@ -3204,11 +3172,9 @@ export class Session {
       () => this.dispatchRemoteExecMessage(msg),
       () => this.dispatchCustomProvidersMessage(msg),
       () => this.dispatchArgoCdMessage(msg),
-      () => this.dispatchSideloadMessage(msg),
       () => this.botsSession?.dispatch(msg),
       () => this.dispatchFigmaMessage(msg),
       () => this.builtinSession.dispatch(msg),
-      () => this.dispatchSimulatorMessage(msg),
       () => this.dispatchProxyMessage(msg),
       () => this.dispatchMigrationMessage(msg),
       () => this.dispatchBuiltinPluginMessage(msg),
@@ -3544,10 +3510,6 @@ export class Session {
   private stopDisabledBuiltinStreams(): void {
     const builtin = this.pluginRuntime?.builtin;
     if (!builtin) return;
-    if (!builtin.isEnabled("devices")) {
-      this.simulatorStreams.disposeAll();
-      this.physicalDeviceSession?.dispose();
-    }
     if (!builtin.isEnabled("clusters")) this.clusterSession.dispose();
     if (!builtin.isEnabled("argocd")) this.argocdSession.suspend();
     else this.argocdSession.syncDelegateRegistration();
@@ -4445,75 +4407,6 @@ export class Session {
     });
   }
 
-  // The fleet itself: listing it, what the host can run, and adding devices to it.
-  private dispatchSimulatorFleet(
-    msg: SessionInboundMessage,
-    fail: (error: unknown) => string,
-  ): Promise<void> | undefined {
-    if (msg.type === "simulator/list") {
-      const { requestId } = msg;
-      return fleetSnapshot(this.simulatorService, this.physicalDevices)
-        .then((result) => {
-          this.emit({
-            type: "simulator/list/response",
-            payload: { requestId, error: null, ...result },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/list/response",
-            payload: {
-              requestId,
-              error: fail(error),
-              availability: { simctl: false, idb: false, maestro: false, xcode: false },
-              devices: [],
-            },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/catalog") {
-      const { requestId } = msg;
-      return this.simulatorService
-        .catalog()
-        .then((runtimes) => {
-          this.emit({
-            type: "simulator/catalog/response",
-            payload: { requestId, error: null, runtimes },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/catalog/response",
-            payload: { requestId, error: fail(error), runtimes: [] },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/create") {
-      const { requestId } = msg;
-      return this.simulatorService
-        .create(msg.name, msg.deviceTypeId, msg.runtimeId, msg.boot ?? false)
-        .then((udid) => {
-          this.emit({
-            type: "simulator/create/response",
-            payload: { requestId, error: null, udid },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/create/response",
-            payload: { requestId, error: fail(error), udid: "" },
-          });
-          return undefined;
-        });
-    }
-    return undefined;
-  }
-
   private dispatchProxyMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     const fail = (error: unknown): string =>
       error instanceof Error ? error.message : String(error);
@@ -4833,339 +4726,6 @@ export class Session {
     return undefined;
   }
 
-  private createPhysicalDeviceSession(): PhysicalDeviceSession | null {
-    if (!this.physicalDevices) return null;
-    return new PhysicalDeviceSession(
-      this.physicalDevices,
-      {
-        emit: (msg) => this.emit(msg),
-        emitBinary: (frame) => this.emitBinary(frame),
-        supportsBinaryScreenFrames: () => this.supports(CLIENT_CAPS.binaryScreenFrames),
-        transportBufferedAmount: () => this.getTransportBufferedAmount(),
-      },
-      this.sessionLogger,
-    );
-  }
-
-  private dispatchSimulatorMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    const fail = (error: unknown): string =>
-      error instanceof Error ? error.message : String(error);
-    const physical = this.physicalDeviceSession?.handle(msg);
-    if (physical) return physical;
-    const fleet = this.dispatchSimulatorFleet(msg, fail);
-    if (fleet) return fleet;
-    if (msg.type === "simulator/action") {
-      const { requestId, udid } = msg;
-      return this.simulatorService
-        .action(udid, msg.action)
-        .then(() => {
-          this.emit({
-            type: "simulator/action/response",
-            payload: { requestId, error: null, udid },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/action/response",
-            payload: { requestId, error: fail(error), udid },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/tap") {
-      const { requestId } = msg;
-      return this.simulatorService
-        .tap(msg.udid, msg.x, msg.y)
-        .then(() => {
-          this.emit({ type: "simulator/tap/response", payload: { requestId, error: null } });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({ type: "simulator/tap/response", payload: { requestId, error: fail(error) } });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/swipe") {
-      const { requestId } = msg;
-      return this.simulatorService
-        .swipe(msg.udid, msg.x1, msg.y1, msg.x2, msg.y2, msg.durationMs)
-        .then(() => {
-          this.emit({ type: "simulator/swipe/response", payload: { requestId, error: null } });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/swipe/response",
-            payload: { requestId, error: fail(error) },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/input-text") {
-      const { requestId } = msg;
-      return this.simulatorService
-        .inputText(msg.udid, msg.text)
-        .then(() => {
-          this.emit({ type: "simulator/input-text/response", payload: { requestId, error: null } });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/input-text/response",
-            payload: { requestId, error: fail(error) },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/button") {
-      const { requestId } = msg;
-      return this.simulatorService
-        .button(msg.udid, msg.button)
-        .then(() => {
-          this.emit({ type: "simulator/button/response", payload: { requestId, error: null } });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/button/response",
-            payload: { requestId, error: fail(error) },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/describe-ui") {
-      const { requestId } = msg;
-      return this.simulatorService
-        .describeUi(msg.udid)
-        .then((elements) => {
-          this.emit({
-            type: "simulator/describe-ui/response",
-            payload: { requestId, error: null, elements },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/describe-ui/response",
-            payload: { requestId, error: fail(error), elements: [] },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/screenshot") {
-      const { requestId } = msg;
-      return this.simulatorService
-        .screenshot(msg.udid, { format: msg.format, maxDim: msg.maxDim })
-        .then((shot) => {
-          this.emit({
-            type: "simulator/screenshot/response",
-            payload: {
-              requestId,
-              error: null,
-              pngBase64: shot.mimeType === "image/png" ? shot.base64 : "",
-              imageBase64: shot.base64,
-              mimeType: shot.mimeType,
-              width: shot.width,
-              height: shot.height,
-            },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/screenshot/response",
-            payload: { requestId, error: fail(error), pngBase64: "" },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/install-app") {
-      const { requestId } = msg;
-      return this.simulatorService
-        .installApp(msg.udid, msg.appPath)
-        .then(() => {
-          this.emit({
-            type: "simulator/install-app/response",
-            payload: { requestId, error: null },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/install-app/response",
-            payload: { requestId, error: fail(error) },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/install-batch") {
-      const { requestId } = msg;
-      return this.simulatorService
-        .installOnMany(msg.udids, msg.filePath)
-        .then((results) => {
-          this.emit({
-            type: "simulator/install-batch/response",
-            payload: { requestId, error: null, results },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/install-batch/response",
-            payload: { requestId, error: fail(error), results: [] },
-          });
-          return undefined;
-        });
-    }
-    return this.dispatchSimulatorMessageContinued(msg);
-  }
-
-  private dispatchSimulatorMessageContinued(msg: SessionInboundMessage): Promise<void> | undefined {
-    const fail = (error: unknown): string =>
-      error instanceof Error ? error.message : String(error);
-    if (msg.type === "simulator/launch-app") {
-      const { requestId } = msg;
-      return this.simulatorService
-        .launchApp(msg.udid, msg.bundleId, msg.terminateExisting)
-        .then(() => {
-          this.emit({ type: "simulator/launch-app/response", payload: { requestId, error: null } });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/launch-app/response",
-            payload: { requestId, error: fail(error) },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/terminate-app") {
-      const { requestId } = msg;
-      return this.simulatorService
-        .terminateApp(msg.udid, msg.bundleId)
-        .then(() => {
-          this.emit({
-            type: "simulator/terminate-app/response",
-            payload: { requestId, error: null },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/terminate-app/response",
-            payload: { requestId, error: fail(error) },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/open-url") {
-      const { requestId } = msg;
-      return this.simulatorService
-        .openUrl(msg.udid, msg.url)
-        .then(() => {
-          this.emit({ type: "simulator/open-url/response", payload: { requestId, error: null } });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/open-url/response",
-            payload: { requestId, error: fail(error) },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/slim") {
-      const { requestId, udid } = msg;
-      return this.simulatorService
-        .slim(udid, msg.reboot ?? false)
-        .then((slimState) => {
-          this.emit({
-            type: "simulator/slim/response",
-            payload: { requestId, error: null, udid, slimState },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/slim/response",
-            payload: { requestId, error: fail(error), udid, slimState: "unknown" },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/unslim") {
-      const { requestId, udid } = msg;
-      return this.simulatorService
-        .unslim(udid)
-        .then((slimState) => {
-          this.emit({
-            type: "simulator/unslim/response",
-            payload: { requestId, error: null, udid, slimState },
-          });
-          return undefined;
-        })
-        .catch((error) => {
-          this.emit({
-            type: "simulator/unslim/response",
-            payload: { requestId, error: fail(error), udid, slimState: "unknown" },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/subscribe") {
-      const { requestId, subscriptionId } = msg;
-      this.emit({
-        type: "simulator/subscribe/response",
-        payload: { requestId, error: null, subscriptionId },
-      });
-      void this.simulatorStreams.subscribeFleet(subscriptionId, (snapshot) => {
-        this.emit({ type: "simulator/snapshot", payload: { subscriptionId, ...snapshot } });
-      });
-      return undefined;
-    }
-    if (msg.type === "simulator/unsubscribe") {
-      const { requestId, subscriptionId } = msg;
-      this.simulatorStreams.unsubscribeFleet(subscriptionId);
-      this.emit({
-        type: "simulator/unsubscribe/response",
-        payload: { requestId, error: null, subscriptionId },
-      });
-      return undefined;
-    }
-    if (msg.type === "simulator/logs/subscribe") {
-      const { requestId, subscriptionId } = msg;
-      return this.simulatorStreams
-        .subscribeLogs(subscriptionId, msg.udid, (chunk) => {
-          this.emit({ type: "simulator/log-chunk", payload: { subscriptionId, chunk } });
-        })
-        .then(() => {
-          this.emit({
-            type: "simulator/logs/subscribe/response",
-            payload: { requestId, error: null, subscriptionId },
-          });
-          return undefined;
-        })
-        .catch((error: unknown) => {
-          this.emit({
-            type: "simulator/logs/subscribe/response",
-            payload: { requestId, error: deviceErrorText(error), subscriptionId },
-          });
-          return undefined;
-        });
-    }
-    if (msg.type === "simulator/logs/unsubscribe") {
-      const { requestId, subscriptionId } = msg;
-      this.simulatorStreams.unsubscribeLogs(subscriptionId);
-      this.emit({
-        type: "simulator/logs/unsubscribe/response",
-        payload: { requestId, error: null, subscriptionId },
-      });
-      return undefined;
-    }
-    return undefined;
-  }
-
   // Argo CD allowlist (spec 30.5): every argocd.* request is listed here AND handled in
   // ArgoCdSession.handle(); a type missing from either is never answered.
   // oxlint-disable-next-line complexity
@@ -5228,11 +4788,6 @@ export class Session {
   private dispatchFigmaMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     if (!this.figmaSession || !isFigmaRequest(msg)) return undefined;
     return this.figmaSession.handle(msg);
-  }
-
-  private dispatchSideloadMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    if (!this.sideloadSession?.handles(msg.type)) return undefined;
-    return this.sideloadSession.handle(msg);
   }
 
   private dispatchSshMessage(msg: SessionInboundMessage): Promise<void> | undefined {
@@ -10914,8 +10469,6 @@ export class Session {
     this.botsSession?.dispose();
     this.figmaSession?.dispose();
     await this.builtinSession.dispose();
-    this.simulatorStreams.disposeAll();
-    this.physicalDeviceSession?.dispose();
     for (const id of this.proxySubscriptionIds) this.proxyService.unsubscribe(id);
     this.proxySubscriptionIds.clear();
     this.terminalController.dispose();

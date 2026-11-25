@@ -18,7 +18,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { bytesToUtf8, decodeBase64, utf8ToBase64 } from "./base64";
+import { bytesToUtf8, decodeBase64, utf8ToBase64 } from "@/utils/base64-bytes";
 import { HeaderEditor, makeHeaderRows, rowsToHeaders, type HeaderRowValue } from "./header-editor";
 import { MessagePane } from "./message-editor";
 import { useSplitRatio, WbSplitBar } from "./wb-resize";

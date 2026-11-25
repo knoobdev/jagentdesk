@@ -36,7 +36,6 @@ import { type NativeSkillsService } from "./skills-native/index.js";
 import { type Skill } from "@jagentdesk/protocol/skills";
 import { type UsageHistoryStorage } from "./usage/usage-history-storage.js";
 import { type HostCapabilityService } from "./host-capabilities/service.js";
-import { type PhysicalDeviceHub } from "./devices/hub.js";
 import { type HostToolInstaller } from "./host-tools/installer.js";
 import { type HostCapabilities } from "@jagentdesk/protocol/host-capabilities";
 import { type LifetimeUsage, type UsageDayRollup } from "@jagentdesk/protocol/usage-history";
@@ -44,7 +43,6 @@ import { type ClusterRegistry } from "./cluster/cluster-registry.js";
 import { type ArgoCdService } from "./argocd/service.js";
 import { type DatabaseRegistry } from "./database/database-registry.js";
 import { SshService } from "./ssh/ssh-service.js";
-import { type SideloadService } from "./sideload/sideload-service.js";
 import { type RemoteExecService } from "./remote-exec/types.js";
 import { type CustomProviderService } from "./custom-providers/types.js";
 import { type FigmaService } from "./figma/service.js";
@@ -734,8 +732,6 @@ export class VoiceAssistantWebSocketServer {
 
   private hostCapabilities: HostCapabilityService | null = null;
 
-  private physicalDevices: PhysicalDeviceHub | null = null;
-
   private hostToolInstaller: HostToolInstaller | null = null;
 
   private unsubscribeHostCapabilities: (() => void) | null = null;
@@ -747,8 +743,6 @@ export class VoiceAssistantWebSocketServer {
   private readonly sshService: SshService;
 
   private readonly argocdService: ArgoCdService | null;
-
-  private readonly sideloadService: SideloadService | null;
 
   private readonly workspaceBaseBranch: WorkspaceBaseBranchService;
 
@@ -978,7 +972,6 @@ export class VoiceAssistantWebSocketServer {
     sessionShareService?: SessionShareService | null,
     sshService?: SshService | null,
     argocdService?: ArgoCdService | null,
-    sideloadService?: SideloadService | null,
     private readonly workspaceArchiveOperations: WorkspaceArchiveOperations = new WorkspaceArchiveOperations(),
   ) {
     this.logger = logger.child({ module: "websocket-server" });
@@ -1038,7 +1031,6 @@ export class VoiceAssistantWebSocketServer {
     this.databaseRegistry =
       databaseRegistry ?? new (require("./database/database-registry.js").DatabaseRegistry)();
     this.sshService = sshServiceOrInMemory(sshService);
-    this.sideloadService = sideloadService ?? null;
     this.scheduleService = requiredServices.scheduleService;
     this.checkoutDiffManager = requiredServices.checkoutDiffManager;
     this.github = github ?? createGitHubService();
@@ -1583,11 +1575,6 @@ export class VoiceAssistantWebSocketServer {
   }
 
   /** Spec 24.2: report what this host can run; re-broadcast server_info when it changes. */
-  // Spec 27: the daemon-wide physical device hub sessions route android:serial:*/ios:* udids to.
-  public setPhysicalDevices(hub: PhysicalDeviceHub | null): void {
-    this.physicalDevices = hub;
-  }
-
   public setHostCapabilities(
     service: HostCapabilityService | null,
     installer: HostToolInstaller | null = null,
@@ -2358,12 +2345,10 @@ export class VoiceAssistantWebSocketServer {
       usageHistory: this.usageHistory,
       hostCapabilities: this.hostCapabilities,
       hostToolInstaller: this.hostToolInstaller,
-      physicalDevices: this.physicalDevices,
       clusterRegistry: this.clusterRegistry,
       databaseRegistry: this.databaseRegistry,
       sshService: this.sshService,
       argocdService: this.argocdService,
-      sideloadService: this.sideloadService,
       botsService: this.botsService,
       figmaService: this.figmaService,
       remoteExecService: this.remoteExecService,
@@ -2938,8 +2923,9 @@ export class VoiceAssistantWebSocketServer {
         // connect engine, and SSH terminal sessions.
         // COMPAT(sshServers): added after v0.8.0, remove gate after 2027-03-01; retain advertisement.
         sshServers: true,
-        sideload: this.sideloadService !== null,
-        sideloadHostBrowse: this.sideloadService !== null,
+        // Devices owns Sideload; its built-in state masks these.
+        sideload: true,
+        sideloadHostBrowse: true,
         // Autonomous run (spec §20 / ADR-0017). Default OFF: advertised only when the
         // daemon opted in (autorunService wired). Gates the whole autorun.* surface;
         // autorunApproval gates the per-action-approval mode toggle (§20.7.3).

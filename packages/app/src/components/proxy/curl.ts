@@ -2,7 +2,7 @@ import type {
   ProxyTransactionFull,
   ProxyTransactionRow,
 } from "@jagentdesk/protocol/proxy/rpc-schemas";
-import { bytesToUtf8, decodeBase64 } from "./base64";
+import { bytesToUtf8, decodeBase64 } from "@/utils/base64-bytes";
 
 // Burp's "Copy URL" / "Copy as cURL" — the two clipboard actions the history context menu offers in
 // P1. The absolute URL omits the port when it is the scheme default, matching what Burp shows.

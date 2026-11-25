@@ -8,7 +8,7 @@ import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import type { Theme } from "@/styles/theme";
 import { Button } from "@/components/ui/button";
-import { decodeBase64, bytesToUtf8 } from "./base64";
+import { decodeBase64, bytesToUtf8 } from "@/utils/base64-bytes";
 import { WB_ORANGE } from "./workbench-constants";
 
 // ---------------------------------------------------------------------------

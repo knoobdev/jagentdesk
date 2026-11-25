@@ -7,6 +7,8 @@ import { useSessionStore } from "@/stores/session-store";
 import { useHosts } from "@/runtime/host-runtime";
 import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { useIsCompactFormFactor } from "@/constants/layout";
+import { hostSupportsCapability } from "@/utils/server-info-capabilities";
+import { mobileNavTileTestID } from "@/components/sidebar/nav-test-ids";
 import type { AppNavItem } from "@/components/sidebar/use-app-nav";
 import { builtinClientRegistry } from "./loaded";
 import type {
@@ -29,6 +31,7 @@ export function useBuiltinDestinations(pathname: string, slot = DEFAULT_SLOT): A
     ? decodeURIComponent(match)
     : (selection?.serverId ?? hosts[0]?.serverId ?? "");
   const entries = useBuiltinClientContributions(serverId);
+  const info = useSessionStore((state) => state.sessions[serverId]?.serverInfo);
   const compact = useIsCompactFormFactor();
   return useMemo(
     () =>
@@ -36,19 +39,24 @@ export function useBuiltinDestinations(pathname: string, slot = DEFAULT_SLOT): A
         ? []
         : [...entries.values()].flatMap((entry) =>
             (compact ? entry.mobileEntries : entry.destinations)
-              .filter((destination) => (destination.slot ?? DEFAULT_SLOT) === slot)
+              .filter(
+                (destination) =>
+                  (destination.slot ?? DEFAULT_SLOT) === slot &&
+                  (!destination.hostCapabilities ||
+                    hostSupportsCapability(info, destination.hostCapabilities)),
+              )
               .map((destination) => ({
                 key: destination.id,
                 group: destination.group,
                 label: destination.title,
-                shortLabel: destination.title,
+                shortLabel: destination.shortTitle ?? destination.title,
                 icon: destination.icon,
                 route: destination.route(serverId),
                 isActive: pathname.includes(`/${destination.routeSegment}`),
                 testID: `rail-${destination.id}`,
               })),
           ),
-    [compact, entries, pathname, serverId, slot],
+    [compact, entries, info, pathname, serverId, slot],
   );
 }
 export function BuiltinLeftPanel({ serverId, segment }: BuiltinClientProps & { segment: string }) {
@@ -94,7 +102,7 @@ function BuiltinSidebarDestination({ item }: { item: AppNavItem }) {
       label={item.label}
       onPress={onPress}
       isActive={item.isActive}
-      testID={`sidebar-${item.key}-nav`}
+      testID={mobileNavTileTestID(item.key, `sidebar-${item.key}-nav`)}
       variant="compact"
     />
   );

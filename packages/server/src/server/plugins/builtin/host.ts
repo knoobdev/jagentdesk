@@ -40,11 +40,14 @@ export interface BuiltinHostToolPermissionRequest {
 /** Per-agent catalog context: approval stays in core; the feature only asks for it. */
 export interface BuiltinAgentToolContext {
   callerAgentId: string | null;
+  /** The calling agent's non-empty title, for permission prompts. */
+  callerAgentTitle(): string | null;
   requestPermission(
     agentId: string,
     request: BuiltinHostToolPermissionRequest,
   ): Promise<AgentPermissionResponse>;
   service: BuiltinServiceLookup;
+  provided: BuiltinProvidedLookup;
 }
 export interface BuiltinAgentToolOptions {
   /** Catalog position. Core calls each slot where the tools were registered before migration. */
@@ -66,8 +69,29 @@ export interface BuiltinSessionOptions {
    * the contribution forwards daemon pushes the client listens for before sending any request. */
   eager?: boolean;
 }
+/**
+ * Services one built-in offers the built-ins that require it. Core declares each contract so a
+ * feature never imports another feature; the consumer's `requires` keeps the provider enabled.
+ */
+export interface BuiltinProvidedServices {
+  /** Devices: install one app file on several iOS simulators (Workbench's sim_install_batch). */
+  "devices.simulator-installer": {
+    installOnMany(
+      udids: string[],
+      filePath: string,
+    ): Promise<{ udid: string; ok: boolean; error: string | null }[]>;
+  };
+}
+export type BuiltinProvidedLookup = <K extends keyof BuiltinProvidedServices>(
+  key: K,
+) => BuiltinProvidedServices[K] | undefined;
 export interface BuiltinSessionServices extends BuiltinCoreServices {
   service: BuiltinServiceLookup;
+  provided: BuiltinProvidedLookup;
+  /** Whether this client declared a client capability (for example binary screen frames). */
+  supportsClientCapability(capability: string): boolean;
+  /** Bytes queued on this client's transport, or null when unknown (backpressure). */
+  transportBufferedAmount(): number | null;
   terminals?: TerminalManager | null;
   remoteDocker: () => RemoteDockerHosts | undefined;
   push(message: SessionOutboundMessage): void;
@@ -144,6 +168,7 @@ export interface BuiltinServerHost {
   ): void;
   /** Bots poll every registered source while this plugin is enabled. */
   botTriggerSource(source: BuiltinBotTriggerSource): void;
+  provide<K extends keyof BuiltinProvidedServices>(key: K, value: BuiltinProvidedServices[K]): void;
 }
 interface RpcRegistration {
   id: BuiltinPluginId;
@@ -153,6 +178,7 @@ interface RpcRegistration {
   eager: boolean;
 }
 interface ToolRegistration {
+  id: BuiltinPluginId;
   install: (registerTool: RegisterBuiltinTool, context: BuiltinAgentToolContext) => void;
   slot: string;
 }
@@ -165,7 +191,8 @@ const DEFAULT_TOOL_SLOT = "default";
 export class BuiltinServerRegistry {
   private readonly rpcs = new Map<string, RpcRegistration>();
   private readonly backgrounds = new Map<BuiltinPluginId, BackgroundRegistration>();
-  private readonly tools = new Map<BuiltinPluginId, ToolRegistration>();
+  private readonly tools: ToolRegistration[] = [];
+  private readonly providedServices = new Map<string, unknown>();
   private readonly triggers = new Map<BuiltinPluginId, BuiltinBotTriggerSource>();
   /** Daemon services keyed by daemon home: several daemons can share one test process. */
   private readonly scopes = new Map<string, Map<symbol, BuiltinBackgroundService>>();
@@ -193,8 +220,14 @@ export class BuiltinServerRegistry {
         return handle;
       },
       agentTools: (install, options) => {
-        if (this.tools.has(id)) throw new Error(`Duplicate built-in tools: ${id}`);
-        this.tools.set(id, { install, slot: options?.slot ?? DEFAULT_TOOL_SLOT });
+        const slot = options?.slot ?? DEFAULT_TOOL_SLOT;
+        if (this.tools.some((tools) => tools.id === id && tools.slot === slot))
+          throw new Error(`Duplicate built-in tools: ${id}/${slot}`);
+        this.tools.push({ id, install, slot });
+      },
+      provide: (key, value) => {
+        if (this.providedServices.has(key)) throw new Error(`Duplicate provided service: ${key}`);
+        this.providedServices.set(key, value);
       },
       botTriggerSource: (source) => {
         if (this.triggers.has(id)) throw new Error(`Duplicate built-in bot trigger source: ${id}`);
@@ -202,6 +235,8 @@ export class BuiltinServerRegistry {
       },
     };
   }
+  provided: BuiltinProvidedLookup = (key) =>
+    this.providedServices.get(key) as BuiltinProvidedServices[typeof key] | undefined;
   /** Resolves a daemon service for the daemon rooted at `home`. */
   lookup(home: string): BuiltinServiceLookup {
     return <T>(handle: BuiltinServiceHandle<T>) =>
@@ -247,7 +282,7 @@ export class BuiltinServerRegistry {
     };
   }
   toolSlots(): string[] {
-    return [...new Set([...this.tools.values()].map((tools) => tools.slot))];
+    return [...new Set(this.tools.map((tools) => tools.slot))];
   }
   rpcNames(): string[] {
     return [...this.rpcs.keys()].sort();
@@ -264,17 +299,19 @@ export class BuiltinServerRegistry {
   ): void {
     const toolContext: BuiltinAgentToolContext = {
       callerAgentId: context.callerAgentId ?? null,
+      callerAgentTitle: context.callerAgentTitle ?? (() => null),
       requestPermission:
         context.requestPermission ??
         (() => Promise.reject(new Error("Tool permission requests are unavailable"))),
       service: context.service ?? (() => undefined),
+      provided: this.provided,
     };
-    for (const [id, tools] of this.tools) {
+    for (const tools of this.tools) {
       if (tools.slot !== slot) continue;
       tools.install((name, config, handler) => {
         // Keep names reserved while disabled so installed hooks cannot replace core tools.
         reserve?.(name);
-        if (!snapshot || snapshot.has(id)) register(name, config, handler);
+        if (!snapshot || snapshot.has(tools.id)) register(name, config, handler);
       }, toolContext);
     }
   }

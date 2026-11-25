@@ -7,7 +7,7 @@ import type {
   ProxyTransactionFull,
 } from "@jagentdesk/protocol/proxy/rpc-schemas";
 import type { Theme } from "@/styles/theme";
-import { bytesToUtf8, decodeBase64 } from "./base64";
+import { bytesToUtf8, decodeBase64 } from "@/utils/base64-bytes";
 import { WbButton } from "./wb-button";
 import { WB_ORANGE } from "./workbench-constants";
 

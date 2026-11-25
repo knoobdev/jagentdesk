@@ -47,6 +47,9 @@ test("one RPC registration admits and dispatches, toggles lifecycle once, and sn
   const session = registry.session(state, {
     ...createBuiltinCoreServices(home, pino({ level: "silent" }), config),
     service: registry.lookup(home),
+    provided: registry.provided,
+    supportsClientCapability: () => false,
+    transportBufferedAmount: () => null,
     remoteDocker: () => undefined,
     push: () => {},
     pushBinary: () => {},
@@ -152,6 +155,9 @@ test("daemon services resolve per home; eager sessions, tool slots and bot trigg
   const session = registry.session(state, {
     ...createBuiltinCoreServices(home, pino({ level: "silent" }), config),
     service: registry.lookup(home),
+    provided: registry.provided,
+    supportsClientCapability: () => false,
+    transportBufferedAmount: () => null,
     remoteDocker: () => undefined,
     push: () => {},
     pushBinary: () => {},

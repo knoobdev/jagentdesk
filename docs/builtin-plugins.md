@@ -45,7 +45,12 @@ migration needs another shared core service; do not import core implementation f
 feature. The facade exposes shared Docker/process/pty primitives, the secret store class, the
 host tool installer, and tool types. Per-session
 services provide the logger, config store, secret store, SQLite opener, Docker service factory
-and remote routing, binary frame codecs, terminal manager, structured push, and binary push.
+and remote routing, binary frame codecs, terminal manager, structured push, binary push, the
+client's capabilities, and its transport backlog. `core.daemon` carries the hooks only the
+bootstrap can supply: agent lifecycle events, broadcast to every client, and the offline push
+notice. Bootstrap starts the registry after the agent manager exists for that reason. Vendored
+daemon assets resolve through `vendorDirectoryCandidates`, because compiled features do not sit
+where `src/server` modules do.
 SQLite paths stay within the daemon's built-in storage directory. Prefix new secret keys and
 new database paths with the feature id. Preserve existing storage locations during migrations.
 
@@ -62,9 +67,15 @@ new database paths with the feature id. Preserve existing storage locations duri
   check live plugin state in a tool handler: existing agents retain their opening tool set.
   Approval and provider tool policy remain in core. `slot` keeps catalog order: core calls each
   slot where the tools were registered before migration (`default` with the kubectl/sql tools,
-  `integrations` after the bot tools, `late` before the voice tools).
+  `accounts` before the bot tools, `integrations` after them, `late` before the voice tools). A
+  plugin may register once per slot: Devices adds Sideload tools to `accounts` and `sim_*` to
+  `late`.
 - `host.botTriggerSource(source)` adds a source to the Bots poller while the plugin is enabled.
   Core supplies the poll clock and per-key state; the source owns its query and dedupe keys.
+- `host.provide(key, value)` offers a service to the built-ins that `require` this one; consumers
+  read it with `provided(key)` from session services or the tool context. Core declares each
+  contract in `BuiltinProvidedServices`, so features never import each other. Devices provides
+  the simulator installer Workbench's `sim_install_batch` uses.
 - `host.backgroundService(create)` registers a daemon-owned lifecycle through
   `BuiltinPluginState`. Its `start(signal)` receives a new abort signal for each enable; disable
   aborts it before cleanup. The host rejects start/stop operations that exceed five seconds. Use
@@ -115,7 +126,9 @@ a route screen, settings sections, mobile drawer entries, composer items, timeli
 attachment sources, composer pills for a core attachment kind (`attachmentPill`), and headless
 per-host mounts (`hostMount`, rendered once in the host route layout). Use the same destination
 metadata for desktop and mobile; a destination's `slot` places it where its row sat before
-migration, as with agent tools. Screens receive the selected `serverId`; never choose the first
+migration, as with agent tools. `hostCapabilities` hides it on hosts that report none of them,
+`shortTitle` keeps a shorter rail label, and existing `sidebar-*` test IDs come from
+`components/sidebar/nav-test-ids.ts`. Screens receive the selected `serverId`; never choose the first
 host inside a migrated screen.
 
 `BuiltinClientRegistry.visible` selects every contribution against live per-host server state.

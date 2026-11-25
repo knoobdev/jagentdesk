@@ -22,6 +22,7 @@ export type {
 export * as Clipboard from "expo-clipboard";
 export { router, useGlobalSearchParams, useLocalSearchParams, type Href } from "expo-router";
 export { useIsFocused } from "expo-router/react-navigation";
+export { Gesture, GestureDetector } from "react-native-gesture-handler";
 export { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export { isWeb } from "@/constants/platform";
@@ -93,3 +94,20 @@ export {
   buildSkillsRoute,
 } from "@/utils/host-routes";
 export { parseUnifiedDiff } from "@/utils/tool-call-parsers";
+// devices
+export { AdaptiveTextInput, type SheetHeader } from "@/components/adaptive-modal-sheet";
+export { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
+export { Alert } from "@/components/ui/alert";
+export { SegmentedControl, type SegmentedControlOption } from "@/components/ui/segmented-control";
+export { SkeletonLines } from "@/components/ui/skeleton";
+export { StatusBadge } from "@/components/ui/status-badge";
+export { Switch } from "@/components/ui/switch";
+export { useSimChatStore } from "@/stores/sim-chat-store";
+export { bytesToBase64 } from "@/utils/base64-bytes";
+// devices
+export { type WorkspaceDescriptor } from "@/stores/session-store";
+export { SIM_CHAT_MAX_WIDTH, SIM_CHAT_MIN_WIDTH } from "@/stores/sim-chat-store";
+export { formatTimeAgo } from "@/utils/time";
+// devices
+export { createDockWorkspace } from "@/components/dock-workspace";
+export { SIM_AGENT_LABEL } from "@/utils/dock-agents";

@@ -28,8 +28,6 @@ import { BuiltinPluginLoader } from "./plugins/builtin/index.js";
 import { withTimeout } from "../utils/promise-timeout.js";
 import { describeHookWorkspace } from "./plugins/lifecycle/index.js";
 import { WorkspaceArchiveOperations } from "./workspace-archive-operations.js";
-import { PhysicalDeviceHub } from "./devices/hub.js";
-import { clearGrantsWhenSessionsEnd } from "./devices/agent-grants.js";
 import { HostCapabilityService } from "./host-capabilities/service.js";
 import { closeAgentMessageDelivery } from "./agent/agent-prompt.js";
 import {
@@ -234,9 +232,6 @@ import type { TerminalManager } from "../terminal/terminal-manager.js";
 import { startWorkerTerminalManager } from "../terminal/worker-terminal-manager.js";
 import { createSshTerminalManager } from "../terminal/ssh-terminal-manager.js";
 import { SshService } from "./ssh/ssh-service.js";
-import { SideloadService, type SideloadSigner } from "./sideload/sideload-service.js";
-import { createSideloadAgentTools } from "./sideload/agent-tools.js";
-import { createSideloadDeviceSigner } from "./devices/sideload-signer.js";
 import { createFigmaService } from "./figma/create.js";
 import { createFigmaAgentTools } from "./figma/agent-tools.js";
 import { createRemoteExecAgentTools } from "./remote-exec/agent-tools.js";
@@ -572,8 +567,6 @@ export interface JAgentDeskDaemon {
   serviceProxy: ServiceProxySubsystem;
   scriptRuntimeStore: WorkspaceScriptRuntimeStore;
   browserToolsBroker: BrowserToolsBroker;
-  /** Sideload accounts other features sign with (spec 27 signs WebDriverAgent). */
-  sideload: SideloadSigner;
   start(): Promise<void>;
   /** Stops the daemon. Terminals keep running for the next daemon only with keepTerminals. */
   stop(options?: { keepTerminals?: boolean }): Promise<void>;
@@ -748,10 +741,6 @@ export async function createJAgentDeskDaemon(
     settingsDirectory: path.join(config.jagentdeskHome, "plugin-settings"),
   });
 
-  const stopBuiltinServices = await builtinServerRegistry.start(
-    pluginRuntime.builtin,
-    createBuiltinCoreServices(config.jagentdeskHome, logger, daemonConfigStore),
-  );
   const serverId = getOrCreateServerId(config.jagentdeskHome, { logger });
   const daemonKeyPair = await loadOrCreateDaemonKeyPair(config.jagentdeskHome, logger);
   const pairedDevices: PairedDeviceStore = createPairedDeviceStore({
@@ -1570,19 +1559,6 @@ export async function createJAgentDeskDaemon(
   });
   await clusterRegistry.initialize();
   logger.info("Cluster registry created");
-  // Spec 27 / ADR-0033: one owner for physical phones and tablets, shared by every client
-  // session and every agent's sim_* tools. Prepare device signs WebDriverAgent with a Sideload
-  // Apple account (spec 26); sideloadService is created further down, hence the late lookup.
-  let deviceSignerSource: SideloadService | null = null;
-  const physicalDevices = new PhysicalDeviceHub({
-    jagentdeskHome: config.jagentdeskHome,
-    logger,
-    signer: createSideloadDeviceSigner(() => deviceSignerSource),
-  });
-  const stopDeviceGrantWatch = clearGrantsWhenSessionsEnd(
-    (callback) => agentManager.subscribe(callback, { replayState: false }),
-    physicalDevices,
-  );
   const databaseRegistry = new DatabaseRegistry({
     jagentdeskHome: config.jagentdeskHome,
     logger,
@@ -1640,20 +1616,6 @@ export async function createJAgentDeskDaemon(
     logger.warn({ err: error }, "Remote-exec service unavailable");
     remoteExecService = null;
   }
-  // Sideload (spec 26 / ADR-0032): accounts, signing, installs and the hourly refresh job.
-  // Secrets stay in <home>/sideload's own secret store; prompts, progress and notices fan out
-  // to every client (wsServer is late-bound). The two env knobs shorten the refresh cycle for
-  // the 26.12.4 acceptance run; they are not user settings.
-  const sideloadService = new SideloadService({
-    jagentdeskHome: config.jagentdeskHome,
-    logger,
-    broadcast: (message) => wsServer?.broadcast(wrapSessionMessage(message)),
-    pushNotification: (notice) => wsServer?.sendSideloadPush(notice),
-    refreshIntervalMs: positiveEnvNumber("JAGENTDESK_SIDELOAD_REFRESH_INTERVAL_MS"),
-    clockOffsetMs: envNumber("JAGENTDESK_SIDELOAD_CLOCK_OFFSET_MS"),
-  });
-  logger.info("Sideload service initialized");
-  deviceSignerSource = sideloadService;
   // Argo CD (spec 30 / ADR-0034): registry + secrets under <home>/argocd, one SSE stream per
   // instance while viewed, and the argocd_* agent tools.
   const argocdService = new ArgoCdService({
@@ -1796,6 +1758,16 @@ export async function createJAgentDeskDaemon(
     { elapsed: elapsed(), enabled: config.sessionSharingEnabled === true },
     "Session share service initialized",
   );
+  // Built-in feature services start after the agent manager exists: they subscribe to agent
+  // events and reach clients through the WebSocket server once it is bound.
+  const stopBuiltinServices = await builtinServerRegistry.start(
+    pluginRuntime.builtin,
+    createBuiltinCoreServices(config.jagentdeskHome, logger, daemonConfigStore, {
+      subscribeAgentEvents: (callback) => agentManager.subscribe(callback, { replayState: false }),
+      broadcast: (message) => wsServer?.broadcast(wrapSessionMessage(message)),
+      pushNotification: (notice) => wsServer?.sendSideloadPush(notice),
+    }),
+  );
   await pluginRuntime.builtin.registerLifecycle("clusters", {
     start: () => {},
     stop: async () => {
@@ -1849,13 +1821,6 @@ export async function createJAgentDeskDaemon(
   await pluginRuntime.builtin.registerLifecycle("argocd", {
     start: () => argocdService.initialize(),
     stop: () => argocdService.dispose(),
-  });
-  await pluginRuntime.builtin.registerLifecycle("devices", {
-    start: () => sideloadService.initialize(),
-    stop: () => {
-      sideloadService.dispose();
-      physicalDevices.dispose();
-    },
   });
   await pluginRuntime.builtin.registerLifecycle("workbench", {
     start: () => {},
@@ -2075,13 +2040,6 @@ export async function createJAgentDeskDaemon(
         requestPermission: (agentId, request) =>
           agentManager.requestHostToolPermission(agentId, request),
       }),
-    sideloadAgentTools: (callerAgentId) =>
-      createSideloadAgentTools({
-        service: sideloadService,
-        callerAgentId,
-        requestPermission: (agentId, request) =>
-          agentManager.requestHostToolPermission(agentId, request),
-      }),
     botAgentTools: (callerAgentId) =>
       createBotAgentTools({
         service: botsService,
@@ -2121,7 +2079,6 @@ export async function createJAgentDeskDaemon(
     },
     requestHostToolPermission: (agentId, req) =>
       agentManager.requestHostToolPermission(agentId, req),
-    physicalDevices,
     logger,
   });
   const createAgentToolCatalog = (runtime: JAgentDeskToolRuntimeContext) =>
@@ -2302,7 +2259,6 @@ export async function createJAgentDeskDaemon(
             });
             setSharedHostToolInstaller(hostToolInstaller);
             server.setHostCapabilities(hostCapabilities, hostToolInstaller);
-            server.setPhysicalDevices(physicalDevices);
             void hostCapabilities.refresh().catch((error: unknown) => {
               logger.warn({ err: error }, "Host capability probe failed");
             });
@@ -2451,7 +2407,6 @@ export async function createJAgentDeskDaemon(
               sessionShareService,
               sshService,
               argocdService,
-              sideloadService,
               workspaceArchiveOperations,
             );
             wsServer.setHostDial(async (target) => {
@@ -2662,8 +2617,6 @@ export async function createJAgentDeskDaemon(
       logger.error({ err: error }, "Terminal shutdown failed");
     }
     unsubscribeBuiltinAgentSnapshots();
-    stopDeviceGrantWatch();
-    physicalDevices.dispose();
     await sshModules.dispose().catch(() => undefined);
     if (unsubscribeRemoteExecJobs) {
       unsubscribeRemoteExecJobs();
@@ -2673,7 +2626,6 @@ export async function createJAgentDeskDaemon(
     await sshServerModules.dispose().catch(() => undefined);
     sshService.dispose();
     argocdService.dispose();
-    sideloadService.dispose();
     await botsSlack.dispose();
     await botsService.dispose();
     void figmaService.dispose();
@@ -2719,23 +2671,10 @@ export async function createJAgentDeskDaemon(
     serviceProxy,
     scriptRuntimeStore,
     browserToolsBroker,
-    sideload: sideloadService,
     start,
     stop,
     getListenTarget: () => boundListenTarget,
   };
-}
-
-function envNumber(name: string): number | undefined {
-  const raw = process.env[name];
-  if (raw === undefined || raw.trim() === "") return undefined;
-  const value = Number(raw);
-  return Number.isFinite(value) ? value : undefined;
-}
-
-function positiveEnvNumber(name: string): number | undefined {
-  const value = envNumber(name);
-  return value !== undefined && value > 0 ? value : undefined;
 }
 
 // The app web build bundled next to the server dist (dist/server/share-app-dist), copied there by

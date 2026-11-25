@@ -243,14 +243,11 @@ interface SidebarSharedProps {
   handleSkills: () => void;
   handleInsights: () => void;
   handleMarketplace: () => void;
-  handleSimulator: () => void;
   handleWorkbench: () => void;
   /** Spec 25: SSH Servers entry only when the daemon advertises sshServers. */
   supportsSshServers: boolean;
   /** Spec 30.3: Argo CD entry only when the daemon advertises argocd. */
   supportsArgoCd: boolean;
-  /** Some connected host can run simulators (spec 24.4). */
-  supportsDevices: boolean;
   labels: SidebarLabels;
   newWorkspaceKeys: ShortcutKey[][] | null;
   handleAddHost: () => void;
@@ -276,7 +273,6 @@ interface SidebarLabels {
   skills: string;
   insights: string;
   marketplace: string;
-  simulator: string;
   workbench: string;
   closeSidebar: string;
 }
@@ -389,7 +385,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     skillsRoute,
     insightsRoute,
     marketplaceRoute,
-    simulatorRoute,
     proxyRoute,
     argoCdRoute,
   } = useAppNavTargets();
@@ -403,9 +398,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
   const handleMarketplaceDesktop = useCallback(() => {
     if (marketplaceRoute) router.push(marketplaceRoute);
   }, [marketplaceRoute]);
-  const handleSimulatorDesktop = useCallback(() => {
-    if (simulatorRoute) router.push(simulatorRoute as Href);
-  }, [simulatorRoute]);
   const handleWorkbenchDesktop = useCallback(() => {
     if (proxyRoute) router.push(proxyRoute as Href);
   }, [proxyRoute]);
@@ -475,13 +467,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     }
   }, [marketplaceRoute, showMobileAgent]);
 
-  const handleSimulatorMobile = useCallback(() => {
-    if (simulatorRoute) {
-      showMobileAgent();
-      router.push(simulatorRoute as Href);
-    }
-  }, [simulatorRoute, showMobileAgent]);
-
   const handleWorkbenchMobile = useCallback(() => {
     if (proxyRoute) {
       showMobileAgent();
@@ -524,7 +509,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       skills: "Skills",
       insights: "Insights",
       marketplace: t("sidebar.actions.marketplace"),
-      simulator: "Simulators",
       workbench: "Workbench",
       closeSidebar: t("sidebar.actions.closeSidebar"),
     }),
@@ -552,11 +536,9 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     handleSkills: handleSkillsDesktop,
     handleInsights: handleInsightsDesktop,
     handleMarketplace: handleMarketplaceDesktop,
-    handleSimulator: handleSimulatorDesktop,
     handleWorkbench: handleWorkbenchDesktop,
     supportsSshServers,
     supportsArgoCd: argoCdRoute !== null,
-    supportsDevices: simulatorRoute !== null,
     labels,
     newWorkspaceKeys,
   };
@@ -573,7 +555,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
           handleSkills={handleSkillsMobile}
           handleInsights={handleInsightsMobile}
           handleMarketplace={handleMarketplaceMobile}
-          handleSimulator={handleSimulatorMobile}
           handleWorkbench={handleWorkbenchMobile}
           insetsTop={insets.top}
           insetsBottom={insets.bottom}
@@ -599,7 +580,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
         handleSkills={handleSkillsDesktop}
         handleInsights={handleInsightsDesktop}
         handleMarketplace={handleMarketplaceDesktop}
-        handleSimulator={handleSimulatorDesktop}
         handleWorkbench={handleWorkbenchDesktop}
         insetsTop={insets.top}
         insetsBottom={insets.bottom}
@@ -1119,11 +1099,9 @@ function DesktopSidebar({
   handleSkills,
   handleInsights,
   handleMarketplace,
-  handleSimulator,
   handleWorkbench,
   supportsSshServers,
   supportsArgoCd,
-  supportsDevices,
   labels,
   handleAddHost,
   handleOpenHostSettings,
@@ -1152,7 +1130,6 @@ function DesktopSidebar({
   const isSkillsActive = pathname.includes("/skills");
   const isInsightsActive = pathname.includes("/insights");
   const isMarketplaceActive = pathname.includes("/marketplace");
-  const isSimulatorActive = pathname.includes("/simulator");
   const isWorkbenchActive = pathname.includes("/proxy");
   const clusterRouteMatch = pathname.match(/\/h\/([^/]+)\/cluster\/([^/]+)/);
   const clusterRoute = clusterRouteMatch
@@ -1380,16 +1357,6 @@ function DesktopSidebar({
               variant="compact"
             />
             <BuiltinSidebarDestinations />
-            {supportsDevices ? (
-              <SidebarHeaderRow
-                icon={Smartphone}
-                label={labels.simulator}
-                onPress={handleSimulator}
-                isActive={isSimulatorActive}
-                testID="sidebar-simulator-nav"
-                variant="compact"
-              />
-            ) : null}
             <NavTargetGate route={builtinTargets.proxyRoute}>
               <SidebarHeaderRow
                 icon={Radar}

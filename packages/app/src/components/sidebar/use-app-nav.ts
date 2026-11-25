@@ -1,7 +1,6 @@
 import { useBuiltinDestinations } from "@/plugins/builtin/surfaces";
 import { useOpenSidebarUsage } from "@/usage/sidebar-item";
 import { useBuiltinPluginEnabled } from "@/plugins/builtin/hooks";
-import { builtinPluginEnabled } from "@/plugins/builtin/registry";
 import { router, usePathname, type Href } from "expo-router";
 import { useCallback, useMemo } from "react";
 import {
@@ -18,7 +17,6 @@ import {
   Server,
   Share2,
   Ship,
-  Smartphone,
   Sparkles,
   Store,
   type LucideIcon,
@@ -31,17 +29,7 @@ import { useClusterNavStore } from "@/stores/cluster-nav-store";
 import { useDatabaseNavStore } from "@/stores/database-nav-store";
 import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { useSessionStore } from "@/stores/session-store";
-import { hostSupportsCapability } from "@/utils/server-info-capabilities";
-import type { HostCapabilityId } from "@jagentdesk/protocol/host-capabilities";
 
-/** Capabilities behind the device fleet: simulators, physical phones (spec 27.2), or sideload (26.9). */
-const DEVICE_CAPABILITIES: readonly HostCapabilityId[] = [
-  "iosSimulators",
-  "androidDevices",
-  "androidPhysical",
-  "iosPhysical",
-  "iosSideload",
-];
 import { useWorkspace } from "@/stores/session-store-hooks";
 import {
   buildArgoCdRoute,
@@ -58,7 +46,6 @@ import {
   buildServersRoute,
   buildSessionsRoute,
   buildSharedSessionsRoute,
-  buildSimulatorRoute,
   buildProxyRoute,
   buildSkillsRoute,
 } from "@/utils/host-routes";
@@ -73,7 +60,6 @@ export interface AppNavTargets {
   skillsRoute: Href | null;
   insightsRoute: Href | null;
   marketplaceRoute: Href | null;
-  simulatorRoute: Href | null;
   proxyRoute: Href | null;
   /** Spec 30.3: the daemon ships Argo CD; null hides the entry. */
   argoCdRoute: Href | null;
@@ -109,16 +95,6 @@ export function useAppNavTargets(): AppNavTargets {
   const supportsArgoCd = useSessionStore(
     (state) => state.sessions[firstServerId]?.serverInfo?.features?.argocd === true,
   );
-  // Spec 24.4: devices open on the first host that can run simulators; none → no entry.
-  const deviceServerId = useSessionStore(
-    (state) =>
-      hosts.find(
-        (host) =>
-          host.serverId === firstServerId &&
-          builtinPluginEnabled(state.sessions[host.serverId]?.serverInfo, "devices") &&
-          hostSupportsCapability(state.sessions[host.serverId]?.serverInfo, DEVICE_CAPABILITIES),
-      )?.serverId ?? null,
-  );
   return useMemo(() => {
     const perHost = (build: (serverId: string) => string): Href | null =>
       firstServerId ? (build(firstServerId) as Href) : null;
@@ -150,7 +126,6 @@ export function useAppNavTargets(): AppNavTargets {
       skillsRoute: skillsEnabled ? perHost(buildSkillsRoute) : null,
       insightsRoute: insightsEnabled ? perHost(buildInsightsRoute) : null,
       marketplaceRoute: perHost(buildMarketplaceRoute),
-      simulatorRoute: deviceServerId ? (buildSimulatorRoute(deviceServerId) as Href) : null,
       proxyRoute: workbenchEnabled ? perHost(buildProxyRoute) : null,
       argoCdRoute: supportsArgoCd ? perHost(buildArgoCdRoute) : null,
       supportsSshServers,
@@ -165,7 +140,6 @@ export function useAppNavTargets(): AppNavTargets {
     workbenchEnabled,
     sharingEnabled,
     supportsFigma,
-    deviceServerId,
     firstServerId,
     lastCluster,
     lastDatabase,
@@ -250,15 +224,6 @@ export function useAppNavItems(): AppNavItem[] {
         "/marketplace",
       ),
       ...builtinDestinations,
-      navItem(
-        "simulators",
-        Smartphone,
-        "Simulators",
-        "Sims",
-        targets.simulatorRoute,
-        pathname,
-        "/simulator",
-      ),
       navItem("workbench", Radar, "Workbench", "WB", targets.proxyRoute, pathname, "/proxy"),
       navItem(
         "databases",

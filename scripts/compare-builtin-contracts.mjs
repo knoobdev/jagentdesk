@@ -29,6 +29,22 @@ const PLUGINS = {
     toolFiles: ["packages/server/src/server/jira/agent-tools.ts"],
     tool: /name: "(jira_[a-z_]+)"/g,
   },
+  devices: {
+    rpcFiles: [
+      SESSION,
+      "packages/server/src/server/session/devices/physical-device-session.ts",
+      "packages/server/src/server/session/sideload/sideload-session.ts",
+    ],
+    rpcPattern: /(?:msg\.type === |case )"([^"]+)"/g,
+    rpc: (name) =>
+      (name.startsWith("simulator/") && !name.endsWith("/response")) ||
+      requests("sideload.")(name) ||
+      requests("android.")(name),
+    toolFiles: [TOOLS, "packages/server/src/server/sideload/agent-tools.ts"],
+    // sim_install_batch belongs to Workbench's capture tools.
+    tool: /(?:(?:registerTool|registerSimulatorOnly|actionTool)\(\s*|name: )"((?:sim|sideload|android)_[a-z_]+)"/g,
+    excludeTools: ["sim_install_batch"],
+  },
   "forge-hub": {
     rpcFiles: [SESSION],
     // forge.search.request is the core checkout search, not Forge Hub.
@@ -80,12 +96,14 @@ function i18n(revision) {
 function baselineDump(id) {
   const plugin = PLUGINS[id];
   const rpc = plugin.rpcFiles
-    .flatMap((file) => [...read(baseline, file).matchAll(/"([a-z][a-z0-9_./-]*)"/g)])
+    .flatMap((file) => [
+      ...read(baseline, file).matchAll(plugin.rpcPattern ?? /"([a-z][a-z0-9_./-]*)"/g),
+    ])
     .map((match) => match[1])
     .filter(plugin.rpc);
-  const tools = plugin.toolFiles.flatMap((file) =>
-    [...read(baseline, file).matchAll(plugin.tool)].map((match) => match[1]),
-  );
+  const tools = plugin.toolFiles
+    .flatMap((file) => [...read(baseline, file).matchAll(plugin.tool)].map((match) => match[1]))
+    .filter((name) => !plugin.excludeTools?.includes(name));
   // SSH servers re-register the server-aware docker_* tools under the same names.
   if (id === "docker") {
     const remote = read(baseline, "packages/server/src/server/ssh/remote-docker/agent-tools.ts");

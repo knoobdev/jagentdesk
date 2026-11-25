@@ -5,7 +5,7 @@ import type { ProxyHeader, ProxyTransactionFull } from "@jagentdesk/protocol/pro
 import { useIsCompactFormFactor } from "@/constants/layout";
 import type { Theme } from "@/styles/theme";
 import { WB_ORANGE } from "./workbench-constants";
-import { bytesToUtf8, decodeBase64 } from "./base64";
+import { bytesToUtf8, decodeBase64 } from "@/utils/base64-bytes";
 import { useSplitRatio, WbSplitBar } from "./wb-resize";
 
 // The Burp message editor: request on the left, response on the right (stacked on phones), each

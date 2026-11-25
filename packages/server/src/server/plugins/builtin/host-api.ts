@@ -19,6 +19,8 @@ export { ensurePrivateDirectory, writePrivateFileAtomicSync } from "../../privat
 export type { AgentPermissionResponse } from "../../agent/agent-sdk-types.js";
 export type { JAgentDeskToolDefinition } from "../../agent/tools/types.js";
 export type { BotTrigger } from "../../bots/service.js";
+export type { BuiltinCoreServices } from "./services.js";
+export { staticHostSupport } from "../../host-capabilities/service.js";
 export type {
   BuiltinAgentToolContext,
   BuiltinBotTriggerContext,
@@ -36,3 +38,9 @@ export { sharedHostToolInstaller } from "../../host-tools/shared-installer.js";
 export { spawn as spawnPty, type IPty as Pty } from "node-pty";
 export { getToolDefinition, hostTarget } from "../../host-tools/registry.js";
 export { createExternalCommandProcessEnv } from "../../jagentdesk-env.js";
+// devices
+export { writeJsonFileAtomic } from "../../atomic-file.js";
+export { androidSdkCandidates } from "../../host-capabilities/service.js";
+export { toolsBinDir } from "../../host-tools/installer.js";
+export { type SessionInboundMessage, type SessionOutboundMessage } from "../../messages.js";
+export { vendorDirectoryCandidates } from "../../vendor-directory.js";

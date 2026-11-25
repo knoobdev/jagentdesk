@@ -4,6 +4,8 @@ import Database from "better-sqlite3";
 import type { Logger } from "pino";
 import * as binaryFrames from "@jagentdesk/protocol/binary-frames/index";
 import type { DaemonConfigStore } from "../../daemon-config-store.js";
+import type { AgentManagerEvent } from "../../agent/agent-manager.js";
+import type { SessionOutboundMessage } from "../../messages.js";
 import { FileSecretStore } from "../../database/secret-store.js";
 import { DockerService } from "../../docker/docker-service.js";
 import { DockerStreams } from "../../docker/docker-streams.js";
@@ -12,7 +14,22 @@ import { routeDockerMessage, disposeRemoteDocker } from "../../ssh/remote-docker
 const secretStores = new WeakMap<DaemonConfigStore, FileSecretStore>();
 
 /** Core owns persistence and transports; features own their lifecycle and registrations. */
-export function createBuiltinCoreServices(home: string, logger: Logger, config: DaemonConfigStore) {
+/** Daemon-wide hooks only the bootstrap can supply; absent for per-session services in tests. */
+export interface BuiltinDaemonHooks {
+  /** Agent lifecycle events, as AgentManager.subscribe delivers them (no replay). */
+  subscribeAgentEvents?: (callback: (event: AgentManagerEvent) => void) => () => void;
+  /** Sends a session message to every connected client. */
+  broadcast?: (message: SessionOutboundMessage) => void;
+  /** Sends an OS notification to paired phones that are not connected. */
+  pushNotification?: (notice: { title: string; body: string }) => void;
+}
+
+export function createBuiltinCoreServices(
+  home: string,
+  logger: Logger,
+  config: DaemonConfigStore,
+  daemon: BuiltinDaemonHooks = {},
+) {
   let secrets = secretStores.get(config);
   if (!secrets) {
     secrets = new FileSecretStore(path.join(home, "builtin-plugins"));
@@ -21,6 +38,7 @@ export function createBuiltinCoreServices(home: string, logger: Logger, config: 
   return {
     /** The daemon home. Preserve a migrated feature's existing storage paths under it. */
     home,
+    daemon,
     logger,
     config,
     secrets,

@@ -12,12 +12,16 @@ export interface BuiltinClientProps {
 export interface BuiltinDestination {
   id: string;
   title: string;
+  /** Rail label when it differs from the title. */
+  shortTitle?: string;
   icon: LucideIcon;
   group: "Tools" | "main";
   route: (serverId: string) => string;
   routeSegment: string;
   /** Navigation position. Core renders each slot where the entry sat before migration. */
   slot?: string;
+  /** Shown only when the host reports at least one of these capabilities (spec 24.4). */
+  hostCapabilities?: readonly import("@jagentdesk/protocol/host-capabilities").HostCapabilityId[];
 }
 /** Renders a composer attachment of a core attachment kind owned by this feature. */
 export interface BuiltinAttachmentPillProps {
