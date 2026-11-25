@@ -1,31 +1,26 @@
-import { PageHeader } from "@/components/headers/page-header";
+import {
+  PageHeader,
+  useHostRuntimeClient,
+  confirmDialog,
+  useIsCompactFormFactor,
+  formatTokenCount,
+  Button,
+  usageHistoryQueryKey,
+  useIsGumloopTheme,
+  gumloopListStyles,
+  type Theme,
+} from "../../../packages/app/src/plugins/builtin/host-api";
+
 import { useCallback, useMemo, useState } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { BarChart3, Coins, Cpu, RefreshCw, Trash2, Users } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useQueryClient } from "@tanstack/react-query";
-import {
-  estimateCacheSavingsUsd,
-  formatSavingsUsd,
-  sumCacheSavingsUsd,
-} from "@/insights/token-pricing";
-import { useHostRouteServerId } from "@/navigation/host-route-context";
-import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import { confirmDialog } from "@/utils/confirm-dialog";
-import { useIsCompactFormFactor } from "@/constants/layout";
-import { formatTokenCount } from "@/components/context-window-meter.utils";
-import { Button } from "@/components/ui/button";
-import {
-  useUsageInsights,
-  type AgentUsageRow,
-  type ModelUsageRow,
-} from "@/insights/use-usage-insights";
-import { useUsageHistory, usageHistoryQueryKey } from "@/insights/use-usage-history";
-import { UsageTimelineCard } from "@/insights/usage-timeline-card";
+import { estimateCacheSavingsUsd, formatSavingsUsd, sumCacheSavingsUsd } from "./token-pricing";
+import { useUsageInsights, type AgentUsageRow, type ModelUsageRow } from "./use-usage-insights";
+import { useUsageHistory } from "./use-usage-history";
+import { UsageTimelineCard } from "./usage-timeline-card";
 import type { LifetimeUsage } from "@jagentdesk/protocol/usage-history";
-import type { Theme } from "@/styles/theme";
-import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
-import { gumloopListStyles } from "@/components/gumloop-shell/list-styles";
 
 const ThemedCoins = withUnistyles(Coins);
 const ThemedCpu = withUnistyles(Cpu);
@@ -242,12 +237,10 @@ function lifetimeModelRows(lifetime: LifetimeUsage): ModelUsageRow[] {
     .sort((a, b) => b.totalTokens - a.totalTokens);
 }
 
-export function InsightsScreen() {
-  // Read the host the user actually navigated into (like every sibling screen),
-  // not raw hosts[0]: on mobile (tailscale mode) getHosts() returns every host in
-  // registry order, so hosts[0] can be a different daemon than the viewed one and
-  // sessions[hosts[0].serverId] is empty → the whole dashboard reads zeros.
-  const serverId = useHostRouteServerId() ?? "";
+// The host the user navigated into (not raw hosts[0]): on mobile (tailscale mode) getHosts()
+// returns every host in registry order, so hosts[0] can be a different daemon than the viewed
+// one and sessions[hosts[0].serverId] is empty → the whole dashboard reads zeros.
+export function InsightsScreen({ serverId }: { serverId: string }) {
   const isCompact = useIsCompactFormFactor();
   const isGumloop = useIsGumloopTheme();
   const insights = useUsageInsights(serverId);

@@ -1,15 +1,12 @@
+import {
+  usageHistoryQueryKey,
+  useReplicaQuery,
+  useHostRuntimeClient,
+  useHostRuntimeIsConnected,
+  type UsageHistory,
+} from "../../../packages/app/src/plugins/builtin/host-api";
 import { useTranslation } from "react-i18next";
-import type { LifetimeUsage, UsageDayRollup } from "@jagentdesk/protocol/usage-history";
-import { useReplicaQuery } from "@/data/query";
-import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
-
-export const usageHistoryQueryKey = (serverId: string | null) => ["usage-history", serverId];
-
-export interface UsageHistory {
-  days: UsageDayRollup[];
-  /** Persistent lifetime total (baseline + all days); survives agent deletion. */
-  lifetime: LifetimeUsage;
-}
+import type { LifetimeUsage } from "@jagentdesk/protocol/usage-history";
 
 const EMPTY_LIFETIME: LifetimeUsage = {
   inputTokens: 0,

@@ -197,7 +197,6 @@ import {
 import { FileBackedChatService } from "./chat/chat-service.js";
 import { CheckoutDiffManager } from "./checkout-diff-manager.js";
 import { LoopService } from "./loop-service.js";
-import { buildLifetimeBaseline, UsageHistoryStorage } from "./usage/usage-history-storage.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseRegistry } from "./database/database-registry.js";
 import { ScheduleService } from "./schedule/service.js";
@@ -1127,8 +1126,6 @@ export async function createJAgentDeskDaemon(
       customProviderService.materializeOpenCodeProvider(providerId),
     claudeSpawnEnv: (providerId) => customProviderService.materializeClaudeEnv(providerId),
   });
-  const usageHistory = new UsageHistoryStorage(config.jagentdeskHome, logger);
-  await usageHistory.initialize();
   const initialAgentManagerState = providerSnapshotManager.getAgentManagerProviderState();
   const agentManager: AgentManager = new AgentManager({
     pluginLifecycle: pluginRuntime,
@@ -1143,31 +1140,12 @@ export async function createJAgentDeskDaemon(
     onWorkspaceStateMayHaveChanged: ({ cwd }) => {
       workspaceGitService.onWorkspaceStateMayHaveChanged(cwd);
     },
-    onUsageBilled: (billed) => usageHistory.record(billed),
+    // Insights records billed turns; agents cannot run before the built-ins start.
+    onUsageBilled: (billed) => builtinDaemon.port("usageHistory")?.record(billed),
     mcpAuthToken: agentMcpAuthToken,
     logger,
   });
 
-  // Built-in features' daemon services, ports, and background lifecycles (docs/builtin-plugins.md).
-  // The host capability probe is created with the WebSocket server below and assigned there.
-  let daemonHostCapabilities: HostCapabilityService | null = null;
-  const builtinDaemon = await builtinServerRegistry.start(
-    pluginRuntime.builtin,
-    createBuiltinCoreServices(config.jagentdeskHome, logger, daemonConfigStore),
-    {
-      home: config.jagentdeskHome,
-      agentManager,
-      agentStorage,
-      broadcast: (message) => wsServer?.broadcast(wrapSessionMessage(message)),
-      hostCapabilities: () => daemonHostCapabilities,
-      sendPush: (notice) => wsServer?.sendBuiltinPush(notice),
-    },
-  );
-  pluginRuntime.builtinDaemon = builtinDaemon;
-  // Spec mode's launch environment (spec 28): the provider process sees the shared checkout env.
-  agentManager.setLaunchEnvProvider(
-    (agentId) => builtinDaemon.enabledPort("specMode")?.launchEnv(agentId) ?? null,
-  );
   const unsubscribeBuiltinAgentSnapshots = agentManager.subscribe(
     (event) => {
       if (event.type === "agent_state") pluginRuntime.builtin.forAgent(event.agent.id);
@@ -1191,6 +1169,27 @@ export async function createJAgentDeskDaemon(
     agentStorage,
   );
   await agentStorage.initialize();
+  // Built-in features' daemon services, ports, and background lifecycles (docs/builtin-plugins.md).
+  // After storage loads: Insights seeds its lifetime baseline from stored agents.
+  // The host capability probe is created with the WebSocket server below and assigned there.
+  let daemonHostCapabilities: HostCapabilityService | null = null;
+  const builtinDaemon = await builtinServerRegistry.start(
+    pluginRuntime.builtin,
+    createBuiltinCoreServices(config.jagentdeskHome, logger, daemonConfigStore),
+    {
+      home: config.jagentdeskHome,
+      agentManager,
+      agentStorage,
+      broadcast: (message) => wsServer?.broadcast(wrapSessionMessage(message)),
+      hostCapabilities: () => daemonHostCapabilities,
+      sendPush: (notice) => wsServer?.sendBuiltinPush(notice),
+    },
+  );
+  pluginRuntime.builtinDaemon = builtinDaemon;
+  // Spec mode's launch environment (spec 28): the provider process sees the shared checkout env.
+  agentManager.setLaunchEnvProvider(
+    (agentId) => builtinDaemon.enabledPort("specMode")?.launchEnv(agentId) ?? null,
+  );
 
   const restartRecovery = createRestartRecovery({
     storage: agentStorage,
@@ -1245,22 +1244,6 @@ export async function createJAgentDeskDaemon(
   }).catch((error: unknown) => {
     logger.error({ err: error }, "Failed to restore finish subscriptions");
   });
-  // Seed the lifetime usage baseline once from existing agents so headline Usage
-  // & Cost figures include usage that predates the time-series and never drop
-  // when an agent is deleted. No-op if a baseline was already persisted.
-  try {
-    const records = await agentStorage.list();
-    usageHistory.seedBaselineIfEmpty(
-      buildLifetimeBaseline(
-        records.map((record) => ({
-          usageTotals: record.usageTotals,
-          model: record.config?.model ?? record.runtimeInfo?.model ?? record.provider,
-        })),
-      ),
-    );
-  } catch (error) {
-    logger.warn({ err: error }, "Failed to seed usage baseline from existing agents");
-  }
   await bootstrapWorkspaceRegistries({
     serverId,
     jagentdeskHome: config.jagentdeskHome,
@@ -2439,7 +2422,6 @@ export async function createJAgentDeskDaemon(
                 requireSignedHelloForDirect,
               },
               pluginRuntime,
-              usageHistory,
               databaseRegistry,
               sessionShareService,
               sshService,

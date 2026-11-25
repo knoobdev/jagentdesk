@@ -1,13 +1,15 @@
+import {
+  formatTokenCount,
+  useIsGumloopTheme,
+  gumloopTabStyles,
+  type Theme,
+} from "../../../packages/app/src/plugins/builtin/host-api";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { LayoutChangeEvent, Pressable, Text, View } from "react-native";
 import Svg, { Line, Rect, Text as SvgText } from "react-native-svg";
 import { StyleSheet } from "react-native-unistyles";
 import type { UsageDayRollup } from "@jagentdesk/protocol/usage-history";
-import { formatTokenCount } from "@/components/context-window-meter.utils";
-import { useUsageHistory } from "@/insights/use-usage-history";
-import type { Theme } from "@/styles/theme";
-import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
-import { gumloopTabStyles } from "@/components/gumloop-shell/list-styles";
+import { useUsageHistory } from "./use-usage-history";
 
 type Period = "day" | "month" | "year";
 const PERIODS: readonly Period[] = ["day", "month", "year"] as const;

@@ -156,7 +156,6 @@ function createRelayServerHarness(
     undefined,
     pairing,
     undefined,
-    undefined,
     createStub<DatabaseRegistry>({}),
   );
 

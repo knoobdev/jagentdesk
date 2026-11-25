@@ -1,3 +1,4 @@
+import { writeJsonFileAtomic } from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { Logger } from "pino";
@@ -12,7 +13,6 @@ import {
   type UsageBucket,
   type UsageDayRollup,
 } from "@jagentdesk/protocol/usage-history";
-import { writeJsonFileAtomic } from "../atomic-file.js";
 
 // v1 was a bare array of day rollups; v2 wraps it with a one-time lifetime
 // baseline so headline totals survive agent deletion. Accept both on load.

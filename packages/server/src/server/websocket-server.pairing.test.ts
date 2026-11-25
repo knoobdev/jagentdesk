@@ -146,7 +146,6 @@ function createPairingServerHarness(
     undefined,
     pairing,
     undefined,
-    undefined,
     createStub<DatabaseRegistry>({}),
   );
 

@@ -32,12 +32,10 @@ import { type ProjectRegistry, type WorkspaceRegistry } from "./workspace-regist
 import { type ProjectUpdate } from "./workspace-reconciliation-service.js";
 import { type FileBackedChatService } from "./chat/chat-service.js";
 import { type LoopService } from "./loop-service.js";
-import { type UsageHistoryStorage } from "./usage/usage-history-storage.js";
 import { type HostCapabilityService } from "./host-capabilities/service.js";
 import { type PhysicalDeviceHub } from "./devices/hub.js";
 import { type HostToolInstaller } from "./host-tools/installer.js";
 import { type HostCapabilities } from "@jagentdesk/protocol/host-capabilities";
-import { type LifetimeUsage, type UsageDayRollup } from "@jagentdesk/protocol/usage-history";
 import { type ClusterRegistry } from "./cluster/cluster-registry.js";
 import { type ArgoCdService } from "./argocd/service.js";
 import { type DatabaseRegistry } from "./database/database-registry.js";
@@ -722,8 +720,6 @@ export class VoiceAssistantWebSocketServer {
 
   private readonly loopService: LoopService;
 
-  private usageHistory: UsageHistoryStorage | null = null;
-
   private hostCapabilities: HostCapabilityService | null = null;
 
   private physicalDevices: PhysicalDeviceHub | null = null;
@@ -844,8 +840,6 @@ export class VoiceAssistantWebSocketServer {
 
   private unsubscribeDaemonConfigChange: (() => void) | null = null;
 
-  private unsubscribeUsageChange: (() => void) | null = null;
-
   private readonly providerUsageService: ProviderUsageService;
 
   private unsubscribeTerminalActivity: (() => void) | null = null;
@@ -957,7 +951,6 @@ export class VoiceAssistantWebSocketServer {
     hubRelationships?: HubRelationshipManagement | null,
     pairing?: PairingServerDependencies | null,
     pluginRuntime?: PluginRuntimePort | null,
-    usageHistory?: UsageHistoryStorage | null,
     databaseRegistry?: DatabaseRegistry,
     sessionShareService?: SessionShareService | null,
     sshService?: SshService | null,
@@ -1084,7 +1077,6 @@ export class VoiceAssistantWebSocketServer {
       unsubscribeBuiltin?.();
       unsubscribeConfig?.();
     };
-    this.setupUsageBroadcast(usageHistory);
 
     const pushLogger = this.logger.child({ module: "push" });
     this.pushTokenStore = new PushTokenStore(pushLogger, join(jagentdeskHome, "push-tokens.json"));
@@ -1688,8 +1680,6 @@ export class VoiceAssistantWebSocketServer {
     this.unsubscribeSpeechReadiness = null;
     this.unsubscribeDaemonConfigChange?.();
     this.unsubscribeDaemonConfigChange = null;
-    this.unsubscribeUsageChange?.();
-    this.unsubscribeUsageChange = null;
     this.unsubscribeTerminalActivity?.();
     this.unsubscribeTerminalActivity = null;
     if (this.runtimeMetricsInterval) {
@@ -2312,7 +2302,6 @@ export class VoiceAssistantWebSocketServer {
       workspaceRegistry: this.workspaceRegistry,
       chatService: this.chatService,
       loopService: this.loopService,
-      usageHistory: this.usageHistory,
       hostCapabilities: this.hostCapabilities,
       hostToolInstaller: this.hostToolInstaller,
       physicalDevices: this.physicalDevices,
@@ -3011,23 +3000,6 @@ export class VoiceAssistantWebSocketServer {
         payload: { status: "daemon_config_changed", config },
       });
     }
-  }
-
-  private setupUsageBroadcast(usageHistory: UsageHistoryStorage | null | undefined): void {
-    this.usageHistory = usageHistory ?? null;
-    this.unsubscribeUsageChange =
-      this.usageHistory?.onChange((days, lifetime) => {
-        this.broadcastUsageChanged(days, lifetime);
-      }) ?? null;
-  }
-
-  private broadcastUsageChanged(days: UsageDayRollup[], lifetime: LifetimeUsage): void {
-    this.broadcast(
-      wrapSessionMessage({
-        type: "status",
-        payload: { status: "usage_changed", days, lifetime },
-      }),
-    );
   }
 
   private bindSocketHandlers(ws: WebSocketLike): void {

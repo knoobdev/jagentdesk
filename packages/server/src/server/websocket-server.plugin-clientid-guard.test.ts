@@ -161,8 +161,7 @@ function createHarness(): Harness {
     undefined, // browserToolsBroker
     undefined, // hubRelationships
     undefined, // pairing
-    undefined, // skillsStorage
-    undefined, // usageHistory
+    undefined, // pluginRuntime
     createStub<DatabaseRegistry>({}),
   );
   const harness: Harness = { wsServer, home };

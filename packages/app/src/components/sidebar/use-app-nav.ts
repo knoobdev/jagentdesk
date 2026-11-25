@@ -5,7 +5,6 @@ import { builtinPluginEnabled } from "@/plugins/builtin/registry";
 import { router, usePathname, type Href } from "expo-router";
 import { useCallback, useMemo } from "react";
 import {
-  BarChart3,
   Gauge,
   Boxes,
   Bot,
@@ -52,7 +51,6 @@ import {
   buildDatabasesRoute,
   buildFigmaRoute,
   buildForgeRoute,
-  buildInsightsRoute,
   buildJiraRoute,
   buildMarketplaceRoute,
   buildNewWorkspaceRoute,
@@ -72,7 +70,6 @@ export interface AppNavTargets {
   clustersRoute: Href | null;
   databasesRoute: Href | null;
   serversRoute: Href | null;
-  insightsRoute: Href | null;
   forgeRoute: Href | null;
   marketplaceRoute: Href | null;
   simulatorRoute: Href | null;
@@ -101,7 +98,6 @@ export function useAppNavTargets(): AppNavTargets {
   const supportsBots = useHostFeature(firstServerId, "bots");
   const clustersEnabled = useBuiltinPluginEnabled(firstServerId, "clusters");
   const databasesEnabled = useBuiltinPluginEnabled(firstServerId, "databases");
-  const insightsEnabled = useBuiltinPluginEnabled(firstServerId, "insights");
   const workbenchEnabled = useBuiltinPluginEnabled(firstServerId, "workbench");
   const sharingEnabled = useBuiltinPluginEnabled(firstServerId, "session-share");
   // Forge Hub is a post-ADR-0003 surface gated per release milestone (spec 19.12):
@@ -159,7 +155,6 @@ export function useAppNavTargets(): AppNavTargets {
       sharedSessionsRoute: sharingEnabled ? (buildSharedSessionsRoute() as Href) : null,
       // Gated at the route: the entry disappears with the daemon feature flag.
       serversRoute: supportsSshServers ? perHost(buildServersRoute) : null,
-      insightsRoute: insightsEnabled ? perHost(buildInsightsRoute) : null,
       forgeRoute: perHost(buildForgeRoute),
       marketplaceRoute: perHost(buildMarketplaceRoute),
       simulatorRoute: deviceServerId ? (buildSimulatorRoute(deviceServerId) as Href) : null,
@@ -174,7 +169,6 @@ export function useAppNavTargets(): AppNavTargets {
     supportsBots,
     clustersEnabled,
     databasesEnabled,
-    insightsEnabled,
     workbenchEnabled,
     sharingEnabled,
     supportsJira,
@@ -303,15 +297,6 @@ export function useAppNavItems(): AppNavItem[] {
         isActive: false,
         testID: "rail-usage",
       },
-      navItem(
-        "insights",
-        BarChart3,
-        "Insights",
-        "Insights",
-        targets.insightsRoute,
-        pathname,
-        "/insights",
-      ),
       navItem("jira", KanbanSquare, "Jira", "Jira", targets.jiraRoute, pathname, "/jira"),
       navItem("figma", Figma, "Figma", "Figma", targets.figmaRoute, pathname, "/figma"),
       targets.supportsForgeHub

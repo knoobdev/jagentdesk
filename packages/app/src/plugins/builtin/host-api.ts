@@ -55,10 +55,10 @@ export { SelectField, type SelectFieldOption } from "@/components/ui/select-fiel
 export { Switch } from "@/components/ui/switch";
 export { AgentControlTrigger } from "@/composer/agent-controls/control";
 export { useToast } from "@/contexts/toast-context";
-export { useFetchQueries, useFetchQuery } from "@/data/query";
+export { useFetchQueries, useFetchQuery, useReplicaQuery } from "@/data/query";
 export { useDaemonConfig } from "@/hooks/use-daemon-config";
 export { useHostRouteServerId } from "@/navigation/host-route-context";
-export { useSessionStore, type WorkspaceDescriptor } from "@/stores/session-store";
+export { useSessionStore, type Agent, type WorkspaceDescriptor } from "@/stores/session-store";
 export { type StreamItem } from "@/types/stream";
 export { confirmDialog } from "@/utils/confirm-dialog";
 export { formatTimeAgo } from "@/utils/time";
@@ -77,3 +77,5 @@ export { LoadingSpinner } from "@/components/ui/loading-spinner";
 // The activity graph frame shares the stream's node-selection contract and HTML navigation rules.
 export { acceptSelectMessage } from "@/agent-stream/activity-node-action";
 export { htmlPreviewNavigationKind } from "@/file-pane/html-preview-navigation";
+export { formatTokenCount } from "@/components/context-window-meter.utils";
+export { usageHistoryQueryKey, type UsageHistory } from "@/data/usage-history-query";

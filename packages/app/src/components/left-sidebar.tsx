@@ -244,7 +244,6 @@ interface SidebarSharedProps {
   handleDatabases: () => void;
   handleServers: () => void;
   handleArgoCd: () => void;
-  handleInsights: () => void;
   handleForge: () => void;
   handleMarketplace: () => void;
   handleSimulator: () => void;
@@ -278,7 +277,6 @@ interface SidebarLabels {
   databases: string;
   servers: string;
   argoCd: string;
-  insights: string;
   forge: string;
   marketplace: string;
   simulator: string;
@@ -391,7 +389,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     databasesRoute,
     serversRoute,
     supportsSshServers,
-    insightsRoute,
     forgeRoute,
     marketplaceRoute,
     simulatorRoute,
@@ -400,9 +397,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     supportsForgeHub,
   } = useAppNavTargets();
 
-  const handleInsightsDesktop = useCallback(() => {
-    if (insightsRoute) router.push(insightsRoute);
-  }, [insightsRoute]);
   const handleForgeDesktop = useCallback(() => {
     if (forgeRoute) router.push(forgeRoute);
   }, [forgeRoute]);
@@ -459,13 +453,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       router.push(argoCdRoute);
     }
   }, [argoCdRoute, showMobileAgent]);
-
-  const handleInsightsMobile = useCallback(() => {
-    if (insightsRoute) {
-      showMobileAgent();
-      router.push(insightsRoute);
-    }
-  }, [insightsRoute, showMobileAgent]);
 
   const handleForgeMobile = useCallback(() => {
     if (forgeRoute) {
@@ -527,7 +514,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       databases: "Databases",
       servers: "Servers",
       argoCd: "Argo CD",
-      insights: "Insights",
       forge: "Forge",
       marketplace: t("sidebar.actions.marketplace"),
       simulator: "Simulators",
@@ -555,7 +541,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     handleDatabases: handleDatabasesDesktop,
     handleServers: handleServersDesktop,
     handleArgoCd: handleArgoCdDesktop,
-    handleInsights: handleInsightsDesktop,
     handleForge: handleForgeDesktop,
     handleMarketplace: handleMarketplaceDesktop,
     handleSimulator: handleSimulatorDesktop,
@@ -577,7 +562,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
           handleDatabases={handleDatabasesMobile}
           handleServers={handleServersMobile}
           handleArgoCd={handleArgoCdMobile}
-          handleInsights={handleInsightsMobile}
           handleForge={handleForgeMobile}
           handleMarketplace={handleMarketplaceMobile}
           handleSimulator={handleSimulatorMobile}
@@ -603,7 +587,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
         handleDatabases={handleDatabasesDesktop}
         handleServers={handleServersDesktop}
         handleArgoCd={handleArgoCdDesktop}
-        handleInsights={handleInsightsDesktop}
         handleForge={handleForgeDesktop}
         handleMarketplace={handleMarketplaceDesktop}
         handleSimulator={handleSimulatorDesktop}
@@ -1123,7 +1106,6 @@ function DesktopSidebar({
   handleDatabases,
   handleServers,
   handleArgoCd,
-  handleInsights,
   handleForge,
   handleMarketplace,
   handleSimulator,
@@ -1157,7 +1139,6 @@ function DesktopSidebar({
   const isDatabasesActive = pathname.includes("/database");
   const isServersActive = pathname.includes("/servers");
   const isArgoCdActive = pathname.includes("/argocd");
-  const isInsightsActive = pathname.includes("/insights");
   const isForgeActive = pathname.includes("/forge");
   const isMarketplaceActive = pathname.includes("/marketplace");
   const isSimulatorActive = pathname.includes("/simulator");
@@ -1399,16 +1380,7 @@ function DesktopSidebar({
                 variant="compact"
               />
             </NavTargetGate>
-            <NavTargetGate route={builtinTargets.insightsRoute}>
-              <SidebarHeaderRow
-                icon={BarChart3}
-                label={labels.insights}
-                onPress={handleInsights}
-                isActive={isInsightsActive}
-                testID="sidebar-insights-nav"
-                variant="compact"
-              />
-            </NavTargetGate>
+            <BuiltinSidebarDestinations before="jira" />
             {supportsForgeHub ? (
               <SidebarHeaderRow
                 icon={GitPullRequest}

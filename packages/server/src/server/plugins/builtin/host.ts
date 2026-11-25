@@ -9,7 +9,7 @@ import type {
   JAgentDeskToolResult,
 } from "../../agent/tools/types.js";
 import type { BuiltinCoreServices } from "./services.js";
-import type { AgentManager } from "../../agent/agent-manager.js";
+import type { AgentManager, AgentManagerOptions } from "../../agent/agent-manager.js";
 import type { AgentStorage } from "../../agent/agent-storage.js";
 import type { SkillInvocationResolver } from "../../agent/agent-prompt.js";
 import type { SpecPlanSource } from "../../agent/spec-plan.js";
@@ -39,6 +39,11 @@ export interface BuiltinPorts {
   specPlan: SpecPlanSource;
   /** Autonomous mode status, read by Spec mode (the two exclude each other). */
   autorun: AutorunPort;
+  /** Insights records every billed turn (AgentManager `onUsageBilled`). */
+  usageHistory: UsageHistoryPort;
+}
+export interface UsageHistoryPort {
+  record(billed: Parameters<NonNullable<AgentManagerOptions["onUsageBilled"]>>[0]): void;
 }
 export interface AutorunPort {
   isRunning(agentId: string): Promise<boolean>;

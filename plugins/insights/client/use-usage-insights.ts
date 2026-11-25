@@ -1,7 +1,6 @@
+import { useSessionStore, type Agent } from "../../../packages/app/src/plugins/builtin/host-api";
 import { useMemo } from "react";
 import { useShallow } from "zustand/shallow";
-import { useSessionStore } from "@/stores/session-store";
-import type { Agent } from "@/stores/session-store";
 
 /**
  * Usage & Cost Insights aggregate the per-agent cumulative usage totals the
