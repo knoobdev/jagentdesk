@@ -176,50 +176,79 @@ export default function PairVerifyScreen() {
   return (
     <View style={styles.container}>
       {!code || error ? <BackHeader title="Pair a device" onBack={cancel} /> : null}
-      <View ref={setSasScope} style={styles.body}>
-        <Text style={styles.title}>
-          {code ? "Do these codes match?" : "Connecting to the host…"}
-        </Text>
-        {error ? (
-          <Text style={styles.error} testID="pairing-error">
-            {error}
+      <View style={styles.center}>
+        <View ref={setSasScope} style={styles.card} testID="pairing-card">
+          <Text style={styles.title}>
+            {code ? "Do these codes match?" : "Connecting to the host…"}
           </Text>
-        ) : null}
-        {code && !error ? (
-          <>
-            <Text style={styles.code} testID="pairing-sas-code">
-              {code.slice(0, 3)} {code.slice(3)}
+          {error ? (
+            <Text style={styles.error} testID="pairing-error">
+              {error}
             </Text>
-            <Text style={styles.text}>Shown on {hostLabel}</Text>
-            <Text style={styles.text}>
-              Compare the code on both screens. If they are different, cancel.
-            </Text>
-            <Text style={styles.text}>Expires in {remaining}s</Text>
-            {confirmed ? (
+          ) : null}
+          {code && !error ? (
+            <>
+              <Text style={styles.code} testID="pairing-sas-code">
+                {code.slice(0, 3)} {code.slice(3)}
+              </Text>
+              <Text style={styles.text}>
+                Shown on {hostLabel}. Compare the code on both screens. If they are different,
+                cancel.
+              </Text>
+              <Text style={styles.muted}>Expires in {remaining}s</Text>
+            </>
+          ) : null}
+          <View style={styles.actions}>
+            {code && !error && confirmed ? (
               <Text style={styles.text}>Waiting for the other device…</Text>
-            ) : (
-              <Button onPress={accept}>Codes match</Button>
-            )}
-          </>
-        ) : null}
-        <Button variant="outline" onPress={cancel}>
-          Cancel
-        </Button>
+            ) : null}
+            {code && !error && !confirmed ? (
+              <Button variant="default" onPress={accept} style={styles.button}>
+                Codes match
+              </Button>
+            ) : null}
+            <Button variant="outline" onPress={cancel} style={styles.button}>
+              Cancel
+            </Button>
+          </View>
+        </View>
       </View>
     </View>
   );
 }
+/** A centered card (spec 38 §4.6 modal): 480 wide at most, 18/600 title, 44 px buttons. */
 const styles = StyleSheet.create((theme) => ({
   container: { flex: 1, backgroundColor: theme.colors.surface0 },
-  body: { padding: theme.spacing[6], gap: theme.spacing[4] },
-  title: { fontSize: theme.fontSize.xl, color: theme.colors.foreground },
+  center: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: theme.spacing[4],
+  },
+  card: {
+    width: "100%",
+    maxWidth: 480,
+    padding: theme.spacing[6],
+    gap: theme.spacing[3],
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface1,
+    ...theme.shadow.lg,
+  },
+  title: { fontSize: 18, fontWeight: "600", color: theme.colors.foreground },
   text: { fontSize: theme.fontSize.base, color: theme.colors.foregroundMuted },
+  muted: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
   code: {
     fontSize: 40,
+    lineHeight: 52,
     letterSpacing: 4,
     fontFamily: theme.fontFamily.mono,
     color: theme.colors.foreground,
     textAlign: "center",
+    paddingVertical: theme.spacing[2],
   },
+  actions: { gap: 12, marginTop: theme.spacing[2] },
+  button: { minHeight: 44 },
   error: { color: theme.colors.destructive, fontSize: theme.fontSize.base },
 }));
