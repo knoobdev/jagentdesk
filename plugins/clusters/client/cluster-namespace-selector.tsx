@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { useHostRuntimeClient } from "@/runtime/host-runtime";
+import { useHostRuntimeClient } from "../../../packages/app/src/plugins/builtin/host-api";
 import { ChevronDown } from "lucide-react-native";
-import type { Theme } from "@/styles/theme";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
 
 interface NamespaceItem {
   name: string;

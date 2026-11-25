@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import TerminalEmulator, { type TerminalEmulatorHandle } from "@/components/terminal-emulator";
-import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import type { Theme } from "@/styles/theme";
-import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
-import { gumloopChipStyles } from "@/components/gumloop-shell/list-styles";
+import {
+  TerminalEmulator,
+  type TerminalEmulatorHandle,
+} from "../../../packages/app/src/plugins/builtin/host-api";
+import { useHostRuntimeClient } from "../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useIsGumloopTheme } from "../../../packages/app/src/plugins/builtin/host-api";
+import { gumloopChipStyles } from "../../../packages/app/src/plugins/builtin/host-api";
 
 interface ClusterPodShellProps {
   serverId: string;

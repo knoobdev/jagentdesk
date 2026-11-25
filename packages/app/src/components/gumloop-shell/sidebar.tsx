@@ -76,7 +76,7 @@ import {
 } from "./sidebar-state";
 
 function resolveSidebarDrillIn(pathname: string) {
-  return resolveCoreSidebarDrillIn(pathname, builtinClientRegistry.destinations());
+  return resolveCoreSidebarDrillIn(pathname, builtinClientRegistry.drillTitles());
 }
 
 const PRIMARY_ORDER: readonly string[] = [
@@ -382,19 +382,15 @@ function RootNavigation({ onNavigate }: { onNavigate: () => void }) {
 
 function DestinationPanel({ pathname }: { pathname: string }) {
   const drill = resolveSidebarDrillIn(pathname);
-  if (drill?.kind === "destination" && builtinClientRegistry.owner(drill.section))
+  if (drill?.kind === "destination" && builtinClientRegistry.hasPanel(drill.section))
     return <BuiltinLeftPanel serverId={drill.serverId} segment={drill.section} />;
   if (drill?.kind === "settings") return <PortalHost name={GUMLOOP_PANEL_HOST} />;
-  const cluster = /\/h\/([^/]+)\/cluster\/([^/]+)/.exec(pathname);
   const database = /\/h\/([^/]+)\/database\/([^/]+)/.exec(pathname);
-  const clusterRoute = cluster
-    ? { serverId: decodeURIComponent(cluster[1]), clusterId: decodeURIComponent(cluster[2]) }
-    : null;
   const databaseRoute = database
     ? { serverId: decodeURIComponent(database[1]), databaseId: decodeURIComponent(database[2]) }
     : null;
   return resolveSidebarNavBody(
-    clusterRoute,
+    null,
     databaseRoute,
     <DestinationLinks pathname={pathname} />,
     resolveSectionRoute(pathname),

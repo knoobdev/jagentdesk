@@ -1,20 +1,20 @@
+import { useSafeAreaInsets } from "../../../packages/app/src/plugins/builtin/host-api";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { ClusterInfo } from "@jagentdesk/protocol/cluster/rpc-schemas";
-import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import { ClusterResourceBrowser } from "@/components/cluster-resource-browser";
-import { ClusterResourceDetail } from "@/components/cluster-resource-detail";
-import { ClusterTabBar } from "@/components/cluster-tab-bar";
-import { ClusterChatDock } from "@/components/cluster-chat-dock";
-import type { ClusterComposerResource } from "@/components/cluster-composer";
-import { useIsCompactFormFactor } from "@/constants/layout";
-import { useClusterChatStore } from "@/stores/cluster-chat-store";
-import { useClusterNavStore } from "@/stores/cluster-nav-store";
-import { useClusterViewStore } from "@/stores/cluster-view-store";
-import { usePanelStore } from "@/stores/panel-store";
-import type { Theme } from "@/styles/theme";
+import { useHostRuntimeClient } from "../../../packages/app/src/plugins/builtin/host-api";
+import { ClusterResourceBrowser } from "./cluster-resource-browser";
+import { ClusterResourceDetail } from "./cluster-resource-detail";
+import { ClusterTabBar } from "./cluster-tab-bar";
+import { ClusterChatDock } from "./cluster-chat-dock";
+import type { ClusterComposerResource } from "./cluster-composer";
+import { useIsCompactFormFactor } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useClusterChatStore } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useClusterNavStore } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useClusterViewStore } from "../../../packages/app/src/plugins/builtin/host-api";
+import { usePanelStore } from "../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
 
 /**
  * The content pane for a connected cluster. The category navigation lives in the

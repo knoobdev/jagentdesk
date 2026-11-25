@@ -1,9 +1,9 @@
-import { createDockWorkspace } from "@/components/dock-workspace";
-import { CLUSTER_AGENT_LABEL } from "@/utils/dock-agents";
+import { createDockWorkspace } from "../../../packages/app/src/plugins/builtin/host-api";
+import { CLUSTER_AGENT_LABEL } from "../../../packages/app/src/plugins/builtin/host-api";
 import { Alert } from "react-native";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
-import { navigateToAgent } from "@/utils/navigate-to-agent";
-import { clusterChatTitle } from "@/utils/cluster-chat-title";
+import { navigateToAgent } from "../../../packages/app/src/plugins/builtin/host-api";
+import { clusterChatTitle } from "./cluster-chat-title";
 
 export interface AskAgentAboutResourceInput {
   client: DaemonClient;

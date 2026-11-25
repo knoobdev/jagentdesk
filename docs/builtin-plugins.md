@@ -5,7 +5,8 @@ they do not use the installed-plugin process, client bundle evaluator, or `plugi
 Settings → Plugins controls each feature per host. The persisted ids, defaults, dependencies,
 capabilities, RPC names, tool names, and data paths are release contracts.
 
-Docker is the phase 2 pilot. The other feature manifests still describe phase 1 implementations.
+Docker was the phase 2 pilot. Migrated features declare `builtinEntrypoints`; the other feature
+manifests still describe phase 1 implementations.
 The bundled provider and usage plugins retain their existing SDK runtime. Do not move those
 implementations while migrating a feature.
 
@@ -54,16 +55,26 @@ new database paths with the feature id. Preserve existing storage locations duri
   it cannot fall through to another dispatcher. The host applies `plugin_disabled` before
   creating or calling a handler, including after an awaited lifecycle transition. Keep existing
   slash names during migrations; new RPCs follow [RPC namespacing](rpc-namespacing.md).
-- `host.agentTools(install)` receives the core tool registrar. The host installs tools from the
-  agent's captured enabled-plugin set. Do not check live plugin state in a tool handler: existing
-  agents retain their opening tool set. Approval and provider tool policy remain in core.
+- `host.agentTools(install)` receives the core tool registrar and a per-agent context: caller id
+  and labels, the host-tool permission request, the shared cluster/database registries, and the
+  daemon core services. The host installs tools from the agent's captured enabled-plugin set. Do
+  not check live plugin state in a tool handler: existing agents retain their opening tool set.
+  Approval and provider tool policy remain in core. The catalog places each feature's tools at its
+  established position (`registerAgentTools` `only`/`except` slots); a new feature lands after them.
+- `host.shared(create)` returns an accessor for one value per daemon, keyed by its config store.
+  Use it for a feature-owned service that the background lifecycle, every session, and the tools
+  share (Argo CD's SSE service). Do not keep such a service in module state: tests run several
+  daemons in one process.
 - `host.backgroundService(create)` registers a daemon-owned lifecycle through
   `BuiltinPluginState`. Its `start(signal)` receives a new abort signal for each enable; disable
   aborts it before cleanup. The host rejects start/stop operations that exceed five seconds. Use
   the signal to cancel pending work and bind resource cleanup. The bootstrap starts these
   registrations and stops them during daemon shutdown.
-- A session contribution supplies `handle`, `stop`, and optional `start`. The host owns its
-  toggle and disconnect lifetime. `stop` must synchronously invalidate pending work before
+- A session contribution supplies `handle`, `stop`, and optional `start` and
+  `capabilitiesChanged`. The host owns its toggle and disconnect lifetime. It is created on the
+  first request unless `host.rpc(..., { eager: true })` asks for creation when the session opens
+  and on enable; use that for state the client relies on without sending a request first
+  (pushes, delegate registration). `stop` must synchronously invalidate pending work before
   awaiting cleanup, kill children, clear timers, and release subscriptions within five seconds.
   Make start/stop repeatable. A late network result must check its generation before spawning
   another child or publishing an event.
@@ -81,6 +92,11 @@ object in a WeakMap. Recreating the object on stop leaks the remote stream owner
 exec uses the core terminal service through the client host's typed daemon client and terminal
 pane. Unmounting the feature closes its exec terminal.
 
+Clusters and Databases keep their registries, Kubernetes/SQL clients, and DTOs in core: SSH
+remote k8s/database access and Argo CD's cluster links consume them. The features own the
+`cluster/*` and `database/*` handlers, the Helm client, the agent tools, and the disable
+lifecycle that disconnects open clients.
+
 The server build compiles static feature imports with the monorepo as its TypeScript root, then
 `relocate-builtin-build.mjs` preserves the existing published daemon paths and asset locations.
 Compiled features live under `dist/server/builtin-features`; raw SDK plugins keep their existing
@@ -96,8 +112,22 @@ on web, iOS, and Android.
 
 `register(app)` can contribute a sidebar destination (`Tools` or `main`), a left drill-in panel,
 a route screen, settings sections, mobile drawer entries, composer items, timeline renderers,
-and attachment sources. Use the same destination metadata for desktop and mobile. Screens
-receive the selected `serverId`; never choose the first host inside a migrated screen.
+attachment sources, and per-host mounts (delegation prompts and binders that must run while the
+plugin is on). Use the same destination metadata for desktop and mobile. Screens receive the
+selected `serverId`; never choose the first host inside a migrated screen. A screen reads its own
+route params (`useLocalSearchParams`).
+
+A destination owns `routeSegment` plus any `routeSegments` (list and detail routes). Those give
+the Gumloop drill-in title (`shortTitle ?? title`). `routeChanges` notifies when `route` would
+change, for example when it reopens the last resource. A left panel registered with
+`{ ownsNavigation: true }` replaces the classic sidebar's navigation on its routes; without it
+the panel appears only in the Gumloop drill-in. Navigation order is the established order in
+`use-app-nav.ts` (`APP_NAV_ORDER`) and the classic sidebar's slots; keep a migrated
+destination where it was.
+
+State that another feature or core drives stays in core and is exported through the host API:
+the cluster navigation and view stores (Argo CD's "Open in Clusters"), the cluster and database
+chat stores (agent navigation), and `KindIcon`. A feature never imports another feature.
 
 `BuiltinClientRegistry.visible` selects every contribution against live per-host server state.
 The generic adapters in `surfaces.tsx` feed navigation, drill-in, screens, settings, and composer.
@@ -138,7 +168,8 @@ toggling one host must leave another host's contributions visible.
    then root typecheck, lint, server/client builds, web export, iOS/Android export, and the desktop
    web overlay. Verify emitted daemon imports. Do not run the whole local test suite.
 10. Compare the contract dumps and web JavaScript bytes with the baseline (at most 5% growth).
-    `scripts/compare-builtin-contracts.mjs` is the Docker example. Use an isolated daemon home and
+    `node scripts/compare-builtin-contracts.mjs <baseline> <out-dir> [plugin...]` compares the
+    handled requests, wire names, tool names, and i18n keys; add the feature to its table. Use an isolated daemon home and
     port, unset every `CLAUDE*` variable, and disable relay/Tailscale. Verify real data, an
     interactive terminal where applicable, live navigation removal within two seconds, disabled
     RPC errors, existing/new agent tool sets, enable, and restart persistence. Record commands,

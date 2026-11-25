@@ -1,11 +1,14 @@
 import { useCallback, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { PodStatusDot } from "@/components/cluster-dot";
-import { ClusterResourceEvents } from "@/components/cluster-resource-events";
-import type { Theme } from "@/styles/theme";
-import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
-import { gumloopChipStyles, gumloopListStyles } from "@/components/gumloop-shell/list-styles";
+import { PodStatusDot } from "./cluster-dot";
+import { ClusterResourceEvents } from "./cluster-resource-events";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useIsGumloopTheme } from "../../../packages/app/src/plugins/builtin/host-api";
+import {
+  gumloopChipStyles,
+  gumloopListStyles,
+} from "../../../packages/app/src/plugins/builtin/host-api";
 
 type Obj = Record<string, unknown>;
 const asObj = (v: unknown): Obj => (v && typeof v === "object" ? (v as Obj) : {});

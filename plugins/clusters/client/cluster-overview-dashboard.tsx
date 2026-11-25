@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { ScrollView, type StyleProp, Text, View, type ViewStyle } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import { useClusterViewStore } from "@/stores/cluster-view-store";
-import type { Theme } from "@/styles/theme";
-import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
-import { gumloopListStyles } from "@/components/gumloop-shell/list-styles";
+import { useHostRuntimeClient } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useClusterViewStore } from "../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useIsGumloopTheme } from "../../../packages/app/src/plugins/builtin/host-api";
+import { gumloopListStyles } from "../../../packages/app/src/plugins/builtin/host-api";
 
 /**
  * k8s-Lens-style cluster Overview: the default view when a cluster opens.

@@ -237,7 +237,6 @@ import { SessionShareSession } from "./session/session-share/session-share-sessi
 import { type ActivityGraphService } from "./agent/activity-graph/service.js";
 import { ActivityGraphSession } from "./session/activity-graph/activity-graph-session.js";
 import { type SessionShareService } from "./session-share/service.js";
-import { ClusterSession } from "./session/cluster/cluster-session.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseSession } from "./session/database/database-session.js";
 import { SshSession } from "./session/ssh/ssh-session.js";
@@ -1261,8 +1260,6 @@ export class Session {
 
   private readonly activityGraphSession: ActivityGraphSession | null;
 
-  private clusterSession!: ClusterSession;
-
   private databaseSession!: DatabaseSession;
 
   private sshSession!: SshSession;
@@ -1845,9 +1842,20 @@ export class Session {
     pluginRuntime: SessionOptions["pluginRuntime"],
   ): BuiltinServerSession {
     return builtinServerRegistry.session(pluginRuntime?.builtin, {
-      ...createBuiltinCoreServices(this.jagentdeskHome, this.sessionLogger, this.daemonConfigStore),
+      ...createBuiltinCoreServices(
+        this.jagentdeskHome,
+        this.sessionLogger,
+        this.daemonConfigStore,
+        {
+          clusters: this.clusterRegistry,
+          databases: this.databaseRegistry,
+        },
+      ),
       terminals: this.terminalManager,
       remoteDocker: () => this.sshService.modules?.docker,
+      remoteK8s: () => this.sshService.modules?.remoteK8s,
+      remoteDb: () => this.sshService.modules?.remoteDb,
+      supportsClientCapability: (capability) => this.supports(capability as ClientCapability),
       push: (message) => this.emit(message),
       pushBinary: (frame) => this.emitBinary(frame),
     });
@@ -1936,13 +1944,6 @@ export class Session {
 
   private initClusterSession(options: SessionOptions): void {
     this.clusterRegistry = options.clusterRegistry ?? new ClusterRegistry();
-    this.clusterSession = new ClusterSession({
-      host: {
-        emit: (msg) => this.emit(msg),
-      },
-      clusterRegistry: this.clusterRegistry,
-      logger: this.sessionLogger,
-    });
   }
 
   private initDatabaseSession(options: SessionOptions): void {
@@ -1998,6 +1999,7 @@ export class Session {
   updateClientCapabilities(capabilities: Record<string, unknown> | null, source?: object): void {
     this.clientCapabilities = parseClientCapabilities(capabilities);
     this.argocdSession?.syncDelegateRegistration();
+    this.builtinSession?.capabilitiesChanged();
     if (source) {
       this.delivery.attach(source, true);
       this.clientCapabilitiesBySource.set(source, this.clientCapabilities);
@@ -3227,7 +3229,6 @@ export class Session {
       () => this.dispatchSpecModeMessage(msg, source),
       () => this.dispatchSessionShareMessage(msg),
       () => this.activityGraphSession?.dispatch(msg),
-      () => this.dispatchClusterMessage(msg),
       () => this.dispatchDatabaseMessage(msg),
       () => this.dispatchSshMessage(msg),
       () => this.dispatchRemoteExecMessage(msg),
@@ -3578,7 +3579,6 @@ export class Session {
       this.simulatorStreams.disposeAll();
       this.physicalDeviceSession?.dispose();
     }
-    if (!builtin.isEnabled("clusters")) this.clusterSession.dispose();
     if (!builtin.isEnabled("argocd")) this.argocdSession.suspend();
     else this.argocdSession.syncDelegateRegistration();
     if (!builtin.isEnabled("jira")) this.jiraSession?.suspend();
@@ -4417,94 +4417,6 @@ export class Session {
   }
 
   // oxlint-disable-next-line complexity
-  private dispatchClusterMessage(msg: SessionInboundMessage): Promise<void> | undefined {
-    switch (msg.type) {
-      case "cluster/contexts":
-        return this.clusterSession.handleContextsRequest(msg);
-      case "cluster/import":
-        return this.clusterSession.handleImportRequest(msg);
-      case "cluster/list":
-        return this.clusterSession.handleListRequest(msg);
-      case "cluster/connect":
-        return this.activateRemoteCluster(msg.id).then(() =>
-          this.clusterSession.handleConnectRequest(msg),
-        );
-      case "cluster/disconnect":
-        return this.clusterSession.handleDisconnectRequest(msg);
-      case "cluster/resources":
-        return this.clusterSession.handleResourcesRequest(msg);
-      case "cluster/get":
-        return this.clusterSession.handleGetRequest(msg);
-      case "cluster/logs":
-        return this.clusterSession.handleLogsRequest(msg);
-      case "cluster/logs/subscribe":
-        return this.clusterSession.handleLogsSubscribeRequest(msg);
-      case "cluster/logs/unsubscribe":
-        return this.clusterSession.handleLogsUnsubscribeRequest(msg);
-      case "cluster/write":
-        return this.clusterSession.handleWriteRequest(msg);
-      case "cluster/kinds":
-        return this.clusterSession.handleClusterKinds(msg);
-      case "cluster/resource/list":
-        return this.clusterSession.handleClusterResourceList(msg);
-      case "cluster/reveal-secret":
-        return this.clusterSession.handleRevealSecretRequest(msg);
-      case "cluster/node-op":
-        return this.clusterSession.handleNodeOpRequest(msg);
-      case "cluster/cronjob-op":
-        return this.clusterSession.handleCronjobOpRequest(msg);
-      case "cluster/metrics":
-        return this.clusterSession.handleClusterMetrics(msg);
-      case "cluster/helm/list":
-        return this.clusterSession.handleHelmListRequest(msg);
-      case "cluster/helm/history":
-        return this.clusterSession.handleHelmHistoryRequest(msg);
-      case "cluster/helm/values":
-        return this.clusterSession.handleHelmValuesRequest(msg);
-      case "cluster/helm/rollback":
-        return this.clusterSession.handleHelmRollbackRequest(msg);
-      case "cluster/helm/uninstall":
-        return this.clusterSession.handleHelmUninstallRequest(msg);
-      case "cluster/exec/start":
-        return this.clusterSession.handleExecStart(
-          msg as unknown as Parameters<typeof this.clusterSession.handleExecStart>[0],
-        );
-      case "cluster/exec/stdin":
-        return this.clusterSession.handleExecStdin(
-          msg as unknown as Parameters<typeof this.clusterSession.handleExecStdin>[0],
-        );
-      case "cluster/exec/close":
-        return this.clusterSession.handleExecClose(
-          msg as unknown as Parameters<typeof this.clusterSession.handleExecClose>[0],
-        );
-      case "cluster/pf/start" as string:
-        return this.clusterSession.handlePfStart(
-          msg as unknown as Parameters<typeof this.clusterSession.handlePfStart>[0],
-        );
-      case "cluster/pf/stdin" as string:
-        return this.clusterSession.handlePfStdin(
-          msg as unknown as Parameters<typeof this.clusterSession.handlePfStdin>[0],
-        );
-      case "cluster/pf/close" as string:
-        return this.clusterSession.handlePfClose(
-          msg as unknown as Parameters<typeof this.clusterSession.handlePfClose>[0],
-        );
-      default:
-        return undefined;
-    }
-  }
-
-  // A cluster imported through an SSH server needs its forward + kubeconfig before KubeClient
-  // connects (ssh/remote-k8s); failures surface through the normal connect response.
-  private async activateRemoteCluster(clusterId: string): Promise<void> {
-    const k8s = this.sshService.modules?.remoteK8s;
-    const cluster = this.clusterRegistry.list().find((candidate) => candidate.id === clusterId);
-    if (!k8s || !cluster || !k8s.isRemoteContext(cluster.contextName)) return;
-    await k8s.activate(cluster.contextName).catch((error: unknown) => {
-      this.sessionLogger.warn({ err: error, clusterId }, "remote cluster activation failed");
-    });
-  }
-
   // A database reached through an SSH server listens on its fixed 127.0.0.1 port again before
   // the registry connects (ssh/remote-db).
   private async reopenRemoteDatabase(databaseId: string): Promise<void> {
@@ -11059,7 +10971,6 @@ export class Session {
 
     this.workspaceGitObserver.dispose();
     this.workspaceFilesSession.dispose();
-    this.clusterSession.dispose();
     this.argocdSession.dispose();
   }
 

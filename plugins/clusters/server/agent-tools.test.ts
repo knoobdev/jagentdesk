@@ -1,8 +1,8 @@
 import { expect, test, vi } from "vitest";
-import { createJAgentDeskToolCatalog } from "./jagentdesk-tools.js";
-import type { JAgentDeskToolHostDependencies } from "./jagentdesk-tools.js";
-import type { ClusterRegistry } from "../../cluster/cluster-registry.js";
-import type { KubeClient } from "../../cluster/kube-client.js";
+import { createJAgentDeskToolCatalog } from "../../../packages/server/src/server/agent/tools/jagentdesk-tools.js";
+import type { JAgentDeskToolHostDependencies } from "../../../packages/server/src/server/agent/tools/jagentdesk-tools.js";
+import type { ClusterRegistry } from "../../../packages/server/src/server/cluster/cluster-registry.js";
+import type { KubeClient } from "../../../packages/server/src/server/cluster/kube-client.js";
 
 function createMockLogger() {
   return {
@@ -22,7 +22,11 @@ function createMinimalDeps(
   overrides?: Partial<JAgentDeskToolHostDependencies>,
 ): JAgentDeskToolHostDependencies {
   return {
-    agentManager: vi.fn() as unknown as JAgentDeskToolHostDependencies["agentManager"],
+    // The catalog reads the caller's labels (bot tool policy) while registering.
+    agentManager: {
+      getAgent: () => null,
+      getPluginTools: () => [],
+    } as unknown as JAgentDeskToolHostDependencies["agentManager"],
     agentStorage: vi.fn() as unknown as JAgentDeskToolHostDependencies["agentStorage"],
     providerSnapshotManager:
       vi.fn() as unknown as JAgentDeskToolHostDependencies["providerSnapshotManager"],

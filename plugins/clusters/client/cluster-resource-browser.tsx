@@ -9,17 +9,17 @@ import {
   type ListRenderItem,
 } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import { ClusterHelmView } from "@/components/cluster-helm-view";
-import { ClusterOverviewDashboard } from "@/components/cluster-overview-dashboard";
-import { ClusterStatusDot, PodStatusDot } from "@/components/cluster-dot";
-import { useClusterNavStore } from "@/stores/cluster-nav-store";
-import { useClusterViewStore } from "@/stores/cluster-view-store";
-import { useIsCompactFormFactor } from "@/constants/layout";
-import { Skeleton, useSkeletonPulse } from "@/components/ui/skeleton";
-import type { Theme } from "@/styles/theme";
-import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
-import { gumloopListStyles } from "@/components/gumloop-shell/list-styles";
+import { useHostRuntimeClient } from "../../../packages/app/src/plugins/builtin/host-api";
+import { ClusterHelmView } from "./cluster-helm-view";
+import { ClusterOverviewDashboard } from "./cluster-overview-dashboard";
+import { ClusterStatusDot, PodStatusDot } from "./cluster-dot";
+import { useClusterNavStore } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useClusterViewStore } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useIsCompactFormFactor } from "../../../packages/app/src/plugins/builtin/host-api";
+import { Skeleton, useSkeletonPulse } from "../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useIsGumloopTheme } from "../../../packages/app/src/plugins/builtin/host-api";
+import { gumloopListStyles } from "../../../packages/app/src/plugins/builtin/host-api";
 
 interface KindInfo {
   kind: string;

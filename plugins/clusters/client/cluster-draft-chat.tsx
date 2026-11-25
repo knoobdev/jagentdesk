@@ -1,21 +1,24 @@
-import { createDockWorkspace } from "@/components/dock-workspace";
-import { CLUSTER_AGENT_LABEL } from "@/utils/dock-agents";
+import { createDockWorkspace } from "../../../packages/app/src/plugins/builtin/host-api";
+import { CLUSTER_AGENT_LABEL } from "../../../packages/app/src/plugins/builtin/host-api";
 import { useMemo } from "react";
 import { Keyboard, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { Composer } from "@/composer";
-import { useAgentInputDraft } from "@/composer/draft/input-draft";
-import { useDraftAgentCreateFlow } from "@/composer/draft/create-flow";
-import { buildDraftStoreKey, generateDraftId } from "@/stores/draft-keys";
-import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import { encodeImages } from "@/utils/encode-images";
-import { isWeb } from "@/constants/platform";
-import { buildClusterSystemPrompt } from "@/components/cluster-ask-agent";
-import { clusterChatTitle } from "@/utils/cluster-chat-title";
-import { type ClusterComposerResource } from "@/components/cluster-composer";
+import { Composer } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useAgentInputDraft } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useDraftAgentCreateFlow } from "../../../packages/app/src/plugins/builtin/host-api";
+import {
+  buildDraftStoreKey,
+  generateDraftId,
+} from "../../../packages/app/src/plugins/builtin/host-api";
+import { useHostRuntimeClient } from "../../../packages/app/src/plugins/builtin/host-api";
+import { encodeImages } from "../../../packages/app/src/plugins/builtin/host-api";
+import { isWeb } from "../../../packages/app/src/plugins/builtin/host-api";
+import { buildClusterSystemPrompt } from "./cluster-ask-agent";
+import { clusterChatTitle } from "./cluster-chat-title";
+import { type ClusterComposerResource } from "./cluster-composer";
 import { type AgentSnapshotPayload } from "@jagentdesk/protocol/messages";
 import { type CreateAgentRequestOptions } from "@jagentdesk/client/internal/daemon-client";
-import { type Theme } from "@/styles/theme";
+import { type Theme } from "../../../packages/app/src/plugins/builtin/host-api";
 
 function resolveModeId(modeOptionIds: readonly string[], selectedMode: string): string | undefined {
   if (modeOptionIds.length === 0) return undefined;

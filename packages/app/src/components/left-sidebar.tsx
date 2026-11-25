@@ -1,4 +1,5 @@
-import { BuiltinSidebarDestinations } from "@/plugins/builtin/surfaces";
+import { BuiltinLeftPanel, BuiltinSidebarDestinations } from "@/plugins/builtin/surfaces";
+import { builtinClientRegistry } from "@/plugins/builtin/loaded";
 import { SidebarFooterIconHighlight } from "@/components/sidebar/sidebar-footer-icon-highlight";
 import { UsageSidebarItem, useUsageSummary, useOpenSidebarUsage } from "@/usage/sidebar-item";
 import { BotsSidebar } from "@/bots/sidebar";
@@ -7,7 +8,6 @@ import { PluginSidebarPanel } from "@/plugins/sidebar-screen-items";
 import { BuiltinPluginGate } from "@/plugins/builtin/gate";
 import { router, usePathname, type Href } from "expo-router";
 import {
-  Boxes,
   Bot,
   BarChart3,
   Database,
@@ -108,7 +108,6 @@ import { JiraSidebarEntry } from "@/jira/sidebar-entry";
 import { SidebarJiraNav } from "@/jira/sidebar-jira-nav";
 import { FigmaSidebarEntry } from "@/figma/sidebar-entry";
 import { SidebarFigmaNav } from "@/figma/sidebar-figma-nav";
-import { SidebarClusterNav } from "./sidebar-cluster-nav";
 import { SidebarDatabaseNav } from "./sidebar-database-nav";
 import { SidebarArgoCdNav } from "@/argocd/sidebar-argocd-nav";
 
@@ -121,6 +120,10 @@ function parseArgoCdRoute(
   const instanceId = match[2] ? decodeURIComponent(match[2]) : null;
   return { serverId: decodeURIComponent(match[1]), instanceId };
 }
+
+// Classic sidebar positions of migrated built-in destinations; the rest follow Marketplace.
+const CLASSIC_SLOT_INFRA: readonly string[] = ["clusters"];
+const CLASSIC_PLACED_DESTINATIONS: readonly string[] = [...CLASSIC_SLOT_INFRA];
 
 /** Sections whose route owns the desktop left column instead of the workspace list. */
 type SectionRoute =
@@ -161,7 +164,7 @@ export { shouldShowAddProject, shouldShowSidebarFooter } from "./sidebar-add-pro
  * nested ternary without tripping the prop-identity perf rules.
  */
 export function resolveSidebarNavBody(
-  clusterRoute: { serverId: string; clusterId: string } | null,
+  builtinPanelRoute: { serverId: string; segment: string } | null,
   databaseRoute: { serverId: string; databaseId: string } | null,
   fallback: ReactNode,
   sectionRoute: SectionRoute | null = null,
@@ -200,11 +203,9 @@ export function resolveSidebarNavBody(
       </BuiltinPluginGate>
     );
   }
-  if (clusterRoute) {
+  if (builtinPanelRoute) {
     return (
-      <BuiltinPluginGate serverId={clusterRoute.serverId} id="clusters">
-        <SidebarClusterNav serverId={clusterRoute.serverId} clusterId={clusterRoute.clusterId} />
-      </BuiltinPluginGate>
+      <BuiltinLeftPanel serverId={builtinPanelRoute.serverId} segment={builtinPanelRoute.segment} />
     );
   }
   if (databaseRoute) {
@@ -241,7 +242,6 @@ interface SidebarSharedProps {
   handleOpenProject: () => void;
   handleHome: () => void;
   handleSettings: () => void;
-  handleClusters: () => void;
   handleDatabases: () => void;
   handleServers: () => void;
   handleArgoCd: () => void;
@@ -276,7 +276,6 @@ interface SidebarLabels {
   schedules: string;
   sharedSessions: string;
   bots: string;
-  clusters: string;
   databases: string;
   servers: string;
   argoCd: string;
@@ -390,7 +389,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
   }, []);
 
   const {
-    clustersRoute,
     databasesRoute,
     serversRoute,
     supportsSshServers,
@@ -422,17 +420,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
   const handleWorkbenchDesktop = useCallback(() => {
     if (proxyRoute) router.push(proxyRoute as Href);
   }, [proxyRoute]);
-
-  const handleClustersDesktop = useCallback(() => {
-    if (clustersRoute) router.push(clustersRoute);
-  }, [clustersRoute]);
-
-  const handleClustersMobile = useCallback(() => {
-    if (clustersRoute) {
-      showMobileAgent();
-      router.push(clustersRoute);
-    }
-  }, [clustersRoute, showMobileAgent]);
 
   const handleDatabasesDesktop = useCallback(() => {
     if (databasesRoute) router.push(databasesRoute);
@@ -537,7 +524,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       schedules: t("sidebar.sections.schedules"),
       sharedSessions: "Shared sessions",
       bots: t("bots.title"),
-      clusters: "Clusters",
       databases: "Databases",
       servers: "Servers",
       argoCd: "Argo CD",
@@ -566,7 +552,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     shortcutIndexByWorkspaceKey,
     toggleProjectCollapsed,
     handleRefresh,
-    handleClusters: handleClustersDesktop,
     handleDatabases: handleDatabasesDesktop,
     handleServers: handleServersDesktop,
     handleArgoCd: handleArgoCdDesktop,
@@ -589,7 +574,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       <RetainedPanelActivity active={active}>
         <MobileSidebar
           {...sharedProps}
-          handleClusters={handleClustersMobile}
           handleDatabases={handleDatabasesMobile}
           handleServers={handleServersMobile}
           handleArgoCd={handleArgoCdMobile}
@@ -616,7 +600,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     <RetainedPanelActivity active={active}>
       <DesktopSidebar
         {...sharedProps}
-        handleClusters={handleClustersDesktop}
         handleDatabases={handleDatabasesDesktop}
         handleServers={handleServersDesktop}
         handleArgoCd={handleArgoCdDesktop}
@@ -974,13 +957,7 @@ function MobileSidebar({
 }: MobileSidebarProps) {
   const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
   const pathname = usePathname();
-  const clusterRouteMatch = pathname.match(/\/h\/([^/]+)\/cluster\/([^/]+)/);
-  const clusterRoute = clusterRouteMatch
-    ? {
-        serverId: decodeURIComponent(clusterRouteMatch[1]),
-        clusterId: decodeURIComponent(clusterRouteMatch[2]),
-      }
-    : null;
+  const builtinPanelRoute = builtinClientRegistry.navigationPanelRoute(pathname);
   const databaseRouteMatch = pathname.match(/\/h\/([^/]+)\/database\/([^/]+)/);
   const databaseRoute = databaseRouteMatch
     ? {
@@ -1076,7 +1053,7 @@ function MobileSidebar({
         {isGumloop ? (
           <GumloopSidebarHeader onBeforeNavigate={closeSidebar} reserveCloseButton />
         ) : null}
-        {clusterRoute || databaseRoute ? null : mobileNavigation}
+        {builtinPanelRoute || databaseRoute ? null : mobileNavigation}
         <WindowChromeSafeArea placement="inline" style={styles.mobileCloseButtonRow}>
           <Pressable
             style={styles.mobileCloseButton}
@@ -1098,7 +1075,7 @@ function MobileSidebar({
         </WindowChromeSafeArea>
 
         {resolveSidebarNavBody(
-          clusterRoute,
+          builtinPanelRoute,
           databaseRoute,
           <SidebarToastRegion active={dragGestureHostPresented}>
             {mobileWorkspaceBody}
@@ -1137,7 +1114,6 @@ function DesktopSidebar({
   handleOpenProject,
   handleHome,
   handleSettings,
-  handleClusters,
   handleDatabases,
   handleServers,
   handleArgoCd,
@@ -1172,7 +1148,6 @@ function DesktopSidebar({
   const isSessionsActive = pathname.includes("/sessions");
   const isSchedulesActive = pathname.includes("/schedules");
   const isSharedSessionsActive = pathname.includes("/shared-sessions");
-  const isClustersActive = pathname.includes("/clusters");
   const isDatabasesActive = pathname.includes("/database");
   const isServersActive = pathname.includes("/servers");
   const isArgoCdActive = pathname.includes("/argocd");
@@ -1182,13 +1157,7 @@ function DesktopSidebar({
   const isMarketplaceActive = pathname.includes("/marketplace");
   const isSimulatorActive = pathname.includes("/simulator");
   const isWorkbenchActive = pathname.includes("/proxy");
-  const clusterRouteMatch = pathname.match(/\/h\/([^/]+)\/cluster\/([^/]+)/);
-  const clusterRoute = clusterRouteMatch
-    ? {
-        serverId: decodeURIComponent(clusterRouteMatch[1]),
-        clusterId: decodeURIComponent(clusterRouteMatch[2]),
-      }
-    : null;
+  const builtinPanelRoute = builtinClientRegistry.navigationPanelRoute(pathname);
   const databaseRouteMatch = pathname.match(/\/h\/([^/]+)\/database\/([^/]+)/);
   const databaseRoute = databaseRouteMatch
     ? {
@@ -1296,7 +1265,7 @@ function DesktopSidebar({
           )}
           {isGumloop && !sectionRoute ? <GumloopSidebarHeader /> : null}
         </View>
-        {clusterRoute || databaseRoute || sectionRoute || isGumloop ? null : (
+        {builtinPanelRoute || databaseRoute || sectionRoute || isGumloop ? null : (
           <ScrollView
             dataSet={WINDOW_CONTENT_DATASET}
             style={styles.navScroll}
@@ -1347,16 +1316,7 @@ function DesktopSidebar({
               />
             </NavTargetGate>
 
-            <NavTargetGate route={builtinTargets.clustersRoute}>
-              <SidebarHeaderRow
-                icon={Boxes}
-                label={labels.clusters}
-                onPress={handleClusters}
-                isActive={isClustersActive}
-                testID="sidebar-clusters-nav"
-                variant="compact"
-              />
-            </NavTargetGate>
+            <BuiltinSidebarDestinations only={CLASSIC_SLOT_INFRA} />
             <NavTargetGate route={builtinTargets.databasesRoute}>
               <SidebarHeaderRow
                 icon={Database}
@@ -1407,7 +1367,7 @@ function DesktopSidebar({
               testID="sidebar-marketplace-nav"
               variant="compact"
             />
-            <BuiltinSidebarDestinations />
+            <BuiltinSidebarDestinations except={CLASSIC_PLACED_DESTINATIONS} />
             {supportsDevices ? (
               <SidebarHeaderRow
                 icon={Smartphone}
@@ -1453,7 +1413,7 @@ function DesktopSidebar({
         )}
 
         {resolveSidebarNavBody(
-          clusterRoute,
+          builtinPanelRoute,
           databaseRoute,
           <SidebarToastRegion active={active}>{workspaceListElement}</SidebarToastRegion>,
           sectionRoute,

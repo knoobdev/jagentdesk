@@ -1,15 +1,12 @@
 import type pino from "pino";
-import type { SessionInboundMessage, SessionOutboundMessage } from "../../messages.js";
-import type { ClusterRegistry } from "../../cluster/cluster-registry.js";
-import { detectKubeContexts } from "../../cluster/kube-config-source.js";
-import { GENERIC_KINDS } from "../../cluster/kube-client.js";
-import {
-  helmList,
-  helmHistory,
-  helmValues,
-  helmRollback,
-  helmUninstall,
-} from "../../cluster/helm-client.js";
+import type {
+  SessionInboundMessage,
+  SessionOutboundMessage,
+} from "../../../packages/server/src/server/plugins/builtin/host-api.js";
+import type { ClusterRegistry } from "../../../packages/server/src/server/plugins/builtin/host-api.js";
+import { detectKubeContexts } from "../../../packages/server/src/server/plugins/builtin/host-api.js";
+import { GENERIC_KINDS } from "../../../packages/server/src/server/plugins/builtin/host-api.js";
+import { helmList, helmHistory, helmValues, helmRollback, helmUninstall } from "./helm-client.js";
 
 export interface ClusterSessionHost {
   emit(msg: SessionOutboundMessage): void;

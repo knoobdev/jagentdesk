@@ -2,11 +2,11 @@ import { useCallback } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { X } from "lucide-react-native";
-import { useClusterNavStore } from "@/stores/cluster-nav-store";
-import { useClusterViewStore } from "@/stores/cluster-view-store";
-import type { Theme } from "@/styles/theme";
-import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
-import { gumloopTabStyles } from "@/components/gumloop-shell/list-styles";
+import { useClusterNavStore } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useClusterViewStore } from "../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useIsGumloopTheme } from "../../../packages/app/src/plugins/builtin/host-api";
+import { gumloopTabStyles } from "../../../packages/app/src/plugins/builtin/host-api";
 
 const ThemedX = withUnistyles(X);
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });

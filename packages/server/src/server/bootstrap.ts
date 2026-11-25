@@ -752,10 +752,6 @@ export async function createJAgentDeskDaemon(
     settingsDirectory: path.join(config.jagentdeskHome, "plugin-settings"),
   });
 
-  const stopBuiltinServices = await builtinServerRegistry.start(
-    pluginRuntime.builtin,
-    createBuiltinCoreServices(config.jagentdeskHome, logger, daemonConfigStore),
-  );
   const serverId = getOrCreateServerId(config.jagentdeskHome, { logger });
   const daemonKeyPair = await loadOrCreateDaemonKeyPair(config.jagentdeskHome, logger);
   const pairedDevices: PairedDeviceStore = createPairedDeviceStore({
@@ -1815,14 +1811,16 @@ export async function createJAgentDeskDaemon(
     { elapsed: elapsed(), enabled: config.sessionSharingEnabled === true },
     "Session share service initialized",
   );
-  await pluginRuntime.builtin.registerLifecycle("clusters", {
-    start: () => {},
-    stop: async () => {
-      await Promise.all(
-        clusterRegistry.list().map((entry) => clusterRegistry.disconnect(entry.id)),
-      );
-    },
-  });
+  const builtinCoreServices = createBuiltinCoreServices(
+    config.jagentdeskHome,
+    logger,
+    daemonConfigStore,
+    { clusters: clusterRegistry, databases: databaseRegistry },
+  );
+  const stopBuiltinServices = await builtinServerRegistry.start(
+    pluginRuntime.builtin,
+    builtinCoreServices,
+  );
   await pluginRuntime.builtin.registerLifecycle("databases", {
     start: () => {},
     stop: async () => {
@@ -2064,6 +2062,7 @@ export async function createJAgentDeskDaemon(
     orchestrationRuntime,
     clusterRegistry,
     databaseRegistry,
+    builtinServices: builtinCoreServices,
     sshAgentTools: (callerAgentId) => sshServerModules.createAgentTools(callerAgentId),
     remoteExecAgentTools: (callerAgentId) =>
       remoteExecService

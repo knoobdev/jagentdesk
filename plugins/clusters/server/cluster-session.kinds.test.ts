@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ClusterSession } from "./cluster-session.js";
-import { GENERIC_KINDS } from "../../cluster/kube-client.js";
+import { GENERIC_KINDS } from "../../../packages/server/src/server/cluster/kube-client.js";
 
 interface EmittedMessage {
   type: string;

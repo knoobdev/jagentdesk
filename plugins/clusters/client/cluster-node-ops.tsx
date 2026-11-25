@@ -1,39 +1,31 @@
 import { useCallback, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import type { Theme } from "@/styles/theme";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
 
-interface ClusterCronjobOpsProps {
+interface ClusterNodeOpsProps {
   client: {
-    clusterCronjobOp: (options: {
+    clusterNodeOp: (options: {
       id: string;
-      namespace: string;
       name: string;
-      op: "trigger" | "suspend" | "resume";
+      op: "cordon" | "uncordon";
     }) => Promise<{ result: { ok: boolean; message: string } | null; error: string | null }>;
   };
   clusterId: string;
-  namespace: string;
   name: string;
   onChanged?: () => void;
 }
 
-export function ClusterCronjobOps({
-  client,
-  clusterId,
-  namespace,
-  name,
-  onChanged,
-}: ClusterCronjobOpsProps) {
+export function ClusterNodeOps({ client, clusterId, name, onChanged }: ClusterNodeOpsProps) {
   const [operating, setOperating] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   const doOp = useCallback(
-    (op: "trigger" | "suspend" | "resume") => {
+    (op: "cordon" | "uncordon") => {
       setOperating(op);
       setMessage(null);
       void client
-        .clusterCronjobOp({ id: clusterId, namespace, name, op })
+        .clusterNodeOp({ id: clusterId, name, op })
         .then((res) => {
           if (res.error) {
             setMessage(res.error);
@@ -50,28 +42,22 @@ export function ClusterCronjobOps({
         })
         .finally(() => setOperating(null));
     },
-    [client, clusterId, namespace, name, onChanged],
+    [client, clusterId, name, onChanged],
   );
 
-  const handleTrigger = useCallback(() => doOp("trigger"), [doOp]);
-  const handleSuspend = useCallback(() => doOp("suspend"), [doOp]);
-  const handleResume = useCallback(() => doOp("resume"), [doOp]);
+  const handleCordon = useCallback(() => doOp("cordon"), [doOp]);
+  const handleUncordon = useCallback(() => doOp("uncordon"), [doOp]);
 
   return (
     <View style={styles.container}>
-      <Pressable style={styles.actionButton} onPress={handleTrigger} disabled={operating !== null}>
+      <Pressable style={styles.actionButton} onPress={handleCordon} disabled={operating !== null}>
         <Text style={styles.actionButtonText}>
-          {operating === "trigger" ? "Triggering..." : "Trigger"}
+          {operating === "cordon" ? "Cordoning..." : "Cordon"}
         </Text>
       </Pressable>
-      <Pressable style={styles.actionButton} onPress={handleSuspend} disabled={operating !== null}>
+      <Pressable style={styles.actionButton} onPress={handleUncordon} disabled={operating !== null}>
         <Text style={styles.actionButtonText}>
-          {operating === "suspend" ? "Suspending..." : "Suspend"}
-        </Text>
-      </Pressable>
-      <Pressable style={styles.actionButton} onPress={handleResume} disabled={operating !== null}>
-        <Text style={styles.actionButtonText}>
-          {operating === "resume" ? "Resuming..." : "Resume"}
+          {operating === "uncordon" ? "Uncordoning..." : "Uncordon"}
         </Text>
       </Pressable>
       {message ? (

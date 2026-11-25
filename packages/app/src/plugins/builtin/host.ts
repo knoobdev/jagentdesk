@@ -12,10 +12,20 @@ export interface BuiltinClientProps {
 export interface BuiltinDestination {
   id: string;
   title: string;
+  /** Rail label and drill-in title; defaults to `title`. */
+  shortTitle?: string;
   icon: LucideIcon;
   group: "Tools" | "main";
   route: (serverId: string) => string;
   routeSegment: string;
+  /** Other host route segments that belong to this destination (list vs detail routes). */
+  routeSegments?: readonly string[];
+  /** Notifies when `route` would return a different value (for example a remembered resource). */
+  routeChanges?: (listener: () => void) => () => void;
+}
+export interface BuiltinLeftPanelOptions {
+  /** Replace the navigation list in the classic sidebar while this segment's route is open. */
+  ownsNavigation?: boolean;
 }
 export interface BuiltinScreen extends BuiltinClientProps {
   sshDocker?: import("@/ssh/ui/ssh-docker-client").SshDockerTarget;
@@ -23,7 +33,13 @@ export interface BuiltinScreen extends BuiltinClientProps {
 export interface BuiltinClientHost {
   readonly id: BuiltinPluginId;
   sidebarDestination(destination: BuiltinDestination): void;
-  leftPanel(routeSegment: string, component: ComponentType<BuiltinClientProps>): void;
+  leftPanel(
+    routeSegment: string,
+    component: ComponentType<BuiltinClientProps>,
+    options?: BuiltinLeftPanelOptions,
+  ): void;
+  /** Rendered once per host route while the plugin is on (delegation prompts, binders). */
+  hostMount(id: string, component: ComponentType<BuiltinClientProps>): void;
   screen(routeSegment: string, component: ComponentType<BuiltinScreen>): void;
   settingsSection(id: string, component: ComponentType<BuiltinClientProps>): void;
   mobileDrawerEntry(destination: BuiltinDestination): void;
@@ -45,6 +61,8 @@ export interface BuiltinClientContributions {
   destinations: BuiltinDestination[];
   mobileEntries: BuiltinDestination[];
   panels: Map<string, ComponentType<BuiltinClientProps>>;
+  navigationPanels: Set<string>;
+  mounts: Map<string, ComponentType<BuiltinClientProps>>;
   screens: Map<string, ComponentType<BuiltinScreen>>;
   settings: Map<string, ComponentType<BuiltinClientProps>>;
   composer: Map<string, ComponentType<BuiltinClientProps>>;
@@ -59,6 +77,8 @@ export class BuiltinClientRegistry {
       destinations: [],
       mobileEntries: [],
       panels: new Map(),
+      navigationPanels: new Set(),
+      mounts: new Map(),
       screens: new Map(),
       settings: new Map(),
       composer: new Map(),
@@ -74,7 +94,11 @@ export class BuiltinClientRegistry {
       id,
       sidebarDestination: (destination) => entry.destinations.push(destination),
       mobileDrawerEntry: (destination) => entry.mobileEntries.push(destination),
-      leftPanel: (key, component) => add(entry.panels, key, component),
+      leftPanel: (key, component, options) => {
+        add(entry.panels, key, component);
+        if (options?.ownsNavigation) entry.navigationPanels.add(key);
+      },
+      hostMount: (key, component) => add(entry.mounts, key, component),
       screen: (key, component) => add(entry.screens, key, component),
       settingsSection: (key, component) => add(entry.settings, key, component),
       composerItem: (key, component) => add(entry.composer, key, component),
@@ -90,6 +114,27 @@ export class BuiltinClientRegistry {
   }
   destinations(): readonly BuiltinDestination[] {
     return [...this.entries.values()].flatMap((entry) => entry.destinations);
+  }
+  /** Drill-in titles for every route segment a destination owns. */
+  drillTitles(): readonly { routeSegment: string; title: string }[] {
+    return this.destinations().flatMap((destination) =>
+      [destination.routeSegment, ...(destination.routeSegments ?? [])].map((routeSegment) => ({
+        routeSegment,
+        title: destination.shortTitle ?? destination.title,
+      })),
+    );
+  }
+  hasPanel(routeSegment: string): boolean {
+    return [...this.entries.values()].some((entry) => entry.panels.has(routeSegment));
+  }
+  /** `/h/<serverId>/<segment>…` routes whose panel replaces the classic sidebar navigation. */
+  navigationPanelRoute(pathname: string): { serverId: string; segment: string } | null {
+    const match = /^\/h\/([^/]+)\/([^/?]+)/.exec(pathname);
+    if (!match) return null;
+    const segment = match[2];
+    return [...this.entries.values()].some((entry) => entry.navigationPanels.has(segment))
+      ? { serverId: decodeURIComponent(match[1]), segment }
+      : null;
   }
   hasPlugin(id: string): boolean {
     return [...this.entries.keys()].some((pluginId) => pluginId === id);

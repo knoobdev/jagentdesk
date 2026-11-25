@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import type { Theme } from "@/styles/theme";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
 
 interface ClusterSecretRevealProps {
   client: {

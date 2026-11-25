@@ -72,7 +72,10 @@ describe("Gumloop sidebar model", () => {
     "plugin/p/surface/s",
   ])("drills into /%s and keeps its owning host", (path) => {
     expect(
-      resolveSidebarDrillIn(`/h/host%20one/${path}`, [{ routeSegment: "docker", title: "Docker" }]),
+      resolveSidebarDrillIn(`/h/host%20one/${path}`, [
+        { routeSegment: "docker", title: "Docker" },
+        { routeSegment: "cluster", title: "Clusters" },
+      ]),
     ).toMatchObject({
       kind: "destination",
       serverId: "host one",

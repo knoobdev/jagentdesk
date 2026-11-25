@@ -7,7 +7,6 @@ import { useCallback, useMemo } from "react";
 import {
   BarChart3,
   Gauge,
-  Boxes,
   Bot,
   CalendarClock,
   Database,
@@ -29,7 +28,6 @@ import { useTranslation } from "react-i18next";
 import { useHostFeature } from "@/runtime/host-features";
 import { useHosts } from "@/runtime/host-runtime";
 import { canCreateWorktreeForProjectKind } from "@/projects/host-projects";
-import { useClusterNavStore } from "@/stores/cluster-nav-store";
 import { useDatabaseNavStore } from "@/stores/database-nav-store";
 import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { useSessionStore } from "@/stores/session-store";
@@ -47,8 +45,6 @@ const DEVICE_CAPABILITIES: readonly HostCapabilityId[] = [
 import { useWorkspace } from "@/stores/session-store-hooks";
 import {
   buildArgoCdRoute,
-  buildClusterWorkloadsRoute,
-  buildClustersRoute,
   buildDatabaseBrowseRoute,
   buildDatabasesRoute,
   buildFigmaRoute,
@@ -71,7 +67,6 @@ import {
 export interface AppNavTargets {
   botsRoute: Href | null;
   sharedSessionsRoute: Href | null;
-  clustersRoute: Href | null;
   databasesRoute: Href | null;
   serversRoute: Href | null;
   skillsRoute: Href | null;
@@ -99,10 +94,8 @@ export function useAppNavTargets(): AppNavTargets {
   const firstServerId = routeServerId
     ? decodeURIComponent(routeServerId)
     : (selection?.serverId ?? hosts[0]?.serverId ?? "");
-  const lastCluster = useClusterNavStore((s) => s.lastCluster);
   const lastDatabase = useDatabaseNavStore((s) => s.lastDatabase);
   const supportsBots = useHostFeature(firstServerId, "bots");
-  const clustersEnabled = useBuiltinPluginEnabled(firstServerId, "clusters");
   const databasesEnabled = useBuiltinPluginEnabled(firstServerId, "databases");
   const skillsEnabled = useBuiltinPluginEnabled(firstServerId, "skills");
   const insightsEnabled = useBuiltinPluginEnabled(firstServerId, "insights");
@@ -138,15 +131,8 @@ export function useAppNavTargets(): AppNavTargets {
   return useMemo(() => {
     const perHost = (build: (serverId: string) => string): Href | null =>
       firstServerId ? (build(firstServerId) as Href) : null;
-    // Clusters and databases jump straight back to the resource the user last had open,
+    // Databases jump straight back to the resource the user last had open,
     // falling back to the list when there is none.
-    let clustersRoute: Href | null = perHost(buildClustersRoute);
-    if (lastCluster && lastCluster.serverId === firstServerId) {
-      clustersRoute = buildClusterWorkloadsRoute(
-        lastCluster.serverId,
-        lastCluster.clusterId,
-      ) as Href;
-    }
     let databasesRoute: Href | null = perHost(buildDatabasesRoute);
     if (lastDatabase && lastDatabase.serverId === firstServerId) {
       databasesRoute = buildDatabaseBrowseRoute(
@@ -158,7 +144,6 @@ export function useAppNavTargets(): AppNavTargets {
       botsRoute: supportsBots
         ? perHost((serverId) => `/h/${encodeURIComponent(serverId)}/bots`)
         : null,
-      clustersRoute: clustersEnabled ? clustersRoute : null,
       databasesRoute: databasesEnabled ? databasesRoute : null,
       sharedSessionsRoute: sharingEnabled ? (buildSharedSessionsRoute() as Href) : null,
       // Gated at the route: the entry disappears with the daemon feature flag.
@@ -177,7 +162,6 @@ export function useAppNavTargets(): AppNavTargets {
     };
   }, [
     supportsBots,
-    clustersEnabled,
     databasesEnabled,
     skillsEnabled,
     insightsEnabled,
@@ -187,7 +171,6 @@ export function useAppNavTargets(): AppNavTargets {
     supportsFigma,
     deviceServerId,
     firstServerId,
-    lastCluster,
     lastDatabase,
     supportsArgoCd,
     supportsForgeHub,
@@ -289,15 +272,6 @@ export function useAppNavItems(): AppNavItem[] {
         "/database",
       ),
       navItem("servers", Server, "Servers", "Servers", targets.serversRoute, pathname, "/servers"),
-      navItem(
-        "clusters",
-        Boxes,
-        "Clusters",
-        "Clusters",
-        targets.clustersRoute,
-        pathname,
-        "/cluster",
-      ),
       navItem("argocd", Ship, "Argo CD", "Argo CD", targets.argoCdRoute, pathname, "/argocd"),
       {
         key: "usage",
@@ -323,8 +297,41 @@ export function useAppNavItems(): AppNavItem[] {
         ? navItem("forge", GitPullRequest, "Forge", "Forge", targets.forgeRoute, pathname, "/forge")
         : null,
     ];
-    return items.filter((item): item is AppNavItem => item !== null);
+    return orderAppNavItems(items.filter((item): item is AppNavItem => item !== null));
   }, [openUsage, pathname, t, targets, builtinDestinations]);
+}
+
+// Established destination order. Built-in feature destinations keep their positions; any other
+// built-in destination follows Marketplace in load order.
+const APP_NAV_ORDER: readonly string[] = [
+  "home",
+  "sessions",
+  "schedules",
+  "bots",
+  "shared-sessions",
+  "skills",
+  "marketplace",
+  "docker",
+  "simulators",
+  "workbench",
+  "databases",
+  "servers",
+  "clusters",
+  "argocd",
+  "usage",
+  "insights",
+  "jira",
+  "figma",
+  "forge",
+];
+const UNPLACED_NAV_RANK = APP_NAV_ORDER.indexOf("marketplace") + 0.5;
+export function orderAppNavItems(items: AppNavItem[]): AppNavItem[] {
+  const rank = (key: string) => {
+    const index = APP_NAV_ORDER.indexOf(key);
+    return index === -1 ? UNPLACED_NAV_RANK : index;
+  };
+  // Hermes has no `toSorted`; Array.prototype.sort is stable.
+  return [...items].sort((left, right) => rank(left.key) - rank(right.key));
 }
 
 function navItem(

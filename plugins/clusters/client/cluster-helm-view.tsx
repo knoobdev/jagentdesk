@@ -1,11 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { FlatList, Pressable, ScrollView, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import { AdaptiveModalSheet } from "@/components/adaptive-modal-sheet";
-import type { Theme } from "@/styles/theme";
-import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
-import { gumloopListStyles, gumloopTabStyles } from "@/components/gumloop-shell/list-styles";
+import { useHostRuntimeClient } from "../../../packages/app/src/plugins/builtin/host-api";
+import { AdaptiveModalSheet } from "../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useIsGumloopTheme } from "../../../packages/app/src/plugins/builtin/host-api";
+import {
+  gumloopListStyles,
+  gumloopTabStyles,
+} from "../../../packages/app/src/plugins/builtin/host-api";
 
 // ── Types ──
 

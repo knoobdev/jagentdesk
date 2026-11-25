@@ -1,17 +1,17 @@
-import { PageHeader } from "@/components/headers/page-header";
+import { useRouter } from "../../../packages/app/src/plugins/builtin/host-api";
+import { PageHeader } from "../../../packages/app/src/plugins/builtin/host-api";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { Boxes, CircleAlert } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { useRouter } from "expo-router";
-import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
-import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import { ContextStatusDot, ClusterStatusDot } from "@/components/cluster-dot";
-import { buildClusterWorkloadsRoute } from "@/utils/host-routes";
-import { useClusterNavStore } from "@/stores/cluster-nav-store";
-import type { Theme } from "@/styles/theme";
-import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
-import { gumloopListStyles } from "@/components/gumloop-shell/list-styles";
+import { useHostRuntimeClient } from "../../../packages/app/src/plugins/builtin/host-api";
+import { LoadingSpinner } from "../../../packages/app/src/plugins/builtin/host-api";
+import { ContextStatusDot, ClusterStatusDot } from "./cluster-dot";
+import { buildClusterWorkloadsRoute } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useClusterNavStore } from "../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useIsGumloopTheme } from "../../../packages/app/src/plugins/builtin/host-api";
+import { gumloopListStyles } from "../../../packages/app/src/plugins/builtin/host-api";
 import type { ClusterInfo, KubeContextInfo } from "@jagentdesk/protocol/cluster/rpc-schemas";
 
 /** Context rows: Gumloop's hairline divider color instead of the classic border. */
@@ -105,9 +105,7 @@ function ContextRow({
   );
 }
 
-export function ClustersScreen() {
-  const hosts = useHosts();
-  const serverId = hosts[0]?.serverId ?? "";
+export function ClustersScreen({ serverId }: { serverId: string }) {
   const client = useHostRuntimeClient(serverId);
   const clearLastCluster = useClusterNavStore((s) => s.clearLastCluster);
   const router = useRouter();

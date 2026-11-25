@@ -1,15 +1,15 @@
+import { useSafeAreaInsets } from "../../../packages/app/src/plugins/builtin/host-api";
 import { useCallback, useMemo, useState } from "react";
 import { Pressable, TextInput, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ArrowUp } from "lucide-react-native";
-import { useHostRuntimeClient } from "@/runtime/host-runtime";
-import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
-import { useSessionStore } from "@/stores/session-store";
-import { askAgentAboutResource } from "@/components/cluster-ask-agent";
-import { useIsCompactFormFactor } from "@/constants/layout";
-import { useClusterChatStore } from "@/stores/cluster-chat-store";
-import type { Theme } from "@/styles/theme";
+import { useHostRuntimeClient } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useProvidersSnapshot } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useSessionStore } from "../../../packages/app/src/plugins/builtin/host-api";
+import { askAgentAboutResource } from "./cluster-ask-agent";
+import { useIsCompactFormFactor } from "../../../packages/app/src/plugins/builtin/host-api";
+import { useClusterChatStore } from "../../../packages/app/src/plugins/builtin/host-api";
+import type { Theme } from "../../../packages/app/src/plugins/builtin/host-api";
 
 const ThemedArrowUp = withUnistyles(ArrowUp);
 const sendIconColor = (theme: Theme) => ({ color: theme.colors.accentForeground });
