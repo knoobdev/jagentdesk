@@ -1,8 +1,14 @@
+import { sshModuleStrings } from "./ssh-modules";
+import { builtinPluginStrings } from "./builtin-plugins";
+import { botsStrings } from "./bots";
 import { type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 import { activityGraphStrings } from "./activity-graph";
 
 export const ptBR: TranslationResources = {
+  bots: botsStrings,
+  builtinPlugins: builtinPluginStrings,
+  ssh: sshModuleStrings,
   pluginCombobox: {
     searching: "Pesquisando…",
     empty: "Nenhum resultado",

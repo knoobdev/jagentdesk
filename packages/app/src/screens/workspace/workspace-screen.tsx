@@ -1,3 +1,8 @@
+import {
+  useWindowLayout,
+  resolveWorkspaceActionPlacement,
+  WindowLayoutActions,
+} from "@/window-layout";
 import { Button } from "@/components/ui/button";
 import { CompactWorkspaceActions } from "./compact-workspace-actions";
 import { ensurePanelsRegistered } from "@/panels/register-panels";
@@ -3999,9 +4004,11 @@ function WorkspaceScreenContent({
     normalizedServerId,
     normalizedWorkspaceId,
   );
+  const windowLayout = useWindowLayout();
+  const actionsInVerticalBar = resolveWorkspaceActionPlacement(windowLayout) === "vertical-bar";
   const headerRight = useMemo(
     () => (
-      <View style={styles.headerRight}>
+      <View style={[styles.headerRight, actionsInVerticalBar && styles.verticalHeaderRight]}>
         <GumloopHeaderShare serverId={normalizedServerId} />
         <WorkspaceOrchestrationPanel
           serverId={normalizedServerId}
@@ -4152,6 +4159,7 @@ function WorkspaceScreenContent({
       handleOpenUrlInBrowserTab,
       showCompactButtonLabels,
       compactHeader,
+      actionsInVerticalBar,
       isGitCheckout,
       handleToggleExplorer,
       isExplorerOpen,
@@ -4369,8 +4377,17 @@ function WorkspaceScreenContent({
     ),
     [gumloopDesktop, normalizedServerId, workspaceHeaderTitle],
   );
+  const inlineHeaderRight = useMemo(
+    () => (actionsInVerticalBar ? null : headerRight),
+    [actionsInVerticalBar, headerRight],
+  );
+  const verticalActionsActive = useMemo(
+    () => isRouteFocused && !isMobile,
+    [isRouteFocused, isMobile],
+  );
   const workspaceCenterColumn = (
     <View style={styles.centerColumn}>
+      <WindowLayoutActions active={verticalActionsActive}>{headerRight}</WindowLayoutActions>
       {showScreenHeader && (
         <WorkspaceScreenHeader
           onRowLayout={onHeaderLayout}
@@ -4414,7 +4431,7 @@ function WorkspaceScreenContent({
               />
             </>
           }
-          right={headerRight}
+          right={inlineHeaderRight}
         />
       )}
 
@@ -4658,6 +4675,7 @@ const styles = StyleSheet.create((theme) => ({
     backgroundColor: theme.colors.surface3,
     opacity: 0.25,
   },
+  verticalHeaderRight: { flexDirection: "column" },
   headerRight: {
     flexDirection: "row",
     alignItems: "center",

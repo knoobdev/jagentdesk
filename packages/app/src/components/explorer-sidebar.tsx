@@ -1,3 +1,5 @@
+import { Portal } from "@gorhom/portal";
+import { GUMLOOP_INSPECTOR_HOST } from "@/components/gumloop-shell/sidebar-state";
 import {
   useGumloopDesktopShell,
   useIsGumloopTheme,
@@ -86,6 +88,7 @@ export function CompactExplorerSidebar({
   isGit,
   onOpenFile,
 }: ExplorerSidebarProps) {
+  const gumloop = useIsGumloopTheme();
   const { theme } = useUnistyles();
   const insets = useSafeAreaInsets();
   const isOpen = usePanelStore((state) => selectIsFileExplorerOpen(state, { isCompact: true }));
@@ -125,7 +128,7 @@ export function CompactExplorerSidebar({
     [insets.top, theme.colors.surfaceSidebar, mobileKeyboardInsetStyle],
   );
 
-  return (
+  const overlay = (
     <RetainedPanelActivity active={isOpen}>
       <MobilePanelOverlay
         panel="file-explorer"
@@ -146,6 +149,7 @@ export function CompactExplorerSidebar({
       </MobilePanelOverlay>
     </RetainedPanelActivity>
   );
+  return gumloop ? <Portal hostName={GUMLOOP_INSPECTOR_HOST}>{overlay}</Portal> : overlay;
 }
 
 export function ExplorerSidebar({

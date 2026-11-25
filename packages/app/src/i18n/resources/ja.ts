@@ -1,8 +1,14 @@
+import { sshModuleStrings } from "./ssh-modules";
+import { builtinPluginStrings } from "./builtin-plugins";
+import { botsStrings } from "./bots";
 import { type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 import { activityGraphStrings } from "./activity-graph";
 
 export const ja: TranslationResources = {
+  bots: botsStrings,
+  builtinPlugins: builtinPluginStrings,
+  ssh: sshModuleStrings,
   pluginCombobox: {
     searching: "検索中…",
     empty: "結果がありません",
@@ -770,6 +776,7 @@ export const ja: TranslationResources = {
       },
       states: {
         runningCount: "{{count}} 件実行中",
+        running: "実行中",
         exitCode: "終了コード: {{code}}",
         startFailed: "{{scriptName}}の起動に失敗しました",
         stopFailed: "{{scriptName}}の停止に失敗しました",

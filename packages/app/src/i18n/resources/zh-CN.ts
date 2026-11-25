@@ -1,8 +1,14 @@
+import { sshModuleStrings } from "./ssh-modules";
+import { builtinPluginStrings } from "./builtin-plugins";
+import { botsStrings } from "./bots";
 import { type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 import { activityGraphStrings } from "./activity-graph";
 
 export const zhCN: TranslationResources = {
+  bots: botsStrings,
+  builtinPlugins: builtinPluginStrings,
+  ssh: sshModuleStrings,
   pluginCombobox: {
     searching: "搜索中…",
     empty: "无结果",

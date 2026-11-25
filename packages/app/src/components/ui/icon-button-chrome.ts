@@ -73,7 +73,7 @@ export function iconButtonChromeStyle({
   const highlighted = state?.active || state?.hovered || state?.pressed || state?.open;
   return [
     resolveIconButtonFrame(size, compact),
-    round ? { borderRadius: 999 } : null,
+    round ? styles.round : null,
     style,
     highlighted ? styles.highlighted : null,
     disabled ? styles.disabled : null,
@@ -141,6 +141,7 @@ const styles = StyleSheet.create((theme) => ({
     flexShrink: 0,
     outlineOffset: FOCUS_RING_INSET,
   },
+  round: { borderRadius: theme.borderRadius.full },
   highlighted: {
     backgroundColor: theme.colors.interactionHighlight,
   },

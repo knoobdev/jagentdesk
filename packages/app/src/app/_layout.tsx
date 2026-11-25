@@ -1,3 +1,4 @@
+import { GUMLOOP_INSPECTOR_HOST } from "@/components/gumloop-shell/sidebar-state";
 import { useSettingsSidebarPresentation } from "@/navigation/settings-presentation";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
@@ -24,7 +25,7 @@ import { UsageSidebarRoot } from "@/usage/sidebar-item";
 import { HostConfirmationSheet } from "@/hosts/host-confirmation-sheet";
 import "@/styles/unistyles";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
-import { PortalProvider } from "@gorhom/portal";
+import { PortalProvider, PortalHost } from "@gorhom/portal";
 import * as Linking from "expo-linking";
 import { Stack, useNavigationContainerRef, usePathname, useRouter, type Href } from "expo-router";
 import {
@@ -448,7 +449,10 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
   const gumloopTheme = useIsGumloopTheme();
   useGumloopSidebarShortcut(gumloopShell);
   const onForge = !gumloopShell && pathname.endsWith("/forge");
-  const sidebarEnabled = chromeEnabled || gumloopShell;
+  const sidebarEnabled = useMemo(
+    () => chromeEnabled || gumloopShell || (gumloopTheme && pathname.startsWith("/settings")),
+    [chromeEnabled, gumloopShell, gumloopTheme, pathname],
+  );
   const settingsSidebar = useSettingsSidebarPresentation({
     presentation: isCompactLayout ? "overlay" : "dock",
     visible: sidebarEnabled,
@@ -526,14 +530,14 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
   const sidebarChrome = useMemo(
     () => (
       <SidebarChrome
-        mounted={isCompactLayout ? chromeEnabled : desktopSidebarMounted}
-        visible={isCompactLayout ? chromeEnabled : desktopSidebarVisible}
+        mounted={isCompactLayout ? sidebarEnabled : desktopSidebarMounted}
+        visible={isCompactLayout ? sidebarEnabled : desktopSidebarVisible}
         keyboardShortcutsEnabled={keyboardShortcutsEnabled}
       />
     ),
     [
       isCompactLayout,
-      chromeEnabled,
+      sidebarEnabled,
       desktopSidebarMounted,
       desktopSidebarVisible,
       keyboardShortcutsEnabled,
@@ -558,6 +562,7 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
     <>
       <FloatingPanelPortalHost />
       <WindowLayoutActionsHost />
+      <PortalHost name={GUMLOOP_INSPECTOR_HOST} />
       {isCompactLayout ? sidebarChrome : null}
       <DownloadToast />
       <RosettaCalloutSource />
@@ -610,7 +615,7 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
   );
 
   const content = isCompactLayout ? (
-    <MobileGestureWrapper chromeEnabled={chromeEnabled}>{surface}</MobileGestureWrapper>
+    <MobileGestureWrapper chromeEnabled={sidebarEnabled}>{surface}</MobileGestureWrapper>
   ) : (
     surface
   );

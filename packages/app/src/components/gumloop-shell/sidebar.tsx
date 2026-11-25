@@ -1,3 +1,4 @@
+import { RetainedPanelActivity } from "@/components/retained-panel";
 import { openSettingsFromSidebar } from "@/navigation/settings-navigation";
 import { getSettingsSidebarReturn } from "@/navigation/settings-presentation/session";
 import { getLastWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
@@ -277,7 +278,7 @@ function ConnectionFooter({ serverId, onNavigate }: { serverId: string; onNaviga
   if (transport === "tailnet") transportLabel = "Tailscale";
   return (
     <View style={styles.footer} testID="gumloop-sidebar-footer">
-      <UsageSidebarItem sources={sources} />
+      <UsageSidebarItem sources={sources} onNavigate={onNavigate} />
       <Pressable
         onPress={connections}
         style={styles.connection}
@@ -549,50 +550,56 @@ export function GumloopSidebar({ active }: { active: boolean }) {
     leftInset: insets.left,
     rightInset: insets.right,
   });
-  const sidebarStyle = [
-    styles.sidebar,
-    division && !compact && { width: division.sidebarWidth },
-    compact && styles.compactSidebar,
-    compact && { paddingTop: insets.top, paddingBottom: insets.bottom },
-  ];
+  const sidebarStyle = useMemo(
+    () => [
+      styles.sidebar,
+      !active && !compact && styles.hiddenSidebar,
+      division && !compact && { width: division.sidebarWidth },
+      compact && styles.compactSidebar,
+      compact && { paddingTop: insets.top, paddingBottom: insets.bottom },
+    ],
+    [active, compact, division, insets.top, insets.bottom],
+  );
   return (
-    <View style={sidebarStyle} pointerEvents={active ? "auto" : "none"} testID="gumloop-sidebar">
-      <View style={styles.header} testID="gumloop-sidebar-header">
-        <BrandRow />
-        {drill ? (
-          <View style={styles.drillRow}>
-            <Pressable
-              style={styles.iconButton}
-              onPress={back}
-              accessibilityRole="button"
-              accessibilityLabel="Back to sidebar"
-              testID="gumloop-drill-back"
-            >
-              <ThemedArrowLeft size={18} uniProps={foreground} />
-            </Pressable>
-            <Text style={styles.label} numberOfLines={1}>
-              {title}
-            </Text>
-            <DrillQuickSwitch drill={drill} onSelect={resetDrill} />
-          </View>
-        ) : (
-          <HostRow serverId={serverId} />
-        )}
-        <Pressable
-          style={styles.newAgent}
-          onPress={newAgent}
-          accessibilityRole="button"
-          testID="sidebar-global-new-workspace"
-        >
-          <ThemedPlus size={18} uniProps={foreground} />
-          <Text style={styles.newAgentLabel}>New agent</Text>
-        </Pressable>
+    <RetainedPanelActivity active={active}>
+      <View style={sidebarStyle} pointerEvents={active ? "auto" : "none"} testID="gumloop-sidebar">
+        <View style={styles.header} testID="gumloop-sidebar-header">
+          <BrandRow />
+          {drill ? (
+            <View style={styles.drillRow}>
+              <Pressable
+                style={styles.iconButton}
+                onPress={back}
+                accessibilityRole="button"
+                accessibilityLabel="Back to sidebar"
+                testID="gumloop-drill-back"
+              >
+                <ThemedArrowLeft size={18} uniProps={foreground} />
+              </Pressable>
+              <Text style={styles.label} numberOfLines={1}>
+                {title}
+              </Text>
+              <DrillQuickSwitch drill={drill} onSelect={resetDrill} />
+            </View>
+          ) : (
+            <HostRow serverId={serverId} />
+          )}
+          <Pressable
+            style={styles.newAgent}
+            onPress={newAgent}
+            accessibilityRole="button"
+            testID="sidebar-global-new-workspace"
+          >
+            <ThemedPlus size={18} uniProps={foreground} />
+            <Text style={styles.newAgentLabel}>New agent</Text>
+          </Pressable>
+        </View>
+        <View style={styles.middle} testID="gumloop-sidebar-middle">
+          {middle}
+        </View>
+        <ConnectionFooter serverId={serverId} onNavigate={resetDrill} />
       </View>
-      <View style={styles.middle} testID="gumloop-sidebar-middle">
-        {middle}
-      </View>
-      <ConnectionFooter serverId={serverId} onNavigate={resetDrill} />
-    </View>
+    </RetainedPanelActivity>
   );
 }
 
@@ -663,6 +670,7 @@ function DrillQuickSwitch({
 }
 
 const styles = StyleSheet.create((theme: Theme) => ({
+  hiddenSidebar: { display: "none" },
   compactSidebar: { width: "100%", flex: 1 },
   sidebar: {
     width: 324,

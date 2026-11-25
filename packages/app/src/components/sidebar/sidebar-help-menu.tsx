@@ -153,8 +153,8 @@ export function SidebarHelpMenu() {
 
 const styles = StyleSheet.create((theme) => ({
   gumloopTrigger: {
-    width: 32,
-    height: 32,
+    width: { xs: 44, md: 32 },
+    height: { xs: 44, md: 32 },
     flexShrink: 0,
     borderRadius: 8,
     alignItems: "center",

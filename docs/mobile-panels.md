@@ -6,8 +6,15 @@ Compact layouts have three mutually exclusive destinations:
 - `agent` in the center
 - `file-explorer` on the right
 
-They are one interaction, not two independent drawers. The implementation lives in
-`packages/app/src/mobile-panels/`.
+They share one navigation model in `packages/app/src/mobile-panels/`. Gumloop presents the left
+destination with the same sidebar used on desktop, capped at 324 points or 85% of the window. The
+right destination is a full-screen inspector above the compact header. Keep their shared motion and
+visibility ownership in `MobilePanelOverlay`; theme-specific placement belongs in the shell.
+
+Compact file and subagent panes use the workspace sheet stack rather than replacing the main pane.
+Retain the underlying pane while a sheet owns focus. Settings temporarily covers the drawer through
+a presentation session, so returning restores its workspace drill-in without replaying an open
+animation. A different navigation destination clears that return session.
 
 ## Ownership
 

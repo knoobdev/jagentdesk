@@ -1,8 +1,14 @@
+import { sshModuleStrings } from "./ssh-modules";
+import { builtinPluginStrings } from "./builtin-plugins";
+import { botsStrings } from "./bots";
 import { type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 import { activityGraphStrings } from "./activity-graph";
 
 export const fr: TranslationResources = {
+  bots: botsStrings,
+  builtinPlugins: builtinPluginStrings,
+  ssh: sshModuleStrings,
   pluginCombobox: {
     searching: "Recherche…",
     empty: "Aucun résultat",
@@ -726,6 +732,7 @@ export const fr: TranslationResources = {
     },
     header: {
       actions: {
+        workspaceActionsUnhealthy: "Actions de l’espace de travail, un service est défaillant",
         workspaceActions: "Actions de l\u2019espace de travail",
         newAgent: "Nouvel agent",
         newTerminal: "Nouveau terminal",
