@@ -57,10 +57,8 @@ import {
   normalizeHostPort,
 } from "@/utils/daemon-endpoints";
 import { getRelayDeviceSigning, prepareRelayDeviceSigning } from "@/utils/relay-device-signing";
-import {
-  isDesktopSignedLocalHost,
-  loadDesktopSignedLocalHosts,
-} from "@/runtime/desktop-signed-local-hosts";
+import { loadDesktopSignedLocalHosts } from "@/runtime/desktop-signed-local-hosts";
+import { directTcpClientConfig } from "@/runtime/direct-tcp-client-config";
 import { resolveAppVersion } from "@/utils/app-version";
 import { ConnectionOfferSchema, type ConnectionOffer } from "@jagentdesk/protocol/connection-offer";
 import { shouldUseDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
@@ -508,30 +506,6 @@ function toSnapshotConnectionPatch(
   };
 }
 
-/**
- * URL and auth for a direct TCP connection. The desktop's own bundled daemon
- * paired the desktop device key at bootstrap, so that Local hello is signed
- * too (ADR-0010); `paired=1` asks the daemon for the challenge. Any other
- * loopback or LAN daemon keeps the plain hello.
- */
-function directTcpClientConfig(
-  host: HostProfile,
-  connection: Extract<HostConnection, { type: "directTcp" }>,
-): Pick<DaemonClientConfig, "url" | "password" | "expectChallenge" | "deviceSigning"> {
-  const url = buildDaemonWebSocketUrl(connection.endpoint, {
-    useTls: connection.useTls ?? false,
-  });
-  const localSigning = isDesktopSignedLocalHost(host.serverId) ? getRelayDeviceSigning() : null;
-  if (localSigning) {
-    return {
-      url: `${url}${url.includes("?") ? "&" : "?"}paired=1`,
-      expectChallenge: true,
-      deviceSigning: localSigning,
-    };
-  }
-  return { url, ...(connection.password ? { password: connection.password } : {}) };
-}
-
 export function buildConnectionCandidates(
   host: HostProfile,
   tailnetMode: TailnetMode | null = isWeb ? "off" : null,
@@ -653,7 +627,10 @@ function createDefaultDeps(
         });
       }
       if (connection.type === "directTcp") {
-        return new DaemonClient({ ...base, ...directTcpClientConfig(host, connection) });
+        return new DaemonClient({
+          ...base,
+          ...directTcpClientConfig({ serverId: host.serverId, connection }),
+        });
       }
       if (connection.type === "relay") {
         return new DaemonClient({
