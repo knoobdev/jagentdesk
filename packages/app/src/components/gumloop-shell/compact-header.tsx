@@ -148,7 +148,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
   button: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   title: {
     flex: 1,
-    textAlign: "center",
+    textAlign: "left",
     fontSize: 17,
     fontWeight: "600",
     color: theme.colors.foreground,
