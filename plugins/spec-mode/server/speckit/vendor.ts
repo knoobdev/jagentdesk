@@ -69,7 +69,12 @@ export const SPECKIT_WORKFLOW = {
 
 // Source layout: src/server/spec-mode/speckit → ../../../../vendor/spec-kit.
 // Build layout:  dist/server/server/spec-mode/speckit → ../../../vendor/spec-kit.
-const VENDOR_CANDIDATES = ["../../../../vendor/spec-kit", "../../../vendor/spec-kit"];
+// Compiled: dist/server/builtin-features/spec-mode/server/speckit → dist/server/vendor.
+// Source: plugins/spec-mode/server/speckit → packages/server/vendor.
+const VENDOR_CANDIDATES = [
+  "../../../../vendor/spec-kit",
+  "../../../../packages/server/vendor/spec-kit",
+];
 
 export class SpecKitVendorMissingError extends Error {
   constructor() {

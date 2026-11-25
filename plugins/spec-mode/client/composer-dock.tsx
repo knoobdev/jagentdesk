@@ -1,9 +1,9 @@
+import { useSpecModeState } from "../../../packages/app/src/plugins/builtin/host-api";
 import type { ReactElement } from "react";
 import { View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
-import { PhaseReviewBar } from "@/spec-mode/phase-review-bar";
-import { SpecModePhaseStrip } from "@/spec-mode/phase-strip";
-import { useSpecModeState } from "@/spec-mode/use-spec-mode";
+import { PhaseReviewBar } from "./phase-review-bar";
+import { SpecModePhaseStrip } from "./phase-strip";
 
 /**
  * Spec mode chrome on top of the composer (spec 28.4 step 3, 28.5): the phase strip and, when a

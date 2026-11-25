@@ -49,9 +49,6 @@ import { type CustomProviderService } from "./custom-providers/types.js";
 import { type FigmaService } from "./figma/service.js";
 import { type ScheduleService } from "./schedule/service.js";
 import { type AutorunService } from "./autorun/service.js";
-import { type SpecModeService } from "./spec-mode/service.js";
-import { SpecModePlanSource } from "./spec-mode/plan-source.js";
-import { type SpecModeState } from "@jagentdesk/protocol/spec-mode";
 import { type SessionShareService } from "./session-share/service.js";
 import { ActivityGraphService } from "./agent/activity-graph/service.js";
 import { type AutorunState, type CreationSnapshot } from "@jagentdesk/protocol/messages";
@@ -755,12 +752,8 @@ export class VoiceAssistantWebSocketServer {
 
   private sessionShareService!: SessionShareService | null;
 
-  private specModeService: SpecModeService | null = null;
-
   // Agent activity graph (spec 31, ADR-0031): one daemon-wide service shared by every session.
   private readonly activityGraphService: ActivityGraphService;
-
-  private readonly specPlanSource: SpecModePlanSource;
 
   // Jira (spec 29), injected post-construction.
   private jiraService: JiraService | null = null;
@@ -999,18 +992,11 @@ export class VoiceAssistantWebSocketServer {
       : null;
     this.pluginRuntime = pluginRuntime ?? null;
     this.agentManager = agentManager;
-    // Plan view with Spec mode on (spec 31.1): phases/tasks from the agent's tasks.md. The Spec
-    // mode service is injected later (setSpecModeService), so the source looks it up per call.
-    this.specPlanSource = new SpecModePlanSource({
-      getState: async (agentId) =>
-        this.specModeService ? this.specModeService.get(agentId) : null,
-      agentCwd: (agentId) => agentManager.getAgent(agentId)?.cwd ?? null,
-      logger: this.logger,
-    });
+    // Plan view with Spec mode on (spec 31.1): the Spec mode built-in provides the plan source.
     this.activityGraphService = new ActivityGraphService({
       agents: agentManager,
       logger: this.logger,
-      specPlanSource: this.specPlanSource,
+      specPlanSource: pluginRuntime?.builtinDaemon?.port("specPlan"),
     });
     this.agentStorage = agentStorage;
     this.messageReceipts = new MessageReceipts(join(jagentdeskHome, "agent-requests"));
@@ -1714,7 +1700,6 @@ export class VoiceAssistantWebSocketServer {
     this.sasPairing?.cancel();
     await this.connectedHosts.close();
     this.activityGraphService.dispose();
-    this.specPlanSource.dispose();
     this.unsubscribeSpeechReadiness?.();
     this.unsubscribeSpeechReadiness = null;
     this.unsubscribeDaemonConfigChange?.();
@@ -2303,15 +2288,6 @@ export class VoiceAssistantWebSocketServer {
     this.customProvidersService = service;
   }
 
-  setSpecModeService(service: SpecModeService): void {
-    this.specModeService = service;
-  }
-
-  /** Spec mode state changed for an agent: refresh its Plan view (spec 31.1). */
-  notifySpecModeState(state: SpecModeState): void {
-    this.specPlanSource.notifyState(state);
-  }
-
   private createSocketSession(options: SocketSessionOptions): Session {
     return new Session({
       creationService: this.creationService,
@@ -2369,7 +2345,6 @@ export class VoiceAssistantWebSocketServer {
       workspaceBaseBranch: this.workspaceBaseBranch,
       scheduleService: this.scheduleService,
       autorunService: this.autorunService,
-      specModeService: this.specModeService,
       sessionShareService: this.sessionShareService,
       activityGraphService: this.activityGraphService,
       checkoutDiffManager: this.checkoutDiffManager,
@@ -2945,7 +2920,7 @@ export class VoiceAssistantWebSocketServer {
         // Session sharing (spec §21 / ADR-0018); advertised only when the daemon opted in.
         ...(this.sessionShareService ? { sessionSharing: true } : {}),
         // Spec mode (spec 28 / ADR-0030): agent.spec_mode.* surface.
-        ...(this.specModeService ? { specMode: true } : {}),
+        ...(this.pluginRuntime?.builtinDaemon?.port("specMode") ? { specMode: true } : {}),
         // Agent activity graph (spec 31 / ADR-0031). COMPAT(activityGraph): added after v0.9.47.
         activityGraph: true,
         // Argo CD (spec 30 / ADR-0034): advertised only when the daemon runs the service.

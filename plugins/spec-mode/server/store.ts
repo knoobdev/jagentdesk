@@ -1,3 +1,4 @@
+import { writeFileAtomic } from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
@@ -6,7 +7,6 @@ import {
   SpecModeStateSchema,
   type SpecModeOptionalPhase,
 } from "@jagentdesk/protocol/spec-mode";
-import { writeFileAtomic } from "../atomic-file.js";
 
 /**
  * Spec mode state per agent (`$JAGENTDESK_HOME/spec-mode/<agentId>.json`, spec 28.5) plus what

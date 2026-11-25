@@ -22,7 +22,7 @@ import {
 import { nodeIndexOf, nodeStatuses, structureKey, type GraphModel } from "./model.js";
 import { buildPlanGraph } from "./plan-builder.js";
 import { renderActivityGraph, type ActivityGraphRenderer } from "./renderer.js";
-import { NO_SPEC_PLAN_SOURCE, type SpecPlanSource } from "./spec-plan-source.js";
+import { NO_SPEC_PLAN_SOURCE, type SpecPlanSource } from "../spec-plan.js";
 
 // Agent activity graph service (spec 31.3, ADR-0031 §2–3). One per daemon, shared by every client
 // session, so a graph is built and rendered once however many clients watch it.

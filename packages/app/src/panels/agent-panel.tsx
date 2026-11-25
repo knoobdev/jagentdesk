@@ -56,8 +56,7 @@ import { useRetainedPanelActive } from "@/components/retained-panel";
 import { RetainedChatContent } from "./retained-chat-content";
 import { SidebarCallout } from "@/components/sidebar-callout";
 import { Composer } from "@/composer";
-import { BuiltinAgentItems } from "@/plugins/builtin/surfaces";
-import { SpecModeComposerDock } from "@/spec-mode/composer-dock";
+import { BuiltinAgentItems, BuiltinComposerDocks } from "@/plugins/builtin/surfaces";
 import { getActiveMessageSubmissions } from "@/composer/submission/model";
 import { RewindComposerRestoreProvider } from "@/components/rewind/composer-restore";
 import {
@@ -1724,14 +1723,12 @@ function ActiveAgentComposer({
 
   const specModeDock = useMemo(
     () => (
-      <BuiltinPluginGate serverId={serverId} id="spec-mode">
-        <SpecModeComposerDock
-          serverId={serverId}
-          agentId={agentId}
-          cwd={cwd}
-          onOpenFile={handleOpenSpecFile}
-        />
-      </BuiltinPluginGate>
+      <BuiltinComposerDocks
+        serverId={serverId}
+        agentId={agentId}
+        cwd={cwd}
+        onOpenFile={handleOpenSpecFile}
+      />
     ),
     [agentId, cwd, handleOpenSpecFile, serverId],
   );

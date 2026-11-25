@@ -1,3 +1,9 @@
+import {
+  parseSpecKitTasks,
+  type SpecPlan,
+  type SpecPlanSource,
+  type SpecPlanStatus,
+} from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 import { watch, type FSWatcher } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -8,12 +14,6 @@ import {
   type SpecModePhaseStatus,
   type SpecModeState,
 } from "@jagentdesk/protocol/spec-mode";
-import {
-  parseSpecKitTasks,
-  type SpecPlan,
-  type SpecPlanSource,
-  type SpecPlanStatus,
-} from "../agent/activity-graph/spec-plan-source.js";
 
 /** What the plan source reads from the daemon (kept narrow for tests). */
 export interface SpecModePlanSourceOptions {

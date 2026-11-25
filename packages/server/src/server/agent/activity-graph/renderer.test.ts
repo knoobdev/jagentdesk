@@ -6,7 +6,7 @@ import type { AgentTimelineItem } from "../agent-sdk-types.js";
 import { buildFlowGraph, type ActivityRow } from "./flow-builder.js";
 import { buildPlanGraph } from "./plan-builder.js";
 import { renderActivityGraph } from "./renderer.js";
-import { parseSpecKitTasks } from "./spec-plan-source.js";
+import { parseSpecKitTasks } from "../spec-plan.js";
 
 // Real renders with the vendored archify 3.2.0 (ADR-0031): the generated JSON passes archify's
 // validation and layout gates, every node is addressable by data-node-id, and the vendored copy

@@ -202,8 +202,6 @@ import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseRegistry } from "./database/database-registry.js";
 import { ScheduleService } from "./schedule/service.js";
 import { AutorunService } from "./autorun/service.js";
-import { SpecModeService } from "./spec-mode/service.js";
-import type { SpecModeState } from "@jagentdesk/protocol/spec-mode";
 import { sendPromptToAgent } from "./agent/agent-prompt.js";
 import { SessionShareService } from "./session-share/service.js";
 import { TunnelManager } from "./session-share/tunnel-manager.js";
@@ -1152,6 +1150,8 @@ export async function createJAgentDeskDaemon(
   });
 
   // Built-in features' daemon services, ports, and background lifecycles (docs/builtin-plugins.md).
+  // The host capability probe is created with the WebSocket server below and assigned there.
+  let daemonHostCapabilities: HostCapabilityService | null = null;
   const builtinDaemon = await builtinServerRegistry.start(
     pluginRuntime.builtin,
     createBuiltinCoreServices(config.jagentdeskHome, logger, daemonConfigStore),
@@ -1160,9 +1160,16 @@ export async function createJAgentDeskDaemon(
       agentManager,
       agentStorage,
       broadcast: (message) => wsServer?.broadcast(wrapSessionMessage(message)),
+      hostCapabilities: () => daemonHostCapabilities,
+      isAutorunActive: async (agentId) =>
+        autorunService !== null && (await autorunService.get(agentId))?.status === "running",
     },
   );
   pluginRuntime.builtinDaemon = builtinDaemon;
+  // Spec mode's launch environment (spec 28): the provider process sees the shared checkout env.
+  agentManager.setLaunchEnvProvider(
+    (agentId) => builtinDaemon.enabledPort("specMode")?.launchEnv(agentId) ?? null,
+  );
   const unsubscribeBuiltinAgentSnapshots = agentManager.subscribe(
     (event) => {
       if (event.type === "agent_state") pluginRuntime.builtin.forAgent(event.agent.id);
@@ -1786,9 +1793,12 @@ export async function createJAgentDeskDaemon(
     onUpdate: (state) => emitExternalSessionMessage({ type: "autorun.stream", payload: { state } }),
     onStopped: (state) => wsServer?.notifyAutorunStopped(state),
   });
-  // Spec mode (spec 28 / ADR-0030) needs the host capability probe, created with the WebSocket
-  // server below; it is assigned there.
-  let specModeService: SpecModeService | null = null;
+  // Spec mode and autonomous mode exclude each other (spec 28.4 step 6).
+  autorunService.setStartGuard(async (agentId) =>
+    (await builtinDaemon.port("specMode")?.isEnabled(agentId))
+      ? "Turn off Spec mode to use autonomous mode"
+      : null,
+  );
   logger.info(
     { elapsed: elapsed(), enabled: config.autorunEnabled === true },
     "Autorun service initialized",
@@ -2335,27 +2345,7 @@ export async function createJAgentDeskDaemon(
             void hostCapabilities.refresh().catch((error: unknown) => {
               logger.warn({ err: error }, "Host capability probe failed");
             });
-            specModeService = await startSpecModeService({
-              jagentdeskHome: config.jagentdeskHome,
-              logger,
-              agentManager,
-              agentStorage,
-              hostCapabilities,
-              autorunService,
-              emit: emitExternalSessionMessage,
-              onState: (state) => server.notifySpecModeState(state),
-            });
-            server.setSpecModeService(specModeService);
-            agentManager.setLaunchEnvProvider((agentId) =>
-              pluginRuntime.builtin.isEnabled("spec-mode")
-                ? specModeService!.launchEnv(agentId)
-                : null,
-            );
-            specModeService.stop();
-            await pluginRuntime.builtin.registerLifecycle("spec-mode", {
-              start: () => specModeService!.initialize(),
-              stop: () => specModeService!.stop(),
-            });
+            daemonHostCapabilities = hostCapabilities;
             server.setBotsService(botsService);
             server.setJiraService(jiraService);
             server.setFigmaService(figmaService);
@@ -2711,7 +2701,6 @@ export async function createJAgentDeskDaemon(
     await speechService.stop();
     await scheduleService.stop().catch(() => undefined);
     await autorunService?.stop().catch(() => undefined);
-    specModeService?.stop();
     await sessionShareService?.stop().catch(() => undefined);
     await relayRuntime?.stop().catch(() => undefined);
     await remoteFinishSubscriptions?.close();
@@ -2808,40 +2797,6 @@ async function closeAllAgents(logger: Logger, agentManager: AgentManager): Promi
  * send path as a user's message; per-agent spec-kit env reaches provider launches; Spec mode
  * and autonomous mode refuse to start while the other is on.
  */
-async function startSpecModeService(params: {
-  jagentdeskHome: string;
-  logger: Logger;
-  agentManager: AgentManager;
-  agentStorage: AgentStorage;
-  hostCapabilities: HostCapabilityService;
-  autorunService: AutorunService | null;
-  emit: (message: SessionOutboundMessage) => void;
-  onState?: (state: SpecModeState) => void;
-}): Promise<SpecModeService> {
-  const { agentManager, agentStorage, autorunService, logger } = params;
-  const service = new SpecModeService({
-    jagentdeskHome: params.jagentdeskHome,
-    logger,
-    agentManager,
-    hostCapabilities: params.hostCapabilities,
-    isAutorunActive: async (agentId) =>
-      autorunService !== null && (await autorunService.get(agentId))?.status === "running",
-    sendPrompt: async (agentId, text) => {
-      await sendPromptToAgent({ agentManager, agentStorage, agentId, prompt: text, logger });
-    },
-    onState: (state) => {
-      params.emit({ type: "agent.spec_mode.state", payload: { agentId: state.agentId, state } });
-      params.onState?.(state);
-    },
-  });
-  await service.initialize();
-  agentManager.setLaunchEnvProvider((agentId) => service.launchEnv(agentId));
-  autorunService?.setStartGuard(async (agentId) =>
-    (await service.isEnabled(agentId)) ? "Turn off Spec mode to use autonomous mode" : null,
-  );
-  return service;
-}
-
 export function connectIdleRuntimeCleanupConfig(
   store: DaemonConfigStore,
   cleanup: Pick<ReturnType<typeof createIdleRuntimeCleanup>, "setEnabled">,

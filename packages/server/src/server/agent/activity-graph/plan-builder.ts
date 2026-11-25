@@ -18,7 +18,7 @@ import {
   type GraphModel,
   type GraphNode,
 } from "./model.js";
-import type { SpecPlan } from "./spec-plan-source.js";
+import type { SpecPlan } from "../spec-plan.js";
 import type { FlowResult } from "./flow-builder.js";
 
 // Plan view (spec 31.1): a tree. Root = the request; children = the agent's todos, or, with Spec

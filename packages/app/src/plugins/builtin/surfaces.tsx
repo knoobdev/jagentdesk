@@ -1,5 +1,5 @@
 import { router, usePathname } from "expo-router";
-import { useCallback } from "react";
+import { useCallback, type ComponentType } from "react";
 import { SidebarHeaderRow } from "@/components/sidebar/sidebar-header-row";
 import { usePanelStore } from "@/stores/panel-store";
 import { useMemo } from "react";
@@ -12,6 +12,8 @@ import { builtinClientRegistry } from "./loaded";
 import type {
   BuiltinAgentProps,
   BuiltinClientProps,
+  BuiltinComposerDockProps,
+  BuiltinUserMessageBodyProps,
   BuiltinScreen as ScreenProps,
   BuiltinTurnPreparation,
 } from "./host";
@@ -92,6 +94,23 @@ export function BuiltinAgentItems({
       )}
     </>
   );
+}
+export function BuiltinComposerDocks(props: BuiltinComposerDockProps) {
+  const entries = useBuiltinClientContributions(props.serverId);
+  return (
+    <>
+      {[...entries].flatMap(([id, entry]) =>
+        [...entry.composerDocks].map(([key, Dock]) => <Dock key={`${id}/${key}`} {...props} />),
+      )}
+    </>
+  );
+}
+/** The enabled message body renderer for this host, or null to render plain text. */
+export function useBuiltinUserMessageBody(
+  serverId: string | undefined,
+): ComponentType<BuiltinUserMessageBodyProps> | null {
+  const entries = useBuiltinClientContributions(serverId ?? "");
+  return [...entries.values()].find((entry) => entry.userMessageBody)?.userMessageBody ?? null;
 }
 /**
  * Reads live host state at send time, including queued sends: a disabled feature contributes

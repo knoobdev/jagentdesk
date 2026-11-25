@@ -1,3 +1,8 @@
+import {
+  Alert,
+  Button,
+  type useSpecModeState,
+} from "../../../packages/app/src/plugins/builtin/host-api";
 import { useCallback, useReducer, type ReactElement } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
@@ -6,9 +11,6 @@ import {
   type SpecModePhase,
   type SpecModeState,
 } from "@jagentdesk/protocol/spec-mode";
-import { Alert } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
-import type { useSpecModeState } from "@/spec-mode/use-spec-mode";
 
 type SpecModeClient = ReturnType<typeof useSpecModeState>["client"];
 

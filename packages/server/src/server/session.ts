@@ -230,8 +230,6 @@ import {
 } from "./session/checkout/git-metadata-generator.js";
 import { ChatScheduleLoopSession } from "./session/chat/chat-schedule-loop-session.js";
 import { AutorunSession } from "./session/autorun/autorun-session.js";
-import { SpecModeSession } from "./session/spec-mode/spec-mode-session.js";
-import { type SpecModeService } from "./spec-mode/service.js";
 import { type AutorunService } from "./autorun/service.js";
 import { SessionShareSession } from "./session/session-share/session-share-session.js";
 import { type ActivityGraphService } from "./agent/activity-graph/service.js";
@@ -660,8 +658,6 @@ export interface SessionOptions {
 
   autorunService?: AutorunService | null;
 
-  specModeService?: SpecModeService | null;
-
   sessionShareService?: SessionShareService | null;
 
   // Agent activity graph (spec 31, ADR-0031); shared daemon-wide service.
@@ -877,26 +873,6 @@ export type SessionLifecycleIntent =
       reason: string;
       keepTerminals: boolean;
     };
-
-interface SpecModeWiring {
-  service: SpecModeService;
-  session: SpecModeSession;
-}
-
-function createSpecModeWiring(
-  service: SpecModeService | null | undefined,
-  host: { emit: (msg: SessionOutboundMessage) => void; logger: pino.Logger },
-): SpecModeWiring | null {
-  if (!service) return null;
-  return {
-    service,
-    session: new SpecModeSession({
-      emit: host.emit,
-      specModeService: service,
-      logger: host.logger,
-    }),
-  };
-}
 
 function parseClientCapabilities(
   capabilities: Record<string, unknown> | null | undefined,
@@ -1247,8 +1223,6 @@ export class Session {
 
   private readonly autorunSession: AutorunSession | null;
 
-  private readonly specMode: SpecModeWiring | null;
-
   private readonly sessionShareSession: SessionShareSession | null;
 
   private readonly activityGraphSession: ActivityGraphSession | null;
@@ -1339,7 +1313,6 @@ export class Session {
       filesystem,
       chatService,
       scheduleService,
-      specModeService,
       loopService,
       checkoutDiffManager,
       github,
@@ -1564,10 +1537,6 @@ export class Session {
       scheduleService,
       loopService,
       clientId: this.clientId,
-      logger: this.sessionLogger,
-    });
-    this.specMode = createSpecModeWiring(specModeService, {
-      emit: (msg) => this.emit(msg),
       logger: this.sessionLogger,
     });
     ({
@@ -3215,7 +3184,6 @@ export class Session {
       () => this.dispatchTerminalMessage(msg, source),
       () => this.dispatchChatScheduleLoopMessage(msg),
       () => this.dispatchAutorunMessage(msg),
-      () => this.dispatchSpecModeMessage(msg, source),
       () => this.dispatchSessionShareMessage(msg),
       () => this.activityGraphSession?.dispatch(msg),
       () => this.dispatchClusterMessage(msg),
@@ -4340,27 +4308,6 @@ export class Session {
         return autorun.handleGetRequest(msg);
       case "autorun.list.request":
         return autorun.handleListRequest(msg);
-      default:
-        return undefined;
-    }
-  }
-
-  private dispatchSpecModeMessage(
-    msg: SessionInboundMessage,
-    source?: object,
-  ): Promise<void> | undefined {
-    const specMode = this.specMode?.session;
-    if (!specMode) return undefined;
-    switch (msg.type) {
-      case "agent.spec_mode.get.request":
-      case "agent.spec_mode.setup.preview.request":
-      case "agent.spec_mode.set.request":
-      case "agent.spec_mode.review.request": {
-        const supported = source
-          ? this.supportsForSource(CLIENT_CAPS.specMode, source)
-          : this.supports(CLIENT_CAPS.specMode);
-        return specMode.handle(msg, supported);
-      }
       default:
         return undefined;
     }
@@ -10621,10 +10568,8 @@ export class Session {
 
       // Spec mode (spec 28.4 step 2): the message becomes the pending phase's spec-kit command.
       // The command must lead the turn, so attached skills are not prefixed to it.
-      const specPhase =
-        this.pluginRuntime?.builtin && !this.pluginRuntime.builtin.isEnabled("spec-mode")
-          ? undefined
-          : await this.specMode?.service.prepareUserMessage(agentId, msg.text);
+      const specMode = this.pluginRuntime?.builtinDaemon?.enabledPort("specMode");
+      const specPhase = await specMode?.prepareUserMessage(agentId, msg.text);
       const prompt = buildAgentPrompt(specPhase?.text ?? msg.text, msg.images, msg.attachments);
       this.sessionLogger.trace(
         {
@@ -10669,7 +10614,7 @@ export class Session {
           });
         else await send();
       } catch (error) {
-        if (specPhase) await this.specMode?.service.revertPhaseStart(agentId, specPhase.phase);
+        if (specPhase) await specMode?.revertPhaseStart(agentId, specPhase.phase);
         const message = error instanceof Error ? error.message : String(error);
         this.handleAgentRunError(agentId, error, "Failed to send agent message");
         this.emit({

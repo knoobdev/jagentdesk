@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { toPlanTreeJson } from "./archify-json.js";
 import type { ActivityRow } from "./flow-builder.js";
 import { buildPlanGraph } from "./plan-builder.js";
-import { parseSpecKitTasks } from "./spec-plan-source.js";
+import { parseSpecKitTasks } from "../spec-plan.js";
 
 // Spec 31.1 Plan view: root = request, children = todos; with Spec mode, tasks.md phases → tasks.
 

@@ -19,7 +19,9 @@ export type {
   BuiltinAgentProps,
   BuiltinClientHost,
   BuiltinClientProps,
+  BuiltinComposerDockProps,
   BuiltinDestination,
+  BuiltinUserMessageBodyProps,
   BuiltinTurnPreparation,
 } from "./host";
 
@@ -27,6 +29,8 @@ export * as Clipboard from "expo-clipboard";
 export { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export { isWeb } from "@/constants/platform";
+// Packages installed only in packages/app resolve through here.
+export { router } from "expo-router";
 
 // Shared app UI and data hooks used by feature screens.
 export {
@@ -57,3 +61,12 @@ export { useSessionStore, type WorkspaceDescriptor } from "@/stores/session-stor
 export { type StreamItem } from "@/types/stream";
 export { confirmDialog } from "@/utils/confirm-dialog";
 export { formatTimeAgo } from "@/utils/time";
+
+export { StatusBadge } from "@/components/ui/status-badge";
+export { ExternalLink } from "@/components/ui/external-link";
+export { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+export { buildSettingsHostSectionRoute } from "@/utils/host-routes";
+
+// Spec mode and autonomous mode read each other's per-agent state.
+export { useAutorunState, useSpecModeState } from "@/hooks/use-agent-mode-state";
+export { specModeBubbleText } from "@/components/spec-mode-bubble-text";

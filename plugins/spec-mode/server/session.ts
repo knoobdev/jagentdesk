@@ -1,7 +1,10 @@
+import type {
+  SessionInboundMessage,
+  SessionOutboundMessage,
+} from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 import type pino from "pino";
 import type { SpecModeError } from "@jagentdesk/protocol/spec-mode";
-import type { SessionInboundMessage, SessionOutboundMessage } from "../../messages.js";
-import { SpecModeRequestError, type SpecModeService } from "../../spec-mode/service.js";
+import { SpecModeRequestError, type SpecModeService } from "./service.js";
 
 /**
  * Wire side of Spec mode (spec 28.6): `agent.spec_mode.*` requests over SpecModeService.

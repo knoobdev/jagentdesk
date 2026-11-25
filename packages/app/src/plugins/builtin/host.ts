@@ -4,6 +4,8 @@ import type { LucideIcon } from "lucide-react-native";
 import type { BuiltinPluginId } from "@jagentdesk/protocol/builtin-plugins";
 import type { PluginAttachmentSourceContribution, PluginTimelineItem } from "@jagentdesk/plugin";
 import type { DaemonServerInfo } from "@/stores/session-store";
+import type { StyleProp, TextStyle } from "react-native";
+import type { SpecModeMessage } from "@jagentdesk/protocol/spec-mode";
 import { builtinPluginEnabled } from "./registry";
 
 export interface BuiltinClientProps {
@@ -21,6 +23,17 @@ export interface BuiltinDestination {
 }
 export interface BuiltinAgentProps extends BuiltinClientProps {
   agentId: string;
+}
+export interface BuiltinComposerDockProps extends BuiltinAgentProps {
+  cwd: string;
+  onOpenFile: (absolutePath: string) => void;
+}
+/** A user message core parsed as a Spec mode phase command; core keeps copy and rewind text. */
+export interface BuiltinUserMessageBodyProps {
+  message: string;
+  parsed: SpecModeMessage;
+  textStyle: StyleProp<TextStyle>;
+  textDataSet?: Record<string, string>;
 }
 /** Message fields a feature contributes when the user sends a turn. */
 export interface BuiltinTurnPreparation {
@@ -59,6 +72,10 @@ export interface BuiltinClientHost {
   /** Rendered below an agent's conversation. */
   agentPanelAccessory(id: string, component: ComponentType<BuiltinAgentProps>): void;
   turnPreparer(prepare: BuiltinTurnPreparer): void;
+  /** Rendered above the agent composer input. */
+  agentComposerDock(id: string, component: ComponentType<BuiltinComposerDockProps>): void;
+  /** Renders a parsed phase-command user message; one per host. */
+  userMessageBody(component: ComponentType<BuiltinUserMessageBodyProps>): void;
 }
 export interface BuiltinAttachmentSource {
   source: PluginAttachmentSourceContribution;
@@ -77,6 +94,8 @@ export interface BuiltinClientContributions {
   agentControls: Map<string, ComponentType<BuiltinAgentProps>>;
   agentPanel: Map<string, ComponentType<BuiltinAgentProps>>;
   turnPreparers: BuiltinTurnPreparer[];
+  composerDocks: Map<string, ComponentType<BuiltinComposerDockProps>>;
+  userMessageBody: ComponentType<BuiltinUserMessageBodyProps> | null;
 }
 export class BuiltinClientRegistry {
   private readonly entries = new Map<BuiltinPluginId, BuiltinClientContributions>();
@@ -95,6 +114,8 @@ export class BuiltinClientRegistry {
       agentControls: new Map(),
       agentPanel: new Map(),
       turnPreparers: [],
+      composerDocks: new Map(),
+      userMessageBody: null,
     };
     this.entries.set(id, entry);
     const add = <T>(map: Map<string, T>, key: string, value: T) => {
@@ -115,6 +136,11 @@ export class BuiltinClientRegistry {
       agentControl: (key, component) => add(entry.agentControls, key, component),
       agentPanelAccessory: (key, component) => add(entry.agentPanel, key, component),
       turnPreparer: (prepare) => entry.turnPreparers.push(prepare),
+      agentComposerDock: (key, component) => add(entry.composerDocks, key, component),
+      userMessageBody: (component) => {
+        if (entry.userMessageBody) throw new Error(`Duplicate built-in message body: ${id}`);
+        entry.userMessageBody = component;
+      },
     };
   }
   /** Every consumer selects against live per-host state, including retained screens. */

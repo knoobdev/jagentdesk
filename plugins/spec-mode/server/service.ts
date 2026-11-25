@@ -1,3 +1,4 @@
+import type { AgentManagerEvent } from "../../../packages/server/src/server/plugins/builtin/host-api.js";
 import path from "node:path";
 import type { Logger } from "pino";
 import {
@@ -12,7 +13,6 @@ import {
   type SpecModeState,
 } from "@jagentdesk/protocol/spec-mode";
 import type { HostCapability, HostCapabilities } from "@jagentdesk/protocol/host-capabilities";
-import type { AgentManagerEvent } from "../agent/agent-manager.js";
 import { nextFeatureDirectory } from "./feature-name.js";
 import {
   changedFiles,

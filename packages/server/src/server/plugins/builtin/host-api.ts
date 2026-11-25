@@ -28,7 +28,10 @@ export type {
 } from "./host.js";
 
 export { ensureValidJson } from "../../json-utils.js";
-export { writeJsonFileAtomic } from "../../atomic-file.js";
+export { writeFileAtomic, writeJsonFileAtomic } from "../../atomic-file.js";
+export { sendPromptToAgent } from "../../agent/agent-prompt.js";
+export type { AgentManagerEvent } from "../../agent/agent-manager.js";
+export type { HostCapabilityService } from "../../host-capabilities/service.js";
 export type { SessionInboundMessage, SessionOutboundMessage } from "../../messages.js";
 
 // Shared by skills, spec mode, and host tools.
@@ -50,3 +53,12 @@ export {
   visibleToFor,
   type SkillDirLabel,
 } from "../../agent/native-skill-paths.js";
+
+// Spec mode provides the plan; the activity graph reads it.
+export {
+  NO_SPEC_PLAN_SOURCE,
+  parseSpecKitTasks,
+  type SpecPlan,
+  type SpecPlanSource,
+  type SpecPlanStatus,
+} from "../../agent/spec-plan.js";

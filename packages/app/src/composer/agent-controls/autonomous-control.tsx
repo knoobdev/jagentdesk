@@ -4,7 +4,7 @@ import { StyleSheet } from "react-native-unistyles";
 import { Infinity as InfinityIcon } from "lucide-react-native";
 import { AgentControlTrigger } from "@/composer/agent-controls/control";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useAutorunState, useSpecModeState } from "@/spec-mode/use-spec-mode";
+import { useAutorunState, useSpecModeState } from "@/hooks/use-agent-mode-state";
 
 /**
  * Autonomous-mode toggle for the CURRENT agent (spec §20). A switch in the composer

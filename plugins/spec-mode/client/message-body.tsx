@@ -1,24 +1,17 @@
+import {
+  StatusBadge,
+  specModeBubbleText,
+  type Theme,
+} from "../../../packages/app/src/plugins/builtin/host-api";
 import { useCallback, useState, type ReactElement } from "react";
 import { Pressable, ScrollView, Text, View, type StyleProp, type TextStyle } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { ChevronDown, ChevronRight } from "lucide-react-native";
-import {
-  specModeApprovalLine,
-  specModePhaseLabel,
-  type SpecModeMessage,
-} from "@jagentdesk/protocol/spec-mode";
-import { StatusBadge } from "@/components/ui/status-badge";
-import type { Theme } from "@/styles/theme";
+import { specModePhaseLabel, type SpecModeMessage } from "@jagentdesk/protocol/spec-mode";
 
 const ThemedChevronRight = withUnistyles(ChevronRight);
 const ThemedChevronDown = withUnistyles(ChevronDown);
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
-
-/** What the bubble says for a Spec mode phase message: the user's words, or the Approve line. */
-export function specModeBubbleText(parsed: SpecModeMessage): string {
-  if (parsed.userText === null) return "";
-  return parsed.userText || specModeApprovalLine(parsed.phase);
-}
 
 /**
  * A user message that carries a Spec mode phase command (spec 28.4 step 2): the

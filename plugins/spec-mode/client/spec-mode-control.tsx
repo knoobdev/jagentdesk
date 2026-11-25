@@ -1,25 +1,31 @@
+import {
+  router,
+  Combobox,
+  Alert,
+  Button,
+  ExternalLink,
+  Switch,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+  AgentControlTrigger,
+  useIsCompactFormFactor,
+  useAutorunState,
+  useSpecModeState,
+  useSessionStore,
+  buildSettingsHostSectionRoute,
+  type ComboboxOption,
+} from "../../../packages/app/src/plugins/builtin/host-api";
 import { useCallback, useReducer, useRef, useState, type ReactElement } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { ListChecks } from "lucide-react-native";
-import { router } from "expo-router";
 import {
   SPEC_MODE_OPTIONAL_PHASES,
   specModePhaseLabel,
   type SpecModeOptionalPhase,
   type SpecModeState,
 } from "@jagentdesk/protocol/spec-mode";
-import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
-import { Alert } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
-import { ExternalLink } from "@/components/ui/external-link";
-import { Switch } from "@/components/ui/switch";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { AgentControlTrigger } from "@/composer/agent-controls/control";
-import { useIsCompactFormFactor } from "@/constants/layout";
-import { useAutorunState, useSpecModeState } from "@/spec-mode/use-spec-mode";
-import { useSessionStore } from "@/stores/session-store";
-import { buildSettingsHostSectionRoute } from "@/utils/host-routes";
 
 const SPEC_KIT_LICENSE_URL = "https://github.com/github/spec-kit/blob/main/LICENSE";
 const NO_OPTIONS: ComboboxOption[] = [];

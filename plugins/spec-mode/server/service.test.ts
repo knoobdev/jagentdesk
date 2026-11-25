@@ -6,8 +6,8 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { HostCapabilities } from "@jagentdesk/protocol/host-capabilities";
 import type { SpecModeState } from "@jagentdesk/protocol/spec-mode";
-import type { AgentManagerEvent } from "../agent/agent-manager.js";
-import { createTestLogger } from "../../test-utils/test-logger.js";
+import type { AgentManagerEvent } from "../../../packages/server/src/server/agent/agent-manager.js";
+import { createTestLogger } from "../../../packages/server/src/test-utils/test-logger.js";
 import { SpecModeRequestError, SpecModeService, type SpecModeAgentManager } from "./service.js";
 
 const AVAILABLE: HostCapabilities = {

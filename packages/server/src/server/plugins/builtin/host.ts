@@ -12,6 +12,9 @@ import type { BuiltinCoreServices } from "./services.js";
 import type { AgentManager } from "../../agent/agent-manager.js";
 import type { AgentStorage } from "../../agent/agent-storage.js";
 import type { SkillInvocationResolver } from "../../agent/agent-prompt.js";
+import type { SpecPlanSource } from "../../agent/spec-plan.js";
+import type { HostCapabilityService } from "../../host-capabilities/service.js";
+import type { SpecModePhase } from "@jagentdesk/protocol/spec-mode";
 import {
   BuiltinPluginError,
   type BuiltinPluginLifecycle,
@@ -30,6 +33,20 @@ export type RegisterBuiltinTool = <Input>(
 export interface BuiltinPorts {
   /** Prompt delivery resolves attached skill ids to the provider's native invocation. */
   skillInvocation: SkillInvocationResolver;
+  /** Spec mode's turn rewriting, agent launch environment, and per-agent state. */
+  specMode: SpecModePort;
+  /** The Plan view's spec-kit phases and tasks (activity graph). */
+  specPlan: SpecPlanSource;
+}
+export interface SpecModePort {
+  /** The pending phase's spec-kit command for this message; null when Spec mode is off. */
+  prepareUserMessage(
+    agentId: string,
+    text: string,
+  ): Promise<{ phase: SpecModePhase; text: string } | null>;
+  revertPhaseStart(agentId: string, phase: SpecModePhase): Promise<void>;
+  isEnabled(agentId: string): Promise<boolean>;
+  launchEnv(agentId: string): Record<string, string> | null;
 }
 export type BuiltinPortKey = keyof BuiltinPorts;
 /** Daemon-owned dependencies a feature's daemon service may use. */
@@ -38,6 +55,10 @@ export interface BuiltinDaemonDeps {
   agentStorage: AgentStorage;
   /** Push to every connected session. */
   broadcast(message: SessionOutboundMessage): void;
+  /** Null until the daemon is listening and has probed the host. */
+  hostCapabilities(): HostCapabilityService | null;
+  /** Whether autonomous mode drives this agent. */
+  isAutorunActive(agentId: string): Promise<boolean>;
 }
 export interface BuiltinDaemonContext extends BuiltinCoreServices, BuiltinDaemonDeps {
   /** The daemon home. Preserve a migrated feature's existing storage paths under it. */

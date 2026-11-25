@@ -37,6 +37,14 @@ const PLUGINS = {
       tools: [T, "plugins/skills/server/agent-tools.ts"],
     },
   },
+  "spec-mode": {
+    rpcPrefixes: ["agent.spec_mode."],
+    baseline: {
+      rpc: [`${S}/session.ts`, `${S}/session/spec-mode/spec-mode-session.ts`],
+      tools: [T],
+    },
+    branch: { rpc: [`${S}/session.ts`, "plugins/spec-mode/server/index.ts"], tools: [T] },
+  },
 };
 const ids = process.argv.slice(4).length ? process.argv.slice(4) : Object.keys(PLUGINS);
 fs.mkdirSync(output, { recursive: true });
