@@ -38,8 +38,8 @@ export function GumloopHome() {
       {desktop ? (
         <PageHeader icon={House} title="Home" actions={actions} testID="gumloop-home-header" />
       ) : (
+        // The compact header (spec 38 §5) already shows "Home"; the page only carries its actions.
         <View style={styles.header}>
-          <Text style={styles.title}>Home</Text>
           <View style={styles.actions}>{actions}</View>
         </View>
       )}
@@ -79,7 +79,6 @@ const styles = StyleSheet.create((theme: Theme) => ({
   // it (spec 38 §4.1).
   desktopBody: { flex: 1, paddingHorizontal: 82, marginTop: -theme.spacing[2] },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 16 },
-  title: { fontSize: 22, fontWeight: "600", color: theme.colors.foreground },
   actions: { flexDirection: "row", gap: 10 },
   body: { flex: 1, marginTop: theme.spacing[2] },
   sectionTitle: {

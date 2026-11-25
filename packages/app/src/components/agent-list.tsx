@@ -14,7 +14,7 @@ import {
   type PressableStateCallbackType,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useCallback, useMemo, useState, type ReactElement } from "react";
+import { Fragment, useCallback, useMemo, useState, type ReactElement } from "react";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
@@ -255,6 +255,9 @@ function SessionRow({
   const projectName = agent.projectPlacement?.projectName ?? "";
   const branch = agent.projectPlacement?.checkout.currentBranch ?? "";
   const workspaceName = agent.projectPlacement?.workspaceName ?? "";
+  // Phone meta line: project · branch · workspace, skipping empty parts and repeats so a row never
+  // reads "name ·  · name".
+  const mobileMetaParts = buildMobileMetaParts(projectName, branch, workspaceName);
   const ProviderIcon = getProviderIcon(agent.provider);
   const pendingPermissionCount = agent.pendingPermissionCount ?? 0;
   const orchestrationRoleBadge = orchestrationRoleBadgeLabel(agent.labels);
@@ -322,30 +325,18 @@ function SessionRow({
         </View>
         {isMobile ? (
           <View style={styles.rowMetaRow}>
-            <Text
-              style={styles.sessionMetaText}
-              numberOfLines={1}
-              testID={`agent-row-project-${agent.serverId}-${agent.id}`}
-            >
-              {projectName}
-            </Text>
-            <Text style={styles.sessionMetaSeparator}>·</Text>
-            <Text
-              style={styles.sessionMetaText}
-              numberOfLines={1}
-              testID={`agent-row-branch-${agent.serverId}-${agent.id}`}
-            >
-              {branch}
-            </Text>
-            <Text style={styles.sessionMetaSeparator}>·</Text>
-            <Text
-              style={styles.sessionMetaText}
-              numberOfLines={1}
-              testID={`agent-row-workspace-${agent.serverId}-${agent.id}`}
-            >
-              {workspaceName}
-            </Text>
-            <Text style={styles.sessionMetaSeparator}>·</Text>
+            {mobileMetaParts.map((part) => (
+              <Fragment key={part.key}>
+                <Text
+                  style={styles.sessionMetaText}
+                  numberOfLines={1}
+                  testID={`agent-row-${part.key}-${agent.serverId}-${agent.id}`}
+                >
+                  {part.text}
+                </Text>
+                <Text style={styles.sessionMetaSeparator}>·</Text>
+              </Fragment>
+            ))}
             <AgentActivityTime date={agent.lastActivityAt} isMobile />
             {showHostColumn && agent.serverLabel ? (
               <>
@@ -865,3 +856,23 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.base,
   },
 }));
+
+export function buildMobileMetaParts(
+  projectName: string,
+  branch: string,
+  workspaceName: string,
+): Array<{ key: "project" | "branch" | "workspace"; text: string }> {
+  const parts: Array<{ key: "project" | "branch" | "workspace"; text: string }> = [];
+  const seen = new Set<string>();
+  for (const [key, raw] of [
+    ["project", projectName],
+    ["branch", branch],
+    ["workspace", workspaceName],
+  ] as const) {
+    const text = raw.trim();
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    parts.push({ key, text });
+  }
+  return parts;
+}
