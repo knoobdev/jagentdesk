@@ -19,7 +19,9 @@ export const BotInputSchema = z.object({
     .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
     .max(64),
   name: z.string().trim().min(1).max(64),
-  identity: z.string().trim().min(1).max(500),
+  // Optional since `features.botsOptionalIdentity`: an empty identity gets the daemon's default
+  // line, so every stored bot still carries one (older apps require it on `Bot`).
+  identity: z.string().trim().max(500).optional(),
   provider: AgentProviderSchema,
   model: z.string().min(1),
   thinkingOptionId: z.string().optional(),
@@ -39,6 +41,7 @@ export const BotInputSchema = z.object({
 export const BotPatchSchema = BotInputSchema.omit({ slug: true }).partial();
 export const BotSchema = BotInputSchema.extend({
   id: z.string(),
+  identity: z.string().trim().min(1).max(500),
   unattended: z.boolean(),
   paused: z.boolean(),
   lookAround: z.object({ enabled: z.boolean(), intervalMinutes: z.number().int().min(1) }),

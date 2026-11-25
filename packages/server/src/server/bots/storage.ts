@@ -17,6 +17,15 @@ import {
 } from "@jagentdesk/protocol/bots/types";
 import { ensurePrivateDirectory, ensurePrivateFile } from "../private-files.js";
 
+/** Seeds SOUL.md and the bot's one-line description when the owner leaves Identity empty. */
+export const DEFAULT_BOT_IDENTITY =
+  "A general-purpose bot: it plans the work its owner asks for, does it, and reports back.";
+
+/** Empty identities are stored as the default so every `Bot` keeps one (older apps require it). */
+export function botIdentity(identity: string | undefined): string {
+  return identity?.trim() || DEFAULT_BOT_IDENTITY;
+}
+
 export class BotStorage {
   readonly db: Database.Database;
   constructor(readonly home: string) {
@@ -72,6 +81,7 @@ export class BotStorage {
     const now = Date.now();
     const bot: Bot = {
       ...input,
+      identity: botIdentity(input.identity),
       id: randomUUID(),
       unattended: input.unattended ?? false,
       paused: false,

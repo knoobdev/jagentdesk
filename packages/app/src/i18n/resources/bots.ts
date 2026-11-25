@@ -130,6 +130,18 @@ export const botsStrings = {
   deleteRoom: "Delete room?",
   deleteSchedule: "Delete schedule?",
   remove: "Remove",
-  validation:
-    "Complete the required fields. Use a lowercase, hyphen-separated slug and a positive look-around interval.",
+  identityOptional: "Optional. Who the bot is and what it does. Empty uses a default.",
+  errors: {
+    nameTooLong: "Name can be up to 64 characters.",
+    slug: "Slug can use lowercase letters, numbers and hyphens.",
+    identityTooLong: "Identity can be up to 500 characters ({{length}} now).",
+    interval: "Enter a whole number of minutes, 1 or more.",
+  },
+  required: {
+    name: "Add a name.",
+    slug: "Add a slug.",
+    provider: "Pick a provider.",
+    model: "Pick a model.",
+    mode: "Pick a mode.",
+  },
 } as const;

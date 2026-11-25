@@ -10,10 +10,11 @@ import { Field } from "@/components/ui/form-field";
 import { SelectField, type SelectFieldDisplay } from "@/components/ui/select-field";
 import { Switch } from "@/components/ui/switch";
 import { Alert } from "@/components/ui/alert";
+import { useHostFeature } from "@/runtime/host-features";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { confirmDialog } from "@/utils/confirm-dialog";
-import { BotFormModel } from "./form-model";
+import { BotFormModel, validateBotDraft } from "./form-model";
 import { useBotsMutation } from "./queries";
 import { Input, ErrorNotice } from "./ui";
 import { styles } from "./styles";
@@ -136,6 +137,7 @@ function ProviderFields({ serverId, model }: { serverId: string; model: BotFormM
 function AdvancedSettings({ model }: { model: BotFormModel }) {
   const { t } = useTranslation();
   const draft = useSyncExternalStore(model.subscribe, model.getState, model.getState);
+  const validation = useMemo(() => validateBotDraft(draft), [draft]);
   const setLookAround = useCallback(
     function setLookAround(value: boolean) {
       model.set("lookAround", value);
@@ -172,7 +174,15 @@ function AdvancedSettings({ model }: { model: BotFormModel }) {
           accessibilityLabel={t("bots.lookAround")}
         />
       </Field>
-      <Input label={t("bots.interval")} value={draft.interval} onChange={setInterval} />
+      <Input
+        label={t("bots.interval")}
+        value={draft.interval}
+        onChange={setInterval}
+        error={
+          draft.lookAround && validation.errors.interval ? t(validation.errors.interval) : null
+        }
+        testID="bot-interval"
+      />
       <Field label={t("bots.unattended")}>
         <Switch
           value={draft.unattended}
@@ -197,13 +207,14 @@ export function BotForm({ serverId, bot, save, pending, error, onSaved }: FormPr
   const { t } = useTranslation();
   const [model] = useState(() => new BotFormModel(bot));
   const draft = useSyncExternalStore(model.subscribe, model.getState, model.getState);
-  const [validation, setValidation] = useState(false);
+  const optionalIdentity = useHostFeature(serverId, "botsOptionalIdentity");
+  const validation = useMemo(() => validateBotDraft(draft), [draft]);
+  const blocked = validation.missing !== null || Object.keys(validation.errors).length > 0;
   const [saved, setSaved] = useState(false);
   const submit = useCallback(
     async function submit() {
       setSaved(false);
-      const input = model.input();
-      setValidation(!input);
+      const input = model.input({ optionalIdentity });
       if (!input) return;
       try {
         await save(input);
@@ -213,17 +224,17 @@ export function BotForm({ serverId, bot, save, pending, error, onSaved }: FormPr
         /* The mutation renders the error beside Save. */
       }
     },
-    [setSaved, model, setValidation, save, onSaved],
+    [setSaved, model, optionalIdentity, save, onSaved],
   );
   const setName = useCallback(
     function setName(value: string) {
-      model.set("name", value);
+      model.setName(value);
     },
     [model],
   );
   const setSlug = useCallback(
     function setSlug(value: string) {
-      model.set("slug", value);
+      model.setSlug(value);
     },
     [model],
   );
@@ -239,14 +250,22 @@ export function BotForm({ serverId, bot, save, pending, error, onSaved }: FormPr
     },
     [model],
   );
+  const { errors } = validation;
   return (
     <View style={styles.body}>
-      <Input label={t("bots.name")} value={draft.name} onChange={setName} testID="bot-name" />
+      <Input
+        label={t("bots.name")}
+        value={draft.name}
+        onChange={setName}
+        error={errors.name ? t(errors.name) : null}
+        testID="bot-name"
+      />
       <Input
         label={t("bots.slug")}
         value={draft.slug}
         onChange={setSlug}
         editable={!bot}
+        error={errors.slug ? t(errors.slug) : null}
         testID="bot-slug"
       />
       <Input
@@ -254,6 +273,10 @@ export function BotForm({ serverId, bot, save, pending, error, onSaved }: FormPr
         value={draft.identity}
         onChange={setIdentity}
         multiline
+        hint={t("bots.identityOptional")}
+        error={
+          errors.identity ? t(errors.identity, { length: draft.identity.trim().length }) : null
+        }
         testID="bot-identity"
       />
       <ProviderFields serverId={serverId} model={model} />
@@ -264,12 +287,16 @@ export function BotForm({ serverId, bot, save, pending, error, onSaved }: FormPr
         testID="bot-repo"
       />
       {bot ? <AdvancedSettings model={model} /> : null}
-      {validation ? <Alert variant="error" title={t("bots.validation")} /> : null}
       <ErrorNotice error={error} />
       {saved ? <Text style={styles.muted}>{t("bots.saved")}</Text> : null}
-      <Button onPress={submit} loading={pending} disabled={pending} testID="bot-save">
+      <Button onPress={submit} loading={pending} disabled={pending || blocked} testID="bot-save">
         {t(bot ? "bots.save" : "bots.create")}
       </Button>
+      {validation.missing ? (
+        <Text style={styles.muted} testID="bot-save-reason">
+          {t(validation.missing)}
+        </Text>
+      ) : null}
     </View>
   );
 }
