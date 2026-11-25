@@ -8,6 +8,7 @@ import {
   waitForAgentRunStartWithTimeout,
   unarchiveAgentState,
 } from "./agent/agent-prompt.js";
+import { observeSourceSend } from "./session/source-send.js";
 import { ConnectedHostSession, type ConnectedHosts } from "./connected-hosts/index.js";
 import {
   SessionAuthorization,
@@ -1400,9 +1401,15 @@ export class Session {
     this.hostSourceId = resolveHostSource(options);
     this.connectedHostSession = createHostSession(options, this);
     this.onMessage = onMessage;
-    this.onMessageToSource = onMessageToSource ?? null;
+    this.onMessageToSource = onMessageToSource
+      ? (source, message) =>
+          observeSourceSend(() => onMessageToSource(source, message), this.sessionLogger)
+      : null;
     this.onBinaryMessage = onBinaryMessage ?? null;
-    this.onBinaryMessageToSource = onBinaryMessageToSource ?? null;
+    this.onBinaryMessageToSource = onBinaryMessageToSource
+      ? (source, frame) =>
+          observeSourceSend(() => onBinaryMessageToSource(source, frame), this.sessionLogger)
+      : null;
     this.getTransportBufferedAmount = getTransportBufferedAmount ?? (() => 0);
     this.onLifecycleIntent = onLifecycleIntent ?? null;
     this.onWorkspaceArchiveUpdate = options.publishWorkspaceArchiveUpdates;
@@ -11341,22 +11348,7 @@ export class Session {
 
   private emitForSource(msg: SessionOutboundMessage, source?: object): void | Promise<void> {
     if (source && this.onMessageToSource) {
-      let delivery: Promise<void>;
-      try {
-        delivery = Promise.resolve(this.onMessageToSource(source, msg));
-      } catch (error) {
-        delivery = Promise.reject(error);
-      }
-      // Pushes and ordinary replies can outlive a physical socket. Observe their
-      // rejection even when the caller does not await, while returning the original
-      // promise so awaited transfer/control delivery still reports failure.
-      void delivery.catch((error) => {
-        this.sessionLogger.debug(
-          { err: error, messageType: msg.type },
-          "Session source delivery unavailable",
-        );
-      });
-      return delivery;
+      return this.onMessageToSource(source, msg);
     }
     this.emit(msg);
   }

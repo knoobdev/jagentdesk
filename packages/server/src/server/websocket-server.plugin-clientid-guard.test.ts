@@ -27,13 +27,16 @@ import type { WorkspaceAutoName } from "./workspace-auto-name.js";
 class FakeSocket implements WebSocketLike {
   readyState = 1;
   bufferedAmount = 0;
+  nextSendError?: Error;
   readonly sent: string[] = [];
   readonly closeCalls: Array<{ code?: number; reason?: string }> = [];
   private readonly listeners = new Map<string, Array<(...args: unknown[]) => void>>();
 
   send(data: string | Uint8Array | ArrayBuffer, callback?: (error?: Error) => void): void {
     this.sent.push(typeof data === "string" ? data : Buffer.from(data as Uint8Array).toString());
-    callback?.();
+    const error = this.nextSendError;
+    this.nextSendError = undefined;
+    callback?.(error);
   }
 
   close(code?: number, reason?: string): void {
@@ -275,4 +278,62 @@ test("a stopped plugin can reconnect with its reserved clientId using a fresh se
   second.receiveText(hello("plugin:restarted"));
   expect(second.receivedServerInfo).toBe(true);
   expect(second.closeCalls).toEqual([]);
+});
+
+test("a timeline acknowledgement rejected during source delivery does not escape the session", async () => {
+  const { wsServer } = createHarness();
+  const ws = new FakeSocket();
+  await wsServer.attachExternalSocket(ws);
+  ws.receiveText(hello("delivery-failure"));
+  ws.nextSendError = new Error("client disconnected during send");
+  ws.receiveText({
+    type: "session",
+    message: {
+      type: "agent.timeline.set_subscription.request",
+      requestId: "timeline",
+      agentIds: [],
+    },
+  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  ws.receiveText({ type: "ping" });
+  expect(ws.sent.map((frame) => JSON.parse(frame).type)).toEqual(["session", "session", "pong"]);
+});
+
+test("a closed source drops its timeline acknowledgement without an unhandled rejection", async () => {
+  const { wsServer } = createHarness();
+  const ws = new FakeSocket();
+  await wsServer.attachExternalSocket(ws);
+  ws.receiveText(hello("closed-delivery"));
+  ws.readyState = 2;
+  ws.receiveText({
+    type: "session",
+    message: {
+      type: "agent.timeline.set_subscription.request",
+      requestId: "timeline",
+      agentIds: [],
+    },
+  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  expect(ws.sent).toHaveLength(1);
+  ws.close();
+});
+
+test("a client ID is reusable after its retained session expires", async () => {
+  vi.useFakeTimers();
+  try {
+    const { wsServer } = createHarness();
+    const original = new FakeSocket();
+    await wsServer.attachExternalSocket(original);
+    original.receiveText(hello("expired-browser"));
+    original.close();
+    await vi.advanceTimersByTimeAsync(90_001);
+    const reloaded = new FakeSocket();
+    await wsServer.attachExternalSocket(reloaded);
+    reloaded.receiveText(hello("expired-browser"));
+    expect(reloaded.receivedServerInfo).toBe(true);
+    reloaded.receiveText({ type: "ping" });
+    expect(JSON.parse(reloaded.sent.at(-1)!)).toEqual({ type: "pong" });
+  } finally {
+    vi.useRealTimers();
+  }
 });

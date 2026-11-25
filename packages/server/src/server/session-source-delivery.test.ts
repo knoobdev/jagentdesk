@@ -3,6 +3,7 @@ import pino from "pino";
 import { expect, test } from "vitest";
 import type { SessionOutboundMessage } from "@jagentdesk/protocol/messages";
 import { Session } from "./session.js";
+import { observeSourceSend } from "./session/source-send.js";
 
 const message: SessionOutboundMessage = {
   type: "agent.timeline.set_subscription.response",
@@ -10,9 +11,11 @@ const message: SessionOutboundMessage = {
 };
 
 function sourceDelivery(send: (source: object) => void | Promise<void>) {
+  const logger = pino({ level: "silent" });
   const session = {
-    onMessageToSource: send,
-    sessionLogger: pino({ level: "silent" }),
+    // Match the Session constructor boundary used by every JSON source callback.
+    onMessageToSource: (source: object) => observeSourceSend(() => send(source), logger),
+    sessionLogger: logger,
   } as unknown as Session;
   return (source: object) => Session.prototype["emitForSource"].call(session, message, source);
 }
