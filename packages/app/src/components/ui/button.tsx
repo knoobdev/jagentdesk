@@ -1,4 +1,5 @@
 import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { PageHeaderActionContext } from "@/components/headers/page-header-context";
 import { AppearanceText as Text } from "@/appearance/text";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
@@ -10,6 +11,7 @@ import {
   type PropsWithChildren,
   type ReactElement,
   type ReactNode,
+  useContext,
 } from "react";
 import { Pressable, View } from "react-native";
 import type {
@@ -93,6 +95,7 @@ const styles = StyleSheet.create((theme) => {
   return {
     gumloopButton: { borderRadius: 10 },
     gumloopSmall: { minHeight: 34 },
+    gumloopHeaderAction: { minHeight: 36, height: 36 },
     gumloopText: { fontSize: 16, fontWeight: "500" },
     base: {
       flexDirection: "row",
@@ -189,6 +192,7 @@ export function Button({
   }
 >) {
   const gumloop = useIsGumloopTheme();
+  const inPageHeader = useContext(PageHeaderActionContext);
   const [hovered, setHovered] = useState(false);
   const isDisabled = disabled || loading;
 
@@ -227,11 +231,12 @@ export function Button({
       variantStyle,
       gumloop && styles.gumloopButton,
       gumloop && size === "sm" && styles.gumloopSmall,
+      gumloop && inPageHeader && styles.gumloopHeaderAction,
       pressed ? styles.pressed : null,
       isDisabled ? styles.disabled : null,
       style,
     ],
-    [gumloop, size, sizeStyle, variantStyle, isDisabled, style],
+    [gumloop, inPageHeader, size, sizeStyle, variantStyle, isDisabled, style],
   );
 
   const resolvedTextStyle = useMemo(

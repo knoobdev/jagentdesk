@@ -153,14 +153,8 @@ export function SkillsScreen({ serverId }: { serverId: string }) {
       ? t("skillsHub.tabs.installedCount", { count: installedCount })
       : t("skillsHub.tabs.installed");
 
-  return (
-    <View style={styles.root} testID="skills-screen">
-      <PageHeader
-        icon={Sparkles}
-        title={t("skillsHub.title")}
-        description={t("skillsHub.subtitle")}
-        actions={headerActions}
-      />
+  const tabBar = useMemo(
+    () => (
       <View style={styles.bar}>
         <SkillsTabRow>
           <SkillsTabButton
@@ -187,6 +181,18 @@ export function SkillsScreen({ serverId }: { serverId: string }) {
           />
         </View>
       </View>
+    ),
+    [installedLabel, tab, selectInstalled, selectBrowse, t, projectPath, projects, setProjectPath],
+  );
+  return (
+    <View style={styles.root} testID="skills-screen">
+      <PageHeader
+        icon={Sparkles}
+        title={t("skillsHub.title")}
+        description={t("skillsHub.subtitle")}
+        actions={headerActions}
+        tabs={tabBar}
+      />
       {connected ? null : (
         <View style={styles.alert}>
           <Alert variant="warning" title={t("skillsHub.offline")} />
@@ -288,8 +294,6 @@ const styles = StyleSheet.create((theme: Theme) => ({
     alignItems: "flex-end",
     justifyContent: "space-between",
     gap: theme.spacing[3],
-    paddingHorizontal: theme.spacing[4],
-    paddingTop: theme.spacing[2],
   },
   projectSelect: { minWidth: 220, flexGrow: 1, maxWidth: 360 },
   alert: { paddingHorizontal: theme.spacing[4], paddingTop: theme.spacing[2] },
