@@ -1235,14 +1235,17 @@ function showsVoiceModeButton(input: {
   isAgentRunning: boolean;
   hasSendableContent: boolean;
   showVoice: boolean;
+  sendAlwaysPresent: boolean;
 }): boolean {
-  // Voice mode holds the trailing disc until there is something to send, then Send takes it.
+  // Classic: voice mode holds the trailing disc until there is something to send, then Send
+  // takes it. Gumloop: Send always holds that disc and voice mode stays just before it, so the
+  // row does not change while typing (spec 38 §4.4).
   return (
     input.showVoice &&
     !input.isVoiceModeForAgent &&
     input.hasAgent &&
     !input.isAgentRunning &&
-    !input.hasSendableContent
+    (input.sendAlwaysPresent || !input.hasSendableContent)
   );
 }
 
@@ -2252,6 +2255,7 @@ function ComposerContentImpl({
     ],
   );
 
+  const isGumloop = useIsGumloopTheme();
   const voiceModeContent = useMemo(
     () =>
       showsVoiceModeButton({
@@ -2260,6 +2264,7 @@ function ComposerContentImpl({
         isAgentRunning,
         hasSendableContent,
         showVoice: mode.showVoice,
+        sendAlwaysPresent: isGumloop,
       }) ? (
         <View style={styles.rightControls}>
           <ComposerVoiceModeButton
@@ -2281,6 +2286,7 @@ function ComposerContentImpl({
       isAgentRunning,
       isConnected,
       isVoiceModeForAgent,
+      isGumloop,
       isVoiceSwitching,
       mode.showVoice,
       realtimeVoiceButtonStyle,

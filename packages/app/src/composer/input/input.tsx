@@ -92,6 +92,8 @@ import {
   stopRealtimeVoice,
   resolveAlternateSendAction,
   resolveMessageInputEnterAction,
+  resolvePresentedActionKind,
+  type PrimaryActionKind,
 } from "./state";
 import { useHardwareKeyboardPresent, useKeyboardFocusSurface } from "@/keyboard";
 import { type SendShortcut } from "@/hooks/use-settings";
@@ -919,8 +921,6 @@ function SendButtonTooltip({
     </Tooltip>
   );
 }
-
-type PrimaryActionKind = "send" | "active" | "none";
 
 function hasSendableComposerContent(input: {
   hasText: boolean;
@@ -2082,10 +2082,12 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       [mode.isMonospace],
     );
     // Fullscreen always shows Send; without content it is disabled, and looks it.
-    // With nothing to send and no voice mode, a disabled Send holds the trailing disc so the row
-    // does not shift when typing starts.
-    const sendStandsIn = isFullscreen || (primaryActionKind === "none" && voiceModeContent == null);
-    const presentedActionKind: PrimaryActionKind = sendStandsIn ? "send" : primaryActionKind;
+    const { kind: presentedActionKind, sendStandsIn } = resolvePresentedActionKind({
+      primaryActionKind,
+      isFullscreen,
+      hasVoiceModeContent: voiceModeContent != null,
+      sendAlwaysPresent: isGumloop,
+    });
     const isPresentedSendDisabled = resolvePresentationSendDisabled({
       standsIn: sendStandsIn,
       disabled: isSendButtonDisabled,

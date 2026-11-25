@@ -268,3 +268,23 @@ export function resolveRetainedSelection(
   const start = Math.min(Math.max(retained.start, 0), end);
   return { start, end };
 }
+
+export type PrimaryActionKind = "send" | "active" | "none";
+
+/**
+ * Which disc holds the trailing slot. With nothing to send and the agent idle the primary
+ * action is "none"; a disabled Send then stands in so the row does not shift when typing
+ * starts. Classic themes keep Paseo's rule that a voice-mode button takes the slot instead;
+ * Gumloop always shows Send there and voice mode sits before it (spec 38 §4.4, A38.6b).
+ */
+export function resolvePresentedActionKind(input: {
+  primaryActionKind: PrimaryActionKind;
+  isFullscreen: boolean;
+  hasVoiceModeContent: boolean;
+  sendAlwaysPresent: boolean;
+}): { kind: PrimaryActionKind; sendStandsIn: boolean } {
+  const sendStandsIn =
+    input.isFullscreen ||
+    (input.primaryActionKind === "none" && (input.sendAlwaysPresent || !input.hasVoiceModeContent));
+  return { kind: sendStandsIn ? "send" : input.primaryActionKind, sendStandsIn };
+}
