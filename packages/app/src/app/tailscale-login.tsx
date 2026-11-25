@@ -93,7 +93,7 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.base,
   },
   placeholderColor: {
-    color: theme.colors.foregroundExtraMuted,
+    color: theme.colors.foregroundMuted,
   },
   connectingText: {
     color: theme.colors.foregroundMuted,

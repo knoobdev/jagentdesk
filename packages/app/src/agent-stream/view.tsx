@@ -60,6 +60,7 @@ import type {
 } from "@jagentdesk/protocol/agent-types";
 import { type AgentScreenAgent } from "@/hooks/use-agent-screen-state-machine";
 import { useSessionStore } from "@/stores/session-store";
+import { stripBotEnvelope } from "@/bots/envelope";
 import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
 import { useLoadOlderAgentHistory } from "@/hooks/use-load-older-agent-history";
 import { useSettings, resolveContentMaxWidth } from "@/hooks/use-settings";
@@ -732,7 +733,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             serverId={resolvedServerId}
             agentId={agentId}
             messageId={item.messageId}
-            message={item.text}
+            message={context.botId ? stripBotEnvelope(item.text) : item.text}
             images={item.images}
             attachments={item.attachments}
             timestamp={item.timestamp.getTime()}
@@ -758,6 +759,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       },
       [
         context.capabilities,
+        context.botId,
         agentId,
         client,
         getCollapsedTurn,

@@ -141,6 +141,7 @@ function TabButton({
 }
 function BotView({ serverId, bot, onBack }: { serverId: string; bot: Bot; onBack: () => void }) {
   const { t } = useTranslation();
+  const gumloop = useGumloopDesktopShell(true);
   const params = useLocalSearchParams<{ tab?: string }>();
   const tab = tabs.find((value) => value === params.tab) ?? "chat";
   const setTab = useCallback((value: BotTab) => router.setParams({ tab: value }), []);
@@ -172,31 +173,42 @@ function BotView({ serverId, bot, onBack }: { serverId: string; bot: Bot; onBack
     default:
       body = <BotChat serverId={serverId} bot={bot} />;
   }
+  const tabRow = useMemo(
+    () => (
+      <ScrollView horizontal contentContainerStyle={gumloop ? styles.gumloopTabs : styles.tabs}>
+        {tabs.map((value) => (
+          <TabButton
+            key={value}
+            value={value}
+            selected={tab === value}
+            count={needsYou}
+            select={setTab}
+          />
+        ))}
+      </ScrollView>
+    ),
+    [gumloop, needsYou, setTab, tab],
+  );
   return (
     <View style={styles.screen}>
-      <PageHeader icon={BotIcon} title={bot.name} description={bot.identity} actions={actions} />
-      {!connected ? <Alert title={t("bots.offline")} /> : null}
-      {bot.paused ? <Alert title={t("bots.paused")} /> : null}
-      <View>
-        <ScrollView horizontal contentContainerStyle={styles.tabs}>
-          {tabs.map((value) => (
-            <TabButton
-              key={value}
-              value={value}
-              selected={tab === value}
-              count={needsYou}
-              select={setTab}
-            />
-          ))}
-        </ScrollView>
-      </View>
-      <WorkerPermissions
-        serverId={serverId}
-        bot={bot}
-        items={items.data ?? []}
-        includeSupervisor={tab !== "chat"}
+      <PageHeader
+        icon={BotIcon}
+        title={bot.name}
+        description={bot.identity}
+        actions={actions}
+        tabs={tabRow}
       />
-      {body}
+      <View style={gumloop ? styles.gumloopBody : styles.column}>
+        {!connected ? <Alert title={t("bots.offline")} /> : null}
+        {bot.paused ? <Alert title={t("bots.paused")} /> : null}
+        <WorkerPermissions
+          serverId={serverId}
+          bot={bot}
+          items={items.data ?? []}
+          includeSupervisor={tab !== "chat"}
+        />
+        {body}
+      </View>
     </View>
   );
 }

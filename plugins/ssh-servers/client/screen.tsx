@@ -10,6 +10,10 @@ import { Button } from "../../../packages/app/src/plugins/builtin/host-api";
 import { Skeleton, useSkeletonPulse } from "../../../packages/app/src/plugins/builtin/host-api";
 import { confirmDialog } from "../../../packages/app/src/plugins/builtin/host-api";
 import { useIsCompactFormFactor } from "../../../packages/app/src/plugins/builtin/host-api";
+import {
+  gumloopListStyles,
+  useIsGumloopTheme,
+} from "../../../packages/app/src/plugins/builtin/host-api";
 import { useHostRuntimeClient } from "../../../packages/app/src/plugins/builtin/host-api";
 import type {
   DaemonClient,
@@ -499,6 +503,64 @@ export function ServersScreen({ hostServerId }: { hostServerId: string }) {
   );
 }
 
+function ServersTabRow({
+  tab,
+  onSelect,
+  serverCount,
+  showSnippets,
+  showForwarding,
+}: {
+  tab: ServersTabId;
+  onSelect: (tab: ServersTabId) => void;
+  serverCount: number;
+  showSnippets: boolean;
+  showForwarding: boolean;
+}) {
+  return (
+    <View style={styles.tabRow}>
+      <TabButton
+        label={`Servers · ${serverCount}`}
+        value="servers"
+        active={tab === "servers"}
+        onSelect={onSelect}
+        testID="servers-tab-servers"
+      />
+      <TabButton
+        label="Keychain"
+        value="keychain"
+        active={tab === "keychain"}
+        onSelect={onSelect}
+        testID="servers-tab-keychain"
+      />
+      <TabButton
+        label="Known hosts"
+        value="hosts"
+        active={tab === "hosts"}
+        onSelect={onSelect}
+        testID="servers-tab-hosts"
+      />
+      {showSnippets ? (
+        <TabButton
+          label="Snippets"
+          value="snippets"
+          active={tab === "snippets"}
+          onSelect={onSelect}
+          testID="servers-tab-snippets"
+        />
+      ) : null}
+      {showForwarding ? (
+        <TabButton
+          label="Port forwarding"
+          value="forwarding"
+          active={tab === "forwarding"}
+          onSelect={onSelect}
+          testID="servers-tab-forwarding"
+        />
+      ) : null}
+    </View>
+  );
+}
+
 function ServersHome({
   client,
   data,
@@ -527,6 +589,7 @@ function ServersHome({
   onAuthSubmit: (serverId: string, answers: string[] | null) => void;
 }) {
   const isCompact = useIsCompactFormFactor();
+  const gumloopDesktop = useIsGumloopTheme() && !isCompact;
   const [tab, setTab] = useState<ServersTabId>("servers");
   const [query, setQuery] = useState("");
   const [selectedTags, setSelectedTags] = useState<ReadonlySet<string>>(new Set());
@@ -610,6 +673,28 @@ function ServersHome({
     [handleAddGroup, handleAddServer, handleImport],
   );
 
+  const tabRow = useMemo(
+    () =>
+      data.loading ? null : (
+        <ServersTabRow
+          tab={tab}
+          onSelect={setTab}
+          serverCount={data.servers.length}
+          showSnippets={Boolean(snippetsApi)}
+          showForwarding={Boolean(moduleApis)}
+        />
+      ),
+    [data.loading, data.servers.length, tab, snippetsApi, moduleApis],
+  );
+  const contentContainerStyle = useMemo(
+    () => [
+      styles.contentContainer,
+      styles.contentBelowHeader,
+      gumloopDesktop && gumloopListStyles.pageContent,
+    ],
+    [gumloopDesktop],
+  );
+
   return (
     <>
       <PageHeader
@@ -617,10 +702,11 @@ function ServersHome({
         title="Servers"
         description="SSH servers saved on this daemon. Sessions run on the daemon and keep going when the app closes."
         actions={headerActions}
+        tabs={tabRow}
       />
       <ScrollView
         style={styles.container}
-        contentContainerStyle={[styles.contentContainer, styles.contentBelowHeader]}
+        contentContainerStyle={contentContainerStyle}
         keyboardShouldPersistTaps="handled"
       >
         {data.loading ? <ServersSkeleton /> : null}
@@ -639,47 +725,6 @@ function ServersHome({
               onHostkeyDecision={onHostkeyDecision}
               onAuthSubmit={onAuthSubmit}
             />
-            <View style={styles.tabRow}>
-              <TabButton
-                label={`Servers · ${data.servers.length}`}
-                value="servers"
-                active={tab === "servers"}
-                onSelect={setTab}
-                testID="servers-tab-servers"
-              />
-              <TabButton
-                label="Keychain"
-                value="keychain"
-                active={tab === "keychain"}
-                onSelect={setTab}
-                testID="servers-tab-keychain"
-              />
-              <TabButton
-                label="Known hosts"
-                value="hosts"
-                active={tab === "hosts"}
-                onSelect={setTab}
-                testID="servers-tab-hosts"
-              />
-              {snippetsApi ? (
-                <TabButton
-                  label="Snippets"
-                  value="snippets"
-                  active={tab === "snippets"}
-                  onSelect={setTab}
-                  testID="servers-tab-snippets"
-                />
-              ) : null}
-              {moduleApis ? (
-                <TabButton
-                  label="Port forwarding"
-                  value="forwarding"
-                  active={tab === "forwarding"}
-                  onSelect={setTab}
-                  testID="servers-tab-forwarding"
-                />
-              ) : null}
-            </View>
             {tab === "servers" ? (
               <ServersListTab
                 rows={rows}

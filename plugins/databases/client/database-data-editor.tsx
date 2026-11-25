@@ -91,7 +91,7 @@ function WhereCompletionRow({
 const ThemedSpinner = withUnistyles(LoadingSpinner);
 const mutedColor = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const placeholderColor = (theme: Theme) => ({
-  placeholderTextColor: theme.colors.foregroundExtraMuted,
+  placeholderTextColor: theme.colors.foregroundMuted,
 });
 const ThemedCellInput = withUnistyles(TextInput);
 

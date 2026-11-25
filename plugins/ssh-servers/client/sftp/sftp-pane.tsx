@@ -88,7 +88,7 @@ const ThemedKey = withUnistyles(KeyRound);
 const ThemedTrash = withUnistyles(Trash2);
 
 const placeholderColor = (theme: Theme) => ({
-  placeholderTextColor: theme.colors.foregroundExtraMuted,
+  placeholderTextColor: theme.colors.foregroundMuted,
 });
 
 export function sftpListQueryKey(scope: string, endpoint: SftpEndpoint) {

@@ -31,7 +31,7 @@ import type { SshDockerTarget } from "../../../../packages/app/src/plugins/built
 // import sheet on the Servers list.
 
 const ThemedTextInput = withUnistyles(TextInput);
-const placeholder = (theme: Theme) => ({ placeholderTextColor: theme.colors.foregroundExtraMuted });
+const placeholder = (theme: Theme) => ({ placeholderTextColor: theme.colors.foregroundMuted });
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

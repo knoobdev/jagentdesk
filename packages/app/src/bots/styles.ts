@@ -49,13 +49,11 @@ export const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[2],
     flexDirection: "row",
   },
+  // The Gumloop page header owns the 82 px page rail; tabs sit on the title's left edge.
+  gumloopTabs: { gap: theme.spacing[2], flexDirection: "row" },
+  gumloopBody: { flex: 1, minHeight: 0, minWidth: 0, paddingHorizontal: 82 - theme.spacing[4] },
   permissions: { maxHeight: "40%", flexShrink: 1 },
-  composer: {
-    padding: theme.spacing[3],
-    gap: theme.spacing[2],
-    borderTopWidth: 1,
-    borderColor: theme.colors.border,
-  },
+  composer: { paddingHorizontal: theme.spacing[3], gap: theme.spacing[2] },
   message: { padding: theme.spacing[3], gap: theme.spacing[1] },
   userMessage: { backgroundColor: theme.colors.surface2, borderRadius: theme.borderRadius.md },
   editor: { minHeight: 300, textAlignVertical: "top", fontFamily: theme.fontFamily.mono },

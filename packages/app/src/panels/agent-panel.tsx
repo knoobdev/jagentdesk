@@ -113,6 +113,7 @@ import { derivePendingPermissionKey, normalizeAgentSnapshot } from "@/utils/agen
 import { applyLegacyDaemonWorkspaceOwnership } from "@/workspace/legacy-daemon-workspaces";
 import { type WorkspaceFileOpenRequest } from "@/workspace/file-open";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
+import { botIdFromLabels } from "@/bots/envelope";
 import { buildDraftAgentSetup, type ClientSlashCommand } from "@/client-slash-commands";
 import { OverlayDismissalScope } from "@/components/ui/overlay-dismissal";
 
@@ -131,6 +132,7 @@ interface ChatAgentStateShape {
   options?: Agent["options"];
   controls?: Agent["controls"];
   lastError?: Agent["lastError"] | null;
+  botId?: string | null;
 }
 
 interface ChatAgentSelectedState extends ChatAgentStateShape {
@@ -191,6 +193,7 @@ function selectChatAgentState(
     options: agent.options,
     controls: agent.controls,
     lastError: agent.lastError ?? null,
+    botId: botIdFromLabels(agent.labels),
     archivedAt: agent.archivedAt ?? null,
     requiresAttention: agent.requiresAttention ?? false,
     attentionReason: agent.attentionReason ?? null,
@@ -219,6 +222,7 @@ function buildChatAgentFromState(
     options: state.options,
     controls: state.controls,
     lastError: state.lastError ?? null,
+    botId: state.botId ?? null,
     projectPlacement,
   };
 }
@@ -692,6 +696,7 @@ function AgentPanelBody({
           options: agentState.options,
           controls: agentState.controls,
           lastError: agentState.lastError ?? null,
+          botId: agentState.botId ?? null,
           projectPlacement,
         }
       : null;

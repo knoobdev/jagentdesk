@@ -1676,7 +1676,7 @@ function ConnectionsView({
               value={host}
               onChangeText={setHost}
               placeholder="git.example.com"
-              placeholderTextColor={theme.colors.foregroundExtraMuted}
+              placeholderTextColor={theme.colors.foregroundMuted}
               autoCapitalize="none"
               autoCorrect={false}
               testID="forge-host-input"
@@ -1725,7 +1725,7 @@ function ConnectionsView({
               value={token}
               onChangeText={setToken}
               placeholder="Paste token"
-              placeholderTextColor={theme.colors.foregroundExtraMuted}
+              placeholderTextColor={theme.colors.foregroundMuted}
               secureTextEntry
               autoCapitalize="none"
               autoCorrect={false}
@@ -1992,7 +1992,7 @@ function RepositoriesView({
             value={query}
             onChangeText={setQuery}
             placeholder="Search repositories…"
-            placeholderTextColor={theme.colors.foregroundExtraMuted}
+            placeholderTextColor={theme.colors.foregroundMuted}
             autoCapitalize="none"
             autoCorrect={false}
             testID="forge-repo-search"
@@ -2372,7 +2372,7 @@ function NewChangeRequestForm({
           value={title}
           onChangeText={setTitle}
           placeholder={`${def.changeRequestNoun} title`}
-          placeholderTextColor={theme.colors.foregroundExtraMuted}
+          placeholderTextColor={theme.colors.foregroundMuted}
           editable={!busy}
           testID="forge-new-cr-title"
         />
@@ -2385,7 +2385,7 @@ function NewChangeRequestForm({
           value={body}
           onChangeText={setBody}
           placeholder="Describe the change (optional)"
-          placeholderTextColor={theme.colors.foregroundExtraMuted}
+          placeholderTextColor={theme.colors.foregroundMuted}
           multiline
           editable={!busy}
           testID="forge-new-cr-body"
@@ -2772,7 +2772,7 @@ function ReviewBox({
               value={body}
               onChangeText={setBody}
               placeholder={action === "approve" ? "Leave a comment (optional)" : "Leave a comment"}
-              placeholderTextColor={theme.colors.foregroundExtraMuted}
+              placeholderTextColor={theme.colors.foregroundMuted}
               multiline
               editable={!running}
               testID="forge-review-body"
@@ -3760,7 +3760,7 @@ function BranchPickerButton({
               value={filter}
               onChangeText={setFilter}
               placeholder="Filter branches…"
-              placeholderTextColor={theme.colors.foregroundExtraMuted}
+              placeholderTextColor={theme.colors.foregroundMuted}
               autoCapitalize="none"
               autoCorrect={false}
               testID="forge-branch-filter"
@@ -5826,7 +5826,7 @@ function NewReleaseForm({
           value={tagName}
           onChangeText={setTagName}
           placeholder="v1.0.0"
-          placeholderTextColor={theme.colors.foregroundExtraMuted}
+          placeholderTextColor={theme.colors.foregroundMuted}
           autoCapitalize="none"
           autoCorrect={false}
           editable={!busy}
@@ -5841,7 +5841,7 @@ function NewReleaseForm({
           value={name}
           onChangeText={setName}
           placeholder="Release title"
-          placeholderTextColor={theme.colors.foregroundExtraMuted}
+          placeholderTextColor={theme.colors.foregroundMuted}
           editable={!busy}
           testID="forge-new-release-name"
         />
@@ -5854,7 +5854,7 @@ function NewReleaseForm({
           value={body}
           onChangeText={setBody}
           placeholder="Release notes (markdown, optional)"
-          placeholderTextColor={theme.colors.foregroundExtraMuted}
+          placeholderTextColor={theme.colors.foregroundMuted}
           multiline
           editable={!busy}
           testID="forge-new-release-body"
@@ -5868,7 +5868,7 @@ function NewReleaseForm({
           value={target}
           onChangeText={setTarget}
           placeholder="branch or commit (optional)"
-          placeholderTextColor={theme.colors.foregroundExtraMuted}
+          placeholderTextColor={theme.colors.foregroundMuted}
           autoCapitalize="none"
           autoCorrect={false}
           editable={!busy}
@@ -6492,7 +6492,7 @@ function IssueDetail({
             value={comment}
             onChangeText={setComment}
             placeholder="Leave a comment"
-            placeholderTextColor={theme.colors.foregroundExtraMuted}
+            placeholderTextColor={theme.colors.foregroundMuted}
             multiline
             editable={!busy}
             testID="forge-issue-comment-body"
@@ -6681,7 +6681,7 @@ function IssuesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo })
               value={title}
               onChangeText={setTitle}
               placeholder="Issue title"
-              placeholderTextColor={theme.colors.foregroundExtraMuted}
+              placeholderTextColor={theme.colors.foregroundMuted}
               editable={!createBusy}
               testID="forge-issue-title-input"
             />
@@ -6693,7 +6693,7 @@ function IssuesView({ client, repo }: { client: DaemonClient; repo: ForgeRepo })
               value={body}
               onChangeText={setBody}
               placeholder="Describe the issue"
-              placeholderTextColor={theme.colors.foregroundExtraMuted}
+              placeholderTextColor={theme.colors.foregroundMuted}
               multiline
               editable={!createBusy}
               testID="forge-issue-body-input"
@@ -6949,7 +6949,7 @@ function MembersView({ client, repo }: { client: DaemonClient; repo: ForgeRepo }
               value={username}
               onChangeText={setUsername}
               placeholder="e.g. octocat"
-              placeholderTextColor={theme.colors.foregroundExtraMuted}
+              placeholderTextColor={theme.colors.foregroundMuted}
               autoCapitalize="none"
               autoCorrect={false}
               editable={!inviteBusy}
@@ -8252,7 +8252,7 @@ export function ForgeHubScreen({ serverId }: { serverId: string }) {
                 value={repoQuery}
                 onChangeText={setRepoQuery}
                 placeholder="Jump to repo…"
-                placeholderTextColor={theme.colors.foregroundExtraMuted}
+                placeholderTextColor={theme.colors.foregroundMuted}
                 autoCapitalize="none"
                 autoCorrect={false}
                 testID="forge-jump-to-repo"

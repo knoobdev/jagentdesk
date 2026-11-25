@@ -190,7 +190,7 @@ const accentFg = (theme: Theme) => ({ color: theme.colors.accentForeground });
 const red = (theme: Theme) => ({ color: theme.colors.palette.red[500] });
 const green = (theme: Theme) => ({ color: theme.colors.palette.green[600] });
 const placeholderColor = (theme: Theme) => ({
-  placeholderTextColor: theme.colors.foregroundExtraMuted,
+  placeholderTextColor: theme.colors.foregroundMuted,
 });
 
 type IconComponent = ComponentType<{ size?: number; uniProps?: (theme: Theme) => object }>;
@@ -2396,6 +2396,55 @@ export function DockerScreen({
   const selected = selectedId ? containers.find((c) => c.id === selectedId) : undefined;
   const livePill = useMemo(() => <LivePill />, []);
 
+  const toolbar = useMemo(
+    () =>
+      available ? (
+        <View style={styles.toolbar}>
+          <View style={isGumloop ? gumloopTabStyles.row : styles.tabRow}>
+            <TabButton
+              label={`Containers · ${containers.length}`}
+              active={tab === "containers"}
+              onPress={showContainers}
+            />
+            <TabButton
+              label={`Images · ${images.length}`}
+              active={tab === "images"}
+              onPress={showImages}
+            />
+            <TabButton
+              label={`Volumes · ${volumes.length}`}
+              active={tab === "volumes"}
+              onPress={showVolumes}
+            />
+          </View>
+          <View style={styles.searchBox}>
+            <ThemedSearch size={14} uniProps={muted} />
+            <ThemedTextInput
+              style={styles.searchInput}
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search"
+              autoCapitalize="none"
+              autoCorrect={false}
+              uniProps={placeholderColor}
+            />
+          </View>
+        </View>
+      ) : null,
+    [
+      available,
+      isGumloop,
+      containers.length,
+      images.length,
+      volumes.length,
+      tab,
+      showContainers,
+      showImages,
+      showVolumes,
+      query,
+    ],
+  );
+
   if (loading) {
     return (
       <>
@@ -2431,6 +2480,7 @@ export function DockerScreen({
         title="Docker"
         description={DOCKER_DESCRIPTION}
         accessory={livePill}
+        tabs={toolbar}
       />
       <ScrollView style={styles.container} contentContainerStyle={contentContainerStyle}>
         {error ? (
@@ -2450,38 +2500,6 @@ export function DockerScreen({
           </View>
         ) : (
           <>
-            <View style={styles.toolbar}>
-              <View style={isGumloop ? gumloopTabStyles.row : styles.tabRow}>
-                <TabButton
-                  label={`Containers · ${containers.length}`}
-                  active={tab === "containers"}
-                  onPress={showContainers}
-                />
-                <TabButton
-                  label={`Images · ${images.length}`}
-                  active={tab === "images"}
-                  onPress={showImages}
-                />
-                <TabButton
-                  label={`Volumes · ${volumes.length}`}
-                  active={tab === "volumes"}
-                  onPress={showVolumes}
-                />
-              </View>
-              <View style={styles.searchBox}>
-                <ThemedSearch size={14} uniProps={muted} />
-                <ThemedTextInput
-                  style={styles.searchInput}
-                  value={query}
-                  onChangeText={setQuery}
-                  placeholder="Search"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  uniProps={placeholderColor}
-                />
-              </View>
-            </View>
-
             {tab === "containers" ? (
               <ContainersPanel
                 containers={filteredContainers}

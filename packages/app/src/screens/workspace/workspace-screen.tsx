@@ -1427,7 +1427,14 @@ function WorkspaceHeaderTitleBar({
 }: WorkspaceHeaderTitleBarProps) {
   // The breadcrumb needs desktop width; phones keep the single-line title.
   const isGumloop = useIsGumloopTheme() && !isMobile;
-  if (isGumloop) return <View style={styles.headerTitleContainer} />;
+  // Gumloop: the focused agent's title, left-aligned right after the sidebar toggle (spec 38 §4.4).
+  if (isGumloop) {
+    return (
+      <View style={styles.headerTitleContainer}>
+        <GumloopChatTitle enabled serverId={normalizedServerId} fallback={title} />
+      </View>
+    );
+  }
   return (
     <View style={styles.headerTitleContainer}>
       {isLoading ? (
@@ -4355,16 +4362,6 @@ function WorkspaceScreenContent({
       workspaceDirectory,
     ],
   );
-  const gumloopHeaderTitle = useMemo(
-    () => (
-      <GumloopChatTitle
-        enabled={gumloopDesktop}
-        serverId={normalizedServerId}
-        fallback={workspaceHeaderTitle}
-      />
-    ),
-    [gumloopDesktop, normalizedServerId, workspaceHeaderTitle],
-  );
   const inlineHeaderRight = useMemo(
     () => (actionsInVerticalBar ? null : headerRight),
     [actionsInVerticalBar, headerRight],
@@ -4379,7 +4376,6 @@ function WorkspaceScreenContent({
       {showScreenHeader && (
         <WorkspaceScreenHeader
           onRowLayout={onHeaderLayout}
-          center={gumloopHeaderTitle}
           left={
             <>
               <SidebarMenuToggle />
@@ -4587,7 +4583,13 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.foreground,
     flexShrink: 1,
   },
-  gumloopChatTitle: { fontSize: 18, fontWeight: "500", color: theme.colors.foreground },
+  gumloopChatTitle: {
+    flexShrink: 1,
+    minWidth: 0,
+    fontSize: 18,
+    fontWeight: "600",
+    color: theme.colors.foreground,
+  },
   headerTitleContainer: {
     flex: 1,
     flexShrink: 1,

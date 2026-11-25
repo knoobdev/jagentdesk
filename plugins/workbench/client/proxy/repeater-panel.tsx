@@ -423,7 +423,6 @@ function RequestResponse({
             autoCapitalize="none"
             autoCorrect={false}
             placeholder="{ }"
-            placeholderTextColor="#9aa"
           />
         </View>
         <WbSplitBar axis={axis} onPointerDown={onPointerDown} />

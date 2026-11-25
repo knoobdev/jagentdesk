@@ -93,7 +93,7 @@ import {
   resolveAlternateSendAction,
   resolveMessageInputEnterAction,
 } from "./state";
-import { useKeyboardFocusSurface } from "@/keyboard";
+import { useHardwareKeyboardPresent, useKeyboardFocusSurface } from "@/keyboard";
 import { type SendShortcut } from "@/hooks/use-settings";
 import {
   controlSizingForLayout,
@@ -116,10 +116,10 @@ import {
   resolveComposerLeadingEdge,
 } from "@/composer/input/toolbar-rails";
 import * as Haptics from "expo-haptics";
-import { hasFinePointer } from "@/hooks/pointer-capabilities";
+import { hasFinePointer, usePointerCapabilities } from "@/hooks/pointer-capabilities";
 
 const ComposerTextInput = withUnistyles(EditingTextInput, (theme) => ({
-  placeholderTextColor: theme.colors.surface4,
+  placeholderTextColor: theme.colors.foregroundMuted,
 }));
 
 const DEFAULT_SEND_KEYS: ShortcutKey[][] = [["Enter"]];
@@ -681,6 +681,13 @@ function MessageInputOverlay({
     );
   }
   return null;
+}
+
+/** "⌘L to focus" only helps someone with a keyboard: hide it on phones and touch screens. */
+function useShowsShortcutHints(isCompact: boolean): boolean {
+  const hardwareKeyboardPresent = useHardwareKeyboardPresent();
+  const { finePointer } = usePointerCapabilities();
+  return hardwareKeyboardPresent || (!isCompact && finePointer);
 }
 
 function FocusHint({
@@ -2034,6 +2041,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
     }, [handleStopRealtimeVoice]);
 
     const isGumloop = useIsGumloopTheme();
+    const showsShortcutHints = useShowsShortcutHints(isCompact);
     const inputWrapperCombinedStyle = useMemo(
       () => [
         styles.inputWrapper,
@@ -2199,7 +2207,9 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
             fullscreen={isFullscreen}
             compact={isCompact}
             onRenderedLinesChange={setRenderedLines}
-            focusHintVisible={!isFullscreen && isWeb && !isInputFocused && !value}
+            focusHintVisible={
+              !isFullscreen && isWeb && showsShortcutHints && !isInputFocused && !value
+            }
             focusInputKeys={focusInputKeys}
             focusHintLabel={t("composer.input.focusHint", {
               shortcut: focusInputKeys ? formatShortcut(focusInputKeys[0], getShortcutOs()) : "",
@@ -2231,6 +2241,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
         isFullscreen,
         isCompact,
         isInputFocused,
+        showsShortcutHints,
         value,
         focusInputKeys,
       ],
@@ -2244,12 +2255,14 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
     const buttonRowStyle = useMemo(
       () => [
         styles.buttonRow,
+        // Gumloop's box has a minimum height; the toolbar sits on its bottom edge (spec 38 §4.4).
+        isGumloop && styles.buttonRowGumloop,
         {
           marginLeft: -composerToolbarOverhang(leadingEdge, controlSizing),
           marginRight: -composerToolbarOverhang(trailingEdge, controlSizing),
         },
       ],
-      [controlSizing, leadingEdge, trailingEdge],
+      [controlSizing, isGumloop, leadingEdge, trailingEdge],
     );
     const toolbar = useMemo(
       () => (
@@ -2509,6 +2522,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
     color: theme.colors.foregroundMuted,
   },
   // The row keeps a full touch target's height; its disc-sized controls centre in it.
+  buttonRowGumloop: { marginTop: "auto" },
   buttonRow: {
     minHeight: TOOLBAR_CONTROL_HEIGHT,
     flexShrink: 0,

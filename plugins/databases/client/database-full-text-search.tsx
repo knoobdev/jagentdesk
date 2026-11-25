@@ -13,7 +13,7 @@ import { gumloopListStyles } from "../../../packages/app/src/plugins/builtin/hos
 
 const ThemedInput = withUnistyles(TextInput);
 const placeholderColor = (theme: Theme) => ({
-  placeholderTextColor: theme.colors.foregroundExtraMuted,
+  placeholderTextColor: theme.colors.foregroundMuted,
 });
 
 // Column types worth scanning for a text match — skip binary/blob and pure numeric

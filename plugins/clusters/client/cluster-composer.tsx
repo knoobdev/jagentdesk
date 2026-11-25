@@ -120,7 +120,6 @@ export function ClusterComposer({
           value={text}
           onChangeText={setText}
           placeholder={placeholder}
-          placeholderTextColor={placeholderColor}
           editable={ready}
           multiline
           onSubmitEditing={handleSend}
@@ -138,8 +137,6 @@ export function ClusterComposer({
     </View>
   );
 }
-
-const placeholderColor = "#717574";
 
 const styles = StyleSheet.create((theme: Theme) => ({
   wrap: {

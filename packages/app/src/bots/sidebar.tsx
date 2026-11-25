@@ -24,8 +24,12 @@ function BotRow({ serverId, bot, active }: { serverId: string; bot: Bot; active:
       style={style}
       testID={`bots-nav-${bot.slug}`}
     >
-      <Text style={styles.text}>{bot.name}</Text>
-      <Text style={styles.muted}>{bot.paused ? t("bots.paused") : bot.identity}</Text>
+      <Text style={styles.text} numberOfLines={1}>
+        {bot.name}
+      </Text>
+      <Text style={styles.muted} numberOfLines={1}>
+        {bot.paused ? t("bots.paused") : bot.identity}
+      </Text>
     </Pressable>
   );
 }
@@ -40,8 +44,10 @@ function RoomRow({ serverId, room, active }: { serverId: string; room: BotRoom; 
   );
   return (
     <Pressable accessibilityRole="button" onPress={open} style={style}>
-      <Text style={styles.text}>{room.name}</Text>
-      <Text style={styles.muted}>
+      <Text style={styles.text} numberOfLines={1}>
+        {room.name}
+      </Text>
+      <Text style={styles.muted} numberOfLines={1}>
         {room.memberBotIds.length} {t("bots.members")}
       </Text>
     </Pressable>
