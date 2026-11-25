@@ -1,3 +1,5 @@
+import { usePanelStore } from "@/stores/panel-store";
+import { revealWorkspaceTab } from "@/workspace-tabs/navigation";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, usePathname } from "expo-router";
 import { useEffect, useSyncExternalStore } from "react";
@@ -33,13 +35,21 @@ const lastWorkspaceSelectionStore = createLastWorkspaceSelectionStore(
 
 function navigateDeps(): NavigateToWorkspaceDeps {
   return {
+    revealWorkspace: (workspaceKey) => {
+      useWorkspaceLayoutStore.getState().focusWorkspace(workspaceKey);
+    },
     getSessionWorkspaces: (serverId) => useSessionStore.getState().sessions[serverId]?.workspaces,
     getSessionAgents: (serverId) =>
       useSessionStore.getState().sessions[serverId]?.agents.values() ?? [],
     openTabFocused: (workspaceKey, target) =>
-      useWorkspaceLayoutStore.getState().openTabFocused(workspaceKey, target),
+      revealWorkspaceTab(
+        workspaceKey,
+        useWorkspaceLayoutStore.getState().openTabFocused(workspaceKey, target),
+      ),
     pinAgent: (workspaceKey, agentId) =>
       useWorkspaceLayoutStore.getState().pinAgent(workspaceKey, agentId),
+    isWorkspaceLayoutHydrated: () => useWorkspaceLayoutStore.persist.hasHydrated(),
+    deferOpenTab: (input) => useWorkspaceLayoutStore.getState().deferOpenTab(input),
     rememberLastWorkspace: (selection) => lastWorkspaceSelectionStore.remember(selection),
     navigateToRoute: (route) => {
       navigateToHostWorkspaceRoute(route);
@@ -61,7 +71,9 @@ export function getIsLastWorkspaceSelectionHydrated(): boolean {
 }
 
 export function navigateToWorkspace(input: NavigateToWorkspaceInput): string {
-  return navigateToWorkspacePure(input, navigateDeps());
+  const route = navigateToWorkspacePure(input, navigateDeps());
+  if (input.surface === "sidebar") usePanelStore.getState().showMobileAgentList();
+  return route;
 }
 
 export function navigateToLastWorkspace(): boolean {

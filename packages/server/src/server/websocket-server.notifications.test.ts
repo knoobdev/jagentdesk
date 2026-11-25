@@ -1,3 +1,8 @@
+import type { DatabaseRegistry } from "./database/database-registry.js";
+import type { FileBackedChatService } from "./chat/chat-service.js";
+import type { LoopService } from "./loop-service.js";
+import type { ClusterRegistry } from "./cluster/cluster-registry.js";
+import { createWorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Server as HTTPServer } from "http";
 import type pino from "pino";
@@ -116,6 +121,7 @@ function createServer(agentManagerOverrides?: Record<string, unknown>) {
     null,
     { allowedOrigins: new Set() },
     createWorkspaceAutoNameStub(),
+    createWorkspaceRuntimeStore(),
     undefined,
     undefined,
     undefined,
@@ -124,6 +130,9 @@ function createServer(agentManagerOverrides?: Record<string, unknown>) {
     undefined,
     undefined,
     undefined,
+    createStub<FileBackedChatService>({}),
+    createStub<LoopService>({}),
+    createStub<ClusterRegistry>({}),
     createStub<ScheduleService>({}),
     createStub<CheckoutDiffManager>({
       subscribe: vi.fn(),
@@ -146,6 +155,13 @@ function createServer(agentManagerOverrides?: Record<string, unknown>) {
     undefined,
     pushNotifications,
     createProviderSnapshotManagerStub().manager,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    createStub<DatabaseRegistry>({}),
   );
 
   return { server, agentManager, pushNotifications };
@@ -176,6 +192,7 @@ function createSessionWithActivity(
     supports: () => false,
     supportsForSource: () => false,
     subscribesToAgent: vi.fn(async () => subscribed),
+    wantsEvent: () => subscribed,
   };
 }
 
@@ -237,13 +254,14 @@ describe("VoiceAssistantWebSocketServer notification payloads", () => {
       agentId: "agent-1",
       provider: "claude",
       reason: "finished",
+      attentionTimestamp: new Date(),
     });
 
     expect(unsubscribed.send).not.toHaveBeenCalled();
     expect(pushNotifications.sent).toHaveLength(1);
   });
 
-  it("uses assistant preview text for push notifications with markdown removed", async () => {
+  it("keeps assistant preview text out of push notifications", async () => {
     const getLastAssistantMessage = vi.fn(
       async () => "**Done**. Updated `README.md` and [link](https://example.com).",
     );
@@ -261,12 +279,13 @@ describe("VoiceAssistantWebSocketServer notification payloads", () => {
       agentId: "agent-1",
       provider: "claude",
       reason: "finished",
+      attentionTimestamp: new Date(),
     });
 
     expect(pushNotifications.sent).toEqual([
       {
         title: "Agent finished",
-        body: "Done. Updated README.md and link.",
+        body: "Finished working.",
         data: {
           serverId: "srv-test",
           workspaceId: WORKSPACE_ID,
@@ -275,7 +294,7 @@ describe("VoiceAssistantWebSocketServer notification payloads", () => {
         },
       },
     ]);
-    expect(getLastAssistantMessage).toHaveBeenCalledWith("agent-1");
+    expect(getLastAssistantMessage).not.toHaveBeenCalled();
   });
 
   it("sends push notifications regardless of UI label presence", async () => {
@@ -295,10 +314,11 @@ describe("VoiceAssistantWebSocketServer notification payloads", () => {
       agentId: "agent-2",
       provider: "claude",
       reason: "finished",
+      attentionTimestamp: new Date(),
     });
 
     expect(pushNotifications.sent).toHaveLength(1);
-    expect(getLastAssistantMessage).toHaveBeenCalledWith("agent-2");
+    expect(getLastAssistantMessage).not.toHaveBeenCalled();
   });
 
   it("routes a hidden stale focused browser tab's notification to the present Electron web client", async () => {
@@ -321,6 +341,7 @@ describe("VoiceAssistantWebSocketServer notification payloads", () => {
       agentId: "agent-X",
       provider: "claude",
       reason: "finished",
+      attentionTimestamp: new Date(),
     });
 
     expect(readAttentionRequiredMessage(electronWs).shouldNotify).toBe(true);
@@ -336,6 +357,7 @@ describe("VoiceAssistantWebSocketServer notification payloads", () => {
       agentId: "agent-no-heartbeat",
       provider: "claude",
       reason: "finished",
+      attentionTimestamp: new Date(),
     });
 
     expect(readAttentionRequiredMessage(ws).shouldNotify).toBe(false);
@@ -350,9 +372,60 @@ describe("VoiceAssistantWebSocketServer notification payloads", () => {
       agentId: "agent-no-heartbeat",
       provider: "claude",
       reason: "error",
+      attentionTimestamp: new Date(),
     });
 
     expect(readAttentionRequiredMessage(ws).shouldNotify).toBe(false);
     expect(pushNotifications.sent).toEqual([]);
+  });
+  it("notifies once while an agent's finish stays unread", async () => {
+    const { server, pushNotifications } = createServer();
+    const broadcast = (attentionTimestamp: Date) =>
+      asInternals<WebSocketServerInternals>(server).broadcastAgentAttention({
+        agentId: "agent-1",
+        provider: "claude",
+        reason: "finished",
+        attentionTimestamp,
+      });
+    const firstUnreadFinish = new Date(1_000);
+
+    await broadcast(firstUnreadFinish);
+    await broadcast(firstUnreadFinish);
+    await broadcast(firstUnreadFinish);
+    expect(pushNotifications.sent).toHaveLength(1);
+
+    // After the user reads the agent (or marks it unread), its next unread finish is new.
+    await broadcast(new Date(2_000));
+    expect(pushNotifications.sent).toHaveLength(2);
+  });
+
+  it("notifies a repeated finish when the user had the agent on screen for the first one", async () => {
+    const { server, pushNotifications } = createServer();
+    const activity = {
+      deviceType: "web" as const,
+      appVisible: true,
+      focusedAgentId: "agent-1" as string | null,
+      lastActivityAt: new Date(),
+    };
+    connectClient(server, activity);
+    const unreadFinish = new Date(1_000);
+    const broadcast = () =>
+      asInternals<WebSocketServerInternals>(server).broadcastAgentAttention({
+        agentId: "agent-1",
+        provider: "claude",
+        reason: "finished",
+        attentionTimestamp: unreadFinish,
+      });
+
+    await broadcast();
+    expect(pushNotifications.sent).toEqual([]);
+
+    // The user leaves; the agent keeps finishing turns it starts on its own.
+    activity.appVisible = false;
+    activity.focusedAgentId = null;
+    activity.lastActivityAt = new Date(Date.now() - 600_000);
+    await broadcast();
+    await broadcast();
+    expect(pushNotifications.sent).toHaveLength(1);
   });
 });

@@ -1,64 +1,89 @@
+import { OpenCodeBackgroundInventory } from "./background-inventory.js";
 import { SessionChildren } from "./children.js";
 import { SessionTurns } from "./turns.js";
 import { V2Timeline } from "./timeline.js";
 import { waitForLocationReady, awaitJAgentDeskPlugin } from "./readiness.js";
-
-import type { SessionInfo, SessionMessageInfo } from "@opencode/client";
-
+import { type SessionInfo, type SessionMessageInfo } from "@opencode/client";
 import { setTimeout as delay } from "node:timers/promises";
-import type { Logger } from "pino";
-import type {
-  AgentMode,
-  AgentPermissionResponse,
-  AgentPersistenceHandle,
-  AgentPromptInput,
-  AgentRunOptions,
-  AgentSession,
-  AgentSessionConfig,
-  AgentStreamEvent,
-  SteerActiveTurnOptions,
-  SteerResult,
+import { type Logger } from "pino";
+import {
+  type AgentMode,
+  type AgentPermissionResponse,
+  type AgentPersistenceHandle,
+  type AgentPromptInput,
+  type AgentRunOptions,
+  type AgentSession,
+  type AgentSessionConfig,
+  type AgentStreamEvent,
+  type SteerActiveTurnOptions,
+  type SteerResult,
 } from "../../../agent-sdk-types.js";
-
 import { toDiagnosticErrorMessage } from "../../diagnostic-utils.js";
-
 import { runProviderTurn } from "../../provider-runner.js";
-
 import { composeSystemPromptParts } from "../../../system-prompt.js";
 import { raceProviderRefreshAbort } from "../../../provider-refresh-deadline.js";
-
 import { type V2Connection } from "./runtime.js";
 import { modelRef, modesFromV2 } from "./mapping.js";
-
 import { V2_CAPABILITIES } from "./capabilities.js";
-import { features } from "./configuration.js";
+import { controls } from "./configuration.js";
 import { commands } from "./commands.js";
 import { messages } from "./history.js";
 import { SessionPermissions } from "./permissions.js";
 import { SessionUsage } from "./usage.js";
 import { attachMcpServers } from "./mcp-attach.js";
+import { createSessionMetricsReporter } from "../../metrics.js";
+import { replayedTurnMetrics, sessionMetrics } from "./metrics.js";
+import { type ProviderOptions } from "@jagentdesk/protocol/agent-types";
+import { applyProviderOptionsPatch } from "../../../option-controls.js";
+import { assertChangesAreLive, validateProviderOptions } from "../../../provider-options.js";
+import { OpenCodeProviderOptionsSchema } from "../options.js";
 
 export class OpenCodeV2Session implements AgentSession {
   readonly provider = "opencode";
+
   readonly capabilities = V2_CAPABILITIES;
+
   private readonly listeners = new Set<(event: AgentStreamEvent) => void>();
+
   private readonly timeline = new V2Timeline();
+
   private readonly abort = new AbortController();
+
   private readonly permissions: SessionPermissions;
+
   private readonly turns: SessionTurns;
+
   private readonly children: SessionChildren;
+
   private readonly usage: SessionUsage;
+
   private stream: Promise<void> | null = null;
+
   private streamAbort = new AbortController();
+
   private exited = false;
+
   private reconnecting: Promise<void> | null = null;
+
   private launchEnv: Record<string, string> | undefined;
+
   private sync: Promise<void> = Promise.resolve();
+
   private dirty = false;
+
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
   private closed = false;
+
   private history: SessionMessageInfo[] = [];
+
+  private readonly background: OpenCodeBackgroundInventory;
+
   private modes: AgentMode[] = [];
+  // Reconciliation runs after nearly every event; report only what changed.
+  private readonly reportSessionMetrics = createSessionMetricsReporter((metrics) =>
+    this.emit({ type: "session_metrics_updated", provider: "opencode", metrics }),
+  );
   constructor(
     private connection: V2Connection,
     private info: SessionInfo,
@@ -70,7 +95,18 @@ export class OpenCodeV2Session implements AgentSession {
     bindChild?: (id: string) => void,
     private readonly acquire?: () => Promise<V2Connection>,
     private readonly moved?: (connection: V2Connection) => void,
+    private readonly historyOnly = false,
   ) {
+    this.background = new OpenCodeBackgroundInventory({
+      id: info.id,
+      cwd: config.cwd,
+      emit: (event) => this.emit(event),
+      report: (error) =>
+        this.logger.warn(
+          { error: toDiagnosticErrorMessage(error) },
+          "OpenCode background inventory failed",
+        ),
+    });
     this.permissions = new SessionPermissions(
       () => this.client,
       info.id,
@@ -101,7 +137,11 @@ export class OpenCodeV2Session implements AgentSession {
         ),
       clearPermissions: async () => {
         for (const request of this.permissions.list())
-          await this.permissions.respondToPermission(request.id, { behavior: "deny" });
+          await this.permissions.respondToPermission(request.id, {
+            behavior: "deny",
+            message:
+              "The user answered with a message instead of approving. Their message follows.",
+          });
       },
     });
     this.usage = new SessionUsage({
@@ -116,15 +156,19 @@ export class OpenCodeV2Session implements AgentSession {
         ),
     });
   }
+
   get id() {
     return this.info.id;
   }
-  get features() {
-    return features(this.config);
+
+  get controls() {
+    return controls;
   }
+
   private get client() {
     return this.connection.client;
   }
+
   async initialize(environment?: Record<string, string>) {
     // OpenCode replaces the whole local shell environment, rather than overlaying it.
     this.launchEnv = environment;
@@ -132,43 +176,57 @@ export class OpenCodeV2Session implements AgentSession {
     await this.configureConnection();
     const location = { directory: this.config.cwd };
     this.modes = modesFromV2((await this.client.agent.list({ location })).data);
-    this.timeline.messages(await messages(this.client, this.id));
+    await this.timeline.messages(await messages(this.client, this.id), () => {});
     await this.startStream();
     await this.children.reconcile(this.id);
   }
+
   private watchExit(connection: V2Connection) {
     void connection.exited.then((error) => {
       if (this.closed || this.connection !== connection) return undefined;
       this.exited = true;
+      this.background.disconnect(true);
       this.streamAbort.abort(error);
       this.turns.fail(error);
       return undefined;
     });
   }
+
   private async configureConnection() {
     const location = { directory: this.config.cwd };
+    await this.connection.bindSession(this.id, this.config.cwd);
     await waitForLocationReady({ client: this.client, location, signal: this.abort.signal });
     if (this.requiresJAgentDeskPlugin)
       await awaitJAgentDeskPlugin({ client: this.client, location, signal: this.abort.signal });
     await attachMcpServers({
       client: this.client,
-      sessionID: this.id,
       location,
       mcpServers: this.config.mcpServers,
       signal: this.abort.signal,
-      logger: this.logger,
     });
+    if (this.historyOnly) return;
     const system = composeSystemPromptParts(
       this.config.systemPrompt,
       this.config.daemonAppendSystemPrompt,
+      ...(this.config.pluginAppendSystemPrompt ?? []),
     );
-    if (system)
+    if (system) {
       await this.client.session.instructions.entry.put({
         sessionID: this.id,
         key: "jagentdesk",
         value: system,
       });
+    } else {
+      const entries = await this.client.session.instructions.entry.list({ sessionID: this.id });
+      if (entries.some((entry) => entry.key === "jagentdesk")) {
+        await this.client.session.instructions.entry.remove({
+          sessionID: this.id,
+          key: "jagentdesk",
+        });
+      }
+    }
   }
+
   private async startStream() {
     let ready!: () => void;
     let fail!: (error: unknown) => void;
@@ -182,6 +240,7 @@ export class OpenCodeV2Session implements AgentSession {
       first,
     );
   }
+
   private async reconnectIfExited() {
     if (this.closed) throw new Error("OpenCode session is closed");
     if (!this.exited) return;
@@ -190,10 +249,16 @@ export class OpenCodeV2Session implements AgentSession {
     });
     await this.reconnecting;
   }
+
   private async reconnect() {
     if (!this.acquire) throw new Error("OpenCode helper server exited");
     await this.stream;
     await this.sync.catch(() => undefined);
+    await this.connection
+      .unbindSession(this.id, this.config.cwd)
+      .catch((error: unknown) =>
+        this.logger.warn({ error }, "Could not unbind the OpenCode JAgentDesk bridge"),
+      );
     const next = await this.acquire();
     if (this.closed) {
       await next.release();
@@ -217,23 +282,58 @@ export class OpenCodeV2Session implements AgentSession {
     this.moved?.(next);
     await old.release();
   }
+
   subscribe(callback: (event: AgentStreamEvent) => void) {
     this.listeners.add(callback);
+    const background = this.background.snapshot();
+    if (background) callback(background);
+    // Reopening can adopt an execution during initialization, before its caller
+    // can subscribe. Deliver that live turn so it remains visible and interruptible.
+    if (this.turns.id)
+      callback({ type: "turn_started", provider: "opencode", turnId: this.turns.id });
     return () => {
       this.listeners.delete(callback);
     };
   }
+
   private emit(event: AgentStreamEvent) {
     for (const listener of this.listeners) listener(event);
   }
+
   private emitTimeline(event: AgentStreamEvent) {
     this.emit({ ...event, ...(this.turns.id ? { turnId: this.turns.id } : {}) });
   }
+
   async *streamHistory() {
     await this.reconnectIfExited();
     const history = new V2Timeline(false);
-    yield* history.messages(await messages(this.client, this.id));
+    const events: AgentStreamEvent[] = [];
+    const [info, list] = await Promise.all([
+      // Session totals are extra; history replays without them.
+      this.client.session.get({ sessionID: this.id }).catch((error: unknown) => {
+        this.logger.debug({ err: error }, "OpenCode session info unavailable for history");
+        return null;
+      }),
+      messages(this.client, this.id),
+    ]);
+    const turnMetrics = replayedTurnMetrics(list);
+    await history.messages(
+      list,
+      (event) => {
+        events.push(event);
+      },
+      (message) => {
+        const metrics = turnMetrics.get(message.id);
+        if (metrics) events.push({ type: "turn_completed", provider: "opencode", metrics });
+      },
+    );
+    const metrics = info ? sessionMetrics(info, list) : [];
+    if (metrics.length > 0) {
+      events.push({ type: "session_metrics_updated", provider: "opencode", metrics });
+    }
+    yield* events;
   }
+
   async getRuntimeInfo() {
     await this.reconnectIfExited();
     this.info = await this.client.session.get({ sessionID: this.id });
@@ -245,12 +345,15 @@ export class OpenCodeV2Session implements AgentSession {
       thinkingOptionId: this.info.model?.variant ?? null,
     };
   }
+
   async getAvailableModes() {
     return this.modes;
   }
+
   async getCurrentMode() {
     return this.info.agent ?? null;
   }
+
   async setMode(modeId: string) {
     await this.reconnectIfExited();
     await this.client.session.switchAgent({ sessionID: this.id, agent: modeId });
@@ -263,6 +366,7 @@ export class OpenCodeV2Session implements AgentSession {
       availableModes: this.modes,
     });
   }
+
   async setModel(model: string | null) {
     await this.reconnectIfExited();
     const location = { directory: this.config.cwd };
@@ -305,6 +409,7 @@ export class OpenCodeV2Session implements AgentSession {
         thinkingOptionId: variant ?? null,
       },
     });
+    return { model: `${selected.providerID}/${selected.id}` };
   }
 
   async setThinkingOption(variant: string | null) {
@@ -319,19 +424,41 @@ export class OpenCodeV2Session implements AgentSession {
     this.info = await this.client.session.get({ sessionID: this.id });
     this.emit({ type: "thinking_option_changed", provider: "opencode", thinkingOptionId: variant });
   }
-  async setFeature(id: string, value: unknown) {
-    if (id !== "auto_accept" || typeof value !== "boolean")
-      throw new Error("Unknown OpenCode feature");
-    this.config.featureValues = { ...this.config.featureValues, [id]: value };
-    if (value && !this.config.toolPolicy)
-      for (const request of this.permissions.list())
-        if (request.kind !== "question")
-          await this.respondToPermission(request.id, { behavior: "allow" });
+
+  /** The agent manager sends one apply at a time, so a failed one restores exactly what it changed. */
+  async applyOptions(options: ProviderOptions): Promise<void> {
+    assertChangesAreLive({
+      provider: "opencode",
+      patch: options,
+      current: this.config.providerOptions,
+      live: ["auto_accept"],
+    });
+    const next = validateProviderOptions(
+      "opencode",
+      OpenCodeProviderOptionsSchema,
+      applyProviderOptionsPatch({ options: this.config.providerOptions, patch: options }),
+    );
+    if (!("auto_accept" in options)) return;
+    const value = next?.auto_accept === true;
+    const previous = this.config.providerOptions;
+    this.config.providerOptions = { ...previous, auto_accept: value };
+    try {
+      if (value && !this.config.toolPolicy)
+        for (const request of this.permissions.list())
+          if (request.kind !== "question")
+            await this.respondToPermission(request.id, { behavior: "allow" });
+    } catch (error) {
+      // A rejected apply stores nothing, so the running session keeps asking as it did.
+      this.config.providerOptions = previous;
+      throw error;
+    }
   }
+
   async listCommands() {
     await this.reconnectIfExited();
     return commands(this.client, this.config.cwd);
   }
+
   describePersistence(): AgentPersistenceHandle {
     return {
       provider: "opencode",
@@ -340,6 +467,7 @@ export class OpenCodeV2Session implements AgentSession {
       metadata: { ...this.config },
     };
   }
+
   run(prompt: AgentPromptInput, options?: AgentRunOptions) {
     return runProviderTurn({
       prompt,
@@ -351,16 +479,25 @@ export class OpenCodeV2Session implements AgentSession {
         item.type === "assistant_message" ? current + item.text : current,
     });
   }
+
   async startTurn(prompt: AgentPromptInput, options?: AgentRunOptions) {
     await this.reconnectIfExited();
+    await this.connection.bindSession(this.id, this.config.cwd);
     return this.turns.startTurn(prompt, options);
   }
+
   steerActiveTurn(prompt: AgentPromptInput, options: SteerActiveTurnOptions): Promise<SteerResult> {
     return this.turns.steerActiveTurn(prompt, options);
   }
+
+  stopBackgroundWork(id: string) {
+    return this.background.stopItem(id);
+  }
+
   interrupt() {
     return this.turns.interrupt();
   }
+
   async revertBoth(input: { messageId: string }) {
     await this.interrupt();
     await this.reconnectIfExited();
@@ -371,13 +508,19 @@ export class OpenCodeV2Session implements AgentSession {
     });
     await this.client.session.revert.commit({ sessionID: this.id });
   }
+
   getPendingPermissions() {
     return [...this.permissions.list()];
   }
+
   async respondToPermission(requestId: string, response: AgentPermissionResponse) {
     await this.reconnectIfExited();
+    const deniesOwnRequest =
+      response.behavior === "deny" && this.permissions.isOwnedBy(requestId, this.id);
     await this.permissions.respondToPermission(requestId, response);
+    if (deniesOwnRequest) this.turns.requestDenied();
   }
+
   private async reconcileSnapshot() {
     const [info, history] = await Promise.all([
       this.client.session.get({ sessionID: this.id }),
@@ -385,21 +528,26 @@ export class OpenCodeV2Session implements AgentSession {
     ]);
     this.info = info;
     this.history = history;
-    for (const event of this.timeline.messages(history)) this.emitTimeline(event);
+    await this.timeline.messages(history, (event) => this.emitTimeline(event));
+    this.reportSessionMetrics(sessionMetrics(this.info, this.history));
     await this.permissions.reconcile(this.id);
   }
+
   private async reconcile() {
     this.dirty = true;
     this.sync = this.sync.catch(() => undefined).then(() => this.drainReconciliation());
     return this.sync;
   }
+
   private async drainReconciliation() {
     while (this.dirty && !this.closed) {
       this.dirty = false;
       await this.reconcileSnapshot();
     }
   }
+
   private async reconcileConnection() {
+    await this.connection.bindSession(this.id, this.config.cwd);
     // Session environments are process-local. Reapply this agent's snapshot before
     // reconciling a new connection, including event-stream reconnections.
     if (this.launchEnv)
@@ -408,6 +556,7 @@ export class OpenCodeV2Session implements AgentSession {
     await this.children.reconcile(this.id);
     await this.turns.reconcile();
   }
+
   private scheduleReconcile() {
     if (this.refreshTimer || this.closed) return;
     this.refreshTimer = setTimeout(() => {
@@ -420,6 +569,7 @@ export class OpenCodeV2Session implements AgentSession {
       );
     }, 25);
   }
+
   private observeOwnEvent(event: import("@opencode/client").OpenCodeEvent) {
     if (event.type === "form.created" && event.data.form.sessionID === this.id) {
       this.scheduleReconcile();
@@ -453,6 +603,7 @@ export class OpenCodeV2Session implements AgentSession {
     this.turns.observe(event);
     this.scheduleReconcile();
   }
+
   private async consume(ready: () => void, fail: (error: unknown) => void) {
     const signal = AbortSignal.any([this.abort.signal, this.streamAbort.signal]);
     let connected = false;
@@ -463,9 +614,12 @@ export class OpenCodeV2Session implements AgentSession {
           if (event.type === "server.connected") {
             this.timeline.resetStreams();
             await this.reconcileConnection();
+            signal.throwIfAborted();
+            this.background.start(this.client);
             connected = true;
             ready();
           }
+          this.background.observe(event);
           await this.children.observe(event);
           this.observeOwnEvent(event);
         }
@@ -481,9 +635,41 @@ export class OpenCodeV2Session implements AgentSession {
           "OpenCode event stream interrupted; reconciling on reconnect",
         );
       }
+      this.background.disconnect();
       await delay(100, undefined, { signal }).catch(() => undefined);
     }
   }
+
+  async canStopRuntime(): Promise<boolean> {
+    if (this.closed || this.exited || this.reconnecting || this.turns.id || this.dirty)
+      return false;
+    const request = { signal: AbortSignal.timeout(10_000) };
+    // Active executions are server-wide. Releasing the last lease must not stop an
+    // autonomous execution merely because it belongs to another session or location.
+    if (Object.keys(await this.client.session.active(request)).length > 0) return false;
+    const family = new Map([[this.info.id, this.info]]);
+    const directories = new Set<string>();
+    for (const info of family.values()) {
+      if ((await this.client.session.inbox.list({ sessionID: info.id }, request)).length)
+        return false;
+      directories.add(info.location.directory);
+      let cursor: string | undefined;
+      do {
+        const page = await this.client.session.list(
+          { ...(cursor ? { cursor } : { parentID: info.id }), limit: 100 },
+          request,
+        );
+        for (const child of page.data) family.set(child.id, child);
+        cursor = page.cursor.next ?? undefined;
+      } while (cursor);
+    }
+    for (const directory of directories) {
+      const shells = await this.client.shell.list({ location: { directory } }, request);
+      if (shells.data.some((shell) => shell.status === "running")) return false;
+    }
+    return !this.turns.id && !this.dirty;
+  }
+
   async close() {
     if (this.closed) return;
     this.closed = true;
@@ -491,9 +677,15 @@ export class OpenCodeV2Session implements AgentSession {
     this.turns.close();
     this.streamAbort.abort();
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    this.background.disconnect();
     await this.stream;
     await this.reconnecting?.catch(() => undefined);
     await this.sync.catch(() => undefined);
+    await this.connection
+      .unbindSession(this.id, this.config.cwd)
+      .catch((error: unknown) =>
+        this.logger.warn({ error }, "Could not unbind the OpenCode JAgentDesk bridge"),
+      );
     this.unbind?.();
     try {
       if (!this.persist) await this.client.session.remove({ sessionID: this.id });

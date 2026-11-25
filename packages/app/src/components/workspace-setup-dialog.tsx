@@ -1,3 +1,4 @@
+import { draftCreationKey } from "@/composer/draft/creation-key";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Image, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
@@ -20,15 +21,15 @@ import {
   resolveComposerAttachmentSubmitFormat,
   splitComposerAttachmentsForSubmit,
 } from "@/composer/attachments/submit";
-import type {
-  CreateAgentRequestOptions,
-  DaemonClient,
+import {
+  type CreateAgentRequestOptions,
+  type DaemonClient,
 } from "@jagentdesk/client/internal/daemon-client";
 import { projectIconPlaceholderLabelFromDisplayName } from "@/utils/project-display-name";
 import { requireWorkspaceDirectory } from "@/utils/workspace-directory";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
-import type { MessagePayload } from "@/composer/types";
+import { type MessagePayload } from "@/composer/types";
 
 function toProjectIconDataUri(icon: { mimeType: string; data: string } | null): string | null {
   if (!icon) {
@@ -84,21 +85,24 @@ function buildChatDraftComposerArgs({
 
 async function callWorkspaceCreation({
   creationMethod,
+  creationIdentity,
   connectedClient,
   input,
 }: {
   creationMethod: "create_worktree" | "open_project";
+  creationIdentity: { draftId: string; worktreeSlug: string };
   connectedClient: DaemonClient;
   input: { cwd: string };
 }) {
-  if (creationMethod === "create_worktree") {
-    return connectedClient.createJAgentDeskWorktree({
-      cwd: input.cwd,
-      worktreeSlug: createNameId(),
-    });
-  }
+  const request = {
+    source:
+      creationMethod === "create_worktree"
+        ? { kind: "worktree" as const, cwd: input.cwd, worktreeSlug: creationIdentity.worktreeSlug }
+        : { kind: "directory" as const, path: input.cwd },
+  };
   return connectedClient.createWorkspace({
-    source: { kind: "directory", path: input.cwd },
+    ...request,
+    idempotencyKey: draftCreationKey(creationIdentity.draftId, request),
   });
 }
 
@@ -121,8 +125,7 @@ function buildCreateAgentOptions({
   provider,
 }: {
   composerState: {
-    modeOptions: { id: string }[];
-    selectedMode: string;
+    effectiveModeId: string;
     effectiveModelId: string | null;
     effectiveThinkingOptionId: string | null;
   };
@@ -133,20 +136,11 @@ function buildCreateAgentOptions({
   workspaceId: string;
   provider: CreateAgentRequestOptions["provider"];
 }): CreateAgentRequestOptions {
-  // Reconcile the selected mode against the discovered modes. The mode picker
-  // shows modeOptions[0] when the stored mode isn't in the list (e.g. a stale
-  // globally-remembered mode this workspace's provider config no longer
-  // defines), so the submitted mode must match that display rather than send a
-  // stale mode the provider would reject.
-  const modeOptionIds = composerState.modeOptions.map((mode) => mode.id);
-  const reconciledMode = modeOptionIds.includes(composerState.selectedMode)
-    ? composerState.selectedMode
-    : (modeOptionIds[0] ?? "");
   return {
     provider,
     cwd: workspaceDirectory,
     workspaceId,
-    ...(reconciledMode !== "" ? { modeId: reconciledMode } : {}),
+    ...(composerState.effectiveModeId ? { modeId: composerState.effectiveModeId } : {}),
     ...(composerState.effectiveModelId ? { model: composerState.effectiveModelId } : {}),
     ...(composerState.effectiveThinkingOptionId
       ? { thinkingOptionId: composerState.effectiveThinkingOptionId }
@@ -162,9 +156,16 @@ export function WorkspaceSetupDialog() {
   const toast = useToast();
   const pendingWorkspaceSetup = useWorkspaceSetupStore((state) => state.pendingWorkspaceSetup);
   const clearWorkspaceSetup = useWorkspaceSetupStore((state) => state.clearWorkspaceSetup);
-  const mergeWorkspaces = useSessionStore((state) => state.mergeWorkspaces);
+  const mergeWorkspaces = useSessionStore((state) => state.seedWorkspaces);
   const setHasHydratedWorkspaces = useSessionStore((state) => state.setHasHydratedWorkspaces);
   const setAgents = useSessionStore((state) => state.setAgents);
+  const creationIdentity = useMemo(
+    () => ({
+      draftId: `${pendingWorkspaceSetup?.serverId ?? "workspace"}:${createNameId()}`,
+      worktreeSlug: createNameId(),
+    }),
+    [pendingWorkspaceSetup],
+  );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [createdWorkspace, setCreatedWorkspace] = useState<ReturnType<
     typeof normalizeWorkspaceDescriptor
@@ -258,6 +259,7 @@ export function WorkspaceSetupDialog() {
       const connectedClient = withConnectedClient();
       const payload = await callWorkspaceCreation({
         creationMethod: pendingWorkspaceSetup.creationMethod,
+        creationIdentity,
         connectedClient,
         input,
       });
@@ -277,6 +279,7 @@ export function WorkspaceSetupDialog() {
       return normalizedWorkspace;
     },
     [
+      creationIdentity,
       createdWorkspace,
       mergeWorkspaces,
       pendingWorkspaceSetup,
@@ -354,7 +357,7 @@ export function WorkspaceSetupDialog() {
       } catch (error) {
         const message = toErrorMessage(error);
         setErrorMessage(message);
-        toast.error(message);
+        if (!getIsStillActive()) toast.error(message);
       } finally {
         if (getIsStillActive()) {
           setPendingAction(null);
@@ -436,20 +439,20 @@ export function WorkspaceSetupDialog() {
           onSubmitMessage={handleCreateChatAgent}
           isSubmitLoading={pendingAction === "chat"}
           blurOnSubmit={true}
-          value={chatDraft.text}
-          onChangeText={chatDraft.setText}
+          textSource={chatDraft.textSource}
+          textReplacement={chatDraft.textReplacement}
+          onChangeText={chatDraft.editText}
           attachments={chatDraft.attachments}
           onChangeAttachments={chatDraft.setAttachments}
           cwd={sourceDirectory}
           clearDraft={chatDraft.clear}
           autoFocus
-          commandDraftConfig={composerState?.commandDraftConfig}
+          commandDraft={composerState?.commandDraft}
           agentControls={agentControlsWithDisabled}
+          error={errorMessage}
           inputWrapperStyle={styles.composerInputWrapper}
         />
       </FileDropZone>
-
-      {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
     </AdaptiveModalSheet>
   );
 }
@@ -486,11 +489,6 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[3],
     marginHorizontal: -theme.spacing[6],
     marginVertical: -theme.spacing[2],
-  },
-  errorText: {
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.destructive,
-    lineHeight: 20,
   },
   composerInputWrapper: {
     backgroundColor: theme.colors.surface2,

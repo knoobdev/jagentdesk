@@ -1,7 +1,9 @@
-import type { PluginAgentSnapshot, PluginWorkspaceSnapshot } from "@jagentdesk/plugin";
-import type { Agent, WorkspaceDescriptor } from "@/stores/session-store";
+import { type PluginAgentSnapshot, type PluginWorkspaceSnapshot } from "@jagentdesk/plugin";
+import { type Agent, type WorkspaceDescriptor } from "@/stores/session-store";
+import { cloneAndFreeze } from "../freeze";
 
 const workspaceSnapshots = new WeakMap<WorkspaceDescriptor, PluginWorkspaceSnapshot>();
+
 const agentSnapshots = new WeakMap<Agent, Map<string, PluginAgentSnapshot>>();
 
 export function createPluginWorkspaceSnapshot(
@@ -37,6 +39,8 @@ export function createPluginAgentSnapshot(agent: Agent, workspaceId: string): Pl
     workspaceId,
     provider: agent.provider,
     status: agent.status,
+    backgroundWork: Object.freeze({ count: agent.backgroundWork?.count ?? 0 }),
+    background: agent.background ?? false,
     createdAt: agent.createdAt.toISOString(),
     updatedAt: agent.updatedAt.toISOString(),
     lastActivityAt: agent.lastActivityAt.toISOString(),
@@ -49,6 +53,7 @@ export function createPluginAgentSnapshot(agent: Agent, workspaceId: string): Pl
     attentionReason: agent.attentionReason ?? null,
     parentAgentId: agent.parentAgentId,
     labels: Object.freeze({ ...agent.labels }),
+    metadata: cloneAndFreeze(agent.metadata ?? {}),
   });
   const byWorkspace = agentSnapshots.get(agent) ?? new Map<string, PluginAgentSnapshot>();
   byWorkspace.set(workspaceId, snapshot);

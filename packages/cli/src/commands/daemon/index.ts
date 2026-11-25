@@ -28,10 +28,12 @@ export function createDaemonCommand(): Command {
     .option("--home <path>", "JAgentDesk home directory (default: ~/.jagentdesk)")
     .option("--timeout <seconds>", "Wait timeout before failing (default: 15)")
     .option("--force", "Send SIGKILL if graceful stop times out")
+    .option("--keep-terminals", "Leave terminals running for the next daemon")
     .option("--kill-timeout <seconds>", "Wait after SIGKILL before failing (default: 3)")
     .action(withOutput(runStopCommand));
 
   addJsonOption(daemon.command("restart").description("Restart the local daemon"))
+    .option("--kill-terminals", "Close terminals during restart")
     .option("--home <path>", "JAgentDesk home directory (default: ~/.jagentdesk)")
     .option("--timeout <seconds>", "Wait timeout before force step (default: 15)")
     .option("--force", "Send SIGKILL if graceful stop times out")

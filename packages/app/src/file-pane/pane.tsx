@@ -1,3 +1,6 @@
+import { Download } from "lucide-react-native";
+import { useFileDownload } from "@/hooks/use-file-download";
+import { RetainedFileView, useTextFileView } from "@/file-panels/source/panel";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import React, {
@@ -12,7 +15,7 @@ import type { DaemonClient, FileReadResult } from "@jagentdesk/client/internal/d
 import { ScrollView as RNScrollView, Text, View } from "react-native";
 import { StyleSheet, UnistylesRuntime, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
-import { MarkdownRenderer } from "@/components/markdown/renderer";
+import { FileMarkdownPreview } from "./markdown-preview";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { isWeb } from "@/constants/platform";
 import { useSessionStore, type ExplorerFile } from "@/stores/session-store";
@@ -58,6 +61,7 @@ interface CodeLineProps {
 }
 
 interface FilePreviewBodyProps {
+  onDownload: () => void;
   preview: ExplorerFile | null;
   mode?: "preview" | "source";
   isLoading: boolean;
@@ -65,6 +69,9 @@ interface FilePreviewBodyProps {
   location: WorkspaceFileLocation;
   navigationRevision: number;
   imagePreviewUri: string | null;
+  workspaceRoot: string;
+  client: DaemonClient | null;
+  serverId: string;
 }
 
 function trimNonEmpty(value: string | null | undefined): string | null {
@@ -215,6 +222,10 @@ function FilePreviewBody({
   location,
   navigationRevision,
   imagePreviewUri,
+  onDownload,
+  workspaceRoot,
+  client,
+  serverId,
 }: FilePreviewBodyProps) {
   const theme = UnistylesRuntime.getTheme();
   const { t } = useTranslation();
@@ -301,7 +312,13 @@ function FilePreviewBody({
             contentContainerStyle={styles.previewMarkdownScrollContent}
             showsVerticalScrollIndicator
           >
-            <MarkdownRenderer text={preview.content ?? ""} />
+            <FileMarkdownPreview
+              source={preview.content ?? ""}
+              filePath={filePath}
+              workspaceRoot={workspaceRoot}
+              client={client}
+              serverId={serverId}
+            />
           </RNScrollView>
         </View>
       );
@@ -372,17 +389,22 @@ function FilePreviewBody({
     <View style={styles.centerState}>
       <Text style={styles.emptyText}>{t("panels.file.binaryPreviewUnavailable")}</Text>
       <Text style={styles.binaryMetaText}>{formatFileSize({ size: preview.size })}</Text>
+      <Button variant="outline" leftIcon={Download} onPress={onDownload}>
+        {t("workspace.fileActions.download")}
+      </Button>
     </View>
   );
 }
 
 export function FilePane({
   serverId,
+  workspaceId,
   workspaceRoot,
   location,
   navigationRevision,
 }: {
   serverId: string;
+  workspaceId?: string | null;
   workspaceRoot: string;
   location: WorkspaceFileLocation;
   navigationRevision: number;
@@ -419,6 +441,18 @@ export function FilePane({
     isTabActive: isActive,
     isAppVisible,
   });
+  const downloadFile = useFileDownload({
+    serverId,
+    workspaceId,
+    workspaceRoot: readTarget?.cwd ?? normalizedWorkspaceRoot,
+  });
+  const onDownload = useCallback(() => {
+    if (readTarget)
+      downloadFile({
+        fileName: location.path.split(/[\\/]/).pop() ?? location.path,
+        path: readTarget.path,
+      });
+  }, [downloadFile, location.path, readTarget]);
   // Live version observation stays on: the file is read-only here, but it can
   // change externally (an agent editing on the host), so the preview keeps
   // following the observed version.
@@ -446,9 +480,11 @@ export function FilePane({
   const previewKey = readTarget ? `${readTarget.cwd}:${readTarget.path}` : null;
 
   const preview = resolvedPreview.key === previewKey ? resolvedPreview.file : null;
-  const imagePreviewUri = useAttachmentPreviewUrl(
+  const imagePreview = useAttachmentPreviewUrl(
     resolvedPreview.key === previewKey ? resolvedPreview.imageAttachment : null,
   );
+
+  const imagePreviewUri = imagePreview.status === "ready" ? imagePreview.url : null;
   const lineCount =
     preview?.kind === "text" ? (preview.content ?? "").split("\n").length : undefined;
   const errorMessage = getFileErrorMessage(liveFile.error, t("panels.file.failedToLoad"));
@@ -457,20 +493,16 @@ export function FilePane({
   const supportsEditing = useSessionStore(
     (state) => state.sessions[serverId]?.serverInfo?.features?.workspaceFileEditing === true,
   );
-  // Edit plain code/text files in place (web only). Rendered markdown/HTML and line-target
-  // navigation stay in the read-only preview; a size cap keeps CodeMirror responsive.
+  // The one editor buffer feeds both Source and Preview; cap edits at the daemon write limit.
   const editable = Boolean(
-    isWeb &&
-    supportsEditing &&
-    preview?.kind === "text" &&
-    preview.size <= 1024 * 1024 &&
-    !location.lineStart &&
-    filePreviewRenderKind(location.path) === null,
+    isWeb && supportsEditing && preview?.kind === "text" && preview.size <= 1024 * 1024,
   );
 
   return (
     <FilePanePresentation
+      onDownload={onDownload}
       serverId={serverId}
+      workspaceRoot={normalizedWorkspaceRoot}
       client={client}
       readTarget={readTarget}
       preview={preview}
@@ -499,6 +531,7 @@ function getFileErrorMessage(error: unknown, fallback: string): string | null {
 
 function FilePanePresentation({
   serverId,
+  workspaceRoot,
   client,
   readTarget,
   preview,
@@ -515,8 +548,10 @@ function FilePanePresentation({
   location,
   navigationRevision,
   imagePreviewUri,
+  onDownload,
 }: {
   serverId: string;
+  workspaceRoot: string;
   client: DaemonClient | null;
   readTarget: { cwd: string; path: string } | null;
   preview: ExplorerFile | null;
@@ -533,7 +568,12 @@ function FilePanePresentation({
   location: WorkspaceFileLocation;
   navigationRevision: number;
   imagePreviewUri: string | null;
+  onDownload: () => void;
 }) {
+  const [view, setView] = useTextFileView(location, navigationRevision);
+  const hasPreview = preview?.kind === "text" && filePreviewRenderKind(location.path) !== null;
+  const showPreview = hasPreview && view === "preview";
+  const previewLocation = useMemo(() => ({ path: location.path }), [location.path]);
   if (!client && readTarget) {
     return (
       <View style={styles.container} testID="workspace-file-pane">
@@ -547,6 +587,7 @@ function FilePanePresentation({
   if (editable && client && readTarget && preview?.kind === "text") {
     return (
       <EditableFilePane
+        onDownload={onDownload}
         key={`${serverId}:${readTarget.cwd}:${readTarget.path}`}
         client={client}
         cwd={readTarget.cwd}
@@ -558,6 +599,8 @@ function FilePanePresentation({
         navigationRevision={navigationRevision}
         onRetryRead={onRetryRead}
         retryingRead={retryingRead}
+        workspaceRoot={workspaceRoot}
+        serverId={serverId}
       />
     );
   }
@@ -577,15 +620,45 @@ function FilePanePresentation({
 
   return (
     <View style={styles.container} testID="workspace-file-pane">
-      {preview ? <FilePanelBar size={preview.size} lineCount={lineCount} /> : null}
-      <FilePreviewBody
-        preview={preview}
-        isLoading={isLoading}
-        isMobile={isMobile}
-        location={location}
-        navigationRevision={navigationRevision}
-        imagePreviewUri={imagePreviewUri}
-      />
+      {preview ? (
+        <FilePanelBar
+          size={preview.size}
+          lineCount={lineCount}
+          view={hasPreview ? view : undefined}
+          onViewChange={hasPreview ? setView : undefined}
+        />
+      ) : null}
+      {hasPreview ? (
+        <RetainedFileView active={showPreview}>
+          <FilePreviewBody
+            preview={preview}
+            isLoading={isLoading}
+            isMobile={isMobile}
+            location={previewLocation}
+            navigationRevision={navigationRevision}
+            onDownload={onDownload}
+            imagePreviewUri={imagePreviewUri}
+            workspaceRoot={workspaceRoot}
+            client={client}
+            serverId={serverId}
+          />
+        </RetainedFileView>
+      ) : null}
+      <RetainedFileView active={!showPreview}>
+        <FilePreviewBody
+          mode="source"
+          preview={preview}
+          isLoading={isLoading}
+          isMobile={isMobile}
+          location={location}
+          navigationRevision={navigationRevision}
+          onDownload={onDownload}
+          imagePreviewUri={imagePreviewUri}
+          workspaceRoot={workspaceRoot}
+          client={client}
+          serverId={serverId}
+        />
+      </RetainedFileView>
     </View>
   );
 }
@@ -615,6 +688,7 @@ const noopCursor = (_position: { line: number; column: number }): void => {};
 const noopVimMode = (_mode: string | null): void => {};
 
 function EditableFilePane({
+  onDownload,
   client,
   cwd,
   path,
@@ -625,7 +699,10 @@ function EditableFilePane({
   navigationRevision,
   onRetryRead,
   retryingRead,
+  workspaceRoot,
+  serverId,
 }: {
+  onDownload: () => void;
   client: DaemonClient;
   cwd: string;
   path: string;
@@ -636,6 +713,8 @@ function EditableFilePane({
   navigationRevision: number;
   onRetryRead: () => void;
   retryingRead: boolean;
+  workspaceRoot: string;
+  serverId: string;
 }) {
   const { t } = useTranslation();
   const theme = UnistylesRuntime.getTheme();
@@ -672,7 +751,15 @@ function EditableFilePane({
   }, [liveFileModel, model]);
   useEffect(() => () => model.dispose(), [model]);
 
+  const [view, setView] = useTextFileView(location, navigationRevision);
+  const hasPreview = filePreviewRenderKind(location.path) !== null;
+  const showPreview = hasPreview && view === "preview";
+  const previewLocation = useMemo(() => ({ path: location.path }), [location.path]);
   const snapshot = useSyncExternalStore(model.subscribe, model.getSnapshot, model.getSnapshot);
+  const [shownPreviewText, setShownPreviewText] = useState(snapshot.content);
+  if (showPreview && shownPreviewText !== snapshot.content) setShownPreviewText(snapshot.content);
+  const previewText = showPreview ? snapshot.content : shownPreviewText;
+  const previewFile = useMemo(() => ({ ...preview, content: previewText }), [preview, previewText]);
   const suspendPendingSave = useCallback(() => model.suspendAutosave(), [model]);
   usePublishPanelInstanceAttributes({ modified: snapshot.modified, suspendPendingSave });
 
@@ -737,6 +824,8 @@ function EditableFilePane({
           snapshot.observedVersion.status === "ready" ? snapshot.observedVersion.size : preview.size
         }
         lineCount={snapshot.content.split("\n").length}
+        view={hasPreview ? view : undefined}
+        onViewChange={hasPreview ? setView : undefined}
       />
       {statusLabel ? (
         <View style={styles.editorStatusRow}>
@@ -751,16 +840,34 @@ function EditableFilePane({
         </View>
       ) : null}
       {conflict ? <FileConflictAlert state={conflict} /> : null}
-      <FileEditorView
-        model={model}
-        filename={filename}
-        location={location}
-        navigationRevision={navigationRevision}
-        vimEnabled={false}
-        theme={visualTheme}
-        onCursorChange={noopCursor}
-        onVimModeChange={noopVimMode}
-      />
+      {hasPreview ? (
+        <RetainedFileView active={showPreview}>
+          <FilePreviewBody
+            onDownload={onDownload}
+            preview={previewFile}
+            isLoading={false}
+            isMobile={false}
+            location={previewLocation}
+            navigationRevision={navigationRevision}
+            imagePreviewUri={null}
+            workspaceRoot={workspaceRoot}
+            client={client}
+            serverId={serverId}
+          />
+        </RetainedFileView>
+      ) : null}
+      <RetainedFileView active={!showPreview}>
+        <FileEditorView
+          model={model}
+          filename={filename}
+          location={location}
+          navigationRevision={navigationRevision}
+          vimEnabled={false}
+          theme={visualTheme}
+          onCursorChange={noopCursor}
+          onVimModeChange={noopVimMode}
+        />
+      </RetainedFileView>
     </View>
   );
 }

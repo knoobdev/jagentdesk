@@ -1,4 +1,4 @@
-import type { GitAction, GitActions } from "@/git/policy";
+import { actionsWithoutPrimary, type GitAction, type GitActions } from "@/git/policy";
 import type { KeyboardActionDefinition } from "@/keyboard/keyboard-action-dispatcher";
 import type { ShortcutKey } from "@/utils/format-shortcut";
 import type { CommandCenterContribution, CommandCenterIcon } from "./contributions";
@@ -10,6 +10,7 @@ export interface WorkspaceCommandCenterLabels {
   newBrowser: string;
   splitRight: string;
   splitDown: string;
+  archiveWorkspace: string;
 }
 
 export interface WorkspaceCommandCenterIcons {
@@ -18,6 +19,7 @@ export interface WorkspaceCommandCenterIcons {
   newBrowser?: CommandCenterIcon;
   splitRight?: CommandCenterIcon;
   splitDown?: CommandCenterIcon;
+  archiveWorkspace?: CommandCenterIcon;
   git?(action: GitAction): CommandCenterIcon | undefined;
 }
 
@@ -35,11 +37,13 @@ export interface WorkspaceCommandCenterSource {
   icons: WorkspaceCommandCenterIcons;
   shortcuts: WorkspaceCommandCenterShortcuts;
   capabilities: {
+    isGit: boolean;
     canSplitPanes: boolean;
     canOpenBrowserTabs: boolean;
   };
   dispatch(action: KeyboardActionDefinition): void;
   runGitAction(action: GitAction): void;
+  archiveWorkspace: (() => void) | null;
 }
 
 function buildGitContribution(
@@ -86,6 +90,35 @@ function buildWorkspaceAction(input: {
     keywords: input.keywords,
     visibility: input.visibility,
     run: () => input.source.dispatch(input.action),
+    presentation: {
+      kind: "action",
+      title: input.title,
+      sectionTitle: input.source.labels.section,
+      icon: input.icon,
+      shortcutKeys: input.shortcutKeys,
+    },
+  };
+}
+
+function buildWorkspaceCallback(input: {
+  source: WorkspaceCommandCenterSource;
+  id: string;
+  rank: number;
+  title: string;
+  keywords: readonly string[];
+  icon?: CommandCenterIcon;
+  shortcutKeys?: ShortcutKey[][];
+  run: () => void;
+  visibility: "always" | "query";
+}): CommandCenterContribution {
+  return {
+    id: input.id,
+    group: "workspace",
+    groupRank: -1,
+    rank: input.rank,
+    keywords: input.keywords,
+    visibility: input.visibility,
+    run: input.run,
     presentation: {
       kind: "action",
       title: input.title,
@@ -167,9 +200,25 @@ export function buildWorkspaceCommandCenterContributions(
       }),
     );
   }
-  for (const [index, action] of source.gitActions.secondary.entries()) {
-    if (action.id === primary?.id) continue;
+  for (const [index, action] of actionsWithoutPrimary(source.gitActions).entries()) {
     contributions.push(buildGitContribution(source, action, 10 + index, "query"));
   }
+  // A Git workspace lists archive among its Git actions; any other workspace archives here.
+  if (!source.capabilities.isGit && source.archiveWorkspace) {
+    contributions.push(
+      buildWorkspaceCallback({
+        source,
+        id: "workspace:archive",
+        rank: 100,
+        title: source.labels.archiveWorkspace,
+        keywords: ["archive", "workspace"],
+        icon: source.icons.archiveWorkspace,
+        shortcutKeys: source.shortcuts.archiveWorkspace,
+        run: source.archiveWorkspace,
+        visibility: "query",
+      }),
+    );
+  }
+
   return contributions;
 }

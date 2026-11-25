@@ -1,29 +1,30 @@
 import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import type { Logger } from "pino";
-import type { AgentManager } from "../agent/agent-manager.js";
-import type { AgentSessionConfig } from "../agent/agent-sdk-types.js";
-import type { AgentStorage } from "../agent/agent-storage.js";
+import { type Logger } from "pino";
+import { type AgentManager } from "../agent/agent-manager.js";
+import { type AgentSessionConfig } from "../agent/agent-sdk-types.js";
+import { type AgentStorage } from "../agent/agent-storage.js";
 import { curateAgentActivity } from "../agent/activity-curator.js";
 import { ensureAgentLoaded } from "../agent/agent-loading.js";
 import { formatSystemNotificationPrompt } from "../agent/agent-prompt.js";
 import { resolveCreateAgentTitles } from "../agent/create-agent-title.js";
 import { type BoundCreateAgentCommand, formatProviderModel } from "../agent/create-agent/create.js";
-import type { PersistedWorkspaceRecord } from "../workspace-registry.js";
-import type { CreateJAgentDeskWorktreeWorkflowResult } from "../worktree-session.js";
+import { type PersistedWorkspaceRecord } from "../workspace-registry.js";
+import { type CreateJAgentDeskWorktreeWorkflowResult } from "../worktree-session.js";
 import { ScheduleStore } from "./store.js";
 import { computeNextRunAt, validateScheduleCadence } from "./cron.js";
-import type {
-  CreateScheduleInput,
-  ScheduleExecutionResult,
-  ScheduleRun,
-  ScheduleTarget,
-  StoredSchedule,
-  UpdateScheduleInput,
-  UpdateScheduleNewAgentConfig,
+import {
+  type CreateScheduleInput,
+  type ScheduleExecutionResult,
+  type ScheduleRun,
+  type ScheduleTarget,
+  type StoredSchedule,
+  type UpdateScheduleInput,
+  type UpdateScheduleNewAgentConfig,
 } from "@jagentdesk/protocol/schedule/types";
-import type { FirstAgentContext } from "@jagentdesk/protocol/messages";
+import { type FirstAgentContext } from "@jagentdesk/protocol/messages";
+import { foldFeatureValues } from "../agent/option-controls.js";
 
 const SCHEDULE_TICK_INTERVAL_MS = 1000;
 
@@ -35,6 +36,32 @@ export class ScheduleTargetGoneError extends Error {
     super(message);
     this.name = "ScheduleTargetGoneError";
   }
+}
+
+export class ScheduleNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Schedule not found: ${id}`);
+    this.name = "ScheduleNotFoundError";
+  }
+}
+
+export class ScheduleStateConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ScheduleStateConflictError";
+  }
+}
+
+function advanceNextRunAtPast(
+  cadence: StoredSchedule["cadence"],
+  nextRunAt: Date,
+  now: Date,
+): Date {
+  let next = nextRunAt;
+  while (next.getTime() <= now.getTime()) {
+    next = computeNextRunAt(cadence, next);
+  }
+  return next;
 }
 
 function trimOptionalName(value: string | null | undefined): string | null {
@@ -145,7 +172,7 @@ function shouldCompleteSchedule(schedule: StoredSchedule, now: Date): boolean {
 
 function requireSchedule(schedule: StoredSchedule | null, id: string): StoredSchedule {
   if (!schedule) {
-    throw new Error(`Schedule not found: ${id}`);
+    throw new ScheduleNotFoundError(id);
   }
   return schedule;
 }
@@ -197,16 +224,26 @@ function buildRunOutput(params: {
 
 type ScheduleAgentManager = Pick<
   AgentManager,
+  | "setDaemonBackgroundWork"
+  | "removeDaemonBackgroundWork"
   | "createAgent"
   | "getAgent"
   | "getRegisteredProviderIds"
   | "hasInFlightRun"
-  | "hydrateTimelineFromProvider"
-  | "resumeAgentFromPersistence"
-  | "runAgent"
-  | "waitForAgentEvent"
-  | "waitForAgentClose"
->;
+  | "replaceAgentRun"
+  | "steerOrReplaceActiveTurn"
+  | "streamAgent"
+> &
+  Pick<
+    AgentManager,
+    | "createAgentFromRecord"
+    | "getRegisteredProviderIds"
+    | "hydrateTimelineFromProvider"
+    | "resumeAgentFromPersistence"
+    | "runAgent"
+    | "waitForAgentEvent"
+    | "waitForAgentClose"
+  >;
 
 interface ScheduleWorkspaceCreateInput {
   cwd: string;
@@ -232,29 +269,48 @@ export interface ScheduleServiceOptions {
 
 export class ScheduleService {
   private readonly store: ScheduleStore;
+
   private readonly logger: Logger;
+
   private readonly agentManager: ScheduleAgentManager;
+
   private readonly agentStorage: AgentStorage;
+
   private readonly createAgent: BoundCreateAgentCommand;
+
   private readonly createDirectoryWorkspace: (
     input: ScheduleWorkspaceCreateInput,
   ) => Promise<PersistedWorkspaceRecord>;
+
   private readonly createJAgentDeskWorktreeWorkspace: (
     input: ScheduleWorkspaceCreateInput,
   ) => Promise<CreateJAgentDeskWorktreeWorkflowResult>;
+
   private readonly archiveWorkspace: (workspaceId: string) => Promise<void>;
+
   private readonly now: () => Date;
+
   private readonly runner: (
     schedule: StoredSchedule,
     runId: string,
   ) => Promise<ScheduleExecutionResult>;
+
   private readonly runningScheduleIds = new Set<string>();
+
+  private readonly heartbeatStops = new Map<string, () => Promise<void>>();
+
+  private recovering = false;
+
   private tickTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(options: ScheduleServiceOptions) {
     this.logger = options.logger.child({ module: "schedule-service" });
-    this.store = new ScheduleStore(join(options.jagentdeskHome, "schedules"), this.logger);
     this.agentManager = options.agentManager;
+    this.store = new ScheduleStore(
+      join(options.jagentdeskHome, "schedules"),
+      this.logger,
+      (schedule, change) => this.syncHeartbeat(schedule, change),
+    );
     this.agentStorage = options.agentStorage;
     this.createAgent = options.createAgent;
     this.createDirectoryWorkspace = options.createDirectoryWorkspace;
@@ -265,10 +321,18 @@ export class ScheduleService {
   }
 
   async start(): Promise<void> {
-    await this.recoverInterruptedRuns();
-    await this.sweepOrphanedSchedules();
     if (this.tickTimer) {
       return;
+    }
+    this.recovering = true;
+    try {
+      await this.recoverInterruptedRuns();
+      await this.sweepOrphanedSchedules();
+    } finally {
+      this.recovering = false;
+    }
+    for (const schedule of await this.store.list()) {
+      this.syncHeartbeat(schedule, "write");
     }
     const timer = setInterval(() => {
       void this.tick().catch((error) => {
@@ -371,10 +435,7 @@ export class ScheduleService {
 
   async inspect(id: string): Promise<StoredSchedule> {
     const schedule = await this.store.get(id);
-    if (!schedule) {
-      throw new Error(`Schedule not found: ${id}`);
-    }
-    return schedule;
+    return requireSchedule(schedule, id);
   }
 
   async logs(id: string): Promise<ScheduleRun[]> {
@@ -385,7 +446,7 @@ export class ScheduleService {
   async pause(id: string): Promise<StoredSchedule> {
     const paused = await this.store.update(id, (schedule) => {
       if (schedule.status === "completed") {
-        throw new Error(`Schedule ${id} is already completed`);
+        throw new ScheduleStateConflictError(`Schedule ${id} is already completed`);
       }
       if (schedule.status === "paused") {
         return schedule;
@@ -405,7 +466,7 @@ export class ScheduleService {
   async resume(id: string): Promise<StoredSchedule> {
     const resumed = await this.store.update(id, (schedule) => {
       if (schedule.status === "completed") {
-        throw new Error(`Schedule ${id} is already completed`);
+        throw new ScheduleStateConflictError(`Schedule ${id} is already completed`);
       }
       if (schedule.status === "active") {
         return schedule;
@@ -471,6 +532,48 @@ export class ScheduleService {
     await this.store.delete(id);
   }
 
+  private syncHeartbeat(schedule: StoredSchedule, change: "write" | "delete"): void {
+    if (schedule.target.type !== "agent") {
+      return;
+    }
+    const { agentId } = schedule.target;
+    const { id, name, createdAt } = schedule;
+    if (change === "delete" || schedule.status !== "active") {
+      this.heartbeatStops.delete(id);
+      this.agentManager.removeDaemonBackgroundWork({ agentId, namespace: "heartbeat", id });
+      return;
+    }
+    if (this.recovering) {
+      return;
+    }
+    let stop = this.heartbeatStops.get(id);
+    if (!stop) {
+      const stopHeartbeat = () =>
+        this.store.delete(id, (current) => {
+          // A queued Stop can reach the store after a pause and resume replaced its row.
+          if (
+            current?.status !== "active" ||
+            current.target.type !== "agent" ||
+            current.target.agentId !== agentId ||
+            this.heartbeatStops.get(id) !== stopHeartbeat
+          ) {
+            throw new ScheduleStateConflictError("Background work is no longer available to stop");
+          }
+        });
+      this.heartbeatStops.set(id, stopHeartbeat);
+      stop = stopHeartbeat;
+    }
+    this.agentManager.setDaemonBackgroundWork({
+      agentId,
+      namespace: "heartbeat",
+      id,
+      kind: "heartbeat",
+      description: name,
+      startedAt: createdAt,
+      stop,
+    });
+  }
+
   async completeForAgent(agentId: string): Promise<number> {
     const now = this.now();
     const schedules = await this.store.list();
@@ -525,10 +628,10 @@ export class ScheduleService {
   async runOnce(id: string): Promise<StoredSchedule> {
     const schedule = await this.inspect(id);
     if (schedule.status === "completed") {
-      throw new Error(`Schedule ${id} is already completed`);
+      throw new ScheduleStateConflictError(`Schedule ${id} is already completed`);
     }
     if (this.runningScheduleIds.has(id)) {
-      throw new Error(`Schedule ${id} is already running`);
+      throw new ScheduleStateConflictError(`Schedule ${id} is already running`);
     }
     await this.runSchedule(schedule, this.now(), { manual: true });
     return this.inspect(id);
@@ -556,7 +659,7 @@ export class ScheduleService {
   }
 
   private async completeScheduleIfDue(scheduleId: string, now: Date): Promise<void> {
-    const updated = await this.store.update(scheduleId, (schedule) => {
+    await this.store.update(scheduleId, (schedule) => {
       if (
         schedule.status !== "active" ||
         !schedule.nextRunAt ||
@@ -566,7 +669,6 @@ export class ScheduleService {
       }
       return completeSchedule(schedule, now);
     });
-    requireSchedule(updated, scheduleId);
   }
 
   private async recoverInterruptedRuns(): Promise<void> {
@@ -613,6 +715,13 @@ export class ScheduleService {
         };
         updated = { ...updated, runs };
         dirty = true;
+      }
+
+      if (
+        (updated.status === "active" || runningIndex !== -1) &&
+        shouldCompleteSchedule(updated, now)
+      ) {
+        return completeSchedule(updated, now);
       }
 
       if (
@@ -681,46 +790,110 @@ export class ScheduleService {
     options?: { manual?: boolean },
   ): Promise<void> {
     const manual = options?.manual === true;
+    // Reserve before store I/O; persisted history cannot prove a run is still alive.
     this.runningScheduleIds.add(schedule.id);
-    const runId = randomUUID();
-    const runningRun: ScheduleRun = {
-      id: runId,
-      scheduledFor: manual ? now.toISOString() : (schedule.nextRunAt ?? now.toISOString()),
-      startedAt: now.toISOString(),
-      endedAt: null,
-      status: "running",
-      agentId: null,
-      output: null,
-      error: null,
-    };
-    const scheduleWithRun = await this.appendRunningRun(schedule.id, runningRun);
-
     try {
-      const result = await this.runner(scheduleWithRun, runId);
-      await this.finishRun({
-        scheduleId: schedule.id,
-        runId,
-        status: "succeeded",
-        agentId: result.agentId,
-        output: result.output,
-        error: null,
-        targetGone: false,
-        manual,
-      });
-    } catch (error) {
-      await this.finishRun({
-        scheduleId: schedule.id,
-        runId,
-        status: "failed",
-        agentId: null,
-        output: null,
-        error: error instanceof Error ? error.message : String(error),
-        targetGone: error instanceof ScheduleTargetGoneError,
-        manual,
-      });
+      let runId: string;
+      let scheduleWithRun: StoredSchedule;
+      if (manual) {
+        runId = randomUUID();
+        const runningRun: ScheduleRun = {
+          id: runId,
+          scheduledFor: now.toISOString(),
+          startedAt: now.toISOString(),
+          endedAt: null,
+          status: "running",
+          agentId: null,
+          output: null,
+          error: null,
+        };
+        scheduleWithRun = await this.appendRunningRun(schedule.id, runningRun);
+      } else {
+        const claimed = await this.claimDueRun(schedule.id, now);
+        if (!claimed) {
+          return;
+        }
+        ({ schedule: scheduleWithRun, runId } = claimed);
+      }
+
+      try {
+        const result = await this.runner(scheduleWithRun, runId);
+        await this.finishRun({
+          scheduleId: schedule.id,
+          runId,
+          status: "succeeded",
+          agentId: result.agentId,
+          output: result.output,
+          error: null,
+          targetGone: false,
+          manual,
+        });
+      } catch (error) {
+        await this.finishRun({
+          scheduleId: schedule.id,
+          runId,
+          status: "failed",
+          agentId: null,
+          output: null,
+          error: error instanceof Error ? error.message : String(error),
+          targetGone: error instanceof ScheduleTargetGoneError,
+          manual,
+        });
+      }
     } finally {
       this.runningScheduleIds.delete(schedule.id);
     }
+  }
+
+  private async claimDueRun(
+    scheduleId: string,
+    now: Date,
+  ): Promise<{ schedule: StoredSchedule; runId: string } | null> {
+    let claimed: { schedule: StoredSchedule; runId: string } | null = null;
+    await this.store.update(scheduleId, (schedule) => {
+      if (
+        schedule.status !== "active" ||
+        !schedule.nextRunAt ||
+        shouldCompleteSchedule(schedule, now) ||
+        new Date(schedule.nextRunAt).getTime() > now.getTime()
+      ) {
+        return schedule;
+      }
+
+      const scheduledFor = schedule.nextRunAt;
+      const isFinalRun =
+        schedule.maxRuns !== null && countCompletedRuns(schedule) + 1 >= schedule.maxRuns;
+      const nextRunAt = isFinalRun
+        ? null
+        : advanceNextRunAtPast(
+            schedule.cadence,
+            computeNextRunAt(schedule.cadence, new Date(scheduledFor)),
+            now,
+          ).toISOString();
+
+      // Claim the due slot and advance its cursor in the same serialized update.
+      // A tick can hold a stale list while another tick finishes this schedule.
+      const runId = randomUUID();
+      const runningRun: ScheduleRun = {
+        id: runId,
+        scheduledFor,
+        startedAt: now.toISOString(),
+        endedAt: null,
+        status: "running",
+        agentId: null,
+        output: null,
+        error: null,
+      };
+      const updated: StoredSchedule = {
+        ...schedule,
+        nextRunAt,
+        updatedAt: now.toISOString(),
+        runs: [...schedule.runs, runningRun],
+      };
+      claimed = { schedule: updated, runId };
+      return updated;
+    });
+    return claimed;
   }
 
   private async appendRunningRun(
@@ -745,7 +918,8 @@ export class ScheduleService {
     targetGone: boolean;
     manual: boolean;
   }): Promise<void> {
-    const updatedSchedule = await this.store.update(params.scheduleId, (schedule) => {
+    // A Stop can delete the schedule while its already launched turn is still running.
+    await this.store.update(params.scheduleId, (schedule) => {
       const now = this.now();
       const completedRuns = schedule.runs.map((run) =>
         run.id === params.runId
@@ -783,20 +957,21 @@ export class ScheduleService {
           nextRunAt: null,
         };
       } else {
-        const after = new Date(schedule.nextRunAt ?? now.toISOString());
-        let nextRunAt = computeNextRunAt(updated.cadence, after);
-        while (nextRunAt.getTime() <= now.getTime()) {
-          nextRunAt = computeNextRunAt(updated.cadence, nextRunAt);
-        }
+        // A final slot has no successor until its run limit is raised or cleared.
+        // Every runner invocation has a recorded run with this id.
+        const finishedRun = completedRuns.find((run) => run.id === params.runId)!;
+        const nextRunAt = updated.nextRunAt
+          ? new Date(updated.nextRunAt)
+          : computeNextRunAt(updated.cadence, new Date(finishedRun.scheduledFor));
+        // Move an overdue cursor past a long run without advancing a future one twice.
         updated = {
           ...updated,
-          nextRunAt: nextRunAt.toISOString(),
+          nextRunAt: advanceNextRunAtPast(updated.cadence, nextRunAt, now).toISOString(),
         };
       }
 
       return updated;
     });
-    requireSchedule(updatedSchedule, params.scheduleId);
   }
 
   private async recordRunWorkspace(params: {
@@ -884,7 +1059,6 @@ export class ScheduleService {
         },
         mode: config.modeId,
         thinking: config.thinkingOptionId,
-        features: config.featureValues,
         unattended: true,
         promptFailure: "return-error",
         background: true,
@@ -986,12 +1160,8 @@ function buildScheduleAgentConfig(
     model: config.model,
     thinkingOptionId: config.thinkingOptionId,
     title: config.title,
-    approvalPolicy: config.approvalPolicy,
-    sandboxMode: config.sandboxMode,
-    networkAccess: config.networkAccess,
-    webSearch: config.webSearch,
-    featureValues: config.featureValues,
-    extra: config.extra,
+    // COMPAT(featureValues): added in v0.15.0, remove after 2027-05-01.
+    providerOptions: foldFeatureValues(config).providerOptions,
     systemPrompt: config.systemPrompt,
     mcpServers: config.mcpServers as AgentSessionConfig["mcpServers"],
   };

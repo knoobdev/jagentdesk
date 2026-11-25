@@ -1,0 +1,12 @@
+{
+  "id": "claude-usage-source",
+  "requirements": {
+    "jagentdesk": ">=0.9.59"
+  },
+  "kind": "builtin",
+  "name": "Claude usage",
+  "description": "Read local claude account quotas.",
+  "defaultEnabled": true,
+  "requires": [],
+  "builtinOrder": 26
+}

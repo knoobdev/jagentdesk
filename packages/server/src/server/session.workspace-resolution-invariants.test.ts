@@ -1,3 +1,4 @@
+import { createWorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
 // Invariant tests for cwd → workspace resolution on the open_project_request path.
 // Each test encodes a default behavior we want from `findOrCreateWorkspaceForDirectory`.
 // Run to see which invariants the current code already satisfies (green) and which
@@ -9,7 +10,6 @@ import path from "node:path";
 import { expect, test, vi } from "vitest";
 
 import { Session, type SessionOptions } from "./session.js";
-import { OWNER_PERMISSIONS } from "./authorization/index.js";
 import type { SessionOutboundMessage } from "@jagentdesk/protocol/messages";
 import { createNoopWorkspaceGitService } from "./test-utils/workspace-git-service-stub.js";
 import { asInternals, createStub } from "./test-utils/class-mocks.js";
@@ -74,7 +74,6 @@ function createHarness(input: {
         mainRepoRoot: null,
       };
     },
-    peekSnapshot: () => null,
   });
 
   const emitted: SessionOutboundMessage[] = [];
@@ -88,8 +87,9 @@ function createHarness(input: {
   };
 
   const session = new Session({
+    workspaceRuntimeStore: createWorkspaceRuntimeStore(),
     clientId: "test",
-    permissions: OWNER_PERMISSIONS,
+    scopes: ["*"],
     appVersion: null,
     onMessage: (m) => emitted.push(m),
     logger: createStub<SessionOptions["logger"]>(logger),

@@ -1,7 +1,13 @@
+import {
+  usesDesktopBindings,
+  useHardwareKeyboardPresent,
+  useOverlayRegistration,
+} from "@/keyboard";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { View, Text } from "react-native";
-import { useIsFocused } from "@react-navigation/native";
+import { useIsFocused } from "expo-router/react-navigation";
 import { StyleSheet } from "react-native-unistyles";
 import { settingsStyles } from "@/styles/settings";
 import { SettingsSection } from "@/screens/settings/settings-section";
@@ -11,6 +17,8 @@ import { useKeyboardShortcutOverrides } from "@/hooks/use-keyboard-shortcut-over
 import {
   buildKeyboardShortcutHelpSections,
   getBindingIdForAction,
+  normalizeCapturedShortcutCombo,
+  isShortcutCaptureComplete,
   type KeyboardShortcutHelpRow,
 } from "@/keyboard/keyboard-shortcuts";
 import {
@@ -21,8 +29,6 @@ import {
 } from "@/keyboard/shortcut-string";
 import { useKeyboardShortcutsStore } from "@/stores/keyboard-shortcuts-store";
 import { getShortcutOs } from "@/utils/shortcut-platform";
-import { getIsElectronRuntime } from "@/constants/layout";
-import { isNative } from "@/constants/platform";
 import { getDesktopHost } from "@/desktop/host";
 
 const EMPTY_CAPTURED_COMBOS: string[] = [];
@@ -128,6 +134,9 @@ function ShortcutRow({
     [overrideCombo, row.keys],
   );
   const rowStyle = useMemo(() => [styles.row, isCapturing && styles.rowCapturing], [isCapturing]);
+  const showDone = isCapturing && capturedCombos.length > 0;
+  const captureComplete =
+    bindingId !== null && isShortcutCaptureComplete(bindingId, capturedCombos);
 
   return (
     <View style={rowStyle}>
@@ -138,10 +147,13 @@ function ShortcutRow({
         ) : (
           <Shortcut chord={displayChord} />
         )}
+        {showDone && !captureComplete ? (
+          <Text style={styles.capturingText}>{t("settings.shortcuts.captureIndexPrompt")}</Text>
+        ) : null}
         {bindingId !== null && (
           <>
-            {isCapturing && capturedCombos.length > 0 ? (
-              <Button variant="ghost" size="sm" onPress={onDone}>
+            {showDone ? (
+              <Button variant="ghost" size="sm" disabled={!captureComplete} onPress={onDone}>
                 {t("settings.shortcuts.actions.done")}
               </Button>
             ) : null}
@@ -164,6 +176,7 @@ function ShortcutRow({
 
 export function KeyboardShortcutsSection() {
   const { t } = useTranslation();
+  const hardwareKeyboardPresent = useHardwareKeyboardPresent();
   const [capturingBindingId, setCapturingBindingId] = useState<string | null>(null);
   const [capturedCombos, setCapturedCombos] = useState<string[]>([]);
   const [heldModifiers, setHeldModifiers] = useState<string | null>(null);
@@ -174,8 +187,7 @@ export function KeyboardShortcutsSection() {
 
   const isFocused = useIsFocused();
   const isMac = getShortcutOs() === "mac";
-  const isDesktopApp = getIsElectronRuntime();
-  const sections = buildKeyboardShortcutHelpSections({ isMac, isDesktop: isDesktopApp });
+  const sections = buildKeyboardShortcutHelpSections({ isMac, usesDesktopBindings });
 
   const cancelCapture = useCallback(() => {
     setCapturedCombos([]);
@@ -195,7 +207,10 @@ export function KeyboardShortcutsSection() {
   );
 
   const saveCapture = useCallback(() => {
-    if (capturingBindingId === null || capturedCombos.length === 0) {
+    if (
+      capturingBindingId === null ||
+      !isShortcutCaptureComplete(capturingBindingId, capturedCombos)
+    ) {
       return;
     }
     void setOverride(capturingBindingId, capturedCombos.join(" "));
@@ -208,34 +223,29 @@ export function KeyboardShortcutsSection() {
     }
   }, [isFocused, capturingBindingId, cancelCapture]);
 
-  useEffect(() => {
-    if (isNative) return;
-    if (capturingBindingId === null) return;
-
-    function handleKeyDown(event: KeyboardEvent) {
+  useOverlayRegistration({
+    active: capturingBindingId !== null,
+    layer: 0,
+    keys: [],
+    manageFocus: false,
+    onKeyDown(event) {
+      if (capturingBindingId === null) return false;
       event.preventDefault();
-      event.stopPropagation();
-
       if (event.code === "Backspace" && heldModifiersFromEvent(event) === null) {
-        setCapturedCombos((current) => (current.length > 0 ? current.slice(0, -1) : current));
-        return;
+        setCapturedCombos((current) => current.slice(0, -1));
+        return true;
       }
-
       const comboString = keyboardEventToComboString(event);
       if (comboString === null) {
         setHeldModifiers(heldModifiersFromEvent(event));
-        return;
+        return true;
       }
-
       setHeldModifiers(null);
-      setCapturedCombos((current) => [...current, comboString]);
-    }
-
-    window.addEventListener("keydown", handleKeyDown, true);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown, true);
-    };
-  }, [capturingBindingId]);
+      const capturedCombo = normalizeCapturedShortcutCombo(capturingBindingId, comboString);
+      setCapturedCombos((current) => [...current, capturedCombo]);
+      return true;
+    },
+  });
 
   useEffect(() => {
     return () => {
@@ -246,7 +256,7 @@ export function KeyboardShortcutsSection() {
   // Suppress desktop zoom accelerators while capturing so combos like Cmd+- are
   // recorded instead of zooming the window. No-op outside Electron.
   useEffect(() => {
-    if (isNative || !capturing) return;
+    if (!capturing) return;
     const menu = getDesktopHost()?.menu;
     void menu?.setCapturingShortcut?.(true);
     return () => {
@@ -260,15 +270,7 @@ export function KeyboardShortcutsSection() {
     [removeOverride],
   );
 
-  if (isNative) {
-    return (
-      <SettingsSection title={t("settings.sections.shortcuts")}>
-        <View style={[settingsStyles.card, styles.mobileCard]}>
-          <Text style={styles.mobileText}>{t("settings.shortcuts.unavailableOnMobile")}</Text>
-        </View>
-      </SettingsSection>
-    );
-  }
+  if (!hardwareKeyboardPresent) return null;
 
   const resetAllButton = hasOverrides ? (
     <Button variant="ghost" size="sm" onPress={handleResetAll}>
@@ -289,7 +291,7 @@ export function KeyboardShortcutsSection() {
               {section.rows.map(function (row, index) {
                 const bindingId = getBindingIdForAction(row.id, {
                   isMac,
-                  isDesktop: isDesktopApp,
+                  usesDesktopBindings,
                 });
                 const overrideCombo = bindingId ? overrides[bindingId] : undefined;
 

@@ -1,9 +1,11 @@
+import type { AgentMessage } from "@jagentdesk/protocol/agent-message";
 import type { ToolCallDetail } from "@jagentdesk/protocol/agent-types";
 import { describe, expect, it } from "vitest";
 
 import { buildToolCallPresentation, type ToolCallPresentationIcon } from "./presentation";
 
 const fakeIcons = {
+  jagentdesk: (() => null) as ToolCallPresentationIcon,
   brain: (() => null) as ToolCallPresentationIcon,
   eye: (() => null) as ToolCallPresentationIcon,
   wrench: (() => null) as ToolCallPresentationIcon,
@@ -12,7 +14,11 @@ const fakeIcons = {
 function fakeResolveIcon(
   toolName: string,
   detail: ToolCallDetail | undefined,
+  agentMessage: AgentMessage | undefined,
 ): ToolCallPresentationIcon {
+  if (agentMessage) {
+    return fakeIcons.jagentdesk;
+  }
   if (detail?.type === "plan") {
     return fakeIcons.brain;
   }
@@ -66,7 +72,7 @@ describe("tool-call presentation", () => {
     });
 
     expect(presentation).toMatchObject({
-      displayName: "Exec Command",
+      displayName: "Exec command",
       icon: fakeIcons.wrench,
       isLoadingDetails: true,
       hasDetails: false,
@@ -91,4 +97,83 @@ describe("tool-call presentation", () => {
     expect(presentation.isPlan).toBe(true);
     expect(presentation.icon).toBe(fakeIcons.brain);
   });
+
+  it.each([
+    ["message", "Message from Worker"],
+    ["finished", "Worker finished"],
+  ] as const)("shows sender identity for %s", (event, displayName) => {
+    const presentation = buildToolCallPresentation({
+      toolName: "agent_message",
+      status: "completed",
+      error: null,
+      agentMessage: {
+        event,
+        sender: { id: "worker", title: "Worker" },
+        text: "Review <changes> & report.",
+      },
+      resolveIcon: fakeResolveIcon,
+    });
+    expect(presentation).toMatchObject({
+      displayName,
+      summary: "Worker",
+      canOpenDetails: true,
+      detail: { type: "plain_text", text: "From agent: worker\n\nReview <changes> & report." },
+    });
+  });
+});
+
+it.each([
+  ["message", "Message from QA messenger"],
+  ["finished", "QA messenger finished"],
+  ["errored", "QA messenger errored"],
+  ["permission-required", "QA messenger needs permission"],
+  ["closed", "QA messenger closed"],
+] as const)(
+  "presents %s with its sender heading and context, and the JAgentDesk icon",
+  (event, heading) => {
+    const presentation = buildToolCallPresentation({
+      toolName: "internal_name_should_not_be_visible",
+      status: "completed",
+      error: null,
+      detail: { type: "plain_text", label: "legacy summary", text: "legacy body", icon: "bot" },
+      agentMessage: {
+        event,
+        sender: { id: "server::sender", title: "QA messenger" },
+        text: "The delivered message.",
+      },
+      resolveIcon: fakeResolveIcon,
+    });
+    expect(presentation.displayName).toBe(heading);
+    expect(presentation.summary).toBe("QA messenger");
+    expect(presentation.icon).toBe(fakeIcons.jagentdesk);
+    expect(presentation.detail).toEqual({
+      type: "plain_text",
+      text: "From agent: server::sender\n\nThe delivered message.",
+    });
+  },
+);
+
+it("uses an opaque sender ID when no title is available", () => {
+  const presentation = buildToolCallPresentation({
+    toolName: "agent_message",
+    status: "completed",
+    error: null,
+    agentMessage: { event: "message", sender: { id: "remote::worker" }, text: "Hello" },
+    resolveIcon: fakeResolveIcon,
+  });
+  expect(presentation.displayName).toBe("Message from remote::worker");
+  expect(presentation.summary).toBe("remote::worker");
+});
+
+it("shows the target agent title as context for JAgentDesk agent tools", () => {
+  const presentation = buildToolCallPresentation({
+    toolName: "mcp__jagentdesk__kill_agent",
+    status: "completed",
+    error: null,
+    detail: { type: "unknown", input: { agentId: "agt_1" }, output: null },
+    targetAgentTitle: "Reviewer",
+    resolveIcon: fakeResolveIcon,
+  });
+  expect(presentation.displayName).toBe("Kill agent");
+  expect(presentation.summary).toBe("Reviewer");
 });

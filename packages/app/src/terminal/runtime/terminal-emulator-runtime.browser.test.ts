@@ -1,7 +1,12 @@
 import { page, userEvent } from "@vitest/browser/context";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TerminalInputModeState } from "@jagentdesk/protocol/terminal-input-mode";
-import { encodeTerminalOutput, TerminalEmulatorRuntime } from "./terminal-emulator-runtime";
+import type { TerminalFile } from "../file-paste";
+import {
+  encodeTerminalOutput,
+  TerminalEmulatorRuntime,
+  type TerminalClipboard,
+} from "./terminal-emulator-runtime";
 
 vi.mock("@xterm/addon-webgl", () => ({
   WebglAddon: class WebglAddon {
@@ -41,9 +46,44 @@ interface MountedTerminal {
   terminalKeys: TerminalKeyRecord[];
   inputModeChanges: TerminalInputModeState[];
   openedUrls: string[];
+  clipboard: FakeClipboard;
+  filePastes: Promise<TerminalFile | null>[];
+}
+
+class FakeClipboard implements TerminalClipboard {
+  text = "";
+  image: { mimeType: string; bytes: number[] } | null = null;
+  imageReads = 0;
+
+  async readText(): Promise<string> {
+    return this.text;
+  }
+
+  async read(): Promise<readonly Pick<ClipboardItem, "types" | "getType">[]> {
+    this.imageReads += 1;
+    const image = this.image;
+    if (!image) {
+      return [];
+    }
+    return [
+      {
+        types: ["text/html", image.mimeType],
+        getType: async (type: string) => new Blob([new Uint8Array(image.bytes)], { type }),
+      },
+    ];
+  }
+
+  async writeText(text: string): Promise<void> {
+    this.text = text;
+  }
 }
 
 const mountedTerminals: MountedTerminal[] = [];
+
+const MAC_DESKTOP_UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+const LINUX_DESKTOP_UA =
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
 function nextFrame(): Promise<void> {
   return new Promise((resolve) => {
@@ -73,10 +113,31 @@ function settleMountRefits(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 2_600));
 }
 
+/** Text typed into xterm's textarea, as the browser reports a typed character. */
+function typeText(mounted: MountedTerminal, text: string): void {
+  mounted.host
+    .querySelector(".xterm-helper-textarea")
+    ?.dispatchEvent(
+      new InputEvent("input", { data: text, inputType: "insertText", bubbles: true }),
+    );
+}
+
+/** A native paste of plain text into xterm's textarea. */
+function pasteText(mounted: MountedTerminal, text: string): void {
+  const clipboardData = new DataTransfer();
+  clipboardData.setData("text/plain", text);
+  mounted.host
+    .querySelector(".xterm-helper-textarea")
+    ?.dispatchEvent(
+      new ClipboardEvent("paste", { clipboardData, bubbles: true, cancelable: true }),
+    );
+}
+
 function createTerminalHost(input: {
   width: number;
   height: number;
   scrollback?: number;
+  isMac?: boolean;
 }): MountedTerminal {
   const root = document.createElement("div");
   root.style.width = `${input.width}px`;
@@ -97,7 +158,12 @@ function createTerminalHost(input: {
   const terminalKeys: TerminalKeyRecord[] = [];
   const inputModeChanges: TerminalInputModeState[] = [];
   const openedUrls: string[] = [];
-  const runtime = new TerminalEmulatorRuntime();
+  const clipboard = new FakeClipboard();
+  const filePastes: Promise<TerminalFile | null>[] = [];
+  const runtime = new TerminalEmulatorRuntime(
+    input.isMac === undefined ? undefined : { isMac: input.isMac },
+    clipboard,
+  );
   runtime.setCallbacks({
     callbacks: {
       onInput: (data) => {
@@ -115,12 +181,14 @@ function createTerminalHost(input: {
       onOpenExternalUrl: (url) => {
         openedUrls.push(url);
       },
+      onFilePaste: (file) => {
+        filePastes.push(file);
+      },
     },
   });
   runtime.mount({
     root,
     host,
-    initialSnapshot: null,
     scrollback: input.scrollback ?? 10_000,
     theme: {
       background: "#0b0b0b",
@@ -138,6 +206,8 @@ function createTerminalHost(input: {
     terminalKeys,
     inputModeChanges,
     openedUrls,
+    clipboard,
+    filePastes,
   };
   mountedTerminals.push(mounted);
   return mounted;
@@ -179,6 +249,7 @@ function getBrowserTerminal(): BrowserTerminal {
 function dispatchTerminalKey(input: {
   host: HTMLElement;
   key: string;
+  keyCode?: number;
   shiftKey?: boolean;
   ctrlKey?: boolean;
   altKey?: boolean;
@@ -189,17 +260,50 @@ function dispatchTerminalKey(input: {
     throw new Error("Expected xterm textarea to be mounted");
   }
   textarea.focus();
-  return textarea.dispatchEvent(
-    new KeyboardEvent("keydown", {
-      key: input.key,
-      shiftKey: input.shiftKey ?? false,
-      ctrlKey: input.ctrlKey ?? false,
-      altKey: input.altKey ?? false,
-      metaKey: input.metaKey ?? false,
-      bubbles: true,
-      cancelable: true,
-    }),
-  );
+  const event = new KeyboardEvent("keydown", {
+    key: input.key,
+    shiftKey: input.shiftKey ?? false,
+    ctrlKey: input.ctrlKey ?? false,
+    altKey: input.altKey ?? false,
+    metaKey: input.metaKey ?? false,
+    bubbles: true,
+    cancelable: true,
+  });
+  if (input.keyCode !== undefined) {
+    // Synthetic KeyboardEvents always report keyCode 0; xterm's fallback encoder
+    // switches on keyCode, so hardware-like events need it filled in.
+    Object.defineProperty(event, "keyCode", { value: input.keyCode });
+  }
+  return textarea.dispatchEvent(event);
+}
+
+// The runtime reads the platform per keydown, so shadowing the instance properties
+// makes mac-only key handling testable from any CI host.
+function withNavigatorPlatform(
+  input: { userAgent: string; platform: string },
+  run: () => void,
+): void {
+  const restores = (["userAgent", "platform"] as const).map((property) => {
+    const original = Object.getOwnPropertyDescriptor(navigator, property);
+    Object.defineProperty(navigator, property, {
+      value: input[property],
+      configurable: true,
+    });
+    return () => {
+      if (original) {
+        Object.defineProperty(navigator, property, original);
+      } else {
+        Reflect.deleteProperty(navigator, property);
+      }
+    };
+  });
+  try {
+    run();
+  } finally {
+    for (const restore of restores) {
+      restore();
+    }
+  }
 }
 
 /** An OSC 8 hyperlink, the escape sequence CLIs such as gh and ls --hyperlink print. */
@@ -401,6 +505,78 @@ describe("terminal emulator runtime in a real browser", () => {
     expect(mounted.inputs).toEqual(["legacy renderer paste"]);
   });
 
+  it("pastes clipboard text on Ctrl+V without reading the clipboard image", async () => {
+    const mounted = createTerminalHost({ width: 720, height: 360, isMac: false });
+    await waitFor({ predicate: () => mounted.sizes.length > 0 });
+    mounted.clipboard.text = "clipboard text";
+    mounted.clipboard.image = { mimeType: "image/png", bytes: [1, 2, 3] };
+
+    dispatchTerminalKey({ host: mounted.host, key: "v", ctrlKey: true });
+
+    expect(mounted.filePastes).toHaveLength(1);
+    await expect(mounted.filePastes[0]).resolves.toBeNull();
+    expect(mounted.inputs).toEqual(["clipboard text"]);
+    expect(mounted.clipboard.imageReads).toBe(0);
+  });
+
+  it("hands the clipboard image to onFilePaste on Ctrl+V when there is no text", async () => {
+    const mounted = createTerminalHost({ width: 720, height: 360, isMac: false });
+    await waitFor({ predicate: () => mounted.sizes.length > 0 });
+    mounted.clipboard.image = { mimeType: "image/jpeg", bytes: [1, 2, 3] };
+
+    dispatchTerminalKey({ host: mounted.host, key: "v", ctrlKey: true });
+
+    expect(mounted.filePastes).toHaveLength(1);
+    await expect(mounted.filePastes[0]).resolves.toEqual({
+      fileName: "clipboard.jpg",
+      mimeType: "image/jpeg",
+      bytes: new Uint8Array([1, 2, 3]),
+    });
+    expect(mounted.inputs).toEqual([]);
+  });
+
+  it("takes file-only paste events at xterm's input before xterm pastes empty text", async () => {
+    const mounted = createTerminalHost({ width: 720, height: 360 });
+    await waitFor({ predicate: () => mounted.sizes.length > 0 });
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([new Uint8Array([1, 2, 3])], "shot.png", { type: "image/png" }));
+    const event = new ClipboardEvent("paste", {
+      clipboardData: transfer,
+      bubbles: true,
+      cancelable: true,
+    });
+
+    mounted.host.querySelector(".xterm-helper-textarea")!.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(mounted.filePastes).toHaveLength(1);
+    await expect(mounted.filePastes[0]).resolves.toEqual({
+      fileName: "shot.png",
+      mimeType: "image/png",
+      bytes: new Uint8Array([1, 2, 3]),
+    });
+    await nextFrame();
+    expect(mounted.inputs).toEqual([]);
+  });
+
+  it("leaves paste events with text to xterm", async () => {
+    const mounted = createTerminalHost({ width: 720, height: 360 });
+    await waitFor({ predicate: () => mounted.sizes.length > 0 });
+    const transfer = new DataTransfer();
+    transfer.setData("text/plain", "echo hi");
+    transfer.items.add(new File([new Uint8Array([1])], "shot.png", { type: "image/png" }));
+
+    mounted.host
+      .querySelector(".xterm-helper-textarea")!
+      .dispatchEvent(
+        new ClipboardEvent("paste", { clipboardData: transfer, bubbles: true, cancelable: true }),
+      );
+
+    await waitFor({ predicate: () => mounted.inputs.length > 0 });
+    expect(mounted.inputs).toEqual(["echo hi"]);
+    expect(mounted.filePastes).toEqual([]);
+  });
+
   it("refreshes visible rows on a forced same-size resize", async () => {
     await page.viewport(900, 600);
     const mounted = createTerminalHost({ width: 720, height: 360 });
@@ -514,16 +690,82 @@ describe("terminal emulator runtime in a real browser", () => {
     });
   });
 
+  it("translates mac editing shortcuts into shell editing sequences", async () => {
+    await page.viewport(900, 600);
+    const mounted = createTerminalHost({ width: 720, height: 360 });
+
+    await waitFor({ predicate: () => mounted.sizes.length > 0 });
+
+    withNavigatorPlatform({ userAgent: MAC_DESKTOP_UA, platform: "MacIntel" }, () => {
+      dispatchTerminalKey({ host: mounted.host, key: "ArrowRight", keyCode: 39 });
+      dispatchTerminalKey({ host: mounted.host, key: "ArrowLeft", keyCode: 37, metaKey: true });
+      dispatchTerminalKey({ host: mounted.host, key: "ArrowRight", keyCode: 39, metaKey: true });
+      dispatchTerminalKey({ host: mounted.host, key: "ArrowLeft", keyCode: 37, altKey: true });
+      dispatchTerminalKey({ host: mounted.host, key: "ArrowRight", keyCode: 39, altKey: true });
+      dispatchTerminalKey({ host: mounted.host, key: "Backspace", keyCode: 8, metaKey: true });
+    });
+    await nextFrame();
+
+    expect(mounted.inputs).toEqual([
+      "\x1b[C", // plain arrow keeps xterm's default encoding
+      "\x01", // cmd+left -> line start
+      "\x05", // cmd+right -> line end
+      "\x1bb", // option+left -> word back
+      "\x1bf", // option+right -> word forward
+      "\x15", // cmd+backspace -> kill line
+    ]);
+    expect(mounted.terminalKeys).toEqual([]);
+  });
+
+  it("keeps cmd+shift+arrow free for app-level shortcuts", async () => {
+    await page.viewport(900, 600);
+    const mounted = createTerminalHost({ width: 720, height: 360 });
+
+    await waitFor({ predicate: () => mounted.sizes.length > 0 });
+
+    withNavigatorPlatform({ userAgent: MAC_DESKTOP_UA, platform: "MacIntel" }, () => {
+      dispatchTerminalKey({
+        host: mounted.host,
+        key: "ArrowRight",
+        keyCode: 39,
+        metaKey: true,
+        shiftKey: true,
+      });
+    });
+    await nextFrame();
+
+    expect(mounted.inputs).toEqual([]);
+    expect(mounted.terminalKeys).toEqual([]);
+  });
+
+  it("does not remap modified arrows on non-mac platforms", async () => {
+    await page.viewport(900, 600);
+    const mounted = createTerminalHost({ width: 720, height: 360 });
+
+    await waitFor({ predicate: () => mounted.sizes.length > 0 });
+
+    withNavigatorPlatform({ userAgent: LINUX_DESKTOP_UA, platform: "Linux x86_64" }, () => {
+      dispatchTerminalKey({ host: mounted.host, key: "ArrowRight", keyCode: 39, metaKey: true });
+      dispatchTerminalKey({ host: mounted.host, key: "ArrowRight", keyCode: 39, altKey: true });
+    });
+    await nextFrame();
+
+    // Meta+arrow is ignored by xterm; alt+arrow takes xterm's generic encoding.
+    expect(mounted.inputs).toEqual(["\x1b[1;3C"]);
+  });
+
   it.each([
     { name: "DA1", bytes: "\x1b[c" },
     { name: "DA1-zero", bytes: "\x1b[0c" },
     { name: "DA2", bytes: "\x1b[>c" },
     { name: "DA3", bytes: "\x1b[=c" },
+    { name: "XTVERSION", bytes: "\x1b[>q" },
     { name: "DSR-5", bytes: "\x1b[5n" },
     { name: "DSR-6", bytes: "\x1b[6n" },
     { name: "DSR-?6", bytes: "\x1b[?6n" },
     { name: "DECRQM", bytes: "\x1b[1$p" },
     { name: "DECRQM-?", bytes: "\x1b[?1$p" },
+    { name: "DECRQSS", bytes: "\x1bP$qm\x1b\\" },
     { name: "OSC-10-foreground-color", bytes: "\x1b]10;?\x07" },
     { name: "OSC-11-background-color", bytes: "\x1b]11;?\x07" },
     { name: "OSC-12-cursor-color", bytes: "\x1b]12;?\x07" },
@@ -540,6 +782,24 @@ describe("terminal emulator runtime in a real browser", () => {
     expect(mounted.inputs).toEqual([]);
   });
 
+  it("keeps what the user types, but not pastes, while a replay is still parsing", async () => {
+    const mounted = createTerminalHost({ width: 720, height: 360 });
+    await waitFor({ predicate: () => mounted.sizes.length > 0 });
+    mounted.runtime.clear();
+    mounted.runtime.replay({ type: "begin" });
+    mounted.runtime.replay({ type: "data", data: terminalOutput("\x1b]4;1;?\x07restored") });
+    mounted.runtime.replay({ type: "end" });
+
+    typeText(mounted, "a");
+    pasteText(mounted, "echo one\necho two\n");
+    typeText(mounted, "f");
+    await new Promise<void>((resolve) =>
+      mounted.runtime.write({ data: terminalOutput("live"), onCommitted: resolve }),
+    );
+
+    expect(mounted.inputs).toEqual(["a", "f"]);
+  });
+
   it("replays snapshots without synchronously resetting the visible terminal", async () => {
     await page.viewport(900, 600);
     const mounted = createTerminalHost({ width: 720, height: 360 });
@@ -551,30 +811,11 @@ describe("terminal emulator runtime in a real browser", () => {
     const reset = vi.fn(originalReset);
     terminal.reset = reset;
 
-    mounted.runtime.renderSnapshot({
-      state: {
-        rows: terminal.rows,
-        cols: terminal.cols,
-        scrollback: [],
-        grid: [
-          [
-            { char: "p" },
-            { char: "r" },
-            { char: "o" },
-            { char: "m" },
-            { char: "p" },
-            { char: "t" },
-          ],
-        ],
-        cursor: {
-          row: 0,
-          col: 6,
-        },
-      },
-    });
-    await nextFrame();
-
+    mounted.runtime.replay({ type: "begin", rows: terminal.rows, cols: terminal.cols });
+    mounted.runtime.replay({ type: "data", data: terminalOutput("prompt") });
+    mounted.runtime.replay({ type: "end" });
     expect(reset).not.toHaveBeenCalled();
+    await nextFrame();
   });
 
   it("opens OSC 8 hyperlinks the same way as plain-text URLs", async () => {
@@ -595,4 +836,96 @@ describe("terminal emulator runtime in a real browser", () => {
     expect(mounted.openedUrls).toEqual(["https://example.com/plain", "https://example.com/osc8"]);
     expect(confirm).not.toHaveBeenCalled();
   });
+});
+
+describe("incremental replay lifecycle", () => {
+  it.each(["clear", "remount"] as const)(
+    "recovers live input after interrupted replay and %s",
+    async (cleanup) => {
+      const mounted = createTerminalHost({ width: 720, height: 360 });
+      mounted.runtime.replay({ type: "begin", rows: 30, cols: 120 });
+      mounted.root.style.width = "360px";
+      mounted.runtime.resize({ shouldClaim: false });
+      mounted.runtime.replay({ type: "data", data: terminalOutput("interrupted") });
+      if (cleanup === "clear")
+        await new Promise<void>((resolve) => mounted.runtime.clear({ onCommitted: resolve }));
+      else {
+        mounted.runtime.unmount();
+        mounted.runtime.mount({
+          root: mounted.root,
+          host: mounted.host,
+          scrollback: 1000,
+          theme: {},
+        });
+      }
+      await new Promise<void>((resolve) =>
+        mounted.runtime.write({ data: terminalOutput("live"), onCommitted: resolve }),
+      );
+      getBrowserTerminal().input("user-input", true);
+      expect(mounted.inputs).toContain("user-input");
+      expect(getBrowserTerminal().cols).toBeLessThan(60);
+    },
+  );
+
+  it("suppresses generated replies until queued replay chunks commit after end", async () => {
+    const mounted = createTerminalHost({ width: 720, height: 360 });
+    mounted.runtime.replay({ type: "begin" });
+    mounted.runtime.replay({ type: "data", data: terminalOutput("\x1b]4;1;?\x07") });
+    mounted.runtime.replay({ type: "data", data: terminalOutput("\x1b]4;1;?\x07") });
+    mounted.runtime.replay({ type: "end" });
+    await new Promise<void>((resolve) =>
+      mounted.runtime.write({ data: terminalOutput("committed"), onCommitted: resolve }),
+    );
+    expect(mounted.inputs).toEqual([]);
+    await new Promise<void>((resolve) =>
+      mounted.runtime.write({ data: terminalOutput("\x1b]4;1;?\x07"), onCommitted: resolve }),
+    );
+    expect(mounted.inputs).toHaveLength(1);
+    expect(mounted.inputs[0]?.startsWith("\x1b]4;1;rgb:")).toBe(true);
+  });
+});
+
+it("restores fitted web geometry after replay before live output", async () => {
+  const mounted = createTerminalHost({ width: 720, height: 360 });
+  await settleMountRefits();
+  const local = latestSize(mounted.sizes);
+  mounted.runtime.replay({ type: "begin", rows: 30, cols: 120 });
+  mounted.runtime.replay({ type: "data", data: terminalOutput("x".repeat(100)) });
+  mounted.runtime.replay({ type: "end" });
+  await new Promise<void>((resolve) =>
+    mounted.runtime.write({ data: terminalOutput("LIVE"), onCommitted: resolve }),
+  );
+  expect(getBrowserTerminal().cols).toBe(latestSize(mounted.sizes).cols);
+  expect(getBrowserTerminal().cols).toBeLessThan(120);
+  expect(getBrowserTerminal().rows).toBe(local.rows);
+  mounted.runtime.resize({ forceClaim: true, shouldClaim: true });
+  expect(getBrowserTerminal().cols).toBe(latestSize(mounted.sizes).cols);
+});
+
+it("defers layout fit until all replay chunks commit", async () => {
+  const mounted = createTerminalHost({ width: 720, height: 360 });
+  await settleMountRefits();
+  mounted.runtime.replay({ type: "begin", rows: 30, cols: 120 });
+  await new Promise<void>((resolve) =>
+    mounted.runtime.write({
+      data: terminalOutput("first"),
+      suppressInput: true,
+      onCommitted: resolve,
+    }),
+  );
+  expect(getBrowserTerminal().cols).toBe(120);
+  mounted.root.style.width = "360px";
+  mounted.runtime.resize({ shouldClaim: true, forceClaim: true, forceRefresh: true });
+  await nextFrame();
+  expect(getBrowserTerminal().cols).toBe(120);
+  mounted.runtime.replay({ type: "data", data: terminalOutput("\x1b[2;110Hsecond") });
+  mounted.runtime.replay({ type: "end" });
+  await new Promise<void>((resolve) =>
+    mounted.runtime.write({ data: terminalOutput("LIVE"), onCommitted: resolve }),
+  );
+  expect(getBrowserTerminal().cols).toBe(latestSize(mounted.sizes).cols);
+  expect(getBrowserTerminal().cols).toBeLessThan(60);
+  expect(latestSize(mounted.sizes)).toMatchObject({ shouldClaim: true, forceClaim: true });
+  mounted.runtime.resize({ shouldClaim: true, forceClaim: true });
+  expect(getBrowserTerminal().cols).toBe(latestSize(mounted.sizes).cols);
 });

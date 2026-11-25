@@ -16,13 +16,18 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "outDir": "./dist/server",
-    "rootDir": "./src",
+    "outDir": "./dist/.builtin-build",
+    "rootDir": "../..",
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true
   },
-  "include": ["src/server/**/*", "src/services/**/*", "src/terminal/**/*"],
+  "include": [
+    "src/server/**/*",
+    "src/services/**/*",
+    "src/terminal/**/*",
+    "src/executable-resolution/which.d.ts"
+  ],
   "exclude": [
     "node_modules",
     "dist",

@@ -1,3 +1,4 @@
+import { useTopBand, type TopBand } from "@/window-layout";
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { View, type ViewProps } from "react-native";
 import {
@@ -77,10 +78,13 @@ export function intersectWindowChromeCorners(
 }
 
 export function resolveWindowChromeObstruction(input: {
+  topBand: TopBand | null;
   isElectron: boolean;
   isMac: boolean;
   isFullscreen: boolean;
 }): WindowChromeObstruction {
+  if (input.topBand?.trailingObstruction)
+    return { topLeft: null, topRight: input.topBand.trailingObstruction };
   if (!input.isElectron || input.isFullscreen) return EMPTY_OBSTRUCTION;
   if (input.isMac) {
     return {
@@ -181,14 +185,16 @@ export function WindowChromeProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const topBand = useTopBand();
   const obstruction = useMemo(
     () =>
       resolveWindowChromeObstruction({
         isElectron: isElectronReady,
         isMac: getIsElectronRuntimeMac(),
         isFullscreen,
+        topBand,
       }),
-    [isElectronReady, isFullscreen],
+    [isElectronReady, isFullscreen, topBand],
   );
   return (
     <WindowChromeContext.Provider value={obstruction}>

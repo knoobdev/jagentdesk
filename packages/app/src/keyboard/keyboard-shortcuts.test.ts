@@ -1,9 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
+import { keyboardEventToComboString } from "./shortcut-string";
 import {
   buildKeyboardShortcutHelpSections,
   buildEffectiveBindings,
+  DEFAULT_BINDINGS,
+  normalizeCapturedShortcutCombo,
+  isShortcutCaptureComplete,
   getBindingIdForAction,
+  getDefaultKeysForAction,
   getWorkspaceIndexJumpModifierKey,
+  resolveShortcutKeysForAction,
   resolveKeyboardShortcut,
   type ChordState,
   type KeyboardShortcutContext,
@@ -29,7 +35,7 @@ function shortcutContext(
 ): KeyboardShortcutContext {
   return {
     isMac: false,
-    isDesktop: false,
+    usesDesktopBindings: false,
     focusScope: "other",
     commandCenterOpen: false,
     ...overrides,
@@ -117,7 +123,7 @@ interface HelpSectionCase {
   name: string;
   context: {
     isMac: boolean;
-    isDesktop: boolean;
+    usesDesktopBindings: boolean;
   };
   expectedKeys: Record<string, string[]>;
 }
@@ -163,55 +169,69 @@ describe("keyboard-shortcuts", () => {
     {
       name: "matches workspace index jump on web via Alt+digit",
       event: { key: "2", code: "Digit2", altKey: true },
-      context: { isDesktop: false },
+      context: { usesDesktopBindings: false },
       action: "workspace.navigate.index",
       payload: { index: 2 },
     },
     {
       name: "matches workspace index jump on desktop via Mod+digit",
       event: { key: "2", code: "Digit2", metaKey: true },
-      context: { isMac: true, isDesktop: true },
+      context: { isMac: true, usesDesktopBindings: true },
       action: "workspace.navigate.index",
       payload: { index: 2 },
     },
     {
       name: "matches tab index jump on mac desktop via Cmd+Alt+digit",
       event: { key: "@", code: "Digit2", metaKey: true, altKey: true },
-      context: { isMac: true, isDesktop: true },
+      context: { isMac: true, usesDesktopBindings: true },
       action: "workspace.tab.navigate.index",
       payload: { index: 2 },
     },
     {
       name: "matches tab index jump on non-mac desktop via Alt+digit",
       event: { key: "2", code: "Digit2", altKey: true },
-      context: { isMac: false, isDesktop: true },
+      context: { isMac: false, usesDesktopBindings: true },
       action: "workspace.tab.navigate.index",
       payload: { index: 2 },
     },
     {
       name: "matches tab index jump on web via Alt+Shift+digit",
       event: { key: "@", code: "Digit2", altKey: true, shiftKey: true },
-      context: { isDesktop: false },
+      context: { usesDesktopBindings: false },
       action: "workspace.tab.navigate.index",
       payload: { index: 2 },
     },
     {
       name: "matches workspace relative navigation on web via Alt+[",
       event: { key: "[", code: "BracketLeft", altKey: true },
-      context: { isDesktop: false },
+      context: { usesDesktopBindings: false },
       action: "workspace.navigate.relative",
       payload: { delta: -1 },
     },
     {
       name: "matches workspace relative navigation on desktop via Mod+]",
       event: { key: "]", code: "BracketRight", ctrlKey: true },
-      context: { isDesktop: true },
+      context: { usesDesktopBindings: true },
       action: "workspace.navigate.relative",
       payload: { delta: 1 },
     },
     {
       name: "matches tab relative navigation via Alt+Shift+]",
       event: { key: "}", code: "BracketRight", altKey: true, shiftKey: true },
+      action: "workspace.tab.navigate.relative",
+      payload: { delta: 1 },
+    },
+    {
+      name: "matches tab relative navigation on macOS desktop via Cmd+Shift+[",
+      event: { key: "{", code: "BracketLeft", metaKey: true, shiftKey: true },
+      context: { isMac: true, usesDesktopBindings: true },
+      action: "workspace.tab.navigate.relative",
+      payload: { delta: -1 },
+    },
+    {
+      name: "matches tab relative navigation on macOS desktop via Cmd+Shift+]",
+      event: { key: "}", code: "BracketRight", metaKey: true, shiftKey: true },
+      context: { isMac: true, usesDesktopBindings: true },
       action: "workspace.tab.navigate.relative",
       payload: { delta: 1 },
     },
@@ -224,19 +244,19 @@ describe("keyboard-shortcuts", () => {
     {
       name: "matches Alt+Shift+W to close current tab on web",
       event: { key: "W", code: "KeyW", altKey: true, shiftKey: true },
-      context: { isDesktop: false },
+      context: { usesDesktopBindings: false },
       action: "workspace.tab.close.current",
     },
     {
       name: "matches Cmd+W to close current tab on mac desktop",
       event: { key: "w", code: "KeyW", metaKey: true },
-      context: { isMac: true, isDesktop: true },
+      context: { isMac: true, usesDesktopBindings: true },
       action: "workspace.tab.close.current",
     },
     {
       name: "matches Ctrl+W to close current tab on non-mac desktop",
       event: { key: "w", code: "KeyW", ctrlKey: true },
-      context: { isMac: false, isDesktop: true },
+      context: { isMac: false, usesDesktopBindings: true },
       action: "workspace.tab.close.current",
     },
     {
@@ -313,6 +333,27 @@ describe("keyboard-shortcuts", () => {
       payload: { kind: "dictation-toggle" },
     },
     {
+      name: "toggles the model picker from the composer",
+      event: { key: "/", code: "Slash", metaKey: true },
+      context: { isMac: true, focusScope: "message-input" },
+      action: "message-input.action",
+      payload: { kind: "model-toggle" },
+    },
+    {
+      name: "toggles the model picker while its search field has focus",
+      event: { key: "/", code: "Slash", metaKey: true },
+      context: { isMac: true, focusScope: "editable" },
+      action: "message-input.action",
+      payload: { kind: "model-toggle" },
+    },
+    {
+      name: "cycles effort with the shifted slash character",
+      event: { key: "?", code: "Slash", metaKey: true, shiftKey: true },
+      context: { isMac: true, focusScope: "message-input" },
+      action: "message-input.action",
+      payload: { kind: "effort-cycle" },
+    },
+    {
       name: "routes Shift+Tab to cycle agent mode from the message input",
       event: { key: "Tab", code: "Tab", shiftKey: true },
       context: { focusScope: "message-input" },
@@ -346,21 +387,21 @@ describe("keyboard-shortcuts", () => {
     {
       name: "matches Alt+Shift+[ to previous tab on macOS when Option substitutes event.key",
       event: { key: "\u201D", code: "BracketLeft", altKey: true, shiftKey: true },
-      context: { isMac: true },
+      context: { isMac: true, usesDesktopBindings: false },
       action: "workspace.tab.navigate.relative",
       payload: { delta: -1 },
     },
     {
       name: "matches Alt+Shift+] to next tab on macOS when Option substitutes event.key",
       event: { key: "\u2019", code: "BracketRight", altKey: true, shiftKey: true },
-      context: { isMac: true },
+      context: { isMac: true, usesDesktopBindings: false },
       action: "workspace.tab.navigate.relative",
       payload: { delta: 1 },
     },
     {
       name: "matches Alt+[ to previous workspace on macOS web when Option substitutes event.key",
       event: { key: "\u201C", code: "BracketLeft", altKey: true },
-      context: { isMac: true, isDesktop: false },
+      context: { isMac: true, usesDesktopBindings: false },
       action: "workspace.navigate.relative",
       payload: { delta: -1 },
       preventDefault: true,
@@ -369,7 +410,7 @@ describe("keyboard-shortcuts", () => {
     {
       name: "matches Alt+] to next workspace on macOS web when Option substitutes event.key",
       event: { key: "\u2018", code: "BracketRight", altKey: true },
-      context: { isMac: true, isDesktop: false },
+      context: { isMac: true, usesDesktopBindings: false },
       action: "workspace.navigate.relative",
       payload: { delta: 1 },
       preventDefault: true,
@@ -378,7 +419,7 @@ describe("keyboard-shortcuts", () => {
     {
       name: "matches Alt+Shift+W to close current tab on macOS web when Option substitutes event.key",
       event: { key: "\u201E", code: "KeyW", altKey: true, shiftKey: true },
-      context: { isMac: true, isDesktop: false },
+      context: { isMac: true, usesDesktopBindings: false },
       action: "workspace.tab.close.current",
     },
   ];
@@ -396,6 +437,25 @@ describe("keyboard-shortcuts", () => {
       });
     },
   );
+
+  describe("undo archive workspace", () => {
+    it.each([
+      { isMac: true, event: { key: "z", code: "KeyZ", metaKey: true } },
+      { isMac: false, event: { key: "z", code: "KeyZ", ctrlKey: true } },
+    ])("routes Cmd/Ctrl+Z outside text and terminals (mac: $isMac)", ({ isMac, event }) => {
+      expectShortcutResolution({ event, context: { isMac }, action: "workspace.archive.undo" });
+    });
+
+    it.each(["editable", "message-input", "terminal"] as const)(
+      "leaves Cmd+Z to the focused %s",
+      (focusScope) => {
+        expectNoShortcutResolution({
+          event: { key: "z", code: "KeyZ", metaKey: true },
+          context: { isMac: true, focusScope },
+        });
+      },
+    );
+  });
 
   const nonMatchingCases: NonMatchingShortcutCase[] = [
     {
@@ -435,12 +495,12 @@ describe("keyboard-shortcuts", () => {
     {
       name: "does not close tab with Ctrl+W on mac desktop (Cmd+W only)",
       event: { key: "w", code: "KeyW", ctrlKey: true },
-      context: { isMac: true, isDesktop: true },
+      context: { isMac: true, usesDesktopBindings: true },
     },
     {
       name: "does not close tab with Ctrl+W on non-mac desktop when terminal is focused",
       event: { key: "w", code: "KeyW", ctrlKey: true },
-      context: { isMac: false, isDesktop: true, focusScope: "terminal" },
+      context: { isMac: false, usesDesktopBindings: true, focusScope: "terminal" },
     },
     {
       name: "does not match Ctrl+T on mac (Cmd only)",
@@ -450,7 +510,7 @@ describe("keyboard-shortcuts", () => {
     {
       name: "keeps mac Option+digit available for international text input",
       event: { key: "@", code: "Digit2", altKey: true },
-      context: { isMac: true, isDesktop: true, focusScope: "message-input" },
+      context: { isMac: true, usesDesktopBindings: true, focusScope: "message-input" },
     },
     {
       name: "does not match Ctrl+K for command center on non-mac in terminal",
@@ -520,7 +580,7 @@ describe("keyboard-shortcuts", () => {
     {
       name: "keeps Dvorak Cmd+V available for paste in message input",
       event: { key: "v", code: "Period", metaKey: true },
-      context: { isMac: true, isDesktop: true, focusScope: "message-input" },
+      context: { isMac: true, usesDesktopBindings: true, focusScope: "message-input" },
     },
     // Sanity: the macOS Option-substitution fallback must still respect
     // modifier checks — pressing Option+T alone (no Cmd) must not trigger
@@ -577,7 +637,7 @@ describe("keyboard-shortcuts", () => {
 
     const firstResult = resolveShortcut({
       event: { key: "w", code: "KeyW", ctrlKey: true },
-      context: { isMac: false, isDesktop: true },
+      context: { isMac: false, usesDesktopBindings: true },
       bindings,
     });
 
@@ -588,7 +648,7 @@ describe("keyboard-shortcuts", () => {
 
     const secondResult = resolveShortcut({
       event: { key: "s", code: "KeyS" },
-      context: { isMac: false, isDesktop: true },
+      context: { isMac: false, usesDesktopBindings: true },
       chordState: firstResult.nextChordState,
       bindings,
     });
@@ -604,7 +664,7 @@ describe("keyboard-shortcuts", () => {
   it("resolves a browser-origin shortcut with browser focus instead of host focus", () => {
     expectShortcutResolution({
       event: { key: "t", code: "KeyT", ctrlKey: true },
-      context: { isDesktop: true, focusScope: "browser" },
+      context: { usesDesktopBindings: true, focusScope: "browser" },
       action: "workspace.tab.new",
     });
   });
@@ -618,12 +678,12 @@ describe("keyboard-shortcuts", () => {
     // so the stream for Ctrl+K, release, Ctrl+J is four keydowns, not two.
     const firstModifier = resolveShortcut({
       event: { key: "Control", code: "ControlLeft", ctrlKey: true },
-      context: { isMac: false, isDesktop: true },
+      context: { isMac: false, usesDesktopBindings: true },
       bindings,
     });
     const firstStep = resolveShortcut({
       event: { key: "k", code: "KeyK", ctrlKey: true },
-      context: { isMac: false, isDesktop: true },
+      context: { isMac: false, usesDesktopBindings: true },
       chordState: firstModifier.nextChordState,
       bindings,
     });
@@ -631,13 +691,13 @@ describe("keyboard-shortcuts", () => {
 
     const secondModifier = resolveShortcut({
       event: { key: "Control", code: "ControlLeft", ctrlKey: true },
-      context: { isMac: false, isDesktop: true },
+      context: { isMac: false, usesDesktopBindings: true },
       chordState: firstStep.nextChordState,
       bindings,
     });
     const secondStep = resolveShortcut({
       event: { key: "j", code: "KeyJ", ctrlKey: true },
-      context: { isMac: false, isDesktop: true },
+      context: { isMac: false, usesDesktopBindings: true },
       chordState: secondModifier.nextChordState,
       bindings,
     });
@@ -655,7 +715,7 @@ describe("keyboard-shortcuts", () => {
 
     const result = resolveShortcut({
       event: { key: "w", code: "KeyW", ctrlKey: true },
-      context: { isMac: false, isDesktop: true },
+      context: { isMac: false, usesDesktopBindings: true },
       onChordReset,
       bindings,
     });
@@ -668,6 +728,94 @@ describe("keyboard-shortcuts", () => {
 
     expect(onChordReset).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
+  });
+
+  it("dispatches a captured Dvorak binding on the same logical key", () => {
+    const event = keyboardInput({ key: "b", code: "KeyN", metaKey: true });
+    const combo = keyboardEventToComboString(event as KeyboardEvent);
+    expect(combo).toBe("Cmd+B");
+    const bindings = buildEffectiveBindings({ "sidebar-toggle-left-mac-cmd-b": combo! });
+
+    expect(
+      resolveShortcut({ event, context: { isMac: true, usesDesktopBindings: true }, bindings })
+        .match?.action,
+    ).toBe("sidebar.toggle.left");
+    expect(
+      resolveShortcut({
+        event: { key: "x", code: "KeyB", metaKey: true },
+        context: { isMac: true, usesDesktopBindings: true },
+        bindings,
+      }).match,
+    ).toBeNull();
+  });
+
+  describe("non-Latin keyboard layouts", () => {
+    const desktopNonMac = { isMac: false, usesDesktopBindings: true };
+
+    it("dispatches a captured Russian letter shortcut on the same key", () => {
+      const event = keyboardInput({ key: "и", code: "KeyB", ctrlKey: true });
+      const combo = keyboardEventToComboString(event as KeyboardEvent);
+      expect(combo).toBe("Ctrl+B");
+      const bindings = buildEffectiveBindings({
+        "sidebar-toggle-left-ctrl-period-non-mac": combo!,
+      });
+
+      expect(resolveShortcut({ event, context: desktopNonMac, bindings }).match?.action).toBe(
+        "sidebar.toggle.left",
+      );
+    });
+
+    it("dispatches a recorded dotted-uppercase letter with Shift held", () => {
+      const event = keyboardInput({ key: "İ", code: "KeyS", ctrlKey: true, shiftKey: true });
+      const combo = keyboardEventToComboString(event as KeyboardEvent);
+      expect(combo).toBe("Ctrl+Shift+S");
+      const bindings = buildEffectiveBindings({
+        "sidebar-toggle-left-ctrl-period-non-mac": combo!,
+      });
+      expect(resolveShortcut({ event, context: desktopNonMac, bindings }).match?.action).toBe(
+        "sidebar.toggle.left",
+      );
+    });
+
+    it.each(["и", "И", "β", "ش", "ב", "é"])(
+      "matches default and recorded letter bindings for unsupported letter %s",
+      (key) => {
+        const event = keyboardInput({ key, code: "KeyB", ctrlKey: true });
+        expectShortcutResolution({
+          event,
+          context: desktopNonMac,
+          action: "sidebar.toggle.left",
+        });
+        const combo = keyboardEventToComboString(event as KeyboardEvent);
+        expect(combo).toBe("Ctrl+B");
+        expect(
+          resolveShortcut({
+            event,
+            context: desktopNonMac,
+            bindings: buildEffectiveBindings({
+              "sidebar-toggle-left-ctrl-period-non-mac": combo!,
+            }),
+          }).match?.action,
+        ).toBe("sidebar.toggle.left");
+      },
+    );
+
+    it.each(["v", "†", "Dead", "Unidentified", ""])(
+      "does not match an unrelated character or named key %s by physical letter",
+      (key) => {
+        expectNoShortcutResolution({
+          event: { key, code: "KeyB", ctrlKey: true },
+          context: desktopNonMac,
+        });
+      },
+    );
+
+    it("does not match non-letter bindings by physical key for unsupported letters", () => {
+      expectNoShortcutResolution({
+        event: { key: "ю", code: "Period", ctrlKey: true },
+        context: desktopNonMac,
+      });
+    });
   });
 });
 
@@ -685,7 +833,7 @@ describe("keyboard-shortcut help sections", () => {
   const helpCases: HelpSectionCase[] = [
     {
       name: "uses web defaults for workspace and tab jump",
-      context: { isMac: true, isDesktop: false },
+      context: { isMac: true, usesDesktopBindings: false },
       expectedKeys: {
         "new-agent": ["mod", "O"],
         "workspace-tab-new": ["mod", "T"],
@@ -695,11 +843,13 @@ describe("keyboard-shortcut help sections", () => {
         "workspace-pane-split-right": ["mod", "\\"],
         "workspace-pane-close": ["mod", "shift", "W"],
         "cycle-agent-mode": ["shift", "Tab"],
+        "toggle-model-picker": ["mod", "/"],
+        "cycle-effort": ["mod", "shift", "/"],
       },
     },
     {
       name: "uses desktop defaults for workspace and tab jump",
-      context: { isMac: true, isDesktop: true },
+      context: { isMac: true, usesDesktopBindings: true },
       expectedKeys: {
         "new-agent": ["mod", "O"],
         "new-workspace": ["mod", "N"],
@@ -713,7 +863,7 @@ describe("keyboard-shortcut help sections", () => {
     },
     {
       name: "uses non-mac desktop defaults for tab jump and close tab",
-      context: { isMac: false, isDesktop: true },
+      context: { isMac: false, usesDesktopBindings: true },
       expectedKeys: {
         "workspace-tab-jump-index": ["alt", "1-9"],
         "workspace-tab-close-current": ["ctrl", "W"],
@@ -721,7 +871,7 @@ describe("keyboard-shortcut help sections", () => {
     },
     {
       name: "uses mod+b for the left sidebar and mod+period for both sidebars on non-mac",
-      context: { isMac: false, isDesktop: false },
+      context: { isMac: false, usesDesktopBindings: false },
       expectedKeys: {
         "toggle-left-sidebar": ["mod", "B"],
         "toggle-both-sidebars": ["mod", "."],
@@ -738,7 +888,7 @@ describe("keyboard-shortcut help sections", () => {
   });
 
   it("returns stable i18n keys for section titles and help rows", () => {
-    const sections = buildKeyboardShortcutHelpSections({ isMac: true, isDesktop: true });
+    const sections = buildKeyboardShortcutHelpSections({ isMac: true, usesDesktopBindings: true });
     const projects = sections.find((section) => section.id === "projects");
     const panels = sections.find((section) => section.id === "panels");
     const openProject = findRow(sections, "new-agent");
@@ -754,30 +904,105 @@ describe("keyboard-shortcut help sections", () => {
   });
 
   it("does not expose Enter send behavior as rebindable shortcut rows", () => {
-    const sections = buildKeyboardShortcutHelpSections({ isMac: true, isDesktop: true });
+    const sections = buildKeyboardShortcutHelpSections({ isMac: true, usesDesktopBindings: true });
 
     expect(findRow(sections, "message-input-send")).toBeNull();
     expect(findRow(sections, "message-input-queue")).toBeNull();
     expect(
-      getBindingIdForAction("message-input-send", { isMac: true, isDesktop: true }),
+      getBindingIdForAction("message-input-send", { isMac: true, usesDesktopBindings: true }),
     ).toBeNull();
     expect(
-      getBindingIdForAction("message-input-queue", { isMac: true, isDesktop: true }),
+      getBindingIdForAction("message-input-queue", { isMac: true, usesDesktopBindings: true }),
     ).toBeNull();
   });
 });
 
 describe("getWorkspaceIndexJumpModifierKey", () => {
   it("uses Alt on web, regardless of OS", () => {
-    expect(getWorkspaceIndexJumpModifierKey({ isMac: true, isDesktop: false })).toBe("Alt");
-    expect(getWorkspaceIndexJumpModifierKey({ isMac: false, isDesktop: false })).toBe("Alt");
+    expect(getWorkspaceIndexJumpModifierKey({ isMac: true, usesDesktopBindings: false })).toBe(
+      "Alt",
+    );
+    expect(getWorkspaceIndexJumpModifierKey({ isMac: false, usesDesktopBindings: false })).toBe(
+      "Alt",
+    );
   });
 
   it("uses Cmd (Meta) on desktop Mac, not Control or Alt", () => {
-    expect(getWorkspaceIndexJumpModifierKey({ isMac: true, isDesktop: true })).toBe("Meta");
+    expect(getWorkspaceIndexJumpModifierKey({ isMac: true, usesDesktopBindings: true })).toBe(
+      "Meta",
+    );
   });
 
   it("uses Ctrl on desktop non-Mac, not Meta or Alt", () => {
-    expect(getWorkspaceIndexJumpModifierKey({ isMac: false, isDesktop: true })).toBe("Control");
+    expect(getWorkspaceIndexJumpModifierKey({ isMac: false, usesDesktopBindings: true })).toBe(
+      "Control",
+    );
   });
+});
+
+describe("number-group shortcut capture", () => {
+  const tabBindingId = "workspace-tab-navigate-index-cmd-alt-digit-mac-desktop";
+  it.each([
+    { id: tabBindingId, action: "workspace.tab.navigate.index", row: "workspace-tab-jump-index" },
+    {
+      id: "workspace-navigate-index-cmd-digit-mac",
+      action: "workspace.navigate.index",
+      row: "workspace-jump-index",
+    },
+  ])("captures Ctrl+1 as the entire number group for $row", ({ id, action, row }) => {
+    const combo = normalizeCapturedShortcutCombo(id, "Ctrl+1");
+    expect(combo).toBe("Ctrl+Digit");
+    const overrides = { [id]: combo };
+    const bindings = buildEffectiveBindings(overrides);
+    for (let index = 1; index <= 9; index++) {
+      const result = resolveShortcut({
+        event: { key: String(index), code: `Digit${index}`, ctrlKey: true },
+        context: { isMac: true, usesDesktopBindings: true, focusScope: "message-input" },
+        bindings,
+      });
+      expect(result.match?.action).toBe(action);
+      expect(result.match?.payload).toEqual({ index });
+    }
+    expect(
+      resolveShortcutKeysForAction(row, overrides, { isMac: true, usesDesktopBindings: true }),
+    ).toEqual([["ctrl", "1-9"]]);
+    expect(
+      resolveShortcut({
+        event: { key: "0", code: "Digit0", ctrlKey: true },
+        context: { isMac: true, usesDesktopBindings: true },
+        bindings,
+      }).match,
+    ).toBeNull();
+  });
+  it("preserves literal numbers for non-index actions and existing nonnumeric combos", () => {
+    expect(normalizeCapturedShortcutCombo("show-shortcuts", "Ctrl+1")).toBe("Ctrl+1");
+    expect(normalizeCapturedShortcutCombo(tabBindingId, "Ctrl+K")).toBe("Ctrl+K");
+    expect(normalizeCapturedShortcutCombo(tabBindingId, "Ctrl+0")).toBe("Ctrl+0");
+    expect(normalizeCapturedShortcutCombo(tabBindingId, "Ctrl+9")).toBe("Ctrl+Digit");
+  });
+});
+
+describe("shortcut capture completion", () => {
+  const indexBindings = DEFAULT_BINDINGS.filter((binding) => binding.payload?.type === "index");
+  it.each(indexBindings)("requires a final 1–9 number for $id", ({ id }) => {
+    for (const combos of [[], ["Ctrl+K"], ["Ctrl+0"], ["Ctrl+Digit", "Ctrl+K"]]) {
+      expect(isShortcutCaptureComplete(id, combos)).toBe(false);
+    }
+    for (let index = 1; index <= 9; index++) {
+      const combo = normalizeCapturedShortcutCombo(id, `Ctrl+${index}`);
+      expect(isShortcutCaptureComplete(id, [combo])).toBe(true);
+      expect(isShortcutCaptureComplete(id, ["Ctrl+K", combo])).toBe(true);
+    }
+  });
+  it("keeps ordinary shortcuts available without a number", () => {
+    expect(isShortcutCaptureComplete("show-shortcuts", [])).toBe(false);
+    expect(isShortcutCaptureComplete("show-shortcuts", ["Ctrl+K"])).toBe(true);
+    expect(isShortcutCaptureComplete("show-shortcuts", ["Ctrl+0"])).toBe(true);
+  });
+});
+
+it("advertises macOS desktop tab navigation", () => {
+  const desktopMac = { isMac: true, usesDesktopBindings: true };
+  expect(getDefaultKeysForAction("workspace-tab-prev", desktopMac)).toEqual(["mod", "shift", "["]);
+  expect(getDefaultKeysForAction("workspace-tab-next", desktopMac)).toEqual(["mod", "shift", "]"]);
 });

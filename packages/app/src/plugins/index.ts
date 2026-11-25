@@ -6,6 +6,7 @@ export { PluginResourceAttachmentPill } from "./attachments/pill";
 export {
   PluginComposerPills,
   PluginHeaderButtons,
+  usePluginWorkspaceMenu,
   useHasPluginComposerPills,
 } from "./buttons/view";
 export {

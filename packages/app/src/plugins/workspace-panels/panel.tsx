@@ -1,10 +1,10 @@
+import { usePluginPanelTab } from "../panel-tab";
 import type {
   PluginAgentPanelProps,
   PluginHostProps,
   PluginWorkspacePanelProps,
 } from "@jagentdesk/plugin/client";
 import type { PluginTheme } from "@jagentdesk/plugin";
-import { PluginClientStateProvider } from "@jagentdesk/plugin/client/host";
 import { CircleAlert } from "lucide-react-native";
 import { useMemo } from "react";
 import { Platform, Text, View } from "react-native";
@@ -39,6 +39,7 @@ function resolvePlatform(): PluginHostProps["layout"]["platform"] {
 
 function PluginPanelBody({ theme }: { theme: PluginTheme }) {
   const { serverId, workspaceId, target } = usePaneContext();
+  const { tab, revision } = usePluginPanelTab();
   invariant(target.kind === "plugin", "PluginPanel requires plugin target");
   const plugin = useInstalledPlugin(serverId, target.pluginId);
   const contribution = resolvePluginWorkspacePanel(plugin, target);
@@ -73,6 +74,9 @@ function PluginPanelBody({ theme }: { theme: PluginTheme }) {
   if (contribution.context === "workspace") {
     const props: PluginWorkspacePanelProps = {
       context: "workspace",
+      params: {},
+      tab,
+      revision,
       theme,
       host,
       layout,
@@ -85,6 +89,9 @@ function PluginPanelBody({ theme }: { theme: PluginTheme }) {
   } else if (agentExists && target.context === "agent") {
     const props: PluginAgentPanelProps = {
       context: "agent",
+      params: { agentId: target.context === "agent" ? target.agentId : "" },
+      tab,
+      revision,
       theme,
       host,
       layout,
@@ -105,8 +112,8 @@ function PluginPanelBody({ theme }: { theme: PluginTheme }) {
       Surface={Surface}
       key={`${serverId}/${target.pluginId}/${target.panelId}/${target.context}`}
     >
-      <PluginRuntimeBoundary plugin={plugin} client={client}>
-        <PluginClientStateProvider source={stateSource}>{panel}</PluginClientStateProvider>
+      <PluginRuntimeBoundary plugin={plugin} client={client} stateSource={stateSource}>
+        {panel}
       </PluginRuntimeBoundary>
     </SurfaceErrorBoundary>
   );

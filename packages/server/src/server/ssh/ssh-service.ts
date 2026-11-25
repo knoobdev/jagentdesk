@@ -1,5 +1,6 @@
 import ssh2 from "ssh2";
 import type { SshModules } from "./modules.js";
+import type { SshModules as SshSessionModules } from "./ssh-modules.js";
 import type { Client, ClientChannel, ParsedKey } from "ssh2";
 import type { Logger } from "pino";
 import type {
@@ -16,7 +17,7 @@ import type {
   SshSessionInfo,
 } from "@jagentdesk/protocol/ssh/rpc-schemas";
 import type { TerminalActivityTransitionEvent } from "../../terminal/terminal-manager.js";
-import type { TerminalSession } from "../../terminal/terminal.js";
+import type { ReplayTerminalSession } from "../../terminal/terminal.js";
 import type { SessionOutboundMessage } from "../messages.js";
 import type { TailnetSocksProxy } from "../tsnet-listener.js";
 import type { SecretStore } from "../database/secret-store.js";
@@ -147,7 +148,7 @@ export type SshExternalSessionFactory = (input: {
   host: string;
   port: number;
   size: { cols: number; rows: number };
-}) => Promise<TerminalSession>;
+}) => Promise<ReplayTerminalSession>;
 
 /** Opens a terminal stream for a non-SSH protocol (Telnet module). */
 export type SshShellOpener = (input: {
@@ -201,11 +202,10 @@ export class SshService {
   private readonly connectionListeners = new Set<(event: SshConnectionEvent) => void>();
   private readonly terminalCreatedListeners = new Set<(event: SshTerminalCreatedEvent) => void>();
   private readonly shellOpeners = new Map<string, SshShellOpener>();
-  private moduleHandlerList: readonly SshModuleRpcHandler[] = [];
   private readonly sessionFactories = new Map<string, SshExternalSessionFactory>();
   private readonly externalSessions = new Map<
     string,
-    { serverId: string; session: TerminalSession & RemoteSessionHandle; createdAtMs: number }
+    { serverId: string; session: ReplayTerminalSession & RemoteSessionHandle; createdAtMs: number }
   >();
   /** Broadcast input groups (25.4): terminalId → every terminal of its group. */
   private readonly broadcastGroups = new Map<string, ReadonlySet<string>>();
@@ -213,6 +213,8 @@ export class SshService {
 
   /** S6–S8 modules (ssh/modules.ts), set by bootstrap; null for in-memory services and tests. */
   modules: SshModules | null = null;
+  /** S2 SFTP, S3 forwarding RPC owner and S5 snippets (ssh/ssh-modules.ts), set by bootstrap. */
+  sessionModules: SshSessionModules | null = null;
 
   /** Bound for modules (CONTRACT.md): `new SftpService(sshService.acquireClient)`. */
   readonly acquireClient: AcquireSshClient = (serverId) => this.acquire(serverId);
@@ -238,6 +240,7 @@ export class SshService {
   }
 
   async initialize(): Promise<void> {
+    this.disposed = false;
     await this.storage.initialize();
   }
 
@@ -1151,15 +1154,6 @@ export class SshService {
     if (input.resolveStartupScript) this.resolveStartupScript = input.resolveStartupScript;
   }
 
-  /** Milestone modules' RPC handlers (ssh-modules.ts); every session dispatches to them. */
-  registerModuleHandlers(handlers: readonly SshModuleRpcHandler[]): void {
-    this.moduleHandlerList = [...this.moduleHandlerList, ...handlers];
-  }
-
-  moduleHandlers(): readonly SshModuleRpcHandler[] {
-    return this.moduleHandlerList;
-  }
-
   registerShellOpener(protocol: Exclude<SshProtocol, "ssh">, opener: SshShellOpener): void {
     this.shellOpeners.set(protocol, opener);
   }
@@ -1387,7 +1381,7 @@ export class SshService {
 
   // ── composite-manager registry surface ─────────────────────────────────
 
-  getSshTerminal(terminalId: string): TerminalSession | undefined {
+  getSshTerminal(terminalId: string): ReplayTerminalSession | undefined {
     return (
       this.terminals.get(terminalId)?.session ?? this.externalSessions.get(terminalId)?.session
     );

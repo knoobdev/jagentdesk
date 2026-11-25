@@ -1,7 +1,7 @@
+import type { ComponentType } from "react";
 import { useCallback, useMemo } from "react";
 import { Pressable, Text, View, type PressableStateCallbackType } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import type { LucideIcon } from "lucide-react-native";
 import { HEADER_INNER_HEIGHT, HEADER_INNER_HEIGHT_MOBILE } from "@/constants/layout";
 import { ICON_SIZE } from "@/styles/theme";
 import type { Theme } from "@/styles/theme";
@@ -14,7 +14,7 @@ const foregroundMutedColorMapping = (theme: Theme) => ({ color: theme.colors.for
 type SidebarHeaderRowVariant = "header" | "compact";
 
 interface SidebarHeaderRowProps {
-  icon: LucideIcon;
+  icon: ComponentType<{ size: number; color: string }>;
   label: string;
   onPress: () => void;
   isActive?: boolean;
@@ -50,10 +50,11 @@ export function SidebarHeaderRow({
   );
 
   const buttonStyle = useCallback(
-    ({ hovered }: PressableStateCallbackType & { hovered?: boolean }) => [
+    ({ hovered, pressed }: PressableStateCallbackType & { hovered?: boolean }) => [
       styles.button,
       variant === "compact" && styles.buttonCompact,
       (Boolean(hovered) || isActive) && styles.buttonHovered,
+      pressed && styles.rowPressed,
     ],
     [isActive, variant],
   );
@@ -145,6 +146,7 @@ const styles = StyleSheet.create((theme) => ({
     // edge with the workspace list below (base button uses a wider spacing[3]).
     paddingHorizontal: theme.spacing[2],
   },
+  rowPressed: { backgroundColor: theme.colors.surface2 },
   buttonHovered: {
     backgroundColor: theme.colors.surfaceSidebarHover,
   },

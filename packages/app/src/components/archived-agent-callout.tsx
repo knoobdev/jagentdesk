@@ -1,12 +1,13 @@
+import { CHAT_COLUMN_RAIL_DATASET } from "@/chat-rail";
 import { useCallback, useMemo, useState } from "react";
 import { View, Text } from "react-native";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
 import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { FOOTER_HEIGHT, MAX_CONTENT_WIDTH } from "@/constants/layout";
+import { FOOTER_HEIGHT } from "@/constants/layout";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
-import { useKeyboardShiftStyle } from "@/hooks/use-keyboard-shift-style";
+import { useKeyboardShiftStyle } from "@/keyboard/shift";
 import { Button } from "@/components/ui/button";
 import type { Theme } from "@/styles/theme";
 import { toErrorMessage } from "@/utils/error-messages";
@@ -45,7 +46,7 @@ export function ArchivedAgentCallout({ serverId, agentId }: ArchivedAgentCallout
 
   return (
     <Animated.View style={containerStyle}>
-      <View style={styles.inputAreaContainer}>
+      <View style={styles.inputAreaContainer} dataSet={CHAT_COLUMN_RAIL_DATASET}>
         <View style={styles.inputAreaContent}>
           <View style={styles.calloutStack}>
             <View style={styles.callout}>
@@ -87,7 +88,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
   },
   inputAreaContent: {
     width: "100%",
-    maxWidth: MAX_CONTENT_WIDTH,
+    maxWidth: theme.contentMaxWidth,
   },
   callout: {
     flexDirection: "row",

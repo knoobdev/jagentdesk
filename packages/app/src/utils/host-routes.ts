@@ -485,17 +485,6 @@ export function buildJiraRoute(serverId: string, params?: Record<string, string>
   return query ? (`${route}?${query}` as const) : route;
 }
 
-/** Figma section (spec 32.5); `params` deep-link to a file, page, node or version. */
-export function buildFigmaRoute(serverId: string, params?: Record<string, string>) {
-  const normalized = trimNonEmpty(serverId);
-  if (!normalized) {
-    return "/" as const;
-  }
-  const route = `/h/${encodeSegment(normalized)}/figma` as const;
-  const query = new URLSearchParams(params ?? {}).toString();
-  return query ? (`${route}?${query}` as const) : route;
-}
-
 export function buildMarketplaceRoute(serverId: string) {
   const normalized = trimNonEmpty(serverId);
   if (!normalized) {
@@ -558,10 +547,6 @@ export function buildSchedulesRoute() {
 
 export function buildSharedSessionsRoute() {
   return "/shared-sessions" as const;
-}
-
-export function buildAgentForumRoute() {
-  return "/agent-forum" as const;
 }
 
 export function buildOpenProjectRoute() {
@@ -630,6 +615,7 @@ export function resolveKnownHostRoute(input: {
 }
 
 export const SETTINGS_SECTION_SLUGS = [
+  "sidebar",
   "general",
   "connection",
   "appearance",
@@ -652,6 +638,7 @@ export const HOST_SECTION_SLUGS = [
   "pair-device",
   "agents",
   "orchestration",
+  "voice",
   "workspaces",
   "providers",
   "usage",

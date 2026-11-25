@@ -162,6 +162,7 @@ describe("DaemonSession", () => {
             { provider: "claude", available: true, error: null },
             { provider: "codex", available: false, error: "boom" },
           ],
+          terminalCleanupUnconfirmed: [],
         },
       },
     ]);
@@ -192,6 +193,7 @@ describe("DaemonSession", () => {
           listen: null,
           tailnet: null,
           providers: [],
+          terminalCleanupUnconfirmed: [],
         },
       },
     ]);
@@ -218,6 +220,7 @@ describe("DaemonSession", () => {
           url: "",
           qr: null,
           tailnetEnabled: false,
+          relayEnabled: false,
         },
       },
     ]);
@@ -572,4 +575,29 @@ describe("DaemonSession", () => {
     );
     expect(message.payload.diagnostic).toContain("Agent lifecycle: idle=8, running=2");
   });
+});
+
+test("legacy registration cannot enroll a new key even on an authenticated session", async () => {
+  const jagentdeskHome = makeHome();
+  const devices = createPairedDeviceStore({ jagentdeskHome });
+  const { subsystem, emitted } = makeSubsystem({
+    pairedDevices: devices,
+    daemonPublicKeyB64: "daemon-public-key",
+    jagentdeskHome,
+  });
+  await subsystem.handlePairingRegisterRequest({
+    type: "pairing.device.register.request",
+    requestId: "new-key",
+    daemonPublicKeyB64: "daemon-public-key",
+    devicePublicKeyB64: "device-public-key",
+  });
+  expect(emitted).toContainEqual({
+    type: "pairing.device.register.response",
+    payload: {
+      requestId: "new-key",
+      ok: false,
+      error: "New devices require SAS pairing. Generate a new pairing link on the host.",
+    },
+  });
+  expect(devices.list()).toEqual([]);
 });

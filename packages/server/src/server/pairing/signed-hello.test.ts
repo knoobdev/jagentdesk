@@ -200,3 +200,40 @@ describe("verifySignedHello", () => {
     }
   });
 });
+
+test.each(["desktop", "mobile", "daemon"] as const)(
+  "tailnet pin applies to %s including missing bridge identity",
+  (kind) => {
+    const home = createTempHome();
+    try {
+      const devices = createPairedDeviceStore({ jagentdeskHome: home });
+      const challenges = createNonceChallengeManager({});
+      const key = generateDeviceKeyPair();
+      const publicKey = exportDevicePublicKey(key.publicKey);
+      devices.register({ devicePublicKeyB64: publicKey, kind, tailnetNodeId: "pinned" });
+      for (const tailnetNodeId of [undefined, "", "other", "pinned"]) {
+        const result = verifySignedHello({
+          ...signedAttempt({ key, nonce: challenges.issue() }),
+          devices,
+          challenges,
+          transport: "tailnet",
+          tailnetNodeId,
+        });
+        expect(result).toEqual(
+          tailnetNodeId === "pinned" ? { ok: true } : { ok: false, reason: "node_changed" },
+        );
+        expect(devices.getByPublicKey(publicKey)?.tailnetNodeId).toBe("pinned");
+      }
+      expect(
+        verifySignedHello({
+          ...signedAttempt({ key, nonce: challenges.issue() }),
+          devices,
+          challenges,
+          transport: "relay",
+        }),
+      ).toEqual({ ok: true });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  },
+);

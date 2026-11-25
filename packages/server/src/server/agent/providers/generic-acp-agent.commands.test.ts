@@ -8,8 +8,8 @@ import { createTestLogger } from "../../../test-utils/test-logger.js";
 import { GenericACPAgentClient } from "./generic-acp-agent.js";
 
 describe("GenericACPAgentClient slash commands", () => {
-  test("lists commands an agent advertises right after session/new", async () => {
-    await withFakeACPAgent("commands-after-session-new", async (command, cwd) => {
+  test("preserves argument hints in commands advertised before session/new completes", async () => {
+    await withFakeACPAgent("commands-during-session-new", async (command, cwd) => {
       const client = new GenericACPAgentClient({
         logger: createTestLogger(),
         command,
@@ -19,9 +19,17 @@ describe("GenericACPAgentClient slash commands", () => {
       });
       const session = await client.createSession({ provider: "acp", cwd });
       try {
-        await expect(session.listCommands?.()).resolves.toEqual([
-          { name: "review", description: "Review the diff", argumentHint: "", kind: "command" },
-        ]);
+        const commands = [
+          {
+            name: "review",
+            description: "Review the diff",
+            argumentHint: "query",
+            kind: "command",
+          },
+          { name: "status", description: "Show status", argumentHint: "", kind: "command" },
+        ];
+        await expect(session.listCommands?.()).resolves.toEqual(commands);
+        await expect(session.listCommands?.()).resolves.toEqual(commands);
       } finally {
         await session.close();
       }
@@ -46,7 +54,7 @@ describe("GenericACPAgentClient slash commands", () => {
 });
 
 async function withFakeACPAgent(
-  mode: "commands-after-session-new" | "silent",
+  mode: "commands-during-session-new" | "silent",
   run: (command: [string, ...string[]], cwd: string) => Promise<void>,
 ): Promise<void> {
   const testDir = await mkdtemp(path.join(tmpdir(), "jagentdesk-acp-commands-"));
@@ -83,21 +91,22 @@ rl.on("line", (line) => {
   }
 
   if (message.method === "session/new") {
-    write({ id: message.id, result: { sessionId: "session-1" } });
-    if (mode === "commands-after-session-new") {
-      setTimeout(() => {
+    if (mode === "commands-during-session-new") {
         write({
           method: "session/update",
           params: {
             sessionId: "session-1",
             update: {
               sessionUpdate: "available_commands_update",
-              availableCommands: [{ name: "review", description: "Review the diff" }],
+              availableCommands: [
+                { name: "review", description: "Review the diff", input: { hint: "query" } },
+                { name: "status", description: "Show status" },
+              ],
             },
           },
         });
-      }, 0);
     }
+    write({ id: message.id, result: { sessionId: "session-1" } });
     return;
   }
 

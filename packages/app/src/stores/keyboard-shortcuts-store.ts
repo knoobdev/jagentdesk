@@ -1,3 +1,4 @@
+import type { CommandCenterTab } from "@/command-center/tabs";
 import { create } from "zustand";
 import type { SidebarShortcutWorkspaceTarget } from "@/utils/sidebar-shortcuts";
 
@@ -5,6 +6,8 @@ const SHORTCUT_BADGE_DELAY_MS = 150;
 
 interface KeyboardShortcutsState {
   commandCenterOpen: boolean;
+  commandCenterTab: CommandCenterTab;
+  setCommandCenterTab: (scope: CommandCenterTab) => void;
   shortcutsDialogOpen: boolean;
   capturingShortcut: boolean;
   altDown: boolean;
@@ -13,7 +16,7 @@ interface KeyboardShortcutsState {
   /** Sidebar-visible workspace targets (up to 9), in top-to-bottom visual order. */
   sidebarShortcutWorkspaceTargets: SidebarShortcutWorkspaceTarget[];
 
-  setCommandCenterOpen: (open: boolean) => void;
+  setCommandCenterOpen: (open: boolean, scope?: CommandCenterTab) => void;
   setShortcutsDialogOpen: (open: boolean) => void;
   setCapturingShortcut: (capturing: boolean) => void;
   setAltDown: (down: boolean) => void;
@@ -47,6 +50,8 @@ function updateBadgeTimer(
 
 export const useKeyboardShortcutsStore = create<KeyboardShortcutsState>((set, get) => ({
   commandCenterOpen: false,
+  commandCenterTab: "all",
+  setCommandCenterTab: (scope) => set({ commandCenterTab: scope }),
   shortcutsDialogOpen: false,
   capturingShortcut: false,
   altDown: false,
@@ -54,7 +59,8 @@ export const useKeyboardShortcutsStore = create<KeyboardShortcutsState>((set, ge
   showShortcutBadges: false,
   sidebarShortcutWorkspaceTargets: [],
 
-  setCommandCenterOpen: (open) => set({ commandCenterOpen: open }),
+  setCommandCenterOpen: (open, scope = "all") =>
+    set({ commandCenterOpen: open, commandCenterTab: open ? scope : "all" }),
   setShortcutsDialogOpen: (open) => set({ shortcutsDialogOpen: open }),
   setCapturingShortcut: (capturing) => set({ capturingShortcut: capturing }),
   setAltDown: (down) => {

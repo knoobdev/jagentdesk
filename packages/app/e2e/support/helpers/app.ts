@@ -32,7 +32,7 @@ export const gotoHome = async (page: Page) => {
 
 export const openSettings = async (page: Page) => {
   // Navigate through the real app control so route changes stay aligned with UI behavior.
-  const settingsButton = page.locator('[data-testid="sidebar-settings"]:visible').first();
+  const settingsButton = page.getByRole("button", { name: "Settings", exact: true }).first();
   await expect(settingsButton).toBeVisible();
   await settingsButton.click();
   await expect(page).toHaveURL(/\/settings\/general$/);

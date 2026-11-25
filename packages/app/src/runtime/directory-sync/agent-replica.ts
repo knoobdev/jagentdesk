@@ -1,3 +1,5 @@
+import { useDraftStore } from "@/stores/draft-store";
+import { buildDraftStoreKey } from "@/stores/draft-keys";
 import type { FetchAgentsEntry } from "@jagentdesk/client/internal/daemon-client";
 import type { AgentSnapshotPayload } from "@jagentdesk/protocol/messages";
 import { clearArchiveAgentPending } from "@/hooks/use-archive-agent";
@@ -142,6 +144,9 @@ export class AgentDirectoryReplica {
   }
 
   remove(agentId: string): void {
+    useDraftStore.getState().clearDraftInput({
+      draftKey: buildDraftStoreKey({ serverId: this.serverId, agentId }),
+    });
     this.members.delete(agentId);
     this.advance(agentId);
     removeAgentDirectoryReplica(this.serverId, agentId);

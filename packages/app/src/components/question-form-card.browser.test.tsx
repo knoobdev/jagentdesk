@@ -1,6 +1,7 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { within } from "@testing-library/dom";
+import { waitFor, within } from "@testing-library/dom";
 import type { AgentPermissionResponse } from "@jagentdesk/protocol/agent-types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n as testI18n } from "@/i18n/i18next";
@@ -11,7 +12,10 @@ import { QuestionFormCard } from "./question-form-card";
 void testI18n;
 
 // App sources compile against the classic JSX runtime, which expects React on the global.
-beforeEach(() => vi.stubGlobal("React", React));
+beforeEach(() => {
+  vi.stubGlobal("React", React);
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+});
 
 /**
  * A real browser with the real web text input, so the Other field's on-screen text and the
@@ -21,6 +25,7 @@ beforeEach(() => vi.stubGlobal("React", React));
 
 interface Mounted {
   root: Root;
+  client: QueryClient;
   container: HTMLDivElement;
 }
 
@@ -30,10 +35,14 @@ afterEach(() => {
   for (const entry of mounted.splice(0)) {
     act(() => entry.root.unmount());
     entry.container.remove();
+    entry.client.clear();
   }
 });
 
-function buildPermission(question: Record<string, unknown>): PendingPermission {
+function buildPermission(
+  question: Record<string, unknown>,
+  following: Record<string, unknown>[] = [],
+): PendingPermission {
   return {
     key: "perm-1",
     agentId: "agent-1",
@@ -42,32 +51,40 @@ function buildPermission(question: Record<string, unknown>): PendingPermission {
       provider: "claude",
       name: "AskUserQuestion",
       kind: "question",
-      input: { questions: [question] },
+      input: { questions: [question, ...following] },
     },
   };
 }
 
-function mountCard(question: Record<string, unknown>) {
+function mountCard(question: Record<string, unknown>, following: Record<string, unknown>[] = []) {
   const onRespond = vi.fn<(response: AgentPermissionResponse) => void>();
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
+  const client = new QueryClient();
   act(() =>
     root.render(
-      <QuestionFormCard
-        permission={buildPermission(question)}
-        onRespond={onRespond}
-        isResponding={false}
-      />,
+      <QueryClientProvider client={client}>
+        <QuestionFormCard
+          permission={buildPermission(question, following)}
+          onRespond={onRespond}
+          isResponding={false}
+          responseError={null}
+        />
+      </QueryClientProvider>,
     ),
   );
-  mounted.push({ root, container });
+  mounted.push({ root, container, client });
 
   const view = within(container);
-  const optionRole = question.multiSelect ? "checkbox" : "radio";
   const otherInput = () =>
     view.getByRole<HTMLInputElement>("textbox", { name: String(question.question) });
-  const check = (label: string) => act(() => view.getByRole(optionRole, { name: label }).click());
+  const check = (label: string) =>
+    act(() =>
+      (
+        view.queryByRole("radio", { name: label }) ?? view.getByRole("checkbox", { name: label })
+      ).click(),
+    );
   const type = (text: string) => {
     const input = otherInput();
     const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
@@ -83,7 +100,7 @@ function mountCard(question: Record<string, unknown>) {
     if (!response || response.behavior !== "allow") throw new Error("card did not submit");
     return (response.updatedInput as { answers: Record<string, string> }).answers;
   };
-  return { check, type, otherInput, submit, submittedAnswers };
+  return { check, type, otherInput, submit, submittedAnswers, view, onRespond };
 }
 
 const multiSelectQuestion = {
@@ -145,5 +162,36 @@ describe("QuestionFormCard other answers", () => {
     expect(card.otherInput().value).toBe("");
     card.submit();
     expect(card.submittedAnswers()).toEqual({ Provider: "Codex" });
+  });
+});
+
+describe("QuestionFormCard explicit navigation", () => {
+  it("keeps a picked option visible until Next and submits only on Submit", () => {
+    const card = mountCard(singleSelectQuestion, [multiSelectQuestion]);
+    card.check("Codex");
+    expect(card.view.getByRole("radio", { name: "Codex" }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    expect(card.onRespond).not.toHaveBeenCalled();
+    act(() => card.view.getByRole("button", { name: "Next" }).click());
+    card.check("Apple");
+    expect(card.onRespond).not.toHaveBeenCalled();
+    card.submit();
+    expect(card.submittedAnswers()).toEqual({ Provider: "Codex", Fruits: "Apple" });
+  });
+
+  it("keeps the description selectable without picking or submitting an option", async () => {
+    const card = mountCard({
+      ...singleSelectQuestion,
+      options: [{ label: "Codex", description: "Use this provider" }],
+    });
+    const description = await waitFor(() => card.view.getByText("Use this provider"), {
+      timeout: 10000,
+    });
+    act(() => description.click());
+    expect(card.view.getByRole("radio", { name: "Codex" }).getAttribute("aria-checked")).toBe(
+      "false",
+    );
+    expect(card.onRespond).not.toHaveBeenCalled();
   });
 });

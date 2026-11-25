@@ -134,6 +134,7 @@ function collectProcessEntries(options: DaemonDiagnosticsOptions): DiagnosticEnt
 
 function collectRuntimeConfigEntries(options: DaemonDiagnosticsOptions): DiagnosticEntry[] {
   const tailnetAddress = options.daemonRuntimeConfig?.getTailnetAddress() ?? null;
+  const relay = options.daemonRuntimeConfig?.getRelayConfig?.() ?? null;
   return [
     { label: "Listen", value: formatListenKind(options.daemonRuntimeConfig?.listen ?? null) },
     {
@@ -144,6 +145,9 @@ function collectRuntimeConfigEntries(options: DaemonDiagnosticsOptions): Diagnos
       label: "Tailnet TLS",
       value: tailnetAddress ? String(tailnetAddress.useTls ?? false) : "n/a",
     },
+    { label: "Relay enabled", value: relay ? String(relay.enabled) : "false" },
+    { label: "Relay endpoint", value: relay?.endpoint ? "configured" : "not configured" },
+    { label: "Relay TLS", value: relay ? String(relay.useTls) : "n/a" },
   ];
 }
 
@@ -541,6 +545,7 @@ export function redactDiagnostic(
   const sensitiveValues = [
     options?.daemonRuntimeConfig?.listen,
     tailnetAddress ? `${tailnetAddress.host}:${tailnetAddress.port}` : undefined,
+    options?.daemonRuntimeConfig?.getRelayConfig?.()?.endpoint,
   ].filter((item): item is string => Boolean(item));
 
   for (const sensitive of sensitiveValues) {

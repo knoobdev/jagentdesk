@@ -1,4 +1,4 @@
-import type { JsonValue } from "@jagentdesk/protocol/agent-types";
+import { type JsonValue } from "@jagentdesk/protocol/agent-types";
 import { z } from "zod";
 
 export const PROVIDER_PROTOCOL_VERSION = 1 as const;
@@ -9,9 +9,11 @@ export const PROVIDER_CAPABILITIES = [
   "prompt.image",
   "prompt.output_schema",
   "prompt.steer",
+  "session.can_stop_runtime",
   "session.archive",
   "session.configure",
   "session.list",
+  "session.metrics",
   "session.persistence",
   "session.revert.both",
   "session.revert.conversation",
@@ -26,21 +28,139 @@ export const PROVIDER_CAPABILITIES = [
 export type ProviderCapability = (typeof PROVIDER_CAPABILITIES)[number];
 
 export interface ProviderRegistration {
+  /** Activate only while agents.providers contains this provider ID, independently of enabled. */
+  requiresConfiguration?: boolean;
   /** Equal keys share discovery within this provider. Include effective configuration and execution environment. */
   getCatalogCacheKey?(options: ProviderCatalogOptions): Promise<string | undefined>;
+  /** Default executable and arguments; the daemon resolves overrides before status/connect. */
+  command?: readonly [string, ...string[]];
+  status?(request: ProviderStatusRequest): Promise<ProviderStatus>;
   id: string;
   label: string;
   description?: string;
   /** Plugin-directory-relative path to a self-contained SVG file. */
   icon?: string;
+  /** http(s) page that helps users set up and troubleshoot the provider. JAgentDesk opens it. */
+  docsUrl?: string;
+  /** How users install the provider's CLI and which version they run. Every member is optional. */
+  installation?: ProviderInstallation;
   connect(request: ProviderConnectRequest): Promise<ProviderConnection>;
 }
 
+export interface ProviderInstallation {
+  /** http(s) page that explains how to install the provider. JAgentDesk opens it; it never installs. */
+  installUrl?: string;
+  /** http(s) page that explains how to update the provider. */
+  updateUrl?: string;
+  /** Report whether the provider is installed and which version. Runs only when a user asks. */
+  inspect?(context: ProviderInstallationContext): Promise<ProviderInspection>;
+  /**
+   * Report whether a newer version than `installedVersion` is available. The provider decides how
+   * to find out and what counts as newer; JAgentDesk shows the result as written. Return `unknown` when
+   * it cannot tell. Runs only when a user asks, never before a session, and only after `inspect`
+   * reports the provider installed. JAgentDesk reuses the answer while `inspect` reports the same
+   * version.
+   */
+  checkForUpdates?(context: ProviderUpdateCheckContext): Promise<ProviderUpdateCheck>;
+  /**
+   * Update the provider, usually by running its CLI's own updater. JAgentDesk shows everything passed
+   * to `report` while it runs, then the returned message. A throw is a failure with its message.
+   * Runs only when a user asks. JAgentDesk sets no deadline; `signal` aborts when the daemon stops.
+   */
+  update?(context: ProviderUpdateContext): Promise<ProviderUpdateResult>;
+}
+
+export interface ProviderUpdateCheckContext extends ProviderInstallationContext {
+  /**
+   * The version `inspect` reported, as written. Absent when `inspect` reported none or the
+   * provider declares no `inspect`.
+   */
+  installedVersion?: string;
+}
+
+export interface ProviderUpdateContext extends ProviderInstallationContext {
+  /** Shows output to the user as it happens, unchanged and in order. */
+  report(event: ProviderUpdateReport): void;
+}
+
+export const ProviderUpdateReportSchema = z
+  .object({ type: z.enum(["stdout", "stderr", "message"]), text: z.string() })
+  .strip();
+
+export type ProviderUpdateReport = z.infer<typeof ProviderUpdateReportSchema>;
+
+export const ProviderUpdateResultSchema = z.discriminatedUnion("status", [
+  /** `message` is shown as written, such as which version is now installed. */
+  z.object({ status: z.literal("succeeded"), message: z.string().optional() }).strip(),
+  z.object({ status: z.literal("failed"), message: z.string() }).strip(),
+]);
+
+export type ProviderUpdateResult = z.infer<typeof ProviderUpdateResultSchema>;
+
+export interface ProviderInstallationContext {
+  /** The launch a session would use. Absent when the provider declares no `command`. */
+  launch?: ProviderInstallationLaunch;
+  /** Aborted when JAgentDesk stops waiting for the result. */
+  signal: AbortSignal;
+}
+
+export interface ProviderInstallationLaunch extends ProviderLaunch {
+  /** False when the executable was not found; `command` is then the configured command as written. */
+  resolved: boolean;
+}
+
+export const ProviderInspectionSchema = z.discriminatedUnion("status", [
+  /** `version` is shown as written and passed to `checkForUpdates`; JAgentDesk does not parse it. */
+  z.object({ status: z.literal("installed"), version: z.string().optional() }).strip(),
+  z.object({ status: z.literal("not_installed") }).strip(),
+]);
+
+export type ProviderInspection = z.infer<typeof ProviderInspectionSchema>;
+
+export const ProviderUpdateCheckSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("current") }).strip(),
+  /** `versions` and `message` are shown as written; JAgentDesk does not parse, sort or compare them. */
+  z
+    .object({
+      status: z.literal("available"),
+      versions: z.array(z.string()).optional(),
+      message: z.string().optional(),
+    })
+    .strip(),
+  z.object({ status: z.literal("unknown"), message: z.string().optional() }).strip(),
+]);
+
+export type ProviderUpdateCheck = z.infer<typeof ProviderUpdateCheckSchema>;
+
 export type ProviderCatalogOptions =
-  | { scope: "global"; force?: boolean }
-  | { scope: "workspace"; cwd: string; force?: boolean };
+  | { scope: "global"; force?: boolean; launch?: ProviderLaunch }
+  | { scope: "workspace"; cwd: string; force?: boolean; launch?: ProviderLaunch };
+
+export const ProviderLaunchSchema = z
+  .object({
+    /** Resolved executable path. */
+    command: z.string().min(1),
+    args: z.array(z.string()),
+    /** Complete daemon-owned environment, including overrides and parent-session stripping. */
+    env: z.record(z.string(), z.string()),
+  })
+  .strip();
+
+export type ProviderLaunch = z.infer<typeof ProviderLaunchSchema>;
+
+export interface ProviderStatusRequest {
+  launch?: ProviderLaunch;
+}
+
+export const ProviderStatusSchema = z.discriminatedUnion("available", [
+  z.object({ available: z.literal(true), diagnostic: z.string().optional() }).strip(),
+  z.object({ available: z.literal(false), diagnostic: z.string().min(1) }).strip(),
+]);
+
+export type ProviderStatus = z.infer<typeof ProviderStatusSchema>;
 
 export interface ProviderConnectRequest {
+  launch?: ProviderLaunch;
   versions: readonly number[];
   capabilities: readonly string[];
 }
@@ -87,7 +207,7 @@ export interface ProviderSessionConfig {
   mode?: string;
   thinkingOption?: string;
   settings: Readonly<Record<string, JsonValue>>;
-  providerOptions?: Readonly<Record<string, JsonValue>>;
+  providerOptions?: Readonly<Record<string, unknown>>;
   title?: string;
   persist: boolean;
 }
@@ -96,6 +216,13 @@ export interface ProviderConfigChanges {
   model?: string | null;
   mode?: string | null;
   thinkingOption?: string | null;
+  /**
+   * The option keys to change on the running session, with or without a control. Apply every key
+   * or fail the whole request, for a key you only read when a session opens. `null` returns the
+   * key to the provider's own default. The committed values come back in `session.config`.
+   */
+  providerOptions?: Readonly<Record<string, JsonValue>>;
+  /** @deprecated Sent next to `providerOptions` to a provider that reports `settings`. */
   settings?: Readonly<Record<string, JsonValue>>;
 }
 
@@ -174,7 +301,7 @@ interface ProviderReviewAttachment {
   type: "review";
   mimeType: "application/jagentdesk-review";
   cwd: string;
-  mode: "uncommitted" | "base";
+  mode: "uncommitted" | "base" | "all";
   baseRef?: string | null;
   comments: Array<{
     filePath: string;
@@ -248,6 +375,7 @@ export type ProviderInput =
     }
   | { type: "session.archive"; requestId: string; persistence: ProviderPersistence }
   | { type: "session.unarchive"; requestId: string; persistence: ProviderPersistence }
+  | { type: "session.can_stop_runtime"; requestId: string; sessionId: string }
   | { type: "session.close"; requestId: string; sessionId: string };
 
 export interface ProviderThinkingOption {
@@ -280,6 +408,33 @@ export interface ProviderMode {
   isUnattended?: boolean;
 }
 
+/**
+ * Draws one top-level option key in the composer. The control holds no value: JAgentDesk reads it
+ * from the agent's options.
+ */
+export type ProviderOptionControl =
+  | {
+      type: "toggle";
+      key: string;
+      label: string;
+      description?: string;
+      /** A Lucide icon name. */
+      icon?: string;
+      /** Shown while the key has no value. */
+      defaultValue?: boolean;
+    }
+  | {
+      type: "select";
+      key: string;
+      label: string;
+      description?: string;
+      /** A Lucide icon name. */
+      icon?: string;
+      /** The choice shown while the key has no value. */
+      defaultValue?: string;
+      choices: ReadonlyArray<{ value: string; label: string; description?: string }>;
+    };
+
 export type ProviderSetting =
   | {
       type: "toggle";
@@ -304,7 +459,12 @@ export interface ProviderConfigState {
   models: readonly ProviderModel[];
   modes: readonly ProviderMode[];
   thinkingOptions: readonly ProviderThinkingOption[];
-  settings: readonly ProviderSetting[];
+  /** The option keys that get a composer control. May change at runtime, for example per model. */
+  controls?: readonly ProviderOptionControl[];
+  /** What the session runs with now, for the keys it reports. Publish the committed values. */
+  providerOptions?: Readonly<Record<string, JsonValue>>;
+  /** @deprecated Report `controls` and `providerOptions`. Each setting id is an option key. */
+  settings?: readonly ProviderSetting[];
 }
 
 export interface ProviderCatalog {
@@ -328,6 +488,7 @@ export interface ProviderCommand {
   name: string;
   description: string;
   argumentHint?: string;
+  kind?: "command" | "skill";
 }
 
 export interface ProviderError {
@@ -386,6 +547,17 @@ export interface ProviderUsage {
   totalCostUsd?: number;
   contextWindowMaxTokens?: number;
   contextWindowUsedTokens?: number;
+}
+
+/**
+ * One row of provider-owned detail about a session or a turn. Format `value` for
+ * reading: JAgentDesk shows it as given.
+ */
+export interface ProviderMetric {
+  label: string;
+  value: string;
+  /** Colors the value. Omit it for an ordinary value. */
+  tone?: "default" | "ok" | "warning" | "danger";
 }
 
 interface ProviderTimelineIdentity {
@@ -523,6 +695,7 @@ export type ProviderTimelineItem =
     });
 
 export type ProviderEvent =
+  | { type: "session.can_stop_runtime"; requestId: string; sessionId: string; canStop: boolean }
   | { type: "catalog"; requestId: string; catalog: ProviderCatalog }
   | { type: "sessions"; requestId: string; sessions: ProviderSessionSummary[] }
   | { type: "request.completed"; requestId: string }
@@ -562,8 +735,19 @@ export type ProviderEvent =
       turnId: string;
       state: "started" | "completed" | "failed" | "canceled";
       error?: ProviderError;
+      /** Shown on the turn's footer. Read when `state` is `"completed"`. */
+      metrics?: readonly ProviderMetric[];
     }
   | { type: "session.usage"; sessionId: string; turnId?: string; usage: ProviderUsage }
+  | {
+      type: "session.metrics";
+      sessionId: string;
+      /**
+       * Replaces the metrics shown for the session. An empty list clears them. Publish only when
+       * `session.metrics` was negotiated: a JAgentDesk that does not offer it rejects this event.
+       */
+      metrics: readonly ProviderMetric[];
+    }
   | { type: "session.config"; sessionId: string; config: ProviderConfigState }
   | { type: "session.commands"; sessionId: string; commands: ProviderCommand[] }
   | { type: "session.permission"; sessionId: string; request: ProviderPermissionRequest }
@@ -605,6 +789,8 @@ function requiredPromptCapabilities(prompt: ProviderPrompt): readonly ProviderCa
 
 export function requiredProviderCapabilities(input: ProviderInput): readonly ProviderCapability[] {
   switch (input.type) {
+    case "session.can_stop_runtime":
+      return ["session.can_stop_runtime"];
     case "catalog":
     case "session.interrupt":
     case "session.close":
@@ -644,13 +830,17 @@ export function requireProviderCapabilities(
 }
 
 const idSchema = z.string().min(1);
+
 const jsonObjectSchema = z.record(z.string(), z.json());
+
 const providerErrorSchema = z
   .object({ message: z.string(), code: z.string().optional(), diagnostic: z.string().optional() })
   .strip();
+
 const persistenceSchema = z
   .object({ version: z.number().int().nonnegative(), data: z.json() })
   .strip();
+
 const mcpServerSchema = z.discriminatedUnion("type", [
   z
     .object({
@@ -678,6 +868,7 @@ const mcpServerSchema = z.discriminatedUnion("type", [
     })
     .strict(),
 ]);
+
 const toolPolicySchema = z
   .object({
     preapproved: z.array(
@@ -685,6 +876,7 @@ const toolPolicySchema = z
     ),
   })
   .strict();
+
 const providerPermissionResponseSchema: z.ZodType<ProviderPermissionResponse> =
   z.discriminatedUnion("behavior", [
     z
@@ -704,6 +896,7 @@ const providerPermissionResponseSchema: z.ZodType<ProviderPermissionResponse> =
       })
       .strip(),
   ]);
+
 const sessionConfigSchema = z
   .object({
     cwd: z.string(),
@@ -715,11 +908,12 @@ const sessionConfigSchema = z
     mode: z.string().optional(),
     thinkingOption: z.string().optional(),
     settings: jsonObjectSchema,
-    providerOptions: jsonObjectSchema.optional(),
+    providerOptions: z.record(z.string(), z.unknown()).optional(),
     title: z.string().optional(),
     persist: z.boolean(),
   })
   .strict();
+
 const externalResourceSchema = z
   .object({
     provider: z.string(),
@@ -731,6 +925,7 @@ const externalResourceSchema = z
     url: z.string(),
   })
   .strip();
+
 const reviewContextLineSchema = z
   .object({
     oldLineNumber: z.number().int().positive().nullable(),
@@ -739,6 +934,7 @@ const reviewContextLineSchema = z
     content: z.string(),
   })
   .strip();
+
 const providerContentSchema: z.ZodType<ProviderContent> = z.union([
   z.object({ type: z.literal("text"), text: z.string() }).strict(),
   z.object({ type: z.literal("image"), data: z.string(), mimeType: z.string() }).strict(),
@@ -805,7 +1001,7 @@ const providerContentSchema: z.ZodType<ProviderContent> = z.union([
       type: z.literal("review"),
       mimeType: z.literal("application/jagentdesk-review"),
       cwd: z.string(),
-      mode: z.enum(["uncommitted", "base"]),
+      mode: z.enum(["uncommitted", "base", "all"]),
       baseRef: z.string().nullable().optional(),
       comments: z.array(
         z
@@ -837,6 +1033,7 @@ const providerContentSchema: z.ZodType<ProviderContent> = z.union([
     })
     .strip(),
 ]);
+
 const promptSchema = z
   .object({
     clientMessageId: idSchema,
@@ -849,11 +1046,13 @@ const promptSchema = z
     clearPendingPermissions: z.boolean().optional(),
   })
   .strict();
+
 const configChangesSchema = z
   .object({
     model: z.string().nullable().optional(),
     mode: z.string().nullable().optional(),
     thinkingOption: z.string().nullable().optional(),
+    providerOptions: jsonObjectSchema.optional(),
     settings: jsonObjectSchema.optional(),
   })
   .strict();
@@ -926,6 +1125,13 @@ export const ProviderInputSchema: z.ZodType<ProviderInput> = z.discriminatedUnio
       persistence: persistenceSchema,
     })
     .strict(),
+  z
+    .object({
+      type: z.literal("session.can_stop_runtime"),
+      requestId: idSchema,
+      sessionId: idSchema,
+    })
+    .strict(),
   z.object({ type: z.literal("session.close"), requestId: idSchema, sessionId: idSchema }).strict(),
 ]);
 
@@ -939,6 +1145,7 @@ const modeSchema = z
     isUnattended: z.boolean().optional(),
   })
   .strip();
+
 const selectOptionSchema = z
   .object({
     id: idSchema,
@@ -948,6 +1155,7 @@ const selectOptionSchema = z
     metadata: jsonObjectSchema.optional(),
   })
   .strip();
+
 const modelSchema = z
   .object({
     id: idSchema,
@@ -962,6 +1170,7 @@ const modelSchema = z
     defaultThinkingOptionId: z.string().optional(),
   })
   .strip();
+
 const settingSchema = z.discriminatedUnion("type", [
   z
     .object({
@@ -983,6 +1192,35 @@ const settingSchema = z.discriminatedUnion("type", [
     })
     .strip(),
 ]);
+
+const controlSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      type: z.literal("toggle"),
+      key: idSchema,
+      label: z.string(),
+      description: z.string().optional(),
+      icon: z.string().optional(),
+      defaultValue: z.boolean().optional(),
+    })
+    .strip(),
+  z
+    .object({
+      type: z.literal("select"),
+      key: idSchema,
+      label: z.string(),
+      description: z.string().optional(),
+      icon: z.string().optional(),
+      defaultValue: z.string().optional(),
+      choices: z.array(
+        z
+          .object({ value: z.string(), label: z.string(), description: z.string().optional() })
+          .strip(),
+      ),
+    })
+    .strip(),
+]);
+
 const configStateSchema = z
   .object({
     model: z.string().optional(),
@@ -991,9 +1229,12 @@ const configStateSchema = z
     models: z.array(modelSchema),
     modes: z.array(modeSchema),
     thinkingOptions: z.array(selectOptionSchema),
-    settings: z.array(settingSchema),
+    controls: z.array(controlSchema).optional(),
+    providerOptions: jsonObjectSchema.optional(),
+    settings: z.array(settingSchema).optional(),
   })
   .strip();
+
 const catalogSchema = z
   .object({
     models: z.array(modelSchema),
@@ -1004,6 +1245,7 @@ const catalogSchema = z
     defaultThinkingOption: z.string().optional(),
   })
   .strip();
+
 const noticeSchema = z
   .object({
     id: idSchema,
@@ -1013,9 +1255,16 @@ const noticeSchema = z
     dismissed: z.boolean().optional(),
   })
   .strip();
+
 const commandSchema = z
-  .object({ name: idSchema, description: z.string(), argumentHint: z.string().optional() })
+  .object({
+    name: idSchema,
+    description: z.string(),
+    argumentHint: z.string().optional(),
+    kind: z.enum(["command", "skill"]).optional(),
+  })
   .strip();
+
 const usageSchema = z
   .object({
     inputTokens: z.number().optional(),
@@ -1024,6 +1273,13 @@ const usageSchema = z
     totalCostUsd: z.number().optional(),
     contextWindowMaxTokens: z.number().optional(),
     contextWindowUsedTokens: z.number().optional(),
+  })
+  .strip();
+const metricSchema = z
+  .object({
+    label: z.string(),
+    value: z.string(),
+    tone: z.enum(["default", "ok", "warning", "danger"]).optional(),
   })
   .strip();
 const worktreeCommandSchema = z
@@ -1037,6 +1293,7 @@ const worktreeCommandSchema = z
     durationMs: z.number().nonnegative().optional(),
   })
   .strip();
+
 const toolCallDetailSchema: z.ZodType<ProviderToolCallDetail> = z.discriminatedUnion("type", [
   z
     .object({
@@ -1150,7 +1407,9 @@ const toolCallDetailSchema: z.ZodType<ProviderToolCallDetail> = z.discriminatedU
   z.object({ type: z.literal("plan"), text: z.string() }).strip(),
   z.object({ type: z.literal("unknown"), input: z.json(), output: z.json() }).strip(),
 ]);
+
 const timelineIdentityShape = { id: idSchema, revertToken: z.json().optional() };
+
 const toolCallBaseShape = {
   ...timelineIdentityShape,
   type: z.literal("tool_call"),
@@ -1159,6 +1418,7 @@ const toolCallBaseShape = {
   detail: toolCallDetailSchema,
   metadata: jsonObjectSchema.optional(),
 };
+
 const timelineItemSchema: z.ZodType<ProviderTimelineItem> = z.union([
   z
     .object({
@@ -1228,6 +1488,7 @@ const timelineItemSchema: z.ZodType<ProviderTimelineItem> = z.union([
     })
     .strip(),
 ]);
+
 const permissionActionSchema = z
   .object({
     id: idSchema,
@@ -1237,6 +1498,7 @@ const permissionActionSchema = z
     intent: z.enum(["implement", "implement_resume", "dismiss"]).optional(),
   })
   .strip();
+
 const providerPermissionRequestSchema: z.ZodType<ProviderPermissionRequest> = z
   .object({
     id: idSchema,
@@ -1299,6 +1561,14 @@ export const ProviderEventSchema: z.ZodType<ProviderEvent> = z.discriminatedUnio
     .strip(),
   z
     .object({
+      type: z.literal("session.can_stop_runtime"),
+      requestId: idSchema,
+      sessionId: idSchema,
+      canStop: z.boolean(),
+    })
+    .strip(),
+  z
+    .object({
       type: z.literal("session.closed"),
       sessionId: idSchema,
       error: providerErrorSchema.optional(),
@@ -1338,6 +1608,7 @@ export const ProviderEventSchema: z.ZodType<ProviderEvent> = z.discriminatedUnio
       turnId: idSchema,
       state: z.enum(["started", "completed", "failed", "canceled"]),
       error: providerErrorSchema.optional(),
+      metrics: z.array(metricSchema).optional(),
     })
     .strip(),
   z
@@ -1346,6 +1617,13 @@ export const ProviderEventSchema: z.ZodType<ProviderEvent> = z.discriminatedUnio
       sessionId: idSchema,
       turnId: idSchema.optional(),
       usage: usageSchema,
+    })
+    .strip(),
+  z
+    .object({
+      type: z.literal("session.metrics"),
+      sessionId: idSchema,
+      metrics: z.array(metricSchema),
     })
     .strip(),
   z

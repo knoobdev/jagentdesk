@@ -9,6 +9,8 @@ export type KeyboardActionId =
   | "message-input.dictation-confirm"
   | "message-input.voice-toggle"
   | "message-input.voice-mute-toggle"
+  | "message-input.model-toggle"
+  | "message-input.effort-cycle"
   | "message-input.mode-cycle"
   | "workspace.tab.new"
   | "workspace.tab.close-current"
@@ -33,6 +35,7 @@ export type KeyboardActionId =
   | "workspace.project.pick"
   | "worktree.new"
   | "workspace.archive"
+  | "workspace.archive.undo"
   | "workspace.pin"
   // Command-center only: no keybind, so these are absent from route-shortcut.ts.
   | "workspace.rename"
@@ -47,6 +50,8 @@ export type KeyboardActionDefinition =
   | { id: "message-input.dictation-confirm"; scope: KeyboardActionScope }
   | { id: "message-input.voice-toggle"; scope: KeyboardActionScope }
   | { id: "message-input.voice-mute-toggle"; scope: KeyboardActionScope }
+  | { id: "message-input.model-toggle"; scope: KeyboardActionScope }
+  | { id: "message-input.effort-cycle"; scope: KeyboardActionScope }
   | { id: "message-input.mode-cycle"; scope: KeyboardActionScope }
   | { id: "workspace.tab.new"; scope: KeyboardActionScope }
   | { id: "workspace.tab.close-current"; scope: KeyboardActionScope }
@@ -71,6 +76,7 @@ export type KeyboardActionDefinition =
   | { id: "workspace.project.pick"; scope: KeyboardActionScope }
   | { id: "worktree.new"; scope: KeyboardActionScope }
   | { id: "workspace.archive"; scope: KeyboardActionScope }
+  | { id: "workspace.archive.undo"; scope: KeyboardActionScope }
   | { id: "workspace.pin"; scope: KeyboardActionScope }
   | { id: "workspace.rename"; scope: KeyboardActionScope }
   | { id: "workspace.setup.show"; scope: KeyboardActionScope };

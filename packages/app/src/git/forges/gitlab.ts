@@ -143,6 +143,10 @@ export function deriveGitlabApprovals(facts: GitlabMergeFacts): GitlabApprovals 
 export const gitlabForgeLogic = {
   id: "gitlab",
   urlGrammar: {
+    referencePaths: [
+      { kind: "change_request", infix: "/-/merge_requests/", sigil: "!" },
+      { kind: "issue", infix: "/-/issues/", sigil: "#" },
+    ],
     treeInfix: "/-/tree/",
     blobInfix: "/-/blob/",
     lineAnchor: gitlabLineAnchor,

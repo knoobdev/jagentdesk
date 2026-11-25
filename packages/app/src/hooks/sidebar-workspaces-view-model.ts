@@ -1,3 +1,4 @@
+import { deriveEffectiveWorkspaceStatus } from "@/workspace-status";
 import type { PrHint } from "@/git/pr-hint";
 import { selectPrHintFromStatus } from "@/git/pr-hint";
 import { type HostProjectListItem } from "@/projects/host-project-model";
@@ -36,6 +37,9 @@ export interface SidebarStatusWorkspacePlacement extends SidebarWorkspacePlaceme
 }
 
 export interface SidebarWorkspaceEntry extends SidebarStatusWorkspacePlacement {
+  createdAt?: string;
+  lastUserMessageAt?: string | null;
+  activityAt?: string | null;
   workspaceDirectory: string;
   workspaceDirectoryLabel: string;
   // Raw user-set title (null when the name is derived from branch/directory).
@@ -121,11 +125,6 @@ export function areSidebarWorkspaceSessionsEqual(
   return true;
 }
 
-interface EffectiveWorkspaceStatus {
-  status: WorkspaceDescriptor["status"];
-  enteredAt: Date | null;
-}
-
 function projectNameForWorkspace(workspace: WorkspaceDescriptor): string {
   return (
     workspace.projectCustomName ??
@@ -165,6 +164,9 @@ export function createSidebarWorkspaceEntry(input: {
     workspaceKind: input.workspace.workspaceKind,
     name: input.workspace.name,
     title: input.workspace.title ?? null,
+    createdAt: input.workspace.createdAt,
+    lastUserMessageAt: input.workspace.lastUserMessageAt,
+    activityAt: input.workspace.activityAt,
     pinnedAt: input.workspace.pinnedAt,
     currentBranch: normalizeCurrentBranch(input.workspace.gitRuntime?.currentBranch),
     statusBucket: effectiveStatus.status,
@@ -180,51 +182,6 @@ export function createSidebarWorkspaceEntry(input: {
     scripts: input.workspace.scripts,
     hasRunningScripts: input.workspace.scripts.some((script) => script.lifecycle === "running"),
   };
-}
-
-function deriveEffectiveWorkspaceStatus(input: {
-  serverId: string;
-  workspace: WorkspaceDescriptor;
-  pendingCreateAttempts?: Record<string, PendingCreateAttempt>;
-  workspaceAgentActivity?: ReadonlyMap<string, WorkspaceAgentActivity>;
-}): EffectiveWorkspaceStatus {
-  if (input.workspace.status !== "done") {
-    return { status: input.workspace.status, enteredAt: input.workspace.statusEnteredAt };
-  }
-
-  const pendingStartedAt = getPendingInitialAgentCreateStartedAt({
-    serverId: input.serverId,
-    workspaceId: input.workspace.id,
-    pendingCreateAttempts: input.pendingCreateAttempts,
-  });
-  if (pendingStartedAt) {
-    return { status: "running", enteredAt: pendingStartedAt };
-  }
-
-  const rootAgentActivity = input.workspaceAgentActivity?.get(input.workspace.id);
-  if (rootAgentActivity && rootAgentActivity.status !== "done") {
-    return rootAgentActivity;
-  }
-
-  return { status: input.workspace.status, enteredAt: input.workspace.statusEnteredAt };
-}
-
-function getPendingInitialAgentCreateStartedAt(input: {
-  serverId: string;
-  workspaceId: string;
-  pendingCreateAttempts: Record<string, PendingCreateAttempt> | undefined;
-}): Date | null {
-  let latestStartedAt: Date | null = null;
-  for (const pending of Object.values(input.pendingCreateAttempts ?? {})) {
-    if (pending.serverId !== input.serverId) continue;
-    if (pending.workspaceId !== input.workspaceId) continue;
-    if (pending.lifecycle === "abandoned") continue;
-    const startedAt = new Date(pending.timestamp);
-    if (!latestStartedAt || startedAt > latestStartedAt) {
-      latestStartedAt = startedAt;
-    }
-  }
-  return latestStartedAt;
 }
 
 export interface ProjectStatusSession {
@@ -283,8 +240,17 @@ export function deriveProjectStatusBucket(input: {
 
 export function buildSidebarWorkspacePlacementModel(input: {
   projects: readonly HostProjectListItem[];
+  hiddenWorkspaceKeys?: ReadonlySet<string>;
 }): SidebarWorkspacePlacementModel {
-  const projects = buildSidebarProjectsFromHostProjects({ projects: input.projects });
+  const allProjects = buildSidebarProjectsFromHostProjects({ projects: input.projects });
+  const projects = input.hiddenWorkspaceKeys?.size
+    ? allProjects.map((project) => ({
+        ...project,
+        workspaces: project.workspaces.filter(
+          (workspace) => !input.hiddenWorkspaceKeys?.has(workspace.workspaceKey),
+        ),
+      }))
+    : allProjects;
   return {
     projects,
     workspaces: projects.flatMap((project) => project.workspaces),
@@ -363,13 +329,15 @@ export function buildSidebarWorkspaceEntries(input: {
   sessions: SidebarWorkspaceSession[];
   pendingCreateAttempts?: Record<string, PendingCreateAttempt>;
   previousEntries?: ReadonlyMap<string, SidebarWorkspaceEntry>;
-}): Map<string, SidebarWorkspaceEntry> {
+}): ReadonlyMap<string, SidebarWorkspaceEntry> {
   if (input.placements.length === 0 || input.sessions.length === 0) {
     return new Map();
   }
 
   const sessionByServerId = new Map(input.sessions.map((session) => [session.serverId, session]));
   const entries = new Map<string, SidebarWorkspaceEntry>();
+  const previousKeys = input.previousEntries?.keys();
+  let unchanged = input.previousEntries !== undefined;
 
   for (const placement of input.placements) {
     const session = sessionByServerId.get(placement.serverId);
@@ -389,15 +357,22 @@ export function buildSidebarWorkspaceEntries(input: {
       workspaceAgentActivity: session.workspaceAgentActivity,
     });
     const previousEntry = input.previousEntries?.get(placement.workspaceKey);
-    entries.set(
-      placement.workspaceKey,
+    const nextEntry =
       previousEntry && areSidebarWorkspaceEntriesEqual(previousEntry, entry)
         ? previousEntry
-        : entry,
-    );
+        : entry;
+    entries.set(placement.workspaceKey, nextEntry);
+    unchanged =
+      previousKeys?.next().value === placement.workspaceKey &&
+      previousEntry === nextEntry &&
+      unchanged;
   }
 
-  return entries;
+  // Resuming a retained sidebar must not invalidate its project/filter projections
+  // when the directory has not changed while it was hidden.
+  return unchanged && input.previousEntries?.size === entries.size
+    ? input.previousEntries
+    : entries;
 }
 
 function areSidebarWorkspaceEntriesEqual(

@@ -1,3 +1,8 @@
+import {
+  deriveNeutralFills,
+  deriveSurfaceStates,
+  deriveTertiaryText,
+} from "@/styles/derive-colors";
 import { useMemo } from "react";
 import { z } from "zod";
 import type { PluginThemeContribution } from "@jagentdesk/plugin";
@@ -20,7 +25,10 @@ import type { InstalledPlugin } from "../types";
 
 const hexColorSchema = z
   .string()
-  .regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/, "Must be a hex color");
+  .regex(
+    /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/,
+    "Must be a hex color",
+  );
 
 const contributionSchema: z.ZodType<PluginThemeContribution> = z.strictObject({
   id: z.string(),
@@ -28,6 +36,12 @@ const contributionSchema: z.ZodType<PluginThemeContribution> = z.strictObject({
   appearance: z.enum(["light", "dark"]),
   colors: z.strictObject({
     background: hexColorSchema,
+    sidebar: hexColorSchema.optional(),
+    surface3: hexColorSchema.optional(),
+    surface4: hexColorSchema.optional(),
+    foregroundExtraMuted: hexColorSchema.optional(),
+    surfaceSidebarHover: hexColorSchema.optional(),
+    surfaceSidebarSelected: hexColorSchema.optional(),
     foreground: hexColorSchema,
     raised: hexColorSchema,
     control: hexColorSchema,
@@ -58,59 +72,75 @@ export function parsePluginThemeContribution(value: unknown): PluginThemeContrib
 function buildDarkPluginTheme(contribution: PluginThemeContribution): Theme {
   const colors = contribution.colors;
   const accent = colors.accent ?? colors.foreground;
-  return buildDarkTheme(
-    buildDarkSemanticColors({
-      surface0: colors.background,
-      surface1: colors.raised,
-      surface2: colors.control,
-      surface3: colors.border,
-      surface4: colors.ring,
-      surfaceDiffEmpty: colors.raised,
-      surfaceSidebar: colors.background,
-      foreground: colors.foreground,
-      foregroundMuted: colors.mutedForeground,
-      foregroundExtraMuted: colors.ring,
-      border: colors.border,
-      borderAccent: colors.border,
-      accent,
-      accentBright: accent,
-      accentForeground: colors.background,
-      destructive: darkTheme.colors.destructive,
-      terminalBlack: colors.control,
-      terminalBrightBlack: colors.ring,
-      ring: colors.ring,
-    }),
-  );
+  const fills = deriveNeutralFills(colors.background, colors.foreground, "dark");
+  const sidebar = colors.sidebar ?? colors.background;
+  const states = deriveSurfaceStates(sidebar, colors.foreground, "dark");
+  const semantic = buildDarkSemanticColors({
+    surface0: colors.background,
+    surface1: colors.raised,
+    surface2: colors.control,
+    surface3: colors.surface3 ?? fills.surface3,
+    surface4: colors.surface4 ?? fills.surface4,
+    surfaceDiffEmpty: colors.raised,
+    surfaceSidebar: sidebar,
+    foreground: colors.foreground,
+    foregroundMuted: colors.mutedForeground,
+    foregroundExtraMuted:
+      colors.foregroundExtraMuted ?? deriveTertiaryText(colors.mutedForeground, colors.background),
+    border: colors.border,
+    borderAccent: colors.border,
+    accent,
+    accentBright: accent,
+    accentForeground: colors.background,
+    destructive: darkTheme.colors.destructive,
+    terminalBlack: colors.control,
+    terminalBrightBlack: colors.ring,
+    ring: colors.ring,
+  });
+  return buildDarkTheme({
+    ...semantic,
+    surfaceSidebarHover: colors.surfaceSidebarHover ?? states.hover,
+    surfaceSidebarSelected: colors.surfaceSidebarSelected ?? states.selected,
+    selectedRow: colors.surfaceSidebarSelected ?? states.selected,
+  });
 }
 
 function buildLightPluginTheme(contribution: PluginThemeContribution): Theme {
   const colors = contribution.colors;
   const accent = colors.accent ?? colors.foreground;
-  return buildLightTheme(
-    buildLightSemanticColors({
-      surface0: colors.background,
-      surface1: colors.raised,
-      surface2: colors.control,
-      surface3: colors.border,
-      surface4: colors.ring,
-      surfaceDiffEmpty: colors.raised,
-      surfaceSidebar: colors.control,
-      foreground: colors.foreground,
-      foregroundMuted: colors.mutedForeground,
-      foregroundExtraMuted: colors.ring,
-      border: colors.border,
-      borderAccent: colors.border,
-      accent,
-      accentBright: accent,
-      accentForeground: colors.background,
-      primary: colors.foreground,
-      primaryForeground: colors.background,
-      destructive: lightTheme.colors.destructive,
-      terminalBlack: colors.foreground,
-      terminalBrightBlack: colors.ring,
-      ring: colors.ring,
-    }),
-  );
+  const fills = deriveNeutralFills(colors.background, colors.foreground, "light");
+  const sidebar = colors.sidebar ?? colors.background;
+  const states = deriveSurfaceStates(sidebar, colors.foreground, "light");
+  const semantic = buildLightSemanticColors({
+    surface0: colors.background,
+    surface1: colors.raised,
+    surface2: colors.control,
+    surface3: colors.surface3 ?? fills.surface3,
+    surface4: colors.surface4 ?? fills.surface4,
+    surfaceDiffEmpty: colors.raised,
+    surfaceSidebar: sidebar,
+    foreground: colors.foreground,
+    foregroundMuted: colors.mutedForeground,
+    foregroundExtraMuted:
+      colors.foregroundExtraMuted ?? deriveTertiaryText(colors.mutedForeground, colors.background),
+    border: colors.border,
+    borderAccent: colors.border,
+    accent,
+    accentBright: accent,
+    accentForeground: colors.background,
+    primary: colors.foreground,
+    primaryForeground: colors.background,
+    destructive: lightTheme.colors.destructive,
+    terminalBlack: colors.foreground,
+    terminalBrightBlack: colors.ring,
+    ring: colors.ring,
+  });
+  return buildLightTheme({
+    ...semantic,
+    surfaceSidebarHover: colors.surfaceSidebarHover ?? states.hover,
+    surfaceSidebarSelected: colors.surfaceSidebarSelected ?? states.selected,
+    selectedRow: colors.surfaceSidebarSelected ?? states.selected,
+  });
 }
 
 function buildPluginTheme(contribution: PluginThemeContribution): Theme {

@@ -3,6 +3,7 @@ import type { ProviderRefreshContext } from "./agent-sdk-types.js";
 interface RunProviderRefreshOptions<T> {
   label: string;
   timeoutMs: number;
+  signal?: AbortSignal;
   operation: (context: ProviderRefreshContext) => Promise<T>;
 }
 
@@ -19,7 +20,10 @@ export async function raceProviderRefreshAbort<T>(
   operation: Promise<T>,
 ): Promise<T> {
   if (!signal) return await operation;
-  signal.throwIfAborted();
+  if (signal.aborted) {
+    void operation.catch(() => undefined);
+    signal.throwIfAborted();
+  }
   let handleAbort: (() => void) | undefined;
   const aborted = new Promise<never>((_resolve, reject) => {
     handleAbort = () => reject(signal.reason);
@@ -68,13 +72,18 @@ export async function runProviderRefreshWithDeadline<T>(
     controller.abort(timeoutError);
   }, options.timeoutMs);
 
+  const outer = options.signal;
+  const abortFromOuter = () => controller.abort(outer?.reason);
+  if (outer?.aborted) abortFromOuter();
+  outer?.addEventListener("abort", abortFromOuter, { once: true });
   try {
-    const result = await options.operation(context);
+    const result = await raceProviderRefreshAbort(controller.signal, options.operation(context));
     if (timeoutError) throw timeoutError;
     return result;
   } catch (error) {
     throw timeoutError ?? error;
   } finally {
     clearTimeout(timer);
+    outer?.removeEventListener("abort", abortFromOuter);
   }
 }

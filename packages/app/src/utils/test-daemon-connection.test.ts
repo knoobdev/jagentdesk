@@ -1,3 +1,5 @@
+import { createHostLogger } from "@/runtime/host-logger";
+import { connectToDaemon } from "./test-daemon-connection";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DaemonClientConfig } from "@jagentdesk/client/internal/daemon-client";
 import type { DaemonConnectionDependencies, DaemonProbeClient } from "./test-daemon-connection";
@@ -34,6 +36,7 @@ class FakeDaemonClient implements DaemonProbeClient {
 }
 
 class FakeDaemonProbe {
+  diagnosticLines: string[] = [];
   createdClients: FakeDaemonClient[] = [];
   closedClients: FakeDaemonClient[] = [];
   clientIdsRequested = 0;
@@ -42,6 +45,11 @@ class FakeDaemonProbe {
   hangNextConnection = false;
 
   readonly deps: DaemonConnectionDependencies<FakeDaemonClient> = {
+    createLogger: (readServerId) => {
+      const capture = (...values: unknown[]) =>
+        this.diagnosticLines.push(values.map(String).join(" "));
+      return createHostLogger(readServerId, { log: capture, warn: capture, error: capture });
+    },
     getClientId: async () => {
       this.clientIdsRequested += 1;
       return "cid_shared_probe_test";
@@ -75,8 +83,20 @@ describe("test-daemon-connection connectToDaemon", () => {
     probe = new FakeDaemonProbe();
   });
 
+  it("retains the learned host identity in adopted probe logs after close", async () => {
+    const result = await connectToDaemon(
+      { id: "direct:test", type: "directTcp", endpoint: "127.0.0.1:6934" },
+      undefined,
+      probe.deps,
+    );
+    await result.client.close();
+    result.client.config.logger!.error({ err: new Error("socket closed") }, "connection_error");
+    const record = JSON.parse(probe.diagnosticLines[0]!.slice("connection_error ".length));
+    expect(record.serverId).toBe("srv_probe_test");
+    expect(record.err.message).toBe("socket closed");
+  });
+
   it("reuses the app clientId for direct connections", async () => {
-    const { connectToDaemon } = await import("./test-daemon-connection");
     const first = await connectToDaemon(
       {
         id: "direct:lan:6767",
@@ -106,7 +126,6 @@ describe("test-daemon-connection connectToDaemon", () => {
   });
 
   it("encodes the local socket target into the client config", async () => {
-    const { connectToDaemon } = await import("./test-daemon-connection");
     const result = await connectToDaemon(
       {
         id: "socket:/tmp/jagentdesk.sock",
@@ -124,7 +143,6 @@ describe("test-daemon-connection connectToDaemon", () => {
   });
 
   it("passes direct TCP connection passwords into the client config", async () => {
-    const { connectToDaemon } = await import("./test-daemon-connection");
     const result = await connectToDaemon(
       {
         id: "direct:lan:6767",
@@ -141,7 +159,6 @@ describe("test-daemon-connection connectToDaemon", () => {
   });
 
   it("dials tailnet connections directly with no e2ee config", async () => {
-    const { connectToDaemon } = await import("./test-daemon-connection");
     const tlsResult = await connectToDaemon(
       {
         id: "tailnet:wss:[::1]:8443",
@@ -169,14 +186,13 @@ describe("test-daemon-connection connectToDaemon", () => {
     await plainResult.client.close();
 
     const [tlsConfig, plainConfig] = probe.createdConfigs();
-    expect(tlsConfig?.url).toBe("wss://[::1]:8443/ws");
-    expect(plainConfig?.url).toBe("ws://tailnet.example.ts.net:6767/ws");
+    expect(tlsConfig?.url).toBe("wss://[::1]:8443/ws?paired=1");
+    expect(plainConfig?.url).toBe("ws://tailnet.example.ts.net:6767/ws?paired=1");
     expect(tlsConfig).not.toHaveProperty("e2ee");
     expect(plainConfig).not.toHaveProperty("e2ee");
   });
 
   it("surfaces auth rejection as an incorrect password", async () => {
-    const { connectToDaemon } = await import("./test-daemon-connection");
     probe.failNextConnection(
       new Error("Transport closed (code 4001)"),
       "Transport closed (code 4001)",
@@ -199,7 +215,6 @@ describe("test-daemon-connection connectToDaemon", () => {
   });
 
   it("keeps generic transport failures generic when a password was supplied", async () => {
-    const { connectToDaemon } = await import("./test-daemon-connection");
     probe.failNextConnection(new Error("Transport error"), "Transport error");
 
     await expect(
@@ -219,7 +234,6 @@ describe("test-daemon-connection connectToDaemon", () => {
   });
 
   it("cancels an in-flight probe and closes its client when the caller leaves", async () => {
-    const { connectToDaemon } = await import("./test-daemon-connection");
     probe.hangNextConnection = true;
     const controller = new AbortController();
     const attempt = connectToDaemon(

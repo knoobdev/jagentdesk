@@ -3,7 +3,7 @@ import type { Logger } from "pino";
 import type {
   AgentCapabilityFlags,
   AgentClient,
-  AgentFeature,
+  AgentOptionControl,
   AgentLaunchContext,
   AgentMode,
   AgentModelDefinition,
@@ -18,6 +18,7 @@ import type {
   AgentRuntimeInfo,
   AgentSession,
   AgentSessionConfig,
+  AgentSlashCommand,
   AgentStreamEvent,
   AgentTimelineItem,
   FetchCatalogOptions,
@@ -25,6 +26,8 @@ import type {
   ImportProviderSessionContext,
   ImportProviderSessionInput,
   ProviderCatalog,
+  SteerActiveTurnOptions,
+  SteerResult,
   ToolCallDetail,
   ToolCallTimelineItem,
 } from "../agent-sdk-types.js";
@@ -33,10 +36,20 @@ import { getAgentProviderDefinition } from "@jagentdesk/protocol/provider-manife
 
 export const MOCK_LOAD_TEST_PROVIDER_ID = "mock";
 export const MOCK_LOAD_TEST_DEFAULT_MODEL_ID = "five-minute-stream";
-export const MOCK_LOAD_TEST_HANDLED_COMMAND = "/mock handled-command";
+const MOCK_LOAD_TEST_COMMAND: AgentSlashCommand = {
+  name: "mock",
+  description: "Reply without starting a turn",
+  argumentHint: "handled-command",
+  kind: "command",
+};
+export const MOCK_LOAD_TEST_HANDLED_COMMAND = `/${MOCK_LOAD_TEST_COMMAND.name} ${MOCK_LOAD_TEST_COMMAND.argumentHint}`;
 const MOCK_LOAD_TEST_MODE_ID = "load-test";
 const MOCK_LOAD_TEST_DURATION_MS = 5 * 60 * 1000;
 const MOCK_LOAD_TEST_INTERVAL_MS = 40;
+
+function getPositiveFeatureInteger(value: unknown): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : 0;
+}
 const ONE_PIXEL_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl4Kj8AAAAASUVORK5CYII=";
 
@@ -57,10 +70,17 @@ const MODELS: AgentModelDefinition[] = [
   {
     provider: MOCK_LOAD_TEST_PROVIDER_ID,
     id: MOCK_LOAD_TEST_DEFAULT_MODEL_ID,
+    aliases: ["legacy-five-minute-stream"],
     label: "Five minute stream",
     description:
       "Realistic agent flow streamed as sub-word tokens for five minutes (good for scroll/coalesce debugging).",
     isDefault: true,
+    thinkingOptions: [
+      { id: "low", label: "Low", isDefault: true },
+      { id: "medium", label: "Medium" },
+      { id: "high", label: "High" },
+    ],
+    defaultThinkingOptionId: "low",
     metadata: {
       durationMs: MOCK_LOAD_TEST_DURATION_MS,
       intervalMs: MOCK_LOAD_TEST_INTERVAL_MS,
@@ -74,6 +94,22 @@ const MODELS: AgentModelDefinition[] = [
     metadata: {
       durationMs: 30 * 60 * 1000,
       intervalMs: 50,
+    },
+  },
+  {
+    provider: MOCK_LOAD_TEST_PROVIDER_ID,
+    id: "legacy-five-minute-stream",
+    label: "Legacy five minute stream",
+    isSelectable: false,
+    thinkingOptions: [
+      { id: "low", label: "Low", isDefault: true },
+      { id: "medium", label: "Medium" },
+      { id: "high", label: "High" },
+    ],
+    defaultThinkingOptionId: "low",
+    metadata: {
+      durationMs: MOCK_LOAD_TEST_DURATION_MS,
+      intervalMs: MOCK_LOAD_TEST_INTERVAL_MS,
     },
   },
   {
@@ -105,9 +141,38 @@ const MODELS: AgentModelDefinition[] = [
     id: "ten-second-stream",
     label: "Ten second stream",
     description: "Fast realistic stream for tests and smoke checks.",
+    thinkingOptions: [
+      { id: "low", label: "Low", isDefault: true },
+      { id: "medium", label: "Medium" },
+      { id: "high", label: "High" },
+    ],
+    defaultThinkingOptionId: "low",
     metadata: {
       durationMs: 10_000,
       intervalMs: 5,
+    },
+  },
+  {
+    provider: MOCK_LOAD_TEST_PROVIDER_ID,
+    id: "max-only-thinking-stream",
+    label: "Max-only thinking stream",
+    description: "Fast realistic stream with one supported thinking level.",
+    thinkingOptions: [{ id: "max", label: "Max", isDefault: true }],
+    defaultThinkingOptionId: "max",
+    metadata: {
+      durationMs: 10_000,
+      intervalMs: 5,
+    },
+  },
+  {
+    provider: MOCK_LOAD_TEST_PROVIDER_ID,
+    id: "e2e-fast-stream",
+    label: "E2E fast stream",
+    description: "Short deterministic stream for browser tests.",
+    isSelectable: false,
+    metadata: {
+      durationMs: 2_000,
+      intervalMs: 20,
     },
   },
 ];
@@ -165,13 +230,17 @@ interface LargeAgentStreamPayloadRequest {
 }
 
 interface AgentStreamStressRequest {
+  tools: boolean;
   count: number;
   coalesced: boolean;
 }
 
+type SteeringReplayShape = "claude" | "codex";
+
 interface MockQuestionOption {
   label: string;
   description?: string;
+  preview?: string;
 }
 
 interface MockQuestionPromptQuestion {
@@ -197,6 +266,13 @@ function shouldEmitTurnFailure(prompt: AgentPromptInput): boolean {
   return /emit\s+(?:a\s+)?synthetic\s+turn\s+failure/i.test(promptToText(prompt));
 }
 
+function parseSteeringReplayShape(prompt: AgentPromptInput): SteeringReplayShape | null {
+  const match = /replay a (claude|codex)-shaped foreground shell tool call/i.exec(
+    promptToText(prompt),
+  );
+  return match?.[1] === "claude" || match?.[1] === "codex" ? match[1] : null;
+}
+
 function parseSettledAssistantImageMarkdown(prompt: AgentPromptInput): string | null {
   const match = /^emit settled assistant image markdown:\s*(!\[[^\]\r\n]*\]\(.+\))\s*$/i.exec(
     promptToText(prompt),
@@ -204,10 +280,49 @@ function parseSettledAssistantImageMarkdown(prompt: AgentPromptInput): string | 
   return match?.[1] ?? null;
 }
 
+const ROLLOUT_FLAG_PREVIEW = [
+  "Ship it dark behind the new-surface flag, then turn it on for internal users before everyone else.",
+  "",
+  'if (flags.enabled("new-surface")) {',
+  "  render(<NewSurface />);",
+  "}",
+  ...Array.from({ length: 40 }, (_, i) => `// rollout step ${i + 1}`),
+  "// LAST PREVIEW LINE",
+].join("\n");
+
 function parseMockQuestionPrompt(prompt: AgentPromptInput): MockQuestionPromptRequest | null {
   const text = promptToText(prompt);
   if (!/emit\s+(?:a\s+)?synthetic\s+questions?/i.test(text)) {
     return null;
+  }
+
+  if (/with\s+links/i.test(text)) {
+    return {
+      questions: [
+        {
+          question:
+            "Sign in at https://example.com/login, then follow [the setup guide](https://example.com/setup). Done?",
+          header: "signIn",
+          options: [
+            {
+              label: "Done",
+              description: "Logs are at https://example.com/logs if sign-in fails.",
+            },
+            { label: "Not yet, see [status](https://example.com/status)" },
+          ],
+          multiSelect: false,
+        },
+        {
+          question: "Which checks should run?",
+          header: "checks",
+          options: [
+            { label: "Lint", description: "Rules: https://example.com/lint" },
+            { label: "Typecheck" },
+          ],
+          multiSelect: true,
+        },
+      ],
+    };
   }
 
   if (/free[-\s]?write|freeform|text[-\s]?only/i.test(text)) {
@@ -242,7 +357,10 @@ function parseMockQuestionPrompt(prompt: AgentPromptInput): MockQuestionPromptRe
       {
         question: "Which rollout should we use?",
         header: "rollout",
-        options: [{ label: "Immediately" }, { label: "Behind feature flag" }],
+        options: [
+          { label: "Immediately" },
+          { label: "Behind feature flag", preview: ROLLOUT_FLAG_PREVIEW },
+        ],
         multiSelect: false,
       },
       {
@@ -342,39 +460,9 @@ function parseLargeAgentStreamPayloadPrompt(
   };
 }
 
-// Scripted turns for the agent activity graph (spec 31.7): a fixed, observable sequence of todos,
-// tool calls, a provider subagent and a final answer, so the graph can be checked end to end without
-// a real model. "graph": the 31.7 #1 scenario, holding mid-turn for `hold` ms. "burst": `steps`
-// separate tool steps, one every `pace` ms (31.7 #3 and #9).
-interface ActivityGraphScriptRequest {
-  kind: "graph" | "burst";
-  steps: number;
-  paceMs: number;
-  holdMs: number;
-}
-
-function parseActivityGraphScriptPrompt(
-  prompt: AgentPromptInput,
-): ActivityGraphScriptRequest | null {
-  const text = promptToText(prompt);
-  const match = /emit\s+synthetic\s+activity\s+(graph|burst)\b([^\n]*)/i.exec(text);
-  if (!match) return null;
-  const option = (name: string, fallback: number, max: number) => {
-    const value = new RegExp(`\\b${name}=(\\d+)`, "i").exec(match[2] ?? "")?.[1];
-    const parsed = value === undefined ? fallback : Number(value);
-    return Number.isFinite(parsed) ? Math.min(Math.max(parsed, 0), max) : fallback;
-  };
-  return {
-    kind: match[1]!.toLowerCase() === "burst" ? "burst" : "graph",
-    steps: option("steps", 10, 200),
-    paceMs: option("pace", 1_200, 10_000),
-    holdMs: option("hold", 4_000, 120_000),
-  };
-}
-
 function parseAgentStreamStressPrompt(prompt: AgentPromptInput): AgentStreamStressRequest | null {
   const text = promptToText(prompt);
-  const match = /emit\s+(\d+)\s+(coalesced\s+)?agent stream updates/i.exec(text);
+  const match = /emit\s+(\d+)\s+(coalesced\s+|tool\s+)?agent stream updates/i.exec(text);
   if (!match) {
     return null;
   }
@@ -384,7 +472,8 @@ function parseAgentStreamStressPrompt(prompt: AgentPromptInput): AgentStreamStre
   }
   return {
     count: Math.min(count, 5_000),
-    coalesced: Boolean(match[2]),
+    coalesced: match[2]?.trim() === "coalesced",
+    tools: match[2]?.trim() === "tool",
   };
 }
 
@@ -689,11 +778,19 @@ export class MockLoadTestAgentClient implements AgentClient {
   }
 }
 
+function getConfiguredAssistantResponses(value: unknown): string[] {
+  return Array.isArray(value) && value.every((response) => typeof response === "string")
+    ? [...value]
+    : [];
+}
+
 export class MockLoadTestAgentSession implements AgentSession {
   readonly provider: AgentProvider = MOCK_LOAD_TEST_PROVIDER_ID;
   readonly capabilities = CAPABILITIES;
-  readonly features: AgentFeature[] = [];
+  readonly controls: AgentOptionControl[] = [];
   readonly id: string;
+  private readonly usageSessionKey = randomUUID();
+
   private readonly listeners = new Set<(event: AgentStreamEvent) => void>();
   private readonly history: AgentStreamEvent[] = [];
   private readonly logger?: Logger;
@@ -702,8 +799,12 @@ export class MockLoadTestAgentSession implements AgentSession {
   private modeId: string | null;
   private modelId: string | null;
   private readonly assistantResponse: string | null;
+  private readonly assistantResponses: string[];
+  private readonly streamingAssistantResponse: string | null;
+  private readonly streamingAssistantIntervalMs: number;
   private readonly rewindError: string | null;
   private remainingPromptRejections: number;
+  private remainingSteerFailures: number;
 
   constructor(options: { config: AgentSessionConfig; sessionId: string; logger?: Logger }) {
     this.id = options.sessionId;
@@ -711,20 +812,47 @@ export class MockLoadTestAgentSession implements AgentSession {
     this.modeId = options.config.modeId ?? MOCK_LOAD_TEST_MODE_ID;
     this.modelId = options.config.model ?? MOCK_LOAD_TEST_DEFAULT_MODEL_ID;
     this.assistantResponse =
-      typeof options.config.featureValues?.mockAssistantResponse === "string"
-        ? options.config.featureValues.mockAssistantResponse
+      typeof options.config.providerOptions?.mockAssistantResponse === "string"
+        ? options.config.providerOptions.mockAssistantResponse
         : null;
+    this.assistantResponses = getConfiguredAssistantResponses(
+      options.config.providerOptions?.mockAssistantResponses,
+    );
+    this.streamingAssistantResponse =
+      typeof options.config.providerOptions?.mockStreamingAssistantResponse === "string"
+        ? options.config.providerOptions.mockStreamingAssistantResponse
+        : null;
+    const requestedStreamingInterval =
+      options.config.providerOptions?.mockStreamingAssistantIntervalMs;
+    this.streamingAssistantIntervalMs =
+      typeof requestedStreamingInterval === "number" &&
+      Number.isFinite(requestedStreamingInterval) &&
+      requestedStreamingInterval >= 1
+        ? Math.min(requestedStreamingInterval, 1_000)
+        : MOCK_LOAD_TEST_INTERVAL_MS;
     this.rewindError =
-      typeof options.config.featureValues?.mockRewindError === "string"
-        ? options.config.featureValues.mockRewindError
+      typeof options.config.providerOptions?.mockRewindError === "string"
+        ? options.config.providerOptions.mockRewindError
         : null;
-    const requestedPromptRejections = options.config.featureValues?.mockPromptRejections;
+    const requestedPromptRejections = options.config.providerOptions?.mockPromptRejections;
     this.remainingPromptRejections =
       typeof requestedPromptRejections === "number" &&
       Number.isSafeInteger(requestedPromptRejections) &&
       requestedPromptRejections > 0
         ? requestedPromptRejections
         : 0;
+    this.remainingSteerFailures = getPositiveFeatureInteger(
+      options.config.providerOptions?.mockSteerAmbiguousFailures,
+    );
+  }
+
+  usageSession() {
+    return {
+      provider: this.provider,
+      model: this.modelId ?? undefined,
+      env: {},
+      sessionKey: this.usageSessionKey,
+    };
   }
 
   async run(prompt: AgentPromptInput, options?: AgentRunOptions): Promise<AgentRunResult> {
@@ -778,14 +906,19 @@ export class MockLoadTestAgentSession implements AgentSession {
     const questionPrompt = parseMockQuestionPrompt(prompt);
     const structuredBranchName = parseStructuredBranchNamePrompt(prompt);
     const settledAssistantImageMarkdown = parseSettledAssistantImageMarkdown(prompt);
-    const activityScript = parseActivityGraphScriptPrompt(prompt);
+    const steeringReplayShape = parseSteeringReplayShape(prompt);
     const scheduleTurn = () => {
-      if (activityScript) {
-        this.scheduleActivityGraphTurn(turn, activityScript);
-      } else if (shouldEmitTurnFailure(prompt)) {
+      if (shouldEmitTurnFailure(prompt)) {
         this.scheduleFailedTurn(turn);
-      } else if (this.assistantResponse !== null) {
-        this.scheduleSettledAssistantTurn(turn, this.assistantResponse);
+      } else if (steeringReplayShape) {
+        this.scheduleSteeringReplayTurn(turn, steeringReplayShape);
+      } else if (this.streamingAssistantResponse !== null) {
+        this.scheduleStreamingAssistantTurn(turn, this.streamingAssistantResponse);
+      } else if (this.assistantResponses.length > 0 || this.assistantResponse !== null) {
+        this.scheduleSettledAssistantTurn(
+          turn,
+          (this.assistantResponses.shift() ?? this.assistantResponse)!,
+        );
       } else if (structuredBranchName) {
         this.scheduleSettledAssistantTurn(turn, JSON.stringify(structuredBranchName));
       } else if (settledAssistantImageMarkdown) {
@@ -857,6 +990,10 @@ export class MockLoadTestAgentSession implements AgentSession {
     userMessageTimer.unref?.();
     if (userMessageDelayMs === 0) scheduleTurn();
     return { turnId };
+  }
+
+  async listCommands(): Promise<AgentSlashCommand[]> {
+    return [MOCK_LOAD_TEST_COMMAND];
   }
 
   tryHandleOutOfBand(
@@ -975,6 +1112,20 @@ export class MockLoadTestAgentSession implements AgentSession {
     });
   }
 
+  async steerActiveTurn(
+    _prompt: AgentPromptInput,
+    options: SteerActiveTurnOptions,
+  ): Promise<SteerResult> {
+    if (this.activeTurn?.turnId !== options.expectedTurnId) {
+      return { status: "unavailable" };
+    }
+    if (this.remainingSteerFailures > 0) {
+      this.remainingSteerFailures -= 1;
+      throw new Error("Requested mock steer transport failure");
+    }
+    return { status: "accepted" };
+  }
+
   async close(): Promise<void> {
     await this.interrupt();
     this.listeners.clear();
@@ -1072,122 +1223,49 @@ export class MockLoadTestAgentSession implements AgentSession {
     turn.timer.unref?.();
   }
 
-  private scheduleActivityGraphTurn(turn: ActiveTurn, script: ActivityGraphScriptRequest): void {
-    const id = turn.turnId;
-    const steps: Array<{ delayMs: number; run: () => void }> = [];
-    const at = (delayMs: number, run: () => void) => steps.push({ delayMs, run });
-    const tool = (
-      callId: string,
-      name: string,
-      detail: ToolCallDetail,
-      status: "running" | "completed",
-    ) => this.emitTimeline(id, createToolCall({ callId, name, status, detail }));
-    const todos = (statuses: Array<"pending" | "in_progress" | "completed">) =>
-      this.emitTimeline(id, {
-        type: "todo",
-        items: [
-          "Inspect the session module",
-          "Find the refresh race",
-          "Patch expiry handling",
-          "Add a regression test",
-        ].map((text, index) => ({
-          id: String(index + 1),
-          text,
-          status: statuses[index]!,
-          completed: statuses[index] === "completed",
-        })),
-      });
-    const pace = script.paceMs;
-    if (script.kind === "graph") {
-      const read: ToolCallDetail = { type: "read", filePath: "src/auth/session.ts" };
-      const search: ToolCallDetail = { type: "search", query: "refreshToken", toolName: "grep" };
-      const edit: ToolCallDetail = { type: "edit", filePath: "src/auth/session.ts" };
-      const task: ToolCallDetail = {
-        type: "sub_agent",
-        subAgentType: "Explore",
-        description: "Map session refresh callers",
-        log: "",
-      };
-      const subagent = (status: "running" | "completed") =>
-        this.emit({
-          type: "provider_subagent",
-          provider: this.provider,
-          event: {
-            type: "upsert",
-            id: `${id}:explore`,
-            title: "Explore",
-            description: "Map session refresh callers",
-            status,
-            toolCallId: `${id}:task`,
-          },
-        });
-      at(0, () => todos(["in_progress", "pending", "pending", "pending"]));
-      at(pace, () => tool(`${id}:read`, "Read", read, "running"));
-      at(pace, () => tool(`${id}:read`, "Read", read, "completed"));
-      at(pace, () => tool(`${id}:grep`, "Grep", search, "running"));
-      at(pace, () => tool(`${id}:grep`, "Grep", search, "completed"));
-      at(pace, () => this.emitTimeline(id, { type: "reasoning", text: "Tracing the callers." }));
-      at(pace, () => {
-        tool(`${id}:task`, "Task", task, "running");
-        subagent("running");
-      });
-      at(pace, () => tool(`${id}:edit`, "Edit", edit, "running"));
-      at(script.holdMs, () => tool(`${id}:edit`, "Edit", edit, "completed"));
-      at(pace, () => {
-        subagent("completed");
-        tool(`${id}:task`, "Task", task, "completed");
-      });
-      at(pace, () => todos(["completed", "completed", "completed", "completed"]));
-      at(pace, () =>
-        this.emitTimeline(id, {
-          type: "assistant_message",
-          text: "Fixed the refresh race in src/auth/session.ts and added a regression test.",
-          messageId: turn.assistantMessageId,
-        }),
-      );
-    } else {
-      for (let index = 0; index < script.steps; index += 1) {
-        const shell: ToolCallDetail = { type: "shell", command: `echo step ${index + 1}` };
-        const callId = `${id}:step-${index + 1}`;
-        at(index === 0 ? 0 : pace, () => {
-          this.emitTimeline(id, { type: "reasoning", text: `Step ${index + 1}.` });
-          tool(callId, "Bash", shell, "running");
-        });
-        at(Math.min(pace, 50), () => tool(callId, "Bash", shell, "completed"));
-      }
-      at(pace, () =>
-        this.emitTimeline(id, {
-          type: "assistant_message",
-          text: `Ran ${script.steps} steps.`,
-          messageId: turn.assistantMessageId,
-        }),
-      );
-    }
-    let index = 0;
-    const next = () => {
+  private scheduleSteeringReplayTurn(turn: ActiveTurn, shape: SteeringReplayShape): void {
+    turn.timer = setTimeout(() => {
       if (this.activeTurn !== turn) return;
-      const step = steps[index];
-      if (!step) {
-        this.activeTurn = null;
-        const usage = { inputTokens: 1, outputTokens: 1 };
-        this.emit({ type: "turn_completed", provider: this.provider, turnId: id, usage });
-        turn.resolve({
-          sessionId: this.id,
-          finalText: "Synthetic activity graph turn complete",
-          usage,
-          timeline: [],
-          canceled: false,
+      this.clearTurnTimer(turn);
+      this.emitTurnStarted(turn);
+      if (shape === "codex") {
+        this.emitTimeline(turn.turnId, {
+          type: "assistant_message",
+          text: "Running the foreground command.",
+          messageId: turn.assistantMessageId,
         });
-        return;
       }
-      index += 1;
-      step.run();
-      const following = steps[index];
-      turn.timer = setTimeout(next, following ? following.delayMs : 0);
+      const callId = `${turn.turnId}:steering-replay-shell`;
+      const detail: ToolCallDetail = {
+        type: "shell",
+        command: "sleep 5",
+        cwd: "/tmp/jagentdesk-mock-load",
+      };
+      this.emitTimeline(
+        turn.turnId,
+        createToolCall({ callId, name: "bash", status: "running", detail }),
+      );
+      turn.timer = setTimeout(() => {
+        if (this.activeTurn !== turn) return;
+        this.clearTurnTimer(turn);
+        this.emitTimeline(
+          turn.turnId,
+          createToolCall({
+            callId,
+            name: "bash",
+            status: "completed",
+            detail: { ...detail, output: "", exitCode: 0 },
+          }),
+        );
+        this.emitTimeline(turn.turnId, {
+          type: "assistant_message",
+          text: "Foreground command completed after steering.",
+          messageId: turn.assistantMessageId,
+        });
+        this.finishTurnWithText(turn, "Foreground command completed after steering.");
+      }, 5_000);
       turn.timer.unref?.();
-    };
-    this.emitTurnStarted(turn);
-    turn.timer = setTimeout(next, steps[0]?.delayMs ?? 0);
+    }, 0);
     turn.timer.unref?.();
   }
 
@@ -1219,6 +1297,32 @@ export class MockLoadTestAgentSession implements AgentSession {
     turn.timer = setTimeout(() => {
       this.emitSettledAssistantTurn(turn, finalText);
     }, 0);
+    turn.timer.unref?.();
+  }
+
+  private scheduleStreamingAssistantTurn(turn: ActiveTurn, finalText: string): void {
+    const tokens = tokenize(finalText);
+    const emitNext = () => {
+      if (this.activeTurn !== turn) {
+        return;
+      }
+      this.clearTurnTimer(turn);
+      this.emitTurnStarted(turn);
+      const token = tokens.shift();
+      if (token === undefined) {
+        this.finishTurnWithText(turn, finalText);
+        return;
+      }
+      turn.emittedTokens += 1;
+      this.emitTimeline(turn.turnId, {
+        type: "assistant_message",
+        text: token,
+        messageId: turn.assistantMessageId,
+      });
+      turn.timer = setTimeout(emitNext, this.streamingAssistantIntervalMs);
+      turn.timer.unref?.();
+    };
+    turn.timer = setTimeout(emitNext, 0);
     turn.timer.unref?.();
   }
 
@@ -1350,21 +1454,37 @@ export class MockLoadTestAgentSession implements AgentSession {
     this.emitTurnStarted(turn);
 
     for (let index = 0; index < stress.count; index += 1) {
-      this.emitTimeline(
-        turn.turnId,
-        stress.coalesced
-          ? {
-              type: "assistant_message",
-              text: `stress-update-${index}`,
-              messageId: turn.assistantMessageId,
-            }
-          : {
-              type: "todo",
-              items: [{ text: `stress-update-${index}`, completed: index % 2 === 0 }],
-            },
-      );
+      let item: AgentTimelineItem;
+      if (stress.tools) {
+        item = {
+          type: "tool_call",
+          callId: `${turn.turnId}:stress:${index}`,
+          name: "Bash",
+          status: "completed",
+          error: null,
+          detail: { type: "shell", command: `echo stress-${index}`, output: `stress-${index}` },
+        };
+      } else if (stress.coalesced) {
+        item = {
+          type: "assistant_message",
+          text: `stress-update-${index}`,
+          messageId: turn.assistantMessageId,
+        };
+      } else {
+        item = {
+          type: "todo",
+          items: [{ text: `stress-update-${index}`, completed: index % 2 === 0 }],
+        };
+      }
+      this.emitTimeline(turn.turnId, item);
     }
 
+    if (stress.tools)
+      this.emitTimeline(turn.turnId, {
+        type: "assistant_message",
+        text: `Completed ${stress.count} commands`,
+        messageId: turn.assistantMessageId,
+      });
     this.activeTurn = null;
     const usage = {
       inputTokens: 1,

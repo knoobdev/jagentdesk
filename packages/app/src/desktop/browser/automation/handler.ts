@@ -1,3 +1,5 @@
+import type { BrowserAutomationHostCapability } from "@jagentdesk/protocol/browser-automation/capabilities";
+import { BROWSER_AUTOMATION_COMMAND_NAMES } from "@jagentdesk/protocol/browser-automation/rpc-schemas";
 import type { SessionInboundMessage, SessionOutboundMessage } from "@jagentdesk/protocol/messages";
 import { getDesktopHost, type DesktopHostBridge } from "@/desktop/host";
 import { syncFingerprintProfileNow } from "@/desktop/browser/fingerprint-profile-sync";
@@ -99,6 +101,17 @@ export function mountBrowserAutomationHandler(
   });
   return () => {
     unsubscribe();
+  };
+}
+
+export function getDesktopBrowserHostRegistration(): BrowserAutomationHostCapability | null {
+  const desktop = getDesktopHost();
+  if (typeof desktop?.browser?.executeAutomationCommand !== "function") return null;
+  return {
+    hostKind: "desktop app",
+    label: desktop.browserHostLabel,
+    instanceId: desktop.browserHostInstanceId,
+    supportedCommands: [...BROWSER_AUTOMATION_COMMAND_NAMES],
   };
 }
 

@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +9,8 @@ import { ModelBrowser, type ModelBrowserState } from "./model-browser";
 
 // Load translations so controls expose their real accessible names.
 void testI18n;
+
+const testQueryClient = new QueryClient();
 
 // App sources compile against the classic JSX runtime, which expects React on the global.
 beforeEach(() => vi.stubGlobal("React", React));
@@ -41,14 +44,17 @@ function buildState(): ModelBrowserState {
     providers,
     selectedProvider: provider,
     selectedModel: modelId,
-    favoriteKeys: new Set([favoriteKey]),
-    view: { kind: "all" },
+    serverId: null,
+    profiles: null,
+    showAll: () => {},
+    view: { kind: "provider", providerId: provider, providerLabel: "Claude" },
     searchQuery: "",
+    isSearchFocused: false,
     header: { title: "Model" },
     selectedModelLabel: "Sonnet",
     triggerLabel: "Sonnet",
     desktopFixedHeight: undefined,
-    isProviderView: false,
+    isProviderView: true,
     prepareToOpen: () => {},
     reset: () => {},
     drillDown: () => {},
@@ -57,36 +63,38 @@ function buildState(): ModelBrowserState {
 
 function mountBrowser() {
   const onSelect = vi.fn<(provider: string, modelId: string) => void>();
-  const onToggleFavorite = vi.fn<(provider: string, modelId: string) => void>();
+  const onCreateProfile = vi.fn<() => void>();
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
   act(() =>
     root.render(
-      <ModelBrowser state={buildState()} onSelect={onSelect} onToggleFavorite={onToggleFavorite} />,
+      <QueryClientProvider client={testQueryClient}>
+        <ModelBrowser state={buildState()} onSelect={onSelect} onCreateProfile={onCreateProfile} />
+      </QueryClientProvider>,
     ),
   );
   mounted.push({ root, container });
-  return { container, onSelect, onToggleFavorite };
+  return { container, onSelect, onCreateProfile };
 }
 
 describe("model browser rows on web", () => {
-  it("keeps the favorite toggle out of the row's button", () => {
+  it("keeps the profile action out of the row's button", () => {
     const { container } = mountBrowser();
     const favorite = container.querySelector(
-      `[data-testid="favorite-model-${provider}-${modelId}"]`,
+      `[data-testid="model-create-profile-${provider}-${modelId}"]`,
     );
     expect(favorite).not.toBeNull();
     expect(container.querySelector("button button")).toBeNull();
   });
 
-  it("toggles the favorite without selecting the model", () => {
-    const { container, onSelect, onToggleFavorite } = mountBrowser();
+  it("creates a profile without selecting the model", () => {
+    const { container, onSelect, onCreateProfile } = mountBrowser();
     const favorite = container.querySelector<HTMLElement>(
-      `[data-testid="favorite-model-${provider}-${modelId}"]`,
+      `[data-testid="model-create-profile-${provider}-${modelId}"]`,
     );
     act(() => favorite?.click());
-    expect(onToggleFavorite).toHaveBeenCalledWith(provider, modelId);
+    expect(onCreateProfile).toHaveBeenCalledWith(expect.objectContaining({ provider, modelId }));
     expect(onSelect).not.toHaveBeenCalled();
   });
 });

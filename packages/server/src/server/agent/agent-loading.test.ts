@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { expect, test, vi } from "vitest";
+import { expect, test } from "vitest";
 
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import { AgentManager } from "./agent-manager.js";
@@ -17,6 +17,7 @@ import type {
   AgentSessionConfig,
 } from "./agent-sdk-types.js";
 import { createTestAgentClients } from "../test-utils/fake-agent-client.js";
+import { createDaemonTestContext } from "../test-utils/daemon-test-context.js";
 
 test("loads archived records for history and active records with the interactive default", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agent-loading-purpose-"));
@@ -70,7 +71,7 @@ test("loads archived records for history and active records with the interactive
     await ensureAgentLoaded(archived.id, { agentManager: manager, agentStorage: storage, logger });
     await ensureAgentLoaded(active.id, { agentManager: manager, agentStorage: storage, logger });
 
-    expect(resumeOptions).toEqual([{ purpose: "history" }, undefined]);
+    expect(resumeOptions).toEqual([{ purpose: "history" }, { purpose: "interactive" }]);
   } finally {
     await Promise.all([
       manager.closeAgent(archivedId).catch(() => undefined),
@@ -82,63 +83,138 @@ test("loads archived records for history and active records with the interactive
   }
 });
 
-test("loads an archived agent's history after its working directory is removed", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "agent-loading-missing-cwd-"));
-  const worktree = path.join(root, "managed-worktree");
-  await mkdir(worktree, { recursive: true });
-  const logger = createTestLogger();
-  const storage = new AgentStorage(path.join(root, "agents"), logger);
-  const manager = new AgentManager({
-    clients: createTestAgentClients(),
-    registry: storage,
-    logger,
-  });
-
-  const agentId = "00000000-0000-4000-8000-000000000501";
-
-  try {
-    const agent = await manager.createAgent({ provider: "codex", cwd: worktree }, agentId, {
-      workspaceId: "workspace-worktree",
-    });
-    await startAgentRun(manager, agent.id, "what did you change", logger, {});
-    // Dispatching a run does not finish it: the provider appends the reply to its
-    // history afterwards, and the turn is finalized only once that append lands.
-    // Archive after the turn is finalized so the transcript this test reads back is
-    // already on disk when the worktree goes away.
-    await vi.waitFor(() => {
-      expect(manager.getAgent(agent.id)?.lifecycle).toBe("idle");
-      expect(manager.getTimeline(agent.id).some((item) => item.type === "assistant_message")).toBe(
-        true,
-      );
-    });
-    await manager.archiveAgent(agent.id);
-    await manager.flush();
-    await storage.flush();
-
-    // Archiving the workspace removes the worktree it owned. The agent's history is
-    // persisted and reading it must not depend on that directory still being there.
-    await rm(worktree, { recursive: true, force: true });
-
-    const loaded = await ensureAgentLoaded(agentId, {
-      agentManager: manager,
-      agentStorage: storage,
+test.each([false, true])(
+  "loads history after its working directory is removed (archived: %s)",
+  async (archived) => {
+    const root = await mkdtemp(path.join(tmpdir(), "agent-loading-missing-cwd-"));
+    const worktree = path.join(root, "managed-worktree");
+    await mkdir(worktree, { recursive: true });
+    const logger = createTestLogger();
+    const storage = new AgentStorage(path.join(root, "agents"), logger);
+    const manager = new AgentManager({
+      clients: createTestAgentClients(),
+      registry: storage,
       logger,
     });
 
-    expect(loaded.id).toBe(agentId);
-    // The transcript is replayed from the provider's persisted history, so the reply the
-    // agent gave before the worktree went away is still readable.
-    const replies = manager
-      .getTimeline(agentId)
-      .filter((item) => item.type === "assistant_message");
-    expect(replies.length).toBeGreaterThan(0);
-    expect(replies.every((item) => item.type === "assistant_message" && item.text.length > 0)).toBe(
-      true,
+    const agentId = "00000000-0000-4000-8000-000000000501";
+
+    try {
+      const agent = await manager.createAgent({ provider: "codex", cwd: worktree }, agentId, {
+        workspaceId: "workspace-worktree",
+      });
+      await startAgentRun(manager, agent.id, "what did you change", logger, {});
+      // Dispatching a run does not finish it: the provider appends the reply to its
+      // history afterwards, and the turn is finalized only once that append lands.
+      // Archive after the turn is finalized so the transcript this test reads back is
+      // already on disk when the worktree goes away.
+      await expect.poll(() => manager.getAgent(agent.id)?.lifecycle).toBe("idle");
+      if (archived) await manager.archiveAgent(agent.id);
+      else await manager.closeAgent(agent.id);
+      await manager.flush();
+      await storage.flush();
+
+      // Archiving the workspace removes the worktree it owned. The agent's history is
+      // persisted and reading it must not depend on that directory still being there.
+      await rm(worktree, { recursive: true, force: true });
+
+      const loaded = await ensureAgentLoaded(agentId, {
+        agentManager: manager,
+        agentStorage: storage,
+        logger,
+        purpose: "history",
+      });
+
+      expect(loaded.id).toBe(agentId);
+      // The transcript is replayed from the provider's persisted history, so the reply the
+      // agent gave before the worktree went away is still readable.
+      const replies = manager
+        .getTimeline(agentId)
+        .filter((item) => item.type === "assistant_message");
+      expect(replies.length).toBeGreaterThan(0);
+      expect(
+        replies.every((item) => item.type === "assistant_message" && item.text.length > 0),
+      ).toBe(true);
+    } finally {
+      await manager.closeAgent(agentId).catch(() => undefined);
+      await manager.flush().catch(() => undefined);
+      await storage.flush().catch(() => undefined);
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test("timeline requests read unarchived stored history with a deleted cwd", async () => {
+  const ctx = await createDaemonTestContext();
+  const cwd = await mkdtemp(path.join(tmpdir(), "timeline-deleted-cwd-"));
+  try {
+    const agent = await ctx.client.createAgent({ provider: "codex", cwd });
+    await ctx.client.sendMessage(agent.id, "remember this conversation");
+    await ctx.client.waitForFinish(agent.id, 15000);
+    const before = await ctx.client.fetchAgentTimeline(agent.id);
+    await ctx.daemon.daemon.agentManager.closeAgent(agent.id);
+    await ctx.daemon.daemon.agentManager.flush();
+    await rm(cwd, { recursive: true, force: true });
+    const after = await ctx.client.fetchAgentTimeline(agent.id);
+    expect(after.entries).toEqual(before.entries);
+    expect(after.entries.length).toBeGreaterThan(0);
+    await expect(ctx.client.sendMessage(agent.id, "continue")).rejects.toThrow(
+      "Working directory does not exist",
     );
+    await expect(ctx.client.createAgent({ provider: "codex", cwd })).rejects.toThrow(
+      "Working directory does not exist",
+    );
+    await mkdir(cwd);
+    await ctx.client.sendMessage(agent.id, "continue after restoring directory");
+    expect((await ctx.client.waitForFinish(agent.id, 15000)).status).toBe("idle");
   } finally {
-    await manager.closeAgent(agentId).catch(() => undefined);
-    await manager.flush().catch(() => undefined);
-    await storage.flush().catch(() => undefined);
-    await rm(root, { recursive: true, force: true });
+    await ctx.cleanup();
+    await rm(cwd, { recursive: true, force: true });
   }
-});
+}, 30000);
+
+test("timeline reads keep runnable unarchived agents interactive for the next prompt", async () => {
+  const clients = createTestAgentClients();
+  const base = clients.codex!;
+  const purposes: Array<AgentResumeSessionOptions | undefined> = [];
+  const client: AgentClient = {
+    provider: base.provider,
+    capabilities: base.capabilities,
+    createSession: (config, context) => base.createSession(config, context),
+    resumeSession: (handle, overrides, context, options) => {
+      purposes.push(options);
+      return base.resumeSession(handle, overrides, context, options);
+    },
+    fetchCatalog: (options) => base.fetchCatalog(options),
+    isAvailable: () => base.isAvailable(),
+  };
+  const ctx = await createDaemonTestContext({ agentClients: { codex: client } });
+  const cwd = await mkdtemp(path.join(tmpdir(), "timeline-interactive-"));
+  try {
+    const agent = await ctx.client.createAgent({ provider: "codex", cwd });
+    await ctx.daemon.daemon.agentManager.closeAgent(agent.id);
+    await ctx.client.fetchAgentTimeline(agent.id);
+    expect(purposes).toEqual([{ purpose: "interactive" }]);
+    await ctx.client.sendMessage(agent.id, "continue after opening history");
+    expect((await ctx.client.waitForFinish(agent.id, 15000)).status).toBe("idle");
+    const timeline = await ctx.client.fetchAgentTimeline(agent.id);
+    expect(timeline.entries.length).toBeGreaterThan(0);
+    await ctx.daemon.daemon.agentManager.closeAgent(agent.id);
+    await rm(cwd, { recursive: true, force: true });
+    await ctx.client.fetchAgentTimeline(agent.id);
+    await mkdir(cwd);
+    const manager = ctx.daemon.daemon.agentManager;
+    await Promise.all([
+      manager.tryRunOutOfBand(agent.id, "first prompt"),
+      manager.tryRunOutOfBand(agent.id, "second prompt"),
+    ]);
+    expect(purposes).toEqual([
+      { purpose: "interactive" },
+      { purpose: "history" },
+      undefined, // Reload uses the provider's interactive default.
+    ]);
+  } finally {
+    await ctx.cleanup();
+    await rm(cwd, { recursive: true, force: true });
+  }
+}, 30000);

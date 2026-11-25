@@ -13,19 +13,19 @@ Your code never leaves your machine. JAgentDesk is local-first.
 └──────┬───────┘    └──────┬──────┘    └──────┬──────┘
        │                   │                  │
        │    WebSocket      │    WebSocket     │    Managed subprocess
-       │    (direct or     │    (direct)      │    + WebSocket
-       │     via Tailscale) │                  │
+       │  (direct, tailnet │    (direct)      │    + WebSocket
+       │   or relay)       │                  │
        └───────────┬───────┴──────────────────┘
                    │
-            ┌──────▼──────┐
-            │   Daemon    │
-            │  (Node.js)  │
+            ┌──────▼──────┐       ┌──────────────────┐
+            │   Daemon    │◄─────►│ Connected daemons │
+            │  (Node.js)  │       └──────────────────┘
             └──────┬──────┘
                    │
       ┌────────────┼────────────┬────────────┬────────────┐
       │            │            │            │            │
 ┌─────▼─────┐ ┌───▼────┐ ┌──────▼─────┐ ┌────▼─────┐ ┌────▼────┐
-│  Claude   │ │ Codex  │ │  Copilot   │ │ OpenCode │ │   Pi    │
+│  Claude   │ │ Codex  │ │  Copilot   │ │ OpenCode │ │ Pi/OMP  │
 │  Agent    │ │ Agent  │ │   Agent    │ │  Agent   │ │ Agent   │
 │  SDK      │ │ Server │ │    ACP     │ │          │ │         │
 └───────────┘ └────────┘ └────────────┘ └──────────┘ └─────────┘
@@ -37,6 +37,8 @@ Your code never leaves your machine. JAgentDesk is local-first.
 - **App:** Cross-platform Expo client for iOS, Android, web, and the shared UI used by desktop.
 - **CLI:** Terminal interface for agent workflows that can also start and manage the daemon.
 - **Desktop app:** Electron wrapper around the web app that bundles and auto-manages its own daemon.
+- **Relay:** Cloudflare Worker that forwards end-to-end encrypted frames between apps and daemons.
+- **Built-in plugins:** Features under `plugins/<id>/` that load into the daemon and app hosts.
 
 ## Packages
 
@@ -48,7 +50,8 @@ The heart of JAgentDesk. A Node.js process that:
 - Manages agent lifecycle (create, run, stop, resume, archive)
 - Streams agent output in real time via a timeline model
 - Provides agent-to-agent tools through a transport-neutral tool catalog, with MCP as one adapter
-- Optionally connects to a Tailscale (tsnet) tailnet for remote access
+- Optionally connects to a Tailscale (tsnet) tailnet and to the encrypted relay for remote access
+- Optionally links to other daemons as [connected hosts](connected-hosts.md)
 - Optionally serves the browser web client from the same HTTP server (self-hosting guide: [public-docs/web-ui.md](../public-docs/web-ui.md))
 
 All paths are under `packages/server/src/`.
@@ -63,21 +66,28 @@ not retain non-Git directories.
 
 **Key modules:**
 
-| Module                          | Responsibility                                                                |
-| ------------------------------- | ----------------------------------------------------------------------------- |
-| `server/bootstrap.ts`           | Daemon initialization: HTTP server, WS server, agent manager, storage, tsnet  |
-| `server/websocket-server.ts`    | WebSocket connection management, hello handshake, binary frame routing        |
-| `server/session.ts`             | Per-client session state, timeline subscriptions, terminal operations         |
-| `server/agent/agent-manager.ts` | Agent lifecycle state machine, timeline tracking, subscriber management       |
-| `server/agent/agent-storage.ts` | File-backed JSON persistence at `$JAGENTDESK_HOME/agents/`                    |
-| `server/agent/tools/`           | Transport-neutral catalog for workspaces, agents, permissions, and automation |
-| `server/orchestration/`         | Task Brief compiler, role-scoped topology enforcement, handback/dissent state |
-| `server/agent/mcp-server.ts`    | Thin MCP adapter that registers the JAgentDesk tool catalog with the MCP SDK  |
-| `server/agent/providers/`       | Provider adapters (see "Agent providers" below)                               |
-| `server/tsnet-listener.ts`      | Tailnet (tsnet) listener for remote access                                    |
-| `server/schedule/`              | Cron-based scheduled agents                                                   |
-| `server/loop-service.ts`        | Looping agent runs that retry until an exit condition                         |
-| `server/chat/`                  | Chat rooms for agent-to-agent and human-to-agent messaging                    |
+| Module                          | Responsibility                                                                  |
+| ------------------------------- | ------------------------------------------------------------------------------- |
+| `server/bootstrap.ts`           | Daemon initialization: HTTP server, WS server, agent manager, storage, tsnet    |
+| `server/websocket-server.ts`    | WebSocket connection management, hello handshake, pairing, binary frame routing |
+| `server/session.ts`             | Per-client session state, timeline subscriptions, terminal operations           |
+| `server/agent/agent-manager.ts` | Agent lifecycle state machine, timeline tracking, subscriber management         |
+| `server/agent/agent-storage.ts` | File-backed JSON persistence at `$JAGENTDESK_HOME/agents/`                      |
+| `server/agent/tools/`           | Transport-neutral catalog for hosts, workspaces, agents, and automation         |
+| `server/agent/mcp-server.ts`    | Thin MCP adapter that registers the JAgentDesk tool catalog with the MCP SDK    |
+| `server/agent/providers/`       | Provider adapters (see "Agent providers" below)                                 |
+| `server/authorization/`         | Semantic permissions per session ([permissions.md](permissions.md))             |
+| `server/pairing/`               | SAS device pairing, signed hello, paired-device store                           |
+| `server/tsnet-listener.ts`      | Tailnet (tsnet) listener for remote access                                      |
+| `server/relay-runtime.ts`       | Encrypted relay control and data sockets ([relay.md](relay.md))                 |
+| `server/connected-hosts/`       | Daemon-to-daemon links and routed sessions                                      |
+| `server/plugins/builtin/`       | `BuiltinServerHost` that registers built-in feature plugins                     |
+| `server/bots/`                  | Bots runtime and SQLite store ([bots.md](bots.md))                              |
+| `server/orchestration/`         | Task Brief compiler, role-scoped topology enforcement, handback/dissent state   |
+| `server/schedule/`              | Cron-based scheduled agents                                                     |
+| `server/loop-service.ts`        | Looping agent runs that retry until an exit condition                           |
+| `server/chat/`                  | Chat rooms for agent-to-agent and human-to-agent messaging                      |
+| `terminal/`                     | Terminal sessions backed by the persistent terminal worker                      |
 
 ### `packages/protocol` — Wire schemas and shared protocol types
 
@@ -98,50 +108,59 @@ code imports from `@jagentdesk/client`.
 Cross-platform React Native app that connects to one or more daemons.
 
 - Expo Router navigation (`/h/[serverId]/workspace/[workspaceId]`, `/h/[serverId]/agent/[agentId]`, etc.). The `workspaceId` URL segment is an opaque workspace id, not a directly meaningful filesystem path.
-- `HostRuntimeController` manages saved host connections, reconnection, and per-host runtime state
-- `runtime/replica-cache` keeps a non-authoritative per-host display replica in AsyncStorage: only the last focused agent, its workspace, and a short timeline tail. It restores before navigation becomes ready, leaves remote hydration flags false, and is atomically replaced by the normal snapshot-plus-delta synchronization path.
+- The desktop shell is one Gumloop sidebar (`components/gumloop-shell/`); compact layouts use a drawer. See [themes.md](themes.md).
+- `HostRuntimeController` manages saved host connections, route selection, reconnection, and per-host runtime state
+- `runtime/replica-cache` restores a disposable display replica before the host connects. See [data-model.md](data-model.md#offline-replica).
 - `SessionContext` wraps the daemon client for the active session
+- `plugins/builtin/` holds `BuiltinClientHost`, which mounts built-in feature plugins
 - Composer UI and submit/draft behavior live in `packages/app/src/composer/`; screens and panels should integrate it from there instead of dropping composer internals into `components/`, `hooks/`, or `screens/workspace/`
 - Timeline reducers in `timeline/session-stream-reducers.ts` handle compaction, gap detection, sequence-based deduplication
-- Timeline sync correctness is documented in [docs/timeline-sync.md](timeline-sync.md): live streams are for immediacy, `fetch_agent_timeline_request` is authoritative, and catch-up is paged but complete.
+- Timeline sync correctness is documented in [timeline-sync.md](timeline-sync.md): live streams are for immediacy, `fetch_agent_timeline_request` is authoritative, and catch-up is paged but complete.
 - Voice features: dictation (STT) and voice agent (realtime)
 
-The replica cache exists only to paint stale data immediately while the host connects. It does not
-own mutations, infer deletions, or replace daemon reconciliation. Pending permission requests are
-not restored from it. AsyncStorage is not encrypted, so the cached timeline tail may contain source
-code, prompts, and tool output; encrypted-at-rest storage is a separate product/security decision.
-Its serialized payload has a 1 MiB byte budget and evicts whole host snapshots in least-recently-
-written order; a single oversized host is omitted rather than partially restored.
+The replica cache paints stale data while the host connects. It does not own mutations, infer
+deletions, or replace daemon reconciliation. Pending permission requests are not restored from it.
 
 ### `packages/cli` — Command-line client
 
 Commander.js CLI with Docker-style commands. Common agent operations are also exposed at the top level (e.g. `jagentdesk ls`, `jagentdesk run`).
 
-- `jagentdesk agent ls/run/import/attach/logs/stop/delete/send/inspect/wait/archive/reload/update/mode`
+- `jagentdesk agent ls/run/import/attach/logs/stop/delete/send/inspect/wait/archive/detach/open/reload/update/mode`
 - `jagentdesk daemon start/stop/restart/status/pair/set-password`
+- `jagentdesk host add/ls/inspect/update/enable/disable/rm` ([connected-hosts.md](connected-hosts.md))
+- `jagentdesk relay reset` ([relay.md](relay.md))
 - `jagentdesk chat ls/create/inspect/post/read/wait/delete`
 - `jagentdesk terminal ls/create/capture/send-keys/kill`
 - `jagentdesk script ls/start/stop`
 - `jagentdesk loop run/ls/inspect/logs/stop`
 - `jagentdesk schedule create/ls/inspect/update/pause/resume/run-once/logs/delete`
 - `jagentdesk heartbeat create/update/delete`
-- `jagentdesk workspace create/ls/archive`
+- `jagentdesk workspace create/ls/rename/archive`
 - `jagentdesk permit allow/deny/ls`
 - `jagentdesk provider ls/models`
+- `jagentdesk plugin init/install/ls/status/logs/update/remove`
+- `jagentdesk usage ls/inspect`
+- `jagentdesk hub connect/disconnect/status`
 - hidden legacy `jagentdesk worktree create/ls/archive` compatibility alias
 - `jagentdesk speech …`
 
 Communicates with the daemon via the same WebSocket protocol as the app.
 
-### Remote access — Tailscale (tsnet)
+### `packages/relay` — Encrypted relay
 
-Remote access no longer uses a relay. The daemon joins a Tailscale tailnet via
-`packages/server/src/server/tsnet-listener.ts` and accepts WebSocket connections
-there; WireGuard provides transport encryption and node identity, so the relay's
-E2EE box layer was removed. Pairing transfers the daemon's public key through a
-tailnet connection offer.
+Cloudflare Worker with a Durable Object per daemon. It forwards Noise-encrypted frames and never
+holds daemon or device private keys. The daemon accepts tailnet connections through embedded tsnet
+and keeps the relay as a second path. Both paths use the same device pairing and signed-hello
+admission. See [relay.md](relay.md) for configuration, identity storage, and transport boundaries,
+and [SECURITY.md](../SECURITY.md) for the threat model.
 
-See [SECURITY.md](../SECURITY.md) for the threat model.
+### `plugins/` — Built-in feature plugins
+
+Each feature lives in `plugins/<id>/` with a `jagentdesk-plugin.json` manifest plus `server/` and
+`client/` entrypoints. `BuiltinServerHost` (`packages/server/src/server/plugins/builtin/host.ts`)
+and `BuiltinClientHost` (`packages/app/src/plugins/builtin/host.ts`) wire them in. The same
+directory holds bundled provider plugins and usage-source plugins. See
+[builtin-plugins.md](builtin-plugins.md) and [plugins.md](plugins.md).
 
 ### `packages/desktop` — Desktop app (Electron)
 
@@ -159,7 +178,7 @@ Electron wrapper for macOS, Linux, and Windows.
 >
 > **In-app browser window opens.** Ordinary link opens, including Shift-clicked links, become JAgentDesk workspace tabs. Script-created opens with popup features or a named window target and POST-backed opens remain secured Electron child windows in the shared browser profile, preserving `window.opener`, `postMessage`, named-window reuse, request bodies, and `window.close()` for OAuth, payment, and similar popup protocols. Unsupported URL schemes are denied before either path.
 >
-> **In-app browser ownership.** Each registered guest records its owning host window. The active browser is keyed by `(host window, workspace)`, and application-menu Reload / Force Reload resolve only within the window Electron supplies to the menu callback. A non-null active update must name a browser owned by that host; a null update clears only that host/workspace. Browser automation continues to target explicit browser ids returned by `browser_new_tab` or `browser_list_tabs`.
+> **In-app browser ownership.** Each registered guest records its owning host window. The active browser is keyed by `(host window, workspace)`, and application-menu Reload / Force Reload resolve only within the window Electron supplies to the menu callback. A non-null active update must name a browser owned by that host; a null update clears only that host/workspace. Browser automation continues to target explicit browser ids returned by `browser_new_tab` or `browser_list_tabs`. Agent browser identity and dialogs are covered in [agentic-browser.md](agentic-browser.md).
 >
 > **Browser keyboard boundary.** Guest pages receive renderer-published shortcuts first. `Cmd/Ctrl+L` and `Cmd/Ctrl+R` are explicit guest-shell reservations; ordinary JAgentDesk shortcuts run only after the page declines them. The sandboxed guest preload runs in every frame so focused iframes use the same boundary, while Node integration remains disabled. Human guest input disables Electron's menu fallback for plain keys. Agent-generated keys use guest `sendInputEvent` with `skipIfUnhandled`, so an unhandled Enter stops at the guest instead of reaching the host composer. Main selects the preload; it exposes no APIs to guest pages.
 
@@ -177,7 +196,7 @@ Agent browser_keypress -> guest sendInputEvent(skipIfUnhandled)
 
 ### `packages/website` — Marketing site
 
-TanStack Router + Cloudflare Workers. Serves localhost:8082.
+TanStack Start + Cloudflare Workers. Serves localhost:8082.
 
 ## WebSocket protocol
 
@@ -198,13 +217,17 @@ Server → Client:  status message with payload { status: "server_info",
                     serverId, hostname, version, capabilities?, features }
 ```
 
+Paired devices answer a daemon challenge with a signed hello before the session opens. Routed
+hellos from a [connected host](connected-hosts.md) also carry `routed`, `producer`, and
+`sessionPermissions`; the daemon overwrites them with the admitted caller's values.
+
 There is no dedicated welcome message; the server emits a `status` session message after accepting the hello, then begins streaming. The session stores client capabilities from the hello and rehydrates them on reconnect, so the wire boundary can ask one question: `session.supports(...)`.
 
 **Top-level WS envelopes** are `hello`, `recording_state`, `ping`/`pong`, and `session` (which wraps the rich union of session messages).
 
-Client liveness checks use the top-level JSON `ping`/`pong` envelope, not a session RPC or RFC6455 control ping. Current clients ping every 10 seconds, beginning one interval after connecting. The first ping claims an application-ownership lease for that physical socket, all later inbound activity renews it, and the daemon forcibly terminates the socket if the lease expires. A legacy or raw socket that never sends an application ping never enters this lease and is not closed for omitting one. Session RPC timeouts are operation failures and must not be treated as proof that the socket is dead.
+Client liveness checks use the top-level JSON `ping`/`pong` envelope, not a session RPC or RFC6455 control ping. Current clients ping every 10 seconds, beginning one interval after connecting. The first ping claims a 45-second application-ownership lease for that physical socket, all later inbound activity renews it, and the daemon forcibly terminates the socket if the lease expires. A legacy or raw socket that never sends an application ping never enters this lease and is not closed for omitting one. Session RPC timeouts are operation failures and must not be treated as proof that the socket is dead.
 
-Every physical send path enforces an 8 MiB outbound high-water mark, including JSON broadcasts and binary terminal frames. This sits above the terminal stream's 4 MiB soft backpressure threshold, leaving room for snapshot catch-up before the hard cutoff. JSON is serialized once per broadcast after sockets already at the limit are removed, then its exact byte length is checked for every remaining socket. A frame that would cross the limit is not sent; that physical socket is forcibly terminated without disturbing other sockets attached to the same logical session. Multiple tabs and simultaneous direct and remote paths may legitimately share a client id.
+Every physical send path enforces a 64 MiB outbound buffer limit (`packages/server/src/server/websocket/physical-socket.ts`), including JSON broadcasts, binary terminal frames, and the encrypted relay socket. It is an out-of-memory backstop for a client that stopped draining, well above the terminal stream's 4 MiB soft backpressure threshold. JSON is serialized once per broadcast after sockets already at the limit are removed, then its exact byte length is checked for every remaining socket. A frame that would cross the limit is not sent; that physical socket is forcibly terminated without disturbing other sockets attached to the same logical session. Multiple tabs and simultaneous direct and remote paths may legitimately share a client id.
 
 Client session RPC waits default to 60s so slow or mobile networks do not turn a live but delayed daemon response into a false operation failure. Keep connect timeouts, app-level grace windows, explicit diagnostic latency probes, liveness ping timers, and genuinely long-running RPCs separate from this default.
 
@@ -220,14 +243,13 @@ The Supervisor–Lead–Peer control plane is documented in [orchestration.md](o
 - `agent_permission_request` / `agent_permission_resolved` — Tool-call permission flow
 - `agent_deleted`, `agent_archived`, `agent_status`, `agent_list`
 - `checkout_status_update`, `checkout_diff_update`, and the full `checkout_*` request/response set for git operations
+- Terminal subscribe/input/capture commands
+- Voice/dictation streaming events (`dictation_stream_*`, `assistant_chunk`, `audio_output`, `transcription_result`)
+- Request/response pairs for fetch, list, create, etc., correlated by `requestId`; failures use `rpc_error`
 
 Agent snapshots optionally carry the daemon-owned active turn identity, and turn lifecycle stream events
 optionally carry the same `turnId`. New clients use these fields when present and normalize an old daemon's
 status once at the directory boundary rather than maintaining a second activity model.
-
-- Terminal subscribe/input/capture commands
-- Voice/dictation streaming events (`dictation_stream_*`, `assistant_chunk`, `audio_output`, `transcription_result`)
-- Request/response pairs for fetch, list, create, etc., correlated by `requestId`; failures use `rpc_error`
 
 `directory_suggestions_request` is one daemon-owned filesystem search capability. The daemon
 configures the same `searchDirectoryEntries` engine with a root, output format, path-query policy,
@@ -240,13 +262,15 @@ typed `entries` list.
 
 **Binary frames (terminal stream protocol):**
 
-Terminal I/O is sent as binary WebSocket frames decoded by `decodeTerminalStreamFrame` in `shared/binary-frames/terminal.ts`. The layout is:
+Terminal I/O is sent as binary WebSocket frames decoded by `decodeTerminalStreamFrame` in `packages/protocol/src/binary-frames/terminal.ts`. The layout is:
 
-- 1-byte opcode: `Output (0x01)`, `Input (0x02)`, `Resize (0x03)`, `Snapshot (0x04)`
+- 1-byte opcode: `Output (0x01)`, `Input (0x02)`, `Resize (0x03)`, `Snapshot (0x04)`, `Restore (0x05)`, `ReplayBegin (0x06)`, `ReplayData (0x07)`, `ReplayEnd (0x08)`
 - 1-byte slot: terminal slot id
-- variable payload: bytes for output/input, JSON-encoded `{ rows, cols }` for resize, terminal snapshot for snapshot
+- variable payload: bytes for output/input, JSON-encoded `{ rows, cols }` for resize, ANSI bytes for restore and replay
 
-Terminal PTY size is last-interacting-client-wins. A client claims the PTY size only when its terminal viewport genuinely changes size or the user focuses/taps the terminal. Passive rendering work — attaching, restoring visibility, font settling, renderer refits, or just looking at a visible terminal — must not send a resize frame. The server does not broadcast resize ownership; the resized PTY redraws through normal output, and every attached client renders that output in its own local viewport.
+The daemon no longer sends `Snapshot`. Reattach replays ANSI history through `Restore` or the chunked replay frames; see [terminal-worker.md](terminal-worker.md) and [protocol-compatibility.md](protocol-compatibility.md#terminal-ansi-replay).
+
+Terminal PTY size is last-interacting-client-wins. A client claims the PTY size only when its terminal viewport genuinely changes size or the user focuses/taps the terminal. Passive rendering work — attaching, restoring visibility, font settling, renderer refits, or looking at a visible terminal — must not send a resize frame. The server does not broadcast resize ownership; the resized PTY redraws through normal output, and every attached client renders that output in its own local viewport.
 
 There is also a separate file-transfer binary frame format in the same directory, used for download/upload streams.
 File downloads keep the existing `FileBegin`/`FileChunk`/`FileEnd` framing and stream 256 KiB chunks
@@ -256,47 +280,25 @@ messages or transfers.
 
 ### Compatibility rules
 
-- WebSocket schemas are append-only. Add fields, do not remove fields, and never make optional fields required.
-- New wire enum values must be gated at serialization with `session.supports(CLIENT_CAPS.someCapability)`.
-- `Session` stores client capabilities from the `hello` handshake and rehydrates them on reconnect, so the wire boundary can ask one question: `session.supports(...)`.
-
-Example: adding a new enum value
-
-```ts
-// 1. Add CLIENT_CAPS.newThing = "new_thing"
-// 2. Let new clients advertise it in WS hello
-// 3. Keep the shared producer schema strict
-// 4. Gate the new emitted value: session.supports(CLIENT_CAPS.newThing) ? "new_value" : "old_value"
-```
+App and daemon versions drift in the wild. Wire schemas stay append-only and new features gate on
+`server_info.features`. New wire enum values are gated at serialization with
+`session.supports(CLIENT_CAPS.someCapability)`. The full contract is in
+[protocol-compatibility.md](protocol-compatibility.md).
 
 ## Agent lifecycle
 
-The lifecycle states are defined in `shared/agent-lifecycle.ts`:
-
-```
-initializing → idle ⇄ running
-        ↓       ↓        ↓
-              error
-                ↓
-              closed
-```
-
-- `initializing` — provider session is being created
-- `idle` — has a live session, awaiting the next prompt
-- `running` — provider is currently producing a turn
-- `error` — last attempt failed; session is still attached
-- `closed` — terminal state, no live session
-
-`ManagedAgent` is a discriminated union over those lifecycle tags. Notes:
+States (`initializing`, `idle`, `running`, `error`, `closed`) are defined in
+`packages/protocol/src/agent-lifecycle.ts`. [agent-lifecycle.md](agent-lifecycle.md) owns their
+meaning, restart recovery, idle runtime release, agent messages, and archive.
 
 - **AgentManager** is the source of truth for agent state and broadcasts updates to all subscribers
 - Timeline sequence allocation is append-only with epochs (each run starts a new epoch). The one
   permitted in-place enrichment adds a provider message id to the manager-owned row for an accepted
-  prompt; it preserves the row's sequence, content, and timestamp. Storage uses sequence numbers for
-  client-side dedup; the default fetch page is 200 items.
+  prompt; it preserves the row's sequence, content, and timestamp. Clients dedupe by sequence number;
+  the default fetch page is 200 items.
 - Timeline row `timestamp` values are canonical daemon-owned timestamps. Providers may supply original replay timestamps, but clients must not guess timestamp trust or hide time UI based on local clock heuristics.
 - Events stream to connected clients in real time; correctness is backed by authoritative timeline fetches and paged-to-completion catch-up.
-- Agent state persists to `$JAGENTDESK_HOME/agents/{cwd-with-dashes}/{agent-id}.json` (timeline rows live alongside the record). That storage path is derived from `cwd`, not from workspace id.
+- Agent records persist to `$JAGENTDESK_HOME/agents/{cwd-with-dashes}/{agent-id}.json`. That storage path is derived from `cwd`, not from workspace id. The daemon keeps projected timeline items in memory; provider history is the durable transcript and rebuilds them on resume.
 
 ## Right-sidebar boundary: directory-backed vs workspace-owned
 
@@ -310,7 +312,7 @@ Two workspaces can share the same `cwd` (e.g. a `directory` workspace and a `loc
 | Git diff                | `checkoutDiffQueryKey(serverId, cwd, mode, baseRef, ws)` | `packages/app/src/git/query-keys.ts`                    |
 | Forge change request    | `checkoutPrStatusQueryKey(serverId, cwd)`                | `packages/app/src/git/query-keys.ts`                    |
 | Change request timeline | `prPaneTimelineQueryKey({ serverId, cwd, prNumber })`    | `packages/app/src/git/pull-request-panel/query-keys.ts` |
-| File preview content    | `["workspaceFile", serverId, cwd, path]`                 | `packages/app/src/components/file-pane.tsx`             |
+| File preview content    | `FileTarget { cwd, path }` on the host's client          | `packages/app/src/file-panels/file/hook.ts`             |
 | File explorer listings  | fetched via `listDirectory(workspaceRoot, path)`         | `packages/app/src/hooks/use-file-explorer-actions.ts`   |
 
 **Workspace-owned (independent per workspace) — keyed by `workspaceId` (falling back to `cwd` only when no `workspaceId` exists):**
@@ -322,8 +324,6 @@ Two workspaces can share the same `cwd` (e.g. a `directory` workspace and a `loc
 | Composer attachments         | `buildWorkspaceAttachmentScopeKey`                 | `packages/app/src/attachments/workspace-attachments-store.ts` |
 | File explorer nav/open state | `fileExplorer` map keyed `workspace:{workspaceId}` | `packages/app/src/hooks/use-file-explorer-actions.ts`         |
 | File explorer expanded paths | `expandedPathsByWorkspace[workspaceStateKey]`      | `packages/app/src/stores/panel-store/state.ts`                |
-
-`diff-pane.tsx` is the canonical wiring site: it passes `{ serverId, cwd }` to the git queries and `{ serverId, workspaceId, cwd }` to the draft/override/attachment scope keys.
 
 **Do not "fix" the sharing away.** Re-keying a directory-backed query by `workspaceId` makes same-`cwd` workspaces diverge (two windows onto the same git tree showing different diffs). Re-keying owned state (drafts, expanded paths) by `cwd` makes them leak between distinct workspaces on the same folder. The `workspaceId`-keyed builders carry a `// workspaceId is opaque; do not parse this key back into a path.` comment — the opaque-id fallback to `cwd` exists only for old payloads without a `workspaceId`, not as a content-sharing mechanism.
 
@@ -340,11 +340,14 @@ The built-in, user-facing providers are Claude Code, Codex, Copilot, OpenCode, P
 | Claude (`claude/`) | Anthropic Agent SDK                  | `~/.claude/projects/{cwd}/{session-id}.jsonl`      |
 | Codex              | Codex AppServer (`codex-app-server`) | `~/.codex/sessions/{date}/rollout-{ts}-{id}.jsonl` |
 | Copilot            | GitHub Copilot via ACP               | Provider-managed                                   |
-| OpenCode           | OpenCode server / CLI                | Provider-managed                                   |
-| Cursor             | ACP wrapper (`acp-agent`)            | Provider-managed                                   |
+| OpenCode           | OpenCode server `/global/event`      | Provider-managed                                   |
+| Pi (`pi/`)         | Local Pi RPC process                 | Provider-managed                                   |
+| OMP (`omp/`)       | Local OMP RPC process                | Provider-managed                                   |
+| Cursor, Kimi, Kiro | ACP wrappers                         | Provider-managed                                   |
 | Generic ACP        | ACP wrapper                          | Provider-managed                                   |
-| Pi                 | Local Pi RPC process                 | Provider-managed                                   |
 | Mock load test     | In-process fake                      | In-memory                                          |
+
+More providers ship as bundled provider plugins in `plugins/*-provider/`. See [providers.md](providers.md) and [custom-providers.md](custom-providers.md).
 
 All providers:
 
@@ -367,26 +370,13 @@ Providers that can accept native tool definitions should set `supportsNativeJAge
 
 ## Storage
 
-`$JAGENTDESK_HOME` defaults to `~/.jagentdesk`. The most important files:
-
-```
-$JAGENTDESK_HOME/
-├── agents/{cwd-with-dashes}/{agent-id}.json   # Agent record + persisted timeline rows
-├── projects/projects.json                      # Project registry
-├── projects/workspaces.json                    # Workspace registry
-├── projects/icons/                             # Custom project icon images
-├── chat/                                       # Chat rooms
-├── schedules/                                  # Scheduled-agent definitions and runs
-├── loops/                                      # Loop runs and logs
-├── config.json                                 # Daemon config (mutable)
-├── daemon-keypair.json                         # Daemon identity for pairing/signing
-├── push-tokens.json                            # Mobile push tokens
-├── jagentdesk.sock / jagentdesk.pid                      # Local IPC socket and pidfile
-└── daemon.log                                  # Daemon trace logs (rotated)
-```
+`$JAGENTDESK_HOME` defaults to `~/.jagentdesk`. [data-model.md](data-model.md) owns the directory
+layout and every store.
 
 ## Deployment models
 
 1. **Local daemon** (default): `jagentdesk daemon start` on `127.0.0.1:6767`
 2. **Managed desktop**: Electron app spawns daemon as subprocess, and stops it again on quit so that "restart the app" is a complete reset. Settings > Host > "Keep daemon running after quit" opts out. Only a daemon the desktop started is stopped — a daemon you started yourself with `jagentdesk daemon start` is left alone (`jagentdesk.pid` records `desktopManaged`).
-3. **Remote (Tailscale)**: Daemon behind a firewall, reachable over a tailnet via tsnet
+3. **Remote (Tailscale)**: Daemon behind a firewall, reachable over a tailnet via embedded tsnet
+4. **Remote (relay)**: Daemon reachable through the encrypted relay without a tailnet ([relay.md](relay.md))
+5. **Docker**: Daemon and bundled web UI in a container ([docker.md](docker.md))

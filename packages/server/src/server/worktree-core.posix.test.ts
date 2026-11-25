@@ -24,6 +24,7 @@ import {
   getJAgentDeskWorktreeMetadataPath,
   readJAgentDeskWorktreeMetadata,
 } from "../utils/worktree-metadata.js";
+import { validateBeforeRequest, validateBeforeResult } from "./plugins/lifecycle/index.js";
 import { UnknownBranchError } from "../utils/worktree.js";
 import { createWorktreeCore as createCoreWorktree } from "./worktree-core.js";
 import { isPlatform } from "../test-utils/platform.js";
@@ -116,7 +117,11 @@ function createGitRepo(): { tempDir: string; repoDir: string; jagentdeskHome: st
   return { tempDir, repoDir, jagentdeskHome };
 }
 
-function createGitRepoWithDevBranch(): { tempDir: string; repoDir: string; jagentdeskHome: string } {
+function createGitRepoWithDevBranch(): {
+  tempDir: string;
+  repoDir: string;
+  jagentdeskHome: string;
+} {
   const { tempDir, repoDir, jagentdeskHome } = createGitRepo();
   execFileSync("git", ["checkout", "-b", "dev"], { cwd: repoDir, stdio: "pipe" });
   writeFileSync(path.join(repoDir, "README.md"), "dev branch\n");
@@ -129,7 +134,11 @@ function createGitRepoWithDevBranch(): { tempDir: string; repoDir: string; jagen
   return { tempDir, repoDir, jagentdeskHome };
 }
 
-function createGitRepoWithOriginMain(): { tempDir: string; repoDir: string; jagentdeskHome: string } {
+function createGitRepoWithOriginMain(): {
+  tempDir: string;
+  repoDir: string;
+  jagentdeskHome: string;
+} {
   const { tempDir, repoDir, jagentdeskHome } = createGitRepo();
   const remoteDir = path.join(tempDir, "origin.git");
   execFileSync("git", ["clone", "--bare", repoDir, remoteDir], { stdio: "pipe" });
@@ -378,6 +387,10 @@ function getBranchUpstream(cwd: string): string | null {
   return result.status === 0 ? result.stdout.trim() : null;
 }
 
+function git(cwd: string, ...args: string[]): string {
+  return execFileSync("git", args, { cwd, stdio: "pipe" }).toString().trim();
+}
+
 function getGitConfigValue(cwd: string, key: string): string | null {
   const result = spawnSync("git", ["config", "--get", key], {
     cwd,
@@ -418,6 +431,25 @@ describe.skipIf(isPlatform("win32"))("worktree-core POSIX-only", () => {
       expect(result.created).toBe(true);
       expect(result.worktree.branchName).toBe("legacy-rpc");
       expect(existsSync(result.worktree.worktreePath)).toBe(true);
+    });
+
+    test("keeps default placement suffixes when the default destination already exists", async () => {
+      const { tempDir, repoDir, jagentdeskHome } = createGitRepo();
+      cleanupPaths.push(tempDir);
+      const first = await createCoreWorktree(
+        { cwd: repoDir, jagentdeskHome, branchName: "first", worktreeSlug: "same" },
+        createCoreDeps(),
+      );
+      // Registered worktrees with the same slug are reused by JAgentDesk. An occupied
+      // directory without a registration exercises the default-placement suffix.
+      execFileSync("git", ["worktree", "remove", first.worktree.worktreePath], { cwd: repoDir });
+      mkdirSync(first.worktree.worktreePath);
+      const second = await createCoreWorktree(
+        { cwd: repoDir, jagentdeskHome, branchName: "second", worktreeSlug: "same" },
+        createCoreDeps(),
+      );
+      expect(second.worktree.worktreePath).toBe(first.worktree.worktreePath + "-1");
+      expect(existsSync(first.worktree.worktreePath)).toBe(true);
     });
 
     test("creates branch-off worktrees from origin main without tracking origin main", async () => {
@@ -489,6 +521,42 @@ describe.skipIf(isPlatform("win32"))("worktree-core POSIX-only", () => {
         checkoutRefs: [{ remoteName: "origin", remoteRef: "refs/pull/123/head" }],
         trackOriginHead: true,
       });
+      expect(result.worktree.branchName).toBe("feature/review-pr");
+    });
+
+    test("round trips every resolved change-request field through an unchanged before-hook result", async () => {
+      const { tempDir, repoDir, jagentdeskHome } = createGitHubPrRemoteRepo();
+      cleanupPaths.push(tempDir);
+      const deps = createCoreDeps();
+      const requests: unknown[] = [];
+      const result = await createCoreWorktree(
+        { cwd: repoDir, githubPrNumber: 123, refName: "feature/review-pr", jagentdeskHome },
+        {
+          ...deps,
+          lifecycle: {
+            before: async (name, request) => {
+              requests.push(request);
+              return validateBeforeResult(name, validateBeforeRequest(name, request), request);
+            },
+          },
+        },
+      );
+      expect(requests).toEqual([
+        {
+          kind: "checkout-change-request",
+          forge: "github",
+          changeRequestNumber: 123,
+          headRef: "feature/review-pr",
+          baseRef: "main",
+          branch: "feature/review-pr",
+          checkoutRefs: [{ remoteName: "origin", remoteRef: "refs/pull/123/head" }],
+          trackOriginHead: true,
+          repoRoot: repoDir,
+          sourceCheckout: repoDir,
+          slug: "feature-review-pr",
+          path: result.worktree.worktreePath,
+        },
+      ]);
       expect(result.worktree.branchName).toBe("feature/review-pr");
     });
 
@@ -592,6 +660,36 @@ describe.skipIf(isPlatform("win32"))("worktree-core POSIX-only", () => {
         branchName: "dev",
       });
       expect(branch).toBe("dev");
+    });
+
+    test("checks out a branch that only a remote other than origin has", async () => {
+      const { tempDir, repoDir, jagentdeskHome } = createGitRepo();
+      cleanupPaths.push(tempDir);
+      const upstreamDir = path.join(tempDir, "upstream.git");
+      execFileSync("git", ["clone", "--bare", repoDir, upstreamDir], { stdio: "pipe" });
+      execFileSync("git", [`--git-dir=${upstreamDir}`, "branch", "feature/upstream-only", "main"], {
+        stdio: "pipe",
+      });
+      execFileSync("git", ["remote", "add", "upstream", upstreamDir], {
+        cwd: repoDir,
+        stdio: "pipe",
+      });
+      execFileSync("git", ["fetch", "upstream"], { cwd: repoDir, stdio: "pipe" });
+
+      const result = await createCoreWorktree(
+        {
+          cwd: repoDir,
+          action: "checkout",
+          refName: "feature/upstream-only",
+          jagentdeskHome,
+        },
+        createCoreDeps(),
+      );
+
+      expect(result.worktree.branchName).toBe("feature/upstream-only");
+      expect(getBranchUpstream(result.worktree.worktreePath)).toBe(
+        "upstream/feature/upstream-only",
+      );
     });
 
     test("checks out an explicit GitHub PR target", async () => {
@@ -869,8 +967,10 @@ describe.skipIf(isPlatform("win32"))("worktree-core POSIX-only", () => {
         second.worktree.worktreePath,
         "remote.jagentdesk-pr-14.url",
       );
-      const metadata = readJAgentDeskWorktreeMetadata(second.worktree.worktreePath);
-      const facts = await getCheckoutSnapshotFacts(second.worktree.worktreePath, { jagentdeskHome });
+      const metadata = await readJAgentDeskWorktreeMetadata(second.worktree.worktreePath);
+      const facts = await getCheckoutSnapshotFacts(second.worktree.worktreePath, {
+        jagentdeskHome,
+      });
 
       expect(second.worktree.branchName).toBe("feature/gitlab-mr-1");
       expect(pushRemote).toBeNull();
@@ -1134,12 +1234,14 @@ describe.skipIf(isPlatform("win32"))("worktree-core POSIX-only", () => {
         createCoreDeps({ github }),
       );
       writeFileSync(
-        getJAgentDeskWorktreeMetadataPath(second.worktree.worktreePath),
+        await getJAgentDeskWorktreeMetadataPath(second.worktree.worktreePath),
         `${JSON.stringify({ version: 1, baseRefName: "main" }, null, 2)}\n`,
         "utf8",
       );
 
-      const facts = await getCheckoutSnapshotFacts(second.worktree.worktreePath, { jagentdeskHome });
+      const facts = await getCheckoutSnapshotFacts(second.worktree.worktreePath, {
+        jagentdeskHome,
+      });
 
       expect(second.worktree.branchName).toBe("daemon-shutdown-diagnostics-1");
       expect(facts).toMatchObject({
@@ -1414,6 +1516,290 @@ describe.skipIf(isPlatform("win32"))("worktree-core POSIX-only", () => {
           createCoreDeps(),
         ),
       ).rejects.toBeInstanceOf(UnknownBranchError);
+    });
+
+    test("branches off a same-repo pull request's head without checking it out", async () => {
+      const { tempDir, repoDir, remoteDir, jagentdeskHome } = createSameRepoGitHubPrRemoteRepo();
+      cleanupPaths.push(tempDir);
+      // The head branch has never been fetched, so creation has to fetch it.
+      execFileSync("git", ["update-ref", "-d", "refs/remotes/origin/daemon-shutdown-diagnostics"], {
+        cwd: repoDir,
+        stdio: "pipe",
+      });
+      const github = {
+        ...createGitHubServiceStub(),
+        getPullRequestCheckoutTarget: async () => ({
+          number: 1790,
+          baseRefName: "main",
+          headRefName: "daemon-shutdown-diagnostics",
+          headOwnerLogin: "jagentdesk",
+          headRepositorySshUrl: remoteDir,
+          headRepositoryUrl: remoteDir,
+          isCrossRepository: false,
+        }),
+      };
+
+      const result = await createCoreWorktree(
+        {
+          cwd: repoDir,
+          action: "branch-off",
+          checkoutSource: { kind: "change_request", forge: "github", number: 1790 },
+          branchName: "follow-up",
+          jagentdeskHome,
+        },
+        {
+          ...createCoreDeps({ github }),
+          lifecycle: {
+            before: async (name, request) =>
+              validateBeforeResult(
+                name,
+                request,
+                validateBeforeRequest(name, { ...request, branch: "hook-follow-up" }),
+              ),
+          },
+        },
+      );
+
+      const prHead = execFileSync("git", [
+        `--git-dir=${remoteDir}`,
+        "rev-parse",
+        "refs/pull/1790/head",
+      ])
+        .toString()
+        .trim();
+      expect(result.intent).toEqual({
+        kind: "branch-off",
+        baseBranch: "refs/remotes/origin/daemon-shutdown-diagnostics",
+        startPoint: "refs/jagentdesk/change-requests/1790",
+        branchName: "hook-follow-up",
+      });
+      expect(result.worktree.branchName).toBe("hook-follow-up");
+      expect(git(result.worktree.worktreePath, "rev-parse", "HEAD")).toBe(prHead);
+      expect(getBranchUpstream(result.worktree.worktreePath)).toBeNull();
+      expect(result.worktree.comparisonBaseRef).toBe(
+        "refs/remotes/origin/daemon-shutdown-diagnostics",
+      );
+      expect(git(repoDir, "branch", "--list", "daemon-shutdown-diagnostics")).toBe("");
+    });
+
+    test("a before hook can replace a PR branch-off base without retaining the fetched PR head", async () => {
+      const { tempDir, repoDir, jagentdeskHome } = createSameRepoGitHubPrRemoteRepo();
+      cleanupPaths.push(tempDir);
+      const deps = createCoreDeps();
+      const result = await createCoreWorktree(
+        {
+          cwd: repoDir,
+          action: "branch-off",
+          githubPrNumber: 1790,
+          branchName: "hook-base",
+          jagentdeskHome,
+          runSetup: false,
+        },
+        {
+          ...deps,
+          lifecycle: {
+            before: async (name, request) =>
+              validateBeforeResult(
+                name,
+                request,
+                validateBeforeRequest(name, { ...request, baseRef: "main" }),
+              ),
+          },
+        },
+      );
+      expect(result.intent).toEqual({
+        kind: "branch-off",
+        branchName: "hook-base",
+        baseBranch: "main",
+      });
+      expect(git(result.worktree.worktreePath, "rev-parse", "HEAD")).toBe(
+        git(repoDir, "rev-parse", "main"),
+      );
+      expect(git(result.worktree.worktreePath, "rev-parse", "HEAD")).not.toBe(
+        git(repoDir, "rev-parse", "refs/jagentdesk/change-requests/1790"),
+      );
+    });
+
+    test("branches off a same-repo pull request in a clone whose origin is a fork", async () => {
+      const { tempDir, repoDir, remoteDir, jagentdeskHome } = createSameRepoGitHubPrRemoteRepo();
+      cleanupPaths.push(tempDir);
+      // The layout a fork clone has: upstream is the base repository, origin is the fork, and
+      // the fork has an older branch with the pull request's branch name.
+      const forkDir = path.join(tempDir, "fork.git");
+      execFileSync("git", ["clone", "--bare", remoteDir, forkDir], { stdio: "pipe" });
+      execFileSync("git", [
+        `--git-dir=${forkDir}`,
+        "update-ref",
+        "refs/heads/daemon-shutdown-diagnostics",
+        "refs/heads/main",
+      ]);
+      execFileSync("git", ["remote", "rename", "origin", "upstream"], {
+        cwd: repoDir,
+        stdio: "pipe",
+      });
+      execFileSync("git", ["remote", "add", "origin", forkDir], { cwd: repoDir, stdio: "pipe" });
+      const github = {
+        ...createGitHubServiceStub(),
+        getPullRequestCheckoutTarget: async () => ({
+          number: 1790,
+          baseRefName: "main",
+          headRefName: "daemon-shutdown-diagnostics",
+          headOwnerLogin: "jagentdesk",
+          headRepositorySshUrl: remoteDir,
+          headRepositoryUrl: remoteDir,
+          isCrossRepository: false,
+          // As the GitHub service lists them: origin first, then upstream.
+          checkoutRefs: [
+            { remoteName: "origin", remoteRef: "refs/pull/1790/head" },
+            { remoteName: "upstream", remoteRef: "refs/pull/1790/head" },
+          ],
+        }),
+      };
+
+      const result = await createCoreWorktree(
+        {
+          cwd: repoDir,
+          action: "branch-off",
+          checkoutSource: { kind: "change_request", forge: "github", number: 1790 },
+          branchName: "follow-up",
+          jagentdeskHome,
+        },
+        createCoreDeps({ github }),
+      );
+
+      const prHead = execFileSync("git", [
+        `--git-dir=${remoteDir}`,
+        "rev-parse",
+        "refs/pull/1790/head",
+      ])
+        .toString()
+        .trim();
+      expect(git(result.worktree.worktreePath, "rev-parse", "HEAD")).toBe(prHead);
+      expect(result.intent).toEqual({
+        kind: "branch-off",
+        baseBranch: "refs/remotes/upstream/daemon-shutdown-diagnostics",
+        startPoint: "refs/jagentdesk/change-requests/1790",
+        branchName: "follow-up",
+      });
+    });
+
+    test("branches off a fork pull request's head without checking it out", async () => {
+      const { tempDir, repoDir, headRemoteDir, jagentdeskHome } = createForkGitHubPrRemoteRepo();
+      cleanupPaths.push(tempDir);
+      // The base repository's main moved on since this clone last fetched.
+      const baseRemoteDir = path.join(tempDir, "base.git");
+      const upstreamMain = execFileSync("git", [
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@test.com",
+        `--git-dir=${baseRemoteDir}`,
+        "commit-tree",
+        "main^{tree}",
+        "-p",
+        "main",
+        "-m",
+        "upstream commit",
+      ])
+        .toString()
+        .trim();
+      execFileSync("git", [
+        `--git-dir=${baseRemoteDir}`,
+        "update-ref",
+        "refs/heads/main",
+        upstreamMain,
+      ]);
+      const github = {
+        ...createGitHubServiceStub(),
+        getPullRequestCheckoutTarget: async () => ({
+          number: 526,
+          baseRefName: "main",
+          headRefName: "main",
+          headOwnerLogin: "therainisme",
+          headRepositorySshUrl: headRemoteDir,
+          headRepositoryUrl: headRemoteDir,
+          isCrossRepository: true,
+        }),
+      };
+
+      const result = await createCoreWorktree(
+        {
+          cwd: repoDir,
+          action: "branch-off",
+          checkoutSource: { kind: "change_request", forge: "github", number: 526 },
+          branchName: "follow-up",
+          jagentdeskHome,
+        },
+        createCoreDeps({ github }),
+      );
+
+      const readme = readFileSync(path.join(result.worktree.worktreePath, "README.md"), "utf8");
+      // The fork's branch is not in this repository, so a pull request from the new branch goes
+      // into the fork pull request's base, compared as the remote has it now.
+      expect(result.intent).toEqual({
+        kind: "branch-off",
+        baseBranch: "refs/remotes/origin/main",
+        startPoint: "refs/jagentdesk/change-requests/526",
+        branchName: "follow-up",
+      });
+      expect(git(repoDir, "rev-parse", "refs/remotes/origin/main")).toBe(upstreamMain);
+      expect(result.worktree.comparisonBaseRef).toBe("refs/remotes/origin/main");
+      expect(result.worktree.branchName).toBe("follow-up");
+      expect(readme.replace(/\r\n/g, "\n")).toBe("fork pr main branch\n");
+      expect(getBranchUpstream(result.worktree.worktreePath)).toBeNull();
+      expect(
+        (await readJAgentDeskWorktreeMetadata(result.worktree.worktreePath))?.baseRefName,
+      ).toBe("main");
+      expect(git(repoDir, "branch", "--list", "therainisme/main")).toBe("");
+      expect(getGitConfigValue(repoDir, "remote.jagentdesk-pr-526.url")).toBeNull();
+      // Base branch pickers list remote-tracking refs; the fork's head is not one of them.
+      expect(git(repoDir, "for-each-ref", "refs/remotes/jagentdesk-pr-526")).toBe("");
+    });
+
+    test("branches off a fork pull request in a clone that calls the base repository upstream", async () => {
+      const { tempDir, repoDir, headRemoteDir, jagentdeskHome } = createForkGitHubPrRemoteRepo();
+      cleanupPaths.push(tempDir);
+      execFileSync("git", ["remote", "rename", "origin", "upstream"], {
+        cwd: repoDir,
+        stdio: "pipe",
+      });
+      const github = {
+        ...createGitHubServiceStub(),
+        getPullRequestCheckoutTarget: async () => ({
+          number: 526,
+          baseRefName: "main",
+          headRefName: "main",
+          headOwnerLogin: "therainisme",
+          headRepositorySshUrl: headRemoteDir,
+          headRepositoryUrl: headRemoteDir,
+          isCrossRepository: true,
+          // As the GitHub service lists them: origin first, then upstream.
+          checkoutRefs: [
+            { remoteName: "origin", remoteRef: "refs/pull/526/head" },
+            { remoteName: "upstream", remoteRef: "refs/pull/526/head" },
+          ],
+        }),
+      };
+
+      const result = await createCoreWorktree(
+        {
+          cwd: repoDir,
+          action: "branch-off",
+          checkoutSource: { kind: "change_request", forge: "github", number: 526 },
+          branchName: "follow-up",
+          jagentdeskHome,
+        },
+        createCoreDeps({ github }),
+      );
+
+      // The base comes from the remote that served the pull request.
+      expect(result.intent).toEqual({
+        kind: "branch-off",
+        baseBranch: "refs/remotes/upstream/main",
+        startPoint: "refs/jagentdesk/change-requests/526",
+        branchName: "follow-up",
+      });
+      expect(result.worktree.comparisonBaseRef).toBe("refs/remotes/upstream/main");
     });
 
     test("creates the agent-create worktree input shape", async () => {

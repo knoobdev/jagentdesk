@@ -41,6 +41,7 @@ function buildManagedAgentConfig(
     extra: configOverrides.extra ?? { claude: { maxThinkingTokens: 1024 } },
     systemPrompt: configOverrides.systemPrompt,
     mcpServers: configOverrides.mcpServers,
+    providerOptions: configOverrides.providerOptions,
   };
   if (Object.prototype.hasOwnProperty.call(configOverrides, "featureValues")) {
     config.featureValues = configOverrides.featureValues;
@@ -125,6 +126,7 @@ function createManagedAgent(overrides: ManagedAgentOverrides = {}): ManagedAgent
     historyPrimed: overrides.historyPrimed ?? true,
     lastUserMessageAt: overrides.lastUserMessageAt ?? core.now,
     lastUsage: overrides.lastUsage,
+    sessionMetrics: overrides.sessionMetrics,
     lastError: overrides.lastError,
   };
 }
@@ -197,7 +199,7 @@ describe("AgentStorage", () => {
       createManagedAgent({
         id: "agent-feature-values",
         config: {
-          featureValues: {
+          providerOptions: {
             fast_mode: true,
           },
         },
@@ -205,12 +207,12 @@ describe("AgentStorage", () => {
     );
 
     const record = await storage.get("agent-feature-values");
-    expect(record?.config?.featureValues).toEqual({ fast_mode: true });
+    expect(record?.config?.providerOptions).toEqual({ fast_mode: true });
 
     const reloaded = new AgentStorage(storagePath, logger);
     const persisted = await reloaded.get("agent-feature-values");
-    expect(persisted?.config?.featureValues).toEqual({ fast_mode: true });
-    expect(buildSessionConfig(persisted!).featureValues).toEqual({ fast_mode: true });
+    expect(persisted?.config?.providerOptions).toEqual({ fast_mode: true });
+    expect(buildSessionConfig(persisted!).providerOptions).toEqual({ fast_mode: true });
   });
 
   test("applySnapshot keeps featureValues absent when they were never set", async () => {
@@ -231,7 +233,7 @@ describe("AgentStorage", () => {
       createManagedAgent({
         id: "agent-resume-overrides",
         config: {
-          featureValues: {
+          providerOptions: {
             fast_mode: true,
           },
         },
@@ -242,7 +244,7 @@ describe("AgentStorage", () => {
     expect(record).not.toBeNull();
     expect(buildConfigOverrides(record!)).toMatchObject({
       cwd: "/tmp/project",
-      featureValues: {
+      providerOptions: {
         fast_mode: true,
       },
     });
@@ -528,5 +530,19 @@ describe("AgentStorage", () => {
     const afterReload = new AgentStorage(storagePath, logger);
     const after = await afterReload.list();
     expect(after.some((r) => r.id === agentId)).toBe(false);
+  });
+  test("session metrics survive a daemon restart and follow the latest snapshot", async () => {
+    const sessionMetrics = [
+      { label: "Cost", value: "$1.23" },
+      { label: "Cache", value: "82%", tone: "ok" as const },
+    ];
+    await storage.applySnapshot(createManagedAgent({ id: "agent-metrics", sessionMetrics }));
+
+    const reloaded = new AgentStorage(storagePath, createTestLogger());
+    expect((await reloaded.get("agent-metrics"))?.sessionMetrics).toEqual(sessionMetrics);
+
+    await reloaded.applySnapshot(createManagedAgent({ id: "agent-metrics" }));
+    const cleared = new AgentStorage(storagePath, createTestLogger());
+    expect(await cleared.get("agent-metrics")).not.toHaveProperty("sessionMetrics");
   });
 });

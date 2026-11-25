@@ -1,3 +1,4 @@
+import { readHostRegistry, writeHostRegistry, forgetUnreadableHost } from "./host-connection";
 import { describe, expect, it } from "vitest";
 import { defaultHostAppearance } from "@/hosts/appearance";
 import {
@@ -283,6 +284,57 @@ describe("upsertHostConnectionInProfiles", () => {
     path: "/tmp/jagentdesk.sock",
   };
 
+  it.each([false, true])(
+    "keeps destinations distinct when a persisted route shares an origin (C already saved: %s)",
+    (savedC) => {
+      const route: HostConnection = { id: "via:srv_a", type: "routed", originServerId: "srv_a" };
+      const directB: HostConnection = {
+        id: "direct:b:6767",
+        type: "directTcp",
+        endpoint: "b:6767",
+      };
+      const directC: HostConnection = {
+        id: "direct:c:6767",
+        type: "directTcp",
+        endpoint: "c:6767",
+      };
+      const b: HostProfile = {
+        ...makeHost("srv_b"),
+        label: "My B",
+        connections: [route, directB],
+        preferredConnectionId: route.id,
+      };
+      const c: HostProfile = {
+        ...makeHost("srv_c"),
+        label: "My C",
+        connections: [directC],
+        preferredConnectionId: directC.id,
+      };
+      const profiles = upsertHostConnectionInProfiles({
+        profiles: savedC ? [b, c] : [b],
+        serverId: "srv_c",
+        label: "Fleet C",
+        connection: route,
+      });
+      expect(profiles).toHaveLength(2);
+      expect(profiles[0]).toEqual(b);
+      expect(profiles[1]).toMatchObject({
+        serverId: "srv_c",
+        label: savedC ? "My C" : "Fleet C",
+        connections: savedC ? [directC, route] : [route],
+        preferredConnectionId: savedC ? directC.id : route.id,
+      });
+      expect(
+        upsertHostConnectionInProfiles({
+          profiles,
+          serverId: "srv_b",
+          label: "Fleet B",
+          connection: route,
+        }),
+      ).toBe(profiles);
+    },
+  );
+
   it("gives a newly discovered host the default appearance", () => {
     const [profile] = upsertHostConnectionInProfiles({
       profiles: [],
@@ -428,5 +480,97 @@ describe("resolveActiveHostServerId", () => {
         orderedHosts: [makeHost("srv_local"), makeHost("srv_remote")],
       }),
     ).toBe("srv_local");
+  });
+});
+
+describe("relay connection offers", () => {
+  it("stores a relay-only host and restores its TLS and last successful route", async () => {
+    const { connectionsFromOffer } = await import("./host-connection");
+    const [connection] = connectionsFromOffer({
+      v: 3,
+      serverId: "srv_relay",
+      daemonPublicKeyB64: "public-key",
+      relay: { endpoint: "desk-relay.jagents.workers.dev" },
+    });
+    expect(connection).toEqual({
+      id: "relay:wss:desk-relay.jagents.workers.dev:443",
+      type: "relay",
+      endpoint: "desk-relay.jagents.workers.dev:443",
+      useTls: true,
+      daemonPublicKeyB64: "public-key",
+    });
+    const [profile] = upsertHostConnectionInProfiles({
+      profiles: [],
+      serverId: "srv_relay",
+      connection,
+    });
+    expect(profile.preferredConnectionId).toBeNull();
+    const restored = normalizeStoredHostProfile(
+      JSON.parse(JSON.stringify({ ...profile, lastConnectionId: connection.id })),
+    );
+    expect(restored?.connections).toEqual([connection]);
+    expect(restored?.lastConnectionId).toBe(connection.id);
+    expect(hostHasLocalConnection(restored!)).toBe(true);
+  });
+
+  it("creates both routes from one pairing offer without persisting the pairing code", async () => {
+    const { connectionsFromOffer } = await import("./host-connection");
+    const connections = connectionsFromOffer({
+      v: 3,
+      serverId: "srv_both",
+      daemonPublicKeyB64: "public-key",
+      tailnetAddress: "100.64.0.4:8765",
+      relay: { endpoint: "127.0.0.1:8123", useTls: false },
+    });
+    expect(connections.map((connection) => connection.type)).toEqual(["tailnet", "relay"]);
+    expect(connections[1]).toMatchObject({ endpoint: "127.0.0.1:8123", useTls: false });
+    expect(connections.every((connection) => !("pairingCode" in connection))).toBe(true);
+  });
+
+  it("rejects persisted relay routes without a daemon key", () => {
+    expect(
+      normalizeStoredHostProfile({
+        serverId: "srv_bad",
+        connections: [{ type: "relay", endpoint: "127.0.0.1:8123" }],
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("saved host recovery", () => {
+  const direct = { id: "direct:lan:6767", type: "directTcp", endpoint: "lan:6767", useTls: false };
+  const future = { id: "future:1", type: "futureKind", address: "future.local" };
+  it("keeps readable hosts and writes unreadable hosts and connections back", () => {
+    const unreadable = { serverId: "future", connections: [future] };
+    const stored = [{ serverId: "readable", connections: [direct, future] }, unreadable, "broken"];
+    const registry = readHostRegistry(stored);
+    expect(registry.hosts.map((host) => host.serverId)).toEqual(["readable"]);
+    expect(registry.hosts[0]?.connections).toEqual([direct]);
+    expect(writeHostRegistry(registry.hosts, registry.unreadable)).toEqual([
+      { ...registry.hosts[0], connections: [direct, future] },
+      unreadable,
+      "broken",
+    ]);
+    expect(
+      writeHostRegistry(registry.hosts, forgetUnreadableHost(registry.unreadable, "future")),
+    ).toEqual([{ ...registry.hosts[0], connections: [direct, future] }, "broken"]);
+  });
+  it("keeps tailnet and relay transports readable", () => {
+    const registry = readHostRegistry([
+      {
+        serverId: "tailnet",
+        connections: [
+          { type: "tailnet", tailnetAddress: "100.64.0.1:6767", daemonPublicKeyB64: "key" },
+        ],
+      },
+      {
+        serverId: "relay",
+        connections: [
+          { type: "relay", endpoint: "relay.local:443", useTls: true, daemonPublicKeyB64: "key" },
+        ],
+      },
+    ]);
+    expect(registry.hosts.map((host) => host.connections[0]?.type)).toEqual(["tailnet", "relay"]);
+    expect(registry.unreadable.hosts).toEqual([]);
   });
 });

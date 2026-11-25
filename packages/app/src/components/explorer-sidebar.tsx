@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { Portal } from "@gorhom/portal";
+import { GUMLOOP_INSPECTOR_HOST } from "@/components/gumloop-shell/sidebar-state";
+import {
+  useGumloopDesktopShell,
+  useIsGumloopTheme,
+} from "@/components/gumloop-shell/use-gumloop-chrome";
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import {
   View,
   Text,
@@ -29,7 +35,7 @@ import { MobilePanelOverlay } from "@/mobile-panels/presentation";
 import { HEADER_INNER_HEIGHT } from "@/constants/layout";
 import { GitDiffPane } from "@/git/diff-pane";
 import { FileExplorerPane } from "./file-explorer-pane";
-import { useKeyboardShiftStyle } from "@/hooks/use-keyboard-shift-style";
+import { useKeyboardShiftStyle } from "@/keyboard/shift";
 import { useHasOwnedWindowChromeObstruction, WindowChromeSafeArea } from "@/utils/desktop-window";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
 import { RetainedPanelActivity } from "@/components/retained-panel";
@@ -45,6 +51,7 @@ import { useDraftStore } from "@/stores/draft-store";
 function logExplorerSidebar(_event: string, _details: Record<string, unknown>): void {}
 
 interface ExplorerSidebarProps {
+  children?: ReactNode;
   serverId: string;
   workspaceId?: string | null;
   workspaceRoot: string;
@@ -81,6 +88,7 @@ export function CompactExplorerSidebar({
   isGit,
   onOpenFile,
 }: ExplorerSidebarProps) {
+  const gumloop = useIsGumloopTheme();
   const { theme } = useUnistyles();
   const insets = useSafeAreaInsets();
   const isOpen = usePanelStore((state) => selectIsFileExplorerOpen(state, { isCompact: true }));
@@ -120,7 +128,7 @@ export function CompactExplorerSidebar({
     [insets.top, theme.colors.surfaceSidebar, mobileKeyboardInsetStyle],
   );
 
-  return (
+  const overlay = (
     <RetainedPanelActivity active={isOpen}>
       <MobilePanelOverlay
         panel="file-explorer"
@@ -141,9 +149,11 @@ export function CompactExplorerSidebar({
       </MobilePanelOverlay>
     </RetainedPanelActivity>
   );
+  return gumloop ? <Portal hostName={GUMLOOP_INSPECTOR_HOST}>{overlay}</Portal> : overlay;
 }
 
 export function ExplorerSidebar({
+  children,
   serverId,
   workspaceId,
   workspaceRoot,
@@ -161,10 +171,13 @@ export function ExplorerSidebar({
     isGit,
   });
   const { width: viewportWidth } = useWindowDimensions();
-  const visibleExplorerWidth = resolveDesktopExplorerWidth({
-    requestedWidth: explorerWidth,
-    viewportWidth,
-  });
+  const gumloop = useGumloopDesktopShell(true);
+  const sheetInspector = gumloop && viewportWidth < 992;
+  const visibleExplorerWidth = useMemo(() => {
+    if (sheetInspector) return viewportWidth;
+    if (gumloop) return 525;
+    return resolveDesktopExplorerWidth({ requestedWidth: explorerWidth, viewportWidth });
+  }, [sheetInspector, gumloop, explorerWidth, viewportWidth]);
   const startWidthRef = useRef(visibleExplorerWidth);
   const resizeWidth = useSharedValue(visibleExplorerWidth);
 
@@ -206,37 +219,45 @@ export function ExplorerSidebar({
     width: resizeWidth.value,
   }));
   const desktopSidebarStyle = useMemo(
-    () => [explorerStaticStyles.desktopSidebar, resizeAnimatedStyle, { paddingTop: insets.top }],
-    [resizeAnimatedStyle, insets.top],
+    () => [
+      explorerStaticStyles.desktopSidebar,
+      resizeAnimatedStyle,
+      sheetInspector && explorerStaticStyles.fullscreen,
+      { paddingTop: insets.top },
+    ],
+    [resizeAnimatedStyle, insets.top, sheetInspector],
   );
 
-  if (!isOpen) {
-    return null;
-  }
+  const content = (
+    <RetainedPanelActivity active={isOpen}>
+      <Animated.View style={isOpen ? desktopSidebarStyle : styles.hiddenSidebar}>
+        <View style={[styles.desktopSidebarBorder, { flex: 1 }]}>
+          {gumloop ? null : (
+            <SidebarResizeHandle
+              edge="left"
+              gesture={resizeGesture}
+              testID="explorer-sidebar-resize-handle"
+            />
+          )}
 
-  return (
-    <Animated.View style={desktopSidebarStyle}>
-      <View style={[styles.desktopSidebarBorder, { flex: 1 }]}>
-        <SidebarResizeHandle
-          edge="left"
-          gesture={resizeGesture}
-          testID="explorer-sidebar-resize-handle"
-        />
-
-        <ExplorerSidebarContent
-          activeTab={explorerTab}
-          onTabPress={handleTabPress}
-          onClose={handleDesktopClose}
-          serverId={serverId}
-          workspaceId={workspaceId}
-          workspaceRoot={workspaceRoot}
-          isGit={isGit}
-          isOpen={isOpen}
-          onOpenFile={onOpenFile}
-        />
-      </View>
-    </Animated.View>
+          {children ?? (
+            <ExplorerSidebarContent
+              activeTab={explorerTab}
+              onTabPress={handleTabPress}
+              onClose={handleDesktopClose}
+              serverId={serverId}
+              workspaceId={workspaceId}
+              workspaceRoot={workspaceRoot}
+              isGit={isGit}
+              isOpen={isOpen}
+              onOpenFile={onOpenFile}
+            />
+          )}
+        </View>
+      </Animated.View>
+    </RetainedPanelActivity>
   );
+  return sheetInspector ? <Portal hostName={GUMLOOP_INSPECTOR_HOST}>{content}</Portal> : content;
 }
 
 interface ExplorerTabButtonProps {
@@ -257,8 +278,20 @@ function ExplorerTabButton({
   children,
 }: ExplorerTabButtonProps) {
   const handlePress = useCallback(() => onTabPress(tab), [onTabPress, tab]);
-  const tabStyle = useMemo(() => [styles.tab, active && styles.tabActive], [active]);
-  const tabTextStyle = useMemo(() => [styles.tabText, active && styles.tabTextActive], [active]);
+  const gumloop = useIsGumloopTheme();
+  const tabStyle = useMemo(
+    () => [
+      styles.tab,
+      active && styles.tabActive,
+      gumloop && styles.gumloopTab,
+      gumloop && active && styles.gumloopTabActive,
+    ],
+    [active, gumloop],
+  );
+  const tabTextStyle = useMemo(
+    () => [styles.tabText, gumloop && styles.gumloopTabText, active && styles.tabTextActive],
+    [active, gumloop],
+  );
   return (
     <Pressable testID={testID} style={tabStyle} onPress={handlePress}>
       {children}
@@ -290,6 +323,8 @@ function ExplorerSidebarContent({
   isOpen,
   onOpenFile,
 }: SidebarContentProps) {
+  const gumloop = useIsGumloopTheme();
+  const headerStyle = useMemo(() => [styles.header, gumloop && styles.gumloopHeader], [gumloop]);
   const { theme } = useUnistyles();
   const { t } = useTranslation();
   const toast = useToast();
@@ -324,7 +359,7 @@ function ExplorerSidebarContent({
       <WindowChromeSafeArea
         placement="inline"
         horizontalPadding={theme.spacing[2]}
-        style={styles.header}
+        style={headerStyle}
         testID="explorer-header"
       >
         <TitlebarDragRegion />
@@ -457,7 +492,7 @@ function useAddFileToChat({
   return { addFile, canAddToChat: focusedChat !== null };
 }
 
-function ChangedFilesPane({
+export function ChangedFilesPane({
   serverId,
   workspaceId,
   workspaceRoot,
@@ -480,7 +515,7 @@ function ChangedFilesPane({
   );
 }
 
-function FilesPane({
+export function FilesPane({
   serverId,
   workspaceId,
   workspaceRoot,
@@ -506,13 +541,14 @@ interface PrTabContentProps {
   onRetry: () => void;
 }
 
-function PrTabContent({
+export function PrTabContent({
   serverId,
   cwd,
   prPane,
   workspaceAttachmentScopeKey,
   onRetry,
 }: PrTabContentProps) {
+  const { t } = useTranslation();
   if (prPane.data) {
     return (
       <PullRequestPane
@@ -527,6 +563,13 @@ function PrTabContent({
   if (prPane.error) {
     return <PullRequestPaneError onRetry={onRetry} />;
   }
+  if (!prPane.isLoading)
+    return (
+      <View style={styles.prEmpty}>
+        <Text style={styles.prEmptyTitle}>{t("panels.pullRequest.emptyTitle")}</Text>
+        <Text style={styles.prEmptyDescription}>{t("panels.pullRequest.emptyDescription")}</Text>
+      </View>
+    );
   return <PullRequestPaneSkeleton />;
 }
 
@@ -534,22 +577,38 @@ function PrTabContent({
 // avoid the "Unable to find node on an unmounted component" crash when Unistyles
 // tries to patch the native node that Reanimated also manages.
 const explorerStaticStyles = RNStyleSheet.create({
+  fullscreen: { position: "absolute", top: 0, bottom: 0, left: 0 },
   desktopSidebar: {
     position: "relative" as const,
   },
 });
 
 const styles = StyleSheet.create((theme) => ({
+  hiddenSidebar: { display: "none" },
+  prEmpty: { flex: 1, justifyContent: "center", padding: theme.spacing[4], gap: theme.spacing[2] },
+  prEmptyTitle: { color: theme.colors.foreground, fontSize: theme.fontSize.base },
+  prEmptyDescription: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
   desktopSidebarBorder: {
     borderLeftWidth: 1,
     borderLeftColor: theme.colors.border,
-    backgroundColor: theme.colors.surfaceSidebar,
+    backgroundColor: theme.colors.surface0,
   },
   sidebarContent: {
     flex: 1,
     minHeight: 0,
     overflow: "hidden",
   },
+  gumloopHeader: { height: 64, backgroundColor: theme.colors.surface0 },
+  gumloopTab: {
+    borderRadius: 0,
+    height: 64,
+    justifyContent: "center",
+    backgroundColor: "transparent",
+    borderBottomWidth: 2,
+    borderBottomColor: "transparent",
+  },
+  gumloopTabActive: { borderBottomColor: theme.colors.foreground },
+  gumloopTabText: { fontSize: 16 },
   header: {
     position: "relative",
     height: HEADER_INNER_HEIGHT,

@@ -1,3 +1,4 @@
+import type { AppSettingsUpdate } from "./storage";
 import { useCallback, useMemo } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
@@ -16,6 +17,8 @@ import {
   DEFAULT_APP_SETTINGS,
   DEFAULT_CLIENT_SETTINGS,
   DEFAULT_CODE_FONT_SIZE,
+  DEFAULT_CONTENT_MAX_WIDTH,
+  resolveContentMaxWidth,
   DEFAULT_TERMINAL_SCROLLBACK_LINES,
   DEFAULT_UI_FONT_SIZE,
   MAX_CODE_FONT_SIZE,
@@ -32,9 +35,12 @@ import {
   sanitizeFontFamily,
   saveAppSettings as saveAppSettingsPure,
   type AppSettings,
+  type ChatDisplay,
   type DesktopSettingsBridge,
   type KeyValueStorage,
   type SendBehavior,
+  type SendShortcut,
+  type ContentWidthPreset,
   type ServiceUrlBehavior,
   type Settings,
   type SettingsDeps,
@@ -46,6 +52,8 @@ export {
   DEFAULT_APP_SETTINGS,
   DEFAULT_CLIENT_SETTINGS,
   DEFAULT_CODE_FONT_SIZE,
+  DEFAULT_CONTENT_MAX_WIDTH,
+  resolveContentMaxWidth,
   DEFAULT_TERMINAL_SCROLLBACK_LINES,
   DEFAULT_UI_FONT_SIZE,
   MAX_CODE_FONT_SIZE,
@@ -60,10 +68,13 @@ export {
 };
 export type {
   AppSettings,
+  ChatDisplay,
   AppLanguage,
   DesktopSettingsBridge,
   KeyValueStorage,
   SendBehavior,
+  SendShortcut,
+  ContentWidthPreset,
   ServiceUrlBehavior,
   Settings,
   SettingsDeps,
@@ -83,7 +94,7 @@ export interface UseAppSettingsReturn {
   settings: AppSettings;
   isLoading: boolean;
   error: unknown;
-  updateSettings: (updates: Partial<AppSettings>) => Promise<void>;
+  updateSettings: (updates: AppSettingsUpdate) => Promise<void>;
   resetSettings: () => Promise<void>;
 }
 
@@ -107,7 +118,7 @@ export function useAppSettings(): UseAppSettingsReturn {
   });
 
   const updateSettings = useCallback(
-    async (updates: Partial<AppSettings>) => {
+    async (updates: AppSettingsUpdate) => {
       try {
         await saveAppSettings({ queryClient, updates });
       } catch (err) {
@@ -246,13 +257,13 @@ export function useSettings<TSelected>(
   };
 }
 
-export async function persistAppSettings(updates: Partial<AppSettings>): Promise<void> {
+export async function persistAppSettings(updates: AppSettingsUpdate): Promise<void> {
   await saveAppSettings({ queryClient: appQueryClient, updates });
 }
 
 export async function saveAppSettings(input: {
   queryClient: QueryClient;
-  updates: Partial<AppSettings>;
+  updates: AppSettingsUpdate;
   deps?: SettingsDeps;
 }): Promise<void> {
   await saveAppSettingsPure({

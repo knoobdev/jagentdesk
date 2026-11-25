@@ -1,3 +1,4 @@
+import type { WorkspaceSort } from "@/projects/workspace-structure";
 import { useMemo } from "react";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import { useSidebarOrderStore } from "@/stores/sidebar-order-store";
@@ -90,10 +91,13 @@ export function useWorkspaceDirectory(
   );
 }
 
-export function useWorkspaceStructure(serverIds: string[]): WorkspaceStructure {
+export function useWorkspaceStructure(
+  serverIds: string[],
+  workspaceSort?: WorkspaceSort,
+): WorkspaceStructure {
   const projects = useStoreWithEqualityFn(
     useSessionStore,
-    (state) => selectWorkspaceStructureProjects(state, serverIds),
+    (state) => selectWorkspaceStructureProjects(state, serverIds, workspaceSort),
     workspaceEqualityFns.deep,
   );
   const projectOrder = useStoreWithEqualityFn(
@@ -110,11 +114,12 @@ export function useWorkspaceStructure(serverIds: string[]): WorkspaceStructure {
   return useMemo(
     () =>
       composeWorkspaceStructure({
+        workspaceSort,
         projects,
         projectOrder,
         workspaceOrderByScope,
       }),
-    [projectOrder, projects, workspaceOrderByScope],
+    [projectOrder, projects, workspaceOrderByScope, workspaceSort],
   );
 }
 

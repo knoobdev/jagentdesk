@@ -1,9 +1,7 @@
+import type { ViewedTimelineStatus } from "@/timeline/viewed-timeline-sync";
 import { useRef } from "react";
-import type {
-  AgentCapabilityFlags,
-  AgentFeature,
-  AgentProvider,
-} from "@jagentdesk/protocol/agent-types";
+import { type AgentCapabilityFlags, type AgentProvider } from "@jagentdesk/protocol/agent-types";
+import { type Agent } from "@/stores/session-store";
 
 export interface AgentScreenAgent {
   serverId: string;
@@ -21,8 +19,11 @@ export interface AgentScreenAgent {
     modeId?: string | null;
     thinkingOptionId?: string | null;
   } | null;
-  features?: readonly AgentFeature[];
+  options?: Agent["options"];
+  controls?: Agent["controls"];
   lastError?: string | null;
+  /** Set when the agent is a bot's supervisor: its prompts carry a `[source]` envelope. */
+  botId?: string | null;
   projectPlacement?: {
     projectKey?: string;
     projectName?: string;
@@ -47,7 +48,8 @@ export interface AgentScreenMachineInput {
   isArchivingCurrentAgent: boolean;
   isHistorySyncing: boolean;
   needsAuthoritativeSync: boolean;
-  visibilityCatchUpStatus: "ready" | "pending" | "error";
+  visibilityCatchUpStatus: ViewedTimelineStatus;
+  visibilityCatchUpError: string | null;
   continuity: AgentScreenContinuity;
   hasHydratedHistoryBefore: boolean;
 }
@@ -116,6 +118,13 @@ function updateInitialSyncFailureMemory(args: {
   if (args.input.missingAgentState.kind === "error" && !args.input.hasHydratedHistoryBefore) {
     args.nextMemory.hadInitialSyncFailure = true;
   }
+  if (
+    args.input.visibilityCatchUpStatus === "error" &&
+    args.input.visibilityCatchUpError &&
+    !args.input.hasHydratedHistoryBefore
+  ) {
+    args.nextMemory.hadInitialSyncFailure = true;
+  }
 }
 
 function shouldUseOptimisticCreateFlowAgent(input: AgentScreenMachineInput): boolean {
@@ -169,7 +178,7 @@ function resolveAgentScreenSync(args: {
   if (input.isArchived) {
     return { status: "idle" };
   }
-  if (!input.isConnected) {
+  if (!input.isConnected || input.visibilityCatchUpStatus === "reattaching") {
     return { status: "reconnecting" };
   }
   if (input.missingAgentState.kind === "error") {
@@ -180,6 +189,7 @@ function resolveAgentScreenSync(args: {
   }
   if (
     input.visibilityCatchUpStatus === "pending" ||
+    input.visibilityCatchUpStatus === "checking" ||
     input.needsAuthoritativeSync ||
     input.isHistorySyncing
   ) {
@@ -187,7 +197,9 @@ function resolveAgentScreenSync(args: {
       status: "catching_up",
       ui: resolveCatchingUpUi({
         hasOptimisticCreateContinuity: hasOptimisticCreateContinuity(input),
-        isVisibilityCatchUpPending: input.visibilityCatchUpStatus === "pending",
+        isVisibilityCatchUpPending:
+          input.visibilityCatchUpStatus === "pending" ||
+          input.visibilityCatchUpStatus === "checking",
         hasHydratedHistoryBefore: input.hasHydratedHistoryBefore,
         hadInitialSyncFailure,
       }),
@@ -230,6 +242,21 @@ export function deriveAgentScreenViewState({
       state: {
         tag: "error",
         message: input.missingAgentState.message,
+      },
+      memory: nextMemory,
+    };
+  }
+
+  if (
+    input.visibilityCatchUpStatus === "error" &&
+    input.visibilityCatchUpError &&
+    !input.hasHydratedHistoryBefore &&
+    !nextMemory.hasRenderedReady
+  ) {
+    return {
+      state: {
+        tag: "error",
+        message: input.visibilityCatchUpError,
       },
       memory: nextMemory,
     };

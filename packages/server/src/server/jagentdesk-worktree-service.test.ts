@@ -517,7 +517,7 @@ test("renames an eligible unnamed branch-off worktree once on first agent contex
   );
 
   expect(created.worktree.branchName).toBe("dazzling-yak");
-  expect(readJAgentDeskWorktreeMetadata(created.worktree.worktreePath)).toMatchObject({
+  expect(await readJAgentDeskWorktreeMetadata(created.worktree.worktreePath)).toMatchObject({
     version: 2,
     firstAgentBranchAutoName: {
       status: "pending",
@@ -544,7 +544,7 @@ test("renames an eligible unnamed branch-off worktree once on first agent contex
     branchName: "renamed-from-agent-context",
   });
   expect(branchAfterFirst).toBe("renamed-from-agent-context");
-  expect(readJAgentDeskWorktreeMetadata(created.worktree.worktreePath)).toMatchObject({
+  expect(await readJAgentDeskWorktreeMetadata(created.worktree.worktreePath)).toMatchObject({
     version: 2,
     firstAgentBranchAutoName: {
       status: "attempted",
@@ -731,7 +731,7 @@ test("leaves the branch alone when generated branch text is invalid", async () =
       .toString()
       .trim(),
   ).toBe("dazzling-yak");
-  expect(readJAgentDeskWorktreeMetadata(created.worktree.worktreePath)).toMatchObject({
+  expect(await readJAgentDeskWorktreeMetadata(created.worktree.worktreePath)).toMatchObject({
     version: 2,
     firstAgentBranchAutoName: {
       status: "attempted",
@@ -760,13 +760,14 @@ test("does not mark checkout branch worktrees as eligible for first-agent rename
     createDeps(),
   );
 
-  expect(readJAgentDeskWorktreeMetadata(created.worktree.worktreePath)).toMatchObject({
+  // baseRefName must be the repo's default branch, not the checked-out branch
+  // itself — otherwise the diff panel compares the branch against itself and
+  // always shows no changes.
+  expect(await readJAgentDeskWorktreeMetadata(created.worktree.worktreePath)).toMatchObject({
     version: 1,
-    baseRefName: "dev",
+    baseRefName: "main",
   });
-  // A checkout-branch worktree has no distinct base, so the workspace records a
-  // null baseBranch even though worktree.json's baseRefName is the branch itself.
-  expect(created.workspace.baseBranch).toBe(null);
+  expect(created.workspace.baseBranch).toBe("main");
   await expect(
     attemptFirstAgentBranchAutoName({
       cwd: created.worktree.worktreePath,
@@ -799,7 +800,7 @@ test("does not mark GitHub PR checkout worktrees as eligible for first-agent ren
     createDeps(),
   );
 
-  expect(readJAgentDeskWorktreeMetadata(created.worktree.worktreePath)).toMatchObject({
+  expect(await readJAgentDeskWorktreeMetadata(created.worktree.worktreePath)).toMatchObject({
     version: 1,
     baseRefName: "main",
   });
@@ -1082,6 +1083,7 @@ function createDeps(options?: {
   };
   const workspaceGitService = createWorkspaceGitServiceStub();
   const workspaceProvisioning = createWorkspaceProvisioningService({
+    unarchiveWorkspaceAgents: async () => {},
     projectRegistry,
     workspaceRegistry,
     workspaceGitService,
@@ -1187,7 +1189,7 @@ function createWorkspaceGitServiceStub(): WorkspaceGitService {
     registerWorkspace: () => ({
       unsubscribe: () => {},
     }),
-    peekSnapshot: (cwd) => createWorkspaceGitSnapshot(cwd),
+
     getCheckout: async (cwd) => {
       try {
         const snapshot = createWorkspaceGitSnapshot(cwd);

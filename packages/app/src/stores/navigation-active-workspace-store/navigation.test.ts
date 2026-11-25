@@ -8,7 +8,8 @@ import {
   type NavigateToLastWorkspaceDeps,
   type NavigateToWorkspaceDeps,
 } from "./navigation";
-import type { Agent, WorkspaceDescriptor } from "@/stores/session-store";
+import type { Agent } from "@/stores/session-store";
+import type { WorkspaceDescriptor } from "@/stores/session-store";
 
 interface RecordedTab {
   workspaceKey: string;
@@ -19,7 +20,14 @@ function createFakeDeps(overrides: Partial<NavigateToWorkspaceDeps> = {}) {
   const navigations: string[] = [];
   const remembered: ActiveWorkspaceSelection[] = [];
   const openedTabs: RecordedTab[] = [];
+  const deferredTabs: unknown[] = [];
   const deps: NavigateToWorkspaceDeps = {
+    revealWorkspace: () => undefined,
+    isWorkspaceLayoutHydrated: () => true,
+    deferOpenTab: (input) => {
+      deferredTabs.push(input);
+      return null;
+    },
     getSessionWorkspaces: () => null,
     getSessionAgents: () => [] as Agent[],
     openTabFocused: (workspaceKey, target) => {
@@ -31,7 +39,7 @@ function createFakeDeps(overrides: Partial<NavigateToWorkspaceDeps> = {}) {
     navigateToRoute: (route) => navigations.push(route),
     ...overrides,
   };
-  return { deps, navigations, remembered, openedTabs };
+  return { deps, navigations, remembered, openedTabs, deferredTabs };
 }
 
 function createLastSelectionDeps(
@@ -73,7 +81,7 @@ describe("workspace navigation", () => {
     expect(remembered).toEqual([{ serverId: "server-1", workspaceId: "workspace-a" }]);
   });
 
-  it("focuses the attention agent's tab when a workspace has one", () => {
+  it("keeps the selected tab when a workspace has an attention agent", () => {
     const workspace = {
       id: "workspace-a",
       workspaceDirectory: "/repo/workspace-a",
@@ -92,12 +100,7 @@ describe("workspace navigation", () => {
 
     navigateToWorkspace({ serverId: "server-1", workspaceId: "workspace-a" }, deps);
 
-    expect(openedTabs).toEqual([
-      {
-        workspaceKey: "server-1:workspace-a",
-        target: { kind: "agent", agentId: "agent-1" },
-      },
-    ]);
+    expect(openedTabs).toEqual([]);
   });
 
   it("keeps an explicit tab authoritative over an attention agent", () => {
@@ -135,7 +138,7 @@ describe("workspace navigation", () => {
   });
 
   it("defers an agent tab until a missing workspace is recovered", () => {
-    const { deps, navigations, openedTabs } = createFakeDeps({
+    const { deps, navigations, openedTabs, deferredTabs } = createFakeDeps({
       getSessionWorkspaces: () => new Map(),
     });
 
@@ -149,7 +152,33 @@ describe("workspace navigation", () => {
     );
 
     expect(openedTabs).toEqual([]);
-    expect(navigations).toEqual(["/h/server-1/workspace/workspace-a?open=agent%3Aagent-1"]);
+    expect(navigations).toEqual(["/h/server-1/workspace/workspace-a"]);
+    expect(deferredTabs).toHaveLength(1);
+  });
+
+  it("defers an agent tab until persisted workspace layout has hydrated", () => {
+    const workspace = {
+      id: "workspace-a",
+      workspaceDirectory: "/repo/workspace-a",
+    } as WorkspaceDescriptor;
+    const { deps, navigations, openedTabs, deferredTabs } = createFakeDeps({
+      getSessionWorkspaces: () => new Map([[workspace.id, workspace]]),
+      isWorkspaceLayoutHydrated: () => false,
+    });
+
+    navigateToWorkspace(
+      {
+        serverId: "server-1",
+        workspaceId: "workspace-a",
+        target: { kind: "agent", agentId: "agent-1" },
+        pin: true,
+      },
+      deps,
+    );
+
+    expect(openedTabs).toEqual([]);
+    expect(navigations).toEqual(["/h/server-1/workspace/workspace-a"]);
+    expect(deferredTabs).toHaveLength(1);
   });
 
   it("reads the active workspace from the current route", () => {
@@ -166,7 +195,7 @@ describe("workspace navigation", () => {
       pathname: "/",
       params: {
         serverId: "server-1",
-        workspaceId: "b64_L3RtcC9wYXNlby1taXNzaW5nLXdvcmtzcGFjZQ",
+        workspaceId: "b64_L3RtcC9qYWdlbnRkZXNrLW1pc3Npbmctd29ya3NwYWNl",
       },
     });
 

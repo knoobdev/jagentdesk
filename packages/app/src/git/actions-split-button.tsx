@@ -143,7 +143,7 @@ export function GitActionsSplitButton({ gitActions, hideLabels }: GitActionsSpli
               </View>
             )}
           </Pressable>
-          {gitActions.secondary.length > 0 ? (
+          {gitActions.secondary.some((action) => action.id !== gitActions.primary?.id) ? (
             <DropdownMenu>
               <DropdownMenuTrigger
                 testID="changes-primary-cta-caret"
@@ -154,22 +154,24 @@ export function GitActionsSplitButton({ gitActions, hideLabels }: GitActionsSpli
                 <ChevronDown size={16} color={theme.colors.foregroundMuted} />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" testID="changes-primary-cta-menu">
-                {gitActions.secondary.map((action, index) => (
-                  <GitActionMenuItem
-                    key={action.id}
-                    action={action}
-                    onSelect={runGitAction}
-                    archiveShortcutKeys={archiveShortcutKeys}
-                    needsSeparator={action.startsGroup}
-                    showSeparator={index > 0}
-                    closeOnSelect={
-                      action.status === "idle" &&
-                      action.id === "pr" &&
-                      action.label === action.pendingLabel &&
-                      action.label === action.successLabel
-                    }
-                  />
-                ))}
+                {gitActions.secondary
+                  .filter((action) => action.id !== gitActions.primary?.id)
+                  .map((action, index) => (
+                    <GitActionMenuItem
+                      key={action.id}
+                      action={action}
+                      onSelect={runGitAction}
+                      archiveShortcutKeys={archiveShortcutKeys}
+                      needsSeparator={action.startsGroup}
+                      showSeparator={index > 0}
+                      closeOnSelect={
+                        action.status === "idle" &&
+                        action.id === "pr" &&
+                        action.label === action.pendingLabel &&
+                        action.label === action.successLabel
+                      }
+                    />
+                  ))}
               </DropdownMenuContent>
             </DropdownMenu>
           ) : null}

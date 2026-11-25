@@ -1,3 +1,4 @@
+import { useBuiltinToolCallCard } from "@/plugins/builtin/tool-call-cards";
 import React, { useMemo, type ReactNode } from "react";
 import {
   View,
@@ -5,6 +6,7 @@ import {
   ScrollView as RNScrollView,
   type StyleProp,
   type ViewStyle,
+  type ScrollViewProps,
 } from "react-native";
 import { ScrollView as GHScrollView } from "react-native-gesture-handler";
 import { StyleSheet } from "react-native-unistyles";
@@ -17,16 +19,33 @@ import { highlightDiffLines } from "@/utils/diff-highlight";
 import { hasMeaningfulToolCallDetail } from "@/utils/tool-call-detail-state";
 import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
 import { CODE_SURFACE_DATASET } from "@/styles/code-surface";
-import { extensionFromPath, highlightToKeyedLines } from "@/utils/highlight-cache";
+import { highlightToKeyedLines } from "@/utils/highlight-cache";
 import { HighlightedLines } from "./highlighted-content";
 import { DiffViewer } from "./diff-viewer";
 import { getCodeInsets } from "./code-insets";
 import { isWeb } from "@/constants/platform";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
-import { readRemoteJobToolResult } from "@/remote-exec/remote-job-detection";
-import { RemoteJobCard } from "@/remote-exec/remote-job-card";
 
 const ScrollView = isWeb ? RNScrollView : GHScrollView;
+
+// A capped detail scrolls as a whole. Only full-height sheets need section scrollers.
+function DetailSectionBody({
+  fillAvailableHeight,
+  style,
+  contentContainerStyle,
+  children,
+  ...scrollProps
+}: ScrollViewProps & { fillAvailableHeight: boolean }) {
+  const bodyStyle = useMemo(() => [style, contentContainerStyle], [style, contentContainerStyle]);
+  if (fillAvailableHeight) {
+    return (
+      <ScrollView {...scrollProps} style={style} contentContainerStyle={contentContainerStyle}>
+        {children}
+      </ScrollView>
+    );
+  }
+  return <View style={bodyStyle}>{children}</View>;
+}
 
 // ---- Content Component ----
 
@@ -42,6 +61,7 @@ interface ToolCallDetailsContentProps {
 }
 
 interface DetailStyles {
+  fillAvailableHeight: boolean;
   sectionFillStyle: StyleProp<ViewStyle>;
   codeBlockFillStyle: StyleProp<ViewStyle>;
   codeVerticalScrollStyle: StyleProp<ViewStyle>;
@@ -51,7 +71,6 @@ interface DetailStyles {
   jsonScrollErrorCombined: StyleProp<ViewStyle>;
   fullBleedContainerStyle: StyleProp<ViewStyle>;
   loadingContainerStyle: StyleProp<ViewStyle>;
-  resolvedMaxHeight: number | undefined;
   shouldFill: boolean;
   isFullBleed: boolean;
 }
@@ -66,12 +85,11 @@ function resolveShouldFill(
 ): boolean {
   if (!fillAvailableHeight) return false;
   const t = detail?.type;
-  return t === "shell" || t === "edit" || t === "write" || t === "read" || t === "sub_agent";
+  return t === "shell" || t === "edit" || t === "write" || t === "read";
 }
 
 function useDetailStyles(
   detail: ToolCallDetail | undefined,
-  resolvedMaxHeight: number | undefined,
   fillAvailableHeight: boolean,
 ): DetailStyles {
   const isFullBleed = resolveIsFullBleed(detail);
@@ -87,28 +105,14 @@ function useDetailStyles(
     [codeBlockStyle, shouldFill],
   );
   const codeVerticalScrollStyle = useMemo(
-    () => [
-      styles.codeVerticalScroll,
-      resolvedMaxHeight !== undefined && inlineUnistylesStyle({ maxHeight: resolvedMaxHeight }),
-      shouldFill && styles.fillHeight,
-    ],
-    [resolvedMaxHeight, shouldFill],
+    () => [styles.codeVerticalScroll, shouldFill && styles.fillHeight],
+    [shouldFill],
   );
   const scrollAreaFillStyle = useMemo(
-    () => [
-      styles.scrollArea,
-      resolvedMaxHeight !== undefined && inlineUnistylesStyle({ maxHeight: resolvedMaxHeight }),
-      shouldFill && styles.fillHeight,
-    ],
-    [resolvedMaxHeight, shouldFill],
+    () => [styles.scrollArea, shouldFill && styles.fillHeight],
+    [shouldFill],
   );
-  const scrollAreaStyle = useMemo(
-    () => [
-      styles.scrollArea,
-      resolvedMaxHeight !== undefined && inlineUnistylesStyle({ maxHeight: resolvedMaxHeight }),
-    ],
-    [resolvedMaxHeight],
-  );
+  const scrollAreaStyle = useMemo(() => [styles.scrollArea], []);
   const jsonScrollCombined = styles.jsonScroll;
   const jsonScrollErrorCombined = [styles.jsonScroll, styles.jsonScrollError];
   const fullBleedContainerStyle = useMemo(
@@ -124,6 +128,7 @@ function useDetailStyles(
   );
 
   return {
+    fillAvailableHeight,
     sectionFillStyle,
     codeBlockFillStyle,
     codeVerticalScrollStyle,
@@ -133,7 +138,6 @@ function useDetailStyles(
     jsonScrollErrorCombined,
     fullBleedContainerStyle,
     loadingContainerStyle,
-    resolvedMaxHeight,
     shouldFill,
     isFullBleed,
   };
@@ -162,7 +166,8 @@ function ShellDetailSection({ command, output, ds }: ShellDetailProps) {
   return (
     <View style={ds.sectionFillStyle}>
       <View style={ds.codeBlockFillStyle}>
-        <ScrollView
+        <DetailSectionBody
+          fillAvailableHeight={ds.fillAvailableHeight}
           style={ds.codeVerticalScrollStyle}
           contentContainerStyle={styles.codeVerticalContent}
           nestedScrollEnabled
@@ -182,7 +187,7 @@ function ShellDetailSection({ command, output, ds }: ShellDetailProps) {
               </Text>
             </View>
           </ScrollView>
-        </ScrollView>
+        </DetailSectionBody>
       </View>
     </View>
   );
@@ -230,184 +235,6 @@ function WorktreeSetupDetailSection({
   );
 }
 
-function resolveSubAgentFallbackHeader(
-  subAgentType: string | null | undefined,
-  description: string | null | undefined,
-  fallbackText: string,
-): string {
-  if (subAgentType && description) {
-    return `${subAgentType}: ${description}`;
-  }
-  return subAgentType ?? description ?? fallbackText;
-}
-
-interface SubAgentDetailProps {
-  log: string;
-  childSessionId: string | null | undefined;
-  subAgentType: string | null | undefined;
-  description: string | null | undefined;
-  ds: DetailStyles;
-}
-
-interface SubAgentActivityRow {
-  index: number;
-  toolName: string;
-  summary?: string;
-}
-
-interface ParsedSubAgentLog {
-  actions: SubAgentActivityRow[];
-  remainingLog: string;
-}
-
-function parseBracketedSubAgentLine(line: string, index: number): SubAgentActivityRow | null {
-  const match = line.match(/^\[([^\]]+)\](?:\s+(.*))?$/);
-  if (!match) {
-    return null;
-  }
-  const toolName = match[1]?.trim();
-  if (!toolName) {
-    return null;
-  }
-  const summary = match[2]?.trim();
-  return {
-    index,
-    toolName,
-    ...(summary ? { summary } : {}),
-  };
-}
-
-function parseSubAgentLog(log: string): ParsedSubAgentLog {
-  const actions: SubAgentActivityRow[] = [];
-  const remainingLines: string[] = [];
-  for (const line of log.replace(/^\n+/, "").split("\n")) {
-    const normalizedLine = line.trim();
-    if (!normalizedLine) {
-      continue;
-    }
-    const parsedAction = parseBracketedSubAgentLine(normalizedLine, actions.length + 1);
-    if (parsedAction) {
-      actions.push(parsedAction);
-    } else {
-      remainingLines.push(line);
-    }
-  }
-  return {
-    actions,
-    remainingLog: remainingLines.join("\n").replace(/^\n+/, ""),
-  };
-}
-
-function SubAgentActionRow({ action }: { action: SubAgentActivityRow }) {
-  return (
-    <View style={styles.subAgentActionRow}>
-      <Text selectable style={styles.subAgentActionTool}>
-        {formatSubAgentToolName(action.toolName)}
-      </Text>
-      {action.summary ? (
-        <Text selectable style={styles.subAgentActionSummary}>
-          {action.summary}
-        </Text>
-      ) : null}
-    </View>
-  );
-}
-
-function formatSubAgentToolName(toolName: string): string {
-  const trimmed = toolName.trim();
-  if (!trimmed) {
-    return toolName;
-  }
-  return trimmed
-    .replace(/[._-]+/g, " ")
-    .split(" ")
-    .filter((segment) => segment.length > 0)
-    .map((segment) => `${segment[0]?.toUpperCase() ?? ""}${segment.slice(1)}`)
-    .join(" ");
-}
-
-function SubAgentLogText({
-  activityLog,
-  fallbackHeader,
-  hasActions,
-}: {
-  activityLog: string;
-  fallbackHeader: string;
-  hasActions: boolean;
-}) {
-  if (activityLog.length > 0) {
-    return (
-      <Text selectable style={styles.scrollText}>
-        {activityLog}
-      </Text>
-    );
-  }
-  if (!hasActions) {
-    return (
-      <Text selectable style={styles.scrollText}>
-        {fallbackHeader}
-      </Text>
-    );
-  }
-  return null;
-}
-
-function SubAgentDetailSection({
-  log,
-  childSessionId,
-  subAgentType,
-  description,
-  ds,
-}: SubAgentDetailProps) {
-  const { t } = useTranslation();
-  const { actions, remainingLog } = useMemo(() => parseSubAgentLog(log), [log]);
-  const fallbackHeader = resolveSubAgentFallbackHeader(
-    subAgentType,
-    description,
-    t("toolCallDetails.subAgentActivity"),
-  );
-  const hasActions = actions.length > 0;
-  return (
-    <View style={ds.sectionFillStyle}>
-      <View style={ds.codeBlockFillStyle}>
-        <ScrollView
-          style={ds.codeVerticalScrollStyle}
-          contentContainerStyle={styles.codeVerticalContent}
-          nestedScrollEnabled
-          showsVerticalScrollIndicator
-        >
-          <ScrollView
-            horizontal
-            nestedScrollEnabled
-            showsHorizontalScrollIndicator
-            contentContainerStyle={styles.codeHorizontalContent}
-          >
-            <View style={styles.codeLine} dataSet={CODE_SURFACE_DATASET}>
-              {childSessionId ? (
-                <Text selectable style={styles.subAgentSessionText}>
-                  session {childSessionId}
-                </Text>
-              ) : null}
-              {hasActions ? (
-                <View style={styles.subAgentActions}>
-                  {actions.map((action) => (
-                    <SubAgentActionRow key={action.index} action={action} />
-                  ))}
-                </View>
-              ) : null}
-              <SubAgentLogText
-                activityLog={remainingLog}
-                fallbackHeader={fallbackHeader}
-                hasActions={hasActions}
-              />
-            </View>
-          </ScrollView>
-        </ScrollView>
-      </View>
-    </View>
-  );
-}
-
 interface EditDetailProps {
   diffLines: DiffLine[] | undefined;
   ds: DetailStyles;
@@ -418,11 +245,7 @@ function EditDetailSection({ diffLines, ds }: EditDetailProps) {
     <View style={ds.sectionFillStyle}>
       {diffLines ? (
         <View style={ds.codeBlockFillStyle}>
-          <DiffViewer
-            diffLines={diffLines}
-            maxHeight={ds.resolvedMaxHeight}
-            fillAvailableHeight={ds.shouldFill}
-          />
+          <DiffViewer diffLines={diffLines} fillAvailableHeight={ds.shouldFill} />
         </View>
       ) : null}
     </View>
@@ -446,11 +269,12 @@ function ScrollableTextSection({
   startLine,
 }: ScrollableContentProps) {
   const keyedLines = useMemo(
-    () => (filePath ? highlightToKeyedLines(content, extensionFromPath(filePath)) : null),
+    () => highlightToKeyedLines(content, filePath ?? null),
     [content, filePath],
   );
   const body = (
-    <ScrollView
+    <DetailSectionBody
+      fillAvailableHeight={ds.fillAvailableHeight}
       style={ds.scrollAreaFillStyle}
       contentContainerStyle={styles.scrollContent}
       nestedScrollEnabled
@@ -465,7 +289,7 @@ function ScrollableTextSection({
           </Text>
         )}
       </ScrollView>
-    </ScrollView>
+    </DetailSectionBody>
   );
   if (!wrapInSectionFill) return body;
   return <View style={ds.sectionFillStyle}>{body}</View>;
@@ -480,7 +304,8 @@ interface FetchDetailProps {
 function FetchDetailSection({ url, result, ds }: FetchDetailProps) {
   return (
     <View style={ds.sectionFillStyle}>
-      <ScrollView
+      <DetailSectionBody
+        fillAvailableHeight={ds.fillAvailableHeight}
         style={ds.scrollAreaFillStyle}
         contentContainerStyle={styles.scrollContent}
         nestedScrollEnabled
@@ -491,7 +316,7 @@ function FetchDetailSection({ url, result, ds }: FetchDetailProps) {
             {result ? `${url}\n\n${result}` : url}
           </Text>
         </ScrollView>
-      </ScrollView>
+      </DetailSectionBody>
     </View>
   );
 }
@@ -499,7 +324,8 @@ function FetchDetailSection({ url, result, ds }: FetchDetailProps) {
 function ScrollablePlainTextSection({ text, ds }: { text: string; ds: DetailStyles }) {
   return (
     <View style={styles.section}>
-      <ScrollView
+      <DetailSectionBody
+        fillAvailableHeight={ds.fillAvailableHeight}
         style={ds.scrollAreaStyle}
         contentContainerStyle={styles.scrollContent}
         nestedScrollEnabled
@@ -508,7 +334,7 @@ function ScrollablePlainTextSection({ text, ds }: { text: string; ds: DetailStyl
         <Text selectable style={styles.plainText}>
           {text}
         </Text>
-      </ScrollView>
+      </DetailSectionBody>
     </View>
   );
 }
@@ -526,7 +352,8 @@ function buildSearchSections(detail: SearchDetail, ds: DetailStyles): ReactNode[
   if (detail.content) {
     out.push(
       <View key="search-content" style={styles.section}>
-        <ScrollView
+        <DetailSectionBody
+          fillAvailableHeight={ds.fillAvailableHeight}
           style={ds.scrollAreaStyle}
           contentContainerStyle={styles.scrollContent}
           nestedScrollEnabled
@@ -537,7 +364,7 @@ function buildSearchSections(detail: SearchDetail, ds: DetailStyles): ReactNode[
               {detail.content}
             </Text>
           </ScrollView>
-        </ScrollView>
+        </DetailSectionBody>
       </View>,
     );
   }
@@ -567,6 +394,9 @@ function buildSearchSections(detail: SearchDetail, ds: DetailStyles): ReactNode[
         </Text>
       </View>,
     );
+  }
+  if (out.length === 0 && detail.query) {
+    return [<ScrollablePlainTextSection key="search-query" text={detail.query} ds={ds} />];
   }
   return out;
 }
@@ -656,18 +486,7 @@ function buildDetailSections(
       />,
     ];
   }
-  if (detail.type === "sub_agent") {
-    return [
-      <SubAgentDetailSection
-        key="sub-agent"
-        log={detail.log}
-        childSessionId={detail.childSessionId}
-        subAgentType={detail.subAgentType}
-        description={detail.description}
-        ds={ds}
-      />,
-    ];
-  }
+  if (detail.type === "sub_agent") return [];
   if (detail.type === "edit") {
     return [<EditDetailSection key="edit" diffLines={diffLines} ds={ds} />];
   }
@@ -766,26 +585,18 @@ function ToolCallDetailsContentInner({
 }: ToolCallDetailsContentProps) {
   const { t } = useTranslation();
   const resolvedMaxHeight = fillAvailableHeight ? undefined : (maxHeight ?? 300);
-  const ds = useDetailStyles(detail, resolvedMaxHeight, fillAvailableHeight);
+  // The allowance belongs to the whole disclosure, rather than each section.
+  const ds = useDetailStyles(detail, fillAvailableHeight);
   const diffLines = useDiffLines(detail);
 
-  // Remote job calls (spec 33.9) render a live card instead of the generic result sections.
-  const remoteJob = useMemo(
-    () => readRemoteJobToolResult(toolName ?? "", detail),
-    [toolName, detail],
-  );
-  if (remoteJob) {
-    return (
-      <RemoteJobCard
-        client={client ?? null}
-        initialJob={remoteJob.job}
-        initialOutput={remoteJob.output}
-        initialOutputOffset={remoteJob.outputOffset}
-        initialTruncated={remoteJob.outputTruncatedHead}
-        testID="remote-job-card"
-      />
-    );
-  }
+  // Feature cards (remote jobs, spec 33.9) replace the generic result sections.
+  const builtinCard = useBuiltinToolCallCard({
+    client,
+    toolName: toolName ?? "",
+    detail,
+    placement: "details",
+  });
+  if (builtinCard) return builtinCard;
 
   const sections: ReactNode[] = buildDetailSections(detail, diffLines, ds, t);
 
@@ -800,6 +611,17 @@ function ToolCallDetailsContentInner({
     return <Text style={styles.emptyStateText}>{t("toolCallDetails.empty")}</Text>;
   }
 
+  if (resolvedMaxHeight !== undefined) {
+    return (
+      <ScrollView
+        style={inlineUnistylesStyle({ maxHeight: resolvedMaxHeight })}
+        contentContainerStyle={ds.fullBleedContainerStyle}
+        nestedScrollEnabled
+      >
+        {sections}
+      </ScrollView>
+    );
+  }
   return <View style={ds.fullBleedContainerStyle}>{sections}</View>;
 }
 
@@ -905,34 +727,6 @@ const styles = StyleSheet.create((theme) => {
     },
     shellPrompt: {
       color: theme.colors.foregroundMuted,
-    },
-    subAgentSessionText: {
-      fontFamily: theme.fontFamily.mono,
-      fontSize: theme.fontSize.code,
-      color: theme.colors.foregroundMuted,
-      lineHeight: 18,
-      marginBottom: theme.spacing[2],
-    },
-    subAgentActions: {
-      gap: theme.spacing[1],
-      marginBottom: theme.spacing[2],
-    },
-    subAgentActionRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: theme.spacing[2],
-    },
-    subAgentActionTool: {
-      fontFamily: theme.fontFamily.mono,
-      fontSize: theme.fontSize.code,
-      color: theme.colors.foregroundMuted,
-      lineHeight: 18,
-    },
-    subAgentActionSummary: {
-      fontFamily: theme.fontFamily.mono,
-      fontSize: theme.fontSize.code,
-      color: theme.colors.foreground,
-      lineHeight: 18,
     },
     jsonScroll: {
       borderWidth: theme.borderWidth[1],

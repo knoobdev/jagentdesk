@@ -5,6 +5,18 @@ description: JAgentDesk reference for managing workspaces, workspace scripts, ag
 
 JAgentDesk is a daemon that supervises AI coding agents on your machine. Control it through tools or a CLI.
 
+## Connected hosts
+
+Call `list_hosts` to discover this daemon and its saved destinations. Select a destination by `serverId`; labels are display names.
+
+`create_workspace`, `list_workspaces`, `create_agent`, `send_agent_prompt`, `get_agent_status`, `get_agent_activity`, and `list_agents` accept `serverId`. Omit it for this daemon. Other agent tools operate on this daemon.
+
+Keep `{ serverId, agentId }` together. Paths and workspace IDs belong to the destination. Remote `list_agents` has no caller-directory default; pass `cwd` to filter it. Before remote `create_agent`, list or create a destination workspace and pass its `workspaceId`, an explicit provider/model, and the same `serverId`.
+
+Manage registrations with `jagentdesk host add '<pairing-link>' --label build` and `jagentdesk host ls --json`. Generate the link on B through Pair a device. Compare the six-digit SAS code and confirm on both B and the CLI. Use the returned `registrationId` for update, enable, disable, inspect, and removal. Removing a registration leaves its agents on B running.
+
+Finish notifications default to enabled for subagents, including remote children. End your turn and wait for the notification. A notice that observation failed means the child's status is unknown; inspect it before retrying a mutation. Connection loss with `outcome: "unknown"` also requires inspection before retrying.
+
 ## Workspaces
 
 **`create_workspace`** — create a workspace independently of any agent. Required: `isolation` (`local` or `worktree`). Worktree isolation supports `mode: "branch-off" | "checkout-branch" | "checkout-pr"`: use `branchName`/`baseBranch` for a new branch, `branch` for an existing branch, or `prNumber` plus optional `forge`/`projectPath` for a change request. `worktreeSlug` controls the managed path. Returns the workspace descriptor centered on `workspaceId`.

@@ -30,7 +30,7 @@ export type OmpRuntimeEventMapping =
       logReason: string;
     };
 
-interface StatusLineNoticeInput {
+export interface StatusLineNoticeInput {
   callId: string;
   name: string;
   label: string;
@@ -257,7 +257,7 @@ function mapAutoCompactionEndEvent(event: unknown): OmpRuntimeEventMapping {
   };
 }
 
-function buildStatusLineNotice(input: StatusLineNoticeInput): OmpTelemetryToolCallItem {
+export function buildStatusLineNotice(input: StatusLineNoticeInput): OmpTelemetryToolCallItem {
   const base = {
     type: "tool_call" as const,
     callId: input.callId,
@@ -326,7 +326,7 @@ function formatDelay(delayMs: number): string {
   return `${(delayMs / 1000).toFixed(1)}s`;
 }
 
-function hashParts(...parts: string[]): string {
+export function hashParts(...parts: string[]): string {
   const hash = createHash("sha1");
   for (const part of parts) {
     hash.update(part);

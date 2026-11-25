@@ -1,9 +1,11 @@
+import { HOST_ROUTE_OPCODE, decodeHostRouteFrame, type HostRouteFrame } from "./host-route.js";
 import {
   decodeFileTransferFrame,
   FileTransferOpcode,
   type FileTransferFrame,
 } from "./file-transfer.js";
 import { decodeScreenFrame, ScreenFrameOpcode, type ScreenFrame } from "./screen.js";
+import { decodePluginFrame, PluginFrameOpcode, type PluginFrame } from "./plugin.js";
 import {
   decodeTerminalStreamFrame,
   TerminalStreamOpcode,
@@ -11,16 +13,28 @@ import {
 } from "./terminal.js";
 
 export type BinaryFrame =
+  | { kind: "host_route"; frame: HostRouteFrame }
   | { kind: "terminal"; frame: TerminalStreamFrame }
   | { kind: "file_transfer"; frame: FileTransferFrame }
-  | { kind: "screen"; frame: ScreenFrame };
+  | { kind: "screen"; frame: ScreenFrame }
+  | { kind: "plugin"; frame: PluginFrame };
 
 export function decodeBinaryFrame(bytes: Uint8Array): BinaryFrame | null {
+  if (bytes[0] === HOST_ROUTE_OPCODE) {
+    const frame = decodeHostRouteFrame(bytes);
+    return frame ? { kind: "host_route", frame } : null;
+  }
+  return decodeStandardBinaryFrame(bytes);
+}
+function decodeStandardBinaryFrame(bytes: Uint8Array): BinaryFrame | null {
   switch (bytes[0]) {
     case TerminalStreamOpcode.Output:
     case TerminalStreamOpcode.Input:
     case TerminalStreamOpcode.Resize:
     case TerminalStreamOpcode.Snapshot:
+    case TerminalStreamOpcode.ReplayBegin:
+    case TerminalStreamOpcode.ReplayData:
+    case TerminalStreamOpcode.ReplayEnd:
     case TerminalStreamOpcode.Restore: {
       const frame = decodeTerminalStreamFrame(bytes);
       return frame ? { kind: "terminal", frame } : null;
@@ -34,6 +48,12 @@ export function decodeBinaryFrame(bytes: Uint8Array): BinaryFrame | null {
     case ScreenFrameOpcode: {
       const frame = decodeScreenFrame(bytes);
       return frame ? { kind: "screen", frame } : null;
+    }
+    case PluginFrameOpcode.Event:
+    case PluginFrameOpcode.Output:
+    case PluginFrameOpcode.Input: {
+      const frame = decodePluginFrame(bytes);
+      return frame ? { kind: "plugin", frame } : null;
     }
     default:
       return null;

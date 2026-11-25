@@ -16,7 +16,7 @@ import {
   FakeJiraServer,
   LARGE_BOARD,
   RICH_COMMENT,
-} from "../src/server/jira/test-support/fake-jira-server.js";
+} from "../../../plugins/jira/server/test-support/fake-jira-server.js";
 
 const args = process.argv.slice(2);
 const PORT = Number(args[args.indexOf("--port") + 1] || 47931);

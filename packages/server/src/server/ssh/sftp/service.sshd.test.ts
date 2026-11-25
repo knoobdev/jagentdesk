@@ -9,7 +9,7 @@ import type {
   SshTransferProgress,
 } from "@jagentdesk/protocol/ssh/sftp-schemas";
 import { createTestSshPool, type TestSshPool } from "../test-support/test-sshd.js";
-import { handleSftpMessage } from "./rpc.js";
+import { handleSftpMessage } from "../../../../../../plugins/ssh-servers/server/rpc/sftp.js";
 import { SftpService } from "./service.js";
 
 // Integration tests against the real sshd from ../test-support/start-test-sshd.sh.

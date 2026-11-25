@@ -1,6 +1,7 @@
-import type { UserComposerAttachment } from "@/attachments/types";
-import type { DraftAgentControlsProps } from "@/composer/agent-controls";
-import type { UseAgentFormStateResult } from "@/hooks/use-agent-form-state";
+import { type UserComposerAttachment } from "@/attachments/types";
+import { type DraftAgentControlsProps } from "@/composer/agent-controls";
+import { type UseAgentFormStateResult } from "@/hooks/use-agent-form-state";
+import { type JsonValue } from "@jagentdesk/protocol/agent-types";
 
 export interface DraftKeyContext {
   selectedServerId: string | null;
@@ -20,15 +21,29 @@ export function resolveDraftKey(input: {
 
 export function buildDraftAgentControls(input: {
   formState: UseAgentFormStateResult;
-  features?: DraftAgentControlsProps["features"];
-  onSetFeature?: DraftAgentControlsProps["onSetFeature"];
+  optionControls?: DraftAgentControlsProps["optionControls"];
+  options: DraftAgentControlsProps["options"];
+  onSetOption: DraftAgentControlsProps["onSetOption"];
+  onApplyAgentProfile: DraftAgentControlsProps["onApplyAgentProfile"];
   onDropdownClose?: DraftAgentControlsProps["onDropdownClose"];
+  context: NonNullable<DraftAgentControlsProps["context"]>;
+  metadata: Record<string, JsonValue>;
+  onSetMetadata: (patch: Record<string, JsonValue>) => void;
 }): DraftAgentControlsProps {
-  const { formState, features, onSetFeature, onDropdownClose } = input;
+  const {
+    formState,
+    optionControls,
+    options,
+    onSetOption,
+    onApplyAgentProfile,
+    onDropdownClose,
+    context,
+    metadata,
+    onSetMetadata,
+  } = input;
   return {
     providerDefinitions: formState.providerDefinitions,
     selectedProvider: formState.selectedProvider,
-    onSelectProvider: formState.setProviderFromUser,
     modeOptions: formState.modeOptions,
     selectedMode: formState.selectedMode,
     onSelectMode: formState.setModeFromUser,
@@ -42,13 +57,18 @@ export function buildDraftAgentControls(input: {
     thinkingOptions: formState.availableThinkingOptions,
     selectedThinkingOptionId: formState.selectedThinkingOptionId,
     onSelectThinkingOption: formState.setThinkingOptionFromUser,
-    features,
-    onSetFeature,
+    onApplyAgentProfile,
+    optionControls,
+    options,
+    onSetOption,
     onDropdownClose,
     onModelSelectorOpen: formState.refetchProviderModelsIfStale,
     onRetryModelProvider: formState.refreshProviderModels,
     isRetryingModelProvider: formState.isProviderModelsRefreshing,
     modelSelectorServerId: formState.selectedServerId,
+    context,
+    metadata,
+    onSetMetadata,
   };
 }
 
@@ -56,7 +76,7 @@ export function hasDraftContent(input: {
   text: string;
   attachments: UserComposerAttachment[];
 }): boolean {
-  return input.text.trim().length > 0 || input.attachments.length > 0;
+  return input.text.length > 0 || input.attachments.length > 0;
 }
 
 export function areAttachmentsEqual(input: {

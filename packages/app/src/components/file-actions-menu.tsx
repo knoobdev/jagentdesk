@@ -1,3 +1,4 @@
+import { ContextMenuContent, ContextMenuItem } from "@/components/ui/context-menu";
 import { useMemo, type ReactElement, type ReactNode } from "react";
 import { type PressableStateCallbackType } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -81,46 +82,15 @@ export function FileActionsMenu({
   accessibilityLabel,
   testIDPrefix,
 }: FileActionsMenuProps): ReactElement | null {
-  const { t } = useTranslation();
-  const actions = useMemo<FileAction[]>(() => {
-    const availableFile = fileKind === "file" && fileExists;
-    const next: FileAction[] = [];
-    if (availableFile && onOpenFile) {
-      next.push({
-        key: "open-file",
-        label: t("workspace.fileActions.openFile"),
-        icon: FileText,
-        onSelect: onOpenFile,
-        testID: testIDPrefix ? `${testIDPrefix}-open-file` : undefined,
-      });
-    }
-    if (onCopyPath) {
-      next.push({
-        key: "copy-path",
-        label: t("workspace.fileActions.copyPath"),
-        icon: Copy,
-        onSelect: onCopyPath,
-      });
-    }
-    if (availableFile && onDownload) {
-      next.push({
-        key: "download",
-        label: t("workspace.fileActions.download"),
-        icon: Download,
-        onSelect: onDownload,
-      });
-    }
-    if (availableFile && onAddToChat) {
-      next.push({
-        key: "add-to-chat",
-        label: t("workspace.fileActions.addToChat"),
-        icon: MessageSquarePlus,
-        onSelect: onAddToChat,
-        testID: testIDPrefix ? `${testIDPrefix}-add-to-chat` : undefined,
-      });
-    }
-    return next;
-  }, [fileExists, fileKind, onAddToChat, onCopyPath, onDownload, onOpenFile, t, testIDPrefix]);
+  const actions = useFileActions({
+    fileKind,
+    fileExists,
+    onOpenFile,
+    onCopyPath,
+    onDownload,
+    onAddToChat,
+    testIDPrefix,
+  });
 
   if (actions.length === 0) {
     return null;
@@ -183,3 +153,88 @@ const styles = StyleSheet.create((theme) => ({
     backgroundColor: theme.colors.surface2,
   },
 }));
+
+function useFileActions({
+  fileKind,
+  fileExists = true,
+  onOpenFile,
+  onCopyPath,
+  onDownload,
+  onAddToChat,
+  testIDPrefix,
+}: Pick<
+  FileActionsMenuProps,
+  | "fileKind"
+  | "fileExists"
+  | "onOpenFile"
+  | "onCopyPath"
+  | "onDownload"
+  | "onAddToChat"
+  | "testIDPrefix"
+>) {
+  const { t } = useTranslation();
+  const actions = useMemo<FileAction[]>(() => {
+    const availableFile = fileKind === "file" && fileExists;
+    const next: FileAction[] = [];
+    if (availableFile && onOpenFile) {
+      next.push({
+        key: "open-file",
+        label: t("workspace.fileActions.openFile"),
+        icon: FileText,
+        onSelect: onOpenFile,
+        testID: testIDPrefix ? `${testIDPrefix}-open-file` : undefined,
+      });
+    }
+    if (onCopyPath) {
+      next.push({
+        key: "copy-path",
+        label: t("workspace.fileActions.copyPath"),
+        icon: Copy,
+        onSelect: onCopyPath,
+      });
+    }
+    if (availableFile && onDownload) {
+      next.push({
+        key: "download",
+        label: t("workspace.fileActions.download"),
+        icon: Download,
+        onSelect: onDownload,
+      });
+    }
+    if (availableFile && onAddToChat) {
+      next.push({
+        key: "add-to-chat",
+        label: t("workspace.fileActions.addToChat"),
+        icon: MessageSquarePlus,
+        onSelect: onAddToChat,
+        testID: testIDPrefix ? `${testIDPrefix}-add-to-chat` : undefined,
+      });
+    }
+    return next;
+  }, [fileExists, fileKind, onAddToChat, onCopyPath, onDownload, onOpenFile, t, testIDPrefix]);
+
+  return actions;
+}
+export function FileActionsContextMenuContent(
+  props: Pick<
+    FileActionsMenuProps,
+    | "fileKind"
+    | "fileExists"
+    | "onOpenFile"
+    | "onCopyPath"
+    | "onDownload"
+    | "onAddToChat"
+    | "testIDPrefix"
+  >,
+) {
+  const actions = useFileActions(props);
+  return (
+    <ContextMenuContent>
+      {actions.map((action) => (
+        <ContextMenuItem key={action.key} onSelect={action.onSelect} testID={action.testID}>
+          {action.label}
+        </ContextMenuItem>
+      ))}
+    </ContextMenuContent>
+  );
+}

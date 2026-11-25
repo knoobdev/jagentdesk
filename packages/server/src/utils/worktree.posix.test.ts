@@ -1,5 +1,6 @@
 // POSIX-only: git worktree and teardown shell fixtures
 /* eslint-disable max-nested-callbacks */
+import { validateWorktreePath } from "./worktree-path.js";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   BranchAlreadyCheckedOutError,
@@ -13,6 +14,7 @@ import {
   getWorktreeTeardownCommands,
   isServiceScript,
   isJAgentDeskOwnedWorktreeCwd,
+  listGitWorktrees,
   listJAgentDeskWorktrees,
   readJAgentDeskConfig,
   resolveWorktreeRuntimeEnv,
@@ -22,13 +24,20 @@ import {
   type WorktreeConfig,
 } from "./worktree";
 import type { JAgentDeskConfig } from "@jagentdesk/protocol/jagentdesk-config-schema";
-import { getJAgentDeskWorktreeMetadataPath } from "./worktree-metadata.js";
+import {
+  getJAgentDeskWorktreeMetadataPath,
+  readJAgentDeskWorktreeMetadata,
+  writeJAgentDeskWorktreeMetadata,
+  writeJAgentDeskWorktreeRuntimeMetadata,
+  writeJAgentDeskWorktreeFirstAgentBranchAutoNameMetadata,
+} from "./worktree-metadata.js";
 import { execFileSync } from "child_process";
 import { isPlatform } from "../test-utils/platform.js";
 import {
   mkdtempSync,
   mkdirSync,
   rmSync,
+  symlinkSync,
   existsSync,
   realpathSync,
   writeFileSync,
@@ -38,9 +47,10 @@ import {
 import { delimiter, dirname, join } from "path";
 import { tmpdir } from "os";
 import net from "node:net";
+import { getCheckoutStatus, getCheckoutDiff } from "./checkout-git.js";
 
-function loadConfigForTest(repoRoot: string): JAgentDeskConfig | null {
-  const result = readJAgentDeskConfig(repoRoot);
+async function loadConfigForTest(repoRoot: string): Promise<JAgentDeskConfig | null> {
+  const result = await readJAgentDeskConfig(repoRoot);
   return result.ok ? result.config : null;
 }
 
@@ -113,10 +123,12 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
         jagentdeskHome,
       });
 
-      expect(result.worktreePath).toBe(join(jagentdeskHome, "worktrees", projectHash, "hello-world"));
+      expect(result.worktreePath).toBe(
+        join(jagentdeskHome, "worktrees", projectHash, "hello-world"),
+      );
       expect(existsSync(result.worktreePath)).toBe(true);
       expect(existsSync(join(result.worktreePath, "file.txt"))).toBe(true);
-      const metadataPath = getJAgentDeskWorktreeMetadataPath(result.worktreePath);
+      const metadataPath = await getJAgentDeskWorktreeMetadataPath(result.worktreePath);
       expect(existsSync(metadataPath)).toBe(true);
       const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
       expect(metadata).toMatchObject({ version: 1, baseRefName: "main" });
@@ -140,9 +152,13 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
       ).resolves.toMatchObject({ allowed: true, worktreeRoot: join(worktreesRoot, projectHash) });
       await expect(
         isJAgentDeskOwnedWorktreeCwd(result.worktreePath, { jagentdeskHome }),
-      ).resolves.toMatchObject({ allowed: false });
+      ).resolves.toMatchObject({ allowed: true, worktreePath: result.worktreePath });
 
-      const worktrees = await listJAgentDeskWorktrees({ cwd: repoDir, jagentdeskHome, worktreesRoot });
+      const worktrees = await listJAgentDeskWorktrees({
+        cwd: repoDir,
+        jagentdeskHome,
+        worktreesRoot,
+      });
       expect(worktrees.map((entry) => entry.path)).toContain(result.worktreePath);
 
       await deleteJAgentDeskWorktree({
@@ -230,7 +246,9 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
         jagentdeskHome,
       });
 
-      expect(result.worktreePath).toBe(join(jagentdeskHome, "worktrees", projectHash, "my-feature"));
+      expect(result.worktreePath).toBe(
+        join(jagentdeskHome, "worktrees", projectHash, "my-feature"),
+      );
       expect(existsSync(result.worktreePath)).toBe(true);
 
       const currentBranch = execFileSync("git", ["branch", "--show-current"], {
@@ -243,10 +261,46 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
         cwd: result.worktreePath,
       });
 
-      const metadataPath = getJAgentDeskWorktreeMetadataPath(result.worktreePath);
+      const metadataPath = await getJAgentDeskWorktreeMetadataPath(result.worktreePath);
       const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
       expect(metadata).toMatchObject({ version: 1, baseRefName: "main" });
     });
+
+    it.each([false])(
+      "shows committed changes for an existing branch (already checked out: %s)",
+      async (alreadyCheckedOut) => {
+        execFileSync("git", ["checkout", "-b", "feature/existing"], { cwd: repoDir });
+        writeFileSync(join(repoDir, "file.txt"), "feature change\n");
+        execFileSync("git", ["add", "file.txt"], { cwd: repoDir });
+        execFileSync("git", ["-c", "commit.gpgsign=false", "commit", "-m", "feature change"], {
+          cwd: repoDir,
+        });
+        if (!alreadyCheckedOut) {
+          execFileSync("git", ["checkout", "main"], { cwd: repoDir });
+        }
+
+        const result = await createWorktreePrimitive({
+          cwd: repoDir,
+          worktreeSlug: "existing-feature",
+          source: { kind: "checkout-branch", branchName: "feature/existing" },
+          runSetup: false,
+          jagentdeskHome,
+        });
+        const status = await getCheckoutStatus(result.worktreePath, { jagentdeskHome });
+        const diff = await getCheckoutDiff(
+          result.worktreePath,
+          { mode: "base" },
+          { jagentdeskHome },
+        );
+        expect(diff.diff).toContain("+feature change");
+        expect(status).toMatchObject({
+          isGit: true,
+          baseRef: "main",
+          aheadBehind: { ahead: 1, behind: 0 },
+        });
+        expect(result.comparisonBaseRef).toBe("main");
+      },
+    );
 
     it("checks out an existing local branch that is not checked out elsewhere", async () => {
       execFileSync("git", ["branch", "dev"], { cwd: repoDir });
@@ -267,9 +321,67 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
         .trim();
       expect(currentBranch).toBe("dev");
 
-      const metadataPath = getJAgentDeskWorktreeMetadataPath(result.worktreePath);
+      // baseRefName must be the repo's default branch, not the checked-out branch
+      // itself — otherwise the diff panel compares the branch against itself and
+      // always shows no changes.
+      const metadataPath = await getJAgentDeskWorktreeMetadataPath(result.worktreePath);
       const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
-      expect(metadata).toMatchObject({ version: 1, baseRefName: "dev" });
+      expect(metadata).toMatchObject({
+        version: 1,
+        baseRefName: "main",
+        changeRequestLookupTarget: { headRef: "dev", localBranchName: "dev" },
+      });
+    });
+
+    it("shows committed changes when origin HEAD points to a deleted default branch", async () => {
+      execFileSync("git", ["branch", "-m", "main", "master"], { cwd: repoDir });
+      execFileSync(
+        "git",
+        ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"],
+        { cwd: repoDir },
+      );
+      execFileSync("git", ["checkout", "-b", "feature/stale-default"], { cwd: repoDir });
+      writeFileSync(join(repoDir, "file.txt"), "feature change\n");
+      execFileSync("git", ["add", "file.txt"], { cwd: repoDir });
+      execFileSync("git", ["-c", "commit.gpgsign=false", "commit", "-m", "feature change"], {
+        cwd: repoDir,
+      });
+      execFileSync("git", ["checkout", "master"], { cwd: repoDir });
+      const created = await createWorktreePrimitive({
+        cwd: repoDir,
+        worktreeSlug: "stale-default",
+        source: { kind: "checkout-branch", branchName: "feature/stale-default" },
+        runSetup: false,
+        jagentdeskHome,
+      });
+      const diff = await getCheckoutDiff(
+        created.worktreePath,
+        { mode: "base" },
+        { jagentdeskHome },
+      );
+      expect(diff.diff).toContain("+feature change");
+      expect(created.comparisonBaseRef).toBe("master");
+    });
+
+    it("falls back to the currently checked out branch when no default branch can be resolved", async () => {
+      // No origin remote and no local main/master — resolveRepositoryDefaultBranch
+      // can't find a default branch, so the fix must fall back to whatever is
+      // currently checked out in the main repo (here: "develop").
+      execFileSync("git", ["branch", "-m", "main", "develop"], { cwd: repoDir });
+      execFileSync("git", ["branch", "feature-x"], { cwd: repoDir });
+
+      const result = await createLegacyWorktreeForTest({
+        cwd: repoDir,
+        worktreeSlug: "feature-x-worktree",
+        source: { kind: "checkout-branch", branchName: "feature-x" },
+        runSetup: true,
+        jagentdeskHome,
+      });
+
+      expect(existsSync(result.worktreePath)).toBe(true);
+      const metadataPath = await getJAgentDeskWorktreeMetadataPath(result.worktreePath);
+      const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
+      expect(metadata).toMatchObject({ version: 1, baseRefName: "develop" });
     });
 
     it("checks out an existing local branch whose name contains uppercase letters and dots", async () => {
@@ -357,7 +469,7 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
         .trim();
       expect(currentBranch).toBe("user/feature");
 
-      const metadataPath = getJAgentDeskWorktreeMetadataPath(result.worktreePath);
+      const metadataPath = await getJAgentDeskWorktreeMetadataPath(result.worktreePath);
       const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
       expect(metadata).toMatchObject({ baseRefName: "main" });
     });
@@ -455,7 +567,9 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
         "from-origin\n",
       );
       expect(
-        JSON.parse(readFileSync(getJAgentDeskWorktreeMetadataPath(originResult.worktreePath), "utf8")),
+        JSON.parse(
+          readFileSync(await getJAgentDeskWorktreeMetadataPath(originResult.worktreePath), "utf8"),
+        ),
       ).toMatchObject({ baseRefName: "main" });
     });
 
@@ -644,7 +758,7 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
         jagentdeskHome,
       });
 
-      expect(getWorktreeSetupCommands(result.worktreePath)).toEqual([
+      expect(await getWorktreeSetupCommands(result.worktreePath)).toEqual([
         'greeting="hello from string setup"\necho "$greeting" > setup.log',
       ]);
       expect(readFileSync(join(result.worktreePath, "setup.log"), "utf8").trim()).toBe(
@@ -714,7 +828,7 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
       expect(readFileSync(join(repoDir, "setup-path.log"), "utf8").trim()).toBe("shim:ok");
     });
 
-    it("treats blank lifecycle strings as empty", () => {
+    it("treats blank lifecycle strings as empty", async () => {
       writeFileSync(
         join(repoDir, "jagentdesk.json"),
         JSON.stringify({
@@ -725,11 +839,11 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
         }),
       );
 
-      expect(getWorktreeSetupCommands(repoDir)).toEqual([]);
-      expect(getWorktreeTeardownCommands(repoDir)).toEqual([]);
+      expect(await getWorktreeSetupCommands(repoDir)).toEqual([]);
+      expect(await getWorktreeTeardownCommands(repoDir)).toEqual([]);
     });
 
-    it("filters non-string and blank entries from lifecycle arrays", () => {
+    it("filters non-string and blank entries from lifecycle arrays", async () => {
       writeFileSync(
         join(repoDir, "jagentdesk.json"),
         JSON.stringify({
@@ -750,11 +864,11 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
         }),
       );
 
-      expect(getWorktreeSetupCommands(repoDir)).toEqual([
+      expect(await getWorktreeSetupCommands(repoDir)).toEqual([
         'echo "first" > setup-array.log',
         'echo "second" >> setup-array.log',
       ]);
-      expect(getWorktreeTeardownCommands(repoDir)).toEqual([
+      expect(await getWorktreeTeardownCommands(repoDir)).toEqual([
         'echo "first" > "$JAGENTDESK_SOURCE_CHECKOUT_PATH/teardown-array.log"',
         'echo "second" >> "$JAGENTDESK_SOURCE_CHECKOUT_PATH/teardown-array.log"',
       ]);
@@ -915,7 +1029,7 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
       };
       writeFileSync(join(repoDir, "jagentdesk.json"), JSON.stringify(jagentdeskConfig));
 
-      expect(getWorktreeTerminalSpecs(repoDir)).toEqual([
+      expect(await getWorktreeTerminalSpecs(repoDir)).toEqual([
         { name: "Dev Server", command: "npm run dev" },
         { command: "cd packages/app && npm run dev" },
       ]);
@@ -935,7 +1049,7 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
       };
       writeFileSync(join(repoDir, "jagentdesk.json"), JSON.stringify(jagentdeskConfig));
 
-      expect(getWorktreeTerminalSpecs(repoDir)).toEqual([
+      expect(await getWorktreeTerminalSpecs(repoDir)).toEqual([
         { name: "Watch", command: "npm run watch" },
         { command: "npm run test" },
       ]);
@@ -953,7 +1067,7 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
         }),
       );
 
-      const scriptConfigs = getScriptConfigs(loadConfigForTest(repoDir));
+      const scriptConfigs = getScriptConfigs(await loadConfigForTest(repoDir));
       const typecheck = scriptConfigs.get("typecheck");
 
       expect(typecheck).toEqual({
@@ -977,7 +1091,7 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
         }),
       );
 
-      const scriptConfigs = getScriptConfigs(loadConfigForTest(repoDir));
+      const scriptConfigs = getScriptConfigs(await loadConfigForTest(repoDir));
       const server = scriptConfigs.get("server");
 
       expect(server).toEqual({
@@ -1017,7 +1131,7 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
         }),
       );
 
-      expect(getScriptConfigs(loadConfigForTest(repoDir))).toEqual(
+      expect(getScriptConfigs(await loadConfigForTest(repoDir))).toEqual(
         new Map([
           ["valid", { command: "npm run valid" }],
           ["invalidType", { command: "npm run worker" }],
@@ -1089,6 +1203,213 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
     });
   });
 
+  describe("worktrees at explicit paths", () => {
+    let tempDir: string;
+    let repoDir: string;
+    let jagentdeskHome: string;
+
+    beforeEach(() => {
+      tempDir = realpathSync(mkdtempSync(join(tmpdir(), "worktree-explicit-test-")));
+      repoDir = join(tempDir, "test-repo");
+      jagentdeskHome = join(tempDir, "jagentdesk-home");
+
+      mkdirSync(repoDir, { recursive: true });
+      execFileSync("git", ["init", "-b", "main"], { cwd: repoDir });
+      execFileSync("git", ["config", "user.email", "test@test.com"], { cwd: repoDir });
+      execFileSync("git", ["config", "user.name", "Test"], { cwd: repoDir });
+      writeFileSync(join(repoDir, "file.txt"), "hello\n");
+      execFileSync("git", ["add", "."], { cwd: repoDir });
+      execFileSync("git", ["-c", "commit.gpgsign=false", "commit", "-m", "initial"], {
+        cwd: repoDir,
+      });
+    });
+
+    afterEach(() => {
+      rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it("places, owns, lists, and deletes a worktree outside the legacy root", async () => {
+      // Sibling layout: <repo-parent>/wt-<slug>
+
+      const result = await createWorktreePrimitive({
+        cwd: repoDir,
+        worktreeSlug: "sibling-one",
+        source: { kind: "branch-off", baseBranch: "main", branchName: "feature/sibling" },
+        jagentdeskHome,
+        worktreePath: join(tempDir, "wt-sibling-one"),
+      });
+
+      expect(result.worktreePath).toBe(join(tempDir, "wt-sibling-one"));
+      expect(existsSync(join(result.worktreePath, "file.txt"))).toBe(true);
+      expect(existsSync(await getJAgentDeskWorktreeMetadataPath(result.worktreePath))).toBe(true);
+
+      const ownership = await isJAgentDeskOwnedWorktreeCwd(result.worktreePath, { jagentdeskHome });
+      expect(ownership.allowed).toBe(true);
+      expect(ownership.worktreePath).toBe(result.worktreePath);
+      // A subdirectory of the worktree resolves to the worktree root.
+      mkdirSync(join(result.worktreePath, "sub"), { recursive: true });
+      const nested = await isJAgentDeskOwnedWorktreeCwd(join(result.worktreePath, "sub"), {
+        jagentdeskHome,
+      });
+      expect(nested.worktreePath).toBe(result.worktreePath);
+
+      const listed = await listJAgentDeskWorktrees({ cwd: repoDir, jagentdeskHome });
+      expect(listed.map((entry) => entry.path)).toContain(result.worktreePath);
+
+      await deleteJAgentDeskWorktree({
+        cwd: repoDir,
+        worktreePath: result.worktreePath,
+        jagentdeskHome,
+      });
+      expect(existsSync(result.worktreePath)).toBe(false);
+    });
+
+    it("removes branches fetched by the source plan when git worktree add fails", async () => {
+      // A branch that exists only on the remote: resolving a
+      // checkout-branch plan fetches it into a local branch. A script
+      // failure must not leave that branch behind, or the next attempt
+      // would uniquify to a different branch name.
+      const remoteDir = join(tempDir, "remote.git");
+      execFileSync("git", ["clone", "--bare", repoDir, remoteDir], { cwd: tempDir });
+      execFileSync("git", ["remote", "add", "origin", remoteDir], { cwd: repoDir });
+      execFileSync("git", ["push", "origin", "main"], { cwd: repoDir });
+      execFileSync("git", ["branch", "feature/remote-check"], { cwd: repoDir });
+      execFileSync("git", ["push", "origin", "feature/remote-check"], { cwd: repoDir });
+      execFileSync("git", ["branch", "-D", "feature/remote-check"], { cwd: repoDir });
+      execFileSync("git", ["fetch", "origin"], { cwd: repoDir });
+
+      mkdirSync(join(tempDir, "occupied"));
+      writeFileSync(join(tempDir, "occupied", "keep"), "keep");
+      await expect(
+        createWorktreePrimitive({
+          cwd: repoDir,
+          worktreeSlug: "remote-check",
+          source: { kind: "checkout-branch", branchName: "feature/remote-check" },
+          jagentdeskHome,
+          worktreePath: join(tempDir, "occupied"),
+        }),
+      ).rejects.toThrow();
+
+      const localBranches = execFileSync("git", ["branch", "--list", "feature/remote-check"], {
+        cwd: repoDir,
+        encoding: "utf8",
+      });
+      expect(localBranches.trim()).toBe("");
+    });
+
+    it("deletes only the registered destination nested beneath the legacy root", async () => {
+      const parent = join(jagentdeskHome, "worktrees", "acme", "widgets");
+      const worktreePath = join(parent, "topic");
+      const siblingPath = join(parent, "sibling");
+      await createWorktreePrimitive({
+        cwd: repoDir,
+        jagentdeskHome,
+        worktreeSlug: "topic",
+        worktreePath,
+        source: { kind: "branch-off", branchName: "topic", baseBranch: "main" },
+      });
+      await createWorktreePrimitive({
+        cwd: repoDir,
+        jagentdeskHome,
+        worktreeSlug: "sibling",
+        worktreePath: siblingPath,
+        source: { kind: "branch-off", branchName: "sibling", baseBranch: "main" },
+      });
+      mkdirSync(join(worktreePath, "nested"));
+      expect(
+        await isJAgentDeskOwnedWorktreeCwd(join(worktreePath, "nested"), { jagentdeskHome }),
+      ).toMatchObject({ allowed: true, worktreePath });
+      await deleteJAgentDeskWorktree({
+        cwd: repoDir,
+        jagentdeskHome,
+        worktreePath,
+        registryProven: true,
+      });
+      expect(existsSync(worktreePath)).toBe(false);
+      expect(readFileSync(join(siblingPath, "file.txt"), "utf8")).toBe("hello\n");
+    });
+
+    it("rejects a destination under a symlink into .git", async () => {
+      const alias = join(tempDir, "git-alias");
+      symlinkSync(join(repoDir, ".git"), alias, "dir");
+      await expect(
+        validateWorktreePath({ candidate: join(alias, "new", "worktree"), repoPath: repoDir }),
+      ).rejects.toThrow("inside a .git directory");
+      expect(existsSync(join(repoDir, ".git", "new"))).toBe(false);
+    });
+
+    it("uses an explicit worktreePath verbatim", async () => {
+      const explicitPath = join(tempDir, "explicit-wt");
+
+      const result = await createWorktreePrimitive({
+        cwd: repoDir,
+        worktreeSlug: "explicit-one",
+        source: { kind: "branch-off", baseBranch: "main", branchName: "feature/explicit" },
+        jagentdeskHome,
+        worktreePath: explicitPath,
+      });
+
+      expect(result.worktreePath).toBe(explicitPath);
+      expect(existsSync(join(explicitPath, "file.txt"))).toBe(true);
+    });
+
+    it("restore recreates at the recorded path", async () => {
+      const created = await createWorktreePrimitive({
+        cwd: repoDir,
+        worktreeSlug: "restorable",
+        source: { kind: "branch-off", baseBranch: "main", branchName: "feature/restorable" },
+        jagentdeskHome,
+        worktreePath: join(tempDir, "wt-sibling-one"),
+      });
+      await deleteJAgentDeskWorktree({
+        cwd: repoDir,
+        worktreePath: created.worktreePath,
+        jagentdeskHome,
+      });
+      expect(existsSync(created.worktreePath)).toBe(false);
+
+      const restored = await createWorktreePrimitive({
+        cwd: repoDir,
+        worktreeSlug: "restorable",
+        source: { kind: "restore", branchName: "feature/restorable", baseRef: "main" },
+        jagentdeskHome,
+        worktreePath: created.worktreePath,
+      });
+
+      expect(restored.worktreePath).toBe(created.worktreePath);
+      expect(existsSync(join(restored.worktreePath, "file.txt"))).toBe(true);
+    });
+
+    it("does not treat a copied marker in a non-worktree directory as ownership", async () => {
+      const created = await createWorktreePrimitive({
+        cwd: repoDir,
+        worktreeSlug: "marker-source",
+        source: { kind: "branch-off", baseBranch: "main", branchName: "feature/marker" },
+        jagentdeskHome,
+        worktreePath: join(tempDir, "wt-sibling-one"),
+      });
+      const metadata = await readJAgentDeskWorktreeMetadata(created.worktreePath);
+      expect(metadata).not.toBeNull();
+
+      // A plain directory with a .git file pointing at a copied admin dir
+      // that holds a jagentdesk/worktree.json. Git does not list it as a
+      // worktree, so the copied marker must not prove ownership.
+      const fakeDir = join(tempDir, "fake-worktree");
+      const fakeAdmin = join(tempDir, "fake-admin");
+      mkdirSync(join(fakeAdmin, "jagentdesk"), { recursive: true });
+      mkdirSync(fakeDir, { recursive: true });
+      writeFileSync(join(fakeAdmin, "jagentdesk", "worktree.json"), JSON.stringify(metadata));
+      writeFileSync(join(fakeDir, ".git"), `gitdir: ${fakeAdmin}\n`);
+
+      const ownership = await isJAgentDeskOwnedWorktreeCwd(fakeDir, { jagentdeskHome });
+      expect(ownership.allowed).toBe(false);
+      await expect(
+        deleteJAgentDeskWorktree({ cwd: repoDir, worktreePath: fakeDir, jagentdeskHome }),
+      ).rejects.toThrow("Refusing to delete non-JAgentDesk worktree");
+      expect(existsSync(fakeDir)).toBe(true);
+    });
+  });
+
   describe("jagentdesk worktree manager", () => {
     let tempDir: string;
     let repoDir: string;
@@ -1112,6 +1433,36 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
 
     afterEach(() => {
       rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it("keeps an otherwise unreachable detached commit after deleting the worktree", async () => {
+      const result = await createWorktreePrimitive({
+        cwd: repoDir,
+        worktreeSlug: "keep-commit",
+        source: { kind: "branch-off", baseBranch: "main", branchName: "feature/keep-commit" },
+        jagentdeskHome,
+      });
+      execFileSync("git", ["checkout", "--detach"], { cwd: result.worktreePath });
+      writeFileSync(join(result.worktreePath, "file.txt"), "detached change\n");
+      execFileSync("git", ["add", "file.txt"], { cwd: result.worktreePath });
+      execFileSync("git", ["-c", "commit.gpgsign=false", "commit", "-m", "detached"], {
+        cwd: result.worktreePath,
+      });
+      const commit = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: result.worktreePath,
+        encoding: "utf8",
+      }).trim();
+
+      await deleteJAgentDeskWorktree({
+        cwd: repoDir,
+        worktreePath: result.worktreePath,
+        jagentdeskHome,
+      });
+      execFileSync("git", ["reflog", "expire", "--expire=now", "--all"], { cwd: repoDir });
+      execFileSync("git", ["gc", "--prune=now"], { cwd: repoDir });
+      expect(
+        execFileSync("git", ["cat-file", "-t", commit], { cwd: repoDir, encoding: "utf8" }).trim(),
+      ).toBe("commit");
     });
 
     it("isolates worktree roots for repositories that share the same directory name", async () => {
@@ -1176,11 +1527,70 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
       const paths = worktrees.map((worktree) => worktree.path).sort();
       expect(paths).toEqual([first.worktreePath, second.worktreePath].sort());
 
-      await deleteJAgentDeskWorktree({ cwd: repoDir, worktreePath: first.worktreePath, jagentdeskHome });
+      await deleteJAgentDeskWorktree({
+        cwd: repoDir,
+        worktreePath: first.worktreePath,
+        jagentdeskHome,
+      });
       expect(existsSync(first.worktreePath)).toBe(false);
 
       const remaining = await listJAgentDeskWorktrees({ cwd: repoDir, jagentdeskHome });
       expect(remaining.map((worktree) => worktree.path)).toEqual([second.worktreePath]);
+    });
+
+    it("lists every git worktree of the repository, not only JAgentDesk's", async () => {
+      const jagentdeskWorktree = await createLegacyWorktreeForTest({
+        branchName: "feature/jagentdesk",
+        cwd: repoDir,
+        baseBranch: "main",
+        worktreeSlug: "alpha",
+        jagentdeskHome,
+      });
+      const manualPath = join(tempDir, "manual");
+      execFileSync("git", ["worktree", "add", "-b", "feature/manual", manualPath], {
+        cwd: repoDir,
+      });
+      const detachedPath = join(tempDir, "detached");
+      execFileSync("git", ["worktree", "add", "--detach", detachedPath], { cwd: repoDir });
+      const removedPath = join(tempDir, "removed");
+      execFileSync("git", ["worktree", "add", "-b", "feature/removed", removedPath], {
+        cwd: repoDir,
+      });
+      rmSync(removedPath, { recursive: true, force: true });
+      // Git reports a locked worktree as neither prunable nor gone after its directory is deleted.
+      const lockedRemovedPath = join(tempDir, "locked-removed");
+      execFileSync(
+        "git",
+        ["worktree", "add", "--lock", "-b", "feature/locked", lockedRemovedPath],
+        {
+          cwd: repoDir,
+        },
+      );
+      rmSync(lockedRemovedPath, { recursive: true, force: true });
+
+      const fromProject = await listGitWorktrees({ cwd: repoDir });
+      const fromJAgentDeskWorktree = await listGitWorktrees({
+        cwd: jagentdeskWorktree.worktreePath,
+      });
+
+      const [mainWorktree, ...linkedWorktrees] = fromProject.map(
+        ({ path, branchName, containsCwd }) => ({ path, branchName, containsCwd }),
+      );
+      expect(mainWorktree).toEqual({ path: repoDir, branchName: "main", containsCwd: true });
+      expect(linkedWorktrees.sort((a, b) => a.path.localeCompare(b.path))).toEqual(
+        [
+          {
+            path: jagentdeskWorktree.worktreePath,
+            branchName: "feature/jagentdesk",
+            containsCwd: false,
+          },
+          { path: manualPath, branchName: "feature/manual", containsCwd: false },
+          { path: detachedPath, branchName: null, containsCwd: false },
+        ].sort((a, b) => a.path.localeCompare(b.path)),
+      );
+      expect(
+        fromJAgentDeskWorktree.filter((worktree) => worktree.containsCwd).map(({ path }) => path),
+      ).toEqual([jagentdeskWorktree.worktreePath]);
     });
 
     it("deletes a jagentdesk worktree even when given a subdirectory path", async () => {
@@ -1232,7 +1642,11 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
         branchName: created.branchName,
       });
 
-      await deleteJAgentDeskWorktree({ cwd: repoDir, worktreePath: created.worktreePath, jagentdeskHome });
+      await deleteJAgentDeskWorktree({
+        cwd: repoDir,
+        worktreePath: created.worktreePath,
+        jagentdeskHome,
+      });
       expect(existsSync(created.worktreePath)).toBe(false);
 
       const teardownLog = readFileSync(join(repoDir, "teardown.log"), "utf8");
@@ -1264,9 +1678,13 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
         jagentdeskHome,
       });
 
-      await deleteJAgentDeskWorktree({ cwd: repoDir, worktreePath: created.worktreePath, jagentdeskHome });
+      await deleteJAgentDeskWorktree({
+        cwd: repoDir,
+        worktreePath: created.worktreePath,
+        jagentdeskHome,
+      });
 
-      expect(getWorktreeTeardownCommands(repoDir)).toEqual([
+      expect(await getWorktreeTeardownCommands(repoDir)).toEqual([
         'cleanup_message="teardown string"\necho "$cleanup_message" > "$JAGENTDESK_SOURCE_CHECKOUT_PATH/teardown.log"',
       ]);
       expect(readFileSync(join(repoDir, "teardown.log"), "utf8").trim()).toBe("teardown string");
@@ -1296,7 +1714,11 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
         jagentdeskHome,
       });
 
-      await deleteJAgentDeskWorktree({ cwd: repoDir, worktreePath: created.worktreePath, jagentdeskHome });
+      await deleteJAgentDeskWorktree({
+        cwd: repoDir,
+        worktreePath: created.worktreePath,
+        jagentdeskHome,
+      });
 
       expect(readFileSync(join(repoDir, "teardown-port.log"), "utf8").trim()).toBe("port=unset");
       expect(existsSync(created.worktreePath)).toBe(false);
@@ -1328,11 +1750,116 @@ describe.skipIf(isPlatform("win32"))("worktree POSIX-only", () => {
       });
 
       await expect(
-        deleteJAgentDeskWorktree({ cwd: repoDir, worktreePath: created.worktreePath, jagentdeskHome }),
+        deleteJAgentDeskWorktree({
+          cwd: repoDir,
+          worktreePath: created.worktreePath,
+          jagentdeskHome,
+        }),
       ).rejects.toThrow("Worktree teardown command failed");
 
       expect(existsSync(created.worktreePath)).toBe(true);
       expect(existsSync(join(repoDir, "teardown-start.log"))).toBe(true);
     });
+  });
+});
+
+describe.skipIf(isPlatform("win32"))("async worktree metadata", () => {
+  it("serializes metadata mutations per worktree while another worktree progresses", async () => {
+    const root = mkdtempSync(join(tmpdir(), "worktree-metadata-order-"));
+    const first = join(root, "first");
+    const second = join(root, "second");
+    mkdirSync(join(first, ".git"), { recursive: true });
+    mkdirSync(join(second, ".git"), { recursive: true });
+    try {
+      await writeJAgentDeskWorktreeMetadata(first, { baseRefName: "main" });
+      await writeJAgentDeskWorktreeMetadata(second, { baseRefName: "release" });
+      const order: string[] = [];
+      const runtime = writeJAgentDeskWorktreeRuntimeMetadata(first, { worktreePort: 4101 }).then(
+        () => order.push("first-runtime"),
+      );
+      const unrelated = writeJAgentDeskWorktreeRuntimeMetadata(second, { worktreePort: 4102 }).then(
+        () => order.push("second-runtime"),
+      );
+      const naming = writeJAgentDeskWorktreeFirstAgentBranchAutoNameMetadata(first, {
+        placeholderBranchName: "topic",
+      }).then(() => order.push("first-naming"));
+      // A read issued while writes are pending observes their completed snapshot.
+      const snapshot = await readJAgentDeskWorktreeMetadata(first);
+      await Promise.all([runtime, unrelated, naming]);
+      expect(order.indexOf("first-runtime")).toBeLessThan(order.indexOf("first-naming"));
+      expect(await snapshot).toMatchObject({
+        baseRefName: "main",
+        runtime: { worktreePort: 4101 },
+        firstAgentBranchAutoName: { status: "pending", placeholderBranchName: "topic" },
+      });
+      expect(await readJAgentDeskWorktreeMetadata(second)).toMatchObject({
+        baseRefName: "release",
+        runtime: { worktreePort: 4102 },
+      });
+      const alias = join(root, "first-alias");
+      symlinkSync(first, alias, "dir");
+      await Promise.all([
+        writeJAgentDeskWorktreeRuntimeMetadata(first, { worktreePort: 4103 }),
+        writeJAgentDeskWorktreeFirstAgentBranchAutoNameMetadata(alias, {
+          placeholderBranchName: "renamed",
+        }),
+      ]);
+      expect(await readJAgentDeskWorktreeMetadata(first)).toMatchObject({
+        runtime: { worktreePort: 4103 },
+        firstAgentBranchAutoName: { placeholderBranchName: "renamed" },
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("a queued metadata mutation cannot recreate an archived Git directory", async () => {
+    const root = mkdtempSync(join(tmpdir(), "worktree-metadata-archive-"));
+    mkdirSync(join(root, ".git"));
+    try {
+      await writeJAgentDeskWorktreeMetadata(root, { baseRefName: "main" });
+      const pending = writeJAgentDeskWorktreeRuntimeMetadata(root, { worktreePort: 4101 });
+      // The mutation is queued in a microtask, so archive wins this ordering.
+      rmSync(join(root, ".git"), { recursive: true });
+      await expect(pending).rejects.toThrow("Not a git repository");
+      expect(existsSync(join(root, ".git"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("recognizes a removed worktree under a symlinked ownership root", async () => {
+    const root = mkdtempSync(join(tmpdir(), "worktree-ownership-alias-"));
+    const actual = join(root, "actual");
+    const alias = join(root, "worktrees");
+    mkdirSync(actual);
+    symlinkSync(actual, alias, "dir");
+    try {
+      const cwd = join(alias, "project", "removed");
+      expect(
+        await isJAgentDeskOwnedWorktreeCwd(cwd, { worktreesRoot: alias, knownGitCommonDir: null }),
+      ).toMatchObject({ allowed: true, worktreePath: cwd });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects oversized metadata and named pipes without reading them whole", async () => {
+    const root = mkdtempSync(join(tmpdir(), "worktree-metadata-admission-"));
+    mkdirSync(join(root, ".git", "jagentdesk"), { recursive: true });
+    try {
+      const path = await getJAgentDeskWorktreeMetadataPath(root);
+      writeFileSync(path, JSON.stringify({ version: 1, baseRefName: "x".repeat(64 * 1024) }));
+      await expect(readJAgentDeskWorktreeMetadata(root)).rejects.toThrow(
+        "Invalid JAgentDesk worktree metadata file",
+      );
+      rmSync(path);
+      execFileSync("mkfifo", [path]);
+      await expect(readJAgentDeskWorktreeMetadata(root)).rejects.toThrow(
+        "Invalid JAgentDesk worktree metadata file",
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

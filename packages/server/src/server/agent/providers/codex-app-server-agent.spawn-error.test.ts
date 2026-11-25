@@ -1,4 +1,6 @@
-import { describe, expect, test } from "vitest";
+import { createCodexAppServerChildProcess } from "./codex/test-utils/fake-app-server.js";
+import { runProviderRefreshWithDeadline } from "../provider-refresh-deadline.js";
+import { describe, expect, test, vi } from "vitest";
 
 import { CodexAppServerAgentClient } from "./codex-app-server-agent.js";
 import { createTestLogger } from "../../../test-utils/test-logger.js";
@@ -30,6 +32,30 @@ describe("CodexAppServerAgentClient spawn error handling", () => {
     } finally {
       process.off("uncaughtException", onUncaught);
     }
+  });
+
+  test("fetchCatalog settles when the refresh deadline aborts an unanswered initialize", async () => {
+    const child = createCodexAppServerChildProcess();
+    const kill = vi.spyOn(child, "kill");
+    const client = new CodexAppServerAgentClient(logger, undefined, {
+      appServerProcess: {
+        resolvePrefix: async () => ({ command: "codex", args: [] }),
+        spawn: () => child,
+      },
+    });
+
+    await expect(
+      runProviderRefreshWithDeadline({
+        label: "Codex",
+        timeoutMs: 50,
+        operation: (context) =>
+          client.fetchCatalog(
+            { scope: "workspace", cwd: "/tmp/codex-models", force: false },
+            context,
+          ),
+      }),
+    ).rejects.toThrow("Timed out refreshing Codex after 50ms");
+    expect(kill).toHaveBeenCalled();
   });
 
   test("listImportableSessions rejects gracefully when the codex binary does not exist", async () => {

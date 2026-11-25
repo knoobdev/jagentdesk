@@ -40,6 +40,7 @@ import type { HostProfile } from "@/types/host-connection";
 import { useSessionStore, type WorkspaceDescriptor } from "@/stores/session-store";
 import { seedSessionWorkspaces } from "@/test/seed-session";
 import { useSidebarOrderStore } from "@/stores/sidebar-order-store";
+import { useSidebarViewStore } from "@/stores/sidebar-view-store";
 import { useWorkspaceFields } from "@/stores/session-store-hooks";
 import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { defaultHostAppearance } from "@/hosts/appearance";
@@ -330,6 +331,7 @@ describe("sidebar workspace render isolation", () => {
   let container: HTMLElement | null = null;
 
   beforeEach(async () => {
+    useSidebarViewStore.setState({ showBackground: false });
     initializeSidebarState(createWorkspaces());
   });
 
@@ -344,6 +346,7 @@ describe("sidebar workspace render isolation", () => {
     container = null;
     act(() => {
       pathnameState.value = "/";
+      useSidebarViewStore.setState({ showBackground: false });
       setHostProfiles([]);
       useSessionStore.getState().clearSession(SERVER_ID);
       useSidebarOrderStore.setState({
@@ -375,6 +378,32 @@ describe("sidebar workspace render isolation", () => {
     expect(counts.frame).toBe(0);
     expect(counts.headers).toEqual({});
     expect(counts.rows).toEqual({ "a-one": 1 });
+  });
+
+  it("updates placements when workspace background visibility changes", async () => {
+    const counts: RenderCounts = {
+      frame: 0,
+      headers: {},
+      rows: {},
+      projectSelection: {},
+      rowSelection: {},
+    };
+    ({ root, container } = await renderProbe(counts));
+
+    await act(async () => {
+      useSessionStore
+        .getState()
+        .mergeWorkspaces(SERVER_ID, [{ ...createWorkspaces()[1], background: true }]);
+    });
+    expect(counts.frame).toBe(1);
+    expect(counts.rows["a-one"]).toBeUndefined();
+
+    resetCounts(counts);
+    await act(async () => {
+      useSidebarViewStore.setState({ showBackground: true });
+    });
+    expect(counts.frame).toBe(1);
+    expect(counts.rows["a-one"]).toBe(1);
   });
 
   it("does not re-render the sidebar for a host-runtime probe tick with no content change", async () => {

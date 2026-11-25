@@ -1,11 +1,11 @@
-import type { AgentManager } from "./agent/agent-manager.js";
+import { type AgentManager, type AttentionState } from "./agent/agent-manager.js";
 import { stripInternalJAgentDeskMcpServer } from "./agent/runtime-mcp-config.js";
-import type {
-  AgentPersistenceHandle,
-  AgentProvider,
-  AgentSessionConfig,
+import {
+  type AgentPersistenceHandle,
+  type AgentProvider,
+  type AgentSessionConfig,
 } from "./agent/agent-sdk-types.js";
-import type { AgentStorage, StoredAgentRecord } from "./agent/agent-storage.js";
+import { type AgentStorage, type StoredAgentRecord } from "./agent/agent-storage.js";
 
 interface LoggerLike {
   child(bindings: Record<string, unknown>): LoggerLike;
@@ -18,6 +18,7 @@ function getLogger(logger: LoggerLike): LoggerLike {
 }
 
 type AgentStoragePersistence = Pick<AgentStorage, "applySnapshot" | "list">;
+
 type AgentManagerStateSource = Pick<AgentManager, "subscribe">;
 
 interface BuildSessionConfigOptions {
@@ -69,8 +70,8 @@ export function buildConfigOverrides(record: StoredAgentRecord): Partial<AgentSe
     modeId: record.lastModeId ?? record.config?.modeId ?? undefined,
     model: record.config?.model ?? undefined,
     thinkingOptionId: record.config?.thinkingOptionId ?? undefined,
-    featureValues: record.config?.featureValues ?? undefined,
-    extra: record.config?.extra ?? undefined,
+    providerOptions: record.config?.providerOptions ?? undefined,
+    toolPolicy: record.config?.toolPolicy ?? undefined,
     systemPrompt: record.config?.systemPrompt ?? undefined,
     mcpServers: record.config?.mcpServers ?? undefined,
   });
@@ -90,8 +91,8 @@ export function buildSessionConfig(
     modeId: overrides.modeId,
     model: overrides.model,
     thinkingOptionId: overrides.thinkingOptionId,
-    featureValues: overrides.featureValues,
-    extra: overrides.extra,
+    providerOptions: overrides.providerOptions,
+    toolPolicy: overrides.toolPolicy,
     systemPrompt: overrides.systemPrompt,
     mcpServers: overrides.mcpServers,
   });
@@ -104,21 +105,65 @@ export function isStoredAgentProviderAvailable(
   return isProviderRegistered(validProviders, record.provider);
 }
 
+/**
+ * When the record last changed, from either of the two timestamps it carries. They diverge
+ * because renaming, labelling, restoring from archive, marking unread, and clearing attention
+ * all move `updatedAt` on an unloaded agent without touching `lastActivityAt`. Reading one
+ * field alone hands consumers a time older than one they have already seen, and
+ * `acceptAgentDirectoryUpdate` drops every state update that goes backwards.
+ */
+export function resolveStoredAgentUpdatedAt(record: StoredAgentRecord): string {
+  const timestamps = [record.updatedAt, record.lastActivityAt]
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .map((value) => ({
+      raw: value,
+      parsed: Date.parse(value),
+    }))
+    .filter((value) => !Number.isNaN(value.parsed));
+
+  if (timestamps.length === 0) {
+    return record.updatedAt;
+  }
+
+  timestamps.sort((a, b) => b.parsed - a.parsed);
+  return timestamps[0].raw;
+}
+
 export function extractTimestamps(record: StoredAgentRecord): {
   createdAt: Date;
   updatedAt: Date;
   lastUserMessageAt: Date | null;
   labels?: Record<string, string>;
+  metadata?: StoredAgentRecord["metadata"];
   workspaceId?: string;
   owner?: StoredAgentRecord["owner"];
+  background?: boolean;
 } {
   return {
     createdAt: new Date(record.createdAt),
-    updatedAt: new Date(record.lastActivityAt ?? record.updatedAt),
+    updatedAt: new Date(resolveStoredAgentUpdatedAt(record)),
     lastUserMessageAt: record.lastUserMessageAt ? new Date(record.lastUserMessageAt) : null,
     labels: record.labels,
+    metadata: record.metadata,
     workspaceId: record.workspaceId,
     owner: record.owner,
+    background: record.background,
+  };
+}
+
+/**
+ * Unread state survives a resume. Attention is set by the agent finishing or failing and
+ * cleared by the user reading the chat (`workspace.clear_attention`); reloading the runtime
+ * is neither, so a resumed agent that drops it silently marks the chat read.
+ */
+export function extractAttention(record: StoredAgentRecord): AttentionState {
+  if (!record.requiresAttention || !record.attentionReason || !record.attentionTimestamp) {
+    return { requiresAttention: false };
+  }
+  return {
+    requiresAttention: true,
+    attentionReason: record.attentionReason,
+    attentionTimestamp: new Date(record.attentionTimestamp),
   };
 }
 

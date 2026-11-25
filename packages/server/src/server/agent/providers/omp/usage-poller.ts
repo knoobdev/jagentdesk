@@ -7,7 +7,8 @@ export interface OmpUsagePollScheduler {
 
 interface OmpUsagePollerOptions {
   readStats(): Promise<OmpSessionStats>;
-  onUsage(usage: AgentUsage, turnId?: string): void;
+  /** Called when usage changes, with the stats it was read from. */
+  onUsage(usage: AgentUsage, turnId: string | undefined, stats: OmpSessionStats): void;
   onPollError(error: unknown): void;
   scheduler?: OmpUsagePollScheduler;
 }
@@ -93,16 +94,27 @@ export class OmpUsagePoller {
     }
     this.active = false;
     const completionGeneration = this.invalidatePendingWork();
-    let usage: AgentUsage | undefined;
+    let stats: OmpSessionStats;
     try {
-      usage = toAgentUsage(await this.options.readStats());
+      stats = await this.options.readStats();
     } catch {
       return;
     }
     if (this.closed || this.generation !== completionGeneration) {
       return;
     }
-    this.publishUsage(usage, turnId);
+    this.publishUsage(stats, turnId);
+  }
+
+  async refresh(): Promise<void> {
+    let stats: OmpSessionStats;
+    try {
+      stats = await this.options.readStats();
+    } catch (error) {
+      if (!this.closed) this.options.onPollError(error);
+      return;
+    }
+    if (!this.closed) this.publishUsage(stats);
   }
 
   close(): void {
@@ -126,9 +138,9 @@ export class OmpUsagePoller {
   }
 
   private async poll(generation: number): Promise<void> {
-    let usage: AgentUsage | undefined;
+    let stats: OmpSessionStats;
     try {
-      usage = toAgentUsage(await this.options.readStats());
+      stats = await this.options.readStats();
     } catch (error) {
       try {
         if (this.active && !this.closed && this.generation === generation) {
@@ -143,7 +155,7 @@ export class OmpUsagePoller {
     }
     try {
       if (this.active && !this.closed && this.generation === generation) {
-        this.publishUsage(usage);
+        this.publishUsage(stats);
       }
     } finally {
       if (this.active && !this.closed && this.generation === generation) {
@@ -160,10 +172,10 @@ export class OmpUsagePoller {
     return usage;
   }
 
-  private publishUsage(usage: AgentUsage | undefined, turnId?: string): void {
-    const changedUsage = this.takeChangedUsage(usage);
+  private publishUsage(stats: OmpSessionStats, turnId?: string): void {
+    const changedUsage = this.takeChangedUsage(toAgentUsage(stats));
     if (changedUsage) {
-      this.options.onUsage(changedUsage, turnId);
+      this.options.onUsage(changedUsage, turnId, stats);
     }
   }
 }

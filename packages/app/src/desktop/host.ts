@@ -81,7 +81,7 @@ export interface DesktopEditorOpenTargetInput {
 }
 
 export interface DesktopEditorBridge {
-  listTargets?: () => Promise<DesktopEditorTargetDescriptor[]>;
+  listTargets?: (input?: { workspacePath?: string }) => Promise<DesktopEditorTargetDescriptor[]>;
   openTarget?: (input: DesktopEditorOpenTargetInput) => Promise<void>;
 }
 
@@ -227,28 +227,11 @@ export interface DesktopArgoCdBridge {
   }) => Promise<DesktopArgoCdSsoResult>;
 }
 
-export type DesktopFigmaLoopbackResult =
-  | { kind: "code"; code: string; state: string }
-  | { kind: "error"; message: string };
-
-/** File selected by the desktop Browse files guest, or cancellation (spec 32.1, ADR-0038). */
-export type DesktopFigmaPickFileResult = { kind: "file"; url: string } | { kind: "cancelled" };
-
-/** Figma OAuth loopback (spec 32.2): Electron only. */
-export interface DesktopFigmaBridge {
-  /** Opens the sandboxed Figma Files picker; takes no URL or partition input. */
-  pickFile?: () => Promise<DesktopFigmaPickFileResult>;
-  oauthLoopback: (input: {
-    authorizeUrl: string;
-    redirectUri: string;
-    timeoutMs?: number;
-  }) => Promise<DesktopFigmaLoopbackResult>;
-}
-
 export interface DesktopHostBridge {
   platform?: string;
   argocd?: DesktopArgoCdBridge;
-  figma?: DesktopFigmaBridge;
+  browserHostLabel?: string;
+  browserHostInstanceId?: string;
   invoke?: DesktopInvokeBridge["invoke"];
   getPendingOpenProject?: () => Promise<string | null>;
   agentNavigation?: DesktopAgentNavigationBridge;

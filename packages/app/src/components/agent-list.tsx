@@ -1,22 +1,25 @@
-import { clickUpListStyles } from "@/components/clickup-shell/list-styles";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { useContainerWidthBelow } from "@/hooks/use-container-width";
+import { Modal } from "@/components/ui/modal";
+import { gumloopListStyles } from "@/components/gumloop-shell/list-styles";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import {
   View,
   Text,
   Pressable,
-  Modal,
   RefreshControl,
   FlatList,
   type ListRenderItem,
+  type StyleProp,
+  type ViewStyle,
   type PressableStateCallbackType,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useCallback, useMemo, useState, type ReactElement } from "react";
+import { Fragment, useCallback, useMemo, useState, type ReactElement } from "react";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { useIsCompactFormFactor } from "@/constants/layout";
-import { formatTimeAgo } from "@/utils/time";
+import { useTimeAgo } from "@/hooks/use-time-ago";
 import { type AggregatedAgent } from "@/hooks/use-aggregated-agents";
 import {
   ORCHESTRATION_ROLE_LABEL,
@@ -36,9 +39,14 @@ interface AgentListProps {
   selectedAgentId?: string;
   onAgentSelect?: () => void;
   listFooterComponent?: ReactElement | null;
+  contentContainerStyle?: StyleProp<ViewStyle>;
   showAttentionIndicator?: boolean;
   showHostColumn?: boolean;
+  /** "compact" is the Home recent-activity list: 44px rows and tight day labels (spec 38 §4.1). */
+  density?: AgentListDensity;
 }
+
+type AgentListDensity = "comfortable" | "compact";
 
 type DateSectionKey = "today" | "yesterday" | "thisWeek" | "thisMonth" | "older";
 
@@ -224,6 +232,7 @@ function SessionRowTrailingAttention({
 function SessionRow({
   agent,
   isMobile,
+  compact,
   selectedAgentId,
   showAttentionIndicator,
   showHostColumn,
@@ -232,6 +241,7 @@ function SessionRow({
 }: {
   agent: AggregatedAgent;
   isMobile: boolean;
+  compact: boolean;
   selectedAgentId?: string;
   showAttentionIndicator: boolean;
   showHostColumn: boolean;
@@ -240,26 +250,32 @@ function SessionRow({
 }) {
   const { theme } = useUnistyles();
   const { t } = useTranslation();
-  const timeAgo = formatTimeAgo(agent.lastActivityAt);
   const agentKey = `${agent.serverId}:${agent.id}`;
   const isSelected = selectedAgentId === agentKey;
   const projectName = agent.projectPlacement?.projectName ?? "";
   const branch = agent.projectPlacement?.checkout.currentBranch ?? "";
   const workspaceName = agent.projectPlacement?.workspaceName ?? "";
+  // Phone meta line: project · branch · workspace, skipping empty parts and repeats so a row never
+  // reads "name ·  · name".
+  const mobileMetaParts = buildMobileMetaParts(projectName, branch, workspaceName);
   const ProviderIcon = getProviderIcon(agent.provider);
   const pendingPermissionCount = agent.pendingPermissionCount ?? 0;
   const orchestrationRoleBadge = orchestrationRoleBadgeLabel(agent.labels);
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
 
   const pressableStyle = useCallback(
     ({ pressed, hovered = false }: PressableStateCallbackType & { hovered?: boolean }) => [
       styles.row,
-      isClickUp && clickUpListStyles.row,
+      isGumloop && gumloopListStyles.row,
+      // Stacked phone rows keep their padding; only the 44px floor applies.
+      isGumloop &&
+        compact &&
+        (isMobile ? gumloopListStyles.compactRowStacked : gumloopListStyles.compactRow),
       isSelected && styles.rowSelected,
       Boolean(hovered) && styles.rowHovered,
       pressed && styles.rowPressed,
     ],
-    [isClickUp, isSelected],
+    [compact, isGumloop, isMobile, isSelected],
   );
 
   const handlePress = useCallback(() => onPress(agent), [onPress, agent]);
@@ -309,31 +325,19 @@ function SessionRow({
         </View>
         {isMobile ? (
           <View style={styles.rowMetaRow}>
-            <Text
-              style={styles.sessionMetaText}
-              numberOfLines={1}
-              testID={`agent-row-project-${agent.serverId}-${agent.id}`}
-            >
-              {projectName}
-            </Text>
-            <Text style={styles.sessionMetaSeparator}>·</Text>
-            <Text
-              style={styles.sessionMetaText}
-              numberOfLines={1}
-              testID={`agent-row-branch-${agent.serverId}-${agent.id}`}
-            >
-              {branch}
-            </Text>
-            <Text style={styles.sessionMetaSeparator}>·</Text>
-            <Text
-              style={styles.sessionMetaText}
-              numberOfLines={1}
-              testID={`agent-row-workspace-${agent.serverId}-${agent.id}`}
-            >
-              {workspaceName}
-            </Text>
-            <Text style={styles.sessionMetaSeparator}>·</Text>
-            <Text style={styles.sessionMetaText}>{timeAgo}</Text>
+            {mobileMetaParts.map((part) => (
+              <Fragment key={part.key}>
+                <Text
+                  style={styles.sessionMetaText}
+                  numberOfLines={1}
+                  testID={`agent-row-${part.key}-${agent.serverId}-${agent.id}`}
+                >
+                  {part.text}
+                </Text>
+                <Text style={styles.sessionMetaSeparator}>·</Text>
+              </Fragment>
+            ))}
+            <AgentActivityTime date={agent.lastActivityAt} isMobile />
             {showHostColumn && agent.serverLabel ? (
               <>
                 <Text style={styles.sessionMetaSeparator}>·</Text>
@@ -366,9 +370,7 @@ function SessionRow({
           >
             {branch}
           </Text>
-          <Text style={styles.columnMetaFixed} numberOfLines={1}>
-            {timeAgo}
-          </Text>
+          <AgentActivityTime date={agent.lastActivityAt} isMobile={false} />
         </View>
       ) : null}
       <SessionRowTrailingAttention
@@ -380,6 +382,15 @@ function SessionRow({
   );
 }
 
+function AgentActivityTime({ date, isMobile }: { date: Date; isMobile: boolean }) {
+  const label = useTimeAgo(date);
+  return (
+    <Text style={isMobile ? styles.sessionMetaText : styles.columnMetaFixed} numberOfLines={1}>
+      {label}
+    </Text>
+  );
+}
+
 export function AgentList({
   agents,
   isRefreshing = false,
@@ -387,14 +398,19 @@ export function AgentList({
   selectedAgentId,
   onAgentSelect,
   listFooterComponent,
+  contentContainerStyle,
   showAttentionIndicator = true,
   showHostColumn = false,
+  density = "comfortable",
 }: AgentListProps) {
   const { theme } = useUnistyles();
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const [actionAgent, setActionAgent] = useState<AggregatedAgent | null>(null);
-  const isMobile = useIsCompactFormFactor();
+  const compactWindow = useIsCompactFormFactor();
+  const isGumloop = useIsGumloopTheme();
+  const { onLayout: measureList, isBelow: narrowList } = useContainerWidthBelow(600);
+  const isMobile = compactWindow || (isGumloop && narrowList);
   const { archiveAgent } = useArchiveAgent();
 
   const actionClient = useSessionStore((state) =>
@@ -478,15 +494,21 @@ export function AgentList({
     return result;
   }, [agents]);
 
-  const isClickUp = useIsClickUpTheme();
+  const compact = density === "compact";
   const renderItem: ListRenderItem<FlatListItem> = useCallback(
-    ({ item }) => {
+    ({ item, index }) => {
       if (item.type === "header") {
-        if (isClickUp) {
+        if (isGumloop) {
           return (
-            <View style={clickUpListStyles.groupRow}>
-              <View style={clickUpListStyles.groupPill}>
-                <Text style={clickUpListStyles.groupPillText}>
+            <View
+              style={[
+                gumloopListStyles.groupRow,
+                compact && gumloopListStyles.compactGroupRow,
+                compact && index === 0 && gumloopListStyles.compactFirstGroupRow,
+              ]}
+            >
+              <View style={[gumloopListStyles.groupPill, compact && gumloopListStyles.compactPill]}>
+                <Text style={gumloopListStyles.groupPillText}>
                   {formatDateSectionLabel(t, item.section)}
                 </Text>
               </View>
@@ -503,6 +525,7 @@ export function AgentList({
         <SessionRow
           agent={item.agent}
           isMobile={isMobile}
+          compact={compact}
           selectedAgentId={selectedAgentId}
           showAttentionIndicator={showAttentionIndicator}
           showHostColumn={showHostColumn}
@@ -512,9 +535,10 @@ export function AgentList({
       );
     },
     [
+      compact,
       handleAgentLongPress,
       handleAgentPress,
-      isClickUp,
+      isGumloop,
       isMobile,
       selectedAgentId,
       showAttentionIndicator,
@@ -551,12 +575,17 @@ export function AgentList({
     [onRefresh, isRefreshing, theme.colors.foregroundMuted, refreshColors],
   );
 
+  const listContentStyle = useMemo(
+    () => [styles.listContent, contentContainerStyle],
+    [contentContainerStyle],
+  );
   return (
     <>
       <FlatList
+        onLayout={measureList}
         data={flatItems}
         style={styles.list}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={listContentStyle}
         keyExtractor={keyExtractor}
         renderItem={renderItem}
         showsVerticalScrollIndicator={false}
@@ -827,3 +856,23 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.base,
   },
 }));
+
+export function buildMobileMetaParts(
+  projectName: string,
+  branch: string,
+  workspaceName: string,
+): Array<{ key: "project" | "branch" | "workspace"; text: string }> {
+  const parts: Array<{ key: "project" | "branch" | "workspace"; text: string }> = [];
+  const seen = new Set<string>();
+  for (const [key, raw] of [
+    ["project", projectName],
+    ["branch", branch],
+    ["workspace", workspaceName],
+  ] as const) {
+    const text = raw.trim();
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    parts.push({ key, text });
+  }
+  return parts;
+}

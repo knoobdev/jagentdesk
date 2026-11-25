@@ -1,3 +1,4 @@
+export type WorkspaceSort = "manual" | "created" | "lastPrompt";
 import type { ProjectDescriptor, WorkspaceDescriptor } from "@/stores/session-store";
 import { projectDisplayNameFromProjectId } from "@/utils/project-display-name";
 
@@ -37,11 +38,17 @@ interface ProjectDraft {
   projectKind: WorkspaceDescriptor["projectKind"];
   iconWorkingDir: string;
   hosts: Map<string, WorkspaceStructureHostPlacement>;
-  workspaces: Array<{ workspaceId: string; workspaceName: string; workspaceKey: string }>;
+  workspaces: Array<{
+    workspaceId: string;
+    workspaceName: string;
+    workspaceKey: string;
+    sortTime: number;
+  }>;
 }
 
 /** The single app boundary that turns host-local projects into grouped display projects. */
 export function buildWorkspaceStructureProjects(input: {
+  workspaceSort?: WorkspaceSort;
   sessions: WorkspaceStructureSession[];
 }): WorkspaceStructureProject[] {
   const byProject = new Map<string, ProjectDraft>();
@@ -85,6 +92,7 @@ export function buildWorkspaceStructureProjects(input: {
       byProject.get(viewKey)?.workspaces.push({
         workspaceId: workspace.id,
         workspaceName: workspace.name,
+        sortTime: workspaceSortTime(workspace, input.workspaceSort),
         workspaceKey: `${session.serverId}:${workspace.id}`,
       });
     }
@@ -99,7 +107,11 @@ export function buildWorkspaceStructureProjects(input: {
       iconWorkingDir: draft.iconWorkingDir,
       hosts: Array.from(draft.hosts.values()),
       workspaceKeys: draft.workspaces
-        .sort(compareWorkspaceStructureItems)
+        .sort(
+          input.workspaceSort && input.workspaceSort !== "manual"
+            ? compareWorkspaceTimes
+            : compareWorkspaceStructureItems,
+        )
         .map((workspace) => workspace.workspaceKey),
     }))
     .sort(
@@ -204,4 +216,21 @@ function compareWorkspaceStructureItems(
       sensitivity: "base",
     }) || left.workspaceId.localeCompare(right.workspaceId, undefined, { sensitivity: "base" })
   );
+}
+
+function workspaceSortTime(
+  workspace: WorkspaceDescriptor,
+  sort: WorkspaceSort | undefined,
+): number {
+  const time =
+    sort === "lastPrompt"
+      ? (workspace.lastUserMessageAt ?? workspace.createdAt)
+      : workspace.createdAt;
+  return time ? Date.parse(time) : 0;
+}
+function compareWorkspaceTimes(
+  left: { sortTime: number; workspaceKey: string },
+  right: { sortTime: number; workspaceKey: string },
+): number {
+  return right.sortTime - left.sortTime || left.workspaceKey.localeCompare(right.workspaceKey);
 }

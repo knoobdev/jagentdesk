@@ -118,7 +118,7 @@ export default {
     name: variant.name,
     slug: "jagentdesk-mobile",
     version: pkg.version,
-    orientation: "portrait",
+    orientation: "default",
     icon: "./assets/images/icon.png",
     scheme: "jagentdesk",
     userInterfaceStyle: "automatic",
@@ -159,6 +159,9 @@ export default {
     },
     plugins: [
       "expo-router",
+      "./modules/jagentdesk-scroll/app.plugin.js",
+      "./modules/jagentdesk-display-metrics/app.plugin.js",
+      "./modules/jagentdesk-hardware-keyboard/app.plugin.js",
       ...buildProfile.cameraPlugins,
       [
         "expo-splash-screen",
@@ -185,6 +188,7 @@ export default {
       [
         "expo-build-properties",
         {
+          ios: { enableSceneSupport: true },
           android: {
             minSdkVersion: 29,
             kotlinVersion: "2.1.20",

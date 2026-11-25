@@ -1,4 +1,4 @@
-import { router, type Href } from "expo-router";
+import { router } from "expo-router";
 import { memo, useCallback, useMemo, type MutableRefObject } from "react";
 import {
   Pressable,
@@ -10,9 +10,10 @@ import {
 } from "react-native";
 import type { GestureType } from "react-native-gesture-handler";
 import { NestableScrollContainer } from "react-native-draggable-flatlist";
-import { ChevronDown, ChevronUp, type LucideIcon } from "lucide-react-native";
+import { ChevronDown, ChevronUp } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useAppNavItems, type AppNavItem } from "@/components/sidebar/use-app-nav";
+import { mobileNavTileTestID } from "./nav-test-ids";
 import { useMobileNavGridStore } from "@/stores/mobile-nav-grid-store";
 import { isNative as platformIsNative } from "@/constants/platform";
 import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
@@ -28,53 +29,14 @@ const foregroundColorMapping = (theme: Theme) => ({ color: theme.colors.foregrou
 const foregroundMutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 
 /** A grid tile: one nav destination, its icon over its short label. */
-export interface MobileNavTile {
-  key: string;
-  icon: LucideIcon;
-  label: string;
-  shortLabel: string;
-  route: Href;
-  isActive: boolean;
-  testID: string;
-}
+export type MobileNavTile = AppNavItem;
 
-/**
- * The drawer rows predate the grid and their `sidebar-*` testIDs are load-bearing for the
- * mobile e2e suites, so tiles keep those IDs instead of the rail's `rail-*` ones. Keys that
- * did not exist when the grid landed (Figma, later sections) fall back to the rail testID.
- */
-const LEGACY_ROW_TEST_IDS: Readonly<Record<string, string>> = {
-  sessions: "sidebar-sessions",
-  schedules: "sidebar-schedules",
-  "shared-sessions": "sidebar-shared-sessions",
-  team: "sidebar-agent-forum",
-  clusters: "sidebar-clusters-nav",
-  databases: "sidebar-databases-nav",
-  servers: "sidebar-servers-nav",
-  argocd: "sidebar-argocd-nav",
-  jira: "sidebar-jira-nav",
-  skills: "sidebar-skills-nav",
-  marketplace: "sidebar-marketplace-nav",
-  docker: "sidebar-docker-nav",
-  simulators: "sidebar-simulator-nav",
-  workbench: "sidebar-workbench-nav",
-  usage: "sidebar-insights-nav",
-  forge: "sidebar-forge-nav",
-};
-
-export function mobileNavTileTestID(key: string, railTestID: string): string {
-  return LEGACY_ROW_TEST_IDS[key] ?? railTestID;
-}
+export { mobileNavTileTestID };
 
 /** The rail's nav items as grid tiles: same order, same active flags, drawer testIDs. */
 export function buildMobileNavTiles(items: AppNavItem[]): MobileNavTile[] {
   return items.map((item) => ({
-    key: item.key,
-    icon: item.icon,
-    label: item.label,
-    shortLabel: item.shortLabel,
-    route: item.route,
-    isActive: item.isActive,
+    ...item,
     testID: mobileNavTileTestID(item.key, item.testID),
   }));
 }
@@ -161,7 +123,8 @@ export function MobileNavGrid({
   const handleTilePress = useCallback(
     (tile: MobileNavTile) => {
       onBeforeNavigate?.();
-      router.push(tile.route);
+      if (tile.onPress) tile.onPress();
+      else router.push(tile.route);
     },
     [onBeforeNavigate],
   );

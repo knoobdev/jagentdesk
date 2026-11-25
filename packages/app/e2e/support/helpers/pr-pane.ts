@@ -1,5 +1,6 @@
+import { i18n } from "@/i18n/i18next";
 import { expect, type Page } from "@playwright/test";
-import { getStateLabel } from "@/git/pull-request-panel/data";
+import { getStateLabelKey } from "@/git/pull-request-panel/data";
 
 export async function openPrPane(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Open explorer" }).click();
@@ -15,7 +16,7 @@ export async function expectPrPaneState(
   page: Page,
   state: "open" | "merged" | "closed" | "draft",
 ): Promise<void> {
-  await expect(page.getByTestId("pr-pane-state")).toHaveText(getStateLabel(state), {
+  await expect(page.getByTestId("pr-pane-state")).toHaveText(i18n.t(getStateLabelKey(state)), {
     timeout: 15_000,
   });
 }

@@ -447,9 +447,9 @@ function buildTerminalTimelineItem(input: {
 }
 
 async function waitForTerminalBootstrapReadiness(
-  terminal: Pick<TerminalSession, "getState" | "subscribe">,
+  terminal: Pick<TerminalSession, "hasOutput" | "subscribe">,
 ): Promise<void> {
-  if (terminalHasOutput(terminal.getState())) {
+  if (terminal.hasOutput()) {
     return;
   }
 
@@ -482,7 +482,7 @@ async function waitForTerminalBootstrapReadiness(
       finish();
     });
 
-    if (terminalHasOutput(terminal.getState())) {
+    if (terminal.hasOutput()) {
       finish();
       return;
     }
@@ -491,23 +491,12 @@ async function waitForTerminalBootstrapReadiness(
   });
 }
 
-function terminalHasOutput(state: ReturnType<TerminalSession["getState"]>): boolean {
-  for (const row of [...state.scrollback, ...state.grid]) {
-    for (const cell of row) {
-      if (cell.char.trim().length > 0) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 async function runWorktreeTerminalBootstrap(
   options: RunAsyncWorktreeBootstrapOptions,
   runtimeEnv: WorktreeRuntimeEnv,
 ): Promise<void> {
   const workspaceCwd = options.workspaceCwd ?? options.worktree.worktreePath;
-  const terminalSpecs = getWorktreeTerminalSpecs(workspaceCwd);
+  const terminalSpecs = await getWorktreeTerminalSpecs(workspaceCwd);
   if (terminalSpecs.length === 0) {
     return;
   }
@@ -586,6 +575,28 @@ async function runWorktreeTerminalBootstrap(
       results,
       errorMessage: null,
     }),
+  );
+}
+
+export async function runWorktreeAutoTerminals(options: {
+  workspaceId: string;
+  worktree: WorktreeConfig;
+  workspaceCwd: string;
+  runtimeEnv: WorktreeRuntimeEnv;
+  terminalManager: TerminalManager | null;
+  logger?: Logger;
+}): Promise<void> {
+  await runWorktreeTerminalBootstrap(
+    {
+      agentId: options.workspaceId,
+      workspaceId: options.workspaceId,
+      worktree: options.worktree,
+      workspaceCwd: options.workspaceCwd,
+      terminalManager: options.terminalManager,
+      appendTimelineItem: async () => true,
+      logger: options.logger,
+    },
+    options.runtimeEnv,
   );
 }
 
@@ -878,7 +889,7 @@ export async function spawnWorkspaceScript(
     logger,
     onLifecycleChanged,
   } = options;
-  const configResult = readJAgentDeskConfig(repoRoot);
+  const configResult = await readJAgentDeskConfig(repoRoot);
   if (!configResult.ok) {
     throw jagentdeskConfigParseError(configResult);
   }

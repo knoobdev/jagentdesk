@@ -1,3 +1,4 @@
+import { useSessionStore } from "@/stores/session-store";
 import { useMemo } from "react";
 import { useRetainedPanelActive } from "@/components/retained-panel";
 import { useReplicaQuery } from "@/data/query";
@@ -9,7 +10,7 @@ import { checkoutDiffQueryKey } from "@/git/query-keys";
 interface UseCheckoutDiffQueryOptions {
   serverId: string;
   cwd: string;
-  mode: "uncommitted" | "base";
+  mode: "uncommitted" | "base" | "all";
   baseRef?: string;
   ignoreWhitespace?: boolean;
   enabled?: boolean;
@@ -25,18 +26,18 @@ export type DiffLine = DiffHunk["lines"][number];
 export type HighlightToken = NonNullable<DiffLine["tokens"]>[number];
 
 function normalizeCheckoutDiffCompare(compare: {
-  mode: "uncommitted" | "base";
+  mode: "uncommitted" | "base" | "all";
   baseRef?: string;
   ignoreWhitespace?: boolean;
-}): { mode: "uncommitted" | "base"; baseRef?: string; ignoreWhitespace?: boolean } {
+}): { mode: "uncommitted" | "base" | "all"; baseRef?: string; ignoreWhitespace?: boolean } {
   const ignoreWhitespace = compare.ignoreWhitespace === true;
   if (compare.mode === "uncommitted") {
     return { mode: "uncommitted", ignoreWhitespace };
   }
   const trimmedBaseRef = compare.baseRef?.trim();
   return trimmedBaseRef
-    ? { mode: "base", baseRef: trimmedBaseRef, ignoreWhitespace }
-    : { mode: "base", ignoreWhitespace };
+    ? { mode: compare.mode, baseRef: trimmedBaseRef, ignoreWhitespace }
+    : { mode: compare.mode, ignoreWhitespace };
 }
 
 export function useCheckoutDiffQuery({
@@ -48,6 +49,11 @@ export function useCheckoutDiffQuery({
   enabled = true,
   queryScope,
 }: UseCheckoutDiffQueryOptions) {
+  // COMPAT(checkoutDiffAll): added in v0.9.59, remove after 2027-05-23 once host floor includes All changes.
+  const allSupported = useSessionStore(
+    (state) => state.sessions[serverId]?.serverInfo?.features?.checkoutDiffAll === true,
+  );
+  const requiresUpdate = mode === "all" && !allSupported;
   const retainedPanelActive = useRetainedPanelActive();
   const queryEnabled = enabled && retainedPanelActive;
   const isConnected = useHostRuntimeIsConnected(serverId);
@@ -70,7 +76,7 @@ export function useCheckoutDiffQuery({
     return normalizedScope ? [...comparisonKey, "scope", normalizedScope] : comparisonKey;
   }, [serverId, cwd, compareMode, compareBaseRef, compareIgnoreWhitespace, queryScope]);
   const subscriptionId = useMemo(() => `checkoutDiff:${JSON.stringify(queryKey)}`, [queryKey]);
-  const routeEnabled = Boolean(queryEnabled && isConnected && cwd);
+  const routeEnabled = Boolean(queryEnabled && isConnected && cwd && !requiresUpdate);
 
   const query = useReplicaQuery<CheckoutDiffQueryPayload>({
     queryKey,
@@ -89,7 +95,15 @@ export function useCheckoutDiffQuery({
     }),
   });
 
-  const payload = query.data ?? null;
+  const payload: CheckoutDiffQueryPayload | null =
+    requiresUpdate && isConnected
+      ? {
+          requestId: "unsupported",
+          cwd,
+          files: [],
+          error: { code: "UNKNOWN", message: "Update the host to view All changes" },
+        }
+      : (query.data ?? null);
   const payloadError = payload?.error ?? null;
 
   return {

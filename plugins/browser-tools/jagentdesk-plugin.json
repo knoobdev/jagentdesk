@@ -1,0 +1,13 @@
+{
+  "kind": "builtin",
+  "id": "browser-tools",
+  "name": "Agentic browser",
+  "description": "Give agents tools to control the browser.",
+  "defaultEnabled": false,
+  "requires": [],
+  "builtinOrder": 19,
+  "builtinEntrypoints": {
+    "server": "server/index.ts",
+    "client": "client/index.tsx"
+  }
+}

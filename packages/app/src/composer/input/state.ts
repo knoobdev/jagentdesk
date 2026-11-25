@@ -1,8 +1,17 @@
-import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
-import type { MessagePayload } from "@/composer/types";
-import type { MessageInputKeyboardActionKind } from "@/keyboard/actions";
+import { type DaemonClient } from "@jagentdesk/client/internal/daemon-client";
+import { type ActiveTurnBehavior } from "@jagentdesk/protocol/messages";
+import { type MessagePayload, type TextReplacement } from "@/composer/types";
+import { type MessageInputKeyboardActionKind } from "@/keyboard/actions";
+import { type SendShortcut } from "@/hooks/use-settings";
 
-export type SendBehavior = "interrupt" | "steer" | "queue";
+export type SendBehavior = ActiveTurnBehavior | "queue";
+
+export function resolveActiveSendBehavior(
+  sendBehavior: SendBehavior,
+  hasPendingPermission: boolean,
+): SendBehavior {
+  return sendBehavior === "queue" && hasPendingPermission ? "interrupt" : sendBehavior;
+}
 
 interface ComposerSurfaceState {
   opacity: 0 | 1;
@@ -52,7 +61,7 @@ interface DictationTranscriptContext {
   isAgentRunning: boolean;
   onQueue: ((payload: MessagePayload) => void) | undefined;
   onSubmit: (payload: MessagePayload) => void;
-  onChangeText: (text: string) => void;
+  replaceText: (text: string) => void;
   attachments: MessagePayload["attachments"];
   cwd: string;
   autoSend: boolean;
@@ -64,15 +73,15 @@ export function applyDictationTranscript(text: string, ctx: DictationTranscriptC
   const nextValue = `${ctx.value}${shouldPad ? " " : ""}${text}`;
 
   if (!ctx.autoSend) {
-    ctx.onChangeText(nextValue);
+    ctx.replaceText(nextValue);
     return;
   }
 
-  ctx.onChangeText(nextValue);
+  ctx.replaceText(nextValue);
 
   if (ctx.defaultSendBehavior === "queue" && ctx.isAgentRunning && ctx.onQueue) {
     ctx.onQueue({ text: nextValue, attachments: ctx.attachments, cwd: ctx.cwd });
-    ctx.onChangeText("");
+    ctx.replaceText("");
     return;
   }
 
@@ -117,14 +126,53 @@ export function runDefaultSendAction(ctx: SendActionContext): void {
   ctx.handleSendMessage();
 }
 
+export type AlternateSendAction = "queue" | "send";
+
+/**
+ * What Mod+Enter and a long-press on Send do instead of the default send. Null while
+ * no turn is running, where both fall back to the default send.
+ */
+export function resolveAlternateSendAction(
+  ctx: Pick<SendActionContext, "defaultSendBehavior" | "isAgentRunning" | "onQueue">,
+): AlternateSendAction | null {
+  if (!ctx.isAgentRunning || !ctx.onQueue) return null;
+  return ctx.defaultSendBehavior === "queue" ? "send" : "queue";
+}
+
 export function runAlternateSendAction(ctx: SendActionContext): void {
-  if (ctx.defaultSendBehavior === "queue") {
+  const action = resolveAlternateSendAction(ctx);
+  if (action === "queue") {
+    ctx.handleQueueMessage();
+    return;
+  }
+  if (action === "send") {
     ctx.handleSendMessage();
     return;
   }
-  if (ctx.isAgentRunning && ctx.onQueue) {
-    ctx.handleQueueMessage();
-  }
+  runDefaultSendAction(ctx);
+}
+
+export type MessageInputEnterAction = "alternate-send" | "default-send";
+
+export interface MessageInputEnterContext {
+  submitOnEnter: boolean;
+  sendShortcut: SendShortcut;
+  shiftKey: boolean;
+  metaKey: boolean;
+  ctrlKey: boolean;
+  isAgentRunning: boolean;
+  onQueue: ((payload: MessagePayload) => void) | undefined;
+}
+
+export function resolveMessageInputEnterAction(
+  ctx: MessageInputEnterContext,
+): MessageInputEnterAction | null {
+  if (!ctx.submitOnEnter) return null;
+  if (ctx.shiftKey) return null;
+  const hasModifier = ctx.metaKey || ctx.ctrlKey;
+  if (ctx.sendShortcut === "mod-enter") return hasModifier ? "default-send" : null;
+  if (hasModifier && ctx.isAgentRunning && ctx.onQueue) return "alternate-send";
+  return "default-send";
 }
 
 export function runMessageInputKeyboardAction(
@@ -183,4 +231,60 @@ export async function stopRealtimeVoice(ctx: StopRealtimeVoiceContext): Promise<
   }
 
   await ctx.voice.stopVoice();
+}
+
+/**
+ * Offset that aligns a glyph's visible ink with the Send arrow's ink when both sit in
+ * equal controls on the same right rail. In Lucide's 24px viewBox ArrowUp ends at
+ * x19 while Maximize2/Minimize2 end at x21, so equal boxes leave the fullscreen
+ * glyphs visibly past the arrow.
+ */
+export function resolveGlyphRailOffset(input: {
+  controlSize: number;
+  sendIconSize: number;
+  glyphIconSize: number;
+}): number {
+  const arrowInkInset =
+    (input.controlSize - input.sendIconSize) / 2 + (5 * input.sendIconSize) / 24;
+  const glyphInkInset =
+    (input.controlSize - input.glyphIconSize) / 2 + (3 * input.glyphIconSize) / 24;
+  return arrowInkInset - glyphInkInset;
+}
+
+export function resolveComposerSurfaceText(
+  liveText: string,
+  replacement: TextReplacement,
+  appliedReplacementKey: string,
+): string {
+  return replacement.key === appliedReplacementKey ? liveText : replacement.text;
+}
+
+/** A retained caret must fit the text the remounted editor shows. */
+export function resolveRetainedSelection(
+  retained: { start: number; end: number },
+  textLength: number,
+): { start: number; end: number } {
+  const end = Math.min(Math.max(retained.end, 0), textLength);
+  const start = Math.min(Math.max(retained.start, 0), end);
+  return { start, end };
+}
+
+export type PrimaryActionKind = "send" | "active" | "none";
+
+/**
+ * Which disc holds the trailing slot. With nothing to send and the agent idle the primary
+ * action is "none"; a disabled Send then stands in so the row does not shift when typing
+ * starts. Classic themes keep Paseo's rule that a voice-mode button takes the slot instead;
+ * Gumloop always shows Send there and voice mode sits before it (spec 38 §4.4, A38.6b).
+ */
+export function resolvePresentedActionKind(input: {
+  primaryActionKind: PrimaryActionKind;
+  isFullscreen: boolean;
+  hasVoiceModeContent: boolean;
+  sendAlwaysPresent: boolean;
+}): { kind: PrimaryActionKind; sendStandsIn: boolean } {
+  const sendStandsIn =
+    input.isFullscreen ||
+    (input.primaryActionKind === "none" && (input.sendAlwaysPresent || !input.hasVoiceModeContent));
+  return { kind: sendStandsIn ? "send" : input.primaryActionKind, sendStandsIn };
 }

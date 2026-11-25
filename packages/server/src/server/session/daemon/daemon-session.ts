@@ -2,6 +2,7 @@ import type pino from "pino";
 import type { ProviderAvailability } from "../../agent/agent-manager.js";
 import type { SessionInboundMessage, SessionOutboundMessage } from "../../messages.js";
 import { getPidLockInfo } from "../../pid-lock.js";
+import { readUnconfirmedTerminalCleanup } from "../../../terminal/terminal-worker-reaper.js";
 import { generateLocalPairingOffer } from "../../pairing-offer.js";
 import {
   collectDaemonDiagnostics,
@@ -22,6 +23,8 @@ export interface DaemonRuntimeConfig {
   appBaseUrl?: string;
   desktopManaged?: boolean;
   getTailnetAddress(): { host: string; port: number; useTls?: boolean } | null;
+  /** Live relay runtime state (spec 35.3); read per request so a toggle applies at once. */
+  getRelayConfig?(): { enabled: boolean; endpoint: string; useTls: boolean } | null;
 }
 
 export interface DaemonSessionHost {
@@ -31,6 +34,7 @@ export interface DaemonSessionHost {
     clientId: string;
     requestId: string;
     reason: string;
+    keepTerminals: boolean;
   }): void;
 }
 
@@ -45,6 +49,8 @@ export interface DaemonSessionOptions {
   listProjects: () => Promise<PersistedProjectRecord[]>;
   listWorkspaces: () => Promise<PersistedWorkspaceRecord[]>;
   listProviderAvailability: () => Promise<ProviderAvailability[]>;
+  /** Why this host's terminals cannot be served (held by a newer JAgentDesk's worker), if so. */
+  getTerminalsUnavailable?: () => string | null;
   getWebSocketRuntimeMetrics?: () => DaemonWebSocketRuntimeDiagnosticSnapshot | null;
   logger: pino.Logger;
   hubRelationships?: HubRelationshipManagement;
@@ -58,6 +64,8 @@ export interface DaemonSessionOptions {
     requestId: string;
     reason: string;
   }) => Promise<{ ok: boolean; error?: string }> | { ok: boolean; error?: string };
+  /** Spec 05.5: closes every live socket of a revoked device on all transports. */
+  closeConnectionsForDevice?: (deviceId: string) => number;
 }
 
 /**
@@ -83,6 +91,7 @@ export class DaemonSession {
     expiresAt: number;
   } | null = null;
   private providerAvailabilityRefresh: Promise<ProviderAvailability[]> | null = null;
+  private readonly getTerminalsUnavailable: () => string | null;
   private readonly getWebSocketRuntimeMetrics: () => DaemonWebSocketRuntimeDiagnosticSnapshot | null;
   private readonly logger: pino.Logger;
   private readonly selfUpdate: DaemonSelfUpdateSessionController;
@@ -96,6 +105,7 @@ export class DaemonSession {
         reason: string;
       }) => Promise<{ ok: boolean; error?: string }> | { ok: boolean; error?: string })
     | null;
+  private readonly closeConnectionsForDevice: ((deviceId: string) => number) | null;
 
   constructor(options: DaemonSessionOptions) {
     this.host = options.host;
@@ -108,6 +118,7 @@ export class DaemonSession {
     this.listProjects = options.listProjects;
     this.listWorkspaces = options.listWorkspaces;
     this.listProviderAvailability = options.listProviderAvailability;
+    this.getTerminalsUnavailable = options.getTerminalsUnavailable ?? (() => null);
     this.getWebSocketRuntimeMetrics = options.getWebSocketRuntimeMetrics ?? (() => null);
     this.logger = options.logger;
     this.hubRelationships = options.hubRelationships ?? null;
@@ -115,6 +126,7 @@ export class DaemonSession {
     this.daemonPublicKeyB64 = options.daemonPublicKeyB64 ?? null;
     this.pairingCodeManager = options.pairingCodeManager ?? null;
     this.cancelPendingPairingRequest = options.cancelPendingPairingRequest ?? null;
+    this.closeConnectionsForDevice = options.closeConnectionsForDevice ?? null;
     this.selfUpdate = new DaemonSelfUpdateSessionController({
       clientId: this.clientId,
       daemonVersion: this.daemonVersion ?? null,
@@ -215,6 +227,12 @@ export class DaemonSession {
   async handleGetStatusRequest(
     msg: Extract<SessionInboundMessage, { type: "daemon.get_status.request" }>,
   ): Promise<void> {
+    // Read outside the degraded-status fallback below: a status that cannot say whether
+    // terminal cleanup finished must fail the request, not report that nothing is left.
+    const terminalCleanupUnconfirmed = (
+      await readUnconfirmedTerminalCleanup(this.jagentdeskHome)
+    ).map(({ pid, role, reason, detail }) => ({ pid, role, reason, detail }));
+    const terminalsUnavailable = this.getTerminalsUnavailable();
     try {
       const pidInfo = await getPidLockInfo(this.jagentdeskHome);
       const providers = (await this.getCachedProviderAvailability()).map((p) => ({
@@ -234,6 +252,8 @@ export class DaemonSession {
           listen: this.daemonRuntimeConfig?.listen ?? null,
           tailnet: this.daemonRuntimeConfig?.getTailnetAddress() ?? null,
           providers,
+          terminalCleanupUnconfirmed,
+          ...(terminalsUnavailable ? { terminalsUnavailable } : {}),
         },
       });
     } catch (error) {
@@ -250,6 +270,8 @@ export class DaemonSession {
           listen: null,
           tailnet: null,
           providers: [],
+          terminalCleanupUnconfirmed,
+          ...(terminalsUnavailable ? { terminalsUnavailable } : {}),
         },
       });
     }
@@ -260,10 +282,14 @@ export class DaemonSession {
   ): Promise<void> {
     try {
       const tailnetAddress = this.daemonRuntimeConfig?.getTailnetAddress() ?? null;
+      const relayConfig = this.daemonRuntimeConfig?.getRelayConfig?.() ?? null;
       const pairing = await generateLocalPairingOffer({
         jagentdeskHome: this.jagentdeskHome,
         tailnetAddress: tailnetAddress ? `${tailnetAddress.host}:${tailnetAddress.port}` : null,
         useTls: tailnetAddress?.useTls,
+        relayEnabled: relayConfig?.enabled === true,
+        relayEndpoint: relayConfig?.endpoint ?? null,
+        relayUseTls: relayConfig?.useTls,
         appBaseUrl: this.daemonRuntimeConfig?.appBaseUrl,
         includeQr: true,
         logger: this.logger,
@@ -277,6 +303,7 @@ export class DaemonSession {
           url: pairing.url ?? "",
           qr: pairing.qr ?? null,
           tailnetEnabled: pairing.tailnetEnabled,
+          relayEnabled: pairing.relayEnabled,
           ...(pairing.pairingCode ? { pairingCode: pairing.pairingCode } : {}),
           ...(pairing.pairingCodeExpiresAtMs
             ? { pairingCodeExpiresAtMs: pairing.pairingCodeExpiresAtMs }
@@ -379,13 +406,15 @@ export class DaemonSession {
       return;
     }
     try {
-      const device = this.pairedDevices.register({
-        devicePublicKeyB64: msg.devicePublicKeyB64,
-        deviceName: msg.deviceName,
-      });
+      // COMPAT(legacyDeviceRegister): added in v0.9.59, remove after 2027-05-25.
+      const device = this.pairedDevices.getByPublicKey(msg.devicePublicKeyB64);
+      if (!device)
+        throw new Error(
+          "New devices require SAS pairing. Generate a new pairing link on the host.",
+        );
       this.logger.info(
         { clientId: this.clientId, deviceId: device.deviceId, requestId: msg.requestId },
-        "Registered paired device",
+        "Reused paired device registration",
       );
       this.host.emit({
         type: "pairing.device.register.response",
@@ -422,8 +451,17 @@ export class DaemonSession {
       return;
     }
     const revoked = this.pairedDevices.revokeById(msg.deviceId);
+    // Spec 05.5: revocation closes the device's live sockets on every transport,
+    // tailnet and relay alike (spec 35.5), within the revoke acceptance window.
+    const closedSockets = revoked ? (this.closeConnectionsForDevice?.(msg.deviceId) ?? 0) : 0;
     this.logger.info(
-      { clientId: this.clientId, deviceId: msg.deviceId, revoked, requestId: msg.requestId },
+      {
+        clientId: this.clientId,
+        deviceId: msg.deviceId,
+        revoked,
+        closedSockets,
+        requestId: msg.requestId,
+      },
       "Revoked paired device",
     );
     this.host.emit({

@@ -1,3 +1,5 @@
+import type { AgentAddress } from "./addresses.js";
+export const PARENT_SERVER_ID_LABEL = "jagentdesk.parent-server-id";
 export const PARENT_AGENT_ID_LABEL = "jagentdesk.parent-agent-id";
 
 const OPEN_AGENT_TAB_LABEL_PREFIX = "jagentdesk.open-agent-tab.";
@@ -54,4 +56,24 @@ export function getParentAgentIdFromLabels(labels: Record<string, unknown> | nul
 
 export function isDelegatedAgent(agent: AgentLabelSource): boolean {
   return getParentAgentIdFromLabels(agent.labels) !== null;
+}
+
+// Absent parent server label means the same host.
+export function getParentAddressFromLabels(
+  labels: Record<string, unknown> | null | undefined,
+  serverId: string,
+): AgentAddress | null {
+  const agentId = getParentAgentIdFromLabels(labels);
+  if (!agentId) return null;
+  const parentServerId = labels?.[PARENT_SERVER_ID_LABEL];
+  return {
+    serverId:
+      typeof parentServerId === "string" && parentServerId.trim()
+        ? parentServerId.trim()
+        : serverId,
+    agentId,
+  };
+}
+export function parentAddressLabels(parent: AgentAddress): Record<string, string> {
+  return { [PARENT_AGENT_ID_LABEL]: parent.agentId, [PARENT_SERVER_ID_LABEL]: parent.serverId };
 }

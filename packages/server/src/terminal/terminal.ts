@@ -1,15 +1,38 @@
 import * as pty from "node-pty";
-import xterm, { type Terminal as TerminalType } from "@xterm/headless";
+import type { Terminal as TerminalType } from "@xterm/headless";
+import { createHeadlessTerminal } from "./headless-terminal.js";
 import { randomUUID } from "crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import {
+  accessSync,
+  chmodSync,
+  constants,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+} from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { basename, delimiter, dirname, extname, join, resolve as resolvePath } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { createExternalProcessEnv } from "../server/jagentdesk-env.js";
+import {
+  resolveExternalProcessPath,
+  resolveJAgentDeskCliBinDir,
+  resolveJAgentDeskCliExecutablePath,
+} from "./jagentdesk-cli-path.js";
 import { writePrivateFileAtomicSync } from "../server/private-files.js";
-import { findExecutable } from "../executable-resolution/executable-resolution.js";
-import type { TerminalCell, TerminalState } from "@jagentdesk/protocol/messages";
+import {
+  findExecutable,
+  findExecutableWithoutProbing,
+} from "../executable-resolution/executable-resolution.js";
+import { createTerminalSerializer } from "./terminal-serializer.js";
+import {
+  captureTerminalLines,
+  type CaptureTerminalLinesOptions,
+  type CaptureTerminalLinesResult,
+} from "./terminal-capture.js";
+import type { TerminalReplayOptions, TerminalReplayMetadata } from "./terminal-replay.js";
 import { TerminalInputModeTracker } from "@jagentdesk/protocol/terminal-input-mode";
 import { TerminalActivityTracker } from "./activity/terminal-activity-tracker.js";
 import type {
@@ -17,9 +40,7 @@ import type {
   TerminalActivityState,
 } from "@jagentdesk/protocol/terminal-activity";
 
-const { Terminal } = xterm;
 const require = createRequire(import.meta.url);
-const JAGENTDESK_CLI_BIN_ENTRY = "@jagentdesk/cli/bin/jagentdesk";
 let nodePtySpawnHelperChecked = false;
 export const TERMINAL_TITLE_DEBOUNCE_MS = 150;
 export const TERMINAL_EXIT_OUTPUT_LINE_LIMIT = 12;
@@ -36,28 +57,22 @@ export interface TerminalExitInfo {
   lastOutputLines: string[];
 }
 
+// The field is assigned explicitly rather than declared as a constructor
+// parameter property: the terminal worker loads this module under
+// --experimental-strip-types, which erases types but cannot emit the
+// assignment a parameter property implies.
+export class TerminalCommandNotFoundError extends Error {
+  readonly command: string;
+
+  constructor(command: string) {
+    super(`${command}: command not found`);
+    this.name = "TerminalCommandNotFoundError";
+    this.command = command;
+  }
+}
+
 export interface TerminalCommandFinishedInfo {
   exitCode: number | null;
-}
-
-export interface TerminalStateSnapshot {
-  state: TerminalState;
-  revision: number;
-  // Input-mode replay preamble at snapshot time. Populated by the terminal
-  // worker so the daemon main loop doesn't have to re-derive it from output.
-  replayPreamble?: string;
-}
-
-export interface TerminalStateSnapshotOptions {
-  scrollbackLines?: number;
-  // Include per-row soft-wrap flags (gridWrapped/scrollbackWrapped) so the client
-  // can reflow restored content on resize. Gated on a client capability, so old
-  // clients never receive the extra fields.
-  includeWrapFlags?: boolean;
-}
-
-export interface TerminalSubscribeOptions {
-  initialSnapshot?: "state" | "ready";
 }
 
 export type ClientMessage =
@@ -67,7 +82,6 @@ export type ClientMessage =
 
 export type ServerMessage =
   | { type: "output"; data: string; revision?: number }
-  | { type: "snapshot"; state: TerminalState; revision?: number }
   | { type: "snapshotReady"; revision?: number; replayPreamble?: string }
   | { type: "titleChange"; title?: string };
 
@@ -82,14 +96,13 @@ export interface TerminalSession {
   cwd: string;
   workspaceId: string;
   send(msg: ClientMessage): void;
-  subscribe(listener: (msg: ServerMessage) => void, options?: TerminalSubscribeOptions): () => void;
+  subscribe(listener: (msg: ServerMessage) => void): () => void;
   onExit(listener: (info: TerminalExitInfo) => void): () => void;
   onCommandFinished(listener: (info: TerminalCommandFinishedInfo) => void): () => void;
   onTitleChange(listener: (title?: string) => void): () => void;
   onActivityChange(listener: (transition: TerminalActivityTransition) => void): () => void;
   getSize(): { rows: number; cols: number };
-  getState(): TerminalState;
-  getStateSnapshot(options?: TerminalStateSnapshotOptions): TerminalStateSnapshot;
+  hasOutput(): boolean;
   getReplayPreamble(): string;
   getTitle(): string | undefined;
   getActivity(): TerminalActivity | null;
@@ -99,6 +112,20 @@ export interface TerminalSession {
   getExitInfo(): TerminalExitInfo | null;
   kill(): void;
   killAndWait(options?: { gracefulTimeoutMs?: number; forceTimeoutMs?: number }): Promise<void>;
+}
+
+/** A session that owns its PTY in this process, so it knows the program's pid. */
+export interface ReplayTerminalSession extends TerminalSession {
+  serializeReplay(options?: TerminalReplayOptions): {
+    metadata: TerminalReplayMetadata;
+    data: Uint8Array;
+  };
+  captureLines(options?: CaptureTerminalLinesOptions): CaptureTerminalLinesResult;
+}
+
+/** A replay source backed by a local PTY. */
+export interface LocalTerminalSession extends ReplayTerminalSession {
+  readonly pid: number;
 }
 
 function parseCommandFinishedOsc(data: string): TerminalCommandFinishedInfo | null {
@@ -131,6 +158,11 @@ export interface CreateTerminalOptions {
   title?: string;
   command?: string;
   args?: string[];
+  // Environment the terminal starts from instead of this process's own. A detached terminal
+  // worker outlives the daemon that launched it, so each create carries the controlling
+  // daemon's environment and its resolved JAgentDesk CLI path.
+  baseEnv?: Record<string, string>;
+  jagentdeskCliPath?: string | null;
 }
 
 export function toTerminalActivity(snapshot: {
@@ -155,6 +187,7 @@ export function resolveInitialTitleMode(presetTitle: string | undefined): "auto"
 interface BuildTerminalEnvironmentInput {
   shell: string;
   env: Record<string, string>;
+  baseEnv?: Record<string, string>;
   zshShellIntegrationDir?: string;
   jagentdeskCliBinDir?: string | null;
   jagentdeskHookCliPath?: string | null;
@@ -302,84 +335,10 @@ export async function resolveTerminalSpawnCommand(
   return { command: resolved, args };
 }
 
+export { resolveJAgentDeskCliBinDir, resolveJAgentDeskCliExecutablePath };
+
 export function resolveZshShellIntegrationDir(): string {
   return fileURLToPath(new URL("./shell-integration/zsh", import.meta.url));
-}
-
-function resolveExternalProcessPath(filePath: string): string {
-  return filePath.replace(/\.asar(?=[/\\]|$)/, ".asar.unpacked");
-}
-
-export function resolveJAgentDeskCliBinDir(): string | null {
-  const cliExecutable = resolveJAgentDeskCliExecutablePath();
-  return cliExecutable ? dirname(cliExecutable) : null;
-}
-
-export function resolveJAgentDeskCliExecutablePath(): string | null {
-  const configuredCli = process.env.JAGENTDESK_CLI?.trim();
-  if (configuredCli) {
-    return resolvePath(configuredCli);
-  }
-
-  const cliEntrypoint = resolveJAgentDeskCliBinEntrypoint();
-  if (!cliEntrypoint) {
-    return null;
-  }
-
-  const externalCliEntrypoint = resolveExternalProcessPath(cliEntrypoint);
-  const npmBinDir = findNpmBinDir(dirname(externalCliEntrypoint));
-  if (npmBinDir) {
-    const shim = resolveJAgentDeskCliShim(npmBinDir);
-    if (shim) {
-      return shim;
-    }
-  }
-
-  return externalCliEntrypoint;
-}
-
-function resolveJAgentDeskCliBinEntrypoint(): string | null {
-  try {
-    return require.resolve(JAGENTDESK_CLI_BIN_ENTRY);
-  } catch {
-    return null;
-  }
-}
-
-function findNpmBinDir(startPath: string): string | null {
-  let current = startPath;
-  while (true) {
-    const candidate = join(current, "node_modules", ".bin");
-    if (hasJAgentDeskCliShim(candidate)) {
-      return candidate;
-    }
-
-    const parent = dirname(current);
-    if (parent === current) {
-      return null;
-    }
-    current = parent;
-  }
-}
-
-function hasJAgentDeskCliShim(binDir: string): boolean {
-  return resolveJAgentDeskCliShim(binDir) !== null;
-}
-
-function resolveJAgentDeskCliShim(binDir: string): string | null {
-  for (const name of jagentdeskCliShimNames()) {
-    const candidate = join(binDir, name);
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-  }
-  return null;
-}
-
-function jagentdeskCliShimNames(): string[] {
-  return process.platform === "win32"
-    ? ["jagentdesk.cmd", "jagentdesk.exe", "jagentdesk"]
-    : ["jagentdesk"];
 }
 
 function resolveZshShellIntegrationRuntimeDir(): string {
@@ -411,10 +370,14 @@ function prepareZshShellIntegrationRuntimeDir(sourceDir = resolveZshShellIntegra
 export function buildTerminalEnvironment(
   input: BuildTerminalEnvironmentInput,
 ): Record<string, string> {
-  const baseEnv: Record<string, string> = createExternalProcessEnv(process.env, input.env, {
-    TERM: "xterm-256color",
-    TERM_PROGRAM: "kitty",
-  });
+  const baseEnv: Record<string, string> = createExternalProcessEnv(
+    input.baseEnv ?? process.env,
+    input.env,
+    {
+      TERM: "xterm-256color",
+      TERM_PROGRAM: "kitty",
+    },
+  );
   const envWithAgentHooks = prependJAgentDeskCliToPath(
     baseEnv,
     input.jagentdeskCliBinDir === undefined
@@ -454,6 +417,26 @@ function injectJAgentDeskHookCli(
   };
 }
 
+// The environment and CLI path a terminal starts from: the caller's when it sends them (the
+// daemon controlling a detached worker does), this process's otherwise.
+function resolveTerminalEnvironmentSource(
+  input: Pick<CreateTerminalOptions, "baseEnv" | "jagentdeskCliPath">,
+): Pick<
+  BuildTerminalEnvironmentInput,
+  "baseEnv" | "jagentdeskCliBinDir" | "jagentdeskHookCliPath"
+> {
+  const source: Pick<
+    BuildTerminalEnvironmentInput,
+    "baseEnv" | "jagentdeskCliBinDir" | "jagentdeskHookCliPath"
+  > = {};
+  if (input.baseEnv) source.baseEnv = input.baseEnv;
+  if (input.jagentdeskCliPath !== undefined) {
+    source.jagentdeskCliBinDir = input.jagentdeskCliPath ? dirname(input.jagentdeskCliPath) : null;
+    source.jagentdeskHookCliPath = input.jagentdeskCliPath;
+  }
+  return source;
+}
+
 function prependJAgentDeskCliToPath(
   env: Record<string, string>,
   cliBinDir: string | null,
@@ -477,175 +460,6 @@ function getPathEnvKey(env: Record<string, string>): string {
 function prependPathEntry(currentPath: string, entry: string): string {
   const entries = currentPath.split(delimiter).filter((value) => value && value !== entry);
   return [entry, ...entries].join(delimiter);
-}
-
-function extractCell(terminal: TerminalType, row: number, col: number): TerminalCell {
-  const buffer = terminal.buffer.active;
-  const line = buffer.getLine(row);
-  if (!line) {
-    return { char: " ", fg: undefined, bg: undefined };
-  }
-
-  const cell = line.getCell(col);
-  if (!cell) {
-    return { char: " ", fg: undefined, bg: undefined };
-  }
-
-  // Color modes from xterm.js: 0=DEFAULT, 1=16 colors (ANSI), 2=256 colors, 3=RGB
-  // getFgColorMode() returns packed value with mode in upper byte (e.g. 0x01000000 for mode 1)
-  const fgModeRaw = cell.getFgColorMode();
-  const bgModeRaw = cell.getBgColorMode();
-  const fgMode = fgModeRaw >> 24;
-  const bgMode = bgModeRaw >> 24;
-
-  // Only return color if not default (mode 0)
-  const fg = fgMode !== 0 ? cell.getFgColor() : undefined;
-  const bg = bgMode !== 0 ? cell.getBgColor() : undefined;
-
-  return {
-    char: cell.getChars() || " ",
-    fg,
-    bg,
-    fgMode: fgMode !== 0 ? fgMode : undefined,
-    bgMode: bgMode !== 0 ? bgMode : undefined,
-    bold: cell.isBold() !== 0,
-    italic: cell.isItalic() !== 0,
-    underline: cell.isUnderline() !== 0,
-    dim: cell.isDim() !== 0,
-    inverse: cell.isInverse() !== 0,
-    strikethrough: cell.isStrikethrough() !== 0,
-  };
-}
-
-export function extractGrid(terminal: TerminalType): TerminalCell[][] {
-  const grid: TerminalCell[][] = [];
-  const buffer = terminal.buffer.active;
-  // Visible viewport starts at baseY
-  const baseY = buffer.baseY;
-
-  for (let row = 0; row < terminal.rows; row++) {
-    const rowCells: TerminalCell[] = [];
-    for (let col = 0; col < terminal.cols; col++) {
-      rowCells.push(extractCell(terminal, baseY + row, col));
-    }
-    grid.push(rowCells);
-  }
-
-  return grid;
-}
-
-export function extractScrollback(
-  terminal: TerminalType,
-  options?: { scrollbackLines?: number },
-): TerminalCell[][] {
-  const scrollback: TerminalCell[][] = [];
-  const buffer = terminal.buffer.active;
-  // baseY is the first row of the visible viewport (0-indexed)
-  // Lines 0 to baseY-1 are in scrollback, lines baseY onwards are visible
-  const scrollbackLines = buffer.baseY;
-  const startRow =
-    typeof options?.scrollbackLines === "number"
-      ? Math.max(0, scrollbackLines - options.scrollbackLines)
-      : 0;
-
-  for (let row = startRow; row < scrollbackLines; row++) {
-    const rowCells: TerminalCell[] = [];
-    const line = buffer.getLine(row);
-    for (let col = 0; col < terminal.cols; col++) {
-      if (line) {
-        const cell = line.getCell(col);
-        if (cell) {
-          const fgModeRaw = cell.getFgColorMode();
-          const bgModeRaw = cell.getBgColorMode();
-          const fgMode = fgModeRaw >> 24;
-          const bgMode = bgModeRaw >> 24;
-          const fg = fgMode !== 0 ? cell.getFgColor() : undefined;
-          const bg = bgMode !== 0 ? cell.getBgColor() : undefined;
-          rowCells.push({
-            char: cell.getChars() || " ",
-            fg,
-            bg,
-            fgMode: fgMode !== 0 ? fgMode : undefined,
-            bgMode: bgMode !== 0 ? bgMode : undefined,
-            bold: cell.isBold() !== 0,
-            italic: cell.isItalic() !== 0,
-            underline: cell.isUnderline() !== 0,
-            dim: cell.isDim() !== 0,
-            inverse: cell.isInverse() !== 0,
-            strikethrough: cell.isStrikethrough() !== 0,
-          });
-        } else {
-          rowCells.push({ char: " ", fg: undefined, bg: undefined });
-        }
-      } else {
-        rowCells.push({ char: " ", fg: undefined, bg: undefined });
-      }
-    }
-    scrollback.push(rowCells);
-  }
-
-  return scrollback;
-}
-
-// xterm marks a line `isWrapped` when it is a continuation of the PREVIOUS line.
-// The snapshot carries the inverse, tmux-style flag — "this row continues onto the
-// next row" — so the client can rejoin and reflow logical lines. So row y's flag is
-// whether line y+1 is a wrapped continuation.
-function lineContinuesToNext(terminal: TerminalType, absoluteRow: number): boolean {
-  return terminal.buffer.active.getLine(absoluteRow + 1)?.isWrapped === true;
-}
-
-export function extractGridWrapped(terminal: TerminalType): boolean[] {
-  const baseY = terminal.buffer.active.baseY;
-  const wrapped: boolean[] = [];
-  for (let row = 0; row < terminal.rows; row++) {
-    wrapped.push(lineContinuesToNext(terminal, baseY + row));
-  }
-  return wrapped;
-}
-
-export function extractScrollbackWrapped(
-  terminal: TerminalType,
-  options?: { scrollbackLines?: number },
-): boolean[] {
-  const scrollbackLines = terminal.buffer.active.baseY;
-  const startRow =
-    typeof options?.scrollbackLines === "number"
-      ? Math.max(0, scrollbackLines - options.scrollbackLines)
-      : 0;
-  const wrapped: boolean[] = [];
-  for (let row = startRow; row < scrollbackLines; row++) {
-    wrapped.push(lineContinuesToNext(terminal, row));
-  }
-  return wrapped;
-}
-
-export function extractCursorState(terminal: TerminalType): TerminalState["cursor"] {
-  const coreService = (terminal as unknown as { _core?: { coreService?: Record<string, unknown> } })
-    ._core?.coreService as
-    | {
-        decPrivateModes?: { cursorStyle?: unknown; cursorBlink?: unknown };
-        isCursorHidden?: unknown;
-      }
-    | undefined;
-  const cursorStyle = coreService?.decPrivateModes?.cursorStyle;
-  const normalizedCursorStyle =
-    cursorStyle === "block" || cursorStyle === "underline" || cursorStyle === "bar"
-      ? cursorStyle
-      : undefined;
-  const cursorBlink =
-    typeof coreService?.decPrivateModes?.cursorBlink === "boolean"
-      ? coreService.decPrivateModes.cursorBlink
-      : undefined;
-  const hidden = Boolean(coreService?.isCursorHidden);
-
-  return {
-    row: terminal.buffer.active.cursorY,
-    col: terminal.buffer.active.cursorX,
-    ...(hidden ? { hidden: true } : {}),
-    ...(normalizedCursorStyle ? { style: normalizedCursorStyle } : {}),
-    ...(typeof cursorBlink === "boolean" ? { blink: cursorBlink } : {}),
-  };
 }
 
 function normalizeProcessToken(token: string): string {
@@ -805,7 +619,65 @@ export function extractLastOutputLinesFromText(text: string, limit: number): str
   return lines.slice(-limit);
 }
 
-export async function createTerminal(options: CreateTerminalOptions): Promise<TerminalSession> {
+function isExecutableFile(path: string): boolean {
+  try {
+    if (!statSync(path).isFile()) {
+      return false;
+    }
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export interface AssertTerminalCommandCanStartInput {
+  command: string | undefined;
+  // The terminal's own cwd and environment, not the daemon's: execve in the
+  // child resolves against those, so anything else produces false negatives.
+  cwd: string;
+  env: Record<string, string>;
+  platform?: NodeJS.Platform;
+}
+
+// node-pty spawns directly through execve on POSIX, with no shell, so a command
+// that does not exist fails inside the spawn helper and surfaces as exit code 1
+// with no output -- indistinguishable from `false` or any program that simply
+// failed. Resolving it up front is the only signal that separates "cannot start"
+// from "ran and exited non-zero", and it lets the create report the failure
+// instead of handing back a terminal that dies immediately. Windows keeps
+// resolving inside resolveTerminalSpawnCommand, which has its own shim handling
+// and its own fallback for an unresolved command.
+export async function assertTerminalCommandCanStart(
+  input: AssertTerminalCommandCanStartInput,
+): Promise<void> {
+  const { command, cwd, env } = input;
+  const platform = input.platform ?? process.platform;
+  if (command === undefined || platform === "win32") {
+    return;
+  }
+
+  // A path-ish command is resolved by execve against the child's cwd, never
+  // through PATH and never against the daemon's working directory.
+  if (command.includes("/")) {
+    if (isExecutableFile(resolvePath(cwd, command))) {
+      return;
+    }
+    throw new TerminalCommandNotFoundError(command);
+  }
+
+  const resolved = await findExecutableWithoutProbing(command, {
+    path: env[getPathEnvKey(env)],
+    cwd,
+  });
+  if (!resolved) {
+    throw new TerminalCommandNotFoundError(command);
+  }
+}
+
+export async function createTerminal(
+  options: CreateTerminalOptions,
+): Promise<LocalTerminalSession> {
   const {
     cwd,
     workspaceId,
@@ -818,8 +690,10 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     title: presetTitle,
     command,
     args = [],
+    baseEnv,
+    jagentdeskCliPath,
   } = options;
-  const resolvedShell = shell ?? resolveDefaultTerminalShell();
+  const resolvedShell = shell ?? resolveDefaultTerminalShell({ env: baseEnv });
 
   const id = options.id ?? randomUUID();
   const listeners = new Set<(msg: ServerMessage) => void>();
@@ -850,13 +724,9 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
   const activityChangeListeners = new Set<(transition: TerminalActivityTransition) => void>();
   let titleChangeSubscription: { dispose(): void } | null = null;
 
-  // Create xterm.js headless terminal
-  const terminal = new Terminal({
-    rows,
-    cols,
-    scrollback: 1000,
-    allowProposedApi: true,
-  });
+  const terminal = createHeadlessTerminal({ rows, cols, scrollback: 10000 });
+
+  const serialize = createTerminalSerializer(terminal);
 
   ensureNodePtySpawnHelperExecutableForCurrentPlatform();
 
@@ -864,19 +734,24 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
   const { command: spawnCommand, args: spawnArgs } = command
     ? await resolveTerminalSpawnCommand(command, args)
     : { command: resolvedShell, args: [] as string[] };
+  const terminalEnv = buildTerminalEnvironment({
+    shell: spawnCommand,
+    env: {
+      ...env,
+      ...activityEnv,
+      JAGENTDESK_WORKSPACE_ID: workspaceId,
+    },
+    ...resolveTerminalEnvironmentSource({ baseEnv, jagentdeskCliPath }),
+  });
+
+  await assertTerminalCommandCanStart({ command, cwd, env: terminalEnv });
+
   const ptyProcess = pty.spawn(spawnCommand, spawnArgs, {
     name: "xterm-256color",
     cols,
     rows,
     cwd,
-    env: buildTerminalEnvironment({
-      shell: spawnCommand,
-      env: {
-        ...env,
-        ...activityEnv,
-        JAGENTDESK_WORKSPACE_ID: workspaceId,
-      },
-    }),
+    env: terminalEnv,
   });
 
   function emitTitleChange(nextTitle: string | undefined): void {
@@ -1089,6 +964,10 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
       if (disposed || killed) {
         return;
       }
+      // Commit protocol modes with the parsed bytes, so a replay cut cannot
+      // combine an older xterm buffer with modes from queued future output.
+      const inputModeUpdate = inputModeTracker.feed(data);
+      for (const response of inputModeUpdate.responses) ptyProcess.write(response);
       stateRevision += 1;
       for (const listener of listeners) {
         listener({ type: "output", data, revision: stateRevision });
@@ -1099,10 +978,6 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
   // Pipe PTY output to terminal emulator
   ptyProcess.onData((data) => {
     if (killed) return;
-    const inputModeUpdate = inputModeTracker.feed(data);
-    for (const response of inputModeUpdate.responses) {
-      ptyProcess.write(response);
-    }
     recentOutputChunks.push(data);
     recentOutputLength += data.length;
     // Drop whole leading chunks while the rest still covers the char limit, so
@@ -1160,32 +1035,15 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     }
   }
 
-  function getState(snapshotOptions?: TerminalStateSnapshotOptions): TerminalState {
-    return {
+  function serializeReplay(replayOptions?: TerminalReplayOptions) {
+    const metadata = {
       rows: terminal.rows,
       cols: terminal.cols,
-      grid: extractGrid(terminal),
-      scrollback: extractScrollback(terminal, {
-        scrollbackLines: snapshotOptions?.scrollbackLines,
-      }),
-      cursor: extractCursorState(terminal),
-      ...(title ? { title } : {}),
-      ...(snapshotOptions?.includeWrapFlags
-        ? {
-            gridWrapped: extractGridWrapped(terminal),
-            scrollbackWrapped: extractScrollbackWrapped(terminal, {
-              scrollbackLines: snapshotOptions?.scrollbackLines,
-            }),
-          }
-        : {}),
-    };
-  }
-
-  function getStateSnapshot(snapshotOptions?: TerminalStateSnapshotOptions): TerminalStateSnapshot {
-    return {
-      state: getState(snapshotOptions),
+      retainedHistoryLines: terminal.buffer.normal.baseY,
       revision: stateRevision,
+      replayPreamble: getReplayPreamble(),
     };
+    return { metadata, data: serialize(replayOptions) };
   }
 
   function getSize(): { rows: number; cols: number } {
@@ -1248,14 +1106,10 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     }
   }
 
-  function subscribe(
-    listener: (msg: ServerMessage) => void,
-    subscribeOptions?: TerminalSubscribeOptions,
-  ): () => void {
+  function subscribe(listener: (msg: ServerMessage) => void): () => void {
     let active = true;
     let snapshotDelivered = false;
     const queuedMessages: ServerMessage[] = [];
-    const initialSnapshot = subscribeOptions?.initialSnapshot ?? "state";
     const subscriptionListener = (msg: ServerMessage): void => {
       if (!active) {
         return;
@@ -1272,17 +1126,11 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     terminal.write("", () => {
       if (!disposed && active && listeners.has(subscriptionListener)) {
         snapshotDelivered = true;
-        if (initialSnapshot === "ready") {
-          // Carry the input-mode preamble so the snapshot-less "ready" path
-          // (live restore) can replay it without a separate state fetch.
-          listener({
-            type: "snapshotReady",
-            revision: stateRevision,
-            replayPreamble: getReplayPreamble(),
-          });
-        } else {
-          listener({ type: "snapshot", ...getStateSnapshot() });
-        }
+        listener({
+          type: "snapshotReady",
+          revision: stateRevision,
+          replayPreamble: getReplayPreamble(),
+        });
         for (const message of queuedMessages.splice(0)) {
           listener(message);
         }
@@ -1455,6 +1303,7 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
 
   return {
     id,
+    pid: ptyProcess.pid,
     name,
     cwd,
     workspaceId,
@@ -1465,8 +1314,15 @@ export async function createTerminal(options: CreateTerminalOptions): Promise<Te
     onTitleChange,
     onActivityChange,
     getSize,
-    getState,
-    getStateSnapshot,
+    serializeReplay,
+    captureLines: (captureOptions) => captureTerminalLines(terminal.buffer.active, captureOptions),
+    hasOutput: () => {
+      const buffer = terminal.buffer.active;
+      for (let row = 0; row < buffer.length; row++) {
+        if (buffer.getLine(row)?.translateToString(true).trim()) return true;
+      }
+      return false;
+    },
     getReplayPreamble,
     getTitle,
     getActivity,

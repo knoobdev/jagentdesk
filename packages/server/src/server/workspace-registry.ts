@@ -1,8 +1,6 @@
 import { promises as fs } from "node:fs";
-
-import type { Logger } from "pino";
+import { type Logger } from "pino";
 import { z } from "zod";
-
 import { writeJsonFileAtomic } from "./atomic-file.js";
 import { areEquivalentPaths } from "../utils/path.js";
 import {
@@ -10,6 +8,7 @@ import {
   type PersistedProjectKind,
   type PersistedWorkspaceKind,
 } from "./workspace-registry-model.js";
+import { type JsonValue } from "@jagentdesk/protocol/agent-types";
 
 const PersistedProjectRecordSchema = z.object({
   projectId: z.string(),
@@ -40,7 +39,15 @@ const PersistedProjectRecordSchema = z.object({
   archivedAt: z.string().nullable(),
 });
 
+const UntrustedWorkspaceSourceSchema = z.object({
+  kind: z.literal("change_request"),
+  forge: z.string(),
+  number: z.number().int().positive(),
+  headRepository: z.string(),
+});
+
 const PersistedWorkspaceRecordSchema = z.object({
+  untrustedSource: UntrustedWorkspaceSourceSchema.optional(),
   workspaceId: z.string(),
   projectId: z.string(),
   cwd: z.string(),
@@ -62,14 +69,15 @@ const PersistedWorkspaceRecordSchema = z.object({
     .nullable()
     .optional()
     .transform((value) => value ?? null),
+  head: z.string().optional(),
   // Exact checkout/worktree root backing cwd. This differs from cwd when the
   // selected project is a subdirectory inside a repository. Persist it so
   // archive and recovery do not need the directory to still exist in order to
   // recover placement.
   worktreeRoot: z.string().nullable().default(null),
-  // Comparison base preserved across worktree deletion and restore. New branch-off
+  // Current base preserved across worktree deletion and restore. New branch-off
   // workspaces store the resolved ref (e.g. refs/remotes/upstream/main); legacy and
-  // PR checkout records may contain a bare branch name. Ordinary checkouts use null.
+  // PR checkout records may contain a bare branch name. Null means no recorded base.
   baseBranch: z
     .string()
     .nullable()
@@ -92,9 +100,15 @@ const PersistedWorkspaceRecordSchema = z.object({
     .nullable()
     .optional()
     .transform((value) => value ?? null),
+  labels: z.array(z.string()).optional(),
+  // Plugin-owned data. JAgentDesk stores it and never reads a key.
+  metadata: z.record(z.string(), z.custom<JsonValue>()).default({}),
+  // Public discovery visibility. Contents retain their ordinary lifecycle.
+  background: z.boolean().optional().default(false),
 });
 
 export type PersistedProjectRecord = z.infer<typeof PersistedProjectRecordSchema>;
+
 export type PersistedWorkspaceRecord = z.infer<typeof PersistedWorkspaceRecordSchema>;
 
 export interface WorkspaceMutation {
@@ -110,6 +124,7 @@ export interface WorkspaceMutationContext {
 
 export interface WorkspaceArchiveContext {
   autoArchivedChangeRequestUrl?: string;
+  head?: string;
 }
 
 export interface ProjectMutation {
@@ -155,7 +170,7 @@ export interface WorkspaceRegistry {
     workspaceId: string,
     archivedAt: string,
     context?: WorkspaceArchiveContext,
-  ): Promise<void>;
+  ): Promise<boolean>;
   remove(workspaceId: string): Promise<void>;
   /** Central lifecycle seam for daemon-global workspace observers. */
   subscribeToMutations?(
@@ -230,17 +245,6 @@ class FileBackedRegistry<TRecord extends RegistryRecord> {
     this.cache.set(id, next);
     await this.enqueuePersist();
     return next;
-  }
-
-  async archive(id: string, archivedAt: string): Promise<void> {
-    await this.archiveIfPresent(id, archivedAt);
-  }
-
-  protected async archiveIfPresent(id: string, archivedAt: string): Promise<TRecord | null> {
-    await this.load();
-    const existing = this.cache.get(id);
-    if (!existing) return null;
-    return this.persistArchive(existing, archivedAt);
   }
 
   protected async archiveIfActive(id: string, archivedAt: string): Promise<TRecord | null> {
@@ -416,7 +420,7 @@ export class FileBackedProjectRegistry
     return project;
   }
 
-  override async archive(projectId: string, archivedAt: string): Promise<void> {
+  async archive(projectId: string, archivedAt: string): Promise<void> {
     const project = await this.archiveIfActive(projectId, archivedAt);
     if (!project) return;
     await this.notifyMutation({ kind: "archive", projectId, project });
@@ -486,27 +490,34 @@ export class FileBackedWorkspaceRegistry
     });
   }
 
-  override async archive(
+  async archive(
     workspaceId: string,
     archivedAt: string,
     context?: WorkspaceArchiveContext,
-  ): Promise<void> {
-    const workspace = await super.update(workspaceId, (existing) => ({
-      ...existing,
-      updatedAt: archivedAt,
-      archivedAt,
-      ...(context?.autoArchivedChangeRequestUrl
-        ? { autoArchivedChangeRequestUrl: context.autoArchivedChangeRequestUrl }
-        : {}),
-    }));
-    if (!workspace) return;
+  ): Promise<boolean> {
+    let archived = false;
+    const workspace = await super.update(workspaceId, (existing) => {
+      if (existing.archivedAt) return existing;
+      archived = true;
+      return {
+        ...existing,
+        updatedAt: archivedAt,
+        archivedAt,
+        head: context?.head,
+        ...(context?.autoArchivedChangeRequestUrl
+          ? { autoArchivedChangeRequestUrl: context.autoArchivedChangeRequestUrl }
+          : {}),
+      };
+    });
+    if (!workspace || !archived) return false;
     await this.notifyMutation({ kind: "archive", workspaceId, workspace });
+    return true;
   }
 
   override async remove(workspaceId: string): Promise<void> {
     const workspace = await this.removeIfPresent(workspaceId);
     if (!workspace) return;
-    await this.notifyMutation({ kind: "remove", workspaceId, workspace: null });
+    await this.notifyMutation({ kind: "remove", workspaceId, workspace });
   }
 
   private async notifyMutation(mutation: WorkspaceMutation): Promise<void> {
@@ -556,9 +567,14 @@ export function createPersistedWorkspaceRecord(input: {
   archivedAt?: string | null;
   autoArchivedChangeRequestUrl?: string | null;
   pinnedAt?: string | null;
+  labels?: string[];
+  metadata?: Record<string, JsonValue>;
+  background?: boolean;
 }): PersistedWorkspaceRecord {
+  const { background, ...rest } = input;
   return PersistedWorkspaceRecordSchema.parse({
-    ...input,
+    ...rest,
+    background: background ?? false,
     title: input.title ?? null,
     branch: input.branch ?? null,
     worktreeRoot: input.worktreeRoot ?? null,

@@ -33,7 +33,7 @@ const pluginRegistry = {
         ...entry,
         requirements: { jagentdesk: `>=${appPackage.version}` },
       })),
-      { ...options, client: daemonClient },
+      { ...options, client: daemonClient, audio: { play: async () => 0 } },
     );
   },
 };

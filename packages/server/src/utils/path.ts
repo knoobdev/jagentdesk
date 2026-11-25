@@ -92,16 +92,19 @@ export function isRealpathInsideRoot(root: string, candidate: string): boolean {
   return getRealpathAwareRelativePath(root, candidate) !== null;
 }
 
-function getRelativePathInsideRoot(root: string, candidate: string): string | null {
+export function getRelativePathInsideRoot(root: string, candidate: string): string | null {
   const compareAsWindows = shouldCompareAsWindows(root, candidate);
   const platformPath = compareAsWindows ? nodePath.win32 : nodePath.posix;
   const normalizedRoot = normalizePathForComparison(root, compareAsWindows);
   const normalizedCandidate = normalizePathForComparison(candidate, compareAsWindows);
   const relative = platformPath.relative(normalizedRoot, normalizedCandidate);
 
-  return relative === "" || (!relative.startsWith("..") && !platformPath.isAbsolute(relative))
-    ? relative
-    : null;
+  const isOutsideRoot =
+    relative === ".." ||
+    relative.startsWith(`..${platformPath.sep}`) ||
+    platformPath.isAbsolute(relative);
+  if (isOutsideRoot) return null;
+  return relative;
 }
 
 function collectPathVariants(value: string): string[] {
@@ -184,4 +187,15 @@ function stripTrailingSeparators(value: string, root: string, compareAsWindows: 
     result = result.slice(0, -1);
   }
   return result;
+}
+
+export function normalizePathPreservingCase(value: string, compareAsWindows: boolean): string {
+  const platformPath = compareAsWindows ? nodePath.win32 : nodePath.posix;
+  const comparableValue = compareAsWindows ? stripWindowsNamespacePrefix(value) : value;
+  const platformNormalized = platformPath.normalize(comparableValue);
+  return stripTrailingSeparators(
+    platformNormalized,
+    platformPath.parse(platformNormalized).root,
+    compareAsWindows,
+  );
 }

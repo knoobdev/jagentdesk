@@ -1,19 +1,22 @@
-import type pino from "pino";
+import pino from "pino";
 import { getErrorMessage } from "@jagentdesk/protocol/error-utils";
-import type { SessionInboundMessage, SessionOutboundMessage } from "../../messages.js";
+import { type SessionInboundMessage, type SessionOutboundMessage } from "../../messages.js";
 import {
   isGlobalProviderSnapshotKey,
   type ProviderSnapshotManager,
 } from "../../agent/provider-snapshot-manager.js";
-import type {
-  AgentFeature,
+import {
   AgentProvider,
   AgentSessionConfig,
   ProviderSnapshotEntry,
+  type AgentOptionControl,
 } from "../../agent/agent-sdk-types.js";
-import type { ProviderAvailability } from "../../agent/agent-manager.js";
-import type { ProviderUsageService } from "../../../services/quota-fetcher/service.js";
+import { type ProviderAvailability } from "../../agent/agent-manager.js";
+import { type ProviderUsageService } from "../../../services/quota-fetcher/service.js";
 import { expandTilde } from "../../../utils/path.js";
+import { featuresFromControls } from "@jagentdesk/protocol/option-controls";
+import { foldFeatureValues } from "../../agent/option-controls.js";
+import { type ProviderOptions } from "@jagentdesk/protocol/agent-types";
 
 // COMPAT(customModeIcons): the only mode icons known to clients before v0.1.84. Any
 // other icon name is downgraded to "ShieldCheck" for those clients.
@@ -34,13 +37,19 @@ const LEGACY_MODE_ICONS = new Set<string>([
  */
 export interface ProviderCatalogSessionHost {
   emit(msg: SessionOutboundMessage): void;
+
   // COMPAT(providersSnapshot): visibility gating for older clients lives on the shell
   // (agent-lifecycle shares it). Reads appVersion live.
   isProviderVisibleToClient(provider: string): boolean;
+
   // COMPAT(customModeIcons): reads clientCapabilities live.
   supportsCustomModeIcons(): boolean;
+
   listProviderAvailability(): Promise<ProviderAvailability[]>;
-  listDraftFeatures(config: AgentSessionConfig): Promise<AgentFeature[]>;
+
+  listDraftControls(
+    config: AgentSessionConfig,
+  ): Promise<{ controls: AgentOptionControl[]; options: ProviderOptions }>;
 }
 
 export interface ProviderCatalogSessionOptions {
@@ -59,9 +68,13 @@ export interface ProviderCatalogSessionOptions {
  */
 export class ProviderCatalogSession {
   private readonly host: ProviderCatalogSessionHost;
+
   private readonly providerSnapshotManager: ProviderSnapshotManager;
+
   private readonly providerUsageService: ProviderUsageService;
+
   private readonly logger: pino.Logger;
+
   private unsubscribeSnapshotEvents: (() => void) | null = null;
 
   constructor(options: ProviderCatalogSessionOptions) {
@@ -277,29 +290,59 @@ export class ProviderCatalogSession {
     model?: string;
     thinkingOptionId?: string;
     featureValues?: Record<string, unknown>;
+    providerOptions?: ProviderOptions;
   }): AgentSessionConfig {
+    // COMPAT(featureValues): added in v0.15.0, remove after 2027-05-01.
+    const { providerOptions } = foldFeatureValues(draftConfig);
     return {
       provider: draftConfig.provider,
       cwd: expandTilde(draftConfig.cwd),
       ...(draftConfig.modeId ? { modeId: draftConfig.modeId } : {}),
       ...(draftConfig.model ? { model: draftConfig.model } : {}),
       ...(draftConfig.thinkingOptionId ? { thinkingOptionId: draftConfig.thinkingOptionId } : {}),
-      ...(draftConfig.featureValues ? { featureValues: draftConfig.featureValues } : {}),
+      ...(providerOptions ? { providerOptions } : {}),
     };
   }
 
+  async handleProviderControlsListRequest(
+    msg: Extract<SessionInboundMessage, { type: "provider.controls.list.request" }>,
+  ): Promise<void> {
+    const fetchedAt = new Date().toISOString();
+    const provider = msg.draftConfig.provider;
+    try {
+      const { controls, options } = await this.host.listDraftControls(
+        this.buildDraftAgentSessionConfig(msg.draftConfig),
+      );
+      this.host.emit({
+        type: "provider.controls.list.response",
+        payload: { provider, controls, options, error: null, fetchedAt, requestId: msg.requestId },
+      });
+    } catch (error) {
+      this.logger.error(
+        { err: error, provider, draftConfig: msg.draftConfig },
+        `Failed to list controls for ${provider}`,
+      );
+      this.host.emit({
+        type: "provider.controls.list.response",
+        payload: { provider, error: getErrorMessage(error), fetchedAt, requestId: msg.requestId },
+      });
+    }
+  }
+
+  // COMPAT(featureValues): added in v0.15.0, remove after 2027-05-01. Answered from controls.
   async handleListProviderFeaturesRequest(
     msg: Extract<SessionInboundMessage, { type: "list_provider_features_request" }>,
   ): Promise<void> {
     const fetchedAt = new Date().toISOString();
     try {
-      const sessionConfig = this.buildDraftAgentSessionConfig(msg.draftConfig);
-      const features = await this.host.listDraftFeatures(sessionConfig);
+      const { controls, options } = await this.host.listDraftControls(
+        this.buildDraftAgentSessionConfig(msg.draftConfig),
+      );
       this.host.emit({
         type: "list_provider_features_response",
         payload: {
           provider: msg.draftConfig.provider,
-          features,
+          features: featuresFromControls({ controls, options }),
           error: null,
           fetchedAt,
           requestId: msg.requestId,
@@ -419,6 +462,77 @@ export class ProviderCatalogSession {
           requestType: msg.type,
           error: `Failed to get provider diagnostic: ${err.message}`,
           code: "provider_diagnostic_failed",
+        },
+      });
+    }
+  }
+
+  async handleInspectProviderInstallationRequest(
+    msg: Extract<SessionInboundMessage, { type: "provider.installation.inspect.request" }>,
+  ): Promise<void> {
+    const response = { provider: msg.provider, requestId: msg.requestId };
+    try {
+      const installation = await this.providerSnapshotManager.installations.inspect(msg.provider, {
+        refresh: msg.refresh,
+      });
+      this.host.emit({
+        type: "provider.installation.inspect.response",
+        payload: { ...response, installation, error: null },
+      });
+    } catch (error) {
+      this.host.emit({
+        type: "provider.installation.inspect.response",
+        payload: {
+          ...response,
+          installation: null,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+
+  async handleUpdateProviderRequest(
+    msg: Extract<SessionInboundMessage, { type: "provider.installation.update.request" }>,
+  ): Promise<void> {
+    const response = { provider: msg.provider, requestId: msg.requestId };
+    try {
+      const update = this.providerSnapshotManager.installations.update(msg.provider);
+      this.host.emit({
+        type: "provider.installation.update.response",
+        payload: { ...response, update, error: null },
+      });
+    } catch (error) {
+      this.host.emit({
+        type: "provider.installation.update.response",
+        payload: {
+          ...response,
+          update: null,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+
+  async handleCheckProviderUpdatesRequest(
+    msg: Extract<SessionInboundMessage, { type: "provider.installation.check_updates.request" }>,
+  ): Promise<void> {
+    const response = { provider: msg.provider, requestId: msg.requestId };
+    try {
+      const updateCheck = await this.providerSnapshotManager.installations.checkForUpdates(
+        msg.provider,
+        { refresh: msg.refresh },
+      );
+      this.host.emit({
+        type: "provider.installation.check_updates.response",
+        payload: { ...response, updateCheck, error: null },
+      });
+    } catch (error) {
+      this.host.emit({
+        type: "provider.installation.check_updates.response",
+        payload: {
+          ...response,
+          updateCheck: null,
+          error: error instanceof Error ? error.message : String(error),
         },
       });
     }

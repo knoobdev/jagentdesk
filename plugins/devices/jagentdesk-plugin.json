@@ -1,0 +1,20 @@
+{
+  "kind": "builtin",
+  "id": "devices",
+  "name": "Devices & simulators",
+  "description": "Control devices and simulators, and sideload apps.",
+  "defaultEnabled": true,
+  "requires": [],
+  "hostCapabilities": [
+    "iosSimulators",
+    "androidDevices",
+    "androidPhysical",
+    "iosPhysical",
+    "iosSideload"
+  ],
+  "builtinOrder": 10,
+  "builtinEntrypoints": {
+    "server": "server/index.ts",
+    "client": "client/index.tsx"
+  }
+}

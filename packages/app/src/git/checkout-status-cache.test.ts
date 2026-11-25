@@ -11,8 +11,12 @@ import {
   prPanePipelineQueryKey,
   prPaneTimelineQueryKey,
 } from "@/git/pull-request-panel/query-keys";
-import { draftAgentCommandsQueryKey } from "@/hooks/agent-commands-query";
-import { resetReviewDraftStore, useReviewDraftStore } from "@/review/store";
+import { draftAgentCommandsQueryKey } from "@/agent-commands/cache";
+import {
+  resetWorkingDiffComparisons,
+  selectWorkingDiffComparison,
+  resolveWorkingDiffComparison,
+} from "./working-diff-comparison";
 import {
   applyCheckoutStatusUpdateFromEvent,
   ensureCheckoutStatus,
@@ -88,10 +92,11 @@ function checkoutStatusUpdate(
   };
 }
 
-function setDiffModeOverride(isDirtyAtSelection: boolean): void {
-  useReviewDraftStore.getState().setDiffModeOverride({
-    scopeKey: "review:scope",
-    override: { serverId, cwd, mode: "base", isDirtyAtSelection },
+function selectBaseComparison(): void {
+  selectWorkingDiffComparison({
+    serverId,
+    cwd,
+    comparison: "base",
   });
 }
 
@@ -100,7 +105,7 @@ function createQueryClient(): QueryClient {
 }
 
 beforeEach(() => {
-  resetReviewDraftStore();
+  resetWorkingDiffComparisons();
 });
 
 describe("fetchCheckoutStatus", () => {
@@ -114,13 +119,13 @@ describe("fetchCheckoutStatus", () => {
     expect(client.getCheckoutStatus).toHaveBeenCalledExactlyOnceWith(cwd);
   });
 
-  it("expires a manual diff-mode override when the fetched dirty state flipped", async () => {
-    setDiffModeOverride(true);
+  it("keeps a manual working-diff comparison when the fetched dirty state flips", async () => {
+    selectBaseComparison();
     const client = { getCheckoutStatus: vi.fn(async () => checkoutStatus({ isDirty: false })) };
 
     await fetchCheckoutStatus({ client, serverId, cwd });
 
-    expect(useReviewDraftStore.getState().diffModeOverrides["review:scope"]).toBeUndefined();
+    expect(resolveWorkingDiffComparison({ serverId, cwd })).toBe("base");
   });
 });
 
@@ -191,7 +196,7 @@ describe("applyCheckoutStatusUpdateFromEvent", () => {
     ).toBe(false);
   });
 
-  it("drops the checkout's cached draft slash commands when its branch changes", () => {
+  it("marks draft slash commands stale without clearing them when the branch changes", () => {
     const queryClient = createQueryClient();
     queryClient.setQueryData(
       checkoutStatusQueryKey(serverId, cwd),
@@ -214,7 +219,9 @@ describe("applyCheckoutStatusUpdateFromEvent", () => {
       message: checkoutStatusUpdate(checkoutStatus({ currentBranch: "main" })),
     });
 
-    expect(queryClient.getQueryData(thisCheckout)).toBeUndefined();
+    expect(queryClient.getQueryData(thisCheckout)).toEqual([{ name: "build-jagentdesk" }]);
+    expect(queryClient.getQueryState(thisCheckout)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherCheckout)?.isInvalidated).toBe(false);
     expect(queryClient.getQueryData(otherCheckout)).toEqual([{ name: "build-jagentdesk" }]);
   });
 
@@ -279,31 +286,25 @@ describe("applyCheckoutStatusUpdateFromEvent", () => {
     ).toBe("unauthenticated");
   });
 
-  it("expires a manual diff-mode override when the pushed dirty state flipped", () => {
-    const queryClient = createQueryClient();
-    setDiffModeOverride(false);
-
-    applyCheckoutStatusUpdateFromEvent({
-      queryClient,
-      serverId,
-      message: checkoutStatusUpdate(checkoutStatus({ isDirty: true })),
-    });
-
-    expect(useReviewDraftStore.getState().diffModeOverrides["review:scope"]).toBeUndefined();
-  });
-
-  it("keeps a manual diff-mode override while the pushed dirty state still matches", () => {
-    const queryClient = createQueryClient();
-    setDiffModeOverride(true);
-
-    applyCheckoutStatusUpdateFromEvent({
-      queryClient,
-      serverId,
-      message: checkoutStatusUpdate(checkoutStatus({ isDirty: true })),
-    });
-
-    expect(useReviewDraftStore.getState().diffModeOverrides["review:scope"]).toBeDefined();
-  });
+  it.each(["base", "uncommitted"] as const)(
+    "keeps %s selected across dirty and clean pushes",
+    (comparison) => {
+      const queryClient = createQueryClient();
+      selectWorkingDiffComparison({ serverId, cwd, comparison });
+      applyCheckoutStatusUpdateFromEvent({
+        queryClient,
+        serverId,
+        message: checkoutStatusUpdate(checkoutStatus({ isDirty: true })),
+      });
+      expect(resolveWorkingDiffComparison({ serverId, cwd })).toBe(comparison);
+      applyCheckoutStatusUpdateFromEvent({
+        queryClient,
+        serverId,
+        message: checkoutStatusUpdate(checkoutStatus({ isDirty: false })),
+      });
+      expect(resolveWorkingDiffComparison({ serverId, cwd })).toBe(comparison);
+    },
+  );
 
   it("invalidates PR detail queries when the prStatus changes, ignoring the volatile requestId", () => {
     const queryClient = createQueryClient();

@@ -1,3 +1,4 @@
+import { buildProviderRegistry } from "../provider-registry.js";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -5,6 +6,7 @@ import path from "node:path";
 import { describe, expect, test } from "vitest";
 
 import { createTestLogger } from "../../../test-utils/test-logger.js";
+import { runProviderRefreshWithDeadline } from "../provider-refresh-deadline.js";
 import { buildVersionProbeCommand, GenericACPAgentClient } from "./generic-acp-agent.js";
 
 const TEST_ACP_TIMEOUT_MS = 1_000;
@@ -91,8 +93,15 @@ describe("GenericACPAgentClient diagnostics", () => {
       });
 
       await expect(
-        client.fetchCatalog({ cwd: tmpdir(), force: true, timeoutMs: TEST_ACP_TIMEOUT_MS }),
-      ).rejects.toThrow(`ACP catalog probe timed out after ${TEST_ACP_TIMEOUT_MS}ms`);
+        runProviderRefreshWithDeadline({
+          label: "Grok",
+          timeoutMs: TEST_ACP_TIMEOUT_MS,
+          operation: (context) =>
+            client.fetchCatalog({ scope: "workspace", cwd: tmpdir(), force: true }, context),
+        }),
+      ).rejects.toThrow(
+        `Timed out refreshing Grok after ${TEST_ACP_TIMEOUT_MS}ms; pending: session/new`,
+      );
 
       const pid = Number(await readFile(pidPath, "utf8"));
       await expectProcessExit(pid);
@@ -102,22 +111,33 @@ describe("GenericACPAgentClient diagnostics", () => {
   test("sends configured client capabilities in catalog and live session initialization", async () => {
     await withFakeACPAgent("success", async (scriptPath, mode, testDir) => {
       const initializeTracePath = path.join(testDir, "initialize.jsonl");
-      const client = new GenericACPAgentClient({
-        logger: createTestLogger(),
-        command: [process.execPath, scriptPath, mode, "", initializeTracePath],
-        providerParams: {
-          clientCapabilities: {
-            fs: {
-              readTextFile: true,
-              writeTextFile: true,
+      const logger = createTestLogger();
+      const registry = buildProviderRegistry(logger, {
+        providerOverrides: {
+          "configured-acp": {
+            extends: "acp",
+            label: "Configured ACP",
+            command: [process.execPath, scriptPath, mode, "", initializeTracePath],
+            options: {
+              supportsMcpServers: false,
+              clientCapabilities: {
+                fs: { readTextFile: true, writeTextFile: true },
+                terminal: true,
+              },
             },
-            terminal: true,
           },
         },
       });
+      const client = registry["configured-acp"].createClient(logger);
 
-      await client.fetchCatalog({ cwd: testDir, force: true, timeoutMs: TEST_ACP_TIMEOUT_MS });
-      const session = await client.createSession({ provider: "acp", cwd: testDir });
+      await client.fetchCatalog({
+        scope: "workspace",
+        cwd: testDir,
+        force: true,
+        timeoutMs: TEST_ACP_TIMEOUT_MS,
+      });
+      const session = await client.createSession({ provider: "configured-acp", cwd: testDir });
+      expect(session.capabilities.supportsMcpServers).toBe(false);
       await session.close();
 
       const initializeRequests = parseInitializeTrace(await readFile(initializeTracePath, "utf8"));

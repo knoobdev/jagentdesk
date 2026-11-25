@@ -1,10 +1,10 @@
+import { useBuiltinClientContributions } from "../builtin/surfaces";
 import { useCallback, useMemo, useState, type ReactElement, type RefObject } from "react";
 import { View } from "react-native";
 import { withUnistyles } from "react-native-unistyles";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { PluginAttachmentItem, PluginAttachmentSourceContribution } from "@jagentdesk/plugin";
 import { searchPluginAttachments } from "@jagentdesk/plugin/client/host";
-import type { LucideIcon } from "lucide-react-native";
 import type { UserComposerAttachment } from "@/attachments/types";
 import type { AttachmentMenuItem } from "@/composer/input/input";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
@@ -19,14 +19,21 @@ const SEARCH_STALE_TIME_MS = 30_000;
 const EMPTY_ATTACHMENT_ITEMS: PluginAttachmentItem[] = [];
 const iconColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 
-function SourceIcon({ Icon, color = "" }: { Icon: LucideIcon; color?: string }) {
+function SourceIcon({
+  Icon,
+  color = "",
+}: {
+  Icon: ReturnType<typeof resolvePluginIcon>;
+  color?: string;
+}) {
   return <Icon size={ICON_SIZE.md} color={color} />;
 }
 
 const ThemedSourceIcon = withUnistyles(SourceIcon);
 
 interface InstalledAttachmentSource {
-  plugin: InstalledPlugin;
+  plugin: Pick<InstalledPlugin, "id"> & Partial<Pick<InstalledPlugin, "queryClient">>;
+  search?: (client: DaemonClient, input: unknown) => Promise<unknown>;
   source: PluginAttachmentSourceContribution;
   key: string;
 }
@@ -78,9 +85,20 @@ export function usePluginAttachmentPicker(
   input: PluginAttachmentPickerInput,
 ): PluginAttachmentPickerBinding {
   const plugins = useInstalledPlugins();
-  const sources = useMemo(
-    () => installedAttachmentSources(plugins, input.serverId),
-    [input.serverId, plugins],
+  const builtins = useBuiltinClientContributions(input.serverId);
+  const sources = useMemo<InstalledAttachmentSource[]>(
+    () => [
+      ...installedAttachmentSources(plugins, input.serverId),
+      ...[...builtins].flatMap(([id, entry]) =>
+        entry.attachments.map(({ source, search }) => ({
+          plugin: { id },
+          source,
+          search,
+          key: `${id}/${source.id}`,
+        })),
+      ),
+    ],
+    [input.serverId, plugins, builtins],
   );
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -100,7 +118,10 @@ export function usePluginAttachmentPicker(
         const client = input.client;
         return searchPluginAttachments(
           active.source,
-          (method, rpcInput) => client.invokePluginRpc(active.plugin.id, method, rpcInput),
+          (method, rpcInput) =>
+            active.search
+              ? active.search(client, rpcInput)
+              : client.invokePluginRpc(active.plugin.id, method, rpcInput),
           trimmedQuery,
         );
       },

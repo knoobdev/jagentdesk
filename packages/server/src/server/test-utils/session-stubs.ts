@@ -1,21 +1,19 @@
 import { vi } from "vitest";
-
 import { getAgentProviderDefinition } from "@jagentdesk/protocol/provider-manifest";
-
-import type {
-  AgentMode,
-  AgentModelDefinition,
-  AgentProvider,
-  ProviderSnapshotEntry,
+import {
+  type AgentMode,
+  type AgentModelDefinition,
+  type AgentProvider,
+  type ProviderSnapshotEntry,
 } from "../agent/agent-sdk-types.js";
-import type {
-  AgentManagerProviderState,
-  ProviderDiagnosticResult,
-  ResolvedProviderCreateConfig,
+import {
+  type AgentManagerProviderState,
+  type ProviderDiagnosticResult,
+  type ResolvedProviderCreateConfig,
+  ProviderSnapshotManager,
 } from "../agent/provider-snapshot-manager.js";
-import { ProviderSnapshotManager } from "../agent/provider-snapshot-manager.js";
-import type { SessionOptions } from "../session.js";
-import type { SessionOutboundMessage } from "@jagentdesk/protocol/messages";
+import { type SessionOptions } from "../session.js";
+import { type SessionOutboundMessage } from "@jagentdesk/protocol/messages";
 import { asInternals, createStub } from "./class-mocks.js";
 
 // ---------------------------------------------------------------------------
@@ -33,7 +31,13 @@ export function asSessionLogger(stub: {
 export function asAgentManager(stub: {
   [K in keyof SessionOptions["agentManager"]]?: unknown;
 }): SessionOptions["agentManager"] {
-  return createStub<SessionOptions["agentManager"]>(stub);
+  return createStub<SessionOptions["agentManager"]>({
+    listProviderSubagentActivity: () => [],
+    getRetiredInternalAgent: () => null,
+    effectiveOptionsFor: (_provider: string, own?: Record<string, unknown>) => own ?? {},
+    getAgentBackgroundWorkSummary: () => undefined,
+    ...stub,
+  });
 }
 
 export function asAgentStorage(stub: {
@@ -198,7 +202,7 @@ export function createProviderSnapshotManagerStub(): {
   const listModes = vi.fn<[unknown], Promise<AgentMode[]>>(async () => []);
   const resolveCreateConfig = vi.fn<[unknown], Promise<ResolvedProviderCreateConfig>>(async () => ({
     modeId: undefined,
-    featureValues: undefined,
+    providerOptions: undefined,
   }));
   const resolveDefaultModel = vi.fn<[unknown], Promise<string | undefined>>(async () => undefined);
   const getProviderDiagnostic = vi.fn<[AgentProvider], Promise<ProviderDiagnosticResult>>(

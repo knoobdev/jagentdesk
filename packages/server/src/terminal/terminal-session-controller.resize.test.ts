@@ -5,7 +5,7 @@ import {
   encodeTerminalResizePayload,
   type TerminalStreamFrame,
 } from "@jagentdesk/protocol/binary-frames/index";
-import type { SessionOutboundMessage, TerminalState } from "@jagentdesk/protocol/messages";
+import type { SessionOutboundMessage } from "@jagentdesk/protocol/messages";
 import type pino from "pino";
 
 import { TerminalSessionController } from "./terminal-session-controller.js";
@@ -19,13 +19,6 @@ function createFixture(): {
 } {
   const appliedSizes: string[] = [];
   let size = { rows: 24, cols: 80 };
-  const state = (): TerminalState => ({
-    rows: size.rows,
-    cols: size.cols,
-    grid: [],
-    scrollback: [],
-    cursor: { row: 0, col: 0 },
-  });
   const terminal = {
     id: "terminal-1",
     name: "Terminal",
@@ -44,7 +37,7 @@ function createFixture(): {
   } as unknown as TerminalSession;
   const terminalManager = {
     getTerminal: () => terminal,
-    getTerminalState: async () => ({ state: state(), revision: 0 }),
+    replayTerminal: async () => null,
   } as unknown as TerminalManager;
   return { terminal, terminalManager, appliedSizes };
 }

@@ -1,5 +1,6 @@
-import type { AgentProvider } from "@jagentdesk/protocol/agent-types";
-import type { WorkspaceFileTabTarget } from "@/workspace/file-open";
+import type { JsonValue } from "@jagentdesk/protocol/agent-types";
+import { type AgentProvider } from "@jagentdesk/protocol/agent-types";
+import { type WorkspaceFileTabTarget } from "@/workspace/file-open";
 
 export interface WorkspaceDraftTabSetup {
   provider: AgentProvider;
@@ -7,7 +8,7 @@ export interface WorkspaceDraftTabSetup {
   modeId: string | null;
   model: string | null;
   thinkingOptionId: string | null;
-  featureValues: Record<string, unknown>;
+  providerOptions: Record<string, unknown>;
 }
 
 export interface WorkspaceWorkingDiffTabTarget {
@@ -37,6 +38,9 @@ export type WorkspaceTabTarget =
   | { kind: "provider_subagent"; parentAgentId: string; subagentId: string }
   | { kind: "terminal"; terminalId: string }
   | { kind: "browser"; browserId: string }
+  | { kind: "files" }
+  | { kind: "changes_tree" }
+  | { kind: "pull_request" }
   | WorkspaceFileTabTarget
   | WorkspaceWorkingDiffTabTarget
   | PluginWorkspaceTabTarget
@@ -44,6 +48,7 @@ export type WorkspaceTabTarget =
   | { kind: "commit_diff"; sha: string };
 
 export interface WorkspaceTab {
+  state?: JsonValue;
   tabId: string;
   target: WorkspaceTabTarget;
   createdAt: number;

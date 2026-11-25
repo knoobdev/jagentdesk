@@ -1,4 +1,4 @@
-import { useMemo, useCallback, useRef, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useCallback, useRef, useSyncExternalStore } from "react";
 import equal from "fast-deep-equal";
 import { useShallow } from "zustand/shallow";
 import { useSessionStore } from "@/stores/session-store";
@@ -24,6 +24,11 @@ export function useAggregatedAgents(options?: {
 }): AggregatedAgentsResult {
   const daemons = useHosts();
   const runtime = getHostRuntimeStore();
+  const serverIds = useMemo(() => daemons.map((host) => host.serverId), [daemons]);
+  useEffect(() => {
+    const releases = serverIds.map((serverId) => runtime.acquireDirectoryDemand(serverId));
+    return () => releases.forEach((release) => release());
+  }, [runtime, serverIds]);
   const includeArchived = options?.includeArchived ?? false;
   const runtimeVersion = useSyncExternalStore(
     (onStoreChange) => runtime.subscribeAll(onStoreChange),
@@ -67,7 +72,7 @@ export function useAggregatedAgents(options?: {
       }
       const serverLabel = serverLabelById.get(serverId) ?? serverId;
       for (const agent of agents.values()) {
-        if (!includeArchived && agent.archivedAt) {
+        if (agent.background || (!includeArchived && agent.archivedAt)) {
           continue;
         }
         const nextAgent: AggregatedAgent = {
@@ -76,6 +81,7 @@ export function useAggregatedAgents(options?: {
           serverLabel,
           title: agent.title ?? null,
           status: agent.status,
+          backgroundWork: agent.backgroundWork,
           lastActivityAt: agent.lastActivityAt,
           cwd: agent.cwd,
           workspaceId: agent.workspaceId,

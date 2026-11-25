@@ -6,6 +6,8 @@ export type SignedHelloVerification = { ok: true } | { ok: false; reason: string
 
 export function verifySignedHello(args: {
   nonce?: string;
+  transport?: "direct" | "tailnet" | "relay";
+  tailnetNodeId?: string;
   signature?: string;
   devicePublicKeyB64?: string;
   challenges: NonceChallengeManager;
@@ -24,6 +26,14 @@ export function verifySignedHello(args: {
   if (devices.getByPublicKey(devicePublicKeyB64) === null) {
     return { ok: false, reason: "device is not paired" };
   }
+
+  const device = devices.getByPublicKey(devicePublicKeyB64)!;
+  if (
+    args.transport === "tailnet" &&
+    device.tailnetNodeId !== undefined &&
+    (!args.tailnetNodeId || args.tailnetNodeId !== device.tailnetNodeId)
+  )
+    return { ok: false, reason: "node_changed" };
 
   if (!verifyNonceSignature(devicePublicKeyB64, nonce, signature)) {
     return { ok: false, reason: "signature verification failed" };

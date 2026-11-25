@@ -1,188 +1,83 @@
+import { useBuiltinDestinations } from "@/plugins/builtin/surfaces";
+import { orderAppNavItems } from "@/components/sidebar/nav-order";
+import { useOpenSidebarUsage } from "@/usage/sidebar-item";
 import { router, usePathname, type Href } from "expo-router";
 import { useCallback, useMemo } from "react";
 import {
-  BarChart3,
-  Boxes,
+  Gauge,
+  Bot,
   CalendarClock,
-  Container,
-  Database,
-  Figma,
-  GitPullRequest,
   History,
   Home,
-  KanbanSquare,
-  Radar,
-  Server,
-  Share2,
-  Ship,
-  Smartphone,
-  Sparkles,
   Store,
-  Users,
   type LucideIcon,
 } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { useHostFeature } from "@/runtime/host-features";
 import { useHosts } from "@/runtime/host-runtime";
 import { canCreateWorktreeForProjectKind } from "@/projects/host-projects";
-import { useClusterNavStore } from "@/stores/cluster-nav-store";
-import { useDatabaseNavStore } from "@/stores/database-nav-store";
 import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
-import { useSessionStore } from "@/stores/session-store";
-import { hostSupportsCapability } from "@/utils/server-info-capabilities";
-import type { HostCapabilityId } from "@jagentdesk/protocol/host-capabilities";
 
-/** Capabilities behind the device fleet: simulators, physical phones (spec 27.2), or sideload (26.9). */
-const DEVICE_CAPABILITIES: readonly HostCapabilityId[] = [
-  "iosSimulators",
-  "androidDevices",
-  "androidPhysical",
-  "iosPhysical",
-  "iosSideload",
-];
 import { useWorkspace } from "@/stores/session-store-hooks";
 import {
-  buildAgentForumRoute,
-  buildArgoCdRoute,
-  buildClusterWorkloadsRoute,
-  buildClustersRoute,
-  buildDatabaseBrowseRoute,
-  buildDatabasesRoute,
-  buildDockerRoute,
-  buildFigmaRoute,
-  buildForgeRoute,
-  buildInsightsRoute,
-  buildJiraRoute,
   buildMarketplaceRoute,
   buildNewWorkspaceRoute,
   buildOpenProjectRoute,
   buildSchedulesRoute,
-  buildServersRoute,
   buildSessionsRoute,
-  buildSharedSessionsRoute,
-  buildSimulatorRoute,
-  buildProxyRoute,
-  buildSkillsRoute,
 } from "@/utils/host-routes";
 
-/** Routes behind the app's primary navigation, shared by the sidebar list and the ClickUp rail. */
+/** Routes behind the app's primary navigation, shared by the sidebar list and the Gumloop rail. */
 export interface AppNavTargets {
-  clustersRoute: Href | null;
-  databasesRoute: Href | null;
-  serversRoute: Href | null;
-  skillsRoute: Href | null;
-  insightsRoute: Href | null;
-  forgeRoute: Href | null;
+  botsRoute: Href | null;
   marketplaceRoute: Href | null;
-  dockerRoute: Href | null;
-  simulatorRoute: Href | null;
-  proxyRoute: Href | null;
-  /** Spec 30.3: the daemon ships Argo CD; null hides the entry. */
-  argoCdRoute: Href | null;
-  supportsForgeHub: boolean;
-  /** Spec 29: Jira surface, when the daemon advertises `jira`. */
-  jiraRoute: Href | null;
-  /** Spec 32: Figma section, when the daemon advertises `figma`. */
-  figmaRoute: Href | null;
-  /** Spec 25: daemon build ships the SSH servers surface (S1+). */
-  supportsSshServers: boolean;
 }
 
 export function useAppNavTargets(): AppNavTargets {
   const hosts = useHosts();
-  const firstServerId = hosts[0]?.serverId ?? "";
-  const lastCluster = useClusterNavStore((s) => s.lastCluster);
-  const lastDatabase = useDatabaseNavStore((s) => s.lastDatabase);
-  // Forge Hub is a post-ADR-0003 surface gated per release milestone (spec 19.12):
-  // only advertise the entry when the first/active daemon reports forgeHub.
-  const supportsForgeHub = useSessionStore(
-    (state) => state.sessions[firstServerId]?.serverInfo?.features?.forgeHub === true,
-  );
-  const supportsJira = useSessionStore(
-    (state) => state.sessions[firstServerId]?.serverInfo?.features?.jira === true,
-  );
-  const supportsFigma = useSessionStore(
-    (state) => state.sessions[firstServerId]?.serverInfo?.features?.figma === true,
-  );
-  const supportsSshServers = useSessionStore(
-    (state) => state.sessions[firstServerId]?.serverInfo?.features?.sshServers === true,
-  );
-  const supportsArgoCd = useSessionStore(
-    (state) => state.sessions[firstServerId]?.serverInfo?.features?.argocd === true,
-  );
-  // Spec 24.4: devices open on the first host that can run simulators; none → no entry.
-  const deviceServerId = useSessionStore(
-    (state) =>
-      hosts.find((host) =>
-        hostSupportsCapability(state.sessions[host.serverId]?.serverInfo, DEVICE_CAPABILITIES),
-      )?.serverId ?? null,
-  );
+  const pathname = usePathname();
+  const selection = useActiveWorkspaceSelection();
+  const routeServerId = /^\/h\/([^/]+)/.exec(pathname)?.[1];
+  const firstServerId = routeServerId
+    ? decodeURIComponent(routeServerId)
+    : (selection?.serverId ?? hosts[0]?.serverId ?? "");
+  const supportsBots = useHostFeature(firstServerId, "bots");
   return useMemo(() => {
     const perHost = (build: (serverId: string) => string): Href | null =>
       firstServerId ? (build(firstServerId) as Href) : null;
-    // Clusters and databases jump straight back to the resource the user last had open,
-    // falling back to the list when there is none.
-    let clustersRoute: Href | null = perHost(buildClustersRoute);
-    if (lastCluster) {
-      clustersRoute = buildClusterWorkloadsRoute(
-        lastCluster.serverId,
-        lastCluster.clusterId,
-      ) as Href;
-    }
-    let databasesRoute: Href | null = perHost(buildDatabasesRoute);
-    if (lastDatabase) {
-      databasesRoute = buildDatabaseBrowseRoute(
-        lastDatabase.serverId,
-        lastDatabase.databaseId,
-      ) as Href;
-    }
     return {
-      clustersRoute,
-      databasesRoute,
+      botsRoute: supportsBots
+        ? perHost((serverId) => `/h/${encodeURIComponent(serverId)}/bots`)
+        : null,
       // Gated at the route: the entry disappears with the daemon feature flag.
-      serversRoute: supportsSshServers ? perHost(buildServersRoute) : null,
-      skillsRoute: perHost(buildSkillsRoute),
-      insightsRoute: perHost(buildInsightsRoute),
-      forgeRoute: perHost(buildForgeRoute),
       marketplaceRoute: perHost(buildMarketplaceRoute),
-      dockerRoute: perHost(buildDockerRoute),
-      simulatorRoute: deviceServerId ? (buildSimulatorRoute(deviceServerId) as Href) : null,
-      proxyRoute: perHost(buildProxyRoute),
-      argoCdRoute: supportsArgoCd ? perHost(buildArgoCdRoute) : null,
-      supportsForgeHub,
-      supportsSshServers,
-      jiraRoute: supportsJira ? perHost(buildJiraRoute) : null,
-      figmaRoute: supportsFigma ? perHost(buildFigmaRoute) : null,
     };
-  }, [
-    supportsJira,
-    supportsFigma,
-    deviceServerId,
-    firstServerId,
-    lastCluster,
-    lastDatabase,
-    supportsArgoCd,
-    supportsForgeHub,
-    supportsSshServers,
-  ]);
+  }, [supportsBots, firstServerId]);
 }
 
-export interface AppNavItem {
+interface AppNavItemBase {
+  group?: "Tools" | "main";
   key: string;
   icon: LucideIcon;
   label: string;
-  /** Short label for the ClickUp rail, where the text sits under the icon. */
+  /** Short label for the Gumloop rail, where the text sits under the icon. */
   shortLabel: string;
-  route: Href;
   isActive: boolean;
   testID: string;
+  /** Built-in destinations: legacy sidebar row test id. */
+  sidebarTestID?: string;
 }
+
+export type AppNavItem = AppNavItemBase &
+  ({ route: Href; onPress?: never } | { route?: never; onPress: () => void });
 
 /** The primary destinations in display order, with the active flag for the current route. */
 export function useAppNavItems(): AppNavItem[] {
+  const openUsage = useOpenSidebarUsage();
   const { t } = useTranslation();
   const pathname = usePathname();
   const targets = useAppNavTargets();
+  const builtinDestinations = useBuiltinDestinations(pathname);
   return useMemo(() => {
     const items: (AppNavItem | null)[] = [
       {
@@ -212,25 +107,8 @@ export function useAppNavItems(): AppNavItem[] {
         isActive: pathname.includes("/schedules"),
         testID: "rail-schedules",
       },
-      {
-        key: "shared-sessions",
-        icon: Share2,
-        label: "Shared sessions",
-        shortLabel: "Shared",
-        route: buildSharedSessionsRoute() as Href,
-        isActive: pathname.includes("/shared-sessions"),
-        testID: "rail-shared-sessions",
-      },
-      {
-        key: "team",
-        icon: Users,
-        label: "Team",
-        shortLabel: "Team",
-        route: buildAgentForumRoute() as Href,
-        isActive: pathname.includes("/agent-forum"),
-        testID: "rail-team",
-      },
-      navItem("skills", Sparkles, "Skills", "Skills", targets.skillsRoute, pathname, "/skills"),
+      navItem("bots", Bot, t("bots.title"), t("bots.title"), targets.botsRoute, pathname, "/bots"),
+
       navItem(
         "marketplace",
         Store,
@@ -240,54 +118,19 @@ export function useAppNavItems(): AppNavItem[] {
         pathname,
         "/marketplace",
       ),
-      navItem("docker", Container, "Docker", "Docker", targets.dockerRoute, pathname, "/docker"),
-      navItem(
-        "simulators",
-        Smartphone,
-        "Simulators",
-        "Sims",
-        targets.simulatorRoute,
-        pathname,
-        "/simulator",
-      ),
-      navItem("workbench", Radar, "Workbench", "WB", targets.proxyRoute, pathname, "/proxy"),
-      navItem(
-        "databases",
-        Database,
-        "Databases",
-        "Data",
-        targets.databasesRoute,
-        pathname,
-        "/database",
-      ),
-      navItem("servers", Server, "Servers", "Servers", targets.serversRoute, pathname, "/servers"),
-      navItem(
-        "clusters",
-        Boxes,
-        "Clusters",
-        "Clusters",
-        targets.clustersRoute,
-        pathname,
-        "/cluster",
-      ),
-      navItem("argocd", Ship, "Argo CD", "Argo CD", targets.argoCdRoute, pathname, "/argocd"),
-      navItem(
-        "usage",
-        BarChart3,
-        "Usage & Cost",
-        "Usage",
-        targets.insightsRoute,
-        pathname,
-        "/insights",
-      ),
-      navItem("jira", KanbanSquare, "Jira", "Jira", targets.jiraRoute, pathname, "/jira"),
-      navItem("figma", Figma, "Figma", "Figma", targets.figmaRoute, pathname, "/figma"),
-      targets.supportsForgeHub
-        ? navItem("forge", GitPullRequest, "Forge", "Forge", targets.forgeRoute, pathname, "/forge")
-        : null,
+      ...builtinDestinations,
+      {
+        key: "usage",
+        icon: Gauge,
+        label: "Usage",
+        shortLabel: "Usage",
+        onPress: openUsage,
+        isActive: false,
+        testID: "rail-usage",
+      },
     ];
-    return items.filter((item): item is AppNavItem => item !== null);
-  }, [pathname, t, targets]);
+    return orderAppNavItems(items.filter((item): item is AppNavItem => item !== null));
+  }, [openUsage, pathname, t, targets, builtinDestinations]);
 }
 
 function navItem(

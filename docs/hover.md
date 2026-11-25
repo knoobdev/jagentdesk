@@ -4,7 +4,7 @@ Read this before writing any hover code. Every hover regression we ship is one o
 
 ## The pattern
 
-The canonical implementation lives in `packages/app/src/components/sidebar-workspace-list.tsx`, in the workspace row (around line 1369). When in doubt, open that file and copy the shape.
+The canonical implementation lives in `packages/app/src/components/sidebar-workspace-list.tsx`, in the workspace row: the outer `View` uses `styles.workspaceRowContainer` and spreads `hoverHandlers`, and the inner pressable is the row's context-menu trigger. When in doubt, open that file and copy the shape.
 
 ```tsx
 //

@@ -1,3 +1,5 @@
+import { reconcileMobilePanel, type PanelLayout, type LeftSidebarPresentation } from "./state";
+export type { PanelLayout, LeftSidebarPresentation };
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -66,6 +68,8 @@ export {
 export type ExpandedPathsUpdate = string[] | ((currentPaths: string[]) => string[]);
 
 export interface PanelState {
+  layout: PanelLayout;
+  applyPanelLayout(layout: PanelLayout): void;
   // Mobile: React's durable target plus the generation that owns it.
   mobilePanel: MobilePanelSelection;
 
@@ -133,6 +137,16 @@ export const usePanelStore = create<PanelState>()(
     (set) => ({
       // Mobile always starts at agent view
       mobilePanel: { target: "agent", revision: 0 },
+      layout: { isCompact: false, leftSidebar: "hidden" },
+      applyPanelLayout: (layout) =>
+        set((state) => {
+          if (
+            state.layout.isCompact === layout.isCompact &&
+            state.layout.leftSidebar === layout.leftSidebar
+          )
+            return state;
+          return { layout, mobilePanel: reconcileMobilePanel(state.mobilePanel, layout) };
+        }),
 
       // Desktop defaults based on platform
       desktop: {

@@ -1,0 +1,12 @@
+{
+  "id": "copilot-usage-source",
+  "requirements": {
+    "jagentdesk": ">=0.9.59"
+  },
+  "kind": "builtin",
+  "name": "GitHub Copilot usage",
+  "description": "Read local copilot account quotas.",
+  "defaultEnabled": true,
+  "requires": [],
+  "builtinOrder": 28
+}

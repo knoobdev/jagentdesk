@@ -4,10 +4,11 @@ import type {
   MutableDaemonConfig,
   SessionOutboundMessage,
 } from "@jagentdesk/protocol/messages";
-import { agentCommandsQueryRoot } from "@/hooks/agent-commands-query";
+import { invalidateCommandsForProviderChange } from "@/agent-commands/cache";
+import type { ProviderSnapshotEntry } from "@jagentdesk/protocol/agent-types";
 import { orderCheckoutDiffFiles } from "@/git/diff-order";
 import { daemonConfigQueryKey } from "@/data/daemon-config";
-import { usageHistoryQueryKey, type UsageHistory } from "@/insights/use-usage-history";
+import { usageHistoryQueryKey, type UsageHistory } from "@/data/usage-history-query";
 import type { LifetimeUsage, UsageDayRollup } from "@jagentdesk/protocol/usage-history";
 import { daemonPairingOfferQueryKey } from "@/data/daemon-pairing";
 import { providersSnapshotQueryKey, providersSnapshotQueryRoot } from "@/data/providers-snapshot";
@@ -34,7 +35,7 @@ type CheckoutDiffCachePayload = Omit<CheckoutDiffResponsePayload, "subscriptionI
 type ListTerminalsPayload = ListTerminalsResponse["payload"];
 
 interface CheckoutDiffCompare {
-  mode: "uncommitted" | "base";
+  mode: "uncommitted" | "base" | "all";
   baseRef?: string;
   ignoreWhitespace?: boolean;
 }
@@ -191,14 +192,18 @@ export function applyProvidersSnapshotUpdate(input: {
     return;
   }
   const queryKey = providersSnapshotQueryKey(input.serverId, input.message.payload.cwd);
+  const previous = input.queryClient.getQueryData<{ entries: ProviderSnapshotEntry[] }>(queryKey);
   input.queryClient.setQueryData(queryKey, {
     entries: input.message.payload.entries,
     generatedAt: input.message.payload.generatedAt,
     requestId: "providers_snapshot_update",
   });
-  void input.queryClient.invalidateQueries({
-    queryKey: agentCommandsQueryRoot(input.serverId),
-    exact: false,
+  void invalidateCommandsForProviderChange({
+    queryClient: input.queryClient,
+    serverId: input.serverId,
+    cwd: input.message.payload.cwd ?? null,
+    previous: previous?.entries,
+    current: input.message.payload.entries,
   });
 }
 
@@ -550,6 +555,14 @@ function getActiveServerDataRoute(
   if (query.getObserversCount() === 0) {
     return null;
   }
+  // Query metadata belongs to the last observer that updated its options. A
+  // retained hidden panel must not cancel demand from another visible panel.
+  const observerRoutes = query.observers
+    .map((observer) => getServerDataRoute({ meta: observer.options.meta }))
+    .filter((route): route is ServerDataRoute => route !== null);
+  if (observerRoutes.length > 0) {
+    return observerRoutes.find((route) => route.enabled && route.serverId === serverId) ?? null;
+  }
   const route = getServerDataRoute(query);
   if (route) {
     return route.enabled && route.serverId === serverId ? route : null;
@@ -646,7 +659,7 @@ function canEventChangeDesiredSubscriptions(type: QueryCacheNotifyEvent["type"])
   );
 }
 
-function getServerDataRoute(query: Query): ServerDataRoute | null {
+function getServerDataRoute(query: Pick<Query, "meta">): ServerDataRoute | null {
   const meta = query.meta;
   if (!isRecord(meta) || !isRecord(meta.serverData)) {
     return null;
@@ -703,7 +716,7 @@ function readCheckoutDiffCompare(value: unknown): CheckoutDiffCompare | null {
   const mode = value.mode;
   const baseRef = value.baseRef;
   const ignoreWhitespace = value.ignoreWhitespace;
-  if (mode !== "uncommitted" && mode !== "base") {
+  if (mode !== "uncommitted" && mode !== "base" && mode !== "all") {
     return null;
   }
   if (baseRef !== undefined && typeof baseRef !== "string") {

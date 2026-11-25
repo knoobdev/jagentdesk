@@ -1,6 +1,6 @@
 import type { AgentSnapshotPayload } from "@jagentdesk/protocol/messages";
 import type { AgentPermissionRequest } from "@jagentdesk/protocol/agent-types";
-import { getParentAgentIdFromLabels } from "@jagentdesk/protocol/agent-labels";
+import { getParentAddressFromLabels } from "@jagentdesk/protocol/agent-labels";
 import type { ActiveTurnIdentity } from "@/timeline/turn-liveness";
 
 function normalizeActiveTurn(
@@ -41,7 +41,8 @@ export function normalizeAgentSnapshot(snapshot: AgentSnapshotPayload, serverId:
     ? new Date(snapshot.attentionTimestamp)
     : null;
   const archivedAt = snapshot.archivedAt ? new Date(snapshot.archivedAt) : null;
-  const parentAgentId = getParentAgentIdFromLabels(snapshot.labels);
+  const parent = getParentAddressFromLabels(snapshot.labels, serverId);
+  const parentAgentId = parent?.serverId === serverId ? parent.agentId : null;
   // COMPAT(agentTurnIdentity): added in v0.2.6, remove after 2027-01-31 once daemon floor >= v0.2.6.
   // Old daemons expose only status. Normalize that legacy signal once so the rest
   // of the app consumes one activity shape.
@@ -52,6 +53,7 @@ export function normalizeAgentSnapshot(snapshot: AgentSnapshotPayload, serverId:
     id: snapshot.id,
     provider: snapshot.provider,
     status: snapshot.status,
+    backgroundWork: snapshot.backgroundWork,
     activeTurn,
     createdAt,
     updatedAt,
@@ -65,18 +67,23 @@ export function normalizeAgentSnapshot(snapshot: AgentSnapshotPayload, serverId:
     runtimeInfo: snapshot.runtimeInfo,
     lastUsage: snapshot.lastUsage,
     usageTotals: snapshot.usageTotals,
+    sessionMetrics: snapshot.sessionMetrics,
+    usageScopeKey: snapshot.usageScopeKey,
     lastError: snapshot.lastError ?? null,
     title: snapshot.title ?? null,
     cwd: snapshot.cwd,
     workspaceId: snapshot.workspaceId,
     model: snapshot.model ?? null,
-    features: snapshot.features,
+    options: snapshot.options,
+    controls: snapshot.controls,
     thinkingOptionId: snapshot.thinkingOptionId ?? null,
     requiresAttention: snapshot.requiresAttention ?? false,
     attentionReason: snapshot.attentionReason ?? null,
     attentionTimestamp,
     archivedAt,
+    background: snapshot.background === true,
     parentAgentId,
     labels: snapshot.labels,
+    metadata: snapshot.metadata,
   };
 }

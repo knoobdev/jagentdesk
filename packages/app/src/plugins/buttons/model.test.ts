@@ -11,10 +11,15 @@ function installation(): InstalledPlugin {
     serverId: "host-a",
     clientBundle: "bundle",
     queryClient: new QueryClient(),
+    subscribe: () => {
+      throw new Error("Subscriptions are not used here");
+    },
     cleanup: () => undefined,
     settingsScreens: [],
     surfaces: [],
     sidebarItems: [],
+    composerItems: [],
+    newWorkspaceItems: [],
     workspacePanels: [],
     commandCenterItems: [],
     clientSlashCommands: [],

@@ -1,5 +1,6 @@
 import { useCallback, useMemo, type ReactElement, type ReactNode } from "react";
-import { Pressable, View } from "react-native";
+import { useTranslation } from "react-i18next";
+import { Text, Pressable, View } from "react-native";
 import type { GestureResponderEvent } from "react-native";
 import { Plus, Server, Settings } from "lucide-react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
@@ -8,7 +9,7 @@ import { Combobox, ComboboxItem, type ComboboxProps } from "@/components/ui/comb
 import { useLocalDaemonServerId } from "@/hooks/use-is-local-daemon";
 import { useHostRuntimeSnapshot, type ActiveConnection } from "@/runtime/host-runtime";
 import { useConnectionMode } from "@/tailscale";
-import { orderHostsLocalFirst } from "@/types/host-connection";
+import { hostTransportLabelKey, orderHostsLocalFirst } from "@/types/host-connection";
 import {
   ADD_HOST_OPTION_ID,
   ALL_HOSTS_OPTION_ID,
@@ -74,6 +75,7 @@ export function HostPickerOption({
   onOpenHostSettings,
   testID,
 }: HostPickerOptionProps): ReactElement {
+  const { t } = useTranslation();
   const { theme } = useUnistyles();
   const activeConnection = useHostRuntimeSnapshot(serverId)?.activeConnection ?? null;
   const connectionLabel =
@@ -89,18 +91,29 @@ export function HostPickerOption({
     [onOpenHostSettings, serverId],
   );
   const trailingSlot = useMemo(() => {
-    if (!onOpenHostSettings) return undefined;
+    const transportKey = hostTransportLabelKey(activeConnection?.type ?? "directTcp");
     return (
-      <Pressable
-        onPress={handleSettingsPress}
-        hitSlop={8}
-        accessibilityRole="button"
-        accessibilityLabel={`Open ${label} settings`}
-      >
-        <Settings size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />
-      </Pressable>
+      <View style={styles.transportActions}>
+        {activeConnection ? (
+          <View style={styles.transportBadge}>
+            <Text style={styles.transportText}>{t(transportKey)}</Text>
+          </View>
+        ) : null}
+        {onOpenHostSettings ? (
+          <Pressable
+            onPress={handleSettingsPress}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={`Open ${label} settings`}
+          >
+            <Settings size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />
+          </Pressable>
+        ) : null}
+      </View>
     );
   }, [
+    activeConnection,
+    t,
     handleSettingsPress,
     label,
     onOpenHostSettings,
@@ -321,6 +334,16 @@ export function HostPicker({
 }
 
 const styles = StyleSheet.create((theme) => ({
+  transportActions: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
+  transportBadge: {
+    borderRadius: theme.borderRadius.full,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface3,
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+  },
+  transportText: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.xs },
   statusDotSlot: {
     width: theme.iconSize.sm,
     height: theme.iconSize.sm,

@@ -14,6 +14,8 @@ interface RewindComposerRestoreContextValue {
 
 interface RewindComposerRestoreProviderProps {
   text: string;
+  getText?: () => string;
+  onRewindComplete?: (restored: boolean) => void;
   setText: (text: string) => void;
   children: ReactNode;
 }
@@ -32,6 +34,8 @@ export function restoreComposerTextIfEmpty(input: {
 
 export function RewindComposerRestoreProvider({
   text,
+  getText,
+  onRewindComplete,
   setText,
   children,
 }: RewindComposerRestoreProviderProps) {
@@ -43,15 +47,17 @@ export function RewindComposerRestoreProvider({
 
   const restoreTextIfComposerEmpty = useCallback(
     (rewoundText: string) => {
+      const currentText = getText?.() ?? textRef.current;
       const nextText = restoreComposerTextIfEmpty({
-        currentText: textRef.current,
+        currentText,
         rewoundText,
       });
-      if (nextText !== textRef.current) {
+      if (nextText !== currentText) {
         setText(nextText);
       }
+      onRewindComplete?.(nextText !== currentText);
     },
-    [setText],
+    [setText, getText, onRewindComplete],
   );
 
   const value = useMemo(() => ({ restoreTextIfComposerEmpty }), [restoreTextIfComposerEmpty]);

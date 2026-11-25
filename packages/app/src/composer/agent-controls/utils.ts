@@ -1,7 +1,14 @@
-import type { AgentFeature, AgentModelDefinition } from "@jagentdesk/protocol/agent-types";
+import {
+  type AgentModelDefinition,
+  type ProviderSnapshotEntry,
+} from "@jagentdesk/protocol/agent-types";
 import { i18n } from "@/i18n/i18next";
 import { formatThinkingOptionLabel } from "@/agent-controls/labels";
-import { FAST_MODE_FEATURE_ID, PLAN_MODE_FEATURE_ID } from "@/agent-controls/policy";
+import {
+  FAST_MODE_FEATURE_ID,
+  PLAN_MODE_FEATURE_ID,
+  SPEED_FEATURE_ID,
+} from "@/agent-controls/policy";
 
 export type ExplainedAgentControl = "mode" | "model" | "thinking";
 export type FeatureHighlightColor = "blue" | "default" | "green" | "yellow";
@@ -31,13 +38,10 @@ export function normalizeModelId(modelId: string | null | undefined): string | n
   return normalized;
 }
 
-export function getFeatureTooltip(feature: Pick<AgentFeature, "label" | "tooltip">): string {
-  return feature.tooltip ?? feature.label;
-}
-
 export function getFeatureHighlightColor(featureId: string): FeatureHighlightColor {
   switch (featureId) {
     case FAST_MODE_FEATURE_ID:
+    case SPEED_FEATURE_ID:
       return "yellow";
     case "auto_accept":
       return "green";
@@ -48,6 +52,14 @@ export function getFeatureHighlightColor(featureId: string): FeatureHighlightCol
   }
 }
 
+export function resolveProviderSnapshotEntry(
+  entries: readonly ProviderSnapshotEntry[] | null | undefined,
+  provider: string | null | undefined,
+): ProviderSnapshotEntry | null {
+  if (!entries || !provider) return null;
+  return entries.find((entry) => entry.provider === provider) ?? null;
+}
+
 function findModelById(
   models: AgentModelDefinition[] | null,
   modelId: string | null,
@@ -55,7 +67,11 @@ function findModelById(
   if (!models || !modelId) {
     return null;
   }
-  return models.find((model) => model.id === modelId) ?? null;
+  return (
+    models.find((model) => model.id === modelId) ??
+    models.find((model) => model.aliases?.includes(modelId)) ??
+    null
+  );
 }
 
 function getFallbackModel(models: AgentModelDefinition[] | null): AgentModelDefinition | null {
@@ -75,16 +91,23 @@ function pickSelectedModel(
   preferredModelId: string | null,
   fallbackModel: AgentModelDefinition | null,
 ): AgentModelDefinition | null {
-  if (!models || !preferredModelId) {
+  if (!preferredModelId) {
     return fallbackModel;
   }
-  return findModelById(models, preferredModelId) ?? fallbackModel;
+  return findModelById(models, preferredModelId);
 }
 
 function resolveThinkingId(
+  runtimeThinkingOptionId: string | null | undefined,
   explicitThinkingOptionId: string | null | undefined,
   selectedModel: AgentModelDefinition | null,
 ): string | null {
+  const runtimeThinkingOption = selectedModel?.thinkingOptions?.find(
+    (option) => option.id === runtimeThinkingOptionId,
+  );
+  if (runtimeThinkingOption) {
+    return runtimeThinkingOption.id;
+  }
   if (explicitThinkingOptionId && explicitThinkingOptionId !== "default") {
     return explicitThinkingOptionId;
   }
@@ -135,9 +158,16 @@ export function resolveAgentModelSelection(input: {
   models: AgentModelDefinition[] | null;
   runtimeModelId: string | null | undefined;
   configuredModelId: string | null | undefined;
+  runtimeThinkingOptionId: string | null | undefined;
   explicitThinkingOptionId: string | null | undefined;
 }) {
-  const { models, runtimeModelId, configuredModelId, explicitThinkingOptionId } = input;
+  const {
+    models,
+    runtimeModelId,
+    configuredModelId,
+    runtimeThinkingOptionId,
+    explicitThinkingOptionId,
+  } = input;
   const normalizedRuntimeModelId = normalizeModelId(runtimeModelId);
   const normalizedConfiguredModelId = normalizeModelId(configuredModelId);
 
@@ -158,9 +188,13 @@ export function resolveAgentModelSelection(input: {
   );
 
   const thinkingOptions = selectedModel?.thinkingOptions ?? null;
-  const resolvedThinkingId = resolveThinkingId(explicitThinkingOptionId, selectedModel);
+  const resolvedThinkingId = resolveThinkingId(
+    runtimeThinkingOptionId,
+    explicitThinkingOptionId,
+    selectedModel,
+  );
   const effectiveThinking = resolveEffectiveThinking(thinkingOptions, resolvedThinkingId);
-  const selectedThinkingId = effectiveThinking?.id ?? null;
+  const selectedThinkingId = effectiveThinking?.id ?? resolvedThinkingId;
   const displayThinking = resolveThinkingDisplay(
     effectiveThinking,
     selectedThinkingId,

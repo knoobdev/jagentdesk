@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { useCallback, useEffect, useMemo } from "react";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import { useCreateFlowStore } from "@/stores/create-flow-store";
@@ -133,14 +134,29 @@ export function useSidebarWorkspacesList(options?: {
 
   const hydratedServerIds = useHydratedWorkspaceServerIds(serverIds);
 
-  const hostProjects = useHostProjects(hydratedServerIds);
+  const workspaceSort = useSidebarViewStore((state) => state.workspaceSort);
+  const hostProjects = useHostProjects(hydratedServerIds, workspaceSort);
+  const showBackground = useSidebarViewStore((state) => state.showBackground);
+  const hiddenWorkspaceKeys = useSessionStore(
+    useShallow((state) => {
+      const keys = new Set<string>();
+      if (showBackground) return keys;
+      for (const serverId of hydratedServerIds) {
+        for (const workspace of state.sessions[serverId]?.workspaces.values() ?? []) {
+          if (workspace.background) keys.add(`${serverId}:${workspace.id}`);
+        }
+      }
+      return keys;
+    }),
+  );
 
   const sidebarModel = useMemo(
     () =>
       buildSidebarWorkspacePlacementModel({
         projects: hostProjects,
+        hiddenWorkspaceKeys,
       }),
-    [hostProjects],
+    [hostProjects, hiddenWorkspaceKeys],
   );
 
   const projects = sidebarModel.projects.length > 0 ? sidebarModel.projects : EMPTY_PROJECTS;
@@ -167,6 +183,12 @@ export function useSidebarWorkspacesList(options?: {
       orderStore.setWorkspaceOrder(projectViewKey, order);
     }
   }, [persistedProjectOrder, projects]);
+
+  useEffect(() => {
+    if (!isActive) return;
+    const releases = serverIds.map((serverId) => runtime.acquireDirectoryDemand(serverId));
+    return () => releases.forEach((release) => release());
+  }, [isActive, runtime, serverIds]);
 
   const refreshAll = useCallback(() => {
     if (!isActive) return;

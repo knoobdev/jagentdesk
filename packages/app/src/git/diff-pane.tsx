@@ -1,3 +1,5 @@
+import { DiffDocument } from "@/git/diff-document";
+import { DiffDocumentWorkspaceCacheProvider } from "@/git/diff-document/workspace-cache";
 import {
   useState,
   useCallback,
@@ -83,6 +85,7 @@ import { lineNumberGutterWidth } from "@/components/code-insets";
 import { GitActionsSplitButton } from "@/git/actions-split-button";
 import { BranchSwitcher } from "@/components/branch-switcher";
 import { useGitActions } from "@/git/use-actions";
+import { WorkspaceBaseBranchPicker } from "@/git/workspace-base-branch-picker";
 import { GIT_ACTION_ICONS } from "@/git/action-icons";
 import { buildForgeSignInCommand, getForgePresentation, type Forge } from "@/git/forge";
 import { parseGitRemoteLocation } from "@jagentdesk/protocol/git-remote";
@@ -1390,9 +1393,10 @@ interface ChangesTabToggleProps {
 }
 
 interface DiffModeMenuProps {
-  diffMode: "uncommitted" | "base";
+  diffMode: "uncommitted" | "base" | "all";
   committedDescription?: string;
   testIDPrefix?: string;
+  onSelectAll: () => void;
   onSelectUncommitted: () => void;
   onSelectBase: () => void;
 }
@@ -1401,6 +1405,7 @@ export function DiffModeMenu({
   diffMode,
   committedDescription,
   testIDPrefix = "changes-diff",
+  onSelectAll,
   onSelectUncommitted,
   onSelectBase,
 }: DiffModeMenuProps) {
@@ -1408,6 +1413,11 @@ export function DiffModeMenu({
   const triggerStyle = useMemo(() => buildDiffModeTriggerStyle(), []);
   const uncommittedLabel = t("workspace.git.diff.uncommitted");
   const committedLabel = t("workspace.git.diff.committed");
+  const labels = {
+    all: t("workspace.git.diff.all"),
+    uncommitted: uncommittedLabel,
+    base: committedLabel,
+  };
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -1417,11 +1427,19 @@ export function DiffModeMenu({
         accessibilityLabel={t("workspace.git.diff.diffMode")}
       >
         <Text style={styles.diffStatusText} numberOfLines={1}>
-          {diffMode === "uncommitted" ? uncommittedLabel : committedLabel}
+          {labels[diffMode]}
         </Text>
         <ThemedChevronDown size={12} uniProps={foregroundMutedIconColorMapping} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" width={260} testID={`${testIDPrefix}-status-menu`}>
+        <DropdownMenuItem
+          testID={`${testIDPrefix}-mode-all`}
+          selected={diffMode === "all"}
+          onSelect={onSelectAll}
+        >
+          {labels.all}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         <DropdownMenuItem
           testID={`${testIDPrefix}-mode-uncommitted`}
           selected={diffMode === "uncommitted"}
@@ -1720,7 +1738,7 @@ function getSplitDiffLineCount(file: ParsedDiffFile): number {
 
 function computeEmptyMessage(
   hideWhitespace: boolean,
-  diffMode: "uncommitted" | "base",
+  diffMode: "uncommitted" | "base" | "all",
   baseRefLabel: string,
   labels: {
     hiddenWhitespace: string;
@@ -1850,7 +1868,69 @@ interface SharedDiffViewProps {
       };
 }
 
-export function SharedDiffView({ files, displayPreferences, mode }: SharedDiffViewProps) {
+export function SharedDiffView(props: SharedDiffViewProps) {
+  return (
+    <DiffDocumentWorkspaceCacheProvider>
+      <DocumentDiffView {...props} />
+    </DiffDocumentWorkspaceCacheProvider>
+  );
+}
+function DocumentDiffView({ files, displayPreferences, mode }: SharedDiffViewProps) {
+  const collapsedPaths = useMemo(() => {
+    if (mode.kind === "commit" || mode.expandedPaths === null) return [];
+    const expanded = new Set(mode.expandedPaths);
+    return files.filter((file) => !expanded.has(file.path)).map((file) => file.path);
+  }, [files, mode]);
+  const onCollapseChange = useCallback(
+    (paths: string[]) => {
+      if (mode.kind === "commit") return;
+      const collapsed = new Set(paths);
+      mode.onExpandedPathsChange(
+        files.filter((file) => !collapsed.has(file.path)).map((file) => file.path),
+      );
+    },
+    [files, mode],
+  );
+  const working = useMemo(() => {
+    if (mode.kind === "commit") return null;
+    if (mode.kind === "working_tree")
+      return {
+        kind: "working" as const,
+        reviewActions: mode.reviewActions,
+        onFilePress: mode.onFilePress,
+        workspaceFileDragScope: mode.workspaceFileDragScope,
+        onOpenFile: mode.onOpenFile,
+        onAddToChat: mode.onAddToChat,
+        onCopyPath: mode.onCopyPath,
+        onDownload: mode.onDownload,
+      };
+    return {
+      kind: "working" as const,
+      reviewActions: mode.reviewActions,
+      focusPath: mode.focusPath,
+      focusRequestId: mode.focusRequestId,
+    };
+  }, [mode]);
+  const collapseState = useMemo(
+    () => ({ paths: collapsedPaths, onChange: onCollapseChange }),
+    [collapsedPaths, onCollapseChange],
+  );
+  if (mode.kind === "working_tree" && mode.viewMode === "tree")
+    return <TreeDiffView files={files} displayPreferences={displayPreferences} mode={mode} />;
+  if (mode.kind === "commit")
+    return <DiffDocument files={files} displayPreferences={displayPreferences} mode={mode} />;
+  if (!working) return null;
+  return (
+    <DiffDocument
+      files={files}
+      displayPreferences={displayPreferences}
+      mode={working}
+      collapseState={collapseState}
+    />
+  );
+}
+
+function TreeDiffView({ files, displayPreferences, mode }: SharedDiffViewProps) {
   const { layout, wrapLines, codeFontSize, monoFontFamily } = displayPreferences;
   const diffBodyLineHeight = Math.round(codeFontSize * 1.5);
   const typographyKey = [monoFontFamily, codeFontSize, diffBodyLineHeight].join(":");
@@ -2684,6 +2764,7 @@ export function GitDiffPane({
     diffMode,
     selectUncommitted: handleSelectUncommitted,
     selectBase: handleSelectBase,
+    selectAll: handleSelectAll,
     files,
     diffPayloadError,
     diffTooLarge,
@@ -2863,6 +2944,15 @@ export function GitDiffPane({
             isGitCheckout={isGit}
             testID="changes-branch-switcher"
           />
+          {
+            <WorkspaceBaseBranchPicker
+              serverId={serverId}
+              workspaceId={workspaceId}
+              cwd={cwd}
+              baseRef={baseRef}
+              isWorktree={isManagedWorktree(status)}
+            />
+          }
           {isMobile ? <GitActionsSplitButton gitActions={gitActions} /> : null}
         </View>
       ) : null}
@@ -2875,6 +2965,7 @@ export function GitDiffPane({
               committedDescription={committedDiffDescription}
               onSelectUncommitted={handleSelectUncommitted}
               onSelectBase={handleSelectBase}
+              onSelectAll={handleSelectAll}
             />
             <View style={styles.diffStatusButtons}>
               <ChangesTabToggle
@@ -3367,3 +3458,9 @@ const styles = StyleSheet.create((theme) => ({
 }));
 
 const DIFF_HEIGHT_CHANGE_EPSILON = 0.5;
+
+function isManagedWorktree(
+  status: { isJAgentDeskOwnedWorktree?: boolean } | null | undefined,
+): boolean {
+  return status?.isJAgentDeskOwnedWorktree === true;
+}

@@ -1,8 +1,22 @@
 # Agentic browser: identity and dialogs
 
 The agentic browser runs each tab in an Electron `<webview>` on the desktop app. Agents drive it with
-the `browser_*` tools through the daemon (`packages/server/src/server/browser-tools/`); the desktop
-main process executes the commands (`packages/desktop/src/features/browser-automation/`).
+the `browser_*` tools. It is the `browser-tools` [built-in](builtin-plugins.md), off by default; turn
+it on in Settings → host → Plugins.
+
+- `plugins/browser-tools/` registers the `browser_*` and fingerprint profile tools and the Settings →
+  Agents cards.
+- The broker that routes commands to desktop windows stays in core
+  (`packages/server/src/server/browser-tools/`).
+- The desktop main process executes the commands
+  (`packages/desktop/src/features/browser-automation/`).
+
+## Desktop selection
+
+`browser_list_hosts` lists connected windows, including windows with no tabs. With multiple
+windows, `browser_new_tab` requires a `browserHostId` from that list. Existing tab commands
+follow their tab's window. Copy the window name from Command Center to identify it; the name
+and instance identity survive a renderer reload or daemon reconnect in that window.
 
 ## Identity
 

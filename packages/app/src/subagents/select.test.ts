@@ -36,7 +36,7 @@ const AGENT_DEFAULTS: Agent = {
   title: "Agent",
   cwd: "/tmp/project",
   model: null,
-  features: undefined,
+  controls: undefined,
   thinkingOptionId: undefined,
   requiresAttention: false,
   attentionReason: null,
@@ -48,7 +48,13 @@ const AGENT_DEFAULTS: Agent = {
 };
 
 function makeAgent(input: Partial<Agent> & Pick<Agent, "id">): Agent {
-  return { ...AGENT_DEFAULTS, ...input };
+  return {
+    ...AGENT_DEFAULTS,
+    ...input,
+    labels:
+      input.labels ??
+      (input.parentAgentId ? { "jagentdesk.parent-agent-id": input.parentAgentId } : {}),
+  };
 }
 
 function setAgents(agents: Agent[]): void {
@@ -60,6 +66,7 @@ function setAgents(agents: Agent[]): void {
 
 afterEach(() => {
   useSessionStore.getState().clearSession(SERVER_ID);
+  useSessionStore.getState().clearSession("server-2");
   useProviderSubagentStore.setState({
     descriptors: new Map(),
     timelines: new Map(),
@@ -128,6 +135,54 @@ describe("selectSubagentsForParent", () => {
     expect(useProviderSubagentStore.getState().descriptors.size).toBe(1);
   });
 
+  it("places nested provider children only beneath their direct provider parent", () => {
+    const store = useProviderSubagentStore.getState();
+    const base = {
+      parentAgentId: "parent-a",
+      provider: "claude" as const,
+      title: "general-purpose",
+      subtitle: null,
+      status: "running" as const,
+      createdAt: "2026-09-04T10:00:00.000Z",
+      updatedAt: "2026-09-04T10:00:00.000Z",
+      toolCallId: null,
+    };
+    store.applyUpdate(SERVER_ID, {
+      kind: "upsert",
+      subagent: { ...base, id: "direct", description: "Direct", parentSubagentId: null },
+    });
+    store.applyUpdate(SERVER_ID, {
+      kind: "upsert",
+      subagent: {
+        ...base,
+        id: "nested",
+        description: "Nested",
+        parentSubagentId: "direct",
+      },
+    });
+
+    expect(
+      selectProviderSubagentsForParent(
+        useProviderSubagentStore.getState(),
+        { serverId: SERVER_ID, parentAgentId: "parent-a" },
+        true,
+        true,
+      ).map((row) => row.id),
+    ).toEqual(["direct"]);
+    expect(
+      selectProviderSubagentsForParent(
+        useProviderSubagentStore.getState(),
+        {
+          serverId: SERVER_ID,
+          parentAgentId: "parent-a",
+          providerParentSubagentId: "direct",
+        },
+        true,
+        true,
+      ).map((row) => row.id),
+    ).toEqual(["nested"]);
+  });
+
   it("returns only non-archived children for the requested parent", () => {
     setAgents([
       makeAgent({ id: "parent-a" }),
@@ -145,6 +200,22 @@ describe("selectSubagentsForParent", () => {
         serverId: SERVER_ID,
         parentAgentId: "parent-a",
       },
+      EMPTY_PENDING_ARCHIVE_IDS,
+    );
+
+    expect(rows.map((row) => row.id)).toEqual(["child-a"]);
+  });
+
+  it("excludes background children from the track", () => {
+    setAgents([
+      makeAgent({ id: "parent-a" }),
+      makeAgent({ id: "child-a", parentAgentId: "parent-a" }),
+      makeAgent({ id: "background-child", parentAgentId: "parent-a", background: true }),
+    ]);
+
+    const rows = selectSubagentsForParent(
+      useSessionStore.getState(),
+      { serverId: SERVER_ID, parentAgentId: "parent-a" },
       EMPTY_PENDING_ARCHIVE_IDS,
     );
 
@@ -262,6 +333,7 @@ describe("selectSubagentsForParent", () => {
     expect(rows).toEqual([
       {
         kind: "jagentdesk",
+        address: { serverId: SERVER_ID, agentId: "child" },
         id: "child",
         provider: "claude",
         title: "Review child",
@@ -273,6 +345,8 @@ describe("selectSubagentsForParent", () => {
       },
     ]);
     expect(Object.keys(rows[0] ?? {}).sort()).toEqual([
+      "address",
+      "backgroundWork",
       "createdAt",
       "description",
       "id",
@@ -316,7 +390,7 @@ describe("selectSubagentsForParent", () => {
     setAgents([
       makeAgent({ id: "parent-a" }),
       makeAgent({ id: "parent-b" }),
-      { ...child, parentAgentId: "parent-b" },
+      { ...child, parentAgentId: "parent-b", labels: { "jagentdesk.parent-agent-id": "parent-b" } },
     ]);
 
     expect(
@@ -354,7 +428,7 @@ describe("selectSubagentsForParent", () => {
         serverId: SERVER_ID,
         parentAgentId: "parent",
       },
-      new Set(["child-b"]),
+      new Set([`${SERVER_ID}:child-b`]),
     );
 
     expect(rows.map((row) => row.id)).toEqual(["child-a"]);
@@ -369,7 +443,7 @@ describe("selectSubagentsForParent", () => {
         serverId: SERVER_ID,
         parentAgentId: "parent",
       },
-      new Set(["child"]),
+      new Set([`${SERVER_ID}:child`]),
     );
 
     expect(rows).toEqual([]);
@@ -384,4 +458,34 @@ describe("selectSubagentsForParent", () => {
       ),
     );
   });
+});
+
+it("qualifies remote parent and child identities when two hosts reuse an agent ID", () => {
+  setAgents([
+    makeAgent({ id: "parent" }),
+    makeAgent({ id: "same-child", parentAgentId: "parent" }),
+  ]);
+  useSessionStore.getState().initializeSession("server-2", null as unknown as DaemonClient);
+  const child = makeAgent({
+    serverId: "server-2",
+    id: "same-child",
+    labels: { "jagentdesk.parent-agent-id": "parent", "jagentdesk.parent-server-id": SERVER_ID },
+  });
+  useSessionStore.getState().setAgents("server-2", new Map([[child.id, child]]));
+  const rows = selectSubagentsForParent(
+    useSessionStore.getState(),
+    { serverId: SERVER_ID, parentAgentId: "parent" },
+    EMPTY_PENDING_ARCHIVE_IDS,
+  );
+  expect(rows.map((row) => (row.kind === "jagentdesk" ? row.address : null))).toEqual([
+    { serverId: SERVER_ID, agentId: "same-child" },
+    { serverId: "server-2", agentId: "same-child" },
+  ]);
+  expect(
+    selectSubagentsForParent(
+      useSessionStore.getState(),
+      { serverId: "server-2", parentAgentId: "parent" },
+      EMPTY_PENDING_ARCHIVE_IDS,
+    ),
+  ).toEqual([]);
 });

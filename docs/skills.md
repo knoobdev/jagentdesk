@@ -2,22 +2,24 @@
 
 Skills are standard Agent Skills folders (`<name>/SKILL.md` with `name` and `description` front
 matter). JAgentDesk does not inject skill text into prompts: it installs skills where each
-provider CLI already looks and asks the provider to load them. Product contract: spec 22,
-ADR-0022.
+provider CLI already looks and asks the provider to load them.
 
-Code: `packages/protocol/src/native-skills.ts` (schemas, invocation),
-`packages/server/src/server/skills-native` (daemon), `packages/app/src/screens/skills-screen.tsx`
-and `packages/app/src/skills` (app).
+Code: `packages/protocol/src/native-skills.ts` (schemas, invocation), the `skills` built-in
+feature in `plugins/skills/` (daemon service, RPCs, tools, screen, composer control; file names
+below without a path are in `plugins/skills/server/`), and the
+provider directory table `packages/server/src/server/agent/native-skill-paths.ts`, which stays in
+core because Spec mode installs its commands there too. Turn the feature off per host in Settings → host → Plugins.
 
 ## Where skills live
 
 The daemon scans these directories, globally (below `~`) and per project (below the project root),
-and reports which providers can see each skill (`SKILL_DIR_SPECS` in `paths.ts`).
+and reports which providers can see each skill (`SKILL_DIR_SPECS` in `native-skill-paths.ts`).
 
 | Directory (global / project)                   | Read by                                         |
 | ---------------------------------------------- | ----------------------------------------------- |
 | `.agents/skills`                               | Codex, OpenCode, Cursor, Copilot, Pi, OMP, Kimi |
 | `.claude/skills`                               | Claude, OpenCode, Cursor, Kimi, OMP             |
+| `.gemini/config/skills` (global only)          | Antigravity                                     |
 | `.kiro/skills`                                 | Kiro                                            |
 | `.codex/skills`                                | Codex                                           |
 | `.config/opencode/skills` / `.opencode/skills` | OpenCode                                        |
@@ -34,7 +36,9 @@ copies differ.
 ## Install and uninstall
 
 An install writes one real copy to `.agents/skills/<name>` and symlinks it into
-`.claude/skills` and `.kiro/skills`. Every path written is recorded in
+`.claude/skills` and `.kiro/skills`. Global installs also link into
+`~/.gemini/config/skills` for Antigravity. New provider paths use optional catalog fields so
+older clients can still read installed skills. Every path written is recorded in
 `$JAGENTDESK_HOME/skills/lock.json`; uninstall removes exactly those paths. A skill directory that
 JAgentDesk did not write is never overwritten. Disabling a skill JAgentDesk does not own moves it
 aside and can be undone.
@@ -44,7 +48,10 @@ Older JSON skills are migrated to owned SKILL.md folders on first start (`migrat
 ## Sources
 
 The marketplace is built from `$JAGENTDESK_HOME/skills/sources.json`. When the file is missing,
-the official `anthropics/skills` and `openai/skills` repositories are used. A source is one of:
+the bundled JAgentDesk orchestration skills and official `anthropics/skills` and `openai/skills`
+repositories are offered. The bundled source is local to the packaged daemon; browsing it does
+not install anything. Install or remove it through the same native skills actions as other
+sources. A source is one of:
 
 - `github` — `owner/repo`, optionally a branch and sub-folder (`/tree/<ref>/<path>` links work);
 - `npm` — a package that contains skill folders;
@@ -59,7 +66,7 @@ marketplaces already added on the host are listed through the provider CLI
 
 ### Directories
 
-An `index` source whose host has an adapter is a searchable directory (ADR-0023); today that is
+An `index` source whose host has an adapter is a searchable directory; today that is
 `https://skillsmp.com` (`directory-hosts.ts`, `directory-sources.ts`). A directory is never listed:
 a merged browse skips it, and `skills.sources.browse { sourceId, query, page }` sends one
 `/api/v1/skills/search` request per page (20 results, cached 10 minutes). Results are

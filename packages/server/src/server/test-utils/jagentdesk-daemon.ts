@@ -1,3 +1,4 @@
+import { BuiltinPluginLoader } from "../plugins/builtin/index.js";
 import os from "node:os";
 import path from "node:path";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
@@ -14,11 +15,18 @@ import { createTestAgentClients } from "./fake-agent-client.js";
 import type { PushNotificationSender } from "../push/notifications.js";
 
 interface TestJAgentDeskDaemonOptions {
+  relay?: { endpoint: string; useTls: boolean };
+  slackApiBaseUrl?: string;
+  hostCapabilities?: import("../host-capabilities/service.js").HostCapabilityService;
+  botsTriggerSource?: import("../bots/service.js").BotTriggerSource;
+  sessionShareTunnelManager?: import("../tunnels/tunnel-manager.js").TunnelManager;
+  builtinPlugins?: BuiltinPluginLoader;
   daemonVersion?: string;
   desktopManaged?: boolean;
   downloadTokenTtlMs?: number;
   corsAllowedOrigins?: string[];
   listen?: string;
+  listenPort?: number;
   logger?: Parameters<typeof createJAgentDeskDaemon>[1];
   mcpEnabled?: boolean;
   mcpDebug?: boolean;
@@ -33,7 +41,8 @@ interface TestJAgentDeskDaemonOptions {
   staticDir?: string;
   cleanup?: boolean;
   openai?: JAgentDeskOpenAIConfig;
-  speech?: JAgentDeskSpeechConfig;
+  // localModelsDir defaults to the local provider's modelsDir, then to a dir under jagentdeskHome.
+  speech?: Omit<JAgentDeskSpeechConfig, "localModelsDir"> & { localModelsDir?: string };
   voiceLlmProvider?: JAgentDeskDaemonConfig["voiceLlmProvider"];
   voiceLlmProviderExplicit?: boolean;
   voiceLlmModel?: string | null;
@@ -90,10 +99,15 @@ export async function createTestJAgentDeskDaemon(
   let lastError: unknown;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const { config, jagentdeskHomeRoot, jagentdeskHome, staticDir } =
+    const { config, jagentdeskHomeRoot, jagentdeskHome, staticDir, createdDirs } =
       await prepareTestDaemonConfig(options);
     const logger = options.logger ?? pino({ level: "silent" });
     const daemon = await createJAgentDeskDaemon(config, logger, {
+      hostCapabilities: options.hostCapabilities,
+      botsTriggerSource: options.botsTriggerSource,
+      slackApiBaseUrl: options.slackApiBaseUrl,
+      sessionShareTunnelManager: options.sessionShareTunnelManager,
+      builtinPlugins: options.builtinPlugins ?? new BuiltinPluginLoader(undefined, []),
       serverFeatureOverrides: {
         daemonStatusRpc: options.daemonStatusRpcCapability,
       },
@@ -110,15 +124,7 @@ export async function createTestJAgentDeskDaemon(
         await daemon.agentManager.flush().catch(() => undefined);
         if (options.cleanup ?? true) {
           await new Promise((r) => setTimeout(r, 50));
-          await Promise.all([
-            rm(jagentdeskHomeRoot, {
-              recursive: true,
-              force: true,
-              maxRetries: 3,
-              retryDelay: 100,
-            }),
-            rm(staticDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }),
-          ]);
+          await removeDirs([jagentdeskHomeRoot, staticDir]);
         }
       };
 
@@ -133,10 +139,8 @@ export async function createTestJAgentDeskDaemon(
     } catch (error) {
       lastError = error;
       await daemon.stop().catch(() => undefined);
-      await Promise.all([
-        rm(jagentdeskHomeRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }),
-        rm(staticDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }),
-      ]);
+      // A failed attempt removes only what it created: a caller-supplied home keeps its serverId.
+      await removeDirs(createdDirs);
 
       if (
         (!isAddressInUseError(error) && !isStartupTimeoutError(error)) ||
@@ -155,26 +159,43 @@ interface PreparedTestDaemonConfig {
   jagentdeskHomeRoot: string;
   jagentdeskHome: string;
   staticDir: string;
+  createdDirs: string[];
+}
+
+async function removeDirs(dirs: string[]): Promise<void> {
+  await Promise.all(
+    dirs.map((dir) => rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })),
+  );
+}
+
+async function createTempDir(prefix: string, createdDirs: string[]): Promise<string> {
+  const dir = await mkdtemp(path.join(os.tmpdir(), prefix));
+  createdDirs.push(dir);
+  return dir;
 }
 
 async function prepareTestDaemonConfig(
   options: TestJAgentDeskDaemonOptions,
 ): Promise<PreparedTestDaemonConfig> {
+  const createdDirs: string[] = [];
   const jagentdeskHomeRoot =
-    options.jagentdeskHomeRoot ?? (await mkdtemp(path.join(os.tmpdir(), "jagentdesk-home-")));
+    options.jagentdeskHomeRoot ?? (await createTempDir("jagentdesk-home-", createdDirs));
   const jagentdeskHome = path.join(jagentdeskHomeRoot, ".jagentdesk");
   await mkdir(jagentdeskHome, { recursive: true });
-  const staticDir =
-    options.staticDir ?? (await mkdtemp(path.join(os.tmpdir(), "jagentdesk-static-")));
+  const staticDir = options.staticDir ?? (await createTempDir("jagentdesk-static-", createdDirs));
   const listenHost = options.listen ?? "127.0.0.1";
+  const listenPort = options.listenPort ?? 0;
   const config: JAgentDeskDaemonConfig = {
-    listen: `${listenHost}:0`,
+    listen: `${listenHost}:${listenPort}`,
     jagentdeskHome,
     daemonVersion: options.daemonVersion,
     desktopManaged: options.desktopManaged,
     corsAllowedOrigins: options.corsAllowedOrigins ?? [],
     hostnames: true,
     mcpEnabled: options.mcpEnabled ?? true,
+    relayEnabled: Boolean(options.relay),
+    relayEndpoint: options.relay?.endpoint,
+    relayUseTls: options.relay?.useTls,
     staticDir,
     mcpDebug: options.mcpDebug ?? false,
     sessionSharingEnabled: options.sessionSharingEnabled,
@@ -191,14 +212,22 @@ async function prepareTestDaemonConfig(
     webUi: options.webUi,
     trustedProxies: options.trustedProxies,
     openai: options.openai,
-    speech: options.speech,
+    speech: options.speech
+      ? {
+          ...options.speech,
+          localModelsDir:
+            options.speech.localModelsDir ??
+            options.speech.local?.modelsDir ??
+            path.join(jagentdeskHome, "models", "local-speech"),
+        }
+      : undefined,
     voiceLlmProvider: options.voiceLlmProvider ?? null,
     voiceLlmProviderExplicit: options.voiceLlmProviderExplicit ?? false,
     voiceLlmModel: options.voiceLlmModel ?? null,
     dictationFinalTimeoutMs: options.dictationFinalTimeoutMs,
     downloadTokenTtlMs: options.downloadTokenTtlMs,
   };
-  return { config, jagentdeskHomeRoot, jagentdeskHome, staticDir };
+  return { config, jagentdeskHomeRoot, jagentdeskHome, staticDir, createdDirs };
 }
 
 function isAddressInUseError(error: unknown): boolean {

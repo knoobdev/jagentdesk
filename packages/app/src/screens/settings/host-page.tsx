@@ -1,3 +1,4 @@
+import { hostTransportLabelKey } from "@/types/host-connection";
 import {
   ArrowDown,
   ArrowUp,
@@ -52,8 +53,7 @@ import {
   useHosts,
 } from "@/runtime/host-runtime";
 import { ProvidersSection } from "@/screens/settings/providers-section";
-import { ProviderUsageSettingsSection } from "@/provider-usage/settings-section";
-import { useProviderUsage } from "@/provider-usage/use-provider-usage";
+import { HostUsageSection } from "@/usage/host-usage-section";
 import { HostAppearanceSection } from "@/screens/settings/host-appearance-section";
 import { SettingsSection } from "@/screens/settings/settings-section";
 import { migrateHostData } from "@/runtime/migration/host-migration-service";
@@ -71,10 +71,9 @@ import { ICON_SIZE } from "@/styles/theme";
 import type { Theme } from "@/styles/theme";
 import { getProviderIcon } from "@/components/provider-icons";
 import { getConnectionMode } from "@/tailscale";
-import { BrowserToolsOptInCard } from "./browser-tools-card";
-import { AutorunOptInCard } from "./autorun-card";
-import { SessionShareOptInCard } from "./session-share-card";
-import { BrowserFingerprintProfilesCard } from "./browser-fingerprint-profiles-card";
+import { IdleRuntimeCleanupCard } from "./idle-runtime-cleanup-card";
+import { RestartRecoveryCard } from "./restart-recovery-card";
+import { BuiltinAgentSettingsCards } from "@/plugins/builtin/surfaces";
 import { hasDaemonReconnectedAfter, type DaemonConnectionMarker } from "./daemon-reconnect";
 import { restartDaemonFromSettings } from "./daemon-restart";
 
@@ -108,6 +107,10 @@ const removeProfileIcon = <ThemedTrash2 size={ICON_SIZE.sm} uniProps={destructiv
 const addProfileIcon = <ThemedPlus size={ICON_SIZE.sm} uniProps={mutedColorMapping} />;
 
 function formatHostConnectionLabel(connection: HostConnection, t: TFunction): string {
+  if (connection.type === "routed") return `Via ${connection.originServerId}`;
+  if (connection.type === "relay") {
+    return `${t("settings.host.badges.relay")} (${connection.endpoint})`;
+  }
   if (connection.type === "tailnet") {
     return `${t("settings.host.badges.tailnet", { defaultValue: "Tailscale" })} (${connection.tailnetAddress})`;
   }
@@ -140,6 +143,7 @@ function HostNotFound() {
 }
 
 function HostStatusBadges({ serverId }: { serverId: string }) {
+  const { t } = useTranslation();
   const { theme } = useUnistyles();
   const snapshot = useHostRuntimeSnapshot(serverId);
   const daemonVersion = useSessionStore(
@@ -187,6 +191,13 @@ function HostStatusBadges({ serverId }: { serverId: string }) {
         <View style={statusDotStyle} />
         <Text style={statusTextStyle}>{statusLabel}</Text>
       </View>
+      {snapshot?.activeConnection ? (
+        <View style={styles.badgePill} testID="host-transport-badge">
+          <Text style={styles.badgeText}>
+            {t(hostTransportLabelKey(snapshot.activeConnection.type))}
+          </Text>
+        </View>
+      ) : null}
       {versionBadgeText ? (
         <View style={styles.badgePill}>
           <Text style={styles.badgeText} numberOfLines={1}>
@@ -257,12 +268,11 @@ export function HostAgentsPage({ serverId }: { serverId: string }) {
       {isConnected ? (
         <SettingsSection title={t("settings.hostSections.agents")}>
           <InjectJAgentDeskToolsCard serverId={serverId} />
-          <BrowserToolsOptInCard serverId={serverId} />
-          <AutorunOptInCard serverId={serverId} />
-          <SessionShareOptInCard serverId={serverId} />
-          <BrowserFingerprintProfilesCard serverId={serverId} />
+          <BuiltinAgentSettingsCards serverId={serverId} />
           <AppendSystemPromptCard serverId={serverId} />
           <OperatorContextCard serverId={serverId} />
+          <RestartRecoveryCard serverId={serverId} />
+          <IdleRuntimeCleanupCard serverId={serverId} />
         </SettingsSection>
       ) : (
         <View style={[settingsStyles.card, styles.emptyCard]}>
@@ -313,10 +323,6 @@ export function HostProvidersPage({ serverId }: { serverId: string }) {
 
 export function HostUsagePage({ serverId }: { serverId: string }) {
   const host = useHostProfile(serverId);
-  const { view: providerUsageView, refresh: refreshProviderUsage } = useProviderUsage(serverId);
-  const handleRefresh = useCallback(() => {
-    void refreshProviderUsage();
-  }, [refreshProviderUsage]);
 
   if (!host) {
     return <HostNotFound />;
@@ -324,7 +330,7 @@ export function HostUsagePage({ serverId }: { serverId: string }) {
 
   return (
     <View>
-      <ProviderUsageSettingsSection view={providerUsageView} onRefresh={handleRefresh} />
+      <HostUsageSection serverId={serverId} />
     </View>
   );
 }
@@ -374,8 +380,27 @@ function ConnectionsSection({
   onAddConnection?: () => void;
 }) {
   const { t } = useTranslation();
-  const { removeConnection } = useHostMutations();
+  const { removeConnection, setPreferredConnection } = useHostMutations();
+  const { config, patchConfig } = useDaemonConfig(host.serverId);
   const snapshot = useHostRuntimeSnapshot(host.serverId);
+  const handleUseConnection = useCallback(
+    async (connection: HostConnection) => {
+      try {
+        await setPreferredConnection(host.serverId, connection.id);
+      } catch (error) {
+        Alert.alert(t("settings.host.connections.useFailed"), String(error));
+      }
+    },
+    [setPreferredConnection, host.serverId, t],
+  );
+  const handleRelayEnabledChange = useCallback(
+    (enabled: boolean) => {
+      void patchConfig({ relay: { enabled } }).catch((error) =>
+        Alert.alert(t("settings.host.connections.useFailed"), String(error)),
+      );
+    },
+    [patchConfig, t],
+  );
   const probeByConnectionId = snapshot?.probeByConnectionId ?? new Map();
   const [pendingRemoveConnection, setPendingRemoveConnection] = useState<{
     connectionId: string;
@@ -424,6 +449,20 @@ function ConnectionsSection({
 
   return (
     <SettingsSection title={t("settings.host.connections.title")}>
+      {config?.relay ? (
+        <View style={settingsStyles.card}>
+          <View style={settingsStyles.row}>
+            <Text style={settingsStyles.rowTitle}>
+              {t("settings.host.connections.enableRelay")}
+            </Text>
+            <Switch
+              value={config.relay.enabled}
+              accessibilityLabel={t("settings.host.connections.enableRelay")}
+              onValueChange={handleRelayEnabledChange}
+            />
+          </View>
+        </View>
+      ) : null}
       {onAddConnection ? (
         <Button
           variant="outline"
@@ -442,6 +481,10 @@ function ConnectionsSection({
             <ConnectionRow
               key={conn.id}
               connection={conn}
+              active={
+                snapshot?.activeConnectionId === conn.id && snapshot.connectionStatus === "online"
+              }
+              onUse={handleUseConnection}
               showBorder={index > 0}
               latencyMs={probe?.status === "available" ? probe.latencyMs : undefined}
               latencyLoading={!probe || probe.status === "pending"}
@@ -493,6 +536,8 @@ function ConnectionsSection({
 
 function ConnectionRow({
   connection,
+  active,
+  onUse,
   showBorder,
   latencyMs,
   latencyLoading,
@@ -500,6 +545,8 @@ function ConnectionRow({
   onRemove,
 }: {
   connection: HostConnection;
+  active: boolean;
+  onUse: (connection: HostConnection) => Promise<void>;
   showBorder: boolean;
   latencyMs: number | null | undefined;
   latencyLoading: boolean;
@@ -518,6 +565,9 @@ function ConnectionRow({
   })();
   const latencyColor = latencyError ? theme.colors.palette.red[300] : theme.colors.foregroundMuted;
 
+  const handleUse = useCallback(() => {
+    void onUse(connection);
+  }, [onUse, connection]);
   const handlePressRemove = useCallback(() => {
     onRemove(connection);
   }, [onRemove, connection]);
@@ -542,7 +592,18 @@ function ConnectionRow({
           {title}
         </Text>
       </View>
-      <Text style={latencyTextStyle}>{latencyText}</Text>
+      <Text style={latencyTextStyle}>
+        {active ? t("settings.host.connections.active") : latencyText}
+      </Text>
+      <Button
+        variant="outline"
+        size="sm"
+        onPress={handleUse}
+        disabled={active}
+        testID={`use-connection-${connection.id}`}
+      >
+        {t("settings.host.connections.use")}
+      </Button>
       <Button
         variant="ghost"
         size="sm"

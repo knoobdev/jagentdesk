@@ -1,5 +1,8 @@
 # Plugins: JAgentDesk vs upstream
 
+This page covers installed plugins and the bundled SDK plugins. Statically linked features
+(Docker, Kubernetes, Databases and the rest) are in [Built-in feature plugins](builtin-plugins.md).
+
 JAgentDesk's plugin system is a selective port of the upstream split plugin API (separate
 client and server entries, `PluginClientContext` / `PluginServerContext`, SDK subpaths
 `@jagentdesk/plugin`, `/client`, `/client/ui`, `/client/react-native`, `/client/host`,
@@ -21,7 +24,7 @@ Code: `packages/plugin` (SDK), `packages/server/src/server/plugins` (daemon runt
 | `index.ts(x)` only (pre-split plugin)       | `index.ts(x)` | —            |
 
 Upstream rejects pre-split single-entry plugins; JAgentDesk keeps loading them as client
-entries (`resolveEntryPaths` in `runtime.ts`).
+entries (`resolveEntryPaths` in `compiler-build.ts`).
 
 ## Requirements
 
@@ -44,18 +47,19 @@ Plugins written for upstream are rebranded on install (`paseo-rebrand.ts`) in tw
 
 Entry file names are kept. `requirements.paseo` is a Paseo version range, so it is checked
 against the Paseo plugin API JAgentDesk implements (`SUPPORTED_PASEO_PLUGIN_API`,
-`>=0.8.0-0 <=0.10.2`), not against the JAgentDesk version. Type-only imports of the host packages
+`>=0.8.0-0 <=0.17.3`), not against the JAgentDesk version. Type-only imports of the host packages
 (`@getpaseo/*`, `@jagentdesk/*`) pass validation because types are erased.
 
 ## Installing and updating
 
-Settings → Plugins installs from a directory, Git or npm source and shows each plugin's status,
-source and revision. `jagentdesk plugin update [plugin-id]` shows the available updates and asks before applying
-them (`--yes` skips the prompt, `--check` only shows them). The Marketplace entry (paseo.cafe catalog) is kept alongside the source installer.
+Settings → host → Plugins installs from a directory, Git or npm source and shows each plugin's
+status, source and revision. `jagentdesk plugin update [plugin-id]` shows the available updates and
+asks before applying them (`--yes` skips the prompt, `--check` only shows them). The Marketplace
+(paseo.cafe catalog) sits alongside the source installer.
 
 A Marketplace entry installs from its scanned npm release when it has one and falls back to its
 Git source; npm installs count as installed. Catalog caveats are shown, and entries without a
-manifest show "Can't install". Plugin screenshots and README images open in the zoomable viewer.
+manifest show "Can’t install". Plugin screenshots and README images open in the zoomable viewer.
 
 ## Persistence
 
@@ -65,19 +69,94 @@ plugins and the global toggle survive a daemon restart. Removing a plugin uses
 (`registerSettings`) are stored under `$JAGENTDESK_HOME/plugin-settings/<pluginId>/` and are
 readable by the server entry at startup before any client connects.
 
-## Not wired yet
+## Runtime contracts
 
-The runtime accepts these registrations, but the daemon does not dispatch to them. A plugin
-that registers one gets a line in its log:
-`[jagentdesk] Not supported by this daemon yet, so it will not run: …`
+Use `server.addHook` with the SDK hook names, such as `agent.open.before`,
+`agent.turn.after` and `worktree.create.after`. Legacy `before` / `on` names remain aliases.
+Before hooks transform requests in registration order. Waiting hooks reject the operation
+with plugin attribution; notification failures are logged and do not stop later handlers.
+`worktree.create.after` finishes before setup scripts or the first agent opens. A failed hook
+rolls back a worktree created by that operation. Registered worktree reuse keeps the fork's
+existing ownership rules.
 
-- Lifecycle hooks (`event` and `before` hooks for workspace and agent creation, turns,
-  permissions, archive). The workspace and agent managers never call `runtime.emit` /
-  `runtime.before`.
-- Plugin agent providers (`server/provider`, `server/acp`). The provider registry does not
-  read `getProviderRegistrations`.
-- Demand-based event delivery to plugin sessions. JAgentDesk sends status to every session.
-- `timeline.append` on agent refs, and the upstream client's `observeEvents` subscription API.
+Plugin providers participate in provider discovery, launch overrides, diagnostics and reload.
+A reload retires their native sessions; the next prompt reopens a resumable session. Closing
+an already closed provider session does not issue another native close. Provider launch
+configuration preserves custom-provider environment overlays and internal MCP approval rules.
 
-The upstream e2e tests for these features are kept in `packages/server/src/server/plugins/`
-as skipped tests (`*.e2e.test.ts`), each with the reason in its header comment.
+`agent.open.before` can attach per-agent tools, MCP servers and instructions. These are launch
+state, not persisted user configuration. Tools are filtered through the provider's
+`jagentdeskTools` policy. Tool and MCP name collisions fail before the session opens. Plugin
+changes invalidate open sessions so the next open uses current contributions.
+
+Plugin sessions receive events only when they express demand through `observeEvents` or
+registered handlers. Plugin RPC subscriptions own their delivery, release and reconnect
+lifetime, and carry JSON or `Uint8Array` values. Plugin binary opcodes are `0x40`–`0x42`:
+`0x20` already belongs to JAgentDesk screen frames and `0x30` is reserved for upstream host
+routing. Protocol capability fields are optional for older clients and daemons.
+
+Agent refs support `timeline.append`. `agent.turn.after` has no timeline field; fetch a bounded
+page through the agent ref when a hook needs history. Streaming provider history uses the
+canonical store, including rewind, without retaining a second complete snapshot.
+
+Every app plugin surface supplies the installation host's state source. A surface that spans
+hosts can pass its own source. Screens and Settings therefore have the same entity hooks as
+workspace panels.
+
+Workspace panels may declare `workspace`, `explorer`, or both locations. On web,
+`explorer` opens a retained right-pane tab and keeps the existing main pane selected.
+Native and compact layouts open that panel in the workspace. Dragging a plugin tab
+between web hosts must respect its declared locations; do not infer host support from
+the generic plugin panel manifest.
+
+Timeline transformers receive immutable source items before display grouping. Plugin rows retain
+the source identity for outline navigation and find; a plugin-rendered final reply stays visible
+when its completed turn folds. Client renderers run inside the installation's existing runtime,
+including its translations and state source.
+
+## Bundled plugins
+
+The daemon loads bundled plugins through `BuiltinPluginLoader` before configured plugins, including
+when the user plugin switch is off. They share Settings → host → Plugins → Built-in and its
+per-host switches with the feature built-ins; `pluginsEnabled` applies only to Installed. Toggle
+rules, persistence and dependency checks are in
+[Built-in feature plugins](builtin-plugins.md#turning-a-built-in-off).
+
+`worktree-include` is bundled in source and packaged builds. It copies matching ignored files from
+`.worktreeinclude` before setup or the first agent starts. It does not overwrite existing
+destinations or copy tracked files.
+
+Bundled provider plugins follow the configured executable and environment. A missing CLI shows an
+unavailable reason in the existing row.
+
+Bundled `*-usage-source` plugins feed Usage with their account reports; turning off a source stops
+its plugin and removes its cards. Usage opens from the sidebar. Its Sources list controls card
+visibility on this device; the Built-in switches control discovery on the host. Quota fetches run
+while Usage, a context popover, or the visible sidebar summary needs them. Per-turn token and cost
+history belongs to the `insights` built-in.
+
+Plugin tools are captured once per agent, including stateless HTTP MCP access, so a toggle changes
+new agents' catalogs only. Session subscriptions and background services still stop on disable. Do
+not clear push listeners while stopping a service: the same WebSocket sessions must work when it is
+enabled again.
+
+## Composer surfaces
+
+Composer items share the composer's model and option controls. Keep legacy composer pills on this
+host too, so toolbar measurement and compact overflow account for every plugin control.
+
+A sheet or popover can mount in a separate React tree. Carry the installation's runtime contexts
+through `usePluginRuntimeContextBridge`; the composer and New workspace contexts belong to the
+surface that opened it. Creating a second runtime loses that surface's draft and translation state.
+
+## Remaining host gaps
+
+The supported Paseo version range covers the ported runtime API, not every upstream host surface.
+Runtime e2e tests in `packages/server/src/server/plugins/` skip the cases that need a missing host
+integration and name the prerequisite beside the test:
+
+- Owned-list observation recovery after repeated socket closes needs the client list subscription
+  engine.
+- Worktree creation hooks across receipt replays need idempotency receipts in `CreationService`.
+- Enabling and disabling configured plugins through a daemon config reload, without a restart,
+  waits on the config reload path.

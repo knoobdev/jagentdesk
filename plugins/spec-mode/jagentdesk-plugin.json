@@ -1,0 +1,13 @@
+{
+  "kind": "builtin",
+  "id": "spec-mode",
+  "name": "Spec mode",
+  "description": "Plan and implement work from a specification.",
+  "defaultEnabled": true,
+  "requires": ["skills"],
+  "builtinOrder": 14,
+  "builtinEntrypoints": {
+    "server": "server/index.ts",
+    "client": "client/index.tsx"
+  }
+}

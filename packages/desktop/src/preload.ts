@@ -11,6 +11,10 @@ const JAGENTDESK_BROWSER_PROFILE_PARTITION = "persist:jagentdesk-browser";
 
 type EventHandler = (payload: unknown) => void;
 
+function readArgValue(prefix: string): string | undefined {
+  return process.argv.find((argument) => argument.startsWith(prefix))?.slice(prefix.length);
+}
+
 interface AttachedBrowserRegistration {
   browserId: string;
   workspaceId: string;
@@ -19,6 +23,8 @@ interface AttachedBrowserRegistration {
 
 contextBridge.exposeInMainWorld("jagentdeskDesktop", {
   platform: process.platform,
+  browserHostLabel: readArgValue("--jagentdesk-browser-host-label="),
+  browserHostInstanceId: readArgValue("--jagentdesk-browser-host-instance-id="),
   invoke: (command: string, args?: Record<string, unknown>) =>
     ipcRenderer.invoke("jagentdesk:invoke", command, args),
   getPendingOpenProject: () =>
@@ -73,13 +79,6 @@ contextBridge.exposeInMainWorld("jagentdeskDesktop", {
     ssoLoopback: (input: { authUrl: string; state: string; timeoutMs: number }) =>
       ipcRenderer.invoke("jagentdesk:argocd:sso-loopback", input),
   },
-  // Figma OAuth (spec 32.2): loopback 127.0.0.1:8766/figma/callback + system browser.
-  figma: {
-    // Browse files (spec 32.1, ADR-0038): sandboxed Figma Files guest; no URL/partition input.
-    pickFile: () => ipcRenderer.invoke("jagentdesk:invoke", "figma_pick_file"),
-    oauthLoopback: (input: { authorizeUrl: string; redirectUri: string; timeoutMs?: number }) =>
-      ipcRenderer.invoke("jagentdesk:invoke", "figma_oauth_loopback", input),
-  },
   dialog: {
     ask: (message: string, options?: Record<string, unknown>) =>
       ipcRenderer.invoke("jagentdesk:dialog:ask", message, options),
@@ -97,7 +96,8 @@ contextBridge.exposeInMainWorld("jagentdeskDesktop", {
     openUrl: (url: string) => ipcRenderer.invoke("jagentdesk:opener:openUrl", url),
   },
   editor: {
-    listTargets: () => ipcRenderer.invoke("jagentdesk:editor:listTargets"),
+    listTargets: (input?: { workspacePath?: string }) =>
+      ipcRenderer.invoke("jagentdesk:editor:listTargets", input),
     openTarget: (input: {
       editorId: string;
       workspacePath: string;

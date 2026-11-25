@@ -1,5 +1,7 @@
+import { pluginComposersSource } from "./composer-items/source";
 import { callPluginRpc } from "@jagentdesk/plugin/client/host";
 import type {
+  PluginOpenScreenInput,
   PluginAgentCommandContext,
   PluginCommandCapabilities,
   PluginPanelLocation,
@@ -11,6 +13,7 @@ import type { PluginSurfaceRuntime } from "./surface-runtime";
 import type { InstalledPlugin } from "./types";
 
 export interface PluginNavigation {
+  openScreen?(pluginId: string, input: PluginOpenScreenInput): void;
   openSettings(pluginId: string, screenId: string): void;
   openSurface(pluginId: string, surfaceId: string): void;
   openWorkspacePanel(pluginId: string, panelId: string, location: PluginPanelLocation): void;
@@ -29,7 +32,14 @@ export function createPluginCapabilities(
 ): PluginCommandCapabilities {
   return {
     jagentdesk: runtime.jagentdesk,
+    composers: (selector) => pluginComposersSource(plugin).resolve(selector),
     rpc: (contract, input) => callPluginRpc(contract, runtime.invoke, input),
+    openScreen(input) {
+      if (!plugin.surfaces.some((surface) => surface.id === input.screenId))
+        throw new Error(`Plugin screen is unavailable: ${input.screenId}`);
+      if (navigation.openScreen) navigation.openScreen(plugin.id, input);
+      else navigation.openSurface(plugin.id, input.screenId);
+    },
     openSettings(screenId) {
       if (!plugin.settingsScreens.some((screen) => screen.id === screenId))
         throw new Error(`Plugin settings screen is unavailable: ${screenId}`);

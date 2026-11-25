@@ -81,6 +81,8 @@ export async function runRestartCommand(
 ): Promise<RestartCommandResult> {
   const timeoutMs = parseTimeoutMs(options.timeout);
   const force = options.force === true;
+  const keepTerminals = options.killTerminals !== true;
+  if (force && keepTerminals) throw new Error("--force requires --kill-terminals");
   const startOptions = toStartOptions(options);
 
   try {
@@ -90,11 +92,12 @@ export async function runRestartCommand(
         home: startOptions.home,
         timeoutMs,
         force,
+        keepTerminals,
       });
     } catch (err) {
       const isTimeout =
         err instanceof Error && err.message.includes("Timed out waiting for daemon PID");
-      if (!force && isTimeout) {
+      if (!force && !keepTerminals && isTimeout) {
         stopResult = await stopLocalDaemon({
           home: startOptions.home,
           timeoutMs,

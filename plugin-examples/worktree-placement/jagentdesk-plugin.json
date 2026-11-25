@@ -1,0 +1,6 @@
+{
+  "id": "worktree-placement",
+  "requirements": {
+    "jagentdesk": ">=0.9.59"
+  }
+}

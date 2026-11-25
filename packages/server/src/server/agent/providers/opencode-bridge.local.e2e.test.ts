@@ -13,6 +13,14 @@ import {
   getRealProviderRuntimeSettings,
 } from "../../daemon-e2e/real-provider-test-config.js";
 import type { JAgentDeskToolCatalog } from "../tools/types.js";
+import { AgentManager } from "../agent-manager.js";
+import { AgentStorage } from "../agent-storage.js";
+import { ProviderSnapshotManager } from "../provider-snapshot-manager.js";
+import {
+  createJAgentDeskAgentToolManifest,
+  createJAgentDeskToolCatalog,
+} from "../tools/jagentdesk-tools.js";
+import { serializeJAgentDeskToolInputParameters } from "../tools/jagentdesk-tool-serialization.js";
 import { OpenCodeAgentClient } from "./opencode-agent.js";
 import { OpenCodeV2AgentClient } from "./opencode/v2/agent.js";
 import { OpenCodeBridge } from "./opencode/bridge.js";
@@ -22,6 +30,61 @@ import {
   readAssistantText,
   requireSessionId,
 } from "./opencode/test-utils/v2-local-e2e-helpers.js";
+
+test("real OpenCode server advertises agent-scoped notification descriptions", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "jagentdesk-opencode-manifest-real-"));
+  const logger = createTestLogger();
+  const providerSnapshotManager = new ProviderSnapshotManager({ logger });
+  const dependencies = {
+    agentManager: new AgentManager({ logger }),
+    agentStorage: new AgentStorage(path.join(root, "agents"), logger),
+    providerSnapshotManager,
+    logger,
+  };
+  const bridge = new OpenCodeBridge({ jagentdeskHome: root, logger });
+  bridge.setManifestCatalog(createJAgentDeskAgentToolManifest(dependencies));
+  const manager = new OpenCodeServerManager({
+    logger,
+    resolveHomeDir: () => root,
+    runtimeSettings: {
+      env: {
+        XDG_CONFIG_HOME: path.join(root, "config"),
+        XDG_DATA_HOME: path.join(root, "data"),
+        XDG_CACHE_HOME: path.join(root, "cache"),
+        OPENCODE_DISABLE_AUTO_UPDATE: "1",
+      },
+    },
+    decorateServerEnv: (env) => bridge.decorateServerEnv(env),
+  });
+  let inspection: Awaited<ReturnType<OpenCodeServerManager["acquireCurrent"]>> | undefined;
+  try {
+    await bridge.start();
+    inspection = await manager.acquireCurrent();
+    const sdk = createOpencodeClient({ baseUrl: inspection.server.url, directory: root });
+    const response = await sdk.tool.list({ directory: root, provider: "openai", model: "gpt-5.4" });
+    expect(response.error).toBeUndefined();
+    const agentCatalog = createJAgentDeskToolCatalog({ ...dependencies, callerAgentId: "caller" });
+    for (const name of ["create_agent", "send_agent_prompt"]) {
+      const actual = response.data!.find((tool) => tool.id === `jagentdesk_${name}`)!;
+      expect(actual).toBeDefined();
+      const expected = serializeJAgentDeskToolInputParameters(agentCatalog.getTool(name)!);
+      expect(actual.parameters).toMatchObject({
+        properties: {
+          notifyOnFinish: {
+            description: (expected.properties as Record<string, { description: string }>)
+              .notifyOnFinish.description,
+          },
+        },
+      });
+    }
+  } finally {
+    await inspection?.release();
+    await manager.shutdown();
+    await bridge.close();
+    await providerSnapshotManager.shutdown();
+    await rm(root, { recursive: true, force: true });
+  }
+}, 120_000);
 
 test("real OpenCode server persists provider permissions across creation and resume", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "jagentdesk-opencode-permissions-"));
@@ -342,45 +405,11 @@ test("v2 native tool bridge preserves caller identity", async () => {
 }, 120_000);
 
 test.each([
-  {
-    major: 1,
-    package: "opencode-ai@1.14.46",
-    windowsPackage: "opencode-windows",
-    expectedTimeline: [],
-    expectedInitialTimeline: undefined,
-    expectedNotices: undefined,
-  },
-  {
-    major: 2,
-    package: "@opencode/cli@2.0.10",
-    windowsPackage: "@opencode/cli-windows",
-    expectedTimeline: [
-      expect.objectContaining({
-        type: "tool_call",
-        name: "opencode_runtime_notice",
-        detail: { type: "plain_text", label: "This chat uses OpenCode v2.", icon: "sparkles" },
-      }),
-    ],
-    expectedInitialTimeline: [
-      expect.objectContaining({
-        item: expect.objectContaining({
-          type: "tool_call",
-          name: "opencode_runtime_notice",
-          detail: { type: "plain_text", label: "This chat uses OpenCode v2.", icon: "sparkles" },
-        }),
-      }),
-    ],
-    expectedNotices: [expect.objectContaining({ major: 2 })],
-  },
+  { major: 1, package: "opencode-ai@1.14.46", windowsPackage: "opencode-windows" },
+  { major: 2, package: "@opencode/cli@2.0.10", windowsPackage: "@opencode/cli-windows" },
 ])(
   "versioned runtime v$major discovers models and preserves a native session handle",
-  async ({
-    package: cliPackage,
-    windowsPackage,
-    expectedTimeline,
-    expectedInitialTimeline,
-    expectedNotices,
-  }) => {
+  async ({ package: cliPackage, windowsPackage }) => {
     const root = await mkdtemp(path.join(os.tmpdir(), "jagentdesk-opencode-versioned-"));
     const client = new OpenCodeRuntimeClient(createTestLogger(), {
       command: {
@@ -407,9 +436,25 @@ test.each([
     let original: Awaited<ReturnType<typeof client.createSession>> | undefined;
     let resumed: Awaited<ReturnType<typeof client.resumeSession>> | undefined;
     try {
+      // Windows invokes the platform binary directly. Installing its wrapper also runs an
+      // unused postinstall binary probe, which has no timeout and can hold the fixture open.
+      const installPackage =
+        process.platform === "win32"
+          ? `${windowsPackage}-${process.arch}@${cliPackage.slice(cliPackage.lastIndexOf("@") + 1)}`
+          : cliPackage;
+      // npm abandons a stalled registry download only after its 5 minute default, past this
+      // test's budget, and the killed install keeps the fixture locked. Retry stalls sooner.
       await execCommand(
         "npm",
-        ["install", "--prefix", root, "--no-audit", "--no-fund", cliPackage],
+        [
+          "install",
+          "--prefix",
+          root,
+          "--no-audit",
+          "--no-fund",
+          "--fetch-timeout=30000",
+          installPackage,
+        ],
         {
           cwd: root,
           timeout: 180_000,
@@ -424,15 +469,14 @@ test.each([
         { persistSession: false },
       );
       const handle = await original.describePersistence();
-      expect(original.initialTimeline).toEqual(expectedInitialTimeline);
-      expect(handle.metadata?.openCodeRuntimeNotices).toEqual(expectedNotices);
+      expect(original.initialTimeline).toBeUndefined();
       resumed = await client.resumeSession(handle, { cwd: root });
       expect((await resumed.describePersistence()).nativeHandle).toBe(handle.nativeHandle);
       expect(
         (await drainPersistedTimeline(resumed)).map((event) =>
           event.type === "timeline" ? event.item : event,
         ),
-      ).toEqual(expectedTimeline);
+      ).toEqual([]);
     } finally {
       await resumed?.close();
       await original?.close();

@@ -1,17 +1,8 @@
 import { useMemo, type ComponentProps, type PropsWithChildren, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { type PressableStateCallbackType } from "react-native";
+import { Pressable, type PressableStateCallbackType } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import {
-  Archive,
-  CircleCheck,
-  Copy,
-  GitBranch,
-  MoreVertical,
-  Pencil,
-  Pin,
-  PinOff,
-} from "lucide-react-native";
+import { Archive, CircleCheck, Copy, MoreVertical, Pencil, Pin, PinOff } from "lucide-react-native";
 import { isNative, isWeb } from "@/constants/platform";
 import { getForgePresentation, normalizeForge } from "@/git/forge";
 import type { SidebarWorkspaceEntry } from "@/hooks/use-sidebar-workspaces-list";
@@ -46,7 +37,6 @@ const ThemedPencil = withUnistyles(Pencil);
 const ThemedCircleCheck = withUnistyles(CircleCheck);
 const ThemedPin = withUnistyles(Pin);
 const ThemedPinOff = withUnistyles(PinOff);
-const ThemedGitBranch = withUnistyles(GitBranch);
 
 const copyLeadingIcon = <ThemedCopy size={14} uniProps={foregroundMutedColorMapping} />;
 const renameLeadingIcon = <ThemedPencil size={14} uniProps={foregroundMutedColorMapping} />;
@@ -56,9 +46,13 @@ const markAsReadLeadingIcon = (
 const archiveLeadingIcon = <ThemedArchive size={14} uniProps={foregroundMutedColorMapping} />;
 const pinLeadingIcon = <ThemedPin size={14} uniProps={foregroundMutedColorMapping} />;
 const unpinLeadingIcon = <ThemedPinOff size={14} uniProps={foregroundMutedColorMapping} />;
-const orchestrationLeadingIcon = (
-  <ThemedGitBranch size={14} uniProps={foregroundMutedColorMapping} />
-);
+
+/** Pointer-only, so it is always the kebab's pointer size. */
+const ARCHIVE_BUTTON_SIZE = 18;
+/** Keeps a press aimed at the kebab from landing on the one-click archive. */
+const ARCHIVE_BUTTON_KEBAB_GAP = 8;
+/** The width the archive button and its gap take up left of the kebab. */
+export const ARCHIVE_BUTTON_FOOTPRINT = ARCHIVE_BUTTON_SIZE + ARCHIVE_BUTTON_KEBAB_GAP;
 
 function renderTriggerIcon({ hovered }: { hovered?: boolean }) {
   return (
@@ -66,6 +60,38 @@ function renderTriggerIcon({ hovered }: { hovered?: boolean }) {
       size={14}
       uniProps={hovered ? foregroundColorMapping : foregroundMutedColorMapping}
     />
+  );
+}
+
+function renderArchiveIcon({ hovered }: PressableStateCallbackType & { hovered?: boolean }) {
+  return (
+    <ThemedArchive
+      size={14}
+      uniProps={hovered ? foregroundColorMapping : foregroundMutedColorMapping}
+    />
+  );
+}
+
+/** One-click archive beside the kebab, for pointer rows that reveal it on hover. */
+export function SidebarWorkspaceArchiveButton({
+  workspaceKey,
+  onArchive,
+}: {
+  workspaceKey: string;
+  onArchive: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Pressable
+      hitSlop={4}
+      style={archiveButtonStyle}
+      onPress={onArchive}
+      accessibilityRole={isWeb ? undefined : "button"}
+      accessibilityLabel={t("sidebar.workspace.actions.archiveWorkspace")}
+      testID={`sidebar-workspace-archive-button-${workspaceKey}`}
+    >
+      {renderArchiveIcon}
+    </Pressable>
   );
 }
 
@@ -128,7 +154,6 @@ function SidebarWorkspaceMenuItems({
   archiveShortcutKeys,
   isPinned,
   onTogglePin,
-  onOpenOrchestration,
   openInFileManagerPath,
 }: SidebarWorkspaceMenuItemsProps & { surface: MenuSurface }): ReactNode {
   const { t } = useTranslation();
@@ -224,7 +249,6 @@ export function SidebarWorkspaceMenu({
   archiveShortcutKeys,
   isPinned,
   onTogglePin,
-  onOpenOrchestration,
   openInFileManagerPath,
   open,
   onOpenChange,
@@ -256,7 +280,6 @@ export function SidebarWorkspaceMenu({
           archiveShortcutKeys={archiveShortcutKeys}
           isPinned={isPinned}
           onTogglePin={onTogglePin}
-          onOpenOrchestration={onOpenOrchestration}
           openInFileManagerPath={openInFileManagerPath}
         />
       </DropdownMenuContent>
@@ -289,7 +312,6 @@ export function SidebarWorkspaceContextMenu({
   archiveShortcutKeys,
   isPinned,
   onTogglePin,
-  onOpenOrchestration,
   openInFileManagerPath,
   accessibilityLabel,
   ...triggerProps
@@ -315,6 +337,7 @@ export function SidebarWorkspaceContextMenu({
       })
     : null;
   const rowAccessibilityLabel = resolveSidebarWorkspaceAccessibilityLabel({
+    t,
     workspace,
     workspaceTitleSource,
     leadingProjectName,
@@ -351,7 +374,6 @@ export function SidebarWorkspaceContextMenu({
           archiveShortcutKeys={archiveShortcutKeys}
           isPinned={isPinned}
           onTogglePin={onTogglePin}
-          onOpenOrchestration={onOpenOrchestration}
           openInFileManagerPath={openInFileManagerPath}
         />
       </ContextMenuContent>
@@ -363,13 +385,33 @@ function triggerStyle({ hovered = false }: PressableStateCallbackType & { hovere
   return [styles.trigger, hovered && styles.triggerHovered];
 }
 
+function archiveButtonStyle({
+  hovered = false,
+}: PressableStateCallbackType & { hovered?: boolean }) {
+  return [styles.archiveButton, hovered && styles.triggerHovered];
+}
+
 const styles = StyleSheet.create((theme) => ({
   trigger: {
-    padding: 2,
+    width: { xs: 32, md: 18 },
+    height: { xs: 32, md: 18 },
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: { xs: -6, md: 0 },
     borderRadius: 4,
     marginLeft: 2,
   },
   triggerHovered: {
     backgroundColor: theme.colors.surface2,
+  },
+  // The kebab's box without its offsets: the archive glyph fills its view box, so it needs
+  // none of the nudging the three dots do.
+  archiveButton: {
+    width: ARCHIVE_BUTTON_SIZE,
+    height: ARCHIVE_BUTTON_SIZE,
+    marginRight: ARCHIVE_BUTTON_KEBAB_GAP,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 4,
   },
 }));

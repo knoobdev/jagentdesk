@@ -40,6 +40,7 @@ describe("sidebar view store", () => {
     useSidebarViewStore.setState({
       groupMode: "project",
       hostFilters: [],
+      showBackground: false,
     });
   });
 
@@ -88,6 +89,8 @@ describe("sidebar view store", () => {
         },
       }),
     ).toEqual({
+      workspaceSort: "created",
+      showBackground: false,
       groupMode: "status",
       hostFilters: [],
     });
@@ -100,6 +103,8 @@ describe("sidebar view store", () => {
         hostFilter: "host-a",
       }),
     ).toEqual({
+      workspaceSort: "created",
+      showBackground: false,
       groupMode: "status",
       hostFilters: ["host-a"],
     });
@@ -112,6 +117,8 @@ describe("sidebar view store", () => {
         hostFilters: ["host-a", "host-b"],
       }),
     ).toEqual({
+      workspaceSort: "created",
+      showBackground: false,
       groupMode: "status",
       hostFilters: ["host-a", "host-b"],
     });
@@ -159,4 +166,14 @@ describe("sidebar view store", () => {
     );
     expect(storage.reads).toEqual(["sidebar-view"]);
   });
+});
+
+it("persists background visibility with the sidebar display preferences", () => {
+  useSidebarViewStore.setState({ showBackground: false });
+  useSidebarViewStore.getState().toggleBackground();
+  expect(useSidebarViewStore.getState().showBackground).toBe(true);
+  expect(
+    migrateSidebarViewState({ groupMode: "project", hostFilters: [], showBackground: true })
+      .showBackground,
+  ).toBe(true);
 });

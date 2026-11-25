@@ -44,6 +44,7 @@ vi.mock("@/runtime/host-runtime", () => ({
 
 vi.mock("@/runtime/host-features", () => ({
   useHostFeature: (_serverId: string, feature: string) => {
+    if (feature === "builtinPlugins") return false;
     if (feature === "pluginLogs") return runtime.logsSupported;
     if (feature === "pluginSourceInstallation") return runtime.sourceInstallSupported;
     return runtime.supported;

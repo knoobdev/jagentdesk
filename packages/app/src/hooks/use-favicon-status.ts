@@ -1,12 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getIsElectronRuntimeMac } from "@/constants/layout";
-import { useAggregatedAgents } from "./use-aggregated-agents";
 import { getDesktopHost } from "@/desktop/host";
-import { useWorkspaceStatusesForBadges } from "@/stores/session-store-hooks";
-import { deriveMacDockBadgeCountFromWorkspaceStatuses } from "@/utils/desktop-badge-state";
+import { useSessionStore } from "@/stores/session-store";
+import { useSidebarViewStore } from "@/stores/sidebar-view-store";
+import { createFaviconStatusSelector, type FaviconStatus } from "@/utils/favicon-status";
+import { createMacDockBadgeCountSelector } from "@/utils/desktop-badge-state";
 import { isNative } from "@/constants/platform";
 
-type FaviconStatus = "none" | "running" | "attention";
 type ColorScheme = "dark" | "light";
 
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -23,21 +23,6 @@ const FAVICON_IMAGES: Record<ColorScheme, Record<FaviconStatus, { uri: string } 
   },
 };
 /* eslint-enable @typescript-eslint/no-require-imports */
-
-function deriveFaviconStatus(
-  agents: ReturnType<typeof useAggregatedAgents>["agents"],
-): FaviconStatus {
-  const hasRunning = agents.some((agent) => agent.status === "running");
-  if (hasRunning) {
-    return "running";
-  }
-  const hasAttention = agents.some((agent) => agent.requiresAttention);
-  const hasNeedsInput = agents.some((agent) => (agent.pendingPermissionCount ?? 0) > 0);
-  if (hasAttention || hasNeedsInput) {
-    return "attention";
-  }
-  return "none";
-}
 
 function getFaviconUri(status: FaviconStatus, colorScheme: ColorScheme): string {
   const image = FAVICON_IMAGES[colorScheme][status];
@@ -94,8 +79,17 @@ async function updateMacDockBadge(count?: number) {
 }
 
 export function useFaviconStatus() {
-  const { agents } = useAggregatedAgents();
-  const workspaceStatuses = useWorkspaceStatusesForBadges();
+  const showBackground = useSidebarViewStore((state) => state.showBackground);
+  const selectFaviconStatus = useMemo(
+    () => createFaviconStatusSelector({ showBackground }),
+    [showBackground],
+  );
+  const selectDockBadgeCount = useMemo(
+    () => createMacDockBadgeCountSelector({ showBackground }),
+    [showBackground],
+  );
+  const status = useSessionStore(selectFaviconStatus);
+  const dockBadgeCount = useSessionStore(selectDockBadgeCount);
   const [colorScheme, setColorScheme] = useState<ColorScheme>(getSystemColorScheme);
   const lastDockBadgeCountRef = useRef<number | undefined>(undefined);
 
@@ -116,13 +110,11 @@ export function useFaviconStatus() {
   useEffect(() => {
     if (isNative) return;
 
-    const status = deriveFaviconStatus(agents);
     updateFavicon(status, colorScheme);
 
-    const dockBadgeCount = deriveMacDockBadgeCountFromWorkspaceStatuses(workspaceStatuses);
     if (dockBadgeCount !== lastDockBadgeCountRef.current) {
       lastDockBadgeCountRef.current = dockBadgeCount;
       void updateMacDockBadge(dockBadgeCount);
     }
-  }, [agents, colorScheme, workspaceStatuses]);
+  }, [status, colorScheme, dockBadgeCount]);
 }

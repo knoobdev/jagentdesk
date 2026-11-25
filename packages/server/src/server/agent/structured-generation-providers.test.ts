@@ -18,20 +18,42 @@ class ProviderSnapshots {
 }
 
 describe("resolveStructuredGenerationProviders", () => {
-  test("uses explicit configured provider models without refreshing provider snapshots", async () => {
-    const snapshots = new ProviderSnapshots([]);
+  test("tries only the configured models when metadata generation is manual", async () => {
+    const snapshots = new ProviderSnapshots([
+      {
+        provider: "work-claude",
+        status: READY,
+        enabled: true,
+        models: [
+          { provider: "work-claude", id: "claude-haiku-2026", label: "Haiku", isDefault: true },
+        ],
+      },
+      {
+        provider: "opencode",
+        status: READY,
+        enabled: true,
+        models: [{ provider: "opencode", id: "minimax-m3", label: "MiniMax M3", isDefault: true }],
+      },
+    ]);
 
     const providers = await resolveStructuredGenerationProviders({
       cwd: "/tmp/repo",
       providerSnapshotManager: snapshots,
       daemonConfig: {
         metadataGeneration: {
-          providers: [{ provider: "mock", model: "ten-second-stream" }],
+          providers: [
+            { provider: "local-llm", model: "qwen-local" },
+            { provider: "mock", model: "ten-second-stream" },
+          ],
         },
       },
+      currentSelection: { provider: "opencode", model: "minimax-m3" },
     });
 
-    expect(providers).toEqual([{ provider: "mock", model: "ten-second-stream" }]);
+    expect(providers).toEqual([
+      { provider: "local-llm", model: "qwen-local" },
+      { provider: "mock", model: "ten-second-stream" },
+    ]);
     expect(snapshots.calls).toEqual([]);
   });
 

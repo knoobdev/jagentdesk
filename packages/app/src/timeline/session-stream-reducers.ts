@@ -1,7 +1,11 @@
+import type { AgentMetric } from "@jagentdesk/protocol/agent-types";
+
+import { streamTimelineItemIdentity } from "@/types/stream";
 import type { AgentStreamEventPayload } from "@jagentdesk/protocol/messages";
 import { selectAgentTimelineState, useSessionStore } from "@/stores/session-store";
 import type { AssistantMessageItem, StreamItem } from "@/types/stream";
 import type { TurnLivenessTransition } from "@/timeline/turn-liveness";
+import { stampTimelineTurnMetrics } from "@/timeline/turn-metrics";
 import {
   applyStreamEvent,
   flushHeadToTail,
@@ -121,6 +125,7 @@ function timelineCursorEquals(left: TimelineCursor, right: TimelineCursor): bool
 }
 
 interface TimelineResponseEntry {
+  turnId?: string;
   seqStart: number;
   seqEnd: number;
   sourceSeqRanges?: TimelineSeqRange[];
@@ -128,6 +133,7 @@ interface TimelineResponseEntry {
   provider: string;
   item: Record<string, unknown>;
   timestamp: string;
+  turnMetrics?: AgentMetric[];
 }
 
 export interface ProcessTimelineResponseInput {
@@ -189,7 +195,7 @@ interface TimelinePathResult {
 
 function matchesProjectedRow(existing: StreamItem, incoming: StreamItem): boolean {
   if (isAgentToolCallItem(existing) && isAgentToolCallItem(incoming)) {
-    return existing.payload.data.callId === incoming.payload.data.callId;
+    return streamTimelineItemIdentity(existing) === streamTimelineItemIdentity(incoming);
   }
   if (existing.kind === "assistant_message" && incoming.kind === "assistant_message") {
     return (
@@ -416,13 +422,7 @@ function mergeTimelineWindow(args: {
     return cursor?.epoch !== payload.epoch || cursor.seq < startSeq || cursor.seq > endSeq;
   });
   const retainedHead = projected.head;
-  const reservedItemIds = new Set(
-    [...retainedTail, ...retainedHead].flatMap((item) =>
-      item.kind === "assistant_message" && item.blockGroupId
-        ? [item.id, item.blockGroupId]
-        : [item.id],
-    ),
-  );
+  const reservedItemIds = new Set([...retainedTail, ...retainedHead].map((item) => item.id));
   const hydrated = hydrateStreamState(
     toHydratedEvents(timelineUnits.filter((unit) => !projected.reconciledUnits.has(unit))),
     { source: "canonical", reservedItemIds },
@@ -795,57 +795,49 @@ function reconcileOverlappingProjectedAssistant(params: {
   };
 
   const headMatch = findMatch(params.head);
-  const tailMatch = headMatch ? null : findMatch(params.tail);
+  const tailMatch = findMatch(params.tail);
   const match = headMatch ?? tailMatch;
   if (!match) {
     return { tail: params.tail, head: params.head, reconciled: false };
   }
 
-  const blockGroupId = match.current.blockGroupId;
   const messageId = projectedMessageId ?? match.current.messageId;
   const replacement: AssistantMessageItem = {
     kind: "assistant_message",
-    id: blockGroupId ?? match.current.id,
+    id: match.current.id,
     ...(messageId !== undefined ? { messageId } : {}),
     text: projectedText,
+    ...(unit.event.type === "timeline" && unit.event.turnId ? { turnId: unit.event.turnId } : {}),
     timestamp: unit.timestamp,
     timelineCursor: { epoch: params.epoch, seq: unit.seqEnd },
   };
-  const belongsToBlockGroup = (item: StreamItem) =>
-    blockGroupId !== undefined &&
-    item.kind === "assistant_message" &&
-    item.blockGroupId === blockGroupId;
-  const removeBlockGroup = (items: StreamItem[]) =>
-    blockGroupId !== undefined ? items.filter((item) => !belongsToBlockGroup(item)) : items;
   const replaceMatch = (items: StreamItem[], index: number) => {
-    if (!blockGroupId) {
-      const next = [...items];
-      next[index] = replacement;
-      return next;
-    }
-    const next: StreamItem[] = [];
-    let inserted = false;
-    for (const item of items) {
-      if (!belongsToBlockGroup(item)) {
-        next.push(item);
-      } else if (!inserted) {
-        next.push(replacement);
-        inserted = true;
-      }
-    }
+    const next = [...items];
+    next[index] = replacement;
     return next;
   };
 
   if (headMatch) {
+    const tailCursor = tailMatch?.current.timelineCursor;
+    const replacesCachedPrefix =
+      tailMatch !== null &&
+      tailCursor?.epoch === params.epoch &&
+      unit.sourceSeqRanges.some(
+        (range) => range.startSeq <= tailCursor.seq && tailCursor.seq <= range.endSeq,
+      );
+    // The catch-up projection owns both the live reply and its covered cached prefix.
+    const tailWithoutPrefix = replacesCachedPrefix
+      ? [...params.tail.slice(0, tailMatch.index), ...params.tail.slice(tailMatch.index + 1)]
+      : params.tail;
     return {
-      tail: removeBlockGroup(params.tail),
+      tail: tailWithoutPrefix,
       head: replaceMatch(params.head, headMatch.index),
       reconciled: true,
     };
   }
   return {
     tail: replaceMatch(params.tail, match.index),
-    head: removeBlockGroup(params.head),
+    head: params.head,
     reconciled: true,
   };
 }
@@ -1135,13 +1127,7 @@ function applyAcceptedTimelinePage(input: {
     })),
     {
       source: "canonical",
-      reservedItemIds: new Set(
-        currentTail.flatMap((item) =>
-          item.kind === "assistant_message" && item.blockGroupId
-            ? [item.id, item.blockGroupId]
-            : [item.id],
-        ),
-      ),
+      reservedItemIds: new Set(currentTail.map((item) => item.id)),
     },
   );
   return {
@@ -1258,7 +1244,8 @@ export function processTimelineResponse(
   // ------------------------------------------------------------------
   // Convert entries to timeline units
   // ------------------------------------------------------------------
-  const timelineUnits = selectEntriesOwnedByTimelinePage(payload).map((entry) => ({
+  const pageEntries = selectEntriesOwnedByTimelinePage(payload);
+  const timelineUnits = pageEntries.map((entry) => ({
     seq: entry.seqStart,
     seqEnd: entry.seqEnd,
     sourceSeqRanges:
@@ -1268,7 +1255,9 @@ export function processTimelineResponse(
     event: {
       type: "timeline",
       provider: entry.provider,
+      turnId: entry.turnId,
       item: entry.item,
+      ...(entry.turnId ? { turnId: entry.turnId } : {}),
     } as AgentStreamEventPayload,
     timestamp: new Date(entry.timestamp),
   }));
@@ -1368,8 +1357,8 @@ export function processTimelineResponse(
     });
   }
 
-  const nextTail = timelineResult.tail;
-  const nextHead = timelineResult.head;
+  const nextTail = stampTimelineTurnMetrics(timelineResult.tail, payload.epoch, pageEntries);
+  const nextHead = stampTimelineTurnMetrics(timelineResult.head, payload.epoch, pageEntries);
   const nextCursor = timelineResult.cursor;
   const cursorChanged = timelineResult.cursorChanged;
   sideEffects.push(...timelineResult.sideEffects);
@@ -1819,6 +1808,7 @@ export interface CreateSessionAgentStreamReducerQueueInput {
     state: (prev: Map<string, TimelineCursor>) => Map<string, TimelineCursor>,
   ) => void;
   recoverTimelineGap: (agentId: string, cursor: { epoch: string; endSeq: number }) => void;
+  onCommitted?: (agentId: string) => void;
 }
 
 function scheduleAgentStreamReducerFlush(callback: () => void): number {
@@ -1832,7 +1822,8 @@ function cancelAgentStreamReducerFlush(id: number) {
 export function createSessionAgentStreamReducerQueue(
   input: CreateSessionAgentStreamReducerQueueInput,
 ): AgentStreamReducerQueue {
-  const { serverId, setAgentStreamState, setAgentTimelineCursor, recoverTimelineGap } = input;
+  const { serverId, setAgentStreamState, setAgentTimelineCursor, recoverTimelineGap, onCommitted } =
+    input;
 
   return createAgentStreamReducerQueue({
     getSnapshot: (agentId) => {
@@ -1889,6 +1880,7 @@ export function createSessionAgentStreamReducerQueue(
           return next;
         });
       }
+      onCommitted?.(agentId);
     },
     handleSideEffects: (agentId, sideEffects) => {
       for (const effect of sideEffects) {

@@ -1,6 +1,6 @@
-import { join } from "node:path";
+import { basename } from "node:path";
 
-import { getJAgentDeskWorktreesRoot, isJAgentDeskOwnedWorktreeCwd } from "../../utils/worktree.js";
+import { isJAgentDeskOwnedWorktreeCwd } from "../../utils/worktree.js";
 import {
   archiveByScope,
   resolveWorkspaceIdAtPath,
@@ -64,7 +64,9 @@ export type CreateJAgentDeskWorktreeCommandResult<Result extends CreateJAgentDes
       cause: unknown;
     };
 
-export async function createJAgentDeskWorktreeCommand<Result extends CreateJAgentDeskWorktreeResult>(
+export async function createJAgentDeskWorktreeCommand<
+  Result extends CreateJAgentDeskWorktreeResult,
+>(
   dependencies: CreateJAgentDeskWorktreeCommandDependencies<Result>,
   input: CreateJAgentDeskWorktreeCommandInput,
 ): Promise<CreateJAgentDeskWorktreeCommandResult<Result>> {
@@ -93,7 +95,10 @@ export interface ArchiveCommandDependencies extends Omit<
   ArchiveDependencies,
   "workspaceGitService"
 > {
-  workspaceGitService: Pick<WorkspaceGitService, "getSnapshot" | "listWorktrees">;
+  workspaceGitService: Pick<
+    WorkspaceGitService,
+    "getSnapshot" | "listWorktrees" | "invalidateWorktrees"
+  >;
 }
 
 export interface ArchiveCommandInput {
@@ -208,10 +213,18 @@ async function resolveWorktreeSlugPath(
   repoRoot: string,
   worktreeSlug: string,
 ): Promise<string> {
-  const worktreesRoot = await getJAgentDeskWorktreesRoot(
-    repoRoot,
-    dependencies.jagentdeskHome,
-    dependencies.jagentdeskWorktreesBaseRoot,
-  );
-  return join(worktreesRoot, worktreeSlug);
+  // Worktrees can live anywhere (legacy root or wherever
+  // a plugin placed them), so a slug resolves against the
+  // discovered worktree list for the repo, never a guessed path.
+  const worktrees = await dependencies.workspaceGitService.listWorktrees(repoRoot);
+  const match = worktrees.find((entry) => basename(entry.path) === worktreeSlug);
+  if (!match) {
+    const found = worktrees.map((entry) => basename(entry.path));
+    throw new Error(
+      found.length > 0
+        ? `JAgentDesk worktree not found for slug ${worktreeSlug}: found ${found.join(", ")}`
+        : `JAgentDesk worktree not found for slug ${worktreeSlug}`,
+    );
+  }
+  return match.path;
 }

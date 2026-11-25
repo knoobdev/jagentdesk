@@ -1,6 +1,7 @@
-import React, { type ReactNode } from "react";
+import React, { useMemo, type ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
+import { isWeb } from "@/constants/platform";
 import {
   ChevronDown,
   ChevronRight,
@@ -30,27 +31,57 @@ export const SUMMARY_SUCCESS_ICON = <ThemedCircleCheck size={12} uniProps={succe
 export const SUMMARY_DANGER_ICON = <ThemedCircleX size={12} uniProps={dangerColorMapping} />;
 export const SUMMARY_WARNING_ICON = <ThemedCircleDot size={12} uniProps={warningColorMapping} />;
 
-interface SectionProps {
+interface SectionHeaderProps {
   title: string;
   open: boolean;
   onToggle: () => void;
   summary: ReactNode;
+  accessibilityLabel?: string;
+}
+
+interface SectionProps extends SectionHeaderProps {
   children: ReactNode;
 }
 
-export function Section({ title, open, onToggle, summary, children }: SectionProps) {
+/** The disclosure row of a section, for layouts that place the section's body themselves. */
+export function SectionHeader({
+  title,
+  open,
+  onToggle,
+  summary,
+  accessibilityLabel,
+}: SectionHeaderProps) {
+  const accessibilityState = useMemo(() => ({ expanded: open }), [open]);
+  // React Native Web does not map `accessibilityState.expanded` to `aria-expanded`.
+  const webExpandedProps = useMemo(
+    () => (isWeb ? ({ "aria-expanded": open } as const) : null),
+    [open],
+  );
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? title}
+      accessibilityState={accessibilityState}
+      {...webExpandedProps}
+      style={sectionKitStyles.sectionHeader}
+      onPress={onToggle}
+    >
+      {open ? (
+        <ThemedChevronDown size={14} uniProps={foregroundMutedColorMapping} />
+      ) : (
+        <ThemedChevronRight size={14} uniProps={foregroundMutedColorMapping} />
+      )}
+      <Text style={sectionKitStyles.sectionTitle}>{title}</Text>
+      <View style={sectionKitStyles.summaryWrap}>{summary}</View>
+    </Pressable>
+  );
+}
+
+export function Section({ children, ...header }: SectionProps) {
   return (
     <View>
-      <Pressable style={sectionKitStyles.sectionHeader} onPress={onToggle}>
-        {open ? (
-          <ThemedChevronDown size={14} uniProps={foregroundMutedColorMapping} />
-        ) : (
-          <ThemedChevronRight size={14} uniProps={foregroundMutedColorMapping} />
-        )}
-        <Text style={sectionKitStyles.sectionTitle}>{title}</Text>
-        <View style={sectionKitStyles.summaryWrap}>{summary}</View>
-      </Pressable>
-      {open ? <View style={sectionKitStyles.sectionBody}>{children}</View> : null}
+      <SectionHeader {...header} />
+      {header.open ? <View style={sectionKitStyles.sectionBody}>{children}</View> : null}
     </View>
   );
 }

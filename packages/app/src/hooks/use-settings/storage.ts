@@ -1,8 +1,14 @@
+import {
+  DEFAULT_USAGE_PREFERENCES,
+  UsagePreferencesSchema,
+  type UsagePreferences,
+} from "@/usage/preferences";
 import { isSyntaxThemeId, type SyntaxThemeId } from "@jagentdesk/highlight";
 import type { QueryClient } from "@tanstack/react-query";
 import type { DesktopSettings } from "@/desktop/settings/desktop-settings";
 import { parseAppLanguage, type AppLanguage } from "@/i18n/locales";
 import {
+  DEFAULT_CONTENT_MAX_WIDTH,
   DEFAULT_THEME,
   PLUGIN_THEME_PREFERENCE,
   THEME_TO_UNISTYLES,
@@ -15,9 +21,12 @@ export const APP_SETTINGS_QUERY_KEY = ["app-settings"];
 // namespace. New settings are written only under the JAgentDesk namespace.
 const LEGACY_SETTINGS_KEY = "@jagentdesk:settings";
 
+export type SendShortcut = "enter" | "mod-enter";
+
 export type SendBehavior = "interrupt" | "steer" | "queue";
 export type ServiceUrlBehavior = "ask" | "in-app" | "external";
 export type WorkspaceTitleSource = "title" | "branch";
+export type ChatDisplay = "full" | "collapseToolCalls" | "collapseTurns";
 export type ToolCallDetailLevel = "overview" | "detailed";
 
 const VALID_THEMES = new Set<string>([
@@ -28,7 +37,7 @@ const VALID_THEMES = new Set<string>([
 // Bumped when the default theme changes. A settings file written before the bump that still has
 // the old default ("auto" = follow the system with the built-in themes) moves to the new
 // default once; any theme the user picked on purpose is kept, and so is a later choice of auto.
-const DEFAULT_THEME_VERSION = 1;
+const DEFAULT_THEME_VERSION = 2;
 const VALID_SERVICE_URL_BEHAVIORS = new Set<ServiceUrlBehavior>(["ask", "in-app", "external"]);
 const VALID_WORKSPACE_TITLE_SOURCES = new Set<WorkspaceTitleSource>(["title", "branch"]);
 const VALID_TOOL_CALL_DETAIL_LEVELS = new Set<ToolCallDetailLevel>(["overview", "detailed"]);
@@ -42,25 +51,38 @@ export const DEFAULT_CODE_FONT_SIZE = 12; // == FONT_SIZE.code
 export const MIN_CODE_FONT_SIZE = 9;
 export const MAX_CODE_FONT_SIZE = 22; // line-height 1.5×22=33 stays safe
 export const MAX_FONT_FAMILY_LENGTH = 200;
+export { DEFAULT_CONTENT_MAX_WIDTH };
+const WIDE_CONTENT_MAX_WIDTH = 1200;
+export type ContentWidthPreset = "default" | "wide" | "full";
+type ContentWidth = ContentWidthPreset | number;
 
+export type AppSettingsUpdate =
+  | Partial<AppSettings>
+  | ((current: AppSettings) => Partial<AppSettings>);
 export interface AppSettings {
+  usage: UsagePreferences;
+  usageInSidebar: boolean;
   theme: ThemeName | "auto" | typeof PLUGIN_THEME_PREFERENCE;
   /** The selected plugin-contributed theme when `theme` is "plugin". */
   pluginThemeId: string | null;
+  filePanelAssociations: Record<string, string>;
   defaultThemeVersion: number;
   language: AppLanguage;
   sendBehavior: SendBehavior;
+  sendShortcut: SendShortcut;
   serviceUrlBehavior: ServiceUrlBehavior;
   terminalScrollbackLines: number;
-  useLegacyTerminalRenderer: boolean;
   uiFontFamily: string; // "" = platform default UI stack
   monoFontFamily: string; // "" = platform default mono stack
   uiFontSize: number; // clamped px, default 16
   codeFontSize: number; // clamped px, default 12
+  contentWidth: ContentWidth;
   syntaxTheme: SyntaxThemeId; // default "one"
   workspaceTitleSource: WorkspaceTitleSource;
+  sidebarPluginRowBadgeItems: Record<string, boolean>;
   autoExpandReasoning: boolean;
   toolCallDetailLevel: ToolCallDetailLevel;
+  chatDisplay: ChatDisplay;
   chatOutlineEnabled: boolean;
   vimKeybindings: boolean;
 }
@@ -69,25 +91,34 @@ export interface Settings extends AppSettings {
   manageBuiltInDaemon: boolean;
 }
 
-type StoredAppSettings = Partial<AppSettings> & { compactToolCalls?: unknown };
+type StoredAppSettings = Partial<AppSettings> & {
+  compactToolCalls?: unknown;
+  contentMaxWidth?: unknown;
+};
 
 export const DEFAULT_CLIENT_SETTINGS: AppSettings = {
+  usage: DEFAULT_USAGE_PREFERENCES,
+  usageInSidebar: true,
   theme: DEFAULT_THEME,
   pluginThemeId: null,
+  filePanelAssociations: {},
   defaultThemeVersion: DEFAULT_THEME_VERSION,
   language: "system",
   sendBehavior: "steer",
+  sendShortcut: "enter",
   serviceUrlBehavior: "ask",
   terminalScrollbackLines: DEFAULT_TERMINAL_SCROLLBACK_LINES,
-  useLegacyTerminalRenderer: false,
   uiFontFamily: "",
   monoFontFamily: "",
   uiFontSize: DEFAULT_UI_FONT_SIZE,
   codeFontSize: DEFAULT_CODE_FONT_SIZE,
+  contentWidth: "default",
   syntaxTheme: "one",
   workspaceTitleSource: "title",
+  sidebarPluginRowBadgeItems: {},
   autoExpandReasoning: false,
   toolCallDetailLevel: "detailed",
+  chatDisplay: "collapseTurns",
   chatOutlineEnabled: true,
   vimKeybindings: false,
 };
@@ -115,14 +146,15 @@ export interface SettingsDeps {
 
 export async function saveAppSettings(input: {
   queryClient: QueryClient;
-  updates: Partial<AppSettings>;
+  updates: AppSettingsUpdate;
   deps: SettingsDeps;
 }): Promise<void> {
   const storedCurrent =
     input.queryClient.getQueryData<AppSettings>(APP_SETTINGS_QUERY_KEY) ??
     (await loadAppSettingsFromStorage(input.deps));
   const current = normalizeAppSettings(storedCurrent);
-  const next = { ...current, ...input.updates };
+  const patch = typeof input.updates === "function" ? input.updates(current) : input.updates;
+  const next = { ...current, ...patch };
   input.queryClient.setQueryData<AppSettings>(APP_SETTINGS_QUERY_KEY, next);
   await input.deps.storage.setItem(APP_SETTINGS_KEY, JSON.stringify(next));
 }
@@ -131,7 +163,15 @@ export async function loadAppSettingsFromStorage(deps: SettingsDeps): Promise<Ap
   try {
     const stored = await deps.storage.getItem(APP_SETTINGS_KEY);
     if (stored) {
-      return normalizeAppSettings(JSON.parse(stored));
+      const parsed = JSON.parse(stored);
+      const normalized = normalizeAppSettings(parsed);
+      if (
+        parsed.defaultThemeVersion !== DEFAULT_THEME_VERSION ||
+        parsed.theme !== normalized.theme
+      ) {
+        await deps.storage.setItem(APP_SETTINGS_KEY, JSON.stringify(normalized));
+      }
+      return normalized;
     }
 
     const legacyStored = await deps.storage.getItem(LEGACY_SETTINGS_KEY);
@@ -192,6 +232,14 @@ export function normalizeAppSettings(value: unknown): AppSettings {
   ) {
     settings.theme = DEFAULT_THEME;
   }
+  // COMPAT(gumloopTheme): added in v0.9.59, remove after 2027-06-01.
+  const legacyTheme: unknown = stored.theme;
+  if (legacyTheme === "clickup") settings.theme = "gumloop";
+  if (legacyTheme === "clickupDark") settings.theme = "gumloopDark";
+  settings.usage = UsagePreferencesSchema.parse(stored.usage ?? DEFAULT_USAGE_PREFERENCES);
+  settings.usageInSidebar = stored.usageInSidebar !== false;
+
+  settings.chatDisplay = parseChatDisplay(stored);
   settings.defaultThemeVersion = DEFAULT_THEME_VERSION;
   return settings;
 }
@@ -217,9 +265,6 @@ function parseToolCallDetailLevel(stored: StoredAppSettings): ToolCallDetailLeve
 
 function pickBooleanAppSettings(stored: StoredAppSettings): Partial<AppSettings> {
   const result: Partial<AppSettings> = {};
-  if (typeof stored.useLegacyTerminalRenderer === "boolean") {
-    result.useLegacyTerminalRenderer = stored.useLegacyTerminalRenderer;
-  }
   if (typeof stored.vimKeybindings === "boolean") {
     result.vimKeybindings = stored.vimKeybindings;
   }
@@ -233,14 +278,41 @@ function pickThemeSettings(stored: StoredAppSettings, result: Partial<AppSetting
   if (typeof stored.theme === "string" && VALID_THEMES.has(stored.theme)) {
     result.theme = stored.theme;
   }
+  if (
+    stored.filePanelAssociations &&
+    typeof stored.filePanelAssociations === "object" &&
+    !Array.isArray(stored.filePanelAssociations)
+  ) {
+    result.filePanelAssociations = Object.fromEntries(
+      Object.entries(stored.filePanelAssociations).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
+    );
+  }
   if (typeof stored.pluginThemeId === "string" || stored.pluginThemeId === null) {
     result.pluginThemeId = stored.pluginThemeId;
+  }
+}
+
+function pickSidebarPluginSettings(stored: StoredAppSettings, result: Partial<AppSettings>): void {
+  if (
+    stored.sidebarPluginRowBadgeItems &&
+    typeof stored.sidebarPluginRowBadgeItems === "object" &&
+    !Array.isArray(stored.sidebarPluginRowBadgeItems)
+  ) {
+    result.sidebarPluginRowBadgeItems = Object.fromEntries(
+      Object.entries(stored.sidebarPluginRowBadgeItems).filter(
+        (entry): entry is [string, boolean] => typeof entry[1] === "boolean",
+      ),
+    );
   }
 }
 
 function pickAppSettings(stored: StoredAppSettings): Partial<AppSettings> {
   const result: Partial<AppSettings> = {};
   pickThemeSettings(stored, result);
+  if (stored.sendShortcut === "enter" || stored.sendShortcut === "mod-enter")
+    result.sendShortcut = stored.sendShortcut;
   const language = parseAppLanguage(stored.language);
   if (language !== null) {
     result.language = language;
@@ -280,6 +352,8 @@ function pickAppSettings(stored: StoredAppSettings): Partial<AppSettings> {
   if (codeFontSize !== null) {
     result.codeFontSize = codeFontSize;
   }
+  result.contentWidth = normalizeContentWidth(stored);
+
   if (typeof stored.syntaxTheme === "string" && isSyntaxThemeId(stored.syntaxTheme)) {
     result.syntaxTheme = stored.syntaxTheme;
   }
@@ -293,6 +367,7 @@ function pickAppSettings(stored: StoredAppSettings): Partial<AppSettings> {
   if (typeof stored.autoExpandReasoning === "boolean") {
     result.autoExpandReasoning = stored.autoExpandReasoning;
   }
+  pickSidebarPluginSettings(stored, result);
   const toolCallDetailLevel = parseToolCallDetailLevel(stored);
   if (toolCallDetailLevel !== null) {
     result.toolCallDetailLevel = toolCallDetailLevel;
@@ -322,6 +397,32 @@ export function parseTerminalScrollbackLines(value: unknown): number | null {
     MAX_TERMINAL_SCROLLBACK_LINES,
     Math.max(MIN_TERMINAL_SCROLLBACK_LINES, Math.floor(numericValue)),
   );
+}
+
+function normalizeContentWidth(stored: StoredAppSettings): ContentWidth {
+  const width = stored.contentWidth;
+  if (width === "default" || width === "wide" || width === "full") return width;
+  if (typeof width === "number" && Number.isFinite(width))
+    return parseClampedFontSize(width, { min: 600, max: 4000 }) ?? "default";
+  // COMPAT(contentMaxWidth): added in v0.9.59, remove after 2027-05-24 once stored presets are established.
+  if (typeof stored.contentMaxWidth === "number" && Number.isFinite(stored.contentMaxWidth))
+    return parseClampedFontSize(stored.contentMaxWidth, { min: 600, max: 4000 }) ?? "default";
+  return "default";
+}
+
+export function resolveContentMaxWidth({
+  contentWidth,
+}: Pick<AppSettings, "contentWidth">): number | undefined {
+  switch (contentWidth) {
+    case "default":
+      return DEFAULT_CONTENT_MAX_WIDTH;
+    case "wide":
+      return WIDE_CONTENT_MAX_WIDTH;
+    case "full":
+      return undefined;
+    default:
+      return contentWidth;
+  }
 }
 
 export function parseClampedFontSize(
@@ -357,7 +458,24 @@ export function sanitizeFontFamily(value: unknown): string | null {
   if ([...trimmed].some((char) => char.charCodeAt(0) <= 0x1f)) {
     return null; // control chars would corrupt the font-family string
   }
-  return trimmed; // quotes/commas are legit in stacks
+  // Unistyles serializes theme values into one shared stylesheet. An unfinished
+  // string, escape, comment, or block consumes the declarations that follow.
+  let quote: string | null = null;
+  let escaped = false;
+  for (const char of trimmed) {
+    if (escaped) {
+      escaped = false;
+    } else if (char === "\\") {
+      escaped = true;
+    } else if (quote !== null) {
+      if (char === quote) quote = null;
+    } else if (char === "'" || char === '"') {
+      quote = char;
+    } else if (/[()[\]/*]/.test(char)) {
+      return null;
+    }
+  }
+  return quote === null && !escaped ? trimmed : null;
 }
 
 async function loadLegacyDesktopSettingsFromStorage(storage: KeyValueStorage): Promise<{
@@ -391,4 +509,21 @@ async function loadRendererSettingsPayload(
     return null;
   }
   return JSON.parse(legacy) as Record<string, unknown>;
+}
+
+function parseChatDisplay(stored: StoredAppSettings): ChatDisplay {
+  if (
+    stored.chatDisplay === "full" ||
+    stored.chatDisplay === "collapseToolCalls" ||
+    stored.chatDisplay === "collapseTurns"
+  )
+    return stored.chatDisplay;
+  // COMPAT(chatDisplay): added in v0.9.59, remove after 2027-05-25 once stored settings carry chatDisplay.
+  if (
+    stored.toolCallDetailLevel === "overview" ||
+    (stored.toolCallDetailLevel as unknown) === "concise" ||
+    stored.compactToolCalls === true
+  )
+    return "collapseToolCalls";
+  return "full";
 }

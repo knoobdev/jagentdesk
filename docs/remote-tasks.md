@@ -2,7 +2,11 @@
 
 Remote tasks let an agent on your daemon machine (for example a Mac) run commands on another machine
 (for example a Windows PC through WSL2). The agent sends a copy of the current workspace, runs the
-command there and shows the result in the chat. Spec: remote execution (spec 33, ADR-0044).
+command there and shows the result in the chat. It is the `remote-tasks`
+[built-in](builtin-plugins.md) (on by default) and requires `ssh-servers`.
+
+Code: `plugins/remote-tasks/` (agent tools, `remote_exec.*` handlers, the job card). It reaches
+servers through the SSH service in `packages/server/src/server/ssh/`.
 
 ## How it works
 
@@ -25,6 +29,9 @@ command there and shows the result in the chat. Spec: remote execution (spec 33,
   home folder without sending code. Both show their result as a card in the chat.
 - Jobs run detached from the SSH session and keep running if the connection drops. Each run and each
   Stop asks for your permission in the chat.
+- **Agent tools.** `remote_targets` lists servers with remote tasks on, `remote_run` starts a job,
+  `remote_job_wait` and `remote_job_output` follow it, `remote_jobs` lists recent jobs and
+  `remote_job_stop` stops one.
 
 ## Prepare a Windows PC (WSL2)
 

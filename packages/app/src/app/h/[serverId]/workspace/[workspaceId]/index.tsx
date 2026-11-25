@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation } from "expo-router/react-navigation";
 import { StyleSheet, View } from "react-native";
 import { useGlobalSearchParams, useLocalSearchParams, useRootNavigationState } from "expo-router";
 import { HostRouteBootstrapBoundary } from "@/components/host-route-bootstrap-boundary";
@@ -9,9 +9,13 @@ import {
   useActiveWorkspaceSelection,
 } from "@/stores/navigation-active-workspace-store";
 import { useHasHydratedWorkspaces, useWorkspaceExists } from "@/stores/session-store-hooks";
+import { useDirectoryDemand } from "@/hooks/use-directory-demand";
 import type { WorkspaceTabTarget } from "@/workspace-tabs/model";
 import { WorkspaceScreen } from "@/screens/workspace/workspace-screen";
-import { useWorkspaceLayoutStoreHydrated } from "@/stores/workspace-layout-store";
+import {
+  useWorkspaceLayoutStore,
+  useWorkspaceLayoutStoreHydrated,
+} from "@/stores/workspace-layout-store";
 import {
   areWorkspaceSelectionListsEqual,
   areWorkspaceSelectionsEqual,
@@ -31,7 +35,6 @@ import {
   replaceBrowserRouteWithCanonicalHostWorkspaceRoute,
   stripHostWorkspaceRouteEchoSearchFromBrowserUrlAfterCommit,
 } from "@/utils/host-route-browser";
-import { prepareWorkspaceTab } from "@/utils/workspace-navigation";
 import { isNative, isWeb } from "@/constants/platform";
 
 function getParamValue(value: string | string[] | undefined): string {
@@ -121,6 +124,7 @@ function HostWorkspaceRouteContent() {
     (isAgentOpenIntent || isOrchestrationOpenIntent) &&
     (!hasHydratedWorkspaces || !workspaceExists),
   );
+  useDirectoryDemand(serverId);
   useEffect(() => {
     if (!serverId || !workspaceId) {
       return;
@@ -128,7 +132,7 @@ function HostWorkspaceRouteContent() {
     stripHostWorkspaceRouteEchoSearchFromBrowserUrlAfterCommit();
   }, [serverId, workspaceId]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!openValue) {
       return;
     }
@@ -155,12 +159,13 @@ function HostWorkspaceRouteContent() {
     consumedIntentRef.current = consumptionKey;
 
     if (openIntent && openIntent.kind !== "orchestration") {
-      prepareWorkspaceTab({
-        serverId,
-        workspaceId,
+      useWorkspaceLayoutStore.getState().deferOpenTab({
+        workspaceKey: `${serverId}:${workspaceId}`,
         target: getOpenIntentTarget(openIntent),
+        intent: "reveal",
         pin: openIntent.kind === "agent",
       });
+      useWorkspaceLayoutStore.getState().consumePendingOpen(`${serverId}:${workspaceId}`);
     }
 
     // Expo Router's replace ignores query-param-only changes (findDivergentState

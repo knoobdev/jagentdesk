@@ -7,16 +7,20 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import type { ForgeService } from "../services/forge-service.js";
 import { createRealpathAwarePathMatcher } from "../utils/path.js";
-import { createWorktree, type WorktreeConfig } from "../utils/worktree.js";
+import { getJAgentDeskWorktreeMetadataPath } from "../utils/worktree-metadata.js";
+import { archiveCommand } from "./worktree/commands.js";
+import { createWorktree, listJAgentDeskWorktrees, type WorktreeConfig } from "../utils/worktree.js";
 import type { ManagedAgent } from "./agent/agent-manager.js";
 import type { AgentStorage, StoredAgentRecord } from "./agent/agent-storage.js";
 import type { WorkspaceGitService } from "./workspace-git-service.js";
 import {
   archiveByScope,
+  unarchiveWorkspaceAgents,
   type ActiveWorkspaceRef,
   type ArchiveDependencies,
   type ArchiveResult,
   resolveWorkspaceIdAtPath,
+  WorkspaceArchiveCanceledError,
 } from "./workspace-archive-service.js";
 
 const cleanupPaths: string[] = [];
@@ -139,7 +143,8 @@ function createArchiveDeps(input: ArchiveDepsInput): ArchiveTestDependencies {
     github: createGitHubServiceStub(),
     workspaceGitService: {
       getSnapshot: vi.fn(async () => null),
-    } as unknown as Pick<WorkspaceGitService, "getSnapshot">,
+      invalidateWorktrees: () => {},
+    } as unknown as Pick<WorkspaceGitService, "getSnapshot" | "invalidateWorktrees">,
     agentManager: {
       listAgents: () => [],
       archiveAgent: vi.fn(async (agentId: string) => {
@@ -187,10 +192,62 @@ function assertArchiveResult(
 }
 
 describe("archiveByScope", () => {
+  test.each(["workspace", "worktree"] as const)(
+    "%s archive preserves a restored external worktree despite its marker",
+    async (kind) => {
+      const { tempDir, repoDir } = createGitRepo();
+      const jagentdeskHome = path.join(tempDir, ".jagentdesk");
+      const recordedPath = path.join(tempDir, "external");
+      execFileSync("git", ["worktree", "add", "-b", "external", recordedPath], {
+        cwd: repoDir,
+        stdio: "pipe",
+      });
+      execFileSync("git", ["worktree", "remove", recordedPath], { cwd: repoDir, stdio: "pipe" });
+      const restored = await createWorktree({
+        cwd: repoDir,
+        jagentdeskHome,
+        worktreeSlug: "external",
+        worktreePath: recordedPath,
+        source: { kind: "restore", branchName: "external", baseRef: "main" },
+      });
+      expect(existsSync(await getJAgentDeskWorktreeMetadataPath(restored.worktreePath))).toBe(true);
+      const workspaceId = "external-workspace";
+      const result = await archiveByScope(
+        createArchiveDeps({
+          jagentdeskHome,
+          activeWorkspaces: [
+            {
+              workspaceId,
+              cwd: restored.worktreePath,
+              kind: "worktree",
+              worktreeRoot: restored.worktreePath,
+              mainRepoRoot: repoDir,
+              isJAgentDeskOwnedWorktree: false,
+            },
+          ],
+        }),
+        {
+          scope:
+            kind === "workspace"
+              ? { kind, workspaceId }
+              : { kind, targetPath: restored.worktreePath },
+          requestId: "archive-external",
+        },
+      );
+      expect(result.removedDirectory).toBe(false);
+      expect(existsSync(restored.worktreePath)).toBe(true);
+      expect(result.archivedWorkspaceIds).toEqual([workspaceId]);
+    },
+  );
+
   test("workspace scope archives the record and removes the directory on last reference", async () => {
     const { tempDir, repoDir } = createGitRepo();
     const jagentdeskHome = path.join(tempDir, ".jagentdesk");
-    const worktree = await createJAgentDeskOwnedWorktree(repoDir, jagentdeskHome, "last-ref-workspace");
+    const worktree = await createJAgentDeskOwnedWorktree(
+      repoDir,
+      jagentdeskHome,
+      "last-ref-workspace",
+    );
     const workspaceId = "ws-last-ref";
 
     const result = await archiveByScope(
@@ -217,6 +274,120 @@ describe("archiveByScope", () => {
     expect(existsSync(worktree.worktreePath)).toBe(false);
   });
 
+  test("workspace scope archives the record but leaves a plugin-placed directory whose marker is gone", async () => {
+    const { tempDir, repoDir } = createGitRepo();
+    const jagentdeskHome = path.join(tempDir, ".jagentdesk");
+    const worktree = await createWorktree({
+      cwd: repoDir,
+      worktreeSlug: "unproven-workspace",
+      source: { kind: "branch-off", baseBranch: "main", branchName: "unproven-workspace" },
+      jagentdeskHome,
+      worktreePath: path.join(tempDir, "placed-worktree"),
+    });
+    // Remove the ownership marker: no proof remains for this path.
+    rmSync(await getJAgentDeskWorktreeMetadataPath(worktree.worktreePath), { force: true });
+    const workspaceId = "ws-unproven";
+
+    const logs: Array<{ targetPath: string; msg: string }> = [];
+    const dependencies = createArchiveDeps({
+      jagentdeskHome,
+      activeWorkspaces: [{ workspaceId, cwd: worktree.worktreePath, kind: "worktree" }],
+    });
+    dependencies.sessionLogger = pino(
+      { level: "warn" },
+      {
+        write(message) {
+          logs.push(JSON.parse(message));
+        },
+      },
+    );
+    const result = await archiveByScope(dependencies, {
+      scope: { kind: "workspace", workspaceId },
+      requestId: "req-unproven-workspace",
+    });
+
+    assertArchiveResult(result, { archivedWorkspaceIds: [workspaceId], removedDirectory: false });
+    expect(result.directoryLeftBehind?.path).toBe(worktree.worktreePath);
+    expect(result.directoryLeftBehind?.reason).toContain("no ownership proof");
+    expect(existsSync(worktree.worktreePath)).toBe(true);
+    expect(logs).toContainEqual(
+      expect.objectContaining({
+        targetPath: worktree.worktreePath,
+        msg: expect.stringContaining("no ownership proof"),
+      }),
+    );
+  });
+
+  test("archives a plugin-placed worktree by its discovered directory name", async () => {
+    const { tempDir, repoDir } = createGitRepo();
+    const jagentdeskHome = path.join(tempDir, ".jagentdesk");
+    const worktreePath = path.join(tempDir, "sibling-feature");
+    await createWorktree({
+      cwd: repoDir,
+      jagentdeskHome,
+      worktreePath,
+      worktreeSlug: "original-slug",
+      source: { kind: "branch-off", branchName: "feature", baseBranch: "main" },
+    });
+    const dependencies = createArchiveDeps({ jagentdeskHome, activeWorkspaces: [] });
+    const result = await archiveCommand(
+      {
+        ...dependencies,
+        workspaceGitService: {
+          ...dependencies.workspaceGitService,
+          listWorktrees: (cwd) => listJAgentDeskWorktrees({ cwd, jagentdeskHome }),
+        },
+      },
+      {
+        repoRoot: repoDir,
+        worktreeSlug: "sibling-feature",
+        scope: "worktree",
+        requestId: "slug-archive",
+      },
+    );
+    expect(result).toEqual({ ok: true, removedAgents: [] });
+    expect(existsSync(worktreePath)).toBe(false);
+  });
+
+  test("workspace scope deletes a plugin-placed directory on registry proof even with the marker gone", async () => {
+    const { tempDir, repoDir } = createGitRepo();
+    const jagentdeskHome = path.join(tempDir, ".jagentdesk");
+    const worktree = await createWorktree({
+      cwd: repoDir,
+      worktreeSlug: "registry-proven-workspace",
+      source: {
+        kind: "branch-off",
+        baseBranch: "main",
+        branchName: "registry-proven-workspace",
+      },
+      jagentdeskHome,
+      worktreePath: path.join(tempDir, "placed-worktree"),
+    });
+    rmSync(await getJAgentDeskWorktreeMetadataPath(worktree.worktreePath), { force: true });
+    const workspaceId = "ws-registry-proven";
+
+    const result = await archiveByScope(
+      createArchiveDeps({
+        jagentdeskHome,
+        activeWorkspaces: [
+          {
+            workspaceId,
+            cwd: worktree.worktreePath,
+            kind: "worktree",
+            isJAgentDeskOwnedWorktree: true,
+            worktreeRoot: worktree.worktreePath,
+            mainRepoRoot: repoDir,
+          },
+        ],
+      }),
+      { scope: { kind: "workspace", workspaceId }, requestId: "req-registry-proven-workspace" },
+    );
+
+    assertArchiveResult(result, { archivedWorkspaceIds: [workspaceId], removedDirectory: true });
+    expect(result.directoryLeftBehind).toBeUndefined();
+    expect(existsSync(worktree.worktreePath)).toBe(false);
+  });
+
   test("workspace scope runs teardown while keeping a directory referenced by a sibling", async () => {
     const { tempDir, repoDir } = createGitRepo();
     writeFileSync(
@@ -235,7 +406,11 @@ describe("archiveByScope", () => {
       stdio: "pipe",
     });
     const jagentdeskHome = path.join(tempDir, ".jagentdesk");
-    const worktree = await createJAgentDeskOwnedWorktree(repoDir, jagentdeskHome, "sibling-workspace");
+    const worktree = await createJAgentDeskOwnedWorktree(
+      repoDir,
+      jagentdeskHome,
+      "sibling-workspace",
+    );
     const workspaceA = "ws-sibling-a";
     const workspaceB = "ws-sibling-b";
 
@@ -264,7 +439,11 @@ describe("archiveByScope", () => {
   test("workspace scope keeps a worktree for an active workspace in a subdirectory", async () => {
     const { tempDir, repoDir } = createGitRepo();
     const jagentdeskHome = path.join(tempDir, ".jagentdesk");
-    const worktree = await createJAgentDeskOwnedWorktree(repoDir, jagentdeskHome, "subdirectory-sibling");
+    const worktree = await createJAgentDeskOwnedWorktree(
+      repoDir,
+      jagentdeskHome,
+      "subdirectory-sibling",
+    );
     const sourceWorkspaceId = "ws-subdirectory-source";
     const siblingWorkspaceId = "ws-subdirectory-sibling";
     const siblingDirectory = path.join(worktree.worktreePath, "packages", "app");
@@ -306,7 +485,11 @@ describe("archiveByScope", () => {
   test("archiving a subdirectory workspace keeps its active worktree root", async () => {
     const { tempDir, repoDir } = createGitRepo();
     const jagentdeskHome = path.join(tempDir, ".jagentdesk");
-    const worktree = await createJAgentDeskOwnedWorktree(repoDir, jagentdeskHome, "subdirectory-target");
+    const worktree = await createJAgentDeskOwnedWorktree(
+      repoDir,
+      jagentdeskHome,
+      "subdirectory-target",
+    );
     const rootWorkspaceId = "ws-subdirectory-root";
     const subdirectoryWorkspaceId = "ws-subdirectory-target";
     const subdirectory = path.join(worktree.worktreePath, "packages", "app");
@@ -367,7 +550,11 @@ describe("archiveByScope", () => {
     });
 
     const jagentdeskHome = path.join(tempDir, ".jagentdesk");
-    const worktree = await createJAgentDeskOwnedWorktree(repoDir, jagentdeskHome, "nested-teardown");
+    const worktree = await createJAgentDeskOwnedWorktree(
+      repoDir,
+      jagentdeskHome,
+      "nested-teardown",
+    );
     const workspaceCwd = path.join(worktree.worktreePath, nestedRelative);
     const matchesWorkspaceCwd = createRealpathAwarePathMatcher(workspaceCwd);
     const workspaceId = "ws-nested-teardown";
@@ -508,7 +695,11 @@ describe("archiveByScope", () => {
   test("worktree scope keeps the directory when one record teardown fails", async () => {
     const { tempDir, repoDir } = createGitRepo();
     const jagentdeskHome = path.join(tempDir, ".jagentdesk");
-    const worktree = await createJAgentDeskOwnedWorktree(repoDir, jagentdeskHome, "partial-failure");
+    const worktree = await createJAgentDeskOwnedWorktree(
+      repoDir,
+      jagentdeskHome,
+      "partial-failure",
+    );
     const workspaceA = "ws-partial-a";
     const workspaceB = "ws-partial-b";
 
@@ -565,28 +756,37 @@ describe("archiveByScope", () => {
     expect(deps.emitWorkspaceUpdatesForWorkspaceIds).not.toHaveBeenCalled();
   });
 
-  test("worktree scope removes an owned directory with zero matching records", async () => {
-    const { tempDir, repoDir } = createGitRepo();
-    const jagentdeskHome = path.join(tempDir, ".jagentdesk");
-    const worktree = await createJAgentDeskOwnedWorktree(repoDir, jagentdeskHome, "zero-records");
+  test.each(["intact", "missing"] as const)(
+    "worktree scope removes an owned directory with zero matching records and %s Git administration",
+    async (gitAdministration) => {
+      const { tempDir, repoDir } = createGitRepo();
+      const jagentdeskHome = path.join(tempDir, ".jagentdesk");
+      const worktree = await createJAgentDeskOwnedWorktree(repoDir, jagentdeskHome, "zero-records");
+      if (gitAdministration === "missing") {
+        const gitDir = execFileSync("git", ["rev-parse", "--absolute-git-dir"], {
+          cwd: worktree.worktreePath,
+        })
+          .toString()
+          .trim();
+        rmSync(gitDir, { recursive: true, force: true });
+      }
+      const dependencies = createArchiveDeps({ jagentdeskHome, activeWorkspaces: [] });
+      const invalidateWorktrees = vi.fn();
+      dependencies.workspaceGitService.invalidateWorktrees = invalidateWorktrees;
 
-    const result = await archiveByScope(
-      createArchiveDeps({
-        jagentdeskHome,
-        activeWorkspaces: [],
-      }),
-      {
+      const result = await archiveByScope(dependencies, {
         scope: { kind: "worktree", targetPath: worktree.worktreePath },
         requestId: "req-zero-records",
-      },
-    );
+      });
 
-    assertArchiveResult(result, {
-      archivedWorkspaceIds: [],
-      removedDirectory: true,
-    });
-    expect(existsSync(worktree.worktreePath)).toBe(false);
-  });
+      assertArchiveResult(result, {
+        archivedWorkspaceIds: [],
+        removedDirectory: true,
+      });
+      expect(existsSync(worktree.worktreePath)).toBe(false);
+      expect(invalidateWorktrees).toHaveBeenCalledTimes(1);
+    },
+  );
 
   test("marks archiving, emits an upsert carrying the archiving state, then clears it and emits a remove", async () => {
     const { tempDir, repoDir } = createGitRepo();
@@ -726,7 +926,11 @@ describe("archiveByScope", () => {
   test("worktree scope archives three workspaces on the directory and removes it", async () => {
     const { tempDir, repoDir } = createGitRepo();
     const jagentdeskHome = path.join(tempDir, ".jagentdesk");
-    const worktree = await createJAgentDeskOwnedWorktree(repoDir, jagentdeskHome, "worktree-scope-n3");
+    const worktree = await createJAgentDeskOwnedWorktree(
+      repoDir,
+      jagentdeskHome,
+      "worktree-scope-n3",
+    );
     const workspaceA = "ws-worktree-n3-a";
     const workspaceB = "ws-worktree-n3-b";
     const workspaceC = "ws-worktree-n3-c";
@@ -752,6 +956,148 @@ describe("archiveByScope", () => {
     expect(result.archivedWorkspaceIds).toHaveLength(3);
     expect(result.removedDirectory).toBe(true);
     expect(existsSync(worktree.worktreePath)).toBe(false);
+  });
+});
+
+function gate(): {
+  wait: Promise<void>;
+  open: () => void;
+  reached: Promise<void>;
+  reach: () => void;
+} {
+  let open!: () => void;
+  let reach!: () => void;
+  const wait = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  const reached = new Promise<void>((resolve) => {
+    reach = resolve;
+  });
+  return { wait, open, reached, reach };
+}
+
+async function canceledArchive(promise: Promise<unknown>): Promise<WorkspaceArchiveCanceledError> {
+  const error = await promise.then(
+    () => null,
+    (reason: unknown) => reason,
+  );
+  if (!(error instanceof WorkspaceArchiveCanceledError)) {
+    throw new Error(`Expected the archive to be canceled, got ${String(error)}`);
+  }
+  return error;
+}
+
+describe("archiveByScope cancellation", () => {
+  function storedAgents(
+    workspaceId: string,
+    agents: Array<{ id: string; archivedAt: string | null }>,
+  ) {
+    return {
+      list: async () => agents.map((agent) => ({ ...agent, workspaceId })) as StoredAgentRecord[],
+    } as Pick<AgentStorage, "list">;
+  }
+
+  test("an abort while agents archive keeps the workspace record active", async () => {
+    const { tempDir, repoDir } = createGitRepo();
+    const jagentdeskHome = path.join(tempDir, ".jagentdesk");
+    const worktree = await createJAgentDeskOwnedWorktree(repoDir, jagentdeskHome, "cancel-agents");
+    const workspaceId = "ws-cancel-agents";
+    const deps = createArchiveDeps({
+      jagentdeskHome,
+      activeWorkspaces: [{ workspaceId, cwd: worktree.worktreePath, kind: "worktree" }],
+    });
+    deps.agentStorage = storedAgents(workspaceId, [
+      { id: "agent-active", archivedAt: null },
+      { id: "agent-already-archived", archivedAt: "2026-01-01T00:00:00.000Z" },
+    ]);
+    const agentArchive = gate();
+    deps.agentManager.archiveSnapshot = vi.fn(async (agentId: string) => {
+      agentArchive.reach();
+      await agentArchive.wait;
+      deps.archivedSnapshotIds.push(agentId);
+      return {} as StoredAgentRecord;
+    });
+    const controller = new AbortController();
+
+    const archive = archiveByScope(deps, {
+      scope: { kind: "workspace", workspaceId },
+      requestId: "req-cancel-agents",
+      signal: controller.signal,
+    });
+    await agentArchive.reached;
+    controller.abort();
+    agentArchive.open();
+    await canceledArchive(archive);
+
+    expect({
+      activeWorkspaceIds: (await deps.listActiveWorkspaces()).map((w) => w.workspaceId),
+      directoryExists: existsSync(worktree.worktreePath),
+    }).toEqual({
+      activeWorkspaceIds: [workspaceId],
+      directoryExists: true,
+    });
+    // The archiving marker never outlives a canceled archive.
+    expect(deps.clearWorkspaceArchiving).toHaveBeenCalledWith([workspaceId]);
+  });
+
+  test("an abort after the record archived keeps the worktree directory", async () => {
+    const { tempDir, repoDir } = createGitRepo();
+    const jagentdeskHome = path.join(tempDir, ".jagentdesk");
+    const worktree = await createJAgentDeskOwnedWorktree(repoDir, jagentdeskHome, "cancel-record");
+    const workspaceId = "ws-cancel-record";
+    const deps = createArchiveDeps({
+      jagentdeskHome,
+      activeWorkspaces: [{ workspaceId, cwd: worktree.worktreePath, kind: "worktree" }],
+    });
+    const recordArchive = gate();
+    const archiveRecord = deps.archiveWorkspaceRecord;
+    deps.archiveWorkspaceRecord = async (id: string) => {
+      recordArchive.reach();
+      await recordArchive.wait;
+      await archiveRecord(id);
+    };
+    const controller = new AbortController();
+
+    const archive = archiveByScope(deps, {
+      scope: { kind: "workspace", workspaceId },
+      requestId: "req-cancel-record",
+      signal: controller.signal,
+    });
+    await recordArchive.reached;
+    controller.abort();
+    recordArchive.open();
+    await canceledArchive(archive);
+
+    expect({
+      activeWorkspaceIds: (await deps.listActiveWorkspaces()).map((w) => w.workspaceId),
+      directoryExists: existsSync(worktree.worktreePath),
+    }).toEqual({ activeWorkspaceIds: [], directoryExists: true });
+  });
+
+  test("an archive aborted before it starts touches nothing", async () => {
+    const { tempDir, repoDir } = createGitRepo();
+    const jagentdeskHome = path.join(tempDir, ".jagentdesk");
+    const worktree = await createJAgentDeskOwnedWorktree(repoDir, jagentdeskHome, "cancel-before");
+    const workspaceId = "ws-cancel-before";
+    const deps = createArchiveDeps({
+      jagentdeskHome,
+      activeWorkspaces: [{ workspaceId, cwd: worktree.worktreePath, kind: "worktree" }],
+    });
+    deps.agentStorage = storedAgents(workspaceId, [{ id: "agent-active", archivedAt: null }]);
+    const controller = new AbortController();
+    controller.abort();
+
+    await canceledArchive(
+      archiveByScope(deps, {
+        scope: { kind: "workspace", workspaceId },
+        requestId: "req-cancel-before",
+        signal: controller.signal,
+      }),
+    );
+
+    expect(deps.archivedSnapshotIds).toEqual([]);
+    expect(deps.markWorkspaceArchiving).not.toHaveBeenCalled();
+    expect(existsSync(worktree.worktreePath)).toBe(true);
   });
 });
 
@@ -788,4 +1134,101 @@ describe("resolveWorkspaceIdAtPath", () => {
 
     expect(result).toBe("ws-nested");
   });
+});
+
+test("uses the operation timestamp for live agents, snapshots, and the workspace", async () => {
+  const { repoDir } = createGitRepo();
+  const deps = createArchiveDeps({
+    jagentdeskHome: repoDir,
+    activeWorkspaces: [{ workspaceId: "stamped", cwd: repoDir, kind: "local_checkout" }],
+  });
+  const stamps: Array<string | undefined> = [];
+  deps.agentManager.listAgents = () => [{ id: "live", workspaceId: "stamped" }] as ManagedAgent[];
+  deps.agentManager.getAgent = () => ({ id: "live" }) as ManagedAgent;
+  deps.agentManager.archiveAgent = async (_id, stamp) => {
+    stamps.push(stamp);
+    return { archivedAt: stamp! };
+  };
+  deps.agentStorage.list = async () =>
+    [
+      { id: "stored", workspaceId: "stamped", archivedAt: null },
+      { id: "closed", workspaceId: "stamped", archivedAt: "2020-01-01T00:00:00.000Z" },
+    ] as StoredAgentRecord[];
+  deps.agentManager.getAgent = (id) => (id === "live" ? ({ id } as ManagedAgent) : null);
+  deps.agentManager.archiveSnapshot = async (_id, stamp) => {
+    stamps.push(stamp);
+    return {} as StoredAgentRecord;
+  };
+  deps.archiveWorkspaceRecord = async (_id, stamp) => {
+    stamps.push(stamp);
+  };
+  await archiveByScope(deps, {
+    scope: { kind: "workspace", workspaceId: "stamped" },
+    requestId: "stamp",
+  });
+  expect(stamps).toHaveLength(3);
+  expect(typeof stamps[0]).toBe("string");
+  expect(new Set(stamps).size).toBe(1);
+});
+
+test.each([
+  {
+    stamp: "2026-11-09T10:00:00.000Z",
+    agents: [
+      ["a", "2026-11-09T10:00:00.000Z"],
+      ["b", "2026-11-09T10:00:00.000Z"],
+      ["closed", "2026-11-09T09:59:50.000Z"],
+      ["rearchived", "2026-11-09T10:00:00.001Z"],
+    ],
+    expected: ["a", "b"],
+  },
+  {
+    stamp: "2026-11-09T10:00:00.000Z",
+    agents: [
+      ["a", "2026-11-09T09:59:00.000Z"],
+      ["b", "2026-11-09T09:59:59.000Z"],
+      ["closed", "2026-11-09T09:58:59.999Z"],
+      ["later", "2026-11-09T10:00:00.001Z"],
+    ],
+    expected: ["a", "b"],
+  },
+])(
+  "restores only agents belonging to the workspace archive ($expected)",
+  async ({ stamp, agents, expected }) => {
+    const restored: string[] = [];
+    await unarchiveWorkspaceAgents({
+      workspaceId: "workspace",
+      archivedAt: stamp,
+      agentStorage: {
+        list: async () =>
+          [
+            ...agents.map(([id, archivedAt]) => ({ id, archivedAt, workspaceId: "workspace" })),
+            { id: "foreign", archivedAt: stamp, workspaceId: "other-workspace" },
+          ] as StoredAgentRecord[],
+      },
+      unarchiveAgent: async (id) => {
+        restored.push(id);
+      },
+    });
+    expect(restored).toEqual(expected);
+  },
+);
+
+test("a canceled archive with no matching agents leaves earlier closed agents archived", async () => {
+  const restored: string[] = [];
+  await unarchiveWorkspaceAgents({
+    workspaceId: "workspace",
+    archivedAt: "2026-11-09T10:00:00.000Z",
+    allowLegacyFallback: false,
+    agentStorage: {
+      list: async () =>
+        [
+          { id: "closed", workspaceId: "workspace", archivedAt: "2026-11-09T09:59:59.000Z" },
+        ] as StoredAgentRecord[],
+    },
+    unarchiveAgent: async (id) => {
+      restored.push(id);
+    },
+  });
+  expect(restored).toEqual([]);
 });

@@ -1,13 +1,13 @@
 import { useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
-import type {
-  AgentForkContextOptions,
-  DaemonClient,
+import {
+  type AgentForkContextOptions,
+  type DaemonClient,
 } from "@jagentdesk/client/internal/daemon-client";
-import type { WorkspaceComposerAttachment } from "@/attachments/types";
-import type { AssistantForkTarget } from "@/components/assistant-fork-menu";
-import type { ToastApi } from "@/components/toast-host";
-import type { AgentScreenAgent } from "@/hooks/use-agent-screen-state-machine";
+import { type WorkspaceComposerAttachment } from "@/attachments/types";
+import { type AssistantForkTarget } from "@/components/assistant-fork-menu";
+import { type ToastApi } from "@/components/toast-host";
+import { type AgentScreenAgent } from "@/hooks/use-agent-screen-state-machine";
 import { useStableEvent } from "@/hooks/use-stable-event";
 import { useHostFeature } from "@/runtime/host-features";
 import { generateDraftId } from "@/stores/draft-keys";
@@ -20,7 +20,7 @@ import {
 import { useWorkspaceDraftSubmissionStore } from "@/stores/workspace-draft-submission-store";
 import { toErrorMessage } from "@/utils/error-messages";
 import { buildNewWorkspaceRoute } from "@/utils/host-routes";
-import type { WorkspaceDraftTabSetup, WorkspaceTabTarget } from "@/workspace-tabs/model";
+import { type WorkspaceDraftTabSetup, type WorkspaceTabTarget } from "@/workspace-tabs/model";
 
 /**
  * The subset of an agent record that a fork needs in order to seed the new
@@ -36,7 +36,7 @@ export type ForkAgentSource = Pick<
   | "model"
   | "thinkingOptionId"
   | "runtimeInfo"
-  | "features"
+  | "options"
   | "projectPlacement"
 >;
 
@@ -95,18 +95,13 @@ function buildForkDraftSetup(agent: ForkAgentSource): WorkspaceDraftTabSetup | u
     return undefined;
   }
 
-  const featureValues: Record<string, unknown> = {};
-  for (const feature of agent.features ?? []) {
-    featureValues[feature.id] = feature.value;
-  }
-
   return {
     provider: agent.provider,
     cwd: agent.cwd,
     modeId: agent.currentModeId ?? agent.runtimeInfo?.modeId ?? null,
     model: agent.model ?? agent.runtimeInfo?.model ?? null,
     thinkingOptionId: agent.thinkingOptionId ?? agent.runtimeInfo?.thinkingOptionId ?? null,
-    featureValues,
+    providerOptions: { ...agent.options },
   };
 }
 

@@ -1,4 +1,6 @@
-// Upstream e2e coverage kept for the next selective port. Skipped: needs timeline.append, DaemonClient.observeEvents and the upstream subscription API, which the fork does not have.
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { EventEmitter, once } from "node:events";
 import { resolveDaemonVersion } from "../daemon-version.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -16,7 +18,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-test.skip("plugin handlers create workspaces and agents through their JAgentDesk API", async () => {
+test("plugin handlers create workspaces and agents through their JAgentDesk API", async () => {
   const pluginDirectory = await mkdtemp(path.join(tmpdir(), "jagentdesk-api-plugin-"));
   const workspaceDirectory = await mkdtemp(path.join(tmpdir(), "jagentdesk-api-workspace-"));
   roots.push(pluginDirectory, workspaceDirectory);
@@ -142,6 +144,7 @@ export default function contribute(server: PluginServerContext) {
   }
 }, 60_000);
 
+// B2 prerequisite: reloadDaemonConfig RPC (#7959).
 test.skip("daemon config reload enables and disables configured plugins without restarting", async () => {
   const pluginDirectory = await mkdtemp(path.join(tmpdir(), "jagentdesk-reload-plugin-"));
   const jagentdeskHomeRoot = await mkdtemp(path.join(tmpdir(), "jagentdesk-reload-home-"));
@@ -255,6 +258,7 @@ async function readReconnectingPluginState(client: DaemonClient) {
   );
 }
 
+// B5 prerequisite: full owned-list subscription/reconnect engine.
 test.skip("plugin host APIs and observations recover after repeated daemon-side socket closes", async () => {
   const pluginDirectory = await mkdtemp(path.join(tmpdir(), "jagentdesk-reconnecting-plugin-"));
   const workspaceDirectory = await mkdtemp(
@@ -411,3 +415,24 @@ export default function contribute(server: PluginServerContext) {
     await daemon.close();
   }
 }, 60_000);
+
+test("keeps reload and enable responsive while compiling a real plugin", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "jagentdesk-responsive-plugin-"));
+  roots.push(directory);
+  const { stdout, stderr } = await promisify(execFile)(
+    process.execPath,
+    [
+      "--import",
+      "tsx",
+      fileURLToPath(new URL("./test-fixtures/compile-responsiveness.e2e.ts", import.meta.url)),
+      directory,
+    ],
+    { timeout: 20_000 },
+  );
+  process.stderr.write(stderr);
+  const results = z
+    .array(z.object({ blockingMs: z.number() }))
+    .length(2)
+    .parse(JSON.parse(stdout));
+  for (const result of results) expect(result.blockingMs).toBeLessThan(20);
+});

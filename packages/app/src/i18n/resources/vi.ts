@@ -1,9 +1,42 @@
+import { botsStrings } from "./bots";
+import { builtinPluginStrings } from "./builtin-plugins";
 // Vietnamese (Tiếng Việt). Partial translation of the app shell; any missing key
 // falls back to English (i18next fallbackLng: "en"). Extend incrementally.
 import { pluginSettings } from "./plugin-settings";
 import { sshModuleStrings } from "./ssh-modules";
 
 export const vi = {
+  toolCallGroup: {
+    thought: "Suy nghĩ",
+    editedFiles: { one: "đã sửa {{count}} tệp", other: "đã sửa {{count}} tệp" },
+    commands: { one: "đã chạy {{count}} lệnh", other: "đã chạy {{count}} lệnh" },
+    readFiles: { one: "đã đọc {{count}} tệp", other: "đã đọc {{count}} tệp" },
+    searches: { one: "đã tìm {{count}} lần", other: "đã tìm {{count}} lần" },
+    otherTools: { one: "đã dùng {{count}} công cụ khác", other: "đã dùng {{count}} công cụ khác" },
+    and: "và",
+  },
+  turnSummary: {
+    details: "Xem chi tiết lượt",
+    sentBy: "Được gửi bởi {{name}}",
+    showMore: "Xem thêm",
+    showLess: "Thu gọn",
+  },
+  bots: botsStrings,
+  subagents: {
+    title: "Các tác tử con",
+    parent: {
+      openParent: "Open parent",
+
+      parentAgent: "Parent agent",
+
+      parent: "Parent",
+
+      backTo: "Back to {{label}}",
+      backToParent: "Back to parent",
+    },
+  },
+
+  builtinPlugins: builtinPluginStrings,
   ssh: sshModuleStrings,
   paneFind: {
     connectionFailure: "Không tìm được trong đoạn chat này. Kiểm tra kết nối tới host rồi thử lại.",
@@ -31,6 +64,8 @@ export const vi = {
     back: "Quay lại",
     loading: "Đang tải...",
     actions: {
+      copyLine: "Sao chép dòng",
+      selectAll: "Chọn tất cả",
       back: "Quay lại",
       cancel: "Huỷ",
       close: "Đóng",
@@ -57,6 +92,8 @@ export const vi = {
       downloadFailed: "Tải xuống thất bại",
     },
     errors: {
+      folderOutsideWorkspace: "{{path}} is outside this workspace",
+
       error: "Lỗi",
       unableToSave: "Không thể lưu",
       nameRequired: "Cần nhập tên",
@@ -81,26 +118,39 @@ export const vi = {
       close: "Đóng menu",
     },
     commandCenter: {
-      placeholder: "Tìm lệnh, workspace và agent...",
-      noMatches: "Không khớp",
-      actions: "Hành động",
-      workspaces: "Workspace",
-      agents: "Agent",
-      newAgent: "Agent mới",
-      addProject: "Thêm dự án",
-      home: "Trang chủ",
+      placeholder: "Search workspaces, files, and actions...",
+      noMatches: "No matches",
+      actions: "Actions",
+      workspaces: "Workspaces",
+      agents: "Agents",
+      newAgent: "New agent",
+      addProject: "Add project",
+      home: "Home",
       modelGroupLabel: "Model",
-      modelSearchKeywords: "đổi model chọn model switch model",
-      thinkingGroupLabel: "Suy luận",
-      thinkingSearchKeywords: "suy luận reasoning thinking",
-      modeGroupLabel: "Chế độ",
-      modeSearchKeywords: "quyền truy cập phê duyệt mode",
-      planModeGroupLabel: "Chế độ lập kế hoạch",
-      planModeSearchKeywords: "kế hoạch plan lập kế hoạch",
-      fastModeGroupLabel: "Nhanh",
-      fastModeSearchKeywords: "nhanh tốc độ fast",
-      settingOn: "Bật",
-      settingOff: "Tắt",
+      modelSearchKeywords: "switch model change model set model select model",
+      thinkingGroupLabel: "Thinking",
+      thinkingSearchKeywords: "reasoning effort thinking think",
+      modeGroupLabel: "Mode",
+      modeSearchKeywords: "access permission approval mode",
+      planModeGroupLabel: "Plan mode",
+      planModeSearchKeywords: "plan planning plan mode",
+      fastModeGroupLabel: "Fast",
+      fastModeSearchKeywords: "fast speed low latency",
+      settingOn: "On",
+      settingOff: "Off",
+      filePlaceholder: "Search files...",
+      searchingFiles: "Searching files...",
+      files: "Files",
+      open: "Open {{name}}",
+      openInSidePane: "Open {{name}} in side pane",
+      openInFocusedPane: "Open {{name}} in focused pane",
+      groupByProject: "Group by project",
+      groupByStatus: "Group by status",
+      placeholderWithoutFiles: "Search workspaces and actions...",
+      workspacePlaceholder: "Search workspaces...",
+      actionPlaceholder: "Search actions...",
+      recentWorkspaces: "Recent workspaces",
+      tabs: { all: "All", workspaces: "Workspaces", files: "Files", actions: "Actions" },
     },
   },
   composer: {
@@ -108,8 +158,15 @@ export const vi = {
       desktop: "Nhắn cho agent, gắn @tệp, hoặc dùng /lệnh và /skills",
       mobile: "Tin nhắn, @tệp, /lệnh",
       fallback: "Tin nhắn...",
+      terminal: "Prompt",
     },
     input: {
+      fullscreen: "Fullscreen",
+      exitFullscreen: "Exit fullscreen",
+      longPressToSendNow: "Long press to send now",
+
+      longPressToQueue: "Long press to queue",
+
       accessibilityLabel: "Nhắn cho agent...",
       focusHint: "{{shortcut}} để tập trung",
       addAttachment: "Thêm đính kèm",
@@ -200,12 +257,16 @@ export const vi = {
       closeSidebar: "Đóng thanh bên",
     },
     help: {
-      trigger: "Trợ giúp & hỗ trợ",
-      sectionHelp: "Trợ giúp",
-      diagnostics: "Chạy chẩn đoán",
-      shortcuts: "Phím tắt",
-      reportIssue: "Báo lỗi",
+      trigger: "Help and support",
+      sectionHelp: "Help",
+      diagnostics: "Run diagnostics",
+      shortcuts: "Keyboard shortcuts",
+      reportIssue: "Report an issue",
       version: "JAgentDesk {{version}}",
+      discord: "Discord",
+      github: "Create GitHub issue",
+      whatsNew: "What's new",
+      appName: "JAgentDesk",
     },
     sections: {
       sessions: "Lịch sử",
@@ -232,6 +293,14 @@ export const vi = {
         copyBranchName: "Sao chép tên nhánh",
       },
     },
+    statusBucket: {
+      needsInput: "Needs input",
+      failed: "Failed",
+      readyToReview: "Ready to review",
+      working: "Working",
+      done: "Done",
+    },
+    statusGroupAccessibility: "{{label}} group",
   },
   newWorkspace: {
     title: "Workspace mới",
@@ -245,6 +314,8 @@ export const vi = {
       project: "Dự án",
       base: "Nhánh gốc",
       baseNotApplicable: "Không áp dụng",
+      host: "Host",
+      branch: "Branch",
     },
     titlePlaceholder: "Tiêu đề (không bắt buộc)",
     errors: {
@@ -260,8 +331,75 @@ export const vi = {
       searchPlaceholder: "Tìm nhánh và PR",
       title: "Bắt đầu từ",
     },
+    launch: {
+      commandPlaceholder: "Run a command, or leave empty for a blank terminal",
+      promptPlaceholder: "Prompt {{name}}",
+      submit: "Launch",
+      chat: "Chat",
+      terminal: "Terminal",
+      title: "What to launch",
+      manageProfiles: "Manage profiles",
+    },
+    tooltips: {
+      project: "Choose the project",
+      host: "Choose the host",
+      isolation: "Choose the isolation level",
+      startingRef: "Choose where to start from",
+      launch: "Choose what to launch",
+    },
   },
   settings: {
+    shortcuts: {
+      help: {
+        cycleEffort: "Cycle effort",
+        toggleModelPicker: "Toggle model picker",
+      },
+    },
+
+    host: {
+      agents: {
+        idleRuntimeCleanup: {
+          title: "Giải phóng agent nhàn rỗi",
+          hint: "Giải phóng bộ nhớ sau một giờ không hoạt động.",
+          info: "Dừng tiến trình agent và giữ lại cuộc hội thoại. Gửi tin nhắn để tiếp tục.\n\nCông việc đang chạy, thông báo đang chờ và kiểm tra an toàn của nhà cung cấp ngăn việc giải phóng.",
+        },
+      },
+      agentProfiles: {
+        featureCountOne: "{{count}} feature",
+        featureCount: "{{count}} features",
+        editProfileTitle: "Edit agent profile",
+        addProfileTitle: "Add agent profile",
+        iconLabel: "Icon",
+        nameLabel: "Name",
+        namePlaceholder: "UI work",
+        providerLabel: "Provider",
+        providerPlaceholder: "Select a provider",
+        noProviders: "No providers are available on this host",
+        modelLabel: "Model",
+        noModels: "This provider has no models to choose from",
+        modeLabel: "Mode",
+        noModes: "This provider has no modes to choose from",
+        thinkingLabel: "Thinking",
+        noThinkingOptions: "This model has no thinking levels",
+        featuresLabel: "Features",
+        notesLabel: "When to use",
+        notesHint: "Helps agents choose this profile when starting another agent.",
+        notesPlaceholder: "Use for UI work — components, layout and design tokens.",
+        saving: "Saving...",
+        save: "Save",
+        moveUp: "Move up",
+        moveDown: "Move down",
+        editProfile: "Edit profile",
+        remove: "Remove",
+        removeConfirmTitle: "Remove profile?",
+        removeConfirmMessage: 'Remove "{{name}}"?',
+        sectionTitle: "Agent profiles",
+        unsupported: "This host runs a daemon that does not support agent profiles yet",
+        unavailable: "Connect to this host to manage agent profiles",
+        emptyState: "No profiles yet. Add one to start agents from a saved provider and model.",
+        newProfile: "New profile",
+      },
+    },
     hostSections: {
       tools: "Công cụ",
     },
@@ -296,6 +434,34 @@ export const vi = {
     },
     plugins: pluginSettings.vi,
     general: {
+      chatDisplay: {
+        label: "Hiển thị trò chuyện",
+        description: "Lượng công việc của agent hiển thị trong cuộc trò chuyện",
+        options: {
+          full: "Đầy đủ",
+          collapseToolCalls: "Thu gọn lệnh công cụ",
+          collapseTurns: "Thu gọn lượt",
+        },
+      },
+      sendShortcut: {
+        options: {
+          "mod-enter": "{{modifier}}+Enter",
+          enter: "Enter",
+        },
+        label: "Send shortcut",
+      },
+
+      defaultSend: {
+        commandEnterDescriptions: {
+          queue: "When the agent is running, {{modifier}}+Enter queues. Enter inserts a new line.",
+
+          steer:
+            "When the agent is running, {{modifier}}+Enter steers the active turn. Enter inserts a new line.",
+          interrupt:
+            "When the agent is running, {{modifier}}+Enter interrupts. Enter inserts a new line.",
+        },
+      },
+
       language: {
         label: "Ngôn ngữ",
         description: "Ngôn ngữ ứng dụng",
@@ -314,6 +480,27 @@ export const vi = {
       },
     },
     appearance: {
+      layout: {
+        contentWidthCustom: "Custom width · {{width}} px",
+
+        contentWidthFull: "Full",
+
+        contentWidthWide: "Wide",
+
+        contentWidthDefault: "Default",
+
+        resetAccessibility: "Reset content width to default",
+
+        reset: "Reset",
+
+        contentWidthAccessibility: "Content width in pixels",
+
+        contentWidthHint: "Max width of chat and Markdown files on wide screens",
+
+        contentWidth: "Content width",
+        title: "Layout",
+      },
+
       theme: {
         title: "Giao diện",
         options: {
@@ -324,54 +511,17 @@ export const vi = {
           claude: "Claude",
           ghostty: "Ghostty",
           pureBlack: "Đen tuyền",
-          clickup: "ClickUp",
-          clickupDark: "ClickUp Dark",
+          gumloop: "Gumloop",
+          gumloopDark: "Gumloop Dark",
           auto: "Theo hệ thống",
         },
       },
     },
   },
-  clickupShell: {
+  gumloopShell: {
     search: "Tìm kiếm",
     newWorkspace: "Mới",
     workspaces: "Workspace",
-  },
-  activityGraph: {
-    toggle: "Sơ đồ hoạt động",
-    title: "Sơ đồ hoạt động",
-    live: "Trực tiếp",
-    close: "Đóng sơ đồ hoạt động",
-    flow: "Luồng",
-    plan: "Kế hoạch",
-    turnPicker: "Chọn lượt",
-    turnCurrent: "Lượt hiện tại",
-    turnNumber: "Lượt {{number}}",
-    fit: "Vừa khung",
-    resize: "Đổi độ rộng sơ đồ hoạt động",
-    loading: "Đang vẽ sơ đồ…",
-    empty: "Chưa có hoạt động",
-    emptyHint: "Gửi một prompt, các bước của agent sẽ hiện ở đây.",
-    offline: "Kết nối tới host để xem sơ đồ hoạt động.",
-    failed: "Không vẽ được sơ đồ hoạt động.",
-    retry: "Thử lại",
-    legend: {
-      running: "Đang chạy",
-      waiting: "Đang chờ",
-      done: "Xong",
-      failed: "Lỗi",
-      pending: "Dự kiến",
-    },
-  },
-  forumArch: {
-    title: "Sơ đồ kiến trúc",
-    loading: "Đang tải sơ đồ…",
-    notFound: "Phiên bản sơ đồ này không còn trên host.",
-    loadFailed: "Không tải được sơ đồ.",
-    offline: "Kết nối tới host để xem sơ đồ này.",
-    retry: "Thử lại",
-    replay: "Phát lại",
-    replayHint: "Phát lại hoạt ảnh luồng",
-    reducedMotion: "Hoạt ảnh đang tắt vì đã bật giảm chuyển động",
   },
   marketplace: {
     title: "Chợ plugin",
@@ -767,5 +917,115 @@ export const vi = {
       fork: "Tạo bản sao",
       forked: "Đang train {{name}}",
     },
+  },
+  message: { turnFooter: { workedFor: "Worked for {{duration}}" } },
+  workspace: {
+    header: {
+      actions: {
+        workspaceActionsUnhealthy: "Hành động không gian làm việc, một dịch vụ không ổn định",
+      },
+    },
+    scripts: { states: { running: "Đang chạy", runningCount: "{{count}} đang chạy" } },
+    git: {
+      pr: {
+        checksOverview: {
+          headline: {
+            actionRequired: "Some checks need your attention",
+            failure: "Some checks were not successful",
+            pending: "Some checks haven't completed yet",
+            success: "All checks have passed",
+            none: "No checks",
+          },
+          count: {
+            actionRequired: "{{count}} needs action",
+            warning: "{{count}} warning",
+            failure: "{{count}} failing",
+            pending: "{{count}} in progress",
+            manual: "{{count}} manual",
+            success: "{{count}} successful",
+            ignored: "{{count}} skipped",
+          },
+          detailOne: "{{parts}} check",
+          detailMany: "{{parts}} checks",
+          groupOne: {
+            actionRequired: "{{count}} needs action check",
+            warning: "{{count}} warning check",
+            failure: "{{count}} failing check",
+            pending: "{{count}} in progress check",
+            manual: "{{count}} manual check",
+            success: "{{count}} successful check",
+            ignored: "{{count}} skipped check",
+          },
+          groupMany: {
+            actionRequired: "{{count}} needs action checks",
+            warning: "{{count}} warning checks",
+            failure: "{{count}} failing checks",
+            pending: "{{count}} in progress checks",
+            manual: "{{count}} manual checks",
+            success: "{{count}} successful checks",
+            ignored: "{{count}} skipped checks",
+          },
+        },
+        actions: {
+          addToChat: "Add to chat",
+          addAllToChat: "Add all to chat",
+          addingToChat: "Adding...",
+        },
+        sections: { activity: "Activity" },
+        empty: { noActivity: "No activity yet" },
+        accessibility: { commentActions: "Comment actions", threadActions: "Thread actions" },
+        thread: { resolved: "Resolved", outdated: "Outdated" },
+      },
+    },
+    sheet: { openAsTab: "Mở thành thẻ" },
+    tabs: {
+      actions: {
+        newTab: "New tab",
+        changes: "Changes",
+        files: "Files",
+        pullRequest: "Pull request",
+      },
+    },
+  },
+  changelog: {
+    title: "What's new",
+    installed: "Installed",
+    showMore: "Show more",
+    showAllChanges: "Show all changes",
+    hideAllChanges: "Hide all changes",
+    openWebsite: "Full changelog",
+    error: {
+      title: "Unable to load the changelog",
+      description: "Check your connection and try again.",
+    },
+  },
+  agentAutocomplete: {
+    loadingProviderCommands: "Loading {{provider}} commands...",
+    commandsFailed: "Couldn't load commands",
+    providerCommandsFailed: "Couldn't load {{provider}} commands",
+    filesFailed: "Couldn't search files",
+    skillTag: "Skill",
+  },
+  panels: {
+    file: { editor: { preview: "Xem trước", source: "Mã nguồn" } },
+    files: { label: "Files", subtitle: "Workspace files", tooltip: "Browse workspace files" },
+    pullRequest: {
+      label: "Pull request",
+      subtitle: "Pull request details",
+      emptyTitle: "No pull request yet",
+      emptyDescription: "Create a pull request for this checkout to see its details here.",
+    },
+  },
+  modelSelector: {
+    editProfilesLabel: "Edit agent profiles",
+    searchAllPlaceholder: "Search all models...",
+    createProfileFromModel: "Create profile from this model",
+    editProfileLabel: "Edit {{name}}",
+    editProfilesCount: "Edit profiles ({{count}})",
+    profiles: "Profiles",
+    createProfile: "Create profile",
+    noMatchesForQuery: 'No models match "{{query}}"',
+    providers: "Providers",
+    model: "Model",
   },
 } as const;

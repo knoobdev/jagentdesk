@@ -355,3 +355,22 @@ describe("pid-lock identity across a reboot", () => {
     }
   });
 });
+
+describe.runIf(process.platform === "linux")("Linux boot identity", () => {
+  test("uses the boot id even when a running lock's wall-clock timestamp predates boot", async () => {
+    const jagentdeskHome = await mkdtemp(join(tmpdir(), "jagentdesk-boot-id-"));
+    try {
+      await acquirePidLock(jagentdeskHome, null, { ownerPid: process.pid });
+      const lock = await getPidLockInfo(jagentdeskHome);
+      if (!lock) throw new Error("Missing acquired lock");
+      expect(lock.bootId).toBe((await readFile("/proc/sys/kernel/random/boot_id", "utf8")).trim());
+      expect(isPidLockOwnerRunning({ ...lock, startedAt: new Date(0).toISOString() })).toBe(true);
+      expect(
+        isPidLockOwnerRunning({ ...lock, bootId: "00000000-0000-0000-0000-000000000000" }),
+      ).toBe(false);
+    } finally {
+      await releasePidLock(jagentdeskHome, { ownerPid: process.pid });
+      await rm(jagentdeskHome, { recursive: true, force: true });
+    }
+  });
+});

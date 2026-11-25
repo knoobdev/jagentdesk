@@ -1,3 +1,4 @@
+import { parseAppPairingOffer } from "@/pairing/offer";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Text, TextInput, View } from "react-native";
@@ -5,9 +6,6 @@ import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { Link } from "lucide-react-native";
 import type { HostProfile } from "@/types/host-connection";
-import { decodeOfferFragmentPayload, normalizeHostPort } from "@/utils/daemon-endpoints";
-import { connectToDaemon } from "@/utils/test-daemon-connection";
-import { ConnectionOfferSchema } from "@jagentdesk/protocol/connection-offer";
 import { AdaptiveModalSheet, AdaptiveTextInput, type SheetHeader } from "./adaptive-modal-sheet";
 import { Button } from "@/components/ui/button";
 import { useRouter, type Href } from "expo-router";
@@ -62,14 +60,7 @@ export interface PairLinkModalProps {
   source?: "onboarding" | "settings";
 }
 
-export function PairLinkModal({
-  visible,
-  onClose,
-  onCancel,
-  onSaved,
-  title,
-  source,
-}: PairLinkModalProps) {
+export function PairLinkModal({ visible, onClose, onCancel, title, source }: PairLinkModalProps) {
   const { theme } = useUnistyles();
   const { t } = useTranslation();
   const router = useRouter();
@@ -120,26 +111,11 @@ export function PairLinkModal({
       setErrorMessage(t("pairing.link.errors.required"));
       return;
     }
-    if (!raw.includes("#offer=")) {
-      setErrorMessage(t("pairing.link.errors.missingOffer"));
-      return;
-    }
-
     const parsedOffer = (() => {
       try {
-        const idx = raw.indexOf("#offer=");
-        const encoded = raw.slice(idx + "#offer=".length).trim();
-        if (!encoded) {
-          throw new Error(t("pairing.link.errors.emptyOffer"));
-        }
-        const payload = decodeOfferFragmentPayload(encoded);
-        return ConnectionOfferSchema.parse(payload);
+        return parseAppPairingOffer(raw);
       } catch (error) {
-        const message = error instanceof Error ? error.message : t("pairing.link.errors.invalid");
-        setErrorMessage(message);
-        if (!isMobile) {
-          Alert.alert(t("pairing.link.alert.failedTitle"), message);
-        }
+        setErrorMessage(error instanceof Error ? error.message : "Invalid pairing link");
         return null;
       }
     })();
@@ -198,7 +174,7 @@ export function PairLinkModal({
           nativeID="pair-link-input"
           accessibilityLabel={t("pairing.link.label")}
           onChangeText={handleChangeOfferUrl}
-          placeholder="jagentdesk://app/#offer=..."
+          placeholder="jagentdesk://pair#..."
           placeholderTextColor={theme.colors.foregroundMuted}
           style={styles.input}
           autoFocus

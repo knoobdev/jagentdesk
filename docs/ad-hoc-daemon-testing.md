@@ -1,6 +1,6 @@
 # Ad-hoc daemon testing
 
-Spin up an isolated in-process daemon test harness without touching the main daemon on port 6767.
+Spin up an isolated in-process daemon without touching the main daemon on port 6767.
 
 This is for test code only. Executable daemon processes must start through
 `scripts/supervisor-entrypoint.ts` or `dist/scripts/supervisor-entrypoint.js`;
@@ -8,66 +8,27 @@ do not use `createJAgentDeskDaemon` as a product launch path.
 
 ## Quick start
 
+`createDaemonTestContext` (`packages/server/src/server/test-utils/daemon-test-context.ts`) starts a daemon on a free port in temp dirs, connects a `DaemonClient`, and subscribes to agents:
+
 ```typescript
-import os from "node:os";
-import path from "node:path";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import pino from "pino";
-import { createJAgentDeskDaemon } from "./bootstrap.js";
-import { DaemonClient } from "./test-utils/daemon-client.js";
+import { createDaemonTestContext } from "./test-utils/daemon-test-context.js";
 
-const logger = pino({ level: "warn" });
-const jagentdeskHomeRoot = await mkdtemp(path.join(os.tmpdir(), "jagentdesk-test-"));
-const jagentdeskHome = path.join(jagentdeskHomeRoot, ".jagentdesk");
-await mkdir(jagentdeskHome, { recursive: true });
-const staticDir = await mkdtemp(path.join(os.tmpdir(), "jagentdesk-static-"));
-
-const daemon = await createJAgentDeskDaemon(
-  {
-    listen: "127.0.0.1:0", // OS picks a free port
-    jagentdeskHome,
-    corsAllowedOrigins: [],
-    hostnames: true,
-    mcpEnabled: false,
-    staticDir,
-    mcpDebug: false,
-    agentClients: {},
-    agentStoragePath: path.join(jagentdeskHome, "agents"),
-    appBaseUrl: "jagentdesk://app",
-    // Add custom config here, e.g.:
-    // providerOverrides: { ... },
-  },
-  logger,
-);
-
-await daemon.start();
-const target = daemon.getListenTarget();
-const port = target!.type === "tcp" ? target!.port : null;
-
-const client = new DaemonClient({
-  url: `ws://127.0.0.1:${port}/ws`,
-  appVersion: "0.1.70", // see gotcha #1
-});
-await client.connect();
-await client.fetchAgents({ subscribe: { subscriptionId: "test" } });
-
-// ... do your testing ...
-
-await client.close();
-await daemon.stop();
-await rm(jagentdeskHomeRoot, { recursive: true, force: true });
-await rm(staticDir, { recursive: true, force: true });
+const ctx = await createDaemonTestContext();
+try {
+  const agent = await ctx.client.createAgent({ provider: "codex", cwd: "/tmp" });
+  // ... test ...
+} finally {
+  await ctx.cleanup(); // closes the client, stops the daemon, removes temp dirs
+}
 ```
 
-Run with:
+It forwards its options to `createTestJAgentDeskDaemon` (`test-utils/jagentdesk-daemon.ts`). By default that helper:
 
-```bash
-npx tsx packages/server/src/server/your-script.ts
-```
+- uses fake agent clients for `claude`, `codex`, and `opencode` (`createTestAgentClients`); pass `agentClients` to use real ones;
+- enables MCP and disables the relay (pass `relay` to enable it);
+- accepts `providerOverrides`, `plugins`, `auth`, `speech`, `webUi`, `serviceProxy`, and the other options listed in `TestJAgentDeskDaemonOptions`.
 
-## Using the test helper
-
-For simpler cases, `createTestJAgentDeskDaemon` + `DaemonClient` handles temp dirs and port selection:
+Use the helper directly when you need a custom client:
 
 ```typescript
 import { createTestJAgentDeskDaemon } from "./test-utils/jagentdesk-daemon.js";
@@ -76,7 +37,7 @@ import { DaemonClient } from "./test-utils/daemon-client.js";
 const daemon = await createTestJAgentDeskDaemon();
 const client = new DaemonClient({
   url: `ws://127.0.0.1:${daemon.port}/ws`,
-  appVersion: "0.1.70",
+  appVersion: "0.10.0", // see gotcha 1
 });
 await client.connect();
 await client.fetchAgents({ subscribe: { subscriptionId: "test" } });
@@ -84,10 +45,16 @@ await client.fetchAgents({ subscribe: { subscriptionId: "test" } });
 // ... test ...
 
 await client.close();
-await daemon.close(); // stops daemon + cleans up temp dirs
+await daemon.close(); // stops the daemon and cleans up temp dirs
 ```
 
-The test helper does **not** expose `providerOverrides`. In test harnesses, use `createJAgentDeskDaemon` directly when you need it (see quick start above).
+Call `createJAgentDeskDaemon` from `bootstrap.ts` yourself only when you need a `JAgentDeskDaemonConfig` field the helper does not expose. Copy the config shape from `prepareTestDaemonConfig` in `test-utils/jagentdesk-daemon.ts`.
+
+Run a one-off script with:
+
+```bash
+npx tsx packages/server/src/server/your-script.ts
+```
 
 ## Common client methods
 
@@ -105,22 +72,22 @@ const updated = await client.waitForAgentUpsert(agent.id, (s) => s.status === "i
 
 ## Gotchas
 
-### 1. appVersion gates provider visibility
+### 1. appVersion switches compatibility paths
 
-The daemon hides non-legacy providers (anything other than claude, codex, opencode) from clients that don't send an `appVersion >= 0.1.45`. The `DaemonClient` sends no version by default, so custom providers like ACP-based ones will be invisible in snapshot responses.
+The session reads the client's `appVersion` to decide which compatibility paths to take (`packages/server/src/server/session.ts`). Without one, or with an old one, the daemon hides providers other than `claude`, `codex`, and `opencode` (below `0.1.45`) and uses legacy workspace restore (below `0.1.105`). `DaemonClient` sends no version by default, so ACP and other custom providers are missing from snapshots.
 
-Always pass `appVersion`:
+Pass the current app version when the test depends on current behavior:
 
 ```typescript
 const client = new DaemonClient({
   url: `ws://127.0.0.1:${port}/ws`,
-  appVersion: "0.1.70",
+  appVersion: "0.10.0",
 });
 ```
 
 ### 2. Provider snapshots are async
 
-After the daemon starts, providers are probed in the background. The first `getProvidersSnapshot()` call will likely return `status: "loading"` for most providers. Poll until the provider you care about is no longer loading:
+After the daemon starts, providers are probed in the background. The first `getProvidersSnapshot()` call returns `status: "loading"` for most providers. Poll until the provider you care about is no longer loading:
 
 ```typescript
 let snapshot = await client.getProvidersSnapshot({ cwd: "/tmp" });
@@ -132,32 +99,22 @@ for (let i = 0; i < 20; i++) {
 }
 ```
 
-### 3. fetchAgents is required before most operations
+### 3. Call fetchAgents after connecting
 
-Call `client.fetchAgents()` after connecting. The daemon session expects this handshake before it processes other requests — without it, messages like `get_providers_snapshot_request` will silently hang.
+Call `client.fetchAgents({ subscribe: ... })` right after `connect()`, as `createDaemonTestContext` does. Requests sent before that handshake, such as `get_providers_snapshot_request`, can hang.
 
-### 4. listen: "127.0.0.1:0" for port allocation
+### 4. Use port 0
 
-Always use port `0` so the OS picks a free port. Never hardcode a port — it will collide with the main daemon or other test runs.
+The helpers listen on `127.0.0.1:0` so the OS picks a free port. Never hardcode a port; it collides with the main daemon or other test runs.
 
-### 5. Script must live inside packages/server
+### 5. Scripts live inside packages/server
 
-The test utilities use relative imports through the TypeScript project. Place your script somewhere under `packages/server/src/` and import from there. Scripts outside the repo will fail with module resolution errors.
+The test utilities use relative imports through the server TypeScript project. Put your script under `packages/server/src/`. Scripts outside the repo fail with module resolution errors.
 
-### 6. Cleanup on failure
+### 6. Clean up on failure
 
-Wrap your test logic in try/finally to ensure the daemon stops and temp dirs are cleaned up, even if an assertion fails:
-
-```typescript
-try {
-  // ... test logic ...
-} finally {
-  await client.close();
-  await daemon.stop().catch(() => undefined);
-  await rm(jagentdeskHomeRoot, { recursive: true, force: true });
-}
-```
+Wrap test logic in `try`/`finally` so the daemon stops and temp dirs are removed even when an assertion fails.
 
 ### 7. ACP providers spawn real processes
 
-When testing ACP providers (e.g., Gemini with `extends: "acp"`), the daemon will spawn real processes to probe for models and modes. The binary must be installed and on PATH. Probing can take 5-15 seconds depending on the provider.
+ACP providers (`extends: "acp"`, see [custom-providers.md](custom-providers.md)) make the daemon spawn the agent binary to probe models and modes. The binary must be installed and on `PATH`, and probing takes several seconds.

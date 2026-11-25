@@ -46,12 +46,11 @@ function countMatchingEnglishStrings(resource: unknown): number {
 // native translation, so they are exempt from the structural parity + interpolation assertions.
 const OPTIONAL_ENGLISH_FALLBACK_PREFIXES = [
   "tailscaleLogin.",
-  "forumNotifications.",
   "operatorContext.",
   // SSH feature modules (resources/ssh-modules.ts) ship English in every locale for now.
   "ssh.",
-  // Agent activity graph (spec 31): English and Vietnamese ship first; other locales fall back.
-  "activityGraph.",
+  "builtinPlugins.",
+  "bots.",
 ];
 function isOptionalEnglishFallbackKey(key: string): boolean {
   return OPTIONAL_ENGLISH_FALLBACK_PREFIXES.some((prefix) => key.startsWith(prefix));
@@ -126,10 +125,19 @@ describe("translation resources", () => {
     const englishKeys = flattenKeys(en)
       .filter((key) => !isOptionalEnglishFallbackKey(key))
       .sort();
+    const requiredKeys = new Set(englishKeys);
     const localeKeys = (resource: unknown) =>
-      flattenKeys(resource)
-        .filter((key) => !isOptionalEnglishFallbackKey(key))
-        .sort();
+      [
+        ...new Set(
+          flattenKeys(resource)
+            .filter((key) => !isOptionalEnglishFallbackKey(key))
+            .map((key) => {
+              // i18next selects locale-specific plural forms from the same base key.
+              const base = key.replace(/_(zero|one|two|few|many|other)$/, "");
+              return requiredKeys.has(base) ? base : key;
+            }),
+        ),
+      ].sort();
     expect(localeKeys(ar)).toEqual(englishKeys);
     expect(localeKeys(es)).toEqual(englishKeys);
     expect(localeKeys(fr)).toEqual(englishKeys);
@@ -201,7 +209,7 @@ describe("translation resources", () => {
     expect(en.shell.menu.toggleSidebar).toBe("Toggle sidebar");
     expect(en.shell.menu.open).toBe("Open menu");
     expect(en.shell.menu.close).toBe("Close menu");
-    expect(en.shell.commandCenter.placeholder).toBe("Search commands, workspaces, and agents...");
+    expect(en.shell.commandCenter.placeholder).toBe("Search workspaces, files, and actions...");
     expect(en.shell.commandCenter.noMatches).toBe("No matches");
     expect(en.shell.commandCenter.actions).toBe("Actions");
     expect(en.shell.commandCenter.workspaces).toBe("Workspaces");
@@ -247,9 +255,6 @@ describe("translation resources", () => {
 
   it("includes Settings expansion keys for the Batch 3A migration", () => {
     expect(en.settings.diagnostics.title).toBe("Diagnostics");
-    expect(en.settings.diagnostics.legacyTerminalRenderer.label).toBe(
-      "Use legacy terminal renderer",
-    );
     expect(en.settings.appearance.theme.title).toBe("Theme");
     expect(en.settings.appearance.fonts.interfaceFont).toBe("Interface font");
     expect(en.settings.shortcuts.actions.rebind).toBe("Rebind");
@@ -315,7 +320,7 @@ describe("translation resources", () => {
       "Update the host to remove projects.",
     );
     expect(en.newWorkspace.title).toBe("New workspace");
-    expect(en.newWorkspace.refPicker.searchPlaceholder).toBe("Search branches and PRs");
+    expect(en.newWorkspace.refPicker.searchBranches).toBe("Search branches");
     expect(en.openProject.tiles.addProject.title).toBe("Add a project");
   });
 
@@ -633,7 +638,7 @@ describe("translation resources", () => {
     expect(en.branchSwitcher.stashRestored).toBe("Stashed changes restored");
     expect(en.agentAutocomplete.searchingWorkspace).toBe("Searching workspace...");
     expect(en.agentAutocomplete.noCommands).toBe("No commands found");
-    expect(en.agentAutocomplete.failedToLoad).toBe("Failed to load");
+    expect(en.agentAutocomplete.commandsFailed).toBe("Couldn't load commands");
     expect(en.loadOlderHistory.failed).toBe("Couldn't load older history");
     expect(en.agentControls.thinking.extraHigh).toBe("Extra high");
     expect(en.agentControls.model.unknown).toBe("Unknown model");

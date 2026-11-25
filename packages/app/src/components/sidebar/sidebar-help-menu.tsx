@@ -1,6 +1,9 @@
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { SidebarFooterIconHighlight } from "./sidebar-footer-icon-highlight";
+import { openChangelog } from "@/changelog";
 import { useCallback, useState } from "react";
-import { Text, View } from "react-native";
-import { Activity, CircleHelp, Keyboard } from "lucide-react-native";
+import { Text, View, type PressableStateCallbackType } from "react-native";
+import { Activity, CircleHelp, Keyboard, MoreVertical } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import {
@@ -26,6 +29,7 @@ import { resolveAppVersion } from "@/utils/app-version";
 
 const ThemedActivity = withUnistyles(Activity);
 const ThemedCircleHelp = withUnistyles(CircleHelp);
+const ThemedMoreVertical = withUnistyles(MoreVertical);
 const ThemedKeyboard = withUnistyles(Keyboard);
 const foregroundColorMapping = (theme: Theme) => ({ color: theme.colors.foreground });
 const foregroundMutedColorMapping = (theme: Theme) => ({
@@ -61,6 +65,8 @@ function HostVersionHint({ host }: { host: HostProfile }) {
 export function SidebarHelpMenu() {
   const { t } = useTranslation();
   const isCompactLayout = useIsCompactFormFactor();
+  const gumloop = useIsGumloopTheme();
+  const MenuIcon = gumloop ? ThemedMoreVertical : ThemedCircleHelp;
   const openAppDiagnostic = useAppDiagnosticStore((state) => state.open);
   const setShortcutsDialogOpen = useKeyboardShortcutsStore((state) => state.setShortcutsDialogOpen);
   const [open, setOpen] = useState(false);
@@ -72,28 +78,42 @@ export function SidebarHelpMenu() {
     setShortcutsDialogOpen(true);
   }, [setShortcutsDialogOpen]);
 
+  const gumloopTriggerStyle = useCallback(
+    ({ hovered, pressed }: PressableStateCallbackType & { hovered?: boolean }) => [
+      styles.gumloopTrigger,
+      (hovered || pressed || open) && styles.gumloopTriggerHovered,
+    ],
+    [open],
+  );
+  const classicTriggerStyle = isCompactLayout ? styles.triggerTouch : styles.trigger;
+  const label = gumloop ? "More options" : t("sidebar.help.trigger");
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <Tooltip delayDuration={300} enabledOnDesktop={!open}>
         <TooltipTrigger asChild>
           <View>
             <DropdownMenuTrigger
-              style={styles.trigger}
+              style={gumloop ? gumloopTriggerStyle : classicTriggerStyle}
               testID="sidebar-help"
               accessibilityRole="button"
-              accessibilityLabel={t("sidebar.help.trigger")}
+              accessibilityLabel={label}
             >
-              {({ hovered }) => (
-                <ThemedCircleHelp
-                  size={ICON_SIZE.md}
-                  uniProps={hovered ? foregroundColorMapping : foregroundMutedColorMapping}
-                />
+              {({ hovered, pressed, open: menuOpen }) => (
+                <>
+                  {gumloop ? null : <SidebarFooterIconHighlight visible={pressed || menuOpen} />}
+                  <MenuIcon
+                    size={gumloop ? 18 : ICON_SIZE.md}
+                    uniProps={
+                      gumloop || !hovered ? foregroundMutedColorMapping : foregroundColorMapping
+                    }
+                  />
+                </>
               )}
             </DropdownMenuTrigger>
           </View>
         </TooltipTrigger>
         <TooltipContent side="top" align="center" offset={8}>
-          <Text style={styles.tooltipText}>{t("sidebar.help.trigger")}</Text>
+          <Text style={styles.tooltipText}>{label}</Text>
         </TooltipContent>
       </Tooltip>
       <DropdownMenuContent side="top" align="end" offset={8} width={280} testID="sidebar-help-menu">
@@ -107,6 +127,9 @@ export function SidebarHelpMenu() {
             {t("sidebar.help.shortcuts")}
           </DropdownMenuItem>
         ) : null}
+        <DropdownMenuItem testID="sidebar-help-whats-new" onSelect={openChangelog}>
+          {t("sidebar.help.whatsNew")}
+        </DropdownMenuItem>
         <DropdownMenuItem
           testID="sidebar-help-diagnostics"
           leading={diagnosticLeadingIcon}
@@ -129,6 +152,16 @@ export function SidebarHelpMenu() {
 }
 
 const styles = StyleSheet.create((theme) => ({
+  gumloopTrigger: {
+    width: { xs: 44, md: 32 },
+    height: { xs: 44, md: 32 },
+    flexShrink: 0,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  gumloopTriggerHovered: { backgroundColor: theme.colors.surfaceSidebarHover },
+  triggerTouch: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   trigger: {
     width: 28,
     height: 28,

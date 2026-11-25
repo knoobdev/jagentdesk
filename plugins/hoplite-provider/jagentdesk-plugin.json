@@ -1,0 +1,13 @@
+{
+  "id": "hoplite-provider",
+  "requirements": {
+    "jagentdesk": ">=0.9.59"
+  },
+  "kind": "builtin",
+  "name": "Hoplite",
+  "description": "Run Hoplite through its local hoplite CLI.",
+  "defaultEnabled": false,
+  "requires": [],
+  "command": "hoplite",
+  "builtinOrder": 23
+}

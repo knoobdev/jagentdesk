@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import {
+  Platform,
   StyleSheet,
   TextInput,
   type NativeSyntheticEvent,
@@ -15,10 +16,19 @@ import {
   type TextInputKeyPressEventData,
   type TextStyle,
 } from "react-native";
-import { resolveNativeTerminalKey, type NativeTerminalKey } from "./terminal-key-events";
+import { hasActiveOverlay, subscribeHardwareKeyboard } from "@/keyboard";
+import {
+  createNativeTerminalKeyEvent,
+  resolveHardwareTerminalKey,
+  resolveNativeTerminalKey,
+  type NativeTerminalKey,
+  type NativeTerminalKeyEvent,
+} from "./terminal-key-events";
 
 export const TERMINAL_INPUT_CONTEXT_MENU_HIDDEN = true;
 export const TERMINAL_INPUT_HITBOX_SIZE = 1;
+/** Matched by the Android hardware keyboard module to claim arrow keys for this input. */
+export const TERMINAL_INPUT_NATIVE_ID = "jagentdesk-terminal-input";
 
 export interface TerminalTextInputChange {
   data: string;
@@ -43,7 +53,7 @@ export interface TerminalInputHandle {
 interface TerminalInputProps {
   onFocus?: () => void;
   onInput?: (data: string) => void;
-  onTerminalKey?: (key: NativeTerminalKey) => void;
+  onTerminalKey?: (event: NativeTerminalKeyEvent) => void;
   style?: StyleProp<TextStyle>;
 }
 
@@ -125,6 +135,8 @@ export const TerminalInput = forwardRef<TerminalInputHandle, TerminalInputProps>
     const isFocusedRef = useRef(false);
     const pendingFocusFrameRef = useRef<number | null>(null);
     const shouldRefocusAfterClearRef = useRef(false);
+    const onTerminalKeyRef = useRef(onTerminalKey);
+    onTerminalKeyRef.current = onTerminalKey;
     const inputState = useMemo(() => createTerminalTextInputState(), []);
     const inputStyle = useMemo(() => [styles.input, style], [style]);
     const [inputEpoch, setInputEpoch] = useState(0);
@@ -199,6 +211,27 @@ export const TerminalInput = forwardRef<TerminalInputHandle, TerminalInputProps>
       };
     }, [inputEpoch]);
 
+    useEffect(() => {
+      // Physical arrows arrive through the native key stream, never through
+      // TextInput.onKeyPress (RN builds that event from the IME connection).
+      // The native module claims them for this input so the hidden buffer
+      // cannot move its caret, then re-emits them here for the PTY.
+      if (Platform.OS !== "android") return;
+      return subscribeHardwareKeyboard((event) => {
+        if (!isFocusedRef.current || event.phase !== "down" || event.isComposing) return;
+        if (hasActiveOverlay()) return;
+        const key = resolveHardwareTerminalKey(event);
+        if (!key) return;
+        onTerminalKeyRef.current?.({
+          key,
+          ctrl: event.ctrlKey,
+          shift: event.shiftKey,
+          alt: event.altKey,
+          meta: event.metaKey,
+        });
+      });
+    }, []);
+
     useImperativeHandle(
       ref,
       () => ({
@@ -244,7 +277,7 @@ export const TerminalInput = forwardRef<TerminalInputHandle, TerminalInputProps>
       (event: NativeSyntheticEvent<TextInputKeyPressEventData>) => {
         const change = inputState.receiveKeyPress(event.nativeEvent.key);
         if (change.key) {
-          onTerminalKey?.(change.key);
+          onTerminalKey?.(createNativeTerminalKeyEvent(change.key));
         }
         if (change.data.length > 0) {
           onInput?.(change.data);
@@ -273,6 +306,7 @@ export const TerminalInput = forwardRef<TerminalInputHandle, TerminalInputProps>
         importantForAutofill="no"
         keyboardType="ascii-capable"
         multiline={true}
+        nativeID={TERMINAL_INPUT_NATIVE_ID}
         onChangeText={handleChangeText}
         onBlur={handleBlur}
         onFocus={handleFocus}

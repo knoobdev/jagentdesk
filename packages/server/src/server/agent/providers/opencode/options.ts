@@ -1,7 +1,8 @@
-import type { ProviderOptions, ToolPolicy } from "@jagentdesk/protocol/agent-types";
+import { type ProviderOptions, type ToolPolicy } from "@jagentdesk/protocol/agent-types";
 import { z } from "zod";
 
 const PermissionActionSchema = z.enum(["ask", "allow", "deny"]);
+
 const PermissionRuleSchema = z.union([
   PermissionActionSchema,
   z.record(z.string(), PermissionActionSchema),
@@ -10,6 +11,8 @@ const PermissionRuleSchema = z.union([
 // OpenCode Config.permission, maintained against @opencode-ai/sdk 1.14.46.
 export const OpenCodeProviderOptionsSchema = z
   .object({
+    // Composer control: approves permission prompts without asking.
+    auto_accept: z.boolean().optional(),
     permission: z
       .union([
         PermissionActionSchema,

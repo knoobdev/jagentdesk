@@ -1,474 +1,159 @@
-# Adding a New Provider to JAgentDesk
+# Providers
 
-This guide walks through adding a new agent provider end-to-end. There are two integration patterns, and this doc covers both.
+A provider is an agent backend: the daemon spawns its CLI or runtime, maps its events onto the JAgentDesk timeline, and answers catalog, permission and history requests for it. This doc covers adding a provider and the contracts every provider adapter must keep. To configure profiles, endpoints or ACP agents without code, see [custom-providers.md](custom-providers.md).
 
-## Two Integration Patterns
+## Where providers come from
 
-### ACP (Agent Client Protocol) -- recommended
+| Source                     | Providers                                                                        | Code                                                                   |
+| -------------------------- | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Built-in, direct           | `claude`, `codex`, `opencode`, `pi`, `omp` (OMP is disabled by default)          | `packages/server/src/server/agent/providers/`                          |
+| Built-in, ACP              | `copilot`                                                                        | `providers/copilot-acp-agent.ts`                                       |
+| Bundled provider plugins   | Muse Code, Antigravity (enabled by default); Hoplite, fx, goose (off by default) | `plugins/<id>-provider/`                                               |
+| Config-defined (`extends`) | Profiles of a built-in provider, generic ACP agents, custom API providers        | [custom-providers.md](custom-providers.md)                             |
+| Development only           | `mock`, `mock-slow` (listed only with `JAGENTDESK_NODE_ENV=development`)         | `providers/mock-load-test-agent.ts`, `providers/mock-slow-provider.ts` |
 
-Extend `ACPAgentClient` from `packages/server/src/server/agent/providers/acp-agent.ts`. The base class handles process spawning, stdio transport, session lifecycle, streaming, permissions, and model discovery. You provide configuration (command, modes, capabilities) and optionally override `isAvailable()` for auth checks.
+An `extends: "acp"` entry whose ID is `cursor`, `kimi`, `kiro` or `traecli` gets a dedicated ACP client (`providers/<name>-acp-agent.ts`) instead of `GenericACPAgentClient`. The in-app ACP catalog (`packages/app/src/data/acp-provider-catalog.ts`) writes those entries.
 
-The only built-in ACP provider today is `copilot` (`copilot-acp-agent.ts`). `GenericACPAgentClient` (`generic-acp-agent.ts`) is also ACP-based but is used for user-defined custom providers configured via `extends: "acp"` overrides — see [docs/custom-providers.md](custom-providers.md).
+## Choosing an integration
 
-Copilot custom agents are exposed through ACP session config, not the slash-command list. When custom agents are available, Copilot returns a select config option with `id: "agent"` and `category: "_agent"`; JAgentDesk maps that to the `agent` provider feature. Copilot uses the agent display name as the option value, and the blank value means the default Copilot agent.
+- **Provider plugin.** Use this for an agent that speaks ACP or that you want to ship outside core. The plugin calls `server.registerProvider(...)`; ACP agents pass `runAcpProvider({ id, label, command, ... })` from `@jagentdesk/plugin/server/acp` (see `plugins/goose-provider/server/provider.ts`). Bundled provider plugins appear in Settings → host → Plugins → Built-in with per-host switches, and a missing CLI shows its unavailable reason there. A registration with `requiresConfiguration: true` activates only while `agents.providers` contains its ID. Plugin runtime behavior is in [plugins.md](plugins.md#runtime-contracts).
+- **Built-in ACP.** Subclass `ACPAgentClient` (`providers/acp-agent.ts`). The base class owns process spawning, stdio transport, session lifecycle, streaming, permissions and catalog discovery. You supply `provider`, `defaultCommand`, `defaultModes` and `capabilities`, and override `isAvailable()` only to add credential checks.
+- **Direct.** Implement `AgentClient` and `AgentSession` from `packages/server/src/server/agent/agent-sdk-types.ts`. You own process management, streaming, permissions and persistence.
 
-ACP permission options are rendered as ordered actions and JAgentDesk returns the selected option's exact `optionId`. Agents can therefore encode a single-choice question as multiple options of the same allow kind. Auto-accept does not resolve those chooser requests; they always wait for the user.
+## Adding a built-in provider
 
-### Direct
+1. Create the client in `packages/server/src/server/agent/providers/`. Read `agent-sdk-types.ts` for the full `AgentClient` / `AgentSession` contract; required members are `createSession`, `resumeSession`, `fetchCatalog` and `isAvailable` on the client, and `startTurn`, `subscribe`, `streamHistory`, `describePersistence`, permissions, modes, `interrupt` and `close` on the session.
+2. Add the definition to `AGENT_PROVIDER_DEFINITIONS` in `packages/protocol/src/provider-manifest.ts`, with modes that carry `icon` and `colorTier` (`safe`, `moderate`, `dangerous`, `planning`, or a `#hex` color). Mark the provider's no-prompt mode with `isUnattended`. Set `enabledByDefault: false` to ship it off.
+3. Add the ID to `BUILTIN_PROVIDER_IDS` in `packages/protocol/src/provider-config.ts`, which validates `extends` values. This list is separate from the manifest.
+4. Add a factory to `PROVIDER_CLIENT_FACTORIES` in `packages/server/src/server/agent/provider-registry.ts`. Factories receive `(logger, runtimeSettings, options)`; the registry already resolves the provider's runtime settings slice.
+5. Register an icon in `BUILTIN_PROVIDER_ICONS` (`packages/app/src/components/provider-icons.ts`). Unknown providers fall back to catalog SVGs and then a generic icon.
+6. Add an entry to `agentConfigs` and `allProviders` in `packages/server/src/server/daemon-e2e/agent-configs.ts`, with a `full` (no prompts) and an `ask` mode.
 
-Implement the `AgentClient` and `AgentSession` interfaces from `agent-sdk-types.ts` yourself. This gives full control but requires you to handle process management, streaming, permissions, and session persistence from scratch.
-
-Existing direct providers: `claude` (in `providers/claude/agent.ts`), `codex` (`codex-app-server-agent.ts`), `opencode` (`opencode-agent.ts`), `pi` (`providers/pi/agent.ts`), and `omp` (`providers/omp/agent.ts`). The dev-only `mock` provider (`mock-load-test-agent.ts`) is also direct.
-
-Claude first-party model metadata lives in `packages/server/src/server/agent/providers/claude/model-manifest.ts`. When adding or updating a Claude model, update that manifest only; the model picker thinking options and Claude-specific feature gates are derived from the manifest. Do not add model-specific Claude capability lists in feature code.
-
-JAgentDesk tools are not implemented as MCP tools internally. They live in a shared tool catalog under `packages/server/src/server/agent/tools/`; MCP is only the fallback adapter. A provider that can register runtime tools directly should set `supportsNativeJAgentDeskTools: true` and consume `launchContext.jagentdeskTools` in `createSession`/`resumeSession`. When native tools are present, `AgentManager` strips the internal JAgentDesk MCP server from the provider launch config so the provider does not receive the same tools twice. Providers that only know MCP should keep `supportsMcpServers: true` and let the daemon inject `/mcp/agents`.
-
-Pi is a process-backed provider. JAgentDesk requires the user to have the `pi` binary installed and talks to it through `pi --mode rpc`; the server package does not embed Pi's SDK/runtime packages.
-
-JAgentDesk's per-agent and daemon-wide system prompts are appended by its generated Pi integration extension. JAgentDesk deliberately does not pass `--append-system-prompt`, because that flag replaces Pi's automatic `APPEND_SYSTEM.md` discovery instead of composing with it.
-
-Pi model records expose input capabilities through `model.input`. Only send raw RPC `images` when the current model explicitly includes `"image"` in that list. Text-only Pi/OMP models reject image content and persist the rejected image in JSONL history, so image prompts for those models must be materialized to a local file and passed as a text path hint instead.
-
-Pi MCP support depends on the open-source `pi-mcp-adapter` extension being loaded for the agent cwd. Probe with Pi RPC `get_commands`; the adapter registers an extension command named `mcp` (often with `sourceInfo.source` containing `pi-mcp-adapter`). When JAgentDesk injects MCP servers into Pi, write a per-agent MCP config and pass it with `--mcp-config` instead of modifying user or project MCP files. Because that flag replaces the Pi global config layer, preserve the existing `<Pi agent dir>/mcp.json` in the generated file before overlaying injected servers. For local HTTP servers such as JAgentDesk's own `/mcp/agents` endpoint, explicitly disable adapter OAuth (`auth: false`, `oauth: false`) in the generated config.
-
-Pi import discovery reads Pi's persisted JSONL session files because Pi RPC does not expose a recent-session listing command. Resume and full history hydration still go through `pi --mode rpc` using the session file as `nativeHandle`.
-
-OMP is a first-class built-in provider, disabled by default. Its launch contract, typed runtime, agent/session behavior, history, permissions, imports, and test fake live under `providers/omp/`; only the provider-neutral JSONL child-process transport is shared with Pi. It launches `omp --mode rpc-ui`, uses OMP's `get_available_commands` RPC for slash-command discovery, bridges OMP `rpc-ui` approval dialogs into JAgentDesk permissions, and imports terminal-started sessions from `~/.omp/agent/sessions` when enabled.
-
-OMP supports native JAgentDesk host tools. The adapter registers the full caller-scoped JAgentDesk tool catalog directly with OMP, matching providers such as Claude that expose the full catalog through MCP. Serialize every OMP host definition with `loadMode: "essential"` so `create_agent`, `send_agent_prompt`, `wait_for_agent`, and related tools remain direct calls; omitting the field makes OMP mount non-built-in names under `xd://` instead. OMP's provider-managed task subagents are surfaced as JAgentDesk subagents through `child_session` imports; the parent keeps the subagents track while the child runtime stays owned by OMP. Custom OMP profiles should extend `omp`; other Pi-compatible forks can still extend `pi`, override `command`, and set `params.sessionDir` to their JSONL session directory.
-
-Pi RPC extension UI dialog requests (`select`, `input`, `editor`, `confirm`) are bridged into JAgentDesk question permissions and answered with `extension_ui_response`. Pi extensions such as `ask_user` may chain dialogs: for example, a `select` can be followed by an optional-comment `input`. When an `ask_user` tool call declares `allowComment: true`, JAgentDesk presents the selection and optional comment as one question permission, answers Pi's initial `select` immediately, then auto-answers the follow-up optional `input` with the comment the user already supplied (or an empty string). Preserve placeholders and optional/skip semantics for standalone optional inputs so the app can still distinguish "skip this optional input" from "cancel the whole dialog." Fire-and-forget extension UI requests such as notifications are intentionally ignored by the provider adapter unless JAgentDesk grows first-class UI for them.
-
-OpenCode MCP injection is dynamic and session-scoped. Call OpenCode's `mcp.add` endpoint with the MCP server config and do not follow it with `mcp.connect`; `connect` only toggles MCP servers already present in OpenCode's own config. New OpenCode versions return `McpServerNotFoundError`/404 for `connect` after a dynamic add because the server is not config-backed, while older versions silently swallowed the same missing-config path.
-
-OpenCode owns user message IDs. Do not pass JAgentDesk-generated IDs to OpenCode prompt APIs; let OpenCode create `msg*` IDs and record the user timeline item from the `message.updated` event.
-
-Use OpenCode v2 execution events to trigger turn completion, with active-state and durable-log reconciliation after admission, reconnect, and while a turn remains active. Do not use `session.wait`: a healthy turn exceeding Node's HTTP headers deadline produces a transport error while OpenCode keeps working. The live event feed has no replay, and shutdown interruption preserves the previous idle outcome, so the session snapshot alone cannot recover missed execution events. Quiet streams are healthy: v2 heartbeats are SSE comments, not application events.
-
-`AgentManager` owns the one canonical timeline row for a foreground prompt carrying a JAgentDesk `clientMessageId`. It records that row when `startTurn` accepts, with the wire `messageId` set to the same value. Provider adapters still emit their native user-message echo with the same `clientMessageId` when available; the manager records its provider identity on the internal row without changing or redispatching the wire item. If an adapter emits the echo before `startTurn` resolves, the manager records the provider identity with the row at acceptance. Provider adapters continue to own externally initiated user rows that have no JAgentDesk client identity. Do not perform global transcript text dedupe.
-
-Rewind accepts the canonical wire `messageId` and resolves it to the provider identity before calling the adapter. A submitted prompt cannot be rewound until its provider echo supplies that identity.
-
-Submitted user-message wire items carry the same JAgentDesk ID in `messageId` and `clientMessageId`. Provider adapters attach `clientMessageId` only to the echo for that foreground submission; provider history and externally initiated user rows do not have a JAgentDesk client ID.
-
-Draft metadata lookups should avoid creating provider sessions when the upstream provider has top-level APIs for that metadata. Prefer `AgentClient.fetchCatalog`, `listCommands`, or `listFeatures` over creating a scratch `AgentSession`; scratch sessions can show up as empty native sessions in provider import/history UIs. `fetchCatalog` is the single discovery API for models and modes — provider implementations may use one process, separate upstream calls, or static data internally, but callers outside the provider do not get separate runtime model/mode probes. Draft command listing and scratch-session feature listing require an explicit draft model. Do not resolve a default model through catalog discovery. A client-level `listFeatures` implementation may return features from an incomplete, model-less draft and owns which features are valid in that state.
-
-Provider session import has its own contract. The picker calls `listImportableSessions` and receives rows only: provider handle, cwd, title, prompt previews, and last activity. Import calls `importSession({ providerHandleId, cwd })` for the selected row and must not call listing again. The provider returns the resumed session, storage config, persistence handle, and hydrated timeline for that one native session; `AgentManager.importProviderSession` seeds the daemon timeline and publishes the JAgentDesk agent only after it is ready.
-
-## Provider Helper Processes
-
-Provider-owned helper processes that can outlive an individual agent session must be recorded in the daemon's managed-process registry. Store provider/kind metadata, the PID, launch command/args, and process identity captured from the platform process table. Remove the record on normal exit or shutdown.
-
-If a helper process has a readiness phase, the provider's lifecycle model must own the process immediately after `spawn`, before readiness succeeds. Startup timeout, startup exit, and daemon shutdown must all clean up through that owned generation. Do not keep a spawned helper only inside a readiness promise; that creates a live process outside the manager/reaper contract.
-
-Daemon bootstrap reconciles that ledger in the background, without blocking startup: dead PIDs are deleted, PID identity mismatches are deleted without killing anything, only positively matched JAgentDesk-owned leftovers are terminated, and a record whose process cannot be inspected is left in place for the next reconcile rather than deleted. Do not add broad process-name sweepers for provider cleanup; cleanup starts from records JAgentDesk previously wrote.
-
----
-
-## Provider Snapshot Refresh Contract
-
-The daemon keeps provider snapshots per resolved working directory, with a separate semantic global scope for settings/provider management and requests that do not carry a cwd. Provider catalog probes receive a discriminated `FetchCatalogOptions`: `{ scope: "global", force }` for global catalog refreshes, or `{ scope: "workspace", cwd, force }` for project-scoped refreshes. Providers decide what global means for their runtime; do not infer global by comparing a cwd to the user's home directory.
-
-Snapshot reads may probe providers only while the requested cwd scope is cold. Once an entry is warm, its `ready`, `error`, or `unavailable` state stays cached until an explicit refresh. Do not add TTL revalidation, focus-triggered refreshes, selector-open refreshes, or config-reload refreshes. Selector-open refetches may read an already-loading or stale React Query, but they must not force provider probing on their own.
-
-Settings refresh is the user-facing "forget stale provider knowledge everywhere" action. A settings refresh clears provider snapshot caches and in-flight loads across all cwd scopes, then immediately refreshes only the global snapshot with `force: true`. Workspace snapshots are re-probed lazily on the next scoped read; do not fan out a settings refresh across every known workspace.
-
-Registry/config replacement may update visible metadata such as label, description, default mode, enabled state, and provider membership, but it must not spawn provider processes. If a provider needs to be re-probed after a config change, route that through the explicit settings refresh path.
-
-Boundary tests should assert observable behavior: cold reads may call provider availability/model/mode discovery for that scope; warm reads and registry replacement must not; explicit workspace refreshes affect only one cwd; settings refresh wipes all scopes but immediately refreshes only global.
-
----
-
-## Provider Usage Fetchers
-
-Provider plan usage is fetch-on-demand, not a daemon push subscription. The app calls `provider.usage.list.request` through React Query when the usage tooltip or Host Usage settings screen is shown, and the daemon returns the normalized `ProviderUsage` list directly.
-
-To add plan usage for a provider, add `packages/server/src/services/quota-fetcher/providers/<provider>.ts` and register it in `packages/server/src/services/quota-fetcher/manifest.ts`. The provider file exports only its fetcher class; provider auth, endpoint constants, API schemas, and normalization helpers stay private in that file. A fetcher owns provider auth/API parsing and returns the generic shape:
-
-- `providerId`, `displayName`, `status`, and optional `planLabel`
-- any number of `windows` such as Session, Weekly, or Biweekly
-- optional `balances` for credits, USD, requests, or tokens
-- optional `details` for provider-specific rows
-
-Keep the protocol shape provider-agnostic. Do not add provider-specific renderers for new limit windows; labels and generic bars should carry the UI. API responses should be parsed and normalized with Zod inside the fetcher, while the protocol boundary stays strict so old/new client compatibility is explicit.
-
-Kimi Code usage follows the CLI-managed credential file at `KIMI_CODE_HOME` or `~/.kimi-code/credentials/kimi-code.json`; do not probe the legacy `~/.kimi` path as the primary source for current Kimi Code installs.
-
----
-
-## ACP Provider Checklist
-
-### 1. Create the provider class
-
-Create `packages/server/src/server/agent/providers/{name}-agent.ts`.
-
-Define capabilities, modes, and a thin subclass of `ACPAgentClient`:
-
-```ts
-import type { Logger } from "pino";
-import type { AgentCapabilityFlags, AgentMode } from "../agent-sdk-types.js";
-import type { ProviderRuntimeSettings } from "../provider-launch-config.js";
-import { ACPAgentClient } from "./acp-agent.js";
-
-const MY_PROVIDER_CAPABILITIES: AgentCapabilityFlags = {
-  supportsStreaming: true,
-  supportsSessionPersistence: true,
-  supportsDynamicModes: true,
-  supportsMcpServers: true,
-  supportsReasoningStream: true,
-  supportsToolInvocations: true,
-};
-
-const MY_PROVIDER_MODES: AgentMode[] = [
-  {
-    id: "default",
-    label: "Default",
-    description: "Standard agent mode",
-  },
-  // Add more modes as needed
-];
-
-type MyProviderClientOptions = {
-  logger: Logger;
-  runtimeSettings?: ProviderRuntimeSettings;
-};
-
-export class MyProviderACPAgentClient extends ACPAgentClient {
-  constructor(options: MyProviderClientOptions) {
-    super({
-      provider: "my-provider", // Must match the ID used everywhere else
-      logger: options.logger,
-      runtimeSettings: options.runtimeSettings,
-      defaultCommand: ["my-agent-binary", "--acp"], // CLI command to spawn
-      defaultModes: MY_PROVIDER_MODES,
-      capabilities: MY_PROVIDER_CAPABILITIES,
-    });
-  }
-
-  // Override isAvailable() if the provider needs specific auth/env vars
-  override async isAvailable(): Promise<boolean> {
-    if (!(await super.isAvailable())) {
-      return false; // Binary not found
-    }
-    return Boolean(process.env["MY_PROVIDER_API_KEY"]);
-  }
-}
-```
-
-The `super.isAvailable()` call checks that the binary from `defaultCommand` is on `$PATH`. Override only to add credential checks on top.
-
-For reference, here is how Copilot does it -- no auth override needed because the CLI handles auth itself:
-
-```ts
-export class CopilotACPAgentClient extends ACPAgentClient {
-  constructor(options: CopilotACPAgentClientOptions) {
-    super({
-      provider: "copilot",
-      logger: options.logger,
-      runtimeSettings: options.runtimeSettings,
-      defaultCommand: ["copilot", "--acp"],
-      defaultModes: COPILOT_MODES,
-      capabilities: COPILOT_CAPABILITIES,
-    });
-  }
-
-  override async isAvailable(): Promise<boolean> {
-    return super.isAvailable();
-  }
-}
-```
-
-### 2. Add to the provider manifest
-
-In `packages/server/src/server/agent/provider-manifest.ts`, add mode definitions with UI metadata (icons, color tiers) and a provider definition entry.
-
-First, define the modes with visual metadata:
-
-```ts
-const MY_PROVIDER_MODES: AgentProviderModeDefinition[] = [
-  {
-    id: "default",
-    label: "Default",
-    description: "Standard agent mode",
-    icon: "ShieldCheck",
-    colorTier: "safe",
-  },
-  {
-    id: "autonomous",
-    label: "Autonomous",
-    description: "Runs without prompting",
-    icon: "ShieldOff",
-    colorTier: "dangerous",
-  },
-];
-```
-
-Available `colorTier` values: `"safe"`, `"moderate"`, `"dangerous"`, `"planning"`.
-Available `icon` values: `"ShieldCheck"`, `"ShieldAlert"`, `"ShieldOff"`.
-
-Then add to the `AGENT_PROVIDER_DEFINITIONS` array:
-
-```ts
-export const AGENT_PROVIDER_DEFINITIONS: AgentProviderDefinition[] = [
-  // ... existing providers ...
-  {
-    id: "my-provider",
-    label: "My Provider",
-    description: "Short description of the provider",
-    defaultModeId: "default",
-    modes: MY_PROVIDER_MODES,
-    // Optional: enable voice
-    voice: {
-      enabled: true,
-      defaultModeId: "default",
-      defaultModel: "some-model",
-    },
-  },
-];
-```
-
-### 3. Add the factory to the provider registry
-
-In `packages/server/src/server/agent/provider-registry.ts`, import your class and add a factory entry to `PROVIDER_CLIENT_FACTORIES`:
-
-```ts
-import { MyProviderACPAgentClient } from "./providers/my-provider-agent.js";
-
-const PROVIDER_CLIENT_FACTORIES: Record<string, ProviderClientFactory> = {
-  // ... existing factories ...
-  "my-provider": (logger, runtimeSettings) =>
-    new MyProviderACPAgentClient({
-      logger,
-      runtimeSettings,
-    }),
-};
-```
-
-The factory is invoked with `(logger, runtimeSettings, options)`; `options.workspaceGitService` is also available if you need it (see the `codex` factory for an example). The registry already passes the per-provider runtime settings slice through, so you don't index into the map yourself.
-
-### 4. Add a provider icon (app)
-
-Create `packages/app/src/components/icons/my-provider-icon.tsx` following the pattern from existing icons (e.g., `claude-icon.tsx`):
-
-```tsx
-import Svg, { Path } from "react-native-svg";
-
-interface MyProviderIconProps {
-  size?: number;
-  color?: string;
-}
-
-export function MyProviderIcon({ size = 16, color = "currentColor" }: MyProviderIconProps) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill={color}>
-      <Path d="..." />
-    </Svg>
-  );
-}
-```
-
-Then register it in `packages/app/src/components/provider-icons.ts` by adding an entry to the existing `PROVIDER_ICONS` map (which already covers the built-in providers):
-
-```ts
-import { MyProviderIcon } from "@/components/icons/my-provider-icon";
-
-const PROVIDER_ICONS: Record<string, typeof Bot> = {
-  // ... existing entries ...
-  "my-provider": MyProviderIcon as unknown as typeof Bot,
-};
-```
-
-If no icon is registered, `getProviderIcon()` falls back to a generic `Bot` icon from lucide.
-
-### 5. Add E2E test config
-
-In `packages/server/src/server/daemon-e2e/agent-configs.ts`, add your provider:
-
-```ts
-export const agentConfigs = {
-  // ... existing configs ...
-  "my-provider": {
-    provider: "my-provider",
-    model: "default-model-id",
-    modes: {
-      full: "autonomous", // Mode with no permission prompts
-      ask: "default", // Mode that requires permission approval
-    },
-  },
-} as const satisfies Record<string, AgentTestConfig>;
-```
-
-Add an availability check in `isProviderAvailable()`. Note `isCommandAvailable` is async, so all branches `await` it:
-
-```ts
-case "my-provider":
-  return (
-    (await isCommandAvailable("my-agent-binary")) &&
-    Boolean(process.env.MY_PROVIDER_API_KEY)
-  );
-```
-
-Add to the `allProviders` array (current built-ins are `claude`, `codex`, `copilot`, `opencode`, `pi`, `omp`):
-
-```ts
-export const allProviders: AgentProvider[] = [
-  "claude",
-  "codex",
-  "copilot",
-  "opencode",
-  "pi",
-  "my-provider",
-];
-```
-
-### 6. Run typecheck
+Try it with the CLI against the dev daemon:
 
 ```bash
-npm run typecheck
+npm run cli -- provider ls
+npm run cli -- provider models my-provider --thinking
+npm run cli -- run --provider my-provider/some-model --mode default "Say hello"
 ```
 
-This is required after every change per project rules.
+## Adapter contracts
 
----
+### Tools
 
-## Direct Provider Checklist
+JAgentDesk tools live in a shared catalog under `packages/server/src/server/agent/tools/`; MCP is only the fallback adapter. A provider that can register runtime tools sets `supportsNativeJAgentDeskTools: true` and consumes `launchContext.jagentdeskTools` in `createSession` / `resumeSession`. `AgentManager` then strips the internal MCP server from the launch config so tools do not arrive twice. Providers that only speak MCP keep `supportsMcpServers: true` and get `/mcp/agents` injected.
 
-If your agent does not speak ACP, implement the interfaces from `agent-sdk-types.ts` directly.
+Exact MCP preapproval is a separate daemon-owned contract. A provider must fail closed for Hub unattended execution until it can approve one exact injected MCP server and tool identity without approving native tools.
 
-### Interfaces to implement
+### Provider options
 
-The interfaces below are abridged signatures — read `agent-sdk-types.ts` for the full source of truth (option bag types, generics, etc.).
+The provider validates and applies `AgentSessionConfig.providerOptions`; the registry supplies the effective options at session startup. Defaults and merge rules are in [custom-providers.md](custom-providers.md#provider-options).
 
-**`AgentClient`** -- factory for sessions and model/mode listing:
+### Catalog and snapshots
 
-```ts
-interface AgentClient {
-  readonly provider: AgentProvider;
-  readonly capabilities: AgentCapabilityFlags;
-  createSession(
-    config: AgentSessionConfig,
-    launchContext?: AgentLaunchContext,
-    options?: AgentCreateSessionOptions,
-  ): Promise<AgentSession>;
-  resumeSession(
-    handle: AgentPersistenceHandle,
-    overrides?: Partial<AgentSessionConfig>,
-    launchContext?: AgentLaunchContext,
-  ): Promise<AgentSession>;
-  fetchCatalog(options: FetchCatalogOptions): Promise<ProviderCatalog>;
-  isAvailable(): Promise<boolean>;
-  // Optional:
-  listImportableSessions(
-    options?: ListImportableSessionsOptions,
-  ): Promise<ImportableProviderSession[]>;
-  importSession(
-    input: ImportProviderSessionInput,
-    context: ImportProviderSessionContext,
-  ): Promise<ImportedProviderSession>;
-  getDiagnostic?(): Promise<{ diagnostic: string }>;
-}
-```
+`fetchCatalog` is the single discovery API for models and modes. Callers outside the provider never probe models and modes separately. A catalog with `incomplete: true` omits models the provider could not confirm.
 
-**`AgentSession`** -- a running agent conversation:
+The daemon keeps provider snapshots per resolved cwd, plus a semantic global scope for settings and requests without a cwd. Probes receive `{ scope: "global", force }` or `{ scope: "workspace", cwd, force }`. Providers decide what global means; never infer it by comparing a cwd to the home directory.
 
-```ts
-interface AgentSession {
-  readonly provider: AgentProvider;
-  readonly id: string | null;
-  readonly capabilities: AgentCapabilityFlags;
-  readonly features?: AgentFeature[];
-  run(prompt: AgentPromptInput, options?: AgentRunOptions): Promise<AgentRunResult>;
-  startTurn(prompt: AgentPromptInput, options?: AgentRunOptions): Promise<{ turnId: string }>;
-  subscribe(callback: (event: AgentStreamEvent) => void): () => void;
-  streamHistory(): AsyncGenerator<AgentStreamEvent>;
-  getRuntimeInfo(): Promise<AgentRuntimeInfo>;
-  getAvailableModes(): Promise<AgentMode[]>;
-  getCurrentMode(): Promise<string | null>;
-  setMode(modeId: string): Promise<void | AgentProviderNotice>;
-  getPendingPermissions(): AgentPermissionRequest[];
-  respondToPermission(
-    requestId: string,
-    response: AgentPermissionResponse,
-  ): Promise<AgentPermissionResult | void>;
-  describePersistence(): AgentPersistenceHandle | null;
-  interrupt(): Promise<void>;
-  close(): Promise<void>;
-  // Optional:
-  listCommands?(): Promise<AgentSlashCommand[]>;
-  setModel?(modelId: string | null): Promise<void>;
-  setThinkingOption?(thinkingOptionId: string | null): Promise<void | AgentProviderNotice>;
-  setFeature?(featureId: string, value: unknown): Promise<void>;
-  tryHandleOutOfBand?(prompt: AgentPromptInput): {
-    run(ctx: { emit: (event: AgentStreamEvent) => void }): Promise<void>;
-  } | null;
-}
-```
+What re-probes a provider:
 
-`setMode` and `setThinkingOption` may return an `AgentProviderNotice` when the provider knows the change needs user-facing context. For example, providers that stage changes until the next turn should return an `info` notice while a turn is already running. The app renders the notice generically as a toast; provider-specific lifecycle behavior stays in the provider implementation.
+- **A cold read** of a scope.
+- **The background schedule.** Enabled providers refresh about every 30 minutes (`PROVIDER_BACKGROUND_REFRESH_INTERVAL_MS`), one provider per slot, across the global scope and every cached cwd. A failed, unavailable or incomplete background probe keeps a ready catalog. Background refresh is soft, so OpenCode keeps its shared server. A manual refresh pushes that provider's next slot back. Shutdown cancels the schedule and aborts running probes.
+- **An explicit workspace refresh**, which affects one cwd.
+- **Settings refresh**, which clears every scope and in-flight load, then force-refreshes only the global scope. Workspace scopes re-probe lazily on their next read.
 
-### Steps
+Do not add focus, selector-open or config-reload refreshes. Registry and config replacement may update label, description, default mode, enabled state and membership, but must not spawn provider processes.
 
-1. Create `packages/server/src/server/agent/providers/{name}-agent.ts` implementing both interfaces
-2. Add to the provider manifest (same as ACP step 2 above)
-3. Add factory to the registry (same as ACP step 3 above)
-4. Add icon (same as ACP step 4 above)
-5. Add E2E config (same as ACP step 5 above)
-6. Run typecheck
+### Draft metadata
 
----
+Avoid creating provider sessions for metadata. Prefer `fetchCatalog`, `listCommands` or `listControls` on the client: scratch sessions show up as empty native sessions in provider import and history UIs. Draft command and control listing require an explicit draft model; do not resolve a default model through catalog discovery.
 
-## Testing
+### User messages and rewind
 
-### Manual testing with the CLI
+`AgentManager` owns the one canonical timeline row for a foreground prompt that carries a `clientMessageId`. It records the row when `startTurn` accepts, with the wire `messageId` equal to the `clientMessageId`. Adapters still emit their native user-message echo with that `clientMessageId`; the manager records the provider identity on the internal row without redispatching it. Adapters own externally initiated user rows, which have no client identity. Do not dedupe transcripts by text.
 
-Start the daemon if not already running, then:
+Rewind takes the canonical `messageId` and resolves it to the provider identity, so a prompt cannot be rewound until its provider echo arrives.
 
-```bash
-# Launch an agent with your provider
-jagentdesk run --provider my-provider
+### Persistence
 
-# Launch with a specific model and mode
-jagentdesk run --provider my-provider --model some-model --mode default
+`describePersistence()` returns a handle only once a new provider process could resume it. Reload, idle runtime release and daemon restart resume the stored handle; an agent without one starts a new session. When there is no handle, `AgentManager` stores `getRuntimeInfo().sessionId` instead, so that ID follows the same rule. Codex, for example, writes its rollout only at the first turn, so its adapter reports neither ID before Codex announces that turn.
 
-# List running agents
-jagentdesk ls -a -g
+### Session import
 
-# Check if the provider reports models
-jagentdesk models --provider my-provider
-```
+The picker calls `listImportableSessions` and gets rows only: handle, cwd, title, prompt previews, last activity. Import calls `importSession({ providerHandleId, cwd })` for the chosen row and must not list again. The provider returns the resumed session, storage config, persistence handle and hydrated timeline; `AgentManager.importProviderSession` publishes the agent only after it is seeded.
 
-### E2E test patterns
+### Notices
 
-The E2E configs in `agent-configs.ts` expose two helpers:
+`setMode` and `setThinkingOption` may return an `AgentProviderNotice` when a change needs user-facing context, such as a change staged until the next turn. The app shows it as a generic toast.
 
-- `getFullAccessConfig(provider)` -- returns config for a session with no permission prompts
-- `getAskModeConfig(provider)` -- returns config for a session that triggers permission requests
+### Session-scoped cancellation
 
-Tests use `isProviderAvailable(provider)` to skip when the binary or credentials are missing, so CI will not fail for providers that are not installed.
+Some providers cancel the whole session rather than one turn (OpenCode's `session.abort`). A cancel still in flight when the next run starts kills that run, which breaks "stop, then prompt again", `notifyOnFinish` wakes and schedules. Own this inside the provider session:
 
----
+- Model the stop as an explicit `stopping` turn state carrying the canceled run's terminal and the cancellation the caller is owed. Pressing Stop again retries the stop in progress; never fire a detached retry.
+- Scope the cancel settlement the way the provider scopes the cancel. For session-scoped cancels, track every request issued on the session and let it outlive the stop that issued it. Only the newest may hold the gate closed.
+- Gate daemon-issued operations (prompt, slash command, summarize) on both the terminal and the cancel settlement. Keep permission and question responses outside the gate, or auto-approve deadlocks the stop. Runs the provider starts on its own (plugin or autonomous wakes) are observed, not gated.
+- Fail closed: if the cancel never succeeded, refuse new runs until the next Stop issues a fresh cancel. `AgentManager` already turns a rejected `interrupt()` into a refused cancel.
+- Suppress the canceled run's residue only until its authoritative terminal. Anything after that terminal is a new run and takes the normal live path.
+
+### Helper processes
+
+Record provider helper processes that can outlive a session in the daemon's managed-process registry: provider and kind, PID, launch command and args, and process identity from the platform process table. Remove the record on normal exit or shutdown. A helper with a readiness phase belongs to the provider's lifecycle model from `spawn`, before readiness succeeds, so startup timeout, startup exit and shutdown all clean it up.
+
+Bootstrap reconciles the ledger in the background: dead PIDs are deleted, identity mismatches are deleted without killing anything, positively matched leftovers are terminated, and records that cannot be inspected wait for the next pass. Do not add process-name sweepers.
+
+A provider session owns every process it spawns until `AgentManager` registers the session. If initialization, resume or initial history hydration fails, `connect()` disposes the process before rethrowing.
+
+### Installation and updates
+
+A client may expose `installation` with `installUrl`, `updateUrl`, `inspect`, `checkForUpdates` and `update` (plugin providers use `ProviderRegistration.installation`). The app reads them through `provider.installation.inspect`, `provider.installation.check_updates`, `provider.installation.update` and `provider.installation.update.subscribe`. Shared helpers for release lookups and updater commands are in `providers/release-check.ts` and `providers/update-command.ts`.
+
+### Plan usage
+
+Usage comes from bundled `*-usage-source` plugins. A source calls `server.registerUsageSource({ id, label, providers, input, discover, fetch })` (see `plugins/kimi-usage-source/index.server.ts`), and the app reads reports through `usage.list_reports.request`. Keep report shapes provider-agnostic: windows, balances and details render generically. `provider.usage.list.request` and `packages/server/src/services/quota-fetcher/` serve older clients only (`COMPAT(providerUsageList)`).
+
+## Provider notes
+
+### Claude
+
+First-party model metadata lives in `providers/claude/model-manifest.ts`. Thinking options and Claude feature gates derive from it, so update only the manifest when adding a model.
+
+### ACP
+
+- Mode IDs can be URIs (Copilot uses `https://agentclientprotocol.com/protocol/session-modes#agent`). The manifest `defaultModeId` must match exactly.
+- Copilot custom agents arrive as a session config option with `id: "agent"` and `category: "_agent"`, mapped to the `agent` feature. The value is the agent's display name; blank means the default agent.
+- Permission options render as ordered actions and JAgentDesk returns the chosen `optionId`. Agents can encode a single-choice question as several options of the same allow kind, so Auto Accept never resolves those requests.
+
+### Pi
+
+Pi is process-backed: JAgentDesk talks to the user's `pi` binary through `pi --mode rpc` and embeds no Pi SDK.
+
+- System prompts go through the generated JAgentDesk Pi extension. Do not pass `--append-system-prompt`: it replaces Pi's `APPEND_SYSTEM.md` discovery.
+- Send raw RPC `images` only when the model's `input` includes `"image"`. Text-only Pi and OMP models reject image content and persist the rejected image in history, so materialize the image to a file and pass a path hint.
+- MCP servers reach Pi through its built-in MCP extension, or, when `pi-mcp-adapter` is loaded for the cwd (it registers an `mcp` command in `get_commands`), through a per-agent `--mcp-config` file. That flag replaces Pi's global layer, so copy the existing `<Pi agent dir>/mcp.json` into the generated file before adding servers, and set `auth: false`, `oauth: false` for local HTTP servers such as `/mcp/agents`.
+- Import discovery reads Pi's JSONL session files because RPC has no session listing. Resume and history still go through RPC with the session file as `nativeHandle`.
+- Extension UI dialogs (`select`, `input`, `editor`, `confirm`) become question permissions answered with `extension_ui_response`. For an `ask_user` call with `allowComment: true`, JAgentDesk shows selection and comment as one question and auto-answers the follow-up optional `input`. Keep placeholders and skip semantics so the app can tell "skip this input" from "cancel the dialog". Fire-and-forget UI requests are ignored.
+- `providers/pi/extensions/` adapts known Pi extensions (subagents, ask-user, todo, MCP adapter) into timeline items, questions and provider subagents.
+
+### OMP
+
+OMP lives under `providers/omp/`; only the JSONL child-process transport is shared with Pi. It launches `omp --mode rpc-ui`, discovers commands with `get_available_commands`, bridges `rpc-ui` approval dialogs into permissions, and imports terminal-started sessions from `~/.omp/agent/sessions` when enabled.
+
+- OMP registers the full caller-scoped JAgentDesk tool catalog natively. Serialize every host definition with `loadMode: "essential"`, or OMP mounts non-built-in names under `xd://` and `create_agent`, `send_agent_prompt` and `wait_for_agent` stop being direct calls.
+- OMP task subagents surface as provider subagents (`providers/omp/subagent-index.ts`), not managed agents.
+- Rewind is a branch: `branch` writes a new session file whose header names the previous file as `parentSession`, leaving the previous file and its recorded head untouched. Treat the file OMP selects as the authority, not the newest file or message. Import listings return a file path, so persist the resumed session's own `sessionId` with that path as `nativeHandle`.
+
+### OpenCode
+
+- V2 discovers tool definitions from each bound session's catalog. Keep session filtering and caller-scoped execution checks: registration is location-wide, and an allowlist cannot register a definition missing from the catalog.
+- Inject MCP with `mcp.add` only. `mcp.connect` toggles config-backed servers; newer OpenCode returns `McpServerNotFoundError` for a dynamically added one.
+- OpenCode owns user message IDs. Do not pass JAgentDesk IDs to its prompt APIs; record the user row from `message.updated`.
+- Complete turns from v2 execution events, reconciled against active state and the durable log after admission, after reconnect, and while a turn stays active. Do not use `session.wait`: a long turn exceeds Node's HTTP headers deadline while OpenCode keeps working. The event feed has no replay. A quiet stream is healthy; v2 heartbeats are SSE comments.
 
 ## Gotchas
 
-**Mode IDs can be URIs.** ACP providers like Copilot use full URIs as mode IDs (e.g., `"https://agentclientprotocol.com/protocol/session-modes#agent"`). Never assume mode IDs are simple strings. The manifest `defaultModeId` must match exactly.
-
-**Models and modes are discovered dynamically.** ACP providers report available models and modes at runtime via the protocol. The static definitions in `provider-manifest.ts` are used for UI scaffolding (icons, color tiers) but the runtime values from the agent process are the source of truth.
-
-**`AgentProvider` is always `string`.** The type alias is `type AgentProvider = string`. Provider IDs are validated against the manifest at runtime, not at the type level.
-
-**Auth patterns vary.** Some providers need API keys in env vars (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`), some use OAuth tokens (`CLAUDE_CODE_OAUTH_TOKEN`), some use auth files (`~/.codex/auth.json`), and some handle auth entirely in their CLI binary (Copilot). Your `isAvailable()` method should check whatever is needed.
-
-**The manifest mode list and the agent class mode list are separate.** The manifest in `provider-manifest.ts` includes UI metadata (`icon`, `colorTier`). The agent class defines modes without UI metadata (just `id`, `label`, `description`). Keep them in sync.
-
-**`defaultCommand` is a tuple.** The first element is the binary name, the rest are default arguments. The base class uses this to find the executable and spawn the process.
-
-**Runtime settings can override the command.** Users can configure custom binary paths or environment variables per provider via `ProviderRuntimeSettings`. Your factory in the registry should pass `runtimeSettings?.["your-provider"]` through to the constructor.
-
-**Session-scoped cancellation needs a stop boundary inside the provider.** Some agents cancel the whole session rather than one turn — OpenCode's `session.abort` is the example. A cancel that is still in flight when the next run starts will kill that replacement run, which is what makes "stop, then immediately prompt again" (`replaceRunning`, `notifyOnFinish` wakes, schedules) flaky. Own this in the provider session, not in `AgentManager`:
-
-- Model the stop as an explicit `stopping` turn-state variant carrying the canceled run's terminal and the cancellation the caller is still owed. Pressing Stop again retries the stop already in progress rather than opening a second one; never fire a detached retry, it will outlive its boundary.
-- **Scope the cancel settlement the way the provider scopes the cancel.** If cancellation is session-scoped, so is its settlement: track it on the session, accumulating every request issued, and let it outlive the stop that issued it. A request still in flight lands on the runner whenever the server gets to it — however many stops have come and gone since. Scoping it to the current stop looks right and quietly drops older requests from the gate. Only the newest may hold the gate closed, since recovering from a failed cancel is what pressing Stop again is for.
-- Gate the operations **the daemon issues** (prompt, slash command, summarize) on both the terminal and cancel settlement. Permission and question responses are not runner operations and must stay outside the gate, or an auto-approve deadlocks the stop. Runs the _provider_ starts on its own — plugin or autonomous wakes — are observed, not gated: the daemon does not choose when they begin, and holding their events back does not protect them from a cancel already in flight, it only hides a run that may already be dead.
-- Fail closed: if the cancel never succeeded you never proved the run stopped, so refuse new runs until the next Stop issues a fresh cancel. `AgentManager` already turns a rejected `interrupt()` into a refused cancel.
-- Suppress the canceled run's residue only until its authoritative terminal. Anything the provider publishes after that terminal is a new run by construction and must take the normal live path — buffering it and replaying it later is how autonomous/plugin wakes get lost.
+- **`AgentProvider` is `string`.** IDs are validated at runtime against the registry.
+- **Runtime values win.** The manifest supplies UI scaffolding (icons, color tiers); models and modes come from the provider at runtime. Keep the manifest mode list and the client's mode list in sync.
+- **`defaultCommand` is a tuple**: binary, then default arguments. `super.isAvailable()` checks that the binary resolves.
+- **Runtime settings can replace the command or add env** per provider (`ProviderRuntimeSettings`). The registry passes the provider's slice to your factory.
+- **Auth varies.** Env API keys, OAuth tokens, auth files (`~/.codex/auth.json`) or CLI-managed auth (Copilot). `isAvailable()` checks whatever your provider needs. Never add auth checks to tests.

@@ -22,6 +22,7 @@ type WorkerLifecycleMessage =
   | {
       type: "jagentdesk:shutdown";
       reason?: string;
+      keepTerminals: boolean;
     }
   | {
       type: "jagentdesk:ready";
@@ -30,6 +31,7 @@ type WorkerLifecycleMessage =
   | {
       type: "jagentdesk:restart";
       reason?: string;
+      keepTerminals: boolean;
     };
 
 interface SupervisorHeartbeatMessage {
@@ -39,7 +41,10 @@ interface SupervisorHeartbeatMessage {
 interface SupervisorGracefulShutdownMessage {
   type: "jagentdesk:graceful-shutdown";
   reason: string;
+  keepTerminals: boolean;
 }
+
+export type SupervisorLifecycleLog = (message: string, fields?: Record<string, unknown>) => void;
 
 interface SupervisorOptions {
   name: string;
@@ -56,11 +61,15 @@ interface SupervisorOptions {
   onWorkerReady?: (message: { listen: string }) => Promise<void> | void;
   restartOnCrash?: boolean;
   onSupervisorExit?: () => Promise<void> | void;
+  // Closes every terminal the worker left. Runs after a kill-intent restart or stop once the
+  // worker has exited (also after a forced kill), before a respawn, and on any supervisor
+  // exit except a keep-terminals stop. A crash restart keeps terminals and skips it.
+  cleanupTerminals?: (log: SupervisorLifecycleLog) => Promise<void>;
   logFile?: SupervisorLogFileOptions;
 }
 
 export interface SupervisorController {
-  requestShutdown(reason: string): void;
+  requestShutdown(reason: string, options?: { keepTerminals?: boolean }): void;
 }
 
 function describeExit(code: number | null, signal: NodeJS.Signals | null): string {
@@ -73,10 +82,11 @@ function parseLifecycleMessage(msg: unknown): WorkerLifecycleMessage | null {
   }
   const type = (msg as { type?: unknown }).type;
   if (type === "jagentdesk:shutdown") {
-    const reason = (msg as { reason?: unknown }).reason;
+    const { reason, keepTerminals } = msg as { reason?: unknown; keepTerminals?: unknown };
     return {
       type: "jagentdesk:shutdown",
       ...(typeof reason === "string" && reason.trim().length > 0 ? { reason } : {}),
+      keepTerminals: keepTerminals === true,
     };
   }
   if (type === "jagentdesk:ready") {
@@ -87,10 +97,11 @@ function parseLifecycleMessage(msg: unknown): WorkerLifecycleMessage | null {
     return { type: "jagentdesk:ready", listen };
   }
   if (type === "jagentdesk:restart") {
-    const reason = (msg as { reason?: unknown }).reason;
+    const { reason, keepTerminals } = msg as { reason?: unknown; keepTerminals?: unknown };
     return {
       type: "jagentdesk:restart",
       ...(typeof reason === "string" && reason.trim().length > 0 ? { reason } : {}),
+      keepTerminals: keepTerminals === true,
     };
   }
   return null;
@@ -171,6 +182,15 @@ function createDurableLog(
   };
 }
 
+// The program that started the daemon can close its end of stdout or stderr, as
+// `jagentdesk daemon run | head -1` does. Drop the output nobody reads and keep supervising
+// the worker; daemon.log still records it.
+function ignoreClosedOutput(error: NodeJS.ErrnoException): void {
+  if (error.code !== "EPIPE") {
+    throw error;
+  }
+}
+
 export function runSupervisor(options: SupervisorOptions): SupervisorController {
   const restartOnCrash = options.restartOnCrash ?? false;
   const workerArgs = options.workerArgs ?? process.argv.slice(2);
@@ -181,6 +201,9 @@ export function runSupervisor(options: SupervisorOptions): SupervisorController 
   let child: ChildProcess | null = null;
   let restarting = false;
   let shuttingDown = false;
+  // The resolved terminal decision of the pending restart or stop. It survives the force-kill
+  // path, so a hung kill restart still closes terminals before the respawn.
+  let pendingKeepTerminals = false;
   let exiting = false;
   let forceKillTimer: NodeJS.Timeout | null = null;
   const durableLog = createDurableLog(options.logFile, (message) => {
@@ -211,12 +234,31 @@ export function runSupervisor(options: SupervisorOptions): SupervisorController 
 
   const closeLogStream = (): Promise<void> => durableLog.close();
 
-  const exitSupervisor = (code: number): void => {
+  const runTerminalCleanup = async (when: string): Promise<void> => {
+    if (!options.cleanupTerminals) {
+      return;
+    }
+    writeLifecycleLog("Closing terminals", { when });
+    try {
+      await options.cleanupTerminals(writeLifecycleLog);
+      writeLifecycleLog("Terminal cleanup finished", { when });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log(`Terminal cleanup not confirmed (${when}): ${message}`);
+    }
+  };
+
+  const exitSupervisor = (code: number, exitOptions: { keepTerminals?: boolean } = {}): void => {
     if (exiting) {
       return;
     }
     exiting = true;
-    Promise.resolve(options.onSupervisorExit?.())
+    const cleanup =
+      exitOptions.keepTerminals === true
+        ? Promise.resolve()
+        : runTerminalCleanup("supervisor_exit");
+    cleanup
+      .then(() => options.onSupervisorExit?.())
       .catch((error) => {
         const message = error instanceof Error ? error.message : String(error);
         log(`Supervisor exit cleanup failed: ${message}`);
@@ -280,14 +322,19 @@ export function runSupervisor(options: SupervisorOptions): SupervisorController 
     }
 
     const spawnSpec = resolveWorkerSpawnSpec?.(workerEntry) ?? null;
+    // The supervisor receives terminal signals and orders shutdown over IPC.
+    // Providers must stay alive until the worker has captured restart recovery.
+    const detached = process.platform !== "win32";
     writeLifecycleLog("Spawning worker", { workerEntry });
     if (spawnSpec) {
       child = spawn(spawnSpec.command, spawnSpec.args, {
+        detached,
         stdio: ["inherit", "pipe", "pipe", "ipc"],
         env: spawnSpec.env ?? workerEnv,
       });
     } else {
       child = fork(workerEntry, workerArgs, {
+        detached,
         stdio: ["inherit", "pipe", "pipe", "ipc"],
         env: workerEnv,
         execArgv: workerExecArgv,
@@ -344,14 +391,20 @@ export function runSupervisor(options: SupervisorOptions): SupervisorController 
 
       if (lifecycleMessage.type === "jagentdesk:shutdown") {
         const reason = lifecycleMessage.reason ?? "worker_requested_shutdown";
-        writeLifecycleLog("Worker requested shutdown", { reason });
-        requestShutdown(reason);
+        writeLifecycleLog("Worker requested shutdown", {
+          reason,
+          keepTerminals: lifecycleMessage.keepTerminals,
+        });
+        requestShutdown(reason, { keepTerminals: lifecycleMessage.keepTerminals });
         return;
       }
 
       const reason = lifecycleMessage.reason ?? "worker_requested_restart";
-      writeLifecycleLog("Worker requested restart", { reason });
-      requestRestart(reason);
+      writeLifecycleLog("Worker requested restart", {
+        reason,
+        keepTerminals: lifecycleMessage.keepTerminals,
+      });
+      requestRestart(reason, lifecycleMessage.keepTerminals);
     });
 
     child.on("exit", (code, signal) => {
@@ -362,7 +415,7 @@ export function runSupervisor(options: SupervisorOptions): SupervisorController 
 
       if (shuttingDown) {
         log(`Worker exited (${exitDescriptor}). Supervisor shutting down.`);
-        exitSupervisor(0);
+        exitSupervisor(0, { keepTerminals: pendingKeepTerminals });
         return;
       }
 
@@ -371,18 +424,31 @@ export function runSupervisor(options: SupervisorOptions): SupervisorController 
         ((code !== 0 && code !== null) || (signal !== null && signal !== "SIGTERM"));
 
       if (restarting || crashed) {
+        const closeTerminals = restarting && !pendingKeepTerminals;
         restarting = false;
+        pendingKeepTerminals = false;
         log(
-          crashed
+          crashed && !closeTerminals
             ? `Worker crashed (${exitDescriptor}). Restarting worker...`
             : `Worker exited (${exitDescriptor}). Restarting worker...`,
         );
-        spawnWorker();
+        if (!closeTerminals) {
+          spawnWorker();
+          return;
+        }
+        // The replacement daemon must never adopt terminals the user asked to close.
+        void runTerminalCleanup("before_respawn").then(() => {
+          if (!shuttingDown) {
+            spawnWorker();
+          }
+          return;
+        });
         return;
       }
 
       log(`Worker exited (${exitDescriptor}). Supervisor exiting.`);
       exitSupervisor(typeof code === "number" ? code : 1);
+      return;
     });
   };
 
@@ -394,9 +460,11 @@ export function runSupervisor(options: SupervisorOptions): SupervisorController 
     const message: SupervisorGracefulShutdownMessage = {
       type: "jagentdesk:graceful-shutdown",
       reason,
+      keepTerminals: pendingKeepTerminals,
     };
     writeLifecycleLog("Supervisor requesting graceful worker shutdown", {
       reason,
+      keepTerminals: pendingKeepTerminals,
       supervisorPid: process.pid,
       workerPid: currentChild.pid ?? null,
     });
@@ -420,27 +488,32 @@ export function runSupervisor(options: SupervisorOptions): SupervisorController 
     });
   };
 
-  const requestRestart = (reason: string) => {
+  const requestRestart = (reason: string, keepTerminals: boolean) => {
     if (!child || restarting || shuttingDown) {
       return;
     }
     restarting = true;
-    writeLifecycleLog("Restart requested", { reason });
+    pendingKeepTerminals = keepTerminals;
+    writeLifecycleLog("Restart requested", { reason, keepTerminals });
     log(`${reason}. Stopping worker for restart...`);
     requestWorkerShutdown(reason);
     scheduleForceKill(reason);
   };
 
-  const requestShutdown = (reason: string) => {
+  const requestShutdown = (reason: string, shutdownOptions: { keepTerminals?: boolean } = {}) => {
     if (shuttingDown) {
       return;
     }
     shuttingDown = true;
     restarting = false;
-    writeLifecycleLog("Supervisor shutdown requested", { reason });
+    pendingKeepTerminals = shutdownOptions.keepTerminals === true;
+    writeLifecycleLog("Supervisor shutdown requested", {
+      reason,
+      keepTerminals: pendingKeepTerminals,
+    });
     log(`${reason}. Stopping worker...`);
     if (!child) {
-      exitSupervisor(0);
+      exitSupervisor(0, { keepTerminals: pendingKeepTerminals });
       return;
     }
     requestWorkerShutdown(reason);
@@ -453,6 +526,8 @@ export function runSupervisor(options: SupervisorOptions): SupervisorController 
 
   process.on("SIGINT", () => forwardSignal("SIGINT"));
   process.on("SIGTERM", () => forwardSignal("SIGTERM"));
+  process.stdout.on("error", ignoreClosedOutput);
+  process.stderr.on("error", ignoreClosedOutput);
 
   process.stdout.write(`[${options.name}] ${options.startupMessage}\n`);
   writeLifecycleLog(options.startupMessage);

@@ -1,11 +1,9 @@
+import { builtinPluginScreenLayout } from "@/plugins/builtin/route-boundary";
 import { Redirect, Stack, useLocalSearchParams } from "expo-router";
-import { ArgoCdSsoDelegatePrompt } from "@/argocd/sso-delegate-prompt";
+import { BuiltinHostMounts } from "@/plugins/builtin/surfaces";
 import { useHostRuntimeBootstrapState } from "@/app/_layout";
 import { HostRouteProvider } from "@/navigation/host-route-context";
 import { resolveStartupRoute } from "@/navigation/host-runtime-bootstrap";
-import { SkillsSyncBinder } from "@/skills/skills-sync-binder";
-import { JiraOAuthDelegationBinder } from "@/jira/connections/oauth-delegation-binder";
-import { FigmaOAuthDelegationBinder } from "@/figma/connect/oauth-delegation-binder";
 import { ThemedStack } from "@/navigation/themed-stack";
 import { useHostRegistryStatus, useHosts } from "@/runtime/host-runtime";
 
@@ -38,11 +36,12 @@ function KnownHostRoute() {
   }
 
   const stack = (
-    <ThemedStack screenOptions={HOST_STACK_SCREEN_OPTIONS}>
+    <ThemedStack screenOptions={HOST_STACK_SCREEN_OPTIONS} screenLayout={builtinPluginScreenLayout}>
       <Stack.Screen name="index" />
       <Stack.Screen name="workspace/[workspaceId]/index" />
       <Stack.Screen name="agent/[agentId]" options={AGENT_SCREEN_OPTIONS} />
       <Stack.Screen name="sessions" />
+      <Stack.Screen name="bots" />
       <Stack.Screen name="clusters" />
       <Stack.Screen name="cluster/[clusterId]" />
       <Stack.Screen name="open-project" />
@@ -56,10 +55,7 @@ function KnownHostRoute() {
 
   return (
     <HostRouteProvider serverId={routeServerId}>
-      <SkillsSyncBinder serverId={routeServerId} />
-      <ArgoCdSsoDelegatePrompt serverId={routeServerId} />
-      <JiraOAuthDelegationBinder serverId={routeServerId} />
-      <FigmaOAuthDelegationBinder serverId={routeServerId} />
+      <BuiltinHostMounts serverId={routeServerId} />
       {stack}
     </HostRouteProvider>
   );

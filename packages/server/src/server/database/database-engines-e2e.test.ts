@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DbClient } from "./db-client.js";
 
 // Infra-gated adapter proofs for the networked engines. Enable with JAD_DB_E2E=1
-// after starting the throwaway containers (see docs/plans/active/multi-database.md).
+// after starting the throwaway containers.
 const E2E = process.env.JAD_DB_E2E === "1";
 
 async function seedSql(client: DbClient, opts: { serial: string; pk: string }) {

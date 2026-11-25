@@ -1,10 +1,10 @@
-import { CLICKUP_MESSAGE_INDENT } from "@/components/clickup-shell/chat-layout";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { GUMLOOP_MESSAGE_INDENT } from "@/components/gumloop-shell/chat-layout";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import type { AgentMetric } from "@jagentdesk/protocol/agent-types";
 import React, { memo, useCallback, useMemo, type ReactNode } from "react";
-import { View } from "react-native";
+import { Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { MAX_CONTENT_WIDTH } from "@/constants/layout";
-import type { Theme } from "@/styles/theme";
+import { SPACING, type Theme } from "@/styles/theme";
 import type { TurnTiming } from "@/timeline/turn-time";
 import type { StreamItem } from "@/types/stream";
 import {
@@ -31,6 +31,11 @@ const workingIndicatorColorMapping = (theme: Theme) => ({
       ? theme.colors.palette.amber[700]
       : theme.colors.palette.amber[500],
 });
+export const TURN_FOOTER_BOTTOM_SPACING = SPACING[8];
+// Every footer variant (running, completed with Copy, completed with only its duration) gets
+// this content height, so a turn ending swaps the footer's controls without moving the rows
+// above it.
+const TURN_FOOTER_CONTENT_HEIGHT = 24;
 
 export type TurnContentStrategy = StreamStrategy;
 export type AssistantTurnForkHandler = (input: {
@@ -85,6 +90,7 @@ export const TurnFooter = memo(function TurnFooter({
       items={host.items}
       timing={host.timing}
       startIndex={host.startIndex}
+      turnMetrics={host.turnMetrics}
       supportsTimelineCursor={supportsTimelineCursor}
       onForkAssistantTurn={onForkAssistantTurn}
     />
@@ -96,6 +102,7 @@ export const CompletedTurnFooterRow = memo(function CompletedTurnFooterRow({
   items,
   timing,
   startIndex,
+  turnMetrics,
   supportsTimelineCursor,
   onForkAssistantTurn,
 }: {
@@ -103,6 +110,7 @@ export const CompletedTurnFooterRow = memo(function CompletedTurnFooterRow({
   items: StreamItem[];
   timing?: TurnTiming;
   startIndex: number;
+  turnMetrics?: AgentMetric[];
   supportsTimelineCursor: boolean;
   onForkAssistantTurn?: AssistantTurnForkHandler;
 }) {
@@ -113,6 +121,7 @@ export const CompletedTurnFooterRow = memo(function CompletedTurnFooterRow({
         items={items}
         timing={timing}
         startIndex={startIndex}
+        turnMetrics={turnMetrics}
         supportsTimelineCursor={supportsTimelineCursor}
         onForkAssistantTurn={onForkAssistantTurn}
       />
@@ -127,12 +136,18 @@ const WorkingIndicator = memo(function WorkingIndicator({
   inFlightTurnStartedAt?: Date | null;
   onForkInFlightTurn?: InFlightTurnForkHandler;
 }) {
+  const gumloop = useIsGumloopTheme();
   const active = useRetainedPanelActive();
   return (
     <View style={stylesheet.turnFooterContent}>
       <View style={stylesheet.workingLoader}>
-        <ThemedSyncedLoader size={14} uniProps={workingIndicatorColorMapping} />
+        {gumloop ? (
+          <View style={stylesheet.thinkingDot} />
+        ) : (
+          <ThemedSyncedLoader size={14} uniProps={workingIndicatorColorMapping} />
+        )}
       </View>
+      {gumloop ? <Text style={stylesheet.thinkingLabel}>Thinking…</Text> : null}
       {/* Match the completed-turn footer: actions precede timing metadata. Guests must not fork the
           agent (ADR-0019 — fork_context is out of the guest scope), so hide it on the guest surface. */}
       {onForkInFlightTurn && !isGuestShareMode() ? (
@@ -172,6 +187,7 @@ function CompletedTurnFooter({
   items,
   timing,
   startIndex,
+  turnMetrics,
   supportsTimelineCursor,
   onForkAssistantTurn,
 }: {
@@ -179,6 +195,7 @@ function CompletedTurnFooter({
   items: StreamItem[];
   timing?: TurnTiming;
   startIndex: number;
+  turnMetrics?: AgentMetric[];
   supportsTimelineCursor: boolean;
   onForkAssistantTurn?: AssistantTurnForkHandler;
 }) {
@@ -208,51 +225,65 @@ function CompletedTurnFooter({
   return (
     <View style={stylesheet.turnFooterSlot}>
       <AssistantTurnFooter
-        getContent={getContent}
+        getContent={items[startIndex]?.kind === "assistant_message" ? getContent : undefined}
         completedAt={timing?.completedAt}
-        durationMs={timing?.durationMs}
+        durationMs={timing?.durationMs ?? undefined}
         onFork={boundary && onForkAssistantTurn ? handleFork : undefined}
+        metrics={turnMetrics}
       />
     </View>
   );
 }
 
 function TurnFooterRow({ children }: { children: ReactNode }) {
-  // The ClickUp chat indents agent turns under the avatar; the footer follows.
-  const isClickUp = useIsClickUpTheme();
+  // The Gumloop chat indents agent turns under the avatar; the footer follows, so the copy
+  // glyph lines up with the reply text (spec 38 §4.4).
+  const isGumloop = useIsGumloopTheme();
   const rowStyle = useMemo(
     () => [
       stylesheet.streamItemWrapper,
       stylesheet.turnFooterRow,
-      isClickUp && stylesheet.turnFooterRowClickUp,
+      isGumloop && stylesheet.turnFooterRowGumloop,
     ],
-    [isClickUp],
+    [isGumloop],
   );
-  return <View style={rowStyle}>{children}</View>;
+  return (
+    <View style={rowStyle} testID="turn-footer">
+      {children}
+    </View>
+  );
 }
 
 const stylesheet = StyleSheet.create((theme) => ({
+  thinkingDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: theme.colors.accentPink },
+  thinkingLabel: { fontSize: 16, color: theme.colors.foregroundMuted },
   streamItemWrapper: {
     width: "100%",
-    maxWidth: MAX_CONTENT_WIDTH,
+    maxWidth: theme.contentMaxWidth,
     alignSelf: "center",
     paddingHorizontal: theme.spacing[2],
   },
+  // The message above drops its bottom padding for the footer (compactBottom), so this margin
+  // alone sets the gap. 20 puts the footer as far below the text as the text sits below a
+  // tool row: 12 message padding + 4 stream gap + 5 badge padding/border, less the footer's
+  // 1px taller row.
   turnFooterRow: {
-    marginTop: theme.spacing[4],
+    marginTop: theme.spacing[4] + theme.spacing[1],
   },
-  turnFooterRowClickUp: {
-    paddingLeft: CLICKUP_MESSAGE_INDENT,
+  // Add the indent to the wrapper's own padding; replacing it dropped the footer 8px left of
+  // the reply.
+  turnFooterRowGumloop: {
+    paddingLeft: theme.spacing[2] + GUMLOOP_MESSAGE_INDENT,
   },
   turnFooterSlot: {
     flexDirection: "row",
     alignItems: "center",
-    alignSelf: "flex-start",
-    minHeight: 24,
-    paddingBottom: theme.spacing[6],
+    alignSelf: "stretch",
+    minHeight: TURN_FOOTER_CONTENT_HEIGHT + TURN_FOOTER_BOTTOM_SPACING,
+    paddingBottom: TURN_FOOTER_BOTTOM_SPACING,
   },
   turnFooterContent: {
-    height: 24,
+    height: TURN_FOOTER_CONTENT_HEIGHT,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-start",

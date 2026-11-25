@@ -1,3 +1,4 @@
+import { DEFAULT_CONTENT_MAX_WIDTH } from "@/styles/theme";
 import { describe, expect, it } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import {
@@ -10,7 +11,9 @@ import {
   loadAppSettingsFromStorage,
   loadSettingsFromStorage,
   parseClampedFontSize,
+  resolveContentMaxWidth,
   parseTerminalScrollbackLines,
+  sanitizeFontFamily,
   saveAppSettings,
   type SettingsDeps,
 } from "./storage";
@@ -34,29 +37,45 @@ function makeDeps(
 }
 
 describe("loadAppSettingsFromStorage", () => {
-  it("defaults theme to ClickUp when storage is empty", async () => {
+  it("defaults theme to Gumloop when storage is empty", async () => {
     const deps = makeDeps();
 
     const result = await loadAppSettingsFromStorage(deps);
 
-    expect(result.theme).toBe("clickup");
+    expect(result.theme).toBe("gumloop");
   });
 
-  it("moves a settings file still on the old default (auto) to ClickUp once", async () => {
+  it("moves a settings file still on the old default (auto) to Gumloop once", async () => {
     const legacy = makeDeps({
       storage: createInMemoryKeyValueStorage({
         [APP_SETTINGS_KEY]: JSON.stringify({ theme: "auto" }),
       }),
     });
-    expect((await loadAppSettingsFromStorage(legacy)).theme).toBe("clickup");
+    expect((await loadAppSettingsFromStorage(legacy)).theme).toBe("gumloop");
 
     // After the move, choosing System again is kept.
     const chosen = makeDeps({
       storage: createInMemoryKeyValueStorage({
-        [APP_SETTINGS_KEY]: JSON.stringify({ theme: "auto", defaultThemeVersion: 1 }),
+        [APP_SETTINGS_KEY]: JSON.stringify({ theme: "auto", defaultThemeVersion: 2 }),
       }),
     });
     expect((await loadAppSettingsFromStorage(chosen)).theme).toBe("auto");
+  });
+
+  it.each([
+    ["clickup", "gumloop"],
+    ["clickupDark", "gumloopDark"],
+    ["auto", "gumloop"],
+  ])("migrates %s once and persists %s", async (before, after) => {
+    const deps = makeDeps({
+      storage: createInMemoryKeyValueStorage({
+        [APP_SETTINGS_KEY]: JSON.stringify({ theme: before, defaultThemeVersion: 1 }),
+      }),
+    });
+    expect((await loadAppSettingsFromStorage(deps)).theme).toBe(after);
+    const saved = JSON.parse(deps.storage.entries.get(APP_SETTINGS_KEY)!);
+    expect(saved).toMatchObject({ theme: after, defaultThemeVersion: 2 });
+    expect(await loadAppSettingsFromStorage(deps)).toEqual(saved);
   });
 
   it("keeps a theme the user picked and a selected plugin theme", async () => {
@@ -127,26 +146,6 @@ describe("loadAppSettingsFromStorage", () => {
     const result = await loadAppSettingsFromStorage(deps);
 
     expect(result.chatOutlineEnabled).toBe(false);
-  });
-
-  it("uses the native terminal renderer by default", async () => {
-    const deps = makeDeps();
-
-    const result = await loadAppSettingsFromStorage(deps);
-
-    expect(result.useLegacyTerminalRenderer).toBe(false);
-  });
-
-  it("loads the per-device legacy terminal renderer preference", async () => {
-    const deps = makeDeps({
-      storage: createInMemoryKeyValueStorage({
-        [APP_SETTINGS_KEY]: JSON.stringify({ useLegacyTerminalRenderer: true }),
-      }),
-    });
-
-    const result = await loadAppSettingsFromStorage(deps);
-
-    expect(result.useLegacyTerminalRenderer).toBe(true);
   });
 
   it("loads configured terminal scrollback lines from app settings", async () => {
@@ -264,6 +263,7 @@ describe("loadSettingsFromStorage", () => {
 
     expect(result).toEqual({
       ...DEFAULT_APP_SETTINGS,
+      chatDisplay: "full",
       theme: "light",
     });
   });
@@ -291,6 +291,7 @@ describe("loadSettingsFromStorage", () => {
     expect(desktop.migrationsApplied).toEqual([{ manageBuiltInDaemon: false }]);
     expect(result).toEqual({
       ...DEFAULT_APP_SETTINGS,
+      chatDisplay: "full",
       theme: "light",
       manageBuiltInDaemon: false,
     });
@@ -310,6 +311,7 @@ describe("loadSettingsFromStorage", () => {
     expect(desktop.migrationsApplied).toEqual([]);
     expect(result).toEqual({
       ...DEFAULT_APP_SETTINGS,
+      chatDisplay: "full",
       theme: "light",
     });
   });
@@ -354,6 +356,7 @@ describe("saveAppSettings", () => {
 
     expect(JSON.parse(deps.storage.entries.get(APP_SETTINGS_KEY) ?? "null")).toEqual({
       ...DEFAULT_CLIENT_SETTINGS,
+      chatDisplay: "collapseToolCalls",
       theme: "light",
       toolCallDetailLevel: "overview",
     });
@@ -529,4 +532,160 @@ describe("parseClampedFontSize", () => {
     expect(parseClampedFontSize("15", { min: 11, max: 24 })).toBe(15);
     expect(parseClampedFontSize("abc", { min: 11, max: 24 })).toBeNull();
   });
+});
+
+describe("font family CSS safety", () => {
+  it.each(["'foo", '"foo', "Menlo, 'foo", "foo\\", "foo/*", "foo(", "foo["])(
+    "rejects unfinished CSS syntax: %s",
+    (value) => expect(sanitizeFontFamily(value)).toBeNull(),
+  );
+
+  it.each([
+    "Menlo",
+    "'Fira Code', monospace",
+    '"Fira Code", monospace',
+    "'Font\\'s name'",
+    "Font\\ Name",
+    "'Font (Mono)'",
+    "'Font [Mono]'",
+  ])("preserves complete font families: %s", (value) =>
+    expect(sanitizeFontFamily(value)).toBe(value),
+  );
+
+  it.each(["uiFontFamily", "monoFontFamily"])(
+    "recovers a persisted unmatched quote in %s",
+    async (field) => {
+      const deps = makeDeps({
+        storage: createInMemoryKeyValueStorage({
+          [APP_SETTINGS_KEY]: JSON.stringify({ [field]: "'foo" }),
+        }),
+      });
+      expect(await loadAppSettingsFromStorage(deps)).toMatchObject({ [field]: "" });
+    },
+  );
+});
+
+describe("content width", () => {
+  it("uses the default width when no preference is saved", async () => {
+    const deps = makeDeps();
+    const queryClient = new QueryClient();
+
+    await saveAppSettings({ queryClient, updates: { codeFontSize: 14 }, deps });
+
+    const settings = await loadAppSettingsFromStorage(deps);
+    expect(settings.contentWidth).toBe("default");
+    expect(resolveContentMaxWidth(settings)).toBe(DEFAULT_CONTENT_MAX_WIDTH);
+  });
+
+  it.each([
+    ["wide", 1200],
+    ["full", undefined],
+    ["default", DEFAULT_CONTENT_MAX_WIDTH],
+  ] as const)("persists the %s preset and resolves its width", async (contentWidth, expected) => {
+    const deps = makeDeps();
+    const queryClient = new QueryClient();
+    await saveAppSettings({ queryClient, updates: { contentWidth }, deps });
+
+    const settings = await loadAppSettingsFromStorage(deps);
+    expect(settings.contentWidth).toBe(contentWidth);
+    expect(resolveContentMaxWidth(settings)).toBe(expected);
+  });
+
+  it("preserves a legacy custom width until a preset is picked", async () => {
+    const deps = makeDeps({
+      storage: createInMemoryKeyValueStorage({
+        [APP_SETTINGS_KEY]: JSON.stringify({ contentMaxWidth: 1600 }),
+      }),
+    });
+    const queryClient = new QueryClient();
+    const settings = await loadAppSettingsFromStorage(deps);
+    expect(settings.contentWidth).toBe(1600);
+    expect(resolveContentMaxWidth(settings)).toBe(1600);
+
+    await saveAppSettings({ queryClient, updates: { codeFontSize: 14 }, deps });
+    expect((await loadAppSettingsFromStorage(deps)).contentWidth).toBe(1600);
+
+    await saveAppSettings({ queryClient, updates: { contentWidth: "default" }, deps });
+    expect((await loadAppSettingsFromStorage(deps)).contentWidth).toBe("default");
+  });
+
+  it.each([
+    [100_000, 4000],
+    [10, 600],
+    [null, "default"],
+    ["wide", "default"],
+  ])("normalizes legacy width %s on load", async (contentMaxWidth, expected) => {
+    const settings = await loadAppSettingsFromStorage(
+      makeDeps({
+        storage: createInMemoryKeyValueStorage({
+          [APP_SETTINGS_KEY]: JSON.stringify({ contentMaxWidth }),
+        }),
+      }),
+    );
+    expect(settings.contentWidth).toBe(expected);
+  });
+});
+
+describe("font family CSS safety", () => {
+  it.each(["'foo", '"foo', "Menlo, 'foo", "foo\\", "foo/*", "foo(", "foo["])(
+    "rejects unfinished CSS syntax: %s",
+    (value) => expect(sanitizeFontFamily(value)).toBeNull(),
+  );
+
+  it.each([
+    "Menlo",
+    "'Fira Code', monospace",
+    '"Fira Code", monospace',
+    "'Font\\'s name'",
+    "Font\\ Name",
+    "'Font (Mono)'",
+    "'Font [Mono]'",
+  ])("preserves complete font families: %s", (value) =>
+    expect(sanitizeFontFamily(value)).toBe(value),
+  );
+
+  it.each(["uiFontFamily", "monoFontFamily"])(
+    "recovers a persisted unmatched quote in %s",
+    async (field) => {
+      const deps = makeDeps({
+        storage: createInMemoryKeyValueStorage({
+          [APP_SETTINGS_KEY]: JSON.stringify({ [field]: "'foo" }),
+        }),
+      });
+      expect(await loadAppSettingsFromStorage(deps)).toMatchObject({ [field]: "" });
+    },
+  );
+});
+
+it("uses Enter to send by default", async () => {
+  const deps = makeDeps();
+
+  const result = await loadAppSettingsFromStorage(deps);
+
+  expect(result.sendShortcut).toBe("enter");
+  expect(DEFAULT_CLIENT_SETTINGS.sendShortcut).toBe("enter");
+});
+
+it("loads the modifier Enter send preference", async () => {
+  const deps = makeDeps({
+    storage: createInMemoryKeyValueStorage({
+      [APP_SETTINGS_KEY]: JSON.stringify({ sendShortcut: "mod-enter" }),
+    }),
+  });
+
+  const result = await loadAppSettingsFromStorage(deps);
+
+  expect(result.sendShortcut).toBe("mod-enter");
+});
+
+it("falls back to Enter when the stored send shortcut is invalid", async () => {
+  const deps = makeDeps({
+    storage: createInMemoryKeyValueStorage({
+      [APP_SETTINGS_KEY]: JSON.stringify({ sendShortcut: "yes" }),
+    }),
+  });
+
+  const result = await loadAppSettingsFromStorage(deps);
+
+  expect(result.sendShortcut).toBe("enter");
 });

@@ -1,5 +1,9 @@
 // CLI exports for @jagentdesk/server
-export { createJAgentDeskDaemon, type JAgentDeskDaemon, type JAgentDeskDaemonConfig } from "./bootstrap.js";
+export {
+  createJAgentDeskDaemon,
+  type JAgentDeskDaemon,
+  type JAgentDeskDaemonConfig,
+} from "./bootstrap.js";
 export { loadConfig, type CliConfigOverrides } from "./config.js";
 export { resolveJAgentDeskHome } from "./jagentdesk-home.js";
 export { getOrCreateServerId } from "./server-id.js";
@@ -103,3 +107,8 @@ export type {
   AgentStreamEventPayload,
   AgentStreamMessage,
 } from "@jagentdesk/protocol/messages";
+
+export { loadExistingRelayIdentity } from "./daemon-keypair.js";
+export { parseRelayChallenge } from "@jagentdesk/relay/ownership";
+
+export { reapTerminalWorkers } from "../terminal/terminal-worker-reaper.js";

@@ -1,5 +1,5 @@
-import { clickUpTabStyles } from "@/components/clickup-shell/list-styles";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { gumloopTabStyles } from "@/components/gumloop-shell/list-styles";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FlatList,
@@ -66,12 +66,12 @@ interface MarketplaceTabButtonProps {
 
 function MarketplaceTabButton({ label, active, onPress, testID }: MarketplaceTabButtonProps) {
   const state = useMemo(() => ({ selected: active }), [active]);
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   let tabStyle: StyleProp<ViewStyle> = active ? styles.tabActive : styles.tab;
   let textStyle: StyleProp<TextStyle> = active ? styles.tabTextActive : styles.tabText;
-  if (isClickUp) {
-    tabStyle = active ? clickUpTabStyles.tabActive : clickUpTabStyles.tab;
-    textStyle = active ? clickUpTabStyles.textActive : clickUpTabStyles.text;
+  if (isGumloop) {
+    tabStyle = active ? gumloopTabStyles.tabActive : gumloopTabStyles.tab;
+    textStyle = active ? gumloopTabStyles.textActive : gumloopTabStyles.text;
   }
   return (
     <Pressable
@@ -153,7 +153,7 @@ function buildInstalledLookup(installed: PluginListItem[] | undefined): {
 }
 
 export function MarketplaceScreen() {
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const isCompact = useIsCompactFormFactor();
@@ -387,7 +387,7 @@ export function MarketplaceScreen() {
   const listHeader = useMemo(
     () => (
       <View style={styles.header}>
-        <View style={isClickUp ? clickUpTabStyles.row : styles.tabRow}>
+        <View style={isGumloop ? gumloopTabStyles.row : styles.tabRow}>
           <MarketplaceTabButton
             label={t("marketplace.tabs.browse")}
             active={isBrowseTab}
@@ -446,7 +446,7 @@ export function MarketplaceScreen() {
       activeCount,
       categories,
       connected,
-      isClickUp,
+      isGumloop,
       handleClearFilters,
       handleSelectBrowse,
       handleSelectThemes,

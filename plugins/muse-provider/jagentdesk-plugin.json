@@ -1,0 +1,13 @@
+{
+  "id": "muse-provider",
+  "requirements": {
+    "jagentdesk": ">=0.9.59"
+  },
+  "kind": "builtin",
+  "name": "Muse Code",
+  "description": "Run Muse Code through its local muse CLI.",
+  "defaultEnabled": true,
+  "requires": [],
+  "command": "muse",
+  "builtinOrder": 21
+}

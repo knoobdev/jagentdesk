@@ -27,6 +27,24 @@ function createRecord(overrides?: Partial<StoredAgentRecord>): StoredAgentRecord
 }
 
 describe("persistence hooks", () => {
+  test("buildConfigOverrides prefers the last live mode over the creation-time mode", () => {
+    const record = createRecord({
+      lastModeId: "bypass",
+      config: { modeId: "acceptEdits" },
+    });
+
+    expect(buildConfigOverrides(record).modeId).toBe("bypass");
+  });
+
+  test("buildConfigOverrides falls back to the configured mode when no live mode was recorded", () => {
+    const record = createRecord({
+      lastModeId: null,
+      config: { modeId: "acceptEdits" },
+    });
+
+    expect(buildConfigOverrides(record).modeId).toBe("acceptEdits");
+  });
+
   test("buildConfigOverrides carries systemPrompt and mcpServers", () => {
     const record = createRecord({
       title: "Voice agent (current)",

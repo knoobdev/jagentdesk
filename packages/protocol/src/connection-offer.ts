@@ -1,20 +1,41 @@
 import { z } from "zod";
 
 /**
- * Tailnet direct-connection offer (JAgentDesk).
+ * Connection offer (JAgentDesk).
  *
- * Carries the daemon's direct tailnet host:port plus its public key. There are
- * no hosted transport fields: transport encryption comes from WireGuard, and the client
- * dials `ws(s)://<tailnetAddress>/ws` directly with no `serverId`, `role`, or
- * `connectionId` query parameters.
+ * Carries the daemon's direct tailnet host:port plus its public key, and — once
+ * the daemon enables relay (spec 35) — an optional public relay endpoint the
+ * app can dial when the tailnet is down. Tailnet traffic rides WireGuard and
+ * dials `ws(s)://<tailnetAddress>/ws` directly; relay traffic is E2EE over the
+ * Cloudflare Worker (`@jagentdesk/relay`) and routes by `serverId`. A payload
+ * must carry at least one route. Old clients strip the unknown `relay` key and
+ * keep working from `tailnetAddress`; only `tailnetAddress`-less offers are
+ * new-client-only.
  */
-export const TailnetConnectionOfferSchema = z.object({
-  v: z.literal(3),
-  serverId: z.string().min(1),
-  daemonPublicKeyB64: z.string().min(1),
-  tailnetAddress: z.string().min(1),
+export const RelayOfferEndpointSchema = z.object({
+  endpoint: z.string().min(1),
   useTls: z.boolean().optional(),
 });
+
+export type RelayOfferEndpoint = z.infer<typeof RelayOfferEndpointSchema>;
+
+export const TailnetConnectionOfferSchema = z
+  .object({
+    v: z.literal(3),
+    serverId: z.string().min(1),
+    daemonPublicKeyB64: z.string().min(1),
+    tailnetAddress: z.string().min(1).optional(),
+    useTls: z.boolean().optional(),
+    relay: RelayOfferEndpointSchema.optional(),
+  })
+  .superRefine((offer, ctx) => {
+    if (!offer.tailnetAddress && !offer.relay) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Connection offer requires tailnetAddress or relay",
+      });
+    }
+  });
 
 export type TailnetConnectionOffer = z.infer<typeof TailnetConnectionOfferSchema>;
 

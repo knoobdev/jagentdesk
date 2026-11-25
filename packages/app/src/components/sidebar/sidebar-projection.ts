@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next";
 import { buildStatusGroups, type StatusGroup } from "@/hooks/sidebar-status-view-model";
 import {
   splitPinnedSidebarGroups,
@@ -22,6 +23,7 @@ export interface SidebarProjection {
 }
 
 export function buildSidebarProjection(input: {
+  t?: TFunction;
   projects: SidebarProjectEntry[];
   pinnedKeys: PinnedSidebarKeys;
   workspaceEntriesByKey: ReadonlyMap<string, SidebarWorkspaceEntry>;
@@ -43,6 +45,7 @@ export function buildSidebarProjection(input: {
             (workspace) => !pinnedWorkspaceKeys.has(workspace.workspaceKey),
           ),
           input.projectNamesByViewKey,
+          input.t,
         )
       : [];
 

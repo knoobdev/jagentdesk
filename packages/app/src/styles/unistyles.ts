@@ -7,8 +7,8 @@ import {
   darkClaudeTheme,
   darkGhosttyTheme,
   darkPureBlackTheme,
-  clickupLightTheme,
-  clickupDarkTheme,
+  gumloopLightTheme,
+  gumloopDarkTheme,
 } from "./theme";
 
 StyleSheet.configure({
@@ -20,8 +20,8 @@ StyleSheet.configure({
     darkClaude: darkClaudeTheme,
     darkGhostty: darkGhosttyTheme,
     darkPureBlack: darkPureBlackTheme,
-    clickupLight: clickupLightTheme,
-    clickupDark: clickupDarkTheme,
+    gumloopLight: gumloopLightTheme,
+    gumloopDark: gumloopDarkTheme,
     // Slots a plugin-contributed theme is written into at run time (see appearance).
     pluginLight: lightTheme,
     pluginDark: darkTheme,
@@ -29,7 +29,7 @@ StyleSheet.configure({
   breakpoints: {
     xs: 0,
     sm: 576,
-    md: 720,
+    md: 600,
     lg: 992,
     xl: 1200,
   },
@@ -47,8 +47,8 @@ interface AppThemes {
   darkClaude: typeof darkClaudeTheme;
   darkGhostty: typeof darkGhosttyTheme;
   darkPureBlack: typeof darkPureBlackTheme;
-  clickupLight: typeof clickupLightTheme;
-  clickupDark: typeof clickupDarkTheme;
+  gumloopLight: typeof gumloopLightTheme;
+  gumloopDark: typeof gumloopDarkTheme;
   pluginLight: typeof lightTheme;
   pluginDark: typeof darkTheme;
 }

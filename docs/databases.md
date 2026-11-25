@@ -1,159 +1,87 @@
-# Multi-database management
+# Databases
 
-JAgentDesk ships a database cockpit — a full schema/object browser, a data editor grid, a SQL
-console, and a per-connection AI chat — that runs identically on the **Electron desktop app** and
-the **iOS/Android app**. It talks to your databases through the daemon's database clients, so the
-app never needs a local `psql`/`mysql` and the agent can operate a database the user's laptop can't
-reach.
+The Databases screen is a schema browser, data grid, SQL console and per-connection agent chat,
+the same on desktop and mobile. The daemon opens the connections, so the app needs no local
+`psql` or `mysql` and the agent can reach a database your phone cannot. It is the `databases`
+[built-in](builtin-plugins.md) (on by default). It follows the layout and chat model of
+[Kubernetes clusters](kubernetes.md).
 
-It is built as a **second kind of workspace beside Kubernetes** (`docs/kubernetes.md`): the same
-left-sidebar entry pattern, the same three-pane desktop / slide-in mobile shell, and the same
-per-resource AI chat dock. Where the Kubernetes cockpit talks to clusters through `KubeClient`, this
-talks to databases through a per-engine `DbClient`.
+Browsing needs no project. Only the chat needs one, because the agent runs in a working directory.
 
-> Browsing a database requires **no project**. Only the AI chat needs a working directory (a
-> project), because the agent runs there — identical to the Kubernetes cockpit.
+Code: `plugins/databases/` (screens, `database/*` handlers, agent tools). The registry, engine
+adapters and secret store stay in `packages/server/src/server/database/` because SSH remote
+databases use them.
 
----
+## Connect
 
-## 1. Connect a database
+1. Open **Data** from the sidebar's Tools group.
+2. Press **Add connection**, pick an engine, and enter host, port, database, user and password,
+   or a connection string (DSN), or for SQLite a file path.
+3. **Save & connect**. A green dot marks a connected database; errors show inline with **Retry**.
 
-1. Open **Databases** from the left sidebar (a top-level entry beside **Clusters**).
-2. The screen lists saved connections. Press **Add connection**.
-3. Pick an **engine** (PostgreSQL, MySQL/MariaDB, SQLite, SQL Server, Oracle, MongoDB, ClickHouse),
-   then enter host/port/database/user/password — or paste a **connection string (DSN)**, or, for
-   SQLite, a **file path**.
-4. **Test connection** verifies reachability and reports the server version; **Save & connect**
-   stores the connection.
+A database reachable only from a remote machine can be added through an SSH server
+("Add database via this server"); see [SSH servers](ssh.md).
 
-**Credentials never leave the daemon.** The password/DSN is encrypted at rest in the OS keychain
-(`safeStorage`, the same store used by the browser vault — `packages/desktop/src/features/browser-vault.ts`)
-and is only read inside the daemon to open a connection. Only connection **identity** (id, engine,
-display name, host, database, user — never the secret) is persisted to
-`<jagentdeskHome>/databases/databases.json`, mirroring how `ClusterRegistry` persists cluster
-identity to `clusters/clusters.json`.
+Passwords and DSNs never leave the daemon. They are encrypted with AES-256-GCM under a key file in
+`$JAGENTDESK_HOME/databases/` (`FileSecretStore`). Only connection identity and non-secret fields
+are written to `$JAGENTDESK_HOME/databases/databases.json`, and nothing secret goes on the wire.
 
-A green dot marks a connection **connected**; a failed connection shows the error inline and a
-**Retry**. Connection state is `saved | connecting | connected | error`, mirroring
-`ClusterConnectionState`.
+## Engines
 
----
+Each engine is an adapter behind one `DbClient` interface in
+`packages/server/src/server/database/adapters/`, so SQL and introspection stay vendor-exact.
 
-## 2. Browse the schema
+| Engine     | Driver                 | Notes                             |
+| ---------- | ---------------------- | --------------------------------- |
+| PostgreSQL | `pg` + `pg-cursor`     | server-side cursor                |
+| MySQL      | `mysql2`               |                                   |
+| SQLite     | `better-sqlite3`       | local file                        |
+| SQL Server | `mssql`                |                                   |
+| Oracle     | `oracledb` (thin mode) | no Oracle client libraries needed |
+| MongoDB    | `mongodb`              | collections and documents         |
+| ClickHouse | `@clickhouse/client`   |                                   |
 
-Press **Open** to enter the database view. Desktop shows three columns: the **object explorer**
-(left rail), the **editor + results** area (center), and the **AI chat dock** (right). Mobile slides
-in the object explorer; the chat is a floating button — identical to the Kubernetes cockpit.
+## Browse
 
-The object explorer is a tree: **connection → schemas/databases → tables · views · materialized
-views · routines (functions/procedures) · sequences**, and each table expands to its **columns**
-with a type and a **PK / FK / NOT NULL** marker, plus its **keys and indexes**. The tree is
-searchable and lazily loaded per level (large catalogs do not block).
+**Open** a connection to enter its view. Desktop shows the object explorer, the editor and results,
+and the chat dock side by side. Mobile slides in the explorer and opens the chat from a floating
+button.
 
-Introspection is per-engine (PostgreSQL `pg_catalog`, MySQL `information_schema`, SQLite
-`PRAGMA table_info`, SQL Server `sys.*`, Oracle data-dictionary views, MongoDB `listCollections`),
-returned as a uniform object model — the browser code is engine-agnostic, exactly as the Kubernetes
-resource browser is kind-agnostic.
+The explorer is a lazily loaded tree: schemas or databases, then tables, views, routines and
+sequences; a table expands to columns (type, PK / FK / NOT NULL) and keys and indexes. A table opens
+on **Data**; **Structure** shows its definition. The view also has an ER diagram and a full-text
+search across tables.
 
-The view opens on an **Overview**: object counts, size, server version, connection health — a
-database-at-a-glance landing page before drilling into a table.
+## Edit data
 
----
+- The grid pages through rows; it never loads a whole table.
+- Filter with a WHERE bar that completes columns, operators and connectors. Sort per column.
+- Double-click (double-tap on native) a cell to edit. **Add rows**, **Clone**, **Delete**, **Set
+  NULL** and **Import CSV** stage changes; the preview shows the DML before it runs.
+- **Submit** applies staged changes. In **Manual** transaction mode, pick an isolation level and
+  finish with **Commit** or **Rollback**; **Auto** commits each submit.
+- **Copy as CSV**, **Copy as JSON** and **Copy as SQL INSERT** copy the result.
 
-## 3. View and edit data
+Every value is bound as a parameter; no SQL is built by string interpolation.
 
-Selecting a table (or running a `SELECT`) opens the **data editor grid**.
+## SQL console
 
-- **Paginated, never full-table.** Large tables are streamed page by page through a server-side
-  cursor with keyset pagination; the toolbar has **first / prev / next / last** and a page-size
-  control. Loading a million-row table never hangs the app.
-- **Sort and filter** per column; a local filter row; text search on the current page.
-- **Inline edit.** Double-click a cell to edit; **add / clone / delete** rows from the toolbar.
-- **Transaction control.** A **Tx: Auto / Manual** toggle. In Manual mode edits accumulate as
-  pending changes (added / modified / deleted rows are marked) and are applied only on **Submit**,
-  committed on **Submit & Commit**, or discarded on **Rollback**. **Preview pending changes** shows
-  the exact DML before it runs.
-- **Export** the result to CSV / JSON / SQL `INSERT`s.
+The console completes table and column names from live introspection. **Run** executes the
+statement; a `SELECT` opens a result grid, other statements report affected rows, duration and
+errors in **Output**. **Explain** fills **Query Plan**. **History** keeps statements per
+connection. A write statement is refused until you turn on **Allow writes**.
 
-All edits use **parameter binding** (never string interpolation). Writes obey the safety policy in
-§6.
+## Ask an agent
 
----
+The chat dock behaves like the cluster chat: the full agent composer, the agent is created on the
+first real message, and its title comes from that message and the connection. Database agents carry
+the label `jagentdesk.database.id` and are pointed at these tools on the `jagentdesk` MCP server:
 
-## 4. SQL console
+| Tool            | Does                                                                          |
+| --------------- | ----------------------------------------------------------------------------- |
+| `sql_query`     | read-only `SELECT` / `EXPLAIN`                                                |
+| `sql_exec`      | writes and DDL; agent-scoped, asks for your approval with the statement shown |
+| `database_list` | lists connection ids                                                          |
+| `sql_connect`   | registers and opens a connection so it appears in Databases                   |
 
-A per-connection SQL console (a tab, stored beside the connection like a query file):
-
-- **Editor** with a line-number gutter, a run-statement gutter arrow, syntax highlighting, and
-  **schema-grounded completion** (tables, columns, functions from the live introspection). The app's
-  existing Monaco editor is reused.
-- **Run** the statement (or the selection). Results land in a docked **Services** panel with
-  **Output**, **Result**, and **Query Plan** tabs. `SELECT` opens a Result grid (§3); non-data
-  statements report affected rows, duration, and errors in Output.
-- **Explain plan** renders the plan as an operations tree.
-- **Query history** is kept per connection.
-
----
-
-## 5. AI chat about a database
-
-Every database view has a right-hand **chat dock**, identical in behaviour to the Kubernetes chat
-dock (`packages/app/src/components/cluster-chat-dock.tsx`): it shows the **full agent composer**
-(model / thinking / permission / @files / commands / skills), creates the agent only when the user
-sends a real message, and titles it from that message plus the connection.
-
-The agent is **grounded in the schema**. Its hidden system prompt states which connection it
-operates and pins it to the dedicated MCP tools (mirroring how the cluster agent is pinned to
-`kubectl_get`/`kubectl_apply`):
-
-- `mcp__jagentdesk__sql_query` — **read-only** SELECT/EXPLAIN against the connection, auto-injected.
-- `mcp__jagentdesk__sql_exec` — writes (INSERT/UPDATE/DELETE/DDL); **agent-scoped and gated** (§6).
-- `mcp__jagentdesk__database_list` — discover connection ids to pass to the tools.
-
-So the agent turns natural language into SQL, runs it read-only, shows the result, explains a query,
-or drafts an index — and any write pauses for the user's approval. Agents are bound to a connection
-by the label `jagentdesk.database.id`, mirroring `jagentdesk.cluster.id`.
-
----
-
-## 6. Safety
-
-- **Read-only by default.** New connections and every AI `SELECT` run read-only. `sql_exec` (any
-  write or DDL) is a separate, agent-scoped tool that **always requests the user's permission**
-  through the existing host-tool permission gate (`requestHostToolPermission`) before it runs.
-- **Parameter binding** on every value; no string-built SQL, no injection surface.
-- **Least privilege** is encouraged (connect with a read-only role for browsing).
-- **Preview before write.** Data-editor changes show their DML; `sql_exec` shows the statement for
-  approval.
-- **Audit.** Executed writes are logged.
-
----
-
-## 7. Supported engines
-
-Shipped as per-engine adapters behind one `DbClient` interface (not an ORM), so vendor SQL and
-introspection stay exact:
-
-| Engine          | Driver               | Notes                                     |
-| --------------- | -------------------- | ----------------------------------------- |
-| PostgreSQL      | `pg` + `pg-cursor`   | streaming server-side cursor              |
-| MySQL / MariaDB | `mysql2`             | prepared statements, pooling              |
-| SQLite          | `better-sqlite3`     | local file, zero-infra                    |
-| SQL Server      | `mssql` (tedious)    |                                           |
-| Oracle          | `node-oracledb`      | requires the Oracle client libraries      |
-| MongoDB         | `mongodb`            | collections + documents, cursor streaming |
-| ClickHouse      | `@clickhouse/client` | streaming                                 |
-
-PostgreSQL, MySQL and SQLite are the first-class set; the rest are additive adapters implementing the
-same interface.
-
----
-
-## 8. Desktop vs mobile
-
-- **Desktop** is the three-column cockpit: object explorer · editor+results · chat dock, with the
-  breadcrumb, transaction badge, dense data-editor toolbar, and a status bar.
-- **Mobile** slides in the object explorer, shows the result grid full-width, and floats the chat as
-  a button — the same responsive rules as the Kubernetes cockpit.
-
-The whole feature is shared app code plus daemon adapters, so desktop and mobile behave identically.
+Connect with a read-only role when you only browse.

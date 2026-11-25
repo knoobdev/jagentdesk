@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  describeConnectionKind,
   formatHostRuntimeSection,
   formatServerInfoSection,
   redactAppDiagnosticReport,
@@ -46,6 +47,34 @@ function makeHost(): HostProfile {
   };
 }
 
+function makeSnapshot(host: HostProfile): HostRuntimeSnapshot {
+  return {
+    serverId: host.serverId,
+    activeConnectionId: "tailnet:tailnet.secret.test:443",
+    activeConnection: {
+      type: "tailnet",
+      endpoint: "tailnet.secret.test:443",
+      display: "tailnet.secret.test:443",
+    },
+    connectionStatus: "online",
+    client: null,
+    lastError: null,
+    lastOnlineAt: "2026-06-25T00:00:00.000Z",
+    agentDirectoryStatus: "ready",
+    agentDirectoryError: null,
+    hasEverLoadedAgentDirectory: true,
+    probeByConnectionId: new Map([
+      ["direct:secret.example.test:6767", { status: "available", latencyMs: 42 }],
+      ["tailnet:tailnet.secret.test:443", { status: "available", latencyMs: 8 }],
+    ]),
+    clientGeneration: 1,
+    connectionEpoch: 1,
+    pendingPairingRequests: [],
+    pendingPairingRequest: null,
+    localRetriesExhausted: false,
+  };
+}
+
 describe("app diagnostics report", () => {
   test("reports whether the connected daemon is managed by JAgentDesk Desktop", () => {
     const report = formatServerInfoSection({
@@ -61,31 +90,7 @@ describe("app diagnostics report", () => {
 
   test("formats connection rows without raw connection details", () => {
     const host = makeHost();
-    const snapshot: HostRuntimeSnapshot = {
-      serverId: host.serverId,
-      activeConnectionId: "tailnet:tailnet.secret.test:443",
-      activeConnection: {
-        type: "tailnet",
-        endpoint: "tailnet.secret.test:443",
-        display: "tailnet.secret.test:443",
-      },
-      connectionStatus: "online",
-      client: null,
-      lastError: null,
-      lastOnlineAt: "2026-06-25T00:00:00.000Z",
-      agentDirectoryStatus: "ready",
-      agentDirectoryError: null,
-      hasEverLoadedAgentDirectory: true,
-      probeByConnectionId: new Map([
-        ["direct:secret.example.test:6767", { status: "available", latencyMs: 42 }],
-        ["tailnet:tailnet.secret.test:443", { status: "available", latencyMs: 8 }],
-      ]),
-      clientGeneration: 1,
-      connectionEpoch: 1,
-      pendingPairingRequests: [],
-      pendingPairingRequest: null,
-      localRetriesExhausted: false,
-    };
+    const snapshot = makeSnapshot(host);
 
     const report = formatHostRuntimeSection({ host, snapshot });
 
@@ -98,6 +103,45 @@ describe("app diagnostics report", () => {
     expect(report).not.toContain("daemon-public-key-secret");
     expect(report).not.toContain("/tmp/jagentdesk-secret.sock");
     expect(report).not.toContain("tcp-password");
+  });
+
+  test.each(["connecting", "offline", "error"] as const)(
+    "does not claim a previously connected host was never online while %s",
+    (connectionStatus) => {
+      const host = makeHost();
+      const report = formatHostRuntimeSection({
+        host,
+        snapshot: { ...makeSnapshot(host), connectionStatus, lastOnlineAt: null },
+      });
+      expect(report).toContain("Last online: unknown");
+      expect(report).not.toContain("Last online: never");
+    },
+  );
+  test("does not infer connection history before runtime startup", () => {
+    expect(formatHostRuntimeSection({ host: makeHost(), snapshot: null })).toContain(
+      "Last online: unknown",
+    );
+  });
+
+  test.each(["relay", "routed"])("identifies %s connections by name", (type) => {
+    expect(describeConnectionKind(type)).toBe(type);
+  });
+
+  test("identifies the active relay without exposing its endpoint", () => {
+    const host = makeHost();
+    host.connections.push({
+      id: "relay-private",
+      type: "relay",
+      endpoint: "127.0.0.1:6934",
+      daemonPublicKeyB64: "private-key",
+    });
+    const snapshot = makeSnapshot(host);
+    snapshot.activeConnectionId = "relay-private";
+    snapshot.activeConnection = { type: "relay", endpoint: "127.0.0.1:6934", display: "relay" };
+    const report = formatHostRuntimeSection({ host, snapshot });
+    expect(report).toContain("Active connection: relay");
+    expect(report).toContain("Connection 5: relay, active, probe=unknown");
+    expect(report).not.toContain("127.0.0.1:6934");
   });
 
   test("redacts saved connection secrets from collected daemon and desktop text", () => {

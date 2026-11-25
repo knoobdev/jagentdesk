@@ -11,6 +11,8 @@ import { type CheckoutStatusPayload, useCheckoutStatusQuery } from "@/git/use-st
 import { type CheckoutPrStatusPayload, useCheckoutPrStatusQuery } from "@/git/use-pr-status-query";
 import {
   buildGitActions,
+  isCurrentBranchBase,
+  canMergeIntoLocalBase,
   narrowPullRequestState,
   type BuildGitActionsInput,
   type GitAction,
@@ -114,7 +116,7 @@ interface DeriveGitActionsStateArgs {
   hasUncommittedChanges: boolean;
   postShipArchiveSuggested: boolean;
   isStatusLoading: boolean;
-  baseRefLabel: string;
+  baseRef: string | undefined;
 }
 
 interface DerivedGitActionsState {
@@ -127,6 +129,7 @@ interface DerivedGitActionsState {
   hasRemote: boolean;
   isJAgentDeskOwnedWorktree: boolean;
   isOnBaseBranch: boolean;
+  canMergeLocally: boolean;
   shouldPromoteArchive: boolean;
 }
 
@@ -165,7 +168,7 @@ function deriveGitActionsState(args: DeriveGitActionsStateArgs): DerivedGitActio
     hasUncommittedChanges,
     postShipArchiveSuggested,
     isStatusLoading,
-    baseRefLabel,
+    baseRef,
   } = args;
   const actionsDisabled = !isGit || Boolean(status?.error) || isStatusLoading;
   const isJAgentDeskOwnedWorktree = gitStatus?.isJAgentDeskOwnedWorktree ?? false;
@@ -176,7 +179,8 @@ function deriveGitActionsState(args: DeriveGitActionsStateArgs): DerivedGitActio
     hasPullRequest: Boolean(prStatus?.url),
     hasRemote: gitStatus?.hasRemote ?? false,
     isJAgentDeskOwnedWorktree,
-    isOnBaseBranch: gitStatus?.currentBranch === baseRefLabel,
+    isOnBaseBranch: isCurrentBranchBase(gitStatus?.currentBranch, baseRef),
+    canMergeLocally: canMergeIntoLocalBase(gitStatus?.currentBranch, baseRef),
     shouldPromoteArchive: computeShouldPromoteArchive({
       hasUncommittedChanges,
       postShipArchiveSuggested,
@@ -203,6 +207,8 @@ interface UseGitActionsResult {
   gitActions: GitActions;
   branchLabel: string;
   isGit: boolean;
+  /** Archives this workspace, Git or not. Null while it cannot be archived. */
+  archiveWorkspace: (() => void) | null;
 }
 
 interface UseWorkspaceScreenArchiveControllerInput {
@@ -260,6 +266,13 @@ function canArchiveWorkspace(
   );
 }
 
+function availableArchive(
+  controller: { canArchive: boolean; isArchiving: boolean },
+  archive: () => void,
+): (() => void) | null {
+  return controller.canArchive && !controller.isArchiving ? archive : null;
+}
+
 function useWorkspaceScreenArchiveController({
   serverId,
   activeWorkspaceSelection,
@@ -285,21 +298,13 @@ function useWorkspaceScreenArchiveController({
     serverId,
     workspaceId: workspaceDescriptor?.id ?? "",
     workspaceKind: workspaceDescriptor?.workspaceKind ?? "directory",
+    workspaceDirectory: workspaceDescriptor?.workspaceDirectory ?? "",
     name: workspaceDescriptor?.name ?? branchLabel,
-    isDirty: archiveRisk.isDirty,
-    aheadOfOrigin: archiveRisk.aheadOfOrigin,
     diffStat: workspaceDescriptor?.diffStat ?? null,
     warningLabels: getWorktreeArchiveWarningLabels(t),
     onSetHiding: setIsHidingWorkspace,
-    onArchiveStarted: () => {
-      if (!activeWorkspaceSelection) {
-        return;
-      }
-      redirectIfArchivingActiveWorkspace({
-        serverId,
-        workspaceId: activeWorkspaceSelection.workspaceId,
-        activeWorkspaceSelection,
-      });
+    onArchiveStarted: (archived) => {
+      redirectIfArchivingActiveWorkspace({ ...archived, activeWorkspaceSelection });
     },
   });
 
@@ -321,7 +326,7 @@ export function useGitActions({ serverId, cwd, icons }: UseGitActionsInput): Use
   const gitStatus = status && status.isGit ? status : null;
   const isGit = Boolean(gitStatus);
   const notGit = status !== null && !status.isGit && !status.error;
-  const baseRef = gitStatus?.baseRef ?? undefined;
+  const baseRef = selectedBaseRef(gitStatus);
 
   const hasUncommittedChanges = Boolean(gitStatus?.isDirty);
 
@@ -651,7 +656,7 @@ export function useGitActions({ serverId, cwd, icons }: UseGitActionsInput): Use
     hasUncommittedChanges,
     postShipArchiveSuggested,
     isStatusLoading,
-    baseRefLabel,
+    baseRef,
   });
   const {
     actionsDisabled,
@@ -663,6 +668,7 @@ export function useGitActions({ serverId, cwd, icons }: UseGitActionsInput): Use
     hasRemote,
     isJAgentDeskOwnedWorktree,
     isOnBaseBranch,
+    canMergeLocally,
     shouldPromoteArchive,
   } = derived;
 
@@ -693,6 +699,7 @@ export function useGitActions({ serverId, cwd, icons }: UseGitActionsInput): Use
       hasRemote,
       isJAgentDeskOwnedWorktree,
       isOnBaseBranch,
+      canMergeLocally,
       hasUncommittedChanges,
       baseRefAvailable: Boolean(baseRef),
       baseRefLabel,
@@ -810,6 +817,7 @@ export function useGitActions({ serverId, cwd, icons }: UseGitActionsInput): Use
     behindBaseCount,
     isJAgentDeskOwnedWorktree,
     isOnBaseBranch,
+    canMergeLocally,
     githubFeaturesEnabled,
     forge,
     githubAutoMergeActionsEnabled,
@@ -863,7 +871,12 @@ export function useGitActions({ serverId, cwd, icons }: UseGitActionsInput): Use
     [gitActionsInput, baseRefLabel, hasPullRequest, forge, t],
   );
 
-  return { gitActions, branchLabel, isGit };
+  return {
+    gitActions,
+    branchLabel,
+    isGit,
+    archiveWorkspace: availableArchive(archiveController, handleArchiveWorkspace),
+  };
 }
 
 function translateGitActions(
@@ -1123,4 +1136,8 @@ function getWorktreeArchiveWarningLabels(
         { count },
       ),
   };
+}
+
+function selectedBaseRef(status: CheckoutStatusPayload | null): string | undefined {
+  return status?.baseRefExact ?? status?.baseRef ?? undefined;
 }

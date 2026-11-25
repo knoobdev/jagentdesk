@@ -1,7 +1,10 @@
+import { i18n } from "@/i18n/i18next";
+import { createPlayAudio, type AudioEngine } from "@/audio";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { createPluginHosts } from "./hosts";
 import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { PluginClientOpenPanelOptions } from "@jagentdesk/plugin/client";
+import { subscribePluginRpc } from "@jagentdesk/plugin/client/host";
 import {
   createPluginAgentActionContext,
   createPluginCapabilities,
@@ -17,6 +20,7 @@ import type { InstalledPlugin } from "./types";
 export function createPluginClientRuntime(
   installation: InstalledPlugin,
   daemonClient: DaemonClient,
+  audio: Pick<AudioEngine, "play">,
 ): PluginClientRuntime {
   const runtime = createPluginSurfaceRuntime(daemonClient, installation);
   if (!runtime) throw new Error("Plugin host is offline");
@@ -28,6 +32,16 @@ export function createPluginClientRuntime(
   );
   return {
     ...capabilities,
+    localeSource: {
+      getLocale: () => i18n.resolvedLanguage ?? i18n.language ?? "en",
+      subscribe: (listener) => {
+        i18n.on("languageChanged", listener);
+        return () => {
+          i18n.off("languageChanged", listener);
+        };
+      },
+    },
+    playAudio: createPlayAudio(audio, installation.lifetime.signal),
     hosts: createPluginHosts(getHostRuntimeStore(), installation.lifetime.signal),
     addComposerPill(contribution) {
       return pluginButtonStore.addComposerPill(installation, contribution);
@@ -38,6 +52,8 @@ export function createPluginClientRuntime(
     openPanel(panelId, options) {
       openClientPanel({ installation, runtime, state, panelId, options });
     },
+    subscribe: (contract, input, onEvent, options) =>
+      subscribePluginRpc(contract, installation.subscribe, input, onEvent, options),
   };
 }
 

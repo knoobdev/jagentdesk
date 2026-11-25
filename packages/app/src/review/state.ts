@@ -1,4 +1,4 @@
-export type ReviewDraftMode = "uncommitted" | "base";
+export type ReviewDraftMode = "uncommitted" | "base" | "all";
 export type ReviewDraftSide = "old" | "new";
 
 export interface ReviewDraftComment {

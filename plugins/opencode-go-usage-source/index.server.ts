@@ -1,0 +1,16 @@
+import type { PluginServerContext } from "@jagentdesk/plugin/server";
+import { inputSchema } from "./shared/input.js";
+import { discover, fetchUsage } from "./server/usage.js";
+
+export default function contribute(server: PluginServerContext) {
+  server.registerUsageSource({
+    id: "opencode-go",
+    label: "OpenCode Go",
+    icon: "icon.svg",
+    providers: ["opencode"],
+    input: inputSchema,
+    discover: (scope) => (scope.kind === "global" ? discover() : Promise.resolve([])),
+    fetch: fetchUsage,
+  });
+  return () => {};
+}

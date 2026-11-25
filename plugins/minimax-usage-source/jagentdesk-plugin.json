@@ -1,0 +1,12 @@
+{
+  "id": "minimax-usage-source",
+  "requirements": {
+    "jagentdesk": ">=0.9.59"
+  },
+  "kind": "builtin",
+  "name": "Minimax usage",
+  "description": "Read local minimax account quotas.",
+  "defaultEnabled": true,
+  "requires": [],
+  "builtinOrder": 32
+}

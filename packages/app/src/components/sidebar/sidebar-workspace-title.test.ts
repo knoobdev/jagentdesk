@@ -1,3 +1,4 @@
+import { i18n } from "@/i18n/i18next";
 import { describe, expect, it } from "vitest";
 import {
   resolveSidebarWorkspaceAccessibilityLabel,
@@ -36,6 +37,7 @@ describe("resolveSidebarWorkspacePrimaryLabel", () => {
 describe("resolveSidebarWorkspaceAccessibilityLabel", () => {
   it("includes the visible host badge with the workspace title", () => {
     const label = resolveSidebarWorkspaceAccessibilityLabel({
+      t: i18n.t,
       workspace: { name: "Investigate search", currentBranch: "fix/search", statusBucket: "done" },
       workspaceTitleSource: "title",
       hostBadgeLabel: "Build host",
@@ -46,6 +48,7 @@ describe("resolveSidebarWorkspaceAccessibilityLabel", () => {
 
   it("owns every visual row contributor in one accessible label", () => {
     const label = resolveSidebarWorkspaceAccessibilityLabel({
+      t: i18n.t,
       workspace: {
         name: "Investigate search",
         currentBranch: "fix/search",
@@ -65,6 +68,7 @@ describe("resolveSidebarWorkspaceAccessibilityLabel", () => {
 
   it("omits the idle status from the workspace label", () => {
     const label = resolveSidebarWorkspaceAccessibilityLabel({
+      t: i18n.t,
       workspace: { name: "Investigate search", currentBranch: "fix/search", statusBucket: "done" },
       workspaceTitleSource: "title",
       leadingProjectName: "Search project",

@@ -38,6 +38,27 @@ The app checks for the capability and either runs the feature or tells the user 
 
 Existing functionality keeps working across versions because of the protocol contract. Gating a new feature never substitutes for that.
 
+## Large transport messages
+
+Chunked transport is negotiated per physical connection: the client advertises
+`binary_chunking_v1` in hello, and the daemon advertises optional
+`features.binaryChunkingV1` in the ordinary server-info response. Both sides must
+advertise support before sending chunks. Older peers keep ordinary frames and
+their existing size limits. Framing sits outside serialization and inside relay
+encryption, so each encrypted relay frame fits the Worker's 32 MiB limit while
+the logical message remains bounded at 100 MiB. React Native sockets cannot report
+write drain; their outbound messages retain the physical frame limit.
+
+## Terminal ANSI replay
+
+Keep advertising `features["terminal-restore-modes"]` forever: released v0.9.x apps use it to request
+ANSI restore. Without `terminal_chunked_replay`, send one Restore frame with 200
+history rows by default, clamped to 0–500. Capable clients receive bounded ANSI
+chunks and request their configured history, clamped to 0–10,000. JSON snapshot
+opcodes remain parseable but are no longer sent or rendered. Omitting `restore`
+requests subsequent live output only. The SDK supplies an explicit full replay
+when `subscribeTerminal` has no restore options.
+
 ## Every shim is tagged and dated
 
 A shim that exists for old-app or old-daemon support carries a comment naming it, the version it arrived in, and when it can go:
@@ -54,11 +75,25 @@ A shim that exists for old-app or old-daemon support carries a comment naming it
 
 When a tag's condition is met, delete the shim and the tag in the same change.
 
+## Removed features
+
+Retiring a whole feature is the one case where its message schemas are deleted rather than kept.
+Older clients calling the removed RPCs receive the normal `rpc_error` with `code: "unknown_schema"`,
+and `server_info.features` stops advertising the feature, so older apps hide it.
+
+- Keep accepting ids an older daemon still sends inside shared lists, so the whole list parses, and
+  drop them after parsing. Tag the shim, as `COMPAT(adr0055)` does in
+  `packages/protocol/src/builtin-plugins.ts`.
+- Ignore stale `builtinPlugins` keys in `config.json`.
+- Leave the feature's ordinary data on disk, unread. Delete stored credentials once at daemon start
+  (`packages/server/src/server/retired-figma-data.ts`): credentials must not outlive the code that
+  used them.
+
 ## Recent additive changes
 
-- v0.9.57: `remote_exec.*` RPCs and the `remote_exec.job_updated` push (spec 33 / ADR-0044). `SshServer` gained optional `via` and `remoteExec` fields. Old clients ignore the new fields and never send the new types; old daemons never send them.
-- v0.9.58: `RemoteJob` gained optional `noCode` and `sources` fields (spec 33.4 / ADR-0045). Old clients parse jobs without them; old daemons never send them.
-- v0.9.59: `providers.custom.list|save|delete|test` requests and responses (spec 34 / ADR-0047); provider config entries gained an optional `api` block. Old clients never send the new requests and the settings section shows the daemon's error on old daemons.
+- v0.9.57: `remote_exec.*` RPCs and the `remote_exec.job_updated` push. `SshServer` gained optional `via` and `remoteExec` fields. Old clients ignore the new fields and never send the new types; old daemons never send them.
+- v0.9.58: `RemoteJob` gained optional `noCode` and `sources` fields. Old clients parse jobs without them; old daemons never send them.
+- v0.9.59: `providers.custom.list|save|delete|test` requests and responses; provider config entries gained an optional `api` block. Old clients never send the new requests and the settings section shows the daemon's error on old daemons.
 
 ## QA
 

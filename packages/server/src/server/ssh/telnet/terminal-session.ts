@@ -1,7 +1,12 @@
+import { createTerminalSerializer } from "../../../terminal/terminal-serializer.js";
+import type { TerminalReplayOptions } from "../../../terminal/terminal-replay.js";
+import {
+  captureTerminalLines,
+  type CaptureTerminalLinesOptions,
+} from "../../../terminal/terminal-capture.js";
 import { createConnection, type Socket } from "node:net";
 import { randomUUID } from "node:crypto";
 import xterm, { type Terminal as TerminalType } from "@xterm/headless";
-import type { TerminalCell, TerminalState } from "@jagentdesk/protocol/messages";
 import type {
   TerminalActivity,
   TerminalActivityState,
@@ -12,10 +17,7 @@ import type {
   TerminalActivityTransition,
   TerminalCommandFinishedInfo,
   TerminalExitInfo,
-  TerminalSession,
-  TerminalStateSnapshot,
-  TerminalStateSnapshotOptions,
-  TerminalSubscribeOptions,
+  ReplayTerminalSession,
 } from "../../../terminal/terminal.js";
 import {
   TelnetCommand,
@@ -91,83 +93,6 @@ const ANSI_SEQUENCE_PATTERN = new RegExp(
   `${ESC}(?:[@-Z\\\\-_]|\\[[0-?]*[ -/]*[@-~]|\\].*?(?:${BEL}|${ESC}\\\\))`,
   "g",
 );
-
-function extractCell(terminal: TerminalType, row: number, col: number): TerminalCell {
-  const line = terminal.buffer.active.getLine(row);
-  const cell = line?.getCell(col);
-  if (!cell) {
-    return { char: " ", fg: undefined, bg: undefined };
-  }
-  // Color mode is packed into the upper byte (0 = default); see terminal.ts.
-  const fgMode = cell.getFgColorMode() >> 24;
-  const bgMode = cell.getBgColorMode() >> 24;
-  return {
-    char: cell.getChars() || " ",
-    fg: fgMode !== 0 ? cell.getFgColor() : undefined,
-    bg: bgMode !== 0 ? cell.getBgColor() : undefined,
-    fgMode: fgMode !== 0 ? fgMode : undefined,
-    bgMode: bgMode !== 0 ? bgMode : undefined,
-    bold: cell.isBold() !== 0,
-    italic: cell.isItalic() !== 0,
-    underline: cell.isUnderline() !== 0,
-    dim: cell.isDim() !== 0,
-    inverse: cell.isInverse() !== 0,
-    strikethrough: cell.isStrikethrough() !== 0,
-  };
-}
-
-function extractGrid(terminal: TerminalType): TerminalCell[][] {
-  const baseY = terminal.buffer.active.baseY;
-  const grid: TerminalCell[][] = [];
-  for (let row = 0; row < terminal.rows; row++) {
-    const rowCells: TerminalCell[] = [];
-    for (let col = 0; col < terminal.cols; col++) {
-      rowCells.push(extractCell(terminal, baseY + row, col));
-    }
-    grid.push(rowCells);
-  }
-  return grid;
-}
-
-function extractScrollback(terminal: TerminalType, scrollbackLines?: number): TerminalCell[][] {
-  const buffer = terminal.buffer.active;
-  const startRow =
-    typeof scrollbackLines === "number" ? Math.max(0, buffer.baseY - scrollbackLines) : 0;
-  const scrollback: TerminalCell[][] = [];
-  for (let row = startRow; row < buffer.baseY; row++) {
-    const rowCells: TerminalCell[] = [];
-    for (let col = 0; col < terminal.cols; col++) {
-      rowCells.push(extractCell(terminal, row, col));
-    }
-    scrollback.push(rowCells);
-  }
-  return scrollback;
-}
-
-// xterm marks a line isWrapped when it continues the PREVIOUS line; the snapshot
-// flag means "this row continues onto the next row", so it reads line y+1.
-function lineContinuesToNext(terminal: TerminalType, absoluteRow: number): boolean {
-  return terminal.buffer.active.getLine(absoluteRow + 1)?.isWrapped === true;
-}
-
-function extractGridWrapped(terminal: TerminalType): boolean[] {
-  const baseY = terminal.buffer.active.baseY;
-  const wrapped: boolean[] = [];
-  for (let row = 0; row < terminal.rows; row++) {
-    wrapped.push(lineContinuesToNext(terminal, baseY + row));
-  }
-  return wrapped;
-}
-
-function extractScrollbackWrapped(terminal: TerminalType, scrollbackLines?: number): boolean[] {
-  const total = terminal.buffer.active.baseY;
-  const startRow = typeof scrollbackLines === "number" ? Math.max(0, total - scrollbackLines) : 0;
-  const wrapped: boolean[] = [];
-  for (let row = startRow; row < total; row++) {
-    wrapped.push(lineContinuesToNext(terminal, row));
-  }
-  return wrapped;
-}
 
 function extractLastOutputLines(terminal: TerminalType, limit: number): string[] {
   const buffer = terminal.buffer.active;
@@ -254,7 +179,7 @@ function openTelnetSocket(address: string, port: number, timeoutMs: number): Pro
  * mirror terminal.ts so the terminal RPC layer can treat both alike; ECHO from
  * the server is relayed, and input is never echoed locally.
  */
-export class TelnetTerminalSession implements TerminalSession {
+export class TelnetTerminalSession implements ReplayTerminalSession {
   readonly id: string;
   readonly name: string;
   readonly cwd: string;
@@ -262,6 +187,7 @@ export class TelnetTerminalSession implements TerminalSession {
 
   private readonly socket: Socket;
   private readonly terminal: TerminalType;
+  private readonly serialize: ReturnType<typeof createTerminalSerializer>;
   private readonly parser: TelnetStreamParser = createTelnetStreamParser();
   private readonly listeners = new Set<(msg: ServerMessage) => void>();
   private readonly exitListeners = new Set<(info: TerminalExitInfo) => void>();
@@ -287,9 +213,10 @@ export class TelnetTerminalSession implements TerminalSession {
     this.terminal = new Terminal({
       rows: config.rows,
       cols: config.cols,
-      scrollback: 1000,
+      scrollback: 10000,
       allowProposedApi: true,
     });
+    this.serialize = createTerminalSerializer(this.terminal);
 
     this.registerEmulatorQueryHandlers();
 
@@ -541,14 +468,10 @@ export class TelnetTerminalSession implements TerminalSession {
     }
   }
 
-  subscribe(
-    listener: (msg: ServerMessage) => void,
-    options?: TerminalSubscribeOptions,
-  ): () => void {
+  subscribe(listener: (msg: ServerMessage) => void): () => void {
     let active = true;
     let snapshotDelivered = false;
     const queuedMessages: ServerMessage[] = [];
-    const initialSnapshot = options?.initialSnapshot ?? "state";
     const subscriptionListener = (msg: ServerMessage): void => {
       if (!active) {
         return;
@@ -567,15 +490,12 @@ export class TelnetTerminalSession implements TerminalSession {
         return;
       }
       snapshotDelivered = true;
-      if (initialSnapshot === "ready") {
-        listener({
-          type: "snapshotReady",
-          revision: this.stateRevision,
-          replayPreamble: this.getReplayPreamble(),
-        });
-      } else {
-        listener({ type: "snapshot", ...this.getStateSnapshot() });
-      }
+
+      listener({
+        type: "snapshotReady",
+        revision: this.stateRevision,
+        replayPreamble: this.getReplayPreamble(),
+      });
       for (const message of queuedMessages.splice(0)) {
         listener(message);
       }
@@ -636,30 +556,24 @@ export class TelnetTerminalSession implements TerminalSession {
     return { rows: this.terminal.rows, cols: this.terminal.cols };
   }
 
-  getState(): TerminalState {
-    return this.buildState();
+  hasOutput(): boolean {
+    return this.stateRevision > 0;
   }
 
-  getStateSnapshot(options?: TerminalStateSnapshotOptions): TerminalStateSnapshot {
-    return { state: this.buildState(options), revision: this.stateRevision };
-  }
-
-  private buildState(options?: TerminalStateSnapshotOptions): TerminalState {
-    const buffer = this.terminal.buffer.active;
+  serializeReplay(options?: TerminalReplayOptions) {
     return {
-      rows: this.terminal.rows,
-      cols: this.terminal.cols,
-      grid: extractGrid(this.terminal),
-      scrollback: extractScrollback(this.terminal, options?.scrollbackLines),
-      cursor: { row: buffer.cursorY, col: buffer.cursorX },
-      ...(this.title ? { title: this.title } : {}),
-      ...(options?.includeWrapFlags
-        ? {
-            gridWrapped: extractGridWrapped(this.terminal),
-            scrollbackWrapped: extractScrollbackWrapped(this.terminal, options?.scrollbackLines),
-          }
-        : {}),
+      metadata: {
+        ...this.getSize(),
+        retainedHistoryLines: this.terminal.buffer.normal.baseY,
+        revision: this.stateRevision,
+        replayPreamble: this.getReplayPreamble(),
+      },
+      data: this.serialize(options),
     };
+  }
+
+  captureLines(options?: CaptureTerminalLinesOptions) {
+    return captureTerminalLines(this.terminal.buffer.active, options);
   }
 
   getReplayPreamble(): string {

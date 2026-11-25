@@ -1,15 +1,52 @@
-import { PhysicalDeviceHub } from "./devices/hub.js";
-import { clearGrantsWhenSessionsEnd } from "./devices/agent-grants.js";
+import { builtinServerRegistry } from "./plugins/builtin/loaded.js";
+import { createBuiltinCoreServices } from "./plugins/builtin/services.js";
+import {
+  createFinishSubscriptions as createRemoteFinishSubscriptions,
+  createJsonFinishSubscriptionStore as createRemoteFinishStore,
+  createFinishObservation as createRemoteFinishObservation,
+  type FinishSubscriptions as RemoteFinishSubscriptions,
+} from "./agent/remote-finish-subscriptions/index.js";
+import { connectThroughProxy } from "./ssh/proxy/connect.js";
+import { BotsSlack } from "./bots/slack.js";
+import { createIdleRuntimeCleanup } from "./agent/idle-runtime-cleanup/index.js";
+import { createChangeRequestRouter } from "../services/change-request-router.js";
+import { createForgeService } from "../services/forge-registry.js";
+import { createForgeResolver } from "../services/forge-resolver.js";
+import { createChangeRequestWatches } from "./agent/change-request-watches/index.js";
+import { getAgentMessageDelivery, setupFinishNotification } from "./agent/agent-prompt.js";
+import { BotStorage } from "./bots/storage.js";
+import { BotsService } from "./bots/service.js";
+import type { BotTriggerSource } from "./bots/service.js";
+import { DaemonBotRuntime } from "./bots/daemon-runtime.js";
+import { LocalBotTriggers } from "./bots/triggers.js";
+import { createBotAgentTools } from "./bots/agent-tools.js";
+import { createRestartRecovery } from "./agent/restart-recovery/index.js";
+import { PROVIDER_BACKGROUND_REFRESH_INTERVAL_MS } from "./agent/provider-refresh-schedule.js";
+import { resolveJAgentDeskToolPolicy } from "./agent/jagentdesk-tool-policy.js";
+import { BuiltinPluginLoader } from "./plugins/builtin/index.js";
+import { withTimeout } from "../utils/promise-timeout.js";
+import { describeHookWorkspace } from "./plugins/lifecycle/index.js";
+import { WorkspaceArchiveOperations } from "./workspace-archive-operations.js";
 import { HostCapabilityService } from "./host-capabilities/service.js";
+import { closeAgentMessageDelivery } from "./agent/agent-prompt.js";
+import {
+  FinishSubscriptionStore,
+  restoreFinishSubscriptions,
+  hasOutstandingFinishSubscriptions,
+  suspendFinishNotifications,
+} from "./agent/finish-subscriptions/index.js";
 import { ensureToolDirsOnPath, HostToolInstaller } from "./host-tools/installer.js";
 import type { HttpFetch } from "./host-tools/release.js";
-import { setForgeToolInstaller } from "./session/forge/forge-cli-installer.js";
+import { setSharedHostToolInstaller } from "./host-tools/shared-installer.js";
+import { unarchiveAgentState } from "./agent/agent-prompt.js";
+import { unarchiveWorkspaceAgents } from "./workspace-archive-service.js";
+import { createWorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
 import express from "express";
 import { createServer as createHTTPServer, type IncomingMessage, type ServerResponse } from "http";
 import { constants, existsSync, unlinkSync } from "fs";
 import { open } from "fs/promises";
 import { randomUUID } from "node:crypto";
-import { homedir, hostname as getHostname } from "node:os";
+import { getHostName } from "./host-name.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -123,21 +160,24 @@ export async function fanOutReconciledWorkspaceUpdates(input: {
   );
 }
 
-import { VoiceAssistantWebSocketServer } from "./websocket-server.js";
+import { VoiceAssistantWebSocketServer, isDaemonOriginAllowed } from "./websocket-server.js";
 import { enrichProcessPath } from "./enrich-path.js";
 import { createGitHubService } from "../services/github-service.js";
 import { createJAgentDeskWorktree as createRegisteredJAgentDeskWorktree } from "./jagentdesk-worktree-service.js";
 import { createWorkspaceProvisioningService } from "./session/workspace-provisioning/workspace-provisioning-service.js";
 import { createJAgentDeskWorktreeWorkflow } from "./worktree-session.js";
 import { DownloadTokenStore } from "./file-download/token-store.js";
+import { formatAttachmentContentDisposition } from "./file-download/content-disposition.js";
 import type { OpenAiSpeechProviderConfig } from "./speech/providers/openai/config.js";
 import type { LocalSpeechProviderConfig } from "./speech/providers/local/config.js";
 import type { RequestedSpeechProviders } from "./speech/speech-types.js";
 import { createSpeechService } from "./speech/speech-runtime.js";
+import { createSpeechSettingsOwner } from "./speech/speech-settings.js";
 import { AgentManager } from "./agent/agent-manager.js";
 import { AgentStorage } from "./agent/agent-storage.js";
 import { attachAgentStoragePersistence } from "./persistence-hooks.js";
 import { createAgentMcpServer } from "./agent/mcp-server.js";
+import { createAgentMcpProtocolNormalizer } from "./agent/mcp-protocol.js";
 import {
   createJAgentDeskToolCatalog,
   type JAgentDeskToolHostDependencies,
@@ -154,34 +194,20 @@ import {
 import { FileBackedChatService } from "./chat/chat-service.js";
 import { CheckoutDiffManager } from "./checkout-diff-manager.js";
 import { LoopService } from "./loop-service.js";
-import { NativeSkillsService } from "./skills-native/index.js";
-import { buildLifetimeBaseline, UsageHistoryStorage } from "./usage/usage-history-storage.js";
 import { ClusterRegistry } from "./cluster/cluster-registry.js";
 import { DatabaseRegistry } from "./database/database-registry.js";
 import { ScheduleService } from "./schedule/service.js";
-import { AutorunService } from "./autorun/service.js";
-import { SpecModeService } from "./spec-mode/service.js";
-import type { SpecModeState } from "@jagentdesk/protocol/spec-mode";
 import { sendPromptToAgent } from "./agent/agent-prompt.js";
-import { SessionShareService } from "./session-share/service.js";
-import { AgentForumService } from "./agent-forum/service.js";
-import { createForumBootstrap, createForumNotify } from "./agent-forum/bootstrap.js";
-import { TunnelManager } from "./session-share/tunnel-manager.js";
+import { TunnelManager } from "./tunnels/tunnel-manager.js";
 import { DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
 import { PluginService } from "./plugins/index.js";
 import { ManagedPluginSources } from "./plugins/managed-source.js";
 import { BrowserToolsBroker } from "./browser-tools/broker.js";
-import { DaemonConfigBrowserToolsPolicy } from "./browser-tools/policy.js";
 import { WorkspaceGitServiceImpl } from "./workspace-git-service.js";
 import { resolveWorkspaceIdForPath } from "./resolve-workspace-id-for-path.js";
-import { ForgeHubService } from "./session/forge/forge-hub-session.js";
 import { FileSecretStore } from "./database/secret-store.js";
-import { extractProviderOverrides } from "./config.js";
+import { DEFAULT_RELAY_ENDPOINT, extractProviderOverrides } from "./config.js";
 import { createCustomProviderService } from "./custom-providers/service.js";
-import { ArgoCdService } from "./argocd/service.js";
-import { createArgoCdClusterAccess } from "./argocd/cluster-access.js";
-import { createArgoCdAgentTools } from "./argocd/agent-tools.js";
-import { ARGOCD_INSTANCE_AGENT_LABEL } from "@jagentdesk/protocol/argocd/chat-prompt";
 import {
   archiveByScope,
   archivePersistedWorkspaceRecord,
@@ -191,27 +217,17 @@ import {
 import { setupAutoArchiveOnMerge } from "./auto-archive-on-merge/index.js";
 import { wrapSessionMessage, type SessionOutboundMessage } from "./messages.js";
 import type { TerminalManager } from "../terminal/terminal-manager.js";
-import { createConfiguredTerminalManager } from "../terminal/terminal-manager-factory.js";
+import { startWorkerTerminalManager } from "../terminal/worker-terminal-manager.js";
 import { createSshTerminalManager } from "../terminal/ssh-terminal-manager.js";
 import { SshService } from "./ssh/ssh-service.js";
-import { SideloadService, type SideloadSigner } from "./sideload/sideload-service.js";
-import { createSideloadAgentTools } from "./sideload/agent-tools.js";
-import { createSideloadDeviceSigner } from "./devices/sideload-signer.js";
-import { JiraService } from "./jira/service.js";
-import { createFigmaService } from "./figma/create.js";
-import { atlassianEndpointsFromEnv } from "./jira/credentials.js";
-import { createJiraAgentTools } from "./jira/agent-tools.js";
-import { createFigmaAgentTools } from "./figma/agent-tools.js";
-import { createRemoteExecAgentTools } from "./remote-exec/agent-tools.js";
-import { createRemoteExecService } from "./remote-exec/service.js";
-import { createRemoteExecDeps } from "./remote-exec/wiring.js";
-import type { RemoteExecService } from "./remote-exec/types.js";
-import { createCustomProviderAgentTools } from "./custom-providers/agent-tools.js";
+import { removeRetiredFigmaData } from "./retired-figma-data.js";
 import { SshModules } from "./ssh/ssh-modules.js";
 import { SshModules as SshServerModules } from "./ssh/modules.js";
 import { applyTerminalAgentHookSetting } from "../terminal/agent-hooks/terminal-agent-hook-setting.js";
 import { loadOrCreateDaemonKeyPair } from "./daemon-keypair.js";
 import { createTsnetListener, type TsnetListener } from "./tsnet-listener.js";
+import { createRelayRuntime, type RelayRuntime } from "./relay-runtime.js";
+import { admitSecuredRelaySocket } from "./websocket/secure-relay-ingress.js";
 import { createPairedDeviceStore, type PairedDeviceStore } from "./pairing/paired-devices.js";
 import {
   createNonceChallengeManager,
@@ -418,6 +434,8 @@ export interface JAgentDeskSpeechSttLanguages {
 
 export interface JAgentDeskSpeechConfig {
   providers: RequestedSpeechProviders;
+  // Where local models live, whether or not a feature currently uses the local provider.
+  localModelsDir: string;
   sttLanguages?: JAgentDeskSpeechSttLanguages;
   local?: JAgentDeskLocalSpeechConfig;
 }
@@ -428,18 +446,22 @@ export type DaemonLifecycleIntent =
       clientId: string;
       requestId: string;
       reason: string;
+      keepTerminals: boolean;
     }
   | {
       type: "restart";
       clientId: string;
       requestId: string;
       reason: string;
+      keepTerminals: boolean;
     };
 
 export interface JAgentDeskDaemonConfig {
   listen: string;
   jagentdeskHome: string;
   daemonVersion?: string;
+  resumeOnStartup?: boolean;
+  resumePrompt?: string;
   desktopManaged?: boolean;
   worktreesRoot?: string;
   corsAllowedOrigins: string[];
@@ -452,6 +474,7 @@ export interface JAgentDeskDaemonConfig {
   // Anti-detect fingerprint profiles and the active one (ADR-0011), persisted in config.json.
   browserFingerprintProfiles?: NonNullable<MutableDaemonConfig["browserTools"]["profiles"]>;
   browserActiveProfileId?: string | null;
+  builtinPlugins?: MutableDaemonConfig["builtinPlugins"];
   pluginsEnabled?: boolean;
   plugins?: MutableDaemonConfig["plugins"];
   // Autonomous run (spec §20). Default OFF; only exposes the autorun.* RPC surface +
@@ -459,6 +482,11 @@ export interface JAgentDeskDaemonConfig {
   autorunEnabled?: boolean;
   // Session sharing (spec §21). Default OFF; exposes one agent chat via a Cloudflare tunnel.
   sessionSharingEnabled?: boolean;
+  // Relay second path (spec 35). Default ON; daemon dials the Worker alongside the tailnet.
+  relayEnabled?: boolean;
+  relayEnabledMutable?: boolean;
+  relayEndpoint?: string;
+  relayUseTls?: boolean;
   // Directory of the app web build served to session-share guests as the real UI (ADR-0019).
   sessionShareAppDistDir?: string;
   git?: {
@@ -498,6 +526,7 @@ export interface JAgentDeskDaemonConfig {
   dictationFinalTimeoutMs?: number;
   downloadTokenTtlMs?: number;
   agentProviderSettings?: AgentProviderRuntimeSettingsMap;
+  idleRuntimeCleanup?: boolean;
   metadataGeneration?: {
     providers?: Array<{
       provider: string;
@@ -520,14 +549,18 @@ export interface JAgentDeskDaemon {
   serviceProxy: ServiceProxySubsystem;
   scriptRuntimeStore: WorkspaceScriptRuntimeStore;
   browserToolsBroker: BrowserToolsBroker;
-  /** Sideload accounts other features sign with (spec 27 signs WebDriverAgent). */
-  sideload: SideloadSigner;
   start(): Promise<void>;
-  stop(): Promise<void>;
+  /** Stops the daemon. Terminals keep running for the next daemon only with keepTerminals. */
+  stop(options?: { keepTerminals?: boolean }): Promise<void>;
   getListenTarget(): ListenTarget | null;
 }
 
 export interface JAgentDeskDaemonDependencies {
+  hostCapabilities?: HostCapabilityService;
+  botsTriggerSource?: BotTriggerSource;
+  slackApiBaseUrl?: string;
+  sessionShareTunnelManager?: TunnelManager;
+  builtinPlugins?: BuiltinPluginLoader;
   hubRelationshipRemote?: HubRelationshipRemote;
   hubRelationshipClock?: HubRelationshipClock;
   hubRelationshipRetryPolicy?: HubRelationshipRetryPolicy;
@@ -572,7 +605,7 @@ function mountWebUi(
     createWebUiMiddleware({
       enabled: config.webUi?.enabled ?? false,
       distDir: config.webUi?.distDir ?? null,
-      label: getHostname(),
+      label: getHostName(),
       logger,
     }),
   );
@@ -582,6 +615,14 @@ function resolveExpressTrustProxySetting(config: JAgentDeskDaemonConfig): true |
   return config.trustedProxies ?? ["loopback"];
 }
 
+function createInitialRelayConfig(config: JAgentDeskDaemonConfig): MutableDaemonConfig["relay"] {
+  return {
+    enabled: config.relayEnabled ?? true,
+    endpoint: config.relayEndpoint ?? DEFAULT_RELAY_ENDPOINT,
+    useTls: config.relayUseTls ?? true,
+  };
+}
+
 function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): MutableDaemonConfig {
   const providers: MutableDaemonConfig["providers"] = Object.fromEntries(
     Object.entries(config.providerOverrides ?? {}).map(([providerId, override]) => {
@@ -589,6 +630,7 @@ function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): Mutab
       if (override.enabled !== undefined) {
         providerConfig.enabled = override.enabled;
       }
+      if (override.jagentdeskTools) providerConfig.jagentdeskTools = override.jagentdeskTools;
       if (override.additionalModels) {
         providerConfig.additionalModels = override.additionalModels;
       }
@@ -599,7 +641,7 @@ function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): Mutab
   const initialConfig: MutableDaemonConfig = {
     mcp: { injectIntoAgents: config.mcpInjectIntoAgents ?? true },
     browserTools: {
-      enabled: config.browserToolsEnabled ?? true,
+      enabled: config.browserToolsEnabled ?? false,
       ...(config.browserFingerprintProfiles ? { profiles: config.browserFingerprintProfiles } : {}),
       ...(config.browserActiveProfileId !== undefined
         ? { activeProfileId: config.browserActiveProfileId }
@@ -607,13 +649,17 @@ function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): Mutab
     },
     autorun: { enabled: config.autorunEnabled ?? false },
     sessionSharing: { enabled: config.sessionSharingEnabled ?? false },
+    relay: createInitialRelayConfig(config),
     providers,
     metadataGeneration: {
       providers: config.metadataGeneration?.providers ?? [],
     },
     autoArchiveAfterMerge: config.autoArchiveAfterMerge ?? false,
     enableTerminalAgentHooks: config.enableTerminalAgentHooks ?? false,
+    idleRuntimeCleanup: config.idleRuntimeCleanup !== false,
     appendSystemPrompt: config.appendSystemPrompt ?? "",
+    resumeOnStartup: config.resumeOnStartup === true,
+    resumePrompt: config.resumePrompt ?? "Resume working.",
     operatorContext: config.operatorContext ?? "",
     orchestration: config.orchestration ?? createDefaultOrchestrationConfig(),
   };
@@ -621,6 +667,7 @@ function createInitialMutableDaemonConfig(config: JAgentDeskDaemonConfig): Mutab
   if (config.terminalProfiles !== undefined) {
     initialConfig.terminalProfiles = config.terminalProfiles;
   }
+  if (config.builtinPlugins !== undefined) initialConfig.builtinPlugins = config.builtinPlugins;
   if (config.pluginsEnabled !== undefined) initialConfig.pluginsEnabled = config.pluginsEnabled;
   if (config.plugins !== undefined) initialConfig.plugins = config.plugins;
 
@@ -642,17 +689,36 @@ export async function createJAgentDeskDaemon(
   const bootstrapStart = performance.now();
   const elapsed = () => `${(performance.now() - bootstrapStart).toFixed(0)}ms`;
   const daemonVersion = config.daemonVersion ?? resolveDaemonVersion(import.meta.url);
+  const speechService = createSpeechService({
+    logger,
+    openaiConfig: config.openai,
+    speechConfig: config.speech,
+  });
   const daemonConfigStore = new DaemonConfigStore(
     config.jagentdeskHome,
     createInitialMutableDaemonConfig(config),
     logger,
+    {
+      speech: createSpeechSettingsOwner({
+        jagentdeskHome: config.jagentdeskHome,
+        env: process.env,
+        speechService,
+      }),
+    },
   );
-  const browserToolsPolicy = new DaemonConfigBrowserToolsPolicy(daemonConfigStore);
   const browserToolsBroker = new BrowserToolsBroker({});
-  // `pluginsEnabled` defaults FALSE, so start() spawns nothing unless the operator
-  // has explicitly enabled plugins. Managed git sources back the marketplace install
-  // flow (a checked-out Paseo plugin is auto-rebranded before it is compiled).
+  // Built-ins load independently of the user-plugin switch. Managed git sources
+  // back marketplace installs and are rebranded before compilation.
   const pluginRuntime = new PluginService(logger, daemonConfigStore, daemonVersion, {
+    resolveUsageLaunch: (provider) => providerSnapshotManager.resolveUsageLaunch(provider),
+    usageAgents: {
+      hasAgent: (id) => agentManager.getAgent(id) !== null,
+      usageSession: (id) => agentManager.usageSession(id),
+      resolveLaunch: (provider) => providerSnapshotManager.resolveUsageLaunch(provider),
+      isProviderActive: (provider, options) =>
+        providerSnapshotManager.isProviderActiveForUsage(provider, options),
+    },
+    builtinPlugins: dependencies.builtinPlugins ?? new BuiltinPluginLoader(),
     managedSources: new ManagedPluginSources(config.jagentdeskHome),
     settingsDirectory: path.join(config.jagentdeskHome, "plugin-settings"),
   });
@@ -700,6 +766,8 @@ export async function createJAgentDeskDaemon(
     logger.warn({ err: error }, "Failed to reconcile managed helper process ledger");
   });
   let tsnetListener: TsnetListener | null = null;
+  let remoteFinishSubscriptions: RemoteFinishSubscriptions | null = null;
+  let relayRuntime: RelayRuntime | null = null;
 
   const staticDir = config.staticDir;
   const downloadTokenTtlMs = config.downloadTokenTtlMs ?? 60000;
@@ -738,12 +806,13 @@ export async function createJAgentDeskDaemon(
     // and re-read on every connect attempt).
     tailnetSocks: () => tsnetListener?.getTailnetSocks() ?? null,
   });
-  const terminalManager = createSshTerminalManager(
-    createConfiguredTerminalManager({
-      getTerminalActivityUrl: () => createTerminalActivityUrl(boundListenTarget),
-    }),
-    () => sshService,
-  );
+  const localTerminalManager = await startWorkerTerminalManager({
+    jagentdeskHome: config.jagentdeskHome,
+    jagentdeskVersion: daemonVersion,
+    logger,
+    getTerminalActivityUrl: () => createTerminalActivityUrl(boundListenTarget),
+  });
+  const terminalManager = createSshTerminalManager(localTerminalManager, () => sshService);
   applyTerminalAgentHookSetting({ store: daemonConfigStore, logger });
 
   const serviceProxyPublicBaseUrl = config.serviceProxy?.publicBaseUrl
@@ -819,7 +888,7 @@ export async function createJAgentDeskDaemon(
 
   app.use((req, res, next) => {
     const origin = req.headers.origin;
-    if (origin && (allowedOrigins.has("*") || allowedOrigins.has(origin))) {
+    if (origin && isDaemonOriginAllowed(origin, req.headers.host ?? null, allowedOrigins)) {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
       res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
@@ -865,7 +934,7 @@ export async function createJAgentDeskDaemon(
     res.json({
       status: "server_info",
       serverId,
-      hostname: getHostname(),
+      hostname: getHostName(),
       version: daemonVersion,
       listen: formatListenTarget(boundListenTarget ?? listenTarget),
     });
@@ -892,18 +961,21 @@ export async function createJAgentDeskDaemon(
     try {
       fileHandle = await open(entry.absolutePath, DOWNLOAD_OPEN_FLAGS);
       const fileStats = await fileHandle.stat();
+      if (res.destroyed) {
+        return;
+      }
       if (!fileStats.isFile()) {
         res.status(404).json({ error: "File not found" });
         return;
       }
 
-      const safeFileName = entry.fileName.replace(/["\r\n]/g, "_");
       res.setHeader("Content-Type", entry.mimeType);
-      res.setHeader("Content-Disposition", `attachment; filename="${safeFileName}"`);
+      res.setHeader("Content-Disposition", formatAttachmentContentDisposition(entry.fileName));
       res.setHeader("Content-Length", fileStats.size.toString());
 
       const stream = fileHandle.createReadStream();
       fileHandle = null;
+      res.once("close", () => stream.destroy());
       stream.on("error", (err) => {
         logger.error({ err }, "Failed to stream download");
         if (!res.headersSent) {
@@ -953,15 +1025,45 @@ export async function createJAgentDeskDaemon(
     logger,
   });
   const github = createGitHubService();
+  const forgeResolver = createForgeResolver({
+    createService: (forge) => (forge === "github" ? github : createForgeService(forge)),
+  });
   const workspaceGitService = new WorkspaceGitServiceImpl({
     logger,
     jagentdeskHome: config.jagentdeskHome,
     worktreesRoot: config.worktreesRoot,
     deps: {
-      forgeOverrides: { github },
+      forgeResolver,
     },
   });
+  workspaceRegistry.subscribeToMutations((mutation) => {
+    if (mutation.kind === "archive" && mutation.workspace)
+      pluginRuntime.emit("workspace.archive.after", {
+        workspace: describeHookWorkspace(mutation.workspace),
+      });
+  });
+  const workspaceRuntimeStore = createWorkspaceRuntimeStore();
+  const workspaceArchiveOperations = new WorkspaceArchiveOperations();
+  workspaceGitService.onSnapshotUpdated((snapshot) => workspaceRuntimeStore.set(snapshot));
+  workspaceRegistry.subscribeToMutations(async (mutation) => {
+    if (mutation.kind === "remove" && mutation.workspace) {
+      const cwd = path.resolve(mutation.workspace.cwd);
+      const workspaces = await workspaceRegistry.list();
+      const hasActiveWorkspace = workspaces.some(
+        (workspace) => !workspace.archivedAt && path.resolve(workspace.cwd) === cwd,
+      );
+      if (!hasActiveWorkspace) workspaceRuntimeStore.remove(cwd);
+    }
+  });
   const workspaceProvisioning = createWorkspaceProvisioningService({
+    lifecycle: pluginRuntime,
+    unarchiveWorkspaceAgents: (request) =>
+      unarchiveWorkspaceAgents({
+        ...request,
+        agentStorage,
+        unarchiveAgent: (id) => unarchiveAgentState(agentStorage, agentManager, id),
+        sessionLogger: logger,
+      }),
     serverId,
     projectRegistry,
     workspaceRegistry,
@@ -989,6 +1091,7 @@ export async function createJAgentDeskDaemon(
   });
   const providerSnapshotLogger = logger.child({ module: "provider-snapshot-manager" });
   const providerSnapshotManager = new ProviderSnapshotManager({
+    backgroundRefresh: { intervalMs: PROVIDER_BACKGROUND_REFRESH_INTERVAL_MS },
     logger: providerSnapshotLogger,
     runtimeSettings: config.agentProviderSettings,
     providerOverrides: config.providerOverrides,
@@ -1000,10 +1103,12 @@ export async function createJAgentDeskDaemon(
       customProviderService.materializeOpenCodeProvider(providerId),
     claudeSpawnEnv: (providerId) => customProviderService.materializeClaudeEnv(providerId),
   });
-  const usageHistory = new UsageHistoryStorage(config.jagentdeskHome, logger);
-  await usageHistory.initialize();
   const initialAgentManagerState = providerSnapshotManager.getAgentManagerProviderState();
-  const agentManager = new AgentManager({
+  const agentManager: AgentManager = new AgentManager({
+    pluginLifecycle: pluginRuntime,
+    resolveJAgentDeskToolPolicy: (provider) =>
+      resolveJAgentDeskToolPolicy(provider, daemonConfigStore.get().providers),
+    pluginAgentTools: pluginRuntime,
     clients: initialAgentManagerState.clients,
     providerDefinitions: initialAgentManagerState.providerDefinitions,
     registry: agentStorage,
@@ -1012,9 +1117,27 @@ export async function createJAgentDeskDaemon(
     onWorkspaceStateMayHaveChanged: ({ cwd }) => {
       workspaceGitService.onWorkspaceStateMayHaveChanged(cwd);
     },
-    onUsageBilled: (billed) => usageHistory.record(billed),
+    // Insights records billed turns; agents cannot run before the built-ins start.
+    onUsageBilled: (billed) => builtinDaemon.port("usageHistory")?.record(billed),
     mcpAuthToken: agentMcpAuthToken,
     logger,
+  });
+
+  const unsubscribeBuiltinAgentSnapshots = agentManager.subscribe(
+    (event) => {
+      if (event.type === "agent_state") pluginRuntime.builtin.forAgent(event.agent.id);
+    },
+    { replayState: false },
+  );
+
+  const unsubscribePluginProviders = pluginRuntime.subscribeProviderRegistrations(() => {
+    agentManager.updateProviderRegistry(
+      providerSnapshotManager.replacePluginProviders(pluginRuntime.getProviderRegistrations()),
+    );
+  });
+
+  const unsubscribePluginSessionChanges = pluginRuntime.subscribeSessionOpenChanges(() => {
+    agentManager.invalidatePluginSessions();
   });
 
   const detachAgentStoragePersistence = attachAgentStoragePersistence(
@@ -1023,6 +1146,22 @@ export async function createJAgentDeskDaemon(
     agentStorage,
   );
   await agentStorage.initialize();
+  // The host capability probe is created with the WebSocket server below and assigned there.
+  let daemonHostCapabilities: HostCapabilityService | null = null;
+
+  const restartRecovery = createRestartRecovery({
+    storage: agentStorage,
+    settings: () => ({
+      enabled: daemonConfigStore.get().resumeOnStartup === true,
+      prompt: daemonConfigStore.get().resumePrompt ?? "Resume working.",
+    }),
+    eligible: async (record) =>
+      !record.workspaceId || !(await workspaceRegistry?.get(record.workspaceId))?.archivedAt,
+    dispatch: (agentId, prompt) =>
+      sendPromptToAgent({ agentId, prompt, agentManager, agentStorage, logger, unarchive: false }),
+    report: (agentId, err) => logger.error({ agentId, err }, "Agent restart recovery failed"),
+  });
+  await restartRecovery.prepareStartup();
 
   // Spec 34.6 hot reload: after a custom provider save/delete, re-read the
   // persisted config, rebuild the provider registry (base overrides replaced,
@@ -1040,22 +1179,29 @@ export async function createJAgentDeskDaemon(
     agentManager.updateProviderRegistry(nextAgentManagerState);
   };
   logger.info({ elapsed: elapsed() }, "Agent storage initialized");
-  // Seed the lifetime usage baseline once from existing agents so headline Usage
-  // & Cost figures include usage that predates the time-series and never drop
-  // when an agent is deleted. No-op if a baseline was already persisted.
-  try {
-    const records = await agentStorage.list();
-    usageHistory.seedBaselineIfEmpty(
-      buildLifetimeBaseline(
-        records.map((record) => ({
-          usageTotals: record.usageTotals,
-          model: record.config?.model ?? record.runtimeInfo?.model ?? record.provider,
-        })),
-      ),
-    );
-  } catch (error) {
-    logger.warn({ err: error }, "Failed to seed usage baseline from existing agents");
-  }
+  // Reconcile after startup continuation admission so a running child is observed through its next finish.
+  await restoreFinishSubscriptions({
+    agentManager,
+    store: FinishSubscriptionStore.forHome(config.jagentdeskHome, logger),
+    reconcile: async (record, signal, subscriptionIds) => {
+      await restartRecovery.waitForResume(record.childAgentId, signal);
+      signal.throwIfAborted();
+      await setupFinishNotification({
+        agentManager,
+        agentStorage,
+        childAgentId: record.childAgentId,
+        callerAgentId: record.callerAgentId,
+        requireParentOwnership: record.requireParentOwnership,
+        restoredSubscriptionId: record.id,
+        restoredSubscriptionIds: subscriptionIds,
+        logger,
+      }).ready;
+    },
+    isArchived: async (agentId) => Boolean((await agentStorage.get(agentId))?.archivedAt),
+    logger,
+  }).catch((error: unknown) => {
+    logger.error({ err: error }, "Failed to restore finish subscriptions");
+  });
   await bootstrapWorkspaceRegistries({
     serverId,
     jagentdeskHome: config.jagentdeskHome,
@@ -1096,15 +1242,18 @@ export async function createJAgentDeskDaemon(
     logger,
     jagentdeskHome: config.jagentdeskHome,
     workspaceGitService,
+    workspaceRuntimeStore,
   });
   const archiveWorkspaceRecordExternal = async (
     workspaceId: string,
     context?: WorkspaceArchiveContext,
+    archivedAt?: string,
   ) => {
     const existingWorkspace = await archivePersistedWorkspaceRecord({
       workspaceId,
       workspaceRegistry,
       context,
+      archivedAt,
     });
     if (!existingWorkspace || existingWorkspace.archivedAt) return;
     teardownArchivedWorkspaceRuntime(workspaceId);
@@ -1117,10 +1266,13 @@ export async function createJAgentDeskDaemon(
   const ensureWorkspaceForCreateExternal = async (
     cwd: string,
     firstAgentContext?: FirstAgentContext,
+    context?: { background?: boolean; callerWorkspaceId?: string },
   ): Promise<string> => {
     const workspace = await workspaceProvisioning.createWorkspaceForDirectory(
       cwd,
       resolveFirstAgentPromptTitle(firstAgentContext),
+      undefined,
+      context,
     );
     if (firstAgentContext) {
       workspaceAutoName.scheduleForDirectory({
@@ -1144,31 +1296,19 @@ export async function createJAgentDeskDaemon(
         mainRepoRoot: workspace.mainRepoRoot,
       }));
   };
-  const markWorkspaceArchivingExternal = (workspaceIds: Iterable<string>, archivingAt: string) => {
-    const workspaceIdList = Array.from(workspaceIds);
-    for (const session of wsServer?.listTrustedSessions() ?? []) {
-      session.markWorkspaceArchivingForExternalMutation(workspaceIdList, archivingAt);
-    }
-  };
-  const clearWorkspaceArchivingExternal = (workspaceIds: Iterable<string>) => {
-    const workspaceIdList = Array.from(workspaceIds);
-    for (const session of wsServer?.listTrustedSessions() ?? []) {
-      session.clearWorkspaceArchivingForExternalMutation(workspaceIdList);
-    }
-  };
+  const markWorkspaceArchiving = (workspaceIds: Iterable<string>, archivingAt: string) =>
+    workspaceArchiveOperations.markArchiving(workspaceIds, archivingAt);
+  const clearWorkspaceArchiving = (workspaceIds: Iterable<string>) =>
+    workspaceArchiveOperations.clearArchiving(workspaceIds);
   const emitWorkspaceUpdatesExternal = async (workspaceIds: Iterable<string>) => {
-    const workspaceIdList = Array.from(workspaceIds);
-    await Promise.all(
-      (wsServer?.listTrustedSessions() ?? []).map((session) =>
-        session.emitWorkspaceUpdatesForExternalWorkspaceIds(workspaceIdList),
-      ),
-    );
+    await wsServer?.publishWorkspaceUpdates(workspaceIds);
   };
   const ensureWorkspaceForCreateAndBroadcastExternal = async (
     cwd: string,
     firstAgentContext?: FirstAgentContext,
+    context?: { background?: boolean; callerWorkspaceId?: string },
   ): Promise<string> => {
-    const workspaceId = await ensureWorkspaceForCreateExternal(cwd, firstAgentContext);
+    const workspaceId = await ensureWorkspaceForCreateExternal(cwd, firstAgentContext, context);
     await emitWorkspaceUpdatesExternal([workspaceId]);
     return workspaceId;
   };
@@ -1211,8 +1351,8 @@ export async function createJAgentDeskDaemon(
     getAutoArchivedChangeRequestUrl: async (workspaceId) =>
       (await workspaceRegistry.get(workspaceId))?.autoArchivedChangeRequestUrl ?? null,
     archiveWorkspaceRecord: archiveWorkspaceRecordExternal,
-    markWorkspaceArchiving: markWorkspaceArchivingExternal,
-    clearWorkspaceArchiving: clearWorkspaceArchivingExternal,
+    markWorkspaceArchiving,
+    clearWorkspaceArchiving,
     emitWorkspaceUpdatesForWorkspaceIds: emitWorkspaceUpdatesExternal,
   });
 
@@ -1226,6 +1366,7 @@ export async function createJAgentDeskDaemon(
         worktreesRoot: config.worktreesRoot,
         createJAgentDeskWorktree: async (workflowInput, workflowOptions) => {
           return createRegisteredJAgentDeskWorktree(workflowInput, {
+            lifecycle: pluginRuntime,
             github,
             ...(workflowOptions?.resolveDefaultBranch
               ? {
@@ -1252,7 +1393,6 @@ export async function createJAgentDeskDaemon(
         emit: emitExternalSessionMessage,
         sessionLogger: logger,
         terminalManager,
-        archiveWorkspaceRecord: archiveWorkspaceRecordExternal,
         serviceProxy,
         scriptRuntimeStore,
         getDaemonTcpPort: () => (boundListenTarget?.type === "tcp" ? boundListenTarget.port : null),
@@ -1289,10 +1429,11 @@ export async function createJAgentDeskDaemon(
         agentStorage,
         findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
         listActiveWorkspaces: listActiveWorkspacesExternal,
-        archiveWorkspaceRecord: archiveWorkspaceRecordExternal,
+        archiveWorkspaceRecord: (workspaceIdToArchive, archivedAt) =>
+          archiveWorkspaceRecordExternal(workspaceIdToArchive, undefined, archivedAt),
         emitWorkspaceUpdatesForWorkspaceIds: emitWorkspaceUpdatesExternal,
-        markWorkspaceArchiving: markWorkspaceArchivingExternal,
-        clearWorkspaceArchiving: clearWorkspaceArchivingExternal,
+        markWorkspaceArchiving,
+        clearWorkspaceArchiving,
         killTerminalsForWorkspace: (workspaceIdToKill) =>
           killTerminalsForWorkspace({ terminalManager, sessionLogger: logger }, workspaceIdToKill),
         sessionLogger: logger,
@@ -1311,12 +1452,12 @@ export async function createJAgentDeskDaemon(
       archiveAgentCommand({ agentManager, agentStorage, logger }, agentId),
     findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
     listActiveWorkspaces: listActiveWorkspacesExternal,
-    archiveWorkspaceRecord: archiveWorkspaceRecordExternal,
+    archiveWorkspaceRecord: (workspaceId) => archiveWorkspaceRecordExternal(workspaceId),
     emit: emitExternalSessionMessage,
     emitAgentRemove: async () => undefined,
     emitWorkspaceUpdatesForWorkspaceIds: emitWorkspaceUpdatesExternal,
-    markWorkspaceArchiving: markWorkspaceArchivingExternal,
-    clearWorkspaceArchiving: clearWorkspaceArchivingExternal,
+    markWorkspaceArchiving,
+    clearWorkspaceArchiving,
     killTerminalsForWorkspace: (workspaceId) =>
       killTerminalsForWorkspace({ terminalManager, sessionLogger: logger }, workspaceId),
     logger,
@@ -1371,33 +1512,12 @@ export async function createJAgentDeskDaemon(
   });
   await loopService.initialize();
   logger.info({ elapsed: elapsed() }, "Loop service initialized");
-  // Native SKILL.md skills (spec 22 / ADR-0022). Also serves the legacy skills.get /
-  // skills.mutate API (COMPAT(nativeSkills)) and migrates skills.json once (22.10).
-  const skillsStorage = new NativeSkillsService({
-    jagentdeskHome: config.jagentdeskHome,
-    homeDir: homedir(),
-    logger,
-  });
-  await skillsStorage.initialize();
   const clusterRegistry = new ClusterRegistry({
     jagentdeskHome: config.jagentdeskHome,
     logger,
   });
   await clusterRegistry.initialize();
   logger.info("Cluster registry created");
-  // Spec 27 / ADR-0033: one owner for physical phones and tablets, shared by every client
-  // session and every agent's sim_* tools. Prepare device signs WebDriverAgent with a Sideload
-  // Apple account (spec 26); sideloadService is created further down, hence the late lookup.
-  let deviceSignerSource: SideloadService | null = null;
-  const physicalDevices = new PhysicalDeviceHub({
-    jagentdeskHome: config.jagentdeskHome,
-    logger,
-    signer: createSideloadDeviceSigner(() => deviceSignerSource),
-  });
-  const stopDeviceGrantWatch = clearGrantsWhenSessionsEnd(
-    (callback) => agentManager.subscribe(callback, { replayState: false }),
-    physicalDevices,
-  );
   const databaseRegistry = new DatabaseRegistry({
     jagentdeskHome: config.jagentdeskHome,
     logger,
@@ -1412,9 +1532,6 @@ export async function createJAgentDeskDaemon(
     sshService,
     jagentdeskHome: config.jagentdeskHome,
     logger,
-    agentLabels: (agentId) => agentManager.getAgent(agentId)?.labels ?? null,
-    requestPermission: (agentId, request) =>
-      agentManager.requestHostToolPermission(agentId, request),
   });
   await sshServerModules.initialize();
   sshService.modules = sshServerModules;
@@ -1426,78 +1543,9 @@ export async function createJAgentDeskDaemon(
     forwarding: sshServerModules.forwarding,
   });
   await sshModules.initialize();
-  sshService.registerModuleHandlers(sshModules.handlers());
+  sshService.sessionModules = sshModules;
   logger.info("SSH service initialized");
-  // Remote execution (spec 33 / ADR-0044): one daemon-wide service over the SSH server store
-  // and client pool. Job updates fan out to every trusted session (same shape as the script
-  // status emitter); the emit gate drops sessions whose scopes cannot read them.
-  // TEMP(remote-exec-engine): construction and start are guarded so an engine that fails to
-  // come up only disables remote-exec instead of failing boot.
-  let remoteExecService: RemoteExecService | null = null;
-  let unsubscribeRemoteExecJobs: (() => void) | null = null;
-  try {
-    const remoteExecCandidate = createRemoteExecService(
-      createRemoteExecDeps({
-        sshService,
-        homeDir: config.jagentdeskHome,
-        daemonId: serverId,
-        logger: logger.child({ module: "remote-exec" }),
-      }),
-    );
-    await remoteExecCandidate.start();
-    remoteExecService = remoteExecCandidate;
-    unsubscribeRemoteExecJobs = remoteExecCandidate.onJobUpdated((job) => {
-      for (const session of wsServer?.listTrustedSessions() ?? []) {
-        session.emitRemoteExecJobUpdated(job);
-      }
-    });
-    logger.info("Remote-exec service initialized");
-  } catch (error) {
-    logger.warn({ err: error }, "Remote-exec service unavailable");
-    remoteExecService = null;
-  }
-  // Sideload (spec 26 / ADR-0032): accounts, signing, installs and the hourly refresh job.
-  // Secrets stay in <home>/sideload's own secret store; prompts, progress and notices fan out
-  // to every client (wsServer is late-bound). The two env knobs shorten the refresh cycle for
-  // the 26.12.4 acceptance run; they are not user settings.
-  const sideloadService = new SideloadService({
-    jagentdeskHome: config.jagentdeskHome,
-    logger,
-    broadcast: (message) => wsServer?.broadcast(wrapSessionMessage(message)),
-    pushNotification: (notice) => wsServer?.sendSideloadPush(notice),
-    refreshIntervalMs: positiveEnvNumber("JAGENTDESK_SIDELOAD_REFRESH_INTERVAL_MS"),
-    clockOffsetMs: envNumber("JAGENTDESK_SIDELOAD_CLOCK_OFFSET_MS"),
-  });
-  sideloadService.initialize();
-  logger.info("Sideload service initialized");
-  deviceSignerSource = sideloadService;
-  // Daemon-wide Forge Hub service (spec 19 / ADR-0015). One instance shared across
-  // all agents' tool catalogs, mirroring how session.ts builds it per-session. Token
-  // secrets + the connection index live under <home>/forge.
-  const forgeSecretDir = path.resolve(config.jagentdeskHome, "forge");
-  const forgeHubService = new ForgeHubService(new FileSecretStore(forgeSecretDir), forgeSecretDir);
-  logger.info("Forge Hub service created");
-  // Argo CD (spec 30 / ADR-0034): registry + secrets under <home>/argocd, one SSE stream per
-  // instance while viewed, and the argocd_* agent tools.
-  const argocdService = new ArgoCdService({
-    jagentdeskHome: config.jagentdeskHome,
-    logger: logger.child({ module: "argocd" }),
-    clusters: createArgoCdClusterAccess(clusterRegistry),
-  });
-  await argocdService.initialize();
-  logger.info("Argo CD service initialized");
-  // Daemon-wide Jira service (spec 29 / ADR-0034 §4): the one credential manager for every
-  // session, view watch and agent tool. Secrets live under <home>/jira.
-  const jiraService = new JiraService({
-    jagentdeskHome: config.jagentdeskHome,
-    endpoints: atlassianEndpointsFromEnv(process.env),
-    logger,
-  });
-  await jiraService.initialize();
-  logger.info("Jira service initialized");
-  // Daemon-wide Figma service (spec 32 / ADR-0035): OAuth, REST budget, Figma Link bridge.
-  const figmaService = await createFigmaService({ jagentdeskHome: config.jagentdeskHome, logger });
-  logger.info("Figma service initialized");
+  await removeRetiredFigmaData({ jagentdeskHome: config.jagentdeskHome, logger });
   const createScheduleLocalWorkspaceExternal = async (input: {
     cwd: string;
     firstAgentContext: FirstAgentContext;
@@ -1536,10 +1584,11 @@ export async function createJAgentDeskDaemon(
         agentStorage,
         findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
         listActiveWorkspaces: listActiveWorkspacesExternal,
-        archiveWorkspaceRecord: archiveWorkspaceRecordExternal,
+        archiveWorkspaceRecord: (workspaceIdToArchive, archivedAt) =>
+          archiveWorkspaceRecordExternal(workspaceIdToArchive, undefined, archivedAt),
         emitWorkspaceUpdatesForWorkspaceIds: emitWorkspaceUpdatesExternal,
-        markWorkspaceArchiving: markWorkspaceArchivingExternal,
-        clearWorkspaceArchiving: clearWorkspaceArchivingExternal,
+        markWorkspaceArchiving,
+        clearWorkspaceArchiving,
         killTerminalsForWorkspace: (workspaceIdToKill) =>
           killTerminalsForWorkspace(
             {
@@ -1567,7 +1616,20 @@ export async function createJAgentDeskDaemon(
     archiveWorkspace: archiveScheduleWorkspaceExternal,
   });
   await scheduleService.start();
+  const changeRequestWatches = createChangeRequestWatches({
+    router: createChangeRequestRouter({ forgeResolver }),
+    backgroundWork: agentManager,
+    jagentdeskHome: config.jagentdeskHome,
+    logger,
+    isActive: async (agentId) => {
+      const record = await agentStorage.get(agentId);
+      return record ? !record.archivedAt : Boolean(agentManager.getAgent(agentId));
+    },
+    messages: () => getAgentMessageDelivery({ agentManager, agentStorage, logger }),
+  });
+
   agentManager.setAgentArchivedCallback(async (agentId) => {
+    await changeRequestWatches.archive(agentId);
     try {
       await scheduleService.completeForAgent(agentId);
     } catch (error) {
@@ -1575,56 +1637,65 @@ export async function createJAgentDeskDaemon(
     }
   });
   logger.info({ elapsed: elapsed() }, "Schedule service initialized");
-  // Autonomous run driver (spec §20 / ADR-0017). Default OFF (spec §20.12): the service —
-  // and with it the whole autorun.* RPC surface + `features.autorun` capability — only
-  // exists when the daemon config opts in. onUpdate broadcasts the run snapshot to every
-  // connected client as `autorun.stream`. Reuses the schedule workspace-creator.
-  const autorunService = config.autorunEnabled
-    ? new AutorunService({
-        jagentdeskHome: config.jagentdeskHome,
-        logger,
-        agentManager,
-        onUpdate: (state) =>
-          emitExternalSessionMessage({ type: "autorun.stream", payload: { state } }),
-        onStopped: (state) => wsServer?.notifyAutorunStopped(state),
-      })
-    : null;
-  await autorunService?.initialize();
-  // Spec mode (spec 28 / ADR-0030) needs the host capability probe, created with the WebSocket
-  // server below; it is assigned there.
-  let specModeService: SpecModeService | null = null;
-  logger.info(
-    { elapsed: elapsed(), enabled: config.autorunEnabled === true },
-    "Autorun service initialized",
-  );
-  // Session sharing (spec §21 / ADR-0018). Default OFF: the service + `features.sessionSharing`
-  // only exist when the daemon opted in. Cloudflare quick tunnel + a scoped per-share server.
-  const shareAppDistDir =
-    config.sessionShareAppDistDir ??
-    process.env.JAGENTDESK_SHARE_APP_DIST ??
-    resolveBundledShareAppDist();
-  const sessionShareService = config.sessionSharingEnabled
-    ? new SessionShareService({
-        logger,
-        agentManager,
-        agentStorage,
-        tunnelManager: new TunnelManager(logger),
-        appDistDir: shareAppDistDir,
-        onUpdate: (share) =>
-          emitExternalSessionMessage({ type: "session.share.stream", payload: { share } }),
-      })
-    : null;
-  logger.info(
-    { elapsed: elapsed(), enabled: config.sessionSharingEnabled === true },
-    "Session share service initialized",
-  );
-  // Agent Forum / Team mode (docs/plans/active/agent-forum.md). Persists per-topic JSON under
-  // ~/.jagentdesk/forums and streams topic changes to all connected clients.
-  const agentForumService = new AgentForumService({
-    dir: path.join(config.jagentdeskHome, "forums"),
+  // Statically linked features start after the shared libraries they consume and the agent
+  // manager exist: they subscribe to agent events and reach clients through the WebSocket server
+  // once it is bound.
+  const builtinServices = createBuiltinCoreServices(
+    config.jagentdeskHome,
     logger,
-    onUpdate: (topic) => wsServer?.publishForumTopic(topic),
+    daemonConfigStore,
+    { clusters: clusterRegistry, databases: databaseRegistry },
+    {
+      ssh: sshService,
+      agents: {
+        labels: (agentId) => agentManager.getAgent(agentId)?.labels ?? null,
+        cwd: (agentId) => agentManager.getAgent(agentId)?.cwd ?? null,
+        requestHostToolPermission: (agentId, request) =>
+          agentManager.requestHostToolPermission(agentId, request),
+      },
+      customProviders: customProviderService,
+      closeCustomProviderForwards: () => customProviderService.closeAll(),
+      beforeSshStop: () => customProviderService.closeAll(),
+      daemonId: serverId,
+      broadcastToTrustedSessions: (message) => {
+        for (const session of wsServer?.listTrustedSessions() ?? []) {
+          session.emitServerMessage(message);
+        }
+      },
+    },
+    {
+      subscribeAgentEvents: (callback) => agentManager.subscribe(callback, { replayState: false }),
+      broadcast: (message) => wsServer?.broadcast(wrapSessionMessage(message)),
+      pushNotification: (notice) => wsServer?.sendSideloadPush(notice),
+    },
+  );
+  // Built-in features' daemon services, ports, and background lifecycles (docs/builtin-plugins.md).
+  // After storage loads (Insights seeds its lifetime baseline from stored agents) and before the
+  // persisted agents load: agents cannot run before the built-ins start.
+  const builtinDaemon = await builtinServerRegistry.start(pluginRuntime.builtin, builtinServices, {
+    agentManager,
+    agentStorage,
+    broadcast: (message) => wsServer?.broadcast(wrapSessionMessage(message)),
+    hostCapabilities: () => daemonHostCapabilities,
+    sendPush: (notice) => wsServer?.sendBuiltinPush(notice),
+    sessionShare: {
+      tunnelManager: dependencies.sessionShareTunnelManager ?? new TunnelManager(logger),
+      appDistDir:
+        config.sessionShareAppDistDir ??
+        process.env.JAGENTDESK_SHARE_APP_DIST ??
+        resolveBundledShareAppDist(),
+      // Session-share guests (ADR-0019): the scoped ShareServer /ws hands validated guest
+      // sockets to the daemon as agent-confined real sessions.
+      attachGuestSocket: (ws, params) => wsServer?.attachGuestSocket(ws, params),
+      // A live capability toggle re-scopes already-connected guest sessions (ADR-0019).
+      updateGuestScopes: (agentId, scopes) => wsServer?.updateGuestScopesForAgent(agentId, scopes),
+    },
   });
+  pluginRuntime.builtinDaemon = builtinDaemon;
+  // Spec mode's launch environment (spec 28): the provider process sees the shared checkout env.
+  agentManager.setLaunchEnvProvider(
+    (agentId) => builtinDaemon.enabledPort("specMode")?.launchEnv(agentId) ?? null,
+  );
   logger.info({ elapsed: elapsed() }, "Loading persisted agent registry");
   const persistedRecords = await agentStorage.list();
   logger.info(
@@ -1645,9 +1716,97 @@ export async function createJAgentDeskDaemon(
     logger,
   });
 
+  const botStorage = new BotStorage(config.jagentdeskHome);
+  const botRuntime = new DaemonBotRuntime({
+    agentManager,
+    providerSnapshotManager,
+    orchestration: orchestrationRuntime,
+    storage: botStorage,
+    createWorktree: createJAgentDeskWorktreeForTools,
+    logger,
+    create: {
+      agentManager,
+      agentStorage,
+      providerSnapshotManager,
+      logger,
+      jagentdeskHome: config.jagentdeskHome,
+      ensureWorkspaceForCreate: ensureWorkspaceForCreateAndBroadcastExternal,
+    },
+  });
+  const botsService = new BotsService(botStorage, botRuntime, {
+    logger,
+    triggers:
+      dependencies.botsTriggerSource ??
+      new LocalBotTriggers({
+        storage: botStorage,
+        sources: () =>
+          builtinServerRegistry.botTriggerSources(pluginRuntime.builtin, config.jagentdeskHome),
+        logger,
+      }),
+    push: { send: (payload) => wsServer?.sendBotPush(payload) ?? Promise.resolve() },
+  });
+  const botsSlack = new BotsSlack(botsService, {
+    logger,
+    relay: () => ({
+      ...(relayRuntime?.getConfig() ?? {
+        enabled: config.relayEnabled ?? true,
+        endpoint: config.relayEndpoint ?? DEFAULT_RELAY_ENDPOINT,
+        useTls: config.relayUseTls ?? true,
+      }),
+      serverId,
+    }),
+    apiBaseUrl: dependencies.slackApiBaseUrl,
+  });
+  botsService.slack = botsSlack;
+  let botsRuntimeReady = false;
+  await pluginRuntime.builtin.registerLifecycle("bots", {
+    start: () => {
+      if (botsRuntimeReady) {
+        botsService.start();
+        botsSlack.start();
+      }
+    },
+    stop: () => {
+      botsService.stop();
+      botsSlack.stop();
+    },
+  });
+
+  const idleRuntimeCleanup = createIdleRuntimeCleanup({
+    enabled: daemonConfigStore.get().idleRuntimeCleanup !== false,
+    runtimes: () => agentManager.getRuntimeCleanupCandidates(),
+    isProtected: (agentId) =>
+      hasOutstandingFinishSubscriptions(agentManager, agentId) ||
+      getAgentMessageDelivery({ agentManager, agentStorage, logger }).hasPending(agentId),
+    logger,
+  });
+
+  const unsubscribeIdleRuntimeCleanup = connectIdleRuntimeCleanupConfig(
+    daemonConfigStore,
+    idleRuntimeCleanup,
+  );
+
   const createAgentToolHostDependencies = (
     runtime: JAgentDeskToolRuntimeContext,
   ): JAgentDeskToolHostDependencies => ({
+    changeRequestWatches,
+    builtinPlugins: pluginRuntime.builtin.forAgent(runtime.callerAgentId),
+    builtinDaemon,
+    callerAgentLabels: runtime.callerAgentLabels,
+    jagentdeskToolPolicy:
+      runtime.jagentdeskToolPolicy ??
+      (runtime.callerAgentId
+        ? agentManager.getJAgentDeskToolPolicy(runtime.callerAgentId)
+        : undefined),
+    serverId,
+    remoteFinishSubscriptions: () => {
+      if (!remoteFinishSubscriptions) throw new Error("Remote finish observation unavailable");
+      return remoteFinishSubscriptions;
+    },
+    hosts: () => {
+      if (!wsServer) throw new Error("Daemon is not accepting host operations");
+      return wsServer.toolHosts();
+    },
     agentManager,
     agentStorage,
     terminalManager,
@@ -1658,15 +1817,17 @@ export async function createJAgentDeskDaemon(
     workspaceGitService,
     findWorkspaceIdForCwd: findWorkspaceIdForCwdExternal,
     listActiveWorkspaces: listActiveWorkspacesExternal,
-    archiveWorkspaceRecord: archiveWorkspaceRecordExternal,
+    archiveWorkspaceRecord: (workspaceId, archivedAt) =>
+      archiveWorkspaceRecordExternal(workspaceId, undefined, archivedAt),
     emitWorkspaceUpdatesForWorkspaceIds: emitWorkspaceUpdatesExternal,
     workspaceRegistry,
     projectRegistry,
-    createDirectoryWorkspace: async (cwd, title, projectId) => {
+    createDirectoryWorkspace: async (cwd, title, projectId, context) => {
       const workspace = await workspaceProvisioning.createWorkspaceForDirectory(
         cwd,
         title,
         projectId,
+        context,
       );
       await emitWorkspaceUpdatesExternal([workspace.workspaceId]);
       return workspace;
@@ -1677,23 +1838,22 @@ export async function createJAgentDeskDaemon(
       terminalManager,
       workspaceRegistry,
       projectRegistry,
-      workspaceGitService,
+      workspaceRuntimeStore,
       getDaemonTcpPort: () => (boundListenTarget?.type === "tcp" ? boundListenTarget.port : null),
       getDaemonTcpHost: () => (boundListenTarget?.type === "tcp" ? boundListenTarget.host : null),
       serviceProxyPublicBaseUrl,
       resolveScriptHealth: (hostname) => scriptHealthMonitor.getHealthForHostname(hostname),
       logger,
-      // MCP operations do not belong to one WebSocket session, so lifecycle
-      // status updates fan out to every connected client.
       emit: (message) => wsServer?.broadcast(wrapSessionMessage(message)),
+      publishStatusUpdate: (message) => wsServer?.publishScriptStatusUpdate(message),
       spawnWorkspaceScript,
       globalServicePorts: loadPersistedConfig(config.jagentdeskHome).worktrees?.servicePorts,
     }),
-    markWorkspaceArchiving: markWorkspaceArchivingExternal,
-    clearWorkspaceArchiving: clearWorkspaceArchivingExternal,
+    markWorkspaceArchiving,
+    clearWorkspaceArchiving,
     ensureWorkspaceForCreate: createAgentCommandDependencies.ensureWorkspaceForCreate,
     createJAgentDeskWorktree: createAgentCommandDependencies.createJAgentDeskWorktree,
-    browserToolsEnabled: browserToolsPolicy.isEnabled(),
+    browserToolsEnabled: pluginRuntime.builtin.forAgent(runtime.callerAgentId).has("browser-tools"),
     browserToolsBroker,
     jagentdeskHome: config.jagentdeskHome,
     worktreesRoot: config.worktreesRoot,
@@ -1703,66 +1863,16 @@ export async function createJAgentDeskDaemon(
     resolveSpeakHandler: (agentId) => wsServer?.resolveVoiceSpeakHandler(agentId) ?? null,
     resolveCallerContext: (agentId) => wsServer?.resolveVoiceCallerContext(agentId) ?? null,
     orchestrationRuntime,
-    agentForumService,
     clusterRegistry,
     databaseRegistry,
-    sshAgentTools: (callerAgentId) => sshServerModules.createAgentTools(callerAgentId),
-    remoteExecAgentTools: (callerAgentId) =>
-      remoteExecService
-        ? createRemoteExecAgentTools({
-            service: remoteExecService,
-            // An advertised tool must work, so the whole set is only offered while at least
-            // one SSH server opts into remote tasks (spec 33.7).
-            hasEnabledTarget: () =>
-              sshService.storage.listServers().some((server) => server.remoteExec?.enabled),
-            callerCwd: () =>
-              callerAgentId ? (agentManager.getAgent(callerAgentId)?.cwd ?? null) : null,
-            callerAgentId,
-            requestPermission: (agentId, request) =>
-              agentManager.requestHostToolPermission(agentId, request),
-          })
-        : [],
-    customProviderAgentTools: (callerAgentId) =>
-      createCustomProviderAgentTools({
-        service: customProviderService,
+    builtinServices,
+    botAgentTools: (callerAgentId) =>
+      createBotAgentTools({
+        service: botsService,
+        agentManager,
         callerAgentId,
-        requestPermission: (agentId, request) =>
-          agentManager.requestHostToolPermission(agentId, request),
-        sshServerLabel: (id) => sshService.storage.getServer(id)?.label ?? null,
+        callerLabels: runtime.callerAgentLabels,
       }),
-    argocdAgentTools: (callerAgentId) =>
-      createArgoCdAgentTools({
-        service: argocdService,
-        callerAgentId,
-        defaultInstanceId: callerAgentId
-          ? (agentManager.getAgent(callerAgentId)?.labels?.[ARGOCD_INSTANCE_AGENT_LABEL] ?? null)
-          : null,
-        requestPermission: (agentId, request) =>
-          agentManager.requestHostToolPermission(agentId, request),
-      }),
-    sideloadAgentTools: (callerAgentId) =>
-      createSideloadAgentTools({
-        service: sideloadService,
-        callerAgentId,
-        requestPermission: (agentId, request) =>
-          agentManager.requestHostToolPermission(agentId, request),
-      }),
-    jiraAgentTools: (callerAgentId) =>
-      createJiraAgentTools({
-        service: jiraService,
-        callerAgentId,
-        requestPermission: (agentId, request) =>
-          agentManager.requestHostToolPermission(agentId, request),
-      }),
-    figmaAgentTools: (callerAgentId) =>
-      createFigmaAgentTools({
-        service: figmaService,
-        callerAgentId,
-        requestPermission: (agentId, request) =>
-          agentManager.requestHostToolPermission(agentId, request),
-      }),
-    skillsStorage,
-    forgeHub: forgeHubService,
     browserFingerprintProfiles: {
       list: () => daemonConfigStore.get().browserTools.profiles ?? [],
       activeId: () => daemonConfigStore.get().browserTools.activeProfileId ?? null,
@@ -1787,7 +1897,6 @@ export async function createJAgentDeskDaemon(
     },
     requestHostToolPermission: (agentId, req) =>
       agentManager.requestHostToolPermission(agentId, req),
-    physicalDevices,
     logger,
   });
   const createAgentToolCatalog = (runtime: JAgentDeskToolRuntimeContext) =>
@@ -1799,6 +1908,7 @@ export async function createJAgentDeskDaemon(
   let agentMcpBaseUrl: string | null = null;
   if (mcpEnabled) {
     const agentMcpRoute = "/mcp/agents";
+    const normalizeAgentMcpProtocol = createAgentMcpProtocolNormalizer(logger);
 
     const createAgentMcpSession = async (callerAgentId?: string) => {
       const agentMcpServer = await createAgentMcpServer(
@@ -1879,6 +1989,7 @@ export async function createJAgentDeskDaemon(
           callerAgentId = callerAgentIdRaw[0];
         }
         const { server, transport } = await createAgentMcpSession(callerAgentId);
+        normalizeAgentMcpProtocol({ request: req, transport, callerAgentId });
         res.on("close", () => {
           void transport.close();
           void server.close();
@@ -1916,13 +2027,6 @@ export async function createJAgentDeskDaemon(
     logger.info("Agent MCP HTTP endpoint disabled");
   }
 
-  const speechService = createSpeechService({
-    logger,
-    openaiConfig: config.openai,
-    speechConfig: config.speech,
-  });
-  logger.info({ elapsed: elapsed() }, "Speech service created");
-
   logger.info({ elapsed: elapsed() }, "Bootstrap complete, ready to start listening");
 
   const start = async () => {
@@ -1952,18 +2056,18 @@ export async function createJAgentDeskDaemon(
         const onListening = () => {
           httpServer.off("error", onError);
           mainStarted = true;
-          // Host capabilities, physical devices, Spec mode, Jira and Team mode attach to the
+          // Host capabilities, physical devices, Spec mode and Jira attach to the
           // WebSocket server right after it exists (kept out of logAndResolve for its size).
           const attachHostServices = async (server: VoiceAssistantWebSocketServer) => {
-            // Agent Forum / Team mode: expose the service to sessions + the bootstrap hook that turns
-            // the origin chat agent into the topic's lead (it then spawns/delegates peers).
             // Spec 24.2: what this host can run, probed in the background after start.
             // Tools the platform-aware installer added live in $JAGENTDESK_HOME/tools/bin.
             ensureToolDirsOnPath(config.jagentdeskHome);
-            const hostCapabilities = new HostCapabilityService({
-              jagentdeskHome: config.jagentdeskHome,
-              logger,
-            });
+            const hostCapabilities =
+              dependencies.hostCapabilities ??
+              new HostCapabilityService({
+                jagentdeskHome: config.jagentdeskHome,
+                logger,
+              });
             const hostToolInstaller = new HostToolInstaller({
               jagentdeskHome: config.jagentdeskHome,
               logger,
@@ -1971,32 +2075,14 @@ export async function createJAgentDeskDaemon(
               fetch: globalThis.fetch as unknown as HttpFetch,
               githubToken: process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? null,
             });
-            setForgeToolInstaller(hostToolInstaller);
+            setSharedHostToolInstaller(hostToolInstaller);
             server.setHostCapabilities(hostCapabilities, hostToolInstaller);
-            server.setPhysicalDevices(physicalDevices);
             void hostCapabilities.refresh().catch((error: unknown) => {
               logger.warn({ err: error }, "Host capability probe failed");
             });
-            specModeService = await startSpecModeService({
-              jagentdeskHome: config.jagentdeskHome,
-              logger,
-              agentManager,
-              agentStorage,
-              hostCapabilities,
-              autorunService,
-              emit: emitExternalSessionMessage,
-              onState: (state) => server.notifySpecModeState(state),
-            });
-            server.setSpecModeService(specModeService);
-            server.setJiraService(jiraService);
-            server.setFigmaService(figmaService);
-            server.setRemoteExecService(remoteExecService);
+            daemonHostCapabilities = hostCapabilities;
+            server.setBotsService(botsService);
             server.setCustomProvidersService(customProviderService);
-            server.setAgentForum(
-              agentForumService,
-              createForumBootstrap({ agentManager, agentStorage, logger }),
-              createForumNotify({ agentManager, agentStorage, logger }),
-            );
           };
           const logAndResolve = async () => {
             boundListenTarget = resolveBoundListenTarget(listenTarget, httpServer);
@@ -2054,6 +2140,7 @@ export async function createJAgentDeskDaemon(
                 daemonStatusRpc: dependencies.serverFeatureOverrides?.daemonStatusRpc,
               },
               workspaceAutoName,
+              workspaceRuntimeStore,
               config.auth,
               speechService,
               terminalManager,
@@ -2091,6 +2178,12 @@ export async function createJAgentDeskDaemon(
                 appBaseUrl: config.appBaseUrl,
                 desktopManaged: config.desktopManaged === true,
                 getTailnetAddress: () => tsnetListener?.getDirectAddress() ?? null,
+                getRelayConfig: () =>
+                  relayRuntime?.getConfig() ?? {
+                    enabled: config.relayEnabled ?? true,
+                    endpoint: config.relayEndpoint ?? DEFAULT_RELAY_ENDPOINT,
+                    useTls: config.relayUseTls ?? true,
+                  },
               },
               serviceProxyPublicBaseUrl,
               browserToolsBroker,
@@ -2103,29 +2196,52 @@ export async function createJAgentDeskDaemon(
                 requireSignedHelloForDirect,
               },
               pluginRuntime,
-              skillsStorage,
-              usageHistory,
               databaseRegistry,
-              autorunService,
-              sessionShareService,
               sshService,
-              argocdService,
-              sideloadService,
+              workspaceArchiveOperations,
             );
-            // Session-share guests (ADR-0019): let the scoped ShareServer /ws hand validated guest
-            // sockets to the daemon as agent-confined real sessions.
-            sessionShareService?.setGuestAttacher((ws, params) =>
-              wsServer?.attachGuestSocket(ws, params),
-            );
-            // Let a live capability toggle re-scope already-connected guest sessions (ADR-0019).
-            sessionShareService?.setGuestScopeUpdater((agentId, scopes) =>
-              wsServer?.updateGuestScopesForAgent(agentId, scopes),
-            );
+            wsServer.setHostDial(async (target) => {
+              const proxy = tsnetListener?.getTailnetSocks();
+              if (!proxy) throw new Error("tailnet_unavailable");
+              const url = new URL(target.url);
+              return connectThroughProxy(
+                { type: "socks5", ...proxy },
+                { host: url.hostname.replace(/^\[|\]$/g, ""), port: target.pairing.port },
+              );
+            });
+            const remoteObservation = createRemoteFinishObservation({
+              agentManager,
+              agentStorage,
+              messages: () => getAgentMessageDelivery({ agentManager, agentStorage, logger }),
+              hosts: () => wsServer!.toolHosts(),
+              serverId,
+              logger,
+            });
+            remoteFinishSubscriptions = createRemoteFinishSubscriptions({
+              ...remoteObservation,
+              hostLabel: async (id) =>
+                (await wsServer!.toolHosts().directory()).hosts.find((host) => host.serverId === id)
+                  ?.label ?? undefined,
+              store: createRemoteFinishStore(config.jagentdeskHome),
+              messages: () => getAgentMessageDelivery({ agentManager, agentStorage, logger }),
+              callerIsActive: async (agentId) => !(await agentStorage.get(agentId))?.archivedAt,
+              serverId,
+              logger,
+            });
+            await remoteFinishSubscriptions.start();
             await attachHostServices(wsServer);
+            botsRuntimeReady = true;
+            if (pluginRuntime.builtin.isEnabled("bots")) {
+              botsService.start();
+              botsSlack.start();
+            }
             // Bind the plugin session host and start configured plugins before any
             // external ingress attaches, mirroring upstream's pre-accept ordering.
             pluginRuntime.bindJAgentDeskSessionHost(wsServer);
             await pluginRuntime.start();
+            providerSnapshotManager.settlePluginProviders();
+            restartRecovery.resumePending();
+            await changeRequestWatches.start();
             tsnetListener = createTsnetListener({
               logger,
               port: boundListenTarget.type === "tcp" ? boundListenTarget.port : 0,
@@ -2145,6 +2261,44 @@ export async function createJAgentDeskDaemon(
               },
             });
             await tsnetListener.start();
+            // Relay second path (spec 35 / ADR-0048): dials the Worker alongside
+            // the tailnet and feeds the same auth path. Data sockets run the
+            // Noise E2EE handshake before session admission.
+            const relaySecurityLogger = logger.child({ module: "relay-security" });
+            relayRuntime = createRelayRuntime({
+              controlHandler: botsSlack,
+              config: {
+                enabled: config.relayEnabled ?? true,
+                endpoint: config.relayEndpoint ?? DEFAULT_RELAY_ENDPOINT,
+                useTls: config.relayUseTls ?? true,
+              },
+              logger,
+              serverId,
+              getRelayOwnership: () => daemonKeyPair.ensureRelayIdentity(),
+              attachSocket: (ws, metadata) =>
+                admitSecuredRelaySocket(
+                  ws,
+                  {
+                    daemonKeyPair: daemonKeyPair.keyPair,
+                    logger: relaySecurityLogger,
+                    requireProtectedMode: () => false,
+                  },
+                  async (secured) => {
+                    if (!wsServer) throw new Error("WebSocket server is not ready");
+                    await wsServer.attachExternalSocket(secured.socket, {
+                      ...metadata,
+                      transport: "relay",
+                      securityMode: secured.securityMode,
+                    });
+                  },
+                ),
+            });
+            daemonConfigStore.onFieldChange("relay.enabled", (value) => {
+              if (config.relayEnabledMutable === false && value !== config.relayEnabled) {
+                throw new Error("Relay enabled state is pinned by the daemon launch configuration");
+              }
+              relayRuntime?.setEnabled(value === true);
+            });
             await hubRelationships.start();
           };
 
@@ -2168,6 +2322,8 @@ export async function createJAgentDeskDaemon(
       speechService.start();
       scriptHealthMonitor.start();
     } catch (error) {
+      unsubscribePluginProviders();
+      unsubscribePluginSessionChanges();
       await pluginRuntime.stopAllPlugins().catch(() => undefined);
       await serviceProxy.stopStandalone().catch(() => undefined);
       if (mainStarted) {
@@ -2178,45 +2334,87 @@ export async function createJAgentDeskDaemon(
     }
   };
 
-  const stop = async () => {
-    await pluginRuntime.stopAllPlugins().catch(() => undefined);
+  const stop = async (options?: { keepTerminals?: boolean }) => {
+    const keepTerminals = options?.keepTerminals === true;
+    let terminalShutdownError: unknown = null;
+    unsubscribePluginProviders();
+    unsubscribePluginSessionChanges();
     await hubRelationships.stop();
     workspaceReconciliation.dispose();
     scriptHealthMonitor.stop();
-    // Freeze both ingress and registration before taking the agent closure snapshot.
+    unsubscribeIdleRuntimeCleanup();
+    await idleRuntimeCleanup.close();
+    // Graceful shutdown delivers agent messages still waiting in a 2 s window
+    // (ADR-0029 decision 3); a crash loses them.
     wsServer?.prepareForShutdown();
+    suspendFinishNotifications(agentManager);
+    await changeRequestWatches.close();
+    await closeAgentMessageDelivery(agentManager).catch(() => undefined);
+    // Freeze registration before taking the agent closure snapshot.
+    botsService.suspendForShutdown();
     agentManager.prepareForShutdown();
+    await restartRecovery.captureRunningAgents();
     await closeAllAgents(logger, agentManager);
-    await agentManager.flushForShutdown().catch(() => undefined);
+    await withTimeout({
+      promise: pluginRuntime.drainEvents(),
+      timeoutMs: 5_000,
+      label: "drain plugin lifecycle events",
+    }).catch((error) => logger.warn({ err: error }, "Plugin lifecycle events did not finish"));
+    let shutdownFlushTimedOut = false;
+    await withTimeout({
+      promise: agentManager.flushForShutdown(),
+      timeoutMs: 5_000,
+      label: "flush agent shutdown tasks",
+    }).catch((error) => {
+      shutdownFlushTimedOut = true;
+      logger.warn({ err: error }, "Agent shutdown tasks did not finish before provider shutdown");
+    });
     detachAgentStoragePersistence();
     await agentStorage.flush().catch(() => undefined);
     // Spec 34: loopback forwards of api providers die with the daemon.
     customProviderService.closeAll();
     await providerSnapshotManager.shutdown();
-    terminalManager.killAll();
-    stopDeviceGrantWatch();
-    physicalDevices.dispose();
-    await sshModules.dispose().catch(() => undefined);
-    if (unsubscribeRemoteExecJobs) {
-      unsubscribeRemoteExecJobs();
-      unsubscribeRemoteExecJobs = null;
+    if (shutdownFlushTimedOut) {
+      await withTimeout({
+        promise: agentManager.flushForShutdown(),
+        timeoutMs: 5_000,
+        label: "flush agent shutdown tasks after provider shutdown",
+      }).catch((error) =>
+        logger.warn({ err: error }, "Agent shutdown tasks did not finish after provider shutdown"),
+      );
+      await agentStorage.flush().catch(() => undefined);
     }
-    await remoteExecService?.stop().catch(() => undefined);
+    await pluginRuntime.stopAllPlugins().catch(() => undefined);
+    try {
+      if (keepTerminals) {
+        await localTerminalManager.detach();
+        logger.info("Terminals left running for the next daemon");
+      } else {
+        await localTerminalManager.closeTerminals();
+      }
+    } catch (error) {
+      // Finish the rest of the shutdown, then report it: the supervisor and `daemon stop`
+      // retry the cleanup from the record the reaper kept.
+      terminalShutdownError = error;
+      logger.error({ err: error }, "Terminal shutdown failed");
+    }
+    unsubscribeBuiltinAgentSnapshots();
+    // Built-in features stop before the shared libraries they consume (remote tasks before SSH).
+    await builtinDaemon.stop();
+    await sshModules.dispose().catch(() => undefined);
     await sshServerModules.dispose().catch(() => undefined);
     sshService.dispose();
-    argocdService.dispose();
-    sideloadService.dispose();
-    jiraService.dispose();
-    void figmaService.dispose();
-    speechService.stop();
+    await botsSlack.dispose();
+    await botsService.dispose();
+    await speechService.stop();
     await scheduleService.stop().catch(() => undefined);
-    await autorunService?.stop().catch(() => undefined);
-    specModeService?.stop();
-    await sessionShareService?.stop().catch(() => undefined);
+    await relayRuntime?.stop().catch(() => undefined);
+    await remoteFinishSubscriptions?.close();
     await tsnetListener?.stop().catch(() => undefined);
     if (wsServer) {
       await wsServer.close();
     }
+    forgeResolver.dispose();
     await serviceProxy.stopStandalone();
     // Force-drop remaining sockets so httpServer.close() resolves promptly.
     // We've already closed wsServer (which sent ws-layer close frames) and
@@ -2233,6 +2431,9 @@ export async function createJAgentDeskDaemon(
     if (listenTarget.type === "socket" && existsSync(listenTarget.path)) {
       unlinkSync(listenTarget.path);
     }
+    if (terminalShutdownError) {
+      throw terminalShutdownError;
+    }
   };
 
   return {
@@ -2243,23 +2444,10 @@ export async function createJAgentDeskDaemon(
     serviceProxy,
     scriptRuntimeStore,
     browserToolsBroker,
-    sideload: sideloadService,
     start,
     stop,
     getListenTarget: () => boundListenTarget,
   };
-}
-
-function envNumber(name: string): number | undefined {
-  const raw = process.env[name];
-  if (raw === undefined || raw.trim() === "") return undefined;
-  const value = Number(raw);
-  return Number.isFinite(value) ? value : undefined;
-}
-
-function positiveEnvNumber(name: string): number | undefined {
-  const value = envNumber(name);
-  return value !== undefined && value > 0 ? value : undefined;
 }
 
 // The app web build bundled next to the server dist (dist/server/share-app-dist), copied there by
@@ -2285,7 +2473,11 @@ async function closeAllAgents(logger: Logger, agentManager: AgentManager): Promi
   await Promise.all(
     agents.map(async (agent) => {
       try {
-        await agentManager.closeAgent(agent.id);
+        await withTimeout({
+          promise: agentManager.closeAgent(agent.id),
+          timeoutMs: 5_000,
+          label: `close agent ${agent.id}`,
+        });
       } catch (err) {
         logger.error({ err, agentId: agent.id }, "Failed to close agent");
       }
@@ -2298,36 +2490,10 @@ async function closeAllAgents(logger: Logger, agentManager: AgentManager): Promi
  * send path as a user's message; per-agent spec-kit env reaches provider launches; Spec mode
  * and autonomous mode refuse to start while the other is on.
  */
-async function startSpecModeService(params: {
-  jagentdeskHome: string;
-  logger: Logger;
-  agentManager: AgentManager;
-  agentStorage: AgentStorage;
-  hostCapabilities: HostCapabilityService;
-  autorunService: AutorunService | null;
-  emit: (message: SessionOutboundMessage) => void;
-  onState?: (state: SpecModeState) => void;
-}): Promise<SpecModeService> {
-  const { agentManager, agentStorage, autorunService, logger } = params;
-  const service = new SpecModeService({
-    jagentdeskHome: params.jagentdeskHome,
-    logger,
-    agentManager,
-    hostCapabilities: params.hostCapabilities,
-    isAutorunActive: async (agentId) =>
-      autorunService !== null && (await autorunService.get(agentId))?.status === "running",
-    sendPrompt: async (agentId, text) => {
-      await sendPromptToAgent({ agentManager, agentStorage, agentId, prompt: text, logger });
-    },
-    onState: (state) => {
-      params.emit({ type: "agent.spec_mode.state", payload: { agentId: state.agentId, state } });
-      params.onState?.(state);
-    },
-  });
-  await service.initialize();
-  agentManager.setLaunchEnvProvider((agentId) => service.launchEnv(agentId));
-  autorunService?.setStartGuard(async (agentId) =>
-    (await service.isEnabled(agentId)) ? "Turn off Spec mode to use autonomous mode" : null,
-  );
-  return service;
+export function connectIdleRuntimeCleanupConfig(
+  store: DaemonConfigStore,
+  cleanup: Pick<ReturnType<typeof createIdleRuntimeCleanup>, "setEnabled">,
+): () => void {
+  cleanup.setEnabled(store.get().idleRuntimeCleanup !== false);
+  return store.onFieldChange("idleRuntimeCleanup", (value) => cleanup.setEnabled(value !== false));
 }

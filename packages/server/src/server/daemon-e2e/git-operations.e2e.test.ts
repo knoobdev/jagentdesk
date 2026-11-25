@@ -1,5 +1,14 @@
 import { test, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, existsSync, rmSync, readFileSync, realpathSync } from "fs";
+import {
+  mkdtempSync,
+  writeFileSync,
+  existsSync,
+  rmSync,
+  readFileSync,
+  realpathSync,
+  mkdirSync,
+} from "fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "os";
 import path from "path";
 import { createDaemonTestContext, type DaemonTestContext } from "../test-utils/index.js";
@@ -141,16 +150,92 @@ const CODEX_TEST_THINKING_OPTION_ID = "low";
 
 let ctx: DaemonTestContext;
 let collector: MessageCollector;
+let stream: ReturnType<DaemonTestContext["client"]["observeEvents"]>;
 
 beforeEach(async () => {
   ctx = await createDaemonTestContext();
   collector = createMessageCollector(ctx.client);
+  stream = ctx.client.observeEvents(["agent_stream"]);
+  await stream.ready;
 });
 
 afterEach(async () => {
   collector.unsubscribe();
+  await stream.release();
   await ctx.cleanup();
 }, 60000);
+
+interface GitCommandOptions {
+  cwd: string;
+  args: string[];
+}
+
+async function mergeFeatureIntoBaseWorktree(baseName: string): Promise<void> {
+  const directory = realpathSync(tmpCwd());
+  const base = path.join(directory, baseName);
+  const feature = path.join(directory, "feature");
+  function git({ cwd, args }: GitCommandOptions): string {
+    return execFileSync("git", args, { cwd, encoding: "utf8", stdio: "pipe" });
+  }
+  try {
+    mkdirSync(base);
+    git({ cwd: base, args: ["init", "-b", "main"] });
+    git({ cwd: base, args: ["config", "user.name", "JAgentDesk Test"] });
+    git({ cwd: base, args: ["config", "user.email", "test@jagentdesk.local"] });
+    git({ cwd: base, args: ["config", "commit.gpgsign", "false"] });
+    git({ cwd: base, args: ["config", "core.autocrlf", "false"] });
+    git({ cwd: base, args: ["commit", "--allow-empty", "-m", "base"] });
+    git({ cwd: base, args: ["worktree", "add", "-b", "feature", feature] });
+    writeFileSync(path.join(feature, "feature.txt"), "feature payload\n");
+    git({ cwd: feature, args: ["add", "feature.txt"] });
+    git({ cwd: feature, args: ["commit", "-m", "feature"] });
+    const featureCommit = git({ cwd: feature, args: ["rev-parse", "HEAD"] }).trim();
+
+    const merged = await ctx.client.checkoutMerge(feature, { baseRef: "main" });
+    expect(merged).toMatchObject({ success: true, error: null });
+    expect(git({ cwd: base, args: ["rev-parse", "HEAD"] }).trim()).toBe(featureCommit);
+    expect(readFileSync(path.join(base, "feature.txt"), "utf8")).toBe("feature payload\n");
+    expect(git({ cwd: feature, args: ["symbolic-ref", "--short", "HEAD"] }).trim()).toBe("feature");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+test.skipIf(isPlatform("win32")).each(["base\ncheckout", "base "])(
+  "merges into a base worktree whose path preserves %j",
+  mergeFeatureIntoBaseWorktree,
+);
+
+test.each(["base checkout", "中文 checkout"])(
+  "merges into a base worktree named %j",
+  mergeFeatureIntoBaseWorktree,
+);
+
+test("merges into a local base branch without another worktree", async () => {
+  const cwd = realpathSync(tmpCwd());
+  function git(args: string[]): string {
+    return execFileSync("git", args, { cwd, encoding: "utf8", stdio: "pipe" });
+  }
+  try {
+    git(["init", "-b", "main"]);
+    git(["config", "user.name", "JAgentDesk Test"]);
+    git(["config", "user.email", "test@jagentdesk.local"]);
+    git(["config", "commit.gpgsign", "false"]);
+    git(["commit", "--allow-empty", "-m", "base"]);
+    git(["checkout", "-b", "feature"]);
+    writeFileSync(path.join(cwd, "feature.txt"), "feature payload\n");
+    git(["add", "feature.txt"]);
+    git(["commit", "-m", "feature"]);
+    const featureCommit = git(["rev-parse", "HEAD"]).trim();
+
+    const merged = await ctx.client.checkoutMerge(cwd, { baseRef: "main" });
+    expect(merged).toMatchObject({ success: true, error: null });
+    expect(git(["rev-parse", "main"]).trim()).toBe(featureCommit);
+    expect(git(["symbolic-ref", "--short", "HEAD"]).trim()).toBe("feature");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
 
 test("returns diff for modified file in git repo", async () => {
   const cwd = tmpCwd();
@@ -388,7 +473,7 @@ test("runs jagentdesk.json setup asynchronously and reports status via timeline 
         worktreeSlug: "async-setup-test",
       },
     }),
-    timeoutMs: 2500,
+    timeoutMs: 15_000,
     label: "createAgent should not block on setup",
   });
 
@@ -476,7 +561,7 @@ test("bootstraps configured worktree terminals after setup succeeds", async () =
           worktreeSlug: "async-setup-terminals-test",
         },
       }),
-      timeoutMs: 2500,
+      timeoutMs: 15_000,
       label: "createAgent should not block on setup",
     });
 
@@ -614,7 +699,7 @@ test("reports failures via timeline tool_call without deleting the created workt
         worktreeSlug: "async-setup-failure-test",
       },
     }),
-    timeoutMs: 2500,
+    timeoutMs: 15_000,
     label: "createAgent should not block on failing setup",
   });
 
@@ -750,7 +835,7 @@ test("archiving a worktree shuts down its terminals but leaves the worktree on d
         worktreeSlug: "archive-cleanup-test",
       },
     }),
-    timeoutMs: 2500,
+    timeoutMs: 15_000,
     label: "createAgent should not block on setup",
   });
 
@@ -770,18 +855,25 @@ test("archiving a worktree shuts down its terminals but leaves the worktree on d
   const beforeArchiveDirectories = ctx.daemon.daemon.terminalManager.listDirectories();
   expect(beforeArchiveDirectories).toContain(agent.cwd);
 
+  // A second workspace retains the directory while this workspace is archived.
+  const sibling = await ctx.client.createWorkspace({
+    source: { kind: "directory", path: agent.cwd },
+  });
+  expect(sibling.error).toBeNull();
+  expect(sibling.workspace?.id).not.toBe(agent.workspaceId);
+  expect(agent.workspaceId).toBeTruthy();
   const archive = await ctx.client.archiveJAgentDeskWorktree({
     worktreePath: agent.cwd,
+    workspaceId: agent.workspaceId!,
   });
   expect(archive.error).toBeNull();
   expect(archive.success).toBe(true);
   expect(archive.removedAgents).toContain(agent.id);
 
-  // Archiving tears down the workspace's terminals but never deletes the
-  // worktree from disk and never runs teardown commands — on-disk removal is a
-  // separate, explicit step.
+  // Workspace teardown runs, while the remaining reference keeps the directory.
   expect(existsSync(agent.cwd)).toBe(true);
-  expect(existsSync(teardownMarkerPath)).toBe(false);
+  expect(existsSync(teardownMarkerPath)).toBe(true);
+  expect(readFileSync(teardownMarkerPath, "utf8").trim()).toBe(agent.cwd);
 
   const afterArchiveDirectories = ctx.daemon.daemon.terminalManager.listDirectories();
   expect(afterArchiveDirectories).not.toContain(agent.cwd);

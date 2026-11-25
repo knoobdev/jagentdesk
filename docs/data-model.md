@@ -30,7 +30,7 @@ Workspace archive runs lifecycle teardown from the exact `cwd` but removes only 
 `worktreeRoot` after its last active reference disappears. Worktree recovery recreates that backing
 checkout from `mainRepoRoot`, then restores the relative path from `worktreeRoot` to `cwd`.
 
-JAgentDesk uses **file-based JSON persistence** instead of a traditional database. All data is validated at runtime with Zod schemas. Most stores write atomically (write to temp file, then rename); a few still use plain `writeFile` — see each section. There is no schema-versioning/migration framework — schemas rely on optional fields with defaults for forward compatibility, with a small amount of inline normalization in `persisted-config.ts` for legacy provider/speech entries.
+JAgentDesk uses **file-based JSON persistence** for its core records. [Bots](bots.md) use SQLite (`bots/bots.sqlite`) for their transactional records and trigger deduplication. All data is validated at runtime with Zod schemas, and the schema file named in each section is the field reference. Core stores write atomically: write a temp file in the target directory, then rename it into place. There is no schema-versioning framework. Schemas add optional fields with defaults; the one record migration is the `workspaceId` backfill in `packages/server/src/server/migrations/`, and `persisted-config.ts` normalizes a few legacy provider and speech entries inline.
 
 All server-side stores live under `$JAGENTDESK_HOME` (defaults to `~/.jagentdesk`).
 
@@ -46,8 +46,12 @@ Store APIs own persistence atomicity and should not make services coordinate raw
 $JAGENTDESK_HOME/
 ├── config.json                          # Daemon configuration
 ├── server-id                            # Stable daemon identifier (plain text, "srv_<base64url>")
-├── daemon-keypair.json                  # Daemon signing keypair (mode 0600)
-├── jagentdesk.pid                            # Daemon PID lock file
+├── daemon-keypair.json                  # Noise key and relay ownership key (mode 0600)
+├── paired-devices.json                  # Paired desktop, mobile and daemon devices
+├── hosts.json                           # Saved hosts and their device keys (mode 0600)
+├── finish-subscriptions.json            # Durable local finish-notification intent
+├── remote-finish-subscriptions.json     # Finish intent for agents on saved hosts
+├── jagentdesk.pid                       # Daemon PID lock file
 ├── daemon.log                           # Default log file (path configurable)
 ├── agents/
 │   └── {sanitized-cwd}/
@@ -58,110 +62,46 @@ $JAGENTDESK_HOME/
 │   └── rooms.json                       # All rooms + messages
 ├── loops/
 │   └── loops.json                       # All loop records
+├── bots/
+│   └── bots.sqlite                      # Bots, items, rooms, trigger dedupe
+├── orchestration/
+│   └── runtime.json                     # Orchestration assignments and handbacks
 ├── projects/
 │   ├── projects.json                    # Project registry
 │   ├── workspaces.json                  # Workspace registry
 │   └── icons/                           # Host-local custom project icon images
+├── worktrees/                           # JAgentDesk-owned worktrees (unless worktrees.root is set)
 ├── runtime/
 │   └── managed-processes/
 │       └── {recordId}.json              # Helper processes owned by JAgentDesk; reconciled on daemon bootstrap
 └── push-tokens.json                     # Expo push notification tokens
 ```
 
-The `agents/{sanitized-cwd}/` directory name is derived from the agent's `cwd` by stripping the filesystem root and replacing path separators with `-` (Windows drive letters become a `C-` style prefix). Persistent server stores write atomically by writing a temp file in the target directory and then renaming it into place.
+Built-in plugins keep their own data under the home as well; [builtin-plugins.md](builtin-plugins.md) treats those paths as release contracts.
+
+The `agents/{sanitized-cwd}/` directory name is derived from the agent's `cwd` by stripping the filesystem root and replacing path separators with `-` (Windows drive letters become a `C-` style prefix).
 
 ---
 
 ## 1. Agent Record
 
 **Path:** `$JAGENTDESK_HOME/agents/{project-dir}/{agentId}.json`
+**Schema:** `packages/server/src/server/agent/agent-storage.ts`
 
-Each agent is stored as a separate JSON file, grouped by project directory.
+Each agent is stored as a separate JSON file, grouped by project directory. The record holds
+identity, configuration, the provider persistence handle, and status. It does not hold the
+timeline: the daemon keeps projected items in memory and rebuilds them from provider history
+when the agent resumes ([timeline-sync.md](timeline-sync.md)).
 
-| Field                | Type                                     | Description                                                                                                                                                                                                                                                                                                                                                                         |
-| -------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                 | `string`                                 | UUID, primary key                                                                                                                                                                                                                                                                                                                                                                   |
-| `provider`           | `string`                                 | Agent provider (`"claude"`, `"codex"`, `"opencode"`, etc.)                                                                                                                                                                                                                                                                                                                          |
-| `cwd`                | `string`                                 | Working directory the agent operates in                                                                                                                                                                                                                                                                                                                                             |
-| `workspaceId`        | `string?`                                | Owning workspace id — the single source of ownership. Every agent is stamped with one at create time; legacy cwd-only records are backfilled once by `migrations/backfill-workspace-id.migration.ts` (the only place a cwd→id mapping exists). Runtime code never infers ownership or status from cwd: status is computed per `workspaceId`, and same-cwd siblings are independent. |
-| `createdAt`          | `string` (ISO 8601)                      | Creation timestamp                                                                                                                                                                                                                                                                                                                                                                  |
-| `updatedAt`          | `string` (ISO 8601)                      | Last update timestamp                                                                                                                                                                                                                                                                                                                                                               |
-| `lastActivityAt`     | `string?` (ISO 8601)                     | Last activity timestamp                                                                                                                                                                                                                                                                                                                                                             |
-| `lastUserMessageAt`  | `string?` (ISO 8601)                     | Last user message timestamp                                                                                                                                                                                                                                                                                                                                                         |
-| `title`              | `string?`                                | User-visible title                                                                                                                                                                                                                                                                                                                                                                  |
-| `labels`             | `Record<string, string>`                 | Key-value labels (default `{}`). `jagentdesk.parent-agent-id` is set automatically for agent-scoped creation and removed by detach — see [agent-lifecycle.md](./agent-lifecycle.md)                                                                                                                                                                                                 |
-| `lastStatus`         | `AgentStatus`                            | One of: `"initializing"`, `"idle"`, `"running"`, `"error"`, `"closed"`. `closed` means the record is resumable but has no live provider runtime; archive remains represented separately by `archivedAt`.                                                                                                                                                                            |
-| `lastModeId`         | `string?`                                | Last active mode ID                                                                                                                                                                                                                                                                                                                                                                 |
-| `config`             | `SerializableConfig?`                    | Agent session configuration (see below)                                                                                                                                                                                                                                                                                                                                             |
-| `runtimeInfo`        | `RuntimeInfo?`                           | Live runtime state (see below)                                                                                                                                                                                                                                                                                                                                                      |
-| `features`           | `AgentFeature[]?`                        | Provider-reported features (toggles/selects)                                                                                                                                                                                                                                                                                                                                        |
-| `persistence`        | `PersistenceHandle?`                     | Handle for resuming sessions                                                                                                                                                                                                                                                                                                                                                        |
-| `lastError`          | `string?` (nullable)                     | Last error message, if any                                                                                                                                                                                                                                                                                                                                                          |
-| `requiresAttention`  | `boolean?`                               | Whether the agent needs user attention                                                                                                                                                                                                                                                                                                                                              |
-| `attentionReason`    | `"finished" \| "error" \| "permission"?` | Why attention is needed                                                                                                                                                                                                                                                                                                                                                             |
-| `attentionTimestamp` | `string?` (ISO 8601)                     | When attention was flagged                                                                                                                                                                                                                                                                                                                                                          |
-| `internal`           | `boolean?`                               | Whether this is a system-internal agent (loop workers, etc.)                                                                                                                                                                                                                                                                                                                        |
-| `archivedAt`         | `string?` (ISO 8601)                     | Soft-delete timestamp                                                                                                                                                                                                                                                                                                                                                               |
+Fields whose meaning the schema does not show:
 
-### Nested: SerializableConfig
-
-| Field              | Type                       | Description                  |
-| ------------------ | -------------------------- | ---------------------------- |
-| `title`            | `string?`                  | Configured title             |
-| `modeId`           | `string?`                  | Configured mode              |
-| `model`            | `string?`                  | Configured model             |
-| `thinkingOptionId` | `string?`                  | Thinking/reasoning level     |
-| `featureValues`    | `Record<string, unknown>?` | Feature preference overrides |
-| `extra`            | `Record<string, any>?`     | Provider-specific config     |
-| `systemPrompt`     | `string?`                  | Custom system prompt         |
-| `mcpServers`       | `Record<string, any>?`     | MCP server configurations    |
-
-### Nested: RuntimeInfo
-
-| Field              | Type                       | Description                    |
-| ------------------ | -------------------------- | ------------------------------ |
-| `provider`         | `string`                   | Active provider                |
-| `sessionId`        | `string?`                  | Active session ID              |
-| `model`            | `string?`                  | Active model                   |
-| `thinkingOptionId` | `string?`                  | Active thinking option         |
-| `modeId`           | `string?`                  | Active mode                    |
-| `extra`            | `Record<string, unknown>?` | Provider-specific runtime data |
-
-### Nested: PersistenceHandle
-
-| Field          | Type                   | Description                                                           |
-| -------------- | ---------------------- | --------------------------------------------------------------------- |
-| `provider`     | `string`               | Provider that owns the session                                        |
-| `sessionId`    | `string`               | Session ID for resumption                                             |
-| `nativeHandle` | `any?`                 | Provider-specific handle (Codex thread ID, Claude resume token, etc.) |
-| `metadata`     | `Record<string, any>?` | Extra metadata                                                        |
-
-### Nested: AgentFeature (discriminated union on `type`)
-
-**Toggle:**
-
-| Field         | Type       |
-| ------------- | ---------- |
-| `type`        | `"toggle"` |
-| `id`          | `string`   |
-| `label`       | `string`   |
-| `description` | `string?`  |
-| `tooltip`     | `string?`  |
-| `icon`        | `string?`  |
-| `value`       | `boolean`  |
-
-**Select:**
-
-| Field         | Type                  |
-| ------------- | --------------------- |
-| `type`        | `"select"`            |
-| `id`          | `string`              |
-| `label`       | `string`              |
-| `description` | `string?`             |
-| `tooltip`     | `string?`             |
-| `icon`        | `string?`             |
-| `value`       | `string \| null`      |
-| `options`     | `AgentSelectOption[]` |
+- `workspaceId` — the single source of ownership. Every agent is stamped with one at create time; legacy cwd-only records are backfilled once by `migrations/backfill-workspace-id.migration.ts` (the only place a cwd→id mapping exists). Runtime code never infers ownership or status from cwd: status is computed per `workspaceId`, and same-cwd siblings are independent.
+- `labels` — `jagentdesk.parent-agent-id` is set automatically for agent-scoped creation and removed by detach. See [agent-lifecycle.md](agent-lifecycle.md).
+- `lastStatus` — `closed` means the record is resumable but has no live provider runtime. Archive is represented separately by `archivedAt`.
+- `sessionMetrics` — provider-formatted session stats, replaced as a whole. Independent of the cumulative usage Insights reads.
+- `internal` — system-internal agents such as loop workers.
+- `background` — hidden from default discovery and agent-announcing surfaces; fixed at creation.
+- `metadata` — plugin-owned data. JAgentDesk stores it and never reads a key.
 
 ---
 
@@ -182,63 +122,26 @@ its roles may contain multiple profiles and its runtime assignments/handbacks ar
 separately under `$JAGENTDESK_HOME/orchestration/runtime.json`. See
 [orchestration.md](orchestration.md) for the role and evidence contract.
 
-Single file, validated with `PersistedConfigSchema`.
+Single file, validated with `PersistedConfigSchema` (`packages/server/src/server/persisted-config.ts`). All fields are optional with defaults. Top-level keys:
 
-```
-{
-  version: 1,
-  daemon: {
-    listen: "127.0.0.1:6767",
-    hostnames: true | string[],   // legacy alias `allowedHosts` is migrated on load
-    trustedProxies: true | string[], // defaults to ["loopback"]; Express proxy names/CIDRs
-    mcp: { enabled: boolean, injectIntoAgents: boolean },
-    git: { maxProcessesPerSecond: number, maxProcessConcurrency: number },
-    appendSystemPrompt: string,    // appended to supported provider system/developer prompts
-    cors: { allowedOrigins: string[] },
-    tailscale: { enabled: boolean, authKey?: string, hostname?: string },
-    auth: { password: string }    // bcrypt hash, optional
-  },
-  app: {
-    baseUrl: string
-  },
-  worktrees?: {
-    root?: string            // optional root for new worktrees; defaults to $JAGENTDESK_HOME/worktrees
-    servicePorts?: {         // optional dynamic service port allocation policy
-      range?: string         // inclusive range, e.g. "3000-4000"
-      portScript?: string    // executable that receives service/workspace context and prints one TCP port
-    }
-  },
-  providers: {
-    openai: {
-      apiKey?: string,
-      baseUrl?: string,
-      stt?: { apiKey?: string, baseUrl?: string },
-      tts?: { apiKey?: string, baseUrl?: string }
-    },
-    local: { modelsDir: string }
-  },
-  agents: {
-    // ProviderOverrideSchema; legacy entries with `command: { mode, ... }` are migrated to the
-    // current shape on load via `migrateProviderSettings`. Custom provider IDs must declare
-    // `extends` (one of the built-ins or `"acp"`) and `label`. See `provider-launch-config.ts`.
-    providers: Record<providerId, ProviderOverride>,
-    metadataGeneration: {
-      providers: [{ provider, model?, thinkingOptionId? }]
-    }
-  },
-  features: {
-    dictation: { enabled, stt: { provider, model, language, confidenceThreshold } },
-    voiceMode: { enabled, llm, stt: { provider, model, language }, turnDetection, tts: { provider, model, voice, speakerId, speed } }
-  },
-  log: {
-    level, format,
-    console: { level, format },
-    file: { level, path, rotate: { maxSize, maxFiles } }
-  }
-}
-```
+| Key              | Holds                                                                                                                                               |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `daemon`         | `listen`, `hostnames`, `trustedProxies`, `mcp`, `relay`, `git`, `cors`, `serviceProxy`, `auth`, `orchestration`, profiles, and per-feature switches |
+| `tailnet`        | Embedded Tailscale `hostname`, `host`, and `stateDir`                                                                                               |
+| `app`            | `baseUrl` for links back into the app                                                                                                               |
+| `builtinPlugins` | Per-host `{ [id]: { enabled } }` toggles for built-in plugins. Unknown ids are ignored                                                              |
+| `plugins`        | Installed local plugin sources, with `pluginsEnabled` as the master switch ([plugins.md](plugins.md))                                               |
+| `usage`          | `{ enabled }` switch for the Usage feature (account quotas from usage-source plugins); on unless `false`                                            |
+| `providers`      | `local.modelsDir` for local speech models                                                                                                           |
+| `agents`         | `providers` overrides, `metadataGeneration`, `resumeOnStartup`, `resumePrompt`, `idleRuntimeCleanup` ([agent-lifecycle.md](agent-lifecycle.md))     |
+| `worktrees`      | `root` for new worktrees (default `$JAGENTDESK_HOME/worktrees`) and `servicePorts` allocation                                                       |
+| `features`       | `dictation`, `voiceMode`, `webUi`                                                                                                                   |
+| `log`            | Level, format, console and file targets, rotation                                                                                                   |
 
-All fields are optional with sensible defaults.
+`agents.providers` entries use `ProviderOverrideSchema`. Legacy entries with `command: { mode, ... }`
+migrate to the current shape on load. Custom provider IDs must declare `extends` (one of the
+built-ins or `"acp"`) and `label`. See `provider-launch-config.ts` and
+[custom-providers.md](custom-providers.md). Relay keys are covered in [relay.md](relay.md#configuration).
 
 ### Git process limits
 
@@ -276,36 +179,27 @@ For a desktop-managed daemon, fully quit and reopen JAgentDesk Desktop.
 
 `agents.metadataGeneration.providers` controls the preferred structured-generation fallback order for daemon-side metadata tasks such as commit messages, PR text, branch names, and generated agent titles. Entries are tried first in the configured order, then JAgentDesk falls through to dynamically discovered defaults and finally the current selection when available.
 
-Local speech model ids are intentionally narrow: STT uses `parakeet-tdt-0.6b-v2-int8`, TTS uses `kokoro-en-v0_19`, and turn detection uses the bundled Silero VAD model.
+### Speech settings
 
-Set these to select OpenAI instead of local speech:
+Configure Speech-to-text, Listening and Speaking independently under **Settings → host → Voice**.
+Local downloads show model sizes and languages before installation. Voice mode defaults to off;
+hosts that never saved a choice will find it disabled after upgrading.
 
-| Env var                             | Applies to                      |
-| ----------------------------------- | ------------------------------- |
-| `JAGENTDESK_VOICE_STT_PROVIDER`     | Voice mode STT provider         |
-| `JAGENTDESK_DICTATION_STT_PROVIDER` | Composer dictation STT provider |
-| `JAGENTDESK_VOICE_TTS_PROVIDER`     | Voice mode TTS provider         |
+Credentials belong to their use site: `features.dictation.stt`, `features.voiceMode.stt` or
+`features.voiceMode.tts`. Select `provider` (`local` or `openai`) at each site. OpenAI sites accept
+`apiKey`, `baseUrl` and `model`. STT accepts `language`; OpenAI STT also accepts
+`confidenceThreshold`. OpenAI TTS accepts `voice`; local TTS accepts `speakerId` and `speed`.
 
-OpenAI speech can be configured under `providers.openai`. STT and TTS resolve independently, so they can point at different endpoints:
+Legacy `providers.openai` credentials fold into sites that explicitly select OpenAI on load.
+Endpoint-specific values win over shared values. Unused legacy keys are discarded with a warning
+that contains only config paths. The next save writes the inline shape. Normalization preserves
+unrelated keys, including `builtinPlugins`, relay settings and `agents.providers` API blocks.
+Same-provider patches keep saved keys; changing provider replaces that site's fields. Reads redact keys.
 
-```json
-{
-  "providers": {
-    "openai": {
-      "stt": {
-        "apiKey": "sk-...",
-        "baseUrl": "https://stt.example.com/v1"
-      },
-      "tts": {
-        "apiKey": "sk-...",
-        "baseUrl": "https://api.openai.com/v1"
-      }
-    }
-  }
-}
-```
-
-`providers.openai.stt` is used for both composer dictation and voice mode speech-to-text; `providers.openai.tts` is used for voice mode text-to-speech. The equivalent env vars are `OPENAI_STT_API_KEY`/`OPENAI_STT_BASE_URL` and `OPENAI_TTS_API_KEY`/`OPENAI_TTS_BASE_URL`. Each feature falls back to `providers.openai.apiKey`/`providers.openai.baseUrl`, then `OPENAI_API_KEY`/`OPENAI_BASE_URL`, when its own fields are unset. These settings apply only to JAgentDesk OpenAI speech features, not to Codex or other OpenAI-backed tools.
+Provider environment overrides are `JAGENTDESK_DICTATION_STT_PROVIDER`,
+`JAGENTDESK_VOICE_STT_PROVIDER` and `JAGENTDESK_VOICE_TTS_PROVIDER`. The sheet marks overridden
+fields read-only. Saved API keys and base URLs win over `OPENAI_STT_*`, `OPENAI_TTS_*` and shared
+`OPENAI_*` fallbacks. These settings apply only to JAgentDesk speech.
 
 JAgentDesk uses these paths under the configured OpenAI base URL:
 
@@ -318,174 +212,33 @@ JAgentDesk uses these paths under the configured OpenAI base URL:
 ## 3. Schedule
 
 **Path:** `$JAGENTDESK_HOME/schedules/{id}.json`
+**Schema:** `StoredScheduleSchema` (`packages/protocol/src/schedule/types.ts`)
 
-One file per schedule. ID is 8 hex characters.
-
-| Field       | Type                                  | Description                      |
-| ----------- | ------------------------------------- | -------------------------------- |
-| `id`        | `string`                              | 8-char hex ID                    |
-| `name`      | `string?`                             | Human-readable name              |
-| `prompt`    | `string`                              | The prompt to send               |
-| `cadence`   | `ScheduleCadence`                     | Timing (see below)               |
-| `target`    | `ScheduleTarget`                      | What to run (see below)          |
-| `status`    | `"active" \| "paused" \| "completed"` | Current state                    |
-| `createdAt` | `string` (ISO 8601)                   |                                  |
-| `updatedAt` | `string` (ISO 8601)                   |                                  |
-| `nextRunAt` | `string?` (ISO 8601)                  | Next scheduled execution         |
-| `lastRunAt` | `string?` (ISO 8601)                  | Last execution time              |
-| `pausedAt`  | `string?` (ISO 8601)                  | When paused                      |
-| `expiresAt` | `string?` (ISO 8601)                  | Auto-expire time                 |
-| `maxRuns`   | `number?`                             | Max executions before completing |
-| `runs`      | `ScheduleRun[]`                       | Execution history                |
-
-### Nested: ScheduleCadence (discriminated union on `type`)
-
-- `{ type: "cron", expression: string, timezone?: string }` — canonical cadence for new writes; absent `timezone` means UTC
-- `{ type: "every", everyMs: number }` — legacy rolling interval, still readable and executable during the compatibility window
-
-### Nested: ScheduleTarget (discriminated union on `type`)
-
-- `{ type: "agent", agentId: string }` — send to existing agent
-- `{ type: "new-agent", config: { provider, cwd, modeId?, model?, thinkingOptionId?, title?, approvalPolicy?, sandboxMode?, networkAccess?, webSearch?, extra?, systemPrompt?, mcpServers? } }` — create a new agent
-
-### Nested: ScheduleRun
-
-| Field          | Type                                   | Description             |
-| -------------- | -------------------------------------- | ----------------------- |
-| `id`           | `string`                               | Run ID                  |
-| `scheduledFor` | `string` (ISO 8601)                    | Intended execution time |
-| `startedAt`    | `string` (ISO 8601)                    |                         |
-| `endedAt`      | `string?` (ISO 8601)                   |                         |
-| `status`       | `"running" \| "succeeded" \| "failed"` |                         |
-| `agentId`      | `string?` (UUID)                       | Agent used for this run |
-| `output`       | `string?`                              | Agent output text       |
-| `error`        | `string?`                              | Error message if failed |
+One file per schedule; the ID is 8 hex characters. `cadence` is `cron` (absent `timezone` means
+UTC) or the legacy rolling `every`, which stays readable and executable until its `COMPAT` tag
+expires. `target` either sends to an existing agent or creates a new agent from a stored config.
+`runs` is the execution history.
 
 ---
 
 ## 4. Chat
 
 **Path:** `$JAGENTDESK_HOME/chat/rooms.json`
+**Schema:** `ChatRoomSchema` and `ChatMessageSchema` (`packages/protocol/src/chat/types.ts`)
 
-Single file containing all rooms and messages.
-
-```json
-{
-  "rooms": [ ... ],
-  "messages": [ ... ]
-}
-```
-
-### ChatRoom
-
-| Field       | Type                | Description                         |
-| ----------- | ------------------- | ----------------------------------- |
-| `id`        | `string` (UUID)     |                                     |
-| `name`      | `string`            | Unique room name (case-insensitive) |
-| `purpose`   | `string?`           | Room description                    |
-| `createdAt` | `string` (ISO 8601) |                                     |
-| `updatedAt` | `string` (ISO 8601) | Updated on each new message         |
-
-### ChatMessage
-
-| Field              | Type                | Description                         |
-| ------------------ | ------------------- | ----------------------------------- |
-| `id`               | `string` (UUID)     |                                     |
-| `roomId`           | `string`            | FK to ChatRoom.id                   |
-| `authorAgentId`    | `string`            | Agent ID of the author              |
-| `body`             | `string`            | Message text (supports `@mentions`) |
-| `replyToMessageId` | `string?`           | FK to another ChatMessage.id        |
-| `mentionAgentIds`  | `string[]`          | Extracted `@mention` agent IDs      |
-| `createdAt`        | `string` (ISO 8601) |                                     |
+Single file containing all rooms and messages. Room names are unique case-insensitively. Message
+`mentionAgentIds` are extracted from `@mentions` in the body.
 
 ---
 
 ## 5. Loop
 
 **Path:** `$JAGENTDESK_HOME/loops/loops.json`
+**Schema:** `LoopRecordSchema` (`packages/server/src/server/loop-service.ts`)
 
-Single file containing an array of all loop records. Writes are direct (not atomic) and serialized through an in-memory queue. On daemon startup any record with `status: "running"` is recovered as `"stopped"` with an interruption log entry.
-
-| Field                   | Type                                                | Description                                |
-| ----------------------- | --------------------------------------------------- | ------------------------------------------ |
-| `id`                    | `string`                                            | 8-char UUID prefix                         |
-| `name`                  | `string?`                                           | Human-readable name                        |
-| `prompt`                | `string`                                            | Worker prompt                              |
-| `cwd`                   | `string`                                            | Working directory                          |
-| `provider`              | `string`                                            | Default provider                           |
-| `model`                 | `string?`                                           | Default model                              |
-| `modeId`                | `string?`                                           | Default mode ID                            |
-| `workerProvider`        | `string?`                                           | Override provider for workers              |
-| `workerModel`           | `string?`                                           | Override model for workers                 |
-| `verifierProvider`      | `string?`                                           | Override provider for verifiers            |
-| `verifierModel`         | `string?`                                           | Override model for verifiers               |
-| `verifierModeId`        | `string?`                                           | Override mode ID for verifiers             |
-| `verifyPrompt`          | `string?`                                           | LLM verification prompt                    |
-| `verifyChecks`          | `string[]`                                          | Shell commands to run as checks            |
-| `archive`               | `boolean`                                           | Whether to archive worker agents after use |
-| `sleepMs`               | `number`                                            | Delay between iterations (ms)              |
-| `maxIterations`         | `number?`                                           | Cap on iterations                          |
-| `maxTimeMs`             | `number?`                                           | Total time budget (ms)                     |
-| `status`                | `"running" \| "succeeded" \| "failed" \| "stopped"` |                                            |
-| `createdAt`             | `string` (ISO 8601)                                 |                                            |
-| `updatedAt`             | `string` (ISO 8601)                                 |                                            |
-| `startedAt`             | `string` (ISO 8601)                                 |                                            |
-| `completedAt`           | `string?` (ISO 8601)                                |                                            |
-| `stopRequestedAt`       | `string?` (ISO 8601)                                |                                            |
-| `iterations`            | `LoopIteration[]`                                   |                                            |
-| `logs`                  | `LoopLogEntry[]`                                    |                                            |
-| `nextLogSeq`            | `number`                                            | Monotonic log sequence counter             |
-| `activeIteration`       | `number?`                                           | Currently executing iteration index        |
-| `activeWorkerAgentId`   | `string?`                                           | Currently running worker agent             |
-| `activeVerifierAgentId` | `string?`                                           | Currently running verifier agent           |
-
-### Nested: LoopIteration
-
-| Field               | Type                                                | Description              |
-| ------------------- | --------------------------------------------------- | ------------------------ |
-| `index`             | `number`                                            | 1-based iteration index  |
-| `workerAgentId`     | `string?`                                           | Agent ID of the worker   |
-| `workerStartedAt`   | `string` (ISO 8601)                                 |                          |
-| `workerCompletedAt` | `string?` (ISO 8601)                                |                          |
-| `verifierAgentId`   | `string?`                                           | Agent ID of the verifier |
-| `status`            | `"running" \| "succeeded" \| "failed" \| "stopped"` |                          |
-| `workerOutcome`     | `"completed" \| "failed" \| "canceled"?`            |                          |
-| `failureReason`     | `string?`                                           |                          |
-| `verifyChecks`      | `LoopVerifyCheckResult[]`                           | Shell check results      |
-| `verifyPrompt`      | `LoopVerifyPromptResult?`                           | LLM verification result  |
-
-### Nested: LoopLogEntry
-
-| Field       | Type                                                 |
-| ----------- | ---------------------------------------------------- |
-| `seq`       | `number` (monotonic)                                 |
-| `timestamp` | `string` (ISO 8601)                                  |
-| `iteration` | `number?`                                            |
-| `source`    | `"loop" \| "worker" \| "verifier" \| "verify-check"` |
-| `level`     | `"info" \| "error"`                                  |
-| `text`      | `string`                                             |
-
-### Nested: LoopVerifyCheckResult
-
-| Field         | Type                |
-| ------------- | ------------------- |
-| `command`     | `string`            |
-| `exitCode`    | `number`            |
-| `passed`      | `boolean`           |
-| `stdout`      | `string`            |
-| `stderr`      | `string`            |
-| `startedAt`   | `string` (ISO 8601) |
-| `completedAt` | `string` (ISO 8601) |
-
-### Nested: LoopVerifyPromptResult
-
-| Field             | Type                |
-| ----------------- | ------------------- |
-| `passed`          | `boolean`           |
-| `reason`          | `string`            |
-| `verifierAgentId` | `string?`           |
-| `startedAt`       | `string` (ISO 8601) |
-| `completedAt`     | `string` (ISO 8601) |
+Single file containing an array of all loop records. Writes are serialized through an in-memory
+queue. On daemon startup any record with `status: "running"` is recovered as `"stopped"` with an
+interruption log entry.
 
 ---
 
@@ -493,7 +246,7 @@ Single file containing an array of all loop records. Writes are direct (not atom
 
 **Path:** `$JAGENTDESK_HOME/projects/projects.json`
 
-Array of project records.
+Array of project records. Schema: `PersistedProjectRecordSchema` (`packages/server/src/server/workspace-registry.ts`).
 
 | Field                | Type                        | Description                                                                                                                                |
 | -------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -528,7 +281,7 @@ workspace together with its owning project.
 
 **Path:** `$JAGENTDESK_HOME/projects/workspaces.json`
 
-Array of workspace records. A workspace is a specific working directory within a project.
+Array of workspace records. A workspace is a specific working directory within a project. Schema: `PersistedWorkspaceRecordSchema` (`packages/server/src/server/workspace-registry.ts`).
 
 | Field                          | Type                                            | Description                                                                                                                                                                                   |
 | ------------------------------ | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -548,6 +301,9 @@ Array of workspace records. A workspace is a specific working directory within a
 | `archivedAt`                   | `string \| null` (ISO 8601)                     | Soft-delete; required nullable                                                                                                                                                                |
 | `autoArchivedChangeRequestUrl` | `string \| null`                                | Change request whose merged state triggered auto-archive. Restore replaces it with the current merged change request, when present, so repeated snapshots cannot archive the workspace again. |
 | `pinnedAt`                     | `string \| null` (ISO 8601)                     | Pinned-to-top-of-sidebar timestamp; null means "not pinned"                                                                                                                                   |
+| `background`                   | `boolean`                                       | Hidden from default discovery; agents inside it are effectively background                                                                                                                    |
+| `metadata`                     | `Record<string, JSON>`                          | Plugin-owned data. JAgentDesk stores it and never reads a key                                                                                                                                 |
+| `untrustedSource`              | `{ kind: "change_request", … }?`                | Set for checkouts of an untrusted change request; workspace setup automation is skipped                                                                                                       |
 
 > **Opaque-ID invariant:** `workspaceId` is opaque identity, never a filesystem path. Filesystem and git operations take `cwd`/`workspaceDirectory` only — never the id. A compatibility-only first-materialization bootstrap still groups pre-registry agent records by path and Git remote so existing installs retain their legacy records. That grouping never runs against a live registry, and its keys are not runtime project or workspace identity.
 
@@ -568,7 +324,7 @@ than treating it as valid.
 }
 ```
 
-Simple set of Expo push notification tokens. Loaded with permissive parsing (filters non-string entries). Persisted with atomic temp-file rename.
+Simple set of Expo push notification tokens. Loaded with permissive parsing (filters non-string entries). Written atomically as a private file.
 
 ---
 
@@ -576,12 +332,14 @@ Simple set of Expo push notification tokens. Loaded with permissive parsing (fil
 
 These small files are not validated as full Zod schemas but are persisted under `$JAGENTDESK_HOME` for daemon identity and runtime coordination.
 
-| Path                  | Format                                 | Notes                                                                                                  |
-| --------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `server-id`           | Plain text, e.g. `srv_<base64url>`     | Stable per-`$JAGENTDESK_HOME` daemon ID. Overridable via `JAGENTDESK_SERVER_ID` env.                   |
-| `daemon-keypair.json` | `{ v: 2, publicKeyB64, secretKeyB64 }` | Daemon identity used for pairing/signing. Written with mode `0600`. Regenerated if file is unreadable. |
-| `jagentdesk.pid`      | JSON `{ pid, startedAt, ... }`         | PID lock; prevents two daemons sharing one `$JAGENTDESK_HOME`.                                         |
-| `daemon.log`          | Pino log output                        | Default location; path/rotation configurable via `log.file` in `config.json`.                          |
+| Path                  | Format                                 | Notes                                                                                                                                                                                               |
+| --------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `server-id`           | Plain text, e.g. `srv_<base64url>`     | Stable per-`$JAGENTDESK_HOME` daemon ID. Overridable via `JAGENTDESK_SERVER_ID` env.                                                                                                                |
+| `daemon-keypair.json` | `{ v: 2, publicKeyB64, secretKeyB64 }` | Noise key used for pairing and E2EE. `relayPublicKeyB64`/`relaySecretKeyB64` appear after the first relay enable. Mode `0600`. Keep it with `server-id`; see [relay.md](relay.md#trust-boundaries). |
+| `paired-devices.json` | JSON `{ devices: [...] }`              | Device public keys, kinds, and pinned tailnet node IDs ([permissions.md](permissions.md#device-pairing)).                                                                                           |
+| `hosts.json`          | JSON                                   | Saved-host registrations with private device keys. Mode `0600`; keep out of diagnostic bundles ([connected-hosts.md](connected-hosts.md)).                                                          |
+| `jagentdesk.pid`      | JSON `{ pid, startedAt, ... }`         | PID lock; prevents two daemons sharing one `$JAGENTDESK_HOME`. `desktopManaged` marks a daemon the desktop app started.                                                                             |
+| `daemon.log`          | Pino log output                        | Default location; path/rotation configurable via `log.file` in `config.json`.                                                                                                                       |
 
 ---
 
@@ -596,21 +354,27 @@ Right-sidebar client state splits on whether it is determined by the directory o
 - **Directory-backed** (shared by same-`cwd` workspaces): keyed by `(serverId, cwd)`. Git status/diff, GitHub PR status, PR timeline, file preview content. These are TanStack Query caches, not persisted stores.
 - **Workspace-owned** (independent per workspace): keyed by `workspaceId`, with `cwd` used only as a fallback when no `workspaceId` is present. Review draft comments (`@jagentdesk:review-draft-store`), diff-mode overrides (in-memory), workspace composer attachments, and file-explorer nav/expand state. The `workspaceId` part of these keys is **opaque** — never parse it back into a path.
 
+### Offline replica
+
+Host directories (agents, workspaces, projects) and per-agent chats use row storage: SQLite on
+native and IndexedDB on web (`packages/app/src/runtime/replica-cache/`). Directory demand and
+viewed timelines restore through their owning runtime, so opening one chat never waits for all
+saved hosts or unrelated streaming agents. Each chat keeps its latest 50 canonical items. The
+whole cache has a 32 MiB budget and evicts whole hosts in least-recently-written order.
+
+The cache is disposable; provider history remains authoritative. Changing its schema evicts
+cached rows rather than migrating them. Pending permission requests and unreconciled local
+prompts are never stored. The rows are not encrypted, so cached chats may contain source code,
+prompts, and tool output. Agent snapshots retain cumulative usage for Insights independently of
+timeline retention. [timeline-sync.md](timeline-sync.md#client-replica-lifetime) covers how a
+restored chat reconciles with the daemon.
+
 ### Draft Store
 
-**AsyncStorage key:** `jagentdesk-drafts` (version 2)
+**AsyncStorage key:** `jagentdesk-drafts` (version `DRAFT_STORE_VERSION` in `packages/app/src/stores/draft-store/state.ts`)
 
-```typescript
-{
-  drafts: Record<draftKey, {
-    input: { text: string, images: AttachmentMetadata[] },
-    lifecycle: "active" | "abandoned" | "sent",
-    updatedAt: number,     // epoch ms
-    version: number        // optimistic concurrency
-  }>,
-  createModalDraft: DraftRecord | null
-}
-```
+Composer drafts keyed by draft scope, each with a lifecycle (`active`, `abandoned`, `sent`) and an
+optimistic-concurrency version.
 
 ### Attachment Store (Web)
 

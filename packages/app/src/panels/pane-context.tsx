@@ -1,13 +1,15 @@
-import React, { createContext, useContext, type ReactNode } from "react";
+import { createContext, useContext, type ReactNode } from "react";
 import invariant from "tiny-invariant";
-import type { WorkspaceTabTarget } from "@/workspace-tabs/model";
-import type { WorkspaceFileOpenRequest } from "@/workspace/file-open";
+import { type WorkspaceTabTarget } from "@/workspace-tabs/model";
+import { type WorkspaceFileOpenRequest } from "@/workspace/file-open";
+import { type PaneHost } from "@/panels/panel-manifest";
 
 export interface PaneContextValue {
   serverId: string;
   workspaceId: string;
   tabId: string;
   target: WorkspaceTabTarget;
+  host?: PaneHost;
   fileNavigationRevision?: number;
   openTab: (target: WorkspaceTabTarget) => void;
   closeCurrentTab: () => void;
@@ -64,6 +66,12 @@ export function usePaneContext(): PaneContextValue {
   const value = useContext(PaneContext);
   invariant(value, "PaneContext is required");
   return value;
+}
+
+/** The host of the pane around this component, or null on a screen with no panes. */
+export function usePaneHost(): PaneHost | null {
+  const pane = useContext(PaneContext);
+  return pane ? (pane.host ?? "main") : null;
 }
 
 export function usePaneFocus(): PaneFocusContextValue {

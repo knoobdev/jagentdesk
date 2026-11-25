@@ -96,3 +96,21 @@ describe("computeWorkspaceTabLayout", () => {
     expect(result.items).toEqual([]);
   });
 });
+
+import { shouldUseCompactWorkspaceHeader, selectWorkspaceChrome } from "./workspace-tab-layout";
+it.each([
+  [349, true],
+  [499, true],
+  [500, false],
+  [800, false],
+])("workspace width %s selects compact=%s", (width, compact) => {
+  expect(shouldUseCompactWorkspaceHeader(width as number)).toBe(compact);
+});
+it("selects chrome from measured content width", () => {
+  const full = ["workspace header", "pane tab rail"];
+  expect(selectWorkspaceChrome({ width: 440, compact: "pane dropdown", full })).toBe(
+    "pane dropdown",
+  );
+  expect(selectWorkspaceChrome({ width: 500, compact: "pane dropdown", full })).toBe(full);
+  expect(selectWorkspaceChrome({ width: null, compact: "pane dropdown", full })).toBe(full);
+});

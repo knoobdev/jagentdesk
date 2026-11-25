@@ -28,7 +28,7 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
   },
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -109,7 +109,7 @@ function extractOfferUrlFromScan(result: BarcodeScanningResult): string | null {
   const raw = typeof result.data === "string" ? result.data.trim() : "";
   if (!raw) return null;
 
-  if (raw.includes("#offer=")) return raw;
+  if (raw.startsWith("jagentdesk://pair#")) return raw;
 
   return null;
 }
@@ -153,7 +153,9 @@ export default function PairScanScreen() {
 
       try {
         setIsPairing(true);
-        router.push(`/pair-verify?source=${encodeURIComponent(source)}&offer=${encodeURIComponent(offerUrl)}` as Href);
+        router.push(
+          `/pair-verify?source=${encodeURIComponent(source)}&offer=${encodeURIComponent(offerUrl)}` as Href,
+        );
       } catch (error) {
         lastScannedRef.current = null;
         const message = error instanceof Error ? error.message : t("pairing.scan.unableToPair");

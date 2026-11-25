@@ -1,13 +1,26 @@
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { rename, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import {
+  cp,
+  rename,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import pino from "pino";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { DaemonConfigStore } from "../daemon-config-store.js";
 import { PluginService } from "./index.js";
+import { BuiltinPluginLoader } from "./builtin/index.js";
 import { ManagedPluginSources } from "./managed-source.js";
+import type { PluginProviderMetadata } from "./plugin-process-protocol.js";
 import {
   startNpmRegistry,
   npmPluginPackages,
@@ -159,7 +172,339 @@ function createPluginSelectivePausedRuntime(pausedPluginId: string) {
   return { runtime, started, releaseStart, starts };
 }
 
+function createGatedRuntime(providers: Record<string, readonly PluginProviderMetadata[]> = {}) {
+  const gates = new Map<string, PromiseWithResolvers<void>>();
+  const gate = (pluginId: string) => {
+    const existing = gates.get(pluginId);
+    if (existing) return existing;
+    const created = Promise.withResolvers<void>();
+    gates.set(pluginId, created);
+    return created;
+  };
+  const begun: string[] = [];
+  const running = new Set<string>();
+  const runtime: TestPluginRuntime = {
+    startSubscription: () => {
+      throw new Error("No subscriptions in this test");
+    },
+    catalog: () => [...running].map((id) => ({ id, clientBundle: "bundle" })),
+    invoke: async () => undefined,
+    getLogs: () => [],
+    clearLogs: () => undefined,
+    getProviderRegistrations: (pluginId) =>
+      running.has(pluginId) ? (providers[pluginId] ?? []) : [],
+    startPlugin: async (pluginId) => {
+      begun.push(pluginId);
+      await gate(pluginId).promise;
+      running.add(pluginId);
+    },
+    stopPluginById: async (pluginId) => running.delete(pluginId),
+    stopAll: async () => {
+      running.clear();
+    },
+    subscribe: () => () => undefined,
+    bindJAgentDeskSessionHost: () => undefined,
+  };
+  return {
+    runtime,
+    begun,
+    finish: (pluginId: string) => gate(pluginId).resolve(),
+    fail: (pluginId: string, error: Error) => gate(pluginId).reject(error),
+  };
+}
+
+function nextNotification(service: PluginService, pluginId: string): Promise<void> {
+  return new Promise((resolve) => {
+    const unsubscribe = service.subscribe((notified) => {
+      if (notified !== pluginId) return;
+      unsubscribe();
+      resolve();
+    });
+  });
+}
+
 describe("PluginService", () => {
+  it.skipIf(process.platform === "win32")(
+    "reaps compiler children after starting and reloading a client-only directory plugin",
+    async () => {
+      const directory = await mkdtemp(path.join(tmpdir(), "jagentdesk-plugin-reaping-"));
+      roots.push(directory);
+      const id = "client-only-reaping";
+      await writeFile(path.join(directory, "jagentdesk-plugin.json"), JSON.stringify({ id }));
+      await writeFile(
+        path.join(directory, "index.client.ts"),
+        "export default function contribute() {}",
+      );
+      const service = createService(
+        directory,
+        { [id]: { source: "directory", path: directory } },
+        { builtinPlugins: new BuiltinPluginLoader(directory, []) },
+      );
+      const compilerChildren = () =>
+        execFileSync("ps", ["-axo", "ppid=,stat=,command="], { encoding: "utf8" })
+          .split("\n")
+          .map((line) => line.trim())
+          .filter((line) => {
+            const [parent, state, ...command] = line.split(/\s+/);
+            return (
+              parent === String(process.pid) &&
+              (state?.startsWith("Z") || /esbuild|compiler-worker/.test(command.join(" ")))
+            );
+          });
+      try {
+        await service.start();
+        expect(service.catalog()[0]?.id).toBe(id);
+        await expect.poll(compilerChildren, { timeout: 5_000 }).toEqual([]);
+        await service.reloadPlugin(id);
+        expect(service.catalog()[0]?.id).toBe(id);
+        await expect.poll(compilerChildren, { timeout: 5_000 }).toEqual([]);
+      } finally {
+        await service.stopAllPlugins();
+      }
+    },
+    20_000,
+  );
+
+  it.each([
+    { shadow: false, runtime: "subprocess" },
+    { shadow: true, runtime: "subprocess" },
+    { shadow: false, runtime: "builtin" },
+    { shadow: true, runtime: "builtin" },
+  ])(
+    "publishes status and launch metadata through $runtime despite a configured provider (extends: $shadow)",
+    async ({ shadow, runtime }) => {
+      const home = await mkdtemp(path.join(tmpdir(), "jagentdesk-plugin-home-"));
+      roots.push(home);
+      const directory = await createPlugin(
+        "provider-status",
+        `export default function contribute(server) {
+      server.registerProvider({ id: "plugin-agent", label: "Plugin agent", command: ["agent", "serve"],
+        async status({ launch }) { return launch.env.LOGIN === "yes" ? { available: true } : { available: false, diagnostic: "Sign in" }; },
+        async getCatalogCacheKey({ launch }) { return launch.command + ":" + launch.env.LOGIN; },
+        async connect({ launch }) {
+          if (launch.command !== process.execPath || launch.env.LOGIN !== "no") throw new Error("Unexpected launch");
+          return { version: 1, capabilities: [], async send() {}, onEvent() { return () => {}; }, async close() {} };
+        },
+      });
+      return () => {};
+    }`,
+      );
+      const store = createStore(home);
+      await store.patch({
+        providers: {
+          "plugin-agent": shadow
+            ? { extends: "acp", label: "Own provider", command: ["own-agent"] }
+            : { command: ["configured-agent"], enabled: false },
+        },
+      });
+      const builtinRoot = path.join(home, "builtins");
+      if (runtime === "builtin") {
+        await mkdir(builtinRoot);
+        await cp(directory, path.join(builtinRoot, "provider-status"), { recursive: true });
+      }
+      const builtinPlugins = new BuiltinPluginLoader(
+        builtinRoot,
+        runtime === "builtin" ? ["provider-status"] : [],
+      );
+      const service = bindTestSessionHost(
+        new PluginService(pino({ level: "silent" }), store, "0.4.0", { builtinPlugins }),
+      );
+      await service.start();
+      try {
+        if (runtime === "subprocess") await service.installDirectory({ path: directory });
+        const [registration] = service.getProviderRegistrations();
+        expect(registration).toMatchObject({
+          id: "plugin-agent",
+          command: ["agent", "serve"],
+          status: expect.any(Function),
+        });
+        const launch = { command: process.execPath, args: [], env: { LOGIN: "no" } };
+        expect(await registration!.getCatalogCacheKey!({ scope: "global", launch })).toBe(
+          process.execPath + ":no",
+        );
+        expect(await registration!.status!({ launch })).toEqual({
+          available: false,
+          diagnostic: "Sign in",
+        });
+        expect(
+          await registration!.status!({ launch: { ...launch, env: { LOGIN: "yes" } } }),
+        ).toEqual({ available: true });
+        const connection = await registration!.connect({ versions: [1], capabilities: [], launch });
+        await connection.close();
+      } finally {
+        await service.stopAllPlugins();
+      }
+    },
+  );
+
+  it.each(["subprocess", "builtin"] as const)(
+    "carries a provider update's output and result through the %s plugin runtime",
+    async (runtime) => {
+      const home = await mkdtemp(path.join(tmpdir(), "jagentdesk-plugin-home-"));
+      roots.push(home);
+      const directory = await createPlugin(
+        "provider-update",
+        `export default function contribute(server) {
+      server.registerProvider({ id: "plugin-agent", label: "Plugin agent", command: ["agent"],
+        installation: {
+          async update({ launch, report }) {
+            report({ type: "message", text: "Running " + launch.command + " update\\n" });
+            report({ type: "stdout", text: " added 1 package\\r\\n" });
+            report({ type: "bogus", text: "dropped" });
+            report({ type: "stderr", text: "warn \\u001b[33mold\\u001b[0m\\n" });
+            if (launch.env.MODE === "throw") throw new Error(" updater crashed \\n");
+            if (launch.env.MODE === "fail") return { status: "failed", message: " exit 3 \\n" };
+            return { status: "succeeded", message: " Restart agents \\n" };
+          },
+        },
+        async connect() { throw new Error("not connected by this test"); },
+      });
+      return () => {};
+    }`,
+      );
+      const store = createStore(home);
+      const builtinRoot = path.join(home, "builtins");
+      if (runtime === "builtin") {
+        await mkdir(builtinRoot);
+        await cp(directory, path.join(builtinRoot, "provider-update"), { recursive: true });
+      }
+      const builtinPlugins = new BuiltinPluginLoader(
+        builtinRoot,
+        runtime === "builtin" ? ["provider-update"] : [],
+      );
+      const service = bindTestSessionHost(
+        new PluginService(pino({ level: "silent" }), store, "0.4.0", { builtinPlugins }),
+      );
+      await service.start();
+      try {
+        if (runtime === "subprocess") await service.installDirectory({ path: directory });
+        const [registration] = service.getProviderRegistrations();
+        const update = registration!.installation!.update!;
+        const run = async (env: Record<string, string>) => {
+          const output: unknown[] = [];
+          const result = await update({
+            launch: { command: "/bin/agent", args: [], env, resolved: true },
+            signal: new AbortController().signal,
+            report: (event) => output.push(event),
+          }).catch((error: Error) => ({ thrown: error.message }));
+          return { result, output };
+        };
+        const output = [
+          { type: "message", text: "Running /bin/agent update\n" },
+          { type: "stdout", text: " added 1 package\r\n" },
+          { type: "stderr", text: "warn \u001b[33mold\u001b[0m\n" },
+        ];
+        await expect(run({})).resolves.toEqual({
+          result: { status: "succeeded", message: " Restart agents \n" },
+          output,
+        });
+        await expect(run({ MODE: "fail" })).resolves.toEqual({
+          result: { status: "failed", message: " exit 3 \n" },
+          output,
+        });
+        await expect(run({ MODE: "throw" })).resolves.toEqual({
+          result: { thrown: " updater crashed \n" },
+          output,
+        });
+      } finally {
+        await service.stopAllPlugins();
+      }
+    },
+  );
+
+  it.each(["subprocess", "builtin"] as const)(
+    "carries provider installation links, inspect and update checks through the %s plugin runtime",
+    async (runtime) => {
+      const home = await mkdtemp(path.join(tmpdir(), "jagentdesk-plugin-home-"));
+      roots.push(home);
+      const directory = await createPlugin(
+        "provider-installation",
+        `export default function contribute(server) {
+      server.registerProvider({ id: "plugin-agent", label: "Plugin agent", command: ["agent"],
+        installation: {
+          installUrl: "https://example.com/install",
+          updateUrl: "https://example.com/update",
+          async inspect({ launch, signal }) {
+            if (launch.env.HANG === "yes")
+              return await new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("aborted"))));
+            if (!launch.resolved) return { status: "not_installed" };
+            return { status: "installed", version: launch.command + " " + launch.env.VERSION };
+          },
+          async checkForUpdates({ launch, installedVersion, signal }) {
+            if (launch.env.HANG === "yes")
+              return await new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("aborted"))));
+            if (launch.env.FEED === "down") throw new Error("feed down");
+            return { status: "available", versions: [installedVersion, "nightly"], message: launch.env.NOTE };
+          },
+        },
+        async connect() { throw new Error("not connected by this test"); },
+      });
+      return () => {};
+    }`,
+      );
+      const store = createStore(home);
+      const builtinRoot = path.join(home, "builtins");
+      if (runtime === "builtin") {
+        await mkdir(builtinRoot);
+        await cp(directory, path.join(builtinRoot, "provider-installation"), { recursive: true });
+      }
+      const builtinPlugins = new BuiltinPluginLoader(
+        builtinRoot,
+        runtime === "builtin" ? ["provider-installation"] : [],
+      );
+      const service = bindTestSessionHost(
+        new PluginService(pino({ level: "silent" }), store, "0.4.0", { builtinPlugins }),
+      );
+      await service.start();
+      try {
+        if (runtime === "subprocess") await service.installDirectory({ path: directory });
+        const [registration] = service.getProviderRegistrations();
+        const installation = registration!.installation!;
+        expect(installation).toMatchObject({
+          installUrl: "https://example.com/install",
+          updateUrl: "https://example.com/update",
+        });
+        const signal = new AbortController().signal;
+        const launch = { command: "/bin/agent", args: [], env: { VERSION: " 1.0 (beta)\n" } };
+        await expect(
+          installation.inspect!({ launch: { ...launch, resolved: true }, signal }),
+        ).resolves.toEqual({ status: "installed", version: "/bin/agent  1.0 (beta)\n" });
+        await expect(
+          installation.inspect!({ launch: { ...launch, resolved: false }, signal }),
+        ).resolves.toEqual({ status: "not_installed" });
+        await expect(
+          installation.checkForUpdates!({
+            launch: { ...launch, env: { ...launch.env, NOTE: " Restart \n" }, resolved: true },
+            installedVersion: " 1.0 (beta)\n",
+            signal,
+          }),
+        ).resolves.toEqual({
+          status: "available",
+          versions: [" 1.0 (beta)\n", "nightly"],
+          message: " Restart \n",
+        });
+        await expect(
+          installation.checkForUpdates!({
+            launch: { ...launch, env: { FEED: "down" }, resolved: true },
+            signal,
+          }),
+        ).rejects.toThrow("feed down");
+
+        for (const call of [installation.inspect!, installation.checkForUpdates!]) {
+          const abort = new AbortController();
+          const hanging = call({
+            launch: { ...launch, env: { HANG: "yes" }, resolved: true },
+            signal: abort.signal,
+          });
+          abort.abort(new Error("stop waiting"));
+          await expect(hanging).rejects.toThrow("stop waiting");
+        }
+      } finally {
+        await service.stopAllPlugins();
+      }
+    },
+  );
+
   it("resolves a provider icon path to sanitized inline SVG", async () => {
     const home = await mkdtemp(path.join(tmpdir(), "jagentdesk-plugin-home-"));
     roots.push(home);
@@ -279,14 +624,126 @@ describe("PluginService", () => {
       "startup-first": { source: "directory", path: first },
       "startup-second": { source: "directory", path: second },
     });
-    const snapshots: string[][] = [];
-    service.subscribe(() => snapshots.push(catalogIds(service)));
+    const notifications: { pluginId: string; running: boolean }[] = [];
+    service.subscribe((pluginId) =>
+      notifications.push({ pluginId, running: catalogIds(service).includes(pluginId) }),
+    );
 
     await service.start();
 
-    expect(snapshots).toEqual([["startup-first"], ["startup-first", "startup-second"]]);
+    expect(notifications).toEqual([
+      { pluginId: "startup-first", running: true },
+      { pluginId: "startup-second", running: true },
+    ]);
+    expect(catalogIds(service)).toEqual(["startup-first", "startup-second"]);
     await service.stopAllPlugins();
   }, 20_000);
+
+  it("starts configured plugins concurrently and publishes them in config order", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "jagentdesk-plugin-home-"));
+    roots.push(home);
+    const gated = createGatedRuntime();
+    const service = createService(
+      home,
+      {
+        alpha: { source: "directory", path: "/plugins/alpha" },
+        beta: { source: "directory", path: "/plugins/beta" },
+        gamma: { source: "directory", path: "/plugins/gamma" },
+      },
+      { runtime: gated.runtime },
+    );
+    const notified: string[] = [];
+    service.subscribe((pluginId) => notified.push(pluginId));
+    let started = false;
+    const starting = (async () => {
+      await service.start();
+      started = true;
+    })();
+
+    await expect.poll(() => gated.begun).toEqual(["alpha", "beta", "gamma"]);
+
+    gated.finish("gamma");
+    const alphaPublished = nextNotification(service, "alpha");
+    gated.finish("alpha");
+    await alphaPublished;
+    expect(notified).toEqual(["alpha"]);
+    expect(started).toBe(false);
+
+    gated.finish("beta");
+    await starting;
+    expect(notified).toEqual(["alpha", "beta", "gamma"]);
+    expect(catalogIds(service)).toEqual(["alpha", "beta", "gamma"]);
+    await service.stopAllPlugins();
+  });
+
+  it("starts the other configured plugins when one fails while they are still starting", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "jagentdesk-plugin-home-"));
+    roots.push(home);
+    const gated = createGatedRuntime();
+    const service = createService(
+      home,
+      {
+        broken: { source: "directory", path: "/plugins/broken" },
+        healthy: { source: "directory", path: "/plugins/healthy" },
+      },
+      { runtime: gated.runtime },
+    );
+    const notified: string[] = [];
+    service.subscribe((pluginId) => notified.push(pluginId));
+    const starting = service.start();
+
+    await expect.poll(() => gated.begun).toEqual(["broken", "healthy"]);
+    const brokenPublished = nextNotification(service, "broken");
+    gated.fail("broken", new Error("startup exploded"));
+    await brokenPublished;
+    gated.finish("healthy");
+    await starting;
+
+    expect(notified).toEqual(["broken", "healthy"]);
+    expect(catalogIds(service)).toEqual(["healthy"]);
+    expect(await service.listPlugins()).toMatchObject([
+      { id: "broken", status: "failed", error: "startup exploded" },
+      { id: "healthy", status: "running" },
+    ]);
+    await service.stopAllPlugins();
+  });
+
+  it("keeps a provider ID with the plugin listed first when both start at once", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "jagentdesk-plugin-home-"));
+    roots.push(home);
+    const gated = createGatedRuntime({
+      first: [{ id: "shared-agent", label: "First agent" }],
+      second: [{ id: "shared-agent", label: "Second agent" }],
+    });
+    const service = createService(
+      home,
+      {
+        first: { source: "directory", path: "/plugins/first" },
+        second: { source: "directory", path: "/plugins/second" },
+      },
+      { runtime: gated.runtime },
+    );
+    const starting = service.start();
+
+    await expect.poll(() => gated.begun).toEqual(["first", "second"]);
+    gated.finish("second");
+    gated.finish("first");
+    await starting;
+
+    expect(service.getProviderRegistrations()).toMatchObject([
+      { id: "shared-agent", label: "First agent" },
+    ]);
+    expect(catalogIds(service)).toEqual(["first"]);
+    expect(await service.listPlugins()).toMatchObject([
+      { id: "first", status: "running" },
+      {
+        id: "second",
+        status: "failed",
+        error: 'Plugin second cannot register provider ID "shared-agent" twice',
+      },
+    ]);
+    await service.stopAllPlugins();
+  });
 
   it("uses an explicit config key, exposes reload failure, and retries from disk", async () => {
     const home = await mkdtemp(path.join(tmpdir(), "jagentdesk-plugin-home-"));
@@ -1068,7 +1525,11 @@ export default function contribute(plugin: unknown) {
 });
 
 describe("npm plugin installation", () => {
-  it("preserves dependencies and metadata, and reloads without npm", async () => {
+  let registry: Awaited<ReturnType<typeof startNpmRegistry>>;
+
+  // Packing the registry starts eleven real npm processes. Give fixture construction its
+  // own setup budget so Windows process startup does not consume the installation journey.
+  beforeAll(async () => {
     const packages = npmPluginPackages();
     const fixture = packages[1];
     packages.push({ ...fixture, version: "2.0.0", tags: ["future"] });
@@ -1103,7 +1564,7 @@ describe("npm plugin installation", () => {
     for (const [name, overrides] of failures) {
       failedPackages.push({ ...fixture, name, files: { ...fixture.files, ...overrides } });
     }
-    const registry = await startNpmRegistry([
+    registry = await startNpmRegistry([
       ...packages,
       {
         name: "jagentdesk-prepared-plugin",
@@ -1133,6 +1594,9 @@ export default function contribute() {
       },
       ...failedPackages,
     ]);
+  }, 120_000);
+
+  it("preserves dependencies and metadata, and reloads without npm", async () => {
     const home = await mkdtemp(path.join(tmpdir(), "jagentdesk-npm-service-"));
     roots.push(home);
     const previousConfig = process.env.npm_config_userconfig;

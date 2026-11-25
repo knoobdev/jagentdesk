@@ -1,3 +1,4 @@
+import { FILE_UPLOAD_MAX_BYTES } from "@/attachments/upload-limit";
 import type { SelectedFile } from "@/attachments/selected-file";
 import type { ActiveTurnBehavior, ForgeSearchItem } from "@jagentdesk/protocol/messages";
 import type {
@@ -55,7 +56,7 @@ export interface ComposerSendClient {
       /** Native skills to invoke on this turn (spec 22.7); the daemon adds the invocation. */
       skillIds?: string[];
     },
-  ) => Promise<void>;
+  ) => Promise<unknown>;
   uploadFile: (input: { fileName: string; mimeType: string; bytes: Uint8Array }) => Promise<{
     requestId: string;
     file: {
@@ -132,7 +133,7 @@ export async function uploadFileAttachments(input: {
 
   for (const file of input.files) {
     const bytes = await file.readBytes();
-    if (bytes.byteLength > 50 * 1024 * 1024) {
+    if (bytes.byteLength > FILE_UPLOAD_MAX_BYTES) {
       throw new Error(
         i18n.t("composer.errors.fileTooLarge", { size: "50MB", fileName: file.fileName }),
       );
@@ -441,3 +442,16 @@ export function isAttachmentSelectedForGithubItem(
 }
 
 export const toggleGithubAttachment = toggleForgeAttachment;
+
+export const findForgeItemByOption = findGithubItemByOption;
+export const isAttachmentSelectedForForgeItem = isAttachmentSelectedForGithubItem;
+export function toggleForgeAttachmentFromPicker(input: {
+  current: UserComposerAttachment[];
+  item: ForgeSearchItem;
+  markForgeAttachmentRemoved: (attachment: UserComposerAttachment) => void;
+}) {
+  return toggleGithubAttachmentFromPicker({
+    ...input,
+    markGithubAttachmentRemoved: input.markForgeAttachmentRemoved,
+  });
+}

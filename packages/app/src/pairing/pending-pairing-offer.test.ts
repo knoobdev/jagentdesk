@@ -87,3 +87,9 @@ describe("pending pairing offer store", () => {
     expect(await loadPendingPairingOffer()).toBeNull();
   });
 });
+
+it("retains the SAS link while visiting Tailscale login", async () => {
+  const offerUrl = "jagentdesk://pair#public-session-payload";
+  await savePendingPairingOffer({ offerUrl, source: "settings" });
+  expect(await loadPendingPairingOffer()).toEqual({ offerUrl, source: "settings" });
+});

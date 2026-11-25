@@ -1,8 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
-import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import {
-  Alert,
   Pressable,
   Text,
   View,
@@ -10,7 +8,7 @@ import {
   type PressableStateCallbackType,
 } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { useIsCompactFormFactor } from "@/constants/layout";
+import { useToast } from "@/contexts/toast-api-context";
 import { settingsStyles } from "@/styles/settings";
 import { useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { useHostFeature } from "@/runtime/host-features";
@@ -34,49 +32,16 @@ import {
 import { SettingsSection } from "@/screens/settings/settings-section";
 import { useProviderSettingsStore } from "@/stores/provider-settings-store";
 import { confirmDialog } from "@/utils/confirm-dialog";
-import { CustomProvidersSection } from "@/custom-providers/custom-providers-section";
+import { BuiltinClientItems } from "@/plugins/builtin/surfaces";
+import { useProviderInstallation } from "@/components/provider-installation";
+import { readRowSummary, rowHasSwitch, type RowSummary } from "@/components/provider-row-summary";
 import { ChevronRight, MoreHorizontal, Trash2 } from "lucide-react-native";
 
 type ProviderDefinition = ReturnType<typeof buildProviderDefinitions>[number];
 type ProviderEntry = NonNullable<ReturnType<typeof useProvidersSnapshot>["entries"]>[number];
 
-type StatusTone = "success" | "warning" | "danger" | "muted" | "loading";
-
-interface ProviderStatus {
-  tone: StatusTone;
-  label: string;
-  modelCount: number | null;
-}
-
-function getProviderStatus(
-  status: string,
-  enabled: boolean,
-  modelCount: number,
-  t: TFunction,
-): ProviderStatus {
-  if (!enabled)
-    return { tone: "muted", label: t("settings.providers.statuses.disabled"), modelCount: null };
-  if (status === "loading") {
-    return { tone: "loading", label: t("settings.providers.statuses.loading"), modelCount: null };
-  }
-  if (status === "error") {
-    return { tone: "danger", label: t("settings.providers.statuses.error"), modelCount: null };
-  }
-  if (status === "ready") {
-    return {
-      tone: "success",
-      label: t("settings.providers.statuses.available"),
-      modelCount: modelCount > 0 ? modelCount : null,
-    };
-  }
-  return {
-    tone: "warning",
-    label: t("settings.providers.statuses.notInstalled"),
-    modelCount: null,
-  };
-}
-
 interface ProviderRowProps {
+  serverId: string;
   def: ProviderDefinition;
   entry: ProviderEntry;
   enabled: boolean;
@@ -167,6 +132,7 @@ function ProviderActionsMenu({
 }
 
 function ProviderRow({
+  serverId,
   def,
   entry,
   enabled,
@@ -180,17 +146,9 @@ function ProviderRow({
 }: ProviderRowProps) {
   const { t } = useTranslation();
   const { theme } = useUnistyles();
-  const isCompact = useIsCompactFormFactor();
   const ProviderIcon = getProviderIcon(def.id);
-  const providerError =
-    enabled &&
-    entry.status === "error" &&
-    typeof entry.error === "string" &&
-    entry.error.trim().length > 0
-      ? entry.error.trim()
-      : null;
-  const modelCount = entry.models?.length ?? 0;
-  const providerStatus = getProviderStatus(entry.status, enabled, modelCount, t);
+  const installation = useProviderInstallation({ serverId, provider: def.id, visible: true });
+  const summary = readRowSummary(entry, installation);
 
   const handlePress = useCallback(() => {
     onPress(def.id);
@@ -201,118 +159,104 @@ function ProviderRow({
     },
     [def.id, onToggleEnabled],
   );
-  const rowStyle = useCallback(
-    ({ pressed, hovered }: PressableStateCallbackType & { hovered?: boolean }) => [
-      settingsStyles.row,
-      !isFirst && settingsStyles.rowBorder,
-      styles.row,
-      hovered && styles.rowHovered,
-      pressed && styles.rowPressed,
-    ],
-    [isFirst],
-  );
-
   return (
-    <Pressable
-      style={rowStyle}
-      onPress={handlePress}
-      accessibilityRole="button"
-      accessibilityLabel={t("settings.providers.providerDetails", { name: def.label })}
+    <View
+      style={[settingsStyles.row, !isFirst && settingsStyles.rowBorder, styles.row]}
+      testID={`provider-row-${def.id}`}
     >
-      {({ hovered }: PressableStateCallbackType & { hovered?: boolean }) => (
-        <>
-          <View style={styles.rowContent}>
-            <ChevronRight
-              size={theme.iconSize.sm}
-              color={hovered ? theme.colors.foreground : theme.colors.foregroundMuted}
+      <Pressable
+        style={styles.rowPressTarget}
+        onPress={handlePress}
+        accessibilityRole="button"
+        accessibilityLabel={t("settings.providers.providerDetails", { name: def.label })}
+      />
+      <View style={styles.rowContent} pointerEvents="none">
+        <ProviderIcon size={theme.iconSize.md} color={theme.colors.foreground} />
+        <View style={styles.textColumn}>
+          <Text style={settingsStyles.rowTitle} numberOfLines={1}>
+            {def.label}
+          </Text>
+          <StatusIndicator summary={summary} />
+        </View>
+      </View>
+      <View style={styles.trailingControls}>
+        {rowHasSwitch(summary) ? (
+          <Switch
+            value={enabled}
+            onValueChange={handleToggleValueChange}
+            disabled={isToggling || isRemoving}
+            accessibilityLabel={t("settings.providers.enableProvider", { name: def.label })}
+          />
+        ) : null}
+        <View style={styles.menuSlot}>
+          {canRemove ? (
+            <ProviderActionsMenu
+              providerId={def.id}
+              providerLabel={def.label}
+              isRemoving={isRemoving}
+              iconSize={theme.iconSize.sm}
+              foregroundColor={theme.colors.foreground}
+              foregroundMutedColor={theme.colors.foregroundMuted}
+              dangerColor={theme.colors.statusDanger}
+              onRemove={onRemove}
             />
-            <ProviderIcon size={theme.iconSize.md} color={theme.colors.foreground} />
-            <View style={styles.textColumn}>
-              <View style={styles.titleRow}>
-                <Text style={settingsStyles.rowTitle} numberOfLines={1}>
-                  {def.label}
-                </Text>
-                {!isCompact ? <Text style={styles.separator}>·</Text> : null}
-                <StatusIndicator status={providerStatus} compact={isCompact} />
-              </View>
-              {providerError && !isCompact ? (
-                <Text style={styles.errorText} numberOfLines={3}>
-                  {providerError}
-                </Text>
-              ) : null}
-            </View>
-          </View>
-          <View style={styles.trailingControls}>
-            <Switch
-              value={enabled}
-              onValueChange={handleToggleValueChange}
-              disabled={isToggling || isRemoving}
-              accessibilityLabel={t("settings.providers.enableProvider", { name: def.label })}
-            />
-            <View style={styles.menuSlot}>
-              {canRemove ? (
-                <ProviderActionsMenu
-                  providerId={def.id}
-                  providerLabel={def.label}
-                  isRemoving={isRemoving}
-                  iconSize={theme.iconSize.sm}
-                  foregroundColor={theme.colors.foreground}
-                  foregroundMutedColor={theme.colors.foregroundMuted}
-                  dangerColor={theme.colors.statusDanger}
-                  onRemove={onRemove}
-                />
-              ) : null}
-            </View>
-          </View>
-        </>
-      )}
-    </Pressable>
+          ) : null}
+        </View>
+        <ChevronRight
+          size={theme.iconSize.sm}
+          color={theme.colors.foregroundMuted}
+          pointerEvents="none"
+        />
+      </View>
+    </View>
   );
 }
 
-function getDotColor(tone: StatusTone, theme: ReturnType<typeof useUnistyles>["theme"]): string {
-  switch (tone) {
-    case "success":
-      return theme.colors.statusSuccess;
-    case "warning":
-      return theme.colors.statusWarning;
-    case "danger":
-      return theme.colors.statusDanger;
-    default:
-      return theme.colors.foregroundMuted;
-  }
-}
-
-function StatusIndicator({ status, compact }: { status: ProviderStatus; compact: boolean }) {
+function StatusIndicator({ summary }: { summary: RowSummary }) {
   const { t } = useTranslation();
   const { theme } = useUnistyles();
-  const dotStyle = useMemo(
-    () => [styles.statusDot, { backgroundColor: getDotColor(status.tone, theme) }],
-    [status.tone, theme],
-  );
-
+  let text: string;
+  switch (summary.kind) {
+    case "pending":
+      text = t("settings.providers.statuses.loading");
+      break;
+    case "ready": {
+      const models =
+        summary.models === 1
+          ? t("settings.providers.models.one")
+          : t("settings.providers.models.many", { count: summary.models });
+      text =
+        [summary.version, summary.models > 0 ? models : null].filter(Boolean).join(" · ") ||
+        t("settings.providers.statuses.available");
+      break;
+    }
+    case "updateAvailable":
+      text = [summary.version, t("settings.providers.installation.updateAvailable")]
+        .filter(Boolean)
+        .join(" · ");
+      break;
+    case "updating":
+      text = t("settings.providers.installation.updating");
+      break;
+    case "failing":
+      text = summary.message ?? t("settings.providers.diagnostic.unknownError");
+      break;
+    case "notInstalled":
+      text = t("settings.providers.statuses.notInstalled");
+      break;
+    case "disabled":
+      text = t("settings.providers.statuses.disabled");
+      break;
+  }
   return (
     <View style={styles.statusRow}>
-      {status.tone === "loading" ? (
+      {summary.kind === "pending" || summary.kind === "updating" ? (
         <LoadingSpinner size={10} color={theme.colors.foregroundMuted} />
-      ) : (
-        <View style={dotStyle} />
-      )}
-      {!compact ? (
-        <>
-          <Text style={styles.statusLabel}>{status.label}</Text>
-          {status.modelCount !== null ? (
-            <>
-              <Text style={styles.separator}>·</Text>
-              <Text style={styles.statusLabel}>
-                {status.modelCount === 1
-                  ? t("settings.providers.models.one")
-                  : t("settings.providers.models.many", { count: status.modelCount })}
-              </Text>
-            </>
-          ) : null}
-        </>
       ) : null}
+      {summary.kind === "failing" ? <View style={styles.errorDot} /> : null}
+      <Text style={styles.statusLabel} numberOfLines={1}>
+        {text}
+      </Text>
     </View>
   );
 }
@@ -323,10 +267,11 @@ export interface ProvidersSectionProps {
 
 export function ProvidersSection({ serverId }: ProvidersSectionProps) {
   const { t } = useTranslation();
+  const toast = useToast();
   const isConnected = useHostRuntimeIsConnected(serverId);
   const supportsProviderRemoval = useHostFeature(serverId, "providerRemoval");
   const { entries, isLoading, refresh } = useProvidersSnapshot(serverId);
-  const { patchConfig } = useDaemonConfig(serverId);
+  const { config, patchConfig } = useDaemonConfig(serverId);
   const openProviderSettings = useProviderSettingsStore((state) => state.open);
   const [pendingProviderId, setPendingProviderId] = useState<string | null>(null);
   const [removingProviderId, setRemovingProviderId] = useState<string | null>(null);
@@ -335,6 +280,12 @@ export function ProvidersSection({ serverId }: ProvidersSectionProps) {
 
   const providerDefinitions = useMemo(() => buildProviderDefinitions(entries), [entries]);
   const hasServer = serverId.length > 0;
+
+  /** Custom providers are deletable only when config.json holds their `extends` definition. */
+  const isConfigOwnedProvider = useCallback(
+    (providerId: string) => Boolean(config?.providers?.[providerId]?.extends),
+    [config],
+  );
 
   const handleOpenProviderSettings = useCallback(
     (providerId: string) => {
@@ -349,15 +300,12 @@ export function ProvidersSection({ serverId }: ProvidersSectionProps) {
       try {
         await patchConfig({ providers: { [providerId]: { enabled } } });
       } catch (error) {
-        Alert.alert(
-          t("settings.providers.updateErrorTitle"),
-          error instanceof Error ? error.message : String(error),
-        );
+        toast.error(error instanceof Error ? error.message : String(error));
       } finally {
         setPendingProviderId((current) => (current === providerId ? null : current));
       }
     },
-    [patchConfig, t],
+    [patchConfig, toast],
   );
 
   const handleRemoveProvider = useCallback(
@@ -378,10 +326,7 @@ export function ProvidersSection({ serverId }: ProvidersSectionProps) {
 
         await patchConfig({ removeProviders: [providerId] });
       } catch (error) {
-        Alert.alert(
-          t("settings.providers.remove.errorTitle"),
-          error instanceof Error ? error.message : String(error),
-        );
+        toast.error(error instanceof Error ? error.message : String(error));
       } finally {
         if (removingProviderIdRef.current === providerId) {
           removingProviderIdRef.current = null;
@@ -389,7 +334,7 @@ export function ProvidersSection({ serverId }: ProvidersSectionProps) {
         setRemovingProviderId((current) => (current === providerId ? null : current));
       }
     },
-    [patchConfig, t],
+    [patchConfig, t, toast],
   );
 
   const handleInstall = useCallback(
@@ -400,15 +345,12 @@ export function ProvidersSection({ serverId }: ProvidersSectionProps) {
         await patchConfig(buildAcpProviderConfigPatch(entry));
         await refresh([entry.id]);
       } catch (error) {
-        Alert.alert(
-          t("settings.providers.addErrorTitle"),
-          error instanceof Error ? error.message : String(error),
-        );
+        toast.error(error instanceof Error ? error.message : String(error));
       } finally {
         setInstallingProviderId((current) => (current === entry.id ? null : current));
       }
     },
-    [installingProviderId, patchConfig, refresh, t],
+    [installingProviderId, patchConfig, refresh, toast],
   );
 
   return (
@@ -436,12 +378,17 @@ export function ProvidersSection({ serverId }: ProvidersSectionProps) {
               return (
                 <ProviderRow
                   key={def.id}
+                  serverId={serverId}
                   def={def}
                   entry={entry}
                   enabled={entry.enabled ?? true}
                   isToggling={pendingProviderId === def.id}
                   isRemoving={removingProviderId === def.id}
-                  canRemove={supportsProviderRemoval && entry.source === "custom"}
+                  canRemove={
+                    supportsProviderRemoval &&
+                    entry.source === "custom" &&
+                    isConfigOwnedProvider(def.id)
+                  }
                   isFirst={index === 0}
                   onPress={handleOpenProviderSettings}
                   onToggleEnabled={handleToggleEnabled}
@@ -453,7 +400,9 @@ export function ProvidersSection({ serverId }: ProvidersSectionProps) {
         ) : null}
       </SettingsSection>
 
-      {hasServer && isConnected ? <CustomProvidersSection serverId={serverId} /> : null}
+      {hasServer && isConnected ? (
+        <BuiltinClientItems serverId={serverId} kind="providerSettings" />
+      ) : null}
 
       {hasServer && isConnected ? (
         <SettingsSection
@@ -491,17 +440,14 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[3],
     minHeight: 56,
   },
-  rowHovered: {
-    backgroundColor: theme.colors.surface2,
-  },
-  rowPressed: {
-    backgroundColor: theme.colors.surface3,
-  },
+  rowPressTarget: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0 },
+  errorDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: theme.colors.statusDanger },
   rowContent: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
+    minWidth: 0,
   },
   textColumn: {
     flex: 1,

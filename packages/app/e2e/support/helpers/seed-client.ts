@@ -1,3 +1,4 @@
+import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import path from "node:path";
 import { readFileSync } from "node:fs";
 import type { TerminalActivity } from "@jagentdesk/protocol/terminal-activity";
@@ -39,6 +40,7 @@ export interface SeedDaemonClient {
   }>;
   removeProject(projectId: string): Promise<{ removedWorkspaceIds: string[] }>;
   renameProject(projectId: string, customName: string | null): Promise<void>;
+  setWorkspacePinned: DaemonClient["setWorkspacePinned"];
   fetchWorkspaces(options?: { filter?: { projectId?: string } }): Promise<{
     entries: SeedWorkspaceDescriptor[];
   }>;
@@ -57,6 +59,7 @@ export interface SeedDaemonClient {
           worktreeSlug?: string;
         };
     title?: string;
+    background?: boolean;
   }): Promise<{
     workspace: SeedWorkspaceDescriptor | null;
     error: string | null;
@@ -102,6 +105,7 @@ export interface SeedDaemonClient {
     featureValues?: Record<string, unknown>;
     initialPrompt?: string;
     labels?: Record<string, string>;
+    background?: boolean;
   }): Promise<{ id: string; status: string }>;
   fetchAgents(options?: { scope?: "active" }): Promise<{
     entries: Array<{

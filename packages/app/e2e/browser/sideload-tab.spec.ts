@@ -10,7 +10,7 @@ import type { Page } from "@playwright/test";
 // reaches Apple. Screenshots go to JAD_SIDELOAD_SHOTS when set.
 
 // Playwright runs from packages/app; the daemon reads the fixture straight from disk.
-const PROBE_IPA = path.resolve("../server/src/server/sideload/test-fixtures/probe.ipa");
+const PROBE_IPA = path.resolve("../../plugins/devices/server/sideload/test-fixtures/probe.ipa");
 const SHOTS = process.env.JAD_SIDELOAD_SHOTS ?? null;
 
 async function shot(page: Page, name: string): Promise<void> {

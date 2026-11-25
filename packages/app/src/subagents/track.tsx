@@ -1,3 +1,13 @@
+import { usePaneContext } from "@/panels/pane-context";
+import { useSubagentSheetTab } from "./sheet-tab";
+import { useSheetPanePage } from "@/screens/workspace/sheet-pane";
+import { ComposerTrackPill, ComposerTrackRow } from "@/composer/tracks";
+import { iconButtonChromeStyle } from "@/components/ui/icon-button-chrome";
+import { useAgentFactsLine } from "@/panels/agent-facts-line";
+import type { AgentAddress } from "@jagentdesk/protocol/addresses";
+import { useHosts } from "@/runtime/host-runtime";
+
+import { CHAT_COLUMN_RAIL_DATASET } from "@/chat-rail";
 import { useCallback, useMemo, useState, type ReactElement } from "react";
 import { Pressable, ScrollView, Text, View, type PressableStateCallbackType } from "react-native";
 import { useTranslation } from "react-i18next";
@@ -30,12 +40,13 @@ const foregroundMutedColorMapping = (theme: Theme) => ({
 });
 
 export interface SubagentsTrackProps {
+  serverId: string;
   rows: SubagentRow[];
-  onOpenSubagent: (id: string) => void;
+  onOpenSubagent: (address: AgentAddress) => void;
   onOpenProviderSubagent: (parentAgentId: string, subagentId: string) => void;
-  onArchiveSubagent: (id: string) => void;
+  onArchiveSubagent: (address: AgentAddress) => void;
   onArchiveFinished?: () => void;
-  onDetachSubagent?: (id: string) => void;
+  onDetachSubagent?: (address: AgentAddress) => void;
 }
 
 const SUBAGENTS_LIST_MAX_HEIGHT = 200;
@@ -51,6 +62,7 @@ function buildRowPresentation(row: SubagentRow): WorkspaceTabPresentation {
 }
 
 export function SubagentsTrack({
+  serverId,
   rows,
   onOpenSubagent,
   onOpenProviderSubagent,
@@ -59,6 +71,7 @@ export function SubagentsTrack({
   onDetachSubagent,
 }: SubagentsTrackProps): ReactElement | null {
   const { t } = useTranslation();
+  const compact = useIsCompactFormFactor();
   const [expanded, setExpanded] = useState(false);
 
   const toggleExpanded = useCallback(() => {
@@ -89,8 +102,20 @@ export function SubagentsTrack({
   const headerLabel = formatHeaderLabel(rows);
   const finishedCount = countFinishedSubagents(rows);
 
+  if (compact)
+    return (
+      <CompactSubagentsTrack
+        serverId={serverId}
+        rows={rows}
+        onOpenSubagent={onOpenSubagent}
+        onOpenProviderSubagent={onOpenProviderSubagent}
+        onArchiveSubagent={onArchiveSubagent}
+        onArchiveFinished={onArchiveFinished}
+        onDetachSubagent={onDetachSubagent}
+      />
+    );
   return (
-    <View style={styles.outer} testID="subagents-track">
+    <View style={styles.outer} testID="subagents-track" dataSet={CHAT_COLUMN_RAIL_DATASET}>
       <View style={styles.track}>
         <View style={surfaceStyle}>
           <View style={headerContainerStyle}>
@@ -132,7 +157,8 @@ export function SubagentsTrack({
             >
               {rows.map((row) => (
                 <SubagentsTrackRow
-                  key={row.id}
+                  serverId={serverId}
+                  key={row.kind === "jagentdesk" ? `${row.address.serverId}:${row.id}` : row.id}
                   row={row}
                   onOpenSubagent={onOpenSubagent}
                   onOpenProviderSubagent={onOpenProviderSubagent}
@@ -148,15 +174,99 @@ export function SubagentsTrack({
   );
 }
 
-interface SubagentsTrackRowProps {
+function CompactSubagentsTrack(props: SubagentsTrackProps) {
+  const { t } = useTranslation();
+  const pane = usePaneContext();
+  const sheetFor = useSubagentSheetTab(`${pane.serverId}:${pane.workspaceId}`, pane.tabId);
+  const page = useSheetPanePage();
+  const sheets = useMemo(
+    () =>
+      props.rows.map((row) =>
+        row.kind === "jagentdesk" && row.address.serverId !== props.serverId ? null : sheetFor(row),
+      ),
+    [props.rows, props.serverId, sheetFor],
+  );
+  const pages = useMemo(
+    () => sheets.flatMap((sheet) => (sheet ? [page(sheet)] : [])),
+    [page, sheets],
+  );
+  const segments = useMemo(
+    () => [{ bucket: null, text: `${props.rows.length} ${t("subagents.title")}` }],
+    [props.rows.length, t],
+  );
+  return (
+    <ComposerTrackPill
+      testID="subagents-track-header"
+      segments={segments}
+      panelTitle={t("subagents.title")}
+      pages={pages}
+    >
+      {props.onArchiveFinished && countFinishedSubagents(props.rows) > 0 ? (
+        <CompactArchiveFinished onPress={props.onArchiveFinished} />
+      ) : null}
+      {props.rows.map((row, index) => (
+        <CompactSubagentRow
+          key={row.kind === "jagentdesk" ? `${row.address.serverId}:${row.id}` : row.id}
+          row={row}
+          pageId={sheets[index]?.tab.tabId}
+          onOpenSubagent={props.onOpenSubagent}
+          onOpenProviderSubagent={props.onOpenProviderSubagent}
+        />
+      ))}
+    </ComposerTrackPill>
+  );
+}
+function CompactArchiveFinished({ onPress }: { onPress: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <ComposerTrackRow onPress={onPress} accessibilityLabel={t("subagents.archiveFinishedAction")}>
+      <Text style={styles.rowLabel}>{t("subagents.archiveFinishedAction")}</Text>
+    </ComposerTrackRow>
+  );
+}
+function CompactSubagentRow({
+  row,
+  pageId,
+  onOpenSubagent,
+  onOpenProviderSubagent,
+}: {
   row: SubagentRow;
-  onOpenSubagent: (id: string) => void;
+  pageId?: string;
+  onOpenSubagent: SubagentsTrackProps["onOpenSubagent"];
+  onOpenProviderSubagent: SubagentsTrackProps["onOpenProviderSubagent"];
+}) {
+  const presentation = useMemo(() => buildRowPresentation(row), [row]);
+  const open = useCallback(() => {
+    if (row.kind === "provider") onOpenProviderSubagent(row.parentAgentId, row.id);
+    else onOpenSubagent(row.address);
+  }, [onOpenProviderSubagent, onOpenSubagent, row]);
+  return (
+    <ComposerTrackRow
+      onPress={open}
+      opensPage={pageId}
+      closeOnSelect={!pageId}
+      accessibilityLabel={presentation.label}
+      testID={`subagents-track-row-${row.id}`}
+    >
+      <WorkspaceTabIcon presentation={presentation} />
+      <Text style={styles.rowLabel} numberOfLines={2}>
+        {presentation.label}
+      </Text>
+    </ComposerTrackRow>
+  );
+}
+
+interface SubagentsTrackRowProps {
+  serverId: string;
+  row: SubagentRow;
+  onOpenSubagent: (address: AgentAddress) => void;
   onOpenProviderSubagent: (parentAgentId: string, subagentId: string) => void;
-  onArchiveSubagent: (id: string) => void;
-  onDetachSubagent?: (id: string) => void;
+  onArchiveSubagent: (address: AgentAddress) => void;
+  onDetachSubagent?: (address: AgentAddress) => void;
 }
 
 function SubagentsTrackRow({
+  serverId,
   row,
   onOpenSubagent,
   onOpenProviderSubagent,
@@ -173,17 +283,20 @@ function SubagentsTrackRow({
     if (row.kind === "provider") {
       onOpenProviderSubagent(row.parentAgentId, row.id);
     } else {
-      onOpenSubagent(row.id);
+      onOpenSubagent(row.address);
     }
   }, [onOpenProviderSubagent, onOpenSubagent, row]);
   const handleArchivePress = useCallback(() => {
-    onArchiveSubagent(row.id);
-  }, [onArchiveSubagent, row.id]);
+    if (row.kind === "jagentdesk") onArchiveSubagent(row.address);
+  }, [onArchiveSubagent, row]);
   const handleDetachPress = useCallback(() => {
-    onDetachSubagent?.(row.id);
-  }, [onDetachSubagent, row.id]);
+    if (row.kind === "jagentdesk") onDetachSubagent?.(row.address);
+  }, [onDetachSubagent, row]);
   const handlePointerEnter = useCallback(() => setHovered(true), []);
   const handlePointerLeave = useCallback(() => setHovered(false), []);
+  const hostLabel = useHosts().find(
+    (host) => row.kind === "jagentdesk" && host.serverId === row.address.serverId,
+  )?.label;
   const actionsAlwaysVisible = isNative || isCompact;
   const actionsVisible = actionsAlwaysVisible || hovered;
 
@@ -191,24 +304,31 @@ function SubagentsTrackRow({
     // Wrapper View handles hover so moving the pointer between the row and
     // the archive button doesn't drop the hover state — the same pattern
     // used by sidebar workspace rows.
-    <View onPointerEnter={handlePointerEnter} onPointerLeave={handlePointerLeave}>
+    <View>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={displayLabel}
         testID={`subagents-track-row-${row.id}`}
         onPress={handlePress}
+        onHoverIn={handlePointerEnter}
+        onHoverOut={handlePointerLeave}
       >
         {({ pressed }) => (
           <View style={hovered || pressed ? styles.rowActive : styles.row}>
             <WorkspaceTabIcon presentation={presentation} />
-            <Text style={styles.rowLabel} numberOfLines={1}>
-              {displayLabel}
-            </Text>
-            {presentation.subtitle ? (
-              <Text style={styles.rowSubtitle} numberOfLines={1}>
-                {presentation.subtitle}
+            <View style={styles.rowText}>
+              <Text style={styles.rowTitle} numberOfLines={1}>
+                {displayLabel}
               </Text>
-            ) : null}
+              {row.kind === "jagentdesk" && row.address.serverId !== serverId ? (
+                <Text style={styles.rowSubtitle}>{hostLabel ?? row.address.serverId}</Text>
+              ) : null}
+              {row.kind === "jagentdesk" ? (
+                <JAgentDeskSubagentFacts serverId={row.address.serverId} agentId={row.id} />
+              ) : (
+                <SubagentFacts rowId={row.id} text={presentation.subtitle} />
+              )}
+            </View>
             {row.kind === "jagentdesk" ? (
               <SubagentRowActions
                 rowId={row.id}
@@ -223,6 +343,18 @@ function SubagentsTrackRow({
       </Pressable>
     </View>
   );
+}
+
+function JAgentDeskSubagentFacts({ serverId, agentId }: { serverId: string; agentId: string }) {
+  const text = useAgentFactsLine(serverId, agentId);
+  return <SubagentFacts rowId={agentId} text={text} />;
+}
+function SubagentFacts({ rowId, text }: { rowId: string; text: string | null }) {
+  return text ? (
+    <Text style={styles.rowFacts} numberOfLines={1} testID={`subagents-track-row-facts-${rowId}`}>
+      {text}
+    </Text>
+  ) : null;
 }
 
 function SubagentRowActions({
@@ -291,6 +423,11 @@ function SubagentActionButton({
   visible: boolean;
   onPress: () => void;
 }): ReactElement {
+  const compact = useIsCompactFormFactor();
+  const actionStyle = useCallback(
+    (state: PressableStateCallbackType) => iconButtonChromeStyle({ size: "small", compact, state }),
+    [compact],
+  );
   return (
     <Tooltip delayDuration={0} enabledOnDesktop enabledOnMobile={false}>
       <TooltipTrigger asChild disabled={!visible}>
@@ -299,7 +436,7 @@ function SubagentActionButton({
           accessibilityLabel={accessibilityLabel}
           testID={testID}
           onPress={onPress}
-          style={styles.actionButton}
+          style={actionStyle}
           hitSlop={8}
         >
           {({ hovered, pressed }) => renderSubagentActionIcon(icon, hovered || pressed)}
@@ -313,6 +450,9 @@ function SubagentActionButton({
 }
 
 const styles = StyleSheet.create((theme) => ({
+  rowText: { flexGrow: 1, flexShrink: 1, flexBasis: "auto", minWidth: 0 },
+  rowTitle: { fontSize: theme.fontSize.base, color: theme.colors.foreground },
+  rowFacts: { fontSize: theme.fontSize.sm, color: theme.colors.foregroundMuted },
   outer: {
     width: "100%",
     alignItems: "center",
@@ -376,6 +516,7 @@ const styles = StyleSheet.create((theme) => ({
     paddingVertical: theme.spacing[1],
   },
   row: {
+    minHeight: { xs: 44, md: 32 },
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],
@@ -383,6 +524,7 @@ const styles = StyleSheet.create((theme) => ({
     paddingVertical: theme.spacing[2],
   },
   rowActive: {
+    minHeight: { xs: 44, md: 32 },
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[2],

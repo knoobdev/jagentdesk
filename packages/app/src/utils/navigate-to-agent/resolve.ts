@@ -1,7 +1,7 @@
 import { buildHostAgentDetailRoute } from "@/utils/host-routes";
-import type { DockAgentOwner } from "@/utils/dock-agents";
+import { type DockAgentOwner } from "@/utils/dock-agents";
 import { normalizeWorkspaceOpaqueId } from "@/utils/workspace-identity";
-import type { NavigateToWorkspaceInput } from "@/stores/navigation-active-workspace-store";
+import { type NavigateToWorkspaceInput } from "@/stores/navigation-active-workspace-store";
 
 export interface NavigateToAgentInput {
   serverId: string;
@@ -10,6 +10,8 @@ export interface NavigateToAgentInput {
   // (cold deep-links). Otherwise the workspace is read from the store.
   workspaceId?: string | null;
   pin?: boolean;
+  /** Opens the agent with its composer, where a compact layout would show a sheet without one. */
+  asTab?: boolean;
 }
 
 export interface AgentNavTarget {
@@ -35,7 +37,7 @@ export function resolveNavigateToAgent(
   deps: NavigateToAgentDeps,
 ): string {
   const target = deps.readAgentNavTarget({ serverId: input.serverId, agentId: input.agentId });
-  const agentWorkspaceId = input.workspaceId ?? target.agentWorkspaceId;
+  const agentWorkspaceId = target.agentWorkspaceId ?? input.workspaceId;
   const workspaceId = normalizeWorkspaceOpaqueId(agentWorkspaceId);
 
   if (target.dockOwner && deps.openDockAgent) {
@@ -58,5 +60,6 @@ export function resolveNavigateToAgent(
     workspaceId,
     target: { kind: "agent", agentId: input.agentId },
     pin: input.pin,
+    asTab: input.asTab,
   });
 }

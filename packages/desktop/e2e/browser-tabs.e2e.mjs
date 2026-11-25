@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { experimental_createMCPClient } from "ai";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { chromium } from "playwright";
+import { runAdaptiveThemeRegression } from "./appearance-theme.electron.mjs";
 import { runAppearanceFontSizeRegression } from "./appearance-font-size.electron.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
@@ -949,6 +950,7 @@ async function main() {
     const page = await waitForAppPage(browser, expoPort);
     const status = await waitForDesktopStatus(page);
 
+    await runAdaptiveThemeRegression(artifactDir);
     await runAppearanceFontSizeRegression(page);
 
     const callerAgentId = await createCallerAgent(daemonPort);

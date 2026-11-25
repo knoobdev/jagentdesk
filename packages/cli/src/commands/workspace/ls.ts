@@ -4,7 +4,7 @@ import type { CommandError, ListResult } from "../../output/index.js";
 import { toWorkspaceRow, workspaceSchema, type WorkspaceRow } from "./shared.js";
 
 export async function runLsCommand(
-  options: { host?: string },
+  options: { host?: string; includeBackground?: boolean },
   _command: Command,
 ): Promise<ListResult<WorkspaceRow>> {
   const host = getDaemonHost({ host: options.host });
@@ -20,6 +20,7 @@ export async function runLsCommand(
     let cursor: string | undefined;
     do {
       const payload = await client.fetchWorkspaces({
+        ...(options.includeBackground ? { includeBackground: true } : {}),
         page: { limit: 200, ...(cursor ? { cursor } : {}) },
       });
       workspaces.push(...payload.entries.map(toWorkspaceRow));

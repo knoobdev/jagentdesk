@@ -1,0 +1,12 @@
+{
+  "id": "grok-usage-source",
+  "requirements": {
+    "jagentdesk": ">=0.9.59"
+  },
+  "kind": "builtin",
+  "name": "Grok usage",
+  "description": "Read local grok account quotas.",
+  "defaultEnabled": true,
+  "requires": [],
+  "builtinOrder": 30
+}

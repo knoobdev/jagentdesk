@@ -1,6 +1,6 @@
 {
   "name": "@jagentdesk/client",
-  "version": "0.9.59",
+  "version": "0.10.0",
   "description": "JAgentDesk client SDK package",
   "files": [
     "dist",
@@ -20,6 +20,18 @@
     "./internal/daemon-client-transport-types": {
       "types": "./dist/daemon-client-transport-types.d.ts",
       "default": "./dist/daemon-client-transport-types.js"
+    },
+    "./internal/daemon-client-transport": {
+      "types": "./dist/daemon-client-transport.d.ts",
+      "default": "./dist/daemon-client-transport.js"
+    },
+    "./internal/hosts": {
+      "types": "./dist/hosts/index.d.ts",
+      "default": "./dist/hosts/index.js"
+    },
+    "./node": {
+      "types": "./dist/node/index.d.ts",
+      "default": "./dist/node/index.js"
     }
   },
   "publishConfig": {
@@ -35,7 +47,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@jagentdesk/protocol": "0.9.59",
+    "@jagentdesk/protocol": "0.10.0",
+    "@jagentdesk/relay": "0.10.0",
+    "ws": "^8.20.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

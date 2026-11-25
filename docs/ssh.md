@@ -1,9 +1,13 @@
 # SSH servers
 
-JAgentDesk includes a Termius-class SSH client. The daemon opens the connections (with `ssh2`), so
-sessions keep running when the app is closed and every device paired with the daemon sees the same
-servers and tabs. Open it from **Servers** in the rail (desktop) or the navigation (mobile); it is
-shown when the daemon advertises the `sshServers` feature.
+JAgentDesk includes an SSH client. The daemon opens the connections (with `ssh2`), so sessions keep
+running when the app is closed and every device paired with the daemon sees the same servers and
+tabs. Open **Servers** from the sidebar's Tools group or the mobile drawer. It is the `ssh-servers`
+[built-in](builtin-plugins.md) (on by default); [Remote tasks](remote-tasks.md) requires it.
+
+Code: `plugins/ssh-servers/` (screens, `ssh.*` handlers, agent tools). The SSH service, storage and
+its remote Docker, database, Kubernetes and forwarding modules stay in
+`packages/server/src/server/ssh/` because other built-ins use them.
 
 ## Data and secrets
 
@@ -36,9 +40,10 @@ hosts, Snippets and Port forwarding also have their own tabs on the Servers scre
 
 ## Chat agent for a server
 
-A chat started from a server gets SSH tools bound to that server: `ssh_run`, `ssh_read_file`,
-`ssh_write_file`, `ssh_list_dir`, `ssh_terminal_send`, `ssh_terminal_capture`,
-`ssh_forward_start`, `ssh_forward_stop`, and the Docker tools with `serverId`. Tools that change the
+A chat started from a server gets SSH tools bound to that server: `ssh_list_servers`, `ssh_run`,
+`ssh_read_file`, `ssh_write_file`, `ssh_list_dir`, `ssh_open_terminal`, `ssh_terminal_send`,
+`ssh_terminal_capture`, `ssh_forward_start`, `ssh_forward_stop`, and the Docker tools with
+`serverId`. Tools that change the
 server ask for permission; reads (file reads up to 1 MB, output cut at 64 KB per stream) do not. The
 agent's system prompt includes the detected environment.
 
@@ -58,12 +63,14 @@ agent's system prompt includes the detected environment.
 ## RPC
 
 All requests use the `ssh.*` namespace and need `daemon.manage`: servers, groups, identities, keys
-(`install_to_server`), known hosts, `hostkey.respond`, `auth.respond`, `session.create`, `sftp.*`,
+(`install_to_server`), known hosts, `hostkey.respond`, `auth.respond`, `session.create`,
+`session.reconnect`, `session.type_password`, `session.broadcast`, `telnet.session.*`, `sftp.*`,
 `transfer.*`, `forward.*`, `snippets.*`, `snippet.run|cancel|get_run|list_runs`, `history.*`,
 `workspaces.*`, `logs.*`, `import.preview|apply`, `environment.detect`, `docker.attach|detach`,
 `remote_db.prepare`, `remote_k8s.import`. Pushes: `ssh.hostkey.prompt`, `ssh.auth.prompt`,
-`ssh.connection.state`, `ssh.session.activity`, `ssh.transfer.progress`, `ssh.forward.state`,
-`ssh.snippet.output`, `ssh.snippet.state`. Product contract: spec 25 in the spec repository.
+`ssh.prompt.resolved`, `ssh.connection.state`, `ssh.session.activity`, `ssh.transfer.progress`,
+`ssh.forward.state`, `ssh.snippet.output`, `ssh.snippet.state`. `plugins/ssh-servers/server/index.ts`
+lists every registered name.
 
 ## Acceptance check
 

@@ -9,6 +9,7 @@ const PLUGIN_SERVER_ONLY_SDK_SPECIFIERS = [
   "@jagentdesk/plugin/server",
   "@jagentdesk/plugin/server/provider",
   "@jagentdesk/plugin/server/acp",
+  "@jagentdesk/plugin/server/usage",
 ] as const;
 
 export const PLUGIN_SDK_SPECIFIERS = [

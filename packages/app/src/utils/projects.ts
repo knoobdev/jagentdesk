@@ -1,8 +1,12 @@
+import { selectPrHintFromStatus } from "@/git/pr-hint";
 import type { ProjectDescriptor, WorkspaceDescriptor } from "@/stores/session-store";
 import type { HostProjectListItem } from "@/projects/host-project-model";
 import { buildWorkspaceStructureProjects } from "@/projects/workspace-structure";
 
 export interface WorkspaceSummary {
+  changeRequestNumber: number | null;
+  statusEnteredAt: Date | null;
+  background: boolean;
   id: string;
   name: string;
   title?: string;
@@ -132,10 +136,14 @@ function toWorkspaceSummary(workspace: WorkspaceDescriptor): WorkspaceSummary {
   const currentBranch = workspace.gitRuntime?.currentBranch?.trim();
   return {
     id: workspace.id,
+    changeRequestNumber:
+      selectPrHintFromStatus(workspace.githubRuntime?.pullRequest, workspace.forge)?.number ?? null,
+    statusEnteredAt: workspace.statusEnteredAt,
     name: workspace.name,
     ...(workspace.title ? { title: workspace.title } : {}),
     workspaceKind: workspace.workspaceKind,
     status: workspace.status,
+    background: workspace.background ?? false,
     currentBranch: currentBranch && currentBranch !== "HEAD" ? currentBranch : null,
     ...(workspace.archivingAt ? { archivingAt: workspace.archivingAt } : {}),
   };

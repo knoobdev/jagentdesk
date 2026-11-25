@@ -1,3 +1,4 @@
+import pino from "pino";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, test, vi } from "vitest";
@@ -92,6 +93,79 @@ describe("ProviderSnapshotManager public surface", () => {
       const claude = await manager.getProvider({ provider: "claude", wait: true });
       expect(codex.models).toEqual([first]);
       expect(claude.models).toEqual([{ ...first, provider: "claude" }]);
+    } finally {
+      manager.destroy();
+    }
+  });
+
+  test("validates catalog choices while leaving provider options opaque", async () => {
+    const manager = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      extraClients: {
+        codex: createExtraClient("codex", {
+          isAvailable: async () => true,
+          fetchCatalog: async () => ({
+            models: [
+              {
+                provider: "codex",
+                id: "gpt-5.5",
+                aliases: ["gpt-latest"],
+                label: "GPT 5.5",
+                thinkingOptions: [{ id: "xhigh", label: "Extra high" }],
+              },
+            ],
+            modes: [{ id: "auto-review", label: "Auto review" }],
+          }),
+        }),
+      },
+    });
+
+    try {
+      await expect(
+        manager.validateAgentConfiguration({
+          provider: "codex",
+          model: "gpt-latest",
+          modeId: "auto-review",
+          thinkingOptionId: "xhigh",
+          providerOptions: {
+            sandbox_workspace_write: {
+              writable_roots: ["/var/cache/npm"],
+              network_access: false,
+            },
+          },
+        }),
+      ).resolves.toEqual([]);
+
+      await expect(
+        manager.validateAgentConfiguration({
+          provider: "codex",
+          model: "missing",
+          modeId: "missing",
+          thinkingOptionId: "missing",
+          providerOptions: {
+            sandbox_workspace_write: { network_access: "sometimes" },
+          },
+        }),
+      ).resolves.toEqual([
+        { path: ["model"], message: "Model 'missing' is not available for provider 'codex'" },
+        { path: ["modeId"], message: "Mode 'missing' is not available for provider 'codex'" },
+        {
+          path: ["thinkingOptionId"],
+          message: "Thinking option 'missing' is not available for provider 'codex'",
+        },
+      ]);
+      await expect(
+        manager.validateAgentConfiguration({
+          provider: "codex",
+          model: "gpt-latest",
+          modeId: "auto-review",
+          thinkingOptionId: "xhigh",
+          providerOptions: {
+            sandbox_workspace_write: { network_access: "sometimes" },
+            arbitrary: true,
+          },
+        }),
+      ).resolves.toEqual([]);
     } finally {
       manager.destroy();
     }
@@ -526,6 +600,29 @@ describe("ProviderSnapshotManager public surface", () => {
       expect(result.diagnostic).toContain("Models:");
       expect(result.diagnostic).toContain("Status:");
       expect(getDiagnostic).toHaveBeenCalledTimes(1);
+    } finally {
+      manager.destroy();
+    }
+  });
+
+  test("diagnostics read the version through the installation service", async () => {
+    const inspection = { status: "installed", version: "3.4.5" } as const;
+    const inspect = vi.fn(async () => inspection);
+    const client = createExtraClient("codex", {
+      installation: { inspect },
+      getDiagnostic: async (context) => ({
+        diagnostic: JSON.stringify(await context?.inspectInstallation()),
+      }),
+    });
+    const manager = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      extraClients: { codex: client },
+    });
+    try {
+      const result = await manager.getProviderDiagnostic("codex");
+      expect(result.diagnostic).toContain(JSON.stringify(inspection));
+      expect((await manager.installations.inspect("codex"))?.inspection).toEqual(inspection);
+      expect(inspect).toHaveBeenCalledTimes(1);
     } finally {
       manager.destroy();
     }
@@ -1261,4 +1358,317 @@ describe("ProviderSnapshotManager cwd routing", () => {
       expect(resolved).toBeDefined();
     }
   });
+});
+
+describe("plugin provider overrides and launch", () => {
+  function provider() {
+    const launches: Array<ProviderLaunch | undefined> = [];
+    const registration: ProviderRegistration = {
+      id: "launch-plugin",
+      label: "Launch plugin",
+      command: [process.execPath, "default.js"],
+      async status({ launch }) {
+        if (launch?.env.PLUGIN_LOGIN !== "yes") {
+          return { available: false, diagnostic: "Sign in to the provider" };
+        }
+        return { available: true };
+      },
+      async connect(request) {
+        launches.push(request.launch);
+        let listener: ((event: ProviderEvent) => void) | undefined;
+        return {
+          version: 1,
+          capabilities: ["session.persistence"],
+          async send(input) {
+            if (input.type !== "catalog") return;
+            listener?.({
+              type: "catalog",
+              requestId: input.requestId,
+              catalog: { models: [{ id: "runtime", label: "Runtime" }], modes: [] },
+            });
+          },
+          onEvent(next) {
+            listener = next;
+            return () => {
+              listener = undefined;
+            };
+          },
+          async close() {},
+        };
+      },
+    };
+    return { registration, launches };
+  }
+
+  test("reports plugin status diagnostics without connecting", async () => {
+    const { registration, launches } = provider();
+    const manager = new ProviderSnapshotManager({ logger: createTestLogger() });
+    try {
+      manager.replacePluginProviders([registration]);
+      expect(await manager.getProvider({ provider: registration.id, wait: true })).toMatchObject({
+        status: "unavailable",
+      });
+      expect((await manager.getProviderDiagnostic(registration.id)).diagnostic).toContain(
+        "Sign in to the provider",
+      );
+      expect(launches).toEqual([]);
+    } finally {
+      await manager.shutdown();
+      manager.destroy();
+    }
+  });
+
+  test("applies plugin overrides and refreshes the resolved launch on config edits", async () => {
+    const { registration, launches } = provider();
+    const manager = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      providerOverrides: {
+        [registration.id]: {
+          enabled: false,
+          label: "Configured plugin",
+          models: [{ id: "configured", label: "Configured" }],
+          additionalModels: [{ id: "extra", label: "Extra" }],
+          command: [process.execPath, "override.js"],
+          env: { PLUGIN_LOGIN: "yes", CLAUDECODE: "parent" },
+        },
+      },
+    });
+    try {
+      manager.replacePluginProviders([registration]);
+      expect(await manager.getProvider({ provider: registration.id, wait: true })).toMatchObject({
+        enabled: false,
+        status: "unavailable",
+        label: "Configured plugin",
+      });
+      expect(launches).toEqual([]);
+      manager.applyMutableProviderConfig({ [registration.id]: { enabled: true } });
+      expect(await manager.getProvider({ provider: registration.id, wait: true })).toMatchObject({
+        status: "ready",
+      });
+      expect(
+        (await manager.getProvider({ provider: registration.id })).models?.map((model) => model.id),
+      ).toEqual(["configured", "extra"]);
+      expect(launches[0]).toMatchObject({
+        command: process.execPath,
+        args: ["override.js"],
+        env: { PLUGIN_LOGIN: "yes" },
+      });
+      expect(launches[0]!.env).not.toHaveProperty("CLAUDECODE");
+      const previous = manager.getAgentManagerProviderState().clients[registration.id];
+      manager.applyMutableProviderConfig({
+        [registration.id]: {
+          enabled: true,
+          command: [process.execPath, "edited.js"],
+          env: { PLUGIN_LOGIN: "no" },
+        },
+      });
+      expect(manager.getAgentManagerProviderState().clients[registration.id]).not.toBe(previous);
+      expect(await manager.getProvider({ provider: registration.id, wait: true })).toMatchObject({
+        status: "unavailable",
+      });
+      manager.applyMutableProviderConfig({
+        [registration.id]: {
+          enabled: true,
+          command: [process.execPath, "edited.js"],
+          env: { PLUGIN_LOGIN: "yes" },
+        },
+      });
+      expect(await manager.getProvider({ provider: registration.id, wait: true })).toMatchObject({
+        status: "ready",
+      });
+      expect(launches.at(-1)).toMatchObject({ args: ["edited.js"] });
+    } finally {
+      await manager.shutdown();
+      manager.destroy();
+    }
+  });
+
+  test("does not warn for a plugin override during startup before provider registration settles", async () => {
+    const { registration } = provider();
+    const warnings: string[] = [];
+    const logger = pino(
+      { level: "warn" },
+      {
+        write(line: string) {
+          warnings.push(line);
+        },
+      },
+    );
+    const manager = new ProviderSnapshotManager({
+      logger,
+      providerOverrides: {
+        [registration.id]: { command: [process.execPath], env: { PLUGIN_LOGIN: "yes" } },
+      },
+    });
+    try {
+      expect(warnings).toEqual([]);
+      manager.replacePluginProviders([]);
+      expect(warnings).toEqual([]);
+      manager.replacePluginProviders([registration]);
+      manager.settlePluginProviders();
+      expect(warnings).toEqual([]);
+      expect(await manager.getProvider({ provider: registration.id, wait: true })).toMatchObject({
+        status: "ready",
+      });
+    } finally {
+      await manager.shutdown();
+      manager.destroy();
+    }
+  });
+
+  test("warns for unknown overrides when plugin startup settles without registered plugins", async () => {
+    const warnings: string[] = [];
+    const logger = pino(
+      { level: "warn" },
+      {
+        write(line: string) {
+          warnings.push(line);
+        },
+      },
+    );
+    const manager = new ProviderSnapshotManager({
+      logger,
+      providerOverrides: { "typo-provider": { enabled: false } },
+    });
+    try {
+      expect(warnings).toEqual([]);
+      manager.settlePluginProviders();
+      manager.settlePluginProviders();
+      expect(warnings).toHaveLength(1);
+      expect(JSON.parse(warnings[0]!)).toMatchObject({
+        provider: "typo-provider",
+        msg: "Provider override matches no registered provider",
+      });
+    } finally {
+      await manager.shutdown();
+      manager.destroy();
+    }
+  });
+
+  test("warns once for unknown overrides after plugin startup settles without warning for known providers", async () => {
+    const { registration } = provider();
+    const warnings: string[] = [];
+    const logger = pino(
+      { level: "warn" },
+      {
+        write(line: string) {
+          warnings.push(line);
+        },
+      },
+    );
+    const manager = new ProviderSnapshotManager({
+      logger,
+      providerOverrides: {
+        "typo-provider": { enabled: false },
+        [registration.id]: { enabled: false },
+        codex: { enabled: false },
+      },
+    });
+    try {
+      expect(warnings).toEqual([]);
+      manager.replacePluginProviders([registration]);
+      expect(warnings).toEqual([]);
+      manager.settlePluginProviders();
+      manager.settlePluginProviders();
+      const unknown = warnings.map((line) => JSON.parse(line) as { provider: string; msg: string });
+      expect(unknown).toEqual([
+        expect.objectContaining({
+          provider: "typo-provider",
+          msg: "Provider override matches no registered provider",
+        }),
+      ]);
+    } finally {
+      await manager.shutdown();
+      manager.destroy();
+    }
+  });
+
+  test("a same-ID extends entry shadows the plugin without throwing", async () => {
+    const { registration, launches } = provider();
+    const warnings: string[] = [];
+    const logger = pino(
+      { level: "warn" },
+      {
+        write(line: string) {
+          warnings.push(line);
+        },
+      },
+    );
+    const manager = new ProviderSnapshotManager({
+      logger,
+      providerOverrides: {
+        [registration.id]: {
+          extends: "acp",
+          label: "Own provider",
+          command: [process.execPath],
+          enabled: true,
+        },
+      },
+    });
+    try {
+      const previous = manager.getAgentManagerProviderState().clients[registration.id];
+      manager.replacePluginProviders([registration]);
+      expect(manager.getAgentManagerProviderState().clients[registration.id]).toBe(previous);
+      expect(manager.getProviderLabel(registration.id)).toBe("Own provider");
+      expect(
+        manager.getAgentManagerProviderState().providerDefinitions[registration.id],
+      ).toMatchObject({ enabled: true });
+      expect(warnings.join("\n")).toContain("shadowed");
+      expect(launches).toEqual([]);
+      manager.replacePluginProviders([]);
+      expect(manager.hasProvider(registration.id)).toBe(true);
+    } finally {
+      await manager.shutdown();
+      manager.destroy();
+    }
+  });
+});
+
+test("model overrides preserve negotiated plugin capabilities and connection shutdown", async () => {
+  let closed = 0;
+  const registration: ProviderRegistration = {
+    id: "model-plugin",
+    label: "Model plugin",
+    async connect() {
+      let listener: ((event: ProviderEvent) => void) | undefined;
+      return {
+        version: 1,
+        capabilities: ["session.persistence"],
+        async send(input) {
+          if (input.type === "catalog")
+            listener?.({
+              type: "catalog",
+              requestId: input.requestId,
+              catalog: { models: [], modes: [] },
+            });
+        },
+        onEvent(next) {
+          listener = next;
+          return () => {
+            listener = undefined;
+          };
+        },
+        async close() {
+          closed += 1;
+        },
+      };
+    },
+  };
+  const manager = new ProviderSnapshotManager({
+    logger: createTestLogger(),
+    providerOverrides: {
+      [registration.id]: { models: [{ id: "configured", label: "Configured" }] },
+    },
+  });
+  try {
+    manager.replacePluginProviders([registration]);
+    await manager.getProvider({ provider: registration.id, wait: true });
+    const client = manager.getAgentManagerProviderState().clients[registration.id]!;
+    expect(client.capabilities.supportsSessionPersistence).toBe(true);
+    await manager.shutdown();
+    expect(closed).toBe(1);
+  } finally {
+    await manager.shutdown();
+    manager.destroy();
+  }
 });

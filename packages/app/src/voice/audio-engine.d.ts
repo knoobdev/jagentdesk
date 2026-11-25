@@ -1,1 +1,1 @@
-export * from "./audio-engine.native";
+export * from "../audio/audio-engine.native";

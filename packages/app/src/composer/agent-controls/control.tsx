@@ -1,32 +1,28 @@
-import { forwardRef, useCallback } from "react";
+import { forwardRef, useCallback, type ComponentProps } from "react";
 import { Text, View, type PressableStateCallbackType } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { ComboboxTrigger } from "@/components/ui/combobox-trigger";
 import { useComposerControlLayout } from "@/composer/agent-controls/layout-context";
 import { ComposerToolbarGlyph } from "@/composer/agent-controls/glyph";
-import type { AgentControlIcon } from "@/agent-controls/icons";
+import { type AgentControlIcon } from "@/agent-controls/icons";
+import { TOUCH_ICON_SIZE, toolbarContentSlot, toolbarSlot } from "@/components/ui/control-geometry";
 
-interface AgentControlTriggerProps {
+type AgentControlTriggerProps = Omit<
+  ComponentProps<typeof ComboboxTrigger>,
+  "accessibilityLabel" | "block" | "children" | "chevron" | "onPress" | "style"
+> & {
   icon: AgentControlIcon;
   iconColor?: string;
   surface: "toolbar" | "sheet";
   label: string;
   value?: string;
   showToolbarLabel?: boolean;
-  /**
-   * When the toolbar trigger collapses to an icon-only pill (compact / phone),
-   * a positive count renders a small numeric badge so the user still sees how
-   * many items are attached. Ignored on desktop, where the full value label
-   * already shows the count.
-   */
   badgeCount?: number;
   showCaret?: boolean;
   open?: boolean;
-  disabled?: boolean;
   onPress: () => void;
   accessibilityLabel: string;
-  testID?: string;
-}
+};
 
 export const AgentControlTrigger = forwardRef<View, AgentControlTriggerProps>(
   function AgentControlTrigger(
@@ -44,16 +40,18 @@ export const AgentControlTrigger = forwardRef<View, AgentControlTriggerProps>(
       onPress,
       accessibilityLabel,
       testID,
+      ...triggerProps
     },
     ref,
   ) {
-    const { glyphSize } = useComposerControlLayout();
+    const { glyphs } = useComposerControlLayout();
+    const glyphRole = showToolbarLabel ? "label" : "icon";
+    const glyph = glyphs[glyphRole];
     const isSheet = surface === "sheet";
-    const resolvedGlyphSize = isSheet ? 16 : glyphSize;
-    const resolvedIconColor = iconColor ?? styles.iconColor.color;
+    const toolbarIconColor =
+      glyph.tone === "foreground" ? styles.iconColorForeground.color : styles.iconColor.color;
+    const resolvedIconColor = iconColor ?? (isSheet ? styles.iconColor.color : toolbarIconColor);
     const showValue = isSheet || showToolbarLabel;
-    const showBadge =
-      !isSheet && !showToolbarLabel && typeof badgeCount === "number" && badgeCount > 0;
     const triggerStyle = useCallback(
       ({ pressed, hovered }: PressableStateCallbackType) => [
         isSheet ? styles.sheetRow : styles.toolbarControl,
@@ -67,6 +65,7 @@ export const AgentControlTrigger = forwardRef<View, AgentControlTriggerProps>(
 
     return (
       <ComboboxTrigger
+        {...triggerProps}
         ref={ref}
         collapsable={false}
         disabled={disabled}
@@ -76,23 +75,20 @@ export const AgentControlTrigger = forwardRef<View, AgentControlTriggerProps>(
         accessibilityLabel={accessibilityLabel}
         testID={testID}
         chevron={showCaret ? undefined : null}
+        block={isSheet}
       >
         {isSheet ? (
           <View style={styles.sheetGlyph}>
-            <Icon size={resolvedGlyphSize} color={resolvedIconColor} />
+            <Icon size={16} color={resolvedIconColor} />
           </View>
         ) : (
-          <ComposerToolbarGlyph size={resolvedGlyphSize}>
-            <Icon size={resolvedGlyphSize} color={resolvedIconColor} />
-            {showBadge ? (
-              <View style={styles.badge} pointerEvents="none">
-                <Text style={styles.badgeText} numberOfLines={1}>
-                  {badgeCount}
-                </Text>
-              </View>
-            ) : null}
+          <ComposerToolbarGlyph role={glyphRole}>
+            <Icon size={glyph.size} strokeWidth={glyph.strokeWidth} color={resolvedIconColor} />
           </ComposerToolbarGlyph>
         )}
+        {!isSheet && !showToolbarLabel && (badgeCount ?? 0) > 0 ? (
+          <Text style={styles.toolbarValue}>{badgeCount}</Text>
+        ) : null}
         {isSheet ? (
           <Text style={styles.sheetLabel} numberOfLines={1}>
             {label}
@@ -110,18 +106,17 @@ export const AgentControlTrigger = forwardRef<View, AgentControlTriggerProps>(
 
 const styles = StyleSheet.create((theme) => ({
   toolbarControl: {
-    height: 28,
     minWidth: 0,
     flexShrink: 1,
     flexDirection: "row",
     alignItems: "center",
     gap: theme.spacing[1],
-    paddingHorizontal: theme.spacing[2],
-    borderRadius: theme.borderRadius["2xl"],
+    ...toolbarContentSlot(theme.spacing[2]),
+    borderRadius: theme.borderRadius.full,
     backgroundColor: "transparent",
   },
   toolbarIconOnly: {
-    width: 28,
+    ...toolbarSlot(TOUCH_ICON_SIZE.md),
     flexShrink: 0,
     paddingHorizontal: 0,
     justifyContent: "center",
@@ -130,7 +125,7 @@ const styles = StyleSheet.create((theme) => ({
     minWidth: 0,
     flexShrink: 1,
     color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.sm,
+    fontSize: theme.fontSize.base,
     fontWeight: theme.fontWeight.normal,
   },
   sheetRow: {
@@ -158,7 +153,7 @@ const styles = StyleSheet.create((theme) => ({
     flex: 1,
     minWidth: 0,
     color: theme.colors.foreground,
-    fontSize: theme.fontSize.sm,
+    fontSize: theme.fontSize.base,
     fontWeight: theme.fontWeight.normal,
   },
   sheetValue: {
@@ -166,14 +161,14 @@ const styles = StyleSheet.create((theme) => ({
     minWidth: 0,
     flexShrink: 1,
     color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.sm,
+    fontSize: theme.fontSize.base,
     fontWeight: theme.fontWeight.normal,
   },
   hovered: {
     backgroundColor: theme.colors.surface2,
   },
   pressed: {
-    backgroundColor: theme.colors.surface0,
+    backgroundColor: theme.colors.surface2,
   },
   disabled: {
     opacity: 0.5,
@@ -181,22 +176,7 @@ const styles = StyleSheet.create((theme) => ({
   iconColor: {
     color: theme.colors.foregroundMuted,
   },
-  badge: {
-    position: "absolute",
-    top: -6,
-    right: -8,
-    minWidth: 14,
-    height: 14,
-    paddingHorizontal: 3,
-    borderRadius: theme.borderRadius.full,
-    backgroundColor: theme.colors.accent,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  badgeText: {
-    color: theme.colors.accentForeground,
-    fontSize: 9,
-    fontWeight: theme.fontWeight.semibold,
-    lineHeight: 12,
+  iconColorForeground: {
+    color: theme.colors.foreground,
   },
 }));

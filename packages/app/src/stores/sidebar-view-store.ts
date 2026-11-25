@@ -1,3 +1,4 @@
+import type { WorkspaceSort } from "@/projects/workspace-structure";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
@@ -6,20 +7,27 @@ export type SidebarGroupMode = "project" | "status";
 
 const SIDEBAR_VIEW_STORAGE_KEY = "sidebar-view";
 const LEGACY_SIDEBAR_GROUP_MODE_STORAGE_KEY = "sidebar-group-mode";
-const SIDEBAR_VIEW_STORE_VERSION = 2;
+const SIDEBAR_VIEW_STORE_VERSION = 4;
 
 interface SidebarViewStoreState {
+  workspaceSort: WorkspaceSort;
+  setWorkspaceSort: (workspaceSort: WorkspaceSort) => void;
   groupMode: SidebarGroupMode;
+  showBackground: boolean;
   // Empty means "all hosts". A non-empty list pins the sidebar to those hosts.
   hostFilters: string[];
+  toggleBackground: () => void;
   setGroupMode: (mode: SidebarGroupMode) => void;
   toggleHostFilter: (serverId: string) => void;
   clearHostFilters: () => void;
+  focusHost: (serverId: string) => void;
   reconcileHostFilters: (serverIds: readonly string[]) => void;
 }
 
 interface SidebarViewPersistedState {
+  workspaceSort?: WorkspaceSort;
   groupMode: SidebarGroupMode;
+  showBackground: boolean;
   hostFilters: string[];
 }
 
@@ -57,15 +65,25 @@ function readHostFilters(persistedState: Record<string, unknown>): string[] {
 
 export function migrateSidebarViewState(persistedState: unknown): SidebarViewPersistedState {
   if (!isRecord(persistedState)) {
-    return { groupMode: "project", hostFilters: [] };
+    return { groupMode: "project", hostFilters: [], showBackground: false };
   }
 
   const legacyGroupMode = readLegacyGroupMode(persistedState);
   if (legacyGroupMode) {
-    return { groupMode: legacyGroupMode, hostFilters: [] };
+    return {
+      workspaceSort: "created",
+      groupMode: legacyGroupMode,
+      hostFilters: [],
+      showBackground: false,
+    };
   }
 
   return {
+    workspaceSort:
+      persistedState.workspaceSort === "manual" || persistedState.workspaceSort === "lastPrompt"
+        ? persistedState.workspaceSort
+        : "created",
+    showBackground: persistedState.showBackground === true,
     groupMode: isSidebarGroupMode(persistedState.groupMode) ? persistedState.groupMode : "project",
     hostFilters: readHostFilters(persistedState),
   };
@@ -90,7 +108,11 @@ export function createSidebarViewStorage(
 export const useSidebarViewStore = create<SidebarViewStoreState>()(
   persist(
     (set) => ({
+      workspaceSort: "created",
+      setWorkspaceSort: (workspaceSort) => set({ workspaceSort }),
       groupMode: "project",
+      showBackground: false,
+      toggleBackground: () => set((state) => ({ showBackground: !state.showBackground })),
       hostFilters: [],
       setGroupMode: (mode) => set({ groupMode: mode }),
       toggleHostFilter: (serverId) =>
@@ -100,6 +122,7 @@ export const useSidebarViewStore = create<SidebarViewStoreState>()(
             : [...state.hostFilters, serverId],
         })),
       clearHostFilters: () => set({ hostFilters: [] }),
+      focusHost: (serverId) => set({ hostFilters: [serverId] }),
       reconcileHostFilters: (serverIds) =>
         set((state) => {
           if (state.hostFilters.length === 0) {
@@ -118,7 +141,9 @@ export const useSidebarViewStore = create<SidebarViewStoreState>()(
       version: SIDEBAR_VIEW_STORE_VERSION,
       storage: createJSONStorage(createSidebarViewStorage),
       partialize: (state) => ({
+        workspaceSort: state.workspaceSort,
         groupMode: state.groupMode,
+        showBackground: state.showBackground,
         hostFilters: state.hostFilters,
       }),
       migrate: migrateSidebarViewState,

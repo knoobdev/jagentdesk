@@ -150,6 +150,7 @@ function reasoningTimeline(
 function canonicalToolTimeline(params: {
   provider: AgentProvider;
   callId: string;
+  turnId?: string;
   name: string;
   status: CanonicalToolStatus;
   input?: unknown;
@@ -188,6 +189,7 @@ function canonicalToolTimeline(params: {
   return {
     type: "timeline",
     provider: params.provider,
+    ...(params.turnId ? { turnId: params.turnId } : {}),
     item,
   };
 }
@@ -413,6 +415,182 @@ describe("stream reducer tool call idempotency", () => {
 });
 
 describe("stream reducer canonical tool calls", () => {
+  it("keeps repeated call ids in different turns as distinct timeline rows", () => {
+    const callId = "tool-reused-across-turns";
+    const state = hydrateStreamState([
+      {
+        event: canonicalToolTimeline({
+          provider: "claude",
+          callId,
+          turnId: "autonomous-turn-1",
+          name: "Task",
+          status: "running",
+        }),
+        timestamp: new Date("2025-01-01T09:00:00Z"),
+      },
+      {
+        event: canonicalToolTimeline({
+          provider: "claude",
+          callId,
+          turnId: "autonomous-turn-2",
+          name: "Task",
+          status: "completed",
+        }),
+        timestamp: new Date("2025-01-01T09:01:00Z"),
+      },
+    ]);
+
+    const tools = state.filter(isAgentToolCallItem);
+    expect(tools.map((tool) => tool.turnId)).toEqual(["autonomous-turn-1", "autonomous-turn-2"]);
+    expect(new Set(tools.map((tool) => tool.id)).size).toBe(2);
+  });
+
+  it.each(["live", "canonical"] as const)(
+    "keeps current tool identity during %s updates when an older turn reports late",
+    (source) => {
+      let state: StreamItem[] = [];
+      const events = [
+        { callId: "background", turnId: "codex-turn-17", status: "running" as const },
+        { callId: "exec-current", turnId: "codex-turn-18", status: "running" as const },
+        { callId: "background", turnId: "codex-turn-17", status: "completed" as const },
+        { callId: "exec-current", turnId: "codex-turn-18", status: "completed" as const },
+      ];
+      for (const [index, item] of events.entries()) {
+        state = reduceStreamUpdate(
+          state,
+          canonicalToolTimeline({
+            provider: "codex",
+            name: "exec_command",
+            ...item,
+          }),
+          new Date(index * 1000),
+          { source },
+        );
+      }
+      expect(
+        state.filter(isAgentToolCallItem).map((item) => ({
+          id: item.id,
+          turnId: item.turnId,
+          status: item.payload.data.status,
+        })),
+      ).toEqual([
+        {
+          id: "agent_tool_turn:codex-turn-17/background",
+          turnId: "codex-turn-17",
+          status: "completed",
+        },
+        {
+          id: "agent_tool_turn:codex-turn-18/exec-current",
+          turnId: "codex-turn-18",
+          status: "completed",
+        },
+      ]);
+    },
+  );
+
+  it("does not move reasoning into an older turn when a late tool update finalizes it", () => {
+    const background = canonicalToolTimeline({
+      provider: "codex",
+      name: "exec_command",
+      callId: "background",
+      turnId: "old",
+      status: "running",
+    });
+    let state = reduceStreamUpdate([], background, new Date(0));
+    state = reduceStreamUpdate(
+      state,
+      {
+        type: "timeline",
+        provider: "codex",
+        turnId: "current",
+        item: { type: "reasoning", text: "Working on the current request" },
+      },
+      new Date(1),
+    );
+    state = reduceStreamUpdate(
+      state,
+      canonicalToolTimeline({
+        provider: "codex",
+        name: "exec_command",
+        callId: "background",
+        turnId: "old",
+        status: "completed",
+      }),
+      new Date(2),
+    );
+    expect(state.at(-1)).toMatchObject({ kind: "thought", turnId: "current", status: "ready" });
+  });
+
+  it("merges lifecycle updates for the same call occurrence", () => {
+    const callId = "tool-updated-within-turn";
+    const turnId = "autonomous-turn-1";
+    const state = hydrateStreamState([
+      {
+        event: canonicalToolTimeline({
+          provider: "claude",
+          callId,
+          turnId,
+          name: "Task",
+          status: "running",
+        }),
+        timestamp: new Date("2025-01-01T09:00:00Z"),
+      },
+      {
+        event: canonicalToolTimeline({
+          provider: "claude",
+          callId,
+          turnId,
+          name: "Task",
+          status: "completed",
+        }),
+        timestamp: new Date("2025-01-01T09:01:00Z"),
+      },
+    ]);
+
+    expect(state.filter(isAgentToolCallItem)).toEqual([
+      expect.objectContaining({
+        id: `agent_tool_turn:${turnId}/${callId}`,
+        turnId,
+        payload: expect.objectContaining({
+          data: expect.objectContaining({ callId, status: "completed" }),
+        }),
+      }),
+    ]);
+  });
+
+  it("preserves call-id lifecycle merging for events without turn identity", () => {
+    const callId = "legacy-unscoped-tool";
+    const state = hydrateStreamState([
+      {
+        event: canonicalToolTimeline({
+          provider: "claude",
+          callId,
+          name: "Task",
+          status: "running",
+        }),
+        timestamp: new Date("2025-01-01T09:00:00Z"),
+      },
+      {
+        event: canonicalToolTimeline({
+          provider: "claude",
+          callId,
+          name: "Task",
+          status: "completed",
+        }),
+        timestamp: new Date("2025-01-01T09:01:00Z"),
+      },
+    ]);
+
+    expect(state.filter(isAgentToolCallItem)).toEqual([
+      expect.objectContaining({
+        id: `agent_tool_${callId}`,
+        payload: expect.objectContaining({
+          data: expect.objectContaining({ callId, status: "completed" }),
+        }),
+      }),
+    ]);
+  });
+
   it("is deterministic for equivalent hydration sequences", () => {
     const updates = [
       {
@@ -565,7 +743,7 @@ describe("stream reducer canonical tool calls", () => {
     expect(new Set(messages.map((message) => message.id)).size).toBe(2);
   });
 
-  it("keeps every promoted block when an assistant message resumes after a tool", () => {
+  it("keeps whole messages when an assistant resumes after a tool", () => {
     const messageId = "msg-promoted-resume";
     let tail: StreamItem[] = [];
     let head: StreamItem[] = [];
@@ -608,10 +786,8 @@ describe("stream reducer canonical tool calls", () => {
         item.kind === "assistant_message",
     );
     expect(messages.map((message) => message.text)).toEqual([
-      "Before one.",
-      "Before two.",
-      "After one.",
-      "After two.",
+      "Before one.\n\nBefore two.",
+      "After one.\n\nAfter two.",
     ]);
     expect(new Set(messages.map((message) => message.id)).size).toBe(messages.length);
   });
@@ -820,7 +996,7 @@ describe("stream reducer canonical tool calls", () => {
       detail: tool.payload.data.detail,
     });
     assert.strictEqual(display.summary, undefined);
-    assert.strictEqual(display.displayName, "Exec Command");
+    assert.strictEqual(display.displayName, "Exec command");
   });
 
   it("preserves early input when later updates contain null input", () => {

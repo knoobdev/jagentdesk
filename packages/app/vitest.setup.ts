@@ -2,6 +2,9 @@
 import { vi } from "vitest";
 import React from "react";
 
+// SDK 57 installs Metro-only import.meta/async-require globals here; Vite owns module loading.
+vi.mock("expo/src/winter", () => ({}));
+
 const globalWithTestShims = globalThis as typeof globalThis & Record<string, unknown>;
 
 globalWithTestShims.__DEV__ = false;
@@ -108,4 +111,11 @@ vi.mock("expo-router", () => ({
     replace: vi.fn(),
     setParams: vi.fn(),
   })),
+}));
+
+// Plugin registration tests inspect metadata without rendering native Markdown. Browser
+// journeys exercise this bridge and its real renderer; other Markdown tests keep their imports.
+vi.mock("@/plugins/react-native/markdown", () => ({
+  Markdown: ({ children }: { children: React.ReactNode }) =>
+    React.createElement("div", null, children),
 }));

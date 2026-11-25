@@ -1,3 +1,4 @@
+import { createWorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
 import path from "node:path";
 import type pino from "pino";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -189,6 +190,8 @@ async function driveWatchRecoveryLadder(
   }
 }
 
+// Registering a workspace reads the checkout twice: once at start and once
+// when observation setup establishes watcher coverage.
 function createService(
   watcher: ReturnType<typeof createWatcherHarness>,
   overrides?: Record<string, unknown>,
@@ -240,6 +243,7 @@ function createService(
         filterEvents: (events) => events,
         verify: vi.fn(async () => {}),
       })),
+      workspaceFolderExists: vi.fn(async () => true),
       ...overrides,
     } as never,
   });
@@ -376,17 +380,20 @@ describe("WorkspaceGitService checkout observation", () => {
       getCheckoutStatus,
       runGitCommand,
     });
+    const workspaceRuntimeStore = createWorkspaceRuntimeStore();
+    service.onSnapshotUpdated((snapshot) => workspaceRuntimeStore.set(snapshot));
 
     const first = service.registerWorkspace({ cwd: REPO_CWD }, vi.fn());
     const second = service.registerWorkspace({ cwd: REPO_CWD }, vi.fn());
     await vi.waitFor(() => {
-      expect(service.peekSnapshot(REPO_CWD)).not.toBeNull();
+      expect(workspaceRuntimeStore.get(REPO_CWD)).not.toBeNull();
       expect(service.getMetrics().workspaceObservationSetupInFlightCount).toBe(0);
       expect(service.getMetrics().workspaceRefreshInFlightCount).toBe(0);
     });
 
-    expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(1);
-    expect(getCheckoutStatus).toHaveBeenCalledTimes(1);
+    expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(2);
+    // The initial read, then one checkout read once the watcher covers the tree.
+    expect(getCheckoutStatus).toHaveBeenCalledTimes(2);
     expect(runGitCommand).toHaveBeenCalledTimes(2);
     expect(watcher.records.filter((record) => record.directory === REPO_CWD)).toHaveLength(1);
     expect(watcher.records.filter((record) => record.directory === GIT_DIR)).toHaveLength(1);
@@ -439,7 +446,10 @@ describe("WorkspaceGitService checkout observation", () => {
       getPullRequestStatus,
       getCheckoutDiff,
     });
+    const workspaceRuntimeStore = createWorkspaceRuntimeStore();
+    service.onSnapshotUpdated((snapshot) => workspaceRuntimeStore.set(snapshot));
     const diffManager = new CheckoutDiffManager({
+      workspaceRuntimeStore: workspaceRuntimeStore,
       logger: createLogger(),
       jagentdeskHome: "/tmp/jagentdesk-home",
       workspaceGitService: service,
@@ -487,7 +497,7 @@ describe("WorkspaceGitService checkout observation", () => {
     });
     await flushPromises();
 
-    expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(1);
+    expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(2);
     expect(getPullRequestStatus).not.toHaveBeenCalled();
 
     diffSubscription.unsubscribe();
@@ -506,10 +516,12 @@ describe("WorkspaceGitService checkout observation", () => {
       },
     );
     const service = createService(watcher, { getCheckoutDiff });
+    const workspaceRuntimeStore = createWorkspaceRuntimeStore();
+    service.onSnapshotUpdated((snapshot) => workspaceRuntimeStore.set(snapshot));
     const subscription = service.registerWorkspace({ cwd: REPO_CWD }, vi.fn());
 
     await vi.waitFor(() => {
-      expect(service.peekSnapshot(REPO_CWD)).not.toBeNull();
+      expect(workspaceRuntimeStore.get(REPO_CWD)).not.toBeNull();
       expect(service.getMetrics().workspaceObservationSetupInFlightCount).toBe(0);
     });
     const initialUncommitted = await service.getCheckoutDiff(REPO_CWD, { mode: "uncommitted" });
@@ -558,7 +570,7 @@ describe("WorkspaceGitService checkout observation", () => {
       ?.callback(null, [{ path: path.join(GIT_DIR, "packed-refs"), type: "update" }]);
     await vi.advanceTimersByTimeAsync(1_000);
     await vi.waitFor(() => {
-      expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(2);
+      expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(3);
     });
 
     expect(listener).toHaveBeenCalledTimes(1);
@@ -628,7 +640,7 @@ describe("WorkspaceGitService checkout observation", () => {
       expect(getCheckoutRefDerivedState).toHaveBeenCalledTimes(1);
     });
 
-    expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(1);
+    expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(2);
     expect(listener).toHaveBeenCalledTimes(1);
 
     subscription.unsubscribe();
@@ -684,7 +696,7 @@ describe("WorkspaceGitService checkout observation", () => {
     await flushPromises();
     await vi.advanceTimersByTimeAsync(1_000);
 
-    expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(1);
+    expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(2);
     expect(getCheckoutRefDerivedState).not.toHaveBeenCalled();
 
     subscription.unsubscribe();
@@ -740,7 +752,7 @@ describe("WorkspaceGitService checkout observation", () => {
       });
       await vi.advanceTimersByTimeAsync(1_000);
       await vi.waitFor(() => {
-        expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(2);
+        expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(3);
       });
 
       subscription.unsubscribe();
@@ -791,7 +803,7 @@ describe("WorkspaceGitService checkout observation", () => {
     });
     await vi.advanceTimersByTimeAsync(1_000);
     await vi.waitFor(() => {
-      expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(2);
+      expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(3);
     });
     expect(getCheckoutRefDerivedState).not.toHaveBeenCalled();
 
@@ -830,7 +842,7 @@ describe("WorkspaceGitService checkout observation", () => {
     const subscription = service.registerWorkspace({ cwd: REPO_CWD }, vi.fn());
     await vi.waitFor(() => {
       expect(service.getMetrics().fetchInFlightCount).toBe(0);
-      expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(1);
+      expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(2);
     });
 
     const repoWatcher = watcher.records.find((record) => record.directory === GIT_DIR);
@@ -842,7 +854,7 @@ describe("WorkspaceGitService checkout observation", () => {
       },
     ]);
     await vi.advanceTimersByTimeAsync(1_000);
-    expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(1);
+    expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(2);
     expect(getCheckoutRefDerivedState).not.toHaveBeenCalled();
 
     repoWatcher?.callback(null, [
@@ -852,7 +864,7 @@ describe("WorkspaceGitService checkout observation", () => {
     await vi.waitFor(() => {
       expect(getCheckoutRefDerivedState).toHaveBeenCalledTimes(1);
     });
-    expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(1);
+    expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(2);
 
     subscription.unsubscribe();
     service.dispose();
@@ -960,10 +972,13 @@ describe("WorkspaceGitService checkout observation", () => {
         return { changes: [], nonRemoteRefsChanged: false, error: null };
       }),
     });
+    const workspaceRuntimeStore = createWorkspaceRuntimeStore();
+    service.onSnapshotUpdated((snapshot) => workspaceRuntimeStore.set(snapshot));
     const subscription = service.registerWorkspace({ cwd: REPO_CWD }, vi.fn());
     await fetchSnapshotRead.promise;
     await vi.waitFor(() => {
-      expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(1);
+      expect(workspaceRuntimeStore.get(REPO_CWD)?.git.currentBranch).toBe("feature");
+      expect(service.getMetrics().workspaceRefreshInFlightCount).toBe(0);
     });
 
     watcher.records
@@ -977,7 +992,7 @@ describe("WorkspaceGitService checkout observation", () => {
     });
     await vi.advanceTimersByTimeAsync(1_000);
     await vi.waitFor(() => {
-      expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(2);
+      expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(3);
     });
 
     subscription.unsubscribe();
@@ -999,7 +1014,10 @@ describe("WorkspaceGitService checkout observation", () => {
     const service = createService(watcher, { getCheckoutSnapshotFacts });
     const subscription = service.registerWorkspace({ cwd: REPO_CWD }, vi.fn());
     await vi.waitFor(() => {
-      expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(1);
+      expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(2);
+      expect(service.getMetrics().workspaceRefreshInFlightCount).toBe(0);
+      expect(service.getMetrics().workspaceObservationSetupInFlightCount).toBe(0);
+      expect(service.getMetrics().fetchInFlightCount).toBe(0);
     });
 
     watcher.records
@@ -1009,7 +1027,7 @@ describe("WorkspaceGitService checkout observation", () => {
       ]);
     await vi.advanceTimersByTimeAsync(1_000);
     await vi.waitFor(() => {
-      expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(2);
+      expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(3);
     });
 
     subscription.unsubscribe();
@@ -1152,7 +1170,7 @@ describe("WorkspaceGitService checkout observation", () => {
       ]);
     await vi.advanceTimersByTimeAsync(1_000);
     await vi.waitFor(() => {
-      expect(getCalledCwds(getCheckoutStatus)).toEqual([WORKTREE_A, WORKTREE_B]);
+      expect(getCalledCwds(getCheckoutStatus).sort()).toEqual([WORKTREE_A, WORKTREE_B].sort());
     });
 
     first.unsubscribe();
@@ -1206,7 +1224,10 @@ describe("WorkspaceGitService checkout observation", () => {
       getCheckoutShortstat,
       getCheckoutDiff,
     });
+    const workspaceRuntimeStore = createWorkspaceRuntimeStore();
+    service.onSnapshotUpdated((snapshot) => workspaceRuntimeStore.set(snapshot));
     const diffManager = new CheckoutDiffManager({
+      workspaceRuntimeStore: workspaceRuntimeStore,
       logger: createLogger(),
       jagentdeskHome: "/tmp/jagentdesk-home",
       workspaceGitService: service,
@@ -1261,7 +1282,10 @@ describe("WorkspaceGitService checkout observation", () => {
       diffStat: { additions: 4, deletions: 2 },
     }));
     const service = createService(watcher, { getCheckoutDiff, getCheckoutWorktreeState });
+    const workspaceRuntimeStore = createWorkspaceRuntimeStore();
+    service.onSnapshotUpdated((snapshot) => workspaceRuntimeStore.set(snapshot));
     const diffManager = new CheckoutDiffManager({
+      workspaceRuntimeStore: workspaceRuntimeStore,
       logger: createLogger(),
       jagentdeskHome: "/tmp/jagentdesk-home",
       workspaceGitService: service,
@@ -1491,6 +1515,8 @@ describe("WorkspaceGitService checkout observation", () => {
       getCheckoutStatus,
       getPullRequestStatus,
     });
+    const workspaceRuntimeStore = createWorkspaceRuntimeStore();
+    service.onSnapshotUpdated((snapshot) => workspaceRuntimeStore.set(snapshot));
     const subscription = service.registerWorkspace({ cwd: REPO_CWD }, vi.fn());
 
     await vi.waitFor(() => {
@@ -1502,7 +1528,7 @@ describe("WorkspaceGitService checkout observation", () => {
       expect(service.getMetrics().workingTreeWatchTargetCount).toBe(1);
       expect(service.getMetrics().workspaceObservationSetupInFlightCount).toBe(0);
       expect(service.getMetrics().workspaceRefreshInFlightCount).toBe(0);
-      expect(service.peekSnapshot(REPO_CWD)).not.toBeNull();
+      expect(workspaceRuntimeStore.get(REPO_CWD)).not.toBeNull();
       expect(getCheckoutStatus).toHaveBeenCalledTimes(1);
     });
     await vi.advanceTimersByTimeAsync(7_000);
@@ -1569,10 +1595,12 @@ describe("WorkspaceGitService checkout observation", () => {
       getWorkspaceGitSelfHealPhaseMs: () => 60_000,
       runGitCommand,
     });
+    const workspaceRuntimeStore = createWorkspaceRuntimeStore();
+    service.onSnapshotUpdated((snapshot) => workspaceRuntimeStore.set(snapshot));
     const summarySubscription = service.registerWorkspace({ cwd: REPO_CWD }, vi.fn());
 
     await vi.waitFor(() => {
-      expect(service.peekSnapshot(REPO_CWD)?.git.isGit).toBe(false);
+      expect(workspaceRuntimeStore.get(REPO_CWD)?.git.isGit).toBe(false);
       expect(service.getMetrics()).toMatchObject({
         workspaceObservationSetupInFlightCount: 0,
         workspaceRefreshInFlightCount: 0,
@@ -1583,7 +1611,7 @@ describe("WorkspaceGitService checkout observation", () => {
     isGit = true;
     await vi.advanceTimersByTimeAsync(5_000);
     await vi.waitFor(() => {
-      expect(service.peekSnapshot(REPO_CWD)?.git.isGit).toBe(true);
+      expect(workspaceRuntimeStore.get(REPO_CWD)?.git.isGit).toBe(true);
       expect(service.getMetrics()).toMatchObject({
         repositoryTargetCount: 1,
         repositoryWorkspaceLinkCount: 1,
@@ -1620,12 +1648,16 @@ describe("WorkspaceGitService checkout observation", () => {
       getWorkspaceGitSelfHealPhaseMs: () => 1_000_000,
       runGitCommand,
     });
+    const workspaceRuntimeStore = createWorkspaceRuntimeStore();
+    service.onSnapshotUpdated((snapshot) => workspaceRuntimeStore.set(snapshot));
     const subscription = service.registerWorkspace({ cwd: REPO_CWD }, vi.fn());
 
     await vi.waitFor(() => {
-      expect(service.peekSnapshot(REPO_CWD)).not.toBeNull();
+      expect(workspaceRuntimeStore.get(REPO_CWD)).not.toBeNull();
       expect(service.getMetrics().workspaceObservationSetupInFlightCount).toBe(0);
+      expect(service.getMetrics().workspaceRefreshInFlightCount).toBe(0);
     });
+    const statusCallsBeforeError = getCheckoutStatus.mock.calls.length;
     const checkoutWatcher = watcher.records.find((record) => record.directory === REPO_CWD);
     expect(checkoutWatcher).toBeDefined();
 
@@ -1634,10 +1666,10 @@ describe("WorkspaceGitService checkout observation", () => {
     expect(service.getMetrics().watcherErrorCallbackCount).toBe(1);
     await vi.advanceTimersByTimeAsync(1_000);
     await vi.waitFor(() => {
-      expect(getCheckoutStatus).toHaveBeenCalledTimes(2);
+      expect(getCheckoutStatus).toHaveBeenCalledTimes(statusCallsBeforeError + 1);
     });
 
-    expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(1);
+    expect(getCheckoutSnapshotFacts).toHaveBeenCalledTimes(2);
     expect(service.getMetrics().workspaceRefreshQueuedCount).toBe(0);
 
     ignoredDirectories = "node_modules/\nbuild/\n";
@@ -1730,8 +1762,10 @@ describe("WorkspaceGitService checkout observation", () => {
       expect(watcher.subscribe).toHaveBeenCalledTimes(1);
     });
     await vi.advanceTimersByTimeAsync(35_000);
-    expect(service.getMetrics().workingTreeWatchSetupInFlightCount).toBe(0);
-    expect(service.getMetrics().workspaceObservationSetupAdmissionActiveCount).toBe(0);
+    await vi.waitFor(() => {
+      expect(service.getMetrics().workingTreeWatchSetupInFlightCount).toBe(0);
+      expect(service.getMetrics().workspaceObservationSetupAdmissionActiveCount).toBe(0);
+    });
     expect(getWatcherSubscribeCallCount(watcher, REPO_CWD)).toBe(1);
 
     openedSubscription.resolve({
@@ -1742,17 +1776,17 @@ describe("WorkspaceGitService checkout observation", () => {
       expect(service.getMetrics().workspaceObservationSetupInFlightCount).toBe(0);
     });
     const statusCallsAfterSetup = getCheckoutStatus.mock.calls.length;
-    await vi.advanceTimersByTimeAsync(5_000);
-    await vi.waitFor(() => {
-      expect(getCheckoutStatus.mock.calls.length).toBeGreaterThan(statusCallsAfterSetup);
-    });
-    await vi.advanceTimersByTimeAsync(24_000);
+    await vi.advanceTimersByTimeAsync(29_000);
     expect(getWatcherSubscribeCallCount(watcher, REPO_CWD)).toBe(1);
     await vi.advanceTimersByTimeAsync(1_000);
     await vi.waitFor(() => {
       expect(getWatcherSubscribeCallCount(watcher, REPO_CWD)).toBe(2);
     });
     expect(erroredUnsubscribe).toHaveBeenCalledTimes(1);
+    // Recovery schedules a debounced refresh. Advance the fake clock past the debounce
+    // explicitly; vi.waitFor alone runs out of real time before it on a slow runner.
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(getCheckoutStatus.mock.calls.length).toBeGreaterThan(statusCallsAfterSetup);
 
     subscription.unsubscribe();
     service.dispose();
@@ -2635,7 +2669,10 @@ describe("WorkspaceGitService checkout observation", () => {
       getCheckoutShortstat,
       getCheckoutDiff,
     });
+    const workspaceRuntimeStore = createWorkspaceRuntimeStore();
+    service.onSnapshotUpdated((snapshot) => workspaceRuntimeStore.set(snapshot));
     const diffManager = new CheckoutDiffManager({
+      workspaceRuntimeStore: workspaceRuntimeStore,
       logger: createLogger(),
       jagentdeskHome: "/tmp/jagentdesk-home",
       workspaceGitService: service,
@@ -2649,9 +2686,11 @@ describe("WorkspaceGitService checkout observation", () => {
     );
 
     await vi.waitFor(() => {
-      expect(service.peekSnapshot(REPO_CWD)).not.toBeNull();
+      expect(workspaceRuntimeStore.get(REPO_CWD)).not.toBeNull();
       expect(service.getMetrics().workspaceObservationSetupInFlightCount).toBe(0);
+      expect(service.getMetrics().workspaceRefreshInFlightCount).toBe(0);
     });
+    const statusCallsBeforeEvent = getCheckoutStatus.mock.calls.length;
     isDirty = true;
     diffStat = { additions: 7, deletions: 3 };
     diffFiles = [{ path: "tracked.txt", additions: 7, deletions: 3, status: "modified" }];
@@ -2675,7 +2714,7 @@ describe("WorkspaceGitService checkout observation", () => {
         error: null,
       });
     });
-    expect(getCheckoutStatus).toHaveBeenCalledTimes(2);
+    expect(getCheckoutStatus).toHaveBeenCalledTimes(statusCallsBeforeEvent + 1);
 
     diffSubscription.unsubscribe();
     subscription.unsubscribe();

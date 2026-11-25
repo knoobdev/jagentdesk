@@ -1,6 +1,17 @@
+import { MAX_RELAY_WEBSOCKET_MESSAGE_BYTES } from "@jagentdesk/protocol/websocket-message-limit";
 import { resolve, dirname, basename } from "path";
-import { existsSync, realpathSync } from "fs";
-import { open as openFile, readFile, stat as statFile } from "fs/promises";
+import {
+  open as openFile,
+  readFile,
+  stat as statFile,
+  realpath,
+  access,
+  mkdtemp,
+  copyFile,
+  utimes,
+  rm,
+} from "fs/promises";
+import { tmpdir } from "node:os";
 import { setImmediate } from "node:timers/promises";
 import { TTLCache } from "@isaacs/ttlcache";
 import type { CheckoutCommit, CheckoutCommitFile } from "@jagentdesk/protocol/messages";
@@ -31,13 +42,17 @@ import {
 import { parseGitRevParsePath, resolveGitRevParsePath } from "./git-rev-parse-path.js";
 import { runGitCommand, type RunGitCommand } from "./run-git-command.js";
 import { readGitFileContents } from "./git-file-contents.js";
+import { unquoteGitPath } from "./git-quoted-path.js";
 import { isJAgentDeskOwnedWorktreeCwd, resolveJAgentDeskWorktreesBaseRoot } from "./worktree.js";
 import {
   branchNameFromRef,
+  findJAgentDeskWorktreeRootForCwd,
+  hasJAgentDeskWorktreeMetadata,
   getJAgentDeskWorktreeChangeRequestHintForBranch,
   type JAgentDeskWorktreeMetadata,
   readJAgentDeskWorktreeMetadata,
   rebindJAgentDeskWorktreeChangeRequestHint,
+  setJAgentDeskWorktreeBaseRef,
 } from "./worktree-metadata.js";
 const READ_ONLY_GIT_ENV = {
   GIT_OPTIONAL_LOCKS: "0",
@@ -138,8 +153,12 @@ function createShortstatCache(ttlMs: number) {
   });
 }
 
-function getPullRequestStatusCacheKey(cwd: string, headSha: string | null): string {
-  return `${resolve(cwd)}\u0000${headSha ?? ""}`;
+function getPullRequestStatusCacheKey(
+  cwd: string,
+  currentBranch: string | null,
+  headSha: string | null,
+): string {
+  return `${resolve(cwd)}\u0000${currentBranch ?? ""}\u0000${headSha ?? ""}`;
 }
 
 function rememberPullRequestStatus(cacheKey: string, status: PullRequestStatusResult): void {
@@ -201,6 +220,7 @@ interface CheckoutFileChange {
 }
 
 interface CheckoutDiffRefs {
+  indexEnv?: { GIT_INDEX_FILE: string };
   baseRef: string;
   targetRef?: string;
   includeUntracked: boolean;
@@ -309,14 +329,29 @@ function sortBranchSuggestions(
 
 export async function listBranchSuggestions(
   cwd: string,
-  options?: { query?: string; limit?: number },
+  options: { query?: string; limit?: number; refMode?: "exact" } = {},
 ): Promise<BranchSuggestion[]> {
   await requireGitRepo(cwd);
 
-  const requestedLimit = options?.limit ?? 50;
+  const requestedLimit = options.limit ?? 50;
   const limit = Math.max(1, Math.min(200, requestedLimit));
-  const rawQuery = options?.query?.trim().toLowerCase() ?? "";
+  const rawQuery = options.query?.trim().toLowerCase() ?? "";
   const query = normalizeBranchSuggestionName(rawQuery) ?? rawQuery;
+
+  if (options.refMode === "exact") {
+    const refs = await listGitRefs(cwd, "refs");
+    const branches = refs.filter((ref) => {
+      const isBranch = ref.name.startsWith("refs/heads/") || ref.name.startsWith("refs/remotes/");
+      return isBranch && !ref.name.endsWith("/HEAD") && ref.name.toLowerCase().includes(rawQuery);
+    });
+    branches.sort((a, b) => b.committerDate - a.committerDate || a.name.localeCompare(b.name));
+    return branches.slice(0, limit).map((ref) => ({
+      name: ref.name,
+      committerDate: ref.committerDate,
+      hasLocal: ref.name.startsWith("refs/heads/"),
+      hasRemote: ref.name.startsWith("refs/remotes/"),
+    }));
+  }
 
   const [localRefs, remoteRefs] = await Promise.all([
     listGitRefs(cwd, "refs/heads"),
@@ -514,22 +549,18 @@ async function listCheckoutFileChanges(
   const { stdout: nameStatusOut } = await runGitCommand(
     buildGitDiffArgs({
       ignoreWhitespace,
-      extra: ["--name-status", ...getCheckoutDiffRefArgs(refs)],
+      extra: ["-z", "--name-status", ...getCheckoutDiffRefArgs(refs)],
     }),
-    { cwd, envOverlay: READ_ONLY_GIT_ENV },
+    { cwd, envOverlay: { ...READ_ONLY_GIT_ENV, ...refs.indexEnv } },
   );
-  for (const line of nameStatusOut
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean)) {
-    // `--name-status` uses TAB separators, which preserves filenames with spaces.
-    const tabParts = line.split("\t");
-    const rawStatus = (tabParts[0] ?? "").trim();
+  const nameStatusFields = nameStatusOut.split("\0");
+  for (let index = 0; index < nameStatusFields.length; ) {
+    const rawStatus = nameStatusFields[index++];
     if (!rawStatus) continue;
 
     if (rawStatus.startsWith("R") || rawStatus.startsWith("C")) {
-      const oldPath = tabParts[1];
-      const newPath = tabParts[2];
+      const oldPath = nameStatusFields[index++];
+      const newPath = nameStatusFields[index++];
       if (newPath) {
         changes.push({
           path: newPath,
@@ -542,7 +573,7 @@ async function listCheckoutFileChanges(
       continue;
     }
 
-    const path = tabParts[1];
+    const path = nameStatusFields[index++];
     if (!path) continue;
     const code = rawStatus[0];
     changes.push({
@@ -555,16 +586,13 @@ async function listCheckoutFileChanges(
 
   if (refs.includeUntracked) {
     const { stdout: untrackedOut } = await runGitCommand(
-      ["ls-files", "--others", "--exclude-standard"],
+      ["ls-files", "-z", "--others", "--exclude-standard"],
       {
         cwd,
-        envOverlay: READ_ONLY_GIT_ENV,
+        envOverlay: { ...READ_ONLY_GIT_ENV, ...refs.indexEnv },
       },
     );
-    for (const file of untrackedOut
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean)) {
+    for (const file of untrackedOut.split("\0").filter(Boolean)) {
       changes.push({
         path: file,
         status: "U",
@@ -622,22 +650,39 @@ async function tryResolveMergeBase(cwd: string, baseRef: string): Promise<string
 type FileStat = { additions: number; deletions: number; isBinary: boolean } | null;
 
 function normalizeNumstatPath(pathField: string): string {
+  if (/^"(?:\\.|[^"\\])*"$/.test(pathField)) {
+    return unquoteGitPath(pathField);
+  }
+
   const braceRenameMatch = pathField.match(/^(.*)\{(.*) => (.*)\}(.*)$/);
   if (braceRenameMatch) {
     const [, prefix, , renamed, suffix] = braceRenameMatch;
-    return `${prefix}${renamed}${suffix}`;
+    // Moving out of a directory prints `src/{nested => }/a.ts`, so an empty
+    // destination leaves a separator from each side behind.
+    if (!renamed) {
+      return unquoteGitPath(`${prefix}${suffix.slice(1)}`);
+    }
+    return unquoteGitPath(`${prefix}${renamed}${suffix}`);
   }
 
   const inlineRenameMatch = pathField.match(/^(.*) => (.*)$/);
   if (inlineRenameMatch) {
-    return inlineRenameMatch[2] ?? pathField;
+    return unquoteGitPath(inlineRenameMatch[2] ?? pathField);
   }
 
-  return pathField;
+  return unquoteGitPath(pathField);
 }
 
+// Parsed patches need a stable wire format regardless of terminal presentation settings.
+const GIT_PATCH_FORMAT_ARGS = ["--no-ext-diff", "--no-color", "--src-prefix=a/", "--dst-prefix=b/"];
+
 function buildGitDiffArgs(args: { ignoreWhitespace?: boolean; extra: string[] }): string[] {
-  return ["diff", ...(args.ignoreWhitespace ? ["-w"] : []), ...args.extra];
+  return [
+    "diff",
+    ...GIT_PATCH_FORMAT_ARGS,
+    ...(args.ignoreWhitespace ? ["-w"] : []),
+    ...args.extra,
+  ];
 }
 
 const TRACKED_DIFF_NUMSTAT_MAX_BYTES = 2 * 1024 * 1024; // 2MB
@@ -660,32 +705,32 @@ async function getTrackedNumstatByPath(
   const result = await runGitCommand(
     buildGitDiffArgs({
       ignoreWhitespace,
-      extra: ["--numstat", ...getCheckoutDiffRefArgs(refs)],
+      extra: ["-z", "--numstat", ...getCheckoutDiffRefArgs(refs)],
     }),
     {
       cwd,
-      envOverlay: READ_ONLY_GIT_ENV,
+      envOverlay: { ...READ_ONLY_GIT_ENV, ...refs.indexEnv },
       maxOutputBytes: TRACKED_DIFF_NUMSTAT_MAX_BYTES,
       acceptExitCodes: [0],
     },
   );
 
   const stats = new Map<string, FileStat>();
-  const lines = result.stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  for (const line of lines) {
-    const parts = line.split("\t");
+  const records = result.stdout.split("\0");
+  for (let index = 0; index < records.length; index += 1) {
+    const parts = records[index].split("\t");
     if (parts.length < 3) {
       continue;
     }
 
     const additionsField = parts[0] ?? "";
     const deletionsField = parts[1] ?? "";
-    const rawPath = parts.slice(2).join("\t");
-    const path = normalizeNumstatPath(rawPath);
+    let path = parts.slice(2).join("\t");
+    if (!path) {
+      // A rename has an empty path here, followed by separate old/new NUL fields.
+      path = records[index + 2];
+      index += 2;
+    }
 
     if (!path) {
       continue;
@@ -713,23 +758,43 @@ async function getTrackedDiffTextForPath(input: {
   cwd: string;
   refsForDiff: CheckoutDiffRefs;
   path: string;
+  oldPath?: string;
   ignoreWhitespace: boolean;
 }): Promise<{ path: string; text: string; truncated: boolean }> {
+  const paths = input.oldPath ? [input.oldPath, input.path] : [input.path];
   const result = await runGitCommand(
     buildGitDiffArgs({
       ignoreWhitespace: input.ignoreWhitespace,
-      extra: [...getCheckoutDiffRefArgs(input.refsForDiff), "--", `:(literal)${input.path}`],
+      extra: [
+        ...(input.oldPath ? ["--diff-filter=RC"] : []),
+        ...getCheckoutDiffRefArgs(input.refsForDiff),
+        "--",
+        ...paths.map((path) => `:(literal)${path}`),
+      ],
     }),
     {
       cwd: input.cwd,
-      envOverlay: READ_ONLY_GIT_ENV,
+      envOverlay: { ...READ_ONLY_GIT_ENV, ...input.refsForDiff.indexEnv },
       maxOutputBytes: PER_FILE_DIFF_MAX_BYTES,
     },
   );
 
+  // A source path can participate in another rename/copy in the same request.
+  // Return only the requested destination; the filter keeps source edits out of its budget.
+  let text = result.stdout;
+  if (input.oldPath && !result.truncated) {
+    text = result.stdout
+      .split(/(?=^diff --git )/m)
+      .filter((section) => {
+        const hunkStart = section.indexOf("\n@@ ");
+        const header = hunkStart < 0 ? section : section.slice(0, hunkStart);
+        return parseDiff(header)[0]?.path === input.path;
+      })
+      .join("");
+  }
   return {
     path: input.path,
-    text: result.stdout,
+    text,
     truncated: result.truncated,
   };
 }
@@ -752,7 +817,11 @@ async function getTrackedDiffTexts(input: {
         ...input.paths.map((path) => `:(literal)${path}`),
       ],
     }),
-    { cwd: input.cwd, envOverlay: READ_ONLY_GIT_ENV, maxOutputBytes: 8 * PER_FILE_DIFF_MAX_BYTES },
+    {
+      cwd: input.cwd,
+      envOverlay: { ...READ_ONLY_GIT_ENV, ...input.refsForDiff.indexEnv },
+      maxOutputBytes: 8 * PER_FILE_DIFF_MAX_BYTES,
+    },
   );
   const files = new Map<string, { path: string; text: string; truncated: boolean }>();
   if (!result.truncated) {
@@ -841,6 +910,7 @@ export interface CheckoutStatusGitNonJAgentDesk {
   currentBranch: string | null;
   isDirty: boolean;
   baseRef: string | null;
+  baseRefExact?: string | null;
   aheadBehind: AheadBehind | null;
   // Remote-tracking ref for currentBranch, e.g. "refs/remotes/origin/main". Null when the
   // branch has no upstream or git could not resolve it. aheadOfOrigin/behindOfOrigin are
@@ -860,6 +930,7 @@ export interface CheckoutStatusGitJAgentDesk {
   currentBranch: string | null;
   isDirty: boolean;
   baseRef: string;
+  baseRefExact?: string | null;
   aheadBehind: AheadBehind | null;
   upstreamRef: string | null;
   aheadOfOrigin: number | null;
@@ -878,7 +949,7 @@ export type CheckoutDiffResult =
   | { diff: ""; structured: []; diffTooLarge: true };
 
 export interface CheckoutDiffCompare {
-  mode: "uncommitted" | "base";
+  mode: "uncommitted" | "base" | "all";
   baseRef?: string;
   ignoreWhitespace?: boolean;
   includeStructured?: boolean;
@@ -1071,7 +1142,7 @@ async function getMainRepoRootFromCommonDir(
   if (!commonDir) {
     throw new Error("Not in a git repository");
   }
-  const normalized = realpathSync(commonDir);
+  const normalized = await realpath(commonDir);
 
   if (basename(normalized) === ".git") {
     return dirname(normalized);
@@ -1085,9 +1156,19 @@ async function getMainRepoRootFromCommonDir(
     },
   );
   const worktrees = parseWorktreeList(worktreeOut);
+  const jagentdeskPaths = new Set(
+    (
+      await Promise.all(
+        worktrees.map(async (wt) =>
+          (await hasJAgentDeskWorktreeMetadata(wt.path)) ? wt.path : null,
+        ),
+      )
+    ).filter((p) => p !== null),
+  );
   const nonBareNonJAgentDesk = worktrees.filter(
     (wt) =>
       !wt.isBare &&
+      !jagentdeskPaths.has(wt.path) &&
       !isJAgentDeskWorktreePath(wt.path, {
         jagentdeskHome: context?.jagentdeskHome,
         worktreesRoot: context?.worktreesRoot,
@@ -1163,13 +1244,16 @@ export function parseWorktreeList(output: string): GitWorktreeEntry[] {
 
 async function getWorktreePathForBranch(cwd: string, branchName: string): Promise<string | null> {
   try {
-    const { stdout } = await runGitCommand(["worktree", "list", "--porcelain"], {
-      cwd,
-      envOverlay: READ_ONLY_GIT_ENV,
-    });
-    const entries = parseWorktreeList(stdout);
     const ref = branchName.startsWith("refs/heads/") ? branchName : `refs/heads/${branchName}`;
-    return entries.find((entry) => entry.branchRef === ref)?.path ?? null;
+    const { stdout } = await runGitCommand(
+      ["for-each-ref", "--format=%(refname)%00%(worktreepath)%00", ref],
+      { cwd, envOverlay: READ_ONLY_GIT_ENV },
+    );
+    for (const record of stdout.split("\0\n")) {
+      const [reference, worktreePath] = record.split("\0");
+      if (reference === ref) return worktreePath || null;
+    }
+    return null;
   } catch {
     return null;
   }
@@ -1197,7 +1281,7 @@ export async function renameCurrentBranch(
 
   const currentBranch = await getCurrentBranch(cwd);
   if (currentBranch) {
-    rebindJAgentDeskWorktreeChangeRequestHint(worktreeRoot, previousBranch, currentBranch);
+    await rebindJAgentDeskWorktreeChangeRequestHint(worktreeRoot, previousBranch, currentBranch);
   }
   return { previousBranch, currentBranch };
 }
@@ -1217,7 +1301,7 @@ async function getJAgentDeskWorktreeForCwd(
   options: JAgentDeskWorktreeLookupOptions = {},
 ): Promise<JAgentDeskWorktreeForCwd> {
   // Fast-path reject: non-worktree paths do not need expensive ownership checks.
-  if (!/[\\/]worktrees[\\/]/.test(cwd)) {
+  if (!/[\\/]worktrees[\\/]/.test(cwd) && (await findJAgentDeskWorktreeRootForCwd(cwd)) === null) {
     return { isJAgentDeskOwnedWorktree: false };
   }
 
@@ -1242,8 +1326,8 @@ function storedBaseRefFromMetadata(metadata: JAgentDeskWorktreeMetadata | null):
   return metadata?.baseRef ?? metadata?.baseRefName ?? null;
 }
 
-function readJAgentDeskWorktreeBaseRef(worktreeRoot: string): string | null {
-  return storedBaseRefFromMetadata(readJAgentDeskWorktreeMetadata(worktreeRoot));
+async function readJAgentDeskWorktreeBaseRef(worktreeRoot: string): Promise<string | null> {
+  return storedBaseRefFromMetadata(await readJAgentDeskWorktreeMetadata(worktreeRoot));
 }
 
 async function getStoredBaseRefForCwd(
@@ -1253,12 +1337,39 @@ async function getStoredBaseRefForCwd(
   if (context?.facts?.isGit) {
     return context.facts.storedBaseRef;
   }
-  const jagentdeskWorktree = await getJAgentDeskWorktreeForCwd(cwd, { context });
-  if (!jagentdeskWorktree.isJAgentDeskOwnedWorktree) {
-    return null;
-  }
+  const ownership = await getJAgentDeskWorktreeForCwd(cwd, { context });
+  return ownership.isJAgentDeskOwnedWorktree
+    ? readJAgentDeskWorktreeBaseRef(ownership.worktreeRoot)
+    : null;
+}
 
-  return readJAgentDeskWorktreeBaseRef(jagentdeskWorktree.worktreeRoot);
+export async function setCheckoutBaseBranch(input: {
+  cwd: string;
+  baseRef: string;
+  context?: CheckoutContext;
+}): Promise<string> {
+  await requireGitRepo(input.cwd);
+  const ownership = await getJAgentDeskWorktreeForCwd(input.cwd, { context: input.context });
+  if (!ownership.isJAgentDeskOwnedWorktree)
+    throw new Error("Workspace is not a JAgentDesk worktree");
+  const requested = input.baseRef.trim();
+  const qualified = requested.startsWith("refs/");
+  const candidates = qualified
+    ? [requested]
+    : [`refs/heads/${requested}`, `refs/remotes/${requested}`, `refs/remotes/origin/${requested}`];
+  for (const candidate of candidates) {
+    if (!isQualifiedBranchRef(candidate) || candidate.endsWith("/HEAD")) continue;
+    const valid = await runGitCommand(["check-ref-format", candidate], {
+      cwd: input.cwd,
+      acceptExitCodes: [0, 1],
+    });
+    if (valid.exitCode !== 0 || !(await doesGitRefExist(input.cwd, candidate))) continue;
+    const worktreeRoot = await getWorktreeRoot(input.cwd);
+    if (!worktreeRoot) throw new NotGitRepoError(input.cwd);
+    await setJAgentDeskWorktreeBaseRef({ worktreeRoot, baseRef: candidate });
+    return candidate;
+  }
+  throw new Error(`Base branch not found: ${requested}`);
 }
 
 async function getResolvedBaseRefForCwd(
@@ -1325,12 +1436,17 @@ function resolveOperationBaseRef(input: {
   return input.storedBaseRef ?? input.requestedBaseRef ?? input.resolvedBaseRef;
 }
 
+// Untracked files count whatever `status.showUntrackedFiles` says: archive warns from this before
+// it removes a worktree, and a file nobody added yet is still work to lose.
 async function isWorkingTreeDirty(cwd: string, context?: CheckoutContext): Promise<boolean> {
-  const { stdout } = await getRunGitCommand(context)(["status", "--porcelain"], {
-    cwd,
-    envOverlay: READ_ONLY_GIT_ENV,
-    logger: context?.logger,
-  });
+  const { stdout } = await getRunGitCommand(context)(
+    ["status", "--porcelain", "--untracked-files=normal"],
+    {
+      cwd,
+      envOverlay: READ_ONLY_GIT_ENV,
+      logger: context?.logger,
+    },
+  );
   return stdout.trim().length > 0;
 }
 
@@ -1517,7 +1633,12 @@ async function abortGitPullConflictState(cwd: string): Promise<void> {
   const rebaseMergePath = resolve(gitDir, "rebase-merge");
   const rebaseApplyPath = resolve(gitDir, "rebase-apply");
 
-  if (existsSync(mergeHeadPath)) {
+  if (
+    await access(mergeHeadPath).then(
+      () => true,
+      () => false,
+    )
+  ) {
     try {
       await runGitCommand(["merge", "--abort"], { cwd, timeout: 120_000 });
     } catch {
@@ -1525,7 +1646,16 @@ async function abortGitPullConflictState(cwd: string): Promise<void> {
     }
   }
 
-  if (existsSync(rebaseMergePath) || existsSync(rebaseApplyPath)) {
+  if (
+    (await access(rebaseMergePath).then(
+      () => true,
+      () => false,
+    )) ||
+    (await access(rebaseApplyPath).then(
+      () => true,
+      () => false,
+    ))
+  ) {
     try {
       await runGitCommand(["rebase", "--abort"], { cwd, timeout: 120_000 });
     } catch {
@@ -1564,11 +1694,15 @@ export async function resolveRepositoryDefaultBranch(
         );
         return localName;
       } catch {
+        await getRunGitCommand(context)(["show-ref", "--verify", "--quiet", ref], {
+          cwd: repoRoot,
+          envOverlay: READ_ONLY_GIT_ENV,
+        });
         return remoteShort;
       }
     }
   } catch {
-    // ignore
+    // A stale origin/HEAD must fall through to the available local branches.
   }
 
   const { stdout } = await getRunGitCommand(context)(["branch", "--format=%(refname:short)"], {
@@ -1713,7 +1847,11 @@ async function getAheadBehind(
   context?: CheckoutContext,
 ): Promise<AheadBehind | null> {
   const normalizedBaseRef = branchNameFromRef(baseRef);
-  if (!normalizedBaseRef || !currentBranch || normalizedBaseRef === currentBranch) {
+  if (
+    !normalizedBaseRef ||
+    !currentBranch ||
+    (!isQualifiedBranchRef(baseRef) && normalizedBaseRef === currentBranch)
+  ) {
     return null;
   }
   const comparisonBaseRef =
@@ -2042,7 +2180,7 @@ export async function getCheckoutSnapshotFacts(
   }
 
   const jagentdeskWorktreeMetadata = inspected.jagentdeskWorktree.isJAgentDeskOwnedWorktree
-    ? readJAgentDeskWorktreeMetadata(inspected.jagentdeskWorktree.worktreeRoot)
+    ? await readJAgentDeskWorktreeMetadata(inspected.jagentdeskWorktree.worktreeRoot)
     : null;
   const storedBaseRef = storedBaseRefFromMetadata(jagentdeskWorktreeMetadata);
   const resolvedBaseRef = storedBaseRef ?? (await resolveBaseRef(cwd, context));
@@ -2055,7 +2193,8 @@ export async function getCheckoutSnapshotFacts(
   if (
     resolvedBaseRef &&
     inspected.currentBranch &&
-    branchNameFromRef(resolvedBaseRef) !== inspected.currentBranch
+    (isQualifiedBranchRef(resolvedBaseRef) ||
+      branchNameFromRef(resolvedBaseRef) !== inspected.currentBranch)
   ) {
     comparisonBaseRef = await resolveBestComparisonBaseRef(cwd, resolvedBaseRef, context).catch(
       () => null,
@@ -2121,13 +2260,13 @@ export async function getCheckoutSnapshotFacts(
 
 const PER_FILE_DIFF_MAX_BYTES = 1024 * 1024; // 1MB
 const TOTAL_DIFF_MAX_BYTES = 2 * 1024 * 1024; // 2MB
-const RELAY_MAX_FRAME_BYTES = 32 * 1024 * 1024;
 const CHECKOUT_DIFF_FRAME_HEADROOM_BYTES = 1024 * 1024;
 // Temporary until diffs load lazily per file. The JAgentDesk relay's 32 MiB frame limit is
 // binding: string frames are encrypted and base64-encoded. Reserve 1 MiB plaintext for
 // the surrounding WebSocket JSON envelope after inverting that exact wire expansion.
 export const CHECKOUT_DIFF_MAX_STRUCTURED_BYTES =
-  maxBase64EncryptedPlaintextByteLength(RELAY_MAX_FRAME_BYTES) - CHECKOUT_DIFF_FRAME_HEADROOM_BYTES;
+  maxBase64EncryptedPlaintextByteLength(MAX_RELAY_WEBSOCKET_MESSAGE_BYTES) -
+  CHECKOUT_DIFF_FRAME_HEADROOM_BYTES;
 
 interface StructuredDiffAccumulator {
   files: ParsedDiffFile[];
@@ -2300,6 +2439,7 @@ export async function getCheckoutStatus(
       currentBranch,
       isDirty,
       baseRef: displayBaseRef ?? baseRef,
+      baseRefExact: baseRef,
       aheadBehind,
       upstreamRef,
       aheadOfOrigin,
@@ -2318,6 +2458,7 @@ export async function getCheckoutStatus(
     currentBranch,
     isDirty,
     baseRef: displayBaseRef,
+    baseRefExact: baseRef,
     aheadBehind,
     upstreamRef,
     aheadOfOrigin,
@@ -2392,7 +2533,7 @@ function parseRawStatusLine(line: string, statuses: Map<string, CheckoutCommitFi
   if (!path) {
     return;
   }
-  statuses.set(path, status);
+  statuses.set(unquoteGitPath(path), status);
 }
 
 // A `--numstat` line: `<adds>\t<dels>\t<path>` (renames use `old => new`, binary
@@ -2532,7 +2673,10 @@ async function tryResolveCheckoutCommitsBaseRef(
     return null;
   }
   const normalizedBaseRef = branchNameFromRef(baseRef);
-  if (!normalizedBaseRef || normalizedBaseRef === currentBranch) {
+  if (
+    !normalizedBaseRef ||
+    (!isQualifiedBranchRef(baseRef) && normalizedBaseRef === currentBranch)
+  ) {
     return null;
   }
   try {
@@ -2613,6 +2757,60 @@ export async function listCheckoutCommits({
   return { baseRef: comparisonBaseRef, commits };
 }
 
+const commitRenamesCache = new TTLCache<string, Promise<ReadonlyMap<string, string>>>({
+  max: 100,
+  ttl: 60_000,
+  checkAgeOnGet: true,
+});
+
+function getCommitRenames(cwd: string, sha: string): Promise<ReadonlyMap<string, string>> {
+  // Symbolic refs and abbreviated IDs can resolve to a different commit later.
+  if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(sha)) {
+    return readCommitRenames(cwd, sha);
+  }
+  const key = JSON.stringify([cwd, sha]);
+  const cached = commitRenamesCache.get(key);
+  if (cached) {
+    return cached;
+  }
+  const lookup = readCommitRenames(cwd, sha).catch((error: unknown) => {
+    if (commitRenamesCache.get(key) === lookup) {
+      commitRenamesCache.delete(key);
+    }
+    throw error;
+  });
+  // Store the pending lookup too, so concurrent file requests share the scan.
+  commitRenamesCache.set(key, lookup);
+  return lookup;
+}
+
+// Discover renames across the commit before narrowing the patch to a file.
+// --follow also detects copies, which would disagree with history's -M-only list.
+async function readCommitRenames(cwd: string, sha: string): Promise<ReadonlyMap<string, string>> {
+  const result = await runGitCommand(
+    [
+      "show",
+      sha,
+      "--format=",
+      "--diff-merges=first-parent",
+      "--name-status",
+      "-z",
+      "-M",
+      "--diff-filter=R",
+    ],
+    { cwd, envOverlay: READ_ONLY_GIT_ENV },
+  );
+  if (result.truncated) {
+    throw new Error("Commit renames exceeded the git output limit");
+  }
+  const renames = new Map<string, string>();
+  const fields = result.stdout.split("\0");
+  for (let index = 0; index + 2 < fields.length; index += 3) {
+    renames.set(fields[index + 2]!, fields[index + 1]!);
+  }
+  return renames;
+}
+
 /**
  * Fetches the unified diff of a single file as introduced by one commit and
  * parses it into the same {@link ParsedDiffFile} shape the diff subscription
@@ -2629,15 +2827,31 @@ export async function getCommitFileDiff({
   cwd,
   sha,
   path,
+  signal,
 }: {
   cwd: string;
   sha: string;
   path: string;
+  signal?: AbortSignal;
 }): Promise<ParsedDiffFile | null> {
+  const worktreeRoot = await requireGitWorktreeRoot(cwd);
+  const renames = await getCommitRenames(worktreeRoot, sha);
+  const oldPath = renames.get(path);
+  const paths = oldPath === undefined ? [path] : [oldPath, path];
   const { stdout } = await runGitCommand(
-    ["show", sha, "--format=", "--diff-merges=first-parent", "--", path],
+    [
+      "show",
+      sha,
+      "--format=",
+      "--diff-merges=first-parent",
+      "--first-parent",
+      "-M",
+      ...GIT_PATCH_FORMAT_ARGS,
+      "--",
+      ...paths.map((filePath) => `:(literal)${filePath}`),
+    ],
     {
-      cwd,
+      cwd: worktreeRoot,
       envOverlay: READ_ONLY_GIT_ENV,
     },
   );
@@ -2646,13 +2860,14 @@ export async function getCommitFileDiff({
     return null;
   }
 
-  const parsedFiles = await parseAndHighlightDiff(stdout, cwd, {
-    getOldFileContent: (file) => readGitFileContentAtRef(cwd, `${sha}^`, file.path),
-    getNewFileContent: (file) => readGitFileContentAtRef(cwd, sha, file.path),
+  const parsedFiles = await parseAndHighlightDiff(stdout, worktreeRoot, {
+    signal,
+    getOldFileContent: (file) => readGitFileContentAtRef(worktreeRoot, `${sha}^`, file.path),
+    getNewFileContent: (file) => readGitFileContentAtRef(worktreeRoot, sha, file.path),
   });
 
-  // `--` scopes the diff to a single pathspec, so there is at most one real
-  // entry. Pick by path to drop any stray header-only section the parser emits.
+  // Including the rename source lets Git pair it with the destination. Select
+  // the requested entry if another change also matches the source path.
   const file = parsedFiles.find((candidate) => candidate.path === path) ?? null;
   if (!file) {
     return null;
@@ -2705,16 +2920,13 @@ async function countUntrackedAdditions(
 ): Promise<number> {
   try {
     const { stdout } = await getRunGitCommand(context)(
-      ["ls-files", "--others", "--exclude-standard"],
+      ["ls-files", "-z", "--others", "--exclude-standard"],
       {
         cwd,
         envOverlay: READ_ONLY_GIT_ENV,
       },
     );
-    const files = stdout
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean);
+    const files = stdout.split("\0").filter(Boolean);
 
     let additions = 0;
     for (const file of files.slice(0, UNTRACKED_SHORTSTAT_MAX_FILES)) {
@@ -3032,6 +3244,7 @@ export function warmCheckoutShortstatInBackground(
 }
 
 interface AppendStructuredTrackedDiffsInput {
+  signal?: AbortSignal;
   cwd: string;
   trackedChanges: CheckoutFileChange[];
   trackedNumstatByPath: Map<string, FileStat>;
@@ -3047,6 +3260,7 @@ interface AppendStructuredTrackedDiffsInput {
 }
 
 async function buildHighlightedTrackedDiffFile(input: {
+  signal?: AbortSignal;
   cwd: string;
   change: CheckoutFileChange;
   parsedFile: ParsedDiffFile;
@@ -3069,6 +3283,7 @@ async function buildHighlightedTrackedDiffFile(input: {
           : null,
       ]);
   const highlightedFile = await highlightDiffWithFileContent(parsedFile, cwd, {
+    signal: input.signal,
     oldFileContent,
     newFileContent,
   });
@@ -3154,6 +3369,7 @@ async function appendStructuredTrackedDiffs(
       const parsedFile = parsedTrackedByPath.get(change.path);
       if (parsedFile) {
         const file = await buildHighlightedTrackedDiffFile({
+          signal: input.signal,
           cwd,
           change,
           parsedFile,
@@ -3195,6 +3411,7 @@ async function appendStructuredTrackedDiffs(
 }
 
 interface ProcessUntrackedChangeInput {
+  signal?: AbortSignal;
   cwd: string;
   change: CheckoutFileChange;
   ignoreWhitespace: boolean;
@@ -3245,7 +3462,7 @@ async function processUntrackedChange(input: ProcessUntrackedChangeInput): Promi
   }
 
   appendDiff(text);
-  const parsed = await parseAndHighlightDiff(text, cwd);
+  const parsed = await parseAndHighlightDiff(text, cwd, { signal: input.signal });
   const parsedFile =
     parsed[0] ??
     ({
@@ -3306,26 +3523,29 @@ async function processTrackedChanges(
 
   let trackedDiffText = "";
   let trackedDiffBytes = 0;
-  const renamedPaths = new Set(
-    trackedChanges.filter((change) => change.oldPath).map((change) => change.path),
+  const oldPathByPath = new Map(
+    trackedChanges
+      .filter((change) => change.oldPath)
+      .map((change) => [change.path, change.oldPath]),
   );
   for (let start = 0; start < trackedDiffPaths.length; start += TRACKED_DIFF_BATCH_SIZE) {
     const paths = trackedDiffPaths.slice(start, start + TRACKED_DIFF_BATCH_SIZE);
-    // Keep rename/copy path filtering identical to the existing per-file command.
+    // Rename/copy detection needs both paths.
     const ordinary = await getTrackedDiffTexts({
       cwd,
       refsForDiff,
-      paths: paths.filter((path) => !renamedPaths.has(path)),
+      paths: paths.filter((path) => !oldPathByPath.has(path)),
       ignoreWhitespace,
     });
     const renamed = await Promise.all(
       paths
-        .filter((path) => renamedPaths.has(path))
+        .filter((path) => oldPathByPath.has(path))
         .map((path) =>
           getTrackedDiffTextForPath({
             cwd,
             refsForDiff,
             path,
+            oldPath: oldPathByPath.get(path),
             ignoreWhitespace,
           }),
         ),
@@ -3382,23 +3602,98 @@ async function resolveCheckoutDiffRefs(
   const bestBaseRef = await resolveBestComparisonBaseRef(cwd, baseRef);
   return {
     baseRef: (await tryResolveMergeBase(cwd, bestBaseRef)) ?? bestBaseRef,
-    targetRef: "HEAD",
-    includeUntracked: false,
+    targetRef: compare.mode === "base" ? "HEAD" : undefined,
+    includeUntracked: compare.mode === "all",
   };
+}
+
+// Git's working-tree diff ignores files absent from the index, even when they
+// exist in the comparison tree. Restore those entries only in a private index.
+async function prepareAllChangesIndex(cwd: string, baseRef: string) {
+  const untracked = await runGitCommand(["ls-files", "-z", "--others", "--exclude-standard"], {
+    cwd,
+    envOverlay: READ_ONLY_GIT_ENV,
+  });
+  const paths = untracked.stdout.split("\0").filter(Boolean);
+  if (paths.length === 0) return null;
+  let entries = "";
+  for (let start = 0; start < paths.length; start += TRACKED_DIFF_BATCH_SIZE) {
+    const result = await runGitCommand(
+      [
+        "ls-tree",
+        "-r",
+        "-z",
+        baseRef,
+        "--",
+        ...paths.slice(start, start + TRACKED_DIFF_BATCH_SIZE).map((path) => `:(literal)${path}`),
+      ],
+      { cwd, envOverlay: READ_ONLY_GIT_ENV },
+    );
+    entries += result.stdout;
+  }
+  if (!entries) return null;
+  const directory = await mkdtemp(resolve(tmpdir(), "jagentdesk-all-changes-"));
+  const indexFile = resolve(directory, "index");
+  try {
+    const index = await runGitCommand(["rev-parse", "--git-path", "index"], {
+      cwd,
+      envOverlay: READ_ONLY_GIT_ENV,
+    });
+    const indexPath = resolveGitRevParsePath(cwd, index.stdout);
+    if (!indexPath) throw new Error("Git did not return an index path");
+    const { atime, mtimeMs } = await statFile(indexPath);
+    await copyFile(indexPath, indexFile);
+    await runGitCommand(["update-index", "-z", "--index-info"], {
+      cwd,
+      input: entries,
+      envOverlay: { ...READ_ONLY_GIT_ENV, GIT_INDEX_FILE: indexFile },
+    });
+    // A fresh index copy would hide same-size edits saved in its source index's timestamp tick.
+    // update-index also rewrites the private index, so restore the source time after both writes.
+    await utimes(indexFile, atime, Math.floor(mtimeMs / 1000));
+    return { indexFile, cleanup: () => rm(directory, { recursive: true, force: true }) };
+  } catch (error) {
+    await rm(directory, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 export async function getCheckoutDiff(
   cwd: string,
   compare: CheckoutDiffCompare,
   context?: CheckoutContext,
+  signal?: AbortSignal,
 ): Promise<CheckoutDiffResult> {
-  await requireGitRepo(cwd);
+  cwd = await requireGitWorktreeRoot(cwd);
 
   const refsForDiff = await resolveCheckoutDiffRefs(cwd, compare, context);
   if (!refsForDiff) {
     return { diff: "" };
   }
 
+  const index =
+    compare.mode === "all" ? await prepareAllChangesIndex(cwd, refsForDiff.baseRef) : null;
+  try {
+    return await readCheckoutDiff(
+      cwd,
+      compare,
+      {
+        ...refsForDiff,
+        indexEnv: index ? { GIT_INDEX_FILE: index.indexFile } : undefined,
+      },
+      signal,
+    );
+  } finally {
+    await index?.cleanup();
+  }
+}
+
+async function readCheckoutDiff(
+  cwd: string,
+  compare: CheckoutDiffCompare,
+  refsForDiff: CheckoutDiffRefs,
+  signal?: AbortSignal,
+): Promise<CheckoutDiffResult> {
   const ignoreWhitespace = compare.ignoreWhitespace === true;
   let effectiveRefsForDiff = refsForDiff;
   let changes: CheckoutFileChange[];
@@ -3458,6 +3753,7 @@ export async function getCheckoutDiff(
 
   if (compare.includeStructured) {
     const didAppendTrackedDiffs = await appendStructuredTrackedDiffs({
+      signal,
       cwd,
       trackedChanges,
       trackedNumstatByPath: trackedDiff.trackedNumstatByPath,
@@ -3485,6 +3781,7 @@ export async function getCheckoutDiff(
       break;
     }
     const didAppendUntrackedDiff = await processUntrackedChange({
+      signal,
       cwd,
       change,
       ignoreWhitespace,
@@ -3522,13 +3819,13 @@ export async function commitAll(cwd: string, message: string): Promise<void> {
 }
 
 export async function discardChanges(cwd: string, pathspecs: string[]): Promise<void> {
-  await requireGitRepo(cwd);
+  const worktreeRoot = await requireGitWorktreeRoot(cwd);
   if (pathspecs.length === 0) {
     return;
   }
   try {
     await runGitCommand(["--literal-pathspecs", "reset", "-q", "HEAD", "--", ...pathspecs], {
-      cwd,
+      cwd: worktreeRoot,
       timeout: DISCARD_CHANGES_TIMEOUT_MS,
     });
   } catch {
@@ -3536,7 +3833,7 @@ export async function discardChanges(cwd: string, pathspecs: string[]): Promise<
     await runGitCommand(
       ["--literal-pathspecs", "rm", "--cached", "-r", "-q", "--ignore-unmatch", "--", ...pathspecs],
       {
-        cwd,
+        cwd: worktreeRoot,
         timeout: DISCARD_CHANGES_TIMEOUT_MS,
       },
     );
@@ -3548,7 +3845,7 @@ export async function discardChanges(cwd: string, pathspecs: string[]): Promise<
   const status = await runGitCommand(
     ["--literal-pathspecs", "status", "--porcelain=v1", "-z", "--", ...pathspecs],
     {
-      cwd,
+      cwd: worktreeRoot,
       timeout: DISCARD_CHANGES_TIMEOUT_MS,
     },
   );
@@ -3574,13 +3871,13 @@ export async function discardChanges(cwd: string, pathspecs: string[]): Promise<
   }
   if (tracked.length > 0) {
     await runGitCommand(["--literal-pathspecs", "checkout", "-q", "--", ...tracked], {
-      cwd,
+      cwd: worktreeRoot,
       timeout: DISCARD_CHANGES_TIMEOUT_MS,
     });
   }
   if (untracked.length > 0) {
     await runGitCommand(["--literal-pathspecs", "clean", "-fd", "-q", "--", ...untracked], {
-      cwd,
+      cwd: worktreeRoot,
       timeout: DISCARD_CHANGES_TIMEOUT_MS,
     });
   }
@@ -3669,7 +3966,7 @@ export async function mergeToBase(
   const normalizedBaseRef = resolveMergeTargetBranch(baseRef);
   const currentWorktreeRoot = (await getWorktreeRoot(cwd, context)) ?? cwd;
   if (normalizedBaseRef === currentBranch) {
-    return currentWorktreeRoot;
+    throw new Error("Cannot merge a branch into itself");
   }
 
   const baseWorktree = await getWorktreePathForBranch(cwd, normalizedBaseRef);
@@ -4097,8 +4394,11 @@ export async function getPullRequestStatus(
   options?: CheckoutReadCacheOptions,
   context?: CheckoutContext,
 ): Promise<PullRequestStatusResult> {
-  const headSha = await getCurrentHeadSha(cwd, context);
-  const cacheKey = getPullRequestStatusCacheKey(cwd, headSha);
+  const [headSha, head] = await Promise.all([
+    getCurrentHeadSha(cwd, context),
+    context?.facts?.isGit ? context.facts.currentBranch : getCurrentBranch(cwd, context),
+  ]);
+  const cacheKey = getPullRequestStatusCacheKey(cwd, head, headSha);
   if (!options?.force) {
     const cached = pullRequestStatusCache.get(cacheKey);
     if (cached) {
@@ -4111,7 +4411,7 @@ export async function getPullRequestStatus(
     }
   }
 
-  const lookup = getPullRequestStatusUncached(cwd, forgeService, options, context, headSha)
+  const lookup = getPullRequestStatusUncached(cwd, forgeService, head, options, context, headSha)
     .then((status) => {
       pullRequestStatusCache.set(cacheKey, status);
       rememberPullRequestStatus(cacheKey, status);
@@ -4137,6 +4437,7 @@ export async function getPullRequestStatus(
 async function getPullRequestStatusUncached(
   cwd: string,
   forgeService: ForgeService,
+  head: string | null,
   options?: CheckoutReadCacheOptions,
   context?: CheckoutContext,
   headSha?: string | null,
@@ -4146,18 +4447,16 @@ async function getPullRequestStatusUncached(
   if (!context?.facts?.isGit) {
     await requireGitRepo(cwd, context);
   }
-  const head = context?.facts?.isGit
-    ? context.facts.currentBranch
-    : await getCurrentBranch(cwd, context);
   if (!head) {
     return buildPullRequestStatusResult(null, "no_remote");
   }
   try {
     const resolvedLookupTarget = await resolvePullRequestStatusLookupTarget(cwd, head, context);
-    const lookupTarget =
-      headSha && !resolvedLookupTarget.headSha
-        ? { ...resolvedLookupTarget, headSha }
-        : resolvedLookupTarget;
+    const lookupTarget = {
+      ...resolvedLookupTarget,
+      ...(headSha && !resolvedLookupTarget.headSha ? { headSha } : {}),
+      ...(head !== resolvedLookupTarget.headRef ? { currentBranch: head } : {}),
+    };
     let status: CurrentPullRequestStatus | null;
     if (options?.force) {
       const reason = options.reason;

@@ -83,6 +83,42 @@ describe("ClaudeTaskProtocolSource", () => {
     ]);
   });
 
+  it("resumes a child a reopened session restored on its original row", () => {
+    const source = new ClaudeTaskProtocolSource();
+    source.restore([
+      {
+        taskId: "a1730a6215e1f5cf6",
+        id: "toolu_original",
+        presentation: { title: "general-purpose", model: "claude-sonnet-5", effort: "high" },
+      },
+    ]);
+
+    // Restored is not running: a canceled turn and an unannounced frame leave it alone.
+    expect(source.cancelRunningForegroundTasks()).toEqual([]);
+    expect(source.resolveSubagentId("toolu_original")).toBeUndefined();
+
+    expect(
+      source.observe(taskStarted({ tool_use_id: "toolu_resumed", prompt: "Resumed prompt" })),
+    ).toEqual([
+      { kind: "status", id: "toolu_original", status: "running" },
+      {
+        kind: "timeline",
+        id: "toolu_original",
+        item: { type: "user_message", text: "Resumed prompt" },
+      },
+    ]);
+    expect(source.resolveSubagentId("toolu_original")).toBe("toolu_original");
+    expect(source.resolveSubagentId("toolu_resumed")).toBe("toolu_original");
+    expect(
+      source.observeSidechainFrame(
+        { type: "assistant", message: { model: "claude-opus-5" } } as unknown as SDKMessage,
+        "toolu_original",
+      ),
+    ).toEqual([
+      { kind: "subtitle", id: "toolu_original", subtitle: "general-purpose · Opus 5 · High" },
+    ]);
+  });
+
   it("does not re-announce a status that already holds", () => {
     const source = new ClaudeTaskProtocolSource();
     source.observe(taskStarted());
@@ -133,11 +169,35 @@ describe("ClaudeTaskProtocolSource", () => {
     expect(source.isActive).toBe(false);
   });
 
-  it("ignores a workflow run", () => {
+  it("declares a workflow as a provider subagent with a provider-owned Workflow label", () => {
     const source = new ClaudeTaskProtocolSource();
     expect(
-      source.observe(taskStarted({ task_type: "local_workflow", subagent_type: undefined })),
-    ).toEqual([]);
+      source.observe(
+        taskStarted({
+          task_type: "local_workflow",
+          subagent_type: undefined,
+          workflow_name: "jagentdesk-workflow-one-child",
+          description: "Runs one deterministic child and returns its structured result",
+          prompt: "export const meta = {};",
+        }),
+      ),
+    ).toEqual([
+      {
+        kind: "declared",
+        id: "toolu_01DgLoPMW9",
+        toolCallId: "toolu_01DgLoPMW9",
+        title: "Workflow",
+        description: "Runs one deterministic child and returns its structured result",
+      },
+      {
+        kind: "timeline",
+        id: "toolu_01DgLoPMW9",
+        item: {
+          type: "user_message",
+          text: "Runs one deterministic child and returns its structured result",
+        },
+      },
+    ]);
   });
 
   it("accepts a subagent from a release that predates task_type", () => {
@@ -262,6 +322,33 @@ describe("ClaudeTaskProtocolSource", () => {
     } as unknown as SDKMessage);
 
     expect(source.cancelRunningForegroundTasks()).toEqual([]);
+  });
+
+  it("does not cancel a subagent announced as backgrounded at spawn", () => {
+    // Claude sets is_backgrounded on task_started for a child spawned in the background, and
+    // sends no task_updated patch for it.
+    const source = new ClaudeTaskProtocolSource();
+    source.observe(taskStarted({ is_backgrounded: true }));
+
+    expect(source.cancelRunningForegroundTasks()).toEqual([]);
+  });
+
+  it("does not cancel a resumed subagent, which Claude always runs in the background", () => {
+    const source = new ClaudeTaskProtocolSource();
+    source.observe(taskStarted({ tool_use_id: "toolu_original", is_backgrounded: false }));
+    source.observe(taskUpdated("completed"));
+    source.observe(taskStarted({ tool_use_id: "toolu_resumed", is_backgrounded: true }));
+
+    expect(source.cancelRunningForegroundTasks()).toEqual([]);
+  });
+
+  it("still cancels a subagent announced in the foreground", () => {
+    const source = new ClaudeTaskProtocolSource();
+    source.observe(taskStarted({ is_backgrounded: false }));
+
+    expect(source.cancelRunningForegroundTasks()).toEqual([
+      { kind: "status", id: "toolu_01DgLoPMW9", status: "canceled" },
+    ]);
   });
 
   it("still routes a backgrounded subagent that settles after the interrupt", () => {

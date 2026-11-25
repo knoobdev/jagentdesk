@@ -1,7 +1,9 @@
+import { type PluginLifecycle, describeHookWorkspace } from "../../plugins/lifecycle/index.js";
 import { stat } from "node:fs/promises";
+import { type WorkspaceArchiveRestoreRequest } from "../../workspace-archive-service.js";
 import { basename, resolve } from "node:path";
-import type { ProjectCheckoutLitePayload } from "@jagentdesk/protocol/messages";
-import type { Logger } from "pino";
+import { type ProjectCheckoutLitePayload } from "@jagentdesk/protocol/messages";
+import { type Logger } from "pino";
 import {
   generateWorkspaceId,
   initialWorkspacePlacement,
@@ -14,12 +16,15 @@ import {
   type ProjectRegistry,
   type WorkspaceRegistry,
 } from "../../workspace-registry.js";
-import type { WorkspaceGitService } from "../../workspace-git-service.js";
-import type { CreateJAgentDeskWorktreeWorkflowResult } from "../../worktree-session.js";
+import { type WorkspaceGitService } from "../../workspace-git-service.js";
+import { type CreateJAgentDeskWorktreeWorkflowResult } from "../../worktree-session.js";
 import { deriveProjectKey } from "../../project-key.js";
 import { areEquivalentPaths, createRealpathAwarePathMatcher } from "../../../utils/path.js";
+import { type JsonValue } from "@jagentdesk/protocol/agent-types";
 
 export interface ResolveOrCreateWorkspaceIdInput {
+  background?: boolean;
+  callerWorkspaceId?: string;
   createdWorktree: CreateJAgentDeskWorktreeWorkflowResult | null;
   requestedWorkspaceId?: string;
   cwd: string;
@@ -37,15 +42,31 @@ export interface ImportWorkspaceResult<T> {
 }
 
 export interface CreateWorktreeWorkspaceInput {
+  workspaceId?: string;
+
   sourceCwd: string;
+
   projectId?: string;
+
   repoRoot: string;
+
   cwd: string;
+
   worktreeRoot: string;
+
   branch: string | null;
+
   baseBranch: string | null;
+
   title: string | null;
+
+  metadata?: Record<string, JsonValue>;
+
   expectsInitialAgent?: boolean;
+
+  background?: boolean;
+
+  callerWorkspaceId?: string;
 }
 
 export interface WorkspaceProvisioningService {
@@ -53,20 +74,33 @@ export interface WorkspaceProvisioningService {
     input: ImportWorkspaceInput,
     operation: (workspace: PersistedWorkspaceRecord) => Promise<T>,
   ): Promise<ImportWorkspaceResult<T>>;
+
   findOrCreateWorkspaceForDirectory(cwd: string): Promise<PersistedWorkspaceRecord>;
+
   resolveOrCreateWorkspaceIdForCreateAgent(input: ResolveOrCreateWorkspaceIdInput): Promise<string>;
+
   createWorkspaceForDirectory(
     cwd: string,
     title?: string | null,
     projectId?: string,
-    context?: { expectsInitialAgent?: boolean },
+    context?: {
+      expectsInitialAgent?: boolean;
+      workspaceId?: string;
+      metadata?: Record<string, JsonValue>;
+      background?: boolean;
+      callerWorkspaceId?: string;
+    },
   ): Promise<PersistedWorkspaceRecord>;
+
   createWorkspaceForWorktree(
     input: CreateWorktreeWorkspaceInput,
   ): Promise<PersistedWorkspaceRecord>;
+
   findOrCreateProjectForDirectory(cwd: string): Promise<PersistedProjectRecord>;
+
   ensureWorkspaceRecordUnarchived(
     workspace: PersistedWorkspaceRecord,
+    archivedAt?: string | null,
   ): Promise<PersistedWorkspaceRecord>;
 }
 
@@ -87,13 +121,16 @@ export class WorkspaceProvisioningError extends Error {
 }
 
 export function createWorkspaceProvisioningService(deps: {
+  lifecycle?: Pick<PluginLifecycle, "emit">;
+  unarchiveWorkspaceAgents: (request: WorkspaceArchiveRestoreRequest) => Promise<void>;
   serverId?: string;
   workspaceRegistry: WorkspaceRegistry;
   projectRegistry: ProjectRegistry;
-  workspaceGitService: Pick<WorkspaceGitService, "getCheckout" | "getSnapshot" | "peekSnapshot">;
+  workspaceGitService: Pick<WorkspaceGitService, "getCheckout" | "getSnapshot">;
   /** Whether a directory exists at the path. Defaults to the daemon's local file system. */
   isDirectory?: (path: string) => Promise<boolean>;
   logger: Logger;
+  withCheckoutLock?: <T>(root: string, operation: () => Promise<T>) => Promise<T>;
 }): WorkspaceProvisioningService {
   const { serverId, workspaceRegistry, projectRegistry, workspaceGitService, logger } = deps;
   const isDirectory = deps.isDirectory ?? isLocalDirectory;
@@ -202,11 +239,28 @@ export function createWorkspaceProvisioningService(deps: {
     return project;
   }
 
+  async function resolveBackground(input?: {
+    background?: boolean;
+    callerWorkspaceId?: string;
+  }): Promise<boolean> {
+    if (input?.background !== undefined) return input.background;
+    if (!input?.callerWorkspaceId) return false;
+    const callerWorkspace = await workspaceRegistry.get(input.callerWorkspaceId);
+    if (!callerWorkspace) throw new Error(`Caller workspace ${input.callerWorkspaceId} not found`);
+    return callerWorkspace.background;
+  }
+
   async function createWorkspaceForDirectory(
     cwd: string,
     title?: string | null,
     projectId?: string,
-    context?: { expectsInitialAgent?: boolean },
+    context?: {
+      expectsInitialAgent?: boolean;
+      workspaceId?: string;
+      metadata?: Record<string, JsonValue>;
+      background?: boolean;
+      callerWorkspaceId?: string;
+    },
   ): Promise<PersistedWorkspaceRecord> {
     const normalizedCwd = resolve(cwd);
     const checkout = await workspaceGitService.getCheckout(normalizedCwd);
@@ -216,7 +270,9 @@ export function createWorkspaceProvisioningService(deps: {
         await findOrCreateProjectForDirectory(normalizedCwd);
     const timestamp = new Date().toISOString();
     const workspace = createPersistedWorkspaceRecord({
-      workspaceId: generateWorkspaceId(),
+      workspaceId: context?.workspaceId ?? generateWorkspaceId(),
+      metadata: context?.metadata,
+      background: await resolveBackground(context),
       projectId: project.projectId,
       ...initialWorkspacePlacement({ source: "checkout", cwd: normalizedCwd, checkout }),
       title: title?.trim() || null,
@@ -224,6 +280,7 @@ export function createWorkspaceProvisioningService(deps: {
       updatedAt: timestamp,
     });
     await workspaceRegistry.upsert(workspace, context);
+    deps.lifecycle?.emit("workspace.create.after", { workspace: describeHookWorkspace(workspace) });
     return workspace;
   }
 
@@ -241,7 +298,7 @@ export function createWorkspaceProvisioningService(deps: {
     });
     const timestamp = new Date().toISOString();
     const workspace = createPersistedWorkspaceRecord({
-      workspaceId: generateWorkspaceId(),
+      workspaceId: input.workspaceId ?? generateWorkspaceId(),
       projectId: project.projectId,
       ...initialWorkspacePlacement({
         source: "created_worktree",
@@ -252,12 +309,15 @@ export function createWorkspaceProvisioningService(deps: {
         mainRepoRoot: repoRoot,
       }),
       title: input.title,
+      metadata: input.metadata,
       createdAt: timestamp,
       updatedAt: timestamp,
+      background: await resolveBackground(input),
     });
     await workspaceRegistry.upsert(workspace, {
       expectsInitialAgent: input.expectsInitialAgent,
     });
+    deps.lifecycle?.emit("workspace.create.after", { workspace: describeHookWorkspace(workspace) });
     return workspace;
   }
 
@@ -351,6 +411,8 @@ export function createWorkspaceProvisioningService(deps: {
     return (
       await createWorkspaceForDirectory(input.cwd, input.initialTitle, undefined, {
         expectsInitialAgent: true,
+        background: input.background,
+        callerWorkspaceId: input.callerWorkspaceId,
       })
     ).workspaceId;
   }
@@ -373,6 +435,7 @@ export function createWorkspaceProvisioningService(deps: {
 
   async function ensureWorkspaceRecordUnarchived(
     workspace: PersistedWorkspaceRecord,
+    archivedAt = workspace.archivedAt,
   ): Promise<PersistedWorkspaceRecord> {
     const project = await projectRegistry.get(workspace.projectId);
     if (!project) throw new Error(`Unknown project: ${workspace.projectId}`);
@@ -420,9 +483,16 @@ export function createWorkspaceProvisioningService(deps: {
         });
       }
     }
-    if (!next) return workspace;
-    await workspaceRegistry.upsert(next);
-    return next;
+    if (next) await workspaceRegistry.upsert(next);
+    // A canceled archive supplies a modern stamp before the record itself is archived.
+    if (archivedAt) {
+      await deps.unarchiveWorkspaceAgents({
+        workspaceId: workspace.workspaceId,
+        archivedAt,
+        allowLegacyFallback: Boolean(workspace.archivedAt),
+      });
+    }
+    return next ?? workspace;
   }
 
   async function refreshWorkspaceRecord(

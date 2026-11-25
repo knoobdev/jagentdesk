@@ -1,0 +1,13 @@
+{
+  "kind": "builtin",
+  "id": "custom-providers",
+  "name": "Custom API providers",
+  "description": "Configure custom model API providers.",
+  "defaultEnabled": true,
+  "requires": [],
+  "builtinOrder": 6,
+  "builtinEntrypoints": {
+    "server": "server/index.ts",
+    "client": "client/index.tsx"
+  }
+}

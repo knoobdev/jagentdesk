@@ -1,18 +1,44 @@
-// This file predates lint enforcement on it (lefthook lints only staged files, and this large tool
-// registrar was never staged until the Agent Forum change). It carries pre-existing nested-ternary
-// style violations in the forge/kubectl tool builders; disabling the stylistic rule file-wide avoids
-// rewriting unrelated tooling. New code here should still prefer if/else.
-/* oxlint-disable no-nested-ternary */
-import { staticHostSupport, type StaticHostSupport } from "../../host-capabilities/service.js";
-import { randomUUID } from "node:crypto";
-import { mkdir, stat, writeFile } from "node:fs/promises";
-import nodePath from "node:path";
+import { builtinServerRegistry } from "../../plugins/builtin/loaded.js";
+import type {
+  BuiltinDaemonScope,
+  BuiltinHostToolPermissionRequest,
+  BuiltinToolContext,
+} from "../../plugins/builtin/host.js";
+import type { BuiltinCoreServices } from "../../plugins/builtin/services.js";
+import {
+  sendPromptToAgent,
+  enqueueAgentMessage,
+  setupFinishNotification,
+  waitForAgentRunStartWithTimeout,
+} from "../agent-prompt.js";
+import { ActiveTurnBehaviorSchema } from "@jagentdesk/protocol/messages";
+import {
+  createHostResolver,
+  HostOperationRejectedError,
+  type HostOperations,
+  type ToolHosts,
+} from "../host-operations/index.js";
+import type { FinishSubscriptions } from "../remote-finish-subscriptions/index.js";
+import { withSkillInvocation } from "../agent-prompt.js";
+import { AgentActiveTurnBehaviorSchema } from "@jagentdesk/protocol/messages";
+import type { ChangeRequestWatches } from "../change-request-watches/index.js";
+import { changeRequestStatusSchema } from "../../../services/change-request-source.js";
+import { type ManagedAgent, type AgentManager } from "../agent-manager.js";
+import { admitsAgent } from "../directory.js";
+import { type ProviderJAgentDeskToolsPolicy } from "@jagentdesk/protocol/provider-config";
+import { isJAgentDeskToolEnabled } from "../jagentdesk-tool-policy.js";
+import { registerPluginTools } from "./plugin-tools.js";
+import { stat } from "node:fs/promises";
 import { z } from "zod";
+import { type BuiltinPluginId } from "@jagentdesk/protocol/builtin-plugins";
+import { builtinPluginForTool } from "../../plugins/builtin/gates.js";
 import { ensureValidJson } from "../../json-utils.js";
-import type { Logger } from "pino";
-
-import type { AgentMode, AgentProvider } from "../agent-sdk-types.js";
-import type { AgentManager } from "../agent-manager.js";
+import { type Logger } from "pino";
+import {
+  type AgentMode,
+  type AgentProvider,
+  type AgentPermissionResponse,
+} from "../agent-sdk-types.js";
 import {
   AgentFeatureSchema,
   AgentPermissionRequestPayloadSchema,
@@ -20,8 +46,9 @@ import {
   AgentPermissionResponseSchema,
   AgentSnapshotPayloadSchema,
   WorkspaceScriptPayloadSchema,
+  type AgentListItemPayload,
+  type FirstAgentContext,
 } from "../../messages.js";
-import type { AgentListItemPayload } from "../../messages.js";
 import {
   buildStoredAgentPayload,
   toAgentListItemPayload,
@@ -29,8 +56,8 @@ import {
 } from "../agent-projections.js";
 import { curateAgentActivity } from "../activity-curator.js";
 import { selectItemsByProjectedLimit } from "../timeline-projection.js";
-import type { AgentStorage } from "../agent-storage.js";
-import { ensureAgentLoaded } from "../agent-loading.js";
+import { type AgentStorage, type StoredAgentRecord } from "../agent-storage.js";
+import { AgentNotFoundError, ensureAgentLoaded } from "../agent-loading.js";
 import { isStoredAgentProviderAvailable } from "../../persistence-hooks.js";
 import {
   archiveByScope,
@@ -39,13 +66,20 @@ import {
   type ArchiveDependencies,
 } from "../../workspace-archive-service.js";
 import { createAgentCommand, type CreateAgentFromMcpInput } from "../create-agent/create.js";
-import type { VoiceCallerContext, VoiceSpeakHandler } from "../../voice-types.js";
-import type { FirstAgentContext } from "../../messages.js";
+import { inheritWorkspaceBackground } from "../create-agent/intent.js";
+import { type VoiceCallerContext, type VoiceSpeakHandler } from "../../voice-types.js";
 import { everyMsToFiveFieldCron } from "@jagentdesk/protocol/schedule/cadence";
 import { expandUserPath, isSameOrDescendantPath, resolvePathFromBase } from "../../path-utils.js";
-import type { TerminalManager } from "../../../terminal/terminal-manager.js";
-import type { CreateJAgentDeskWorktreeWorkflowFn } from "../../worktree-session.js";
-import type { ScheduleService } from "../../schedule/service.js";
+import { type TerminalManager } from "../../../terminal/terminal-manager.js";
+import { encodeTerminalKeyInput } from "@jagentdesk/protocol/terminal-key-input";
+import { TerminalInputModeTracker } from "@jagentdesk/protocol/terminal-input-mode";
+import { type CreateJAgentDeskWorktreeWorkflowFn } from "../../worktree-session.js";
+import { computeNextRunAt, validateScheduleCadence } from "../../schedule/cron.js";
+import {
+  ScheduleNotFoundError,
+  ScheduleStateConflictError,
+  type ScheduleService,
+} from "../../schedule/service.js";
 import {
   ScheduleRunSchema,
   ScheduleSummarySchema,
@@ -53,7 +87,7 @@ import {
   type ScheduleCadence,
   type UpdateScheduleInput,
 } from "@jagentdesk/protocol/schedule/types";
-import type { ProviderSnapshotManager } from "../provider-snapshot-manager.js";
+import { type ProviderSnapshotManager } from "../provider-snapshot-manager.js";
 import {
   AgentModelSchema,
   AgentProviderEnum,
@@ -67,11 +101,6 @@ import {
   toScheduleSummary,
   waitForAgentWithTimeout,
 } from "../mcp-shared.js";
-import {
-  sendPromptToAgent,
-  setupFinishNotification,
-  waitForAgentRunStartWithTimeout,
-} from "../agent-prompt.js";
 import { respondToAgentPermission } from "../permission-response.js";
 import {
   archiveAgentCommand,
@@ -80,70 +109,58 @@ import {
   setAgentModeCommand,
   updateAgentCommand,
 } from "../lifecycle-command.js";
-import type { ForgeService } from "../../../services/forge-service.js";
-import type { WorkspaceGitService } from "../../workspace-git-service.js";
-import type {
-  PersistedWorkspaceRecord,
-  ProjectRegistry,
-  WorkspaceRegistry,
+import { type ForgeService } from "../../../services/forge-service.js";
+import { type WorkspaceGitService } from "../../workspace-git-service.js";
+import {
+  type PersistedWorkspaceRecord,
+  type ProjectRegistry,
+  type WorkspaceRegistry,
 } from "../../workspace-registry.js";
 import { resolveWorktreeSourceCwd } from "../../workspace-source.js";
-import type { WorkspaceScriptsService } from "../../session/workspace-scripts/workspace-scripts-service.js";
+import { type WorkspaceScriptsService } from "../../session/workspace-scripts/workspace-scripts-service.js";
 import {
   type ArchiveCommandDependencies,
   type CreateJAgentDeskWorktreeCommandInput,
   createJAgentDeskWorktreeCommand,
 } from "../../worktree/commands.js";
-import { registerBrowserTools } from "../../browser-tools/tools.js";
-import type { BrowserToolsBroker } from "../../browser-tools/broker.js";
+import { type BrowserToolsBroker } from "../../browser-tools/broker.js";
+import { type BrowserFingerprintProfile } from "@jagentdesk/protocol/browser-automation/fingerprint-profile";
 import {
-  generateFingerprintProfile,
-  type BrowserFingerprintProfile,
-  type FingerprintOs,
-} from "@jagentdesk/protocol/browser-automation/fingerprint-profile";
-import type {
-  JAgentDeskToolCatalog,
-  JAgentDeskToolConfig,
-  JAgentDeskToolDefinition,
-  JAgentDeskToolExecutionContext,
-  JAgentDeskToolResult,
+  JAgentDeskToolInputError,
+  type JAgentDeskToolCatalog,
+  type JAgentDeskToolConfig,
+  type JAgentDeskToolDefinition,
+  type JAgentDeskToolExecutionContext,
+  type JAgentDeskToolResult,
 } from "./types.js";
 import {
   OrchestrationDissentOutcomeSchema,
   OrchestrationHandbackSchema,
   OrchestrationRouteCategorySchema,
 } from "@jagentdesk/protocol/orchestration";
-import type {
-  OrchestrationAgentContext,
-  OrchestrationRuntime,
+import {
+  type OrchestrationAgentContext,
+  type OrchestrationRuntime,
 } from "../../orchestration/runtime.js";
-import type { AgentForumService } from "../../agent-forum/service.js";
-import { registerForumTools } from "./forum-tools.js";
-import type { ClusterRegistry } from "../../cluster/cluster-registry.js";
-import { registerSshAgentTools, type SshAgentTool } from "../../ssh/environment/agent-tools.js";
-import type { RemoteExecAgentTool } from "../../remote-exec/agent-tools.js";
-import type { CustomProviderAgentTool } from "../../custom-providers/agent-tools.js";
-import type { ArgoCdAgentTool } from "../../argocd/agent-tools.js";
-import type { SideloadAgentTool } from "../../sideload/agent-tools.js";
-import type { JiraAgentTool } from "../../jira/agent-tools.js";
-import type { FigmaAgentTool } from "../../figma/agent-tools.js";
-import type { DatabaseRegistry } from "../../database/database-registry.js";
-import type { DatabaseEngine } from "../../database/database-dto.js";
-import { execCommand } from "../../../utils/spawn.js";
-import { SimulatorService } from "../../simulator/simulator-service.js";
-import { fleetSnapshot } from "../../simulator/simulator-streams.js";
-import { DeviceError } from "../../devices/errors.js";
-import { isPhysicalUdid, type PhysicalDeviceHub } from "../../devices/hub.js";
-import { resolveDeviceTarget, type PhysicalDeviceAccess } from "./sim-device-target.js";
-import { getSharedProxyService, installCaToSimulator } from "../../proxy/proxy-service.js";
-import { fridaAvailability, installFrida, launchAndUnpin } from "../../proxy/frida-control.js";
-import { SimButtonSchema, type SimButton } from "@jagentdesk/protocol/simulator/rpc-schemas";
-import type { ForgeHubService } from "../../session/forge/forge-hub-session.js";
-import type { NativeSkillsService } from "../../skills-native/index.js";
-import { slugifySkillName } from "../../skills-native/frontmatter.js";
-import type { AgentPermissionResponse } from "../agent-sdk-types.js";
+import { type ClusterRegistry } from "../../cluster/cluster-registry.js";
+import { type DatabaseRegistry } from "../../database/database-registry.js";
+import { featuresFromControls } from "@jagentdesk/protocol/option-controls";
+
+// This file predates lint enforcement on it (lefthook lints only staged files, and this large tool
+// registrar was not previously linted). It carries pre-existing nested-ternary
+// style violations in the forge/kubectl tool builders; disabling the stylistic rule file-wide avoids
+// rewriting unrelated tooling. New code here should still prefer if/else.
+/* oxlint-disable no-nested-ternary */
 
 export interface JAgentDeskToolHostDependencies {
+  serverId?: string;
+  hosts?: () => ToolHosts;
+  remoteFinishSubscriptions?: () => FinishSubscriptions;
+  changeRequestWatches?: ChangeRequestWatches;
+  builtinPlugins?: ReadonlySet<BuiltinPluginId>;
+  /** The daemon's built-in feature services; tool installers read their instances from it. */
+  builtinDaemon?: BuiltinDaemonScope;
+  jagentdeskToolPolicy?: ProviderJAgentDeskToolsPolicy;
   agentManager: AgentManager;
   agentStorage: AgentStorage;
   terminalManager?: TerminalManager | null;
@@ -153,7 +170,7 @@ export interface JAgentDeskToolHostDependencies {
   github?: ForgeService;
   workspaceGitService?: Pick<
     WorkspaceGitService,
-    "getSnapshot" | "listWorktrees" | "resolveRepoRoot"
+    "getSnapshot" | "listWorktrees" | "resolveRepoRoot" | "invalidateWorktrees"
   >;
   findWorkspaceIdForCwd?: ArchiveDependencies["findWorkspaceIdForCwd"];
   listActiveWorkspaces?: ArchiveDependencies["listActiveWorkspaces"];
@@ -165,6 +182,7 @@ export interface JAgentDeskToolHostDependencies {
     cwd: string,
     title?: string | null,
     projectId?: string,
+    context?: { background?: boolean; callerWorkspaceId?: string },
   ) => Promise<PersistedWorkspaceRecord>;
   workspaceScripts?: Pick<WorkspaceScriptsService, "list" | "launch" | "stop">;
   markWorkspaceArchiving?: ArchiveDependencies["markWorkspaceArchiving"];
@@ -174,6 +192,7 @@ export interface JAgentDeskToolHostDependencies {
   ensureWorkspaceForCreate?: (
     cwd: string,
     firstAgentContext?: FirstAgentContext,
+    context?: { background?: boolean; callerWorkspaceId?: string },
   ) => Promise<string>;
   browserToolsEnabled?: boolean;
   browserToolsBroker?: BrowserToolsBroker | null;
@@ -184,6 +203,7 @@ export interface JAgentDeskToolHostDependencies {
    * Used for cwd/mode inheritance when agents spawn child agents.
    */
   callerAgentId?: string;
+  callerAgentLabels?: Record<string, string>;
   /**
    * Optional resolver for session-bound speak handlers.
    * Used by hidden voice agents to narrate through daemon-managed TTS.
@@ -191,35 +211,11 @@ export interface JAgentDeskToolHostDependencies {
   resolveSpeakHandler?: (callerAgentId: string) => VoiceSpeakHandler | null;
   resolveCallerContext?: (callerAgentId: string) => VoiceCallerContext | null;
   orchestrationRuntime?: OrchestrationRuntime;
-  // Agent Forum / Team mode (docs/plans/active/agent-forum.md). Lets any agent post to a topic and
-  // manage its tasks via the forum.* tools, mirroring how clusterRegistry backs kubectl_*.
-  agentForumService?: AgentForumService | null;
   clusterRegistry?: ClusterRegistry;
   databaseRegistry?: DatabaseRegistry;
-  // SSH servers (spec 25.11): ssh_* tools and the server-aware docker_* tools that replace the
-  // host-only ones (same names, same behaviour without serverId). Bound per caller agent.
-  sshAgentTools?: (callerAgentId: string | null) => SshAgentTool[];
-  // Remote execution (spec 33.7): remote_* tools; [] when no SSH server has remote tasks enabled.
-  remoteExecAgentTools?: (callerAgentId: string | null) => RemoteExecAgentTool[];
-  // Custom API providers (spec 34.7): provider_* tools; list/test auto-run, mutations raise a card.
-  customProviderAgentTools?: (callerAgentId: string | null) => CustomProviderAgentTool[];
-  // Argo CD (spec 30.4): argocd_* tools bound per caller agent (default instance from its label).
-  argocdAgentTools?: (callerAgentId: string | null) => ArgoCdAgentTool[];
-  /** Sideload tools (spec 26.10); installs raise a permission card. */
-  sideloadAgentTools?: (callerAgentId: string | null) => SideloadAgentTool[];
-  // Jira (spec 29.4): jira_* tools; reads auto-run, writes raise the permission card.
-  jiraAgentTools?: (callerAgentId: string | null) => JiraAgentTool[];
-  // Figma (spec 32.7): figma_* tools; reads auto-run, writes raise the permission card.
-  figmaAgentTools?: (callerAgentId: string | null) => FigmaAgentTool[];
-  // Daemon-wide Forge Hub service (spec 19 / ADR-0015). Lets ANY agent read and
-  // operate GitHub/GitLab/Bitbucket via the forge_* tools, mirroring how
-  // clusterRegistry backs the kubectl_* tools. Single instance so all agents
-  // share one token/connection store.
-  forgeHub?: ForgeHubService;
-  // Native skills service (spec 22). Lets a chat agent author a SKILL.md skill
-  // mid-conversation; its change broadcast (status:skills_changed) surfaces it live
-  // in the Skills screen on every device. Also resolves skillIds on send_agent_prompt.
-  skillsStorage?: Pick<NativeSkillsService, "author" | "getSkill" | "buildInvocationPrefix">;
+  /** Daemon core services handed to built-in feature tool installers. */
+  builtinServices?: BuiltinCoreServices;
+  botAgentTools?: (callerAgentId: string | null) => JAgentDeskToolDefinition[];
   // Daemon-config-backed store for the agentic browser's anti-detect fingerprint
   // profiles. Lets a chat agent create a coherent profile and switch the active one
   // mid-conversation; the config patch broadcasts status:daemon_config_changed, so
@@ -231,8 +227,6 @@ export interface JAgentDeskToolHostDependencies {
     select(id: string | null): void;
     remove(id: string): void;
   };
-  // Spec 27: physical phones/tablets for the sim_* tools (same hub the Sims screen uses).
-  physicalDevices?: PhysicalDeviceHub | null;
   requestHostToolPermission?: (
     agentId: string,
     request: {
@@ -283,6 +277,7 @@ const WorkspaceAutomationSummarySchema = z.object({
   isolation: z.enum(["local", "worktree"]),
   kind: z.enum(["directory", "local_checkout", "worktree"]),
   title: z.string().nullable(),
+  background: z.boolean().optional(),
 });
 
 function toWorkspaceAutomationSummary(workspace: PersistedWorkspaceRecord) {
@@ -293,6 +288,7 @@ function toWorkspaceAutomationSummary(workspace: PersistedWorkspaceRecord) {
     isolation: workspace.kind === "worktree" ? ("worktree" as const) : ("local" as const),
     kind: workspace.kind,
     title: workspace.title,
+    background: workspace.background,
   };
 }
 
@@ -318,7 +314,7 @@ function assertOptionsAbsent(
   message: string,
 ): void {
   if (options.some(([, value]) => value !== undefined)) {
-    throw new Error(message);
+    throw new JAgentDeskToolInputError(message);
   }
 }
 
@@ -354,7 +350,7 @@ function resolveWorkspaceWorktreeTarget(input: WorkspaceWorktreeOptions): Worksp
       };
     case "checkout-branch":
       if (!input.branch) {
-        throw new Error("branch is required for checkout-branch mode");
+        throw new JAgentDeskToolInputError("branch is required for checkout-branch mode");
       }
       assertOptionsAbsent(
         [
@@ -368,7 +364,7 @@ function resolveWorkspaceWorktreeTarget(input: WorkspaceWorktreeOptions): Worksp
       return { action: "checkout", refName: input.branch };
     case "checkout-pr":
       if (input.prNumber === undefined) {
-        throw new Error("prNumber is required for checkout-pr mode");
+        throw new JAgentDeskToolInputError("prNumber is required for checkout-pr mode");
       }
       assertOptionsAbsent(
         [
@@ -444,7 +440,7 @@ function resolveScheduleProviderAndModel(params: {
   const provider = providerInput.slice(0, slashIndex).trim();
   const model = providerInput.slice(slashIndex + 1).trim();
   if (!provider || !model) {
-    throw new Error("provider must be <provider> or <provider>/<model>");
+    throw new JAgentDeskToolInputError("provider must be <provider> or <provider>/<model>");
   }
 
   return {
@@ -461,7 +457,7 @@ function resolveScheduleUpdateProviderAndModel(params: {
   const modelInput = typeof params.model === "string" ? params.model.trim() : params.model;
 
   if (params.model !== undefined && modelInput === "") {
-    throw new Error("model cannot be empty");
+    throw new JAgentDeskToolInputError("model cannot be empty");
   }
 
   if (!providerInput) {
@@ -479,13 +475,13 @@ function resolveScheduleUpdateProviderAndModel(params: {
   const provider = providerInput.slice(0, slashIndex).trim();
   const modelFromProvider = providerInput.slice(slashIndex + 1).trim();
   if (!provider || !modelFromProvider) {
-    throw new Error("provider must be <provider> or <provider>/<model>");
+    throw new JAgentDeskToolInputError("provider must be <provider> or <provider>/<model>");
   }
   if (params.model === null) {
-    throw new Error("provider specifies a model but model is null");
+    throw new JAgentDeskToolInputError("provider specifies a model but model is null");
   }
   if (typeof modelInput === "string" && modelInput !== modelFromProvider) {
-    throw new Error("Conflicting model values provided");
+    throw new JAgentDeskToolInputError("Conflicting model values provided");
   }
 
   return {
@@ -527,26 +523,84 @@ function normalizeScheduleTimeZoneArg(value: string | undefined): string | undef
   return normalizeScheduleCadenceArg(value);
 }
 
+function addScheduleCadenceIssue(
+  input: { cron?: string; timezone?: string },
+  context: z.RefinementCtx,
+): void {
+  const expression = input.cron?.trim();
+  if (!expression) {
+    return;
+  }
+  const cadence: ScheduleCadence = {
+    type: "cron",
+    expression,
+    ...(input.timezone !== undefined ? { timezone: input.timezone.trim() } : {}),
+  };
+  try {
+    validateScheduleCadence(cadence);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    context.addIssue({
+      code: "custom",
+      path: [message.startsWith("Invalid cron time zone:") ? "timezone" : "cron"],
+      message,
+    });
+    return;
+  }
+  try {
+    computeNextRunAt(cadence, new Date());
+  } catch (error) {
+    context.addIssue({
+      code: "custom",
+      path: ["cron"],
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+function parseToolArguments<T>(schema: z.ZodType<T>, input: unknown): T {
+  const result = schema.safeParse(input);
+  if (!result.success) {
+    throw new JAgentDeskToolInputError(result.error.message, result.error.issues);
+  }
+  return result.data;
+}
+
+function addScheduleDurationIssue(value: string, context: z.RefinementCtx): void {
+  try {
+    parseDurationString(value);
+  } catch (error) {
+    context.addIssue({
+      code: "custom",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+const scheduleDurationInputSchema = z.string().superRefine(addScheduleDurationIssue);
+
 function resolveScheduleUpdateCadence(input: ScheduleUpdateToolInput): ScheduleCadence | undefined {
   const every = normalizeScheduleCadenceArg(input.every);
   const cron = normalizeScheduleCadenceArg(input.cron);
   const timeZone = normalizeScheduleTimeZoneArg(input.timezone);
 
   if (every !== undefined && cron !== undefined) {
-    throw new Error("Specify at most one of every or cron");
+    throw new JAgentDeskToolInputError("Specify at most one of every or cron");
   }
   if (timeZone !== undefined && cron === undefined) {
-    throw new Error("timezone can only be used with cron");
+    throw new JAgentDeskToolInputError("timezone can only be used with cron");
   }
   if (every !== undefined) {
     // COMPAT(scheduleEveryInput): accept the old hidden field and canonicalize it before write.
     // Added in v0.2.0; remove after 2027-01-17.
-    const everyMs = parseDurationString(every);
+    const everyMs = parseDurationString(parseToolArguments(scheduleDurationInputSchema, every));
     const expression = everyMsToFiveFieldCron(everyMs);
     if (expression) {
       return { type: "cron", expression };
     }
-    throw new Error(`${every} cannot be represented faithfully by five-field cron`);
+    throw new JAgentDeskToolInputError(
+      `${every} cannot be represented faithfully by five-field cron`,
+    );
   }
   if (cron !== undefined) {
     return {
@@ -560,7 +614,7 @@ function resolveScheduleUpdateCadence(input: ScheduleUpdateToolInput): ScheduleC
 
 function resolveScheduleUpdateExpiresAt(input: ScheduleUpdateToolInput): string | null | undefined {
   if (input.expiresIn !== undefined && input.clearExpires) {
-    throw new Error("Specify at most one of expiresIn or clearExpires");
+    throw new JAgentDeskToolInputError("Specify at most one of expiresIn or clearExpires");
   }
   if (input.expiresIn !== undefined) {
     return new Date(Date.now() + parseDurationString(input.expiresIn)).toISOString();
@@ -621,2701 +675,51 @@ const TerminalSummarySchema = z.object({
   cwd: z.string(),
 });
 
-function resolveTerminalKeyToken(key: string, literal: boolean): string {
+interface TerminalKeyTokenInput {
+  key: string;
+  literal: boolean;
+  preamble: string;
+}
+
+function resolveTerminalKeyToken({ key, literal, preamble }: TerminalKeyTokenInput): string {
   if (literal) {
     return key;
   }
 
-  switch (key) {
-    case "Enter":
-      return "\r";
-    case "Tab":
-      return "\t";
-    case "Escape":
-      return "\u001b";
-    case "Space":
-      return " ";
-    case "BSpace":
-      return "\u007f";
-    case "C-c":
-      return "\u0003";
-    case "C-d":
-      return "\u0004";
-    case "C-z":
-      return "\u001a";
-    case "C-l":
-      return "\u000c";
-    case "C-a":
-      return "\u0001";
-    case "C-e":
-      return "\u0005";
-    default:
-      return key;
+  const match = /^((?:[CMS]-)*)(.+)$/.exec(key);
+  if (!match) {
+    return key;
   }
-}
-
-// Docker container management for agents (team-mode devops/dev/lead spin up + run services
-// themselves). Backed by the host `docker` CLI via execCommand — read tools return output,
-// write tools (run/exec/build/stop/rm) go through the normal tool-approval flow.
-async function runDocker(
-  args: string[],
-  opts?: { cwd?: string; timeoutMs?: number },
-): Promise<JAgentDeskToolResult> {
-  try {
-    const result = await execCommand("docker", args, {
-      cwd: opts?.cwd,
-      timeout: opts?.timeoutMs ?? 120_000,
-      maxBuffer: 8 * 1024 * 1024,
-    });
-    const out = [result.stdout?.trim(), result.stderr?.trim()].filter(Boolean).join("\n").trim();
-    return { content: [{ type: "text", text: out || "(no output)" }] };
-  } catch (err) {
-    const e = err as { stderr?: string; stdout?: string; message?: string };
-    const text = (e.stderr || e.stdout || e.message || String(err)).trim();
-    return { content: [{ type: "text", text: `docker failed: ${text}` }], isError: true };
-  }
-}
-
-function dockerRunArgs(input: {
-  image: string;
-  name?: string;
-  detach?: boolean;
-  ports?: string[];
-  env?: string[];
-  volumes?: string[];
-  command?: string[];
-}): string[] {
-  const args = ["run"];
-  if (input.detach !== false) args.push("-d");
-  if (input.name) args.push("--name", input.name);
-  for (const p of input.ports ?? []) args.push("-p", p);
-  for (const e of input.env ?? []) args.push("-e", e);
-  for (const v of input.volumes ?? []) args.push("-v", v);
-  args.push(input.image);
-  for (const c of input.command ?? []) args.push(c);
-  return args;
-}
-
-function registerDockerTools(params: {
-  registerTool: (
-    name: string,
-    config: JAgentDeskToolConfig,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool handlers are schema-validated at registration boundaries.
-    handler: (input: any, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>,
-  ) => void;
-}): void {
-  const { registerTool } = params;
-
-  registerTool(
-    "docker_ps",
-    {
-      title: "Docker ps",
-      description:
-        "List Docker containers (running, or all with allContainers=true). Auto-approved (read-only).",
-      inputSchema: { allContainers: z.boolean().optional() },
-    },
-    async (input: { allContainers?: boolean }) =>
-      runDocker([
-        "ps",
-        ...(input.allContainers ? ["--all"] : []),
-        "--format",
-        "{{.ID}}  {{.Names}}  {{.Image}}  {{.Status}}  {{.Ports}}",
-      ]),
-  );
-
-  registerTool(
-    "docker_images",
-    {
-      title: "Docker images",
-      description: "List local Docker images. Auto-approved (read-only).",
-      inputSchema: {},
-    },
-    async () => runDocker(["images", "--format", "{{.Repository}}:{{.Tag}}  {{.ID}}  {{.Size}}"]),
-  );
-
-  registerTool(
-    "docker_logs",
-    {
-      title: "Docker logs",
-      description:
-        "Read a container's logs (last `tail` lines, default 200). Auto-approved (read-only).",
-      inputSchema: { container: z.string().min(1), tail: z.number().int().positive().optional() },
-    },
-    async (input: { container: string; tail?: number }) =>
-      runDocker(["logs", "--tail", String(input.tail ?? 200), input.container]),
-  );
-
-  registerTool(
-    "docker_inspect",
-    {
-      title: "Docker inspect",
-      description: "Inspect a container or image (JSON). Auto-approved (read-only).",
-      inputSchema: { target: z.string().min(1) },
-    },
-    async (input: { target: string }) => runDocker(["inspect", input.target]),
-  );
-
-  registerTool(
-    "docker_run",
-    {
-      title: "Docker run",
-      description:
-        "Create + run a container from an image. Detached by default. ports are 'host:container' (e.g. '5432:5432'), env are 'KEY=value', volumes are 'host:container'. Returns the container id. Use this to spin up the services your work needs (a DB, a cache, your app) so the human can see them.",
-      inputSchema: {
-        image: z.string().min(1),
-        name: z.string().optional(),
-        detach: z.boolean().optional(),
-        ports: z.array(z.string()).optional(),
-        env: z.array(z.string()).optional(),
-        volumes: z.array(z.string()).optional(),
-        command: z.array(z.string()).optional(),
-      },
-    },
-    async (input: {
-      image: string;
-      name?: string;
-      detach?: boolean;
-      ports?: string[];
-      env?: string[];
-      volumes?: string[];
-      command?: string[];
-    }) => runDocker(dockerRunArgs(input), { timeoutMs: 180_000 }),
-  );
-
-  registerTool(
-    "docker_exec",
-    {
-      title: "Docker exec",
-      description:
-        "Run a command inside a running container. `command` is argv (e.g. ['psql','-c','SELECT 1']).",
-      inputSchema: { container: z.string().min(1), command: z.array(z.string()).min(1) },
-    },
-    async (input: { container: string; command: string[] }) =>
-      runDocker(["exec", input.container, ...input.command]),
-  );
-
-  registerTool(
-    "docker_build",
-    {
-      title: "Docker build",
-      description:
-        "Build an image from a build context directory (absolute path) and tag it. Optional dockerfile path (relative to context).",
-      inputSchema: {
-        contextPath: z.string().min(1),
-        tag: z.string().min(1),
-        dockerfile: z.string().optional(),
-      },
-    },
-    async (input: { contextPath: string; tag: string; dockerfile?: string }) =>
-      runDocker(
-        [
-          "build",
-          "-t",
-          input.tag,
-          ...(input.dockerfile ? ["-f", input.dockerfile] : []),
-          input.contextPath,
-        ],
-        { timeoutMs: 600_000 },
-      ),
-  );
-
-  registerTool(
-    "docker_stop",
-    {
-      title: "Docker stop",
-      description: "Stop a running container.",
-      inputSchema: { container: z.string().min(1) },
-    },
-    async (input: { container: string }) => runDocker(["stop", input.container]),
-  );
-
-  registerTool(
-    "docker_rm",
-    {
-      title: "Docker rm",
-      description: "Remove a container (force=true to kill+remove a running one).",
-      inputSchema: { container: z.string().min(1), force: z.boolean().optional() },
-    },
-    async (input: { container: string; force?: boolean }) =>
-      runDocker(["rm", ...(input.force ? ["-f"] : []), input.container]),
-  );
-}
-
-// SimFleet — iOS Simulator control for agents. Lets an agent list/boot/drive MANY simulators
-// concurrently (tap/swipe/type via idb, inspect the accessibility tree, screenshot, launch apps,
-// deep-link) and slim them for density, all through the daemon's SimulatorService — the same
-// control plane the human SimFleet UI uses. macOS-only; tools surface a clear error otherwise.
-const simulatorToolService = new SimulatorService();
-
-function textResult(text: string): JAgentDeskToolResult {
-  return { content: [{ type: "text", text: text || "(ok)" }] };
-}
-function simErrorResult(err: unknown): JAgentDeskToolResult {
-  if (err instanceof DeviceError) {
-    return { content: [{ type: "text", text: `${err.code}: ${err.message}` }], isError: true };
-  }
-  const e = err as { stderr?: string; message?: string };
-  return {
-    content: [
-      { type: "text", text: `simulator failed: ${(e.stderr || e.message || String(err)).trim()}` },
-    ],
-    isError: true,
+  const [, modifiers, token] = match;
+  const aliases: Record<string, string> = {
+    Up: "ArrowUp",
+    Down: "ArrowDown",
+    Left: "ArrowLeft",
+    Right: "ArrowRight",
+    BSpace: "Backspace",
+    Space: " ",
   };
-}
-
-// Workbench (intercepting-proxy) tools — the agent drives the same capture sessions and store the
-// human UI shows (getSharedProxyService is a daemon-wide singleton). The agent can tell which
-// simulator a session is bound to via the `udid`/`bundleId` on each session and transaction.
-function registerProxyTools(params: {
-  registerTool: (
-    name: string,
-    config: JAgentDeskToolConfig,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- schema-validated at the boundary.
-    handler: (input: any, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>,
-  ) => void;
-  support: StaticHostSupport;
-}): void {
-  const { registerTool, support } = params;
-  const svc = getSharedProxyService();
-  // Spec 24.5: only offer capture modes this host can run.
-  const captureModes = [
-    "manual",
-    ...(support.proxySystemCapture ? ["system"] : []),
-    ...(support.iosSimulators ? ["frida"] : []),
-  ] as [string, ...string[]];
-
-  registerTool(
-    "proxy_capture_start",
-    {
-      title: "Workbench: start capture",
-      description: `Start an intercepting-proxy capture session and return its listener host:port. Modes on this host: ${captureModes.join(", ")}. mode='manual' points a client at the listener${support.proxySystemCapture ? "; 'system' captures through the macOS system proxy" : ""}${support.iosSimulators ? "; 'frida' binds to a simulator udid+bundleId" : ""}. Returns the session, whose udid tells which simulator it captures.`,
-      inputSchema: {
-        mode: z.enum(captureModes).optional(),
-        udid: z.string().optional(),
-        bundleId: z.string().optional(),
-        label: z.string().optional(),
-      },
-    },
-    async (input: {
-      mode?: "manual" | "system" | "frida";
-      udid?: string;
-      bundleId?: string;
-      label?: string;
-    }) => {
-      try {
-        const session = await svc.captureStart({
-          mode: input.mode ?? "manual",
-          udid: input.udid,
-          bundleId: input.bundleId,
-          label: input.label,
-        });
-        return textResult(JSON.stringify(session, null, 2));
-      } catch (err) {
-        return simErrorResult(err);
-      }
-    },
-  );
-
-  registerTool(
-    "proxy_capture_stop",
-    {
-      title: "Workbench: stop capture",
-      description: "Stop a capture session by id.",
-      inputSchema: { sessionId: z.string() },
-    },
-    async (input: { sessionId: string }) => {
-      try {
-        await svc.captureStop(input.sessionId);
-        return textResult(`stopped ${input.sessionId}`);
-      } catch (err) {
-        return simErrorResult(err);
-      }
-    },
-  );
-
-  registerTool(
-    "proxy_sessions_list",
-    {
-      title: "Workbench: list capture sessions",
-      description:
-        "List capture sessions (id, mode, state, listener, udid, bundleId, transactionCount). Auto-approved (read-only). Use udid/bundleId to see which simulator each session captures.",
-      inputSchema: {},
-    },
-    async () => textResult(JSON.stringify(svc.sessionsList(), null, 2)),
-  );
-
-  registerTool(
-    "proxy_history_query",
-    {
-      title: "Workbench: query HTTP history",
-      description:
-        "Query captured HTTP transactions. Filter by sessionId, host, method, status, or a free-text 'contains'. Auto-approved (read-only).",
-      inputSchema: {
-        sessionId: z.string().optional(),
-        host: z.string().optional(),
-        method: z.string().optional(),
-        status: z.number().optional(),
-        contains: z.string().optional(),
-        limit: z.number().optional(),
-      },
-    },
-    async (input: {
-      sessionId?: string;
-      host?: string;
-      method?: string;
-      status?: number;
-      contains?: string;
-      limit?: number;
-    }) => {
-      const rows = svc.historyQuery({
-        sessionId: input.sessionId ?? null,
-        host: input.host,
-        method: input.method,
-        status: input.status,
-        contains: input.contains,
-        limit: input.limit ?? 100,
-      });
-      return textResult(JSON.stringify(rows, null, 2));
-    },
-  );
-
-  registerTool(
-    "proxy_request_get",
-    {
-      title: "Workbench: get transaction",
-      description:
-        "Get the full request/response for a captured transaction id. Auto-approved (read-only).",
-      inputSchema: { id: z.string() },
-    },
-    async (input: { id: string }) => {
-      const tx = svc.transactionGet(input.id);
-      return tx ? textResult(JSON.stringify(tx, null, 2)) : simErrorResult(new Error("not found"));
-    },
-  );
-
-  registerTool(
-    "proxy_repeater_send",
-    {
-      title: "Workbench: send request (Repeater)",
-      description:
-        "Send an arbitrary HTTP request and return the response (status, headers, body). Like Burp Repeater.",
-      inputSchema: {
-        secure: z.boolean(),
-        host: z.string(),
-        port: z.number(),
-        method: z.string(),
-        path: z.string(),
-        headers: z.array(z.object({ name: z.string(), value: z.string() })).optional(),
-        body: z.string().optional(),
-      },
-    },
-    async (input: {
-      secure: boolean;
-      host: string;
-      port: number;
-      method: string;
-      path: string;
-      headers?: { name: string; value: string }[];
-      body?: string;
-    }) => {
-      try {
-        const tx = await svc.repeaterSend({
-          secure: input.secure,
-          host: input.host,
-          port: input.port,
-          method: input.method,
-          path: input.path,
-          headers: input.headers ?? [],
-          body: Buffer.from(input.body ?? "", "utf8"),
-        });
-        return textResult(JSON.stringify(tx, null, 2));
-      } catch (err) {
-        return simErrorResult(err);
-      }
-    },
-  );
-
-  registerTool(
-    "proxy_intruder_run",
-    {
-      title: "Workbench: run Intruder",
-      description:
-        "Run a Sniper Intruder attack: substitute each payload into the §…§ marker in the request template and report status/length/time per payload (throttled + capped, like Community Edition).",
-      inputSchema: {
-        secure: z.boolean(),
-        host: z.string(),
-        port: z.number(),
-        template: z.string(),
-        payloads: z.array(z.string()),
-      },
-    },
-    async (input: {
-      secure: boolean;
-      host: string;
-      port: number;
-      template: string;
-      payloads: string[];
-    }) => {
-      try {
-        const out = await svc.intruderRun(input);
-        return textResult(JSON.stringify(out, null, 2));
-      } catch (err) {
-        return simErrorResult(err);
-      }
-    },
-  );
-
-  registerTool(
-    "proxy_ca_export",
-    {
-      title: "Workbench: export CA certificate",
-      description:
-        "Return the Workbench root CA certificate (PEM) to trust in a simulator (xcrun simctl keychain booted add-root-cert). Auto-approved (read-only).",
-      inputSchema: {},
-    },
-    async () => textResult(svc.caExportPem()),
-  );
-
-  // Batch installs, Frida unpinning and simulator CA trust act on iOS simulators (macOS
-  // hosts only).
-  if (support.iosSimulators) {
-    registerTool(
-      "sim_install_batch",
+  const inputMode = new TerminalInputModeTracker();
+  inputMode.feed(preamble);
+  const encodedKey = Object.hasOwn(aliases, token) ? aliases[token] : token;
+  return (
+    encodeTerminalKeyInput(
       {
-        title: "Simulator: install app on many",
-        description:
-          "Install a .app or .ipa onto one or more simulators at once. NOTE: a simulator only runs SIMULATOR builds — App Store / device .ipa files (ARM + FairPlay) are rejected. Returns per-simulator ok/error.",
-        inputSchema: {
-          udids: z.array(z.string()).min(1),
-          filePath: z.string(),
-        },
+        key: encodedKey,
+        ctrl: modifiers.includes("C-"),
+        alt: modifiers.includes("M-"),
+        shift: modifiers.includes("S-"),
       },
-      async (input: { udids: string[]; filePath: string }) => {
-        try {
-          const results = await simulatorToolService.installOnMany(input.udids, input.filePath);
-          return textResult(JSON.stringify(results, null, 2));
-        } catch (err) {
-          return simErrorResult(err);
-        }
-      },
-    );
-
-    registerTool(
-      "proxy_frida_available",
-      {
-        title: "Workbench: Frida availability",
-        description:
-          "Report whether the host `frida` CLI is installed (needed for TLS-pinning bypass). Auto-approved (read-only).",
-        inputSchema: {},
-      },
-      async () => textResult(JSON.stringify(await fridaAvailability(), null, 2)),
-    );
-
-    registerTool(
-      "proxy_frida_install",
-      {
-        title: "Workbench: install Frida",
-        description:
-          "Install Frida (frida-tools) on this host via pipx/pip so TLS unpinning works. Use when proxy_frida_available reports frida=false.",
-        inputSchema: {},
-      },
-      async () => textResult(JSON.stringify(await installFrida(), null, 2)),
-    );
-
-    registerTool(
-      "proxy_frida_unpin",
-      {
-        title: "Workbench: Frida TLS unpin",
-        description:
-          "Launch an app on a simulator and attach the generic (app-agnostic) TLS-pinning bypass via Frida. Works for whatever app runs on the simulator. Returns the injected PID.",
-        inputSchema: { udid: z.string(), bundleId: z.string() },
-      },
-      async (input: { udid: string; bundleId: string }) => {
-        try {
-          const handle = await launchAndUnpin({ udid: input.udid, bundleId: input.bundleId });
-          return textResult(`unpinned ${input.bundleId} on ${input.udid} (pid ${handle.pid})`);
-        } catch (err) {
-          return simErrorResult(err);
-        }
-      },
-    );
-
-    registerTool(
-      "proxy_ca_install_sim",
-      {
-        title: "Workbench: trust CA on simulator",
-        description:
-          "Install the Workbench CA into a booted simulator's trust store so its HTTPS is inspectable (xcrun simctl keychain add-root-cert).",
-        inputSchema: { udid: z.string() },
-      },
-      async (input: { udid: string }) => {
-        try {
-          await installCaToSimulator(input.udid, svc.caCertFilePath());
-          return textResult(`CA installed on ${input.udid}`);
-        } catch (err) {
-          return simErrorResult(err);
-        }
-      },
-    );
-  }
-}
-
-function registerSimulatorTools(params: {
-  registerTool: (
-    name: string,
-    config: JAgentDeskToolConfig,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool handlers are schema-validated at registration boundaries.
-    handler: (input: any, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>,
-  ) => void;
-  access: PhysicalDeviceAccess;
-  iosSimulators: boolean;
-}): void {
-  const { registerTool, access } = params;
-  const target = (udid: string, toolName: string) =>
-    resolveDeviceTarget({ udid, toolName, simulators: simulatorToolService, access });
-  // Catalog, lifecycle and density tools exist only for iOS simulators (spec 27.5); hosts without
-  // Xcode do not get them.
-  const registerSimulatorOnly: typeof registerTool = (name, config, handler) => {
-    if (params.iosSimulators) registerTool(name, config, handler);
-  };
-  const refusePhysical = (udid: string, what: string) => {
-    if (isPhysicalUdid(udid)) {
-      throw new DeviceError(
-        "unsupported_on_platform",
-        `${what} is not available on physical devices`,
-      );
-    }
-  };
-
-  registerTool(
-    "sim_list",
-    {
-      title: "Device list",
-      description:
-        "List iOS simulators and physical iPhones/iPads/Android devices on this host (udid, name, kind, runtime, state). Physical devices show connection, control (on/off) and readiness; a device with control off answers control_disabled until the user enables it in Sims. An iPhone with readiness needs_wda/wda_expired already gives screenshots; its first touch tool sets up WebDriverAgent with the Apple account saved in Sideload (apple_account_required when none is saved: ask the user to add one). bootedOnly=true limits to running/connected ones. Auto-approved (read-only).",
-      inputSchema: { bootedOnly: z.boolean().optional() },
-    },
-    async (input: { bootedOnly?: boolean }) => {
-      try {
-        const { availability, devices } = await fleetSnapshot(simulatorToolService, access.hub);
-        const rows = devices
-          .filter((d) => !input.bootedOnly || d.isBooted)
-          .map((d) => {
-            const kind = d.kind ?? "simulator";
-            const physical =
-              kind === "simulator"
-                ? ""
-                : `  ${d.connection ?? "local"}  control ${d.controlEnabled ? "on" : "off"}  ${d.readiness ?? "ready"}`;
-            return `${d.isBooted ? "●" : "○"} ${d.name}  (${d.deviceType})  [${d.runtime}]  ${kind}  ${d.state}${physical}  ${d.udid}`;
-          });
-        const notes: string[] = [];
-        if (!availability.simctl) notes.push("(no Xcode/simctl on this host — no iOS simulators)");
-        else if (!availability.idb && !availability.maestro) {
-          notes.push("(no idb or Maestro — simulator tap/swipe/type disabled)");
-        }
-        return textResult([rows.join("\n") || "(no devices)", ...notes].join("\n"));
-      } catch (err) {
-        return simErrorResult(err);
-      }
-    },
-  );
-
-  registerSimulatorOnly(
-    "sim_device_types",
-    {
-      title: "Simulator device types",
-      description:
-        "List the iOS runtimes installed on this Mac and, for each, the device types that can be created on it (name + identifier). Use before sim_create. family filters to iPhone | iPad | iPod.",
-      inputSchema: { family: z.enum(["iPhone", "iPad", "iPod"]).optional() },
-    },
-    async (input: { family?: "iPhone" | "iPad" | "iPod" }) => {
-      try {
-        const runtimes = await simulatorToolService.catalog();
-        if (runtimes.length === 0) return textResult("(no iOS simulator runtimes installed)");
-        const blocks = runtimes.map((r) => {
-          const types = r.deviceTypes
-            .filter((t) => !input.family || t.productFamily === input.family)
-            .map((t) => `  ${t.name}  ${t.identifier}`);
-          return `${r.name}  ${r.identifier}\n${types.join("\n")}`;
-        });
-        return textResult(blocks.join("\n\n"));
-      } catch (err) {
-        return simErrorResult(err);
-      }
-    },
-  );
-
-  registerSimulatorOnly(
-    "sim_create",
-    {
-      title: "Create simulator",
-      description:
-        "Create a new iOS simulator. deviceType and runtime accept a display name ('iPhone 15 Pro', 'iOS 17.4') or an identifier from sim_device_types; runtime defaults to the newest installed. boot=true boots it headless and waits until ready. Returns the new udid.",
-      inputSchema: {
-        deviceType: z.string().min(1),
-        runtime: z.string().optional(),
-        name: z.string().optional(),
-        boot: z.boolean().optional(),
-      },
-    },
-    async (input: { deviceType: string; runtime?: string; name?: string; boot?: boolean }) => {
-      try {
-        const runtimes = await simulatorToolService.catalog();
-        const want = input.runtime?.trim().toLowerCase();
-        const runtime = want
-          ? runtimes.find(
-              (r) => r.identifier.toLowerCase() === want || r.name.toLowerCase() === want,
-            )
-          : runtimes[0];
-        if (!runtime) {
-          return textResult(
-            `Unknown runtime "${input.runtime ?? ""}". Installed: ${runtimes.map((r) => r.name).join(", ") || "none"}`,
-          );
-        }
-        const wantType = input.deviceType.trim().toLowerCase();
-        const type = runtime.deviceTypes.find(
-          (t) => t.identifier.toLowerCase() === wantType || t.name.toLowerCase() === wantType,
-        );
-        if (!type) {
-          return textResult(
-            `"${input.deviceType}" is not available on ${runtime.name}. Call sim_device_types for the valid names.`,
-          );
-        }
-        const name = input.name?.trim() || type.name;
-        const udid = await simulatorToolService.create(
-          name,
-          type.identifier,
-          runtime.identifier,
-          input.boot ?? false,
-        );
-        return textResult(
-          `created ${name} (${type.name}, ${runtime.name}) ${udid}${input.boot ? " — booted" : ""}`,
-        );
-      } catch (err) {
-        return simErrorResult(err);
-      }
-    },
-  );
-
-  const actionTool = (
-    name: string,
-    action: "boot" | "shutdown" | "erase" | "delete",
-    description: string,
-  ) =>
-    registerSimulatorOnly(
-      name,
-      { title: name, description, inputSchema: { udid: z.string().min(1) } },
-      async (input: { udid: string }) => {
-        try {
-          refusePhysical(input.udid, action);
-          await simulatorToolService.action(input.udid, action);
-          return textResult(`${action} ${input.udid} ok`);
-        } catch (err) {
-          return simErrorResult(err);
-        }
-      },
-    );
-  actionTool("sim_boot", "boot", "Boot an iOS simulator and wait until ready.");
-  actionTool("sim_shutdown", "shutdown", "Shut down a booted iOS simulator.");
-  actionTool("sim_erase", "erase", "Erase a simulator's data + settings (factory reset).");
-  actionTool("sim_delete", "delete", "Delete a simulator permanently.");
-
-  registerTool(
-    "sim_tap",
-    {
-      title: "Simulator tap",
-      description: "Tap at (x, y) in points on a simulator (needs idb or Maestro).",
-      inputSchema: { udid: z.string().min(1), x: z.number(), y: z.number() },
-    },
-    async (input: { udid: string; x: number; y: number }) => {
-      try {
-        await (await target(input.udid, "sim_tap")).tap(input.x, input.y);
-        return textResult(`tapped ${input.x},${input.y}`);
-      } catch (err) {
-        return simErrorResult(err);
-      }
-    },
-  );
-
-  registerTool(
-    "sim_swipe",
-    {
-      title: "Simulator swipe",
-      description:
-        "Swipe from (x1,y1) to (x2,y2) in points; optional durationMs (needs idb or Maestro).",
-      inputSchema: {
-        udid: z.string().min(1),
-        x1: z.number(),
-        y1: z.number(),
-        x2: z.number(),
-        y2: z.number(),
-        durationMs: z.number().int().nonnegative().optional(),
-      },
-    },
-    async (input: {
-      udid: string;
-      x1: number;
-      y1: number;
-      x2: number;
-      y2: number;
-      durationMs?: number;
-    }) => {
-      try {
-        await (
-          await target(input.udid, "sim_swipe")
-        ).swipe(input.x1, input.y1, input.x2, input.y2, input.durationMs);
-        return textResult("swiped");
-      } catch (err) {
-        return simErrorResult(err);
-      }
-    },
-  );
-
-  registerTool(
-    "sim_type",
-    {
-      title: "Simulator type text",
-      description: "Type text into the focused field on a simulator (needs idb or Maestro).",
-      inputSchema: { udid: z.string().min(1), text: z.string() },
-    },
-    async (input: { udid: string; text: string }) => {
-      try {
-        await (await target(input.udid, "sim_type")).inputText(input.text);
-        return textResult("typed");
-      } catch (err) {
-        return simErrorResult(err);
-      }
-    },
-  );
-
-  registerTool(
-    "sim_button",
-    {
-      title: "Simulator hardware button",
-      description: "Press a hardware button: home, lock, side-button, siri, apple-pay (needs idb).",
-      inputSchema: {
-        udid: z.string().min(1),
-        button: z.enum(["home", "lock", "side-button", "siri", "apple-pay"]),
-      },
-    },
-    async (input: { udid: string; button: SimButton }) => {
-      try {
-        await (await target(input.udid, "sim_button")).button(input.button);
-        return textResult(`pressed ${input.button}`);
-      } catch (err) {
-        return simErrorResult(err);
-      }
-    },
-  );
-
-  registerTool(
-    "sim_describe_ui",
-    {
-      title: "Simulator accessibility tree",
-      description:
-        "Dump the on-screen accessibility elements (role, label, identifier, frame). Prefer this over screenshots to locate a control, then tap its frame center — faster and deterministic. Needs idb or Maestro. Auto-approved (read-only).",
-      inputSchema: { udid: z.string().min(1) },
-    },
-    async (input: { udid: string }) => {
-      try {
-        const elements = await (await target(input.udid, "sim_describe_ui")).describeUi();
-        const lines = elements.map(
-          (e) =>
-            `${e.role}${e.label ? ` "${e.label}"` : ""}${e.identifier ? ` #${e.identifier}` : ""} @ ${Math.round(e.x + e.width / 2)},${Math.round(e.y + e.height / 2)} [${Math.round(e.x)},${Math.round(e.y)},${Math.round(e.width)}x${Math.round(e.height)}]${e.enabled ? "" : " (disabled)"}`,
-        );
-        return textResult(lines.join("\n") || "(no elements)");
-      } catch (err) {
-        return simErrorResult(err);
-      }
-    },
-  );
-
-  registerTool(
-    "sim_screenshot",
-    {
-      title: "Simulator screenshot",
-      description: "Capture the simulator screen as an image. Auto-approved (read-only).",
-      inputSchema: { udid: z.string().min(1) },
-    },
-    async (input: { udid: string }) => {
-      try {
-        const shot = await (await target(input.udid, "sim_screenshot")).screenshot();
-        return {
-          content: [
-            { type: "image", data: shot.base64, mimeType: shot.mimeType },
-            { type: "text", text: "screenshot captured" },
-          ],
-        };
-      } catch (err) {
-        return simErrorResult(err);
-      }
-    },
-  );
-
-  registerTool(
-    "sim_install_app",
-    {
-      title: "Simulator install app",
-      description: "Install a .app bundle (absolute path) onto a booted simulator.",
-      inputSchema: { udid: z.string().min(1), appPath: z.string().min(1) },
-    },
-    async (input: { udid: string; appPath: string }) => {
-      try {
-        await (await target(input.udid, "sim_install_app")).installApp(input.appPath);
-        return textResult("installed");
-      } catch (err) {
-        return simErrorResult(err);
-      }
-    },
-  );
-
-  registerTool(
-    "sim_launch_app",
-    {
-      title: "Simulator launch app",
-      description: "Launch an installed app by bundle id; terminateExisting relaunches it.",
-      inputSchema: {
-        udid: z.string().min(1),
-        bundleId: z.string().min(1),
-        terminateExisting: z.boolean().optional(),
-      },
-    },
-    async (input: { udid: string; bundleId: string; terminateExisting?: boolean }) => {
-      try {
-        await (
-          await target(input.udid, "sim_launch_app")
-        ).launchApp(input.bundleId, input.terminateExisting ?? false);
-        return textResult(`launched ${input.bundleId}`);
-      } catch (err) {
-        return simErrorResult(err);
-      }
-    },
-  );
-
-  registerTool(
-    "sim_terminate_app",
-    {
-      title: "Simulator terminate app",
-      description: "Terminate a running app by bundle id.",
-      inputSchema: { udid: z.string().min(1), bundleId: z.string().min(1) },
-    },
-    async (input: { udid: string; bundleId: string }) => {
-      try {
-        await (await target(input.udid, "sim_terminate_app")).terminateApp(input.bundleId);
-        return textResult(`terminated ${input.bundleId}`);
-      } catch (err) {
-        return simErrorResult(err);
-      }
-    },
-  );
-
-  registerTool(
-    "sim_open_url",
-    {
-      title: "Simulator open URL",
-      description: "Open a URL / deep link on a simulator (https:// or a custom scheme).",
-      inputSchema: { udid: z.string().min(1), url: z.string().min(1) },
-    },
-    async (input: { udid: string; url: string }) => {
-      try {
-        await (await target(input.udid, "sim_open_url")).openUrl(input.url);
-        return textResult(`opened ${input.url}`);
-      } catch (err) {
-        return simErrorResult(err);
-      }
-    },
-  );
-
-  registerSimulatorOnly(
-    "sim_slim",
-    {
-      title: "Simulator slim",
-      description:
-        "Disable background daemons on a simulator to free RAM so more simulators fit on this Mac. reboot=true reapplies from a clean boot. Returns the new slim state.",
-      inputSchema: { udid: z.string().min(1), reboot: z.boolean().optional() },
-    },
-    async (input: { udid: string; reboot?: boolean }) => {
-      try {
-        refusePhysical(input.udid, "Slim");
-        const slimState = await simulatorToolService.slim(input.udid, input.reboot ?? false);
-        return textResult(`slimmed → ${slimState}`);
-      } catch (err) {
-        return simErrorResult(err);
-      }
-    },
-  );
-
-  registerSimulatorOnly(
-    "sim_unslim",
-    {
-      title: "Simulator unslim",
-      description: "Re-enable the background daemons a previous slim disabled (restore stock).",
-      inputSchema: { udid: z.string().min(1) },
-    },
-    async (input: { udid: string }) => {
-      try {
-        refusePhysical(input.udid, "Unslim");
-        const slimState = await simulatorToolService.unslim(input.udid);
-        return textResult(`unslimmed → ${slimState}`);
-      } catch (err) {
-        return simErrorResult(err);
-      }
-    },
-  );
-
-  registerTool(
-    "sim_press_button",
-    {
-      title: "Device hardware button",
-      description:
-        "Press a hardware button on a simulator or physical device. iOS: home, lock, volume-up, volume-down (simulators also side-button, siri, apple-pay). Android: home, back, app-switch, volume-up, volume-down, power, lock, rotate. A button the device lacks returns unsupported_on_platform.",
-      inputSchema: { udid: z.string().min(1), button: SimButtonSchema },
-    },
-    async (input: { udid: string; button: SimButton }) => {
-      try {
-        await (await target(input.udid, "sim_press_button")).button(input.button);
-        return textResult(`pressed ${input.button}`);
-      } catch (err) {
-        return simErrorResult(err);
-      }
-    },
-  );
-
-  registerTool(
-    "sim_logs",
-    {
-      title: "Device logs",
-      description:
-        "Read the most recent log lines of a simulator (unified log), Android device (logcat) or iPhone/iPad (syslog). lines defaults to 200 (max 2000).",
-      inputSchema: {
-        udid: z.string().min(1),
-        lines: z.number().int().positive().max(2000).optional(),
-      },
-    },
-    async (input: { udid: string; lines?: number }) => {
-      try {
-        const logs = await (await target(input.udid, "sim_logs")).recentLogs(input.lines ?? 200);
-        return textResult(logs || "(no log lines)");
-      } catch (err) {
-        return simErrorResult(err);
-      }
-    },
-  );
-}
-
-function registerKubectlTools(params: {
-  registerTool: (
-    name: string,
-    config: JAgentDeskToolConfig,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool handlers are schema-validated at registration boundaries.
-    handler: (input: any, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>,
-  ) => void;
-  options: JAgentDeskToolHostDependencies;
-  callerAgentId: string | undefined;
-}): void {
-  const { registerTool, options, callerAgentId } = params;
-
-  registerTool(
-    "kubectl_get",
-    {
-      title: "Kubectl get",
-      description: "Read Kubernetes resources from a connected cluster. Auto-approved (read-only).",
-      inputSchema: {
-        clusterId: z.string().min(1),
-        action: z.enum(["get", "list", "describe", "logs"]),
-        kind: z.string().optional(),
-        namespace: z.string().optional(),
-        name: z.string().optional(),
-      },
-    },
-    async (input: {
-      clusterId: string;
-      action: "get" | "list" | "describe" | "logs";
-      kind?: string;
-      namespace?: string;
-      name?: string;
-    }) => {
-      const client = options.clusterRegistry?.getClient(input.clusterId);
-      if (!client) {
-        return {
-          content: [
-            { type: "text", text: `Cluster not found or not connected: ${input.clusterId}` },
-          ],
-          isError: true,
-        };
-      }
-      let text: string;
-      try {
-        switch (input.action) {
-          case "list": {
-            if (!input.kind) throw new Error("kind is required for list action");
-            const items = await client.listGeneric(input.kind, input.namespace);
-            // Return a COMPACT summary, not the full objects — a namespace of pods
-            // serializes to hundreds of KB (managedFields, full spec/status) and
-            // blows past the MCP result size limit. Use action=get/describe for the
-            // full manifest of a single resource.
-            const summary = items.map((raw) => {
-              const md = (raw.metadata as Record<string, unknown> | undefined) ?? {};
-              const status = (raw.status as Record<string, unknown> | undefined) ?? {};
-              const cs = (status.containerStatuses as Array<{ ready?: boolean }> | undefined) ?? [];
-              const ready = cs.length
-                ? `${cs.filter((c) => c.ready).length}/${cs.length}`
-                : undefined;
-              return {
-                name: md.name,
-                namespace: md.namespace,
-                status: status.phase ?? undefined,
-                ready,
-                replicas: status.readyReplicas ?? status.availableReplicas ?? undefined,
-                created: md.creationTimestamp,
-              };
-            });
-            text = JSON.stringify(
-              {
-                kind: input.kind,
-                namespace: input.namespace ?? "all",
-                count: items.length,
-                items: summary,
-              },
-              null,
-              2,
-            );
-            break;
-          }
-          case "logs": {
-            if (!input.namespace || !input.name)
-              throw new Error("namespace and name are required for logs action");
-            text = await client.getPodLogs(input.namespace, input.name);
-            break;
-          }
-          case "get":
-          case "describe": {
-            if (!input.kind || !input.name)
-              throw new Error("kind and name are required for get/describe action");
-            text = await client.getGeneric(input.kind, input.namespace, input.name);
-            break;
-          }
-          default:
-            throw new Error(`Unknown action: ${input.action}`);
-        }
-      } catch (err) {
-        return {
-          content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
-          isError: true,
-        };
-      }
-      return { content: [{ type: "text", text }] };
-    },
-  );
-
-  registerTool(
-    "kubectl_apply",
-    {
-      title: "Kubectl apply",
-      description:
-        "Write (apply/delete/scale/restart) Kubernetes resources. Requires user approval via permission card.",
-      inputSchema: {
-        clusterId: z.string().min(1),
-        action: z.enum(["apply", "delete", "scale", "restart"]),
-        manifestYaml: z.string().optional(),
-        kind: z.string().optional(),
-        namespace: z.string().optional(),
-        name: z.string().optional(),
-        replicas: z.number().optional(),
-      },
-    },
-    async (
-      input: {
-        clusterId: string;
-        action: "apply" | "delete" | "scale" | "restart";
-        manifestYaml?: string;
-        kind?: string;
-        namespace?: string;
-        name?: string;
-        replicas?: number;
-      },
-      _context: JAgentDeskToolExecutionContext,
-    ) => {
-      if (!callerAgentId) {
-        return {
-          content: [
-            { type: "text", text: "kubectl_apply is only available to agent-scoped tool sessions" },
-          ],
-          isError: true,
-        };
-      }
-      const client = options.clusterRegistry?.getClient(input.clusterId);
-      if (!client) {
-        return {
-          content: [
-            { type: "text", text: `Cluster not found or not connected: ${input.clusterId}` },
-          ],
-          isError: true,
-        };
-      }
-      const description =
-        input.manifestYaml ?? `${input.action} ${input.kind ?? "?"}/${input.name ?? "?"}`;
-      const decision = await options.requestHostToolPermission!(callerAgentId, {
-        name: "kubectl_apply",
-        kind: "tool",
-        title: `${input.action} on ${input.clusterId}`,
-        description,
-        input: input as unknown as Record<string, unknown>,
-      });
-      if (decision.behavior !== "allow") {
-        return { content: [{ type: "text", text: "Denied by user." }], isError: true };
-      }
-      try {
-        const result = await client.applyWrite({
-          kind: input.kind ?? "",
-          namespace: input.namespace,
-          name: input.name ?? "",
-          action: input.action,
-          replicas: input.replicas,
-          manifestYaml: input.manifestYaml,
-          dryRun: false,
-        });
-        return { content: [{ type: "text", text: JSON.stringify(result) }] };
-      } catch (err) {
-        return {
-          content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
-          isError: true,
-        };
-      }
-    },
-  );
-
-  // Lets ANY agent (a workspace/project agent, not just the k8s chat) discover
-  // the clusters connected in the app and their clusterId, so it can then drive
-  // them with kubectl_get/kubectl_apply — the bridge between workspace agents and
-  // the Kubernetes feature.
-  registerTool(
-    "cluster_list",
-    {
-      title: "List Kubernetes clusters",
-      description:
-        "List the Kubernetes clusters connected in the app (clusterId, name, state, node/pod counts). Pass a returned clusterId to kubectl_get/kubectl_apply. Auto-approved (read-only).",
-      inputSchema: {},
-    },
-    async () => {
-      const clusters = options.clusterRegistry?.list() ?? [];
-      const summary = clusters.map((c) => ({
-        clusterId: c.id,
-        name: c.displayName ?? c.contextName,
-        context: c.contextName,
-        state: c.state,
-        nodes: c.nodeCount,
-        pods: c.podCount,
-      }));
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({ count: summary.length, clusters: summary }, null, 2),
-          },
-        ],
-      };
-    },
-  );
-}
-
-// Forge Hub tools (spec 19 / ADR-0015). These mirror the kubectl_* precedent:
-// read tools are auto-approved, write tools are gated behind requestHostToolPermission.
-// The generic ForgeHubService methods are GitHub-only; GitLab/Bitbucket use the
-// *GitLab*/*Bitbucket* variants, so every non-discovery tool takes a `forge` enum
-// and routes with a 3-way branch, matching ForgeHubSession.handle().
-function registerForgeTools(params: {
-  registerTool: (
-    name: string,
-    config: JAgentDeskToolConfig,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool handlers are schema-validated at registration boundaries.
-    handler: (input: any, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>,
-  ) => void;
-  options: JAgentDeskToolHostDependencies;
-  callerAgentId: string | undefined;
-}): void {
-  const { registerTool, options, callerAgentId } = params;
-
-  const forgeUnavailable: JAgentDeskToolResult = {
-    content: [{ type: "text", text: "Forge is not available." }],
-    isError: true,
-  };
-  const forgeEnum = z.enum(["github", "gitlab", "bitbucket"]);
-  const ok = (result: unknown): JAgentDeskToolResult => ({
-    content: [{ type: "text", text: JSON.stringify(result) }],
-  });
-  const fail = (err: unknown): JAgentDeskToolResult => ({
-    content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
-    isError: true,
-  });
-
-  // READ 1: discovery — fans out to all three forges internally, no routing.
-  registerTool(
-    "forge_list_repos",
-    {
-      title: "List forge repositories",
-      description:
-        "List repositories across all connected forge accounts (GitHub/GitLab/Bitbucket). Returns forge,owner,name to pass to other forge_* tools. (read-only, auto-approved)",
-      inputSchema: {
-        query: z.string().optional(),
-        limit: z.number().optional(),
-      },
-    },
-    async (input: { query?: string; limit?: number }) => {
-      if (!options.forgeHub) return forgeUnavailable;
-      try {
-        return ok(await options.forgeHub.listRepos({ query: input.query, limit: input.limit }));
-      } catch (err) {
-        return fail(err);
-      }
-    },
-  );
-
-  // READ 2: pull/merge requests.
-  registerTool(
-    "forge_list_change_requests",
-    {
-      title: "List change requests",
-      description:
-        "List pull requests (GitHub/Bitbucket) or merge requests (GitLab) for a repo. (read-only, auto-approved)",
-      inputSchema: {
-        forge: forgeEnum,
-        owner: z.string(),
-        name: z.string(),
-        state: z.enum(["open", "draft", "merged", "closed", "all"]).optional(),
-        limit: z.number().optional(),
-      },
-    },
-    async (input: {
-      forge: "github" | "gitlab" | "bitbucket";
-      owner: string;
-      name: string;
-      state?: "open" | "draft" | "merged" | "closed" | "all";
-      limit?: number;
-    }) => {
-      if (!options.forgeHub) return forgeUnavailable;
-      const arg = { owner: input.owner, name: input.name, state: input.state, limit: input.limit };
-      try {
-        return ok(
-          input.forge === "github"
-            ? await options.forgeHub.listChangeRequests(arg)
-            : input.forge === "gitlab"
-              ? await options.forgeHub.listGitLabChangeRequests(arg)
-              : await options.forgeHub.listBitbucketChangeRequests(arg),
-        );
-      } catch (err) {
-        return fail(err);
-      }
-    },
-  );
-
-  // READ 3: changed files of a change request.
-  registerTool(
-    "forge_get_change_request_files",
-    {
-      title: "Get change request files",
-      description: "List the changed files of a pull/merge request. (read-only, auto-approved)",
-      inputSchema: {
-        forge: forgeEnum,
-        owner: z.string(),
-        name: z.string(),
-        number: z.number(),
-      },
-    },
-    async (input: {
-      forge: "github" | "gitlab" | "bitbucket";
-      owner: string;
-      name: string;
-      number: number;
-    }) => {
-      if (!options.forgeHub) return forgeUnavailable;
-      const arg = { owner: input.owner, name: input.name, number: input.number };
-      try {
-        return ok(
-          input.forge === "github"
-            ? await options.forgeHub.getChangeRequestFiles(arg)
-            : input.forge === "gitlab"
-              ? await options.forgeHub.getGitLabChangeRequestFiles(arg)
-              : await options.forgeHub.getBitbucketChangeRequestFiles(arg),
-        );
-      } catch (err) {
-        return fail(err);
-      }
-    },
-  );
-
-  // READ 4: CI pipeline runs.
-  registerTool(
-    "forge_list_pipelines",
-    {
-      title: "List pipelines",
-      description: "List recent CI pipeline runs for a repo. (read-only, auto-approved)",
-      inputSchema: {
-        forge: forgeEnum,
-        owner: z.string(),
-        name: z.string(),
-        limit: z.number().optional(),
-      },
-    },
-    async (input: {
-      forge: "github" | "gitlab" | "bitbucket";
-      owner: string;
-      name: string;
-      limit?: number;
-    }) => {
-      if (!options.forgeHub) return forgeUnavailable;
-      const arg = { owner: input.owner, name: input.name, limit: input.limit };
-      try {
-        return ok(
-          input.forge === "github"
-            ? await options.forgeHub.listPipelines(arg)
-            : input.forge === "gitlab"
-              ? await options.forgeHub.listGitLabPipelines(arg)
-              : await options.forgeHub.listBitbucketPipelines(arg),
-        );
-      } catch (err) {
-        return fail(err);
-      }
-    },
-  );
-
-  // READ 5: issues.
-  registerTool(
-    "forge_list_issues",
-    {
-      title: "List issues",
-      description: "List issues for a repo. (read-only, auto-approved)",
-      inputSchema: {
-        forge: forgeEnum,
-        owner: z.string(),
-        name: z.string(),
-        state: z.enum(["open", "closed", "all"]).optional(),
-        limit: z.number().optional(),
-      },
-    },
-    async (input: {
-      forge: "github" | "gitlab" | "bitbucket";
-      owner: string;
-      name: string;
-      state?: "open" | "closed" | "all";
-      limit?: number;
-    }) => {
-      if (!options.forgeHub) return forgeUnavailable;
-      const arg = { owner: input.owner, name: input.name, state: input.state, limit: input.limit };
-      try {
-        return ok(
-          input.forge === "github"
-            ? await options.forgeHub.listIssues(arg)
-            : input.forge === "gitlab"
-              ? await options.forgeHub.listGitLabIssues(arg)
-              : await options.forgeHub.listBitbucketIssues(arg),
-        );
-      } catch (err) {
-        return fail(err);
-      }
-    },
-  );
-
-  // READ 6: file contents at a ref. The service methods require a ref; default to
-  // "HEAD" (the default branch tip) when the caller omits one.
-  registerTool(
-    "forge_read_file",
-    {
-      title: "Read forge file",
-      description:
-        "Read a file's contents from a repo at a ref (defaults to HEAD). (read-only, auto-approved)",
-      inputSchema: {
-        forge: forgeEnum,
-        owner: z.string(),
-        name: z.string(),
-        path: z.string(),
-        ref: z.string().optional(),
-      },
-    },
-    async (input: {
-      forge: "github" | "gitlab" | "bitbucket";
-      owner: string;
-      name: string;
-      path: string;
-      ref?: string;
-    }) => {
-      if (!options.forgeHub) return forgeUnavailable;
-      const arg = {
-        owner: input.owner,
-        name: input.name,
-        path: input.path,
-        ref: input.ref ?? "HEAD",
-      };
-      try {
-        return ok(
-          input.forge === "github"
-            ? await options.forgeHub.getFile(arg)
-            : input.forge === "gitlab"
-              ? await options.forgeHub.getGitLabFile(arg)
-              : await options.forgeHub.getBitbucketFile(arg),
-        );
-      } catch (err) {
-        return fail(err);
-      }
-    },
-  );
-
-  // READ 7: commits.
-  registerTool(
-    "forge_list_commits",
-    {
-      title: "List commits",
-      description: "List recent commits for a repo. (read-only, auto-approved)",
-      inputSchema: {
-        forge: forgeEnum,
-        owner: z.string(),
-        name: z.string(),
-        limit: z.number().optional(),
-      },
-    },
-    async (input: {
-      forge: "github" | "gitlab" | "bitbucket";
-      owner: string;
-      name: string;
-      limit?: number;
-    }) => {
-      if (!options.forgeHub) return forgeUnavailable;
-      const arg = { owner: input.owner, name: input.name, limit: input.limit };
-      try {
-        return ok(
-          input.forge === "github"
-            ? await options.forgeHub.listCommits(arg)
-            : input.forge === "gitlab"
-              ? await options.forgeHub.listGitLabCommits(arg)
-              : await options.forgeHub.listBitbucketCommits(arg),
-        );
-      } catch (err) {
-        return fail(err);
-      }
-    },
-  );
-
-  // WRITE 8: comment on an issue. Gated behind user approval like kubectl_apply.
-  registerTool(
-    "forge_comment_issue",
-    {
-      title: "Comment on issue",
-      description: "Post a comment on an issue. Requires user approval via permission card.",
-      inputSchema: {
-        forge: forgeEnum,
-        owner: z.string(),
-        name: z.string(),
-        number: z.number(),
-        body: z.string(),
-      },
-    },
-    async (
-      input: {
-        forge: "github" | "gitlab" | "bitbucket";
-        owner: string;
-        name: string;
-        number: number;
-        body: string;
-      },
-      _context: JAgentDeskToolExecutionContext,
-    ) => {
-      if (!options.forgeHub) return forgeUnavailable;
-      if (!callerAgentId) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "forge_comment_issue is only available to agent-scoped tool sessions",
-            },
-          ],
-          isError: true,
-        };
-      }
-      const decision = await options.requestHostToolPermission!(callerAgentId, {
-        name: "forge_comment_issue",
-        kind: "tool",
-        title: `Comment on ${input.forge} ${input.owner}/${input.name}#${input.number}`,
-        description: input.body,
-        input: input as unknown as Record<string, unknown>,
-      });
-      if (decision.behavior !== "allow") {
-        return { content: [{ type: "text", text: "Denied by user." }], isError: true };
-      }
-      const arg = {
-        owner: input.owner,
-        name: input.name,
-        number: input.number,
-        body: input.body,
-      };
-      try {
-        return ok(
-          input.forge === "github"
-            ? await options.forgeHub.commentIssue(arg)
-            : input.forge === "gitlab"
-              ? await options.forgeHub.commentGitLabIssue(arg)
-              : await options.forgeHub.commentBitbucketIssue(arg),
-        );
-      } catch (err) {
-        return fail(err);
-      }
-    },
-  );
-
-  // WRITE 9: create an issue.
-  registerTool(
-    "forge_create_issue",
-    {
-      title: "Create issue",
-      description: "Create a new issue. Requires user approval via permission card.",
-      inputSchema: {
-        forge: forgeEnum,
-        owner: z.string(),
-        name: z.string(),
-        title: z.string(),
-        body: z.string().optional(),
-      },
-    },
-    async (
-      input: {
-        forge: "github" | "gitlab" | "bitbucket";
-        owner: string;
-        name: string;
-        title: string;
-        body?: string;
-      },
-      _context: JAgentDeskToolExecutionContext,
-    ) => {
-      if (!options.forgeHub) return forgeUnavailable;
-      if (!callerAgentId) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "forge_create_issue is only available to agent-scoped tool sessions",
-            },
-          ],
-          isError: true,
-        };
-      }
-      const decision = await options.requestHostToolPermission!(callerAgentId, {
-        name: "forge_create_issue",
-        kind: "tool",
-        title: `Create issue in ${input.forge} ${input.owner}/${input.name}`,
-        description: input.title,
-        input: input as unknown as Record<string, unknown>,
-      });
-      if (decision.behavior !== "allow") {
-        return { content: [{ type: "text", text: "Denied by user." }], isError: true };
-      }
-      const arg = {
-        owner: input.owner,
-        name: input.name,
-        title: input.title,
-        body: input.body,
-      };
-      try {
-        return ok(
-          input.forge === "github"
-            ? await options.forgeHub.createIssue(arg)
-            : input.forge === "gitlab"
-              ? await options.forgeHub.createGitLabIssue(arg)
-              : await options.forgeHub.createBitbucketIssue(arg),
-        );
-      } catch (err) {
-        return fail(err);
-      }
-    },
-  );
-
-  // WRITE 10: rerun a pipeline. Bitbucket has no rerun.
-  registerTool(
-    "forge_rerun_pipeline",
-    {
-      title: "Rerun pipeline",
-      description:
-        "Rerun a CI pipeline run (GitHub/GitLab only). Requires user approval via permission card.",
-      inputSchema: {
-        forge: forgeEnum,
-        owner: z.string(),
-        name: z.string(),
-        runId: z.string(),
-      },
-    },
-    async (
-      input: {
-        forge: "github" | "gitlab" | "bitbucket";
-        owner: string;
-        name: string;
-        runId: string;
-      },
-      _context: JAgentDeskToolExecutionContext,
-    ) => {
-      if (!options.forgeHub) return forgeUnavailable;
-      if (!callerAgentId) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "forge_rerun_pipeline is only available to agent-scoped tool sessions",
-            },
-          ],
-          isError: true,
-        };
-      }
-      if (input.forge === "bitbucket") {
-        return {
-          content: [{ type: "text", text: "Rerun is not supported for Bitbucket pipelines." }],
-          isError: true,
-        };
-      }
-      const decision = await options.requestHostToolPermission!(callerAgentId, {
-        name: "forge_rerun_pipeline",
-        kind: "tool",
-        title: `Rerun ${input.forge} pipeline ${input.runId}`,
-        description: `${input.owner}/${input.name} run ${input.runId}`,
-        input: input as unknown as Record<string, unknown>,
-      });
-      if (decision.behavior !== "allow") {
-        return { content: [{ type: "text", text: "Denied by user." }], isError: true };
-      }
-      const arg = { owner: input.owner, name: input.name, runId: input.runId };
-      try {
-        return ok(
-          input.forge === "github"
-            ? await options.forgeHub.rerunPipeline(arg)
-            : await options.forgeHub.rerunGitLabPipeline(arg),
-        );
-      } catch (err) {
-        return fail(err);
-      }
-    },
-  );
-
-  // WRITE 11: merge a change request. All three merge methods take `method: ForgeMergeMethod`
-  // (z.enum(["merge","squash","rebase"])).
-  registerTool(
-    "forge_merge_change_request",
-    {
-      title: "Merge change request",
-      description: "Merge a pull/merge request. Requires user approval via permission card.",
-      inputSchema: {
-        forge: forgeEnum,
-        owner: z.string(),
-        name: z.string(),
-        number: z.number(),
-        method: z.enum(["merge", "squash", "rebase"]).optional(),
-      },
-    },
-    async (
-      input: {
-        forge: "github" | "gitlab" | "bitbucket";
-        owner: string;
-        name: string;
-        number: number;
-        method?: "merge" | "squash" | "rebase";
-      },
-      _context: JAgentDeskToolExecutionContext,
-    ) => {
-      if (!options.forgeHub) return forgeUnavailable;
-      if (!callerAgentId) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "forge_merge_change_request is only available to agent-scoped tool sessions",
-            },
-          ],
-          isError: true,
-        };
-      }
-      const decision = await options.requestHostToolPermission!(callerAgentId, {
-        name: "forge_merge_change_request",
-        kind: "tool",
-        title: `Merge ${input.forge} ${input.owner}/${input.name}#${input.number}`,
-        description: `method=${input.method ?? "merge"}`,
-        input: input as unknown as Record<string, unknown>,
-      });
-      if (decision.behavior !== "allow") {
-        return { content: [{ type: "text", text: "Denied by user." }], isError: true };
-      }
-      const arg = {
-        owner: input.owner,
-        name: input.name,
-        number: input.number,
-        method: input.method ?? ("merge" as const),
-      };
-      try {
-        return ok(
-          input.forge === "github"
-            ? await options.forgeHub.mergeChangeRequest(arg)
-            : input.forge === "gitlab"
-              ? await options.forgeHub.mergeGitLabChangeRequest(arg)
-              : await options.forgeHub.mergeBitbucketChangeRequest(arg),
-        );
-      } catch (err) {
-        return fail(err);
-      }
-    },
-  );
-
-  // WRITE 12: create a change request. GitHub/GitLab accept an optional `draft`;
-  // Bitbucket's createBitbucketChangeRequest has no draft param, so it is dropped
-  // for that forge. All take {owner,name,base,head,title,body?}.
-  registerTool(
-    "forge_create_change_request",
-    {
-      title: "Create change request",
-      description:
-        "Open a new pull/merge request from head into base. Requires user approval via permission card.",
-      inputSchema: {
-        forge: forgeEnum,
-        owner: z.string(),
-        name: z.string(),
-        title: z.string(),
-        head: z.string(),
-        base: z.string(),
-        body: z.string().optional(),
-        draft: z.boolean().optional(),
-      },
-    },
-    async (
-      input: {
-        forge: "github" | "gitlab" | "bitbucket";
-        owner: string;
-        name: string;
-        title: string;
-        head: string;
-        base: string;
-        body?: string;
-        draft?: boolean;
-      },
-      _context: JAgentDeskToolExecutionContext,
-    ) => {
-      if (!options.forgeHub) return forgeUnavailable;
-      if (!callerAgentId) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "forge_create_change_request is only available to agent-scoped tool sessions",
-            },
-          ],
-          isError: true,
-        };
-      }
-      const decision = await options.requestHostToolPermission!(callerAgentId, {
-        name: "forge_create_change_request",
-        kind: "tool",
-        title: `Open ${input.forge} PR in ${input.owner}/${input.name}`,
-        description: `${input.head} → ${input.base}: ${input.title}`,
-        input: input as unknown as Record<string, unknown>,
-      });
-      if (decision.behavior !== "allow") {
-        return { content: [{ type: "text", text: "Denied by user." }], isError: true };
-      }
-      try {
-        if (input.forge === "github") {
-          return ok(
-            await options.forgeHub.createChangeRequest({
-              owner: input.owner,
-              name: input.name,
-              base: input.base,
-              head: input.head,
-              title: input.title,
-              body: input.body,
-              draft: input.draft,
-            }),
-          );
-        }
-        if (input.forge === "gitlab") {
-          return ok(
-            await options.forgeHub.createGitLabChangeRequest({
-              owner: input.owner,
-              name: input.name,
-              base: input.base,
-              head: input.head,
-              title: input.title,
-              body: input.body,
-              draft: input.draft,
-            }),
-          );
-        }
-        // Bitbucket: createBitbucketChangeRequest has no `draft` param.
-        return ok(
-          await options.forgeHub.createBitbucketChangeRequest({
-            owner: input.owner,
-            name: input.name,
-            base: input.base,
-            head: input.head,
-            title: input.title,
-            body: input.body,
-          }),
-        );
-      } catch (err) {
-        return fail(err);
-      }
-    },
-  );
-}
-
-function registerSqlTools(params: {
-  registerTool: (
-    name: string,
-    config: JAgentDeskToolConfig,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool handlers are schema-validated at registration boundaries.
-    handler: (input: any, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>,
-  ) => void;
-  options: JAgentDeskToolHostDependencies;
-  callerAgentId: string | undefined;
-}): void {
-  const { registerTool, options, callerAgentId } = params;
-
-  registerTool(
-    "sql_connect",
-    {
-      title: "Connect a database",
-      description:
-        "Register + open a database connection so it appears in the human's Databases panel (they can watch the schema you design and the data live) and so you can query it with sql_query / sql_exec. Pass the engine and the connection fields (host/port/database/user/password, or a full dsn; for sqlite pass file). Returns the databaseId to use. Use this for the database you set up or work on — e.g. after a devops/dev peer provisions one — with the REAL credentials you configured; never invent credentials.",
-      inputSchema: {
-        engine: z.enum(["postgres", "mysql", "sqlite", "mssql", "oracle", "mongodb", "clickhouse"]),
-        host: z.string().optional(),
-        port: z.number().optional(),
-        database: z.string().optional(),
-        user: z.string().optional(),
-        password: z.string().optional(),
-        dsn: z.string().optional(),
-        file: z.string().optional(),
-        displayName: z.string().optional(),
-      },
-    },
-    async (input: {
-      engine: DatabaseEngine;
-      host?: string;
-      port?: number;
-      database?: string;
-      user?: string;
-      password?: string;
-      dsn?: string;
-      file?: string;
-      displayName?: string;
-    }) => {
-      if (!options.databaseRegistry) {
-        return {
-          content: [{ type: "text", text: "Database service is not available in this session." }],
-          isError: true,
-        };
-      }
-      try {
-        const info = await options.databaseRegistry.addConnection({
-          engine: input.engine,
-          ...(input.displayName ? { displayName: input.displayName } : {}),
-          config: {
-            host: input.host,
-            port: input.port,
-            database: input.database,
-            user: input.user,
-            password: input.password,
-            dsn: input.dsn,
-            file: input.file,
-          },
-        });
-        await options.databaseRegistry.connect(info.id).catch(() => undefined);
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Connected database "${info.displayName}" (databaseId=${info.id}). It now shows in the human's Databases panel; query/inspect it with sql_query and sql_exec.`,
-            },
-          ],
-        };
-      } catch (err) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Failed to connect database: ${err instanceof Error ? err.message : String(err)}`,
-            },
-          ],
-          isError: true,
-        };
-      }
-    },
-  );
-
-  registerTool(
-    "sql_query",
-    {
-      title: "SQL query",
-      description:
-        "Run a read-only SQL SELECT against a connected database and return the rows. Auto-approved (read-only; writes are rejected on this path — use sql_exec).",
-      inputSchema: {
-        databaseId: z.string().min(1),
-        sql: z.string().min(1),
-        limit: z.number().optional(),
-        offset: z.number().optional(),
-      },
-    },
-    async (input: { databaseId: string; sql: string; limit?: number; offset?: number }) => {
-      const client = options.databaseRegistry?.getClient(input.databaseId);
-      if (!client) {
-        return {
-          content: [
-            { type: "text", text: `Database not found or not connected: ${input.databaseId}` },
-          ],
-          isError: true,
-        };
-      }
-      try {
-        const result = await client.runQuery(input.sql, {
-          limit: input.limit,
-          offset: input.offset,
-        });
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-      } catch (err) {
-        return {
-          content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
-          isError: true,
-        };
-      }
-    },
-  );
-
-  registerTool(
-    "sql_exec",
-    {
-      title: "SQL exec",
-      description:
-        "Run a writing SQL statement (INSERT/UPDATE/DELETE/DDL) against a connected database. Requires user approval via permission card.",
-      inputSchema: {
-        databaseId: z.string().min(1),
-        sql: z.string().min(1),
-      },
-    },
-    async (
-      input: { databaseId: string; sql: string },
-      _context: JAgentDeskToolExecutionContext,
-    ) => {
-      if (!callerAgentId) {
-        return {
-          content: [
-            { type: "text", text: "sql_exec is only available to agent-scoped tool sessions" },
-          ],
-          isError: true,
-        };
-      }
-      const client = options.databaseRegistry?.getClient(input.databaseId);
-      if (!client) {
-        return {
-          content: [
-            { type: "text", text: `Database not found or not connected: ${input.databaseId}` },
-          ],
-          isError: true,
-        };
-      }
-      const decision = await options.requestHostToolPermission!(callerAgentId, {
-        name: "sql_exec",
-        kind: "tool",
-        title: `SQL write on ${input.databaseId}`,
-        description: input.sql,
-        input: input as unknown as Record<string, unknown>,
-      });
-      if (decision.behavior !== "allow") {
-        return { content: [{ type: "text", text: "Denied by user." }], isError: true };
-      }
-      try {
-        const result = await client.execWrite(input.sql);
-        return { content: [{ type: "text", text: JSON.stringify(result) }] };
-      } catch (err) {
-        return {
-          content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
-          isError: true,
-        };
-      }
-    },
-  );
-
-  // Lets ANY agent discover the databases connected in the app and their
-  // databaseId, so it can then drive them with sql_query/sql_exec — the bridge
-  // between workspace agents and the database feature.
-  registerTool(
-    "database_list",
-    {
-      title: "List databases",
-      description:
-        "List the databases connected in the app (databaseId, name, engine, state). Pass a returned databaseId to sql_query/sql_exec. Auto-approved (read-only).",
-      inputSchema: {},
-    },
-    async () => {
-      const databases = options.databaseRegistry?.list() ?? [];
-      const summary = databases.map((d) => ({
-        databaseId: d.id,
-        name: d.displayName,
-        engine: d.engine,
-        target: d.target,
-        state: d.state,
-      }));
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({ count: summary.length, databases: summary }, null, 2),
-          },
-        ],
-      };
-    },
-  );
-}
-
-function registerBrowserProfileTools(params: {
-  registerTool: (
-    name: string,
-    config: JAgentDeskToolConfig,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool handlers are schema-validated at registration boundaries.
-    handler: (input: any, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>,
-  ) => void;
-  options: JAgentDeskToolHostDependencies;
-}): void {
-  const { registerTool, options } = params;
-  const store = options.browserFingerprintProfiles;
-  if (!store) {
-    return;
-  }
-
-  const summarize = (profile: BrowserFingerprintProfile) => ({
-    id: profile.id,
-    name: profile.name,
-    os: profile.os,
-    userAgent: profile.userAgent,
-    timezone: profile.timezone,
-    locale: profile.locale,
-    matchIpLocation: profile.geoFromIp !== false,
-    hasProxy: profile.proxy !== null,
-    webrtcPolicy: profile.webrtcPolicy,
-    extensions: profile.extensions.length,
-    stealthEnabled: profile.stealthEnabled,
-    active: profile.id === store.activeId(),
-  });
-
-  registerTool(
-    "browser_profile_list",
-    {
-      title: "List browser fingerprint profiles",
-      description:
-        "List the agentic browser's anti-detect fingerprint profiles and which one is active. Use before browser_profile_use to pick one. Auto-approved.",
-      inputSchema: {},
-    },
-    async () => {
-      const profiles = store.list().map(summarize);
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              { count: profiles.length, activeProfileId: store.activeId(), profiles },
-              null,
-              2,
-            ),
-          },
-        ],
-      };
-    },
-  );
-
-  registerTool(
-    "browser_profile_create",
-    {
-      title: "Create browser fingerprint profile",
-      description:
-        "Create a coherent anti-detect fingerprint profile for the agentic browser (a consistent device identity: User-Agent, UA Client Hints, WebGL, timezone, screen, seeded canvas/audio noise). Optionally attach a proxy (the ONLY way to change the observed IP — no proxy means the real IP), Chromium extensions (absolute unpacked dirs you can author first), and custom init scripts (JS injected before page scripts). Set activate=true to make it the active profile immediately. For identities strict checkers (PixelScan, iphey) accept: use the OS of the machine running the browser (macOS on a Mac) — its real GPU is then reported, while another OS must claim a GPU the hardware cannot back; timezone, locale and languages follow the exit IP's location by default (matchIpLocation). Auto-approved.",
-      inputSchema: {
-        name: z
-          .string()
-          .trim()
-          .min(1)
-          .max(60)
-          .optional()
-          .describe("Label shown in the profile list."),
-        os: z
-          .enum(["windows", "macos", "linux"])
-          .optional()
-          .describe("Device OS family the identity mimics. Defaults to windows."),
-        timezone: z
-          .string()
-          .trim()
-          .optional()
-          .describe("IANA timezone, e.g. America/New_York. Setting it turns off matchIpLocation."),
-        locale: z.string().trim().optional().describe("BCP-47 locale, e.g. en-US."),
-        matchIpLocation: z
-          .boolean()
-          .optional()
-          .describe(
-            "Take timezone, locale and languages from the location of the exit IP (through the proxy) each time the profile is applied. Default true unless timezone is given.",
-          ),
-        languages: z
-          .array(z.string().trim().min(1))
-          .optional()
-          .describe("navigator.languages list."),
-        proxyServer: z
-          .string()
-          .trim()
-          .optional()
-          .describe("Proxy URL scheme://host:port (http/https/socks5). Required to change the IP."),
-        proxyUsername: z.string().optional(),
-        proxyPassword: z.string().optional(),
-        webrtcPolicy: z
-          .enum(["default", "force-proxy", "disable"])
-          .optional()
-          .describe("force-proxy closes the WebRTC STUN IP leak behind a proxy."),
-        extensions: z
-          .array(z.string().trim().min(1))
-          .optional()
-          .describe("Absolute paths to unpacked Chromium extension directories."),
-        initScripts: z
-          .array(z.string().min(1))
-          .optional()
-          .describe("Custom JS injected into every page before its own scripts run."),
-        stealthEnabled: z
-          .boolean()
-          .optional()
-          .describe(
-            "Apply fingerprint spoofing. Default true. False = real identity + proxy/extensions only.",
-          ),
-        activate: z
-          .boolean()
-          .optional()
-          .describe("Make this the active profile now. Default true."),
-      },
-    },
-    async (input: {
-      name?: string;
-      os?: FingerprintOs;
-      timezone?: string;
-      matchIpLocation?: boolean;
-      locale?: string;
-      languages?: string[];
-      proxyServer?: string;
-      proxyUsername?: string;
-      proxyPassword?: string;
-      webrtcPolicy?: "default" | "force-proxy" | "disable";
-      extensions?: string[];
-      initScripts?: string[];
-      stealthEnabled?: boolean;
-      activate?: boolean;
-    }) => {
-      const id = `bfp_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
-      const proxy = input.proxyServer
-        ? {
-            server: input.proxyServer.trim(),
-            ...(input.proxyUsername ? { username: input.proxyUsername } : {}),
-            ...(input.proxyPassword ? { password: input.proxyPassword } : {}),
-          }
-        : null;
-      const base = generateFingerprintProfile({
-        id,
-        nowMs: Date.now(),
-        ...(input.name ? { name: input.name } : {}),
-        ...(input.os ? { os: input.os } : {}),
-        ...(input.timezone ? { timezone: input.timezone } : {}),
-        ...(input.matchIpLocation !== undefined ? { geoFromIp: input.matchIpLocation } : {}),
-        ...(input.locale ? { locale: input.locale } : {}),
-        ...(input.languages ? { languages: input.languages } : {}),
-        proxy,
-        ...(input.webrtcPolicy ? { webrtcPolicy: input.webrtcPolicy } : {}),
-      });
-      const profile: BrowserFingerprintProfile = {
-        ...base,
-        extensions: input.extensions ?? base.extensions,
-        initScripts: input.initScripts ?? base.initScripts,
-        stealthEnabled: input.stealthEnabled ?? base.stealthEnabled,
-      };
-      store.save(profile);
-      if (input.activate !== false) {
-        store.select(profile.id);
-      }
-      return {
-        content: [{ type: "text", text: JSON.stringify(summarize(profile), null, 2) }],
-      };
-    },
-  );
-
-  registerTool(
-    "browser_profile_use",
-    {
-      title: "Select active browser fingerprint profile",
-      description:
-        "Set the active anti-detect fingerprint profile applied to new browser tabs (pass an id from browser_profile_list), or pass null to use the host's real identity. Takes effect on the next tab/navigation. Auto-approved.",
-      inputSchema: {
-        id: z
-          .string()
-          .trim()
-          .nullable()
-          .describe("Profile id to activate, or null to clear (use the real browser identity)."),
-      },
-    },
-    async (input: { id: string | null }) => {
-      const targetId = input.id === null ? null : input.id.trim();
-      if (targetId !== null && !store.list().some((profile) => profile.id === targetId)) {
-        return {
-          content: [{ type: "text", text: `No fingerprint profile with id ${targetId}` }],
-          isError: true,
-        };
-      }
-      store.select(targetId);
-      return {
-        content: [{ type: "text", text: JSON.stringify({ activeProfileId: targetId }, null, 2) }],
-      };
-    },
-  );
-
-  registerTool(
-    "browser_scaffold_extension",
-    {
-      title: "Scaffold a Chromium extension for the agentic browser",
-      description:
-        "Write a working, unpacked Manifest V3 Chromium extension skeleton to a directory (manifest.json + content.js) so you can then EDIT the content script to do what you need and load it with browser_load_extension. The template's content script runs in its own world (so it works even where the page CSP blocks injected scripts), mirrors signals onto a `data-jad-*` attribute on <html> that you can read with browser_snapshot/browser_evaluate, and listens for commands you write back — the basis for real-time, event-driven page monitoring/automation instead of polling. After scaffolding, edit content.js, then call browser_load_extension with the same path. Auto-approved.",
-      inputSchema: {
-        path: z
-          .string()
-          .trim()
-          .min(1)
-          .describe("Absolute directory to create the extension in (created if missing)."),
-        name: z.string().trim().min(1).max(60).optional().describe("Extension name."),
-        matches: z
-          .array(z.string().trim().min(1))
-          .optional()
-          .describe("URL match patterns for the content script. Defaults to ['<all_urls>']."),
-      },
-    },
-    async (input: { path: string; name?: string; matches?: string[] }) => {
-      const dir = expandUserPath(input.path.trim());
-      const name = input.name?.trim() || "JAgentDesk Agent Extension";
-      const matches = input.matches && input.matches.length > 0 ? input.matches : ["<all_urls>"];
-      const manifest = {
-        manifest_version: 3,
-        name,
-        version: "1.0.0",
-        description: "Authored by a JAgentDesk agent for the agentic browser.",
-        content_scripts: [
-          { matches, js: ["content.js"], run_at: "document_idle", all_frames: false },
-        ],
-        host_permissions: matches,
-        permissions: [],
-      };
-      const contentJs = `// Content script — runs in an isolated world, so it works even when the page's
-// CSP blocks injected page scripts. Edit the logic below for your task.
-(() => {
-  const root = document.documentElement;
-  // Push a signal the agent can read via browser_snapshot / browser_evaluate:
-  //   browser_evaluate: document.documentElement.getAttribute('data-jad-signal')
-  const emit = (value) => {
-    try { root.setAttribute('data-jad-signal', typeof value === 'string' ? value : JSON.stringify(value)); } catch (e) {}
-  };
-  // Example: report the page title once, then on every DOM mutation (real-time).
-  emit({ type: 'ready', title: document.title, url: location.href, at: Date.now() });
-  const observer = new MutationObserver(() => {
-    emit({ type: 'mutation', title: document.title, url: location.href, at: Date.now() });
-  });
-  observer.observe(root, { childList: true, subtree: true, characterData: true });
-  // Accept commands the agent writes back to a data attribute, e.g. via CDP/DOM:
-  //   root.setAttribute('data-jad-command', JSON.stringify({ action: 'click', selector: '#x' }))
-  new MutationObserver(() => {
-    const raw = root.getAttribute('data-jad-command');
-    if (!raw) return;
-    root.removeAttribute('data-jad-command');
-    try {
-      const cmd = JSON.parse(raw);
-      if (cmd && cmd.action === 'click' && cmd.selector) {
-        document.querySelector(cmd.selector)?.click();
-        emit({ type: 'command-done', action: 'click', selector: cmd.selector, at: Date.now() });
-      }
-      // Add more command handlers here.
-    } catch (e) { emit({ type: 'command-error', error: String(e && e.message) }); }
-  }).observe(root, { attributes: true, attributeFilter: ['data-jad-command'] });
-})();
-`;
-      try {
-        await mkdir(dir, { recursive: true });
-        await writeFile(
-          nodePath.join(dir, "manifest.json"),
-          `${JSON.stringify(manifest, null, 2)}\n`,
-        );
-        await writeFile(nodePath.join(dir, "content.js"), contentJs);
-      } catch (error) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Failed to scaffold extension: ${error instanceof Error ? error.message : String(error)}`,
-            },
-          ],
-          isError: true,
-        };
-      }
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              {
-                path: dir,
-                files: ["manifest.json", "content.js"],
-                next: "Edit content.js for your task, then call browser_load_extension with this path.",
-              },
-              null,
-              2,
-            ),
-          },
-        ],
-      };
-    },
-  );
-
-  registerTool(
-    "browser_load_extension",
-    {
-      title: "Load a Chromium extension into the agentic browser",
-      description:
-        "Load an unpacked Chromium extension into the agentic browser. YOU CAN AUTHOR THE EXTENSION YOURSELF: use your file tools to write a directory containing a manifest.json (manifest_version 3) plus content/background scripts, then call this with that absolute directory. This is the way to do things the fixed browser_* tools can't — a content script runs in its own world, so it works on pages whose CSP blocks injected page scripts, can watch the DOM/network continuously and push events, and can relay signals back to the page. It attaches to the active fingerprint profile (creating one if none is active) and loads on the next tab; reload or open a tab afterwards. Prefer this (event-driven) over a cron/polling loop for real-time page monitoring. Auto-approved.",
-      inputSchema: {
-        path: z
-          .string()
-          .trim()
-          .min(1)
-          .describe("Absolute path to the unpacked extension directory (contains manifest.json)."),
-      },
-    },
-    async (input: { path: string }) => {
-      const path = input.path.trim();
-      const activeId = store.activeId();
-      const current = activeId
-        ? (store.list().find((profile) => profile.id === activeId) ?? null)
-        : null;
-      const base =
-        current ??
-        generateFingerprintProfile({
-          id: `bfp_${randomUUID().replace(/-/g, "").slice(0, 12)}`,
-          nowMs: Date.now(),
-          name: "Browser (extensions)",
-        });
-      const extensions = base.extensions.includes(path)
-        ? base.extensions
-        : [...base.extensions, path];
-      const profile: BrowserFingerprintProfile = {
-        ...base,
-        extensions,
-        updatedAtMs: Date.now(),
-      };
-      store.save(profile);
-      store.select(profile.id);
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              {
-                loaded: path,
-                profileId: profile.id,
-                extensions: profile.extensions,
-                note: "Open browser tabs are reloaded automatically so the extension's content scripts inject; open a new tab if none exists yet.",
-              },
-              null,
-              2,
-            ),
-          },
-        ],
-      };
-    },
-  );
-
-  registerTool(
-    "browser_profile_update",
-    {
-      title: "Update a browser fingerprint profile",
-      description:
-        "Change fields on an existing anti-detect fingerprint profile by id (from browser_profile_list). Only the fields you pass are changed. Use this to attach/rotate a proxy (the only way to change the observed IP), adjust timezone/locale to match the proxy geo, add custom init scripts or extensions, toggle spoofing, or set the WebRTC leak policy. Takes effect on the next tab/navigation. Auto-approved.",
-      inputSchema: {
-        id: z.string().trim().min(1).describe("Profile id to update."),
-        name: z.string().trim().min(1).max(60).optional(),
-        timezone: z
-          .string()
-          .trim()
-          .optional()
-          .describe("IANA timezone. Setting it turns off matchIpLocation."),
-        matchIpLocation: z
-          .boolean()
-          .optional()
-          .describe("Take timezone, locale and languages from the exit IP's location."),
-        locale: z.string().trim().optional(),
-        languages: z.array(z.string().trim().min(1)).optional(),
-        proxyServer: z
-          .string()
-          .trim()
-          .nullable()
-          .optional()
-          .describe("Proxy URL scheme://host:port, or null to remove the proxy."),
-        proxyUsername: z.string().optional(),
-        proxyPassword: z.string().optional(),
-        webrtcPolicy: z.enum(["default", "force-proxy", "disable"]).optional(),
-        extensions: z
-          .array(z.string().trim().min(1))
-          .optional()
-          .describe("Replaces the profile's extension dir list."),
-        initScripts: z
-          .array(z.string().min(1))
-          .optional()
-          .describe(
-            "Replaces the profile's custom init scripts (JS injected before page scripts).",
-          ),
-        stealthEnabled: z.boolean().optional(),
-      },
-    },
-    async (input: {
-      id: string;
-      name?: string;
-      timezone?: string;
-      matchIpLocation?: boolean;
-      locale?: string;
-      languages?: string[];
-      proxyServer?: string | null;
-      proxyUsername?: string;
-      proxyPassword?: string;
-      webrtcPolicy?: "default" | "force-proxy" | "disable";
-      extensions?: string[];
-      initScripts?: string[];
-      stealthEnabled?: boolean;
-    }) => {
-      const current = store.list().find((profile) => profile.id === input.id.trim());
-      if (!current) {
-        return {
-          content: [{ type: "text", text: `No fingerprint profile with id ${input.id.trim()}` }],
-          isError: true,
-        };
-      }
-      const proxy =
-        input.proxyServer === undefined
-          ? current.proxy
-          : input.proxyServer === null
-            ? null
-            : {
-                server: input.proxyServer.trim(),
-                ...(input.proxyUsername ? { username: input.proxyUsername } : {}),
-                ...(input.proxyPassword ? { password: input.proxyPassword } : {}),
-              };
-      const profile: BrowserFingerprintProfile = {
-        ...current,
-        ...(input.name ? { name: input.name } : {}),
-        ...(input.timezone ? { timezone: input.timezone, geoFromIp: false } : {}),
-        ...(input.matchIpLocation !== undefined ? { geoFromIp: input.matchIpLocation } : {}),
-        ...(input.locale ? { locale: input.locale } : {}),
-        ...(input.languages ? { languages: input.languages } : {}),
-        proxy,
-        ...(input.webrtcPolicy ? { webrtcPolicy: input.webrtcPolicy } : {}),
-        ...(input.extensions ? { extensions: input.extensions } : {}),
-        ...(input.initScripts ? { initScripts: input.initScripts } : {}),
-        ...(input.stealthEnabled !== undefined ? { stealthEnabled: input.stealthEnabled } : {}),
-        updatedAtMs: Date.now(),
-      };
-      store.save(profile);
-      return {
-        content: [{ type: "text", text: JSON.stringify(summarize(profile), null, 2) }],
-      };
-    },
-  );
-
-  registerTool(
-    "browser_profile_delete",
-    {
-      title: "Delete a browser fingerprint profile",
-      description:
-        "Delete an anti-detect fingerprint profile by id (from browser_profile_list). If it was the active profile, the browser reverts to the host's real identity. Auto-approved.",
-      inputSchema: {
-        id: z.string().trim().min(1).describe("Profile id to delete."),
-      },
-    },
-    async (input: { id: string }) => {
-      const id = input.id.trim();
-      if (!store.list().some((profile) => profile.id === id)) {
-        return {
-          content: [{ type: "text", text: `No fingerprint profile with id ${id}` }],
-          isError: true,
-        };
-      }
-      store.remove(id);
-      return {
-        content: [{ type: "text", text: JSON.stringify({ deleted: id }, null, 2) }],
-      };
-    },
-  );
-}
-
-function registerSkillsTools(params: {
-  registerTool: (
-    name: string,
-    config: JAgentDeskToolConfig,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool handlers are schema-validated at registration boundaries.
-    handler: (input: any, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>,
-  ) => void;
-  options: JAgentDeskToolHostDependencies;
-}): void {
-  const { registerTool, options } = params;
-
-  // Skills are standard Agent Skills directories (<name>/SKILL.md) installed natively
-  // for every provider (spec 22 / ADR-0022): one real copy in .agents/skills plus
-  // symlinks into .claude/skills and .kiro/skills, recorded in the skills lock.
-  const resolveCwd = (scope: "global" | "project", cwd: string | undefined) => {
-    if (scope === "global") return undefined;
-    if (cwd) return cwd;
-    return options.callerAgentId
-      ? (options.agentManager.getAgent(options.callerAgentId)?.cwd ?? undefined)
-      : undefined;
-  };
-  const skillError = (error: unknown): JAgentDeskToolResult => ({
-    content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
-    isError: true,
-  });
-
-  registerTool(
-    "create_skill",
-    {
-      title: "Create skill",
-      description:
-        "Create a new skill as a standard Agent Skills directory (<name>/SKILL.md) that every coding agent provider loads natively (Claude, Codex, OpenCode, Cursor, Copilot, Pi, OMP, Kimi, Kiro). Use THIS tool when the user asks you to create/make a skill: it installs the real copy in ~/.agents/skills (or <project>/.agents/skills), symlinks it into .claude/skills and .kiro/skills, records it in the JAgentDesk skills lock and shows it in the Skills screen on every device. Never overwrites an existing skill directory. Auto-approved.",
-      inputSchema: {
-        name: z
-          .string()
-          .trim()
-          .min(1, "name is required")
-          .max(64, "name must be 64 characters or fewer")
-          .describe(
-            "Skill name: lowercase letters, digits and hyphens (e.g. pr-reviewer). Other text is converted to that form.",
-          ),
-        instructions: z
-          .string()
-          .trim()
-          .min(1, "instructions are required")
-          .describe("SKILL.md body (markdown): what the skill does and how to apply it."),
-        description: z
-          .string()
-          .trim()
-          .max(1024)
-          .optional()
-          .describe(
-            "When the skill should be used (the provider shows this to the model). Defaults to the first line of the instructions.",
-          ),
-        scope: z
-          .enum(["global", "project"])
-          .optional()
-          .describe("global (default): the user's home. project: the current workspace."),
-        cwd: z
-          .string()
-          .optional()
-          .describe("Workspace directory for scope=project. Defaults to your working directory."),
-      },
-      outputSchema: {
-        id: z.string(),
-        name: z.string(),
-        path: z.string(),
-      },
-    },
-    async (input: {
-      name: string;
-      instructions: string;
-      description?: string;
-      scope?: "global" | "project";
-      cwd?: string;
-    }) => {
-      if (!options.skillsStorage) {
-        return {
-          content: [{ type: "text", text: "Skills storage is not configured" }],
-          isError: true,
-        };
-      }
-      const scope = input.scope ?? "global";
-      const name = slugifySkillName(input.name);
-      const description =
-        input.description?.trim() ||
-        input.instructions
-          .split("\n")
-          .map((line) => line.replace(/^#+\s*/, "").trim())
-          .find(Boolean) ||
-        name;
-      try {
-        const skill = await options.skillsStorage.author({
-          name,
-          description,
-          body: input.instructions,
-          scope,
-          cwd: resolveCwd(scope, input.cwd),
-        });
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Created skill "${skill.name}" (${skill.skillId}) at ${skill.realPath}`,
-            },
-          ],
-          structuredContent: ensureValidJson({
-            id: skill.skillId,
-            name: skill.name,
-            path: skill.realPath,
-          }),
-        };
-      } catch (error) {
-        return skillError(error);
-      }
-    },
-  );
-
-  registerTool(
-    "update_skill",
-    {
-      title: "Update skill",
-      description:
-        "Update the description and/or instructions (SKILL.md body) of a skill JAgentDesk owns, by id (the id returned by create_skill or shown in the Skills screen). Learned lessons are kept. Renaming is not supported. Auto-approved.",
-      inputSchema: {
-        id: z.string().min(1).describe("Skill id to update."),
-        instructions: z.string().trim().min(1).optional(),
-        description: z.string().trim().max(1024).optional(),
-        cwd: z
-          .string()
-          .optional()
-          .describe("Workspace directory, needed only for a project skill."),
-      },
-      outputSchema: {
-        id: z.string(),
-        name: z.string(),
-      },
-    },
-    async (input: { id: string; instructions?: string; description?: string; cwd?: string }) => {
-      if (!options.skillsStorage) {
-        return {
-          content: [{ type: "text", text: "Skills storage is not configured" }],
-          isError: true,
-        };
-      }
-      try {
-        const current = await options.skillsStorage.getSkill(input.id, input.cwd);
-        const skill = await options.skillsStorage.author({
-          skillId: current.skill.skillId,
-          name: current.skill.name,
-          description: input.description ?? current.skill.description,
-          body: input.instructions ?? current.body,
-          scope: current.skill.scope,
-          cwd: current.skill.projectRoot ?? undefined,
-        });
-        return {
-          content: [{ type: "text", text: `Updated skill "${skill.name}" (${skill.skillId})` }],
-          structuredContent: ensureValidJson({ id: skill.skillId, name: skill.name }),
-        };
-      } catch (error) {
-        return skillError(error);
-      }
-    },
+      { inputMode: inputMode.getState() },
+    ) || key
   );
 }
 
 function validateSendPromptCaller(
-  callerOrchestrationContext: OrchestrationAgentContext | null,
+  callerOrchestrationContext: Pick<
+    OrchestrationAgentContext,
+    "role" | "briefId" | "workspaceId"
+  > | null,
   orchestrationRuntime: OrchestrationRuntime | null | undefined,
   agentId: string,
 ): void {
@@ -3348,7 +752,7 @@ function registerOrchestrationTools(params: {
   ) => void;
   orchestrationRuntime: OrchestrationRuntime;
   callerAgentId: string;
-  callerOrchestrationContext: OrchestrationAgentContext;
+  callerOrchestrationContext: Pick<OrchestrationAgentContext, "role" | "briefId" | "workspaceId">;
   callerContext: {
     lockedCwd?: string;
     allowCustomCwd?: boolean;
@@ -3508,9 +912,23 @@ function registerOrchestrationTools(params: {
   }
 }
 
-// oxlint-disable-next-line complexity -- pre-existing large tool registrar (one branch per tool group)
 export function createJAgentDeskToolCatalog(
   options: JAgentDeskToolHostDependencies,
+): JAgentDeskToolCatalog {
+  return createToolCatalog(options, options.callerAgentId ? "agent" : "top-level");
+}
+
+export function createJAgentDeskAgentToolManifest(
+  options: JAgentDeskToolHostDependencies,
+): Pick<JAgentDeskToolCatalog, "tools"> {
+  // Plugins register before a caller exists, but every execution uses an agent-bound catalog.
+  return { tools: createToolCatalog(options, "agent").tools };
+}
+
+// oxlint-disable-next-line complexity -- pre-existing large tool registrar (one branch per tool group)
+function createToolCatalog(
+  options: JAgentDeskToolHostDependencies,
+  scope: "agent" | "top-level",
 ): JAgentDeskToolCatalog {
   const {
     agentManager,
@@ -3527,8 +945,17 @@ export function createJAgentDeskToolCatalog(
   } = options;
   const childLogger = logger.child({ module: "agent", component: "jagentdesk-tool-catalog" });
   const callerContext = callerAgentId ? (resolveCallerContext?.(callerAgentId) ?? null) : null;
+  const openingLabels = options.callerAgentLabels;
+  const openingRole = openingLabels?.["jagentdesk.orchestration.role"];
   const callerOrchestrationContext = callerAgentId
-    ? (orchestrationRuntime?.getAgentContext(callerAgentId) ?? null)
+    ? (orchestrationRuntime?.getAgentContext(callerAgentId) ??
+      (openingRole
+        ? {
+            role: openingRole,
+            briefId: openingLabels!["jagentdesk.orchestration.brief-id"],
+            workspaceId: openingLabels!["jagentdesk.orchestration.workspace-id"],
+          }
+        : null))
     : null;
 
   const parseToolInput = async (
@@ -3545,16 +972,146 @@ export function createJAgentDeskToolCatalog(
       typeof (inputSchema as { safeParseAsync?: unknown }).safeParseAsync === "function"
         ? (inputSchema as z.ZodType)
         : z.object(inputSchema as z.ZodRawShape).passthrough();
-    return schema.parseAsync(input);
+    const result = await schema.safeParseAsync(input);
+    if (!result.success) {
+      throw new JAgentDeskToolInputError(result.error.message, result.error.issues);
+    }
+    return result.data;
   };
 
+  const hostTools = new Map<string, keyof HostOperations>([
+    ["create_agent", "createAgent"],
+    ["create_workspace", "createWorkspace"],
+    ["list_workspaces", "listWorkspaces"],
+    ["send_agent_prompt", "sendPrompt"],
+    ["get_agent_status", "getStatus"],
+    ["get_agent_activity", "getActivity"],
+    ["list_agents", "listAgents"],
+  ]);
+  const localHostOperations = new Map<string, HostOperations["createAgent"]>();
+  const local = Object.fromEntries(
+    [...hostTools].map(([tool, operation]) => [
+      operation,
+      (input: Record<string, unknown>, context: JAgentDeskToolExecutionContext) =>
+        localHostOperations.get(tool)!(input, context),
+    ]),
+  ) as unknown as HostOperations;
+  const hostResolver = createHostResolver({
+    serverId: options.serverId ?? "self",
+    local,
+    hosts: () => {
+      if (!options.hosts) throw new Error("Connected hosts are unavailable");
+      return options.hosts();
+    },
+    callerAgentId,
+    lockedCwd: callerContext?.lockedCwd,
+    caller: () => {
+      const caller = callerAgentId ? agentManager.getAgent(callerAgentId) : null;
+      return caller
+        ? {
+            provider: caller.provider,
+            currentModeId: caller.currentModeId,
+            background: caller.background,
+          }
+        : null;
+    },
+  });
   const tools = new Map<string, JAgentDeskToolDefinition>();
+  const builtinNames = new Set<string>();
   const registerTool = (
     name: string,
     config: JAgentDeskToolConfig,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool handlers are schema-validated at registration boundaries.
     handler: (input: any, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>,
   ) => {
+    builtinNames.add(name);
+    const botId =
+      openingLabels?.["jagentdesk.bot.id"] ??
+      (callerAgentId
+        ? agentManager.getAgent(callerAgentId)?.labels["jagentdesk.bot.id"]
+        : undefined);
+    if (
+      botId &&
+      [
+        "set_agent_mode",
+        "update_agent",
+        "respond_to_permission",
+        "orchestration.bootstrap_lead",
+        "create_schedule",
+        "pause_schedule",
+        "resume_schedule",
+        "delete_schedule",
+        "update_schedule",
+        "run_schedule_once",
+      ].includes(name)
+    )
+      return;
+    const plugin = builtinPluginForTool(name);
+    if (plugin && options.builtinPlugins && !options.builtinPlugins.has(plugin)) return;
+    if (!isJAgentDeskToolEnabled(options.jagentdeskToolPolicy, name)) return;
+    const operation = hostTools.get(name);
+    if (operation) {
+      localHostOperations.set(name, handler);
+      const original = config.inputSchema;
+      const selector = {
+        serverId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Destination server ID from list_hosts; omit for this host."),
+      };
+      config = {
+        ...config,
+        inputSchema:
+          original instanceof z.ZodObject
+            ? original.extend(selector)
+            : { ...(original as z.ZodRawShape), ...selector },
+      };
+      const localHandler = handler;
+      handler = async ({ serverId, ...input }, context) => {
+        if (!serverId || serverId === options.serverId) return localHandler(input, context);
+        let registration: Awaited<ReturnType<FinishSubscriptions["register"]>> | undefined;
+        try {
+          if (name === "send_agent_prompt" && callerAgentId && input.notifyOnFinish !== false) {
+            registration = await options
+              .remoteFinishSubscriptions?.()
+              .register({ callerAgentId, childAgentId: input.agentId, serverId }, true);
+          }
+          const response = await hostResolver.use(serverId, (host) =>
+            host[operation](input, context),
+          );
+          if (name === "create_agent" && callerAgentId && input.notifyOnFinish !== false) {
+            await options.remoteFinishSubscriptions?.().register({
+              callerAgentId,
+              childAgentId: (response.structuredContent as { agentId: string }).agentId,
+              serverId,
+              requireParentOwnership: true,
+            });
+          }
+          registration?.accept();
+          return {
+            ...response,
+            structuredContent: { ...(response.structuredContent as object), serverId },
+          };
+        } catch (error) {
+          if (registration) {
+            if (error instanceof HostOperationRejectedError) await registration.reject();
+            else registration.accept();
+          }
+          const failure = {
+            serverId,
+            error: error instanceof Error ? error.message : String(error),
+            ...(error instanceof Error && "code" in error ? { code: error.code } : {}),
+            ...(error instanceof Error && "outcome" in error ? { outcome: error.outcome } : {}),
+          };
+          return {
+            isError: true,
+            content: [{ type: "text", text: JSON.stringify(failure) }],
+            structuredContent: failure,
+          };
+        }
+      };
+    }
     tools.set(name, {
       name,
       title: config.title,
@@ -3576,7 +1133,7 @@ export function createJAgentDeskToolCatalog(
     ): Promise<JAgentDeskToolResult> {
       const tool = tools.get(name);
       if (!tool) {
-        throw new Error(`JAgentDesk tool not found: ${name}`);
+        throw new JAgentDeskToolInputError(`JAgentDesk tool not found: ${name}`);
       }
       return tool.handler(await parseToolInput(tool, input), context);
     },
@@ -3588,7 +1145,7 @@ export function createJAgentDeskToolCatalog(
   }): ScheduleCadence => {
     const expression = input.cron?.trim() ?? "";
     if (!expression) {
-      throw new Error("cron is required");
+      throw new JAgentDeskToolInputError("cron is required");
     }
     const timezone = normalizeScheduleTimeZoneArg(input.timezone);
     return {
@@ -3610,9 +1167,17 @@ export function createJAgentDeskToolCatalog(
     }
     const parentAgent = agentManager.getAgent(callerAgentId);
     if (!parentAgent) {
-      throw new Error(`Parent agent ${callerAgentId} not found`);
+      throw new JAgentDeskToolInputError(`Parent agent ${callerAgentId} not found`);
     }
     return parentAgent;
+  };
+
+  const workspaceBackgroundIntent = (background: boolean | undefined) => {
+    const caller = resolveCallerAgent();
+    return {
+      background: inheritWorkspaceBackground(background, caller),
+      callerWorkspaceId: caller?.workspaceId,
+    };
   };
 
   const resolveScopedCwd = (requestedCwd?: string, opts?: { required?: boolean }): string => {
@@ -3629,9 +1194,9 @@ export function createJAgentDeskToolCatalog(
     const trimmedCwd = requestedCwd?.trim();
     if (!trimmedCwd) {
       if (opts?.required) {
-        throw new Error("cwd is required");
+        throw new JAgentDeskToolInputError("cwd is required");
       }
-      throw new Error("cwd is required outside an agent-scoped session");
+      throw new JAgentDeskToolInputError("cwd is required outside an agent-scoped session");
     }
 
     return expandUserPath(trimmedCwd);
@@ -3646,11 +1211,12 @@ export function createJAgentDeskToolCatalog(
     }
 
     if (!options.ensureWorkspaceForCreate) {
-      throw new Error(
-        callerAgentId
-          ? `Caller agent ${callerAgentId} has no workspace and workspace minting is not configured`
-          : "workspaceId is required outside an agent-scoped session",
-      );
+      if (callerAgentId) {
+        throw new Error(
+          `Caller agent ${callerAgentId} has no workspace and workspace minting is not configured`,
+        );
+      }
+      throw new JAgentDeskToolInputError("workspaceId is required outside an agent-scoped session");
     }
 
     return options.ensureWorkspaceForCreate(resolvedCwd);
@@ -3665,11 +1231,13 @@ export function createJAgentDeskToolCatalog(
     if (callerAgentId) {
       const callerAgent = resolveCallerAgent();
       if (!callerAgent?.workspaceId) {
-        throw new Error(`Caller agent ${callerAgentId} has no current workspace`);
+        throw new JAgentDeskToolInputError(
+          `Caller agent ${callerAgentId} has no current workspace`,
+        );
       }
       return callerAgent.workspaceId;
     }
-    throw new Error("workspaceId is required outside an agent-scoped session");
+    throw new JAgentDeskToolInputError("workspaceId is required outside an agent-scoped session");
   }
 
   const buildCallerAgentScheduleConfigExtras = (
@@ -3690,8 +1258,8 @@ export function createJAgentDeskToolCatalog(
         ? { webSearch: callerAgent.config.webSearch }
         : {}),
       ...(callerAgent.config.extra ? { extra: callerAgent.config.extra } : {}),
-      ...(callerAgent.config.featureValues
-        ? { featureValues: callerAgent.config.featureValues }
+      ...(callerAgent.config.providerOptions
+        ? { providerOptions: callerAgent.config.providerOptions }
         : {}),
       ...(callerAgent.config.systemPrompt ? { systemPrompt: callerAgent.config.systemPrompt } : {}),
       ...(callerAgent.config.mcpServers ? { mcpServers: callerAgent.config.mcpServers } : {}),
@@ -3746,7 +1314,7 @@ export function createJAgentDeskToolCatalog(
     }
 
     if (!params?.provider?.trim()) {
-      throw new Error("provider is required when target is new-agent");
+      throw new JAgentDeskToolInputError("provider is required when target is new-agent");
     }
 
     const resolvedProviderModel = resolveScheduleProviderAndModel({
@@ -3768,22 +1336,43 @@ export function createJAgentDeskToolCatalog(
     if (!scheduleService) {
       throw new Error("Schedule service is not configured");
     }
-    const schedule = await scheduleService.inspect(id);
+    let schedule: Awaited<ReturnType<ScheduleService["inspect"]>>;
+    try {
+      schedule = await scheduleService.inspect(id);
+    } catch (error) {
+      if (error instanceof ScheduleNotFoundError) {
+        throw new JAgentDeskToolInputError(error.message);
+      }
+      throw error;
+    }
     if (schedule.target.type !== type) {
-      throw new Error(
+      throw new JAgentDeskToolInputError(
         type === "agent" ? `Heartbeat not found: ${id}` : `Schedule not found: ${id}`,
       );
     }
     return schedule;
   }
 
+  async function runScheduleAction<T>(action: () => Promise<T>): Promise<T> {
+    try {
+      return await action();
+    } catch (error) {
+      if (error instanceof ScheduleStateConflictError) {
+        throw new JAgentDeskToolInputError(error.message);
+      }
+      throw error;
+    }
+  }
+
   async function requireCallerHeartbeat(id: string) {
     if (!callerAgentId) {
-      throw new Error("Heartbeat operations require an agent-scoped session");
+      throw new JAgentDeskToolInputError("Heartbeat operations require an agent-scoped session");
     }
     const schedule = await requireScheduleTarget(id, "agent");
     if (schedule.target.type !== "agent" || schedule.target.agentId !== callerAgentId) {
-      throw new Error(`Heartbeat ${id} does not belong to caller ${callerAgentId}`);
+      throw new JAgentDeskToolInputError(
+        `Heartbeat ${id} does not belong to caller ${callerAgentId}`,
+      );
     }
     return schedule;
   }
@@ -3793,6 +1382,9 @@ export function createJAgentDeskToolCatalog(
     })
     .refine(
       (value) => {
+        if (!value.includes("/")) {
+          return true;
+        }
         try {
           resolveRequiredProviderModel(value);
           return true;
@@ -3967,6 +1559,12 @@ export function createJAgentDeskToolCatalog(
       .trim()
       .min(1, "initialPrompt is required")
       .describe("Required first task to run immediately after creation."),
+    background: z
+      .boolean()
+      .optional()
+      .describe(
+        "True creates a background agent: hidden from tabs, default lists, your subagent track and notifications. You still get its finish notification and can address it by id. Omit to inherit your own value (false without a caller); use it for helpers the user does not need to watch.",
+      ),
   };
   const legacyCreateAgentPlacementFields = {
     relationship: AgentRelationshipInputSchema.describe(
@@ -4065,7 +1663,7 @@ export function createJAgentDeskToolCatalog(
       .describe("Legacy GitHub PR number. Prefer workspace.source.target.githubPrNumber."),
   };
   const createAgentInputSchema = z
-    .object(callerAgentId ? agentToAgentInputSchema : canonicalTopLevelInputSchema)
+    .object(scope === "agent" ? agentToAgentInputSchema : canonicalTopLevelInputSchema)
     .passthrough();
   const agentToAgentCreateAgentArgsSchema = z.object(agentToAgentInputSchema).strict();
   const legacyAgentToAgentCreateAgentArgsSchema = z.object(legacyAgentToAgentInputSchema).strict();
@@ -4083,6 +1681,9 @@ export function createJAgentDeskToolCatalog(
       .describe(
         "Skill ids (from the Skills screen / create_skill) to invoke for this turn; the daemon prefixes the provider's native skill invocation.",
       ),
+    activeTurnBehavior: AgentActiveTurnBehaviorSchema.optional().describe(
+      'Leave this out unless the message cannot wait. Default "queue" waits for the running turn to end. "steer" joins it, or interrupts if the provider cannot steer. "interrupt" replaces it. A steer or interrupt carries messages queued before it, in order.',
+    ),
   };
   const agentToAgentSendAgentPromptInputSchema = {
     ...commonSendAgentPromptInputSchema,
@@ -4103,6 +1704,9 @@ export function createJAgentDeskToolCatalog(
   };
   const topLevelSendAgentPromptInputSchema = {
     ...commonSendAgentPromptInputSchema,
+    activeTurnBehavior: ActiveTurnBehaviorSchema.optional().describe(
+      'Default "interrupt": the running turn stops and a new turn starts with the prompt. "steer": the prompt joins the running turn; a provider that cannot steer interrupts the turn instead.',
+    ),
     background: z
       .boolean()
       .optional()
@@ -4118,9 +1722,8 @@ export function createJAgentDeskToolCatalog(
         "Agent-scoped only: get notified when the prompted agent finishes, errors, or needs permission.",
       ),
   };
-  const sendAgentPromptInputSchema = callerAgentId
-    ? agentToAgentSendAgentPromptInputSchema
-    : topLevelSendAgentPromptInputSchema;
+  const sendAgentPromptInputSchema =
+    scope === "agent" ? agentToAgentSendAgentPromptInputSchema : topLevelSendAgentPromptInputSchema;
   const inspectProviderInputSchema = {
     provider: ProviderOrProviderModelInputSchema.describe(
       "Provider ID, optionally with a model ID (for example codex or codex/gpt-5.4).",
@@ -4152,97 +1755,93 @@ export function createJAgentDeskToolCatalog(
   // agent (the k8s chat agent relies on them). Register them BEFORE the
   // voice-only early return below — otherwise a voice-only session silently
   // drops kubectl_get/kubectl_apply and the agent falls back to shelling out.
-  registerKubectlTools({ registerTool, options, callerAgentId });
-  registerSqlTools({ registerTool, options, callerAgentId });
-  registerDockerTools({ registerTool });
-  if (options.sshAgentTools) {
-    registerSshAgentTools(registerTool, options.sshAgentTools(callerAgentId ?? null));
-  }
-  if (options.remoteExecAgentTools) {
-    for (const tool of options.remoteExecAgentTools(callerAgentId ?? null)) {
+  const builtinToolContext: BuiltinToolContext = {
+    callerAgentId: callerAgentId ?? null,
+    callerLabels: () => (callerAgentId ? agentManager.getAgent(callerAgentId)?.labels : undefined),
+    callerAgentTitle: () => {
+      const title = callerAgentId
+        ? (agentManager.getAgent(callerAgentId) as { title?: unknown } | null)?.title
+        : null;
+      return typeof title === "string" && title.trim() ? title : null;
+    },
+    requestPermission: (agentId: string, request: BuiltinHostToolPermissionRequest) =>
+      options.requestHostToolPermission
+        ? options.requestHostToolPermission(agentId, request)
+        : agentManager.requestHostToolPermission(agentId, request),
+    service:
+      options.builtinDaemon?.service ?? builtinServerRegistry.lookup(options.jagentdeskHome ?? ""),
+    provided: options.builtinDaemon?.provided ?? builtinServerRegistry.provided,
+    requestHostToolPermission: options.requestHostToolPermission,
+    clusters: options.clusterRegistry,
+    databases: options.databaseRegistry,
+    services: options.builtinServices,
+    daemon: options.builtinDaemon,
+    agentManager,
+    resolveCallerAgent: () => resolveCallerAgent(),
+    browser: {
+      enabled: options.browserToolsEnabled === true,
+      broker: options.browserToolsBroker ?? null,
+      fingerprintProfiles: options.browserFingerprintProfiles ?? null,
+    },
+  };
+  const reserveBuiltinTool = (name: string) => builtinNames.add(name);
+  // Keep the catalog order: kubectl_*, sql_*, docker_*, then the SSH, remote and provider tools.
+  const earlyBuiltinTools: BuiltinPluginId[] = [
+    "clusters",
+    "databases",
+    "docker",
+    "ssh-servers",
+    "remote-tasks",
+    "custom-providers",
+  ];
+  // After the voice-only early return: the agentic browser's tools, then skill authoring.
+  const trailingBuiltinTools: BuiltinPluginId[] = ["browser-tools", "skills"];
+  builtinServerRegistry.registerAgentTools(
+    options.builtinPlugins,
+    registerTool,
+    reserveBuiltinTool,
+    builtinToolContext,
+    { only: earlyBuiltinTools },
+  );
+  builtinServerRegistry.registerAgentTools(
+    options.builtinPlugins,
+    registerTool,
+    reserveBuiltinTool,
+    builtinToolContext,
+    "accounts",
+  );
+  if (options.botAgentTools) {
+    for (const tool of options.botAgentTools(callerAgentId ?? null))
       registerTool(
         tool.name,
         { title: tool.title, description: tool.description, inputSchema: tool.inputSchema },
         tool.handler,
       );
-    }
   }
-  if (options.customProviderAgentTools) {
-    for (const tool of options.customProviderAgentTools(callerAgentId ?? null)) {
-      registerTool(
-        tool.name,
-        { title: tool.title, description: tool.description, inputSchema: tool.inputSchema },
-        tool.handler,
-      );
-    }
-  }
-  if (options.sideloadAgentTools) {
-    registerSshAgentTools(registerTool, options.sideloadAgentTools(callerAgentId ?? null));
-  }
-  if (options.jiraAgentTools) {
-    for (const tool of options.jiraAgentTools(callerAgentId ?? null)) {
-      registerTool(
-        tool.name,
-        { title: tool.title, description: tool.description, inputSchema: tool.inputSchema },
-        tool.handler,
-      );
-    }
-  }
-  if (options.figmaAgentTools) {
-    for (const tool of options.figmaAgentTools(callerAgentId ?? null)) {
-      registerTool(
-        tool.name,
-        { title: tool.title, description: tool.description, inputSchema: tool.inputSchema },
-        tool.handler,
-      );
-    }
-  }
-  // Spec 24.5: tools a host cannot run are not offered (unsupported_os depends only on
-  // the OS/arch, so this needs no probe).
-  const hostSupport = staticHostSupport(process.platform, process.arch);
-  // Spec 27.6: physical devices (adb/go-ios run on every host OS) keep sim_* registered off macOS.
-  if (hostSupport.iosSimulators || options.physicalDevices) {
-    registerSimulatorTools({
-      registerTool,
-      iosSimulators: hostSupport.iosSimulators,
-      access: {
-        hub: options.physicalDevices ?? null,
-        callerAgentId,
-        agentTitle: () => {
-          const title = callerAgentId
-            ? (agentManager.getAgent(callerAgentId) as { title?: unknown } | null)?.title
-            : null;
-          return typeof title === "string" && title.trim() ? title : "this agent";
-        },
-        requestPermission: options.requestHostToolPermission,
-      },
-    });
-  }
-  registerProxyTools({ registerTool, support: hostSupport });
-  // Forge Hub tools mirror the kubectl precedent: available to every agent and
-  // registered before the voice-only early return so a voice session keeps them.
-  registerForgeTools({ registerTool, options, callerAgentId });
-  if (options.argocdAgentTools) {
-    for (const tool of options.argocdAgentTools(callerAgentId ?? null)) {
-      registerTool(
-        tool.name,
-        { title: tool.title, description: tool.description, inputSchema: tool.inputSchema },
-        tool.handler,
-      );
-    }
-  }
-  // Agent Forum / Team mode: any agent can post to a topic and manage its task board.
-  if (options.agentForumService && callerAgentId) {
-    const callerManagedTitle = (agentManager.getAgent(callerAgentId) as { title?: unknown } | null)
-      ?.title;
-    registerForumTools({
-      registerTool,
-      agentForumService: options.agentForumService,
-      callerAgentId,
-      callerRoleHint: callerOrchestrationContext?.role,
-      callerTitle: typeof callerManagedTitle === "string" ? callerManagedTitle : undefined,
-    });
-  }
+  builtinServerRegistry.registerAgentTools(
+    options.builtinPlugins,
+    registerTool,
+    reserveBuiltinTool,
+    builtinToolContext,
+    "integrations",
+  );
+  // Device, workbench and forge tools: available to every agent and registered before the
+  // voice-only early return so a voice session keeps them.
+  builtinServerRegistry.registerAgentTools(
+    options.builtinPlugins,
+    registerTool,
+    reserveBuiltinTool,
+    builtinToolContext,
+    "late",
+  );
+  // Argo CD (spec 30.4) and any later default-slot feature tools follow Forge Hub.
+  builtinServerRegistry.registerAgentTools(
+    options.builtinPlugins,
+    registerTool,
+    reserveBuiltinTool,
+    builtinToolContext,
+    { except: [...earlyBuiltinTools, ...trailingBuiltinTools] },
+  );
 
   if (options.voiceOnly || options.enableVoiceTools || callerContext?.enableVoiceTools) {
     registerTool(
@@ -4264,11 +1863,15 @@ export function createJAgentDeskToolCatalog(
       },
       async (args, context) => {
         if (!callerAgentId) {
-          throw new Error("speak is only available to agent-scoped tool sessions");
+          throw new JAgentDeskToolInputError(
+            "speak is only available to agent-scoped tool sessions",
+          );
         }
         const handler = resolveSpeakHandler?.(callerAgentId) ?? null;
         if (!handler) {
-          throw new Error(`No speak handler registered for your session '${callerAgentId}'`);
+          throw new JAgentDeskToolInputError(
+            `No speak handler registered for your session '${callerAgentId}'`,
+          );
         }
         await handler({
           text: args.text,
@@ -4287,23 +1890,40 @@ export function createJAgentDeskToolCatalog(
     return toCatalog();
   }
 
-  if (options.browserToolsEnabled && options.browserToolsBroker) {
-    registerBrowserTools({
-      registerTool,
-      broker: options.browserToolsBroker,
-      callerAgentId,
-      resolveCallerAgent,
-    });
-  }
-
-  if (options.browserToolsEnabled && options.browserFingerprintProfiles) {
-    registerBrowserProfileTools({ registerTool, options });
-  }
-
   // Skill authoring is a normal chat-agent capability (not gated behind a
   // workspace/DB/cluster), so it lives here after the voice-only early return.
-  registerSkillsTools({ registerTool, options });
+  builtinServerRegistry.registerAgentTools(
+    options.builtinPlugins,
+    registerTool,
+    reserveBuiltinTool,
+    builtinToolContext,
+    { only: trailingBuiltinTools },
+  );
 
+  registerTool(
+    "list_hosts",
+    {
+      title: "List hosts",
+      description: "List this daemon and saved connected hosts.",
+      inputSchema: {},
+    },
+    async () => {
+      const directory = await hostResolver.directory();
+      return {
+        content: [],
+        structuredContent: {
+          hosts: ensureValidJson([
+            { serverId: directory.self.serverId, label: directory.self.label, status: "connected" },
+            ...directory.hosts.map((host) => ({
+              serverId: host.serverId,
+              label: host.label,
+              status: host.status,
+            })),
+          ]),
+        },
+      };
+    },
+  );
   registerTool(
     "create_workspace",
     {
@@ -4320,6 +1940,12 @@ export function createJAgentDeskToolCatalog(
           ),
         projectId: z.string().optional().describe("Existing project id to own the workspace."),
         title: z.string().trim().min(1).optional(),
+        background: z
+          .boolean()
+          .optional()
+          .describe(
+            "True hides the workspace from default lists and the sidebar while its contents remain durable and accessible; omit background to inherit your own visibility (true when you or your current workspace are background, false without a caller), and override it only when the user explicitly asks.",
+          ),
         mode: z
           .enum(["branch-off", "checkout-branch", "checkout-pr"])
           .optional()
@@ -4358,6 +1984,7 @@ export function createJAgentDeskToolCatalog(
       path,
       projectId,
       title,
+      background,
       mode,
       worktreeSlug,
       branchName,
@@ -4370,7 +1997,7 @@ export function createJAgentDeskToolCatalog(
       if (isolation === "local") {
         const cwd = resolveScopedCwd(path, { required: true });
         if (!(await isExistingDirectory(cwd))) {
-          throw new Error(`Directory not found: ${cwd}`);
+          throw new JAgentDeskToolInputError(`Directory not found: ${cwd}`);
         }
         assertOptionsAbsent(
           [
@@ -4387,7 +2014,12 @@ export function createJAgentDeskToolCatalog(
         if (!options.createDirectoryWorkspace) {
           throw new Error("Workspace provisioning is not configured");
         }
-        workspace = await options.createDirectoryWorkspace(cwd, title, projectId);
+        workspace = await options.createDirectoryWorkspace(
+          cwd,
+          title,
+          projectId,
+          workspaceBackgroundIntent(background),
+        );
       } else {
         let cwd =
           path !== undefined || !projectId ? resolveScopedCwd(path, { required: true }) : null;
@@ -4418,6 +2050,7 @@ export function createJAgentDeskToolCatalog(
             ...(worktreeSlug ? { worktreeSlug } : {}),
             ...worktreeTarget,
             ...(title ? { title } : {}),
+            ...workspaceBackgroundIntent(background),
           },
         );
         if (!result.ok) {
@@ -4438,15 +2071,17 @@ export function createJAgentDeskToolCatalog(
     {
       title: "List workspaces",
       description: "List active workspaces.",
-      inputSchema: {},
+      inputSchema: { includeBackground: z.boolean().optional().default(false) },
       outputSchema: { workspaces: z.array(WorkspaceAutomationSummarySchema) },
     },
-    async () => {
+    async ({ includeBackground = false }) => {
       if (!options.workspaceRegistry) {
         throw new Error("Workspace registry is not configured");
       }
       const workspaces = (await options.workspaceRegistry.list())
-        .filter((workspace) => !workspace.archivedAt)
+        .filter(
+          (workspace) => !workspace.archivedAt && (includeBackground || !workspace.background),
+        )
         .map(toWorkspaceAutomationSummary);
       return {
         content: [],
@@ -4503,7 +2138,7 @@ export function createJAgentDeskToolCatalog(
     {
       title: "Create agent",
       description:
-        "Create an agent. Agent-scoped creation defaults to your workspace and creates your subagent. Top-level creation without workspaceId creates a new local workspace. Requires provider/model (for example codex/gpt-5.4) and an initial prompt. Do not guess; call list_providers and list_models first if uncertain.",
+        "Create an agent. Agent-scoped creation defaults to your workspace and creates your subagent. Top-level creation without workspaceId creates a new local workspace. Requires provider/model (for example codex/gpt-5.4) and an initial prompt. For a different provider, set settings.modeId from inspect_provider; omission is accepted for targets with no modes and for unattended execution supported by the target. Do not guess; call list_providers and list_models first if uncertain.",
       inputSchema: createAgentInputSchema,
       outputSchema: {
         agentId: z.string(),
@@ -4561,11 +2196,12 @@ export function createJAgentDeskToolCatalog(
           cwd: resolvedArgs.cwd,
           workspaceId: resolvedArgs.workspaceId,
           thinking: parsedArgs.settings?.thinkingOptionId,
-          features: parsedArgs.settings?.features,
+          providerOptions: parsedArgs.settings?.features,
           labels: parsedArgs.labels,
           mode: parsedArgs.settings?.modeId,
           background: requestedBackground,
           notifyOnFinish,
+          agentBackground: parsedArgs.background,
           detached: resolvedArgs.detached,
           callerAgentId,
           callerContext,
@@ -4652,7 +2288,7 @@ export function createJAgentDeskToolCatalog(
       if (hasLegacyCreateAgentPlacement(args)) {
         // COMPAT(nestedCreateAgentPlacement): accept the old relationship/workspace shape without
         // advertising it to models. Added in v0.2.0; remove after 2027-01-17.
-        const parsed = legacyAgentToAgentCreateAgentArgsSchema.parse(args);
+        const parsed = parseToolArguments(legacyAgentToAgentCreateAgentArgsSchema, args);
         const { cwd, workspaceId, worktree } = await resolveCreateAgentWorkspace(parsed.workspace, {
           prompt: parsed.initialPrompt,
         });
@@ -4665,7 +2301,7 @@ export function createJAgentDeskToolCatalog(
           worktree,
         };
       }
-      const parsed = agentToAgentCreateAgentArgsSchema.parse(args);
+      const parsed = parseToolArguments(agentToAgentCreateAgentArgsSchema, args);
       const { cwd, workspaceId } = await resolveCanonicalCreateAgentWorkspace(parsed.workspaceId, {
         prompt: parsed.initialPrompt,
       });
@@ -4681,13 +2317,15 @@ export function createJAgentDeskToolCatalog(
     if (hasLegacyCreateAgentPlacement(args)) {
       // COMPAT(nestedCreateAgentPlacement): see the agent-scoped branch above.
       const parsedArgs = normalizeTopLevelCreateAgentArgs(
-        legacyTopLevelCreateAgentArgsSchema.parse(args),
+        parseToolArguments(legacyTopLevelCreateAgentArgsSchema, args),
       );
       if (parsedArgs.relationship?.kind === "subagent") {
-        throw new Error("relationship subagent requires an agent-scoped tool session");
+        throw new JAgentDeskToolInputError(
+          "relationship subagent requires an agent-scoped tool session",
+        );
       }
       if (!parsedArgs.workspace) {
-        throw new Error("Legacy create_agent placement could not be resolved");
+        throw new JAgentDeskToolInputError("Legacy create_agent placement could not be resolved");
       }
       const { cwd, workspaceId, worktree } = await resolveCreateAgentWorkspace(
         parsedArgs.workspace,
@@ -4702,7 +2340,7 @@ export function createJAgentDeskToolCatalog(
         worktree,
       };
     }
-    const parsedArgs = canonicalTopLevelCreateAgentArgsSchema.parse(args);
+    const parsedArgs = parseToolArguments(canonicalTopLevelCreateAgentArgsSchema, args);
     const { cwd, workspaceId } = await resolveCanonicalCreateAgentWorkspace(
       parsedArgs.workspaceId,
       { prompt: parsedArgs.initialPrompt },
@@ -4755,12 +2393,16 @@ export function createJAgentDeskToolCatalog(
       const cwd = process.cwd();
       return {
         cwd,
-        workspaceId: await options.ensureWorkspaceForCreate(cwd, firstAgentContext),
+        workspaceId: await options.ensureWorkspaceForCreate(
+          cwd,
+          firstAgentContext,
+          workspaceBackgroundIntent(undefined),
+        ),
       };
     }
     const caller = resolveCallerAgent();
     if (!caller?.workspaceId) {
-      throw new Error(`Caller agent ${callerAgentId} has no current workspace`);
+      throw new JAgentDeskToolInputError(`Caller agent ${callerAgentId} has no current workspace`);
     }
     return { cwd: undefined, workspaceId: caller.workspaceId };
   }
@@ -4788,18 +2430,18 @@ export function createJAgentDeskToolCatalog(
     };
 
     if (canonicalCandidate.relationship && canonicalCandidate.workspace) {
-      return legacyTopLevelCreateAgentArgsSchema.parse({
+      return parseToolArguments(legacyTopLevelCreateAgentArgsSchema, {
         ...canonicalCandidate,
         ...(Object.keys(settings).length > 0 ? { settings } : {}),
       });
     }
 
     if (canonicalCandidate.relationship || canonicalCandidate.workspace) {
-      throw new Error("relationship and workspace must be provided together");
+      throw new JAgentDeskToolInputError("relationship and workspace must be provided together");
     }
 
     if (!cwd?.trim()) {
-      throw new Error("cwd is required for legacy top-level create_agent calls");
+      throw new JAgentDeskToolInputError("cwd is required for legacy top-level create_agent calls");
     }
 
     const legacyWorktreeTarget = resolveLegacyCreateAgentWorktreeTarget({
@@ -4826,7 +2468,7 @@ export function createJAgentDeskToolCatalog(
           },
         };
 
-    return legacyTopLevelCreateAgentArgsSchema.parse({
+    return parseToolArguments(legacyTopLevelCreateAgentArgsSchema, {
       ...canonicalCandidate,
       relationship: { kind: "detached" },
       workspace,
@@ -4879,11 +2521,15 @@ export function createJAgentDeskToolCatalog(
   }> {
     if (workspace.kind === "current") {
       if (!callerAgentId) {
-        throw new Error("workspace current requires an agent-scoped tool session");
+        throw new JAgentDeskToolInputError(
+          "workspace current requires an agent-scoped tool session",
+        );
       }
       const callerAgent = resolveCallerAgent();
       if (!callerAgent?.workspaceId) {
-        throw new Error(`Caller agent ${callerAgentId} has no current workspace`);
+        throw new JAgentDeskToolInputError(
+          `Caller agent ${callerAgentId} has no current workspace`,
+        );
       }
       return {
         cwd: workspace.cwd,
@@ -4900,14 +2546,16 @@ export function createJAgentDeskToolCatalog(
         (candidate) => candidate.workspaceId === workspace.workspaceId,
       );
       if (!existingWorkspace) {
-        throw new Error(`Workspace ${workspace.workspaceId} not found`);
+        throw new JAgentDeskToolInputError(`Workspace ${workspace.workspaceId} not found`);
       }
       const cwd = workspace.cwd
         ? resolveScopedCwd(workspace.cwd, { required: true })
         : existingWorkspace.cwd;
       const lockedCwd = callerContext?.lockedCwd?.trim();
       if (lockedCwd && !isSameOrDescendantPath(expandUserPath(lockedCwd), cwd)) {
-        throw new Error(`Workspace ${workspace.workspaceId} is outside the allowed cwd`);
+        throw new JAgentDeskToolInputError(
+          `Workspace ${workspace.workspaceId} is outside the allowed cwd`,
+        );
       }
       return {
         cwd,
@@ -4923,7 +2571,11 @@ export function createJAgentDeskToolCatalog(
       }
       return {
         cwd,
-        workspaceId: await options.ensureWorkspaceForCreate(cwd, firstAgentContext),
+        workspaceId: await options.ensureWorkspaceForCreate(
+          cwd,
+          firstAgentContext,
+          workspaceBackgroundIntent(undefined),
+        ),
         worktree: undefined,
       };
     }
@@ -4965,12 +2617,122 @@ export function createJAgentDeskToolCatalog(
   const PROMPTED_AGENT_NOTIFICATION_GUIDANCE =
     "You will get notified when the prompted agent finishes, errors, or needs permission. Do not poll for status; continue with other work until the notification arrives.";
 
+  function validateBotPromptCaller(agentId: string, sessionMode?: string): void {
+    const callerBotId = callerAgentId
+      ? agentManager.getAgent(callerAgentId)?.labels["jagentdesk.bot.id"]
+      : undefined;
+    if (callerBotId && sessionMode)
+      throw new Error("Only the owner can change bot execution modes");
+    if (callerBotId && agentManager.getAgent(agentId)?.labels["jagentdesk.bot.id"] !== callerBotId)
+      throw new Error(
+        "Use bot_handoff to contact another bot; bot prompts stay within their own ORC tree",
+      );
+  }
+
+  async function sendQueuedAgentPrompt(input: {
+    agentId: string;
+    senderAgentId: string;
+    prompt: string;
+    sessionMode?: string;
+    activeTurnBehavior?: "queue" | "steer" | "interrupt";
+    skillIds?: string[];
+    background: boolean;
+    notifyOnFinish: boolean;
+    armFinishNotification: () => Promise<boolean>;
+  }) {
+    const {
+      agentId,
+      senderAgentId,
+      prompt,
+      sessionMode,
+      activeTurnBehavior,
+      background,
+      notifyOnFinish,
+      armFinishNotification,
+      skillIds,
+    } = input;
+    if (!agentManager.getAgent(agentId) && !(await agentStorage.get(agentId))) {
+      throw new JAgentDeskToolInputError(`Agent ${agentId} not found`);
+    }
+    let notifying = false;
+    const receipt = enqueueAgentMessage(
+      { agentManager, agentStorage, logger: childLogger },
+      {
+        recipientId: agentId,
+        prompt,
+        source: {
+          kind: "agent-message",
+          agentId: senderAgentId,
+          ...(resolveCallerAgent()?.config?.title
+            ? { title: resolveCallerAgent()!.config.title! }
+            : {}),
+        },
+        sessionMode,
+        activeTurnBehavior,
+        preparePrompt: skillIds?.length
+          ? (preparedPrompt) =>
+              withSkillInvocation({
+                agentManager,
+                agentStorage,
+                agentId,
+                prompt: preparedPrompt,
+                skillIds,
+                skillInvocation: options.builtinDaemon?.port("skillInvocation") ?? null,
+                logger: childLogger,
+              })
+          : undefined,
+        // Arm right before dispatch so the notification follows this task's turn.
+        beforeDispatch: async () => {
+          if (background) await armFinishNotification();
+        },
+      },
+    );
+    if (background) {
+      notifying = Boolean(notifyOnFinish);
+      return {
+        content: [],
+        structuredContent: ensureValidJson({
+          success: true,
+          deliveryStatus: receipt.status,
+          activeTurnBehavior: receipt.activeTurnBehavior,
+          messageId: receipt.messageId,
+          status: agentManager.getAgent(agentId)?.lifecycle ?? "idle",
+          lastMessage: null,
+          permission: null,
+          guidance: notifying
+            ? `${receipt.guidance} ${PROMPTED_AGENT_NOTIFICATION_GUIDANCE}`
+            : receipt.guidance,
+        }),
+      };
+    }
+    // Blocking callers wait for the message to be dispatched before waiting for the turn.
+    await receipt.dispatched;
+    const result = await waitForAgentWithTimeout(agentManager, agentId, {
+      waitForActive: true,
+    });
+    notifying =
+      result.timedOut &&
+      agentManager.getAgent(agentId)?.lifecycle === "running" &&
+      (await armFinishNotification());
+    return {
+      content: [],
+      structuredContent: ensureValidJson({
+        success: true,
+        messageId: receipt.messageId,
+        status: result.status,
+        lastMessage: result.lastMessage,
+        permission: sanitizePermissionRequest(result.permission),
+        ...(notifying ? { guidance: PROMPTED_AGENT_NOTIFICATION_GUIDANCE } : {}),
+      }),
+    };
+  }
+
   registerTool(
     "send_agent_prompt",
     {
       title: "Send agent prompt",
       description:
-        "Send a task to a running agent. Agent-scoped callers run in background by default; top-level callers wait by default.",
+        "Send a message to another agent. Agent callers receive a receipt at once; read its guidance. Leave activeTurnBehavior out to queue until the running turn ends. Use a short steer or interrupt follow-up to deliver waiting messages now instead of resending them. An unread steer is lost if its turn stops or is interrupted, along with the messages it carried. Completion reports include the last response by default. JAgentDesk supplies caller identity.",
       inputSchema: sendAgentPromptInputSchema,
       outputSchema: {
         success: z.boolean(),
@@ -4978,6 +2740,9 @@ export function createJAgentDeskToolCatalog(
         lastMessage: z.string().nullable().optional(),
         permission: AgentPermissionRequestPayloadSchema.nullable().optional(),
         guidance: z.string().optional(),
+        deliveryStatus: z.literal("queued").optional(),
+        activeTurnBehavior: AgentActiveTurnBehaviorSchema.optional(),
+        messageId: z.string().optional(),
       },
     },
     async ({
@@ -4987,31 +2752,60 @@ export function createJAgentDeskToolCatalog(
       skillIds,
       background = Boolean(callerAgentId),
       notifyOnFinish = Boolean(callerAgentId),
+      activeTurnBehavior,
     }) => {
+      validateBotPromptCaller(agentId, sessionMode);
       validateSendPromptCaller(callerOrchestrationContext, orchestrationRuntime, agentId);
-      function armFinishNotification(): boolean {
+      async function armFinishNotification(): Promise<boolean> {
         if (!callerAgentId || !notifyOnFinish) {
           return false;
         }
-        setupFinishNotification({
+        const registration = setupFinishNotification({
           agentManager,
           agentStorage,
           childAgentId: agentId,
           callerAgentId,
           logger: childLogger,
         });
+        await registration.ready;
         return true;
       }
 
-      const { disposition } = await sendPromptToAgent({
+      // Every agent send uses the shared queue; native skill prefixes are added at dispatch.
+      if (callerAgentId) {
+        return await sendQueuedAgentPrompt({
+          agentId,
+          senderAgentId: callerAgentId,
+          skillIds,
+          prompt,
+          sessionMode,
+          activeTurnBehavior,
+          background,
+          notifyOnFinish,
+          armFinishNotification,
+        });
+      }
+
+      let notifying = false;
+      const dispatchResult = await sendPromptToAgent({
         agentManager,
         agentStorage,
         agentId,
         prompt,
+        source: callerAgentId ? { kind: "agent-message", agentId: callerAgentId } : undefined,
+        activeTurnBehavior,
         sessionMode,
         skillIds,
-        skillInvocation: options.skillsStorage ?? null,
+        skillInvocation: options.builtinDaemon?.port("skillInvocation") ?? null,
+        beforeDispatch: async () => {
+          if (background) notifying = await armFinishNotification();
+        },
         logger: childLogger,
+      }).catch((error) => {
+        if (error instanceof AgentNotFoundError) {
+          throw new JAgentDeskToolInputError(error.message);
+        }
+        throw error;
       });
 
       // If not running in background, wait for completion
@@ -5021,17 +2815,17 @@ export function createJAgentDeskToolCatalog(
         });
         // The wait ran out while the agent keeps working, so its result arrives as a
         // finish notification instead of in this response.
-        const notifying =
+        const timeoutNotifying =
           result.timedOut &&
           agentManager.getAgent(agentId)?.lifecycle === "running" &&
-          armFinishNotification();
+          (await armFinishNotification());
 
         const responseData = {
           success: true,
           status: result.status,
           lastMessage: result.lastMessage,
           permission: sanitizePermissionRequest(result.permission),
-          ...(notifying ? { guidance: PROMPTED_AGENT_NOTIFICATION_GUIDANCE } : {}),
+          ...(timeoutNotifying ? { guidance: PROMPTED_AGENT_NOTIFICATION_GUIDANCE } : {}),
         };
         const validJson = ensureValidJson(responseData);
 
@@ -5042,11 +2836,9 @@ export function createJAgentDeskToolCatalog(
         return response;
       }
 
-      const notifying = armFinishNotification();
-
       // Return once the provider has accepted the turn, so the status reports it running.
-      if (disposition === "turn_started") {
-        await waitForAgentRunStartWithTimeout(agentManager, agentId);
+      if (dispatchResult.disposition === "turn_started") {
+        await waitForAgentRunStartWithTimeout(agentManager, agentId, dispatchResult.started);
       }
       const currentSnapshot = agentManager.getAgent(agentId);
 
@@ -5067,6 +2859,22 @@ export function createJAgentDeskToolCatalog(
     },
   );
 
+  // Match the WebSocket snapshot: idle agents can still own background work.
+  async function projectLiveAgent(agent: ManagedAgent) {
+    const snapshot = await serializeSnapshotWithMetadata(agentStorage, agent, childLogger);
+    const backgroundWork = agentManager.getAgentBackgroundWorkSummary(agent.id);
+    return backgroundWork ? { ...snapshot, backgroundWork } : snapshot;
+  }
+
+  function projectStoredAgent(record: StoredAgentRecord) {
+    return buildStoredAgentPayload(
+      record,
+      new Set(providerSnapshotManager.listRegisteredProviderIds()),
+      (provider, own) => agentManager.effectiveOptionsFor(provider, own),
+      agentManager.getAgentBackgroundWorkSummary(record.id),
+    );
+  }
+
   registerTool(
     "get_agent_status",
     {
@@ -5084,11 +2892,7 @@ export function createJAgentDeskToolCatalog(
     async ({ agentId }) => {
       const snapshot = agentManager.getAgent(agentId);
       if (snapshot) {
-        const structuredSnapshot = await serializeSnapshotWithMetadata(
-          agentStorage,
-          snapshot,
-          childLogger,
-        );
+        const structuredSnapshot = await projectLiveAgent(snapshot);
         return {
           content: [],
           structuredContent: ensureValidJson({
@@ -5100,13 +2904,10 @@ export function createJAgentDeskToolCatalog(
 
       const record = await agentStorage.get(agentId);
       if (!record || record.internal) {
-        throw new Error(`Agent ${agentId} not found`);
+        throw new JAgentDeskToolInputError(`Agent ${agentId} not found`);
       }
 
-      const structuredSnapshot = buildStoredAgentPayload(
-        record,
-        new Set(providerSnapshotManager.listRegisteredProviderIds()),
-      );
+      const structuredSnapshot = projectStoredAgent(record);
       return {
         content: [],
         structuredContent: ensureValidJson({
@@ -5123,6 +2924,7 @@ export function createJAgentDeskToolCatalog(
       title: "List agents",
       description: "List recent agents as compact metadata.",
       inputSchema: {
+        includeBackground: z.boolean().optional().default(false),
         includeArchived: z.boolean().optional().default(false),
         cwd: z.string().optional(),
         sinceHours: z
@@ -5139,29 +2941,38 @@ export function createJAgentDeskToolCatalog(
         agents: z.array(AgentListItemPayloadSchema),
       },
     },
-    async ({ includeArchived = false, cwd, sinceHours = 48, statuses, limit = 50 }) => {
+    async ({ includeBackground = false, cwd, sinceHours = 48, statuses, limit = 50 }) => {
       const callerCwd = callerAgentId ? resolveCallerAgent()?.cwd : undefined;
       const requestedCwd = cwd?.trim() ? expandUserPath(cwd) : callerCwd;
       const statusFilter = statuses && statuses.length > 0 ? new Set(statuses) : null;
       const sinceMs = Date.now() - sinceHours * 60 * 60 * 1000;
       const liveSnapshots = agentManager.listAgents();
-      const liveAgents = await Promise.all(
-        liveSnapshots.map((snapshot) =>
-          serializeSnapshotWithMetadata(agentStorage, snapshot, childLogger),
-        ),
+      const projectedLiveAgents = await Promise.all(
+        liveSnapshots.map((snapshot) => projectLiveAgent(snapshot)),
       );
+      const liveAgents = projectedLiveAgents.filter((agent) => !agent.archivedAt);
       const liveIds = new Set(liveSnapshots.map((snapshot) => snapshot.id));
       const storedRecords = await agentStorage.list();
       const registeredProviderIds = new Set(providerSnapshotManager.listRegisteredProviderIds());
       const storedAgents = storedRecords
         .filter((record) => !record.internal && !liveIds.has(record.id))
-        .filter((record) => includeArchived || !record.archivedAt)
-        .filter(
-          (record) =>
-            includeArchived || isStoredAgentProviderAvailable(record, registeredProviderIds),
-        )
-        .map((record) => buildStoredAgentPayload(record, registeredProviderIds));
+        .filter((record) => !record.archivedAt)
+        .filter((record) => isStoredAgentProviderAvailable(record, registeredProviderIds))
+        .map(projectStoredAgent);
+      const backgroundWorkspaceIds = new Set(
+        ((await options.workspaceRegistry?.list()) ?? [])
+          .filter((workspace) => workspace.background)
+          .map((workspace) => workspace.workspaceId),
+      );
       const agents = [...liveAgents, ...storedAgents]
+        .filter((agent) =>
+          admitsAgent(
+            agent,
+            backgroundWorkspaceIds.has(agent.workspaceId ?? ""),
+            includeBackground,
+          ),
+        )
+        .filter((agent) => !agent.archivedAt)
         .map(toAgentListItemPayload)
         .filter((agent) => !requestedCwd || isSameOrDescendantPath(requestedCwd, agent.cwd))
         .filter((agent) => !statusFilter || statusFilter.has(agent.status))
@@ -5328,10 +3139,10 @@ export function createJAgentDeskToolCatalog(
       const workspaceId = resolveWorkspaceIdForRename(requestedWorkspaceId);
       const existing = await options.workspaceRegistry.get(workspaceId);
       if (!existing) {
-        throw new Error(`Workspace ${workspaceId} not found`);
+        throw new JAgentDeskToolInputError(`Workspace ${workspaceId} not found`);
       }
       if (existing.archivedAt) {
-        throw new Error(`Workspace ${workspaceId} is archived`);
+        throw new JAgentDeskToolInputError(`Workspace ${workspaceId} is archived`);
       }
 
       await options.workspaceRegistry.upsert({
@@ -5535,7 +3346,7 @@ export function createJAgentDeskToolCatalog(
 
       const terminal = terminalManager.getTerminal(terminalId);
       if (!terminal) {
-        throw new Error(`Terminal ${terminalId} not found`);
+        throw new JAgentDeskToolInputError(`Terminal ${terminalId} not found`);
       }
 
       terminal.kill();
@@ -5571,7 +3382,7 @@ export function createJAgentDeskToolCatalog(
       }
 
       if (!terminalManager.getTerminal(terminalId)) {
-        throw new Error(`Terminal ${terminalId} not found`);
+        throw new JAgentDeskToolInputError(`Terminal ${terminalId} not found`);
       }
 
       const capture = await terminalManager.captureTerminal(terminalId, {
@@ -5595,7 +3406,8 @@ export function createJAgentDeskToolCatalog(
     "send_terminal_keys",
     {
       title: "Send terminal keys",
-      description: "Send literal text or special key tokens to a terminal session.",
+      description:
+        "Send text or a key token: Enter, Tab, Escape, Space, BSpace, Up, Down, Left, Right, Home, End, Insert, Delete, PageUp, PageDown, or F1-F12. Combine C- (Ctrl), M- (Alt), and S- (Shift) prefixes, e.g. C-r, S-Tab, or C-M-Left. Set literal=true to send the text unchanged.",
       inputSchema: {
         terminalId: z.string(),
         keys: z.string(),
@@ -5612,12 +3424,16 @@ export function createJAgentDeskToolCatalog(
 
       const terminal = terminalManager.getTerminal(terminalId);
       if (!terminal) {
-        throw new Error(`Terminal ${terminalId} not found`);
+        throw new JAgentDeskToolInputError(`Terminal ${terminalId} not found`);
       }
 
       terminal.send({
         type: "input",
-        data: resolveTerminalKeyToken(keys, literal),
+        data: resolveTerminalKeyToken({
+          key: keys,
+          literal,
+          preamble: terminal.getReplayPreamble(),
+        }),
       });
 
       return {
@@ -5632,24 +3448,26 @@ export function createJAgentDeskToolCatalog(
     {
       title: "Create schedule",
       description: "Create a recurring schedule that starts a new agent on a cron cadence.",
-      inputSchema: {
-        prompt: z.string().trim().min(1, "prompt is required"),
-        cron: z.string().trim().min(1, "cron is required"),
-        timezone: z
-          .string()
-          .trim()
-          .min(1)
-          .optional()
-          .describe("IANA time zone for the cron cadence. For example: America/New_York."),
-        name: z.string().optional(),
-        provider: (callerAgentId ? AgentProviderEnum.optional() : AgentProviderEnum).describe(
-          "Provider, or provider/model (for example: codex or codex/gpt-5.4). Defaults to the caller's provider in an agent-scoped session.",
-        ),
-        cwd: z.string().optional(),
-        isolation: z.enum(["local", "worktree"]).optional(),
-        maxRuns: z.number().int().positive().optional(),
-        expiresIn: z.string().optional(),
-      },
+      inputSchema: z
+        .object({
+          prompt: z.string().trim().min(1, "prompt is required"),
+          cron: z.string().trim().min(1, "cron is required"),
+          timezone: z
+            .string()
+            .trim()
+            .min(1)
+            .optional()
+            .describe("IANA time zone for the cron cadence. For example: America/New_York."),
+          name: z.string().optional(),
+          provider: (scope === "agent" ? AgentProviderEnum.optional() : AgentProviderEnum).describe(
+            "Provider, or provider/model (for example: codex or codex/gpt-5.4). Defaults to the caller's provider in an agent-scoped session.",
+          ),
+          cwd: z.string().optional(),
+          isolation: z.enum(["local", "worktree"]).optional(),
+          maxRuns: z.number().int().positive().optional(),
+          expiresIn: scheduleDurationInputSchema.optional(),
+        })
+        .superRefine(addScheduleCadenceIssue),
       outputSchema: ScheduleSummarySchema.shape,
     },
     async ({ prompt, cron, timezone, name, provider, cwd, isolation, maxRuns, expiresIn }) => {
@@ -5677,24 +3495,87 @@ export function createJAgentDeskToolCatalog(
     },
   );
 
+  if (options.changeRequestWatches) {
+    const watches = options.changeRequestWatches;
+    const inputSchema = {
+      url: z
+        .string()
+        .trim()
+        .min(1)
+        .describe("URL of a pull request or merge request on a supported forge."),
+    };
+    registerTool(
+      "subscribe_change_request",
+      {
+        title: "Watch change request",
+        description:
+          "Watch a pull request or merge request for check failures, passing checks, new comments, reviews, approvals, and closure. Returns the current state and sends future updates after your current turn.",
+        inputSchema,
+        outputSchema: {
+          url: z.string(),
+          ...changeRequestStatusSchema.shape,
+          subscribed: z.boolean(),
+          stale: z
+            .boolean()
+            .describe("The last stored status is shown because a fresh read is pending or failed."),
+        },
+      },
+      async ({ url }) => {
+        if (!callerAgentId) {
+          throw new JAgentDeskToolInputError(
+            "subscribe_change_request requires an agent-scoped session",
+          );
+        }
+        resolveCallerAgent();
+        return {
+          content: [],
+          structuredContent: ensureValidJson(await watches.subscribe(callerAgentId, url)),
+        };
+      },
+    );
+    registerTool(
+      "unsubscribe_change_request",
+      {
+        title: "Stop watching change request",
+        description: "Stop your watch and discard its unsent updates.",
+        inputSchema,
+        outputSchema: { url: z.string(), removed: z.boolean() },
+      },
+      async ({ url }) => {
+        if (!callerAgentId) {
+          throw new JAgentDeskToolInputError(
+            "unsubscribe_change_request requires an agent-scoped session",
+          );
+        }
+        resolveCallerAgent();
+        return {
+          content: [],
+          structuredContent: ensureValidJson(await watches.unsubscribe(callerAgentId, url)),
+        };
+      },
+    );
+  }
+
   registerTool(
     "create_heartbeat",
     {
       title: "Create heartbeat",
       description: "Create a recurring heartbeat that sends you a prompt on a cron cadence.",
-      inputSchema: {
-        prompt: z.string().trim().min(1, "prompt is required"),
-        cron: z.string().trim().min(1, "cron is required"),
-        timezone: z
-          .string()
-          .trim()
-          .min(1)
-          .optional()
-          .describe("IANA time zone for the cron cadence. For example: America/New_York."),
-        name: z.string().optional(),
-        maxRuns: z.number().int().positive().optional(),
-        expiresIn: z.string().optional(),
-      },
+      inputSchema: z
+        .object({
+          prompt: z.string().trim().min(1, "prompt is required"),
+          cron: z.string().trim().min(1, "cron is required"),
+          timezone: z
+            .string()
+            .trim()
+            .min(1)
+            .optional()
+            .describe("IANA time zone for the cron cadence. For example: America/New_York."),
+          name: z.string().optional(),
+          maxRuns: z.number().int().positive().optional(),
+          expiresIn: scheduleDurationInputSchema.optional(),
+        })
+        .superRefine(addScheduleCadenceIssue),
       outputSchema: ScheduleSummarySchema.shape,
     },
     async ({ prompt, cron, timezone, name, maxRuns, expiresIn }) => {
@@ -5702,7 +3583,7 @@ export function createJAgentDeskToolCatalog(
         throw new Error("Schedule service is not configured");
       }
       if (!callerAgentId) {
-        throw new Error("create_heartbeat requires an agent-scoped session");
+        throw new JAgentDeskToolInputError("create_heartbeat requires an agent-scoped session");
       }
       resolveCallerAgent();
 
@@ -5813,7 +3694,7 @@ export function createJAgentDeskToolCatalog(
       }
 
       await requireScheduleTarget(id, "new-agent");
-      await scheduleService.pause(id);
+      await runScheduleAction(() => scheduleService.pause(id));
       return {
         content: [],
         structuredContent: ensureValidJson({ success: true }),
@@ -5839,7 +3720,7 @@ export function createJAgentDeskToolCatalog(
       }
 
       await requireScheduleTarget(id, "new-agent");
-      await scheduleService.resume(id);
+      await runScheduleAction(() => scheduleService.resume(id));
       return {
         content: [],
         structuredContent: ensureValidJson({ success: true }),
@@ -5921,13 +3802,13 @@ export function createJAgentDeskToolCatalog(
             .optional()
             .describe("New mode for new-agent target (null to clear)."),
           cwd: z.string().trim().min(1).optional().describe("New cwd for new-agent target."),
-          expiresIn: z
-            .string()
+          expiresIn: scheduleDurationInputSchema
             .optional()
             .describe("New relative expiry duration (for example: 1h, 2d)."),
           clearExpires: z.boolean().optional().describe("Clear any schedule expiry."),
         })
-        .passthrough(),
+        .passthrough()
+        .superRefine(addScheduleCadenceIssue),
       outputSchema: StoredScheduleSchema.shape,
     },
     async (input) => {
@@ -5984,7 +3865,7 @@ export function createJAgentDeskToolCatalog(
         throw new Error("Schedule service is not configured");
       }
       await requireScheduleTarget(id, "new-agent");
-      const schedule = await scheduleService.runOnce(id);
+      const schedule = await runScheduleAction(() => scheduleService.runOnce(id));
       return {
         content: [],
         structuredContent: ensureValidJson(schedule),
@@ -6073,19 +3954,21 @@ export function createJAgentDeskToolCatalog(
       });
       const summary = toProviderSummary(entry);
       if (!entry.enabled) {
-        throw new Error(`Provider '${providerId}' is disabled`);
+        throw new JAgentDeskToolInputError(`Provider '${providerId}' is disabled`);
       }
       if (entry.status !== "ready") {
-        throw new Error(entry.error ?? `Provider '${providerId}' is unavailable`);
+        throw new JAgentDeskToolInputError(
+          entry.error ?? `Provider '${providerId}' is unavailable`,
+        );
       }
       const selectedModel = settings?.model ?? resolvedProviderModel.model;
-      const features = await agentManager.listDraftFeatures({
+      const described = await agentManager.listDraftControls({
         provider: providerId,
         cwd: resolvedCwd,
         ...(settings?.modeId ? { modeId: settings.modeId } : {}),
         ...(selectedModel ? { model: selectedModel } : {}),
         ...(settings?.thinkingOptionId ? { thinkingOptionId: settings.thinkingOptionId } : {}),
-        ...(settings?.features ? { featureValues: settings.features } : {}),
+        ...(settings?.features ? { providerOptions: settings.features } : {}),
       });
       return {
         content: [],
@@ -6097,7 +3980,7 @@ export function createJAgentDeskToolCatalog(
           status: summary.status,
           modes: summary.modes,
           selectedModel: selectedModel ?? null,
-          features,
+          features: featuresFromControls(described),
         }),
       };
     },
@@ -6247,6 +4130,14 @@ export function createJAgentDeskToolCatalog(
     },
   );
 
+  registerPluginTools({
+    agentManager,
+    callerAgentId,
+    scope,
+    tools,
+    builtinNames,
+    policy: options.jagentdeskToolPolicy,
+  });
   return toCatalog();
 }
 

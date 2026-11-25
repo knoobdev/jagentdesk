@@ -1,4 +1,5 @@
-import { Platform } from "react-native";
+import { isWeb } from "@/constants/platform";
+import { Platform, type ViewStyle } from "react-native";
 import { darkHighlightColors, lightHighlightColors } from "@jagentdesk/highlight";
 
 export const baseColors = {
@@ -115,8 +116,8 @@ export type ThemeName =
   | "claude"
   | "ghostty"
   | "pureBlack"
-  | "clickup"
-  | "clickupDark";
+  | "gumloop"
+  | "gumloopDark";
 
 // Diff colors — light uses muted tones, dark uses the brighter palette values.
 //
@@ -159,6 +160,13 @@ const darkStatusColors = {
 // Semantic color tokens - Layer-based system
 const lightSemanticColors = {
   interactionHighlight: "rgba(0, 0, 0, 0.06)",
+  selectedRow: "#e4e4e7",
+  surfaceSidebarSelected: "#e4e4e7",
+  accentPink: "#FF4EA6",
+  switchOn: "#20744A",
+  statusSuccessBackground: "#dcfce7",
+  statusDangerBackground: "#fee2e2",
+  statusWarningBackground: "#fef3c7",
   // Surfaces (layers) - shifted one step lighter
   surface0: "#ffffff", // App background
   surface1: "#fafafa", // Subtle hover (was zinc-100, now zinc-50)
@@ -300,6 +308,13 @@ export function buildDarkSemanticColors(tint: DarkThemeConfig) {
     surfaceSidebarHover: tint.surfaceSidebarHover ?? tint.surface2,
     surfaceWorkspace: tint.surface1,
     interactionHighlight: "rgba(255, 255, 255, 0.08)",
+    selectedRow: tint.surface3,
+    surfaceSidebarSelected: tint.surface3,
+    accentPink: "#FF4EA6",
+    switchOn: tint.accent,
+    statusSuccessBackground: "#1E3A2A",
+    statusDangerBackground: "#3D1F21",
+    statusWarningBackground: "#3A2F17",
 
     foreground,
     foregroundMuted: tint.foregroundMuted,
@@ -489,6 +504,7 @@ const pureBlackDarkColors = buildDarkSemanticColors({
 
 export const SPACING = {
   0: 0,
+  0.5: 2,
   1: 4,
   1.5: 6,
   2: 8,
@@ -525,6 +541,8 @@ export const ICON_SIZE = {
   md: 16,
   lg: 20,
 } as const;
+
+export const ICON_STROKE_WIDTH = 1.5;
 
 export const FONT_WEIGHT = {
   normal: "normal" as const,
@@ -571,7 +589,21 @@ export const DEFAULT_MONO_FONT_STACK: string = Platform.select({
   web: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
 });
 
-// `fontSize`, `fontFamily`, and `lineHeight` are deliberately widened to plain
+// Chat and markdown content column; the appearance updater patches the user's width in.
+export const DEFAULT_CONTENT_MAX_WIDTH = 820;
+
+// On web Unistyles puts string tokens in CSS variables, so mounted content
+// receives width changes without regenerating its classes. The px string is
+// emitted as CSS by Unistyles. Native always receives a number or percentage.
+export function themeContentMaxWidth(
+  width: number | undefined,
+): NonNullable<ViewStyle["maxWidth"]> {
+  return isWeb && width !== undefined
+    ? (`${width}px` as NonNullable<ViewStyle["maxWidth"]>)
+    : (width ?? "100%");
+}
+
+// `fontSize`, `fontFamily`, `lineHeight`, and `contentMaxWidth` are deliberately widened to plain
 // `number`/`string` (not narrowed by `as const`) so the appearance updater can patch
 // them at runtime via `UnistylesRuntime.updateTheme`. The remaining tokens keep their
 // literal types.
@@ -580,6 +612,7 @@ interface CommonTheme {
   fontSize: Record<keyof typeof FONT_SIZE, number>;
   fontFamily: { ui: string; mono: string };
   lineHeight: Record<keyof typeof LINE_HEIGHT, number>;
+  contentMaxWidth: ReturnType<typeof themeContentMaxWidth>;
   iconSize: typeof ICON_SIZE;
   fontWeight: typeof FONT_WEIGHT;
   borderRadius: typeof BORDER_RADIUS;
@@ -592,6 +625,7 @@ const commonTheme: CommonTheme = {
   fontSize: FONT_SIZE,
   fontFamily: { ui: DEFAULT_UI_FONT_STACK, mono: DEFAULT_MONO_FONT_STACK },
   lineHeight: LINE_HEIGHT,
+  contentMaxWidth: themeContentMaxWidth(DEFAULT_CONTENT_MAX_WIDTH),
   iconSize: ICON_SIZE,
   fontWeight: FONT_WEIGHT,
   borderRadius: BORDER_RADIUS,
@@ -599,14 +633,9 @@ const commonTheme: CommonTheme = {
   opacity: OPACITY,
 };
 
-/**
- * Window-level chrome a theme can bring besides colors. "classic" is the JAgentDesk shell
- * (sidebar with the nav list). "clickup" swaps in ClickUp's shell on desktop and mobile: a
- * global top bar, a vertical icon rail, a rounded content panel, a gradient composer and a
- * bottom tab bar on phones. Values are measured from ClickUp (see docs/themes.md).
- */
+/** Semantic chrome shared by controls; the selected built-in theme owns shell structure. */
 export interface ShellChrome {
-  kind: "classic" | "clickup";
+  kind: "classic" | "gumloop";
   /** Window background behind the top bar, rail and panel. */
   canvas: string;
   topBar: string;
@@ -630,7 +659,7 @@ export interface ShellChrome {
   sendGradient: readonly string[];
   /** Soft wash at the top-right of an empty agent screen. */
   heroGlow: string;
-  /** Phone bottom tab bar (ClickUp iOS). */
+  /** Phone bottom tab bar (Gumloop iOS). */
   tabBar: string;
   tabBarBorder: string;
   tabIdle: string;
@@ -641,6 +670,13 @@ export interface ShellChrome {
   titleWeightCompact: "300" | "400" | "500" | "600" | "700";
   buttonTextWeight: "400" | "500" | "600";
   controlRadius: number;
+  modalRadius: number;
+  searchHeight: number;
+  searchRadius: number;
+  tableRowHeight: number;
+  switchWidth: number;
+  switchHeight: number;
+  switchThumbSize: number;
   outlineBackground: string;
   outlineBorder: string;
   /** Settings/list page canvas behind white cards. */
@@ -649,17 +685,15 @@ export interface ShellChrome {
   cardBorder: string;
   cardRadius: number;
   sectionTitleColor: string;
-  /** Selected filter chip (ClickUp iOS "Unread": lavender fill, violet text). */
+  /** Selected filter chip (Gumloop iOS "Unread": lavender fill, violet text). */
   chipActiveBackground: string;
   chipActiveForeground: string;
   sectionTitleWeight: "400" | "500" | "600";
   rowTitleWeight: "400" | "500" | "600";
 }
 
-/** Kept as an alias: the ClickUp values are one instance of the shell tokens. */
-export type ClickUpShellChrome = ShellChrome;
-
 interface ClassicChromeSource {
+  selectedRow: string;
   borderAccent: string;
   surface0: string;
   surface1: string;
@@ -693,7 +727,7 @@ function classicChrome(c: ClassicChromeSource): ShellChrome {
     searchBackground: c.surface1,
     searchBorder: c.border,
     searchForeground: c.foregroundMuted,
-    selectedRow: c.surface3,
+    selectedRow: c.selectedRow,
     composerGradient: [c.border, c.border],
     sendGradient: [c.accent, c.accent],
     heroGlow: c.surface1,
@@ -706,6 +740,13 @@ function classicChrome(c: ClassicChromeSource): ShellChrome {
     titleWeightCompact: "400",
     buttonTextWeight: "400",
     controlRadius: BORDER_RADIUS.lg,
+    modalRadius: 12,
+    searchHeight: 34,
+    searchRadius: BORDER_RADIUS.md,
+    tableRowHeight: 44,
+    switchWidth: 34,
+    switchHeight: 20,
+    switchThumbSize: 16,
     outlineBackground: "transparent",
     outlineBorder: c.borderAccent,
     pageCanvas: c.surface0,
@@ -742,7 +783,7 @@ const darkShadow = {
 } as const;
 
 export function buildDarkTheme(
-  semanticColors: ReturnType<typeof buildDarkSemanticColors>,
+  semanticColors: Widen<ReturnType<typeof buildDarkSemanticColors>>,
   chrome: ShellChrome = classicChrome(semanticColors),
 ) {
   return {
@@ -887,175 +928,289 @@ export function buildLightTheme(
 
 export const lightTheme = buildLightTheme(lightSemanticColors);
 
-// ---------------------------------------------------------------------------
-// ClickUp — a violet, productivity-app palette. Values are measured from ClickUp's own web and
-// iOS UI (Mobbin captures); the per-token evidence lives in docs/themes.md. It follows the
-// system appearance, so it has a light and a dark half.
-// ---------------------------------------------------------------------------
-
-const CLICKUP_VIOLET = "#6149e7";
-
-// ClickUp shell, measured from w_purple_home (light, ClickUp's "Purple" theme) and
-// w_dark_home (dark); ids in docs/themes.md. The Brain composer gradient comes from
-// fef108fd-aab3-46a3-bf67-d41cdedd8553.
-export const CLICKUP_LIGHT_CHROME: ClickUpShellChrome = {
-  kind: "clickup",
-  canvas: "#fcfcfc",
-  topBar: "#fcfcfc",
-  railGradient: ["#5741d2", "#4332a2", "#2e2371"],
-  railForeground: "#ffffff",
-  railForegroundMuted: "rgba(255, 255, 255, 0.78)",
-  railActiveBackground: "#ffffff",
-  railActiveForeground: CLICKUP_VIOLET,
-  panelBorder: "#eaeaea",
-  createBackground: CLICKUP_VIOLET,
-  createForeground: "#ffffff",
-  searchBackground: "#ffffff",
-  searchBorder: "#e4e4e4",
-  searchForeground: "#676767",
-  selectedRow: "#eaeaea",
-  composerGradient: ["#40c8f4", "#912eff", "#ec02f7"],
-  sendGradient: ["#912eff", "#ec02f7"],
-  heroGlow: "#ffecee",
-  tabBar: "#ffffff",
-  tabBarBorder: "#f1f1f1",
-  tabIdle: "#8c8c8c",
-  tabCreateBackground: "#5b43d7",
-  tabCreateForeground: "#ffffff",
-  titleWeight: "600",
-  titleWeightCompact: "600",
-  buttonTextWeight: "500",
-  controlRadius: BORDER_RADIUS.md,
-  outlineBackground: "#ffffff",
-  outlineBorder: "#e4e4e4",
-  pageCanvas: "#f9f9f9",
-  cardBackground: "#ffffff",
-  cardBorder: "#ececec",
-  cardRadius: 10,
-  sectionTitleColor: "#202020",
-  chipActiveBackground: "#f2f2fe",
-  chipActiveForeground: CLICKUP_VIOLET,
-  sectionTitleWeight: "600",
-  rowTitleWeight: "500",
+// Gumloop values are pinned to spec 38, including the constructed syntax and ANSI palettes.
+export const gumloopLightSyntax = {
+  keyword: "#C2185B",
+  type: "#C2185B",
+  tag: "#C2185B",
+  comment: "#767676",
+  meta: "#767676",
+  string: "#0A7F3F",
+  regexp: "#0A7F3F",
+  link: "#0A7F3F",
+  number: "#0068B8",
+  literal: "#0068B8",
+  escape: "#0068B8",
+  function: "#0068B8",
+  definition: "#0068B8",
+  class: "#A3336F",
+  attribute: "#9A4B00",
+  property: "#0068B8",
+  operator: "#0068B8",
+  heading: "#0068B8",
+  variable: "#000000",
+  punctuation: "#4A4A4A",
+};
+const gumloopLightColors = {
+  ...lightSemanticColors,
+  surface0: "#FCFCFC",
+  surface1: "#FFFFFF",
+  surface2: "#F4F5F7",
+  surface3: "#EDEDED",
+  surface4: "#E4E4E4",
+  surfaceDiffEmpty: "#F4F5F7",
+  surfaceSidebar: "#FAFAFA",
+  surfaceSidebarHover: "#F5F5F5",
+  surfaceWorkspace: "#FCFCFC",
+  foreground: "#000000",
+  foregroundMuted: "#757575",
+  foregroundExtraMuted: "#A3A3A3",
+  scrollbarHandle: "#A3A3A3",
+  border: "#E9E9E9",
+  borderAccent: "#E9E9E9",
+  accent: "#019EFF",
+  accentBright: "#019EFF",
+  accentForeground: "#FFFFFF",
+  destructive: "#BD0E13",
+  destructiveForeground: "#FFFFFF",
+  success: "#0A7F3F",
+  successForeground: "#FFFFFF",
+  background: "#FCFCFC",
+  popover: "#FFFFFF",
+  popoverForeground: "#000000",
+  primary: "#1D1D1D",
+  primaryForeground: "#FFFFFF",
+  secondary: "#F4F5F7",
+  secondaryForeground: "#000000",
+  muted: "#F4F5F7",
+  mutedForeground: "#757575",
+  accentBorder: "#E9E9E9",
+  input: "#FFFFFF",
+  ring: "#019EFF",
+  interactionHighlight: "#F5F5F5",
+  selectedRow: "#F0F0F0",
+  surfaceSidebarSelected: "#F0F0F0",
+  accentPink: "#FF4EA6",
+  switchOn: "#0091FF",
+  statusSuccess: "#0A7F3F",
+  statusSuccessBackground: "#E7FCED",
+  statusDanger: "#BD0E13",
+  statusDangerBackground: "#FFEFF0",
+  statusWarning: "#8F5300",
+  statusWarningBackground: "#FFF4E0",
+  statusMerged: "#C2185B",
+  diffAddition: "#E7FCED",
+  diffDeletion: "#FFEFF0",
+  diffStatAddition: "#0A7F3F",
+  diffStatDeletion: "#BD0E13",
+  terminal: {
+    background: "#FFFFFF",
+    foreground: "#1D1D1D",
+    cursor: "#FF4EA6",
+    cursorAccent: "#FFFFFF",
+    selectionBackground: "rgba(1, 158, 255, 0.22)",
+    selectionForeground: "#1D1D1D",
+    black: "#1D1D1D",
+    red: "#BD0E13",
+    green: "#0A7F3F",
+    yellow: "#8F5300",
+    blue: "#0068B8",
+    magenta: "#C2185B",
+    cyan: "#00737C",
+    white: "#757575",
+    brightBlack: "#5C5C5C",
+    brightRed: "#E5484D",
+    brightGreen: "#1A9455",
+    brightYellow: "#B36A00",
+    brightBlue: "#019EFF",
+    brightMagenta: "#FF4EA6",
+    brightCyan: "#009AA6",
+    brightWhite: "#A3A3A3",
+  },
+};
+export const gumloopDarkSyntax = {
+  keyword: "#FF6FB5",
+  type: "#FF6FB5",
+  tag: "#FF6FB5",
+  comment: "#8C8C8C",
+  meta: "#8C8C8C",
+  string: "#5BD98A",
+  regexp: "#5BD98A",
+  link: "#5BD98A",
+  number: "#4DB8FF",
+  literal: "#4DB8FF",
+  escape: "#4DB8FF",
+  function: "#4DB8FF",
+  definition: "#4DB8FF",
+  class: "#FF9ACB",
+  attribute: "#FFB86B",
+  property: "#7DCBFF",
+  operator: "#7DCBFF",
+  heading: "#7DCBFF",
+  variable: "#F5F5F5",
+  punctuation: "#C8C8C8",
+};
+const gumloopDarkColors = {
+  ...jagentdeskDarkColors,
+  surface0: "#1F1F1F",
+  surface1: "#262626",
+  surface2: "#2E2E2E",
+  surface3: "#363636",
+  surface4: "#3F3F3F",
+  surfaceDiffEmpty: "#2E2E2E",
+  surfaceSidebar: "#171717",
+  surfaceSidebarHover: "#262626",
+  surfaceWorkspace: "#1F1F1F",
+  foreground: "#F5F5F5",
+  foregroundMuted: "#98999D",
+  foregroundExtraMuted: "#6B6B6F",
+  scrollbarHandle: "#6B6B6F",
+  border: "#2E2E2E",
+  borderAccent: "#2E2E2E",
+  accent: "#019EFF",
+  accentBright: "#019EFF",
+  accentForeground: "#FFFFFF",
+  destructive: "#FF6369",
+  destructiveForeground: "#FFFFFF",
+  success: "#5BD98A",
+  successForeground: "#FFFFFF",
+  background: "#1F1F1F",
+  popover: "#262626",
+  popoverForeground: "#F5F5F5",
+  primary: "#F5F5F5",
+  primaryForeground: "#171717",
+  secondary: "#2E2E2E",
+  secondaryForeground: "#F5F5F5",
+  muted: "#2E2E2E",
+  mutedForeground: "#98999D",
+  accentBorder: "#2E2E2E",
+  input: "#262626",
+  ring: "#019EFF",
+  interactionHighlight: "#262626",
+  selectedRow: "#2E2E2E",
+  surfaceSidebarSelected: "#2E2E2E",
+  accentPink: "#FF4EA6",
+  switchOn: "#0091FF",
+  statusSuccess: "#5BD98A",
+  statusSuccessBackground: "#1E3A2A",
+  statusDanger: "#FF6369",
+  statusDangerBackground: "#3D1F21",
+  statusWarning: "#F2C14E",
+  statusWarningBackground: "#3A2F17",
+  statusMerged: "#FF6FB5",
+  diffAddition: "rgba(91, 217, 138, 0.14)",
+  diffDeletion: "rgba(255, 99, 105, 0.14)",
+  diffStatAddition: "#5BD98A",
+  diffStatDeletion: "#FF6369",
+  terminal: {
+    background: "#1F1F1F",
+    foreground: "#F5F5F5",
+    cursor: "#FF4EA6",
+    cursorAccent: "#1F1F1F",
+    selectionBackground: "rgba(77, 184, 255, 0.30)",
+    selectionForeground: "#F5F5F5",
+    black: "#2E2E2E",
+    red: "#FF6369",
+    green: "#5BD98A",
+    yellow: "#F2C14E",
+    blue: "#4DB8FF",
+    magenta: "#FF6FB5",
+    cyan: "#4FD1D9",
+    white: "#D4D4D4",
+    brightBlack: "#757575",
+    brightRed: "#FF8A8F",
+    brightGreen: "#86E7A9",
+    brightYellow: "#F7D47E",
+    brightBlue: "#7DCBFF",
+    brightMagenta: "#FF9ACB",
+    brightCyan: "#7FE0E6",
+    brightWhite: "#FFFFFF",
+  },
 };
 
-export const CLICKUP_DARK_CHROME: ClickUpShellChrome = {
-  kind: "clickup",
-  canvas: "#111111",
-  topBar: "#111111",
-  railGradient: ["#191919"],
-  railForeground: "#ffffff",
-  railForegroundMuted: "#b8b8b8",
-  railActiveBackground: "#2a2a2a",
-  railActiveForeground: "#ffffff",
-  panelBorder: "#1f1f1f",
-  createBackground: "#ededed",
-  createForeground: "#111111",
-  searchBackground: "#2a2a2a",
-  searchBorder: "#2d2d2d",
-  searchForeground: "#b8b8b8",
-  selectedRow: "#2a2a2a",
-  composerGradient: ["#40c8f4", "#912eff", "#ec02f7"],
-  sendGradient: ["#912eff", "#ec02f7"],
-  heroGlow: "#1d1426",
-  tabBar: "#1e1e1e",
-  tabBarBorder: "#292929",
-  tabIdle: "#6d6d6d",
-  tabCreateBackground: "#a59ff7",
-  tabCreateForeground: "#1e1e1e",
-  titleWeight: "600",
-  titleWeightCompact: "600",
-  buttonTextWeight: "500",
-  controlRadius: BORDER_RADIUS.md,
-  outlineBackground: "#111111",
-  outlineBorder: "#2d2d2d",
-  pageCanvas: "#090909",
-  cardBackground: "#111111",
-  cardBorder: "#1f1f1f",
-  cardRadius: 10,
-  sectionTitleColor: "#fafafa",
-  chipActiveBackground: "#231e3d",
-  chipActiveForeground: "#a6a0f8",
-  sectionTitleWeight: "600",
-  rowTitleWeight: "500",
+function gumloopChrome(c: typeof gumloopLightColors, dark: boolean): ShellChrome {
+  return {
+    ...classicChrome(c),
+    kind: "gumloop",
+    canvas: c.surface0,
+    panelBorder: c.border,
+    createBackground: c.primary,
+    createForeground: c.primaryForeground,
+    searchBackground: c.surface1,
+    selectedRow: c.selectedRow,
+    composerGradient: dark
+      ? ["rgba(247, 178, 122, 0.6)", "rgba(244, 166, 207, 0.6)", "rgba(159, 212, 247, 0.6)"]
+      : ["#F7B27A", "#F4A6CF", "#9FD4F7"],
+    sendGradient: [c.primary, c.primary],
+    titleWeight: "600",
+    titleWeightCompact: "600",
+    buttonTextWeight: "500",
+    controlRadius: 10,
+    modalRadius: 16,
+    searchHeight: 46,
+    searchRadius: 10,
+    tableRowHeight: 72,
+    switchWidth: 44,
+    switchHeight: 24,
+    switchThumbSize: 20,
+    outlineBackground: c.surface1,
+    outlineBorder: c.border,
+    pageCanvas: c.surface0,
+    cardBackground: c.surface1,
+    cardBorder: c.border,
+    cardRadius: 14,
+    sectionTitleColor: c.foregroundMuted,
+    chipActiveBackground: c.surface1,
+    chipActiveForeground: c.foreground,
+    sectionTitleWeight: "500",
+    rowTitleWeight: "500",
+  };
+}
+export const GUMLOOP_LIGHT_CHROME = gumloopChrome(gumloopLightColors, false);
+export const GUMLOOP_DARK_CHROME = gumloopChrome(gumloopDarkColors, true);
+
+function gumloopShadow(alpha: number) {
+  return {
+    sm: {
+      shadowColor: `rgba(0, 0, 0, ${0.06 * alpha})`,
+      shadowOffset: { width: 0, height: 1 },
+      shadowRadius: 2,
+      elevation: 2,
+    },
+    md: {
+      shadowColor: `rgba(0, 0, 0, ${0.08 * alpha})`,
+      shadowOffset: { width: 0, height: 4 },
+      shadowRadius: 12,
+      elevation: 4,
+    },
+    lg: {
+      shadowColor: `rgba(0, 0, 0, ${0.12 * alpha})`,
+      shadowOffset: { width: 0, height: 12 },
+      shadowRadius: 32,
+      elevation: 8,
+    },
+  };
+}
+export const gumloopLightTheme = {
+  ...buildLightTheme(gumloopLightColors, GUMLOOP_LIGHT_CHROME),
+  colors: { ...gumloopLightColors, palette: baseColors, syntax: gumloopLightSyntax },
+  shadow: gumloopShadow(1),
 };
-
-export const clickupDarkTheme = buildDarkTheme(
-  {
-    ...buildDarkSemanticColors({
-      surface0: "#090909",
-      surface1: "#111111",
-      surface2: "#191919",
-      surface3: "#2a2a2a",
-      surface4: "#414141",
-      surfaceDiffEmpty: "#161616",
-      surfaceSidebar: "#191919",
-      surfaceSidebarHover: "#222222",
-      foreground: "#fafafa",
-      foregroundMuted: "#b8b8b8",
-      foregroundExtraMuted: "#757575",
-      scrollbarHandle: "#757575",
-      border: "#272727",
-      borderAccent: "#414141",
-      accent: CLICKUP_VIOLET,
-      // Violet text on #111111 needs the lighter tint to stay readable (8.1:1).
-      accentBright: "#a6a0f8",
-      accentForeground: "#ffffff",
-      destructive: "#cf2f2f",
-      terminalBlack: "#191919",
-      terminalBrightBlack: "#414141",
-      ring: CLICKUP_VIOLET,
-    }),
-    statusSuccess: "#6bba9a",
-    statusDanger: "#f98689",
-    statusWarning: "#ffc539",
-    statusMerged: "#a6a0f8",
-  },
-  CLICKUP_DARK_CHROME,
-);
-
-export const clickupLightTheme = buildLightTheme(
-  {
-    ...buildLightSemanticColors({
-      surface0: "#ffffff",
-      surface1: "#f9f9f9",
-      surface2: "#f0f0f0",
-      surface3: "#eaeaea",
-      surface4: "#cecece",
-      surfaceDiffEmpty: "#f4f4f4",
-      surfaceSidebar: "#f9f9f9",
-      foreground: "#202020",
-      foregroundMuted: "#676767",
-      foregroundExtraMuted: "#919191",
-      border: "#e9e9e9",
-      borderAccent: "#cecece",
-      accent: CLICKUP_VIOLET,
-      accentBright: "#7868e5",
-      accentForeground: "#ffffff",
-      primary: "#202020",
-      primaryForeground: "#ffffff",
-      destructive: "#cf2f2f",
-      terminalBlack: "#202020",
-      terminalBrightBlack: "#3f3f46",
-      ring: CLICKUP_VIOLET,
-    }),
-    surfaceSidebarHover: "#f0f0f0",
-    scrollbarHandle: "#919191",
-    input: "#ffffff",
-    success: "#279566",
-    statusSuccess: "#1f7a52",
-    statusDanger: "#cf2f2f",
-    statusWarning: "#9a6700",
-    statusMerged: "#5d47cd",
-  },
-  CLICKUP_LIGHT_CHROME,
-);
+export const gumloopDarkTheme = {
+  ...buildDarkTheme(gumloopDarkColors, GUMLOOP_DARK_CHROME),
+  colors: { ...gumloopDarkColors, palette: baseColors, syntax: gumloopDarkSyntax },
+  shadow: gumloopShadow(2),
+};
 
 // Keep compatibility with existing code
 export const theme = darkTheme;
 
 // Export a union type that works for both themes
-export type Theme = typeof darkTheme | typeof lightTheme;
+export type Theme =
+  | typeof darkTheme
+  | typeof lightTheme
+  | typeof gumloopLightTheme
+  | typeof gumloopDarkTheme;
 
 type UnistylesThemeKey =
   | "light"
@@ -1065,8 +1220,8 @@ type UnistylesThemeKey =
   | "darkClaude"
   | "darkGhostty"
   | "darkPureBlack"
-  | "clickupLight"
-  | "clickupDark";
+  | "gumloopLight"
+  | "gumloopDark";
 
 export const THEME_TO_UNISTYLES: Record<ThemeName, UnistylesThemeKey> = {
   light: "light",
@@ -1076,9 +1231,9 @@ export const THEME_TO_UNISTYLES: Record<ThemeName, UnistylesThemeKey> = {
   claude: "darkClaude",
   ghostty: "darkGhostty",
   pureBlack: "darkPureBlack",
-  // ClickUp is a light product; its dark half is its own, opt-in theme.
-  clickup: "clickupLight",
-  clickupDark: "clickupDark",
+  // Gumloop is a light product; its dark half is its own, opt-in theme.
+  gumloop: "gumloopLight",
+  gumloopDark: "gumloopDark",
 };
 
 /** Themes with a light and a dark half that switch with the system appearance. */
@@ -1087,7 +1242,7 @@ export const SCHEME_FOLLOWING_THEMES: Partial<
 > = {};
 
 /** The theme a fresh install starts with. Every other theme stays selectable. */
-export const DEFAULT_THEME: ThemeName = "clickup";
+export const DEFAULT_THEME: ThemeName = "gumloop";
 
 /**
  * A theme contributed by a plugin is applied into one of these two slots (by its
@@ -1107,6 +1262,6 @@ export const THEME_SWATCHES: Record<ThemeName, string> = {
   claude: "#D97757",
   ghostty: "#8caaee",
   pureBlack: "#000000",
-  clickup: CLICKUP_VIOLET,
-  clickupDark: "#191919",
+  gumloop: "#1D1D1D",
+  gumloopDark: "#171717",
 };

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -9,6 +9,24 @@ import { loadConfig, resolveBundledWebUiDistDir } from "./config.js";
 const roots: string[] = [];
 
 describe("server config", () => {
+  test.each([undefined, false, true])(
+    "restart recovery requires explicit opt-in (%s)",
+    async (enabled) => {
+      const jagentdeskHome = await mkdtemp(path.join(os.tmpdir(), "jagentdesk-config-recovery-"));
+      roots.push(jagentdeskHome);
+      await writeFile(
+        path.join(jagentdeskHome, "config.json"),
+        JSON.stringify({
+          version: 1,
+          agents: { resumeOnStartup: enabled, resumePrompt: "Continue exactly.\n" },
+        }),
+      );
+      const config = loadConfig(jagentdeskHome, { env: {} });
+      expect(config.resumeOnStartup).toBe(enabled === true);
+      expect(config.resumePrompt).toBe("Continue exactly.\n");
+    },
+  );
+
   afterEach(async () => {
     await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
   });
@@ -26,6 +44,17 @@ describe("server config", () => {
 
     expect(desktopConfig.desktopManaged).toBe(true);
     expect(standaloneConfig.desktopManaged).toBe(false);
+  });
+
+  test("idle runtime cleanup defaults on and supports a host-wide opt-out", async () => {
+    const jagentdeskHome = await mkdtemp(path.join(os.tmpdir(), "jagentdesk-config-idle-cleanup-"));
+    roots.push(jagentdeskHome);
+    expect(loadConfig(jagentdeskHome, { env: {} }).idleRuntimeCleanup).toBe(true);
+    await writeFile(
+      path.join(jagentdeskHome, "config.json"),
+      JSON.stringify({ agents: { idleRuntimeCleanup: false } }),
+    );
+    expect(loadConfig(jagentdeskHome, { env: {} }).idleRuntimeCleanup).toBe(false);
   });
 
   // Dev-only providers (mock, mock-slow) are listed only when isDev is true; production daemons,

@@ -939,3 +939,25 @@ describe("deriveProjectStatusBucket", () => {
     ).toBe("done");
   });
 });
+
+it("keeps background workspaces in the replica while filtering sidebar placements", () => {
+  const input = {
+    projects: [
+      project({
+        projectKey: "repo",
+        projectName: "repo",
+        iconWorkingDir: "/repo",
+        hosts: [{ serverId: "host-a", iconWorkingDir: "/repo", worktreeSupport: "supported" }],
+        workspaceKeys: ["host-a:visible", "host-a:background"],
+      }),
+    ],
+  };
+  const hidden = buildSidebarWorkspacePlacementModel({
+    ...input,
+    hiddenWorkspaceKeys: new Set(["host-a:background"]),
+  });
+  expect(hidden.workspaces.map((entry) => entry.workspaceId)).toEqual(["visible"]);
+  expect(
+    buildSidebarWorkspacePlacementModel(input).workspaces.map((entry) => entry.workspaceId),
+  ).toEqual(["visible", "background"]);
+});

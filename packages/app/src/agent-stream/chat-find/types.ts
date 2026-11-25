@@ -9,7 +9,7 @@ export interface ChatFindProps {
   items: StreamItem[];
   viewportRef: RefObject<StreamViewportHandle | null>;
   revealLoadedMessage(messageId: string): boolean;
-  visibleMessageIds: ReadonlySet<string>;
+  visibleMessageIds: Pick<ReadonlySet<string>, "has">;
   children: ReactNode;
 }
 export interface ChatFindExpansionProps {

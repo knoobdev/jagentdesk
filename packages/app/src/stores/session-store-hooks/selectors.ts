@@ -1,3 +1,4 @@
+import type { WorkspaceSort } from "@/projects/workspace-structure";
 import equal from "fast-deep-equal";
 import {
   buildWorkspaceStructureProjects,
@@ -141,6 +142,7 @@ export function selectHydratedWorkspaceServerIds(
 export function selectWorkspaceStructureProjects(
   state: SessionsSnapshot,
   serverIds: readonly string[],
+  workspaceSort?: WorkspaceSort,
 ): WorkspaceStructureProject[] {
   const sessions: Array<{
     serverId: string;
@@ -166,7 +168,7 @@ export function selectWorkspaceStructureProjects(
     return EMPTY_WORKSPACE_STRUCTURE.projects;
   }
 
-  return buildWorkspaceStructureProjects({ sessions });
+  return buildWorkspaceStructureProjects({ sessions, workspaceSort });
 }
 
 export function selectProject(
@@ -204,6 +206,7 @@ export function selectWorkspaceOrderByScope(state: SidebarOrderSnapshot): Record
 }
 
 export function composeWorkspaceStructure(input: {
+  workspaceSort?: WorkspaceSort;
   projects: WorkspaceStructureProject[];
   projectOrder: readonly string[];
   workspaceOrderByScope: Record<string, readonly string[]>;
@@ -217,11 +220,14 @@ export function composeWorkspaceStructure(input: {
       const workspaceOrder = input.workspaceOrderByScope[project.viewKey] ?? EMPTY_WORKSPACE_KEYS;
       return {
         ...project,
-        workspaceKeys: applyStoredOrdering({
-          items: project.workspaceKeys,
-          storedOrder: workspaceOrder,
-          getKey: (workspaceKey) => workspaceKey,
-        }),
+        workspaceKeys:
+          input.workspaceSort && input.workspaceSort !== "manual"
+            ? project.workspaceKeys
+            : applyStoredOrdering({
+                items: project.workspaceKeys,
+                storedOrder: workspaceOrder,
+                getKey: (workspaceKey) => workspaceKey,
+              }),
       };
     }),
     storedOrder: input.projectOrder,

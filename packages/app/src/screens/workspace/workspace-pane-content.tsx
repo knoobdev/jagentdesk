@@ -1,3 +1,4 @@
+import type { PaneHost } from "@/panels/panel-manifest";
 import React, { useMemo, type ComponentType } from "react";
 import invariant from "tiny-invariant";
 import {
@@ -8,7 +9,6 @@ import {
 } from "@/panels/pane-context";
 import { useStableEvent } from "@/hooks/use-stable-event";
 import { getPanelRegistration } from "@/panels/panel-registry";
-import { ensurePanelsRegistered } from "@/panels/register-panels";
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
 import { RenderProfile } from "@/utils/render-profiler";
 import type { WorkspaceFileOpenRequest } from "@/workspace/file-open";
@@ -21,6 +21,7 @@ export interface WorkspacePaneContentModel {
 
 export interface BuildWorkspacePaneContentModelInput {
   tab: WorkspaceTabDescriptor;
+  host?: PaneHost;
   normalizedServerId: string;
   normalizedWorkspaceId: string;
   fileNavigationRevision?: number;
@@ -33,6 +34,7 @@ export interface BuildWorkspacePaneContentModelInput {
 
 export function buildWorkspacePaneContentModel({
   tab,
+  host = "main",
   normalizedServerId,
   normalizedWorkspaceId,
   fileNavigationRevision,
@@ -42,13 +44,13 @@ export function buildWorkspacePaneContentModel({
   onOpenWorkspaceFile,
   onOpenImportSheet,
 }: BuildWorkspacePaneContentModelInput): WorkspacePaneContentModel {
-  ensurePanelsRegistered();
   const registration = getPanelRegistration(tab.kind);
   invariant(registration, `No panel registration for kind: ${tab.kind}`);
   return {
     key: `${normalizedServerId}:${normalizedWorkspaceId}:${tab.tabId}`,
     Component: registration.component,
     paneContextValue: {
+      host,
       serverId: normalizedServerId,
       workspaceId: normalizedWorkspaceId,
       tabId: tab.tabId,
@@ -84,6 +86,7 @@ export function WorkspacePaneContent({
   const openImportSheet = useStableEvent(paneContextValue.openImportSheet);
   const stablePaneContextValue = useMemo(
     () => ({
+      host: paneContextValue.host,
       serverId: paneContextValue.serverId,
       workspaceId: paneContextValue.workspaceId,
       tabId: paneContextValue.tabId,
@@ -100,6 +103,7 @@ export function WorkspacePaneContent({
       openFileInWorkspace,
       openImportSheet,
       openTab,
+      paneContextValue.host,
       paneContextValue.serverId,
       paneContextValue.fileNavigationRevision,
       paneContextValue.tabId,

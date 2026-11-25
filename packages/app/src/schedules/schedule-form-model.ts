@@ -710,24 +710,20 @@ function buildInitialState(snapshot: ScheduleFormSnapshot): ScheduleFormState {
 
 function toFormState(state: ScheduleFormState): FormState {
   return {
-    serverId: state.selectedServerId,
     provider: state.selectedProvider,
     modeId: state.selectedMode,
     model: state.selectedModel,
     thinkingOptionId: state.selectedThinkingOptionId,
-    workingDir: state.workingDir,
   };
 }
 
 function applyResolvedFormState(state: ScheduleFormState, form: FormState): ScheduleFormState {
   return {
     ...state,
-    selectedServerId: form.serverId,
     selectedProvider: form.provider,
     selectedMode: form.modeId,
     selectedModel: form.model,
     selectedThinkingOptionId: form.thinkingOptionId,
-    workingDir: form.workingDir,
   };
 }
 
@@ -939,7 +935,9 @@ export function openScheduleForm(snapshot: ScheduleFormSnapshot): ScheduleFormMo
       }
       publish({
         ...resolved,
-        modelSelectorProviders: buildSelectableProviderSelectorProviders(providerEntries),
+        modelSelectorProviders: buildSelectableProviderSelectorProviders(providerEntries, {
+          selectedProvider: resolved.selectedProvider,
+        }),
         providerResolutionByServerId,
         providerSnapshotRequest: isPendingResolution ? null : state.providerSnapshotRequest,
       });
@@ -950,8 +948,6 @@ export function openScheduleForm(snapshot: ScheduleFormSnapshot): ScheduleFormMo
       }
       userModified = {
         ...userModified,
-        serverId: true,
-        workingDir: true,
       };
       publish(
         clearProviderSelection({
@@ -977,7 +973,7 @@ export function openScheduleForm(snapshot: ScheduleFormSnapshot): ScheduleFormMo
       if (!providerScopeChanged && state.selectedProjectOptionId === target.optionId) {
         return;
       }
-      userModified = { ...userModified, serverId: true, workingDir: true };
+      userModified = { ...userModified };
       const nextState = {
         ...state,
         selectedServerId: target.serverId,

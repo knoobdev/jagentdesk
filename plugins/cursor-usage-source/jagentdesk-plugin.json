@@ -1,0 +1,12 @@
+{
+  "id": "cursor-usage-source",
+  "requirements": {
+    "jagentdesk": ">=0.9.59"
+  },
+  "kind": "builtin",
+  "name": "Cursor usage",
+  "description": "Read local cursor account quotas.",
+  "defaultEnabled": true,
+  "requires": [],
+  "builtinOrder": 29
+}

@@ -1,7 +1,7 @@
-import { DockerScreen } from "@/screens/docker-screen";
-
+import { BuiltinScreen } from "@/plugins/builtin/surfaces";
+import { useHostRouteServerId } from "@/navigation/host-route-context";
 export default function HostDockerRoute() {
-  return <DockerScreen />;
+  const serverId = useHostRouteServerId();
+  return serverId ? <BuiltinScreen segment="docker" serverId={serverId} /> : null;
 }
-
 export { ErrorBoundary } from "expo-router";

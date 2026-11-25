@@ -35,23 +35,28 @@ export function extractTransportMessage(event: unknown, nodeIsBinary?: boolean):
   return { data: String(raw ?? ""), isBinary: true };
 }
 
+function connectionFailureText(message: string): string {
+  if (!message.includes("wrong_tailnet_account")) return message;
+  return "wrong_tailnet_account: Different Tailscale account. Tags on only one side can cause this; check device tags and use the same Tailscale account on both devices.";
+}
+
 export function describeTransportClose(event?: unknown): string {
   if (!event) {
     return "Transport closed";
   }
   if (event instanceof Error) {
-    return event.message;
+    return connectionFailureText(event.message);
   }
   if (typeof event === "string") {
-    return event;
+    return connectionFailureText(event);
   }
   if (typeof event === "object") {
     const record = event as { reason?: unknown; message?: unknown; code?: unknown };
     if (typeof record.reason === "string" && record.reason.trim().length > 0) {
-      return record.reason.trim();
+      return connectionFailureText(record.reason.trim());
     }
     if (typeof record.message === "string" && record.message.trim().length > 0) {
-      return record.message.trim();
+      return connectionFailureText(record.message.trim());
     }
     if (typeof record.code === "number") {
       return `Transport closed (code ${record.code})`;
@@ -65,15 +70,15 @@ export function describeTransportError(event?: unknown): string {
     return "Transport error";
   }
   if (event instanceof Error) {
-    return event.message;
+    return connectionFailureText(event.message);
   }
   if (typeof event === "string") {
-    return event;
+    return connectionFailureText(event);
   }
   if (typeof event === "object") {
     const record = event as { message?: unknown };
     if (typeof record.message === "string" && record.message.trim().length > 0) {
-      return record.message.trim();
+      return connectionFailureText(record.message.trim());
     }
   }
   return "Transport error";
@@ -132,4 +137,11 @@ export function encodeUtf8String(value: string): Uint8Array {
     out[i] = value.charCodeAt(i) & 0xff;
   }
   return out;
+}
+
+export function messageTooLargeError(size: number, limit: number): Error {
+  const toMiB = (bytes: number) => (bytes / (1024 * 1024)).toFixed(1);
+  return new Error(
+    `Message is too large to send (${toMiB(size)} MiB). The limit is ${toMiB(limit)} MiB, so send fewer or smaller attachments.`,
+  );
 }

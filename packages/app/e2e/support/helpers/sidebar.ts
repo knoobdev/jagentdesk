@@ -185,3 +185,8 @@ export async function expectMobileAgentSidebarVisible(page: Page): Promise<void>
 export async function expectMobileAgentSidebarHidden(page: Page): Promise<void> {
   await expect(page.getByTestId("sidebar-sessions")).not.toBeInViewport({ timeout: 5_000 });
 }
+
+export async function selectSidebarStatusGrouping(page: Page): Promise<void> {
+  await page.getByTestId("sidebar-display-preferences-menu").click();
+  await page.getByTestId("sidebar-grouping-status").click();
+}

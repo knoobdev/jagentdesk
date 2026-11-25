@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { readPiTranscript, type PiTranscript } from "./transcript.js";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { Logger } from "pino";
 
@@ -15,7 +17,6 @@ import {
   type PiStartSessionInput,
 } from "./runtime.js";
 import type {
-  PiAgentMessage,
   PiModel,
   PiPromptAck,
   PiRpcCommand,
@@ -76,17 +77,25 @@ export class PiCliRuntime implements PiRuntime {
       await process.close(input.signal.reason);
       input.signal.throwIfAborted();
     }
-    return new PiCliRuntimeSession(process, this.commandsRpcName);
+    return new PiCliRuntimeSession({
+      process,
+      commandsRpcName: this.commandsRpcName,
+      newSession: input.session === undefined,
+    });
   }
+}
+
+interface PiCliRuntimeSessionOptions {
+  process: JsonlRpcProcess;
+  commandsRpcName: string;
+  newSession: boolean;
 }
 
 class PiCliRuntimeSession implements PiRuntimeSession {
   private readonly subscribers = new Set<(event: PiRuntimeEvent) => void>();
 
-  constructor(
-    private readonly process: JsonlRpcProcess,
-    private readonly commandsRpcName: string,
-  ) {
+  constructor(private readonly options: PiCliRuntimeSessionOptions) {
+    const { process } = options;
     process.onMessage((message) => {
       this.emit(message as PiRuntimeEvent);
     });
@@ -106,7 +115,7 @@ class PiCliRuntimeSession implements PiRuntimeSession {
     message: string,
     images?: Array<{ type: "image"; data: string; mimeType: string }>,
   ): Promise<PiPromptAck> {
-    const { id: requestId, promise } = this.process.startRequest({
+    const { id: requestId, promise } = this.options.process.startRequest({
       type: "prompt",
       message,
       ...(images?.length ? { images } : {}),
@@ -155,9 +164,23 @@ class PiCliRuntimeSession implements PiRuntimeSession {
     return (await this.request({ type: "get_state" })) as PiSessionState;
   }
 
-  async getMessages(): Promise<PiAgentMessage[]> {
-    const data = (await this.request({ type: "get_messages" })) as { messages?: PiAgentMessage[] };
-    return data.messages ?? [];
+  async getHistory(): Promise<PiTranscript> {
+    const state = await this.getState();
+    if (!state.sessionFile) throw new Error("Pi history requires a persisted session file");
+    try {
+      return readPiTranscript(await readFile(state.sessionFile, "utf8"));
+    } catch (error) {
+      // Pi does not create the file until the first conversation message is saved.
+      if (
+        this.options.newSession &&
+        state.messageCount === 0 &&
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "ENOENT"
+      )
+        return { messages: [], userEntries: [] };
+      throw error;
+    }
   }
 
   async getAvailableModels(timeoutMs?: number | null): Promise<PiModel[]> {
@@ -208,21 +231,21 @@ class PiCliRuntimeSession implements PiRuntimeSession {
   }
 
   async getCommands(): Promise<PiRpcSlashCommand[]> {
-    const data = (await this.request({ type: this.commandsRpcName })) as {
+    const data = (await this.request({ type: this.options.commandsRpcName })) as {
       commands?: PiRpcSlashCommand[];
     };
     return data.commands ?? [];
   }
 
   sendRawFrame(frame: object & { type: string }): void {
-    this.process.send(frame);
+    this.options.process.send(frame);
   }
 
   respondToExtensionUiRequest(
     id: string,
     response: { value?: string; confirmed?: boolean; cancelled?: boolean },
   ): void {
-    this.process.send({ type: "extension_ui_response", id, ...response });
+    this.options.process.send({ type: "extension_ui_response", id, ...response });
   }
 
   cancelExtensionUiRequest(id: string): void {
@@ -230,22 +253,22 @@ class PiCliRuntimeSession implements PiRuntimeSession {
   }
 
   async close(): Promise<void> {
-    await this.process.close(new Error("Pi RPC session is closed"));
+    await this.options.process.close(new Error("Pi RPC session is closed"));
   }
 
   request(command: PiRpcCommand, timeoutMs?: number | null): Promise<unknown> {
-    return this.process.request(command, timeoutMs);
+    return this.options.process.request(command, timeoutMs);
   }
 
   private requestStopWork(command: PiRpcCommand): Promise<void> {
-    return this.process.requestStopWork(command);
+    return this.options.process.requestStopWork(command);
   }
 
   private async waitForCompletion(command: PiRpcCommand): Promise<void> {
     // Pi only replies after its compaction work is durable. Its child process and
     // session close paths already reject pending RPCs, so no elapsed-time failure
     // is useful here.
-    await this.process.request(command, JSONL_RPC_NO_TIMEOUT);
+    await this.options.process.request(command, JSONL_RPC_NO_TIMEOUT);
   }
 
   private emit(event: PiRuntimeEvent): void {

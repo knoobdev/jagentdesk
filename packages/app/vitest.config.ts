@@ -1,3 +1,4 @@
+import { build } from "esbuild";
 import { defineConfig, configDefaults } from "vitest/config";
 import { playwright } from "@vitest/browser-playwright";
 import path from "path";
@@ -13,6 +14,49 @@ const resolvePackageEntry = (packageName: string) => {
 };
 
 export default defineConfig({
+  plugins: [
+    {
+      name: "markdown-wasm-commonjs-export",
+      transform(source, id) {
+        if (!id.split("?")[0].endsWith("/lib/module/web/wasm/md4c.js")) return;
+        const trailer = source.search(/\nif\s*\(typeof exports === ['"]object['"]/);
+        if (trailer < 0) throw new Error("Markdown WASM CommonJS trailer was not found");
+        return { code: `${source.slice(0, trailer)}\nexport default createMd4cModule;`, map: null };
+      },
+    },
+    {
+      name: "reanimated-web-style-helpers",
+      transform(_source, id) {
+        if (
+          !id.split("?")[0].endsWith("/lib/module/ReanimatedModule/js-reanimated/webUtils.web.js")
+        )
+          return;
+        return {
+          code: [
+            'export { default as createReactDOMStyle } from "react-native-web/dist/exports/StyleSheet/compiler/createReactDOMStyle";',
+            'export { createTransformValue, createTextShadowValue } from "react-native-web/dist/exports/StyleSheet/preprocess";',
+          ].join("\n"),
+          map: null,
+        };
+      },
+    },
+
+    {
+      name: "bundle-i18n-resources",
+      async transform(_source, id) {
+        if (path.resolve(id) !== path.resolve(__dirname, "src/i18n/i18next.ts")) return;
+        const result = await build({
+          entryPoints: [id],
+          bundle: true,
+          format: "esm",
+          platform: "neutral",
+          external: ["i18next", "react-i18next"],
+          write: false,
+        });
+        return { code: result.outputFiles[0].text, map: null };
+      },
+    },
+  ],
   // Expo compiles JSX with the automatic runtime (no `import React` needed); esbuild's
   // default is the classic runtime, which breaks files that render JSX without React
   // in scope (e.g. remote-job-card.tsx) under test.
@@ -26,20 +70,39 @@ export default defineConfig({
         test: {
           name: "unit",
           environment: "node",
-          include: ["src/**/*.{test,spec}.{ts,tsx}", "native-release-version.test.ts"],
+          include: [
+            "src/**/*.{test,spec}.{ts,tsx}",
+            "../../plugins/*/client/**/*.{test,spec}.{ts,tsx}",
+            "modules/**/*.test.{ts,tsx}",
+            "native-release-version.test.ts",
+            // Statically linked built-in features keep their client tests next to their code.
+            "../../plugins/*/client/**/*.{test,spec}.{ts,tsx}",
+          ],
           setupFiles: [path.resolve(__dirname, "vitest.setup.ts")],
-          exclude: [...configDefaults.exclude, "e2e/**", "src/**/*.browser.{test,spec}.{ts,tsx}"],
+          exclude: [
+            ...configDefaults.exclude,
+            "e2e/**",
+            "src/**/*.browser.{test,spec}.{ts,tsx}",
+            "../../plugins/**/*.browser.{test,spec}.{ts,tsx}",
+          ],
         },
       },
       {
         extends: true,
         test: {
           name: "browser",
+          setupFiles: [path.resolve(__dirname, "vitest.browser.setup.ts")],
           fileParallelism: false,
-          include: ["src/**/*.browser.{test,spec}.{ts,tsx}"],
+          include: [
+            "src/**/*.browser.{test,spec}.{ts,tsx}",
+            "../../plugins/*/client/**/*.browser.{test,spec}.{ts,tsx}",
+          ],
           browser: {
             enabled: true,
-            provider: playwright(),
+            provider: playwright({
+              // Exercise real WebGL glyph rendering on GPU-less CI runners.
+              launchOptions: { args: ["--enable-unsafe-swiftshader"] },
+            }),
             headless: true,
             connectTimeout: 180_000,
             instances: [{ browser: "chromium" }],
@@ -60,11 +123,16 @@ export default defineConfig({
       deps: {
         fallbackCJS: true,
         inline: [
+          "react-native-enriched-markdown",
           "zustand",
           "@tanstack/react-query",
           "react-native-web",
+          "react-native-reanimated",
+          "react-native-worklets",
           "react-native-gesture-handler",
           "react-native-keyboard-controller",
+          "react-native-screens",
+          "@floating-ui/react-native",
         ],
       },
     },
@@ -74,13 +142,48 @@ export default defineConfig({
   // so it scans the native files and dies on imports react-native-web has no answer for.
   // Unbundled, the same imports go through the resolver below and land on the web files.
   optimizeDeps: {
+    // The optimizer must choose the same platform leaves as Vite/Metro, including CJS
+    // imports from Expo Router's native-screen and asset entry points.
+    esbuildOptions: {
+      resolveExtensions: [
+        ".web.mjs",
+        ".web.js",
+        ".web.mts",
+        ".web.ts",
+        ".web.jsx",
+        ".web.tsx",
+        ".mjs",
+        ".js",
+        ".mts",
+        ".ts",
+        ".jsx",
+        ".tsx",
+        ".json",
+      ],
+    },
     // Bundle the CJS dependencies of the excluded gesture-handler package for the browser.
     include: [
+      "@marijn/find-cluster-break",
+      "warn-once",
+      "@react-native/assets-registry/registry",
+      "react-native-web/dist/exports/StyleSheet/compiler/createReactDOMStyle",
+      "react-native-web/dist/exports/StyleSheet/preprocess",
       "react/jsx-runtime",
+      "react/jsx-dev-runtime",
       "react-native-gesture-handler > hoist-non-react-statics",
       "react-native-gesture-handler > invariant",
     ],
     exclude: [
+      "react-native-enriched-markdown",
+      "expo/src/winter",
+      // Expo core has web modules that must pass through the platform resolver.
+      "expo-modules-core",
+      "expo-asset",
+      "expo-constants",
+      "expo-clipboard",
+      "expo-crypto",
+      "expo-web-browser",
+      "expo-file-system",
       "react-native-reanimated",
       "react-native-gesture-handler",
       "react-native-keyboard-controller",
@@ -111,6 +214,12 @@ export default defineConfig({
     ],
     alias: [
       { find: "@", replacement: path.resolve(__dirname, "src") },
+      // Built-in feature tests live in ../../plugins, where app-only packages do not resolve;
+      // pin the subpath their mocks name to the module the host API loads.
+      {
+        find: /^expo-router\/react-navigation$/,
+        replacement: path.join(resolvePackageEntry("expo-router"), "react-navigation.js"),
+      },
       // Keep keyboard-controller's imports in Vite so native aliases and platform extensions apply.
       {
         find: /^react-native-keyboard-controller$/,
@@ -119,12 +228,28 @@ export default defineConfig({
           "lib/module/index.js",
         ),
       },
+      // The CJS floating-ui entry requires native React Native before aliases can apply.
+      {
+        find: /^@floating-ui\/react-native$/,
+        replacement: path.resolve(
+          resolvePackageEntry("@floating-ui/react-native"),
+          "dist/floating-ui.react-native.esm.js",
+        ),
+      },
+      // Screens exposes platform-specific leaf modules; keep them in Vite's web resolver.
+      {
+        find: /^react-native-screens$/,
+        replacement: path.resolve(
+          resolvePackageEntry("react-native-screens"),
+          "lib/module/index.js",
+        ),
+      },
       // The CJS entry bypasses Vite's React Native alias and web-extension resolution.
       {
         find: /^react-native-gesture-handler$/,
         replacement: path.resolve(
-          rootNodeModules,
-          "react-native-gesture-handler/lib/module/index.js",
+          resolvePackageEntry("react-native-gesture-handler"),
+          "lib/module/index.js",
         ),
       },
       // Must precede the `react-native` alias: a string `find` matches by prefix, so this subpath

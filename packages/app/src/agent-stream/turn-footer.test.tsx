@@ -6,7 +6,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("react-native", () => ({
-  Platform: { OS: "web" },
+  Platform: {
+    OS: "web",
+    select: (options: Record<string, unknown>) => options.web ?? options.default,
+  },
   View: ({ children, testID }: { children?: React.ReactNode; testID?: string }) => (
     <div data-testid={testID}>{children}</div>
   ),
@@ -29,8 +32,8 @@ vi.mock("react-native-unistyles", () => ({
   withUnistyles: <T,>(component: T) => component,
 }));
 
-vi.mock("@/components/clickup-shell/use-clickup-chrome", () => ({
-  useIsClickUpTheme: () => false,
+vi.mock("@/components/gumloop-shell/use-gumloop-chrome", () => ({
+  useIsGumloopTheme: () => false,
 }));
 
 vi.mock("@/components/message", () => ({

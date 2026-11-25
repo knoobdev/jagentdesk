@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import type {
   AgentClient,
-  AgentFeature,
   AgentModelDefinition,
   AgentMode,
   AgentSessionConfig,
@@ -13,7 +12,7 @@ import type {
 const mockState = vi.hoisted(() => {
   interface ConstructorEntry {
     runtimeSettings?: unknown;
-    providerParams?: unknown;
+
     commandsRpcType?: unknown;
   }
 
@@ -25,12 +24,10 @@ const mockState = vi.hoisted(() => {
       cursor: [] as Array<{
         command: string[];
         env?: Record<string, string>;
-        providerParams?: unknown;
       }>,
       trae: [] as Array<{
         command: string[];
         env?: Record<string, string>;
-        providerParams?: unknown;
       }>,
       pi: [] as ConstructorEntry[],
       genericAcp: [] as Array<{
@@ -38,7 +35,6 @@ const mockState = vi.hoisted(() => {
         env?: Record<string, string>;
         providerId?: string;
         label?: string;
-        providerParams?: unknown;
       }>,
     },
     isCommandAvailable: vi.fn(async (_command: string) => false),
@@ -237,13 +233,12 @@ vi.mock("./providers/pi/agent.js", () => ({
 
     constructor(options: {
       runtimeSettings?: unknown;
-      providerParams?: unknown;
+
       commandsRpcType?: unknown;
     }) {
       this.runtimeSettings = options.runtimeSettings;
       const entry: ConstructorEntry = {
         runtimeSettings: options.runtimeSettings,
-        providerParams: options.providerParams,
       };
       if (options.commandsRpcType !== undefined) {
         entry.commandsRpcType = options.commandsRpcType;
@@ -290,21 +285,7 @@ vi.mock("./providers/generic-acp-agent.js", () => ({
       env?: Record<string, string>;
       providerId?: string;
       label?: string;
-      providerParams?: unknown;
     }) {
-      const providerParams =
-        options.providerParams &&
-        typeof options.providerParams === "object" &&
-        !Array.isArray(options.providerParams)
-          ? (options.providerParams as Record<string, unknown>)
-          : {};
-      this.capabilities = {
-        ...this.capabilities,
-        supportsMcpServers:
-          typeof providerParams.supportsMcpServers === "boolean"
-            ? providerParams.supportsMcpServers
-            : this.capabilities.supportsMcpServers,
-      };
       this.runtimeSettings = {
         command: {
           mode: "replace",
@@ -317,7 +298,6 @@ vi.mock("./providers/generic-acp-agent.js", () => ({
         env: options.env,
         providerId: options.providerId,
         label: options.label,
-        providerParams: options.providerParams,
       });
     }
 
@@ -355,11 +335,7 @@ vi.mock("./providers/cursor-acp-agent.js", () => ({
     readonly provider = "acp";
     readonly runtimeSettings?: unknown;
 
-    constructor(options: {
-      command: string[];
-      env?: Record<string, string>;
-      providerParams?: unknown;
-    }) {
+    constructor(options: { command: string[]; env?: Record<string, string> }) {
       this.runtimeSettings = {
         command: {
           mode: "replace",
@@ -370,7 +346,6 @@ vi.mock("./providers/cursor-acp-agent.js", () => ({
       mockState.constructorArgs.cursor.push({
         command: options.command,
         env: options.env,
-        providerParams: options.providerParams,
       });
     }
 
@@ -393,17 +368,19 @@ vi.mock("./providers/cursor-acp-agent.js", () => ({
       return true;
     }
 
-    async listFeatures(config: AgentSessionConfig): Promise<AgentFeature[]> {
+    async listControls(config: AgentSessionConfig) {
       mockState.cursorListFeaturesConfigs.push(config);
-      return [
-        {
-          type: "select",
-          id: "fast",
-          label: "Fast",
-          value: "false",
-          options: [{ id: "false", label: "Off" }],
-        },
-      ];
+      return {
+        controls: [
+          {
+            type: "select",
+            key: "fast",
+            label: "Fast",
+            choices: [{ value: "false", label: "Off" }],
+          },
+        ],
+        options: { fast: "false" },
+      };
     }
   },
 }));
@@ -421,11 +398,7 @@ vi.mock("./providers/trae-acp-agent.js", () => ({
     readonly provider = "acp";
     readonly runtimeSettings?: unknown;
 
-    constructor(options: {
-      command: string[];
-      env?: Record<string, string>;
-      providerParams?: unknown;
-    }) {
+    constructor(options: { command: string[]; env?: Record<string, string> }) {
       this.runtimeSettings = {
         command: {
           mode: "replace",
@@ -436,7 +409,6 @@ vi.mock("./providers/trae-acp-agent.js", () => ({
       mockState.constructorArgs.trae.push({
         command: options.command,
         env: options.env,
-        providerParams: options.providerParams,
       });
     }
 
@@ -748,7 +720,6 @@ test("new provider extending acp uses GenericACPAgentClient", () => {
       },
       providerId: "my-agent",
       label: "My Agent",
-      providerParams: undefined,
     },
     {
       command: ["my-agent", "--acp"],
@@ -757,46 +728,6 @@ test("new provider extending acp uses GenericACPAgentClient", () => {
       },
       providerId: "my-agent",
       label: "My Agent",
-      providerParams: undefined,
-    },
-  ]);
-});
-
-test("ACP provider params can disable MCP support", () => {
-  const registry = buildProviderRegistry(logger, {
-    providerOverrides: {
-      "no-mcp-acp": {
-        extends: "acp",
-        label: "No MCP ACP",
-        command: ["no-mcp-acp", "serve"],
-        params: {
-          supportsMcpServers: false,
-        },
-      },
-    },
-  });
-
-  const client = registry["no-mcp-acp"].createClient(logger);
-
-  expect(client.capabilities.supportsMcpServers).toBe(false);
-  expect(mockState.constructorArgs.genericAcp).toEqual([
-    {
-      command: ["no-mcp-acp", "serve"],
-      env: undefined,
-      providerId: "no-mcp-acp",
-      label: "No MCP ACP",
-      providerParams: {
-        supportsMcpServers: false,
-      },
-    },
-    {
-      command: ["no-mcp-acp", "serve"],
-      env: undefined,
-      providerId: "no-mcp-acp",
-      label: "No MCP ACP",
-      providerParams: {
-        supportsMcpServers: false,
-      },
     },
   ]);
 });
@@ -822,14 +753,12 @@ test("cursor provider extending acp uses CursorACPAgentClient", () => {
       env: {
         CURSOR_AGENT_LOG: "debug",
       },
-      providerParams: undefined,
     },
     {
       command: ["cursor-agent", "acp"],
       env: {
         CURSOR_AGENT_LOG: "debug",
       },
-      providerParams: undefined,
     },
   ]);
   expect(mockState.constructorArgs.genericAcp).toEqual([]);
@@ -849,19 +778,16 @@ test("wrapped cursor client lists ACP features through the inner provider", asyn
   const client = registry.cursor.createClient(logger);
 
   await expect(
-    client.listFeatures?.({
+    client.listControls?.({
       provider: "cursor",
       cwd: "/tmp/cursor",
     }),
-  ).resolves.toEqual([
-    {
-      type: "select",
-      id: "fast",
-      label: "Fast",
-      value: "false",
-      options: [{ id: "false", label: "Off" }],
-    },
-  ]);
+  ).resolves.toEqual({
+    controls: [
+      { type: "select", key: "fast", label: "Fast", choices: [{ value: "false", label: "Off" }] },
+    ],
+    options: { fast: "false" },
+  });
   expect(mockState.cursorListFeaturesConfigs).toEqual([
     {
       provider: "acp",
@@ -886,12 +812,10 @@ test("traecli provider extending acp uses TraeACPAgentClient", () => {
     {
       command: ["traecli", "acp", "serve"],
       env: undefined,
-      providerParams: undefined,
     },
     {
       command: ["traecli", "acp", "serve"],
       env: undefined,
-      providerParams: undefined,
     },
   ]);
   expect(mockState.constructorArgs.genericAcp).toEqual([]);

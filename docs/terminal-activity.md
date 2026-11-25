@@ -1,8 +1,6 @@
-# Terminal Activity Indicators
+# Terminal activity
 
-JAgentDesk surfaces terminal activity as a tab indicator (the same "running" dot used by agents).
-
-## Current state
+JAgentDesk shows terminal activity as a tab indicator (the same "running" dot agents use) and rolls it into workspace status and notifications.
 
 Terminal activity is source-agnostic plumbing. `TerminalActivityTracker` holds the current per-terminal state and emits transitions to the manager, worker protocol, websocket subscription, app buckets, dots, and notifications.
 
@@ -51,7 +49,7 @@ Claude hook mapping:
 
 - `UserPromptSubmit` → `running`
 - `Stop`, `StopFailure`, `SessionEnd` → `idle`
-- `Notification` with `reason` or `matcher` equal to `idle_prompt` → `needs-input`
+- `Notification` with `notification_type` equal to `idle_prompt` → `needs-input`
 
 Codex hook mapping:
 
@@ -73,7 +71,7 @@ The daemon maps hook states onto terminal activity like an agent lifecycle plus 
 
 Client heartbeats include the focused terminal id. When a visible client focuses a terminal with an `attentionReason`, the daemon clears the attention and leaves the terminal idle. Plain idle terminal activity does not contribute to workspace status, so a workspace whose only attention source was that terminal rolls up from `needs_input` or `attention` back to `done`.
 
-### Agent hook installation
+## Agent hook installation
 
 Installing hooks edits the user's real agent config files, so it is opt-in. The daemon setting
 `enableTerminalAgentHooks` (persisted under `daemon.enableTerminalAgentHooks`, default `false`)
@@ -93,7 +91,7 @@ When enabled, JAgentDesk installs provider hooks globally:
 
 Installation is marker-based/idempotent for config hooks and exact-file/idempotent for the OpenCode plugin. JAgentDesk preserves user hooks, removes only its own marker-matched command hooks, and leaves hooks installed across daemon shutdown. Outside a JAgentDesk terminal they are inert because the command or plugin is gated on `JAGENTDESK_TERMINAL_ID`.
 
-Provider variation lives in `AGENT_HOOK_PROVIDERS`: provider id, installed events, config install metadata, and runtime event-to-activity resolution. The daemon calls `installRegisteredAgentHooks()` once; the CLI calls `resolveHookActivity(provider, event, input)`. Adding a provider should add one provider entry and register it in `AGENT_HOOK_PROVIDERS`, without editing the generic CLI command or daemon bootstrap.
+Provider variation lives in `AGENT_HOOK_PROVIDERS`: provider id, installed events, config install metadata, and runtime event-to-activity resolution. The daemon calls `installRegisteredAgentHooks()` once; the CLI calls `resolveHookActivity(provider, event, input)`. To add a provider, add one entry under `packages/server/src/terminal/agent-hooks/<provider>/` and register it in `AGENT_HOOK_PROVIDERS` (`agent-hooks/provider-registry.ts`); do not edit the generic CLI command or daemon bootstrap.
 
 The installed hook command keeps the config portable and resolves the CLI at runtime:
 

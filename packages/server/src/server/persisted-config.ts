@@ -1,20 +1,21 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import { BuiltinPluginConfigSchema } from "@jagentdesk/protocol/builtin-plugins";
 import { DEFAULT_JAGENTDESK_DAEMON_PORT } from "@jagentdesk/protocol/defaults";
-
 import {
   AgentProviderRuntimeSettingsMapSchema,
   migrateProviderSettings,
   ProviderOverridesSchema,
+  type AgentProviderRuntimeSettingsMap,
 } from "./agent/provider-launch-config.js";
-import type { AgentProviderRuntimeSettingsMap } from "./agent/provider-launch-config.js";
 import { ensurePrivateFile, writePrivateFileAtomicSync } from "./private-files.js";
 import { TerminalProfileSchema } from "@jagentdesk/protocol/messages";
 import { PluginIdSchema, PluginSourceSchema } from "@jagentdesk/protocol/plugin-config";
 import { BrowserFingerprintProfileSchema } from "@jagentdesk/protocol/browser-automation/fingerprint-profile";
 import { JAgentDeskServicePortAllocationSchema } from "@jagentdesk/protocol/jagentdesk-config-schema";
 import { OrchestrationConfigSchema } from "@jagentdesk/protocol/orchestration";
+import { AgentProfileSchema } from "@jagentdesk/protocol/agent-profile";
 
 export const LogLevelSchema = z.enum(["trace", "debug", "info", "warn", "error", "fatal"]);
 export const LogFormatSchema = z.enum(["pretty", "json"]);
@@ -50,22 +51,6 @@ const LogConfigSchema = z
   })
   .strict();
 
-const OpenAiSpeechEndpointSchema = z
-  .object({
-    apiKey: z.string().trim().min(1).optional(),
-    baseUrl: z.string().trim().min(1).optional(),
-  })
-  .strict();
-
-const OpenAiProviderSchema = z
-  .object({
-    apiKey: z.string().min(1).optional(),
-    baseUrl: z.string().trim().min(1).optional(),
-    stt: OpenAiSpeechEndpointSchema.optional(),
-    tts: OpenAiSpeechEndpointSchema.optional(),
-  })
-  .strict();
-
 const LocalSpeechProviderSchema = z
   .object({
     modelsDir: z.string().min(1).optional(),
@@ -74,7 +59,6 @@ const LocalSpeechProviderSchema = z
 
 const ProvidersSchema = z
   .object({
-    openai: OpenAiProviderSchema.optional(),
     local: LocalSpeechProviderSchema.optional(),
   })
   .strict();
@@ -102,18 +86,54 @@ const SpeechProviderIdSchema = z
   .toLowerCase()
   .pipe(z.enum(["openai", "local"]));
 
+const SpeechModelSchema = z.string().min(1).optional();
+const OpenAiConnectionFields = {
+  apiKey: z.string().trim().min(1).optional(),
+  baseUrl: z.string().trim().min(1).optional(),
+};
+
+export const SpeechSttConfigSchema = z.discriminatedUnion("provider", [
+  z
+    .object({
+      provider: z.literal("local"),
+      model: SpeechModelSchema,
+      language: z.string().trim().min(1).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      provider: z.literal("openai"),
+      ...OpenAiConnectionFields,
+      model: SpeechModelSchema,
+      language: z.string().trim().min(1).optional(),
+      confidenceThreshold: z.number().optional(),
+    })
+    .strict(),
+]);
+
+export const SpeechTtsConfigSchema = z.discriminatedUnion("provider", [
+  z
+    .object({
+      provider: z.literal("local"),
+      model: SpeechModelSchema,
+      speakerId: z.number().int().optional(),
+      speed: z.number().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      provider: z.literal("openai"),
+      ...OpenAiConnectionFields,
+      model: SpeechModelSchema,
+      voice: z.string().trim().min(1).optional(),
+    })
+    .strict(),
+]);
+
 const FeatureDictationSchema = z
   .object({
     enabled: z.boolean().optional(),
-    stt: z
-      .object({
-        provider: SpeechProviderIdSchema.optional(),
-        model: z.string().min(1).optional(),
-        language: z.string().trim().min(1).optional(),
-        confidenceThreshold: z.number().optional(),
-      })
-      .strict()
-      .optional(),
+    stt: SpeechSttConfigSchema.optional(),
   })
   .strict();
 
@@ -127,30 +147,14 @@ const FeatureVoiceModeSchema = z
       })
       .strict()
       .optional(),
-    stt: z
-      .object({
-        provider: SpeechProviderIdSchema.optional(),
-        model: z.string().min(1).optional(),
-        language: z.string().trim().min(1).optional(),
-      })
-      .strict()
-      .optional(),
+    stt: SpeechSttConfigSchema.optional(),
     turnDetection: z
       .object({
         provider: SpeechProviderIdSchema.optional(),
       })
       .strict()
       .optional(),
-    tts: z
-      .object({
-        provider: SpeechProviderIdSchema.optional(),
-        model: z.string().min(1).optional(),
-        voice: z.enum(["alloy", "echo", "fable", "onyx", "nova", "shimmer"]).optional(),
-        speakerId: z.number().int().optional(),
-        speed: z.number().optional(),
-      })
-      .strict()
-      .optional(),
+    tts: SpeechTtsConfigSchema.optional(),
   })
   .strict();
 
@@ -190,17 +194,41 @@ function isLegacyProviderEntry(value: unknown): boolean {
   return typeof (command as Record<string, unknown>).mode === "string";
 }
 
+function isConfigRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function configRecord(value: unknown): Record<string, unknown> | undefined {
+  return isConfigRecord(value) ? value : undefined;
+}
+
 function normalizeAgentProviders(value: unknown): unknown {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return value;
+  if (!isConfigRecord(value)) return value;
+
+  let rawProviders = value;
+  const goose = configRecord(value.goose);
+  // COMPAT(gooseProvider): added in v0.17.0, remove after 2027-05-20 once legacy configs have migrated.
+  if (goose?.extends === "acp") {
+    const { extends: _base, description: _description, command, ...overrides } = goose;
+    const usesDefaultCommand =
+      Array.isArray(command) &&
+      command.length === 2 &&
+      command[0] === "goose" &&
+      command[1] === "acp";
+    rawProviders = {
+      ...value,
+      goose: {
+        ...overrides,
+        ...(command !== undefined && !usesDefaultCommand ? { command } : {}),
+      },
+    };
   }
 
-  const rawProviders = value as Record<string, unknown>;
   const hasLegacyEntries = Object.values(rawProviders).some((entry) =>
     isLegacyProviderEntry(entry),
   );
   if (!hasLegacyEntries) {
-    return value;
+    return rawProviders;
   }
 
   const legacyEntries: Record<string, unknown> = {};
@@ -216,7 +244,7 @@ function normalizeAgentProviders(value: unknown): unknown {
 
   const parsedLegacyEntries = AgentProviderRuntimeSettingsMapSchema.safeParse(legacyEntries);
   if (!parsedLegacyEntries.success) {
-    return value;
+    return rawProviders;
   }
 
   return {
@@ -238,7 +266,12 @@ export const PersistedConfigSchema = z
         listen: z.string().optional(),
         hostnames: z.union([z.literal(true), z.array(z.string())]).optional(),
         allowedHosts: z.union([z.literal(true), z.array(z.string())]).optional(),
-        trustedProxies: z.union([z.literal(true), z.array(z.string())]).optional(),
+        trustedProxies: z
+          .union([z.literal(true), z.array(z.string())])
+          .optional()
+          .describe(
+            'Express trusted proxy setting for X-Forwarded-* headers. Defaults to ["loopback"]. Use true only when the final trusted proxy overwrites client-supplied forwarded headers.',
+          ),
         mcp: z
           .object({
             enabled: z.boolean().optional(),
@@ -268,6 +301,16 @@ export const PersistedConfigSchema = z
           })
           .passthrough()
           .optional(),
+        // Relay second connection path (spec 35.3). Default ON; endpoint is the
+        // deployed Worker and is overridable here or via JAGENTDESK_RELAY_*.
+        relay: z
+          .object({
+            enabled: z.boolean().optional(),
+            endpoint: z.string().min(1).optional(),
+            useTls: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
         git: z
           .object({
             maxProcessesPerSecond: z.number().int().positive().optional(),
@@ -280,6 +323,7 @@ export const PersistedConfigSchema = z
         appendSystemPrompt: z.string().optional(),
         operatorContext: z.string().optional(),
         terminalProfiles: z.array(TerminalProfileSchema).optional(),
+        agentProfiles: z.array(AgentProfileSchema).optional(),
         orchestration: OrchestrationConfigSchema.optional(),
         cors: z
           .object({
@@ -292,9 +336,22 @@ export const PersistedConfigSchema = z
             // COMPAT(serviceProxyEnabled): added 2026-06-02, remove after 2026-12-02.
             // Parsed only to suppress optional public/listen layers for old configs;
             // localhost service proxying remains always enabled.
-            enabled: z.boolean().optional(),
-            listen: z.string().optional(),
-            publicBaseUrl: z.url().optional(),
+            enabled: z
+              .boolean()
+              .optional()
+              .describe(
+                "Compatibility shim. false suppresses optional service proxy listen/public layers only; localhost proxying remains enabled.",
+              ),
+            listen: z
+              .string()
+              .optional()
+              .describe(
+                "Optional service-only listener address. Presence enables the standalone service proxy listener.",
+              ),
+            publicBaseUrl: z
+              .url()
+              .optional()
+              .describe("Optional public base URL for service host aliases."),
           })
           .strict()
           .optional(),
@@ -325,12 +382,17 @@ export const PersistedConfigSchema = z
 
     providers: ProvidersSchema.optional(),
     // Plugins persist at the top level, matching upstream's config layout.
+    builtinPlugins: BuiltinPluginConfigSchema.optional(),
+    usage: z.object({ enabled: z.boolean() }).optional(),
     pluginsEnabled: z.boolean().optional(),
     plugins: z.record(PluginIdSchema, PluginSourceSchema).optional(),
     worktrees: WorktreesConfigSchema.optional(),
     agents: z
       .object({
+        resumeOnStartup: z.boolean().optional(),
+        resumePrompt: z.string().optional(),
         providers: z.preprocess(normalizeAgentProviders, ProviderOverridesSchema).optional(),
+        idleRuntimeCleanup: z.boolean().optional(),
         metadataGeneration: AgentMetadataGenerationSchema.optional(),
       })
       .strict()
@@ -370,6 +432,7 @@ const DEFAULT_PERSISTED_CONFIG = PersistedConfigSchema.parse({
 interface LoggerLike {
   child(bindings: Record<string, unknown>): LoggerLike;
   info(...args: unknown[]): void;
+  warn?(...args: unknown[]): void;
 }
 
 function getConfigPath(jagentdeskHome: string): string {
@@ -380,43 +443,86 @@ function getLogger(logger: LoggerLike | undefined): LoggerLike | undefined {
   return logger?.child({ module: "config" });
 }
 
-// Removed config fields are stripped before parsing so the strict schema does not
-// reject a config written by an older release. The stripped values are discarded,
-// not migrated — there is no back-compat for the removed `providers.openai.voice`
-// block (use `providers.openai.stt` / `providers.openai.tts`).
-function stripRemovedConfigFields(parsed: unknown): unknown {
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return parsed;
+// COMPAT(speechProviderConfig): added in v0.12.0, remove after 2027-04-26.
+// Fold shared credentials once at the file boundary; consumers see only the strict
+// per-site shape. Never include credential values in diagnostics.
+function normalizeSpeechProviderConfig(parsed: unknown, logger?: LoggerLike): unknown {
+  if (!isConfigRecord(parsed)) return parsed;
+  const root = structuredClone(parsed);
+  const providers = configRecord(root.providers);
+  const legacy = configRecord(providers?.openai);
+  const features = configRecord(root.features);
+  const foldedKeys = new Set<string>();
+  for (const [feature, kind] of [
+    ["dictation", "stt"],
+    ["voiceMode", "stt"],
+    ["voiceMode", "tts"],
+  ] as const) {
+    const site = configRecord(configRecord(features?.[feature])?.[kind]);
+    if (site) normalizeSpeechSite(site, kind, legacy, foldedKeys);
   }
-
-  const root = { ...(parsed as Record<string, unknown>) };
-  const providers = root.providers;
-  if (!providers || typeof providers !== "object" || Array.isArray(providers)) {
-    return root;
+  if (legacy) warnDiscardedSpeechKeys(legacy, foldedKeys, logger);
+  if (providers) {
+    delete providers.openai;
+    const local = configRecord(providers.local);
+    if (local) delete local.autoDownload;
   }
-
-  const providersRecord = { ...(providers as Record<string, unknown>) };
-
-  const local = providersRecord.local;
-  if (local && typeof local === "object" && !Array.isArray(local)) {
-    const localRecord = { ...(local as Record<string, unknown>) };
-    delete localRecord.autoDownload;
-    providersRecord.local = localRecord;
-  }
-
-  const openai = providersRecord.openai;
-  if (openai && typeof openai === "object" && !Array.isArray(openai)) {
-    const openaiRecord = { ...(openai as Record<string, unknown>) };
-    // COMPAT(openaiVoiceConfig): added 2026-06-30, remove after 2026-12-30.
-    // Drop a `providers.openai.voice` block left by an older release so the strict
-    // schema doesn't reject it. The value is discarded, not migrated — there is no
-    // back-compat; configure `providers.openai.stt` / `providers.openai.tts` instead.
-    delete openaiRecord.voice;
-    providersRecord.openai = openaiRecord;
-  }
-
-  root.providers = providersRecord;
   return root;
+}
+
+function normalizeSpeechSite(
+  site: Record<string, unknown>,
+  kind: "stt" | "tts",
+  legacy: Record<string, unknown> | undefined,
+  foldedKeys: Set<string>,
+) {
+  site.provider =
+    typeof site.provider === "string"
+      ? site.provider.trim().toLowerCase()
+      : (site.provider ?? "local");
+  if (kind === "stt" && site.provider === "local") {
+    delete site.confidenceThreshold;
+  }
+  if (kind === "tts") {
+    if (site.provider === "local") delete site.voice;
+    if (site.provider === "openai") {
+      delete site.speakerId;
+      delete site.speed;
+    }
+  }
+  if (site.provider !== "openai" || !legacy) return;
+  const endpoint = configRecord(legacy[kind]);
+  for (const field of ["apiKey", "baseUrl"] as const) {
+    if (site[field] !== undefined) continue;
+    if (endpoint?.[field] !== undefined) {
+      site[field] = endpoint[field];
+      foldedKeys.add(`providers.openai.${kind}.${field}`);
+    } else if (legacy[field] !== undefined) {
+      site[field] = legacy[field];
+      foldedKeys.add(`providers.openai.${field}`);
+    }
+  }
+}
+
+function warnDiscardedSpeechKeys(
+  legacy: Record<string, unknown>,
+  foldedKeys: Set<string>,
+  logger?: LoggerLike,
+) {
+  const keys = [
+    ["providers.openai.apiKey", legacy.apiKey],
+    ...["stt", "tts"].map((kind) => [
+      `providers.openai.${kind}.apiKey`,
+      configRecord(legacy[kind])?.apiKey,
+    ]),
+  ] as const;
+  for (const [keyPath, key] of keys) {
+    if (key && typeof keyPath === "string" && !foldedKeys.has(keyPath)) {
+      const message = `Dropped ${keyPath}: no use site in config.json selects OpenAI; re-enter it when selecting OpenAI.`;
+      if (logger?.warn) logger.warn(message);
+      else console.warn(message);
+    }
+  }
 }
 
 export function loadPersistedConfig(jagentdeskHome: string, logger?: LoggerLike): PersistedConfig {
@@ -457,8 +563,7 @@ export function loadPersistedConfig(jagentdeskHome: string, logger?: LoggerLike)
     });
   }
 
-  const migrated = stripRemovedConfigFields(parsed);
-  const result = PersistedConfigSchema.safeParse(migrated);
+  const result = PersistedConfigSchema.safeParse(normalizeSpeechProviderConfig(parsed, log));
   if (!result.success) {
     const issues = result.error.issues
       .map((i) => `  - ${i.path.join(".")}: ${i.message}`)

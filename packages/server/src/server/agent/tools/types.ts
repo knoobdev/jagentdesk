@@ -1,4 +1,16 @@
+import type { ProviderJAgentDeskToolsPolicy } from "@jagentdesk/protocol/provider-config";
 import type { z } from "zod";
+
+export class JAgentDeskToolInputError extends Error {
+  readonly status = 400;
+  readonly issues?: z.ZodError["issues"];
+
+  constructor(message: string, issues?: z.ZodError["issues"]) {
+    super(message);
+    this.issues = issues;
+    this.name = "JAgentDeskToolInputError";
+  }
+}
 
 export interface JAgentDeskToolExecutionContext {
   signal?: AbortSignal;
@@ -21,7 +33,10 @@ export interface JAgentDeskToolConfig {
 export interface JAgentDeskToolDefinition extends JAgentDeskToolConfig {
   name: string;
   description: string;
-  handler: (input: unknown, context: JAgentDeskToolExecutionContext) => Promise<JAgentDeskToolResult>;
+  handler: (
+    input: unknown,
+    context: JAgentDeskToolExecutionContext,
+  ) => Promise<JAgentDeskToolResult>;
 }
 
 export interface JAgentDeskToolCatalog {
@@ -35,6 +50,8 @@ export interface JAgentDeskToolCatalog {
 }
 
 export interface JAgentDeskToolRuntimeContext {
+  callerAgentLabels?: Record<string, string>;
+  jagentdeskToolPolicy?: ProviderJAgentDeskToolsPolicy;
   callerAgentId?: string;
   enableVoiceTools?: boolean;
   voiceOnly?: boolean;

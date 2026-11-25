@@ -7,23 +7,24 @@ canonical files and are trying to add or change one.
 
 ## Canonical files
 
-| File                                     | Use case                                                          |
-| ---------------------------------------- | ----------------------------------------------------------------- |
-| `components/ui/combobox.tsx`             | Anchored picker with search; mobile falls back to bottom sheet    |
-| `components/ui/tooltip.tsx`              | Non-interactive hover/long-press tooltip                          |
-| `components/workspace-hover-card.tsx`    | Desktop-web hover card with measure + computePosition + Portal    |
-| `components/ui/autocomplete-popover.tsx` | Slash-command autocomplete anchored to the focused composer input |
+| File                                  | Use case                                                          |
+| ------------------------------------- | ----------------------------------------------------------------- |
+| `components/ui/combobox.tsx`          | Anchored picker with search; mobile falls back to bottom sheet    |
+| `components/ui/tooltip.tsx`           | Non-interactive hover/long-press tooltip                          |
+| `components/workspace-hover-card.tsx` | Desktop-web hover card with measure + computePosition + Portal    |
+| `components/ui/autocomplete-popover/` | Slash-command autocomplete anchored to the focused composer input |
 
-Each handles a different mix of concerns: combobox owns input focus, tooltip is
-non-interactive, hover-card is web-only desktop, autocomplete keeps the composer
-input focused while its scrollable list lives in a Portal. There is no shared
-"floating panel" primitive yet — when a fifth use case shows up we can revisit;
-until then prefer copying the closest file and trimming.
+All paths are under `packages/app/src/`. Each handles a different mix of
+concerns: combobox owns input focus, tooltip is non-interactive, hover-card is
+web-only desktop, autocomplete keeps the composer input focused while its
+scrollable list lives in a Portal. Menus have their own engine
+([menus.md](menus.md)). For anything else, copy the closest file and trim.
 
 ## Popover width contract
 
 Combobox desktop popovers are never narrower than their trigger, and they grow
-with content up to a ceiling that is never below the trigger:
+with content up to a ceiling that is never below the trigger
+(`components/ui/combobox-frame-style.ts`):
 
 ```ts
 const floor = Math.max(desktopMinWidth ?? 0, referenceWidth ?? 200);
@@ -32,16 +33,9 @@ const frameStyle = { minWidth: floor, maxWidth: Math.max(400, floor) };
 
 `desktopMinWidth` is an explicit floor-raiser. It does not cap width, and the
 trigger still wins when it is wider. Changing this default requires re-verifying
-every consumer listed here.
-
-Consumers: `composer/agent-controls/mode-control.tsx`,
-`composer/agent-controls/index.tsx`, `composer/index.tsx`,
-`components/combined-model-selector.tsx`, `components/hosts/host-picker.tsx`
-(including `components/hosts/host-filter.tsx`), `components/branch-switcher.tsx`,
-`components/left-sidebar.tsx`, `components/ui/select-field.tsx` (schedule form),
-`screens/new-workspace-screen.tsx` plus `screens/new-workspace/project-picker.ts`,
-`components/import-session-sheet.tsx`, `screens/workspace/workspace-screen.tsx`,
-`screens/settings-screen.tsx`, and `screens/project-settings-screen.tsx`.
+every consumer: each `<Combobox>` and `<HostPicker>` call site in
+`packages/app/src` and `plugins/*/client`. `SelectField` (the form kit) and the
+sidebar host switcher are both consumers.
 
 ## Gotcha 1 — Android touch hit-test by parent bounds
 
@@ -87,7 +81,8 @@ Web's `<Modal>` puts them in the browser top layer, where no ordinary modal
 portal can cover them.
 
 Painting and keyboard ownership use the same relative layer model. Register
-desktop modal, combobox, and dropdown focus scopes with `useWebOverlayRegistration`; the
+desktop modal, combobox, and dropdown focus scopes with `useOverlayRegistration`
+(`@/keyboard`); the
 highest painted scope alone receives overlay keys, traps focus, and restores
 focus when it closes. Do not add component-local global Escape listeners: two
 stacked overlays would both close on one keypress.
@@ -97,7 +92,7 @@ the React tree, carry the opener's current layer through the host store and
 restore it with `OverlayLayerProvider`. Otherwise painting and keyboard
 ownership silently reset at the app root. When the opener is a global keyboard
 action and has no component context to carry, resolve the host layer with
-`useGlobalWebOverlayLayer` on its closed-to-open transition. It captures the
+`useGlobalOverlayLayer` (`lib/overlay-root.ts`) on its closed-to-open transition. It captures the
 current top registered layer before the new host joins the stack; do not give a
 global dialog a fixed root-derived modal layer.
 
@@ -209,7 +204,7 @@ both:
 - **Once `anchorRect` is set but `contentSize` isn't, render the wrapper with
   the final width but `opacity: 0`.** The first visible paint is at the
   correct position. This is the combobox pattern —
-  `shouldHideDesktopContent` at `combobox.tsx:481, 876`. **Do not** use
+  `shouldHideDesktopContent` in `combobox.tsx` and `combobox-frame-style.ts`. **Do not** use
   `top: -9999` as the placeholder; the layout work still happens at -9999 and
   any subsequent state-flash is visible when you flip back.
 

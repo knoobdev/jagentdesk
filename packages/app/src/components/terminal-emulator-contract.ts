@@ -1,10 +1,10 @@
+import type { TerminalCharacterWidths } from "../terminal/character-widths";
 import type {
   TerminalFindHandle,
   TerminalFindResult,
 } from "../terminal/runtime/terminal-emulator-runtime";
 import type { Ref } from "react";
 import type { ITheme } from "@xterm/xterm";
-import type { TerminalState } from "@jagentdesk/protocol/messages";
 import type { TerminalInputModeState } from "@jagentdesk/protocol/terminal-input-mode";
 import type { TerminalOutputData } from "../terminal/runtime/terminal-emulator-runtime";
 import type {
@@ -12,14 +12,14 @@ import type {
   TerminalLocalFileLinkTarget,
 } from "../terminal/local-links/terminal-local-link-provider";
 import type { TerminalClipboardWriter } from "../terminal/native-renderer/terminal-selection";
+import type { TerminalFile } from "../terminal/file-paste";
 import type { PendingTerminalModifiers } from "../utils/terminal-keys";
 import type { TerminalRendererReadyChange } from "../utils/terminal-renderer-readiness";
 
 export interface TerminalEmulatorHandle {
   find?: TerminalFindHandle;
   writeOutput: (data: TerminalOutputData) => void;
-  restoreOutput: (data: TerminalOutputData) => void;
-  renderSnapshot: (state: TerminalState | null) => void;
+  replay: (event: import("@jagentdesk/client").TerminalReplayEvent) => void;
   paste: (text: string) => void;
   copySelection: (clipboard: TerminalClipboardWriter) => Promise<string>;
   clear: () => void;
@@ -33,6 +33,7 @@ export interface TerminalEmulatorProps {
   ref: Ref<TerminalEmulatorHandle>;
   streamKey: string;
   supportsTerminalInputModeReplay: boolean;
+  characterWidths: TerminalCharacterWidths;
   testId?: string;
   xtermTheme?: ITheme;
   scrollbackLines: number;
@@ -42,7 +43,6 @@ export interface TerminalEmulatorProps {
   swipeGesturesEnabled?: boolean;
   onSwipeLeft?: () => void;
   onSwipeRight?: () => void;
-  initialSnapshot?: TerminalState | null;
   onFindRequest?: () => void;
   onFindResult?: (result: TerminalFindResult) => void;
   onInput?: (data: string) => Promise<void> | void;
@@ -74,4 +74,5 @@ export interface TerminalEmulatorProps {
   pendingModifiers?: PendingTerminalModifiers;
   focusRequestToken?: number;
   resizeRequestToken?: number;
+  onFilePaste?: (file: Promise<TerminalFile | null>) => void;
 }

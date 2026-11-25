@@ -1,3 +1,4 @@
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { useCallback, useMemo } from "react";
 import { Gesture } from "react-native-gesture-handler";
 import { useSharedValue } from "react-native-reanimated";
@@ -10,6 +11,17 @@ import { useMobilePanelsRuntime } from "./provider";
 import { resolveMobilePanelGestureIntent } from "./gesture-intent";
 
 const MOBILE_WEB_EDGE_SWIPE_WIDTH = 32;
+/** A horizontal surface takes the current touch before either panel opens. */
+export function usePanelAwareHorizontalScrollGesture() {
+  const { leftOpenGestureRef, rightOpenGestureRef } = useMobilePanelsRuntime();
+  return useMemo(
+    () =>
+      Gesture.Native()
+        .blocksExternalGesture(leftOpenGestureRef, rightOpenGestureRef)
+        .disallowInterruption(true),
+    [leftOpenGestureRef, rightOpenGestureRef],
+  );
+}
 
 function isCurrentSelection(startedRevision: number): boolean {
   return usePanelStore.getState().mobilePanel.revision === startedRevision;
@@ -43,8 +55,10 @@ export function useOpenAgentListGesture(enabled: boolean) {
     openGesturesBlocked,
     position,
     updateGesture,
-    windowWidth,
+    windowWidth: viewportWidth,
   } = useMobilePanelsRuntime();
+  const gumloop = useIsGumloopTheme();
+  const windowWidth = gumloop ? Math.min(324, viewportWidth * 0.85) : viewportWidth;
   const horizontalScroll = useHorizontalScrollOptional();
   const { startedRevision, touchStartX, touchStartY } = useGestureState();
   const showMobileAgentList = usePanelStore((state) => state.showMobileAgentList);
@@ -84,7 +98,7 @@ export function useOpenAgentListGesture(enabled: boolean) {
           if (
             !canBeginMobilePanelGesture(motionState.value, "agent", position.value) ||
             horizontalScroll?.isAnyScrolledRight.value ||
-            (isWeb && touchStartX.value > MOBILE_WEB_EDGE_SWIPE_WIDTH) ||
+            ((isWeb || gumloop) && touchStartX.value > MOBILE_WEB_EDGE_SWIPE_WIDTH) ||
             panIntent === "fail"
           ) {
             stateManager.fail();
@@ -112,6 +126,7 @@ export function useOpenAgentListGesture(enabled: boolean) {
           }
         }),
     [
+      gumloop,
       commit,
       enabled,
       beginGesture,
@@ -138,8 +153,10 @@ export function useCloseAgentListGesture() {
     motionState,
     position,
     updateGesture,
-    windowWidth,
+    windowWidth: viewportWidth,
   } = useMobilePanelsRuntime();
+  const gumloop = useIsGumloopTheme();
+  const windowWidth = gumloop ? Math.min(324, viewportWidth * 0.85) : viewportWidth;
   const { startedRevision, touchStartX, touchStartY } = useGestureState();
   const showMobileAgent = usePanelStore((state) => state.showMobileAgent);
   const commit = useRevisionCommit(showMobileAgent);

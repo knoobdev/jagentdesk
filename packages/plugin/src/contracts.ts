@@ -1,5 +1,7 @@
-import type { JsonValue } from "@jagentdesk/protocol/agent-types";
-import type { PluginRpcContract } from "./rpc.js";
+import { type PluginText } from "./text.js";
+import { type PluginSerializableIcon } from "./icons.js";
+import { type JsonValue } from "@jagentdesk/protocol/agent-types";
+import { type PluginRpcContract } from "./rpc.js";
 
 export interface PluginTheme {
   readonly colors: {
@@ -35,24 +37,54 @@ export interface PluginWorkspaceSnapshot {
 
 export interface PluginAgentSnapshot {
   readonly id: string;
+
   readonly workspaceId: string;
+
   readonly provider: string;
+
   readonly status: "initializing" | "idle" | "running" | "error" | "closed";
+
+  /** Shells and monitors the agent left running after its turn. 0 when none are live. */
+  readonly backgroundWork: { readonly count: number };
+
+  /** A helper hidden from tabs, lists and attention. Fixed at creation. */
+  readonly background: boolean;
+
   readonly createdAt: string;
+
   readonly updatedAt: string;
+
   readonly lastActivityAt: string;
+
   readonly title: string | null;
+
   readonly cwd: string;
+
   readonly model: string | null;
+
   readonly currentModeId: string | null;
+
   readonly thinkingOptionId: string | null;
+
   readonly requiresAttention: boolean;
+
   readonly attentionReason: "finished" | "error" | "permission" | null;
+
   readonly parentAgentId: string | null;
+
   readonly labels: Readonly<Record<string, string>>;
+
+  /** Structured data plugins store on the agent. */
+  readonly metadata: Readonly<Record<string, JsonValue>>;
 }
 
 export interface PluginThemeColors {
+  sidebar?: string;
+  surface3?: string;
+  surface4?: string;
+  foregroundExtraMuted?: string;
+  surfaceSidebarHover?: string;
+  surfaceSidebarSelected?: string;
   background: string;
   foreground: string;
   raised: string;
@@ -63,19 +95,19 @@ export interface PluginThemeColors {
   ring: string;
 }
 
-export interface PluginThemeContribution {
+export interface PluginThemeContribution<Text extends PluginText = string> {
   id: string;
-  name: string;
+  name: Text;
   appearance: "light" | "dark";
   colors: PluginThemeColors;
 }
 
-export interface PluginAttachmentSourceContribution {
+export interface PluginAttachmentSourceContribution<Text extends PluginText = string> {
   id: string;
-  title: string;
-  icon: string;
-  pickerTitle: string;
-  searchPlaceholder: string;
+  title: Text;
+  icon: PluginSerializableIcon;
+  pickerTitle: Text;
+  searchPlaceholder: Text;
   search: PluginRpcContract;
 }
 

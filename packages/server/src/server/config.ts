@@ -26,6 +26,8 @@ import { resolveGitProcessPolicy } from "../utils/git-process-scheduler.js";
 import { DEFAULT_JAGENTDESK_DAEMON_PORT } from "@jagentdesk/protocol/defaults";
 
 const DEFAULT_APP_BASE_URL = "jagentdesk://app";
+
+export const DEFAULT_RELAY_ENDPOINT = "desk-relay.jagents.workers.dev";
 const DEFAULT_TRUSTED_PROXIES = ["loopback"];
 
 interface ResolveBundledWebUiDistDirInput {
@@ -378,9 +380,9 @@ function resolveOperatorContext(persisted: ReturnType<typeof loadPersistedConfig
 }
 
 function resolveBrowserToolsEnabled(persisted: ReturnType<typeof loadPersistedConfig>): boolean {
-  // Browser tools default ON: agents can drive the built-in agentic browser out of
-  // the box. Only an explicit `false` in persisted config turns them off.
-  return persisted.daemon?.browserTools?.enabled ?? true;
+  // Spec 36 keeps the browser-tools built-in opt-in. An explicit legacy value
+  // seeds the one-time migration; an absent flag must not turn it on.
+  return persisted.daemon?.browserTools?.enabled ?? false;
 }
 
 function resolveAutorunEnabled(persisted: ReturnType<typeof loadPersistedConfig>): boolean {
@@ -394,6 +396,38 @@ function resolveSessionSharingEnabled(persisted: ReturnType<typeof loadPersisted
   // Session sharing defaults OFF (spec §21.11): it exposes one agent chat to the public
   // internet via a Cloudflare tunnel, so it is dangerous and strictly opt-in per daemon.
   return persisted.daemon?.sessionSharing?.enabled ?? false;
+}
+
+interface ResolvedRelayConfig {
+  relayEnabled: boolean;
+  relayEndpoint: string;
+  relayUseTls: boolean;
+  /**
+   * False when env pinned `relay.enabled`, so the Settings toggle (and persisted
+   * mutation) is refused for this daemon run, mirroring ADR-0048 §6 launch semantics.
+   */
+  relayEnabledMutable: boolean;
+}
+
+function resolveRelayConfig(
+  env: NodeJS.ProcessEnv,
+  persisted: ReturnType<typeof loadPersistedConfig>,
+): ResolvedRelayConfig {
+  // Relay ships ON (ADR-0048): it is the second path beside the tailnet and the
+  // only one that works without a tailnet membership. E2EE means the Worker
+  // never sees payload, so the default is safe to advertise in pairing offers.
+  const environmentEnabled = parseBooleanEnv(env.JAGENTDESK_RELAY_ENABLED);
+  const relayEndpoint =
+    env.JAGENTDESK_RELAY_ENDPOINT?.trim() ||
+    persisted.daemon?.relay?.endpoint?.trim() ||
+    DEFAULT_RELAY_ENDPOINT;
+  return {
+    relayEnabled: environmentEnabled ?? persisted.daemon?.relay?.enabled ?? true,
+    relayEndpoint,
+    relayUseTls:
+      parseBooleanEnv(env.JAGENTDESK_RELAY_USE_TLS) ?? persisted.daemon?.relay?.useTls ?? true,
+    relayEnabledMutable: environmentEnabled === undefined,
+  };
 }
 
 // Default ON so agents actually receive the jagentdesk MCP tools (kubectl_get,
@@ -422,6 +456,7 @@ function resolveStaticLoadConfigSettings(
     browserActiveProfileId: persisted.daemon?.browserTools?.activeProfileId,
     autorunEnabled: resolveAutorunEnabled(persisted),
     sessionSharingEnabled: resolveSessionSharingEnabled(persisted),
+    ...resolveRelayConfig(env, persisted),
     autoArchiveAfterMerge: persisted.daemon?.autoArchiveAfterMerge ?? false,
     appendSystemPrompt: resolveAppendSystemPrompt(persisted),
     operatorContext: resolveOperatorContext(persisted),
@@ -456,6 +491,10 @@ export function loadConfig(
     browserActiveProfileId,
     autorunEnabled,
     sessionSharingEnabled,
+    relayEnabled,
+    relayEndpoint,
+    relayUseTls,
+    relayEnabledMutable,
     autoArchiveAfterMerge,
     appendSystemPrompt,
     operatorContext,
@@ -495,11 +534,16 @@ export function loadConfig(
     browserActiveProfileId,
     autorunEnabled,
     sessionSharingEnabled,
+    relayEnabled,
+    relayEndpoint,
+    relayUseTls,
+    relayEnabledMutable,
     git: resolveGitProcessConfig(env, persisted),
     autoArchiveAfterMerge,
     enableTerminalAgentHooks: persisted.daemon?.enableTerminalAgentHooks ?? false,
     appendSystemPrompt,
     operatorContext,
+    builtinPlugins: persisted.builtinPlugins,
     pluginsEnabled: persisted.pluginsEnabled,
     plugins: persisted.plugins,
     terminalProfiles,
@@ -521,9 +565,18 @@ export function loadConfig(
     voiceLlmProvider: voiceLlm.provider,
     voiceLlmProviderExplicit: voiceLlm.providerExplicit,
     voiceLlmModel: voiceLlm.model,
+    ...resolveRestartRecoveryConfig(persisted.agents),
     agentProviderSettings: extractAgentProviderSettings(providerOverrides),
+    idleRuntimeCleanup: persisted.agents?.idleRuntimeCleanup ?? true,
     metadataGeneration: persisted.agents?.metadataGeneration,
     providerOverrides,
     log: resolveLogConfigFromEnv(env, persisted),
+  };
+}
+
+function resolveRestartRecoveryConfig(agents: PersistedConfig["agents"]) {
+  return {
+    resumeOnStartup: agents?.resumeOnStartup ?? false,
+    resumePrompt: agents?.resumePrompt ?? "Resume working.",
   };
 }

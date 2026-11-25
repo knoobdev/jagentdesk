@@ -143,7 +143,14 @@ describe("rebrandPaseoPlugin", () => {
   });
 
   it("accepts Paseo ranges JAgentDesk implements and rejects newer ones", async () => {
-    for (const range of [">=0.10.1", "^0.9.0 || ^0.10.0-beta.1", "^0.9.0", ">=0.7.2-0"]) {
+    for (const range of [
+      "^0.11.0",
+      "0.17.3",
+      ">=0.10.1",
+      "^0.9.0 || ^0.10.0-beta.1",
+      "^0.9.0",
+      ">=0.7.2-0",
+    ]) {
       await writeFile(
         path.join(directory, "paseo-plugin.json"),
         JSON.stringify({ id: "compatible", requirements: { paseo: range } }),
@@ -154,10 +161,10 @@ describe("rebrandPaseoPlugin", () => {
     await rm(path.join(directory, "jagentdesk-plugin.json"), { force: true });
     await writeFile(
       path.join(directory, "paseo-plugin.json"),
-      JSON.stringify({ id: "future", requirements: { paseo: ">=0.11.0" } }),
+      JSON.stringify({ id: "future", requirements: { paseo: ">=0.18.0" } }),
     );
     await expect(rebrandPaseoManifest(directory)).rejects.toThrow(
-      'Plugin "future" requires Paseo >=0.11.0',
+      'Plugin "future" requires Paseo >=0.18.0',
     );
   });
 

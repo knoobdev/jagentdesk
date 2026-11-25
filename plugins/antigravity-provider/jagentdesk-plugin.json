@@ -1,0 +1,13 @@
+{
+  "id": "antigravity-provider",
+  "requirements": {
+    "jagentdesk": ">=0.9.59"
+  },
+  "kind": "builtin",
+  "name": "Antigravity",
+  "description": "Run Antigravity through its local agy CLI.",
+  "defaultEnabled": true,
+  "requires": [],
+  "command": "agy",
+  "builtinOrder": 22
+}

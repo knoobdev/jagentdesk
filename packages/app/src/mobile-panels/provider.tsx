@@ -124,6 +124,12 @@ export function MobilePanelsProvider({ children }: { children: ReactNode }) {
   const animateTransition = useCallback(
     (transition: MobilePanelTransition) => {
       "worklet";
+      if (transition.immediateTarget) {
+        cancelAnimation(position);
+        position.value = getMobilePanelAnchor(transition.immediateTarget);
+        scheduleOnRN(settlePresentation, transition.immediateTarget, transition.state.revision);
+        return;
+      }
       if (!transition.animationTarget) {
         return;
       }
@@ -154,12 +160,13 @@ export function MobilePanelsProvider({ children }: { children: ReactNode }) {
   );
 
   const applySelection = useCallback(
-    (selection: MobilePanelSelection) => {
+    (selection: MobilePanelSelection, immediate = false) => {
       "worklet";
       const currentState = motionState.value;
       const transition = transitionMobilePanel(currentState, {
         type: "command",
         selection,
+        immediate,
       });
       if (transition.state === currentState) {
         return;
@@ -182,7 +189,7 @@ export function MobilePanelsProvider({ children }: { children: ReactNode }) {
           Keyboard.dismiss();
         }
       }
-      scheduleOnUI(applySelection, selection);
+      scheduleOnUI(applySelection, selection, state.layout.leftSidebar === "suspended");
     });
   }, [applySelection, presentPanel]);
 

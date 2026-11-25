@@ -37,7 +37,8 @@ export interface NotifyChatMentionsInput extends ChatMentionNotificationInput {
   resolveAgentIdentifier: (
     identifier: string,
   ) => Promise<{ ok: true; agentId: string } | { ok: false; error: string }>;
-  sendAgentMessage: (agentId: string, text: string) => Promise<void>;
+  /** `sourceAgentId` is the author when the mention came from an agent (ADR-0029). */
+  sendAgentMessage: (agentId: string, text: string, sourceAgentId?: string) => Promise<void>;
 }
 
 export async function prepareChatMentionFanout(
@@ -104,7 +105,7 @@ export async function notifyChatMentions(input: NotifyChatMentionsInput): Promis
       }
 
       try {
-        await input.sendAgentMessage(resolved.agentId, notification);
+        await input.sendAgentMessage(resolved.agentId, notification, input.authorAgentId);
       } catch (error) {
         input.logger.warn(
           { err: error, mentionedAgentId: resolved.agentId, room: input.room },

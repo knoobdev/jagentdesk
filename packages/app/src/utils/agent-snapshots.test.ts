@@ -30,6 +30,7 @@ function createSnapshot(
     availableModes: input.availableModes ?? [],
     pendingPermissions: input.pendingPermissions ?? [],
     persistence: input.persistence ?? null,
+    sessionMetrics: input.sessionMetrics,
     title: input.title ?? null,
     labels: (input.labels ?? {}) as AgentSnapshotPayload["labels"],
   };
@@ -91,5 +92,15 @@ describe("normalizeAgentSnapshot", () => {
     expect(missing.parentAgentId).toBeNull();
     expect(empty.parentAgentId).toBeNull();
     expect(nonString.parentAgentId).toBeNull();
+  });
+});
+
+describe("provider metrics", () => {
+  it("round-trips session metrics through the canonical snapshot boundary", () => {
+    const sessionMetrics = [{ label: "Cost", value: "$0.42", tone: "warning" as const }];
+
+    const agent = normalizeAgentSnapshot(createSnapshot({ sessionMetrics }), "server-1");
+
+    expect(agent.sessionMetrics).toEqual(sessionMetrics);
   });
 });

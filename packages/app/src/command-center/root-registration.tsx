@@ -1,8 +1,15 @@
+import { useToast } from "@/contexts/toast-context";
+import { getDesktopHost } from "@/desktop/host";
+import { copyToClipboard } from "@/utils/copy-to-clipboard";
+import { getCommandCenterIcon } from "./icon";
+import { usesDesktopBindings } from "@/keyboard";
+
 import { useMemo } from "react";
 import { router, type Href } from "expo-router";
 import { useTranslation } from "react-i18next";
 import {
   CalendarClock,
+  Copy,
   FolderPlus,
   History,
   Home,
@@ -11,7 +18,6 @@ import {
   Settings,
 } from "lucide-react-native";
 import { withUnistyles } from "react-native-unistyles";
-import { getIsElectronRuntime } from "@/constants/layout";
 import { useKeyboardShortcutOverrides } from "@/hooks/use-keyboard-shortcut-overrides";
 import { useOpenAddProject } from "@/hooks/use-open-add-project";
 import { keyboardActionDispatcher } from "@/keyboard/keyboard-action-dispatcher";
@@ -46,6 +52,8 @@ const ThemedSettings = withUnistyles(Settings, (theme) => ({
 }));
 const ThemedHome = withUnistyles(Home, (theme) => ({ color: theme.colors.foregroundMuted }));
 
+const BrowserHostCopyIcon = getCommandCenterIcon(Copy);
+
 function PlusIcon({ size }: CommandCenterIconProps) {
   return <ThemedPlus size={size} strokeWidth={2.4} />;
 }
@@ -76,6 +84,8 @@ function HomeIcon({ size }: CommandCenterIconProps) {
 
 export function CommandCenterRootActions() {
   const { t } = useTranslation();
+  const toast = useToast();
+  const browserHostLabel = getDesktopHost()?.browserHostLabel;
   const { overrides } = useKeyboardShortcutOverrides();
   const openAddProject = useOpenAddProject();
   const settingsRoute = useMemo<Href>(() => buildSettingsRoute(), []);
@@ -84,11 +94,38 @@ export function CommandCenterRootActions() {
   const schedulesRoute = useMemo<Href>(() => buildSchedulesRoute(), []);
   const setShortcutsDialogOpen = useKeyboardShortcutsStore((state) => state.setShortcutsDialogOpen);
   const shortcutPlatform = useMemo(
-    () => ({ isMac: getShortcutOs() === "mac", isDesktop: getIsElectronRuntime() }),
+    () => ({ isMac: getShortcutOs() === "mac", usesDesktopBindings }),
     [],
   );
   const actions = useMemo<CommandCenterContribution[]>(
     () => [
+      ...(browserHostLabel
+        ? [
+            {
+              id: "copy-browser-host-name",
+              group: "actions",
+              groupRank: 0,
+              rank: 9,
+              keywords: ["browser", "host", "window", browserHostLabel],
+              visibility: "query" as const,
+              run: async () => {
+                try {
+                  await copyToClipboard(browserHostLabel);
+                  toast.copied();
+                } catch {
+                  toast.error(t("common.errors.unableToCopy"));
+                }
+              },
+              presentation: {
+                kind: "action" as const,
+                title: t("shell.commandCenter.copyBrowserHostName"),
+                subtitle: browserHostLabel,
+                sectionTitle: t("shell.commandCenter.actions"),
+                icon: BrowserHostCopyIcon,
+              },
+            },
+          ]
+        : []),
       {
         id: "add-project",
         group: "actions",
@@ -224,6 +261,8 @@ export function CommandCenterRootActions() {
       },
     ],
     [
+      browserHostLabel,
+      toast,
       homeRoute,
       openAddProject,
       overrides,

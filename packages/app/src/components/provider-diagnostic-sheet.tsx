@@ -1,9 +1,11 @@
+import { ExternalLink } from "@/components/ui/external-link";
+import { getAcpProviderCatalog } from "@/hooks/use-acp-provider-catalog";
 import * as Clipboard from "expo-clipboard";
 import { AlertTriangle, Copy, FileText, Plus, RotateCw, Trash2 } from "lucide-react-native";
 import type { TFunction } from "i18next";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Pressable, type PressableStateCallbackType, Text, View } from "react-native";
+import { Pressable, ScrollView, type PressableStateCallbackType, Text, View } from "react-native";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import {
   AdaptiveModalSheet,
@@ -22,10 +24,12 @@ import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { useHostRuntimeClient } from "@/runtime/host-runtime";
 import { settingsStyles } from "@/styles/settings";
 import { resolveProviderLabel } from "@/utils/provider-definitions";
-import { formatTimeAgo } from "@/utils/time";
+import { useTimeAgo } from "@/hooks/use-time-ago";
 import { compareMatchScores, scoreTextFields } from "@/utils/score-match";
-import type { AgentModelDefinition, AgentProvider } from "@jagentdesk/protocol/agent-types";
+import type { AgentModelDefinition } from "@jagentdesk/protocol/agent-types";
 import type { ProviderProfileModel } from "@jagentdesk/protocol/provider-config";
+import { ProviderInstallationSection } from "./provider-installation-section";
+import { useProviderInstallation } from "./provider-installation";
 import {
   resolveProviderDiscoveredModels,
   type ProviderDiscoveredModelsCache,
@@ -95,11 +99,11 @@ function CustomModelRow({
 
   return (
     <View style={sheetStyles.modelRow}>
-      <Text style={sheetStyles.modelTitle} numberOfLines={1}>
+      <Text style={[sheetStyles.modelTitle, sheetStyles.customModelText]} numberOfLines={1}>
         {model.label}
       </Text>
       <Text
-        style={sheetStyles.monoHint}
+        style={[sheetStyles.monoHint, sheetStyles.customModelText]}
         numberOfLines={1}
         selectable
         dataSet={CODE_SURFACE_DATASET}
@@ -121,11 +125,22 @@ function CustomModelRow({
   );
 }
 
-function SectionHeader({ title, count, hint }: { title: string; count?: number; hint?: string }) {
+function SectionHeader({
+  title,
+  count,
+  hint,
+  trailing,
+}: {
+  title: string;
+  count?: number;
+  hint?: string;
+  trailing?: React.ReactNode;
+}) {
   return (
     <View style={sheetStyles.sectionHeader}>
       <Text style={settingsStyles.sectionHeaderTitle}>{title}</Text>
       <View style={sheetStyles.sectionHeaderMeta}>
+        {trailing}
         {count !== undefined ? (
           <Text style={settingsStyles.sectionHeaderTitle}>{count}</Text>
         ) : null}
@@ -143,13 +158,11 @@ function AddCustomModelSubSheet({
   serverId,
   visible,
   onClose,
-  refresh,
 }: {
   provider: string;
   serverId: string;
   visible: boolean;
   onClose: () => void;
-  refresh: (providers?: AgentProvider[]) => Promise<void>;
 }) {
   const { t } = useTranslation();
   const { theme } = useUnistyles();
@@ -183,13 +196,12 @@ function AddCustomModelSubSheet({
         },
       },
     })
-      .then(() => refresh([provider]))
       .then(() => onClose())
       .catch((err) => {
         setError(err instanceof Error ? err.message : t("settings.providers.models.failedToSave"));
       })
       .finally(() => setSaving(false));
-  }, [additionalModels, canAdd, onClose, patchConfig, provider, refresh, t, trimmed]);
+  }, [additionalModels, canAdd, onClose, patchConfig, provider, t, trimmed]);
 
   const header = useMemo<SheetHeader>(
     () => ({ title: t("settings.providers.models.addCustomTitle") }),
@@ -410,37 +422,27 @@ interface ProviderModalBodyProps {
 }
 
 interface ProviderSheetFooterInput {
-  fetchedAtLabel: string | null;
+  fetchedAt: string | null;
   isCompact: boolean;
-  modelsRefreshing: boolean;
   t: TFunction;
   onOpenAddSheet: () => void;
   onOpenDiagSheet: () => void;
-  onRefreshModels: () => void;
 }
 
 function renderProviderSheetFooter({
-  fetchedAtLabel,
+  fetchedAt,
   isCompact,
-  modelsRefreshing,
   t,
   onOpenAddSheet,
   onOpenDiagSheet,
-  onRefreshModels,
 }: ProviderSheetFooterInput) {
   const contentStyle = isCompact ? sheetStyles.compactFooterContent : sheetStyles.footerContent;
   const actionsStyle = isCompact ? sheetStyles.compactFooterActions : sheetStyles.footerActions;
   const buttonStyle = isCompact ? sheetStyles.compactFooterButton : null;
-  const metaStyle = isCompact
-    ? [sheetStyles.footerMeta, sheetStyles.compactFooterMeta]
-    : sheetStyles.footerMeta;
-
   return (
     <View style={contentStyle}>
-      {fetchedAtLabel || !isCompact ? (
-        <Text style={metaStyle} numberOfLines={1}>
-          {fetchedAtLabel ? t("settings.providers.models.updated", { time: fetchedAtLabel }) : ""}
-        </Text>
+      {fetchedAt || !isCompact ? (
+        <ProviderUpdatedLabel fetchedAt={fetchedAt} isCompact={isCompact} />
       ) : null}
       <View style={actionsStyle}>
         <Button
@@ -461,20 +463,27 @@ function renderProviderSheetFooter({
         >
           {t("settings.providers.diagnostic.button")}
         </Button>
-        <Button
-          variant="default"
-          size="sm"
-          leftIcon={modelsRefreshing ? undefined : RotateCw}
-          onPress={onRefreshModels}
-          disabled={modelsRefreshing}
-          style={buttonStyle}
-        >
-          {modelsRefreshing
-            ? t("settings.providers.diagnostic.refreshing")
-            : t("settings.providers.diagnostic.refresh")}
-        </Button>
       </View>
     </View>
+  );
+}
+
+function ProviderUpdatedLabel({
+  fetchedAt,
+  isCompact,
+}: {
+  fetchedAt: string | null;
+  isCompact: boolean;
+}) {
+  const { t } = useTranslation();
+  const label = useTimeAgo(fetchedAt ? new Date(fetchedAt) : null);
+  const style = isCompact
+    ? [sheetStyles.footerMeta, sheetStyles.compactFooterMeta]
+    : sheetStyles.footerMeta;
+  return (
+    <Text style={style} numberOfLines={1}>
+      {fetchedAt ? t("settings.providers.models.updated", { time: label }) : ""}
+    </Text>
   );
 }
 
@@ -534,14 +543,16 @@ function ProviderModalBody(props: ProviderModalBodyProps) {
     <>
       {filteredDiscovered.length > 0 ? (
         <View style={sheetStyles.section}>
-          <SectionHeader
-            title={t("settings.providers.models.discovered")}
-            count={filteredDiscovered.length}
-          />
           <View style={settingsStyles.card}>
-            {filteredDiscovered.map((model) => (
-              <DiscoveredModelRow key={model.id} model={model} />
-            ))}
+            <ScrollView
+              style={sheetStyles.discoveredList}
+              nestedScrollEnabled
+              testID="provider-discovered-models"
+            >
+              {filteredDiscovered.map((model) => (
+                <DiscoveredModelRow key={model.id} model={model} />
+              ))}
+            </ScrollView>
           </View>
         </View>
       ) : null}
@@ -610,18 +621,6 @@ export function ProviderDiagnosticSheet({
   });
   stableDiscoveredRef.current = nextDiscoveredCache;
 
-  const [clockTick, setClockTick] = useState(0);
-  useEffect(() => {
-    if (!visible) return;
-    const id = setInterval(() => setClockTick((tick) => tick + 1), 10_000);
-    return () => clearInterval(id);
-  }, [visible]);
-  const fetchedAtLabel = useMemo(() => {
-    if (!providerEntry?.fetchedAt) return null;
-    void clockTick;
-    return formatTimeAgo(new Date(providerEntry.fetchedAt));
-  }, [providerEntry?.fetchedAt, clockTick]);
-
   useEffect(() => {
     if (!visible) {
       setQuery("");
@@ -640,9 +639,18 @@ export function ProviderDiagnosticSheet({
     [additionalModels, q],
   );
 
+  const installation = useProviderInstallation({ serverId, provider, visible });
+  const refreshInstallation = installation.refresh;
+  const docsUrl =
+    providerEntry?.docsUrl ??
+    (installation.state.status === "ready"
+      ? installation.state.installation?.installUrl
+      : undefined) ??
+    getAcpProviderCatalog().find((entry) => entry.id === provider)?.installLink;
   const handleRefreshModels = useCallback(() => {
     void refresh([provider]);
-  }, [provider, refresh]);
+    refreshInstallation();
+  }, [provider, refresh, refreshInstallation]);
 
   const handleOpenAddSheet = useCallback(() => setAddSheetOpen(true), []);
   const handleCloseAddSheet = useCallback(() => setAddSheetOpen(false), []);
@@ -658,13 +666,11 @@ export function ProviderDiagnosticSheet({
             additionalModels: additionalModels.filter((model) => model.id !== modelId),
           },
         },
-      })
-        .then(() => refresh([provider]))
-        .finally(() => {
-          setDeletingModelId((current) => (current === modelId ? null : current));
-        });
+      }).finally(() => {
+        setDeletingModelId((current) => (current === modelId ? null : current));
+      });
     },
-    [additionalModels, patchConfig, provider, refresh],
+    [additionalModels, patchConfig, provider],
   );
 
   const sheetHeader = useMemo<SheetHeader>(
@@ -679,6 +685,22 @@ export function ProviderDiagnosticSheet({
     [providerLabel, t],
   );
 
+  const modelsRefreshAction = useMemo(
+    () => (
+      <Button
+        size="xs"
+        variant="outline"
+        onPress={handleRefreshModels}
+        loading={modelsRefreshing || installation.refreshing}
+        leftIcon={RotateCw}
+        testID="provider-models-refresh"
+      >
+        {t("settings.providers.diagnostic.refresh")}
+      </Button>
+    ),
+    [handleRefreshModels, modelsRefreshing, installation.refreshing, t],
+  );
+
   return (
     <>
       <AdaptiveModalSheet
@@ -687,16 +709,29 @@ export function ProviderDiagnosticSheet({
         onClose={onClose}
         testID="provider-settings-sheet"
         footer={renderProviderSheetFooter({
-          fetchedAtLabel,
+          fetchedAt: providerEntry?.fetchedAt ?? null,
           isCompact,
-          modelsRefreshing,
           t,
           onOpenAddSheet: handleOpenAddSheet,
           onOpenDiagSheet: handleOpenDiagSheet,
-          onRefreshModels: handleRefreshModels,
         })}
         snapPoints={MAIN_SNAP_POINTS}
       >
+        {docsUrl ? (
+          <View style={sheetStyles.section}>
+            <ExternalLink href={docsUrl} label={"Docs"} testID="provider-docs-link" />
+          </View>
+        ) : null}
+        <ProviderInstallationSection
+          state={installation.state}
+          updates={installation.updates}
+          action={installation.action}
+        />
+        <SectionHeader
+          title={t("settings.providers.models.discovered")}
+          count={discoveredModels.length}
+          trailing={modelsRefreshAction}
+        />
         <ProviderModalBody
           discoveredCount={discoveredModels.length}
           additionalCount={additionalModels.length}
@@ -717,7 +752,6 @@ export function ProviderDiagnosticSheet({
         serverId={serverId}
         visible={addSheetOpen}
         onClose={handleCloseAddSheet}
-        refresh={refresh}
       />
       <DiagnosticSubSheet
         provider={provider}
@@ -730,6 +764,7 @@ export function ProviderDiagnosticSheet({
 }
 
 const sheetStyles = StyleSheet.create((theme) => ({
+  discoveredList: { maxHeight: 320 },
   mutedText: {
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,
@@ -762,6 +797,7 @@ const sheetStyles = StyleSheet.create((theme) => ({
   iconButton: {
     width: 28,
     height: 28,
+    flexShrink: 0,
     borderRadius: theme.borderRadius.full,
     alignItems: "center",
     justifyContent: "center",
@@ -806,6 +842,10 @@ const sheetStyles = StyleSheet.create((theme) => ({
     color: theme.colors.foreground,
     fontSize: theme.fontSize.sm,
     flexShrink: 0,
+  },
+  customModelText: {
+    flexShrink: 1,
+    minWidth: 0,
   },
   modelRowFiller: {
     flex: 1,

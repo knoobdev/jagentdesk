@@ -33,6 +33,9 @@ const agent: PluginAgentSnapshot = {
   workspaceId: workspace.id,
   provider: "codex",
   status: "running",
+  metadata: {},
+  backgroundWork: { count: 0 },
+  background: false,
   createdAt: "2026-08-16T10:00:00.000Z",
   updatedAt: "2026-08-16T10:00:00.000Z",
   lastActivityAt: "2026-08-16T10:00:00.000Z",
@@ -60,12 +63,17 @@ function plugin(onAgentSelect: AgentCommandItem["onSelect"]): InstalledPlugin {
     id: "review",
     serverId: "host-1",
     clientBundle: "bundle",
+    subscribe: () => {
+      throw new Error("No subscriptions in this test");
+    },
     lifetime: new AbortController(),
     queryClient: new QueryClient(),
     cleanup: () => {},
     settingsScreens: [],
     surfaces: [{ id: "main", Component: () => null }],
     sidebarItems: [],
+    composerItems: [],
+    newWorkspaceItems: [],
     workspacePanels: [
       {
         id: "details",
@@ -129,6 +137,9 @@ function createRuntime(installed: InstalledPlugin) {
   });
   return {
     jagentdesk: createJAgentDeskApi(client),
+    subscribe: () => {
+      throw new Error("Subscriptions are not used here");
+    },
     invoke: async (method: string, input: unknown) => {
       expect(installed.id).toBe("review");
       expect(method).toBe("review.inspect");

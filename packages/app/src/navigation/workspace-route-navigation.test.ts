@@ -1,16 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { NavigationContainerRefWithCurrent } from "@react-navigation/native";
+import type { NavigationContainerRefWithCurrent } from "expo-router/react-navigation";
 import {
+  getFocusedWorkspaceSelection,
   navigateToHostWorkspaceRoute,
   registerWorkspaceRouteNavigationRef,
 } from "./workspace-route-navigation";
 
-function createNavigationRef(rootState: unknown, options: { ready?: boolean } = {}) {
+function createNavigationRef(
+  rootState: unknown,
+  options: { ready?: boolean; currentRoute?: { name: string; params?: object } } = {},
+) {
   const dispatch = vi.fn();
   const navigationRef = {
     current: {
       isReady: () => options.ready ?? true,
       getRootState: () => rootState,
+      getCurrentRoute: () => options.currentRoute,
       dispatch,
     },
   } as unknown as NavigationContainerRefWithCurrent<ReactNavigation.RootParamList>;
@@ -104,5 +109,29 @@ describe("navigateToHostWorkspaceRoute", () => {
         },
       },
     });
+  });
+});
+
+describe("getFocusedWorkspaceSelection", () => {
+  function focus(currentRoute?: { name: string; params?: object }) {
+    registerWorkspaceRouteNavigationRef(createNavigationRef({}, { currentRoute }).navigationRef);
+  }
+
+  it("returns the workspace on screen", () => {
+    focus({
+      name: "workspace/[workspaceId]/index",
+      params: { serverId: "server-1", workspaceId: "workspace-a" },
+    });
+
+    expect(getFocusedWorkspaceSelection()).toEqual({
+      serverId: "server-1",
+      workspaceId: "workspace-a",
+    });
+  });
+
+  it("returns null when a non-workspace screen is focused", () => {
+    focus({ name: "settings/[section]", params: { section: "general" } });
+
+    expect(getFocusedWorkspaceSelection()).toBeNull();
   });
 });

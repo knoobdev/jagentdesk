@@ -1,5 +1,4 @@
-import { execFile } from "node:child_process";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { existsSync, readFileSync, realpathSync, statSync, watch } from "node:fs";
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
@@ -9,29 +8,34 @@ import { promisify } from "node:util";
 import { Writable } from "node:stream";
 import pino from "pino";
 import { WebSocket } from "ws";
-import type {
-  AgentSnapshotPayload,
-  HubExecutionAgentCreateResponse,
-  HubExecutionControlAction,
-  HubExecutionControlResponse,
-  HubExecutionAgentStream,
-  HubExecutionAgentUpdate,
-  RpcErrorMessage,
-  CreateAgentWorktreeTarget,
-  SessionOutboundMessage,
+import {
+  type AgentSnapshotPayload,
+  type HubExecutionAgentCreateResponse,
+  type HubExecutionControlAction,
+  type HubExecutionControlResponse,
+  type HubExecutionAgentStream,
+  type HubExecutionAgentUpdate,
+  type RpcErrorMessage,
+  type CreateAgentWorktreeTarget,
+  type SessionOutboundMessage,
+  type SessionInboundMessage,
 } from "../../messages.js";
-import { createJAgentDeskDaemon, type JAgentDeskDaemon, type JAgentDeskDaemonConfig } from "../../bootstrap.js";
-import type { WebSocketLike } from "../../websocket-server.js";
-import type {
-  AgentClient,
-  AgentCreateSessionOptions,
-  AgentLaunchContext,
-  AgentPromptInput,
-  AgentPersistenceHandle,
-  AgentSession,
-  AgentSessionConfig,
-  FetchCatalogOptions,
-  ProviderCatalog,
+import {
+  createJAgentDeskDaemon,
+  type JAgentDeskDaemon,
+  type JAgentDeskDaemonConfig,
+} from "../../bootstrap.js";
+import { type WebSocketLike } from "../../websocket-server.js";
+import {
+  type AgentClient,
+  type AgentCreateSessionOptions,
+  type AgentLaunchContext,
+  type AgentPromptInput,
+  type AgentPersistenceHandle,
+  type AgentSession,
+  type AgentSessionConfig,
+  type FetchCatalogOptions,
+  type ProviderCatalog,
 } from "../../agent/agent-sdk-types.js";
 import { createTestAgentClients } from "../../test-utils/fake-agent-client.js";
 import { DaemonClient } from "../../test-utils/daemon-client.js";
@@ -42,26 +46,30 @@ import {
   createAgentCommand,
   type CreateAgentCommandDependencies,
 } from "../../agent/create-agent/create.js";
-import type {
-  HubRelationshipClock,
-  HubRelationshipRetryPolicy,
-  ScheduledRelationshipTask,
+import {
+  type HubRelationshipClock,
+  type HubRelationshipRetryPolicy,
+  type ScheduledRelationshipTask,
 } from "../relationship-controller.js";
-import type {
-  HubEnrollment,
-  HubEnrollmentResult,
-  HubRelationshipRemote,
-  HubRevocation,
-  HubSocketConnection,
-  HubSocketCredentials,
-  HubSocketEvents,
+import {
+  type HubEnrollment,
+  type HubEnrollmentResult,
+  type HubRelationshipRemote,
+  type HubRevocation,
+  type HubSocketConnection,
+  type HubSocketCredentials,
+  type HubSocketEvents,
+  HubEnrollmentRejectedError,
 } from "../relationship-remote.js";
-import { HubEnrollmentRejectedError } from "../relationship-remote.js";
 
 const execFileAsync = promisify(execFile);
+
 const HUB_ORIGIN = "https://hub.test";
+
 const SOCKET_URL = "wss://hub.test/daemon";
+
 const REPOSITORY_ROOT = path.resolve(import.meta.dirname, "../../../../../..");
+
 const REMOVAL_RETRY_CODES = new Set(["EBUSY", "ENOTEMPTY", "EPERM"]);
 
 async function removeDirectoryAfterWritesSettle(directory: string): Promise<void> {
@@ -440,7 +448,7 @@ type AcceptedCreate = Omit<
 
 const providerCatalog = {
   async resolveCreateConfig(input) {
-    return { modeId: input.requestedMode, featureValues: input.featureValues };
+    return { modeId: input.requestedMode, providerOptions: input.providerOptions };
   },
 } satisfies CreateAgentCommandDependencies["providerSnapshotManager"];
 
@@ -525,6 +533,98 @@ export class HubRelationshipHarness {
         ...(execute ? ["--permission", "hub.execute"] : []),
       ]),
     };
+  }
+
+  // The fork CLI has device authorization rather than upstream's --api-key /
+  // permissions flags. New controller tests use the real local session RPCs.
+  beginConnectViaRpc(token = "ceremony-token", hubUrl = HUB_ORIGIN, execute = true): CliProcess {
+    return {
+      result: this.trackCli(
+        this.requestLocal({
+          type: "hub.management.daemon.connect.request",
+          requestId: "local-connect",
+          hubUrl,
+          token,
+          permissions: execute ? ["hub.execute"] : [],
+        }).then((message) => {
+          if (message.type !== "hub.management.daemon.connect.response")
+            throw new Error("Expected Hub connect response");
+          return message.payload.status;
+        }),
+      ),
+    };
+  }
+
+  async updatePermissionViaRpc(granted: boolean): Promise<void> {
+    const response = await this.requestLocal({
+      type: "hub.management.daemon.permissions.update.request",
+      requestId: "local-permission",
+      grant: granted ? ["hub.execute"] : [],
+      revoke: granted ? [] : ["hub.execute"],
+    });
+    if (response.type !== "hub.management.daemon.permissions.update.response")
+      throw new Error("Expected permission update response");
+  }
+
+  private async requestLocal(
+    message: SessionInboundMessage & { requestId: string },
+  ): Promise<SessionOutboundMessage> {
+    let socket: WebSocket | undefined;
+    const client = new DaemonClient({
+      url: `ws://${this.host}/ws`,
+      appVersion: "0.1.106",
+      onWebSocket: (value) => {
+        socket = value;
+      },
+    });
+    await client.connect();
+    try {
+      return await new Promise<SessionOutboundMessage>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          unsubscribe();
+          reject(new Error("Local Hub RPC timed out"));
+        }, 30000);
+        const unsubscribe = client.subscribeRawMessages((response) => {
+          if (
+            !("payload" in response) ||
+            !("requestId" in response.payload) ||
+            response.payload.requestId !== message.requestId
+          )
+            return;
+          clearTimeout(timer);
+          unsubscribe();
+          if (response.type === "rpc_error") reject(new Error(response.payload.error));
+          else resolve(response);
+        });
+        socket!.send(JSON.stringify({ type: "session", message }), (error) => {
+          if (error) {
+            clearTimeout(timer);
+            unsubscribe();
+            reject(error);
+          }
+        });
+      });
+    } finally {
+      await client.close();
+    }
+  }
+
+  async requestOrdinary(
+    message: SessionInboundMessage & { requestId: string },
+  ): Promise<SessionOutboundMessage> {
+    const socket = this.latestSocket().socket;
+    socket.receive(message);
+    return socket.messageFor(message.requestId);
+  }
+
+  async statusViaRpc(): Promise<Record<string, unknown>> {
+    const response = await this.requestLocal({
+      type: "hub.management.daemon.get_status.request",
+      requestId: "local-status",
+    });
+    if (response.type !== "hub.management.daemon.get_status.response")
+      throw new Error("Expected Hub status response");
+    return response.payload.status;
   }
 
   async status(): Promise<Record<string, unknown>> {
@@ -703,9 +803,9 @@ export class HubRelationshipHarness {
     this.rejectLatestSocket(code);
   }
 
-  closeLatestSocket(code: number): void {
+  closeLatestSocket(code: number, reason?: string): void {
     const socket = this.latestSocket();
-    socket.events.closed(code);
+    socket.events.closed(code, reason);
     socket.socket.close(code);
   }
 

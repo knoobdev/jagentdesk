@@ -1,11 +1,18 @@
-import type { TranslationResources } from "./en";
-import { pluginSettings } from "./plugin-settings";
-import { activityGraphStrings } from "./activity-graph";
 import { sshModuleStrings } from "./ssh-modules";
+import { builtinPluginStrings } from "./builtin-plugins";
+import { botsStrings } from "./bots";
+import { type TranslationResources } from "./en";
+import { pluginSettings } from "./plugin-settings";
 
 export const ar: TranslationResources = {
+  bots: botsStrings,
+  builtinPlugins: builtinPluginStrings,
   ssh: sshModuleStrings,
-  activityGraph: activityGraphStrings,
+  pluginCombobox: {
+    searching: "جارٍ البحث…",
+    empty: "لا توجد نتائج",
+    failed: "فشل البحث: {{message}}",
+  },
   paneFind: {
     connectionFailure: "Could not search this chat. Check the host connection and retry.",
     historyChangedFailure: "The chat changed while searching. Search again.",
@@ -32,6 +39,8 @@ export const ar: TranslationResources = {
     back: "خلف",
     loading: "تحميل...",
     actions: {
+      copyLine: "نسخ السطر",
+      selectAll: "تحديد الكل",
       back: "خلف",
       cancel: "يلغي",
       close: "يغلق",
@@ -65,6 +74,7 @@ export const ar: TranslationResources = {
       daemonClientUnavailable: "عميل Daemon غير متوفر",
       daemonClientDisconnected: "تم قطع اتصال عميل Daemon",
       noFileFound: "لم يتم العثور على ملف لـ{{token}}",
+      folderOutsideWorkspace: "{{path}} خارج مساحة العمل هذه",
       unexpectedDictationError: "حدث خطأ غير متوقع أثناء معالجة الإملاء.",
     },
     connectionStatus: {
@@ -82,26 +92,61 @@ export const ar: TranslationResources = {
       close: "إغلاق القائمة",
     },
     commandCenter: {
-      placeholder: "ابحث في الأوامر ومساحات العمل والوكلاء...",
-      noMatches: "لا توجد مباريات",
-      actions: "الإجراءات",
-      workspaces: "مساحات العمل",
-      agents: "الوكلاء",
-      newAgent: "وكيل جديد",
-      addProject: "إضافة مشروع",
-      home: "بيت",
-      modelGroupLabel: "النموذج",
-      modelSearchKeywords: "تبديل النموذج تغيير النموذج تعيين النموذج اختيار النموذج",
-      thinkingGroupLabel: "التفكير",
-      thinkingSearchKeywords: "الاستدلال الجهد التفكير",
-      modeGroupLabel: "الوضع",
-      modeSearchKeywords: "الوصول الإذن الموافقة الوضع",
-      planModeGroupLabel: "وضع التخطيط",
-      planModeSearchKeywords: "التخطيط خطة وضع التخطيط",
-      fastModeGroupLabel: "سريع",
-      fastModeSearchKeywords: "سريع سرعة زمن انتقال منخفض",
-      settingOn: "تشغيل",
-      settingOff: "إيقاف",
+      placeholder:
+        "\u0627\u0644\u0628\u062D\u062B \u0641\u064A \u0645\u0633\u0627\u062D\u0627\u062A \u0627\u0644\u0639\u0645\u0644 \u0648\u0627\u0644\u0645\u0644\u0641\u0627\u062A \u0648\u0627\u0644\u0625\u062C\u0631\u0627\u0621\u0627\u062A...",
+      noMatches: "\u0644\u0627 \u062A\u0648\u062C\u062F \u0645\u0628\u0627\u0631\u064A\u0627\u062A",
+      actions: "\u0627\u0644\u0625\u062C\u0631\u0627\u0621\u0627\u062A",
+      workspaces: "\u0645\u0633\u0627\u062D\u0627\u062A \u0627\u0644\u0639\u0645\u0644",
+      agents: "\u0627\u0644\u0648\u0643\u0644\u0627\u0621",
+      newAgent: "\u0648\u0643\u064A\u0644 \u062C\u062F\u064A\u062F",
+      addProject: "\u0625\u0636\u0627\u0641\u0629 \u0645\u0634\u0631\u0648\u0639",
+      home: "\u0628\u064A\u062A",
+      copyBrowserHostName: "نسخ اسم مضيف المتصفح",
+      modelGroupLabel: "\u0627\u0644\u0646\u0645\u0648\u0630\u062C",
+      modelSearchKeywords:
+        "\u062A\u0628\u062F\u064A\u0644 \u0627\u0644\u0646\u0645\u0648\u0630\u062C \u062A\u063A\u064A\u064A\u0631 \u0627\u0644\u0646\u0645\u0648\u0630\u062C \u062A\u0639\u064A\u064A\u0646 \u0627\u0644\u0646\u0645\u0648\u0630\u062C \u0627\u062E\u062A\u064A\u0627\u0631 \u0627\u0644\u0646\u0645\u0648\u0630\u062C",
+      thinkingGroupLabel: "\u0627\u0644\u062A\u0641\u0643\u064A\u0631",
+      thinkingSearchKeywords:
+        "\u0627\u0644\u0627\u0633\u062A\u062F\u0644\u0627\u0644 \u0627\u0644\u062C\u0647\u062F \u0627\u0644\u062A\u0641\u0643\u064A\u0631",
+      modeGroupLabel: "\u0627\u0644\u0648\u0636\u0639",
+      modeSearchKeywords:
+        "\u0627\u0644\u0648\u0635\u0648\u0644 \u0627\u0644\u0625\u0630\u0646 \u0627\u0644\u0645\u0648\u0627\u0641\u0642\u0629 \u0627\u0644\u0648\u0636\u0639",
+      planModeGroupLabel: "\u0648\u0636\u0639 \u0627\u0644\u062A\u062E\u0637\u064A\u0637",
+      planModeSearchKeywords:
+        "\u0627\u0644\u062A\u062E\u0637\u064A\u0637 \u062E\u0637\u0629 \u0648\u0636\u0639 \u0627\u0644\u062A\u062E\u0637\u064A\u0637",
+      fastModeGroupLabel: "\u0633\u0631\u064A\u0639",
+      fastModeSearchKeywords:
+        "\u0633\u0631\u064A\u0639 \u0633\u0631\u0639\u0629 \u0632\u0645\u0646 \u0627\u0646\u062A\u0642\u0627\u0644 \u0645\u0646\u062E\u0641\u0636",
+      settingOn: "\u062A\u0634\u063A\u064A\u0644",
+      settingOff: "\u0625\u064A\u0642\u0627\u0641",
+      filePlaceholder:
+        "\u0627\u0644\u0628\u062D\u062B \u0641\u064A \u0627\u0644\u0645\u0644\u0641\u0627\u062A...",
+      searchingFiles:
+        "\u062C\u0627\u0631\u064D \u0627\u0644\u0628\u062D\u062B \u0641\u064A \u0627\u0644\u0645\u0644\u0641\u0627\u062A...",
+      files: "\u0627\u0644\u0645\u0644\u0641\u0627\u062A",
+      open: "\u0641\u062A\u062D {{name}}",
+      openInSidePane:
+        "\u0641\u062A\u062D {{name}} \u0641\u064A \u0627\u0644\u0644\u0648\u062D\u0629 \u0627\u0644\u062C\u0627\u0646\u0628\u064A\u0629",
+      openInFocusedPane:
+        "\u0641\u062A\u062D {{name}} \u0641\u064A \u0627\u0644\u062C\u0632\u0621 \u0627\u0644\u0646\u0634\u0637",
+      groupByProject:
+        "\u062A\u062C\u0645\u064A\u0639 \u062D\u0633\u0628 \u0627\u0644\u0645\u0634\u0631\u0648\u0639",
+      groupByStatus:
+        "\u062A\u062C\u0645\u064A\u0639 \u062D\u0633\u0628 \u0627\u0644\u062D\u0627\u0644\u0629",
+      placeholderWithoutFiles:
+        "\u0627\u0644\u0628\u062D\u062B \u0641\u064A \u0645\u0633\u0627\u062D\u0627\u062A \u0627\u0644\u0639\u0645\u0644 \u0648\u0627\u0644\u0625\u062C\u0631\u0627\u0621\u0627\u062A...",
+      workspacePlaceholder:
+        "\u0627\u0644\u0628\u062D\u062B \u0641\u064A \u0645\u0633\u0627\u062D\u0627\u062A \u0627\u0644\u0639\u0645\u0644...",
+      actionPlaceholder:
+        "\u0627\u0644\u0628\u062D\u062B \u0641\u064A \u0627\u0644\u0625\u062C\u0631\u0627\u0621\u0627\u062A...",
+      recentWorkspaces:
+        "\u0645\u0633\u0627\u062D\u0627\u062A \u0627\u0644\u0639\u0645\u0644 \u0627\u0644\u0623\u062E\u064A\u0631\u0629",
+      tabs: {
+        all: "\u0627\u0644\u0643\u0644",
+        workspaces: "\u0645\u0633\u0627\u062D\u0627\u062A \u0627\u0644\u0639\u0645\u0644",
+        files: "\u0627\u0644\u0645\u0644\u0641\u0627\u062A",
+        actions: "\u0627\u0644\u0625\u062C\u0631\u0627\u0621\u0627\u062A",
+      },
     },
   },
   composer: {
@@ -109,8 +154,15 @@ export const ar: TranslationResources = {
       desktop: "أرسل رسالة إلى الوكيل أو ضع علامة على @files أو استخدم /commands و /skills",
       mobile: "الرسالة، @files ، /commands",
       fallback: "رسالة...",
+      terminal: "Prompt",
     },
     input: {
+      fullscreen: "Fullscreen",
+      exitFullscreen: "Exit fullscreen",
+      longPressToSendNow: "Long press to send now",
+
+      longPressToQueue: "Long press to queue",
+
       accessibilityLabel: "وكيل الرسائل...",
       focusHint: "{{shortcut}}للتركيز",
       addAttachment: "إضافة مرفق",
@@ -306,6 +358,7 @@ export const ar: TranslationResources = {
       copyTurn: "نسخ بدوره",
       copyMessage: "انسخ الرسالة",
       forkMenu: "تفريع الرسالة",
+      turnStats: "إحصاءات الدور",
       forkInNewTab: "تفريع في تبويب جديد",
       forkInNewWorkspace: "تفريع في مساحة عمل جديدة",
       forkUnavailable: "حدّث المضيف لاستخدام هذا.",
@@ -335,6 +388,12 @@ export const ar: TranslationResources = {
       details: "تفاصيل",
     },
     dictation: {
+      insecureContext: "افتح JAgentDesk عبر HTTPS أو localhost لاستخدام الميكروفون.",
+      unsupported: "الإملاء غير متاح في هذا المتصفح.",
+      noMicrophone: "صِل ميكروفونًا وحاول مرة أخرى.",
+      permissionDenied: "اسمح بالوصول إلى الميكروفون وحاول مرة أخرى.",
+      startFailed: "تعذر بدء الإملاء. حاول مرة أخرى.",
+      paused: "تمت مقاطعة الميكروفون. في انتظار الاستئناف…",
       start: "بدء الإملاء الصوتي",
       cancel: "إلغاء الإملاء",
       retry: "أعد محاولة الإملاء",
@@ -344,10 +403,30 @@ export const ar: TranslationResources = {
       failedRetry: "فشل الإملاء. اضغط على إعادة المحاولة.",
     },
     question: {
+      responseFailed: "تعذر إرسال ردك. حاول مرة أخرى.",
       submit: "يُقدِّم",
       next: "التالي",
       answerPlaceholder: "اكتب إجابتك...",
       otherPlaceholder: "آخر...",
+    },
+    backgroundWork: {
+      heartbeat: "نبضة دورية",
+      pillOne: "مهمة واحدة في الخلفية",
+      pillMany: "{{count}} مهمة في الخلفية",
+      notRunning: "لم يعد قيد التشغيل",
+      dismiss: "إغلاق",
+      stop: "إيقاف",
+      stopping: "جارٍ الإيقاف…",
+      stopError: "تعذر تأكيد الإيقاف.",
+      label: "في الخلفية",
+      title: "عمل الخلفية",
+      waiting: "بانتظار تفاصيل عمل الخلفية",
+      error: "تعذر تحميل عمل الخلفية",
+      retry: "إعادة المحاولة",
+      running: "عمل الخلفية قيد التشغيل",
+      shell: "الصدفة",
+      monitor: "المراقبة",
+      other: "عمل آخر",
     },
     todo: {
       title: "المهام",
@@ -360,6 +439,7 @@ export const ar: TranslationResources = {
       withTokens: "تم ضغط السياق (رموز{{tokens}}K)",
       completed: "تم ضغط السياق",
     },
+    turnFooter: { workedFor: "\u0639\u0645\u0644 \u0644\u0645\u062F\u0629 {{duration}}" },
   },
   importSession: {
     title: "جلسة الاستيراد",
@@ -412,7 +492,8 @@ export const ar: TranslationResources = {
       recovery: {
         archivedTitle: "مساحة العمل مؤرشفة",
         restoreDescription:
-          "تمت أرشفة {{workspaceName}} وإزالة شجرة العمل الخاصة بها. استعد الفرع {{branch}} لفتحها مجددًا.",
+          "استعد {{workspaceName}} للعودة إلى وكلائها. ستستخدم شجرة العمل الفرع {{branch}}.",
+        restoreWithoutBranchDescription: "استعد {{workspaceName}} للعودة إلى وكلائها.",
         unarchiveDescription: "{{workspaceName}} مؤرشفة. ألغِ أرشفتها لفتحها مجددًا.",
         restoreAction: "استعادة",
         unarchiveAction: "إلغاء الأرشفة",
@@ -535,9 +616,16 @@ export const ar: TranslationResources = {
       },
     },
     terminal: {
+      fileUploaded: "تم رفع الملف",
+      pasteFileFailed: "تعذر لصق الملف: {{reason}}",
+      uploadingFile: "جارٍ رفع الملف…",
       hostDisconnected: "Host غير متصل",
       updateHost: "حدّث المضيف لاستخدام عارض الطرفية الأصلي.",
+      restoreRequiresUpdate: "حدّث المضيف لعرض الطرفيات.",
       unableToSubscribe: "غير قادر على الاشتراك في المحطة",
+    },
+    sheet: {
+      openAsTab: "فتح كعلامة تبويب",
     },
     tabs: {
       loading: "تحميل...",
@@ -589,6 +677,11 @@ export const ar: TranslationResources = {
         editTerminalProfiles: "Edit profiles…",
         pinTarget: "تثبيت",
         unpinTarget: "إلغاء التثبيت",
+        newTab:
+          "\u0639\u0644\u0627\u0645\u0629 \u062A\u0628\u0648\u064A\u0628 \u062C\u062F\u064A\u062F\u0629",
+        changes: "\u0627\u0644\u062A\u063A\u064A\u064A\u0631\u0627\u062A",
+        files: "\u0627\u0644\u0645\u0644\u0641\u0627\u062A",
+        pullRequest: "\u0637\u0644\u0628 \u0627\u0644\u0633\u062D\u0628",
       },
       explorer: {
         open: "افتح المستكشف",
@@ -645,6 +738,7 @@ export const ar: TranslationResources = {
     },
     header: {
       actions: {
+        workspaceActionsUnhealthy: "إجراءات Workspace، توجد خدمة غير سليمة",
         workspaceActions: "إجراءات Workspace",
         newAgent: "وكيل جديد",
         newTerminal: "محطة جديدة",
@@ -690,6 +784,8 @@ export const ar: TranslationResources = {
         direct: "مباشر",
       },
       states: {
+        runningCount: "{{count}} قيد التشغيل",
+        running: "جري",
         exitCode: "الخروج من{{code}}",
         startFailed: "فشل بدء تشغيل{{scriptName}}",
         stopFailed: "فشل إيقاف{{scriptName}}",
@@ -830,6 +926,9 @@ export const ar: TranslationResources = {
         },
       },
       diff: {
+        baseBranch: {
+          title: "الفرع الأساسي",
+        },
         openChangesTab: "فتح علامة تبويب التغييرات",
         closeChangesTab: "إغلاق علامة تبويب التغييرات",
         binaryFile: "ملف ثنائي",
@@ -861,6 +960,7 @@ export const ar: TranslationResources = {
         checkingRepository: "فحص المستودع...",
         notRepository: "ليس مستودع جيت",
         diffMode: "وضع الفرق",
+        all: "كل التغييرات",
         uncommitted: "غير ملتزم",
         committed: "ملتزم",
         branchUnknown: "مجهول",
@@ -889,22 +989,34 @@ export const ar: TranslationResources = {
         actions: {
           viewPullRequest: "عرض",
           openOn: "فتح على {{brand}}",
+          addToChat:
+            "\u0625\u0636\u0627\u0641\u0629 \u0625\u0644\u0649 \u0627\u0644\u062F\u0631\u062F\u0634\u0629",
+          addAllToChat:
+            "\u0625\u0636\u0627\u0641\u0629 \u0627\u0644\u0643\u0644 \u0625\u0644\u0649 \u0627\u0644\u062F\u0631\u062F\u0634\u0629",
+          addingToChat: "\u062C\u0627\u0631\u064D \u0627\u0644\u0625\u0636\u0627\u0641\u0629...",
         },
         sections: {
           checks: "الشيكات",
           pipeline: "خط المعالجة",
           reviews: "التعليقات",
+          activity: "\u0627\u0644\u0646\u0634\u0627\u0637",
         },
         empty: {
           noJobs: "لا توجد مهام",
           loadingPipeline: "جارٍ تحميل خط المعالجة...",
           pipelineJobsLoadFailed: "تعذر تحميل مهام خط المعالجة",
           allowedToFail: "مسموح بالفشل",
+          noActivity:
+            "\u0644\u0627 \u064A\u0648\u062C\u062F \u0646\u0634\u0627\u0637 \u0628\u0639\u062F",
         },
         approvals: "{{given}} من {{required}} موافقات",
         accessibility: {
           pullRequest: "سحب الطلب #{{number}}",
           pullRequest_mr: "طلب دمج !{{number}}",
+          commentActions:
+            "\u0625\u062C\u0631\u0627\u0621\u0627\u062A \u0627\u0644\u062A\u0639\u0644\u064A\u0642",
+          threadActions:
+            "\u0625\u062C\u0631\u0627\u0621\u0627\u062A \u0633\u0644\u0633\u0644\u0629 \u0627\u0644\u0646\u0642\u0627\u0634",
         },
         states: {
           draft: "مسودة",
@@ -923,10 +1035,63 @@ export const ar: TranslationResources = {
         },
         thread: {
           discussion: "سلسلة المناقشة",
+          resolved: "\u062A\u0645 \u0627\u0644\u062D\u0644",
+          outdated: "\u0642\u062F\u064A\u0645",
         },
         errors: {
           statusLoadFailed: "غير قادر على تحميل حالة طلب السحب",
           activityLoadFailed: "غير قادر على تحميل نشاط طلب السحب",
+        },
+        checksOverview: {
+          headline: {
+            actionRequired:
+              "\u0628\u0639\u0636 \u0627\u0644\u0641\u062D\u0648\u0635\u0627\u062A \u062A\u062D\u062A\u0627\u062C \u0625\u0644\u0649 \u0627\u0646\u062A\u0628\u0627\u0647\u0643",
+            failure:
+              "\u0628\u0639\u0636 \u0627\u0644\u0641\u062D\u0648\u0635\u0627\u062A \u0644\u0645 \u062A\u0646\u062C\u062D",
+            pending:
+              "\u0628\u0639\u0636 \u0627\u0644\u0641\u062D\u0648\u0635\u0627\u062A \u0644\u0645 \u062A\u0643\u062A\u0645\u0644 \u0628\u0639\u062F",
+            success:
+              "\u0646\u062C\u062D\u062A \u062C\u0645\u064A\u0639 \u0627\u0644\u0641\u062D\u0648\u0635\u0627\u062A",
+            none: "\u0644\u0627 \u062A\u0648\u062C\u062F \u0641\u062D\u0648\u0635\u0627\u062A",
+          },
+          count: {
+            actionRequired:
+              "{{count}} \u062A\u062D\u062A\u0627\u062C \u0625\u062C\u0631\u0627\u0621\u064B",
+            warning: "{{count}} \u0645\u0639 \u062A\u062D\u0630\u064A\u0631",
+            failure: "{{count}} \u0641\u0627\u0634\u0644\u0629",
+            pending: "{{count}} \u0642\u064A\u062F \u0627\u0644\u062A\u0634\u063A\u064A\u0644",
+            manual: "{{count}} \u064A\u062F\u0648\u064A\u0629",
+            success: "{{count}} \u0646\u0627\u062C\u062D\u0629",
+            ignored: "{{count}} \u0645\u062A\u062E\u0637\u0627\u0629",
+          },
+          detailOne: "\u0627\u0644\u0641\u062D\u0635: {{parts}}",
+          detailMany: "\u0627\u0644\u0641\u062D\u0648\u0635\u0627\u062A: {{parts}}",
+          groupOne: {
+            actionRequired:
+              "{{count}} \u0641\u062D\u0635 \u064A\u062D\u062A\u0627\u062C \u0625\u062C\u0631\u0627\u0621\u064B",
+            warning: "{{count}} \u0641\u062D\u0635 \u0645\u0639 \u062A\u062D\u0630\u064A\u0631",
+            failure: "{{count}} \u0641\u062D\u0635 \u0641\u0627\u0634\u0644",
+            pending:
+              "{{count}} \u0641\u062D\u0635 \u0642\u064A\u062F \u0627\u0644\u062A\u0634\u063A\u064A\u0644",
+            manual: "{{count}} \u0641\u062D\u0635 \u064A\u062F\u0648\u064A",
+            success: "{{count}} \u0641\u062D\u0635 \u0646\u0627\u062C\u062D",
+            ignored: "{{count}} \u0641\u062D\u0635 \u0645\u062A\u062E\u0637\u0649",
+          },
+          groupMany: {
+            actionRequired:
+              "{{count}} \u0641\u062D\u0648\u0635\u0627\u062A \u062A\u062D\u062A\u0627\u062C \u0625\u062C\u0631\u0627\u0621\u064B",
+            warning:
+              "{{count}} \u0641\u062D\u0648\u0635\u0627\u062A \u0645\u0639 \u062A\u062D\u0630\u064A\u0631",
+            failure:
+              "{{count}} \u0641\u062D\u0648\u0635\u0627\u062A \u0641\u0627\u0634\u0644\u0629",
+            pending:
+              "{{count}} \u0641\u062D\u0648\u0635\u0627\u062A \u0642\u064A\u062F \u0627\u0644\u062A\u0634\u063A\u064A\u0644",
+            manual: "{{count}} \u0641\u062D\u0648\u0635\u0627\u062A \u064A\u062F\u0648\u064A\u0629",
+            success:
+              "{{count}} \u0641\u062D\u0648\u0635\u0627\u062A \u0646\u0627\u062C\u062D\u0629",
+            ignored:
+              "{{count}} \u0641\u062D\u0648\u0635\u0627\u062A \u0645\u062A\u062E\u0637\u0627\u0629",
+          },
         },
       },
       forgeSetup: {
@@ -935,17 +1100,6 @@ export const ar: TranslationResources = {
         generic: "قم بإعداد {{brand}} على هذا المضيف لاستخدام ميزاته.",
       },
     },
-  },
-  forumArch: {
-    title: "مخطط البنية",
-    loading: "جارٍ تحميل المخطط…",
-    notFound: "لم يعد هذا الإصدار من المخطط متاحًا على المضيف.",
-    loadFailed: "تعذّر تحميل المخطط.",
-    offline: "اتصل بالمضيف لعرض هذا المخطط.",
-    retry: "إعادة المحاولة",
-    replay: "إعادة التشغيل",
-    replayHint: "إعادة تشغيل حركة التتبع",
-    reducedMotion: "الحركة متوقفة لأن تقليل الحركة مفعّل",
   },
   connection: {
     localMode: {
@@ -1005,12 +1159,20 @@ export const ar: TranslationResources = {
       closeSidebar: "إغلاق الشريط الجانبي",
     },
     help: {
-      trigger: "المساعدة والدعم",
-      sectionHelp: "المساعدة",
-      diagnostics: "تشغيل التشخيص",
-      shortcuts: "اختصارات لوحة المفاتيح",
-      reportIssue: "الإبلاغ عن مشكلة",
+      trigger:
+        "\u0627\u0644\u0645\u0633\u0627\u0639\u062F\u0629 \u0648\u0627\u0644\u062F\u0639\u0645",
+      sectionHelp: "\u0627\u0644\u0645\u0633\u0627\u0639\u062F\u0629",
+      diagnostics: "\u062A\u0634\u063A\u064A\u0644 \u0627\u0644\u062A\u0634\u062E\u064A\u0635",
+      shortcuts:
+        "\u0627\u062E\u062A\u0635\u0627\u0631\u0627\u062A \u0644\u0648\u062D\u0629 \u0627\u0644\u0645\u0641\u0627\u062A\u064A\u062D",
+      reportIssue:
+        "\u0627\u0644\u0625\u0628\u0644\u0627\u063A \u0639\u0646 \u0645\u0634\u0643\u0644\u0629",
       version: "JAgentDesk {{version}}",
+      discord: "Discord",
+      github:
+        "\u0625\u0646\u0634\u0627\u0621 \u0645\u0634\u0643\u0644\u0629 \u0639\u0644\u0649 GitHub",
+      whatsNew: "\u0645\u0627 \u0627\u0644\u062C\u062F\u064A\u062F",
+      appName: "JAgentDesk",
     },
     sections: {
       sessions: "السجل",
@@ -1091,21 +1253,36 @@ export const ar: TranslationResources = {
         hostDisconnected: "Host غير متصل",
         hideFailed: "فشل في إخفاء مساحة العمل",
         archiveFailed: "فشل في أرشفة مساحة العمل",
+        archived: "تمت أرشفة مساحة العمل",
+        undoArchive: "تراجع",
+        undoArchiveFailed: "تعذّر التراجع عن الأرشفة",
       },
     },
+    statusBucket: {
+      needsInput: "\u062A\u062D\u062A\u0627\u062C \u0625\u062F\u062E\u0627\u0644\u0627\u064B",
+      failed: "\u0641\u0634\u0644",
+      readyToReview:
+        "\u062C\u0627\u0647\u0632\u0629 \u0644\u0644\u0645\u0631\u0627\u062C\u0639\u0629",
+      working: "\u0642\u064A\u062F \u0627\u0644\u0639\u0645\u0644",
+      done: "\u062A\u0645",
+    },
+    statusGroupAccessibility: "\u0645\u062C\u0645\u0648\u0639\u0629 {{label}}",
   },
   newWorkspace: {
     title: "مساحة عمل جديدة",
     create: "يخلق",
     isolation: {
-      local: "محلي",
+      local: "مجلد المشروع",
       worktree: "شجرة عمل جديدة",
+      existing: "شجرة عمل موجودة",
       label: "العزل",
     },
     fields: {
       project: "المشروع",
       base: "الأساس",
       baseNotApplicable: "غير قابل للتطبيق",
+      host: "المضيف",
+      branch: "الفرع",
     },
     titlePlaceholder: "العنوان (اختياري)",
     errors: {
@@ -1113,6 +1290,10 @@ export const ar: TranslationResources = {
       createWorktreeFailed: "فشل في إنشاء شجرة العمل",
       composerStateRequired: "حالة الملحن مطلوبة",
       selectModel: "اختر نموذجا",
+      branchInProjectDirectory:
+        "الفرع {{branch}} مفعّل في مجلد المشروع. اختر مجلد المشروع للعمل عليه، أو أنشئ فرعًا جديدًا منه.",
+      branchInWorktree:
+        "الفرع {{branch}} مفعّل في {{path}}. اختر شجرة العمل هذه من شجرة عمل موجودة، أو أنشئ فرعًا جديدًا منه.",
     },
     refPicker: {
       startingRef: "بدء المرجع",
@@ -1121,7 +1302,42 @@ export const ar: TranslationResources = {
       searching: "جارٍ البحث...",
       noMatchingRefs: "لا توجد مراجع مطابقة.",
       searchPlaceholder: "بحث الفروع والعلاقات العامة",
+      searchBranches: "ابحث في الفروع",
+      searchPullRequests: "ابحث في طلبات الدمج",
+      searchPullRequests_mr: "ابحث في MR",
+      branches: "الفروع",
+      pullRequests: "طلبات الدمج",
+      pullRequests_mr: "MR",
+      pullRequestsShort: "الدمج",
+      pullRequestsShort_mr: "MR",
+      branchOff: "فرع جديد",
+      checkout: "العمل عليه",
+      branchOffHint: "ينشئ فرعًا جديدًا منه",
+      checkoutHint: "يعمل عليه مباشرة",
+      base: "الأساس",
+      from: "من",
+      branch: "الفرع",
+      pullRequest: "طلب الدمج",
+      pullRequest_mr: "MR",
+      inProjectDirectory: "في مجلد المشروع",
+      inWorktree: "في شجرة عمل",
       title: "ابدأ من",
+    },
+    launch: {
+      commandPlaceholder: "Run a command, or leave empty for a blank terminal",
+      promptPlaceholder: "Prompt {{name}}",
+      submit: "Launch",
+      chat: "Chat",
+      terminal: "Terminal",
+      title: "What to launch",
+      manageProfiles: "Manage profiles",
+    },
+    tooltips: {
+      project: "Choose the project",
+      host: "Choose the host",
+      isolation: "Choose the isolation level",
+      startingRef: "اختر من أين تبدأ",
+      launch: "Choose what to launch",
     },
   },
   desktop: {
@@ -1296,6 +1512,7 @@ export const ar: TranslationResources = {
     openPath: "فتح المسار",
   },
   branchSwitcher: {
+    failedToLoad: "تعذّر تحميل الفروع. أعد فتح قائمة الفروع للمحاولة مرة أخرى.",
     currentBranch: "الفرع الحالي:{{branchName}}. اضغط لتبديل الفرع.",
     placeholder: "تبديل الفرع...",
     searchPlaceholder: "تصفية الفروع...",
@@ -1318,6 +1535,17 @@ export const ar: TranslationResources = {
     noFiles: "لم يتم العثور على ملفات أو أدلة",
     noCommands: "لم يتم العثور على أي أوامر",
     failedToLoad: "فشل التحميل",
+    chooseProjectForCommands: "اختر مشروعًا لعرض الأوامر",
+    chooseModelForCommands: "اختر نموذجًا لعرض الأوامر",
+    loadingProviderCommands:
+      "\u062C\u0627\u0631\u064D \u062A\u062D\u0645\u064A\u0644 \u0623\u0648\u0627\u0645\u0631 {{provider}}...",
+    commandsFailed:
+      "\u062A\u0639\u0630\u0631 \u062A\u062D\u0645\u064A\u0644 \u0627\u0644\u0623\u0648\u0627\u0645\u0631",
+    providerCommandsFailed:
+      "\u062A\u0639\u0630\u0631 \u062A\u062D\u0645\u064A\u0644 \u0623\u0648\u0627\u0645\u0631 {{provider}}",
+    filesFailed:
+      "\u062A\u0639\u0630\u0631 \u0627\u0644\u0628\u062D\u062B \u0641\u064A \u0627\u0644\u0645\u0644\u0641\u0627\u062A",
+    skillTag: "\u0645\u0647\u0627\u0631\u0629",
   },
   loadOlderHistory: {
     failed: "تعذر تحميل السجل الأقدم",
@@ -1367,18 +1595,33 @@ export const ar: TranslationResources = {
     noMatches: "لا توجد نماذج تطابق بحثك",
     searchPlaceholder: "نماذج البحث...",
     openProviderSettings: "افتح إعدادات{{provider}}",
+    editProfilesLabel: "تحرير ملفات الوكيل",
+    searchAllPlaceholder: "ابحث في كل النماذج...",
+    createProfileFromModel: "إنشاء ملف شخصي من هذا النموذج",
+    editProfileLabel: "تحرير {{name}}",
+    editProfilesCount: "تحرير الملفات الشخصية ({{count}})",
+    profiles: "الملفات الشخصية",
+    createProfile: "إنشاء ملف شخصي",
+    noMatchesForQuery: 'لا توجد نماذج تطابق "{{query}}"',
+    providers: "المزودون",
+    model: "النموذج",
   },
   providerCatalog: {
     title: "إضافة مزود",
     search: "مقدمي البحث",
     noProviders: "لم يتم العثور على مقدمي الخدمات",
+    clearSearch: "مسح البحث",
     actions: {
       add: "يضيف",
+      addProvider: "إضافة {{provider}}",
       adding: "إضافة",
       installed: "تم التثبيت",
       cancel: "يلغي",
       installInstructions: "تعليمات التثبيت",
       installInstructionsFor: "تعليمات تثبيت{{provider}}",
+    },
+    types: {
+      acp: "ACP",
     },
     errors: {
       unableToInstall: "غير قادر على تثبيت الموفر",
@@ -1401,6 +1644,34 @@ export const ar: TranslationResources = {
     },
   },
   pairing: {
+    hostConfirmation: {
+      title: "Connect to this host?",
+      description: "This link adds a new host. Check its address and key before connecting.",
+      descriptionChanged:
+        "This link changes a saved host. Check the previous and new values before connecting.",
+      hostLabel: "Host",
+      fingerprintLabel: "New daemon key fingerprint (SHA-256)",
+      routesLabel: "New connections",
+      previousRoutesLabel: "Previous connections",
+      previousFingerprintLabel: "Previous daemon key fingerprint (SHA-256)",
+      keyChanged: "Warning: the daemon key has changed. Verify this change with the host owner.",
+      connect: "Connect",
+    },
+    verify: {
+      failed: "Pairing failed",
+      saveFailed:
+        "JAgentDesk could not save the pairing offer on this device. Paste the link again to retry.",
+      invalidOffer: "This is not a valid JAgentDesk pairing offer.",
+      enterCode: "Enter the 6-digit verification code shown on desktop.",
+      starting: "Connection is still starting. Try entering the code again.",
+      waiting: "Waiting for Tailscale to connect...",
+      helper: "Enter the 6-digit code shown in the JAgentDesk desktop connection popup.",
+      login:
+        "Pairing offer saved. Sign in to Tailscale first; then this screen will connect to the desktop and ask for the 6-digit code.",
+      title: "Verify pairing",
+      codeTitle: "Enter verification code",
+      verifying: "Verifying…",
+    },
     connectionMethods: {
       title: "إضافة اتصال",
       direct: {
@@ -1492,6 +1763,8 @@ export const ar: TranslationResources = {
       errorTitle: "خطأ",
     },
     device: {
+      transportHint:
+        "Copy this link or scan the QR code. This desktop will show the device request and six-digit code. Relay works without a Tailscale login.",
       loadingOffer: "جارٍ تحميل عرض الإقران...",
       failedToLoadOffer: "فشل تحميل عرض الاقتران.",
       unavailable: "عرض الاقتران غير متاح.",
@@ -1537,6 +1810,7 @@ export const ar: TranslationResources = {
     hostUnavailable: "مضيف التنزيل غير متاح.",
     cancelled: "تم إلغاء التنزيل.",
     failed: "فشل تنزيل الملف.",
+    httpFailed: "فشل تنزيل الملف (HTTP {{status}}).",
     shareFile: "مشاركة الملف",
     shareFileNamed: "مشاركة{{fileName}}",
   },
@@ -1544,6 +1818,18 @@ export const ar: TranslationResources = {
     backdrop: "خلفية القائمة",
   },
   subagents: {
+    title: "الوكلاء الفرعيون",
+    parent: {
+      openParent: "Open parent",
+
+      parentAgent: "Parent agent",
+
+      parent: "Parent",
+
+      backTo: "Back to {{label}}",
+      backToParent: "Back to parent",
+    },
+
     detachAction: "فصل {{label}}",
     detachTooltip: "فصل الوكيل الفرعي",
     archiveAction: "أرشيف{{label}}",
@@ -1596,6 +1882,22 @@ export const ar: TranslationResources = {
       loadError: "فشل تحميل الفروقات",
       capabilityMissing: "حدّث المضيف لعرض فروقات الالتزامات.",
     },
+    files: {
+      label: "\u0627\u0644\u0645\u0644\u0641\u0627\u062A",
+      subtitle:
+        "\u0645\u0644\u0641\u0627\u062A \u0645\u0633\u0627\u062D\u0629 \u0627\u0644\u0639\u0645\u0644",
+      tooltip:
+        "\u062A\u0635\u0641\u062D \u0645\u0644\u0641\u0627\u062A \u0645\u0633\u0627\u062D\u0629 \u0627\u0644\u0639\u0645\u0644",
+    },
+    pullRequest: {
+      label: "\u0637\u0644\u0628 \u0627\u0644\u0633\u062D\u0628",
+      subtitle:
+        "\u062A\u0641\u0627\u0635\u064A\u0644 \u0637\u0644\u0628 \u0627\u0644\u0633\u062D\u0628",
+      emptyTitle:
+        "\u0644\u0627 \u064A\u0648\u062C\u062F \u0637\u0644\u0628 \u0633\u062D\u0628 \u0628\u0639\u062F",
+      emptyDescription:
+        "\u0623\u0646\u0634\u0626 \u0637\u0644\u0628 \u0633\u062D\u0628 \u0644\u0646\u0633\u062E\u0629 \u0627\u0644\u0639\u0645\u0644 \u0647\u0630\u0647 \u0644\u0639\u0631\u0636 \u062A\u0641\u0627\u0635\u064A\u0644\u0647 \u0647\u0646\u0627.",
+    },
   },
   toolCallDetails: {
     error: "خطأ",
@@ -1604,7 +1906,14 @@ export const ar: TranslationResources = {
     input: "مدخل",
     output: "الإخراج",
   },
+  turnSummary: {
+    details: "عرض تفاصيل الجولة",
+    sentBy: "أرسلها {{name}}",
+    showMore: "عرض المزيد",
+    showLess: "عرض أقل",
+  },
   toolCallGroup: {
+    thought: "فكّر",
     editedFiles: {
       one: "حرّر {{count}} ملفًا",
       other: "حرّر {{count}} ملفات",
@@ -1639,6 +1948,8 @@ export const ar: TranslationResources = {
     dismiss: "رفض",
   },
   contextWindow: {
+    noData: "No context data",
+    accessibilityNoData: "Context window: No context data",
     title: "نافذة السياق",
     used: "تم استخدام{{percentage}}%",
     tokens: "رموز{{used}}/{{max}}",
@@ -1701,6 +2012,7 @@ export const ar: TranslationResources = {
       connections: "اتصالات",
       agents: "Agents",
       orchestration: "Orchestration",
+      voice: "الصوت",
       workspaces: "Workspaces",
       providers: "مقدمي الخدمات",
       usage: "الاستخدام",
@@ -1736,6 +2048,69 @@ export const ar: TranslationResources = {
         unsupported_os: "Not available on this OS",
       },
     },
+    voice: {
+      offline: "اتصل بهذا المضيف لضبط الصوت.",
+      updateHost: "حدّث المضيف لضبط الصوت.",
+      saveError: "تعذّر تحديث إعدادات الصوت",
+      provider: "المزوّد",
+      providers: {
+        local: "محلي",
+        openai: "OpenAI",
+      },
+      voice: "الصوت",
+      save: "حفظ",
+      retry: "إعادة المحاولة",
+      cancel: "إلغاء",
+      model: "النموذج",
+      language: "اللغة",
+      languagePlaceholder: "اكتشاف تلقائي",
+      setBy: "محدد بواسطة {{name}}",
+      unknownProvider: "حدّث التطبيق لإعداد {{provider}}",
+      sites: {
+        dictationStt: "تحويل الكلام إلى نص",
+        voiceModeStt: "الاستماع",
+        voiceModeTts: "التحدث",
+      },
+      dictation: {
+        title: "الإملاء",
+        enabled: "الإملاء",
+        enabledHint: "تحدّث في مربع الرسالة بدلًا من الكتابة",
+      },
+      voiceMode: {
+        title: "وضع الصوت",
+        info: "يحوّل وضع الصوت كلامك إلى نص ويقرأ ردود الوكيل بصوت عالٍ.",
+        enabled: "وضع الصوت",
+        enabledHint: "تحدّث مع وكلائك دون استخدام يديك",
+      },
+      openai: {
+        apiKey: "مفتاح API",
+        apiKeyHint: "يُحفظ على المضيف ولا يُعرض مرة أخرى.",
+        keyPlaceholder: "sk-...",
+        savedKeyPlaceholder: "محفوظ",
+        missingKey: "مفتاح API مفقود",
+        baseUrl: "عنوان URL الأساسي",
+        baseUrlHint: "للخوادم المتوافقة مع OpenAI. اتركه فارغًا لاستخدام OpenAI.",
+      },
+      models: {
+        loading: "جارٍ تحميل النماذج...",
+        loadError: "تعذّر تحميل النماذج المحلية",
+        none: "لا توجد نماذج متاحة",
+        downloaded: "منزّل",
+        inUse: "قيد الاستخدام",
+        recommended: "موصى به",
+        download: "تنزيل",
+        downloadAction: "تنزيل {{label}}",
+        downloading: "جارٍ التنزيل...",
+        downloadingPercent: "جارٍ التنزيل {{percent}}%",
+        extracting: "جارٍ الاستخراج...",
+        delete: "حذف",
+        deleteAction: "حذف {{label}}",
+        deleteTitle: "حذف {{label}}؟",
+        deleteMessage: "سيؤدي هذا إلى تحرير {{size}}. يمكنك تنزيله مرة أخرى لاحقًا.",
+        languages: "لغات {{label}}",
+        moreLanguages: "{{languages}} و{{count}} أخرى",
+      },
+    },
     general: {
       title: "عام",
       browserData: {
@@ -1749,7 +2124,18 @@ export const ar: TranslationResources = {
         success: "تم مسح بيانات المتصفح.",
         error: "تعذر مسح بيانات المتصفح.",
       },
+      sendShortcut: {
+        label: "Send shortcut",
+        options: { enter: "Enter", "mod-enter": "{{modifier}}+Enter" },
+      },
       defaultSend: {
+        commandEnterDescriptions: {
+          interrupt:
+            "When the agent is running, {{modifier}}+Enter interrupts. Enter inserts a new line.",
+          steer:
+            "When the agent is running, {{modifier}}+Enter steers the active turn. Enter inserts a new line.",
+          queue: "When the agent is running, {{modifier}}+Enter queues. Enter inserts a new line.",
+        },
         label: "إرسال افتراضي",
         descriptions: {
           steer:
@@ -1782,13 +2168,13 @@ export const ar: TranslationResources = {
         label: "عرض التفكير دائماً",
         description: "إظهار تفكير الوكيل وخطوات الاستدلال بشكل كامل بشكل افتراضي",
       },
-      toolCallDetail: {
-        label: "عرض استدعاءات الأدوات",
-        description: "كيفية ظهور استدعاءات الأدوات في المخطط الزمني",
-        accessibilityLabel: "حدد عرض استدعاءات الأدوات ({{value}})",
+      chatDisplay: {
+        label: "عرض المحادثة",
+        description: "مقدار عمل الوكيل الذي تعرضه المحادثة",
         options: {
-          overview: "ملخص",
-          detailed: "التفاصيل الكاملة",
+          full: "كامل",
+          collapseToolCalls: "طيّ استدعاءات الأدوات",
+          collapseTurns: "طيّ الأدوار",
         },
       },
       language: {
@@ -1810,11 +2196,6 @@ export const ar: TranslationResources = {
     },
     diagnostics: {
       title: "التشخيص",
-      legacyTerminalRenderer: {
-        label: "استخدام عارض الطرفية السابق",
-        description: "استخدام طرفية WebView السابقة بعد إعادة فتح الطرفية",
-        accessibilityLabel: "استخدام عارض الطرفية السابق",
-      },
       testAudio: "اختبار الصوت",
       playTest: "لعب الاختبار",
       playing: "جارٍ اللعب...",
@@ -1848,8 +2229,8 @@ export const ar: TranslationResources = {
           claude: "كلود",
           ghostty: "شبحي",
           pureBlack: "أسود نقي",
-          clickup: "ClickUp",
-          clickupDark: "ClickUp Dark",
+          gumloop: "Gumloop",
+          gumloopDark: "Gumloop Dark",
           auto: "نظام",
         },
       },
@@ -1875,6 +2256,22 @@ export const ar: TranslationResources = {
         codeSize: "حجم الكود",
         codeSizeAccessibility: "حجم خط الكود",
       },
+      layout: {
+        contentWidthCustom: "Custom width · {{width}} px",
+
+        contentWidthFull: "Full",
+
+        contentWidthWide: "Wide",
+
+        contentWidthDefault: "Default",
+
+        title: "Layout",
+        contentWidth: "Content width",
+        contentWidthHint: "Maximum width of chat and Markdown content",
+        contentWidthAccessibility: "Content width in pixels",
+        reset: "Reset",
+        resetAccessibility: "Reset content width",
+      },
       syntax: {
         title: "بناء الجملة",
         highlightTheme: "تسليط الضوء على الموضوع",
@@ -1888,6 +2285,8 @@ export const ar: TranslationResources = {
       searchPlaceholder: "البحث في الاختصارات",
       unavailableOnMobile: "اختصارات لوحة المفاتيح متاحة فقط على سطح المكتب",
       capturePrompt: "اضغط على الاختصار...",
+      captureIndexPrompt: "اختم برقم من 1 إلى 9.",
+      unassigned: "غير معين",
       actions: {
         done: "منتهي",
         cancel: "يلغي",
@@ -1936,6 +2335,8 @@ export const ar: TranslationResources = {
         toggleFocusMode: "تبديل وضع التركيز",
         cycleTheme: "موضوع الدورة",
         focusMessageInput: "التركيز على إدخال الرسالة",
+        toggleModelPicker: "فتح منتقي النموذج أو إغلاقه",
+        cycleEffort: "التنقل بين مستويات الجهد",
         cycleAgentMode: "تبديل وضع الوكيل",
         toggleVoiceMode: "تبديل الوضع الصوتي",
         startStopDictation: "بدء إملاء /stop",
@@ -2043,9 +2444,15 @@ export const ar: TranslationResources = {
       },
       notFound: "لم يتم العثور على Host",
       badges: {
+        relay: "Relay",
+        tailnet: "Tailscale",
         local: "محلي",
       },
       connections: {
+        active: "Active",
+        enableRelay: "Enable relay",
+        use: "Use this connection",
+        useFailed: "Could not switch connection",
         title: "اتصالات",
         removeTitle: "إزالة الاتصال",
         removeMessage: "إزالة{{name}}؟ لا يمكن التراجع عن هذا.",
@@ -2080,7 +2487,20 @@ export const ar: TranslationResources = {
         },
       },
       agents: {
+        resumeOnStartup: {
+          title: "استئناف الوكلاء بعد إعادة التشغيل",
+          info: "إعادة فتح الوكلاء الذين كانوا يعملون عند توقف المضيف وإرسال طلب الاستئناف. ينطبق ذلك بعد إعادة التشغيل العادية والتعطّل.",
+          hint: "متابعة العمل المنقطع تلقائيًا.",
+          prompt: "طلب الاستئناف",
+          edit: "تحرير",
+          editAccessibilityLabel: "تعديل الطلب",
+        },
         unavailable: "Connect to this host to manage agents",
+        idleRuntimeCleanup: {
+          title: "تحرير الوكلاء الخاملين",
+          hint: "تحرير الذاكرة بعد ساعة من الخمول.",
+          info: "يوقف عملية الوكيل مع الاحتفاظ بمحادثته. أرسل رسالة لاستئنافها.\n\nيمنع العمل النشط والإشعارات المعلّقة وفحوصات أمان المزوّد عملية التنظيف.",
+        },
       },
       workspaces: {
         unavailable: "Connect to this host to manage workspaces",
@@ -2177,6 +2597,41 @@ export const ar: TranslationResources = {
           errorMessage: "غير قادر على إزالة المضيف",
           localErrorMessage: "Unable to remove localhost connection",
         },
+      },
+      agentProfiles: {
+        featureCountOne: "{{count}} سمة",
+        featureCount: "{{count}} سمة",
+        editProfileTitle: "تعديل ملف تعريف الوكيل",
+        addProfileTitle: "إضافة ملف تعريف وكيل",
+        iconLabel: "الأيقونة",
+        nameLabel: "الاسم",
+        namePlaceholder: "عمل الواجهة",
+        providerLabel: "المزود",
+        providerPlaceholder: "اختر مزودًا",
+        noProviders: "لا يوجد مزودون متاحون على هذا المضيف",
+        modelLabel: "النموذج",
+        noModels: "لا توجد نماذج يمكن الاختيار من بينها لهذا المزود",
+        modeLabel: "الوضع",
+        noModes: "لا توجد أوضاع يمكن الاختيار من بينها لهذا المزود",
+        thinkingLabel: "التفكير",
+        noThinkingOptions: "لا توجد مستويات تفكير لهذا النموذج",
+        featuresLabel: "السمات",
+        notesLabel: "متى يُستخدم",
+        notesHint: "يساعد الوكلاء على اختيار ملف التعريف هذا عند بدء وكيل آخر.",
+        notesPlaceholder: "استخدمه لعمل الواجهة — المكونات والتخطيط ورموز التصميم.",
+        saving: "جارٍ الحفظ...",
+        save: "حفظ",
+        moveUp: "نقل لأعلى",
+        moveDown: "نقل لأسفل",
+        editProfile: "تعديل الملف",
+        remove: "إزالة",
+        removeConfirmTitle: "إزالة الملف؟",
+        removeConfirmMessage: 'إزالة "{{name}}"؟',
+        sectionTitle: "ملفات تعريف الوكيل",
+        unsupported: "يشغّل هذا المضيف نسخة Daemon لا تدعم ملفات تعريف الوكيل بعد",
+        unavailable: "اتصل بهذا المضيف لإدارة ملفات تعريف الوكيل",
+        emptyState: "لا توجد ملفات تعريف بعد. أضف واحدًا لبدء الوكلاء من مزود ونموذج محفوظين.",
+        newProfile: "ملف تعريف جديد",
       },
     },
     providers: {
@@ -2292,6 +2747,26 @@ export const ar: TranslationResources = {
         custom: "نماذج مخصصة",
         updated: "تم تحديث{{time}}",
       },
+      installation: {
+        title: "التثبيت",
+        version: "الإصدار",
+        installed: "مثبّت",
+        notInstalled: "غير مثبّت",
+        install: "تثبيت",
+        checking: "جارٍ التحقق...",
+        failed: "تعذّر التحقق من التثبيت",
+        updates: "التحديثات",
+        upToDate: "محدّث",
+        updateAvailable: "يتوفر تحديث",
+        updateInstructions: "تعليمات التحديث",
+        update: "تحديث",
+        updating: "جارٍ التحديث...",
+        updated: "تم التحديث",
+        updateFailed: "فشل التحديث",
+        outputTruncated: "تم حذف المخرجات السابقة.",
+        updatesFailed: "تعذّر التحقق من التحديثات",
+        installInstructions: "تعليمات التثبيت",
+      },
       diagnostic: {
         title: "التشخيص",
         button: "التشخيص",
@@ -2392,7 +2867,7 @@ export const ar: TranslationResources = {
       },
     },
   },
-  clickupShell: {
+  gumloopShell: {
     search: "بحث",
     newWorkspace: "جديد",
     workspaces: "مساحات العمل",
@@ -2792,6 +3267,139 @@ export const ar: TranslationResources = {
       forkHint: "JAgentDesk does not own {{name}}, so it is never edited.",
       fork: "Create copy",
       forked: "Training {{name}}",
+    },
+  },
+  changelog: {
+    title: "\u0645\u0627 \u0627\u0644\u062C\u062F\u064A\u062F",
+    installed: "\u0645\u062B\u0628\u0651\u062A",
+    showMore: "\u0639\u0631\u0636 \u0627\u0644\u0645\u0632\u064A\u062F",
+    showAllChanges:
+      "\u0639\u0631\u0636 \u0643\u0644 \u0627\u0644\u062A\u063A\u064A\u064A\u0631\u0627\u062A",
+    hideAllChanges:
+      "\u0625\u062E\u0641\u0627\u0621 \u0643\u0644 \u0627\u0644\u062A\u063A\u064A\u064A\u0631\u0627\u062A",
+    openWebsite:
+      "\u0633\u062C\u0644 \u0627\u0644\u062A\u063A\u064A\u064A\u0631\u0627\u062A \u0627\u0644\u0643\u0627\u0645\u0644",
+    error: {
+      title:
+        "\u062A\u0639\u0630\u0651\u0631 \u062A\u062D\u0645\u064A\u0644 \u0633\u062C\u0644 \u0627\u0644\u062A\u063A\u064A\u064A\u0631\u0627\u062A",
+      description:
+        "\u062A\u062D\u0642\u0642 \u0645\u0646 \u0627\u062A\u0635\u0627\u0644\u0643 \u0648\u062D\u0627\u0648\u0644 \u0645\u0631\u0629 \u0623\u062E\u0631\u0649.",
+    },
+  },
+  providerUsage: {
+    checkUsage: "التحقق من الاستخدام",
+    checkUsageHint: "ينطبق على {{host}} على جميع الأجهزة",
+    off: "التحقق من الاستخدام متوقف على {{host}}.",
+    turnOn: "تشغيل",
+
+    options: "الإعدادات",
+    host: "المضيف",
+    refreshFailed: "تعذّر تحديث الاستخدام",
+    noHosts: "لا توجد مضيفات متصلة",
+    agentError: "تعذّر تحميل الاستخدام: {{reason}}",
+    pin: "تثبيت",
+    unpin: "إلغاء التثبيت",
+    displayAs: "النسب المئوية",
+    displayUsed: "المستخدم",
+    displayRemaining: "المتبقي",
+    showInSidebar: "ملخص في الشريط الجانبي",
+    showInSidebarHint: "تظهر الفترات المثبتة في أسفل الشريط الجانبي",
+    runToRefresh: "شغّل {{command}} للتحديث.",
+    signInAgain: "سجّل الدخول مجددًا.",
+    loginRejected: "تم رفض تسجيل الدخول (HTTP {{status}}). {{remedy}}",
+    loginExpired: "انتهت صلاحية تسجيل الدخول {{relativeTime}}. {{remedy}}",
+    title: "استخدام الخطة",
+    refresh: "تحديث",
+    reorderCard: "إعادة ترتيب {{source}}",
+    sources: "المصادر",
+    sourcesCount: "{{shown}} من {{total}}",
+    providerInactive: "المزود غير نشط",
+    allSourcesHidden: "لا توجد مصادر استخدام معروضة",
+    chooseSources: "اختيار المصادر",
+    refreshAll: "تحديث الكل",
+    refreshing: "جارٍ التحديث...",
+    loading: "جارٍ تحميل بيانات الاستخدام...",
+    empty: "لا توجد بيانات استخدام",
+    errorTitle: "تعذّر تحميل بيانات الاستخدام",
+    hostUnavailable: "اتصل بـ{{host}} لعرض استخدام المزوّد",
+    hostUpgradeRequired: "حدّث {{host}} لعرض استخدام المزوّد",
+    clientUnavailable: "اتصال المضيف غير جاهز",
+    retry: "حاول مرة أخرى",
+    tooltipLoading: "جارٍ تحميل استخدام الخطة...",
+    status: {
+      error: "خطأ",
+      unavailable: "غير متاح",
+    },
+    values: {
+      used: "تم استخدام {{percentage}}",
+      remaining: "متبقٍ {{amount}}",
+    },
+    labels: {
+      session: "الجلسة",
+      weekly: "أسبوعي",
+      monthly: "شهري",
+      codeReview: "مراجعة التعليمات البرمجية",
+      credits: "الأرصدة",
+      monthlyCredits: "أرصدة شهرية",
+    },
+    duration: {
+      days: "{{value}} يوم",
+      days_zero: "{{value}} يوم",
+      days_one: "يوم واحد",
+      days_two: "يومين",
+      days_few: "{{value}} أيام",
+      days_many: "{{value}} يومًا",
+      days_other: "{{value}} يوم",
+      hours: "{{value}} ساعة",
+      hours_zero: "{{value}} ساعة",
+      hours_one: "ساعة واحدة",
+      hours_two: "ساعتين",
+      hours_few: "{{value}} ساعات",
+      hours_many: "{{value}} ساعة",
+      hours_other: "{{value}} ساعة",
+      minutes: "{{value}} دقيقة",
+      minutes_zero: "{{value}} دقيقة",
+      minutes_one: "دقيقة واحدة",
+      minutes_two: "دقيقتين",
+      minutes_few: "{{value}} دقائق",
+      minutes_many: "{{value}} دقيقة",
+      minutes_other: "{{value}} دقيقة",
+      pair: "{{first}} و{{second}}",
+    },
+    timing: {
+      lastUpdated: "آخر تحديث {{relativeTime}}",
+      noSuccessfulUpdate: "لا يوجد تحديث ناجح",
+      resetTimePassed: "مضى وقت إعادة التعيين",
+      resettingNow: "تتم إعادة التعيين الآن",
+      resetsIn: "تتم إعادة التعيين خلال {{duration}}",
+      resetsAtWeekday: "{{weekday}} {{time}}",
+      resetsAtDate: "{{date}}، {{time}}",
+      limitReached: "تم بلوغ الحد",
+      mayHaveRunOut: "ربما نفدت الحصة",
+      runsOutAt: "ينفد عند {{time}}",
+      justNow: "الآن",
+      daysAgo: "قبل {{value}} يومًا",
+      daysAgo_zero: "قبل {{value}} يوم",
+      daysAgo_one: "قبل يوم واحد",
+      daysAgo_two: "قبل يومين",
+      daysAgo_few: "قبل {{value}} أيام",
+      daysAgo_many: "قبل {{value}} يومًا",
+      daysAgo_other: "قبل {{value}} يوم",
+      hoursAgo: "قبل {{value}} ساعة",
+      hoursAgo_zero: "قبل {{value}} ساعة",
+      hoursAgo_one: "قبل ساعة واحدة",
+      hoursAgo_two: "قبل ساعتين",
+      hoursAgo_few: "قبل {{value}} ساعات",
+      hoursAgo_many: "قبل {{value}} ساعة",
+      hoursAgo_other: "قبل {{value}} ساعة",
+      minutesAgo: "قبل {{value}} دقيقة",
+      minutesAgo_zero: "قبل {{value}} دقيقة",
+      minutesAgo_one: "قبل دقيقة واحدة",
+      minutesAgo_two: "قبل دقيقتين",
+      minutesAgo_few: "قبل {{value}} دقائق",
+      minutesAgo_many: "قبل {{value}} دقيقة",
+      minutesAgo_other: "قبل {{value}} دقيقة",
+      updated: "تم التحديث {{relativeTime}}",
     },
   },
 };

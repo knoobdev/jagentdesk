@@ -1,3 +1,5 @@
+import { usesDesktopBindings } from "@/keyboard";
+
 import { useMemo, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { Columns2, Globe, Rows2, SquarePen, SquareTerminal } from "lucide-react-native";
@@ -39,7 +41,7 @@ function staticIcon(element: ReactElement | undefined): CommandCenterIcon | unde
 function resolveWorkspaceShortcuts(
   overrides: Readonly<Record<string, string>>,
 ): WorkspaceCommandCenterShortcuts {
-  const platform = { isMac: getShortcutOs() === "mac", isDesktop: getIsElectron() };
+  const platform = { isMac: getShortcutOs() === "mac", usesDesktopBindings };
   return {
     newAgent: resolveShortcutKeysForAction("workspace-tab-new", overrides, platform) ?? undefined,
     newTerminal:
@@ -61,7 +63,7 @@ export function useWorkspaceCommandCenterActions(): void {
   const cwd = useWorkspaceDirectory(serverId, workspaceId);
   const isCompact = useIsCompactFormFactor();
   const { overrides } = useKeyboardShortcutOverrides();
-  const { gitActions } = useGitActions({
+  const { gitActions, isGit, archiveWorkspace } = useGitActions({
     serverId: serverId ?? "",
     cwd: cwd ?? "",
     icons: GIT_ACTION_ICONS,
@@ -79,13 +81,16 @@ export function useWorkspaceCommandCenterActions(): void {
           newBrowser: t("workspace.tabs.actions.newBrowser"),
           splitRight: t("workspace.tabs.actions.splitRight"),
           splitDown: t("workspace.tabs.actions.splitDown"),
+          archiveWorkspace: t("workspace.git.actions.archive.label"),
         },
         icons: {
           ...WORKSPACE_COMMAND_CENTER_ICONS,
+          archiveWorkspace: staticIcon(GIT_ACTION_ICONS.archive),
           git: (action) => staticIcon(action.icon),
         },
         shortcuts: resolveWorkspaceShortcuts(overrides),
         capabilities: {
+          isGit,
           canSplitPanes: supportsDesktopPaneSplits() && !isCompact,
           canOpenBrowserTabs: getIsElectron(),
         },
@@ -94,8 +99,9 @@ export function useWorkspaceCommandCenterActions(): void {
           keyboardActionDispatcher.dispatch(action);
         },
         runGitAction,
+        archiveWorkspace,
       }),
-    [gitActions, isCompact, overrides, runGitAction, t],
+    [gitActions, isCompact, overrides, runGitAction, t, archiveWorkspace, isGit],
   );
 
   useCommandCenterActions({

@@ -1,20 +1,19 @@
+import { useProviderIcons } from "@/components/provider-icons";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import type {
-  AgentFeature,
-  AgentMode,
-  AgentProvider,
-  AgentSelectOption,
+import {
+  type AgentMode,
+  type AgentProvider,
+  type AgentSelectOption,
 } from "@jagentdesk/protocol/agent-types";
-import type { AgentProviderDefinition } from "@jagentdesk/protocol/provider-manifest";
+import { type AgentProviderDefinition } from "@jagentdesk/protocol/provider-manifest";
 import {
   getAgentFeatureIcon,
   getAgentModeIcon,
   PlanModeIcon,
   ThinkingIcon,
 } from "@/agent-controls/icons";
-import { getProviderIcon } from "@/components/provider-icons";
-import type { ProviderSelectorProvider } from "@/provider-selection/provider-selection";
+import { type ProviderSelectorProvider } from "@/provider-selection/provider-selection";
 import {
   buildAgentControlContributions,
   buildAgentControlContributionLabels,
@@ -22,6 +21,7 @@ import {
 } from "./agent-control-contributions";
 import { getCommandCenterIcon } from "./icon";
 import { useCommandCenterActions } from "./provider";
+import { type ComposerOptionControls } from "@/agent-controls/option-controls";
 
 export interface AgentControlCommandCenterSource {
   serverId: string;
@@ -44,15 +44,15 @@ export interface AgentControlCommandCenterSource {
     selectedId: string | null | undefined;
     select(modeId: string): void | Promise<void>;
   };
-  features: {
-    list: readonly AgentFeature[] | undefined;
-    set?: (featureId: string, value: unknown) => void | Promise<void>;
-  };
+  /** Absent when the surface cannot change options (the agent has no client). */
+  optionControls: ComposerOptionControls | null;
 }
 
-function ignoreAgentFeatureChange(): void {
-  return;
-}
+const NO_OPTION_CONTROLS: ComposerOptionControls = {
+  controls: [],
+  options: {},
+  onSetOption: () => undefined,
+};
 
 function resolveDefaultModeId(
   provider: string | null | undefined,
@@ -87,7 +87,8 @@ export function useAgentControlCommandCenterActions(input: {
 }): void {
   const { t } = useTranslation();
   const { controls } = input;
-  const { features, models, modes, thinking } = controls;
+  const { optionControls, models, modes, thinking } = controls;
+  const getProviderIcon = useProviderIcons(controls.serverId);
   const actions = useMemo(
     () =>
       buildAgentControlContributions({
@@ -103,7 +104,7 @@ export function useAgentControlCommandCenterActions(input: {
             getCommandCenterIcon(
               getAgentModeIcon(controls.provider ?? "", modeId, controls.providerDefinitions),
             ),
-          feature: (feature) => getCommandCenterIcon(getAgentFeatureIcon(feature.icon)),
+          control: (control) => getCommandCenterIcon(getAgentFeatureIcon(control.icon)),
         },
         models: {
           providers: models.providers,
@@ -122,18 +123,15 @@ export function useAgentControlCommandCenterActions(input: {
           modes?.select,
           resolveDefaultModeId(controls.provider, controls.providerDefinitions),
         ),
-        features: {
-          list: features.set ? (features.list ?? []) : [],
-          set: features.set ?? ignoreAgentFeatureChange,
-        },
+        optionControls: optionControls ?? NO_OPTION_CONTROLS,
       }),
     [
+      getProviderIcon,
       controls.ownerKey,
       controls.provider,
       controls.providerDefinitions,
       controls.serverId,
-      features.list,
-      features.set,
+      optionControls,
       models.providers,
       models.select,
       models.selectedModelId,

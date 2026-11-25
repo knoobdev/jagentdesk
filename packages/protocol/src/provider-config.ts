@@ -54,16 +54,25 @@ export const ProviderApiConfigSchema = z.object({
   sshServerId: z.string().min(1).optional(),
 });
 
+export const ProviderJAgentDeskToolsPolicySchema = z.object({
+  enabled: z.boolean().optional(),
+  disabledTools: z.array(z.string()).optional(),
+});
+export type ProviderJAgentDeskToolsPolicy = z.infer<typeof ProviderJAgentDeskToolsPolicySchema>;
+
 export const ProviderOverrideSchema = z.object({
   extends: z.string().optional(),
   label: z.string().optional(),
   description: z.string().optional(),
   command: z.array(z.string().min(1)).min(1).optional(),
   env: z.record(z.string(), z.string()).optional(),
+  options: z.record(z.string(), z.unknown()).optional(),
+  // COMPAT(providerParams): added in v0.10.0, remove after 2027-03-30 once configs use options.
   params: z.record(z.string(), z.unknown()).optional(),
   models: z.array(ProviderProfileModelSchema).optional(),
   additionalModels: z.array(ProviderProfileModelSchema).optional(),
   disallowedTools: z.array(z.string()).optional(),
+  jagentdeskTools: ProviderJAgentDeskToolsPolicySchema.optional(),
   enabled: z.boolean().optional(),
   order: z.number().optional(),
   api: ProviderApiConfigSchema.optional(),
@@ -89,15 +98,8 @@ export const ProviderOverridesSchema = z
 
       const isBuiltinProvider = builtinProviderIdSet.has(providerId);
       const isApiProvider = provider.api !== undefined;
-      if (!isBuiltinProvider && !provider.extends && !isApiProvider) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: [providerId, "extends"],
-          message: `Custom provider "${providerId}" must declare extends.`,
-        });
-      }
 
-      if (!isBuiltinProvider && !provider.label && !isApiProvider) {
+      if (!isBuiltinProvider && provider.extends && !provider.label && !isApiProvider) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: [providerId, "label"],

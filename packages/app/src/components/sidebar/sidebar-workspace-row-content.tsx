@@ -1,3 +1,6 @@
+import { StatusRing } from "@/components/status-ring";
+import type { SidebarSurfaceBackdrop } from "@/styles/surface-backdrop";
+import { PluginWorkspaceRowBadgeItems } from "@/plugins/workspace-row-badge-items";
 import { memo, useCallback, useId, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -21,7 +24,6 @@ import {
 } from "lucide-react-native";
 import { HostBadge } from "@/components/sidebar/host-badge";
 import { ProjectStatusIndicator } from "@/components/sidebar/project-leading-visual";
-import { PulsingStatusDot } from "@/components/sidebar/pulsing-status-dot";
 import { WorkspaceHoverCard } from "@/components/workspace-hover-card";
 import type { HostBadgeModel } from "@/hosts/appearance";
 import type { SidebarWorkspaceEntry } from "@/hooks/use-sidebar-workspaces-list";
@@ -35,6 +37,7 @@ import { shouldRenderSyncedStatusLoader } from "@/utils/status-loader";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { resolveSidebarWorkspacePrimaryLabel } from "@/components/sidebar/sidebar-workspace-title";
 import { useWorkspacePrimaryAgentTitle } from "@/hooks/use-workspace-primary-agent-title";
+import { SidebarWorkspaceArchiveButton } from "@/components/sidebar/sidebar-workspace-menu";
 
 // The scrim spans more than the kebab so the fade starts left of the diff stat. Solid from
 // SCRIM_SOLID_OFFSET rightward, which keeps the kebab itself off the gradient entirely.
@@ -103,10 +106,12 @@ type SidebarWorkspaceScriptIconKind = "service" | "command";
 export function SidebarWorkspaceRowFrame({
   workspace,
   isDragging = false,
+  isEditingTitle = false,
   children,
 }: {
   workspace: SidebarWorkspaceEntry;
   isDragging?: boolean;
+  isEditingTitle?: boolean;
   children: (input: {
     isHovered: boolean;
     contextMenuOpen: boolean;
@@ -117,8 +122,8 @@ export function SidebarWorkspaceRowFrame({
   const [isHovered, setIsHovered] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const handlePointerEnter = useCallback(() => {
-    if (!contextMenuOpen) setIsHovered(true);
-  }, [contextMenuOpen]);
+    if (!contextMenuOpen && !isEditingTitle) setIsHovered(true);
+  }, [contextMenuOpen, isEditingTitle]);
   const handlePointerLeave = useCallback(() => setIsHovered(false), []);
   const handleContextMenuOpenChange = useCallback((open: boolean) => {
     setContextMenuOpen(open);
@@ -148,6 +153,7 @@ export function SidebarWorkspaceRowFrame({
 
 export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowContent({
   workspace,
+  backdrop = "surfaceSidebar",
   hostBadge,
   leadingProjectName = null,
   leadingProjectIconDataUri = null,
@@ -158,9 +164,11 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
   shortcutNumber = null,
   showShortcutBadge = false,
   reserveIdleStatusIndicatorSpace = true,
+  titleEditor = null,
   children,
 }: {
   workspace: SidebarWorkspaceEntry;
+  backdrop?: SidebarSurfaceBackdrop;
   hostBadge?: HostBadgeModel | null;
   /** Hoisted rows use their project icon as the leading visual because no project row contains them. */
   leadingProjectName?: string | null;
@@ -173,12 +181,16 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
   showShortcutBadge?: boolean;
   /** Keep the empty leading slot when the workspace has no active status. */
   reserveIdleStatusIndicatorSpace?: boolean;
+  titleEditor?: ReactNode;
   children?: ReactNode;
 }) {
   const {
     settings: { workspaceTitleSource },
   } = useAppSettings();
-  const primaryAgentTitle = useWorkspacePrimaryAgentTitle(workspace.serverId, workspace.workspaceId);
+  const primaryAgentTitle = useWorkspacePrimaryAgentTitle(
+    workspace.serverId,
+    workspace.workspaceId,
+  );
   const workspaceLabel = resolveSidebarWorkspacePrimaryLabel({
     workspace,
     workspaceTitleSource,
@@ -202,6 +214,7 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
       <View style={styles.workspaceRowMain}>
         {leadingProjectName ? (
           <ProjectStatusIndicator
+            backdrop={backdrop}
             iconDataUri={leadingProjectIconDataUri}
             displayName={leadingProjectName}
             projectViewKey={workspace.projectViewKey}
@@ -229,12 +242,26 @@ export const SidebarWorkspaceRowContent = memo(function SidebarWorkspaceRowConte
                   showLabel={hostBadge.showLabel}
                 />
               ) : null}
-              <Text style={workspaceBranchTextStyle} numberOfLines={1}>
-                {workspaceLabel}
-              </Text>
+              {titleEditor ? (
+                <View style={styles.titleEditor}>{titleEditor}</View>
+              ) : (
+                <Text
+                  style={workspaceBranchTextStyle}
+                  numberOfLines={1}
+                  testID={`sidebar-workspace-title-${workspace.workspaceKey}`}
+                >
+                  {workspaceLabel}
+                </Text>
+              )}
               {scriptIconKind ? <WorkspaceScriptIcon kind={scriptIconKind} /> : null}
             </View>
             <View style={sidebarWorkspaceRowStyles.rowRight}>{children}</View>
+          </View>
+          <View style={styles.pluginBadges}>
+            <PluginWorkspaceRowBadgeItems
+              serverId={workspace.serverId}
+              workspaceId={workspace.workspaceId}
+            />
           </View>
         </View>
       </View>
@@ -281,7 +308,7 @@ function WorkspaceStatusIndicator({
   if (loading) {
     return (
       <View style={styles.workspaceStatusDot} testID="workspace-status-indicator-loading">
-        <PulsingStatusDot style={styles.standaloneRunningDot} />
+        <StatusRing />
       </View>
     );
   }
@@ -289,7 +316,7 @@ function WorkspaceStatusIndicator({
   if (shouldRenderSyncedStatusLoader({ bucket })) {
     return (
       <View style={styles.workspaceStatusDot} testID="workspace-status-indicator-running">
-        <PulsingStatusDot style={styles.standaloneRunningDot} />
+        <StatusRing />
       </View>
     );
   }
@@ -480,6 +507,8 @@ export const sidebarWorkspaceRowStyles = StyleSheet.create((theme) => ({
     position: "absolute",
     top: 0,
     right: 0,
+    flexDirection: "row",
+    alignItems: "flex-start",
   },
   trailingActionScrim: {
     position: "absolute",
@@ -520,10 +549,15 @@ export function resolveTrailingActionVisibility({
   isHovered: boolean;
   isTouchPlatform: boolean;
   showShortcut: boolean;
-}): { showDiffStat: boolean; showKebab: boolean; showScrim: boolean } {
+}): { showDiffStat: boolean; showKebab: boolean; showArchiveButton: boolean; showScrim: boolean } {
   const showKebab = Boolean(hasArchiveAction && (isHovered || isTouchPlatform)) && !showShortcut;
   const showDiffStat = hasDiffStat && !showShortcut && (isHovered || !showKebab);
-  return { showDiffStat, showKebab, showScrim: showDiffStat && showKebab };
+  return {
+    showDiffStat,
+    showKebab,
+    showArchiveButton: showKebab && isHovered && !isTouchPlatform,
+    showScrim: showDiffStat && showKebab,
+  };
 }
 
 export function SidebarWorkspaceTrailingActionSlot({ children }: { children: ReactNode }) {
@@ -541,21 +575,35 @@ export function SidebarWorkspaceTrailingActionBase({
   return <View style={visible ? undefined : sidebarWorkspaceRowStyles.hidden}>{children}</View>;
 }
 
+// The archive button plus the kebab's marginLeft, which is the gap between them.
+
 export function SidebarWorkspaceTrailingActionOverlay({
   visible,
   scrim = false,
+  workspaceKey,
+  onArchiveButtonPress,
   children,
 }: {
   visible: boolean;
   /** Fade the row into the kebab when something (the diff stat) is still rendered behind it. */
   scrim?: boolean;
+  workspaceKey: string;
+  onArchiveButtonPress?: () => void;
   children: ReactNode;
 }) {
   if (!visible || !children) return null;
   return (
     <>
       {scrim ? <TrailingActionScrim /> : null}
-      <View style={sidebarWorkspaceRowStyles.trailingActionOverlay}>{children}</View>
+      <View style={sidebarWorkspaceRowStyles.trailingActionOverlay}>
+        {onArchiveButtonPress ? (
+          <SidebarWorkspaceArchiveButton
+            workspaceKey={workspaceKey}
+            onArchive={onArchiveButtonPress}
+          />
+        ) : null}
+        {children}
+      </View>
     </>
   );
 }
@@ -575,13 +623,18 @@ function TrailingActionScrim() {
   // Keep the per-instance uniqueness, drop everything a fragment reference can't carry.
   const gradientId = `sidebar-scrim-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   return (
-    <View style={sidebarWorkspaceRowStyles.trailingActionScrim} pointerEvents="none">
+    <View
+      testID="sidebar-workspace-trailing-scrim"
+      style={sidebarWorkspaceRowStyles.trailingActionScrim}
+      pointerEvents="none"
+    >
       <ThemedTrailingActionScrimSvg gradientId={gradientId} uniProps={scrimColorMapping} />
     </View>
   );
 }
 
 const styles = StyleSheet.create((theme) => ({
+  pluginBadges: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
   workspaceRowContent: {
     position: "relative",
   },
@@ -660,6 +713,7 @@ const styles = StyleSheet.create((theme) => ({
   workspaceBranchTextWithAccessory: {
     flexShrink: 1,
   },
+  titleEditor: { flex: 1, height: 20, minWidth: 0 },
   workspaceTitleAccessory: {
     height: 20,
     flexShrink: 0,

@@ -6,7 +6,7 @@ import type pino from "pino";
 import { findExecutable } from "../../executable-resolution/executable-resolution.js";
 import { execCommand } from "../../utils/spawn.js";
 import type { HostCapabilityService } from "../host-capabilities/service.js";
-import { extractTarGz, safeTarget } from "../skills-native/tar.js";
+import { extractTarGz, safeTarget } from "../../utils/tar.js";
 import {
   downloadVerified,
   resolveRelease,

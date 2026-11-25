@@ -1,3 +1,10 @@
+import { createHostPluginClientBundleStore } from "@/plugins/client-bundles";
+import { createHostLogger } from "@/runtime/host-logger";
+import {
+  nativeWebSocketFactory,
+  defaultWebSocketFactory,
+} from "@jagentdesk/client/internal/daemon-client-transport";
+import { isNative } from "@/constants/platform";
 import { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
 import type { DaemonClientConfig } from "@jagentdesk/client/internal/daemon-client";
 import type {
@@ -5,11 +12,13 @@ import type {
   DirectSocketHostConnection,
   HostConnection,
   TailnetHostConnection,
+  RelayHostConnection,
 } from "@/types/host-connection";
+import { getRelayDeviceSigning, prepareRelayDeviceSigning } from "./relay-device-signing";
 import { getOrCreateClientId } from "./client-id";
 import { getTailscaleLoginAdapter } from "@/tailscale";
 import { resolveAppVersion } from "./app-version";
-import { buildDaemonWebSocketUrl } from "./daemon-endpoints";
+import { buildDaemonWebSocketUrl, buildRelayWebSocketUrl } from "./daemon-endpoints";
 import {
   buildLocalDaemonTransportUrl,
   createDesktopLocalDaemonTransportFactory,
@@ -29,6 +38,7 @@ interface LocalTransportUrlInput {
 }
 
 export interface DaemonConnectionDependencies<TClient extends DaemonProbeClient> {
+  createLogger: typeof createHostLogger;
   getClientId(): Promise<string>;
   resolveAppVersion(): string | null;
   createLocalTransportFactory(): DaemonClientConfig["transportFactory"] | null;
@@ -37,11 +47,19 @@ export interface DaemonConnectionDependencies<TClient extends DaemonProbeClient>
 }
 
 const defaultDaemonConnectionDependencies: DaemonConnectionDependencies<DaemonClient> = {
-  getClientId: getOrCreateClientId,
+  createLogger: createHostLogger,
+  getClientId: async () => {
+    await prepareRelayDeviceSigning().catch(() => undefined);
+    return getOrCreateClientId();
+  },
   resolveAppVersion,
   createLocalTransportFactory: createDesktopLocalDaemonTransportFactory,
   buildLocalTransportUrl: buildLocalDaemonTransportUrl,
-  createClient: (config) => new DaemonClient(config),
+  createClient: (config) =>
+    new DaemonClient({
+      ...config,
+      createPluginClientBundleStore: createHostPluginClientBundleStore,
+    }),
 };
 
 function normalizeNonEmptyString(value: unknown): string | null {
@@ -119,28 +137,18 @@ function buildLocalClientConfig(
   };
 }
 
-async function buildTailnetClientConfig(
-  connection: TailnetHostConnection,
-  base: BaseDaemonClientConfig,
-  options: BuildClientOptions | undefined,
-): Promise<DaemonClientConfig> {
-  const tailscaleAdapter = getTailscaleLoginAdapter();
-  if (tailscaleAdapter.platform === "desktop") {
-    const status = await tailscaleAdapter.getStatus();
-    if (status.kind !== "connected") {
-      throw new DaemonConnectionTestError("Tailscale connection is not ready", {
-        reason: "Tailscale connection is not ready",
-        lastError: null,
-      });
-    }
-  }
+function requireServerId(serverId: string | undefined): string {
+  if (!serverId) throw new Error("serverId is required for relay connections");
+  return serverId;
+}
 
-  const proxyAddress = tailscaleAdapter.getProxyAddress?.(connection.tailnetAddress) ?? null;
-  const signing = tailscaleAdapter.getDeviceSigningMaterial?.() ?? null;
+function buildPairingRegistration(
+  connection: TailnetHostConnection | RelayHostConnection,
+  options: BuildClientOptions | undefined,
+  platform: string,
+) {
   const deviceName =
-    tailscaleAdapter.platform === "ios" || tailscaleAdapter.platform === "android"
-      ? getMobileDeviceName()
-      : undefined;
+    platform === "ios" || platform === "android" ? getMobileDeviceName() : undefined;
   const pairingCodeProvider = options?.pairingCodeProvider;
   // A normal host health check must never create a new pairing request. The
   // six-digit registration is only armed by the explicit mobile Pair verify
@@ -155,11 +163,55 @@ async function buildTailnetClientConfig(
           ...(pairingCodeProvider ? { pairingCodeProvider } : {}),
         }
       : null;
+
+  return pairingRegistration;
+}
+
+async function buildTailnetClientConfig(
+  connection: TailnetHostConnection | RelayHostConnection,
+  serverId: string | undefined,
+  base: BaseDaemonClientConfig,
+  options: BuildClientOptions | undefined,
+): Promise<DaemonClientConfig> {
+  const tailscaleAdapter = getTailscaleLoginAdapter();
+  if (connection.type === "tailnet" && tailscaleAdapter.platform === "desktop") {
+    const status = await tailscaleAdapter.getStatus();
+    if (status.kind !== "connected") {
+      throw new DaemonConnectionTestError("Tailscale connection is not ready", {
+        reason: "Tailscale connection is not ready",
+        lastError: null,
+      });
+    }
+  }
+
+  const proxyAddress =
+    connection.type === "tailnet"
+      ? (tailscaleAdapter.getProxyAddress?.(connection.tailnetAddress) ?? null)
+      : null;
+  if (connection.type === "relay") await prepareRelayDeviceSigning();
+  const signing = getRelayDeviceSigning();
+  const pairingRegistration = buildPairingRegistration(
+    connection,
+    options,
+    tailscaleAdapter.platform,
+  );
   return {
     ...base,
-    url: buildDaemonWebSocketUrl(proxyAddress ?? connection.tailnetAddress, {
-      useTls: connection.useTls ?? false,
-    }),
+    ...(connection.type === "relay"
+      ? {
+          url: buildRelayWebSocketUrl({
+            role: "client",
+            endpoint: connection.endpoint,
+            useTls: connection.useTls ?? true,
+            serverId: requireServerId(serverId),
+          }),
+          e2ee: { enabled: true, daemonPublicKeyB64: connection.daemonPublicKeyB64 },
+        }
+      : {
+          url: `${buildDaemonWebSocketUrl(proxyAddress ?? connection.tailnetAddress, {
+            useTls: connection.useTls ?? false,
+          })}?paired=1`,
+        }),
     expectChallenge: true,
     ...(signing ? { deviceSigning: signing } : {}),
     ...(pairingRegistration ? { pairingRegistration } : {}),
@@ -175,10 +227,13 @@ export async function buildClientConfig(
     "getClientId" | "resolveAppVersion" | "createLocalTransportFactory" | "buildLocalTransportUrl"
   > = defaultDaemonConnectionDependencies,
 ): Promise<DaemonClientConfig> {
+  if (connection.type === "routed")
+    throw new Error("Routed host connections are resolved by HostRuntime");
   const clientId = await deps.getClientId();
   const localTransportFactory = deps.createLocalTransportFactory();
   const base = {
     clientId,
+    webSocketFactory: isNative ? nativeWebSocketFactory : defaultWebSocketFactory,
     clientType: "mobile" as const,
     appVersion: deps.resolveAppVersion() ?? undefined,
     suppressSendErrors: true,
@@ -203,7 +258,7 @@ export async function buildClientConfig(
     };
   }
 
-  return buildTailnetClientConfig(connection, base, options);
+  return buildTailnetClientConfig(connection, serverId, base, options);
 }
 
 export function connectAndProbe(
@@ -345,5 +400,14 @@ export async function connectToDaemon(
   deps: DaemonConnectionDependencies<DaemonProbeClient> = defaultDaemonConnectionDependencies,
 ): Promise<{ client: DaemonProbeClient; serverId: string; hostname: string | null }> {
   const config = await buildClientConfig(connection, options?.serverId, options, deps);
-  return connectAndProbe(config, resolveTimeout(connection, options), deps, options?.signal);
+  let serverId = options?.serverId;
+  config.logger = deps.createLogger(() => serverId);
+  const result = await connectAndProbe(
+    config,
+    resolveTimeout(connection, options),
+    deps,
+    options?.signal,
+  );
+  serverId = result.serverId;
+  return result;
 }

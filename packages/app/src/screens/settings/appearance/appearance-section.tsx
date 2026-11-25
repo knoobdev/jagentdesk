@@ -1,7 +1,10 @@
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
+import { AppearanceText as Text } from "@/appearance/text";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
-import { Text, TextInput, View, type PressableStateCallbackType } from "react-native";
+import { TextInput, View, type PressableStateCallbackType } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { ChevronDown, Monitor, Moon, Sun } from "lucide-react-native";
 import {
@@ -27,6 +30,7 @@ import {
   sanitizeFontFamily,
   useAppSettings,
   type AppSettings,
+  type ContentWidthPreset,
 } from "@/hooks/use-settings";
 import {
   DEFAULT_MONO_FONT_STACK,
@@ -62,8 +66,8 @@ type BuiltInTheme = Exclude<AppSettings["theme"], "plugin">;
 
 function getThemeLabel(t: TFunction, value: BuiltInTheme): string {
   const labelKeys: Record<BuiltInTheme, string> = {
-    clickup: "settings.appearance.theme.options.clickup",
-    clickupDark: "settings.appearance.theme.options.clickupDark",
+    gumloop: "settings.appearance.theme.options.gumloop",
+    gumloopDark: "settings.appearance.theme.options.gumloopDark",
     light: "settings.appearance.theme.options.light",
     dark: "settings.appearance.theme.options.dark",
     zinc: "settings.appearance.theme.options.zinc",
@@ -76,9 +80,9 @@ function getThemeLabel(t: TFunction, value: BuiltInTheme): string {
   return t(labelKeys[value]);
 }
 
-const PRIMARY_THEMES: readonly BuiltInTheme[] = ["clickup", "light", "dark", "auto"];
+const PRIMARY_THEMES: readonly BuiltInTheme[] = ["gumloop", "light", "dark", "auto"];
 const DARK_VARIANT_THEMES: readonly BuiltInTheme[] = [
-  "clickupDark",
+  "gumloopDark",
   "zinc",
   "midnight",
   "claude",
@@ -195,11 +199,11 @@ function ThemeRow({
       : null;
   const selectedLabel =
     value === "plugin"
-      ? (selectedPlugin?.name ?? getThemeLabel(t, "clickup"))
+      ? (selectedPlugin?.name ?? getThemeLabel(t, "gumloop"))
       : getThemeLabel(t, value);
   const leading =
     value === "plugin" ? (
-      <ThemeSwatch color={selectedPlugin?.swatch ?? THEME_SWATCHES.clickup} />
+      <ThemeSwatch color={selectedPlugin?.swatch ?? THEME_SWATCHES.gumloop} />
     ) : (
       <ThemeLeading themeValue={value} />
     );
@@ -298,22 +302,20 @@ function ChatOutlineRow({ value, onChange }: ChatOutlineRowProps) {
   );
 }
 
-const TOOL_CALL_DETAIL_LEVELS: readonly AppSettings["toolCallDetailLevel"][] = [
-  "detailed",
-  "overview",
+const CHAT_DISPLAYS: readonly AppSettings["chatDisplay"][] = [
+  "full",
+  "collapseToolCalls",
+  "collapseTurns",
 ];
 
-function getToolCallDetailLevelLabel(
-  t: TFunction,
-  value: AppSettings["toolCallDetailLevel"],
-): string {
-  return t(`settings.general.toolCallDetail.options.${value}`);
+function getToolCallDetailLevelLabel(t: TFunction, value: AppSettings["chatDisplay"]): string {
+  return t(`settings.general.chatDisplay.options.${value}`);
 }
 
 interface ToolCallDetailMenuItemProps {
-  value: AppSettings["toolCallDetailLevel"];
+  value: AppSettings["chatDisplay"];
   selected: boolean;
-  onChange: (value: AppSettings["toolCallDetailLevel"]) => void;
+  onChange: (value: AppSettings["chatDisplay"]) => void;
 }
 
 function ToolCallDetailMenuItem({ value, selected, onChange }: ToolCallDetailMenuItemProps) {
@@ -327,8 +329,8 @@ function ToolCallDetailMenuItem({ value, selected, onChange }: ToolCallDetailMen
 }
 
 interface ToolCallDetailRowProps {
-  value: AppSettings["toolCallDetailLevel"];
-  onChange: (value: AppSettings["toolCallDetailLevel"]) => void;
+  value: AppSettings["chatDisplay"];
+  onChange: (value: AppSettings["chatDisplay"]) => void;
 }
 
 function ToolCallDetailRow({ value, onChange }: ToolCallDetailRowProps) {
@@ -337,23 +339,19 @@ function ToolCallDetailRow({ value, onChange }: ToolCallDetailRowProps) {
   return (
     <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
       <View style={settingsStyles.rowContent}>
-        <Text style={settingsStyles.rowTitle}>{t("settings.general.toolCallDetail.label")}</Text>
-        <Text style={settingsStyles.rowHint}>
-          {t("settings.general.toolCallDetail.description")}
-        </Text>
+        <Text style={settingsStyles.rowTitle}>{t("settings.general.chatDisplay.label")}</Text>
+        <Text style={settingsStyles.rowHint}>{t("settings.general.chatDisplay.description")}</Text>
       </View>
       <DropdownMenu>
         <DropdownMenuTrigger
           style={dropdownTriggerStyle}
-          accessibilityLabel={t("settings.general.toolCallDetail.accessibilityLabel", {
-            value: selectedLabel,
-          })}
+          accessibilityLabel={`${t("settings.general.chatDisplay.label")}: ${selectedLabel}`}
         >
           <Text style={styles.triggerText}>{selectedLabel}</Text>
           <ThemedChevronDown size={ICON_SIZE.sm} uniProps={mutedColorMapping} />
         </DropdownMenuTrigger>
         <DropdownMenuContent side="bottom" align="end" width={200}>
-          {TOOL_CALL_DETAIL_LEVELS.map((option) => (
+          {CHAT_DISPLAYS.map((option) => (
             <ToolCallDetailMenuItem
               key={option}
               value={option}
@@ -380,7 +378,7 @@ interface FontFamilyRowProps {
   draft: string;
   withBorder: boolean;
   onChangeDraft: (value: string) => void;
-  onCommit: (value: string) => void;
+  onCommit: (value: string) => string;
 }
 
 function FontFamilyRow({
@@ -395,8 +393,10 @@ function FontFamilyRow({
   onCommit,
 }: FontFamilyRowProps) {
   const handleCommit = useCallback(() => {
-    onCommit(draft);
-  }, [draft, onCommit]);
+    // JAgentDesk's field is controlled, so writing the committed value back to
+    // the draft is what drops a rejected family from the input.
+    onChangeDraft(onCommit(draft));
+  }, [draft, onCommit, onChangeDraft]);
 
   // Resync from the committed value when it changes elsewhere.
   useEffect(() => {
@@ -469,6 +469,46 @@ function FontSizeRow({
 }
 
 // ---------------------------------------------------------------------------
+// Content width presets
+// ---------------------------------------------------------------------------
+
+function ContentWidthRow({
+  value,
+  onChange,
+}: {
+  value: AppSettings["contentWidth"];
+  onChange: (value: ContentWidthPreset) => void;
+}) {
+  const { t } = useTranslation();
+
+  const options = useMemo(
+    () => [
+      { value: "default" as const, label: t("settings.appearance.layout.contentWidthDefault") },
+      { value: "wide" as const, label: t("settings.appearance.layout.contentWidthWide") },
+      { value: "full" as const, label: t("settings.appearance.layout.contentWidthFull") },
+    ],
+    [t],
+  );
+  return (
+    <View style={styles.contentWidthRow}>
+      <View>
+        <Text style={settingsStyles.rowTitle}>{t("settings.appearance.layout.contentWidth")}</Text>
+        <Text style={settingsStyles.rowHint}>
+          {typeof value === "number"
+            ? t("settings.appearance.layout.contentWidthCustom", { width: value })
+            : t("settings.appearance.layout.contentWidthHint")}
+        </Text>
+      </View>
+      <SegmentedControl<ContentWidthPreset>
+        testID="content-width-options"
+        value={typeof value === "number" ? null : value}
+        onValueChange={onChange}
+        options={options}
+      />
+    </View>
+  );
+}
+
 // Syntax highlight theme picker (commits immediately)
 // ---------------------------------------------------------------------------
 
@@ -500,8 +540,18 @@ interface SyntaxRowProps {
 }
 
 function SyntaxRow({ value, onChange }: SyntaxRowProps) {
+  const gumloop = useIsGumloopTheme();
   const { t } = useTranslation();
   const selectedLabel = syntaxLabelForId(value);
+  if (gumloop)
+    return (
+      <View style={settingsStyles.row}>
+        <Text style={settingsStyles.rowTitle}>
+          {t("settings.appearance.syntax.highlightTheme")}
+        </Text>
+        <Text style={styles.triggerText}>Gumloop</Text>
+      </View>
+    );
   return (
     <View style={settingsStyles.row}>
       <View style={settingsStyles.rowContent}>
@@ -576,6 +626,13 @@ export function AppearanceSection() {
     [updateSettings],
   );
 
+  const handleContentWidthChange = useCallback(
+    (contentWidth: ContentWidthPreset) => {
+      void updateSettings({ contentWidth });
+    },
+    [updateSettings],
+  );
+
   const handleSyntaxThemeChange = useCallback(
     (syntaxTheme: SyntaxThemeId) => {
       void updateSettings({ syntaxTheme });
@@ -591,8 +648,8 @@ export function AppearanceSection() {
   );
 
   const handleToolCallDetailLevelChange = useCallback(
-    (toolCallDetailLevel: AppSettings["toolCallDetailLevel"]) => {
-      void updateSettings({ toolCallDetailLevel });
+    (chatDisplay: AppSettings["chatDisplay"]) => {
+      void updateSettings({ chatDisplay });
     },
     [updateSettings],
   );
@@ -609,12 +666,13 @@ export function AppearanceSection() {
       const sanitized = sanitizeFontFamily(value);
       if (sanitized === null) {
         setUiFontDraft(settings.uiFontFamily);
-        return;
+        return settings.uiFontFamily;
       }
       setUiFontDraft(sanitized);
       if (sanitized !== settings.uiFontFamily) {
         void updateSettings({ uiFontFamily: sanitized });
       }
+      return sanitized;
     },
     [settings.uiFontFamily, updateSettings],
   );
@@ -624,12 +682,13 @@ export function AppearanceSection() {
       const sanitized = sanitizeFontFamily(value);
       if (sanitized === null) {
         setMonoFontDraft(settings.monoFontFamily);
-        return;
+        return settings.monoFontFamily;
       }
       setMonoFontDraft(sanitized);
       if (sanitized !== settings.monoFontFamily) {
         void updateSettings({ monoFontFamily: sanitized });
       }
+      return sanitized;
     },
     [settings.monoFontFamily, updateSettings],
   );
@@ -697,7 +756,7 @@ export function AppearanceSection() {
             onChange={handleAutoExpandReasoningChange}
           />
           <ToolCallDetailRow
-            value={settings.toolCallDetailLevel}
+            value={settings.chatDisplay}
             onChange={handleToolCallDetailLevelChange}
           />
           {!isNative ? (
@@ -753,6 +812,11 @@ export function AppearanceSection() {
           />
         </View>
       </SettingsSection>
+      <SettingsSection title={t("settings.appearance.layout.title")}>
+        <View style={settingsStyles.card}>
+          <ContentWidthRow value={settings.contentWidth} onChange={handleContentWidthChange} />
+        </View>
+      </SettingsSection>
       <SettingsSection title={t("settings.appearance.syntax.title")}>
         <View style={settingsStyles.card}>
           <SyntaxRow value={settings.syntaxTheme} onChange={handleSyntaxThemeChange} />
@@ -766,6 +830,7 @@ export function AppearanceSection() {
 }
 
 const styles = StyleSheet.create((theme) => ({
+  contentWidthRow: { alignItems: "flex-start", gap: theme.spacing[2], padding: theme.spacing[4] },
   preview: {
     marginTop: theme.spacing[4],
   },

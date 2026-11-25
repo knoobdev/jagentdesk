@@ -1,0 +1,9 @@
+{
+  "kind": "builtin",
+  "id": "bots",
+  "name": "Bots",
+  "description": "Long-lived assistants that delegate work and review results.",
+  "defaultEnabled": true,
+  "requires": [],
+  "builtinOrder": 0
+}

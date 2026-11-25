@@ -1,9 +1,15 @@
+import type {
+  AgentOptionControl,
+  JsonValue,
+  ProviderOptions,
+} from "@jagentdesk/protocol/agent-types";
+import { isWorkspaceArchivePending } from "@/contexts/session-workspace-upserts";
 import equal from "fast-deep-equal";
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
-import type { DaemonClient } from "@jagentdesk/client/internal/daemon-client";
-import type { ViewedTimelineUiBridge } from "@/timeline/viewed-timeline-sync";
-import type { AgentDirectoryEntry } from "@/types/agent-directory";
+import { type DaemonClient } from "@jagentdesk/client/internal/daemon-client";
+import { type ViewedTimelineUiBridge } from "@/timeline/viewed-timeline-sync";
+import { type AgentDirectoryEntry } from "@/types/agent-directory";
 import {
   appendSubmittedUserMessage,
   handoffCreatedAgentUserMessageToStream,
@@ -14,7 +20,7 @@ import {
 import {
   acceptMessageSubmission,
   beginMessageSubmission,
-  getActiveMessageSubmissions,
+  hasActiveMessageSubmission,
   observeMessageSubmissionCanonical,
   rejectMessageSubmission,
   type MessageSubmissionRecord,
@@ -25,20 +31,21 @@ import type { ComposerAttachment } from "@/attachments/types";
 import type { AgentLifecycleStatus } from "@jagentdesk/protocol/agent-lifecycle";
 import type {
   AgentPermissionRequest,
-  AgentFeature,
   AgentProvider,
   AgentMode,
   AgentCapabilityFlags,
   AgentUsage,
   AgentUsageTotals,
+  AgentMetric,
   AgentPersistenceHandle,
 } from "@jagentdesk/protocol/agent-types";
-import type {
-  ServerInfoStatusPayload,
-  ProjectPlacementPayload,
-  ServerCapabilities,
-  WorkspaceDescriptorPayload,
-  WorkspaceProjectDescriptorPayload,
+import {
+  type AgentBackgroundWorkSummary,
+  type ServerInfoStatusPayload,
+  type ProjectPlacementPayload,
+  type ServerCapabilities,
+  type WorkspaceDescriptorPayload,
+  type WorkspaceProjectDescriptorPayload,
 } from "@jagentdesk/protocol/messages";
 import {
   normalizeWorkspaceOpaqueId,
@@ -55,11 +62,13 @@ import {
 } from "@/utils/workspace-agent-activity";
 import {
   applyTurnLivenessTransition,
+  resolveTimelineTurnPresentation,
   resolveTurnPresentation,
   TURN_LIVENESS_IDLE,
   type TurnLiveness,
   type TurnPresentation,
   type TurnLivenessTransition,
+  type UnsettledTurn,
 } from "@/timeline/turn-liveness";
 
 // Re-export types that were in session-context
@@ -114,39 +123,83 @@ export interface AgentRuntimeInfo {
 
 export interface Agent {
   serverId: string;
+
   id: string;
+
   provider: AgentProvider;
+
   status: AgentLifecycleStatus;
+
+  backgroundWork?: AgentBackgroundWorkSummary;
+
   activeTurn: { turnId: string | null; startedAt: Date | null } | null;
+
   createdAt: Date;
+
   updatedAt: Date;
+
   lastUserMessageAt: Date | null;
+
   lastActivityAt: Date;
+
   capabilities: AgentCapabilityFlags;
+
   currentModeId: string | null;
+
   availableModes: AgentMode[];
+
   pendingPermissions: AgentPermissionRequest[];
+
   persistence: AgentPersistenceHandle | null;
+
   runtimeInfo?: AgentRuntimeInfo;
+
   lastUsage?: AgentUsage;
+
   usageTotals?: AgentUsageTotals;
+  usageScopeKey?: string;
+  /** What the provider reports about the session, as label and value rows. */
+  sessionMetrics?: AgentMetric[];
   lastError?: string | null;
+
   title: string | null;
+
   cwd: string;
+
   workspaceId?: string;
+
   model: string | null;
-  features?: AgentFeature[];
+
+  options?: ProviderOptions;
+
+  controls?: AgentOptionControl[];
+
   thinkingOptionId?: string | null;
+
   requiresAttention?: boolean;
+
   attentionReason?: "finished" | "error" | "permission" | null;
+
   attentionTimestamp?: Date | null;
+
   archivedAt?: Date | null;
+
+  /** Background agents stay out of tabs, the subagent track and agent lists. Open them by id. */
+  background?: boolean;
+
   parentAgentId: string | null;
+
   labels: Record<string, string>;
+
+  metadata?: Record<string, JsonValue>;
+
   projectPlacement?: ProjectPlacementPayload | null;
 }
 
 export interface WorkspaceDescriptor {
+  createdAt?: string;
+  lastUserMessageAt?: string | null;
+  activityAt?: string | null;
   id: string;
   projectId: string;
   projectDisplayName: string;
@@ -157,6 +210,7 @@ export interface WorkspaceDescriptor {
   worktreeSlug?: WorkspaceDescriptorPayload["worktreeSlug"];
   projectKind: WorkspaceDescriptorPayload["projectKind"];
   workspaceKind: WorkspaceDescriptorPayload["workspaceKind"];
+  background?: boolean;
   name: string;
   title?: string | null;
   pinnedAt?: string | null;
@@ -168,6 +222,7 @@ export interface WorkspaceDescriptor {
   gitRuntime?: WorkspaceDescriptorPayload["gitRuntime"];
   githubRuntime?: WorkspaceDescriptorPayload["githubRuntime"];
   forge?: WorkspaceDescriptorPayload["forge"];
+  forgeWeb?: WorkspaceDescriptorPayload["forgeWeb"];
   project?: ProjectPlacementPayload;
 }
 
@@ -180,6 +235,9 @@ export function normalizeWorkspaceDescriptor(
       ? new Date(statusEnteredAtRaw)
       : null;
   return {
+    createdAt: payload.createdAt,
+    lastUserMessageAt: payload.lastUserMessageAt,
+    activityAt: payload.activityAt,
     id: normalizeWorkspaceOpaqueId(payload.id) ?? payload.id,
     projectId: payload.projectId,
     projectDisplayName: payload.projectDisplayName,
@@ -193,6 +251,7 @@ export function normalizeWorkspaceDescriptor(
     worktreeSlug: payload.worktreeSlug,
     projectKind: payload.projectKind,
     workspaceKind: payload.workspaceKind,
+    background: payload.background ?? false,
     name: payload.name,
     title: payload.title ?? null,
     pinnedAt: payload.pinnedAt ?? null,
@@ -204,6 +263,7 @@ export function normalizeWorkspaceDescriptor(
     gitRuntime: payload.gitRuntime,
     githubRuntime: payload.githubRuntime,
     forge: payload.forge,
+    forgeWeb: payload.forgeWeb,
     project: payload.project,
   };
 }
@@ -279,7 +339,9 @@ function projectMapsEqual(
 }
 
 export type ExplorerEntryKind = "file" | "directory";
+
 export type ExplorerFileKind = "text" | "image" | "binary";
+
 export type ExplorerEncoding = "utf-8" | "base64" | "none";
 
 export interface ExplorerEntry {
@@ -314,6 +376,7 @@ interface ExplorerRequestState {
 }
 
 export interface AgentFileExplorerState {
+  listingGeneration: number;
   directories: Map<string, ExplorerDirectory>;
   files: Map<string, ExplorerFile>;
   isLoading: boolean;
@@ -332,6 +395,19 @@ export interface DaemonServerInfo {
   desktopManaged?: boolean;
   capabilities?: ServerCapabilities;
   features?: ServerInfoStatusPayload["features"];
+}
+
+export function toDaemonServerInfo(serverInfo: ServerInfoStatusPayload): DaemonServerInfo {
+  return {
+    serverId: serverInfo.serverId,
+    hostname: serverInfo.hostname ?? null,
+    version: serverInfo.version ?? null,
+    ...(serverInfo.desktopManaged !== undefined
+      ? { desktopManaged: serverInfo.desktopManaged }
+      : {}),
+    ...(serverInfo.capabilities ? { capabilities: serverInfo.capabilities } : {}),
+    ...(serverInfo.features ? { features: serverInfo.features } : {}),
+  };
 }
 
 export interface AgentTimelineCursorState {
@@ -386,14 +462,92 @@ export function selectAgentTimelineState(
   return items.length > 0 ? { status: "painted", items } : { status: "cold" };
 }
 
+/** Text of the loaded user messages, newest first, with back-to-back repeats collapsed. */
+export function selectAgentSentMessages(
+  session: SessionState | undefined,
+  agentId: string,
+): string[] {
+  if (!session) return [];
+  const items = [
+    ...(session.agentStreamTail.get(agentId) ?? []),
+    ...(session.agentStreamHead.get(agentId) ?? []),
+  ];
+  const messages: string[] = [];
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item.kind !== "user_message" || item.text.trim().length === 0) continue;
+    if (messages[messages.length - 1] === item.text) continue;
+    messages.push(item.text);
+  }
+  return messages;
+}
+
 export function selectAgentTurnPresentation(
   session: SessionState | undefined,
   agentId: string,
 ): TurnPresentation {
   return resolveTurnPresentation(
     session?.agentTurnLiveness.get(agentId) ?? TURN_LIVENESS_IDLE,
-    getActiveMessageSubmissions(session?.messageSubmissions.get(agentId)).length > 0,
+    hasActiveMessageSubmission(session?.messageSubmissions.get(agentId)),
   );
+}
+
+/** Turn state for the chat's own timeline. Every other surface reads the true status above. */
+export function selectAgentTimelineTurnPresentation(
+  session: SessionState | undefined,
+  agentId: string,
+): TurnPresentation {
+  return resolveTimelineTurnPresentation(
+    selectAgentTurnPresentation(session, agentId),
+    session?.agentTimelineUnsettledTurn.get(agentId),
+  );
+}
+
+/** The unsettled turn a chat's messages carry: the one open right now, or the one it holds. */
+export function selectAgentUnsettledTurn(
+  session: SessionState | undefined,
+  agentId: string,
+): UnsettledTurn | undefined {
+  const turn = session?.agentTurnLiveness.get(agentId);
+  if (turn?.phase === "open") return { turnId: turn.turnId, startedAt: turn.startedAt };
+  return session?.agentTimelineUnsettledTurn.get(agentId);
+}
+
+function withUnsettledTurn(
+  current: Map<string, UnsettledTurn>,
+  agentId: string,
+  turn: UnsettledTurn,
+): Map<string, UnsettledTurn> {
+  const held = current.get(agentId);
+  // COMPAT(agentTurnIdentity): added in v0.2.6, remove after 2027-01-31 once daemon floor >= v0.2.6.
+  // Hosts without turn ids report null for every turn, so only the start time tells two turns apart.
+  if (held?.turnId === turn.turnId && held?.startedAt?.getTime() === turn.startedAt?.getTime()) {
+    return current;
+  }
+  const next = new Map(current);
+  next.set(agentId, turn);
+  return next;
+}
+
+function withoutUnsettledTurn(
+  current: Map<string, UnsettledTurn>,
+  agentId: string,
+): Map<string, UnsettledTurn> {
+  if (!current.has(agentId)) return current;
+  const next = new Map(current);
+  next.delete(agentId);
+  return next;
+}
+
+// The messages that bring a chat current settle its turn in this same commit.
+function commitUnsettledTurn(
+  current: Map<string, UnsettledTurn>,
+  agentId: string,
+  commit: { synchronized: boolean; unsettledTurn?: UnsettledTurn },
+): Map<string, UnsettledTurn> {
+  if (commit.synchronized) return withoutUnsettledTurn(current, agentId);
+  if (commit.unsettledTurn) return withUnsettledTurn(current, agentId, commit.unsettledTurn);
+  return current;
 }
 
 export type WorkspaceRestoreStatus = "restoring" | "failed" | "needs-host-upgrade";
@@ -413,6 +567,7 @@ export interface SessionState {
   // Hydration status
   hasHydratedAgents: boolean;
   hasHydratedWorkspaces: boolean;
+  hasWorkspaceDirectorySnapshot: boolean;
 
   // Audio state
   isPlayingAudio: boolean;
@@ -431,6 +586,7 @@ export interface SessionState {
   agentTurnLiveness: Map<string, TurnLiveness>;
   messageSubmissions: Map<string, MessageSubmissionRecord[]>;
   agentTimelineCursor: Map<string, AgentTimelineCursorState>;
+  agentTimelineUnsettledTurn: Map<string, UnsettledTurn>;
   agentTimelineHasOlder: Map<string, boolean>;
   agentTimelineHasNewer: Map<string, boolean>;
   agentTimelineOlderFetchInFlight: Map<string, boolean>;
@@ -597,7 +753,13 @@ interface SessionStoreActions {
       newer: boolean;
       synchronized: boolean;
       acknowledgedClientMessageIds: string[];
+      unsettledTurn?: UnsettledTurn;
     },
+  ) => void;
+  setAgentTimelineUnsettledTurn: (
+    serverId: string,
+    agentId: string,
+    turn: UnsettledTurn | null,
   ) => void;
 
   // Initializing agents
@@ -622,6 +784,7 @@ interface SessionStoreActions {
       | ((prev: Map<string, WorkspaceDescriptor>) => Map<string, WorkspaceDescriptor>),
   ) => void;
   mergeWorkspaces: (serverId: string, workspaces: Iterable<WorkspaceDescriptor>) => void;
+  seedWorkspaces: (serverId: string, workspaces: Iterable<WorkspaceDescriptor>) => void;
   removeWorkspace: (serverId: string, workspaceId: string) => void;
   setProjects: (serverId: string, projects: Iterable<ProjectDescriptor>) => void;
   upsertProject: (serverId: string, project: ProjectDescriptor) => void;
@@ -669,6 +832,7 @@ interface SessionStoreActions {
   // Hydration
   setHasHydratedAgents: (serverId: string, hydrated: boolean) => void;
   setHasHydratedWorkspaces: (serverId: string, hydrated: boolean) => void;
+  setHasWorkspaceDirectorySnapshot: (serverId: string, available: boolean) => void;
 
   // Agent directory (derived from agents)
   getAgentDirectory: (serverId: string) => AgentDirectoryEntry[] | undefined;
@@ -692,6 +856,7 @@ function createInitialSessionState(
     serverInfo: null,
     hasHydratedAgents: false,
     hasHydratedWorkspaces: false,
+    hasWorkspaceDirectorySnapshot: false,
     isPlayingAudio: false,
     focusedAgentId: null,
     focusedTerminalId: null,
@@ -702,6 +867,7 @@ function createInitialSessionState(
     agentTurnLiveness: new Map(),
     messageSubmissions: new Map(),
     agentTimelineCursor: new Map(),
+    agentTimelineUnsettledTurn: new Map(),
     agentTimelineHasOlder: new Map(),
     agentTimelineHasNewer: new Map(),
     agentTimelineOlderFetchInFlight: new Map(),
@@ -898,6 +1064,7 @@ export const useSessionStore = create<SessionStore>()(
                 agentTurnLiveness: rekeyMap(session.agentTurnLiveness),
                 messageSubmissions: rekeyMap(session.messageSubmissions),
                 agentTimelineCursor: rekeyMap(session.agentTimelineCursor),
+                agentTimelineUnsettledTurn: rekeyMap(session.agentTimelineUnsettledTurn),
                 agentTimelineHasOlder: rekeyMap(session.agentTimelineHasOlder),
                 agentTimelineHasNewer: rekeyMap(session.agentTimelineHasNewer),
                 agentTimelineOlderFetchInFlight: rekeyMap(session.agentTimelineOlderFetchInFlight),
@@ -1679,6 +1846,11 @@ export const useSessionStore = create<SessionStore>()(
             nextAuthoritative.set(agentId, true);
             nextSyncGeneration.set(agentId, session.historySyncGeneration);
           }
+          const agentTimelineUnsettledTurn = commitUnsettledTurn(
+            session.agentTimelineUnsettledTurn,
+            agentId,
+            state,
+          );
 
           return {
             ...prev,
@@ -1691,10 +1863,30 @@ export const useSessionStore = create<SessionStore>()(
                 agentTimelineCursor: nextCursor,
                 agentTimelineHasOlder: nextHasOlder,
                 agentTimelineHasNewer: nextHasNewer,
+                agentTimelineUnsettledTurn,
                 agentAuthoritativeHistoryApplied: nextAuthoritative,
                 agentHistorySyncGeneration: nextSyncGeneration,
                 messageSubmissions,
               },
+            },
+          };
+        });
+      },
+
+      setAgentTimelineUnsettledTurn: (serverId, agentId, turn) => {
+        set((prev) => {
+          const session = prev.sessions[serverId];
+          if (!session) return prev;
+          const current = session.agentTimelineUnsettledTurn;
+          const next = turn
+            ? withUnsettledTurn(current, agentId, turn)
+            : withoutUnsettledTurn(current, agentId);
+          if (next === current) return prev;
+          return {
+            ...prev,
+            sessions: {
+              ...prev.sessions,
+              [serverId]: { ...session, agentTimelineUnsettledTurn: next },
             },
           };
         });
@@ -1879,6 +2071,17 @@ export const useSessionStore = create<SessionStore>()(
             },
           };
         });
+      },
+
+      seedWorkspaces: (serverId, workspaces) => {
+        const existing = get().sessions[serverId]?.workspaces;
+        // Creation responses seed missing rows; live directory updates own existing rows.
+        const missing = Array.from(workspaces).filter(
+          (workspace) =>
+            !existing?.has(workspace.id) &&
+            !isWorkspaceArchivePending({ serverId, workspaceId: workspace.id }),
+        );
+        get().mergeWorkspaces(serverId, missing);
       },
 
       mergeWorkspaces: (serverId, workspaces) => {
@@ -2080,6 +2283,20 @@ export const useSessionStore = create<SessionStore>()(
             sessions: {
               ...prev.sessions,
               [serverId]: { ...session, hasHydratedWorkspaces: hydrated },
+            },
+          };
+        });
+      },
+
+      setHasWorkspaceDirectorySnapshot: (serverId, available) => {
+        set((prev) => {
+          const session = prev.sessions[serverId];
+          if (!session || session.hasWorkspaceDirectorySnapshot === available) return prev;
+          return {
+            ...prev,
+            sessions: {
+              ...prev.sessions,
+              [serverId]: { ...session, hasWorkspaceDirectorySnapshot: available },
             },
           };
         });

@@ -7,7 +7,7 @@ import type { BrowserFingerprintProfile } from "@jagentdesk/protocol/browser-aut
  * through the existing daemon-config get/patch flow (deepMerge replaces the whole
  * `profiles` array, so a patch always sends the full list). The active profile is
  * resolved here and pushed to the desktop main process to apply. See
- * docs/plans/active/agentic-browser-custom-and-anti-detect.md.
+ * docs/agentic-browser.md.
  */
 
 export function listFingerprintProfiles(

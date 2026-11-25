@@ -1,3 +1,4 @@
+import { revealWorkspaceTab } from "@/workspace-tabs/navigation";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef } from "react";
 import { View } from "react-native";
 import { GestureDetector } from "react-native-gesture-handler";
@@ -100,9 +101,7 @@ interface CompactExplorerSidebarHostProps {
 export function CompactExplorerSidebarHost({ children, enabled }: CompactExplorerSidebarHostProps) {
   const model = useActiveCompactExplorerSidebarModel(enabled);
   const openFileExplorerForCheckout = usePanelStore((state) => state.openFileExplorerForCheckout);
-  const showMobileAgent = usePanelStore((state) => state.showMobileAgent);
   const openWorkspaceTabFocused = useWorkspaceLayoutStore((state) => state.openTabFocused);
-  const focusWorkspaceTab = useWorkspaceLayoutStore((state) => state.focusTab);
 
   const handleOpenExplorer = useCallback(() => {
     if (!model?.workspaceRoot) {
@@ -126,12 +125,11 @@ export function CompactExplorerSidebarHost({ children, enabled }: CompactExplore
       openWorkspaceFileFromExplorer({
         filePath,
         persistenceKey: model.persistenceKey,
-        showMobileAgent,
         openWorkspaceTabFocused,
-        focusWorkspaceTab,
+        revealWorkspaceTab,
       });
     },
-    [focusWorkspaceTab, model, openWorkspaceTabFocused, showMobileAgent],
+    [model, openWorkspaceTabFocused],
   );
 
   return (

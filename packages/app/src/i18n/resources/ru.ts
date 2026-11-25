@@ -1,11 +1,18 @@
-import type { TranslationResources } from "./en";
-import { pluginSettings } from "./plugin-settings";
-import { activityGraphStrings } from "./activity-graph";
 import { sshModuleStrings } from "./ssh-modules";
+import { builtinPluginStrings } from "./builtin-plugins";
+import { botsStrings } from "./bots";
+import { type TranslationResources } from "./en";
+import { pluginSettings } from "./plugin-settings";
 
 export const ru: TranslationResources = {
+  bots: botsStrings,
+  builtinPlugins: builtinPluginStrings,
   ssh: sshModuleStrings,
-  activityGraph: activityGraphStrings,
+  pluginCombobox: {
+    searching: "Поиск…",
+    empty: "Нет результатов",
+    failed: "Не удалось выполнить поиск: {{message}}",
+  },
   paneFind: {
     connectionFailure: "Could not search this chat. Check the host connection and retry.",
     historyChangedFailure: "The chat changed while searching. Search again.",
@@ -32,6 +39,8 @@ export const ru: TranslationResources = {
     back: "Назад",
     loading: "Загрузка...",
     actions: {
+      copyLine: "Копировать строку",
+      selectAll: "Выбрать всё",
       back: "Назад",
       cancel: "Отмена",
       close: "Закрывать",
@@ -58,6 +67,8 @@ export const ru: TranslationResources = {
       downloadFailed: "Загрузка не удалась",
     },
     errors: {
+      folderOutsideWorkspace: "{{path}} is outside this workspace",
+
       error: "Ошибка",
       unableToSave: "Не удалось сохранить",
       nameRequired: "Требуется имя",
@@ -82,26 +93,63 @@ export const ru: TranslationResources = {
       close: "Закрыть меню",
     },
     commandCenter: {
-      placeholder: "Поиск команд, рабочих пространств и агентов...",
-      noMatches: "Нет совпадений",
-      actions: "Действия",
-      workspaces: "Рабочие пространства",
-      agents: "Агенты",
-      newAgent: "Новый агент",
-      addProject: "Добавить проект",
-      home: "Дом",
-      modelGroupLabel: "Модель",
-      modelSearchKeywords: "сменить модель изменить модель выбрать модель установить модель",
-      thinkingGroupLabel: "Мышление",
-      thinkingSearchKeywords: "рассуждение усилие мышление",
-      modeGroupLabel: "Режим",
-      modeSearchKeywords: "доступ разрешение одобрение режим",
-      planModeGroupLabel: "Режим плана",
-      planModeSearchKeywords: "план планирование режим плана",
-      fastModeGroupLabel: "Быстрый",
-      fastModeSearchKeywords: "быстрый скорость низкая задержка",
-      settingOn: "Вкл",
-      settingOff: "Выкл",
+      placeholder:
+        "\u041F\u043E\u0438\u0441\u043A \u0440\u0430\u0431\u043E\u0447\u0438\u0445 \u043F\u0440\u043E\u0441\u0442\u0440\u0430\u043D\u0441\u0442\u0432, \u0444\u0430\u0439\u043B\u043E\u0432 \u0438 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0439...",
+      noMatches: "\u041D\u0435\u0442 \u0441\u043E\u0432\u043F\u0430\u0434\u0435\u043D\u0438\u0439",
+      actions: "\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u044F",
+      workspaces:
+        "\u0420\u0430\u0431\u043E\u0447\u0438\u0435 \u043F\u0440\u043E\u0441\u0442\u0440\u0430\u043D\u0441\u0442\u0432\u0430",
+      agents: "\u0410\u0433\u0435\u043D\u0442\u044B",
+      newAgent: "\u041D\u043E\u0432\u044B\u0439 \u0430\u0433\u0435\u043D\u0442",
+      addProject:
+        "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043F\u0440\u043E\u0435\u043A\u0442",
+      home: "\u0413\u043B\u0430\u0432\u043D\u0430\u044F",
+      copyBrowserHostName: "Скопировать имя хоста браузера",
+      modelGroupLabel: "\u041C\u043E\u0434\u0435\u043B\u044C",
+      modelSearchKeywords:
+        "\u0421\u043C\u0435\u043D\u0438\u0442\u044C, \u0438\u0437\u043C\u0435\u043D\u0438\u0442\u044C, \u0432\u044B\u0431\u0440\u0430\u0442\u044C \u0438\u043B\u0438 \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C \u043C\u043E\u0434\u0435\u043B\u044C",
+      thinkingGroupLabel: "\u041C\u044B\u0448\u043B\u0435\u043D\u0438\u0435",
+      thinkingSearchKeywords:
+        "\u0423\u0440\u043E\u0432\u0435\u043D\u044C \u0443\u0441\u0438\u043B\u0438\u044F \u0440\u0430\u0441\u0441\u0443\u0436\u0434\u0435\u043D\u0438\u044F",
+      modeGroupLabel: "\u0420\u0435\u0436\u0438\u043C",
+      modeSearchKeywords:
+        "\u0440\u0435\u0436\u0438\u043C \u043F\u043E\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043D\u0438\u044F \u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043D\u0438\u0439 \u0434\u043E\u0441\u0442\u0443\u043F\u0430",
+      planModeGroupLabel:
+        "\u0420\u0435\u0436\u0438\u043C \u043F\u043B\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F",
+      planModeSearchKeywords:
+        "\u043F\u043B\u0430\u043D \u043F\u043B\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 \u0440\u0435\u0436\u0438\u043C \u043F\u043B\u0430\u043D\u0430",
+      fastModeGroupLabel: "\u0411\u044B\u0441\u0442\u0440\u044B\u0439",
+      fastModeSearchKeywords:
+        "\u0431\u044B\u0441\u0442\u0440\u044B\u0439 \u0441\u043A\u043E\u0440\u043E\u0441\u0442\u044C \u043D\u0438\u0437\u043A\u0430\u044F \u0437\u0430\u0434\u0435\u0440\u0436\u043A\u0430",
+      settingOn: "\u0412\u043A\u043B",
+      settingOff: "\u0412\u044B\u043A\u043B",
+      filePlaceholder: "\u041F\u043E\u0438\u0441\u043A \u0444\u0430\u0439\u043B\u043E\u0432...",
+      searchingFiles: "\u041F\u043E\u0438\u0441\u043A \u0444\u0430\u0439\u043B\u043E\u0432...",
+      files: "\u0424\u0430\u0439\u043B\u044B",
+      open: "\u041E\u0442\u043A\u0440\u044B\u0442\u044C {{name}}",
+      openInSidePane:
+        "\u041E\u0442\u043A\u0440\u044B\u0442\u044C {{name}} \u0432 \u0431\u043E\u043A\u043E\u0432\u043E\u0439 \u043F\u0430\u043D\u0435\u043B\u0438",
+      openInFocusedPane:
+        "\u041E\u0442\u043A\u0440\u044B\u0442\u044C {{name}} \u0432 \u0430\u043A\u0442\u0438\u0432\u043D\u043E\u0439 \u043E\u0431\u043B\u0430\u0441\u0442\u0438",
+      groupByProject:
+        "\u0413\u0440\u0443\u043F\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u043F\u043E \u043F\u0440\u043E\u0435\u043A\u0442\u0443",
+      groupByStatus:
+        "\u0413\u0440\u0443\u043F\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u043F\u043E \u0441\u0442\u0430\u0442\u0443\u0441\u0443",
+      placeholderWithoutFiles:
+        "\u041F\u043E\u0438\u0441\u043A \u0440\u0430\u0431\u043E\u0447\u0438\u0445 \u043F\u0440\u043E\u0441\u0442\u0440\u0430\u043D\u0441\u0442\u0432 \u0438 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0439...",
+      workspacePlaceholder:
+        "\u041F\u043E\u0438\u0441\u043A \u0440\u0430\u0431\u043E\u0447\u0438\u0445 \u043F\u0440\u043E\u0441\u0442\u0440\u0430\u043D\u0441\u0442\u0432...",
+      actionPlaceholder:
+        "\u041F\u043E\u0438\u0441\u043A \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0439...",
+      recentWorkspaces:
+        "\u041D\u0435\u0434\u0430\u0432\u043D\u0438\u0435 \u0440\u0430\u0431\u043E\u0447\u0438\u0435 \u043F\u0440\u043E\u0441\u0442\u0440\u0430\u043D\u0441\u0442\u0432\u0430",
+      tabs: {
+        all: "\u0412\u0441\u0435",
+        workspaces:
+          "\u0420\u0430\u0431\u043E\u0447\u0438\u0435 \u043F\u0440\u043E\u0441\u0442\u0440\u0430\u043D\u0441\u0442\u0432\u0430",
+        files: "\u0424\u0430\u0439\u043B\u044B",
+        actions: "\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u044F",
+      },
     },
   },
   composer: {
@@ -109,8 +157,15 @@ export const ru: TranslationResources = {
       desktop: "Напишите агенту сообщение, отметьте @files или используйте /commands и /skills.",
       mobile: "Сообщение,@files,/commands",
       fallback: "Сообщение...",
+      terminal: "Prompt",
     },
     input: {
+      fullscreen: "Fullscreen",
+      exitFullscreen: "Exit fullscreen",
+      longPressToSendNow: "Long press to send now",
+
+      longPressToQueue: "Long press to queue",
+
       accessibilityLabel: "Агент сообщений...",
       focusHint: "{{shortcut}}, чтобы сосредоточиться",
       addAttachment: "Добавить вложение",
@@ -314,6 +369,7 @@ export const ru: TranslationResources = {
       forkUnavailable: "Обновите хост, чтобы использовать это.",
       forkMissingWorkspace: "Этот агент не находится в рабочем пространстве.",
       forkFailed: "Не удалось форкнуть чат",
+      turnStats: "Статистика ответа",
       openFile: "Открыть файл",
       copied: "Скопировано",
     },
@@ -338,6 +394,13 @@ export const ru: TranslationResources = {
       details: "Подробности",
     },
     dictation: {
+      insecureContext:
+        "Чтобы использовать микрофон, откройте JAgentDesk по HTTPS или на localhost.",
+      unsupported: "Диктовка недоступна в этом браузере.",
+      noMicrophone: "Подключите микрофон и попробуйте снова.",
+      permissionDenied: "Разрешите доступ к микрофону и попробуйте снова.",
+      startFailed: "Не удалось начать диктовку. Попробуйте снова.",
+      paused: "Микрофон прерван. Ожидание возобновления…",
       start: "Начать голосовой диктовку",
       cancel: "Отменить диктовку",
       retry: "Повторить диктовку",
@@ -347,10 +410,30 @@ export const ru: TranslationResources = {
       failedRetry: "Диктант не удался. Нажмите «Повторить».",
     },
     question: {
+      responseFailed: "Не удалось отправить ответ. Попробуйте ещё раз.",
       submit: "Представлять на рассмотрение",
       next: "Далее",
       answerPlaceholder: "Введите ответ...",
       otherPlaceholder: "Другой...",
+    },
+    backgroundWork: {
+      heartbeat: "Периодический сигнал",
+      pillOne: "1 фоновая задача",
+      pillMany: "Фоновые задачи: {{count}}",
+      notRunning: "Больше не выполняется",
+      dismiss: "Закрыть",
+      stop: "Остановить",
+      stopping: "Остановка…",
+      stopError: "Не удалось подтвердить остановку.",
+      label: "В фоне",
+      title: "Фоновые задачи",
+      waiting: "Ожидание сведений о задачах",
+      error: "Не удалось загрузить фоновые задачи",
+      retry: "Повторить",
+      running: "Фоновые задачи выполняются",
+      shell: "Оболочка",
+      monitor: "Монитор",
+      other: "Другая задача",
     },
     todo: {
       title: "Задачи",
@@ -362,6 +445,10 @@ export const ru: TranslationResources = {
       manual: "Контекст сжимается вручную",
       withTokens: "Сжатый контекст (токены{{tokens}}K)",
       completed: "Контекст сжат",
+    },
+    turnFooter: {
+      workedFor:
+        "\u0412\u0440\u0435\u043C\u044F \u0440\u0430\u0431\u043E\u0442\u044B: {{duration}}",
     },
   },
   importSession: {
@@ -415,7 +502,9 @@ export const ru: TranslationResources = {
       recovery: {
         archivedTitle: "Рабочая область в архиве",
         restoreDescription:
-          "{{workspaceName}} была архивирована, а её worktree удалён. Восстановите ветку {{branch}}, чтобы открыть её снова.",
+          "Восстановите «{{workspaceName}}», чтобы вернуться к его агентам. Worktree будет использовать ветку {{branch}}.",
+        restoreWithoutBranchDescription:
+          "Восстановите «{{workspaceName}}», чтобы вернуться к его агентам.",
         unarchiveDescription:
           "{{workspaceName}} находится в архиве. Разархивируйте её, чтобы открыть снова.",
         restoreAction: "Восстановить",
@@ -540,9 +629,16 @@ export const ru: TranslationResources = {
       },
     },
     terminal: {
+      fileUploaded: "Файл загружен",
+      pasteFileFailed: "Не удалось вставить файл: {{reason}}",
+      uploadingFile: "Загрузка файла…",
       hostDisconnected: "Host не подключен",
       updateHost: "Обновите хост, чтобы использовать нативный терминал.",
       unableToSubscribe: "Невозможно подписаться на терминал",
+      restoreRequiresUpdate: "Обновите хост, чтобы просматривать терминалы.",
+    },
+    sheet: {
+      openAsTab: "Открыть во вкладке",
     },
     tabs: {
       loading: "Загрузка...",
@@ -594,6 +690,11 @@ export const ru: TranslationResources = {
         editTerminalProfiles: "Edit profiles…",
         pinTarget: "Закрепить",
         unpinTarget: "Открепить",
+        newTab: "\u041D\u043E\u0432\u0430\u044F \u0432\u043A\u043B\u0430\u0434\u043A\u0430",
+        changes: "\u0418\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F",
+        files: "\u0424\u0430\u0439\u043B\u044B",
+        pullRequest:
+          "\u0417\u0430\u043F\u0440\u043E\u0441 \u043D\u0430 \u0441\u043B\u0438\u044F\u043D\u0438\u0435",
       },
       explorer: {
         open: "Открыть проводник",
@@ -651,6 +752,7 @@ export const ru: TranslationResources = {
     },
     header: {
       actions: {
+        workspaceActionsUnhealthy: "Действия с рабочим пространством, есть неисправный сервис",
         workspaceActions: "Действия Workspace",
         newAgent: "Новый агент",
         newTerminal: "Новый терминал",
@@ -696,6 +798,8 @@ export const ru: TranslationResources = {
         direct: "Прямой адрес",
       },
       states: {
+        runningCount: "Запущено: {{count}}",
+        running: "Выполняется",
         exitCode: "выйти из{{code}}",
         startFailed: "Не удалось запустить{{scriptName}}",
         stopFailed: "Не удалось остановить{{scriptName}}",
@@ -853,6 +957,9 @@ export const ru: TranslationResources = {
         },
       },
       diff: {
+        baseBranch: {
+          title: "Базовая ветка",
+        },
         openChangesTab: "Открыть вкладку «Изменения»",
         closeChangesTab: "Закрыть вкладку «Изменения»",
         binaryFile: "Бинарный файл",
@@ -882,12 +989,13 @@ export const ru: TranslationResources = {
         emptyUncommitted: "Нет незафиксированных изменений",
         emptyAgainstBase: "Никаких изменений по сравнению с{{baseRef}}",
         checkingRepository: "Проверяем репозиторий...",
-        notRepository: "Не git- репозиторий",
-        diffMode: "Режим разницы",
-        uncommitted: "Незафиксированный",
-        committed: "Преданный идее",
-        branchUnknown: "Неизвестный",
-        base: "база",
+        notRepository: "Это не репозиторий Git",
+        diffMode: "Режим диффа",
+        all: "Все изменения",
+        uncommitted: "Незафиксированные изменения",
+        committed: "Зафиксированные изменения",
+        branchUnknown: "Неизвестная ветка",
+        base: "базовая ветка",
         newFile: "Новый",
         deletedFile: "Удалено",
         commits: {
@@ -912,22 +1020,33 @@ export const ru: TranslationResources = {
         actions: {
           viewPullRequest: "Открыть",
           openOn: "Открыть на {{brand}}",
+          addToChat: "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u0432 \u0447\u0430\u0442",
+          addAllToChat:
+            "\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u0432\u0441\u0451 \u0432 \u0447\u0430\u0442",
+          addingToChat: "\u0414\u043E\u0431\u0430\u0432\u043B\u0435\u043D\u0438\u0435...",
         },
         sections: {
           checks: "Чеки",
           pipeline: "Пайплайн",
           reviews: "Отзывы",
+          activity: "\u0410\u043A\u0442\u0438\u0432\u043D\u043E\u0441\u0442\u044C",
         },
         empty: {
           noJobs: "Нет задач",
           loadingPipeline: "Загрузка пайплайна...",
           pipelineJobsLoadFailed: "Не удалось загрузить задачи пайплайна",
           allowedToFail: "допускается сбой",
+          noActivity:
+            "\u0410\u043A\u0442\u0438\u0432\u043D\u043E\u0441\u0442\u0438 \u043F\u043E\u043A\u0430 \u043D\u0435\u0442",
         },
         approvals: "{{given}} из {{required}} одобрений",
         accessibility: {
           pullRequest: "Запрос на извлечение №{{number}}",
           pullRequest_mr: "Запрос на слияние !{{number}}",
+          commentActions:
+            "\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u044F \u0441 \u043A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0435\u043C",
+          threadActions:
+            "\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u044F \u0441 \u043E\u0431\u0441\u0443\u0436\u0434\u0435\u043D\u0438\u0435\u043C",
         },
         states: {
           draft: "Черновик",
@@ -946,10 +1065,63 @@ export const ru: TranslationResources = {
         },
         thread: {
           discussion: "Обсуждение",
+          resolved: "\u0420\u0435\u0448\u0435\u043D\u043E",
+          outdated: "\u0423\u0441\u0442\u0430\u0440\u0435\u043B\u043E",
         },
         errors: {
           statusLoadFailed: "Невозможно загрузить статус запроса на включение",
           activityLoadFailed: "Невозможно загрузить активность запроса на включение",
+        },
+        checksOverview: {
+          headline: {
+            actionRequired:
+              "\u041D\u0435\u043A\u043E\u0442\u043E\u0440\u044B\u0435 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438 \u0442\u0440\u0435\u0431\u0443\u044E\u0442 \u0432\u043D\u0438\u043C\u0430\u043D\u0438\u044F",
+            failure:
+              "\u041D\u0435\u043A\u043E\u0442\u043E\u0440\u044B\u0435 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438 \u043D\u0435 \u043F\u0440\u043E\u0439\u0434\u0435\u043D\u044B",
+            pending:
+              "\u041D\u0435\u043A\u043E\u0442\u043E\u0440\u044B\u0435 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438 \u0435\u0449\u0451 \u043D\u0435 \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u044B",
+            success:
+              "\u0412\u0441\u0435 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438 \u043F\u0440\u043E\u0439\u0434\u0435\u043D\u044B",
+            none: "\u041D\u0435\u0442 \u043F\u0440\u043E\u0432\u0435\u0440\u043E\u043A",
+          },
+          count: {
+            actionRequired:
+              "\u0442\u0440\u0435\u0431\u0443\u0435\u0442 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0439: {{count}}",
+            warning:
+              "\u0441 \u043F\u0440\u0435\u0434\u0443\u043F\u0440\u0435\u0436\u0434\u0435\u043D\u0438\u0435\u043C: {{count}}",
+            failure: "\u043D\u0435 \u043F\u0440\u043E\u0439\u0434\u0435\u043D\u043E: {{count}}",
+            pending:
+              "\u0432\u044B\u043F\u043E\u043B\u043D\u044F\u0435\u0442\u0441\u044F: {{count}}",
+            manual: "\u0432\u0440\u0443\u0447\u043D\u0443\u044E: {{count}}",
+            success: "\u043F\u0440\u043E\u0439\u0434\u0435\u043D\u043E: {{count}}",
+            ignored: "\u043F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u043E: {{count}}",
+          },
+          detailOne: "\u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 ({{parts}})",
+          detailMany: "\u041F\u0440\u043E\u0432\u0435\u0440\u043A\u0438 ({{parts}})",
+          groupOne: {
+            actionRequired:
+              "\u0422\u0440\u0435\u0431\u0443\u0435\u0442 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0439: {{count}}",
+            warning:
+              "\u0421 \u043F\u0440\u0435\u0434\u0443\u043F\u0440\u0435\u0436\u0434\u0435\u043D\u0438\u0435\u043C: {{count}}",
+            failure: "\u041D\u0435 \u043F\u0440\u043E\u0439\u0434\u0435\u043D\u0430: {{count}}",
+            pending:
+              "\u0412\u044B\u043F\u043E\u043B\u043D\u044F\u0435\u0442\u0441\u044F: {{count}}",
+            manual: "\u0420\u0443\u0447\u043D\u0430\u044F: {{count}}",
+            success: "\u041F\u0440\u043E\u0439\u0434\u0435\u043D\u0430: {{count}}",
+            ignored: "\u041F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u0430: {{count}}",
+          },
+          groupMany: {
+            actionRequired:
+              "\u0422\u0440\u0435\u0431\u0443\u044E\u0442 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0439: {{count}}",
+            warning:
+              "\u0421 \u043F\u0440\u0435\u0434\u0443\u043F\u0440\u0435\u0436\u0434\u0435\u043D\u0438\u0435\u043C: {{count}}",
+            failure: "\u041D\u0435 \u043F\u0440\u043E\u0439\u0434\u0435\u043D\u044B: {{count}}",
+            pending:
+              "\u0412\u044B\u043F\u043E\u043B\u043D\u044F\u044E\u0442\u0441\u044F: {{count}}",
+            manual: "\u0420\u0443\u0447\u043D\u044B\u0435: {{count}}",
+            success: "\u041F\u0440\u043E\u0439\u0434\u0435\u043D\u044B: {{count}}",
+            ignored: "\u041F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u044B: {{count}}",
+          },
         },
       },
       forgeSetup: {
@@ -958,17 +1130,6 @@ export const ru: TranslationResources = {
         generic: "Настройте {{brand}} на этом хосте, чтобы использовать его функции.",
       },
     },
-  },
-  forumArch: {
-    title: "Архитектурная диаграмма",
-    loading: "Загрузка диаграммы…",
-    notFound: "Эта версия диаграммы больше недоступна на хосте.",
-    loadFailed: "Не удалось загрузить диаграмму.",
-    offline: "Подключитесь к хосту, чтобы просмотреть эту диаграмму.",
-    retry: "Повторить",
-    replay: "Повторить анимацию",
-    replayHint: "Воспроизвести анимацию трассировки ещё раз",
-    reducedMotion: "Анимация отключена, так как включено уменьшение движения",
   },
   connection: {
     localMode: {
@@ -1029,12 +1190,20 @@ export const ru: TranslationResources = {
       closeSidebar: "Закрыть боковую панель",
     },
     help: {
-      trigger: "Помощь и поддержка",
-      sectionHelp: "Помощь",
-      diagnostics: "Запустить диагностику",
-      shortcuts: "Сочетания клавиш",
-      reportIssue: "Сообщить о проблеме",
+      trigger:
+        "\u041F\u043E\u043C\u043E\u0449\u044C \u0438 \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u043A\u0430",
+      sectionHelp: "\u041F\u043E\u043C\u043E\u0449\u044C",
+      diagnostics:
+        "\u0417\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C \u0434\u0438\u0430\u0433\u043D\u043E\u0441\u0442\u0438\u043A\u0443",
+      shortcuts:
+        "\u0421\u043E\u0447\u0435\u0442\u0430\u043D\u0438\u044F \u043A\u043B\u0430\u0432\u0438\u0448",
+      reportIssue:
+        "\u0421\u043E\u043E\u0431\u0449\u0438\u0442\u044C \u043E \u043F\u0440\u043E\u0431\u043B\u0435\u043C\u0435",
       version: "JAgentDesk {{version}}",
+      discord: "Discord",
+      github: "\u0421\u043E\u0437\u0434\u0430\u0442\u044C issue \u043D\u0430 GitHub",
+      whatsNew: "\u0427\u0442\u043E \u043D\u043E\u0432\u043E\u0433\u043E",
+      appName: "JAgentDesk",
     },
     sections: {
       sessions: "История",
@@ -1115,21 +1284,35 @@ export const ru: TranslationResources = {
         hostDisconnected: "Host не подключен",
         hideFailed: "Не удалось скрыть рабочую область.",
         archiveFailed: "Не удалось заархивировать рабочее пространство.",
+        archived: "Рабочее пространство архивировано",
+        undoArchive: "Отменить",
+        undoArchiveFailed: "Не удалось отменить архивацию",
       },
     },
+    statusBucket: {
+      needsInput: "\u041E\u0436\u0438\u0434\u0430\u0435\u0442 \u0432\u0432\u043E\u0434\u0430",
+      failed: "\u041E\u0448\u0438\u0431\u043A\u0430",
+      readyToReview: "\u041D\u0430 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0443",
+      working: "\u0412 \u0440\u0430\u0431\u043E\u0442\u0435",
+      done: "\u0413\u043E\u0442\u043E\u0432\u043E",
+    },
+    statusGroupAccessibility: "\u0413\u0440\u0443\u043F\u043F\u0430 \u00AB{{label}}\u00BB",
   },
   newWorkspace: {
     title: "Новое рабочее пространство",
     create: "Создавать",
     isolation: {
-      local: "Локально",
+      local: "Папка проекта",
       worktree: "Новый worktree",
+      existing: "Существующий worktree",
       label: "Изоляция",
     },
     fields: {
       project: "Проект",
       base: "База",
       baseNotApplicable: "Неприменимо",
+      host: "Хост",
+      branch: "Ветка",
     },
     titlePlaceholder: "Название (необязательно)",
     errors: {
@@ -1137,15 +1320,55 @@ export const ru: TranslationResources = {
       createWorktreeFailed: "Не удалось создать рабочее дерево.",
       composerStateRequired: "Требуется состояние композитора.",
       selectModel: "Выберите модель",
+      branchInProjectDirectory:
+        "Ветка {{branch}} уже открыта в папке проекта. Выберите «Папка проекта», чтобы работать в ней, или создайте от неё новую ветку.",
+      branchInWorktree:
+        "Ветка {{branch}} уже открыта в {{path}}. Выберите этот worktree в «Существующий worktree» или создайте от неё новую ветку.",
     },
     refPicker: {
-      startingRef: "Начальная ссылка",
       chooseStart: "Выберите, с чего начать",
-      intoBase: "в {{baseRef}}",
-      searching: "Идет поиск...",
-      noMatchingRefs: "Нет подходящих ссылок.",
       searchPlaceholder: "Поиск филиалов и PR",
+      startingRef: "Исходная точка",
+      intoBase: "в ветку {{baseRef}}",
+      searching: "Идет поиск...",
+      noMatchingRefs: "Нет подходящих веток или PR.",
+      searchBranches: "Поиск веток",
+      searchPullRequests: "Поиск PR",
+      searchPullRequests_mr: "Поиск MR",
+      branches: "Ветки",
+      pullRequests: "Pull requests",
+      pullRequests_mr: "Merge requests",
+      pullRequestsShort: "PR",
+      pullRequestsShort_mr: "MR",
+      branchOff: "Новая ветка",
+      checkout: "Переключиться",
+      branchOffHint: "Создать от неё новую ветку",
+      checkoutHint: "Работать прямо в ней",
+      base: "База",
+      from: "от",
+      branch: "Ветка",
+      pullRequest: "Pull request",
+      pullRequest_mr: "Merge request",
+      inProjectDirectory: "В папке проекта",
+      inWorktree: "В worktree",
       title: "Начать с",
+    },
+    launch: {
+      commandPlaceholder:
+        "Введите команду или оставьте поле пустым, чтобы открыть терминал без запуска команды",
+      promptPlaceholder: "Промпт для {{name}}",
+      submit: "Запустить",
+      chat: "Чат",
+      terminal: "Терминал",
+      title: "Что запустить",
+      manageProfiles: "Управление профилями терминала",
+    },
+    tooltips: {
+      project: "Выберите проект",
+      host: "Выберите хост",
+      isolation: "Выберите уровень изоляции",
+      startingRef: "Выберите, с чего начать",
+      launch: "Выберите, что запустить",
     },
   },
   desktop: {
@@ -1323,6 +1546,7 @@ export const ru: TranslationResources = {
     openPath: "Открыть путь",
   },
   branchSwitcher: {
+    failedToLoad: "Не удалось загрузить ветки. Откройте список заново, чтобы повторить попытку.",
     currentBranch: "Текущая ветка:{{branchName}}. Нажмите, чтобы переключить ветку.",
     placeholder: "Сменить ветку...",
     searchPlaceholder: "Фильтровать ветки...",
@@ -1347,6 +1571,17 @@ export const ru: TranslationResources = {
     noFiles: "Файлы и каталоги не найдены",
     noCommands: "Команды не найдены",
     failedToLoad: "Не удалось загрузить",
+    chooseProjectForCommands: "Выберите проект, чтобы увидеть команды",
+    chooseModelForCommands: "Выберите модель, чтобы увидеть команды",
+    loadingProviderCommands:
+      "\u0417\u0430\u0433\u0440\u0443\u0437\u043A\u0430 \u043A\u043E\u043C\u0430\u043D\u0434 {{provider}}...",
+    commandsFailed:
+      "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044C \u043A\u043E\u043C\u0430\u043D\u0434\u044B",
+    providerCommandsFailed:
+      "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044C \u043A\u043E\u043C\u0430\u043D\u0434\u044B {{provider}}",
+    filesFailed:
+      "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043D\u0430\u0439\u0442\u0438 \u0444\u0430\u0439\u043B\u044B",
+    skillTag: "\u041D\u0430\u0432\u044B\u043A",
   },
   loadOlderHistory: {
     failed: "Не удалось загрузить старую историю.",
@@ -1397,18 +1632,33 @@ export const ru: TranslationResources = {
     noMatches: "Ни одна модель не соответствует вашему запросу",
     searchPlaceholder: "Поиск моделей...",
     openProviderSettings: "Открыть настройки{{provider}}",
+    editProfilesLabel: "Изменить профили агентов",
+    searchAllPlaceholder: "Поиск по всем моделям...",
+    createProfileFromModel: "Создать профиль из этой модели",
+    editProfileLabel: "Изменить {{name}}",
+    editProfilesCount: "Изменить профили ({{count}})",
+    profiles: "Профили",
+    createProfile: "Создать профиль",
+    noMatchesForQuery: "Нет моделей, соответствующих «{{query}}»",
+    providers: "Провайдеры",
+    model: "Модель",
   },
   providerCatalog: {
     title: "Добавить провайдера",
-    search: "Поиск поставщиков",
-    noProviders: "Поставщики не найдены",
+    search: "Поиск провайдеров",
+    noProviders: "Провайдеры не найдены",
+    clearSearch: "Очистить поиск",
     actions: {
-      add: "Добавлять",
+      add: "Добавить",
+      addProvider: "Добавить {{provider}}",
       adding: "Добавление",
       installed: "Установлено",
       cancel: "Отмена",
       installInstructions: "Инструкции по установке",
       installInstructionsFor: "Инструкция по установке{{provider}}",
+    },
+    types: {
+      acp: "ACP",
     },
     errors: {
       unableToInstall: "Невозможно установить провайдера",
@@ -1431,6 +1681,34 @@ export const ru: TranslationResources = {
     },
   },
   pairing: {
+    hostConfirmation: {
+      title: "Connect to this host?",
+      description: "This link adds a new host. Check its address and key before connecting.",
+      descriptionChanged:
+        "This link changes a saved host. Check the previous and new values before connecting.",
+      hostLabel: "Host",
+      fingerprintLabel: "New daemon key fingerprint (SHA-256)",
+      routesLabel: "New connections",
+      previousRoutesLabel: "Previous connections",
+      previousFingerprintLabel: "Previous daemon key fingerprint (SHA-256)",
+      keyChanged: "Warning: the daemon key has changed. Verify this change with the host owner.",
+      connect: "Connect",
+    },
+    verify: {
+      failed: "Pairing failed",
+      saveFailed:
+        "JAgentDesk could not save the pairing offer on this device. Paste the link again to retry.",
+      invalidOffer: "This is not a valid JAgentDesk pairing offer.",
+      enterCode: "Enter the 6-digit verification code shown on desktop.",
+      starting: "Connection is still starting. Try entering the code again.",
+      waiting: "Waiting for Tailscale to connect...",
+      helper: "Enter the 6-digit code shown in the JAgentDesk desktop connection popup.",
+      login:
+        "Pairing offer saved. Sign in to Tailscale first; then this screen will connect to the desktop and ask for the 6-digit code.",
+      title: "Verify pairing",
+      codeTitle: "Enter verification code",
+      verifying: "Verifying…",
+    },
     connectionMethods: {
       title: "Добавить соединение",
       direct: {
@@ -1524,6 +1802,8 @@ export const ru: TranslationResources = {
       errorTitle: "Ошибка",
     },
     device: {
+      transportHint:
+        "Copy this link or scan the QR code. This desktop will show the device request and six-digit code. Relay works without a Tailscale login.",
       loadingOffer: "Загрузка предложения по сопряжению...",
       failedToLoadOffer: "Не удалось загрузить предложение сопряжения.",
       unavailable: "Предложение по сопряжению недоступно.",
@@ -1569,6 +1849,7 @@ export const ru: TranslationResources = {
     hostUnavailable: "Хост загрузки недоступен.",
     cancelled: "Загрузка отменена.",
     failed: "Не удалось загрузить файл.",
+    httpFailed: "Не удалось загрузить файл (HTTP {{status}}).",
     shareFile: "Поделиться файлом",
     shareFileNamed: "Поделиться {{fileName}}",
   },
@@ -1576,6 +1857,18 @@ export const ru: TranslationResources = {
     backdrop: "Фон меню",
   },
   subagents: {
+    title: "Субагенты",
+    parent: {
+      openParent: "Open parent",
+
+      parentAgent: "Parent agent",
+
+      parent: "Parent",
+
+      backTo: "Back to {{label}}",
+      backToParent: "Back to parent",
+    },
+
     detachAction: "Отсоединить {{label}}",
     detachTooltip: "Отсоединить субагент",
     archiveAction: "Архив{{label}}",
@@ -1628,6 +1921,23 @@ export const ru: TranslationResources = {
       loadError: "Не удалось загрузить различия",
       capabilityMissing: "Обновите хост, чтобы просматривать различия коммитов.",
     },
+    files: {
+      label: "\u0424\u0430\u0439\u043B\u044B",
+      subtitle:
+        "\u0424\u0430\u0439\u043B\u044B \u0440\u0430\u0431\u043E\u0447\u0435\u0433\u043E \u043F\u0440\u043E\u0441\u0442\u0440\u0430\u043D\u0441\u0442\u0432\u0430",
+      tooltip:
+        "\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440 \u0444\u0430\u0439\u043B\u043E\u0432 \u0440\u0430\u0431\u043E\u0447\u0435\u0433\u043E \u043F\u0440\u043E\u0441\u0442\u0440\u0430\u043D\u0441\u0442\u0432\u0430",
+    },
+    pullRequest: {
+      label:
+        "\u0417\u0430\u043F\u0440\u043E\u0441 \u043D\u0430 \u0441\u043B\u0438\u044F\u043D\u0438\u0435",
+      subtitle:
+        "\u0421\u0432\u0435\u0434\u0435\u043D\u0438\u044F \u043E \u0437\u0430\u043F\u0440\u043E\u0441\u0435 \u043D\u0430 \u0441\u043B\u0438\u044F\u043D\u0438\u0435",
+      emptyTitle:
+        "\u0417\u0430\u043F\u0440\u043E\u0441\u0430 \u043D\u0430 \u0441\u043B\u0438\u044F\u043D\u0438\u0435 \u043F\u043E\u043A\u0430 \u043D\u0435\u0442",
+      emptyDescription:
+        "\u0421\u043E\u0437\u0434\u0430\u0439\u0442\u0435 \u0437\u0430\u043F\u0440\u043E\u0441 \u043D\u0430 \u0441\u043B\u0438\u044F\u043D\u0438\u0435 \u0434\u043B\u044F \u044D\u0442\u043E\u0439 \u0440\u0430\u0431\u043E\u0447\u0435\u0439 \u043A\u043E\u043F\u0438\u0438, \u0447\u0442\u043E\u0431\u044B \u0443\u0432\u0438\u0434\u0435\u0442\u044C \u0437\u0434\u0435\u0441\u044C \u0435\u0433\u043E \u0441\u0432\u0435\u0434\u0435\u043D\u0438\u044F.",
+    },
   },
   toolCallDetails: {
     error: "Ошибка",
@@ -1636,7 +1946,14 @@ export const ru: TranslationResources = {
     input: "Вход",
     output: "Выход",
   },
+  turnSummary: {
+    details: "Показать подробности хода",
+    sentBy: "Отправлено агентом {{name}}",
+    showMore: "Показать больше",
+    showLess: "Свернуть",
+  },
   toolCallGroup: {
+    thought: "Обдумал",
     editedFiles: {
       one: "изменён {{count}} файл",
       other: "изменено {{count}} файлов",
@@ -1671,6 +1988,8 @@ export const ru: TranslationResources = {
     dismiss: "Увольнять",
   },
   contextWindow: {
+    noData: "No context data",
+    accessibilityNoData: "Context window: No context data",
     title: "Контекстное окно",
     used: "{{percentage}}% использовано",
     tokens: "Токены{{used}}/{{max}}",
@@ -1734,6 +2053,7 @@ export const ru: TranslationResources = {
       agents: "Agents",
       orchestration: "Orchestration",
       workspaces: "Workspaces",
+      voice: "Голос",
       providers: "Провайдеры",
       usage: "Использование",
       terminals: "Terminals",
@@ -1768,6 +2088,70 @@ export const ru: TranslationResources = {
         unsupported_os: "Not available on this OS",
       },
     },
+    voice: {
+      offline: "Подключитесь к этому хосту, чтобы настроить голос.",
+      updateHost: "Обновите хост, чтобы настроить голос.",
+      saveError: "Не удалось обновить голосовые настройки",
+      provider: "Провайдер",
+      providers: {
+        local: "Локально",
+        openai: "OpenAI",
+      },
+      voice: "Голос",
+      save: "Сохранить",
+      retry: "Повторить",
+      cancel: "Отмена",
+      model: "Модель",
+      language: "Язык",
+      languagePlaceholder: "Автоопределение",
+      setBy: "Задано через {{name}}",
+      unknownProvider: "Обновите приложение, чтобы настроить {{provider}}",
+      sites: {
+        dictationStt: "Распознавание речи",
+        voiceModeStt: "Прослушивание",
+        voiceModeTts: "Озвучивание",
+      },
+      dictation: {
+        title: "Диктовка",
+        enabled: "Диктовка",
+        enabledHint: "Говорите в поле сообщения вместо набора текста",
+      },
+      voiceMode: {
+        title: "Голосовой режим",
+        info: "Голосовой режим расшифровывает вашу речь и зачитывает ответы агента вслух.",
+        enabled: "Голосовой режим",
+        enabledHint: "Общайтесь с агентами без рук",
+      },
+      openai: {
+        apiKey: "API-ключ",
+        apiKeyHint: "Хранится на хосте и больше не показывается.",
+        keyPlaceholder: "sk-...",
+        savedKeyPlaceholder: "Сохранён",
+        missingKey: "Нет API-ключа",
+        baseUrl: "Базовый URL",
+        baseUrlHint:
+          "Для серверов, совместимых с OpenAI. Оставьте пустым, чтобы использовать OpenAI.",
+      },
+      models: {
+        loading: "Загрузка моделей...",
+        loadError: "Не удалось загрузить локальные модели",
+        none: "Нет доступных моделей",
+        downloaded: "Скачана",
+        inUse: "Используется",
+        recommended: "Рекомендуется",
+        download: "Скачать",
+        downloadAction: "Скачать {{label}}",
+        downloading: "Скачивание...",
+        downloadingPercent: "Скачивание {{percent}}%",
+        extracting: "Распаковка...",
+        delete: "Удалить",
+        deleteAction: "Удалить {{label}}",
+        deleteTitle: "Удалить {{label}}?",
+        deleteMessage: "Освободится {{size}}. Позже её можно скачать снова.",
+        languages: "Языки {{label}}",
+        moreLanguages: "{{languages}} и ещё {{count}}",
+      },
+    },
     general: {
       title: "Общий",
       browserData: {
@@ -1782,7 +2166,18 @@ export const ru: TranslationResources = {
         success: "Данные браузера очищены.",
         error: "Не удалось очистить данные браузера.",
       },
+      sendShortcut: {
+        label: "Send shortcut",
+        options: { enter: "Enter", "mod-enter": "{{modifier}}+Enter" },
+      },
       defaultSend: {
+        commandEnterDescriptions: {
+          interrupt:
+            "When the agent is running, {{modifier}}+Enter interrupts. Enter inserts a new line.",
+          steer:
+            "When the agent is running, {{modifier}}+Enter steers the active turn. Enter inserts a new line.",
+          queue: "When the agent is running, {{modifier}}+Enter queues. Enter inserts a new line.",
+        },
         label: "Отправка по умолчанию",
         descriptions: {
           steer:
@@ -1815,13 +2210,13 @@ export const ru: TranslationResources = {
         description:
           "По умолчанию показывать блоки размышлений и логики агента полностью развернутыми",
       },
-      toolCallDetail: {
-        label: "Отображение вызовов инструментов",
-        description: "Как вызовы инструментов отображаются на временной шкале",
-        accessibilityLabel: "Выбрать отображение вызовов инструментов ({{value}})",
+      chatDisplay: {
+        label: "Отображение чата",
+        description: "Какую часть работы агента показывает чат",
         options: {
-          overview: "Сводка",
-          detailed: "Полная детализация",
+          full: "Полностью",
+          collapseToolCalls: "Сворачивать вызовы инструментов",
+          collapseTurns: "Сворачивать ходы",
         },
       },
       language: {
@@ -1843,11 +2238,6 @@ export const ru: TranslationResources = {
     },
     diagnostics: {
       title: "Диагностика",
-      legacyTerminalRenderer: {
-        label: "Использовать прежний рендерер терминала",
-        description: "Использовать прежний WebView-терминал после повторного открытия",
-        accessibilityLabel: "Использовать прежний рендерер терминала",
-      },
       testAudio: "Тестирование звука",
       playTest: "Игровой тест",
       playing: "Игра...",
@@ -1881,8 +2271,8 @@ export const ru: TranslationResources = {
           claude: "Клод",
           ghostty: "Призрачный",
           pureBlack: "Чистый чёрный",
-          clickup: "ClickUp",
-          clickupDark: "ClickUp Dark",
+          gumloop: "Gumloop",
+          gumloopDark: "Gumloop Dark",
           auto: "Система",
         },
       },
@@ -1909,6 +2299,22 @@ export const ru: TranslationResources = {
         codeSize: "Размер кода",
         codeSizeAccessibility: "Размер шрифта кода",
       },
+      layout: {
+        contentWidthCustom: "Custom width · {{width}} px",
+
+        contentWidthFull: "Full",
+
+        contentWidthWide: "Wide",
+
+        contentWidthDefault: "Default",
+
+        title: "Layout",
+        contentWidth: "Content width",
+        contentWidthHint: "Maximum width of chat and Markdown content",
+        contentWidthAccessibility: "Content width in pixels",
+        reset: "Reset",
+        resetAccessibility: "Reset content width",
+      },
       syntax: {
         title: "Синтаксис",
         highlightTheme: "Выделить тему",
@@ -1923,6 +2329,8 @@ export const ru: TranslationResources = {
       searchPlaceholder: "Поиск сочетаний клавиш",
       unavailableOnMobile: "Сочетания клавиш доступны только на рабочем столе.",
       capturePrompt: "Нажмите ярлык...",
+      captureIndexPrompt: "Завершите цифрой от 1 до 9.",
+      unassigned: "Не задано",
       actions: {
         done: "Сделанный",
         cancel: "Отмена",
@@ -1938,6 +2346,10 @@ export const ru: TranslationResources = {
         agentInput: "Вход Agent",
       },
       help: {
+        cycleEffort: "Cycle effort",
+
+        toggleModelPicker: "Toggle model picker",
+
         openProject: "Открыть проект",
         newWorkspace: "Новое рабочее пространство",
         newWorktree: "Новое рабочее дерево",
@@ -2079,9 +2491,15 @@ export const ru: TranslationResources = {
       },
       notFound: "Host не найден",
       badges: {
+        relay: "Relay",
+        tailnet: "Tailscale",
         local: "Местный",
       },
       connections: {
+        active: "Active",
+        enableRelay: "Enable relay",
+        use: "Use this connection",
+        useFailed: "Could not switch connection",
         title: "Соединения",
         removeTitle: "Удалить соединение",
         removeMessage: "Удалить{{name}}? Это невозможно отменить.",
@@ -2117,7 +2535,20 @@ export const ru: TranslationResources = {
         },
       },
       agents: {
+        resumeOnStartup: {
+          title: "Возобновлять агентов после перезапуска",
+          info: "Открывает агентов, которые работали при остановке хоста, и отправляет сообщение для продолжения. Применяется после обычного перезапуска и сбоя.",
+          hint: "Автоматически продолжать прерванную работу.",
+          prompt: "Сообщение для продолжения",
+          edit: "Редактировать",
+          editAccessibilityLabel: "Изменить сообщение",
+        },
         unavailable: "Connect to this host to manage agents",
+        idleRuntimeCleanup: {
+          title: "Освобождать неактивных агентов",
+          hint: "Освобождает память после часа бездействия.",
+          info: "Останавливает процесс агента, сохраняя разговор. Отправьте сообщение, чтобы продолжить.\n\nАктивная работа, ожидающие уведомления и проверки безопасности провайдера предотвращают очистку.",
+        },
       },
       workspaces: {
         unavailable: "Connect to this host to manage workspaces",
@@ -2215,6 +2646,42 @@ export const ru: TranslationResources = {
           errorMessage: "Невозможно удалить хост",
           localErrorMessage: "Unable to remove localhost connection",
         },
+      },
+      agentProfiles: {
+        featureCountOne: "{{count}} функция",
+        featureCount: "Функции: {{count}}",
+        editProfileTitle: "Изменить профиль агента",
+        addProfileTitle: "Добавить профиль агента",
+        iconLabel: "Значок",
+        nameLabel: "Имя",
+        namePlaceholder: "Работа над UI",
+        providerLabel: "Провайдер",
+        providerPlaceholder: "Выберите провайдера",
+        noProviders: "На этом хосте нет доступных провайдеров",
+        modelLabel: "Модель",
+        noModels: "У этого провайдера нет моделей для выбора",
+        modeLabel: "Режим",
+        noModes: "У этого провайдера нет режимов для выбора",
+        thinkingLabel: "Рассуждения",
+        noThinkingOptions: "У этой модели нет уровней рассуждений",
+        featuresLabel: "Функции",
+        notesLabel: "Когда использовать",
+        notesHint: "Помогает агентам выбрать этот профиль при запуске другого агента.",
+        notesPlaceholder: "Используйте для работы над UI — компоненты, макет и токены дизайна.",
+        saving: "Сохранение...",
+        save: "Сохранить",
+        moveUp: "Переместить вверх",
+        moveDown: "Переместить вниз",
+        editProfile: "Изменить профиль",
+        remove: "Удалить",
+        removeConfirmTitle: "Удалить профиль?",
+        removeConfirmMessage: "Удалить «{{name}}»?",
+        sectionTitle: "Профили агентов",
+        unsupported: "На этом хосте запущен демон, который пока не поддерживает профили агентов",
+        unavailable: "Подключитесь к этому хосту, чтобы управлять профилями агентов",
+        emptyState:
+          "Пока нет профилей. Добавьте один, чтобы запускать агентов с сохранённым провайдером и моделью.",
+        newProfile: "Новый профиль",
       },
     },
     providers: {
@@ -2330,6 +2797,26 @@ export const ru: TranslationResources = {
         custom: "Пользовательские модели",
         updated: "Обновлен{{time}}",
       },
+      installation: {
+        title: "Установка",
+        version: "Версия",
+        installed: "Установлено",
+        notInstalled: "Не установлено",
+        install: "Установить",
+        checking: "Проверка...",
+        failed: "Не удалось проверить установку",
+        updates: "Обновления",
+        upToDate: "Актуальная версия",
+        updateAvailable: "Доступно обновление",
+        updateInstructions: "Инструкции по обновлению",
+        update: "Обновить",
+        updating: "Обновление...",
+        updated: "Обновлено",
+        updateFailed: "Не удалось обновить",
+        outputTruncated: "Более ранний вывод был отброшен.",
+        updatesFailed: "Не удалось проверить обновления",
+        installInstructions: "Инструкции по установке",
+      },
       diagnostic: {
         title: "Диагностика",
         button: "Диагностика",
@@ -2432,7 +2919,7 @@ export const ru: TranslationResources = {
       },
     },
   },
-  clickupShell: {
+  gumloopShell: {
     search: "Поиск",
     newWorkspace: "Новый",
     workspaces: "Рабочие пространства",
@@ -2832,6 +3319,103 @@ export const ru: TranslationResources = {
       forkHint: "JAgentDesk does not own {{name}}, so it is never edited.",
       fork: "Create copy",
       forked: "Training {{name}}",
+    },
+  },
+  changelog: {
+    title: "\u0427\u0442\u043E \u043D\u043E\u0432\u043E\u0433\u043E",
+    installed: "\u0423\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u0430",
+    showMore: "\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u0435\u0449\u0451",
+    showAllChanges:
+      "\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u0432\u0441\u0435 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F",
+    hideAllChanges:
+      "\u0421\u043A\u0440\u044B\u0442\u044C \u0432\u0441\u0435 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F",
+    openWebsite:
+      "\u041F\u043E\u043B\u043D\u044B\u0439 \u0441\u043F\u0438\u0441\u043E\u043A \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439",
+    error: {
+      title:
+        "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044C \u0441\u043F\u0438\u0441\u043E\u043A \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439",
+      description:
+        "\u041F\u0440\u043E\u0432\u0435\u0440\u044C\u0442\u0435 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435 \u0438 \u043F\u043E\u043F\u0440\u043E\u0431\u0443\u0439\u0442\u0435 \u0441\u043D\u043E\u0432\u0430.",
+    },
+  },
+  providerUsage: {
+    checkUsage: "Проверять использование",
+    checkUsageHint: "Применяется к {{host}} на всех устройствах",
+    off: "Проверка использования отключена на {{host}}.",
+    turnOn: "Включить",
+
+    options: "Настройки",
+    host: "Хост",
+    refreshFailed: "Не удалось обновить использование",
+    noHosts: "Нет подключённых хостов",
+    agentError: "Не удалось загрузить использование: {{reason}}",
+    pin: "Закрепить",
+    unpin: "Открепить",
+    displayAs: "Проценты",
+    displayUsed: "Использовано",
+    displayRemaining: "Осталось",
+    showInSidebar: "Сводка на боковой панели",
+    showInSidebarHint: "Закреплённые периоды отображаются внизу боковой панели",
+    runToRefresh: "Выполните {{command}} для обновления.",
+    signInAgain: "Войдите снова.",
+    loginRejected: "Вход отклонён (HTTP {{status}}). {{remedy}}",
+    loginExpired: "Срок входа истёк {{relativeTime}}. {{remedy}}",
+    title: "Использование плана",
+    refresh: "Обновить",
+    reorderCard: "Переместить {{source}}",
+    sources: "Источники",
+    sourcesCount: "{{shown}} из {{total}}",
+    providerInactive: "Провайдер неактивен",
+    allSourcesHidden: "Источники использования скрыты",
+    chooseSources: "Выбрать источники",
+    refreshAll: "Обновить всё",
+    refreshing: "Обновление...",
+    loading: "Загрузка данных об использовании...",
+    empty: "Нет данных об использовании",
+    errorTitle: "Не удалось загрузить данные об использовании",
+    hostUnavailable: "Подключитесь к {{host}}, чтобы увидеть использование провайдера",
+    hostUpgradeRequired: "Обновите {{host}}, чтобы увидеть использование провайдера",
+    clientUnavailable: "Соединение с хостом не готово",
+    retry: "Повторить",
+    tooltipLoading: "Загрузка использования плана...",
+    status: {
+      error: "Ошибка",
+      unavailable: "Недоступно",
+    },
+    values: {
+      used: "Использовано: {{percentage}}",
+      remaining: "Осталось: {{amount}}",
+    },
+    labels: {
+      session: "Сессия",
+      weekly: "Еженедельно",
+      monthly: "Ежемесячно",
+      codeReview: "Проверка кода",
+      credits: "Кредиты",
+      monthlyCredits: "Ежемесячные кредиты",
+    },
+    duration: {
+      days: "{{value}} дн.",
+      hours: "{{value}} ч",
+      minutes: "{{value}} мин",
+      pair: "{{first}} {{second}}",
+    },
+    timing: {
+      lastUpdated: "Последнее обновление {{relativeTime}}",
+      noSuccessfulUpdate: "Успешных обновлений нет",
+      resetTimePassed: "Время сброса прошло",
+      resettingNow: "сброс сейчас",
+      resetsIn: "сброс через {{duration}}",
+      resetsAtWeekday: "{{weekday}} {{time}}",
+      resetsAtDate: "{{date}}, {{time}}",
+      limitReached: "Лимит исчерпан",
+      mayHaveRunOut: "Лимит мог уже исчерпаться",
+      runsOutAt: "закончится {{time}}",
+      justNow: "только что",
+      daysAgo: "{{value}} дн. назад",
+      hoursAgo: "{{value}} ч назад",
+      minutesAgo: "{{value}} мин назад",
+      updated: "Обновлено {{relativeTime}}",
     },
   },
 };

@@ -1,0 +1,13 @@
+{
+  "kind": "builtin",
+  "id": "jira",
+  "name": "Jira",
+  "description": "Browse boards and manage Jira issues.",
+  "defaultEnabled": true,
+  "requires": [],
+  "builtinOrder": 8,
+  "builtinEntrypoints": {
+    "server": "server/index.ts",
+    "client": "client/index.tsx"
+  }
+}

@@ -1,3 +1,4 @@
+import { controlsFromFeatures, optionsFromFeatures } from "@jagentdesk/protocol/option-controls";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -11,8 +12,10 @@ import { z } from "zod";
 
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import { createAgentMcpServer } from "./mcp-server.js";
+import { setDefaultAgentMessageDeliveryTimingForTests } from "./agent-prompt.js";
 import { AgentManager, type ManagedAgent } from "./agent-manager.js";
 import { AgentStorage, type StoredAgentRecord } from "./agent-storage.js";
+import { AgentRunState } from "./agent-run-state.js";
 import { createTestAgentClients } from "../test-utils/fake-agent-client.js";
 import type {
   AgentClient,
@@ -60,7 +63,8 @@ import { createGitMutationService } from "../session/git-mutation/git-mutation-s
 import type { GeneratedWorkspaceName } from "../worktree-branch-name-generator.js";
 import type { ForgeService } from "../../services/forge-service.js";
 import { areEquivalentPaths } from "../../utils/path.js";
-import type { TerminalManager } from "../../terminal/terminal-manager.js";
+import { createTerminalManager, type TerminalManager } from "../../terminal/terminal-manager.js";
+import { startWorkerTerminalManager } from "../../terminal/worker-terminal-manager.js";
 import { PARENT_AGENT_ID_LABEL } from "@jagentdesk/protocol/agent-labels";
 import type { BrowserToolsBroker, BrowserToolsExecuteInput } from "../browser-tools/broker.js";
 import type { BrowserToolsResponsePayload } from "../browser-tools/errors.js";
@@ -213,6 +217,7 @@ interface TestDeps {
 }
 
 function buildAgentManagerSpies() {
+  const getAgent = vi.fn();
   return {
     createAgent: vi.fn(),
     waitForAgentEvent: vi.fn().mockResolvedValue({
@@ -229,17 +234,38 @@ function buildAgentManagerSpies() {
     updateAgentMetadata: vi.fn().mockResolvedValue(undefined),
     archiveAgent: vi.fn().mockResolvedValue({ archivedAt: new Date().toISOString() }),
     notifyAgentState: vi.fn(),
-    getAgent: vi.fn(),
+    getAgent,
     listAgents: vi.fn().mockReturnValue([]),
+    getAgentBackgroundWorkSummary: vi.fn().mockReturnValue(undefined),
+    effectiveOptionsFor: (_provider: string, own: Record<string, unknown> | undefined) => own ?? {},
     getTimeline: vi.fn().mockReturnValue([]),
     resumeAgentFromPersistence: vi.fn(),
     hydrateTimelineFromProvider: vi.fn().mockResolvedValue(undefined),
     appendTimelineItem: vi.fn().mockResolvedValue(undefined),
     emitLiveTimelineItem: vi.fn().mockResolvedValue(undefined),
+    getPluginTools: () => [],
+    reloadStalePluginSession: async () => {},
     hasInFlightRun: vi.fn().mockReturnValue(false),
+    hasPendingPermissions: vi.fn().mockReturnValue(false),
+    canSteer: vi.fn().mockReturnValue(false),
+    onStop: vi.fn().mockReturnValue(() => {}),
     tryRunOutOfBand: vi.fn().mockReturnValue(false),
+    // Agent callers steer by default (ADR-0029); "inactive" falls through to a new turn.
+    steerOrReplaceActiveTurn: vi.fn().mockResolvedValue({ status: "inactive" }),
     subscribe: vi.fn().mockReturnValue(() => {}),
-    streamAgent: vi.fn(() => (async function* noop() {})()),
+    streamAgent: vi.fn((...args: Parameters<AgentManager["streamAgent"]>) =>
+      (async function* admitted() {
+        const [agentId, , , promptStart] = args;
+        const turnId = randomUUID();
+        if (promptStart) {
+          const runs = new AgentRunState();
+          const run = runs.createPendingRun(agentId);
+          promptStart.bind(run);
+          runs.settleForegroundStart(run, { status: "started", turnId });
+        }
+        yield { type: "turn_started", provider: getAgent(agentId)?.provider ?? "claude", turnId };
+      })(),
+    ),
     waitForAgentRunStart: vi.fn().mockResolvedValue(undefined),
     respondToPermission: vi.fn(),
     cancelAgentRun: vi.fn(),
@@ -258,6 +284,15 @@ function buildAgentStorageSpies() {
     list: vi.fn().mockResolvedValue([]),
     remove: vi.fn(),
   };
+}
+
+// Delivery formatting tests do not need the 2 s quiet window; the window itself is
+// covered by agent-messages/delivery.test.ts.
+setDefaultAgentMessageDeliveryTimingForTests({ quietMs: 0 });
+
+function childFinishSubscriptionCount(manager: AgentManagerSpies): number {
+  return manager.subscribe.mock.calls.filter(([, options]) => options?.agentId === "child-agent")
+    .length;
 }
 
 function createTestDeps(): TestDeps {
@@ -521,7 +556,9 @@ function createManagedAgent(overrides: Partial<ManagedAgent> = {}): ManagedAgent
     },
     currentModeId: null,
     availableModes: [],
-    features: [],
+    controls: controlsFromFeatures(overrides.features),
+    effectiveOptions: optionsFromFeatures(overrides.features),
+    metadata: {},
     pendingPermissions: new Map(),
     persistence: null,
     labels: {},
@@ -582,6 +619,10 @@ class FakeBrowserToolsBroker {
 }
 
 class BoundaryAgentManagerFake {
+  public getPluginTools(): [] {
+    return [];
+  }
+
   private readonly agent = createManagedAgent({
     id: "agent-1",
     cwd: REPO_CWD,
@@ -752,6 +793,7 @@ function createJAgentDeskWorktreeForMcpTest(options: {
     },
   };
   const workspaceProvisioning = createWorkspaceProvisioningService({
+    unarchiveWorkspaceAgents: async () => {},
     projectRegistry,
     workspaceRegistry,
     workspaceGitService,
@@ -803,7 +845,6 @@ function createJAgentDeskWorktreeForMcpTest(options: {
         emit: () => {},
         sessionLogger: createTestLogger(),
         terminalManager: null,
-        archiveWorkspaceRecord: async () => {},
         serviceProxy: null,
         scriptRuntimeStore: null,
         getDaemonTcpPort: null,
@@ -976,6 +1017,7 @@ describe("browser MCP tools", () => {
   it("does not register browser tools when browser tools are disabled", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     spies.agentManager.getAgent.mockReturnValue({
+      labels: {},
       id: "agent-1",
       cwd: REPO_CWD,
       workspaceId: BROWSER_WORKSPACE_ID,
@@ -996,6 +1038,7 @@ describe("browser MCP tools", () => {
   it("wires browser tools through the browser tools broker", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     spies.agentManager.getAgent.mockReturnValue({
+      labels: {},
       id: "agent-1",
       cwd: REPO_CWD,
       workspaceId: BROWSER_WORKSPACE_ID,
@@ -1039,7 +1082,7 @@ describe("browser MCP tools", () => {
 
   it("tells browser callers without a workspace how to proceed before broker execution", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
-    spies.agentManager.getAgent.mockReturnValue({ id: "agent-1", cwd: REPO_CWD });
+    spies.agentManager.getAgent.mockReturnValue({ labels: {}, id: "agent-1", cwd: REPO_CWD });
     const execute = vi.fn().mockResolvedValue({
       requestId: "req-browser-tabs",
       ok: true,
@@ -1080,6 +1123,182 @@ describe("browser MCP tools", () => {
 
 describe("terminal MCP tools", () => {
   const logger = createTestLogger();
+
+  it.each<[string, string, string, boolean]>([
+    ["Down", "\x1b[B", "", false],
+    ["Up", "\x1b[A", "", false],
+    ["Left", "\x1b[D", "", false],
+    ["Right", "\x1b[C", "", false],
+    ["PageUp", "\x1b[5~", "", false],
+    ["PageDown", "\x1b[6~", "", false],
+    ["Home", "\x1b[H", "", false],
+    ["End", "\x1b[F", "", false],
+    ["Insert", "\x1b[2~", "", false],
+    ["Delete", "\x1b[3~", "", false],
+    ["F1", "\x1bOP", "", false],
+    ["F5", "\x1b[15~", "", false],
+    ["F12", "\x1b[24~", "", false],
+    ["S-Tab", "\x1b[Z", "", false],
+    ["C-r", "\x12", "", false],
+    ["M-b", "\x1bb", "", false],
+    ["C-M-Left", "\x1b[1;7D", "", false],
+    ["C-S-Up", "\x1b[1;6A", "", false],
+    ["C-Space", "\x00", "", false],
+    ["Enter", "\r", "", false],
+    ["Tab", "\t", "", false],
+    ["Escape", "\x1b", "", false],
+    ["Space", " ", "", false],
+    ["BSpace", "\x7f", "", false],
+    ["C-c", "\x03", "", false],
+    ["C-d", "\x04", "", false],
+    ["C-z", "\x1a", "", false],
+    ["C-l", "\x0c", "", false],
+    ["C-a", "\x01", "", false],
+    ["C-e", "\x05", "", false],
+    ["Down", "\x1bOB", "\x1b[?1h", false],
+    ["S-Enter", "\x1b[13;2u", "\x1b[=1;1u", false],
+    ["C-Enter", "\x1b[13;28;13;1;8;1_", "\x1b[?9001h", false],
+    ["echo hello\r", "echo hello\r", "", false],
+    ["\x1b[B", "\x1b[B", "", false],
+    ["UnknownKey", "UnknownKey", "", false],
+    ["constructor", "constructor", "", false],
+    ["__proto__", "__proto__", "", false],
+    ["", "", "", false],
+    ["Down", "Down", "\x1b[?1h", true],
+    ["C-r", "C-r", "", true],
+    ["S-Tab", "S-Tab", "", true],
+  ])(
+    "sends terminal token %j as %j (preamble=%j, literal=%s)",
+    async (keys, data, preamble, literal) => {
+      const { agentManager, agentStorage } = createTestDeps();
+      const send = vi.fn();
+      const terminalManager = createTerminalManagerStub({
+        getTerminal: vi.fn().mockReturnValue({
+          send,
+          getReplayPreamble: () => preamble,
+        }),
+      });
+      const server = await createAgentMcpServer({
+        agentManager,
+        agentStorage,
+        providerSnapshotManager: createClaudeOnlyManager(),
+        terminalManager,
+        logger,
+      });
+
+      try {
+        const response = await registeredTool(server, "send_terminal_keys").handler({
+          terminalId: "term-1",
+          keys,
+          literal,
+        });
+        expect(response.structuredContent).toEqual({ success: true });
+        expect(send).toHaveBeenCalledExactlyOnceWith({ type: "input", data });
+      } finally {
+        await server.close();
+      }
+    },
+  );
+
+  it.each([
+    ["in-process", async () => ({ manager: createTerminalManager(), home: null })],
+    [
+      "worker",
+      async () => {
+        const home = await mkdtemp(join(tmpdir(), "mcp-terminal-keys-home-"));
+        const manager = await startWorkerTerminalManager({
+          jagentdeskHome: home,
+          jagentdeskVersion: "0.0.0-test",
+          logger,
+        });
+        return { manager, home };
+      },
+    ],
+  ] as const)(
+    "delivers MCP key tokens through %s after terminal input modes change",
+    async (_name, createManager) => {
+      const { agentManager, agentStorage } = createTestDeps();
+      const { manager: terminalManager, home } = await createManager();
+      const terminal = await terminalManager.createTerminal({
+        cwd: process.cwd(),
+        workspaceId: "ws-terminal-keys",
+        command: process.execPath,
+        args: [
+          "-e",
+          `process.stdin.setRawMode(true);
+         process.stdout.write("READY\\r\\n");
+         process.stdin.on("data", data => {
+           if (data.toString() === "application") {
+             process.stdout.write("\\x1b[?1hAPPLICATION_READY\\r\\n");
+             return;
+           }
+           if (data.toString() === "normal") {
+             process.stdout.write("\\x1b[?1lNORMAL_READY\\r\\n");
+             return;
+           }
+           process.stdout.write("HEX:" + data.toString("hex") + "\\r\\n");
+         });`,
+        ],
+      });
+      const server = await createAgentMcpServer({
+        agentManager,
+        agentStorage,
+        providerSnapshotManager: createClaudeOnlyManager(),
+        terminalManager,
+        logger,
+      });
+
+      // Every step is a round trip through a real PTY. A loaded Windows runner (ConPTY) has
+      // taken over 3 s to reach READY, so each step gets the same window rather than 1 s.
+      let output = "";
+      const unsubscribe = terminal.subscribe((message) => {
+        if (message.type === "output") {
+          output += message.data;
+        }
+      });
+      try {
+        await vi.waitFor(
+          async () => {
+            const capture = await terminalManager.captureTerminal(terminal.id);
+            expect(capture.lines).toContain("READY");
+          },
+          { timeout: 5000 },
+        );
+        const tool = registeredTool(server, "send_terminal_keys");
+        await tool.handler({ terminalId: terminal.id, keys: "application", literal: true });
+        await vi.waitFor(() => expect(output).toContain("APPLICATION_READY"));
+        for (const [keys, hex] of [
+          ["Down", "1b4f42"],
+          ["Up", "1b4f41"],
+          ["Left", "1b4f44"],
+          ["Right", "1b4f43"],
+          ["PageDown", "1b5b367e"],
+          ["S-Tab", "1b5b5a"],
+          ["C-r", "12"],
+          ["M-b", "1b62"],
+        ]) {
+          await tool.handler({ terminalId: terminal.id, keys });
+          await vi.waitFor(async () => {
+            const capture = await terminalManager.captureTerminal(terminal.id);
+            expect(capture.lines.join("\n")).toContain(`HEX:${hex}`);
+          });
+        }
+        await tool.handler({ terminalId: terminal.id, keys: "normal", literal: true });
+        await vi.waitFor(() => expect(output).toContain("NORMAL_READY"));
+        await tool.handler({ terminalId: terminal.id, keys: "Down" });
+        await vi.waitFor(async () => {
+          const capture = await terminalManager.captureTerminal(terminal.id);
+          expect(capture.lines).toContain("HEX:1b5b42");
+        });
+      } finally {
+        unsubscribe();
+        await server.close();
+        await terminalManager.killTerminalAndWait(terminal.id);
+        terminalManager.killAll();
+        if (home) await rm(home, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("captures terminal output through the terminal manager authority", async () => {
     const { agentManager, agentStorage } = createTestDeps();
@@ -1314,6 +1533,7 @@ describe("create_agent MCP tool", () => {
   it("requires a caller workspace for current workspace intent", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     spies.agentManager.getAgent.mockReturnValue({
+      labels: {},
       id: "parent-agent",
       cwd: existingCwd,
       provider: "codex",
@@ -1818,6 +2038,7 @@ describe("create_agent MCP tool", () => {
     const jagentdeskHome = join(tempDir, ".jagentdesk");
     const broadcasts: string[] = [];
     const workspaceGitService = {
+      invalidateWorktrees: () => {},
       getSnapshot: vi.fn(async () => {
         throw new Error("agent metadata branch rename should not run");
       }),
@@ -1966,7 +2187,7 @@ describe("create_agent MCP tool", () => {
       })
         .toString()
         .trim();
-      const metadata = readJAgentDeskWorktreeMetadata(agentCwd);
+      const metadata = await readJAgentDeskWorktreeMetadata(agentCwd);
 
       expect(metadata).toMatchObject({
         version: 2,
@@ -2285,6 +2506,7 @@ describe("create_agent MCP tool", () => {
     const workspaceRecords = new Map<string, PersistedWorkspaceRecord>();
     let generateCalls = 0;
     const workspaceGitService = {
+      invalidateWorktrees: () => {},
       getSnapshot: vi.fn(async () => {
         throw new Error("agent metadata branch rename should not run");
       }),
@@ -2375,9 +2597,9 @@ describe("create_agent MCP tool", () => {
         title: "Generated Checkout Workspace Title",
         branch: "existing-feature",
       });
-      expect(readJAgentDeskWorktreeMetadata(agentCwd)).toMatchObject({
+      expect(await readJAgentDeskWorktreeMetadata(agentCwd)).toMatchObject({
         version: 1,
-        baseRefName: "existing-feature",
+        baseRefName: "main",
       });
       expect(generateCalls).toBe(1);
       expect(workspaceGitService.getSnapshot).not.toHaveBeenCalled();
@@ -2430,6 +2652,7 @@ describe("create_agent MCP tool", () => {
       }),
     );
     const workspaceGitService = {
+      invalidateWorktrees: () => {},
       getSnapshot: vi.fn(async () => {
         throw new Error("agent metadata branch rename should not run");
       }),
@@ -2509,6 +2732,7 @@ describe("create_agent MCP tool", () => {
       execFileSync("git", ["commit", "-m", "init"], { cwd: repoDir, stdio: "pipe" });
       execFileSync("git", ["branch", "-M", "main"], { cwd: repoDir, stdio: "pipe" });
       const workspaceGitService = {
+        invalidateWorktrees: () => {},
         getSnapshot: vi.fn(async () => null),
         listWorktrees: vi.fn(async () => []),
         resolveRepoRoot: vi.fn(async () => repoDir),
@@ -2719,6 +2943,7 @@ describe("create_agent MCP tool", () => {
       execFileSync("git", ["branch", "-M", "main"], { cwd: repoDir, stdio: "pipe" });
 
       const workspaceGitService = {
+        invalidateWorktrees: () => {},
         getSnapshot: vi.fn(async () => null),
         listWorktrees: vi.fn(async () => []),
         resolveRepoRoot: vi.fn(async () => repoDir),
@@ -2775,7 +3000,10 @@ describe("create_agent MCP tool", () => {
         force: true,
         reason: "archive-worktree",
       });
-      expect(archiveWorkspaceRecord).toHaveBeenCalledWith("ws-archive-tool-worktree");
+      expect(archiveWorkspaceRecord).toHaveBeenCalledWith(
+        "ws-archive-tool-worktree",
+        expect.any(String),
+      );
       expect(markWorkspaceArchiving).toHaveBeenCalledWith(
         ["ws-archive-tool-worktree"],
         expect.any(String),
@@ -2829,6 +3057,7 @@ describe("create_agent MCP tool", () => {
       execFileSync("git", ["branch", "-M", "main"], { cwd: repoDir, stdio: "pipe" });
 
       const workspaceGitService = {
+        invalidateWorktrees: () => {},
         getSnapshot: vi.fn(async () => null),
         listWorktrees: vi.fn(async () => []),
         resolveRepoRoot: vi.fn(async () => repoDir),
@@ -2920,6 +3149,7 @@ describe("create_agent MCP tool", () => {
       execFileSync("git", ["branch", "-M", "main"], { cwd: repoDir, stdio: "pipe" });
 
       const workspaceGitService = {
+        invalidateWorktrees: () => {},
         getSnapshot: vi.fn(async () => null),
         listWorktrees: vi.fn(async () => []),
         resolveRepoRoot: vi.fn(async () => repoDir),
@@ -3011,6 +3241,7 @@ describe("create_agent MCP tool", () => {
     const subdir = join(baseDir, "subdir");
     await mkdir(subdir, { recursive: true });
     spies.agentManager.getAgent.mockReturnValue({
+      labels: {},
       id: "voice-agent",
       cwd: baseDir,
       workspaceId: "wks_voice",
@@ -3065,6 +3296,7 @@ describe("create_agent MCP tool", () => {
   it("rejects background from caller agents and defaults notify-on-finish on", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     spies.agentManager.getAgent.mockReturnValue({
+      labels: {},
       id: "parent-agent",
       cwd: existingCwd,
       workspaceId: "wks_parent",
@@ -3110,21 +3342,21 @@ describe("create_agent MCP tool", () => {
 
   it("returns notify-on-finish guidance for caller-created agents", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
-    const parentAgent = {
+    const parentAgent = createManagedAgent({
       id: "parent-agent",
       cwd: existingCwd,
       workspaceId: "wks_parent",
       provider: "codex",
       currentModeId: "full-access",
-    } as ManagedAgent;
-    const childAgent = {
+    });
+    const childAgent = createManagedAgent({
       id: "child-agent",
       cwd: existingCwd,
       lifecycle: "idle",
       currentModeId: null,
       availableModes: [],
       config: { title: "Child" },
-    } as ManagedAgent;
+    });
     spies.agentManager.getAgent.mockImplementation((agentId: string) => {
       if (agentId === "parent-agent") return parentAgent;
       if (agentId === "child-agent") return childAgent;
@@ -3153,9 +3385,54 @@ describe("create_agent MCP tool", () => {
     );
   });
 
+  it("notifies the caller when a created child finishes its initial turn before the turn start returns", async () => {
+    const workdir = await mkdtemp(join(tmpdir(), "mcp-create-fast-child-"));
+    const storage = new AgentStorage(join(workdir, "agents"), logger);
+    const parentClient = new HeldTurnAgentClient("claude", false);
+    const childClient = new HeldTurnAgentClient("codex", false, { finishTurnsDuringStart: true });
+    const agentManager = new AgentManager({
+      clients: { claude: parentClient, codex: childClient },
+      registry: storage,
+      logger,
+    });
+
+    try {
+      const parent = await agentManager.createAgent(
+        { provider: "claude", cwd: existingCwd },
+        undefined,
+        { workspaceId: "wks_parent" },
+      );
+      const server = await createAgentMcpServer({
+        agentManager,
+        agentStorage: storage,
+        callerAgentId: parent.id,
+        providerSnapshotManager: createOpenCodeManager().manager,
+        logger,
+      });
+
+      const response = await invokeToolWithParsedInput(registeredTool(server, "create_agent"), {
+        ...subagentCurrentWorkspace(),
+        title: "Fast Child",
+        provider: "codex/gpt-5.4",
+        initialPrompt: "Finish immediately",
+      });
+      const childId = z.object({ agentId: z.string() }).parse(response.structuredContent).agentId;
+
+      await vi.waitFor(() => {
+        const parentPrompts = parentClient.sessions[0]!.prompts;
+        expect(parentPrompts).toHaveLength(1);
+        expect(parentPrompts[0]).toContain(childId);
+        expect(parentPrompts[0]).toContain("finished");
+      });
+    } finally {
+      await removeAgentStateDir(agentManager, storage, workdir);
+    }
+  });
+
   it("creates detached caller agents without a parent label", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     spies.agentManager.getAgent.mockReturnValue({
+      labels: {},
       id: "parent-agent",
       cwd: existingCwd,
       workspaceId: "wks_parent",
@@ -3208,6 +3485,7 @@ describe("create_agent MCP tool", () => {
   it("accepts provider features from caller agents and passes them through createAgent", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     spies.agentManager.getAgent.mockReturnValue({
+      labels: {},
       id: "parent-agent",
       cwd: existingCwd,
       workspaceId: "wks_parent",
@@ -3463,13 +3741,13 @@ describe("create_agent MCP tool", () => {
 
   it("passes the real parent agent and explicit unattended intent to the resolver", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
-    const parentAgent = {
+    const parentAgent = createManagedAgent({
       id: "parent-agent",
       cwd: existingCwd,
       workspaceId: "wks_parent",
       provider: "claude",
       currentModeId: "bypassPermissions",
-    } as ManagedAgent;
+    });
     spies.agentManager.getAgent.mockReturnValue(parentAgent);
     spies.agentManager.createAgent.mockResolvedValue({
       id: "child-agent",
@@ -3516,6 +3794,7 @@ describe("create_agent MCP tool", () => {
   it("accepts an explicit valid mode across providers", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     spies.agentManager.getAgent.mockReturnValue({
+      labels: {},
       id: "parent-agent",
       cwd: existingCwd,
       workspaceId: "wks_parent",
@@ -3565,6 +3844,11 @@ const HELD_TURN_CAPABILITIES = {
   supportsToolInvocations: false,
 } as const;
 
+interface HeldTurnOptions {
+  /** Run the whole turn before the turn-start request returns. */
+  finishTurnsDuringStart?: boolean;
+}
+
 /**
  * Provider session that records every prompt it receives. With `holdTurns`, a started
  * turn stays running until `finishTurn()` so a caller's bounded wait can run out first.
@@ -3580,6 +3864,7 @@ class HeldTurnAgentSession implements AgentSession {
   constructor(
     readonly provider: AgentProvider,
     private readonly holdTurns: boolean,
+    private readonly options: HeldTurnOptions = {},
   ) {}
 
   /** Hold the next turn's acknowledgment, as a provider awaiting its turn-start request does. */
@@ -3599,6 +3884,13 @@ class HeldTurnAgentSession implements AgentSession {
     this.prompts.push(typeof prompt === "string" ? prompt : JSON.stringify(prompt));
     await this.turnStartGate;
     const turnId = randomUUID();
+    if (this.options.finishTurnsDuringStart) {
+      // The whole turn runs before the turn-start request returns, as a provider whose
+      // start acknowledgment arrives together with the turn's completion does.
+      this.pushEvent({ type: "turn_started", provider: this.provider, turnId });
+      this.pushEvent({ type: "turn_completed", provider: this.provider, turnId });
+      return { turnId };
+    }
     this.activeTurnId = turnId;
     setTimeout(() => {
       this.pushEvent({ type: "turn_started", provider: this.provider, turnId });
@@ -3681,6 +3973,7 @@ class HeldTurnAgentClient implements AgentClient {
   constructor(
     readonly provider: AgentProvider,
     private readonly holdTurns: boolean,
+    private readonly options: HeldTurnOptions = {},
   ) {}
 
   async isAvailable(): Promise<boolean> {
@@ -3688,7 +3981,7 @@ class HeldTurnAgentClient implements AgentClient {
   }
 
   async createSession(): Promise<AgentSession> {
-    const session = new HeldTurnAgentSession(this.provider, this.holdTurns);
+    const session = new HeldTurnAgentSession(this.provider, this.holdTurns, this.options);
     this.sessions.push(session);
     return session;
   }
@@ -3708,21 +4001,21 @@ describe("send_agent_prompt MCP tool", () => {
 
   it("defaults agent-scoped prompts to background finish notifications", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
-    const parentAgent = {
+    const parentAgent = createManagedAgent({
       id: "parent-agent",
       cwd: existingCwd,
       workspaceId: "wks_parent",
       provider: "codex",
       currentModeId: "full-access",
-    } as ManagedAgent;
-    const childAgent = {
+    });
+    const childAgent = createManagedAgent({
       id: "child-agent",
       cwd: existingCwd,
       lifecycle: "running",
       currentModeId: null,
       availableModes: [],
       config: { title: "Child" },
-    } as ManagedAgent;
+    });
     spies.agentManager.getAgent.mockImplementation((agentId: string) => {
       if (agentId === "parent-agent") return parentAgent;
       if (agentId === "child-agent") return childAgent;
@@ -3753,16 +4046,20 @@ describe("send_agent_prompt MCP tool", () => {
 
     const response = await tool.handler(parsed.data as Record<string, unknown>);
 
-    expect(spies.agentManager.subscribe).toHaveBeenCalledTimes(1);
+    // The sender gets a queued receipt at once; the notification is armed at dispatch.
+    expect(response.structuredContent).toMatchObject({ deliveryStatus: "queued" });
+    expect(response.structuredContent.messageId).toEqual(expect.any(String));
+    await vi.waitFor(() => expect(childFinishSubscriptionCount(spies.agentManager)).toBe(1));
     expect(spies.agentManager.waitForAgentEvent).not.toHaveBeenCalled();
     expect(response.structuredContent.guidance).toBe(
-      "You will get notified when the prompted agent finishes, errors, or needs permission. Do not poll for status; continue with other work until the notification arrives.",
+      "Queued. The agent is idle, so your message starts a turn in about 2 seconds. You will get notified when the prompted agent finishes, errors, or needs permission. Do not poll for status; continue with other work until the notification arrives.",
     );
   });
 
   it("keeps top-level prompts blocking by default", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     spies.agentManager.getAgent.mockReturnValue({
+      labels: {},
       id: "child-agent",
       cwd: existingCwd,
       lifecycle: "idle",
@@ -3794,7 +4091,7 @@ describe("send_agent_prompt MCP tool", () => {
 
     await tool.handler(parsed.data as Record<string, unknown>);
 
-    expect(spies.agentManager.subscribe).not.toHaveBeenCalled();
+    expect(childFinishSubscriptionCount(spies.agentManager)).toBe(0);
     expect(spies.agentManager.waitForAgentEvent).toHaveBeenCalledWith(
       "child-agent",
       expect.objectContaining({ waitForActive: true }),
@@ -3803,21 +4100,21 @@ describe("send_agent_prompt MCP tool", () => {
 
   it("does not arm a finish notification for blocking agent-scoped prompts", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
-    const parentAgent = {
+    const parentAgent = createManagedAgent({
       id: "parent-agent",
       cwd: existingCwd,
       workspaceId: "wks_parent",
       provider: "codex",
       currentModeId: "full-access",
-    } as ManagedAgent;
-    const childAgent = {
+    });
+    const childAgent = createManagedAgent({
       id: "child-agent",
       cwd: existingCwd,
       lifecycle: "idle",
       currentModeId: null,
       availableModes: [],
       config: { title: "Child" },
-    } as ManagedAgent;
+    });
     spies.agentManager.getAgent.mockImplementation((agentId: string) => {
       if (agentId === "parent-agent") return parentAgent;
       if (agentId === "child-agent") return childAgent;
@@ -3839,7 +4136,7 @@ describe("send_agent_prompt MCP tool", () => {
       background: false,
     });
 
-    expect(spies.agentManager.subscribe).not.toHaveBeenCalled();
+    expect(childFinishSubscriptionCount(spies.agentManager)).toBe(0);
     expect(spies.agentManager.waitForAgentEvent).toHaveBeenCalledWith(
       "child-agent",
       expect.objectContaining({ waitForActive: true }),
@@ -3945,6 +4242,7 @@ describe("send_agent_prompt MCP tool", () => {
       const sent = await invokeToolWithParsedInput(registeredTool(server, "send_agent_prompt"), {
         agentId: childId,
         prompt: "Stop and reply instead",
+        activeTurnBehavior: "interrupt",
       });
       expect(sent.structuredContent).toMatchObject({
         success: true,
@@ -4005,12 +4303,17 @@ describe("send_agent_prompt MCP tool", () => {
         agentId: child.id,
         prompt: "Follow up",
       });
-      await vi.waitFor(() => expect(childSession.prompts).toEqual(["Follow up"]));
-      acknowledgeTurnStart();
+      await vi.waitFor(() =>
+        expect(childSession.prompts).toEqual([
+          expect.stringMatching(
+            /^<jagentdesk-system version="1" kind="agent-message" source-agent-id="[^"]+" message-id="[^"]+"[^>]*>\nFollow up\n<\/jagentdesk-system>$/,
+          ),
+        ]),
+      );
       const response = await pending;
-
-      expect(response.structuredContent).toMatchObject({ success: true, status: "running" });
-      expect(agentManager.getAgent(child.id)?.lifecycle).toBe("running");
+      expect(response.structuredContent).toMatchObject({ success: true, deliveryStatus: "queued" });
+      acknowledgeTurnStart();
+      await vi.waitFor(() => expect(agentManager.getAgent(child.id)?.lifecycle).toBe("running"));
 
       childSession.finishTurn();
       await vi.waitFor(() => {
@@ -4076,8 +4379,9 @@ describe("send_agent_prompt MCP tool", () => {
           prompt: "Fast reply",
         },
       );
+      expect(response.structuredContent).toMatchObject({ success: true, deliveryStatus: "queued" });
+      await vi.waitFor(() => expect(finished).toBe(true));
       unsubscribe();
-      expect(response.structuredContent).toMatchObject({ success: true, status: "idle" });
       await vi.waitFor(() => {
         const parentPrompts = parentClient.sessions[0]!.prompts;
         expect(parentPrompts).toHaveLength(1);
@@ -4473,6 +4777,7 @@ describe("create_schedule MCP tool", () => {
   it("inherits the caller provider, model, and features when provider is omitted", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     spies.agentManager.getAgent.mockReturnValue({
+      labels: {},
       id: "parent-agent",
       provider: "opencode",
       cwd: REPO_CWD,
@@ -4622,6 +4927,7 @@ describe("create_heartbeat MCP tool", () => {
   it("creates a self-targeted cron heartbeat", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     spies.agentManager.getAgent.mockReturnValue({
+      labels: {},
       id: "parent-agent",
       provider: "codex",
       cwd: REPO_CWD,
@@ -5446,6 +5752,36 @@ describe("speak MCP tool", () => {
 describe("agent snapshot MCP serialization", () => {
   const logger = createTestLogger();
 
+  it("queues agent-to-agent prompts by default and honors an explicit interrupt", async () => {
+    const { agentManager, agentStorage, spies } = createTestDeps();
+    spies.agentManager.getAgent.mockImplementation((agentId: string) =>
+      createManagedAgent({ id: agentId, cwd: "/tmp/workspace" }),
+    );
+    const server = await createAgentMcpServer({
+      agentManager,
+      agentStorage,
+      logger,
+      providerSnapshotManager: createClaudeOnlyManager(),
+      callerAgentId: "parent-agent",
+    });
+    const tool = registeredTool(server, "send_agent_prompt");
+
+    const steered = await tool.inputSchema.safeParseAsync({ agentId: "child-agent", prompt: "a" });
+    expect(steered.success).toBe(true);
+    await tool.handler({ ...(steered.data as Record<string, unknown>), notifyOnFinish: false });
+    await vi.waitFor(() => expect(spies.agentManager.streamAgent).toHaveBeenCalled());
+    expect(spies.agentManager.steerOrReplaceActiveTurn).not.toHaveBeenCalled();
+
+    spies.agentManager.steerOrReplaceActiveTurn.mockClear();
+    await tool.handler({
+      ...(steered.data as Record<string, unknown>),
+      notifyOnFinish: false,
+      activeTurnBehavior: "interrupt",
+    });
+    await vi.waitFor(() => expect(spies.agentManager.streamAgent).toHaveBeenCalled());
+    expect(spies.agentManager.steerOrReplaceActiveTurn).not.toHaveBeenCalled();
+  });
+
   it("returns compact list items from list_agents", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     spies.agentManager.listAgents = vi.fn().mockReturnValue([
@@ -5712,6 +6048,39 @@ describe("agent snapshot MCP serialization", () => {
     expect(new Set(agentIds)).toEqual(new Set(["in-cwd", "in-child-cwd", "stored-in-cwd"]));
   });
 
+  it("keeps an archived agent resumed for a history read out of list_agents", async () => {
+    const { agentManager, agentStorage, spies } = createTestDeps();
+    const now = new Date().toISOString();
+    spies.agentManager.getAgent.mockReturnValue(
+      createManagedAgent({ id: "caller-agent", cwd: "/tmp/workspace" }),
+    );
+    spies.agentManager.listAgents.mockReturnValue([
+      createManagedAgent({ id: "live-active", cwd: "/tmp/workspace" }),
+      createManagedAgent({ id: "live-archived", cwd: "/tmp/workspace" }),
+    ]);
+    spies.agentStorage.get.mockImplementation(async (agentId: string) =>
+      agentId === "live-archived"
+        ? createStoredRecord({ id: "live-archived", cwd: "/tmp/workspace", archivedAt: now })
+        : null,
+    );
+    spies.agentStorage.list.mockResolvedValue([]);
+
+    const server = await createAgentMcpServer({
+      agentManager,
+      agentStorage,
+      logger,
+      providerSnapshotManager: createClaudeOnlyManager(),
+      callerAgentId: "caller-agent",
+    });
+    const tool = registeredTool(server, "list_agents");
+
+    const byDefault = agentsOf(await tool.handler({})).map((agent) => agent.id);
+    expect(byDefault).toEqual(["live-active"]);
+
+    const withArchived = agentsOf(await tool.handler({ includeArchived: true }));
+    expect(withArchived.map((agent) => agent.id)).toEqual(["live-active"]);
+  });
+
   it("allows explicit cwd, status, archive, time, and limit filters for list_agents", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     const now = Date.now();
@@ -5766,11 +6135,10 @@ describe("agent snapshot MCP serialization", () => {
     expect(agentsOf(response).map((agent) => agent.id)).toEqual([
       "running-target",
       "old-running-target",
-      "recent-archived",
     ]);
   });
 
-  it("bounds includeArchived by default time window and limit", async () => {
+  it("keeps archived history out of discovery even with includeArchived", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     const now = Date.now();
     const recentArchivedRecords = Array.from({ length: 55 }, (_, index) =>
@@ -5797,17 +6165,10 @@ describe("agent snapshot MCP serialization", () => {
     const response = await tool.handler({ includeArchived: true });
     const agentIds = agentsOf(response).map((agent) => agent.id);
 
-    expect(agentIds).toHaveLength(50);
-    expect(agentIds).toEqual(
-      Array.from(
-        { length: 50 },
-        (_, index) => `recent-archived-${index.toString().padStart(2, "0")}`,
-      ),
-    );
-    expect(agentIds).not.toContain("old-archived");
+    expect(agentIds).toEqual([]);
   });
 
-  it("returns compact list items for stored archived agents", async () => {
+  it("returns compact list items for stored agents", async () => {
     const { agentManager, agentStorage, spies } = createTestDeps();
     const now = new Date().toISOString();
     spies.agentStorage.list.mockResolvedValue([
@@ -5816,7 +6177,7 @@ describe("agent snapshot MCP serialization", () => {
         cwd: REPO_CWD,
         updatedAt: now,
         lastActivityAt: now,
-        archivedAt: now,
+        archivedAt: null,
         features: [
           {
             type: "toggle",
@@ -5851,7 +6212,7 @@ describe("agent snapshot MCP serialization", () => {
       createdAt: "2026-04-11T00:00:00.000Z",
       updatedAt: now,
       lastUserMessageAt: null,
-      archivedAt: now,
+      archivedAt: null,
       requiresAttention: false,
       attentionReason: null,
       attentionTimestamp: null,
@@ -6118,4 +6479,31 @@ describe("agent snapshot MCP serialization", () => {
     expect(content).not.toContain("second answer");
     expect(content).not.toContain("first answer");
   });
+});
+
+it("list_hosts returns a record accepted by the real MCP client", async () => {
+  const { agentManager, agentStorage } = createTestDeps();
+  const server = await createAgentMcpServer({
+    agentManager,
+    agentStorage,
+    providerSnapshotManager: createOpenCodeManager().manager,
+    logger: createTestLogger(),
+    hosts: () => ({
+      directory: async () => ({ self: { serverId: "host-a", label: "Build A" }, hosts: [] }),
+      async use() {
+        throw new Error("This test only lists hosts");
+      },
+    }),
+  });
+  const client = await connectInMemoryMcpClient(server);
+  try {
+    const response = await client.callTool({ name: "list_hosts", arguments: {} });
+    expect(response.isError).not.toBe(true);
+    expect(response.structuredContent).toEqual({
+      hosts: [{ serverId: "host-a", label: "Build A", status: "connected" }],
+    });
+  } finally {
+    await client.close();
+    await server.close();
+  }
 });

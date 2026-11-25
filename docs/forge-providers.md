@@ -4,6 +4,11 @@ JAgentDesk's forge layer is a registry/manifest system. A forge is a runtime con
 shared protocol messages carry neutral/open facts, the server adapter owns
 behavior, and the app owns bundled presentation/runtime interpretation.
 
+This layer is core: workspace PR/MR status, checks, merge and `forge.search.request` use it
+whether or not any built-in is on. The Forge Hub screen and the `forge_*` agent tools are the
+`forge-hub` [built-in](builtin-plugins.md) in `plugins/forge-hub/`; it addresses repositories by
+forge, owner and name through the forge CLIs and does not go through `ForgeService`.
+
 The maintainer litmus test is the rule of thumb:
 
 > Adding a new forge means adding files in a new directory/module that implement
@@ -103,6 +108,12 @@ allowlist. Self-hosted detection is a trust gate: JAgentDesk only talks to a for
 host that is either a known cloud host or one the CLI is already authenticated
 to. Adapter probes must not make anonymous HTTP requests to remote-derived
 hosts, and adapters must not route credentials to an unauthenticated host.
+
+Reuse the daemon's shared `ForgeResolver` for workspace reads and agent change
+request watches. Separate adapters duplicate per-host polling budgets and miss
+shared invalidations. Watches use the existing CLI login; do not add a watch
+credential store. Keep unsubscribe usable from its saved address when the forge
+or its CLI is unavailable.
 
 ## App
 

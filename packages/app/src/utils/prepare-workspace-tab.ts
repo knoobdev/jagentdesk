@@ -2,6 +2,7 @@ import { generateDraftId } from "@/stores/draft-keys";
 import { buildWorkspaceTabPersistenceKey, type WorkspaceTabTarget } from "@/workspace-tabs/model";
 
 export interface PrepareWorkspaceTabInput {
+  asTab?: boolean;
   serverId: string;
   workspaceId: string;
   target: WorkspaceTabTarget;

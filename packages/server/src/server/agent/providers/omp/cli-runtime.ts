@@ -1,14 +1,20 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { Logger } from "pino";
+import { z } from "zod";
 
 import type { ProviderRuntimeSettings } from "../../provider-launch-config.js";
-import { JsonlRpcProcess, type JsonlRpcLaunch } from "../jsonl-rpc-process.js";
+import {
+  JSONL_RPC_NO_TIMEOUT,
+  JsonlRpcProcess,
+  type JsonlRpcLaunch,
+} from "../jsonl-rpc-process.js";
 import { establishOmpProtocol } from "./protocol-session.js";
 import {
   buildOmpLaunch,
   type OmpRuntime,
   type OmpRuntimeLaunch,
   type OmpRuntimeSession,
+  type OmpPromptInput,
   type OmpStartSessionInput,
 } from "./runtime.js";
 import {
@@ -21,7 +27,7 @@ import {
   OmpModelsResultSchema,
   OmpPromptAckSchema,
   OmpRpcCommandSchema,
-  OmpRuntimeEventSchema,
+  parseOmpRuntimeEvent,
   OmpSessionStateSchema,
   OmpSessionStatsSchema,
   type OmpThinkingLevel,
@@ -113,9 +119,9 @@ class OmpCliRuntimeSession implements OmpRuntimeSession {
     private readonly commandsRpcName: "get_available_commands",
   ) {
     process.onMessage((message) => {
-      const event = OmpRuntimeEventSchema.safeParse(message);
-      if (event.success) {
-        this.emit(event.data);
+      const event = parseOmpRuntimeEvent(message);
+      if (event) {
+        this.emit(event);
       }
     });
     process.onExit(({ error }) => {
@@ -130,24 +136,25 @@ class OmpCliRuntimeSession implements OmpRuntimeSession {
     };
   }
 
-  async prompt(
-    message: string,
-    images?: Array<{ type: "image"; data: string; mimeType: string }>,
-  ): Promise<OmpPromptAck> {
+  async prompt({ message, images, streamingBehavior }: OmpPromptInput): Promise<OmpPromptAck> {
     const { id: requestId, promise } = this.process.startRequest({
       type: "prompt",
       message,
       ...(images?.length ? { images } : {}),
+      ...(streamingBehavior ? { streamingBehavior: streamingBehavior } : {}),
     });
     const ack = OmpPromptAckSchema.parse(await promise) ?? {};
     return { requestId, ...ack };
   }
 
   async compact(customInstructions?: string): Promise<void> {
-    await this.request({
-      type: "compact",
-      ...(customInstructions ? { customInstructions } : {}),
-    });
+    await this.request(
+      {
+        type: "compact",
+        ...(customInstructions ? { customInstructions } : {}),
+      },
+      JSONL_RPC_NO_TIMEOUT,
+    );
   }
 
   async setAutoCompaction(enabled: boolean): Promise<void> {
@@ -160,6 +167,11 @@ class OmpCliRuntimeSession implements OmpRuntimeSession {
 
   async getState(): Promise<OmpSessionState> {
     return OmpSessionStateSchema.parse(await this.request({ type: "get_state" }));
+  }
+
+  async setFastMode(enabled: boolean): Promise<{ enabled: boolean; active: boolean }> {
+    const result = await this.request({ type: "set_fast_mode", enabled });
+    return z.object({ enabled: z.boolean(), active: z.boolean() }).parse(result);
   }
 
   async getMessages(): Promise<OmpAgentMessage[]> {
@@ -255,15 +267,11 @@ class OmpCliRuntimeSession implements OmpRuntimeSession {
     return data.messages ?? [];
   }
 
-  steer(message: string, images?: Array<{ type: "image"; data: string; mimeType: string }>): void {
-    this.process.send({ type: "steer", message, ...(images?.length ? { images } : {}) });
-  }
-
-  followUp(
+  async steer(
     message: string,
     images?: Array<{ type: "image"; data: string; mimeType: string }>,
-  ): void {
-    this.process.send({ type: "follow_up", message, ...(images?.length ? { images } : {}) });
+  ): Promise<void> {
+    await this.request({ type: "steer", message, ...(images?.length ? { images } : {}) });
   }
 
   async handoff(customInstructions?: string): Promise<void> {

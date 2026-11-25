@@ -6,8 +6,6 @@ import type { SessionOutboundMessage } from "@jagentdesk/protocol/messages";
 import { clearArchiveAgentPending } from "@/hooks/use-archive-agent";
 import { queryClient } from "@/data/query-client";
 import { acceptAgentDirectoryUpdate } from "@/utils/agent-directory-update-policy";
-import { buildDraftStoreKey } from "@/stores/draft-keys";
-import { useDraftStore } from "@/stores/draft-store";
 import { getInitDeferred, getInitKey, rejectInitDeferred } from "@/utils/agent-initialization";
 
 type AgentDirectoryFetchEntry = FetchAgentsEntry;
@@ -128,9 +126,6 @@ export function removeAgentDirectoryReplica(serverId: string, agentId: string): 
     const agentLastActivity = new Map(state.agentLastActivity);
     agentLastActivity.delete(agentId);
     return { ...state, agentLastActivity };
-  });
-  useDraftStore.getState().clearDraftInput({
-    draftKey: buildDraftStoreKey({ serverId, agentId }),
   });
   const initKey = getInitKey(serverId, agentId);
   if (getInitDeferred(initKey)) {

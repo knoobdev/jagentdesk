@@ -1,4 +1,11 @@
 const shared = {
+  timelineUnavailable: "Plugin timeline item unavailable.",
+  screens: {
+    backToPlugins: "Back to plugins",
+    offline: "Connect to this host to open plugin settings.",
+    update: "Update this host to use plugin settings.",
+    unavailable: "This plugin settings screen is unavailable.",
+  },
   logs: {
     action: "Logs",
     title: "Logs: {{id}}",
@@ -60,6 +67,7 @@ export const pluginSettings = {
   },
   ar: {
     ...shared,
+    timelineUnavailable: "عنصر المخطط الزمني للإضافة غير متاح.",
     title: "الإضافات",
     trustedTitle: "الإضافات تعليمات برمجية موثوقة",
     trustedDescription:
@@ -107,6 +115,7 @@ export const pluginSettings = {
   },
   es: {
     ...shared,
+    timelineUnavailable: "Elemento de cronología del complemento no disponible.",
     title: "Plugins",
     trustedTitle: "Los plugins son código de confianza",
     trustedDescription:
@@ -154,6 +163,7 @@ export const pluginSettings = {
   },
   fr: {
     ...shared,
+    timelineUnavailable: "Élément de chronologie du plugin indisponible.",
     title: "Plugins",
     trustedTitle: "Les plugins sont du code de confiance",
     trustedDescription:
@@ -201,6 +211,7 @@ export const pluginSettings = {
   },
   ja: {
     ...shared,
+    timelineUnavailable: "プラグインのタイムライン項目は利用できません。",
     title: "プラグイン",
     trustedTitle: "プラグインは信頼済みコードです",
     trustedDescription:
@@ -248,6 +259,7 @@ export const pluginSettings = {
   },
   "pt-BR": {
     ...shared,
+    timelineUnavailable: "Item da linha do tempo do plugin indisponível.",
     title: "Plugins",
     trustedTitle: "Plugins são código confiável",
     trustedDescription:
@@ -295,6 +307,7 @@ export const pluginSettings = {
   },
   ru: {
     ...shared,
+    timelineUnavailable: "Элемент хронологии плагина недоступен.",
     title: "Плагины",
     trustedTitle: "Плагины — доверенный код",
     trustedDescription:
@@ -342,6 +355,7 @@ export const pluginSettings = {
   },
   vi: {
     ...shared,
+    timelineUnavailable: "Không thể hiển thị mục dòng thời gian của tiện ích.",
     title: "Plugin",
     trustedTitle: "Plugin là mã đáng tin cậy",
     trustedDescription:
@@ -389,6 +403,7 @@ export const pluginSettings = {
   },
   "zh-CN": {
     ...shared,
+    timelineUnavailable: "插件时间线项目不可用。",
     title: "插件",
     trustedTitle: "插件是受信任的代码",
     trustedDescription: "它们会在此主机和应用内运行，且没有隔离。请仅安装你信任的代码。",

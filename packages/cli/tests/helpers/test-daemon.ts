@@ -346,6 +346,8 @@ export async function runJAgentDeskCli(
     timeout?: number;
     cwd?: string;
     env?: NodeJS.ProcessEnv;
+    /** Close the reading end of the CLI's stdout, as a launcher that discards output does. */
+    closedStdout?: boolean;
   },
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const timeout = options?.timeout ?? 60000;
@@ -370,6 +372,10 @@ export async function runJAgentDeskCli(
 
     const stdout = createOutputCapture();
     const stderr = createOutputCapture();
+
+    if (options?.closedStdout) {
+      proc.stdout?.destroy();
+    }
 
     proc.stdout?.on("data", (data) => {
       appendOutputCapture(stdout, data);

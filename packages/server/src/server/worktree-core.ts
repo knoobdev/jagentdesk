@@ -1,9 +1,14 @@
+import { runGitCommand } from "../utils/run-git-command.js";
+import type { PluginWorktreeCreateRequest } from "@jagentdesk/plugin/server";
+import type { PluginLifecycle } from "./plugins/lifecycle/index.js";
 import { createNameId } from "mnemonic-id";
 
 import type { ForgeService } from "../services/forge-service.js";
 import {
   createWorktree,
+  resolveDefaultWorktreePath,
   resolveExistingWorktreeForSlug,
+  fetchFirstAvailableRef,
   slugify,
   validateBranchSlug,
   type CreatedWorktree,
@@ -36,6 +41,7 @@ export interface CreateWorktreeCoreInput {
 }
 
 export interface CreateWorktreeCoreDeps {
+  lifecycle?: Pick<PluginLifecycle, "before">;
   github: ForgeService;
   workspaceGitService?: Pick<
     WorkspaceGitService,
@@ -72,7 +78,11 @@ export async function createWorktreeCore(
       githubPrNumber: input.githubPrNumber,
       worktreeSlug: requestedWorktreeSlug,
     };
-  } else if (input.checkoutSource !== undefined || input.githubPrNumber !== undefined) {
+  } else if (
+    input.action !== "branch-off" &&
+    (input.checkoutSource !== undefined || input.githubPrNumber !== undefined)
+  ) {
+    // A change request with no action is checked out, as clients did before `action` existed.
     intentInput = {
       checkoutSource: input.checkoutSource,
       githubPrNumber: input.githubPrNumber,
@@ -84,16 +94,20 @@ export async function createWorktreeCore(
     intentInput = {
       action: "branch-off",
       refName: input.refName,
+      checkoutSource: input.checkoutSource,
+      githubPrNumber: input.githubPrNumber,
       branchName: requestedBranchName,
       worktreeSlug,
     };
   }
 
   const forge = await resolveForge(repoRoot, deps, intentInput);
-  const intent = await resolveWorktreeCreationIntent(intentInput, repoRoot, {
+  let intent = await resolveWorktreeCreationIntent(intentInput, repoRoot, {
     forge: forge.forge,
     forgeService: forge.service,
     resolveDefaultBranch: (root) => resolveDefaultBranch(root, deps),
+    fetchRef: ({ repoRoot: cwd, sources, destination }) =>
+      fetchFirstAvailableRef({ cwd, sources, destination }),
   });
   let normalizedSlug: string;
 
@@ -124,7 +138,7 @@ export async function createWorktreeCore(
     return {
       worktree: {
         ...existingWorktree,
-        comparisonBaseRef: resolveReusedWorktreeComparisonBase(
+        comparisonBaseRef: await resolveReusedWorktreeComparisonBase(
           intent,
           existingWorktree.worktreePath,
         ),
@@ -135,10 +149,33 @@ export async function createWorktreeCore(
     };
   }
 
+  const defaultPath = await resolveDefaultWorktreePath({
+    cwd: repoRoot,
+    jagentdeskHome: input.jagentdeskHome,
+    worktreesRoot: input.worktreesRoot,
+    worktreeSlug: normalizedSlug,
+  });
+  const { stdout: sourceRoot } = await runGitCommand(["rev-parse", "--show-toplevel"], {
+    cwd: input.cwd,
+  });
+  const sourceCheckout = sourceRoot.trim();
+  const request = describeCreationRequest(intent, {
+    repoRoot,
+    sourceCheckout,
+    slug: normalizedSlug,
+    path: defaultPath,
+  });
+  const transformed = deps.lifecycle
+    ? await deps.lifecycle.before("worktree.create.before", request)
+    : request;
+  normalizedSlug = validateWorktreeSlug(transformed.slug);
+  intent = creationIntentFromRequest(transformed, intent);
+
   return {
     worktree: await createWorktree({
       cwd: repoRoot,
       worktreeSlug: normalizedSlug,
+      worktreePath: transformed.path,
       source: intent,
       runSetup: input.runSetup ?? true,
       jagentdeskHome: input.jagentdeskHome,
@@ -147,6 +184,72 @@ export async function createWorktreeCore(
     intent,
     repoRoot,
     created: true,
+  };
+}
+
+function describeCreationRequest(
+  intent: WorktreeCreationIntent,
+  placement: Pick<PluginWorktreeCreateRequest, "repoRoot" | "sourceCheckout" | "slug" | "path">,
+): PluginWorktreeCreateRequest {
+  if (intent.kind === "branch-off")
+    return {
+      ...placement,
+      kind: intent.kind,
+      branch: intent.branchName,
+      baseRef: intent.baseBranch,
+    };
+  if (intent.kind === "checkout-branch")
+    return { ...placement, kind: intent.kind, branch: intent.branchName };
+  const { localBranchName, baseRefName, ...facts } = intent;
+  return {
+    ...placement,
+    ...facts,
+    branch: localBranchName ?? intent.headRef,
+    baseRef: baseRefName,
+  };
+}
+
+function creationIntentFromRequest(
+  request: PluginWorktreeCreateRequest,
+  original: WorktreeCreationIntent,
+): WorktreeCreationIntent {
+  if (request.kind === "branch-off") {
+    return {
+      kind: request.kind,
+      branchName: request.branch,
+      baseBranch: request.baseRef,
+      // PR heads can differ from their comparison base. A hook that changes only
+      // placement or branch keeps the fetched head; a new base replaces it.
+      ...(original.kind === "branch-off" &&
+      original.baseBranch === request.baseRef &&
+      original.startPoint
+        ? { startPoint: original.startPoint }
+        : {}),
+    };
+  }
+  if (request.kind === "checkout-branch") {
+    return {
+      kind: request.kind,
+      branchName: request.branch,
+    };
+  }
+  const {
+    repoRoot: _repoRoot,
+    sourceCheckout: _checkout,
+    slug: _slug,
+    path: _path,
+    branch,
+    baseRef,
+    ...facts
+  } = request;
+  const keepLocalBranchName =
+    branch !== request.headRef ||
+    ((original.kind === "checkout-change-request" || original.kind === "checkout-github-pr") &&
+      original.localBranchName !== undefined);
+  return {
+    ...facts,
+    ...(keepLocalBranchName ? { localBranchName: branch } : {}),
+    baseRefName: baseRef,
   };
 }
 
@@ -204,12 +307,12 @@ function normalizeWorktreeSlug(value: string): string {
 
 // A reused worktree keeps the comparison base recorded when it was created; a worktree
 // without JAgentDesk metadata falls back to the base the request named.
-function resolveReusedWorktreeComparisonBase(
+async function resolveReusedWorktreeComparisonBase(
   intent: WorktreeCreationIntent,
   worktreePath: string,
-): string | null {
+): Promise<string | null> {
   if (intent.kind === "checkout-branch") return null;
-  const metadata = readJAgentDeskWorktreeMetadata(worktreePath);
+  const metadata = await readJAgentDeskWorktreeMetadata(worktreePath);
   if (metadata) return metadata.baseRef ?? metadata.baseRefName;
   return normalizeBaseRefName(
     intent.kind === "branch-off" ? intent.baseBranch : intent.baseRefName,

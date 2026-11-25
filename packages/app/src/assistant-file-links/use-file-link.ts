@@ -1,9 +1,11 @@
+import { useAgentCommandHints, matchCommandLink } from "@/agent-commands";
 import { useCallback, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useStableEvent } from "@/hooks/use-stable-event";
 import type { OpenFileDisposition } from "@/workspace/file-open";
 import { openExternalUrl } from "@/utils/open-external-url";
+import { formatFileLinkTooltipPath } from "./tooltip-path";
 import type { InlinePathTarget } from "./parse";
 import {
   useAssistantFileLinkResolverContext,
@@ -14,10 +16,12 @@ import {
   fetchDaemonResolution,
   type AssistantFileLinkResolution,
   type AssistantFileLinkSource,
+  type AssistantFileLinkContext,
 } from "./resolver";
 
 export interface UseFileLinkResult {
   target: InlinePathTarget | null;
+  tooltipPath: string | null;
   onHoverIn: () => void;
   onPress: () => void;
   onAuxPress: () => void;
@@ -30,29 +34,39 @@ export interface AssistantFileLinkActions {
   canResolveFile(source: AssistantFileLinkSource): boolean;
 }
 
+interface AssistantFileLinkLookupKey {
+  query: string;
+  path: string;
+  lineStart: number | null;
+  lineEnd: number | null;
+}
+
 type AssistantFileLinkQueryKey = readonly [
   "assistantFileLink",
   string | null,
   string | null,
-  string,
+  AssistantFileLinkLookupKey | null,
 ];
 
-const DISABLED_QUERY_KEY = ["assistantFileLink", null, null, ""] as const;
+const DISABLED_QUERY_KEY = ["assistantFileLink", null, null, null] as const;
 
 export function useFileLink(source: AssistantFileLinkSource): UseFileLinkResult {
+  const hints = useAgentCommandHints();
   const { t } = useTranslation();
   const context = useAssistantFileLinkResolverContext();
   const queryClient = useQueryClient();
   const stableSource = useStableSource(source);
   const activeConfig = context.configRef.current;
   const workspaceRoot = activeConfig.workspaceRoot;
+  const relativePathBase = activeConfig.relativePathBase;
   const serverId = activeConfig.serverId;
   const resolution = useMemo(
     () =>
       classifyForResolution(stableSource, {
         workspaceRoot,
+        relativePathBase,
       }),
-    [stableSource, workspaceRoot],
+    [stableSource, workspaceRoot, relativePathBase],
   );
   const queryKey = useMemo(
     () =>
@@ -60,7 +74,7 @@ export function useFileLink(source: AssistantFileLinkSource): UseFileLinkResult 
         ? assistantFileLinkQueryKey({
             serverId,
             workspaceRoot,
-            ambiguousQuery: resolution.ambiguousQuery,
+            resolution,
           })
         : DISABLED_QUERY_KEY,
     [resolution, serverId, workspaceRoot],
@@ -87,6 +101,13 @@ export function useFileLink(source: AssistantFileLinkSource): UseFileLinkResult 
 
   const open = useStableEvent(
     (nextSource: AssistantFileLinkSource, disposition: OpenFileDisposition) => {
+      const command =
+        hints &&
+        matchCommandLink(nextSource.href, nextSource.sourceType ?? "markdown", hints.names);
+      if (command) {
+        hints.insert(command);
+        return;
+      }
       openAssistantFileLink({
         source: nextSource,
         disposition,
@@ -120,6 +141,7 @@ export function useFileLink(source: AssistantFileLinkSource): UseFileLinkResult 
   const onPress = useStableEvent(() => {
     open(stableSource, "main");
   });
+
   const onAuxPress = useStableEvent(() => {
     open(stableSource, "side");
   });
@@ -131,13 +153,15 @@ export function useFileLink(source: AssistantFileLinkSource): UseFileLinkResult 
     return query.data ?? null;
   }, [query.data, resolution]);
 
+  const tooltipPath = target ? formatFileLinkTooltipPath({ target, workspaceRoot }) : null;
   return useMemo(
-    () => ({ target, onHoverIn, onPress, onAuxPress, open }),
-    [target, onHoverIn, onPress, onAuxPress, open],
+    () => ({ target, tooltipPath, onHoverIn, onPress, onAuxPress, open }),
+    [target, tooltipPath, onHoverIn, onPress, onAuxPress, open],
   );
 }
 
 export function useAssistantFileLinkActions(): AssistantFileLinkActions {
+  const hints = useAgentCommandHints();
   const context = useAssistantFileLinkResolverContext();
   const actionLink = useFileLink(ACTION_LINK_SOURCE);
 
@@ -148,13 +172,17 @@ export function useAssistantFileLinkActions(): AssistantFileLinkActions {
   );
   const canOpen = useCallback(
     (source: AssistantFileLinkSource) =>
-      canOpenAssistantFileLink(source, context.configRef.current.workspaceRoot),
-    [context.configRef],
+      Boolean(
+        hints && matchCommandLink(source.href, source.sourceType ?? "markdown", hints.names),
+      ) || canOpenAssistantFileLink(source, context.configRef.current),
+    [context.configRef, hints],
   );
   const canResolveFile = useCallback(
     (source: AssistantFileLinkSource) =>
-      canResolveAssistantFileLinkToFile(source, context.configRef.current.workspaceRoot),
-    [context.configRef],
+      Boolean(
+        hints && matchCommandLink(source.href, source.sourceType ?? "markdown", hints.names),
+      ) || canResolveAssistantFileLinkToFile(source, context.configRef.current),
+    [context.configRef, hints],
   );
 
   return useMemo(() => ({ open, canOpen, canResolveFile }), [open, canOpen, canResolveFile]);
@@ -170,6 +198,7 @@ function openAssistantFileLink(input: {
   const capturedConfig = input.context.configRef.current;
   const capturedResolution = classifyForResolution(input.source, {
     workspaceRoot: capturedConfig.workspaceRoot,
+    relativePathBase: capturedConfig.relativePathBase,
   });
 
   if (capturedResolution.kind === "resolved") {
@@ -186,7 +215,7 @@ function openAssistantFileLink(input: {
   const capturedQueryKey = assistantFileLinkQueryKey({
     serverId: capturedConfig.serverId,
     workspaceRoot: capturedConfig.workspaceRoot,
-    ambiguousQuery: capturedResolution.ambiguousQuery,
+    resolution: capturedResolution,
   });
 
   const run = async () => {
@@ -227,17 +256,17 @@ function openAssistantFileLink(input: {
 
 function canOpenAssistantFileLink(
   source: AssistantFileLinkSource,
-  workspaceRoot: string | undefined,
+  context: AssistantFileLinkContext,
 ): boolean {
-  const resolution = classifyForResolution(source, { workspaceRoot });
+  const resolution = classifyForResolution(source, context);
   return resolution.kind === "needsLookup" || resolution.value.kind !== "ignored";
 }
 
 function canResolveAssistantFileLinkToFile(
   source: AssistantFileLinkSource,
-  workspaceRoot: string | undefined,
+  context: AssistantFileLinkContext,
 ): boolean {
-  const resolution = classifyForResolution(source, { workspaceRoot });
+  const resolution = classifyForResolution(source, context);
   return resolution.kind === "needsLookup" || resolution.value.kind === "file";
 }
 
@@ -252,13 +281,18 @@ function useStableSource(source: AssistantFileLinkSource): AssistantFileLinkSour
 function assistantFileLinkQueryKey(input: {
   serverId?: string;
   workspaceRoot?: string;
-  ambiguousQuery: string;
+  resolution: Extract<AssistantFileLinkResolution, { kind: "needsLookup" }>;
 }): AssistantFileLinkQueryKey {
   return [
     "assistantFileLink",
     input.serverId ?? null,
     input.workspaceRoot ?? null,
-    input.ambiguousQuery,
+    {
+      query: input.resolution.ambiguousQuery,
+      path: input.resolution.target.path,
+      lineStart: input.resolution.target.lineStart ?? null,
+      lineEnd: input.resolution.target.lineEnd ?? null,
+    },
   ];
 }
 

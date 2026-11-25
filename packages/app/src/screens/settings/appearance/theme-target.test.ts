@@ -19,17 +19,17 @@ const paper = {
 } as PluginThemeOption;
 
 describe("resolveThemeTarget", () => {
-  it("keeps ClickUp light whatever the system appearance; ClickUp Dark is its own choice", () => {
-    const base = { preference: "clickup" as const, pluginThemeId: null, pluginOptions: [] };
+  it("keeps Gumloop light whatever the system appearance; Gumloop Dark is its own choice", () => {
+    const base = { preference: "gumloop" as const, pluginThemeId: null, pluginOptions: [] };
     for (const systemScheme of ["light", "dark", null] as const) {
       expect(resolveThemeTarget({ ...base, systemScheme })).toEqual({
         kind: "static",
-        key: "clickupLight",
+        key: "gumloopLight",
       });
     }
     expect(
-      resolveThemeTarget({ ...base, preference: "clickupDark", systemScheme: "light" }),
-    ).toEqual({ kind: "static", key: "clickupDark" });
+      resolveThemeTarget({ ...base, preference: "gumloopDark", systemScheme: "light" }),
+    ).toEqual({ kind: "static", key: "gumloopDark" });
   });
 
   it("keeps the built-in themes and System selectable", () => {
@@ -69,6 +69,6 @@ describe("resolveThemeTarget", () => {
         pluginOptions: [],
         systemScheme: "light",
       }),
-    ).toEqual({ kind: "static", key: "clickupLight" });
+    ).toEqual({ kind: "static", key: "gumloopLight" });
   });
 });

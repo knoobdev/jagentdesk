@@ -1,4 +1,3 @@
-import { PluginClientStateProvider } from "@jagentdesk/plugin/client/host";
 import type {
   PluginButtonBehavior,
   PluginButtonIcon,
@@ -6,10 +5,16 @@ import type {
   PluginHostProps,
 } from "@jagentdesk/plugin/client";
 import type { PluginTheme } from "@jagentdesk/plugin";
-import { useCallback, useMemo, useSyncExternalStore, type ReactNode } from "react";
+import {
+  useCallback,
+  useMemo,
+  useSyncExternalStore,
+  type ReactNode,
+  type ReactElement,
+} from "react";
 import { Platform, Pressable, Text, View, useWindowDimensions } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { AlertCircle, ChevronDown, MoreHorizontal } from "lucide-react-native";
+import { AlertCircle, ChevronDown, ChevronUp, MoreHorizontal } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import {
   MenuRoot,
@@ -34,7 +39,7 @@ import { ToastApiProvider, useToast } from "@/contexts/toast-context";
 import { useHostRuntimeClient, useHosts } from "@/runtime/host-runtime";
 import type { Theme } from "@/styles/theme";
 import { createPluginClientStateSource } from "../client-state/source";
-import { Icon } from "../icons";
+import { Icon, pluginIconComponent } from "../icons";
 import { PluginRuntimeBoundary } from "../runtime-boundary";
 import { SurfaceErrorBoundary } from "../surface-error-boundary";
 import { toPluginTheme } from "../theme";
@@ -78,8 +83,12 @@ function resolvePlatform(): PluginHostProps["layout"]["platform"] {
 function ButtonEnvironment({ view, children }: { view: ButtonView; children: ReactNode }) {
   return (
     <ToastApiProvider api={view.toast}>
-      <PluginRuntimeBoundary plugin={view.entry.installation} client={view.client}>
-        <PluginClientStateProvider source={view.state}>{children}</PluginClientStateProvider>
+      <PluginRuntimeBoundary
+        plugin={view.entry.installation}
+        client={view.client}
+        stateSource={view.state}
+      >
+        {children}
       </PluginRuntimeBoundary>
     </ToastApiProvider>
   );
@@ -111,7 +120,8 @@ function renderCustomIcon(
   size: number,
   color: string,
 ) {
-  return <CustomIcon {...view.props} size={size} color={color} />;
+  const Component = pluginIconComponent(CustomIcon);
+  return <Component {...view.props} size={size} color={color} />;
 }
 
 function pressButton(view: ButtonView, path: readonly string[]) {
@@ -202,7 +212,7 @@ function ButtonBody({
         behavior={item.behavior}
         disabled={view.entry.pending || view.entry.button.disabled || item.disabled === true}
         path={itemPath}
-        pageId={buttonPageId(view, itemPath)}
+        pageId={buttonPageId(view.entry.key, itemPath)}
       />
     );
   });
@@ -226,14 +236,19 @@ function ButtonSurfaceBody({
   );
 }
 
-function buttonPageId(view: ButtonView, path: readonly string[]): string {
-  return [view.entry.key, ...path].join("/");
+// Prefixed so plugin pages can share a surface with the host's own pages.
+function buttonPageId(key: number, path: readonly string[]): string {
+  return ["plugin-button", key, ...path].join("/");
 }
 
+type RenderButtonPage = (behavior: PluginButtonBehavior, path: readonly string[]) => ReactNode;
+
+/** A page for every menu and popover item below `behavior`, depth first. */
 function buttonPages(
-  view: ButtonView,
+  key: number,
   behavior: PluginButtonBehavior,
-  path: readonly string[] = [],
+  path: readonly string[],
+  render: RenderButtonPage,
 ): MenuPageDefinition[] {
   if (behavior.kind !== "menu") return [];
   return behavior.items.flatMap((item) => {
@@ -242,12 +257,12 @@ function buttonPages(
     const itemPath = [...path, item.id];
     return [
       {
-        id: buttonPageId(view, itemPath),
+        id: buttonPageId(key, itemPath),
         title: item.title,
         hoverIntent: item.behavior.kind === "menu",
-        content: <ButtonSurfaceBody view={view} behavior={item.behavior} path={itemPath} />,
+        content: render(item.behavior, itemPath),
       },
-      ...buttonPages(view, item.behavior, itemPath),
+      ...buttonPages(key, item.behavior, itemPath, render),
     ];
   });
 }
@@ -258,7 +273,8 @@ function ButtonControl({ view }: { view: ButtonView }) {
   const composer = entry.placement === "composer";
   const disabled = button.disabled || entry.pending;
   const expanded = button.behavior.kind !== "action";
-  const chevron = !composer && !props.layout.compact && expanded;
+  const chevron = expanded && (composer || !props.layout.compact);
+  const Chevron = composer ? ChevronUp : ChevronDown;
   let label = button.label;
   if (composer) label = button.label ?? button.title;
   else if (props.layout.compact) label = undefined;
@@ -295,7 +311,7 @@ function ButtonControl({ view }: { view: ButtonView }) {
       ) : null}
       {chevron ? (
         <View testID="plugin-button-chevron">
-          <ChevronDown size={12} color={props.theme.colors.foregroundMuted} />
+          <Chevron size={12} color={props.theme.colors.foregroundMuted} />
         </View>
       ) : null}
     </>
@@ -326,7 +342,13 @@ function ButtonControl({ view }: { view: ButtonView }) {
       {contents}
     </Pressable>
   );
-  const pages = useMemo(() => buttonPages(view, button.behavior), [view, button.behavior]);
+  const pages = useMemo(
+    () =>
+      buttonPages(entry.key, button.behavior, ROOT_PATH, (behavior, path) => (
+        <ButtonSurfaceBody view={view} behavior={behavior} path={path} />
+      )),
+    [view, entry.key, button.behavior],
+  );
   return (
     <MenuRoot compactMode="sheet" open={entry.open} onOpenChange={setOpen}>
       <Tooltip enabledOnMobile={false}>
@@ -447,85 +469,107 @@ function PluginButtonHost({
 
 const ThemedPluginButton = withUnistyles(PluginButtonHost);
 
-// Overflow rows keep their own plugin runtime; a menu can contain several installations.
-function OverflowButton({ view }: { view: ButtonView }) {
-  const { button } = view.entry;
-  return (
-    <ButtonMenuItem
-      view={view}
-      title={button.title}
-      icon={button.icon}
-      behavior={button.behavior}
-      disabled={button.disabled || view.entry.pending}
-      path={ROOT_PATH}
-      pageId={buttonPageId(view, [])}
-    />
+/**
+ * Each row and page of a shared menu resolves its own installation's runtime: one menu can hold
+ * buttons from several plugins, and none of them may run through another's host client.
+ */
+function useMenuButtonView(entry: RegisteredPluginButton, theme: PluginTheme): ButtonView | null {
+  const client = useHostRuntimeClient(entry.installation.serverId);
+  const toast = useToast();
+  const compact = useIsCompactFormFactor();
+  const hosts = useHosts();
+  const serverId = entry.installation.serverId;
+  const hostLabel = hosts.find((host) => host.serverId === serverId)?.label ?? serverId;
+  return useMemo(
+    () => createButtonView({ entry, client, toast, compact, hostLabel, theme }),
+    [entry, client, toast, compact, hostLabel, theme],
   );
 }
 
-function OverflowPages({
-  entries,
-  compact,
-  hostLabel,
+function MenuButtonRow({ entry, theme }: { entry: RegisteredPluginButton; theme: PluginTheme }) {
+  const view = useMenuButtonView(entry, theme);
+  if (!view) return null;
+  const { button } = entry;
+  return (
+    <SurfaceErrorBoundary installation={entry.installation} Surface={button.icon}>
+      <ButtonEnvironment view={view}>
+        <ButtonMenuItem
+          view={view}
+          title={button.title}
+          icon={button.icon}
+          behavior={button.behavior}
+          disabled={button.disabled || entry.pending}
+          path={ROOT_PATH}
+          pageId={buttonPageId(entry.key, ROOT_PATH)}
+        />
+      </ButtonEnvironment>
+    </SurfaceErrorBoundary>
+  );
+}
+
+function MenuButtonPage({
+  entry,
+  behavior,
+  path,
   theme,
 }: {
-  entries: readonly RegisteredPluginButton[];
-  compact: boolean;
-  hostLabel: string;
+  entry: RegisteredPluginButton;
+  behavior: PluginButtonBehavior;
+  path: readonly string[];
   theme: PluginTheme;
 }) {
-  // The header belongs to one host, but each button keeps its installation's query cache and RPCs.
-  const client = useHostRuntimeClient(entries[0].installation.serverId);
-  const toast = useToast();
-  const menuContent = useMemo(() => {
-    const pages: MenuPageDefinition[] = [];
-    const rows: ReactNode[] = [];
-    for (const entry of entries) {
-      const view = createButtonView({ entry, client, toast, compact, hostLabel, theme });
-      if (!view) continue;
-      rows.push(
-        <SurfaceErrorBoundary
-          key={entry.key}
-          installation={entry.installation}
-          Surface={entry.button.icon}
-        >
-          <ButtonEnvironment view={view}>
-            <OverflowButton view={view} />
-          </ButtonEnvironment>
-        </SurfaceErrorBoundary>,
-      );
-      if (entry.button.behavior.kind === "action") continue;
-      pages.push(
-        {
-          id: buttonPageId(view, []),
-          title: entry.button.title,
-          hoverIntent: false,
-          content: (
-            <ButtonSurfaceBody view={view} behavior={entry.button.behavior} path={ROOT_PATH} />
-          ),
-        },
-        ...buttonPages(view, entry.button.behavior),
-      );
-    }
-    return { pages, rows };
-  }, [entries, client, toast, theme, hostLabel, compact]);
+  const view = useMenuButtonView(entry, theme);
+  if (!view) return null;
+  return <ButtonSurfaceBody view={view} behavior={behavior} path={path} />;
+}
+
+const ThemedMenuButtonRow = withUnistyles(MenuButtonRow);
+const ThemedMenuButtonPage = withUnistyles(MenuButtonPage);
+
+export interface PluginButtonsMenu {
+  /** One row per button, in registration order. Render them on the menu's root page. */
+  rows: ReactElement[];
+  /** The pages those rows lead to. Pass them to the menu's surface. */
+  pages: MenuPageDefinition[];
+}
+
+function buttonsMenu(entries: readonly RegisteredPluginButton[]): PluginButtonsMenu {
+  const rows = entries.map((entry) => (
+    <ThemedMenuButtonRow key={entry.key} entry={entry} uniProps={pluginThemeMapping} />
+  ));
+  const pages = entries.flatMap((entry): MenuPageDefinition[] => {
+    const { behavior } = entry.button;
+    if (behavior.kind === "action") return [];
+    const render: RenderButtonPage = (pageBehavior, path) => (
+      <ThemedMenuButtonPage
+        entry={entry}
+        behavior={pageBehavior}
+        path={path}
+        uniProps={pluginThemeMapping}
+      />
+    );
+    return [
+      {
+        id: buttonPageId(entry.key, ROOT_PATH),
+        title: entry.button.title,
+        hoverIntent: false,
+        content: render(behavior, ROOT_PATH),
+      },
+      ...buttonPages(entry.key, behavior, ROOT_PATH, render),
+    ];
+  });
+  return { rows, pages };
+}
+
+function OverflowSurface({ entries }: { entries: readonly RegisteredPluginButton[] }) {
   const { t } = useTranslation();
+  const menu = useMemo(() => buttonsMenu(entries), [entries]);
   return (
-    <MenuSurface
-      sheetTitle={t("workspace.git.actions.moreActions")}
-      align="end"
-      minWidth={280}
-      maxWidth={420}
-      maxHeight={440}
-      scrollable
-      pages={menuContent.pages}
-    >
-      {menuContent.rows}
+    <MenuSurface sheetTitle={t("workspace.git.actions.moreActions")} align="end" pages={menu.pages}>
+      {menu.rows}
     </MenuSurface>
   );
 }
-
-const ThemedOverflowPages = withUnistyles(OverflowPages);
 
 function useButtons(serverId: string, workspaceId: string, agentId: string | null) {
   const entries = useSyncExternalStore(
@@ -570,6 +614,15 @@ export function PluginComposerPills({
       uniProps={pluginThemeMapping}
     />
   ));
+}
+
+/**
+ * A workspace's header buttons as rows and pages of a host menu. Compact headers have no room for
+ * the buttons themselves, so the workspace menu carries them instead.
+ */
+export function usePluginWorkspaceMenu(serverId: string, workspaceId: string): PluginButtonsMenu {
+  const entries = useButtons(serverId, workspaceId, null);
+  return useMemo(() => buttonsMenu(entries), [entries]);
 }
 
 export function PluginHeaderButtons({
@@ -617,12 +670,7 @@ export function PluginHeaderButtons({
           >
             <ThemedMoreIcon size={16} uniProps={mutedIconMapping} />
           </MenuTrigger>
-          <ThemedOverflowPages
-            entries={overflow}
-            compact={compact}
-            hostLabel={hostLabel}
-            uniProps={pluginThemeMapping}
-          />
+          <OverflowSurface entries={overflow} />
         </MenuRoot>
       ) : null}
     </View>

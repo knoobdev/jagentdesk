@@ -10,7 +10,7 @@ export interface BottomAnchorRouteRequest {
 }
 
 export interface BottomAnchorLocalRequest {
-  reason: "jump-to-bottom" | "message-sent";
+  reason: "jump-to-bottom" | "message-sent" | "rewind";
   agentId: string;
 }
 
@@ -69,20 +69,18 @@ interface BottomAnchorControllerDriver {
   applyRouteRequest: (request: BottomAnchorRouteRequest | null) => void;
   requestLocalAnchor: (request: BottomAnchorLocalRequest) => void;
   beginUserScroll: () => void;
-  endUserScroll: (params: { isNearBottom: boolean }) => void;
+  endUserScroll: (params: { isAtEnd: boolean }) => void;
   detachByUser: () => void;
+  holdForDisclosure: () => void;
+  releaseDisclosure: (params: { isAtEnd: boolean }) => void;
   handleViewportMetricsChange: (params: {
     previousViewportWidth: number;
     viewportWidth: number;
     previousViewportHeight: number;
     viewportHeight: number;
   }) => void;
-  handleContentSizeChange: (params: {
-    previousContentHeight: number;
-    contentHeight: number;
-  }) => void;
+  handleContentSizeChange: () => void;
   prepareForStickyViewportChange: () => void;
-  prepareForStickyContentChange: () => void;
   handleScrollNearBottomChange: (params: {
     nextIsNearBottom: boolean;
     scrollDelta: number;
@@ -415,6 +413,7 @@ function createBottomAnchorControllerDriver(
       | "content_size_change"
       | "scroll_near_bottom_change"
       | "user_scroll_end"
+      | "disclosure_released"
       | "history_readiness_change"
       | "manual_reevaluate"
       | "retry_scroll",
@@ -505,13 +504,24 @@ function createBottomAnchorControllerDriver(
     requestLocalAnchor(request) {
       createRequest(request);
     },
+    // The gesture owns the viewport, so following stops until it ends: content growing at the end
+    // must not move the rows under the finger. The gesture's end decides whether following resumes.
     beginUserScroll() {
       isUserScrollActive = true;
       cancelPendingAttempt();
+      setModeInternal("detached");
     },
+    // A gesture ending short stays detached unless a newer prompt submission requested the end.
+    // Passive output must not move the rows the finger just let go of.
     endUserScroll(params) {
       isUserScrollActive = false;
-      if (params.isNearBottom) {
+      // Submit arrives with the user's action; rewind and tail jumps can arrive after a fetch.
+      // A newer gesture would have detached again, so only a still-sticky submit owns release.
+      if (pendingRequest?.reason === "message-sent" && mode === "sticky-bottom") {
+        evaluate(false, "user_scroll_end");
+        return;
+      }
+      if (params.isAtEnd) {
         if (mode === "detached") {
           setModeInternal("sticky-bottom");
           pendingVerification = { requestId: null, retries: 0 };
@@ -533,9 +543,8 @@ function createBottomAnchorControllerDriver(
         markStickyMeasurementVerified();
         return;
       }
-      if (mode === "sticky-bottom") {
-        this.detachByUser();
-      }
+      cancelPendingRequest("user_scrolled_away");
+      setModeInternal("detached");
     },
     detachByUser() {
       if (mode === "detached") {
@@ -543,6 +552,21 @@ function createBottomAnchorControllerDriver(
       }
       cancelPendingRequest("user_scrolled_away");
       setModeInternal("detached");
+    },
+    // A disclosure keeps its trigger in place, so following output stops while it applies.
+    holdForDisclosure() {
+      cancelPendingRequest("disclosure");
+      setModeInternal("detached");
+    },
+    // Following resumes only if the applied change left the list at its end. Scroll events
+    // during the hold never re-stick: before the change lands the list is still at the end.
+    releaseDisclosure(params) {
+      if (isUserScrollActive || mode !== "detached" || !params.isAtEnd) {
+        return;
+      }
+      setModeInternal("sticky-bottom");
+      pendingVerification = { requestId: null, retries: 0 };
+      evaluate(false, "disclosure_released");
     },
     handleViewportMetricsChange(params) {
       if (
@@ -568,55 +592,19 @@ function createBottomAnchorControllerDriver(
         evaluate(false, "viewport_change");
       }
     },
-    handleContentSizeChange(params) {
-      if (params.previousContentHeight !== params.contentHeight) {
-        markStickyMeasurementChanged();
-      }
-      if (isUserScrollActive) {
+    // The list keeps its own end through content changes while following, so a change in content
+    // height never scrolls from here. It only gives a pending jump another look at the new geometry.
+    handleContentSizeChange() {
+      if (isUserScrollActive || !pendingRequest) {
         return;
       }
-      const shouldRestick = __private__.shouldRestickOnContentChange({
-        mode,
-        previousContentHeight: params.previousContentHeight,
-        contentHeight: params.contentHeight,
-      });
-      if (shouldRestick && !pendingRequest) {
-        pendingVerification = { requestId: null, retries: 0 };
-        if (attemptHandle) {
-          input.cancelFrame(attemptHandle);
-          attemptHandle = null;
-        }
-        runAttempt(false);
-        return;
-      }
-      if (shouldRestick || pendingRequest) {
-        evaluate(false, "content_size_change");
-      }
+      evaluate(false, "content_size_change");
     },
     prepareForStickyViewportChange() {
       if (mode !== "sticky-bottom") {
         return;
       }
       markStickyMeasurementChanged();
-    },
-    prepareForStickyContentChange() {
-      if (mode !== "sticky-bottom") {
-        return;
-      }
-      markStickyMeasurementChanged();
-      if (isUserScrollActive) {
-        return;
-      }
-      if (!pendingRequest) {
-        pendingVerification = { requestId: null, retries: 0 };
-        if (attemptHandle) {
-          input.cancelFrame(attemptHandle);
-          attemptHandle = null;
-        }
-        runAttempt(false);
-        return;
-      }
-      evaluate(false, "content_size_change");
     },
     handleScrollNearBottomChange(params) {
       const { nextIsNearBottom, scrollDelta } = params;
@@ -695,13 +683,6 @@ export const __private__ = {
           input.previousViewportWidth !== input.viewportWidth))
     );
   },
-  shouldRestickOnContentChange(input: {
-    mode: BottomAnchorMode;
-    previousContentHeight: number;
-    contentHeight: number;
-  }): boolean {
-    return input.mode === "sticky-bottom" && input.contentHeight > input.previousContentHeight;
-  },
   shouldDetachFromScrollAway(input: {
     mode: BottomAnchorMode;
     nextIsNearBottom: boolean;
@@ -726,7 +707,7 @@ export function useBottomAnchorController(input: {
   routeRequest: BottomAnchorRouteRequest | null;
   isAuthoritativeHistoryReady: boolean;
   renderStrategy: string;
-  transportBehavior: BottomAnchorTransportBehavior;
+  getTransportBehavior: () => BottomAnchorTransportBehavior;
   getMeasurementState: () => ControllerMeasurementState;
   isNearBottom: () => boolean;
   scrollToBottom: (animated: boolean) => void;
@@ -735,7 +716,7 @@ export function useBottomAnchorController(input: {
   const agentIdRef = useRef(input.agentId);
   const readinessRef = useRef(input.isAuthoritativeHistoryReady);
   const renderStrategyRef = useRef(input.renderStrategy);
-  const transportBehaviorRef = useRef(input.transportBehavior);
+  const getTransportBehaviorRef = useRef(input.getTransportBehavior);
   const getMeasurementStateRef = useRef(input.getMeasurementState);
   const isNearBottomRef = useRef(input.isNearBottom);
   const scrollToBottomRef = useRef(input.scrollToBottom);
@@ -744,7 +725,7 @@ export function useBottomAnchorController(input: {
   agentIdRef.current = input.agentId;
   readinessRef.current = input.isAuthoritativeHistoryReady;
   renderStrategyRef.current = input.renderStrategy;
-  transportBehaviorRef.current = input.transportBehavior;
+  getTransportBehaviorRef.current = input.getTransportBehavior;
   getMeasurementStateRef.current = input.getMeasurementState;
   isNearBottomRef.current = input.isNearBottom;
   scrollToBottomRef.current = input.scrollToBottom;
@@ -754,7 +735,7 @@ export function useBottomAnchorController(input: {
       getAgentId: () => agentIdRef.current,
       getIsAuthoritativeHistoryReady: () => readinessRef.current,
       getRenderStrategy: () => renderStrategyRef.current,
-      getTransportBehavior: () => transportBehaviorRef.current,
+      getTransportBehavior: () => getTransportBehaviorRef.current(),
       getMeasurementState: () => getMeasurementStateRef.current(),
       isNearBottom: () => isNearBottomRef.current(),
       scrollToBottom: (animated) => scrollToBottomRef.current(animated),
@@ -792,11 +773,17 @@ export function useBottomAnchorController(input: {
     beginUserScroll() {
       driverRef.current?.beginUserScroll();
     },
-    endUserScroll(params: { isNearBottom: boolean }) {
+    endUserScroll(params: { isAtEnd: boolean }) {
       driverRef.current?.endUserScroll(params);
     },
     detachByUser() {
       driverRef.current?.detachByUser();
+    },
+    holdForDisclosure() {
+      driverRef.current?.holdForDisclosure();
+    },
+    releaseDisclosure(params: { isAtEnd: boolean }) {
+      driverRef.current?.releaseDisclosure(params);
     },
     handleViewportLayout() {},
     handleViewportMetricsChange(params: {
@@ -807,14 +794,11 @@ export function useBottomAnchorController(input: {
     }) {
       driverRef.current?.handleViewportMetricsChange(params);
     },
-    handleContentSizeChange(params: { previousContentHeight: number; contentHeight: number }) {
-      driverRef.current?.handleContentSizeChange(params);
+    handleContentSizeChange() {
+      driverRef.current?.handleContentSizeChange();
     },
     prepareForStickyViewportChange() {
       driverRef.current?.prepareForStickyViewportChange();
-    },
-    prepareForStickyContentChange() {
-      driverRef.current?.prepareForStickyContentChange();
     },
     handleScrollNearBottomChange(params: { nextIsNearBottom: boolean; scrollDelta: number }) {
       driverRef.current?.handleScrollNearBottomChange(params);

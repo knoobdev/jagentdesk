@@ -123,7 +123,7 @@ export type UserComposerAttachment =
       pluginId: string;
       sourceId: string;
       sourceTitle: string;
-      sourceIcon: string;
+      sourceIcon: import("@jagentdesk/plugin").PluginSerializableIcon;
       item: PluginAttachmentItem;
     };
 

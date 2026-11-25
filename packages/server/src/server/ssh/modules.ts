@@ -5,40 +5,23 @@ import {
   ServerEnvironmentSchema,
   type ServerEnvironment,
 } from "@jagentdesk/protocol/ssh/environment-schemas";
-import { SSH_SERVER_AGENT_LABEL } from "@jagentdesk/protocol/ssh/server-chat-prompt";
 import type { SshServer } from "@jagentdesk/protocol/ssh/rpc-schemas";
-import type { SshModuleHandler } from "../session/ssh/ssh-session.js";
-import { captureTerminalLines } from "../../terminal/terminal-capture.js";
-import {
-  createSshAgentTools,
-  type RequestToolPermission,
-  type SshAgentTool,
-  type SshForwardAccess,
-  type SshServerDirectory,
-  type SshTerminalAccess,
-} from "./environment/agent-tools.js";
-import { handleSshEnvironmentMessage } from "./environment/rpc.js";
 import { SshEnvironmentService } from "./environment/service.js";
 import type { EnvironmentStore } from "./environment/store.js";
 import { SshImporter, type SshImportSink } from "./logs-import/importer.js";
 import { KeyInstallService } from "./logs-import/install-key.js";
-import { handleLogsImportMessage } from "./logs-import/rpc.js";
 import { SessionLogService } from "./logs-import/session-log.js";
-import { createRemoteDockerTools } from "./remote-docker/agent-tools.js";
 import { RemoteDockerHosts } from "./remote-docker/hosts.js";
 import { ForwardingService } from "./forwarding/service.js";
-import { handleSshRemoteDbMessage } from "./remote-db/rpc.js";
 import { RemoteDbTunnels } from "./remote-db/service.js";
-import { handleSshRemoteK8sMessage } from "./remote-k8s/rpc.js";
 import { RemoteK8sClusters } from "./remote-k8s/service.js";
 import { FileSecretStore } from "../database/secret-store.js";
-import { handleSshRemoteDockerMessage } from "./remote-docker/rpc.js";
 import type { SshService, SshTerminalCreatedEvent } from "./ssh-service.js";
 import type { SshStorage } from "./ssh-storage.js";
 
 // Wires milestones S6 (logs, import, install key), S7 (environment, server-chat tools) and S8
 // (Docker on the server) into S1's SshService: storage-backed adapters, connection and terminal
-// hooks, the session RPC handlers and the agent tools for server chats.
+// hooks. The ssh-servers built-in owns the session RPC handlers and the server-chat agent tools.
 
 /** spec 25.10: the detected environment lives on the server record in servers.json. */
 function serversJsonEnvironmentStore(storage: SshStorage): EnvironmentStore {
@@ -145,103 +128,10 @@ async function attachKey(service: SshService, serverId: string, keyId: string): 
   });
 }
 
-function terminalAccess(service: SshService): SshTerminalAccess {
-  function session(terminalId: string) {
-    const found = service.getSshTerminalSession(terminalId);
-    if (!found) throw new Error(`SSH terminal ${terminalId} is not open`);
-    return found;
-  }
-  return {
-    list(serverId) {
-      return service
-        .listSessions()
-        .filter((info) => info.serverId === serverId)
-        .map((info) => ({
-          terminalId: info.terminalId,
-          serverId: info.serverId,
-          title: service.getSshTerminalSession(info.terminalId)?.getTitle() ?? info.serverId,
-        }));
-    },
-    async send(terminalId, data) {
-      session(terminalId).typeInput(data);
-    },
-    async capture(terminalId, { lines }) {
-      const captured = captureTerminalLines(session(terminalId), {
-        start: -lines,
-        stripAnsi: true,
-      });
-      return captured.lines.join("\n");
-    },
-  };
-}
-
-function serverDirectory(service: SshService): SshServerDirectory {
-  return {
-    async list() {
-      const servers = await service.listServerInfos();
-      return servers.map((server) => {
-        const resolved = service.resolveConfig(server.id);
-        return {
-          serverId: server.id,
-          label: server.label,
-          address: server.address,
-          port: resolved?.port ?? 22,
-          username: resolved?.username ?? null,
-          state: server.state,
-        };
-      });
-    },
-    async openTerminal(serverId) {
-      const terminalId = service.createSession(serverId, { cols: 120, rows: 32 });
-      return {
-        terminalId,
-        serverId,
-        title: service.storage.getServer(serverId)?.label ?? serverId,
-      };
-    },
-  };
-}
-
-/**
- * ssh_forward_* (spec 25.11) over S3: an agent's forward is a saved rule labelled for the agent,
- * started at once; stopping it removes the rule again.
- */
-function forwardAccess(forwarding: ForwardingService): SshForwardAccess {
-  return {
-    async start(input) {
-      const destination =
-        input.kind === "dynamic" ? "SOCKS5" : `${input.destHost ?? ""}:${input.destPort ?? 0}`;
-      const describe = (port: number) =>
-        `${input.kind} ${input.bindAddress}:${port} → ${destination}`;
-      const rule = await forwarding.save({
-        label: `Agent: ${describe(input.bindPort)}`,
-        kind: input.kind,
-        serverId: input.serverId,
-        bindAddress: input.bindAddress,
-        bindPort: input.bindPort,
-        ...(input.destHost ? { destHost: input.destHost } : {}),
-        ...(input.destPort ? { destPort: input.destPort } : {}),
-      });
-      const state = await forwarding.start(rule.id);
-      if (state.status === "error") {
-        await forwarding.delete(rule.id);
-        throw new Error(state.error?.message ?? "The forward could not start");
-      }
-      return { forwardId: rule.id, description: describe(state.boundPort ?? input.bindPort) };
-    },
-    async stop(forwardId) {
-      await forwarding.delete(forwardId);
-    },
-  };
-}
-
 export interface SshModulesOptions {
   sshService: SshService;
   jagentdeskHome: string;
   logger: Logger;
-  /** Labels of an agent, to find the server a server-chat agent is bound to. */
-  agentLabels: (agentId: string) => Record<string, string> | null;
-  requestPermission: RequestToolPermission;
 }
 
 export class SshModules {
@@ -254,10 +144,9 @@ export class SshModules {
   readonly remoteK8s: RemoteK8sClusters;
   /** S3 port forwarding; its ssh.forward.* RPCs are wired by the S1 owner on this instance. */
   readonly forwarding: ForwardingService;
-  readonly handlers: readonly SshModuleHandler[];
   private readonly unsubscribe: Array<() => void> = [];
 
-  constructor(private readonly options: SshModulesOptions) {
+  constructor(options: SshModulesOptions) {
     const { sshService: service, jagentdeskHome } = options;
     const sshHome = path.join(jagentdeskHome, "ssh");
     this.logs = new SessionLogService({ sshHome, now: Date.now });
@@ -286,13 +175,6 @@ export class SshModules {
       secrets: new FileSecretStore(path.join(sshHome, "k8s")),
       runDirectory: path.join(sshHome, "run"),
     });
-    this.handlers = [
-      (message, emit) => handleLogsImportMessage(this.moduleServices(), message, emit),
-      (message, emit) => handleSshEnvironmentMessage(this.environment, message, emit),
-      (message, emit) => handleSshRemoteDockerMessage(this.docker, message, emit),
-      (message, emit) => handleSshRemoteDbMessage(this.remoteDb, message, emit),
-      (message, emit) => handleSshRemoteK8sMessage(this.remoteK8s, message, emit),
-    ];
     this.unsubscribe.push(
       service.subscribeConnections((event) => {
         if (event.kind === "disconnected") {
@@ -313,10 +195,6 @@ export class SshModules {
     );
   }
 
-  private moduleServices() {
-    return { logs: this.logs, importer: this.importer, keys: this.keys };
-  }
-
   /** spec 25.8: when logging is on for the server, every output chunk of the tab is recorded. */
   private async recordTerminal(
     serverId: string,
@@ -329,37 +207,6 @@ export class SshModules {
       untap();
       void recorder.close();
     });
-  }
-
-  /** The `ssh_*` and server-aware `docker_*` tools for one agent's catalog (spec 25.11). */
-  createAgentTools(callerAgentId: string | null): SshAgentTool[] {
-    const labels = callerAgentId ? this.options.agentLabels(callerAgentId) : null;
-    const defaultServerId = labels?.[SSH_SERVER_AGENT_LABEL] ?? null;
-    const { sshService: service, requestPermission } = this.options;
-    return [
-      ...createSshAgentTools({
-        acquire: service.acquireClient,
-        callerAgentId,
-        defaultServerId,
-        requestPermission,
-        remoteExecEnabledServers: () => {
-          const enabled = new Set<string>();
-          for (const server of service.storage.listServers()) {
-            if (server.remoteExec?.enabled === true) enabled.add(server.id);
-          }
-          return enabled;
-        },
-        terminals: terminalAccess(service),
-        forwards: forwardAccess(this.forwarding),
-        servers: serverDirectory(service),
-      }),
-      ...createRemoteDockerTools({
-        hosts: this.docker,
-        callerAgentId,
-        defaultServerId,
-        requestPermission,
-      }),
-    ];
   }
 
   /** Loads persisted state (forwarding rules); call once before serving. */

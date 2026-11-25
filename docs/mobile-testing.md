@@ -2,7 +2,7 @@
 
 ## Agent Device
 
-Agent Device `.ad` scripts are the primary mobile E2E format. An agent discovers a working flow interactively, saves the successful commands, then the replay runner executes the same typed plan locally or in CI.
+Agent Device `.ad` scripts are the primary mobile E2E format. An agent discovers a working flow interactively, saves the successful commands, then the replay runner executes the same plan. The `agent-device` CLI is not a repo dependency; install it on your machine first.
 
 Record a flow while driving the app normally:
 
@@ -25,17 +25,17 @@ Run the JAgentDesk mobile suite:
 npm run test:e2e:mobile
 ```
 
-The runner uses an isolated Agent Device state directory, verifies or starts Metro for this checkout, prewarms the iOS runner, discovers each script's platform from its `context` header, and cleans its sessions, runner lease, daemon, and any Metro process it started. Attempt results, timings, logs, and failure artifacts go under `.dev/agent-device-artifacts`.
+`scripts/test-mobile-agent-device.sh` uses an isolated Agent Device state directory (`.dev/agent-device-e2e`), prepares Metro for this checkout, prewarms the iOS runner, runs every script in `packages/app/e2e/mobile/agent-device/` with `--fail-fast`, and stops its Agent Device daemon on exit. Each script's platform comes from its `context` header. Results, logs, and failure artifacts go under `.dev/agent-device-artifacts`.
 
-Set `JAGENTDESK_MOBILE_E2E_METRO_PORT` when this worktree already has Metro on a non-default port:
+Metro defaults to port `8081`. Set `JAGENTDESK_MOBILE_E2E_METRO_PORT` when this worktree runs Metro elsewhere:
 
 ```bash
 JAGENTDESK_MOBILE_E2E_METRO_PORT=62093 npm run test:e2e:mobile
 ```
 
-[native-terminal-basic.ios.ad](../packages/app/e2e/mobile/agent-device/native-terminal-basic.ios.ad) and [native-terminal-basic.android.ad](../packages/app/e2e/mobile/agent-device/native-terminal-basic.android.ad) are the smallest examples. Each opens a fresh terminal, types a command at zero delay, submits it, and asserts its distinct output. The app must be connected to a daemon with an active workspace.
+[native-terminal-basic.ios.ad](../packages/app/e2e/mobile/agent-device/native-terminal-basic.ios.ad) and [native-terminal-basic.android.ad](../packages/app/e2e/mobile/agent-device/native-terminal-basic.android.ad) are the smallest examples. Each opens a fresh terminal from `workspace-header-menu-trigger`, types a command at zero delay, submits it, and asserts its distinct output. The scripts target the debug app (`app.jagentdesk.mobile.debug`), which must be connected to a daemon with an active workspace.
 
-When replay diverges, read its ranked selector suggestions. Edit the script deliberately and rerun it from the beginning. `--update` is retained for compatibility but no longer rewrites scripts.
+When replay diverges, read its ranked selector suggestions. Edit the script deliberately and rerun it from the beginning.
 
 ## Maestro compatibility
 
@@ -43,7 +43,7 @@ Existing Maestro flows live in `packages/app/maestro/`. Agent Device can execute
 
 ### Existing flows
 
-Maestro flows live in `packages/app/maestro/`. Reusable sub-flows live in `packages/app/maestro/flows/`.
+Maestro flows live in `packages/app/maestro/`, documented in its `README.md`. Reusable sub-flows live in `packages/app/maestro/flows/`.
 
 Run a flow:
 
@@ -66,6 +66,16 @@ cd /tmp/maestro-out && maestro test "$FLOW"
 ### Element targeting
 
 Use `testID` or `nativeID` on components, then target with `id:` in flows. Prefer this over text matching — text breaks on copy changes.
+
+The shell exposes stable IDs for navigation (`packages/app/src/components/gumloop-shell/`):
+
+| testID                 | What it is                                                                   |
+| ---------------------- | ---------------------------------------------------------------------------- |
+| `menu-button`          | Compact header button that opens the mobile drawer                           |
+| `gumloop-sidebar`      | The sidebar (pinned on wide layouts, the drawer on compact)                  |
+| `sidebar-<key>`        | A sidebar nav row, for example `sidebar-sessions`                            |
+| `gumloop-group-<name>` | A collapsible sidebar group: `gumloop-group-tools`, `gumloop-group-projects` |
+| `sidebar-project-list` | The project list inside the sidebar                                          |
 
 ```tsx
 // Component
@@ -99,7 +109,7 @@ This is how `flows/dev-client.yaml` handles Expo dev client screens that only ap
 
 ### Don't use launchApp against a running dev app
 
-`launchApp` kills and restarts the app, disrupting Expo dev client state and host connections. For flows that test against an already-running dev app, **omit launchApp entirely** — just interact with whatever is on screen.
+`launchApp` kills and restarts the app, disrupting Expo dev client state and host connections. For flows that test against an already-running dev app, **omit launchApp entirely** and interact with whatever is on screen.
 
 Use `launchApp` only in flows that need a clean start (e.g., onboarding tests).
 
@@ -119,7 +129,7 @@ Use `start`/`end` with percentage coordinates for precise control:
 
 ### Assertions
 
-`assertVisible` checks **actual screen visibility**, not just view tree presence. An element that exists in the tree but is off-screen (e.g., `translateX: -400`) will correctly fail `assertVisible`. This makes it reliable for catching animation bugs where state says "open" but the view is visually hidden.
+`assertVisible` checks **actual screen visibility**, not view tree presence alone. An element that exists in the tree but is off-screen (e.g., `translateX: -400`) will correctly fail `assertVisible`. This makes it reliable for catching animation bugs where state says "open" but the view is visually hidden.
 
 For async elements, use `extendedWaitUntil`:
 
@@ -133,12 +143,13 @@ For async elements, use `extendedWaitUntil`:
 
 Two reusable flows handle Expo dev client screens after launch:
 
-- `flows/launch.yaml` — handles dev launcher, dismisses dev menu, asserts "Welcome to JAgentDesk"
+- `flows/launch.yaml` — handles the dev launcher, dismisses the dev menu, and asserts "Welcome to JAgentDesk" when it is visible
 - `flows/dev-client.yaml` — same but without asserting a particular app route
+- `flows/android-dev-client.yaml` — the Android dev client variant
 
 ### Reach the composer
 
-`flows/land-in-chat.yaml` is the canonical "get into a chat" primitive. It `clearState`s, runs `launch.yaml`, taps the welcome screen's direct-connection option, types `127.0.0.1:6767`, submits, and waits for `message-input-root`. Compose any composer-level fixture on top of it:
+`flows/land-in-chat.yaml` is the canonical "get into a chat" primitive. It `clearState`s, runs `launch.yaml`, taps `welcome-direct-connection`, types `127.0.0.1:6767` into `direct-host-input`, submits, and waits for `message-input-root`. Compose any composer-level fixture on top of it:
 
 ```yaml
 appId: app.jagentdesk.mobile
@@ -149,7 +160,7 @@ appId: app.jagentdesk.mobile
 
 See `image-picker-repro.yaml` for an example.
 
-**Use the connection mode required by the test.** Local tests use `127.0.0.1:6768`; remote-pairing tests use the real Tailscale offer and six-digit verification flow. There is no relay fallback.
+**Use the connection mode required by the test.** `land-in-chat.yaml` targets the production-style daemon on `6767`; a flow against the dev daemon types `127.0.0.1:6768` instead. Remote-pairing flows (`tailscale-pair-*.yaml`) drive the real Tailscale offer and SAS verification, so they need a reachable tailnet.
 
 ### New Workspace Creation
 
@@ -186,13 +197,9 @@ For inputs that E2E flows type into (host endpoint, pairing URL, etc.), use an *
 
 See `pair-link-modal.tsx` for the pattern (`useRef`-backed `onChangeText`, no `value=` prop). Always pair the source change with a Maestro `assertVisible` on the input's `id + text` after `inputText`, so regressions are caught immediately.
 
-### Dropdowns that launch native presenters (iOS)
+### Menus that launch native presenters (iOS)
 
-On iOS, when a dropdown menu (`DropdownMenu` / RN `Modal`) item needs to launch a native presenter like `PHPickerViewController` (image picker) or a `UIDocumentPicker`, the callback **must not fire while the `Modal` is still dismissing**. UIKit dismissal completion spans multiple frames beyond React unmount; launching a native presenter mid-dismissal leaves an invisible backdrop mounted that traps every subsequent touch.
-
-`DropdownMenu` handles this by deferring the selected item's `onSelect` until `Modal.onDismiss` fires (UIKit-level dismissal complete), then adds a small extra buffer before invoking it. See `components/ui/dropdown-menu.tsx`'s `selectItem` / `flushPendingSelect`.
-
-When building a new component that composes a dropdown with a native presenter, reuse this dropdown — do not invent a new timing shim.
+A menu item that opens an image picker or document picker on iOS runs a beat after the press. The menu engine owns that delay; see [Selecting an item on iOS](menus.md#selecting-an-item-on-ios). Don't add your own timing shim.
 
 ## Self-verification loops
 
@@ -254,71 +261,15 @@ Expected result: JAgentDesk does not throw `RuntimeException: Audio focus reques
 
 ## Unistyles + Reanimated
 
-### The crash
+Theme-reactive Unistyles styles on a Reanimated `Animated.View` crash on theme change. The rule and the fix live in [unistyles.md](unistyles.md#reanimated-animatedview--dynamic-styles-crashes).
 
-Applying Unistyles theme-reactive styles (`StyleSheet.create((theme) => ...)`) directly to `Animated.View` causes **"Unable to find node on an unmounted component"** on theme change.
+## Chat Stream Layout
 
-Unistyles wraps styled components in `<UnistylesComponent>` and patches native view properties via C++. Reanimated also manages the same native node for animated transforms. When the theme changes, both systems try to update the node simultaneously and the view crashes.
-
-### The fix
-
-Use plain React Native `StyleSheet.create` for static positioning on `Animated.View`. Pass theme-dependent values as inline styles from `useUnistyles()`:
-
-```tsx
-// BAD: Unistyles dynamic style on Animated.View
-const styles = StyleSheet.create((theme) => ({
-  sidebar: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    bottom: 0,
-    backgroundColor: theme.colors.surfaceSidebar, // theme-reactive
-    overflow: "hidden",
-  },
-}));
-
-<Animated.View style={[styles.sidebar, animatedStyle]} />;
-```
-
-```tsx
-// GOOD: static stylesheet + inline theme values
-import { StyleSheet as RNStyleSheet } from "react-native";
-
-const staticStyles = RNStyleSheet.create({
-  sidebar: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    bottom: 0,
-    overflow: "hidden",
-  },
-});
-
-const { theme } = useUnistyles();
-
-<Animated.View
-  style={[staticStyles.sidebar, animatedStyle, { backgroundColor: theme.colors.surfaceSidebar }]}
-/>;
-```
-
-Regular `View` components can safely use Unistyles dynamic styles — the conflict is specific to `Animated.View`.
-
-## Native Chat Stream Layout
-
-The native agent stream uses an inverted `FlatList`, so chat layout has three coordinate systems:
-
-- chronological stream order
-- strategy-ordered array order
-- native inverted cell visual order
+Native renders the agent stream with `LegendList` over an end-pinned `ScrollView` (`packages/app/src/agent-stream/strategy-native.tsx`); web uses `strategy-web.tsx`. Both strategies keep chronological order. Platform differences belong on `StreamStrategy` (`packages/app/src/agent-stream/strategy.ts`).
 
 Do not compute stream neighbors, history/live-head seams, turn footer ownership, assistant block spacing, or tool sequence endings inside React render loops. Those policies live in `packages/app/src/agent-stream/layout.ts` and are unit-tested without React Native rendering.
 
-Platform-specific stream edges belong on `StreamStrategy`:
-
-- forward web uses the last history item as the history/live-head boundary and renders content before a footer
-- native inverted uses the first history item as the history/live-head boundary and compensates for inverted cell child order
-
-If a chat footer looks duplicated or appears above the assistant message on mobile, start with `packages/app/src/agent-stream/layout.test.ts`. Do not add a React Native renderer test for this class of bug; make the pure layout invariant fail first.
+If a chat footer looks duplicated or misplaced on mobile, start with `packages/app/src/agent-stream/layout.test.ts`. Make the pure layout invariant fail first; do not add a React Native renderer test for this class of bug.
 
 ## iOS Simulator
 
@@ -332,4 +283,4 @@ xcrun simctl ui booted appearance dark     # set dark
 xcrun simctl ui booted appearance light    # set light
 ```
 
-Expo dev server logs are in the tmux pane running `npm run dev`. Daemon logs are at `$JAGENTDESK_HOME/daemon.log` (see [development.md](development.md)).
+Expo logs are in the terminal running `npm run dev:app` (or `npm run ios`). Daemon logs are at `$JAGENTDESK_HOME/daemon.log` (see [development.md](development.md)). For the simulator fleet and input backends, see [simulators.md](simulators.md).

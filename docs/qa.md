@@ -31,7 +31,7 @@ For UI, that means matching the design system in visuals, in interaction, and in
 
 The two things that go wrong most often:
 
-- **Layout shift.** Content that jumps as data arrives, a row that resizes when a badge appears, a panel that reflows on first render. Watch the change on a slow connection and on first load, not just after everything is warm.
+- **Layout shift.** Content that jumps as data arrives, a row that resizes when a badge appears, a panel that reflows on first render. Watch the change on a slow connection and on first load, not only after everything is warm.
 - **Alignment.** Things align to their glyphs, not to their touch targets. See the alignment rules in [design.md](design.md).
 
 ## Does it regress anything else

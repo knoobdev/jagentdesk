@@ -1,0 +1,13 @@
+{
+  "kind": "builtin",
+  "id": "clusters",
+  "name": "Kubernetes",
+  "description": "Manage clusters, workloads and Helm releases.",
+  "defaultEnabled": true,
+  "requires": [],
+  "builtinOrder": 2,
+  "builtinEntrypoints": {
+    "server": "server/index.ts",
+    "client": "client/index.tsx"
+  }
+}

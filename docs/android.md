@@ -9,9 +9,18 @@ Controlled by `APP_VARIANT` in `packages/app/app.config.js` (vanilla Expo, no cu
 | `production`  | JAgentDesk       | `app.jagentdesk.mobile`       |
 | `development` | JAgentDesk Debug | `app.jagentdesk.mobile.debug` |
 
-EAS profiles: `development`, `production`, and `production-apk` in `packages/app/eas.json`.
+EAS profiles live in `packages/app/eas.json`: `development` and `development-simulator` (dev client, `APP_VARIANT=development`, Android `assembleDebug`), and `production`, `production-apk`, `production-ipa`, and `production-simulator` (`APP_VARIANT=production`).
 
-`development` uses Android `debug`.
+## Display density
+
+The display-metrics module backports RN's window-density correction for Samsung DeX and
+other external displays. Remove it after upgrading to RN 0.89 with
+`useWindowDensityForDisplayMetricsAndroid` enabled. Run its device regression from the
+generated Android project:
+
+```bash
+./gradlew :jagentdesk-display-metrics:connectedDebugAndroidTest --no-daemon --max-workers=2 -Dorg.gradle.parallel=false
+```
 
 ## Version codes
 
@@ -21,7 +30,7 @@ EAS profiles: `development`, `production`, and `production-apk` in `packages/app
 major * 1_000_000 + minor * 1_000 + patch
 ```
 
-Prerelease metadata is ignored, so `0.1.102-beta.1` and `0.1.102` both produce `1102`. The same value is used as the iOS `buildNumber` because `packages/app/eas.json` uses EAS's local app version source. Do not re-enable EAS remote version counters or Android `autoIncrement`; F-Droid and other source-based builders need the native build number to be visible in the repo.
+Prerelease metadata is ignored, so `0.10.0-beta.1` and `0.10.0` both produce `10000`. The same value is used as the iOS `buildNumber` because `packages/app/eas.json` uses EAS's local app version source. Do not re-enable EAS remote version counters or Android `autoIncrement`; F-Droid and other source-based builders need the native build number to be visible in the repo.
 
 The formula reserves three digits each for minor and patch. If either reaches `1000`, change the formula before cutting that release.
 
@@ -59,6 +68,8 @@ Gradle auto-fetches the platform/build-tools it needs once licenses are accepted
 
 ## Local build + install
 
+`npm run android` (an alias for `android:development`) and `android:production` first build the embedded Tailscale bridge with `gomobile` (`packages/app/modules/jagentdesk-tailscale/build.mjs android`). That step needs Go (version in `packages/app/modules/jagentdesk-tailscale/go/tailscale-bridge/go.mod`) and the Android NDK; set `ANDROID_NDK_HOME`. The release workflow installs `ndk;27.1.12297006`.
+
 From repo root:
 
 ```bash
@@ -67,7 +78,7 @@ npm run android:production     # Release build
 npm run android:clear          # Remove generated Android project
 ```
 
-Or from `packages/app`:
+Or from `packages/app`, after the Tailscale bridge and `npm run build:client` have run:
 
 ```bash
 # Debug
@@ -130,13 +141,15 @@ JAGENTDESK_FDROID_BUILD=1 ./gradlew assembleRelease \
 
 Supported values are `armeabi-v7a`, `arm64-v8a`, `x86`, and `x86_64`. The F-Droid profile filters native libraries to that ABI and changes the APK version code to `baseVersionCode * 10 + abiSuffix`, where the suffixes are ordered `1` through `4` in that same sequence. F-Droid metadata should use four build blocks with `VercodeOperation` entries `10 * %c + 1` through `10 * %c + 4` and pass the matching `reactNativeArchitectures` value in each build command. Builds without a single architecture keep the base version code.
 
-Keep the excluded npm packages installed. Normal builds use them, while the F-Droid profile removes only their Android native modules and config plugins. JAgentDesk always applies `expo-gradle-jvmargs` with `-Xmx4096m` and `-XX:MaxMetaspaceSize=1024m` so local Expo prebuilds have enough Gradle heap whether they use precompiled AARs or source-built Expo modules.
+Keep the excluded npm packages (`expo-camera`, `expo-notifications`, `expo-dev-client`) installed. Normal builds use them, while the F-Droid profile (`packages/app/plugins/with-fdroid-autolinking.js`) removes only their Android native modules and config plugins, and Metro swaps in the stubs under `packages/app/src/fdroid/`.
 
-The EAS `production-apk` profile uses the large Android resource class. Release builds compile the native ABIs and run Hermes bundling in the same Gradle invocation; the default worker can exhaust its remaining memory and kill Hermes with exit code 137 even when Gradle's own heap is correctly sized.
+`app.config.js` applies `expo-gradle-jvmargs` with a `2048m` heap and `512m` metaspace. Release builds compile the native ABIs and run Hermes bundling in the same Gradle invocation, which can exhaust memory and kill Hermes with exit code 137. That is why the EAS `production` and `production-apk` profiles and the release workflow run Gradle with `--no-daemon --max-workers=1 -Dorg.gradle.parallel=false`; keep those flags.
+
+F-Droid store metadata lives in `fastlane/metadata/android/<locale>/`. `node scripts/sync-fdroid-changelogs.mjs` writes `changelogs/<versionCode>.txt` for each locale from `CHANGELOG.md`.
 
 ### React version lockstep
 
-Keep `react` and `react-dom` pinned to the React version embedded by the current `react-native` release. React Native `0.81.x` embeds `react-native-renderer` `19.1.0`, so `packages/app` must use React `19.1.0`. Bumping React to a newer patch can build successfully but crash at JS startup on Android with `Incompatible React versions`, leaving the app on the native splash screen.
+Keep `react` and `react-dom` pinned to the React version embedded by the current `react-native` release. React Native `0.86.3` embeds `react-native-renderer` `19.2.3`, so `packages/app` must use React `19.2.3`. Bumping React to a newer patch can build successfully but crash at JS startup on Android with `Incompatible React versions`, leaving the app on the native splash screen.
 
 ## Screenshots
 
@@ -144,17 +157,13 @@ Keep `react` and `react-dom` pinned to the React version embedded by the current
 adb exec-out screencap -p > screenshot.png
 ```
 
-## Cloud build + submit (EAS)
+## Release builds
 
-Stable tag pushes like `v0.1.0` trigger:
+Pushing a `v*.*.*` tag runs `.github/workflows/release.yml`. Its Android job prebuilds with `APP_VARIANT=production`, runs `:app:assembleRelease`, and uploads `JAgentDesk-<tag>-android.apk` to the GitHub Release. The same workflow builds the desktop packages and an unsigned iOS device IPA. Re-run one platform for an existing tag with `workflow_dispatch` and `only: android`.
 
-- The EAS GitHub app on Expo servers (iOS + Android production builds + store submit). There is no workflow file in this repo for it.
-- `.github/workflows/android-apk-release.yml` on GitHub Actions (APK asset on GitHub Release).
+## Store builds (EAS)
 
-iOS auto-submits to App Store review via a Fastlane lane after EAS uploads to TestFlight. Android auto-submits to the Play Store via EAS-managed credentials.
-
-Builds are started explicitly from EAS for the selected account/profile. No repository tag or
-hosted release workflow is required.
+Start store builds explicitly with EAS for the selected account and profile, for example `npx eas build --platform android --profile production` from `packages/app`. `eas.json` submits iOS to App Store Connect and Android to the Play `production` track. After a build reaches TestFlight, the Fastlane `submit_review` lane (`packages/app/fastlane/Fastfile`) submits it for App Store review.
 
 ### Useful commands
 

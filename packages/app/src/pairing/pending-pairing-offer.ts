@@ -35,7 +35,10 @@ export async function loadPendingPairingOffer(): Promise<PendingPairingOffer | n
       return null;
     }
     const record = value as { offerUrl?: unknown; source?: unknown };
-    if (typeof record.offerUrl !== "string" || !record.offerUrl.includes("#offer=")) {
+    if (
+      typeof record.offerUrl !== "string" ||
+      (!record.offerUrl.includes("#offer=") && !record.offerUrl.startsWith("jagentdesk://pair#"))
+    ) {
       return null;
     }
     return {

@@ -1,3 +1,4 @@
+import { recognizeBareUrls } from "./markdown-bare-urls";
 import MarkdownIt from "markdown-it";
 import { enableStreamingMarkdown } from "@/utils/streaming-markdown";
 
@@ -7,17 +8,16 @@ export function createAssistantMarkdownParser({ streaming = false } = {}): Markd
   const parser = new MarkdownIt({
     html: false,
     linkify: true,
-    typographer: true,
+    typographer: false,
   });
   const defaultValidateLink = parser.validateLink.bind(parser);
 
   parser.validateLink = (url: string) =>
     url.trim().toLowerCase().startsWith("file://") || defaultValidateLink(url);
 
-  if (streaming) {
-    enableStreamingMarkdown(parser);
-  }
+  recognizeBareUrls(parser);
 
+  if (streaming) enableStreamingMarkdown(parser);
   return parser;
 }
 

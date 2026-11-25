@@ -1,0 +1,13 @@
+{
+  "kind": "builtin",
+  "id": "autorun",
+  "name": "Autonomous run",
+  "description": "Let agents continue working until stopped.",
+  "defaultEnabled": false,
+  "requires": [],
+  "builtinOrder": 15,
+  "builtinEntrypoints": {
+    "server": "server/index.ts",
+    "client": "client/index.tsx"
+  }
+}

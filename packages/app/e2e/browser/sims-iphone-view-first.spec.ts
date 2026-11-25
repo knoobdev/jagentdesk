@@ -7,7 +7,7 @@ import { getServerId } from "../support/helpers/server-id";
 import {
   FAKE_IOS_UDID,
   writeFakeGoIos,
-} from "../../../server/src/server/devices/test-utils/fake-go-ios";
+} from "../../../../plugins/devices/server/devices/test-utils/fake-go-ios";
 
 // Spec 27.4 / 27.5 / ADR-0033 decision 8 in the app against the e2e daemon, whose go-ios is the
 // test stand-in (one cabled iPhone, screenshot service, no WebDriverAgent, no Apple account):

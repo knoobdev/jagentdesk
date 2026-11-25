@@ -9,19 +9,39 @@ import {
 describe("window chrome", () => {
   it("has no corner obstruction outside Electron or in fullscreen", () => {
     expect(
-      resolveWindowChromeObstruction({ isElectron: false, isMac: true, isFullscreen: false }),
+      resolveWindowChromeObstruction({
+        topBand: null,
+        isElectron: false,
+        isMac: true,
+        isFullscreen: false,
+      }),
     ).toEqual({ topLeft: null, topRight: null });
     expect(
-      resolveWindowChromeObstruction({ isElectron: true, isMac: true, isFullscreen: true }),
+      resolveWindowChromeObstruction({
+        topBand: null,
+        isElectron: true,
+        isMac: true,
+        isFullscreen: true,
+      }),
     ).toEqual({ topLeft: null, topRight: null });
   });
 
   it("places native controls in their physical top corner", () => {
     expect(
-      resolveWindowChromeObstruction({ isElectron: true, isMac: true, isFullscreen: false }),
+      resolveWindowChromeObstruction({
+        topBand: null,
+        isElectron: true,
+        isMac: true,
+        isFullscreen: false,
+      }),
     ).toEqual({ topLeft: { width: 78, height: 45 }, topRight: null });
     expect(
-      resolveWindowChromeObstruction({ isElectron: true, isMac: false, isFullscreen: false }),
+      resolveWindowChromeObstruction({
+        topBand: null,
+        isElectron: true,
+        isMac: false,
+        isFullscreen: false,
+      }),
     ).toEqual({ topLeft: null, topRight: { width: 140, height: 48 } });
   });
 

@@ -1,3 +1,4 @@
+import { createWorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
 import pino from "pino";
 import { z } from "zod";
 import { describe, expect, test } from "vitest";
@@ -11,8 +12,6 @@ import {
   type SessionOutboundMessage,
 } from "@jagentdesk/protocol/messages";
 import { Session, type SessionOptions } from "./session.js";
-import { OWNER_PERMISSIONS } from "./authorization/index.js";
-import { DirectorySyncService } from "./directory-sync/index.js";
 import { createProviderSnapshotManagerStub } from "./test-utils/session-stubs.js";
 import type { AgentTimelineRow } from "./agent/agent-manager.js";
 import { InMemoryAgentTimelineStore } from "./agent/agent-timeline-store.js";
@@ -107,6 +106,10 @@ class InMemoryAgentManager {
     };
   }
 
+  getAgentBackgroundWorkSummary() {
+    return undefined;
+  }
+
   fetchTimeline(_agentId: string, options?: AgentTimelineFetchOptions) {
     return this.timeline.fetch("agent-1", options);
   }
@@ -182,7 +185,6 @@ class InMemoryWorktreeWorkflow {
 
 function createSessionForWireCompatTest(options?: {
   clientCapabilities?: Record<string, unknown> | null;
-  directorySync?: DirectorySyncService;
   messages?: SessionOutboundMessage[];
   rows?: AgentTimelineRow[];
 }): Session {
@@ -206,8 +208,9 @@ function createSessionForWireCompatTest(options?: {
   ];
 
   const session = new Session({
+    workspaceRuntimeStore: createWorkspaceRuntimeStore(),
     clientId: "wire-compat-client",
-    permissions: OWNER_PERMISSIONS,
+    scopes: ["*"],
     clientCapabilities: options?.clientCapabilities ?? null,
     onMessage: (message) => messages.push(message),
     logger: pino({ level: "silent" }),
@@ -221,7 +224,6 @@ function createSessionForWireCompatTest(options?: {
     projectRegistry: new EmptyProjectRegistry() as unknown as SessionOptions["projectRegistry"],
     workspaceRegistry:
       new EmptyWorkspaceRegistry() as unknown as SessionOptions["workspaceRegistry"],
-    directorySync: options?.directorySync,
     scheduleService: {} as SessionOptions["scheduleService"],
     checkoutDiffManager: {
       scheduleRefreshForCwd() {},
@@ -249,9 +251,7 @@ function createSessionForWireCompatTest(options?: {
       async listStashes() {
         return [];
       },
-      peekSnapshot() {
-        return null;
-      },
+
       async validateBranchRef() {
         return { ok: false, error: "not found" };
       },
@@ -344,7 +344,6 @@ describe("wire compatibility", () => {
             projectDisplayName: "Favorite project",
             projectCustomName: "Favorite project",
             projectCustomIconRevision: null,
-            projectIconRevision: "automatic:none:v1",
             projectRootPath: "/tmp/project",
             projectKind: "git",
           },
@@ -357,13 +356,10 @@ describe("wire compatibility", () => {
     ]);
   });
 
-  test("publishes rapid project mutations in order before incremental reconciliation", async () => {
-    const directorySync = new DirectorySyncService("generation");
-    const initial = directorySync.synchronizeProjects([], {});
+  test("publishes rapid project mutations in order before a legacy reconciliation request", async () => {
     const messages: SessionOutboundMessage[] = [];
     const session = createSessionForWireCompatTest({
       clientCapabilities: { [CLIENT_CAPS.projectUpdates]: true },
-      directorySync,
       messages,
     });
     const project = createPersistedProjectRecord({
@@ -385,20 +381,34 @@ describe("wire compatibility", () => {
         message.type === "project.update" ? [message.payload.kind] : [],
       ),
     ).toEqual(["upsert", "remove"]);
-    expect(
-      directorySync.synchronizeProjects([], {
-        generation: initial.sync.generation,
-        afterSeq: initial.sync.headSeq,
+    // Legacy sync hints remain accepted; reconciliation now returns a complete
+    // project snapshot rather than the retired DirectorySyncService journal.
+    await session.handleMessage(
+      SessionInboundMessageSchema.parse({
+        type: "project.list.request",
+        requestId: "req-reconcile-projects",
+        sync: { generation: "generation", afterSeq: 0 },
       }),
-    ).toEqual({
-      projects: [],
-      sync: {
-        generation: "generation",
-        mode: "changes",
-        headSeq: 2,
-        removals: [{ id: "project-ordered", seq: 2 }],
-      },
+    );
+    expect(messages.at(-1)).toEqual({
+      type: "project.list.response",
+      payload: { requestId: "req-reconcile-projects", projects: [] },
     });
+    expect(
+      SessionOutboundMessageSchema.safeParse({
+        type: "project.list.response",
+        payload: {
+          requestId: "req-legacy-reconciliation",
+          projects: [],
+          sync: {
+            generation: "generation",
+            mode: "changes",
+            headSeq: 2,
+            removals: [{ id: "project-ordered", seq: 2 }],
+          },
+        },
+      }).success,
+    ).toBe(true);
   });
 
   test("downgrades reasoning_merge for clients that do not declare the capability", async () => {
@@ -444,6 +454,42 @@ describe("wire compatibility", () => {
     expect(LegacyFetchAgentTimelineResponseMessageSchema.parse(response).payload.entries).toEqual(
       expect.arrayContaining([expect.not.objectContaining({ turnId: expect.anything() })]),
     );
+  });
+
+  test("returns turn metrics on the turn's footer row while legacy schemas ignore them", async () => {
+    const turnMetrics = [
+      { label: "Model", value: "GPT-5.4" },
+      { label: "Cache", value: "82%", tone: "ok" as const },
+    ];
+    const response = await emitTimelineResponse({
+      rows: [
+        {
+          seq: 1,
+          timestamp: "2026-05-02T00:00:00.000Z",
+          item: { type: "user_message", text: "prompt" },
+        },
+        {
+          seq: 2,
+          timestamp: "2026-05-02T00:00:01.000Z",
+          item: { type: "assistant_message", text: "done" },
+          turnMetrics,
+        },
+      ],
+    });
+
+    expect(
+      FetchAgentTimelineResponseMessageSchema.parse(response).payload.entries.map(
+        (entry) => entry.turnMetrics ?? null,
+      ),
+    ).toEqual([null, turnMetrics]);
+    // A row without metrics sends no field at all.
+    expect(JSON.parse(JSON.stringify(response)).payload.entries[0]).not.toHaveProperty(
+      "turnMetrics",
+    );
+    expect(LegacyFetchAgentTimelineResponseMessageSchema.parse(response).payload.entries).toEqual([
+      expect.not.objectContaining({ turnMetrics: expect.anything() }),
+      expect.not.objectContaining({ turnMetrics: expect.anything() }),
+    ]);
   });
 
   test("legacy worktree request shape normalizes to the same internal input as the new shape", async () => {

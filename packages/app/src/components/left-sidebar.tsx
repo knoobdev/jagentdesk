@@ -1,22 +1,22 @@
+import { BuiltinLeftPanel, BuiltinSidebarDestinations } from "@/plugins/builtin/surfaces";
+import { builtinClientRegistry } from "@/plugins/builtin/loaded";
+import { SidebarFooterIconHighlight } from "@/components/sidebar/sidebar-footer-icon-highlight";
+import { UsageSidebarItem, useUsageSummary, useOpenSidebarUsage } from "@/usage/sidebar-item";
+import { BotsSidebar } from "@/bots/sidebar";
+import { isNative as platformIsNative } from "@/constants/platform";
+import { PluginSidebarPanel } from "@/plugins/sidebar-screen-items";
+import { BuiltinPluginGate } from "@/plugins/builtin/gate";
 import { router, usePathname, type Href } from "expo-router";
 import {
-  Boxes,
+  Bot,
   BarChart3,
-  Container,
-  Database,
-  GitPullRequest,
-  Sparkles,
   CalendarClock,
-  Share2,
-  Users,
   FolderPlus,
   History,
   Home,
   Plus,
-  Radar,
   Search,
   Server,
-  Ship,
   Settings,
   Smartphone,
   Store,
@@ -35,26 +35,31 @@ import {
 } from "react";
 import {
   Pressable,
+  ScrollView,
   StyleSheet as RNStyleSheet,
   Text,
   useWindowDimensions,
   View,
   type PressableStateCallbackType,
 } from "react-native";
-import { Gesture } from "react-native-gesture-handler";
+import { Gesture, ScrollView as GHScrollView } from "react-native-gesture-handler";
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
+import {
+  TitlebarDragRegion,
+  WINDOW_CONTENT_DATASET,
+} from "@/components/desktop/titlebar-drag-region";
 import { resolveDesktopSidebarWidth } from "@/components/desktop-sidebar-layout";
 import { HostPicker } from "@/components/hosts/host-picker";
 import { MobileNavGrid } from "@/components/sidebar/mobile-nav-grid";
 import { SidebarHeaderRow } from "@/components/sidebar/sidebar-header-row";
 import { useAppNavTargets, useNewWorkspaceNavigate } from "@/components/sidebar/use-app-nav";
-import { ClickUpSidebarHeader } from "@/components/clickup-shell/clickup-sidebar-header";
-import { useIsClickUpTheme } from "@/components/clickup-shell/use-clickup-chrome";
+import { GumloopSidebarHeader } from "@/components/gumloop-shell/gumloop-sidebar-header";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { PluginSidebarItems } from "@/plugins";
 import { SidebarDisplayPreferencesMenu } from "@/components/sidebar/sidebar-display-preferences-menu";
+import { SidebarToastRegion } from "@/components/sidebar/sidebar-toast-region";
 import { SidebarHelpMenu } from "@/components/sidebar/sidebar-help-menu";
 import { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
 import { Shortcut } from "@/components/ui/shortcut";
@@ -81,8 +86,6 @@ import { useIsMobilePanelPresented } from "@/mobile-panels/provider";
 import {
   buildOpenProjectRoute,
   buildSchedulesRoute,
-  buildSharedSessionsRoute,
-  buildAgentForumRoute,
   buildSessionsRoute,
   buildSettingsAddHostRoute,
   buildSettingsHostSectionRoute,
@@ -93,37 +96,41 @@ import { SidebarAgentListSkeleton } from "./sidebar-agent-list-skeleton";
 import { shouldShowAddProject, shouldShowSidebarFooter } from "./sidebar-add-project-visibility";
 import { SidebarCalloutSlot } from "./sidebar-callout-slot";
 import { SidebarWorkspaceList } from "./sidebar-workspace-list";
-import { SidebarServersNav } from "@/ssh/ui/sidebar-servers-nav";
-import { JiraSidebarEntry } from "@/jira/sidebar-entry";
-import { SidebarJiraNav } from "@/jira/sidebar-jira-nav";
-import { FigmaSidebarEntry } from "@/figma/sidebar-entry";
-import { SidebarFigmaNav } from "@/figma/sidebar-figma-nav";
-import { SidebarClusterNav } from "./sidebar-cluster-nav";
-import { SidebarDatabaseNav } from "./sidebar-database-nav";
-import { SidebarArgoCdNav } from "@/argocd/sidebar-argocd-nav";
 
-/** `/h/<serverId>/argocd[/<instanceId>[/app]]` → the host and the open instance. */
-function parseArgoCdRoute(
-  pathname: string,
-): { serverId: string; instanceId: string | null } | null {
-  const match = pathname.match(/\/h\/([^/]+)\/argocd(?:\/([^/?]+))?/);
-  if (!match) return null;
-  const instanceId = match[2] ? decodeURIComponent(match[2]) : null;
-  return { serverId: decodeURIComponent(match[1]), instanceId };
-}
+// Classic sidebar positions of migrated built-in destinations; the rest follow Marketplace.
+const CLASSIC_SLOT_SHARING: readonly string[] = ["shared-sessions"];
+const CLASSIC_SLOT_SKILLS: readonly string[] = ["skills"];
+const CLASSIC_SLOT_INSIGHTS: readonly string[] = ["insights"];
+const CLASSIC_SLOT_INFRA: readonly string[] = ["clusters", "databases", "servers"];
+const CLASSIC_SLOT_DEPLOY: readonly string[] = ["argocd"];
+const CLASSIC_SLOT_INTEGRATIONS: readonly string[] = ["jira"];
+const CLASSIC_SLOT_TAIL: readonly string[] = ["forge"];
+const CLASSIC_PLACED_DESTINATIONS: readonly string[] = [
+  ...CLASSIC_SLOT_SHARING,
+  ...CLASSIC_SLOT_SKILLS,
+  ...CLASSIC_SLOT_INSIGHTS,
+  ...CLASSIC_SLOT_INFRA,
+  ...CLASSIC_SLOT_DEPLOY,
+  ...CLASSIC_SLOT_INTEGRATIONS,
+  ...CLASSIC_SLOT_TAIL,
+];
 
 /** Sections whose route owns the desktop left column instead of the workspace list. */
 type SectionRoute =
-  | { section: "servers" | "jira" | "figma"; serverId: string }
-  | { section: "argocd"; serverId: string; instanceId: string | null };
+  | { section: "plugin"; serverId: string; pluginId: string }
+  | { section: "servers" | "jira" | "bots"; serverId: string };
 
-function resolveSectionRoute(pathname: string): SectionRoute | null {
-  const argoCd = parseArgoCdRoute(pathname);
-  if (argoCd) return { section: "argocd", ...argoCd };
-  const match = pathname.match(/\/h\/([^/]+)\/(servers|jira|figma)(?:$|[/?])/);
+export function resolveSectionRoute(pathname: string): SectionRoute | null {
+  const plugin = /^\/h\/([^/]+)\/plugin\/([^/]+)/.exec(pathname);
+  if (plugin)
+    return {
+      section: "plugin",
+      serverId: decodeURIComponent(plugin[1]),
+      pluginId: decodeURIComponent(plugin[2]),
+    };
+  const match = pathname.match(/\/h\/([^/]+)\/(servers|jira|bots)(?:$|[/?])/);
   const section = match?.[2];
-  if (!match?.[1] || (section !== "servers" && section !== "jira" && section !== "figma"))
-    return null;
+  if (!match?.[1] || (section !== "servers" && section !== "bots")) return null;
   return { section, serverId: decodeURIComponent(match[1]) };
 }
 
@@ -139,31 +146,27 @@ export { shouldShowAddProject, shouldShowSidebarFooter } from "./sidebar-add-pro
  * rendered directly (not passed as a prop) so the two sidebar variants avoid a
  * nested ternary without tripping the prop-identity perf rules.
  */
-function resolveSidebarNavBody(
-  clusterRoute: { serverId: string; clusterId: string } | null,
-  databaseRoute: { serverId: string; databaseId: string } | null,
+export function resolveSidebarNavBody(
+  builtinPanelRoute: { serverId: string; segment: string } | null,
   fallback: ReactNode,
   sectionRoute: SectionRoute | null = null,
 ): ReactNode {
-  // A section that owns the left column (spec 25.13.1 Servers, 29.3 Jira, 30.3 Argo CD).
+  if (sectionRoute?.section === "bots")
+    return (
+      <BuiltinPluginGate serverId={sectionRoute.serverId} id="bots">
+        <BotsSidebar serverId={sectionRoute.serverId} />
+      </BuiltinPluginGate>
+    );
+  if (sectionRoute?.section === "plugin")
+    return <PluginSidebarPanel serverId={sectionRoute.serverId} pluginId={sectionRoute.pluginId} />;
+  // A section that owns the left column (spec 25.13.1 Servers, 29.3 Jira).
   if (sectionRoute?.section === "servers")
-    return <SidebarServersNav serverId={sectionRoute.serverId} />;
-  if (sectionRoute?.section === "jira") return <SidebarJiraNav serverId={sectionRoute.serverId} />;
-  if (sectionRoute?.section === "figma")
-    return <SidebarFigmaNav serverId={sectionRoute.serverId} />;
-  if (sectionRoute?.section === "argocd") {
+    return <BuiltinLeftPanel serverId={sectionRoute.serverId} segment="servers" />;
+  if (sectionRoute?.section === "jira")
+    return <BuiltinLeftPanel serverId={sectionRoute.serverId} segment="jira" />;
+  if (builtinPanelRoute) {
     return (
-      <SidebarArgoCdNav serverId={sectionRoute.serverId} instanceId={sectionRoute.instanceId} />
-    );
-  }
-  if (clusterRoute) {
-    return (
-      <SidebarClusterNav serverId={clusterRoute.serverId} clusterId={clusterRoute.clusterId} />
-    );
-  }
-  if (databaseRoute) {
-    return (
-      <SidebarDatabaseNav serverId={databaseRoute.serverId} databaseId={databaseRoute.databaseId} />
+      <BuiltinLeftPanel serverId={builtinPanelRoute.serverId} segment={builtinPanelRoute.segment} />
     );
   }
   return fallback;
@@ -190,24 +193,7 @@ interface SidebarSharedProps {
   handleOpenProject: () => void;
   handleHome: () => void;
   handleSettings: () => void;
-  handleClusters: () => void;
-  handleDatabases: () => void;
-  handleServers: () => void;
-  handleArgoCd: () => void;
-  handleSkills: () => void;
-  handleInsights: () => void;
-  handleForge: () => void;
   handleMarketplace: () => void;
-  handleDocker: () => void;
-  handleSimulator: () => void;
-  handleWorkbench: () => void;
-  supportsForgeHub: boolean;
-  /** Spec 25: SSH Servers entry only when the daemon advertises sshServers. */
-  supportsSshServers: boolean;
-  /** Spec 30.3: Argo CD entry only when the daemon advertises argocd. */
-  supportsArgoCd: boolean;
-  /** Some connected host can run simulators (spec 24.4). */
-  supportsDevices: boolean;
   labels: SidebarLabels;
   newWorkspaceKeys: ShortcutKey[][] | null;
   handleAddHost: () => void;
@@ -224,19 +210,8 @@ interface SidebarLabels {
   searchHosts: string;
   sessions: string;
   schedules: string;
-  sharedSessions: string;
-  agentForum: string;
-  clusters: string;
-  databases: string;
-  servers: string;
-  argoCd: string;
-  skills: string;
-  insights: string;
-  forge: string;
+  bots: string;
   marketplace: string;
-  docker: string;
-  simulator: string;
-  workbench: string;
   closeSidebar: string;
 }
 
@@ -248,11 +223,10 @@ interface MobileSidebarProps extends SidebarSharedProps {
 
 interface DesktopSidebarProps extends SidebarSharedProps {
   insetsTop: number;
+  insetsBottom: number;
   active: boolean;
   handleViewMore: () => void;
   handleViewSchedules: () => void;
-  handleViewSharedSessions: () => void;
-  handleViewAgentForum: () => void;
 }
 
 export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boolean }) {
@@ -340,108 +314,11 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     router.push(buildOpenProjectRoute());
   }, []);
 
-  const {
-    clustersRoute,
-    databasesRoute,
-    serversRoute,
-    supportsSshServers,
-    skillsRoute,
-    insightsRoute,
-    forgeRoute,
-    marketplaceRoute,
-    dockerRoute,
-    simulatorRoute,
-    proxyRoute,
-    argoCdRoute,
-    supportsForgeHub,
-  } = useAppNavTargets();
+  const { marketplaceRoute } = useAppNavTargets();
 
-  const handleSkillsDesktop = useCallback(() => {
-    if (skillsRoute) router.push(skillsRoute);
-  }, [skillsRoute]);
-  const handleInsightsDesktop = useCallback(() => {
-    if (insightsRoute) router.push(insightsRoute);
-  }, [insightsRoute]);
-  const handleForgeDesktop = useCallback(() => {
-    if (forgeRoute) router.push(forgeRoute);
-  }, [forgeRoute]);
   const handleMarketplaceDesktop = useCallback(() => {
     if (marketplaceRoute) router.push(marketplaceRoute);
   }, [marketplaceRoute]);
-  const handleDockerDesktop = useCallback(() => {
-    if (dockerRoute) router.push(dockerRoute as Href);
-  }, [dockerRoute]);
-  const handleSimulatorDesktop = useCallback(() => {
-    if (simulatorRoute) router.push(simulatorRoute as Href);
-  }, [simulatorRoute]);
-  const handleWorkbenchDesktop = useCallback(() => {
-    if (proxyRoute) router.push(proxyRoute as Href);
-  }, [proxyRoute]);
-
-  const handleClustersDesktop = useCallback(() => {
-    if (clustersRoute) router.push(clustersRoute);
-  }, [clustersRoute]);
-
-  const handleClustersMobile = useCallback(() => {
-    if (clustersRoute) {
-      showMobileAgent();
-      router.push(clustersRoute);
-    }
-  }, [clustersRoute, showMobileAgent]);
-
-  const handleDatabasesDesktop = useCallback(() => {
-    if (databasesRoute) router.push(databasesRoute);
-  }, [databasesRoute]);
-
-  const handleDatabasesMobile = useCallback(() => {
-    if (databasesRoute) {
-      showMobileAgent();
-      router.push(databasesRoute);
-    }
-  }, [databasesRoute, showMobileAgent]);
-
-  const handleServersDesktop = useCallback(() => {
-    if (serversRoute) router.push(serversRoute as Href);
-  }, [serversRoute]);
-
-  const handleServersMobile = useCallback(() => {
-    if (serversRoute) {
-      showMobileAgent();
-      router.push(serversRoute as Href);
-    }
-  }, [serversRoute, showMobileAgent]);
-
-  const handleArgoCdDesktop = useCallback(() => {
-    if (argoCdRoute) router.push(argoCdRoute);
-  }, [argoCdRoute]);
-
-  const handleArgoCdMobile = useCallback(() => {
-    if (argoCdRoute) {
-      showMobileAgent();
-      router.push(argoCdRoute);
-    }
-  }, [argoCdRoute, showMobileAgent]);
-
-  const handleSkillsMobile = useCallback(() => {
-    if (skillsRoute) {
-      showMobileAgent();
-      router.push(skillsRoute);
-    }
-  }, [skillsRoute, showMobileAgent]);
-
-  const handleInsightsMobile = useCallback(() => {
-    if (insightsRoute) {
-      showMobileAgent();
-      router.push(insightsRoute);
-    }
-  }, [insightsRoute, showMobileAgent]);
-
-  const handleForgeMobile = useCallback(() => {
-    if (forgeRoute) {
-      showMobileAgent();
-      router.push(forgeRoute);
-    }
-  }, [forgeRoute, showMobileAgent]);
 
   const handleMarketplaceMobile = useCallback(() => {
     if (marketplaceRoute) {
@@ -450,44 +327,12 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     }
   }, [marketplaceRoute, showMobileAgent]);
 
-  const handleDockerMobile = useCallback(() => {
-    if (dockerRoute) {
-      showMobileAgent();
-      router.push(dockerRoute as Href);
-    }
-  }, [dockerRoute, showMobileAgent]);
-
-  const handleSimulatorMobile = useCallback(() => {
-    if (simulatorRoute) {
-      showMobileAgent();
-      router.push(simulatorRoute as Href);
-    }
-  }, [simulatorRoute, showMobileAgent]);
-
-  const handleWorkbenchMobile = useCallback(() => {
-    if (proxyRoute) {
-      showMobileAgent();
-      router.push(proxyRoute as Href);
-    }
-  }, [proxyRoute, showMobileAgent]);
-
   const handleViewMoreNavigate = useCallback(() => {
     router.push(buildSessionsRoute());
   }, []);
 
   const handleViewSchedulesNavigate = useCallback(() => {
     router.push(buildSchedulesRoute());
-  }, []);
-
-  const handleViewSharedSessionsNavigate = useCallback(() => {
-    // Cast: expo-router's typed-routes manifest re-indexes /shared-sessions on the next dev run; the
-    // route file exists and resolves at runtime.
-    router.push(buildSharedSessionsRoute() as Href);
-  }, []);
-
-  const handleViewAgentForumNavigate = useCallback(() => {
-    // Cast: expo-router's typed-routes manifest re-indexes /agent-forum on the next dev run.
-    router.push(buildAgentForumRoute() as Href);
   }, []);
 
   const newWorkspaceKeys = useShortcutKeys("new-workspace");
@@ -502,19 +347,8 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       searchHosts: t("sidebar.host.searchPlaceholder"),
       sessions: t("sidebar.sections.sessions"),
       schedules: t("sidebar.sections.schedules"),
-      sharedSessions: "Shared sessions",
-      agentForum: "Team",
-      clusters: "Clusters",
-      databases: "Databases",
-      servers: "Servers",
-      argoCd: "Argo CD",
-      skills: "Skills",
-      insights: "Usage & Cost",
-      forge: "Forge",
+      bots: t("bots.title"),
       marketplace: t("sidebar.actions.marketplace"),
-      docker: "Docker",
-      simulator: "Simulators",
-      workbench: "Workbench",
       closeSidebar: t("sidebar.actions.closeSidebar"),
     }),
     [t],
@@ -534,21 +368,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     shortcutIndexByWorkspaceKey,
     toggleProjectCollapsed,
     handleRefresh,
-    handleClusters: handleClustersDesktop,
-    handleDatabases: handleDatabasesDesktop,
-    handleServers: handleServersDesktop,
-    handleArgoCd: handleArgoCdDesktop,
-    handleSkills: handleSkillsDesktop,
-    handleInsights: handleInsightsDesktop,
-    handleForge: handleForgeDesktop,
     handleMarketplace: handleMarketplaceDesktop,
-    handleDocker: handleDockerDesktop,
-    handleSimulator: handleSimulatorDesktop,
-    handleWorkbench: handleWorkbenchDesktop,
-    supportsForgeHub,
-    supportsSshServers,
-    supportsArgoCd: argoCdRoute !== null,
-    supportsDevices: simulatorRoute !== null,
     labels,
     newWorkspaceKeys,
   };
@@ -558,17 +378,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       <RetainedPanelActivity active={active}>
         <MobileSidebar
           {...sharedProps}
-          handleClusters={handleClustersMobile}
-          handleDatabases={handleDatabasesMobile}
-          handleServers={handleServersMobile}
-          handleArgoCd={handleArgoCdMobile}
-          handleSkills={handleSkillsMobile}
-          handleInsights={handleInsightsMobile}
-          handleForge={handleForgeMobile}
           handleMarketplace={handleMarketplaceMobile}
-          handleDocker={handleDockerMobile}
-          handleSimulator={handleSimulatorMobile}
-          handleWorkbench={handleWorkbenchMobile}
           insetsTop={insets.top}
           insetsBottom={insets.bottom}
           closeSidebar={showMobileAgent}
@@ -586,18 +396,9 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     <RetainedPanelActivity active={active}>
       <DesktopSidebar
         {...sharedProps}
-        handleClusters={handleClustersDesktop}
-        handleDatabases={handleDatabasesDesktop}
-        handleServers={handleServersDesktop}
-        handleArgoCd={handleArgoCdDesktop}
-        handleSkills={handleSkillsDesktop}
-        handleInsights={handleInsightsDesktop}
-        handleForge={handleForgeDesktop}
         handleMarketplace={handleMarketplaceDesktop}
-        handleDocker={handleDockerDesktop}
-        handleSimulator={handleSimulatorDesktop}
-        handleWorkbench={handleWorkbenchDesktop}
         insetsTop={insets.top}
+        insetsBottom={insets.bottom}
         active={active}
         handleOpenProject={handleOpenProjectDesktop}
         handleHome={handleHomeDesktop}
@@ -606,8 +407,6 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
         handleOpenHostSettings={handleOpenHostSettingsDesktop}
         handleViewMore={handleViewMoreNavigate}
         handleViewSchedules={handleViewSchedulesNavigate}
-        handleViewSharedSessions={handleViewSharedSessionsNavigate}
-        handleViewAgentForum={handleViewAgentForumNavigate}
       />
     </RetainedPanelActivity>
   );
@@ -650,11 +449,14 @@ function FooterIconButton({
           accessibilityRole="button"
           onPress={onPress}
         >
-          {({ hovered }) => (
-            <Icon
-              size={iconSize ?? theme.iconSize.md}
-              color={hovered ? theme.colors.foreground : theme.colors.foregroundMuted}
-            />
+          {({ hovered, pressed }) => (
+            <>
+              <SidebarFooterIconHighlight visible={pressed} />
+              <Icon
+                size={iconSize ?? theme.iconSize.md}
+                color={hovered ? theme.colors.foreground : theme.colors.foregroundMuted}
+              />
+            </>
           )}
         </Pressable>
       </TooltipTrigger>
@@ -846,9 +648,11 @@ function SidebarFooter({
   handleOpenHostSettings: (serverId: string) => void;
   showAddProject?: boolean;
 }) {
+  const openUsage = useOpenSidebarUsage();
+  const usageSummary = useUsageSummary();
   const newAgentKeys = useShortcutKeys("new-agent");
   const settingsKeys = useShortcutKeys("toggle-settings");
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const localServerId = useLocalDaemonServerId();
   const openPairDeviceModal = usePairDeviceModalStore((state) => state.open);
   const handleOpenPairDevice = useCallback(() => {
@@ -858,7 +662,15 @@ function SidebarFooter({
   }, [localServerId, openPairDeviceModal]);
 
   return (
-    <View style={styles.sidebarFooter}>
+    <View style={[styles.sidebarFooter, styles.footerWithUsage]} testID="sidebar-footer">
+      <SidebarHeaderRow
+        icon={BarChart3}
+        label="Usage"
+        onPress={openUsage}
+        testID="sidebar-usage-open"
+        variant="compact"
+      />
+      <UsageSidebarItem sources={usageSummary} />
       {showAddProject ? (
         <FooterAddProjectButton
           onPress={handleOpenProject}
@@ -867,8 +679,8 @@ function SidebarFooter({
           theme={theme}
         />
       ) : null}
-      {/* The ClickUp shell moves hosts, help, pairing and settings to the top bar and rail. */}
-      <View style={isClickUp ? styles.footerIconRowHidden : styles.footerIconRow}>
+      {/* The Gumloop shell moves hosts, help, pairing and settings to the top bar and rail. */}
+      <View style={isGumloop ? styles.footerIconRowHidden : styles.footerIconRow}>
         <SidebarHostPicker
           theme={theme}
           label={labels.hosts}
@@ -932,22 +744,11 @@ function MobileSidebar({
 }: MobileSidebarProps) {
   const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
   const pathname = usePathname();
-  const clusterRouteMatch = pathname.match(/\/h\/([^/]+)\/cluster\/([^/]+)/);
-  const clusterRoute = clusterRouteMatch
-    ? {
-        serverId: decodeURIComponent(clusterRouteMatch[1]),
-        clusterId: decodeURIComponent(clusterRouteMatch[2]),
-      }
-    : null;
-  const databaseRouteMatch = pathname.match(/\/h\/([^/]+)\/database\/([^/]+)/);
-  const databaseRoute = databaseRouteMatch
-    ? {
-        serverId: decodeURIComponent(databaseRouteMatch[1]),
-        databaseId: decodeURIComponent(databaseRouteMatch[2]),
-      }
-    : null;
+  // Section panels (Argo CD) are desktop-only, as core sections are.
+  const navigationPanel = builtinClientRegistry.navigationPanelRoute(pathname);
+  const builtinPanelRoute = navigationPanel?.section ? null : navigationPanel;
   const { gesture: closeGesture, gestureRef: closeGestureRef } = useCloseAgentListGesture();
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const dragGestureHostPresented = useIsMobilePanelPresented("agent-list");
 
   const handleWorkspacePress = useCallback(() => {
@@ -986,6 +787,43 @@ function MobileSidebar({
       />
     );
 
+  const mobileNavRows = (
+    <View style={styles.sidebarHeaderGroup}>
+      {isGumloop ? null : (
+        <SidebarNewWorkspaceHeaderRow
+          label={labels.newWorkspace}
+          testID="sidebar-global-new-workspace"
+          variant="compact"
+          shortcutKeys={newWorkspaceKeys}
+          onBeforeNavigate={closeSidebar}
+        />
+      )}
+      <MobileNavGrid onBeforeNavigate={closeSidebar} parentGestureRef={closeGestureRef} />
+      <PluginSidebarItems onBeforeNavigate={closeSidebar} />
+    </View>
+  );
+
+  const mobileNavigation = platformIsNative ? (
+    <GHScrollView
+      simultaneousHandlers={closeGestureRef}
+      style={styles.mobileNavScroll}
+      showsVerticalScrollIndicator={false}
+      alwaysBounceVertical={false}
+      testID="sidebar-nav-scroll"
+    >
+      {mobileNavRows}
+    </GHScrollView>
+  ) : (
+    <ScrollView
+      style={styles.mobileNavScroll}
+      showsVerticalScrollIndicator={false}
+      alwaysBounceVertical={false}
+      testID="sidebar-nav-scroll"
+    >
+      {mobileNavRows}
+    </ScrollView>
+  );
+
   return (
     <MobilePanelOverlay
       panel="agent-list"
@@ -994,24 +832,10 @@ function MobileSidebar({
     >
       <View style={styles.sidebarContent} pointerEvents="auto">
         <WindowChromeSafeArea placement="below" />
-        {isClickUp ? (
-          <ClickUpSidebarHeader onBeforeNavigate={closeSidebar} reserveCloseButton />
+        {isGumloop ? (
+          <GumloopSidebarHeader onBeforeNavigate={closeSidebar} reserveCloseButton />
         ) : null}
-        {clusterRoute || databaseRoute ? null : (
-          <View style={styles.sidebarHeaderGroup}>
-            {isClickUp ? null : (
-              <SidebarNewWorkspaceHeaderRow
-                label={labels.newWorkspace}
-                testID="sidebar-global-new-workspace"
-                variant="compact"
-                shortcutKeys={newWorkspaceKeys}
-                onBeforeNavigate={closeSidebar}
-              />
-            )}
-            <MobileNavGrid onBeforeNavigate={closeSidebar} parentGestureRef={closeGestureRef} />
-            <PluginSidebarItems onBeforeNavigate={closeSidebar} />
-          </View>
-        )}
+        {builtinPanelRoute ? null : mobileNavigation}
         <WindowChromeSafeArea placement="inline" style={styles.mobileCloseButtonRow}>
           <Pressable
             style={styles.mobileCloseButton}
@@ -1032,7 +856,12 @@ function MobileSidebar({
           </Pressable>
         </WindowChromeSafeArea>
 
-        {resolveSidebarNavBody(clusterRoute, databaseRoute, mobileWorkspaceBody)}
+        {resolveSidebarNavBody(
+          builtinPanelRoute,
+          <SidebarToastRegion active={dragGestureHostPresented}>
+            {mobileWorkspaceBody}
+          </SidebarToastRegion>,
+        )}
 
         <SidebarFooter
           theme={theme}
@@ -1066,64 +895,28 @@ function DesktopSidebar({
   handleOpenProject,
   handleHome,
   handleSettings,
-  handleClusters,
-  handleDatabases,
-  handleServers,
-  handleArgoCd,
-  handleSkills,
-  handleInsights,
-  handleForge,
   handleMarketplace,
-  handleDocker,
-  handleSimulator,
-  handleWorkbench,
-  supportsForgeHub,
-  supportsSshServers,
-  supportsArgoCd,
-  supportsDevices,
   labels,
   handleAddHost,
   handleOpenHostSettings,
   insetsTop,
+  insetsBottom,
   active,
   handleViewMore,
   handleViewSchedules,
-  handleViewSharedSessions,
-  handleViewAgentForum,
 }: DesktopSidebarProps) {
+  const builtinTargets = useAppNavTargets();
+  const handleBots = useCallback(() => {
+    if (builtinTargets.botsRoute) router.push(builtinTargets.botsRoute);
+  }, [builtinTargets.botsRoute]);
   const ownsTopLeft = useOwnsWindowChromeCorner("top-left");
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const pathname = usePathname();
   const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
   const isSessionsActive = pathname.includes("/sessions");
   const isSchedulesActive = pathname.includes("/schedules");
-  const isSharedSessionsActive = pathname.includes("/shared-sessions");
-  const isAgentForumActive = pathname.includes("/agent-forum");
-  const isClustersActive = pathname.includes("/clusters");
-  const isDatabasesActive = pathname.includes("/database");
-  const isServersActive = pathname.includes("/servers");
-  const isArgoCdActive = pathname.includes("/argocd");
-  const isSkillsActive = pathname.includes("/skills");
-  const isInsightsActive = pathname.includes("/insights");
-  const isForgeActive = pathname.includes("/forge");
   const isMarketplaceActive = pathname.includes("/marketplace");
-  const isDockerActive = pathname.includes("/docker");
-  const isSimulatorActive = pathname.includes("/simulator");
-  const isWorkbenchActive = pathname.includes("/proxy");
-  const clusterRouteMatch = pathname.match(/\/h\/([^/]+)\/cluster\/([^/]+)/);
-  const clusterRoute = clusterRouteMatch
-    ? {
-        serverId: decodeURIComponent(clusterRouteMatch[1]),
-        clusterId: decodeURIComponent(clusterRouteMatch[2]),
-      }
-    : null;
-  const databaseRouteMatch = pathname.match(/\/h\/([^/]+)\/database\/([^/]+)/);
-  const databaseRoute = databaseRouteMatch
-    ? {
-        serverId: decodeURIComponent(databaseRouteMatch[1]),
-        databaseId: decodeURIComponent(databaseRouteMatch[2]),
-      }
-    : null;
+  const builtinPanelRoute = builtinClientRegistry.navigationPanelRoute(pathname);
   const sectionRoute = resolveSectionRoute(pathname);
   const sidebarWidth = usePanelStore((state) => state.sidebarWidth);
   const setSidebarWidth = usePanelStore((state) => state.setSidebarWidth);
@@ -1175,8 +968,11 @@ function DesktopSidebar({
     [active, resizeAnimatedStyle],
   );
   const desktopSidebarBorderStyle = useMemo(
-    () => [styles.desktopSidebarBorder, { flex: 1, paddingTop: insetsTop }],
-    [insetsTop],
+    () => [
+      styles.desktopSidebarBorder,
+      { flex: 1, paddingTop: insetsTop, paddingBottom: insetsBottom },
+    ],
+    [insetsTop, insetsBottom],
   );
   const sidebarHeaderGroupStyle = useMemo(
     () => [styles.sidebarHeaderGroup, ownsTopLeft && styles.sidebarHeaderGroupBelowChrome],
@@ -1215,153 +1011,80 @@ function DesktopSidebar({
               <TitlebarDragRegion />
             </View>
           ) : (
-            <TitlebarDragRegion />
-          )}
-          {isClickUp && !sectionRoute ? <ClickUpSidebarHeader /> : null}
-          {clusterRoute || databaseRoute || sectionRoute || isClickUp ? null : (
-            <View style={sidebarHeaderGroupStyle}>
-              <SidebarNewWorkspaceHeaderRow
-                label={labels.newWorkspace}
-                testID="sidebar-global-new-workspace"
-                variant="compact"
-                shortcutKeys={newWorkspaceKeys}
-              />
-              <SidebarHeaderRow
-                icon={History}
-                label={labels.sessions}
-                onPress={handleViewMore}
-                isActive={isSessionsActive}
-                testID="sidebar-sessions"
-                variant="compact"
-              />
-              <SidebarHeaderRow
-                icon={CalendarClock}
-                label={labels.schedules}
-                onPress={handleViewSchedules}
-                isActive={isSchedulesActive}
-                testID="sidebar-schedules"
-                variant="compact"
-              />
-              <SidebarHeaderRow
-                icon={Share2}
-                label={labels.sharedSessions}
-                onPress={handleViewSharedSessions}
-                isActive={isSharedSessionsActive}
-                testID="sidebar-shared-sessions"
-                variant="compact"
-              />
-              <SidebarHeaderRow
-                icon={Users}
-                label={labels.agentForum}
-                onPress={handleViewAgentForum}
-                isActive={isAgentForumActive}
-                testID="sidebar-agent-forum"
-                variant="compact"
-              />
-              <SidebarHeaderRow
-                icon={Boxes}
-                label={labels.clusters}
-                onPress={handleClusters}
-                isActive={isClustersActive}
-                testID="sidebar-clusters-nav"
-                variant="compact"
-              />
-              <SidebarHeaderRow
-                icon={Database}
-                label={labels.databases}
-                onPress={handleDatabases}
-                isActive={isDatabasesActive}
-                testID="sidebar-databases-nav"
-                variant="compact"
-              />
-              {supportsSshServers ? (
-                <SidebarHeaderRow
-                  icon={Server}
-                  label={labels.servers}
-                  onPress={handleServers}
-                  isActive={isServersActive}
-                  testID="sidebar-servers-nav"
-                  variant="compact"
-                />
-              ) : null}
-              {supportsArgoCd ? (
-                <SidebarHeaderRow
-                  icon={Ship}
-                  label={labels.argoCd}
-                  onPress={handleArgoCd}
-                  isActive={isArgoCdActive}
-                  testID="sidebar-argocd-nav"
-                  variant="compact"
-                />
-              ) : null}
-              <JiraSidebarEntry closesDrawer={false} />
-              <FigmaSidebarEntry closesDrawer={false} />
-              <SidebarHeaderRow
-                icon={Sparkles}
-                label={labels.skills}
-                onPress={handleSkills}
-                isActive={isSkillsActive}
-                testID="sidebar-skills-nav"
-                variant="compact"
-              />
-              <SidebarHeaderRow
-                icon={Store}
-                label={labels.marketplace}
-                onPress={handleMarketplace}
-                isActive={isMarketplaceActive}
-                testID="sidebar-marketplace-nav"
-                variant="compact"
-              />
-              <SidebarHeaderRow
-                icon={Container}
-                label={labels.docker}
-                onPress={handleDocker}
-                isActive={isDockerActive}
-                testID="sidebar-docker-nav"
-                variant="compact"
-              />
-              {supportsDevices ? (
-                <SidebarHeaderRow
-                  icon={Smartphone}
-                  label={labels.simulator}
-                  onPress={handleSimulator}
-                  isActive={isSimulatorActive}
-                  testID="sidebar-simulator-nav"
-                  variant="compact"
-                />
-              ) : null}
-              <SidebarHeaderRow
-                icon={Radar}
-                label={labels.workbench}
-                onPress={handleWorkbench}
-                isActive={isWorkbenchActive}
-                testID="sidebar-workbench-nav"
-                variant="compact"
-              />
-              <SidebarHeaderRow
-                icon={BarChart3}
-                label={labels.insights}
-                onPress={handleInsights}
-                isActive={isInsightsActive}
-                testID="sidebar-insights-nav"
-                variant="compact"
-              />
-              {supportsForgeHub ? (
-                <SidebarHeaderRow
-                  icon={GitPullRequest}
-                  label={labels.forge}
-                  onPress={handleForge}
-                  isActive={isForgeActive}
-                  testID="sidebar-forge-nav"
-                  variant="compact"
-                />
-              ) : null}
-              <PluginSidebarItems />
+            <View style={styles.desktopDragStrip}>
+              <TitlebarDragRegion />
             </View>
           )}
+          {isGumloop && !sectionRoute && !builtinPanelRoute?.section ? (
+            <GumloopSidebarHeader />
+          ) : null}
         </View>
+        {builtinPanelRoute || sectionRoute || isGumloop ? null : (
+          <ScrollView
+            dataSet={WINDOW_CONTENT_DATASET}
+            style={styles.navScroll}
+            contentContainerStyle={sidebarHeaderGroupStyle}
+            showsVerticalScrollIndicator={false}
+            testID="sidebar-nav-scroll"
+          >
+            <SidebarNewWorkspaceHeaderRow
+              label={labels.newWorkspace}
+              testID="sidebar-global-new-workspace"
+              variant="compact"
+              shortcutKeys={newWorkspaceKeys}
+            />
+            <SidebarHeaderRow
+              icon={History}
+              label={labels.sessions}
+              onPress={handleViewMore}
+              isActive={isSessionsActive}
+              testID="sidebar-sessions"
+              variant="compact"
+            />
+            <SidebarHeaderRow
+              icon={CalendarClock}
+              label={labels.schedules}
+              onPress={handleViewSchedules}
+              isActive={isSchedulesActive}
+              testID="sidebar-schedules"
+              variant="compact"
+            />
+            <NavTargetGate route={builtinTargets.botsRoute}>
+              <SidebarHeaderRow
+                icon={Bot}
+                label={labels.bots}
+                onPress={handleBots}
+                isActive={pathname.includes("/bots")}
+                testID="sidebar-bots"
+                variant="compact"
+              />
+            </NavTargetGate>
+            <BuiltinSidebarDestinations only={CLASSIC_SLOT_SHARING} />
 
-        {resolveSidebarNavBody(clusterRoute, databaseRoute, workspaceListElement, sectionRoute)}
+            <BuiltinSidebarDestinations only={CLASSIC_SLOT_INFRA} />
+            <BuiltinSidebarDestinations only={CLASSIC_SLOT_DEPLOY} />
+            <BuiltinSidebarDestinations only={CLASSIC_SLOT_INTEGRATIONS} />
+            <BuiltinSidebarDestinations only={CLASSIC_SLOT_SKILLS} />
+            <SidebarHeaderRow
+              icon={Store}
+              label={labels.marketplace}
+              onPress={handleMarketplace}
+              isActive={isMarketplaceActive}
+              testID="sidebar-marketplace-nav"
+              variant="compact"
+            />
+            <BuiltinSidebarDestinations except={CLASSIC_PLACED_DESTINATIONS} />
+            <BuiltinSidebarDestinations only={CLASSIC_SLOT_INSIGHTS} />
+            <BuiltinSidebarDestinations only={CLASSIC_SLOT_TAIL} />
+            <PluginSidebarItems />
+          </ScrollView>
+        )}
+
+        {resolveSidebarNavBody(
+          builtinPanelRoute,
+          <SidebarToastRegion active={active}>{workspaceListElement}</SidebarToastRegion>,
+          sectionRoute,
+        )}
 
         <SidebarCalloutSlot />
 
@@ -1390,7 +1113,7 @@ function DesktopSidebar({
 
 function WorkspacesSectionHeader() {
   const { theme } = useUnistyles();
-  const isClickUp = useIsClickUpTheme();
+  const isGumloop = useIsGumloopTheme();
   const setCommandCenterOpen = useKeyboardShortcutsStore((state) => state.setCommandCenterOpen);
   const commandCenterKeys = useShortcutKeys("toggle-command-center");
   const handleSearchPress = useCallback(() => setCommandCenterOpen(true), [setCommandCenterOpen]);
@@ -1404,7 +1127,7 @@ function WorkspacesSectionHeader() {
 
   return (
     <View style={styles.workspacesSectionHeader}>
-      <Text style={styles.workspacesSectionTitle}>{isClickUp ? "Projects" : "Workspaces"}</Text>
+      <Text style={styles.workspacesSectionTitle}>{isGumloop ? "Projects" : "Workspaces"}</Text>
       <View style={styles.workspacesSectionActions}>
         <Tooltip delayDuration={300}>
           <TooltipTrigger asChild>
@@ -1461,6 +1184,9 @@ const staticStyles = RNStyleSheet.create({
 });
 
 const styles = StyleSheet.create((theme) => ({
+  mobileNavScroll: { flexGrow: 0, flexShrink: 1, maxHeight: "50%" },
+  navScroll: { flexGrow: 0, flexShrink: 1, maxHeight: "50%" },
+  desktopDragStrip: { position: "relative", height: theme.spacing[2] },
   sidebarHeaderGroup: {
     paddingTop: theme.spacing[2],
     gap: 2,
@@ -1542,6 +1268,7 @@ const styles = StyleSheet.create((theme) => ({
     borderBottomWidth: theme.borderWidth[1],
     borderBottomColor: "transparent",
   },
+  footerWithUsage: { flexDirection: "column", alignItems: "stretch" },
   sidebarFooter: {
     flexDirection: "row",
     alignItems: "center",
@@ -1602,3 +1329,7 @@ const styles = StyleSheet.create((theme) => ({
     color: theme.colors.popoverForeground,
   },
 }));
+
+function NavTargetGate({ route, children }: { route: Href | null; children: ReactNode }) {
+  return route ? children : null;
+}

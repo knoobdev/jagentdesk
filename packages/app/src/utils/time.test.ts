@@ -6,7 +6,7 @@ describe("formatTimeAgo", () => {
 
   it.each([
     ["2026-07-16T11:59:55.000Z", "just now"],
-    ["2026-07-16T11:59:30.000Z", "30s ago"],
+    ["2026-07-16T11:59:30.000Z", "just now"],
     ["2026-07-16T11:55:00.000Z", "5m ago"],
     ["2026-07-16T10:00:00.000Z", "2h ago"],
     ["2026-07-13T12:00:00.000Z", "3d ago"],
@@ -79,4 +79,11 @@ describe("formatMessageTimestamp", () => {
     expect(formatted).toMatch(/Apr|April/);
     expect(formatted).toMatch(/2026/);
   });
+});
+
+// Shared minute resolution keeps fresh labels stable between ticks.
+it("uses one minute thresholds for prose and compact labels", () => {
+  const now = new Date("2026-07-16T12:00:00Z");
+  expect(formatTimeAgo(new Date(now.getTime() - 59_999), now)).toBe("just now");
+  expect(formatTimeAgo(new Date(now.getTime() - 60_000), now)).toBe("1m ago");
 });

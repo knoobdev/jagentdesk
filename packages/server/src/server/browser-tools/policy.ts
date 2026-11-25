@@ -8,7 +8,8 @@ export class DaemonConfigBrowserToolsPolicy implements BrowserToolsPolicy {
   public constructor(private readonly configStore: Pick<DaemonConfigStore, "get">) {}
 
   public isEnabled(): boolean {
-    return readBrowserToolsEnabled(this.configStore.get());
+    const config = this.configStore.get();
+    return config.builtinPlugins?.["browser-tools"]?.enabled ?? readBrowserToolsEnabled(config);
   }
 }
 

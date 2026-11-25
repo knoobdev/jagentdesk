@@ -5,6 +5,7 @@ export interface BrowserCaptureImage {
 
 export interface BrowserCaptureGuest<TImage extends BrowserCaptureImage = BrowserCaptureImage> {
   isDestroyed(): boolean;
+  getZoomFactor(): number;
   capturePage(rect: BrowserCaptureRect): Promise<TImage>;
 }
 
@@ -37,7 +38,9 @@ export interface BrowserCaptureService {
   copy(payload: unknown): boolean;
 }
 
-function captureRect(value: unknown): BrowserCaptureRect | null {
+// The renderer measures the element in page CSS pixels, while capturePage
+// takes device-independent pixels, so the page zoom scales the region.
+function captureRect(value: unknown, zoomFactor: number): BrowserCaptureRect | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
   const coordinates = [record.x, record.y, record.width, record.height];
@@ -48,7 +51,9 @@ function captureRect(value: unknown): BrowserCaptureRect | null {
   ) {
     return null;
   }
-  const [x, y, width, height] = coordinates as number[];
+  const [x, y, width, height] = (coordinates as number[]).map(
+    (coordinate) => coordinate * zoomFactor,
+  );
   if (width <= 0 || height <= 0) return null;
   return {
     x: Math.max(0, Math.round(x)),
@@ -77,8 +82,9 @@ export function createBrowserCaptureService<TImage extends BrowserCaptureImage>(
     async capture({ browserId, hostWebContentsId, rect }) {
       if (typeof browserId !== "string" || browserId.trim().length === 0) return null;
       const guest = dependencies.findGuest(browserId, hostWebContentsId);
-      const bounds = captureRect(rect);
-      if (!guest || guest.isDestroyed() || !bounds) return null;
+      if (!guest || guest.isDestroyed()) return null;
+      const bounds = captureRect(rect, guest.getZoomFactor());
+      if (!bounds) return null;
       try {
         const image = await guest.capturePage(bounds);
         return image.isEmpty() ? null : image.toDataURL();

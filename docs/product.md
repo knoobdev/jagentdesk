@@ -68,14 +68,19 @@ Anyone who builds software:
 3. **The daemon as infrastructure.** Server/client architecture enables deployment anywhere.
 4. **Open source outlasts funding.** Open source communities are resilient. Contributors become advocates.
 
-## Current state (May 2026)
+## Current state (v0.10.0)
 
-- Desktop (Electron), mobile (iOS/Android), web, CLI
-- Built-in providers: Claude Code (Agent SDK), Codex (app-server), GitHub Copilot (ACP), OpenCode, Pi, OMP
-- One-click ACP provider catalog: CodeWhale, Cursor, Hermes, Qwen Coder, Kimi Code, and others — plus custom ACP providers
+- Desktop (Electron), mobile (iOS/Android, Expo 57 / React Native 0.86), web, CLI
+- Built-in providers: Claude Code (Agent SDK), Codex (app-server), GitHub Copilot (ACP), OpenCode, Pi, OMP. More ship as bundled provider plugins, plus a one-click ACP catalog and custom ACP or API providers ([providers.md](providers.md), [custom-providers.md](custom-providers.md))
+- Gumloop look: one desktop sidebar, a drawer on phones, and Settings grouped into tiles on phones ([themes.md](themes.md))
+- Features are built-in plugins that each host turns on or off under Settings → host → Plugins: Docker, Kubernetes, Databases, Argo CD, SSH servers, Remote tasks, Custom API providers, Jira, Forge Hub, Devices & simulators, Workbench, Skills, Spec mode, Insights, and Bots. Autonomous run, Session sharing and Agentic browser start off ([builtin-plugins.md](builtin-plugins.md))
+- Remote access over the embedded Tailscale listener or the end-to-end encrypted relay ([relay.md](relay.md)). New devices pair by comparing a six-digit code on both screens ([permissions.md](permissions.md#device-pairing))
+- Connected hosts: a daemon can pair with another daemon and run agents there ([connected-hosts.md](connected-hosts.md))
+- Bots: long-lived assistants that delegate work and review results, including from Slack ([bots.md](bots.md))
+- Usage shows per-account quotas from usage-source plugins; Insights shows usage history and costs
+- Idle agent runtimes are released after an hour and resume on demand; agent-to-agent messages queue by default ([agent-lifecycle.md](agent-lifecycle.md))
+- Terminals survive daemon restarts and replay their history on reattach ([terminal-worker.md](terminal-worker.md))
 - Voice mode: dictate prompts or talk through problems hands-free
-- MCP server exposes the daemon to other agents (workspaces, create/detach agent, schedules, heartbeats, terminals, workspace renaming)
+- MCP server exposes the daemon to other agents (hosts, workspaces, agents, schedules, heartbeats, terminals)
 - Scheduled agents (cron-style triggers) via app, CLI, and MCP
-- Frequent releases (multiple per week)
-- Community contributions across packaging, providers, and bug fixes
 - Key UX: split panes, keybinding customization, workspace model, in-app browser

@@ -48,7 +48,7 @@ vi.mock("@/utils/rich-clipboard-default-environment", () => ({
 
 import { ToolCall } from "./message";
 import type { ToolCallDetail } from "@jagentdesk/protocol/agent-types";
-import claudeRemoteRunCalls from "@/remote-exec/fixtures/claude-remote-run-calls.json";
+import claudeRemoteRunCalls from "../../../../plugins/remote-tasks/client/fixtures/claude-remote-run-calls.json";
 
 let root: Root | null = null;
 let container: HTMLElement | null = null;

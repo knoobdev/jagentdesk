@@ -26,6 +26,7 @@ export {
   groupInlineReviewCommentsByTarget,
   InlineReviewEditor,
   InlineReviewGutterCell,
+  InlineReviewAddButton,
   InlineReviewThread,
   isInlineReviewEditorForTarget,
   SMALL_ACTION_HIT_SLOP,

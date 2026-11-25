@@ -771,3 +771,24 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[2],
   },
 }));
+
+export function InlineReviewAddButton({
+  onPress,
+  style,
+}: {
+  onPress: () => void;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={t("review.comment.add")}
+      hitSlop={SMALL_ACTION_HIT_SLOP}
+      onPress={onPress}
+      style={[styles.gutterActionIcon, style]}
+    >
+      <ThemedPlus size={16} strokeWidth={2.4} uniProps={accentForegroundIconColorMapping} />
+    </Pressable>
+  );
+}

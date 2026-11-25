@@ -1,3 +1,4 @@
+import { createWorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
 import { createServer, type Server as HTTPServer } from "node:http";
 import type { AddressInfo } from "node:net";
 
@@ -104,7 +105,7 @@ describe("WebSocketServer browser tools wiring", () => {
       },
     });
 
-    await expect(resultPromise).resolves.toEqual({
+    await expect(resultPromise).resolves.toMatchObject({
       requestId: request.requestId,
       ok: true,
       result: { command: "list_tabs", tabs: [] },
@@ -301,6 +302,7 @@ function createVoiceAssistantWebSocketServer(params: {
     null,
     { allowedOrigins: new Set(["*"]) },
     createWorkspaceAutoNameStub(),
+    createWorkspaceRuntimeStore(),
     undefined,
     undefined,
     undefined,
@@ -337,8 +339,6 @@ function createVoiceAssistantWebSocketServer(params: {
     undefined,
     undefined,
     broker,
-    undefined,
-    undefined,
     undefined,
     undefined,
     undefined,

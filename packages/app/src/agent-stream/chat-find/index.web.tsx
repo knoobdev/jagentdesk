@@ -1,3 +1,4 @@
+import { hasActiveOverlay } from "@/keyboard";
 import {
   createContext,
   useCallback,
@@ -15,7 +16,7 @@ import { PaneFind, findShortcutPlatform, isFindShortcut, type PaneFindHandle } f
 import { Button } from "@/components/ui/button";
 import { usePaneFocus } from "@/panels/pane-context";
 import { useRetainedPanelActive } from "@/components/retained-panel";
-import { hasActiveWebOverlay } from "@/lib/overlay-root";
+
 import { isImeComposingKeyboardEvent } from "@/utils/keyboard-ime";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { planTimelinePromptJump } from "@/timeline/timeline-sync-plan";
@@ -104,7 +105,7 @@ export function ChatFind({
   useEffect(() => {
     if (!active || !isInteractive) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || hasActiveWebOverlay() || isImeComposingKeyboardEvent(event))
+      if (event.defaultPrevented || hasActiveOverlay() || isImeComposingKeyboardEvent(event))
         return;
       if (isFindShortcut(event, findShortcutPlatform())) {
         event.preventDefault();
@@ -118,8 +119,8 @@ export function ChatFind({
   }, [active, isInteractive, model]);
   const close = useCallback(() => {
     model.close();
-    root.current?.focus({ preventScroll: true });
-  }, [model]);
+    viewportRef.current?.focus?.();
+  }, [model, viewportRef]);
   let status = "";
   if (state.phase === "searching") status = t("paneFind.searching");
   else if (state.phase === "loading") status = t("paneFind.loading");

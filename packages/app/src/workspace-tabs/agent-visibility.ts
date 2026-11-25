@@ -8,6 +8,7 @@ export interface WorkspaceAgentVisibility {
   activeAgentIds: Set<string>;
   autoOpenAgentIds: Set<string>;
   knownAgentIds: Set<string>;
+  foreignAgentIds: Set<string>;
 }
 
 function agentBelongsToWorkspace(agent: Agent, workspaceId: string): boolean {
@@ -50,38 +51,101 @@ export function deriveWorkspaceAgentVisibility(input: {
       activeAgentIds: new Set<string>(),
       autoOpenAgentIds: new Set<string>(),
       knownAgentIds: new Set<string>(),
+      foreignAgentIds: new Set<string>(),
     };
   }
 
   const activeAgentIds = new Set<string>();
   const autoOpenAgentIds = new Set<string>();
   const knownAgentIds = new Set<string>();
-  const agentsById = new Map<string, Agent>([
-    ...(agentDetails?.entries() ?? []),
-    ...(sessionAgents?.entries() ?? []),
-  ]);
+  const foreignAgentIds = new Set<string>();
   const earliestRegularAgentAt = earliestRegularAgentCreatedAt(sessionAgents, workspaceId);
   for (const agent of sessionAgents?.values() ?? []) {
     if (!agentBelongsToWorkspace(agent, workspaceId)) {
+      if (normalizeWorkspaceOpaqueId(agent.workspaceId)) foreignAgentIds.add(agent.id);
       continue;
     }
     knownAgentIds.add(agent.id);
     if (!agent.archivedAt && !isMisfiledDockAgent(agent, earliestRegularAgentAt)) {
       activeAgentIds.add(agent.id);
-      const parentAgent = agent.parentAgentId ? agentsById.get(agent.parentAgentId) : undefined;
-      if (isWorkspaceRootAgent(agent, parentAgent)) {
+      const parentAgent = agent.parentAgentId
+        ? (sessionAgents?.get(agent.parentAgentId) ?? agentDetails?.get(agent.parentAgentId))
+        : undefined;
+      if (shouldAutoOpenBackgroundAgent(agent, parentAgent)) {
         autoOpenAgentIds.add(agent.id);
       }
     }
   }
-  for (const agent of agentDetails?.values() ?? []) {
-    if (!agentBelongsToWorkspace(agent, workspaceId)) {
-      continue;
-    }
-    knownAgentIds.add(agent.id);
-  }
+  addHistoricalOwnership({
+    sessionAgents,
+    agentDetails,
+    workspaceId,
+    knownAgentIds,
+    foreignAgentIds,
+  });
 
-  return { activeAgentIds, autoOpenAgentIds, knownAgentIds };
+  return { activeAgentIds, autoOpenAgentIds, knownAgentIds, foreignAgentIds };
+}
+
+function addHistoricalOwnership({
+  sessionAgents,
+  agentDetails,
+  workspaceId,
+  knownAgentIds,
+  foreignAgentIds,
+}: {
+  sessionAgents: Map<string, Agent> | undefined;
+  agentDetails: Map<string, Agent> | undefined;
+  workspaceId: string;
+  knownAgentIds: Set<string>;
+  foreignAgentIds: Set<string>;
+}) {
+  for (const agent of agentDetails?.values() ?? []) {
+    if (sessionAgents?.has(agent.id)) continue;
+    const ownerId = normalizeWorkspaceOpaqueId(agent.workspaceId);
+    if (ownerId === workspaceId) knownAgentIds.add(agent.id);
+    else if (ownerId) foreignAgentIds.add(agent.id);
+  }
+}
+
+interface AgentMapsSnapshot {
+  sessions: Record<
+    string,
+    { agents: Map<string, Agent>; agentDetails: Map<string, Agent> } | undefined
+  >;
+}
+
+// Session-store selectors run on every store update, including every stream tick, which
+// leaves the agent maps untouched. Reuse the previous result until either map changes, and
+// keep it when a recompute yields the same sets so the hook's equality check stays O(1).
+export function createWorkspaceAgentVisibilitySelector(input: {
+  serverId: string;
+  workspaceId: string | null | undefined;
+}): (state: AgentMapsSnapshot) => WorkspaceAgentVisibility {
+  let previousAgents: Map<string, Agent> | undefined;
+  let previousAgentDetails: Map<string, Agent> | undefined;
+  let previousVisibility: WorkspaceAgentVisibility | null = null;
+
+  return (state) => {
+    const session = state.sessions[input.serverId];
+    const agents = session?.agents;
+    const agentDetails = session?.agentDetails;
+    if (previousVisibility && agents === previousAgents && agentDetails === previousAgentDetails) {
+      return previousVisibility;
+    }
+
+    const visibility = deriveWorkspaceAgentVisibility({
+      sessionAgents: agents,
+      agentDetails,
+      workspaceId: input.workspaceId,
+    });
+    previousAgents = agents;
+    previousAgentDetails = agentDetails;
+    if (!previousVisibility || !workspaceAgentVisibilityEqual(previousVisibility, visibility)) {
+      previousVisibility = visibility;
+    }
+    return previousVisibility;
+  };
 }
 
 export function buildWorkspaceTabSnapshot(input: {
@@ -98,6 +162,7 @@ export function buildWorkspaceTabSnapshot(input: {
     activeAgentIds: input.agentVisibility.activeAgentIds,
     autoOpenAgentIds: input.agentVisibility.autoOpenAgentIds,
     knownAgentIds: input.agentVisibility.knownAgentIds,
+    foreignAgentIds: input.agentVisibility.foreignAgentIds,
     knownTerminalIds: input.knownTerminalIds,
     standaloneTerminalIds: input.standaloneTerminalIds,
     hasActivePendingDraftCreate: input.hasActivePendingDraftCreate,
@@ -108,10 +173,12 @@ export function workspaceAgentVisibilityEqual(
   a: WorkspaceAgentVisibility,
   b: WorkspaceAgentVisibility,
 ): boolean {
+  if (a === b) return true;
   return (
     setsEqual(a.activeAgentIds, b.activeAgentIds) &&
     setsEqual(a.autoOpenAgentIds, b.autoOpenAgentIds) &&
-    setsEqual(a.knownAgentIds, b.knownAgentIds)
+    setsEqual(a.knownAgentIds, b.knownAgentIds) &&
+    setsEqual(a.foreignAgentIds, b.foreignAgentIds)
   );
 }
 
@@ -141,4 +208,8 @@ export function shouldPruneWorkspaceAgentTab(input: {
     return false;
   }
   return !input.activeAgentIds.has(input.agentId);
+}
+
+function shouldAutoOpenBackgroundAgent(agent: Agent, parentAgent: Agent | undefined): boolean {
+  return !agent.background && isWorkspaceRootAgent(agent, parentAgent);
 }

@@ -7,7 +7,7 @@ import {
   type ReactElement,
 } from "react";
 import { ScrollView, Text, View } from "react-native";
-import { useIsFocused } from "@react-navigation/native";
+import { useIsFocused } from "expo-router/react-navigation";
 import { CalendarClock, Plus } from "lucide-react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { PageHeader } from "@/components/headers/page-header";
@@ -407,7 +407,7 @@ const styles = StyleSheet.create((theme) => ({
   errorsBannerWrap: {
     paddingHorizontal: { xs: theme.spacing[3], md: theme.spacing[6] },
   },
-  // chrome card tokens: classic themes carry border / lg, ClickUp #ececec / 10.
+  // chrome card tokens: classic themes carry border / lg, Gumloop #ececec / 10.
   errorsBanner: {
     borderWidth: 1,
     borderColor: theme.chrome.cardBorder,

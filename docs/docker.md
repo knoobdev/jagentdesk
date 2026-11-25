@@ -1,28 +1,35 @@
 # Running JAgentDesk in Docker
 
-JAgentDesk publishes a container image for running the daemon on a server, VM, NAS,
-or homelab box. The image also serves the bundled browser web UI, so one
-container gives you both the daemon API and a self-hosted UI.
+The image in [`docker/base/`](../docker/base/) runs the daemon on a server, VM, NAS or homelab box
+and serves the bundled browser web UI from the same origin. This page is about running the daemon
+in a container; the Docker cockpit inside the app is the `docker` [built-in](builtin-plugins.md).
 
-The image source lives in [`docker/`](../docker/).
+## What the image does
 
-## How it works
+- Builds `@jagentdesk/server` and `@jagentdesk/cli` from workspace tarballs of the checked-out
+  source.
+- Runs the daemon as the non-root `jagentdesk` user (uid/gid `1000:1000`) under `tini`.
+- Listens on `0.0.0.0:6767` and sets `JAGENTDESK_WEB_UI_ENABLED=true`.
+- Stores daemon state and agent credentials under `/home/jagentdesk`.
+- Ships no agent CLIs.
+- Health-checks `GET /api/health`.
 
-The official image:
+Open the container's HTTP origin, for example `http://localhost:6767`. The served app gets a
+same-origin connection hint and connects back to that daemon. Static UI files load without auth;
+the API and WebSocket require `JAGENTDESK_PASSWORD` when one is set.
 
-- builds `@jagentdesk/server` and `@jagentdesk/cli` from source-built workspace tarballs
-- runs the daemon as the non-root `jagentdesk` user
-- listens on `0.0.0.0:6767` inside the container
-- enables the bundled daemon web UI with `JAGENTDESK_WEB_UI_ENABLED=true`
-- stores daemon state and agent credentials under `/home/jagentdesk`
-- leaves agent CLIs out of the base image
+## Build the image
 
-Open the container's HTTP origin, for example `http://localhost:6767`, to load
-the web UI. The served app receives a same-origin connection hint and connects
-back to that daemon. Static UI files load without daemon auth; API and
-WebSocket requests still require `JAGENTDESK_PASSWORD` when one is configured.
+No image is published. Build it from the repository root:
 
-## Quick Start
+```bash
+docker build -f docker/base/Dockerfile -t jagentdesk:local .
+```
+
+`--build-arg JAGENTDESK_VERSION=<version>` makes the build fail unless the root `package.json` has
+that version.
+
+## Run
 
 ```bash
 docker run -d --name jagentdesk \
@@ -30,121 +37,68 @@ docker run -d --name jagentdesk \
   -e JAGENTDESK_PASSWORD=change-me \
   -v "$PWD/jagentdesk-home:/home/jagentdesk" \
   -v "$PWD:/workspace" \
-  jagentdesk:local:latest
+  jagentdesk:local
 ```
 
-Then open:
+Open `http://localhost:6767`. If you set `JAGENTDESK_PASSWORD`, enter the same password when you
+add the direct connection in the web UI or another client.
 
-```text
-http://localhost:6767
-```
+For Compose, start from [`docker/docker-compose.example.yml`](../docker/docker-compose.example.yml)
+and set `image:` to the tag you built.
 
-If you set `JAGENTDESK_PASSWORD`, enter the same password when adding the direct
-daemon connection in the web UI or another JAgentDesk client.
+## Add agents
 
-## Docker Compose
-
-Use [`docker/docker-compose.example.yml`](../docker/docker-compose.example.yml):
-
-```bash
-cp docker/docker-compose.example.yml docker-compose.yml
-$EDITOR docker-compose.yml
-docker compose up -d
-```
-
-Minimal example:
-
-```yaml
-services:
-  jagentdesk:
-    image: jagentdesk:local:latest
-    restart: unless-stopped
-    ports:
-      - "6767:6767"
-    environment:
-      JAGENTDESK_PASSWORD: "change-me"
-    volumes:
-      - ./jagentdesk-home:/home/jagentdesk
-      - ./workspace:/workspace
-```
-
-## Installing Agents
-
-The base image does not preinstall Claude Code, Codex, OpenCode, Copilot, Pi, or
-other agent CLIs. That keeps the default image small and avoids coupling JAgentDesk
-releases to third-party agent release cycles.
-
-Create a child image for the agents you use:
+Create a child image with the agent CLIs you use. An example is in
+[`docker/Dockerfile.agents.example`](../docker/Dockerfile.agents.example):
 
 ```Dockerfile
-FROM jagentdesk:local:latest
+FROM jagentdesk:local
 
 USER root
-RUN npm install -g @openai/codex @anthropic-ai/claude-code opencode-ai
+RUN npm install -g @anthropic-ai/claude-code @openai/codex opencode-ai
 ```
 
-Build it:
+Leave the child image user as root. The entrypoint uses root only to prepare mounted directories,
+then drops the daemon and the agents it launches to `jagentdesk`.
+
+Sign agents in once inside the container, or mount their credentials:
 
 ```bash
-docker build -f Dockerfile -t jagentdesk-with-agents .
-```
-
-Then use `image: jagentdesk-with-agents` in Compose.
-
-Leave the child image user as root. The base entrypoint uses root only for
-first-run directory setup, then drops the daemon and launched agents to the
-non-root `jagentdesk` user.
-
-An example child image is in
-[`docker/Dockerfile.agents.example`](../docker/Dockerfile.agents.example).
-
-You can also mount credentials from the host or run agent login once inside the
-container:
-
-```bash
-docker exec -it --user jagentdesk jagentdesk codex
 docker exec -it --user jagentdesk jagentdesk claude
+docker exec -it --user jagentdesk jagentdesk codex
 ```
 
-Agent credentials and config persist in `/home/jagentdesk`, alongside daemon state.
-Provider environment variables such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
-`OPENAI_BASE_URL`, or `ANTHROPIC_BASE_URL` can be passed through `docker run -e`
-or `compose.environment`; JAgentDesk passes them to launched agents.
+Provider variables such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_BASE_URL` or
+`OPENAI_BASE_URL` passed with `docker run -e` or Compose `environment` reach launched agents.
 
-## Volumes
+## Volumes and defaults
 
-| Mount         | Purpose                                                                  |
-| ------------- | ------------------------------------------------------------------------ |
-| `/home/jagentdesk` | JAgentDesk state under `.jagentdesk` plus agent config such as `.codex`, `.claude` |
-| `/workspace`  | Code that JAgentDesk and launched agents can read and write                   |
+| Mount              | Purpose                                                                         |
+| ------------------ | ------------------------------------------------------------------------------- |
+| `/home/jagentdesk` | Daemon state in `.jagentdesk`, plus agent config such as `.claude` and `.codex` |
+| `/workspace`       | Code the daemon and its agents can read and write                               |
 
-The image defaults:
+| Variable                | Default                        |
+| ----------------------- | ------------------------------ |
+| `HOME`                  | `/home/jagentdesk`             |
+| `JAGENTDESK_HOME`       | `/home/jagentdesk/.jagentdesk` |
+| `JAGENTDESK_LISTEN`     | `0.0.0.0:6767`                 |
+| `JAGENTDESK_LOG_FORMAT` | `json`                         |
+| `CLAUDE_CONFIG_DIR`     | `/home/jagentdesk/.claude`     |
+| `CODEX_HOME`            | `/home/jagentdesk/.codex`      |
 
-| Variable       | Default              |
-| -------------- | -------------------- |
-| `HOME`         | `/home/jagentdesk`        |
-| `JAGENTDESK_HOME`   | `/home/jagentdesk/.jagentdesk` |
-| `JAGENTDESK_LISTEN` | `0.0.0.0:6767`       |
+On Linux bind mounts, the container user must be able to write the host directories. Change their
+ownership to `1000:1000`, or run the container with `--user` / Compose `user:`.
 
-If you bind-mount host directories on Linux, make sure the container user can
-write them. The built-in `jagentdesk` user has uid/gid `1000:1000`. For a different
-host uid/gid, either adjust ownership on the mounted directories or run the
-container with Docker's `--user` / Compose `user:` option.
+## Reverse proxies
 
-## Reverse Proxies
-
-When serving JAgentDesk behind a reverse proxy, forward normal HTTP requests and
-WebSocket upgrades to the same daemon port.
-
-Caddy example:
+Forward HTTP requests and WebSocket upgrades to the same daemon port.
 
 ```caddy
 jagentdesk.example.com {
   reverse_proxy 127.0.0.1:6767
 }
 ```
-
-Nginx example:
 
 ```nginx
 server {
@@ -162,78 +116,28 @@ server {
 }
 ```
 
-If you reach the daemon by DNS name, set `JAGENTDESK_HOSTNAMES` so host-header
-validation allows that name:
-
-```yaml
-environment:
-  JAGENTDESK_HOSTNAMES: "jagentdesk.example.com,.lan"
-```
-
-IPs and `localhost` are allowed by default.
+When you reach the daemon by DNS name, add the name to `JAGENTDESK_HOSTNAMES` (comma-separated; a
+leading dot matches subdomains). IPs and `localhost` are allowed by default. Forwarded-header trust
+(`trustedProxies`) is described in [Service proxy](service-proxy.md#dns-and-reverse-proxy-setup).
 
 ## Security
 
-- Set `JAGENTDESK_PASSWORD` for any published port or network-reachable deployment.
-- Prefer HTTPS at the reverse proxy for direct browser access.
-- For untrusted networks or mobile access when you do not want to expose the
-  daemon port directly, reach the daemon over a Tailscale tailnet (tsnet)
-  instead. The relay package was removed from this repository.
-- The container is the isolation boundary for agents. Agents can read and write
-  whatever you mount into `/workspace` and whatever credentials you place in
-  `/home/jagentdesk`.
-- The bundled web UI static files are public on the daemon origin. The daemon
-  API and WebSocket remain protected by password auth when configured.
+- Set `JAGENTDESK_PASSWORD` for any published port.
+- Terminate HTTPS at the reverse proxy for browser access.
+- To reach the daemon from phones or untrusted networks without publishing the port, use the
+  embedded Tailscale node or the encrypted relay. See [Relay](relay.md).
+- The container is the isolation boundary. Agents can read and write everything mounted at
+  `/workspace` and every credential in `/home/jagentdesk`.
 
-See [SECURITY.md](../SECURITY.md) for the daemon trust model.
-
-## Building Locally
-
-```bash
-docker build -f docker/base/Dockerfile -t jagentdesk:local .
-```
-
-To assert the source tree version while building:
-
-```bash
-docker build \
-  --build-arg JAGENTDESK_VERSION=0.1.102 \
-  -t jagentdesk:0.1.102 \
-  -f docker/base/Dockerfile \
-  .
-```
-
-The Docker workflow builds the image on pull requests and on `main` as a
-non-publishing check. Stable `vX.Y.Z` tag pushes publish
-`jagentdesk:local:X.Y.Z` and `jagentdesk:local:latest`. Beta tags
-publish only the exact prerelease tag, such as
-`jagentdesk:local:0.1.102-beta.1`, and do not update `latest`.
-
-To replace a Docker image in place without rebuilding desktop, APK, or EAS
-mobile release artifacts, dispatch the Docker workflow manually instead of
-pushing a `v*` release tag:
-
-```bash
-gh workflow run docker.yml \
-  --ref main \
-  -f jagentdesk_version=0.1.102-beta.1 \
-  -f publish=true
-```
-
-Manual Docker publishes require an explicit `jagentdesk_version`. The workflow builds
-from the checked-out source tree and publishes only the exact prerelease image
-tag for prerelease versions.
-
-The published image is multi-arch for `linux/amd64` and `linux/arm64`.
+See [SECURITY.md](../SECURITY.md) for the trust model.
 
 ## Troubleshooting
 
-- **The web UI loads but cannot connect**: if `JAGENTDESK_PASSWORD` is set, add a
-  direct connection with the same password.
-- **403 Host not allowed**: set `JAGENTDESK_HOSTNAMES` to the DNS names you use.
-- **Provider not available**: install that agent CLI in a child image or mount a
-  runtime where the binary is on `PATH`.
-- **Permission errors in `/workspace`**: make the mounted directory writable by
-  uid/gid `1000:1000`, or run the container as the host uid/gid.
-- **Logs**: inspect `docker logs jagentdesk` or
-  `/home/jagentdesk/.jagentdesk/daemon.log` inside the container.
+- **The web UI loads but cannot connect:** add a direct connection with the `JAGENTDESK_PASSWORD`
+  value.
+- **403 Host not allowed:** add the DNS name to `JAGENTDESK_HOSTNAMES`.
+- **Provider not available:** install that agent CLI in a child image.
+- **Permission errors in `/workspace`:** make the mount writable by `1000:1000`, or run as the host
+  uid/gid.
+- **Logs:** `docker logs jagentdesk`, or `/home/jagentdesk/.jagentdesk/daemon.log` in the
+  container.

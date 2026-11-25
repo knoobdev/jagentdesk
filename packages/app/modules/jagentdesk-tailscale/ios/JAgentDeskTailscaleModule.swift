@@ -149,6 +149,7 @@ public final class JAgentDeskTailscaleModule: Module {
     }
 
     Function("getDevicePublicKeyB64") { () -> String? in
+      try self.bridge.prepareDeviceIdentity(self.stateDirectory())
       let publicKey = self.bridge.devicePublicKeyB64()
       return publicKey.isEmpty ? nil : publicKey
     }
@@ -240,6 +241,7 @@ public final class JAgentDeskTailscaleModule: Module {
     try? fm.removeItem(at: authenticatedMarkerURL(stateDir: stateDir))
     if let entries = try? fm.contentsOfDirectory(atPath: stateDir) {
       for entry in entries {
+        if entry == "jagentdesk-device-ed25519.key" { continue }
         try? fm.removeItem(atPath: (stateDir as NSString).appendingPathComponent(entry))
       }
     }

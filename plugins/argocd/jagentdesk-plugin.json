@@ -1,0 +1,13 @@
+{
+  "kind": "builtin",
+  "id": "argocd",
+  "name": "Argo CD",
+  "description": "Monitor and deploy Kubernetes applications.",
+  "defaultEnabled": true,
+  "requires": ["clusters"],
+  "builtinOrder": 9,
+  "builtinEntrypoints": {
+    "server": "server/index.ts",
+    "client": "client/index.tsx"
+  }
+}

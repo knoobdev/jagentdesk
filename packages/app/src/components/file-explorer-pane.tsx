@@ -37,10 +37,15 @@ import { buildWorkspaceExplorerStateKey } from "@/hooks/use-file-explorer-action
 import { usePanelStore, type ExpandedPathsUpdate, type SortOption } from "@/stores/panel-store";
 import { formatTimeAgo } from "@/utils/time";
 import { buildAbsoluteExplorerPath } from "@/utils/explorer-paths";
+import {
+  DIRECTORY_LISTING_INVALIDATED,
+  type DirectoryListingResult,
+} from "@/file-explorer/directory-listings";
 import { isHiddenExplorerPath } from "@/file-explorer/visibility";
 import {
   flattenExplorerTree,
   reconcileRestoredExpandedPaths,
+  refreshExplorerDirectories,
   restoreExpandedDirectories,
   setExpandedDirectoryPath,
   showHiddenFilesAndRestoreExpandedDirectories,
@@ -236,11 +241,12 @@ export function FileExplorerPane({
       : undefined,
   );
 
-  const { requestDirectoryListing, selectExplorerEntry } = useFileExplorerActions({
-    serverId,
-    workspaceId,
-    workspaceRoot: normalizedWorkspaceRoot,
-  });
+  const { requestDirectoryListing, invalidateDirectoryListings, selectExplorerEntry } =
+    useFileExplorerActions({
+      serverId,
+      workspaceId,
+      workspaceRoot: normalizedWorkspaceRoot,
+    });
   const downloadFile = useFileDownload({
     serverId,
     workspaceId,
@@ -410,9 +416,11 @@ export function FileExplorerPane({
       refreshExplorerDirectories({
         hasWorkspaceScope,
         expandedPaths,
+        showHiddenFiles: usePanelStore.getState().explorerShowHiddenFiles,
         requestDirectoryListing,
+        invalidateDirectoryListings,
       }),
-    [expandedPaths, hasWorkspaceScope, requestDirectoryListing],
+    [invalidateDirectoryListings, expandedPaths, hasWorkspaceScope, requestDirectoryListing],
   );
   const { refetch: refetchExplorer, isFetching: isRefreshFetching } = useQuery({
     queryKey: ["fileExplorerRefresh", serverId, workspaceStateKey],
@@ -749,7 +757,7 @@ function toggleDirectory({
   requestDirectoryListing: (
     path: string,
     opts?: { recordHistory?: boolean; setCurrentPath?: boolean },
-  ) => Promise<ExplorerDirectory | null>;
+  ) => Promise<DirectoryListingResult>;
   setExpandedPathsForWorkspace: (workspaceStateKey: string, paths: ExpandedPathsUpdate) => void;
 }): void {
   if (!workspaceStateKey) {
@@ -836,7 +844,7 @@ async function initializeExplorer({
   requestDirectoryListing: (
     path: string,
     opts?: { recordHistory?: boolean; setCurrentPath?: boolean },
-  ) => Promise<ExplorerDirectory | null>;
+  ) => Promise<DirectoryListingResult>;
   setExpandedPathsForWorkspace: (workspaceStateKey: string, paths: ExpandedPathsUpdate) => void;
 }): Promise<void> {
   if (!hasWorkspaceScope || hasInitializedRef.current) {
@@ -847,6 +855,7 @@ async function initializeExplorer({
     recordHistory: false,
     setCurrentPath: false,
   });
+  if (rootDirectory === DIRECTORY_LISTING_INVALIDATED) return;
   if (!rootDirectory) {
     hasInitializedRef.current = false;
     return;
@@ -868,7 +877,10 @@ async function initializeExplorer({
   const hiddenPersistedPaths = showHiddenFiles
     ? []
     : Array.from(persistedExpandedPaths).filter(isHiddenExplorerPath);
-  const restoredPathsWithHidden = [...restoredPaths, ...hiddenPersistedPaths];
+  const restoredPathsWithHidden =
+    restoredPaths === DIRECTORY_LISTING_INVALIDATED
+      ? DIRECTORY_LISTING_INVALIDATED
+      : [...restoredPaths, ...hiddenPersistedPaths];
   setExpandedPathsForWorkspace(workspaceStateKey, (currentPaths) =>
     reconcileRestoredExpandedPaths({
       persistedExpandedPaths,
@@ -876,39 +888,6 @@ async function initializeExplorer({
       restoredExpandedPaths: restoredPathsWithHidden,
     }),
   );
-}
-
-async function refreshExplorerDirectories({
-  hasWorkspaceScope,
-  expandedPaths,
-  requestDirectoryListing,
-}: {
-  hasWorkspaceScope: boolean;
-  expandedPaths: Set<string>;
-  requestDirectoryListing: (
-    path: string,
-    opts?: { recordHistory?: boolean; setCurrentPath?: boolean },
-  ) => Promise<ExplorerDirectory | null>;
-}): Promise<null> {
-  if (!hasWorkspaceScope) {
-    return null;
-  }
-  const showHiddenFiles = usePanelStore.getState().explorerShowHiddenFiles;
-  const directoryPaths = Array.from(expandedPaths).filter(
-    (path) => showHiddenFiles || !isHiddenExplorerPath(path),
-  );
-  if (!directoryPaths.includes(".")) {
-    directoryPaths.unshift(".");
-  }
-  await Promise.all(
-    directoryPaths.map((path) =>
-      requestDirectoryListing(path, {
-        recordHistory: false,
-        setCurrentPath: false,
-      }),
-    ),
-  );
-  return null;
 }
 
 function getErrorRecoveryPath(state: AgentFileExplorerState | undefined): string {

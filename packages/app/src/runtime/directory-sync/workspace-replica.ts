@@ -13,6 +13,7 @@ import {
 import { useWorkspaceSetupStore } from "@/stores/workspace-setup-store";
 import {
   clearWorkspaceArchivePending,
+  shouldSuppressWorkspaceRemovalForLocalUndo,
   shouldSuppressWorkspaceForLocalArchive,
 } from "@/contexts/session-workspace-upserts";
 import { resolveWorkspaceMapKeyByIdentity } from "@/utils/workspace-identity";
@@ -81,6 +82,24 @@ export class WorkspaceDirectoryReplica {
     this.commit(state, delta.kind === "remove" && "id" in delta ? [delta.id] : []);
   }
 
+  commitCached(input: {
+    workspaces: Map<string, WorkspaceDescriptor>;
+    projects: Map<string, ProjectDescriptor>;
+  }): void {
+    this.commit(input, []);
+    useSessionStore.getState().setHasWorkspaceDirectorySnapshot(this.serverId, true);
+  }
+
+  commitCachedWorkspace(
+    workspace: WorkspaceDescriptor,
+    project: ProjectDescriptor | undefined,
+  ): void {
+    const snapshot = this.read();
+    snapshot.workspaces.set(workspace.id, workspace);
+    if (project) snapshot.projects.set(project.projectId, project);
+    this.commit(snapshot, []);
+  }
+
   commitSnapshot(
     snapshot: WorkspaceDirectorySnapshot,
     deltas: readonly WorkspaceDirectoryDelta[],
@@ -106,6 +125,13 @@ export class WorkspaceDirectoryReplica {
   ): WorkspaceDirectorySnapshot {
     let workspaces = new Map(snapshot.workspaces);
     const projects = new Map(snapshot.projects);
+    for (const [workspaceId, workspace] of this.read().workspaces) {
+      if (
+        !workspaces.has(workspaceId) &&
+        shouldSuppressWorkspaceRemovalForLocalUndo({ serverId: this.serverId, workspaceId })
+      )
+        workspaces.set(workspaceId, workspace);
+    }
     for (const [workspaceId, workspace] of workspaces) {
       if (shouldSuppressWorkspaceForLocalArchive({ serverId: this.serverId, workspace })) {
         workspaces.delete(workspaceId);
@@ -121,6 +147,13 @@ export class WorkspaceDirectoryReplica {
         continue;
       }
       if (delta.kind === "remove") {
+        if (
+          shouldSuppressWorkspaceRemovalForLocalUndo({
+            serverId: this.serverId,
+            workspaceId: delta.id,
+          })
+        )
+          continue;
         workspaces.delete(delta.id);
         if (delta.emptyProject) {
           const project = normalizeProjectDescriptor(delta.emptyProject);

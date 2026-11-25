@@ -2,7 +2,7 @@
  * Integration tests for the agent event stream redesign (Unit 3).
  *
  * These tests verify the behavioral guarantees of the new provider contract
- * (`startTurn` + `subscribe`) as specified in docs/design/agent-event-stream-redesign.md.
+ * (`startTurn` + `subscribe`).
  *
  * All tests use REAL Claude SDK sessions — no mocks.
  *

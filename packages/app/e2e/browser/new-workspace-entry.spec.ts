@@ -82,7 +82,20 @@ test.describe("New workspace entry points", () => {
     }
   });
 
-  test("the New Workspace screen hides the host selector when there is only one host", async ({
+  test("New workspace opens the Import session sheet", async ({ page }) => {
+    const seeded = await seedWorkspace({ repoPrefix: "entry-import-sheet-" });
+    try {
+      await gotoAppShell(page);
+      await waitForSidebarHydration(page);
+      await openGlobalNewWorkspaceComposer(page);
+      await page.getByTestId("new-workspace-import-session").filter({ visible: true }).click();
+      await expect(page.getByTestId("import-session-sheet")).toBeVisible({ timeout: 30_000 });
+    } finally {
+      await seeded.cleanup();
+    }
+  });
+
+  test("the New Workspace screen shows the host selector with Add host when there is only one host", async ({
     page,
   }) => {
     const seeded: SeededWorkspace = await seedWorkspace({ repoPrefix: "entry-single-host-" });
@@ -107,7 +120,12 @@ test.describe("New workspace entry points", () => {
       await expect(page.getByTestId("new-workspace-project-picker-trigger")).toBeVisible({
         timeout: 30_000,
       });
-      await expect(page.getByTestId("host-picker-trigger")).toHaveCount(0);
+      const hostTrigger = page.getByTestId("host-picker-trigger");
+      await expect(hostTrigger).toContainText("localhost", { timeout: 30_000 });
+      await hostTrigger.click();
+      await expect(page.getByTestId("new-workspace-host-picker-add-host")).toBeVisible();
+      await page.getByTestId("new-workspace-host-picker-add-host").click();
+      await expect(page).toHaveURL(/\/settings\/general\?addHost=/);
     } finally {
       await seeded.cleanup();
     }

@@ -1,6 +1,6 @@
 import { useLocalSearchParams } from "expo-router";
 import { HostRouteBootstrapBoundary } from "@/components/host-route-bootstrap-boundary";
-import { ArgoCdInstancesScreen } from "@/argocd/instances-screen";
+import { BuiltinScreen } from "@/plugins/builtin/surfaces";
 
 export default function HostArgoCdRoute() {
   return (
@@ -13,7 +13,7 @@ export default function HostArgoCdRoute() {
 function HostArgoCdRouteContent() {
   const params = useLocalSearchParams<{ serverId?: string }>();
   const serverId = typeof params.serverId === "string" ? params.serverId : "";
-  return <ArgoCdInstancesScreen serverId={serverId} />;
+  return <BuiltinScreen segment="argocd" serverId={serverId} />;
 }
 
 export { ErrorBoundary } from "expo-router";
