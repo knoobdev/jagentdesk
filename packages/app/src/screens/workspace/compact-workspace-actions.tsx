@@ -1,4 +1,5 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, type ReactNode } from "react";
+import { Portal } from "@gorhom/portal";
 import { Copy, Ellipsis, Import, Settings } from "lucide-react-native";
 import { View } from "react-native";
 import { router } from "expo-router";
@@ -12,6 +13,8 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { usePluginWorkspaceMenu } from "@/plugins/buttons/view";
+import { GUMLOOP_COMPACT_ACTIONS_HOST } from "@/components/gumloop-shell/sidebar-state";
+import { useIsGumloopTheme } from "@/components/gumloop-shell/use-gumloop-chrome";
 import { buildSettingsRoute } from "@/utils/host-routes";
 import { useWorkspaceScriptsMenuPages, type UseWorkspaceScriptsMenuPagesInput } from "./scripts";
 import type { Theme } from "@/styles/theme";
@@ -24,6 +27,26 @@ const muted = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 const IMPORT_ICON = <ThemedImport size={18} uniProps={muted} />;
 const COPY_ICON = <ThemedCopy size={18} uniProps={muted} />;
 const SETTINGS_ICON = <ThemedSettings size={18} uniProps={muted} />;
+/** Gumloop on compact puts `⋯` in the app-level 56 px header row (spec 38 §5); other shells keep it by the tab switcher. */
+export function useCompactActionsInHeader(isCompact: boolean): boolean {
+  const gumloop = useIsGumloopTheme();
+  return gumloop && isCompact;
+}
+
+/** Only the focused workspace portals, so retained workspaces never stack menus in the header. */
+export function CompactHeaderActionsPortal({
+  enabled,
+  focused,
+  children,
+}: {
+  enabled: boolean;
+  focused: boolean;
+  children: ReactNode;
+}) {
+  if (!enabled || !focused) return null;
+  return <Portal hostName={GUMLOOP_COMPACT_ACTIONS_HOST}>{children}</Portal>;
+}
+
 export function CompactWorkspaceActions({
   onImport,
   importDisabled,

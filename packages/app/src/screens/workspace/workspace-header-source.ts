@@ -46,6 +46,13 @@ export function resolveWorkspaceHeader(input: { workspace: WorkspaceDescriptor }
   };
 }
 
+/** One-line workspace label for the compact header: `project · branch`, or one name when they match. */
+export function formatCompactWorkspaceTitle(workspace: WorkspaceDescriptor): string {
+  const { title, subtitle } = resolveWorkspaceHeader({ workspace });
+  if (!trimNonEmpty(subtitle) || areHeaderLabelsEquivalent(title, subtitle)) return title;
+  return `${subtitle} · ${title}`;
+}
+
 export function resolveWorkspaceHeaderRenderState(input: {
   workspace: WorkspaceDescriptor | null;
   checkoutState: WorkspaceHeaderCheckoutState;

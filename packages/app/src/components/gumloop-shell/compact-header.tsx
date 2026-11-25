@@ -11,6 +11,7 @@ import { WindowChromeSafeArea } from "@/utils/desktop-window";
 import { useCallback, useMemo } from "react";
 import { Text, View } from "react-native";
 import { usePathname } from "expo-router";
+import { PortalHost } from "@gorhom/portal";
 import { Menu, PanelRight, Plus } from "lucide-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -19,10 +20,11 @@ import { useIsCompactFormFactor } from "@/constants/layout";
 import { useAppNavItems, useNewWorkspaceNavigate } from "@/components/sidebar/use-app-nav";
 import { HeaderToggleButton } from "@/components/headers/header-toggle-button";
 import { usePanelStore } from "@/stores/panel-store";
-import { useSessionStore } from "@/stores/session-store";
 import { useWorkspace } from "@/stores/session-store-hooks";
 import { parseHostWorkspaceRouteFromPathname } from "@/utils/host-routes";
+import { formatCompactWorkspaceTitle } from "@/screens/workspace/workspace-header-source";
 import { useIsGumloopTheme } from "./use-gumloop-chrome";
+import { GUMLOOP_COMPACT_ACTIONS_HOST } from "./sidebar-state";
 import type { Theme } from "@/styles/theme";
 
 const ThemedMenu = withUnistyles(Menu);
@@ -31,24 +33,16 @@ const ThemedPlus = withUnistyles(Plus);
 const foreground = (theme: Theme) => ({ color: theme.colors.foreground });
 const NO_KEYS: [] = [];
 
-function selectFocusedTitle(
-  state: ReturnType<typeof useSessionStore.getState>,
-  serverId: string | undefined,
-) {
-  const session = serverId ? state.sessions[serverId] : null;
-  const agent = session?.focusedAgentId ? session.agents.get(session.focusedAgentId) : null;
-  return agent?.title;
-}
-
+// In a workspace the title is the workspace, not the agent: the tab switcher row
+// right below already names the active agent (spec 38 §5).
 function resolveHeaderTitle(
   pathname: string,
   workspace: boolean,
-  agent: string | null | undefined,
   name: string | undefined,
   active: string | undefined,
   t: import("i18next").TFunction,
 ): string {
-  if (workspace) return agent ?? name ?? t("workspace.header.title");
+  if (workspace) return name ?? t("workspace.header.title");
   if (pathname.includes("/settings")) return t("sidebar.actions.settings");
   return active ?? t("sidebar.actions.home");
 }
@@ -63,14 +57,12 @@ export function GumloopCompactHeader({ enabled }: { enabled: boolean }) {
   const { t } = useTranslation();
   const route = parseHostWorkspaceRouteFromPathname(pathname);
   const workspace = useWorkspace(route?.serverId ?? null, route?.workspaceId ?? null);
-  const agentTitle = useSessionStore((state) => selectFocusedTitle(state, route?.serverId));
   const nav = useAppNavItems();
   const active = nav.find((item) => item.isActive);
   const title = resolveHeaderTitle(
     pathname,
     route !== null,
-    agentTitle,
-    workspace?.name,
+    workspace ? formatCompactWorkspaceTitle(workspace) : undefined,
     active?.label,
     t,
   );
@@ -134,6 +126,7 @@ export function GumloopCompactHeader({ enabled }: { enabled: boolean }) {
         <Text style={styles.title} numberOfLines={1} testID="compact-header-title">
           {title}
         </Text>
+        {route ? <PortalHost name={GUMLOOP_COMPACT_ACTIONS_HOST} /> : null}
         {verticalActions ? <View style={styles.button} /> : action}
       </WindowChromeSafeArea>
       <WindowLayoutActions active={enabled}>{action}</WindowLayoutActions>

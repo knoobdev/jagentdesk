@@ -4,7 +4,11 @@ import {
   WindowLayoutActions,
 } from "@/window-layout";
 import { Button } from "@/components/ui/button";
-import { CompactWorkspaceActions } from "./compact-workspace-actions";
+import {
+  CompactWorkspaceActions,
+  CompactHeaderActionsPortal,
+  useCompactActionsInHeader,
+} from "./compact-workspace-actions";
 import { ensurePanelsRegistered } from "@/panels/register-panels";
 import { revealWorkspaceTab } from "@/workspace-tabs/navigation";
 import { SheetTabs } from "./sheet-tabs";
@@ -2206,6 +2210,7 @@ function WorkspaceScreenContent({
   const toast = useToast();
   const isMobile = useIsCompactFormFactor();
   const gumloopDesktop = useGumloopDesktopShell(true);
+  const actionsInCompactHeader = useCompactActionsInHeader(isMobile);
   const isFocusModeEnabled = usePanelStore((state) => state.desktop.focusModeEnabled);
   const toggleFocusMode = usePanelStore((state) => state.toggleFocusMode);
 
@@ -4362,6 +4367,10 @@ function WorkspaceScreenContent({
       workspaceDirectory,
     ],
   );
+  const switcherTrailingActions = useMemo(
+    () => (actionsInCompactHeader ? null : compactWorkspaceActions),
+    [actionsInCompactHeader, compactWorkspaceActions],
+  );
   const inlineHeaderRight = useMemo(
     () => (actionsInVerticalBar ? null : headerRight),
     [actionsInVerticalBar, headerRight],
@@ -4372,6 +4381,9 @@ function WorkspaceScreenContent({
   );
   const workspaceCenterColumn = (
     <View style={styles.centerColumn}>
+      <CompactHeaderActionsPortal enabled={actionsInCompactHeader} focused={isRouteFocused}>
+        {compactWorkspaceActions}
+      </CompactHeaderActionsPortal>
       <WindowLayoutActions active={verticalActionsActive}>{headerRight}</WindowLayoutActions>
       {showScreenHeader && (
         <WorkspaceScreenHeader
@@ -4432,7 +4444,7 @@ function WorkspaceScreenContent({
             onCreateDraftTab={handleCreateDraftTab}
             onCreateTerminal={handleCreateTerminal}
             createTerminalDisabled={createTerminalDisabled}
-            trailingContent={compactWorkspaceActions}
+            trailingContent={switcherTrailingActions}
             tabs={tabs}
             activeTabKey={activeTabKey}
             activeTab={activeTabDescriptor}

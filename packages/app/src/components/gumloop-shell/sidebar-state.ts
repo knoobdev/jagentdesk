@@ -6,6 +6,8 @@ export const GUMLOOP_SIDEBAR_WIDTH = 324;
 export const GUMLOOP_INSPECTOR_WIDTH = 525;
 export const GUMLOOP_INSPECTOR_HOST = "gumloop-compact-inspector";
 export const GUMLOOP_PANEL_HOST = "gumloop-sidebar-panel";
+/** The focused workspace portals its `⋯` actions menu into the compact header row (spec 38 §5). */
+export const GUMLOOP_COMPACT_ACTIONS_HOST = "gumloop-compact-header-actions";
 
 interface GumloopSidebarState {
   toolsCollapsed: boolean | null;
